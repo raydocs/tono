@@ -1,9 +1,11 @@
 //! Physical interface detection and the non-critical redacted runtime copy.
 
+use crate::tono::state::TonoState;
 use std::sync::Arc;
 use std::time::Duration;
+#[cfg(windows)]
+use tono_core::config::TUN_DEVICE_NAME;
 use tono_logging::{Type, logging};
-use crate::tono::state::TonoState;
 
 /// One absolute budget covers service readiness, the cold Core start, controller/DNS
 /// verification, fail-closed cloud-policy hot reload, locking, and the post-lock verification
@@ -15,6 +17,146 @@ use crate::tono::state::TonoState;
 /// park the write for minutes. Bound it well under the transaction budget: a diagnostics file
 /// must never be the reason a connect spends its clock.
 pub(super) const REDACTED_COPY_WRITE_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// The interface can be registered before Mihomo has finished installing the routes that make
+/// protected traffic enter WinTUN. Do not point system DNS at the tunnel or start data-plane
+/// probes until Windows selects Tono for both a fake address and the protected DNS endpoint.
+// Windows TUN setup can spend about 15 seconds in its first adapter attempt
+// before it reports a failure and retries. Keep the route proof in place while
+// giving that first attempt time to finish.
+#[cfg(windows)]
+const TUN_ROUTE_READY_TIMEOUT: Duration = Duration::from_secs(20);
+
+#[cfg(windows)]
+const TUN_INTERFACE_OPER_STATUS_UP: i32 = 1;
+#[cfg(windows)]
+const FAKE_IP_ROUTE_PROBE: [u8; 4] = [198, 18, 5, 25];
+#[cfg(windows)]
+const PROTECTED_DNS_ROUTE_PROBE: [u8; 4] = [198, 18, 0, 2];
+
+#[cfg(windows)]
+fn fake_ip_route_uses_ready_tun(alias: &str, oper_status: i32) -> bool {
+    alias.eq_ignore_ascii_case(TUN_DEVICE_NAME) && oper_status == TUN_INTERFACE_OPER_STATUS_UP
+}
+
+#[cfg(windows)]
+fn protected_routes_use_ready_tun(fake_ip_alias: &str, fake_ip_status: i32, dns_alias: &str, dns_status: i32) -> bool {
+    fake_ip_route_uses_ready_tun(fake_ip_alias, fake_ip_status) && fake_ip_route_uses_ready_tun(dns_alias, dns_status)
+}
+
+/// Wait until Windows routes a non-local fake-IP through the Tono interface. The Service can
+/// resolve the TUN LUID as soon as the adapter is registered, before the protected routes exist.
+pub(super) async fn wait_for_tun_route_ready() -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        tokio::task::spawn_blocking(wait_for_tun_route_ready_windows)
+            .await
+            .map_err(|error| format!("TUN route readiness worker failed: {error}"))?
+    }
+    #[cfg(not(windows))]
+    {
+        Ok(())
+    }
+}
+
+#[cfg(windows)]
+fn wait_for_tun_route_ready_windows() -> Result<(), String> {
+    let deadline = std::time::Instant::now() + TUN_ROUTE_READY_TIMEOUT;
+    loop {
+        let fake_ip_route = best_ipv4_route_windows(FAKE_IP_ROUTE_PROBE, "fake-IP 198.18.5.25");
+        let dns_route = best_ipv4_route_windows(PROTECTED_DNS_ROUTE_PROBE, "protected DNS 198.18.0.2");
+        let fake_ip_ready = fake_ip_route
+            .as_ref()
+            .is_ok_and(|(alias, status)| fake_ip_route_uses_ready_tun(alias, *status));
+        let dns_ready = dns_route
+            .as_ref()
+            .is_ok_and(|(alias, status)| fake_ip_route_uses_ready_tun(alias, *status));
+        if let (Ok((fake_ip_alias, fake_ip_status)), Ok((dns_alias, dns_status))) = (&fake_ip_route, &dns_route)
+            && protected_routes_use_ready_tun(fake_ip_alias, *fake_ip_status, dns_alias, *dns_status)
+        {
+            return Ok(());
+        }
+        let route_detail = |target: &str, route: &Result<(String, i32), String>, ready: bool| match route {
+            Ok((alias, status)) if ready => {
+                format!("{target} selects the ready {alias:?} tunnel (status {status})")
+            }
+            Ok((alias, status)) => {
+                format!("{target} selects interface {alias:?} (operational status {status})")
+            }
+            Err(error) => format!("{target} route lookup failed: {error}"),
+        };
+        let last = format!(
+            "{}; {}",
+            route_detail("fake-IP 198.18.5.25", &fake_ip_route, fake_ip_ready),
+            route_detail("protected DNS 198.18.0.2", &dns_route, dns_ready),
+        );
+        if std::time::Instant::now() >= deadline {
+            return Err(format!(
+                "TONO_TUN_ROUTE_UNAVAILABLE: {last}; expected both protected routes to use the active {TUN_DEVICE_NAME:?} tunnel",
+            ));
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+}
+
+#[cfg(windows)]
+fn best_ipv4_route_windows(destination_address: [u8; 4], target: &str) -> Result<(String, i32), String> {
+    use windows_sys::Win32::NetworkManagement::IpHelper::{
+        GetBestRoute2, GetIfEntry2, MIB_IF_ROW2, MIB_IPFORWARD_ROW2,
+    };
+    use windows_sys::Win32::NetworkManagement::Ndis::NET_LUID_LH;
+    use windows_sys::Win32::Networking::WinSock::{AF_INET, IN_ADDR, SOCKADDR_INET};
+
+    let mut destination = SOCKADDR_INET::default();
+    destination.Ipv4.sin_family = AF_INET;
+    destination.Ipv4.sin_addr = IN_ADDR {
+        S_un: windows_sys::Win32::Networking::WinSock::IN_ADDR_0 {
+            S_addr: u32::from_ne_bytes(destination_address),
+        },
+    };
+    let mut route = MIB_IPFORWARD_ROW2::default();
+    let mut source = SOCKADDR_INET::default();
+    // SAFETY: the destination, route, and source buffers are valid for the duration of the call.
+    let status = unsafe {
+        GetBestRoute2(
+            std::ptr::null_mut(),
+            0,
+            std::ptr::null(),
+            &destination,
+            0,
+            &mut route,
+            &mut source,
+        )
+    };
+    if status != 0 {
+        return Err(format!("GetBestRoute2 for {target} failed: {status}"));
+    }
+    // SAFETY: `InterfaceLuid` was returned by IP Helper with a successful route lookup.
+    let luid = unsafe { route.InterfaceLuid.Value };
+    let mut interface = MIB_IF_ROW2 {
+        InterfaceLuid: NET_LUID_LH { Value: luid },
+        ..Default::default()
+    };
+    // SAFETY: `interface` is a valid output buffer and `luid` came from the selected route.
+    let status = unsafe { GetIfEntry2(&mut interface) };
+    if status != 0 {
+        return Err(format!("GetIfEntry2 for {target} route failed: {status}"));
+    }
+    Ok((utf16_field(&interface.Alias), interface.OperStatus))
+}
+
+#[cfg(all(test, windows))]
+mod tun_route_tests {
+    use super::{fake_ip_route_uses_ready_tun, protected_routes_use_ready_tun};
+
+    #[test]
+    fn both_protected_routes_must_select_an_up_tono_interface() {
+        assert!(protected_routes_use_ready_tun("Tono", 1, "Tono", 1));
+        assert!(!protected_routes_use_ready_tun("Tono", 1, "以太网", 1));
+        assert!(!protected_routes_use_ready_tun("以太网", 1, "Tono", 1));
+        assert!(!fake_ip_route_uses_ready_tun("Tono", 2));
+    }
+}
 
 /// The physical interface carrying the default route. Windows uses
 /// `GetBestRoute2` (runtime-unverified here; covered by the xwin check and
