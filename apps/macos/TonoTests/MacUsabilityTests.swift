@@ -294,6 +294,49 @@ final class MacUsabilityTests: XCTestCase {
         await app.finishPendingPersistence()
     }
 
+    func testRemovedSelectionOnUnarmedMacDoesNotClaimKillSwitchBlocks() async throws {
+        // H16-O-F3: the removal banner must follow the real barrier state.
+        let storage = ConfigStorage.shared
+        let savedFiles = ["regions.json", "rules.json", "config.json"].map { name in
+            let url = storage.appSupportDirectory.appendingPathComponent(name)
+            return (url, try? Data(contentsOf: url))
+        }
+        let selection = AppProfile.defaults.object(forKey: SettingsKey.selectedProxyTargetName)
+        let migration = AppProfile.defaults.object(forKey: SettingsKey.cloudExitDefaultPolicyVersion)
+        let armed = KillSwitchService.isArmed
+        defer {
+            KillSwitchService.isArmed = armed
+            AppProfile.defaults.set(selection, forKey: SettingsKey.selectedProxyTargetName)
+            AppProfile.defaults.set(migration, forKey: SettingsKey.cloudExitDefaultPolicyVersion)
+            for (url, data) in savedFiles {
+                if let data { try? storage.writeSensitive(data, to: url) }
+                else { try? FileManager.default.removeItem(at: url) }
+            }
+            ManagedExitCatalogOwnership.purge()
+        }
+        KillSwitchService.isArmed = false
+        let app = AppState()
+        app.isProtectionBlocked = false
+        ManagedExitCatalogOwnership.adopt("removal-owner")
+        func catalog(_ node: ProxyNode, revision: Int) throws -> ManagedExitCatalogCache {
+            let yaml = "proxies:\n" + (try ConfigPipeline.ownedNodeYAML(node))
+            let digest = Data(SHA256.hash(data: Data(yaml.utf8))).base64EncodedString()
+                .replacingOccurrences(of: "=", with: "")
+                .replacingOccurrences(of: "+", with: "-")
+                .replacingOccurrences(of: "/", with: "_")
+            return .init(revision: revision, yaml: yaml, sha256: digest, updatedAt: nil, routing: nil, owner: "removal-owner")
+        }
+        let removed = Fixture.realityNode(name: "US-Removed", id: "us-removed")
+        let survivor = Fixture.realityNode(name: "JP-Survivor", id: "jp-survivor", server: "203.0.114.9")
+        try await app.installManagedExitCatalog(try catalog(removed, revision: 73), persistCache: false, allowRuntimeTransition: false)
+        XCTAssertTrue(app.applyProxySelection(removed.name))
+        try await app.installManagedExitCatalog(try catalog(survivor, revision: 74), persistCache: false, allowRuntimeTransition: false)
+        XCTAssertTrue(app.catalogSelectionRequiresChoice)
+        let message = try XCTUnwrap(app.errorMessage)
+        XCTAssertFalse(message.contains("Kill Switch"), "no barrier exists on an idle, unarmed Mac")
+        await app.finishPendingPersistence()
+    }
+
     func testRecoveryFeedbackUsesExistingOwnerAndReleaseClearsIt() async {
         let app = AppState()
         app.recoveryCause = .wake
