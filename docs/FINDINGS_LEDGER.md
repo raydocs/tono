@@ -103,7 +103,7 @@
 | X2-1 | 网络变化后 DIRECT 仍绑定已不再是上行的适配器 | fixed(d98b217d) | [#461](https://github.com/raydocs/tono/issues/461)，[#462](https://github.com/raydocs/tono/pull/462) | 低·实机 | 核实后降级 |
 | H6-C | Support 页 WebRTC 检查按钮缺少打开其固定页面的权限 | fixed(d98b217d) | [#386](https://github.com/raydocs/tono/issues/386)，[#387](https://github.com/raydocs/tono/pull/387) | 低·已确认 | 功能缺陷，非安全项 |
 | H16-C-F3 | 退出登录发布最终状态后，周期目录同步在解锁后发布的旧 Ready/Connected 快照可以覆盖 tono_status 缓存且不再被纠正 | open | 待开 | 中·推导 | 窗口是解锁与发布之间几条指令，需要 worker 线程被抢占；未复现；与 H17-AUTH-WIN（#515）同改 account.rs，排在其后 |
-| H16-O-F7 | 冷启动恢复把已探测到的屏障状态压到 me() 返回之后才发布，期间托盘 flyout 显示 Standby 并提供 Connect | open | 待开 | 低·已确认 | 核实后收窄：仅初始未保护且持有 refresh token 的冷启动恢复、仅豁免恢复屏的托盘 flyout；Connect 会被账户准入拒绝；排在 #515 之后（restore.rs） |
+| H16-O-F7 | 冷启动恢复把已探测到的屏障状态压到 me() 返回之后才发布，期间托盘 flyout 显示 Standby 并提供 Connect | fixed(7c8dc6e0) | [#602](https://github.com/raydocs/tono/issues/602)，[#651](https://github.com/raydocs/tono/pull/651) | 低·已确认 | 核实后收窄：仅初始未保护且持有 refresh token 的冷启动恢复、仅豁免恢复屏的托盘 flyout；Connect 会被账户准入拒绝；排在 #515 之后（restore.rs） |
 | H16-O-F1 | Protected Offline 横幅、登录「网络已被拦截」卡片与托盘提示只凭状态机锁存声称已拦截，未看 Service 的 live 屏障（= H16-C-F5） | fixed(42cea896) | [#511](https://github.com/raydocs/tono/issues/511)，[#513](https://github.com/raydocs/tono/pull/513) | 高·已确认 | 仪表盘、进度卡、托盘面板已由 b489ea16 修正；托盘提示被速率覆盖、图标不刷新见 H16-O-F2 |
 | H16-O-F2 | 托盘图标只在启动时取样，状态发布不刷新；connecting/disconnecting 显示已连接图标；速率显示整段替换提示的保护行（= H16-C-F4） | fixed(42cea896) | [#517](https://github.com/raydocs/tono/issues/517)，[#518](https://github.com/raydocs/tono/pull/518) | 中·已确认 | 反向「橙色卡住」变体为推导；未实机观察 |
 | H16-O-F6 | 退出/重启拒绝对话框不读 Service 就承诺「本机保持受保护」，而 8 s 超时后释放仍可能完成、待完成更新时主机可能从未受保护 | fixed(42cea896) | [#519](https://github.com/raydocs/tono/issues/519)，[#520](https://github.com/raydocs/tono/pull/520) | 中·推导 | 文案已确认，慢释放时序需实机；App 侧 IPC 报错而 Service 仍在释放时仍可能误说保持受保护 |
@@ -176,7 +176,7 @@
 |---|---|---|---|---|---|
 | H4-F1 | dual 阶段吊销设备不退役共享 legacy 出口凭据，被吊销设备仍可用出口并计入账户 | fixed(6cfa4d9e) | [#313](https://github.com/raydocs/tono/issues/313)，[#323](https://github.com/raydocs/tono/pull/323) | 高·推导 | 暴露面取决于生产 rollout phase（本机无法查）；列车 #570 审查 TC-anthropic-1：退役账户的就绪判断看全部 active 出口，一个未上架的新节点就让所有退役账户 503，已在分支 `fix/cp-a-20260924` 改为只看本次下发目录中的节点（未合 main） |
 | H4-F2 | 停用/退役/删除/改名的住宅（catalog 型）home exit 及其 hy2 孪生块从限制名单掉出，下发给所有账户 | fixed(6cfa4d9e) | [#322](https://github.com/raydocs/tono/issues/322)，[#326](https://github.com/raydocs/tono/pull/326) | 高·推导 | roster 不按节点隔离（身份隔离）列为后续 |
-| H4-F3 | ops 角色门不覆盖 shared-admin；另有原始日志读取与 signup-allowlist 写两处未拦截且文档未列 | fixed(4597446a) | [#646](https://github.com/raydocs/tono/pull/646) | 低·推导 | 只修了 signup-allowlist PATCH（补 `customers.write`）；shared-admin 不拦截（已记录限制）与原始诊断日志读取（`shared-admin/diagnostics-logs.ts`）仍未拦截；只有配置 OPS_ROLES 且有非 owner 角色时可利用 |
+| H4-F3 | ops 角色门不覆盖 shared-admin；另有原始日志读取与 signup-allowlist 写两处未拦截且文档未列 | open | [#646](https://github.com/raydocs/tono/pull/646) | 低·推导 | 只修了 signup-allowlist PATCH（补 `customers.write`）；shared-admin 不拦截（已记录限制）与原始诊断日志读取（`shared-admin/diagnostics-logs.ts`）仍未拦截；只有配置 OPS_ROLES 且有非 owner 角色时可利用；#646 已合入（只补 signup-allowlist PATCH 的 `customers.write`），原始诊断日志读取与 shared-admin 仍无角色门，尚无修复 PR |
 | H3-F4 | refresh 严格单次轮换无宽限且非原子：响应丢失即产生伪 401，客户端登出并释放保护 | fixed(6cfa4d9e) | [#314](https://github.com/raydocs/tono/issues/314)，[#329](https://github.com/raydocs/tono/pull/329) | 高·推导 | 修复在服务端，客户端「真 401 才释放」不变；Windows 启动恢复遇 401 已不再释放（[#515](https://github.com/raydocs/tono/pull/515)） |
 | H3-F5 | 策略 revision 不在签名字节内，历史签名策略配伪造 revision 可永久钉住客户端 | fixed(6cfa4d9e) | [#317](https://github.com/raydocs/tono/issues/317)，[#342](https://github.com/raydocs/tono/pull/342)（Windows 客户端）、[#472](https://github.com/raydocs/tono/pull/472)（Windows sing_box）、[#473](https://github.com/raydocs/tono/pull/473)（macOS）、[#474](https://github.com/raydocs/tono/pull/474)（Worker/签名工具） | 中·推导 | 前提是 Worker/D1 被攻破或 TLS 中间人；#474 的开关默认关闭，四个 PR 都合入并由发布侧启用后才生效 |
 | H10-F1 | 控制面节点名校验与客户端 YAML 解码不一致，受限住宅出口可能下发给其他账户 | fixed(6cfa4d9e) | [#418](https://github.com/raydocs/tono/issues/418)，[#419](https://github.com/raydocs/tono/pull/419) | 高·推导 | — |
@@ -255,7 +255,7 @@
 | #5 | home-agent 无法识别高于旧水位的计数器重置 | open | [#5](https://github.com/raydocs/tono/issues/5) | 中·已确认 | — |
 | OPS-1 | ops 观测表达/freshness 后续项 | open | [ops 计划](ops/plan-2026-09-11.md) | 低 | 不是客户发布门 |
 | #208 | 定时 D1 备份在导出前因缺 Cloudflare 凭据失败 | open | [#208](https://github.com/raydocs/tono/issues/208) | 中·已确认 | — |
-| #191 | D1 当月冲销警告需吸收且不覆盖 Batch 8 Ledger | open | [#191](https://github.com/raydocs/tono/issues/191) | 低 | — |
+| #191 | D1 当月冲销警告需吸收且不覆盖 Batch 8 Ledger | fixed(f1d55368) | [#191](https://github.com/raydocs/tono/issues/191)，[#647](https://github.com/raydocs/tono/pull/647) | 低 | 目标月锁定为读取快照，最终以后端 MONTH_CLOSED 为准；未做浏览器实机截图验收 |
 | #188 | #187 集成被 Batch 8 UI 冻结与 migration 0072 冲突阻塞 | open | [#188](https://github.com/raydocs/tono/issues/188) | 低 | — |
 | #183 | Today 之外 18 个既有 Mac 截图失败待对账 | open | [#183](https://github.com/raydocs/tono/issues/183) | 低 | 测试/fixture 类 |
 | H7-F1 | ops SSH 未校验主机密钥 | fixed(85ba3945) | [#365](https://github.com/raydocs/tono/issues/365)，[#368](https://github.com/raydocs/tono/pull/368) | 中·推导 | 部署前 hub known-hosts 需含全部节点与探针 |
@@ -339,7 +339,7 @@
 | R612-O2 | 待写 tombstone 内容过期：后到的 forbidden 覆盖 refused；解除后的旧 tombstone 仍可覆盖新授权 | fixed(e0b7be4a) | [#612](https://github.com/raydocs/tono/pull/612) | 低·已确认 | Opus 发现，Codex 复核；修复 b662119e；无回归 |
 | R612-O3 | tombstone 未绑定被吊销的会话，新会话离线启动被旧会话的拒绝挂起（macOS 还会清掉目录缓存） | fixed(e0b7be4a) | [#612](https://github.com/raydocs/tono/pull/612) | 低·已确认 | Opus 发现，Codex 复核；修复 e1d61944，吊销记录带 token 摘要，不匹配或无摘要按无授权处理 |
 | R612-O4 | Windows 退出只等待 tombstone，不触发写入；写入器处于长退避时 3 s 预算内无新尝试 | fixed(e0b7be4a) | [#612](https://github.com/raydocs/tono/pull/612) | 低·已确认 | Opus 发现，Codex 复核；修复 f124c0b7（退出唤醒写入器）；无回归 |
-| R612-O5 | macOS 受保护重连只看 kill switch 与缓存目录，控制面不可达且无授权（账户 error）时网络变化仍会拨缓存出口 | open | 待开 | 低·已确认 | Opus 发现，Codex 复核：origin/main 已存在，非 #612 引入；需在共享 Connect 入口要求在线验证或离线准入 |
+| R612-O5 | macOS 受保护重连只看 kill switch 与缓存目录，控制面不可达且无授权（账户 error）时网络变化仍会拨缓存出口 | fixed(a1f2f340) | [#601](https://github.com/raydocs/tono/issues/601)，[#652](https://github.com/raydocs/tono/pull/652) | 低·已确认 | Opus 发现，Codex 复核：origin/main 已存在，非 #612 引入。修复：gate 要求本进程内服务端接受过会话或离线准入；恢复失败、清除账户（登出、账户丢失）与停用时撤回接受；恢复期间的受保护重连改为等待验证；未实机 |
 | R612-G1 | Windows 恢复预算超时时，已收到的 refresh 401（body 未完）被丢弃并按不可达离线准入 | fixed(e0b7be4a) | [#612](https://github.com/raydocs/tono/pull/612) | 低·已确认 | 第 2–6 轮逐步收紧，终版 380fe8e3：收到状态行后等 `me()` 链结束；罕见情况 Restoring 较久 |
 | R612-G2 | 两端 body 中断的非 401/403 非 2xx 状态被当作不可达 | fixed(e0b7be4a) | [#612](https://github.com/raydocs/tono/pull/612) | 低·已确认 | 36a43680；2xx 中断仍按传输失败（接受，服务端已接受会话） |
 | R612-G3 | Windows 解除 FORBIDDEN 与 tombstone 写入器的快照-写盘之间有缝，已解除的 tombstone 仍可落盘 | fixed(e0b7be4a) | [#612](https://github.com/raydocs/tono/pull/612) | 低·已确认 | 36a43680 + f594995a（只在真正解除时取文件锁）；该罕见路径 sink 可能等一次写盘 |
@@ -361,7 +361,7 @@
 | H20-C-F5 | Windows 上传诊断缺上一次失败记录 | fixed(ef6d09db) | [#594](https://github.com/raydocs/tono/issues/594) · [#616](https://github.com/raydocs/tono/pull/616) | 低·已确认 | 当前无错误时上传上一次失败的阶段与稳定码（不含本地详情）；#580 仅内部版自动报告 |
 | H20-C-F6 = H20-O-F13 | 验证码错误/过期被显示为「会话过期」 | fixed(8fb73d84) | [#595](https://github.com/raydocs/tono/issues/595)，[#620](https://github.com/raydocs/tono/pull/620) | 中·已确认 | 只把带 `INVALID_OR_EXPIRED_CODE` 的 401 改为专门错误；其它 401（含 verify 的 `AUTHENTICATION_FAILED`、带令牌请求）不变 |
 | H22-C-F2 = H22-O-F6 | 验证码未送达时两端没有求助/诊断出口 | fixed(8fb73d84) | [#596](https://github.com/raydocs/tono/issues/596)，[#620](https://github.com/raydocs/tono/pull/620) | 中·已确认 | 验证码页 60 秒后给出求助；菜单栏入口未加 |
-| H22-C-F1 | Windows 欢迎页吞掉存储失败导致循环 | open | 待开 | 低·推导(PLAUSIBLE) | 触发条件未证实 |
+| H22-C-F1 | Windows 欢迎页吞掉存储失败导致循环 | fixed(b0348ba7) | [#648](https://github.com/raydocs/tono/pull/648) | 低·推导(PLAUSIBLE) | 内存标记只在本次会话有效；触发条件仍未实机证实 |
 | H20-O-*, H22-O-* | Opus 席位 H20（15 条）与 H22（8 条，含 H22-O-F1 BFE 关闭时无法安装、H22-O-F2 VC++ 运行库缺失时安装门禁失败）| open（待核实）| 待开 | 待 Codex 异厂商核实 | 见交接文档 |
 | XRAY26-RMU | exit-agent 用 `--email=` 调 Xray 26 `rmu` 被拒，自 2026-09-18 起吊销不执行、计量停报；`rmu` 失败也退出 0 | fixed(85ba3945) | [#563](https://github.com/raydocs/tono/pull/563)（5bcc6b9d/924cafb3/b3299814）| 高·已确认(实机输出) | 未部署到节点 |
 | TF-opus-4 | exit-agent 停用轮不读计数，上次正常轮到停机之间的流量丢失 | fixed | [#600](https://github.com/raydocs/tono/issues/600)，[#624](https://github.com/raydocs/tono/pull/624)（f5c31d58，2026-09-25 已部署到 14 个节点） | 中·已确认 | 撤除后尽力折入最后计数，下一次可上报的轮次报出；永久退役节点仍不上报；需部署到节点 |

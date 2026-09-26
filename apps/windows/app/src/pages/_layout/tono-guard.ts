@@ -9,7 +9,14 @@ export type TonoGuardAction =
 
 export const TONO_INTRO_SEEN_KEY = 'tono.introSeen'
 
+// Session fallback when storage refuses the write; without it the guard would
+// send a signed-out user from /login back to /intro forever.
+let introSeenInMemory = false
+
 export const readTonoIntroSeen = (): boolean => {
+  if (introSeenInMemory) {
+    return true
+  }
   try {
     return globalThis.localStorage.getItem(TONO_INTRO_SEEN_KEY) === '1'
   } catch {
@@ -18,6 +25,7 @@ export const readTonoIntroSeen = (): boolean => {
 }
 
 export const writeTonoIntroSeen = (): void => {
+  introSeenInMemory = true
   try {
     globalThis.localStorage.setItem(TONO_INTRO_SEEN_KEY, '1')
   } catch {
