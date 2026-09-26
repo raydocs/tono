@@ -6,6 +6,11 @@ use crate::core::windows_kill_switch;
 use crate::core::structure::is_protected_startup_replacement_candidate;
 use tracing::{info, trace, warn};
 
+/// The operation marker an update transaction publishes in `/status` while it runs.
+fn update_operation(_request: &crate::update_wire::UpdateRequest) -> Option<OperationGuard> {
+    None
+}
+
 pub(super) fn create_ipc_router() -> Result<Router> {
     let router = Router::new()
         .post(IpcCommand::UpdateTransaction.as_ref(), |ctx| async move {
@@ -16,6 +21,7 @@ pub(super) fn create_ipc_router() -> Result<Router> {
             // A Prepare supersedes in-flight connect attempts only once `update::request` has
             // admitted it, still under this lock (TW-anthropic-4).
             let _lifecycle = OWNER_LIFECYCLE_LOCK.lock().await;
+            let _operation_guard = update_operation(&request.payload);
             #[cfg(windows)]
             return match crate::core::update::request(&owner, request.payload).await {
                 Ok(status) => ok_json(status),
@@ -1031,4 +1037,30 @@ pub(super) fn create_ipc_router() -> Result<Router> {
             ok_empty("Proxy barrier reset")
         });
     Ok(router)
+}
+
+#[cfg(test)]
+mod update_operation_tests {
+    use super::update_operation;
+    use crate::ServiceOperationKind;
+    use crate::core::operation::snapshot;
+    use crate::update_wire::UpdateRequest;
+    use serial_test::serial;
+
+    /// F520-1: a native-update Disconnect releases WFP. `/status` must show it as a release and
+    /// advance `snapshot_generation`, or the App's two-reading check can still say "stays
+    /// protected" after it.
+    #[test]
+    #[serial]
+    fn update_disconnect_is_published_as_a_kill_switch_release() {
+        let before = snapshot().0;
+        let guard = update_operation(&UpdateRequest::Disconnect);
+        let (during, active) = snapshot();
+        assert_eq!(
+            active.map(|operation| operation.kind),
+            Some(ServiceOperationKind::ReleaseKillSwitch)
+        );
+        assert!(during > before);
+        drop(guard);
+    }
 }
