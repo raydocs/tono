@@ -1356,6 +1356,16 @@ fn remote_session_connect_refused(
     session != CallerSession::Console && !caller_holds_verified_protection
 }
 
+/// [`remote_session_connect_refused`] against the Service's published protection.
+fn connect_session_refused(session: CallerSession, caller_key: &str) -> bool {
+    let armed = armed_guard();
+    remote_session_connect_refused(
+        session,
+        armed.as_ref().map(|armed| &armed.intent),
+        caller_key,
+    )
+}
+
 /// Refuse a connect from a non-console session unless the caller already holds verified
 /// protection. `caller_session_id` is `AuthenticatedOwner::peer_session_id`: read from the token of
 /// the very pipe-peer process whose SID authentication verified, while that process handle was
@@ -1366,15 +1376,7 @@ pub(crate) fn authorize_connect_session_for(
     caller_session_id: Option<u32>,
 ) -> std::result::Result<(), crate::core::auth::ServiceError> {
     let session = caller_session(caller_session_id);
-    let refused = {
-        let armed = armed_guard();
-        remote_session_connect_refused(
-            session,
-            armed.as_ref().map(|armed| &armed.intent),
-            caller_key,
-        )
-    };
-    if !refused {
+    if !connect_session_refused(session, caller_key) {
         return Ok(());
     }
     tracing::warn!("connect refused: caller session is {session:?}, not the local console");
@@ -4462,6 +4464,42 @@ mod tests {
         assert!(refused(Unknown, Some(&intent_only)));
 
         assert!(refused(Remote, Some(&other_users)));
+    }
+
+    /// TW-R-boot: startup restore keeps a verified intent published (fail-closed, the watchdog
+    /// retries) even when this start could not install its filters. That carried-over flag then
+    /// proves no live barrier, so the owner's Remote Desktop exception waits for an install that
+    /// succeeds.
+    #[tokio::test]
+    #[serial]
+    async fn a_failed_startup_install_withholds_the_remote_reconnect_exception() -> Result<()> {
+        cleanup().await;
+        let intent = IntentRecord {
+            owner_key: Some("owner-alice".to_owned()),
+            ..valid_intent(KillSwitchStatusMode::Locked, true)
+        };
+        atomic_write(&intent_path(), &serde_json::to_vec_pretty(&intent)?).await?;
+
+        let failures = SimulatedStateFailures::arm(false, true);
+        restore_on_service_start()
+            .await
+            .expect_err("the failed startup install must be reported");
+        let restored = armed_guard().clone().expect("startup stays fail-closed");
+        assert!(restored.intent.is_verified());
+        assert!(
+            connect_session_refused(CallerSession::Remote, "owner-alice"),
+            "a verified intent whose filters this start never installed must not admit a remote connect"
+        );
+
+        drop(failures);
+        // The watchdog's repair installs the same published snapshot.
+        install_unlocked(&restored).await?;
+        assert!(!connect_session_refused(
+            CallerSession::Remote,
+            "owner-alice"
+        ));
+        cleanup().await;
+        Ok(())
     }
 
     #[tokio::test]
