@@ -435,6 +435,11 @@ nonisolated enum KillSwitchService {
             throw Error.userDenied
         } catch HelperIPCError.forbidden {
             throw Error.helperRejected
+        } catch HelperIPCError.boundToAnotherUser(let account) {
+            // #579: the installer's root guard refused another macOS account's
+            // helper. Keep the error that names that account; as an install
+            // failure it read as a repair for this account to approve.
+            throw HelperIPCError.boundToAnotherUser(account)
         } catch {
             throw Error.installFailed(error.localizedDescription)
         }

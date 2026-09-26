@@ -35,6 +35,39 @@ nonisolated private enum SessionUse: Sendable {
     case decisive(SessionScope)
 }
 
+/// One caller's wait for a shared token renewal (535R-C-F2), settled exactly
+/// once: with the renewal's answer, or with cancellation when the caller is
+/// cancelled first, possibly before the continuation is installed.
+nonisolated private final class RenewalWait: @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<String, Error>?
+    private var outcome: Result<String, Error>?
+
+    func install(_ continuation: CheckedContinuation<String, Error>) {
+        lock.lock()
+        if let outcome {
+            lock.unlock()
+            continuation.resume(with: outcome)
+            return
+        }
+        self.continuation = continuation
+        lock.unlock()
+    }
+
+    func finish(_ result: Result<String, Error>) {
+        lock.lock()
+        guard outcome == nil else {
+            lock.unlock()
+            return
+        }
+        outcome = result
+        let continuation = self.continuation
+        self.continuation = nil
+        lock.unlock()
+        continuation?.resume(with: result)
+    }
+}
+
 actor TonoAPIClient {
     enum APIError: LocalizedError, Equatable {
         case invalidConfiguration, transport(String), unauthorized, forbidden, notFound
@@ -504,11 +537,15 @@ actor TonoAPIClient {
     }
 
     private func refreshAccessToken() async throws -> String {
-        if let refreshTask { return try await refreshTask.task.value }
+        if let refreshTask { return try await Self.awaitRenewal(refreshTask.task) }
         let id = UUID()
         let generation = credentialGeneration
         let scope = SessionScope(generation: generation, readScope: offlineGate.readScope)
         let task = Task<String, Error> {
+            // The slot is released when the renewal ends, not when its caller
+            // stops waiting: a second renewal beside it would send the refresh
+            // token this one is rotating (535R-C-F2).
+            defer { if refreshTask?.id == id { refreshTask = nil } }
             try requireCredentialGeneration(generation)
             if let pending = unpersistedRefreshToken,
                (try? keychain.set(pending, for: .refreshToken)) != nil {
@@ -536,10 +573,28 @@ actor TonoAPIClient {
             return response.accessToken
         }
         refreshTask = (id, task)
-        defer {
-            if refreshTask?.id == id { refreshTask = nil }
+        return try await Self.awaitRenewal(task)
+    }
+
+    /// 535R-C-F2: every caller that needs a renewal shares one, and it runs
+    /// to the end even when they stop waiting: the server rotates the refresh
+    /// token on the way, and dropping its answer would sign the user out. A
+    /// cancelled caller stops waiting at once (Restore internet and sign-out
+    /// cancel account work, then wait for it) and leaves the renewal running.
+    nonisolated private static func awaitRenewal(_ renewal: Task<String, Error>) async throws -> String {
+        try Task.checkCancellation()
+        let wait = RenewalWait()
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<String, Error>) in
+                wait.install(continuation)
+                Task {
+                    let result = await renewal.result
+                    wait.finish(result)
+                }
+            }
+        } onCancel: {
+            wait.finish(.failure(CancellationError()))
         }
-        return try await task.value
     }
 
     private func publicRequest<Response: Decodable, Body: Encodable>(
