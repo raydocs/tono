@@ -387,6 +387,13 @@ async fn spawn_periodic_inner(state: &Arc<TonoState>, app: &AppHandle, auth_gene
                 auth_generation,
             )
             .await;
+            // A sign-in whose session marker never committed (the vault stalled or refused its
+            // write) tries again each period; a committed marker costs one small file read.
+            if let Err(error) =
+                crate::tono::commands::account::commit_marker_if_durable(&task_state, auth_generation).await
+            {
+                logging!(warn, Type::Service, "Tono: sign-in session marker not committed: {error}");
+            }
         }
     });
     let mut inner = state.lock().await;

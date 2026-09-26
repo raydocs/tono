@@ -103,3 +103,21 @@
   剩余限制更新：换账户登录在 adopt 之前失败（释放失败、被取代、`client.adopt` 失败），上一账户的已提交标记已被改为待定且不恢复，
   本进程仍以上一账户运行，但下次启动需重新登录，并走上述无归属会话路径（含已存防护的释放）；后台提交在约 3 分钟内未成功（写库被拒或持续超时）
   或提交前进程退出，下次启动同样需重新登录。
+- **续记（2026-09-26，#642 评审 c28a72f7 确认 codex:F2、opus:F1、opus:F3/codex:F1（均 minor）；opus:F2 已驳回，不处理）**：
+  ① codex:F2：后台提交把标记「读不出」当成「已被新登录替换」并停止重试。现在 `holds_pending_marker` 返回 `io::Result<bool>`：
+  读到其他内容或文件不存在才是「不归本次登录」，读错误返回错误，后台提交照常重试。
+  ② opus:F1：换账户登录在 `client.adopt` 之前失败（释放被拒、被取代）时，上一账户的已提交标记已改写为待定，撤销又对 `Existing` 直接返回，
+  而凭据库从未被动过、本进程仍是上一账户，下次启动却被登出。现在标记步骤记下原内容（`SignInMarker::Existing { previous }`），
+  登录未存下会话时，只要文件仍是本次的 `pending:<代次>`，就原子写回原内容（原本不存在则删除；原内容读不出则保持待定）。
+  `adopted` 出错即表示会话没有进入凭据库（`client.adopt` 在入队写库之前失败），所以 `client.adopt` 失败也一并写回；
+  `client.adopt` 成功之后的保持待定不变。`docs/DECISIONS.md` 的暂定条目同步改为「只有新会话已交给凭据库之后才不恢复」。
+  ③ opus:F3/codex:F1：后台约 3 分钟放弃后本进程不再尝试。单次尝试抽成 `commit_marker_if_durable`（先读标记，只有仍是本次待定内容才 flush 并提交），
+  账户的周期同步（`catalog_sync` 每 300 秒一轮，不另设定时器）在每轮末尾以当前登录代次调用一次；已提交时只多一次小文件读取。
+  已有测试 `a_sign_in_whose_local_marker_cannot_be_written_is_refused` 随 `SignInMarker` 改为带原内容的形式调整参数，断言含义不变。
+  测试：新增 `tono::commands::account::lifecycle_tests::a_switch_refused_before_adopting_keeps_the_previous_account_marker`
+  （上一账户有已提交标记且隧道在启动，释放被拒，断言登录失败且下次启动仍为 `Owned`）；红分支
+  `wip/win-signin-marker-20260926-red6`（`e99034cd`，基于 `6913b366`，仅测试，windows-ci run 36218716073）。上一轮红分支 run 36217858913
+  以断言失败（542 passed，1 failed），`6913b366` 的 windows-ci run 36218076446 通过（均已核对）。读错误重试与周期同步里的提交没有单元测试覆盖。
+  MacBook 未运行 cargo，以 PR #642 的 windows-ci 为准。
+  剩余限制更新：换账户登录只有在 `client.adopt` 已把新会话交给凭据库之后失败落库，才会让下次启动需重新登录；此前失败则写回原标记。
+  连锁情形（两次换账户登录重叠且都在 adopt 之前失败）时，后失败者写回的是先失败者的待定标记，下次启动需重新登录（安全方向）。
