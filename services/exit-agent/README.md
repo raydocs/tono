@@ -99,7 +99,11 @@ A disabled or retired node gets `403 EXIT_NODE_DISABLED` on the roster. Only
 that answer makes the agent remove every `u:` client and `shared-legacy`,
 empty the hy2 allowlist, take a best-effort final counter sample into the
 state file (reported by the next round that may report) and exit non-zero;
-stop `tono-xray` afterwards. Any
+stop `tono-xray` afterwards and start it again only when the node is
+re-enabled. `shared-legacy` comes back only when Xray restarts and reloads its
+static config, so re-enabling a node whose Xray kept running leaves it removed.
+The node keeps getting this answer after its token is rotated while disabled:
+disabling saves the deployed token's hash, which only ever earns the 403. Any
 other HTTP error or network failure keeps the last roster and retries.
 
 Xray drops every client added over its management API when it restarts. Each
