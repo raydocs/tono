@@ -102,7 +102,7 @@
 | H13-F3 | 控制面拒绝会话后账户未进入挂起 | fixed(d98b217d) | [#459](https://github.com/raydocs/tono/issues/459)，[#460](https://github.com/raydocs/tono/pull/460) | 中·推导 | 与 #456 同文件，后合者需 rebase |
 | X2-1 | 网络变化后 DIRECT 仍绑定已不再是上行的适配器 | fixed(d98b217d) | [#461](https://github.com/raydocs/tono/issues/461)，[#462](https://github.com/raydocs/tono/pull/462) | 低·实机 | 核实后降级 |
 | H6-C | Support 页 WebRTC 检查按钮缺少打开其固定页面的权限 | fixed(d98b217d) | [#386](https://github.com/raydocs/tono/issues/386)，[#387](https://github.com/raydocs/tono/pull/387) | 低·已确认 | 功能缺陷，非安全项 |
-| H16-C-F3 | 退出登录发布最终状态后，周期目录同步在解锁后发布的旧 Ready/Connected 快照可以覆盖 tono_status 缓存且不再被纠正 | open | 待开 | 中·推导 | 窗口是解锁与发布之间几条指令，需要 worker 线程被抢占；未复现；与 H17-AUTH-WIN（#515）同改 account.rs，排在其后 |
+| H16-C-F3 | 退出登录发布最终状态后，周期目录同步在解锁后发布的旧 Ready/Connected 快照可以覆盖 tono_status 缓存且不再被纠正 | in-PR | [#656](https://github.com/raydocs/tono/pull/656) | 中·推导 | 目录同步、会话被拒、切换回滚、监视器 kill switch 变化四处改为持锁发布（account.rs 未改）；未实机复现 |
 | H16-O-F7 | 冷启动恢复把已探测到的屏障状态压到 me() 返回之后才发布，期间托盘 flyout 显示 Standby 并提供 Connect | fixed(7c8dc6e0) | [#602](https://github.com/raydocs/tono/issues/602)，[#651](https://github.com/raydocs/tono/pull/651) | 低·已确认 | 核实后收窄：仅初始未保护且持有 refresh token 的冷启动恢复、仅豁免恢复屏的托盘 flyout；Connect 会被账户准入拒绝；排在 #515 之后（restore.rs） |
 | H16-O-F1 | Protected Offline 横幅、登录「网络已被拦截」卡片与托盘提示只凭状态机锁存声称已拦截，未看 Service 的 live 屏障（= H16-C-F5） | fixed(42cea896) | [#511](https://github.com/raydocs/tono/issues/511)，[#513](https://github.com/raydocs/tono/pull/513) | 高·已确认 | 仪表盘、进度卡、托盘面板已由 b489ea16 修正；托盘提示被速率覆盖、图标不刷新见 H16-O-F2 |
 | H16-O-F2 | 托盘图标只在启动时取样，状态发布不刷新；connecting/disconnecting 显示已连接图标；速率显示整段替换提示的保护行（= H16-C-F4） | fixed(42cea896) | [#517](https://github.com/raydocs/tono/issues/517)，[#518](https://github.com/raydocs/tono/pull/518) | 中·已确认 | 反向「橙色卡住」变体为推导；未实机观察 |

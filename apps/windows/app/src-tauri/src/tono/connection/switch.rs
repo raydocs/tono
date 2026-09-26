@@ -120,9 +120,8 @@ pub(super) async fn restore_selected_node(
     if let Err(error) = restore_selection_value(&mut inner.selected_node, &catalog_dir, previous_name) {
         logging!(warn, Type::Service, "Tono: could not persist rolled-back selection: {error:#}");
     }
-    let status = commands::status_of(&inner);
-    drop(inner);
-    commands::emit_status(app, &status);
+    // Under the lock, like every status publisher (H16-C-F3).
+    commands::emit_status(app, &commands::status_of(&inner));
 }
 
 fn restore_selection_value(
