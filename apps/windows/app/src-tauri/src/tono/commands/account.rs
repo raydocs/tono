@@ -14,7 +14,7 @@ use crate::{
     tono::{
         audit::AuditEvent,
         catalog_sync, connection,
-        credentials::TonoCredentialStore,
+        credentials::{TonoCredentialStore, VaultSessionOwnership},
         state::{AccountState, TonoInner, TonoState},
     },
 };
@@ -22,18 +22,25 @@ use super::*;
 use super::diagnostics::auth_error;
 
 pub async fn load_credentials(state: &Arc<TonoState>) {
-    load_credentials_from(state, || async {
+    let rebind = load_credentials_from(state, || async {
         let refresh = TonoCredentialStore::get_session_async().await;
         let id = TonoCredentialStore::get_async(CredentialKey::InstallationId).await;
         (refresh, id)
     })
-    .await
+    .await;
+    if rebind {
+        // The marker now vouches for a session an earlier build stored roaming: bind it to this
+        // machine off the load path. A failure leaves it roaming for the next load.
+        tokio::spawn(TonoCredentialStore::bind_session_to_machine_async());
+    }
 }
 
 type VaultRead = Result<Option<String>, tono_core::credentials::CredentialError>;
 type SessionRead = Result<Option<crate::tono::credentials::StoredSession>, tono_core::credentials::CredentialError>;
 
-async fn load_credentials_from<F, Fut>(state: &Arc<TonoState>, read: F)
+/// Returns whether the adopted session was stored roaming by an earlier build and should now be
+/// bound to this machine ([`VaultSessionOwnership::Owned`]).
+async fn load_credentials_from<F, Fut>(state: &Arc<TonoState>, read: F) -> bool
 where
     F: FnOnce() -> Fut,
     Fut: std::future::Future<Output = (SessionRead, VaultRead)>,
@@ -41,7 +48,7 @@ where
     let generation = {
         let inner = state.lock().await;
         if inner.credentials_loaded || inner.account_close.is_some() {
-            return;
+            return false;
         }
         inner.sign_in_generation
     };
@@ -52,11 +59,11 @@ where
     // sign-out or a newer login generation must not let a late startup read resurrect the old
     // refresh token in the memory-first credential store.
     if inner.credentials_loaded || inner.account_close.is_some() {
-        return;
+        return false;
     }
     if inner.sign_in_generation != generation {
         inner.credentials_loaded = true;
-        return;
+        return false;
     }
     // A fresh attempt must not inherit the previous verdict. Retry re-enters
     // here, and a stale error would outlive the condition that produced it.
@@ -70,7 +77,7 @@ where
         inner.credential_error = Some(format!(
             "credential store did not answer within {CREDENTIAL_LOAD_TIMEOUT:?}"
         ));
-        return;
+        return false;
     };
     // The installation id is independent of the refresh token and is handled
     // first, so the early return below cannot cost a persisted id — losing it
@@ -92,6 +99,7 @@ where
             // The id is not auth-critical: keep the ephemeral one.
         }
     }
+    let mut rebind = false;
     match refresh {
         Ok(Some(stored)) => {
             // Credential Manager outlives an uninstall that deletes the data directory, so a
@@ -107,15 +115,27 @@ where
                 crate::tono::state::selection_path(&inner.catalog_dir),
                 inner.catalog_dir.join(crate::tono::audit::SETTINGS_FILE_NAME),
             ];
-            if crate::tono::credentials::data_dir_owns_vault_session(
+            match crate::tono::credentials::data_dir_owns_vault_session(
                 &inner.catalog_dir, &account_traces, stored.legacy_roaming,
             ) {
-                // Hydrate memory only — writing the same bytes back would
-                // risk another prompting vault call.
-                let _ = inner.credentials.set_local(CredentialKey::RefreshToken, &stored.token);
-            } else {
-                logging!(warn, Type::Service,
-                    "Tono: ignoring a stored session this installation did not create; sign in again");
+                VaultSessionOwnership::Owned { rebind: roaming } => {
+                    // Hydrate memory only — writing the same bytes back would
+                    // risk another prompting vault call.
+                    let _ = inner.credentials.set_local(CredentialKey::RefreshToken, &stored.token);
+                    rebind = roaming;
+                }
+                VaultSessionOwnership::NotOwned => {
+                    logging!(warn, Type::Service,
+                        "Tono: ignoring a stored session this installation did not create; sign in again");
+                }
+                VaultSessionOwnership::Unrecorded => {
+                    // Neither adopt (the token rotation would rewrite the roaming credential, the
+                    // upgrade's only evidence) nor sign out: the M1 branch keeps protection and
+                    // offers Retry, which re-reads with the gate still closed.
+                    inner.credential_error =
+                        Some("could not record this installation's stored session".to_string());
+                    return false;
+                }
             }
         }
         Ok(None) => {}
@@ -128,12 +148,13 @@ where
             // identical error — so the Retry button the account-error screen
             // offers provably could not succeed, even after the vault recovered.
             inner.credential_error = Some(err.to_string());
-            return;
+            return false;
         }
     }
     // The vault answered — including "there is nothing stored", which is a real answer. The
     // gate opens only here; startup was never blocked, because the read itself is bounded.
     inner.credentials_loaded = true;
+    rebind
 }
 
 /// Start email sign-in (`POST auth/email/start`, §1/§2).
