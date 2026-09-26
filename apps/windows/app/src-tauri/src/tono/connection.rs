@@ -200,6 +200,15 @@ fn seed_autostart_after_connect() {
 /// `tono_connect`: guard, then the full §6 transaction; any failure after
 /// arm keeps blocking and schedules the protected reconnect.
 pub async fn connect(state: Arc<TonoState>, app: AppHandle) -> Result<(), String> {
+    connect_for_generation(state, app, None).await
+}
+
+/// [`connect`] that refuses to start once the connection generation is no longer
+/// `expected_generation`, re-checked under the lock that admits the attempt. Update recovery
+/// passes the generation its restore captured, so a Restore internet in between wins.
+pub(crate) async fn connect_for_generation(
+    state: Arc<TonoState>, app: AppHandle, expected_generation: Option<u64>,
+) -> Result<(), String> {
     {
         let mut inner = state.lock().await;
         match &inner.account_state {
@@ -224,7 +233,7 @@ pub async fn connect(state: Arc<TonoState>, app: AppHandle) -> Result<(), String
             );
         }
     }
-    match attempt(&state, &app).await {
+    match attempt_for_generation(&state, &app, expected_generation).await {
         Attempt::Connected => {
             seed_autostart_after_connect();
             Ok(())
@@ -243,10 +252,6 @@ pub async fn connect(state: Arc<TonoState>, app: AppHandle) -> Result<(), String
 /// One full connect attempt: guards → service checks → begin → stages.
 /// Returns a boxed future (see [`BoxedAttempt`]); call sites `await` it as
 /// before.
-fn attempt<'a>(state: &'a Arc<TonoState>, app: &'a AppHandle) -> BoxedAttempt<'a> {
-    attempt_for_generation(state, app, None)
-}
-
 fn attempt_for_generation<'a>(state: &'a Arc<TonoState>, app: &'a AppHandle, expected_generation: Option<u64>) -> BoxedAttempt<'a> {
     Box::pin(attempt_inner(state, app, expected_generation))
 }

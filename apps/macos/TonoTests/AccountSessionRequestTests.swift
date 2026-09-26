@@ -777,6 +777,68 @@ final class AccountSessionRequestTests: XCTestCase {
         await account.stopRuntime()
     }
 
+    /// 535R-C-F3: a refusal heard while a runtime start awaits suspends the
+    /// account. The stale start must not then mark it ready (or report its
+    /// own failure) over `.suspended`.
+    func testARefusalDuringARuntimeStartIsNotOverwrittenByThatStart() async throws {
+        var account: AccountSession?
+        var refuseDuringStart = false
+        let (session, transport, host, _) = fixture(
+            descriptorConsumer: { descriptor in
+                // The start withdraws the descriptor first; the refusal lands
+                // while it waits for that.
+                guard descriptor == nil, refuseDuringStart, let account else { return }
+                refuseDuringStart = false
+                account.enterEntitlementBlock(detail: nil)
+            },
+            cloudFallbackConsumer: { _ in }
+        )
+        account = session
+        let logUpload = SettingsKey.isNetworkLogUploadEnabled()
+        AppProfile.defaults.set(false, forKey: SettingsKey.networkLogUploadEnabled)
+        defer {
+            transport.invalidateAndCancel(); HeldAccountProtocol.remove(host)
+            try? testKeychain(host).remove(.refreshToken)
+            ManagedExitCatalogOwnership.purge()
+            AppProfile.defaults.set(logUpload, forKey: SettingsKey.networkLogUploadEnabled)
+        }
+        try await adoptTestAccount(session)
+        refuseDuringStart = true
+        await session.startCloudOnlyRuntime()
+        XCTAssertEqual(session.state, .suspended, "the refusal owns the state, not the start it interrupted")
+        await session.stopRuntime()
+    }
+
+    /// 535R-C-F3 (#653 review codex:F1): a refusal heard while `fail` cleans
+    /// up after a stale start suspends the account. The failure must not then
+    /// replace `.suspended` with its error.
+    func testARefusalDuringFailureCleanupIsNotOverwrittenByThatFailure() async throws {
+        var account: AccountSession?
+        var refuseDuringCleanup = false
+        let (session, transport, host, _) = fixture(
+            descriptorConsumer: { descriptor in
+                // The cleanup withdraws the descriptor; the refusal lands
+                // while it waits for that.
+                guard descriptor == nil, refuseDuringCleanup, let account else { return }
+                refuseDuringCleanup = false
+                account.enterEntitlementBlock(detail: nil)
+            }
+        )
+        account = session
+        let logUpload = SettingsKey.isNetworkLogUploadEnabled()
+        AppProfile.defaults.set(false, forKey: SettingsKey.networkLogUploadEnabled)
+        defer {
+            transport.invalidateAndCancel(); HeldAccountProtocol.remove(host)
+            try? testKeychain(host).remove(.refreshToken)
+            ManagedExitCatalogOwnership.purge()
+            AppProfile.defaults.set(logUpload, forKey: SettingsKey.networkLogUploadEnabled)
+        }
+        try await adoptTestAccount(session)
+        refuseDuringCleanup = true
+        await session.fail(TonoSidecarService.Error.commandFailed("Managed cloud catalog is unavailable."))
+        XCTAssertEqual(session.state, .suspended, "the refusal owns the state, not the failure it interrupted")
+    }
+
     func testExplicitInvalidationRetiresReadBeforeUserIsCleared() async throws {
         let (account, transport, host, requests) = fixture()
         defer { transport.invalidateAndCancel(); HeldAccountProtocol.remove(host); try? testKeychain(host).remove(.refreshToken) }
@@ -1014,6 +1076,77 @@ final class AccountSessionRequestTests: XCTestCase {
         await account.settleRestoreFailure(unreachable)
         XCTAssertEqual(account.state, .suspended, "a revoked grant is not Ready")
         XCTAssertNil(account.offlineVerifiedAt)
+    }
+
+    /// R612-O5: a restore that cannot reach Tono and finds no offline grant
+    /// leaves the account in error with the cached catalog still in memory.
+    /// Connect, the entry every protected reconnect takes, must refuse it
+    /// rather than dial that cached exit.
+    func testUnreachableRestoreWithoutAGrantKeepsConnectRefused() async throws {
+        let directory = Self.offlineGrantDirectory("o5")
+        let installed = InstalledCatalogDigests(catalogSha256: "catalog-a", routingSha256: "routing-a")
+        let (account, transport, host, _) = fixture(
+            offlineGate: OfflineGrantGate(directory: directory),
+            installedCatalogConsumer: { installed }
+        )
+        defer {
+            transport.invalidateAndCancel(); HeldAccountProtocol.remove(host)
+            try? testKeychain(host).remove(.refreshToken)
+            ManagedExitCatalogOwnership.purge()
+            try? FileManager.default.removeItem(at: directory)
+        }
+        try await adoptTestAccount(account)
+        // Relaunch with no grant on disk and the control plane blackholed.
+        account.user = nil
+        account.state = .restoring
+        HeldAccountProtocol.install(host) { request in
+            request.client?.urlProtocol(request, didFailWithError: URLError(.cannotConnectToHost))
+        }
+        let unreachable: Error
+        do {
+            _ = try await account.api.me()
+            return XCTFail("a blackholed control plane cannot answer")
+        } catch {
+            unreachable = error
+        }
+
+        await account.settleRestoreFailure(unreachable)
+        guard case .error = account.state else {
+            return XCTFail("no grant admits this launch offline; got \(account.state)")
+        }
+        XCTAssertNotNil(
+            account.api.offlineGate.connectRefusal(
+                catalogDigest: installed.catalogSha256,
+                routingToken: installed.routingSha256
+            ),
+            "Connect must not dial the cached exit of a session Tono neither verified nor admitted offline"
+        )
+    }
+
+    /// R612-O5: clearing the account (sign-out, account loss) withdraws
+    /// Tono's acceptance of its session; Connect must not read a signed-out
+    /// session as verified online.
+    func testClearingTheAccountWithdrawsItsOnlineAcceptance() async throws {
+        let directory = Self.offlineGrantDirectory("o5-sign-out")
+        let (account, transport, host, _) = fixture(offlineGate: OfflineGrantGate(directory: directory))
+        defer {
+            transport.invalidateAndCancel(); HeldAccountProtocol.remove(host)
+            try? testKeychain(host).remove(.refreshToken)
+            ManagedExitCatalogOwnership.purge()
+            try? FileManager.default.removeItem(at: directory)
+        }
+        try await adoptTestAccount(account)
+        XCTAssertNil(
+            account.api.offlineGate.connectRefusal(catalogDigest: "catalog-a", routingToken: "routing-a"),
+            "a sign-in is Tono accepting the session"
+        )
+
+        account.clearAccount()
+
+        XCTAssertNotNil(
+            account.api.offlineGate.connectRefusal(catalogDigest: "catalog-a", routingToken: "routing-a"),
+            "a signed-out session is not accepted online"
+        )
     }
 
     /// #582 M2: the server refusing this session's own renewal overwrites the
@@ -1265,6 +1398,37 @@ final class AccountSessionRequestTests: XCTestCase {
         _ = await read.result
         await logout.value
         XCTAssertNil(try testKeychain(host).string(for: .refreshToken))
+    }
+
+    /// 535R-C-F2: Restore internet and sign-out cancel account work and wait
+    /// for it. A cancelled read must stop waiting for the token renewal its
+    /// 401 started instead of lasting as long as that renewal. The renewal
+    /// itself runs on: the server rotates the refresh token, so the next read
+    /// uses what it returned.
+    func testACancelledReadStopsWaitingForItsTokenRenewal() async throws {
+        let (account, transport, host, requests) = fixture()
+        defer { transport.invalidateAndCancel(); HeldAccountProtocol.remove(host); try? testKeychain(host).remove(.refreshToken) }
+        try await adoptTestAccount(account)
+        let read = Task { try await account.api.me() }
+        let me = try await nextRequest(requests)
+        me.respond(status: 401, body: #"{"error":{"code":"UNAUTHORIZED"}}"#)
+        let refresh = try await nextRequest(requests)
+        XCTAssertTrue(refresh.request.url?.path.hasSuffix("/auth/refresh") == true)
+        let returned = expectation(description: "the cancelled read returns while its renewal is held")
+        let waiter = Task { () -> Result<TonoMeResponse, Error> in
+            let result = await read.result
+            returned.fulfill()
+            return result
+        }
+        read.cancel()
+        await fulfillment(of: [returned], timeout: 2)
+        refresh.respond(status: 200, body: #"{"accessToken":"rotated-access","refreshToken":"rotated-refresh"}"#)
+        assertCancelled(await waiter.value)
+        let next = Task { try await account.api.me() }
+        let retried = try await nextRequest(requests)
+        XCTAssertEqual(retried.request.value(forHTTPHeaderField: "Authorization"), "Bearer rotated-access")
+        retried.respond(status: 200, body: "{\"user\":\(Self.originalUser)}")
+        _ = try await next.value
     }
 
     func testInvalidAdoptionLeavesTheCurrentCredentialsUsable() async throws {

@@ -1347,6 +1347,15 @@ class ReconcileSafety(unittest.TestCase):
         )
         self.assertEqual(removed, 2)
 
+    def test_an_early_shared_legacy_removal_is_counted_with_no_inventory(self) -> None:
+        # Combined review codex:F4: with an empty roster and neither a listing nor
+        # a record, the fail-safe return dropped the confirmed removal and reported 0.
+        _, removed, _ = agent.reconcile(
+            Path("/unused"), {"add_user": "adu", "remove_user": "rmu"}, "127.0.0.1:10085",
+            "tono-vless", [], None, None, retire_shared_legacy=True,
+        )
+        self.assertEqual(removed, 1)
+
     def test_a_failed_early_shared_legacy_removal_still_revokes_the_rest(self) -> None:
         # TF-opus-7: the early removal's failure is reported with the others and
         # never skips the revocations after it.

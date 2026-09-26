@@ -204,19 +204,21 @@ test.describe('账目', () => {
     await expect(page.getByRole('row').filter({ hasText: 'wang.tao@example.com' })).toHaveCount(2);
   });
 
-  test('锁定之后只能冲正，改不了', async ({ page }, testInfo) => {
+  test('锁定当前 UTC 月之后不能再接收冲正', async ({ page }, testInfo) => {
     const session = `ledger-close-${testInfo.project.name}`;
     await open(page, LEDGER, 'default', session);
     await page.getByRole('button', { name: '锁定本月' }).click();
 
     const dialog = page.getByRole('dialog');
     await expect(dialog.getByText(/收入 ¥2,402\.00，支出 ¥1,789\.80，毛利 ¥612\.20，3 项还没对上。/)).toBeVisible();
+    await expect(dialog).toContainText('这也是当前 UTC 月，锁定后本月不能再接收冲正。');
     await dialog.getByRole('button', { name: '锁定', exact: true }).click();
 
     await expect(page.getByText(/已锁定 · owner@example\.test/)).toBeVisible();
-    await expect(page.getByText('这个月已经锁了，只能冲正，不能改。')).toBeVisible();
+    await expect(page.getByText('这个月已经锁了，不能改；冲正只能记入未锁定的当前 UTC 月。')).toBeVisible();
     await expect(page.getByRole('button', { name: '记一笔' })).toBeDisabled();
     await expect(page.getByRole('button', { name: '改备注' }).first()).toBeDisabled();
+    await expect(page.getByRole('button', { name: '冲正', exact: true }).first()).toBeDisabled();
 
     // The button being disabled is the console's half; the hub refusing the
     // write is the half that actually protects a closed month.

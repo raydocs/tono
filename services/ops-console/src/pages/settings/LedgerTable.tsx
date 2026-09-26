@@ -4,9 +4,11 @@ import { ConfirmDialog } from '@/components/ops/ConfirmDialog';
 import { DataTable, type DataColumn, type TableState } from '@/components/ops/DataTable';
 import { Value } from '@/components/ops/Value';
 import { copy } from '@/copy/copy';
+import { refusalCode } from '@/lib/api-customer-actions';
 import { ledgerApi, type LedgerEntryDto } from '@/lib/api-ledger';
+import { nowSec } from '@/lib/clock';
 import { formatDate } from '@/lib/display';
-import { entryWords, formatAmount, formatCny, formatRate, monthWords, sortedEntries } from '@/lib/ledger';
+import { entryWords, formatAmount, formatCny, formatRate, monthWords, reversalMonth, sortedEntries } from '@/lib/ledger';
 import { TextField } from './form';
 import { useWrite } from './use-write';
 
@@ -32,16 +34,19 @@ export function LedgerTable({
   message,
   locked,
   currentMonth,
+  reverseReason,
   nameOf,
   onChanged,
 }: {
   rows: readonly LedgerEntryDto[];
   state: TableState;
   message?: string;
-  /** A closed month takes no edits at all; only a reversal may still be added. */
+  /** A closed source month takes no edits; reversals target the current UTC month. */
   locked: boolean;
-  /** Where a reversal lands — today's month, whichever month is on screen. */
+  /** Where a reversal lands, whichever month is on screen. */
   currentMonth: string;
+  /** Why reversal is unavailable (target month locked or unknown), or null when known open. */
+  reverseReason: string | null;
   nameOf: (row: LedgerEntryDto) => string;
   onChanged: () => void;
 }) {
@@ -56,6 +61,7 @@ export function LedgerTable({
   const columns = useMemo(() => entryColumns({
     nameOf,
     locked,
+    reverseReason,
     inMonth: (id) => here.has(id),
     onJump: setSelected,
     onEditNote: (row) => {
@@ -63,7 +69,7 @@ export function LedgerTable({
       setEditing(row);
     },
     onReverse: setReversing,
-  }), [nameOf, locked, here]);
+  }), [nameOf, locked, reverseReason, here]);
 
   return (
     <div className="flex flex-col gap-3">
@@ -108,12 +114,27 @@ export function LedgerTable({
           : ''}
         confirm={words.reverseConfirm}
         pending={write.pending}
-        failure={write.error}
+        failure={write.error ?? reverseReason}
         onCancel={() => setReversing(null)}
         onConfirm={() => {
           const row = reversing;
-          if (!row) return;
-          void write.run(() => ledgerApi.reverse(row.id)).then((ok) => {
+          if (!row || write.pending || reverseReason) return;
+          // A dialog left open across UTC midnight needs a newly read target.
+          if (reversalMonth(nowSec()) !== currentMonth) {
+            setReversing(null);
+            onChanged();
+            return;
+          }
+          void write.run(async () => {
+            try {
+              return await ledgerApi.reverse(row.id);
+            } catch (error) {
+              if (refusalCode(error) !== 'MONTH_CLOSED') throw error;
+              setReversing(null);
+              onChanged();
+              throw new Error(words.reverseRefused);
+            }
+          }).then((ok) => {
             if (ok) setReversing(null);
           });
         }}
@@ -125,6 +146,7 @@ export function LedgerTable({
 type Hooks = {
   nameOf: (row: LedgerEntryDto) => string;
   locked: boolean;
+  reverseReason: string | null;
   inMonth: (id: string) => boolean;
   onJump: (id: string) => void;
   onEditNote: (row: LedgerEntryDto) => void;
@@ -262,7 +284,7 @@ function ActionCell({ row, hooks }: { row: LedgerEntryDto; hooks: Hooks }) {
         {words.editNote}
       </Action>
       <Action
-        reason={reversed ? words.reversed : null}
+        reason={reversed ? words.reversed : hooks.reverseReason}
         onClick={() => hooks.onReverse(row)}
       >
         {words.reverse}

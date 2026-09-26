@@ -25,3 +25,4 @@
 - 剩余限制：**需部署 Worker 与全部节点的 exit-agent 才生效（本 PR 未部署）**。本改动部署前已停用、且停用期间再轮换令牌的节点
   没有存档哈希，仍会得到 401；退役节点（`revokeExitToken`）原本已覆盖。重新启用后 `revoked_token_hash` 保留旧值，启用期间不被读取，
   下次停用时覆盖。TF-opus-3 只改日志与文档，agent 不自动停启 Xray。
+- 续记 2026-09-26：#638 已合 main（merge 779b4876）。控制面与 admin Worker 从 main@57c1c64c 部署（含 `revoked_token_hash`，部署前未导出 D1）；13 个装 agent 的节点 exit-agent 换为 main@#638 版本（md5 b50edcbe…），后又换为 #641 版本（见该条目）；Tokyo·Sakura（148.135.183.152）SSH 超时未部署，「全部节点」的生效条件尚未满足。

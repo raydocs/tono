@@ -172,4 +172,11 @@ describe('ops roles', () => {
     expect((await ops('incidents/inc-1/ack', json({}))).status).toBe(200);
     expect((await ops('users/no-such-user', json({ notes: 'x' }, 'PATCH'))).status).not.toBe(403);
   });
+
+  it('viewer is refused on PATCH signup-allowlist/{id}', async () => {
+    bindRole('viewer');
+    const res = await ops('signup-allowlist/no-such-entry', json({ note: 'x' }, 'PATCH'));
+    expect(res.status).toBe(403);
+    expect(((await res.json()) as { error: { code: string } }).error.code).toBe('ROLE_FORBIDDEN');
+  });
 });

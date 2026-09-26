@@ -514,6 +514,9 @@ extension AccountSession {
             enterEntitlementBlock(detail: apiError.errorDescription)
             return
         }
+        // 535R-C-F3: a refusal heard during the cleanup below suspends the
+        // account; this older failure must not replace `.suspended`.
+        let refusals = entitlementRefusals
         let accountLost = signsOutOnUnauthorized
             && error as? TonoAPIClient.APIError == .unauthorized
         // Account loss purges synchronously before the first suspension point;
@@ -554,6 +557,7 @@ extension AccountSession {
             await api.logout(); clearAccount(); state = .signedOut
             shouldResumeProtection = resumeProtection
         } else {
+            guard entitlementRefusals == refusals else { return }
             // Leave kill switch armed if it was armed — prevents IP leak on failed reconnect.
             state = .error((error as? LocalizedError)?.errorDescription ?? String(localized: "Something went wrong. Please try again."))
         }
@@ -597,8 +601,10 @@ extension AccountSession {
         deviceActionError = nil
         entitlementDetail = nil
         blockedWhileReady = false
-        // An offline admission described the account just cleared (#582).
+        // An offline admission described the account just cleared (#582),
+        // and so did Tono's acceptance of its session (R612-O5).
         api.offlineGate.leaveOffline()
+        api.offlineGate.withdrawAcceptance()
         offlineVerifiedAt = nil
     }
 }

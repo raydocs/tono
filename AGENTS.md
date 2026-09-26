@@ -24,6 +24,10 @@ These conditions are the approval: when they hold, act; do not stop to ask.
   main's, never the PR's) run `node ~/.agents/skills/jev-route/scripts/route.mjs review --git origin/<baseRefName>...<headRefOid>`,
   run every slot it names (cross-vendor for protected paths: global list plus [.jev-route.json](.jev-route.json); a PR changing it gets
   dual_cross_family regardless), fix or refute every finding, and post decision id, slots and verification as a PR comment.
+  Stop rule (owner, 2026-09-26): only major or worse blocks. Minors get one fix round; any still open after it are recorded
+  open in `docs/findings.d/` (product defects) or in the PR body's limitations (engineering/test/docs items the ledger excludes),
+  then merge. At least major: loosening fail-closed PF/WFP, a leak, privilege escalation, cross-account mixing, or showing
+  protected when protection is released (the ledger's 高 impact).
 - No unresolved review threads (GraphQL `reviewThreads.isResolved`), no `CHANGES_REQUESTED`.
 - The merge order in the PR body ("Stacked on #N", "Merge after #N" or a `## Merge order` section)
   holds: wait for N; stacked PRs merge base-first, then `gh pr edit --base main`.
