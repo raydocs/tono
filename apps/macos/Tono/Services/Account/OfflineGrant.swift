@@ -154,6 +154,11 @@ nonisolated final class OfflineGrantGate: @unchecked Sendable {
     /// The grant this session was admitted on while no server answer has
     /// arrived yet. Nil online.
     private var admittedGrant: OfflineGrant?
+    /// Tono accepted this session in this process, and no restore has
+    /// failed to verify it since: a 2xx answer, `me()` accepting the account,
+    /// or a sign-in. Without it only an offline admission lets Connect dial
+    /// (R612-O5).
+    private var acceptedOnline = false
     /// The newest revocation the disk has not acknowledged.
     private var pendingTombstone: OfflineGrantRecord?
     private var tombstoneWriterRunning = false
@@ -211,6 +216,7 @@ nonisolated final class OfflineGrantGate: @unchecked Sendable {
         lock.lock(); defer { lock.unlock() }
         revocation = .eligible
         admittedGrant = nil
+        acceptedOnline = true
     }
 
     /// `me()` accepted the account again (a launch, Check again): a refusal
@@ -221,6 +227,15 @@ nonisolated final class OfflineGrantGate: @unchecked Sendable {
         lock.lock(); defer { lock.unlock() }
         if revocation != .eligible { pendingTombstone = nil }
         revocation = .eligible
+        acceptedOnline = true
+    }
+
+    /// A restore could not verify this session (R612-O5): an acceptance
+    /// heard earlier in this process no longer lets Connect dial. A new
+    /// server acceptance or an offline admission does.
+    func restoreUnverified() {
+        lock.lock(); defer { lock.unlock() }
+        acceptedOnline = false
     }
 
     /// Offline admission (#582): compare the grant with what is in memory
@@ -260,13 +275,20 @@ nonisolated final class OfflineGrantGate: @unchecked Sendable {
     /// any state, and an offline session must still hold exactly the catalog
     /// its grant verified. The token is not compared again: offline nothing
     /// rotates it, and a renewal that could is a server answer that ended
-    /// offline mode.
+    /// offline mode. A session neither accepted online nor admitted offline
+    /// (a launch still restoring, a restore that failed without a grant) is
+    /// refused too, so a reconnect never dials the cached catalog on it
+    /// (R612-O5).
     func connectRefusal(catalogDigest: String?, routingToken: String?) -> String? {
         lock.lock(); defer { lock.unlock() }
         if revocation != .eligible {
             return String(localized: "Tono did not accept this session. Connect stays blocked until Tono verifies it again.")
         }
-        guard let grant = admittedGrant else { return nil }
+        guard let grant = admittedGrant else {
+            return acceptedOnline
+                ? nil
+                : String(localized: "Tono has not verified this account. Connect stays blocked until Tono verifies it.")
+        }
         guard grant.catalogSha256 == catalogDigest, grant.routingSha256 == routingToken else {
             return String(localized: "The cloud servers no longer match what Tono last verified. Connect again when Tono is reachable.")
         }
@@ -300,6 +322,7 @@ nonisolated final class OfflineGrantGate: @unchecked Sendable {
         var refused = false
         switch verdict {
         case .verified:
+            acceptedOnline = true
             // The lifted 403's tombstone, if the disk has not taken it yet,
             // is stale: it must not land over a grant recorded after this.
             if revocation == .forbidden {
