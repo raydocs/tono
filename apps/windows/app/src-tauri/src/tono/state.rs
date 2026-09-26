@@ -222,11 +222,6 @@ pub struct TonoInner {
     /// Generation of the current email-auth transaction. Starting/resending, signing out, or
     /// replacing a challenge invalidates network responses from every older transaction.
     pub sign_in_generation: u64,
-    /// The sign-in generation whose session marker no stored session backs yet: it wrote the
-    /// marker pending ([`crate::tono::credentials::SignInMarker::Created`]) and has neither stored
-    /// its session nor removed the marker. Until then the marker is that sign-in's to commit or
-    /// undo, not ownership this machine held.
-    pub sign_in_marker_pending: Option<u64>,
     pub installation_id: String,
     pub catalog_tracker: CatalogTracker,
     /// Directory holding `managed-exit-catalog.json` (`app_home_dir()/tono`).
@@ -602,7 +597,6 @@ impl TonoState {
                 account: None,
                 challenge_id: None,
                 sign_in_generation: 0,
-                sign_in_marker_pending: None,
                 installation_id,
                 catalog_tracker: CatalogTracker::new(),
                 catalog_dir,

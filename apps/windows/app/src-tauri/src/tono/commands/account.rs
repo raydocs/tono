@@ -339,7 +339,7 @@ pub(crate) async fn begin_sign_in(
     Ok((inner.client.clone(), inner.installation_id.clone(), inner.sign_in_generation))
 }
 
-/// The caller has already written this sign-in's session marker pending, and commits it once the
+/// The caller has already written this sign-in's session marker pending; it commits once the
 /// session is durable ([`adopt_replacing_with`]). An error here means no session was stored.
 pub(crate) async fn adopt_sign_in_response(
     state: &Arc<TonoState>, client: &Arc<crate::tono::state::TonoApiClient>,
@@ -364,8 +364,8 @@ pub(crate) async fn adopt_sign_in_response(
     inner.attempt_history = Default::default();
     // Keep the Tono state lock through adoption: a resend/sign-out cannot invalidate this
     // generation between the last check and the token write.
-    // The refresh token is in memory and its vault write is only queued: the caller commits the
-    // marker once that write is durable.
+    // The refresh token is in memory and its vault write is only queued: the marker commits once
+    // that write is durable ([`commit_marker_when_durable`]).
     client.adopt(auth).await.map_err(|err| err.to_string())?;
     // tono-core has retired the previous identity: its verdicts no longer apply (#582).
     inner.offline.adopt_new_identity();
@@ -381,9 +381,50 @@ pub(crate) async fn adopt_sign_in_response(
     Ok(info)
 }
 
-/// How long a sign-in waits for its refresh token to reach the vault before it reports the sign-in
-/// as not saved ([`adopt_replacing_with`]).
-const SIGN_IN_SAVE_TIMEOUT: Duration = Duration::from_secs(5);
+/// How long one wait for the vault writer's acknowledgement may take ([`commit_marker_when_durable`]).
+const SIGN_IN_SAVE_TIMEOUT: Duration = Duration::from_secs(10);
+/// How many times a sign-in's marker commit waits for the vault before it gives up. The waits back
+/// off from [`SIGN_IN_SAVE_FIRST_RETRY`], doubling: a few minutes in all.
+const SIGN_IN_SAVE_ATTEMPTS: u32 = 6;
+const SIGN_IN_SAVE_FIRST_RETRY: Duration = Duration::from_secs(5);
+
+/// Commits sign-in `generation`'s pending marker once its refresh token is durable in the vault
+/// (the vault writer acknowledges every earlier write:
+/// [`crate::tono::credentials::SessionCredentialStore::flush`]). Detached from the sign-in, so a
+/// slow or failing vault never holds it up. A marker that never commits stays pending, and the next
+/// launch asks for a sign-in.
+async fn commit_marker_when_durable(state: Arc<TonoState>, generation: u64) {
+    let credentials = Arc::clone(&state.lock().await.credentials);
+    let mut retry = SIGN_IN_SAVE_FIRST_RETRY;
+    for attempt in 1..=SIGN_IN_SAVE_ATTEMPTS {
+        let durable = match tokio::time::timeout(SIGN_IN_SAVE_TIMEOUT, credentials.flush()).await {
+            Ok(flushed) => flushed.map_err(|error| format!("the session is not durable: {error}")),
+            Err(_) => Err(format!("the vault did not acknowledge within {SIGN_IN_SAVE_TIMEOUT:?}")),
+        };
+        let committed = match durable {
+            Ok(()) => {
+                let inner = state.lock().await;
+                // `false`: a newer sign-in replaced the marker, and it is that sign-in's to commit.
+                crate::tono::credentials::commit_sign_in_marker(&inner.catalog_dir, generation)
+                    .map_err(|error| format!("the marker was not rewritten: {error}"))
+            }
+            Err(error) => Err(error),
+        };
+        match committed {
+            Ok(_) => return,
+            Err(error) => {
+                logging!(warn, Type::Service,
+                    "Tono: sign-in session marker not committed (attempt {attempt}/{SIGN_IN_SAVE_ATTEMPTS}): {error}");
+            }
+        }
+        if attempt < SIGN_IN_SAVE_ATTEMPTS {
+            tokio::time::sleep(retry).await;
+            retry *= 2;
+        }
+    }
+    logging!(warn, Type::Service,
+        "Tono: the sign-in session marker stays pending; the next launch asks to sign in again");
+}
 
 /// Adopt a verified sign-in that may replace an account which never signed out. A tunnel still
 /// running (or starting, or releasing) the previous account's runtime is retired first with
@@ -399,31 +440,25 @@ where
     R: FnOnce(Arc<TonoState>) -> RF,
     RF: std::future::Future<Output = Result<(), String>>,
 {
-    let retire = {
+    let (retire, marker) = {
         let mut inner = state.lock().await;
         if inner.sign_in_generation != generation || inner.challenge_id.as_deref() != Some(challenge_id) {
             return Err("sign-in verification was superseded by a newer attempt".to_string());
         }
-        // The session marker before anything this sign-in cannot undo (retiring the previous
-        // account's connection, dropping its catalog): a marker that cannot be written refuses
-        // the sign-in with protection and the previous account untouched.
-        let pending = inner.sign_in_marker_pending.is_some();
-        let marker = crate::tono::credentials::record_sign_in_marker(&inner.catalog_dir, generation, pending).map_err(|error| {
+        // The pending session marker before anything this sign-in cannot undo (retiring the
+        // previous account's connection, dropping its catalog): a marker that cannot be written
+        // refuses the sign-in with protection and the previous account untouched.
+        let marker = crate::tono::credentials::record_sign_in_marker(&inner.catalog_dir, generation).map_err(|error| {
             logging!(warn, Type::Service, "Tono: {error}");
             error
         })?;
-        if marker == crate::tono::credentials::SignInMarker::Created {
-            // Until this sign-in commits the marker behind a durable session or removes it, the
-            // marker is its own.
-            inner.sign_in_marker_pending = Some(generation);
-        }
         let status = inner.fsm.status();
         let live = status.is_connected || status.is_connecting || status.is_disconnecting;
         if live {
             inner.invalidate_connection(true);
             inner.cancel_server_tests();
         }
-        live
+        (live, marker)
     };
     let released = if retire {
         release(Arc::clone(state)).await.map_err(|error| {
@@ -436,54 +471,18 @@ where
         Ok(()) => adopt_sign_in_response(state, client, generation, challenge_id, auth, emit).await,
         Err(error) => Err(error),
     };
-    let info = match adopted {
-        Ok(info) => info,
-        Err(error) => {
-            // No session was stored, so a marker this sign-in created must not vouch for what the
-            // vault already held, even when a newer sign-in or restore superseded it. Kept only
-            // when a newer sign-in took the marker over: that one commits or removes it.
-            let mut inner = state.lock().await;
-            if inner.sign_in_marker_pending == Some(generation)
-                && crate::tono::credentials::undo_sign_in_marker(&inner.catalog_dir)
-            {
-                inner.sign_in_marker_pending = None;
-            }
-            return Err(error);
-        }
-    };
-    // `client.adopt` only queued the refresh token's vault write. The marker vouches for the
-    // session only once that write is durable; awaited without the state lock, as account close
-    // awaits it.
-    let credentials = Arc::clone(&state.lock().await.credentials);
-    let durable = match tokio::time::timeout(SIGN_IN_SAVE_TIMEOUT, credentials.flush()).await {
-        Ok(flushed) => flushed.map_err(|error| error.to_string()),
-        Err(_) => Err(format!("the credential store did not answer within {SIGN_IN_SAVE_TIMEOUT:?}")),
-    };
-    let mut inner = state.lock().await;
-    let saved = match durable {
-        Ok(()) if inner.sign_in_marker_pending == Some(generation) => {
-            let marker_dir = inner.catalog_dir.clone();
-            let committed = crate::tono::credentials::commit_sign_in_marker(&marker_dir)
-                .or_else(|_| crate::tono::credentials::commit_sign_in_marker(&marker_dir));
-            if committed.is_ok() {
-                inner.sign_in_marker_pending = None;
-            }
-            committed.map_err(|error| format!("the session marker was not committed: {error}"))
-        }
-        // A committed marker this machine already held vouches as it is (`Existing`); one a newer
-        // sign-in took over is that sign-in's to commit or remove.
-        Ok(()) => Ok(()),
-        Err(error) => Err(error),
-    };
-    drop(inner);
-    // Not saved: the marker stays pending, so the next launch asks for a sign-in instead of
-    // vouching for whatever the vault holds. This process keeps the adopted session; nothing is
-    // signed out or released here.
-    saved.map(|()| info).map_err(|error| {
-        let error = format!("TONO_SIGN_IN_NOT_SAVED: this sign-in was not saved on this PC, so the next launch asks to sign in again: {error}");
-        logging!(warn, Type::Service, "Tono: {error}");
-        error
-    })
+    if adopted.is_ok() {
+        // `client.adopt` only queued the refresh token's vault write: the marker commits once that
+        // write is durable, without holding up this sign-in.
+        tokio::spawn(commit_marker_when_durable(Arc::clone(state), generation));
+    } else {
+        // No session was stored. A marker this sign-in created is removed, unless a newer sign-in
+        // replaced it; one that replaced an existing marker stays pending, so the next launch asks
+        // for a sign-in.
+        let inner = state.lock().await;
+        crate::tono::credentials::undo_sign_in_marker(&inner.catalog_dir, generation, marker);
+    }
+    adopted
 }
 
 /// Sign out: bump the connect generation and abort every background task

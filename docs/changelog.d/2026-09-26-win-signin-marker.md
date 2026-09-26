@@ -81,3 +81,25 @@
   落库超时、改写失败的重试、被接管时的分支没有单元测试覆盖。MacBook 未运行 cargo，以 PR #642 的 windows-ci 为准。
   剩余限制更新：落库失败、超时或改写失败时，本进程仍以该账户登录，但下次启动需重新登录，并按上述无归属会话路径处理（含已存防护的释放）；
   超时后写入才落库时标记仍为待定，同样下次需重新登录。标记为已提交之后的换令牌写入失败，不在本 PR 范围内。
+- **续记（2026-09-26，#642 评审 44d47166 确认 opus:F1 / codex:F2（major）、opus:F2、codex:F1（minor））**：上一条的「adopt 之后失败即返回
+  `TONO_SIGN_IN_NOT_SAVED`」设计有误（协调方设计，已撤回）：返回错误时 `adopt_sign_in_response` 已接纳会话、丢弃目录、置为 Ready 并广播，
+  调用方的 `?` 跳过首次目录/策略同步、周期任务与 SignInOk 审计，留下没有出口的半登录状态，前端又因 Ready 离开登录页，看不到重试提示（major）；
+  换账户时已有已提交标记，新账户写库失败则库里仍是旧账户的令牌，已提交标记让下次启动静默恢复旧账户，与错误文案相反（opus:F2）；
+  落库成功但改写两次失败时合法会话只剩待定标记（codex:F1）。现在：① 登录的标记步骤（仍在任何释放/丢弃之前）一律写入 `pending:<代次>`，
+  已有已提交或旧格式标记时也改写（更严：换账户失败不得静默恢复上一账户，代价是重新登录）；写不进仍在释放/丢弃之前拒绝。
+  登录失败时：标记原本不存在（`Created`）且仍是本次写的待定标记则删除；原本已有标记（`Existing`）则不恢复，保持待定，下次启动需重新登录。
+  ② adopt 之后不再让登录失败，也不阻塞命令：正常走完成功路径（Ready、首次同步、周期任务、SignInOk 审计），另起后台任务
+  `commit_marker_when_durable` 等待 `SessionCredentialStore::flush()`（每次上限 10 秒，最多 6 次，间隔从 5 秒起倍增，约 3 分钟内），
+  落库成功且标记仍为 `pending:<本次代次>` 时才改写为已提交；每次失败记日志，始终不成功则标记保持待定，下次启动需重新登录（安全方向）。
+  ③ 删除 adopt 之后的 `TONO_SIGN_IN_NOT_SAVED` 返回，该错误只剩 adopt 之前写标记失败的拒绝。标记归属改由文件内容 `pending:<代次>` 判定，
+  内存中的 `TonoInner.sign_in_marker_pending` 已删除；`record_sign_in_marker` 不再需要 pending 参数。
+  已有测试 `a_sign_in_whose_local_marker_cannot_be_written_is_refused` 的第三项随设计改为：已有标记时写不进同样拒绝，写入则为 `Existing`。
+  启动时待定标记的去向不变（见上一条）：走 main 既有的无归属会话路径（NoToken：`client.logout()`，Service 报告 Armed 时释放已存防护）。
+  测试：上一条的测试改名为 `tono::commands::account::lifecycle_tests::a_sign_in_whose_session_never_lands_in_the_vault_leaves_its_marker_pending`，
+  并在前置条件中加入上一账户的已提交标记（换账户情形）：凭据库拒绝写入时登录返回成功，下次启动的归属判定为 `NotOwned`；红分支
+  `wip/win-signin-marker-20260926-red5`（`008cfaba`，基于 `2809087b`，仅测试，windows-ci run 36217858913）。上一轮红分支 run 36216963614、
+  36215718981 均以断言失败，`2809087b` 的 windows-ci 通过（已核对：run 36217064878、36217067192）。后台提交的重试、被新登录替换时的跳过、失败后保持待定没有单元测试覆盖。
+  MacBook 未运行 cargo，以 PR #642 的 windows-ci 为准。
+  剩余限制更新：换账户登录在 adopt 之前失败（释放失败、被取代、`client.adopt` 失败），上一账户的已提交标记已被改为待定且不恢复，
+  本进程仍以上一账户运行，但下次启动需重新登录，并走上述无归属会话路径（含已存防护的释放）；后台提交在约 3 分钟内未成功（写库被拒或持续超时）
+  或提交前进程退出，下次启动同样需重新登录。
