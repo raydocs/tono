@@ -19,16 +19,16 @@ use super::controller::{
     allocate_runtime_ports, configure_owned_controller_for_ui, lock_kill_switch_with_retries, preflight_bfe,
     preflight_dns_listener, wait_controller,
 };
+use super::direct::{CapturedTrafficPolicy, WINDOWS_OPTIONAL_DIRECT_ENABLED, spawn_optional_direct_after_connected};
 use super::endpoints::proxy_endpoint_of;
 use super::monitor::{
     bootstrap_hosts, refresh_control_plane_pins_from_service, spawn_control_plane_pin_refresh,
     spawn_exit_identity_lookup, spawn_network_monitor,
 };
+use super::platform::{detect_physical_interface, wait_for_tun_route_ready, write_redacted_copy};
 use super::probes::{verify_fake_ip, verify_post_lock};
-use super::status::set_stage;
-use super::direct::{CapturedTrafficPolicy, WINDOWS_OPTIONAL_DIRECT_ENABLED, spawn_optional_direct_after_connected};
-use super::platform::{detect_physical_interface, write_redacted_copy};
 use super::reconnect::active_runtime_resume_status;
+use super::status::set_stage;
 use super::{failure::StageFailure, transaction::ConnectTransaction};
 use crate::{
     core::service,
@@ -282,6 +282,14 @@ pub(super) async fn run_stages(
         .await?;
     controller_ready.map_err(StageFailure::error)?;
     lock_ready.map_err(StageFailure::error)?;
+
+    // The Service can resolve and permit the virtual adapter as soon as its alias exists, while
+    // Windows is still bringing it up and Mihomo has not installed the protected routes. Keep the
+    // DNS snapshot unchanged until the effective routes select the active Tono interface.
+    transaction
+        .wait("waiting for protected TUN route", wait_for_tun_route_ready())
+        .await?
+        .map_err(StageFailure::error)?;
 
     // Optional DIRECT is applied only after Connected. The critical path stays full-tunnel.
 
