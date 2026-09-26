@@ -17,7 +17,10 @@
   新增 `#[tokio::test]` `catalog_sync_publishes_status_before_releasing_the_state_lock`（发布闭包里检查状态锁仍被持有）；
   `#[test]` `refusal_dialog_does_not_promise_protection_across_a_service_generation_change`（两次在线读数代际 4/6 →
   `Unconfirmed`，同代 → `Held`）。红分支只含测试和两个保持 main 行为的骨架（解锁后发布；只按第一次读数分类）。
-- 验证：本地未跑 cargo/Tauri（MacBook 不是构建机）；以 hosted Windows CI（`windows-ci.yml` app-rust 任务）为准，
-  run 编号与结果记在 #656。
+- 验证：本地未跑 cargo/Tauri（MacBook 不是构建机）；以 hosted Windows CI（`windows-ci.yml` app-rust 任务）为准。
+  红分支 `a4d5885a` run [36227715136](https://github.com/raydocs/tono/actions/runs/36227715136)：app-rust 551 过、2 败，
+  失败的正是两个新测试且都按断言失败（`Some(false)` 对 `Some(true)`；`Held` 对 `Unconfirmed`）。修复分支 run 编号与结果记在 #656。
+  红分支骨架向发布闭包传 `TonoStatus`，测试因此调用 `status_of`，触发的更新日志后台读取在 worker 线程报
+  「App handle not initialized」；修复分支改为传 `&TonoInner`（与 `close_account_with` 的 `emit` 相同），测试不再调用 `status_of`。
 - 候选/发布：仅源码，无新候选。
 - 剩余限制：未实机复现两处交错；Service 快照本身仍分两次采样（未改协议），拒绝框靠两次读数的代际比较收窄；`/status` 读不到时仍为「未确认」。

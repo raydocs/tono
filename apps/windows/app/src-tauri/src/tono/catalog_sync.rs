@@ -237,8 +237,10 @@ async fn sync_once_inner(state: &Arc<TonoState>, app: &AppHandle, auth_generatio
     let response = client.exit_catalog().await.map_err(SyncFailure::from_api)?;
 
     let (selection_vanished, server_confirmed) =
-        commit_fetched_catalog(state, auth_generation, &response, |snapshot| commands::emit_status(app, snapshot))
-            .await?;
+        commit_fetched_catalog(state, auth_generation, &response, |inner| {
+            commands::emit_status(app, &commands::status_of(inner));
+        })
+        .await?;
 
     if let Some(generation) = selection_vanished {
         if state.lock().await.sign_in_generation == auth_generation {
@@ -265,7 +267,7 @@ async fn commit_fetched_catalog<P>(
     publish: P,
 ) -> Result<(Option<u64>, bool), SyncFailure>
 where
-    P: FnOnce(&commands::TonoStatus) + Send,
+    P: FnOnce(&TonoInner) + Send,
 {
     let mut inner = state.lock().await;
     if inner.sign_in_generation != auth_generation {
@@ -298,7 +300,7 @@ where
     // H16-C-F3: publish before the unlock. Sign-out bumps the generation and publishes its final
     // status under this lock, so a snapshot published after the unlock could overwrite it.
     if emit {
-        publish(&commands::status_of(&inner));
+        publish(&inner);
     }
     drop(inner);
     Ok((vanished, emit))
