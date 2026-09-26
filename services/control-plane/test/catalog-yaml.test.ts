@@ -109,6 +109,40 @@ describe('catalog hy2 contract', () => {
     expect(relistedHy2.yaml.match(/\{\{TONO_CLIENT_UUID\}\}/g)).toHaveLength(3);
   });
 
+  it('admits an optional block-style SPKI pin of exactly 32 bytes on hysteria2 blocks only', () => {
+    const pin = 'q6urq6urq6urq6urq6urq6urq6urq6urq6urq6urq6s=';
+    const vless = (extra: string[] = []) => [
+      '  - name: Tokyo · Sakura',
+      '    type: vless',
+      '    server: 203.0.113.60',
+      '    port: 443',
+      '    uuid: {{TONO_CLIENT_UUID}}',
+      ...extra,
+    ].join('\n');
+    const hy2 = (value: string) => [
+      '  - name: Tokyo · Sakura · hy2',
+      '    type: hysteria2',
+      '    server: 203.0.113.60',
+      '    port: 443',
+      '    password: {{TONO_CLIENT_UUID}}',
+      '    sni: www.microsoft.com',
+      '    fingerprint: e3aa4a745aa90539ab1a493d940eeba7b4305b7516ab84167e46c98ad9fed3db',
+      `    certificate-public-key-sha256: ${value}`,
+    ].join('\n');
+    const catalog = (...blocks: string[]) => ['proxies:', ...blocks].join('\n') + '\n';
+    const pinned = catalog(vless(), hy2(pin));
+    expect(managedCatalogYAML(pinned)).toBe(pinned);
+    expectInvalidCatalog(catalog(vless(), hy2('q6urq6urq6urq6urq6urq6urq6urq6urq6urq6urqw==')));
+    expectInvalidCatalog(catalog(vless(), hy2('e3aa4a745aa90539ab1a493d940eeba7b4305b7516ab84167e46c98ad9fed3db')));
+    expectInvalidCatalog(catalog(vless([`    certificate-public-key-sha256: ${pin}`]), hy2(pin)));
+    expectInvalidCatalog(catalog(
+      vless(),
+      '  - {name: Tokyo · Sakura · hy2, type: hysteria2, server: 203.0.113.60, port: 443, '
+        + 'password: {{TONO_CLIENT_UUID}}, sni: www.microsoft.com, '
+        + `fingerprint: e3aa4a745aa90539ab1a493d940eeba7b4305b7516ab84167e46c98ad9fed3db, certificate-public-key-sha256: ${pin}}`,
+    ));
+  });
+
   it('hides hy2 blocks and group members unless the viewer is on the gray list', () => {
     const yaml = [
       'proxies:',

@@ -38,6 +38,23 @@ final class SingBoxConfigTests: XCTestCase {
         }
     }
 
+    /// A managed hy2 block read by the production catalog parser, so the
+    /// published key name is part of what the test pins.
+    private func catalogHY2(name: String, server: String, spki: String) throws -> ProxyNode {
+        let yaml = """
+        proxies:
+          - name: \(name)
+            type: hysteria2
+            server: \(server)
+            port: 443
+            password: 11111111-1111-4111-8111-111111111111
+            sni: exit.example.com
+            fingerprint: \(String(repeating: "ab", count: 32))
+            certificate-public-key-sha256: "\(spki)"
+        """
+        return try XCTUnwrap(ConfigParser.parseSubscription(yaml).first)
+    }
+
     private func snapshot(_ object: [String: Any], identity: String = "synthetic-owner",
                           status: Snapshot.Status = .syntheticOfflineOnly) throws -> Snapshot {
         let data = try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
@@ -204,7 +221,27 @@ final class SingBoxConfigTests: XCTestCase {
         XCTAssertEqual(value.dialEndpoints, [.init(host: "2.0.0.1", port: 8443, transport: "tcp")])
     }
 
-    func testProductRuntimePreservesHomeDirectAndRejectsPinnedHY2() throws {
+    func testHY2WithPublishedSPKIPinGetsPinnedSingBoxOutbound() throws {
+        let spki = Data(repeating: 0xab, count: 32).base64EncodedString()
+        var values = try nodes()
+        let hy2 = try catalogHY2(name: "Fixture Alpha · hy2", server: values[0].server, spki: spki)
+        XCTAssertNil(ConfigPipeline.singBoxUnavailableReason(hy2))
+        values.append(hy2)
+        let overlay = ConfigPipeline.OverlayConfig(mixedPort: 29190,
+            externalController: "127.0.0.1:29191", secret: secret, tunEnabled: true,
+            selectedNodeName: hy2.name)
+        let result = try ConfigPipeline.buildSingBoxRuntime(overlay: overlay, nodes: values, directPlan: nil)
+        XCTAssertEqual(result.unavailableNodes, [:])
+        XCTAssertEqual(result.dialEndpoints, [.init(host: values[0].server, port: 443, transport: "udp")])
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: result.runtimeJSON) as? [String: Any])
+        let outbounds = try XCTUnwrap(json["outbounds"] as? [[String: Any]])
+        let outbound = try XCTUnwrap(outbounds.first { $0["tag"] as? String == hy2.name })
+        XCTAssertEqual(outbound["tls"] as? NSDictionary, [
+            "enabled": true, "server_name": "exit.example.com", "certificate_public_key_sha256": [spki],
+        ] as NSDictionary)
+    }
+
+    func testProductRuntimePreservesHomeDirectAndRejectsHY2WithoutSPKIPin() throws {
         var overlay = ConfigPipeline.OverlayConfig(mixedPort: 29190,
             externalController: "127.0.0.1:29191", secret: secret, tunEnabled: true,
             selectedNodeName: "Fixture Beta", claudeHomeNodeName: "Fixture Alpha")
@@ -219,6 +256,9 @@ final class SingBoxConfigTests: XCTestCase {
         hy2.password = "11111111-1111-4111-8111-111111111111"
         hy2.tlsFingerprint = String(repeating: "ab", count: 32)
         values.append(hy2)
+        // Pinned sibling: its outbound reaches the bytes the fixed core checks below.
+        values.append(try catalogHY2(name: "Fixture Beta · hy2", server: values[1].server,
+                                     spki: Data(repeating: 0xcd, count: 32).base64EncodedString()))
         // Hosted CI has no reviewed app installed; supply the discovered path.
         ConfigPipeline.managedDirectBundlePathsOverride = ["/Applications/WeChat.app/"]
         defer { ConfigPipeline.managedDirectBundlePathsOverride = nil }
