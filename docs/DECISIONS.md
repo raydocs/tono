@@ -25,7 +25,10 @@ may reverse), `reversed` (keep the line; say what replaced it).
   Customer feeds stay untouched until G1–G3 are ticked. Rejected: testing G3 only after
   publish, a second device round.
 - Why: owner, 2026-09-26 in chat; conditional on the plan review confirming no shipped build
-  reads the pointer.
+  reads the pointer. The kit's own builds do read it (NativeUpdateDownload.swift:5,15;
+  update_wire.rs:5), so the pointer is left on the kit's success-target package, which is the
+  exact candidate the owner accepts and G4 publishes; nothing else is placed behind it before
+  G4, and the kit's release sequences are the ones the published build continues from.
 - Applied in: G1–G3 test kit (this session).
 
 ## 2026-09-26 · May the agent approve the `windows-release` environment for test-kit signing?
@@ -44,17 +47,6 @@ may reverse), `reversed` (keep the line; say what replaced it).
   redesign rejected five times in plan review.
 - Why: owner, 2026-09-26. Not a regression (present since 0.0.67); reach is limited to
   shared control-plane anycast addresses while Protected Offline.
-
-## 2026-09-26 · Does #352 (Windows Service binds to the installed Tono image) go into the 0.0.73 kit?
-
-- Status: provisional
-- Chosen: no. #352 stays open until the owner's Win11 `icacls` / owner evidence; the kit's
-  checklist carries that step and #352 merges for 0.0.74 when it matches. 0.0.73 ships H2-F3
-  (ordinary IPC not bound to the Tono image) as a known limitation. Rejected: merging #352
-  without the evidence — if the device ACL differs from its model, it refuses every
-  protection lifecycle route and the Windows test round is void.
-- Why stricter for availability: no Windows customer loses the ability to connect on an
-  unverified ACL model; H2-F3 is not a regression.
 
 ## 2026-09-26 · Windows: which vault session does the next launch trust after a sign-in that did not finish saving?
 
