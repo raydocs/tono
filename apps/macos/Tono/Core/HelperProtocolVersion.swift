@@ -219,10 +219,12 @@ nonisolated enum HelperProtocolVersion {
     ///   drops that DNS report and, restarting in a loop, leaks one token per
     ///   start.
     /// - 4.47.0 → 4.48.0: every command the helper runs (`pfctl`, the
-    ///   relay-map `curl`) has a 15 s deadline; past it the child gets SIGTERM,
-    ///   then SIGKILL, and the call fails like any other command failure. A
-    ///   4.47.0 daemon waits on a wedged `pfctl` forever, holding its single
-    ///   request thread and with it `/core/stop`.
+    ///   relay-map `curl`) has a 15 s deadline, 3 s for a read-only `pfctl`
+    ///   query; past it the child gets SIGTERM, then SIGKILL, and the call
+    ///   fails like any other command failure. A query with no answer is never
+    ///   read as "no": it stops the chain, and nothing is released, forgotten
+    ///   or disabled on it. A 4.47.0 daemon waits on a wedged `pfctl` forever,
+    ///   holding its single request thread and with it `/core/stop`.
     static let current = "4.48.0"
 }
 

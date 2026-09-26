@@ -551,6 +551,10 @@ extension KillSwitchManager {
         standaloneMain: Bool = false
     ) throws {
         let mainChanged = try standaloneMain ? false : ensureMainHook()
+        // Read only where it decides the load, as before. No answer fails the
+        // load rather than reading as a missing anchor.
+        var mainAnchorMissing = false
+        if !standaloneMain, !mainChanged { mainAnchorMissing = try !mainAnchorActive() }
         let loaded: HelperCommandResult
         if standaloneMain {
             try atomicWrite(
@@ -559,7 +563,7 @@ extension KillSwitchManager {
                 permissions: 0o600
             )
             loaded = try run("/sbin/pfctl", ["-f", killSwitchStandaloneMainPath])
-        } else if mainChanged || !mainAnchorActive()
+        } else if mainChanged || mainAnchorMissing
                     || FileManager.default.fileExists(atPath: killSwitchStandaloneMainPath) {
             // Installing/recovering the anchor point requires one main ruleset
             // load. Normal arm/reassert operations must not flush unrelated
@@ -613,7 +617,7 @@ extension KillSwitchManager {
                 )
             }
         }
-        guard effectiveStatus() else {
+        guard try effectiveStatus() else {
             throw HelperFailure.system("Kill Switch verification failed.")
         }
     }
@@ -628,37 +632,45 @@ extension KillSwitchManager {
         """
     }
 
-    static func pfEnabled() -> Bool {
-        guard let result = try? run("/sbin/pfctl", ["-s", "info"]),
-              result.status == 0,
-              let text = String(data: result.output, encoding: .utf8) else {
-            return false
-        }
+    /// Longest a read-only `pfctl` query (`-s`, `-sr`) may run. One answers
+    /// in tens of milliseconds. 3 s, plus the two 1 s waits for SIGTERM and
+    /// SIGKILL, keeps a query that meets a wedged `/dev/pf` to about 5 s, under
+    /// the app's default 6 s wait on a helper request. Loads, flushes, enable
+    /// and release keep `helperCommandDeadline`.
+    static let pfctlQueryDeadline: TimeInterval = 3
+
+    /// `pfctl`'s output for a read-only query, or nil when it answered with a
+    /// failure. Throws when it gave no answer at all (it could not start, or
+    /// ran past its deadline). That is no evidence of anything, so no caller
+    /// may release, forget or disable on it, and a chain of commands stops
+    /// there instead of waiting out one deadline per command (#639 review).
+    static func pfctlQuery(
+        _ arguments: [String],
+        deadline: TimeInterval = KillSwitchManager.pfctlQueryDeadline
+    ) throws -> String? {
+        let result = try run("/sbin/pfctl", arguments, deadline: deadline)
+        guard result.status == 0 else { return nil }
+        return String(data: result.output, encoding: .utf8)
+    }
+
+    static func pfEnabled() throws -> Bool {
+        guard let text = try pfctlQuery(["-s", "info"]) else { return false }
         return text.lowercased().contains("status: enabled")
     }
 
-    static func mainAnchorActive() -> Bool {
-        guard let result = try? run("/sbin/pfctl", ["-sr"]),
-              result.status == 0,
-              let text = String(data: result.output, encoding: .utf8) else {
-            return false
-        }
+    static func mainAnchorActive() throws -> Bool {
+        guard let text = try pfctlQuery(["-sr"]) else { return false }
         return text.contains("anchor \"\(killSwitchAnchor)\"")
     }
 
-    static func childAnchorActive() -> Bool {
-        guard let result = try? run(
-            "/sbin/pfctl",
-            ["-a", killSwitchAnchor, "-sr"]
-        ), result.status == 0,
-              let text = String(data: result.output, encoding: .utf8) else {
-            return false
-        }
+    static func childAnchorActive() throws -> Bool {
+        guard let text = try pfctlQuery(["-a", killSwitchAnchor, "-sr"]) else { return false }
         return text.lowercased().contains("block drop out quick all")
     }
 
-    static func effectiveStatus() -> Bool {
-        pfEnabled() && mainAnchorActive() && childAnchorActive()
+    static func effectiveStatus() throws -> Bool {
+        guard try pfEnabled(), try mainAnchorActive() else { return false }
+        return try childAnchorActive()
     }
 
     // MARK: - PF enable reference
@@ -675,6 +687,18 @@ extension KillSwitchManager {
         let boot: String
     }
 
+    /// A `pfctl -E` killed at its deadline. The kernel issues the token before
+    /// pfctl prints it, so the child may hold one that nothing recorded
+    /// (#639 review, opus:F2). `pfctl -s References` lists each token with the
+    /// PID that took it, so a later pass can still find this child's token.
+    struct PFEnableAcquire: Equatable {
+        let pid: pid_t
+        let boot: String
+    }
+
+    /// Held in memory only, like `unrecordedPFEnableReference`.
+    nonisolated(unsafe) static var unsettledPFEnableAcquire: PFEnableAcquire?
+
     /// PF stays enabled while any enable reference is held. Enabling it only
     /// when it was off meant this helper held none whenever something else had
     /// enabled PF first, so that program releasing its own token (`pfctl -X`)
@@ -687,25 +711,45 @@ extension KillSwitchManager {
     static func holdPFEnableReference(
         recordPath: String = killSwitchPFReferencePath
     ) throws {
-        if heldPFEnableReference(recordPath: recordPath) != nil { return }
+        if try heldPFEnableReference(recordPath: recordPath) != nil { return }
         guard let boot = try? TonoAuthenticatedPeer.bootSession() else {
             // Without a boot identity a token cannot be recorded safely, and
             // taking an unrecorded one on every check would leak references.
             // Keep the pre-reference behaviour for this unexpected case.
-            if !pfEnabled() { _ = try run("/sbin/pfctl", ["-e"]) }
-            guard pfEnabled() else { throw HelperFailure.system("PF enable failed.") }
+            if try !pfEnabled() { _ = try run("/sbin/pfctl", ["-e"]) }
+            guard try pfEnabled() else { throw HelperFailure.system("PF enable failed.") }
+            return
+        }
+        try settlePFEnableAcquire()
+        if unsettledPFEnableAcquire != nil {
+            // That `-E` may still be inside the kernel. Another would queue
+            // behind it and could leave a second token nothing can find, so
+            // hold PF on the kernel's anonymous reference meanwhile, as when
+            // no token can be recorded.
+            guard holdAnonymousPFEnableReference() else {
+                throw HelperFailure.system("PF enable failed.")
+            }
             return
         }
         let previous = readPFEnableReference(recordPath)
         let token: String
         if let pending = unrecordedPFEnableReference, pending.boot == boot,
-           pfEnabled(), pfEnableReferenceListed(pending.token) {
+           try pfEnabled(), try pfEnableReferenceListed(pending.token) {
             // A token from an earlier failed record write is still held.
             // Retry recording that one instead of taking another.
             token = pending.token
         } else {
             unrecordedPFEnableReference = nil
-            let acquired = try run("/sbin/pfctl", ["-E"])
+            var child: pid_t = 0
+            let acquired: HelperCommandResult
+            do {
+                acquired = try run("/sbin/pfctl", ["-E"], started: { child = $0 })
+            } catch {
+                // Found by its PID on a later pass, not listed now: another
+                // query here would wait behind the same pfctl.
+                if child > 0 { unsettledPFEnableAcquire = .init(pid: child, boot: boot) }
+                throw error
+            }
             guard acquired.status == 0,
                   let issued = parsePFEnableToken(String(decoding: acquired.output, as: UTF8.self))
             else {
@@ -745,8 +789,10 @@ extension KillSwitchManager {
             return
         }
         unrecordedPFEnableReference = nil
+        // The new token is held and recorded; a listing with no answer only
+        // leaves the previous one held.
         if let previous, previous.boot == boot, previous.token != token,
-           pfEnableReferenceListed(previous.token) {
+           (try? pfEnableReferenceListed(previous.token)) == true {
             _ = try? run("/sbin/pfctl", ["-X", previous.token])
         }
     }
@@ -761,39 +807,84 @@ extension KillSwitchManager {
               enabled.status == 0 || enabled.message.contains("already enabled") else {
             return false
         }
-        return pfEnabled()
+        return (try? pfEnabled()) == true
     }
 
     /// Releases the reference this helper recorded, if the kernel still holds
-    /// it in this boot, and forgets it either way. PF stops only if no other
-    /// program holds a reference, which is exactly the correct outcome.
+    /// it in this boot, and then forgets it. PF stops only if no other program
+    /// holds a reference, which is exactly the correct outcome.
+    ///
+    /// A token is forgotten only once pfctl has answered for it. Past a
+    /// listing or a `-X` that never reported back it may still be held, so
+    /// this throws and keeps the record (and any unrecorded token) for the
+    /// next arm to reuse or the next disarm to release (#639 review, opus:F2).
     static func releasePFEnableReference(
         recordPath: String = killSwitchPFReferencePath,
-        queryDeadline: TimeInterval = KillSwitchManager.helperCommandDeadline
-    ) {
-        if let held = readPFEnableReference(recordPath),
-           held.boot == (try? TonoAuthenticatedPeer.bootSession()),
-           pfEnableReferenceListed(held.token) {
-            _ = try? run("/sbin/pfctl", ["-X", held.token])
+        queryDeadline: TimeInterval = KillSwitchManager.pfctlQueryDeadline
+    ) throws {
+        let boot = try? TonoAuthenticatedPeer.bootSession()
+        try settlePFEnableAcquire(deadline: queryDeadline)
+        if let held = readPFEnableReference(recordPath), held.boot == boot,
+           try pfEnableReferenceListed(held.token, deadline: queryDeadline) {
+            _ = try run("/sbin/pfctl", ["-X", held.token])
         }
-        if let pending = unrecordedPFEnableReference,
-           pending.boot == (try? TonoAuthenticatedPeer.bootSession()),
-           pfEnableReferenceListed(pending.token) {
-            _ = try? run("/sbin/pfctl", ["-X", pending.token])
+        unlink(recordPath)
+        if let pending = unrecordedPFEnableReference, pending.boot == boot,
+           try pfEnableReferenceListed(pending.token, deadline: queryDeadline) {
+            _ = try run("/sbin/pfctl", ["-X", pending.token])
         }
         unrecordedPFEnableReference = nil
-        unlink(recordPath)
+    }
+
+    /// Settles a `pfctl -E` that ran past its deadline: its token, once
+    /// listed, becomes the unrecorded reference the next hold records and
+    /// disarm releases. A child that had left the kernel before the listing,
+    /// with no token under its PID, took none. While it may still be in the
+    /// kernel the question stays open. Throws when the listing gives no answer.
+    static func settlePFEnableAcquire(
+        deadline: TimeInterval = KillSwitchManager.pfctlQueryDeadline
+    ) throws {
+        guard let acquire = unsettledPFEnableAcquire else { return }
+        // Checked before listing, so a token issued as the child leaves is
+        // either in this listing or the child still counts as running.
+        let gone = kill(acquire.pid, 0) != 0 && errno == ESRCH
+        // Status ignored: with no token at all the kernel answers ENOENT.
+        let listed = try run("/sbin/pfctl", ["-s", "References"], deadline: deadline)
+        let listing = String(decoding: listed.output, as: UTF8.self)
+        if let token = pfEnableToken(takenBy: acquire.pid, in: listing) {
+            unrecordedPFEnableReference = .init(token: token, boot: acquire.boot)
+            unsettledPFEnableAcquire = nil
+        } else if gone {
+            unsettledPFEnableAcquire = nil
+        }
+    }
+
+    /// The token `pfctl -s References` lists for pfctl process `pid`, from its
+    /// `PID  Process Name  TOKEN  TIMESTAMP` rows.
+    static func pfEnableToken(takenBy pid: pid_t, in listing: String) -> String? {
+        for line in listing.split(separator: "\n") {
+            let words = line.split(whereSeparator: \.isWhitespace)
+            guard words.count >= 3, words[0] == String(pid), words[1] == "pfctl" else {
+                continue
+            }
+            let token = String(words[2])
+            if token.range(of: #"^[0-9]{1,20}$"#, options: .regularExpression) != nil {
+                return token
+            }
+        }
+        return nil
     }
 
     /// The recorded reference, only if it was issued in this boot and the
-    /// kernel still lists it. `pfctl -d` invalidates every token.
+    /// kernel still lists it. `pfctl -d` invalidates every token. Throws when
+    /// pfctl gives no answer.
     static func heldPFEnableReference(
         recordPath: String = killSwitchPFReferencePath
-    ) -> PFEnableReference? {
+    ) throws -> PFEnableReference? {
         guard let held = readPFEnableReference(recordPath),
               held.boot == (try? TonoAuthenticatedPeer.bootSession()),
-              pfEnabled(),
-              pfEnableReferenceListed(held.token) else { return nil }
+              try pfEnabled(),
+              try pfEnableReferenceListed(held.token) else { return nil }
         return held
     }
 
@@ -815,10 +906,11 @@ extension KillSwitchManager {
         return String(output[range])
     }
 
-    static func pfEnableReferenceListed(_ token: String) -> Bool {
-        guard let result = try? run("/sbin/pfctl", ["-s", "References"]),
-              result.status == 0,
-              let text = String(data: result.output, encoding: .utf8) else {
+    static func pfEnableReferenceListed(
+        _ token: String,
+        deadline: TimeInterval = KillSwitchManager.pfctlQueryDeadline
+    ) throws -> Bool {
+        guard let text = try pfctlQuery(["-s", "References"], deadline: deadline) else {
             return false
         }
         return text.split(whereSeparator: \.isWhitespace).contains { $0 == token }
@@ -964,7 +1056,8 @@ extension KillSwitchManager {
     static func run(
         _ executable: String,
         _ arguments: [String],
-        deadline: TimeInterval = KillSwitchManager.helperCommandDeadline
+        deadline: TimeInterval = KillSwitchManager.helperCommandDeadline,
+        started: (pid_t) -> Void = { _ in }
     ) throws -> HelperCommandResult {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: executable)
@@ -976,6 +1069,7 @@ extension KillSwitchManager {
         let exited = DispatchSemaphore(value: 0)
         process.terminationHandler = { _ in exited.signal() }
         try process.run()
+        started(process.processIdentifier)
         // Drained on its own thread, so a child that fills the pipe still
         // exits. The block holds the read end and the process until the
         // child's end closes, so a read abandoned below still finishes, frees

@@ -289,7 +289,11 @@ extension KillSwitchManager {
         let referenceRecord = FileManager.default.temporaryDirectory
             .appendingPathComponent("tono-lifecycle-pf.reference").path
         unlink(referenceRecord)
-        let startedEnabled = pfEnabled()
+        // A start state pfctl did not answer for reads as enabled, so nothing
+        // below may disable PF on it (#639 review, codex:F2).
+        let startedState = try? pfEnabled()
+        check("reference-start-state-read", startedState != nil)
+        let startedEnabled = startedState ?? true
         if let foreign = try? run("/sbin/pfctl", ["-E"]), foreign.status == 0,
            let foreignToken = parsePFEnableToken(
             String(decoding: foreign.output, as: UTF8.self)
@@ -297,18 +301,21 @@ extension KillSwitchManager {
             let held = (try? holdPFEnableReference(recordPath: referenceRecord)) != nil
             let recorded = readPFEnableReference(referenceRecord)
             check("reference-recorded", held && recorded != nil && recorded?.token != foreignToken)
-            check("reference-listed", recorded.map { pfEnableReferenceListed($0.token) } == true)
+            check(
+                "reference-listed",
+                recorded.map { (try? pfEnableReferenceListed($0.token)) == true } == true
+            )
             _ = try? run("/sbin/pfctl", ["-X", foreignToken])
-            check("reference-survives-foreign-release", pfEnabled())
+            check("reference-survives-foreign-release", (try? pfEnabled()) == true)
             try? holdPFEnableReference(recordPath: referenceRecord)
             check("reference-reused-while-live", readPFEnableReference(referenceRecord) == recorded)
-            releasePFEnableReference(recordPath: referenceRecord)
+            try? releasePFEnableReference(recordPath: referenceRecord)
             check(
                 "reference-released",
-                recorded.map { !pfEnableReferenceListed($0.token) } == true
+                recorded.map { (try? pfEnableReferenceListed($0.token)) == false } == true
                     && readPFEnableReference(referenceRecord) == nil
             )
-            check("reference-release-restores-pf", pfEnabled() == startedEnabled)
+            check("reference-release-restores-pf", (try? pfEnabled()) == startedEnabled)
         } else {
             check("reference-foreign-token", false)
         }
@@ -337,9 +344,9 @@ extension KillSwitchManager {
         check(
             "unrecorded-reference-not-kept",
             listedBefore != nil && listedAfter != nil
-                && listedAfter!.subtracting(listedBefore!).isEmpty && pfEnabled()
+                && listedAfter!.subtracting(listedBefore!).isEmpty && (try? pfEnabled()) == true
         )
-        releasePFEnableReference(recordPath: unwritableRecord)
+        try? releasePFEnableReference(recordPath: unwritableRecord)
         if !startedEnabled { _ = try? run("/sbin/pfctl", ["-d"]) }
 
         // 9c. A release must not forget a token it could not check (#639

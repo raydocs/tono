@@ -508,13 +508,25 @@ final class KillSwitchManager {
                 cleared.message.isEmpty ? "PF disarm failed." : cleared.message
             )
         }
-        guard !Self.childAnchorActive() else {
+        // A query with no answer throws here, before the intent or the PF
+        // reference goes: it is no evidence that the anchor is empty
+        // (#639 review, codex:F1).
+        guard try !Self.childAnchorActive() else {
             throw HelperFailure.system("PF child anchor remained active.")
         }
         try Self.removeStateIfPresent()
         // Only after the anchor is empty and the intent is gone. If no other
         // program holds a reference, PF stops, which is the pre-arm state.
-        Self.releasePFEnableReference()
+        // The kill switch is off either way; a release pfctl did not confirm
+        // keeps its record for the next arm to reuse or disarm to release.
+        do {
+            try Self.releasePFEnableReference()
+        } catch {
+            let detail = (error as? HelperFailure)?.message ?? String(describing: error)
+            FileHandle.standardError.write(Data(
+                "tono: PF enable reference kept, release unconfirmed: \(detail)\n".utf8
+            ))
+        }
         stateGeneration &+= 1
         lastLoadedPassRules = nil
         repairedSinceArm = false
@@ -527,7 +539,7 @@ final class KillSwitchManager {
 
         var wanted = false
         var healed = false
-        var live = Self.effectiveStatus()
+        var live = (try? Self.effectiveStatus()) ?? false
         do {
             if let state = try loadState() {
                 wanted = state.armed
@@ -537,7 +549,7 @@ final class KillSwitchManager {
                         try Self.writeRules(state: state, allowedUID: allowedUID)
                         try Self.ensureAnchorLoaded(flushStates: true)
                         lastLoadedPassRules = nil
-                        live = Self.effectiveStatus()
+                        live = (try? Self.effectiveStatus()) ?? false
                         // Persisted state deliberately omits session direct
                         // endpoints, so this heal reinstalled PF without them.
                         // The GUI must see that and re-arm with the live
@@ -554,7 +566,7 @@ final class KillSwitchManager {
                 if !live {
                     try? Self.installEmergencyBlock(allowedUID: allowedUID)
                     lastLoadedPassRules = nil
-                    live = Self.effectiveStatus()
+                    live = (try? Self.effectiveStatus()) ?? false
                     healed = true
                 }
             }
@@ -574,16 +586,28 @@ final class KillSwitchManager {
         guard Self.stateFileExists() else { return }
         lock.lock()
         defer { lock.unlock() }
-        var live = Self.effectiveStatus()
-        if !live {
-            // effectiveStatus() is three pfctl reads; any one failing or
-            // timing out once reads as "not filtering". A repair flushes every
-            // state on the machine and makes the app reconnect, so require a
-            // second read to agree first.
-            usleep(200_000)
-            live = Self.effectiveStatus()
+        let live: Bool
+        let referenced: Bool
+        do {
+            var filtering = try Self.effectiveStatus()
+            if !filtering {
+                // effectiveStatus() is three pfctl reads; any one failing once
+                // reads as "not filtering". A repair flushes every state on the
+                // machine and makes the app reconnect, so require a second
+                // read to agree first.
+                usleep(200_000)
+                filtering = try Self.effectiveStatus()
+            }
+            live = filtering
+            referenced = try Self.heldPFEnableReference() != nil
+        } catch {
+            // No answer says nothing about PF, and every further pfctl here
+            // would wait out its own deadline behind the same /dev/pf. Leave
+            // PF as it is and ask again at the next pass (#639 review).
+            let detail = (error as? HelperFailure)?.message ?? String(describing: error)
+            FileHandle.standardError.write(Data("tono: PF check skipped: \(detail)\n".utf8))
+            return
         }
-        let referenced = Self.heldPFEnableReference() != nil
         guard !live || !referenced else { return }
         do {
             guard let state = try loadState(), state.armed else { return }
@@ -605,8 +629,9 @@ final class KillSwitchManager {
         // app has to re-arm; the flag is how it finds out.
         lastLoadedPassRules = nil
         repairedSinceArm = true
+        let liveAfter = (try? Self.effectiveStatus()).map { String($0) } ?? "unknown"
         let message = "tono: kill switch was not filtering while armed; reinstalled "
-            + "(live: \(Self.effectiveStatus()))\n"
+            + "(live: \(liveAfter))\n"
         FileHandle.standardError.write(Data(message.utf8))
     }
 
@@ -618,7 +643,7 @@ final class KillSwitchManager {
         return [
             "ok": true,
             "wantArmed": Self.stateFileExists(),
-            "live": Self.effectiveStatus(),
+            "live": (try? Self.effectiveStatus()) ?? false,
             "repairedSinceArm": repairedSinceArm,
             "version": helperVersion,
         ]
