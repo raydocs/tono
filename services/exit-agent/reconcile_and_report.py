@@ -1013,6 +1013,12 @@ def reconcile(binary: Path, commands: dict[str, str], address: str, tag: str,
             # Like every other removal: reported with the rest, never a reason
             # to skip the revocations that follow.
             failures.append(f"removing {LEGACY_CLIENT_EMAIL} failed: {api_error(result)}")
+        elif result.returncode == 0 and (
+            commands["remove_user"] != "rmu"
+            or _total_at_least_one(_output_lines(result), "Removed")
+        ):
+            # Counted like the removals below; an already-absent client is not.
+            removed += 1
         if recorded is not None:
             recorded = recorded - {LEGACY_CLIENT_EMAIL}
     wanted = {
@@ -1599,15 +1605,22 @@ def run_once(path: Path) -> None:
                 keep_usage_locally(path, state, None, counters, settled_marker)
             except Exception as error:  # noqa: BLE001 - best effort after withdrawal
                 metering_note = f"; usage since the last round is not kept: {error}"
+        # The withdrawal also pulls shared-legacy from the running Xray, and
+        # only a restart reloads it from the static config: re-enabling a node
+        # whose Xray kept running leaves it removed.
+        procedure = ("; stop tono-xray now and start it again only when the node is re-enabled"
+                     " (the restart restores shared-legacy)")
         if withdrawal_error is not None:
-            raise Refusal(f"{withdrawal_error}{cache_note}{metering_note}") from withdrawal_error
+            raise Refusal(
+                f"{withdrawal_error}{procedure}{cache_note}{metering_note}"
+            ) from withdrawal_error
         # Never a success: the node is out of service and an operator should
         # stop tono-xray. Usage and acknowledgements are not sent.
         raise Refusal(
             f"the control plane reports this exit node disabled; removed {removed} client(s)"
             " and emptied hy2"
-            + ("" if remaining is not None else
-               "; the client inventory is unknown, so stop tono-xray on this node")
+            + ("" if remaining is not None else "; the client inventory is unknown")
+            + procedure
             + cache_note
             + metering_note
         )
