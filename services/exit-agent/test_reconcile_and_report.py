@@ -864,6 +864,26 @@ class DisabledNodeWithdrawal(unittest.TestCase):
                 agent.withdraw_disabled_node(Path("/unused/xray"), {}, "127.0.0.1:1", "tag", None)
         reconcile.assert_called_once()
 
+    def test_the_disabled_round_tells_the_operator_to_stop_xray_until_re_enabled(self) -> None:
+        # TF-opus-3: the withdrawal also pulls shared-legacy from the running
+        # Xray, and re-enabling without a restart leaves it removed.
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        with patch.dict(agent.os.environ, {
+                 "TONO_HOME_AGENT_TOKEN": "node-token", "TONO_SOURCE_ID": "exit-node-a",
+             }, clear=True), \
+             patch.object(agent, "api_base", return_value="https://control.example"), \
+             patch.object(agent, "xray_binary", return_value=Path("/unused/xray")), \
+             patch.object(agent, "xray_start_marker", return_value=None), \
+             patch.object(agent, "require_commands", return_value={
+                 "add_user": "adu", "remove_user": "rmu", "stats_query": "statsquery",
+             }), \
+             patch.object(agent, "fetch_roster", side_effect=agent.NodeDisabled("disabled")), \
+             patch.object(agent, "withdraw_disabled_node", return_value=(2, set())), \
+             patch.object(agent, "read_counters", return_value={}):
+            with self.assertRaisesRegex(agent.Refusal, "stop tono-xray now.*start it again.*re-enabled"):
+                agent.run_once(Path(directory.name) / "state.json")
+
 
 class Hy2RosterAuthorization(unittest.TestCase):
     def setUp(self):
@@ -1316,6 +1336,36 @@ class ReconcileSafety(unittest.TestCase):
 
         self.assertEqual((added, removed), (0, 0))
         self.assertEqual(installed, {"u:usr_1", agent.LEGACY_CLIENT_EMAIL})
+
+    def test_an_early_shared_legacy_removal_is_counted(self) -> None:
+        # TF-opus-6: without a live listing shared-legacy is removed first and
+        # was left out of the count (legacy + one u: client reported 1).
+        _, removed, _ = agent.reconcile(
+            Path("/unused"), {"add_user": "adu", "remove_user": "rmu"}, "127.0.0.1:10085",
+            "tono-vless", [], None, {"u:usr_1", agent.LEGACY_CLIENT_EMAIL},
+            retire_shared_legacy=True,
+        )
+        self.assertEqual(removed, 2)
+
+    def test_a_failed_early_shared_legacy_removal_still_revokes_the_rest(self) -> None:
+        # TF-opus-7: the early removal's failure is reported with the others and
+        # never skips the revocations after it.
+        attempted: list[str] = []
+
+        def fake_run(_binary, arguments):
+            attempted.append(arguments[-1])
+            if arguments[-1] == agent.LEGACY_CLIENT_EMAIL:
+                return type("Result", (), {"returncode": 0, "stdout": "Removed 0 user(s) in total.",
+                                           "stderr": "injected rpc failure"})
+            return type("Result", (), {"returncode": 0, "stdout": "Removed 1 user(s) in total.", "stderr": ""})
+
+        with patch.object(agent, "run_xray", fake_run):
+            with self.assertRaisesRegex(agent.Refusal, f"removing {agent.LEGACY_CLIENT_EMAIL} failed"):
+                agent.reconcile(
+                    Path("/unused"), {"add_user": "adu", "remove_user": "rmu"}, "127.0.0.1:10085",
+                    "tono-vless", [], None, {"u:usr_1"}, retire_shared_legacy=True,
+                )
+        self.assertEqual(attempted, [agent.LEGACY_CLIENT_EMAIL, "u:usr_1"])
 
     def test_an_account_still_on_the_roster_is_never_removed(self) -> None:
         added, removed, _ = self.reconcile(

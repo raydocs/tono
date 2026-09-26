@@ -1662,6 +1662,24 @@ rules: []
     expect((await roster('unknown-exit-token-with-at-least-32-characters')).status).toBe(401);
   });
 
+  it('keeps telling a disabled exit node to withdraw after its token is rotated', async () => {
+    // TF-opus-5: rotating a disabled node's token dropped the hash its agent
+    // still holds, so the agent got 401, kept its last roster and never withdrew.
+    const roster = (token: string) => api('home/exit-identities', {
+      headers: { authorization: `Bearer ${token}` },
+    });
+    const deployed = EXIT_NODE_TOKENS['exit-a'];
+    expect((await admin('exit-nodes/exit-a', { status: 'disabled' }, 'PATCH')).status).toBe(200);
+    expect((await admin('exit-nodes/exit-a/token', {})).status).toBe(200);
+    expect((await admin('exit-nodes/exit-a/token', {})).status).toBe(200);
+    const withdrawn = await roster(deployed);
+    expect(withdrawn.status).toBe(403);
+    expect(await withdrawn.json()).toMatchObject({ error: { code: 'EXIT_NODE_DISABLED' } });
+    // Re-enabled, the rotated-away token authenticates nothing.
+    expect((await admin('exit-nodes/exit-a', { status: 'active' }, 'PATCH')).status).toBe(200);
+    expect((await roster(deployed)).status).toBe(401);
+  });
+
   it('enforces device-only rollout readiness at the database boundary', async () => {
     await env.DB.prepare(
       "UPDATE exit_nodes SET last_roster_at = 0 WHERE id = 'exit-default'",
