@@ -206,7 +206,8 @@ measuring it binds each producer run (workflow file, `workflow_dispatch`, releas
 line, SHA, success, build-job env), its artifact by id and digest, and the package
 contents: the macOS receipt, sealed `tono-build-source.json`, Info.plist channel and
 key, Developer ID/notarization and release gate; the Windows installer signature,
-version resources, and the floor and updater key compiled into `tono-service.exe`.
+version resources, the installed payload copy of each component (any gate copy must
+be identical), and the updater key compiled into `tono-service.exe`.
 Each private key is used in one step of its own environment job (`macos-appcast`,
 `windows-release`), through env or stdin. Both signatures are verified under the
 pinned keys before the bundle is uploaded as a 30-day workflow artifact. The token

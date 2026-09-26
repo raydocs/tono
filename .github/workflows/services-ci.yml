@@ -42,6 +42,7 @@ on:
       - tooling/scripts/check-migration-numbers.mjs
       - tooling/scripts/check-ops-budgets.mjs
       - tooling/scripts/compare-connect-performance.mjs
+      - tooling/scripts/windows-package-components.mjs
       - tooling/scripts/tests/*.test.mjs
       - tooling/scripts/publish-managed-catalog.rb
       - tooling/scripts/write-dedirock-hy2-catalog-sources.rb
@@ -69,6 +70,7 @@ on:
       - tooling/scripts/check-migration-numbers.mjs
       - tooling/scripts/check-ops-budgets.mjs
       - tooling/scripts/compare-connect-performance.mjs
+      - tooling/scripts/windows-package-components.mjs
       - tooling/scripts/tests/*.test.mjs
       - tooling/scripts/publish-managed-catalog.rb
       - tooling/scripts/write-dedirock-hy2-catalog-sources.rb

@@ -30,3 +30,12 @@
 - 剩余限制：macOS gate 步骤调用本次 checkout 的 `verify-release-gate.sh`，main 上它仍检查 `mihomo`，前置 PR-4 合入前签名 run 会在 gate 失败（失败即关闭）。
   producer artifact 保留 7 天，签名须在构建后 7 天内完成。Windows 下限是 `tono-service.exe` 里的子串匹配，
   更强的记录是构建 job 的 env 行和已签名清单里的序列号。
+- **续记（2026-09-26，合并回归审查 6e71164d 的 major 及真实 7401 安装包核对）**：#661 已合 main（`20278e72`）。
+  ① CR6e71-sign-nsis-copies：windows-verify 按名字递归找组件并要求只有一份，#658 之后的安装包还带 `$PLUGINSDIR/tono-gate/resources/`
+  预安装门副本，签名会拒绝每个真实安装包。现在由新脚本 `tooling/scripts/windows-package-components.mjs` 按安装路径取
+  `Tono.exe.next`、`tono-core.exe.next`、`resources/tono-service.exe`，包里其它同名组件副本（含所有 `tono-service*.exe`）必须逐字节相同，
+  否则拒绝。② SIGN-WIN-FLOOR-STRING：真实包里没有序列号字符串（编译期折成整数），删去该子串检查，序列号只由 guard 核对构建 job env。
+  测试：`tooling/scripts/tests/windows-package-components.test.mjs`（按真实布局造双份目录：取安装副本；门副本改一字节即拒绝）；
+  红分支 `wip/desktop-update-sign-nsis-copies-20260926-red`（`07d3c069`，仅测试，模块不存在）。本机对真实 7401 解包实跑：
+  取 `resources/tono-service.exe`；改门副本一字节即拒绝。services-ci 路径加入新脚本。分支 `fix/desktop-update-sign-nsis-copies-20260926`，[#665](https://github.com/raydocs/tono/pull/665)。
+  新 workflow 仍未派发。`windows-candidate.yml` 配对候选的测量步骤有同样的按名查找，未在此修改。

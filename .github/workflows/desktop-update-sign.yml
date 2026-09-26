@@ -11,8 +11,9 @@ name: Desktop update sign
 # measured or signed, each producer run is bound to its workflow file, event, ref,
 # SHA and conclusion; its exact artifact by id and digest; and the sequence,
 # version and channel inside the package itself (macOS: the sealed
-# tono-build-source.json and Info.plist; Windows: the build job env, the floor and
-# updater key compiled into tono-service.exe, and the version resources).
+# tono-build-source.json and Info.plist; Windows: the build job env, the installed
+# payload copies, the updater key compiled into tono-service.exe, and the version
+# resources).
 #
 # Each private key is visible to one step of one job that declares its
 # environment: the Sparkle key in macos-appcast, the Tauri updater key in
@@ -407,7 +408,7 @@ jobs:
           [IO.Compression.ZipFile]::ExtractToDirectory($zip, $payload)
           "INSTALLER=$(Join-Path $payload $installers[0])" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
-      - name: Check the installer signature, versions, compiled floor and pinned key
+      - name: Check the installer signature, installed payload, versions and pinned key
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -417,27 +418,31 @@ jobs:
           if ($setupVersion -ne $env:VERSION) { throw "Installer ProductVersion is $setupVersion, expected $env:VERSION" }
           $extracted = Join-Path $env:RUNNER_TEMP 'windows-payload-unpacked'
           7z x -y "-o$extracted" $env:INSTALLER | Out-Null
+          # The installer also carries a pre-install gate copy of every resource under
+          # $PLUGINSDIR\tono-gate\. Take each component by its installed path; any other copy
+          # of a component that differs from it refuses the package.
+          $selected = @(node tooling/scripts/windows-package-components.mjs $extracted)
           $components = @{}
-          foreach ($name in @('Tono.exe.next', 'tono-core.exe.next', 'tono-service.exe')) {
-            $found = @(Get-ChildItem -LiteralPath $extracted -Recurse -File | Where-Object Name -eq $name)
-            if ($found.Count -ne 1) { throw "Expected one packaged $name, found $($found.Count)" }
-            $components[$name] = $found[0].FullName
+          foreach ($line in $selected) {
+            $name, $value = $line -split '=', 2
+            $components[$name] = $value
           }
-          $appVersion = [Diagnostics.FileVersionInfo]::GetVersionInfo($components['Tono.exe.next']).ProductVersion
+          foreach ($name in @('WINDOWS_APP', 'WINDOWS_CORE', 'WINDOWS_SERVICE')) {
+            if (-not $components[$name]) { throw "The component selector did not return $name" }
+          }
+          $appVersion = [Diagnostics.FileVersionInfo]::GetVersionInfo($components['WINDOWS_APP']).ProductVersion
           if ($appVersion -ne $env:VERSION) { throw "Tono.exe ProductVersion is $appVersion, expected $env:VERSION" }
           # windows-release.yml sets no TONO_BUILD_CHANNEL (the guard checked its job env), so
-          # the App is a release-channel build. The Service carries the v1 floor and the
-          # updater key it will verify this manifest with, both compiled from the build env.
-          $service = [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($components['tono-service.exe']))
-          if (-not $service.Contains($env:SEQUENCE)) { throw "tono-service.exe does not contain the compiled floor $env:SEQUENCE" }
+          # the App is a release-channel build. The Service pins the updater key it will verify
+          # this manifest with. Its v1 floor is not checked here: rustc folds the compiled
+          # option_env!(..).parse() into an integer, so the sequence is not a string in the
+          # binary (0.0.74 run 36251483271); the guard binds it through the build job env.
+          $service = [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($components['WINDOWS_SERVICE']))
           $key = "$env:TONO_UPDATER_PUBLIC_KEY".Trim()
           if ($key.Length -eq 0 -or -not $service.Contains($key)) { throw 'tono-service.exe does not pin TONO_UPDATER_PUBLIC_KEY' }
-          @(
-            "WINDOWS_APP=$($components['Tono.exe.next'])",
-            "WINDOWS_CORE=$($components['tono-core.exe.next'])",
-            "WINDOWS_SERVICE=$($components['tono-service.exe'])"
-          ) | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          "installer $setupVersion, App $appVersion, floor $env:SEQUENCE and updater key match"
+          $selected | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          $selected
+          "installer $setupVersion, App $appVersion and updater key match"
 
       - name: Measure the installer and its App, Core and Service
         id: measure
