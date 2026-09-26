@@ -955,6 +955,35 @@ mod lifecycle_tests {
         let _ = std::fs::remove_dir_all(&directory);
         assert_eq!(ownership, VaultSessionOwnership::NotOwned);
     }
+
+    #[tokio::test]
+    async fn a_sign_in_cut_off_before_storing_its_session_leaves_no_marker_vouching_for_the_vault() {
+        let state = Arc::new(TonoState::for_test());
+        let directory = {
+            let mut inner = state.lock().await;
+            inner.fsm.begin_connect();
+            inner.catalog_dir.clone()
+        };
+        let (client, _, generation) = begin_sign_in(&state).await.unwrap();
+        state.lock().await.challenge_id = Some("challenge-a".into());
+        let auth: tono_core::auth::AuthResponse = serde_json::from_value(serde_json::json!({
+            "accessToken": "fixture-access-a",
+            "user": { "id": "account-a", "email": "a@example.test" },
+        })).unwrap();
+        // The process ends while the previous tunnel is released: nothing after that point runs,
+        // so neither the session nor any undo of the marker happens.
+        let cut_off = tokio::time::timeout(Duration::from_millis(100), adopt_replacing_with(
+            &state, &client, generation, "challenge-a", &auth,
+            |_| std::future::pending::<Result<(), String>>(),
+            |_| {},
+        )).await;
+        assert!(cut_off.is_err(), "the release never finishes");
+        // The next launch must not own whatever the vault holds (a previous installation's session)
+        // on the word of a marker whose sign-in never stored its own.
+        let ownership = crate::tono::credentials::data_dir_owns_vault_session(&directory, &[], false);
+        let _ = std::fs::remove_dir_all(&directory);
+        assert_eq!(ownership, VaultSessionOwnership::NotOwned);
+    }
 }
 
 /// The current account, if signed in.
