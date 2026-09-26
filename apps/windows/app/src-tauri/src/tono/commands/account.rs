@@ -1027,7 +1027,7 @@ mod lifecycle_tests {
     }
 
     #[tokio::test]
-    async fn a_sign_in_whose_session_never_lands_in_the_vault_is_not_saved() {
+    async fn a_sign_in_whose_session_never_lands_in_the_vault_leaves_its_marker_pending() {
         use crate::tono::{credentials::SessionCredentialStore, state::TonoApiClient, transport::TonoTransport};
         use tono_core::credentials::CredentialError;
         // Credential Manager refuses the write: the refresh token the sign-in queued never lands.
@@ -1046,25 +1046,28 @@ mod lifecycle_tests {
             inner.client = Arc::new(TonoApiClient::new(
                 tono_core::auth::DEFAULT_BASE_URL, TonoTransport::new().unwrap(), inner.credentials.clone(),
             ).unwrap());
+            // Account A signed in here before, so a committed marker vouches for A's session.
+            crate::tono::credentials::mark_vault_session_owned(&inner.catalog_dir).unwrap();
             inner.catalog_dir.clone()
         };
         let (client, _, generation) = begin_sign_in(&state).await.unwrap();
-        state.lock().await.challenge_id = Some("challenge-a".into());
+        state.lock().await.challenge_id = Some("challenge-b".into());
         let auth: tono_core::auth::AuthResponse = serde_json::from_value(serde_json::json!({
-            "accessToken": "fixture-access-a",
-            "refreshToken": "fixture-refresh-a",
-            "user": { "id": "account-a", "email": "a@example.test" },
+            "accessToken": "fixture-access-b",
+            "refreshToken": "fixture-refresh-b",
+            "user": { "id": "account-b", "email": "b@example.test" },
         })).unwrap();
-        let adopted = adopt_replacing_with(&state, &client, generation, "challenge-a", &auth,
+        let adopted = adopt_replacing_with(&state, &client, generation, "challenge-b", &auth,
             |_| async { Ok::<(), String>(()) },
             |_| {},
         ).await;
         let ownership = crate::tono::credentials::data_dir_owns_vault_session(&directory, &[], false);
         let _ = std::fs::remove_dir_all(&directory);
-        assert!(matches!(&adopted, Err(error) if error.starts_with("TONO_SIGN_IN_NOT_SAVED")),
-            "the user must hear that this sign-in was not saved");
+        assert!(adopted.is_ok(), "B is signed in for this run: {:?}", adopted.err());
+        // The vault still holds A's refresh token: the next launch must neither restore A nor own
+        // anything else on the word of a marker whose sign-in never reached the vault.
         assert_eq!(ownership, VaultSessionOwnership::NotOwned,
-            "the next launch must not own a session that never reached the vault");
+            "the next launch must ask for a sign-in, not restore a session B never stored");
     }
 }
 
