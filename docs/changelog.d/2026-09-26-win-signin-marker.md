@@ -62,3 +62,22 @@
   剩余限制更新：`client.adopt` 成功后、改写为已提交之前进程崩溃（或改写失败），会话已存而标记仍待定，下次启动按未登录处理
   （需重新登录，走与任何无归属会话相同的 NoToken 恢复路径）；改写为已提交紧跟在 `client.adopt` 把写库排入队列之后，
   写库本身仍是异步的，已提交标记之后写库失败或崩溃时，标记为凭据库原有内容作证（与此前相同，本 PR 不能消除）。
+- **续记（2026-09-26，#642 评审 c0e92466 确认 opus:F1/F2、codex:F1/F2，两个根因）**：① 提交早于落库（opus:F1、codex:F1）：
+  `client.adopt` 经 `SessionCredentialStore::mutate` 只把写库命令 `try_send` 入队并更新内存，真正的 `vault.set` 在后台 writer 中异步执行，
+  上一版却在入队后立即把标记改写为已提交，注释「The session is stored」与事实不符。现在提交移出 `adopt_sign_in_response`，
+  由 `adopt_replacing_with` 在 adopt 成功后、不持状态锁地等待现有的 `SessionCredentialStore::flush()`（writer 处理完此前所有写入后回报结果，
+  上限 `SIGN_IN_SAVE_TIMEOUT` 5 秒），只有落库成功且标记仍归本次登录时才改写为已提交。② 提交失败被吞（opus:F2、codex:F2）：
+  上一版改写失败只记日志、清掉内存待定状态并返回成功。现在落库失败或超时、或改写失败（重试一次后仍失败）都返回现有的
+  `TONO_SIGN_IN_NOT_SAVED`（前端已映射为「无法在这台电脑上保存登录。请重新获取验证码后再试。」），标记保持待定，内存待定状态不清，
+  下次启动按未登录处理（安全方向）。本进程保留已接纳的会话，不新增任何登出或释放防护的路径。登录前已有的已提交标记（`Existing`）不改写；
+  其落库失败同样返回 `TONO_SIGN_IN_NOT_SAVED`，标记仍按原样为本机会话作证。
+  启动时待定标记的实际去向（已核对，`restore.rs` 与加载路径本 PR 未改）：`data_dir_owns_vault_session` 答 `NotOwned` → 不载入令牌 →
+  `restore_session` 的 `TokenProbe::NoToken`：保护状态未知时进入 Error、不释放；否则走 `close_account_with(Missing)`，
+  执行 `client.logout()`，并在 Service 报告保护仍处于 Armed 时调用现有的 `release_for_account` 释放。这与 main 处理任何无归属会话
+  （如卸载重装后凭据库残留的令牌）的路径完全相同，本 PR 没有新增释放；但它确实会释放已存的防护，评审所说「触发既有的自动登出和防护释放路径」属实。
+  测试：新增 `tono::commands::account::lifecycle_tests::a_sign_in_whose_session_never_lands_in_the_vault_is_not_saved`
+  （注入拒绝写入的凭据库，断言登录返回 `TONO_SIGN_IN_NOT_SAVED` 且下次启动的归属判定为 `NotOwned`）；红分支
+  `wip/win-signin-marker-20260926-red4`（`1a907b0c`，基于 `573dcbea`，仅测试，windows-ci run 36216963614）。
+  落库超时、改写失败的重试、被接管时的分支没有单元测试覆盖。MacBook 未运行 cargo，以 PR #642 的 windows-ci 为准。
+  剩余限制更新：落库失败、超时或改写失败时，本进程仍以该账户登录，但下次启动需重新登录，并按上述无归属会话路径处理（含已存防护的释放）；
+  超时后写入才落库时标记仍为待定，同样下次需重新登录。标记为已提交之后的换令牌写入失败，不在本 PR 范围内。

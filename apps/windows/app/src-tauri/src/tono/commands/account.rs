@@ -339,8 +339,8 @@ pub(crate) async fn begin_sign_in(
     Ok((inner.client.clone(), inner.installation_id.clone(), inner.sign_in_generation))
 }
 
-/// The caller has already made the session marker vouch for this sign-in ([`adopt_replacing_with`]).
-/// An error here means no session was stored.
+/// The caller has already written this sign-in's session marker pending, and commits it once the
+/// session is durable ([`adopt_replacing_with`]). An error here means no session was stored.
 pub(crate) async fn adopt_sign_in_response(
     state: &Arc<TonoState>, client: &Arc<crate::tono::state::TonoApiClient>,
     generation: u64, challenge_id: &str, auth: &tono_core::auth::AuthResponse,
@@ -364,14 +364,9 @@ pub(crate) async fn adopt_sign_in_response(
     inner.attempt_history = Default::default();
     // Keep the Tono state lock through adoption: a resend/sign-out cannot invalidate this
     // generation between the last check and the token write.
+    // The refresh token is in memory and its vault write is only queued: the caller commits the
+    // marker once that write is durable.
     client.adopt(auth).await.map_err(|err| err.to_string())?;
-    // The session is stored: the pending marker this sign-in wrote now vouches for it. One left
-    // pending vouches for nothing, so a failed rewrite only asks for a sign-in on the next launch.
-    if inner.sign_in_marker_pending.take().is_some() {
-        if let Err(error) = crate::tono::credentials::commit_sign_in_marker(&inner.catalog_dir) {
-            logging!(warn, Type::Service, "Tono: failed to commit the session marker; the next launch asks to sign in: {error}");
-        }
-    }
     // tono-core has retired the previous identity: its verdicts no longer apply (#582).
     inner.offline.adopt_new_identity();
     inner.challenge_id = None;
@@ -385,6 +380,10 @@ pub(crate) async fn adopt_sign_in_response(
     emit(&inner);
     Ok(info)
 }
+
+/// How long a sign-in waits for its refresh token to reach the vault before it reports the sign-in
+/// as not saved ([`adopt_replacing_with`]).
+const SIGN_IN_SAVE_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Adopt a verified sign-in that may replace an account which never signed out. A tunnel still
 /// running (or starting, or releasing) the previous account's runtime is retired first with
@@ -414,7 +413,8 @@ where
             error
         })?;
         if marker == crate::tono::credentials::SignInMarker::Created {
-            // Until this sign-in stores its session or removes the marker, the marker is its own.
+            // Until this sign-in commits the marker behind a durable session or removes it, the
+            // marker is its own.
             inner.sign_in_marker_pending = Some(generation);
         }
         let status = inner.fsm.status();
@@ -436,18 +436,54 @@ where
         Ok(()) => adopt_sign_in_response(state, client, generation, challenge_id, auth, emit).await,
         Err(error) => Err(error),
     };
-    if adopted.is_err() {
-        // No session was stored, so a marker this sign-in created must not vouch for what the
-        // vault already held, even when a newer sign-in or restore superseded it. Kept only when
-        // a newer sign-in took the marker over: that one stores its session on it or removes it.
-        let mut inner = state.lock().await;
-        if inner.sign_in_marker_pending == Some(generation)
-            && crate::tono::credentials::undo_sign_in_marker(&inner.catalog_dir)
-        {
-            inner.sign_in_marker_pending = None;
+    let info = match adopted {
+        Ok(info) => info,
+        Err(error) => {
+            // No session was stored, so a marker this sign-in created must not vouch for what the
+            // vault already held, even when a newer sign-in or restore superseded it. Kept only
+            // when a newer sign-in took the marker over: that one commits or removes it.
+            let mut inner = state.lock().await;
+            if inner.sign_in_marker_pending == Some(generation)
+                && crate::tono::credentials::undo_sign_in_marker(&inner.catalog_dir)
+            {
+                inner.sign_in_marker_pending = None;
+            }
+            return Err(error);
         }
-    }
-    adopted
+    };
+    // `client.adopt` only queued the refresh token's vault write. The marker vouches for the
+    // session only once that write is durable; awaited without the state lock, as account close
+    // awaits it.
+    let credentials = Arc::clone(&state.lock().await.credentials);
+    let durable = match tokio::time::timeout(SIGN_IN_SAVE_TIMEOUT, credentials.flush()).await {
+        Ok(flushed) => flushed.map_err(|error| error.to_string()),
+        Err(_) => Err(format!("the credential store did not answer within {SIGN_IN_SAVE_TIMEOUT:?}")),
+    };
+    let mut inner = state.lock().await;
+    let saved = match durable {
+        Ok(()) if inner.sign_in_marker_pending == Some(generation) => {
+            let marker_dir = inner.catalog_dir.clone();
+            let committed = crate::tono::credentials::commit_sign_in_marker(&marker_dir)
+                .or_else(|_| crate::tono::credentials::commit_sign_in_marker(&marker_dir));
+            if committed.is_ok() {
+                inner.sign_in_marker_pending = None;
+            }
+            committed.map_err(|error| format!("the session marker was not committed: {error}"))
+        }
+        // A committed marker this machine already held vouches as it is (`Existing`); one a newer
+        // sign-in took over is that sign-in's to commit or remove.
+        Ok(()) => Ok(()),
+        Err(error) => Err(error),
+    };
+    drop(inner);
+    // Not saved: the marker stays pending, so the next launch asks for a sign-in instead of
+    // vouching for whatever the vault holds. This process keeps the adopted session; nothing is
+    // signed out or released here.
+    saved.map(|()| info).map_err(|error| {
+        let error = format!("TONO_SIGN_IN_NOT_SAVED: this sign-in was not saved on this PC, so the next launch asks to sign in again: {error}");
+        logging!(warn, Type::Service, "Tono: {error}");
+        error
+    })
 }
 
 /// Sign out: bump the connect generation and abort every background task

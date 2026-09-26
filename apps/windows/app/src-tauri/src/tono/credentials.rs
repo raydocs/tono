@@ -105,7 +105,7 @@ pub(crate) enum SignInMarker {
     /// vouches for, not the ownership, so nothing was written and nothing is undone.
     Existing,
     /// This sign-in wrote a pending marker, or took over one an earlier sign-in wrote without storing
-    /// its session: [`commit_sign_in_marker`] makes it vouch once the session is stored, and
+    /// its session: [`commit_sign_in_marker`] makes it vouch once the session is durable, and
     /// [`undo_sign_in_marker`] removes it if none is.
     Created,
 }
@@ -115,7 +115,7 @@ pub(crate) enum SignInMarker {
 /// Only the local marker vouches for a vault session ([`data_dir_owns_vault_session`]): a session
 /// stored without it is disowned by the next launch, which signs the user out and releases their
 /// protection. A marker that cannot be written therefore refuses the sign-in. The marker is written
-/// pending and vouches only once [`commit_sign_in_marker`] runs after the session is stored.
+/// pending and vouches only once [`commit_sign_in_marker`] runs after the session is durable.
 /// `pending`: the marker on disk is an earlier sign-in's that has not stored its session, so it is
 /// not ownership this machine held and this sign-in writes it as its own. A marker that cannot be
 /// read refuses the sign-in too: it may be a committed one this sign-in must not overwrite.
@@ -147,8 +147,8 @@ fn sign_in_marker_verdict(
     })
 }
 
-/// Makes the pending marker of a sign-in that stored its session vouch for it. Until this succeeds
-/// the next launch does not own the session and asks for a sign-in.
+/// Makes the pending marker of a sign-in whose session is durable in the vault vouch for it. Until
+/// this succeeds the next launch does not own the session and asks for a sign-in.
 pub(crate) fn commit_sign_in_marker(data_dir: &std::path::Path) -> std::io::Result<()> {
     replace_marker(data_dir, COMMITTED_MARKER)
 }
