@@ -898,6 +898,139 @@ mod tests {
         std::fs::remove_dir_all(root).unwrap();
     }
 
+    /// G3 failure-then-success on one device: a failed publication rolls back, the verified
+    /// Disconnect retires it, and the next update must be able to prepare its members after its
+    /// own consume. Rollback keeps each `.rollback` copy (it now equals the restored bytes) and
+    /// retirement archives the record without touching files, so the next `prepare` met them.
+    #[test]
+    fn update_after_a_retired_rollback_prepares_past_the_retained_copies() {
+        let root = std::env::temp_dir().join(format!(
+            "tono-update-after-rollback-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir(&root).unwrap();
+        let mut store = tx::Store::open(&root).unwrap();
+        let manifest = ReleaseManifest::decode(include_bytes!(
+            "../../../../../../tooling/scripts/tests/fixtures/update-protocol-v1/manifest.json"
+        ))
+        .unwrap();
+        let mut receipt = Receipt::decode(include_bytes!("../../../../../../tooling/scripts/tests/fixtures/update-protocol-v1/windows-receipt.json"), &manifest).unwrap();
+        receipt.installed_location_sha256 = tx::location_digest(&root);
+        let owner = "windows:fixture-owner";
+        let peer = tx::Image {
+            pid: 11,
+            started_at: 10,
+            path: root.join("Tono.exe"),
+            sha256: "0".repeat(64),
+        };
+        let executor = tx::Image {
+            pid: 22,
+            started_at: 20,
+            path: root.join("executor.exe"),
+            sha256: "e".repeat(64),
+        };
+        let attempt_id = receipt.attempt_id.clone();
+        store
+            .save(tx::State {
+                consumed_sequence: 73,
+                generation: 91,
+                manual_installer: None,
+                attempt: Some(tx::Attempt {
+                    old_components: tx::target(&manifest).components.clone(),
+                    manifest,
+                    receipt,
+                    initiating_image: peer.clone(),
+                    successor_image: None,
+                    install_root: root.clone(),
+                    execution: tx::Execution::Staged,
+                    executor: Some(executor.clone()),
+                    disconnect: None,
+                }),
+            })
+            .unwrap();
+        let names = ["Tono.exe", "tono-core.exe", "tono-service.exe"];
+        let mut members = Vec::new();
+        for name in names {
+            let installed = root.join(name);
+            let staged = root.join(format!("{name}.next"));
+            std::fs::write(&installed, format!("old-{name}")).unwrap();
+            std::fs::write(&staged, format!("first-{name}")).unwrap();
+            members.push(
+                CoordinatedBinaryReplacement::prepare(
+                    &staged,
+                    &installed,
+                    sha256(&staged).unwrap(),
+                )
+                .unwrap(),
+            );
+        }
+        let mut plan = Plan {
+            attempt_id,
+            members,
+        };
+        store
+            .observe(
+                owner,
+                &peer,
+                91,
+                1_900_000_001,
+                Observation::PreparationVerified {
+                    artifact_sha256: "b".repeat(64),
+                    protection: Protection::Unprotected,
+                },
+            )
+            .unwrap();
+        store.execution(tx::Execution::Launching).unwrap();
+        store.consume(&executor, 1_900_000_002).unwrap();
+        // First update: the publication fails after the first live rename and rolls back.
+        let plan_path = root.join("replacement.json");
+        assert!(
+            publish_plan(&store, &mut plan, &plan_path, |member| {
+                member.publish()?;
+                anyhow::bail!("injected publication failure")
+            })
+            .is_err()
+        );
+        rollback_plan(&mut plan).unwrap();
+        for name in names {
+            assert_eq!(
+                std::fs::read(root.join(name)).unwrap(),
+                format!("old-{name}").into_bytes()
+            );
+        }
+        store.execution(tx::Execution::RolledBack).unwrap();
+        // Verified explicit Disconnect retires the rolled-back attempt.
+        store.request_disconnect(owner, &peer, 1_900_000_003).unwrap();
+        store
+            .verify_disconnect(owner, &peer, 1_900_000_004, Protection::Unprotected)
+            .unwrap();
+        store.retire_rolled_back(owner, &peer).unwrap();
+        assert!(!store.pending(), "the rolled-back attempt must be retired");
+        drop(store);
+
+        // Second update, past its consume: every member must prepare.
+        for name in names {
+            let installed = root.join(name);
+            let staged = root.join(format!("{name}.next"));
+            std::fs::write(&staged, format!("second-{name}")).unwrap();
+            let prepared = CoordinatedBinaryReplacement::prepare(
+                &staged,
+                &installed,
+                sha256(&staged).unwrap(),
+            );
+            assert!(
+                prepared.is_ok(),
+                "second update refused {name} after a retired rollback: {:#}",
+                prepared.err().unwrap()
+            );
+        }
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
     #[test]
     fn update_recovery_classifies_publication_by_installed_identity_not_successor_liveness() {
         let target = Components {
