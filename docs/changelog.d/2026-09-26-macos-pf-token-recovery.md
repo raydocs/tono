@@ -2,7 +2,7 @@
 - 归属：G1（断开收回保护，PF 引用不误释放、不泄漏）；Issue #601 条目 R609-F2 的 #639 复核续修（R639-O1、R639-F2）。helper
   `KillSwitchPF.swift`、`KillSwitchTests.swift`、`CONTRACT.sha256`；App `Core/HelperProtocolVersion.swift`。
 - 来源：基线 origin/main `42e3afd6`；红分支 `wip/macos-pf-token-recovery-20260926-red`（`0c932dcc`），修复分支
-  `fix/macos-pf-token-recovery-20260926`，PR 待开；未合 main。
+  `fix/macos-pf-token-recovery-20260926`，[#643](https://github.com/raydocs/tono/pull/643)；未合 main。
 - 缺陷修复：
   - R639-O1（opus:F1 = codex:F1；合并回归审查 run `4459fadd` 复报）：#639 的 `-E` 超时找回只按 PID + 进程名 `pfctl` 认领
     `pfctl -s References` 的行。token 比取得它的 pfctl 活得久，PID 会回绕：同次开机更早别的程序在同一 PID 下取得的 token
@@ -22,7 +22,7 @@
   参数，应以断言失败（返回旧持有者的 token；真实 `-X` 有回答，token 被释放并遗忘）。`-E` 超时后的完整找回（内核在期限后才发
   token）仍无法在 CI 复现，只覆盖认领规则。
 - 验证：未在本地编译（MacBook 不是构建机）；以 macOS CI（`macos-26`，`build-core-helper.sh` 内的 `--self-test`、特权 `--self-test` 与
-  `--lifecycle-self-test`）为准。红 run 与修复 CI 在推送时尚未出结果。
+  `--lifecycle-self-test`）为准。红 run 36213252890 记录时仍在运行；修复分支 CI 结果未出。
 - 候选/发布：仅源码，无新候选。
 - 剩余限制：TIMESTAMP 是年龄的判断来自 macOS 26 `pfctl` 的格式串（`%-u days %.2u:%.2u:%.2u`）、xnu 按日历秒记 token 时间
   （`pf_calendar_time_second`）和公开样例，未在实机 root 下核对；若不是年龄，推算的签发秒落不进窗口，只会不认领，不会误领。
