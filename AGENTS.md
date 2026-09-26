@@ -46,7 +46,7 @@ value for a Tono-controlled secret the task names for creation or rotation (coor
 never fabricate third-party credentials or print or commit a secret. Rollback: `npx wrangler rollback` per Worker.
 
 Customer channel publish only after the owner has written `[x]` for G1, G2 and G3 in SHIP_PLAN §6
-with evidence links; agents never edit those lines. The evidence names the candidate (source SHA, package
+(for 0.0.74 only: G1 and G2; G3 moves to 0.0.75 by owner decision 2026-09-26, [DECISIONS](docs/DECISIONS.md)) with evidence links; agents never edit those lines. The evidence names the candidate (source SHA, package
 hashes); publish only that candidate. Any other SHA or version needs new owner evidence, except rebuilding
 a published good source as a higher build for rollback. Then G4 is the agent's, in SHIP_PLAN §5 order
 (G4.2 on the owner's devices first; G4.3 needs the release row's `verifiedAt`); steps, both Windows

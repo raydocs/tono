@@ -34,7 +34,7 @@
 | **G3 发出去还能再发** | 客户能从旧版自动更到这一版，失败证据还在 | issue #26 的 journal 全相位 + 一台已装 Windows / 一台 macOS 真机走通 |
 | **G4 客户版本=你以为的版本** | 更新源指向 0.0.74，不是 GitHub 上挂着、客户还在用 0.0.34 | Sparkle 与 `windows-updates` 推进后，内部设备先吃，再小范围朋友 |
 
-四条齐了才叫过发布标准。老板在 §6 为 G1、G2、G3 写下 `[x]` 并附证据链接之前，不改 `public/appcast.xml`、不推 `windows-updates`、不把 0.0.74 标成客户频道；之后由 agent 按 [AGENTS.md](../AGENTS.md) 执行 G4。
+四条齐了才叫过发布标准。老板在 §6 为 G1、G2、G3（仅 0.0.74：G1、G2 即可，G3 按老板 2026-09-26 决定推迟到 0.0.75，见 [DECISIONS](DECISIONS.md)）写下 `[x]` 并附证据链接之前，不改 `public/appcast.xml`、不推 `windows-updates`、不把 0.0.74 标成客户频道；之后由 agent 按 [AGENTS.md](../AGENTS.md) 执行 G4。
 
 ---
 
@@ -81,7 +81,7 @@
 ## 2. 硬规则
 
 1. **四条门是发布门，不是愿望清单。** 任何 PR 说明必须写它服务 G1–G4 的哪一条；写不上来的不合进这一发的集成分支。
-2. **客户源只在 G1–G3 证据之后推。** 老板在 §6 为 G1、G2、G3 写下 `[x]` 与证据链接之前，不改 `public/appcast.xml`、不推 `windows-updates`、不把 GitHub release 从 prerelease 改成客户频道。之后由 agent 按 [AGENTS.md](../AGENTS.md) 的发布步骤执行 G4；agent 不改 §6 中 G1–G3 的勾选行，G4 各行由执行 agent 在推源过程中勾。
+2. **客户源只在 G1–G3 证据之后推（仅 0.0.74：G1、G2 即可，G3 按老板 2026-09-26 决定推迟到 0.0.75，见 [DECISIONS](DECISIONS.md)）。** 老板在 §6 为 G1、G2、G3 写下 `[x]` 与证据链接之前，不改 `public/appcast.xml`、不推 `windows-updates`、不把 GitHub release 从 prerelease 改成客户频道。之后由 agent 按 [AGENTS.md](../AGENTS.md) 的发布步骤执行 G4；agent 不改 §6 中 G1–G3 的勾选行，G4 各行由执行 agent 在推源过程中勾。
 3. **版本。** 已升到 0.0.74 / macOS build 74（[RELEASE_LINES](RELEASE_LINES.md)），后续提交不回退版本号。冻结提交改的是：`apps/macos/Tono.xcodeproj/project.pbxproj` 的 `MARKETING_VERSION` / `CURRENT_PROJECT_VERSION`、`apps/windows/app/package.json`、`apps/windows/app/src-tauri/Cargo.toml`，以及 `python3 tooling/scripts/verify-desktop-version.py --expected 0.0.74`。夹具里的 `0.0.72` 示例不必全改，那是演示数据。
 4. **目录合同。** 托管目录仍然只有 Tono 签发的出口。hy2 是同一节点的第二块，名字后缀 ` · hy2`（中间是空格+间隔号+空格）。展示名、判定、退役都折叠到基名。禁止为 hy2 另开一套节点身份。
 5. **保护面不得放宽。** hy2 只把 **那一个** `(IPv4, hy2_port, UDP)` 放进 PF/WFP 允许集；禁止 `skip-cert-verify`；禁止非公开 IPv4；Windows `admit_node` 与 macOS `validatedOwnedNode` 只**增** hy2 分支，不删 VLESS Reality 约束。
@@ -355,7 +355,7 @@ macOS Sparkle 没有 NSIS，仍由 `installHandler` 在静默断开之后写 `In
 - 至少一台 macOS、一台 Windows，用与客户相同的更新通道（不是拖安装包，除非通道还没指过去——那时先指内部 appcast / latest.json）。
 - 看 `connection_events`：失败率不高于旧版；若开了 hy2，出现过至少一次 `transport=hy2` 的成功或确认没有 UDP。
 
-**G4.3 推客户源** — agent（前提：老板已在 §6 勾 G1–G3）· S
+**G4.3 推客户源** — agent（前提：老板已在 §6 勾 G1–G3；0.0.74 为 G1、G2）· S
 
 - 两端按 [RELEASE_LINES 的客户发布步骤](RELEASE_LINES.md#customer-publish-g4) 执行（macOS `tono-macos-0.0.74-build74`，Windows `v0.0.74`；标签在发布时才打，发已验收产物）。
 - Windows：R2 对象存在且后台发布行 `verifiedAt` 有值（PR #140 已要求未校验不能发布）。
@@ -379,7 +379,7 @@ B0 口径
         └─ 通：G2.4 → G2.5 → G2.6+G2.7 → G2.8 → G2.9 ── G2 过门（自动）
 
 G1 且 G2A 之后：G3.1 → G3.2 → G3.3 ── G3 过门
-老板在 §6 勾完 G1–G3：G4.1 → G4.2 → G4.3 → G4.4 ── 发布标准达成，冻
+老板在 §6 勾完 G1–G3（0.0.74 为 G1、G2）：G4.1 → G4.2 → G4.3 → G4.4 ── 发布标准达成，冻
 ```
 
 G3 不要与 G1 并行改同一份 Windows 连接/更新代码；G3.1 基于已过 G1 的 `main`。
@@ -388,7 +388,7 @@ G3 不要与 G1 并行改同一份 Windows 连接/更新代码；G3.1 基于已�
 
 ## 6. 整体验收（过发布标准的检查表）
 
-打印这一页。G1–G3 由老板全勾并附证据链接后才推客户源；G4 在推源过程中逐条勾。
+打印这一页。G1–G3 由老板全勾并附证据链接后才推客户源（0.0.74 为 G1、G2，G3 推迟到 0.0.75）；G4 在推源过程中逐条勾。
 
 **G1**
 

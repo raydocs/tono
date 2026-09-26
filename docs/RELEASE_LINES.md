@@ -50,7 +50,8 @@ The first customer publication after 0.0.67 / 0.0.34 is gated by
 [SHIP_PLAN.md](SHIP_PLAN.md): Connected-means-usable, a next step on
 connect failure, a proven protected update journal, then feed promotion
 as **0.0.74**. Sparkle and `windows-updates` advance only after the owner
-has recorded G1–G3 evidence in SHIP_PLAN §6; agents then run G4 per
+has recorded G1–G3 evidence (for 0.0.74: G1 and G2; G3 moves to 0.0.75, see
+[DECISIONS.md](DECISIONS.md)) in SHIP_PLAN §6; agents then run G4 per
 [AGENTS.md](../AGENTS.md). GitHub `v0.0.72` / `tono-macos-0.0.72-build72`
 tags are not those feeds.
 
@@ -106,11 +107,11 @@ If it already happened, reinstalling 0.0.73+ repairs NRPT and encrypted DNS.
 ## Customer publish (G4)
 
 When an agent may start is set in [AGENTS.md](../AGENTS.md) (owner-written G1–G3
-evidence in SHIP_PLAN §6). Record each step's run URL, SHA and artifact hashes in the publish's
+evidence in SHIP_PLAN §6; for 0.0.74 G1 and G2 only). Record each step's run URL, SHA and artifact hashes in the publish's
 `docs/changelog.d/` entry ([format](changelog.d/README.md)).
 
 - **Candidate identity.** Before customer promotion, match the release's source SHA,
-  version/build and package hashes to the candidate the owner's G1–G3 evidence names.
+  version/build and package hashes to the candidate the owner's G1–G3 evidence (0.0.74: G1–G2) names.
   A changed candidate does not reuse that acceptance; it needs new owner evidence.
   The one exception is rebuilding an already-published good source as a higher build
   for rollback.
