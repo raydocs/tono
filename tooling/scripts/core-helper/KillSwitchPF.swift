@@ -948,9 +948,12 @@ extension KillSwitchManager {
     /// only forgotten. A boot that could not be read (nil) is not another
     /// boot: nothing is forgotten on it, and this throws (#643 review,
     /// grok:F3 = codex:F6). A token whose `-X` already ran is released again
-    /// only while the listing shows the row seen before that `-X`; any other
-    /// row, or none that parses, may be another program's token under the
-    /// same value, so it is forgotten with no `-X` (#643 review, opus:F1/F2).
+    /// only while the listing shows the row seen before that `-X`; a
+    /// readable row of another issue may be another program's token under
+    /// the same value, so it is forgotten with no `-X` (#643 review,
+    /// opus:F1/F2). Only a full listing (`pfEnableReferenceListing`) can show
+    /// a token gone, and a row that cannot be read this pass keeps its entry,
+    /// with no `-X`, and this throws (#643 review 8fa64f3b, grok:F1/F2).
     static func releaseSupersededPFEnableReferences(
         boot: String?,
         keeping: String?,
@@ -970,22 +973,28 @@ extension KillSwitchManager {
             let token = superseded.reference.token
             if superseded.reference.boot == boot, token != keeping {
                 let listedFrom = time(nil)
-                let listed = try listReferences(queryDeadline)
-                let listing = listed.status == 0 ? String(data: listed.output, encoding: .utf8) : nil
+                let listing = try pfEnableReferenceListing(
+                    deadline: queryDeadline,
+                    listReferences: listReferences
+                )
                 let listedTo = time(nil)
-                if let listing,
-                   listing.split(whereSeparator: \.isWhitespace).contains(where: { $0 == token }) {
-                    let row = pfEnableRow(
+                if listing.split(whereSeparator: \.isWhitespace).contains(where: { $0 == token }) {
+                    // No readable row this pass (it does not parse, or a clock
+                    // step inverted the window) proves nothing either way:
+                    // keep it, with no `-X`, for the next pass.
+                    guard let row = pfEnableRow(
                         of: token,
                         listedFrom: listedFrom,
                         listedTo: listedTo,
                         in: listing
-                    )
+                    ) else {
+                        throw HelperFailure.system("Replaced PF reference row unreadable; kept.")
+                    }
                     if !superseded.releaseTried {
                         supersededPFEnableReferences[0].releaseTried = true
                         supersededPFEnableReferences[0].row = row
                         try releaseToken(token)
-                    } else if let seen = superseded.row, let row, seen.sameIssue(as: row) {
+                    } else if let seen = superseded.row, seen.sameIssue(as: row) {
                         try releaseToken(token)
                     } else {
                         FileHandle.standardError.write(Data(
@@ -1035,17 +1044,17 @@ extension KillSwitchManager {
         guard let boot = try? bootSession() else {
             throw HelperFailure.system("Boot session unknown; PF enable references kept.")
         }
+        // Only a full listing shows a token gone; any other answer throws
+        // here and keeps it (#643 review 8fa64f3b, grok:F1).
         if let held = readPFEnableReference(recordPath), held.boot == boot,
-           try pfEnableReferenceListed(
-            held.token, deadline: queryDeadline, listReferences: listReferences
-           ) {
+           try pfEnableReferenceListing(deadline: queryDeadline, listReferences: listReferences)
+            .split(whereSeparator: \.isWhitespace).contains(where: { $0 == held.token }) {
             _ = try run("/sbin/pfctl", ["-X", held.token])
         }
         unlink(recordPath)
         if let pending = unrecordedPFEnableReference, pending.boot == boot,
-           try pfEnableReferenceListed(
-            pending.token, deadline: queryDeadline, listReferences: listReferences
-           ) {
+           try pfEnableReferenceListing(deadline: queryDeadline, listReferences: listReferences)
+            .split(whereSeparator: \.isWhitespace).contains(where: { $0 == pending.token }) {
             _ = try run("/sbin/pfctl", ["-X", pending.token])
         }
         unrecordedPFEnableReference = nil
@@ -1116,13 +1125,16 @@ extension KillSwitchManager {
     }
 
     /// The one row `listing` shows for `token`, or nil when no row of the
-    /// `PID  Process Name  TOKEN  <d> days HH:MM:SS` shape does, or several do.
+    /// `PID  Process Name  TOKEN  <d> days HH:MM:SS` shape does, several do,
+    /// or the window is inverted (#643 review 8fa64f3b, codex:F1).
     static func pfEnableRow(
         of token: String,
         listedFrom: time_t,
         listedTo: time_t,
         in listing: String
     ) -> PFEnableRow? {
+        // A wall clock stepped back during the listing orders nothing.
+        guard listedFrom <= listedTo else { return nil }
         var found: [PFEnableRow] = []
         for line in listing.split(separator: "\n") {
             let words = line.split(whereSeparator: \.isWhitespace)
@@ -1244,13 +1256,9 @@ extension KillSwitchManager {
 
     static func pfEnableReferenceListed(
         _ token: String,
-        deadline: TimeInterval = KillSwitchManager.pfctlQueryDeadline,
-        listReferences: (TimeInterval) throws -> HelperCommandResult = {
-            try KillSwitchManager.listPFEnableReferences(deadline: $0)
-        }
+        deadline: TimeInterval = KillSwitchManager.pfctlQueryDeadline
     ) throws -> Bool {
-        let listed = try listReferences(deadline)
-        guard listed.status == 0, let text = String(data: listed.output, encoding: .utf8) else {
+        guard let text = try pfctlQuery(["-s", "References"], deadline: deadline) else {
             return false
         }
         return text.split(whereSeparator: \.isWhitespace).contains { $0 == token }
@@ -1259,6 +1267,23 @@ extension KillSwitchManager {
     /// `pfctl -s References`; the self-test replaces it to stage an answer.
     static func listPFEnableReferences(deadline: TimeInterval) throws -> HelperCommandResult {
         try run("/sbin/pfctl", ["-s", "References"], deadline: deadline)
+    }
+
+    /// A `pfctl -s References` answer that listed every token, as
+    /// `pfReferenceSnapshot` reads one. Any other answer (a failure status,
+    /// or pfctl's exit 0 after `DIOCGETSTARTERS: <error>`) says nothing about
+    /// any token and throws, as no answer does (#643 review 8fa64f3b,
+    /// grok:F1).
+    static func pfEnableReferenceListing(
+        deadline: TimeInterval,
+        listReferences: (TimeInterval) throws -> HelperCommandResult
+    ) throws -> String {
+        let listed = try listReferences(deadline)
+        let text = String(decoding: listed.output, as: UTF8.self)
+        guard pfReferenceSnapshot(status: listed.status, output: text) != nil else {
+            throw HelperFailure.system("pfctl did not list the PF enable references.")
+        }
+        return text
     }
 
     // MARK: - Root-owned I/O and commands
