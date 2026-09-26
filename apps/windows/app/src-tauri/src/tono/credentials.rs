@@ -54,11 +54,19 @@ pub(crate) fn mark_vault_session_owned(data_dir: &std::path::Path) -> std::io::R
     std::fs::write(marker_dir.join(VAULT_SESSION_MARKER), b"1")
 }
 
-/// A sign-in's answer to its local marker write. Not fatal: the next launch asks this user to
-/// sign in again.
+/// Writes the local marker a sign-in needs before it stores its session. Only the local marker
+/// vouches for a vault session ([`data_dir_owns_vault_session`]): a session stored without it is
+/// disowned by the next launch, which signs the user out and releases their protection. A failed
+/// write therefore refuses the sign-in before anything is stored, and the user can retry.
+pub(crate) fn record_sign_in_marker(data_dir: &std::path::Path) -> Result<(), String> {
+    sign_in_marker_verdict(mark_vault_session_owned(data_dir))
+}
+
+/// [`record_sign_in_marker`]'s answer to the marker write.
 fn sign_in_marker_verdict(written: std::io::Result<()>) -> Result<(), String> {
-    let _ = written;
-    Ok(())
+    written.map_err(|error| {
+        format!("could not record this installation's session, so this sign-in was not adopted; try again: {error}")
+    })
 }
 
 /// Whether the refresh token in the vault belongs to this data directory. Only the local marker
