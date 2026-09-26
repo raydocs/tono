@@ -1552,6 +1552,62 @@ mod tests {
     }
 
     #[test]
+    fn program_files_prefix_requires_a_drive_root_that_cannot_replace_it() {
+        struct RootAcl(Result<DirectorySecurity, String>);
+        impl DirectorySecuritySource for RootAcl {
+            fn read_directory_security(&self, directory: &str) -> Result<DirectorySecurity, String> {
+                if directory.eq_ignore_ascii_case(r"C:\") {
+                    return self.0.clone();
+                }
+                Ok(DirectorySecurity {
+                    owner_sid: "S-1-5-18".to_string(),
+                    allowed_aces: vec![
+                        ("S-1-5-18".to_string(), 0x001f_01ff),
+                        ("S-1-5-32-544".to_string(), 0x001f_01ff),
+                        ("S-1-5-32-545".to_string(), 0x0012_00a9),
+                    ],
+                })
+            }
+        }
+        // Default `C:\`: Authenticated Users may create folders and hold an inherit-only
+        // DELETE | GENERIC_WRITE | GENERIC_READ | GENERIC_EXECUTE ACE. Neither lets them
+        // replace the existing Program Files.
+        fn root(owner: &str, extra: Option<(&str, u32)>) -> RootAcl {
+            let mut allowed_aces = vec![
+                ("S-1-5-18".to_string(), 0x001f_01ff),
+                ("S-1-5-32-544".to_string(), 0x001f_01ff),
+                ("S-1-3-0".to_string(), 0x1000_0000),
+                ("S-1-5-32-545".to_string(), 0x0012_00a9),
+                ("S-1-5-11".to_string(), 0x0000_0004),
+                ("S-1-5-11".to_string(), 0xe001_0000),
+            ];
+            allowed_aces.extend(extra.map(|(sid, mask)| (sid.to_string(), mask)));
+            RootAcl(Ok(DirectorySecurity {
+                owner_sid: owner.to_string(),
+                allowed_aces,
+            }))
+        }
+        let install = r"C:\Program Files\Tencent\WeChat";
+        assert!(is_admin_only_install_chain(install, &root("S-1-5-18", None)));
+        // FILE_DELETE_CHILD, WRITE_DAC, WRITE_OWNER and GENERIC_ALL on the root can each
+        // delete, rename or re-permission Program Files.
+        for mask in [0x0000_0040, 0x0004_0000, 0x0008_0000, 0x1000_0000] {
+            assert!(
+                !is_admin_only_install_chain(install, &root("S-1-5-18", Some(("S-1-5-11", mask)))),
+                "root grants {mask:#x} to Authenticated Users"
+            );
+        }
+        assert!(
+            !is_admin_only_install_chain(install, &root("S-1-5-21-1-2-3-1001", None)),
+            "a user owns the drive root"
+        );
+        assert!(
+            !is_admin_only_install_chain(install, &RootAcl(Err("access denied".to_string()))),
+            "unreadable drive root"
+        );
+    }
+
+    #[test]
     fn discovery_is_empty_off_windows() {
         #[cfg(not(windows))]
         assert!(discover_signed_wechat_path_regexes().is_empty());
