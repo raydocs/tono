@@ -16,3 +16,13 @@
   H11-F2 改 open（Windows 半边 #632/#635 已合，macOS data-protection keychain 未做）。
 - **候选/发布**：内部候选从 fb5e8485 构建中（macOS run 36212061109、Windows run 36212062220），未发布到客户通道。
 - **剩余限制**：各修复的设备验收待候选包实机测试。
+- 续记 2026-09-26（按条目模板补齐）：
+  - 来源：合并批次 #634、#636、#638、#637、#635、#514、#639（main fb5e8485），随后 #640（42e3afd6）、#641（50c2c0d0）。
+  - 部署：exit-agent 第二轮换为 main@50c2c0d0（#641，md5 ffe030b1…），13/13 `result=success`，备份 `/root/tono-exit-agent-backup-20260926b/`；
+    Tokyo·Sakura 仍未部署。控制面此后无新部署。
+  - 验证：合并回归审查 run `4459fadd` 覆盖到 fb5e8485；#640、#641 各自双厂商审查，未单独做批次回归审查（下一批一并覆盖 fb5e8485 之后的提交）。
+  - 候选/发布：内部候选 0.0.73 build73 源码 fb5e8485 已构建并与包内 manifest 核对——Windows `Tono_0.0.73_x64-setup.exe`
+    25,411,125 B，SHA-256 `fb24f1272425543bedbd0d9b8452d104c83e31135519cf42b146228c717166f5`，未签名；macOS
+    `Tono-0.0.73-build73-arm64.zip` 19,704,496 B，SHA-256 `aa03769e52c6ab600fa8666ed065e45a156f1b39fcb6258dd8c74da07657aa1f`，
+    Developer ID 签名并已公证。仅内部测试，未发布到客户通道。
+  - 剩余限制：候选实机验收（所有者合并测试轮）未做；#642、#643 不在此候选内。
