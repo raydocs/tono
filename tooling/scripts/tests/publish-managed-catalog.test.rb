@@ -360,6 +360,17 @@ class PublishManagedCatalogTest < Minitest::Test
     assert_equal(["Tokyo Reality · hy2"], YAML.safe_load(yaml).fetch("proxies").map { |node| node["name"] })
   end
 
+  def test_publish_keeps_the_hy2_spki_pin_beside_the_der_fingerprint
+    spki = "q6urq6urq6urq6urq6urq6urq6urq6urq6urq6urq6s="
+    pinned = HY2_SOURCE.sub("  skip-cert-verify: false\n", "  certificate-public-key-sha256: #{spki}\n  skip-cert-verify: false\n")
+    code, output, uploaded = run_publisher(["--publish", source("hy2.yaml", pinned)])
+    assert_equal(0, code, output)
+    yaml = uploaded.fetch("yaml")
+    assert_includes(yaml, "fingerprint: #{HY2_FINGERPRINT}\n")
+    assert_includes(yaml, "certificate-public-key-sha256: #{spki}\n")
+    assert_equal([spki], YAML.safe_load(yaml).fetch("proxies").map { |node| node["certificate-public-key-sha256"] })
+  end
+
   def test_append_hy2_sibling_next_to_the_vless_base_name
     code, output, uploaded = run_publisher(
       ["--append", source("hy2.yaml", HY2_SOURCE)],

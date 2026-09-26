@@ -90,7 +90,8 @@ after all platform callers have migrated; this PR does not break main callers.
 |---|---|
 | Reality TCP | `vless`, TLS Reality + explicit uTLS chrome, optional vision; re-admit all nodes |
 | HY2 without pin | upstream can parse CA-only TLS, but Tono admission requires DER pin; **not a product-supported path** |
-| HY2 DER pin | **refuse** `TONO_SINGBOX_UNSUPPORTED_CERTIFICATE_PIN`; never map DER to SPKI |
+| HY2 DER pin only | **refuse** `TONO_SINGBOX_UNSUPPORTED_CERTIFICATE_PIN` (Swift: `TONO_SINGBOX_HY2_DER_PIN_UNSUPPORTED`, node unavailable); never map DER to SPKI |
+| HY2 DER + published SPKI pin | Swift (macOS): catalog `certificate-public-key-sha256` → `tls: {enabled, server_name: <sni>, certificate_public_key_sha256: [<pin>]}`; never `insecure`. Rust emitter does not consume it yet (Windows ships mihomo on the DER pin) |
 | DIRECT exact | logical AND: network, domain, IP /32, port; concrete `direct` outbound with `bind_interface` |
 | DIRECT native | signature-admitted anchored `process_path_regex` AND reviewed TCP ports; no name-only TCP escape |
 | DIRECT UDP | exact public IP+port AND platform-reviewed process identity; all other Reality UDP rejected |
@@ -141,8 +142,32 @@ the catalog's SHA256 of leaf DER. PEM-as-root also changes the accepted certific
 set (same-key replacement/chain/name/time semantics); no PEM bytes exist in the
 catalog. An equivalent solution requires a separately built DER verifier in the
 actual QUIC TLS backend and same-key-leaf/name/time regression checks. Stock
-binaries cannot consume an invented DER field. Thus pinned HY2 remains an
-explicit implementation blocker, not a silently removed pin or converted hash.
+binaries cannot consume an invented DER field. Thus a DER-only HY2 block remains
+unavailable, not a silently removed pin or converted hash.
+
+HY2 with a published SPKI pin (owner, 2026-09-26; [DECISIONS](../../../docs/DECISIONS.md)):
+a managed hysteria2 block may add `certificate-public-key-sha256`, the standard
+base64 SHA-256 of the leaf's SubjectPublicKeyInfo DER (exactly 32 bytes, one
+block-style line at the block's own field column, plain or simply quoted, no
+trailing comment: the only form macOS reads; the control plane rejects anything
+else, and VLESS blocks never carry it). The operator computes it on the node from
+the same certificate as `fingerprint`, which stays mandatory
+(`manage-tono-hy2-node.sh apply` reports both for every new certificate):
+
+    openssl x509 -in <hy2 tls.cert> -pubkey -noout | openssl pkey -pubin -outform der \
+      | openssl dgst -sha256 -binary | openssl enc -base64
+
+This is the value `VerifyPublicKeySHA256` (same pinned `std_client.go`) compares:
+Go's `x509.MarshalPKIXPublicKey` of the leaf key, checked equal for a P-256
+certificate issued like `manage-tono-hy2-node.sh`. The client never derives it.
+Equivalence: Tono hy2 nodes serve operator-generated self-signed certificates
+whose private key is created on the node and never leaves it, and the DER pin
+never relied on a CA, name or validity period. A key pin therefore gives the
+same MITM protection as the DER pin; it additionally accepts a reissued
+certificate over the same key, which only the node's key holder can produce.
+`std_client.go` sets `InsecureSkipVerify` only together with the SPKI verifier
+(`VerifyPeerCertificate`), and hysteria2 takes that config through the default
+Go engine. A block without a valid pin stays unavailable (fail-closed).
 `node::admit_hysteria2` requires `fingerprint` even for a CA-signed node, so no
 CA-only Tono draft is permitted. The first hosted Rust run caught a synthetic
 test that incorrectly assumed otherwise; the correction preserves admission
@@ -152,6 +177,6 @@ and tests that removing a pin rejects even an unselected node.
 `dns-proxied`, `tun`, `clash-api`. `hy2` still validates each node's actual
 authentication requirements. `dns-redundancy`, arbitrary sniff/remote rules,
 IPv6 and unknown requirements refuse. Full migration is not complete until
-pinned HY2, resolver redundancy and native PF/WFP/DNS/installer integration are
+Rust-emitter HY2 pinning, resolver redundancy and native PF/WFP/DNS/installer integration are
 implemented and verified. No POST replay, automatic alternate node, direct
 fallback, or policy-loss recovery is authorized.
