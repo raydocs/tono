@@ -86,6 +86,12 @@ pub(crate) fn data_dir_owns_vault_session(data_dir: &std::path::Path, account_tr
     true
 }
 
+/// Red skeleton: today's decision for a data directory without the local marker.
+#[cfg_attr(not(test), allow(dead_code))]
+const fn adopts_unmarked_vault_session(legacy_marker: bool, _legacy_roaming_session: bool, account_traces: bool) -> bool {
+    legacy_marker || account_traces
+}
+
 fn account_name(key: CredentialKey) -> &'static str {
     match key {
         CredentialKey::RefreshToken => "refresh-token",
@@ -566,6 +572,21 @@ mod tests {
         assert_eq!(vault_read_action(Some(CRED_PERSIST_ENTERPRISE_RAW)), VaultReadAction::MigrateToLocalMachine);
         assert_eq!(vault_read_action(Some(CRED_PERSIST_LOCAL_MACHINE_RAW)), VaultReadAction::Use);
         assert_eq!(vault_read_action(None), VaultReadAction::Absent);
+    }
+
+    #[test]
+    fn roaming_account_traces_vouch_only_for_a_session_an_earlier_build_stored_roaming() {
+        use super::adopts_unmarked_vault_session as adopts;
+        // Arguments: legacy roaming marker, session stored CRED_PERSIST_ENTERPRISE, account traces.
+        // The traces live in the roaming data directory: without the local marker they cannot make
+        // this machine the owner of a local-machine session.
+        assert!(!adopts(false, false, true), "roaming account traces alone adopted a vault session");
+        // The one-time upgrade: a build before the local marker stored the session roaming.
+        assert!(adopts(false, true, true));
+        // A roaming session on a fresh data directory is a previous installation's.
+        assert!(!adopts(false, true, false));
+        // A marker an earlier build left in the roaming data directory still answers once.
+        assert!(adopts(true, false, false));
     }
 
     #[test]
