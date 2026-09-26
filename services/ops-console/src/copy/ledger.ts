@@ -58,12 +58,12 @@ export const ledgerCopy = {
     closedBy: (who: string, when: string) => `已锁定 · ${who} · ${when}`,
     closeAction: '锁定本月',
     closeTitle: '锁定本月',
-    closeBody: (month: string, revenue: string, cost: string, margin: string, pending: string) =>
-      `锁定 ${month} 之后这个月只能冲正，不能改。收入 ${revenue}，支出 ${cost}，毛利 ${margin}，${pending}。`,
+    closeBody: (month: string, revenue: string, cost: string, margin: string, pending: string, target: 'current' | 'next' | 'past') =>
+      `锁定 ${month} 之后这个月不能改。${target === 'current' ? '这也是当前 UTC 月，锁定后本月不能再接收冲正。' : target === 'next' ? '冲正只能记入未锁定的当前 UTC 月；这个月在 UTC 零点后就成为当前 UTC 月，锁定后整月都不能接收冲正。' : '冲正只能记入未锁定的当前 UTC 月。'}收入 ${revenue}，支出 ${cost}，毛利 ${margin}，${pending}。`,
     closeConfirm: '锁定',
     closedAlready: '这个月已经锁了',
     closeWaiting: '汇总还没读到',
-    lockedNote: '这个月已经锁了，只能冲正，不能改。',
+    lockedNote: '这个月已经锁了，不能改；冲正只能记入未锁定的当前 UTC 月。',
     exportAction: '导出 CSV',
 
     /* ------------------------------------------------------------- 录入抽屉 */
@@ -145,6 +145,11 @@ export const ledgerCopy = {
     reverseTitle: '冲正这一笔',
     reverseBody: (what: string, month: string) =>
       `冲正会在 ${month} 记一笔跟「${what}」相反的账，原来那笔留着，标成已冲正。`,
+    reverseWaiting: '当前 UTC 月的锁定状态还没读到，暂不能冲正。',
+    reverseUnreadable: '当前 UTC 月的锁定状态读取失败，暂不能冲正；点「重读锁定状态」再试。',
+    reverseRetry: '重读锁定状态',
+    reverseLocked: '当前 UTC 月已经锁定，不能接收冲正。',
+    reverseRefused: '当前 UTC 月已锁定，冲正未写入；请等下一个未锁定的 UTC 月再试。',
     reverseConfirm: '冲正',
     reversed: '已冲正',
     reversedBy: '看冲正那笔',

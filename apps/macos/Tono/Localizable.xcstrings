@@ -6219,6 +6219,16 @@
         }
       }
     },
+    "The selected cloud server was removed. Choose another cloud server.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "所选云端节点已被移除，请另选一个云端节点。"
+          }
+        }
+      }
+    },
     "The selected cloud server was removed. Kill Switch is still blocking traffic; choose another cloud server.": {
       "localizations": {
         "zh-Hans": {
@@ -6599,6 +6609,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Tono 无法解除上一次会话遗留的保护状态。请运行文档中的 sudo 紧急解除命令，然后重新打开 Tono。%@"
+          }
+        }
+      }
+    },
+    "Tono has not verified this account. Connect stays blocked until Tono verifies it.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tono 尚未验证此账户。在 Tono 验证之前，无法连接。"
           }
         }
       }

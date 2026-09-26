@@ -16,9 +16,16 @@ extension AppState {
             isProtectionBlocked = status.receipt?.requiredRecovery != .unprotected
         } catch {
             // Unreachable is pending, never a reason to run ordinary cleanup.
-            if let status = try? await coordinator.nativeUpdate("status") {
+            let status = try? await coordinator.nativeUpdate("status")
+            if let status {
                 nativeUpdatePending = status.pending
                 RuntimeCleanup.nativeUpdatePending = status.pending
+            }
+            // Suspension already cleared isConnected; a barrier that is still
+            // armed must read as blocked, never as Standby. Only ever raised.
+            if !isConnected, KillSwitchService.isArmed
+                || (status?.pending == true && status?.receipt?.requiredRecovery != .unprotected) {
+                isProtectionBlocked = true
             }
             throw error
         }
@@ -58,6 +65,7 @@ extension AppState {
                 guard result.disconnectVerified == true else { throw NativeUpdateDownload.failure("Update Disconnect was not verified.") }
                 isProtectionBlocked = false
                 KillSwitchService.isArmed = false
+                resetReleasedSessionHistory()
                 RuntimeCleanup.clearCoreStarted()
             } catch {
                 isProtectionBlocked = true
@@ -89,6 +97,7 @@ extension AppState {
         RuntimeCleanup.nativeUpdateRecovery = nil
         KillSwitchService.isArmed = false
         isProtectionBlocked = false
+        resetReleasedSessionHistory()
         updateIncomplete = UpdateHandoffStore.showsIncompleteUpdate()
         errorMessage = nil
         RuntimeCleanup.clearCoreStarted()

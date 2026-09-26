@@ -183,19 +183,36 @@ extension AccountSession {
     }
 
     func startCloudOnlyRuntimeThrowing() async throws {
-        await cancelRuntimeMonitor()
-        await descriptorConsumer(nil)
+        // 535R-C-F3: a refusal heard while this start awaits has suspended the
+        // account. The start is stale from then on: it neither marks the
+        // account ready nor lets its own failure (`fail` sets `.error`)
+        // replace `.suspended`. Cancellation is what `fail` ignores.
+        let refusals = entitlementRefusals
+        func requireNoNewRefusal() throws {
+            guard entitlementRefusals == refusals else { throw CancellationError() }
+        }
+        do {
+            await cancelRuntimeMonitor()
+            try requireNoNewRefusal()
+            await descriptorConsumer(nil)
+            try requireNoNewRefusal()
 
-        // Terminate a verified legacy Tono sidecar, including one left by an
-        // older app process. This starts no daemon and performs no Tailscale
-        // CLI, API, enrollment, or network operation.
-        try await sidecar.prepareCloudOnly()
+            // Terminate a verified legacy Tono sidecar, including one left by an
+            // older app process. This starts no daemon and performs no Tailscale
+            // CLI, API, enrollment, or network operation.
+            try await sidecar.prepareCloudOnly()
+            try requireNoNewRefusal()
 
-        // A normal signed-in-but-disconnected launch must leave the host's
-        // network usable. The last authenticated mode-0600 catalog cache is
-        // sufficient to paint the first usable screen; refreshing it is not a
-        // launch gate and happens immediately in the background below.
-        try await activateCloudFallback()
+            // A normal signed-in-but-disconnected launch must leave the host's
+            // network usable. The last authenticated mode-0600 catalog cache is
+            // sufficient to paint the first usable screen; refreshing it is not a
+            // launch gate and happens immediately in the background below.
+            try await activateCloudFallback()
+            try requireNoNewRefusal()
+        } catch {
+            try requireNoNewRefusal()
+            throw error
+        }
         state = .ready
         startCatalogSync(refreshImmediately: true)
     }
@@ -243,6 +260,7 @@ extension AccountSession {
         try Task.checkCancellation()
         guard user != nil else { throw CancellationError() }
         let revision = accountReadRevision
+        let refusals = entitlementRefusals
         let resume = resumeProtection ?? shouldResumeProtection
         do {
             try cloudFallbackConsumer(resume)
@@ -252,7 +270,11 @@ extension AccountSession {
             try Task.checkCancellation()
             let refreshed = await refreshManagedCatalog(attempts: 2)
             try Task.checkCancellation()
-            guard accountReadRevision == revision else { throw CancellationError() }
+            // 535R-C-F3: a refusal during the catalog read withdrew the exits;
+            // do not select one for the refused session.
+            guard accountReadRevision == revision, entitlementRefusals == refusals else {
+                throw CancellationError()
+            }
             guard refreshed else {
                 let detail = lastCatalogFailureMessage.map { " \($0)" } ?? ""
                 throw TonoSidecarService.Error.commandFailed(

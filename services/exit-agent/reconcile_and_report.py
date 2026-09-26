@@ -1034,7 +1034,8 @@ def reconcile(binary: Path, commands: dict[str, str], address: str, tag: str,
     if not wanted and listed is None and recorded is None:
         if failures:
             raise Refusal("; ".join(failures))
-        return 0, 0, None
+        # A confirmed shared-legacy removal above still counts.
+        return 0, removed, None
     installed = listed if listed is not None else recorded
     known_installed = None if installed is None else {
         label for label in installed
