@@ -229,6 +229,13 @@ const DIRECT_COMMITTED_LEASE: std::time::Duration = std::time::Duration::from_se
 /// restore can re-lock the tunnel instead of leaving the machine fail-closed until the GUI
 /// returns (`relock_restored_tunnel`).
 static RESTORE_WAS_LOCKED: AtomicBool = AtomicBool::new(false);
+/// Startup recovery published a *verified* intent carried over from before this Service start,
+/// and no WFP install or live verify has proved its filters in this process yet (TW-R-boot).
+/// A failed startup install keeps that intent published — fail-closed, the watchdog retries —
+/// while the machine is open, so `verified` alone no longer proves a live barrier and the
+/// Remote Desktop exception (`connect_session_refused`) must wait. Cleared by the first
+/// successful install or verify.
+static RESTORED_BARRIER_UNPROVEN: AtomicBool = AtomicBool::new(false);
 /// The watchdog's latest verify-by-key result. `/kill-switch/status` reuses it instead of
 /// running a full WFP RPC sweep per request.
 static LAST_VERIFY: Lazy<Mutex<Option<(std::time::Instant, bool)>>> =
@@ -951,6 +958,9 @@ async fn install_unlocked_for(armed: &Armed, current_core: Option<CoreInstance>)
         // may publish that a tunnel permit was actually rendered.
         TUNNEL_PERMIT_RENDERED.store(result.is_ok() && tunnel_permit_expected, Ordering::Relaxed);
         note_verify(result.is_ok());
+        if result.is_ok() {
+            RESTORED_BARRIER_UNPROVEN.store(false, Ordering::Release);
+        }
         result
     }
     #[cfg(not(all(windows, not(feature = "test"))))]
@@ -974,6 +984,7 @@ async fn install_unlocked_for(armed: &Armed, current_core: Option<CoreInstance>)
             }
         }
         TUNNEL_PERMIT_RENDERED.store(tunnel_permit_expected, Ordering::Relaxed);
+        RESTORED_BARRIER_UNPROVEN.store(false, Ordering::Release);
         Ok(())
     }
 }
@@ -986,6 +997,9 @@ async fn verify_live_unlocked_for(armed: &Armed, current_core: Option<CoreInstan
     {
         let result = engine_call("verify", move || crate::core::wfp::verify(&expected)).await;
         TUNNEL_PERMIT_RENDERED.store(result.is_ok() && tunnel_permit_expected, Ordering::Relaxed);
+        if result.is_ok() {
+            RESTORED_BARRIER_UNPROVEN.store(false, Ordering::Release);
+        }
         result
     }
     #[cfg(not(all(windows, not(feature = "test"))))]
@@ -1342,7 +1356,9 @@ pub(crate) enum CallerSession {
 /// The one exception is a caller whose own protection is already *verified* (`armed` is the
 /// published intent). Verification is committed only after a successful lock, so it proves the
 /// barrier was actually installed for this owner; that reconnect path stays fail-closed and
-/// unchanged. A bare `wanted` intent proves nothing: `ARMED` is published before the WFP install
+/// unchanged. A verified intent carried over by startup recovery is withheld from `armed` until
+/// this start has proved its filters (`connect_session_refused`, TW-R-boot).
+/// A bare `wanted` intent proves nothing: `ARMED` is published before the WFP install
 /// and survives a failed one, so a local first arm that failed before committing filters must not
 /// let a Remote Desktop retry arm for the first time.
 fn remote_session_connect_refused(
@@ -1356,6 +1372,17 @@ fn remote_session_connect_refused(
     session != CallerSession::Console && !caller_holds_verified_protection
 }
 
+/// [`remote_session_connect_refused`] against the Service's published protection. A verified
+/// intent carried over by startup recovery counts only once this start has proved its filters
+/// ([`RESTORED_BARRIER_UNPROVEN`]); until then the caller holds no proven protection.
+fn connect_session_refused(session: CallerSession, caller_key: &str) -> bool {
+    let armed = armed_guard();
+    let proven = armed
+        .as_ref()
+        .filter(|_| !RESTORED_BARRIER_UNPROVEN.load(Ordering::Acquire));
+    remote_session_connect_refused(session, proven.map(|armed| &armed.intent), caller_key)
+}
+
 /// Refuse a connect from a non-console session unless the caller already holds verified
 /// protection. `caller_session_id` is `AuthenticatedOwner::peer_session_id`: read from the token of
 /// the very pipe-peer process whose SID authentication verified, while that process handle was
@@ -1366,15 +1393,7 @@ pub(crate) fn authorize_connect_session_for(
     caller_session_id: Option<u32>,
 ) -> std::result::Result<(), crate::core::auth::ServiceError> {
     let session = caller_session(caller_session_id);
-    let refused = {
-        let armed = armed_guard();
-        remote_session_connect_refused(
-            session,
-            armed.as_ref().map(|armed| &armed.intent),
-            caller_key,
-        )
-    };
-    if !refused {
+    if !connect_session_refused(session, caller_key) {
         return Ok(());
     }
     tracing::warn!("connect refused: caller session is {session:?}, not the local console");
@@ -2539,6 +2558,9 @@ pub async fn restore_on_service_start() -> Result<()> {
                     armed.intent.updated_at = now_unix();
                     RESTORE_WAS_LOCKED.store(true, Ordering::Release);
                 }
+                // Published before the install so the watchdog keeps retrying a failed one, but
+                // not yet proof of a live barrier for the Remote Desktop exception.
+                RESTORED_BARRIER_UNPROVEN.store(true, Ordering::Release);
                 *armed_guard() = Some(armed.clone());
                 let persist = if restored_was_locked {
                     match serde_json::to_vec_pretty(&armed.intent) {
@@ -3368,6 +3390,7 @@ mod tests {
         *LAST_ERROR.lock().unwrap() = None;
         *LAST_VERIFY.lock().unwrap() = None;
         RESTORE_WAS_LOCKED.store(false, Ordering::Release);
+        RESTORED_BARRIER_UNPROVEN.store(false, Ordering::Release);
         for path in [
             intent_path(),
             dns_snapshot_path(),
@@ -4462,6 +4485,42 @@ mod tests {
         assert!(refused(Unknown, Some(&intent_only)));
 
         assert!(refused(Remote, Some(&other_users)));
+    }
+
+    /// TW-R-boot: startup restore keeps a verified intent published (fail-closed, the watchdog
+    /// retries) even when this start could not install its filters. That carried-over flag then
+    /// proves no live barrier, so the owner's Remote Desktop exception waits for an install that
+    /// succeeds.
+    #[tokio::test]
+    #[serial]
+    async fn a_failed_startup_install_withholds_the_remote_reconnect_exception() -> Result<()> {
+        cleanup().await;
+        let intent = IntentRecord {
+            owner_key: Some("owner-alice".to_owned()),
+            ..valid_intent(KillSwitchStatusMode::Locked, true)
+        };
+        atomic_write(&intent_path(), &serde_json::to_vec_pretty(&intent)?).await?;
+
+        let failures = SimulatedStateFailures::arm(false, true);
+        restore_on_service_start()
+            .await
+            .expect_err("the failed startup install must be reported");
+        let restored = armed_guard().clone().expect("startup stays fail-closed");
+        assert!(restored.intent.is_verified());
+        assert!(
+            connect_session_refused(CallerSession::Remote, "owner-alice"),
+            "a verified intent whose filters this start never installed must not admit a remote connect"
+        );
+
+        drop(failures);
+        // The watchdog's repair installs the same published snapshot.
+        install_unlocked(&restored).await?;
+        assert!(!connect_session_refused(
+            CallerSession::Remote,
+            "owner-alice"
+        ));
+        cleanup().await;
+        Ok(())
     }
 
     #[tokio::test]
