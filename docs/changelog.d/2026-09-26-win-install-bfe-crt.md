@@ -21,7 +21,18 @@
   断言失败；`windows-packaging.test.mjs` 的 NSIS 拒绝对话框断言加上 79 分支、`manualInstallNeedsBfe` 三语和 79 常量。
 - 验证：MacBook 未运行 cargo；本机只跑了 `node --test scripts/windows-packaging.test.mjs`（33 通过；换回旧 NSIS 时
   拒绝对话框断言失败）和 `rustfmt --check`（改动处无新增格式差异），并用新的导入表检查读 fb5e8485 候选安装包：
-  六份 tono-service*.exe 均报 `VCRUNTIME140.dll`。Windows CI 与候选预检结果见下方续记。
-- 候选/发布：仅源码，无新候选（候选工作流只用于验证预检，不是发布候选）。
+  六份 tono-service*.exe 均报 `VCRUNTIME140.dll`。
+  - 红（`76646679`）：Windows CI [36227938281](https://github.com/raydocs/tono/actions/runs/36227938281) service job
+    在 `update_manual_gate_brings_bfe_up_before_reading_wfp` 断言失败（left `["wfp"]`），其余 job 通过；候选
+    [36227941946](https://github.com/raydocs/tono/actions/runs/36227941946) 在 payload 预检失败：
+    `resources/tono-service.exe imports the Visual C++ runtime (VCRUNTIME140.dll)`。
+  - 修复（`acf916d9`）：Windows CI [36228201853](https://github.com/raydocs/tono/actions/runs/36228201853)（dispatch）与
+    [36228200928](https://github.com/raydocs/tono/actions/runs/36228200928)（pull_request）四个 job 全绿，新测试在
+    lifecycle 与 executor 两步均通过；候选 [36228203218](https://github.com/raydocs/tono/actions/runs/36228203218) 构建与
+    payload 预检通过（安装包 SHA-256 `20fa693ebd6c3e035d1b3503120c7aa2371caa2695f406b145e7699cae79ee30`，本机复查六份
+    helper 均无 `VCRUNTIME*`/`MSVCP*`/`api-ms-win-crt-*` 导入）；安装冒烟
+    [36229560874](https://github.com/raydocs/tono/actions/runs/36229560874)（install/repair/uninstall，windows-2025，BFE 正常、
+    runner 已有 VC++ 运行库）通过。
+- 候选/发布：无发布候选；候选工作流 36228203218 的未签名内部包只用于验证预检和安装冒烟。
 - 剩余限制：未在 BFE 停止/禁用、以及未装 VC++ 运行库的干净 Windows 上实机安装；卸载门禁拿到 79 时仍显示通用卸载拒绝文案；
   自动更新（SYSTEM 执行器）路径未改。
