@@ -6,7 +6,7 @@ use crate::utils::window_manager::WindowManager;
 use std::sync::Arc;
 use tauri::Manager as _;
 use tono_logging::{Type, logging};
-use tono_service_protocol::{KillSwitchStatus, ServiceStatusSnapshot};
+use tono_service_protocol::{KillSwitchStatus, ServiceOperationKind, ServiceStatusSnapshot};
 use tokio::time::Duration;
 #[cfg(target_os = "macos")]
 use tokio::time::timeout;
@@ -272,17 +272,44 @@ async fn refusal_protection(release_wait_timed_out: bool) -> RefusalProtection {
 
 /// Wording from the Service's own reading. This App's registry misses a release another user's
 /// App started, and one of ours whose response was lost; the Service's `active_operation` does
-/// not, so a Service still running any lifecycle mutation means the barrier may yet change.
+/// not. Only an operation that can drop the barrier counts as a release; the others keep the
+/// Service's barrier reading as the answer.
 fn classify_service_refusal(
     app_release_in_progress: bool,
     snapshot: Option<&ServiceStatusSnapshot>,
 ) -> RefusalProtection {
-    let service_mutating = snapshot.is_some_and(|snapshot| snapshot.active_operation.is_some());
+    let service_releasing = snapshot
+        .and_then(|snapshot| snapshot.active_operation.as_ref())
+        .is_some_and(|operation| operation_may_release_barrier(operation.kind));
     classify_refusal(
         false,
-        app_release_in_progress || service_mutating,
+        app_release_in_progress || service_releasing,
         snapshot.and_then(|snapshot| snapshot.kill_switch.as_ref()),
     )
+}
+
+/// Service operations that can remove the WFP barrier: the explicit release, and a core stop,
+/// whose `release_kill_switch` option the status marker does not carry. Exhaustive on purpose,
+/// so a new operation kind has to be classified here.
+const fn operation_may_release_barrier(kind: ServiceOperationKind) -> bool {
+    match kind {
+        ServiceOperationKind::ReleaseKillSwitch | ServiceOperationKind::StopCore => true,
+        ServiceOperationKind::PrepareCoreStart
+        | ServiceOperationKind::StartCore
+        | ServiceOperationKind::StageRuntime
+        | ServiceOperationKind::LockKillSwitch
+        | ServiceOperationKind::BeginDirectRuntimeReload
+        | ServiceOperationKind::ReplaceDirectEndpoints
+        | ServiceOperationKind::FinalizeDirectRuntimeReload
+        | ServiceOperationKind::RenewDirectRuntimeReload
+        | ServiceOperationKind::ReplaceProxyEndpoints
+        | ServiceOperationKind::VerifyKillSwitch
+        | ServiceOperationKind::RestrictKillSwitch
+        | ServiceOperationKind::EnableDns
+        | ServiceOperationKind::RestoreDns
+        | ServiceOperationKind::UpdateWriter
+        | ServiceOperationKind::SetSystemProxy => false,
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -726,6 +753,16 @@ mod tests {
         assert_eq!(
             classify_service_refusal(false, Some(&snapshot)),
             RefusalProtection::ReleaseMayComplete
+        );
+
+        let mut locking = snapshot.clone();
+        if let Some(operation) = locking.active_operation.as_mut() {
+            operation.kind = ServiceOperationKind::LockKillSwitch;
+        }
+        assert_eq!(
+            classify_service_refusal(false, Some(&locking)),
+            RefusalProtection::Held,
+            "an operation that cannot drop the barrier is not a release"
         );
     }
 

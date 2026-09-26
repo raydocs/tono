@@ -362,7 +362,7 @@ H16-O-F1（#513）、H16-O-F2（#518）、H16-O-F6（#520）、H17-AUTH-MAC（#5
 | H20-C-F5 | Windows 上传诊断缺上一次失败记录 | in-PR | [#594](https://github.com/raydocs/tono/issues/594) · [#616](https://github.com/raydocs/tono/pull/616) | 低·已确认 | 当前无错误时上传上一次失败的阶段与稳定码（不含本地详情）；#580 仅内部版自动报告 |
 | H20-C-F6 = H20-O-F13 | 验证码错误/过期被显示为「会话过期」 | in-PR | [#595](https://github.com/raydocs/tono/issues/595)，[#620](https://github.com/raydocs/tono/pull/620) | 中·已确认 | 只把带 `INVALID_OR_EXPIRED_CODE` 的 401 改为专门错误；其它 401（含 verify 的 `AUTHENTICATION_FAILED`、带令牌请求）不变 |
 | H22-C-F2 = H22-O-F6 | 验证码未送达时两端没有求助/诊断出口 | in-PR | [#596](https://github.com/raydocs/tono/issues/596)，[#620](https://github.com/raydocs/tono/pull/620) | 中·已确认 | 验证码页 60 秒后给出求助；菜单栏入口未加 |
-| H22-C-F1 | Windows 欢迎页吞掉存储失败导致循环 | open | 待开 | 低·推导(PLAUSIBLE) | 触发条件未证实 |
+| H22-C-F1 | Windows 欢迎页吞掉存储失败导致循环 | in-PR | [#648](https://github.com/raydocs/tono/pull/648) | 低·推导(PLAUSIBLE) | 内存标记只在本次会话有效；触发条件仍未实机证实 |
 | H20-O-*, H22-O-* | Opus 席位 H20（15 条）与 H22（8 条，含 H22-O-F1 BFE 关闭时无法安装、H22-O-F2 VC++ 运行库缺失时安装门禁失败）| open（待核实）| 待开 | 待 Codex 异厂商核实 | 见交接文档 |
 | XRAY26-RMU | exit-agent 用 `--email=` 调 Xray 26 `rmu` 被拒，自 2026-09-18 起吊销不执行、计量停报；`rmu` 失败也退出 0 | in-PR | [#563](https://github.com/raydocs/tono/pull/563)（5bcc6b9d/924cafb3/b3299814）| 高·已确认(实机输出) | 未部署到节点 |
 | TF-opus-4 | exit-agent 停用轮不读计数，上次正常轮到停机之间的流量丢失 | fixed | [#600](https://github.com/raydocs/tono/issues/600)，[#624](https://github.com/raydocs/tono/pull/624)（f5c31d58，2026-09-25 已部署到 14 个节点） | 中·已确认 | 撤除后尽力折入最后计数，下一次可上报的轮次报出；永久退役节点仍不上报；需部署到节点 |
