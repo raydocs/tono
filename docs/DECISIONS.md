@@ -29,7 +29,7 @@ may reverse), `reversed` (keep the line; say what replaced it).
 - Why stricter: the installer changes no machine setting the user or their security software
   chose; the user makes that change. Protection is not loosened: an unreadable WFP still
   refuses the gate, and a stopped (not Disabled) BFE installs as before the regression.
-- Applied in: [#PRNUM](https://github.com/raydocs/tono/pull/PRNUM) (H22-O-F1)
+- Applied in: [#658](https://github.com/raydocs/tono/pull/658) (H22-O-F1)
 
 ## 2026-09-26 · May the G3 test kit use the production v1 update pointer before G4?
 

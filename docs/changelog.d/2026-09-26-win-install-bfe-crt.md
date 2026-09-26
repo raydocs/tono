@@ -2,7 +2,7 @@
 - 归属：G3（可安装性），客户 0.0.73 发布阻断；影响 Windows Service 安装 helper（`install_service.rs`、
   `update_executor.rs`）、Service 构建配置、NSIS `.onInit`、发布预检与 App 修复横幅文案。发现 H22-O-F1、H22-O-F2。
 - 来源：基线 origin/main `f15e95a7`；红分支 `wip/win-install-bfe-crt-red`（`76646679`），修复分支
-  `fix/win-install-bfe-crt-20260926`，[#PRNUM](https://github.com/raydocs/tono/pull/PRNUM)；未合 main。
+  `fix/win-install-bfe-crt-20260926`，[#658](https://github.com/raydocs/tono/pull/658)；未合 main。
 - 缺陷修复：
   - H22-O-F1：BFE 停止或禁用时，`.onInit` 的 `--manual-update-gate` 先读 WFP（RPC 到 BFE）而失败，安装以通用
     「无法安装」中止（76）；原来的 BFE 自修复排在门禁读 WFP 之后，永远跑不到，App 横幅「修复」同样失败。
