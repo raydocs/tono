@@ -989,6 +989,47 @@ mod lifecycle_tests {
         let _ = std::fs::remove_dir_all(&directory);
         assert_eq!(ownership, VaultSessionOwnership::NotOwned);
     }
+
+    #[tokio::test]
+    async fn a_sign_in_whose_session_never_lands_in_the_vault_is_not_saved() {
+        use crate::tono::{credentials::SessionCredentialStore, state::TonoApiClient, transport::TonoTransport};
+        use tono_core::credentials::CredentialError;
+        // Credential Manager refuses the write: the refresh token the sign-in queued never lands.
+        struct RefusingVault;
+        impl tono_core::credentials::CredentialStore for RefusingVault {
+            fn get(&self, _: CredentialKey) -> Result<Option<String>, CredentialError> { Ok(None) }
+            fn set(&self, _: CredentialKey, _: &str) -> Result<(), CredentialError> {
+                Err(CredentialError::Store("the vault refused the write".into()))
+            }
+            fn delete(&self, _: CredentialKey) -> Result<(), CredentialError> { Ok(()) }
+        }
+        let state = Arc::new(TonoState::for_test());
+        let directory = {
+            let mut inner = state.lock().await;
+            inner.credentials = Arc::new(SessionCredentialStore::with_test_vault(Arc::new(RefusingVault)));
+            inner.client = Arc::new(TonoApiClient::new(
+                tono_core::auth::DEFAULT_BASE_URL, TonoTransport::new().unwrap(), inner.credentials.clone(),
+            ).unwrap());
+            inner.catalog_dir.clone()
+        };
+        let (client, _, generation) = begin_sign_in(&state).await.unwrap();
+        state.lock().await.challenge_id = Some("challenge-a".into());
+        let auth: tono_core::auth::AuthResponse = serde_json::from_value(serde_json::json!({
+            "accessToken": "fixture-access-a",
+            "refreshToken": "fixture-refresh-a",
+            "user": { "id": "account-a", "email": "a@example.test" },
+        })).unwrap();
+        let adopted = adopt_replacing_with(&state, &client, generation, "challenge-a", &auth,
+            |_| async { Ok::<(), String>(()) },
+            |_| {},
+        ).await;
+        let ownership = crate::tono::credentials::data_dir_owns_vault_session(&directory, &[], false);
+        let _ = std::fs::remove_dir_all(&directory);
+        assert!(matches!(&adopted, Err(error) if error.starts_with("TONO_SIGN_IN_NOT_SAVED")),
+            "the user must hear that this sign-in was not saved");
+        assert_eq!(ownership, VaultSessionOwnership::NotOwned,
+            "the next launch must not own a session that never reached the vault");
+    }
 }
 
 /// The current account, if signed in.
