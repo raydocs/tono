@@ -16,6 +16,46 @@ may reverse), `reversed` (keep the line; say what replaced it).
 - Applied in: PR / commit / command
 ```
 
+## 2026-09-26 · May the G3 test kit use the production v1 update pointer before G4?
+
+- Status: owner
+- Chosen: yes. The one-round G1–G3 test kit publishes its signed update pair behind
+  `releases.afk.ccwu.cc/desktop/v1/latest/manifest.json`, which no shipped customer build
+  reads (0.0.67 / 0.0.34 use Sparkle `public/appcast.xml` and `public/windows/latest.json`).
+  Customer feeds stay untouched until G1–G3 are ticked. Rejected: testing G3 only after
+  publish, a second device round.
+- Why: owner, 2026-09-26 in chat; conditional on the plan review confirming no shipped build
+  reads the pointer.
+- Applied in: G1–G3 test kit (this session).
+
+## 2026-09-26 · May the agent approve the `windows-release` environment for test-kit signing?
+
+- Status: owner
+- Chosen: yes, the agent approves the signing runs of the test kit with `gh`, and records
+  each approval (run id, source SHA) in `docs/changelog.d/`. Rejected: waiting for the owner
+  at the computer.
+- Applied in: G1–G3 test kit (this session).
+
+## 2026-09-26 · Does #331 (macOS bootstrap exception not bound to Tono) block 0.0.73?
+
+- Status: owner
+- Chosen: no. 0.0.73 ships with H1-F5 (macOS half) as a known limitation in the release
+  notes; #331 continues from plan v5 for 0.0.74. Rejected: holding 0.0.73 for a helper/PF
+  redesign rejected five times in plan review.
+- Why: owner, 2026-09-26. Not a regression (present since 0.0.67); reach is limited to
+  shared control-plane anycast addresses while Protected Offline.
+
+## 2026-09-26 · Does #352 (Windows Service binds to the installed Tono image) go into the 0.0.73 kit?
+
+- Status: provisional
+- Chosen: no. #352 stays open until the owner's Win11 `icacls` / owner evidence; the kit's
+  checklist carries that step and #352 merges for 0.0.74 when it matches. 0.0.73 ships H2-F3
+  (ordinary IPC not bound to the Tono image) as a known limitation. Rejected: merging #352
+  without the evidence — if the device ACL differs from its model, it refuses every
+  protection lifecycle route and the Windows test round is void.
+- Why stricter for availability: no Windows customer loses the ability to connect on an
+  unverified ACL model; H2-F3 is not a regression.
+
 ## 2026-09-26 · Windows: which vault session does the next launch trust after a sign-in that did not finish saving?
 
 - Status: provisional
