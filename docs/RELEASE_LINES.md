@@ -171,7 +171,9 @@ the owner's step.
 
 Both environments list reviewer `raydocs`, the same account as the agents' token,
 so an agent approving them removes the only human check there. Whether that token
-can approve its own deployment is untested as of 2026-09-24. Self-approve only for
+can approve its own deployment was confirmed on 2026-09-26 for `windows-release` only (kit
+runs recorded in `docs/changelog.d/2026-09-26-kit-0-0-74.md`); `windows-update-channel` is
+configured separately and is still untested. Self-approve only for
 the G4 publish and, by owner decision of 2026-09-26 ([DECISIONS.md](DECISIONS.md)), for the
 `windows-release` signing runs of the one-round G1–G3 test kit; any other signed G3
 candidate waits for the owner's approval. Record each approval (environment, run URL,
