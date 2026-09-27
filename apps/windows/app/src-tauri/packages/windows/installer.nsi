@@ -1505,6 +1505,10 @@ Function .onInstSuccess
 FunctionEnd
 
 Function un.onInit
+  ; Before the manual gate, as in .onInit: the gate's dialogs then use this language, and a
+  ; Cancel in the language dialog (no saved choice) Aborts before any lease is taken.
+  !insertmacro MUI_UNGETLANGUAGE
+
   ; Refuse pending v1 before the pre-uninstall hook or any App termination. The plug-ins
   ; directory only holds the helper's reason file until the gate has answered.
   InitPluginsDir
@@ -1544,8 +1548,6 @@ Function un.onInit
   !if "${INSTALLMODE}" == "both"
     !insertmacro MULTIUSER_UNINIT
   !endif
-
-  !insertmacro MUI_UNGETLANGUAGE
 
   ${GetOptions} $CMDLINE "/P" $PassiveMode
   ${IfNot} ${Errors}

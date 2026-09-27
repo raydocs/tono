@@ -163,8 +163,16 @@ impl std::fmt::Display for StoreBusy {
     }
 }
 
+/// Only a lock another process holds is [`StoreBusy`]. A failed lock call is an I/O fault that
+/// keeps its own text, so a gate does not report it as another installer being active.
 fn take_store_lock(taken: std::result::Result<(), std::fs::TryLockError>) -> Result<()> {
-    taken.context(StoreBusy)
+    match taken {
+        Ok(()) => Ok(()),
+        Err(held @ std::fs::TryLockError::WouldBlock) => Err(held).context(StoreBusy),
+        Err(std::fs::TryLockError::Error(error)) => {
+            Err(error).context("the durable store lock could not be taken")
+        }
+    }
 }
 
 pub struct Store {
