@@ -529,6 +529,13 @@ test('NSIS names every gate refusal with its own dialog, code, first error line 
     new RegExp(freshReason + String.raw`nsExec::ExecToLog [^\n]*--manual-uninstall-gate --reason-file`),
   )
   assert.ok(pluginsAt >= 0 && pluginsAt < gateAt && gateAt < confirmAt && confirmAt < leaseAt)
+  // Like .onInit, the uninstaller resolves its language before the gate, so the gate's dialogs
+  // are in the user's language rather than the script's first one.
+  const unLanguageAt = unInit.indexOf('!insertmacro MUI_UNGETLANGUAGE')
+  assert.ok(
+    unLanguageAt >= 0 && unLanguageAt < gateAt,
+    'the uninstaller language must be resolved before the gate',
+  )
   // An orphaned barrier gets the same confirmed release on uninstall.
   assert.match(unInit.slice(gateAt, confirmAt), /\$\{If\} \$0 == "78"\s+StrCpy \$0 "77"/)
   assert.match(

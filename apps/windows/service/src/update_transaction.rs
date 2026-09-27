@@ -163,6 +163,10 @@ impl std::fmt::Display for StoreBusy {
     }
 }
 
+fn take_store_lock(taken: std::result::Result<(), std::fs::TryLockError>) -> Result<()> {
+    taken.context(StoreBusy)
+}
+
 pub struct Store {
     root: PathBuf,
     _lock: File,
@@ -183,7 +187,7 @@ impl Store {
             .create(true)
             .truncate(false)
             .open(root.join("transaction.lock"))?;
-        lock.try_lock().context(StoreBusy)?;
+        take_store_lock(lock.try_lock())?;
         let state = match File::open(root.join("state.json")) {
             Ok(file) => {
                 let mut bytes = Vec::new();
@@ -793,6 +797,23 @@ pub(crate) mod tests {
             )
             .unwrap();
         store.execution(Execution::Launching).unwrap();
+    }
+
+    #[test]
+    fn update_store_lock_io_failure_is_not_reported_as_busy() {
+        // Only a lock another process holds is `StoreBusy`; a failed lock call is an I/O fault
+        // and must carry its own text, not "another installer is active".
+        let held = take_store_lock(Err(std::fs::TryLockError::WouldBlock)).unwrap_err();
+        assert!(held.is::<StoreBusy>(), "{held:#}");
+        let failed = take_store_lock(Err(std::fs::TryLockError::Error(std::io::Error::other(
+            "lock volume went away",
+        ))))
+        .unwrap_err();
+        assert!(!failed.is::<StoreBusy>(), "{failed:#}");
+        assert!(
+            format!("{failed:#}").contains("lock volume went away"),
+            "{failed:#}"
+        );
     }
 
     #[test]
