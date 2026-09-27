@@ -340,6 +340,13 @@ pub fn no_proxy(sid: &str) -> Result<()> {
 /// Enumerate successfully before claiming absence. A failed alias lookup can
 /// also mean API/access failure or a same-named non-TUN adapter, not removal.
 pub fn tunnel_absent(name: &str) -> Result<()> {
+    ensure!(!tunnel_present(name)?, "TUN adapter is still present");
+    Ok(())
+}
+
+/// Whether an interface with this alias exists. An enumeration failure is an error, never
+/// absence.
+pub fn tunnel_present(name: &str) -> Result<bool> {
     use windows_sys::Win32::NetworkManagement::IpHelper::{FreeMibTable, GetIfTable2};
     let mut table = std::ptr::null_mut();
     let status = unsafe { GetIfTable2(&mut table) };
@@ -362,12 +369,11 @@ pub fn tunnel_absent(name: &str) -> Result<()> {
             .iter()
             .position(|c| *c == 0)
             .unwrap_or(row.Alias.len());
-        ensure!(
-            !String::from_utf16(&row.Alias[..end])?.eq_ignore_ascii_case(name),
-            "TUN adapter is still present"
-        );
+        if String::from_utf16(&row.Alias[..end])?.eq_ignore_ascii_case(name) {
+            return Ok(true);
+        }
     }
-    Ok(())
+    Ok(false)
 }
 
 pub fn decode_base64(value: &str) -> Result<String> {
@@ -433,6 +439,33 @@ pub fn process_matches(expected: &Image) -> Result<()> {
         "process incarnation changed"
     );
     Ok(())
+}
+
+/// The image file name Windows lists for `pid` (Toolhelp's `szExeFile`). Listing needs no
+/// handle to the process, so it answers where `OpenProcess` or the image path is refused.
+/// `None` when the snapshot fails or the pid is not listed.
+pub fn process_image_name(pid: u32) -> Option<String> {
+    use windows_sys::Win32::System::Diagnostics::ToolHelp::*;
+    let snapshot = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) };
+    if snapshot == INVALID_HANDLE_VALUE {
+        return None;
+    }
+    let snapshot = Handle(snapshot);
+    let mut entry = PROCESSENTRY32W::default();
+    entry.dwSize = std::mem::size_of_val(&entry) as u32;
+    let mut found = unsafe { Process32FirstW(snapshot.0, &mut entry) };
+    while found != 0 {
+        if entry.th32ProcessID == pid {
+            let end = entry
+                .szExeFile
+                .iter()
+                .position(|c| *c == 0)
+                .unwrap_or(entry.szExeFile.len());
+            return String::from_utf16(&entry.szExeFile[..end]).ok();
+        }
+        found = unsafe { Process32NextW(snapshot.0, &mut entry) };
+    }
+    None
 }
 
 /// Manual installers may live in Downloads; this is an incarnation binding,
