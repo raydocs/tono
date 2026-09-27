@@ -127,6 +127,25 @@ fn manual_update_gate(
     begin()
 }
 
+/// How a manual gate run ends: its exit status for NSIS.
+#[cfg_attr(not(test), allow(dead_code))]
+fn finish_gate(_mode: &str, _report: &native::GateReport, outcome: Result<(), Error>) -> i32 {
+    let Err(error) = outcome else {
+        return 0;
+    };
+    eprintln!("Error: {error:#}");
+    if error.is::<native::ProtectionActive>() {
+        return native::MANUAL_GATE_PROTECTION_ACTIVE_EXIT;
+    }
+    if error.is::<native::OrphanedProtection>() {
+        return native::MANUAL_GATE_ORPHANED_PROTECTION_EXIT;
+    }
+    if error.is::<BfeUnavailable>() {
+        return MANUAL_GATE_BFE_UNAVAILABLE_EXIT;
+    }
+    1
+}
+
 pub(super) fn dispatch() -> Result<bool, Error> {
     let args: Vec<_> = std::env::args_os().skip(1).collect();
     match args.as_slice() {
@@ -1319,6 +1338,56 @@ mod tests {
         // Rollback and the no-plan identity check still run with the Service stopped.
         assert!(classify_recovery(true, false, &target, &target).requires_service_stop());
         assert!(classify_recovery(false, false, &old, &target).requires_service_stop());
+    }
+
+    /// WIN-GATE-OPAQUE: a customer's 0.0.74 installer refused with the catch-all dialog, and
+    /// the cause went only to a stderr nobody sees from `.onInit`. A refusal must exit with its
+    /// own code, append its cause to the install-gate log, and hand NSIS the first line and the
+    /// log path for the dialog.
+    #[test]
+    fn update_manual_gate_refusal_names_its_cause_in_the_log_and_the_dialog() {
+        let root = std::env::temp_dir().join(format!(
+            "tono-gate-report-{}-{}",
+            std::process::id(),
+            line!()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let log = root.join("logs").join("install-gate.log");
+        let report = native::GateReport {
+            log: Some(log.clone()),
+            fallback_log: root.join("fallback.log"),
+            reason_file: Some(root.join("reason.txt")),
+        };
+        let refused = Err(native::refusal(
+            native::GateReason::InstallerLeaseHeld,
+            "another manual installer is active: Un_A.exe (pid 4242) holds the lease",
+        ));
+        assert_eq!(finish_gate("--manual-update-gate", &report, refused), 81);
+        let written = std::fs::read_to_string(&log).unwrap_or_default();
+        assert!(
+            written.contains("--manual-update-gate exit=81 TONO_INSTALL_INSTALLER_LEASE_HELD"),
+            "{written}"
+        );
+        assert!(
+            written.contains("Un_A.exe (pid 4242) holds the lease"),
+            "{written}"
+        );
+        let reason = std::fs::read(root.join("reason.txt")).unwrap();
+        let reason = String::from_utf16(
+            &reason
+                .chunks_exact(2)
+                .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+                .collect::<Vec<_>>(),
+        )
+        .unwrap();
+        let mut lines = reason.split("\r\n");
+        assert_eq!(
+            lines.next(),
+            Some("another manual installer is active: Un_A.exe (pid 4242) holds the lease")
+        );
+        assert_eq!(lines.next(), Some(log.display().to_string().as_str()));
+        std::fs::remove_dir_all(&root).unwrap();
     }
 
     /// H22-O-F1: every refusal of the manual gate starts with a WFP read, an RPC to BFE. A

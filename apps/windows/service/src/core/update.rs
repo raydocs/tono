@@ -1,5 +1,6 @@
 //! Native coordinator. All calls execute under the Service lifecycle writer;
 //! the on-disk lock also serializes the independently running SYSTEM executor.
+mod gate;
 pub(crate) mod security;
 use super::{
     auth::AuthenticatedOwner, desired, dns, manager, windows_kill_switch as wfp, windows_security,
@@ -10,6 +11,7 @@ use crate::update_contract::{
 use crate::update_transaction::*;
 use crate::update_wire::{UpdateRequest, UpdateStatus};
 use anyhow::{Context as _, Result, ensure};
+pub use gate::{GateReason, GateRefusal, GateReport, reason_of, refusal};
 pub use security::{
     UserLaunch, app_image, image, install_root, parent_image, pin_path, program_files,
     record_installed_version, tunnel_absent, verify_tree,
@@ -931,12 +933,37 @@ pub async fn manual_gate() -> Result<()> {
 
 async fn manual_core_absent() -> Result<()> {
     if let Some(record) = super::runtime::read_core_runtime_record().await? {
-        ensure!(
-            super::process::process_identity(record.pid)?.as_ref() != Some(&record.identity),
-            "Disconnect before manual installation: Core is still running"
-        );
+        let live = super::process::process_identity(record.pid);
+        match recorded_core_state(&record.identity, live, || None) {
+            RecordedCore::Gone => {}
+            RecordedCore::Running => {
+                anyhow::bail!("Disconnect before manual installation: Core is still running")
+            }
+            RecordedCore::Unverifiable(error) => return Err(error),
+        }
     }
     tunnel_absent("Tono")
+}
+
+/// What a leftover core runtime record says about the Core it names.
+enum RecordedCore {
+    /// That incarnation is gone: the pid exited or now belongs to another program.
+    Gone,
+    Running,
+    /// The pid is alive but could not be inspected, and nothing shows it is another program.
+    Unverifiable(anyhow::Error),
+}
+
+fn recorded_core_state(
+    recorded: &super::process::ProcessIdentity,
+    live: Result<Option<super::process::ProcessIdentity>>,
+    _image_name: impl FnOnce() -> Option<String>,
+) -> RecordedCore {
+    match live {
+        Ok(Some(identity)) if identity == *recorded => RecordedCore::Running,
+        Ok(_) => RecordedCore::Gone,
+        Err(error) => RecordedCore::Unverifiable(error),
+    }
 }
 
 /// The manual gate refused only because Tono protection is still active: no
@@ -1211,6 +1238,37 @@ pub fn reconcile_before_desired() -> Result<bool> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// WIN-GATE-OPAQUE: a core runtime record outlives its Core when the Service is removed
+    /// without stopping it cleanly. After a reboot its pid can belong to any program, including
+    /// one whose image cannot be read (`Registry`, `MemCompression`, a protected process). That
+    /// read error refused every install with the catch-all dialog. A pid that now runs a
+    /// different image is a stale record; only the same image name, or none, stays unproven.
+    #[test]
+    fn update_manual_gate_treats_a_reused_core_pid_as_a_stale_record() {
+        let recorded = super::super::process::ProcessIdentity {
+            executable: r"C:\Program Files\Tono\tono-core.exe".into(),
+            started_at: 133_000_000_000_000_000,
+        };
+        let state = recorded_core_state(
+            &recorded,
+            Err(anyhow::anyhow!("Access is denied. (os error 5)")),
+            || Some("Registry".into()),
+        );
+        assert!(
+            matches!(state, RecordedCore::Gone),
+            "a reused pid kept refusing the install"
+        );
+        let state = recorded_core_state(
+            &recorded,
+            Err(anyhow::anyhow!("Access is denied. (os error 5)")),
+            || Some("TONO-CORE.EXE".into()),
+        );
+        assert!(matches!(state, RecordedCore::Unverifiable(_)));
+        let state =
+            recorded_core_state(&recorded, Err(anyhow::anyhow!("snapshot failed")), || None);
+        assert!(matches!(state, RecordedCore::Unverifiable(_)));
+    }
 
     #[test]
     fn update_manual_gate_names_an_orphaned_barrier_instead_of_asking_to_disconnect() {
