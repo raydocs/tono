@@ -74,6 +74,8 @@ Var PassiveMode
 Var UpdateMode
 Var TonoPrivateUnpack
 Var TonoManualMutated
+; 1 once the uninstaller handed its manual lease back at the end of its section.
+Var TonoLeaseReleased
 Var NoShortcutMode
 Var ExistingVersion
 Var ExistingUninstallCommand
@@ -427,9 +429,6 @@ LangString manualInstallNeedsDisconnect ${LANG_SIMPCHINESE} "${PRODUCTNAME} 仍�
 LangString manualInstallNeedsDisconnect ${LANG_ENGLISH} "${PRODUCTNAME} is still connected, or its network protection is still on, so it cannot be installed right now. Nothing was changed.$\r$\n$\r$\nOpen ${PRODUCTNAME} and choose Disconnect (or Restore internet if it shows Protected Offline), then run this installer or check for updates again.$\r$\n$\r$\nIf ${PRODUCTNAME} does not open, first run the Start-menu shortcut $\"${PRODUCTNAME} — 恢复网络 (Restore Network)$\" as administrator."
 LangString manualInstallNeedsDisconnect ${LANG_RUSSIAN} "${PRODUCTNAME} всё ещё подключён или его защита сети включена, поэтому установка сейчас невозможна. Ничего не изменено.$\r$\n$\r$\nОткройте ${PRODUCTNAME} и выберите «Отключить» (или «Восстановить интернет» в режиме Protected Offline), затем снова запустите этот установщик или проверьте обновления.$\r$\n$\r$\nЕсли ${PRODUCTNAME} не открывается, сначала запустите от имени администратора ярлык меню «Пуск» $\"${PRODUCTNAME} — 恢复网络 (Restore Network)$\"."
 
-LangString manualInstallRefused ${LANG_SIMPCHINESE} "${PRODUCTNAME} 现在无法安装：可能有受保护的更新尚未完成、另一个安装程序正在运行，或无法确认网络状态。没有做任何更改。$\r$\n$\r$\n请打开 ${PRODUCTNAME}，在“检查更新”中完成或断开并重试未完成的更新，然后再运行此安装程序。"
-LangString manualInstallRefused ${LANG_ENGLISH} "${PRODUCTNAME} cannot be installed right now: a protected update may still be pending, another installer may be running, or the network state could not be confirmed. Nothing was changed.$\r$\n$\r$\nOpen ${PRODUCTNAME}, finish or Disconnect and Retry the pending update from Check for Updates, then run this installer again."
-LangString manualInstallRefused ${LANG_RUSSIAN} "Сейчас установить ${PRODUCTNAME} нельзя: возможно, не завершено защищённое обновление, работает другой установщик или не удалось подтвердить состояние сети. Ничего не изменено.$\r$\n$\r$\nОткройте ${PRODUCTNAME}, завершите незаконченное обновление или отключитесь и повторите его в разделе проверки обновлений, затем снова запустите этот установщик."
 LangString manualInstallNeedsBfe ${LANG_SIMPCHINESE} "${PRODUCTNAME} 现在无法安装：Windows 的基础筛选引擎（BFE）已关闭或无法启动，${PRODUCTNAME} 需要它来检查和保护网络。没有做任何更改。$\r$\n$\r$\n请以管理员身份打开 PowerShell，依次运行：$\r$\n    sc.exe config BFE start= auto$\r$\n    sc.exe start BFE$\r$\n然后重新运行此安装程序。BFE 通常是被安全软件或“网络加速器”类工具关掉的。"
 LangString manualInstallNeedsBfe ${LANG_ENGLISH} "${PRODUCTNAME} cannot be installed right now: Windows Base Filtering Engine (BFE) is turned off or would not start, and ${PRODUCTNAME} needs it to check and protect your network. Nothing was changed.$\r$\n$\r$\nOpen PowerShell as administrator and run:$\r$\n    sc.exe config BFE start= auto$\r$\n    sc.exe start BFE$\r$\nthen run this installer again. Security software and network accelerator tools are the usual reason BFE is turned off."
 LangString manualInstallNeedsBfe ${LANG_RUSSIAN} "Сейчас установить ${PRODUCTNAME} нельзя: служба Windows «Служба базовой фильтрации» (BFE) отключена или не запускается, а ${PRODUCTNAME} нужна она, чтобы проверить и защитить сеть. Ничего не изменено.$\r$\n$\r$\nОткройте PowerShell от имени администратора и выполните:$\r$\n    sc.exe config BFE start= auto$\r$\n    sc.exe start BFE$\r$\nзатем снова запустите этот установщик. Обычно BFE отключают защитные программы и «ускорители сети»."
@@ -438,9 +437,6 @@ LangString uninstallReleasesProtection ${LANG_SIMPCHINESE} "${PRODUCTNAME} 仍�
 LangString uninstallReleasesProtection ${LANG_ENGLISH} "${PRODUCTNAME} is still connected, or its network protection is still on.$\r$\n$\r$\nUninstalling turns ${PRODUCTNAME}'s protection off and restores normal internet access. If the block cannot be shown removed, nothing is deleted.$\r$\n$\r$\nContinue uninstalling?"
 LangString uninstallReleasesProtection ${LANG_RUSSIAN} "${PRODUCTNAME} всё ещё подключён или его защита сети включена.$\r$\n$\r$\nУдаление отключит защиту ${PRODUCTNAME} и восстановит обычный доступ в интернет. Если не удастся подтвердить снятие блокировки, ничего не будет удалено.$\r$\n$\r$\nПродолжить удаление?"
 
-LangString manualUninstallRefused ${LANG_SIMPCHINESE} "${PRODUCTNAME} 现在无法卸载：可能有受保护的更新尚未完成，或另一个安装程序正在运行。没有做任何更改。$\r$\n$\r$\n请打开 ${PRODUCTNAME}，在“检查更新”中完成或断开并重试未完成的更新，然后再卸载。"
-LangString manualUninstallRefused ${LANG_ENGLISH} "${PRODUCTNAME} cannot be uninstalled right now: a protected update may still be pending, or another installer may be running. Nothing was changed.$\r$\n$\r$\nOpen ${PRODUCTNAME}, finish or Disconnect and Retry the pending update from Check for Updates, then uninstall again."
-LangString manualUninstallRefused ${LANG_RUSSIAN} "Сейчас удалить ${PRODUCTNAME} нельзя: возможно, не завершено защищённое обновление или работает другой установщик. Ничего не изменено.$\r$\n$\r$\nОткройте ${PRODUCTNAME}, завершите незаконченное обновление или отключитесь и повторите его в разделе проверки обновлений, затем повторите удаление."
 
 LangString installClearsOrphanedBlock ${LANG_SIMPCHINESE} "此电脑上仍装有 ${PRODUCTNAME} 的网络拦截，但已没有 ${PRODUCTNAME} 服务可以解除它，因此“断开”和“恢复网络”快捷方式都不可用。$\r$\n$\r$\n继续安装会先解除这项拦截并恢复普通网络访问，然后重新安装 ${PRODUCTNAME}；如果无法确认拦截已解除，安装会停止，不会删除任何文件。安装完成后请重新连接以恢复保护。$\r$\n$\r$\n是否继续？"
 LangString installClearsOrphanedBlock ${LANG_ENGLISH} "A ${PRODUCTNAME} network block is still installed on this PC, but no ${PRODUCTNAME} Service is left to release it, so neither Disconnect nor the Restore Network shortcut can help.$\r$\n$\r$\nContinuing removes that block, restores normal internet access and reinstalls ${PRODUCTNAME}. If the block cannot be shown removed, the installation stops and nothing is deleted. Connect again afterwards to turn protection back on.$\r$\n$\r$\nContinue?"
@@ -449,6 +445,176 @@ LangString installClearsOrphanedBlock ${LANG_RUSSIAN} "На этом компь�
 LangString restoreNetworkTooltip ${LANG_SIMPCHINESE} "当 ${PRODUCTNAME} 无法恢复网络时，解除网络保护（需要管理员权限）。"
 LangString restoreNetworkTooltip ${LANG_ENGLISH} "Restores your network if ${PRODUCTNAME} cannot. Requires administrator approval."
 LangString restoreNetworkTooltip ${LANG_RUSSIAN} "Восстанавливает сеть, если ${PRODUCTNAME} не может. Требуются права администратора."
+
+; Manual gate refusals (WIN-GATE-OPAQUE): one explanation per helper exit code. Chinese and
+; English; Russian stays selectable, so each of these repeats the English text there.
+LangString gateInstallRefused ${LANG_SIMPCHINESE} "${PRODUCTNAME} 现在无法安装，没有做任何更改。"
+LangString gateInstallRefused ${LANG_ENGLISH} "${PRODUCTNAME} cannot be installed right now. Nothing was changed."
+LangString gateInstallRefused ${LANG_RUSSIAN} "${PRODUCTNAME} cannot be installed right now. Nothing was changed."
+
+LangString gateUninstallRefused ${LANG_SIMPCHINESE} "${PRODUCTNAME} 现在无法卸载，没有做任何更改。"
+LangString gateUninstallRefused ${LANG_ENGLISH} "${PRODUCTNAME} cannot be uninstalled right now. Nothing was changed."
+LangString gateUninstallRefused ${LANG_RUSSIAN} "${PRODUCTNAME} cannot be uninstalled right now. Nothing was changed."
+
+LangString gateRefusalFooter ${LANG_SIMPCHINESE} "错误代码：$R0$\r$\n详情：$R2$\r$\n日志：$R3"
+LangString gateRefusalFooter ${LANG_ENGLISH} "Code: $R0$\r$\nDetails: $R2$\r$\nLog: $R3"
+LangString gateRefusalFooter ${LANG_RUSSIAN} "Code: $R0$\r$\nDetails: $R2$\r$\nLog: $R3"
+
+LangString gateNoDetail ${LANG_SIMPCHINESE} "（无）"
+LangString gateNoDetail ${LANG_ENGLISH} "(none)"
+LangString gateNoDetail ${LANG_RUSSIAN} "(none)"
+
+LangString gateReasonUpdatePending ${LANG_SIMPCHINESE} "原因：上一次 ${PRODUCTNAME} 更新没有完成，受保护的恢复记录仍在。$\r$\n下一步：如果 ${PRODUCTNAME} 仍已安装，请打开它，在“检查更新”中完成更新（或断开后重试）；如果已经卸载，请重启电脑一次，让恢复任务完成，然后重试。"
+LangString gateReasonUpdatePending ${LANG_ENGLISH} "Cause: an earlier ${PRODUCTNAME} update did not finish, and its protected recovery record is still here.$\r$\nNext: if ${PRODUCTNAME} is still installed, open it and finish the update from Check for Updates (or Disconnect and Retry). If it is already uninstalled, restart Windows once so the recovery task can finish, then try again."
+LangString gateReasonUpdatePending ${LANG_RUSSIAN} "Cause: an earlier ${PRODUCTNAME} update did not finish, and its protected recovery record is still here.$\r$\nNext: if ${PRODUCTNAME} is still installed, open it and finish the update from Check for Updates (or Disconnect and Retry). If it is already uninstalled, restart Windows once so the recovery task can finish, then try again."
+
+LangString gateReasonInstallerLeaseHeld ${LANG_SIMPCHINESE} "原因：另一个 ${PRODUCTNAME} 安装程序或卸载程序的窗口还开着（名字见“详情”）。$\r$\n下一步：关闭那个窗口（卸载程序停在“完成”页时请点“关闭”），然后重试。在任务栏找不到它时，请重启电脑后重试。"
+LangString gateReasonInstallerLeaseHeld ${LANG_ENGLISH} "Cause: another ${PRODUCTNAME} installer or uninstaller window is still open (its name is under Details).$\r$\nNext: close that window (if an uninstaller shows Completed, click Close), then try again. If you cannot find it on the taskbar, restart Windows and try again."
+LangString gateReasonInstallerLeaseHeld ${LANG_RUSSIAN} "Cause: another ${PRODUCTNAME} installer or uninstaller window is still open (its name is under Details).$\r$\nNext: close that window (if an uninstaller shows Completed, click Close), then try again. If you cannot find it on the taskbar, restart Windows and try again."
+
+LangString gateReasonLifecycleWriterActive ${LANG_SIMPCHINESE} "原因：另一个 ${PRODUCTNAME} 安装、卸载或修复步骤正在运行。$\r$\n下一步：等一分钟，关闭其他 ${PRODUCTNAME} 安装或卸载窗口，然后重试；仍然出现时，请重启电脑后重试。"
+LangString gateReasonLifecycleWriterActive ${LANG_ENGLISH} "Cause: another ${PRODUCTNAME} install, uninstall or repair step is running right now.$\r$\nNext: wait a minute, close any other ${PRODUCTNAME} setup windows, then try again. If it keeps happening, restart Windows and try again."
+LangString gateReasonLifecycleWriterActive ${LANG_RUSSIAN} "Cause: another ${PRODUCTNAME} install, uninstall or repair step is running right now.$\r$\nNext: wait a minute, close any other ${PRODUCTNAME} setup windows, then try again. If it keeps happening, restart Windows and try again."
+
+LangString gateReasonWfpUnreadable ${LANG_SIMPCHINESE} "原因：无法读取 Windows 筛选平台（WFP），${PRODUCTNAME} 不能确认网络没有被拦截。$\r$\n下一步：重启电脑后重试。仍然失败时，可能是安全软件拦截了对 Windows 防火墙引擎的访问：请在安装期间暂停它的防火墙或网络防护。"
+LangString gateReasonWfpUnreadable ${LANG_ENGLISH} "Cause: the Windows Filtering Platform (WFP) could not be read, so ${PRODUCTNAME} cannot confirm your network is not blocked.$\r$\nNext: restart Windows and try again. If it still fails, security software may be blocking the Windows firewall engine: pause its firewall or network protection during setup."
+LangString gateReasonWfpUnreadable ${LANG_RUSSIAN} "Cause: the Windows Filtering Platform (WFP) could not be read, so ${PRODUCTNAME} cannot confirm your network is not blocked.$\r$\nNext: restart Windows and try again. If it still fails, security software may be blocking the Windows firewall engine: pause its firewall or network protection during setup."
+
+LangString gateReasonOwnerStateUnreadable ${LANG_SIMPCHINESE} "原因：无法读取 ${PRODUCTNAME} 保存的连接记录（%ProgramData%\Tono 下的 active-owner.json 或 users 文件夹）。$\r$\n下一步：重启电脑后重试；仍然失败时，请把下面的日志文件发给 ${PRODUCTNAME} 支持。"
+LangString gateReasonOwnerStateUnreadable ${LANG_ENGLISH} "Cause: the connection record ${PRODUCTNAME} saved (active-owner.json or the users folder in %ProgramData%\Tono) cannot be read.$\r$\nNext: restart Windows and try again. If it still fails, send the log file below to ${PRODUCTNAME} support."
+LangString gateReasonOwnerStateUnreadable ${LANG_RUSSIAN} "Cause: the connection record ${PRODUCTNAME} saved (active-owner.json or the users folder in %ProgramData%\Tono) cannot be read.$\r$\nNext: restart Windows and try again. If it still fails, send the log file below to ${PRODUCTNAME} support."
+
+LangString gateReasonDnsRestoreUnproven ${LANG_SIMPCHINESE} "原因：${PRODUCTNAME} 无法证明网卡的 DNS 设置已经从它的保护状态恢复。$\r$\n下一步：重启电脑后重试。仍然失败时，在 Windows 设置 > 网络和 Internet > 当前网络 > DNS 服务器分配 中选“自动(DHCP)”，然后重试。"
+LangString gateReasonDnsRestoreUnproven ${LANG_ENGLISH} "Cause: ${PRODUCTNAME} could not prove that your network adapters' DNS settings were restored from its protection.$\r$\nNext: restart Windows and try again. If it still fails, set DNS server assignment to Automatic (DHCP) for your network in Windows Settings > Network & internet, then try again."
+LangString gateReasonDnsRestoreUnproven ${LANG_RUSSIAN} "Cause: ${PRODUCTNAME} could not prove that your network adapters' DNS settings were restored from its protection.$\r$\nNext: restart Windows and try again. If it still fails, set DNS server assignment to Automatic (DHCP) for your network in Windows Settings > Network & internet, then try again."
+
+LangString gateReasonCoreRunning ${LANG_SIMPCHINESE} "原因：之前安装的 ${PRODUCTNAME} 核心进程仍在运行，或无法确认它已经停止。$\r$\n下一步：请重启电脑，然后重试。"
+LangString gateReasonCoreRunning ${LANG_ENGLISH} "Cause: the ${PRODUCTNAME} core process from an earlier installation is still running, or could not be shown stopped.$\r$\nNext: restart Windows, then try again."
+LangString gateReasonCoreRunning ${LANG_RUSSIAN} "Cause: the ${PRODUCTNAME} core process from an earlier installation is still running, or could not be shown stopped.$\r$\nNext: restart Windows, then try again."
+
+LangString gateReasonTonoAdapterPresent ${LANG_SIMPCHINESE} "原因：旧版 ${PRODUCTNAME} 的虚拟网卡（名为 Tono）仍在。$\r$\n下一步：请重启电脑后再重试。重启后仍在时，打开设备管理器 > 查看 > 显示隐藏的设备，在“网络适配器”下卸载属于 ${PRODUCTNAME} 的虚拟网卡（显示为 Tono、Wintun 或 Mihomo），然后重试。"
+LangString gateReasonTonoAdapterPresent ${LANG_ENGLISH} "Cause: the virtual network adapter of an earlier ${PRODUCTNAME} (named Tono) is still present.$\r$\nNext: restart Windows and try again. If it is still there after the restart, open Device Manager > View > Show hidden devices, uninstall the ${PRODUCTNAME} adapter under Network adapters (shown as Tono, Wintun or Mihomo), then try again."
+LangString gateReasonTonoAdapterPresent ${LANG_RUSSIAN} "Cause: the virtual network adapter of an earlier ${PRODUCTNAME} (named Tono) is still present.$\r$\nNext: restart Windows and try again. If it is still there after the restart, open Device Manager > View > Show hidden devices, uninstall the ${PRODUCTNAME} adapter under Network adapters (shown as Tono, Wintun or Mihomo), then try again."
+
+LangString gateReasonStateDirUnusable ${LANG_SIMPCHINESE} "原因：${PRODUCTNAME} 的系统数据文件夹 %ProgramData%\Tono 不能安全使用：它可能被“C 盘搬家”类工具改成了链接，或所有者不是管理员或 SYSTEM。$\r$\n下一步：如果用工具搬移过 ProgramData，请先移回原位；否则请把下面的日志文件发给 ${PRODUCTNAME} 支持。"
+LangString gateReasonStateDirUnusable ${LANG_ENGLISH} "Cause: the ${PRODUCTNAME} system data folder %ProgramData%\Tono cannot be used safely: a disk-moving tool may have turned it into a link, or it is not owned by Administrators or SYSTEM.$\r$\nNext: if you moved ProgramData with such a tool, move it back first. Otherwise send the log file below to ${PRODUCTNAME} support."
+LangString gateReasonStateDirUnusable ${LANG_RUSSIAN} "Cause: the ${PRODUCTNAME} system data folder %ProgramData%\Tono cannot be used safely: a disk-moving tool may have turned it into a link, or it is not owned by Administrators or SYSTEM.$\r$\nNext: if you moved ProgramData with such a tool, move it back first. Otherwise send the log file below to ${PRODUCTNAME} support."
+
+LangString gateReasonUpdateEvidenceUnreadable ${LANG_SIMPCHINESE} "原因：${PRODUCTNAME} 的受保护更新记录（%ProgramData%\Tono\updates-v1）已损坏，或是由更新版本的 ${PRODUCTNAME} 写入的。$\r$\n下一步：请使用最新的 ${PRODUCTNAME} 安装程序；已经是最新版时，请把下面的日志文件发给 ${PRODUCTNAME} 支持。不要自行删除该文件夹。"
+LangString gateReasonUpdateEvidenceUnreadable ${LANG_ENGLISH} "Cause: the ${PRODUCTNAME} protected update record (%ProgramData%\Tono\updates-v1) is damaged or was written by a newer ${PRODUCTNAME}.$\r$\nNext: use the newest ${PRODUCTNAME} installer. If this already is the newest, send the log file below to ${PRODUCTNAME} support. Do not delete that folder yourself."
+LangString gateReasonUpdateEvidenceUnreadable ${LANG_RUSSIAN} "Cause: the ${PRODUCTNAME} protected update record (%ProgramData%\Tono\updates-v1) is damaged or was written by a newer ${PRODUCTNAME}.$\r$\nNext: use the newest ${PRODUCTNAME} installer. If this already is the newest, send the log file below to ${PRODUCTNAME} support. Do not delete that folder yourself."
+
+LangString gateReasonInstallerUnverifiable ${LANG_SIMPCHINESE} "原因：无法读取正在运行的安装（或卸载）程序文件本身。$\r$\n下一步：把安装程序复制到本机磁盘上的“下载”文件夹并从那里运行；不要从网络驱动器、U 盘、云盘或直接在压缩包里运行。"
+LangString gateReasonInstallerUnverifiable ${LANG_ENGLISH} "Cause: the running setup program file itself could not be read.$\r$\nNext: copy the installer to your Downloads folder on this PC's disk and run it from there, not from a network drive, USB stick, cloud drive or directly inside a ZIP file."
+LangString gateReasonInstallerUnverifiable ${LANG_RUSSIAN} "Cause: the running setup program file itself could not be read.$\r$\nNext: copy the installer to your Downloads folder on this PC's disk and run it from there, not from a network drive, USB stick, cloud drive or directly inside a ZIP file."
+
+LangString gateReasonOrphanedProtection ${LANG_SIMPCHINESE} "原因：此电脑上仍有 ${PRODUCTNAME} 的网络拦截，但已没有 ${PRODUCTNAME} 服务可以解除它。$\r$\n下一步：不带 /S 参数运行此安装程序，在提示时确认解除拦截。"
+LangString gateReasonOrphanedProtection ${LANG_ENGLISH} "Cause: a ${PRODUCTNAME} network block is still installed, but no ${PRODUCTNAME} Service is left to release it.$\r$\nNext: run this installer without /S and confirm clearing the block when asked."
+LangString gateReasonOrphanedProtection ${LANG_RUSSIAN} "Cause: a ${PRODUCTNAME} network block is still installed, but no ${PRODUCTNAME} Service is left to release it.$\r$\nNext: run this installer without /S and confirm clearing the block when asked."
+
+LangString gateReasonBfe ${LANG_SIMPCHINESE} "原因：Windows 的基础筛选引擎（BFE）已关闭或无法启动，${PRODUCTNAME} 需要它来检查网络。$\r$\n下一步：以管理员身份打开 PowerShell，依次运行 sc.exe config BFE start= auto 和 sc.exe start BFE，然后重试。"
+LangString gateReasonBfe ${LANG_ENGLISH} "Cause: the Windows Base Filtering Engine (BFE) is turned off or would not start, and ${PRODUCTNAME} needs it to check your network.$\r$\nNext: in an administrator PowerShell run sc.exe config BFE start= auto, then sc.exe start BFE, then try again."
+LangString gateReasonBfe ${LANG_RUSSIAN} "Cause: the Windows Base Filtering Engine (BFE) is turned off or would not start, and ${PRODUCTNAME} needs it to check your network.$\r$\nNext: in an administrator PowerShell run sc.exe config BFE start= auto, then sc.exe start BFE, then try again."
+
+LangString gateReasonHelperBlocked ${LANG_SIMPCHINESE} "原因：安装程序无法启动它的 ${PRODUCTNAME} 安全检查组件（tono-service-install.exe），通常是被安全软件或 Windows“智能应用控制”拦截了。$\r$\n下一步：在安全软件中允许该文件或把它从隔离区恢复，然后重试。"
+LangString gateReasonHelperBlocked ${LANG_ENGLISH} "Cause: setup could not start its ${PRODUCTNAME} safety check (tono-service-install.exe); security software or Windows Smart App Control usually blocked it.$\r$\nNext: allow that file in your security software or restore it from quarantine, then try again."
+LangString gateReasonHelperBlocked ${LANG_RUSSIAN} "Cause: setup could not start its ${PRODUCTNAME} safety check (tono-service-install.exe); security software or Windows Smart App Control usually blocked it.$\r$\nNext: allow that file in your security software or restore it from quarantine, then try again."
+
+LangString gateReasonUnexpected ${LANG_SIMPCHINESE} "原因：未知错误（见“详情”）。$\r$\n下一步：重启电脑后重试；仍然失败时，请把错误代码、详情和日志文件发给 ${PRODUCTNAME} 支持。"
+LangString gateReasonUnexpected ${LANG_ENGLISH} "Cause: unknown error (see Details).$\r$\nNext: restart Windows and try again. If it still fails, send the code, the details and the log file to ${PRODUCTNAME} support."
+LangString gateReasonUnexpected ${LANG_RUSSIAN} "Cause: unknown error (see Details).$\r$\nNext: restart Windows and try again. If it still fails, send the code, the details and the log file to ${PRODUCTNAME} support."
+
+; Strip one trailing LF and CR that FileReadUTF16LE keeps.
+!macro TONO_TRIM_EOL VAR
+  StrCpy $R5 ${VAR} 1 -1
+  ${If} $R5 == "$\n"
+    StrCpy ${VAR} ${VAR} -1
+  ${EndIf}
+  StrCpy $R5 ${VAR} 1 -1
+  ${If} $R5 == "$\r"
+    StrCpy ${VAR} ${VAR} -1
+  ${EndIf}
+!macroend
+
+; Explain a manual gate result ($0: the helper's exit code, or nsExec's "error" when it could not
+; start). Out: $R0 the stable code, $R1 the cause and next step, $R2 the helper's first error
+; line, $R3 the install-gate log it wrote. The helper writes both lines to the reason file.
+!macro TONO_GATE_EXPLAIN UN
+Function ${UN}TonoGateExplain
+  StrCpy $R2 ""
+  StrCpy $R3 ""
+  ClearErrors
+  FileOpen $R4 "$PLUGINSDIR\tono-gate-reason.txt" r
+  ${IfNot} ${Errors}
+    FileReadUTF16LE $R4 $R2
+    FileReadUTF16LE $R4 $R3
+    FileClose $R4
+  ${EndIf}
+  !insertmacro TONO_TRIM_EOL $R2
+  !insertmacro TONO_TRIM_EOL $R3
+  ${If} $R2 == ""
+    StrCpy $R2 "$(gateNoDetail)"
+  ${EndIf}
+  ${If} $R3 == ""
+    ReadEnvStr $R3 PROGRAMDATA
+    StrCpy $R3 "$R3\Tono\logs\install-gate.log"
+  ${EndIf}
+  ${If} $0 == "77"
+    StrCpy $R0 "TONO_INSTALL_PROTECTION_ACTIVE"
+    StrCpy $R1 "$(manualInstallNeedsDisconnect)"
+  ${ElseIf} $0 == "78"
+    StrCpy $R0 "TONO_INSTALL_ORPHANED_PROTECTION"
+    StrCpy $R1 "$(gateReasonOrphanedProtection)"
+  ${ElseIf} $0 == "79"
+    StrCpy $R0 "TONO_BFE_NOT_RUNNING"
+    StrCpy $R1 "$(gateReasonBfe)"
+  ${ElseIf} $0 == "80"
+    StrCpy $R0 "TONO_INSTALL_UPDATE_PENDING"
+    StrCpy $R1 "$(gateReasonUpdatePending)"
+  ${ElseIf} $0 == "81"
+    StrCpy $R0 "TONO_INSTALL_INSTALLER_LEASE_HELD"
+    StrCpy $R1 "$(gateReasonInstallerLeaseHeld)"
+  ${ElseIf} $0 == "82"
+    StrCpy $R0 "TONO_INSTALL_LIFECYCLE_WRITER_ACTIVE"
+    StrCpy $R1 "$(gateReasonLifecycleWriterActive)"
+  ${ElseIf} $0 == "83"
+    StrCpy $R0 "TONO_INSTALL_WFP_UNREADABLE"
+    StrCpy $R1 "$(gateReasonWfpUnreadable)"
+  ${ElseIf} $0 == "84"
+    StrCpy $R0 "TONO_INSTALL_OWNER_STATE_UNREADABLE"
+    StrCpy $R1 "$(gateReasonOwnerStateUnreadable)"
+  ${ElseIf} $0 == "85"
+    StrCpy $R0 "TONO_INSTALL_DNS_RESTORE_UNPROVEN"
+    StrCpy $R1 "$(gateReasonDnsRestoreUnproven)"
+  ${ElseIf} $0 == "86"
+    StrCpy $R0 "TONO_INSTALL_CORE_RUNNING"
+    StrCpy $R1 "$(gateReasonCoreRunning)"
+  ${ElseIf} $0 == "87"
+    StrCpy $R0 "TONO_INSTALL_TONO_ADAPTER_PRESENT"
+    StrCpy $R1 "$(gateReasonTonoAdapterPresent)"
+  ${ElseIf} $0 == "88"
+    StrCpy $R0 "TONO_INSTALL_STATE_DIR_UNUSABLE"
+    StrCpy $R1 "$(gateReasonStateDirUnusable)"
+  ${ElseIf} $0 == "89"
+    StrCpy $R0 "TONO_INSTALL_UPDATE_EVIDENCE_UNREADABLE"
+    StrCpy $R1 "$(gateReasonUpdateEvidenceUnreadable)"
+  ${ElseIf} $0 == "90"
+    StrCpy $R0 "TONO_INSTALL_INSTALLER_UNVERIFIABLE"
+    StrCpy $R1 "$(gateReasonInstallerUnverifiable)"
+  ${ElseIf} $0 == "91"
+    StrCpy $R0 "TONO_INSTALL_UNEXPECTED"
+    StrCpy $R1 "$(gateReasonUnexpected)"
+  ${ElseIf} $0 == "error"
+    StrCpy $R0 "TONO_INSTALL_HELPER_BLOCKED"
+    StrCpy $R1 "$(gateReasonHelperBlocked)"
+  ${Else}
+    StrCpy $R0 "TONO_INSTALL_UNEXPECTED"
+    StrCpy $R1 "$(gateReasonUnexpected)"
+  ${EndIf}
+FunctionEnd
+!macroend
+!insertmacro TONO_GATE_EXPLAIN ""
+!insertmacro TONO_GATE_EXPLAIN "un."
 
 Function .onInit
   ; This is the first entry, before language/repair/registry/resource writes.
@@ -497,7 +663,9 @@ Function .onInit
   {{#each resources}}
     File /a "/oname={{this.[1]}}" "{{no-escape @key}}"
   {{/each}}
-  nsExec::ExecToLog '"$PLUGINSDIR\tono-gate\resources\tono-service-install.exe" --manual-update-gate'
+  ; The helper hands its first error line and its log path back through a fresh reason file.
+  Delete "$PLUGINSDIR\tono-gate-reason.txt"
+  nsExec::ExecToLog '"$PLUGINSDIR\tono-gate\resources\tono-service-install.exe" --manual-update-gate --reason-file "$PLUGINSDIR\tono-gate-reason.txt"'
   Pop $0
   ; 78: Tono's block filters remain but no Tono Service is left to own them, so neither Disconnect
   ; nor the Restore Network shortcut exists. The Install section's RemoveVergeService ladder is
@@ -510,7 +678,8 @@ Function .onInit
     SetErrorLevel 76
     Abort "Installation cancelled; the leftover Tono network block was kept."
     orphanBlockClearConfirmed:
-    nsExec::ExecToLog '"$PLUGINSDIR\tono-gate\resources\tono-service-install.exe" --manual-orphan-gate'
+    Delete "$PLUGINSDIR\tono-gate-reason.txt"
+    nsExec::ExecToLog '"$PLUGINSDIR\tono-gate\resources\tono-service-install.exe" --manual-orphan-gate --reason-file "$PLUGINSDIR\tono-gate-reason.txt"'
     Pop $0
     ${If} $0 == "0"
       StrCpy $ClearingOrphanedBlock 1
@@ -522,13 +691,16 @@ Function .onInit
     ; stood in the way. The gate still refuses; nothing here releases protection.
     ; 79 (H22-O-F1): BFE is Disabled or would not start, so WFP cannot be read and the gate
     ; refuses. The helper never re-enables a Disabled BFE (docs/DECISIONS.md); the dialog says how.
+    ; Every other refusal names its cause (WIN-GATE-OPAQUE): each dialog says what is wrong on
+    ; this PC and what to do, then the code, the helper's first error line and its log.
     ${IfNot} ${Silent}
+      Call TonoGateExplain
       ${If} $0 == "77"
-        MessageBox MB_ICONEXCLAMATION|MB_OK "$(manualInstallNeedsDisconnect)"
+        MessageBox MB_ICONEXCLAMATION|MB_OK "$(manualInstallNeedsDisconnect)$\r$\n$\r$\n$(gateRefusalFooter)"
       ${ElseIf} $0 == "79"
-        MessageBox MB_ICONSTOP|MB_OK "$(manualInstallNeedsBfe)"
+        MessageBox MB_ICONSTOP|MB_OK "$(manualInstallNeedsBfe)$\r$\n$\r$\n$(gateRefusalFooter)"
       ${Else}
-        MessageBox MB_ICONSTOP|MB_OK "$(manualInstallRefused)"
+        MessageBox MB_ICONSTOP|MB_OK "$(gateInstallRefused)$\r$\n$\r$\n$R1$\r$\n$\r$\n$(gateRefusalFooter)"
       ${EndIf}
     ${EndIf}
     SetErrorLevel 76
@@ -1333,8 +1505,11 @@ Function .onInstSuccess
 FunctionEnd
 
 Function un.onInit
-  ; Refuse pending v1 before the pre-uninstall hook or any App termination.
-  nsExec::ExecToLog '"$INSTDIR\resources\tono-service-install.exe" --manual-update-gate'
+  ; Refuse pending v1 before the pre-uninstall hook or any App termination. The plug-ins
+  ; directory only holds the helper's reason file until the gate has answered.
+  InitPluginsDir
+  Delete "$PLUGINSDIR\tono-gate-reason.txt"
+  nsExec::ExecToLog '"$INSTDIR\resources\tono-service-install.exe" --manual-update-gate --reason-file "$PLUGINSDIR\tono-gate-reason.txt"'
   Pop $0
   ; 78 (block filters with no Tono Service left to own them) needs the same confirmed release:
   ; this uninstaller's RemoveVergeService ladder is the only thing left that can remove them.
@@ -1351,17 +1526,18 @@ Function un.onInit
     SetErrorLevel 76
     Abort "Uninstall cancelled while protection is active."
     uninstallReleaseConfirmed:
-    nsExec::ExecToLog '"$INSTDIR\resources\tono-service-install.exe" --manual-uninstall-gate'
+    Delete "$PLUGINSDIR\tono-gate-reason.txt"
+    nsExec::ExecToLog '"$INSTDIR\resources\tono-service-install.exe" --manual-uninstall-gate --reason-file "$PLUGINSDIR\tono-gate-reason.txt"'
     Pop $0
   ${EndIf}
   ${If} $0 != "0"
     ${IfNot} ${Silent}
-      MessageBox MB_ICONSTOP|MB_OK "$(manualUninstallRefused)"
+      Call un.TonoGateExplain
+      MessageBox MB_ICONSTOP|MB_OK "$(gateUninstallRefused)$\r$\n$\r$\n$R1$\r$\n$\r$\n$(gateRefusalFooter)"
     ${EndIf}
     SetErrorLevel 76
     Abort "Disconnect and resolve any pending protected update before uninstalling."
   ${EndIf}
-  InitPluginsDir
   CopyFiles /SILENT "$INSTDIR\resources\tono-service-install.exe" "$PLUGINSDIR\tono-gate.exe"
   !insertmacro SetContext
 
@@ -1571,6 +1747,16 @@ Section Uninstall
     !insertmacro NSIS_HOOK_POSTUNINSTALL
   !endif
 
+  ; Nothing below changes this PC, so hand the manual lease back now instead of when this window
+  ; closes: a new installer started while the Completed page is still open was refused as
+  ; "another installer is active" (WIN-GATE-OPAQUE). An aborted section never gets here and
+  ; keeps the lease, as before.
+  nsExec::ExecToLog '"$PLUGINSDIR\tono-gate.exe" --manual-update-finish'
+  Pop $0
+  ${If} $0 == "0"
+    StrCpy $TonoLeaseReleased 1
+  ${EndIf}
+
   ; Auto close if passive mode or updating
   ${If} $PassiveMode = 1
   ${OrIf} $UpdateMode = 1
@@ -1579,10 +1765,12 @@ Section Uninstall
 SectionEnd
 
 Function un.onUninstSuccess
-  nsExec::ExecToLog '"$PLUGINSDIR\tono-gate.exe" --manual-update-finish'
-  Pop $0
-  ${If} $0 != "0"
-    SetErrorLevel 76
+  ${If} $TonoLeaseReleased != 1
+    nsExec::ExecToLog '"$PLUGINSDIR\tono-gate.exe" --manual-update-finish'
+    Pop $0
+    ${If} $0 != "0"
+      SetErrorLevel 76
+    ${EndIf}
   ${EndIf}
 FunctionEnd
 

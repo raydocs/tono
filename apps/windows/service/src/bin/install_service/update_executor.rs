@@ -127,63 +127,103 @@ fn manual_update_gate(
     begin()
 }
 
-/// How a manual gate run ends: its exit status for NSIS.
-#[cfg_attr(not(test), allow(dead_code))]
-fn finish_gate(_mode: &str, _report: &native::GateReport, outcome: Result<(), Error>) -> i32 {
+/// The gates whose refusal NSIS shows as a dialog. Each may name a reason file for it.
+const GATE_MODES: [&str; 3] = [
+    "--manual-update-gate",
+    "--manual-orphan-gate",
+    "--manual-uninstall-gate",
+];
+const REASON_FILE_ARG: &str = "--reason-file";
+
+/// `(mode, reason file)` when these arguments ask for one of [`GATE_MODES`].
+fn gate_invocation(args: &[std::ffi::OsString]) -> Option<(String, Option<PathBuf>)> {
+    let (mode, reason_file) = match args {
+        [mode] => (mode, None),
+        [mode, flag, path] if flag == REASON_FILE_ARG => (mode, Some(PathBuf::from(path))),
+        _ => return None,
+    };
+    let mode = mode.to_str()?;
+    GATE_MODES
+        .contains(&mode)
+        .then(|| (mode.to_owned(), reason_file))
+}
+
+/// The exit status and stable code for a gate error (WIN-GATE-OPAQUE). 77–79 keep their own
+/// types; every other refusal names a [`native::GateReason`], or is `TONO_INSTALL_UNEXPECTED`.
+fn gate_exit(error: &Error) -> (i32, &'static str) {
+    if error.is::<native::ProtectionActive>() {
+        (
+            native::MANUAL_GATE_PROTECTION_ACTIVE_EXIT,
+            "TONO_INSTALL_PROTECTION_ACTIVE",
+        )
+    } else if error.is::<native::OrphanedProtection>() {
+        (
+            native::MANUAL_GATE_ORPHANED_PROTECTION_EXIT,
+            "TONO_INSTALL_ORPHANED_PROTECTION",
+        )
+    } else if error.is::<BfeUnavailable>() {
+        (MANUAL_GATE_BFE_UNAVAILABLE_EXIT, "TONO_BFE_NOT_RUNNING")
+    } else {
+        let reason = native::reason_of(error);
+        (reason.exit_code(), reason.code())
+    }
+}
+
+/// How a manual gate run ends: the exit status NSIS maps to its dialog, one entry in the
+/// install-gate log, and the reason file carrying the refusal's first line and that log's path.
+fn finish_gate(mode: &str, report: &native::GateReport, outcome: Result<(), Error>) -> i32 {
     let Err(error) = outcome else {
+        report.record(mode, 0, "OK", "");
         return 0;
     };
-    eprintln!("Error: {error:#}");
-    if error.is::<native::ProtectionActive>() {
-        return native::MANUAL_GATE_PROTECTION_ACTIVE_EXIT;
-    }
-    if error.is::<native::OrphanedProtection>() {
-        return native::MANUAL_GATE_ORPHANED_PROTECTION_EXIT;
-    }
-    if error.is::<BfeUnavailable>() {
-        return MANUAL_GATE_BFE_UNAVAILABLE_EXIT;
-    }
-    1
+    let (exit, code) = gate_exit(&error);
+    let chain = format!("{error:#}");
+    // A named refusal's chain starts with its code; the dialog shows the code on its own line.
+    let detail = chain
+        .strip_prefix(code)
+        .and_then(|rest| rest.strip_prefix(": "))
+        .unwrap_or(&chain);
+    eprintln!("Error: {code}: {detail}");
+    let log = report.record(mode, exit, code, detail);
+    report.write_reason(detail, log.as_deref());
+    exit
+}
+
+/// A panic is a refusal too: its message reaches the log and the dialog before the process ends
+/// (with `panic = "abort"` its exit status is not 101, which NSIS shows as unexpected anyway).
+fn report_gate_panics(mode: &str, reason_file: Option<PathBuf>) {
+    let mode = mode.to_owned();
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        default_hook(info);
+        let report = native::GateReport::for_machine(reason_file.clone());
+        let chain = format!("panic: {info}");
+        let log = report.record(&mode, 101, native::GateReason::Unexpected.code(), &chain);
+        report.write_reason(&chain, log.as_deref());
+    }));
 }
 
 pub(super) fn dispatch() -> Result<bool, Error> {
     let args: Vec<_> = std::env::args_os().skip(1).collect();
+    if let Some((mode, reason_file)) = gate_invocation(&args) {
+        report_gate_panics(&mode, reason_file.clone());
+        let outcome = match mode.as_str() {
+            "--manual-update-gate" => manual_update_gate(bring_scm_bfe_up, || {
+                tokio::runtime::Runtime::new()?.block_on(native::begin_manual())
+            }),
+            "--manual-orphan-gate" => native::begin_manual_orphan(),
+            _ => native::begin_manual_uninstall(),
+        };
+        let report = native::GateReport::for_machine(reason_file);
+        std::process::exit(finish_gate(&mode, &report, outcome));
+    }
     match args.as_slice() {
         [mode, package] if mode == "--update-unpack-gate" => {
             native::unpack_gate(Path::new(package))?;
             Ok(true)
         }
-        [mode] if mode == "--manual-update-gate" => {
-            let gate = manual_update_gate(bring_scm_bfe_up, || {
-                tokio::runtime::Runtime::new()?.block_on(native::begin_manual())
-            });
-            if let Err(error) = gate {
-                if error.is::<native::ProtectionActive>() {
-                    eprintln!("Error: {error:#}");
-                    std::process::exit(native::MANUAL_GATE_PROTECTION_ACTIVE_EXIT);
-                }
-                if error.is::<native::OrphanedProtection>() {
-                    eprintln!("Error: {error:#}");
-                    std::process::exit(native::MANUAL_GATE_ORPHANED_PROTECTION_EXIT);
-                }
-                if error.is::<BfeUnavailable>() {
-                    eprintln!("Error: {error:#}");
-                    std::process::exit(MANUAL_GATE_BFE_UNAVAILABLE_EXIT);
-                }
-                return Err(error);
-            }
-            Ok(true)
-        }
-        [mode] if mode == "--manual-orphan-gate" => {
-            native::begin_manual_orphan()?;
-            Ok(true)
-        }
         [mode] if mode == "--retire-orphaned-owner" => {
             tokio::runtime::Runtime::new()?.block_on(native::retire_orphaned_owner())?;
-            Ok(true)
-        }
-        [mode] if mode == "--manual-uninstall-gate" => {
-            native::begin_manual_uninstall()?;
             Ok(true)
         }
         [mode] if mode == "--manual-update-finish" => {

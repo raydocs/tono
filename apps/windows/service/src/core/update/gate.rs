@@ -106,8 +106,9 @@ pub fn reason_of(error: &Error) -> GateReason {
 const LOG_NAME: &str = "install-gate.log";
 /// Past this size the log is rolled once to `install-gate.log.1`, so it stays bounded.
 const LOG_MAX_BYTES: u64 = 256 * 1024;
-/// The dialog shows one line of detail; the log keeps the whole chain.
-const REASON_MAX_CHARS: usize = 480;
+/// The dialog shows one line of detail (NSIS strings stop at 1024 characters); the log keeps the
+/// whole chain.
+const REASON_MAX_CHARS: usize = 300;
 
 /// Where one gate run reports: the install-gate log and, when NSIS asked for one, the reason
 /// file it reads back for its dialog (the error's first line and the log that holds the rest).

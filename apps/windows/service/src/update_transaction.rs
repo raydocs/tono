@@ -153,6 +153,16 @@ impl State {
     }
 }
 
+/// Another process (a gate, an executor, the Service) holds the durable store's lock.
+#[derive(Debug, Clone, Copy)]
+pub struct StoreBusy;
+
+impl std::fmt::Display for StoreBusy {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("another update operation owns the durable store")
+    }
+}
+
 pub struct Store {
     root: PathBuf,
     _lock: File,
@@ -173,8 +183,7 @@ impl Store {
             .create(true)
             .truncate(false)
             .open(root.join("transaction.lock"))?;
-        lock.try_lock()
-            .context("another update operation owns the durable store")?;
+        lock.try_lock().context(StoreBusy)?;
         let state = match File::open(root.join("state.json")) {
             Ok(file) => {
                 let mut bytes = Vec::new();
