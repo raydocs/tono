@@ -30,7 +30,8 @@ pub enum GateReason {
     DnsRestoreUnproven,
     /// The recorded Tono Core is running, or could not be shown stopped.
     CoreRunning,
-    /// A network interface named `Tono` is still present.
+    /// A network interface named `Tono` that Windows reports as present (any status but
+    /// NotPresent) after the recorded Core was shown stopped.
     TonoAdapterPresent,
     /// `ProgramData\Tono` (or a directory under it) is not a private, ordinary directory.
     StateDirUnusable,

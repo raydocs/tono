@@ -938,9 +938,24 @@ pub const IF_OPER_STATUS_NOT_PRESENT: i32 = 6;
 #[cfg_attr(any(not(windows), feature = "test"), allow(dead_code))]
 pub const ERROR_FILE_NOT_FOUND: u32 = 2;
 
+/// Whether the interface row the tunnel alias resolved to is not ready yet, rather than wrong.
+/// Only two cases qualify: the row read failed with `ERROR_FILE_NOT_FOUND` after the alias had
+/// resolved (the leftover was swept away in between), or the row reads as not present. Both
+/// carry "did not resolve to a LUID", which the App retries. Every other status is `None`, so
+/// the caller's permanent refusal still applies; `oper_status` is ignored when the read failed.
 #[cfg_attr(any(not(windows), feature = "test"), allow(dead_code))]
-pub fn tunnel_row_not_ready(_luid: u64, _lookup_status: u32, _oper_status: i32) -> Option<String> {
-    None
+pub fn tunnel_row_not_ready(luid: u64, lookup_status: u32, oper_status: i32) -> Option<String> {
+    if lookup_status == ERROR_FILE_NOT_FOUND {
+        Some(format!(
+            "interface LUID {luid} was not found after the tunnel alias resolved to it, so the tunnel alias did not resolve to a LUID of a present adapter; refusing to lock"
+        ))
+    } else if lookup_status == 0 && oper_status == IF_OPER_STATUS_NOT_PRESENT {
+        Some(format!(
+            "interface LUID {luid} is reported as not present, so the tunnel alias did not resolve to a LUID of a present adapter; refusing to lock"
+        ))
+    } else {
+        None
+    }
 }
 
 #[cfg(test)]
