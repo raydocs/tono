@@ -116,9 +116,9 @@ const REASON_MAX_CHARS: usize = 300;
 #[derive(Debug, Clone)]
 pub struct GateReport {
     /// `%ProgramData%\Tono\logs\install-gate.log`, or `None` when the state root is unusable.
+    /// There is no other log: any other directory this elevated process could use, the user's
+    /// TEMP included, is one the same user's unelevated processes control.
     pub log: Option<PathBuf>,
-    /// This account's temp directory, used only when the primary log cannot be written.
-    pub fallback_log: PathBuf,
     pub reason_file: Option<PathBuf>,
 }
 
@@ -127,15 +127,11 @@ impl GateReport {
         let root = crate::service_paths().persistent_state_dir().to_path_buf();
         // Like the Service's own log: `logs` is created only below a state root that carries
         // the private SYSTEM/Administrators DACL, so it inherits that DACL. An unusable root
-        // (perhaps the very refusal being reported) sends the log to the fallback instead.
+        // (perhaps the very refusal being reported) leaves no log; the reason file says so.
         let log = super::super::windows_security::ensure_private_installer_directory(&root)
             .ok()
             .map(|()| root.join("logs").join(LOG_NAME));
-        Self {
-            log,
-            fallback_log: std::env::temp_dir().join(LOG_NAME),
-            reason_file,
-        }
+        Self { log, reason_file }
     }
 
     /// Append one timestamped entry; returns the log that holds it. Never fails the caller: a
@@ -148,15 +144,14 @@ impl GateReport {
             if chain.is_empty() { "" } else { " " },
             chain.replace(['\r', '\n'], " "),
         );
-        for path in self.log.iter().chain(std::iter::once(&self.fallback_log)) {
-            match append_entry(path, &entry) {
-                Ok(()) => return Some(path.clone()),
-                Err(error) => {
-                    eprintln!("tono-install: install-gate log {path:?} not written ({error:#})")
-                }
+        let path = self.log.as_ref()?;
+        match append_entry(path, &entry) {
+            Ok(()) => Some(path.clone()),
+            Err(error) => {
+                eprintln!("tono-install: install-gate log {path:?} not written ({error:#})");
+                None
             }
         }
-        None
     }
 
     /// Hand NSIS the first line of the refusal and where the log is. UTF-16LE, no BOM, one

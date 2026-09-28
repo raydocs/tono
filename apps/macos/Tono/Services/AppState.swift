@@ -849,18 +849,25 @@ final class AppState {
         // A normal signed-in launch remains an explicit user choice. After a
         // crash, however, PF is already fail-closed; recover the selected route
         // automatically instead of leaving the machine offline at a dashboard.
-        autoConnectRequested = resumeProtection
-        if resumeProtection, automaticResumeHeldAfterRestart {
+        // The restore read that intent before now: a confirmed release
+        // accepted since then (the root emergency disarm) cleared the armed
+        // intent and supersedes it.
+        let resume = resumeProtection && KillSwitchService.isArmed
+        autoConnectRequested = resume
+        if resume, automaticResumeHeldAfterRestart {
             holdAutomaticResumeAfterUnexpectedRestart()
         }
         attemptAutomaticConnect()
     }
 
     /// Launch asked to resume protection, but `automaticResumeHeldAfterRestart`
-    /// holds it. PF stays armed. Also set the user-action pause so the actions
-    /// read Repair and reconnect / Restore internet, and say why.
+    /// holds it. PF stays armed. When the helper has confirmed that barrier,
+    /// also set the user-action pause so the actions read Repair and
+    /// reconnect / Restore internet, and say why; an unconfirmed one keeps
+    /// the unknown state launch published.
     private func holdAutomaticResumeAfterUnexpectedRestart() {
         autoConnectRequested = false
+        guard isProtectionBlocked else { return }
         protectedReconnectPausedForUserAction = true
         protectedReconnectPauseLiftsOnNetworkChange = false
         LocalTrafficAudit.shared.recordEvent("automatic_resume_held_after_restart")
