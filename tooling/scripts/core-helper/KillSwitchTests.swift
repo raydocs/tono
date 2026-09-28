@@ -1143,10 +1143,17 @@ extension KillSwitchManager {
                 && realRemovalStillFlushes && restoreIsWidening && unknownBaselineUntouched
                 && rollbackRestoresTheFile && completedWithholdIsDone && mismatchKeepsTheCore
             // Continuity is TUN-scoped: empty tunnelInterfaces (this `state`)
-            // must not keep Sidecar as a side channel; a live utun must.
+            // must not keep Sidecar as a side channel; a live utun must. The
+            // six interface passes keep no state: macOS creates and destroys
+            // awdl0/llw0/bridge100 on demand, and PF must hold no if-bound
+            // state entries on them.
             let continuityNeedles = [
-                "pass in quick on awdl0 all keep state (if-bound)",
-                "pass out quick on awdl0 all keep state (if-bound)",
+                "pass in quick on awdl0 all no state label \"tono-continuity\"",
+                "pass out quick on awdl0 all no state label \"tono-continuity\"",
+                "pass in quick on llw0 all no state label \"tono-continuity\"",
+                "pass out quick on llw0 all no state label \"tono-continuity\"",
+                "pass in quick on bridge100 all no state label \"tono-continuity\"",
+                "pass out quick on bridge100 all no state label \"tono-continuity\"",
                 "to 224.0.0.251 port 5353",
                 "to ff02::fb port 5353",
                 "to fe80::/10",
@@ -1161,6 +1168,41 @@ extension KillSwitchManager {
                 return block.lowerBound < lan.lowerBound
             }()
             let continuityOnWithTunnel = continuityNeedles.allSatisfy(cloudRules.contains)
+                && !cloudRules.split(separator: "\n").contains {
+                    $0.contains("label \"tono-continuity\"") && $0.contains("keep state")
+                }
+            if !continuityOnWithTunnel {
+                FileHandle.standardError.write(Data(
+                    "self-test: Continuity passes missing or keeping state with a tunnel\n".utf8
+                ))
+            }
+            // Every daemon start, a boot included, restores the saved state
+            // before any TUN exists; the status() heal and the supervisor
+            // repair reinstall it the same way. A saved utun that is not up
+            // must restore the no-tunnel form: no Continuity, mDNS, LAN,
+            // link-local, DHCP or NDP pass and no rule for that utun. A utun
+            // that is up (a helper restart mid-session) is kept. The three
+            // reinstall paths need root and pfctl, so this checks the
+            // `restorableState` filter they all render through.
+            let bootRestoreRules = renderRules(
+                state: restorableState(inactiveState, interfaceExists: { _ in false }),
+                allowedUID: 501
+            )
+            let tunnelOnlyLabels = [
+                "tono-continuity", "tono-mdns", "tono-lan", "tono-linklocal",
+                "tono-dhcp", "tono-ndp", "tono-tunnel",
+            ]
+            let bootRestoreHasNoTunnelPass =
+                !tunnelOnlyLabels.contains(where: bootRestoreRules.contains)
+                && !bootRestoreRules.contains("utun199")
+                && restorableState(
+                    inactiveState, interfaceExists: { $0 == "utun199" }
+                ).tunnelInterfaces == ["utun199"]
+            if !bootRestoreHasNoTunnelPass {
+                FileHandle.standardError.write(Data(
+                    "self-test: boot restore rendered a tunnel-only pass without a tunnel\n".utf8
+                ))
+            }
             // Whole-string equality, so the class labels belong here too: this is
             // the one assertion that pins the emergency ruleset exactly, and it is
             // what caught the label change before it shipped.
@@ -1253,6 +1295,7 @@ extension KillSwitchManager {
                 && bundleWithheldForCoreSync
                 && continuityOffWithoutTunnel
                 && continuityOnWithTunnel
+                && bootRestoreHasNoTunnelPass
                 && lanDNSBlockedFirst
                 && emergencyRules == emergencyExpected
                 && cloudShapesHold

@@ -236,6 +236,12 @@ final class AppState {
     var resumeProtectionAfterWake = false
     var initialDataLoaded = false
     var autoConnectRequested = false
+    /// The Mac restarted while a session was up and was never released (a
+    /// kernel panic, a power loss). Decided in `init`, before any automatic
+    /// connect could record this boot; while set, no automatic path (launch
+    /// resume, the reconnect loop, wake recovery) connects. Lifted by the
+    /// user's connect or Retry, or by a completed release.
+    var automaticResumeHeldAfterRestart = false
     var managedCatalogRevision = -1
     var managedCatalogDigest: String?
     /// Freshness of the sibling routing document. The fleet-wide revision and
@@ -343,6 +349,10 @@ final class AppState {
         RuntimeCleanup.launchProtectionConsumer = { [weak self] protection in
             self?.adoptLaunchProtection(protection)
         }
+        automaticResumeHeldAfterRestart = RuntimeCleanup.holdsAutomaticResume(
+            recordedBootSession: RuntimeCleanup.recordedConnectBootSession,
+            currentBootSession: RuntimeCleanup.currentBootSession()
+        )
         LocalTrafficAudit.shared.recordEvent(
             "app_state_initialized",
             details: [
@@ -727,8 +737,10 @@ final class AppState {
                 // survives sleep: a wake reconnect would only reach the same
                 // verdict again. PF is reasserted above and the pause message
                 // stays. Pauses that lift on a network change do not stop here.
-                if self.protectedReconnectPausedForUserAction,
-                   !self.protectedReconnectPauseLiftsOnNetworkChange {
+                // Neither does a wake connect after an unexpected restart.
+                if self.protectedReconnectPausedForUserAction
+                    && !self.protectedReconnectPauseLiftsOnNetworkChange
+                    || self.automaticResumeHeldAfterRestart {
                     if !Task.isCancelled {
                         if barrierArmed { self.isProtectionBlocked = true }
                         self.connectionCoordinator.wakeRecoveryTask = nil
@@ -838,11 +850,26 @@ final class AppState {
         // crash, however, PF is already fail-closed; recover the selected route
         // automatically instead of leaving the machine offline at a dashboard.
         autoConnectRequested = resumeProtection
+        if resumeProtection, automaticResumeHeldAfterRestart {
+            holdAutomaticResumeAfterUnexpectedRestart()
+        }
         attemptAutomaticConnect()
+    }
+
+    /// Launch asked to resume protection, but `automaticResumeHeldAfterRestart`
+    /// holds it. PF stays armed. Also set the user-action pause so the actions
+    /// read Repair and reconnect / Restore internet, and say why.
+    private func holdAutomaticResumeAfterUnexpectedRestart() {
+        autoConnectRequested = false
+        protectedReconnectPausedForUserAction = true
+        protectedReconnectPauseLiftsOnNetworkChange = false
+        LocalTrafficAudit.shared.recordEvent("automatic_resume_held_after_restart")
+        errorMessage = String(localized: "This Mac restarted unexpectedly while Tono was connected, so Tono did not reconnect automatically. Kill Switch is still blocking traffic. Click Repair and reconnect to connect, or Restore internet to get back online.")
     }
 
     func attemptAutomaticConnect() {
         guard !nativeUpdatePending, !RuntimeCleanup.nativeUpdateBlocksConnect,
+              !automaticResumeHeldAfterRestart,
               autoConnectRequested, initialDataLoaded, isTonoReady,
               accountConnectRefusal(managedCatalogDigest, managedCatalogRoutingToken) == nil,
               !catalogSelectionRequiresChoice, !isConnected, !isConnecting else { return }

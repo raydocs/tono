@@ -93,24 +93,32 @@ extension KillSwitchManager {
         ]
         // Only while a TUN is up. Emergency fail-closed has no tunnel and
         // must not keep Sidecar/clipboard as a side channel.
+        //
+        // `no state`: macOS creates and destroys awdl0, llw0 and bridge100 on
+        // demand (Universal Clipboard, AirDrop, Sidecar), and PF must not hold
+        // if-bound state entries on them. The allow set is unchanged: both
+        // directions have their own pass, and these are the first rules that
+        // can match on those interfaces (only the lo0 passes come before), so
+        // every packet there is decided here without a state. Same shape as
+        // the inbound `tono-dhcp` permit below.
         if !state.tunnelInterfaces.isEmpty {
             lines.append(
-                "pass in quick on awdl0 all keep state (if-bound) label \"tono-continuity\""
+                "pass in quick on awdl0 all no state label \"tono-continuity\""
             )
             lines.append(
-                "pass out quick on awdl0 all keep state (if-bound) label \"tono-continuity\""
+                "pass out quick on awdl0 all no state label \"tono-continuity\""
             )
             lines.append(
-                "pass in quick on llw0 all keep state (if-bound) label \"tono-continuity\""
+                "pass in quick on llw0 all no state label \"tono-continuity\""
             )
             lines.append(
-                "pass out quick on llw0 all keep state (if-bound) label \"tono-continuity\""
+                "pass out quick on llw0 all no state label \"tono-continuity\""
             )
             lines.append(
-                "pass in quick on bridge100 all keep state (if-bound) label \"tono-continuity\""
+                "pass in quick on bridge100 all no state label \"tono-continuity\""
             )
             lines.append(
-                "pass out quick on bridge100 all keep state (if-bound) label \"tono-continuity\""
+                "pass out quick on bridge100 all no state label \"tono-continuity\""
             )
             lines.append(
                 "pass out quick inet proto udp to 224.0.0.251 port 5353 keep state (if-bound) label \"tono-mdns\""
