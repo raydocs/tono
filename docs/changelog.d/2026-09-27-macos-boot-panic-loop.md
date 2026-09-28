@@ -50,11 +50,14 @@
   - 评审修复后的头 `7a70cace`：macOS CI [push 36380279569](https://github.com/raydocs/tono/actions/runs/36380279569) 与
     [PR 36380282810](https://github.com/raydocs/tono/actions/runs/36380282810) 通过。
   - 红 Continuity `336dd8e1`：分支 `fix/macos-boot-panic-loop-20260927-red-awdl` 手动触发
-    [run 36380924567](https://github.com/raydocs/tono/actions/runs/36380924567)（同分支的 push 运行被它取消），结果待出；
-    预期在 `--self-test` 报 `self-test: Continuity passes missing or keeping state with a tunnel`。
-  - 修复 `266be2dd` 及之后：MacBook 上只做了 `swiftc -parse` 和 CONTRACT 管道重算；`no state` 形式能否被 macOS pfctl 解析
-    由 CI `privileged-tests` 的 root `--self-test`（`pfSyntaxAccepts` 对带隧道的规则集 `pfctl -nf`）和 lifecycle 自测
-    （载入测试锚点）证明，结果待出。
+    [run 36380924567](https://github.com/raydocs/tono/actions/runs/36380924567)（同分支的 push 运行被它取消）失败，`build` 与
+    `privileged-tests` 都在 helper 编译后的 `--self-test` 报 `self-test: Continuity passes missing or keeping state with a
+    tunnel` 退出 1，是新断言，不是编译错误。
+  - 加固后的头 `b033cbe4`（含修复 `266be2dd`）：macOS CI [push 36381056726](https://github.com/raydocs/tono/actions/runs/36381056726)
+    与 [PR 36381060780](https://github.com/raydocs/tono/actions/runs/36381060780) 通过。其中 `privileged-tests` 的 root
+    `--self-test`（`pfSyntaxAccepts` 对带隧道的规则集跑 `pfctl -nf`，无跳过警告、无 `pf syntax:` 报错）和 lifecycle 自测
+    （把带 utun199 的规则集载入测试锚点，含 `labels-report-tono-continuity`）都通过，这证明 `no state` 形式能被 GitHub-hosted
+    macos-26 的 pfctl 解析和载入；本机只做了 `swiftc -parse` 和 CONTRACT 管道重算。
 - 候选/发布：仅源码，无新候选。
 - 剩余限制：panic 根因未证实（无 panic 报告，可能是 macOS AWDL 自身缺陷），不能声称修好 panic，只去掉了两处已确认会让循环
   持续的我方行为，并把 Continuity 放行改成不留状态（我方最可疑的触发点，同样未证实）；安全模式下 helper 是否运行未核实。
