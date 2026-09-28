@@ -3,7 +3,7 @@
   `core/update/gate.rs` 注释、`bin/install_service/update_executor.rs`）、WFP 锁（`core/wfp/mod.rs`、`core/wfp_model.rs`）
   与 NSIS 87 对话框。发现 WIN-GATE-GHOST-TUN。
 - 来源：基线 origin/main `6226b604`；分支 `fix/win-ghost-tono-adapter-20260927`，红提交 `38a5fb2e`
-  （分支 `fix/win-ghost-tono-adapter-20260927-red`），修复提交 `145dc833`，本记录提交在其后；PR 待开，未合 main。
+  （分支 `fix/win-ghost-tono-adapter-20260927-red`），修复提交 `145dc833`，本记录提交在其后；PR #676。
   方向：计划 PLAN-stale-adapter 第 3 版（Jev be13d4a6，计划评审 cb50f375 → d1837131 → 1e546b82 通过），实现决定 b43e5ab3。
 - 缺陷修复：
   - WIN-GATE-GHOST-TUN（门禁）：每次停止 Core 都是 `TerminateJobObject` 硬杀，WinTUN 设备变为「不存在」（Not present），
