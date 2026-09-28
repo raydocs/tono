@@ -546,7 +546,10 @@ final class KillSwitchManager {
                 if wanted {
                     try Self.ensureHostsMappings(state: state)
                     if !live {
-                        try Self.writeRules(state: state, allowedUID: allowedUID)
+                        try Self.writeRules(
+                            state: Self.restorableState(state),
+                            allowedUID: allowedUID
+                        )
                         try Self.ensureAnchorLoaded(flushStates: true)
                         lastLoadedPassRules = nil
                         live = (try? Self.effectiveStatus()) ?? false
@@ -631,7 +634,7 @@ final class KillSwitchManager {
                 try Self.holdPFEnableReference()
                 return
             }
-            try Self.writeRules(state: state, allowedUID: allowedUID)
+            try Self.writeRules(state: Self.restorableState(state), allowedUID: allowedUID)
             try Self.ensureHostsMappings(state: state)
             try Self.ensureAnchorLoaded(flushStates: true)
         } catch {
@@ -696,9 +699,8 @@ final class KillSwitchManager {
 
     func restoreAtLaunch() throws {
         do {
-            guard let saved = try loadState(), saved.armed else { return }
-            let state = Self.launchRestoreState(saved)
-            try Self.writeRules(state: state, allowedUID: allowedUID)
+            guard let state = try loadState(), state.armed else { return }
+            try Self.writeRules(state: Self.restorableState(state), allowedUID: allowedUID)
             try Self.ensureHostsMappings(state: state)
             try Self.ensureAnchorLoaded(flushStates: true)
         } catch {
@@ -710,16 +712,17 @@ final class KillSwitchManager {
         }
     }
 
-    /// What a daemon start renders from the saved state. The saved tunnel is
-    /// the last arm's intent, not a fact: at boot (before login, before any
+    /// What PF renders when it is reinstalled from the saved state: the daemon
+    /// start, the `status()` heal and the supervisor repair. The saved tunnel
+    /// is the last arm's intent, not a fact: at boot (before login, before any
     /// TUN) and after a Core that is gone, that utun does not exist. Rendering
     /// it anyway loads the Continuity, mDNS, LAN and link-local passes, which
     /// exist only while a TUN is up (see `renderRules`). Keep only interfaces
-    /// present now, so a start without a tunnel restores the no-tunnel form.
+    /// present now, so a reinstall without a tunnel renders the no-tunnel form.
     /// This only removes passes. The file is not rewritten: disk keeps the
     /// intent, the app's connect arms with the live interface, and an arm that
     /// omits the field falls back to exactly what it did before.
-    static func launchRestoreState(
+    static func restorableState(
         _ state: KillSwitchState,
         interfaceExists: (String) -> Bool = { name in
             name.withCString { if_nametoindex($0) } != 0

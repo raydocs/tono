@@ -1162,12 +1162,15 @@ extension KillSwitchManager {
             }()
             let continuityOnWithTunnel = continuityNeedles.allSatisfy(cloudRules.contains)
             // Every daemon start, a boot included, restores the saved state
-            // before any TUN exists. A saved utun that is not up must restore
-            // the no-tunnel form: no Continuity, mDNS, LAN, link-local, DHCP
-            // or NDP pass and no rule for that utun. A utun that is up (a
-            // helper restart mid-session) is kept.
+            // before any TUN exists; the status() heal and the supervisor
+            // repair reinstall it the same way. A saved utun that is not up
+            // must restore the no-tunnel form: no Continuity, mDNS, LAN,
+            // link-local, DHCP or NDP pass and no rule for that utun. A utun
+            // that is up (a helper restart mid-session) is kept. The three
+            // reinstall paths need root and pfctl, so this checks the
+            // `restorableState` filter they all render through.
             let bootRestoreRules = renderRules(
-                state: launchRestoreState(inactiveState, interfaceExists: { _ in false }),
+                state: restorableState(inactiveState, interfaceExists: { _ in false }),
                 allowedUID: 501
             )
             let tunnelOnlyLabels = [
@@ -1177,7 +1180,7 @@ extension KillSwitchManager {
             let bootRestoreHasNoTunnelPass =
                 !tunnelOnlyLabels.contains(where: bootRestoreRules.contains)
                 && !bootRestoreRules.contains("utun199")
-                && launchRestoreState(
+                && restorableState(
                     inactiveState, interfaceExists: { $0 == "utun199" }
                 ).tunnelInterfaces == ["utun199"]
             if !bootRestoreHasNoTunnelPass {
