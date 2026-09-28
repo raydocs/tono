@@ -603,6 +603,9 @@ test('NSIS names every gate refusal with its own dialog, code, first error line 
       installerSource.match(new RegExp(`LangString ${name} \\$\\{LANG_${language}\\} (".*")`))?.[1]
     for (const language of ['SIMPCHINESE', 'ENGLISH', 'RUSSIAN']) {
       assert.ok(text(language), `${name} is missing for ${language}`)
+      if (name.startsWith('gate')) {
+        assert.doesNotMatch(text(language), /Device Manager|设备管理器/, `${name} (${language})`)
+      }
     }
     if (name.startsWith('gate')) {
       assert.equal(text('RUSSIAN'), text('ENGLISH'), `${name}: Russian repeats the English text`)

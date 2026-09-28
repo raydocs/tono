@@ -1398,6 +1398,35 @@ mod tests {
         assert!(matches!(state, RecordedCore::Unverifiable(_)));
     }
 
+    /// WIN-GATE-GHOST-TUN: every Core stop is a hard kill, so its WinTUN device is left "Not
+    /// present" while Windows keeps its interface row named `Tono`. Matching that name alone
+    /// refused every later manual install with 87. Only a row Windows reports as present (any
+    /// status but NotPresent) still refuses, and only an exact name match counts.
+    #[test]
+    fn update_manual_gate_ignores_a_not_present_tono_interface() {
+        use windows_sys::Win32::NetworkManagement::Ndis::{
+            IfOperStatusDown, IfOperStatusNotPresent, IfOperStatusUp,
+        };
+        let row = |alias: &str, oper_status| security::TunnelRow {
+            alias: alias.into(),
+            oper_status,
+            ..Default::default()
+        };
+        let (present, not_present) =
+            security::split_tunnel_rows(vec![row("Tono", IfOperStatusNotPresent)], "Tono");
+        assert!(
+            present.is_empty(),
+            "a not-present Tono interface refused the install: {present:?}"
+        );
+        assert_eq!(not_present.len(), 1);
+        let (present, _) = security::split_tunnel_rows(
+            vec![row("TONO", IfOperStatusDown), row("Tono 1", IfOperStatusUp)],
+            "Tono",
+        );
+        assert_eq!(present.len(), 1, "{present:?}");
+        assert_eq!(present[0].alias, "TONO");
+    }
+
     #[test]
     fn update_manual_gate_names_an_orphaned_barrier_instead_of_asking_to_disconnect() {
         // No filters: the gate does not even ask who owns them.

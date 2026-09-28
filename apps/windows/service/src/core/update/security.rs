@@ -344,6 +344,33 @@ pub fn tunnel_absent(name: &str) -> Result<()> {
     Ok(())
 }
 
+/// One interface row whose alias matches the tunnel name.
+#[derive(Debug, Default)]
+pub(crate) struct TunnelRow {
+    pub(crate) alias: String,
+    pub(crate) luid: u64,
+    pub(crate) if_index: u32,
+    pub(crate) guid: String,
+    pub(crate) oper_status: i32,
+    pub(crate) admin_status: i32,
+    pub(crate) media_connect_state: i32,
+    pub(crate) if_type: u32,
+    pub(crate) description: String,
+}
+
+/// `(present, not_present)` among the rows named `name`.
+#[allow(dead_code)]
+pub(crate) fn split_tunnel_rows(
+    rows: Vec<TunnelRow>,
+    name: &str,
+) -> (Vec<TunnelRow>, Vec<TunnelRow>) {
+    let present = rows
+        .into_iter()
+        .filter(|row| row.alias.eq_ignore_ascii_case(name))
+        .collect();
+    (present, Vec::new())
+}
+
 /// Whether an interface with this alias exists. An enumeration failure is an error, never
 /// absence.
 pub fn tunnel_present(name: &str) -> Result<bool> {
