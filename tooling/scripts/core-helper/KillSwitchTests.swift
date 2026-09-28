@@ -1143,10 +1143,17 @@ extension KillSwitchManager {
                 && realRemovalStillFlushes && restoreIsWidening && unknownBaselineUntouched
                 && rollbackRestoresTheFile && completedWithholdIsDone && mismatchKeepsTheCore
             // Continuity is TUN-scoped: empty tunnelInterfaces (this `state`)
-            // must not keep Sidecar as a side channel; a live utun must.
+            // must not keep Sidecar as a side channel; a live utun must. The
+            // six interface passes keep no state: macOS creates and destroys
+            // awdl0/llw0/bridge100 on demand, and PF must hold no if-bound
+            // state entries on them.
             let continuityNeedles = [
-                "pass in quick on awdl0 all keep state (if-bound)",
-                "pass out quick on awdl0 all keep state (if-bound)",
+                "pass in quick on awdl0 all no state label \"tono-continuity\"",
+                "pass out quick on awdl0 all no state label \"tono-continuity\"",
+                "pass in quick on llw0 all no state label \"tono-continuity\"",
+                "pass out quick on llw0 all no state label \"tono-continuity\"",
+                "pass in quick on bridge100 all no state label \"tono-continuity\"",
+                "pass out quick on bridge100 all no state label \"tono-continuity\"",
                 "to 224.0.0.251 port 5353",
                 "to ff02::fb port 5353",
                 "to fe80::/10",
@@ -1161,6 +1168,14 @@ extension KillSwitchManager {
                 return block.lowerBound < lan.lowerBound
             }()
             let continuityOnWithTunnel = continuityNeedles.allSatisfy(cloudRules.contains)
+                && !cloudRules.split(separator: "\n").contains {
+                    $0.contains("label \"tono-continuity\"") && $0.contains("keep state")
+                }
+            if !continuityOnWithTunnel {
+                FileHandle.standardError.write(Data(
+                    "self-test: Continuity passes missing or keeping state with a tunnel\n".utf8
+                ))
+            }
             // Every daemon start, a boot included, restores the saved state
             // before any TUN exists; the status() heal and the supervisor
             // repair reinstall it the same way. A saved utun that is not up
