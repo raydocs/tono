@@ -35,6 +35,13 @@ enum RuntimeCleanup {
         AppProfile.defaults.removeObject(forKey: SettingsKey.lastTunEnabled)
     }
 
+    nonisolated static func holdsAutomaticResume(
+        recordedBootSession: String?,
+        currentBootSession: String?
+    ) -> Bool {
+        false
+    }
+
     /// Recover a previous process's network mutations transactionally before
     /// account restoration performs any request. If protection had been active,
     /// PF stays armed with only Tono's bounded control-plane recovery exception
