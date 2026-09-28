@@ -82,6 +82,11 @@ extension AppState {
                 // Any fresh connect attempt is user-visible intent to try again; the
                 // reconnect loop re-pauses if the same user-action failure repeats.
                 self.protectedReconnectPausedForUserAction = false
+                // This boot now has a session: a launch in a later boot that
+                // finds this record restarted without a clean release, and
+                // does not reconnect by itself. A user's Connect lands here
+                // too, which is what lifts that hold.
+                RuntimeCleanup.recordConnectBootSession()
 
                 // Session-dynamic mixed/controller ports avoid collisions with leftover
                 // 7890/9090 listeners from other proxies or a previous core.
@@ -1011,6 +1016,7 @@ extension AppState {
                     if releaseKillSwitch, !transitionLeavesProtectionBlocked {
                         self.protectedDNSService = nil
                         self.recoveryCause = nil
+                        RuntimeCleanup.clearConnectBootSession()
                     }
                     if let transitionError {
                         self.errorMessage = transitionError

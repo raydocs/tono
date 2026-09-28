@@ -35,11 +35,47 @@ enum RuntimeCleanup {
         AppProfile.defaults.removeObject(forKey: SettingsKey.lastTunEnabled)
     }
 
+    /// The kernel's boot session. It changes on every restart, a kernel panic
+    /// included. The helper's peer check reads the same sysctl.
+    nonisolated static func currentBootSession() -> String? {
+        var buffer = [CChar](repeating: 0, count: 128)
+        var size = buffer.count
+        guard sysctlbyname("kern.bootsessionuuid", &buffer, &size, nil, 0) == 0,
+              size > 1, size <= buffer.count else { return nil }
+        return String(cString: buffer)
+    }
+
+    /// Recorded when a connect starts; cleared by a completed release
+    /// (Restore internet, Quit). A record from another boot therefore means
+    /// the Mac restarted while a session was up, without a clean stop.
+    static func recordConnectBootSession() {
+        if let boot = currentBootSession() {
+            AppProfile.defaults.set(boot, forKey: SettingsKey.connectBootSession)
+        } else {
+            AppProfile.defaults.removeObject(forKey: SettingsKey.connectBootSession)
+        }
+    }
+
+    static func clearConnectBootSession() {
+        AppProfile.defaults.removeObject(forKey: SettingsKey.connectBootSession)
+    }
+
+    static var recordedConnectBootSession: String? {
+        AppProfile.defaults.string(forKey: SettingsKey.connectBootSession)
+    }
+
+    /// Launch resumes protection by reconnecting on its own. That is right
+    /// after a crash within the same boot, but not after the Mac restarted
+    /// mid-session (a kernel panic, a power loss): if the session triggered
+    /// the restart, reconnecting repeats it at every login. PF stays armed
+    /// either way; only the automatic connect waits for the user. No record
+    /// (nothing started since the last clean release) changes nothing.
     nonisolated static func holdsAutomaticResume(
         recordedBootSession: String?,
         currentBootSession: String?
     ) -> Bool {
-        false
+        guard let recordedBootSession else { return false }
+        return recordedBootSession != currentBootSession
     }
 
     /// Recover a previous process's network mutations transactionally before

@@ -838,7 +838,26 @@ final class AppState {
         // crash, however, PF is already fail-closed; recover the selected route
         // automatically instead of leaving the machine offline at a dashboard.
         autoConnectRequested = resumeProtection
+        if resumeProtection, RuntimeCleanup.holdsAutomaticResume(
+            recordedBootSession: RuntimeCleanup.recordedConnectBootSession,
+            currentBootSession: RuntimeCleanup.currentBootSession()
+        ) {
+            holdAutomaticResumeAfterUnexpectedRestart()
+        }
         attemptAutomaticConnect()
+    }
+
+    /// The Mac restarted while a session was up and was never released (a
+    /// kernel panic, a power loss). PF stays armed; neither this launch nor a
+    /// network-change or wake kick reconnects. The user-action pause is what
+    /// every automatic loop already honors, and the user's own connect lifts
+    /// it and records this boot.
+    private func holdAutomaticResumeAfterUnexpectedRestart() {
+        autoConnectRequested = false
+        protectedReconnectPausedForUserAction = true
+        protectedReconnectPauseLiftsOnNetworkChange = false
+        LocalTrafficAudit.shared.recordEvent("automatic_resume_held_after_restart")
+        errorMessage = String(localized: "This Mac restarted unexpectedly while Tono was connected, so Tono did not reconnect automatically. Kill Switch is still blocking traffic. Click Repair and reconnect to connect, or Restore internet to get back online.")
     }
 
     func attemptAutomaticConnect() {

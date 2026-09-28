@@ -8166,6 +8166,16 @@
           }
         }
       }
+    },
+    "This Mac restarted unexpectedly while Tono was connected, so Tono did not reconnect automatically. Kill Switch is still blocking traffic. Click Repair and reconnect to connect, or Restore internet to get back online.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "这台 Mac 在 Tono 连接期间意外重启，所以 Tono 没有自动重新连接。断网保护仍在拦住直连。点按「修复并重新连接」来连接，或点按「恢复正常网络」恢复上网。"
+          }
+        }
+      }
     }
   },
   "version": "1.0"
