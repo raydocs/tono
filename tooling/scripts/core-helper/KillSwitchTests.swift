@@ -1161,6 +1161,30 @@ extension KillSwitchManager {
                 return block.lowerBound < lan.lowerBound
             }()
             let continuityOnWithTunnel = continuityNeedles.allSatisfy(cloudRules.contains)
+            // Every daemon start, a boot included, restores the saved state
+            // before any TUN exists. A saved utun that is not up must restore
+            // the no-tunnel form: no Continuity, mDNS, LAN, link-local, DHCP
+            // or NDP pass and no rule for that utun. A utun that is up (a
+            // helper restart mid-session) is kept.
+            let bootRestoreRules = renderRules(
+                state: launchRestoreState(inactiveState, interfaceExists: { _ in false }),
+                allowedUID: 501
+            )
+            let tunnelOnlyLabels = [
+                "tono-continuity", "tono-mdns", "tono-lan", "tono-linklocal",
+                "tono-dhcp", "tono-ndp", "tono-tunnel",
+            ]
+            let bootRestoreHasNoTunnelPass =
+                !tunnelOnlyLabels.contains(where: bootRestoreRules.contains)
+                && !bootRestoreRules.contains("utun199")
+                && launchRestoreState(
+                    inactiveState, interfaceExists: { $0 == "utun199" }
+                ).tunnelInterfaces == ["utun199"]
+            if !bootRestoreHasNoTunnelPass {
+                FileHandle.standardError.write(Data(
+                    "self-test: boot restore rendered a tunnel-only pass without a tunnel\n".utf8
+                ))
+            }
             // Whole-string equality, so the class labels belong here too: this is
             // the one assertion that pins the emergency ruleset exactly, and it is
             // what caught the label change before it shipped.
@@ -1253,6 +1277,7 @@ extension KillSwitchManager {
                 && bundleWithheldForCoreSync
                 && continuityOffWithoutTunnel
                 && continuityOnWithTunnel
+                && bootRestoreHasNoTunnelPass
                 && lanDNSBlockedFirst
                 && emergencyRules == emergencyExpected
                 && cloudShapesHold

@@ -709,6 +709,15 @@ final class KillSwitchManager {
         }
     }
 
+    static func launchRestoreState(
+        _ state: KillSwitchState,
+        interfaceExists: (String) -> Bool = { name in
+            name.withCString { if_nametoindex($0) } != 0
+        }
+    ) -> KillSwitchState {
+        state
+    }
+
     static func installEmergencyBlock(allowedUID: uid_t) throws {
         let state = emergencyState(preserving: nil)
         try writeRules(state: state, allowedUID: allowedUID)
