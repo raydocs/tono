@@ -241,7 +241,9 @@ nonisolated enum HelperProtocolVersion {
     ///   no-tunnel form without the Continuity (awdl0, llw0, bridge100), mDNS,
     ///   LAN, link-local, DHCP and NDP passes. The saved state is not
     ///   rewritten. A 4.49.0 daemon loads those passes at every boot, before
-    ///   login, from the last session's utun.
+    ///   login, from the last session's utun. The six Continuity passes on
+    ///   awdl0, llw0 and bridge100 keep no state (`no state` instead of
+    ///   `keep state (if-bound)`); the allow set is unchanged.
     static let current = "4.50.0"
 }
 
