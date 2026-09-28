@@ -1438,6 +1438,52 @@ mod tests {
         std::fs::remove_dir_all(&root).unwrap();
     }
 
+    /// Regression review a1d498c8 opus:F1: when the protected log could not be written, the
+    /// elevated gate created and rotated `install-gate.log` under the user's TEMP, a directory
+    /// that user's unelevated processes control. It writes no other log; the dialog's log line
+    /// says the log was not written.
+    #[test]
+    fn update_manual_gate_skips_the_log_it_cannot_write_in_the_protected_root() {
+        let root = std::env::temp_dir().join(format!(
+            "tono-gate-report-{}-{}",
+            std::process::id(),
+            line!()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        // A file where `logs` should be: the protected log cannot be created.
+        std::fs::write(root.join("logs"), b"").unwrap();
+        let report = native::GateReport {
+            log: Some(root.join("logs").join("install-gate.log")),
+            fallback_log: root.join("fallback.log"),
+            reason_file: Some(root.join("reason.txt")),
+        };
+        let refused = Err(native::refusal(
+            native::GateReason::InstallerLeaseHeld,
+            "another manual installer is active",
+        ));
+        assert_eq!(finish_gate("--manual-update-gate", &report, refused), 81);
+        let mut written: Vec<_> = std::fs::read_dir(&root)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        written.sort();
+        assert_eq!(written, ["logs", "reason.txt"]);
+        let reason = std::fs::read(root.join("reason.txt")).unwrap();
+        let reason = String::from_utf16(
+            &reason
+                .chunks_exact(2)
+                .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+                .collect::<Vec<_>>(),
+        )
+        .unwrap();
+        assert_eq!(
+            reason.split("\r\n").nth(1),
+            Some("(the install-gate log could not be written)")
+        );
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
     /// H22-O-F1: every refusal of the manual gate starts with a WFP read, an RPC to BFE. A
     /// stopped BFE must be started, and its StartPending waited out, before that read; reading
     /// first refused a merely stopped BFE as an unconfirmable network state and aborted install.
