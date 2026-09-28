@@ -1404,7 +1404,6 @@ mod tests {
         let log = root.join("logs").join("install-gate.log");
         let report = native::GateReport {
             log: Some(log.clone()),
-            fallback_log: root.join("fallback.log"),
             reason_file: Some(root.join("reason.txt")),
         };
         let refused = Err(native::refusal(
@@ -1455,7 +1454,6 @@ mod tests {
         std::fs::write(root.join("logs"), b"").unwrap();
         let report = native::GateReport {
             log: Some(root.join("logs").join("install-gate.log")),
-            fallback_log: root.join("fallback.log"),
             reason_file: Some(root.join("reason.txt")),
         };
         let refused = Err(native::refusal(
