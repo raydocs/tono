@@ -41,10 +41,21 @@
 - 验证：本机只做 `swiftc -parse`（三份 Swift 文件）、把 `writeSynced` 抽成独立脚本 `swiftc -typecheck`
   （`-default-isolation MainActor`）并运行一次（写两次、删除、目录无残留临时文件），以及 `rustfmt --edition 2024 --check`
   （`gate.rs` 无差异；`update_executor.rs` 仅有与本次无关的旧格式差异）。未本机编译或运行 XCTest/cargo。
-  - 红 macOS `edc7119f`：macOS CI [push 36385847625](https://github.com/raydocs/tono/actions/runs/36385847625)，结果待补。
-  - 红 Windows `5f6a98e1`：Windows CI [push 36385845528](https://github.com/raydocs/tono/actions/runs/36385845528)，结果待补。
+  - 红 macOS `edc7119f`：macOS CI [push 36385847625](https://github.com/raydocs/tono/actions/runs/36385847625) 失败，
+    `build` 的 448 个 XCTest 中只有两条新用例失败：`testConnectRecordSurvivesALostPreferencesWrite`
+    （`XCTAssertEqual failed: ("nil") is not equal to ("Optional("8E22…")")`）与
+    `testRestartHoldIgnoresAResumeThatAConfirmedReleaseSuperseded`（暂停为真、`errorMessage` 是重启保持提示）；
+    是新断言，不是编译错误；helper 与 policy 作业通过。
+  - 红 Windows `5f6a98e1`：Windows CI [push 36385845528](https://github.com/raydocs/tono/actions/runs/36385845528) 失败，
+    `service` 作业唯一失败用例 `update_manual_gate_skips_the_log_it_cannot_write_in_the_protected_root`
+    （`left: ["fallback.log", "logs", "reason.txt"]`，`right: ["logs", "reason.txt"]`）；core、app、app-rust 通过。
+  - 修复头 `96a1cdbc`：macOS CI [push 36386377442](https://github.com/raydocs/tono/actions/runs/36386377442) 通过
+    （448 个 XCTest，1 跳过、0 失败，三条 `UnexpectedRestartResumeTests` 都通过）；Windows CI
+    [push 36386377524](https://github.com/raydocs/tono/actions/runs/36386377524) 通过（新用例与原
+    `update_manual_gate_refusal_names_its_cause_in_the_log_and_the_dialog` 都通过）。本条续记之后的头只改文档，
+    另手动触发两条 CI。
 - 候选/发布：仅源码，无新候选。
 - 剩余限制：未实机验证（panic 后记录是否在、提示是否可见、Windows 对话框「日志」行）。连接开始时在主线程做两次
-  `F_FULLFSYNC`，耗时未测。launch 判定「未确认」而后才被 helper 确认为屏障时，不补显示重启保持提示（只看到 Protected
+  `F_FULLFSYNC`，耗时未在真机测（CI 上含一次记录的用例共 0.015 秒）。launch 判定「未确认」而后才被 helper 确认为屏障时，不补显示重启保持提示（只看到 Protected
   Offline）。重启保持期间唤醒/网络变化的拒绝仍是静默的；Home-US 路径无提示（R675-opus-F1，仍 open）。NSIS reason 文件
   本身在 `$PLUGINSDIR`（用户 TEMP 下），仍为 `create_new` + 不跟随最后一级重解析点，本次未改。
