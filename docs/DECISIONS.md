@@ -18,7 +18,7 @@ may reverse), `reversed` (keep the line; say what replaced it).
 
 ## 2026-09-27 · Windows installer gate and lock: a Tono adapter that is not present is neither a refusal nor a tunnel
 
-- Status: owner for the requirement (2026-09-27, relayed): a leftover `Tono` adapter must not block
+- Status: provisional. The requirement is the owner's (2026-09-27, relayed): a leftover `Tono` adapter must not block
   a reinstall, and it may be removed only if leaving it breaks connecting. The mechanism below is
   the smaller option the owner asked to evaluate (agent, plan PLAN-stale-adapter r3, plan review
   1e546b82).
