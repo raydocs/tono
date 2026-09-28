@@ -6,7 +6,7 @@
   `install_service/update_executor.rs`。发现 MAC-BOOT-AUTORESUME（续修）、MAC-BOOT-AUTORESUME-notice、CRa1d4-opus-F1。
 - 来源：基线 origin/main `ccbc50a8`；分支 `fix/regression-a1d498c8-minors-20260928`；红提交（仅测试）`edc7119f`（macOS，
   另推为分支 `…-red-mac`）、`335c4d2c`（Windows；同内容 cherry-pick 到 main 上为 `5f6a98e1`，推为分支 `…-red-win`）；
-  修复提交 `6836703d`（grok:F2）、`7302599d`（codex:F1）、`9d7d0aaf`（opus:F1）。PR 待开，未合 main。
+  修复提交 `6836703d`（grok:F2）、`7302599d`（codex:F1）、`9d7d0aaf`（opus:F1）。PR [#677](https://github.com/raydocs/tono/pull/677)。
 - 缺陷修复：
   - MAC-BOOT-AUTORESUME 续修（grok:F2）：开机记录只写 UserDefaults，cfprefsd 异步落盘，连接后几秒内 panic 会丢记录、下次
     开机照样自动连接，循环可能继续。改后 `recordConnectBootSession` 另写 `Application Support/Tono/connect-boot-session`
