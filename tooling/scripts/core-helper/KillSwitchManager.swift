@@ -696,7 +696,8 @@ final class KillSwitchManager {
 
     func restoreAtLaunch() throws {
         do {
-            guard let state = try loadState(), state.armed else { return }
+            guard let saved = try loadState(), saved.armed else { return }
+            let state = Self.launchRestoreState(saved)
             try Self.writeRules(state: state, allowedUID: allowedUID)
             try Self.ensureHostsMappings(state: state)
             try Self.ensureAnchorLoaded(flushStates: true)
@@ -709,13 +710,35 @@ final class KillSwitchManager {
         }
     }
 
+    /// What a daemon start renders from the saved state. The saved tunnel is
+    /// the last arm's intent, not a fact: at boot (before login, before any
+    /// TUN) and after a Core that is gone, that utun does not exist. Rendering
+    /// it anyway loads the Continuity, mDNS, LAN and link-local passes, which
+    /// exist only while a TUN is up (see `renderRules`). Keep only interfaces
+    /// present now, so a start without a tunnel restores the no-tunnel form.
+    /// This only removes passes. The file is not rewritten: disk keeps the
+    /// intent, the app's connect arms with the live interface, and an arm that
+    /// omits the field falls back to exactly what it did before.
     static func launchRestoreState(
         _ state: KillSwitchState,
         interfaceExists: (String) -> Bool = { name in
             name.withCString { if_nametoindex($0) } != 0
         }
     ) -> KillSwitchState {
-        state
+        KillSwitchState(
+            armed: state.armed,
+            tailscaleBootstrapEnabled: state.tailscaleBootstrapEnabled,
+            apiHosts: state.apiHosts,
+            exitHints: state.exitHints,
+            tunnelInterfaces: state.tunnelInterfaces.filter(interfaceExists),
+            resolvedHosts: state.resolvedHosts,
+            pinnedHosts: state.pinnedHosts,
+            derpEndpoints: state.derpEndpoints,
+            cachedDERPEndpoints: state.cachedDERPEndpoints,
+            proxyTargets: state.proxyTargets,
+            sessionDirectEndpoints: state.sessionDirectEndpoints,
+            reviewedBundleDirectEnabled: state.reviewedBundleDirectEnabled
+        )
     }
 
     static func installEmergencyBlock(allowedUID: uid_t) throws {

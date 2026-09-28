@@ -235,7 +235,13 @@ nonisolated enum HelperProtocolVersion {
     ///   periodic check retries that one). A 4.48.0 daemon can
     ///   claim, and at disarm release, another program's token under a reused
     ///   PID, and forgets both unanswered tokens.
-    static let current = "4.49.0"
+    /// - 4.49.0 → 4.50.0: a daemon start (every boot) renders only the saved
+    ///   tunnel interfaces that exist at that moment, so a start before any
+    ///   TUN restores the no-tunnel form without the Continuity (awdl0, llw0,
+    ///   bridge100), mDNS, LAN, link-local, DHCP and NDP passes. The saved
+    ///   state is not rewritten. A 4.49.0 daemon loads those passes at every
+    ///   boot, before login, from the last session's utun.
+    static let current = "4.50.0"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS
