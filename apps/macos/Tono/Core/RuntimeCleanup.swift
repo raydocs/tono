@@ -88,18 +88,30 @@ enum RuntimeCleanup {
         try? FileManager.default.removeItem(at: connectBootSessionFile)
     }
 
-    /// The file copy, else the preference an earlier build kept. A file that
-    /// exists but cannot be read holds, like an unreadable boot session.
     static var recordedConnectBootSession: String? {
+        recordedConnectBootSession(in: connectBootSessionFile)
+    }
+
+    /// The file copy, else the preference an earlier build kept. A file that
+    /// exists but cannot be read holds, like an unreadable boot session. So
+    /// does no record where the file cannot be written: a connect there kept
+    /// only the preference, which a panic can lose, so its absence proves
+    /// nothing.
+    static func recordedConnectBootSession(in file: URL) -> String? {
         do {
-            let data = try Data(contentsOf: connectBootSessionFile)
+            let data = try Data(contentsOf: file)
             guard let record = String(data: data, encoding: .utf8), !record.isEmpty else {
                 return unknownBootSession
             }
             return record
         } catch let error as CocoaError
             where error.code == .fileReadNoSuchFile || error.code == .fileNoSuchFile {
-            return AppProfile.defaults.string(forKey: SettingsKey.connectBootSession)
+            if let record = AppProfile.defaults.string(forKey: SettingsKey.connectBootSession) {
+                return record
+            }
+            let writable = FileManager.default
+                .isWritableFile(atPath: file.deletingLastPathComponent().path)
+            return writable ? nil : unknownBootSession
         } catch {
             return unknownBootSession
         }

@@ -25,7 +25,7 @@ final class UnexpectedRestartResumeTests: XCTestCase {
     /// Regression review a1d498c8 grok:F2: cfprefsd writes a preference to
     /// disk when it gets to it, so a panic seconds after connect could lose a
     /// record kept only there, and the next boot reconnected by itself again.
-    func testConnectRecordSurvivesALostPreferencesWrite() {
+    func testConnectRecordSurvivesALostPreferencesWrite() throws {
         defer { RuntimeCleanup.clearConnectBootSession() }
         RuntimeCleanup.recordConnectBootSession()
         // The preference never reached disk before the restart.
@@ -36,6 +36,21 @@ final class UnexpectedRestartResumeTests: XCTestCase {
         )
         RuntimeCleanup.clearConnectBootSession()
         XCTAssertNil(RuntimeCleanup.recordedConnectBootSession)
+        // Review 8a9e6ebd codex:F1: where the file cannot be written, a
+        // connect kept only the preference, so no record proves nothing.
+        let readOnly = FileManager.default.temporaryDirectory
+            .appendingPathComponent("tono-read-only-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(
+            at: readOnly, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o500]
+        )
+        defer {
+            try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: readOnly.path)
+            try? FileManager.default.removeItem(at: readOnly)
+        }
+        XCTAssertEqual(
+            RuntimeCleanup.recordedConnectBootSession(in: readOnly.appendingPathComponent("connect-boot-session")),
+            RuntimeCleanup.unknownBootSession
+        )
         // A record an earlier build kept only in preferences still holds.
         AppProfile.defaults.set("boot-before-upgrade", forKey: SettingsKey.connectBootSession)
         XCTAssertEqual(RuntimeCleanup.recordedConnectBootSession, "boot-before-upgrade")

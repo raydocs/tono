@@ -59,3 +59,19 @@
   `F_FULLFSYNC`，耗时未在真机测（CI 上含一次记录的用例共 0.015 秒）。launch 判定「未确认」而后才被 helper 确认为屏障时，不补显示重启保持提示（只看到 Protected
   Offline）。重启保持期间唤醒/网络变化的拒绝仍是静默的；Home-US 路径无提示（R675-opus-F1，仍 open）。NSIS reason 文件
   本身在 `$PLUGINSDIR`（用户 TEMP 下），仍为 `create_new` + 不跟随最后一级重解析点，本次未改。
+
+### 续记 2026-09-28 · #677 评审 8a9e6ebd 的一条 minor（一轮修复）
+- 沿用证据：只改文档的头 `5796f5ec` 上手动触发的 Windows CI [36387579678](https://github.com/raydocs/tono/actions/runs/36387579678)
+  通过；macOS CI [36387577256](https://github.com/raydocs/tono/actions/runs/36387577256) 第 1 次 `privileged-tests` 失败于
+  helper `--lifecycle-self-test` 的 `reference-kept-past-unanswered-query`（本 PR 未动 helper，同一代码在 `96a1cdbc` 通过），
+  只重跑失败作业一次，第 2 次全部通过；视为偶发，未另查。
+- 缺陷修复（MAC-BOOT-AUTORESUME 续修，codex:F1）：记录目录可读不可写、文件不存在时，连接只记审计事件照常进行，panic 丢掉
+  尚未落盘的 UserDefaults 后下次启动仍自动连接。改后 `recordedConnectBootSession(in:)` 在既无文件也无 UserDefaults 记录、
+  而文件所在目录不可写（`FileManager.isWritableFile`）时返回哨兵 `unknown`，`AppState.init` 于是设重启保持：不自动连接，
+  PF 保持，走已有提示路径；用户的 Connect 照常并解除保持。没用 UserDefaults 里的「写失败」标记：它与记录一样异步落盘。
+- 工程与测试：`testConnectRecordSurvivesALostPreferencesWrite` 加一条断言（临时目录权限 0500、无文件无旧键时读出哨兵），
+  测试改为 `throws`。与修复同一提交，没有单独的红提交（新入口在旧代码上只会是编译错误）。
+- 验证：本机 `swiftc -parse` 与一段独立脚本（0500 目录下读文件报 no-such-file、`isWritableFile` 为 false、清理成功）；
+  macOS CI 结果见下一条续记或 PR。
+- 剩余限制：这种不可写的机器上每次启动都保持（同一次开机内崩溃也不自动恢复），提示文案仍说「意外重启」，可能与实情不符；
+  目录可写但写入失败（如磁盘满）时旧缺口仍在。
