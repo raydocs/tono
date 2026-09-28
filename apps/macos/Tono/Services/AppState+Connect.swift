@@ -84,8 +84,10 @@ extension AppState {
                 self.protectedReconnectPausedForUserAction = false
                 // This boot now has a session: a launch in a later boot that
                 // finds this record restarted without a clean release, and
-                // does not reconnect by itself. A user's Connect lands here
-                // too, which is what lifts that hold.
+                // does not reconnect by itself. Every automatic caller refuses
+                // while that hold is set, so a connect admitted here is the
+                // user's, and it lifts the hold.
+                self.automaticResumeHeldAfterRestart = false
                 RuntimeCleanup.recordConnectBootSession()
 
                 // Session-dynamic mixed/controller ports avoid collisions with leftover
@@ -1017,6 +1019,7 @@ extension AppState {
                         self.protectedDNSService = nil
                         self.recoveryCause = nil
                         RuntimeCleanup.clearConnectBootSession()
+                        self.automaticResumeHeldAfterRestart = false
                     }
                     if let transitionError {
                         self.errorMessage = transitionError
@@ -2160,6 +2163,9 @@ extension AppState {
             onAttemptScheduled: { [weak self] attempt, delay in
                 guard let self else { return false }
                 if self.protectedReconnectPausedForUserAction { return false }
+                // After an unexpected restart only the user reconnects;
+                // Retry now lifts this hold before it schedules the loop.
+                if self.automaticResumeHeldAfterRestart { return false }
                 self.isProtectedReconnectScheduled = true
                 self.protectedReconnectAttempt = attempt + 1
                 self.protectedReconnectNextAttemptAt = delay > 0
@@ -2204,7 +2210,8 @@ extension AppState {
                     return true
                 }
                 guard !Task.isCancelled,
-                      !self.protectedReconnectPausedForUserAction else { return true }
+                      !self.protectedReconnectPausedForUserAction,
+                      !self.automaticResumeHeldAfterRestart else { return true }
                 if self.catalogSelectionRequiresChoice {
                     return true
                 }
@@ -2313,6 +2320,8 @@ extension AppState {
         guard isProtectionBlocked, !isConnected, !isConnecting else { return }
         protectedReconnectPausedForUserAction = false
         protectedReconnectPauseLiftsOnNetworkChange = false
+        // An explicit retry is the user's connect after an unexpected restart.
+        automaticResumeHeldAfterRestart = false
         // Explicit user intent earns a fresh cycle of three attempts, not a
         // single shot against a counter already sitting at the threshold.
         lastProtectedFailureSignature = nil

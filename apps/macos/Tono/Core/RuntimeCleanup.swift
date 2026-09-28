@@ -45,15 +45,24 @@ enum RuntimeCleanup {
         return String(cString: buffer)
     }
 
+    /// Stored when the boot session cannot be read at connect start. It never
+    /// equals a real boot session (a UUID) or a failed read (nil), so a later
+    /// launch holds instead of losing the record.
+    nonisolated static let unknownBootSession = "unknown"
+
+    /// What a connect start records for the boot session it read.
+    nonisolated static func bootSessionRecord(current: String?) -> String {
+        current ?? unknownBootSession
+    }
+
     /// Recorded when a connect starts; cleared by a completed release
     /// (Restore internet, Quit). A record from another boot therefore means
     /// the Mac restarted while a session was up, without a clean stop.
     static func recordConnectBootSession() {
-        if let boot = currentBootSession() {
-            AppProfile.defaults.set(boot, forKey: SettingsKey.connectBootSession)
-        } else {
-            AppProfile.defaults.removeObject(forKey: SettingsKey.connectBootSession)
-        }
+        AppProfile.defaults.set(
+            bootSessionRecord(current: currentBootSession()),
+            forKey: SettingsKey.connectBootSession
+        )
     }
 
     static func clearConnectBootSession() {

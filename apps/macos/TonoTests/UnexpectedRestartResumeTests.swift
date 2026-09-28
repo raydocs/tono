@@ -12,6 +12,10 @@ final class UnexpectedRestartResumeTests: XCTestCase {
             recordedBootSession: "boot-before-restart",
             currentBootSession: "boot-after-restart"
         ), "A session started in an earlier boot must not auto-connect")
+        XCTAssertTrue(RuntimeCleanup.holdsAutomaticResume(
+            recordedBootSession: RuntimeCleanup.bootSessionRecord(current: nil),
+            currentBootSession: "boot-after-restart"
+        ), "A connect whose boot session could not be read must still hold")
         XCTAssertFalse(RuntimeCleanup.holdsAutomaticResume(
             recordedBootSession: "same-boot",
             currentBootSession: "same-boot"
