@@ -35,6 +35,11 @@
   [run 36379273405](https://github.com/raydocs/tono/actions/runs/36379273405)（`38a5fb2e`，期望在「Test the service lifecycle」
   只有两个新测试在第一条断言失败），绿 [run 36379299558](https://github.com/raydocs/tono/actions/runs/36379299558)（`145dc833`）；
   写本条时两个 run 仍在运行，结果以 run 页面为准。
+  - 续记（2026-09-27，run 完成）：红 run 结论 failure。service 作业的「Test the service lifecycle」336 个测试中 334 通过、2 失败，
+    失败的正是两个新测试，分别在第一条断言处（`update.rs:1417`、`wfp_model.rs:2417`），后续步骤跳过；app 作业只有
+    packaging 测试 1 项失败（`gateReasonTonoAdapterPresent (SIMPCHINESE)`）。绿 run 结论 success：service 作业各步骤全过
+    （lifecycle 336/336，含 native update admission 与 independent executor），core、app、app-rust 通过。测试 SHA 为 `145dc833`；
+    本记录提交只改文档，没有重新触发 Windows CI。
 - 候选/发布：仅源码，无新候选。
 - 剩余限制：
   - A5 未实机确认：遗留行在 `GetIfTable2` 与 `GetIfEntry2` 中是否真的报 OperStatus 6。若不是，门禁仍拒绝，锁的行为与今天相同。
