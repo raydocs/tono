@@ -174,11 +174,12 @@ Both environments list reviewer `raydocs`, the same account as the agents' token
 so an agent approving them removes the only human check there. Whether that token
 can approve its own deployment was confirmed on 2026-09-26 for `windows-release` only (kit
 runs recorded in `docs/changelog.d/2026-09-26-kit-0-0-74.md`); `windows-update-channel` is
-configured separately and is still untested. Self-approve only for
-the G4 publish and, by owner decision of 2026-09-26 ([DECISIONS.md](DECISIONS.md)), for the
-`windows-release` signing runs of the one-round G1–G3 test kit; any other signed G3
-candidate waits for the owner's approval. Record each approval (environment, run URL,
-SHA) in the changelog.
+configured separately and is still untested. By owner decision of 2026-09-28
+([DECISIONS.md](DECISIONS.md)), agents approve GitHub Actions environment approvals
+themselves (`windows-release` for any candidate, `windows-update-channel` at G4); none waits
+for the owner. Record each approval (run URL, environment, candidate SHA and release
+sequence) in the changelog. The customer-publish precondition is unchanged: the owner's
+`[x]` for G1–G2 in SHIP_PLAN §6 (0.0.74), and only the candidate that evidence names.
 
 **Rollback.** Moving a feed back to the last good entry only stops machines that
 have not updated yet. Updated machines refuse a lower build or release sequence on
