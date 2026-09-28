@@ -119,10 +119,10 @@ fn classify_before_stop(
 /// `--manual-update-gate`: every refusal in `begin_manual` starts with a WFP read, an RPC to BFE,
 /// so BFE comes up first. Reading first refused a merely stopped BFE as an unconfirmable network
 /// state, before the install could ever repair it (H22-O-F1).
-fn manual_update_gate(
+fn manual_update_gate<T>(
     bfe_up: impl FnOnce() -> Result<(), Error>,
-    begin: impl FnOnce() -> Result<(), Error>,
-) -> Result<(), Error> {
+    begin: impl FnOnce() -> Result<T, Error>,
+) -> Result<T, Error> {
     bfe_up()?;
     begin()
 }
@@ -171,10 +171,18 @@ fn gate_exit(error: &Error) -> (i32, &'static str) {
 
 /// How a manual gate run ends: the exit status NSIS maps to its dialog, one entry in the
 /// install-gate log, and the reason file carrying the refusal's first line and that log's path.
-fn finish_gate(mode: &str, report: &native::GateReport, outcome: Result<(), Error>) -> i32 {
-    let Err(error) = outcome else {
-        report.record(mode, 0, "OK", "");
-        return 0;
+/// A passing gate's note, if any, goes on its OK line.
+fn finish_gate(
+    mode: &str,
+    report: &native::GateReport,
+    outcome: Result<Option<String>, Error>,
+) -> i32 {
+    let error = match outcome {
+        Ok(note) => {
+            report.record(mode, 0, "OK", note.as_deref().unwrap_or(""));
+            return 0;
+        }
+        Err(error) => error,
     };
     let (exit, code) = gate_exit(&error);
     let chain = format!("{error:#}");
@@ -211,8 +219,8 @@ pub(super) fn dispatch() -> Result<bool, Error> {
             "--manual-update-gate" => manual_update_gate(bring_scm_bfe_up, || {
                 tokio::runtime::Runtime::new()?.block_on(native::begin_manual())
             }),
-            "--manual-orphan-gate" => native::begin_manual_orphan(),
-            _ => native::begin_manual_uninstall(),
+            "--manual-orphan-gate" => native::begin_manual_orphan().map(|()| None),
+            _ => native::begin_manual_uninstall().map(|()| None),
         };
         let report = native::GateReport::for_machine(reason_file);
         std::process::exit(finish_gate(&mode, &report, outcome));

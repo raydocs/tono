@@ -1059,12 +1059,26 @@ pub(crate) fn luid_for_interface(name: &str) -> Result<u64> {
 /// that nor an unmistakably virtual/tunnel interface type fails the lock (the caller's retry
 /// path handles a still-initializing adapter).
 fn validate_tunnel_luid(luid: u64) -> Result<()> {
+    const _: () = assert!(
+        windows_sys::Win32::NetworkManagement::Ndis::IfOperStatusNotPresent
+            == crate::core::wfp_model::IF_OPER_STATUS_NOT_PRESENT
+    );
+    const _: () = assert!(
+        windows_sys::Win32::Foundation::ERROR_FILE_NOT_FOUND
+            == crate::core::wfp_model::ERROR_FILE_NOT_FOUND
+    );
     let mut row = MIB_IF_ROW2 {
         InterfaceLuid: NET_LUID_LH { Value: luid },
         ..Default::default()
     };
     // SAFETY: `row` is a valid in/out buffer; the LUID identifies the requested interface.
     let status = unsafe { GetIfEntry2(&mut row) };
+    // Reached only after the alias resolved: a vanished or not-present row is "not resolved yet",
+    // never a tunnel to key the permit to.
+    if let Some(reason) = crate::core::wfp_model::tunnel_row_not_ready(luid, status, row.OperStatus)
+    {
+        bail!("{reason}")
+    }
     if status != 0 {
         bail!("GetIfEntry2 failed for LUID {luid}: Windows error {status}");
     }

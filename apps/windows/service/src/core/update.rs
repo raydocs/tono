@@ -937,7 +937,9 @@ pub async fn manual_gate() -> Result<()> {
     Ok(())
 }
 
-async fn manual_core_absent() -> Result<()> {
+/// `Ok(Some(note))` when the only interfaces named `Tono` are ones Windows reports as not
+/// present; the gate ignores those and says so in its log.
+async fn manual_core_absent() -> Result<Option<String>> {
     let core = || GateRefusal(GateReason::CoreRunning);
     if let Some(record) = super::runtime::read_core_runtime_record()
         .await
@@ -974,13 +976,29 @@ async fn manual_core_absent() -> Result<()> {
         }
     }
     // An enumeration failure is not absence; it stays an unexpected refusal with its own text.
-    if security::tunnel_present("Tono")? {
+    // Only a row Windows reports as present refuses (WIN-GATE-GHOST-TUN).
+    let (present, not_present) = security::tunnel_rows("Tono")?;
+    let list = |rows: Vec<security::TunnelRow>| {
+        rows.iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("; ")
+    };
+    if !present.is_empty() {
         return Err(refusal(
             GateReason::TonoAdapterPresent,
-            "a network interface named \"Tono\" (Tono's TUN adapter) is still present",
+            format!(
+                "a network interface named \"Tono\" is reported as present: {}",
+                list(present)
+            ),
         ));
     }
-    Ok(())
+    Ok((!not_present.is_empty()).then(|| {
+        format!(
+            "ignored a network interface named \"Tono\" that Windows reports as not present: {}",
+            list(not_present)
+        )
+    }))
 }
 
 /// What a leftover core runtime record says about the Core it names.
@@ -1188,8 +1206,9 @@ fn refuse_live_lease(store: &Store, installer: &Image) -> Result<()> {
 
 /// NSIS calls this before *any* live or repair-resource mutation. The durable
 /// lease fences Service connect/restart even after the short-lived gate exits.
-/// Every refusal names its cause ([`GateRefusal`]) for the installer's dialog.
-pub async fn begin_manual() -> Result<()> {
+/// Every refusal names its cause ([`GateRefusal`]) for the installer's dialog. The lease is
+/// written only after every check passed; the returned note is for the install-gate log.
+pub async fn begin_manual() -> Result<Option<String>> {
     let installer = gate_installer()?;
     let _repair = gate_repair_lock()?;
     let mut store = gate_store()?;
@@ -1231,13 +1250,14 @@ pub async fn begin_manual() -> Result<()> {
             ),
         ));
     }
-    manual_core_absent().await?;
+    let note = manual_core_absent().await?;
     store = gate_store()?;
     let mut next = store.state.clone();
     next.manual_installer = Some(installer);
     store
         .save(next)
-        .context(GateRefusal(GateReason::StateDirUnusable))
+        .context(GateRefusal(GateReason::StateDirUnusable))?;
+    Ok(note)
 }
 
 /// Uninstall only, after the user confirmed releasing active protection. The
@@ -1396,6 +1416,35 @@ mod tests {
         let state =
             recorded_core_state(&recorded, Err(anyhow::anyhow!("snapshot failed")), || None);
         assert!(matches!(state, RecordedCore::Unverifiable(_)));
+    }
+
+    /// WIN-GATE-GHOST-TUN: every Core stop is a hard kill, so its WinTUN device is left "Not
+    /// present" while Windows keeps its interface row named `Tono`. Matching that name alone
+    /// refused every later manual install with 87. Only a row Windows reports as present (any
+    /// status but NotPresent) still refuses, and only an exact name match counts.
+    #[test]
+    fn update_manual_gate_ignores_a_not_present_tono_interface() {
+        use windows_sys::Win32::NetworkManagement::Ndis::{
+            IfOperStatusDown, IfOperStatusNotPresent, IfOperStatusUp,
+        };
+        let row = |alias: &str, oper_status| security::TunnelRow {
+            alias: alias.into(),
+            oper_status,
+            ..Default::default()
+        };
+        let (present, not_present) =
+            security::split_tunnel_rows(vec![row("Tono", IfOperStatusNotPresent)], "Tono");
+        assert!(
+            present.is_empty(),
+            "a not-present Tono interface refused the install: {present:?}"
+        );
+        assert_eq!(not_present.len(), 1);
+        let (present, _) = security::split_tunnel_rows(
+            vec![row("TONO", IfOperStatusDown), row("Tono 1", IfOperStatusUp)],
+            "Tono",
+        );
+        assert_eq!(present.len(), 1, "{present:?}");
+        assert_eq!(present[0].alias, "TONO");
     }
 
     #[test]

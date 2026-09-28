@@ -344,10 +344,65 @@ pub fn tunnel_absent(name: &str) -> Result<()> {
     Ok(())
 }
 
-/// Whether an interface with this alias exists. An enumeration failure is an error, never
-/// absence.
+/// One interface row whose alias matches the tunnel name. These facts, and only for rows with
+/// that name, are what a gate refusal or note may log.
+#[derive(Debug, Default)]
+pub(crate) struct TunnelRow {
+    pub(crate) alias: String,
+    pub(crate) luid: u64,
+    pub(crate) if_index: u32,
+    pub(crate) guid: String,
+    pub(crate) oper_status: i32,
+    pub(crate) admin_status: i32,
+    pub(crate) media_connect_state: i32,
+    pub(crate) if_type: u32,
+    pub(crate) description: String,
+}
+
+impl std::fmt::Display for TunnelRow {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "alias={:?} luid={} ifIndex={} guid={} operStatus={} adminStatus={} mediaConnectState={} type={} description={:?}",
+            self.alias,
+            self.luid,
+            self.if_index,
+            self.guid,
+            self.oper_status,
+            self.admin_status,
+            self.media_connect_state,
+            self.if_type,
+            self.description
+        )
+    }
+}
+
+/// `(present, not_present)` among the rows named `name` (exact, ASCII case-insensitive). A row
+/// is present unless Windows reports it `IfOperStatusNotPresent`: a killed Core leaves its
+/// WinTUN device not present while its interface row stays registered.
+pub(crate) fn split_tunnel_rows(
+    rows: Vec<TunnelRow>,
+    name: &str,
+) -> (Vec<TunnelRow>, Vec<TunnelRow>) {
+    use windows_sys::Win32::NetworkManagement::Ndis::IfOperStatusNotPresent;
+    rows.into_iter()
+        .filter(|row| row.alias.eq_ignore_ascii_case(name))
+        .partition(|row| row.oper_status != IfOperStatusNotPresent)
+}
+
+/// Whether an interface with this alias is present (any status but NotPresent). An enumeration
+/// failure is an error, never absence.
 pub fn tunnel_present(name: &str) -> Result<bool> {
+    Ok(!tunnel_rows(name)?.0.is_empty())
+}
+
+/// Every interface named `name`, as [`split_tunnel_rows`] divides them. An enumeration failure,
+/// an oversized table or an alias that is not valid UTF-16 is an error, never absence.
+pub fn tunnel_rows(name: &str) -> Result<(Vec<TunnelRow>, Vec<TunnelRow>)> {
     use windows_sys::Win32::NetworkManagement::IpHelper::{FreeMibTable, GetIfTable2};
+    fn text(units: &[u16]) -> &[u16] {
+        &units[..units.iter().position(|c| *c == 0).unwrap_or(units.len())]
+    }
     let mut table = std::ptr::null_mut();
     let status = unsafe { GetIfTable2(&mut table) };
     ensure!(
@@ -363,17 +418,40 @@ pub fn tunnel_present(name: &str) -> Result<bool> {
     let _table = Table(table.cast());
     let count = unsafe { (*table).NumEntries } as usize;
     ensure!(count <= 4096, "adapter enumeration exceeds limit");
+    let mut rows = Vec::new();
     for row in unsafe { std::slice::from_raw_parts((*table).Table.as_ptr(), count) } {
-        let end = row
-            .Alias
-            .iter()
-            .position(|c| *c == 0)
-            .unwrap_or(row.Alias.len());
-        if String::from_utf16(&row.Alias[..end])?.eq_ignore_ascii_case(name) {
-            return Ok(true);
+        let alias = String::from_utf16(text(&row.Alias))?;
+        if !alias.eq_ignore_ascii_case(name) {
+            continue;
         }
+        let g = &row.InterfaceGuid;
+        rows.push(TunnelRow {
+            alias,
+            // SAFETY: `Value` is the plain u64 view of the union.
+            luid: unsafe { row.InterfaceLuid.Value },
+            if_index: row.InterfaceIndex,
+            guid: format!(
+                "{{{:08X}-{:04X}-{:04X}-{:02X}{:02X}-{:02X}{:02X}{:02X}{:02X}{:02X}{:02X}}}",
+                g.data1,
+                g.data2,
+                g.data3,
+                g.data4[0],
+                g.data4[1],
+                g.data4[2],
+                g.data4[3],
+                g.data4[4],
+                g.data4[5],
+                g.data4[6],
+                g.data4[7]
+            ),
+            oper_status: row.OperStatus,
+            admin_status: row.AdminStatus,
+            media_connect_state: row.MediaConnectState,
+            if_type: row.Type,
+            description: String::from_utf16_lossy(text(&row.Description)),
+        });
     }
-    Ok(false)
+    Ok(split_tunnel_rows(rows, name))
 }
 
 pub fn decode_base64(value: &str) -> Result<String> {
