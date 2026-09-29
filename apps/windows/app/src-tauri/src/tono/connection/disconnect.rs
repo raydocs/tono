@@ -220,9 +220,11 @@ async fn run_release_sequence(
     // registered Service before asking its owner-gated endpoint to remove protection. This is
     // the path that hands the machine its Internet back, so it always gets its prompt: a repair
     // the user declined during a connect must not leave them hard-blocked with no way out.
-    service::tono_service_ready_or_start_now()
-        .await
-        .map_err(|error| service_not_ready_release_error(&error))?;
+    {
+        if let Err(error) = service::tono_service_ready_or_start_now().await {
+            return Err(release_unconfirmed(state, service_not_ready_release_error(&error)).await);
+        }
+    }
 
     #[cfg(windows)]
     let status = {
@@ -233,8 +235,10 @@ async fn run_release_sequence(
         } else { None };
         match update_release {
             Some(status) => status,
-            None => service::tono_release_kill_switch().await
-                .map_err(|error| format!("kill switch release failed; protection stays on: {error}"))?,
+            None => match service::tono_release_kill_switch().await {
+                Ok(status) => status,
+                Err(error) => return Err(release_failed(state, &error).await),
+            },
         }
     };
 
@@ -247,9 +251,10 @@ async fn run_release_sequence(
         if stop_core_before_release(core_active, service::tono_session_live()) {
             let _ = service::tono_stop_core(false).await;
         }
-        service::tono_release_kill_switch()
-            .await
-            .map_err(|error| format!("kill switch release failed; protection stays on: {error}"))?
+        match service::tono_release_kill_switch().await {
+            Ok(status) => status,
+            Err(error) => return Err(release_failed(state, &error).await),
+        }
     };
 
     if status.wanted || status.live {
@@ -278,6 +283,28 @@ fn service_not_ready_release_error(error: impl std::fmt::Display) -> String {
         "{}: the Tono Service is not ready, so the release did not run and protection is unconfirmed: {error}",
         super::failure::PROTECTION_UNCONFIRMED_PREFIX
     )
+}
+
+/// A release that ends without a Service reading drops the cached one before it reports: an older
+/// reading of wanted and live would otherwise still be published, and the UI would show protected
+/// with nothing proving it. The FSM still holds protection as blocking, so Disconnect stays offered.
+async fn release_unconfirmed(state: &TonoState, message: String) -> String {
+    state.lock().await.kill_switch = None;
+    message
+}
+
+/// A Service refusal, or a reading that stays armed, is the Service's answer that protection is
+/// still on. A release that got no reading ([`service::ReleaseGotNoReading`]) proves nothing either
+/// way, so it is reported unconfirmed.
+async fn release_failed(state: &TonoState, error: &anyhow::Error) -> String {
+    if error.is::<service::ReleaseGotNoReading>() {
+        let message = format!(
+            "{}: protection is unconfirmed: {error:#}",
+            super::failure::PROTECTION_UNCONFIRMED_PREFIX
+        );
+        return release_unconfirmed(state, message).await;
+    }
+    format!("kill switch release failed; protection stays on: {error}")
 }
 
 /// `tono_disconnect`: cancel the reconnect, then the explicit-release
@@ -468,5 +495,54 @@ mod tests {
         );
         assert!(!message.contains("protection stays on"), "{message}");
         assert!(message.contains("the helper exited with 1"), "{message}");
+    }
+
+    /// deef9193 codex:F1: a release that ends without a Service reading must not leave the last
+    /// reading of wanted and live published, or the UI shows protected with nothing proving it.
+    /// The FSM still holds protection as blocking, so Disconnect stays offered.
+    #[tokio::test]
+    async fn an_unconfirmed_release_drops_the_cached_protected_reading() {
+        let state = Arc::new(TonoState::for_test());
+        {
+            let mut inner = state.lock().await;
+            inner.fsm.begin_connect();
+            inner.fsm.mark_kill_switch_armed();
+            inner.fsm.mark_session_verified();
+            inner.fsm.connect_succeeded().unwrap();
+            inner.fsm.begin_disconnect();
+            inner.kill_switch = Some(serde_json::from_value(serde_json::json!({
+                "wanted": true, "verified": true, "live": true, "mode": "blocked",
+            })).unwrap());
+        }
+        let sequence_state = Arc::clone(&state);
+        let operation = coordinate_release(&state, None,
+            move |_guard| async move {
+                let not_ready = service_not_ready_release_error("the helper exited with 1");
+                Err(release_unconfirmed(&sequence_state, not_ready).await)
+            },
+            || async {},
+        ).await;
+        assert!(operation.wait().await.is_err());
+        let inner = state.lock().await;
+        assert!(inner.kill_switch.is_none(), "no cached reading may still claim protected");
+        assert!(inner.fsm.status().is_protection_blocked && inner.fsm.kill_switch_armed());
+    }
+
+    /// deef9193 opus:F2: a release that got no reading from the Service (no owner credentials, or
+    /// the release IPC and its read-back both failed) proves nothing, so it is unconfirmed and not
+    /// "protection stays on".
+    #[tokio::test]
+    async fn a_release_that_got_no_service_reading_is_unconfirmed() {
+        let state = Arc::new(TonoState::for_test());
+        let lost = anyhow::anyhow!("the pipe closed")
+            .context("无法连接到Tono Service")
+            .context(service::ReleaseGotNoReading);
+        let message = release_failed(&state, &lost).await;
+        assert!(
+            message.starts_with(super::super::failure::PROTECTION_UNCONFIRMED_PREFIX),
+            "{message}"
+        );
+        assert!(!message.contains("protection stays on"), "{message}");
+        assert!(message.contains("the pipe closed"), "{message}");
     }
 }

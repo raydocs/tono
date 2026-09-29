@@ -1253,12 +1253,27 @@ pub(crate) async fn tono_service_status_snapshot() -> Result<ServiceStatusSnapsh
     response.data.context("Tono Service 未返回状态快照")
 }
 
+/// A release that got no reading from the Tono Service: the owner credentials could not be read,
+/// so no request was sent, or the release IPC and its read-back both failed. Nothing then shows
+/// whether protection is on or off, so callers report it unconfirmed, not still on
+/// (R681-old-helper-still-on). A refusal from the Service is its own answer and is not this error.
+#[derive(Debug)]
+pub(crate) struct ReleaseGotNoReading;
+
+impl std::fmt::Display for ReleaseGotNoReading {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("the release got no reading from the Tono Service")
+    }
+}
+
+impl std::error::Error for ReleaseGotNoReading {}
+
 /// `POST /kill-switch/release` (owner-gated, protocol rev 6): the explicit
 /// user disarm. Works without a session — by the time Protected Offline is
 /// released, the session that armed the switch is long gone. Idempotent on
 /// the Service side and itself enforces DNS-before-disarm.
 pub(crate) async fn tono_release_kill_switch() -> Result<KillSwitchStatus> {
-    let credentials = current_owner_credentials()?;
+    let credentials = current_owner_credentials().context(ReleaseGotNoReading)?;
     let response = match tono_service_protocol::release_kill_switch(&credentials).await {
         Ok(response) => response,
         Err(error) => {
@@ -1278,7 +1293,7 @@ pub(crate) async fn tono_release_kill_switch() -> Result<KillSwitchStatus> {
                 record_verified_release(&status);
                 return Ok(status);
             }
-            return Err(error).context("无法连接到Tono Service");
+            return Err(error).context("无法连接到Tono Service").context(ReleaseGotNoReading);
         }
     };
     if response.code > 0 {

@@ -31,9 +31,10 @@ pub const BFE_NOT_RUNNING_PREFIX: &str = "TONO_BFE_NOT_RUNNING";
 /// reading `(unknown)`, which is unactionable for the customer and for support.
 pub const SERVICE_NOT_RUNNING_PREFIX: &str = "TONO_SERVICE_NOT_RUNNING";
 /// An explicit release could not get a ready Service (a start helper older than
-/// `--start-registered`, a declined prompt, a start or repair that failed), so no release ran and
-/// the Service gave no reading of protection. The UI shows protection as unconfirmed, never as
-/// still on.
+/// `--start-registered`, a declined prompt, a start or repair that failed), so no release ran, or
+/// the release got no reading (no owner credentials, or the IPC and its read-back both failed).
+/// Either way the Service gave no reading of protection. The UI shows protection as unconfirmed,
+/// never as still on.
 pub const PROTECTION_UNCONFIRMED_PREFIX: &str = "TONO_PROTECTION_UNCONFIRMED";
 /// Stable post-lock classifications. The loopback-proxy cross-check distinguishes a selected
 /// node/Core path that works without WinTUN from a failure shared by every Mihomo ingress path.

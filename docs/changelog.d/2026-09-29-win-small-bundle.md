@@ -42,3 +42,28 @@
   - 创建（挂起）与入 Job 之间若进程退出，留下一个从未运行的挂起子进程，不改 DNS，直到重启或被结束。
   - 入 Job 失败时这次 DNS 应用或恢复失败并报错，按已有失败路径处理，不再无绑定地运行脚本。
   - 未确认文案覆盖就绪检查失败的所有原因，不只旧版 helper；其它释放失败（Service 拒绝、Service 返回仍武装）仍报「保护仍开启」。
+
+### 2026-09-29 续记：评审 deef9193 修正轮
+- 来源：PR #684 head `30d7648f` 的代码评审 deef9193（triple/max）通过，3 个 minor，本续记一轮全部修复；Jev-Decision 54dc19ce。
+- 缺陷修复：
+  1. codex:F1：就绪检查失败时 R681 只改了文字，缓存的 Service 读数（wanted、live 都为 true）仍随状态发布，界面照样显示
+     「已保护」。改后：释放以「未确认」结束时先清掉 `inner.kill_switch` 再报错，界面显示保护未验证；FSM 仍按释放失败保持
+     Protected Offline（Restore internet 仍可再点）。
+  2. opus:F2：就绪检查通过后，`tono_release_kill_switch` 里拿不到 Service 读数的失败（读不到属主凭据、没发请求；释放 IPC
+     与其回读都失败）仍报「protection stays on」。改后：这两种失败带 `ReleaseGotNoReading` 标记，App 映射为
+     `TONO_PROTECTION_UNCONFIRMED` 并清掉缓存读数。Service 拒绝（`code > 0`）与返回仍武装的读数仍报「保护仍开启」。
+  3. opus:F1：`a_dns_helper_runs_only_after_joining_the_job` 在去掉 `CREATE_SUSPENDED` 后仍会通过。改后：
+     `resume_suspended_process` 要求至少一个线程恢复前的挂起计数不为 0，否则子进程在入 Job 前已在运行，返回错误并终止它；
+     去掉 `CREATE_SUSPENDED` 时该测试的正向路径因此失败。
+- 工程与测试：新增 `tono::connection::disconnect::tests::an_unconfirmed_release_drops_the_cached_protected_reading`
+  （经 `coordinate_release` 的失败路径后缓存读数为空、FSM 仍阻断）与
+  `a_release_that_got_no_service_reading_is_unconfirmed`（`ReleaseGotNoReading` 映射为未确认，不说仍开启）；
+  收紧上面那个 service 测试的前提，不另加测试。
+- 验证：MacBook 未运行 cargo、Tauri、vitest 或 Windows 构建；本轮提交的 Windows CI 运行编号与结论记在 PR #684 正文。
+  「去掉 `CREATE_SUSPENDED` 后测试失败」按代码推导（`ResumeThread` 对运行中的线程返回 0），未实际跑过去掉该标志的版本。
+- 剩余限制（评审降为建议、本轮未改）：
+  - codex:F2：`src/services/tono.ts` 对 `CORE_EXIT_UNREACHABLE` 先行返回，连接失败后的自动释放把两个标记拼在一起时，
+    `TONO_PROTECTION_UNCONFIRMED` 被遮住，显示节点不可达文案；非回归。
+  - codex:F3：逐个恢复线程不是一次性提交；主线程已恢复后，第三方注入的线程恰在快照与 `OpenThread` 之间退出时返回错误，
+    清理只杀直接子进程，可能留下已起的孙进程（它们仍在 Job 内）。
+  - opus:F3：`EXIT_JOB` 把创建 Job 的失败永久缓存，此后该进程每次起 DNS 助手都失败，直到进程重启。

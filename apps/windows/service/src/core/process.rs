@@ -353,6 +353,8 @@ fn spawn_in_job(
 /// process is skipped. The child has run nothing yet, so its one thread is the primary thread
 /// CreateProcess left suspended. A thread a third party injected would be resumed as well, which
 /// is harmless once the process is in the job and does nothing to a thread already running.
+/// If no thread was suspended, the child ran before it joined the job; that is an error, and the
+/// caller terminates the child.
 #[cfg(windows)]
 #[cfg_attr(feature = "test", allow(dead_code))]
 fn resume_suspended_process(pid: u32) -> Result<()> {
@@ -384,7 +386,7 @@ fn resume_suspended_process(pid: u32) -> Result<()> {
         dwSize: std::mem::size_of::<THREADENTRY32>() as u32,
         ..Default::default()
     };
-    let mut resumed = 0_u32;
+    let mut suspended = 0_u32;
     // SAFETY: `snapshot` is a live snapshot and `entry` a valid, correctly sized in/out buffer.
     let mut has_entry = unsafe { Thread32First(snapshot.0, &mut entry) } != 0;
     while has_entry {
@@ -405,19 +407,24 @@ fn resume_suspended_process(pid: u32) -> Result<()> {
             let thread = Handle(raw);
             // SAFETY: `thread` is a live handle opened with the query and resume rights.
             if unsafe { GetProcessIdOfThread(thread.0) } == pid {
-                if unsafe { ResumeThread(thread.0) } == u32::MAX {
+                // SAFETY: the same live handle. ResumeThread returns the suspend count the thread
+                // had before this call.
+                let previous = unsafe { ResumeThread(thread.0) };
+                if previous == u32::MAX {
                     return Err(std::io::Error::last_os_error()).with_context(|| {
                         format!("failed to resume thread {} of process {pid}", entry.th32ThreadID)
                     });
                 }
-                resumed += 1;
+                if previous > 0 {
+                    suspended += 1;
+                }
             }
         }
         // SAFETY: same contract as the first call.
         has_entry = unsafe { Thread32Next(snapshot.0, &mut entry) } != 0;
     }
-    if resumed == 0 {
-        bail!("process {pid} has no thread to resume");
+    if suspended == 0 {
+        bail!("process {pid} had no suspended thread, so it ran before it joined the job");
     }
     Ok(())
 }
@@ -728,7 +735,8 @@ mod tests {
 
     /// R680-dns-child-job-window: a DNS helper is created suspended and runs only once it is in
     /// the job. One that cannot join is terminated before it has run anything, and the start fails
-    /// instead of leaving an unbound helper running.
+    /// instead of leaving an unbound helper running. The start also fails when the helper had no
+    /// suspended thread to resume, so this test fails if the helper is not created suspended.
     #[cfg(windows)]
     #[test]
     fn a_dns_helper_runs_only_after_joining_the_job() {
