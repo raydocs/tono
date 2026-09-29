@@ -201,7 +201,8 @@ fn run_emergency_disarm() -> Result<()> {
                     );
                     Err(error)
                 }
-                DisarmErrorClass::StillProtected => {
+                // Red skeleton: the new class is never produced yet.
+                DisarmErrorClass::StillProtected | DisarmErrorClass::ResolverRuleRemains => {
                     print_disarm_result(
                         "解除失败，网络保护仍然生效。",
                         "The disarm failed; protection is still in place.",
@@ -245,6 +246,8 @@ enum DisarmErrorClass {
     EnforcementGoneDnsStale,
     /// Nothing proves the barrier is gone — the genuine failure case.
     StillProtected,
+    /// WFP may be gone, but Tono's NRPT catch-all could not be proven removed.
+    ResolverRuleRemains,
 }
 
 #[cfg(windows)]
@@ -280,6 +283,20 @@ mod disarm_error_tests {
         assert_eq!(
             classify_disarm_error("WFP engine call failed: access denied"),
             DisarmErrorClass::StillProtected
+        );
+    }
+
+    /// BRICK-W4: when Tono's NRPT catch-all could not be removed, every lookup still goes to the
+    /// stopped resolver whatever the adapters say. That outcome is checked before the DNS markers
+    /// it can travel with, so the shortcut never reports it as a stale adapter a restart fixes.
+    #[test]
+    fn a_remaining_nrpt_rule_is_its_own_outcome() {
+        assert_eq!(
+            classify_disarm_error(
+                "TONO_DNS_POLICY_REMAINS: WFP was removed, but Tono's DNS rule could not be \
+                 removed: TONO_DNS_STILL_ON_LOOPBACK: ..."
+            ),
+            DisarmErrorClass::ResolverRuleRemains
         );
     }
 }
