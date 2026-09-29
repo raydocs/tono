@@ -1714,4 +1714,127 @@ mod tests {
         assert!(!root.join("linked-copy.exe").exists());
         std::fs::remove_dir_all(root).unwrap();
     }
+
+    /// BRICK-W2 (Service half): an uninstaller cancelled at "Tono is running" leaves its lease
+    /// behind, and that lease refused every release for good. The release admission now passes
+    /// a lease whose holder is conclusively dead: no process has its PID, or the PID names a
+    /// process created at another time. The same creation time under another path, or an
+    /// unreadable process, still counts as alive, and a pending attempt still refuses.
+    #[test]
+    fn update_release_admission_passes_only_a_conclusively_dead_lease_holder() {
+        use super::super::process::{ProcessIdentity, process_identity};
+        let holder = Image {
+            pid: 4242,
+            started_at: 133_000_000_000_000_000,
+            path: r"C:\Program Files\Tono\uninstall.exe".into(),
+            sha256: "a".repeat(64),
+        };
+        let leased = State {
+            manual_installer: Some(holder.clone()),
+            ..State::default()
+        };
+        assert!(
+            release_admission_at(&leased, |_| Ok(None)).is_ok(),
+            "an exited lease holder kept refusing the release"
+        );
+        assert!(
+            release_admission_at(&leased, |_| Ok(Some(ProcessIdentity {
+                executable: r"C:\Windows\System32\notepad.exe".into(),
+                started_at: holder.started_at + 1,
+            })))
+            .is_ok(),
+            "a lease PID reused by a later process kept refusing the release"
+        );
+        let same_start = release_admission_at(&leased, |_| {
+            Ok(Some(ProcessIdentity {
+                executable: r"C:\Elsewhere\uninstall.exe".into(),
+                started_at: holder.started_at,
+            }))
+        })
+        .unwrap_err();
+        assert!(
+            format!("{same_start:#}").contains("manual installer owns the machine lifecycle"),
+            "{same_start:#}"
+        );
+        assert!(
+            release_admission_at(&leased, |_| Err(anyhow::anyhow!(
+                "Access is denied. (os error 5)"
+            )))
+            .is_err(),
+            "an unreadable lease holder must count as alive"
+        );
+        let (root, store, _, _) = crate::update_transaction::tests::reserved();
+        let pending = release_admission_at(&store.state, |_| Ok(None)).unwrap_err();
+        assert!(format!("{pending:#}").contains("update pending"), "{pending:#}");
+        drop(store);
+        std::fs::remove_dir_all(root).unwrap();
+
+        // The operating system's answers: this process reads as alive. A killed child whose
+        // handle is still held (so its PID cannot be reused) reads as conclusively dead.
+        let own = process_identity(std::process::id())
+            .unwrap()
+            .expect("this process is running");
+        let own_holder = Image {
+            pid: std::process::id(),
+            started_at: own.started_at,
+            path: own.executable.into(),
+            sha256: String::new(),
+        };
+        assert!(!holder_conclusively_dead(
+            &own_holder,
+            process_identity(own_holder.pid)
+        ));
+        let mut child = std::process::Command::new("ping")
+            .args(["-n", "30", "127.0.0.1"])
+            .stdout(std::process::Stdio::null())
+            .spawn()
+            .unwrap();
+        let running = process_identity(child.id())
+            .unwrap()
+            .expect("the child is running");
+        let child_holder = Image {
+            pid: child.id(),
+            started_at: running.started_at,
+            path: running.executable.into(),
+            sha256: String::new(),
+        };
+        child.kill().unwrap();
+        child.wait().unwrap();
+        assert!(
+            holder_conclusively_dead(&child_holder, process_identity(child_holder.pid)),
+            "a killed lease holder still counted as alive"
+        );
+        drop(child);
+    }
+
+    /// BRICK-W2 (Service half): after a restart the App's Disconnect sends `Status` first, and
+    /// any lease refused it before the release was ever asked. Only `Status` passes a
+    /// conclusively dead holder; an unreadable holder refuses it, and every other request keeps
+    /// refusing any lease.
+    #[test]
+    fn update_status_passes_only_a_conclusively_dead_lease_holder() {
+        let leased = State {
+            manual_installer: Some(Image {
+                pid: 4242,
+                started_at: 133_000_000_000_000_000,
+                path: r"C:\Program Files\Tono\uninstall.exe".into(),
+                sha256: "a".repeat(64),
+            }),
+            ..State::default()
+        };
+        assert!(
+            update_lease_gate(&UpdateRequest::Status, &leased, |_| Ok(None)).is_ok(),
+            "Status kept refusing an exited lease holder"
+        );
+        let unreadable = update_lease_gate(&UpdateRequest::Status, &leased, |_| {
+            Err(anyhow::anyhow!("Access is denied. (os error 5)"))
+        })
+        .unwrap_err();
+        assert!(
+            format!("{unreadable:#}").contains("manual installation is pending"),
+            "{unreadable:#}"
+        );
+        assert!(update_lease_gate(&UpdateRequest::Adopt, &leased, |_| Ok(None)).is_err());
+        assert!(update_lease_gate(&UpdateRequest::Disconnect, &leased, |_| Ok(None)).is_err());
+    }
 }

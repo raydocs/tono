@@ -824,6 +824,36 @@ pub(crate) mod tests {
         );
     }
 
+    /// BRICK-W5 (d): the release admission opened the store for writing, so a lock another
+    /// process held, or a rewrite that failed, refused Disconnect with no update in progress.
+    /// Its read succeeds under a held lock and leaves every byte, time and entry as it was.
+    #[test]
+    fn update_release_read_takes_no_lock_and_rewrites_nothing() {
+        let (root, store, _, _) = reserved();
+        let path = root.join("state.json");
+        let bytes = std::fs::read(&path).unwrap();
+        let modified = std::fs::metadata(&path).unwrap().modified().unwrap();
+        let listing = || {
+            let mut names = std::fs::read_dir(&root)
+                .unwrap()
+                .map(|entry| entry.unwrap().file_name())
+                .collect::<Vec<_>>();
+            names.sort();
+            names
+        };
+        let entries = listing();
+        let state = Store::read_state(&root).expect("a held store lock refused the release read");
+        assert_eq!(state.generation, 91);
+        assert_eq!(std::fs::read(&path).unwrap(), bytes);
+        assert_eq!(
+            std::fs::metadata(&path).unwrap().modified().unwrap(),
+            modified
+        );
+        assert_eq!(listing(), entries);
+        drop(store);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
     #[test]
     fn newer_store_fields_are_ignored_and_a_newer_major_is_refused_not_corrupt() {
         let (root, store, _, _) = reserved();

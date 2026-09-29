@@ -2068,6 +2068,120 @@ mod tests {
         );
     }
 
+    /// BRICK-W5 (e): a TonoService stopped from services.msc left WFP armed, and the release
+    /// path could revive it only through the full repair, which `manual_gate` refuses while
+    /// filters exist. `--start-registered` starts only a stopped Service whose registration and
+    /// binary verify, releases the repair gate before it waits, and reports an unverified target
+    /// as 74 with nothing started.
+    #[cfg(windows)]
+    #[test]
+    fn windows_start_registered_starts_only_a_stopped_verified_service_and_waits_without_the_gate()
+    {
+        struct Scripted<'a> {
+            stopped: bool,
+            verifies: bool,
+            log: &'a std::cell::RefCell<Vec<&'static str>>,
+        }
+        impl StartRegisteredEffects for Scripted<'_> {
+            fn acquire_repair_gate(&mut self) -> Result<bool, Error> {
+                self.log.borrow_mut().push("gate");
+                Ok(true)
+            }
+            fn start_admission(&mut self) -> Result<(), Error> {
+                self.log.borrow_mut().push("admission");
+                Ok(())
+            }
+            fn service_stopped(&mut self) -> Result<bool, Error> {
+                self.log.borrow_mut().push("stopped");
+                Ok(self.stopped)
+            }
+            fn target_verifies(&mut self) -> Result<bool, Error> {
+                self.log.borrow_mut().push("verify");
+                Ok(self.verifies)
+            }
+            fn bring_bfe_up(&mut self) -> Result<(), Error> {
+                self.log.borrow_mut().push("bfe");
+                Ok(())
+            }
+            fn start_service(&mut self) -> Result<(), Error> {
+                self.log.borrow_mut().push("start");
+                Ok(())
+            }
+            fn release_repair_gate(&mut self) {
+                self.log.borrow_mut().push("release");
+            }
+            fn wait_for_service_ready(&mut self) -> Result<(), Error> {
+                self.log.borrow_mut().push("wait");
+                Ok(())
+            }
+        }
+        let log = std::cell::RefCell::new(Vec::new());
+        let stopped_verified = start_registered_with(&mut Scripted {
+            stopped: true,
+            verifies: true,
+            log: &log,
+        });
+        assert_eq!(stopped_verified, 0);
+        assert_eq!(
+            *log.borrow(),
+            ["gate", "admission", "stopped", "verify", "bfe", "start", "release", "wait"]
+        );
+        log.borrow_mut().clear();
+        let running = start_registered_with(&mut Scripted {
+            stopped: false,
+            verifies: true,
+            log: &log,
+        });
+        assert_eq!(running, 0);
+        assert_eq!(
+            *log.borrow(),
+            ["gate", "admission", "stopped", "release", "wait"]
+        );
+        log.borrow_mut().clear();
+        let unverified = start_registered_with(&mut Scripted {
+            stopped: true,
+            verifies: false,
+            log: &log,
+        });
+        assert_eq!(unverified, 74, "the App repairs on exactly 74");
+        assert_eq!(unverified, START_TARGET_UNVERIFIED_EXIT);
+        assert_eq!(*log.borrow(), ["gate", "admission", "stopped", "verify"]);
+    }
+
+    /// BRICK-W5 (e): the start helper starts only the binary the installer registers, with no
+    /// argument after it.
+    #[cfg(windows)]
+    #[test]
+    fn windows_start_registered_target_must_be_the_installed_path() {
+        use std::ffi::{OsStr, OsString};
+
+        assert_eq!(
+            parse_windows_install_mode([OsString::from("--start-registered")]).unwrap(),
+            WindowsInstallMode::StartRegistered
+        );
+        let installed = Path::new(r"C:\ProgramData\Tono\bin\tono-service.exe");
+        assert!(start_target_is_installed_service(
+            OsStr::new(r#""C:\ProgramData\Tono\bin\tono-service.exe""#),
+            installed
+        ));
+        assert!(start_target_is_installed_service(
+            OsStr::new(r"c:\programdata\tono\BIN\tono-service.exe"),
+            installed
+        ));
+        assert!(!start_target_is_installed_service(
+            OsStr::new(r#""C:\ProgramData\Tono\bin\tono-service.exe" --run"#),
+            installed
+        ));
+        assert!(!start_target_is_installed_service(
+            OsStr::new(r"C:\ProgramData\Tono\bin\tono-service.exe --run"),
+            installed
+        ));
+        assert!(!start_target_is_installed_service(
+            OsStr::new(r"C:\Users\Public\tono-service.exe"),
+            installed
+        ));
+    }
+
     #[cfg(windows)]
     struct TransactionTestDirectory(PathBuf);
 
