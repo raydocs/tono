@@ -1206,9 +1206,12 @@ pub(crate) const DNS_UNINSTALL_STILL_ON_LOOPBACK_PREFIX: &str = "TONO_DNS_STILL_
 pub(crate) const WFP_REMOVED_CONTINUE_PREFIX: &str = "TONO_WFP_REMOVED";
 
 /// Stable marker that Tono's NRPT catch-all could not be proven removed
-/// ([`remove_tono_resolver_rule_within`]). Every lookup still goes to 198.18.0.2 while it stays,
-/// so it blocks the uninstall and never travels with [`WFP_REMOVED_CONTINUE_PREFIX`].
-/// `uninstall_service.rs` and the recovery CLI match this literal.
+/// ([`remove_tono_resolver_rule_within`]). Every lookup still goes to 198.18.0.2 while it stays.
+/// It leads the message, and the DNS outcome follows it unchanged, so it can travel with
+/// [`WFP_REMOVED_CONTINUE_PREFIX`] or another continue marker. The recovery CLI checks it first
+/// and blocks. `uninstall_service.rs` classifies by the DNS outcome after it; what blocks the
+/// uninstall is its `with_resolver_rule_proof` sweep, which exits 3 while the rule remains. Both
+/// match this literal.
 pub(crate) const DNS_RESOLVER_POLICY_REMAINS_PREFIX: &str = "TONO_DNS_POLICY_REMAINS";
 
 /// Which rung of the uninstall ladder the evidence lands on. Pure, so the whole decision table

@@ -294,25 +294,132 @@ fn terminate_process_windows(pid: u32) -> Result<()> {
     }
 }
 
-/// Bind a helper process the DNS engine starts (powershell.exe, ipconfig.exe) to one
+/// Start a helper process the DNS engine runs (powershell.exe, ipconfig.exe) inside one
 /// kill-on-close Job Object that this process holds until it exits. A caller that abandons a
 /// timed-out DNS call and then exits (the uninstall helper's `block_on_abandoning`, the Service's
 /// `shutdown_background`) skips the guard that kills the child on the worker thread. Without the
 /// job, a late restore script would keep running and could overwrite DNS a later install has
 /// set. Exit closes the handle, and Windows ends every process still in the job. Normal runs are
 /// unchanged: their child is waited for, or killed by its guard, long before exit.
+///
+/// The child joins the job before it runs anything ([`spawn_in_job`]), so every process it starts
+/// is in the job too. A child that cannot join is terminated unrun and the start fails: a restore
+/// that does not run is reported, while an unbound one could outlive this process. An exit
+/// between creation and joining leaves a suspended child that never runs.
 #[cfg(windows)]
 #[cfg_attr(feature = "test", allow(dead_code))]
-pub(super) fn bind_to_process_exit(child: &std::process::Child) -> Result<()> {
+pub(super) fn spawn_bound_to_process_exit(
+    command: &mut std::process::Command,
+) -> Result<std::process::Child> {
     use std::os::windows::io::OwnedHandle;
 
     // Statics are never dropped, so the kernel closes this handle only when the process exits.
     static EXIT_JOB: std::sync::OnceLock<std::result::Result<OwnedHandle, String>> =
         std::sync::OnceLock::new();
     match EXIT_JOB.get_or_init(|| kill_on_close_job().map_err(|error| format!("{error:#}"))) {
-        Ok(job) => assign_to_job(job, child),
-        Err(error) => bail!("the exit Job Object could not be created: {error}"),
+        Ok(job) => spawn_in_job(job, command),
+        Err(error) => {
+            bail!("the exit Job Object could not be created, so nothing was started: {error}")
+        }
     }
+}
+
+/// Create `command` suspended, assign it to `job`, and only then resume it. A child that cannot
+/// join, or whose threads cannot be resumed, is terminated and waited for before the error is
+/// returned.
+#[cfg(windows)]
+#[cfg_attr(feature = "test", allow(dead_code))]
+fn spawn_in_job(
+    job: &std::os::windows::io::OwnedHandle,
+    command: &mut std::process::Command,
+) -> Result<std::process::Child> {
+    use std::os::windows::process::CommandExt as _;
+    use windows_sys::Win32::System::Threading::CREATE_SUSPENDED;
+
+    let mut child = command.creation_flags(CREATE_SUSPENDED).spawn()?;
+    if let Err(error) =
+        assign_to_job(job, &child).and_then(|()| resume_suspended_process(child.id()))
+    {
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err(error);
+    }
+    Ok(child)
+}
+
+/// Resume a process this process created suspended. `std::process::Child` keeps no thread handle,
+/// so its threads are found by owner PID in a Toolhelp snapshot; the caller holds the process
+/// handle, so the PID cannot be reused meanwhile, and a thread ID that now belongs to another
+/// process is skipped. The child has run nothing yet, so its one thread is the primary thread
+/// CreateProcess left suspended. A thread a third party injected would be resumed as well, which
+/// is harmless once the process is in the job and does nothing to a thread already running.
+#[cfg(windows)]
+#[cfg_attr(feature = "test", allow(dead_code))]
+fn resume_suspended_process(pid: u32) -> Result<()> {
+    use windows_sys::Win32::Foundation::{CloseHandle, HANDLE, INVALID_HANDLE_VALUE};
+    use windows_sys::Win32::System::Diagnostics::ToolHelp::{
+        CreateToolhelp32Snapshot, TH32CS_SNAPTHREAD, THREADENTRY32, Thread32First, Thread32Next,
+    };
+    use windows_sys::Win32::System::Threading::{
+        GetProcessIdOfThread, OpenThread, ResumeThread, THREAD_QUERY_LIMITED_INFORMATION,
+        THREAD_SUSPEND_RESUME,
+    };
+
+    struct Handle(HANDLE);
+    impl Drop for Handle {
+        fn drop(&mut self) {
+            // SAFETY: only successfully opened handles are wrapped, and each closes once.
+            unsafe { CloseHandle(self.0) };
+        }
+    }
+
+    // SAFETY: a snapshot of the thread table has no caller-supplied pointers to invalidate.
+    let raw = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0) };
+    if raw == INVALID_HANDLE_VALUE {
+        return Err(std::io::Error::last_os_error())
+            .with_context(|| format!("failed to list the threads of process {pid}"));
+    }
+    let snapshot = Handle(raw);
+    let mut entry = THREADENTRY32 {
+        dwSize: std::mem::size_of::<THREADENTRY32>() as u32,
+        ..Default::default()
+    };
+    let mut resumed = 0_u32;
+    // SAFETY: `snapshot` is a live snapshot and `entry` a valid, correctly sized in/out buffer.
+    let mut has_entry = unsafe { Thread32First(snapshot.0, &mut entry) } != 0;
+    while has_entry {
+        if entry.th32OwnerProcessID == pid {
+            // SAFETY: no pointers; a null result is checked before use.
+            let raw = unsafe {
+                OpenThread(
+                    THREAD_SUSPEND_RESUME | THREAD_QUERY_LIMITED_INFORMATION,
+                    0,
+                    entry.th32ThreadID,
+                )
+            };
+            if raw.is_null() {
+                return Err(std::io::Error::last_os_error()).with_context(|| {
+                    format!("failed to open thread {} of process {pid}", entry.th32ThreadID)
+                });
+            }
+            let thread = Handle(raw);
+            // SAFETY: `thread` is a live handle opened with the query and resume rights.
+            if unsafe { GetProcessIdOfThread(thread.0) } == pid {
+                if unsafe { ResumeThread(thread.0) } == u32::MAX {
+                    return Err(std::io::Error::last_os_error()).with_context(|| {
+                        format!("failed to resume thread {} of process {pid}", entry.th32ThreadID)
+                    });
+                }
+                resumed += 1;
+            }
+        }
+        // SAFETY: same contract as the first call.
+        has_entry = unsafe { Thread32Next(snapshot.0, &mut entry) } != 0;
+    }
+    if resumed == 0 {
+        bail!("process {pid} has no thread to resume");
+    }
+    Ok(())
 }
 
 #[cfg(windows)]
@@ -583,7 +690,7 @@ mod tests {
     }
 
     /// A DNS helper bound to the exit job ends when the job's last handle closes, which is what
-    /// process exit does to the handle `bind_to_process_exit` keeps.
+    /// process exit does to the handle `spawn_bound_to_process_exit` keeps.
     #[cfg(windows)]
     #[test]
     fn closing_the_exit_job_ends_a_bound_helper() {

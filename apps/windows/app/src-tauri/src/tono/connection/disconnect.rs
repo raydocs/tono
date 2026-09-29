@@ -222,7 +222,7 @@ async fn run_release_sequence(
     // the user declined during a connect must not leave them hard-blocked with no way out.
     service::tono_service_ready_or_start_now()
         .await
-        .map_err(|error| format!("kill switch release failed; protection stays on: {error}"))?;
+        .map_err(|error| service_not_ready_release_error(&error))?;
 
     #[cfg(windows)]
     let status = {
@@ -267,6 +267,17 @@ async fn run_release_sequence(
     let mut inner = state.lock().await;
     inner.kill_switch = Some(status);
     Ok(())
+}
+
+/// The release could not get a ready Service, so it did not run and nothing about protection was
+/// read. "Protection stays on" would be a promise without the Service's evidence
+/// (R681-old-helper-still-on); the marker makes the UI show protection as unconfirmed.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn service_not_ready_release_error(error: impl std::fmt::Display) -> String {
+    format!(
+        "{}: the Tono Service is not ready, so the release did not run and protection is unconfirmed: {error}",
+        super::failure::PROTECTION_UNCONFIRMED_PREFIX
+    )
 }
 
 /// `tono_disconnect`: cancel the reconnect, then the explicit-release

@@ -847,21 +847,17 @@ fn spawn_before_deadline(
     let spawn_args = args.iter().map(|arg| (*arg).to_owned()).collect::<Vec<_>>();
     let (sender, receiver) = std::sync::mpsc::sync_channel::<Result<std::process::Child>>(0);
     std::thread::spawn(move || {
-        let spawned = std::process::Command::new(&spawn_program)
-            .args(&spawn_args)
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .spawn()
-            .with_context(|| format!("failed to start {spawn_program}"));
-        // Bound before the hand-over, so a caller that abandons this run and exits takes the
-        // child with it. Unbound, the guard below and in `run_with_timeout` still kills it on
-        // every path that does not end the process first.
-        if let Ok(child) = &spawned
-            && let Err(error) = crate::core::process::bind_to_process_exit(child)
-        {
-            tracing::warn!("dns: {spawn_program} is not bound to process exit: {error:#}");
-        }
+        // Created suspended and in the exit Job before it runs, so a caller that abandons this run
+        // and exits takes the child, and anything it started, with it. A child that cannot join
+        // is terminated unrun and this start fails; it never runs unbound.
+        let spawned = crate::core::process::spawn_bound_to_process_exit(
+            std::process::Command::new(&spawn_program)
+                .args(&spawn_args)
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped()),
+        )
+        .with_context(|| format!("failed to start {spawn_program}"));
         if let Err(std::sync::mpsc::SendError(Ok(mut child))) = sender.send(spawned) {
             let _ = child.kill();
             let _ = child.wait();

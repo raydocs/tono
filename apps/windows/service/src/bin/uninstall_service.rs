@@ -25,9 +25,10 @@ use shared::{force_stop_windows_service, read_service_pid_file, stop_windows_ser
 /// uninstalled** — the failure this ladder exists to correct. The danger being guarded against
 /// is real, but it is narrower than the guard was: what must never happen is *removing the app
 /// while leaving persistent WFP filters armed*, i.e. a blocked machine with no software left to
-/// unblock it. That is now the whole of the blocking condition. An inexact resolver is not a
-/// blocked machine: the user can change DNS from Windows' own network settings, and cannot
-/// conjure back an uninstaller that refuses to run.
+/// unblock it. That blocks, and so does Tono's NRPT catch-all when `with_resolver_rule_proof`
+/// cannot prove it removed: every lookup would still go to a resolver that is gone. An inexact
+/// resolver is not a blocked machine: the user can change DNS from Windows' own network
+/// settings, and cannot conjure back an uninstaller that refuses to run.
 #[cfg(any(windows, test))]
 #[derive(Debug)]
 enum CleanupOutcome {
@@ -70,8 +71,9 @@ const EXIT_RESTORED_AUTOMATIC: i32 = 4;
 /// (`app/src-tauri/src/tono/connection.rs`). Matched by substring, because every layer wraps the
 /// message in its own context.
 ///
-/// Any of these lets the uninstall/install continue (exit 4 family). The only blocking condition
-/// is "the WFP barrier may still be installed".
+/// Any of these lets the uninstall/install continue (exit 4 family). What blocks is "the WFP
+/// barrier may still be installed", and an NRPT rule that `with_resolver_rule_proof` cannot prove
+/// removed.
 #[cfg(any(windows, test))]
 const DNS_RESTORED_AUTOMATIC_MARKER: &str = "TONO_DNS_RESTORED_AUTOMATIC";
 #[cfg(any(windows, test))]
