@@ -310,7 +310,7 @@ final class KillSwitchManager {
         let renderedRules = try Self.writeRules(state: state, allowedUID: allowedUID)
         // Persist fail-closed intent before activating the new rules.
         try saveState(state)
-        try Self.ensureHostsMappings(state: state)
+        Self.pinHostsIfUsable(state: state)
         // A machine-wide state flush is a security requirement only when the
         // new rule set revokes a previously granted permission. Node switches
         // and config reloads re-arm with identical or wider rules; flushing
@@ -517,7 +517,7 @@ final class KillSwitchManager {
 
     /// The steps of `disarm()`, in order, with each effect passed in so the
     /// lifecycle self-test can check the order without touching the live
-    /// /etc/hosts, anchor or state.
+    /// /etc/hosts, anchor or state. Nothing after the intent removal throws.
     static func releaseSequence(
         writePlaceholder: () throws -> Void,
         flushAnchor: () throws -> HelperCommandResult,
@@ -528,9 +528,6 @@ final class KillSwitchManager {
         releaseEnableReference: () throws -> Void
     ) throws {
         try writePlaceholder()
-        // Remove pinned bootstrap names before opening egress. If this fails,
-        // the existing live PF block remains in place.
-        try removeHostsPins()
         let cleared = try flushAnchor()
         guard cleared.status == 0 else {
             throw HelperFailure.system(
@@ -544,6 +541,19 @@ final class KillSwitchManager {
             throw HelperFailure.system("PF child anchor remained active.")
         }
         try removeIntent()
+        // Pins are /etc/hosts lines, never PF permits. Removed before the
+        // flush, an /etc/hosts this helper cannot use failed every release
+        // with PF intact, the emergency commands included (BRICK-M2). Now
+        // they go after the release, best-effort; an unsafe file is refused
+        // before any write, and its pins stay until a later disarm.
+        do {
+            try removeHostsPins()
+        } catch {
+            let detail = (error as? HelperFailure)?.message ?? String(describing: error)
+            FileHandle.standardError.write(Data(
+                "tono: hosts pins kept after release: \(detail)\n".utf8
+            ))
+        }
         restoreDisplacedMain()
         // Only after the anchor is empty and the intent is gone. If no other
         // program holds a reference, PF stops, which is the pre-arm state.
@@ -570,7 +580,7 @@ final class KillSwitchManager {
             if let state = try loadState() {
                 wanted = state.armed
                 if wanted {
-                    try Self.ensureHostsMappings(state: state)
+                    Self.pinHostsIfUsable(state: state)
                     if !live {
                         try Self.writeRules(
                             state: Self.restorableState(state),
@@ -661,7 +671,7 @@ final class KillSwitchManager {
                 return
             }
             try Self.writeRules(state: Self.restorableState(state), allowedUID: allowedUID)
-            try Self.ensureHostsMappings(state: state)
+            Self.pinHostsIfUsable(state: state)
             try Self.ensureAnchorLoaded(flushStates: true)
         } catch {
             guard !live else { return }
@@ -727,7 +737,7 @@ final class KillSwitchManager {
         do {
             guard let state = try loadState(), state.armed else { return }
             try Self.writeRules(state: Self.restorableState(state), allowedUID: allowedUID)
-            try Self.ensureHostsMappings(state: state)
+            Self.pinHostsIfUsable(state: state)
             try Self.ensureAnchorLoaded(flushStates: true)
         } catch {
             if Self.stateFileExists() {
@@ -1536,6 +1546,25 @@ final class KillSwitchManager {
         }
         lines.append(killSwitchHostsEndMarker)
         return lines.joined(separator: "\n") + "\n"
+    }
+
+    /// Pins are best-effort (BRICK-M2): an /etc/hosts this helper cannot
+    /// safely rewrite (not a root-owned regular file, group or world
+    /// writable, over 1 MiB, a symlink, not UTF-8, a lone marker) failed the
+    /// arm after its intent was saved, and sent the heal, the supervisor
+    /// repair and every daemon start to the emergency ruleset. No permit
+    /// depends on a pin. The file is refused before any write or backup, as
+    /// before; this only stops that refusal from failing the caller.
+    @discardableResult
+    static func pinHostsIfUsable(state: KillSwitchState) -> Bool {
+        do {
+            try ensureHostsMappings(state: state)
+            return true
+        } catch {
+            let detail = (error as? HelperFailure)?.message ?? String(describing: error)
+            FileHandle.standardError.write(Data("tono: hosts pins skipped: \(detail)\n".utf8))
+            return false
+        }
     }
 
     static func ensureHostsMappings(state: KillSwitchState) throws {

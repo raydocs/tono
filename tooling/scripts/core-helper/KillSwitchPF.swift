@@ -640,8 +640,16 @@ extension KillSwitchManager {
         """
     }
 
-    /// A release after the emergency block's standalone main ruleset. Not
-    /// implemented yet: the displaced main ruleset stays displaced.
+    /// A release after the emergency block loaded its standalone main ruleset
+    /// (BRICK-M6): put `/etc/pf.conf` back, which only a later normal load did
+    /// before, so Apple's and other products' root anchors stay displaced no
+    /// longer. Only when `/etc/pf.conf` attaches Tono's anchor and loads it from
+    /// Tono's rule file, which disarm has just set to the placeholder: the
+    /// reload then drops nothing any Tono writer put there. A main without that
+    /// hook is one `ensureMainHook` refused; loading it is not a release's call,
+    /// so it stays displaced. Never writes `/etc/pf.conf`, never uses its
+    /// backup, and cannot throw. The marker goes only after a load that pfctl
+    /// confirmed. Returns whether nothing is left displaced.
     @discardableResult
     static func restoreDisplacedMainRuleset(
         standalonePath: String = killSwitchStandaloneMainPath,
@@ -650,7 +658,37 @@ extension KillSwitchManager {
             try KillSwitchManager.run("/sbin/pfctl", ["-f", $0])
         }
     ) -> Bool {
-        true
+        guard FileManager.default.fileExists(atPath: standalonePath) else { return true }
+        func kept(_ reason: String) -> Bool {
+            FileHandle.standardError.write(Data("tono: emergency main ruleset kept: \(reason)\n".utf8))
+            return false
+        }
+        let lines: Set<String>
+        do {
+            let data = try secureRead(mainPath, maximumBytes: 1024 * 1024)
+            guard let text = String(data: data, encoding: .utf8) else {
+                return kept("The main PF configuration is not UTF-8.")
+            }
+            lines = Set(text.components(separatedBy: .newlines).map {
+                $0.trimmingCharacters(in: .whitespaces)
+            })
+        } catch {
+            return kept((error as? HelperFailure)?.message ?? String(describing: error))
+        }
+        guard lines.contains("anchor \"\(killSwitchAnchor)\""),
+              lines.contains("load anchor \"\(killSwitchAnchor)\" from \"\(killSwitchPFPath)\"") else {
+            return kept("The main PF configuration does not attach Tono's anchor.")
+        }
+        do {
+            let loaded = try reload(killSwitchMainPFPath)
+            guard loaded.status == 0 else {
+                return kept(loaded.message.isEmpty ? "Main PF load failed." : loaded.message)
+            }
+        } catch {
+            return kept((error as? HelperFailure)?.message ?? String(describing: error))
+        }
+        unlink(standalonePath)
+        return true
     }
 
     /// Longest a read-only `pfctl` query (`-s`, `-sr`) may run. One answers
@@ -1331,7 +1369,10 @@ extension KillSwitchManager {
     }
 
     static func secureRead(_ path: String, maximumBytes: Int) throws -> Data {
-        let fd = open(path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW)
+        // O_NONBLOCK: a FIFO with no writer (say at /etc/hosts) returns here at
+        // once and the regular-file check below refuses it, instead of hanging
+        // an arm, a start or a release. Regular-file reads are unaffected.
+        let fd = open(path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK)
         guard fd >= 0 else {
             throw HelperFailure.system("A required root-owned file is unavailable.")
         }
