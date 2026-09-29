@@ -10,8 +10,11 @@
   1. BRICK-W5 (d)：`ReleaseKillSwitch` 的准入原本走 `lifecycle_allowed` 与 `release_allowed`，两者都以写方式打开更新存储
      （重设 ProgramData\Tono 与 `updates-v1` 的私有 ACL、创建并 try-lock `transaction.lock`、重新发布 `state.json`）；
      另一进程持锁、磁盘满导致重写或 ACL 写失败时，没有更新也没有安装程序在跑，Disconnect 也被拒绝。改后：释放准入
-     （新 `OwnerLifecycleGate::ArmedPolicyRelease`）用 `Store::read_state` 只读：不取锁、不重写、不重设 ACL；根目录仍须
-     非重解析点且 ACL 为私有 ACL，未提交的更新尝试仍拒绝。其余路由仍走 `lifecycle_allowed`。
+     （新 `OwnerLifecycleGate::ArmedPolicyRelease`）用 `Store::read_state` 只读 `updates-v1`：对这个目录不取锁、不重写、
+     不重设 ACL；它仍须非重解析点且 ACL 为私有 ACL，未提交的更新尝试仍拒绝。其余路由仍走 `lifecycle_allowed`。
+     准入之前、所有者路由共用的修复锁（`acquire_service_repair_gate`，顺序未改）仍会准备 `ProgramData\Tono` 与 `bin`
+     （可能重设私有 ACL）并创建 `.repair.lock`；这一步失败时释放仍被拒，但拒绝理由改为真实的 I/O/ACL 错误并记日志，
+     不再说成「native installer owns the lifecycle」。
   2. BRICK-W2 的 Service 半边：卸载在「Tono 正在运行」处取消后留下的手动租约，在持有者退出后仍挡释放；App 重启后
      `adopt()` 置 INCOMPLETE，显式 Disconnect 先发的更新 `Status` 探测也被租约拒绝（35f8b312/codex:F7）。改后：持有者
      确认死亡（PID 不存在或已退出，或同 PID 的创建时间不同；读取失败一律视为活着）时，释放准入与 `Status` 放行；
@@ -19,9 +22,11 @@
   3. BRICK-W5 (e)：SCM 停止 TonoService 后 WFP 仍武装，释放路径只能走完整修复，而修复的 `manual_gate` 在有过滤器时拒绝。
      改后：SCM 报告 Stopped 时，释放路径经 Run State 的特权操作槽（与修复同样的准入、150 秒上限与超时隔离）运行
      `tono-service-install.exe --start-registered`，原样启动已注册的 Service，一次 UAC；注册路径、启动类型或已安装
-     二进制摘要校验不过时 helper 退出 74，App 退回原修复路径。Repair 按钮不变。
-- 新增/优化：`tono-service-install.exe --start-registered`（持修复锁；只在 Service 停止且注册路径为
-  `install_dir\tono-service.exe`、启动类型非 Disabled、已安装二进制为普通文件且与随包 `tono-service.exe` 摘要一致时
+     二进制摘要校验不过时 helper 退出 74，App 退回原修复路径。74 表示没有启动任何东西、SCM 注册未改；但 helper 先取的
+     修复锁可能已重设安装目录（`ProgramData\Tono`、`bin`）的私有 ACL。Repair 按钮不变。
+- 新增/优化：`tono-service-install.exe --start-registered`（持修复锁；只在 Service 停止且注册路径（ImagePath）为
+  `install_dir\tono-service.exe`（整体加引号的去引号后比较；未加引号却含空白、或路径后带参数的一律不通过）、
+  启动类型非 Disabled、已安装二进制为普通文件且与随包 `tono-service.exe` 摘要一致时
   启动；放开修复锁后等待就绪；退出码 0 成功、74 目标未校验、75 另有安装/卸载/修复在跑、1 其他失败）。不改 IPC、
   不升协议、不改客户文案。
 - 工程与测试：新增 T1 `core::update::tests::update_release_admission_passes_only_a_conclusively_dead_lease_holder`、
@@ -46,6 +51,10 @@
     的步骤为 ok，T4、T7 在「Test the service lifecycle」的 bin 单测中为 ok；app-rust 作业 T5、T6 为 ok，
     `privileged_operation_timeout_quarantines_the_slot_until_restart` 不变且为 ok（lib 555 passed）。
     PR head 上的记录提交只改 `docs/`，其 CI 结果见 PR。
+  - 2026-09-29 续记，评审修复轮（三厂商 max 评审通过，无 major；按停止规则修一轮三个 minor）：codex:F1 注册路径
+    未加引号却含空白时校验不过（退出 74，退回修复），T7 加一条断言；opus:F1 修复锁取锁失败时报真实错误并记日志、
+    仍拒绝，BRICK-W5 文字改正、残余列入剩余限制；grok:F2 改正 74 的含义与 `install_service.rs` 注释（修复锁先于
+    校验，可能已重设安装目录 ACL）。修复轮 CI 结果见 PR。
   - 未执行：实机场景（计划 §9.4 1–6：停止 Service 后 Restore internet；卸载取消后 Disconnect 与重启后横幅；活着的卸载
     程序仍拒绝；Run State 隔离后拒绝；替换已安装二进制后 74 退回修复）；U1–U6 未在 Windows 上确认。
 - 候选/发布：仅源码，无新候选。
@@ -62,6 +71,8 @@
     「restart Tono before retrying」拒绝直到 Tono 重启，与修复路径今天的行为相同。
   - helper 仍持修复锁时，启动中的 Service 派生的恢复执行器取锁失败，下次 Service 启动或开机重试（A10）。
   - `updates-v1` 目录 ACL 不是私有 ACL 时释放被拒，直到写路径打开重设 ACL。
+  - `ProgramData\Tono` 或 `bin` 的 ACL 写入失败（或 `.repair.lock` 打不开）时，修复锁取不到，Disconnect 仍被拒绝
+    （现在报出真实原因）；只读准入只覆盖 `updates-v1`（#681 评审 opus:F1，open）。
   - BRICK-W11 未改。
   - U1–U6 需要 Windows 实机或设备确认：U1 20 秒就绪等待是否够慢机器；U2 同上；U3 nsExec 下租约持有者即 NSIS 进程；
     U4 SCM 报告的二进制路径无参数；U5 7422 横幅即 BRICK-W10；U6 `runas` 1.2.0 转发 `--start-registered` 并返回退出码。

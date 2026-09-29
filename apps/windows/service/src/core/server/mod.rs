@@ -796,7 +796,18 @@ async fn enter_owner_lifecycle(
     #[cfg(windows)]
     let repair = match crate::acquire_service_repair_gate() {
         Ok(Some(guard)) => guard,
-        _ => return ControlFlow::Break(service_unavailable("native installer owns the lifecycle")),
+        Ok(None) => {
+            return ControlFlow::Break(service_unavailable("native installer owns the lifecycle"));
+        }
+        // Still refused (fail-closed), but under its real cause: taking the gate prepares
+        // `ProgramData\Tono` and its `bin` directory (private ACL) and opens `.repair.lock`, and an
+        // I/O or ACL failure there is not an installer holding the lifecycle.
+        Err(error) => {
+            warn!("service repair gate unavailable: {error:#}");
+            return ControlFlow::Break(service_unavailable(format!(
+                "service repair gate unavailable: {error:#}"
+            )));
+        }
     };
     #[cfg(windows)]
     {

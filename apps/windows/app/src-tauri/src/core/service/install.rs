@@ -580,7 +580,9 @@ pub(super) fn install_service() -> Result<()> {
 }
 
 /// Exit code of `tono-service-install.exe --start-registered` when TonoService's registration or
-/// installed binary does not verify; the helper started and changed nothing. The same value as
+/// installed binary does not verify; the helper started nothing and left the SCM registration
+/// unchanged, though its repair gate may have re-applied the install directory's private ACL. The
+/// same value as
 /// the helper's `START_TARGET_UNVERIFIED_EXIT`, which the App cannot import: the helper's exit
 /// codes are exported only under the Service crate's `standalone` feature, and the App builds it
 /// with `client` only.

@@ -1716,7 +1716,9 @@ fn bring_scm_bfe_up() -> Result<(), Error> {
 }
 
 /// Exit code of `--start-registered` when TonoService's registration or installed binary does not
-/// verify; nothing was started or changed. The App runs its full repair on exactly this code, and
+/// verify: nothing was started and the SCM registration is unchanged, but the repair gate taken
+/// first may already have re-applied the private ACL to `ProgramData\Tono` and its `bin`
+/// directory and created `.repair.lock`. The App runs its full repair on exactly this code, and
 /// keeps its own copy of the value (`START_TARGET_UNVERIFIED_EXIT` in the App's service installer).
 #[cfg(windows)]
 const START_TARGET_UNVERIFIED_EXIT: i32 = 74;
@@ -1744,7 +1746,9 @@ trait StartRegisteredEffects {
 /// `manual_gate` while filters exist or the owner still wants its Core.
 ///
 /// Order: the raw repair gate (never `enter_repair_gate`, whose `maintenance_allowed` refuses any
-/// lease and any pending attempt), the lease admission, the service state; only for a Stopped
+/// lease and any pending attempt; taking the raw gate still prepares the install directory, which
+/// may re-apply its private ACL, before anything is verified), the lease admission, the service
+/// state; only for a Stopped
 /// Service the target verification, BFE and the start; then the gate is released before the
 /// readiness wait, so a recovery executor the starting Service spawns can take it. A Service
 /// that is not Stopped is neither verified nor started. Every early return ends the process,
@@ -1811,10 +1815,13 @@ fn start_registered_with(effects: &mut impl StartRegisteredEffects) -> i32 {
     }
 }
 
-/// Whether SCM's registered command line for TonoService is exactly the installed binary, with
-/// no argument. One pair of surrounding quotes is stripped and nothing may follow the closing
-/// quote; an unquoted value is the whole path, so a space-separated argument makes it unequal.
-/// ASCII case-insensitive, with no canonicalization.
+/// Whether SCM's registered command line (ImagePath) for TonoService is exactly the installed
+/// binary, with no argument. A fully quoted value is unquoted and compared; nothing may follow the
+/// closing quote. An unquoted value containing any whitespace fails: SCM may run a shorter prefix
+/// of it (`C:\Program.exe` for `C:\Program Files\...`), so equality would not prove which file
+/// starts. The installer's `create_service` quotes exactly the paths that contain whitespace
+/// (windows-service `shell_escape`), so a real install still verifies. ASCII case-insensitive,
+/// with no canonicalization.
 #[cfg(windows)]
 fn start_target_is_installed_service(registered: &std::ffi::OsStr, installed: &Path) -> bool {
     let (Some(registered), Some(installed)) = (registered.to_str(), installed.to_str()) else {
@@ -1825,6 +1832,7 @@ fn start_target_is_installed_service(registered: &std::ffi::OsStr, installed: &P
             Some(inner) if !inner.contains('"') => inner,
             _ => return false,
         },
+        None if registered.contains(char::is_whitespace) => return false,
         None => registered,
     };
     path.eq_ignore_ascii_case(installed)
@@ -1938,8 +1946,10 @@ fn main() -> anyhow::Result<()> {
         return Ok(());
     }
     if install_mode == WindowsInstallMode::StartRegistered {
-        // Before the replacement candidates, `enter_repair_gate`, `manual_gate`, the directory
-        // preparation, the digest pin, staging and any SCM configuration change (BRICK-W5 e).
+        // Before the replacement candidates, `enter_repair_gate`, `manual_gate`, the digest pin,
+        // staging and any SCM configuration change (BRICK-W5 e). The raw repair gate it takes
+        // still runs `prepare_service_install_directory`, which may re-apply the private ACL to
+        // `ProgramData\Tono` and `bin` before the target is verified; exit 74 does not undo that.
         std::process::exit(start_registered_with(&mut ScmStartRegistered::default()));
     }
     let mut replacement_candidates = if install_mode == WindowsInstallMode::ReplaceRuntime {
@@ -2391,6 +2401,10 @@ mod tests {
         assert!(!start_target_is_installed_service(
             OsStr::new(r"C:\Users\Public\tono-service.exe"),
             installed
+        ));
+        assert!(!start_target_is_installed_service(
+            OsStr::new(r"C:\Program Data\Tono\bin\tono-service.exe"),
+            Path::new(r"C:\Program Data\Tono\bin\tono-service.exe")
         ));
     }
 
