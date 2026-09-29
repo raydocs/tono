@@ -13,7 +13,7 @@ def source_touched(root):
     """True when the checkout has changes other than SESSION_STATE.md; unknown counts as touched."""
     try:
         out = subprocess.run(
-            ["git", "-C", root, "status", "--porcelain"],
+            ["git", "--no-optional-locks", "-C", root, "status", "--porcelain"],
             capture_output=True, text=True, timeout=10, check=True,
         ).stdout
     except (OSError, subprocess.SubprocessError):
