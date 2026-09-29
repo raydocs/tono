@@ -763,6 +763,7 @@ fn status(store: &Store) -> Result<UpdateStatus> {
             .unwrap_or_else(|| "none".into()),
         offer: None,
         needs_attention: None,
+        successor_relaunched: false,
     })
 }
 
