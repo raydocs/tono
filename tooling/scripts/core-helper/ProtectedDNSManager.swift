@@ -245,9 +245,11 @@ final class ProtectedDNSManager {
     }
 
     /// Whether a DNS server list may be Tono's resolver left behind by a
-    /// stopped Core. Not narrowed yet: any list that contains it counts.
+    /// stopped Core. Tono writes DNS only as exactly `[127.0.0.1]`; a list
+    /// that merely contains it is another product's and blocked every native
+    /// update (BRICK-M4).
     static func isStoppedTonoResolver(_ servers: [String]) -> Bool {
-        servers.contains(protectedDNSServer)
+        servers == [protectedDNSServer]
     }
 
     /// The same recovery transaction runs against either System Configuration

@@ -80,32 +80,48 @@ enum UpdateExecutor {
     }
 
     /// Called before constructing CoreManager or restoring normal desired
-    /// state. A corrupt ledger installs a fail-closed barrier and stops launch.
+    /// state. A corrupt ledger stops launch, and installs a fail-closed
+    /// barrier only where protection is wanted (saved Kill Switch intent, the
+    /// predicate `secureFailedStartup` uses): a Mac that was never connected
+    /// was otherwise blocked at every boot by a store it could not read
+    /// (BRICK-M1). When the store opened, that intent is read and the barrier
+    /// installed under the update lock, which every release holds for its
+    /// whole release, so no release lands between the check and the install.
+    /// When the store or the lock could not be opened there is no lock to
+    /// decide under; the check runs where the unconditional install used to.
     /// A stop request that arrives while this daemon waits behind the update
     /// lock is not corruption: that SIGTERM is our own update executor's
     /// `launchctl bootout` (the spin guard exists precisely so a bootout can
     /// stop a waiting daemon), the executor owns the replacement flow, and it
     /// bootstraps this daemon back afterwards. Stopping then is clean: no PF
-    /// action, exit success. Every other startup failure keeps installing the
-    /// barrier.
+    /// action, exit success.
     static func startup(storage: UpdateStorage? = nil,
                         protectionWanted: () -> Bool = KillSwitchManager.stateFileExists,
                         emergencyBlock: () throws -> Void = armEmergencyBlock) throws -> Bool {
+        var secured = false
         do {
             let storage = try storage ?? UpdateStorage()
             return try storage.locked {
-                guard let attempt = try storage.load().attempt, attempt.receipt.phase != .committed else { return false }
-                if attempt.execution == .consumed && (attempt.receipt.blockedReason != nil || attempt.disconnectRequested) { return false }
-                if [.consumed, .replacing, .rollingBack].contains(attempt.execution) {
-                    try launch(storage: storage, attempt: attempt)
-                    return true
+                do {
+                    guard let attempt = try storage.load().attempt, attempt.receipt.phase != .committed else { return false }
+                    if attempt.execution == .consumed && (attempt.receipt.blockedReason != nil || attempt.disconnectRequested) { return false }
+                    if [.consumed, .replacing, .rollingBack].contains(attempt.execution) {
+                        try launch(storage: storage, attempt: attempt)
+                        return true
+                    }
+                    return false
+                } catch HelperFailure.stopping(let message) {
+                    throw HelperFailure.stopping(message)
+                } catch {
+                    secured = true
+                    if protectionWanted() { try? emergencyBlock() }
+                    throw error
                 }
-                return false
             }
         } catch HelperFailure.stopping {
             return true
         } catch {
-            try? emergencyBlock()
+            if !secured, protectionWanted() { try? emergencyBlock() }
             throw error
         }
     }
