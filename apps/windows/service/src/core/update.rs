@@ -75,6 +75,106 @@ pub(crate) fn release_allowed() -> Result<()> {
     Ok(())
 }
 
+/// The update evidence read without the store's lock and without a write (BRICK-W5 d): no ACL is
+/// re-applied, no `transaction.lock` is created and `state.json` is not re-published. An absent
+/// root is the empty store [`store_root`] would create. A reparse point or an ACL that is not the
+/// private one refuses; nothing re-applies it here.
+fn read_store_state() -> Result<State> {
+    let root = crate::service_paths()
+        .persistent_state_dir()
+        .join("updates-v1");
+    if matches!(
+        std::fs::symlink_metadata(&root),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound
+    ) {
+        return Ok(State::default());
+    }
+    let _pins = pin_path(&root, true)?;
+    Store::read_state(&root)
+}
+
+/// Whether the manual installer that took the lease is gone for certain (Service half of
+/// BRICK-W2): no process has its PID or that process has exited, or the PID now names a process
+/// created at another time. A PID names one process object at a time. The same creation time
+/// under any path, and any read failure, count as alive.
+fn holder_conclusively_dead(
+    holder: &Image,
+    live: Result<Option<super::process::ProcessIdentity>>,
+) -> bool {
+    match live {
+        Ok(None) => true,
+        Ok(Some(process)) => process.started_at != holder.started_at,
+        Err(_) => false,
+    }
+}
+
+/// No manual installer lease, or one whose holder is conclusively dead. The lease itself is kept:
+/// it still fences Connect, the other update requests, repair and startup Core restore until an
+/// installer run replaces it.
+fn no_live_lease(
+    state: &State,
+    live: impl FnOnce(u32) -> Result<Option<super::process::ProcessIdentity>>,
+) -> Result<()> {
+    match &state.manual_installer {
+        None => Ok(()),
+        Some(holder) if holder_conclusively_dead(holder, live(holder.pid)) => Ok(()),
+        Some(holder) => Err(anyhow::anyhow!(
+            "the manual installer lease holder (pid {}) may still be running",
+            holder.pid
+        )),
+    }
+}
+
+/// The `ReleaseKillSwitch` admission. It reads the update evidence without writing it
+/// (BRICK-W5 d) and refuses what `lifecycle_allowed` and [`release_allowed`] refuse, except a
+/// manual installer lease whose holder is conclusively dead (Service half of BRICK-W2).
+pub(crate) fn release_admission() -> Result<()> {
+    release_admission_at(&read_store_state()?, super::process::process_identity)
+}
+
+fn release_admission_at(
+    state: &State,
+    live: impl FnOnce(u32) -> Result<Option<super::process::ProcessIdentity>>,
+) -> Result<()> {
+    ensure!(
+        !state.pending(),
+        "update pending; release/quit cannot cancel the recorded recovery obligation"
+    );
+    no_live_lease(state, live).context("manual installer owns the machine lifecycle")?;
+    if let Some(holder) = &state.manual_installer {
+        tracing::warn!(
+            "releasing protection past a manual installer lease whose holder (pid {}) has exited; \
+             the lease stays and still fences Connect",
+            holder.pid
+        );
+    }
+    Ok(())
+}
+
+/// The manual installer lease check for update requests. Only `Status`, the read the App sends
+/// before its release, passes a conclusively dead holder (Service half of BRICK-W2); every other
+/// request refuses any lease.
+fn update_lease_gate(
+    request: &UpdateRequest,
+    state: &State,
+    live: impl FnOnce(u32) -> Result<Option<super::process::ProcessIdentity>>,
+) -> Result<()> {
+    if state.manual_installer.is_none() {
+        return Ok(());
+    }
+    match request {
+        UpdateRequest::Status => no_live_lease(state, live).context("manual installation is pending"),
+        _ => Err(anyhow::anyhow!("manual installation is pending")),
+    }
+}
+
+/// Whether `tono-service-install --start-registered` may start the registered Service
+/// (BRICK-W5 e): no manual installer lease whose holder may still run. A pending attempt does not
+/// refuse the start; the starting Service fences it itself. Read without a lock or a write.
+pub fn start_admission() -> Result<()> {
+    no_live_lease(&read_store_state()?, super::process::process_identity)
+}
+
 fn verify_manifest(bytes: &[u8], signature: &str) -> Result<ReleaseManifest> {
     let manifest = ReleaseManifest::decode(bytes)?;
     let key = security::decode_base64(
@@ -211,10 +311,7 @@ pub(crate) async fn request(
 ) -> Result<UpdateStatus> {
     let peer = app_image(owner.peer_pid.context("pipe did not identify App")?)?;
     let mut store = open_store()?;
-    ensure!(
-        store.state.manual_installer.is_none(),
-        "manual installation is pending"
-    );
+    update_lease_gate(&request, &store.state, super::process::process_identity)?;
     let _repair =
         crate::acquire_service_repair_gate()?.context("repair/uninstall already running")?;
     if let Some(a) = &store.state.attempt

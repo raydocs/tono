@@ -761,6 +761,10 @@ enum OwnerLifecycleGate<'a> {
     /// the lifecycle lock: checking before waiting for the lock creates a stale-authorization
     /// window in which a queued StartClash can replace the owner.
     ArmedPolicyOwner,
+    /// `ReleaseKillSwitch` only: the same owner proof, admitted by the update evidence read
+    /// without a lock or a write (BRICK-W5 d) and past a manual installer lease whose holder is
+    /// conclusively dead (Service half of BRICK-W2). Every other route keeps `lifecycle_allowed`.
+    ArmedPolicyRelease,
     /// `StartClash` and `PrepareCoreStart` make the caller the owner and may stop the running
     /// Core, so they must not run over armed protection that another local user still holds.
     /// Nor may they first arm protection from a Remote Desktop session, which the arm would cut.
@@ -795,12 +799,21 @@ async fn enter_owner_lifecycle(
         _ => return ControlFlow::Break(service_unavailable("native installer owns the lifecycle")),
     };
     #[cfg(windows)]
-    if let Err(error) = crate::core::update::lifecycle_allowed(owner) {
-        return ControlFlow::Break(service_error(ServiceError::still_protected(error.to_string())));
+    {
+        let admitted = if matches!(gate, OwnerLifecycleGate::ArmedPolicyRelease) {
+            crate::core::update::release_admission()
+        } else {
+            crate::core::update::lifecycle_allowed(owner)
+        };
+        if let Err(error) = admitted {
+            return ControlFlow::Break(service_error(ServiceError::still_protected(
+                error.to_string(),
+            )));
+        }
     }
     let gated = match gate {
         OwnerLifecycleGate::Unchecked => Ok(()),
-        OwnerLifecycleGate::ArmedPolicyOwner => {
+        OwnerLifecycleGate::ArmedPolicyOwner | OwnerLifecycleGate::ArmedPolicyRelease => {
             windows_kill_switch::authorize_write_for(&owner.key)
         }
         OwnerLifecycleGate::ArmedPolicyTakeover => {

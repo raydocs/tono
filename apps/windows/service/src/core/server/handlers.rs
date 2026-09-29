@@ -378,7 +378,7 @@ pub(super) fn create_ipc_router() -> Result<Router> {
             // Sign-Out unreachable from Protected Offline. The separate armed-policy owner
             // gate runs under the lifecycle lock so it cannot go stale while queued.
             let _lifecycle_guard =
-                match enter_owner_lifecycle(&owner, OwnerLifecycleGate::ArmedPolicyOwner).await {
+                match enter_owner_lifecycle(&owner, OwnerLifecycleGate::ArmedPolicyRelease).await {
                     ControlFlow::Continue(guard) => guard,
                     ControlFlow::Break(response) => return response,
                 };
@@ -388,9 +388,6 @@ pub(super) fn create_ipc_router() -> Result<Router> {
             );
             #[cfg(windows)]
             {
-                if let Err(error) = crate::core::update::release_allowed() {
-                    return service_unavailable(error.to_string());
-                }
                 // Make the owner-gated release a complete last-resort Disconnect. The App may
                 // have lost the StartClash response and therefore have no session proof with
                 // which to stop a Core that did start. Restore DNS first; then stop and retire
