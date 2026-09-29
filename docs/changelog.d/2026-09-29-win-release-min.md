@@ -76,3 +76,4 @@
   - BRICK-W11 未改。
   - U1–U6 需要 Windows 实机或设备确认：U1 20 秒就绪等待是否够慢机器；U2 同上；U3 nsExec 下租约持有者即 NSIS 进程；
     U4 SCM 报告的二进制路径无参数；U5 7422 横幅即 BRICK-W10；U6 `runas` 1.2.0 转发 `--start-registered` 并返回退出码。
+- 续记 2026-09-29：三家评审 cb8d2f9c（max）→ 修复轮 → 复查 5a2e265e PASSED，无 major；停止规则后仍开放的 minor 记为 R681-release-gate-writes、R681-start-only-74-after-acl、R681-old-helper-still-on。
