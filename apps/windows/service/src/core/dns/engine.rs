@@ -854,6 +854,14 @@ fn spawn_before_deadline(
             .stderr(std::process::Stdio::piped())
             .spawn()
             .with_context(|| format!("failed to start {spawn_program}"));
+        // Bound before the hand-over, so a caller that abandons this run and exits takes the
+        // child with it. Unbound, the guard below and in `run_with_timeout` still kills it on
+        // every path that does not end the process first.
+        if let Ok(child) = &spawned
+            && let Err(error) = crate::core::process::bind_to_process_exit(child)
+        {
+            tracing::warn!("dns: {spawn_program} is not bound to process exit: {error:#}");
+        }
         if let Err(std::sync::mpsc::SendError(Ok(mut child))) = sender.send(spawned) {
             let _ = child.kill();
             let _ = child.wait();

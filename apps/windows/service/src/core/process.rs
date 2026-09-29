@@ -294,6 +294,83 @@ fn terminate_process_windows(pid: u32) -> Result<()> {
     }
 }
 
+/// Bind a helper process the DNS engine starts (powershell.exe, ipconfig.exe) to one
+/// kill-on-close Job Object that this process holds until it exits. A caller that abandons a
+/// timed-out DNS call and then exits (the uninstall helper's `block_on_abandoning`, the Service's
+/// `shutdown_background`) skips the guard that kills the child on the worker thread. Without the
+/// job, a late restore script would keep running and could overwrite DNS a later install has
+/// set. Exit closes the handle, and Windows ends every process still in the job. Normal runs are
+/// unchanged: their child is waited for, or killed by its guard, long before exit.
+#[cfg(windows)]
+#[cfg_attr(feature = "test", allow(dead_code))]
+pub(super) fn bind_to_process_exit(child: &std::process::Child) -> Result<()> {
+    use std::os::windows::io::OwnedHandle;
+
+    // Statics are never dropped, so the kernel closes this handle only when the process exits.
+    static EXIT_JOB: std::sync::OnceLock<std::result::Result<OwnedHandle, String>> =
+        std::sync::OnceLock::new();
+    match EXIT_JOB.get_or_init(|| kill_on_close_job().map_err(|error| format!("{error:#}"))) {
+        Ok(job) => assign_to_job(job, child),
+        Err(error) => bail!("the exit Job Object could not be created: {error}"),
+    }
+}
+
+#[cfg(windows)]
+#[cfg_attr(feature = "test", allow(dead_code))]
+fn kill_on_close_job() -> Result<std::os::windows::io::OwnedHandle> {
+    use std::os::windows::io::{AsRawHandle as _, FromRawHandle as _, OwnedHandle};
+    use windows_sys::Win32::Foundation::HANDLE;
+    use windows_sys::Win32::System::JobObjects::{
+        CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+        JobObjectExtendedLimitInformation, SetInformationJobObject,
+    };
+
+    let raw = unsafe { CreateJobObjectW(std::ptr::null(), std::ptr::null()) };
+    if raw.is_null() {
+        return Err(std::io::Error::last_os_error()).context("failed to create a Job Object");
+    }
+    // SAFETY: `CreateJobObjectW` returned a new owned handle.
+    let job = unsafe { OwnedHandle::from_raw_handle(raw.cast()) };
+    let mut limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
+    limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+    if unsafe {
+        SetInformationJobObject(
+            job.as_raw_handle() as HANDLE,
+            JobObjectExtendedLimitInformation,
+            (&limits as *const JOBOBJECT_EXTENDED_LIMIT_INFORMATION).cast(),
+            std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+        )
+    } == 0
+    {
+        return Err(std::io::Error::last_os_error())
+            .context("failed to make the Job Object kill on close");
+    }
+    Ok(job)
+}
+
+#[cfg(windows)]
+#[cfg_attr(feature = "test", allow(dead_code))]
+fn assign_to_job(
+    job: &std::os::windows::io::OwnedHandle,
+    child: &std::process::Child,
+) -> Result<()> {
+    use std::os::windows::io::AsRawHandle as _;
+    use windows_sys::Win32::Foundation::HANDLE;
+    use windows_sys::Win32::System::JobObjects::AssignProcessToJobObject;
+
+    if unsafe {
+        AssignProcessToJobObject(
+            job.as_raw_handle() as HANDLE,
+            child.as_raw_handle() as HANDLE,
+        )
+    } == 0
+    {
+        return Err(std::io::Error::last_os_error())
+            .with_context(|| format!("failed to assign process {} to a Job Object", child.id()));
+    }
+    Ok(())
+}
+
 /// Which of the enumerated `(pid, canonical executable)` candidates are orphaned cores: the
 /// image is Tono's installed core and no caller vouches for the PID (the runtime record's PID,
 /// the core this process currently supervises, or one a start has just spawned). Pure, so the
@@ -503,5 +580,42 @@ mod tests {
             select_orphan_core_pids(&candidates, &protected, installed).is_empty(),
             "a fully protected runtime record closes the watchdog replacement race"
         );
+    }
+
+    /// A DNS helper bound to the exit job ends when the job's last handle closes, which is what
+    /// process exit does to the handle `bind_to_process_exit` keeps.
+    #[cfg(windows)]
+    #[test]
+    fn closing_the_exit_job_ends_a_bound_helper() {
+        let mut child = std::process::Command::new("ping.exe")
+            .args(["-n", "30", "127.0.0.1"])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .expect("ping.exe starts");
+        let job = super::kill_on_close_job().expect("the job is created");
+        super::assign_to_job(&job, &child).expect("the helper joins the job");
+
+        drop(job);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let ended = loop {
+            if child
+                .try_wait()
+                .expect("the helper can be polled")
+                .is_some()
+            {
+                break true;
+            }
+            if std::time::Instant::now() >= deadline {
+                break false;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        };
+        if !ended {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+        assert!(ended, "closing the job must end the helper bound to it");
     }
 }

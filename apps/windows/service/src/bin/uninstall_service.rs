@@ -78,8 +78,9 @@ const DNS_RESTORED_AUTOMATIC_MARKER: &str = "TONO_DNS_RESTORED_AUTOMATIC";
 const DNS_STILL_ON_LOOPBACK_MARKER: &str = "TONO_DNS_STILL_ON_LOOPBACK";
 #[cfg(any(windows, test))]
 const WFP_REMOVED_CONTINUE_MARKER: &str = "TONO_WFP_REMOVED";
-/// `dns::DNS_RESOLVER_POLICY_REMAINS_PREFIX`: WFP may be gone, but Tono's NRPT catch-all could
-/// not be proven removed. It blocks, like every unmarked failure.
+/// `dns::DNS_RESOLVER_POLICY_REMAINS_PREFIX`: WFP is gone, but Tono's NRPT catch-all could not
+/// be proven removed. It blocks unless the helper's own sweep (`with_resolver_rule_proof`)
+/// proves the rule gone.
 #[cfg(any(windows, test))]
 const DNS_POLICY_REMAINS_MARKER: &str = "TONO_DNS_POLICY_REMAINS";
 
@@ -136,6 +137,11 @@ fn uninstall_may_continue(exit_code: i32) -> bool {
 /// downgrades a disarm "failure" to continue-with-warning. Everything else — a wedged WFP
 /// engine, a failed tombstone write before removal, an unrecognised message — stays blocking,
 /// because none of those can show that the barrier was removed.
+///
+/// `TONO_DNS_POLICY_REMAINS` is also emitted only after WFP removal, with the DNS outcome after
+/// it. With no DNS marker behind it the saved servers were restored exactly, so it reads as
+/// `Clean`. That is safe only because `with_resolver_rule_proof` sweeps the NRPT rule again
+/// before any exit that continues, and blocks with exit 3 if the rule remains.
 #[cfg(any(windows, test))]
 fn classify_disarm_failure(error: Error) -> CleanupOutcome {
     let message = format!("{error:#}");
@@ -144,6 +150,8 @@ fn classify_disarm_failure(error: Error) -> CleanupOutcome {
         || message.contains(WFP_REMOVED_CONTINUE_MARKER)
     {
         CleanupOutcome::RestoredToAutomatic(error)
+    } else if message.contains(DNS_POLICY_REMAINS_MARKER) {
+        CleanupOutcome::Clean
     } else {
         CleanupOutcome::StillProtected(error)
     }
@@ -560,6 +568,16 @@ fn windows_cleanup() -> CleanupOutcome {
     let dns_fallback = match disarm {
         Ok(()) => None,
         Err(error) => match classify_disarm_failure(error) {
+            // The barrier is gone and the saved servers were restored; only the disarm's NRPT
+            // sweep failed. `with_resolver_rule_proof` below sweeps again and blocks if it fails.
+            CleanupOutcome::Clean => {
+                eprintln!(
+                    "Kill switch was disarmed and the saved DNS servers were restored, but \
+                     Tono's DNS rule (the NRPT catch-all) was not proven removed; it is removed \
+                     and proven again before the uninstall may continue."
+                );
+                None
+            }
             CleanupOutcome::RestoredToAutomatic(error) => {
                 eprintln!(
                     "Kill switch was disarmed; the saved DNS servers could not be proven \
@@ -1056,6 +1074,19 @@ mod tests {
 
         let outcome = with_resolver_rule_proof(CleanupOutcome::Clean, || Ok(()));
         assert!(matches!(outcome, CleanupOutcome::Clean));
+
+        // The disarm's own sweep failed after an exact DNS restore: once the helper's sweep
+        // proves the rule gone, that is exit 0, not the DHCP-reset exit 4.
+        assert_eq!(
+            cleanup_exit_code(&with_resolver_rule_proof(
+                classify_disarm_failure(anyhow::anyhow!(
+                    "{DNS_POLICY_REMAINS_MARKER}: WFP was removed, but Tono's DNS rule could not \
+                     be removed"
+                )),
+                || Ok(()),
+            )),
+            0
+        );
     }
 
     /// Tokio's runtime drop waits for every `spawn_blocking` task, and the DNS and WFP engine
