@@ -244,6 +244,24 @@ nonisolated enum HelperProtocolVersion {
     ///   login, from the last session's utun. The six Continuity passes on
     ///   awdl0, llw0 and bridge100 keep no state (`no state` instead of
     ///   `keep state (if-bound)`); the allow set is unchanged.
+    /// - 4.50.0 → 4.51.0: helper brick fixes. A daemon start that fails on
+    ///   the update store installs the emergency barrier only where Kill
+    ///   Switch intent is saved, decided under the update lock when the store
+    ///   opened. `/etc/hosts` pins are best-effort at arm, heal, supervisor
+    ///   repair and start, and are removed after the release instead of
+    ///   before the flush, never failing it; an unsafe hosts file is never
+    ///   rewritten, and a FIFO there no longer hangs a read. A release reloads
+    ///   a `/etc/pf.conf` the emergency block displaced when it carries
+    ///   Tono's hook, without writing it. iPhone/iPad wrapper apps (no
+    ///   `Contents`) are not Tono in the removal check. Update verification
+    ///   refuses only a loopback proxy on the Core's mixed port (any loopback
+    ///   proxy while that port is unknown) and an exact `[127.0.0.1]`
+    ///   resolver. A 4.50.0 daemon blocks a never-connected Mac at every boot
+    ///   when the store cannot open, fails every arm and release on an
+    ///   unusable hosts file, leaves the main ruleset displaced after a
+    ///   release, keeps a removed Tono's protection when any wrapper app is
+    ///   installed, and blocks native updates on other products' loopback
+    ///   proxies, proxy-less VPN services and mixed DNS lists.
     static let current = "4.51.0"
 }
 
