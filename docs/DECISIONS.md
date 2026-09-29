@@ -16,6 +16,38 @@ may reverse), `reversed` (keep the line; say what replaced it).
 - Applied in: PR / commit / command
 ```
 
+## 2026-09-29 · After an unexpected restart on Windows, does the Service start the Core by itself, and does the App say why it did not?
+
+- Status: provisional
+- Chosen: no replay, and no new notice. The Service replays a run intent only if the intent was recorded
+  in this boot (the volatile `BootSession` marker) and a wanted barrier was restored. Otherwise it holds
+  the Core stopped with the barrier up until the user connects, and it does not rewrite the intent. The App
+  shows its existing Protected Offline state. Rejected: a clean-shutdown marker that would replay after a
+  crash, since holding is stricter; an App notice for the hold (plan OQ1, left open because it needs new
+  UI strings); rewriting the intent at a held boot (a boot-path write that can fail, and it erases evidence).
+- Why stricter: nothing connects before logon without the user, and fail-closed is unchanged, because the
+  barrier stays up while the Core is held. The cost is availability. The user connects once after a crash,
+  a blue screen or a power loss, and taps Retry once after a planned restart whose logoff release did not
+  finish.
+- Applied in: PR [#680](https://github.com/raydocs/tono/pull/680) (`core/boot_session.rs`,
+  `core/desired.rs`; BRICK-W1); plan PLAN-win-boot-uninstall r3, plan review 38c453fa.
+
+## 2026-09-29 · Does the Windows App's native-update recovery reconnect by itself after a restart?
+
+- Status: provisional
+- Chosen: no. The App starts the update-recovery Connect only when its own Adopt returned a certain answer
+  that it is the successor the executor launched (`successor_relaunched` false). A later App after a
+  restart, or an Adopt that failed or gave an uncertain answer, holds for the life of that App process, and
+  the existing "update recovery incomplete" banner shows beside Protected Offline. The user's own Connect
+  and Restore internet are unchanged. Rejected: a boot marker in the update receipt or attempt (changes the
+  shared v1 contract with macOS); an App-side boot record taken at update start (would hold every connected
+  user after the first routine update into this version); making `successor_relaunched` durable (a schema
+  change in the shared transaction store).
+- Why stricter: no Connect at logon that the user did not ask for. Nothing widens exposure. The cost is
+  that recovery waits for the user; the 48 h receipt-expiry dead end stays open as BRICK-W6.
+- Applied in: PR [#680](https://github.com/raydocs/tono/pull/680) (`tono/commands/update.rs` `Adoption`,
+  `tono/commands/restore.rs`, Service `successor_relaunched`; BRICK-W1).
+
 ## 2026-09-28 · Who approves GitHub Actions environment approvals (e.g. `windows-release`)?
 
 - Status: owner

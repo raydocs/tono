@@ -68,3 +68,19 @@
     已停止的解析器；NSIS 的 exit 3 中止文字仍说「kill switch may still be installed」（归 W3 计划）；管理员能否删掉 SYSTEM 建的
     NRPT 键并读回未实机验证。
   - 计划评审 38c453fa/codex:F2（minor）：计划写的实现档位 Opus high 低于 xhigh；本次实现由 Jev 决定 9b3d278d 派发。
+- 续记（2026-09-29，评审修正轮）：PR #680 代码评审（三家、max）无 major，按停止规则修一轮 minor：
+  - 代码评审 codex:F1：助手放弃超时的 DNS runtime 后 `process::exit`，DNS 引擎起的 powershell.exe 只靠工作线程上的 guard 杀，
+    进程退出跳过它；修复门释放后迟到的恢复脚本可能覆盖新装的 DNS。CLI 的 `shutdown_background` 同理。改后
+    `core/process.rs` 新增 `bind_to_process_exit`：`spawn_before_deadline` 在交出子进程前把它放进本进程持有、到退出才关闭的
+    kill-on-close Job Object，进程退出即结束仍在跑的子进程。放不进去只记 warn，退回原先由 guard 杀的行为。剩余：子进程在
+    创建和入 Job 之间起的孙进程不在 Job 里；已交给 WMI 提供程序（WmiPrvSE）的单个 CIM 调用不随 powershell 结束而撤回。回归：
+    `core::process::tests::closing_the_exit_job_ends_a_bound_helper`（Windows）。
+  - 代码评审 opus:F2：紧急解除里第一次 NRPT 清扫失败时，函数在给 DNS 结果分类之前就返回，精确恢复的结果丢失；助手分类器
+    不认 `TONO_DNS_POLICY_REMAINS`，重探后包成 `TONO_WFP_REMOVED`，最终清扫成功就 exit 4 并说「改回自动（DHCP）」，实际 DNS
+    是精确恢复的，应为 exit 0。改后紧急解除先算出 DNS 结果，清扫失败时报文以 `TONO_DNS_POLICY_REMAINS` 开头、后接原样的 DNS
+    结果（这推翻了上面 BRICK-W4 里「从不带 `TONO_WFP_REMOVED`」一句；CLI 先判这个标记）；助手分类器认这个标记：
+    后面带 DNS 标记为 `RestoredToAutomatic`，不带为 `Clean`，两者都再经 `with_resolver_rule_proof` 清扫，规则未证明删除仍 exit 3。
+    T4 改为断言报文以该标记开头并带 DNS 结果；T5 加一条断言：标记加精确恢复、最终清扫成功为 exit 0。
+  - 计划的两项产品决定记入 [DECISIONS](../DECISIONS.md)（provisional）：意外重启后保持 Core 不启动且不加提示；原生更新恢复的
+    自动重连跨重启保持。
+  - 验证：MacBook 只跑了 `rustfmt --edition 2024 --check`（改动处无格式差异）；Windows CI 结果见 #680。

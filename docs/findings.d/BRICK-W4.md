@@ -8,5 +8,6 @@
 `bin/service.rs:193-203`。方向：PLAN-win-boot-uninstall 第 3 版 §1.4–1.5。
 
 清扫只动 Tono 自己的键（`DnsPolicyConfig\{8f3c2b91-4a6e-4d17-9c1a-198018000002}`），键不存在算成功，删后一定读回；
-只有卸载助手与提权的恢复 CLI 调用，Service 不调用。标记 `TONO_DNS_POLICY_REMAINS` 从不与 `TONO_WFP_REMOVED` 同时出现，
-CLI 先判它。退出码仍是 0/2/3/4。
+只有卸载助手与提权的恢复 CLI 调用，Service 不调用。标记 `TONO_DNS_POLICY_REMAINS` 位于报文开头，后面原样跟着 DNS 结果
+（评审 opus:F2 修正：精确恢复不再在助手最终清扫成功后误报 exit 4）。CLI 先判它；助手按其后的 DNS 结果分类，但只在
+自己的最终清扫证明规则已删后才给 0 或 4，否则 exit 3。退出码仍是 0/2/3/4。
