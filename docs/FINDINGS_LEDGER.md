@@ -112,7 +112,7 @@
 
 | ID | 问题（一句） | 状态 | Issue / PR | 等级 | 剩余限制 |
 |---|---|---|---|---|---|
-| W2 | 卸载时 NRPT 恢复失败被适配器 fallback 吞掉，误报已恢复 | fixed(0e20f2df) | [#249](https://github.com/raydocs/tono/issues/249)，[#267](https://github.com/raydocs/tono/pull/267) | 中·已确认 | issue 开放等设备/系统边界证据 |
+| W2 | 卸载时 NRPT 恢复失败被适配器 fallback 吞掉，误报已恢复 | fixed(0e20f2df) | [#249](https://github.com/raydocs/tono/issues/249)，[#267](https://github.com/raydocs/tono/pull/267) | 中·已确认 | issue 开放等设备/系统边界证据；第 3 档与 WFP 移除后的 DNS 错误仍能让卸载在 NRPT 规则未删时完成，续修见 [BRICK-W4](findings.d/BRICK-W4.md) |
 | W8 | Windows DNS 自写窗口内直接丢弃网络通知 | fixed(0e20f2df) | [#259](https://github.com/raydocs/tono/issues/259)，[#267](https://github.com/raydocs/tono/pull/267) | 中·已确认 | issue 开放等设备证据；macOS 对应项 R1-F5 |
 | M2 | macOS DNS 读取失败当作空配置，删除快照并允许释放 | fixed(0e20f2df) | [#267](https://github.com/raydocs/tono/pull/267)（含 #268） | 中·已确认 | 「拒绝假恢复」是后续 DNS 修复的约束基线 |
 | N1 | macOS getaddrinfo 阻塞在 task group 内 | fixed(1ca878cf) | [#289](https://github.com/raydocs/tono/pull/289) | 中·已确认 | — |

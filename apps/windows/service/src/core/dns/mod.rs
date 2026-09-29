@@ -1205,6 +1205,12 @@ pub(crate) const DNS_UNINSTALL_STILL_ON_LOOPBACK_PREFIX: &str = "TONO_DNS_STILL_
 /// never re-classify "filters removed, DNS messy" as "machine still blocked" (result 3).
 pub(crate) const WFP_REMOVED_CONTINUE_PREFIX: &str = "TONO_WFP_REMOVED";
 
+/// Stable marker that Tono's NRPT catch-all could not be proven removed
+/// ([`remove_tono_resolver_rule_within`]). Every lookup still goes to 198.18.0.2 while it stays,
+/// so it blocks the uninstall and never travels with [`WFP_REMOVED_CONTINUE_PREFIX`].
+/// `uninstall_service.rs` and the recovery CLI match this literal.
+pub(crate) const DNS_RESOLVER_POLICY_REMAINS_PREFIX: &str = "TONO_DNS_POLICY_REMAINS";
+
 /// Which rung of the uninstall ladder the evidence lands on. Pure, so the whole decision table
 /// is unit-tested off Windows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -2084,6 +2090,19 @@ pub(crate) mod test_hooks {
     #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn set_encrypted_restore_fails(fails: bool) {
         ENCRYPTED_RESTORE_FAILS.store(fails, Ordering::Relaxed);
+    }
+
+    static NRPT_SWEEP_HANGS: AtomicBool = AtomicBool::new(false);
+
+    /// While set, the stubbed NRPT removal does not return: a registry call behind a filter
+    /// driver or a wedged Dnscache.
+    pub(crate) fn nrpt_sweep_hangs() -> bool {
+        NRPT_SWEEP_HANGS.load(Ordering::Relaxed)
+    }
+
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn set_nrpt_sweep_hangs(hangs: bool) {
+        NRPT_SWEEP_HANGS.store(hangs, Ordering::Relaxed);
     }
 
     #[cfg(test)]
@@ -2972,6 +2991,17 @@ pub(crate) async fn restore_for_uninstall() -> Result<UninstallDnsRestore> {
             Ok(UninstallDnsRestore::Automatic { adapters: targets })
         }
         UninstallRung::StillOnLoopback => {
+            // The resolver policy (the NRPT catch-all and the Encrypted DNS pin) does not depend
+            // on the adapters, so it is restored here too rather than left behind (BRICK-W4). Its
+            // outcome joins the message and the rung still refuses. Capture-loss evidence stays
+            // on disk: nothing here commits a restore.
+            let policy = match record_outcome(restore_resolver_policy().await) {
+                Ok(None) => {
+                    " Tono's resolver policy was restored and its NRPT rule removed.".to_owned()
+                }
+                Ok(Some(note)) => format!(" Tono's resolver policy was restored. {note}"),
+                Err(error) => format!(" Tono's resolver policy could not be restored: {error:#}"),
+            };
             // The last rung, and the only one that still refuses. Everything the user needs to
             // get out of it is in the message: the barrier is already gone, so they are online,
             // and one change in Windows' own network settings makes the next run take rung 2.
@@ -2984,11 +3014,74 @@ pub(crate) async fn restore_for_uninstall() -> Result<UninstallDnsRestore> {
                  resolution is still pointed at Tono. Fix it in Windows: Settings → Network & \
                  Internet → your adapter → DNS server assignment → Edit → Automatic (DHCP), for \
                  both IPv4 and IPv6; a reboot also clears a wedged DNS Client service. Then run \
-                 the uninstaller again and it will complete.",
+                 the uninstaller again and it will complete.{policy}",
                 live_loopback_label(live_loopback),
             )
         }
     }
+}
+
+/// Delete Tono's NRPT catch-all and prove it gone, giving up after `budget` (BRICK-W4).
+///
+/// The rule sends every lookup to 198.18.0.2, which nothing answers once the Core is gone, and a
+/// restart does not remove it. The ladder deletes it only on its proven rungs, so an uninstall
+/// could finish with it still installed. This is the proof the uninstall helper and the elevated
+/// recovery CLI take before they report a machine safe; the Service never calls it.
+///
+/// Synchronous on purpose, for callers that must return after the budget whatever the registry
+/// does: the removal runs on its own named thread, and a call that has not answered by then is
+/// abandoned. Neither `spawn_blocking` (a runtime drop waits for it) nor the engine's wedge latch
+/// (a wedged ladder call would refuse this sweep too) is used. A DNS operation still in progress
+/// is an error, not a wait.
+pub fn remove_tono_resolver_rule_within(budget: std::time::Duration) -> Result<()> {
+    let Ok(_operation) = DNS_OPERATION.try_lock() else {
+        bail!("another DNS operation is still running, so Tono's NRPT rule was not touched");
+    };
+    let _self_write = SelfWriteWindow::open();
+    run_on_detached_thread("tono-nrpt-sweep", budget, sweep_tono_resolver_rule)
+}
+
+/// Run `work` on a detached named thread and wait for its answer at most `budget`. On timeout the
+/// thread keeps running and its answer is dropped.
+fn run_on_detached_thread<T: Send + 'static>(
+    name: &str,
+    budget: std::time::Duration,
+    work: impl FnOnce() -> Result<T> + Send + 'static,
+) -> Result<T> {
+    let (answer, answered) = std::sync::mpsc::channel();
+    std::thread::Builder::new()
+        .name(name.to_owned())
+        .spawn(move || {
+            let _ = answer.send(work());
+        })
+        .with_context(|| format!("{name} could not be started"))?;
+    match answered.recv_timeout(budget) {
+        Ok(result) => result,
+        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+            bail!("{name} did not answer within {budget:?}; the registry call was abandoned")
+        }
+        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+            bail!("{name} ended without an answer")
+        }
+    }
+}
+
+/// The removal itself: Tono's key only, an absent key is success, and the result is read back.
+#[cfg(all(windows, not(feature = "test")))]
+fn sweep_tono_resolver_rule() -> Result<()> {
+    engine::remove_nrpt_rule()
+}
+
+/// The stub stands in for a registry call that never returns, or one that fails.
+#[cfg(not(all(windows, not(feature = "test"))))]
+fn sweep_tono_resolver_rule() -> Result<()> {
+    while test_hooks::nrpt_sweep_hangs() {
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    if test_hooks::encrypted_restore_fails() {
+        bail!("injected Tono NRPT removal failure");
+    }
+    Ok(())
 }
 
 /// The disarm gate: succeed when no protection is active, or after a proven restore. An

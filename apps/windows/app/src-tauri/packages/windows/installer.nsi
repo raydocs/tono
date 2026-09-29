@@ -887,6 +887,9 @@ FunctionEnd
     ; stays armed leaves a blocked machine with no software left to unblock it. An inexact
     ; resolver does not: the user can change DNS from Windows' own network settings.
     ${IfNot} ${FileExists} "$INSTDIR\resources\tono-service-uninstall.exe"
+      !ifdef __UNINSTALL__
+        Call un.HandBackManualLease
+      !endif
       Abort "Tono Service uninstaller is missing. Reinstall Tono, then uninstall again."
     ${EndIf}
     DetailPrint "Restoring network protection and removing ${PRODUCTNAME} Service..."
@@ -926,6 +929,9 @@ FunctionEnd
     ${ElseIf} $0 != "0"
       ; Result 3 means the kill-switch filters may still be installed. DNS-only problems no longer
       ; land here (they are exit 4). Reboot and retry, or reinstall to repair the Service first.
+      !ifdef __UNINSTALL__
+        Call un.HandBackManualLease
+      !endif
       Abort "Tono could not confirm this machine was made safe to uninstall (result $0), so nothing was deleted and the recovery files were kept. See the messages above for what failed. The kill switch may still be installed. A reboot does not clear it and makes it worse — the block filters survive a restart while the loopback and DHCP exceptions beside them do not — so use the elevated Start-Menu shortcut ${RESTORENETWORKLINK} first, or run this uninstaller or installer again. Removing Tono while the barrier stays armed would leave the machine blocked with nothing left to unblock it. Installing Tono again first also repairs the Service."
     ${EndIf}
   ${EndIf}
@@ -1561,7 +1567,6 @@ Function un.onInit
 FunctionEnd
 
 Section Uninstall
-  StrCpy $TonoManualMutated 1
   !ifmacrodef NSIS_HOOK_PREUNINSTALL
     !insertmacro NSIS_HOOK_PREUNINSTALL
   !endif
@@ -1570,6 +1575,9 @@ Section Uninstall
   ${If} $UpdateMode <> 1
     StrCpy $TonoUninstallScope "--final-uninstall"
   ${EndIf}
+  ; The first change to this PC is the next line. A Cancel or a failed App kill above changed
+  ; nothing, so un.onUninstFailed and un.onGUIEnd hand the lease back for it (BRICK-W2).
+  StrCpy $TonoManualMutated 1
   !insertmacro RemoveVergeService
 
   ; Every delete below that reaches into the approving account's own AppData runs only when the
@@ -1751,8 +1759,8 @@ Section Uninstall
 
   ; Nothing below changes this PC, so hand the manual lease back now instead of when this window
   ; closes: a new installer started while the Completed page is still open was refused as
-  ; "another installer is active" (WIN-GATE-OPAQUE). An aborted section never gets here and
-  ; keeps the lease, as before.
+  ; "another installer is active" (WIN-GATE-OPAQUE). An aborted section never gets here; its
+  ; abort paths hand the lease back through un.HandBackManualLease (BRICK-W2).
   nsExec::ExecToLog '"$PLUGINSDIR\tono-gate.exe" --manual-update-finish'
   Pop $0
   ${If} $0 == "0"
@@ -1776,10 +1784,47 @@ Function un.onUninstSuccess
   ${EndIf}
 FunctionEnd
 
-Function un.onGUIEnd
-  ${If} $TonoManualMutated != 1
+; BRICK-W2: an uninstall that stops early hands the manual lease back first. Before this, the
+; lease outlived the stopped uninstaller, and the Service refused release, update Disconnect and
+; repair until another installer ran. Called before both uninstaller Aborts in RemoveVergeService,
+; from un.onUninstFailed and from un.onGUIEnd; never at the section end or in un.onUninstSuccess.
+; At most three tries a second apart, and only exit 0 counts. If every try fails the lease stays
+; exactly as an abort left it before.
+Function un.HandBackManualLease
+  Push $0
+  Push $1
+  StrCpy $0 ""
+  StrCpy $1 0
+  handBackAttempt:
+  ${If} $TonoLeaseReleased != 1
+  ${AndIf} $1 < 3
+    IntOp $1 $1 + 1
     nsExec::ExecToLog '"$PLUGINSDIR\tono-gate.exe" --manual-update-finish'
     Pop $0
+    ${If} $0 == "0"
+      StrCpy $TonoLeaseReleased 1
+    ${ElseIf} $1 < 3
+      Sleep 1000
+    ${EndIf}
+    Goto handBackAttempt
+  ${EndIf}
+  ${If} $TonoLeaseReleased != 1
+    DetailPrint "The installer lease could not be handed back (result $0); the next ${PRODUCTNAME} installer or uninstaller replaces it."
+  ${EndIf}
+  Pop $1
+  Pop $0
+FunctionEnd
+
+; NSIS calls this when the uninstall stopped early: a Cancel or a failed App kill in
+; CheckIfAppIsRunning, or an Abort in RemoveVergeService (already handed back). Silent mode
+; reaches it too. In GUI mode it runs when the failure page is closed.
+Function un.onUninstFailed
+  Call un.HandBackManualLease
+FunctionEnd
+
+Function un.onGUIEnd
+  ${If} $TonoManualMutated != 1
+    Call un.HandBackManualLease
   ${EndIf}
 FunctionEnd
 

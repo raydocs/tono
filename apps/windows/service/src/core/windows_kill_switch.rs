@@ -3119,10 +3119,17 @@ pub async fn emergency_disarm_windows_kill_switch() -> Result<()> {
             );
         }
     }
+    // BRICK-W4: Tono's NRPT catch-all sends every lookup to 198.18.0.2, which nothing answers
+    // once the Core is gone, and a restart does not remove it. It must be proven gone before any
+    // DNS outcome below is reported as continuable. A rule that remains puts its own blocking
+    // marker in front of that outcome (see the end of this function). Only this entry point
+    // (the uninstall helper and the elevated recovery CLI) runs the sweep; the Service never does.
+    const NRPT_SWEEP_BUDGET: std::time::Duration = std::time::Duration::from_secs(10);
+    let resolver_rule = crate::core::dns::remove_tono_resolver_rule_within(NRPT_SWEEP_BUDGET);
     // Everything below runs only once the WFP objects are provably gone: the engine_call `?`
     // above returns before it. Every imperfect DNS outcome is therefore tagged so the
     // uninstaller continues — the barrier that could leave a brick is already down.
-    match dns_restore {
+    let dns_outcome = match dns_restore {
         // Rung 1: the snapshot was restored and proven. Nothing to report.
         Ok(crate::core::dns::UninstallDnsRestore::Exact) => Ok(()),
         // Rung 2: reported through the error channel on purpose. This entry point's contract has
@@ -3164,7 +3171,26 @@ pub async fn emergency_disarm_windows_kill_switch() -> Result<()> {
                 crate::core::dns::WFP_REMOVED_CONTINUE_PREFIX,
             ))
         }
+    };
+    // The blocking marker leads, and the DNS outcome follows it unchanged. The recovery CLI
+    // checks this marker first, so it still blocks there. The uninstall helper sweeps again and
+    // blocks if the rule remains; when that sweep proves the rule gone, it reports what the DNS
+    // restore really did (an exact restore is exit 0, not a DHCP reset).
+    if let Err(error) = resolver_rule {
+        let dns = match &dns_outcome {
+            Ok(()) => String::new(),
+            Err(dns_error) => format!(" The DNS restore reported: {dns_error:#}"),
+        };
+        return Err(anyhow::anyhow!(
+            "{}: WFP was removed, but Tono's DNS rule (the NRPT catch-all that sends every lookup \
+             to 198.18.0.2) could not be removed: {error:#}. Name lookups keep going to the \
+             stopped Tono resolver until it is gone. Run the Start-Menu shortcut \
+             \"Tono — 恢复网络 (Restore Network)\" as administrator again, or run the uninstaller \
+             again.{dns}",
+            crate::core::dns::DNS_RESOLVER_POLICY_REMAINS_PREFIX,
+        ));
     }
+    dns_outcome
 }
 
 pub(crate) async fn status() -> KillSwitchStatus {
@@ -4345,6 +4371,41 @@ mod tests {
         assert!(!superseded_snapshot_exists().await);
 
         crate::core::dns::test_hooks::set_live_apply_fails(false);
+        remove_superseded_snapshots().await;
+        cleanup().await;
+        Ok(())
+    }
+
+    /// BRICK-W4: once WFP was gone every DNS outcome carried `TONO_WFP_REMOVED`, so the
+    /// uninstall finished while Tono's NRPT catch-all still sent every lookup to 198.18.0.2. A
+    /// rule that cannot be removed has its own marker now, and that marker blocks.
+    #[tokio::test]
+    #[serial]
+    async fn emergency_disarm_blocks_uninstall_while_the_nrpt_rule_remains() -> Result<()> {
+        cleanup().await;
+        remove_superseded_snapshots().await;
+        let _opt_in = UninstallLadderOptIn::enter();
+        arm_bootstrap(&test_config(), "/opt/tono/mihomo", "owner-alice").await?;
+        atomic_write(
+            &dns_snapshot_path(),
+            &serde_json::to_vec_pretty(&redirected_snapshot())?,
+        )
+        .await?;
+        crate::core::dns::test_hooks::set_encrypted_restore_fails(true);
+
+        let result = emergency_disarm_windows_kill_switch().await;
+        crate::core::dns::test_hooks::set_encrypted_restore_fails(false);
+        let message = format!(
+            "{:#}",
+            result.expect_err("a remaining NRPT rule must not read as a finished disarm")
+        );
+
+        assert!(message.starts_with("TONO_DNS_POLICY_REMAINS"), "{message}");
+        assert!(
+            message.contains(crate::core::dns::WFP_REMOVED_CONTINUE_PREFIX),
+            "the DNS outcome follows the blocking marker, for the helper's final call: {message}"
+        );
+        assert!(ARMED.lock().unwrap().is_none(), "the barrier is removed");
         remove_superseded_snapshots().await;
         cleanup().await;
         Ok(())

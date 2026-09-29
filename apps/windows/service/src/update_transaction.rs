@@ -600,6 +600,17 @@ impl Store {
         }
     }
 
+    /// [`Self::authenticate_successor`], also answering whether `peer` is a relaunch: anything
+    /// but the exact incarnation the executor recorded (pid, start time, path and digest). A
+    /// restart kills that incarnation, so every App after one reads as relaunched, and the App
+    /// then does not reconnect by itself (BRICK-W1). Computed before authenticating, which may
+    /// rebind the record to `peer`.
+    pub fn adopt_successor(&mut self, peer: &Image) -> Result<bool> {
+        let relaunched = self.attempt()?.successor_image.as_ref() != Some(peer);
+        self.authenticate_successor(peer)?;
+        Ok(relaunched)
+    }
+
     pub fn execution(&mut self, execution: Execution) -> Result<()> {
         let mut next = self.state.clone();
         next.attempt.as_mut().context("no attempt")?.execution = execution;
@@ -1320,6 +1331,46 @@ pub(crate) mod tests {
             store.attempt().unwrap().successor_image,
             Some(relaunched.clone())
         );
+        drop(store);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// BRICK-W1: after a restart every App is a later incarnation. Adoption tells it so, which
+    /// is what keeps it from reconnecting by itself, and its release stays admitted.
+    #[test]
+    fn update_adoption_by_a_later_incarnation_reports_a_relaunch() {
+        let (root, mut store, peer, executor) = reserved();
+        authorize(&mut store, &peer);
+        store.consume(&executor, 1_900_000_002).unwrap();
+        let launched = Image {
+            pid: 30,
+            started_at: 400,
+            path: peer.path.clone(),
+            sha256: target(&store.attempt().unwrap().manifest)
+                .components
+                .app_sha256
+                .clone(),
+        };
+        let mut next = store.state.clone();
+        next.attempt.as_mut().unwrap().execution = Execution::Replaced;
+        next.attempt.as_mut().unwrap().successor_image = Some(launched.clone());
+        store.save(next).unwrap();
+        assert!(
+            !store.adopt_successor(&launched).unwrap(),
+            "the executor's own successor is not a relaunch"
+        );
+        let relaunched = Image {
+            pid: 31,
+            started_at: 500,
+            ..launched.clone()
+        };
+        assert!(
+            store.adopt_successor(&relaunched).unwrap(),
+            "a later incarnation must be reported as relaunched"
+        );
+        store
+            .request_disconnect("windows:fixture-owner", &relaunched, 1_900_000_010)
+            .unwrap();
         drop(store);
         std::fs::remove_dir_all(root).unwrap();
     }

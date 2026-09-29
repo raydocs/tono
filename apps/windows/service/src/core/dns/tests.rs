@@ -63,6 +63,54 @@
         Ok(())
     }
 
+    /// BRICK-W4: the last rung bailed before Tono's resolver policy was touched, so the NRPT
+    /// catch-all stayed behind whatever the adapters ended up as. It is attempted now, and the
+    /// rung still refuses.
+    #[tokio::test]
+    #[serial]
+    async fn uninstall_rung_three_still_restores_the_resolver_policy() -> Result<()> {
+        reset_dns_state().await;
+        seed_snapshot(vec![adapter("{A}", Some("9.9.9.9"))]).await?;
+        test_hooks::set_live_dns_on_loopback(true);
+        test_hooks::set_live_apply_fails(true);
+        let result = restore_for_uninstall().await;
+        let policy_restores = test_hooks::take_encrypted_restores();
+        reset_dns_state().await;
+        let error = result.expect_err("nothing took the machine off Tono's DNS");
+        assert!(
+            format!("{error:#}").contains(DNS_UNINSTALL_STILL_ON_LOOPBACK_PREFIX),
+            "{error:#}"
+        );
+        assert_eq!(policy_restores, 1, "rung 3 left Tono's resolver policy untouched");
+        Ok(())
+    }
+
+    /// A registry call behind a filter driver can block for ever. The NRPT sweep runs on its own
+    /// thread, so the uninstall gives up after its budget instead of hanging with it.
+    #[test]
+    #[serial]
+    fn the_resolver_rule_sweep_gives_up_on_a_hung_call() {
+        test_hooks::set_nrpt_sweep_hangs(true);
+        let (answer, answered) = std::sync::mpsc::channel();
+        let started = std::time::Instant::now();
+        std::thread::spawn(move || {
+            let _ = answer.send(remove_tono_resolver_rule_within(
+                std::time::Duration::from_millis(200),
+            ));
+        });
+        let returned = answered.recv_timeout(std::time::Duration::from_secs(5));
+        let elapsed = started.elapsed();
+        test_hooks::set_nrpt_sweep_hangs(false);
+        assert!(
+            matches!(returned, Ok(Err(_))),
+            "a hung sweep must give up and say so: {returned:?}"
+        );
+        assert!(
+            elapsed < std::time::Duration::from_secs(2),
+            "the sweep gave up only after {elapsed:?}"
+        );
+    }
+
     fn adapter(guid: &str, v4: Option<&str>) -> AdapterDnsSnapshot {
         AdapterDnsSnapshot {
             interface_guid: guid.to_owned(),
