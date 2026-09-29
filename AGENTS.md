@@ -76,3 +76,20 @@ Read the findings (`node tooling/scripts/records.mjs findings`: [docs/FINDINGS_L
 review or bug fix; in the delivering PR add one `docs/findings.d/<ID>.md` per new finding ([format](docs/findings.d/README.md)) and update
 status in that fragment, or in the ledger row if the ID has none. Delete stale docs.
 Lines `release/macos`, `release/windows`, `main` (sole production Worker source; merge commits, no rewrite): [docs/RELEASE_LINES.md](docs/RELEASE_LINES.md).
+
+## Session state
+
+Before editing source, read and update `SESSION_STATE.md` at the repo root.
+If it is missing, create it from the template in that file, then edit code.
+
+Keep SESSION_STATE.md short (target < 80 lines). Only these sections:
+- Objective: done criteria
+- Decided: locked decisions, do not reopen
+- Active diffs: files touched this session
+- Tool receipts: one line per important command — pass/fail + one-line key output
+- Verification: never check off without raw terminal output pasted into the receipt
+- Next: exactly one next command, or DONE
+
+After compact, subagent start, or session resume: read SESSION_STATE.md first.
+Do not reconstruct tool results from chat history.
+Do not dump full logs, full diffs, or file contents into SESSION_STATE.md.
