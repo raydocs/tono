@@ -2086,6 +2086,19 @@ pub(crate) mod test_hooks {
         ENCRYPTED_RESTORE_FAILS.store(fails, Ordering::Relaxed);
     }
 
+    static NRPT_SWEEP_HANGS: AtomicBool = AtomicBool::new(false);
+
+    /// While set, the stubbed NRPT removal does not return: a registry call behind a filter
+    /// driver or a wedged Dnscache.
+    pub(crate) fn nrpt_sweep_hangs() -> bool {
+        NRPT_SWEEP_HANGS.load(Ordering::Relaxed)
+    }
+
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn set_nrpt_sweep_hangs(hangs: bool) {
+        NRPT_SWEEP_HANGS.store(hangs, Ordering::Relaxed);
+    }
+
     #[cfg(test)]
     static AUTOMATIC_RESETS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
@@ -2989,6 +3002,33 @@ pub(crate) async fn restore_for_uninstall() -> Result<UninstallDnsRestore> {
             )
         }
     }
+}
+
+/// Delete Tono's NRPT catch-all and prove it gone.
+///
+/// Red skeleton: runs the removal inline, without a budget.
+#[allow(dead_code)]
+pub fn remove_tono_resolver_rule_within(budget: std::time::Duration) -> Result<()> {
+    let _ = budget;
+    sweep_tono_resolver_rule()
+}
+
+/// The removal itself: Tono's key only, an absent key is success, and the result is read back.
+#[cfg(all(windows, not(feature = "test")))]
+fn sweep_tono_resolver_rule() -> Result<()> {
+    engine::remove_nrpt_rule()
+}
+
+/// The stub stands in for a registry call that never returns, or one that fails.
+#[cfg(not(all(windows, not(feature = "test"))))]
+fn sweep_tono_resolver_rule() -> Result<()> {
+    while test_hooks::nrpt_sweep_hangs() {
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    if test_hooks::encrypted_restore_fails() {
+        bail!("injected Tono NRPT removal failure");
+    }
+    Ok(())
 }
 
 /// The disarm gate: succeed when no protection is active, or after a proven restore. An

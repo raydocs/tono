@@ -572,6 +572,103 @@ mod owner_tests {
         Ok(())
     }
 
+    /// A run intent as `persist_owner_core_started` leaves it, recorded in `boot_session`. The
+    /// Core path does not exist, so a replay cannot succeed quietly.
+    #[cfg(windows)]
+    async fn seed_run_intent(owner: &AuthenticatedOwner, boot_session: &str) -> anyhow::Result<()> {
+        persist_active_owner(owner).await?;
+        let mut intent = serde_json::to_value(super::DesiredState {
+            core_should_be_running: true,
+            last_clash_config: Some(ClashConfig {
+                core_config: CoreConfig {
+                    core_path: r"C:\tono-missing\tono-core.exe".to_string(),
+                    ..Default::default()
+                },
+                log_config: Default::default(),
+            }),
+            ..Default::default()
+        })?;
+        intent["boot_session"] = serde_json::json!(boot_session);
+        write_json_atomic(
+            &crate::service_paths()
+                .for_owner_key(&owner.key)
+                .desired_state_path(),
+            &intent,
+        )
+        .await
+    }
+
+    #[cfg(windows)]
+    async fn disarm_kill_switch() {
+        let _ = crate::core::windows_kill_switch::emergency_disarm_windows_kill_switch().await;
+    }
+
+    /// BRICK-W1: after a crash, a BSOD or a power loss the Service started the recorded Core
+    /// before anyone signed in. A run intent from an earlier boot is held and nothing is
+    /// rewritten. A wanted barrier is armed first, so only the boot check can hold.
+    #[cfg(windows)]
+    #[tokio::test]
+    #[serial]
+    async fn restore_holds_a_run_intent_recorded_in_an_earlier_boot() -> anyhow::Result<()> {
+        disarm_kill_switch().await;
+        crate::core::windows_kill_switch::arm_bootstrap(
+            &crate::KillSwitchConfig {
+                tunnel_interface: "Tono".to_owned(),
+                proxy_endpoints: vec![crate::ProxyEndpoint {
+                    ip: "8.8.8.8".to_owned(),
+                    port: 443,
+                    protocol: crate::ProxyProtocol::Tcp,
+                }],
+                bootstrap_api_hosts: vec!["1.1.1.1".to_owned()],
+                direct_endpoints: Vec::new(),
+            },
+            "/opt/tono/mihomo",
+            "owner-alice",
+        )
+        .await?;
+        let owner = test_owner(90_010);
+        seed_run_intent(&owner, "an-earlier-boot").await?;
+
+        let restored = super::restore_desired_state().await;
+        let kept = load_owner_desired_state(&owner.key)
+            .await?
+            .core_should_be_running;
+        disarm_kill_switch().await;
+        clear_active_owner().await?;
+
+        assert!(
+            matches!(restored, Ok(false)),
+            "a run intent from an earlier boot was replayed: {restored:?}"
+        );
+        assert!(kept, "the hold must not rewrite the run intent");
+        Ok(())
+    }
+
+    /// The emergency disarm removes the barrier but never touches the run intent, and after
+    /// BRICK-W2 the lease no longer fences startup by accident. A same-boot Service start must
+    /// still not replay a Core with no barrier restored.
+    #[cfg(windows)]
+    #[tokio::test]
+    #[serial]
+    async fn restore_never_replays_a_run_intent_without_a_wanted_barrier() -> anyhow::Result<()> {
+        disarm_kill_switch().await;
+        let owner = test_owner(90_011);
+        seed_run_intent(&owner, "tests-share-one-boot").await?;
+
+        let restored = super::restore_desired_state().await;
+        let kept = load_owner_desired_state(&owner.key)
+            .await?
+            .core_should_be_running;
+        clear_active_owner().await?;
+
+        assert!(
+            matches!(restored, Ok(false)),
+            "a run intent without a restored barrier was replayed: {restored:?}"
+        );
+        assert!(kept, "the hold must not rewrite the run intent");
+        Ok(())
+    }
+
     #[tokio::test]
     async fn legacy_global_state_is_backed_up_without_becoming_owner_state() -> anyhow::Result<()> {
         let root = std::env::temp_dir().join(format!(

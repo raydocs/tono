@@ -1510,6 +1510,18 @@ fn nrpt_rule_key() -> String {
     format!(r"{NRPT_ROOT}\{NRPT_RULE_GUID}")
 }
 
+/// Delete Tono's NRPT catch-all and read back that it is gone. Only Tono's key is touched, and
+/// an absent key counts as success.
+pub(super) fn remove_nrpt_rule() -> Result<()> {
+    let key = nrpt_rule_key();
+    delete_key(&key)?;
+    anyhow::ensure!(
+        !key_exists(&key)?,
+        "Tono's NRPT rule {key} is still present after the delete"
+    );
+    Ok(())
+}
+
 fn install_nrpt() -> Result<()> {
     let _root = create_key(NRPT_ROOT)?;
     drop(_root);

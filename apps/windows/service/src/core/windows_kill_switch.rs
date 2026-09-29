@@ -4350,6 +4350,41 @@ mod tests {
         Ok(())
     }
 
+    /// BRICK-W4: once WFP was gone every DNS outcome carried `TONO_WFP_REMOVED`, so the
+    /// uninstall finished while Tono's NRPT catch-all still sent every lookup to 198.18.0.2. A
+    /// rule that cannot be removed has its own marker now, and that marker blocks.
+    #[tokio::test]
+    #[serial]
+    async fn emergency_disarm_blocks_uninstall_while_the_nrpt_rule_remains() -> Result<()> {
+        cleanup().await;
+        remove_superseded_snapshots().await;
+        let _opt_in = UninstallLadderOptIn::enter();
+        arm_bootstrap(&test_config(), "/opt/tono/mihomo", "owner-alice").await?;
+        atomic_write(
+            &dns_snapshot_path(),
+            &serde_json::to_vec_pretty(&redirected_snapshot())?,
+        )
+        .await?;
+        crate::core::dns::test_hooks::set_encrypted_restore_fails(true);
+
+        let result = emergency_disarm_windows_kill_switch().await;
+        crate::core::dns::test_hooks::set_encrypted_restore_fails(false);
+        let message = format!(
+            "{:#}",
+            result.expect_err("a remaining NRPT rule must not read as a finished disarm")
+        );
+
+        assert!(message.contains("TONO_DNS_POLICY_REMAINS"), "{message}");
+        assert!(
+            !message.contains(crate::core::dns::WFP_REMOVED_CONTINUE_PREFIX),
+            "a remaining NRPT rule must never carry the continue marker: {message}"
+        );
+        assert!(ARMED.lock().unwrap().is_none(), "the barrier is removed");
+        remove_superseded_snapshots().await;
+        cleanup().await;
+        Ok(())
+    }
+
     /// The opt-in is the whole boundary between the two behaviours: an unset or unrecognised
     /// value must leave the strict path in force, because everything that is not an uninstall
     /// still wants the user's exact servers back.
