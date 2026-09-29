@@ -78,6 +78,13 @@ pub struct State {
 }
 
 impl State {
+    /// An attempt that has not committed. [`Store::pending`] asks this of the store's view.
+    pub fn pending(&self) -> bool {
+        self.attempt
+            .as_ref()
+            .is_some_and(|a| a.receipt.phase != Phase::Committed)
+    }
+
     fn validate(&self) -> Result<()> {
         ensure!(
             self.consumed_sequence <= 9_007_199_254_740_991
@@ -175,6 +182,44 @@ fn take_store_lock(taken: std::result::Result<(), std::fs::TryLockError>) -> Res
     }
 }
 
+/// Read and validate `state.json`, with its bytes; `None` when it is absent and the orphan rule
+/// holds (only `transaction.lock` may be present). It takes no lock and writes nothing: the locked
+/// open reaffirms what this returns, and the release admission only reads it.
+fn load(root: &Path) -> Result<Option<(Vec<u8>, State)>> {
+    match File::open(root.join("state.json")) {
+        Ok(file) => {
+            let mut bytes = Vec::new();
+            file.take(65_537).read_to_end(&mut bytes)?;
+            ensure!(
+                bytes.len() <= 65_536,
+                "update state exceeds limit; evidence retained"
+            );
+            let schema = serde_json::from_slice::<SchemaProbe>(&bytes)
+                .context("corrupt update evidence retained")?
+                .schema_version
+                .unwrap_or(1);
+            ensure!(schema >= 1, "corrupt update evidence retained");
+            ensure!(
+                schema <= STATE_SCHEMA_VERSION,
+                "update evidence written by a newer Tono (schema {schema}) retained for that version"
+            );
+            let state: State =
+                serde_json::from_slice(&bytes).context("corrupt update evidence retained")?;
+            state.validate()?;
+            Ok(Some((bytes, state)))
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            ensure!(
+                std::fs::read_dir(root)?
+                    .all(|entry| entry.is_ok_and(|e| e.file_name() == "transaction.lock")),
+                "orphan update evidence without state; manual recovery required"
+            );
+            Ok(None)
+        }
+        Err(e) => Err(e.into()),
+    }
+}
+
 pub struct Store {
     root: PathBuf,
     _lock: File,
@@ -196,26 +241,8 @@ impl Store {
             .truncate(false)
             .open(root.join("transaction.lock"))?;
         take_store_lock(lock.try_lock())?;
-        let state = match File::open(root.join("state.json")) {
-            Ok(file) => {
-                let mut bytes = Vec::new();
-                file.take(65_537).read_to_end(&mut bytes)?;
-                ensure!(
-                    bytes.len() <= 65_536,
-                    "update state exceeds limit; evidence retained"
-                );
-                let schema = serde_json::from_slice::<SchemaProbe>(&bytes)
-                    .context("corrupt update evidence retained")?
-                    .schema_version
-                    .unwrap_or(1);
-                ensure!(schema >= 1, "corrupt update evidence retained");
-                ensure!(
-                    schema <= STATE_SCHEMA_VERSION,
-                    "update evidence written by a newer Tono (schema {schema}) retained for that version"
-                );
-                let state: State =
-                    serde_json::from_slice(&bytes).context("corrupt update evidence retained")?;
-                state.validate()?;
+        let state = match load(root)? {
+            Some((bytes, state)) => {
                 // A rename can become visible before a failed durability ack.
                 // Do not promote mere visibility on query/restart to authority:
                 // re-publish these exact bytes under the lock, with a fresh
@@ -223,15 +250,7 @@ impl Store {
                 reaffirm(&root.join("state.json"), &bytes)?;
                 state
             }
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                ensure!(
-                    std::fs::read_dir(root)?
-                        .all(|entry| entry.is_ok_and(|e| e.file_name() == "transaction.lock")),
-                    "orphan update evidence without state; manual recovery required"
-                );
-                State::default()
-            }
-            Err(e) => return Err(e.into()),
+            None => State::default(),
         };
         Ok(Self {
             root: root.into(),
@@ -239,6 +258,17 @@ impl Store {
             write_failed: false,
             state,
         })
+    }
+
+    /// The evidence as it stands, read without the store's lock and without a write: no
+    /// `transaction.lock` is created or taken and `state.json` is not re-published. Only the
+    /// release admission (BRICK-W5 d) and the start helper's lease check read this way; both
+    /// only admit or refuse. Every writer publishes a whole file by
+    /// rename, so this sees one complete version. It grants no update authority: every update
+    /// writer still opens the store under its lock and reaffirms first. The caller must
+    /// establish a native private, non-reparse root first, as for [`Self::open`].
+    pub fn read_state(root: &Path) -> Result<State> {
+        Ok(load(root)?.map(|(_, state)| state).unwrap_or_default())
     }
 
     pub fn save(&mut self, candidate: State) -> Result<()> {
@@ -265,10 +295,7 @@ impl Store {
     }
 
     pub fn pending(&self) -> bool {
-        self.state
-            .attempt
-            .as_ref()
-            .is_some_and(|a| a.receipt.phase != Phase::Committed)
+        self.state.pending()
     }
 
     pub fn attempt_dir(&self) -> Result<PathBuf> {
@@ -833,6 +860,36 @@ pub(crate) mod tests {
             format!("{failed:#}").contains("lock volume went away"),
             "{failed:#}"
         );
+    }
+
+    /// BRICK-W5 (d): the release admission opened the store for writing, so a lock another
+    /// process held, or a rewrite that failed, refused Disconnect with no update in progress.
+    /// Its read succeeds under a held lock and leaves every byte, time and entry as it was.
+    #[test]
+    fn update_release_read_takes_no_lock_and_rewrites_nothing() {
+        let (root, store, _, _) = reserved();
+        let path = root.join("state.json");
+        let bytes = std::fs::read(&path).unwrap();
+        let modified = std::fs::metadata(&path).unwrap().modified().unwrap();
+        let listing = || {
+            let mut names = std::fs::read_dir(&root)
+                .unwrap()
+                .map(|entry| entry.unwrap().file_name())
+                .collect::<Vec<_>>();
+            names.sort();
+            names
+        };
+        let entries = listing();
+        let state = Store::read_state(&root).expect("a held store lock refused the release read");
+        assert_eq!(state.generation, 91);
+        assert_eq!(std::fs::read(&path).unwrap(), bytes);
+        assert_eq!(
+            std::fs::metadata(&path).unwrap().modified().unwrap(),
+            modified
+        );
+        assert_eq!(listing(), entries);
+        drop(store);
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

@@ -969,6 +969,16 @@ private func tonoAppIn(_ applicationsDirectory: String) -> Bool {
           let entries = try? FileManager.default.contentsOfDirectory(atPath: applicationsDirectory)
     else { return true }
     for entry in entries where entry.hasSuffix(".app") {
+        // An iPhone or iPad app on Apple silicon has no Contents folder
+        // (`WrappedBundle -> Wrapper/<name>.app`) and cannot be a runnable
+        // Tono; counting it as present kept every removed Tono's protection
+        // (BRICK-M3). Only a missing Contents skips; any other doubt below
+        // still counts as present.
+        var contents = stat()
+        if lstat("\(applicationsDirectory)/\(entry)/Contents", &contents) != 0 {
+            let failure = errno
+            if failure == ENOENT || failure == ENOTDIR { continue }
+        }
         let infoPath = "\(applicationsDirectory)/\(entry)/Contents/Info.plist"
         // Bounded and regular-file only: this runs as root at every start. A
         // bundle whose Info.plist is missing or unreadable may be a renamed
@@ -1435,10 +1445,11 @@ if CommandLine.arguments.dropFirst() == ["--emergency-reset"] {
 do {
     // Executor recovery must precede CoreManager's stale-child cleanup and
     // normal PF restoration. The independent job owns a consumed replacement.
-    // startup() installs the corrupt-ledger emergency barrier itself and also
-    // returns a clean stop when the executor's own bootout interrupts this
-    // daemon behind the update lock — in that window the executor owns the
-    // flow and no PF action is ours to take.
+    // startup() installs the corrupt-ledger emergency barrier itself, only
+    // where Kill Switch intent is saved (BRICK-M1), and also returns a clean
+    // stop when the executor's own bootout interrupts this daemon behind the
+    // update lock — in that window the executor owns the flow and no PF
+    // action is ours to take.
     if try UpdateExecutor.startup() { exit(0) }
     if releaseIfTonoWasRemoved() { exit(0) }
 } catch {

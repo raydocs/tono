@@ -84,3 +84,8 @@
   - 计划的两项产品决定记入 [DECISIONS](../DECISIONS.md)（provisional）：意外重启后保持 Core 不启动且不加提示；原生更新恢复的
     自动重连跨重启保持。
   - 验证：MacBook 只跑了 `rustfmt --edition 2024 --check`（改动处无格式差异）；Windows CI 结果见 #680。
+- 续记（2026-09-29，并入 main）：#681（PLAN-win-release-min，Service 半边的 BRICK-W2）已合入 main `7a4b748d`，本分支合并
+  origin/main（合并提交，不改写历史）。`core/update.rs` 与 `update_transaction.rs` 自动合并：#681 的准入、start-only 与
+  exit 74 逻辑原样保留（相对 main 的差异只剩本 PR 的三处），本 PR 的 `adopt_successor` 与 `successor_relaunched` 仍在 Adopt 分支与 `status()` 里。手工解决两处：
+  `docs/findings.d/BRICK-W2.md`（两个 PR 各建一份，并成一行：Service 半边 #681 已合、NSIS 半边 #680 in-PR，保留 GUI 取消限制）；
+  `docs/DECISIONS.md`（同一位置两边都新增条目，两条都保留）。Windows CI 结果见 #680。
