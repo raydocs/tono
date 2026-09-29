@@ -618,4 +618,62 @@ mod tests {
         }
         assert!(ended, "closing the job must end the helper bound to it");
     }
+
+    /// R680-dns-child-job-window: a DNS helper is created suspended and runs only once it is in
+    /// the job. One that cannot join is terminated before it has run anything, and the start fails
+    /// instead of leaving an unbound helper running.
+    #[cfg(windows)]
+    #[test]
+    fn a_dns_helper_runs_only_after_joining_the_job() {
+        let marker = |name: &str| {
+            std::env::temp_dir().join(format!("tono-job-bind-{}-{name}", std::process::id()))
+        };
+        let mkdir = |path: &std::path::Path| {
+            let mut command = std::process::Command::new("cmd.exe");
+            command
+                .args(["/d", "/c", "mkdir"])
+                .arg(path)
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null());
+            command
+        };
+        let joined = marker("joined");
+        let refused = marker("refused");
+        let _ = std::fs::remove_dir(&joined);
+        let _ = std::fs::remove_dir(&refused);
+
+        let job = super::kill_on_close_job().expect("the job is created");
+        let mut child = super::spawn_in_job(&job, &mut mkdir(&joined))
+            .expect("a helper that joins the job starts");
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        let status = loop {
+            if let Some(status) = child.try_wait().expect("the helper can be polled") {
+                break Some(status);
+            }
+            if std::time::Instant::now() >= deadline {
+                let _ = child.kill();
+                let _ = child.wait();
+                break None;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(25));
+        };
+        let ran = status.is_some_and(|status| status.success()) && joined.is_dir();
+        let _ = std::fs::remove_dir(&joined);
+        assert!(ran, "a helper inside the job is resumed and runs: {status:?}");
+
+        // A file handle is not a Job Object, so joining it fails.
+        let not_a_job: std::os::windows::io::OwnedHandle =
+            std::fs::File::open(std::env::current_exe().expect("the test binary has a path"))
+                .expect("the test binary opens")
+                .into();
+        let refusal = super::spawn_in_job(&not_a_job, &mut mkdir(&refused))
+            .expect_err("a helper that cannot join the job must not start");
+        let never_ran = !refused.exists();
+        let _ = std::fs::remove_dir(&refused);
+        assert!(
+            never_ran,
+            "a helper that could not join the job must never run: {refusal:#}"
+        );
+    }
 }

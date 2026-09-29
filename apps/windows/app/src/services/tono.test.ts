@@ -298,6 +298,15 @@ describe('connectErrorSuggestsServerSwitch', () => {
     ).not.toContain('dial timeout')
   })
 
+  it('reports an unreachable Service on Restore internet as unconfirmed protection', () => {
+    const error = new Error(
+      'TONO_PROTECTION_UNCONFIRMED: the Tono Service is not ready: failed to start the registered service: the helper exited with 1',
+    )
+    expect(formatTonoActionError(error, (key) => `translated:${key}`)).toBe(
+      'translated:tono.progress.protectionUnknownBody',
+    )
+  })
+
   it('maps kernel pin and DNS-port failures to user-facing keys', () => {
     expect(
       formatTonoActionError(

@@ -442,4 +442,20 @@ mod tests {
         // otherwise `disconnect()` early-returns and the tray disables Disconnect.
         assert!(inner.fsm.status().is_protection_blocked && inner.fsm.kill_switch_armed());
     }
+
+    /// R681-old-helper-still-on: an installed `tono-service-install` older than
+    /// `--start-registered` exits 1, the Service stays stopped, and nothing about protection was
+    /// read. Restore internet must report protection as unconfirmed, not promise it stays on.
+    #[test]
+    fn an_older_start_helper_leaves_protection_unconfirmed_not_promised_on() {
+        let old_helper =
+            anyhow::anyhow!("failed to start the registered service: the helper exited with 1");
+        let message = service_not_ready_release_error(&old_helper);
+        assert!(
+            message.starts_with(super::super::failure::PROTECTION_UNCONFIRMED_PREFIX),
+            "{message}"
+        );
+        assert!(!message.contains("protection stays on"), "{message}");
+        assert!(message.contains("the helper exited with 1"), "{message}");
+    }
 }
