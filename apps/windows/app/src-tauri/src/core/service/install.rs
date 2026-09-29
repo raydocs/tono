@@ -84,6 +84,31 @@ pub(crate) fn service_prerequisites() -> ServicePrerequisites {
     report
 }
 
+/// Whether SCM reports TonoService Stopped. Read with QUERY_STATUS only, like
+/// [`service_prerequisites`], so it needs no prompt. A Service that is not registered is not
+/// Stopped.
+#[cfg(windows)]
+pub(crate) fn registered_service_stopped() -> Result<bool> {
+    use windows_service::{
+        Error as WindowsServiceError,
+        service::{ServiceAccess, ServiceState},
+        service_manager::{ServiceManager as WinManager, ServiceManagerAccess},
+    };
+
+    const ERROR_SERVICE_DOES_NOT_EXIST: i32 = 1060;
+    let manager = WinManager::local_computer(None::<&str>, ServiceManagerAccess::CONNECT)?;
+    match manager.open_service(
+        tono_service_protocol::WINDOWS_SERVICE_NAME,
+        ServiceAccess::QUERY_STATUS,
+    ) {
+        Ok(service) => Ok(service.query_status()?.current_state == ServiceState::Stopped),
+        Err(WindowsServiceError::Winapi(error)) if error.raw_os_error() == Some(ERROR_SERVICE_DOES_NOT_EXIST) => {
+            Ok(false)
+        }
+        Err(error) => Err(error).context("failed to inspect the Windows service state"),
+    }
+}
+
 #[cfg(not(windows))]
 pub(crate) fn service_prerequisites() -> ServicePrerequisites {
     ServicePrerequisites {
@@ -552,6 +577,76 @@ pub(super) fn install_service() -> Result<()> {
     }
 
     Ok(())
+}
+
+/// Exit code of `tono-service-install.exe --start-registered` when TonoService's registration or
+/// installed binary does not verify; the helper started and changed nothing. The same value as
+/// the helper's `START_TARGET_UNVERIFIED_EXIT`, which the App cannot import: the helper's exit
+/// codes are exported only under the Service crate's `standalone` feature, and the App builds it
+/// with `client` only.
+#[cfg(target_os = "windows")]
+const START_TARGET_UNVERIFIED_EXIT: i32 = 74;
+
+/// The start helper found TonoService's registration or installed binary unverified (exit 74):
+/// a start-only recovery cannot help, so the release path runs the full repair instead.
+#[derive(Debug)]
+#[cfg_attr(not(windows), allow(dead_code))]
+pub(super) struct StartTargetUnverified;
+
+impl std::fmt::Display for StartTargetUnverified {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(
+            "the registered Tono Service or its installed binary is not what the installer writes; nothing was started",
+        )
+    }
+}
+
+impl std::error::Error for StartTargetUnverified {}
+
+/// Start the registered, stopped TonoService as it is (BRICK-W5 e): `tono-service-install.exe
+/// --start-registered` verifies the registration and the installed binary, then starts it with no
+/// repair and no `manual_gate`. The same helper and privilege branch as [`install_service`], so one
+/// UAC prompt when the App is not elevated. Exit 74 is [`StartTargetUnverified`].
+#[cfg(target_os = "windows")]
+pub(super) fn start_registered_service() -> Result<()> {
+    logging!(info, Type::Service, "start registered service");
+
+    use deelevate::{PrivilegeLevel, Token};
+    use runas::Command as RunasCommand;
+    use std::os::windows::process::CommandExt as _;
+
+    let install_path = packaged_service_tool_path("tono-service-install.exe", || {
+        Ok(dirs::service_path()?.with_file_name("tono-service-install.exe"))
+    })?;
+
+    if !install_path.exists() {
+        bail!(format!("installer not found: {install_path:?}"));
+    }
+
+    let token = Token::with_current_process()?;
+    let level = token.privilege_level()?;
+    // `.status()`, never `.output()`, for the reason `install_service` gives.
+    let status = match level {
+        PrivilegeLevel::NotPrivileged => RunasCommand::new(&install_path)
+            .arg("--start-registered")
+            .show(false)
+            .status()?,
+        _ => StdCommand::new(&install_path)
+            .arg("--start-registered")
+            .creation_flags(0x08000000)
+            .status()?,
+    };
+
+    match status.code() {
+        Some(0) => Ok(()),
+        Some(START_TARGET_UNVERIFIED_EXIT) => Err(StartTargetUnverified.into()),
+        // The helper's REPAIR_IN_PROGRESS_EXIT_CODE, exported only under `standalone` as well.
+        Some(75) => bail!("another Tono installer, uninstaller or repair is running"),
+        code => bail!(
+            "failed to start the registered service: the helper exited with {}",
+            code.unwrap_or(-1)
+        ),
+    }
 }
 
 #[cfg(target_os = "linux")]

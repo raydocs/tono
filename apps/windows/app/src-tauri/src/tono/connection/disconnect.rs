@@ -220,7 +220,7 @@ async fn run_release_sequence(
     // registered Service before asking its owner-gated endpoint to remove protection. This is
     // the path that hands the machine its Internet back, so it always gets its prompt: a repair
     // the user declined during a connect must not leave them hard-blocked with no way out.
-    service::tono_service_ready_or_repair_now()
+    service::tono_service_ready_or_start_now()
         .await
         .map_err(|error| format!("kill switch release failed; protection stays on: {error}"))?;
 
