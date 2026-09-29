@@ -130,6 +130,18 @@ final class UpdateRuntime {
         }
     }
 
+    /// The listen ports of the Core's mixed inbounds in the runtime config, or
+    /// nil when they cannot be known. Not implemented yet: always unknown.
+    static func coreProxyPorts(runtimeConfig: String = runtimeConfigPath) -> Set<Int>? {
+        nil
+    }
+
+    /// Whether any enabled loopback proxy entry may point at Tono's Core. Not
+    /// narrowed yet: every entry counts.
+    static func mayBeTonoProxy(loopbackPorts: [Int?], corePorts: Set<Int>?) -> Bool {
+        !loopbackPorts.isEmpty
+    }
+
     private static func noCoreProxy(_ config: [String: Any]) throws {
         for name in ["HTTP", "HTTPS", "SOCKS"] {
             if (config[name + "Enable"] as? NSNumber)?.boolValue == true,

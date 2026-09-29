@@ -640,6 +640,19 @@ extension KillSwitchManager {
         """
     }
 
+    /// A release after the emergency block's standalone main ruleset. Not
+    /// implemented yet: the displaced main ruleset stays displaced.
+    @discardableResult
+    static func restoreDisplacedMainRuleset(
+        standalonePath: String = killSwitchStandaloneMainPath,
+        mainPath: String = killSwitchMainPFPath,
+        reload: (String) throws -> HelperCommandResult = {
+            try KillSwitchManager.run("/sbin/pfctl", ["-f", $0])
+        }
+    ) -> Bool {
+        true
+    }
+
     /// Longest a read-only `pfctl` query (`-s`, `-sr`) may run. One answers
     /// in tens of milliseconds. 3 s, plus the two 1 s waits for SIGTERM and
     /// SIGKILL, keeps a query that meets a wedged `/dev/pf` to about 5 s, under

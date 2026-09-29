@@ -227,7 +227,7 @@ final class ProtectedDNSManager {
         defer { lock.unlock() }
         guard try loadSnapshot() == nil else { throw HelperFailure.invalid("DNS recovery is still pending.") }
         for service in try Self.allServices() {
-            guard try !Self.readDNS(on: service).contains(Self.protectedDNSServer) else {
+            guard try !Self.isStoppedTonoResolver(Self.readDNS(on: service)) else {
                 throw HelperFailure.invalid("A network service still uses the stopped Tono resolver.")
             }
         }
@@ -238,10 +238,16 @@ final class ProtectedDNSManager {
         }
         for case let config as [String: Any] in values.values {
             if let servers = config[kSCPropNetDNSServerAddresses as String] as? [String],
-               servers.contains(Self.protectedDNSServer) {
+               Self.isStoppedTonoResolver(servers) {
                 throw HelperFailure.invalid("The active resolver still points to the stopped Core.")
             }
         }
+    }
+
+    /// Whether a DNS server list may be Tono's resolver left behind by a
+    /// stopped Core. Not narrowed yet: any list that contains it counts.
+    static func isStoppedTonoResolver(_ servers: [String]) -> Bool {
+        servers.contains(protectedDNSServer)
     }
 
     /// The same recovery transaction runs against either System Configuration

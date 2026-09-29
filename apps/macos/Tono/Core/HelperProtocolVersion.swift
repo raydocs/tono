@@ -244,7 +244,7 @@ nonisolated enum HelperProtocolVersion {
     ///   login, from the last session's utun. The six Continuity passes on
     ///   awdl0, llw0 and bridge100 keep no state (`no state` instead of
     ///   `keep state (if-bound)`); the allow set is unchanged.
-    static let current = "4.50.0"
+    static let current = "4.51.0"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS

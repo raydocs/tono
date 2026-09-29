@@ -89,6 +89,7 @@ enum UpdateExecutor {
     /// action, exit success. Every other startup failure keeps installing the
     /// barrier.
     static func startup(storage: UpdateStorage? = nil,
+                        protectionWanted: () -> Bool = KillSwitchManager.stateFileExists,
                         emergencyBlock: () throws -> Void = armEmergencyBlock) throws -> Bool {
         do {
             let storage = try storage ?? UpdateStorage()
