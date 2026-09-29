@@ -75,6 +75,106 @@ pub(crate) fn release_allowed() -> Result<()> {
     Ok(())
 }
 
+/// The update evidence read without the store's lock and without a write (BRICK-W5 d): no ACL is
+/// re-applied, no `transaction.lock` is created and `state.json` is not re-published. An absent
+/// root is the empty store [`store_root`] would create. A reparse point or an ACL that is not the
+/// private one refuses; nothing re-applies it here.
+fn read_store_state() -> Result<State> {
+    let root = crate::service_paths()
+        .persistent_state_dir()
+        .join("updates-v1");
+    if matches!(
+        std::fs::symlink_metadata(&root),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound
+    ) {
+        return Ok(State::default());
+    }
+    let _pins = pin_path(&root, true)?;
+    Store::read_state(&root)
+}
+
+/// Whether the manual installer that took the lease is gone for certain (Service half of
+/// BRICK-W2): no process has its PID or that process has exited, or the PID now names a process
+/// created at another time. A PID names one process object at a time. The same creation time
+/// under any path, and any read failure, count as alive.
+fn holder_conclusively_dead(
+    holder: &Image,
+    live: Result<Option<super::process::ProcessIdentity>>,
+) -> bool {
+    match live {
+        Ok(None) => true,
+        Ok(Some(process)) => process.started_at != holder.started_at,
+        Err(_) => false,
+    }
+}
+
+/// No manual installer lease, or one whose holder is conclusively dead. The lease itself is kept:
+/// it still fences Connect, the other update requests, repair and startup Core restore until an
+/// installer run replaces it.
+fn no_live_lease(
+    state: &State,
+    live: impl FnOnce(u32) -> Result<Option<super::process::ProcessIdentity>>,
+) -> Result<()> {
+    match &state.manual_installer {
+        None => Ok(()),
+        Some(holder) if holder_conclusively_dead(holder, live(holder.pid)) => Ok(()),
+        Some(holder) => Err(anyhow::anyhow!(
+            "the manual installer lease holder (pid {}) may still be running",
+            holder.pid
+        )),
+    }
+}
+
+/// The `ReleaseKillSwitch` admission. It reads the update evidence without writing it
+/// (BRICK-W5 d) and refuses what `lifecycle_allowed` and [`release_allowed`] refuse, except a
+/// manual installer lease whose holder is conclusively dead (Service half of BRICK-W2).
+pub(crate) fn release_admission() -> Result<()> {
+    release_admission_at(&read_store_state()?, super::process::process_identity)
+}
+
+fn release_admission_at(
+    state: &State,
+    live: impl FnOnce(u32) -> Result<Option<super::process::ProcessIdentity>>,
+) -> Result<()> {
+    ensure!(
+        !state.pending(),
+        "update pending; release/quit cannot cancel the recorded recovery obligation"
+    );
+    no_live_lease(state, live).context("manual installer owns the machine lifecycle")?;
+    if let Some(holder) = &state.manual_installer {
+        tracing::warn!(
+            "releasing protection past a manual installer lease whose holder (pid {}) has exited; \
+             the lease stays and still fences Connect",
+            holder.pid
+        );
+    }
+    Ok(())
+}
+
+/// The manual installer lease check for update requests. Only `Status`, the read the App sends
+/// before its release, passes a conclusively dead holder (Service half of BRICK-W2); every other
+/// request refuses any lease.
+fn update_lease_gate(
+    request: &UpdateRequest,
+    state: &State,
+    live: impl FnOnce(u32) -> Result<Option<super::process::ProcessIdentity>>,
+) -> Result<()> {
+    if state.manual_installer.is_none() {
+        return Ok(());
+    }
+    match request {
+        UpdateRequest::Status => no_live_lease(state, live).context("manual installation is pending"),
+        _ => Err(anyhow::anyhow!("manual installation is pending")),
+    }
+}
+
+/// Whether `tono-service-install --start-registered` may start the registered Service
+/// (BRICK-W5 e): no manual installer lease whose holder may still run. A pending attempt does not
+/// refuse the start; the starting Service fences it itself. Read without a lock or a write.
+pub fn start_admission() -> Result<()> {
+    no_live_lease(&read_store_state()?, super::process::process_identity)
+}
+
 fn verify_manifest(bytes: &[u8], signature: &str) -> Result<ReleaseManifest> {
     let manifest = ReleaseManifest::decode(bytes)?;
     let key = security::decode_base64(
@@ -211,10 +311,7 @@ pub(crate) async fn request(
 ) -> Result<UpdateStatus> {
     let peer = app_image(owner.peer_pid.context("pipe did not identify App")?)?;
     let mut store = open_store()?;
-    ensure!(
-        store.state.manual_installer.is_none(),
-        "manual installation is pending"
-    );
+    update_lease_gate(&request, &store.state, super::process::process_identity)?;
     let _repair =
         crate::acquire_service_repair_gate()?.context("repair/uninstall already running")?;
     if let Some(a) = &store.state.attempt
@@ -1713,5 +1810,128 @@ mod tests {
         );
         assert!(!root.join("linked-copy.exe").exists());
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// BRICK-W2 (Service half): an uninstaller cancelled at "Tono is running" leaves its lease
+    /// behind, and that lease refused every release for good. The release admission now passes
+    /// a lease whose holder is conclusively dead: no process has its PID, or the PID names a
+    /// process created at another time. The same creation time under another path, or an
+    /// unreadable process, still counts as alive, and a pending attempt still refuses.
+    #[test]
+    fn update_release_admission_passes_only_a_conclusively_dead_lease_holder() {
+        use super::super::process::{ProcessIdentity, process_identity};
+        let holder = Image {
+            pid: 4242,
+            started_at: 133_000_000_000_000_000,
+            path: r"C:\Program Files\Tono\uninstall.exe".into(),
+            sha256: "a".repeat(64),
+        };
+        let leased = State {
+            manual_installer: Some(holder.clone()),
+            ..State::default()
+        };
+        assert!(
+            release_admission_at(&leased, |_| Ok(None)).is_ok(),
+            "an exited lease holder kept refusing the release"
+        );
+        assert!(
+            release_admission_at(&leased, |_| Ok(Some(ProcessIdentity {
+                executable: r"C:\Windows\System32\notepad.exe".into(),
+                started_at: holder.started_at + 1,
+            })))
+            .is_ok(),
+            "a lease PID reused by a later process kept refusing the release"
+        );
+        let same_start = release_admission_at(&leased, |_| {
+            Ok(Some(ProcessIdentity {
+                executable: r"C:\Elsewhere\uninstall.exe".into(),
+                started_at: holder.started_at,
+            }))
+        })
+        .unwrap_err();
+        assert!(
+            format!("{same_start:#}").contains("manual installer owns the machine lifecycle"),
+            "{same_start:#}"
+        );
+        assert!(
+            release_admission_at(&leased, |_| Err(anyhow::anyhow!(
+                "Access is denied. (os error 5)"
+            )))
+            .is_err(),
+            "an unreadable lease holder must count as alive"
+        );
+        let (root, store, _, _) = crate::update_transaction::tests::reserved();
+        let pending = release_admission_at(&store.state, |_| Ok(None)).unwrap_err();
+        assert!(format!("{pending:#}").contains("update pending"), "{pending:#}");
+        drop(store);
+        std::fs::remove_dir_all(root).unwrap();
+
+        // The operating system's answers: this process reads as alive. A killed child whose
+        // handle is still held (so its PID cannot be reused) reads as conclusively dead.
+        let own = process_identity(std::process::id())
+            .unwrap()
+            .expect("this process is running");
+        let own_holder = Image {
+            pid: std::process::id(),
+            started_at: own.started_at,
+            path: own.executable.into(),
+            sha256: String::new(),
+        };
+        assert!(!holder_conclusively_dead(
+            &own_holder,
+            process_identity(own_holder.pid)
+        ));
+        let mut child = std::process::Command::new("ping")
+            .args(["-n", "30", "127.0.0.1"])
+            .stdout(std::process::Stdio::null())
+            .spawn()
+            .unwrap();
+        let running = process_identity(child.id())
+            .unwrap()
+            .expect("the child is running");
+        let child_holder = Image {
+            pid: child.id(),
+            started_at: running.started_at,
+            path: running.executable.into(),
+            sha256: String::new(),
+        };
+        child.kill().unwrap();
+        child.wait().unwrap();
+        assert!(
+            holder_conclusively_dead(&child_holder, process_identity(child_holder.pid)),
+            "a killed lease holder still counted as alive"
+        );
+        drop(child);
+    }
+
+    /// BRICK-W2 (Service half): after a restart the App's Disconnect sends `Status` first, and
+    /// any lease refused it before the release was ever asked. Only `Status` passes a
+    /// conclusively dead holder; an unreadable holder refuses it, and every other request keeps
+    /// refusing any lease.
+    #[test]
+    fn update_status_passes_only_a_conclusively_dead_lease_holder() {
+        let leased = State {
+            manual_installer: Some(Image {
+                pid: 4242,
+                started_at: 133_000_000_000_000_000,
+                path: r"C:\Program Files\Tono\uninstall.exe".into(),
+                sha256: "a".repeat(64),
+            }),
+            ..State::default()
+        };
+        assert!(
+            update_lease_gate(&UpdateRequest::Status, &leased, |_| Ok(None)).is_ok(),
+            "Status kept refusing an exited lease holder"
+        );
+        let unreadable = update_lease_gate(&UpdateRequest::Status, &leased, |_| {
+            Err(anyhow::anyhow!("Access is denied. (os error 5)"))
+        })
+        .unwrap_err();
+        assert!(
+            format!("{unreadable:#}").contains("manual installation is pending"),
+            "{unreadable:#}"
+        );
+        assert!(update_lease_gate(&UpdateRequest::Adopt, &leased, |_| Ok(None)).is_err());
+        assert!(update_lease_gate(&UpdateRequest::Disconnect, &leased, |_| Ok(None)).is_err());
     }
 }

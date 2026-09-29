@@ -450,8 +450,8 @@ pub(crate) async fn tono_service_ready_or_repair() -> Result<()> {
     }
 }
 
-/// The same readiness check for a path the user asked for: the Repair control, and the explicit
-/// release that gives a blocked machine its Internet back.
+/// The same readiness check for a path the user asked for: the Repair control. The explicit
+/// release that gives a blocked machine its Internet back takes `tono_service_ready_or_start_now`.
 ///
 /// A person acting on the failure is evidence the record cannot hold — they may be standing at
 /// the machine ready to approve the prompt they declined a minute ago — so the backoff that
@@ -464,6 +464,93 @@ pub(crate) async fn tono_service_ready_or_repair_now() -> Result<()> {
 /// Drop the record, so the next readiness failure is answered with a prompt again.
 fn forget_failed_service_repair() {
     *LAST_FAILED_SERVICE_REPAIR.lock() = None;
+}
+
+/// The readiness check of the release that gives a blocked machine its Internet back
+/// (BRICK-W5 e). A Service that SCM reports Stopped is started as it is through
+/// `tono-service-install.exe --start-registered`, which needs no `manual_gate`; that gate refuses
+/// the full repair while filters are armed. Everything else is [`tono_service_ready_or_repair_now`].
+#[cfg(windows)]
+pub(crate) async fn tono_service_ready_or_start_now() -> Result<()> {
+    forget_failed_service_repair();
+    ready_or_start_with(
+        tono_service_ready,
+        || async {
+            tokio::task::spawn_blocking(registered_service_stopped)
+                .await
+                .context("service state thread did not finish")?
+        },
+        || {
+            start_registered_under_run_state(&RUN_STATE, || async {
+                // Only the join error gets context, so `StartTargetUnverified` stays downcastable.
+                tokio::task::spawn_blocking(start_registered_service)
+                    .await
+                    .context("start helper thread did not finish")?
+            })
+        },
+        tono_service_ready_or_repair,
+    )
+    .await
+}
+
+/// The release path's choice between starting the Service as it is and the repair (BRICK-W5 e).
+///
+/// A Service that is not ready but Stopped is started, and readiness is asked again; that answer
+/// is the result. Only a start helper that found the registration or the binary unverified
+/// ([`StartTargetUnverified`]) falls back to the repair. Any other failed start is returned: after
+/// a declined prompt, or a verified binary that fails to start, the repair would fail the same
+/// way, and with filters armed `manual_gate` refuses it. A Service that is not Stopped, or an SCM
+/// that cannot be read, takes the repair path as before.
+#[cfg_attr(not(windows), allow(dead_code))]
+async fn ready_or_start_with<Ready, ReadyFuture, Stopped, StoppedFuture, Start, StartFuture, Repair, RepairFuture>(
+    ready: Ready,
+    stopped: Stopped,
+    start: Start,
+    repair: Repair,
+) -> Result<()>
+where
+    Ready: Fn() -> ReadyFuture,
+    ReadyFuture: Future<Output = Result<()>>,
+    Stopped: FnOnce() -> StoppedFuture,
+    StoppedFuture: Future<Output = Result<bool>>,
+    Start: FnOnce() -> StartFuture,
+    StartFuture: Future<Output = Result<()>>,
+    Repair: FnOnce() -> RepairFuture,
+    RepairFuture: Future<Output = Result<()>>,
+{
+    if ready().await.is_ok() {
+        return Ok(());
+    }
+    if !matches!(stopped().await, Ok(true)) {
+        return repair().await;
+    }
+    match start().await {
+        Ok(()) => ready().await,
+        Err(error) if error.is::<StartTargetUnverified>() => repair().await,
+        Err(error) => Err(error),
+    }
+}
+
+/// The release path's start, admitted and bounded like every privileged operation (BRICK-W5 e).
+///
+/// It takes Run State's operation slot, as the repair does through `run_operation`: it refuses at
+/// once while another privileged operation or a readiness refresh holds the slot, or while a
+/// timed-out helper may still be running, and never waits, since a quarantined slot never
+/// settles. The helper runs only after admission, under the privileged bound and quarantine, and
+/// records no Pending Action. The slot is released before this returns, so the caller's readiness
+/// check can take it.
+#[cfg_attr(not(windows), allow(dead_code))]
+async fn start_registered_under_run_state<E, Helper, HelperFuture>(
+    store: &RunStateStore<E>,
+    helper: Helper,
+) -> Result<()>
+where
+    E: RunStateEnv,
+    Helper: FnOnce() -> HelperFuture,
+    HelperFuture: Future<Output = Result<()>>,
+{
+    let _operation = store.begin_operation()?;
+    store.perform_unrecorded("StartRegistered", helper()).await
 }
 
 /// What one attempt at the privileged install/repair entry achieved.
