@@ -748,6 +748,78 @@ extension KillSwitchManager {
             check("hook-removal-fixture-failed", false)
         }
 
+        // 11. An /etc/hosts the release cannot use never stops the release
+        //     (BRICK-M2): pins go only after the anchor is flushed and the
+        //     intent is gone, and a failure there is logged, not thrown.
+        //     Recorded effects only; nothing live is touched.
+        var releaseSteps: [String] = []
+        let released = (try? releaseSequence(
+            writePlaceholder: { releaseSteps.append("placeholder") },
+            flushAnchor: {
+                releaseSteps.append("flush")
+                return HelperCommandResult(status: 0, output: Data())
+            },
+            anchorStillActive: { releaseSteps.append("query"); return false },
+            removeIntent: { releaseSteps.append("intent") },
+            removeHostsPins: {
+                releaseSteps.append("hosts")
+                throw HelperFailure.invalid("A root-owned file is unsafe.")
+            },
+            restoreDisplacedMain: { releaseSteps.append("main") },
+            releaseEnableReference: { releaseSteps.append("reference") }
+        )) != nil
+        check(
+            "release-survives-unusable-hosts",
+            released && releaseSteps == ["placeholder", "flush", "query", "intent", "hosts", "main", "reference"]
+        )
+
+        // 12. A release puts back the main ruleset the emergency block
+        //     displaced, only by reloading /etc/pf.conf and only when that
+        //     file attaches Tono's anchor from Tono's rule file (BRICK-M6).
+        //     Fixture paths; the reload is recorded, no pfctl runs.
+        let displacedRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("tono-displaced-main-\(getpid())").path
+        defer { try? FileManager.default.removeItem(atPath: displacedRoot) }
+        do {
+            try FileManager.default.createDirectory(
+                atPath: displacedRoot, withIntermediateDirectories: true,
+                attributes: [.posixPermissions: 0o700]
+            )
+            let marker = "\(displacedRoot)/pf.tono-main.conf"
+            let main = "\(displacedRoot)/pf.conf"
+            let standalone = Data(renderStandaloneMain(childPath: killSwitchPFPath).utf8)
+            let hooked = try Data(hookedMainConfiguration(unhooked).utf8)
+            var reloads: [String] = []
+            var reloadStatus: Int32 = 0
+            func restore() -> Bool {
+                restoreDisplacedMainRuleset(standalonePath: marker, mainPath: main, reload: { path in
+                    reloads.append(path)
+                    return HelperCommandResult(status: reloadStatus, output: Data())
+                })
+            }
+            try atomicWrite(path: main, data: hooked, permissions: 0o644)
+            try atomicWrite(path: marker, data: standalone, permissions: 0o600)
+            let reloaded = restore() && reloads == [killSwitchMainPFPath]
+                && !FileManager.default.fileExists(atPath: marker)
+            try atomicWrite(path: marker, data: standalone, permissions: 0o600)
+            reloadStatus = 1
+            let failedReloadKept = !restore() && reloads == [killSwitchMainPFPath, killSwitchMainPFPath]
+                && FileManager.default.fileExists(atPath: marker)
+            reloadStatus = 0
+            try atomicWrite(path: main, data: Data(unhooked.utf8), permissions: 0o644)
+            let hooklessKept = !restore() && reloads.count == 2
+                && FileManager.default.fileExists(atPath: marker)
+            unlink(marker)
+            try atomicWrite(path: main, data: hooked, permissions: 0o644)
+            let unmarkedUntouched = restore() && reloads.count == 2
+            check(
+                "displaced-main-restored-only-through-a-hooked-pf-conf",
+                reloaded && failedReloadKept && hooklessKept && unmarkedUntouched
+            )
+        } catch {
+            check("displaced-main-fixture-failed", false)
+        }
+
         if failures.isEmpty { return true }
         FileHandle.standardError.write(Data(
             "lifecycle self-test failed: \(failures.joined(separator: ", "))\n".utf8

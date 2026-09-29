@@ -309,7 +309,8 @@ func runUpdateSelfTests() -> Bool {
             let daemon = try UpdateStorage(root: directory)
             helperShutdownRequested = 1
             defer { helperShutdownRequested = 0 }
-            let clean = try UpdateExecutor.startup(storage: daemon, emergencyBlock: { armed += 1 })
+            let clean = try UpdateExecutor.startup(storage: daemon, protectionWanted: { true },
+                                                   emergencyBlock: { armed += 1 })
             try check(clean, "A bootout while waiting behind the executor's lock is a clean stop")
         }
         try check(armed == 0, "Executor bootout during startup armed the emergency block")
@@ -319,9 +320,30 @@ func runUpdateSelfTests() -> Bool {
         try UpdateStorage.write(Data("not a ledger".utf8), to: directory + "/corrupt/ledger.json")
         var corrupted = 0
         try refuses {
-            _ = try UpdateExecutor.startup(storage: corrupt, emergencyBlock: { corrupted += 1 })
+            _ = try UpdateExecutor.startup(storage: corrupt, protectionWanted: { true },
+                                           emergencyBlock: { corrupted += 1 })
         }
         try check(corrupted == 1, "Corrupt-ledger startup stopped arming the emergency block")
+    }
+    // A Mac that was never connected was blocked at every boot by a store it
+    // could not read (BRICK-M1): the startup barrier needs saved intent, and
+    // when the store opened that intent is read under the update lock, where
+    // no release can interleave between the check and the install.
+    test("startup-barrier-only-with-intent-decided-under-the-update-lock") { directory in
+        let corrupt = try UpdateStorage(root: directory)
+        try UpdateStorage.write(Data("not a ledger".utf8), to: directory + "/ledger.json")
+        var barriers = 0
+        var decidedUnderLock: Bool?
+        try refuses {
+            _ = try UpdateExecutor.startup(storage: corrupt, protectionWanted: {
+                let probe = open(directory + "/lock", O_RDWR | O_NOFOLLOW | O_CLOEXEC)
+                defer { if probe >= 0 { close(probe) } }
+                decidedUnderLock = probe >= 0 && flock(probe, LOCK_EX | LOCK_NB) != 0 && errno == EWOULDBLOCK
+                return false
+            }, emergencyBlock: { barriers += 1 })
+        }
+        try check(barriers == 0, "A startup failure without saved intent installed the emergency block")
+        try check(decidedUnderLock == true, "The startup barrier was decided outside the update lock")
     }
     test("rolled-back-attempt-can-be-retired-after-verified-disconnect") { directory in
         let store = try UpdateStorage(root: directory)
@@ -438,6 +460,31 @@ func runUpdateSelfTests() -> Bool {
                                           userApplicationsDirectory: nil, clientRunning: { false }, release: release)
                   && releases == 1, "A helper whose app was removed kept its installation")
     }
+    // An iPhone or iPad app on Apple silicon is a wrapper with no Contents
+    // folder (`WrappedBundle -> Wrapper/<name>.app`). One of them kept every
+    // removed Tono's protection (BRICK-M3). A bundle that has Contents but no
+    // readable Info.plist still counts as present.
+    test("helper-start-release-looks-past-iphone-app-wrappers") { directory in
+        let applications = directory + "/Applications"
+        let wrapped = applications + "/Forward.app/Wrapper/Forward.app"
+        try FileManager.default.createDirectory(atPath: wrapped, withIntermediateDirectories: true)
+        try PropertyListSerialization.data(fromPropertyList: ["CFBundleIdentifier": "com.example.forward"],
+                                           format: .xml, options: 0)
+            .write(to: URL(fileURLWithPath: wrapped + "/Info.plist"))
+        try FileManager.default.createSymbolicLink(atPath: applications + "/Forward.app/WrappedBundle",
+                                                   withDestinationPath: "Wrapper/Forward.app")
+        var releases = 0
+        let release: (UpdateStorage) -> Bool = { _ in releases += 1; return true }
+        let idle = try UpdateStorage(root: directory + "/idle")
+        try check(releaseIfTonoWasRemoved(storage: idle, applicationsDirectory: applications,
+                                          userApplicationsDirectory: nil, clientRunning: { false }, release: release)
+                  && releases == 1, "An iPhone app wrapper kept a removed Tono's installation")
+        try FileManager.default.createDirectory(atPath: applications + "/Copying.app/Contents",
+                                                withIntermediateDirectories: true)
+        try check(!releaseIfTonoWasRemoved(storage: idle, applicationsDirectory: applications,
+                                           userApplicationsDirectory: nil, clientRunning: { false }, release: release)
+                  && releases == 1, "A bundle with Contents but no readable Info.plist lost its protection")
+    }
     // The running app moved to ~/Applications and a helper restart released
     // PF under it; a later launch from there refused to start and reinstall
     // looped. A running Tono client or Tono.app in the bound user's
@@ -489,6 +536,32 @@ func runUpdateSelfTests() -> Bool {
         // fall back to doubt (requirement, pid listing or lookup failure).
         try check(!tonoClientProcessRunning(), "The Tono process scan found a client on a host without Tono")
     }
-    print("Update production-bound tests: \(13 - failures.count) passed, \(failures.count) failed; native-device acceptance NOT performed")
+    // Another product's loopback proxy or DNS list blocked every native
+    // update (BRICK-M4). Only what can be Tono's still refuses: a loopback
+    // proxy on the Core's mixed port, any loopback proxy while that port is
+    // unknown, and a resolver list that is exactly Tono's.
+    test("update-verification-refuses-only-tono-leftovers") { directory in
+        let config = directory + "/config.json"
+        try UpdateStorage.write(Data(("{\"inbounds\":[{\"type\":\"tun\",\"tag\":\"Tono-TUN\"},"
+            + "{\"type\":\"direct\",\"tag\":\"Tono-DNS\",\"listen\":\"127.0.0.1\",\"listen_port\":53},"
+            + "{\"type\":\"mixed\",\"tag\":\"Tono-Mixed\",\"listen\":\"127.0.0.1\",\"listen_port\":28990}]}").utf8),
+            to: config)
+        try check(UpdateRuntime.coreProxyPorts(runtimeConfig: config) == [28990], "The Core's mixed port was not read")
+        try check(UpdateRuntime.coreProxyPorts(runtimeConfig: directory + "/absent.json") == nil,
+                  "A missing runtime config gave known Core ports")
+        try check(!UpdateRuntime.mayBeTonoProxy(loopbackPorts: [7890], corePorts: [28990]),
+                  "Another product's loopback proxy blocked the update")
+        try check(UpdateRuntime.mayBeTonoProxy(loopbackPorts: [28990], corePorts: [28990]),
+                  "A loopback proxy on the Core's mixed port was not refused")
+        try check(UpdateRuntime.mayBeTonoProxy(loopbackPorts: [7890], corePorts: nil),
+                  "A loopback proxy was accepted while the Core's port was unknown")
+        try check(UpdateRuntime.mayBeTonoProxy(loopbackPorts: [nil], corePorts: [28990]),
+                  "A loopback proxy without a port was accepted")
+        try check(!UpdateRuntime.mayBeTonoProxy(loopbackPorts: [], corePorts: nil), "No loopback proxy was refused")
+        try check(!ProtectedDNSManager.isStoppedTonoResolver(["127.0.0.1", "1.1.1.1"]),
+                  "A mixed resolver list counted as Tono's")
+        try check(ProtectedDNSManager.isStoppedTonoResolver(["127.0.0.1"]), "Tono's resolver list was not refused")
+    }
+    print("Update production-bound tests: \(16 - failures.count) passed, \(failures.count) failed; native-device acceptance NOT performed")
     return failures.isEmpty
 }
