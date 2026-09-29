@@ -76,3 +76,4 @@
   /dev/null）。BRICK-M3：有 `Contents` 但 Info.plist 读不出的包仍算 Tono，删除只在启动时检查（BRICK-M11）。BRICK-M6：
   `/etc/pf.conf` 没有 Tono 挂钩或加载失败时仍停在替换状态，动态 `com.apple/*` 保留未实机验证。BRICK-M8–M12 未修。
   jev-route 合并前审查未在本条内运行。
+- 续记 2026-09-29：三家评审 28a99ca5（opus max、codex、grok）PASSED，无 major；既有缺口 BRICK-M13（allowed-uid 不可读时跳过紧急屏障）记为 open，归后续 emergency-release 计划。
