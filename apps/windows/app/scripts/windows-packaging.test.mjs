@@ -652,6 +652,49 @@ test('an uninstaller hands the lease back when its work is done, not when its wi
   )
 })
 
+test('every uninstaller abort hands the manual lease back first', () => {
+  // BRICK-W2: an uninstall that stopped early (Cancel at "Tono is running", a failed App kill,
+  // the helper missing, unproven cleanup) kept the lease, and the Service then refused release,
+  // update Disconnect and repair until another installer ran.
+  const handBack =
+    installerSource.match(/Function un\.HandBackManualLease\b([\s\S]*?)FunctionEnd/)?.[1] ?? ''
+  assert.match(handBack, /^\s*Push \$0\s+Push \$1\s/, 'the hand-back preserves $0 and $1')
+  assert.match(handBack, /Pop \$1\s+Pop \$0\s*$/, 'the hand-back restores $1 and $0')
+  assert.match(
+    handBack,
+    /\$\{If\} \$TonoLeaseReleased != 1[\s\S]*?nsExec::ExecToLog '"\$PLUGINSDIR\\tono-gate\.exe" --manual-update-finish'\s+Pop \$0\s+\$\{If\} \$0 == "0"\s+StrCpy \$TonoLeaseReleased 1/,
+    'the finish call runs only while the lease is held, and only exit 0 counts',
+  )
+
+  const failed =
+    installerSource.match(/Function un\.onUninstFailed\b([\s\S]*?)FunctionEnd/)?.[1] ?? ''
+  assert.match(failed, /Call un\.HandBackManualLease/, 'un.onUninstFailed hands the lease back')
+
+  const removeService =
+    installerSource.match(/!macro RemoveVergeService\b([\s\S]*?)!macroend/)?.[1] ?? ''
+  const aborts = [...removeService.matchAll(/^[ \t]*Abort\b/gm)]
+  assert.equal(aborts.length, 2, 'RemoveVergeService has two Aborts')
+  for (const abort of aborts) {
+    assert.match(
+      removeService.slice(0, abort.index),
+      /!ifdef __UNINSTALL__\s+Call un\.HandBackManualLease\s+!endif\s*$/,
+      'an uninstaller Abort in RemoveVergeService hands the lease back first',
+    )
+  }
+
+  const uninstall =
+    installerSource.match(/Section Uninstall\b([\s\S]*?)SectionEnd/)?.[1] ?? ''
+  const mutatedAt = uninstall.indexOf('StrCpy $TonoManualMutated 1')
+  assert.ok(
+    mutatedAt > uninstall.indexOf('!insertmacro CheckIfAppIsRunning'),
+    'a Cancel at "Tono is running" is not a mutation',
+  )
+  assert.ok(
+    mutatedAt < uninstall.indexOf('!insertmacro RemoveVergeService'),
+    'the uninstall is marked mutated before its first change',
+  )
+})
+
 test('a confirmed orphaned-block clear reinstalls through the fresh path, not the upgrade path', () => {
   // An upgrade skips RemoveVergeService and hands the runtime to --replace-runtime, whose gate
   // refuses while the filters remain and which cannot replace a Service that is gone. Once the

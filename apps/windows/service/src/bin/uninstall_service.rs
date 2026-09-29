@@ -78,6 +78,10 @@ const DNS_RESTORED_AUTOMATIC_MARKER: &str = "TONO_DNS_RESTORED_AUTOMATIC";
 const DNS_STILL_ON_LOOPBACK_MARKER: &str = "TONO_DNS_STILL_ON_LOOPBACK";
 #[cfg(any(windows, test))]
 const WFP_REMOVED_CONTINUE_MARKER: &str = "TONO_WFP_REMOVED";
+/// `dns::DNS_RESOLVER_POLICY_REMAINS_PREFIX`: WFP may be gone, but Tono's NRPT catch-all could
+/// not be proven removed. It blocks, like every unmarked failure.
+#[cfg(any(windows, test))]
+const DNS_POLICY_REMAINS_MARKER: &str = "TONO_DNS_POLICY_REMAINS";
 
 /// Customer logs show this exact status when Tono never installed a WFP provider. That is a
 /// **clean** machine, not an armed kill switch. Matched by substring so every layer's wrapping
@@ -697,6 +701,17 @@ fn final_cleanup_outcome(
     }
 }
 
+/// Red skeleton: returns the outcome unchanged, as today.
+#[cfg(any(windows, test))]
+#[allow(dead_code)]
+fn with_resolver_rule_proof(
+    outcome: CleanupOutcome,
+    sweep: impl FnOnce() -> Result<(), Error>,
+) -> CleanupOutcome {
+    let _ = sweep;
+    outcome
+}
+
 /// Passed only by the uninstaller's own Uninstall section, never by an install, an update or
 /// an install rollback: those keep the update store, its executors and the manual lease.
 #[cfg(any(windows, test))]
@@ -993,13 +1008,72 @@ fn known_folder(id: windows_sys::core::GUID) -> Option<std::path::PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::{
-        CleanupOutcome, DNS_RESTORED_AUTOMATIC_MARKER, DNS_STILL_ON_LOOPBACK_MARKER,
-        EXIT_COSMETIC_FAILURE, EXIT_RESTORED_AUTOMATIC, EXIT_STILL_PROTECTED,
-        WFP_REMOVED_CONTINUE_MARKER, classify_disarm_failure, cleanup_exit_code,
-        cleanup_fast_path_allowed, final_cleanup_outcome, final_uninstall_cleanup, poll_until,
-        uninstall_may_continue,
+        CleanupOutcome, DNS_POLICY_REMAINS_MARKER, DNS_RESTORED_AUTOMATIC_MARKER,
+        DNS_STILL_ON_LOOPBACK_MARKER, EXIT_COSMETIC_FAILURE, EXIT_RESTORED_AUTOMATIC,
+        EXIT_STILL_PROTECTED, WFP_REMOVED_CONTINUE_MARKER, classify_disarm_failure,
+        cleanup_exit_code, cleanup_fast_path_allowed, final_cleanup_outcome,
+        final_uninstall_cleanup, poll_until, uninstall_may_continue, with_resolver_rule_proof,
     };
     use std::cell::Cell;
+
+    /// BRICK-W4: a continuing outcome (exit 0, 2 or 4) is only possible once Tono's NRPT
+    /// catch-all is proven gone. A rule that remains turns it into the blocking outcome, so the
+    /// uninstall stops and keeps the product files. An outcome that already blocks is not swept.
+    #[test]
+    fn a_remaining_nrpt_rule_stops_the_uninstall() {
+        assert_eq!(DNS_POLICY_REMAINS_MARKER, "TONO_DNS_POLICY_REMAINS");
+        let outcome = with_resolver_rule_proof(
+            CleanupOutcome::RestoredToAutomatic(anyhow::anyhow!(
+                "{DNS_RESTORED_AUTOMATIC_MARKER}: reset to DHCP"
+            )),
+            || Err(anyhow::anyhow!("the NRPT rule is still present")),
+        );
+        assert!(
+            matches!(&outcome, CleanupOutcome::StillProtected(error)
+                if format!("{error:#}").contains(DNS_POLICY_REMAINS_MARKER)),
+            "a remaining NRPT rule must block the uninstall: {outcome:?}"
+        );
+        assert_eq!(cleanup_exit_code(&outcome), EXIT_STILL_PROTECTED);
+
+        let outcome = with_resolver_rule_proof(
+            CleanupOutcome::StillProtected(anyhow::anyhow!("filters present")),
+            || panic!("swept although the outcome already blocks"),
+        );
+        assert!(matches!(outcome, CleanupOutcome::StillProtected(_)));
+
+        let outcome = with_resolver_rule_proof(CleanupOutcome::Clean, || Ok(()));
+        assert!(matches!(outcome, CleanupOutcome::Clean));
+    }
+
+    /// Tokio's runtime drop waits for every `spawn_blocking` task, and the DNS and WFP engine
+    /// calls abandon such a task when they miss their deadline. The helper's runtimes must return
+    /// anyway, or a hung engine call keeps the uninstall from ever reaching the NRPT proof.
+    #[test]
+    fn block_on_abandoning_returns_while_a_blocking_call_hangs() {
+        let (release, hang) = std::sync::mpsc::channel::<()>();
+        let (answer, answered) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let value = super::shared::block_on_abandoning(async move {
+                let _ = tokio::time::timeout(
+                    std::time::Duration::from_millis(100),
+                    tokio::task::spawn_blocking(move || {
+                        let _ = hang.recv();
+                    }),
+                )
+                .await;
+                7
+            });
+            let _ = answer.send(value.ok());
+        });
+        let returned = answered.recv_timeout(std::time::Duration::from_secs(5));
+        // Lets the abandoned blocking call end, whatever the answer was.
+        let _ = release.send(());
+        assert_eq!(
+            returned.ok().flatten(),
+            Some(7),
+            "the runtime wrapper waited for an abandoned blocking call"
+        );
+    }
 
     #[test]
     fn final_uninstall_retires_update_executors_only_after_proven_removal() {

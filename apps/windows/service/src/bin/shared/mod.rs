@@ -22,6 +22,16 @@ pub(crate) fn enter_repair_gate() -> Result<tono_service_protocol::ServiceRepair
     }
 }
 
+/// Run one future to completion on a fresh current-thread runtime.
+// Red skeleton: the runtime is still dropped implicitly, as the helper's runtimes are today.
+#[allow(dead_code)] // The installer declares this module too and does not use it.
+pub(crate) fn block_on_abandoning<F: std::future::Future>(future: F) -> Result<F::Output, Error> {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?;
+    Ok(runtime.block_on(future))
+}
+
 pub(crate) fn run_maintenance_if_requested() -> Result<bool, Error> {
     if !std::env::args().any(|argument| argument == "--cleanup-stale-owners") {
         return Ok(false);

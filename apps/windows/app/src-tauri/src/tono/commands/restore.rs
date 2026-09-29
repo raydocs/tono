@@ -192,7 +192,12 @@ pub async fn restore_session(app: AppHandle, state: Arc<TonoState>) {
             Ok(Some(tono_service_protocol::update_contract::Protection::Connected)) => {
                 let allowed = {
                     let inner = state.lock().await;
-                    update_recovery_connect_allowed(&inner, generation, connect_epoch)
+                    update_recovery_connect_allowed(
+                        &inner,
+                        generation,
+                        connect_epoch,
+                        super::update::recovery_adoption(),
+                    )
                 };
                 if allowed {
                     let state = state.clone();
@@ -230,7 +235,14 @@ pub async fn restore_session(app: AppHandle, state: Arc<TonoState>) {
 /// does not change `sign_in_generation` but always retires the connection generation, so any
 /// connection transition since restore began (a Disconnect, a node switch, a quit) or a release
 /// still in flight wins: the user's choice stands and recovery waits for them.
-fn update_recovery_connect_allowed(inner: &TonoInner, generation: u64, connect_epoch: u64) -> bool {
+fn update_recovery_connect_allowed(
+    inner: &TonoInner,
+    generation: u64,
+    connect_epoch: u64,
+    adoption: super::update::Adoption,
+) -> bool {
+    // Red skeleton: the adoption answer is not consulted yet.
+    let _ = adoption;
     inner.sign_in_generation == generation
         && inner.connect_generation == connect_epoch
         && !inner.fsm.status().is_disconnecting
@@ -705,14 +717,36 @@ mod barrier_before_me_tests {
         let state = Arc::new(TonoState::for_test());
         let mut inner = state.lock().await;
         let (generation, connect_epoch) = (inner.sign_in_generation, inner.connect_generation);
-        assert!(update_recovery_connect_allowed(&inner, generation, connect_epoch),
+        let allowed = super::super::update::Adoption::Allowed;
+        assert!(update_recovery_connect_allowed(&inner, generation, connect_epoch, allowed),
             "an untouched restore keeps its update recovery Connect");
         // `disconnect()`'s own steps, then what its proven release leaves behind.
         inner.invalidate_connection(true);
         inner.fsm.begin_disconnect();
         inner.fsm.sign_out_or_quit();
-        assert!(!update_recovery_connect_allowed(&inner, generation, connect_epoch),
+        assert!(!update_recovery_connect_allowed(&inner, generation, connect_epoch, allowed),
             "update recovery reconnected a machine the user released during restore");
+    }
+
+    /// BRICK-W1: after a restart mid-update every App is a later incarnation, and it reconnected
+    /// by itself at every logon. Only the executor's own successor, after a certain answer, may
+    /// run the recovery Connect; a lost answer holds for the rest of the process, even when a
+    /// retried restore then reads the incarnation the first Adopt rebound.
+    #[tokio::test]
+    async fn an_uncertain_or_relaunched_adoption_never_starts_the_recovery_connect() {
+        use super::super::update::Adoption;
+        let state = Arc::new(TonoState::for_test());
+        let inner = state.lock().await;
+        let (generation, connect_epoch) = (inner.sign_in_generation, inner.connect_generation);
+        let retried = Adoption::Undecided.after(None).after(Some(false));
+        assert!(!update_recovery_connect_allowed(&inner, generation, connect_epoch, retried),
+            "a lost Adopt answer followed by a same-process retry started the recovery Connect");
+        let relaunched = Adoption::Undecided.after(Some(true));
+        assert!(!update_recovery_connect_allowed(&inner, generation, connect_epoch, relaunched),
+            "a relaunched App started the recovery Connect");
+        let own_successor = Adoption::Undecided.after(Some(false));
+        assert!(update_recovery_connect_allowed(&inner, generation, connect_epoch, own_successor),
+            "the executor's own successor keeps its recovery Connect");
     }
 }
 

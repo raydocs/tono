@@ -261,6 +261,27 @@ fn quiesce_connection_after_update(
     }
 }
 
+/// Whether this App process may run update recovery's automatic Connect.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Adoption {
+    Undecided,
+    Allowed,
+    Held,
+}
+
+impl Adoption {
+    /// Red skeleton: every answer allows, as today.
+    pub(crate) fn after(self, answered: Option<bool>) -> Adoption {
+        let _ = (self, answered);
+        Adoption::Allowed
+    }
+}
+
+/// Red skeleton: every process may reconnect, as today.
+pub(crate) fn recovery_adoption() -> Adoption {
+    Adoption::Allowed
+}
+
 pub async fn adopt() -> Result<Option<Protection>> {
     // A known legacy Service uses normal verified Disconnect/manual replacement.
     // A failed v1 adoption, unlike a proven absent attempt, must remain visible.
