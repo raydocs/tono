@@ -20,6 +20,10 @@ pub struct DesiredState {
     pub last_writer_config: Option<WriterConfig>,
     pub generation: u64,
     pub updated_at: u64,
+    /// The boot that recorded the run intent (`boot_session::current`). A Windows Service start
+    /// replays the intent only in that same boot; a missing value never matches (BRICK-W1).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub boot_session: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -66,6 +70,7 @@ pub async fn persist_owner_core_started(
         state.core_should_be_running = true;
         state.last_clash_config = Some(config.clone());
         state.last_writer_config = Some(config.log_config.clone());
+        state.boot_session = crate::core::boot_session::current();
     })
     .await
 }
@@ -228,6 +233,31 @@ pub async fn restore_desired_state() -> Result<bool> {
         return Ok(false);
     }
 
+    // BRICK-W1. Neither hold rewrites the intent: the barrier stays as its own intent restored
+    // it, and the user's next Connect replaces the run intent.
+    #[cfg(windows)]
+    {
+        let current = crate::core::boot_session::current();
+        if !recorded_in_this_boot(state.boot_session.as_deref(), current.as_deref()) {
+            warn!(
+                "Desired state asks for a Core, but its run intent was not recorded in this boot \
+                 (recorded {:?}, current {current:?}); holding it until the user connects",
+                state.boot_session
+            );
+            return Ok(false);
+        }
+        // A Windows StartClash always arms WFP, so a legitimate run intent always comes with a
+        // wanted barrier, restored before this runs. One without it outlived a release that did
+        // not retire it, such as the emergency disarm.
+        if !crate::core::windows_kill_switch::status().await.wanted {
+            warn!(
+                "Desired state asks for a Core, but no wanted barrier was restored; a run intent \
+                 without a restored barrier is not replayed"
+            );
+            return Ok(false);
+        }
+    }
+
     let Some(config) = state.last_clash_config else {
         warn!("Desired state requests core restore but has no ClashConfig");
         return Ok(false);
@@ -264,6 +294,13 @@ pub async fn restore_desired_state() -> Result<bool> {
         return Err(error);
     }
     Ok(true)
+}
+
+/// Both markers present and equal. An unknown current boot or an intent recorded before this
+/// field existed reads as another boot.
+#[cfg(windows)]
+fn recorded_in_this_boot(recorded: Option<&str>, current: Option<&str>) -> bool {
+    matches!((recorded, current), (Some(recorded), Some(current)) if recorded == current)
 }
 
 /// 判断错误链中是否包含 NotFound I/O 错误，用于识别失效的 core 路径。

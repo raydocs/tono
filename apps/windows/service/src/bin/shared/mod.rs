@@ -22,14 +22,23 @@ pub(crate) fn enter_repair_gate() -> Result<tono_service_protocol::ServiceRepair
     }
 }
 
-/// Run one future to completion on a fresh current-thread runtime.
-// Red skeleton: the runtime is still dropped implicitly, as the helper's runtimes are today.
+/// Run one future to completion on a fresh current-thread runtime, then return without waiting
+/// for blocking work it left behind.
+///
+/// Dropping a tokio runtime waits for every `spawn_blocking` task to return, and the DNS and WFP
+/// engine calls leave such a task running when they miss their deadline. A plain drop therefore
+/// turned a timed-out engine call back into a hang, before the uninstall helper could prove Tono's
+/// NRPT rule gone (BRICK-W4). `shutdown_background` does not wait. The abandoned calls only
+/// release protection, never arm it; the helper holds the repair gate with the Service stopped or
+/// gone, and exits right after it reports.
 #[allow(dead_code)] // The installer declares this module too and does not use it.
 pub(crate) fn block_on_abandoning<F: std::future::Future>(future: F) -> Result<F::Output, Error> {
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()?;
-    Ok(runtime.block_on(future))
+    let output = runtime.block_on(future);
+    runtime.shutdown_background();
+    Ok(output)
 }
 
 pub(crate) fn run_maintenance_if_requested() -> Result<bool, Error> {

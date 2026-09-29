@@ -3119,6 +3119,25 @@ pub async fn emergency_disarm_windows_kill_switch() -> Result<()> {
             );
         }
     }
+    // BRICK-W4: Tono's NRPT catch-all sends every lookup to 198.18.0.2, which nothing answers
+    // once the Core is gone, and a restart does not remove it. It must be proven gone before any
+    // DNS outcome below is reported as continuable. A rule that remains gets its own blocking
+    // marker, never `TONO_WFP_REMOVED`. Only this entry point (the uninstall helper and the
+    // elevated recovery CLI) runs the sweep; the Service never does.
+    const NRPT_SWEEP_BUDGET: std::time::Duration = std::time::Duration::from_secs(10);
+    if let Err(error) = crate::core::dns::remove_tono_resolver_rule_within(NRPT_SWEEP_BUDGET) {
+        if let Err(dns_error) = &dns_restore {
+            tracing::error!("emergency disarm: DNS restore also failed: {dns_error:#}");
+        }
+        return Err(anyhow::anyhow!(
+            "{}: WFP was removed, but Tono's DNS rule (the NRPT catch-all that sends every lookup \
+             to 198.18.0.2) could not be removed: {error:#}. Name lookups keep going to the \
+             stopped Tono resolver until it is gone. Run the Start-Menu shortcut \
+             \"Tono — 恢复网络 (Restore Network)\" as administrator again, or run the uninstaller \
+             again.",
+            crate::core::dns::DNS_RESOLVER_POLICY_REMAINS_PREFIX,
+        ));
+    }
     // Everything below runs only once the WFP objects are provably gone: the engine_call `?`
     // above returns before it. Every imperfect DNS outcome is therefore tagged so the
     // uninstaller continues — the barrier that could leave a brick is already down.

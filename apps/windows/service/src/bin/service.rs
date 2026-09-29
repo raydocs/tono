@@ -152,6 +152,10 @@ fn run_emergency_disarm() -> Result<()> {
             .await
             .map(|()| true)
     });
+    // A timed-out DNS or WFP engine call leaves its `spawn_blocking` task running, and dropping
+    // the runtime would wait for it. This process only releases protection and exits right after
+    // reporting, so the task is abandoned instead.
+    rt.shutdown_background();
 
     match outcome {
         Ok(true) => {
@@ -195,14 +199,27 @@ fn run_emergency_disarm() -> Result<()> {
                         "网络封锁已解除，但 DNS 仍指向已停止的 Tono 解析器。",
                         "The block is removed, but DNS still points at the stopped Tono resolver.",
                         &[
-                            "请重启电脑完成恢复；重启后网络即正常。",
-                            "Reboot once to finish the recovery; the network works after that.",
+                            "请打开“设置”>“网络和 Internet”> 你的网络适配器 >“DNS 服务器分配”>“编辑”，\
+                             IPv4 和 IPv6 都选“自动(DHCP)”。",
+                            "Open Settings > Network & Internet > your adapter > DNS server \
+                             assignment > Edit, and choose Automatic (DHCP) for IPv4 and IPv6.",
                         ],
                     );
                     Err(error)
                 }
-                // Red skeleton: the new class is never produced yet.
-                DisarmErrorClass::StillProtected | DisarmErrorClass::ResolverRuleRemains => {
+                DisarmErrorClass::ResolverRuleRemains => {
+                    print_disarm_result(
+                        "网络封锁已解除，但 Tono 的 DNS 规则未能删除，域名查询仍被送往已停止的 Tono 解析器。",
+                        "The block is removed, but Tono's DNS rule could not be removed, so name \
+                         lookups still go to the stopped Tono resolver.",
+                        &[
+                            "请再运行一次本快捷方式；仍失败请联系支持。",
+                            "Run this shortcut again; if it still fails, contact support.",
+                        ],
+                    );
+                    Err(error)
+                }
+                DisarmErrorClass::StillProtected => {
                     print_disarm_result(
                         "解除失败，网络保护仍然生效。",
                         "The disarm failed; protection is still in place.",
@@ -242,17 +259,21 @@ enum DisarmErrorClass {
     /// saved servers could not be proven restored. A safe end state.
     RestoredToAutomatic,
     /// WFP removed, but an adapter still points at Tono's (now dead) loopback
-    /// resolver. The machine needs a reboot to resolve again.
+    /// resolver. Its DNS has to be set back to automatic in Windows Settings.
     EnforcementGoneDnsStale,
     /// Nothing proves the barrier is gone — the genuine failure case.
     StillProtected,
-    /// WFP may be gone, but Tono's NRPT catch-all could not be proven removed.
+    /// WFP removed, but Tono's NRPT catch-all could not be removed, so every
+    /// lookup still goes to the stopped resolver. A restart does not remove it;
+    /// running the shortcut again retries.
     ResolverRuleRemains,
 }
 
 #[cfg(windows)]
 fn classify_disarm_error(message: &str) -> DisarmErrorClass {
-    if message.contains("TONO_DNS_RESTORED_AUTOMATIC") {
+    if message.contains("TONO_DNS_POLICY_REMAINS") {
+        DisarmErrorClass::ResolverRuleRemains
+    } else if message.contains("TONO_DNS_RESTORED_AUTOMATIC") {
         DisarmErrorClass::RestoredToAutomatic
     } else if message.contains("TONO_DNS_STILL_ON_LOOPBACK") || message.contains("TONO_WFP_REMOVED")
     {

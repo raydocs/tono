@@ -573,10 +573,15 @@ impl Store {
         }
     }
 
-    /// Red skeleton: authenticates and reports no relaunch, as today.
+    /// [`Self::authenticate_successor`], also answering whether `peer` is a relaunch: anything
+    /// but the exact incarnation the executor recorded (pid, start time, path and digest). A
+    /// restart kills that incarnation, so every App after one reads as relaunched, and the App
+    /// then does not reconnect by itself (BRICK-W1). Computed before authenticating, which may
+    /// rebind the record to `peer`.
     pub fn adopt_successor(&mut self, peer: &Image) -> Result<bool> {
+        let relaunched = self.attempt()?.successor_image.as_ref() != Some(peer);
         self.authenticate_successor(peer)?;
-        Ok(false)
+        Ok(relaunched)
     }
 
     pub fn execution(&mut self, execution: Execution) -> Result<()> {

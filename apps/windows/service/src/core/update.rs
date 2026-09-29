@@ -466,7 +466,7 @@ pub(crate) async fn request(
             if !store.pending() {
                 return status(&store);
             }
-            store.authenticate_successor(&peer)?;
+            let relaunched = store.adopt_successor(&peer)?;
             let a = store.live_attempt(now()?)?;
             ensure!(
                 a.execution == Execution::Replaced,
@@ -495,6 +495,9 @@ pub(crate) async fn request(
                     Observation::InstalledIdentityVerified { components: actual },
                 )?;
             }
+            let mut adopted = status(&store)?;
+            adopted.successor_relaunched = relaunched;
+            return Ok(adopted);
         }
         UpdateRequest::Commit => {
             if !store.pending() {

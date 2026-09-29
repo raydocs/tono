@@ -190,14 +190,10 @@ pub async fn restore_session(app: AppHandle, state: Arc<TonoState>) {
         // the restore task does not await that potentially long connection transaction.
         match update_recovery {
             Ok(Some(tono_service_protocol::update_contract::Protection::Connected)) => {
+                let adoption = super::update::recovery_adoption();
                 let allowed = {
                     let inner = state.lock().await;
-                    update_recovery_connect_allowed(
-                        &inner,
-                        generation,
-                        connect_epoch,
-                        super::update::recovery_adoption(),
-                    )
+                    update_recovery_connect_allowed(&inner, generation, connect_epoch, adoption)
                 };
                 if allowed {
                     let state = state.clone();
@@ -209,6 +205,8 @@ pub async fn restore_session(app: AppHandle, state: Arc<TonoState>) {
                             logging!(warn, Type::Service, "Update recovery remains incomplete: {error}");
                         }
                     });
+                } else if adoption != super::update::Adoption::Allowed {
+                    logging!(info, Type::Service, "Tono: update recovery Connect held; this App is not the update executor's own successor (a restart or a relaunch), or its adoption answer was uncertain. Connect finishes the update; Restore internet releases it");
                 } else {
                     logging!(info, Type::Service, "Tono: update recovery Connect skipped; a Restore internet or newer connection action during restore owns the connection");
                 }
@@ -241,9 +239,9 @@ fn update_recovery_connect_allowed(
     connect_epoch: u64,
     adoption: super::update::Adoption,
 ) -> bool {
-    // Red skeleton: the adoption answer is not consulted yet.
-    let _ = adoption;
-    inner.sign_in_generation == generation
+    // BRICK-W1: only the executor's own successor, after a certain Adopt answer.
+    adoption == super::update::Adoption::Allowed
+        && inner.sign_in_generation == generation
         && inner.connect_generation == connect_epoch
         && !inner.fsm.status().is_disconnecting
 }

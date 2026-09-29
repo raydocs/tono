@@ -349,11 +349,12 @@ fn main() -> anyhow::Result<()> {
         }
         CleanupOutcome::RestoredToAutomatic(error) => {
             eprintln!(
-                "The network barrier was removed, but the saved DNS servers could not be proven \
-                 restored, so the affected adapters were set back to automatic (DHCP) instead. \
-                 The machine is neither blocked nor pointed at Tono's resolver, so the uninstall \
-                 continues; DNS now comes from the network rather than from the exact previous \
-                 configuration: {error:#}"
+                "The network barrier and Tono's DNS rule (the NRPT catch-all) were removed, but \
+                 the saved DNS servers could not be proven restored, so the affected adapters \
+                 were set back to automatic (DHCP) where that worked. An adapter may still name \
+                 Tono's stopped resolver: if names do not resolve, open Settings > Network & \
+                 Internet > your adapter > DNS server assignment > Edit and choose Automatic \
+                 (DHCP) for IPv4 and IPv6. The uninstall continues: {error:#}"
             );
             std::process::exit(code);
         }
@@ -420,30 +421,27 @@ fn windows_cleanup() -> CleanupOutcome {
     // installs. Treat probe failure as "unknown, run the full disarm" instead of aborting.
     let recovery_state_present = windows_recovery_state_present();
     if service.is_none() && !recovery_state_present {
-        let residual_filters_present = match tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-        {
-            Ok(runtime) => {
-                match runtime.block_on(tono_service_protocol::residual_filters_present()) {
-                    Ok(present) => present,
-                    // 0x80320005 = FWP_E_PROVIDER_NOT_FOUND: no Tono provider → not residual, CLEAN.
-                    // Treating this as "unknown, force disarm" was the result-3 loop on customer PCs.
-                    Err(error) if error_means_no_tono_wfp_provider(&error) => {
-                        println!(
-                            "WFP reports no Tono provider (clean machine; {error:#}); nothing to disarm."
-                        );
-                        false
-                    }
-                    Err(error) => {
-                        eprintln!(
-                            "Could not probe residual Tono WFP filters ({error:#}); running the full \
-                         network disarm instead of blocking install/uninstall."
-                        );
-                        true
-                    }
+        let residual_filters_present = match shared::block_on_abandoning(
+            tono_service_protocol::residual_filters_present(),
+        ) {
+            Ok(probe) => match probe {
+                Ok(present) => present,
+                // 0x80320005 = FWP_E_PROVIDER_NOT_FOUND: no Tono provider → not residual, CLEAN.
+                // Treating this as "unknown, force disarm" was the result-3 loop on customer PCs.
+                Err(error) if error_means_no_tono_wfp_provider(&error) => {
+                    println!(
+                        "WFP reports no Tono provider (clean machine; {error:#}); nothing to disarm."
+                    );
+                    false
                 }
-            }
+                Err(error) => {
+                    eprintln!(
+                        "Could not probe residual Tono WFP filters ({error:#}); running the full \
+                         network disarm instead of blocking install/uninstall."
+                    );
+                    true
+                }
+            },
             Err(error) => {
                 eprintln!(
                     "Could not create the residual WFP verification runtime ({error:#}); running \
@@ -456,10 +454,13 @@ fn windows_cleanup() -> CleanupOutcome {
             println!(
                 "No service, recovery state, or residual Tono WFP filters present; nothing to clean up."
             );
-            return match remove_windows_service_binary() {
+            let outcome = match remove_windows_service_binary() {
                 Ok(()) => CleanupOutcome::Clean,
                 Err(error) => CleanupOutcome::CosmeticFailure(error),
             };
+            return with_resolver_rule_proof(outcome, || {
+                tono_service_protocol::remove_tono_resolver_rule_within(NRPT_SWEEP_BUDGET)
+            });
         }
         println!(
             "No service or recovery state remains, but orphaned Tono WFP filters exist (or could \
@@ -507,54 +508,50 @@ fn windows_cleanup() -> CleanupOutcome {
     // The helper links the same recovery library as the service binary, so cleanup does not
     // depend on an intact installed `tono-service.exe` and cannot pipe-wait on a child process.
     // The owner lock proves no standalone daemon/core still owns the WFP and DNS state.
-    let disarm = (|| -> Result<(), Error> {
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()?;
-        runtime.block_on(async {
-            // Prefer the owner lock so we do not race a live daemon. If lock acquisition fails
-            // after the SCM stop (ProgramData ACL damage, missing pid file, stuck lock), still
-            // attempt the disarm: the uninstall ladder removes WFP even when tombstone writes
-            // fail, and refusing here is exactly the result-3 install/uninstall deadlock.
-            let owner_guard = match tono_service_protocol::acquire_service_owner().await {
-                Ok(Some(guard)) => Some(guard),
-                Ok(None) => match read_service_pid_file() {
-                    Some(pid) => {
-                        println!(
-                            "Owner lock is held by live daemon {pid}; terminating it before disarm."
-                        );
-                        terminate_process_by_pid(pid)?;
-                        tono_service_protocol::acquire_service_owner()
-                            .await
-                            .ok()
-                            .flatten()
-                    }
-                    None => {
-                        eprintln!(
-                            "Owner lock is held but no pid file is available; attempting disarm \
-                             without the lock so install/uninstall can proceed."
-                        );
-                        None
-                    }
-                },
-                Err(error) => {
+    let disarm: Result<(), Error> = shared::block_on_abandoning(async {
+        // Prefer the owner lock so we do not race a live daemon. If lock acquisition fails
+        // after the SCM stop (ProgramData ACL damage, missing pid file, stuck lock), still
+        // attempt the disarm: the uninstall ladder removes WFP even when tombstone writes
+        // fail, and refusing here is exactly the result-3 install/uninstall deadlock.
+        let owner_guard = match tono_service_protocol::acquire_service_owner().await {
+            Ok(Some(guard)) => Some(guard),
+            Ok(None) => match read_service_pid_file() {
+                Some(pid) => {
+                    println!(
+                        "Owner lock is held by live daemon {pid}; terminating it before disarm."
+                    );
+                    terminate_process_by_pid(pid)?;
+                    tono_service_protocol::acquire_service_owner()
+                        .await
+                        .ok()
+                        .flatten()
+                }
+                None => {
                     eprintln!(
-                        "Could not acquire the service owner lock ({error:#}); attempting disarm \
-                         anyway so a stuck ProgramData ACL cannot brick install/uninstall."
+                        "Owner lock is held but no pid file is available; attempting disarm \
+                         without the lock so install/uninstall can proceed."
                     );
                     None
                 }
-            };
-            if owner_guard.is_none() {
+            },
+            Err(error) => {
                 eprintln!(
-                    "Proceeding with emergency disarm without an exclusive owner lock; service \
-                     was already stopped (or never registered)."
+                    "Could not acquire the service owner lock ({error:#}); attempting disarm \
+                     anyway so a stuck ProgramData ACL cannot brick install/uninstall."
                 );
+                None
             }
-            let _owner_guard = owner_guard;
-            tono_service_protocol::emergency_disarm_windows_kill_switch().await
-        })
-    })();
+        };
+        if owner_guard.is_none() {
+            eprintln!(
+                "Proceeding with emergency disarm without an exclusive owner lock; service \
+                 was already stopped (or never registered)."
+            );
+        }
+        let _owner_guard = owner_guard;
+        tono_service_protocol::emergency_disarm_windows_kill_switch().await
+    })
+    .and_then(|disarmed| disarmed);
     // The escalation ladder collapses back into two questions here: are the WFP filters gone,
     // and if the exact DNS restore failed, is the machine at least off Tono's resolver? Only
     // post-WFP continue markers answer "yes" without an exact restore. If the disarm error is
@@ -580,15 +577,11 @@ fn windows_cleanup() -> CleanupOutcome {
                     );
                     None
                 } else {
-                    let residual = tokio::runtime::Builder::new_current_thread()
-                        .enable_all()
-                        .build()
-                        .ok()
-                        .and_then(|runtime| {
-                            runtime
-                                .block_on(tono_service_protocol::residual_filters_present())
-                                .ok()
-                        });
+                    let residual = shared::block_on_abandoning(
+                        tono_service_protocol::residual_filters_present(),
+                    )
+                    .ok()
+                    .and_then(|probe| probe.ok());
                     match residual {
                         Some(false) => {
                             eprintln!(
@@ -674,7 +667,10 @@ fn windows_cleanup() -> CleanupOutcome {
     {
         cosmetic_error = Some(error);
     }
-    final_cleanup_outcome(blocking_error, cosmetic_error, dns_fallback)
+    with_resolver_rule_proof(
+        final_cleanup_outcome(blocking_error, cosmetic_error, dns_fallback),
+        || tono_service_protocol::remove_tono_resolver_rule_within(NRPT_SWEEP_BUDGET),
+    )
 }
 
 /// Resolve the cleanup result after every step has run. Precedence: a blocking error (the stop
@@ -701,15 +697,32 @@ fn final_cleanup_outcome(
     }
 }
 
-/// Red skeleton: returns the outcome unchanged, as today.
+/// How long the helper waits for the NRPT sweep before it gives up and blocks.
+#[cfg(windows)]
+const NRPT_SWEEP_BUDGET: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// The last word on every cleanup outcome (BRICK-W4): an outcome that would let the uninstall
+/// continue (exit 0, 2 or 4) stands only once Tono's NRPT catch-all is proven gone. Otherwise every
+/// lookup still goes to 198.18.0.2 with nothing left to answer it, so the outcome blocks, the
+/// uninstall stops and the product files stay. An outcome that already blocks is not swept.
+/// Deletion is unchanged: this runs after it.
 #[cfg(any(windows, test))]
-#[allow(dead_code)]
 fn with_resolver_rule_proof(
     outcome: CleanupOutcome,
     sweep: impl FnOnce() -> Result<(), Error>,
 ) -> CleanupOutcome {
-    let _ = sweep;
-    outcome
+    if matches!(outcome, CleanupOutcome::StillProtected(_)) {
+        return outcome;
+    }
+    match sweep() {
+        Ok(()) => outcome,
+        Err(error) => CleanupOutcome::StillProtected(anyhow::anyhow!(
+            "{DNS_POLICY_REMAINS_MARKER}: the network barrier is gone, but Tono's DNS rule (the \
+             NRPT catch-all that sends every lookup to 198.18.0.2) could not be removed, so the \
+             uninstall stops and keeps the product files. Run the elevated Start-Menu shortcut \
+             \"Tono — 恢复网络 (Restore Network)\" or this uninstaller again: {error:#}"
+        )),
+    }
 }
 
 /// Passed only by the uninstaller's own Uninstall section, never by an install, an update or

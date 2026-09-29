@@ -7,7 +7,7 @@ use serde::Serialize;
 use std::{
     sync::{
         Arc,
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU8, Ordering},
     },
     time::Duration,
 };
@@ -261,25 +261,51 @@ fn quiesce_connection_after_update(
     }
 }
 
-/// Whether this App process may run update recovery's automatic Connect.
+/// Whether this App process may run update recovery's automatic Connect (BRICK-W1).
+///
+/// After a restart mid-update every App is a later incarnation, and each one reconnected by
+/// itself at every logon until the update committed. Only a certain answer that this process is
+/// the executor's own successor opens the recovery Connect. A failed or uncertain Adopt, or a
+/// relaunch, holds it for the rest of the process: a retried restore may then read the
+/// incarnation the first Adopt already rebound, and must not take that as the answer. The
+/// user's own Connect still finishes the update, and Restore internet still releases it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
 pub(crate) enum Adoption {
-    Undecided,
-    Allowed,
-    Held,
+    Undecided = 0,
+    Allowed = 1,
+    Held = 2,
 }
 
 impl Adoption {
-    /// Red skeleton: every answer allows, as today.
+    /// The state after one Adopt request. `answered` is the Service's `successor_relaunched`
+    /// when the request succeeded, `None` when it failed.
     pub(crate) fn after(self, answered: Option<bool>) -> Adoption {
-        let _ = (self, answered);
-        Adoption::Allowed
+        match (self, answered) {
+            (Adoption::Undecided | Adoption::Allowed, Some(false)) => Adoption::Allowed,
+            _ => Adoption::Held,
+        }
+    }
+
+    fn from_u8(value: u8) -> Adoption {
+        match value {
+            0 => Adoption::Undecided,
+            1 => Adoption::Allowed,
+            _ => Adoption::Held,
+        }
     }
 }
 
-/// Red skeleton: every process may reconnect, as today.
+static ADOPTION: AtomicU8 = AtomicU8::new(Adoption::Undecided as u8);
+
 pub(crate) fn recovery_adoption() -> Adoption {
-    Adoption::Allowed
+    Adoption::from_u8(ADOPTION.load(Ordering::Acquire))
+}
+
+fn record_adoption(answered: Option<bool>) {
+    let _ = ADOPTION.fetch_update(Ordering::AcqRel, Ordering::Acquire, |current| {
+        Some(Adoption::from_u8(current).after(answered) as u8)
+    });
 }
 
 pub async fn adopt() -> Result<Option<Protection>> {
@@ -289,7 +315,9 @@ pub async fn adopt() -> Result<Option<Protection>> {
         return Ok(None);
     }
     INCOMPLETE.store(true, Ordering::Release);
-    let status = request(UpdateRequest::Adopt).await?;
+    let adopted = request(UpdateRequest::Adopt).await;
+    record_adoption(adopted.as_ref().ok().map(|status| status.successor_relaunched));
+    let status = adopted?;
     let Some(receipt) = status.receipt.filter(|r| r.phase != Phase::Committed) else {
         return Ok(None);
     };
