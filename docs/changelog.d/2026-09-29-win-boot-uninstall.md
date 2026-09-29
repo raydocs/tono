@@ -89,3 +89,7 @@
   exit 74 逻辑原样保留（相对 main 的差异只剩本 PR 的三处），本 PR 的 `adopt_successor` 与 `successor_relaunched` 仍在 Adopt 分支与 `status()` 里。手工解决两处：
   `docs/findings.d/BRICK-W2.md`（两个 PR 各建一份，并成一行：Service 半边 #681 已合、NSIS 半边 #680 in-PR，保留 GUI 取消限制）；
   `docs/DECISIONS.md`（同一位置两边都新增条目，两条都保留）。Windows CI 结果见 #680。
+- 续记（2026-09-29，复评）：#680 复评通过，满足停止规则，不再改代码。两项 minor 记为 open：
+  [R680-dns-child-job-window](../findings.d/R680-dns-child-job-window.md)（powershell 创建后才入退出 Job，创建与入 Job 之间退出或入 Job
+  失败时恢复脚本可比助手活得久；复评 codex:F1、opus:F1）；[R680-dns-marker-doc-stale](../findings.d/R680-dns-marker-doc-stale.md)
+  （`TONO_DNS_POLICY_REMAINS` 与卸载阻塞条件的文档注释仍是旧语义；复评 opus:F2）。
