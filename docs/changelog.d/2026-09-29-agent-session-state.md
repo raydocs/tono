@@ -9,3 +9,4 @@
 - 工程与测试：本地手测 hook 六种情况（Next 为空、`stop_hook_active`、文件缺失、缺小节、Next=DONE、SessionStart 输出），结果符合预期；无产品测试。
 - 候选/发布：仅源码，无新候选。
 - 剩余限制：hook 在 Claude Code 新会话加载 settings 后才生效；Codex/Gemini 只读 AGENTS.md 规则，没有 hook 强制。
+- 续记 2026-09-29：评审 8f06dbcf 两条 minor 已修：文件缺失且工作区无改动（只读会话、评审快照）时不拦；状态文件非 UTF-8、stdin 非对象时给出可读结果不崩溃。AGENTS.md 那一节按所有者原文保留（「template in that file」无入库模板），hook 提示指向该节的小节列表。
