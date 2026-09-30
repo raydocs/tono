@@ -1,0 +1,24 @@
+name: Connect bench
+
+# Loopback only. Compares Tono's mihomo dial shape with a direct-DNS Clash
+# profile against local protocol servers. Fails when a pinned stage exceeds
+# tooling/perf/connect-bench/baseline.json. Does not touch TUN, routes or DNS.
+
+on:
+  # Path list: CONNECT_BENCH_PATHS in tooling/scripts/ci-gate-changes.mjs
+  # (the former pull_request filter). ci-gate calls this workflow.
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  bench:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v5
+
+      - name: Connect bench
+        run: python3 tooling/perf/connect-bench/bench.py --check

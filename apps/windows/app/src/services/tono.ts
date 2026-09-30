@@ -140,6 +140,24 @@ const STABLE_ERROR_KEYS: Array<{ prefix: string; key: string }> = [
   // hostname and TLS SNI, so when both fail the failure is about reaching the server at
   // all — not the account, the code, or the app. Without this entry the raw Rust error
   // chain reached the login screen verbatim.
+  { prefix: 'TONO_AUTH_DNS', key: 'tono.login.errors.unreachable' },
+  { prefix: 'TONO_AUTH_TCP', key: 'tono.login.errors.unreachable' },
+  { prefix: 'TONO_AUTH_TLS', key: 'tono.login.errors.unreachable' },
+  { prefix: 'TONO_AUTH_QUIC', key: 'tono.login.errors.unreachable' },
+  { prefix: 'TONO_AUTH_TIMEOUT', key: 'tono.login.errors.unreachable' },
+  { prefix: 'TONO_AUTH_CAPTIVE', key: 'tono.login.errors.unreachable' },
+  { prefix: 'TONO_AUTH_LOCAL_CONFLICT', key: 'tono.login.errors.unreachable' },
+  { prefix: 'TONO_AUTH_API', key: 'tono.login.errors.serverError' },
+  { prefix: 'TONO_AUTH_FORBIDDEN', key: 'tono.login.errors.serverError' },
+  { prefix: 'TONO_AUTH_STORE', key: 'tono.login.errors.signInNotSaved' },
+  { prefix: 'TONO_CONNECT_DNS', key: 'tono.dashboard.errors.nodeUnreachable' },
+  { prefix: 'TONO_CONNECT_TCP', key: 'tono.dashboard.errors.nodeUnreachable' },
+  { prefix: 'TONO_CONNECT_TLS', key: 'tono.dashboard.errors.protectedHttpsFailed' },
+  { prefix: 'TONO_CONNECT_QUIC', key: 'tono.dashboard.errors.nodeUnreachable' },
+  { prefix: 'TONO_CONNECT_TIMEOUT', key: 'tono.dashboard.errors.nodeUnreachable' },
+  { prefix: 'TONO_CONNECT_TUN', key: 'tono.dashboard.errors.tunDataPlaneBroken' },
+  { prefix: 'TONO_CONNECT_CAPTIVE', key: 'tono.dashboard.errors.nodeUnreachable' },
+  { prefix: 'TONO_CONNECT_LOCAL_CONFLICT', key: 'tono.dashboard.errors.tunIngressBroken' },
   { prefix: 'TONO_AUTH_UNREACHABLE', key: 'tono.login.errors.unreachable' },
   { prefix: 'TONO_AUTH_RATE_LIMITED', key: 'tono.login.errors.rateLimited' },
   { prefix: 'TONO_AUTH_DEVICE_LIMIT', key: 'tono.login.errors.deviceLimit' },
@@ -156,6 +174,13 @@ const STABLE_ERROR_KEYS: Array<{ prefix: string; key: string }> = [
   {
     prefix: 'TONO_SERVICE_NOT_RUNNING',
     key: 'tono.dashboard.errors.serviceNotRunning',
+  },
+  // Restore internet could not get a ready Service (an older start helper, a
+  // declined prompt, a failed start), so no release ran and nothing about
+  // protection was read: unconfirmed, never "still on".
+  {
+    prefix: 'TONO_PROTECTION_UNCONFIRMED',
+    key: 'tono.progress.protectionUnknownBody',
   },
   // Without these two the Rust side's own Chinese sentence reached the UI
   // verbatim, prefix and all, whatever locale the user had chosen.
@@ -330,7 +355,12 @@ export const describeTonoActionError = (
   const raw = actionErrorRaw(error)
   const key = mappedTonoActionErrorKey(raw)
   if (key) {
-    return { message: t ? t(key) : raw }
+    const message = t ? t(key) : raw
+    const code = stableTonoErrorCode(raw)
+    if (code && showsSupportCode(code) && !message.includes(code)) {
+      return { message: `${message} (${code})` }
+    }
+    return { message }
   }
   if (t) {
     return {
@@ -345,6 +375,15 @@ export const formatTonoActionError = (
   error: unknown,
   t?: (key: string) => string,
 ): string => describeTonoActionError(error, t).message
+
+/** Login, verification, and connect codes belong on the short sentence. */
+const showsSupportCode = (code: string): boolean =>
+  code.startsWith('TONO_AUTH_') ||
+  code.startsWith('TONO_CONNECT_') ||
+  code === 'TONO_CLOCK_SKEW' ||
+  code === 'TONO_SIGN_IN_NOT_SAVED' ||
+  code === 'TONO_NODE_OR_CORE_UNREACHABLE' ||
+  code.startsWith('CORE_')
 
 /** First stable `TONO_*` / `CORE_*` token in a diagnostic string, for Copy details. */
 export const stableTonoErrorCode = (

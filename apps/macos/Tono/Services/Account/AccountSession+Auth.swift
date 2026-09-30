@@ -854,7 +854,10 @@ extension AccountSession {
             // the previous account is reachable by this one.
             ManagedExitCatalogOwnership.adopt(response.user.id)
             adoptEnrollment(response.enrollment)
-            try await reloadDevices()
+            // Cloud-only sign-in already has the authenticated user and this
+            // device in the verify response. Inventory is device-management
+            // data, not an admission gate; a separate read may be unavailable.
+            if AppProfile.homeExitEnabled { try await reloadDevices() }
             if response.user.suspended == true {
                 enterEntitlementBlock(detail: nil)
                 return
@@ -868,6 +871,7 @@ extension AccountSession {
                 enrollmentHostname = nil
                 enrollment = nil
                 await startCloudOnlyRuntime()
+                if !Task.isCancelled, state == .ready { refreshDevicesInBackground() }
             } else if response.enrollment == nil {
                 await resumeOrEnrollRuntime()
             } else {

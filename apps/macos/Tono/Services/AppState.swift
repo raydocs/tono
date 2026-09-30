@@ -53,6 +53,15 @@ final class AppState {
                             StageDuration(stage: oldValue, milliseconds: elapsedMs)
                         )
                     }
+                    let cumulative = connectionStartedAt.map {
+                        max(0, Int(now.timeIntervalSince($0) * 1_000))
+                    }
+                    ConnectionTelemetryBuffer.shared.record(
+                        "stage",
+                        stage: oldValue.telemetryKey,
+                        elapsedMs: cumulative,
+                        delayMs: elapsedMs
+                    )
                 }
                 connectionStageStartedAt = now
             }
@@ -83,6 +92,10 @@ final class AppState {
     /// UI interlock only. The helper's private pending receipt is authoritative.
     var nativeUpdatePending = false
     var nativeUpdateDisconnectTask: Task<Void, Never>?
+    /// Helper transport only; pending-update release ownership stays in AppState.
+    var nativeUpdateDisconnect: () async throws -> HelperManager.UpdateStatus = {
+        try await PrivilegedRuntimeCoordinator.shared.nativeUpdate("disconnect")
+    }
     var isProtectedReconnectScheduled = false
     var protectedReconnectAttempt = 0
     var protectedReconnectNextAttemptAt: Date?
@@ -137,7 +150,10 @@ final class AppState {
     /// it is still the current generation, no protection operation followed
     /// that release.
     @ObservationIgnored var confirmedReleaseGeneration: UInt64? = nil
-    var lastPhysicalFingerprint: PhysicalInterfaceFingerprint?
+    /// Default uplink captured when this session became connected. Nil until
+    /// that capture succeeds. Reconciliation compares against it and does not
+    /// replace it with an inconclusive reading.
+    var lastUplinkSnapshot: NetworkUplinkSnapshot?
     var switchingNodeId: String? = nil
     var proxyMode: ProxyMode = .rule
     var activeNode: ProxyNode? = nil
@@ -236,6 +252,12 @@ final class AppState {
     var resumeProtectionAfterWake = false
     var initialDataLoaded = false
     var autoConnectRequested = false
+    /// The Mac restarted while a session was up and was never released (a
+    /// kernel panic, a power loss). Decided in `init`, before any automatic
+    /// connect could record this boot; while set, no automatic path (launch
+    /// resume, the reconnect loop, wake recovery) connects. Lifted by the
+    /// user's connect or Retry, or by a completed release.
+    var automaticResumeHeldAfterRestart = false
     var managedCatalogRevision = -1
     var managedCatalogDigest: String?
     /// Freshness of the sibling routing document. The fleet-wide revision and
@@ -287,6 +309,10 @@ final class AppState {
     let coreRuntime = CoreRuntimeManager()
     let connectionCoordinator = ConnectionCoordinator()
     var networkProtection = NetworkProtectionOperations()
+    /// Connect admission's durable-write boundary, before any network mutation.
+    var recordConnectBootSession: () throws -> Void = {
+        try RuntimeCleanup.recordConnectBootSession()
+    }
     /// System boundary for the connect tail's native-update resume, the same
     /// pattern as `networkProtection`.
     var nativeUpdateResume = NativeUpdateResumeOperations()
@@ -343,6 +369,10 @@ final class AppState {
         RuntimeCleanup.launchProtectionConsumer = { [weak self] protection in
             self?.adoptLaunchProtection(protection)
         }
+        automaticResumeHeldAfterRestart = RuntimeCleanup.holdsAutomaticResume(
+            recordedBootSession: RuntimeCleanup.recordedConnectBootSession,
+            currentBootSession: RuntimeCleanup.currentBootSession()
+        )
         LocalTrafficAudit.shared.recordEvent(
             "app_state_initialized",
             details: [
@@ -463,10 +493,10 @@ final class AppState {
     }
 
     /// Debounced reconciliation of the committed network environment against
-    /// the session's captured baseline: primary service vs
-    /// `protectedDNSService`, root-owned DNS integrity, and the physical
-    /// fingerprint (which is how Tono's own DNS writes are excluded). Shared
-    /// by the connected branch of `handleSystemNetworkChange()` and by
+    /// the session's captured uplink: default service, interface, address and
+    /// gateway, plus root-owned DNS integrity. Tono's own DNS writes do not
+    /// change that uplink, so they are not a roam. Shared by the connected
+    /// branch of `handleSystemNetworkChange()` and by
     /// `consumePendingNetworkChange()` so a deferred observation runs exactly
     /// the comparison a live one would.
     private func scheduleNetworkEnvironmentReconciliation() {
@@ -475,24 +505,34 @@ final class AppState {
             try? await Task.sleep(for: .milliseconds(750))
             guard let self, !Task.isCancelled, self.isConnected,
                   !self.isConnecting, !self.isDisconnecting else { return }
-            let primaryService =
-                await PrivilegedRuntimeCoordinator.shared.primaryNetworkService()
+            let currentUplink = await self.protectionAudits.uplinkSnapshot()
             let dnsIntegrity = if let service = self.protectedDNSService {
                 await self.protectedDNSIntegrityConfirmingBroken(service: service)
             } else {
                 PrivilegedRuntimeCoordinator.ProtectedDNSIntegrity.broken
             }
             guard !Task.isCancelled, self.isConnected else { return }
-            // An unreachable helper is not evidence that DNS was tampered with;
-            // tearing the session down on it closes every flow for a restart
-            // that resolves itself.
-            guard dnsIntegrity != .unverifiable else {
+            let transition = NetworkUplinkSnapshot.classify(
+                from: self.lastUplinkSnapshot,
+                to: currentUplink,
+                protectedService: self.protectedDNSService
+            )
+            switch transition {
+            case .stay, .adopt:
+                if self.lastUplinkSnapshot != currentUplink {
+                    self.lastUplinkSnapshot = currentUplink
+                }
+            case .inconclusive, .moved:
+                break
+            }
+            let networkMoved = transition == .moved
+            // An unreachable helper is not evidence that DNS was tampered with.
+            // A real uplink move still reconnects; withholding that because the
+            // helper missed one read left the session on the old gateway.
+            guard dnsIntegrity != .unverifiable || networkMoved else {
                 self.connectionCoordinator.networkEnvironmentTask = nil
                 return
             }
-            let currentFingerprint = PhysicalInterfaceFingerprint.current()
-            let physicalChanged = (self.lastPhysicalFingerprint != nil && self.lastPhysicalFingerprint != currentFingerprint)
-            let networkMoved = primaryService != self.protectedDNSService || physicalChanged
             if dnsIntegrity == .intact { self.consecutiveProtectedDNSBrokenAudits = 0 }
             if !networkMoved, case .supplementalConflict(let resolvers) = dnsIntegrity {
                 self.connectionCoordinator.networkEnvironmentTask = nil
@@ -509,7 +549,6 @@ final class AppState {
                 self.connectionCoordinator.networkEnvironmentTask = nil
                 return
             }
-            self.lastPhysicalFingerprint = currentFingerprint
             self.connectionCoordinator.networkEnvironmentTask = nil
             LocalTrafficAudit.shared.recordEvent(
                 "system_network_change_requires_reconnect",
@@ -727,8 +766,10 @@ final class AppState {
                 // survives sleep: a wake reconnect would only reach the same
                 // verdict again. PF is reasserted above and the pause message
                 // stays. Pauses that lift on a network change do not stop here.
-                if self.protectedReconnectPausedForUserAction,
-                   !self.protectedReconnectPauseLiftsOnNetworkChange {
+                // Neither does a wake connect after an unexpected restart.
+                if self.protectedReconnectPausedForUserAction
+                    && !self.protectedReconnectPauseLiftsOnNetworkChange
+                    || self.automaticResumeHeldAfterRestart {
                     if !Task.isCancelled {
                         if barrierArmed { self.isProtectionBlocked = true }
                         self.connectionCoordinator.wakeRecoveryTask = nil
@@ -837,12 +878,34 @@ final class AppState {
         // A normal signed-in launch remains an explicit user choice. After a
         // crash, however, PF is already fail-closed; recover the selected route
         // automatically instead of leaving the machine offline at a dashboard.
-        autoConnectRequested = resumeProtection
+        // The restore read that intent before now: a confirmed release
+        // accepted since then (the root emergency disarm) cleared the armed
+        // intent and supersedes it.
+        let resume = resumeProtection && KillSwitchService.isArmed
+        autoConnectRequested = resume
+        if resume, automaticResumeHeldAfterRestart {
+            holdAutomaticResumeAfterUnexpectedRestart()
+        }
         attemptAutomaticConnect()
+    }
+
+    /// Launch asked to resume protection, but `automaticResumeHeldAfterRestart`
+    /// holds it. PF stays armed. When the helper has confirmed that barrier,
+    /// also set the user-action pause so the actions read Repair and
+    /// reconnect / Restore internet, and say why; an unconfirmed one keeps
+    /// the unknown state launch published.
+    private func holdAutomaticResumeAfterUnexpectedRestart() {
+        autoConnectRequested = false
+        guard isProtectionBlocked else { return }
+        protectedReconnectPausedForUserAction = true
+        protectedReconnectPauseLiftsOnNetworkChange = false
+        LocalTrafficAudit.shared.recordEvent("automatic_resume_held_after_restart")
+        errorMessage = String(localized: "This Mac restarted unexpectedly while Tono was connected, so Tono did not reconnect automatically. Kill Switch is still blocking traffic. Click Repair and reconnect to connect, or Restore internet to get back online.")
     }
 
     func attemptAutomaticConnect() {
         guard !nativeUpdatePending, !RuntimeCleanup.nativeUpdateBlocksConnect,
+              !automaticResumeHeldAfterRestart,
               autoConnectRequested, initialDataLoaded, isTonoReady,
               accountConnectRefusal(managedCatalogDigest, managedCatalogRoutingToken) == nil,
               !catalogSelectionRequiresChoice, !isConnected, !isConnecting else { return }
@@ -1535,6 +1598,7 @@ final class AppState {
     func verifyProtectedConnection(
         controller: ProbeCheck? = nil,
         controllerTask: Task<ProbeCheck, Never>? = nil,
+        advisoryProbe: (@MainActor () -> Task<ProbeCheck, Never>)? = nil,
         mixedPort: Int,
         generation: UInt64,
         rounds: Int,
@@ -1611,6 +1675,11 @@ final class AppState {
             let controllerResult: ProbeCheck
             if case .ok = tun {
                 controllerResult = controller ?? .ok
+                // The tunnel is already proved. A delay sample after that
+                // does not sit on the handshake the probe just paid for.
+                if controllerTask == nil, let advisoryProbe {
+                    _ = advisoryProbe()
+                }
             } else if includeMixed {
                 if let controller {
                     controllerResult = controller
@@ -1619,6 +1688,14 @@ final class AppState {
                         await controllerTask.value
                     } onCancel: {
                         controllerTask.cancel()
+                    }
+                    if let result = interrupted(round) { return result }
+                } else if let advisoryProbe {
+                    let task = advisoryProbe()
+                    controllerResult = await withTaskCancellationHandler {
+                        await task.value
+                    } onCancel: {
+                        task.cancel()
                     }
                     if let result = interrupted(round) { return result }
                 } else {

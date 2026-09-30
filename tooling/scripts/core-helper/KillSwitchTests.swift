@@ -748,6 +748,79 @@ extension KillSwitchManager {
             check("hook-removal-fixture-failed", false)
         }
 
+        // 11. An /etc/hosts the release cannot use never stops the release
+        //     (BRICK-M2): pins go only after the anchor is flushed and the
+        //     intent is gone, and a failure there is logged, not thrown.
+        //     Recorded effects only; nothing live is touched.
+        var releaseSteps: [String] = []
+        let released = (try? releaseSequence(
+            writePlaceholder: { releaseSteps.append("placeholder") },
+            flushAnchor: {
+                releaseSteps.append("flush")
+                return HelperCommandResult(status: 0, output: Data())
+            },
+            anchorStillActive: { releaseSteps.append("query"); return false },
+            removeIntent: { releaseSteps.append("intent") },
+            removeHostsPins: {
+                releaseSteps.append("hosts")
+                throw HelperFailure.invalid("A root-owned file is unsafe.")
+            },
+            restoreDisplacedMain: { releaseSteps.append("main") },
+            releaseEnableReference: { releaseSteps.append("reference") }
+        )) != nil
+        check(
+            "release-survives-unusable-hosts",
+            released && releaseSteps == ["placeholder", "flush", "query", "intent", "hosts", "main", "reference"]
+        )
+
+        // 12. A release puts back the main ruleset the emergency block
+        //     displaced, only by reloading /etc/pf.conf and only when that
+        //     file declares Tono's anchor (BRICK-M6, BRICK-M9). The on-disk
+        //     hook does not load the rule file. Fixture paths; the reload is
+        //     recorded, no pfctl runs.
+        let displacedRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("tono-displaced-main-\(getpid())").path
+        defer { try? FileManager.default.removeItem(atPath: displacedRoot) }
+        do {
+            try FileManager.default.createDirectory(
+                atPath: displacedRoot, withIntermediateDirectories: true,
+                attributes: [.posixPermissions: 0o700]
+            )
+            let marker = "\(displacedRoot)/pf.tono-main.conf"
+            let main = "\(displacedRoot)/pf.conf"
+            let standalone = Data(renderStandaloneMain(childPath: killSwitchPFPath).utf8)
+            let hooked = try Data(hookedMainConfiguration(unhooked).utf8)
+            var reloads: [String] = []
+            var reloadStatus: Int32 = 0
+            func restore() -> Bool {
+                restoreDisplacedMainRuleset(standalonePath: marker, mainPath: main, reload: { path in
+                    reloads.append(path)
+                    return HelperCommandResult(status: reloadStatus, output: Data())
+                })
+            }
+            try atomicWrite(path: main, data: hooked, permissions: 0o644)
+            try atomicWrite(path: marker, data: standalone, permissions: 0o600)
+            let reloaded = restore() && reloads == [killSwitchMainPFPath]
+                && !FileManager.default.fileExists(atPath: marker)
+            try atomicWrite(path: marker, data: standalone, permissions: 0o600)
+            reloadStatus = 1
+            let failedReloadKept = !restore() && reloads == [killSwitchMainPFPath, killSwitchMainPFPath]
+                && FileManager.default.fileExists(atPath: marker)
+            reloadStatus = 0
+            try atomicWrite(path: main, data: Data(unhooked.utf8), permissions: 0o644)
+            let hooklessKept = !restore() && reloads.count == 2
+                && FileManager.default.fileExists(atPath: marker)
+            unlink(marker)
+            try atomicWrite(path: main, data: hooked, permissions: 0o644)
+            let unmarkedUntouched = restore() && reloads.count == 2
+            check(
+                "displaced-main-restored-only-through-a-hooked-pf-conf",
+                reloaded && failedReloadKept && hooklessKept && unmarkedUntouched
+            )
+        } catch {
+            check("displaced-main-fixture-failed", false)
+        }
+
         if failures.isEmpty { return true }
         FileHandle.standardError.write(Data(
             "lifecycle self-test failed: \(failures.joined(separator: ", "))\n".utf8
@@ -1143,10 +1216,17 @@ extension KillSwitchManager {
                 && realRemovalStillFlushes && restoreIsWidening && unknownBaselineUntouched
                 && rollbackRestoresTheFile && completedWithholdIsDone && mismatchKeepsTheCore
             // Continuity is TUN-scoped: empty tunnelInterfaces (this `state`)
-            // must not keep Sidecar as a side channel; a live utun must.
+            // must not keep Sidecar as a side channel; a live utun must. The
+            // six interface passes keep no state: macOS creates and destroys
+            // awdl0/llw0/bridge100 on demand, and PF must hold no if-bound
+            // state entries on them.
             let continuityNeedles = [
-                "pass in quick on awdl0 all keep state (if-bound)",
-                "pass out quick on awdl0 all keep state (if-bound)",
+                "pass in quick on awdl0 all no state label \"tono-continuity\"",
+                "pass out quick on awdl0 all no state label \"tono-continuity\"",
+                "pass in quick on llw0 all no state label \"tono-continuity\"",
+                "pass out quick on llw0 all no state label \"tono-continuity\"",
+                "pass in quick on bridge100 all no state label \"tono-continuity\"",
+                "pass out quick on bridge100 all no state label \"tono-continuity\"",
                 "to 224.0.0.251 port 5353",
                 "to ff02::fb port 5353",
                 "to fe80::/10",
@@ -1161,6 +1241,41 @@ extension KillSwitchManager {
                 return block.lowerBound < lan.lowerBound
             }()
             let continuityOnWithTunnel = continuityNeedles.allSatisfy(cloudRules.contains)
+                && !cloudRules.split(separator: "\n").contains {
+                    $0.contains("label \"tono-continuity\"") && $0.contains("keep state")
+                }
+            if !continuityOnWithTunnel {
+                FileHandle.standardError.write(Data(
+                    "self-test: Continuity passes missing or keeping state with a tunnel\n".utf8
+                ))
+            }
+            // The supervisor reinstalls saved state before any TUN exists,
+            // and only while the Core is running. Boot, launch and status()
+            // do not. A saved utun that is not up must render the no-tunnel
+            // form: no Continuity, mDNS, LAN,
+            // link-local, DHCP or NDP pass and no rule for that utun. A utun
+            // that is up (a helper restart mid-session) is kept. The
+            // reinstall needs root and pfctl, so this checks the
+            // `restorableState` filter it renders through.
+            let bootRestoreRules = renderRules(
+                state: restorableState(inactiveState, interfaceExists: { _ in false }),
+                allowedUID: 501
+            )
+            let tunnelOnlyLabels = [
+                "tono-continuity", "tono-mdns", "tono-lan", "tono-linklocal",
+                "tono-dhcp", "tono-ndp", "tono-tunnel",
+            ]
+            let bootRestoreHasNoTunnelPass =
+                !tunnelOnlyLabels.contains(where: bootRestoreRules.contains)
+                && !bootRestoreRules.contains("utun199")
+                && restorableState(
+                    inactiveState, interfaceExists: { $0 == "utun199" }
+                ).tunnelInterfaces == ["utun199"]
+            if !bootRestoreHasNoTunnelPass {
+                FileHandle.standardError.write(Data(
+                    "self-test: boot restore rendered a tunnel-only pass without a tunnel\n".utf8
+                ))
+            }
             // Whole-string equality, so the class labels belong here too: this is
             // the one assertion that pins the emergency ruleset exactly, and it is
             // what caught the label change before it shipped.
@@ -1247,12 +1362,73 @@ extension KillSwitchManager {
                     + "\(deadlineElapsed) s, child gone \(overranChildGone))\n"
                 FileHandle.standardError.write(Data(failure.utf8))
             }
+            // R643-F1: an unrecorded PF enable token survives a hold whose
+            // listing gives no answer. Only a full listing proves it gone;
+            // a `DIOCGETSTARTERS` warning (exit 0) or a denied open (exit 1)
+            // must throw instead of reading as "not listed", or the hold
+            // clears the only handle to a reference that may still be held.
+            let pendingToken = PFEnableReference(token: "2222222222222222222", boot: "test-boot")
+            let listedRow = "4242     pfctl                        2222222222222222222      0 days 00:00:40\n"
+            let tokensHeader = "TOKENS:\n"
+                + "PID      Process Name                 TOKEN                    TIMESTAMP\n"
+            func heldWithStagedListing(status: Int32, output: String) throws -> Bool {
+                try unrecordedPFEnableReferenceHeld(
+                    pendingToken,
+                    deadline: 5,
+                    listReferences: { _ in .init(status: status, output: Data(output.utf8)) }
+                )
+            }
+            let listedWhenPresent = (try? heldWithStagedListing(
+                status: 0, output: tokensHeader + listedRow
+            )) == true
+            let clearedWhenAbsent = (try? heldWithStagedListing(
+                status: 0, output: "No pf starter references held\n"
+            )) == false
+            let warningThrows = (try? heldWithStagedListing(
+                status: 0, output: "pfctl: DIOCGETSTARTERS: Operation not permitted\n"
+            )) == nil
+            let deniedThrows = (try? heldWithStagedListing(
+                status: 1, output: "pfctl: /dev/pf: Permission denied\n"
+            )) == nil
+            let unansweredListingKeepsUnrecordedToken =
+                listedWhenPresent && clearedWhenAbsent && warningThrows && deniedThrows
+            if !unansweredListingKeepsUnrecordedToken {
+                let failure = "self-test: unanswered PF listing did not keep the unrecorded token\n"
+                FileHandle.standardError.write(Data(failure.utf8))
+            }
+            let sampleMain = """
+            scrub-anchor "com.apple/*"
+            anchor "com.apple/*"
+            load anchor "com.apple" from "/etc/pf.anchors/com.apple"
+
+            """
+            let diskHook = try hookedMainConfiguration(sampleMain)
+            let anchorLine = "anchor \"\(killSwitchAnchor)\"\n"
+            let loadLine = "load anchor \"\(killSwitchAnchor)\" from \"\(killSwitchPFPath)\""
+            let oldHook = diskHook.replacingOccurrences(
+                of: anchorLine,
+                with: anchorLine + loadLine + "\n"
+            )
+            let migrated = try hookedMainConfiguration(oldHook)
+            let kernel = try kernelMainConfiguration(disk: oldHook, childPath: killSwitchPFPath)
+            let bootAnchorHolds = !mainConfigurationLoadsKillSwitchRules(diskHook)
+                && !mainConfigurationLoadsKillSwitchRules(migrated)
+                && mainConfigurationLoadsKillSwitchRules(oldHook)
+                && kernel.contains(loadLine)
+                && kernel.components(separatedBy: loadLine).count == 2
+                && (try? kernelMainConfiguration(disk: diskHook, childPath: "relative")) == nil
+            let watchdogReleases = !watchdogShouldRestoreNetwork(
+                consecutiveCoreDownChecks: coreDownRestoreThreshold - 1
+            ) && watchdogShouldRestoreNetwork(
+                consecutiveCoreDownChecks: coreDownRestoreThreshold
+            )
             return ruleShapesHold
                 && bundleShapesHold
                 && bundleOffWithoutTunnel
                 && bundleWithheldForCoreSync
                 && continuityOffWithoutTunnel
                 && continuityOnWithTunnel
+                && bootRestoreHasNoTunnelPass
                 && lanDNSBlockedFirst
                 && emergencyRules == emergencyExpected
                 && cloudShapesHold
@@ -1265,6 +1441,19 @@ extension KillSwitchManager {
                 && acceptedUDPProxyTarget
                 && rejectedQuicProxyTarget
                 && commandDeadlineHolds
+                && unansweredListingKeepsUnrecordedToken
+                && bootAnchorHolds
+                && watchdogReleases
+                && failureRecoveryReleasesNetwork(strictKillSwitchEnabled: false)
+                && !failureRecoveryReleasesNetwork(strictKillSwitchEnabled: true)
+                && shouldReinstallKillSwitch(coreRunning: true)
+                && !shouldReinstallKillSwitch(coreRunning: false)
+                && !shouldReleaseLeftoverAtLaunch(coreRunning: true, stateFilePresent: true)
+                && shouldReleaseLeftoverAtLaunch(coreRunning: false, stateFilePresent: true)
+                && !shouldReleaseLeftoverAtLaunch(coreRunning: false, stateFilePresent: false)
+                && !SocketServer.shouldRestoreSavedDNSAtLaunch(coreRunning: true, snapshotPresent: true)
+                && SocketServer.shouldRestoreSavedDNSAtLaunch(coreRunning: false, snapshotPresent: true)
+                && !SocketServer.shouldRestoreSavedDNSAtLaunch(coreRunning: false, snapshotPresent: false)
         } catch {
             return false
         }

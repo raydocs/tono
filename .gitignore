@@ -24,6 +24,10 @@ LiquidClash/design/
 # review, unlike settings.local.json which is per-machine.
 .claude/*
 !.claude/skills/
+!.claude/settings.json
+!.claude/hooks/
+# Per-session agent state (AGENTS.md "Session state"); never committed.
+/SESSION_STATE.md
 .codex/
 .serena/
 .spec-workflow/
@@ -43,6 +47,8 @@ LiquidClashHelper/
 
 # Python
 __pycache__/
+tooling/perf/connect-bench/.cache/
+tooling/perf/connect-bench/last-run.json
 
 # Wrangler local cache
 .wrangler/

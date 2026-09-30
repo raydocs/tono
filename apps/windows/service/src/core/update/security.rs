@@ -340,7 +340,69 @@ pub fn no_proxy(sid: &str) -> Result<()> {
 /// Enumerate successfully before claiming absence. A failed alias lookup can
 /// also mean API/access failure or a same-named non-TUN adapter, not removal.
 pub fn tunnel_absent(name: &str) -> Result<()> {
+    ensure!(!tunnel_present(name)?, "TUN adapter is still present");
+    Ok(())
+}
+
+/// One interface row whose alias matches the tunnel name. These facts, and only for rows with
+/// that name, are what a gate refusal or note may log.
+#[derive(Debug, Default)]
+pub(crate) struct TunnelRow {
+    pub(crate) alias: String,
+    pub(crate) luid: u64,
+    pub(crate) if_index: u32,
+    pub(crate) guid: String,
+    pub(crate) oper_status: i32,
+    pub(crate) admin_status: i32,
+    pub(crate) media_connect_state: i32,
+    pub(crate) if_type: u32,
+    pub(crate) description: String,
+}
+
+impl std::fmt::Display for TunnelRow {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "alias={:?} luid={} ifIndex={} guid={} operStatus={} adminStatus={} mediaConnectState={} type={} description={:?}",
+            self.alias,
+            self.luid,
+            self.if_index,
+            self.guid,
+            self.oper_status,
+            self.admin_status,
+            self.media_connect_state,
+            self.if_type,
+            self.description
+        )
+    }
+}
+
+/// `(present, not_present)` among the rows named `name` (exact, ASCII case-insensitive). A row
+/// is present unless Windows reports it `IfOperStatusNotPresent`: a killed Core leaves its
+/// WinTUN device not present while its interface row stays registered.
+pub(crate) fn split_tunnel_rows(
+    rows: Vec<TunnelRow>,
+    name: &str,
+) -> (Vec<TunnelRow>, Vec<TunnelRow>) {
+    use windows_sys::Win32::NetworkManagement::Ndis::IfOperStatusNotPresent;
+    rows.into_iter()
+        .filter(|row| row.alias.eq_ignore_ascii_case(name))
+        .partition(|row| row.oper_status != IfOperStatusNotPresent)
+}
+
+/// Whether an interface with this alias is present (any status but NotPresent). An enumeration
+/// failure is an error, never absence.
+pub fn tunnel_present(name: &str) -> Result<bool> {
+    Ok(!tunnel_rows(name)?.0.is_empty())
+}
+
+/// Every interface named `name`, as [`split_tunnel_rows`] divides them. An enumeration failure,
+/// an oversized table or an alias that is not valid UTF-16 is an error, never absence.
+pub fn tunnel_rows(name: &str) -> Result<(Vec<TunnelRow>, Vec<TunnelRow>)> {
     use windows_sys::Win32::NetworkManagement::IpHelper::{FreeMibTable, GetIfTable2};
+    fn text(units: &[u16]) -> &[u16] {
+        &units[..units.iter().position(|c| *c == 0).unwrap_or(units.len())]
+    }
     let mut table = std::ptr::null_mut();
     let status = unsafe { GetIfTable2(&mut table) };
     ensure!(
@@ -356,18 +418,40 @@ pub fn tunnel_absent(name: &str) -> Result<()> {
     let _table = Table(table.cast());
     let count = unsafe { (*table).NumEntries } as usize;
     ensure!(count <= 4096, "adapter enumeration exceeds limit");
+    let mut rows = Vec::new();
     for row in unsafe { std::slice::from_raw_parts((*table).Table.as_ptr(), count) } {
-        let end = row
-            .Alias
-            .iter()
-            .position(|c| *c == 0)
-            .unwrap_or(row.Alias.len());
-        ensure!(
-            !String::from_utf16(&row.Alias[..end])?.eq_ignore_ascii_case(name),
-            "TUN adapter is still present"
-        );
+        let alias = String::from_utf16(text(&row.Alias))?;
+        if !alias.eq_ignore_ascii_case(name) {
+            continue;
+        }
+        let g = &row.InterfaceGuid;
+        rows.push(TunnelRow {
+            alias,
+            // SAFETY: `Value` is the plain u64 view of the union.
+            luid: unsafe { row.InterfaceLuid.Value },
+            if_index: row.InterfaceIndex,
+            guid: format!(
+                "{{{:08X}-{:04X}-{:04X}-{:02X}{:02X}-{:02X}{:02X}{:02X}{:02X}{:02X}{:02X}}}",
+                g.data1,
+                g.data2,
+                g.data3,
+                g.data4[0],
+                g.data4[1],
+                g.data4[2],
+                g.data4[3],
+                g.data4[4],
+                g.data4[5],
+                g.data4[6],
+                g.data4[7]
+            ),
+            oper_status: row.OperStatus,
+            admin_status: row.AdminStatus,
+            media_connect_state: row.MediaConnectState,
+            if_type: row.Type,
+            description: String::from_utf16_lossy(text(&row.Description)),
+        });
     }
-    Ok(())
+    Ok(split_tunnel_rows(rows, name))
 }
 
 pub fn decode_base64(value: &str) -> Result<String> {
@@ -433,6 +517,33 @@ pub fn process_matches(expected: &Image) -> Result<()> {
         "process incarnation changed"
     );
     Ok(())
+}
+
+/// The image file name Windows lists for `pid` (Toolhelp's `szExeFile`). Listing needs no
+/// handle to the process, so it answers where `OpenProcess` or the image path is refused.
+/// `None` when the snapshot fails or the pid is not listed.
+pub fn process_image_name(pid: u32) -> Option<String> {
+    use windows_sys::Win32::System::Diagnostics::ToolHelp::*;
+    let snapshot = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) };
+    if snapshot == INVALID_HANDLE_VALUE {
+        return None;
+    }
+    let snapshot = Handle(snapshot);
+    let mut entry = PROCESSENTRY32W::default();
+    entry.dwSize = std::mem::size_of_val(&entry) as u32;
+    let mut found = unsafe { Process32FirstW(snapshot.0, &mut entry) };
+    while found != 0 {
+        if entry.th32ProcessID == pid {
+            let end = entry
+                .szExeFile
+                .iter()
+                .position(|c| *c == 0)
+                .unwrap_or(entry.szExeFile.len());
+            return String::from_utf16(&entry.szExeFile[..end]).ok();
+        }
+        found = unsafe { Process32NextW(snapshot.0, &mut entry) };
+    }
+    None
 }
 
 /// Manual installers may live in Downloads; this is an incarnation binding,

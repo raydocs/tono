@@ -847,13 +847,17 @@ fn spawn_before_deadline(
     let spawn_args = args.iter().map(|arg| (*arg).to_owned()).collect::<Vec<_>>();
     let (sender, receiver) = std::sync::mpsc::sync_channel::<Result<std::process::Child>>(0);
     std::thread::spawn(move || {
-        let spawned = std::process::Command::new(&spawn_program)
-            .args(&spawn_args)
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .spawn()
-            .with_context(|| format!("failed to start {spawn_program}"));
+        // Created suspended and in the exit Job before it runs, so a caller that abandons this run
+        // and exits takes the child, and anything it started, with it. A child that cannot join
+        // is terminated unrun and this start fails; it never runs unbound.
+        let spawned = crate::core::process::spawn_bound_to_process_exit(
+            std::process::Command::new(&spawn_program)
+                .args(&spawn_args)
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped()),
+        )
+        .with_context(|| format!("failed to start {spawn_program}"));
         if let Err(std::sync::mpsc::SendError(Ok(mut child))) = sender.send(spawned) {
             let _ = child.kill();
             let _ = child.wait();
@@ -1508,6 +1512,18 @@ fn delete_capture_file() -> Result<()> {
 
 fn nrpt_rule_key() -> String {
     format!(r"{NRPT_ROOT}\{NRPT_RULE_GUID}")
+}
+
+/// Delete Tono's NRPT catch-all and read back that it is gone. Only Tono's key is touched, and
+/// an absent key counts as success.
+pub(super) fn remove_nrpt_rule() -> Result<()> {
+    let key = nrpt_rule_key();
+    delete_key(&key)?;
+    anyhow::ensure!(
+        !key_exists(&key)?,
+        "Tono's NRPT rule {key} is still present after the delete"
+    );
+    Ok(())
 }
 
 fn install_nrpt() -> Result<()> {

@@ -95,6 +95,33 @@ function windowBoundsMs(window: TelemetryWindowInput, payload: Row): { startMs: 
  *   uiState === 'connected', else 0. windows += 1 per overlapped hour.
  *   node / app_version / platform take the latest window (excluded.*).
  */
+/** Directional event bytes win. A route total with no split is stored as download so the sum matches the ledger once. */
+export function windowByteTotals(payload: Row): { up: number; down: number } {
+  const events = Array.isArray(payload.events) ? payload.events as Row[] : [];
+  let up = 0;
+  let down = 0;
+  let directional = false;
+  for (const event of events) {
+    if (Number.isSafeInteger(event.bytesUp) && Number(event.bytesUp) >= 0) {
+      up += Number(event.bytesUp);
+      directional = true;
+    }
+    if (Number.isSafeInteger(event.bytesDown) && Number(event.bytesDown) >= 0) {
+      down += Number(event.bytesDown);
+      directional = true;
+    }
+  }
+  if (directional) return { up, down };
+  const routes = payload.bytesByRoute;
+  if (!routes || typeof routes !== 'object' || Array.isArray(routes)) return { up: 0, down: 0 };
+  let total = 0;
+  for (const key of ['cloud', 'residential', 'direct']) {
+    const value = (routes as Row)[key];
+    if (Number.isSafeInteger(value) && Number(value) >= 0) total += Number(value);
+  }
+  return { up: 0, down: total };
+}
+
 function hourSlices(
   startMs: number,
   endMs: number,
@@ -124,6 +151,7 @@ export async function accrueActivityHours(
   if (!bounds) return 0;
   const slices = hourSlices(bounds.startMs, bounds.endMs);
   if (slices.length === 0) return 0;
+  const totals = windowByteTotals(payload);
   const connected = text(payload.uiState) === 'connected';
   const deviceId = text(window.device_id) ?? '';
   const node = text(payload.selectedServer);
@@ -137,12 +165,12 @@ export async function accrueActivityHours(
     `INSERT OR IGNORE INTO customer_activity_windows (window_id, claim, received_at)
      VALUES (?, ?, ?)`,
   ).bind(window.id, claim, Number(window.received_at) || 0);
-  const statements = slices.map((slice) => db.prepare(
+  const statements = slices.map((slice, index) => db.prepare(
     `INSERT INTO customer_activity_hours (
        user_id, device_id, hour_at, online_minutes, connected_minutes,
        bytes_up, bytes_down, node, app_version, platform, windows
      )
-     SELECT ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, 1
+     SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1
      WHERE EXISTS (
        SELECT 1 FROM customer_activity_windows WHERE window_id = ? AND claim = ?
      )
@@ -161,6 +189,8 @@ export async function accrueActivityHours(
     slice.hourAt,
     slice.minutes,
     connected ? slice.minutes : 0,
+    index === slices.length - 1 ? totals.up : 0,
+    index === slices.length - 1 ? totals.down : 0,
     node,
     appVersion,
     platform,

@@ -35,6 +35,163 @@ enum RuntimeCleanup {
         AppProfile.defaults.removeObject(forKey: SettingsKey.lastTunEnabled)
     }
 
+    /// The kernel's boot session. It changes on every restart, a kernel panic
+    /// included. The helper's peer check reads the same sysctl.
+    nonisolated static func currentBootSession() -> String? {
+        var buffer = [CChar](repeating: 0, count: 128)
+        var size = buffer.count
+        guard sysctlbyname("kern.bootsessionuuid", &buffer, &size, nil, 0) == 0,
+              size > 1, size <= buffer.count else { return nil }
+        return String(cString: buffer)
+    }
+
+    /// Stored when the boot session cannot be read at connect start. It never
+    /// equals a real boot session (a UUID) or a failed read (nil), so a later
+    /// launch holds instead of losing the record.
+    nonisolated static let unknownBootSession = "unknown"
+
+    /// What a connect start records for the boot session it read.
+    nonisolated static func bootSessionRecord(current: String?) -> String {
+        current ?? unknownBootSession
+    }
+
+    /// Recorded when a connect starts; cleared by a completed release
+    /// (Restore internet, Quit). A record from another boot therefore means
+    /// the Mac restarted while a session was up, without a clean stop.
+    ///
+    /// cfprefsd writes a preference to disk when it gets to it, so a panic
+    /// seconds after connect could lose a record kept only there, and the next
+    /// boot would reconnect by itself again. The file copy is synced before
+    /// the connect goes on; the preference stays for a build that reads only
+    /// it.
+    static func recordConnectBootSession(
+        in file: URL = connectBootSessionFile,
+        writer: (String, URL) throws -> Void = writeSynced
+    ) throws {
+        let record = bootSessionRecord(current: currentBootSession())
+        do {
+            // A durable pending marker outlives any failure after rename but
+            // before directory sync. Visible current-boot bytes alone cannot
+            // make a failed admission look successful on the next launch.
+            let pending = file.appendingPathExtension("pending")
+            try writer(unknownBootSession, pending)
+            try writer(record, file)
+            guard Darwin.unlink(pending.path) == 0 else {
+                throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+            }
+            // The record and its directory were already synced by writer.
+            // Marker removal is not a new admission grant: if it reappears
+            // after power loss, the next launch only holds more conservatively.
+            AppProfile.defaults.set(record, forKey: SettingsKey.connectBootSession)
+        } catch {
+            // Admission fails. Preserve the prior record or the pending marker
+            // instead of trusting the preference or a visible replacement.
+            LocalTrafficAudit.shared.recordEvent(
+                "connect_boot_session_not_synced",
+                details: ["error": error.localizedDescription]
+            )
+            throw error
+        }
+    }
+
+    static func clearConnectBootSession() {
+        AppProfile.defaults.removeObject(forKey: SettingsKey.connectBootSession)
+        try? FileManager.default.removeItem(at: connectBootSessionFile)
+        try? FileManager.default.removeItem(at: connectBootSessionFile.appendingPathExtension("pending"))
+    }
+
+    static var recordedConnectBootSession: String? {
+        recordedConnectBootSession(in: connectBootSessionFile)
+    }
+
+    /// The file copy, else the preference an earlier build kept. A file that
+    /// exists but cannot be read holds, like an unreadable boot session. So
+    /// does no record where the file cannot be written: a connect there kept
+    /// only the preference, which a panic can lose, so its absence proves
+    /// nothing.
+    static func recordedConnectBootSession(in file: URL) -> String? {
+        var metadata = stat()
+        if Darwin.lstat(file.appendingPathExtension("pending").path, &metadata) == 0
+            || errno != ENOENT {
+            return unknownBootSession
+        }
+        do {
+            let data = try Data(contentsOf: file)
+            guard let record = String(data: data, encoding: .utf8), !record.isEmpty else {
+                return unknownBootSession
+            }
+            return record
+        } catch let error as CocoaError
+            where error.code == .fileReadNoSuchFile || error.code == .fileNoSuchFile {
+            if let record = AppProfile.defaults.string(forKey: SettingsKey.connectBootSession) {
+                return record
+            }
+            let writable = FileManager.default
+                .isWritableFile(atPath: file.deletingLastPathComponent().path)
+            return writable ? nil : unknownBootSession
+        } catch {
+            return unknownBootSession
+        }
+    }
+
+    nonisolated static var connectBootSessionFile: URL {
+        ConfigStorage.shared.appSupportDirectory
+            .appendingPathComponent("connect-boot-session")
+    }
+
+    /// Replace `url` with `record` and sync the file and its directory, so the
+    /// record survives a panic or a power loss right after this returns.
+    nonisolated static func writeSynced(_ record: String, to url: URL) throws {
+        let directory = url.deletingLastPathComponent()
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let temporary = directory
+            .appendingPathComponent(".\(url.lastPathComponent).\(UUID().uuidString)")
+        let file = Darwin.open(temporary.path, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0o600)
+        guard file >= 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
+        var renamed = false
+        defer { if !renamed { Darwin.unlink(temporary.path) } }
+        do {
+            defer { Darwin.close(file) }
+            let bytes = Array(record.utf8)
+            let written = bytes.withUnsafeBytes { Darwin.write(file, $0.baseAddress, $0.count) }
+            guard written == bytes.count else {
+                throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+            }
+            try fullSync(file)
+        }
+        guard Darwin.rename(temporary.path, url.path) == 0 else {
+            throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+        }
+        renamed = true
+        let folder = Darwin.open(directory.path, O_RDONLY | O_CLOEXEC)
+        guard folder >= 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
+        defer { Darwin.close(folder) }
+        try fullSync(folder)
+    }
+
+    /// `F_FULLFSYNC` also flushes the drive's own cache; plain `fsync` where a
+    /// file system does not support it.
+    nonisolated private static func fullSync(_ descriptor: Int32) throws {
+        if fcntl(descriptor, F_FULLFSYNC) == 0 { return }
+        guard fsync(descriptor) == 0 else {
+            throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+        }
+    }
+
+    /// Launch resumes protection by reconnecting on its own. That is right
+    /// after a crash within the same boot, but not after the Mac restarted
+    /// mid-session (a kernel panic, a power loss): if the session triggered
+    /// the restart, reconnecting repeats it at every login. PF stays armed
+    /// either way; only the automatic connect waits for the user. No record
+    /// (nothing started since the last clean release) changes nothing.
+    nonisolated static func holdsAutomaticResume(
+        recordedBootSession: String?,
+        currentBootSession: String?
+    ) -> Bool {
+        guard let recordedBootSession else { return false }
+        return recordedBootSession != currentBootSession
+    }
+
     /// Recover a previous process's network mutations transactionally before
     /// account restoration performs any request. If protection had been active,
     /// PF stays armed with only Tono's bounded control-plane recovery exception

@@ -92,7 +92,7 @@ final class AppStateCoreMonitorTests: XCTestCase {
         )
         XCTAssertEqual(
             app.errorMessage,
-            String(localized: "Protected TUN stopped; Kill Switch is blocking traffic while Tono retries.")
+            String(localized: "The connection didn't complete. Support code TONO_CONNECT_TUN.")
         )
 
         // Settle the queued teardown through the replaced seams; no real
@@ -131,7 +131,16 @@ final class AppStateCoreMonitorTests: XCTestCase {
         app.networkProtection = runtime
         app.tunInterfaceExists = { _ in true }
         var audits = ProtectionAuditOperations()
+        let stableUplink = NetworkUplinkSnapshot(
+            primaryService: "Wi-Fi",
+            primaryInterface: "en0",
+            ipv4Address: "192.168.1.20",
+            ipv4Gateway: "192.168.1.1",
+            ipv6Gateway: nil
+        )
+        app.lastUplinkSnapshot = stableUplink
         audits.primaryNetworkService = { "Wi-Fi" }
+        audits.uplinkSnapshot = { stableUplink }
         audits.protectedDNSIntegrity = { _ in .unverifiable }
         audits.killSwitchHealth = { (wanted: true, live: true, repairedSinceArm: true) }
         app.protectionAudits = audits

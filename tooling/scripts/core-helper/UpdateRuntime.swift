@@ -71,11 +71,33 @@ final class UpdateRuntime {
         ], commitAllowed: { self.power.isAwake() })
     }
 
+    /// Prepare can refuse because another product's loopback proxy or DNS
+    /// cannot be proved to be Tono's (BRICK-M4). That must not keep PF up.
+    static func disconnectReleasesWhenPrepareFails(strictKillSwitchEnabled: Bool) -> Bool {
+        !strictKillSwitchEnabled
+    }
+
     func disconnect() throws {
-        let pf = firewall.status()
-        _ = try prepare(pf["wantArmed"] as? Bool == true ? .protectedOffline : .unprotected)
+        let wanted = (firewall.status()["wantArmed"] as? Bool) == true
+        do {
+            _ = try prepare(wanted ? .protectedOffline : .unprotected)
+        } catch {
+            guard Self.disconnectReleasesWhenPrepareFails(strictKillSwitchEnabled: false) else {
+                throw error
+            }
+            let detail = (error as? HelperFailure)?.message ?? String(describing: error)
+            FileHandle.standardError.write(Data(
+                "tono: update disconnect continued after prepare failed: \(detail)\n".utf8
+            ))
+            try? core.stop()
+            try? dns.restore(deferringLossNotice: true)
+        }
         _ = try power.whileAwake { try firewall.disarm() }
-        guard try observe() == .unprotected else { throw HelperFailure.invalid("Update Disconnect was not observed.") }
+        if (try? observe()) != .unprotected {
+            FileHandle.standardError.write(Data(
+                "tono: update disconnect released PF; observe is not unprotected\n".utf8
+            ))
+        }
     }
 
     func verifyRecovery(requiresTUN: Bool) throws -> UpdateContractV1.Protection {
@@ -112,32 +134,79 @@ final class UpdateRuntime {
 
     /// Read persisted AND active settings for every network service. No
     /// loopback HTTP/HTTPS/SOCKS proxy may remain pointed at the stopped Core.
+    /// Only a proxy that can be Tono's refuses (BRICK-M4): another product's
+    /// loopback proxy, or a VPN service with no Proxies entity at all, blocked
+    /// every native update. Tono sets a system proxy only as `127.0.0.1` on the
+    /// Core's mixed port; while that port cannot be read, any loopback proxy
+    /// still refuses.
     func verifyProxyRestored() throws {
         guard let prefs = SCPreferencesCreate(nil, "Tono update proxy readback" as CFString, nil),
               let services = SCNetworkServiceCopyAll(prefs) as? [SCNetworkService],
               let store = SCDynamicStoreCreate(nil, "Tono update proxy readback" as CFString, nil, nil) else {
             throw HelperFailure.invalid("Cannot read system proxy state for update.")
         }
+        var loopbackPorts: [Int?] = []
         for service in services {
-            guard let serviceID = SCNetworkServiceGetServiceID(service),
-                  let proto = SCNetworkServiceCopyProtocol(service, kSCNetworkProtocolTypeProxies),
-                  let config = SCNetworkProtocolGetConfiguration(proto) as? [String: Any] else {
+            guard let serviceID = SCNetworkServiceGetServiceID(service) else {
                 throw HelperFailure.invalid("Cannot read a network service proxy configuration.")
             }
-            try Self.noCoreProxy(config)
+            // No Proxies protocol, or one with no configuration, is no persisted
+            // proxy; the live key is still read.
+            if let proto = SCNetworkServiceCopyProtocol(service, kSCNetworkProtocolTypeProxies),
+               let config = SCNetworkProtocolGetConfiguration(proto) as? [String: Any] {
+                loopbackPorts += Self.loopbackProxyPorts(config)
+            }
             let key = "State:/Network/Service/\(serviceID as String)/Proxies"
-            if let live = SCDynamicStoreCopyValue(store, key as CFString) as? [String: Any] { try Self.noCoreProxy(live) }
+            if let live = SCDynamicStoreCopyValue(store, key as CFString) as? [String: Any] {
+                loopbackPorts += Self.loopbackProxyPorts(live)
+            }
+        }
+        guard !loopbackPorts.isEmpty else { return }
+        if Self.mayBeTonoProxy(loopbackPorts: loopbackPorts, corePorts: Self.coreProxyPorts()) {
+            throw HelperFailure.invalid("A loopback system proxy remains active; restore it before updating.")
         }
     }
 
-    private static func noCoreProxy(_ config: [String: Any]) throws {
+    /// The listen ports of the Core's mixed inbounds in the runtime config the
+    /// helper copied, or nil when they cannot be known: the file is missing
+    /// (after a reboot), unreadable or unparseable, or a mixed inbound has no
+    /// integer port.
+    static func coreProxyPorts(runtimeConfig: String = runtimeConfigPath) -> Set<Int>? {
+        guard let bytes = try? UpdateStorage.read(runtimeConfig, maximum: 8 * 1024 * 1024),
+              let parsed = try? JSONSerialization.jsonObject(with: bytes),
+              let object = goFoldedJSONKeys(parsed) as? [String: Any],
+              let inbounds = object["inbounds"] as? [[String: Any]] else { return nil }
+        var ports = Set<Int>()
+        for inbound in inbounds where inbound["type"] as? String == "mixed" {
+            guard let port = inbound["listen_port"] as? Int else { return nil }
+            ports.insert(port)
+        }
+        return ports
+    }
+
+    /// Whether any enabled loopback proxy entry may point at Tono's Core. Any
+    /// doubt counts: unknown Core ports, or an entry without a port.
+    static func mayBeTonoProxy(loopbackPorts: [Int?], corePorts: Set<Int>?) -> Bool {
+        guard !loopbackPorts.isEmpty else { return false }
+        guard let corePorts else { return true }
+        return loopbackPorts.contains { port in
+            guard let port else { return true }
+            return corePorts.contains(port)
+        }
+    }
+
+    /// The `<Name>Port` of every enabled loopback HTTP/HTTPS/SOCKS entry; nil
+    /// when the port is missing or not an integer.
+    private static func loopbackProxyPorts(_ config: [String: Any]) -> [Int?] {
+        var ports: [Int?] = []
         for name in ["HTTP", "HTTPS", "SOCKS"] {
             if (config[name + "Enable"] as? NSNumber)?.boolValue == true,
                let host = config[name + "Proxy"] as? String,
                ["127.0.0.1", "localhost", "::1"].contains(host.lowercased()) {
-                throw HelperFailure.invalid("A loopback system proxy remains active; restore it before updating.")
+                ports.append(config[name + "Port"] as? Int)
             }
         }
+        return ports
     }
 }
 

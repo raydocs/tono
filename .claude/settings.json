@@ -1,0 +1,24 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "if [ -f \"$CLAUDE_PROJECT_DIR/SESSION_STATE.md\" ]; then printf 'Current SESSION_STATE.md:\\n\\n'; cat \"$CLAUDE_PROJECT_DIR/SESSION_STATE.md\"; else echo 'SESSION_STATE.md missing. Create it before editing source.'; fi"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/check_session_state.py\""
+          }
+        ]
+      }
+    ]
+  }
+}

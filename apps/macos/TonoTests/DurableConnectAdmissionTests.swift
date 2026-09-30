@@ -1,0 +1,140 @@
+import XCTest
+@testable import Tono
+
+@MainActor
+final class DurableConnectAdmissionTests: XCTestCase {
+    func testBootRecordWriteFailureIsReturnedToConnectAdmission() throws {
+        let preference = AppProfile.defaults.object(forKey: SettingsKey.connectBootSession)
+        defer { AppProfile.defaults.set(preference, forKey: SettingsKey.connectBootSession) }
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("tono-boot-write-failure-" + UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let file = directory.appendingPathComponent("connect-boot-session")
+        var writes = 0
+
+        XCTAssertThrowsError(try RuntimeCleanup.recordConnectBootSession(in: file, writer: { _, path in
+            writes += 1
+            if path == file { throw POSIXError(.ENOSPC) }
+            try RuntimeCleanup.writeSynced(RuntimeCleanup.unknownBootSession, to: path)
+        })) { error in
+            XCTAssertEqual((error as? POSIXError)?.code, .ENOSPC)
+        }
+
+        XCTAssertEqual(writes, 2)
+        AppProfile.defaults.removeObject(forKey: SettingsKey.connectBootSession)
+        XCTAssertEqual(RuntimeCleanup.recordedConnectBootSession(in: file), RuntimeCleanup.unknownBootSession,
+                       "failed admission retains a durable hold, not a successful boot record")
+    }
+
+    func testConnectRefusesUnsyncedBootRecordWithoutRetiringHeldProtection() {
+        let armed = KillSwitchService.isArmed
+        let blocksConnect = RuntimeCleanup.nativeUpdateBlocksConnect
+        defer {
+            KillSwitchService.isArmed = armed
+            RuntimeCleanup.nativeUpdateBlocksConnect = blocksConnect
+        }
+        RuntimeCleanup.nativeUpdateBlocksConnect = false
+        KillSwitchService.isArmed = true
+        let app = AppState()
+        defer { app.connectionCoordinator.cancelConnectionTasks() }
+        app.proxyRegions = [ProxyRegion(id: AppState.managedCatalogRegionID,
+            name: "TONO CLOUD", nodes: [Fixture.realityNode()])]
+        app.isProtectionBlocked = true
+        app.automaticResumeHeldAfterRestart = true
+        let generation = app.connectionCoordinator.protectionOperationGeneration
+        var records = 0
+        app.recordConnectBootSession = {
+            records += 1
+            throw POSIXError(.ENOSPC)
+        }
+
+        app.connect()
+
+        XCTAssertEqual(records, 1)
+        XCTAssertFalse(app.isConnecting)
+        XCTAssertFalse(app.isConnected)
+        XCTAssertNil(app.connectionCoordinator.connectTask)
+        XCTAssertNil(app.connectionCoordinator.connectWatchdogTask)
+        XCTAssertEqual(app.connectionCoordinator.protectionOperationGeneration, generation)
+        XCTAssertTrue(app.isProtectionBlocked)
+        XCTAssertTrue(KillSwitchService.isArmed)
+        XCTAssertTrue(app.automaticResumeHeldAfterRestart)
+        XCTAssertNotNil(app.errorMessage)
+    }
+
+    func testSuccessfulDurableRecordAllowsExplicitRetryToLiftRestartHold() {
+        let blocksConnect = RuntimeCleanup.nativeUpdateBlocksConnect
+        let selection = AppProfile.defaults.object(forKey: SettingsKey.selectedProxyTargetName)
+        defer {
+            RuntimeCleanup.nativeUpdateBlocksConnect = blocksConnect
+            AppProfile.defaults.set(selection, forKey: SettingsKey.selectedProxyTargetName)
+        }
+        RuntimeCleanup.nativeUpdateBlocksConnect = false
+        let app = AppState()
+        defer { app.connectionCoordinator.cancelConnectionTasks() }
+        app.proxyRegions = [ProxyRegion(id: AppState.managedCatalogRegionID,
+            name: "TONO CLOUD", nodes: [Fixture.realityNode()])]
+        app.automaticResumeHeldAfterRestart = true
+        var records = 0
+        app.recordConnectBootSession = { records += 1 }
+
+        app.connect()
+
+        XCTAssertEqual(records, 1)
+        XCTAssertTrue(app.isConnecting)
+        XCTAssertNotNil(app.connectionCoordinator.connectTask)
+        XCTAssertFalse(app.automaticResumeHeldAfterRestart)
+    }
+
+    func testFailedAdmissionWritePreservesPreviousDurableRecoveryRecord() throws {
+        let preference = AppProfile.defaults.object(forKey: SettingsKey.connectBootSession)
+        defer { AppProfile.defaults.set(preference, forKey: SettingsKey.connectBootSession) }
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("tono-boot-previous-" + UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let file = directory.appendingPathComponent("connect-boot-session")
+        try RuntimeCleanup.writeSynced("previous-boot", to: file)
+        AppProfile.defaults.set("previous-boot", forKey: SettingsKey.connectBootSession)
+
+        XCTAssertThrowsError(try RuntimeCleanup.recordConnectBootSession(in: file, writer: { _, _ in
+            throw POSIXError(.EIO)
+        }))
+
+        XCTAssertEqual(try String(contentsOf: file, encoding: .utf8), "previous-boot")
+        XCTAssertEqual(AppProfile.defaults.string(forKey: SettingsKey.connectBootSession), "previous-boot")
+        AppProfile.defaults.removeObject(forKey: SettingsKey.connectBootSession)
+        XCTAssertTrue(RuntimeCleanup.holdsAutomaticResume(
+            recordedBootSession: RuntimeCleanup.recordedConnectBootSession(in: file),
+            currentBootSession: RuntimeCleanup.currentBootSession()))
+    }
+
+    func testFailureAfterRecordPublicationHoldsRelaunchEvenWhenPreferencesAreLost() throws {
+        let preference = AppProfile.defaults.object(forKey: SettingsKey.connectBootSession)
+        defer { AppProfile.defaults.set(preference, forKey: SettingsKey.connectBootSession) }
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("tono-boot-published-failure-" + UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let file = directory.appendingPathComponent("connect-boot-session")
+        try RuntimeCleanup.writeSynced("previous-boot", to: file)
+        var published = false
+
+        XCTAssertThrowsError(try RuntimeCleanup.recordConnectBootSession(in: file, writer: { record, path in
+            try RuntimeCleanup.writeSynced(record, to: path)
+            if path == file {
+                published = true
+                // A replacement became visible before its directory sync failed.
+                throw POSIXError(.EIO)
+            }
+        }))
+        XCTAssertTrue(published)
+        AppProfile.defaults.removeObject(forKey: SettingsKey.connectBootSession)
+
+        XCTAssertTrue(RuntimeCleanup.holdsAutomaticResume(
+            recordedBootSession: RuntimeCleanup.recordedConnectBootSession(in: file),
+            currentBootSession: RuntimeCleanup.currentBootSession()),
+            "visible current-boot bytes do not prove the failed admission synced")
+    }
+}

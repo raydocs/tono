@@ -64,6 +64,15 @@ extension AppState {
                     }
                     return (false, UUID())
                 }
+                do {
+                    // A session must not reach PF/Core while its restart-loop
+                    // guard exists only in asynchronously flushed preferences.
+                    try self.recordConnectBootSession()
+                } catch {
+                    self.automaticResumeHeldAfterRestart = true
+                    self.errorMessage = String(localized: "Tono could not save its restart safety record, so the connection was not started. Check available disk space and retry. \(error.localizedDescription)")
+                    return (false, UUID())
+                }
                 self.isProtectionBlocked = false
                 self.connectionStage = .preparing
                 self.completedConnectionStages = []
@@ -82,6 +91,12 @@ extension AppState {
                 // Any fresh connect attempt is user-visible intent to try again; the
                 // reconnect loop re-pauses if the same user-action failure repeats.
                 self.protectedReconnectPausedForUserAction = false
+                // This boot now has a session: a launch in a later boot that
+                // finds this record restarted without a clean release, and
+                // does not reconnect by itself. Every automatic caller refuses
+                // while that hold is set, so a connect admitted here is the
+                // user's, and it lifts the hold.
+                self.automaticResumeHeldAfterRestart = false
 
                 // Session-dynamic mixed/controller ports avoid collisions with leftover
                 // 7890/9090 listeners from other proxies or a previous core.
@@ -440,15 +455,16 @@ extension AppState {
                 // the core and PF live; only an exhausted real data plane can
                 // refuse Connected.
                 self.connectionStage = .checkingExit
-                let controllerTask = Task {
-                    await self.advisoryControllerExitProbe(
-                        api: api,
-                        selectedExit: selectedExit
-                    )
-                }
                 self.connectionStage = .verifyingTraffic
                 let verdict = await self.verifyProtectedConnection(
-                    controllerTask: controllerTask,
+                    advisoryProbe: {
+                        Task {
+                            await self.advisoryControllerExitProbe(
+                                api: api,
+                                selectedExit: selectedExit
+                            )
+                        }
+                    },
                     mixedPort: self.config.mixedPort,
                     generation: self.connectionCoordinator.protectionOperationGeneration,
                     rounds: ProtectedConnectivity.postLockVerifyRounds
@@ -504,6 +520,15 @@ extension AppState {
                             )
                         )
                     }
+                    let cumulative = self.connectionStartedAt.map {
+                        max(0, Int(Date().timeIntervalSince($0) * 1_000))
+                    }
+                    ConnectionTelemetryBuffer.shared.record(
+                        "stage",
+                        stage: self.connectionStage.telemetryKey,
+                        elapsedMs: cumulative,
+                        delayMs: elapsedMs
+                    )
                 }
                 self.completedConnectionStages.insert(self.connectionStage)
                 self.isConnecting = false
@@ -690,9 +715,10 @@ extension AppState {
         lastConnectionFailure = nil
     }
 
-    /// Stops Mihomo/TUN. Kill switch is NOT disarmed here — that only happens on
-    /// intentional logout / user "turn off protection" so a crash or health failure
-    /// leaves the host fail-closed via Kill Switch.
+    /// Stops Mihomo/TUN. The default leaves the kill switch armed. An exhausted
+    /// failure passes `releaseKillSwitch: true` unless the user explicitly
+    /// enabled a strict kill switch, so the original network comes back.
+    /// A crash mid-attempt still does not disarm by itself.
     ///
     /// `afterUnarmedConnectFailure` marks the automatic cleanup of a connect
     /// attempt that failed before its first arm. It is a release, but not the
@@ -812,7 +838,7 @@ extension AppState {
 
                 // Reset state
                 self.isConnected = false
-                self.lastPhysicalFingerprint = nil
+                self.lastUplinkSnapshot = nil
                 self.isProxyDegraded = false
                 // In-place recovery belongs to the session being torn down.
                 // Left set, it outranked Protected Offline and Not Connected on
@@ -1011,6 +1037,8 @@ extension AppState {
                     if releaseKillSwitch, !transitionLeavesProtectionBlocked {
                         self.protectedDNSService = nil
                         self.recoveryCause = nil
+                        RuntimeCleanup.clearConnectBootSession()
+                        self.automaticResumeHeldAfterRestart = false
                     }
                     if let transitionError {
                         self.errorMessage = transitionError
@@ -1077,7 +1105,8 @@ extension AppState {
         // resurrect the UI as connected while that teardown is queued.
         guard isConnecting, !Task.isCancelled else { return false }
         isConnected = true
-        lastPhysicalFingerprint = PhysicalInterfaceFingerprint.current()
+        let capturedUplink = NetworkUplinkSnapshot.current()
+        lastUplinkSnapshot = capturedUplink.isConcrete ? capturedUplink : nil
         isProtectionBlocked = false
         isRecoveringProtectedConnection = false
         isProxyDegraded = proxyFailed
@@ -1406,14 +1435,18 @@ extension AppState {
                 // process a fraction of a second from recreating the
                 // interface, so one missing sighting without a task in flight
                 // is not a verdict either. Require the absence to persist
-                // across consecutive ticks; a real TUN death fails closed on
+                // across consecutive ticks; a real TUN death disconnects on
                 // the next one.
                 guard state.consecutiveMissingTUNTicks >= Self.tunMissingVerdictTicks else {
                     return .continueMonitoring
                 }
-                self.disconnect(releaseKillSwitch: false)
+                // Exhausted tunnel loss. Fail open unless a strict kill switch
+                // was explicitly enabled. This call does not install a new filter.
+                // No user preference on this path is treated as not strict.
+                let disposition = ExhaustedFailureNetwork.afterFailure(strictKillSwitchExplicit: false)
+                self.disconnect(releaseKillSwitch: disposition.releasesSystemNetwork)
                 self.errorMessage = String(
-                    localized: "Protected TUN stopped; Kill Switch is blocking traffic while Tono retries."
+                    localized: "The connection didn't complete. Support code TONO_CONNECT_TUN."
                 )
                 self.scheduleProtectedReconnect()
                 return .stopMonitoring
@@ -1433,12 +1466,16 @@ extension AppState {
                 // Cancelling self.connectionCoordinator.coreMonitorTask cannot help: a task
                 // suspended on an actor call still resumes.
                 let observedGeneration = self.connectionCoordinator.protectionOperationGeneration
-                let primaryService =
-                    await self.protectionAudits.primaryNetworkService()
+                let uplink = await self.protectionAudits.uplinkSnapshot()
                 guard !Task.isCancelled, self.isConnected,
                   self.connectionCoordinator.protectionOperationGeneration == observedGeneration
                 else { return .stopMonitoring }
-                guard primaryService == service else {
+                switch NetworkUplinkSnapshot.classify(
+                    from: self.lastUplinkSnapshot,
+                    to: uplink,
+                    protectedService: service
+                ) {
+                case .moved:
                     self.recoveryCause = .networkChange
                     self.disconnect(releaseKillSwitch: false)
                     self.errorMessage = String(
@@ -1446,6 +1483,12 @@ extension AppState {
                     )
                     self.scheduleProtectedReconnect()
                     return .stopMonitoring
+                case .stay, .adopt:
+                    if self.lastUplinkSnapshot != uplink {
+                        self.lastUplinkSnapshot = uplink
+                    }
+                case .inconclusive:
+                    break
                 }
                 let dnsIntegrity =
                     await self.protectedDNSIntegrityConfirmingBroken(service: service)
@@ -2154,6 +2197,9 @@ extension AppState {
             onAttemptScheduled: { [weak self] attempt, delay in
                 guard let self else { return false }
                 if self.protectedReconnectPausedForUserAction { return false }
+                // After an unexpected restart only the user reconnects;
+                // Retry now lifts this hold before it schedules the loop.
+                if self.automaticResumeHeldAfterRestart { return false }
                 self.isProtectedReconnectScheduled = true
                 self.protectedReconnectAttempt = attempt + 1
                 self.protectedReconnectNextAttemptAt = delay > 0
@@ -2198,7 +2244,8 @@ extension AppState {
                     return true
                 }
                 guard !Task.isCancelled,
-                      !self.protectedReconnectPausedForUserAction else { return true }
+                      !self.protectedReconnectPausedForUserAction,
+                      !self.automaticResumeHeldAfterRestart else { return true }
                 if self.catalogSelectionRequiresChoice {
                     return true
                 }
@@ -2307,6 +2354,8 @@ extension AppState {
         guard isProtectionBlocked, !isConnected, !isConnecting else { return }
         protectedReconnectPausedForUserAction = false
         protectedReconnectPauseLiftsOnNetworkChange = false
+        // An explicit retry is the user's connect after an unexpected restart.
+        automaticResumeHeldAfterRestart = false
         // Explicit user intent earns a fresh cycle of three attempts, not a
         // single shot against a counter already sitting at the threshold.
         lastProtectedFailureSignature = nil

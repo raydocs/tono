@@ -930,6 +930,34 @@ pub fn diff(current_keys: &[Guid], desired: &[FilterSpec]) -> ChangePlan {
     ChangePlan { install, remove }
 }
 
+/// `IfOperStatusNotPresent` (ifdef.h).
+#[cfg_attr(any(not(windows), feature = "test"), allow(dead_code))]
+pub const IF_OPER_STATUS_NOT_PRESENT: i32 = 6;
+
+/// `ERROR_FILE_NOT_FOUND` (winerror.h), returned by `GetIfEntry2` for an unknown LUID.
+#[cfg_attr(any(not(windows), feature = "test"), allow(dead_code))]
+pub const ERROR_FILE_NOT_FOUND: u32 = 2;
+
+/// Whether the interface row the tunnel alias resolved to is not ready yet, rather than wrong.
+/// Only two cases qualify: the row read failed with `ERROR_FILE_NOT_FOUND` after the alias had
+/// resolved (the leftover was swept away in between), or the row reads as not present. Both
+/// carry "did not resolve to a LUID", which the App retries. Every other status is `None`, so
+/// the caller's permanent refusal still applies; `oper_status` is ignored when the read failed.
+#[cfg_attr(any(not(windows), feature = "test"), allow(dead_code))]
+pub fn tunnel_row_not_ready(luid: u64, lookup_status: u32, oper_status: i32) -> Option<String> {
+    if lookup_status == ERROR_FILE_NOT_FOUND {
+        Some(format!(
+            "interface LUID {luid} was not found after the tunnel alias resolved to it, so the tunnel alias did not resolve to a LUID of a present adapter; refusing to lock"
+        ))
+    } else if lookup_status == 0 && oper_status == IF_OPER_STATUS_NOT_PRESENT {
+        Some(format!(
+            "interface LUID {luid} is reported as not present, so the tunnel alias did not resolve to a LUID of a present adapter; refusing to lock"
+        ))
+    } else {
+        None
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2390,5 +2418,30 @@ mod tests {
             direct_keys.iter().all(|key| plan.remove.contains(key)),
             "a mode change must never leave a stale DIRECT permit installed"
         );
+    }
+
+    /// WIN-GATE-GHOST-TUN: a killed Core leaves its `Tono` interface registered but not present.
+    /// While the new Core's adapter takes over the name, the alias can still resolve to that
+    /// leftover, and the leftover can be swept away between the alias lookup and the row read.
+    /// Neither may key the tunnel permit or end the lock: both are "not resolved yet", which the
+    /// App already retries, until the alias names the new, present adapter. Any other row-read
+    /// failure stays a permanent refusal.
+    #[test]
+    fn a_gone_or_not_present_tunnel_row_waits_for_the_new_adapter() {
+        let not_present = tunnel_row_not_ready(1111, 0, IF_OPER_STATUS_NOT_PRESENT)
+            .expect("a not-present leftover row keyed the tunnel permit");
+        assert!(
+            not_present.contains("did not resolve to a LUID") && not_present.contains("1111"),
+            "{not_present}"
+        );
+        let gone = tunnel_row_not_ready(1111, ERROR_FILE_NOT_FOUND, 0)
+            .expect("a row that vanished after the alias lookup refused the lock for good");
+        assert!(gone.contains("did not resolve to a LUID"), "{gone}");
+        // Down and Up are present adapters: the existing description and type checks decide.
+        assert_eq!(tunnel_row_not_ready(2222, 0, 2), None);
+        assert_eq!(tunnel_row_not_ready(2222, 0, 1), None);
+        // Access denied and invalid parameter have no known transient cause.
+        assert_eq!(tunnel_row_not_ready(3333, 5, 0), None);
+        assert_eq!(tunnel_row_not_ready(3333, 87, 0), None);
     }
 }
