@@ -26,7 +26,7 @@ import { FleetLoad } from './nodes/FleetLoad';
 import { FleetTable } from './nodes/FleetTable';
 
 /**
- * 节点: is the fleet healthy, busy, and worth what it costs.
+ * The nodes page: is the fleet healthy, busy, and worth what it costs.
  *
  * Headline numbers first, then the fleet's load over time, then every machine
  * as a row. Each block reads its own source and fails on its own — a

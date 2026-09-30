@@ -9,9 +9,10 @@ export type SegmentedOption<T extends string> = {
 
 /**
  * One choice out of a few, as pressed buttons in a labelled group: a range
- * (24 小时 / 7 天) or a filter over a list. Buttons rather than a radio group
+ * (a day or a week) or a filter over a list. Buttons rather than a radio group
  * because every option is one click that changes the page, and the count
- * beside a filter is part of its name so a screen reader hears "有问题 7".
+ * beside a filter is part of its name, so a screen reader hears the label
+ * and the number together.
  */
 export function Segmented<T extends string>({
   label,
