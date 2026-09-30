@@ -1707,9 +1707,9 @@ pub(crate) async fn lock(tunnel_interface: Option<&str>) -> Result<()> {
 /// Perform the tunnel lock while [`WFP_OPERATION`] is held. Once an install succeeds, publish its
 /// candidate immediately so every later error can reconcile the set that may actually be live.
 async fn lock_unlocked(tunnel_interface: Option<&str>) -> Result<()> {
-    let mut armed = ARMED
-        .lock()
-        .unwrap()
+    // Same poison contract as every other mutation: a prior panic while `ARMED` was held must
+    // not make the next tunnel lock panic the IPC task. `mark_verified` is the sibling path.
+    let mut armed = armed_guard()
         .clone()
         .context("kill switch is not armed")?;
     let recorded = armed.intent.tunnel_interface.clone();
@@ -4851,6 +4851,53 @@ mod tests {
         let armed = ARMED.lock().unwrap().clone().expect("still armed");
         assert_eq!(armed.intent.mode, KillSwitchStatusMode::Locked);
         assert_eq!(armed.tun_luid, Some(0));
+        cleanup().await;
+        Ok(())
+    }
+
+    /// A panic while `ARMED` is held poisons the mutex. The next tunnel lock must recover the
+    /// guard and still install the permit; `ARMED.lock().unwrap()` would panic the IPC task
+    /// and leave the session unable to lock until the Service process restarts.
+    #[tokio::test]
+    #[serial]
+    async fn lock_recovers_a_poisoned_armed_lock() -> Result<()> {
+        cleanup().await;
+        arm_bootstrap(&test_config(), "/opt/tono/mihomo", "owner-alice").await?;
+        crate::core::manager::set_running_core_identity_for_kill_switch_tests(Some((4242, 1)))
+            .await;
+
+        struct ClearPoison;
+        impl Drop for ClearPoison {
+            fn drop(&mut self) {
+                ARMED.clear_poison();
+            }
+        }
+        let poison = ClearPoison;
+        assert!(
+            std::thread::spawn(|| {
+                let _armed = ARMED.lock().unwrap();
+                panic!("simulate a panic while holding ARMED");
+            })
+            .join()
+            .is_err()
+        );
+        assert!(ARMED.is_poisoned());
+
+        lock(Some("Tono")).await?;
+
+        let armed = armed_guard()
+            .clone()
+            .expect("lock must proceed on a poisoned ARMED mutex");
+        assert_eq!(armed.intent.mode, KillSwitchStatusMode::Locked);
+        assert_eq!(armed.tun_luid, Some(0));
+        assert_eq!(
+            armed.core_instance,
+            Some(CoreInstance {
+                pid: 4242,
+                generation: 1,
+            })
+        );
+        drop(poison);
         cleanup().await;
         Ok(())
     }
