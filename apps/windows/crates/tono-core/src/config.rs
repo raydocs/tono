@@ -1068,7 +1068,7 @@ fn runtime_value(
         .map(|rule| rule.to_string())
         .collect();
     if home.is_some() || home_socks5.is_some() {
-        // TCP-scoped on purpose: these pins sit ahead of the UDP REJECT row,
+        // TCP-scoped on purpose: these pins sit ahead of the UDP REJECT rows,
         // and a network-agnostic Claude pin would swallow UDP into a group
         // that cannot carry it (Vision) — Mihomo's fallback for that is a
         // ruleless DIRECT dial, leaking Claude's UDP to the physical egress.
@@ -1098,6 +1098,28 @@ fn runtime_value(
         for regex in home_process_path_regexes() {
             rules.push(format!(
                 "AND,((NETWORK,TCP),(PROCESS-PATH-REGEX,{regex})),{CLAUDE_HOME_GROUP_NAME}"
+            ));
+        }
+        // An HY2 exit can carry UDP, so reject the same assistant matchers
+        // before MATCH to keep retries on the residential TCP hop.
+        for domain in CLAUDE_HOME_DOMAINS {
+            rules.push(format!(
+                "AND,((NETWORK,UDP),(DOMAIN-SUFFIX,{domain})),REJECT"
+            ));
+        }
+        for cidr in CLAUDE_HOME_IPV4_CIDRS {
+            rules.push(format!(
+                "AND,((NETWORK,UDP),(IP-CIDR,{cidr},no-resolve)),REJECT"
+            ));
+        }
+        for process in HOME_PROCESS_NAMES {
+            rules.push(format!(
+                "AND,((NETWORK,UDP),(PROCESS-NAME,{process})),REJECT"
+            ));
+        }
+        for regex in home_process_path_regexes() {
+            rules.push(format!(
+                "AND,((NETWORK,UDP),(PROCESS-PATH-REGEX,{regex})),REJECT"
             ));
         }
     } else if let Some(plan) = direct {
@@ -1712,6 +1734,14 @@ reality-opts:
             ));
         }
         rules.extend(expected_home_process_rules(CLAUDE_HOME_GROUP_NAME));
+        let udp_rules: Vec<String> = rules[2..]
+            .iter()
+            .map(|rule| {
+                rule.replace("(NETWORK,TCP)", "(NETWORK,UDP)")
+                    .replace(CLAUDE_HOME_GROUP_NAME, "REJECT")
+            })
+            .collect();
+        rules.extend(udp_rules);
         rules.push("AND,((NETWORK,UDP)),REJECT".to_string());
         rules.push("MATCH,Tono-Exit".to_string());
         rules
@@ -1733,6 +1763,14 @@ reality-opts:
             ));
         }
         rules.extend(expected_home_process_rules(CLAUDE_HOME_GROUP_NAME));
+        let udp_rules: Vec<String> = rules[2..]
+            .iter()
+            .map(|rule| {
+                rule.replace("(NETWORK,TCP)", "(NETWORK,UDP)")
+                    .replace(CLAUDE_HOME_GROUP_NAME, "REJECT")
+            })
+            .collect();
+        rules.extend(udp_rules);
         rules.extend(expected_wechat_direct_rules());
         rules.push("AND,((NETWORK,TCP),(DST-PORT,443),(DOMAIN,www.bilibili.com),(IP-CIDR,9.0.0.30/32,no-resolve)),Tono-China-Web-Direct".to_string());
         // This fixture has no signed native-app path regex, so its suffix rows are
@@ -2777,6 +2815,55 @@ reality-opts:
                 .map(String::as_str)
                 .collect::<Vec<_>>()
         );
+    }
+
+    #[test]
+    fn hysteria2_home_route_rejects_assistant_udp_before_match() {
+        let yaml = r#"
+name: "Buffalo · Niagara · hy2"
+type: hysteria2
+server: 23.94.79.123
+port: 443
+password: "9e107d9d-372b-4c81-8d2b-3f2d0a1b2c3d"
+sni: "www.microsoft.com"
+fingerprint: "1e5374a79bdb83b04c3d3c84722c03211d1c941c2de9f92431d2198ba7212cad"
+"#;
+        let hy2_node = admit_node(&serde_yaml_ng::from_str(yaml).unwrap()).unwrap();
+        let nodes = vec![hy2_node, node("Home Reality", "8.8.8.8")];
+        let runtime = build_owned_runtime_with_ports(
+            &nodes,
+            "Buffalo · Niagara · hy2",
+            "test-secret",
+            None,
+            Some("Home Reality"),
+            None,
+            RuntimePorts::default(),
+        )
+        .unwrap();
+        let value = parsed(&runtime);
+        let rules: Vec<&str> = get(&value, &["rules"])
+            .as_sequence()
+            .unwrap()
+            .iter()
+            .map(|rule| rule.as_str().unwrap())
+            .collect();
+        let tcp_home_rules: Vec<&str> = rules
+            .iter()
+            .copied()
+            .filter(|rule| rule.ends_with(",Tono-Claude-Home"))
+            .collect();
+        let home_rows = CLAUDE_HOME_DOMAINS.len() + CLAUDE_HOME_IPV4_CIDRS.len()
+            + HOME_PROCESS_NAMES.len() + home_process_path_regexes().len();
+        assert_eq!(tcp_home_rules.len(), home_rows);
+        let first_udp = 2 + home_rows;
+        for (offset, tcp_rule) in tcp_home_rules.iter().enumerate() {
+            let udp_rule = tcp_rule.replace("(NETWORK,TCP)", "(NETWORK,UDP)")
+                .replace(CLAUDE_HOME_GROUP_NAME, "REJECT");
+            assert_eq!(rules[first_udp + offset], udp_rule);
+        }
+        assert_eq!(rules.len(), first_udp + home_rows + 1);
+        assert_eq!(rules.last().copied(), Some("MATCH,Tono-Exit"));
+        assert!(!rules.contains(&"AND,((NETWORK,UDP)),REJECT"));
     }
 
     #[test]
