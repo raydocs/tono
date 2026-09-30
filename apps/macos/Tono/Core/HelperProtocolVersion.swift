@@ -278,7 +278,11 @@ nonisolated enum HelperProtocolVersion {
     ///   is running. Startup, a corrupt update ledger, and a Core that stays
     ///   down release a leftover kill switch and restore a saved DNS snapshot.
     ///   They do not install a block.
-    static let current = "4.52.2"
+    /// - 4.52.2 → 4.52.3: a failed arm commit and a failed sleep barrier
+    ///   release the kill switch instead of installing an all-block. Startup
+    ///   failure and a failed update rollback do the same, without needing
+    ///   the allowed uid.
+    static let current = "4.52.3"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS
