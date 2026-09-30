@@ -30,3 +30,14 @@
 - 验证：未在本机编译。
 - 候选/发布：无新候选包。草稿保持草稿。
 - 剩余限制：#701 与 #703 合入 main 之后，下一次变基才把助手版本设成当时 main 的版本 +0.0.1。
+
+## 2026-09-30 · 续记：变基到 main，助手 4.52.8
+
+- 归属：同上，[#738](https://github.com/raydocs/tono/pull/738)。
+- 来源：#701、#703 与助手链已合 main。本 PR 自身 4 个提交 `--onto` 变基到 main `846705c7`，base 改为 main。
+- 缺陷修复：无新增行为。
+- 新增/优化：无。
+- 工程与测试：助手版本设为 main 的 `4.52.7` + 0.0.1 = `4.52.8`，`CONTRACT.sha256` 按 `build-core-helper.sh` 的源码清单重算。`main.swift` 自测同时保留 main 的 `emergencyReleaseDespiteUnreadableLedger` 两行与本 PR 的 `SelectiveFailOpen.runSelfTests()`。DECISIONS 的 owner 条目保留 main 的其他条目与 Applied in，Chosen 用本 PR 的版本（多出两条 Rejected）。不跳过、不放宽 CI。
+- 验证：本机未编译；由 PR 上的 `ci-gate`（macOS 与 Windows）复跑。
+- 候选/发布：无新候选包。需要真机（`needs-hardware`）。
+- 剩余限制：若合入前 main 的助手版本再变，按当时 main +0.0.1 再改。
