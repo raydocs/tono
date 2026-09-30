@@ -7,3 +7,4 @@
 - 工程与测试：`PeriodicTelemetryConsentTests`（断网代号入队、普通失败不入队、快照关闭后 P0 仍入队）。本环境没有 Xcode，XCTest 未执行。仅源码，无新候选。
 - 实机：断网保护打开时失败仍能上报；飞行模式后恢复联网能发出队列；设置关闭后普通时间线停止，但断网类 P0 仍发出。需要在 Mac 上跑 XCTest。
 - 2026-09-30 续记：CI `ea339dde` 的 macOS build 失败。设置副标题补了 zh-Hans。等待中的内测失败上报在用户明确关闭快照后再读同意，避免 v3 把未选择的关闭重新打开。周期窗口测试先清掉本机队列，否则前面的恢复网络事件会抢先发出、正文没有 `window`，上传任务在会话作废后继续跑，把受保护重连测试一起带崩。本环境没有 Xcode，XCTest 未执行。
+- 2026-09-30 续记：变基到 `origin/main` `7e475245`（#706），没有把 main 合并进来。`HelperProtocolVersion` 没有冲突，保持 main 的 `4.52.6`。网络变化的 P0 改挂在 `NetworkUplinkSnapshot` 的 `.moved` 上；失败后放行网络的断开说明保持 main 的写法。上述 CI 修正仍在。本环境没有 Xcode，XCTest 未执行。
