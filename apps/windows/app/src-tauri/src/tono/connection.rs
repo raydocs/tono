@@ -273,7 +273,7 @@ pub(crate) async fn connect_for_generation(
                                 "Tono: restoring the original network failed; protection stays as the release left it: {release_error}"
                             );
                         }
-                        unarmed_probe::spawn_after_release(&state, &app).await;
+                        unarmed_probe::spawn_after_release(&state, &app, generation);
                     }
                     tono_core::heal::NetworkEffect::SelectiveAiHold { .. } => {
                         logging!(

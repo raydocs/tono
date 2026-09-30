@@ -698,6 +698,15 @@ impl TonoState {
         self.inner.lock().await
     }
 
+    /// Non-blocking lock. The unarmed probe starter is synchronous: connect
+    /// calls it, and the probe later calls connect, so the starter cannot be
+    /// an async function.
+    pub(crate) fn try_lock(
+        &self,
+    ) -> Result<tokio::sync::MutexGuard<'_, TonoInner>, tokio::sync::TryLockError> {
+        self.inner.try_lock()
+    }
+
     pub async fn lock_catalog_sync(&self) -> tokio::sync::MutexGuard<'_, ()> {
         self.catalog_sync_operation.lock().await
     }

@@ -25,7 +25,10 @@ pub(super) fn in_unarmed_probe() -> bool {
     IN_UNARMED_PROBE.try_with(|_| ()).is_ok()
 }
 
-pub(super) async fn spawn_after_release(state: &Arc<TonoState>, app: &AppHandle) {
+/// Synchronous on purpose. `connect_for_generation` calls this after a
+/// failure, and `run` awaits `connect_for_generation`. An async starter makes
+/// those two opaque futures a type cycle (`E0391`).
+pub(super) fn spawn_after_release(state: &Arc<TonoState>, app: &AppHandle, generation: u64) {
     if in_unarmed_probe() {
         return;
     }
@@ -33,7 +36,6 @@ pub(super) async fn spawn_after_release(state: &Arc<TonoState>, app: &AppHandle)
         .unarmed_probe_ticket
         .fetch_add(1, Ordering::AcqRel)
         .wrapping_add(1);
-    let generation = state.lock().await.connect_generation;
     let task_state = Arc::clone(state);
     let task_app = app.clone();
     let handle = AsyncHandler::spawn(move || async move {
@@ -41,7 +43,33 @@ pub(super) async fn spawn_after_release(state: &Arc<TonoState>, app: &AppHandle)
             .scope((), run(task_state, task_app, ticket, generation))
             .await;
     });
-    let mut inner = state.lock().await;
+    install_handle(state, ticket, handle);
+}
+
+fn install_handle(state: &Arc<TonoState>, ticket: u64, handle: tauri::async_runtime::JoinHandle<()>) {
+    if let Ok(mut inner) = state.try_lock() {
+        store_handle(&state, &mut inner, ticket, handle);
+        return;
+    }
+    let state = Arc::clone(state);
+    AsyncHandler::spawn(move || async move {
+        let mut inner = state.lock().await;
+        store_handle(&state, &mut inner, ticket, handle);
+    });
+}
+
+fn store_handle(
+    state: &TonoState,
+    inner: &mut crate::tono::state::TonoInner,
+    ticket: u64,
+    handle: tauri::async_runtime::JoinHandle<()>,
+) {
+    // A newer starter already replaced this ticket. Abort this task instead of
+    // overwriting the newer handle.
+    if state.unarmed_probe_ticket.load(Ordering::Acquire) != ticket {
+        handle.abort();
+        return;
+    }
     if let Some(previous) = inner.tasks.unarmed_probe.replace(handle) {
         previous.abort();
     }
@@ -109,8 +137,9 @@ async fn run(state: Arc<TonoState>, app: AppHandle, ticket: u64, mut generation:
                     "Tono: unarmed probe found a reachable exit; connecting without a filter already installed"
                 );
                 let before = generation;
-                // Connect calls this function again after a failure. Name that future
-                // as a trait object so the spawned task's type does not contain itself.
+                // The starter is synchronous, so this await does not name
+                // `run` again. The trait object keeps the spawned task Send
+                // without embedding connect's concrete future.
                 let connect: std::pin::Pin<
                     Box<dyn std::future::Future<Output = Result<(), String>> + Send>,
                 > = Box::pin(super::connect_for_generation(
