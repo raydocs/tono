@@ -27,3 +27,8 @@
 
 - 工程与测试：`a232aae0` 上 `policy-tests` 已通过，Observation 不再报 yield 错误。`macos/build` 仍失败，因为健康检查断言还期待「断网保护正在阻断并重连」，目录里也没有四句新英文的简体中文。断言改成「原来的网络已经恢复，正在寻找可连接的出口」。PF 检查仍必须跑完并停止监视，修复次数仍是 1。显式「修复并重连」仍会进入 `connect()`；武装失败之后保护已放下，不再停在暂停的 Protected Offline。四句新文案补了 `zh-Hans`。
 - 行为不变：普通失败仍 `disarm`，不调用 `restrictToBootstrap`。本机无 Xcode，未跑 `xcodebuild`。
+
+### 2026-09-30 续记 · 助手拒绝后自动重试仍然暂停
+
+- 缺陷修复：`a232aae0` 的 `macos/build` 里 `testRepairAndReconnectReachesConnectWhenHelperRejectsThisApp` 失败。显式「修复并重连」已经进入 `connect()`，但放行时 `resetReleasedSessionHistory` 清掉了暂停，无武装探测又取消了保护重连，下一拍看不到助手的 `.rejected`，暂停没有重新立上。现在放行之后若状态仍是拒绝，重新立上暂停，并且不启动无武装连接（那次 `connect()` 会再次清掉暂停）。原网络仍然放开。断言仍要求暂停为真，没有改成期待假。
+- 验证：本机无 Xcode，未跑 `xcodebuild`。

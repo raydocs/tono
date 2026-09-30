@@ -23,7 +23,7 @@ final class ArmedFailureReleaseTests: XCTestCase {
         app.unarmedTcpProof = { _ in false }
         defer { app.connectionCoordinator.unarmedReconnectTask?.cancel() }
 
-        app.applyExhaustedArmedFailure(message: "tcp connect failed", resumeWhenReachable: true)
+        await app.applyExhaustedArmedFailure(message: "tcp connect failed", resumeWhenReachable: true)
         await app.finishPendingDisconnect()
 
         XCTAssertEqual(disarmed, 1, "PF disarm runs")

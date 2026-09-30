@@ -159,7 +159,7 @@ extension AppState {
                     localized: "The connection attempt stalled and was stopped."
                 )
                 if KillSwitchService.isArmed {
-                    self.applyExhaustedArmedFailure(
+                    await self.applyExhaustedArmedFailure(
                         message: stalledMessage,
                         resumeWhenReachable: true
                     )
@@ -642,7 +642,7 @@ extension AppState {
                             ? failureMessage + " "
                                 + String(localized: "This needs your action, so Tono will not reconnect by itself. The original network is back.")
                             : failureMessage
-                        self.applyExhaustedArmedFailure(
+                        await self.applyExhaustedArmedFailure(
                             message: detail,
                             resumeWhenReachable: !needsUser
                         )
@@ -1459,7 +1459,7 @@ extension AppState {
                 // was explicitly enabled. ExitHeal only picks the next dial.
                 // A pending native update keeps its barrier: this monitor must
                 // not take the Restore-internet release.
-                self.applyExhaustedArmedFailure(
+                await self.applyExhaustedArmedFailure(
                     message: String(localized: "The connection didn't complete. Support code TONO_CONNECT_TUN."),
                     resumeWhenReachable: true,
                     exhaustedTunnelLoss: true
@@ -1523,7 +1523,7 @@ extension AppState {
                     return .stopMonitoring
                 case .broken:
                     if self.pauseIfProtectedDNSKeepsFailing() { return .stopMonitoring }
-                    self.applyExhaustedArmedFailure(
+                    await self.applyExhaustedArmedFailure(
                         message: String(localized: "Protected DNS stopped. Tono released the filter and will reconnect only after a proof."),
                         resumeWhenReachable: true
                     )
@@ -1569,7 +1569,7 @@ extension AppState {
                 )
                 self.consecutiveProtectionRepairCount += 1
                 let paused = self.consecutiveProtectionRepairCount >= 3
-                self.applyExhaustedArmedFailure(
+                await self.applyExhaustedArmedFailure(
                     message: paused
                         ? String(localized: "Another program keeps replacing Tono's network protection. The original network is back. Quit the other VPN or firewall, then connect again.")
                         : String(localized: "Network protection was interrupted by another program. The original network is back while Tono looks for a reachable exit."),
@@ -1882,7 +1882,7 @@ extension AppState {
                 return .continueMonitoring
             }
             guard self.isConnected, !self.isDisconnecting else { return .stopMonitoring }
-            self.applyExhaustedArmedFailure(
+            await self.applyExhaustedArmedFailure(
                 message: failure.userMessage,
                 resumeWhenReachable: true
             )
@@ -2187,12 +2187,15 @@ extension AppState {
 
     /// Armed connect or health failure. The release bit is the shared
     /// `ExhaustedFailureNetwork` disposition. ExitHeal only chooses the next
-    /// dial, and only a later unarmed proof may connect.
+    /// dial, and only a later unarmed proof may connect. A helper that
+    /// rejects this app still pauses the automatic follow-up: the repair
+    /// attempt already reached connect, and another automatic connect would
+    /// raise the same rejection.
     func applyExhaustedArmedFailure(
         message: String,
         resumeWhenReachable: Bool,
         exhaustedTunnelLoss: Bool = false
-    ) {
+    ) async {
         let releases = ExhaustedFailureNetwork.afterFailure(strictKillSwitchExplicit: false)
             .releasesSystemNetwork
         let preferred = selectedExitNode()?.name ?? ConfigPipeline.homeNodeName
@@ -2219,7 +2222,13 @@ extension AppState {
             if exhaustedTunnelLoss, holdsUpdateBarrier { return }
             lastConnectionFailure = preservedFailure
             completedConnectionStages = preservedStages
-            if resumeWhenReachable {
+            // Release clears the pause. Put it back when the helper rejects
+            // this app, and do not start an unarmed connect that would clear
+            // it again.
+            if await networkProtection.refreshKillSwitchStatus() == .rejected {
+                protectedReconnectPausedForUserAction = true
+                protectedReconnectPauseLiftsOnNetworkChange = false
+            } else if resumeWhenReachable {
                 scheduleUnarmedReconnect()
             }
         } else {
@@ -2229,6 +2238,7 @@ extension AppState {
     }
 
     func scheduleUnarmedReconnect() {
+        if protectedReconnectPausedForUserAction { return }
         connectionCoordinator.protectedReconnectTask?.cancel()
         connectionCoordinator.protectedReconnectTask = nil
         isProtectedReconnectScheduled = false
@@ -2240,6 +2250,7 @@ extension AppState {
                 try? await Task.sleep(for: .seconds(delay))
                 guard let self, !Task.isCancelled else { return }
                 if self.isConnected || self.isConnecting || self.isDisconnecting { return }
+                if self.protectedReconnectPausedForUserAction { return }
                 if KillSwitchService.isArmed || self.isProtectionBlocked { return }
                 let name = self.unarmedDialName ?? self.selectedExitNode()?.name ?? ""
                 let reachable = await TcpEndpointProof.prove(
