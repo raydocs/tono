@@ -292,7 +292,12 @@ nonisolated enum HelperProtocolVersion {
     ///   release PF when the update ledger cannot be read. They keep the
     ///   ledger bytes and do not remove the install in that case. A DNS
     ///   restore failure no longer skips the PF release.
-    static let current = "4.52.5"
+    /// - 4.52.5 → 4.52.6: a DNS snapshot restores only its own service.
+    ///   Another service left on exactly 127.0.0.1 is not cleared.
+    ///   Update disconnect still releases PF when prepare cannot prove a
+    ///   foreign loopback proxy or resolver is Tono's. The lifecycle
+    ///   read-failure self-test expects that owner-only restore.
+    static let current = "4.52.6"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS
