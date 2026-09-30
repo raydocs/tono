@@ -557,6 +557,10 @@ func runUpdateSelfTests() -> Bool {
         try check(UpdateRuntime.mayBeTonoProxy(loopbackPorts: [nil], corePorts: [28990]),
                   "A loopback proxy without a port was accepted")
         try check(!UpdateRuntime.mayBeTonoProxy(loopbackPorts: [], corePorts: nil), "No loopback proxy was refused")
+        try check(UpdateRuntime.disconnectReleasesWhenPrepareFails(strictKillSwitchEnabled: false),
+                  "Prepare failure kept the kill switch up")
+        try check(!UpdateRuntime.disconnectReleasesWhenPrepareFails(strictKillSwitchEnabled: true),
+                  "A strict kill switch released during disconnect")
         try check(!ProtectedDNSManager.isStoppedTonoResolver(["127.0.0.1", "1.1.1.1"]),
                   "A mixed resolver list counted as Tono's")
         try check(ProtectedDNSManager.isStoppedTonoResolver(["127.0.0.1"]), "Tono's resolver list was not refused")
