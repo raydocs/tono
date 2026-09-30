@@ -1,6 +1,6 @@
 ## 2026-09-30 · macOS Protected Offline 更新允许放行后提交
 - 归属：SHIP_PLAN §2 第 10 条（装上会坏）。macOS 原生更新、共享值契约与启动保护显示。
-- 来源：main `80f4b4d0` → 分支 `codex2/mac-update-offline-commit`；PR 待开；未合 main。
+- 来源：main `80f4b4d0` → 分支 `codex2/mac-update-offline-commit`；PR #795；未合 main。
 - 缺陷修复：Protected Offline 更新换入新 helper 后，Core 已停，启动按现有释放路径解除 PF；旧契约仍要求 Protected Offline，导致恢复与提交证据被拒绝、更新一直 pending、Connect 被挡。`UpdateContractV1.recoverySatisfies` 只在恢复与提交阶段允许 Protected Offline 接受真实 Unprotected；Connected 与 Unprotected 仍要求各自精确匹配。App 在该路径提交成功后读取 helper 当前保护状态，经认证确认已释放后清除本地武装意图与已保护显示，再清除 Connect 门控；关联 [MAC-UPDATE-OFFLINE-COMMIT-STUCK](../findings.d/MAC-UPDATE-OFFLINE-COMMIT-STUCK.md)。
 - 新增/优化：无。不重新武装 PF，不新增 AI 阻断层；沿用 helper 标准释放路径，等待独立 PR #738 接入。健康连接与现有严格杀开关规则不变。
 - 工程与测试：helper 新增一条回归，验证 Protected Offline 收据在实际读数为 Unprotected 时完成恢复、提交并放开 `/core/start`；既有 Connected 所有权回归补上恢复与提交阶段都拒绝 Unprotected。既有 App XCTest 文件新增一条启动回归，验证提交后读取实时保护状态并清除已保护显示与 Connect 门控。
