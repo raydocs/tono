@@ -182,6 +182,38 @@ describe('rollNodeCycle', () => {
     expect(summary.autoUnlistAtPct).toBe(95);
   });
 
+  it('counts traffic since the last sample when a cycle expires, including a counter reset', async () => {
+    const end = utc(2025, 4, 1);
+    const profile = { cycle_kind: 'calendar_day', cycle_anchor_day: 1, quota_counts: 'in_out' };
+    const first = await rollNodeCycle(
+      db(), 'Tokyo · North', profile,
+      { in: 100, out: 40, at: end - 7200 }, end - 7200,
+    );
+    await rollNodeCycle(
+      db(), 'Tokyo · North', profile,
+      { in: 150, out: 80, at: end - 1800 }, end - 1800,
+    );
+
+    const rolled = await rollNodeCycle(
+      db(), 'Tokyo · North', profile,
+      { in: 210, out: 20, at: end + 1800 }, end + 1800,
+    );
+    expect(rolled?.status).toBe('open');
+    expect(Number(rolled?.cycle_start)).toBe(end);
+    expect(Number(rolled?.used_bytes)).toBe(80);
+    expect(Number(rolled?.resets_detected)).toBe(1);
+    expect(Number(rolled?.counter_in_start)).toBe(210);
+    expect(Number(rolled?.counter_out_start)).toBe(20);
+    expect(Number(rolled?.counter_in_last)).toBe(210);
+    expect(Number(rolled?.counter_out_last)).toBe(20);
+
+    const closed = await db().prepare(
+      'SELECT used_bytes, status FROM node_traffic_cycles WHERE id = ?',
+    ).bind(first!.id).first<Record<string, unknown>>();
+    expect(closed?.status).toBe('closed');
+    expect(Number(closed?.used_bytes)).toBe(90);
+  });
+
   it('rolls every active profile through injected counters', async () => {
     await insertProfile('A');
     await insertProfile('B');
