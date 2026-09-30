@@ -1,6 +1,6 @@
 ## 2026-09-30 · DNS 只恢复快照里的服务，断开不再被别人的代理挡住
 - 归属：SHIP_PLAN §2 第 10 条（装上会坏）。macOS helper。
-- 来源：基线 main `d2363002`；分支 `cursor/macos-dns-owner-only-581a`。尚未合 main。
+- 来源：基线 main `d2363002`；分支 `cursor/macos-dns-owner-only-581a`；[#712](https://github.com/raydocs/tono/pull/712)。尚未合 main。
 - 缺陷修复：
   - BRICK-M12：有 DNS 快照时只把快照记录的那个服务写回去。别的服务上正好是 `[127.0.0.1]` 不再清掉。快照损坏时的无主清扫保留，否则紧急恢复没有出口。
   - BRICK-M4：更新 `disconnect` 在 `prepare` 失败（认不出是不是 Tono 的 loopback 代理或 DNS）之后仍停止 Core 并释放 PF。`mayBeTonoProxy` 的判定不放宽，开始更新仍会拒绝未知端口的 loopback 代理。
