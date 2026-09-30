@@ -3,8 +3,11 @@
 //! Every privileged step goes through the Service IPC wrappers in
 //! `core::service` — the owner/session machinery is never bypassed. The
 //! fail-closed invariant: once the WFP policy exists, only Disconnect,
-//! Sign Out, or Quit release it; everything else keeps blocking behind
-//! `Protected Offline` plus the 2/5/10/20/30 s reconnect backoff.
+//! Sign Out, Quit, or one ordinary self-heal exhaustion release it. That
+//! exhaustion uses the explicit release and does not build another tunnel.
+//! Windows has no strict kill switch, so a verified connect failure restores
+//! the original network instead of sitting in Protected Offline. Self-heal
+//! does not rewrite routes while a hop is still unproven.
 //!
 //! Concurrency: `connect_generation` (in `TonoInner`) is bumped by
 //! disconnect, sign-out, node switches, and catalog-driven teardowns. An
@@ -25,6 +28,7 @@ mod disconnect;
 mod reconnect;
 mod switch;
 mod direct;
+mod heal;
 mod platform;
 
 // Compatibility surface for existing command and test callers. The transaction
@@ -236,14 +240,48 @@ pub(crate) async fn connect_for_generation(
     }
     match attempt_for_generation(&state, &app, expected_generation).await {
         Attempt::Connected => {
+            {
+                let mut inner = state.lock().await;
+                heal::note_connected(&mut inner);
+            }
             seed_autostart_after_connect();
             Ok(())
         }
         Attempt::GuardRejected(err) => Err(err),
         Attempt::Stale => Err("connection superseded by a newer transition".to_string()),
         Attempt::Failed { generation, error, account_owner } => {
+            let effect = {
+                let mut inner = state.lock().await;
+                heal::on_failure(&mut inner, &error)
+            };
             if fail_connect(&state, &app, generation, error.clone(), account_owner).await {
-                reconnect::schedule_reconnect_for_generation(&state, &app, generation).await;
+                match effect {
+                    tono_core::heal::NetworkEffect::FailOpen { .. } => {
+                        logging!(
+                            warn,
+                            Type::Service,
+                            "Tono: self-heal stopped; restoring the original network without another tunnel"
+                        );
+                        if let Err(release_error) = disconnect::release_explicit(&state, &app).await {
+                            logging!(
+                                error,
+                                Type::Service,
+                                "Tono: restoring the original network failed; protection stays as the release left it: {release_error}"
+                            );
+                        }
+                    }
+                    tono_core::heal::NetworkEffect::SelectiveAiHold { .. } => {
+                        logging!(
+                            warn,
+                            Type::Service,
+                            "Tono: self-heal kept AI-service destinations blocked and did not restore the whole network"
+                        );
+                    }
+                    tono_core::heal::NetworkEffect::HoldClosed => {
+                        reconnect::schedule_reconnect_for_generation(&state, &app, generation).await;
+                    }
+                    _ => {}
+                }
             }
             Err(error)
         }
@@ -290,6 +328,10 @@ async fn attempt_inner(state: &Arc<TonoState>, app: &AppHandle, expected_generat
     if expected_generation.is_some_and(|expected| expected != generation) {
         return Attempt::Stale;
     }
+    // Recovery only, and only while protection is down: one TCP fail-fast so
+    // the next tunnel is not installed on a node that just refused. The first
+    // connect does not wait here.
+    let node = heal::refine_before_arm(state, node).await;
     // L5: the clock starts at the top of the attempt, so even a
     // service-readiness failure leaves no orphan ConnectFail.
     let started = std::time::Instant::now();
@@ -493,7 +535,8 @@ async fn attempt_from_stage_failure(
 /// §6.1 guards: forced values live in the owned runtime; here we check the
 /// account is ready (H2a — the reconnect path's only account gate), the
 /// catalog is usable, the selection exists and passed admission, and no
-/// transaction is in flight. Pure read — no state changes.
+/// transaction is in flight. The only write is the in-memory heal dial, and
+/// only while protection is down.
 async fn guard_snapshot(
     state: &Arc<TonoState>,
 ) -> Result<(ValidatedNode, Vec<ValidatedNode>, Option<tono_core::CatalogRouting>, u64, CancellationToken), String> {
@@ -502,7 +545,7 @@ async fn guard_snapshot(
             "{RELEASE_RECONCILING_PREFIX}: network protection release is still reconciling; wait before reconnecting"
         ));
     }
-    let inner = state.lock().await;
+    let mut inner = state.lock().await;
     if inner.account_close.is_some() {
         return Err("account sign-out is still reconciling".to_string());
     }
@@ -525,10 +568,11 @@ async fn guard_snapshot(
     if inner.nodes.is_empty() {
         return Err(CATALOG_NOT_READY_REJECTION.to_string());
     }
-    let selected = inner
-        .selected_node
-        .clone()
-        .ok_or_else(|| "select a server first".to_string())?;
+    heal::prepare(&mut inner);
+    let selected = heal::dial_name(&inner);
+    if selected.is_empty() {
+        return Err("select a server first".to_string());
+    }
     let node = inner
         .nodes
         .iter()
