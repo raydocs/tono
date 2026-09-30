@@ -1,6 +1,6 @@
 ## 2026-09-30 · 控制面：登出撤销并发刷新的后继会话
 - 归属：控制面会话鉴权（[ops 计划](../ops/plan-2026-09-11.md)）；`services/control-plane`，不涉及客户端网络行为。
-- 来源：main `378c165d` → 分支 `codex2/cp-logout-refresh-race`；PR 待开；未合 main。
+- 来源：main `378c165d` → 分支 `codex2/cp-logout-refresh-race`；PR #800；未合 main。
 - 缺陷修复：CP-LOGOUT-REFRESH-RACE。登出鉴权与撤销提交之间发生刷新时，只撤销原会话会留下有效后继凭据。
   改为在原 D1 batch 内沿现有 `successor_id` 撤销轮换链，穿过已撤销的中间会话；可选 refresh hash 同样作为本用户的链起点。
   独立会话保留，其他账户不受影响；无需迁移，刷新已有的条件撤销继续覆盖登出先提交的顺序。
