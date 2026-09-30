@@ -13,6 +13,7 @@ pub mod config;
 pub mod connection;
 pub mod credentials;
 pub mod heal;
+pub mod network_disposition;
 pub mod node;
 pub mod policy;
 pub mod policy_signature;
@@ -34,6 +35,10 @@ pub use credentials::{CredentialKey, CredentialStore};
 pub use heal::{
     Candidate, DialChange, FailureClass, HYSTERESIS_MS, KillSwitchStance, NetworkEffect, Session,
     TCP_FAIL_FAST_MS, Transport,
+};
+pub use network_disposition::{
+    exhausted_protection, exhausted_protection_using, register_selective_ai_block,
+    registered_selective_ai_block, ExhaustedProtection,
 };
 pub use node::{
     EXIT_GROUP_NAME, HY2_NAME_SUFFIX, NodeProtocol, NodeRejection, ValidatedNode,
