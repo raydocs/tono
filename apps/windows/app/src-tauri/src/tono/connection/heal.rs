@@ -99,10 +99,11 @@ pub async fn refine_before_arm(state: &Arc<TonoState>, node: ValidatedNode) -> V
     if reachable {
         return node;
     }
+    let nodes = candidates(&inner.nodes);
     let effect = heal::observe(
         &mut inner.heal,
         Some(heal::FailureClass::Tcp),
-        &candidates(&inner.nodes),
+        &nodes,
         KillSwitchStance::Ordinary,
         now_ms(),
     );
