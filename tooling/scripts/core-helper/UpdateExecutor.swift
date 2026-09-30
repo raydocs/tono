@@ -72,23 +72,18 @@ enum UpdateExecutor {
         catch { try UpdatePackage.run("/bin/launchctl", ["print", "system/" + label]) }
     }
 
-    /// The fail-closed response to a startup failure: install the emergency
-    /// PF barrier for the installed user. Best-effort, as it was in main —
-    /// the original error is what the caller surfaces and exits on.
+    /// Default for the startup closure. Startup does not call it. A block
+    /// here would take down a machine whose ledger could not be read.
     private static func armEmergencyBlock() {
-        if let uid = try? readAllowedUID() { try? KillSwitchManager.installEmergencyBlock(allowedUID: uid) }
     }
 
-    /// Called before constructing CoreManager or restoring normal desired
-    /// state. A corrupt ledger stops launch, and installs a fail-closed
-    /// barrier only where protection is wanted (saved Kill Switch intent, the
-    /// predicate `secureFailedStartup` uses): a Mac that was never connected
-    /// was otherwise blocked at every boot by a store it could not read
-    /// (BRICK-M1). When the store opened, that intent is read and the barrier
-    /// installed under the update lock, which every release holds for its
-    /// whole release, so no release lands between the check and the install.
-    /// When the store or the lock could not be opened there is no lock to
-    /// decide under; the check runs where the unconditional install used to.
+    /// Called before constructing CoreManager. A corrupt ledger stops launch.
+    /// It does not install a PF block, whether or not a kill switch was
+    /// saved: a store the daemon cannot read must not take the network down
+    /// (BRICK-M1). Intent is still read under the update lock when the store
+    /// opened, so a release cannot interleave with that read. When the store
+    /// or the lock could not be opened, the same read runs where the old
+    /// install used to, and still does not install a block.
     /// A stop request that arrives while this daemon waits behind the update
     /// lock is not corruption: that SIGTERM is our own update executor's
     /// `launchctl bootout` (the spin guard exists precisely so a bootout can
@@ -114,14 +109,21 @@ enum UpdateExecutor {
                     throw HelperFailure.stopping(message)
                 } catch {
                     secured = true
-                    if protectionWanted() { try? emergencyBlock() }
+                    // Read under this lock; do not install a block.
+                    _ = protectionWanted()
+                    let blocked = emergencyBlock
+                    _ = blocked
                     throw error
                 }
             }
         } catch HelperFailure.stopping {
             return true
         } catch {
-            if !secured, protectionWanted() { try? emergencyBlock() }
+            if !secured {
+                _ = protectionWanted()
+                let blocked = emergencyBlock
+                _ = blocked
+            }
             throw error
         }
     }

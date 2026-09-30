@@ -498,8 +498,9 @@ nonisolated struct HelperManager {
         /// Turned off under Login Items › Allow in the Background. launchd will
         /// not start it, and no repair from the app works until it is back on.
         case backgroundDisabled
-        /// launchd has no such job, so nothing restored PF after the last
-        /// restart: macOS loads the PF rules at boot but leaves PF disabled.
+        /// launchd has no such job. macOS loads /etc/pf.conf at boot with PF
+        /// disabled. That hook declares an anchor and does not load the rule
+        /// file, so a missing helper does not reinstall a block.
         case notLoaded
         /// Loaded (an unreachable helper is then busy or restarting, and its PF
         /// rules stay in the kernel), or launchd could not say.
