@@ -5,14 +5,9 @@ name: Connect bench
 # tooling/perf/connect-bench/baseline.json. Does not touch TUN, routes or DNS.
 
 on:
-  pull_request:
-    paths:
-      - tooling/perf/connect-bench/**
-      - apps/windows/crates/tono-core/src/config.rs
-      - apps/windows/service/src/core/runtime_generation/owned_config.rs
-      - apps/macos/Tono/Core/Configuration/ConfigPipeline+Runtime.swift
-      - apps/macos/Tono/Core/Configuration/ConfigPipeline+Nodes.swift
-      - .github/workflows/connect-bench.yml
+  # Path list: CONNECT_BENCH_PATHS in tooling/scripts/ci-gate-changes.mjs
+  # (the former pull_request filter). ci-gate calls this workflow.
+  workflow_call:
   workflow_dispatch:
 
 permissions:

@@ -17,9 +17,8 @@ ship gate). Every PR names one of them; during the G4 freeze only SHIP_PLAN §2 
 
 These conditions are the approval: when they hold, act; do not stop to ask.
 
-**1. Merge** with `gh pr merge N --merge` when all hold:
-- CI is green on the exact head SHA for every tree the PR touches (workflow per tree, docs-only, and uncovered
-  paths needing dual_cross_family instead: [docs/BUILD_AND_TEST.md](docs/BUILD_AND_TEST.md#which-workflow-must-be-green-for-a-pr)). Dispatch a missing run; skipped is not green.
+**1. Merge** through the merge queue. Auto-merge is on for `main`. The only required status check is `ci-gate`. Merges use merge commits. Enable auto-merge with `gh pr merge --auto --merge` on a ready, non-draft PR when the conditions below hold. Do not enable it on a UI PR or a PR that needs real-hardware testing. On a conflict or a helper-version collision, rebase onto current `main` and set `HelperProtocolVersion.current` (`apps/macos/Tono/Core/HelperProtocolVersion.swift`) to main's value plus `0.0.1`.
+- `ci-gate` is green on the exact head SHA. It calls the path-filtered workflows and passes when each relevant job succeeded or was skipped because its paths were not touched. A missing `ci-gate` run is not green; dispatch `ci-gate`. Do not also dispatch those workflows on the pull request (they would run a second time). Docs-only and uncovered paths: [docs/BUILD_AND_TEST.md](docs/BUILD_AND_TEST.md#which-workflow-must-be-green-for-a-pr).
 - The jev-route review depth for the diff passed: from an up-to-date `origin/main` checkout (routing policy is
   main's, never the PR's) run `node ~/.agents/skills/jev-route/scripts/route.mjs review --git origin/<baseRefName>...<headRefOid>`,
   run every slot it names (cross-vendor for protected paths: global list plus [.jev-route.json](.jev-route.json); a PR changing it gets
