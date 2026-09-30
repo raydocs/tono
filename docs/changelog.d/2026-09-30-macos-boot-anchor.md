@@ -1,6 +1,6 @@
 ## 2026-09-30 · macOS 开机不再从规则文件装入阻断，启动放行
 - 归属：SHIP_PLAN §2 第 10 条（装上会坏：杀开关在重启/安全模式后仍断网）。macOS helper。
-- 来源：基线 main `d2363002`；分支 `cursor/fix-macos-boot-anchor-581a`。尚未合 main。
+- 来源：基线 main `d2363002`；分支 `cursor/fix-macos-boot-anchor-581a`；[#701](https://github.com/raydocs/tono/pull/701)。尚未合 main。
 - 缺陷修复：
   - BRICK-M9：`/etc/pf.conf` 的 Tono 段改为只声明 `anchor "tono.killswitch"`。`com.apple.pfctl` 在每次开机（含安全模式）加载该文件，不再打开 Application Support 里的规则文件，因此不会在 helper 未运行时装入 `block drop out quick all`，也不会在规则文件被删掉或卡住时拖住这次主规则集加载。helper 要强制执行时，用一次性根文件做同一次 `pfctl -f`，副本里才有 `load anchor from`，避免 PF 已经启用时先把子锚点清空。写规则文件之前先改挂钩；挂钩仍会加载规则文件时，紧急屏障只把规则装进内存，不把新的阻断写进那个会被开机加载的文件。
   - 开机、helper 重启、启动失败、更新账本损坏：不再重新武装，也不装紧急全阻断。Core 未在运行时立即释放已保存的杀开关；空闲循环里 Core 连续约 30 秒未运行则再释放一次。Core 仍在运行时，监督按已保存规则重装，避免连接中泄漏；这次重装失败不再改装全阻断。
