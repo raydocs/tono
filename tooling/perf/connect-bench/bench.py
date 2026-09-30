@@ -8,6 +8,8 @@ handshake visible; the same delay is applied to every profile.
 Pinned cores:
   mihomo v1.19.30 (the client under test, stock build, not the Tono patch)
   sing-box 1.14.2 (local protocol servers)
+  sing-box 1.15.0-alpha.9 (third client, stock upstream tarball, same
+  revision the certified build names; not the Tono-signed binary)
 
 Tono's owned runtime admits only VLESS+Reality and Hysteria2. Trojan, VMess,
 Shadowsocks and TUIC are measured on the Clash profile and reported as
@@ -44,6 +46,8 @@ MIHOMO_URL = "https://github.com/MetaCubeX/mihomo/releases/download/v1.19.30/mih
 MIHOMO_SHA = "cf06ce2c7d1421bdbda14ee4a5b6046672dc35ebf8eecd8e77504ec3c0ed9a84"
 SINGBOX_URL = "https://github.com/SagerNet/sing-box/releases/download/v1.14.2/sing-box-1.14.2-linux-amd64.tar.gz"
 SINGBOX_SHA = "a684484d7477d1437282ee411f4d131d0340aaad60a7868841ebd5d87dd8a0c6"
+SINGBOX_CLIENT_URL = "https://github.com/SagerNet/sing-box/releases/download/v1.15.0-alpha.9/sing-box-1.15.0-alpha.9-linux-amd64.tar.gz"
+SINGBOX_CLIENT_SHA = "8aede1f5935a856d939c61413677dc2e7e3eb0046efbc22b9a869229e6da279f"
 UUID = "9e107d9d-372b-4c81-8d2b-3f2d0a1b2c3d"
 SHORT_ID = "0123456789abcdef"
 ORIGIN_HOST = "bench.tono.test"
@@ -84,10 +88,22 @@ def ensure_bins() -> tuple[Path, Path]:
         mihomo.chmod(0o755)
     if not sing.exists():
         subprocess.run(["tar", "-xzf", str(CACHE / "sing-box.tar.gz"), "-C", str(CACHE)], check=True)
-        unpacked = next(CACHE.glob("sing-box-*/sing-box"))
+        unpacked = CACHE / "sing-box-1.14.2-linux-amd64" / "sing-box"
         shutil.copy(unpacked, sing)
         sing.chmod(0o755)
     return mihomo, sing
+
+
+def ensure_singbox_client() -> Path:
+    archive = CACHE / "sing-box-1.15.0-alpha.9.tar.gz"
+    download(SINGBOX_CLIENT_URL, archive, SINGBOX_CLIENT_SHA)
+    dest = CACHE / "sing-box-1.15.0-alpha.9"
+    if not dest.exists():
+        subprocess.run(["tar", "-xzf", str(archive), "-C", str(CACHE)], check=True)
+        unpacked = CACHE / "sing-box-1.15.0-alpha.9-linux-amd64" / "sing-box"
+        shutil.copy(unpacked, dest)
+        dest.chmod(0o755)
+    return dest
 
 
 def dns_reply(query: bytes) -> bytes:
@@ -701,11 +717,209 @@ def filter_servers(sing: Path, work: Path, material: dict) -> list[str]:
     return [item["tag"] for item in kept]
 
 
+def singbox_config(protocol: str, material: dict, mixed: int, controller: int, dns_port: int, work: Path) -> dict:
+    """Stock alpha.9 client. Same shape as the owned emitter: chrome uTLS,
+    fake-ip for the dial, DoH only for a real lookup, no QUIC DNS.
+    """
+    started = time.perf_counter()
+    cert = str(work / "cert.pem")
+    if protocol == "vless":
+        outbound = {
+            "type": "vless",
+            "tag": "proxy",
+            "server": "127.0.0.1",
+            "server_port": 24431,
+            "uuid": UUID,
+            "flow": "xtls-rprx-vision",
+            "tls": {
+                "enabled": True,
+                "server_name": "www.microsoft.com",
+                "utls": {"enabled": True, "fingerprint": "chrome"},
+                "reality": {
+                    "enabled": True,
+                    "public_key": material["public"],
+                    "short_id": SHORT_ID,
+                },
+            },
+        }
+    elif protocol == "hysteria2":
+        outbound = {
+            "type": "hysteria2",
+            "tag": "proxy",
+            "server": "127.0.0.1",
+            "server_port": 24432,
+            "password": UUID,
+            "tls": {
+                "enabled": True,
+                "server_name": "bench.local",
+                "certificate_path": cert,
+            },
+        }
+    else:
+        raise SystemExit(protocol)
+    config = {
+        "log": {"level": "error"},
+        "dns": {
+            "servers": [
+                {"type": "fakeip", "tag": "fakeip", "inet4_range": "198.18.0.1/16"},
+                {
+                    "type": "https",
+                    "tag": "doh",
+                    "server": "127.0.0.2",
+                    "server_port": 18443,
+                    "path": "/dns-query",
+                    "tls": {
+                        "enabled": True,
+                        "server_name": "127.0.0.2",
+                        "certificate_path": cert,
+                    },
+                    "detour": "proxy",
+                },
+            ],
+            "rules": [
+                {"query_type": ["AAAA"], "action": "predefined", "rcode": "NOERROR"},
+                {
+                    "domain": [ORIGIN_HOST],
+                    "query_type": ["A"],
+                    "action": "route",
+                    "server": "fakeip",
+                },
+            ],
+            "final": "doh",
+            "strategy": "ipv4_only",
+        },
+        "inbounds": [
+            {"type": "mixed", "tag": "mixed", "listen": "127.0.0.1", "listen_port": mixed},
+            {"type": "direct", "tag": "dns-in", "listen": "127.0.0.1", "listen_port": dns_port},
+        ],
+        "outbounds": [outbound],
+        "route": {
+            "rules": [{"inbound": ["dns-in"], "action": "hijack-dns"}],
+            "final": "proxy",
+        },
+        "experimental": {
+            "clash_api": {
+                "external_controller": f"127.0.0.1:{controller}",
+                "secret": "bench",
+            }
+        },
+    }
+    blob = json.dumps(config)
+    if "skip-cert-verify" in blob or '"insecure": true' in blob or "handshake-timeout" in blob:
+        raise SystemExit("bench config weakened TLS")
+    material["last_yaml_ms"] = (time.perf_counter() - started) * 1000
+    return config
+
+
+class SingBox:
+    def __init__(self, binary: Path, work: Path, config: dict, mixed: int, controller: int) -> None:
+        path = work / f"singbox-{mixed}.json"
+        path.write_text(json.dumps(config))
+        directory = work / f"sb-core-{mixed}"
+        directory.mkdir(parents=True, exist_ok=True)
+        log_path = work / f"singbox-{mixed}.log"
+        self._log = log_path.open("w")
+        self.proc = subprocess.Popen(
+            [str(binary), "run", "-c", str(path), "-D", str(directory)],
+            stdout=self._log,
+            stderr=subprocess.STDOUT,
+        )
+        self.mixed = mixed
+        self.controller = controller
+        deadline = time.perf_counter() + 5
+        while time.perf_counter() < deadline:
+            if controller_ready(controller):
+                return
+            if self.proc.poll() is not None:
+                self._log.flush()
+                tail = log_path.read_text(errors="replace")[-400:]
+                raise SystemExit(f"sing-box exited for {path}: {tail}")
+            time.sleep(0.02)
+        raise SystemExit(f"sing-box controller {controller} did not answer")
+
+    def close(self) -> None:
+        self.proc.terminate()
+        try:
+            self.proc.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            self.proc.kill()
+        self._log.close()
+
+
+def measure_singbox(binary: Path, work: Path, camo: Camo, protocol: str, material: dict, slot: int) -> dict:
+    mixed = 30000 + slot
+    controller = 31000 + slot
+    listen = controller + 1000
+    config = singbox_config(protocol, material, mixed, controller, listen, work)
+    cold, warm, starts, handshakes = [], [], [], []
+    dns_ms, dns_handshakes, handshake_ms = [], [], []
+    fake_ip_ms, fake_ip_handshakes = [], []
+    dns_cached_ms, dns_cached_handshakes = [], []
+    dns_reuse_ms, dns_reuse_handshakes = [], []
+    for _ in range(SAMPLES):
+        t0 = time.perf_counter()
+        core = SingBox(binary, work, config, mixed, controller)
+        starts.append((time.perf_counter() - t0) * 1000)
+        camo.reset()
+        fake_ok, fake_elapsed = fake_ip_query(listen)
+        if fake_ok:
+            fake_ip_ms.append(fake_elapsed)
+            fake_ip_handshakes.append(len(camo.snapshot()))
+        camo.reset()
+        code, elapsed = curl(mixed, f"http://{ORIGIN_HOST}:18080/")
+        marks = camo.snapshot()
+        cold.append(elapsed if code == 200 else None)
+        handshakes.append(len(marks))
+        if code == 200 and marks:
+            handshake_ms.append((marks[-1][1] - marks[-1][0]) * 1000)
+        code2, elapsed2 = curl(mixed, f"http://{ORIGIN_HOST}:18080/")
+        warm.append(elapsed2 if code2 == 200 else None)
+        # The dial name is pinned to fake-ip, so a real resolve has to ask for
+        # a different name. Clash API /dns/query is that path. A miss here
+        # does not undo the request above.
+        camo.reset()
+        dns_ok, dns_elapsed = dns_query(controller, OTHER_HOST)
+        if dns_ok:
+            dns_ms.append(dns_elapsed)
+            dns_handshakes.append(len(camo.snapshot()))
+        camo.reset()
+        cached_ok, cached_elapsed = dns_query(controller, OTHER_HOST)
+        if cached_ok:
+            dns_cached_ms.append(cached_elapsed)
+            dns_cached_handshakes.append(len(camo.snapshot()))
+        camo.reset()
+        reuse_ok, reuse_elapsed = dns_query(controller, OTHER_HOST_2)
+        if reuse_ok:
+            dns_reuse_ms.append(reuse_elapsed)
+            dns_reuse_handshakes.append(len(camo.snapshot()))
+        core.close()
+    return {
+        "profile": "sing-box",
+        "protocol": protocol,
+        "config_ms": round(material["last_yaml_ms"], 3),
+        "startup_ms": _median(starts),
+        "cold_ms": _median(cold),
+        "warm_ms": _median(warm),
+        "fake_ip_ms": _median(fake_ip_ms) if len(fake_ip_ms) == SAMPLES else None,
+        "fake_ip_handshakes": _count(fake_ip_handshakes),
+        "dns_ms": _median(dns_ms) if len(dns_ms) == SAMPLES else None,
+        "dns_handshakes": _count(dns_handshakes),
+        "dns_cached_ms": _median(dns_cached_ms) if len(dns_cached_ms) == SAMPLES else None,
+        "dns_cached_handshakes": _count(dns_cached_handshakes),
+        "dns_reuse_ms": _median(dns_reuse_ms) if len(dns_reuse_ms) == SAMPLES else None,
+        "dns_reuse_handshakes": _count(dns_reuse_handshakes),
+        "handshake_ms": _median(handshake_ms) if len(handshake_ms) == SAMPLES else None,
+        "handshakes": _count(handshakes),
+        "ok": _median(cold) is not None,
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--check", action="store_true")
     args = parser.parse_args()
     mihomo, sing = ensure_bins()
+    sing_client = ensure_singbox_client()
     work = Path("/tmp/tono-connect-bench")
     if work.exists():
         shutil.rmtree(work)
@@ -764,6 +978,17 @@ def main() -> int:
                 except SystemExit as exc:
                     rows.append({"profile": profile, "protocol": protocol, "ok": False, "note": str(exc)})
                 slot += 1
+        for protocol in ("vless", "hysteria2"):
+            tag = {"hysteria2": "hy2"}.get(protocol, protocol)
+            if tag not in admitted:
+                rows.append({"profile": "sing-box", "protocol": protocol, "ok": False, "note": "server unavailable"})
+                continue
+            print(f"measure sing-box {protocol}", flush=True)
+            try:
+                rows.append(measure_singbox(sing_client, work, camo, protocol, material, slot))
+            except SystemExit as exc:
+                rows.append({"profile": "sing-box", "protocol": protocol, "ok": False, "note": str(exc)})
+            slot += 1
         extra = contention(mihomo, work, camo, material)
     finally:
         server.terminate()
@@ -784,7 +1009,7 @@ def main() -> int:
     for row in rows:
         if row.get("protocol") not in {"vless", "hysteria2"}:
             continue
-        if row.get("profile") not in {"tono-fixed", "clash"}:
+        if row.get("profile") not in {"tono-fixed", "clash", "sing-box"}:
             continue
         for field in (
             "cold_ms",
