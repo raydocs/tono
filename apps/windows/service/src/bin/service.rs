@@ -130,12 +130,10 @@ fn run_emergency_disarm() -> Result<()> {
         // succeeds, so it means a live service that *answers* owns the machine.
         // Disarming underneath it loses a race that cannot be won: this process
         // deletes the filters and the intent file, the running service's
-        // watchdog checks its own in-memory intent within its period, finds the
-        // filters gone and reinstalls the block — and the DNS watchdog can
-        // re-point every adapter at the protected resolver and rewrite the
-        // snapshot. The user is told "your network is restored" and is blocked
-        // again seconds later, with the intent file now missing so the next
-        // service start comes up in the emergency block. Because the owner
+        // watchdog checks its own in-memory intent within its period. Without an
+        // explicit strict kill switch it releases after a short unhealthy streak
+        // instead of reinstalling; the DNS watchdog can still re-point adapters
+        // at the protected resolver and rewrite the snapshot. Because the owner
         // answered, the supported route is open, which is exactly what the
         // refusal below tells them to use.
         let _owner_guard = match tono_service_protocol::acquire_service_owner().await {
@@ -152,6 +150,10 @@ fn run_emergency_disarm() -> Result<()> {
             .await
             .map(|()| true)
     });
+    // A timed-out DNS or WFP engine call leaves its `spawn_blocking` task running, and dropping
+    // the runtime would wait for it. This process only releases protection and exits right after
+    // reporting, so the task is abandoned instead.
+    rt.shutdown_background();
 
     match outcome {
         Ok(true) => {
@@ -195,8 +197,22 @@ fn run_emergency_disarm() -> Result<()> {
                         "网络封锁已解除，但 DNS 仍指向已停止的 Tono 解析器。",
                         "The block is removed, but DNS still points at the stopped Tono resolver.",
                         &[
-                            "请重启电脑完成恢复；重启后网络即正常。",
-                            "Reboot once to finish the recovery; the network works after that.",
+                            "请打开“设置”>“网络和 Internet”> 你的网络适配器 >“DNS 服务器分配”>“编辑”，\
+                             IPv4 和 IPv6 都选“自动(DHCP)”。",
+                            "Open Settings > Network & Internet > your adapter > DNS server \
+                             assignment > Edit, and choose Automatic (DHCP) for IPv4 and IPv6.",
+                        ],
+                    );
+                    Err(error)
+                }
+                DisarmErrorClass::ResolverRuleRemains => {
+                    print_disarm_result(
+                        "网络封锁已解除，但 Tono 的 DNS 规则未能删除，域名查询仍被送往已停止的 Tono 解析器。",
+                        "The block is removed, but Tono's DNS rule could not be removed, so name \
+                         lookups still go to the stopped Tono resolver.",
+                        &[
+                            "请再运行一次本快捷方式；仍失败请联系支持。",
+                            "Run this shortcut again; if it still fails, contact support.",
                         ],
                     );
                     Err(error)
@@ -241,15 +257,21 @@ enum DisarmErrorClass {
     /// saved servers could not be proven restored. A safe end state.
     RestoredToAutomatic,
     /// WFP removed, but an adapter still points at Tono's (now dead) loopback
-    /// resolver. The machine needs a reboot to resolve again.
+    /// resolver. Its DNS has to be set back to automatic in Windows Settings.
     EnforcementGoneDnsStale,
     /// Nothing proves the barrier is gone — the genuine failure case.
     StillProtected,
+    /// WFP removed, but Tono's NRPT catch-all could not be removed, so every
+    /// lookup still goes to the stopped resolver. A restart does not remove it;
+    /// running the shortcut again retries.
+    ResolverRuleRemains,
 }
 
 #[cfg(windows)]
 fn classify_disarm_error(message: &str) -> DisarmErrorClass {
-    if message.contains("TONO_DNS_RESTORED_AUTOMATIC") {
+    if message.contains("TONO_DNS_POLICY_REMAINS") {
+        DisarmErrorClass::ResolverRuleRemains
+    } else if message.contains("TONO_DNS_RESTORED_AUTOMATIC") {
         DisarmErrorClass::RestoredToAutomatic
     } else if message.contains("TONO_DNS_STILL_ON_LOOPBACK") || message.contains("TONO_WFP_REMOVED")
     {
@@ -280,6 +302,20 @@ mod disarm_error_tests {
         assert_eq!(
             classify_disarm_error("WFP engine call failed: access denied"),
             DisarmErrorClass::StillProtected
+        );
+    }
+
+    /// BRICK-W4: when Tono's NRPT catch-all could not be removed, every lookup still goes to the
+    /// stopped resolver whatever the adapters say. That outcome is checked before the DNS markers
+    /// it can travel with, so the shortcut never reports it as a stale adapter a restart fixes.
+    #[test]
+    fn a_remaining_nrpt_rule_is_its_own_outcome() {
+        assert_eq!(
+            classify_disarm_error(
+                "TONO_DNS_POLICY_REMAINS: WFP was removed, but Tono's DNS rule could not be \
+                 removed: TONO_DNS_STILL_ON_LOOPBACK: ..."
+            ),
+            DisarmErrorClass::ResolverRuleRemains
         );
     }
 }

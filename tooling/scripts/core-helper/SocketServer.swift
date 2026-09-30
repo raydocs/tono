@@ -16,8 +16,14 @@ final class SocketServer {
     private let powerMonitor: HelperPowerMonitor
     private let updates: UpdateTransaction
     private var serverFD: Int32 = -1
+    /// Last `openNetworkEpoch` observed by the idle loop. A newer epoch means
+    /// an arm or a release committed, so the core-down count starts over.
+    private var openNetworkEpoch: UInt64 = 0
+    private var consecutiveCoreDownChecks = 0
 
-    /// `killSwitch` has already restored PF: see `startHelperDaemon`.
+    /// Launch does not install PF. `run()` releases a leftover after this
+    /// init has stopped a stale Core. A Core that is still running is left
+    /// alone.
     init(allowedUID: uid_t, killSwitch: KillSwitchManager) throws {
         self.allowedUID = allowedUID
         self.killSwitch = killSwitch
@@ -37,6 +43,26 @@ final class SocketServer {
         )
         try setupSocket()
         try powerMonitor.start()
+    }
+
+    /// The Core constructor has already stopped a stale child. A snapshot
+    /// left behind then points the system resolver at a listener that is
+    /// gone. Failure stays on the snapshot: startup must not turn it into
+    /// a PF block.
+    private func recoverDNSAfterStoppedCore() {
+        let snapshotPresent = protectedDNS.status()["snapshotPresent"] as? Bool == true
+        guard ProtectedDNSManager.shouldRecoverDNSAtBoot(
+            coreRunning: core.status().running,
+            snapshotPresent: snapshotPresent
+        ) else { return }
+        do {
+            _ = try protectedDNS.restore(deferringLossNotice: true)
+        } catch {
+            let detail = (error as? HelperFailure)?.message ?? String(describing: error)
+            FileHandle.standardError.write(Data(
+                "tono: boot DNS recovery kept the saved resolvers: \(detail)\n".utf8
+            ))
+        }
     }
 
     deinit {
@@ -72,19 +98,37 @@ final class SocketServer {
         }
     }
 
+    /// A saved DNS snapshot with the Core stopped still points the resolver
+    /// at a listener that is gone. Restore it at launch. Do not touch DNS
+    /// while the Core is running.
+    static func shouldRestoreSavedDNSAtLaunch(coreRunning: Bool, snapshotPresent: Bool) -> Bool {
+        !coreRunning && snapshotPresent
+    }
+
     func run() {
+        // After listen, before any client. The stale Core is already gone.
+        // macOS has no strict kill-switch opt-in, so a helper start with the
+        // Core down opens the original network. A Core that is still running
+        // keeps the block it already has. DNS restore uses the same
+        // SCPreferences path as disconnect and has no extra deadline.
+        releaseLeftoverBlockIfCoreStopped()
+        recoverDNSAfterStoppedCore()
         var lastProtectionCheck = Date()
         while helperShutdownRequested == 0 {
-            // Low-frequency PF liveness check between requests. Under the update
-            // lock like every IPC mutation, so it cannot interleave with an
-            // out-of-process emergency disarm or an update transition.
+            // Low-frequency check between requests. Under the update lock
+            // like every IPC mutation, so it cannot interleave with an arm
+            // or an out-of-process emergency disarm.
             if Date().timeIntervalSince(lastProtectionCheck) >= 10 {
                 lastProtectionCheck = Date()
+                // BRICK-M11: deleting the app while this daemon stays up used
+                // to leave PF in place until the next start. This takes the
+                // update lock itself; do not call it from inside locked.
+                if releaseIfTonoWasRemoved() { return }
+                // Supervise only while the Core is running. While it is down,
+                // withhold the bundle permit at once and release the saved
+                // block after the watchdog threshold.
                 try? updates.storage.locked {
-                    killSwitch.superviseProtection()
-                    // A Core that exited took its utun with it (#608). Only
-                    // the app's next arm with a live tunnel restores the permit.
-                    if !core.status().running { try? killSwitch.withholdReviewedBundlePermit() }
+                    observeCoreForWatchdog()
                 }
             }
             var descriptor = pollfd(
@@ -115,6 +159,64 @@ final class SocketServer {
         // owned child before this helper exits so the next version never races
         // an orphaned controller or TUN.
         try? core.stop()
+    }
+
+    /// Immediate release at start. Idempotent: no state file means no pfctl.
+    /// A running Core is not disarmed and is not reinstalled from the file.
+    private func releaseLeftoverBlockIfCoreStopped() {
+        guard KillSwitchManager.shouldReleaseLeftoverAtLaunch(
+            coreRunning: core.status().running,
+            stateFilePresent: KillSwitchManager.stateFileExists()
+        ) else { return }
+        do {
+            _ = try killSwitch.disarm()
+        } catch {
+            let detail = (error as? HelperFailure)?.message ?? String(describing: error)
+            FileHandle.standardError.write(Data(
+                "tono: startup release could not clear the kill switch: \(detail)\n".utf8
+            ))
+        }
+    }
+
+    /// While the Core is running, keep the in-session block (a live connect
+    /// must not leak). When the Core stays down, release instead of
+    /// reinstalling that block. The threshold skips the short gap between
+    /// arm and the Core process appearing.
+    private func observeCoreForWatchdog() {
+        let epoch = killSwitch.openNetworkEpoch
+        if epoch != openNetworkEpoch {
+            openNetworkEpoch = epoch
+            consecutiveCoreDownChecks = 0
+        }
+        if KillSwitchManager.shouldReinstallKillSwitch(coreRunning: core.status().running) {
+            consecutiveCoreDownChecks = 0
+            killSwitch.superviseProtection()
+            return
+        }
+        // The Core took its utun with it (#608). Narrow the reviewed-bundle
+        // permit immediately. The all-block, if still saved, waits for the
+        // threshold below so a connect can start the Core.
+        try? killSwitch.withholdReviewedBundlePermit()
+        if KillSwitchManager.stateFileExists() {
+            consecutiveCoreDownChecks += 1
+            // DNS stays put until the block is released. Restoring it during
+            // the gap between arm and the Core process would undo a connect.
+            guard KillSwitchManager.watchdogShouldRestoreNetwork(
+                consecutiveCoreDownChecks: consecutiveCoreDownChecks
+            ) else { return }
+            do {
+                _ = try killSwitch.disarm()
+            } catch {
+                let detail = (error as? HelperFailure)?.message ?? String(describing: error)
+                FileHandle.standardError.write(Data(
+                    "tono: watchdog could not clear the kill switch: \(detail)\n".utf8
+                ))
+                return
+            }
+        } else {
+            consecutiveCoreDownChecks = 0
+        }
+        recoverDNSAfterStoppedCore()
     }
 
     private func handle(_ client: Int32) {

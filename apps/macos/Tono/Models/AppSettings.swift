@@ -89,6 +89,9 @@ enum SettingsKey {
     static let windowGeometryPolicyVersion = "windowGeometryPolicyVersion"
     static let didStartCore = "didStartCore"
     static let lastTunEnabled = "lastTunEnabled"
+    /// `kern.bootsessionuuid` when the last connect started; removed by a
+    /// completed release. See `RuntimeCleanup.holdsAutomaticResume`.
+    static let connectBootSession = "connectBootSession"
 }
 
 enum InterfaceLanguagePreference {

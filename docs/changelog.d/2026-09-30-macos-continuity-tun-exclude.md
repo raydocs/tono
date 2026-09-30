@@ -1,0 +1,14 @@
+## 2026-09-30 · TUN 不再收下有限广播和 IPv6 组播
+- 归属：[SHIP_PLAN](../SHIP_PLAN.md) G1。macOS TUN 下隔空播放、随航、通用剪贴板。
+- 来源：rebase 到 `main` `ba7f07e4` 的分支 `cursor/macos-continuity-onlink-3d9f`，[#700](https://github.com/raydocs/tono/pull/700)。丢掉先前把旧 main 合进来的 `74859a2b`。未合 main。
+- 缺陷修复：产品 sing-box 的 `route_exclude_address` 补上 `255.255.255.255/32` 和 `ff00::/8`，与已有的私网、链路本地和 `224.0.0.0/4` 放在同一份静态表 `tunRouteExcludeCIDRs`。Darwin auto-route 因此不再把有限广播装进 utun。不新增 PF 规则，不升级 helper，不恢复进程级公网 DIRECT。
+- 新增/优化：无。
+- 工程与测试：`testContinuityLocalBypassDoesNotForcePublicAppleTrafficDirectWithoutPolicy` 增加排除表断言，并拒绝出现 `/0`。
+- 验证：Linux VM 不能跑 XCTest、`pfctl` 或 utun。hosted macOS CI 待跑。没有在 Mac 上连接、改路由或改 PF。
+- 候选/发布：仅源码，无新包。
+- 剩余限制：在网全球 IPv6 和非私网 IPv4 仍由现有 Kill Switch 丢弃（MAC-CONTINUITY-ONLINK-PF，未改）。IPv6 组播排除在当前「TUN 无 IPv6 地址」下不安装内核路由。未证明通用剪贴板或隔空播放已恢复。连接失败时仍用应用里的 Restore internet，本改动不改变那条恢复路径。
+- 2026-09-30 续记：`be5403e8` 上的 macOS CI 已通过之后，`main` 又前进。再 rebase 到 `939177f4`（含已合入的 #701、#705）。仍是线性历史，没有 merge main。helper 沿用 main 的 `4.52.2`，本分支不改 helper 源码，所以没有再 +0.0.1。冲突只在 `docs/DECISIONS.md`，#701 与 #705 的条目原样保留。
+- 2026-09-30 续记：`86117f50` 的 Windows CI `core` 失败，[run 36750424329](https://github.com/raydocs/tono/actions/runs/36750424329)。整份 YAML 哈希在 `main` 上已由 [#752](https://github.com/raydocs/tono/pull/752) 钉到 `2a0e26f4…`。本分支再 rebase 到 `658aed21`，不改这份测试，也不再写一份自己的哈希。macOS 的路由排除没有改。
+- 2026-09-30 续记：`ace67021` 与前进后的 `main` 冲突。再 rebase 到 `ba7c8ae`（含已合入的 [#708](https://github.com/raydocs/tono/pull/708)）。仍是线性历史，没有 merge main。冲突只在 `docs/DECISIONS.md`，#708 的条目原样保留。helper 沿用 main 的 `4.52.3`，本分支不改 helper 源码。YAML 整份断言仍是 #752 的钉，没有放宽。这个新 head 的 CI 还要重跑。
+- 2026-09-30 续记：`398fc452` 的 macOS CI 已通过之后，`main` 又到 `5d46b896`（含 #711、#712、#751）。再 rebase。冲突只在 `docs/DECISIONS.md`，#711 的紧急释放条目原样保留。helper 沿用 main 的 `4.52.6`，本分支不改 helper 源码，没有 +0.0.1。有限广播排除和 YAML 整份断言都没改。这个新 head 的 CI 还要重跑。
+- 2026-09-30 续记：`eefa4a43` 的 [ci-gate 36772481399](https://github.com/raydocs/tono/actions/runs/36772481399) 已通过（macOS 四项 success）。随后 `main` 到 `7e475245`（#702、#706）并冲突。再 rebase。冲突只在 `docs/DECISIONS.md`，#702 与 #706 的条目原样保留。helper 仍是 `4.52.6`，没有 +0.0.1。有限广播排除和 YAML 整份断言都没改。这个新 head 的 CI 还要重跑。

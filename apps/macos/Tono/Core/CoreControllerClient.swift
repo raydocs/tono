@@ -309,6 +309,10 @@ actor CoreControllerClient {
                     throw CoreControllerError.requestFailed("/version")
                 }
                 _ = try JSONDecoder().decode(APIVersion.self, from: data)
+                // Overlap the exit DoH for the probe host with the PF arm
+                // and the system DNS switch that follow readiness. Ignore
+                // errors: a cold cache must not fail connect.
+                Task { try? await self.resolveIPv4("www.google.com") }
                 return // Core is ready
             } catch {
                 try Task.checkCancellation()

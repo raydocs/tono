@@ -36,4 +36,9 @@ pub struct UpdateStatus {
     /// Err response means no release completed. Absent from older Services.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub needs_attention: Option<String>,
+    /// Set only by an Adopt from any App but the incarnation the update executor launched, such
+    /// as the first App after a restart. That App does not reconnect by itself. Absent from
+    /// older Services, which reads as false.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub successor_relaunched: bool,
 }

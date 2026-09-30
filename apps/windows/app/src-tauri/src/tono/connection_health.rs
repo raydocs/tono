@@ -338,9 +338,93 @@ pub const fn health_threshold_reached(consecutive_failures: u32) -> bool {
     consecutive_failures >= HEALTH_FAILURE_THRESHOLD
 }
 
+/// Consecutive failed network-event proofs before the tunnel is rebuilt.
+///
+/// One failure is a blip: packet loss, a DHCP flicker, a route notification
+/// while the exit is still carrying traffic. Stopping the core there opens a
+/// kill-switch window longer than the blip. The next monitor tick probes
+/// again without waiting for another OS notification. Core identity and the
+/// protection legs are not debounced by this count.
+pub const EVENT_PROBE_REBUILD_AFTER: u32 = 2;
+
+pub const fn event_probe_failure_rebuilds(consecutive_failures: u32) -> bool {
+    consecutive_failures >= EVENT_PROBE_REBUILD_AFTER
+}
+
+/// Whether this monitor tick should ask the tunnel about a network event.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NetworkEventProbePlan {
+    /// Nothing to prove. Core identity, a broken barrier, and our own DIRECT
+    /// reload are handled by their own legs.
+    Idle,
+    /// A success inside the cooldown still covers this notification.
+    ReuseRecentProof,
+    /// Run one data-plane proof. A pending failure from the previous tick
+    /// must run even when this tick has no new OS notification.
+    Probe,
+}
+
+/// What that proof did to the session. `Hold` keeps the core and the barrier.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NetworkEventProbeEffect {
+    Unchanged,
+    Proven,
+    Hold,
+    Rebuild,
+}
+
+pub const fn plan_network_event_probe(
+    event_invalidated: bool,
+    network_changed: bool,
+    core_changed: bool,
+    health_invalid: bool,
+    owned_direct_reload: bool,
+    pending_failures: u32,
+    recent_proof: bool,
+) -> NetworkEventProbePlan {
+    if core_changed || health_invalid || owned_direct_reload {
+        return NetworkEventProbePlan::Idle;
+    }
+    let corroboration_due = event_invalidated && network_changed;
+    let reconfirm = pending_failures > 0;
+    if !corroboration_due && !reconfirm {
+        return NetworkEventProbePlan::Idle;
+    }
+    if corroboration_due && pending_failures == 0 && recent_proof {
+        return NetworkEventProbePlan::ReuseRecentProof;
+    }
+    NetworkEventProbePlan::Probe
+}
+
+pub const fn apply_network_event_probe(
+    plan: NetworkEventProbePlan,
+    probe_failed: bool,
+    pending_failures: u32,
+) -> (NetworkEventProbeEffect, u32) {
+    match plan {
+        NetworkEventProbePlan::Idle => (NetworkEventProbeEffect::Unchanged, pending_failures),
+        NetworkEventProbePlan::ReuseRecentProof => (NetworkEventProbeEffect::Proven, 0),
+        NetworkEventProbePlan::Probe => {
+            if !probe_failed {
+                (NetworkEventProbeEffect::Proven, 0)
+            } else {
+                let next = pending_failures.saturating_add(1);
+                if event_probe_failure_rebuilds(next) {
+                    (NetworkEventProbeEffect::Rebuild, 0)
+                } else {
+                    (NetworkEventProbeEffect::Hold, next)
+                }
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::may_recover_in_place;
+    use super::{
+        NetworkEventProbeEffect, NetworkEventProbePlan, apply_network_event_probe, may_recover_in_place,
+        plan_network_event_probe,
+    };
 
     #[test]
     fn a_direct_overlay_bound_to_a_lost_adapter_cannot_recover_in_place() {
@@ -348,6 +432,79 @@ mod tests {
         assert!(
             !may_recover_in_place(true, Some("Ethernet"), Some(&uplinks)),
             "DIRECT bound to Ethernet while only Wi-Fi carries a default route must be rebuilt, even though the tunnel probe succeeded"
+        );
+    }
+
+    /// Simulated network-change harness. The monitor tick is not run; these
+    /// are the decisions it asks before it is allowed to stop the core.
+
+    #[test]
+    fn one_failed_network_event_probe_holds_the_tunnel() {
+        let plan = plan_network_event_probe(true, true, false, false, false, 0, false);
+        assert_eq!(plan, NetworkEventProbePlan::Probe);
+        assert_eq!(
+            apply_network_event_probe(plan, true, 0),
+            (NetworkEventProbeEffect::Hold, 1)
+        );
+    }
+
+    #[test]
+    fn a_second_failed_network_event_probe_rebuilds() {
+        let plan = plan_network_event_probe(false, false, false, false, false, 1, false);
+        assert_eq!(
+            plan,
+            NetworkEventProbePlan::Probe,
+            "the confirmation tick must probe without waiting for another OS event"
+        );
+        assert_eq!(
+            apply_network_event_probe(plan, true, 1),
+            (NetworkEventProbeEffect::Rebuild, 0)
+        );
+    }
+
+    #[test]
+    fn a_probe_that_recovers_clears_the_pending_failure() {
+        let plan = plan_network_event_probe(false, false, false, false, false, 1, false);
+        assert_eq!(
+            apply_network_event_probe(plan, false, 1),
+            (NetworkEventProbeEffect::Proven, 0)
+        );
+    }
+
+    #[test]
+    fn a_recent_proof_is_reused_instead_of_probing_again() {
+        assert_eq!(
+            plan_network_event_probe(true, true, false, false, false, 0, true),
+            NetworkEventProbePlan::ReuseRecentProof
+        );
+        assert_eq!(
+            apply_network_event_probe(NetworkEventProbePlan::ReuseRecentProof, true, 0),
+            (NetworkEventProbeEffect::Proven, 0),
+            "reuse does not consult the probe_failed flag"
+        );
+    }
+
+    #[test]
+    fn a_core_change_is_not_deferred_as_a_network_blip() {
+        assert_eq!(
+            plan_network_event_probe(true, true, true, false, false, 1, false),
+            NetworkEventProbePlan::Idle
+        );
+    }
+
+    #[test]
+    fn a_protection_failure_is_not_deferred_as_a_network_blip() {
+        assert_eq!(
+            plan_network_event_probe(true, true, false, true, false, 0, false),
+            NetworkEventProbePlan::Idle
+        );
+    }
+
+    #[test]
+    fn an_owned_direct_reload_does_not_probe() {
+        assert_eq!(
+            plan_network_event_probe(true, true, false, false, true, 0, false),
+            NetworkEventProbePlan::Idle
         );
     }
 }

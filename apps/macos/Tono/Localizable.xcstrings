@@ -6109,6 +6109,26 @@
         }
       }
     },
+    "The connection didn't complete. Support code CORE_EXIT_UNREACHABLE.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "连接没有完成。支持码 CORE_EXIT_UNREACHABLE。"
+          }
+        }
+      }
+    },
+    "The connection didn't complete. Support code TONO_CONNECT_TUN.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "连接没有完成。支持码 TONO_CONNECT_TUN。"
+          }
+        }
+      }
+    },
     "The current device cannot revoke itself.": {
       "localizations": {
         "zh-Hans": {
@@ -6361,12 +6381,12 @@
         }
       }
     },
-    "The network service whose DNS settings Tono saved has been deleted, so those DNS servers could not be put back. DNS is now obtained automatically. If your network needs manual DNS servers, set them again in System Settings > Network.": {
+    "Tono did not restore the saved DNS settings because the network service was removed or its DNS settings changed. Any newer DNS settings were kept. Check System Settings > Network if DNS needs adjustment.": {
       "localizations": {
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "Tono 保存的 DNS 设置所属的网络服务已被删除，原来的 DNS 服务器无法写回，现已改为自动获取 DNS。如果该网络需要手动填写 DNS 服务器，请在系统设置 > 网络中重新设置。"
+            "value": "网络服务已被移除，或其 DNS 设置已更改，因此 Tono 未恢复保存的 DNS 设置。较新的 DNS 设置已保留。如需调整 DNS，请检查系统设置 > 网络。"
           }
         }
       }
@@ -8163,6 +8183,26 @@
           "stringUnit": {
             "state": "translated",
             "value": "好"
+          }
+        }
+      }
+    },
+    "This Mac restarted unexpectedly while Tono was connected, so Tono did not reconnect automatically. Kill Switch is still blocking traffic. Click Repair and reconnect to connect, or Restore internet to get back online.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "这台 Mac 在 Tono 连接期间意外重启，所以 Tono 没有自动重新连接。断网保护仍在拦住直连。点按「修复并重新连接」来连接，或点按「恢复正常网络」恢复上网。"
+          }
+        }
+      }
+    },
+    "Tono could not save its restart safety record, so the connection was not started. Check available disk space and retry. %@": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tono 无法保存重启安全记录，因此没有启动连接。请检查可用磁盘空间后重试。%@"
           }
         }
       }

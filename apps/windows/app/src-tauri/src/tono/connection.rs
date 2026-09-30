@@ -3,8 +3,11 @@
 //! Every privileged step goes through the Service IPC wrappers in
 //! `core::service` — the owner/session machinery is never bypassed. The
 //! fail-closed invariant: once the WFP policy exists, only Disconnect,
-//! Sign Out, or Quit release it; everything else keeps blocking behind
-//! `Protected Offline` plus the 2/5/10/20/30 s reconnect backoff.
+//! Sign Out, Quit, or one ordinary self-heal exhaustion release it. That
+//! exhaustion uses the explicit release and does not build another tunnel.
+//! Windows has no strict kill switch, so a verified connect failure restores
+//! the original network instead of sitting in Protected Offline. Self-heal
+//! does not rewrite routes while a hop is still unproven.
 //!
 //! Concurrency: `connect_generation` (in `TonoInner`) is bumped by
 //! disconnect, sign-out, node switches, and catalog-driven teardowns. An
@@ -25,6 +28,7 @@ mod disconnect;
 mod reconnect;
 mod switch;
 mod direct;
+mod heal;
 mod platform;
 
 // Compatibility surface for existing command and test callers. The transaction
@@ -82,8 +86,9 @@ pub use crate::tono::connection_health::{
     protected_dns_unhealthy, startup_resume_guards_hold, startup_runtime_is_resume_candidate,
 };
 pub use crate::tono::connection_plan::{
-    FailurePlan, SelectAction, guard_rejection_is_transient, plan_failure, reconnect_allowed, retry_now_is_noop,
-    select_action, sign_out_needs_release, single_flight_begin, stale_exit_needs_release,
+    FailurePlan, SelectAction, guard_rejection_is_transient, plan_failure, plan_failure_using,
+    reconnect_allowed, retry_now_is_noop, select_action, sign_out_needs_release, single_flight_begin,
+    stale_exit_needs_release,
 };
 #[cfg(any(not(windows), test))]
 pub use crate::tono::connection_plan::stop_core_before_release;
@@ -235,14 +240,48 @@ pub(crate) async fn connect_for_generation(
     }
     match attempt_for_generation(&state, &app, expected_generation).await {
         Attempt::Connected => {
+            {
+                let mut inner = state.lock().await;
+                heal::note_connected(&mut inner);
+            }
             seed_autostart_after_connect();
             Ok(())
         }
         Attempt::GuardRejected(err) => Err(err),
         Attempt::Stale => Err("connection superseded by a newer transition".to_string()),
         Attempt::Failed { generation, error, account_owner } => {
+            let effect = {
+                let mut inner = state.lock().await;
+                heal::on_failure(&mut inner, &error)
+            };
             if fail_connect(&state, &app, generation, error.clone(), account_owner).await {
-                reconnect::schedule_reconnect_for_generation(&state, &app, generation).await;
+                match effect {
+                    tono_core::heal::NetworkEffect::FailOpen { .. } => {
+                        logging!(
+                            warn,
+                            Type::Service,
+                            "Tono: self-heal stopped; restoring the original network without another tunnel"
+                        );
+                        if let Err(release_error) = disconnect::release_explicit(&state, &app).await {
+                            logging!(
+                                error,
+                                Type::Service,
+                                "Tono: restoring the original network failed; protection stays as the release left it: {release_error}"
+                            );
+                        }
+                    }
+                    tono_core::heal::NetworkEffect::SelectiveAiHold { .. } => {
+                        logging!(
+                            warn,
+                            Type::Service,
+                            "Tono: self-heal kept AI-service destinations blocked and did not restore the whole network"
+                        );
+                    }
+                    tono_core::heal::NetworkEffect::HoldClosed => {
+                        reconnect::schedule_reconnect_for_generation(&state, &app, generation).await;
+                    }
+                    _ => {}
+                }
             }
             Err(error)
         }
@@ -289,6 +328,10 @@ async fn attempt_inner(state: &Arc<TonoState>, app: &AppHandle, expected_generat
     if expected_generation.is_some_and(|expected| expected != generation) {
         return Attempt::Stale;
     }
+    // Recovery only, and only while protection is down: one TCP fail-fast so
+    // the next tunnel is not installed on a node that just refused. The first
+    // connect does not wait here.
+    let node = heal::refine_before_arm(state, node).await;
     // L5: the clock starts at the top of the attempt, so even a
     // service-readiness failure leaves no orphan ConnectFail.
     let started = std::time::Instant::now();
@@ -492,7 +535,8 @@ async fn attempt_from_stage_failure(
 /// §6.1 guards: forced values live in the owned runtime; here we check the
 /// account is ready (H2a — the reconnect path's only account gate), the
 /// catalog is usable, the selection exists and passed admission, and no
-/// transaction is in flight. Pure read — no state changes.
+/// transaction is in flight. The only write is the in-memory heal dial, and
+/// only while protection is down.
 async fn guard_snapshot(
     state: &Arc<TonoState>,
 ) -> Result<(ValidatedNode, Vec<ValidatedNode>, Option<tono_core::CatalogRouting>, u64, CancellationToken), String> {
@@ -501,7 +545,7 @@ async fn guard_snapshot(
             "{RELEASE_RECONCILING_PREFIX}: network protection release is still reconciling; wait before reconnecting"
         ));
     }
-    let inner = state.lock().await;
+    let mut inner = state.lock().await;
     if inner.account_close.is_some() {
         return Err("account sign-out is still reconciling".to_string());
     }
@@ -524,10 +568,11 @@ async fn guard_snapshot(
     if inner.nodes.is_empty() {
         return Err(CATALOG_NOT_READY_REJECTION.to_string());
     }
-    let selected = inner
-        .selected_node
-        .clone()
-        .ok_or_else(|| "select a server first".to_string())?;
+    heal::prepare(&mut inner);
+    let selected = heal::dial_name(&inner);
+    if selected.is_empty() {
+        return Err("select a server first".to_string());
+    }
     let node = inner
         .nodes
         .iter()
@@ -565,12 +610,17 @@ async fn guard_snapshot(
 
 
 
-/// The §6 failure decision table, executing [`plan_failure`]. After arm:
-/// stop the core, keep blocking (restrict to the bootstrap channel),
-/// Protected Offline. Before arm: full release.
+/// The failure decision table, executing [`plan_failure`]. A verified barrier
+/// with an explicit strict kill switch keeps blocking. A ready selective
+/// AI-block hook releases general traffic and must not full-release. Every
+/// other exhausted attempt full-releases. A raced disconnect does nothing.
 async fn fail_connect(
     state: &Arc<TonoState>, app: &AppHandle, generation: u64, err: String, account_owner: (u64, u64),
 ) -> bool {
+    {
+        let inner = state.lock().await;
+        inner.client.transport().set_auth_tunnel_port(0);
+    }
     let task_state = Arc::clone(state);
     let task_app = app.clone();
     match cleanup::reconcile_failure(
@@ -600,7 +650,12 @@ async fn fail_connect_observed(
         return false;
     };
     let mut guard = Some(guard);
-    let release_result = if plan.stop_core == Some(true) && armed {
+    let release_result = if plan.selective_ai_hold {
+        // The hook already rewrote filters so general traffic flows and
+        // AI-service destinations stay blocked. `release_explicit` would
+        // remove that hold.
+        None
+    } else if plan.stop_core == Some(true) && armed {
         // Register the real release before transferring this writer. If Disconnect already
         // registered its worker, the coordinator drops our writer and joins that actual result.
         Some(disconnect::release_explicit_with_guard(state, app, guard.take()).await)
@@ -670,10 +725,15 @@ async fn record_connect_failure(
         if session_verified {
             inner.fsm.mark_session_verified();
         }
-        let plan = plan_failure(armed, session_verified, was_disconnecting);
+        // No Windows preference on this path means the user did not explicitly
+        // enable a strict kill switch, so an exhausted attempt releases.
+        let strict_kill_switch = tono_core::strict_kill_switch_explicit(None);
+        let plan = plan_failure(armed, session_verified, was_disconnecting, strict_kill_switch);
         let action: &'static str = if was_disconnecting {
             "racedDisconnect"
-        } else if armed && session_verified {
+        } else if plan.selective_ai_hold {
+            "selectiveAiHold"
+        } else if plan.stop_core == Some(false) {
             "keepBlockingAndReconnect"
         } else {
             "fullRelease"
@@ -928,6 +988,7 @@ mod tests {
         kill_switch_unhealthy_for_monitor, map_service_ready_error, owned_direct_reload_in_flight,
         policy_behavior_change_allows_in_place_recovery,
         map_wfp_engine_error, monitor_interval, monitor_requires_reconnect, network_event_fires, plan_failure,
+        plan_failure_using,
         protected_dns_unhealthy, prove_service_endpoint_digest, prove_service_reload_mode, proxy_endpoint_of,
         unique_proxy_endpoints,
         reconnect_allowed, retry_now_is_noop, select_action, sign_out_needs_release, single_flight_begin,
@@ -1272,11 +1333,12 @@ mod tests {
     #[test]
     fn a_post_lock_failure_would_otherwise_be_a_dead_end() {
         assert_eq!(
-            plan_failure(true, false, false),
+            plan_failure(true, false, false, false),
             FailurePlan {
                 mark_armed: false,
                 stop_core: Some(true),
                 restrict_bootstrap: false,
+                selective_ai_hold: false,
             }
         );
         // ...and the FSM confirms the dead end: after that release neither
@@ -1519,16 +1581,27 @@ mod tests {
     #[test]
     fn post_lock_retry_does_not_weaken_the_failure_table() {
         assert_eq!(
-            plan_failure(true, false, false).stop_core,
+            plan_failure(true, false, false, false).stop_core,
             Some(true),
             "an unverified session is still fully released once the retries are exhausted"
         );
         assert_eq!(
-            plan_failure(true, true, false),
+            plan_failure(true, true, false, false),
+            FailurePlan {
+                mark_armed: false,
+                stop_core: Some(true),
+                restrict_bootstrap: false,
+                selective_ai_hold: false,
+            },
+            "an exhausted verified session fail-opens unless the user chose a strict kill switch"
+        );
+        assert_eq!(
+            plan_failure(true, true, false, true),
             FailurePlan {
                 mark_armed: true,
                 stop_core: Some(false),
                 restrict_bootstrap: true,
+                selective_ai_hold: false,
             }
         );
     }
@@ -1963,47 +2036,85 @@ mod tests {
 
     #[test]
     fn failure_plan_is_exhaustive() {
-        // Armed, no disconnect in flight: keep blocking (stop, never
-        // release), restrict to bootstrap, latch the armed flag.
+        // Exhausted and verified, no explicit strict kill switch: fail open.
         assert_eq!(
-            plan_failure(true, true, false),
+            plan_failure(true, true, false, false),
+            FailurePlan {
+                mark_armed: false,
+                stop_core: Some(true),
+                restrict_bootstrap: false,
+                selective_ai_hold: false,
+            }
+        );
+        // The same shape with an explicit strict kill switch keeps the block.
+        assert_eq!(
+            plan_failure(true, true, false, true),
             FailurePlan {
                 mark_armed: true,
                 stop_core: Some(false),
                 restrict_bootstrap: true,
+                selective_ai_hold: false,
             }
         );
         // Pre-arm failure: full release.
         assert_eq!(
-            plan_failure(false, false, false),
+            plan_failure(false, false, false, false),
             FailurePlan {
                 mark_armed: false,
                 stop_core: Some(true),
                 restrict_bootstrap: false,
+                selective_ai_hold: false,
             }
         );
         // Initial post-arm failure has not crossed the verification barrier: full release.
         assert_eq!(
-            plan_failure(true, false, false),
+            plan_failure(true, false, false, false),
             FailurePlan {
                 mark_armed: false,
                 stop_core: Some(true),
                 restrict_bootstrap: false,
+                selective_ai_hold: false,
             }
         );
         // A raced disconnect owns the release end to end; the failing
-        // transaction does nothing, whatever the arm state.
-        for armed in [true, false] {
+        // transaction does nothing, whatever the arm state. Strict does not
+        // let this transaction tear the network down a second time.
+        for (armed, strict) in [(true, false), (false, false), (true, true)] {
             assert_eq!(
-                plan_failure(armed, false, true),
+                plan_failure(armed, false, true, strict),
                 FailurePlan {
                     mark_armed: false,
                     stop_core: None,
                     restrict_bootstrap: false,
+                    selective_ai_hold: false,
                 },
                 "armed={armed}"
             );
         }
+    }
+
+    fn engage_selective_ai_block() -> bool {
+        true
+    }
+
+    #[test]
+    fn ready_selective_hook_does_not_full_release() {
+        let plan = plan_failure_using(true, true, false, false, Some(engage_selective_ai_block));
+        assert_eq!(
+            plan,
+            FailurePlan {
+                mark_armed: true,
+                stop_core: None,
+                restrict_bootstrap: false,
+                selective_ai_hold: true,
+            }
+        );
+        let strict = plan_failure_using(true, true, false, true, Some(engage_selective_ai_block));
+        assert!(!strict.selective_ai_hold);
+        assert_eq!(strict.stop_core, Some(false));
+        let unverified = plan_failure_using(true, false, false, false, Some(engage_selective_ai_block));
+        assert!(!unverified.selective_ai_hold);
+        assert_eq!(unverified.stop_core, Some(true));
     }
 
     #[test]

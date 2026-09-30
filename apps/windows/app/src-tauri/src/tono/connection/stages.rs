@@ -156,6 +156,11 @@ pub(super) async fn run_stages(
     bfe_preflight.map_err(StageFailure::error)?;
     let controller_port = runtime_ports.controller_port;
     let mixed_port = runtime_ports.mixed_port;
+    // Auth may use this loopback port last. It does not install a route or a filter.
+    {
+        let inner = state.lock().await;
+        inner.client.transport().set_auth_tunnel_port(mixed_port);
+    }
     if let Err(error) = dns_preflight {
         if active_runtime_resume.is_some() {
             // The old, strongly proven same-owner Core is expected to own TCP/UDP loopback:53.
