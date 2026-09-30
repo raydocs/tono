@@ -1,4 +1,5 @@
-import { AlertTriangle, Clock, Database, Inbox, RotateCw } from 'lucide-react';
+import { AlertTriangle, Clock, Database, Inbox, Loader2, RotateCw } from 'lucide-react';
+import { useEffect, useRef } from 'react';
 import { cn } from '@/lib/utils';
 import type { Tone } from '@proto/charts/core';
 import { useProto } from '@proto/state';
@@ -11,9 +12,9 @@ const TONE_DOT: Record<Tone, string> = { ok: 'bg-ok', warn: 'bg-warn', sev: 'bg-
 
 export function toneText(t: Tone) { return TONE_TEXT[t]; }
 
-export function Dot({ tone, pulse }: { tone: Tone; pulse?: boolean }) {
+export function Dot({ tone, pulse, label }: { tone: Tone; pulse?: boolean; label?: string }) {
   return (
-    <span className="relative inline-flex h-2 w-2 shrink-0">
+    <span className="relative inline-flex h-2 w-2 shrink-0" role={label ? 'img' : undefined} aria-label={label} aria-hidden={label ? undefined : true}>
       {pulse && <span className={cn('absolute inset-0 animate-ping rounded-full opacity-50', TONE_DOT[tone])} />}
       <span className={cn('relative inline-flex h-2 w-2 rounded-full', TONE_DOT[tone])} />
     </span>
@@ -55,6 +56,24 @@ type PanelProps = {
   children: React.ReactNode;
 };
 
+/** A region that scrolls sideways but holds nothing focusable gets a tab stop, so keyboard users can scroll it. */
+function useKeyboardScroll<T extends HTMLElement>() {
+  const ref = useRef<T>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return undefined;
+    const sync = () => {
+      const needs = el.scrollWidth > el.clientWidth + 1 && !el.querySelector('a, button, input, select, textarea, [tabindex]');
+      if (needs) el.setAttribute('tabindex', '0'); else el.removeAttribute('tabindex');
+    };
+    sync();
+    const ro = new ResizeObserver(sync);
+    ro.observe(el);
+    return () => ro.disconnect();
+  });
+  return ref;
+}
+
 /**
  * Every block of data on every page is a Panel. The panel, not the page,
  * owns loading, error and staleness, so one slow source never blanks a page.
@@ -63,6 +82,7 @@ export function Panel({ title, description, actions, source, ageMin = 1, staleAf
   const { dataState } = useProto();
   const stale = dataState === 'stale' ? 42 : ageMin;
   const isStale = stale > staleAfter;
+  const body = useKeyboardScroll<HTMLDivElement>();
   return (
     <section className={cn('flex min-w-0 flex-col rounded-lg border border-line bg-panel', className)}>
       {(title || actions) && (
@@ -75,7 +95,7 @@ export function Panel({ title, description, actions, source, ageMin = 1, staleAf
           {actions}
         </header>
       )}
-      <div className={cn('min-w-0 flex-1', !flush && 'p-4')}>
+      <div ref={flush ? body : undefined} className={cn('min-w-0 flex-1', flush ? 'overflow-x-auto' : 'p-4')}>
         {dataState === 'loading' ? <div className={cn(flush && 'p-4')}><Loading /></div>
           : dataState === 'error' ? <div className={cn(flush && 'p-4')}><ErrorState source={source} /></div>
             : children}
@@ -114,18 +134,30 @@ export function Stat({ label, value, sub, tone, children, href }: {
   return href ? <a href={href} className={cn(cls, 'transition-colors hover:border-line-strong')}>{body}</a> : <div className={cls}>{body}</div>;
 }
 
-export function Segmented<T extends string>({ value, options, onChange, size = 'sm' }: {
-  value: T; options: { value: T; label: string; count?: number }[]; onChange: (v: T) => void; size?: 'sm' | 'xs';
+export function Segmented<T extends string>({ value, options, onChange, size = 'sm', label }: {
+  value: T; options: { value: T; label: string; count?: number }[]; onChange: (v: T) => void; size?: 'sm' | 'xs'; label?: string;
 }) {
+  function onKey(e: React.KeyboardEvent) {
+    if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
+    e.preventDefault();
+    const i = options.findIndex((o) => o.value === value);
+    const next = options[(i + (e.key === 'ArrowRight' ? 1 : options.length - 1)) % options.length];
+    onChange(next.value);
+    (e.currentTarget.querySelector(`[data-value="${next.value}"]`) as HTMLElement | null)?.focus();
+  }
   return (
-    <div className="inline-flex rounded-md border border-line bg-panel-2 p-0.5">
+    <div role="radiogroup" aria-label={label} onKeyDown={onKey} className="inline-flex max-w-full overflow-x-auto rounded-md border border-line bg-panel-2 p-0.5">
       {options.map((o) => (
         <button
           key={o.value}
           type="button"
+          role="radio"
+          aria-checked={o.value === value}
+          tabIndex={o.value === value ? 0 : -1}
+          data-value={o.value}
           onClick={() => onChange(o.value)}
           className={cn(
-            'inline-flex items-center gap-1.5 rounded-[5px] px-2.5 font-medium transition-colors',
+            'inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-[5px] px-2.5 font-medium transition-colors',
             size === 'sm' ? 'h-7 text-xs' : 'h-6 text-2xs',
             o.value === value ? 'bg-panel text-fg shadow-[0_0_0_1px_var(--line)]' : 'text-muted hover:text-fg',
           )}
@@ -138,19 +170,29 @@ export function Segmented<T extends string>({ value, options, onChange, size = '
   );
 }
 
-export function Button({ children, variant = 'default', size = 'sm', onClick, href, icon }: {
-  children: React.ReactNode; variant?: 'default' | 'primary' | 'ghost' | 'danger'; size?: 'sm' | 'xs';
-  onClick?: () => void; href?: string; icon?: React.ReactNode;
+export function Button({ children, variant = 'default', size = 'sm', onClick, href, icon, disabled, loading, label, type = 'button' }: {
+  children?: React.ReactNode; variant?: 'default' | 'primary' | 'ghost' | 'danger' | 'danger-solid'; size?: 'sm' | 'xs';
+  onClick?: () => void; href?: string; icon?: React.ReactNode; disabled?: boolean; loading?: boolean;
+  /** Required when the button is icon-only. */
+  label?: string; type?: 'button' | 'submit';
 }) {
   const cls = cn(
-    'inline-flex items-center gap-1.5 whitespace-nowrap rounded-md font-medium transition-colors',
+    'inline-flex shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-md font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50',
     size === 'sm' ? 'h-8 px-3 text-sm' : 'h-7 px-2.5 text-xs',
-    variant === 'primary' && 'bg-accent text-white hover:opacity-90',
+    !children && (size === 'sm' ? 'w-8 px-0' : 'w-7 px-0'),
+    variant === 'primary' && 'bg-accent text-accent-fg hover:opacity-90',
     variant === 'default' && 'border border-line bg-panel hover:bg-hover',
     variant === 'ghost' && 'text-muted hover:bg-hover hover:text-fg',
     variant === 'danger' && 'border border-line bg-panel text-sev hover:bg-sev-soft',
+    variant === 'danger-solid' && 'bg-sev text-accent-fg hover:opacity-90',
   );
-  return href ? <a href={href} className={cls}>{icon}{children}</a> : <button type="button" onClick={onClick} className={cls}>{icon}{children}</button>;
+  const inner = <>{loading ? <Loader2 size={size === 'sm' ? 14 : 12} className="animate-spin" aria-hidden /> : icon}{children}</>;
+  if (href) return <a href={href} className={cls} aria-label={label}>{inner}</a>;
+  return <button type={type} onClick={onClick} className={cls} disabled={disabled || loading} aria-label={label} aria-busy={loading || undefined}>{inner}</button>;
+}
+
+export function Kbd({ children }: { children: React.ReactNode }) {
+  return <kbd className="inline-flex h-5 min-w-5 items-center justify-center rounded border border-line bg-panel-2 px-1 text-2xs font-medium text-muted num">{children}</kbd>;
 }
 
 export function Legend({ items }: { items: { label: string; color: string; dashed?: boolean }[] }) {

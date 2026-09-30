@@ -23,6 +23,8 @@ type Props = {
   longRange?: boolean;
   /** Counts: ticks land on whole numbers only. */
   integer?: boolean;
+  /** Screen-reader summary; defaults to each series' latest value. */
+  label?: string;
 };
 
 const PAD = { top: 8, right: 8, bottom: 22 };
@@ -32,7 +34,7 @@ const PAD = { top: 8, right: 8, bottom: 22 };
  * every series at that instant, the way Grafana does; nulls break the line
  * rather than being drawn as zero.
  */
-export function LineChart({ series, height = 180, format, domain, guides = [], bands = [], longRange, integer }: Props) {
+export function LineChart({ series, height = 180, format, domain, guides = [], bands = [], longRange, integer, label }: Props) {
   const [ref, width] = useWidth<HTMLDivElement>();
   const [hover, setHover] = useState<number | null>(null);
   const times = series[0]?.points.map((p) => p.at) ?? [];
@@ -77,10 +79,14 @@ export function LineChart({ series, height = 180, format, domain, guides = [], b
   }
 
   const hx = hover != null ? x(times[hover]) : 0;
+  const summary = label ?? series.map((s) => {
+    const latest = [...s.points].reverse().find((p) => p.v != null)?.v;
+    return `${s.name} 最新 ${latest == null ? '无数据' : format(latest)}`;
+  }).join('；');
   return (
     <div ref={ref} className="relative w-full select-none" style={{ height }}>
       {width > 0 && (
-        <svg width={width} height={height} onMouseMove={onMove} onMouseLeave={() => setHover(null)} role="img">
+        <svg width={width} height={height} onMouseMove={onMove} onMouseLeave={() => setHover(null)} role="img" aria-label={summary}>
           {bands.map((b, i) => (
             <rect key={i} x={x(Math.max(b.from, times[0]))} y={PAD.top} width={Math.max(0, x(Math.min(b.to, times[times.length - 1])) - x(Math.max(b.from, times[0])))} height={innerH} fill={TONE_VAR[b.tone]} opacity={0.08} />
           ))}

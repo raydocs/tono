@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import type { Point } from '@proto/mock/series';
-import { extent, linear, TONE_VAR, type Tone, useWidth } from './core';
+import { extent, linear, niceTicks, TONE_VAR, type Tone, useWidth } from './core';
 
 /** A trend without axes, for table cells and stat cards. */
 export function Spark({ points, color = 'var(--c1)', height = 24, width = 96, area = true, domain }: {
@@ -23,35 +23,52 @@ export function Spark({ points, color = 'var(--c1)', height = 24, width = 96, ar
 }
 
 /** Stacked bars over categories or time buckets, with a hover readout. */
-export function Bars({ data, colors, names, height = 160, format }: {
+export function Bars({ data, colors, names, height = 160, format, axis, label }: {
   data: { label: string; values: number[] }[];
   colors: string[];
   names: string[];
   height?: number;
   format: (v: number) => string;
+  /** Draw a value axis with round ticks and guide lines. */
+  axis?: boolean;
+  label?: string;
 }) {
   const [ref, width] = useWidth<HTMLDivElement>();
   const [hover, setHover] = useState<number | null>(null);
-  const max = Math.max(1, ...data.map((d) => d.values.reduce((a, b) => a + Math.max(0, b), 0)));
+  const peak = Math.max(1, ...data.map((d) => d.values.reduce((a, b) => a + Math.max(0, b), 0)));
+  const ticks = axis ? niceTicks(0, peak * 1.05, 4) : [];
+  const max = axis ? Math.max(peak, ticks[ticks.length - 1] ?? peak) : peak;
+  const left = axis ? Math.max(28, Math.max(...ticks.map((t) => format(t).length)) * 6.8 + 12) : 0;
   const bottom = 20;
-  const innerH = height - bottom - 4;
-  const slot = width / Math.max(1, data.length);
+  const top = axis ? 8 : 4;
+  const innerH = height - bottom - top;
+  const slot = (width - left) / Math.max(1, data.length);
   const bw = Math.max(4, Math.min(28, slot * 0.62));
+  const summary = label ?? `${names.join('、')}：${data.map((d) => `${d.label} ${format(d.values.reduce((a, b) => a + b, 0))}`).join('，')}`;
   return (
     <div ref={ref} className="relative w-full" style={{ height }}>
       {width > 0 && (
-        <svg width={width} height={height} onMouseLeave={() => setHover(null)}>
-          <line x1={0} x2={width} y1={innerH + 4} y2={innerH + 4} stroke="var(--line)" />
+        <svg width={width} height={height} onMouseLeave={() => setHover(null)} role="img" aria-label={summary}>
+          {ticks.map((t) => {
+            const ty = top + innerH - (t / max) * innerH;
+            return (
+              <g key={t}>
+                <line x1={left} x2={width} y1={ty} y2={ty} stroke="var(--line)" strokeDasharray={t === 0 ? undefined : '2 3'} />
+                <text x={left - 8} y={ty} dy="0.32em" textAnchor="end" fontSize={11} fill="var(--faint)" className="num">{format(t)}</text>
+              </g>
+            );
+          })}
+          {!axis && <line x1={0} x2={width} y1={innerH + top} y2={innerH + top} stroke="var(--line)" />}
           {data.map((d, i) => {
             let acc = 0;
-            const cx = slot * i + slot / 2;
+            const cx = left + slot * i + slot / 2;
             return (
               <g key={d.label} onMouseEnter={() => setHover(i)}>
-                <rect x={slot * i} y={0} width={slot} height={height} fill="transparent" />
+                <rect x={left + slot * i} y={0} width={slot} height={height} fill="transparent" />
                 {d.values.map((v, k) => {
                   const h = (Math.max(0, v) / max) * innerH;
                   acc += h;
-                  return <rect key={k} x={cx - bw / 2} y={innerH + 4 - acc} width={bw} height={Math.max(0, h - 1)} rx={2} fill={colors[k]} opacity={hover == null || hover === i ? 1 : 0.45} />;
+                  return <rect key={k} x={cx - bw / 2} y={innerH + top - acc} width={bw} height={Math.max(0, h - 1)} rx={2} fill={colors[k]} opacity={hover == null || hover === i ? 1 : 0.45} />;
                 })}
                 <text x={cx} y={height - 4} textAnchor="middle" fontSize={11} fill="var(--faint)">{d.label}</text>
               </g>
@@ -60,7 +77,7 @@ export function Bars({ data, colors, names, height = 160, format }: {
         </svg>
       )}
       {hover != null && (
-        <div className="pointer-events-none absolute z-10 rounded-md border border-line bg-panel px-2.5 py-2 text-xs" style={{ left: Math.min(slot * hover + slot / 2 + 10, width - 160), top: 0, boxShadow: 'var(--shadow-pop)' }}>
+        <div className="pointer-events-none absolute z-10 rounded-md border border-line bg-panel px-2.5 py-2 text-xs" style={{ left: Math.min(left + slot * hover + slot / 2 + 10, width - 160), top: 0, boxShadow: 'var(--shadow-pop)' }}>
           <div className="mb-1 text-faint">{data[hover].label}</div>
           {names.map((n, k) => (
             <div key={n} className="flex items-center gap-2">
@@ -78,7 +95,8 @@ export function Bars({ data, colors, names, height = 160, format }: {
 /** One tick per probe; a gap is "not probed", never "dead". */
 export function ProbeStrip({ probes, height = 16 }: { probes: ('alive' | 'dead' | null)[]; height?: number }) {
   return (
-    <div className="flex items-end gap-px" style={{ height }} aria-label="探测记录">
+    <div className="flex items-end gap-px" style={{ height }} role="img"
+      aria-label={`探测 ${probes.length} 次：通 ${probes.filter((p) => p === 'alive').length}，不通 ${probes.filter((p) => p === 'dead').length}，未测 ${probes.filter((p) => p == null).length}`}>
       {probes.map((p, i) => (
         <span
           key={i}
@@ -95,7 +113,7 @@ export function Heatmap({ rows, rowLabels, max = 60, cell = 14, color = 'var(--c
   rows: number[][]; rowLabels: string[]; max?: number; cell?: number; color?: string;
 }) {
   return (
-    <div className="inline-grid gap-1" style={{ gridTemplateColumns: `28px repeat(${rows[0]?.length ?? 0}, ${cell}px)` }}>
+    <div className="inline-grid gap-1" role="img" aria-label={`${rows.length} 天 × ${rows[0]?.length ?? 0} 小时的使用分钟数`} style={{ gridTemplateColumns: `28px repeat(${rows[0]?.length ?? 0}, ${cell}px)` }}>
       {rows.map((row, r) => [
         <span key={`l${r}`} className="text-2xs text-faint leading-[14px]">{rowLabels[r]}</span>,
         ...row.map((v, c) => (

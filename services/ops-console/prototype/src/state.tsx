@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import type { Range } from '@proto/mock/series';
 
 export type DataState = 'ready' | 'loading' | 'stale' | 'error';
@@ -50,9 +50,13 @@ export function useProto(): Proto {
 export function useHash(): string {
   const [hash, setHash] = useState(() => window.location.hash.replace(/^#/, '') || '/');
   useEffect(() => {
+    let path = hash.split('?')[0];
     const on = () => {
-      setHash(window.location.hash.replace(/^#/, '') || '/');
-      document.querySelector('main')?.scrollTo({ top: 0 });
+      const next = window.location.hash.replace(/^#/, '') || '/';
+      setHash(next);
+      const nextPath = next.split('?')[0];
+      if (nextPath !== path) document.querySelector('main')?.scrollTo({ top: 0 });
+      path = nextPath;
     };
     window.addEventListener('hashchange', on);
     return () => window.removeEventListener('hashchange', on);
@@ -62,4 +66,28 @@ export function useHash(): string {
 
 export function go(path: string) {
   window.location.hash = path;
+}
+
+function readParam(key: string): string | null {
+  const q = window.location.hash.split('?')[1];
+  return q ? new URLSearchParams(q).get(key) : null;
+}
+
+/**
+ * A drawer's subject lives in the URL (`#/observe?code=ETIMEDOUT`), so a
+ * detail can be linked in chat and survives a reload. Opening or closing it
+ * replaces history instead of pushing, so Back leaves the page.
+ */
+export function useHashParam(key: string): [string | null, (value: string | null) => void] {
+  const hash = useHash();
+  const value = hash.includes('?') ? readParam(key) : null;
+  const set = useCallback((next: string | null) => {
+    const [path, q = ''] = window.location.hash.replace(/^#/, '').split('?');
+    const params = new URLSearchParams(q);
+    if (next == null) params.delete(key); else params.set(key, next);
+    const qs = params.toString();
+    window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}#${path}${qs ? `?${qs}` : ''}`);
+    window.dispatchEvent(new HashChangeEvent('hashchange'));
+  }, [key]);
+  return [value, set];
 }
