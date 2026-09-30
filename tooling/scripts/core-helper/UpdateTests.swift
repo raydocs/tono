@@ -325,6 +325,62 @@ func runUpdateSelfTests() -> Bool {
         }
         try check(corrupted == 1, "Corrupt-ledger startup stopped arming the emergency block")
     }
+    test("explicit-recovery-retains-corrupt-ledger-and-requires-cleanup-before-pf") { directory in
+        let store = try UpdateStorage(root: directory)
+        let bad = Data("not a ledger".utf8)
+        try UpdateStorage.write(bad, to: directory + "/ledger.json")
+        try refuses { _ = try store.load() }
+        var events = [String]()
+        try refuses {
+            try performExplicitEmergencyRelease(
+                isolate: { events.append("isolate") },
+                takeOwnership: { events.append("own") },
+                cleanup: { events.append("cleanup"); throw HelperFailure.system("DNS readback failed") },
+                recordRequest: { events.append("record") },
+                releasePF: { events.append("release") }
+            )
+        }
+        try check(events == ["isolate", "own", "cleanup"],
+                  "A failed Core/TUN/DNS proof opened PF or recorded a completed recovery")
+        try check(UpdateStorage.read(directory + "/ledger.json", maximum: 128 * 1024) == bad,
+                  "Corrupt update evidence was modified")
+    }
+    test("explicit-recovery-release-order-and-newer-ledger-retention") { directory in
+        let store = try UpdateStorage(root: directory)
+        let newer = Data("{\"schemaVersion\":2,\"highWater\":14,\"generation\":1}".utf8)
+        try UpdateStorage.write(newer, to: directory + "/ledger.json")
+        try refuses { _ = try store.load() }
+        var events = [String]()
+        try performExplicitEmergencyRelease(
+            isolate: { events.append("isolate") },
+            takeOwnership: { events.append("own") },
+            cleanup: { events.append("core-tun-dns-safe") },
+            recordRequest: { events.append("record") },
+            releasePF: { events.append("release") }
+        )
+        try check(events == ["isolate", "own", "core-tun-dns-safe", "record", "release"],
+                  "Recovery loaded PF or released it before ownership and Core/DNS proof")
+        try check(UpdateStorage.read(directory + "/ledger.json", maximum: 128 * 1024) == newer,
+                  "Newer-schema ledger or high-water was modified")
+    }
+    test("recovery-lease-bars-current-owner-and-later-startup") { directory in
+        let root = directory + "/recovery"
+        var daemon: RecoveryOwnership? = try RecoveryOwnership(root: root)
+        try daemon?.acquire(exclusive: false)
+        do {
+            let recovery = try RecoveryOwnership(root: root)
+            try refuses { try recovery.acquire(exclusive: true, maximumAttempts: 1) }
+            daemon = nil
+            try recovery.acquire(exclusive: true, maximumAttempts: 1)
+            try recovery.recordRecoveryRequest()
+            let competing = try RecoveryOwnership(root: root)
+            try refuses { try competing.acquire(exclusive: false, maximumAttempts: 1) }
+        }
+        let laterStartup = try RecoveryOwnership(root: root)
+        try laterStartup.acquire(exclusive: false, maximumAttempts: 1)
+        try check(try laterStartup.recoveryRequested,
+                  "A later startup missed the durable root recovery request")
+    }
     // A Mac that was never connected was blocked at every boot by a store it
     // could not read (BRICK-M1): the startup barrier needs saved intent, and
     // when the store opened that intent is read under the update lock, where

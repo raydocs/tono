@@ -786,6 +786,206 @@ func requestHelperShutdown(_ signal: Int32) {
     helperShutdownRequested = 1
 }
 
+/// Independent of Updates: a corrupt or newer ledger cannot prevent root
+/// recovery. Normal helper/executor processes hold a shared lease for their
+/// entire life (including IPC, supervision and power callbacks). Recovery
+/// first unregisters them, then owns the exclusive lease through release.
+/// Never take this lease while holding the Updates lock: executor bootout
+/// waits for the daemon, whose update-lock wait is interruptible.
+final class RecoveryOwnership {
+    static let directory = "/private/var/db/com.raydocs.tono.recovery"
+    private let fd: Int32
+    private let root: String
+    private var locked = false
+    private var exclusive = false
+
+    init(root: String = directory) throws {
+        self.root = root
+        if root == Self.directory {
+            for path in ["/private", "/private/var", "/private/var/db"] {
+                _ = try secureMetadata(path, type: mode_t(S_IFDIR), owner: 0)
+            }
+        }
+        try ensureRootDirectory(root, permissions: 0o700)
+        fd = open(root + "/owner.lock", O_RDWR | O_CREAT | O_NOFOLLOW | O_CLOEXEC, 0o600)
+        guard fd >= 0 else { throw HelperFailure.system("Recovery ownership lock is unavailable.") }
+        do {
+            let path = try secureMetadata(root + "/owner.lock", type: mode_t(S_IFREG), owner: 0)
+            var opened = stat()
+            guard fstat(fd, &opened) == 0, opened.st_dev == path.st_dev,
+                  opened.st_ino == path.st_ino else {
+                throw HelperFailure.invalid("Recovery ownership lock changed while opening.")
+            }
+            try UpdateStorage.syncDirectory(root)
+        } catch { close(fd); throw error }
+    }
+
+    deinit { if locked { flock(fd, LOCK_UN) }; close(fd) }
+
+    func acquire(exclusive: Bool, maximumAttempts: Int = 600,
+                 stopRequested: () -> Bool = { helperShutdownRequested != 0 }) throws {
+        guard !locked else { throw HelperFailure.invalid("Recovery ownership is already held by this descriptor.") }
+        let mode = (exclusive ? LOCK_EX : LOCK_SH) | LOCK_NB
+        for _ in 0..<maximumAttempts {
+            if flock(fd, mode) == 0 { locked = true; self.exclusive = exclusive; return }
+            guard errno == EWOULDBLOCK || errno == EINTR else {
+                throw HelperFailure.system("Recovery ownership lock failed.")
+            }
+            if stopRequested() { throw HelperFailure.stopping("Helper stopped while awaiting recovery ownership.") }
+            usleep(50_000)
+        }
+        throw HelperFailure.system("Recovery ownership could not be confirmed before its deadline.")
+    }
+
+    var recoveryRequested: Bool {
+        get throws {
+            var metadata = stat()
+            let path = root + "/requested"
+            if lstat(path, &metadata) != 0 {
+                if errno == ENOENT { return false }
+                throw HelperFailure.system("Cannot inspect recovery ownership record.")
+            }
+            _ = try UpdateStorage.read(path, maximum: 64)
+            return true
+        }
+    }
+
+    func recordRecoveryRequest() throws {
+        guard locked && exclusive else {
+            throw HelperFailure.invalid("Exclusive recovery ownership is not held.")
+        }
+        if try recoveryRequested { return }
+        try UpdateStorage.write(Data("root emergency disarm\n".utf8), to: root + "/requested")
+    }
+}
+
+/// A nonzero/unknown launchctl result is never proof of bootout. The kernel
+/// process census also covers an old executor binary that predates the lease.
+private func recoveryLaunchctl(_ arguments: [String]) throws -> Int32 {
+    let child = Process()
+    child.executableURL = URL(fileURLWithPath: "/bin/launchctl")
+    child.arguments = arguments
+    child.standardOutput = FileHandle.nullDevice
+    child.standardError = FileHandle.nullDevice
+    try child.run()
+    for _ in 0..<100 where child.isRunning { usleep(100_000) }
+    if child.isRunning {
+        child.terminate()
+        for _ in 0..<20 where child.isRunning { usleep(100_000) }
+        if child.isRunning { kill(child.processIdentifier, SIGKILL) }
+        child.waitUntilExit()
+        throw HelperFailure.system("Launchd owner isolation timed out.")
+    }
+    child.waitUntilExit()
+    return child.terminationStatus
+}
+
+private func survivingRecoveryMutator() throws -> Bool {
+    let capacity = proc_listallpids(nil, 0)
+    guard capacity > 0 else { throw HelperFailure.system("Cannot enumerate recovery mutators.") }
+    var pids = [Int32](repeating: 0, count: Int(capacity) + 32)
+    let count = pids.withUnsafeMutableBytes { proc_listallpids($0.baseAddress, Int32($0.count)) }
+    guard count > 0, Int(count) < pids.count else {
+        throw HelperFailure.system("Cannot enumerate every recovery mutator.")
+    }
+    for pid in pids.prefix(Int(count)) where pid > 1 && pid != getpid() {
+        let path = processExecutablePath(pid)
+        let name = processShortName(pid)
+        if path == UpdatePackage.helperPath
+            || (path?.hasPrefix(UpdateStorage.directory + "/") == true && path?.hasSuffix("/executor") == true)
+            || path == "/sbin/pfctl"
+            || path == "/usr/sbin/networksetup"
+            || name == "tono-core-helper" || name == "executor" {
+            if processLiveness(pid) != false { return true }
+        }
+    }
+    return false
+}
+
+private func isolateRecoveryMutators(
+    launchctl: ([String]) throws -> Int32 = recoveryLaunchctl,
+    surviving: () throws -> Bool = survivingRecoveryMutator
+) throws {
+    for label in [UpdateExecutor.label, UpdateExecutor.daemonLabel] {
+        let service = "system/" + label
+        let status = try launchctl(["bootout", service])
+        guard status == 0 || status == 113,
+              try launchctl(["print", service]) == 113 else {
+            throw HelperFailure.system("Tono launchd mutator was not unregistered: \(label).")
+        }
+    }
+    if try surviving() { throw HelperFailure.system("A Tono mutator process survived bootout.") }
+}
+
+/// Explicit root release does not claim an update Disconnect: full transaction
+/// proof is unavailable when the ledger cannot be decoded. It retains every
+/// update byte, including high-water, and verifies only the separate physical
+/// Core/TUN/DNS prerequisites before opening Tono's PF anchor.
+func performExplicitEmergencyRelease(
+    isolate: () throws -> Void,
+    takeOwnership: () throws -> Void,
+    cleanup: () throws -> Void,
+    recordRequest: () throws -> Void,
+    releasePF: () throws -> Void
+) throws {
+    try isolate()
+    try takeOwnership()
+    try cleanup()
+    try recordRequest()
+    try releasePF()
+}
+
+func runExplicitEmergencyDisarm() -> Bool {
+    guard geteuid() == 0 else {
+        fputs("Tono emergency recovery must be run with sudo.\n", stderr)
+        return false
+    }
+    do {
+        try UpdatePackage.runningHelperMatchesInstalled()
+        let owner = try RecoveryOwnership()
+        var recoveryUID: uid_t?
+        try performExplicitEmergencyRelease(
+            isolate: { try isolateRecoveryMutators() },
+            takeOwnership: {
+                try owner.acquire(exclusive: true)
+                for label in [UpdateExecutor.label, UpdateExecutor.daemonLabel] {
+                    guard try recoveryLaunchctl(["print", "system/" + label]) == 113 else {
+                        throw HelperFailure.system("A Tono launchd mutator re-registered during recovery.")
+                    }
+                }
+                if try survivingRecoveryMutator() {
+                    throw HelperFailure.system("A Tono mutator survived exclusive recovery ownership.")
+                }
+            },
+            cleanup: {
+                let uid = try readAllowedUID()
+                recoveryUID = uid
+                let core = try CoreManager(allowedUID: uid)
+                try core.stop()
+                guard !core.status().running, if_nametoindex("utun199") == 0 else {
+                    throw HelperFailure.system("Owned Core or TUN is still active.")
+                }
+                let dns = try ProtectedDNSManager()
+                _ = try dns.restore(deferringLossNotice: true)
+                try dns.verifyRestored()
+            },
+            recordRequest: { try owner.recordRecoveryRequest() },
+            releasePF: {
+                guard let uid = recoveryUID else {
+                    throw HelperFailure.system("Core/DNS cleanup ownership was not recorded.")
+                }
+                let manager = try KillSwitchManager(allowedUID: uid, restoreAtLaunch: false)
+                _ = try manager.disarm()
+            }
+        )
+        print("Tono PF protection is disarmed. Update evidence remains unchanged and unverified.")
+        return true
+    } catch {
+        fputs("Tono emergency release was not confirmed: \(error)\n", stderr)
+        return false
+    }
+}
+
 /// Last-resort recovery for a machine whose GUI cannot reconnect or quit
 /// normally. This path is intentionally unavailable over the user socket and
 /// requires an administrator to execute the installed, signed helper as root.
@@ -1374,6 +1574,9 @@ if CommandLine.arguments.dropFirst() == ["--update-install-allowed"] {
 if CommandLine.arguments.dropFirst() == ["--update-install-guard"] {
     guard geteuid() == 0 else { exit(1) }
     do {
+        let owner = try RecoveryOwnership()
+        try owner.acquire(exclusive: false)
+        if try owner.recoveryRequested { exit(1) }
         let storage = try UpdateStorage()
         let status = try storage.locked { () throws -> Int32 in
             let attempt = try storage.load().attempt
@@ -1391,7 +1594,13 @@ if CommandLine.arguments.dropFirst() == ["--update-install-guard"] {
     } catch { exit(1) }
 }
 if CommandLine.arguments.dropFirst() == ["--update-executor"] {
-    exit(UpdateExecutor.run() ? 0 : 1)
+    do {
+        let owner = try RecoveryOwnership()
+        try owner.acquire(exclusive: false)
+        if try owner.recoveryRequested { exit(0) }
+        exit(UpdateExecutor.run() ? 0 : 1)
+    } catch HelperFailure.stopping { exit(0) }
+    catch { exit(1) }
 }
 if CommandLine.arguments.dropFirst() == ["--update-self-test"] {
     exit(runUpdateSelfTests() ? 0 : 1)
@@ -1437,11 +1646,24 @@ if CommandLine.arguments.dropFirst() == ["--network-self-test"] {
     exit(KillSwitchManager.runNetworkSelfTest() ? 0 : 1)
 }
 if CommandLine.arguments.dropFirst() == ["--emergency-disarm"] {
-    exit(runEmergencyDisarm() ? 0 : 1)
+    exit(runExplicitEmergencyDisarm() ? 0 : 1)
 }
 if CommandLine.arguments.dropFirst() == ["--emergency-reset"] {
-    exit(runEmergencyReset() ? 0 : 1)
+    do {
+        let owner = try RecoveryOwnership()
+        try owner.acquire(exclusive: false)
+        exit(runEmergencyReset() ? 0 : 1)
+    } catch { exit(1) }
 }
+let daemonRecoveryOwner: RecoveryOwnership
+do {
+    daemonRecoveryOwner = try RecoveryOwnership()
+    try daemonRecoveryOwner.acquire(exclusive: false)
+    // A durable explicit root request bars every later automatic startup,
+    // including launchd registration after the recovery command exits.
+    if try daemonRecoveryOwner.recoveryRequested { exit(0) }
+} catch HelperFailure.stopping { exit(0) }
+catch { exit(1) }
 do {
     // Executor recovery must precede CoreManager's stale-child cleanup and
     // normal PF restoration. The independent job owns a consumed replacement.

@@ -131,10 +131,10 @@ final class KillSwitchManager {
     /// loads a ruleset it rendered in full; until then every withhold fails.
     var reviewedBundleFileUnconfirmed = false
 
-    init(allowedUID: uid_t) throws {
+    init(allowedUID: uid_t, restoreAtLaunch: Bool = true) throws {
         self.allowedUID = allowedUID
         try Self.ensureRootDirectory("/Library/Application Support/Tono", permissions: 0o700)
-        try restoreAtLaunch()
+        if restoreAtLaunch { try self.restoreAtLaunch() }
     }
 
     func arm(

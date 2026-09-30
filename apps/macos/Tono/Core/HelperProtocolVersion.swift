@@ -262,7 +262,13 @@ nonisolated enum HelperProtocolVersion {
     ///   release, keeps a removed Tono's protection when any wrapper app is
     ///   installed, and blocks native updates on other products' loopback
     ///   proxies, proxy-less VPN services and mixed DNS lists.
-    static let current = "4.51.0"
+    /// - 4.52.0 → 4.53.0: an explicitly root-invoked emergency disarm can
+    ///   bypass an unreadable/newer update ledger without altering it. A
+    ///   separate root-owned recovery lease excludes daemon, executor, power
+    ///   and IPC mutators through the release, and a durable recovery request
+    ///   prevents later automatic startup from re-arming. The recovery-mode
+    ///   firewall constructor never restores PF before Core/TUN/DNS cleanup.
+    static let current = "4.53.0"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS
