@@ -113,7 +113,9 @@ final class ProtectedReconnectTests: XCTestCase {
     /// X1-3: a helper that answers 403 pauses automatic retries and asks the
     /// user to choose Repair and reconnect. That explicit loop must reach
     /// connect(), whose helper preparation is the administrator reinstall,
-    /// instead of re-pausing on the same rejection before connect runs.
+    /// instead of re-pausing on the same rejection before connect runs. The
+    /// armed failure then releases the original network, so the follow-up is
+    /// not another Protected Offline loop.
     func testRepairAndReconnectReachesConnectWhenHelperRejectsThisApp() async {
         let app = AppState()
         // Same fast, pre-helper connect failure as above: the attempt is on
@@ -158,11 +160,16 @@ final class ProtectedReconnectTests: XCTestCase {
             app.lastConnectionFailure,
             "Repair and reconnect must reach connect() despite the rejection"
         )
-        XCTAssertTrue(
+        XCTAssertFalse(
+            app.isProtectionBlocked,
+            "the armed attempt releases the original network instead of staying in Protected Offline"
+        )
+        XCTAssertFalse(
             app.protectedReconnectPausedForUserAction,
-            "the automatic attempt after the repair still pauses on a rejection"
+            "a released session is not a paused Protected Offline loop"
         )
         XCTAssertNil(app.connectionCoordinator.protectedReconnectTask)
+        app.connectionCoordinator.unarmedReconnectTask?.cancel()
     }
 
     /// #585: a saved pinned-certificate hy2 selection is refused in prepare

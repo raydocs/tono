@@ -164,7 +164,7 @@ final class AppStateCoreMonitorTests: XCTestCase {
         XCTAssertFalse(app.isConnected)
         XCTAssertEqual(
             app.errorMessage,
-            String(localized: "Network protection was interrupted by another program; Kill Switch is blocking traffic while Tono reconnects.")
+            String(localized: "Network protection was interrupted by another program. The original network is back while Tono looks for a reachable exit.")
         )
 
         // Settle the queued teardown through the replaced seams, as above.
