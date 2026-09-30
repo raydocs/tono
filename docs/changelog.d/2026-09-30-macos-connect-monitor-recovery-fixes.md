@@ -1,0 +1,13 @@
+## 2026-09-30 · macOS 连接监视与失败清理的四处恢复修复
+- 归属：SHIP_PLAN §2 item 10；macOS `AppState+Connect.swift`，发现 MAC-TUN-TICKS-INFLIGHT、MAC-REPAIR-COUNT-RESET、MAC-UNARMED-CLEANUP-ERRORS、MAC-ACTIVATION-RECONCILE-ARMED。
+- 来源：基线 `5d46b896` → 分支 `codex/macos-connect-recovery-fixes`（本分支 PR），未合 main。GLM-5.3 发现，Codex gpt-6.1-sol（effort max）实现，审阅后提交。
+- 缺陷修复：
+  - 核心监视在节点切换/配置重载进行中也给 TUN 缺失计数，切换刚结束再缺一次就误判 TUN 死亡、拆掉健康会话。现在进行中的那一拍把计数清零；切换结束后仍需连续两拍缺失才下结论（真死亡仍会断开，不跳过）。
+  - `consecutiveProtectionRepairCount` 在健康会话里从不清零，常开会话里间隔数小时的三次无关修复事件就进入终止暂停。现在 `CoreMonitorState` 记连续健康审计次数，满 30 次（约 30 分钟）清零修复计数；不可用或不健康的回答重新计起。只在 `if let health …` 块之前插入，不改 #720/#725 改写的块体（#720 把暂停改成放行，本修复与之互补）。
+  - 未 arm 的连接失败清理用 DNS 失败信息覆盖 `transitionError`，系统代理关不掉（代理指向已死核心 = 断网）和确实仍在运行的核心都被吞掉。现在汇总：系统代理失败始终保留，核心停止失败仅在状态已验证且仍在运行时保留，再附 DNS 失败；都没有时仍保留原来的连接失败提示。
+  - 前台激活时 `reconcileConfirmedExternalProtectionRelease()` 默认 `protectionWasArmed: true`；从未 arm 的会话里 helper 回答 confirmed(false) 被当作外部释放，取消保护重连、悄悄丢掉用户的连接意图。现在传 `KillSwitchService.isArmed`（与重连循环一致）；root 紧急解除后 App 的 `isArmed` 仍为真，文档化的外部释放路径不变。
+- 新增/优化：无，未新增拒绝或阻断状态。
+- 工程与测试：新文件 `AppStateConnectRecoveryTests.swift` 六个窄测试（切换宽限、健康审计连续性、代理/DNS 汇总且无未验证核心噪音、已验证运行核心、保留连接失败提示、未 arm 激活不查询外部释放）。`AppStateCoreMonitorTests.testMonitorHoldsMissingTUNVerdictWhileRuntimeReplacementIsInFlight` 原先断言重载结束后第一拍就断开（正是本缺陷），改为第一拍保持、第二拍仍 fail-closed 断开，断言不减。
+- 验证：Linux box 无 Swift 工具链，Swift/XCTest 未在本地执行，由托管 macOS CI 验证；与 #702/#706/#714/#720/#725/#744/#749 做了本地试合并，无文本冲突。
+- 候选/发布：仅源码，无新候选。
+- 剩余限制：需托管 macOS CI 与设备上的切换/重载时序验证。
