@@ -1228,9 +1228,7 @@ impl<T: HttpTransport, S: CredentialStore> ApiClient<T, S> {
         let response = self
             .authorized_for_identity(HttpMethod::Post, path, Some(body.to_string()), identity)
             .await?;
-        if response.trim().is_empty() {
-            return Err(ApiError::InvalidResponse);
-        }
+        saved_telemetry_body_present(&response)?;
         Ok(())
     }
 
@@ -1666,6 +1664,17 @@ fn catalog_accept_headers(path: &str) -> Vec<(String, String)> {
         vec![("X-Tono-Accept".to_string(), "hy2".to_string())]
     } else {
         Vec::new()
+    }
+}
+
+/// The pinned client returns the response bytes. Empty, whitespace-only, and
+/// non-UTF-8 bodies are not an accepted telemetry post.
+fn saved_telemetry_body_present(body: &[u8]) -> Result<(), ApiError> {
+    let text = std::str::from_utf8(body).map_err(|_| ApiError::InvalidResponse)?;
+    if text.trim().is_empty() {
+        Err(ApiError::InvalidResponse)
+    } else {
+        Ok(())
     }
 }
 
@@ -3577,6 +3586,18 @@ mod connect_failure_report_tests {
                 .unwrap()
                 .get("bytesByRoute")
                 .is_none()
+        );
+    }
+
+    #[test]
+    fn a_saved_telemetry_body_must_be_nonempty_utf8() {
+        assert_eq!(saved_telemetry_body_present(b"{}"), Ok(()));
+        assert_eq!(saved_telemetry_body_present(b"  {\"ok\":true}\n"), Ok(()));
+        assert_eq!(saved_telemetry_body_present(b""), Err(ApiError::InvalidResponse));
+        assert_eq!(saved_telemetry_body_present(b" \n\t"), Err(ApiError::InvalidResponse));
+        assert_eq!(
+            saved_telemetry_body_present(&[0xFF, 0xFE]),
+            Err(ApiError::InvalidResponse)
         );
     }
 }
