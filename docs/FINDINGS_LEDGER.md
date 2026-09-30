@@ -269,7 +269,7 @@
 | H8-F1 | JPY 等零小数货币换算后存储值小 100 倍 | fixed(6cfa4d9e) | [#391](https://github.com/raydocs/tono/issues/391)，[#394](https://github.com/raydocs/tono/pull/394) | 中·推导 | — |
 | H8-F2 | 已冲销的账本行可改变归属主体 | fixed(6cfa4d9e) | [#398](https://github.com/raydocs/tono/issues/398)，[#400](https://github.com/raydocs/tono/pull/400) | 中·推导 | 关账计算与写入之间的窗口仍在；UTC 月归属见 #191 |
 | H8-F3 | v1 home-lines 退役绕过使用中/解绑/revision 守卫 | fixed(6cfa4d9e) | [#397](https://github.com/raydocs/tono/issues/397)，[#399](https://github.com/raydocs/tono/pull/399) | 中·推导 | 退役改为拒绝，需先手动解绑 |
-| H8-F4 | telemetry 窗口重复计入活动时长；字节数从未写入 | open | [#403](https://github.com/raydocs/tono/issues/403)，[#404](https://github.com/raydocs/tono/pull/404) | 低·推导 | migration 0082；字节来源缺失，客户端显示 pending；#404 已合入（只修重复计时），真实字节来源留在 #403，尚无修复 PR |
+| H8-F4 | telemetry 窗口重复计入活动时长；字节数从未写入 | in-PR | [#403](https://github.com/raydocs/tono/issues/403)，[#404](https://github.com/raydocs/tono/pull/404)，[#707](https://github.com/raydocs/tono/pull/707) | 低·推导 | migration 0082；#404 已合入（只修重复计时）。#707 服务端 flatten 写入 `bytes_up`/`bytes_down`，活动时长只在窗口最后一个重叠小时累加。客户端仍须上报这些字段，否则控制台继续 pending |
 | H8-F5 | 账号池分配存在并发重复分配 | fixed(6cfa4d9e) | [#401](https://github.com/raydocs/tono/issues/401)，[#402](https://github.com/raydocs/tono/pull/402) | 中·推导 | — |
 | H8-F6 | 影响客户的写操作缺少审计记录 | fixed(6cfa4d9e) | [#405](https://github.com/raydocs/tono/issues/405)，[#406](https://github.com/raydocs/tono/pull/406) | 低·推导 | token-admin 路由移到 src/ops/token-admin.ts |
 | H13-F5 | Worker 不可达时 exit-agent 没有 roster 回退 | fixed(85ba3945) | [#463](https://github.com/raydocs/tono/issues/463)，[#464](https://github.com/raydocs/tono/pull/464) | 中·推导 | 与 #375/#384/#389 冲突，解决步骤写在 PR |

@@ -34,7 +34,9 @@ export function eventWord(kind: ConnectionEventKind): string {
   return copy.eventWord[kind];
 }
 
-const FAILED: ConnectionEventKind[] = ['connectFail', 'healthProbeFail', 'releaseFail', 'syncFail'];
+const FAILED: ConnectionEventKind[] = [
+  'connectFail', 'healthProbeFail', 'releaseFail', 'syncFail', 'signInFail', 'appCrash', 'killSwitchFail',
+];
 const SWITCHED: ConnectionEventKind[] = ['nodeSwitch', 'connectCatalogFailover'];
 const SUCCEEDED: ConnectionEventKind[] = ['connectOk'];
 
