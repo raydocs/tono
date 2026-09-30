@@ -180,6 +180,8 @@ export type LoadCharts = {
   /** Bytes per second, worked out from the counters between two samples. */
   netIn: LoadPoint[];
   netOut: LoadPoint[];
+  /** Open TCP connections as the agent counted them at each sample. */
+  connections: LoadPoint[];
   /**
    * The 95th percentile of in+out, which is how transit is billed — the
    * number an operator compares against what they are paying for.
@@ -203,6 +205,7 @@ export type Derived = {
   netIn: number | null;
   netOut: number | null;
   total: number | null;
+  connections: number | null;
 };
 
 /**
@@ -239,6 +242,7 @@ export function derive(samples: readonly LoadSample[]): Derived[] {
       netIn,
       netOut,
       total: netIn === null || netOut === null ? null : netIn + netOut,
+      connections: row.tcpConnections,
     });
   }
   return out;
@@ -298,6 +302,7 @@ export function foldLoad(taken: NodeLoadWindow): LoadCharts {
     memory: columns(rows, (row) => row.memory, from, to),
     netIn: columns(rows, (row) => row.netIn, from, to),
     netOut: columns(rows, (row) => row.netOut, from, to),
+    connections: columns(rows, (row) => row.connections, from, to),
     bandwidth95: percentile95(totals),
     peakConnections: peaks.length === 0 ? null : Math.max(...peaks),
     asOfSec: last,

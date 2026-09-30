@@ -41,7 +41,7 @@ export function NodeFacts({ facts, onEdit }: { facts: NodeFactsDto; onEdit: () =
       title={copy.nodeSections.facts}
       aside={<Action onClick={onEdit}>{copy.nodeEdit}</Action>}
     >
-      <div className="grid gap-x-8 sm:grid-cols-2">
+      <div className="node-facts-grid grid gap-x-8 sm:grid-cols-2">
         <Fact label={copy.nodeFacts.ip} measured={say(facts.publicIp)} render={privacy.ip} />
         <Fact label={copy.nodeFacts.os} measured={say(facts.os)} />
         <Fact label={copy.nodeFacts.provider} measured={say(facts.provider)} />

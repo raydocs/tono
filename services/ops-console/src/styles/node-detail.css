@@ -1,83 +1,88 @@
-/* Node detail: conclusion first, evidence in the open, reference aside.
+/* Node detail: identity, six numbers, the dashboards, then the evidence.
  *
- * Everything here is scoped under `.node-detail-page`. The zoning is deliberate rather than
- * mechanical: the hero card carries identity plus the actions, the acceptance
- * block keeps its decision emphasis, the aux card groups the narrow reference
- * sections (facts, bindings, quota), and the evidence sections (paths, load,
- * occupants, errors, timeline, jobs, history) stay as hairline sections so
- * the page does not become cards inside cards. Order, resources, lazy
- * mounting and all action protections are untouched. */
-
-.node-detail-page .node-hero-card {
-  background: var(--surface);
-  border: 1px solid var(--hairline);
-  border-radius: 20px;
-  box-shadow: var(--shadow-card-lg);
-  padding: 22px 24px;
-}
-
-.dark .node-detail-page .node-hero-card {
-  border-color: rgb(255 255 255 / 0.07);
-  box-shadow: var(--shadow-card-lg), inset 0 1px 0 rgb(255 255 255 / 0.06);
-}
-
-.node-detail-page .node-detail-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: 24px;
-  align-items: start;
-}
-
-.node-detail-page .node-detail-main {
-  display: flex;
-  flex-direction: column;
-  gap: 28px;
-  min-width: 0;
-}
-
-.node-detail-page .node-aux-card {
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
-  min-width: 0;
-  background: var(--surface);
-  border: 1px solid var(--hairline);
-  border-radius: 20px;
-  box-shadow: var(--shadow-card-lg);
-  padding: 18px;
-}
-
-.dark .node-detail-page .node-aux-card {
-  border-color: rgb(255 255 255 / 0.07);
-  box-shadow: var(--shadow-card-lg), inset 0 1px 0 rgb(255 255 255 / 0.06);
-}
-
+ * The dashboard bands reuse the shared quality band and Panel. The hero, the
+ * reference aside and the evidence column are raised blocks with the Panel's
+ * own radius and shadow, so the page reads as one set of cards rather than
+ * two design languages stacked. Outside the layer, because `.page-wrap`
+ * itself is unlayered. */
+.page-wrap.node-detail-page { max-width: 1280px; gap: 24px; }
+/* In the 360 px aside two columns of facts wrap every label; unlayered so it
+   beats the `sm:` utility that gives the full-width layout its two. */
 @media (min-width: 1100px) {
+  .node-detail-page .node-facts-grid { grid-template-columns: minmax(0, 1fr); }
+}
+
+@layer components {
+  .node-detail-page .node-hero-card,
+  .node-detail-page .node-aux-card,
+  .node-detail-page .node-detail-main {
+    background: var(--surface);
+    border-radius: 10px;
+    padding: 20px;
+  }
+
+  .node-detail-page .node-stats {
+    display: grid;
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    gap: 12px;
+  }
+
+  .node-detail-page .node-load-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 16px;
+  }
+
+  .node-detail-page .node-paths-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px;
+    align-items: start;
+  }
+  .node-detail-page .node-path-failure { max-width: 0; width: 34%; }
+  .node-detail-page .node-probe-col { text-align: right; width: 1%; white-space: nowrap; }
+
   .node-detail-page .node-detail-grid {
-    grid-template-columns: minmax(0, 1fr) 360px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 16px;
+    align-items: start;
   }
 
   .node-detail-page .node-detail-main {
-    grid-column: 1;
-    grid-row: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 28px;
+    min-width: 0;
   }
 
   .node-detail-page .node-aux-card {
-    grid-column: 2;
-    grid-row: 1;
-    position: sticky;
-    top: 16px;
-  }
-}
-
-@media (max-width: 640px) {
-  .node-detail-page .node-hero-card {
-    padding: 18px 16px;
-    border-radius: 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    min-width: 0;
   }
 
-  .node-detail-page .node-aux-card {
-    padding: 16px;
-    border-radius: 18px;
+  @media (min-width: 1100px) {
+    .node-detail-page .node-detail-grid { grid-template-columns: minmax(0, 1fr) 360px; }
+    .node-detail-page .node-detail-main { grid-column: 1; grid-row: 1; }
+    .node-detail-page .node-aux-card { grid-column: 2; grid-row: 1; position: sticky; top: 16px; }
+  }
+
+  @media (max-width: 1280px) {
+    .node-detail-page .node-stats { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .node-detail-page .node-load-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
+
+  @media (max-width: 1100px) {
+    .node-detail-page .node-paths-grid { grid-template-columns: minmax(0, 1fr); }
+  }
+
+  @media (max-width: 640px) {
+    .node-detail-page .node-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .node-detail-page .node-load-grid { grid-template-columns: minmax(0, 1fr); }
+    .node-detail-page .node-hero-card,
+    .node-detail-page .node-aux-card,
+    .node-detail-page .node-detail-main { padding: 16px; }
   }
 }
