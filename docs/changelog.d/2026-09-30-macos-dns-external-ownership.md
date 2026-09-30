@@ -21,3 +21,7 @@
 ### Hosted red 与首轮审查证据
 - 旧行为仅加restore fixture的 `ae6f318b` [CI36685435186](https://github.com/raydocs/tono/actions/runs/36685435186) 实际在编译后helper `--self-test` 失败：`DNS superseded-restore regression FAILED: newer DNS was changed or reported restored`，build和privileged jobs均记录同一反例；没有将编译错误当产品red。
 - 原修复准确 `3326b711` [CI36685038992](https://github.com/raydocs/tono/actions/runs/36685038992) 成功，但独立Codex high指出两项major，故未合：ID读写错误退回名字，以及same-owner enable仍留旧snapshot。原绿不是充分审查证据；本轮纠正新增实际dispatcher和同owner re-enable→restore/失败重试回归，必须新头CI和增量独立审查。
+
+### 首次 enable 的未知身份也拒绝
+- `7efd73e4` 独立Codex high增量复核确认先前两个ID-bearing majors纠正；但首次enable仍将SC ID lookup错误折成nil并创建名字快照，违反未知身份拒绝的边界。root只新增生产身份gate和一项nil/lookup失败回归：首次和再次enable均须正向识别serviceID后才读写DNS；既有legacy名字快照的restore支持不删除。
+- 此项新回归尚未执行；不能沿用先前头为新准确头绿证据。最终CI及身份gate增量独立审查待完成。

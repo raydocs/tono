@@ -86,12 +86,9 @@ final class ProtectedDNSManager {
         let service = try Self.validateService(rawService)
         // Resolve the selected service ID before reading or writing DNS;
         // name-only fallback is for services without an ID, not failed ID I/O.
-        let serviceID = try? Self.scServiceID(named: service)
+        let serviceID = try Self.requireServiceID(named: service, lookup: Self.scServiceID)
         let selected = NetworkService(id: serviceID, name: service)
         let previous = try loadSnapshotQuarantiningCorruption()
-        if previous?.serviceID != nil && serviceID == nil {
-            throw HelperFailure.system("The selected DNS service cannot be identified.")
-        }
         let existingServers: [String]
         do {
             existingServers = try Self.readDNS(on: selected)
@@ -805,6 +802,19 @@ final class ProtectedDNSManager {
         )
     }
 
+    /// New protection always records a positive stable identity. Legacy
+    /// name-only snapshots may still be restored, but a failed lookup must
+    /// not create another one or send writes to an unproven display name.
+    private static func requireServiceID(
+        named service: String,
+        lookup: (String) throws -> String?
+    ) throws -> String {
+        guard let id = try lookup(service), !id.isEmpty else {
+            throw HelperFailure.system("The selected DNS service cannot be identified.")
+        }
+        return id
+    }
+
     private static func scServiceID(named service: String) throws -> String? {
         try withPreferences(lock: false) { prefs in
             namedService(prefs, service).flatMap {
@@ -1362,6 +1372,26 @@ final class ProtectedDNSManager {
         return true
     }
 
+    /// First enable must refuse absent or failed identity before any DNS
+    /// I/O, even when no prior ID-bearing snapshot exists.
+    static func runEnableIdentityFailureSelfTest() -> Bool {
+        enum LookupFailure: Error { case injected }
+        var missingRefused = false
+        var lookupFailurePreserved = false
+        do {
+            _ = try requireServiceID(named: "Wi-Fi", lookup: { _ in nil })
+        } catch HelperFailure.system { missingRefused = true } catch {}
+        do {
+            _ = try requireServiceID(named: "Wi-Fi", lookup: { _ in throw LookupFailure.injected })
+        } catch LookupFailure.injected { lookupFailurePreserved = true } catch {}
+        guard missingRefused, lookupFailurePreserved else {
+            print("DNS enable-identity regression FAILED: absent or failed lookup was admitted")
+            return false
+        }
+        print("DNS enable-identity regression passed: absent and failed lookup refuse protection")
+        return true
+    }
+
     /// Whether a restore reply carries `originalDNSRestored: false`. A
     /// deferred release also records its loss at `noticePath`; any other
     /// reply reports its own loss or a recorded one, and removes the record
@@ -1456,6 +1486,7 @@ final class ProtectedDNSManager {
                 && runSupersededHandoffSelfTest()
                 && runStableIDIOFailureSelfTest()
                 && runSameOwnerReenableSelfTest()
+                && runEnableIdentityFailureSelfTest()
         } catch {
             return false
         }
