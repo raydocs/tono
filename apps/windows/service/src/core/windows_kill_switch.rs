@@ -280,13 +280,21 @@ const WATCHDOG_PERIOD: std::time::Duration = std::time::Duration::from_secs(1);
 /// seconds, well inside the app's own reconnect budget.
 const VERIFY_CACHE_TTL: std::time::Duration = std::time::Duration::from_secs(5);
 
-/// How long a restored verified wanted session may stay blocked while this Service start
-/// waits for Core to be running and the tunnel lock to be proven.
+/// Calibration knob. Needs real-hardware calibration.
 ///
-/// Needs real-hardware calibration. Ninety seconds covers logon, app restore, and one
-/// connect when desired-state is allowed to replay Core on the same boot. After a crash
-/// reboot the Service does not start Core, so the window expires and the network opens.
-const WANTED_CORE_PROOF_WINDOW: std::time::Duration = std::time::Duration::from_secs(90);
+/// Used only when Core is already running or this boot will start it. Thirty seconds
+/// matches the macOS helper's idle release (three checks, ten seconds apart). A Core
+/// that is neither running nor starting does not wait: the block is released immediately.
+const WANTED_CORE_PROOF_WINDOW: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// This boot's desired state will start Core, and that start has not settled yet.
+/// The watchdog treats it as "starting" so a same-boot replay is not released before
+/// `start_core` runs. Cleared when desired-state restore finishes.
+static CORE_REPLAY_EXPECTED: AtomicBool = AtomicBool::new(false);
+
+/// Tests pretend a Core start is in flight without a process.
+#[cfg(test)]
+static TEST_CORE_STARTING: AtomicBool = AtomicBool::new(false);
 
 /// Expiry of the core-proof window for the verified wanted intent restored by this process.
 /// `None` means the window is not running (strict opt-in, unverified recovery, a proven
@@ -307,7 +315,7 @@ enum WantedCoreWindow {
     Keep,
     /// Core is running, the session is verified and Locked, and the tunnel permit is up.
     Proven,
-    /// The window elapsed without that proof.
+    /// The window elapsed without that proof, or Core is neither running nor starting.
     Release,
 }
 
@@ -322,6 +330,7 @@ fn restored_connection_proven(
 
 fn wanted_core_window_action(
     strict_kill_switch: bool,
+    core_running_or_starting: bool,
     deadline_reached: bool,
     connection_proven: bool,
 ) -> WantedCoreWindow {
@@ -331,10 +340,26 @@ fn wanted_core_window_action(
     if connection_proven {
         return WantedCoreWindow::Proven;
     }
-    if deadline_reached {
+    // No process and nothing about to start one: do not wait out the cap.
+    if !core_running_or_starting || deadline_reached {
         return WantedCoreWindow::Release;
     }
     WantedCoreWindow::Keep
+}
+
+fn core_is_running_or_starting(running: bool, replay_expected: bool) -> bool {
+    if running || replay_expected {
+        return true;
+    }
+    #[cfg(test)]
+    if TEST_CORE_STARTING.load(Ordering::Relaxed) {
+        return true;
+    }
+    false
+}
+
+fn core_still_expected(running: bool) -> bool {
+    core_is_running_or_starting(running, CORE_REPLAY_EXPECTED.load(Ordering::Relaxed))
 }
 
 fn clear_wanted_core_window() {
@@ -2752,14 +2777,16 @@ async fn reconcile_wanted_core_window_unlocked() -> Result<WantedCoreWindow> {
     if !watching {
         return Ok(WantedCoreWindow::Keep);
     }
+    let running = current_core_instance().await.is_some();
     let proven = restored_connection_proven(
-        current_core_instance().await.is_some(),
+        running,
         armed.intent.is_verified(),
         armed.intent.mode,
         TUNNEL_PERMIT_RENDERED.load(Ordering::Relaxed),
     );
     let action = wanted_core_window_action(
         armed.intent.strict_kill_switch,
+        core_still_expected(running),
         wanted_core_deadline_reached(std::time::Instant::now()),
         proven,
     );
@@ -2769,6 +2796,18 @@ async fn reconcile_wanted_core_window_unlocked() -> Result<WantedCoreWindow> {
         WantedCoreWindow::Keep => {}
     }
     Ok(action)
+}
+
+/// Desired-state restore has finished, or was skipped. A Core that is still
+/// neither running nor starting is released on this call instead of waiting
+/// out [`WANTED_CORE_PROOF_WINDOW`].
+pub async fn note_core_replay_finished() -> Result<()> {
+    if !SUPPORTED {
+        return Ok(());
+    }
+    CORE_REPLAY_EXPECTED.store(false, Ordering::Release);
+    let _operation = WFP_OPERATION.lock().await;
+    reconcile_wanted_core_window_unlocked().await.map(|_| ())
 }
 
 /// `POST /kill-switch/release`: the explicit user-requested disarm. Idempotent — not armed
@@ -2942,6 +2981,8 @@ pub async fn restore_on_service_start() -> Result<()> {
     if !SUPPORTED {
         return Ok(());
     }
+    // Read before the WFP lock. Desired-state I/O must not nest under it.
+    let replay_expected = crate::core::desired::core_replay_expected_this_boot().await;
     let _operation = WFP_OPERATION.lock().await;
     RESTORE_WAS_LOCKED.store(false, Ordering::Release);
     clear_wanted_core_window();
@@ -3027,10 +3068,32 @@ pub async fn restore_on_service_start() -> Result<()> {
                 if wfp_live {
                     sweep_legacy_sublayers_unlocked().await;
                 }
-                // The block is up now. It stays only while Core comes back and the tunnel
-                // is proven inside the window; a strict record does not start that window.
-                note_wanted_core_window(&armed.intent);
-                reconciled
+                // Strict keeps the block. Otherwise the block stays only while Core is
+                // running or this boot will start it, and only until the calibrated cap.
+                // A Core that is neither running nor starting is released here.
+                if armed.intent.strict_kill_switch {
+                    clear_wanted_core_window();
+                    CORE_REPLAY_EXPECTED.store(false, Ordering::Release);
+                    reconciled
+                } else {
+                    let running = current_core_instance().await.is_some();
+                    let starting = core_is_running_or_starting(running, replay_expected);
+                    note_wanted_core_window(&armed.intent);
+                    if starting {
+                        CORE_REPLAY_EXPECTED.store(!running, Ordering::Release);
+                        reconciled
+                    } else {
+                        CORE_REPLAY_EXPECTED.store(false, Ordering::Release);
+                        *WANTED_CORE_DEADLINE
+                            .lock()
+                            .unwrap_or_else(std::sync::PoisonError::into_inner) =
+                            Some(std::time::Instant::now());
+                        match release_unproven_wanted_session_unlocked().await {
+                            Ok(()) => Ok(()),
+                            Err(release_error) => Err(release_error),
+                        }
+                    }
+                }
             }
             // `wanted == false` still disarms. A wanted record that no longer validates is not
             // an explicit strict kill switch unless `strict_kill_switch` is true. Corrupt and
@@ -3356,12 +3419,14 @@ fn direct_reload_invalidation_reason(
 
 /// One-second verify-after-write watchdog (the macOS helper does the same for PF).
 ///
-/// A restored verified wanted session also runs a bounded core-proof window. If Core is
-/// not running with a Locked, verified tunnel permit when that window ends, the tick
-/// releases WFP and restores DNS instead of reinstalling the block. An explicit strict
-/// kill switch does not start the window. Any other mismatch reinstalls the full expected
-/// set transactionally. Persistent failures are log-throttled — one error per minute, the
-/// rest at debug — so a broken engine cannot flood the service log.
+/// A restored verified wanted session releases immediately when Core is neither running
+/// nor about to start. While Core is running or this boot will start it, a bounded
+/// core-proof window applies: if Core is not running with a Locked, verified tunnel
+/// permit when that window ends, the tick releases WFP and restores DNS instead of
+/// reinstalling the block. An explicit strict kill switch does not start the window.
+/// Any other mismatch reinstalls the full expected set transactionally. Persistent
+/// failures are log-throttled — one error per minute, the rest at debug — so a broken
+/// engine cannot flood the service log.
 pub fn spawn_windows_kill_switch_watchdog() {
     /// One error line per minute; the rest at debug.
     const ERROR_LOG_INTERVAL: std::time::Duration = std::time::Duration::from_secs(60);
@@ -3980,6 +4045,9 @@ mod tests {
         clear_wanted_core_window();
         RECONNECT_AFTER_RELEASE.store(false, Ordering::Release);
         CRASH_TOMBSTONE_PENDING.store(false, Ordering::Release);
+        CORE_REPLAY_EXPECTED.store(false, Ordering::Release);
+        #[cfg(test)]
+        TEST_CORE_STARTING.store(false, Ordering::Release);
         for path in [
             intent_path(),
             dns_snapshot_path(),
@@ -3997,6 +4065,7 @@ mod tests {
     #[serial]
     async fn restore_with_valid_wanted_intent_rearms_and_downgrades_locked() -> Result<()> {
         cleanup().await;
+        TEST_CORE_STARTING.store(true, Ordering::Relaxed);
         let intent = valid_intent(KillSwitchStatusMode::Locked, true);
         atomic_write(&intent_path(), &serde_json::to_vec_pretty(&intent)?).await?;
 
@@ -4018,18 +4087,34 @@ mod tests {
         Ok(())
     }
 
-    /// A restored verified wanted block stays up only while Core can still come back.
-    /// Needs real-hardware calibration of [`WANTED_CORE_PROOF_WINDOW`].
+    /// A restored verified wanted block is released at once when Core is neither
+    /// running nor starting. While Core is starting, it stays up only until
+    /// [`WANTED_CORE_PROOF_WINDOW`]. Needs real-hardware calibration of that cap.
     #[tokio::test]
     #[serial]
     async fn wanted_session_releases_when_core_is_not_proven_in_time() -> Result<()> {
+        assert_eq!(WANTED_CORE_PROOF_WINDOW, std::time::Duration::from_secs(30));
         assert_eq!(
-            wanted_core_window_action(true, true, false),
+            wanted_core_window_action(true, false, true, false),
             WantedCoreWindow::Keep,
             "an explicit strict kill switch keeps the restored block"
         );
         assert_eq!(
-            wanted_core_window_action(false, true, true),
+            wanted_core_window_action(false, false, false, false),
+            WantedCoreWindow::Release,
+            "a Core that is neither running nor starting is released immediately"
+        );
+        assert_eq!(
+            wanted_core_window_action(false, true, false, false),
+            WantedCoreWindow::Keep,
+            "a starting Core keeps the block until the cap"
+        );
+        assert_eq!(
+            wanted_core_window_action(false, true, true, false),
+            WantedCoreWindow::Release
+        );
+        assert_eq!(
+            wanted_core_window_action(false, true, true, true),
             WantedCoreWindow::Proven
         );
         assert!(!restored_connection_proven(
@@ -4049,28 +4134,11 @@ mod tests {
         let intent = valid_intent(KillSwitchStatusMode::Locked, true);
         atomic_write(&intent_path(), &serde_json::to_vec_pretty(&intent)?).await?;
         restore_on_service_start().await?;
-        assert!(
-            status().await.wanted,
-            "the block stays up until the window elapses"
-        );
-        assert!(
-            WANTED_CORE_DEADLINE
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .is_some(),
-            "a non-strict verified restore starts the core-proof window"
-        );
-
-        *WANTED_CORE_DEADLINE
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) =
-            Some(std::time::Instant::now() - std::time::Duration::from_secs(1));
-        assert_eq!(
-            reconcile_wanted_core_window_unlocked().await?,
-            WantedCoreWindow::Release
-        );
         let released = status().await;
-        assert!(!released.wanted);
+        assert!(
+            !released.wanted,
+            "no Core process and no replay releases before the cap"
+        );
         assert!(released.reconnect_after_release);
         let on_disk: IntentRecord =
             serde_json::from_slice(&tokio::fs::read(intent_path()).await?)?;
@@ -4086,6 +4154,42 @@ mod tests {
             tokio::fs::metadata(intent_path()).await.is_ok(),
             "the crash tombstone survives the next Service start"
         );
+
+        cleanup().await;
+        TEST_CORE_STARTING.store(true, Ordering::Relaxed);
+        atomic_write(&intent_path(), &serde_json::to_vec_pretty(&intent)?).await?;
+        restore_on_service_start().await?;
+        assert!(status().await.wanted, "a starting Core keeps the block");
+        let deadline = WANTED_CORE_DEADLINE
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .expect("a starting restore arms the core-proof window");
+        assert!(deadline > std::time::Instant::now());
+        assert_eq!(
+            reconcile_wanted_core_window_unlocked().await?,
+            WantedCoreWindow::Keep
+        );
+        TEST_CORE_STARTING.store(false, Ordering::Relaxed);
+        note_core_replay_finished().await?;
+        assert!(
+            !status().await.wanted,
+            "replay that settled with no process releases before the cap"
+        );
+        assert!(status().await.reconnect_after_release);
+
+        cleanup().await;
+        TEST_CORE_STARTING.store(true, Ordering::Relaxed);
+        atomic_write(&intent_path(), &serde_json::to_vec_pretty(&intent)?).await?;
+        restore_on_service_start().await?;
+        *WANTED_CORE_DEADLINE
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) =
+            Some(std::time::Instant::now() - std::time::Duration::from_secs(1));
+        assert_eq!(
+            reconcile_wanted_core_window_unlocked().await?,
+            WantedCoreWindow::Release
+        );
+        assert!(!status().await.wanted);
 
         cleanup().await;
         let mut strict = valid_intent(KillSwitchStatusMode::Locked, true);
@@ -4111,6 +4215,7 @@ mod tests {
     #[serial]
     async fn startup_persist_failure_still_installs_and_publishes_blocked() -> Result<()> {
         cleanup().await;
+        TEST_CORE_STARTING.store(true, Ordering::Relaxed);
         let intent = valid_intent(KillSwitchStatusMode::Locked, true);
         atomic_write(&intent_path(), &serde_json::to_vec_pretty(&intent)?).await?;
 
@@ -4146,6 +4251,7 @@ mod tests {
     #[serial]
     async fn startup_install_failure_still_persists_and_arms_watchdog_state() -> Result<()> {
         cleanup().await;
+        TEST_CORE_STARTING.store(true, Ordering::Relaxed);
         let intent = valid_intent(KillSwitchStatusMode::Locked, true);
         atomic_write(&intent_path(), &serde_json::to_vec_pretty(&intent)?).await?;
 
@@ -4195,6 +4301,7 @@ mod tests {
     #[serial]
     async fn startup_double_failure_reports_both_and_keeps_conservative_state() -> Result<()> {
         cleanup().await;
+        TEST_CORE_STARTING.store(true, Ordering::Relaxed);
         let intent = valid_intent(KillSwitchStatusMode::Locked, true);
         atomic_write(&intent_path(), &serde_json::to_vec_pretty(&intent)?).await?;
 
@@ -4226,6 +4333,8 @@ mod tests {
     #[serial]
     async fn legacy_locked_migration_stays_verified_across_a_second_restart() -> Result<()> {
         cleanup().await;
+        // The migration is about a session Core may still return to, not the idle release.
+        TEST_CORE_STARTING.store(true, Ordering::Relaxed);
         let mut value = serde_json::to_value(valid_intent(KillSwitchStatusMode::Locked, true))?;
         value.as_object_mut().unwrap().remove("verified");
         atomic_write(&intent_path(), &serde_json::to_vec_pretty(&value)?).await?;
@@ -4341,6 +4450,7 @@ mod tests {
     #[serial]
     async fn verified_startup_intent_is_never_retired_by_initial_attempt_cleanup() -> Result<()> {
         cleanup().await;
+        TEST_CORE_STARTING.store(true, Ordering::Relaxed);
         let intent = valid_intent(KillSwitchStatusMode::Locked, true);
         atomic_write(&intent_path(), &serde_json::to_vec_pretty(&intent)?).await?;
 
@@ -5355,6 +5465,7 @@ mod tests {
     #[serial]
     async fn a_failed_startup_install_withholds_the_remote_reconnect_exception() -> Result<()> {
         cleanup().await;
+        TEST_CORE_STARTING.store(true, Ordering::Relaxed);
         let intent = IntentRecord {
             owner_key: Some("owner-alice".to_owned()),
             ..valid_intent(KillSwitchStatusMode::Locked, true)
@@ -6416,6 +6527,7 @@ mod tests {
     #[serial]
     async fn restored_locked_intent_relocks_after_core_restore() -> Result<()> {
         cleanup().await;
+        TEST_CORE_STARTING.store(true, Ordering::Relaxed);
         let intent = valid_intent(KillSwitchStatusMode::Locked, true);
         atomic_write(&intent_path(), &serde_json::to_vec_pretty(&intent)?).await?;
 
@@ -6690,7 +6802,9 @@ mod tests {
         );
 
         // Startup recovery also rebuilds with an empty set (fail-closed until the App's next
-        // authenticated lease transaction).
+        // authenticated lease transaction). Core is treated as starting so this observes the
+        // rebuilt session rather than the idle release.
+        TEST_CORE_STARTING.store(true, Ordering::Relaxed);
         restore_on_service_start().await?;
         assert!(
             ARMED
