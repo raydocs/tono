@@ -83,6 +83,10 @@ final class AppState {
     /// UI interlock only. The helper's private pending receipt is authoritative.
     var nativeUpdatePending = false
     var nativeUpdateDisconnectTask: Task<Void, Never>?
+    /// Helper transport only; pending-update release ownership stays in AppState.
+    var nativeUpdateDisconnect: () async throws -> HelperManager.UpdateStatus = {
+        try await PrivilegedRuntimeCoordinator.shared.nativeUpdate("disconnect")
+    }
     var isProtectedReconnectScheduled = false
     var protectedReconnectAttempt = 0
     var protectedReconnectNextAttemptAt: Date?

@@ -61,7 +61,7 @@ extension AppState {
             defer { nativeUpdateDisconnectTask = nil }
             await suspendForNativeUpdate()
             do {
-                let result = try await PrivilegedRuntimeCoordinator.shared.nativeUpdate("disconnect")
+                let result = try await nativeUpdateDisconnect()
                 guard result.disconnectVerified == true else { throw NativeUpdateDownload.failure("Update Disconnect was not verified.") }
                 isProtectionBlocked = false
                 KillSwitchService.isArmed = false
