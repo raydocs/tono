@@ -308,4 +308,27 @@ final class SingBoxConfigTests: XCTestCase {
         let continuity = try XCTUnwrap(directRules.first { $0["process_path"] != nil })
         XCTAssertEqual(continuity["process_path"] as? [String], ConfigPipeline.continuityDirectProcessPaths)
     }
+
+    func testContinuityLocalBypassDoesNotForcePublicAppleTrafficDirectWithoutPolicy() throws {
+        let overlay = ConfigPipeline.OverlayConfig(mixedPort: 29190,
+            externalController: "127.0.0.1:29191", secret: secret, tunEnabled: true,
+            selectedNodeName: "Fixture Beta")
+        let result = try ConfigPipeline.buildSingBoxRuntime(overlay: overlay, nodes: nodes(), directPlan: nil)
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: result.runtimeJSON) as? [String: Any])
+        let route = try XCTUnwrap(json["route"] as? [String: Any])
+        let rules = try XCTUnwrap(route["rules"] as? [[String: Any]])
+        let localIndex = try XCTUnwrap(rules.firstIndex {
+            $0["outbound"] as? String == "DIRECT" && $0["ip_cidr"] != nil
+        })
+        let local = Set(try XCTUnwrap(rules[localIndex]["ip_cidr"] as? [String]))
+        XCTAssertTrue(Set(["169.254.0.0/16", "fe80::/10", "fc00::/7", "224.0.0.0/4", "ff00::/8"])
+            .isSubset(of: local), "AWDL/link-local and multicast remain direct")
+        let ipv6RejectIndex = try XCTUnwrap(rules.firstIndex { $0["ip_version"] as? Int == 6 })
+        XCTAssertLessThan(localIndex, ipv6RejectIndex, "local IPv6 must bypass the public IPv6 reject")
+        XCTAssertFalse(rules.contains {
+            $0["outbound"] as? String == "DIRECT" && $0["process_path"] != nil
+                && $0["ip_cidr"] == nil
+        }, "Apple public TCP traffic must not bypass a healthy tunnel without matching PF authorization")
+        XCTAssertEqual(route["final"] as? String, ConfigPipeline.exitGroupName)
+    }
 }
