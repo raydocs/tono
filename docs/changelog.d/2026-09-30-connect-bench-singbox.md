@@ -8,3 +8,4 @@
 - 验证：本机 `python3 tooling/perf/connect-bench/bench.py --check` 退出码 0（2026-09-30，5 次中位数，伪装 40 ms）。sing-box VLESS：启动 42.0 ms，fake-ip 0.5 ms / 0 次握手，首包 42.8 ms / 1 次握手，冷 DoH 129.5 ms / 2 次握手，同名缓存 0.6 ms / 0 次，下一个名字 43.3 ms / 0 次新握手。Hysteria2 首包 3.9 ms，冷 DoH 46.3 ms，缓存 0.4 ms，复用 43.4 ms。`cargo test` 与 XCTest 未跑。
 - 候选/发布：仅源码，无新候选。
 - 剩余限制：见 PERF-CONNECT-4。main 上的 Windows 模板已经有 `rewrite_ttl: 30` 和 `Tono-DoH-Backup`。仍开放的是冷 DoH 多一次握手，以及 macOS 发出器的指纹和 fake-ip 段。
+- 2026-09-30 续记：rebase 到已含 fake-ip 就绪重传的 DoH 分支。sing-box 的计时采样同样先等 UDP 监听回答，再清伪装计数。完整 `--check` 未在这轮重跑。

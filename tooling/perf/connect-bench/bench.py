@@ -860,6 +860,7 @@ def measure_singbox(binary: Path, work: Path, camo: Camo, protocol: str, materia
         t0 = time.perf_counter()
         core = SingBox(binary, work, config, mixed, controller)
         starts.append((time.perf_counter() - t0) * 1000)
+        wait_fake_ip(listen)
         camo.reset()
         fake_ok, fake_elapsed = fake_ip_query(listen)
         if fake_ok:
