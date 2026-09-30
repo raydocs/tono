@@ -1582,6 +1582,11 @@ const DNS_FLUSH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15
 /// "busy".
 #[cfg(any(all(windows, not(feature = "test")), test))]
 const DNS_SLOW_CALL: std::time::Duration = std::time::Duration::from_secs(5);
+/// Retries for the snapshot delete after a proven restore: an AV or backup handle on the
+/// file is typically transient, and the delete is housekeeping — it must never outvote the
+/// proof above it.
+const SNAPSHOT_DELETE_ATTEMPTS: usize = 3;
+const SNAPSHOT_DELETE_RETRY_DELAY: std::time::Duration = std::time::Duration::from_millis(100);
 
 /// A DNS engine call that was handed to a blocking thread and has not come back yet.
 ///
@@ -2106,6 +2111,20 @@ pub(crate) mod test_hooks {
     #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn set_nrpt_sweep_hangs(hangs: bool) {
         NRPT_SWEEP_HANGS.store(hangs, Ordering::Relaxed);
+    }
+
+    static SNAPSHOT_DELETE_FAILS: AtomicBool = AtomicBool::new(false);
+
+    /// While set, the snapshot delete after a proven restore fails every round: an antivirus
+    /// or backup handle on the file that outlives the retry budget.
+    #[cfg(any(not(windows), feature = "test"))]
+    pub(crate) fn snapshot_delete_fails() -> bool {
+        SNAPSHOT_DELETE_FAILS.load(Ordering::Relaxed)
+    }
+
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn set_snapshot_delete_fails(fails: bool) {
+        SNAPSHOT_DELETE_FAILS.store(fails, Ordering::Relaxed);
     }
 
     #[cfg(test)]
@@ -2647,6 +2666,17 @@ async fn restore_resolver_policy() -> Result<Option<String>> {
     }))
 }
 
+/// The committed restore's last housekeeping step: delete the snapshot. Test builds can
+/// inject a persistent failure here (the AV/backup-handle scenario), so the retry-and-note
+/// behavior in [`restore_protected`] stays exercisable off Windows.
+async fn remove_restored_snapshot() -> std::io::Result<()> {
+    #[cfg(any(not(windows), feature = "test"))]
+    if test_hooks::snapshot_delete_fails() {
+        return Err(std::io::Error::other("simulated snapshot delete failure"));
+    }
+    tokio::fs::remove_file(snapshot_path()).await
+}
+
 /// Restore adapters and resolver policies before dropping their recovery snapshot. A failed
 /// proof keeps the snapshot and, via the disarm invariant, the block armed.
 pub(crate) async fn restore_protected() -> Result<DnsProtectionStatus> {
@@ -2789,14 +2819,51 @@ pub(crate) async fn restore_protected() -> Result<DnsProtectionStatus> {
     // Required resolver cleanup belongs to the disarm proof, not best-effort housekeeping.
     // A failed NRPT/DoH restore retains the adapter snapshot and its independent captures.
     let capture_note = record_outcome(restore_resolver_policy().await)?;
-    match tokio::fs::remove_file(snapshot_path()).await {
-        Ok(()) => {}
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-        Err(error) => return Err(error.into()),
+    // The restore is proven by here; deleting the snapshot is housekeeping. A delete that
+    // fails on something other than absence (typically a transient AV sharing violation)
+    // used to fail the whole restore and, through the disarm gate, refuse the WFP release —
+    // the machine stayed blocked over a file that no longer describes a redirect. Retry
+    // briefly, then keep the leftover and surface it: with `PROTECTION_WANTED` false the
+    // watchdog will not re-apply it, the next enable merges it as the originals it already
+    // holds, and the next restore retries the delete.
+    let mut leftover: Option<std::io::Error> = None;
+    for attempt in 0..SNAPSHOT_DELETE_ATTEMPTS {
+        match remove_restored_snapshot().await {
+            Ok(()) => {
+                leftover = None;
+                break;
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                leftover = None;
+                break;
+            }
+            Err(error) => {
+                if attempt + 1 < SNAPSHOT_DELETE_ATTEMPTS {
+                    tokio::time::sleep(SNAPSHOT_DELETE_RETRY_DELAY).await;
+                }
+                leftover = Some(error);
+            }
+        }
     }
-    // Committed: the snapshot is gone. The degraded-restore note (adapter DNS) and the capture
-    // note (Encrypted DNS) describe different losses, so both reach `last_error`.
-    if let Some(note) = join_notes(degraded, settle_capture_loss(capture_note).await) {
+    let leftover_note = leftover.map(|error| {
+        tracing::warn!(
+            "dns: the restored protected-dns snapshot could not be deleted ({error}); it will \
+             be retried on the next restore"
+        );
+        format!(
+            "{DNS_RESTORE_DEGRADED_PREFIX}: the original DNS servers were restored and \
+             verified, but the recovery snapshot file could not be deleted ({error}); the \
+             leftover matches the restored DNS and is inert — the next disconnect retries \
+             the deletion"
+        )
+    });
+    // Committed as far as the machine is concerned. The degraded-restore note (adapter
+    // DNS), the leftover-snapshot note and the capture note (Encrypted DNS) describe
+    // different losses, so all reach `last_error`.
+    if let Some(note) = join_notes(
+        degraded,
+        join_notes(leftover_note, settle_capture_loss(capture_note).await),
+    ) {
         surface_success_note(&note);
     }
     if let Err(error) = engine_flush_cache().await {
