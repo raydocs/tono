@@ -2236,7 +2236,7 @@ extension AppState {
         connectionCoordinator.unarmedReconnectTask = Task { [weak self] in
             var attempt = 0
             while !Task.isCancelled {
-                let delay = UnarmedReconnect.delaySeconds(attempt)
+                let delay = UnarmedReconnect.delaySeconds(attempt: attempt)
                 try? await Task.sleep(for: .seconds(delay))
                 guard let self, !Task.isCancelled else { return }
                 if self.isConnected || self.isConnecting || self.isDisconnecting { return }

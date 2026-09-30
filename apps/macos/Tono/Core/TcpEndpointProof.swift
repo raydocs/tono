@@ -6,7 +6,7 @@ enum TcpEndpointProof {
     static func prove(
         name: String,
         nodes: [ProxyNode],
-        override: (@MainActor (String) async -> Bool)?,
+        override: (@MainActor @Sendable (String) async -> Bool)?,
         timeout: TimeInterval = 2.5
     ) async -> Bool {
         if let override {
