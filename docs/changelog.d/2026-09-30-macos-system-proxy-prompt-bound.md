@@ -1,7 +1,7 @@
 ## 2026-09-30 · macOS：系统代理 administrator 授权弹窗加 180 s 期限，超时按拒绝处理
 - 归属：G1（断开/恢复/退出不得被系统代理路径挂死）；发现分片 MAC-PROXY-PROMPT-UNBOUNDED。App
   `Core/SystemProxy.swift`、`Services/AppState.swift`；测试 `TonoTests/ProtectedDNSServiceSelectionTests.swift`。
-- 来源：main `ee6e028e` → 分支 `glm/mac-proxy-prompt-bound`；PR 待开；未合 main。
+- 来源：main `64af499a` → 分支 `glm/mac-proxy-prompt-bound`；PR 待开；未合 main。
 - 缺陷修复：`SystemProxy.runNetworkSetupWithPrivileges` 的 `osascript ... with administrator privileges` 用无期限
   `waitUntilExit()` 等待。系统代理模式下未提权 `networksetup` 失败时（非管理员用户、MDM 锁定代理设置），
   enable / turnOff / restore / reapply 都会走到它，而它们全部串行在 `PrivilegedRuntimeCoordinator` actor 上：
