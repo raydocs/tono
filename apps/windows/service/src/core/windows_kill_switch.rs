@@ -2494,6 +2494,13 @@ pub(crate) async fn transition_after_stop(release_requested: bool) -> Result<()>
     restrict_bootstrap_unlocked().await
 }
 
+#[cfg(windows)]
+pub(crate) fn strict_kill_switch_enabled() -> bool {
+    armed_guard()
+        .as_ref()
+        .is_some_and(|armed| armed.intent.strict_kill_switch)
+}
+
 /// Crash, hang, and unreadable state release general traffic unless the user explicitly
 /// enabled the strict kill switch. A missing flag is not that opt-in.
 fn crash_recovery_releases_network(strict_kill_switch_enabled: bool) -> bool {
@@ -2504,6 +2511,18 @@ fn crash_recovery_releases_network(strict_kill_switch_enabled: bool) -> bool {
 const UNHEALTHY_RELEASE_TICKS: u32 = 3;
 /// Strict mode keeps repairing, then releases so a wedged engine cannot stay closed forever.
 const STRICT_UNHEALTHY_RELEASE_TICKS: u32 = 30;
+
+#[cfg_attr(not(windows), allow(dead_code))]
+fn release_on_service_stop(strict_kill_switch_enabled: bool, lifecycle_owned: bool) -> bool {
+    !strict_kill_switch_enabled && !lifecycle_owned
+}
+
+/// Called under the owner lifecycle and repair gates; an update/installer stop must leave the
+/// recorded protection for its successor. Ordinary SCM Stop releases unless strict is on.
+#[cfg(windows)]
+pub(crate) fn service_stop_release_allowed(lifecycle_owned: bool) -> bool {
+    release_on_service_stop(strict_kill_switch_enabled(), lifecycle_owned)
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum UnhealthyWatchdogAction {
@@ -4128,6 +4147,14 @@ mod tests {
         tokio::fs::remove_dir(intent_path()).await?;
         cleanup().await;
         Ok(())
+    }
+
+    #[test]
+    fn service_stop_releases_only_without_strict_or_lifecycle_ownership() {
+        assert!(release_on_service_stop(false, false));
+        assert!(!release_on_service_stop(true, false));
+        assert!(!release_on_service_stop(false, true));
+        assert!(!release_on_service_stop(true, true));
     }
 
     #[test]
