@@ -1,7 +1,7 @@
 ## 2026-09-30 · macOS：受保护 DNS 服务器数量上限统一为一个常量（32），读得回的列表恢复得回
 - 归属：SHIP_PLAN G2（macOS 连接与恢复）缺陷修复（冻结期归类由所有者认定）；影响 helper
   `tooling/scripts/core-helper/ProtectedDNSManager.swift`。发现 MAC-DNS-SNAPSHOT-OVER-8。
-- 来源：main `01c2403f` → 分支 `glm/mac-helper-dns-cap`；PR 待开；未合 main。
+- 来源：main `01c2403f` → 分支 `glm/mac-helper-dns-cap`；PR [#765](https://github.com/raydocs/tono/pull/765)；未合 main。
 - 缺陷修复：
   - MAC-DNS-SNAPSHOT-OVER-8：`enable` 经 SC 路径读当前 DNS（`scCurrentDNS`→`dnsServers`，无数量上限），
     `save` 不查数量，但 `loadSnapshot`、`writeDNS`/`setDNS`、`parseDNSOutput` 都只收 8 条。于是 >8 台解析源
