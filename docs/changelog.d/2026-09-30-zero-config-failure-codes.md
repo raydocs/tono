@@ -8,3 +8,10 @@
 - 验证：本机 Linux 跑 `cargo test -p tono-core customer_failure` 与 Windows 前端 vitest（见 PR）。未跑 xcodebuild、未跑 Windows 原生 cargo。macOS XCTest 未执行。
 - 候选/发布：仅源码，无新候选。
 - 剩余限制：DoH、备用端口和回环隧道没有在真实故障网络上验证。macOS 多数健康检查路径仍按原样保持保护，只有隧道丢失判定改为 fail-open；其余路径需要实机再改。释放失败时屏障可能仍在，这不是新的放行。Windows 这条路径没有用户「permanent」开关，因此耗尽后一律释放。DNS 设置按钮还在，失败句子不再把打开设置写成解决办法。
+
+### 2026-09-30 续记 · 多解析器 DoH，以及单一 fail-open 决定
+
+- 新增/优化：登录 DoH 不再只问 1.1.1.1。AliDNS（`dns.alidns.com` 钉在 223.5.5.5 / 223.6.6.6）、DNSPod（`doh.pub` 钉在 1.12.12.12 / 120.53.53.53）、Cloudflare（1.1.1.1 / 1.0.0.1）、Google（8.8.8.8 / 8.8.4.4）同时问，先到的公网 A 记录胜出。不改系统 DNS。没有已发布的、与 API 证书相同的 CDN 前置域名，所以 `extra_api_front_hosts` 为空；备用地址仍是现有钉扎 IP 和同一主机名的 DoH 答案。
+- 新增/优化：耗尽后的网络决定只在 `network_disposition::exhausted_protection`。#706 拥有这个函数。#703 调用它，不再单独 match 普通/严格。所有者要求选择性 fail-open：放行一般流量，继续挡住 AI 服务（Claude/OpenAI），真实地址不到达它们。钩子由 bc-3c5ccfd4 的 PF/WFP 规则注册；未注册或返回 false 时仍是今天的全量释放。严格 `permanent` 优先，钩子不能覆盖。
+- 验证：本机 rustc 1.83 不能编译 edition 2024，`cargo test -p tono-core` 未执行。macOS XCTest 未执行。前端文案未改，未重跑 vitest。
+- 剩余限制：竞速 DoH 没有在中国大陆网络上验证。选择性阻断的过滤器还不存在；钩子就绪前不会少放行，也不会多阻断。#703 合入后若 `fail_connect` 已经按同一决定释放过，其 FailOpen 分支不应再释放第二次。

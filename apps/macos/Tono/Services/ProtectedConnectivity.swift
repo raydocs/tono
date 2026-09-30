@@ -60,15 +60,28 @@ nonisolated enum ProtectedFailureCode: String, CaseIterable, Sendable {
     }
 }
 
-/// After login or connect recovery is exhausted. `permanent` is the only
-/// explicit strict kill switch. Anything else restores the original network.
-/// This value does not install or tear down a filter by itself.
+/// Mirror of `tono_core::network_disposition::exhausted_protection`.
+/// #706 owns that function. This copy exists because the TUN-loss path is
+/// Swift and cannot call the Rust module. Strict wins. A ready selective
+/// hook means filters were already rewritten and this path must not
+/// full-release. Until that hook lands, `selectiveAiBlockReady` stays false
+/// and the result is a full release. This value does not install a filter.
 nonisolated enum ExhaustedFailureNetwork: Sendable, Equatable {
     case failOpen
     case keepStrictBlock
+    case selectiveFailOpen
 
-    static func afterFailure(strictKillSwitchExplicit: Bool) -> ExhaustedFailureNetwork {
-        strictKillSwitchExplicit ? .keepStrictBlock : .failOpen
+    static func afterFailure(
+        strictKillSwitchExplicit: Bool,
+        selectiveAiBlockReady: Bool = false
+    ) -> ExhaustedFailureNetwork {
+        if strictKillSwitchExplicit {
+            return .keepStrictBlock
+        }
+        if selectiveAiBlockReady {
+            return .selectiveFailOpen
+        }
+        return .failOpen
     }
 
     var releasesSystemNetwork: Bool {

@@ -58,6 +58,13 @@ may reverse), `reversed` (keep the line; say what replaced it).
 - Why stricter: recovery cannot be refused by evidence the helper cannot read. Nothing is deleted. Launch does not re-arm, and a DNS restore failure still releases PF.
 - Applied in: [#711](https://github.com/raydocs/tono/pull/711) (`main.swift`).
 
+## 2026-09-30 · When fail-open runs, does AI-service traffic also go out on the real address?
+
+- Status: owner
+- Chosen: selective. Release general traffic, and keep blocking AI-service traffic (Claude/OpenAI and the same class) so the real address never reaches them. The PF/WFP rule set is bc-3c5ccfd4's. Until that hook is registered and returns true, the decision stays today's full release. An explicit strict kill switch (`permanent`) still keeps the whole block and is not overridden. Rejected: inventing the filter rules in this change, and leaving every exhausted failure fully blocked.
+- Why stricter: the real address stays off AI services once the hook exists. Until then nothing new is blocked, and nothing new is punched through a filter the hook did not install. Certificate checks stay on. System DNS is not changed.
+- Applied in: [#706](https://github.com/raydocs/tono/pull/706) owns `network_disposition::exhausted_protection`. [#703](https://github.com/raydocs/tono/pull/703) calls that function and does not keep a second match. The later decision above (#709) governs a crash: full release first. This hook stays unregistered until that narrow layer exists, and a true return must not hold general traffic.
+
 ## 2026-09-30 · After login or connect recovery is exhausted, does the machine stay blocked?
 
 - Status: owner

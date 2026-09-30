@@ -573,8 +573,8 @@ impl TonoTransport {
         None
     }
 
-    /// DNS-over-HTTPS via a pinned resolver address. System DNS is not
-    /// modified. A poisoned answer that is not a public IPv4 is ignored.
+    /// DNS-over-HTTPS raced across pinned resolvers. System DNS is not
+    /// read or written. A poisoned answer that is not a public IPv4 is ignored.
     async fn attempt_doh(&self, request: &ApiRequest) -> Option<Result<ApiResponse, ApiError>> {
         if !request.url.contains(bootstrap::API_HOST) {
             return None;
@@ -640,18 +640,58 @@ impl TonoTransport {
 }
 
 async fn resolve_via_doh(name: &str) -> Result<Vec<std::net::Ipv4Addr>, ()> {
+    let resolvers = tono_core::doh_resolvers();
+    let (tx, mut rx) = tokio::sync::mpsc::channel(resolvers.len());
+    for resolver in resolvers {
+        let tx = tx.clone();
+        let name = name.to_owned();
+        let host = resolver.host;
+        let pins = resolver.ipv4.to_vec();
+        tokio::spawn(async move {
+            let answer = query_one_doh(host, &pins, &name).await.ok();
+            let _ = tx.send(answer).await;
+        });
+    }
+    drop(tx);
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+    let mut seen = Vec::with_capacity(resolvers.len());
+    while seen.len() < resolvers.len() {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        if remaining.is_zero() {
+            break;
+        }
+        match tokio::time::timeout(remaining, rx.recv()).await {
+            Ok(Some(answer)) => {
+                seen.push(answer);
+                if let Some(ips) = tono_core::first_public_doh_answer(&seen) {
+                    return Ok(ips);
+                }
+            }
+            _ => break,
+        }
+    }
+    Err(())
+}
+
+async fn query_one_doh(
+    host: &'static str,
+    pins: &[std::net::Ipv4Addr],
+    name: &str,
+) -> Result<Vec<std::net::Ipv4Addr>, ()> {
+    let addrs: Vec<std::net::SocketAddr> = pins
+        .iter()
+        .copied()
+        .map(|ip| std::net::SocketAddr::new(std::net::IpAddr::V4(ip), 443))
+        .collect();
     let client = reqwest::Client::builder()
         .no_proxy()
         .redirect(reqwest::redirect::Policy::none())
         .connect_timeout(Duration::from_secs(2))
         .timeout(Duration::from_secs(2))
-        .resolve_to_addrs(
-            "cloudflare-dns.com",
-            &[std::net::SocketAddr::from(([1, 1, 1, 1], 443))],
-        )
+        .resolve_to_addrs(host, &addrs)
         .build()
         .map_err(|_| ())?;
-    let url = format!("https://cloudflare-dns.com/dns-query?name={name}&type=A");
+    let url = format!("https://{host}/dns-query?name={name}&type=A");
     let body = client
         .get(url)
         .header("accept", "application/dns-json")

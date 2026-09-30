@@ -5,8 +5,8 @@
 //!
 //! Auth recovery is a list of HTTP attempts. None of them install a filter,
 //! change system DNS, or replace a route. After those attempts are exhausted,
-//! the network disposition is fail-open unless the user explicitly chose a
-//! strict kill switch (`permanent`).
+//! [`crate::network_disposition`] decides: strict kill switch, selective AI
+//! hold when that hook is ready, otherwise fail-open.
 
 use std::{net::Ipv4Addr, time::Duration};
 
@@ -325,20 +325,104 @@ pub fn parse_doh_json_answers(body: &str) -> Vec<Ipv4Addr> {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DohResolver {
+    pub name: &'static str,
+    pub host: &'static str,
+    /// Pinned addresses. The lookup does not ask the system resolver.
+    pub ipv4: &'static [Ipv4Addr],
+}
+
+const ALIDNS_V4: [Ipv4Addr; 2] = [
+    Ipv4Addr::new(223, 5, 5, 5),
+    Ipv4Addr::new(223, 6, 6, 6),
+];
+const DNSPOD_V4: [Ipv4Addr; 2] = [
+    Ipv4Addr::new(1, 12, 12, 12),
+    Ipv4Addr::new(120, 53, 53, 53),
+];
+const CLOUDFLARE_V4: [Ipv4Addr; 2] = [
+    Ipv4Addr::new(1, 1, 1, 1),
+    Ipv4Addr::new(1, 0, 0, 1),
+];
+const GOOGLE_V4: [Ipv4Addr; 2] = [Ipv4Addr::new(8, 8, 8, 8), Ipv4Addr::new(8, 8, 4, 4)];
+
+/// Resolvers raced by the auth DoH fallback. AliDNS and DNSPod are reachable
+/// from mainland China; Cloudflare and Google cover networks where those are
+/// not. Order is a label only: the first public answer wins.
+pub fn doh_resolvers() -> &'static [DohResolver] {
+    const RESOLVERS: &[DohResolver] = &[
+        DohResolver {
+            name: "alidns",
+            host: "dns.alidns.com",
+            ipv4: &ALIDNS_V4,
+        },
+        DohResolver {
+            name: "dnspod",
+            host: "doh.pub",
+            ipv4: &DNSPOD_V4,
+        },
+        DohResolver {
+            name: "cloudflare",
+            host: "cloudflare-dns.com",
+            ipv4: &CLOUDFLARE_V4,
+        },
+        DohResolver {
+            name: "google",
+            host: "dns.google",
+            ipv4: &GOOGLE_V4,
+        },
+    ];
+    RESOLVERS
+}
+
+/// First non-empty public A set, in completion order. Failed lookups and
+/// private answers are skipped. This does not read or write system DNS.
+pub fn first_public_doh_answer(
+    results_in_completion_order: &[Option<Vec<Ipv4Addr>>],
+) -> Option<Vec<Ipv4Addr>> {
+    results_in_completion_order.iter().find_map(|result| {
+        let ips = result.as_ref()?;
+        let public: Vec<Ipv4Addr> = ips
+            .iter()
+            .copied()
+            .filter(|ip| is_public_ipv4(*ip))
+            .collect();
+        if public.is_empty() { None } else { Some(public) }
+    })
+}
+
+/// Extra HTTPS names on the API certificate. Empty until the backend
+/// publishes a CDN front on that same certificate. Callers must not invent
+/// a front: SNI has to match a name the server presents. Recovery stays on
+/// the pinned API addresses and DoH answers for `api.afk.ccwu.cc`.
+pub fn extra_api_front_hosts() -> &'static [&'static str] {
+    &[]
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NetworkDisposition {
     /// Put the machine back on the network it had before this attempt.
     FailOpen,
     /// The user turned on a strict kill switch. Leave that block in place.
     KeepStrictBlock,
+    /// General traffic released; AI-service traffic stays blocked.
+    /// The hook already rewrote filters. Callers must not full-release.
+    SelectiveFailOpen,
 }
 
-/// Exhausted login/connect failure. Strict means the user explicitly chose
-/// `permanent`. Any other mode, including a missing preference, fail-opens.
+/// Wrapper around [`crate::network_disposition::exhausted_protection`].
+/// That function is the only policy. Strict means the user chose `permanent`.
 pub fn disposition_after_exhausted_failure(strict_kill_switch_explicit: bool) -> NetworkDisposition {
-    if strict_kill_switch_explicit {
-        NetworkDisposition::KeepStrictBlock
-    } else {
-        NetworkDisposition::FailOpen
+    match crate::network_disposition::exhausted_protection(strict_kill_switch_explicit) {
+        crate::network_disposition::ExhaustedProtection::KeepStrictBlock => {
+            NetworkDisposition::KeepStrictBlock
+        }
+        crate::network_disposition::ExhaustedProtection::ReleaseGeneralKeepAi => {
+            NetworkDisposition::SelectiveFailOpen
+        }
+        crate::network_disposition::ExhaustedProtection::ReleaseOriginalNetwork => {
+            NetworkDisposition::FailOpen
+        }
     }
 }
 
@@ -566,6 +650,33 @@ mod tests {
             vec!["104.20.26.170".parse::<Ipv4Addr>().unwrap()]
         );
         assert!(parse_doh_json_answers("not json").is_empty());
+    }
+
+    #[test]
+    fn doh_race_keeps_the_first_public_answer_and_invents_no_front() {
+        let resolvers = doh_resolvers();
+        assert_eq!(
+            resolvers.iter().map(|resolver| resolver.name).collect::<Vec<_>>(),
+            vec!["alidns", "dnspod", "cloudflare", "google"]
+        );
+        assert_eq!(resolvers[0].host, "dns.alidns.com");
+        assert_eq!(resolvers[0].ipv4, &ALIDNS_V4);
+        assert_eq!(resolvers[1].host, "doh.pub");
+        assert_eq!(resolvers[1].ipv4, &DNSPOD_V4);
+        assert_eq!(resolvers[2].ipv4, &CLOUDFLARE_V4);
+        assert_eq!(resolvers[3].ipv4, &GOOGLE_V4);
+        assert!(resolvers
+            .iter()
+            .all(|resolver| resolver.ipv4.iter().copied().all(is_public_ipv4)));
+        assert!(extra_api_front_hosts().is_empty());
+        let ali: Ipv4Addr = "223.5.5.5".parse().unwrap();
+        let poisoned = Some(vec!["10.0.0.1".parse().unwrap()]);
+        let good = Some(vec![ali]);
+        assert_eq!(
+            first_public_doh_answer(&[None, poisoned.clone(), good]).as_deref(),
+            Some([ali].as_slice())
+        );
+        assert!(first_public_doh_answer(&[None, poisoned]).is_none());
     }
 
     #[test]

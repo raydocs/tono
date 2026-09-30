@@ -82,8 +82,9 @@ pub use crate::tono::connection_health::{
     protected_dns_unhealthy, startup_resume_guards_hold, startup_runtime_is_resume_candidate,
 };
 pub use crate::tono::connection_plan::{
-    FailurePlan, SelectAction, guard_rejection_is_transient, plan_failure, reconnect_allowed, retry_now_is_noop,
-    select_action, sign_out_needs_release, single_flight_begin, stale_exit_needs_release,
+    FailurePlan, SelectAction, guard_rejection_is_transient, plan_failure, plan_failure_using,
+    reconnect_allowed, retry_now_is_noop, select_action, sign_out_needs_release, single_flight_begin,
+    stale_exit_needs_release,
 };
 #[cfg(any(not(windows), test))]
 pub use crate::tono::connection_plan::stop_core_before_release;
@@ -565,9 +566,10 @@ async fn guard_snapshot(
 
 
 
-/// The §6 failure decision table, executing [`plan_failure`]. After arm:
-/// stop the core, keep blocking (restrict to the bootstrap channel),
-/// Protected Offline. Before arm: full release.
+/// The failure decision table, executing [`plan_failure`]. A verified barrier
+/// with an explicit strict kill switch keeps blocking. A ready selective
+/// AI-block hook releases general traffic and must not full-release. Every
+/// other exhausted attempt full-releases. A raced disconnect does nothing.
 async fn fail_connect(
     state: &Arc<TonoState>, app: &AppHandle, generation: u64, err: String, account_owner: (u64, u64),
 ) -> bool {
@@ -601,7 +603,12 @@ async fn fail_connect_observed(
         return false;
     };
     let mut guard = Some(guard);
-    let release_result = if plan.stop_core == Some(true) && armed {
+    let release_result = if plan.selective_ai_hold {
+        // The hook already rewrote filters so general traffic flows and
+        // AI-service destinations stay blocked. `release_explicit` would
+        // remove that hold.
+        None
+    } else if plan.stop_core == Some(true) && armed {
         // Register the real release before transferring this writer. If Disconnect already
         // registered its worker, the coordinator drops our writer and joins that actual result.
         Some(disconnect::release_explicit_with_guard(state, app, guard.take()).await)
@@ -677,7 +684,9 @@ async fn record_connect_failure(
         let plan = plan_failure(armed, session_verified, was_disconnecting, strict_kill_switch);
         let action: &'static str = if was_disconnecting {
             "racedDisconnect"
-        } else if armed && session_verified {
+        } else if plan.selective_ai_hold {
+            "selectiveAiHold"
+        } else if plan.stop_core == Some(false) {
             "keepBlockingAndReconnect"
         } else {
             "fullRelease"
@@ -932,6 +941,7 @@ mod tests {
         kill_switch_unhealthy_for_monitor, map_service_ready_error, owned_direct_reload_in_flight,
         policy_behavior_change_allows_in_place_recovery,
         map_wfp_engine_error, monitor_interval, monitor_requires_reconnect, network_event_fires, plan_failure,
+        plan_failure_using,
         protected_dns_unhealthy, prove_service_endpoint_digest, prove_service_reload_mode, proxy_endpoint_of,
         unique_proxy_endpoints,
         reconnect_allowed, retry_now_is_noop, select_action, sign_out_needs_release, single_flight_begin,
@@ -1281,6 +1291,7 @@ mod tests {
                 mark_armed: false,
                 stop_core: Some(true),
                 restrict_bootstrap: false,
+                selective_ai_hold: false,
             }
         );
         // ...and the FSM confirms the dead end: after that release neither
@@ -1533,6 +1544,7 @@ mod tests {
                 mark_armed: false,
                 stop_core: Some(true),
                 restrict_bootstrap: false,
+                selective_ai_hold: false,
             },
             "an exhausted verified session fail-opens unless the user chose a strict kill switch"
         );
@@ -1542,6 +1554,7 @@ mod tests {
                 mark_armed: true,
                 stop_core: Some(false),
                 restrict_bootstrap: true,
+                selective_ai_hold: false,
             }
         );
     }
@@ -1983,6 +1996,7 @@ mod tests {
                 mark_armed: false,
                 stop_core: Some(true),
                 restrict_bootstrap: false,
+                selective_ai_hold: false,
             }
         );
         // The same shape with an explicit strict kill switch keeps the block.
@@ -1992,6 +2006,7 @@ mod tests {
                 mark_armed: true,
                 stop_core: Some(false),
                 restrict_bootstrap: true,
+                selective_ai_hold: false,
             }
         );
         // Pre-arm failure: full release.
@@ -2001,6 +2016,7 @@ mod tests {
                 mark_armed: false,
                 stop_core: Some(true),
                 restrict_bootstrap: false,
+                selective_ai_hold: false,
             }
         );
         // Initial post-arm failure has not crossed the verification barrier: full release.
@@ -2010,6 +2026,7 @@ mod tests {
                 mark_armed: false,
                 stop_core: Some(true),
                 restrict_bootstrap: false,
+                selective_ai_hold: false,
             }
         );
         // A raced disconnect owns the release end to end; the failing
@@ -2022,10 +2039,35 @@ mod tests {
                     mark_armed: false,
                     stop_core: None,
                     restrict_bootstrap: false,
+                    selective_ai_hold: false,
                 },
                 "armed={armed}"
             );
         }
+    }
+
+    fn engage_selective_ai_block() -> bool {
+        true
+    }
+
+    #[test]
+    fn ready_selective_hook_does_not_full_release() {
+        let plan = plan_failure_using(true, true, false, false, Some(engage_selective_ai_block));
+        assert_eq!(
+            plan,
+            FailurePlan {
+                mark_armed: true,
+                stop_core: None,
+                restrict_bootstrap: false,
+                selective_ai_hold: true,
+            }
+        );
+        let strict = plan_failure_using(true, true, false, true, Some(engage_selective_ai_block));
+        assert!(!strict.selective_ai_hold);
+        assert_eq!(strict.stop_core, Some(false));
+        let unverified = plan_failure_using(true, false, false, false, Some(engage_selective_ai_block));
+        assert!(!unverified.selective_ai_hold);
+        assert_eq!(unverified.stop_core, Some(true));
     }
 
     #[test]

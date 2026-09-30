@@ -2,6 +2,21 @@ import XCTest
 @testable import Tono
 
 final class ProtectedConnectivityTests: XCTestCase {
+    func testExhaustedFailureSelectiveHookDefaultsToFullRelease() {
+        XCTAssertEqual(ExhaustedFailureNetwork.afterFailure(strictKillSwitchExplicit: false), .failOpen)
+        XCTAssertEqual(
+            ExhaustedFailureNetwork.afterFailure(strictKillSwitchExplicit: false, selectiveAiBlockReady: true),
+            .selectiveFailOpen
+        )
+        XCTAssertEqual(
+            ExhaustedFailureNetwork.afterFailure(strictKillSwitchExplicit: true, selectiveAiBlockReady: true),
+            .keepStrictBlock
+        )
+        XCTAssertTrue(ExhaustedFailureNetwork.failOpen.releasesSystemNetwork)
+        XCTAssertFalse(ExhaustedFailureNetwork.selectiveFailOpen.releasesSystemNetwork)
+        XCTAssertFalse(ExhaustedFailureNetwork.keepStrictBlock.releasesSystemNetwork)
+    }
+
     func testBrowserDoHModeMatrix() {
         XCTAssertEqual(BrowserDNSDiagnostics.classify(mode: nil, templates: nil), .clear)
         XCTAssertEqual(BrowserDNSDiagnostics.classify(mode: nil, templates: "https://dns"), .blocking)
