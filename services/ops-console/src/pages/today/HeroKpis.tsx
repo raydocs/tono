@@ -1,6 +1,7 @@
 import { StatTile } from '@/components/ops/StatTile';
 import { copy } from '@/copy/copy';
 import { formatCount } from '@/lib/display';
+import { useIsPhone } from '@/lib/use-phone';
 import { QualityBand } from './Quality';
 
 /**
@@ -14,6 +15,10 @@ import { QualityBand } from './Quality';
  * The band is mounted from here rather than from the page so the page file
  * keeps its one job — deciding what the verdict says — and the dashboard
  * below it can grow without touching that decision.
+ *
+ * Not on a phone: mounted here the band sits above the incident list, and on
+ * a phone the first screen belongs to the incident and its claim button. It
+ * comes back on the phone once the page itself can place it below the list.
  */
 export function HeroKpis({
   open,
@@ -31,6 +36,7 @@ export function HeroKpis({
   /** Follows the coverage line: partly unmeasured stays grey, never green. */
   sweptTone: 'ok' | 'unk';
 }) {
+  const phone = useIsPhone();
   const sweptText = swept === null || listed === null ? null : copy.todaySweptOf(formatCount(swept), formatCount(listed));
   return (
     <>
@@ -56,7 +62,7 @@ export function HeroKpis({
           tone={sweptText === null ? 'unk' : sweptTone}
         />
       </div>
-      <QualityBand />
+      {phone ? null : <QualityBand />}
     </>
   );
 }

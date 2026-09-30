@@ -29,3 +29,9 @@
   - 剩下的 `aria-required-parent` 来自 `Today.tsx` 的标签页缺 `role="tablist"`，要等 #734 合入后再改一行。
   - 没有数据源、这次没画的：成功率目标线（代码和文档都没定义目标）、按天的握手 p95、按小时的成功率（`/slo` 只有按天）、
     失败码分布（归 #707/#734）。
+- 续记（2026-09-30，接手的代理）：本 PR 的 CI `ops-console-e2e` 红在两处，都是本 PR 引入的，已修：
+  - `ledger.spec`「毛利算不出来的」：新的 `/slo` fixture 让账目页出现很多条 `Seoul · Han` 链接，断言改为取第一条。
+  - `today-phone.spec`：连接质量挂在头条区里，在手机上把事故和「认领」挤出第一屏。手机上先不挂这一段；
+    等 #734 合入、`Today.tsx` 能把它放到事故列表下面时再放回手机。
+  - 本机 Playwright（系统 Chrome，`--ignore-snapshots`，一个 worker）：`ledger`、`today-phone` 35 个通过；
+    `一个月的账，一页` 的整页截图在本机 Chrome 里截不出来（页面太长），CI 上通过。

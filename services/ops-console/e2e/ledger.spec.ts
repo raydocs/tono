@@ -43,7 +43,7 @@ test.describe('账目', () => {
     await expect(page.getByText('3 项还没对上')).toBeVisible();
     const pending = page.getByRole('link', { name: 'zhao.lei@example.com' });
     await expect(pending).toHaveAttribute('href', '#/customers/u-05');
-    await expect(page.getByRole('link', { name: 'Seoul · Han' })).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Seoul · Han' }).first()).toBeVisible();
     await expect(page.getByText('待核对').first()).toBeVisible();
   });
 
