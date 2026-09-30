@@ -4573,6 +4573,26 @@
         }
       }
     },
+    "Resets when you disconnect.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "断开后清零。"
+          }
+        }
+      }
+    },
+    "This connection": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "本次连接"
+          }
+        }
+      }
+    },
     "Ready": {
       "localizations": {
         "zh-Hans": {
