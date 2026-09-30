@@ -668,6 +668,8 @@ impl Drop for RestartServiceOnFailure<'_> {
 enum WindowsInstallMode {
     ServiceOnly,
     ReplaceRuntime,
+    /// Start the registered, stopped TonoService as it is ([`start_registered_with`]).
+    StartRegistered,
 }
 
 #[cfg(windows)]
@@ -678,12 +680,13 @@ fn parse_windows_install_mode(
     match arguments.as_slice() {
         [] => Ok(WindowsInstallMode::ServiceOnly),
         [argument] if argument == "--replace-runtime" => Ok(WindowsInstallMode::ReplaceRuntime),
+        [argument] if argument == "--start-registered" => Ok(WindowsInstallMode::StartRegistered),
         // `run_maintenance_if_requested` handles this mode before any install work. Keep it in the
         // strict parser so adding argument validation cannot break the existing recovery command.
         [argument] if argument == "--cleanup-stale-owners" => Ok(WindowsInstallMode::ServiceOnly),
         _ => bail!(
             "unsupported Tono Service installer arguments; expected no arguments, \
-             --replace-runtime, or --cleanup-stale-owners"
+             --replace-runtime, --start-registered, or --cleanup-stale-owners"
         ),
     }
 }
@@ -1712,6 +1715,218 @@ fn bring_scm_bfe_up() -> Result<(), Error> {
     })
 }
 
+/// Exit code of `--start-registered` when TonoService's registration or installed binary does not
+/// verify: nothing was started and the SCM registration is unchanged, but the repair gate taken
+/// first may already have re-applied the private ACL to `ProgramData\Tono` and its `bin`
+/// directory and created `.repair.lock`. The App runs its full repair on exactly this code, and
+/// keeps its own copy of the value (`START_TARGET_UNVERIFIED_EXIT` in the App's service installer).
+#[cfg(windows)]
+const START_TARGET_UNVERIFIED_EXIT: i32 = 74;
+
+/// The effects of `--start-registered`: the SCM and the repair gate in production, a script in
+/// tests. [`start_registered_with`] owns their order.
+#[cfg(windows)]
+trait StartRegisteredEffects {
+    /// Take the raw repair gate; `Ok(false)` when another lifecycle writer holds it.
+    fn acquire_repair_gate(&mut self) -> Result<bool, Error>;
+    /// No manual installer lease whose holder may still run.
+    fn start_admission(&mut self) -> Result<(), Error>;
+    /// Open TonoService and read its state: true only for Stopped.
+    fn service_stopped(&mut self) -> Result<bool, Error>;
+    /// The registration and the installed binary are what the installer writes.
+    fn target_verifies(&mut self) -> Result<bool, Error>;
+    fn bring_bfe_up(&mut self) -> Result<(), Error>;
+    fn start_service(&mut self) -> Result<(), Error>;
+    fn release_repair_gate(&mut self);
+    fn wait_for_service_ready(&mut self) -> Result<(), Error>;
+}
+
+/// `--start-registered` (BRICK-W5 e): start the registered, stopped TonoService as it is, so the
+/// App's release can reach it. An SCM stop leaves WFP armed, and the full repair is refused by
+/// `manual_gate` while filters exist or the owner still wants its Core.
+///
+/// Order: the raw repair gate (never `enter_repair_gate`, whose `maintenance_allowed` refuses any
+/// lease and any pending attempt; taking the raw gate still prepares the install directory, which
+/// may re-apply its private ACL, before anything is verified), the lease admission, the service
+/// state; only for a Stopped
+/// Service the target verification, BFE and the start; then the gate is released before the
+/// readiness wait, so a recovery executor the starting Service spawns can take it. A Service
+/// that is not Stopped is neither verified nor started. Every early return ends the process,
+/// which closes the gate's handle. Exits: 0 ready, 74 target unverified, 75 gate held, 1
+/// otherwise, with the reason on stderr.
+#[cfg(windows)]
+fn start_registered_with(effects: &mut impl StartRegisteredEffects) -> i32 {
+    match effects.acquire_repair_gate() {
+        Ok(true) => {}
+        Ok(false) => {
+            eprintln!("Service repair is already in progress");
+            return tono_service_protocol::REPAIR_IN_PROGRESS_EXIT_CODE;
+        }
+        Err(error) => {
+            eprintln!("tono-install: could not take the repair gate: {error:#}");
+            return 1;
+        }
+    }
+    if let Err(error) = effects.start_admission() {
+        eprintln!("tono-install: TonoService was not started: {error:#}");
+        return 1;
+    }
+    let stopped = match effects.service_stopped() {
+        Ok(stopped) => stopped,
+        Err(error) => {
+            eprintln!("tono-install: could not read the TonoService state: {error:#}");
+            return 1;
+        }
+    };
+    if stopped {
+        match effects.target_verifies() {
+            Ok(true) => {}
+            Ok(false) => {
+                eprintln!(
+                    "tono-install: the registered TonoService is not what the installer writes; \
+                     nothing was started"
+                );
+                return START_TARGET_UNVERIFIED_EXIT;
+            }
+            Err(error) => {
+                eprintln!(
+                    "tono-install: the registered TonoService could not be verified ({error:#}); \
+                     nothing was started"
+                );
+                return START_TARGET_UNVERIFIED_EXIT;
+            }
+        }
+        if let Err(error) = effects.bring_bfe_up() {
+            eprintln!("tono-install: {error:#}");
+            return 1;
+        }
+        if let Err(error) = effects.start_service() {
+            eprintln!("tono-install: TonoService did not start: {error:#}");
+            return 1;
+        }
+    }
+    effects.release_repair_gate();
+    match effects.wait_for_service_ready() {
+        Ok(()) => 0,
+        Err(error) => {
+            eprintln!("tono-install: {error:#}");
+            1
+        }
+    }
+}
+
+/// Whether SCM's registered command line (ImagePath) for TonoService is exactly the installed
+/// binary, with no argument. A fully quoted value is unquoted and compared; nothing may follow the
+/// closing quote. An unquoted value containing any whitespace fails: SCM may run a shorter prefix
+/// of it (`C:\Program.exe` for `C:\Program Files\...`), so equality would not prove which file
+/// starts. The installer's `create_service` quotes exactly the paths that contain whitespace
+/// (windows-service `shell_escape`), so a real install still verifies. ASCII case-insensitive,
+/// with no canonicalization.
+#[cfg(windows)]
+fn start_target_is_installed_service(registered: &std::ffi::OsStr, installed: &Path) -> bool {
+    let (Some(registered), Some(installed)) = (registered.to_str(), installed.to_str()) else {
+        return false;
+    };
+    let path = match registered.strip_prefix('"') {
+        Some(quoted) => match quoted.strip_suffix('"') {
+            Some(inner) if !inner.contains('"') => inner,
+            _ => return false,
+        },
+        None if registered.contains(char::is_whitespace) => return false,
+        None => registered,
+    };
+    path.eq_ignore_ascii_case(installed)
+}
+
+/// [`StartRegisteredEffects`] against the local SCM. It holds the repair gate and the
+/// TonoService handle between the steps.
+#[cfg(windows)]
+#[derive(Default)]
+struct ScmStartRegistered {
+    gate: Option<tono_service_protocol::ServiceRepairGate>,
+    service: Option<platform_lib::service::Service>,
+}
+
+#[cfg(windows)]
+impl ScmStartRegistered {
+    fn service(&self) -> Result<&platform_lib::service::Service, Error> {
+        self.service.as_ref().context("TonoService was not opened")
+    }
+}
+
+#[cfg(windows)]
+impl StartRegisteredEffects for ScmStartRegistered {
+    fn acquire_repair_gate(&mut self) -> Result<bool, Error> {
+        self.gate = tono_service_protocol::acquire_service_repair_gate()?;
+        Ok(self.gate.is_some())
+    }
+
+    fn start_admission(&mut self) -> Result<(), Error> {
+        tono_service_protocol::update_native::start_admission()
+    }
+
+    fn service_stopped(&mut self) -> Result<bool, Error> {
+        use platform_lib::service::{ServiceAccess, ServiceState};
+        use platform_lib::service_manager::{ServiceManager, ServiceManagerAccess};
+
+        let manager = ServiceManager::local_computer(None::<&str>, ServiceManagerAccess::CONNECT)?;
+        let service = manager.open_service(
+            tono_service_protocol::WINDOWS_SERVICE_NAME,
+            ServiceAccess::QUERY_STATUS | ServiceAccess::QUERY_CONFIG | ServiceAccess::START,
+        )?;
+        let stopped = service.query_status()?.current_state == ServiceState::Stopped;
+        self.service = Some(service);
+        Ok(stopped)
+    }
+
+    fn target_verifies(&mut self) -> Result<bool, Error> {
+        use platform_lib::service::ServiceStartType;
+
+        let config = self.service()?.query_config()?;
+        let installed = tono_service_protocol::service_paths()
+            .install_dir()
+            .join("tono-service.exe");
+        if !start_target_is_installed_service(config.executable_path.as_os_str(), &installed) {
+            eprintln!(
+                "tono-install: TonoService is registered as {:?}, not {installed:?}",
+                config.executable_path
+            );
+            return Ok(false);
+        }
+        if config.start_type == ServiceStartType::Disabled {
+            eprintln!("tono-install: TonoService is disabled");
+            return Ok(false);
+        }
+        let metadata = std::fs::symlink_metadata(&installed)
+            .with_context(|| format!("failed to inspect {installed:?}"))?;
+        if !metadata.file_type().is_file() {
+            eprintln!("tono-install: {installed:?} is not an ordinary file");
+            return Ok(false);
+        }
+        if sha256(&installed)? != sha256(&bundled_service_binary()?)? {
+            eprintln!("tono-install: {installed:?} differs from the bundled tono-service.exe");
+            return Ok(false);
+        }
+        Ok(true)
+    }
+
+    fn bring_bfe_up(&mut self) -> Result<(), Error> {
+        bring_scm_bfe_up()
+    }
+
+    fn start_service(&mut self) -> Result<(), Error> {
+        Ok(self.service()?.start::<&std::ffi::OsStr>(&[])?)
+    }
+
+    fn release_repair_gate(&mut self) {
+        self.gate = None;
+    }
+
+    fn wait_for_service_ready(&mut self) -> Result<(), Error> {
+        wait_for_service_ready()
+    }
+}
+
 /// install and start the service
 #[cfg(windows)]
 fn main() -> anyhow::Result<()> {
@@ -1729,6 +1944,13 @@ fn main() -> anyhow::Result<()> {
     let install_mode = parse_windows_install_mode(std::env::args_os().skip(1))?;
     if run_maintenance_if_requested()? {
         return Ok(());
+    }
+    if install_mode == WindowsInstallMode::StartRegistered {
+        // Before the replacement candidates, `enter_repair_gate`, `manual_gate`, the digest pin,
+        // staging and any SCM configuration change (BRICK-W5 e). The raw repair gate it takes
+        // still runs `prepare_service_install_directory`, which may re-apply the private ACL to
+        // `ProgramData\Tono` and `bin` before the target is verified; exit 74 does not undo that.
+        std::process::exit(start_registered_with(&mut ScmStartRegistered::default()));
     }
     let mut replacement_candidates = if install_mode == WindowsInstallMode::ReplaceRuntime {
         let runtime = runtime_replacement_candidate(&std::env::current_exe()?)?;
@@ -2066,6 +2288,124 @@ mod tests {
             ])
             .is_err()
         );
+    }
+
+    /// BRICK-W5 (e): a TonoService stopped from services.msc left WFP armed, and the release
+    /// path could revive it only through the full repair, which `manual_gate` refuses while
+    /// filters exist. `--start-registered` starts only a stopped Service whose registration and
+    /// binary verify, releases the repair gate before it waits, and reports an unverified target
+    /// as 74 with nothing started.
+    #[cfg(windows)]
+    #[test]
+    fn windows_start_registered_starts_only_a_stopped_verified_service_and_waits_without_the_gate()
+    {
+        struct Scripted<'a> {
+            stopped: bool,
+            verifies: bool,
+            log: &'a std::cell::RefCell<Vec<&'static str>>,
+        }
+        impl StartRegisteredEffects for Scripted<'_> {
+            fn acquire_repair_gate(&mut self) -> Result<bool, Error> {
+                self.log.borrow_mut().push("gate");
+                Ok(true)
+            }
+            fn start_admission(&mut self) -> Result<(), Error> {
+                self.log.borrow_mut().push("admission");
+                Ok(())
+            }
+            fn service_stopped(&mut self) -> Result<bool, Error> {
+                self.log.borrow_mut().push("stopped");
+                Ok(self.stopped)
+            }
+            fn target_verifies(&mut self) -> Result<bool, Error> {
+                self.log.borrow_mut().push("verify");
+                Ok(self.verifies)
+            }
+            fn bring_bfe_up(&mut self) -> Result<(), Error> {
+                self.log.borrow_mut().push("bfe");
+                Ok(())
+            }
+            fn start_service(&mut self) -> Result<(), Error> {
+                self.log.borrow_mut().push("start");
+                Ok(())
+            }
+            fn release_repair_gate(&mut self) {
+                self.log.borrow_mut().push("release");
+            }
+            fn wait_for_service_ready(&mut self) -> Result<(), Error> {
+                self.log.borrow_mut().push("wait");
+                Ok(())
+            }
+        }
+        let log = std::cell::RefCell::new(Vec::new());
+        let stopped_verified = start_registered_with(&mut Scripted {
+            stopped: true,
+            verifies: true,
+            log: &log,
+        });
+        assert_eq!(stopped_verified, 0);
+        assert_eq!(
+            *log.borrow(),
+            ["gate", "admission", "stopped", "verify", "bfe", "start", "release", "wait"]
+        );
+        log.borrow_mut().clear();
+        let running = start_registered_with(&mut Scripted {
+            stopped: false,
+            verifies: true,
+            log: &log,
+        });
+        assert_eq!(running, 0);
+        assert_eq!(
+            *log.borrow(),
+            ["gate", "admission", "stopped", "release", "wait"]
+        );
+        log.borrow_mut().clear();
+        let unverified = start_registered_with(&mut Scripted {
+            stopped: true,
+            verifies: false,
+            log: &log,
+        });
+        assert_eq!(unverified, 74, "the App repairs on exactly 74");
+        assert_eq!(unverified, START_TARGET_UNVERIFIED_EXIT);
+        assert_eq!(*log.borrow(), ["gate", "admission", "stopped", "verify"]);
+    }
+
+    /// BRICK-W5 (e): the start helper starts only the binary the installer registers, with no
+    /// argument after it.
+    #[cfg(windows)]
+    #[test]
+    fn windows_start_registered_target_must_be_the_installed_path() {
+        use std::ffi::{OsStr, OsString};
+
+        assert_eq!(
+            parse_windows_install_mode([OsString::from("--start-registered")]).unwrap(),
+            WindowsInstallMode::StartRegistered
+        );
+        let installed = Path::new(r"C:\ProgramData\Tono\bin\tono-service.exe");
+        assert!(start_target_is_installed_service(
+            OsStr::new(r#""C:\ProgramData\Tono\bin\tono-service.exe""#),
+            installed
+        ));
+        assert!(start_target_is_installed_service(
+            OsStr::new(r"c:\programdata\tono\BIN\tono-service.exe"),
+            installed
+        ));
+        assert!(!start_target_is_installed_service(
+            OsStr::new(r#""C:\ProgramData\Tono\bin\tono-service.exe" --run"#),
+            installed
+        ));
+        assert!(!start_target_is_installed_service(
+            OsStr::new(r"C:\ProgramData\Tono\bin\tono-service.exe --run"),
+            installed
+        ));
+        assert!(!start_target_is_installed_service(
+            OsStr::new(r"C:\Users\Public\tono-service.exe"),
+            installed
+        ));
+        assert!(!start_target_is_installed_service(
+            OsStr::new(r"C:\Program Data\Tono\bin\tono-service.exe"),
+            Path::new(r"C:\Program Data\Tono\bin\tono-service.exe")
+        ));
     }
 
     #[cfg(windows)]

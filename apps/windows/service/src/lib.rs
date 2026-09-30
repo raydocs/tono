@@ -50,6 +50,7 @@ pub use core::{
     emergency_disarm_windows_kill_switch, initialize_protected_dns_status, load_active_owner,
     load_owner_desired_state, owner_goodbye_requested, prepare_for_service_replacement,
     prepare_service_install_directory, reconcile_service_startup, relock_restored_tunnel,
+    remove_tono_resolver_rule_within,
     residual_filters_present, restore_desired_state, restore_kill_switch,
     restore_windows_kill_switch, retire_unverified_windows_kill_switch, run_ipc_server,
     run_ipc_supervisor_until_shutdown, service_lifecycle_state, set_service_lifecycle_state,

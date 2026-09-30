@@ -118,6 +118,8 @@ pub enum AuditEvent {
     Stage {
         stage: &'static str,
         elapsed_ms: u64,
+        /// Wall time of this completed step. `elapsed_ms` stays cumulative.
+        delay_ms: u64,
     },
     ConnectFail {
         stage: Option<&'static str>,

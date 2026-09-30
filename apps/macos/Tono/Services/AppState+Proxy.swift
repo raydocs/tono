@@ -147,11 +147,13 @@ extension AppState {
                 // previous destination. Closing everything first dumped the
                 // session onto an unverified node.
                 let switchVerdict = await self.verifyProtectedConnection(
-                    controllerTask: Task {
-                        await self.advisoryControllerExitProbe(
-                            api: api,
-                            selectedExit: desiredNode
-                        )
+                    advisoryProbe: {
+                        Task {
+                            await self.advisoryControllerExitProbe(
+                                api: api,
+                                selectedExit: desiredNode
+                            )
+                        }
                     },
                     mixedPort: self.config.mixedPort,
                     generation: switchGeneration,

@@ -495,20 +495,9 @@ impl<E: RunStateEnv> RunStateStore<E> {
     /// is unknown and the operation slot stays quarantined until this app process restarts. This
     /// prevents a second installer from racing a first one that may still commit to the SCM.
     pub async fn perform(&self, action: PendingAction) -> Result<()> {
-        // Set this before the first cancellation point. Only a definite return from the helper
-        // clears it; dropping a spawn_blocking JoinHandle does not stop its blocking thread.
-        self.privileged_outcome_uncertain.store(true, Ordering::Release);
-        let outcome = match tokio::time::timeout(self.privileged_timeout, self.env.run_privileged(action)).await {
-            Ok(outcome) => {
-                self.privileged_outcome_uncertain.store(false, Ordering::Release);
-                outcome
-            }
-            Err(_elapsed) => {
-                return Err(anyhow::anyhow!(
-                    "service {action:?} timed out and may still be running — check the UAC prompt, then restart Tono before retrying; alternatively run resources\\tono-service-install.exe as Administrator"
-                ));
-            }
-        };
+        let outcome = self
+            .bounded_privileged(&format!("{action:?}"), self.env.run_privileged(action))
+            .await?;
         match &outcome {
             Ok(()) if matches!(action, PendingAction::Uninstall) => self.observe(ServiceHealth::NotInstalled),
             Ok(()) => {}
@@ -522,6 +511,39 @@ impl<E: RunStateEnv> RunStateStore<E> {
             }
         }
         outcome
+    }
+
+    /// Carry out a privileged helper that records no Pending Action and writes no health: the
+    /// release path's start-only recovery (BRICK-W5 e). It has [`Self::perform`]'s bound and
+    /// quarantine; the caller holds the slot from [`Self::begin_operation`].
+    #[cfg_attr(not(windows), allow(dead_code))]
+    pub async fn perform_unrecorded(
+        &self,
+        label: &str,
+        helper: impl std::future::Future<Output = Result<()>>,
+    ) -> Result<()> {
+        self.bounded_privileged(label, helper).await?
+    }
+
+    /// Wait for one privileged helper, hard-bounded by [`PRIVILEGED_ACTION_TIMEOUT`]. The outer
+    /// error is the timeout; the inner result is the helper's own.
+    async fn bounded_privileged(
+        &self,
+        label: &str,
+        helper: impl std::future::Future<Output = Result<()>>,
+    ) -> Result<Result<()>> {
+        // Set this before the first cancellation point. Only a definite return from the helper
+        // clears it; dropping a spawn_blocking JoinHandle does not stop its blocking thread.
+        self.privileged_outcome_uncertain.store(true, Ordering::Release);
+        match tokio::time::timeout(self.privileged_timeout, helper).await {
+            Ok(outcome) => {
+                self.privileged_outcome_uncertain.store(false, Ordering::Release);
+                Ok(outcome)
+            }
+            Err(_elapsed) => Err(anyhow::anyhow!(
+                "service {label} timed out and may still be running — check the UAC prompt, then restart Tono before retrying; alternatively run resources\\tono-service-install.exe as Administrator"
+            )),
+        }
     }
 
     // ─────────────────────────── running mode ───────────────────────────

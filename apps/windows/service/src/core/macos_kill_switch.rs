@@ -611,17 +611,29 @@ pub(crate) async fn transition_after_stop(release_requested: bool) -> Result<()>
     install_unlocked(&desired).await
 }
 
+fn crash_recovery_releases_network(strict_kill_switch_enabled: bool) -> bool {
+    !strict_kill_switch_enabled
+}
+
 pub async fn restore_kill_switch() -> Result<()> {
     let _operation = PF_OPERATION.lock().await;
     match tokio::fs::read(state_path()).await {
         Ok(bytes) => match serde_json::from_slice::<Desired>(&bytes) {
             Ok(mut desired) => {
+                let strict = desired.mode == MacosKillSwitchMode::Permanent;
                 if desired.mode == MacosKillSwitchMode::Disabled
                     || desired
                         .tunnel_interface
                         .as_deref()
                         .is_none_or(|interface| validate_interface(interface).is_err())
                 {
+                    if crash_recovery_releases_network(strict) {
+                        *DESIRED.lock().unwrap() = None;
+                        tracing::warn!(
+                            "invalid kill-switch state; not installing a permanent block"
+                        );
+                        return Ok(());
+                    }
                     let emergency = Desired {
                         mode: MacosKillSwitchMode::Permanent,
                         tunnel_interface: None,
@@ -630,7 +642,7 @@ pub async fn restore_kill_switch() -> Result<()> {
                     *DESIRED.lock().unwrap() = Some(emergency.clone());
                     return install_unlocked(&emergency)
                         .await
-                        .context("invalid state: failed to install emergency block");
+                        .context("invalid strict state: failed to install emergency block");
                 }
                 // A persisted utun name is not proof that this boot's interface is owned by the
                 // recovered core. Restore the bootstrap block first and add the tunnel only after
@@ -641,15 +653,9 @@ pub async fn restore_kill_switch() -> Result<()> {
                 install_unlocked(&desired).await
             }
             Err(_) => {
-                let emergency = Desired {
-                    mode: MacosKillSwitchMode::Permanent,
-                    tunnel_interface: None,
-                    tunnel_ready: false,
-                };
-                *DESIRED.lock().unwrap() = Some(emergency.clone());
-                install_unlocked(&emergency)
-                    .await
-                    .context("corrupt state: failed to install emergency block")
+                *DESIRED.lock().unwrap() = None;
+                tracing::warn!("corrupt kill-switch state; not installing a permanent block");
+                Ok(())
             }
         },
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
@@ -659,18 +665,41 @@ pub async fn restore_kill_switch() -> Result<()> {
 
 pub fn spawn_kill_switch_watchdog() {
     tokio::spawn(async {
+        let mut consecutive_unhealthy: u32 = 0;
         loop {
             tokio::time::sleep(std::time::Duration::from_secs(1)).await;
             let _operation = PF_OPERATION.lock().await;
             let wanted = { DESIRED.lock().unwrap().clone() };
-            if let Some(desired) = wanted {
-                #[cfg(all(target_os = "macos", not(feature = "test")))]
-                let healthy = verify_live_unlocked(&desired).await.is_ok();
-                #[cfg(not(all(target_os = "macos", not(feature = "test"))))]
-                let healthy = true;
-                if !healthy && let Err(error) = install_unlocked(&desired).await {
-                    tracing::error!("kill-switch reconciliation failed: {error:#}");
+            let Some(desired) = wanted else {
+                consecutive_unhealthy = 0;
+                continue;
+            };
+            #[cfg(all(target_os = "macos", not(feature = "test")))]
+            let healthy = verify_live_unlocked(&desired).await.is_ok();
+            #[cfg(not(all(target_os = "macos", not(feature = "test"))))]
+            let healthy = true;
+            if healthy {
+                consecutive_unhealthy = 0;
+                continue;
+            }
+            consecutive_unhealthy = consecutive_unhealthy.saturating_add(1);
+            let strict = desired.mode == MacosKillSwitchMode::Permanent;
+            if crash_recovery_releases_network(strict) {
+                if consecutive_unhealthy >= 3 {
+                    tracing::warn!("kill-switch unhealthy; releasing general traffic");
+                    if let Err(error) = release_unlocked().await {
+                        tracing::error!("kill-switch unhealthy release failed: {error:#}");
+                    }
+                    consecutive_unhealthy = 0;
                 }
+            } else if consecutive_unhealthy >= 30 {
+                tracing::warn!("strict kill-switch stayed unhealthy; releasing for recovery");
+                if let Err(error) = release_unlocked().await {
+                    tracing::error!("strict kill-switch recovery release failed: {error:#}");
+                }
+                consecutive_unhealthy = 0;
+            } else if let Err(error) = install_unlocked(&desired).await {
+                tracing::error!("strict kill-switch reconciliation failed: {error:#}");
             }
         }
     });
@@ -719,6 +748,12 @@ mod tests {
         );
         assert!(rules.contains("group 62001"));
         assert!(!rules.contains("user root"));
+    }
+
+    #[test]
+    fn corrupt_recovery_releases_unless_the_mode_is_permanent() {
+        assert!(crash_recovery_releases_network(false));
+        assert!(!crash_recovery_releases_network(true));
     }
 
     #[test]

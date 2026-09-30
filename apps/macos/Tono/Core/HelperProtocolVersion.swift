@@ -235,7 +235,69 @@ nonisolated enum HelperProtocolVersion {
     ///   periodic check retries that one). A 4.48.0 daemon can
     ///   claim, and at disarm release, another program's token under a reused
     ///   PID, and forgets both unanswered tokens.
-    static let current = "4.49.0"
+    /// - 4.49.0 → 4.50.0: a daemon start (every boot), the `status()` heal
+    ///   and the supervisor repair render only the saved tunnel interfaces
+    ///   that exist at that moment, so a reinstall without a TUN renders the
+    ///   no-tunnel form without the Continuity (awdl0, llw0, bridge100), mDNS,
+    ///   LAN, link-local, DHCP and NDP passes. The saved state is not
+    ///   rewritten. A 4.49.0 daemon loads those passes at every boot, before
+    ///   login, from the last session's utun. The six Continuity passes on
+    ///   awdl0, llw0 and bridge100 keep no state (`no state` instead of
+    ///   `keep state (if-bound)`); the allow set is unchanged.
+    /// - 4.50.0 → 4.51.0: helper brick fixes. A daemon start that fails on
+    ///   the update store installs the emergency barrier only where Kill
+    ///   Switch intent is saved, decided under the update lock when the store
+    ///   opened. `/etc/hosts` pins are best-effort at arm, heal, supervisor
+    ///   repair and start, and are removed after the release instead of
+    ///   before the flush, never failing it; an unsafe hosts file is never
+    ///   rewritten, and a FIFO there no longer hangs a read. A release reloads
+    ///   a `/etc/pf.conf` the emergency block displaced when it carries
+    ///   Tono's hook, without writing it. iPhone/iPad wrapper apps (no
+    ///   `Contents`) are not Tono in the removal check. Update verification
+    ///   refuses only a loopback proxy on the Core's mixed port (any loopback
+    ///   proxy while that port is unknown) and an exact `[127.0.0.1]`
+    ///   resolver. A 4.50.0 daemon blocks a never-connected Mac at every boot
+    ///   when the store cannot open, fails every arm and release on an
+    ///   unusable hosts file, leaves the main ruleset displaced after a
+    ///   release, keeps a removed Tono's protection when any wrapper app is
+    ///   installed, and blocks native updates on other products' loopback
+    ///   proxies, proxy-less VPN services and mixed DNS lists.
+    /// - 4.51.0 → 4.52.0: restore and service handoff inspect the snapshot's
+    ///   stable owner before writing old DNS. A newer external DNS choice is
+    ///   retained and the snapshot archived, not reported as restored. Missing
+    ///   identity or read failure still refuses release.
+    /// - 4.52.0 → 4.52.1: the hold path keeps an unrecorded PF enable token
+    ///   when its listing query gives no answer (only a full listing proves
+    ///   it gone), instead of clearing the only handle to a reference that
+    ///   may still be held; settling a past-deadline `pfctl -E` throws on a
+    ///   non-listing answer instead of claiming the child took none. A 4.52.0
+    ///   daemon can leave a token held past disarm with PF enabled.
+    /// - 4.52.1 → 4.52.2: `/etc/pf.conf` only declares the kill-switch anchor.
+    ///   Boot, including Safe Mode, no longer loads the rule file. The helper
+    ///   loads those rules in one `pfctl -f` of a temporary copy while a Core
+    ///   is running. Startup, a corrupt update ledger, and a Core that stays
+    ///   down release a leftover kill switch and restore a saved DNS snapshot.
+    ///   They do not install a block.
+    /// - 4.52.2 → 4.52.3: a failed arm commit and a failed sleep barrier
+    ///   release the kill switch instead of installing an all-block. Startup
+    ///   failure and a failed update rollback do the same, without needing
+    ///   the allowed uid.
+    /// - 4.52.3 → 4.52.4: `/killswitch/status` no longer loads PF rules.
+    ///   The idle supervisor reinstalls only while the Core is running.
+    ///   If the app is removed while the helper stays up, the existing
+    ///   removal release runs without waiting for the next start. Launch
+    ///   does not reinstall from the state file; a Core that is not running
+    ///   is released immediately and a saved DNS snapshot is restored.
+    /// - 4.52.4 → 4.52.5: `--emergency-disarm` and `--emergency-reset`
+    ///   release PF when the update ledger cannot be read. They keep the
+    ///   ledger bytes and do not remove the install in that case. A DNS
+    ///   restore failure no longer skips the PF release.
+    /// - 4.52.5 → 4.52.6: a DNS snapshot restores only its own service.
+    ///   Another service left on exactly 127.0.0.1 is not cleared.
+    ///   Update disconnect still releases PF when prepare cannot prove a
+    ///   foreign loopback proxy or resolver is Tono's. The lifecycle
+    ///   read-failure self-test expects that owner-only restore.
+    static let current = "4.52.6"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS

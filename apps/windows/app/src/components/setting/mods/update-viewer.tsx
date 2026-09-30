@@ -16,10 +16,10 @@ import type { Options as ReactMarkdownOptions } from 'react-markdown'
 
 import { BaseDialog, type DialogRef } from '@/components/base'
 import { useUpdate } from '@/hooks/use-update'
-import { installUpdate } from '@/services/update'
 import { showNotice } from '@/services/notice-service'
 import { useSetUpdateState, useUpdateState } from '@/services/states'
 import { formatTonoActionError } from '@/services/tono'
+import { installUpdate } from '@/services/update'
 
 type MarkdownNode = {
   type: string

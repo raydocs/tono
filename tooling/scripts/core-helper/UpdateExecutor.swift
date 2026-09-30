@@ -72,39 +72,53 @@ enum UpdateExecutor {
         catch { try UpdatePackage.run("/bin/launchctl", ["print", "system/" + label]) }
     }
 
-    /// The fail-closed response to a startup failure: install the emergency
-    /// PF barrier for the installed user. Best-effort, as it was in main —
-    /// the original error is what the caller surfaces and exits on.
+    /// Startup failure used to install an emergency block, and skipped that
+    /// block entirely when the allowed uid could not be read (BRICK-M13).
+    /// There is no strict kill switch, and no uid is required to release.
     private static func armEmergencyBlock() {
-        if let uid = try? readAllowedUID() { try? KillSwitchManager.installEmergencyBlock(allowedUID: uid) }
+        KillSwitchManager.releaseInstalledBlock()
     }
 
     /// Called before constructing CoreManager or restoring normal desired
-    /// state. A corrupt ledger installs a fail-closed barrier and stops launch.
+    /// state. A corrupt ledger stops launch. The default failure action
+    /// releases a saved kill switch; it does not install one (BRICK-M13).
+    /// Intent is still read where the old install ran, including under the
+    /// update lock when the store opened, so tests can see that read. A Mac
+    /// that was never connected is not blocked by a store it cannot read
+    /// (BRICK-M1).
     /// A stop request that arrives while this daemon waits behind the update
     /// lock is not corruption: that SIGTERM is our own update executor's
     /// `launchctl bootout` (the spin guard exists precisely so a bootout can
     /// stop a waiting daemon), the executor owns the replacement flow, and it
     /// bootstraps this daemon back afterwards. Stopping then is clean: no PF
-    /// action, exit success. Every other startup failure keeps installing the
-    /// barrier.
+    /// action, exit success.
     static func startup(storage: UpdateStorage? = nil,
+                        protectionWanted: () -> Bool = KillSwitchManager.stateFileExists,
                         emergencyBlock: () throws -> Void = armEmergencyBlock) throws -> Bool {
+        var secured = false
         do {
             let storage = try storage ?? UpdateStorage()
             return try storage.locked {
-                guard let attempt = try storage.load().attempt, attempt.receipt.phase != .committed else { return false }
-                if attempt.execution == .consumed && (attempt.receipt.blockedReason != nil || attempt.disconnectRequested) { return false }
-                if [.consumed, .replacing, .rollingBack].contains(attempt.execution) {
-                    try launch(storage: storage, attempt: attempt)
-                    return true
+                do {
+                    guard let attempt = try storage.load().attempt, attempt.receipt.phase != .committed else { return false }
+                    if attempt.execution == .consumed && (attempt.receipt.blockedReason != nil || attempt.disconnectRequested) { return false }
+                    if [.consumed, .replacing, .rollingBack].contains(attempt.execution) {
+                        try launch(storage: storage, attempt: attempt)
+                        return true
+                    }
+                    return false
+                } catch HelperFailure.stopping(let message) {
+                    throw HelperFailure.stopping(message)
+                } catch {
+                    secured = true
+                    if protectionWanted() { try? emergencyBlock() }
+                    throw error
                 }
-                return false
             }
         } catch HelperFailure.stopping {
             return true
         } catch {
-            try? emergencyBlock()
+            if !secured, protectionWanted() { try? emergencyBlock() }
             throw error
         }
     }
@@ -193,6 +207,13 @@ enum UpdateExecutor {
             return true
         } catch {
             // Keep all evidence; do not turn an exception into "not installed".
+            // A failed rollback used to leave the helper stopped and PF up
+            // with no recovery short of another boot (BRICK-M8). Release the
+            // network first. Do not claim the rollback succeeded.
+            KillSwitchManager.releaseInstalledBlock()
+            if let dns = try? ProtectedDNSManager() {
+                try? dns.restore(deferringLossNotice: true)
+            }
             // Before the replacing write no binary mutation occurred. Mark
             // this consumed attempt blocked and make diagnostics available.
             if let storage = try? UpdateStorage() {

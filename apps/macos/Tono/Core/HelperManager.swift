@@ -498,8 +498,9 @@ nonisolated struct HelperManager {
         /// Turned off under Login Items › Allow in the Background. launchd will
         /// not start it, and no repair from the app works until it is back on.
         case backgroundDisabled
-        /// launchd has no such job, so nothing restored PF after the last
-        /// restart: macOS loads the PF rules at boot but leaves PF disabled.
+        /// launchd has no such job. macOS loads /etc/pf.conf at boot with PF
+        /// disabled. That hook declares an anchor and does not load the rule
+        /// file, so a missing helper does not reinstall a block.
         case notLoaded
         /// Loaded (an unreachable helper is then busy or restarting, and its PF
         /// rules stay in the kernel), or launchd could not say.
@@ -890,7 +891,7 @@ nonisolated struct HelperManager {
             // restore may run at launch, on Quit or in update preparation.
             AppProfile.defaults.set(true, forKey: protectedDNSOriginalLostKey)
             LocalTrafficAudit.shared.recordEvent(
-                "protected_dns_original_service_missing",
+                "protected_dns_original_not_restored",
                 details: ["service": envelope.service ?? ""]
             )
         }
@@ -910,7 +911,7 @@ nonisolated struct HelperManager {
 
     private static var protectedDNSOriginalLostNotice: String {
         String(
-            localized: "The network service whose DNS settings Tono saved has been deleted, so those DNS servers could not be put back. DNS is now obtained automatically. If your network needs manual DNS servers, set them again in System Settings > Network."
+            localized: "Tono did not restore the saved DNS settings because the network service was removed or its DNS settings changed. Any newer DNS settings were kept. Check System Settings > Network if DNS needs adjustment."
         )
     }
 

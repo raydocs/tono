@@ -33,6 +33,8 @@ mod bootstrap_pins;
 #[cfg(feature = "standalone")]
 mod auth;
 #[cfg(feature = "standalone")]
+mod boot_session;
+#[cfg(feature = "standalone")]
 mod desired;
 #[cfg(feature = "standalone")]
 mod dns;
@@ -103,7 +105,7 @@ pub use desired::{
 };
 #[cfg(feature = "standalone")]
 pub use dns::{
-    initialize_status_cache as initialize_protected_dns_status,
+    initialize_status_cache as initialize_protected_dns_status, remove_tono_resolver_rule_within,
     spawn_status_watchdog as spawn_protected_dns_watchdog,
 };
 #[cfg(feature = "standalone")]

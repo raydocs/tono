@@ -1,5 +1,6 @@
 //! Native coordinator. All calls execute under the Service lifecycle writer;
 //! the on-disk lock also serializes the independently running SYSTEM executor.
+mod gate;
 pub(crate) mod security;
 use super::{
     auth::AuthenticatedOwner, desired, dns, manager, windows_kill_switch as wfp, windows_security,
@@ -10,6 +11,7 @@ use crate::update_contract::{
 use crate::update_transaction::*;
 use crate::update_wire::{UpdateRequest, UpdateStatus};
 use anyhow::{Context as _, Result, ensure};
+pub use gate::{GateReason, GateRefusal, GateReport, reason_of, refusal};
 pub use security::{
     UserLaunch, app_image, image, install_root, parent_image, pin_path, program_files,
     record_installed_version, tunnel_absent, verify_tree,
@@ -21,12 +23,18 @@ use std::{
 };
 
 pub fn open_store() -> Result<Store> {
+    let (root, _pins) = store_root()?;
+    Store::open(&root)
+}
+
+/// The private `updates-v1` root, pinned against rename for as long as the caller holds the pins.
+fn store_root() -> Result<(PathBuf, Vec<std::fs::File>)> {
     let paths = crate::service_paths();
     windows_security::ensure_private_installer_directory(paths.persistent_state_dir())?;
     let root = paths.persistent_state_dir().join("updates-v1");
     windows_security::ensure_private_installer_directory(&root)?;
-    let _pins = pin_path(&root, true)?;
-    Store::open(&root)
+    let pins = pin_path(&root, true)?;
+    Ok((root, pins))
 }
 
 pub fn pending() -> bool {
@@ -65,6 +73,106 @@ pub(crate) fn release_allowed() -> Result<()> {
         "update pending; release/quit cannot cancel the recorded recovery obligation"
     );
     Ok(())
+}
+
+/// The update evidence read without the store's lock and without a write (BRICK-W5 d): no ACL is
+/// re-applied, no `transaction.lock` is created and `state.json` is not re-published. An absent
+/// root is the empty store [`store_root`] would create. A reparse point or an ACL that is not the
+/// private one refuses; nothing re-applies it here.
+fn read_store_state() -> Result<State> {
+    let root = crate::service_paths()
+        .persistent_state_dir()
+        .join("updates-v1");
+    if matches!(
+        std::fs::symlink_metadata(&root),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound
+    ) {
+        return Ok(State::default());
+    }
+    let _pins = pin_path(&root, true)?;
+    Store::read_state(&root)
+}
+
+/// Whether the manual installer that took the lease is gone for certain (Service half of
+/// BRICK-W2): no process has its PID or that process has exited, or the PID now names a process
+/// created at another time. A PID names one process object at a time. The same creation time
+/// under any path, and any read failure, count as alive.
+fn holder_conclusively_dead(
+    holder: &Image,
+    live: Result<Option<super::process::ProcessIdentity>>,
+) -> bool {
+    match live {
+        Ok(None) => true,
+        Ok(Some(process)) => process.started_at != holder.started_at,
+        Err(_) => false,
+    }
+}
+
+/// No manual installer lease, or one whose holder is conclusively dead. The lease itself is kept:
+/// it still fences Connect, the other update requests, repair and startup Core restore until an
+/// installer run replaces it.
+fn no_live_lease(
+    state: &State,
+    live: impl FnOnce(u32) -> Result<Option<super::process::ProcessIdentity>>,
+) -> Result<()> {
+    match &state.manual_installer {
+        None => Ok(()),
+        Some(holder) if holder_conclusively_dead(holder, live(holder.pid)) => Ok(()),
+        Some(holder) => Err(anyhow::anyhow!(
+            "the manual installer lease holder (pid {}) may still be running",
+            holder.pid
+        )),
+    }
+}
+
+/// The `ReleaseKillSwitch` admission. It reads the update evidence without writing it
+/// (BRICK-W5 d) and refuses what `lifecycle_allowed` and [`release_allowed`] refuse, except a
+/// manual installer lease whose holder is conclusively dead (Service half of BRICK-W2).
+pub(crate) fn release_admission() -> Result<()> {
+    release_admission_at(&read_store_state()?, super::process::process_identity)
+}
+
+fn release_admission_at(
+    state: &State,
+    live: impl FnOnce(u32) -> Result<Option<super::process::ProcessIdentity>>,
+) -> Result<()> {
+    ensure!(
+        !state.pending(),
+        "update pending; release/quit cannot cancel the recorded recovery obligation"
+    );
+    no_live_lease(state, live).context("manual installer owns the machine lifecycle")?;
+    if let Some(holder) = &state.manual_installer {
+        tracing::warn!(
+            "releasing protection past a manual installer lease whose holder (pid {}) has exited; \
+             the lease stays and still fences Connect",
+            holder.pid
+        );
+    }
+    Ok(())
+}
+
+/// The manual installer lease check for update requests. Only `Status`, the read the App sends
+/// before its release, passes a conclusively dead holder (Service half of BRICK-W2); every other
+/// request refuses any lease.
+fn update_lease_gate(
+    request: &UpdateRequest,
+    state: &State,
+    live: impl FnOnce(u32) -> Result<Option<super::process::ProcessIdentity>>,
+) -> Result<()> {
+    if state.manual_installer.is_none() {
+        return Ok(());
+    }
+    match request {
+        UpdateRequest::Status => no_live_lease(state, live).context("manual installation is pending"),
+        _ => Err(anyhow::anyhow!("manual installation is pending")),
+    }
+}
+
+/// Whether `tono-service-install --start-registered` may start the registered Service
+/// (BRICK-W5 e): no manual installer lease whose holder may still run. A pending attempt does not
+/// refuse the start; the starting Service fences it itself. Read without a lock or a write.
+pub fn start_admission() -> Result<()> {
+    no_live_lease(&read_store_state()?, super::process::process_identity)
 }
 
 fn verify_manifest(bytes: &[u8], signature: &str) -> Result<ReleaseManifest> {
@@ -203,10 +311,7 @@ pub(crate) async fn request(
 ) -> Result<UpdateStatus> {
     let peer = app_image(owner.peer_pid.context("pipe did not identify App")?)?;
     let mut store = open_store()?;
-    ensure!(
-        store.state.manual_installer.is_none(),
-        "manual installation is pending"
-    );
+    update_lease_gate(&request, &store.state, super::process::process_identity)?;
     let _repair =
         crate::acquire_service_repair_gate()?.context("repair/uninstall already running")?;
     if let Some(a) = &store.state.attempt
@@ -458,7 +563,7 @@ pub(crate) async fn request(
             if !store.pending() {
                 return status(&store);
             }
-            store.authenticate_successor(&peer)?;
+            let relaunched = store.adopt_successor(&peer)?;
             let a = store.live_attempt(now()?)?;
             ensure!(
                 a.execution == Execution::Replaced,
@@ -487,6 +592,9 @@ pub(crate) async fn request(
                     Observation::InstalledIdentityVerified { components: actual },
                 )?;
             }
+            let mut adopted = status(&store)?;
+            adopted.successor_relaunched = relaunched;
+            return Ok(adopted);
         }
         UpdateRequest::Commit => {
             if !store.pending() {
@@ -752,6 +860,7 @@ fn status(store: &Store) -> Result<UpdateStatus> {
             .unwrap_or_else(|| "none".into()),
         offer: None,
         needs_attention: None,
+        successor_relaunched: false,
     })
 }
 
@@ -929,14 +1038,105 @@ pub async fn manual_gate() -> Result<()> {
     Ok(())
 }
 
-async fn manual_core_absent() -> Result<()> {
-    if let Some(record) = super::runtime::read_core_runtime_record().await? {
-        ensure!(
-            super::process::process_identity(record.pid)?.as_ref() != Some(&record.identity),
-            "Disconnect before manual installation: Core is still running"
-        );
+/// `Ok(Some(note))` when the only interfaces named `Tono` are ones Windows reports as not
+/// present; the gate ignores those and says so in its log.
+async fn manual_core_absent() -> Result<Option<String>> {
+    let core = || GateRefusal(GateReason::CoreRunning);
+    if let Some(record) = super::runtime::read_core_runtime_record()
+        .await
+        .context(core())?
+    {
+        let live = super::process::process_identity(record.pid);
+        match recorded_core_state(&record.identity, live, || {
+            security::process_image_name(record.pid)
+        }) {
+            RecordedCore::Gone => {
+                // A stale record only misleads a later check once its pid is reused. With no
+                // Service left to write a new one it belongs to nobody, so it goes.
+                if !barrier_service_present().unwrap_or(true) {
+                    super::runtime::remove_core_runtime_record().await;
+                }
+            }
+            RecordedCore::Running => {
+                return Err(refusal(
+                    GateReason::CoreRunning,
+                    format!(
+                        "Disconnect before manual installation: Core is still running (pid {})",
+                        record.pid
+                    ),
+                ));
+            }
+            RecordedCore::Unverifiable(error) => {
+                return Err(error
+                    .context(format!(
+                        "the recorded Tono Core (pid {}) could not be shown stopped",
+                        record.pid
+                    ))
+                    .context(core()));
+            }
+        }
     }
-    tunnel_absent("Tono")
+    // An enumeration failure is not absence; it stays an unexpected refusal with its own text.
+    // Only a row Windows reports as present refuses (WIN-GATE-GHOST-TUN).
+    let (present, not_present) = security::tunnel_rows("Tono")?;
+    let list = |rows: Vec<security::TunnelRow>| {
+        rows.iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("; ")
+    };
+    if !present.is_empty() {
+        return Err(refusal(
+            GateReason::TonoAdapterPresent,
+            format!(
+                "a network interface named \"Tono\" is reported as present: {}",
+                list(present)
+            ),
+        ));
+    }
+    Ok((!not_present.is_empty()).then(|| {
+        format!(
+            "ignored a network interface named \"Tono\" that Windows reports as not present: {}",
+            list(not_present)
+        )
+    }))
+}
+
+/// What a leftover core runtime record says about the Core it names.
+enum RecordedCore {
+    /// That incarnation is gone: the pid exited or now belongs to another program.
+    Gone,
+    Running,
+    /// The pid is alive but could not be inspected, and nothing shows it is another program.
+    Unverifiable(anyhow::Error),
+}
+
+/// A record names one Core incarnation, which runs only if its pid still carries that identity.
+/// When the pid cannot be inspected (`Registry`, `MemCompression`, a protected process after a
+/// reboot reused it), the image name Windows lists for it still tells another program from the
+/// Core; the same name, or none, stays unproven.
+fn recorded_core_state(
+    recorded: &super::process::ProcessIdentity,
+    live: Result<Option<super::process::ProcessIdentity>>,
+    image_name: impl FnOnce() -> Option<String>,
+) -> RecordedCore {
+    match live {
+        Ok(Some(identity)) if identity == *recorded => RecordedCore::Running,
+        Ok(_) => RecordedCore::Gone,
+        Err(error) => {
+            let recorded_name = Path::new(&recorded.executable)
+                .file_name()
+                .and_then(|name| name.to_str());
+            match (image_name(), recorded_name) {
+                (Some(live_name), Some(recorded_name))
+                    if !live_name.eq_ignore_ascii_case(recorded_name) =>
+                {
+                    RecordedCore::Gone
+                }
+                _ => RecordedCore::Unverifiable(error),
+            }
+        }
+    }
 }
 
 /// The manual gate refused only because Tono protection is still active: no
@@ -1039,47 +1239,126 @@ fn barrier_service_present() -> Result<bool> {
     }
 }
 
+/// The installer (or uninstaller) that started this gate; the lease binds its incarnation.
+fn gate_installer() -> Result<Image> {
+    parent_image()
+        .context("the setup program that started this gate could not be identified or read")
+        .context(GateRefusal(GateReason::InstallerUnverifiable))
+}
+
+/// The repair lock every lifecycle writer takes: the Service, repair, install and uninstall.
+fn gate_repair_lock() -> Result<crate::ServiceRepairGate> {
+    crate::acquire_service_repair_gate()
+        .context(GateRefusal(GateReason::StateDirUnusable))?
+        .context(
+            "another lifecycle writer is active: another Tono installer, uninstaller or repair, \
+             or the Service, holds ProgramData\\Tono\\bin\\.repair.lock",
+        )
+        .context(GateRefusal(GateReason::LifecycleWriterActive))
+}
+
+/// The update store as a gate reads it: an unusable state directory, a store another Tono
+/// process holds, and damaged evidence are three different answers for the customer.
+fn gate_store() -> Result<Store> {
+    let (root, _pins) = store_root().context(GateRefusal(GateReason::StateDirUnusable))?;
+    Store::open(&root).map_err(|error| {
+        let reason = if error.is::<StoreBusy>() {
+            GateReason::LifecycleWriterActive
+        } else {
+            GateReason::UpdateEvidenceUnreadable
+        };
+        error.context(GateRefusal(reason))
+    })
+}
+
+fn refuse_pending(store: &Store) -> Result<()> {
+    match store.state.attempt.as_ref() {
+        Some(a) if store.pending() => Err(refusal(
+            GateReason::UpdatePending,
+            format!(
+                "update evidence pending: attempt {} is at {:?}/{:?} and has not committed",
+                a.receipt.attempt_id, a.receipt.phase, a.execution
+            ),
+        )),
+        _ => Ok(()),
+    }
+}
+
+/// A lease whose holder exited is stale and is replaced; only a live other holder refuses.
+fn refuse_live_lease(store: &Store, installer: &Image) -> Result<()> {
+    match &store.state.manual_installer {
+        Some(previous) if previous != installer && security::process_matches(previous).is_ok() => {
+            let name = previous.path.file_name().map_or_else(
+                || previous.path.display().to_string(),
+                |name| name.to_string_lossy().into_owned(),
+            );
+            Err(refusal(
+                GateReason::InstallerLeaseHeld,
+                format!(
+                    "another manual installer is active: {name} (pid {}) still holds the \
+                     installer lease",
+                    previous.pid
+                ),
+            ))
+        }
+        _ => Ok(()),
+    }
+}
+
 /// NSIS calls this before *any* live or repair-resource mutation. The durable
 /// lease fences Service connect/restart even after the short-lived gate exits.
-pub async fn begin_manual() -> Result<()> {
-    let installer = parent_image()?;
-    let _repair =
-        crate::acquire_service_repair_gate()?.context("another lifecycle writer is active")?;
-    let mut store = open_store()?;
-    ensure!(!store.pending(), "update evidence pending");
-    if let Some(previous) = &store.state.manual_installer {
-        ensure!(
-            security::process_matches(previous).is_err() || *previous == installer,
-            "another manual installer is active"
-        );
-    }
+/// Every refusal names its cause ([`GateRefusal`]) for the installer's dialog. The lease is
+/// written only after every check passed; the returned note is for the install-gate log.
+pub async fn begin_manual() -> Result<Option<String>> {
+    let installer = gate_installer()?;
+    let _repair = gate_repair_lock()?;
+    let mut store = gate_store()?;
+    refuse_pending(&store)?;
+    refuse_live_lease(&store, &installer)?;
     drop(store);
     // No stale manual lease may turn armed/unknown protection into permission.
     residual_filter_refusal(
-        wfp::residual_filters_present().await?,
+        wfp::residual_filters_present()
+            .await
+            .context(GateRefusal(GateReason::WfpUnreadable))?,
         barrier_service_present,
     )?;
     let paths = crate::service_paths();
-    if paths.active_owner_path().try_exists()? {
-        let active: crate::ActiveOwnerState =
-            serde_json::from_slice(&std::fs::read(paths.active_owner_path())?)?;
-        runnable_owner_refusal(
-            desired::load_owner_desired_state(&active.owner_key)
-                .await?
-                .core_should_be_running,
-            barrier_service_present,
-        )?;
+    let owner = || GateRefusal(GateReason::OwnerStateUnreadable);
+    if paths.active_owner_path().try_exists().context(owner())? {
+        let active: crate::ActiveOwnerState = std::fs::read(paths.active_owner_path())
+            .map_err(anyhow::Error::from)
+            .and_then(|bytes| Ok(serde_json::from_slice::<crate::ActiveOwnerState>(&bytes)?))
+            .with_context(|| format!("active owner record {:?}", paths.active_owner_path()))
+            .context(owner())?;
+        let wanted = desired::load_owner_desired_state(&active.owner_key)
+            .await
+            .context(owner())?;
+        runnable_owner_refusal(wanted.core_should_be_running, barrier_service_present)?;
     }
-    let restored = dns::restore_protected().await?;
-    ensure!(
-        !restored.enabled && restored.last_error.is_none(),
-        "DNS restoration is unproven"
-    );
-    manual_core_absent().await?;
-    store = open_store()?;
+    let restored = dns::restore_protected()
+        .await
+        .context(GateRefusal(GateReason::DnsRestoreUnproven))?;
+    if restored.enabled || restored.last_error.is_some() {
+        return Err(refusal(
+            GateReason::DnsRestoreUnproven,
+            format!(
+                "DNS restoration is unproven: {}",
+                restored
+                    .last_error
+                    .as_deref()
+                    .unwrap_or("protected DNS is still enabled")
+            ),
+        ));
+    }
+    let note = manual_core_absent().await?;
+    store = gate_store()?;
     let mut next = store.state.clone();
     next.manual_installer = Some(installer);
-    store.save(next)
+    store
+        .save(next)
+        .context(GateRefusal(GateReason::StateDirUnusable))?;
+    Ok(note)
 }
 
 /// Uninstall only, after the user confirmed releasing active protection. The
@@ -1087,20 +1366,16 @@ pub async fn begin_manual() -> Result<()> {
 /// deletes nothing unless WFP removal is proven, so this takes the same
 /// update/installer lease as [`begin_manual`] without requiring Disconnect.
 pub fn begin_manual_uninstall() -> Result<()> {
-    let installer = parent_image()?;
-    let _repair =
-        crate::acquire_service_repair_gate()?.context("another lifecycle writer is active")?;
-    let mut store = open_store()?;
-    ensure!(!store.pending(), "update evidence pending");
-    if let Some(previous) = &store.state.manual_installer {
-        ensure!(
-            security::process_matches(previous).is_err() || *previous == installer,
-            "another manual installer is active"
-        );
-    }
+    let installer = gate_installer()?;
+    let _repair = gate_repair_lock()?;
+    let mut store = gate_store()?;
+    refuse_pending(&store)?;
+    refuse_live_lease(&store, &installer)?;
     let mut next = store.state.clone();
     next.manual_installer = Some(installer);
-    store.save(next)
+    store
+        .save(next)
+        .context(GateRefusal(GateReason::StateDirUnusable))
 }
 
 /// Install only, after the user confirmed clearing an orphaned barrier ([`OrphanedProtection`]).
@@ -1108,10 +1383,11 @@ pub fn begin_manual_uninstall() -> Result<()> {
 /// The install's own `RemoveVergeService` ladder then removes the filters, and the install stops
 /// there unless that removal is proven.
 pub fn begin_manual_orphan() -> Result<()> {
-    ensure!(
-        !barrier_service_present()?,
-        "a Tono Service still owns the network barrier"
-    );
+    if barrier_service_present()? {
+        // A Service appeared since the user confirmed: Disconnect is the answer again (77).
+        return Err(anyhow::Error::new(ProtectionActive)
+            .context("a Tono Service still owns the network barrier"));
+    }
     begin_manual_uninstall()
 }
 
@@ -1211,6 +1487,66 @@ pub fn reconcile_before_desired() -> Result<bool> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// WIN-GATE-OPAQUE: a core runtime record outlives its Core when the Service is removed
+    /// without stopping it cleanly. After a reboot its pid can belong to any program, including
+    /// one whose image cannot be read (`Registry`, `MemCompression`, a protected process). That
+    /// read error refused every install with the catch-all dialog. A pid that now runs a
+    /// different image is a stale record; only the same image name, or none, stays unproven.
+    #[test]
+    fn update_manual_gate_treats_a_reused_core_pid_as_a_stale_record() {
+        let recorded = super::super::process::ProcessIdentity {
+            executable: r"C:\Program Files\Tono\tono-core.exe".into(),
+            started_at: 133_000_000_000_000_000,
+        };
+        let state = recorded_core_state(
+            &recorded,
+            Err(anyhow::anyhow!("Access is denied. (os error 5)")),
+            || Some("Registry".into()),
+        );
+        assert!(
+            matches!(state, RecordedCore::Gone),
+            "a reused pid kept refusing the install"
+        );
+        let state = recorded_core_state(
+            &recorded,
+            Err(anyhow::anyhow!("Access is denied. (os error 5)")),
+            || Some("TONO-CORE.EXE".into()),
+        );
+        assert!(matches!(state, RecordedCore::Unverifiable(_)));
+        let state =
+            recorded_core_state(&recorded, Err(anyhow::anyhow!("snapshot failed")), || None);
+        assert!(matches!(state, RecordedCore::Unverifiable(_)));
+    }
+
+    /// WIN-GATE-GHOST-TUN: every Core stop is a hard kill, so its WinTUN device is left "Not
+    /// present" while Windows keeps its interface row named `Tono`. Matching that name alone
+    /// refused every later manual install with 87. Only a row Windows reports as present (any
+    /// status but NotPresent) still refuses, and only an exact name match counts.
+    #[test]
+    fn update_manual_gate_ignores_a_not_present_tono_interface() {
+        use windows_sys::Win32::NetworkManagement::Ndis::{
+            IfOperStatusDown, IfOperStatusNotPresent, IfOperStatusUp,
+        };
+        let row = |alias: &str, oper_status| security::TunnelRow {
+            alias: alias.into(),
+            oper_status,
+            ..Default::default()
+        };
+        let (present, not_present) =
+            security::split_tunnel_rows(vec![row("Tono", IfOperStatusNotPresent)], "Tono");
+        assert!(
+            present.is_empty(),
+            "a not-present Tono interface refused the install: {present:?}"
+        );
+        assert_eq!(not_present.len(), 1);
+        let (present, _) = security::split_tunnel_rows(
+            vec![row("TONO", IfOperStatusDown), row("Tono 1", IfOperStatusUp)],
+            "Tono",
+        );
+        assert_eq!(present.len(), 1, "{present:?}");
+        assert_eq!(present[0].alias, "TONO");
+    }
 
     #[test]
     fn update_manual_gate_names_an_orphaned_barrier_instead_of_asking_to_disconnect() {
@@ -1478,5 +1814,128 @@ mod tests {
         );
         assert!(!root.join("linked-copy.exe").exists());
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// BRICK-W2 (Service half): an uninstaller cancelled at "Tono is running" leaves its lease
+    /// behind, and that lease refused every release for good. The release admission now passes
+    /// a lease whose holder is conclusively dead: no process has its PID, or the PID names a
+    /// process created at another time. The same creation time under another path, or an
+    /// unreadable process, still counts as alive, and a pending attempt still refuses.
+    #[test]
+    fn update_release_admission_passes_only_a_conclusively_dead_lease_holder() {
+        use super::super::process::{ProcessIdentity, process_identity};
+        let holder = Image {
+            pid: 4242,
+            started_at: 133_000_000_000_000_000,
+            path: r"C:\Program Files\Tono\uninstall.exe".into(),
+            sha256: "a".repeat(64),
+        };
+        let leased = State {
+            manual_installer: Some(holder.clone()),
+            ..State::default()
+        };
+        assert!(
+            release_admission_at(&leased, |_| Ok(None)).is_ok(),
+            "an exited lease holder kept refusing the release"
+        );
+        assert!(
+            release_admission_at(&leased, |_| Ok(Some(ProcessIdentity {
+                executable: r"C:\Windows\System32\notepad.exe".into(),
+                started_at: holder.started_at + 1,
+            })))
+            .is_ok(),
+            "a lease PID reused by a later process kept refusing the release"
+        );
+        let same_start = release_admission_at(&leased, |_| {
+            Ok(Some(ProcessIdentity {
+                executable: r"C:\Elsewhere\uninstall.exe".into(),
+                started_at: holder.started_at,
+            }))
+        })
+        .unwrap_err();
+        assert!(
+            format!("{same_start:#}").contains("manual installer owns the machine lifecycle"),
+            "{same_start:#}"
+        );
+        assert!(
+            release_admission_at(&leased, |_| Err(anyhow::anyhow!(
+                "Access is denied. (os error 5)"
+            )))
+            .is_err(),
+            "an unreadable lease holder must count as alive"
+        );
+        let (root, store, _, _) = crate::update_transaction::tests::reserved();
+        let pending = release_admission_at(&store.state, |_| Ok(None)).unwrap_err();
+        assert!(format!("{pending:#}").contains("update pending"), "{pending:#}");
+        drop(store);
+        std::fs::remove_dir_all(root).unwrap();
+
+        // The operating system's answers: this process reads as alive. A killed child whose
+        // handle is still held (so its PID cannot be reused) reads as conclusively dead.
+        let own = process_identity(std::process::id())
+            .unwrap()
+            .expect("this process is running");
+        let own_holder = Image {
+            pid: std::process::id(),
+            started_at: own.started_at,
+            path: own.executable.into(),
+            sha256: String::new(),
+        };
+        assert!(!holder_conclusively_dead(
+            &own_holder,
+            process_identity(own_holder.pid)
+        ));
+        let mut child = std::process::Command::new("ping")
+            .args(["-n", "30", "127.0.0.1"])
+            .stdout(std::process::Stdio::null())
+            .spawn()
+            .unwrap();
+        let running = process_identity(child.id())
+            .unwrap()
+            .expect("the child is running");
+        let child_holder = Image {
+            pid: child.id(),
+            started_at: running.started_at,
+            path: running.executable.into(),
+            sha256: String::new(),
+        };
+        child.kill().unwrap();
+        child.wait().unwrap();
+        assert!(
+            holder_conclusively_dead(&child_holder, process_identity(child_holder.pid)),
+            "a killed lease holder still counted as alive"
+        );
+        drop(child);
+    }
+
+    /// BRICK-W2 (Service half): after a restart the App's Disconnect sends `Status` first, and
+    /// any lease refused it before the release was ever asked. Only `Status` passes a
+    /// conclusively dead holder; an unreadable holder refuses it, and every other request keeps
+    /// refusing any lease.
+    #[test]
+    fn update_status_passes_only_a_conclusively_dead_lease_holder() {
+        let leased = State {
+            manual_installer: Some(Image {
+                pid: 4242,
+                started_at: 133_000_000_000_000_000,
+                path: r"C:\Program Files\Tono\uninstall.exe".into(),
+                sha256: "a".repeat(64),
+            }),
+            ..State::default()
+        };
+        assert!(
+            update_lease_gate(&UpdateRequest::Status, &leased, |_| Ok(None)).is_ok(),
+            "Status kept refusing an exited lease holder"
+        );
+        let unreadable = update_lease_gate(&UpdateRequest::Status, &leased, |_| {
+            Err(anyhow::anyhow!("Access is denied. (os error 5)"))
+        })
+        .unwrap_err();
+        assert!(
+            format!("{unreadable:#}").contains("manual installation is pending"),
+            "{unreadable:#}"
+        );
+        assert!(update_lease_gate(&UpdateRequest::Adopt, &leased, |_| Ok(None)).is_err());
+        assert!(update_lease_gate(&UpdateRequest::Disconnect, &leased, |_| Ok(None)).is_err());
     }
 }
