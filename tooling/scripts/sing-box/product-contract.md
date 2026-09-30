@@ -100,8 +100,8 @@ after all platform callers have migrated; this PR does not break main callers.
 | homeProxy | fixed home outbound selection before DIRECT; home endpoint joins proxy tuples |
 | homeSocks5 | `socks` version 5, credentials, `detour: Tono-Exit`; home server NOT a physical permit |
 | home precedence | SOCKS wins over homeProxy as existing catalog contract; domain/CIDR/process/path TCP rules precede DIRECT |
-| DNS | AAAA empty NOERROR, pinned A, fake A, proxied DoH; single resolver, no redundancy claim |
-| TUN | utun199/Tono; 198.18.0.1/30, DNS 198.18.0.2; Windows sing-box template fake `198.18.16.0/20` (inside the probe's 198.18/16, outside the TUN /30). Live mihomo YAML stays `198.18.0.1/16`. Frozen M0 reference and the macOS Swift emitter stay on `198.19.0.0/16`. No `stack`; core DNS disabled |
+| DNS | AAAA empty NOERROR, pinned A, fake A with `rewrite_ttl` 30; primary DoH then, only when that answer is not NOERROR, backup DoH. Both are `https` through `Tono-Exit` with `alpn: h2`. No udp, tcp, or local DNS. `final` stays `Tono-DoH` |
+| TUN | utun199/Tono; 198.18.0.1/30, DNS 198.18.0.2; Windows sing-box template fake `198.18.16.0/20` (inside the probe's 198.18/16, outside the TUN /30). Live mihomo YAML stays `198.18.0.1/16`. Frozen M0 reference and the synthetic draft stay on `198.19.0.0/16`. No `stack`; core DNS disabled |
 | control | authenticated loopback Clash API for observation; no PUT configs success assumption or selector change |
 | state | draft → bounded check → protected start → native receipts → Connected; reload is protected stop/start |
 
@@ -109,7 +109,10 @@ Fake-IP and pinned-host A rules are scoped to `inbound: [Tono-TUN, Tono-DNS,
 Tono-Mixed]`. Internal `/dns/query` has no inbound and must reach real DoH, not
 fake-IP or stale pins. `route.default_domain_resolver: Tono-DoH` is mandatory
 when direct/domain outbounds exist; alpha.3 rejects missing resolver without a
-deprecated-feature environment override. Do not set that override.
+deprecated-feature environment override. Do not set that override. That resolver
+dials the primary DoH directly and does not see the backup rule. The backup
+runs only for queries that walk DNS rules and do not already have a NOERROR
+answer. It is not a parallel race, and it is never a plaintext server.
 
 ### macOS policy variant (Swift owner, not Windows DirectPlan)
 

@@ -3,11 +3,16 @@
   "dns": {
     "servers": [
       {"type": "fakeip", "tag": "Tono-FakeIP", "inet4_range": "198.18.16.0/20"},
-      {"type": "https", "tag": "Tono-DoH", "server": "1.1.1.1", "server_port": 443, "path": "/dns-query", "tls": {"enabled": true, "server_name": "1.1.1.1"}, "detour": "Tono-Exit"}
+      {"type": "https", "tag": "Tono-DoH", "server": "1.1.1.1", "server_port": 443, "path": "/dns-query", "tls": {"enabled": true, "server_name": "1.1.1.1", "alpn": ["h2"]}, "detour": "Tono-Exit"},
+      {"type": "https", "tag": "Tono-DoH-Backup", "server": "8.8.8.8", "server_port": 443, "path": "/dns-query", "tls": {"enabled": true, "server_name": "dns.google", "alpn": ["h2"]}, "detour": "Tono-Exit"}
     ],
     "rules": [
       {"query_type": ["AAAA"], "action": "predefined", "rcode": "NOERROR"},
-      {"inbound": ["Tono-TUN", "Tono-DNS", "Tono-Mixed"], "query_type": ["A"], "action": "route", "server": "Tono-FakeIP"}
+      {"inbound": ["Tono-TUN", "Tono-DNS", "Tono-Mixed"], "query_type": ["A"], "action": "route", "server": "Tono-FakeIP", "rewrite_ttl": 30},
+      {"action": "evaluate", "server": "Tono-DoH", "tag": "primary"},
+      {"match_response": "primary", "response_rcode": "NOERROR", "action": "respond"},
+      {"action": "evaluate", "server": "Tono-DoH-Backup", "tag": "backup"},
+      {"match_response": "backup", "action": "respond"}
     ],
     "final": "Tono-DoH",
     "strategy": "ipv4_only"

@@ -186,6 +186,7 @@ pub fn build_runtime(input: RuntimeInput<'_>) -> Result<OwnedSingBoxRuntime, Sin
                 "Tono-Mixed",
                 "Tono-FakeIP",
                 "Tono-DoH",
+                "Tono-DoH-Backup",
                 "Tono-Hosts",
             ]
             .contains(&node.name.as_str())
@@ -535,7 +536,7 @@ mod tests {
             "action":"route","outbound":"Tono-China-Direct"})
         );
         assert_eq!(
-            value["dns"]["servers"][2]["predefined"]["qq.com"],
+            value["dns"]["servers"][3]["predefined"]["qq.com"],
             json!(["101.1.2.3"])
         );
         assert_eq!(
@@ -662,6 +663,49 @@ mod tests {
         assert!(!sing_box_pool([198, 18, 0, 2]));
         assert!(!sing_box_pool([198, 19, 0, 1]));
         assert!(sing_box_pool([198, 18, 16, 1]));
+    }
+
+    #[test]
+    fn sing_box_dns_falls_back_to_a_second_doh_without_plaintext() {
+        let nodes = nodes();
+        let routing = CatalogRouting::default();
+        let runtime = build_runtime(input(&nodes, &routing)).unwrap();
+        let value: Value = serde_json::from_str(runtime.runtime_json()).unwrap();
+        let servers = value["dns"]["servers"].as_array().unwrap();
+        assert!(
+            servers
+                .iter()
+                .all(|server| { matches!(server["type"].as_str(), Some("fakeip" | "https")) })
+        );
+        assert_eq!(servers[1]["tag"], "Tono-DoH");
+        assert_eq!(servers[1]["server"], "1.1.1.1");
+        assert_eq!(servers[1]["detour"], "Tono-Exit");
+        assert_eq!(servers[1]["tls"]["alpn"], json!(["h2"]));
+        assert_eq!(servers[2]["tag"], "Tono-DoH-Backup");
+        assert_eq!(servers[2]["server"], "8.8.8.8");
+        assert_eq!(servers[2]["tls"]["server_name"], "dns.google");
+        assert_eq!(servers[2]["detour"], "Tono-Exit");
+        assert_eq!(servers[2]["tls"]["alpn"], json!(["h2"]));
+        let rules = value["dns"]["rules"].as_array().unwrap();
+        assert_eq!(rules[1]["rewrite_ttl"], 30);
+        assert_eq!(rules[1]["server"], "Tono-FakeIP");
+        assert_eq!(rules[2]["action"], "evaluate");
+        assert_eq!(rules[2]["server"], "Tono-DoH");
+        assert_eq!(rules[2].get("race"), None);
+        assert_eq!(rules[3]["match_response"], "primary");
+        assert_eq!(rules[3]["response_rcode"], "NOERROR");
+        assert_eq!(rules[3]["action"], "respond");
+        assert_eq!(rules[4]["server"], "Tono-DoH-Backup");
+        assert_eq!(rules[5]["match_response"], "backup");
+        assert_eq!(rules[5]["action"], "respond");
+        assert_eq!(value["dns"]["final"], "Tono-DoH");
+        assert_eq!(value["route"]["default_domain_resolver"], "Tono-DoH");
+        let mut stolen = nodes.clone();
+        stolen[0].name = "Tono-DoH-Backup".into();
+        assert_eq!(
+            build_runtime(input(&stolen, &routing)).unwrap_err(),
+            SingBoxError::InvalidNode
+        );
     }
 
     fn probe_sees_fake(octets: [u8; 4]) -> bool {
