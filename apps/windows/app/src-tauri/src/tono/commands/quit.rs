@@ -4,6 +4,8 @@ use std::{net::SocketAddr, sync::Arc, time::Duration};
 use tauri::{AppHandle, Manager as _};
 use tono_logging::{Type, logging};
 use tono_service_protocol::KillSwitchStatus;
+#[cfg(any(windows, test))]
+use tono_service_protocol::ServiceStatusSnapshot;
 use tono_core::{
     auth::{ApiError, DEFAULT_DEVICE_LIMIT, User, normalize_installation_id},
     connection::{ConnectStage, ConnectionFsm, UiState},
@@ -30,6 +32,32 @@ fn fsm_reports_protection(fsm: &ConnectionFsm) -> bool {
         || fsm.status().is_connected
         || fsm.status().is_connecting
         || fsm.status().is_protection_blocked
+}
+
+/// A relaunched App may quit before discovery folds the surviving owner's Core/WFP into its
+/// FSM. An unreadable Service snapshot proves nothing; keep the local decision in that case.
+#[cfg(any(windows, test))]
+fn quit_needs_service_release(local_protected: bool, service: Option<&ServiceStatusSnapshot>) -> bool {
+    // Only this owner's session: the kill-switch aggregate is machine-wide, and an owner-gated
+    // release against another user's barrier would just refuse this Quit.
+    local_protected || service.is_some_and(|snapshot| {
+        snapshot.is_active
+            && (snapshot.kill_switch.as_ref().is_some_and(|status| status.wanted) || snapshot.core_pid.is_some())
+    })
+}
+
+#[cfg(windows)]
+async fn quit_needs_release(local_protected: bool) -> bool {
+    let snapshot = if local_protected {
+        None
+    } else {
+        // Leave room to dispatch release inside even the 2.5 s session-ending Quit budget.
+        tokio::time::timeout(Duration::from_secs(1), service::tono_service_status_snapshot())
+            .await
+            .ok()
+            .and_then(Result::ok)
+    };
+    quit_needs_service_release(local_protected, snapshot.as_ref())
 }
 
 
@@ -272,6 +300,23 @@ pub async fn quit_release(app: AppHandle) -> Result<(), String> {
         return Err("A Service-owned update is pending; Quit/Disconnect cannot cancel its recovery obligation".into());
     }
     let Some(state) = app.try_state::<Arc<TonoState>>().map(|state| state.inner().clone()) else {
+        #[cfg(windows)]
+        if quit_needs_release(false).await {
+            // State creation can fail while the previous App's Core survives. This route needs
+            // only owner credentials; keep release and owned proxy cleanup running even if the
+            // interactive Quit waiter expires.
+            return tauri::async_runtime::spawn(async {
+                let status = service::tono_release_kill_switch().await
+                    .map_err(|error| format!("Quit release without product state failed: {error:#}"))?;
+                if status.wanted || status.live {
+                    return Err("Quit release without product state returned an armed kill switch".into());
+                }
+                let _ = crate::core::sysopt::Sysopt::global().clear_owned_sysproxy().await;
+                Ok::<(), String>(())
+            })
+            .await
+            .map_err(|error| format!("Quit release without product state task failed: {error}"))?;
+        }
         return Ok(());
     };
     let (protected, offline) = {
@@ -280,6 +325,8 @@ pub async fn quit_release(app: AppHandle) -> Result<(), String> {
         inner.tasks.abort_catalog_sync();
         (fsm_reports_protection(&inner.fsm), Arc::clone(&inner.offline))
     };
+    #[cfg(windows)]
+    let protected = quit_needs_release(protected).await;
     let result = if protected {
         connection::release_explicit(&state, &app).await
     } else {
@@ -333,6 +380,73 @@ pub async fn resync_after_cancelled_quit(app: AppHandle) {
         connection::spawn_protection_resync(&state, &app)
     });
     emit_status(&app, &status_of(&inner));
+    // Quit retired catalog/policy refresh, but a cancelled exit keeps this account alive.
+    // The spawn rechecks the auth generation; it must run after releasing the state lock.
+    let generation = (inner.account_state == AccountState::Ready
+        && inner.account.is_some()
+        && inner.account_close.is_none())
+        .then_some(inner.sign_in_generation);
+    drop(inner);
+    if let Some(generation) = generation {
+        catalog_sync::spawn_periodic_for_auth_generation(&state, &app, generation).await;
+    }
+}
+
+#[cfg(test)]
+mod quit_tests {
+    use super::*;
+    use tono_service_protocol::{KillSwitchStatusMode, ServiceLifecycleState};
+
+    #[test]
+    fn quit_before_discovery_releases_service_protection_or_own_running_core() {
+        assert!(!quit_needs_service_release(false, None));
+        assert!(quit_needs_service_release(true, None));
+        let mut snapshot = ServiceStatusSnapshot {
+            snapshot_generation: 0,
+            active_operation: None,
+            is_active: false,
+            active_generation: None,
+            service_state: ServiceLifecycleState::Running,
+            core_pid: None,
+            core_generation: 0,
+            core_started_at: None,
+            last_core_exit_reason: None,
+            restart_count: 0,
+            last_recovery_at: None,
+            desired_core_should_be_running: false,
+            desired_generation: 0,
+            desired_updated_at: 0,
+            desired_state_unknown: false,
+            macos_kill_switch_wanted: false,
+            macos_kill_switch_live: false,
+            macos_kill_switch_mode: Default::default(),
+            kill_switch: Some(KillSwitchStatus {
+                wanted: true,
+                verified: false,
+                live: false,
+                mode: KillSwitchStatusMode::Blocked,
+                tunnel_permit_rendered: false,
+                endpoints: Vec::new(),
+                direct_endpoint_digest: String::new(),
+                last_error: None,
+            }),
+            network_events: Default::default(),
+        };
+        assert!(
+            !quit_needs_service_release(false, Some(&snapshot)),
+            "another user's barrier is not ours to release"
+        );
+        snapshot.is_active = true;
+        assert!(quit_needs_service_release(false, Some(&snapshot)));
+        snapshot.is_active = false;
+        snapshot.kill_switch = None;
+        assert!(!quit_needs_service_release(false, Some(&snapshot)));
+        snapshot.is_active = true;
+        snapshot.core_pid = Some(1234);
+        assert!(quit_needs_service_release(false, Some(&snapshot)));
+        snapshot.is_active = false;
+        assert!(!quit_needs_service_release(false, Some(&snapshot)), "another user's Core is not ours to release");
+    }
 }
 
 /// Fold a Service kill-switch reading into the product state. Extracted from the
