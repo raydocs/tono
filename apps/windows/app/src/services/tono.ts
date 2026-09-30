@@ -157,6 +157,13 @@ const STABLE_ERROR_KEYS: Array<{ prefix: string; key: string }> = [
     prefix: 'TONO_SERVICE_NOT_RUNNING',
     key: 'tono.dashboard.errors.serviceNotRunning',
   },
+  // Restore internet could not get a ready Service (an older start helper, a
+  // declined prompt, a failed start), so no release ran and nothing about
+  // protection was read: unconfirmed, never "still on".
+  {
+    prefix: 'TONO_PROTECTION_UNCONFIRMED',
+    key: 'tono.progress.protectionUnknownBody',
+  },
   // Without these two the Rust side's own Chinese sentence reached the UI
   // verbatim, prefix and all, whatever locale the user had chosen.
   {

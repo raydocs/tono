@@ -294,25 +294,139 @@ fn terminate_process_windows(pid: u32) -> Result<()> {
     }
 }
 
-/// Bind a helper process the DNS engine starts (powershell.exe, ipconfig.exe) to one
+/// Start a helper process the DNS engine runs (powershell.exe, ipconfig.exe) inside one
 /// kill-on-close Job Object that this process holds until it exits. A caller that abandons a
 /// timed-out DNS call and then exits (the uninstall helper's `block_on_abandoning`, the Service's
 /// `shutdown_background`) skips the guard that kills the child on the worker thread. Without the
 /// job, a late restore script would keep running and could overwrite DNS a later install has
 /// set. Exit closes the handle, and Windows ends every process still in the job. Normal runs are
 /// unchanged: their child is waited for, or killed by its guard, long before exit.
+///
+/// The child joins the job before it runs anything ([`spawn_in_job`]), so every process it starts
+/// is in the job too. A child that cannot join is terminated unrun and the start fails: a restore
+/// that does not run is reported, while an unbound one could outlive this process. An exit
+/// between creation and joining leaves a suspended child that never runs.
 #[cfg(windows)]
 #[cfg_attr(feature = "test", allow(dead_code))]
-pub(super) fn bind_to_process_exit(child: &std::process::Child) -> Result<()> {
+pub(super) fn spawn_bound_to_process_exit(
+    command: &mut std::process::Command,
+) -> Result<std::process::Child> {
     use std::os::windows::io::OwnedHandle;
 
     // Statics are never dropped, so the kernel closes this handle only when the process exits.
     static EXIT_JOB: std::sync::OnceLock<std::result::Result<OwnedHandle, String>> =
         std::sync::OnceLock::new();
     match EXIT_JOB.get_or_init(|| kill_on_close_job().map_err(|error| format!("{error:#}"))) {
-        Ok(job) => assign_to_job(job, child),
-        Err(error) => bail!("the exit Job Object could not be created: {error}"),
+        Ok(job) => spawn_in_job(job, command),
+        Err(error) => {
+            bail!("the exit Job Object could not be created, so nothing was started: {error}")
+        }
     }
+}
+
+/// Create `command` suspended, assign it to `job`, and only then resume it. A child that cannot
+/// join, or whose threads cannot be resumed, is terminated and waited for before the error is
+/// returned.
+#[cfg(windows)]
+#[cfg_attr(feature = "test", allow(dead_code))]
+fn spawn_in_job(
+    job: &std::os::windows::io::OwnedHandle,
+    command: &mut std::process::Command,
+) -> Result<std::process::Child> {
+    use std::os::windows::process::CommandExt as _;
+    use windows_sys::Win32::System::Threading::CREATE_SUSPENDED;
+
+    let mut child = command.creation_flags(CREATE_SUSPENDED).spawn()?;
+    if let Err(error) =
+        assign_to_job(job, &child).and_then(|()| resume_suspended_process(child.id()))
+    {
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err(error);
+    }
+    Ok(child)
+}
+
+/// Resume a process this process created suspended. `std::process::Child` keeps no thread handle,
+/// so its threads are found by owner PID in a Toolhelp snapshot; the caller holds the process
+/// handle, so the PID cannot be reused meanwhile, and a thread ID that now belongs to another
+/// process is skipped. The child has run nothing yet, so its one thread is the primary thread
+/// CreateProcess left suspended. A thread a third party injected would be resumed as well, which
+/// is harmless once the process is in the job and does nothing to a thread already running.
+/// If no thread was suspended, the child ran before it joined the job; that is an error, and the
+/// caller terminates the child.
+#[cfg(windows)]
+#[cfg_attr(feature = "test", allow(dead_code))]
+fn resume_suspended_process(pid: u32) -> Result<()> {
+    use windows_sys::Win32::Foundation::{CloseHandle, HANDLE, INVALID_HANDLE_VALUE};
+    use windows_sys::Win32::System::Diagnostics::ToolHelp::{
+        CreateToolhelp32Snapshot, TH32CS_SNAPTHREAD, THREADENTRY32, Thread32First, Thread32Next,
+    };
+    use windows_sys::Win32::System::Threading::{
+        GetProcessIdOfThread, OpenThread, ResumeThread, THREAD_QUERY_LIMITED_INFORMATION,
+        THREAD_SUSPEND_RESUME,
+    };
+
+    struct Handle(HANDLE);
+    impl Drop for Handle {
+        fn drop(&mut self) {
+            // SAFETY: only successfully opened handles are wrapped, and each closes once.
+            unsafe { CloseHandle(self.0) };
+        }
+    }
+
+    // SAFETY: a snapshot of the thread table has no caller-supplied pointers to invalidate.
+    let raw = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0) };
+    if raw == INVALID_HANDLE_VALUE {
+        return Err(std::io::Error::last_os_error())
+            .with_context(|| format!("failed to list the threads of process {pid}"));
+    }
+    let snapshot = Handle(raw);
+    let mut entry = THREADENTRY32 {
+        dwSize: std::mem::size_of::<THREADENTRY32>() as u32,
+        ..Default::default()
+    };
+    let mut suspended = 0_u32;
+    // SAFETY: `snapshot` is a live snapshot and `entry` a valid, correctly sized in/out buffer.
+    let mut has_entry = unsafe { Thread32First(snapshot.0, &mut entry) } != 0;
+    while has_entry {
+        if entry.th32OwnerProcessID == pid {
+            // SAFETY: no pointers; a null result is checked before use.
+            let raw = unsafe {
+                OpenThread(
+                    THREAD_SUSPEND_RESUME | THREAD_QUERY_LIMITED_INFORMATION,
+                    0,
+                    entry.th32ThreadID,
+                )
+            };
+            if raw.is_null() {
+                return Err(std::io::Error::last_os_error()).with_context(|| {
+                    format!("failed to open thread {} of process {pid}", entry.th32ThreadID)
+                });
+            }
+            let thread = Handle(raw);
+            // SAFETY: `thread` is a live handle opened with the query and resume rights.
+            if unsafe { GetProcessIdOfThread(thread.0) } == pid {
+                // SAFETY: the same live handle. ResumeThread returns the suspend count the thread
+                // had before this call.
+                let previous = unsafe { ResumeThread(thread.0) };
+                if previous == u32::MAX {
+                    return Err(std::io::Error::last_os_error()).with_context(|| {
+                        format!("failed to resume thread {} of process {pid}", entry.th32ThreadID)
+                    });
+                }
+                if previous > 0 {
+                    suspended += 1;
+                }
+            }
+        }
+        // SAFETY: same contract as the first call.
+        has_entry = unsafe { Thread32Next(snapshot.0, &mut entry) } != 0;
+    }
+    if suspended == 0 {
+        bail!("process {pid} had no suspended thread, so it ran before it joined the job");
+    }
+    Ok(())
 }
 
 #[cfg(windows)]
@@ -583,7 +697,7 @@ mod tests {
     }
 
     /// A DNS helper bound to the exit job ends when the job's last handle closes, which is what
-    /// process exit does to the handle `bind_to_process_exit` keeps.
+    /// process exit does to the handle `spawn_bound_to_process_exit` keeps.
     #[cfg(windows)]
     #[test]
     fn closing_the_exit_job_ends_a_bound_helper() {
@@ -617,5 +731,64 @@ mod tests {
             let _ = child.wait();
         }
         assert!(ended, "closing the job must end the helper bound to it");
+    }
+
+    /// R680-dns-child-job-window: a DNS helper is created suspended and runs only once it is in
+    /// the job. One that cannot join is terminated before it has run anything, and the start fails
+    /// instead of leaving an unbound helper running. The start also fails when the helper had no
+    /// suspended thread to resume, so this test fails if the helper is not created suspended.
+    #[cfg(windows)]
+    #[test]
+    fn a_dns_helper_runs_only_after_joining_the_job() {
+        let marker = |name: &str| {
+            std::env::temp_dir().join(format!("tono-job-bind-{}-{name}", std::process::id()))
+        };
+        let mkdir = |path: &std::path::Path| {
+            let mut command = std::process::Command::new("cmd.exe");
+            command
+                .args(["/d", "/c", "mkdir"])
+                .arg(path)
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null());
+            command
+        };
+        let joined = marker("joined");
+        let refused = marker("refused");
+        let _ = std::fs::remove_dir(&joined);
+        let _ = std::fs::remove_dir(&refused);
+
+        let job = super::kill_on_close_job().expect("the job is created");
+        let mut child = super::spawn_in_job(&job, &mut mkdir(&joined))
+            .expect("a helper that joins the job starts");
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        let status = loop {
+            if let Some(status) = child.try_wait().expect("the helper can be polled") {
+                break Some(status);
+            }
+            if std::time::Instant::now() >= deadline {
+                let _ = child.kill();
+                let _ = child.wait();
+                break None;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(25));
+        };
+        let ran = status.is_some_and(|status| status.success()) && joined.is_dir();
+        let _ = std::fs::remove_dir(&joined);
+        assert!(ran, "a helper inside the job is resumed and runs: {status:?}");
+
+        // A file handle is not a Job Object, so joining it fails.
+        let not_a_job: std::os::windows::io::OwnedHandle =
+            std::fs::File::open(std::env::current_exe().expect("the test binary has a path"))
+                .expect("the test binary opens")
+                .into();
+        let refusal = super::spawn_in_job(&not_a_job, &mut mkdir(&refused))
+            .expect_err("a helper that cannot join the job must not start");
+        let never_ran = !refused.exists();
+        let _ = std::fs::remove_dir(&refused);
+        assert!(
+            never_ran,
+            "a helper that could not join the job must never run: {refusal:#}"
+        );
     }
 }

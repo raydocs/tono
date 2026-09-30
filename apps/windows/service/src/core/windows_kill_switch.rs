@@ -3005,8 +3005,11 @@ pub fn spawn_windows_kill_switch_watchdog() {
 /// removal fails *without* claiming the barrier is gone. Once WFP is deleted, every DNS outcome
 /// is tagged with a continue marker (`DNS_RESTORED_AUTOMATIC_PREFIX`,
 /// `DNS_UNINSTALL_STILL_ON_LOOPBACK_PREFIX`, or `WFP_REMOVED_CONTINUE_PREFIX`) so the
-/// uninstaller can never treat "filters gone, DNS messy" as result 3. Removing the app while
-/// leaving WFP armed is the only end state that must still block.
+/// uninstaller can never treat "filters gone, DNS messy" as result 3. An NRPT catch-all that
+/// could not be removed puts `DNS_RESOLVER_POLICY_REMAINS_PREFIX` in front of that DNS outcome,
+/// so both markers appear. Two end states must still block: WFP still armed, and the NRPT rule
+/// still present, which the uninstall helper's own sweep (`with_resolver_rule_proof`) checks
+/// again and blocks on with result 3.
 pub async fn emergency_disarm_windows_kill_switch() -> Result<()> {
     let _operation = WFP_OPERATION.lock().await;
     // This is still the fail-open escape hatch: WFP objects are removed even if protected DNS
