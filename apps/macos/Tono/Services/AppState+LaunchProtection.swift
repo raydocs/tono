@@ -35,6 +35,11 @@ extension AppState {
     /// reasserts the stored intent, so the older answer must not retire it.
     func resolveUnconfirmedProtection() async {
         guard isProtectionUnconfirmed else { return }
+        if nativeUpdatePending || RuntimeCleanup.nativeUpdatePending
+            || RuntimeCleanup.nativeUpdateBlocksConnect {
+            await refreshNativeUpdateProtectionStatus()
+            return
+        }
         let sequence = launchProtectionSequence
         let generation = connectionCoordinator.protectionOperationGeneration
         let observation = await networkProtection.refreshKillSwitchStatus()

@@ -64,6 +64,15 @@ extension AppState {
                     }
                     return (false, UUID())
                 }
+                do {
+                    // A session must not reach PF/Core while its restart-loop
+                    // guard exists only in asynchronously flushed preferences.
+                    try self.recordConnectBootSession()
+                } catch {
+                    self.automaticResumeHeldAfterRestart = true
+                    self.errorMessage = String(localized: "Tono could not save its restart safety record, so the connection was not started. Check available disk space and retry. \(error.localizedDescription)")
+                    return (false, UUID())
+                }
                 self.isProtectionBlocked = false
                 self.connectionStage = .preparing
                 self.completedConnectionStages = []
@@ -88,7 +97,6 @@ extension AppState {
                 // while that hold is set, so a connect admitted here is the
                 // user's, and it lifts the hold.
                 self.automaticResumeHeldAfterRestart = false
-                RuntimeCleanup.recordConnectBootSession()
 
                 // Session-dynamic mixed/controller ports avoid collisions with leftover
                 // 7890/9090 listeners from other proxies or a previous core.

@@ -64,28 +64,40 @@ enum RuntimeCleanup {
     /// boot would reconnect by itself again. The file copy is synced before
     /// the connect goes on; the preference stays for a build that reads only
     /// it.
-    static func recordConnectBootSession() {
+    static func recordConnectBootSession(
+        in file: URL = connectBootSessionFile,
+        writer: (String, URL) throws -> Void = writeSynced
+    ) throws {
         let record = bootSessionRecord(current: currentBootSession())
-        AppProfile.defaults.set(record, forKey: SettingsKey.connectBootSession)
         do {
-            try writeSynced(record, to: connectBootSessionFile)
-        } catch {
-            // Unless the file already holds this record, the preference is
-            // all this connect has: a file from an earlier boot must not
-            // outvote it.
-            if recordedConnectBootSession != record {
-                try? FileManager.default.removeItem(at: connectBootSessionFile)
+            // A durable pending marker outlives any failure after rename but
+            // before directory sync. Visible current-boot bytes alone cannot
+            // make a failed admission look successful on the next launch.
+            let pending = file.appendingPathExtension("pending")
+            try writer(unknownBootSession, pending)
+            try writer(record, file)
+            guard Darwin.unlink(pending.path) == 0 else {
+                throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
             }
+            // The record and its directory were already synced by writer.
+            // Marker removal is not a new admission grant: if it reappears
+            // after power loss, the next launch only holds more conservatively.
+            AppProfile.defaults.set(record, forKey: SettingsKey.connectBootSession)
+        } catch {
+            // Admission fails. Preserve the prior record or the pending marker
+            // instead of trusting the preference or a visible replacement.
             LocalTrafficAudit.shared.recordEvent(
                 "connect_boot_session_not_synced",
                 details: ["error": error.localizedDescription]
             )
+            throw error
         }
     }
 
     static func clearConnectBootSession() {
         AppProfile.defaults.removeObject(forKey: SettingsKey.connectBootSession)
         try? FileManager.default.removeItem(at: connectBootSessionFile)
+        try? FileManager.default.removeItem(at: connectBootSessionFile.appendingPathExtension("pending"))
     }
 
     static var recordedConnectBootSession: String? {
@@ -98,6 +110,11 @@ enum RuntimeCleanup {
     /// only the preference, which a panic can lose, so its absence proves
     /// nothing.
     static func recordedConnectBootSession(in file: URL) -> String? {
+        var metadata = stat()
+        if Darwin.lstat(file.appendingPathExtension("pending").path, &metadata) == 0
+            || errno != ENOENT {
+            return unknownBootSession
+        }
         do {
             let data = try Data(contentsOf: file)
             guard let record = String(data: data, encoding: .utf8), !record.isEmpty else {

@@ -27,7 +27,7 @@ final class UnexpectedRestartResumeTests: XCTestCase {
     /// record kept only there, and the next boot reconnected by itself again.
     func testConnectRecordSurvivesALostPreferencesWrite() throws {
         defer { RuntimeCleanup.clearConnectBootSession() }
-        RuntimeCleanup.recordConnectBootSession()
+        try RuntimeCleanup.recordConnectBootSession()
         // The preference never reached disk before the restart.
         AppProfile.defaults.removeObject(forKey: SettingsKey.connectBootSession)
         XCTAssertEqual(
