@@ -739,9 +739,9 @@ const DashboardPage = () => {
         : uiState === 'protectedOffline' && !protectionConfirmed
           ? t('tono.progress.protectionUnknownBody')
           : connected
-            ? status?.directOverlay === 'on'
-              ? t('tono.dashboard.directOn')
-              : t('tono.dashboard.directSkipped')
+            ? status?.directOverlay === 'skipped'
+              ? t('tono.dashboard.directSkipped')
+              : t('tono.dashboard.taglineConnected')
             : t('tono.dashboard.taglineIdle')
   const selectedCity = status?.selectedServer
     ? nodeCityLabel(status.selectedServer, t)
