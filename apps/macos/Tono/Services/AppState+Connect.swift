@@ -837,7 +837,7 @@ extension AppState {
 
                 // Reset state
                 self.isConnected = false
-                self.lastPhysicalFingerprint = nil
+                self.lastUplinkSnapshot = nil
                 self.isProxyDegraded = false
                 // In-place recovery belongs to the session being torn down.
                 // Left set, it outranked Protected Offline and Not Connected on
@@ -1104,7 +1104,8 @@ extension AppState {
         // resurrect the UI as connected while that teardown is queued.
         guard isConnecting, !Task.isCancelled else { return false }
         isConnected = true
-        lastPhysicalFingerprint = PhysicalInterfaceFingerprint.current()
+        let capturedUplink = NetworkUplinkSnapshot.current()
+        lastUplinkSnapshot = capturedUplink.isConcrete ? capturedUplink : nil
         isProtectionBlocked = false
         isRecoveringProtectedConnection = false
         isProxyDegraded = proxyFailed
@@ -1460,12 +1461,16 @@ extension AppState {
                 // Cancelling self.connectionCoordinator.coreMonitorTask cannot help: a task
                 // suspended on an actor call still resumes.
                 let observedGeneration = self.connectionCoordinator.protectionOperationGeneration
-                let primaryService =
-                    await self.protectionAudits.primaryNetworkService()
+                let uplink = await self.protectionAudits.uplinkSnapshot()
                 guard !Task.isCancelled, self.isConnected,
                   self.connectionCoordinator.protectionOperationGeneration == observedGeneration
                 else { return .stopMonitoring }
-                guard primaryService == service else {
+                switch NetworkUplinkSnapshot.classify(
+                    from: self.lastUplinkSnapshot,
+                    to: uplink,
+                    protectedService: service
+                ) {
+                case .moved:
                     self.recoveryCause = .networkChange
                     self.disconnect(releaseKillSwitch: false)
                     self.errorMessage = String(
@@ -1473,6 +1478,12 @@ extension AppState {
                     )
                     self.scheduleProtectedReconnect()
                     return .stopMonitoring
+                case .stay, .adopt:
+                    if self.lastUplinkSnapshot != uplink {
+                        self.lastUplinkSnapshot = uplink
+                    }
+                case .inconclusive:
+                    break
                 }
                 let dnsIntegrity =
                     await self.protectedDNSIntegrityConfirmingBroken(service: service)

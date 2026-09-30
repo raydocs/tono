@@ -450,8 +450,16 @@ nonisolated struct SystemProxy {
 nonisolated struct SystemNetworkObservation: Equatable {
     /// `State:/Network/Global/IPv4` → `PrimaryService` (a service ID).
     var ipv4PrimaryServiceID: String?
+    /// `State:/Network/Global/IPv4` → `PrimaryInterface` (a BSD name, `en0`).
+    var ipv4PrimaryInterface: String? = nil
+    /// `State:/Network/Global/IPv4` → `Router`.
+    var ipv4Router: String? = nil
     /// `State:/Network/Global/IPv6` → `PrimaryService` (a service ID).
     var ipv6PrimaryServiceID: String?
+    /// `State:/Network/Global/IPv6` → `PrimaryInterface`.
+    var ipv6PrimaryInterface: String? = nil
+    /// `State:/Network/Global/IPv6` → `Router` (usually a link-local next hop).
+    var ipv6Router: String? = nil
     /// Service ID → the name `SCNetworkServiceGetName` gives it, which is
     /// how `networksetup` and the helper look a service up.
     var serviceNames: [String: String]
@@ -588,9 +596,11 @@ nonisolated struct SystemNetworkObservation: Equatable {
             [serviceDNSPattern] as CFArray
         ) as? [String: Any] else { return nil }
 
+        func entityString(_ key: String, _ property: CFString) -> String? {
+            (values[key] as? [String: Any])?[property as String] as? String
+        }
         func primaryService(_ key: String) -> String? {
-            (values[key] as? [String: Any])?[kSCDynamicStorePropNetPrimaryService as String]
-                as? String
+            entityString(key, kSCDynamicStorePropNetPrimaryService)
         }
         let primaryIDs = [primaryService(ipv4Key), primaryService(ipv6Key)].compactMap { $0 }
         var names: [String: String] = [:]
@@ -621,7 +631,11 @@ nonisolated struct SystemNetworkObservation: Equatable {
         let fileResolvers = resolverDirectoryConflicts()
         return SystemNetworkObservation(
             ipv4PrimaryServiceID: primaryService(ipv4Key),
+            ipv4PrimaryInterface: entityString(ipv4Key, kSCDynamicStorePropNetPrimaryInterface),
+            ipv4Router: entityString(ipv4Key, kSCPropNetIPv4Router),
             ipv6PrimaryServiceID: primaryService(ipv6Key),
+            ipv6PrimaryInterface: entityString(ipv6Key, kSCDynamicStorePropNetPrimaryInterface),
+            ipv6Router: entityString(ipv6Key, kSCPropNetIPv6Router),
             serviceNames: names,
             effectiveDNSServers: (values[dnsKey] as? [String: Any])?[
                 kSCPropNetDNSServerAddresses as String
