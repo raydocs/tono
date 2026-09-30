@@ -334,6 +334,7 @@ final class KillSwitchManager {
                 + "protection remains fail-closed."
             )
         }
+        do {
         let renderedRules = try Self.writeRules(state: state, allowedUID: allowedUID)
         // Persist fail-closed intent before activating the new rules.
         try saveState(state)
@@ -369,6 +370,22 @@ final class KillSwitchManager {
                 return 0
             }()
         )
+        } catch {
+            // A failed commit may already have written the rule file and the
+            // state. macOS has no strict kill switch, so that must not stay
+            // until the next helper start.
+            if Self.failureRecoveryReleasesNetwork(strictKillSwitchEnabled: false) {
+                Self.releaseInstalledBlock()
+            }
+            throw error
+        }
+    }
+
+    /// True unless the user explicitly enabled a strict kill switch. macOS
+    /// has no such control; the flag exists so a future opt-in can keep a
+    /// block without another edit to every failure path.
+    static func failureRecoveryReleasesNetwork(strictKillSwitchEnabled: Bool) -> Bool {
+        !strictKillSwitchEnabled
     }
 
     static func passRules(in rules: String) -> Set<String> {
@@ -503,10 +520,9 @@ final class KillSwitchManager {
             try? Self.ensureHostsMappings(state: state)
             return true
         } catch {
-            if Self.stateFileExists() {
-                stateGeneration &+= 1
-                try? Self.installEmergencyBlock(allowedUID: allowedUID)
-                return true
+            stateGeneration &+= 1
+            if Self.failureRecoveryReleasesNetwork(strictKillSwitchEnabled: false) {
+                Self.releaseInstalledBlock()
             }
             return false
         }
@@ -563,6 +579,33 @@ final class KillSwitchManager {
             restoreDisplacedMain: { _ = restoreDisplacedMainRuleset() },
             releaseEnableReference: { try releasePFEnableReference() }
         )
+    }
+
+    /// Flush the anchor and drop saved intent. Does not take `lock`. Never
+    /// installs a block. A second call is a no-op once the anchor is empty.
+    static func releaseInstalledBlock() {
+        do {
+            try releaseSequence(
+                writePlaceholder: {
+                    try atomicWrite(
+                        path: killSwitchPFPath,
+                        data: Data("# Managed by Tono Kill Switch — intentionally disarmed\n".utf8),
+                        permissions: 0o600
+                    )
+                },
+                flushAnchor: { try run("/sbin/pfctl", ["-a", killSwitchAnchor, "-F", "all"]) },
+                anchorStillActive: { try childAnchorActive() },
+                removeIntent: { try removeStateIfPresent() },
+                removeHostsPins: { try removeHostsMappings() },
+                restoreDisplacedMain: { _ = restoreDisplacedMainRuleset() },
+                releaseEnableReference: { try releasePFEnableReference() }
+            )
+        } catch {
+            let detail = (error as? HelperFailure)?.message ?? String(describing: error)
+            FileHandle.standardError.write(Data(
+                "tono: failure release could not clear the kill switch: \(detail)\n".utf8
+            ))
+        }
     }
 
     /// The steps of `disarm()`, in order, with each effect passed in so the

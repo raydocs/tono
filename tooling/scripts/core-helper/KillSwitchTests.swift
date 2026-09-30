@@ -1443,6 +1443,8 @@ extension KillSwitchManager {
                 && unansweredListingKeepsUnrecordedToken
                 && bootAnchorHolds
                 && watchdogReleases
+                && failureRecoveryReleasesNetwork(strictKillSwitchEnabled: false)
+                && !failureRecoveryReleasesNetwork(strictKillSwitchEnabled: true)
         } catch {
             return false
         }
