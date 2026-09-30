@@ -18,3 +18,8 @@
 
 - 新增/优化：普通失败放回原网络、严格模式保持封锁，不再在本模块里单独 match。两者都调用 `network_disposition::exhausted_protection_using`。这个函数的所有者是 [#706](https://github.com/raydocs/tono/pull/706)。本 PR 只消费它。钩子就绪时结果是 `SelectiveAiHold`：放行一般流量，不调用显式全量释放，AI 服务流量继续被挡。钩子未注册时仍是今天的 `FailOpen`。PF/WFP 规则归 bc-3c5ccfd4。
 - 剩余限制：#706 的 `plan_failure` 合入后，若它已经按同一决定释放过，本分支的 `FailOpen` 分支不应再释放第二次。选择性过滤器尚未落地。
+
+### 2026-09-30 续记 · 先取出节点列表再改会话
+
+- 工程与测试：`refine_before_arm` 在调用 `heal::observe` 时同时可变借用 `inner.heal` 和不可变借用 `inner.nodes`，`app-rust` 编译失败。节点列表先收进局部 `Vec`，再改会话。探测顺序和放行条件没有变。
+- 验证：本机仍不能跑 `cargo test`。推送后等该 head 的 `app-rust` 变绿。
