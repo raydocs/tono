@@ -224,6 +224,17 @@ final class CoreWebSocket {
         stopLogsTask(keepEnabled: false)
     }
 
+    /// Discard buffered lines and the receive already in flight under the
+    /// previous runtime. The task-identity guard in receiveLogs rejects its
+    /// callback, and the coalescing buffer no longer holds lines that a
+    /// post-commit flush would classify against the new route context.
+    func restartLogsStreamAfterRuntimeChange() {
+        guard logsEnabled, !isStopped else { return }
+        let level = logLevel
+        stopLogsStream()
+        startLogsStream(level: level)
+    }
+
     private func stopLogsTask(keepEnabled: Bool) {
         logsEnabled = keepEnabled
         logFlushTask?.cancel()
@@ -274,8 +285,8 @@ final class CoreWebSocket {
 
     /// Mihomo can emit dozens of messages in one UI frame. Coalesce them into
     /// one observation mutation so the Logs page lays out at most four times per
-    /// second instead of once per line.
-    private func enqueueLog(level: String, message: String) {
+    /// second instead of once per line. Tests enqueue through here directly.
+    func enqueueLog(level: String, message: String) {
         pendingLogs.append((level, message))
         if pendingLogs.count > 500 {
             pendingLogs.removeFirst(pendingLogs.count - 500)
