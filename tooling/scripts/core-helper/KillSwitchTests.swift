@@ -1422,6 +1422,37 @@ extension KillSwitchManager {
             ) && watchdogShouldRestoreNetwork(
                 consecutiveCoreDownChecks: coreDownRestoreThreshold
             )
+            // MAC-ORPHAN-BOOTSTRAP-PF: a bootstrap-only block (empty
+            // tunnelInterfaces) outlives the app only when the recorded
+            // owner stayed dead past the threshold. A committed session, a
+            // helper that restarted mid-session (no owner), and a live
+            // owner are all untouched however long the loop runs.
+            let orphanedBootstrapUntouched = SocketServer.orphanedBootstrapAction(
+                stateFilePresent: true, bootstrapOnly: false, ownerRecorded: true,
+                ownerAlive: false, consecutiveChecks: 99
+            ) == .reset
+                && SocketServer.orphanedBootstrapAction(
+                    stateFilePresent: true, bootstrapOnly: true, ownerRecorded: false,
+                    ownerAlive: false, consecutiveChecks: 99
+                ) == .reset
+                && SocketServer.orphanedBootstrapAction(
+                    stateFilePresent: true, bootstrapOnly: true, ownerRecorded: true,
+                    ownerAlive: true, consecutiveChecks: 99
+                ) == .reset
+                && SocketServer.orphanedBootstrapAction(
+                    stateFilePresent: false, bootstrapOnly: true, ownerRecorded: true,
+                    ownerAlive: false, consecutiveChecks: 99
+                ) == .reset
+            let orphanedBootstrapReleases = SocketServer.orphanedBootstrapAction(
+                stateFilePresent: true, bootstrapOnly: true, ownerRecorded: true,
+                ownerAlive: false,
+                consecutiveChecks: SocketServer.orphanedBootstrapReleaseThreshold - 1
+            ) == .count
+                && SocketServer.orphanedBootstrapAction(
+                    stateFilePresent: true, bootstrapOnly: true, ownerRecorded: true,
+                    ownerAlive: false,
+                    consecutiveChecks: SocketServer.orphanedBootstrapReleaseThreshold
+                ) == .release
             return ruleShapesHold
                 && bundleShapesHold
                 && bundleOffWithoutTunnel
@@ -1444,6 +1475,8 @@ extension KillSwitchManager {
                 && unansweredListingKeepsUnrecordedToken
                 && bootAnchorHolds
                 && watchdogReleases
+                && orphanedBootstrapUntouched
+                && orphanedBootstrapReleases
                 && failureRecoveryReleasesNetwork(strictKillSwitchEnabled: false)
                 && !failureRecoveryReleasesNetwork(strictKillSwitchEnabled: true)
                 && shouldReinstallKillSwitch(coreRunning: true)
