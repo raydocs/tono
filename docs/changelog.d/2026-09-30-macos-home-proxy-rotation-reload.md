@@ -1,6 +1,6 @@
 ## 2026-09-30 · macOS 同名住宅节点轮换后重载当前会话
 - 归属：[SHIP_PLAN](../SHIP_PLAN.md) G1；macOS 托管目录与住宅助手路由。
-- 来源：main `026e747c` → 分支 `codex2/mac-home-proxy-reload`；PR 待开；未合 main。
+- 来源：main `026e747c` → 分支 `codex2/mac-home-proxy-reload`；PR #781；未合 main。
 - 缺陷修复：连接中所选云节点不变、住宅节点同名轮换时，路由摘要只含住宅节点名，原会跳过重载并沿用旧地址/凭据/Reality 密钥。现保存更新前的住宅路由名，用现有名称匹配规则查找两版住宅节点，按与所选节点相同的拨号身份比较触发重载。见 `MAC-HOME-PROXY-ROTATION-STALE`。
 - 新增/优化：无；没有 `homeProxy` 时保持原重载判断，沿用现有流式响应延迟与运行时重载路径。
 - 工程与测试：在现有 `CatalogLiveSessionTests.swift` 新增一个 XCTest：所选节点不变、同名住宅节点 UUID 轮换、路由摘要不变时必须重载；更新全部既有 `shouldReload` 调用参数。
