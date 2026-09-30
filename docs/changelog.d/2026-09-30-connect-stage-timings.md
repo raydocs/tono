@@ -13,3 +13,8 @@
 
 - 来源：变基到 `origin/main` `5d46b896`。助手协议仍是 main 的 `4.52.6`。
 - 新增/优化：main 已有的 `telemetryKey` 保留（`preparingHelper` 仍是 `preparingHelper`）。新的 `wireKey` 与 Windows `WIRE_KEYS` 对齐，`preparingHelper` 在这条键上是 `preparingService`。预算没有缩短。
+
+### 2026-09-30 续记 · 变基到已含 #706 的 main
+
+- 来源：变基到 `origin/main` `7e475245`。没有把 main 合并进来。唯一冲突是 `docs/DECISIONS.md`：#706 的两条所有者记录留在「不缩短 TUN / 首字节预算」上面。两条都保留。
+- 新增/优化：`telemetryKey` 与 `wireKey` 仍同时存在。10 秒 TUN 和 12 秒首字节预算没有缩短。助手协议仍是 `4.52.6`。
