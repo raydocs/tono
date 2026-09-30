@@ -69,7 +69,6 @@ enum RuntimeCleanup {
         writer: (String, URL) throws -> Void = writeSynced
     ) throws {
         let record = bootSessionRecord(current: currentBootSession())
-        AppProfile.defaults.set(record, forKey: SettingsKey.connectBootSession)
         do {
             // A durable pending marker outlives any failure after rename but
             // before directory sync. Visible current-boot bytes alone cannot
@@ -86,6 +85,7 @@ enum RuntimeCleanup {
             }
             defer { Darwin.close(directory) }
             try fullSync(directory)
+            AppProfile.defaults.set(record, forKey: SettingsKey.connectBootSession)
         } catch {
             // Admission fails. Preserve the prior record or the pending marker
             // instead of trusting the preference or a visible replacement.

@@ -96,12 +96,14 @@ final class DurableConnectAdmissionTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: directory) }
         let file = directory.appendingPathComponent("connect-boot-session")
         try RuntimeCleanup.writeSynced("previous-boot", to: file)
+        AppProfile.defaults.set("previous-boot", forKey: SettingsKey.connectBootSession)
 
         XCTAssertThrowsError(try RuntimeCleanup.recordConnectBootSession(in: file, writer: { _, _ in
             throw POSIXError(.EIO)
         }))
 
         XCTAssertEqual(try String(contentsOf: file, encoding: .utf8), "previous-boot")
+        XCTAssertEqual(AppProfile.defaults.string(forKey: SettingsKey.connectBootSession), "previous-boot")
         AppProfile.defaults.removeObject(forKey: SettingsKey.connectBootSession)
         XCTAssertTrue(RuntimeCleanup.holdsAutomaticResume(
             recordedBootSession: RuntimeCleanup.recordedConnectBootSession(in: file),
