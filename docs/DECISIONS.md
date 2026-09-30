@@ -93,6 +93,13 @@ may reverse), `reversed` (keep the line; say what replaced it).
 - Why stricter: 连接时 Kill Switch 在 TUN 起来之前就已经武装。动态 PF 或未在 Mac 上解析过的规则一旦写坏，整份规则装不进去，恢复仍要靠已有的 Restore internet，但这次改动本身不能增加那条路径的失败面。排除有限广播不会打开公网，也不替换默认路由。在网全球 IPv6 / 非私网 IPv4 仍按现有 Kill Switch 丢弃，直到有实机证明一条静态、可重复的放行。
 - Applied in: [#700](https://github.com/raydocs/tono/pull/700) `cursor/macos-continuity-onlink-3d9f`（`ConfigPipeline.tunRouteExcludeCIDRs`）。
 
+## 2026-09-30 · On Windows, should corrupt WFP state or an unhealthy watchdog keep a block?
+
+- Status: provisional
+- Chosen: no, unless the on-disk record explicitly sets `strict_kill_switch` (or the PF desired mode is Permanent). Corrupt, unreadable, unusable, and residual-without-intent paths release WFP and attempt DNS restore. The unhealthy watchdog waits three ticks, then releases; strict mode reinstalls and still releases after thirty consecutive unhealthy ticks. Rejected: keeping the ownerless emergency block, and deleting corrupt bytes to synthesize a tombstone.
+- Why stricter: an unreadable file is not an opt-in, so it cannot keep the machine closed. A live wanted session is still restored when the record parses and the install verifies. The cost is a connected session whose WFP verify fails for about three seconds loses the block until the next arm. Needs real-hardware testing.
+- Applied in: branch `cursor/win-wfp-fail-open-581a` (`windows_kill_switch.rs`, `macos_kill_switch.rs`).
+
 ## 2026-09-29 · After an unexpected restart on Windows, does the Service start the Core by itself, and does the App say why it did not?
 
 - Status: provisional
