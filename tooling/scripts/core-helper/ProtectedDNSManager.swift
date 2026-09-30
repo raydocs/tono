@@ -1103,7 +1103,7 @@ final class ProtectedDNSManager {
         do { try restore() } catch ReadFailure.injected { refused = true } catch {}
         guard refused, !snapshotRemoved,
               settings["Wi-Fi"] == ["9.9.9.9"],
-              settings["Bridge"] == [],
+              settings["Bridge"] == [protectedDNSServer],
               settings["Disabled Ethernet"] == [protectedDNSServer],
               settings["Custom"] == ["8.8.4.4"] else {
             print("DNS restore read-failure regression FAILED: refused=\(refused), snapshotRemoved=\(snapshotRemoved)")
@@ -1111,11 +1111,14 @@ final class ProtectedDNSManager {
         }
         unreadable = false
         do { try restore() } catch { return false }
-        guard snapshotRemoved, settings["Disabled Ethernet"] == [],
-              settings["Wi-Fi"] == ["9.9.9.9"], settings["Custom"] == ["8.8.4.4"] else {
+        guard snapshotRemoved,
+              settings["Disabled Ethernet"] == [protectedDNSServer],
+              settings["Bridge"] == [protectedDNSServer],
+              settings["Wi-Fi"] == ["9.9.9.9"],
+              settings["Custom"] == ["8.8.4.4"] else {
             return false
         }
-        print("DNS restore read-failure regression passed: failure retains snapshot; retry restores all services")
+        print("DNS restore read-failure regression passed: failure retains snapshot; other loopback services stay")
         return true
     }
 

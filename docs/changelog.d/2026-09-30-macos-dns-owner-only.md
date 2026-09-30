@@ -9,3 +9,5 @@
 - 验证：Linux 无 Swift、无 PF。未编译、未跑 self-test。
 - 候选/发布：仅源码，无新候选。
 - 剩余限制：没写进快照的禁用网卡可能仍留着 `127.0.0.1`。更新准入仍会被别家代理拦住，本 PR 不关那些代理。未实机。版本行与 #701、#695、#708、#710、#711 冲突。
+
+- 续记（2026-09-30）：macOS CI `privileged-tests` 的 `--lifecycle-self-test` 失败，`DNS restore read-failure regression` 仍要求有快照时把 Bridge 清成空。自测改为：读失败时快照保留、只恢复 Wi-Fi；重试删快照，Bridge 和 Disabled Ethernet 上的 `127.0.0.1` 保持不动。该修正与本 PR 同在 `4.52.6`，不再另升一号。守护进程的 DNS 决定没有再改。Linux 仍未跑 self-test。
