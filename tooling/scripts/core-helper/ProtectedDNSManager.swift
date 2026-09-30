@@ -798,9 +798,6 @@ final class ProtectedDNSManager {
     }
 
     private static func writeDNS(_ servers: [String], on service: NetworkService) throws {
-        guard servers.count <= maximumDNSServerCount, servers.allSatisfy(isIPAddress) else {
-            throw HelperFailure.invalid("A protected DNS snapshot is invalid.")
-        }
         try writeDNS(
             servers,
             on: service,
@@ -815,6 +812,11 @@ final class ProtectedDNSManager {
         writeByID: ([String], String) throws -> Void,
         writeByName: ([String], String) throws -> Void
     ) throws {
+        // The guard lives in the injectable layer so the self-test exercises
+        // the same check production writes go through.
+        guard servers.count <= maximumDNSServerCount, servers.allSatisfy(isIPAddress) else {
+            throw HelperFailure.invalid("A protected DNS snapshot is invalid.")
+        }
         if let id = service.id {
             try writeByID(servers, id)
         } else {
