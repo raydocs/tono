@@ -22,3 +22,7 @@
 
 - 缺陷修复：`1e8d0def` 的 `app-rust` 仍失败，错误是 `E0391`。`spawn_after_release` 的异步类型要检查 `connect_for_generation` 是否 `Send`，而连接失败又会等回这个启动函数，类型算不完。启动改成同步函数，世代号由调用方传入；句柄用 `try_lock` 装上，锁被占用时另起一个只装句柄的任务。票号变了就丢掉旧句柄，不覆盖更新的探测。
 - 行为不变：屏障还在时仍走保护重连；只有 TCP 证明成功才连接；探测过程不装 TUN、WFP 或 PF。本机仍不能跑 `cargo test`。
+
+### 2026-09-30 续记 · 变基到已含 #703 的 main
+
+- 来源：变基到 `origin/main` `01c2403f`（[#703](https://github.com/raydocs/tono/pull/703) 已合入）。没有把 main 合并进来。`connection.rs` 的失败分支两边都留：`FailOpen` 仍调用 `release_explicit`，然后才同步启动探测；`SelectiveAiHold` 不探测、不显式全量释放；`HoldClosed` 仍走保护重连。助手协议仍是 `4.52.6`。
