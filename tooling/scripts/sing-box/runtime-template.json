@@ -2,7 +2,7 @@
   "log": {"level": "warn"},
   "dns": {
     "servers": [
-      {"type": "fakeip", "tag": "Tono-FakeIP", "inet4_range": "198.19.0.0/16"},
+      {"type": "fakeip", "tag": "Tono-FakeIP", "inet4_range": "198.18.16.0/20"},
       {"type": "https", "tag": "Tono-DoH", "server": "1.1.1.1", "server_port": 443, "path": "/dns-query", "tls": {"enabled": true, "server_name": "1.1.1.1"}, "detour": "Tono-Exit"}
     ],
     "rules": [
