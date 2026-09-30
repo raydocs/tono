@@ -970,6 +970,13 @@ impl Audit {
     /// Non-blocking, best-effort, never panics: disabled, closed, or a full
     /// channel drops the event (the last one counted).
     pub fn log(&self, event: AuditEvent) {
+        // A network-loss fact is queued even when the local log is off. The
+        // write is one small file and does not run on the per-packet path.
+        if !self.closed.load(Ordering::Acquire) {
+            if let Some(code) = crate::tono::network_loss::code_for_audit(&event) {
+                crate::tono::network_loss::enqueue_p0(&self.settings_dir, code, "unselected");
+            }
+        }
         if !self.enabled() || self.closed.load(Ordering::Acquire) {
             return;
         }
