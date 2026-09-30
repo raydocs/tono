@@ -131,6 +131,12 @@ impl ValidatedNode {
         );
         match self.protocol {
             NodeProtocol::Hysteria2 => {
+                // Pinned mihomo v1.19.30 already dials with QUIC early-data
+                // (`Early: true`) and defaults ALPN to h3 inside one core
+                // process. Do not emit `handshake-timeout`: a positive value
+                // makes sing-quic detach the handshake from the caller, so a
+                // cancelled connect keeps dialing in the background. Do not
+                // emit `skip-cert-verify`.
                 put("type", Value::String("hysteria2".to_string()));
                 put("password", Value::String(self.uuid.clone()));
                 put("sni", Value::String(self.servername.clone()));
@@ -671,6 +677,10 @@ fingerprint: "E3:AA:4A:74:5A:A9:05:39:AB:1A:49:3D:94:0E:EB:A7:B4:30:5B:75:16:AB:
         assert!(yaml.contains("password:"));
         assert!(yaml.contains("fingerprint:"));
         assert!(!yaml.contains("skip-cert-verify"));
+        assert!(
+            !yaml.contains("handshake-timeout"),
+            "a positive handshake-timeout detaches the QUIC dial from the caller"
+        );
         assert!(!yaml.contains("uuid:"));
         assert!(!yaml.contains("reality-opts"));
 
