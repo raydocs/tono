@@ -295,24 +295,23 @@ async fn release_unconfirmed(state: &TonoState, message: String) -> String {
 
 #[cfg_attr(not(windows), allow(dead_code))]
 async fn pending_update_release_result(
-    _state: &TonoState,
+    state: &TonoState,
     result: anyhow::Result<Option<tono_service_protocol::KillSwitchStatus>>,
 ) -> Result<Option<tono_service_protocol::KillSwitchStatus>, String> {
-    result.map_err(|error| format!("update Disconnect remains unproven: {error:#}"))
+    match result {
+        Ok(status) => Ok(status),
+        Err(error) => Err(release_failed(state, &error).await),
+    }
 }
 
-/// A Service refusal, or a reading that stays armed, is the Service's answer that protection is
-/// still on. A release that got no reading ([`service::ReleaseGotNoReading`]) proves nothing either
-/// way, so it is reported unconfirmed.
+/// An error is not a protection reading: even a Service refusal can follow WFP removal if the
+/// rollback failed. Without a successful reading, neither release path may keep cached proof.
 async fn release_failed(state: &TonoState, error: &anyhow::Error) -> String {
-    if error.is::<service::ReleaseGotNoReading>() {
-        let message = format!(
-            "{}: protection is unconfirmed: {error:#}",
-            super::failure::PROTECTION_UNCONFIRMED_PREFIX
-        );
-        return release_unconfirmed(state, message).await;
-    }
-    format!("kill switch release failed; protection stays on: {error}")
+    let message = format!(
+        "{}: protection is unconfirmed: {error:#}",
+        super::failure::PROTECTION_UNCONFIRMED_PREFIX
+    );
+    release_unconfirmed(state, message).await
 }
 
 /// `tono_disconnect`: cancel the reconnect, then the explicit-release
@@ -569,9 +568,8 @@ mod tests {
             "an unconfirmed release must retain the retry/blocking latch");
     }
 
-    /// deef9193 opus:F2: a release that got no reading from the Service (no owner credentials, or
-    /// the release IPC and its read-back both failed) proves nothing, so it is unconfirmed and not
-    /// "protection stays on".
+    /// deef9193 opus:F2 / 56d02a04 codex:F1: a failed release without a status reading proves
+    /// nothing, even when its error does not carry ReleaseGotNoReading.
     #[tokio::test]
     async fn a_release_that_got_no_service_reading_is_unconfirmed() {
         let state = Arc::new(TonoState::for_test());

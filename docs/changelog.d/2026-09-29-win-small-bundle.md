@@ -67,3 +67,22 @@
   - codex:F3：逐个恢复线程不是一次性提交；主线程已恢复后，第三方注入的线程恰在快照与 `OpenThread` 之间退出时返回错误，
     清理只杀直接子进程，可能留下已起的孙进程（它们仍在 Job 内）。
   - opus:F3：`EXIT_JOB` 把创建 Job 的失败永久缓存，此后该进程每次起 DNS 助手都失败，直到进程重启。
+
+### 2026-09-29 续记：更新 Disconnect 的释放回读不确定（本地待验证）
+- 来源：评审 56d02a04 的 grok:F1（major，codex 确认），以及同路径 codex:F2；普通释放的 codex:F1
+  （opus 降为 minor）一并处理。实现路由 Jev-Decision 4f5e2a40（整 PR 保护路径，fallback opus_xhigh；Jev fetch failed）。
+  本次小范围修正由根会话直接完成，未启动外部实现代理，不算跨厂商复核；评审 CLI 初始化失败。
+- 缺陷修复：更新尚未提交时，Service Disconnect 已解除 WFP，随后的独立状态回读仍可能失败。更新分支现在经
+  `pending_update_release_result` 使用同一个 `release_failed`：所有没有成功状态读数的错误都清掉缓存的
+  `kill_switch`，以 `TONO_PROTECTION_UNCONFIRMED` 返回。不再把普通 Service 错误响应本身当作保护仍开启的证明。
+  Service/WFP/协议不变；协调器仍保留失败后的阻断/重试锁存，未确认不是释放成功。
+- 工程与测试：红候选 `fca25e05` 提取行为不变的生产结果适配器，增加
+  `a_pending_update_readback_failure_drops_cached_protection`，经真实结果适配器和 `coordinate_release` 验证错误标记、
+  缓存清空与重试锁存；已有 `a_release_that_got_no_service_reading_is_unconfirmed` 加强为不依赖错误类型标记、检查清空缓存。
+  测试仅注入结果适配器的错误，不声称执行了 Service IPC/WFP 故障注入。
+- 验证：MacBook 未运行 cargo/native 构建。红候选和修复提交的 hosted Windows CI 尚未运行；未声称实际红/绿。
+  GitHub 查询两次失败（`error connecting to api.github.com`），新 head 的 CI、复审、推送和合并均未完成。
+  登录方案复审也遇到 CLI 初始化失败（`Operation not permitted`），不是评审通过。
+- 候选/发布：仅本地源码；无新安装包、无生产节点部署、无客户发布。
+- 剩余限制：上文旧记录中「Service 拒绝仍报保护仍开启」已被本轮的未确认处理替代；有效的仍武装状态读数仍走既有失败路径。
+  其余建议（错误文案优先级、逐线程恢复、Job 失败缓存）保持原样。新修正须 exact-head CI 和跨厂商复核后才能合并。

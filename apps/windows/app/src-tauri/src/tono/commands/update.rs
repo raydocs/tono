@@ -337,8 +337,8 @@ pub async fn disconnect_if_pending() -> Result<Option<tono_service_protocol::Kil
     }
     crate::core::proxy_control::stop_guard().await;
     crate::core::proxy_control::clear_for_update().await?;
-    // Err means the Service completed no protection release. A release whose
-    // update record could not be proven or archived returns Ok with
+    // A lost reply can follow a committed release; the caller treats errors as unconfirmed.
+    // A release whose update record could not be proven or archived returns Ok with
     // `needs_attention`: the machine is open, so it must not read as armed.
     let released = request(UpdateRequest::Disconnect).await?;
     if let Some(reason) = released.needs_attention.as_deref() {
