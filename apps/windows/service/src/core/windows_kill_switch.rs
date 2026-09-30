@@ -377,6 +377,14 @@ fn intent_path() -> PathBuf {
         .join("kill-switch.json")
 }
 
+/// Per-write sequence for intent temporaries (BRICK-W11). A shared
+/// `kill-switch.tmp` let a later writer delete or overwrite an earlier
+/// writer's in-flight bytes, and a `replace` that reported a timeout can
+/// still commit afterwards and silently cover a successor's newer intent.
+static INTENT_WRITE_SEQ: AtomicU64 = AtomicU64::new(1);
+#[cfg(test)]
+static TEST_INTENT_VERIFY_CORRUPT: AtomicBool = AtomicBool::new(false);
+
 async fn atomic_write(path: &Path, bytes: &[u8]) -> Result<()> {
     #[cfg(test)]
     {
@@ -387,14 +395,36 @@ async fn atomic_write(path: &Path, bytes: &[u8]) -> Result<()> {
     }
     crate::core::paths::ensure_persistent_state_layout()?;
     crate::core::platform_security::secure_private_service_file_if_exists(path)?;
-    let temporary = path.with_extension("tmp");
-    if std::fs::symlink_metadata(&temporary).is_ok() {
-        std::fs::remove_file(&temporary)?;
-    }
+    // One temporary per write: no writer removes or reuses another's
+    // in-flight file. A timed-out rename's source is left alone rather
+    // than unlinked under it (cf. staging's reclaim rule).
+    let temporary = path.with_extension(format!(
+        "tmp-{}-{}",
+        std::process::id(),
+        INTENT_WRITE_SEQ.fetch_add(1, Ordering::Relaxed)
+    ));
     tokio::fs::write(&temporary, bytes).await?;
     crate::core::platform_security::secure_private_service_file_if_exists(&temporary)?;
-    crate::core::atomic_file::replace(&temporary, path).await?;
+    crate::core::atomic_file::replace(&temporary, path)
+        .await
+        .with_context(|| format!("failed to move state into {path:?}"))?;
     crate::core::platform_security::secure_private_service_file_if_exists(path)?;
+    #[cfg(test)]
+    if TEST_INTENT_VERIFY_CORRUPT.swap(false, Ordering::Relaxed) {
+        // Deterministic stand-in for a stale rename landing between the
+        // replace above and the read-back below.
+        std::fs::write(path, b"stale-intent")?;
+    }
+    // A stale commit that landed before this read is a loud error the
+    // caller already treats as "not proven" — never a quiet older intent.
+    // (A rename landing after this read is still uncovered; it needs the
+    // kernel rename to stall past a whole successor write. See BRICK-W11.)
+    let committed = tokio::fs::read(path)
+        .await
+        .with_context(|| format!("failed to verify state at {path:?}"))?;
+    if committed != bytes {
+        anyhow::bail!("intent write did not commit: destination differs after replace");
+    }
     Ok(())
 }
 
@@ -3410,6 +3440,7 @@ mod tests {
         TEST_PERSIST_FAILURE.store(false, Ordering::Relaxed);
         TEST_INSTALL_FAILURE.store(false, Ordering::Relaxed);
         TEST_AMBIGUOUS_INSTALL_FAILURE.store(false, Ordering::Relaxed);
+        TEST_INTENT_VERIFY_CORRUPT.store(false, Ordering::Relaxed);
         TEST_PERSIST_ATTEMPTS.store(0, Ordering::Relaxed);
         TEST_INSTALL_ATTEMPTS.store(0, Ordering::Relaxed);
         TEST_OWNER_SIGNED_OUT.store(false, Ordering::Relaxed);
@@ -3592,6 +3623,63 @@ mod tests {
             .expect("must remain fail-closed");
         assert!(armed.intent.is_verified());
         assert_eq!(armed.intent.mode, KillSwitchStatusMode::Blocked);
+        cleanup().await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn intent_write_isolated_tmps_and_verified_commit() -> Result<()> {
+        cleanup().await;
+        let dir = crate::service_paths()
+            .persistent_state_dir()
+            .join("intent-write-test");
+        tokio::fs::create_dir_all(&dir).await?;
+        let path = dir.join("probe.json");
+
+        // Sequential writes commit exactly what was asked, with no shared
+        // temporary left behind for a later writer to delete or reuse.
+        atomic_write(&path, b"{\"wanted\":true}").await?;
+        atomic_write(&path, b"{\"wanted\":false}").await?;
+        assert_eq!(tokio::fs::read(&path).await?, b"{\"wanted\":false}");
+        let mut entries = tokio::fs::read_dir(&dir).await?;
+        let mut names = Vec::new();
+        while let Some(entry) = entries.next_entry().await? {
+            names.push(entry.file_name().to_string_lossy().into_owned());
+        }
+        assert_eq!(
+            names,
+            vec!["probe.json".to_owned()],
+            "unique tmps must be renamed away; a shared tmp must never exist"
+        );
+
+        // Concurrent writers never tear: the destination always holds one
+        // complete write, and at least the last writer verifies its own
+        // commit (a stale commit landing first is reported, not kept).
+        let (first, second) = tokio::join!(
+            atomic_write(&path, b"first-writer"),
+            atomic_write(&path, b"second-writer")
+        );
+        assert!(
+            first.is_ok() || second.is_ok(),
+            "at least the last writer verifies its own commit"
+        );
+        let committed = tokio::fs::read(&path).await?;
+        assert!(
+            committed.as_slice() == b"first-writer"
+                || committed.as_slice() == b"second-writer",
+            "concurrent intent writes must never tear"
+        );
+
+        // A stale rename landing between replace and read-back is a loud
+        // error, never a quiet older intent.
+        TEST_INTENT_VERIFY_CORRUPT.store(true, Ordering::Relaxed);
+        let error = atomic_write(&path, b"third-writer")
+            .await
+            .expect_err("a stale destination after replace must fail verification");
+        assert!(format!("{error:#}").contains("did not commit"));
+
+        tokio::fs::remove_dir_all(&dir).await?;
         cleanup().await;
         Ok(())
     }
