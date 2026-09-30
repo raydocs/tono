@@ -12,6 +12,7 @@ pub mod catalog;
 pub mod config;
 pub mod connection;
 pub mod credentials;
+pub mod customer_failure;
 pub mod node;
 pub mod policy;
 pub mod policy_signature;
@@ -29,6 +30,12 @@ pub use config::{
     DirectPlan, OwnedRuntime, build_owned_runtime, generate_controller_secret, redact_secret,
 };
 pub use connection::{ConnectStage, ConnectionStatus, ReconnectBackoff, UiState};
+pub use customer_failure::{
+    auth_recovery_plan, auth_support_prefix, backoff_before, classify_auth_transport,
+    classify_connect_text, customer_message, disposition_after_exhausted_failure,
+    parse_doh_json_answers, stamp_connect_failure, strict_kill_switch_explicit, AuthRecoveryStep,
+    CustomerFailureCode, FailureStage, NetworkDisposition,
+};
 pub use protected_connectivity::{
     PostLockDecision, ProtectedFailureCode, TUN_PROBE_ORIGINS, classify_exhausted_data_plane,
     classify_post_lock,

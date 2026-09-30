@@ -58,6 +58,13 @@ may reverse), `reversed` (keep the line; say what replaced it).
 - Why stricter: recovery cannot be refused by evidence the helper cannot read. Nothing is deleted. Launch does not re-arm, and a DNS restore failure still releases PF.
 - Applied in: [#711](https://github.com/raydocs/tono/pull/711) (`main.swift`).
 
+## 2026-09-30 · After login or connect recovery is exhausted, does the machine stay blocked?
+
+- Status: owner
+- Chosen: fail open to the original network, unless the user explicitly enabled a strict kill switch (`permanent`). Rejected: keeping the block after every verified-session failure.
+- Why stricter: retries do not install filters, change system DNS, or replace routes. Certificate checks stay on. A strict kill switch the user turned on still keeps the block. The cost is a direct path after an exhausted failure when strict mode is off.
+- Applied in: `customer_failure` disposition and Windows `plan_failure`.
+
 ## 2026-09-29 · After an unexpected restart on Windows, does the Service start the Core by itself, and does the App say why it did not?
 
 - Status: provisional

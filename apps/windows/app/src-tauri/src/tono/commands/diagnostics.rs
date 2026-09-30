@@ -392,21 +392,9 @@ pub async fn tono_upload_diagnostics(
 /// and the tunnel provides its own reachability, so one attempt from a working network is
 /// enough. That is what the mapped message says.
 pub(super) fn auth_error(err: &ApiError) -> String {
-    let prefix = match err {
-        // #588: a certificate the clock cannot date. Still a transport failure (no status
-        // line arrived), but the clock is what the user has to fix.
-        ApiError::Transport { message, .. }
-            if message.contains(crate::tono::transport::CLOCK_SKEW) =>
-        {
-            crate::tono::transport::CLOCK_SKEW
-        }
-        ApiError::Transport { .. } => "TONO_AUTH_UNREACHABLE",
-        ApiError::RateLimited => "TONO_AUTH_RATE_LIMITED",
-        ApiError::DeviceLimit => "TONO_AUTH_DEVICE_LIMIT",
-        ApiError::Unauthorized => "TONO_AUTH_UNAUTHORIZED",
-        ApiError::InvalidOrExpiredCode => "TONO_AUTH_INVALID_CODE",
-        _ => return err.to_string(),
-    };
+    // The prefix is the support code. Detail stays on the string for telemetry
+    // and Copy-for-support; the screen maps the code to a short sentence.
+    let prefix = tono_core::auth_support_prefix(err);
     format!("{prefix}: {err}")
 }
 

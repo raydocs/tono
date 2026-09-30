@@ -571,7 +571,7 @@ final class ProtectedConnectivityTests: XCTestCase {
         XCTAssertFalse(shown.localizedCaseInsensitiveContains("eof"))
         // Verify the backup-action copy in the active language, not an English
         // substring that necessarily fails on a Chinese test host.
-        XCTAssertEqual(shown, String(localized: "This city could not complete a protected connection. Retry, choose another route, or try the backup channel if one is shown."))
+        XCTAssertEqual(shown, String(localized: "The connection didn't complete. Support code CORE_EXIT_UNREACHABLE."))
         XCTAssertTrue(classified.copyableDetail.contains("CORE_EXIT_UNREACHABLE"))
         XCTAssertTrue(classified.copyableDetail.contains("checkingExit"))
 

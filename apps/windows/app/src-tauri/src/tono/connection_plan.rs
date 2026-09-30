@@ -30,7 +30,12 @@ pub struct FailurePlan {
     pub restrict_bootstrap: bool,
 }
 
-pub fn plan_failure(armed: bool, session_verified: bool, was_disconnecting: bool) -> FailurePlan {
+pub fn plan_failure(
+    armed: bool,
+    session_verified: bool,
+    was_disconnecting: bool,
+    strict_kill_switch: bool,
+) -> FailurePlan {
     if was_disconnecting {
         // A disconnect is in flight and owns the release sequence end to
         // end; the failing transaction must not double it.
@@ -39,14 +44,17 @@ pub fn plan_failure(armed: bool, session_verified: bool, was_disconnecting: bool
             stop_core: None,
             restrict_bootstrap: false,
         }
-    } else if armed && session_verified {
+    } else if armed && session_verified && strict_kill_switch {
+        // Only an explicit strict kill switch keeps the block after the
+        // attempt is exhausted. The filter contents are unchanged.
         FailurePlan {
             mark_armed: true,
             stop_core: Some(false),
             restrict_bootstrap: true,
         }
     } else {
-        // §6: failure before the WFP policy exists is a full release.
+        // Fail open: release back to the original network. Login and connect
+        // retries must not leave the machine with no working network.
         FailurePlan {
             mark_armed: false,
             stop_core: Some(true),

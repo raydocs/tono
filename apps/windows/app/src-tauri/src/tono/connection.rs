@@ -571,6 +571,7 @@ async fn guard_snapshot(
 async fn fail_connect(
     state: &Arc<TonoState>, app: &AppHandle, generation: u64, err: String, account_owner: (u64, u64),
 ) -> bool {
+    state.client.transport().set_auth_tunnel_port(0);
     let task_state = Arc::clone(state);
     let task_app = app.clone();
     match cleanup::reconcile_failure(
@@ -670,7 +671,10 @@ async fn record_connect_failure(
         if session_verified {
             inner.fsm.mark_session_verified();
         }
-        let plan = plan_failure(armed, session_verified, was_disconnecting);
+        // No Windows preference on this path means the user did not explicitly
+        // enable a strict kill switch, so an exhausted attempt releases.
+        let strict_kill_switch = tono_core::strict_kill_switch_explicit(None);
+        let plan = plan_failure(armed, session_verified, was_disconnecting, strict_kill_switch);
         let action: &'static str = if was_disconnecting {
             "racedDisconnect"
         } else if armed && session_verified {
@@ -1272,7 +1276,7 @@ mod tests {
     #[test]
     fn a_post_lock_failure_would_otherwise_be_a_dead_end() {
         assert_eq!(
-            plan_failure(true, false, false),
+            plan_failure(true, false, false, false),
             FailurePlan {
                 mark_armed: false,
                 stop_core: Some(true),
@@ -1519,12 +1523,21 @@ mod tests {
     #[test]
     fn post_lock_retry_does_not_weaken_the_failure_table() {
         assert_eq!(
-            plan_failure(true, false, false).stop_core,
+            plan_failure(true, false, false, false).stop_core,
             Some(true),
             "an unverified session is still fully released once the retries are exhausted"
         );
         assert_eq!(
-            plan_failure(true, true, false),
+            plan_failure(true, true, false, false),
+            FailurePlan {
+                mark_armed: false,
+                stop_core: Some(true),
+                restrict_bootstrap: false,
+            },
+            "an exhausted verified session fail-opens unless the user chose a strict kill switch"
+        );
+        assert_eq!(
+            plan_failure(true, true, false, true),
             FailurePlan {
                 mark_armed: true,
                 stop_core: Some(false),
@@ -1963,10 +1976,18 @@ mod tests {
 
     #[test]
     fn failure_plan_is_exhaustive() {
-        // Armed, no disconnect in flight: keep blocking (stop, never
-        // release), restrict to bootstrap, latch the armed flag.
+        // Exhausted and verified, no explicit strict kill switch: fail open.
         assert_eq!(
-            plan_failure(true, true, false),
+            plan_failure(true, true, false, false),
+            FailurePlan {
+                mark_armed: false,
+                stop_core: Some(true),
+                restrict_bootstrap: false,
+            }
+        );
+        // The same shape with an explicit strict kill switch keeps the block.
+        assert_eq!(
+            plan_failure(true, true, false, true),
             FailurePlan {
                 mark_armed: true,
                 stop_core: Some(false),
@@ -1975,7 +1996,7 @@ mod tests {
         );
         // Pre-arm failure: full release.
         assert_eq!(
-            plan_failure(false, false, false),
+            plan_failure(false, false, false, false),
             FailurePlan {
                 mark_armed: false,
                 stop_core: Some(true),
@@ -1984,7 +2005,7 @@ mod tests {
         );
         // Initial post-arm failure has not crossed the verification barrier: full release.
         assert_eq!(
-            plan_failure(true, false, false),
+            plan_failure(true, false, false, false),
             FailurePlan {
                 mark_armed: false,
                 stop_core: Some(true),
@@ -1992,10 +2013,11 @@ mod tests {
             }
         );
         // A raced disconnect owns the release end to end; the failing
-        // transaction does nothing, whatever the arm state.
-        for armed in [true, false] {
+        // transaction does nothing, whatever the arm state. Strict does not
+        // let this transaction tear the network down a second time.
+        for (armed, strict) in [(true, false), (false, false), (true, true)] {
             assert_eq!(
-                plan_failure(armed, false, true),
+                plan_failure(armed, false, true, strict),
                 FailurePlan {
                     mark_armed: false,
                     stop_core: None,

@@ -34,7 +34,7 @@ nonisolated enum ProtectedFailureCode: String, CaseIterable, Sendable {
         case .coreControllerUnavailable:
             return String(localized: "Part of the protected connection is temporarily unavailable. If your traffic still looks normal, the connection will stay up.")
         case .coreExitUnreachable:
-            return String(localized: "This city could not complete a protected connection. Retry, choose another route, or try the backup channel if one is shown.")
+            return String(localized: "The connection didn't complete. Support code CORE_EXIT_UNREACHABLE.")
         case .networkEnvironmentOffline:
             // Looked up rather than written in place: a physical-link
             // observation is what produces this code, and it reaches the
@@ -57,6 +57,22 @@ nonisolated enum ProtectedFailureCode: String, CaseIterable, Sendable {
         case .unknownClassifiedFailure:
             return String(localized: "The protected connection failed. Diagnostic details have been recorded.")
         }
+    }
+}
+
+/// After login or connect recovery is exhausted. `permanent` is the only
+/// explicit strict kill switch. Anything else restores the original network.
+/// This value does not install or tear down a filter by itself.
+nonisolated enum ExhaustedFailureNetwork: Sendable, Equatable {
+    case failOpen
+    case keepStrictBlock
+
+    static func afterFailure(strictKillSwitchExplicit: Bool) -> ExhaustedFailureNetwork {
+        strictKillSwitchExplicit ? .keepStrictBlock : .failOpen
+    }
+
+    var releasesSystemNetwork: Bool {
+        self == .failOpen
     }
 }
 
