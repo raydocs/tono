@@ -1251,7 +1251,10 @@ pub(super) async fn handle_network_change_inner(
             "Tono: health failure is releasing protection so the original network stays up"
         );
         match super::disconnect::release_explicit(state, app).await {
-            Ok(()) => super::unarmed_probe::spawn_after_release(state, app).await,
+            Ok(()) => {
+                let generation = state.lock().await.connect_generation;
+                super::unarmed_probe::spawn_after_release(state, app, generation);
+            }
             Err(error) => {
                 logging!(
                     error,
