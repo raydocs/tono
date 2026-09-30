@@ -1,7 +1,7 @@
 ## 2026-09-30 · 控制面：重开的撤除任务不再继承旧 last_attempt_at
 - 归属：缺陷修复（发现 CP-REVOCATION-REOPEN-ATTEMPT），非发布门条目；`services/control-plane/src/index.ts`
   撤除 outbox（`processRevocations` 与六处 `ON CONFLICT(tailscale_node_id)` 重开路径）。
-- 来源：main `01c2403f` → 分支 `glm/cp-revocation-reopen`；PR 待开；未合 main。
+- 来源：main `01c2403f` → 分支 `glm/cp-revocation-reopen`；PR [#758](https://github.com/raydocs/tono/pull/758)；未合 main。
 - 缺陷修复：0038 迁移给新撤除任务 `last_attempt_at` 默认 0，`processRevocations` 每次尝试前打戳，把失败任务轮换到
   少试的一方之后；但六条重开路径（`enqueueRevocation`、`expirePending`、设备轮换 `device_rotated`、`revokeDevice`、
   confirm 守卫、身份重登记）的 `ON CONFLICT(tailscale_node_id) DO UPDATE` 只清 `completed_at`/`last_error`，不清
