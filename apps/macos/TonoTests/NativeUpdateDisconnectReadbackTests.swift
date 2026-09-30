@@ -5,7 +5,7 @@ import XCTest
 final class NativeUpdateDisconnectReadbackTests: XCTestCase {
     private enum Failure: Error { case lostAcknowledgement }
 
-    func testLostDisconnectReplyWithReleasedPFDoesNotClaimProtectionOrRetireUpdate() async {
+    func testLostDisconnectReplyWithNonLiveReadingDoesNotClaimProtectionOrRetireUpdate() async {
         let armed = KillSwitchService.isArmed
         let blocksConnect = RuntimeCleanup.nativeUpdateBlocksConnect
         let didStartCore = AppProfile.defaults.object(forKey: SettingsKey.didStartCore)
@@ -33,9 +33,9 @@ final class NativeUpdateDisconnectReadbackTests: XCTestCase {
 
         XCTAssertEqual(reads, 1)
         XCTAssertFalse(app.isProtectionBlocked)
-        XCTAssertFalse(app.isProtectionUnconfirmed)
-        XCTAssertFalse(KillSwitchService.isArmed)
-        XCTAssertEqual(MenuBarProtectionStatus(app).kind, .standby)
+        XCTAssertTrue(app.isProtectionUnconfirmed, "health's false can also be an unreadable PF status")
+        XCTAssertTrue(KillSwitchService.isArmed, "a lossy health response cannot retire local recovery intent")
+        XCTAssertEqual(MenuBarProtectionStatus(app).kind, .unconfirmed)
         XCTAssertTrue(app.nativeUpdatePending, "PF readback cannot retire update evidence")
         XCTAssertTrue(RuntimeCleanup.nativeUpdateBlocksConnect)
         XCTAssertTrue(AppProfile.defaults.bool(forKey: SettingsKey.didStartCore),
