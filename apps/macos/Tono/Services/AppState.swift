@@ -330,6 +330,23 @@ final class AppState {
     /// System boundary for the connected session's read-only DNS and PF
     /// audits, the same pattern as `tunInterfaceExists`.
     var protectionAudits = ProtectionAuditOperations()
+    /// System boundary for the Chromium Secure DNS scan, the same pattern as
+    /// `protectionAudits`. Chromium writes Local State by replace/rename, so
+    /// production retries once off the main actor — a harmless in-flight
+    /// atomic save must not read as a permanent scan gap; a second incomplete
+    /// result stays fail-closed. Tests substitute the report so one monitor
+    /// tick can drive the blocking verdict without Chrome or Edge installed.
+    var scanBrowserProtectedDNS: () async -> BrowserDNSDiagnostics.Report = {
+        let first = await Task.detached(priority: .userInitiated) {
+            BrowserDNSDiagnostics.scan()
+        }.value
+        guard first.outcome == .incomplete, !Task.isCancelled else { return first }
+        try? await Task.sleep(for: .milliseconds(150))
+        guard !Task.isCancelled else { return first }
+        return await Task.detached(priority: .userInitiated) {
+            BrowserDNSDiagnostics.scan()
+        }.value
+    }
     /// System boundary for the post-connect optional-policy background
     /// replacement. Production (nil) resolves the managed web-domain pins and
     /// performs the privileged arm → writeRuntimeConfig → /core/sync → reload
@@ -2209,21 +2226,6 @@ final class AppState {
             try? await Task.sleep(for: .milliseconds(200))
         }
         return false
-    }
-
-    /// Chromium writes Local State by replace/rename. One short retry keeps a
-    /// harmless in-flight atomic save from looking like a permanent scan gap;
-    /// a second incomplete result remains fail-closed.
-    func scanBrowserProtectedDNS() async -> BrowserDNSDiagnostics.Report {
-        let first = await Task.detached(priority: .userInitiated) {
-            BrowserDNSDiagnostics.scan()
-        }.value
-        guard first.outcome == .incomplete, !Task.isCancelled else { return first }
-        try? await Task.sleep(for: .milliseconds(150))
-        guard !Task.isCancelled else { return first }
-        return await Task.detached(priority: .userInitiated) {
-            BrowserDNSDiagnostics.scan()
-        }.value
     }
 
     func recordBrowserDNSPreflight(_ report: BrowserDNSDiagnostics.Report) {
