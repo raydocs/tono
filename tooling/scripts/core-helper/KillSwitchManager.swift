@@ -334,6 +334,7 @@ final class KillSwitchManager {
                 + "protection remains fail-closed."
             )
         }
+        do {
         let renderedRules = try Self.writeRules(state: state, allowedUID: allowedUID)
         // Persist fail-closed intent before activating the new rules.
         try saveState(state)
@@ -369,6 +370,22 @@ final class KillSwitchManager {
                 return 0
             }()
         )
+        } catch {
+            // A failed commit may already have written the rule file and the
+            // state. macOS has no strict kill switch, so that must not stay
+            // until the next helper start.
+            if Self.failureRecoveryReleasesNetwork(strictKillSwitchEnabled: false) {
+                Self.releaseInstalledBlock()
+            }
+            throw error
+        }
+    }
+
+    /// True unless the user explicitly enabled a strict kill switch. macOS
+    /// has no such control; the flag exists so a future opt-in can keep a
+    /// block without another edit to every failure path.
+    static func failureRecoveryReleasesNetwork(strictKillSwitchEnabled: Bool) -> Bool {
+        !strictKillSwitchEnabled
     }
 
     static func passRules(in rules: String) -> Set<String> {
@@ -503,10 +520,9 @@ final class KillSwitchManager {
             try? Self.ensureHostsMappings(state: state)
             return true
         } catch {
-            if Self.stateFileExists() {
-                stateGeneration &+= 1
-                try? Self.installEmergencyBlock(allowedUID: allowedUID)
-                return true
+            stateGeneration &+= 1
+            if Self.failureRecoveryReleasesNetwork(strictKillSwitchEnabled: false) {
+                Self.releaseInstalledBlock()
             }
             return false
         }
@@ -563,6 +579,33 @@ final class KillSwitchManager {
             restoreDisplacedMain: { _ = restoreDisplacedMainRuleset() },
             releaseEnableReference: { try releasePFEnableReference() }
         )
+    }
+
+    /// Flush the anchor and drop saved intent. Does not take `lock`. Never
+    /// installs a block. A second call is a no-op once the anchor is empty.
+    static func releaseInstalledBlock() {
+        do {
+            try releaseSequence(
+                writePlaceholder: {
+                    try atomicWrite(
+                        path: killSwitchPFPath,
+                        data: Data("# Managed by Tono Kill Switch — intentionally disarmed\n".utf8),
+                        permissions: 0o600
+                    )
+                },
+                flushAnchor: { try run("/sbin/pfctl", ["-a", killSwitchAnchor, "-F", "all"]) },
+                anchorStillActive: { try childAnchorActive() },
+                removeIntent: { try removeStateIfPresent() },
+                removeHostsPins: { try removeHostsMappings() },
+                restoreDisplacedMain: { _ = restoreDisplacedMainRuleset() },
+                releaseEnableReference: { try releasePFEnableReference() }
+            )
+        } catch {
+            let detail = (error as? HelperFailure)?.message ?? String(describing: error)
+            FileHandle.standardError.write(Data(
+                "tono: failure release could not clear the kill switch: \(detail)\n".utf8
+            ))
+        }
     }
 
     /// The steps of `disarm()`, in order, with each effect passed in so the
@@ -624,34 +667,23 @@ final class KillSwitchManager {
         defer { lock.unlock() }
 
         var wanted = false
-        var healed = false
         var live = (try? Self.effectiveStatus()) ?? false
         do {
             if let state = try loadState() {
                 wanted = state.armed
-                if wanted {
+                if wanted && live {
                     Self.pinHostsIfUsable(state: state)
-                    if !live {
-                        try Self.writeRules(
-                            state: Self.restorableState(state),
-                            allowedUID: allowedUID
-                        )
-                        try Self.ensureAnchorLoaded(flushStates: true)
-                        lastLoadedPassRules = nil
-                        live = (try? Self.effectiveStatus()) ?? false
-                        // Persisted state deliberately omits session direct
-                        // endpoints, so this heal reinstalled PF without them.
-                        // The GUI must see that and re-arm with the live
-                        // session's exceptions.
-                        healed = true
-                    }
                 }
+                // Do not load rules from a status read. Update preparation
+                // calls this after the Core has stopped; rewriting PF would
+                // put the block back on a machine whose Core is gone.
             }
-            return response(armed: live, wanted: wanted, live: live, healed: healed)
+            return response(armed: live, wanted: wanted, live: live, healed: false)
         } catch {
-            // Unreadable state is not a strict kill switch. Do not install a
-            // block; the startup release and the core-down watchdog clear a
-            // leftover ruleset. `live` still reports whatever PF is doing.
+            // Unreadable state is not a strict kill switch. Report it.
+            // Do not install a block; the startup release and the core-down
+            // watchdog clear a leftover ruleset. `live` still reports
+            // whatever PF is doing.
             var result = response(armed: live, wanted: wanted, live: live, healed: false)
             result["ok"] = false
             result["error"] = String(describing: error).prefixString(1024)
@@ -659,9 +691,22 @@ final class KillSwitchManager {
         }
     }
 
-    /// Periodic check from the helper's idle loop. Nothing else looks at PF
-    /// while a session is connected: `status()` heals, but only when someone
-    /// calls it, and the connected app does not. Another program releasing its
+    /// Whether the idle loop may reinstall a saved kill switch. Update
+    /// preparation stops the Core and then reads status; reinstalling while
+    /// the Core is down puts the block back on a machine that should fail open.
+    static func shouldReinstallKillSwitch(coreRunning: Bool) -> Bool {
+        coreRunning
+    }
+
+    /// Launch never installs a block. A leftover state file is released only
+    /// when the Core is not running. A running Core keeps the kernel rules
+    /// already in place; this start does not tear them down either.
+    static func shouldReleaseLeftoverAtLaunch(coreRunning: Bool, stateFilePresent: Bool) -> Bool {
+        !coreRunning && stateFilePresent
+    }
+
+    /// Periodic check from the helper's idle loop, and only while the Core is
+    /// running. `status()` does not load rules. Another program releasing its
     /// PF reference, a `pfctl -d`, or a main-ruleset reload without the Tono
     /// anchor left the kill switch off until the next arm.
     func superviseProtection() {
@@ -788,10 +833,13 @@ final class KillSwitchManager {
     /// migration already ran in `init`. `SocketServer.run` releases the
     /// leftover block once the stale Core has been stopped.
     func restoreAtLaunch() throws {
+        // No block at launch. The Core is constructed after this init, so
+        // SocketServer.run decides: release a leftover when the Core is not
+        // running, and leave a live session's rules alone.
     }
 
-    /// What PF renders when it is reinstalled from the saved state: the daemon
-    /// start, the `status()` heal and the supervisor repair. The saved tunnel
+    /// What PF renders when the supervisor reinstalls saved state while the
+    /// Core is running. Launch does not. The saved tunnel
     /// is the last arm's intent, not a fact: at boot (before login, before any
     /// TUN) and after a Core that is gone, that utun does not exist. Rendering
     /// it anyway loads the Continuity, mDNS, LAN and link-local passes, which

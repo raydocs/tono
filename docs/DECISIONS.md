@@ -51,6 +51,20 @@ may reverse), `reversed` (keep the line; say what replaced it).
 - Why stricter: a live Core can still install the block before PF is enabled. The cost is a short interval after boot, before the helper starts, where another program enabling PF evaluates an empty anchor. Safe Mode, where this helper does not run, no longer reinstalls the block from the rule file once this helper has rewritten the hook.
 - Applied in: [#701](https://github.com/raydocs/tono/pull/701) (`KillSwitchPF.swift`); BRICK-M9, MAC-BOOT-DNS-ORPHAN.
 
+## 2026-09-30 · On arm or sleep-barrier failure, keep the all-block until the next helper start?
+
+- Status: provisional
+- Chosen: no. Release the anchor and the saved intent immediately. A failed update rollback does the same before it returns. Rejected: installing an emergency all-block and waiting for the next daemon start. macOS has no strict kill-switch opt-in.
+- Why stricter: a failed commit does not leave the host offline. A successful sleep barrier is unchanged. The cost is that a failed re-arm also drops the previous block.
+- Applied in: [#708](https://github.com/raydocs/tono/pull/708) (`KillSwitchManager.swift`, `UpdateExecutor.swift`); BRICK-M8, BRICK-M13.
+
+## 2026-09-30 · Should an unreadable update ledger refuse emergency network release?
+
+- Status: provisional
+- Chosen: no. `--emergency-disarm` releases PF and attempts DNS restore, and leaves the ledger bytes in place. `--emergency-reset` does not remove the install when the ledger cannot be trusted, but it still releases the network. Rejected: #691's bootout of every `pfctl`/`networksetup`, requiring DNS verification before opening PF, and a durable flag that stops later helper starts. That draft stays untouched.
+- Why stricter: recovery cannot be refused by evidence the helper cannot read. Nothing is deleted. Launch does not re-arm, and a DNS restore failure still releases PF.
+- Applied in: [#711](https://github.com/raydocs/tono/pull/711) (`main.swift`).
+
 ## 2026-09-29 · After an unexpected restart on Windows, does the Service start the Core by itself, and does the App say why it did not?
 
 - Status: provisional

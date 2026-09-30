@@ -323,7 +323,7 @@ func runUpdateSelfTests() -> Bool {
             _ = try UpdateExecutor.startup(storage: corrupt, protectionWanted: { true },
                                            emergencyBlock: { corrupted += 1 })
         }
-        try check(corrupted == 0, "Corrupt-ledger startup installed the emergency block")
+        try check(corrupted == 1, "Corrupt-ledger startup did not release a saved kill switch")
     }
     // A Mac that was never connected was blocked at every boot by a store it
     // could not read (BRICK-M1). Startup still reads saved intent under the
