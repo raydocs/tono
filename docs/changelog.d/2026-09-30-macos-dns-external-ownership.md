@@ -25,3 +25,10 @@
 ### 首次 enable 的未知身份也拒绝
 - `7efd73e4` 独立Codex high增量复核确认先前两个ID-bearing majors纠正；但首次enable仍将SC ID lookup错误折成nil并创建名字快照，违反未知身份拒绝的边界。root只新增生产身份gate和一项nil/lookup失败回归：首次和再次enable均须正向识别serviceID后才读写DNS；既有legacy名字快照的restore支持不删除。
 - 此项新回归尚未执行；不能沿用先前头为新准确头绿证据。最终CI及身份gate增量独立审查待完成。
+
+### 2026-09-30 · 精确源码审查与合入 main
+- 来源：[#690](https://github.com/raydocs/tono/pull/690) 最终 head `453ae24f9dfe80cb0c0d72cfa4305e3d8e067e69`，已合 main `a1e333e6b25d155dbf95d27147f915a7e3250894`。helper 4.52.0 manifest CONTRACT 静态摘要 `bb14859e4ed7363ca15d19011746fc18c58e51ae5f0862f2a552c53275f113d5`。上文待集成/待执行为当时状态，已由本段精确证据推进，不改写历史失败。
+- 验证：最终准确头 [CI36688400051](https://github.com/raydocs/tono/actions/runs/36688400051) 的 sing-box-input、build（含 XCTest）、policy-tests、privileged-tests 全 success，helper 自测实际执行。root 查 GraphQL 无 review threads/CHANGES_REQUESTED、合入无新 source conflict、diff whitespace 通过。
+- 独立审查：Codex gpt-6-sol/high 初审 `b9c50b60..3326b711` 两项 major；续审 `3326b711..a71c3602`（四处源码与 integration `7efd73e4` 相同）纠正两项但留下首次身份 major；最终 `7efd73e4..453ae24f` gate/hash 增量关闭该 major、无新 finding。notice/version/archive 未改范围沿用初审覆盖；[PR 记录](https://github.com/raydocs/tono/pull/690#issuecomment-5907437299)。CI 绿不替代源码审查。
+- 候选/发布：仅源码；无新客户候选、未更新本机 Tono、未做本机 native/TUN/PF/DNS 操作、无客户发布。
+- 剩余限制：BRICK-M12 外部 loopback 归属/首装快照、设备并发 profile/网络写入仍未闭环；不能把本修复当作已抹盘机器重启事故的根因或实机修复证明。紧急恢复 #691 另有三项 major，仍是 draft/no-go，不因本 PR 通过而放行。
