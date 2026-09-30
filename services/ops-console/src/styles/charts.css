@@ -84,6 +84,23 @@
     .panel-skeleton { animation: none; }
   }
 
+  /* The headline number on a dashboard tile (`StatTile`). */
+  .stat-dot {
+    flex: none;
+    width: 7px;
+    height: 7px;
+    border-radius: 999px;
+    background: var(--tone-ink);
+  }
+
+  .stat-value {
+    font-size: 26px;
+    font-weight: 550;
+    letter-spacing: -0.02em;
+    line-height: 1.15;
+    font-variant-numeric: tabular-nums;
+  }
+
   .panel-action:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
 }
 

@@ -2,7 +2,7 @@ import { useId, type PointerEvent } from 'react';
 import { copy } from '@/copy/copy';
 import { cn } from '@/lib/utils';
 import { ChartTip, Legend, type TipRow } from './ChartTip';
-import { axisTicks, linear, seriesColor, type AxisScale } from './chart-scale';
+import { axisTicks, labelWidth, linear, seriesColor, type AxisScale } from './chart-scale';
 import type { Tone } from './StatusWord';
 import { useCursor, useWidth } from './use-chart';
 
@@ -12,7 +12,6 @@ export type BarColumn = { key: string; label: string; values: ReadonlyArray<numb
 
 const TOP = 10;
 const BOTTOM = 22;
-const LABEL_PX = 6.6;
 const MIN_LABEL_GAP = 44;
 
 function px(value: number): number {
@@ -42,7 +41,7 @@ export function Bars({
   format: (value: number) => string;
   label: string;
   height?: number;
-  /** `bytes` puts value ticks on round multiples of KB, MB, GB. */
+  /** `bytes` puts value ticks on round KB, MB, GB; `minutes` on round hours past three of them. */
   scale?: AxisScale;
   className?: string;
 }) {
@@ -53,7 +52,7 @@ export function Bars({
   const totals = columns.map((column) => column.values.reduce<number>((sum, value) => sum + Math.max(0, value ?? 0), 0));
   const ticks = axisTicks(scale, 0, Math.max(1, ...totals), height >= 160 ? 4 : 3);
   const max = ticks[ticks.length - 1];
-  const left = Math.ceil(Math.max(...ticks.map((value) => format(value).length)) * LABEL_PX) + 12;
+  const left = Math.max(...ticks.map((value) => labelWidth(format(value)))) + 12;
   const y = linear(0, max, height - BOTTOM, TOP);
   const slot = (width - left) / Math.max(1, columns.length);
   const barWidth = Math.max(3, Math.min(28, slot * 0.62));

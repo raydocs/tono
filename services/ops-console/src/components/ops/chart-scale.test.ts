@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { byteTicks, extent, linear, nearestIndex, niceTicks, splitRuns, timeTicks } from './chart-scale';
+import { byteTicks, extent, linear, minuteTicks, nearestIndex, niceTicks, splitRuns, timeTicks } from './chart-scale';
 
 describe('chart scale', () => {
   it('picks round ticks that cover the whole range', () => {
@@ -9,6 +9,10 @@ describe('chart scale', () => {
   it('picks byte ticks on round multiples of the printed unit', () => {
     const gib = 1024 ** 3;
     expect(byteTicks(0, 37 * gib, 4)).toEqual([0, 10, 20, 30, 40].map((n) => n * gib));
+  });
+
+  it('steps minute ticks in whole hours once the range passes three hours', () => {
+    expect(minuteTicks(0, 1_440, 3)).toEqual([0, 600, 1_200, 1_800]);
   });
 
   it('starts a non-negative extent at zero and ignores gaps', () => {

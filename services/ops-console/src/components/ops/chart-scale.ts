@@ -59,10 +59,31 @@ export function byteTicks(lo: number, hi: number, count = 4): number[] {
   return niceTicks(lo / unit, hi / unit, count).map((tick) => tick * unit);
 }
 
-export type AxisScale = 'linear' | 'bytes';
+/**
+ * Round ticks for a count of minutes: past three hours the label switches to
+ * hours, so the steps are chosen in hours too — "8 小时" rather than "500 分钟"
+ * printed as a rounded "8 小时" next to a gridline at 8.3.
+ */
+export function minuteTicks(lo: number, hi: number, count = 4): number[] {
+  if (hi < 180) return niceTicks(lo, hi, count);
+  return niceTicks(lo / 60, hi / 60, count).map((tick) => tick * 60);
+}
+
+export type AxisScale = 'linear' | 'bytes' | 'minutes';
 
 export function axisTicks(scale: AxisScale, lo: number, hi: number, count: number): number[] {
-  return scale === 'bytes' ? byteTicks(lo, hi, count) : niceTicks(lo, hi, count);
+  if (scale === 'bytes') return byteTicks(lo, hi, count);
+  if (scale === 'minutes') return minuteTicks(lo, hi, count);
+  return niceTicks(lo, hi, count);
+}
+
+const WIDE = /[\u2E80-\u9FFF\uF900-\uFAFF\uFF00-\uFFEF]/;
+
+/** Rough rendered width of an 11 px label: CJK and full-width glyphs are square, the rest are mono digits. */
+export function labelWidth(text: string): number {
+  let width = 0;
+  for (const char of text) width += WIDE.test(char) ? 11 : 6.6;
+  return Math.ceil(width);
 }
 
 const MINUTE = 60;

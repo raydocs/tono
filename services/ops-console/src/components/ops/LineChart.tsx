@@ -2,7 +2,7 @@ import { useId, useMemo, type PointerEvent } from 'react';
 import { copy } from '@/copy/copy';
 import { cn } from '@/lib/utils';
 import { ChartTip, Legend, type TipRow } from './ChartTip';
-import { axisTicks, extent, linear, nearestIndex, seriesColor, splitRuns, timeTicks, type AxisScale } from './chart-scale';
+import { axisTicks, extent, labelWidth, linear, nearestIndex, seriesColor, splitRuns, timeTicks, type AxisScale } from './chart-scale';
 import type { Tone } from './StatusWord';
 import type { SeriesPoint } from './TimeSeries';
 import { useCursor, useWidth } from './use-chart';
@@ -21,7 +21,6 @@ export type Guide = { value: number; label: string; tone: Tone };
 const TOP = 10;
 const BOTTOM = 22;
 const RIGHT = 8;
-const LABEL_PX = 6.6;
 const MIN_TICK_GAP = 110;
 
 function px(value: number): number {
@@ -66,7 +65,7 @@ export function LineChart({
   label: string;
   guides?: readonly Guide[];
   domain?: [number, number];
-  /** `bytes` puts value ticks on round multiples of KB, MB, GB. */
+  /** `bytes` puts value ticks on round KB, MB, GB; `minutes` on round hours past three of them. */
   scale?: AxisScale;
   className?: string;
 }) {
@@ -97,7 +96,7 @@ export function LineChart({
   const yTicks = axisTicks(scale, lo, hi, height >= 160 ? 4 : 3);
   const yMin = Math.min(lo, yTicks[0]);
   const yMax = Math.max(hi, yTicks[yTicks.length - 1]);
-  const left = Math.ceil(Math.max(...yTicks.map((value) => format(value).length)) * LABEL_PX) + 12;
+  const left = Math.max(...yTicks.map((value) => labelWidth(format(value)))) + 12;
   const t0 = times[0];
   const t1 = times[times.length - 1];
   const x = linear(t0, t1, left, width - RIGHT);
