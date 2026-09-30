@@ -1,7 +1,7 @@
 ## 2026-09-30 · 运维控制台重做第 1 期：令牌、Panel 与图表组件
 - 归属：运维计划 [plan-2026-09-11](../ops/plan-2026-09-11.md) 的一个控制台（Ops 2）工作；只动 `services/ops-console`。
   不是出货门，G4 冻结期间不合入。
-- 来源：基线 `origin/main` d2363002 → 分支 `cursor/ops-console-foundation-d728`；未合 main。
+- 来源：基线 `origin/main` d2363002 → 分支 `cursor/ops-console-foundation-d728`（草稿 PR [#743](https://github.com/raydocs/tono/pull/743)）；未合 main。
   设计来源为原型 PR #737（`services/ops-console/prototype`）。
 - 缺陷修复：浅色 `--muted-foreground` 由 0.58 调到 0.6 不透明度。原值在白底 11 px 小字上测得 4.48:1，
   低于 WCAG AA 4.5:1（axe `color-contrast`）；新值约 4.7:1，暗色不变。
