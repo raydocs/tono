@@ -65,6 +65,13 @@ here; the entry itself is the linked file.
 
 [031 fail-open-keeps-ai-block](decisions/031-2026-09-30-fail-open-keeps-ai-block.md)
 
+## 2026-09-30 · On macOS, does an armed connect failure keep PF up while it retries?
+
+- Status: provisional
+- Chosen: no, unless a strict kill switch is explicit. This path has no such preference, so it uses `ExhaustedFailureNetwork.afterFailure(false)` and disarms. ExitHeal only picks the next dial. Reconnect waits for a TCP proof. Rejected: scheduling the protected reconnect after the release, which would install PF again.
+- Why stricter: the original network returns. The probe closure does not arm PF. A failure that needs the user (authorization) does not auto-connect. Browser DoH conflict still blocks, because releasing it would leave the residential route enforceable only by a filter that is gone.
+- Applied in: branch `cursor/macos-exit-heal-live-a925`.
+
 ## 2026-09-30 · After login or connect recovery is exhausted, does the machine stay blocked?
 
 [030 exhausted-recovery-fails-open](decisions/030-2026-09-30-exhausted-recovery-fails-open.md)

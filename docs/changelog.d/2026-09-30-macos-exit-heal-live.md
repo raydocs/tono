@@ -1,0 +1,10 @@
+## 2026-09-30 · macOS 失败后卸下 PF，探测期间不装隧道
+
+- 归属：SHIP_PLAN 客户连接路径。叠在 #706 上。不是 G4，不发客户包。
+- 来源：#706 `47d0c564`，并带上 #703 的 `ExitHeal` 决策类型；未合 main。
+- 缺陷修复：已武装的连接失败、看门狗、TUN 丢失、受保护 DNS 损坏、健康升级和 PF 被其他程序改掉，以前保持 PF 并保护重连。现在用共享的 `ExhaustedFailureNetwork` 放行，调用 `disarm`。
+- 新增/优化：`ExitHeal` 只选下一次拨号，不碰 PF。后台重连要等 TCP 证明且保护已放下。需要用户操作的失败（管理员拒绝）放行后不自动再连，避免反复弹授权。网络变化那一支仍是 #702 的范围，这里不改。浏览器 DoH 冲突仍保持原来的阻断。
+- 工程与测试：`ArmedFailureReleaseTests` 证明 disarm 被调用、restrict 没被调用、`isProtectionBlocked` 为假、没有排保护重连。`UnarmedReconnect` 证明不可达或仍武装时不连接。XCTest 未在本机跑。
+- 验证：无 Xcode，`xcodebuild` 未执行。需要 macOS CI。
+- 候选/发布：仅源码，无新候选。
+- 剩余限制：默认 TCP 证明闭包返回 false，实机还没接真正的套接字探测。没有 permanent 开关可读，这条路径按非严格处理。网络切换分支和浏览器 DoH 未改。释放失败时 PF 可能仍在。

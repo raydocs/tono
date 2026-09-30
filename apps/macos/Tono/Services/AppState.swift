@@ -90,6 +90,11 @@ final class AppState {
     var disconnectionStartedAt: Date?
     var completedConnectionStages: Set<ConnectionStage> = []
     var lastConnectionFailure: ConnectionFailure?
+    /// Next dial chosen by ExitHeal while PF is down. Nil keeps the selected node.
+    var unarmedDialName: String?
+    /// Test seam. Production TCP proof does not install PF; the default refuses
+    /// to connect until a caller supplies a real proof.
+    var unarmedTcpProof: @MainActor (String) async -> Bool = { _ in false }
     /// Failed update journal still on disk. Dashboard tells the customer to
     /// disconnect and reinstall; a later connect must not hide this.
     var updateIncomplete: Bool = UpdateHandoffStore.showsIncompleteUpdate()
