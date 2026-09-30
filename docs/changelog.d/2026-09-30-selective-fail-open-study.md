@@ -1,7 +1,7 @@
 ## 2026-09-30 · 崩溃时选择性放行：只记录可行性，不装规则
 
 - 归属：不属于 0.0.74 G1–G4，也不属于运维计划任务。设计记录，不改客户行为。
-- 来源：基线 `d2363002`；分支 `cursor/selective-fail-open-study-4352`；未合 main。
+- 来源：基线 `d2363002`；分支 `cursor/selective-fail-open-study-4352`；[#709](https://github.com/raydocs/tono/pull/709)；未合 main。
 - 缺陷修复：无。
 - 新增/优化：无运行时行为。记录老板提出的「非严格模式下崩溃、卡死或强制门户时放开普通流量、继续挡住 AI」在 macOS PF 与 Windows WFP 上做不到保证。否决 CDN/ASN 拦截和把 `CLAUDE_HOME_DOMAINS` 当作崩溃拦截名单。见 [selective-fail-open.md](../selective-fail-open.md)。
 - 工程与测试：仅文档。
