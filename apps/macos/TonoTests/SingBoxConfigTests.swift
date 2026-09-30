@@ -305,8 +305,8 @@ final class SingBoxConfigTests: XCTestCase {
         let direct: Set<String> = ["DIRECT", ConfigPipeline.appDirectGroupName, ConfigPipeline.webDirectGroupName]
         let directRules = rules.filter { direct.contains($0["outbound"] as? String ?? "") }
         XCTAssertFalse(directRules.contains { $0["process_name"] != nil })
-        let continuity = try XCTUnwrap(directRules.first { $0["process_path"] != nil })
-        XCTAssertEqual(continuity["process_path"] as? [String], ConfigPipeline.continuityDirectProcessPaths)
+        XCTAssertFalse(directRules.contains { $0["process_path"] != nil },
+                       "a process identity alone cannot authorize public DIRECT")
     }
 
     func testContinuityLocalBypassDoesNotForcePublicAppleTrafficDirectWithoutPolicy() throws {
