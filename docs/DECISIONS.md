@@ -16,6 +16,13 @@ may reverse), `reversed` (keep the line; say what replaced it).
 - Applied in: PR / commit / command
 ```
 
+## 2026-09-30 · macOS 已连接时，哪些网络变化可以拆掉隧道？
+
+- Status: provisional
+- Chosen: 只在默认上行的服务、接口、可用 IPv4 地址或 IPv4 网关变成另一个具体值时重建；IPv6-only 才把 IPv6 默认下一跳算进身份。次要网卡出现、DHCP 空窗、APIPA、动态库读失败、双栈上的 IPv6 路由器抖动都保持隧道。拒绝：继续用「所有 up 的 IPv4 地址」指纹（插扩展坞就拆隧道），以及为了门户登录临时放开 PF。
+- Why stricter: PF 保持失败关闭，不新增旁路。少拆一次隧道就是少一次 Kill Switch 把机器扣在无网络上的窗口。双栈不因 IPv6 RA 抖动拆掉仍可用的 IPv4 上行。
+- Applied in: [#702](https://github.com/raydocs/tono/pull/702)（`NetworkUplinkSnapshot`）。
+
 ## 2026-09-30 · Windows 网络事件的第一次数据面探测失败，要不要立刻拆隧道？
 
 - Status: provisional
@@ -57,6 +64,41 @@ may reverse), `reversed` (keep the line; say what replaced it).
 - Chosen: no. `--emergency-disarm` releases PF and attempts DNS restore, and leaves the ledger bytes in place. `--emergency-reset` does not remove the install when the ledger cannot be trusted, but it still releases the network. Rejected: #691's bootout of every `pfctl`/`networksetup`, requiring DNS verification before opening PF, and a durable flag that stops later helper starts. That draft stays untouched.
 - Why stricter: recovery cannot be refused by evidence the helper cannot read. Nothing is deleted. Launch does not re-arm, and a DNS restore failure still releases PF.
 - Applied in: [#711](https://github.com/raydocs/tono/pull/711) (`main.swift`).
+
+## 2026-09-30 · When fail-open runs, does AI-service traffic also go out on the real address?
+
+- Status: owner
+- Chosen: selective. Release general traffic, and keep blocking AI-service traffic (Claude/OpenAI and the same class) so the real address never reaches them. The PF/WFP rule set is bc-3c5ccfd4's. Until that hook is registered and returns true, the decision stays today's full release. An explicit strict kill switch (`permanent`) still keeps the whole block and is not overridden. Rejected: inventing the filter rules in this change, and leaving every exhausted failure fully blocked.
+- Why stricter: the real address stays off AI services once the hook exists. Until then nothing new is blocked, and nothing new is punched through a filter the hook did not install. Certificate checks stay on. System DNS is not changed.
+- Applied in: [#706](https://github.com/raydocs/tono/pull/706) owns `network_disposition::exhausted_protection`. [#703](https://github.com/raydocs/tono/pull/703) calls that function and does not keep a second match. The later decision above (#709) governs a crash: full release first. This hook stays unregistered until that narrow layer exists, and a true return must not hold general traffic.
+
+## 2026-09-30 · After login or connect recovery is exhausted, does the machine stay blocked?
+
+- Status: owner
+- Chosen: fail open to the original network, unless the user explicitly enabled a strict kill switch (`permanent`). Rejected: keeping the block after every verified-session failure.
+- Why stricter: retries do not install filters, change system DNS, or replace routes. Certificate checks stay on. A strict kill switch the user turned on still keeps the block. The cost is a direct path after an exhausted failure when strict mode is off.
+- Applied in: [#706](https://github.com/raydocs/tono/pull/706)（`customer_failure`、Windows `plan_failure`）。
+
+## 2026-09-30 · When a configured exit fails, may self-heal tear the tunnel down to try another, and may it leave the machine blocked?
+
+- Status: provisional
+- Chosen: no tear-down between hops. A new dial name is used only while protection is down, before the next tunnel exists. If a verified barrier is already up and the user has not explicitly enabled a strict kill switch, stop and restore the original network through the existing explicit release, once, with no reconnect. Strict (macOS Kill Switch "Permanent" only; Windows has no such toggle, so Windows is ordinary) may keep the barrier and retries the same node. Rejected: rotating cities under WFP/PF, a positive mihomo `handshake-timeout` (it detaches the QUIC dial from the caller), and `skip-cert-verify`.
+- Why stricter: the healer writes no PF, WFP, TUN, or route. It does not widen the permit set to probe backups. Residential SOCKS identity is not replaced. The cost is that a dead preferred path is not hot-swapped under an armed barrier; the machine goes back to its original network instead of sitting in Protected Offline.
+- Applied in: `tono-core` `heal` and the Windows connect failure path. macOS has the same decision type and tests; it is not called from the live connect path until a device proves the PF release.
+
+## 2026-09-30 · Continuity 要不要改 PF 在网放行或组播状态
+
+- Status: provisional
+- Chosen: 只把静态、不可路由的前缀（有限广播 `255.255.255.255/32`、IPv6 组播 `ff00::/8`，加上原先已排除的私网/链路本地/IPv4 组播）放进 sing-box `route_exclude_address`，让 Darwin auto-route 不要把它们装进 utun。不改 PF、不升级 helper、不按网卡现算在网前缀、不把 mDNS/链路本地从 `keep state` 改成 `no state`、不恢复 Apple 进程的公网 DIRECT。
+- Why stricter: 连接时 Kill Switch 在 TUN 起来之前就已经武装。动态 PF 或未在 Mac 上解析过的规则一旦写坏，整份规则装不进去，恢复仍要靠已有的 Restore internet，但这次改动本身不能增加那条路径的失败面。排除有限广播不会打开公网，也不替换默认路由。在网全球 IPv6 / 非私网 IPv4 仍按现有 Kill Switch 丢弃，直到有实机证明一条静态、可重复的放行。
+- Applied in: [#700](https://github.com/raydocs/tono/pull/700) `cursor/macos-continuity-onlink-3d9f`（`ConfigPipeline.tunRouteExcludeCIDRs`）。
+
+## 2026-09-30 · On Windows, should corrupt WFP state or an unhealthy watchdog keep a block?
+
+- Status: provisional
+- Chosen: no, unless the on-disk record explicitly sets `strict_kill_switch` (or the PF desired mode is Permanent). Corrupt, unreadable, unusable, and residual-without-intent paths release WFP and attempt DNS restore. The unhealthy watchdog waits three ticks, then releases; strict mode reinstalls and still releases after thirty consecutive unhealthy ticks. Rejected: keeping the ownerless emergency block, and deleting corrupt bytes to synthesize a tombstone.
+- Why stricter: an unreadable file is not an opt-in, so it cannot keep the machine closed. A live wanted session is still restored when the record parses and the install verifies. The cost is a connected session whose WFP verify fails for about three seconds loses the block until the next arm. Needs real-hardware testing.
+- Applied in: [#733](https://github.com/raydocs/tono/pull/733) (`windows_kill_switch.rs`, `macos_kill_switch.rs`).
 
 ## 2026-09-29 · After an unexpected restart on Windows, does the Service start the Core by itself, and does the App say why it did not?
 

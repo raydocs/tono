@@ -178,8 +178,9 @@ fn poll_until<T>(
 }
 
 /// The only safe "already clean" classification. A missing SCM record and missing state files
-/// are insufficient: persistent WFP filters can outlive both, and Service startup intentionally
-/// converts exactly that orphaned combination back into a strict emergency block.
+/// are insufficient: persistent WFP filters can outlive both. Service startup releases that
+/// orphan when no readable record explicitly enabled the strict kill switch, but this process
+/// may be the only one running, so residual filters still take the full disarm.
 #[cfg(any(windows, test))]
 fn cleanup_fast_path_allowed(
     service_present: bool,
