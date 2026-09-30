@@ -1029,6 +1029,7 @@ async function enqueueRevocation(
      ON CONFLICT(tailscale_node_id) DO UPDATE SET
        completed_at = NULL,
        last_error = NULL,
+       last_attempt_at = 0,
        device_id = excluded.device_id,
        created_at = excluded.created_at,
        ownership_generation = excluded.ownership_generation,
@@ -1063,6 +1064,7 @@ async function expirePending(e: Env, user: string) {
            ON CONFLICT(tailscale_node_id) DO UPDATE SET
              completed_at = NULL,
              last_error = NULL,
+             last_attempt_at = 0,
              device_id = excluded.device_id,
              created_at = excluded.created_at,
              ownership_generation = excluded.ownership_generation,
@@ -1209,6 +1211,7 @@ async function ensureDevice(e: Env, user: string, name: string, installation: st
          ON CONFLICT(tailscale_node_id) DO UPDATE SET
            completed_at = NULL,
            last_error = NULL,
+           last_attempt_at = 0,
            device_id = excluded.device_id,
            created_at = excluded.created_at,
            ownership_generation = excluded.ownership_generation,
@@ -1552,6 +1555,7 @@ async function revokeDevice(e: Env, d: Row, requireIneligibleUser = false) {
        ON CONFLICT(tailscale_node_id) DO UPDATE SET
          completed_at = NULL,
          last_error = NULL,
+         last_attempt_at = 0,
          device_id = excluded.device_id,
          created_at = excluded.created_at,
          ownership_generation = excluded.ownership_generation,
@@ -2103,6 +2107,7 @@ async function confirmDevice(
        ON CONFLICT(tailscale_node_id) DO UPDATE SET
          completed_at = NULL,
          last_error = NULL,
+         last_attempt_at = 0,
          device_id = excluded.device_id,
          created_at = excluded.created_at,
          ownership_generation = excluded.ownership_generation,
@@ -2658,6 +2663,7 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
            ON CONFLICT(tailscale_node_id) DO UPDATE SET
              completed_at = NULL,
              last_error = NULL,
+             last_attempt_at = 0,
              device_id = excluded.device_id,
              created_at = excluded.created_at,
              ownership_generation = excluded.ownership_generation,
