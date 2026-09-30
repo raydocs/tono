@@ -125,6 +125,9 @@ pub struct TaskRegistry {
     /// on entry to that state, retired on exit; the loop itself also stops once the state is
     /// gone, so it is never a resident task.
     pub protection_resync: Option<JoinHandle<()>>,
+    /// TCP proofs after a fail-open release. Disconnect aborts this task.
+    /// It must not be aborted from inside its own connect attempt.
+    pub unarmed_probe: Option<JoinHandle<()>>,
 }
 
 impl TaskRegistry {
@@ -187,6 +190,10 @@ impl TaskRegistry {
         Self::abort(&mut self.protection_resync);
     }
 
+    pub fn abort_unarmed_probe(&mut self) {
+        Self::abort(&mut self.unarmed_probe);
+    }
+
     /// Connection-scoped tasks: everything that drives the connect
     /// transaction or reacts to the tunnel. Aborted on disconnect and on a
     /// node switch; the catalog sync is account-scoped and survives both.
@@ -197,6 +204,7 @@ impl TaskRegistry {
         self.abort_pin_refresh();
         self.abort_switch();
         self.abort_protection_resync();
+        self.abort_unarmed_probe();
     }
 }
 
@@ -548,6 +556,10 @@ pub struct TonoState {
     /// activation transaction retains an owned reader through its final proof.
     policy_activation: Arc<tokio::sync::RwLock<()>>,
     next_release_id: AtomicU64,
+    /// Replaces an older unarmed probe. The probe task exits when this changes.
+    pub(crate) unarmed_probe_ticket: AtomicU64,
+    /// Recent TCP proofs, keyed by `ip:port`. Not a tunnel and not a route.
+    pub(crate) unarmed_proofs: parking_lot::Mutex<tono_core::unarmed_probe::ProofCache>,
 }
 
 impl TonoState {
@@ -669,6 +681,8 @@ impl TonoState {
             privileged_transition: Arc::new(tokio::sync::RwLock::new(())),
             policy_activation: Arc::new(tokio::sync::RwLock::new(())),
             next_release_id: AtomicU64::new(1),
+            unarmed_probe_ticket: AtomicU64::new(1),
+            unarmed_proofs: parking_lot::Mutex::new(tono_core::unarmed_probe::ProofCache::default()),
         })
     }
 

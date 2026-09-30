@@ -114,6 +114,13 @@ may reverse), `reversed` (keep the line; say what replaced it).
 - Why stricter: a shorter budget fails connects that are merely slow, and a parallel tunnel install is the silent-drop case. The keys do not add a second telemetry upload.
 - Applied in: branch `cursor/connect-stage-timings-a925`.
 
+## 2026-09-30 · After fail-open, does Tono keep probing and reconnect by itself?
+
+- Status: provisional
+- Chosen: yes, with the original network left up. TCP proofs of the preferred node, then up to two same-region TCP nodes, with backoff capped at 120s. A connect starts only after one proof. Rejected: stopping after the release (the user would have to click again) and probing by installing TUN/WFP/PF.
+- Why stricter: proofs do not arm a filter or move a route. Hysteria2 is not treated as a TCP success. The release decision stays `disposition_after_exhausted_failure` from the shared failure module. A strict `permanent` kill switch does not enter this loop. Residential routing is not rewritten here.
+- Applied in: branch `cursor/unarmed-background-heal-a925` (`unarmed_probe`).
+
 ## 2026-09-29 · After an unexpected restart on Windows, does the Service start the Core by itself, and does the App say why it did not?
 
 - Status: provisional
