@@ -130,12 +130,10 @@ fn run_emergency_disarm() -> Result<()> {
         // succeeds, so it means a live service that *answers* owns the machine.
         // Disarming underneath it loses a race that cannot be won: this process
         // deletes the filters and the intent file, the running service's
-        // watchdog checks its own in-memory intent within its period, finds the
-        // filters gone and reinstalls the block — and the DNS watchdog can
-        // re-point every adapter at the protected resolver and rewrite the
-        // snapshot. The user is told "your network is restored" and is blocked
-        // again seconds later, with the intent file now missing so the next
-        // service start comes up in the emergency block. Because the owner
+        // watchdog checks its own in-memory intent within its period. Without an
+        // explicit strict kill switch it releases after a short unhealthy streak
+        // instead of reinstalling; the DNS watchdog can still re-point adapters
+        // at the protected resolver and rewrite the snapshot. Because the owner
         // answered, the supported route is open, which is exactly what the
         // refusal below tells them to use.
         let _owner_guard = match tono_service_protocol::acquire_service_owner().await {
