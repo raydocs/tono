@@ -79,12 +79,9 @@ enum RuntimeCleanup {
             guard Darwin.unlink(pending.path) == 0 else {
                 throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
             }
-            let directory = Darwin.open(file.deletingLastPathComponent().path, O_RDONLY | O_CLOEXEC)
-            guard directory >= 0 else {
-                throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
-            }
-            defer { Darwin.close(directory) }
-            try fullSync(directory)
+            // The record and its directory were already synced by writer.
+            // Marker removal is not a new admission grant: if it reappears
+            // after power loss, the next launch only holds more conservatively.
             AppProfile.defaults.set(record, forKey: SettingsKey.connectBootSession)
         } catch {
             // Admission fails. Preserve the prior record or the pending marker
