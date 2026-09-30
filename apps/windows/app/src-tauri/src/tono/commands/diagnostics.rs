@@ -34,7 +34,7 @@ pub async fn tono_set_audit_enabled(state: tauri::State<'_, Arc<TonoState>>, ena
     state.audit().set_enabled(enabled)
 }
 
-/// Whether periodic cloud diagnostic timeline upload is enabled (default OFF).
+/// Whether periodic cloud diagnostic timeline upload is enabled (default ON).
 #[tauri::command]
 pub async fn tono_periodic_telemetry_enabled(
     state: tauri::State<'_, Arc<TonoState>>,

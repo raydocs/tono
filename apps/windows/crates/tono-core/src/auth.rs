@@ -44,6 +44,9 @@ pub mod endpoints {
     /// not the 3.5 raw connection log: the body is the same `connectFail`
     /// shape the periodic window already carries (stage, code, node).
     pub const TELEMETRY_FAILURES: &str = "telemetry/failures";
+    /// Privacy-safe diagnostics bundle (version, session, chain, DNS, allowlisted
+    /// AI routes). Not the raw hostname log. Direct POST on the pinned API client.
+    pub const TELEMETRY_DIAGNOSTICS: &str = "telemetry/diagnostics";
     /// Raw audit-log segments for the test programme. Unlike
     /// [`DIAGNOSTICS_REPORTS`] this carries hostnames, process paths and routes,
     /// so it is gated on its own product toggle and its own disclosure.
@@ -1211,6 +1214,24 @@ impl<T: HttpTransport, S: CredentialStore> ApiClient<T, S> {
             return Err(ApiError::InvalidResponse);
         }
         Ok(receipt)
+    }
+
+    /// Repost a saved telemetry body. `path` is one of the telemetry endpoints;
+    /// this does not post anywhere else. The pinned API client is the direct
+    /// path the kill switch already allows.
+    pub async fn upload_saved_telemetry(
+        &self, path: &'static str, body: &str, identity: u64,
+    ) -> Result<(), ApiError> {
+        if path != endpoints::TELEMETRY_DIAGNOSTICS && path != endpoints::TELEMETRY_FAILURES {
+            return Err(ApiError::InvalidInput("telemetry path".to_string()));
+        }
+        let response = self
+            .authorized_for_identity(HttpMethod::Post, path, Some(body.to_string()), identity)
+            .await?;
+        if response.trim().is_empty() {
+            return Err(ApiError::InvalidResponse);
+        }
+        Ok(())
     }
 
     /// `POST telemetry/failures`: one classified connectFail, the moment it
