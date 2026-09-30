@@ -266,7 +266,13 @@ nonisolated enum HelperProtocolVersion {
     ///   stable owner before writing old DNS. A newer external DNS choice is
     ///   retained and the snapshot archived, not reported as restored. Missing
     ///   identity or read failure still refuses release.
-    static let current = "4.52.0"
+    /// - 4.52.0 → 4.52.1: the hold path keeps an unrecorded PF enable token
+    ///   when its listing query gives no answer (only a full listing proves
+    ///   it gone), instead of clearing the only handle to a reference that
+    ///   may still be held; settling a past-deadline `pfctl -E` throws on a
+    ///   non-listing answer instead of claiming the child took none. A 4.52.0
+    ///   daemon can leave a token held past disarm with PF enabled.
+    static let current = "4.52.1"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS
