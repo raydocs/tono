@@ -359,10 +359,15 @@ const ServersPage = () => {
   const selected = (servers ?? []).find((server) => server.selected)
   // #590: this page's own refresh failure is superseded once the last successful sync moves (a
   // later periodic or manual success, or sign-in/out resetting it): the backend's `catalog.error`
-  // speaks for the catalog from then on. A later failed sync does not move it.
-  useEffect(() => {
+  // speaks for the catalog from then on. A later failed sync does not move it. Adjusted during
+  // render rather than in an effect, so the refresh area never pays a synchronous re-render.
+  const [clearedSyncAtMs, setClearedSyncAtMs] = useState<number | null | undefined>(
+    catalog?.lastSyncedAtMs,
+  )
+  if (catalog?.lastSyncedAtMs !== clearedSyncAtMs) {
+    setClearedSyncAtMs(catalog?.lastSyncedAtMs)
     setRefreshError(null)
-  }, [catalog?.lastSyncedAtMs])
+  }
   const catalogFailure =
     refreshError ??
     (catalog?.error ? describeTonoActionError(catalog.error, t) : null)

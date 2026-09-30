@@ -7,7 +7,7 @@ import { getNodeRetirePreview } from '../retire-dependencies';
 import { getNodeAcceptance } from './nodes-acceptance';
 import {
   getCustomers, getCustomer, getCustomerConnections, getCustomerActivity,
-  getCustomerDestinations, getCustomerServices,
+  getCustomerDestinations, getCustomerServices, getCustomerDiagnostics, getFailureClusters,
 } from './customers';
 import { getFunnel } from './funnel';
 import {
@@ -59,6 +59,8 @@ export const OPS_V1_ROUTES = [
   'GET /api/v1/ops/customers/funnel',
   'GET /api/v1/ops/customers/{id}',
   'GET /api/v1/ops/customers/{id}/connections',
+  'GET /api/v1/ops/customers/{id}/diagnostics',
+  'GET /api/v1/ops/failure-clusters',
   'GET /api/v1/ops/customers/{id}/activity',
   'GET /api/v1/ops/customers/{id}/destinations',
   'GET /api/v1/ops/customers/{id}/services',
@@ -151,6 +153,8 @@ const ROUTES: Array<{ method: string; re: RegExp; handle: Handler }> = [
   { method: 'GET', re: /^\/api\/v1\/ops\/customers$/, handle: (req, e) => getCustomers(req, e) },
   { method: 'GET', re: /^\/api\/v1\/ops\/customers\/funnel$/, handle: (req, e) => getFunnel(req, e) },
   { method: 'GET', re: /^\/api\/v1\/ops\/customers\/([^/]+)\/connections$/, handle: (req, e, _a, p) => getCustomerConnections(req, e, p[0]) },
+  { method: 'GET', re: /^\/api\/v1\/ops\/customers\/([^/]+)\/diagnostics$/, handle: (req, e, _a, p) => getCustomerDiagnostics(req, e, p[0]) },
+  { method: 'GET', re: /^\/api\/v1\/ops\/failure-clusters$/, handle: (req, e) => getFailureClusters(req, e) },
   { method: 'GET', re: /^\/api\/v1\/ops\/customers\/([^/]+)\/activity$/, handle: (req, e, _a, p) => getCustomerActivity(req, e, p[0]) },
   { method: 'GET', re: /^\/api\/v1\/ops\/customers\/([^/]+)\/destinations$/, handle: (req, e, _a, p) => getCustomerDestinations(req, e, p[0]) },
   { method: 'GET', re: /^\/api\/v1\/ops\/customers\/([^/]+)\/services$/, handle: (req, e, _a, p) => getCustomerServices(req, e, p[0]) },
