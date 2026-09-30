@@ -717,18 +717,16 @@ func runOwnedRuntimeContractSelfTests() -> Bool {
         )
 }
 
-/// Daemon startup after executor recovery, in the order protection needs.
+/// Daemon startup after executor recovery.
 ///
-/// After a boot, macOS loads /etc/pf.conf with PF disabled; this daemon is the
-/// only thing that enables it. PF used to be restored only once the socket
-/// server had resolved the user's group and home, set up its directories and
-/// swept a stale core, and any failure on the way exited without touching PF,
-/// so an armed machine came up open and stayed open across every launchd
-/// retry. PF is now restored right after the allowed user is read, and any
-/// later failure installs the emergency block when protection was wanted.
-///
-/// A stop request is a clean stop, as in `UpdateExecutor.startup`: the
-/// executor's own bootout must not leave a barrier behind.
+/// After a boot, macOS loads /etc/pf.conf with PF disabled. That file only
+/// declares the Tono anchor; it does not load the rule file, so Safe Mode
+/// (where this LaunchDaemon does not run) cannot reinstall a block from it.
+/// This daemon does not re-arm on startup. Once the socket is listening, a
+/// Core that is not running releases any leftover kill switch. A failure
+/// before that release clears a saved kill switch instead of installing a
+/// block. A stop request is a clean stop, as in `UpdateExecutor.startup`:
+/// the executor's own bootout must not change PF.
 func startHelperDaemon<KillSwitch, Server>(
     readUID: () throws -> uid_t = {
         guard geteuid() == 0 else {
@@ -751,8 +749,8 @@ func startHelperDaemon<KillSwitch, Server>(
     }
 }
 
-/// PF is restored before the server initialises, a server failure leaves the
-/// machine fail-closed, and a requested stop does not (H12-F2).
+/// The manager is constructed before the server. A server failure runs the
+/// startup release, and a requested stop does not (H12-F2).
 func runStartupOrderSelfTest() -> Bool {
     struct StartupFailed: Error {}
     var events: [String] = []
@@ -807,9 +805,8 @@ func runEmergencyDisarm(underLock suppliedStorage: UpdateStorage? = nil) -> Bool
         // Initialization terminates a stale owned Mihomo process before PF is
         // opened, preventing a half-running privileged runtime after recovery.
         let core = try CoreManager(allowedUID: allowedUID)
-        // Restore the user's DHCP/custom DNS before opening PF. If DNS recovery
-        // fails, retain fail-closed protection instead of returning a machine
-        // with direct egress but a dead resolver.
+        // Restore DNS, then release PF. A DNS failure must not keep the block:
+        // the host would stay offline with a dead resolver.
         let dns = try ProtectedDNSManager()
         let manager = try KillSwitchManager(allowedUID: allowedUID)
         if pending {
@@ -831,7 +828,14 @@ func runEmergencyDisarm(underLock suppliedStorage: UpdateStorage? = nil) -> Bool
                 fputs("Tono emergency recovery disarmed PF but could not archive the resolved update attempt: \(error)\n", stderr)
             }
         } else {
-            _ = try dns.restore(deferringLossNotice: true)
+            do {
+                _ = try dns.restore(deferringLossNotice: true)
+            } catch {
+                fputs(
+                    "Tono emergency recovery could not restore DNS; releasing PF anyway: \(error)\n",
+                    stderr
+                )
+            }
             _ = try manager.disarm()
         }
         print("Tono network protection is disarmed.")
@@ -1135,9 +1139,10 @@ func releaseIfTonoWasRemoved(
 }
 
 /// Nothing is removed unless the stale core stops, DNS is restored and PF is
-/// disarmed (`runEmergencyDisarm`); otherwise startup continues and restores
-/// protection as before. The daemon has not opened its socket yet, so no GUI
-/// arm can interleave, unlike the `--emergency-reset` tool.
+/// disarmed (`runEmergencyDisarm`); otherwise startup continues and
+/// `SocketServer.run` releases a leftover kill switch when the Core is not
+/// running. The daemon has not opened its socket yet, so no GUI arm can
+/// interleave, unlike the `--emergency-reset` tool.
 func releaseRemovedInstallationLocked(_ storage: UpdateStorage) -> Bool {
     guard runEmergencyDisarm(underLock: storage) else { return false }
     removeHelperInstallation()
@@ -1443,13 +1448,11 @@ if CommandLine.arguments.dropFirst() == ["--emergency-reset"] {
     exit(runEmergencyReset() ? 0 : 1)
 }
 do {
-    // Executor recovery must precede CoreManager's stale-child cleanup and
-    // normal PF restoration. The independent job owns a consumed replacement.
-    // startup() installs the corrupt-ledger emergency barrier itself, only
-    // where Kill Switch intent is saved (BRICK-M1), and also returns a clean
-    // stop when the executor's own bootout interrupts this daemon behind the
-    // update lock — in that window the executor owns the flow and no PF
-    // action is ours to take.
+    // Executor recovery must precede CoreManager's stale-child cleanup.
+    // startup() does not install a PF block, including when the ledger is
+    // corrupt (BRICK-M1). It returns a clean stop when the executor's own
+    // bootout interrupts this daemon behind the update lock — in that window
+    // the executor owns the flow and no PF action is ours to take.
     if try UpdateExecutor.startup() { exit(0) }
     if releaseIfTonoWasRemoved() { exit(0) }
 } catch {

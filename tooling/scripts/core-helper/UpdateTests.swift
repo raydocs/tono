@@ -314,8 +314,8 @@ func runUpdateSelfTests() -> Bool {
             try check(clean, "A bootout while waiting behind the executor's lock is a clean stop")
         }
         try check(armed == 0, "Executor bootout during startup armed the emergency block")
-        // Only the bootout whitelist is clean; an unreadable ledger keeps
-        // arming the fail-closed barrier and stops launch as before.
+        // An unreadable ledger still stops launch. It must not install a
+        // block: a store the daemon cannot read is not a strict kill switch.
         let corrupt = try UpdateStorage(root: directory + "/corrupt")
         try UpdateStorage.write(Data("not a ledger".utf8), to: directory + "/corrupt/ledger.json")
         var corrupted = 0
@@ -323,12 +323,11 @@ func runUpdateSelfTests() -> Bool {
             _ = try UpdateExecutor.startup(storage: corrupt, protectionWanted: { true },
                                            emergencyBlock: { corrupted += 1 })
         }
-        try check(corrupted == 1, "Corrupt-ledger startup stopped arming the emergency block")
+        try check(corrupted == 0, "Corrupt-ledger startup installed the emergency block")
     }
     // A Mac that was never connected was blocked at every boot by a store it
-    // could not read (BRICK-M1): the startup barrier needs saved intent, and
-    // when the store opened that intent is read under the update lock, where
-    // no release can interleave between the check and the install.
+    // could not read (BRICK-M1). Startup still reads saved intent under the
+    // update lock, and never installs a block from that read.
     test("startup-barrier-only-with-intent-decided-under-the-update-lock") { directory in
         let corrupt = try UpdateStorage(root: directory)
         try UpdateStorage.write(Data("not a ledger".utf8), to: directory + "/ledger.json")
