@@ -16,6 +16,13 @@ may reverse), `reversed` (keep the line; say what replaced it).
 - Applied in: PR / commit / command
 ```
 
+## 2026-09-30 · When a configured exit fails, may self-heal tear the tunnel down to try another, and may it leave the machine blocked?
+
+- Status: provisional
+- Chosen: no tear-down between hops. A new dial name is used only while protection is down, before the next tunnel exists. If a verified barrier is already up and the user has not explicitly enabled a strict kill switch, stop and restore the original network through the existing explicit release, once, with no reconnect. Strict (macOS Kill Switch "Permanent" only; Windows has no such toggle, so Windows is ordinary) may keep the barrier and retries the same node. Rejected: rotating cities under WFP/PF, a positive mihomo `handshake-timeout` (it detaches the QUIC dial from the caller), and `skip-cert-verify`.
+- Why stricter: the healer writes no PF, WFP, TUN, or route. It does not widen the permit set to probe backups. Residential SOCKS identity is not replaced. The cost is that a dead preferred path is not hot-swapped under an armed barrier; the machine goes back to its original network instead of sitting in Protected Offline.
+- Applied in: `tono-core` `heal` and the Windows connect failure path. macOS has the same decision type and tests; it is not called from the live connect path until a device proves the PF release.
+
 ## 2026-09-30 · On crash or hang without an explicit strict kill switch, what happens to general traffic and to AI services?
 
 - Status: owner

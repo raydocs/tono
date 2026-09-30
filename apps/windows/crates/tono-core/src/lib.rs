@@ -12,6 +12,7 @@ pub mod catalog;
 pub mod config;
 pub mod connection;
 pub mod credentials;
+pub mod heal;
 pub mod node;
 pub mod policy;
 pub mod policy_signature;
@@ -29,6 +30,15 @@ pub use config::{
     DirectPlan, OwnedRuntime, build_owned_runtime, generate_controller_secret, redact_secret,
 };
 pub use connection::{ConnectStage, ConnectionStatus, ReconnectBackoff, UiState};
+pub use credentials::{CredentialKey, CredentialStore};
+pub use heal::{
+    Candidate, DialChange, FailureClass, HYSTERESIS_MS, KillSwitchStance, NetworkEffect, Session,
+    TCP_FAIL_FAST_MS, Transport,
+};
+pub use node::{
+    EXIT_GROUP_NAME, HY2_NAME_SUFFIX, NodeProtocol, NodeRejection, ValidatedNode,
+    catalog_base_name, catalog_transport_of_name, is_hy2_catalog_name,
+};
 pub use protected_connectivity::{
     PostLockDecision, ProtectedFailureCode, TUN_PROBE_ORIGINS, classify_exhausted_data_plane,
     classify_post_lock,
@@ -36,9 +46,4 @@ pub use protected_connectivity::{
 pub use update_journal::{
     UpdateHandoffJournal, UpdateHandoffPhase, commit_verified_recovery, incomplete_from_phase,
     record_install_started,
-};
-pub use credentials::{CredentialKey, CredentialStore};
-pub use node::{
-    EXIT_GROUP_NAME, HY2_NAME_SUFFIX, NodeProtocol, NodeRejection, ValidatedNode,
-    catalog_base_name, catalog_transport_of_name, is_hy2_catalog_name,
 };
