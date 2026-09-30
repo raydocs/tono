@@ -47,6 +47,8 @@ LiquidClashHelper/
 
 # Python
 __pycache__/
+tooling/perf/connect-bench/.cache/
+tooling/perf/connect-bench/last-run.json
 
 # Wrangler local cache
 .wrangler/
