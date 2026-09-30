@@ -109,9 +109,16 @@ async fn run(state: Arc<TonoState>, app: AppHandle, ticket: u64, mut generation:
                     "Tono: unarmed probe found a reachable exit; connecting without a filter already installed"
                 );
                 let before = generation;
-                let result =
-                    super::connect_for_generation(Arc::clone(&state), app.clone(), Some(before))
-                        .await;
+                // Connect calls this function again after a failure. Name that future
+                // as a trait object so the spawned task's type does not contain itself.
+                let connect: std::pin::Pin<
+                    Box<dyn std::future::Future<Output = Result<(), String>> + Send>,
+                > = Box::pin(super::connect_for_generation(
+                    Arc::clone(&state),
+                    app.clone(),
+                    Some(before),
+                ));
+                let result = connect.await;
                 let after = state.lock().await.connect_generation;
                 if result.is_ok() {
                     return;

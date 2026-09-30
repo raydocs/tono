@@ -13,3 +13,7 @@
 
 - 来源：只重放探测提交到 [#706](https://github.com/raydocs/tono/pull/706) `55e68e93`。没有把旧的 #706 提交再打一遍。`state.client` 仍走锁内的 `inner.client`。放行之后才探测；屏障还在时仍走保护重连。
 - 缺陷修复：`app-rust` 报 `TonoState` 上没有 `client`。那是旧基线上的调用。变基后沿用 #706 的锁内写法，探测行为没有放宽。
+
+### 2026-09-30 续记 · 探测任务里的连接不再嵌套自己的类型
+
+- 缺陷修复：`app-rust` 报探测任务的 future 不能 `Send`。连接失败会再调用 `spawn_after_release`，任务类型把自己包进去。现在把这一次连接收成 `Box<dyn Future + Send>`。仍然只有证明成功才连接，屏障还在时不探测，失败不装隧道。
