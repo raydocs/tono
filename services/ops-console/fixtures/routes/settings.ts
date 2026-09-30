@@ -139,7 +139,7 @@ export function createSettingsFixtures(rootDir: string) {
         alertRules: shift(read<ListDto<AlertRuleDto>>('alert-rules.json')).items,
         deliveries: shift(read<ListDto<AlertDeliveryDto>>('alert-deliveries.json')).items,
         providers: shift(read<ListDto<ProviderAccountDto>>('provider-accounts.json')).items,
-        homeLines: shift(read<ListDto<HomeLineDto>>('home-lines.json')).items,
+        homeLines: [...shift(read<ListDto<HomeLineDto>>('home-lines.json')).items, ...billedLines(nowSec())],
         usage: shift(read<ListDto<HomeLineUsageDayDto>>('home-lines-id-usage.json')).items,
         candidates: shift(read<{ items: DirectCandidateDto[] }>('direct-candidates.json')).items
           // `firstSeen` does not end in `At`, so the shared shifter leaves it
@@ -610,4 +610,62 @@ function maskEmail(value: unknown): string | null {
   const at = text.indexOf('@');
   if (at <= 0) return `${text.slice(0, 1)}***`;
   return `${text.slice(0, 1)}***${text.slice(at)}`;
+}
+
+/**
+ * Four lines beside the captured one, each carrying a bill the assets page
+ * has to read: a bundle nearly spent that renews this week, a monthly line
+ * with room to spare, a per-GB line nobody meters, and one already retired.
+ */
+function billedLines(now: number): HomeLineDto[] {
+  const DAY = 86_400;
+  const GB = 1_073_741_824;
+  const line = (id: string, name: string, patch: Partial<HomeLineDto>): HomeLineDto => ({
+    id,
+    proxyName: name.toLowerCase().replaceAll(' ', '-'),
+    displayName: name,
+    status: 'active',
+    isp: null,
+    region: null,
+    providerAccountId: null,
+    price: null,
+    currency: null,
+    billingKind: null,
+    bundleBytes: null,
+    cycleStart: now - 20 * DAY,
+    cycleEnd: now + 10 * DAY,
+    expiresAt: null,
+    meterSource: 'client_route',
+    usage: { value: null, asOfSec: null, source: 'telemetry' },
+    probe: { value: null, asOfSec: null, source: 'collector' },
+    boundUsers: { value: 0, asOfSec: now - 600, source: 'engine' },
+    notes: null,
+    createdAt: now - 60 * DAY,
+    updatedAt: now - 2 * DAY,
+    ...patch,
+  });
+  return [
+    line('id_fixture_gamma', 'Preview Home Gamma', {
+      isp: '联通', region: '上海', price: 120, currency: 'CNY', billingKind: 'bundle',
+      bundleBytes: 500 * GB, expiresAt: now + 5 * DAY,
+      usage: { value: { bytesUp: 41 * GB, bytesDown: 372 * GB, users: 1, source: 'client_route' }, asOfSec: now - 900, source: 'telemetry' },
+      probe: { value: { alive: 29, total: 44, uptimeRatio: 29 / 44, status: 'alive' }, asOfSec: now - 1_200, source: 'collector' },
+      boundUsers: { value: 1, asOfSec: now - 600, source: 'engine' },
+    }),
+    line('id_fixture_delta', 'Preview Home Delta', {
+      isp: '电信', region: '广州', price: 99, currency: 'CNY', billingKind: 'monthly',
+      expiresAt: now + 41 * DAY,
+      usage: { value: { bytesUp: 2 * GB, bytesDown: 14 * GB, users: 0, source: 'client_route' }, asOfSec: now - 900, source: 'telemetry' },
+      probe: { value: { alive: 44, total: 44, uptimeRatio: 1, status: 'alive' }, asOfSec: now - 600, source: 'collector' },
+    }),
+    line('id_fixture_epsilon', 'Preview Home Epsilon', {
+      isp: '移动', region: '北京', price: 15, currency: 'USD', billingKind: 'per_gb',
+      expiresAt: now + 18 * DAY, meterSource: null,
+      probe: { value: { alive: 0, total: 20, uptimeRatio: 0, status: 'dead' }, asOfSec: now - 1_500, source: 'collector' },
+    }),
+    line('id_fixture_beta', 'Preview Home Beta', {
+      status: 'retired', isp: '联通', region: '杭州', price: 80, currency: 'CNY', billingKind: 'monthly',
+      expiresAt: now - 12 * DAY,
+    }),
+  ];
 }

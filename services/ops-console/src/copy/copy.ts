@@ -16,6 +16,7 @@ import { nodeDetailCopy } from './node-detail';
 import { nodesBoardCopy } from './nodes-board';
 import { panelCopy } from './panel';
 import { qualityCopy } from './quality';
+import { residentialCopy } from './residential';
 import { settingsCopy } from './settings';
 import { settingsPublishCopy } from './settings-publish';
 import { customerCopy } from './customers';
@@ -38,6 +39,7 @@ export const copy = {
   ...panelCopy,
   ...diagnosticsCopy,
   ...qualityCopy,
+  ...residentialCopy,
 } as const;
 
 
