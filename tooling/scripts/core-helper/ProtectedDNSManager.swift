@@ -1099,6 +1099,42 @@ final class ProtectedDNSManager {
         return true
     }
 
+    /// A newer explicit setting on the same stable service ID supersedes the
+    /// snapshot; release must not report the saved original as restored.
+    static func runSupersededRestoreSelfTest() -> Bool {
+        let snapshot = Snapshot(service: "Wi-Fi", serviceID: "S1", servers: ["10.0.0.53"])
+        let owner = NetworkService(id: "S1", name: "Renamed Wi-Fi")
+        let other = NetworkService(id: "S2", name: "Ethernet")
+        var settings = [owner: ["9.9.9.9"], other: [protectedDNSServer]]
+        var ownerWrites = 0
+        var removed = false
+        var archived = false
+        let restored: Bool
+        do {
+            restored = try restoreServices(
+                snapshot: snapshot,
+                services: Set(settings.keys),
+                read: { settings[$0]! },
+                write: { servers, service in
+                    if service == owner { ownerWrites += 1 }
+                    settings[service] = servers
+                },
+                removeSnapshot: { removed = true },
+                archiveSnapshot: { archived = true }
+            )
+        } catch {
+            print("DNS superseded-restore regression FAILED: \(error)")
+            return false
+        }
+        guard !restored, !removed, archived, ownerWrites == 0,
+              settings[owner] == ["9.9.9.9"], settings[other] == [] else {
+            print("DNS superseded-restore regression FAILED: newer DNS was changed or reported restored")
+            return false
+        }
+        print("DNS superseded-restore regression passed: newer DNS retained, snapshot archived, loopback swept")
+        return true
+    }
+
     /// Whether a restore reply carries `originalDNSRestored: false`. A
     /// deferred release also records its loss at `noticePath`; any other
     /// reply reports its own loss or a recorded one, and removes the record
@@ -1189,7 +1225,7 @@ final class ProtectedDNSManager {
                     == ["Wi-Fi", "Ethernet", "Thunderbolt Bridge"] else {
                 return false
             }
-            return true
+            return runSupersededRestoreSelfTest()
         } catch {
             return false
         }
