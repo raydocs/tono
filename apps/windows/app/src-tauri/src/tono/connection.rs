@@ -262,7 +262,7 @@ pub(crate) async fn connect_for_generation(
                             Type::Service,
                             "Tono: self-heal stopped; restoring the original network without another tunnel"
                         );
-                        if let Err(release_error) = disconnect::release_explicit(&state, &app).await {
+                        if let Err(release_error) = disconnect::release_explicit_applying_narrow(&state, &app).await {
                             logging!(
                                 error,
                                 Type::Service,

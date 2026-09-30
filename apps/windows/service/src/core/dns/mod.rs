@@ -3398,6 +3398,16 @@ fn is_active_dns_adapter(oper_status: i32, if_type: u32, has_bound_ip: bool) -> 
 // --- Windows engine: registry snapshot/set + native apply, legacy compatibility/restore ---
 
 #[cfg(all(windows, not(feature = "test")))]
+pub(crate) fn install_selective_nrpt() -> Result<()> {
+    engine::install_selective_nrpt()
+}
+
+#[cfg(all(windows, not(feature = "test")))]
+pub(crate) fn remove_selective_nrpt() -> Result<()> {
+    engine::remove_selective_nrpt()
+}
+
+#[cfg(all(windows, not(feature = "test")))]
 mod engine;
 
 

@@ -360,6 +360,9 @@ final class KillSwitchManager {
         openNetworkEpoch &+= 1
         repairedSinceArm = false
         reviewedBundleFileUnconfirmed = false
+        // The tunnel is up. Drop the crash-time sinkhole so AI names resolve
+        // through it. Failure here does not roll back the block.
+        SelectiveFailOpenInstaller.removeBestEffort()
         return response(
             armed: true,
             wanted: true,
@@ -543,7 +546,22 @@ final class KillSwitchManager {
         openNetworkEpoch &+= 1
         lastLoadedPassRules = nil
         repairedSinceArm = false
+        // Restore, disconnect, and emergency disarm all come through here.
+        // They remove the secondary layer and do not put it back. The crash
+        // watchdog applies it only after this returns.
+        SelectiveFailOpenInstaller.removeBestEffort()
         return response(armed: false, wanted: false, live: false)
+    }
+
+    /// Crash and startup release call this after a successful disarm.
+    /// Restore, disconnect, and emergency disarm do not. The state-file
+    /// check is under the same lock as arm: a tunnel that has committed
+    /// does not inherit the sinkhole.
+    func applySelectiveLayerIfReleased() {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !Self.stateFileExists() else { return }
+        SelectiveFailOpenInstaller.applyBestEffort()
     }
 
     /// Best-effort release used when the daemon cannot finish starting.
@@ -558,7 +576,9 @@ final class KillSwitchManager {
             FileHandle.standardError.write(Data(
                 "tono: startup release could not clear the kill switch: \(detail)\n".utf8
             ))
+            return
         }
+        SelectiveFailOpenInstaller.applyBestEffort()
     }
 
     /// The steps of `disarm()` without taking `lock`. Callers that already

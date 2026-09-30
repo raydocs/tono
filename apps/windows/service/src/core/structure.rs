@@ -154,6 +154,31 @@ pub struct OwnerCredentials {
     pub token: Option<String>,
 }
 
+/// Body of `POST /kill-switch/release`. Absent on older clients, which must
+/// keep the full release and must not install the secondary AI hold.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReleaseKillSwitchPayload {
+    #[serde(default)]
+    pub apply_narrow_layer: bool,
+}
+
+/// `null` (older clients) or the payload object.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+pub enum ReleaseKillSwitchBody {
+    Options(ReleaseKillSwitchPayload),
+    Absent(()),
+}
+
+impl ReleaseKillSwitchBody {
+    pub fn apply_narrow_layer(&self) -> bool {
+        match self {
+            Self::Options(options) => options.apply_narrow_layer,
+            Self::Absent(()) => false,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AuthenticatedRequest<T> {
     pub credentials: OwnerCredentials,
@@ -1219,5 +1244,17 @@ mod tests {
                 .bytes()
                 .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
         );
+    }
+
+    #[cfg(feature = "test")]
+    #[test]
+    fn an_absent_release_body_does_not_apply_the_narrow_layer() {
+        let absent: ReleaseKillSwitchBody = serde_json::from_str("null").unwrap();
+        assert!(!absent.apply_narrow_layer());
+        let present: ReleaseKillSwitchBody =
+            serde_json::from_str(r#"{"apply_narrow_layer":true}"#).unwrap();
+        assert!(present.apply_narrow_layer());
+        let omitted: ReleaseKillSwitchBody = serde_json::from_str("{}").unwrap();
+        assert!(!omitted.apply_narrow_layer());
     }
 }

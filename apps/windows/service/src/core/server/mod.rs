@@ -856,8 +856,13 @@ async fn enter_owner_lifecycle(
 /// included — a release whose DNS restore cannot be proven is refused and stays armed).
 /// Idempotent: not armed is a successful no-op returning the current status.
 #[cfg(windows)]
-async fn release_kill_switch_for_platform() -> Result<HttpResponse> {
-    match windows_kill_switch::release().await {
+async fn release_kill_switch_for_platform(apply_narrow: bool) -> Result<HttpResponse> {
+    let released = if apply_narrow {
+        windows_kill_switch::release_applying_narrow().await
+    } else {
+        windows_kill_switch::release().await
+    };
+    match released {
         Ok(status) => ok_json(status),
         Err(error) => service_unavailable(format!(
             "Kill switch release refused; protection remains: {error:#}"
@@ -869,7 +874,7 @@ async fn release_kill_switch_for_platform() -> Result<HttpResponse> {
 /// release/failure semantics (there is no DNS snapshot on macOS). Reported through the same
 /// wire type so the client has one code path.
 #[cfg(target_os = "macos")]
-async fn release_kill_switch_for_platform() -> Result<HttpResponse> {
+async fn release_kill_switch_for_platform(_apply_narrow: bool) -> Result<HttpResponse> {
     match macos_kill_switch::release().await {
         Ok(()) => {
             let (wanted, live, _mode) = macos_kill_switch::status().await;
@@ -890,7 +895,7 @@ async fn release_kill_switch_for_platform() -> Result<HttpResponse> {
 }
 
 #[cfg(not(any(windows, target_os = "macos")))]
-async fn release_kill_switch_for_platform() -> Result<HttpResponse> {
+async fn release_kill_switch_for_platform(_apply_narrow: bool) -> Result<HttpResponse> {
     bad_request("kill switch release is unsupported on this platform")
 }
 

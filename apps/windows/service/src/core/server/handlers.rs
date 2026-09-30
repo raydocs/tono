@@ -368,8 +368,8 @@ pub(super) fn create_ipc_router() -> Result<Router> {
         })
         .post(IpcCommand::ReleaseKillSwitch.as_ref(), |ctx| async move {
             trace!("Received ReleaseKillSwitch command");
-            let (_request, owner) =
-                match authenticate_request::<AuthenticatedRequest<()>>(&ctx).await {
+            let (request, owner) =
+                match authenticate_request::<AuthenticatedRequest<crate::core::structure::ReleaseKillSwitchBody>>(&ctx).await {
                     ControlFlow::Continue(authenticated) => authenticated,
                     ControlFlow::Break(response) => return response,
                 };
@@ -431,7 +431,7 @@ pub(super) fn create_ipc_router() -> Result<Router> {
                     }
                 }
             }
-            release_kill_switch_for_platform().await
+            release_kill_switch_for_platform(request.payload.apply_narrow_layer()).await
         })
         .post(IpcCommand::EnableProtectedDns.as_ref(), |ctx| async move {
             trace!("Received EnableProtectedDns command");
