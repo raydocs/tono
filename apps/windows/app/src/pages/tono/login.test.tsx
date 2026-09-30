@@ -27,7 +27,8 @@ vi.mock('@/hooks/use-tono', () => ({
   tonoServersQueryKey: ['tonoServers'],
 }))
 vi.mock('@/services/query-client', () => ({ removeCacheData: vi.fn() }))
-vi.mock('@/services/tono', () => ({
+vi.mock('@/services/tono', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/services/tono')>()),
   tonoSignInStart: mocks.start,
   tonoSignInVerify: mocks.verify,
   tonoSignOut: mocks.signOut,
