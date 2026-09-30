@@ -336,9 +336,7 @@ fn diagnostics_bundle(report: &ConnectFailureReport) -> Result<serde_json::Value
 }
 
 async fn drain_outbox(state: &Arc<TonoState>, generation: u64) {
-    if !state.audit().periodic_telemetry_enabled() {
-        return;
-    }
+    let telemetry_on = state.audit().periodic_telemetry_enabled();
     let items = telemetry_outbox::due(state.audit().settings_dir(), epoch_ms());
     if items.is_empty() {
         return;
@@ -351,11 +349,14 @@ async fn drain_outbox(state: &Arc<TonoState>, generation: u64) {
         (inner.client.clone(), inner.client.diagnostics_log_identity().await)
     };
     for item in items {
+        if !telemetry_on && item.kind != "p0" {
+            continue;
+        }
         let result = match item.kind.as_str() {
             "failure" => client
                 .upload_saved_telemetry(tono_core::auth::endpoints::TELEMETRY_FAILURES, &item.body, identity)
                 .await,
-            "diagnostics" => client
+            "diagnostics" | "p0" => client
                 .upload_saved_telemetry(tono_core::auth::endpoints::TELEMETRY_DIAGNOSTICS, &item.body, identity)
                 .await,
             _ => continue,

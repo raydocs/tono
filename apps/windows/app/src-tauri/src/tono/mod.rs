@@ -29,6 +29,7 @@ pub mod steps;
 pub(crate) mod support_reports;
 pub mod log_upload;
 pub mod ai_allowlist;
+pub mod network_loss;
 pub mod support_codes;
 pub mod telemetry;
 pub mod telemetry_outbox;
