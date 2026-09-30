@@ -59,7 +59,7 @@ pub(super) async fn direct_lease_heartbeat_loop(state: Arc<TonoState>, generatio
             if inner.connect_generation != generation || !inner.fsm.status().is_connected {
                 return;
             }
-            if inner.policy_tracker.current_digest() != Some(heartbeat.policy_digest.as_str()) {
+            if !direct_lease_policy_is_current(inner.traffic_policy.as_ref(), &heartbeat.policy) {
                 return;
             }
         }
@@ -199,7 +199,16 @@ pub(super) struct DirectLeaseHeartbeat {
     session: OwnerSessionProof,
     reload_id: u64,
     endpoint_digest: String,
-    policy_digest: String,
+    policy: tono_core::policy::TonoTrafficPolicy,
+}
+
+pub(super) fn direct_lease_policy_is_current(
+    current: Option<&tono_core::policy::TonoTrafficPolicy>,
+    committed: &tono_core::policy::TonoTrafficPolicy,
+) -> bool {
+    // Revision-only republishes change the signed JSON digest without changing routes.
+    // Keep renewing unless validated behavior changed, matching policy_sync's reconnect decision.
+    current == Some(committed)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -501,6 +510,11 @@ pub(super) async fn apply_cloud_policy(
         return Ok(None);
     }
     let expected_controller_rules = expected_controller_direct_rules(&plan);
+    // A suffix-only plan emits no rules without native-app pins. Opening the reload bracket
+    // for an empty graph would retract the healthy TUN permit and then fail controller read-back.
+    if expected_controller_rules.is_empty() {
+        return Ok(None);
+    }
     // Declared to the Service exactly when `runtime_value` emits process-scoped rules, and with
     // the same condition it uses. A pin existing is not the same as process routing existing:
     // `direct_endpoints` is the union of the WeChat, web and media pins and the Service cannot
@@ -1372,7 +1386,7 @@ pub(super) async fn commit_direct_policy_cancellation_safe(
                     session: pending.session.clone(),
                     reload_id: pending.reload_id,
                     endpoint_digest: pending.endpoint_digest.clone(),
-                    policy_digest: pending.policy.digest.clone(),
+                    policy: pending.policy.document.clone(),
                 },
             ))
         }
