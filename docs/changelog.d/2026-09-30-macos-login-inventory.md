@@ -11,3 +11,7 @@
 ### 2026-09-30 主线程接管 Git / 托管验证
 - 子代理 Git 公共目录和 remote 访问被沙盒限制，不等于 maintainer 凭据失效；主线程 gh/Git 已正常使用。主线程独立核对 authResult/production caller、Ready 后的 inventory 异步错误和 session-verdict 路径，再提交指定文件。
 - 红回归单独位于 b9c50b60 上的 `test/macos-login-inventory-red-20260930`，只添加 XCTest，不回退 worker 实现；红/绿尚待 hosted 结果，不能声称已经 red。
+
+### 合入与验证收据
+- PR #689已合main `ca1dd8ac`。改前仅加测试 `25350e10` 的[CI36682380427](https://github.com/raydocs/tono/actions/runs/36682380427) 实际449 tests/1现有skip/1 failure；唯一失败是新 `testVerifiedEmailSignInDoesNotDependOnDeviceInventoryRead`：`.error("Inventory temporarily unavailable")` != `.ready`。原始日志保留，非静态推断red。
+- 改后准确头 `c09417d7` 的[CI36682656707](https://github.com/raydocs/tono/actions/runs/36682656707) 四jobs成功。独立Codex high审查 `b9c50b60...c09417d7` 无发现，验证Worker eligibility、账户/设备裁决、取消和revision门控均保留；范围见[#689评论](https://github.com/raydocs/tono/pull/689#issuecomment-5906562438)。这不证明所有登录故障已消除；具体用户失败阶段未提供。

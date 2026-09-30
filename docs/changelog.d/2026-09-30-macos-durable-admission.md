@@ -21,3 +21,7 @@
 ### 2026-09-30 工程纠正 · 本地化覆盖
 - hosted `0d0842a4` [36680476205](https://github.com/raydocs/tono/actions/runs/36680476205) build/job 失败；其余 input/policy/privileged jobs 成功。失败是新增插值错误文案未收录本地化目录，不是记录回归失败；补齐真实 `%@` 键及中文翻译，不修改覆盖测试。
 - 红候选 `ecf131ce` 的 [36678721840](https://github.com/raydocs/tono/actions/runs/36678721840) 实际 458 tests / 8 failures，均出自两条 admission 新回归；`52c999fc` [36679554114](https://github.com/raydocs/tono/actions/runs/36679554114) 有发布后持久化反例失败及上述本地化工程失败，不能把后者计成产品 bug。
+
+### 合入与验证收据
+- #686之后，PR #687已合main `bde2cfa4`；准确头 `c768b669` 的[macOS CI36682257117](https://github.com/raydocs/tono/actions/runs/36682257117) 四jobs成功，包括实际XCTest/helper检查。
+- 独立Codex high复用未变的 `283330d4...0d0842a4` admission范围，增量 `0d0842a4...c768b669` PASS/无新发现，冗余post-unlink同步minor已纠正；覆盖与集成收据见[#687评论](https://github.com/raydocs/tono/pull/687#issuecomment-5906478856)。不宣称首次panic或设备断电试验已验证。

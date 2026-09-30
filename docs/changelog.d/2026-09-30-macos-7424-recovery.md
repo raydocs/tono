@@ -21,3 +21,7 @@
 - `283330d4` hosted macOS CI [36680375773](https://github.com/raydocs/tono/actions/runs/36680375773) exact head 全部四个 jobs 成功；独立 Codex high 当前 diff 复核无 major，保留 native retire/suspend overlap 的 low/minor（M7424-native-retire-overlap）。不得把该 minor 改记为修完；先前 major 和 lossy-health false release 已纠正。
 - 评审反例红候选 `85a20c96` [36679099322](https://github.com/raydocs/tono/actions/runs/36679099322) 457 tests / 6 failures，均来自两个新增启动/交错回归。health 红 `83e2b302` [36680313622](https://github.com/raydocs/tono/actions/runs/36680313622) 457 tests / 3 failures，均来自 non-live 未确认回归；各有已有 1 skip。原始日志保留，非源码推测 red。
 - 本续记仅记录已覆盖源码及未修 minor；文档头需要新的 exact-head macOS CI，不把此前绿直接冒认为新 SHA 的运行。
+
+### 合入与验证收据
+- PR #686 已合 main `8d1b48f2`；准确头 `1f0e91bc` 的 [macOS CI36682257824](https://github.com/raydocs/tono/actions/runs/36682257824) 四 jobs成功，TonoTests及helper检查实际执行。
+- 独立Codex high覆盖源码 `b9c50b60...283330d4` 无major；root实际检查 `283330d4...1f0e91bc` App/helper源码diff为空，复用源码审查，不把文档改头视为新源码审查。收据见[#686评论](https://github.com/raydocs/tono/pull/686#issuecomment-5906192200)。未修的low retire/suspend overlap仍为open，不关闭实机/P0根因验收。
