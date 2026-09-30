@@ -359,7 +359,8 @@ may reverse), `reversed` (keep the line; say what replaced it).
   upload, or leaving the snapshot default off.
 - Why stricter: the reports the owner never received were privacy-safe failure
   facts, not browsing history. Hostname logs stay denied.
-- Applied in: [diagnostics-privacy.md](diagnostics-privacy.md).
+- Applied in: [diagnostics-privacy.md](diagnostics-privacy.md);
+  [#707](https://github.com/raydocs/tono/pull/707).
 
 ## 2026-09-30 · Failure-cluster alerts are off until both webhook settings exist
 
@@ -373,4 +374,5 @@ may reverse), `reversed` (keep the line; say what replaced it).
   separate `DIAGNOSTICS_READ_TOKEN`. Rejected: posting to the human alert
   allowlist, or a token that can write.
 - Why stricter: an unset bot cannot be reached, and one outage is one alert.
-- Applied in: [diagnostics-privacy.md](diagnostics-privacy.md).
+- Applied in: [diagnostics-privacy.md](diagnostics-privacy.md);
+  [#707](https://github.com/raydocs/tono/pull/707).
