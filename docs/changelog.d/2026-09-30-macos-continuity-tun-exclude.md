@@ -9,3 +9,4 @@
 - 剩余限制：在网全球 IPv6 和非私网 IPv4 仍由现有 Kill Switch 丢弃（MAC-CONTINUITY-ONLINK-PF，未改）。IPv6 组播排除在当前「TUN 无 IPv6 地址」下不安装内核路由。未证明通用剪贴板或隔空播放已恢复。连接失败时仍用应用里的 Restore internet，本改动不改变那条恢复路径。
 - 2026-09-30 续记：`be5403e8` 上的 macOS CI 已通过之后，`main` 又前进。再 rebase 到 `939177f4`（含已合入的 #701、#705）。仍是线性历史，没有 merge main。helper 沿用 main 的 `4.52.2`，本分支不改 helper 源码，所以没有再 +0.0.1。冲突只在 `docs/DECISIONS.md`，#701 与 #705 的条目原样保留。
 - 2026-09-30 续记：`86117f50` 的 Windows CI `core` 失败，[run 36750424329](https://github.com/raydocs/tono/actions/runs/36750424329)。整份 YAML 哈希在 `main` 上已由 [#752](https://github.com/raydocs/tono/pull/752) 钉到 `2a0e26f4…`。本分支再 rebase 到 `658aed21`，不改这份测试，也不再写一份自己的哈希。macOS 的路由排除没有改。
+- 2026-09-30 续记：`ace67021` 与前进后的 `main` 冲突。再 rebase 到 `ba7c8ae`（含已合入的 [#708](https://github.com/raydocs/tono/pull/708)）。仍是线性历史，没有 merge main。冲突只在 `docs/DECISIONS.md`，#708 的条目原样保留。helper 沿用 main 的 `4.52.3`，本分支不改 helper 源码。YAML 整份断言仍是 #752 的钉，没有放宽。这个新 head 的 CI 还要重跑。
