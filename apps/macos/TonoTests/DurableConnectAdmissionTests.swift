@@ -107,4 +107,32 @@ final class DurableConnectAdmissionTests: XCTestCase {
             recordedBootSession: RuntimeCleanup.recordedConnectBootSession(in: file),
             currentBootSession: RuntimeCleanup.currentBootSession()))
     }
+
+    func testFailureAfterRecordPublicationHoldsRelaunchEvenWhenPreferencesAreLost() throws {
+        let preference = AppProfile.defaults.object(forKey: SettingsKey.connectBootSession)
+        defer { AppProfile.defaults.set(preference, forKey: SettingsKey.connectBootSession) }
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("tono-boot-published-failure-" + UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let file = directory.appendingPathComponent("connect-boot-session")
+        try RuntimeCleanup.writeSynced("previous-boot", to: file)
+        var published = false
+
+        XCTAssertThrowsError(try RuntimeCleanup.recordConnectBootSession(in: file, writer: { record, path in
+            try RuntimeCleanup.writeSynced(record, to: path)
+            if path == file {
+                published = true
+                // A replacement became visible before its directory sync failed.
+                throw POSIXError(.EIO)
+            }
+        }))
+        XCTAssertTrue(published)
+        AppProfile.defaults.removeObject(forKey: SettingsKey.connectBootSession)
+
+        XCTAssertTrue(RuntimeCleanup.holdsAutomaticResume(
+            recordedBootSession: RuntimeCleanup.recordedConnectBootSession(in: file),
+            currentBootSession: RuntimeCleanup.currentBootSession()),
+            "visible current-boot bytes do not prove the failed admission synced")
+    }
 }
