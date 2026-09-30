@@ -92,3 +92,24 @@ Keep SESSION_STATE.md short (target < 80 lines). Only these sections:
 After compact, subagent start, or session resume: read SESSION_STATE.md first.
 Do not reconstruct tool results from chat history.
 Do not dump full logs, full diffs, or file contents into SESSION_STATE.md.
+
+## Cursor Cloud specific instructions
+
+Linux Cloud Agents run the checks below. `xcodebuild`, Swift, Windows service
+`cargo`, Tauri, and Core packaging stay on hosted `macos-26` and `windows-2025`
+CI ([BUILD_AND_TEST](docs/BUILD_AND_TEST.md)).
+
+- Node 24 matches services and Windows frontend CI. `/exec-daemon/node` is Node 22
+  and precedes nvm; a login shell prepends `~/.nvm/versions/node/v24.*/bin`.
+- `npm ci` in `services/control-plane` and `services/ops-console`. Ops fixtures:
+  `npm run dev:fixtures` → `http://127.0.0.1:5174/ops2/`. Playwright screenshot
+  baselines are macOS; on Linux pass `--ignore-snapshots`.
+- Windows UI only: `pnpm@11.26.0` (`packageManager`) and
+  `pnpm install --frozen-lockfile` in `apps/windows/app`, then `pnpm web:dev`
+  on port 3000. `pnpm dev` starts Tauri and does not run here. The page loads
+  a Tono shell; Tauri `invoke` is absent, so it stays on the splash.
+- Local D1, from `services/control-plane`: `npx wrangler d1 migrations apply DB --local`.
+  Do not deploy or write production D1.
+- Python 3.12 stdlib: exit-agent, home-agent, `ops-panel/tests`. Ruby 3.2:
+  `ruby tooling/scripts/tests/publish-managed-catalog.test.rb`.
+
