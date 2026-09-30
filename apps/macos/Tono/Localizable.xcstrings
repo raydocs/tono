@@ -8176,6 +8176,16 @@
           }
         }
       }
+    },
+    "Tono could not save its restart safety record, so the connection was not started. Check available disk space and retry. %@": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tono 无法保存重启安全记录，因此没有启动连接。请检查可用磁盘空间后重试。%@"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

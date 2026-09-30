@@ -16,3 +16,8 @@
 ### 2026-09-30 续记 · 无法读取 PF 也不能称已释放
 - 对 `81ce504c` 的独立 Codex high 复核无 major、保留一项 minor：helper health 将 PF 查询失败编码为 `live=false`。因此 App 层采取更保守处理：所有 non-live 健康读数都显示未确认，不退休 local recovery intent；只有完整验证的 Disconnect ACK 确认释放。该调整不修改 helper，避免与管理员恢复 worker 争写。
 - 上一头 `81ce504c` hosted macOS CI [36679172373](https://github.com/raydocs/tono/actions/runs/36679172373) 实际成功，不能沿用为本次改后头的绿证据。新增红候选 `83e2b302`；最终 exact-head CI / 复核待完成。
+
+### 2026-09-30 验证续记
+- `283330d4` hosted macOS CI [36680375773](https://github.com/raydocs/tono/actions/runs/36680375773) exact head 全部四个 jobs 成功；独立 Codex high 当前 diff 复核无 major，保留 native retire/suspend overlap 的 low/minor（M7424-native-retire-overlap）。不得把该 minor 改记为修完；先前 major 和 lossy-health false release 已纠正。
+- 评审反例红候选 `85a20c96` [36679099322](https://github.com/raydocs/tono/actions/runs/36679099322) 457 tests / 6 failures，均来自两个新增启动/交错回归。health 红 `83e2b302` [36680313622](https://github.com/raydocs/tono/actions/runs/36680313622) 457 tests / 3 failures，均来自 non-live 未确认回归；各有已有 1 skip。原始日志保留，非源码推测 red。
+- 本续记仅记录已覆盖源码及未修 minor；文档头需要新的 exact-head macOS CI，不把此前绿直接冒认为新 SHA 的运行。
