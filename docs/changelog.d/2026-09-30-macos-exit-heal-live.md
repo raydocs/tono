@@ -32,3 +32,9 @@
 
 - 缺陷修复：`a232aae0` 的 `macos/build` 里 `testRepairAndReconnectReachesConnectWhenHelperRejectsThisApp` 失败。显式「修复并重连」已经进入 `connect()`，但放行时 `resetReleasedSessionHistory` 清掉了暂停，无武装探测又取消了保护重连，下一拍看不到助手的 `.rejected`，暂停没有重新立上。现在放行之后若状态仍是拒绝，重新立上暂停，并且不启动无武装连接（那次 `connect()` 会再次清掉暂停）。原网络仍然放开。断言仍要求暂停为真，没有改成期待假。
 - 验证：本机无 Xcode，未跑 `xcodebuild`。
+
+### 2026-09-30 续记 · 变基到已含 #703 的 main
+
+- 来源：重放到 `01c2403f`（main 已含 #706 与已合并的 #703）。`ExitHeal` 保留 main 的 `selectiveAiHold`；这条路径的 `selectiveReady` 仍是 false，普通失败仍是完整放行。助手协议仍是 `4.52.6`。
+- 行为不变：放行之后若助手状态仍是 `.rejected`，重新立上 `protectedReconnectPausedForUserAction`，不启动无武装连接。`testRepairAndReconnectReachesConnectWhenHelperRejectsThisApp` 仍断言暂停为真。`unarmedTcpProof` 仍是 `@ObservationIgnored`。
+- 验证：本机无 Xcode，未跑 `xcodebuild`。需要 macOS CI。
