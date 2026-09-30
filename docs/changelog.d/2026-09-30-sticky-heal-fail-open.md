@@ -35,3 +35,9 @@
 - 来源：`main` 继续前移后，变基到 `origin/main` `939177f4`。没有把 main 合并进来。唯一冲突仍是 `docs/DECISIONS.md`：main 上较新的开机不重装、`pf.conf` 不在启动时加载规则，留在本 PR 的粘性自愈记录上面。记录都保留。
 - 缺陷修复：无行为变化。助手协议版本与 main 同为 `4.52.2`，本 PR 没有改助手，因此没有再加 `0.0.1`。普通失败仍全量放回原网络；钩子就绪时仍不调用显式全量释放；严格模式仍保持封锁。检查没有放宽。
 - 剩余限制：合入顺序仍是先 [#706](https://github.com/raydocs/tono/pull/706)，再本 PR。
+
+### 2026-09-30 续记 · `core` 的 YAML 摘要钉在 #752
+
+- 缺陷修复：head `41862ab2` 的 `core` 失败，因为整份 mihomo YAML 的摘要仍钉着 #732 拨号默认值之前的值 `5565d505…`，实际输出已是 `2a0e26f4…`。没有改断言，也没有放宽比较。变基到 `origin/main` `658aed21`，带上 [#752](https://github.com/raydocs/tono/pull/752) 的同一枚钉。
+- 验证：本机 Cargo 1.83 仍不能跑 `tono-core`。推送后等该 head 的 `core` 变绿。
+- 剩余限制：合入顺序仍是先 [#706](https://github.com/raydocs/tono/pull/706)，再本 PR。
