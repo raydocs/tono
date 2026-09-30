@@ -120,10 +120,13 @@ final class PeriodicTelemetryConsentTests: XCTestCase {
 
     /// A report that passed the consent check can still wait on a token
     /// refresh or a network retry. Opting out in that time must stop it.
+    /// The snapshot-off has to be an explicit choice: a bare false is the v2
+    /// force-off, and the next read turns the snapshot back on.
     func testAPendingFailureReportStopsOnceTheUserOptsOut() {
-        defaults.set(true, forKey: SettingsKey.periodicTelemetryDefaultV2Applied)
         defaults.set(false, forKey: SettingsKey.periodicTelemetryEnabled)
+        AccountSession.notePeriodicTelemetryChoice()
         defaults.removeObject(forKey: SettingsKey.internalFailureReportsOptedOut)
+        XCTAssertFalse(AccountSession.isPeriodicTelemetryEnabled)
         XCTAssertTrue(AccountSession.failureReportStillAllowed(builtAs: .classified, internalBuild: true))
         defaults.set(true, forKey: SettingsKey.internalFailureReportsOptedOut)
         XCTAssertFalse(

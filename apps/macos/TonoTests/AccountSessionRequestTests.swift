@@ -445,6 +445,7 @@ final class AccountSessionRequestTests: XCTestCase {
             _ = buffer.drain()
         }
         try await adoptTestAccount(account)
+        AppProfile.defaults.removeObject(forKey: TelemetryOutbox.key)
         account.periodicTelemetryConsent = { true }
         buffer.record("connectBegin")
         let first = Task { await account.uploadPeriodicTelemetryWindow() }
@@ -488,6 +489,9 @@ final class AccountSessionRequestTests: XCTestCase {
             _ = ConnectionTelemetryBuffer.shared.drain()
         }
         try await adoptTestAccount(account)
+        // A queued diagnostics body is posted before the window. It has no
+        // `window` key, so a leftover from an earlier test steals this request.
+        AppProfile.defaults.removeObject(forKey: TelemetryOutbox.key)
         account.periodicTelemetryConsent = { true }
         let startMs = Int64(Date().timeIntervalSince1970 * 1_000) - 8 * 60 * 60 * 1_000
         account.routeTelemetryCursor.setEnabled(true, current: .init(direct: 100), atMs: startMs)
@@ -495,19 +499,29 @@ final class AccountSessionRequestTests: XCTestCase {
         func begin() async throws -> (Task<Void, Never>, HeldAccountProtocol, [String: Any]) {
             account.lastPeriodicTelemetryAt = nil
             let task = Task { await account.uploadPeriodicTelemetryWindow() }
-            let request = try await nextRequest(requests)
-            var data = request.request.httpBody ?? Data()
-            if let stream = request.request.httpBodyStream {
-                stream.open(); defer { stream.close() }
-                var bytes = [UInt8](repeating: 0, count: 4096)
-                while stream.hasBytesAvailable {
-                    let count = stream.read(&bytes, maxLength: bytes.count)
-                    guard count > 0 else { break }
-                    data.append(contentsOf: bytes.prefix(count))
+            do {
+                let request = try await nextRequest(requests)
+                let data: Data
+                if let body = request.request.httpBody {
+                    data = body
+                } else {
+                    let stream = try XCTUnwrap(request.request.httpBodyStream)
+                    stream.open(); defer { stream.close() }
+                    var body = Data()
+                    var bytes = [UInt8](repeating: 0, count: 4096)
+                    while stream.hasBytesAvailable {
+                        let count = stream.read(&bytes, maxLength: bytes.count)
+                        guard count > 0 else { break }
+                        body.append(contentsOf: bytes.prefix(count))
+                    }
+                    data = body
                 }
+                let json = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+                return (task, request, try XCTUnwrap(json["window"] as? [String: Any]))
+            } catch {
+                task.cancel()
+                throw error
             }
-            let json = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
-            return (task, request, try XCTUnwrap(json["window"] as? [String: Any]))
         }
 
         let (legacyTask, legacy, legacyWindow) = try await begin()
@@ -1011,6 +1025,7 @@ final class AccountSessionRequestTests: XCTestCase {
         let (account, transport, host, requests) = fixture(killSwitchDisarmConsumer: { released = true })
         defer { transport.invalidateAndCancel(); HeldAccountProtocol.remove(host); try? testKeychain(host).remove(.refreshToken) }
         try await adoptTestAccount(account)
+        AppProfile.defaults.removeObject(forKey: TelemetryOutbox.key)
         account.periodicTelemetryConsent = { true }
         let upload = Task { await account.uploadPeriodicTelemetryWindow() }
         // The Worker refuses an expired plan, a used-up allowance, a disabled
