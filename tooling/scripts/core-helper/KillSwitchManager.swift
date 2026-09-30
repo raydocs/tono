@@ -620,7 +620,24 @@ final class KillSwitchManager {
         restoreDisplacedMain: () -> Void,
         releaseEnableReference: () throws -> Void
     ) throws {
-        try writePlaceholder()
+        // The placeholder is housekeeping: it stops a later main-ruleset load
+        // from re-reading stale block rules out of the anchor file. A disk
+        // that cannot take it (full, directory unwritable) must not keep the
+        // machine blocked — the same class as the hosts pins below
+        // (BRICK-M2), so the same treatment: attempted first, and a failure
+        // is logged, not thrown. One reader of that file remains, and it is
+        // why a failed write also skips the displaced-main restore below: a
+        // legacy main ruleset still carries `load anchor from` for it.
+        var placeholderWritten = true
+        do {
+            try writePlaceholder()
+        } catch {
+            placeholderWritten = false
+            let detail = (error as? HelperFailure)?.message ?? String(describing: error)
+            FileHandle.standardError.write(Data(
+                "tono: disarm placeholder not written: \(detail)\n".utf8
+            ))
+        }
         let cleared = try flushAnchor()
         guard cleared.status == 0 else {
             throw HelperFailure.system(
@@ -647,7 +664,20 @@ final class KillSwitchManager {
                 "tono: hosts pins kept after release: \(detail)\n".utf8
             ))
         }
-        restoreDisplacedMain()
+        if placeholderWritten {
+            restoreDisplacedMain()
+        } else {
+            // The rule file still holds the block rules just flushed. A
+            // legacy /etc/pf.conf would `load anchor from` them straight
+            // back with the intent already gone, so the reload waits for a
+            // release that can write the placeholder. Keeping the standalone
+            // main is the same "kept" outcome `restoreDisplacedMainRuleset`
+            // returns for its other refusals, and after the flush it blocks
+            // nothing.
+            FileHandle.standardError.write(Data(
+                "tono: emergency main ruleset kept: the rule file still holds old rules\n".utf8
+            ))
+        }
         // Only after the anchor is empty and the intent is gone. If no other
         // program holds a reference, PF stops, which is the pre-arm state.
         // The kill switch is off either way; a release pfctl did not confirm
@@ -758,6 +788,19 @@ final class KillSwitchManager {
                 try Self.holdPFEnableReference()
                 return
             }
+            // The persisted state omits the session's direct exceptions, so
+            // the app has to re-arm; the flag is how it finds out. Recorded
+            // before any step that can replace kernel rules:
+            // `ensureAnchorLoaded` can throw after the persisted rules are
+            // already live (the enable reference, the state flush, the
+            // verification probe), and the next pass would then see
+            // live+referenced and return — the session's direct traffic
+            // stayed dropped with nothing telling the app to re-arm. A repair
+            // that fails earlier sets it too: PF was not filtering while
+            // armed, so a re-arm is right either way. Only a committed arm or
+            // disarm clears it.
+            lastLoadedPassRules = nil
+            repairedSinceArm = true
             try Self.writeRules(state: Self.restorableState(state), allowedUID: allowedUID)
             Self.pinHostsIfUsable(state: state)
             try Self.ensureAnchorLoaded(flushStates: true)
@@ -771,10 +814,6 @@ final class KillSwitchManager {
             ))
             return
         }
-        // The persisted state omits the session's direct exceptions, so the
-        // app has to re-arm; the flag is how it finds out.
-        lastLoadedPassRules = nil
-        repairedSinceArm = true
         let liveAfter = (try? Self.effectiveStatus()).map { String($0) } ?? "unknown"
         let message = "tono: kill switch was not filtering while armed; reinstalled "
             + "(live: \(liveAfter))\n"

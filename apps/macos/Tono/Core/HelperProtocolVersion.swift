@@ -297,7 +297,13 @@ nonisolated enum HelperProtocolVersion {
     ///   Update disconnect still releases PF when prepare cannot prove a
     ///   foreign loopback proxy or resolver is Tono's. The lifecycle
     ///   read-failure self-test expects that owner-only restore.
-    static let current = "4.52.6"
+    /// - 4.52.6 → 4.52.7: a release whose placeholder rule file cannot be
+    ///   written still flushes the anchor and removes the intent, and then
+    ///   keeps the standalone emergency main instead of reloading a legacy
+    ///   pf.conf that would load the stale rules back. A PF repair records
+    ///   repairedSinceArm before it can replace kernel rules, so a repair that
+    ///   throws after loading still makes the app re-arm.
+    static let current = "4.52.7"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS
