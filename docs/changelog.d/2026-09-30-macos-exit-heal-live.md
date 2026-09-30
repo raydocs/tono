@@ -7,4 +7,8 @@
 - 工程与测试：`ArmedFailureReleaseTests` 证明 disarm 被调用、restrict 没被调用、`isProtectionBlocked` 为假、没有排保护重连。`UnarmedReconnect` 证明不可达或仍武装时不连接。XCTest 未在本机跑。
 - 验证：无 Xcode，`xcodebuild` 未执行。需要 macOS CI。
 - 候选/发布：仅源码，无新候选。
-- 剩余限制：默认 TCP 证明闭包返回 false，实机还没接真正的套接字探测。没有 permanent 开关可读，这条路径按非严格处理。网络切换分支和浏览器 DoH 未改。释放失败时 PF 可能仍在。
+- 剩余限制：网络切换分支和浏览器 DoH 未改。释放失败时 PF 可能仍在。Hysteria2 不做 TCP 证明。没有实机套接字探测记录。
+
+### 2026-09-30 续记 · 生产路径使用 TCP 连接证明
+
+- 未设置测试闭包时，用 `NWConnection` 对目录里的地址做一次 TCP，超时 2.5 秒。不通就继续等待，不调用 `connect()`。测试仍注入闭包，所以单测不会打到网络。

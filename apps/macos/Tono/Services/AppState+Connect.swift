@@ -2242,7 +2242,11 @@ extension AppState {
                 if self.isConnected || self.isConnecting || self.isDisconnecting { return }
                 if KillSwitchService.isArmed || self.isProtectionBlocked { return }
                 let name = self.unarmedDialName ?? self.selectedExitNode()?.name ?? ""
-                let reachable = await self.unarmedTcpProof(name)
+                let reachable = await TcpEndpointProof.prove(
+                    name: name,
+                    nodes: self.proxyRegions.flatMap(\.nodes),
+                    override: self.unarmedTcpProof
+                )
                 guard UnarmedReconnect.shouldConnect(
                     tcpReachable: reachable,
                     protectionArmed: KillSwitchService.isArmed || self.isProtectionBlocked
