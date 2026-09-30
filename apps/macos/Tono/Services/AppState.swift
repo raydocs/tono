@@ -627,6 +627,7 @@ final class AppState {
                 "system_network_change_requires_reconnect",
                 details: self.auditProtectionDetails()
             )
+            self.noteProtectionLoss(NetworkLossReport.networkLoss)
             self.recoveryCause = .networkChange
             self.disconnect(releaseKillSwitch: false)
             self.errorMessage = String(
@@ -972,6 +973,7 @@ final class AppState {
         guard isProtectionBlocked else { return }
         protectedReconnectPausedForUserAction = true
         protectedReconnectPauseLiftsOnNetworkChange = false
+        noteProtectionLoss(NetworkLossReport.crashWhileProtected)
         LocalTrafficAudit.shared.recordEvent("automatic_resume_held_after_restart")
         errorMessage = String(localized: "This Mac restarted unexpectedly while Tono was connected, so Tono did not reconnect automatically. Kill Switch is still blocking traffic. Click Repair and reconnect to connect, or Restore internet to get back online.")
     }

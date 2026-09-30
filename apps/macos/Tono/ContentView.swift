@@ -106,7 +106,7 @@ private struct ProtectedOfflineBanner: View {
                 .disabled(!appState.isTonoReady || appState.isDisconnecting)
             }
             Button("Restore internet") {
-                appState.disconnect(releaseKillSwitch: true)
+                appState.restoreInternet()
             }
             .buttonStyle(.bordered)
             .controlSize(.small)

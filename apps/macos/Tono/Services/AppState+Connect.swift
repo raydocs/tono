@@ -51,8 +51,7 @@ extension AppState {
                             self.consecutiveProtectedFailureCount = 1
                         }
                         if self.consecutiveProtectedFailureCount >= 3 {
-                            self.protectedReconnectPausedForUserAction = true
-                            self.protectedReconnectPauseLiftsOnNetworkChange = false
+                            self.holdKillSwitchForUser(liftsOnNetworkChange: false)
                             // Retry now exists only in Protected Offline; with an
                             // unconfirmed barrier the "Choose Reality" above is
                             // the action to take.
@@ -164,6 +163,7 @@ extension AppState {
                         resumeWhenReachable: true
                     )
                 } else {
+                    // PF never armed, so this cleanup does not take the network.
                     self.errorMessage = stalledMessage
                     self.disconnect(
                         releaseKillSwitch: true,
@@ -696,6 +696,31 @@ extension AppState {
         lastConnectionFailure = nil
     }
 
+    /// Records a P0 diagnostics bundle. The body waits on disk until the next
+    /// signed-in upload, which is how it leaves after the network returns.
+    func noteProtectionLoss(_ code: String) {
+        NetworkLossReport.enqueue(code: code, node: selectedExitNode()?.name ?? "")
+    }
+
+    /// Retries stopped while the barrier is still up. The user has no network
+    /// until they press Restore internet or a later retry succeeds.
+    func holdKillSwitchForUser(liftsOnNetworkChange: Bool) {
+        protectedReconnectPausedForUserAction = true
+        protectedReconnectPauseLiftsOnNetworkChange = liftsOnNetworkChange
+        if isProtectionBlocked || isProtectionUnconfirmed || KillSwitchService.isArmed {
+            noteProtectionLoss(NetworkLossReport.killSwitchStuck)
+        }
+    }
+
+    /// Restore internet, including Cancel while a connect already holds the
+    /// network. A disconnect of a working tunnel is not this path.
+    func restoreInternet() {
+        if !isConnected && (isProtectionBlocked || isProtectionUnconfirmed || KillSwitchService.isArmed) {
+            noteProtectionLoss(NetworkLossReport.restoreNetwork)
+        }
+        disconnect(releaseKillSwitch: true)
+    }
+
     /// Stops Mihomo/TUN. The default leaves the kill switch armed. An exhausted
     /// failure passes `releaseKillSwitch: true` unless the user explicitly
     /// enabled a strict kill switch, so the original network comes back.
@@ -887,6 +912,9 @@ extension AppState {
                         "helper_release_repair_failed",
                         details: ["error": error.localizedDescription]
                     )
+                    await MainActor.run {
+                        self?.noteProtectionLoss(NetworkLossReport.killSwitchStuck)
+                    }
                 }
             }
 
@@ -1505,6 +1533,7 @@ extension AppState {
                     protectedService: service
                 ) {
                 case .moved:
+                    self.noteProtectionLoss(NetworkLossReport.networkLoss)
                     self.recoveryCause = .networkChange
                     self.disconnect(releaseKillSwitch: false)
                     self.errorMessage = String(
@@ -2062,8 +2091,7 @@ extension AppState {
                 )
                 return false
             }
-            protectedReconnectPausedForUserAction = true
-            protectedReconnectPauseLiftsOnNetworkChange = false
+            holdKillSwitchForUser(liftsOnNetworkChange: false)
             self.connectionCoordinator.protectedReconnectTask?.cancel()
             self.connectionCoordinator.protectedReconnectTask = nil
             self.connectionCoordinator.protectedReconnectID = nil
@@ -2264,6 +2292,14 @@ extension AppState {
             let holdsUpdateBarrier = nativeUpdatePending
                 || RuntimeCleanup.nativeUpdateBlocksConnect
                 || RuntimeCleanup.nativeUpdatePending
+            // The queue is written before the release so the selected node is
+            // still known. A pending update keeps the barrier on exhausted
+            // tunnel loss, so that case is a stuck filter, not a fail-open.
+            if exhaustedTunnelLoss, holdsUpdateBarrier {
+                noteProtectionLoss(NetworkLossReport.killSwitchStuck)
+            } else {
+                noteProtectionLoss(NetworkLossReport.failOpen)
+            }
             disconnect(
                 releaseKillSwitch: true,
                 exhaustedTunnelLoss: exhaustedTunnelLoss,
@@ -2289,6 +2325,7 @@ extension AppState {
                 scheduleUnarmedReconnect()
             }
         } else {
+            noteProtectionLoss(NetworkLossReport.killSwitchStuck)
             disconnect(releaseKillSwitch: false)
             scheduleProtectedReconnect()
         }
@@ -2499,8 +2536,7 @@ extension AppState {
             details: ["audits": String(consecutiveProtectedDNSBrokenAudits)]
         )
         disconnect(releaseKillSwitch: false)
-        protectedReconnectPausedForUserAction = true
-        protectedReconnectPauseLiftsOnNetworkChange = false
+        holdKillSwitchForUser(liftsOnNetworkChange: false)
         errorMessage = String(localized: "Protected DNS did not take effect after repeated reconnects: macOS is still resolving through another DNS server. Kill Switch is blocking traffic and automatic retries are paused. Click Repair and reconnect to try again, or Restore internet to get back online.")
         return true
     }
@@ -2530,8 +2566,7 @@ extension AppState {
             ]
         )
         disconnect(releaseKillSwitch: false)
-        protectedReconnectPausedForUserAction = true
-        protectedReconnectPauseLiftsOnNetworkChange = false
+        holdKillSwitchForUser(liftsOnNetworkChange: false)
         errorMessage = String(localized: "DNS conflict: a corporate VPN, profile or /etc/resolver rule sends some domains to a DNS server outside Tono's protection. Kill Switch is blocking traffic and automatic retries are paused. Turn that rule off, then click Repair and reconnect, or Restore internet to get back online.")
             + " (" + summary + ")"
     }

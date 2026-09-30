@@ -50,10 +50,10 @@ struct DashboardView: View {
                                       Date().timeIntervalSince(since) >= Self.cancelGraceInterval else {
                                     return
                                 }
-                                appState.disconnect(releaseKillSwitch: true)
+                                appState.restoreInternet()
                             } else if appState.isProtectionBlocked
                                         || appState.isProtectionUnconfirmed {
-                                appState.disconnect(releaseKillSwitch: true)
+                                appState.restoreInternet()
                             } else if newValue {
                                 appState.connect()
                             } else {
@@ -690,7 +690,7 @@ private struct ConnectionProgressCard: View {
         HStack(spacing: 10) {
             if appState.isConnecting {
                 Button("Cancel and restore internet") {
-                    appState.disconnect(releaseKillSwitch: true)
+                    appState.restoreInternet()
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
@@ -705,7 +705,7 @@ private struct ConnectionProgressCard: View {
                 .disabled(!appState.isTonoReady || appState.isDisconnecting)
 
                 Button("Restore internet") {
-                    appState.disconnect(releaseKillSwitch: true)
+                    appState.restoreInternet()
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)

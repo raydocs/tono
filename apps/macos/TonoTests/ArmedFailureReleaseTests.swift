@@ -86,12 +86,14 @@ final class ArmedFailureReleaseTests: XCTestCase {
             }
         }
         app.networkProtection = runtime
+        AppProfile.defaults.removeObject(forKey: TelemetryOutbox.key)
         defer {
             app.connectionCoordinator.unarmedReconnectTask?.cancel()
             app.connectionCoordinator.cancelConnectionTasks()
             KillSwitchService.isArmed = savedArmed
             RuntimeCleanup.nativeUpdateBlocksConnect = savedUpdateBlock
             RuntimeCleanup.nativeUpdatePending = savedUpdatePending
+            AppProfile.defaults.removeObject(forKey: TelemetryOutbox.key)
         }
         let failure = Task {
             await app.applyExhaustedArmedFailure(message: "TCP failed", resumeWhenReachable: true)
@@ -107,7 +109,7 @@ final class ArmedFailureReleaseTests: XCTestCase {
         XCTAssertFalse(app.isProtectionBlocked)
     }
 
-    func testExhaustedArmedFailureReleasesGeneralTrafficAndKeepsAIHold() async {
+    func testExhaustedArmedFailureReleasesGeneralTrafficAndKeepsAIHold() async throws {
         let app = AppState()
         let originalArmed = KillSwitchService.isArmed
         KillSwitchService.isArmed = true
@@ -137,7 +139,11 @@ final class ArmedFailureReleaseTests: XCTestCase {
         runtime.restrictToBootstrap = { restricted += 1 }
         app.networkProtection = runtime
         app.unarmedTcpProof = { _ in false }
-        defer { app.connectionCoordinator.unarmedReconnectTask?.cancel() }
+        AppProfile.defaults.removeObject(forKey: TelemetryOutbox.key)
+        defer {
+            app.connectionCoordinator.unarmedReconnectTask?.cancel()
+            AppProfile.defaults.removeObject(forKey: TelemetryOutbox.key)
+        }
 
         await app.applyExhaustedArmedFailure(message: "tcp connect failed", resumeWhenReachable: true)
         await app.finishPendingDisconnect()
@@ -149,6 +155,13 @@ final class ArmedFailureReleaseTests: XCTestCase {
         XCTAssertFalse(app.isProtectionBlocked)
         XCTAssertFalse(app.isProtectedReconnectScheduled)
         XCTAssertFalse(KillSwitchService.isArmed)
+        let queued = TelemetryOutbox.pending()
+        XCTAssertEqual(queued.count, 1)
+        XCTAssertEqual(queued.first?["kind"], "p0")
+        let body = try XCTUnwrap(queued.first?["body"].flatMap { Data(base64Encoded: $0) })
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+        let event = try XCTUnwrap((json["events"] as? [[String: Any]])?.first)
+        XCTAssertEqual(event["code"] as? String, NetworkLossReport.failOpen)
     }
 
     func testUnarmedReconnectWaitsForAProofWhileProtectionIsDown() {

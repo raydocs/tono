@@ -126,8 +126,10 @@ extension AccountSession {
             state == .ready && user != nil && Self.isPeriodicTelemetryEnabled,
             current: routeSplitConsumer()
         )
-        guard state == .ready, !systemSleeping, user != nil,
-              Self.isPeriodicTelemetryEnabled else {
+        // The snapshot switch stops the window. It does not stop a queued P0:
+        // a machine that just got its network back still has to report that
+        // it was offline, including after an explicit opt-out.
+        guard state == .ready, !systemSleeping, user != nil else {
             periodicTelemetryTask?.cancel()
             periodicTelemetryTask = nil
             return
@@ -150,8 +152,10 @@ extension AccountSession {
     func uploadPeriodicTelemetryWindow() async {
         // The switch can be turned off while this task is parked on its sleep,
         // and the cancellation only lands at the next suspension point.
-        guard periodicTelemetryConsent() else { return }
-        await TelemetryOutbox.drain(api: api)
+        // P0 still leaves; the window itself does not.
+        let consented = periodicTelemetryConsent()
+        await TelemetryOutbox.drain(api: api, includeOrdinary: consented)
+        guard consented else { return }
         // A sleep cancels the timer and a wake starts a fresh one, so the task
         // being new is not evidence that a window is due. Hold the cadence
         // across restarts rather than spending the hourly budget on them.
@@ -639,15 +643,25 @@ nonisolated enum TelemetryOutbox {
         defaults.array(forKey: key) as? [[String: String]] ?? []
     }
 
+    /// A network-loss report still posts after the snapshot is turned off.
+    static func sendsWhenSnapshotOff(_ kind: String) -> Bool {
+        kind == "p0"
+    }
+
     @MainActor
-    static func drain(api: TonoAPIClient) async {
+    static func drain(api: TonoAPIClient, includeOrdinary: Bool = true) async {
         let items = pending()
         guard !items.isEmpty else { return }
         var kept: [[String: String]] = []
         for item in items {
             guard let kind = item["kind"], let encoded = item["body"],
                   let body = Data(base64Encoded: encoded) else { continue }
-            let path = kind == "diagnostics" ? "telemetry/diagnostics" : "telemetry/failures"
+            if !includeOrdinary && !sendsWhenSnapshotOff(kind) {
+                kept.append(item)
+                continue
+            }
+            let path = (kind == "diagnostics" || kind == "p0")
+                ? "telemetry/diagnostics" : "telemetry/failures"
             do {
                 try await api.uploadSavedTelemetry(path: path, body: body)
             } catch {
@@ -657,5 +671,76 @@ nonisolated enum TelemetryOutbox {
             }
         }
         AppProfile.defaults.set(kept, forKey: key)
+    }
+}
+
+/// Events that leave the user without a working network.
+///
+/// Queued on disk and posted to `telemetry/diagnostics` on a later signed-in
+/// pass, including after the snapshot is turned off. The control plane treats
+/// these codes as severity `p0` and alerts on the first event of the cluster.
+/// The closed set matches `P0_NETWORK_LOSS_CODES` in `failure-clusters.ts`.
+nonisolated enum NetworkLossReport {
+    static let networkLoss = "TONO_NETWORK_LOSS"
+    static let failOpen = "TONO_FAIL_OPEN"
+    static let watchdogRestore = "TONO_WATCHDOG_RESTORE"
+    static let killSwitchStuck = "TONO_KILL_SWITCH_STUCK"
+    static let restoreNetwork = "TONO_RESTORE_NETWORK"
+    static let crashWhileProtected = "TONO_CRASH_WHILE_PROTECTED"
+
+    static func isP0(_ code: String) -> Bool {
+        switch code {
+        case networkLoss, failOpen, watchdogRestore, killSwitchStuck, restoreNetwork, crashWhileProtected:
+            return true
+        default:
+            return false
+        }
+    }
+
+    static func eventKind(for code: String) -> String {
+        switch code {
+        case crashWhileProtected: return "appCrash"
+        case killSwitchStuck: return "killSwitchFail"
+        default: return "connectFail"
+        }
+    }
+
+    static func enqueue(code: String, node: String, defaults: UserDefaults = AppProfile.defaults) {
+        guard isP0(code) else { return }
+        let version = (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String)
+            .map { String($0.prefix(40)) }
+            .flatMap { $0.isEmpty ? nil : $0 } ?? "unknown"
+        let osVersion = String(DiagnosticsLogUploader.compactOperatingSystemVersion().prefix(80))
+        let body: [String: Any] = [
+            "schemaVersion": 1,
+            "aiServicesConsent": false,
+            "client": [
+                "appVersion": version,
+                "platform": "macos",
+                "osVersion": osVersion.isEmpty ? "unknown" : osVersion,
+                "channel": AccountSession.isInternalBuild() ? "beta" : "release",
+            ],
+            "events": [[
+                "ts": Int(Date().timeIntervalSince1970 * 1_000),
+                "kind": eventKind(for: code),
+                "stage": "protection",
+                "code": code,
+                "node": sanitizedNode(node),
+            ]],
+        ]
+        guard JSONSerialization.isValidJSONObject(body),
+              let data = try? JSONSerialization.data(withJSONObject: body) else { return }
+        TelemetryOutbox.enqueue(kind: "p0", body: data, defaults: defaults)
+    }
+
+    /// Node names ride the cluster key. Anything that is not a catalog label
+    /// (a URL, an email) is dropped rather than sent.
+    static func sanitizedNode(_ raw: String) -> String {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "unselected" }
+        let clipped = String(trimmed.prefix(80))
+        let allowed = CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 .·_-")
+        guard clipped.unicodeScalars.allSatisfy({ allowed.contains($0) }) else { return "unselected" }
+        return clipped
     }
 }

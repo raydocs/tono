@@ -160,7 +160,7 @@ struct MenuBarView: View {
         Button {
             Task { @MainActor in
                 if accountSession.state == .ready {
-                    appState.disconnect(releaseKillSwitch: true)
+                    appState.restoreInternet()
                 } else {
                     await accountSession.restoreDirectInternet()
                 }
