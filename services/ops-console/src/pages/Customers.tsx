@@ -45,6 +45,8 @@ import { BatchResults } from './customer/BatchResults';
 import { customerColumns } from './customer/columns';
 import { FunnelBar } from './customer/Funnel';
 import { InviteDrawer } from './customer/InviteDrawer';
+import { ListBand } from './customer/ListBand';
+import { ListCharts } from './customer/ListCharts';
 import { withInvites } from './customer/invite-row';
 import { OnboardDrawer } from './customer/OnboardDrawer';
 
@@ -187,7 +189,7 @@ export default function CustomersPage({
         : 'ready';
 
   return (
-    <div ref={context.container} className="page-wrap customers-page">
+    <div ref={context.container} className="page-wrap customers-page customers-wide">
       <div className="page-head">
         <section className="customers-hero" aria-label={copy.pages.customers}>
           {/* The sentence the page is built around, and the one button that
@@ -268,6 +270,17 @@ export default function CustomersPage({
             ))}
           </div>
         )}
+      </div>
+
+      <div className="customers-board">
+        <ListBand rows={customers.status === 'ready' ? all : null} />
+        <ListCharts
+          rows={all}
+          state={customers.status === 'ready' ? 'ready' : customers.status}
+          asOfSec={customers.status === 'ready' ? customers.fetchedAt : null}
+          mask={privacy.email}
+          onRetry={customers.reload}
+        />
       </div>
 
       {/* Between the filters and the table, because it is the second question
