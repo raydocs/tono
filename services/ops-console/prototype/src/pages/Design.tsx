@@ -6,6 +6,7 @@ import { Badge, Button, Dot, Empty, ErrorState, Freshness, Legend, Loading, NotW
 import { pct } from '@proto/format';
 import { successSeries } from '@proto/mock/observe';
 import { useProto } from '@proto/state';
+import { AccessSpec, FormSpec, OverlaySpec } from './design/Specs';
 
 const TYPE = [
   { cls: 'text-3xl font-semibold tracking-tight', px: '32 / 600', use: '首页结论' },
@@ -103,10 +104,10 @@ export default function Design() {
             <Button>导出</Button>
             <Button variant="ghost">取消</Button>
             <Button variant="danger">停用</Button>
-            <Segmented value="24h" onChange={() => undefined} options={[{ value: '1h', label: '1 小时' }, { value: '24h', label: '24 小时' }, { value: '7d', label: '7 天' }]} />
+            <Segmented label="时间范围示例" value="24h" onChange={() => undefined} options={[{ value: '1h', label: '1 小时' }, { value: '24h', label: '24 小时' }, { value: '7d', label: '7 天' }]} />
           </div>
         </Panel>
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <Stat label="连接成功率" value="99.1%" sub="目标 99%" tone="ok"><Spark points={a} color="var(--ok)" /></Stat>
           <Stat label="受影响客户" value="5" sub="LA Mesa 故障" tone="sev" />
         </div>
@@ -157,6 +158,10 @@ export default function Design() {
           <div className="xl:col-span-2"><div className="mb-2 text-xs text-faint">未接入（不画空图）</div><NotWired what="每跳握手耗时" needs="等 #707 的 chain_hops 表上线" /></div>
         </div>
       </Panel>
+
+      <FormSpec />
+      <OverlaySpec />
+      <AccessSpec />
     </div>
   );
 }

@@ -8,7 +8,9 @@ import {
   AI_ROUTES, attemptsSeries, CLUSTERS, CODE_TEXT, DNS, dnsSeries, FAILURE_CODES, HOPS, hopSeries, latencySeries, SEGMENTS, successSeries,
 } from '@proto/mock/observe';
 import { HOUR, last } from '@proto/mock/series';
-import { useProto } from '@proto/state';
+import { go, useHashParam, useProto } from '@proto/state';
+import { FailureDrawer } from './observe/FailureDrawer';
+import { rowProps } from '@proto/keys';
 
 type Split = 'all' | 'platform' | 'carrier';
 const COLORS = ['var(--c1)', 'var(--c2)', 'var(--c3)'];
@@ -16,6 +18,7 @@ const COLORS = ['var(--c1)', 'var(--c2)', 'var(--c3)'];
 export default function Observe() {
   const { range, telemetry } = useProto();
   const [split, setSplit] = useState<Split>('platform');
+  const [code, setCode] = useHashParam('code');
   const long = range === '7d' || range === '30d';
   const all = successSeries('all', range);
   const lines = split === 'all'
@@ -28,7 +31,7 @@ export default function Observe() {
   return (
     <div>
       <PageHeader title="连接质量" description="客户能不能连上、慢在哪、为什么失败。按平台、运营商、节点拆开看。" />
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-5 max-lg:[&>*:last-child]:col-span-2">
         <Stat label="连接成功率" value={pct(last(all))} tone="warn" sub="目标 99% · 过去 30 天 98.7%" />
         <Stat label="连接尝试" value={int(Math.round(attempts))} sub={`失败 ${int(failures)} 次`} />
         <Stat label="握手 p50" value={ms(last(latencySeries(range, 'p50')))} sub="客户点连接到可用" />
@@ -57,26 +60,26 @@ export default function Observe() {
         </Panel>
       </div>
 
-      <Panel className="mt-4" title="失败码" description="按次数排序；点一行看这类失败的客户" source="connection_events" flush>
+      <Panel className="mt-4" title="失败码" description="按次数排序；点一行或按 J/K、Enter 看样本与集中在哪" source="connection_events" flush>
         <table className="tbl">
-          <thead><tr><th>失败码</th><th>意思</th><th>阶段</th><th className="r">次数</th><th className="r">客户</th><th>占比</th><th>24 小时</th><th>最多的节点</th><th>最多的版本</th></tr></thead>
+          <thead><tr><th>失败码</th><th className="max-md:hidden">意思</th><th>阶段</th><th className="r">次数</th><th className="r">客户</th><th className="max-lg:hidden">占比</th><th className="max-xl:hidden">24 小时</th><th>最多的节点</th><th className="max-xl:hidden">最多的版本</th></tr></thead>
           <tbody>
             {FAILURE_CODES.map((f) => (
-              <tr key={f.code} data-href>
+              <tr key={f.code} {...rowProps(() => setCode(f.code), `${f.code} ${CODE_TEXT[f.code]}`)}>
                 <td className="num text-xs">{f.code}</td>
-                <td>{CODE_TEXT[f.code]}</td>
+                <td className="max-md:hidden">{CODE_TEXT[f.code]}</td>
                 <td className="text-muted">{f.stage}</td>
                 <td className="r num">{int(f.count)}</td>
                 <td className="r num">{f.users}</td>
-                <td>
+                <td className="max-lg:hidden">
                   <span className="inline-flex items-center gap-2">
                     <span className="h-1.5 w-20 overflow-hidden rounded-full bg-hover"><span className="block h-full bg-sev/70" style={{ width: `${f.share * 100}%` }} /></span>
                     <span className="w-9 text-right text-xs num text-muted">{pct(f.share, 0)}</span>
                   </span>
                 </td>
-                <td><Spark points={f.trend} color="var(--sev)" width={88} height={20} /></td>
+                <td className="max-xl:hidden"><Spark points={f.trend} color="var(--sev)" width={88} height={20} /></td>
                 <td className="text-muted">{f.topNode}</td>
-                <td className="text-muted">{f.topVersion}</td>
+                <td className="text-muted max-xl:hidden">{f.topVersion}</td>
               </tr>
             ))}
           </tbody>
@@ -85,17 +88,17 @@ export default function Observe() {
 
       <Panel className="mt-4" title="每个节点" description="成功率低于 99% 的标黄，低于 95% 标红；三网延迟来自大陆探针" source="ops_daily_slo · hub 探针" ageMin={6} flush>
         <table className="tbl">
-          <thead><tr><th>节点</th><th className="r">在线</th><th className="r">成功率</th><th>趋势</th><th className="r">握手 p50</th><th className="r">电信</th><th className="r">联通</th><th className="r">移动</th><th className="r">丢包</th></tr></thead>
+          <thead><tr><th>节点</th><th className="r">在线</th><th className="r">成功率</th><th className="max-lg:hidden">趋势</th><th className="r">握手 p50</th><th className="r">电信</th><th className="r">联通</th><th className="r">移动</th><th className="r">丢包</th></tr></thead>
           <tbody>
             {FLEET.filter((n) => n.success != null || n.status === 'sev').map((n) => {
               const tone = n.success == null ? 'idle' : n.success < 0.95 ? 'sev' : n.success < 0.99 ? 'warn' : 'ok';
               const loss = Math.max(...n.carriers.map((c) => c.loss ?? 0));
               return (
-                <tr key={n.name} data-href onClick={() => { window.location.hash = `/nodes/${encodeURIComponent(n.name)}`; }}>
+                <tr key={n.name} {...rowProps(() => go(`/nodes/${encodeURIComponent(n.name)}`))}>
                   <td><span className="inline-flex items-center gap-2"><Dot tone={n.status} />{n.name}</span></td>
                   <td className="r num">{n.users}</td>
                   <td className={`r num ${tone === 'sev' ? 'text-sev' : tone === 'warn' ? 'text-warn' : ''}`}>{pct(n.success)}</td>
-                  <td><Spark points={successSeries(`node:${n.name}`, '24h', n.success ?? 0.99, n.status === 'sev')} color={tone === 'sev' ? 'var(--sev)' : 'var(--c1)'} width={80} height={18} domain={[0.5, 1]} /></td>
+                  <td className="max-lg:hidden"><Spark points={successSeries(`node:${n.name}`, '24h', n.success ?? 0.99, n.status === 'sev')} color={tone === 'sev' ? 'var(--sev)' : 'var(--c1)'} width={80} height={18} domain={[0.5, 1]} /></td>
                   <td className="r num">{ms(n.p50)}</td>
                   {n.carriers.map((c) => <td key={c.name} className={`r num ${c.latency == null ? 'text-sev' : ''}`}>{c.latency == null ? '不通' : ms(c.latency)}</td>)}
                   <td className={`r num ${loss > 0.05 ? 'text-warn' : 'text-muted'}`}>{pct(loss)}</td>
@@ -132,7 +135,7 @@ export default function Observe() {
             </table>
           </Panel>
           <Panel title="DNS" description="解析是否离开隧道、地理是否和出口一致" source="dns_checks">
-            <div className="grid grid-cols-4 gap-3">
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
               <Stat label="检查" value={int(DNS.checks)} />
               <Stat label="隧道外解析" value={String(DNS.leakOutside)} tone="sev" />
               <Stat label="IPv6 泄漏" value={String(DNS.ipv6Leak)} tone="sev" />
@@ -164,6 +167,7 @@ export default function Observe() {
           </Panel>
         </div>
       )}
+      <FailureDrawer code={code} onClose={() => setCode(null)} />
     </div>
   );
 }

@@ -7,7 +7,10 @@ import { CUSTOMERS, customerById, onlineSeries } from '@proto/mock/customers';
 import { FLEET } from '@proto/mock/fleet';
 import { attemptsSeries, INCIDENTS, latencySeries, successSeries } from '@proto/mock/observe';
 import { HOUR, last } from '@proto/mock/series';
-import { useProto } from '@proto/state';
+import { go, useHashParam, useProto } from '@proto/state';
+import { useToast } from '@proto/ds/overlay';
+import { IncidentDrawer } from './home/IncidentDrawer';
+import { rowProps } from '@proto/keys';
 
 /** Chores use the Worker's thresholds, not a second client-side copy. */
 const QUOTA_WARN = 0.8;
@@ -30,6 +33,8 @@ function VerdictUnknown({ loading }: { loading: boolean }) {
 
 export function Home() {
   const { range, dataState } = useProto();
+  const [incId, setIncId] = useHashParam('incident');
+  const toast = useToast();
   const ok = successSeries('all', range);
   const ok1h = successSeries('all', '1h');
   const p50 = latencySeries('1h', 'p50');
@@ -47,7 +52,7 @@ export function Home() {
       {dataState === 'loading' || dataState === 'error' ? <VerdictUnknown loading={dataState === 'loading'} /> : (
       <section className="rounded-lg border border-line bg-panel">
         <div className="flex flex-wrap items-center gap-6 px-5 py-4">
-          <div className="flex min-w-72 flex-1 items-start gap-3">
+          <div className="flex min-w-0 flex-1 items-start gap-3 sm:min-w-72">
             <span className={`mt-1 grid h-8 w-8 shrink-0 place-items-center rounded-md ${tone === 'sev' ? 'bg-sev-soft text-sev' : 'bg-ok-soft text-ok'}`}>
               <ShieldAlert size={18} />
             </span>
@@ -60,7 +65,7 @@ export function Home() {
               </p>
             </div>
           </div>
-          <div className="grid grid-cols-4 gap-6">
+          <div className="grid w-full grid-cols-2 gap-x-6 gap-y-4 sm:grid-cols-4 lg:w-auto">
             {[
               { label: '连接成功率 · 1h', value: pct(rateNow), tone: rateNow < 0.99 ? 'warn' as const : undefined, points: ok1h, color: 'var(--c1)' },
               { label: '握手 p50 · 1h', value: ms(last(p50)), points: p50, color: 'var(--c2)' },
@@ -83,12 +88,12 @@ export function Home() {
           actions={<Button size="xs" variant="ghost" href="#/observe">看连接质量</Button>}>
           <ul className="divide-y divide-line">
             {INCIDENTS.map((inc) => (
-              <li key={inc.id} className="flex items-start gap-3 px-4 py-3 hover:bg-hover">
+              <li key={inc.id} className="flex flex-wrap items-start gap-3 px-4 py-3 hover:bg-hover sm:flex-nowrap">
                 <span className={`mt-1 h-10 w-1 shrink-0 rounded-full ${inc.severity === 'sev' ? 'bg-sev' : 'bg-warn'}`} />
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-2">
                     <Badge tone={inc.severity}>{inc.severity === 'sev' ? '严重' : '注意'}</Badge>
-                    <a className="font-medium hover:underline" href={inc.subject.kind === 'node' ? `#/nodes/${encodeURIComponent(inc.subject.id)}` : '#/observe'}>{inc.title}</a>
+                    <button type="button" className="text-left font-medium hover:underline" onClick={() => setIncId(inc.id)}>{inc.title}</button>
                   </div>
                   <div className="mt-1 text-xs text-muted">{inc.signal}</div>
                   <div className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-faint">
@@ -98,9 +103,9 @@ export function Home() {
                     <span className="text-muted">下一步：{inc.next}</span>
                   </div>
                 </div>
-                <div className="flex shrink-0 gap-1.5">
-                  {!inc.owner && <Button size="xs">认领</Button>}
-                  <Button size="xs" variant="primary" href={inc.subject.kind === 'node' ? `#/nodes/${encodeURIComponent(inc.subject.id)}` : '#/clients'}>处理</Button>
+                <div className="flex shrink-0 gap-1.5 max-sm:ml-4">
+                  {!inc.owner && <Button size="xs" onClick={() => toast(`已认领 ${inc.id}`, 'ok')}>认领</Button>}
+                  <Button size="xs" variant="primary" onClick={() => setIncId(inc.id)}>处理</Button>
                 </div>
               </li>
             ))}
@@ -118,7 +123,7 @@ export function Home() {
                     <div className="truncate text-xs text-faint">{c.stateReason ?? `卡在 ${c.node}`}</div>
                   </div>
                   <span className="text-xs text-faint">{c.platform} {c.version}</span>
-                  <ArrowRight size={14} className="text-faint" />
+                  <ArrowRight size={14} className="text-faint" aria-hidden />
                 </a>
               </li>
             ))}
@@ -137,7 +142,7 @@ export function Home() {
             bands={[{ from: NOW - 2 * HOUR - 40 * 60_000, to: NOW, tone: 'sev' }]}
             longRange={range === '7d' || range === '30d'}
           />
-          <div className="mt-3 grid grid-cols-3 gap-3 border-t border-line pt-3 text-xs">
+          <div className="mt-3 grid grid-cols-1 gap-3 border-t sm:grid-cols-3 border-line pt-3 text-xs">
             <div><div className="text-faint">尝试</div><div className="num text-sm">{int(Math.round(attemptsSeries(range).reduce((a, p) => a + (p.v ?? 0), 0)))}</div></div>
             <div><div className="text-faint">失败最多的码</div><div className="text-sm"><span className="num">TLS_HANDSHAKE_TIMEOUT</span> · 46%</div></div>
             <div><div className="text-faint">最差的一段</div><div className="text-sm">Windows · 联通 · Mesa</div></div>
@@ -145,12 +150,12 @@ export function Home() {
         </Panel>
 
         <Panel title="节点状态" description={`${FLEET.length} 台 · 点开看详情`} source="operations_live_snapshot" ageMin={2}>
-          <div className="grid grid-cols-3 gap-1.5">
+          <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3">
             {FLEET.map((n) => (
               <a key={n.name} href={`#/nodes/${encodeURIComponent(n.name)}`} title={n.reason ?? '正常'}
                 className={`group rounded-md border px-2 py-1.5 transition-colors ${n.status === 'sev' ? 'border-sev/40 bg-sev-soft' : n.status === 'warn' ? 'border-warn/40 bg-warn-soft' : 'border-line hover:bg-hover'}`}>
                 <div className="flex items-center gap-1.5"><Dot tone={n.status} /><span className="truncate text-xs font-medium">{n.name.split(' · ')[1] ?? n.name}</span></div>
-                <div className="mt-0.5 truncate text-2xs text-faint">{n.city} · {n.users} 人</div>
+                <div className="mt-0.5 truncate text-2xs text-muted">{n.city} · {n.users} 人</div>
               </a>
             ))}
           </div>
@@ -160,19 +165,19 @@ export function Home() {
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
         <Panel title="今天要做" description={`规则与 Worker 同一份：用量 ≥ ${QUOTA_WARN * 100}%、${EXPIRY_WARN_DAYS} 天内到期`} source="ops_customer_status" flush className="xl:col-span-2">
           <table className="tbl">
-            <thead><tr><th>事项</th><th>客户</th><th>依据</th><th className="r">期限</th><th /></tr></thead>
+            <thead><tr><th>事项</th><th>客户</th><th className="max-md:hidden">依据</th><th className="r">期限</th><th><span className="sr-only">打开</span></th></tr></thead>
             <tbody>
               {[
                 ...expiring.slice(0, 3).map((c) => ({ c, what: '到期续费', why: `套餐 ¥${c.planMinor / 100}/月`, when: until(c.expiresAt) })),
                 ...quota.slice(0, 2).map((c) => ({ c, what: '用量快满', why: `${bytes(c.usageBytes)} / ${bytes(c.quotaBytes)}`, when: '本周期' })),
                 ...never.slice(0, 2).map((c) => ({ c, what: '开通未连上', why: `开通 ${ago(c.joinedAt)}`, when: '尽快' })),
               ].map(({ c, what, why, when }) => (
-                <tr key={`${what}${c.id}`} data-href onClick={() => { window.location.hash = `/customers/${c.id}`; }}>
+                <tr key={`${what}${c.id}`} {...rowProps(() => go(`/customers/${c.id}`), `${what} ${c.email}`)}>
                   <td><Badge tone={what === '开通未连上' ? 'info' : 'warn'}>{what}</Badge></td>
                   <td>{c.email}</td>
-                  <td className="text-muted">{why}</td>
+                  <td className="text-muted max-md:hidden">{why}</td>
                   <td className="r text-muted">{when}</td>
-                  <td className="r"><ArrowRight size={14} className="inline text-faint" /></td>
+                  <td className="r"><ArrowRight size={14} className="inline text-faint" aria-hidden /></td>
                 </tr>
               ))}
             </tbody>
@@ -191,13 +196,14 @@ export function Home() {
               <li key={src as string} className="flex items-center gap-2">
                 <Dot tone={(age as number) > (limit as number) ? 'warn' : 'ok'} />
                 <span className="flex-1">{label}</span>
-                <span className="text-faint">{src}</span>
+                <span className="text-faint max-sm:hidden">{src}</span>
                 <span className="w-16 text-right num text-muted">{age} 分钟</span>
               </li>
             ))}
           </ul>
         </Panel>
       </div>
+      <IncidentDrawer inc={INCIDENTS.find((i) => i.id === incId)} onClose={() => setIncId(null)} />
     </div>
   );
 }

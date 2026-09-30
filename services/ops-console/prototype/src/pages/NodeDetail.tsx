@@ -1,13 +1,17 @@
+import { useState } from 'react';
 import { ArrowLeft, Power, RefreshCcw, Search } from 'lucide-react';
 import { LineChart } from '@proto/charts/LineChart';
 import { Badge, Button, Dot, Empty, PageHeader, Panel, Stat } from '@proto/ds';
 import { ago, bytes, cny, ms, NOW, pct, rate, until } from '@proto/format';
 import { CUSTOMERS } from '@proto/mock/customers';
 import { nodeByName, nodeSeries } from '@proto/mock/fleet';
-import { useProto } from '@proto/state';
+import { go, useProto } from '@proto/state';
+import { rowProps } from '@proto/keys';
+import { DecommissionConfirm, ProbeConfirm, RestartConfirm } from './node/Actions';
 
 export default function NodeDetail({ name }: { name: string }) {
   const { range } = useProto();
+  const [dialog, setDialog] = useState<'probe' | 'restart' | 'decommission' | null>(null);
   const n = nodeByName(name);
   if (!n) return <Empty title="没有这台节点" hint={name} action={<Button href="#/nodes">回到节点</Button>} />;
   const long = range === '7d' || range === '30d';
@@ -15,14 +19,14 @@ export default function NodeDetail({ name }: { name: string }) {
 
   return (
     <div>
-      <a href="#/nodes" className="mb-3 inline-flex items-center gap-1 text-xs text-muted hover:text-fg"><ArrowLeft size={12} /> 节点</a>
+      <a href="#/nodes" className="mb-3 inline-flex items-center gap-1 text-xs text-muted hover:text-fg"><ArrowLeft size={12} aria-hidden /> 节点</a>
       <PageHeader
         title={n.name}
         description={<span className="inline-flex flex-wrap items-center gap-2"><Dot tone={n.status} /> {n.reason ?? '正常'} · {n.city} · {n.provider} · <span className="num">{n.ipMasked}</span> · Xray {n.xray}{n.listed ? '' : ' · 已下架'}</span>}
         actions={<>
-          <Button size="sm" icon={<Search size={14} />}>重新探测</Button>
-          <Button size="sm" icon={<RefreshCcw size={14} />}>重启 Xray</Button>
-          <Button size="sm" variant="danger" icon={<Power size={14} />}>下架预览</Button>
+          <Button size="sm" icon={<Search size={14} />} onClick={() => setDialog('probe')}>重新探测</Button>
+          <Button size="sm" icon={<RefreshCcw size={14} />} onClick={() => setDialog('restart')}>重启 Xray</Button>
+          <Button size="sm" variant="danger" icon={<Power size={14} />} onClick={() => setDialog('decommission')} disabled={!n.listed}>{n.listed ? '下架' : '已下架'}</Button>
         </>}
       />
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-6">
@@ -53,9 +57,9 @@ export default function NodeDetail({ name }: { name: string }) {
         <Panel title="最近连这台的客户" source="ops_device_status" flush>
           {users.length === 0 ? <Empty title="现在没人在用" /> : (
             <table className="tbl">
-              <thead><tr><th>客户</th><th>客户端</th><th className="r">最后心跳</th></tr></thead>
+              <thead><tr><th>客户</th><th className="max-sm:hidden">客户端</th><th className="r">最后心跳</th></tr></thead>
               <tbody>{users.slice(0, 8).map((c) => (
-                <tr key={c.id} data-href onClick={() => { window.location.hash = `/customers/${c.id}`; }}><td>{c.email}</td><td className="text-muted">{c.platform} {c.version}</td><td className="r text-muted">{c.lastSeen ? ago(c.lastSeen) : '—'}</td></tr>
+                <tr key={c.id} {...rowProps(() => go(`/customers/${c.id}`), c.email)}><td>{c.email}</td><td className="text-muted max-sm:hidden">{c.platform} {c.version}</td><td className="r text-muted">{c.lastSeen ? ago(c.lastSeen) : '—'}</td></tr>
               ))}</tbody>
             </table>
           )}
@@ -70,6 +74,9 @@ export default function NodeDetail({ name }: { name: string }) {
           </ul>
         </Panel>
       </div>
+      <ProbeConfirm n={n} open={dialog === 'probe'} onOpenChange={(v) => setDialog(v ? 'probe' : null)} />
+      <RestartConfirm n={n} open={dialog === 'restart'} onOpenChange={(v) => setDialog(v ? 'restart' : null)} />
+      <DecommissionConfirm n={n} open={dialog === 'decommission'} onOpenChange={(v) => setDialog(v ? 'decommission' : null)} />
     </div>
   );
 }
