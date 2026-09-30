@@ -100,6 +100,13 @@ may reverse), `reversed` (keep the line; say what replaced it).
 - Why stricter: an unreadable file is not an opt-in, so it cannot keep the machine closed. A live wanted session is still restored when the record parses and the install verifies. The cost is a connected session whose WFP verify fails for about three seconds loses the block until the next arm. Needs real-hardware testing.
 - Applied in: [#733](https://github.com/raydocs/tono/pull/733) (`windows_kill_switch.rs`, `macos_kill_switch.rs`).
 
+## 2026-09-30 · Should the 10s TUN and 12s first-byte budgets be shortened now?
+
+- Status: provisional
+- Chosen: no. Record per-stage durations under the existing wire keys (`preparing` … `verifyingTraffic`) so a later field trace can be compared. Rejected: cutting those budgets without a device trace, installing the tunnel in parallel with the handshake, and building a Clash-versus-Tono harness here.
+- Why stricter: a shorter budget fails connects that are merely slow, and a parallel tunnel install is the silent-drop case. The keys do not add a second telemetry upload.
+- Applied in: branch `cursor/connect-stage-timings-a925`.
+
 ## 2026-09-29 · After an unexpected restart on Windows, does the Service start the Core by itself, and does the App say why it did not?
 
 - Status: provisional

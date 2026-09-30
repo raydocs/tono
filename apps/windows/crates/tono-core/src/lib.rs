@@ -10,6 +10,7 @@
 pub mod auth;
 pub mod catalog;
 pub mod config;
+pub mod connect_timing;
 pub mod connection;
 pub mod credentials;
 pub mod customer_failure;
