@@ -262,7 +262,11 @@ nonisolated enum HelperProtocolVersion {
     ///   release, keeps a removed Tono's protection when any wrapper app is
     ///   installed, and blocks native updates on other products' loopback
     ///   proxies, proxy-less VPN services and mixed DNS lists.
-    static let current = "4.51.0"
+    /// - 4.51.0 → 4.52.0: restore and service handoff inspect the snapshot's
+    ///   stable owner before writing old DNS. A newer external DNS choice is
+    ///   retained and the snapshot archived, not reported as restored. Missing
+    ///   identity or read failure still refuses release.
+    static let current = "4.52.0"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS
