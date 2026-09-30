@@ -8,7 +8,12 @@
 //!   barrier is down, before the next tunnel is built.
 //! - [`NetworkEffect::FailOpen`] is one request to restore the original network
 //!   through the existing explicit release. It is not a reconnect and it is not
-//!   a route rewrite between hops.
+//!   a route rewrite between hops. Which of fail-open, selective AI hold, or
+//!   strict hold applies is `network_disposition::exhausted_protection_using`.
+//!   #706 owns that function. This module only maps the result.
+//! - [`NetworkEffect::SelectiveAiHold`] means the hook already released general
+//!   traffic and kept AI-service destinations blocked. Callers must not
+//!   full-release.
 //! - [`NetworkEffect::HoldClosed`] is allowed only when the user explicitly
 //!   enabled a strict kill switch. The reconnect stays on the same node.
 
@@ -147,8 +152,33 @@ pub enum NetworkEffect {
         remember: Option<String>,
         dialer_changed: bool,
     },
+    /// General traffic released; AI-service traffic stays blocked.
+    /// The hook already rewrote filters. Do not call the explicit release.
+    SelectiveAiHold { remember: Option<String> },
     /// Explicit strict kill switch: keep the barrier and retry the same node.
     HoldClosed,
+}
+
+/// Maps the shared exhausted-protection decision onto this healer.
+/// #706 owns `exhausted_protection_using`. Do not copy its match.
+pub fn network_effect_for_exhausted(
+    strict: bool,
+    engage: Option<fn() -> bool>,
+    remember: Option<String>,
+    dialer_changed: bool,
+) -> NetworkEffect {
+    match crate::network_disposition::exhausted_protection_using(strict, engage) {
+        crate::network_disposition::ExhaustedProtection::KeepStrictBlock => NetworkEffect::HoldClosed,
+        crate::network_disposition::ExhaustedProtection::ReleaseOriginalNetwork => {
+            NetworkEffect::FailOpen {
+                remember,
+                dialer_changed,
+            }
+        }
+        crate::network_disposition::ExhaustedProtection::ReleaseGeneralKeepAi => {
+            NetworkEffect::SelectiveAiHold { remember }
+        }
+    }
 }
 
 /// City key used to keep failover inside one region. Matches the Windows
@@ -296,15 +326,15 @@ fn on_failure(
     let next = next_candidate(session, failure, candidates);
     if session.protection_armed {
         session.pending_dial = next.as_ref().map(|(candidate, _)| candidate.name.clone());
-        return match stance {
-            KillSwitchStance::Strict => NetworkEffect::HoldClosed,
-            KillSwitchStance::Ordinary => NetworkEffect::FailOpen {
-                remember: session.pending_dial.clone(),
-                dialer_changed: next.as_ref().is_some_and(|(candidate, _)| {
-                    catalog_base_name(&candidate.name) != catalog_base_name(&session.preferred)
-                }),
-            },
-        };
+        let dialer_changed = next.as_ref().is_some_and(|(candidate, _)| {
+            catalog_base_name(&candidate.name) != catalog_base_name(&session.preferred)
+        });
+        return network_effect_for_exhausted(
+            matches!(stance, KillSwitchStance::Strict),
+            crate::network_disposition::registered_selective_ai_block(),
+            session.pending_dial.clone(),
+            dialer_changed,
+        );
     }
     let Some((candidate, change)) = next else {
         return NetworkEffect::Untouched;
@@ -859,6 +889,37 @@ mod tests {
         note_protection(&mut session, false, 10);
         assert_eq!(session.dial, "Buffalo · Niagara · hy2");
         assert!(!session.protection_armed);
+    }
+
+    fn ready_selective_hook() -> bool {
+        true
+    }
+
+    #[test]
+    fn ready_selective_hook_does_not_ask_for_a_full_release() {
+        let held = network_effect_for_exhausted(
+            false,
+            Some(ready_selective_hook),
+            Some("Buffalo · Niagara · hy2".to_string()),
+            false,
+        );
+        assert_eq!(
+            held,
+            NetworkEffect::SelectiveAiHold {
+                remember: Some("Buffalo · Niagara · hy2".to_string()),
+            }
+        );
+        assert_eq!(
+            network_effect_for_exhausted(false, None, None, false),
+            NetworkEffect::FailOpen {
+                remember: None,
+                dialer_changed: false,
+            }
+        );
+        assert_eq!(
+            network_effect_for_exhausted(true, Some(ready_selective_hook), None, false),
+            NetworkEffect::HoldClosed
+        );
     }
 
     #[test]
