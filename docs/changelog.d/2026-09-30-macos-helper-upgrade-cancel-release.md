@@ -1,7 +1,7 @@
 ## 2026-09-30 · macOS helper 升级放弃后释放旧 PF
 
 - 归属：SHIP_PLAN §2 第 10 项（装上会坏）；macOS App 的 helper 替换与网络恢复。
-- 来源：main `378c165d` → 分支 `codex2/mac-helper-upgrade-cancel-release`；PR 待开；未合 main。
+- 来源：main `378c165d` → 分支 `codex2/mac-helper-upgrade-cancel-release`；PR #794；未合 main。
 - 缺陷修复：旧 authenticated helper 在预检停 Core 后仍持有 PF，升级提示被 withheld、取消、超时、安装失败或新 helper 启动超时会留下全网阻断。现在确认停 Core 后的所有失败出口都尽力调用 Disconnect 同用的 `KillSwitchService.disarm()`，按原路径先恢复 DNS 再释放 PF；清理失败不覆盖原安装错误。停 Core 后的预检状态读取失败也进入清理。关联 MAC-HELPER-UPGRADE-CANCEL-KEEPS-PF。
 - 新增/优化：无。提示期间继续保持 PF，静默升级与管理员安装成功不释放；释放成功清除 `isArmed`，释放回复丢失时按 Disconnect 的 confirmed 状态读回收敛；本地审计分别记录 `helper_upgrade_abandoned_released` / `helper_upgrade_abandoned_release_failed`。沿用标准释放路径，不另建 AI 阻断层，待 #738 接入。
 - 工程与测试：在已有 `HelperSilentUpgradeTimeoutTests.swift` 加一条 `testAbandonedUpgradeReleasesOnlyAfterPreviousCoreStopped`，覆盖仅已停 Core 且升级未成功才释放的判断；没有安装注入缝，使用小型纯判断函数。更新 bootstrap restriction 的对应注释；不改 helper 协议版本或合同摘要。
