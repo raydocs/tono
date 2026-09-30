@@ -1,7 +1,7 @@
 ## 2026-09-30 · macOS helper PF 释放顺序与修复标志
 
 - 归属：SHIP_PLAN §2 item 10（装上会坏）；影响 macOS helper（`tooling/scripts/core-helper/KillSwitchManager.swift`、`KillSwitchPF.swift`、`KillSwitchTests.swift`）。
-- 来源：main `01c2403f` → 分支 `glm/mac-helper-pf-release`；PR 待开；未合 main。
+- 来源：main `01c2403f` → 分支 `glm/mac-helper-pf-release`；PR [#761](https://github.com/raydocs/tono/pull/761)；未合 main。
 - 缺陷修复：
   - MAC-PF-PLACEHOLDER-RELEASE：`releaseSequence` 先 `writePlaceholder` 再 flush 锚点，磁盘满或 `/Library/Application Support/Tono` 不可写时 `atomicWrite` 抛错，锚点永不 flush，disarm、watchdog、启动释放与 `--emergency-disarm` 全部失败，机器保持阻断（watchdog 还在 DNS 恢复前返回）。与 hosts pins（BRICK-M2）同类同治：占位仍先尝试，失败只记 stderr，释放继续走 flush → 锚点空确认 → 删意图 → hosts pins → 恢复被顶替的 main → 释放 PF 引用；占位失败时同时跳过 displaced-main 恢复并记一行 stderr——否则未迁移旧版 `/etc/pf.conf` 的 `load anchor from` 行会把刚 flush 的阻断经重载装回而意图已删（保持 standalone main 即既有「kept」结果，flush 后不拦截流量）。`KillSwitchPF.restoreDisplacedMainRuleset` 的守卫注释改为如实陈述该前提。其余守卫不变。
   - MAC-PF-PARTIAL-REPAIR-FLAG：`superviseProtection` 修复分支只在全成功后置 `repairedSinceArm` 并清 `lastLoadedPassRules`；`ensureAnchorLoaded` 可在省略本会话直连例外的持久规则已入内核后抛错（enable 引用、状态 flush、校验探针），下一轮见 live+referenced 直接返回，App 收不到重新 arm 信号。改后在 `writeRules`/`ensureAnchorLoaded` 之前置位（`if live` 抢引用分支之后），仅由提交的 arm/disarm 清除；`status()` 从不装规则，无此模式，未改。
