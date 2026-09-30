@@ -41,3 +41,9 @@
 - 缺陷修复：head `41862ab2` 的 `core` 失败，因为整份 mihomo YAML 的摘要仍钉着 #732 拨号默认值之前的值 `5565d505…`，实际输出已是 `2a0e26f4…`。没有改断言，也没有放宽比较。变基到 `origin/main` `658aed21`，带上 [#752](https://github.com/raydocs/tono/pull/752) 的同一枚钉。
 - 验证：本机 Cargo 1.83 仍不能跑 `tono-core`。推送后等该 head 的 `core` 变绿。
 - 剩余限制：合入顺序仍是先 [#706](https://github.com/raydocs/tono/pull/706)，再本 PR。
+
+### 2026-09-30 续记 · 变基到 #708 之后的 main
+
+- 来源：变基到 `origin/main` `ba7c8ae1`（[#708](https://github.com/raydocs/tono/pull/708)）。没有把 main 合并进来。唯一冲突是 `docs/DECISIONS.md`：武装失败立即释放的记录留在粘性自愈记录上面。两条都保留。
+- 缺陷修复：无行为变化。助手协议与 main 同为 `4.52.3`，本 PR 没有改助手，因此没有再加 `0.0.1`。YAML 摘要钉仍是 `2a0e26f4…`，没有改断言。普通失败仍全量放回原网络；钩子就绪时仍不调用显式全量释放；严格模式仍保持封锁。
+- 剩余限制：合入顺序仍是先 [#706](https://github.com/raydocs/tono/pull/706)，再本 PR。
