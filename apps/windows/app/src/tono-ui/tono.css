@@ -485,6 +485,27 @@
   border-top: 1px solid rgba(142, 142, 147, 0.18);
 }
 
+.tono-account-facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 12px;
+  margin: 0;
+  padding: 10px 0;
+  border-top: 1px solid rgba(142, 142, 147, 0.18);
+  border-bottom: 1px solid rgba(142, 142, 147, 0.18);
+}
+.tono-account-facts dt {
+  font-size: 11px;
+  color: var(--tono-text-secondary);
+}
+.tono-account-facts dd {
+  margin: 2px 0 0;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--tono-text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
 /* Native range slider, Tono flavored */
 .tono-range {
   -webkit-appearance: none;

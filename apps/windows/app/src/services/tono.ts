@@ -37,6 +37,11 @@ export interface TonoAccount {
   email: string
   suspended: boolean
   deviceLimit: number
+  plan?: string | null
+  quotaBytes?: number | null
+  usageBytes?: number | null
+  /** Epoch seconds. */
+  expiresAt?: number | null
 }
 
 export interface TonoDevice {
