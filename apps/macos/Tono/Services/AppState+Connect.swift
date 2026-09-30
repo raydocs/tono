@@ -1539,9 +1539,10 @@ extension AppState {
         // The helper supervises PF and reinstalls it when another program
         // stops PF or reloads the main ruleset without the Tono anchor. PF was
         // not filtering until then, and the reinstall comes from persisted
-        // state without this session's direct exceptions. Treat it like lost
-        // protected DNS: reconnect behind the kill switch, and say why. The
-        // endpoint is read-only; /killswitch/status would heal instead.
+        // state without this session's direct exceptions. Release the
+        // original network and count the repair. The third one pauses
+        // automatic retries. The endpoint is read-only;
+        // /killswitch/status would heal instead.
         // Skipped while a node switch or reload re-arms, which clears it.
         if state.healthCycle.isMultiple(of: 12), KillSwitchService.isArmed,
            self.switchingNodeId == nil,
@@ -1568,13 +1569,24 @@ extension AppState {
                     ]
                 )
                 self.consecutiveProtectionRepairCount += 1
-                let paused = self.consecutiveProtectionRepairCount >= 3
+                let repairs = self.consecutiveProtectionRepairCount
+                let paused = repairs >= 3
                 await self.applyExhaustedArmedFailure(
                     message: paused
                         ? String(localized: "Another program keeps replacing Tono's network protection. The original network is back. Quit the other VPN or firewall, then connect again.")
                         : String(localized: "Network protection was interrupted by another program. The original network is back while Tono looks for a reachable exit."),
                     resumeWhenReachable: !paused
                 )
+                // The release clears session history, including this counter.
+                // The streak is what stops the third automatic attempt, so
+                // put it back. A later, different release may still clear it.
+                self.consecutiveProtectionRepairCount = repairs
+                if paused {
+                    self.protectedReconnectPausedForUserAction = true
+                    self.protectedReconnectPauseLiftsOnNetworkChange = false
+                    self.connectionCoordinator.unarmedReconnectTask?.cancel()
+                    self.connectionCoordinator.unarmedReconnectTask = nil
+                }
                 return .stopMonitoring
             }
         }

@@ -48,3 +48,8 @@
 
 - 来源：变基到 `origin/main` `cbb4f56a`。没有把 main 合并进来。`docs/DECISIONS.md` 把 Continuity 与 Windows WFP 放行留在这条 macOS 记录上面。暂停断言仍为真。失败收尾仍不套同步的 `MainActor.run`。助手协议仍是 `4.52.6`。
 - 验证：本机无 Xcode，未跑 `xcodebuild`。需要 macOS CI。
+
+### 2026-09-30 续记 · PF 监督修复的计数不被这次放行清掉
+
+- 缺陷修复：`5bd51c7b` 的 `macos/build` 里 `testUnverifiableDNSAuditStillRunsPFHealthCheck` 失败。不可验证的 DNS 仍跑了 PF 检查，但放行里的 `resetReleasedSessionHistory` 把刚加上的 `consecutiveProtectionRepairCount` 清成 0，第三次自动暂停永远到不了。放行之后把这次的计数写回去；满 3 次再立上暂停并取消无武装连接。断言仍要求计数为 1，没有改成期待 0。
+- 验证：本机无 Xcode，未跑 `xcodebuild`。需要 macOS CI。
