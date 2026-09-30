@@ -288,7 +288,11 @@ nonisolated enum HelperProtocolVersion {
     ///   removal release runs without waiting for the next start. Launch
     ///   does not reinstall from the state file; a Core that is not running
     ///   is released immediately and a saved DNS snapshot is restored.
-    static let current = "4.52.4"
+    /// - 4.52.4 → 4.52.5: `--emergency-disarm` and `--emergency-reset`
+    ///   release PF when the update ledger cannot be read. They keep the
+    ///   ledger bytes and do not remove the install in that case. A DNS
+    ///   restore failure no longer skips the PF release.
+    static let current = "4.52.5"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS
