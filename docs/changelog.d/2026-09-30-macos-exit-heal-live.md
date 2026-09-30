@@ -38,3 +38,8 @@
 - 来源：重放到 `01c2403f`（main 已含 #706 与已合并的 #703）。`ExitHeal` 保留 main 的 `selectiveAiHold`；这条路径的 `selectiveReady` 仍是 false，普通失败仍是完整放行。助手协议仍是 `4.52.6`。
 - 行为不变：放行之后若助手状态仍是 `.rejected`，重新立上 `protectedReconnectPausedForUserAction`，不启动无武装连接。`testRepairAndReconnectReachesConnectWhenHelperRejectsThisApp` 仍断言暂停为真。`unarmedTcpProof` 仍是 `@ObservationIgnored`。
 - 验证：本机无 Xcode，未跑 `xcodebuild`。需要 macOS CI。
+
+### 2026-09-30 续记 · 放行不能放进同步的 MainActor.run
+
+- 工程与测试：`fd7d2f9e` 上 `macos/build` 与 `policy-tests` 编译失败。连接失败收尾在 `await MainActor.run` 里调用了异步的 `applyExhaustedArmedFailure`，闭包变成异步，而 `MainActor.run` 只要同步体。这段 `perform` 已经标了 `@MainActor`，收尾直接留在原闭包里。暂停条件和放行条件没有放宽。
+- 验证：本机无 Xcode，未跑 `xcodebuild`。需要 macOS CI。

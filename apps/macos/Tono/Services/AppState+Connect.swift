@@ -586,11 +586,12 @@ extension AppState {
                     // into a dial error an operator can act on.
                     coreErrors: [status.lastError].compactMap { $0 }
                 )
-                await MainActor.run {
-                    // An explicit Disconnect/Quit can cancel while the status
-                    // request is in flight. Never let this stale failure path
-                    // re-arm protection after the user released it.
-                    guard !Task.isCancelled else { return }
+                // An explicit Disconnect/Quit can cancel while the status
+                // request is in flight. Never let this stale failure path
+                // re-arm protection after the user released it. This closure
+                // is already on the main actor; `MainActor.run` only accepts
+                // a synchronous body, and the release below awaits.
+                guard !Task.isCancelled else { return }
                     // Keep Core lastError / localizedDescription on the audit
                     // and the copyable classified detail. The dashboard must
                     // not interpolate them — handshake eof used to land as
@@ -662,7 +663,6 @@ extension AppState {
                         self.lastConnectionFailure = preservedFailure
                         self.completedConnectionStages = preservedStages
                     }
-                }
             }
         }
     )
