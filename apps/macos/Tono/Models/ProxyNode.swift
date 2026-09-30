@@ -250,15 +250,22 @@ nonisolated struct ProxyNode: Identifiable, Codable, Hashable, Sendable {
 /// Whether a connected session must reload Mihomo after a catalog install.
 enum CatalogLiveSession {
     /// Skip the reload when the selected exit's dial identity is unchanged
-    /// and residential routing did not move. Adding or renaming other cities
-    /// is not a reason to close every connection.
+    /// and neither the residential exit nor its routing moved. Adding or renaming
+    /// other cities is not a reason to close every connection.
     static func shouldReload(
         previousSelected: ProxyNode?,
         nextSelected: ProxyNode?,
+        previousHome: ProxyNode?,
+        nextHome: ProxyNode?,
         routingChanged: Bool
     ) -> Bool {
         if routingChanged { return true }
         guard let previousSelected, let nextSelected else { return true }
-        return !previousSelected.liveSessionIdentity(matches: nextSelected)
+        if !previousSelected.liveSessionIdentity(matches: nextSelected) { return true }
+        // A same-name residential rotation must replace the live dial identity.
+        guard let previousHome, let nextHome else {
+            return previousHome != nil || nextHome != nil
+        }
+        return !previousHome.liveSessionIdentity(matches: nextHome)
     }
 }
