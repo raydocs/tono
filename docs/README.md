@@ -29,6 +29,7 @@ Use the execution guide's dated status, not old handoff machine assignments.
 | [UPDATE_PROTOCOL_V1.md](UPDATE_PROTOCOL_V1.md) | Shared macOS/Windows update wire values and conformance, not installation acceptance |
 | [UPDATE_INTEGRATION_V1.md](UPDATE_INTEGRATION_V1.md) | Native protected-update ownership, detached transport, paired packaging and G3 evidence boundaries |
 | [RELEASE_LINES.md](RELEASE_LINES.md) | `release/macos`, `release/windows`, `main`; tag formats |
+| [RELEASE_READINESS.md](RELEASE_READINESS.md) | Launch gaps: done / in-PR / needs-real-hardware; not a ship gate |
 | [ui-design-system.md](ui-design-system.md) | Shared visual tokens for both clients |
 | [desktop-clarity.md](desktop-clarity.md) | Welcome / login / content-layer clarity |
 | [welcome-v2.md](welcome-v2.md) | Welcome flow copy and layout |
