@@ -128,6 +128,22 @@ may reverse), `reversed` (keep the line; say what replaced it).
 - Why stricter: the filter is not installed on a path that did not answer. Hysteria2 still cannot be proved with TCP, so that transport is unchanged. The proof does not change routes.
 - Applied in: branch `cursor/preflight-before-tun-a925`.
 
+## 2026-09-30 · After reboot, if a valid wanted block is back but Core never proves the tunnel, does the machine stay closed?
+
+- Status: provisional
+- Chosen: no. The Service still installs the block at startup, then waits 90 seconds
+  (needs real-hardware calibration) for Core to be running with a verified Locked
+  session and a rendered tunnel permit. If that proof does not arrive, it removes
+  WFP, restores DNS on a best-effort basis, writes a tombstone, and the app reconnects
+  in the background. An explicit `strict_kill_switch: true` keeps today's block;
+  emergency disarm still opens the network. Rejected: leaving the restored block up
+  until a person taps connect, and releasing before the window in case Core is about
+  to return.
+- Why stricter: a proven session does not open early, and a crash no longer leaves
+  the machine closed after the window. The Service still does not start Core by
+  itself before logon.
+- Applied in: this branch (`windows_kill_switch.rs`, app restore and protection resync).
+
 ## 2026-09-29 · After an unexpected restart on Windows, does the Service start the Core by itself, and does the App say why it did not?
 
 - Status: provisional
