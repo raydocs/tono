@@ -258,10 +258,7 @@ async fn run_release_sequence(
     };
 
     if status.wanted || status.live {
-        return Err(format!(
-            "kill switch release returned an armed state (wanted={}, live={})",
-            status.wanted, status.live
-        ));
+        return Err(release_still_armed(state, status).await);
     }
 
     #[cfg(windows)]
@@ -290,6 +287,20 @@ fn service_not_ready_release_error(error: impl std::fmt::Display) -> String {
 /// with nothing proving it. The FSM still holds protection as blocking, so Disconnect stays offered.
 async fn release_unconfirmed(state: &TonoState, message: String) -> String {
     state.lock().await.kill_switch = None;
+    message
+}
+
+/// The Service answered but is still armed. Its reading is the newest evidence, so it replaces the
+/// cached one before the failure settles: an armed reading with live=false must not leave an older
+/// live=true published as confirmed protection.
+async fn release_still_armed(
+    state: &TonoState, status: tono_service_protocol::KillSwitchStatus,
+) -> String {
+    let message = format!(
+        "kill switch release returned an armed state (wanted={}, live={})",
+        status.wanted, status.live
+    );
+    state.lock().await.kill_switch = Some(status);
     message
 }
 
@@ -566,6 +577,46 @@ mod tests {
         assert!(inner.kill_switch.is_none(), "released protection must not be claimed from the old reading");
         assert!(inner.fsm.status().is_protection_blocked && inner.fsm.kill_switch_armed(),
             "an unconfirmed release must retain the retry/blocking latch");
+    }
+
+    /// f6f80dc7 review grok:F1: a release whose fresh reading is still armed but no longer live must
+    /// publish that reading at settlement, not the older wanted+live one.
+    #[tokio::test]
+    async fn an_armed_release_reading_with_live_false_replaces_cached_live_true() {
+        let state = Arc::new(TonoState::for_test());
+        {
+            let mut inner = state.lock().await;
+            inner.fsm.begin_connect();
+            inner.fsm.mark_kill_switch_armed();
+            inner.fsm.mark_session_verified();
+            inner.fsm.connect_succeeded().unwrap();
+            inner.fsm.begin_disconnect();
+            inner.kill_switch = Some(serde_json::from_value(serde_json::json!({
+                "wanted": true, "verified": true, "live": true, "mode": "blocked",
+            })).unwrap());
+        }
+        let fresh: tono_service_protocol::KillSwitchStatus = serde_json::from_value(serde_json::json!({
+            "wanted": true, "verified": true, "live": false, "mode": "blocked",
+        })).unwrap();
+        let sequence_state = Arc::clone(&state);
+        let settled_state = Arc::clone(&state);
+        let (published, publication) = oneshot::channel();
+        let operation = coordinate_release(&state, None,
+            move |_guard| async move {
+                let status = pending_update_release_result(&sequence_state, Ok(Some(fresh))).await?
+                    .expect("Ok(Some) is the release reading");
+                Err(release_still_armed(&sequence_state, status).await)
+            },
+            move || async move {
+                let inner = settled_state.lock().await;
+                published.send(commands::status_of(&inner).kill_switch).unwrap();
+            },
+        ).await;
+        assert!(operation.wait().await.unwrap_err().contains("armed state"));
+        let published = publication.await.unwrap();
+        assert!(published.as_ref().is_some_and(|reading| reading.wanted && !reading.live),
+            "settlement must publish the fresh live=false reading, got {published:?}");
+        assert!(state.lock().await.fsm.status().is_protection_blocked);
     }
 
     /// deef9193 opus:F2 / 56d02a04 codex:F1: a failed release without a status reading proves
