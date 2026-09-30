@@ -60,18 +60,56 @@ extension AppState {
         nativeUpdateDisconnectTask = Task {
             defer { nativeUpdateDisconnectTask = nil }
             await suspendForNativeUpdate()
+            let generation = connectionCoordinator.protectionOperationGeneration
+            guard !Task.isCancelled else { return }
+            isProtectionBlocked = false
+            isProtectionUnconfirmed = true
             do {
                 let result = try await nativeUpdateDisconnect()
+                guard !Task.isCancelled,
+                      connectionCoordinator.protectionOperationGeneration == generation else { return }
                 guard result.disconnectVerified == true else { throw NativeUpdateDownload.failure("Update Disconnect was not verified.") }
                 isProtectionBlocked = false
                 KillSwitchService.isArmed = false
                 resetReleasedSessionHistory()
                 RuntimeCleanup.clearCoreStarted()
             } catch {
-                isProtectionBlocked = true
+                guard !Task.isCancelled,
+                      connectionCoordinator.protectionOperationGeneration == generation else { return }
+                // The helper may have released PF before the reply or ledger
+                // write failed. Until a live readback arrives, neither the old
+                // cached intent nor this error proves protection is held.
+                isProtectionBlocked = false
+                isProtectionUnconfirmed = true
+                guard await refreshNativeUpdateProtectionStatus() else { return }
+                guard !Task.isCancelled,
+                      connectionCoordinator.protectionOperationGeneration == generation else { return }
                 errorMessage = error.localizedDescription
             }
         }
+    }
+
+    /// Read-only PF reconciliation: desired intent alone is not live protection.
+    /// This never acknowledges Core/DNS cleanup or retires the pending receipt.
+    @discardableResult
+    func refreshNativeUpdateProtectionStatus() async -> Bool {
+        let generation = connectionCoordinator.protectionOperationGeneration
+        let sequence = launchProtectionSequence
+        let health = await protectionAudits.killSwitchHealth()
+        guard !Task.isCancelled, nativeUpdatePending,
+              connectionCoordinator.protectionOperationGeneration == generation,
+              launchProtectionSequence == sequence else { return false }
+        launchProtectionSequence &+= 1
+        guard let health else {
+            isProtectionBlocked = false
+            isProtectionUnconfirmed = true
+            return true
+        }
+        KillSwitchService.isArmed = health.wanted || health.live
+        isProtectionBlocked = health.live
+        isProtectionUnconfirmed = !health.live && health.wanted
+        if !health.wanted, !health.live { resetReleasedSessionHistory() }
+        return true
     }
 
     /// The retry button explicitly requests Internet release. Root rechecks

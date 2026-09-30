@@ -143,4 +143,65 @@ final class NativeUpdateDisconnectReadbackTests: XCTestCase {
         XCTAssertTrue(app.isProtectionUnconfirmed)
         XCTAssertNil(app.errorMessage, "a retired result cannot overwrite newer presentation")
     }
+
+    func testActivationOfPendingUpdateUsesLivePFInsteadOfDesiredIntent() async {
+        let armed = KillSwitchService.isArmed
+        defer { KillSwitchService.isArmed = armed }
+        KillSwitchService.isArmed = true
+        let app = AppState()
+        app.nativeUpdatePending = true
+        app.isProtectionUnconfirmed = true
+        var reads = 0
+        app.protectionAudits.killSwitchHealth = {
+            reads += 1
+            return (wanted: true, live: false, repairedSinceArm: false)
+        }
+        app.networkProtection.refreshKillSwitchStatus = {
+            XCTFail("Desired intent alone must not resolve native-update live protection")
+            return .confirmed(requiresProtectionRecovery: true)
+        }
+
+        await app.resolveUnconfirmedProtection()
+
+        XCTAssertEqual(reads, 1)
+        XCTAssertFalse(app.isProtectionBlocked)
+        XCTAssertTrue(app.isProtectionUnconfirmed)
+        XCTAssertEqual(MenuBarProtectionStatus(app).kind, .unconfirmed)
+        XCTAssertTrue(KillSwitchService.isArmed)
+    }
+
+    func testVerifiedDisconnectClearsPreviousUnknownWithoutExtraReadback() async {
+        let armed = KillSwitchService.isArmed
+        let blocksConnect = RuntimeCleanup.nativeUpdateBlocksConnect
+        let didStartCore = AppProfile.defaults.object(forKey: SettingsKey.didStartCore)
+        let lastTunEnabled = AppProfile.defaults.object(forKey: SettingsKey.lastTunEnabled)
+        defer {
+            KillSwitchService.isArmed = armed
+            RuntimeCleanup.nativeUpdateBlocksConnect = blocksConnect
+            AppProfile.defaults.set(didStartCore, forKey: SettingsKey.didStartCore)
+            AppProfile.defaults.set(lastTunEnabled, forKey: SettingsKey.lastTunEnabled)
+        }
+        KillSwitchService.isArmed = true
+        RuntimeCleanup.markCoreStarted(tunEnabled: true)
+        let app = AppState()
+        app.isProtectionUnconfirmed = true
+        app.nativeUpdateDisconnect = {
+            .init(pending: true, receipt: nil, execution: nil,
+                  disconnectVerified: true, diagnostic: nil)
+        }
+        app.protectionAudits.killSwitchHealth = {
+            XCTFail("A verified complete disconnect already proves release")
+            return nil
+        }
+
+        app.disconnectPendingNativeUpdate()
+        await app.nativeUpdateDisconnectTask?.value
+
+        XCTAssertFalse(app.isProtectionBlocked)
+        XCTAssertFalse(app.isProtectionUnconfirmed)
+        XCTAssertFalse(KillSwitchService.isArmed)
+        XCTAssertFalse(AppProfile.defaults.bool(forKey: SettingsKey.didStartCore))
+        XCTAssertTrue(app.nativeUpdatePending)
+        XCTAssertTrue(RuntimeCleanup.nativeUpdateBlocksConnect)
+    }
 }
