@@ -52,4 +52,8 @@
 ### 2026-09-30 续记 · PF 监督修复的计数不被这次放行清掉
 
 - 缺陷修复：`5bd51c7b` 的 `macos/build` 里 `testUnverifiableDNSAuditStillRunsPFHealthCheck` 失败。不可验证的 DNS 仍跑了 PF 检查，但放行里的 `resetReleasedSessionHistory` 把刚加上的 `consecutiveProtectionRepairCount` 清成 0，第三次自动暂停永远到不了。放行之后把这次的计数写回去；满 3 次再立上暂停并取消无武装连接。断言仍要求计数为 1，没有改成期待 0。
-- 验证：本机无 Xcode，未跑 `xcodebuild`。需要 macOS CI。
+- 验证：本机无 Xcode，未跑 `xcodebuild`。需要 macOS CI。`b59183d4` 上 17 项检查无失败。
+
+### 2026-09-30 续记 · 去掉并入 main 的合并，改回变基
+
+- 来源：`b50e3a93` 把 `main` 合并进了本分支，那次 CI 被取消，`ci-gate` 把取消的 macOS 任务当成失败。这些合并提交没有留下。提交重放到 `origin/main` `80f4b4d0`。助手协议仍是 main 的 `4.52.7`，本分支没有改 helper。暂停断言和 PF 修复计数仍按原样。
