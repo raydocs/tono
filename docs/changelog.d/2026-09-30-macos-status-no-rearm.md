@@ -1,0 +1,12 @@
+## 2026-09-30 · 更新准备期间 status 不再重装阻断
+- 归属：SHIP_PLAN §2 第 10 条（装上会坏）。macOS helper。
+- 来源：基线 main `d2363002`；分支 `cursor/macos-status-no-rearm-581a`。尚未合 main。不包含 #701。
+- 缺陷修复：
+  - `/killswitch/status` 不再加载 PF 规则，也不在状态损坏时装紧急全阻断。更新准备在停掉 Core 之后读这个接口，旧行为会把阻断装回去。
+  - 空闲监督只在 Core 正在运行时重装。Core 已停时只收紧 reviewed-bundle 许可（#608）。
+  - BRICK-M11：helper 还在跑时删掉 App，约每 10 秒走已有的删除释放，不再等到下次启动。
+- 新增/优化：无。
+- 工程与测试：helper `4.52.0` → `4.52.1`。`--self-test` 断言 Core 在跑才允许重装。`CONTRACT.sha256` 重算。
+- 验证：Linux 无 Swift、无 PF。未编译、未跑 self-test。
+- 候选/发布：仅源码，无新候选。
+- 剩余限制：helper 自身卡在不可中断睡眠时，没有外部看门狗（见 MAC-HELPER-HANG-WATCHDOG）。BRICK-M10 的开机不重新武装在 #701，需实机。版本行与 #701、#695、#708 冲突。未实机。

@@ -1249,9 +1249,10 @@ extension KillSwitchManager {
                     "self-test: Continuity passes missing or keeping state with a tunnel\n".utf8
                 ))
             }
-            // A status() heal or a supervisor repair reinstalls saved state
-            // before any TUN exists. Boot does not. A saved utun that is not
-            // up must render the no-tunnel form: no Continuity, mDNS, LAN,
+            // The supervisor reinstalls saved state before any TUN exists,
+            // and only while the Core is running. Boot and status() do not.
+            // A saved utun that is not up must render the no-tunnel form:
+            // no Continuity, mDNS, LAN,
             // link-local, DHCP or NDP pass and no rule for that utun. A utun
             // that is up (a helper restart mid-session) is kept. Those
             // reinstall paths need root and pfctl, so this checks the
@@ -1445,6 +1446,8 @@ extension KillSwitchManager {
                 && watchdogReleases
                 && failureRecoveryReleasesNetwork(strictKillSwitchEnabled: false)
                 && !failureRecoveryReleasesNetwork(strictKillSwitchEnabled: true)
+                && shouldReinstallKillSwitch(coreRunning: true)
+                && !shouldReinstallKillSwitch(coreRunning: false)
         } catch {
             return false
         }

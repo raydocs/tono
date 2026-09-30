@@ -667,34 +667,23 @@ final class KillSwitchManager {
         defer { lock.unlock() }
 
         var wanted = false
-        var healed = false
         var live = (try? Self.effectiveStatus()) ?? false
         do {
             if let state = try loadState() {
                 wanted = state.armed
-                if wanted {
+                if wanted && live {
                     Self.pinHostsIfUsable(state: state)
-                    if !live {
-                        try Self.writeRules(
-                            state: Self.restorableState(state),
-                            allowedUID: allowedUID
-                        )
-                        try Self.ensureAnchorLoaded(flushStates: true)
-                        lastLoadedPassRules = nil
-                        live = (try? Self.effectiveStatus()) ?? false
-                        // Persisted state deliberately omits session direct
-                        // endpoints, so this heal reinstalled PF without them.
-                        // The GUI must see that and re-arm with the live
-                        // session's exceptions.
-                        healed = true
-                    }
                 }
+                // Do not load rules from a status read. Update preparation
+                // calls this after the Core has stopped; rewriting PF would
+                // put the block back on a machine whose Core is gone.
             }
-            return response(armed: live, wanted: wanted, live: live, healed: healed)
+            return response(armed: live, wanted: wanted, live: live, healed: false)
         } catch {
-            // Unreadable state is not a strict kill switch. Do not install a
-            // block; the startup release and the core-down watchdog clear a
-            // leftover ruleset. `live` still reports whatever PF is doing.
+            // Unreadable state is not a strict kill switch. Report it.
+            // Do not install a block; the startup release and the core-down
+            // watchdog clear a leftover ruleset. `live` still reports
+            // whatever PF is doing.
             var result = response(armed: live, wanted: wanted, live: live, healed: false)
             result["ok"] = false
             result["error"] = String(describing: error).prefixString(1024)
@@ -702,9 +691,15 @@ final class KillSwitchManager {
         }
     }
 
-    /// Periodic check from the helper's idle loop. Nothing else looks at PF
-    /// while a session is connected: `status()` heals, but only when someone
-    /// calls it, and the connected app does not. Another program releasing its
+    /// Whether the idle loop may reinstall a saved kill switch. Update
+    /// preparation stops the Core and then reads status; reinstalling while
+    /// the Core is down puts the block back on a machine that should fail open.
+    static func shouldReinstallKillSwitch(coreRunning: Bool) -> Bool {
+        coreRunning
+    }
+
+    /// Periodic check from the helper's idle loop, and only while the Core is
+    /// running. `status()` does not load rules. Another program releasing its
     /// PF reference, a `pfctl -d`, or a main-ruleset reload without the Tono
     /// anchor left the kill switch off until the next arm.
     func superviseProtection() {

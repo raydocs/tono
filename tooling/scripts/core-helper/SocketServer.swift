@@ -113,6 +113,13 @@ final class SocketServer {
             // or an out-of-process emergency disarm.
             if Date().timeIntervalSince(lastProtectionCheck) >= 10 {
                 lastProtectionCheck = Date()
+                // BRICK-M11: deleting the app while this daemon stays up used
+                // to leave PF in place until the next start. This takes the
+                // update lock itself; do not call it from inside locked.
+                if releaseIfTonoWasRemoved() { return }
+                // Supervise only while the Core is running. While it is down,
+                // withhold the bundle permit at once and release the saved
+                // block after the watchdog threshold.
                 try? updates.storage.locked {
                     observeCoreForWatchdog()
                 }
