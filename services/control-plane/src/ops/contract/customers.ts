@@ -624,7 +624,7 @@ export function assertCustomerDiagnostics(value: unknown, path = 'customerDiagno
 }
 
 const FAILURE_CLUSTER_KEYS = [
-  'id', 'code', 'stage', 'appVersion', 'platform', 'node', 'count', 'users', 'devices',
+  'id', 'code', 'stage', 'appVersion', 'platform', 'node', 'severity', 'count', 'users', 'devices',
   'firstSeenMs', 'lastSeenMs', 'status', 'sample', 'detailPath',
 ];
 
@@ -637,6 +637,7 @@ function assertFailureCluster(value: unknown, path: string) {
     appVersion: text(row, path, 'appVersion'),
     platform: text(row, path, 'platform'),
     node: text(row, path, 'node'),
+    severity: oneOf(row, path, 'severity', ['p0', 'normal'] as const),
     count: int(row, path, 'count'),
     users: int(row, path, 'users'),
     devices: int(row, path, 'devices'),

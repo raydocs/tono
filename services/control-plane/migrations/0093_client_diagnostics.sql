@@ -145,6 +145,7 @@ CREATE TABLE failure_clusters (
   app_version TEXT NOT NULL,
   platform TEXT NOT NULL,
   node TEXT NOT NULL,
+  severity TEXT NOT NULL DEFAULT 'normal' CHECK(severity IN ('p0', 'normal')),
   event_count INTEGER NOT NULL,
   user_count INTEGER NOT NULL,
   device_count INTEGER NOT NULL,

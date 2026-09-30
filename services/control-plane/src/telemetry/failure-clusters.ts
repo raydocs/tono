@@ -13,6 +13,23 @@ export const ALERT_HOUR_CAP = 12;
 
 const SAMPLE_LIMIT = 500;
 
+/** The user was left without a working network. First event of the cluster
+ *  alerts immediately; spike growth is not required. */
+export const P0_NETWORK_LOSS_CODES = [
+  'TONO_NETWORK_LOSS',
+  'TONO_FAIL_OPEN',
+  'TONO_WATCHDOG_RESTORE',
+  'TONO_KILL_SWITCH_STUCK',
+  'TONO_RESTORE_NETWORK',
+  'TONO_CRASH_WHILE_PROTECTED',
+] as const;
+
+export type ClusterSeverity = 'p0' | 'normal';
+
+export function clusterSeverity(code: string): ClusterSeverity {
+  return (P0_NETWORK_LOSS_CODES as readonly string[]).includes(code) ? 'p0' : 'normal';
+}
+
 export type ClusterAlert = 'opened' | 'spike';
 
 export type ClusterSnapshot = {
@@ -26,12 +43,16 @@ export function clusterAlertDecision(
   existing: ClusterSnapshot | null,
   nowMs: number,
   nowSec: number,
+  severity: ClusterSeverity = 'normal',
 ): { action: 'open' | 'join'; alert: ClusterAlert | null } {
   if (!existing || nowMs - existing.lastSeenMs > CLUSTER_GAP_MS) {
     return { action: 'open', alert: 'opened' };
   }
   const nextCount = existing.count + 1;
   if (existing.alertedAt == null) return { action: 'join', alert: 'opened' };
+  // P0 already alerted on the first event of this cluster. Later events do
+  // not wait for a spike and do not send another alert.
+  if (severity === 'p0') return { action: 'join', alert: null };
   const since = nowSec - existing.alertedAt;
   const grew = nextCount >= existing.countAtAlert * SPIKE_MULTIPLE
     && nextCount >= existing.countAtAlert + SPIKE_MIN_GROWTH;
@@ -176,20 +197,21 @@ export async function recordFailureCluster(
     alertedAt: decisionRow.alerted_at == null ? null : Number(decisionRow.alerted_at),
     lastSeenMs: Number(decisionRow.last_seen_ms),
   } : null;
-  const decision = clusterAlertDecision(snapshot, nowMs, nowSec);
+  const severity = clusterSeverity(input.code);
+  const decision = clusterAlertDecision(snapshot, nowMs, nowSec, severity);
   const sample = sampleOf(input);
   let clusterId: string;
   if (decision.action === 'open' || !decisionRow) {
     clusterId = crypto.randomUUID();
     await db.prepare(
       `INSERT INTO failure_clusters(
-         id, group_key, code, stage, app_version, platform, node,
+         id, group_key, code, stage, app_version, platform, node, severity,
          event_count, user_count, device_count, first_seen_ms, last_seen_ms,
          sample_json, opened_at, updated_at, alert_count, count_at_alert, status
-       ) VALUES(?, ?, ?, ?, ?, ?, ?, 1, 1, 1, ?, ?, ?, ?, ?, 0, 0, 'open')`,
+       ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, 1, 1, 1, ?, ?, ?, ?, ?, 0, 0, 'open')`,
     ).bind(
       clusterId, groupKey, input.code, input.stage, input.appVersion, input.platform, input.node,
-      nowMs, nowMs, sample, nowSec, nowSec,
+      severity, nowMs, nowMs, sample, nowSec, nowSec,
     ).run();
   } else {
     clusterId = decisionRow.id;
@@ -230,7 +252,13 @@ async function sendClusterAlert(
   const recent = await db.prepare(
     `SELECT COUNT(*) AS n FROM failure_alert_sends WHERE sent_at > ?`,
   ).bind(nowSec - 3600).first<{ n: number }>();
-  if (Number(recent?.n ?? 0) >= ALERT_HOUR_CAP) return false;
+  const preview = await db.prepare(
+    `SELECT code FROM failure_clusters WHERE id = ?`,
+  ).bind(clusterId).first<{ code: string }>();
+  const severity = clusterSeverity(preview?.code ?? '');
+  // A P0 opening alert is the first time this outage left someone offline.
+  // The hourly cap and the spike gap must not swallow it.
+  if (severity !== 'p0' && Number(recent?.n ?? 0) >= ALERT_HOUR_CAP) return false;
   const row = await db.prepare(
     `SELECT id, code, stage, app_version, platform, node, event_count, user_count, device_count,
             first_seen_ms, last_seen_ms, sample_json, alerted_at
@@ -249,6 +277,7 @@ async function sendClusterAlert(
   const body = JSON.stringify({
     schemaVersion: 1,
     kind: 'failure_cluster',
+    severity: clusterSeverity(row.code),
     reason,
     cluster: {
       id: row.id,

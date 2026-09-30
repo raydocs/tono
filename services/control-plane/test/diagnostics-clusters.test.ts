@@ -9,6 +9,7 @@ import worker, { type Env } from '../src/index';
 import {
   ALERT_HOUR_CAP,
   clusterAlertDecision,
+  clusterSeverity,
   isSafeAlertUrl,
   recordFailureCluster,
   type ClusterEnv,
@@ -169,6 +170,24 @@ describe('failure cluster decisions', () => {
     )).toEqual({ action: 'open', alert: 'opened' });
   });
 
+  it('alerts a network-loss cluster on the first event and does not wait for a spike', () => {
+    expect(clusterSeverity('TONO_KILL_SWITCH_STUCK')).toBe('p0');
+    expect(clusterSeverity('timeout')).toBe('normal');
+    const now = 1_700_000_000_000;
+    const nowSec = 1_700_000_000;
+    expect(clusterAlertDecision(null, now, nowSec, 'p0')).toEqual({ action: 'open', alert: 'opened' });
+    const opened = { count: 1, countAtAlert: 1, alertedAt: nowSec, lastSeenMs: now };
+    expect(clusterAlertDecision(opened, now + 1000, nowSec + 1, 'p0')).toEqual({
+      action: 'join', alert: null,
+    });
+    expect(clusterAlertDecision(
+      { ...opened, count: 20, countAtAlert: 1, alertedAt: nowSec - 20 * 60 },
+      now + 20 * 60 * 1000,
+      nowSec + 20 * 60,
+      'p0',
+    ).alert).toBeNull();
+  });
+
   it('rejects webhook URLs that are not public https', () => {
     expect(isSafeAlertUrl(HOOK)).toBe(true);
     expect(isSafeAlertUrl('http://bot.example.com/hooks/tono')).toBe(false);
@@ -223,6 +242,7 @@ describe('failure cluster webhook', () => {
     const opened = JSON.parse(calls[0].body) as {
       schemaVersion: number;
       kind: string;
+      severity: string;
       reason: string;
       cluster: { id: string; count: number; sample: { error: string } };
       detailPath: string;
@@ -230,6 +250,7 @@ describe('failure cluster webhook', () => {
     expect(opened.schemaVersion).toBe(1);
     expect(opened.kind).toBe('failure_cluster');
     expect(opened.reason).toBe('opened');
+    expect(opened.severity).toBe('normal');
     expect(opened.cluster.id).toBe(first.clusterId);
     expect(opened.cluster.count).toBe(1);
     expect(opened.detailPath).toBe(`/api/v1/diagnostics/clusters/${first.clusterId}`);
@@ -276,6 +297,38 @@ describe('failure cluster webhook', () => {
       await recordFailureCluster(db(), failureInput(`cap-${index}`, atMs + index), clusterEnv(), 1_800_000_200);
     }
     expect(calls).toHaveLength(ALERT_HOUR_CAP);
+  });
+
+  it('sends a p0 network-loss alert on the first event even after the hourly cap', async () => {
+    (env as unknown as Env).FAILURE_ALERT_WEBHOOK_URL = HOOK;
+    (env as unknown as Env).FAILURE_ALERT_WEBHOOK_SECRET = SECRET;
+    const { calls } = hookSpy();
+    const atMs = 1_800_000_300_000;
+    for (let index = 0; index < ALERT_HOUR_CAP; index++) {
+      await recordFailureCluster(db(), failureInput(`cap-p0-${index}`, atMs + index), clusterEnv(), 1_800_000_300);
+    }
+    expect(calls).toHaveLength(ALERT_HOUR_CAP);
+    const p0 = await recordFailureCluster(
+      db(),
+      failureInput('TONO_NETWORK_LOSS', atMs + 100),
+      clusterEnv(),
+      1_800_000_300,
+    );
+    expect(p0.alerted).toBe(true);
+    const second = await recordFailureCluster(
+      db(),
+      failureInput('TONO_NETWORK_LOSS', atMs + 200),
+      clusterEnv(),
+      1_800_000_301,
+    );
+    expect(second.alerted).toBe(false);
+    expect(second.clusterId).toBe(p0.clusterId);
+    expect(calls).toHaveLength(ALERT_HOUR_CAP + 1);
+    const body = JSON.parse(calls[ALERT_HOUR_CAP].body) as { severity: string; reason: string; cluster: { code: string; count: number } };
+    expect(body.severity).toBe('p0');
+    expect(body.reason).toBe('opened');
+    expect(body.cluster.code).toBe('TONO_NETWORK_LOSS');
+    expect(body.cluster.count).toBe(1);
   });
 });
 

@@ -41,6 +41,12 @@ function clusterDto(row: Row) {
     appVersion: String(row.app_version),
     platform: String(row.platform),
     node: String(row.node),
+    severity: row.severity === 'p0' || row.severity === 'normal'
+      ? row.severity
+      : (typeof row.code === 'string' && [
+        'TONO_NETWORK_LOSS', 'TONO_FAIL_OPEN', 'TONO_WATCHDOG_RESTORE',
+        'TONO_KILL_SWITCH_STUCK', 'TONO_RESTORE_NETWORK', 'TONO_CRASH_WHILE_PROTECTED',
+      ].includes(row.code) ? 'p0' : 'normal'),
     count: num(row.event_count),
     users: num(row.user_count),
     devices: num(row.device_count),

@@ -57,6 +57,7 @@ The outage key is SHA-256 of `code`, `stage`, `appVersion`, `platform`, and node
 {
   "schemaVersion": 1,
   "kind": "failure_cluster",
+  "severity": "normal",
   "reason": "opened",
   "cluster": {
     "id": "uuid",
@@ -82,7 +83,7 @@ The outage key is SHA-256 of `code`, `stage`, `appVersion`, `platform`, and node
 }
 ```
 
-`reason` is `opened` or `spike`. `sample.error` is passed through the job redactor (emails, IPv4, UUIDs, passwords) and clipped. `sample` may be null.
+`reason` is `opened` or `spike`. `severity` is `p0` or `normal`. `p0` is a network-loss code (`TONO_NETWORK_LOSS`, `TONO_FAIL_OPEN`, `TONO_WATCHDOG_RESTORE`, `TONO_KILL_SWITCH_STUCK`, `TONO_RESTORE_NETWORK`, `TONO_CRASH_WHILE_PROTECTED`): the webhook fires on the first event of that cluster and is not held for a spike or the hourly cap. `sample.error` is passed through the job redactor (emails, IPv4, UUIDs, passwords) and clipped. `sample` may be null.
 
 ## Read API
 
