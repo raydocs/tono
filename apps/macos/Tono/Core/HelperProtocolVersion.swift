@@ -297,7 +297,10 @@ nonisolated enum HelperProtocolVersion {
     ///   Update disconnect still releases PF when prepare cannot prove a
     ///   foreign loopback proxy or resolver is Tono's. The lifecycle
     ///   read-failure self-test expects that owner-only restore.
-    static let current = "4.52.6"
+    /// - 4.52.6 → 4.52.7: one protected-DNS server-count cap (32) for save,
+    ///   load and write; enable refuses over-cap lists before any change (MAC-
+    ///   DNS-SNAPSHOT-OVER-8).
+    static let current = "4.52.7"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS
