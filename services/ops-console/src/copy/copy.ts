@@ -10,6 +10,7 @@
  * the directory itself.
  */
 import { clientCopy } from './clients';
+import { customerBoardCopy } from './customer-board';
 import { ledgerCopy } from './ledger';
 import { nodeBoardCopy } from './node-board';
 import { nodeDetailCopy } from './node-detail';
@@ -40,6 +41,7 @@ export const copy = {
   ...diagnosticsCopy,
   ...qualityCopy,
   ...residentialCopy,
+  ...customerBoardCopy,
 } as const;
 
 
