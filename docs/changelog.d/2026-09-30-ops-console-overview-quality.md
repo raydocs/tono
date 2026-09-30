@@ -35,3 +35,5 @@
     等 #734 合入、`Today.tsx` 能把它放到事故列表下面时再放回手机。
   - 本机 Playwright（系统 Chrome，`--ignore-snapshots`，一个 worker）：`ledger`、`today-phone` 35 个通过；
     `一个月的账，一页` 的整页截图在本机 Chrome 里截不出来（页面太长），CI 上通过。
+- 续（e2e 收紧）：`ledger.spec`「毛利算不出来的，写着待核对」原先用 `.first()` 取页面上任意一个 Seoul · Han 链接
+  （SLO 表每行都链一次机器，重复是正常的）；现在限定在「待核对」区块里，要求那里恰好一个、href 指向这台机器、所在行写着待核对。

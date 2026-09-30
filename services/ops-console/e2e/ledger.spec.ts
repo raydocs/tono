@@ -41,10 +41,15 @@ test.describe('账目', () => {
   test('毛利算不出来的，写着待核对', async ({ page }) => {
     await open(page, LEDGER);
     await expect(page.getByText('3 项还没对上')).toBeVisible();
-    const pending = page.getByRole('link', { name: 'zhao.lei@example.com' });
+    // The SLO table links every node once per day row, so the node is looked
+    // for inside the 待核对 block, where it must appear exactly once.
+    const block = page.getByRole('heading', { name: '待核对', exact: true }).locator('xpath=ancestor::section[1]');
+    const pending = block.getByRole('link', { name: 'zhao.lei@example.com', exact: true });
     await expect(pending).toHaveAttribute('href', '#/customers/u-05');
-    await expect(page.getByRole('link', { name: 'Seoul · Han' }).first()).toBeVisible();
-    await expect(page.getByText('待核对').first()).toBeVisible();
+    const node = block.getByRole('link', { name: 'Seoul · Han', exact: true });
+    await expect(node).toBeVisible();
+    await expect(node).toHaveAttribute('href', `#/nodes/${encodeURIComponent('Seoul · Han')}`);
+    await expect(block.getByRole('listitem').filter({ has: page.getByRole('link', { name: 'Seoul · Han', exact: true }) })).toContainText('待核对');
   });
 
   test('导出是一个能点开的链接', async ({ page }) => {
