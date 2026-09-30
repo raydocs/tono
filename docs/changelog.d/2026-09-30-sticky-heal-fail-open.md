@@ -53,3 +53,9 @@
 - 来源：变基到 `origin/main` `5d46b896`。没有把 main 合并进来。唯一冲突仍是 `docs/DECISIONS.md`：不可读更新账本仍释放网络的记录留在粘性自愈记录上面。两条都保留。
 - 缺陷修复：无行为变化。助手协议与 main 同为 `4.52.6`，本 PR 没有改助手，因此没有再加 `0.0.1`。普通失败仍全量放回原网络；钩子就绪时仍不调用显式全量释放；严格模式仍保持封锁。检查没有放宽。
 - 剩余限制：合入顺序仍是先 [#706](https://github.com/raydocs/tono/pull/706)，再本 PR。
+
+### 2026-09-30 续记 · 变基到已含 #706 的 main
+
+- 来源：变基到 `origin/main` `7e475245`（[#706](https://github.com/raydocs/tono/pull/706) 已合入）。没有把 main 合并进来。冲突在 `tono-core` 的模块导出和 `docs/DECISIONS.md`：main 的 `customer_failure` / `network_disposition` 与本 PR 的 `heal` 都保留；#706 的两条所有者记录留在粘性自愈记录上面。
+- 缺陷修复：无行为变化。助手协议与 main 同为 `4.52.6`，本 PR 没有改助手，因此没有再加 `0.0.1`。YAML 摘要钉仍是 `2a0e26f4…`。普通失败仍调用 `release_explicit` 放回原网络；`SelectiveAiHold` 仍不调用显式全量释放；`HoldClosed` 仍只在严格模式下重试。检查没有放宽。
+- 剩余限制：#706 已在这个 main 上。本 PR 仍不合并。
