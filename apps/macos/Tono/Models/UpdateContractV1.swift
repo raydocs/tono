@@ -80,6 +80,12 @@ nonisolated enum UpdateContractV1 {
         case unknown, unprotected, protectedOffline, connected
     }
 
+    static func recoverySatisfies(required: Protection, observed: Protection) -> Bool {
+        // macOS has no strict kill switch: the successor helper releases PF
+        // with the Core stopped, so Protected Offline may recover fail-open.
+        observed == required || (required == .protectedOffline && observed == .unprotected)
+    }
+
     enum BlockReason: String, Codable, Sendable {
         case preparationFailed, installationUncertain, recoveryFailed, cancelled
     }
@@ -161,7 +167,8 @@ nonisolated enum UpdateContractV1 {
                 next.successorGeneration = context.generation
             case let (.installedIdentityVerified, .recoveryVerified(components, protection)),
                  let (.recoveryVerified, .commitVerified(components, protection)):
-                guard components == target.components, protection == requiredRecovery else { throw ContractError.evidence }
+                guard components == target.components,
+                      recoverySatisfies(required: requiredRecovery, observed: protection) else { throw ContractError.evidence }
                 next.phase = phase == .recoveryVerified ? .committed : .recoveryVerified
             case let (_, .block(reason)):
                 next.blockedReason = reason

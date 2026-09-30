@@ -196,20 +196,30 @@ enum RuntimeCleanup {
     /// account restoration performs any request. If protection had been active,
     /// PF stays armed with only Tono's bounded control-plane recovery exception
     /// until a verified session reconnects or the user explicitly disarms it.
-    static func cleanupStaleRuntime() async throws -> Bool {
+    static func cleanupStaleRuntime(
+        queryNativeUpdate: () async throws -> HelperManager.UpdateStatus? = {
+            try await PrivilegedRuntimeCoordinator.shared.pendingNativeUpdate()
+        },
+        nativeUpdate: (String) async throws -> HelperManager.UpdateStatus = {
+            try await PrivilegedRuntimeCoordinator.shared.nativeUpdate($0)
+        },
+        observeProtection: () async -> KillSwitchService.StatusObservation = {
+            await PrivilegedRuntimeCoordinator.shared.refreshKillSwitchStatus()
+        }
+    ) async throws -> Bool {
         // Until the helper answers, including when a step below throws first,
         // a stored fail-closed intent must not read as Standby.
         if KillSwitchService.isArmed { launchProtectionConsumer(.unconfirmed) }
         let coordinator = PrivilegedRuntimeCoordinator.shared
         let pendingUpdate = try await queryPendingNativeUpdate(
-            query: { try await coordinator.pendingNativeUpdate() },
+            query: queryNativeUpdate,
             launchState: { await coordinator.helperLaunchState() },
             repairHelper: { try await coordinator.prepareHelper() }
         )
         if let pending = pendingUpdate, pending.pending {
             nativeUpdatePending = true
             nativeUpdateBlocksConnect = true
-            let adopted = try await coordinator.nativeUpdate("reconcile")
+            let adopted = try await nativeUpdate("reconcile")
             guard let receipt = adopted.receipt, receipt.blockedReason == nil,
                   receipt.phase == .installedIdentityVerified || receipt.phase == .recoveryVerified else {
                 throw NativeUpdateDownload.failure(String(localized: "The pending update cannot be resumed by this copy of Tono. Choose Check for Updates, then Disconnect and Retry, to restore Internet access and end this update attempt."))
@@ -222,7 +232,14 @@ enum RuntimeCleanup {
                 nativeUpdateBlocksConnect = false // Root permits only this adopted incarnation.
                 return true
             }
-            _ = try await coordinator.nativeUpdate("commit")
+            _ = try await nativeUpdate("commit")
+            if receipt.requiredRecovery == .protectedOffline {
+                // The successor helper fails open at launch; the old receipt's
+                // Protected Offline obligation does not prove PF is still held.
+                _ = adoptLaunchObservation(
+                    await observeProtection(), localIntent: KillSwitchService.isArmed
+                )
+            }
             nativeUpdatePending = false
             nativeUpdateBlocksConnect = false
             return false // Protected Offline must not silently become Connected.

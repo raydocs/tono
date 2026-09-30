@@ -300,7 +300,11 @@ nonisolated enum HelperProtocolVersion {
     /// - 4.52.6 → 4.52.7: an update ledger whose receipt contains a key this
     ///   build does not know is refused and kept on disk. Additive keys
     ///   outside the receipt are still tolerated.
-    static let current = "4.52.7"
+    /// - 4.52.7 → 4.52.8: a Protected Offline update recovers fail-open. The
+    ///   successor helper releases PF at launch with the Core stopped, so an
+    ///   observed Unprotected state now satisfies a Protected Offline
+    ///   recovery and commit; Connected still requires Connected.
+    static let current = "4.52.8"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS
