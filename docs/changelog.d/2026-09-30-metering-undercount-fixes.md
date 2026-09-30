@@ -1,6 +1,6 @@
 ## 2026-09-30 · 出口计量与节点配额：补齐重启、ACK 失败与跨周期漏计
 - 归属：ops 任务（出口计量、吊销与节点流量配额）；`services/exit-agent`、`services/control-plane/src/ops/quota.ts`。
-- 来源：main `c0a44053` → 分支 `codex2/metering-undercount`；PR 待开；未合 main。
+- 来源：main `c0a44053` → 分支 `codex2/metering-undercount`；PR #780；未合 main。
 - 缺陷修复：`EXIT-AGENT-RESTART-BASELINE`：Xray 重启后首读缺席的账户沿用旧原始基线，迟到的首读漏掉旧基线字节；
   改后保留累计总量、把缺席标签的基线归零。`EXIT-AGENT-INVENTORY-ACK-LOSS`：新增客户端后名册 ACK 失败，库存未落盘，
   后续撤销可能漏掉该客户端；改后 ACK 前仅保存对账后的客户端库存，累计量、基线、标记、待报队列和 sourceId 保持原提交顺序。
