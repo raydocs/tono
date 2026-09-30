@@ -93,3 +93,4 @@
 - 来源合入：`gh pr merge 684 --merge --match-head-commit 027db93d`，merge commit `d092f80b`，树与 `027db93d` 相同。该批就是这次已通过的 PR 差异，没有另开一轮相同树的复审。
 - 候选/发布：仅源码合入 main。无新安装包，无生产节点部署，无客户发布。
 - 剩余限制：建议级仍开放，不挡这次合并。`CORE_EXIT_UNREACHABLE` 仍会盖住未确认文案；DNS 助手按线程恢复；`EXIT_JOB` 缓存一次创建失败；`ReleaseGotNoReading` 已没有读取方。登录中转方案 `0fe15ce7` 仍被退回，未实现、未部署。
+- 发现记录：R680-dns-child-job-window、R680-dns-marker-doc-stale、R681-old-helper-still-on、R684-update-release-reading 改为 `fixed(d092f80b)`。仍武装但 `live=false` 的显示问题另记 R684-armed-live-cache，同样 `fixed(d092f80b)`。
