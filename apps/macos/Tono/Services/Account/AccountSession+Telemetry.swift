@@ -151,6 +151,7 @@ extension AccountSession {
         // The switch can be turned off while this task is parked on its sleep,
         // and the cancellation only lands at the next suspension point.
         guard periodicTelemetryConsent() else { return }
+        await TelemetryOutbox.drain(api: api)
         // A sleep cancels the timer and a wake starts a fresh one, so the task
         // being new is not evidence that a window is due. Hold the cadence
         // across restarts rather than spending the hourly budget on them.
@@ -313,8 +314,12 @@ extension AccountSession {
                 AccountSession.failureReportStillAllowed(builtAs: scope, internalBuild: internalBuild)
             })
         } catch {
-            // Best effort: the window still carries the event, and a report
-            // that did not land must never touch protection or the sign-in.
+            // A timeout may already have been delivered. Anything else that
+            // never left the machine waits for the next signed-in pass.
+            if Self.shouldQueueTelemetry(error),
+               let body = try? TonoCoding.encoder().encode(report) {
+                TelemetryOutbox.enqueue(kind: "failure", body: body)
+            }
         }
         scheduleEarlyTelemetryWindow()
     }
@@ -606,5 +611,51 @@ extension AccountSession {
         api.offlineGate.leaveOffline()
         api.offlineGate.withdrawAcceptance()
         offlineVerifiedAt = nil
+    }
+
+    /// A timeout may have reached the server. Other URL failures have not.
+    nonisolated static func shouldQueueTelemetry(_ error: Error) -> Bool {
+        guard let urlError = error as? URLError else { return false }
+        return urlError.code != .timedOut
+    }
+}
+
+/// Capped queue for a privacy-safe post that did not leave the machine.
+/// The send still uses the pinned control-plane client.
+nonisolated enum TelemetryOutbox {
+    static let key = "telemetryOutbox.v1"
+    static let maxItems = 32
+
+    static func enqueue(kind: String, body: Data, defaults: UserDefaults = AppProfile.defaults) {
+        var items = defaults.array(forKey: key) as? [[String: String]] ?? []
+        items.append(["kind": kind, "body": body.base64EncodedString()])
+        if items.count > maxItems {
+            items.removeFirst(items.count - maxItems)
+        }
+        defaults.set(items, forKey: key)
+    }
+
+    static func pending(defaults: UserDefaults = AppProfile.defaults) -> [[String: String]] {
+        defaults.array(forKey: key) as? [[String: String]] ?? []
+    }
+
+    @MainActor
+    static func drain(api: TonoAPIClient) async {
+        let items = pending()
+        guard !items.isEmpty else { return }
+        var kept: [[String: String]] = []
+        for item in items {
+            guard let kind = item["kind"], let encoded = item["body"],
+                  let body = Data(base64Encoded: encoded) else { continue }
+            let path = kind == "diagnostics" ? "telemetry/diagnostics" : "telemetry/failures"
+            do {
+                try await api.uploadSavedTelemetry(path: path, body: body)
+            } catch {
+                if AccountSession.shouldQueueTelemetry(error) {
+                    kept.append(item)
+                }
+            }
+        }
+        AppProfile.defaults.set(kept, forKey: key)
     }
 }

@@ -34,7 +34,7 @@ struct SettingsView: View {
     @AppStorage(
         SettingsKey.periodicTelemetryEnabled,
         store: AppProfile.defaults
-    ) private var periodicTelemetryEnabled = false
+    ) private var periodicTelemetryEnabled = true
     @AppStorage(
         SettingsKey.internalFailureReportsOptedOut,
         store: AppProfile.defaults
@@ -215,12 +215,16 @@ struct SettingsView: View {
 
             SettingToggleRow(
                 label: "Protection snapshot",
-                subtitle: "Off by default. When enabled, about every 20 minutes share protection status, the selected server, per-route byte totals and recent connection events (including the bytes moved when a connection ends) with Tono support, and report a failed connection the moment it happens",
-                isOn: $periodicTelemetryEnabled
+                subtitle: "On by default. About every 20 minutes, share protection status, the selected server, per-route byte totals and recent connection events with Tono, and report a failed connection when it happens. No website names or page contents. Turn this off to stop those uploads.",
+                isOn: Binding(
+                    get: { periodicTelemetryEnabled },
+                    set: { newValue in
+                        periodicTelemetryEnabled = newValue
+                        AccountSession.notePeriodicTelemetryChoice()
+                        accountSession.periodicTelemetrySettingChanged()
+                    }
+                )
             )
-            .onChange(of: periodicTelemetryEnabled) { _, _ in
-                accountSession.periodicTelemetrySettingChanged()
-            }
 
             settingDivider
 

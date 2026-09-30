@@ -10,14 +10,20 @@ extension SettingsKey {
     /// fifteen-second poll for the four fixed remote device actions, and a
     /// consent to be remotely actionable is not a consent to a periodic upload
     /// it never described. Mirrors the Windows client's
-    /// `periodic_telemetry_enabled`, including the v2 default-off migration.
+    /// `periodic_telemetry_enabled`. Default on. The v2 marker must not force
+    /// the switch off again (a68d4e76). See docs/diagnostics-upload-guard.md.
     nonisolated static let periodicTelemetryEnabled =
         "periodicTelemetryEnabled"
     nonisolated static let periodicTelemetryDefaultV2Applied =
         "periodicTelemetryDefaultV2Applied"
+    nonisolated static let periodicTelemetryDefaultV3Applied =
+        "periodicTelemetryDefaultV3Applied"
+    /// Set when the person moves the switch. Absent means the v2 force-off
+    /// was not their choice.
+    nonisolated static let periodicTelemetryUserChosen =
+        "periodicTelemetryUserChosen"
     /// Internal builds only: the user turned off the classified connect-failure
-    /// report that those builds send by default. Its own key because the
-    /// snapshot switch is off by default and cannot also mean "opted out".
+    /// report that those builds send when the timeline is off.
     nonisolated static let internalFailureReportsOptedOut =
         "internalFailureReportsOptedOut"
 }
@@ -191,25 +197,31 @@ final class AccountSession {
 
     /// Whether the twenty-minute protection snapshot may be uploaded.
     ///
-    /// New installations default off. The marker resets the former default-on
-    /// value exactly once; once marked, a later explicit opt-in stays on.
+    /// New installations default on. v3 turns the switch back on once when the
+    /// person has not chosen, which undoes the v2 force-off. An explicit
+    /// opt-out stays off. Do not assign false inside the v2 branch.
     nonisolated static var isPeriodicTelemetryEnabled: Bool {
-        if !AppProfile.defaults.bool(
-            forKey: SettingsKey.periodicTelemetryDefaultV2Applied
-        ) {
-            AppProfile.defaults.set(
-                false,
-                forKey: SettingsKey.periodicTelemetryEnabled
-            )
-            AppProfile.defaults.set(
-                true,
-                forKey: SettingsKey.periodicTelemetryDefaultV2Applied
-            )
-            return false
+        let defaults = AppProfile.defaults
+        if !defaults.bool(forKey: SettingsKey.periodicTelemetryDefaultV2Applied) {
+            defaults.set(true, forKey: SettingsKey.periodicTelemetryDefaultV2Applied)
         }
-        return AppProfile.defaults.bool(
-            forKey: SettingsKey.periodicTelemetryEnabled
-        )
+        if !defaults.bool(forKey: SettingsKey.periodicTelemetryDefaultV3Applied) {
+            defaults.set(true, forKey: SettingsKey.periodicTelemetryDefaultV3Applied)
+            if !defaults.bool(forKey: SettingsKey.periodicTelemetryUserChosen) {
+                defaults.set(true, forKey: SettingsKey.periodicTelemetryEnabled)
+            }
+        }
+        if defaults.object(forKey: SettingsKey.periodicTelemetryEnabled) == nil {
+            return true
+        }
+        return defaults.bool(forKey: SettingsKey.periodicTelemetryEnabled)
+    }
+
+    /// Records that the settings switch moved, so a later load does not turn
+    /// an opt-out back on.
+    nonisolated static func notePeriodicTelemetryChoice() {
+        AppProfile.defaults.set(true, forKey: SettingsKey.periodicTelemetryUserChosen)
+        AppProfile.defaults.set(true, forKey: SettingsKey.periodicTelemetryDefaultV3Applied)
     }
 
     /// Internal candidate build: Info.plist `TonoBuildChannel` is `internal`
