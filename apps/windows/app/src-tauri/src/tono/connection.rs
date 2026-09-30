@@ -427,10 +427,10 @@ async fn attempt_inner(state: &Arc<TonoState>, app: &AppHandle, expected_generat
             }
         }
 
-        match transaction
-            .wait("service readiness", ensure_service_ready())
-            .await
-        {
+        let proof = unarmed_probe::tcp_proof_before_tunnel(state, &node);
+        let service = transaction.wait("service readiness", ensure_service_ready());
+        let (proof, service) = tokio::join!(proof, service);
+        match service {
             Ok(Ok(())) => {}
             Ok(Err(err)) => {
                 // The kill switch may already be armed from a previous session, so this is a
@@ -442,6 +442,9 @@ async fn attempt_inner(state: &Arc<TonoState>, app: &AppHandle, expected_generat
                 return attempt_from_stage_failure(state, generation, &attempt_record, failure, account_owner)
                     .await;
             }
+        }
+        if let Err(error) = proof {
+            return Attempt::Failed { generation, error, account_owner };
         }
 
         match run_stages(
