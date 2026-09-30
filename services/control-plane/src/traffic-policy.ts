@@ -229,6 +229,19 @@ function canonicalTrafficPolicyEntries(value: unknown, trusted: boolean): Traffi
     'growthbook.io', 'stripe.com', 'stripecdn.com', 'link.com', 'hcaptcha.com', 'stripe.network', 'storage.googleapis.com',
     'registry.npmjs.org', 'raw.githubusercontent.com', 'formulae.brew.sh',
     'sentry.io',
+    // Match the clients' assistant home domains: a signed direct suffix must
+    // not override their residential routes, including assistant auth hosts.
+    'chatgpt.com', 'openai.com', 'chat.com', 'ai.com', 'oaistatic.com', 'oaiusercontent.com',
+    'grok.com', 'grok.x.com', 'grokipedia.com', 'x.ai',
+    'perplexity.ai', 'perplexity.com', 'pplx.ai',
+    'gemini.google.com', 'bard.google.com', 'aistudio.google.com',
+    'generativelanguage.googleapis.com', 'notebooklm.google.com',
+    'muse.ai', 'meta.ai', 'muse.meta.com', 'www.muse.ai',
+    'meta.com', 'facebook.com', 'fb.com', 'fb.me', 'fb.watch', 'fbcdn.net',
+    'facebook.net', 'messenger.com', 'instagram.com', 'cdninstagram.com', 'ig.me', 'threads.net',
+    'gmail.com', 'mail.google.com', 'googlemail.com', 'inbox.google.com',
+    'accounts.google.com', 'myaccount.google.com', 'oauth2.googleapis.com',
+    'mail-pa.clients6.google.com', 'gmail.googleapis.com',
     'tono.app', 'tono.com',
   ];
   const seenHosts = new Set<string>();
