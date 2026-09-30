@@ -329,9 +329,9 @@ async fn release_failed(state: &TonoState, error: &anyhow::Error) -> String {
 /// sequence (DNS restore → core stop → owner-gated release, §6/C1).
 /// Idempotent while a disconnect is already in flight (L6).
 pub async fn disconnect(state: Arc<TonoState>, app: AppHandle) -> Result<(), String> {
-    state.client.transport().set_auth_tunnel_port(0);
     let operation = {
         let mut inner = state.lock().await;
+        inner.client.transport().set_auth_tunnel_port(0);
         if inner.fsm.status().is_disconnecting {
             let operation = start_explicit_release(&state, &app, None, true).await;
             drop(inner);

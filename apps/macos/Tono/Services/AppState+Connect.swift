@@ -1434,7 +1434,7 @@ extension AppState {
                 // process a fraction of a second from recreating the
                 // interface, so one missing sighting without a task in flight
                 // is not a verdict either. Require the absence to persist
-                // across consecutive ticks; a real TUN death fails closed on
+                // across consecutive ticks; a real TUN death disconnects on
                 // the next one.
                 guard state.consecutiveMissingTUNTicks >= Self.tunMissingVerdictTicks else {
                     return .continueMonitoring

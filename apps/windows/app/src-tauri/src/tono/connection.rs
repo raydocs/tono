@@ -573,7 +573,10 @@ async fn guard_snapshot(
 async fn fail_connect(
     state: &Arc<TonoState>, app: &AppHandle, generation: u64, err: String, account_owner: (u64, u64),
 ) -> bool {
-    state.client.transport().set_auth_tunnel_port(0);
+    {
+        let inner = state.lock().await;
+        inner.client.transport().set_auth_tunnel_port(0);
+    }
     let task_state = Arc::clone(state);
     let task_app = app.clone();
     match cleanup::reconcile_failure(

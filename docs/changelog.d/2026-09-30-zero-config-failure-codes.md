@@ -13,5 +13,9 @@
 
 - 新增/优化：登录 DoH 不再只问 1.1.1.1。AliDNS（`dns.alidns.com` 钉在 223.5.5.5 / 223.6.6.6）、DNSPod（`doh.pub` 钉在 1.12.12.12 / 120.53.53.53）、Cloudflare（1.1.1.1 / 1.0.0.1）、Google（8.8.8.8 / 8.8.4.4）同时问，先到的公网 A 记录胜出。不改系统 DNS。没有已发布的、与 API 证书相同的 CDN 前置域名，所以 `extra_api_front_hosts` 为空；备用地址仍是现有钉扎 IP 和同一主机名的 DoH 答案。
 - 新增/优化：耗尽后的网络决定只在 `network_disposition::exhausted_protection`。#706 拥有这个函数。#703 调用它，不再单独 match 普通/严格。所有者要求选择性 fail-open：放行一般流量，继续挡住 AI 服务（Claude/OpenAI），真实地址不到达它们。钩子由 bc-3c5ccfd4 的 PF/WFP 规则注册；未注册或返回 false 时仍是今天的全量释放。严格 `permanent` 优先，钩子不能覆盖。
-- 验证：本机 rustc 1.83 不能编译 edition 2024，`cargo test -p tono-core` 未执行。macOS XCTest 未执行。前端文案未改，未重跑 vitest。
+- 验证：本机用 rustup 安装的 rustc 1.98.1 跑 `cargo test -p tono-core --lib`：296 passed。macOS XCTest 未在本机执行。前端文案未改，未重跑 vitest。
+
+### 2026-09-30 续记 · CI
+
+- 缺陷修复：登录隧道端口写在 `TonoState` 外层，Windows `app-rust` 编不过。改为在状态锁里用 `inner.client`。macOS 两条新支持码补了简体中文。隧道丢失后的监视器测试改成期望支持码，替换窗口内仍不拆会话。
 - 剩余限制：竞速 DoH 没有在中国大陆网络上验证。选择性阻断的过滤器还不存在；钩子就绪前不会少放行，也不会多阻断。#703 合入后若 `fail_connect` 已经按同一决定释放过，其 FailOpen 分支不应再释放第二次。
