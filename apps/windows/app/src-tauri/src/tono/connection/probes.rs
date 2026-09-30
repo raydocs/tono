@@ -24,7 +24,7 @@ use super::failure::{
     NODE_OR_CORE_UNREACHABLE_PREFIX, TUN_DATA_PLANE_BROKEN_PREFIX, TUN_INGRESS_BROKEN_PREFIX,
     WFP_LOCK_UNVERIFIED_PREFIX, StageFailure,
 };
-use super::status::set_stage;
+use super::status::{log_current_stage_duration, set_stage};
 use super::transaction::ConnectTransaction;
 
 /// §6.8 exit probe target.
@@ -136,11 +136,9 @@ pub(super) async fn verify_post_lock(
     started: std::time::Instant,
     transaction: &ConnectTransaction,
 ) -> Result<KillSwitchStatus, StageFailure> {
-    // §6.8 is deliberately one advisory measurement for the whole verification group. Repeating
-    // Mihomo's doubled `unified-delay` request on every TUN retry used to spend another full
-    // cross-border round without adding any connection proof.
-    // CheckingExit is only a UI label. The real TUN race starts immediately;
-    // controller /delay may finish later and is never required for Connected.
+    // §6.8 is one advisory measurement. It must not run beside the TUN probe:
+    // unified-delay doubles `/delay`, and each sample is another Reality
+    // handshake on the same exit. Success does not wait for it.
     set_stage(state, app, ConnectStage::CheckingExit, generation, started).await?;
     let outcomes = {
         let inner = state.lock().await;
@@ -150,23 +148,10 @@ pub(super) async fn verify_post_lock(
             None
         }
     };
-    let controller_recorder = outcomes.as_ref().map(|outcomes| ProbeRecorder { round: 1, path: "controller", outcomes: outcomes.clone() });
-    let controller_secret = secret.to_string();
-    let mut controller_task = Some(tokio::spawn(async move {
-        let began = std::time::Instant::now();
-        let result = probe_exit_once(&controller_secret, controller_port).await;
-        if let Some(recorder) = controller_recorder {
-            recorder.record("Google", result.is_ok(), "advisory", None, began.elapsed().as_millis() as u64);
-        }
-        result
-    }));
     set_stage(state, app, ConnectStage::VerifyingTraffic, generation, started).await?;
     let mut last = String::from("post-lock verification did not run");
     for round in 0..POST_LOCK_VERIFY_ROUNDS {
         if round > 0 && state.lock().await.connect_generation != generation {
-            if let Some(task) = controller_task.take() {
-                task.abort();
-            }
             return Err(StageFailure::Stale);
         }
         let final_round = round + 1 == POST_LOCK_VERIFY_ROUNDS;
@@ -191,9 +176,27 @@ pub(super) async fn verify_post_lock(
         };
         let data_plane_error = data_plane.as_ref().err().cloned();
         let controller_probe = if data_plane.is_ok() {
-            match controller_task.as_ref() {
-                Some(task) if task.is_finished() => match controller_task.take().unwrap().await {
-                    Ok(result) => match result {
+            Ok(())
+        } else if final_round {
+            let controller_recorder = outcomes.as_ref().map(|outcomes| ProbeRecorder {
+                round: round + 1,
+                path: "controller",
+                outcomes: outcomes.clone(),
+            });
+            transaction
+                .wait("advisory exit measurement", async {
+                    let began = std::time::Instant::now();
+                    let result = probe_exit_once(secret, controller_port).await;
+                    if let Some(recorder) = controller_recorder {
+                        recorder.record(
+                            "Google",
+                            result.is_ok(),
+                            "advisory",
+                            None,
+                            began.elapsed().as_millis() as u64,
+                        );
+                    }
+                    match result {
                         Ok(delay) => {
                             if delay > 0 {
                                 let mut inner = state.lock().await;
@@ -202,30 +205,6 @@ pub(super) async fn verify_post_lock(
                             Ok(())
                         }
                         Err(error) => Err(error),
-                    },
-                    Err(_) => Ok(()),
-                },
-                _ => Ok(()),
-            }
-        } else if final_round {
-            let task = controller_task.take();
-            transaction
-                .wait("advisory exit measurement", async {
-                    match task {
-                        Some(task) => match task.await {
-                            Ok(result) => match result {
-                                Ok(delay) => {
-                                    if delay > 0 {
-                                        let mut inner = state.lock().await;
-                                        inner.record_exit_delay(delay);
-                                    }
-                                    Ok(())
-                                }
-                                Err(error) => Err(error),
-                            },
-                            Err(_) => Err("controller probe cancelled".to_string()),
-                        },
-                        None => Ok(()),
                     }
                 })
                 .await?
@@ -250,6 +229,24 @@ pub(super) async fn verify_post_lock(
                         error,
                     });
                 }
+                // The data plane already succeeded. Sample RTT afterwards so
+                // the UI still has a delay, without sharing the handshake
+                // that proved the tunnel.
+                let delay_state = state.clone();
+                let delay_secret = secret.to_string();
+                tokio::spawn(async move {
+                    let Ok(delay) = probe_exit_once(&delay_secret, controller_port).await else {
+                        return;
+                    };
+                    if delay == 0 {
+                        return;
+                    }
+                    let mut inner = delay_state.lock().await;
+                    if inner.connect_generation == generation {
+                        inner.record_exit_delay(delay);
+                    }
+                });
+                log_current_stage_duration(state, generation, started).await;
                 return Ok(status);
             }
             PostLockVerification::Retry { error } => {

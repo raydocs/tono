@@ -53,6 +53,15 @@ final class AppState {
                             StageDuration(stage: oldValue, milliseconds: elapsedMs)
                         )
                     }
+                    let cumulative = connectionStartedAt.map {
+                        max(0, Int(now.timeIntervalSince($0) * 1_000))
+                    }
+                    ConnectionTelemetryBuffer.shared.record(
+                        "stage",
+                        stage: oldValue.telemetryKey,
+                        elapsedMs: cumulative,
+                        delayMs: elapsedMs
+                    )
                 }
                 connectionStageStartedAt = now
             }
@@ -1577,6 +1586,7 @@ final class AppState {
     func verifyProtectedConnection(
         controller: ProbeCheck? = nil,
         controllerTask: Task<ProbeCheck, Never>? = nil,
+        advisoryProbe: (@MainActor () -> Task<ProbeCheck, Never>)? = nil,
         mixedPort: Int,
         generation: UInt64,
         rounds: Int,
@@ -1653,6 +1663,11 @@ final class AppState {
             let controllerResult: ProbeCheck
             if case .ok = tun {
                 controllerResult = controller ?? .ok
+                // The tunnel is already proved. A delay sample after that
+                // does not sit on the handshake the probe just paid for.
+                if controllerTask == nil, let advisoryProbe {
+                    _ = advisoryProbe()
+                }
             } else if includeMixed {
                 if let controller {
                     controllerResult = controller
@@ -1661,6 +1676,14 @@ final class AppState {
                         await controllerTask.value
                     } onCancel: {
                         controllerTask.cancel()
+                    }
+                    if let result = interrupted(round) { return result }
+                } else if let advisoryProbe {
+                    let task = advisoryProbe()
+                    controllerResult = await withTaskCancellationHandler {
+                        await task.value
+                    } onCancel: {
+                        task.cancel()
                     }
                     if let result = interrupted(round) { return result }
                 } else {

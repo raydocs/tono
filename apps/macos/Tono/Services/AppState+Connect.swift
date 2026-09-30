@@ -455,15 +455,16 @@ extension AppState {
                 // the core and PF live; only an exhausted real data plane can
                 // refuse Connected.
                 self.connectionStage = .checkingExit
-                let controllerTask = Task {
-                    await self.advisoryControllerExitProbe(
-                        api: api,
-                        selectedExit: selectedExit
-                    )
-                }
                 self.connectionStage = .verifyingTraffic
                 let verdict = await self.verifyProtectedConnection(
-                    controllerTask: controllerTask,
+                    advisoryProbe: {
+                        Task {
+                            await self.advisoryControllerExitProbe(
+                                api: api,
+                                selectedExit: selectedExit
+                            )
+                        }
+                    },
                     mixedPort: self.config.mixedPort,
                     generation: self.connectionCoordinator.protectionOperationGeneration,
                     rounds: ProtectedConnectivity.postLockVerifyRounds
@@ -519,6 +520,15 @@ extension AppState {
                             )
                         )
                     }
+                    let cumulative = self.connectionStartedAt.map {
+                        max(0, Int(Date().timeIntervalSince($0) * 1_000))
+                    }
+                    ConnectionTelemetryBuffer.shared.record(
+                        "stage",
+                        stage: self.connectionStage.telemetryKey,
+                        elapsedMs: cumulative,
+                        delayMs: elapsedMs
+                    )
                 }
                 self.completedConnectionStages.insert(self.connectionStage)
                 self.isConnecting = false

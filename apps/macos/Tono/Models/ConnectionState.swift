@@ -14,6 +14,21 @@ enum ConnectionStage: String, CaseIterable, Hashable {
     var localizedTitle: String {
         String(localized: String.LocalizationValue(rawValue))
     }
+
+    /// Wire key shared with the Windows connect stage enum.
+    var telemetryKey: String {
+        switch self {
+        case .preparing: "preparing"
+        case .preparingHelper: "preparingHelper"
+        case .startingKillSwitch: "startingKillSwitch"
+        case .startingTunnel: "startingTunnel"
+        case .lockingTraffic: "lockingTraffic"
+        case .applyingCloudPolicy: "applyingCloudPolicy"
+        case .securingDNS: "securingDNS"
+        case .checkingExit: "checkingExit"
+        case .verifyingTraffic: "verifyingTraffic"
+        }
+    }
 }
 
 enum DisconnectionStage: String {
