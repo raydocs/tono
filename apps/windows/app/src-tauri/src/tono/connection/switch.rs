@@ -3,7 +3,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 use tauri::AppHandle;
-use tono_core::EXIT_GROUP_NAME;
+use tono_core::{node::ValidatedNode, EXIT_GROUP_NAME};
 use tono_logging::{Type, logging};
 use tono_plugin_core::{MihomoExt as _, models::Protocol};
 use crate::core::service;
@@ -135,6 +135,10 @@ fn restore_selection_value(
     crate::tono::state::save_selection(catalog_dir, previous_name)
 }
 
+pub(super) fn hot_switch_allowed(previous: Option<&ValidatedNode>, next: &ValidatedNode) -> bool {
+    previous.is_some_and(|previous| previous.is_hysteria2() == next.is_hysteria2())
+}
+
 pub async fn switch_selected_node(
     state: Arc<TonoState>,
     app: AppHandle,
@@ -179,6 +183,12 @@ pub async fn switch_selected_node(
         restore_selected_node(&state, &app, generation, &previous_name).await;
         return;
     };
+    // UDP fallback rules are fixed when the runtime is built. A VLESS/HY2 change,
+    // or an unknown previous transport, needs a rebuild with WFP still armed.
+    if !hot_switch_allowed(previous.as_ref(), &next) {
+        cold_switch_selected_node(state, app, generation, guard).await;
+        return;
+    }
     let old_endpoints = previous
         .as_ref()
         .map(|node| proxy_endpoints_for(node, &nodes, routing.as_ref()))
