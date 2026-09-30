@@ -26,3 +26,7 @@
 ### 2026-09-30 续记 · 变基到已含 #703 的 main
 
 - 来源：变基到 `origin/main` `01c2403f`（[#703](https://github.com/raydocs/tono/pull/703) 已合入）。没有把 main 合并进来。`connection.rs` 的失败分支两边都留：`FailOpen` 仍调用 `release_explicit`，然后才同步启动探测；`SelectiveAiHold` 不探测、不显式全量释放；`HoldClosed` 仍走保护重连。助手协议仍是 `4.52.6`。
+
+### 2026-09-30 续记 · 变基到已含 #733 的 main
+
+- 来源：变基到 `origin/main` `cbb4f56a`。没有把 main 合并进来。唯一冲突是 `docs/DECISIONS.md`：Continuity 与 Windows WFP 放行记录留在探测记录上面。`FailOpen` 仍先 `release_explicit` 再同步 `spawn_after_release`。助手协议仍是 `4.52.6`。
