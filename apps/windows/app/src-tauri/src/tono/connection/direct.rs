@@ -937,7 +937,8 @@ pub(super) fn controller_direct_graph_is_active(
     // AND selector, and a single final MATCH. Requiring the complete
     // cardinality/order rejects broad, missing, duplicated, or stale DIRECT
     // selectors. With home-broadband split routing the home block also carries
-    // CLAUDE_HOME_DOMAINS pointing at Tono-Claude-Home.
+    // CLAUDE_HOME_DOMAINS pointing at Tono-Claude-Home, followed by the same
+    // assistant matchers rejecting UDP even when the selected exit is HY2.
     let claude_target = if claude_home {
         config::CLAUDE_HOME_GROUP_NAME
     } else {
@@ -953,6 +954,7 @@ pub(super) fn controller_direct_graph_is_active(
     let mut home_rows = config::HOME_PROCESS_NAMES.len() + home_path_regexes.len();
     if claude_home {
         home_rows += config::CLAUDE_HOME_DOMAINS.len() + config::CLAUDE_HOME_IPV4_CIDRS.len();
+        home_rows *= 2;
     }
     // + 4 = two loopback rows, the UDP REJECT row, and the final MATCH.
     let expected_len = expected_direct_rules.len() + 3 + home_rows + 1;
@@ -1008,6 +1010,48 @@ pub(super) fn controller_direct_graph_is_active(
             claude_target,
         )?;
         index += 1;
+    }
+    if claude_home {
+        for domain in config::CLAUDE_HOME_DOMAINS {
+            expect_rule(
+                rules.get(index),
+                index,
+                "AND",
+                &format!("((Network,udp) && (DomainSuffix,{domain}))"),
+                "REJECT",
+            )?;
+            index += 1;
+        }
+        for cidr in config::CLAUDE_HOME_IPV4_CIDRS {
+            expect_rule(
+                rules.get(index),
+                index,
+                "AND",
+                &format!("((Network,udp) && (IPCIDR,{cidr}))"),
+                "REJECT",
+            )?;
+            index += 1;
+        }
+        for process in config::HOME_PROCESS_NAMES {
+            expect_rule(
+                rules.get(index),
+                index,
+                "AND",
+                &format!("((Network,udp) && (ProcessName,{process}))"),
+                "REJECT",
+            )?;
+            index += 1;
+        }
+        for regex in &home_path_regexes {
+            expect_rule(
+                rules.get(index),
+                index,
+                "AND",
+                &format!("((Network,udp) && ({MIHOMO_PROCESS_PATH_REGEX_TYPE},{regex}))"),
+                "REJECT",
+            )?;
+            index += 1;
+        }
     }
     for (offset, expected) in expected_direct_rules.iter().enumerate() {
         let rule_index = index + offset;
