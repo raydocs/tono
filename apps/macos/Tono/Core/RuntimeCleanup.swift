@@ -382,16 +382,17 @@ enum RuntimeCleanup {
             // install path once before declaring the launch failed.
             var repaired = false
             do {
-                try await PrivilegedRuntimeCoordinator.shared.prepareHelper()
-                let recheck = await PrivilegedRuntimeCoordinator.shared
-                    .protectedDNSStatus()
-                if recheck.snapshotPresent {
-                    _ = try await PrivilegedRuntimeCoordinator.shared
-                        .restoreProtectedDNSIfConfigured()
-                    repaired = true
-                } else {
-                    repaired = recheck.available
-                }
+                repaired = try await repairProtectedDNSAtLaunch(
+                    prepareHelper: {
+                        try await PrivilegedRuntimeCoordinator.shared.prepareHelper()
+                    },
+                    status: {
+                        await PrivilegedRuntimeCoordinator.shared.protectedDNSStatus()
+                    },
+                    restoreDNS: {
+                        try await PrivilegedRuntimeCoordinator.shared.restoreProtectedDNSIfConfigured()
+                    }
+                )
             } catch {
                 // Losing the real cause here (most often a cancelled
                 // administrator prompt) would present the unrelated DNS
@@ -415,6 +416,20 @@ enum RuntimeCleanup {
             }
         }
         return shouldResumeProtection
+    }
+
+    static func repairProtectedDNSAtLaunch(
+        prepareHelper: () async throws -> Void,
+        status: () async -> (
+            available: Bool, configured: Bool, snapshotPresent: Bool, service: String?
+        ),
+        restoreDNS: () async throws -> Bool
+    ) async throws -> Bool {
+        try await prepareHelper()
+        let recheck = await status()
+        guard recheck.available else { return false }
+        _ = try await restoreDNS()
+        return true
     }
 
     /// Folds launch's helper answer into the stored fail-closed intent,
