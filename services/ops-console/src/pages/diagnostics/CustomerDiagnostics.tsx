@@ -1,4 +1,4 @@
-import { Empty } from '@/components/ops/Empty';
+import { EmptyLine } from '@/components/ops/Empty';
 import { Section } from '@/components/ops/Section';
 import { getJson } from '@/lib/api';
 import { useResource } from '@/lib/use-resource';
@@ -18,11 +18,11 @@ export function CustomerDiagnostics({ userId }: { userId: string }) {
   const data = resource.status === 'ready' ? resource.data : null;
   return (
     <Section title="自动诊断">
-      {resource.status === 'loading' ? <Empty message="正在读取自动诊断…" /> : null}
+      {resource.status === 'loading' ? <EmptyLine message="正在读取自动诊断…" /> : null}
       {resource.status === 'error' ? (
-        <Empty message="这份自动诊断还读不到。控制面接口部署之后，这里会显示会话、链路和 DNS。" />
+        <EmptyLine message="这份自动诊断还读不到。控制面接口部署之后，这里会显示会话、链路和 DNS。" />
       ) : null}
-      {data && data.sessions.length === 0 ? <Empty message="还没有自动诊断会话。" /> : null}
+      {data && data.sessions.length === 0 ? <EmptyLine message="还没有自动诊断会话。" /> : null}
       {data && data.sessions.length > 0 ? (
         <ul className="grid gap-2">
           {data.sessions.map((session) => (

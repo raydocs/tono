@@ -1,4 +1,4 @@
-import { Empty } from '@/components/ops/Empty';
+import { EmptyLine } from '@/components/ops/Empty';
 import { Section } from '@/components/ops/Section';
 import { getJson } from '@/lib/api';
 import { useResource } from '@/lib/use-resource';
@@ -19,7 +19,7 @@ export function FailureClusters() {
   return (
     <Section title="失败聚类">
       {resource.status === 'ready' && resource.data.clusters.length === 0 ? (
-        <Empty message="这段时间没有打开的失败聚类。" />
+        <EmptyLine message="这段时间没有打开的失败聚类。" />
       ) : null}
       {resource.status === 'ready' && resource.data.clusters.length > 0 ? (
         <ul className="grid gap-2">
@@ -34,9 +34,9 @@ export function FailureClusters() {
           ))}
         </ul>
       ) : null}
-      {resource.status === 'loading' ? <Empty message="正在读取失败聚类…" /> : null}
+      {resource.status === 'loading' ? <EmptyLine message="正在读取失败聚类…" /> : null}
       {resource.status === 'error' ? (
-        <Empty message="失败聚类还读不到。控制面的聚类接口部署之后，这里会列出同一类失败。" />
+        <EmptyLine message="失败聚类还读不到。控制面的聚类接口部署之后，这里会列出同一类失败。" />
       ) : null}
     </Section>
   );

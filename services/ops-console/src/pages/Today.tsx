@@ -172,8 +172,6 @@ export default function TodayPage({
         />
       </section>
 
-      <FailureClusters />
-
       <div className="today-grid">
         <div className="today-aux">
           {/* The morning read sits in the aux column on desktop and folds shut
@@ -227,6 +225,11 @@ export default function TodayPage({
               />
             )}
           </div>
+
+          {/* Under the list, not above it. On a phone the first 认领 has to
+              be on screen when the page opens; a block here used to push it
+              past the fold. */}
+          <FailureClusters />
         </div>
       </div>
 
