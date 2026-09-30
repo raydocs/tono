@@ -69,6 +69,7 @@ extension AppState {
                 guard !Task.isCancelled,
                       connectionCoordinator.protectionOperationGeneration == generation else { return }
                 guard result.disconnectVerified == true else { throw NativeUpdateDownload.failure("Update Disconnect was not verified.") }
+                launchProtectionSequence &+= 1
                 isProtectionBlocked = false
                 KillSwitchService.isArmed = false
                 resetReleasedSessionHistory()
@@ -96,7 +97,9 @@ extension AppState {
         let generation = connectionCoordinator.protectionOperationGeneration
         let sequence = launchProtectionSequence
         let health = await protectionAudits.killSwitchHealth()
-        guard !Task.isCancelled, nativeUpdatePending,
+        guard !Task.isCancelled,
+              nativeUpdatePending || RuntimeCleanup.nativeUpdatePending
+                || RuntimeCleanup.nativeUpdateBlocksConnect,
               connectionCoordinator.protectionOperationGeneration == generation,
               launchProtectionSequence == sequence else { return false }
         launchProtectionSequence &+= 1
@@ -105,10 +108,13 @@ extension AppState {
             isProtectionUnconfirmed = true
             return true
         }
-        KillSwitchService.isArmed = health.wanted || health.live
+        // The current helper maps an unreadable PF status to live=false.
+        // A live reading proves a barrier; a non-live reading cannot certify
+        // release, even if the intent file is absent. Only the verified
+        // Disconnect reply may settle release and clear local recovery intent.
+        if health.wanted || health.live { KillSwitchService.isArmed = true }
         isProtectionBlocked = health.live
-        isProtectionUnconfirmed = !health.live && health.wanted
-        if !health.wanted, !health.live { resetReleasedSessionHistory() }
+        isProtectionUnconfirmed = !health.live
         return true
     }
 
