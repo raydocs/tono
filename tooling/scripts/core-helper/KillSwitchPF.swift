@@ -858,6 +858,9 @@ extension KillSwitchManager {
         },
         heldReference: (String) throws -> PFEnableReference? = {
             try KillSwitchManager.heldPFEnableReference(recordPath: $0)
+        },
+        listReferences: (TimeInterval) throws -> HelperCommandResult = {
+            try KillSwitchManager.listPFEnableReferences(deadline: $0)
         }
     ) throws {
         if let held = try heldReference(recordPath) {
@@ -891,7 +894,12 @@ extension KillSwitchManager {
         let previous = readPFEnableReference(recordPath)
         let token: String
         if let pending = unrecordedPFEnableReference, pending.boot == boot,
-           try pfEnabled(), try pfEnableReferenceListed(pending.token) {
+           try pfEnabled(),
+           try unrecordedPFEnableReferenceHeld(
+               pending,
+               deadline: KillSwitchManager.pfctlQueryDeadline,
+               listReferences: listReferences
+           ) {
             // A token from an earlier failed record write is still held.
             // Retry recording that one instead of taking another.
             token = pending.token
@@ -1151,6 +1159,16 @@ extension KillSwitchManager {
         // Status ignored: with no token at all the kernel answers ENOENT.
         let listed = try run("/sbin/pfctl", ["-s", "References"], deadline: deadline)
         let listedTo = time(nil)
+        // An answer that is not a full listing says nothing about any token:
+        // settling it as "the child took none" would clear the acquire while
+        // the token may still be held (R643-F1, same class as the hold path).
+        // The ENOENT shape still counts as a listing with no tokens.
+        guard pfReferenceSnapshot(
+            status: listed.status,
+            output: String(decoding: listed.output, as: UTF8.self)
+        ) != nil else {
+            throw HelperFailure.system("pfctl did not list the PF enable references.")
+        }
         if let token = pfEnableToken(
             takenBy: acquire.pid,
             spawned: acquire.spawned,
@@ -1326,6 +1344,25 @@ extension KillSwitchManager {
     /// `pfctl -s References`; the self-test replaces it to stage an answer.
     static func listPFEnableReferences(deadline: TimeInterval) throws -> HelperCommandResult {
         try run("/sbin/pfctl", ["-s", "References"], deadline: deadline)
+    }
+
+    /// Whether a full `pfctl -s References` listing still shows an
+    /// unrecorded token. Only a full listing proves it gone: any other
+    /// answer (a failure status, or pfctl's exit 0 after a `DIOCGETSTARTERS`
+    /// warning) says nothing about the token and throws, so the hold path
+    /// keeps it for the next check instead of clearing the only handle to a
+    /// reference that may still be held (R643-F1). A cleared handle has no
+    /// release path afterwards.
+    static func unrecordedPFEnableReferenceHeld(
+        _ pending: PFEnableReference,
+        deadline: TimeInterval = KillSwitchManager.pfctlQueryDeadline,
+        listReferences: (TimeInterval) throws -> HelperCommandResult = {
+            try KillSwitchManager.listPFEnableReferences(deadline: $0)
+        }
+    ) throws -> Bool {
+        try pfEnableReferenceListing(deadline: deadline, listReferences: listReferences)
+            .split(whereSeparator: \.isWhitespace)
+            .contains(where: { $0 == pending.token })
     }
 
     /// A `pfctl -s References` answer that listed every token, as

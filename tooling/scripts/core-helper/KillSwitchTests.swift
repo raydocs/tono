@@ -1361,6 +1361,40 @@ extension KillSwitchManager {
                     + "\(deadlineElapsed) s, child gone \(overranChildGone))\n"
                 FileHandle.standardError.write(Data(failure.utf8))
             }
+            // R643-F1: an unrecorded PF enable token survives a hold whose
+            // listing gives no answer. Only a full listing proves it gone;
+            // a `DIOCGETSTARTERS` warning (exit 0) or a denied open (exit 1)
+            // must throw instead of reading as "not listed", or the hold
+            // clears the only handle to a reference that may still be held.
+            let pendingToken = PFEnableReference(token: "2222222222222222222", boot: "test-boot")
+            let listedRow = "4242     pfctl                        2222222222222222222      0 days 00:00:40\n"
+            let tokensHeader = "TOKENS:\n"
+                + "PID      Process Name                 TOKEN                    TIMESTAMP\n"
+            func heldWithStagedListing(status: Int32, output: String) throws -> Bool {
+                try unrecordedPFEnableReferenceHeld(
+                    pendingToken,
+                    deadline: 5,
+                    listReferences: { _ in .init(status: status, output: Data(output.utf8)) }
+                )
+            }
+            let listedWhenPresent = (try? heldWithStagedListing(
+                status: 0, output: tokensHeader + listedRow
+            )) == true
+            let clearedWhenAbsent = (try? heldWithStagedListing(
+                status: 0, output: "No pf starter references held\n"
+            )) == false
+            let warningThrows = (try? heldWithStagedListing(
+                status: 0, output: "pfctl: DIOCGETSTARTERS: Operation not permitted\n"
+            )) == nil
+            let deniedThrows = (try? heldWithStagedListing(
+                status: 1, output: "pfctl: /dev/pf: Permission denied\n"
+            )) == nil
+            let unansweredListingKeepsUnrecordedToken =
+                listedWhenPresent && clearedWhenAbsent && warningThrows && deniedThrows
+            if !unansweredListingKeepsUnrecordedToken {
+                let failure = "self-test: unanswered PF listing did not keep the unrecorded token\n"
+                FileHandle.standardError.write(Data(failure.utf8))
+            }
             return ruleShapesHold
                 && bundleShapesHold
                 && bundleOffWithoutTunnel
@@ -1380,6 +1414,7 @@ extension KillSwitchManager {
                 && acceptedUDPProxyTarget
                 && rejectedQuicProxyTarget
                 && commandDeadlineHolds
+                && unansweredListingKeepsUnrecordedToken
         } catch {
             return false
         }
