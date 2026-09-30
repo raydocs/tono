@@ -7,5 +7,6 @@
 - 工程与测试：一条服务端回归覆盖未启动立刻放行、启动中未到点保持、到点放行、重放落空立刻放行、墓碑跨一次服务启动仍在、严格记录不放行。一条应用侧纯函数回归覆盖何时允许后台重连。
 - 验证：本机 Cargo 1.83 不能编译 edition 2024，Windows 测试未跑。托管 CI 为验证。未在实机上跑 WFP。
 - 工程续记：`fee8c866` 的 Windows `service` 检查编译失败，`note_core_replay_finished` 只在 `core` 里导出，crate 根没有。已把它加进 `tono_service_protocol` 的 standalone 再导出，与 `restore_windows_kill_switch` 同一道门。这是编译接线，不是新的运行时缺陷。
+- 工程续记：变基到已含 #733 的 main。看门狗注释同时写明未启动立刻放行、启动中最多 30 秒，以及不健康时非严格约 3 秒放行、严格先重装再约 30 秒放行。`emergency_armed` 保持 `strict_kill_switch: true`。
 - 候选/发布：仅源码，无新候选。
 - 剩余限制：30 秒上限与应用 30 秒保护轮询需要实机校准（needs real-hardware calibration）。窗口在连接过程中到期时，保护轮询可能已经退出，当次要用户再点一次；下次启动仍能看见墓碑。DNS 恢复失败仍会去掉 WFP，但该失败路径未在本机注入。与 #733 任意顺序合并：两边都留 `strict_kill_switch` 和 `reconnect_after_release`；本 PR 的「未启动立刻放行、启动中最多 30 秒」与 #733 的损坏状态放行和不健康看门狗（非严格约 3 秒、严格约 30 秒）都留。`emergency_armed` 以 #733 的 `strict=true` 为准。本 PR 不改不健康重装路径。macOS 会话恢复不在本 PR 改。

@@ -3424,9 +3424,11 @@ fn direct_reload_invalidation_reason(
 /// core-proof window applies: if Core is not running with a Locked, verified tunnel
 /// permit when that window ends, the tick releases WFP and restores DNS instead of
 /// reinstalling the block. An explicit strict kill switch does not start the window.
-/// Any other mismatch reinstalls the full expected set transactionally. Persistent
-/// failures are log-throttled — one error per minute, the rest at debug — so a broken
-/// engine cannot flood the service log.
+/// An unhealthy tick does not reinstall unless that opt-in is set. Without it, general
+/// traffic is released after [`UNHEALTHY_RELEASE_TICKS`]. Strict mode repairs until
+/// [`STRICT_UNHEALTHY_RELEASE_TICKS`], then releases too. Persistent failures are
+/// log-throttled — one error per minute, the rest at debug — so a broken engine cannot
+/// flood the service log.
 pub fn spawn_windows_kill_switch_watchdog() {
     /// One error line per minute; the rest at debug.
     const ERROR_LOG_INTERVAL: std::time::Duration = std::time::Duration::from_secs(60);
