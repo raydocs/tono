@@ -396,7 +396,7 @@ describe('connectErrorSuggestsBackupChannel', () => {
     expect(connectErrorSuggestsServerSwitch(error)).toBe(false)
     expect(connectErrorSuggestsBackupChannel(error)).toBe(false)
     expect(formatTonoActionError(error, (key) => `translated:${key}`)).toBe(
-      'translated:tono.dashboard.errors.hy2Idle',
+      'translated:tono.dashboard.errors.hy2Idle (TONO_CONNECT_HY2_IDLE)',
     )
   })
 
