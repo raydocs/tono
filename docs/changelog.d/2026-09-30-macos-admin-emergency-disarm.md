@@ -11,3 +11,8 @@
 ### Root 接管验证
 - root 独立读取实际 lease、mode、Core/DNS/释放、旧 reset 和 install guard 路径后保存 assigned draft。CONTRACT 仅按编译manifest静态算hash，不代表构建证明。
 - 独立高风险diff审查及准确头hosted CI由root发起；DNS4.52/#690必须先合，后续集成保留admin4.53。原生实机/坏账本恢复仍未验证，不能关闭首次panic或声称紧急修复已完成。
+
+### 独立审查与处置（禁止合入）
+- 准确源码 `ba81b184` [CI36686240114](https://github.com/raydocs/tono/actions/runs/36686240114) 四jobs成功，但独立Codex high实际diff审查**未通过**：持久requested缺少可信修复/清除路径；新Core实例status不能证明未知进程已停；旧版签名installer guard不受新lease且census漏掉。不得以自测绿代替这些安全证明。
+- Codex `gpt-6-sol/xhigh` 仲裁为**NO-GO**：不是再补一次bootout/census就能完成的窄修；必须完整设计可恢复hold、正向Core停止证明和旧安装器可执行边界。保留[#691](https://github.com/raydocs/tono/pull/691) draft，未合main，不以未来repair设计冒充当前修完。
+- 本次源码范围审查记录不覆盖DNS4.52/#690；后续若继续，先满足merge order，再对新状态机/安装边界增量审查和hosted/device故障注入。未触及本机或用户系统网络，未发布。
