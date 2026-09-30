@@ -44,6 +44,7 @@ extension AccountSession {
     /// NOT ready (crash recovery with an unreachable control plane). Without
     /// it the sign-in gate and menu bar offered no way to restore internet.
     func restoreDirectInternet() async {
+        NetworkLossReport.enqueue(code: NetworkLossReport.restoreNetwork, node: "")
         invalidateAccountReads()
         // Cancelling the account work does not reach a detached catalog
         // request, and the release would wait out its network timeout. The

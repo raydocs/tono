@@ -64,6 +64,7 @@ extension AppState {
                             // clears the strike count; "Choose Reality" above
                             // stays the action to take.
                             let refusal = self.errorMessage ?? reason
+                            self.noteProtectionLoss(NetworkLossReport.failOpen)
                             self.releaseAfterPausedFailure(
                                 pending: refusal + " "
                                     + String(localized: "Tono is restoring this Mac's normal internet; AI services stay blocked."),
@@ -175,6 +176,7 @@ extension AppState {
                         resumeWhenReachable: true
                     )
                 } else {
+                    // PF never armed, so this cleanup does not take the network.
                     self.errorMessage = stalledMessage
                     self.disconnect(
                         releaseKillSwitch: true,
@@ -708,6 +710,31 @@ extension AppState {
         lastConnectionFailure = nil
     }
 
+    /// Records a P0 diagnostics bundle. The body waits on disk until the next
+    /// signed-in upload, which is how it leaves after the network returns.
+    func noteProtectionLoss(_ code: String) {
+        NetworkLossReport.enqueue(code: code, node: selectedExitNode()?.name ?? "")
+    }
+
+    /// Retries stopped while the barrier is still up. The user has no network
+    /// until they press Restore internet or a later retry succeeds.
+    func holdKillSwitchForUser(liftsOnNetworkChange: Bool) {
+        protectedReconnectPausedForUserAction = true
+        protectedReconnectPauseLiftsOnNetworkChange = liftsOnNetworkChange
+        if isProtectionBlocked || isProtectionUnconfirmed || KillSwitchService.isArmed {
+            noteProtectionLoss(NetworkLossReport.killSwitchStuck)
+        }
+    }
+
+    /// Restore internet, including Cancel while a connect already holds the
+    /// network. A disconnect of a working tunnel is not this path.
+    func restoreInternet() {
+        if !isConnected && (isProtectionBlocked || isProtectionUnconfirmed || KillSwitchService.isArmed) {
+            noteProtectionLoss(NetworkLossReport.restoreNetwork)
+        }
+        disconnect(releaseKillSwitch: true)
+    }
+
     /// Stops Mihomo/TUN. The default leaves the kill switch armed. An exhausted
     /// failure passes `releaseKillSwitch: true` unless the user explicitly
     /// enabled a strict kill switch, so the original network comes back.
@@ -906,6 +933,9 @@ extension AppState {
                         "helper_release_repair_failed",
                         details: ["error": error.localizedDescription]
                     )
+                    await MainActor.run {
+                        self?.noteProtectionLoss(NetworkLossReport.killSwitchStuck)
+                    }
                 }
             }
 
@@ -1526,6 +1556,7 @@ extension AppState {
                     protectedService: service
                 ) {
                 case .moved:
+                    self.noteProtectionLoss(NetworkLossReport.networkLoss)
                     self.recoveryCause = .networkChange
                     self.disconnect(releaseKillSwitch: false)
                     self.errorMessage = String(
@@ -2084,8 +2115,7 @@ extension AppState {
                 )
                 return false
             }
-            protectedReconnectPausedForUserAction = true
-            protectedReconnectPauseLiftsOnNetworkChange = false
+            holdKillSwitchForUser(liftsOnNetworkChange: false)
             helperRejectedStatusRead = true
             self.connectionCoordinator.protectedReconnectTask?.cancel()
             self.connectionCoordinator.protectedReconnectTask = nil
@@ -2288,6 +2318,14 @@ extension AppState {
             let holdsUpdateBarrier = nativeUpdatePending
                 || RuntimeCleanup.nativeUpdateBlocksConnect
                 || RuntimeCleanup.nativeUpdatePending
+            // The queue is written before the release so the selected node is
+            // still known. A pending update keeps the barrier on exhausted
+            // tunnel loss, so that case is a stuck filter, not a fail-open.
+            if exhaustedTunnelLoss, holdsUpdateBarrier {
+                noteProtectionLoss(NetworkLossReport.killSwitchStuck)
+            } else {
+                noteProtectionLoss(NetworkLossReport.failOpen)
+            }
             disconnect(
                 releaseKillSwitch: true,
                 exhaustedTunnelLoss: exhaustedTunnelLoss,
@@ -2313,6 +2351,7 @@ extension AppState {
                 scheduleUnarmedReconnect()
             }
         } else {
+            noteProtectionLoss(NetworkLossReport.killSwitchStuck)
             disconnect(releaseKillSwitch: false)
             scheduleProtectedReconnect()
         }
@@ -2583,6 +2622,7 @@ extension AppState {
             "protected_dns_broken_retries_exhausted",
             details: ["audits": String(consecutiveProtectedDNSBrokenAudits)]
         )
+        noteProtectionLoss(NetworkLossReport.failOpen)
         releaseAfterPausedFailure(
             pending: String(localized: "Protected DNS did not take effect after repeated reconnects: macOS is still resolving through another DNS server. Tono is restoring this Mac's normal internet; AI services stay blocked."),
             released: String(localized: "Protected DNS did not take effect after repeated reconnects: macOS is still resolving through another DNS server. This Mac is back on its normal internet and AI services stay blocked. Connect again when you are ready.")
@@ -2640,6 +2680,7 @@ extension AppState {
             ]
         )
         let detail = " (" + summary + ")"
+        noteProtectionLoss(NetworkLossReport.failOpen)
         releaseAfterPausedFailure(
             pending: String(localized: "DNS conflict: a corporate VPN, profile or /etc/resolver rule sends some domains to a DNS server outside Tono's protection. Tono is restoring this Mac's normal internet; AI services stay blocked. Turn that rule off, then connect again.")
                 + detail,

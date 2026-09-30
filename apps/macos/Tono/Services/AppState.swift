@@ -690,6 +690,7 @@ final class AppState {
                 "system_network_change_requires_reconnect",
                 details: self.auditProtectionDetails()
             )
+            if networkMoved { self.noteProtectionLoss(NetworkLossReport.networkLoss) }
             self.recoveryCause = .networkChange
             self.disconnect(releaseKillSwitch: false)
             self.errorMessage = networkMoved
@@ -1076,6 +1077,7 @@ final class AppState {
     func holdAutomaticResumeAfterUnexpectedRestart() {
         autoConnectRequested = false
         guard isProtectionBlocked else { return }
+        noteProtectionLoss(NetworkLossReport.crashWhileProtected)
         LocalTrafficAudit.shared.recordEvent("automatic_resume_held_after_restart")
         let reason = String(localized: "This Mac restarted unexpectedly while Tono was connected, so Tono did not reconnect automatically.")
         releaseAfterPausedFailure(

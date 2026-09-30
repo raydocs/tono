@@ -19,6 +19,7 @@ final class PeriodicTelemetryConsentTests: XCTestCase {
         defaults.removeObject(forKey: SettingsKey.periodicTelemetryDefaultV3Applied)
         defaults.removeObject(forKey: SettingsKey.periodicTelemetryUserChosen)
         defaults.removeObject(forKey: SettingsKey.internalFailureReportsOptedOut)
+        defaults.removeObject(forKey: TelemetryOutbox.key)
         super.tearDown()
     }
 
@@ -128,6 +129,57 @@ final class PeriodicTelemetryConsentTests: XCTestCase {
         XCTAssertFalse(
             AccountSession.failureReportStillAllowed(builtAs: .classified, internalBuild: true),
             "an opt-out saved while the report waited must stop its next send attempt"
+        )
+    }
+
+    func testNetworkLossCodesWaitOnDiskUntilTheNetworkReturns() throws {
+        defaults.removeObject(forKey: TelemetryOutbox.key)
+        NetworkLossReport.enqueue(code: NetworkLossReport.networkLoss, node: "", defaults: defaults)
+        NetworkLossReport.enqueue(code: NetworkLossReport.failOpen, node: "Tokyo", defaults: defaults)
+        NetworkLossReport.enqueue(code: NetworkLossReport.watchdogRestore, node: "Tokyo", defaults: defaults)
+        NetworkLossReport.enqueue(code: NetworkLossReport.killSwitchStuck, node: "Tokyo", defaults: defaults)
+        NetworkLossReport.enqueue(code: NetworkLossReport.restoreNetwork, node: "Tokyo", defaults: defaults)
+        NetworkLossReport.enqueue(code: NetworkLossReport.crashWhileProtected, node: "Tokyo", defaults: defaults)
+        let items = TelemetryOutbox.pending(defaults: defaults)
+        XCTAssertEqual(items.count, 6)
+        XCTAssertTrue(items.allSatisfy { $0["kind"] == "p0" })
+        let loss = try Self.queuedEvent(items[0])
+        XCTAssertEqual(loss.code, "TONO_NETWORK_LOSS")
+        XCTAssertEqual(loss.stage, "protection")
+        XCTAssertEqual(loss.kind, "connectFail")
+        XCTAssertEqual(loss.node, "unselected")
+        XCTAssertEqual(try Self.queuedEvent(items[3]).kind, "killSwitchFail")
+        XCTAssertEqual(try Self.queuedEvent(items[5]).kind, "appCrash")
+        XCTAssertEqual(NetworkLossReport.sanitizedNode("https://example.com/path"), "unselected")
+    }
+
+    func testANormalFailureIsNotQueuedAsNetworkLoss() {
+        defaults.removeObject(forKey: TelemetryOutbox.key)
+        NetworkLossReport.enqueue(code: "TONO_NODE_TIMEOUT", node: "Tokyo", defaults: defaults)
+        XCTAssertTrue(TelemetryOutbox.pending(defaults: defaults).isEmpty)
+    }
+
+    func testANetworkLossReportStillQueuesAfterTheSnapshotIsOff() {
+        defaults.set(false, forKey: SettingsKey.periodicTelemetryEnabled)
+        AccountSession.notePeriodicTelemetryChoice()
+        XCTAssertFalse(AccountSession.isPeriodicTelemetryEnabled)
+        XCTAssertTrue(TelemetryOutbox.sendsWhenSnapshotOff("p0"))
+        XCTAssertFalse(TelemetryOutbox.sendsWhenSnapshotOff("failure"))
+        defaults.removeObject(forKey: TelemetryOutbox.key)
+        NetworkLossReport.enqueue(code: NetworkLossReport.restoreNetwork, node: "Osaka", defaults: defaults)
+        XCTAssertEqual(TelemetryOutbox.pending(defaults: defaults).count, 1)
+    }
+
+    private static func queuedEvent(_ item: [String: String]) throws -> (code: String, stage: String, kind: String, node: String) {
+        let body = try XCTUnwrap(item["body"].flatMap { Data(base64Encoded: $0) })
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+        let events = try XCTUnwrap(json["events"] as? [[String: Any]])
+        let event = try XCTUnwrap(events.first)
+        return (
+            try XCTUnwrap(event["code"] as? String),
+            try XCTUnwrap(event["stage"] as? String),
+            try XCTUnwrap(event["kind"] as? String),
+            try XCTUnwrap(event["node"] as? String)
         )
     }
 
