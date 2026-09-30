@@ -759,10 +759,16 @@ const DashboardPage = () => {
             : 'tono.dashboard.overview.reading',
         )
       : `${down} ${downUnit}/s`
+  const sessionBytes = (traffic?.upTotal ?? 0) + (traffic?.downTotal ?? 0)
+  const [sessionTotal, sessionTotalUnit] = parseTraffic(sessionBytes)
   const trafficDetail = !connected
     ? t('tono.dashboard.overview.noActiveRoute')
     : trafficLive
-      ? `↑ ${up} ${upUnit}/s`
+      ? sessionBytes > 0
+        ? `↑ ${up} ${upUnit}/s · ${t('tono.dashboard.overview.sessionTotal', {
+            total: `${sessionTotal} ${sessionTotalUnit}`,
+          })}`
+        : `↑ ${up} ${upUnit}/s`
       : ''
 
   return (
