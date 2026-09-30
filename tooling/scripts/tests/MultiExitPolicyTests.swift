@@ -184,7 +184,7 @@ struct MultiExitPolicyTests {
             ("rule-mode", "\nmode: rule\n"),
             ("unified-delay", "\nunified-delay: true\n"),
             ("tcp-concurrent", "\ntcp-concurrent: true\n"),
-            ("dns-ipv4-only", "\n      ipv6: false\n"),
+            ("dns-ipv4-only", "\n  ipv6: false\n"),
             ("demand-process-lookup", "\nfind-process-mode: strict\n"),
             ("disable-stale-selection-cache", "\n  store-selected: false\n"),
             ("disable-direct-icmp", "\n  disable-icmp-forwarding: true\n"),
