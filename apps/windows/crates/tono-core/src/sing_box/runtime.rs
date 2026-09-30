@@ -389,7 +389,12 @@ pub fn build_runtime(input: RuntimeInput<'_>) -> Result<OwnedSingBoxRuntime, Sin
             .push(json!({"type":"hosts","tag":"Tono-Hosts","predefined":hosts}));
         runtime["dns"]["rules"].as_array_mut().unwrap().insert(1, json!({"inbound":["Tono-TUN","Tono-DNS","Tono-Mixed"],"query_type":["A"],"domain":hosts.keys().collect::<Vec<_>>(),"action":"route","server":"Tono-Hosts"}));
     }
-    runtime["outbounds"] = json!(outbounds);
+    // Residential NAT: stamp keep_alive_period on a hysteria2 outbound that
+    // this compiler already built. Today's HY2 arm still refuses a missing
+    // DER pin and pushes nothing, so this is a no-op until an outbound exists.
+    let mut outbound_value = json!(outbounds);
+    crate::hy2_idle::apply_sing_box_keep_alive(&mut outbound_value);
+    runtime["outbounds"] = outbound_value;
     let runtime_json = runtime.to_string();
     if runtime_json.len() > MAX_BYTES {
         return Err(UnsupportedPolicy);

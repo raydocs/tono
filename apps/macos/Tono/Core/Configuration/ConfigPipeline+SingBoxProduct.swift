@@ -97,12 +97,16 @@ nonisolated extension ConfigPipeline {
                     throw SingBoxError.unsupportedTransport
                 }
                 let serverName = node.sni ?? node.server
+                // 5s stays under quic-go's half-of-30s cap. Do not set
+                // idle_timeout: Chrome parrot forces 30s and a shorter idle
+                // drops the session sooner. Do not disable the parrot.
                 let outbound: [String: Any] = [
                     "type": "hysteria2",
                     "tag": node.name,
                     "server": node.server,
                     "server_port": node.port,
                     "password": password,
+                    "keep_alive_period": Hy2IdleSupport.singBoxKeepAlivePeriod,
                     "tls": [
                         "enabled": true,
                         "server_name": serverName,
