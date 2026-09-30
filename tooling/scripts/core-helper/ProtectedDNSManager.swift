@@ -248,6 +248,19 @@ final class ProtectedDNSManager {
         servers == [protectedDNSServer]
     }
 
+    /// Helper start, or the idle loop, after the Core is stopped. A snapshot
+    /// is the evidence this helper changed DNS. Restoring it while a Core is
+    /// still running would pull the resolver out from under a live session.
+    /// A stopped Core restores even if a kill switch was wanted: a dead
+    /// listener must not be left as the system resolver. Without a snapshot
+    /// this does not sweep a stranger's loopback DNS (BRICK-M12).
+    static func shouldRecoverDNSAtBoot(
+        coreRunning: Bool,
+        snapshotPresent: Bool
+    ) -> Bool {
+        !coreRunning && snapshotPresent
+    }
+
     /// The same recovery transaction runs against either System Configuration
     /// or controlled I/O. Snapshot removal is part of the transaction, not a
     /// decision a test or caller can make independently of service readback.
@@ -1030,6 +1043,28 @@ final class ProtectedDNSManager {
         }
     }
 
+    /// A stopped Core with a snapshot restores DNS, including when a kill
+    /// switch was wanted. A running Core, or no snapshot, does not.
+    static func runBootDNSRecoveryDecisionSelfTest() -> Bool {
+        let restoresStopped = shouldRecoverDNSAtBoot(
+            coreRunning: false,
+            snapshotPresent: true
+        )
+        let skipsLiveCore = !shouldRecoverDNSAtBoot(
+            coreRunning: true,
+            snapshotPresent: true
+        )
+        let skipsForeign = !shouldRecoverDNSAtBoot(
+            coreRunning: false,
+            snapshotPresent: false
+        )
+        let ok = restoresStopped && skipsLiveCore && skipsForeign
+        if !ok {
+            FileHandle.standardError.write(Data("boot DNS recovery decision failed\n".utf8))
+        }
+        return ok
+    }
+
     /// Fault-injected lifecycle regression. No live DNS preferences or root
     /// snapshot are changed; production restoreServices owns every decision.
     static func runRestoreReadFailureSelfTest() -> Bool {
@@ -1487,6 +1522,7 @@ final class ProtectedDNSManager {
                 && runStableIDIOFailureSelfTest()
                 && runSameOwnerReenableSelfTest()
                 && runEnableIdentityFailureSelfTest()
+                && runBootDNSRecoveryDecisionSelfTest()
         } catch {
             return false
         }

@@ -8,8 +8,38 @@ extension KillSwitchManager {
         allowedUID: uid_t
     ) throws -> String {
         let rules = renderRules(state: state, allowedUID: allowedUID)
+        // Detach the boot load before the rule file holds a block. A throw
+        // leaves the previous file in place.
+        _ = try ensureMainHook()
+        if mainConfigurationLoadsKillSwitchRules(try diskMainPFText()) {
+            throw HelperFailure.invalid(
+                "Main PF configuration still loads the kill switch rule file."
+            )
+        }
         try writeRuleText(rules)
         return rules
+    }
+
+    /// Whether this text would make `com.apple.pfctl` load Tono's rule file
+    /// at boot. The match is the line this helper used to write.
+    static func mainConfigurationLoadsKillSwitchRules(_ text: String) -> Bool {
+        text.components(separatedBy: .newlines).contains { line in
+            line.trimmingCharacters(in: .whitespaces)
+                == "load anchor \"\(killSwitchAnchor)\" from \"\(killSwitchPFPath)\""
+        }
+    }
+
+    static func diskMainPFText() throws -> String {
+        let data = try secureRead(killSwitchMainPFPath, maximumBytes: 1024 * 1024)
+        guard let text = String(data: data, encoding: .utf8) else {
+            throw HelperFailure.invalid("The main PF configuration is not UTF-8.")
+        }
+        return text
+    }
+
+    static func diskLoadsKillSwitchRules() -> Bool {
+        guard let text = try? diskMainPFText() else { return true }
+        return mainConfigurationLoadsKillSwitchRules(text)
     }
 
     static func writeRuleText(_ rules: String) throws {
@@ -364,10 +394,13 @@ extension KillSwitchManager {
             throw HelperFailure.invalid("Malformed Tono PF markers.")
         }
 
+        // Anchor declaration only. A `load anchor from` here is what
+        // com.apple.pfctl installs at every boot, including Safe Mode, where
+        // this LaunchDaemon does not run (BRICK-M9). The helper loads the
+        // child in the same pfctl transaction via `kernelMainConfiguration`.
         let snippet = """
         \(killSwitchBeginMarker)
         anchor "\(killSwitchAnchor)"
-        load anchor "\(killSwitchAnchor)" from "\(killSwitchPFPath)"
         \(killSwitchEndMarker)
 
         """
@@ -411,6 +444,49 @@ extension KillSwitchManager {
             candidate = cleaned
         }
         return candidate
+    }
+
+    /// Ruleset passed to `pfctl -f` while this helper is enforcing. Disk
+    /// `/etc/pf.conf` only declares the anchor, so a later boot does not open
+    /// the rule file. The kernel load still carries `load anchor from` inside
+    /// the same transaction: a main reload otherwise flushes the child and,
+    /// when PF is already enabled, that gap is a leak.
+    static func kernelMainConfiguration(disk: String, childPath: String) throws -> String {
+        guard childPath.hasPrefix("/"),
+              !childPath.contains("\""),
+              !childPath.contains("\n"),
+              !childPath.contains("\r") else {
+            throw HelperFailure.invalid("PF anchor path is unsafe.")
+        }
+        let declared = try hookedMainConfiguration(disk)
+        let anchor = "anchor \"\(killSwitchAnchor)\""
+        let load = "load anchor \"\(killSwitchAnchor)\" from \"\(childPath)\""
+        var lines = declared.components(separatedBy: "\n")
+        guard let index = lines.firstIndex(of: anchor) else {
+            throw HelperFailure.invalid("Tono PF anchor is missing from the main ruleset.")
+        }
+        if lines.contains(load) { return declared }
+        lines.insert(load, at: index + 1)
+        var text = lines.joined(separator: "\n")
+        if declared.hasSuffix("\n"), !text.hasSuffix("\n") { text += "\n" }
+        return text
+    }
+
+    /// Load `/etc/pf.conf` into the kernel without writing the `load anchor`
+    /// line onto that file. The ephemeral copy is root-only and removed
+    /// before this returns.
+    static func loadHookedMainRuleset(childPath: String = killSwitchPFPath) throws -> HelperCommandResult {
+        let kernel = try kernelMainConfiguration(disk: try diskMainPFText(), childPath: childPath)
+        let ephemeral = "/etc/.tono-pf-load-\(UUID().uuidString)"
+        defer { unlink(ephemeral) }
+        try atomicWrite(path: ephemeral, data: Data(kernel.utf8), permissions: 0o600)
+        let checked = try run("/sbin/pfctl", ["-nf", ephemeral])
+        guard checked.status == 0 else {
+            throw HelperFailure.system(
+                checked.message.isEmpty ? "Main PF validation failed." : checked.message
+            )
+        }
+        return try run("/sbin/pfctl", ["-f", ephemeral])
     }
 
     /// Full removal only (`--emergency-reset`), after PF is released: take
@@ -551,9 +627,10 @@ extension KillSwitchManager {
     /// the Tono anchor instead of hooking `/etc/pf.conf`. Only the emergency
     /// block uses it, and only after the normal path failed: that file can be
     /// unparseable (another product's `load anchor` left pointing at a deleted
-    /// file), and the block must not depend on it. At boot nothing else would
-    /// enable PF, so a block that failed with `/etc/pf.conf` left the machine
-    /// unprotected until repaired.
+    /// file), and the block must not depend on it. The standalone file is not
+    /// `/etc/pf.conf`, so a reboot does not keep it. At boot nothing else
+    /// would enable PF, so a block that failed with `/etc/pf.conf` left the
+    /// machine unprotected until repaired.
     static func ensureAnchorLoaded(
         disposal: StateDisposal,
         standaloneMain: Bool = false
@@ -578,7 +655,9 @@ extension KillSwitchManager {
             // dynamic macOS anchors. A standalone emergency main is replaced
             // the first time `/etc/pf.conf` loads again, so the system anchors
             // it left out come back.
-            loaded = try run("/sbin/pfctl", ["-f", killSwitchMainPFPath])
+            // Disk `/etc/pf.conf` has no `load anchor from`. Loading it
+            // directly would flush the child while PF may already be enabled.
+            loaded = try loadHookedMainRuleset()
             if loaded.status == 0 { unlink(killSwitchStandaloneMainPath) }
         } else {
             loaded = try run(
@@ -640,16 +719,64 @@ extension KillSwitchManager {
         """
     }
 
+    /// Emergency block when `/etc/pf.conf` still loads the persistent rule
+    /// file, so that file must not be replaced with a block. Rules are loaded
+    /// from a temporary child and the temporary main is not `/etc/pf.conf`.
+    /// The standalone marker is what a later successful load uses to put
+    /// Apple's anchors back (BRICK-M6).
+    static func loadInMemoryEmergencyBlock(_ rules: String) throws {
+        let child = "/Library/Application Support/Tono/.tono-emergency-\(UUID().uuidString).conf"
+        let main = "/etc/.tono-pf-emergency-\(UUID().uuidString)"
+        defer {
+            unlink(child)
+            unlink(main)
+        }
+        try atomicWrite(path: child, data: Data(rules.utf8), permissions: 0o600)
+        let checked = try run("/sbin/pfctl", ["-nf", child])
+        guard checked.status == 0 else {
+            throw HelperFailure.system(
+                checked.message.isEmpty ? "PF rule validation failed." : checked.message
+            )
+        }
+        try atomicWrite(
+            path: main,
+            data: Data(renderStandaloneMain(childPath: child).utf8),
+            permissions: 0o600
+        )
+        let loaded = try run("/sbin/pfctl", ["-f", main])
+        guard loaded.status == 0 else {
+            throw HelperFailure.system(
+                loaded.message.isEmpty ? "Main PF load failed." : loaded.message
+            )
+        }
+        try atomicWrite(
+            path: killSwitchStandaloneMainPath,
+            data: Data(renderStandaloneMain(childPath: killSwitchPFPath).utf8),
+            permissions: 0o600
+        )
+        try holdPFEnableReference()
+        let flushed = try run("/sbin/pfctl", ["-F", "states"])
+        guard flushed.status == 0 else {
+            throw HelperFailure.system(
+                flushed.message.isEmpty ? "PF state flush failed." : flushed.message
+            )
+        }
+        guard try effectiveStatus() else {
+            throw HelperFailure.system("Kill Switch verification failed.")
+        }
+    }
+
     /// A release after the emergency block loaded its standalone main ruleset
     /// (BRICK-M6): put `/etc/pf.conf` back, which only a later normal load did
     /// before, so Apple's and other products' root anchors stay displaced no
-    /// longer. Only when `/etc/pf.conf` attaches Tono's anchor and loads it from
-    /// Tono's rule file, which disarm has just set to the placeholder: the
-    /// reload then drops nothing any Tono writer put there. A main without that
-    /// hook is one `ensureMainHook` refused; loading it is not a release's call,
-    /// so it stays displaced. Never writes `/etc/pf.conf`, never uses its
-    /// backup, and cannot throw. The marker goes only after a load that pfctl
-    /// confirmed. Returns whether nothing is left displaced.
+    /// longer. Only when `/etc/pf.conf` declares Tono's anchor inside the
+    /// marker. Disarm has just set the rule file to the placeholder, and the
+    /// on-disk hook does not load that file, so the reload drops nothing a
+    /// Tono writer put there. A main without that hook is one `ensureMainHook`
+    /// refused; loading it is not a release's call, so it stays displaced.
+    /// Never writes `/etc/pf.conf`, never uses its backup, and cannot throw.
+    /// The marker goes only after a load that pfctl confirmed. Returns whether
+    /// nothing is left displaced.
     @discardableResult
     static func restoreDisplacedMainRuleset(
         standalonePath: String = killSwitchStandaloneMainPath,
@@ -675,8 +802,12 @@ extension KillSwitchManager {
         } catch {
             return kept((error as? HelperFailure)?.message ?? String(describing: error))
         }
-        guard lines.contains("anchor \"\(killSwitchAnchor)\""),
-              lines.contains("load anchor \"\(killSwitchAnchor)\" from \"\(killSwitchPFPath)\"") else {
+        // The on-disk hook is an anchor declaration. Older files also have
+        // `load anchor from`; both still name this anchor inside the marker.
+        // A release has already written the placeholder rule file, so a
+        // reload cannot install a block from either shape.
+        guard lines.contains(killSwitchBeginMarker),
+              lines.contains("anchor \"\(killSwitchAnchor)\"") else {
             return kept("The main PF configuration does not attach Tono's anchor.")
         }
         do {
