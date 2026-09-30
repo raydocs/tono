@@ -246,6 +246,10 @@ final class AppState {
     var autoUpdateTimer: Timer?
     private var proxyGuardTimer: Timer?
     private var latencyTestTimer: Timer?
+    /// One guard reapply can still be waiting on the privileged coordinator
+    /// (a bounded-but-slow administrator prompt); a new guard tick must not
+    /// queue another reapply behind it.
+    private var proxyReapplyInFlight = false
     /// Catalog exits already tried in this fail-closed connect loop. Reset on
     /// a fresh user connect so a China GFW hit on one city can move on.
     private var catalogFailoverNamesTried: Set<String> = []
@@ -1281,6 +1285,12 @@ final class AppState {
                 let intact = await PrivilegedRuntimeCoordinator.shared.systemProxyIsIntact()
                 guard !self.nativeUpdatePending, self.isConnected, SystemProxy.didSetProxy else { return }
                 if !intact {
+                    // Each tick spawns its own Task, so without this guard a
+                    // slow reapply (an administrator prompt) accumulates one
+                    // queued reapply per 10 s tick behind it on the actor.
+                    guard !self.proxyReapplyInFlight else { return }
+                    self.proxyReapplyInFlight = true
+                    defer { self.proxyReapplyInFlight = false }
                     do {
                         try await PrivilegedRuntimeCoordinator.shared.reapplySystemProxy()
                         self.isProxyDegraded = false
