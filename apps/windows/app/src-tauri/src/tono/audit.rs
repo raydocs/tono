@@ -1564,7 +1564,11 @@ mod tests {
         assert_eq!(migrated["network_log_upload_enabled"], false);
         assert_eq!(migrated["network_log_default_v3"], true);
         assert_eq!(migrated["network_log_upload_user_chosen"], false);
-        assert_eq!(migrated["periodic_telemetry_enabled"], false);
+        // This file's snapshot-off is the v2 force-off: nobody chose it, so v3
+        // turns that switch back on. The network-log opt-out above stays off.
+        assert_eq!(migrated["periodic_telemetry_enabled"], true);
+        assert_eq!(migrated["periodic_telemetry_default_v3"], true);
+        assert_eq!(migrated["periodic_telemetry_user_chosen"], false);
     }
 
     #[test]
