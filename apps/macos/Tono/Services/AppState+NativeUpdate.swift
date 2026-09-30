@@ -69,6 +69,7 @@ extension AppState {
                 guard !Task.isCancelled,
                       connectionCoordinator.protectionOperationGeneration == generation else { return }
                 guard result.disconnectVerified == true else { throw NativeUpdateDownload.failure("Update Disconnect was not verified.") }
+                launchProtectionSequence &+= 1
                 isProtectionBlocked = false
                 KillSwitchService.isArmed = false
                 resetReleasedSessionHistory()
@@ -96,7 +97,9 @@ extension AppState {
         let generation = connectionCoordinator.protectionOperationGeneration
         let sequence = launchProtectionSequence
         let health = await protectionAudits.killSwitchHealth()
-        guard !Task.isCancelled, nativeUpdatePending,
+        guard !Task.isCancelled,
+              nativeUpdatePending || RuntimeCleanup.nativeUpdatePending
+                || RuntimeCleanup.nativeUpdateBlocksConnect,
               connectionCoordinator.protectionOperationGeneration == generation,
               launchProtectionSequence == sequence else { return false }
         launchProtectionSequence &+= 1
