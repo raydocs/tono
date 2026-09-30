@@ -12,3 +12,12 @@
 - root 核对 assigned diff 后补齐 helper 4.52.0 和按 build manifest 顺序静态计算的 CONTRACT hash；静态 hash 不代表编译/自测通过。
 - `originalDNSRestored:false` 也可能表示外部新 DNS 被保留，不再把 App/CLI 提示误写成服务被删除且已切 DHCP；同步真实 notice XCTest 和中文本地化。
 - child 的 Git/gh 限制仅属于它的 sandbox；root 的 remote 凭据可用。root 负责提交、hosted CI 和独立高风险 diff 审查，未在本机编译或改系统网络。
+
+### 2026-09-30 · 独立审查两项 major 续修（未提交交接）
+- 复核 `3326b711` 后仅续修 helper DNS 与本条记录：带稳定 ID 的 SC DNS 读写失败不再退到同名服务；同 owner re-enable 若见外部新 DNS，先存档旧快照、持久化新快照，再写 Tono loopback；普通重试保留新快照。
+- 工程与测试：helper `--self-test` 增加 ID I/O 失败和同 owner 新 DNS → re-enable → restore 两项生产接缝注入回归；未运行本机 native 编译/自测，root 负责精确源码 CI 和重新独立审查。
+- 候选/发布：仅未提交源码，无新候选或发布；现有 4.52.0 pin 与合同未改。BRICK-M12 及设备并发 DNS 改动仍未验收。
+
+### Hosted red 与首轮审查证据
+- 旧行为仅加restore fixture的 `ae6f318b` [CI36685435186](https://github.com/raydocs/tono/actions/runs/36685435186) 实际在编译后helper `--self-test` 失败：`DNS superseded-restore regression FAILED: newer DNS was changed or reported restored`，build和privileged jobs均记录同一反例；没有将编译错误当产品red。
+- 原修复准确 `3326b711` [CI36685038992](https://github.com/raydocs/tono/actions/runs/36685038992) 成功，但独立Codex high指出两项major，故未合：ID读写错误退回名字，以及same-owner enable仍留旧snapshot。原绿不是充分审查证据；本轮纠正新增实际dispatcher和同owner re-enable→restore/失败重试回归，必须新头CI和增量独立审查。
