@@ -13,7 +13,9 @@
     "budgets": "node scripts/check-budgets.mjs",
     "test:e2e": "playwright test",
     "test:e2e:locked": "../../tooling/scripts/with-slot.sh playwright 1 -- npx playwright test --workers=2",
-    "test:e2e:update": "playwright test --update-snapshots"
+    "test:e2e:update": "playwright test --update-snapshots",
+    "proto": "vite -c vite.prototype.config.ts",
+    "proto:build": "vite build -c vite.prototype.config.ts"
   },
   "dependencies": {
     "class-variance-authority": "^0.7.1",
