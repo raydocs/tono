@@ -22,8 +22,8 @@
       },
       "internalDiagnostics": "Internal test build: failed connections are reported to Tono automatically (stage, error code, version and server only).",
       "periodicTelemetry": {
-        "label": "Share diagnostic timeline (optional)",
-        "description": "Off by default. If you turn it on, about every 20 minutes while signed in Tono uploads a short protection and network event summary — including per-route byte totals and bytes at disconnect — so we can improve Claude stability in China, and reports a failed connection the moment it happens. No chat content, passwords, or node secrets."
+        "label": "Share diagnostic timeline",
+        "description": "On by default. About every 20 minutes while signed in, Tono uploads a short protection and network event summary — version, selected server, per-route byte totals, connection stage and error code — and reports a failed connection when it happens. No website names, page contents, passwords, or node secrets. Turn this off to stop those uploads."
       },
       "networkLogUpload": {
         "label": "Upload the full traffic log",

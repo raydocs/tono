@@ -541,10 +541,10 @@ pub enum FailureReportScope {
 }
 
 /// Whether a connect failure is reported, and with what. The local log switch
-/// still stops every report. Release builds report only after the timeline
-/// opt-in; internal builds also send the classified record without it. That
-/// default comes from the build, not from `settings.json`, so the one-shot v2
-/// reset of the timeline switch cannot turn it off on upgrade.
+/// still stops every report. Release builds report when the timeline is on.
+/// The timeline defaults on, so those reports default on; turning the timeline
+/// off is the opt-out. Internal builds still send a classified record when the
+/// timeline is off. Do not gate release reports on a second default-off switch.
 pub fn failure_report_scope(
     internal_build: bool,
     audit_enabled: bool,
@@ -565,14 +565,23 @@ pub fn failure_report_scope(
 struct SettingsFile {
     #[serde(default = "default_true")]
     audit_enabled: bool,
-    /// Default OFF: short diagnostic timelines still create durable D1 rows
-    /// and therefore require an explicit opt-in. Unchanged by the v3 log-upload flip.
-    #[serde(default)]
+    /// Default ON. This timeline has no hostnames, URLs, or page contents.
+    /// Do not default it off again: commit a68d4e76 forced it off, and that
+    /// is why failure and crash facts never left the device. An explicit
+    /// opt-out sets `periodic_telemetry_user_chosen` and is kept.
+    #[serde(default = "default_true")]
     periodic_telemetry_enabled: bool,
-    /// One-shot migration from the former default-on policy. New defaults set
-    /// this immediately; an old settings file lacks it and is reset once.
+    /// Retired force-off marker. Presence means v2 already ran. The load path
+    /// must not clear `periodic_telemetry_enabled` because of this flag.
     #[serde(default)]
     periodic_telemetry_default_v2: bool,
+    /// One-shot re-enable after the v2 force-off, unless the user has chosen.
+    #[serde(default)]
+    periodic_telemetry_default_v3: bool,
+    /// Set by the settings toggle. Absent on files written before the opt-out
+    /// was distinguishable from a68d4e76's force-off.
+    #[serde(default)]
+    periodic_telemetry_user_chosen: bool,
     /// Uploads the audit log itself (hostnames, process names, routes, byte
     /// totals). Default follows [`NETWORK_LOG_UPLOAD_DEFAULT`].
     #[serde(default)]
@@ -637,8 +646,10 @@ impl Default for SettingsFile {
     fn default() -> Self {
         Self {
             audit_enabled: true,
-            periodic_telemetry_enabled: false,
+            periodic_telemetry_enabled: true,
             periodic_telemetry_default_v2: true,
+            periodic_telemetry_default_v3: true,
+            periodic_telemetry_user_chosen: false,
             network_log_upload_enabled: NETWORK_LOG_UPLOAD_DEFAULT,
             network_log_default_v2: true,
             network_log_default_v3: true,
@@ -669,8 +680,16 @@ fn load_settings_locked(dir: &Path) -> SettingsFile {
         migrated = true;
     }
     if !settings.periodic_telemetry_default_v2 {
-        settings.periodic_telemetry_enabled = false;
+        // a68d4e76 reset every existing install to off here. That assignment
+        // must not come back. Mark v2 applied and leave the stored switch.
         settings.periodic_telemetry_default_v2 = true;
+        migrated = true;
+    }
+    if !settings.periodic_telemetry_default_v3 {
+        settings.periodic_telemetry_default_v3 = true;
+        if !settings.periodic_telemetry_user_chosen {
+            settings.periodic_telemetry_enabled = true;
+        }
         migrated = true;
     }
     if !settings.network_log_default_v3 {
@@ -689,7 +708,8 @@ pub fn audit_enabled_from_settings(dir: &Path) -> bool {
     load_settings(dir).audit_enabled
 }
 
-/// Default OFF; legacy default-on settings are reset exactly once by v2.
+/// Default ON. v3 turns the switch back on once when the user has not chosen,
+/// which undoes the v2 force-off. A later opt-out stays off.
 pub fn periodic_telemetry_enabled_from_settings(dir: &Path) -> bool {
     load_settings(dir).periodic_telemetry_enabled
 }
@@ -726,6 +746,8 @@ fn save_periodic_telemetry_enabled(dir: &Path, enabled: bool) -> Result<()> {
     let _guard = SETTINGS_LOCK.lock();
     let mut settings = load_settings_locked(dir);
     settings.periodic_telemetry_enabled = enabled;
+    settings.periodic_telemetry_user_chosen = true;
+    settings.periodic_telemetry_default_v3 = true;
     save_settings(dir, &settings)
 }
 
@@ -827,6 +849,10 @@ impl Audit {
 
     pub fn periodic_telemetry_enabled(&self) -> bool {
         self.periodic_telemetry_enabled.load(Ordering::Acquire)
+    }
+
+    pub fn settings_dir(&self) -> &Path {
+        &self.settings_dir
     }
 
     /// [`failure_report_scope`] for this build and the current switches.
@@ -1411,11 +1437,32 @@ mod tests {
     }
 
     #[test]
-    fn periodic_telemetry_defaults_off_and_migrates_legacy_true_once() {
+    fn periodic_telemetry_defaults_on_and_an_explicit_opt_out_sticks() {
         let fresh = TempDir::new("periodic-fresh");
         assert!(
-            !periodic_telemetry_enabled_from_settings(fresh.path()),
-            "a new installation must not opt into periodic D1 writes"
+            periodic_telemetry_enabled_from_settings(fresh.path()),
+            "a new installation must upload the privacy-safe timeline"
+        );
+        let source = include_str!("audit.rs");
+        let v2 = source
+            .split("if !settings.periodic_telemetry_default_v2")
+            .nth(1)
+            .expect("v2 marker");
+        let v2_body = v2.split("if !settings.periodic_telemetry_default_v3").next().unwrap();
+        assert!(
+            !v2_body.contains("periodic_telemetry_enabled = false"),
+            "do not reintroduce the a68d4e76 force-off inside the v2 migration"
+        );
+
+        let forced = TempDir::new("periodic-forced");
+        std::fs::write(
+            forced.path().join(super::SETTINGS_FILE_NAME),
+            r#"{"audit_enabled":true,"periodic_telemetry_enabled":false,"periodic_telemetry_default_v2":true,"network_log_default_v2":true}"#,
+        )
+        .unwrap();
+        assert!(
+            periodic_telemetry_enabled_from_settings(forced.path()),
+            "v3 turns the v2 force-off back on when the user has not chosen"
         );
 
         let legacy = TempDir::new("periodic-legacy");
@@ -1425,21 +1472,14 @@ mod tests {
         )
         .unwrap();
         assert!(
-            !periodic_telemetry_enabled_from_settings(legacy.path()),
-            "the v2 migration must reset a legacy default-on installation"
-        );
-        let migrated: serde_json::Value = serde_json::from_str(
-            &std::fs::read_to_string(legacy.path().join(super::SETTINGS_FILE_NAME)).unwrap(),
-        )
-        .unwrap();
-        assert_eq!(migrated["periodic_telemetry_enabled"], false);
-        assert_eq!(migrated["periodic_telemetry_default_v2"], true);
-
-        save_periodic_telemetry_enabled(legacy.path(), true).unwrap();
-        assert!(periodic_telemetry_enabled_from_settings(legacy.path()));
-        assert!(
             periodic_telemetry_enabled_from_settings(legacy.path()),
-            "a post-migration explicit opt-in must survive every later load"
+            "a legacy on value must stay on; v2 must not force it off"
+        );
+
+        save_periodic_telemetry_enabled(legacy.path(), false).unwrap();
+        assert!(
+            !periodic_telemetry_enabled_from_settings(legacy.path()),
+            "an explicit opt-out must survive the next load"
         );
     }
 
@@ -1454,16 +1494,21 @@ mod tests {
         .unwrap();
         let timeline = periodic_telemetry_enabled_from_settings(upgraded.path());
         let audit = audit_enabled_from_settings(upgraded.path());
-        assert!(!timeline && audit);
+        assert!(timeline && audit);
         assert_eq!(
             failure_report_scope(true, audit, timeline),
-            Some(FailureReportScope::Classified),
-            "an internal build must keep reporting classified failures after the upgrade reset"
+            Some(FailureReportScope::Full),
+            "an internal build with the timeline on sends the full failure report"
         );
         assert_eq!(
             failure_report_scope(false, audit, timeline),
+            Some(FailureReportScope::Full),
+            "release builds report failures while the timeline stays on"
+        );
+        assert_eq!(
+            failure_report_scope(false, audit, false),
             None,
-            "release builds keep the opt-in"
+            "the timeline opt-out stops release failure reports"
         );
         assert_eq!(failure_report_scope(false, audit, true), Some(FailureReportScope::Full));
         assert_eq!(
@@ -1481,8 +1526,8 @@ mod tests {
             "a new installation must follow NETWORK_LOG_UPLOAD_DEFAULT (currently on)"
         );
         assert!(
-            !periodic_telemetry_enabled_from_settings(fresh.path()),
-            "the periodic snapshot default must stay off"
+            periodic_telemetry_enabled_from_settings(fresh.path()),
+            "the periodic snapshot default must stay on"
         );
     }
 

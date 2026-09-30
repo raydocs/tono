@@ -309,6 +309,12 @@ pub(crate) fn observe_protected_routes(
             continue;
         }
         let route = classify_protected_route(connection, residential_target);
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|elapsed| elapsed.as_millis() as i64)
+            .unwrap_or(0);
+        // Host is classified into claude|openai and dropped. Consent defaults off.
+        super::ai_allowlist::note(&connection.metadata.host, route.as_str(), now_ms);
         aggregate.observe(route, destination);
         changed = true;
     }
