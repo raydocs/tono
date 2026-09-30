@@ -1473,6 +1473,40 @@ final class AccountSessionRequestTests: XCTestCase {
         XCTAssertNil(try testKeychain(host).string(for: .refreshToken))
     }
 
+    func testVerifiedEmailSignInDoesNotDependOnDeviceInventoryRead() async throws {
+        let (account, transport, host, _) = fixture()
+        defer {
+            account.catalogSyncTask?.cancel()
+            account.deviceRefreshTask?.cancel()
+            transport.invalidateAndCancel()
+            HeldAccountProtocol.remove(host)
+            try? testKeychain(host).remove(.refreshToken)
+        }
+        account.emailChallenge = TonoEmailChallengeResponse(
+            challengeId: "challenge-fixture", expiresIn: 600, message: "sent"
+        )
+        let inventoryReads = PathCallCounter()
+        HeldAccountProtocol.install(host) { request in
+            switch request.request.url?.path {
+            case "/api/v1/auth/email/verify":
+                request.respond(status: 200, body: #"{"accessToken":"test-only-access","refreshToken":"test-only-refresh","user":{"id":"original","email":"old@example.test"},"device":{"id":"00000000-0000-0000-0000-000000000001","name":"Test Mac","status":"active","current":true}}"#)
+            case "/api/v1/devices":
+                inventoryReads.record()
+                request.respond(status: 503, body: #"{"error":{"code":"TEMPORARY_FAILURE","message":"Inventory temporarily unavailable"}}"#)
+            default:
+                request.respond(status: 503, body: #"{"error":{"code":"TEMPORARY_FAILURE","message":"Temporarily unavailable"}}"#)
+            }
+        }
+
+        await account.verifyEmailCode("123456")
+        await account.deviceRefreshTask?.value
+
+        XCTAssertEqual(inventoryReads.count, 1)
+        XCTAssertEqual(account.state, .ready)
+        XCTAssertEqual(account.user?.id, "original")
+        XCTAssertEqual(try testKeychain(host).string(for: .refreshToken), "test-only-refresh")
+    }
+
     func testLateDeviceInventoryDoesNotRepopulateASignedOutAccount() async throws {
         let (account, transport, host, requests) = fixture()
         defer { transport.invalidateAndCancel(); HeldAccountProtocol.remove(host); try? testKeychain(host).remove(.refreshToken) }
