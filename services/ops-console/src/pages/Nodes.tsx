@@ -1,278 +1,126 @@
 import { useMemo, useState } from 'react';
-import { LayoutGrid, Table as TableIcon } from 'lucide-react';
-import type { NodeLifecycle, NodeSummaryDto, SystemHealthDto } from '@contract';
-import { Chip } from '@/components/ops/Chip';
-import { CountText } from '@/components/ops/CountText';
-import { type TableState } from '@/components/ops/DataTable';
+import type { NodeSummaryDto, SystemHealthDto } from '@contract';
 import { DetailDrawer, Fact } from '@/components/ops/DetailDrawer';
-import { Empty } from '@/components/ops/Empty';
 import { PageNote } from '@/components/ops/PageNote';
+import type { PanelState } from '@/components/ops/Panel';
 import { StatusWord } from '@/components/ops/StatusWord';
 import { copy } from '@/copy/copy';
-import { formatBytesMeasured } from '@/lib/display';
-import { closeNode, openNode, openNodePage } from '@/lib/hash-route';
+import { ledgerApi } from '@/lib/api-ledger';
+import { sloApi } from '@/lib/api-slo';
+import { nowSec } from '@/lib/clock';
+import { foldFleetLoad } from '@/lib/fleet-load';
+import { closeNode, openNodePage } from '@/lib/hash-route';
+import { monthOf } from '@/lib/ledger';
+import { nodeLegacyApi, type NodeLoadRange } from '@/lib/node-legacy';
 import { usePrivacy } from '@/lib/privacy';
+import { selectLifecycle } from '@/lib/selectors';
+import { nodeQuality } from '@/lib/slo';
 import { useIsPhone } from '@/lib/use-phone';
-import {
-  countFragments,
-  countLine,
-  lifecycleCounts,
-  NODE_LIFECYCLE_CHIPS,
-  selectLifecycle,
-  selectNodes,
-  topFragments,
-  type NodeFilter,
-  type NodeFilterId,
-} from '@/lib/selectors';
-import { oldestFetch, type Resource } from '@/lib/use-resource';
-import { cn } from '@/lib/utils';
-import type { Tone } from '@/components/ops/StatusWord';
+import { oldestFetch, useResource, type Resource } from '@/lib/use-resource';
 import type { FleetNodeDto } from '@/lib/types';
 import type { FleetState } from '@/lib/use-fleet';
 import '@/styles/nodes.css';
-import { NodeCardGrid } from './NodeCardGrid';
-import { NodeTable } from './NodeTable';
 import { toNodeView } from './node-metrics';
+import { FleetBand } from './nodes/FleetBand';
+import { FleetLoad } from './nodes/FleetLoad';
+import { FleetTable } from './nodes/FleetTable';
 
-/** How many fragments of the count sentence fit on a phone before it eats the page. */
-const PHONE_FRAGMENTS = 3;
-
+/**
+ * 节点: is the fleet healthy, busy, and worth what it costs.
+ *
+ * Headline numbers first, then the fleet's load over time, then every machine
+ * as a row. Each block reads its own source and fails on its own — a
+ * collector that is down empties the load panels, not the table. The
+ * verdicts are the engine's and nothing here recomputes one (R4).
+ *
+ * `?node=` still opens the short drawer, because ⌘K lands there; a row on
+ * this page goes straight to the node page, which is what the drawer was
+ * only ever a step towards.
+ */
 export default function NodesPage({
   nodes,
   health,
   fleet,
   selected,
 }: {
-  /** The engine's judgement of the fleet. The page shows this and nothing else. */
-  nodes: Resource<NodeSummaryDto[]>;
+  nodes: Resource<NodeSummaryDto[]> & { reload: () => void };
   health: Resource<SystemHealthDto>;
-  /** The legacy read, for the drawer's flat facts only. */
+  /** The legacy read, for the flat facts only. */
   fleet: FleetState;
   selected: string | null;
 }) {
   const privacy = usePrivacy();
   const phone = useIsPhone();
-  const [filter, setFilter] = useState<NodeFilter>(null);
-  const [lifecycle, setLifecycle] = useState<NodeLifecycle | null>(null);
-  const [chosen, setChosen] = useState<'cards' | 'table'>('cards');
-  /**
-   * One card per screen at 390 px is a scroll through forty-five screens to
-   * find the one that is broken. Three columns of the table — the word, the
-   * name, the quota — fit and answer the same question in one screen, so the
-   * phone gets the table whatever the toggle says, and the toggle goes.
-   */
-  const view = phone ? 'table' : chosen;
+  const [range, setRange] = useState<NodeLoadRange>('24h');
+  // The day window feeds both the charts and each row's CPU line; the week is
+  // only fetched once somebody asks for it.
+  const day = useResource('fleet-load-24h', (signal) => nodeLegacyApi.fleetLoad('24h', signal));
+  const week = useResource(range === '7d' ? 'fleet-load-7d' : null, (signal) => nodeLegacyApi.fleetLoad('7d', signal));
+  const load = range === '24h' ? day : week;
+  const slo = useResource('nodes-slo-7d', (signal) => sloApi.get({ range: '7d' }, signal));
+  const month = monthOf(nowSec());
+  const ledger = useResource(`ledger-month-${month}`, (signal) => ledgerApi.month(month, signal));
 
   const all = useMemo(() => (nodes.status === 'ready' ? nodes.data : []), [nodes]);
+  const inService = useMemo(() => selectLifecycle(all, null), [all]);
   const facts = useMemo(() => {
     const out = new Map<string, FleetNodeDto>();
     if (fleet.status !== 'ready') return out;
     for (const node of fleet.fleet.nodes) out.set(node.name, node);
     return out;
   }, [fleet]);
-
-  /**
-   * A retired machine is inventory, not fleet.
-   *
-   * A machine that was taken out of service answers no probe, so leaving it in
-   * the list filled the page with alarms nobody can act on — and made the count
-   * sentence disagree with the daily page, which had already stopped raising
-   * incidents for it. It is one chip away, and the chip carries its count.
-   */
-  const onShow = useMemo(() => selectLifecycle(all, lifecycle), [all, lifecycle]);
-  const lifecycles = useMemo(() => lifecycleCounts(all), [all]);
-  const counts = useMemo(() => countLine(onShow), [onShow]);
-  const fragments = useMemo(
-    () => {
-      const all = countFragments(counts);
-      return phone ? topFragments(all, PHONE_FRAGMENTS, filter) : all;
-    },
-    [counts, phone, filter],
+  const perNode = useMemo(
+    () => (day.status === 'ready' ? foldFleetLoad(day.data).perNode : null),
+    [day],
   );
-  const rows = useMemo(() => selectNodes(onShow, filter), [onShow, filter]);
-  const views = useMemo(
-    () => rows.map((node) => toNodeView(node, facts.get(node.name))),
-    [rows, facts],
-  );
+  const quality = useMemo(() => {
+    if (slo.status !== 'ready') return null;
+    return new Map(nodeQuality(slo.data.items).map((row) => [row.node, row]));
+  }, [slo]);
   /**
-   * The client-side leg is measured for some machines and not others. The
-   * column comes back the moment one node in the whole fleet has a
-   * measurement — the condition is the data, not a flag somebody has to
-   * remember to flip — and the nodes without one show the em dash and who
-   * should have measured it.
+   * The customer-side leg comes back as a column the moment one node in the
+   * fleet has a measurement: the condition is the data, not a flag.
    */
   const pathWired = useMemo(() => all.some((node) => node.forwardWorst.value !== null), [all]);
-  const fleetTotals = useMemo(() => {
-    let occupants = 0;
-    let hasOccupants = false;
-    let usedBytes = 0;
-    let hasUsed = false;
-    let quotaBytes = 0;
-    let hasQuota = false;
+  const tableState: PanelState = nodes.status === 'loading' ? 'loading' : nodes.status === 'error' ? 'error' : 'ready';
+  const newest = all.reduce<number | null>((top, node) => Math.max(top ?? 0, node.updatedAt), null);
 
-    for (const node of onShow) {
-      if (node.occupancy.value !== null) {
-        occupants += node.occupancy.value;
-        hasOccupants = true;
-      }
-      const q = node.quota.value;
-      if (q?.used !== null && q?.used !== undefined) {
-        usedBytes += q.used;
-        hasUsed = true;
-      }
-      if (q?.quota !== null && q?.quota !== undefined) {
-        quotaBytes += q.quota;
-        hasQuota = true;
-      }
-    }
-
-    const trafficText = hasUsed
-      ? (hasQuota && quotaBytes > 0
-        ? copy.fleetTrafficTotal(formatBytesMeasured(usedBytes), formatBytesMeasured(quotaBytes))
-        : copy.fleetTrafficUsedOnly(formatBytesMeasured(usedBytes)))
-      : null;
-
-    return {
-      occupancyText: hasOccupants ? copy.fleetOccupancyTotal(occupants) : null,
-      trafficText,
-    };
-  }, [onShow]);
   const selectedView = useMemo(() => {
     const found = all.find((node) => node.name === selected);
     return found ? toNodeView(found, facts.get(found.name)) : null;
   }, [all, selected, facts]);
 
-  const tableState: TableState = nodes.status === 'loading'
-    ? 'loading'
-    : nodes.status === 'error'
-      ? 'error'
-      : views.length === 0
-        ? 'empty'
-        : 'ready';
-
   return (
     <div className="page-wrap nodes-page">
-      <div className="page-head">
-        <section className="nodes-hero" aria-label={copy.pages.nodes}>
-          {/* R2 reaches the headline too: a fleet that failed to load has no counts,
-              and a zero count would be a measurement the console never took. */}
-          {nodes.status === 'ready' ? (
-            <p className="text-verdict">
-              {fragments.map((id, index) => (
-                <span key={id}>
-                  {index === 0 ? null : <span className="mx-2 text-[var(--muted-foreground)]">·</span>}
-                  <CountBit
-                    id={id}
-                    active={filter === id}
-                    count={counts[id]}
-                    render={(values) => copy.count[id](values[0])}
-                    onClick={() => setFilter((current) => (current === id ? null : id))}
-                  />
-                </span>
-              ))}
-            </p>
-          ) : (
-            <p className="text-verdict text-[var(--muted-foreground)]">
-              {nodes.status === 'loading' ? copy.loading : copy.loadError}
-            </p>
-          )}
-
-          <PageNote
-            className="nodes-hero-note"
-            fetchedAt={oldestFetch(nodes, health, fleet)}
-            backfill={health.status === 'ready' ? health.data.backfill : null}
-          />
-
-          {nodes.status === 'ready' && (fleetTotals.occupancyText || fleetTotals.trafficText) ? (
-            <p className="nodes-aggregate-bar text-micro text-[var(--muted-foreground)] flex items-center gap-2">
-              {fleetTotals.occupancyText ? (
-                <span className="font-mono">{fleetTotals.occupancyText}</span>
-              ) : null}
-              {fleetTotals.occupancyText && fleetTotals.trafficText ? <span>·</span> : null}
-              {fleetTotals.trafficText ? (
-                <span className="font-mono">{fleetTotals.trafficText}</span>
-              ) : null}
-            </p>
-          ) : null}
-
-          {nodes.status === 'ready' && all.length > 0 && !pathWired ? (
-            <p className="text-body text-[var(--muted-foreground)]">{copy.pathNotWired}</p>
-          ) : null}
-        </section>
-
-        <div className="toolbar-row nodes-toolbar">
-          {NODE_LIFECYCLE_CHIPS.map((id) => (
-            <Chip
-              key={id}
-              active={lifecycle === id}
-              count={lifecycles[id]}
-              onClick={() => {
-                setLifecycle((current) => (current === id ? null : id));
-                setFilter(null);
-              }}
-            >
-              {copy.nodeLifecycle[id]}
-            </Chip>
-          ))}
-
-          {phone ? null : (
-            <div className="nodes-view-switch ml-auto flex items-center gap-0.5">
-              <button
-                type="button"
-                aria-pressed={view === 'cards'}
-                className={cn(
-                  'ops-view-btn flex h-8 items-center gap-1 rounded-[999px] border border-transparent px-3 text-micro',
-                  view === 'cards' ? 'bg-[var(--accent)] text-white' : 'text-[var(--muted-foreground)] hover:text-[var(--foreground)]',
-                )}
-                onClick={() => setChosen('cards')}
-              >
-                <LayoutGrid size={12} />
-                {copy.viewCards}
-              </button>
-              <button
-                type="button"
-                aria-pressed={view === 'table'}
-                className={cn(
-                  'ops-view-btn flex h-8 items-center gap-1 rounded-[999px] border border-transparent px-3 text-micro',
-                  view === 'table' ? 'bg-[var(--accent)] text-white' : 'text-[var(--muted-foreground)] hover:text-[var(--foreground)]',
-                )}
-                onClick={() => setChosen('table')}
-              >
-                <TableIcon size={12} />
-                {copy.viewTable}
-              </button>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {nodes.status === 'error' && !nodes.sessionExpired ? (
-        <Empty message={nodes.message || copy.loadError} />
-      ) : view === 'cards' ? (
-        nodes.status === 'loading' ? (
-          <Empty message={copy.loading} />
-        ) : views.length === 0 ? (
-          <Empty message={copy.emptyList} />
-        ) : (
-          <NodeCardGrid
-            views={views}
-            selected={selected}
-            showPath={pathWired}
-            onOpen={openNode}
-            onOpenPage={openNodePage}
-          />
-        )
-      ) : (
-        <NodeTable
-          views={views}
-          selected={selected}
-          showPath={pathWired}
-          phone={phone}
-          state={tableState}
-          errorMessage={nodes.status === 'error' ? nodes.message : undefined}
-          onOpen={openNode}
+      <header className="nodes-head">
+        <p className="text-fine">{copy.nodesBoard.lead}</p>
+        <PageNote
+          fetchedAt={oldestFetch(nodes, health, fleet)}
+          backfill={health.status === 'ready' ? health.data.backfill : null}
         />
-      )}
+        {nodes.status === 'ready' && all.length > 0 && !pathWired ? (
+          <p className="text-fine">{copy.pathNotWired}</p>
+        ) : null}
+      </header>
+
+      <FleetBand nodes={nodes} inService={inService} slo={slo} month={ledger} />
+
+      {phone ? null : <FleetLoad load={load} range={range} onRange={setRange} />}
+
+      <FleetTable
+        nodes={all}
+        state={tableState}
+        facts={facts}
+        load={perNode}
+        quality={quality}
+        showPath={pathWired}
+        phone={phone}
+        asOfSec={newest}
+        onRetry={nodes.reload}
+      />
+
+      {/* On a phone the list is what the page is opened for, so the charts follow it. */}
+      {phone ? <FleetLoad load={load} range={range} onRange={setRange} /> : null}
 
       <DetailDrawer
         open={Boolean(selectedView)}
@@ -307,43 +155,3 @@ export default function NodesPage({
     </div>
   );
 }
-
-/**
- * A fragment of the count sentence. It has to read as prose and behave as a
- * control at once: a real button so the keyboard and screen readers get it,
- * `aria-pressed` for the filter state, an underline on hover, and a 2 px rule
- * in the fragment's own tone once it is on.
- */
-const FRAGMENT_TONE: Record<NodeFilterId, Tone | 'none'> = {
-  lost: 'sev',
-  blocked: 'sev',
-  degraded: 'warn',
-  ok: 'none',
-  unmeasured: 'unk',
-};
-
-function CountBit({
-  id,
-  active,
-  count,
-  render,
-  onClick,
-}: {
-  id: NodeFilterId;
-  active: boolean;
-  count: number;
-  render: (values: number[]) => string;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      aria-pressed={active}
-      className={cn('count-bit', `tone-${FRAGMENT_TONE[id]}`)}
-      onClick={onClick}
-    >
-      <CountText values={[count]} render={render} />
-    </button>
-  );
-}
-

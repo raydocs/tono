@@ -87,6 +87,13 @@ function readJson<T>(relative: string): T {
   return JSON.parse(readFileSync(path.resolve(rootDir, relative), 'utf8')) as T;
 }
 
+/** The machines a fleet-wide `metrics` read reports: every one the set's node list has. */
+function fleetNames(set: FixtureSetName): string[] {
+  if (set === 'empty' || set === 'error') return [];
+  const file = set === 'dense' ? 'fixtures/nodes.dense.json' : 'fixtures/nodes.json';
+  return readJson<{ list: { items: Array<{ name: string }> } }>(file).list.items.map((node) => node.name);
+}
+
 /**
  * The empty set is assembled from the captured files rather than written by
  * hand: a node with nothing behind it is the one shape the capture already
@@ -245,6 +252,7 @@ export function serveNodeRoutes(options: {
     send(res, parts[0] === 'metrics'
       ? metricsBody({
         name: query.get('node'),
+        fleet: fleetNames(set),
         range: query.get('range'),
         fields: query.get('fields'),
         empty: set === 'empty',

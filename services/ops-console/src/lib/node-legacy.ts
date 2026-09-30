@@ -44,6 +44,8 @@ export type LoadSample = {
   netIn: number | null;
   netOut: number | null;
   tcpConnections: number | null;
+  /** Only the fleet read asks for it; one node's window leaves it null. */
+  load1?: number | null;
 };
 
 export type NodeLoadWindow = {
@@ -91,6 +93,7 @@ function readSample(value: unknown): LoadSample {
     netIn: maybeCount(row.netIn),
     netOut: maybeCount(row.netOut),
     tcpConnections: maybeCount(row.tcpConnections),
+    load1: maybeCount(row.load1),
   };
 }
 
@@ -118,6 +121,30 @@ function readWindow(value: unknown, name: string): NodeLoadWindow {
   };
 }
 
+/** Every machine the collector reported in the window, keyed by its name. */
+export type FleetLoadWindow = {
+  from: number;
+  to: number;
+  resolutionSeconds: number;
+  series: Map<string, LoadSample[]>;
+};
+
+function readFleetWindow(value: unknown): FleetLoadWindow {
+  const body = record(record(value).metrics);
+  const series = new Map<string, LoadSample[]>();
+  for (const [name, rows] of Object.entries(record(body.series))) {
+    series.set(name, (Array.isArray(rows) ? rows : []).map(readSample).sort((a, b) => a.t - b.t));
+  }
+  return {
+    from: count(body.from),
+    to: count(body.to),
+    resolutionSeconds: count(body.resolutionSeconds),
+    series,
+  };
+}
+
+const FLEET_FIELDS = 'cpu,memUsed,memTotal,load1,netIn,netOut';
+
 function readQualityText(value: unknown): NodeQualityText {
   const row = record(value);
   return {
@@ -132,6 +159,9 @@ export const nodeLegacyApi = {
       await getJson<unknown>('metrics', signal, { range, node: name, fields: FIELDS }),
       name,
     ),
+  /** The same window for every machine at once, for the 节点 page's fleet charts. */
+  fleetLoad: async (range: NodeLoadRange, signal?: AbortSignal) =>
+    readFleetWindow(await getJson<unknown>('metrics', signal, { range, fields: FLEET_FIELDS })),
   qualityText: async (name: string, signal?: AbortSignal) =>
     readQualityText(
       await getJson<unknown>(`fleet-nodes/${encodeURIComponent(name)}/quality-text`, signal),
@@ -165,10 +195,11 @@ const COLUMNS = 96;
 
 const P95 = 0.95;
 
-type Derived = {
+export type Derived = {
   t: number;
   cpu: number | null;
   memory: number | null;
+  load1: number | null;
   netIn: number | null;
   netOut: number | null;
   total: number | null;
@@ -189,7 +220,7 @@ function ratePerSecond(before: number | null, after: number | null, seconds: num
   return delta < 0 ? null : delta / seconds;
 }
 
-function derive(samples: readonly LoadSample[]): Derived[] {
+export function derive(samples: readonly LoadSample[]): Derived[] {
   const out: Derived[] = [];
   for (let index = 0; index < samples.length; index += 1) {
     const row = samples[index];
@@ -204,6 +235,7 @@ function derive(samples: readonly LoadSample[]): Derived[] {
       t: row.t,
       cpu: row.cpu,
       memory: share,
+      load1: row.load1 ?? null,
       netIn,
       netOut,
       total: netIn === null || netOut === null ? null : netIn + netOut,
@@ -221,7 +253,7 @@ function derive(samples: readonly LoadSample[]): Derived[] {
  * read as the same picture at two zooms, and a column nobody measured stays
  * empty instead of being joined across.
  */
-function columns(
+export function columns(
   rows: readonly Derived[],
   pick: (row: Derived) => number | null,
   from: number,
