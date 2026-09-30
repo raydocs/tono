@@ -228,8 +228,8 @@ async fn run_release_sequence(
 
     #[cfg(windows)]
     let status = {
-        // Only the user Disconnect command requests this durable release. Quit,
-        // sign-out and automatic failure cleanup keep the pending-update fence.
+        // User Disconnect and failed-Prepare recovery request this durable release.
+        // Quit, sign-out and ordinary failure cleanup keep the pending-update fence.
         let update_release = if _explicit_disconnect {
             pending_update_release_result(state, commands::update::disconnect_if_pending().await).await?
         } else { None };
@@ -329,8 +329,18 @@ async fn release_failed(state: &TonoState, error: &anyhow::Error) -> String {
 /// sequence (DNS restore → core stop → owner-gated release, §6/C1).
 /// Idempotent while a disconnect is already in flight (L6).
 pub async fn disconnect(state: Arc<TonoState>, app: AppHandle) -> Result<(), String> {
+    disconnect_for_generation(state, app, None).await
+}
+
+/// Failed Prepare recovery must not release a successor admitted after its status read.
+pub(crate) async fn disconnect_for_generation(
+    state: Arc<TonoState>, app: AppHandle, expected_generation: Option<u64>,
+) -> Result<(), String> {
     let operation = {
         let mut inner = state.lock().await;
+        if expected_generation.is_some_and(|generation| inner.connect_generation != generation) {
+            return Ok(());
+        }
         inner.client.transport().set_auth_tunnel_port(0);
         if inner.fsm.status().is_disconnecting {
             let operation = start_explicit_release(&state, &app, None, true).await;
@@ -350,7 +360,9 @@ pub async fn disconnect(state: Arc<TonoState>, app: AppHandle) -> Result<(), Str
         // delayed sample would dispatch another owner-wide release against B.
         start_explicit_release(&state, &app, None, true).await
     };
-    state.audit().log(AuditEvent::DisconnectBegin { cause: "user" });
+    state.audit().log(AuditEvent::DisconnectBegin {
+        cause: if expected_generation.is_some() { "updatePreparationFailed" } else { "user" },
+    });
     wait_explicit_release(&operation).await
 }
 
