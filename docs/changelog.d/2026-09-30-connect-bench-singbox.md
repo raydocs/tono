@@ -9,3 +9,4 @@
 - 候选/发布：仅源码，无新候选。
 - 剩余限制：见 PERF-CONNECT-4。main 上的 Windows 模板已经有 `rewrite_ttl: 30` 和 `Tono-DoH-Backup`。仍开放的是冷 DoH 多一次握手，以及 macOS 发出器的指纹和 fake-ip 段。
 - 2026-09-30 续记：rebase 到已含 fake-ip 就绪重传的 DoH 分支。sing-box 的计时采样同样先等 UDP 监听回答，再清伪装计数。完整 `--check` 未在这轮重跑。
+- 2026-09-30 续记：#741 丢掉合并 main 的提交并 rebase 到 `7e475245` 之后，本分支再 rebase 到那个直线历史上。没有把 main 合并进来。
