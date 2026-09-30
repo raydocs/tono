@@ -6124,6 +6124,64 @@ ${nameLine}
     }
   });
 
+  it('reopens a revocation job with a fresh attempt stamp so failing work cannot delay it', async () => {
+    const originalFetch = vi.mocked(globalThis.fetch).getMockImplementation()!;
+    const attempts: string[] = [];
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const request = input instanceof Request ? input : new Request(String(input), init);
+      if (request.method === 'DELETE') {
+        const node = new URL(request.url).pathname.split('/').pop()!;
+        attempts.push(node);
+        if (node.startsWith('poison-')) return new Response('upstream failure', { status: 500 });
+      }
+      return originalFetch(input, init);
+    });
+    try {
+      const account = await createAccount('reopen-fairness');
+      const t = Math.floor(Date.now() / 1000);
+      // This node was revoked before: the completed job keeps the stamp of that
+      // attempt, and a full batch of failing jobs was attempted around it.
+      await env.DB.prepare(
+        `INSERT INTO revocation_jobs(
+           id, device_id, tailscale_node_id, created_at, last_attempt_at, completed_at, reason
+         ) VALUES('reopen-prior', ?, ?, ?, ?, ?, 'device_revoked')`,
+      ).bind(account.device.id, MGMT_ID, t - 100, t, t).run();
+      await env.DB.batch(Array.from({ length: 40 }, (_, index) => env.DB.prepare(
+        `INSERT INTO revocation_jobs(id, device_id, tailscale_node_id, created_at, last_attempt_at)
+         VALUES(?, ?, ?, ?, ?)`,
+      ).bind(`reopen-fair-${index}`, `missing-${index}`, `poison-${index}`, index, t)));
+
+      // The login path (expirePending) reopens the completed job without
+      // processing it, so the inherited stamp is observable before any attempt.
+      await env.DB.prepare(
+        `UPDATE devices SET tailscale_node_id = ?, pending_expires_at = ?, status = 'pending' WHERE id = ?`,
+      ).bind(MGMT_ID, t - 10, account.device.id).run();
+      const login = await emailSignIn({
+        email: account.email,
+        deviceName: 'Primary Mac',
+        installationId: 'reopen-fairness-installation-one',
+      });
+      expect(login.status).toBe(409);
+      const reopened = await env.DB.prepare(
+        "SELECT last_attempt_at FROM revocation_jobs WHERE id = 'reopen-prior'",
+      ).first<any>();
+      expect(reopened.last_attempt_at).toBe(0);
+
+      const context = createExecutionContext();
+      await worker.scheduled(createScheduledController(), env as unknown as Env, context);
+      await waitOnExecutionContext(context);
+      expect(attempts).toContain(MGMT_ID);
+      expect(attempts.indexOf(MGMT_ID)).toBeLessThan(attempts.indexOf('poison-0'));
+      const done = await env.DB.prepare(
+        "SELECT completed_at, last_error FROM revocation_jobs WHERE id = 'reopen-prior'",
+      ).first<any>();
+      expect(done.completed_at).toBeTypeOf('number');
+      expect(done.last_error).toBeNull();
+    } finally {
+      fetchSpy.mockImplementation(originalFetch);
+    }
+  });
+
   it('keeps cron enforcement cost flat as already-enforced users accumulate', async () => {
     const tick = async () => {
       let prepares = 0;
