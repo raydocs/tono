@@ -885,7 +885,7 @@ fn recovery_task_registration(system_directory: &Path, dir: &Path) -> std::proce
         "\"{}\" --update-recover",
         dir.join("executor.exe").display()
     );
-    let mut registration = std::process::Command::new(system_directory.join("schtasks.exe"));
+    let mut registration = std::process::Command::new(schtasks_path(system_directory));
     registration.args([
         "/Create",
         "/TN",
@@ -901,6 +901,10 @@ fn recovery_task_registration(system_directory: &Path, dir: &Path) -> std::proce
         "/F",
     ]);
     registration
+}
+
+fn schtasks_path(system_directory: &Path) -> PathBuf {
+    system_directory.join("schtasks.exe")
 }
 
 fn register_recovery_with(store: &Store, register: impl FnOnce(&Path) -> Result<()>) -> Result<()> {
@@ -969,19 +973,23 @@ pub fn unpack_gate(package: &Path) -> Result<()> {
 /// The ONSTART task [`register_consumed_recovery`] creates.
 pub const RECOVERY_TASK_NAME: &str = "Tono Update Recovery v1";
 
+fn recovery_task_retirement(system_directory: &Path) -> std::process::Command {
+    let mut retirement = std::process::Command::new(schtasks_path(system_directory));
+    retirement.args(["/Delete", "/TN", RECOVERY_TASK_NAME, "/F"]);
+    retirement
+}
+
 /// Remove the SYSTEM boot task. The executor retires it once the committed
 /// cleanup ran, as macOS retires its launchd job at commit; a final uninstall
 /// retires it after WFP removal is proven. A task that is already gone is not
 /// an error. Same scheduler binary as the registration.
 pub fn retire_recovery_task() -> Result<()> {
-    let schtasks = Path::new("C:\\Windows\\System32\\schtasks.exe");
-    let deleted = std::process::Command::new(schtasks)
-        .args(["/Delete", "/TN", RECOVERY_TASK_NAME, "/F"])
-        .output()?;
+    let system_directory = security::system_directory()?;
+    let deleted = recovery_task_retirement(&system_directory).output()?;
     if deleted.status.success() {
         return Ok(());
     }
-    let present = std::process::Command::new(schtasks)
+    let present = std::process::Command::new(schtasks_path(&system_directory))
         .args(["/Query", "/TN", RECOVERY_TASK_NAME])
         .output()?;
     ensure!(
@@ -1758,6 +1766,20 @@ mod tests {
         assert_eq!(
             Path::new(registration.get_program()),
             Path::new(r"D:\Windows\System32\schtasks.exe")
+        );
+    }
+
+    #[test]
+    fn update_recovery_retirement_uses_the_os_system_directory() {
+        // Retirement must use the same scheduler as registration on another volume.
+        let retirement = recovery_task_retirement(Path::new(r"D:\Windows\System32"));
+        assert_eq!(
+            Path::new(retirement.get_program()),
+            Path::new(r"D:\Windows\System32\schtasks.exe")
+        );
+        assert_eq!(
+            retirement.get_args().collect::<Vec<_>>(),
+            ["/Delete", "/TN", RECOVERY_TASK_NAME, "/F"].map(std::ffi::OsStr::new)
         );
     }
 

@@ -29,11 +29,12 @@ pub(crate) fn enter_repair_gate() -> Result<tono_service_protocol::ServiceRepair
 /// engine calls leave such a task running when they miss their deadline. A plain drop therefore
 /// turned a timed-out engine call back into a hang, before the uninstall helper could prove Tono's
 /// NRPT rule gone (BRICK-W4). `shutdown_background` does not wait. The abandoned calls only
-/// release protection, never arm it; the helper holds the repair gate with the Service stopped or
-/// gone, and exits right after it reports. A powershell.exe such a call started is in the
-/// library's kill-on-close exit job, so it ends when the helper exits and cannot rewrite DNS
-/// after the gate is released.
-#[allow(dead_code)] // The installer declares this module too and does not use it.
+/// read or release protection, never arm it; on the uninstall path the helper holds the repair
+/// gate with the Service stopped or gone, and exits right after it reports. Installer gates also
+/// read WFP, so a hung BFE RPC must not keep the repair gate forever. A powershell.exe such a call
+/// started is in the library's kill-on-close exit job, so it ends when the helper exits and cannot
+/// rewrite DNS after the gate is released.
+#[cfg_attr(not(windows), allow(dead_code))]
 pub(crate) fn block_on_abandoning<F: std::future::Future>(future: F) -> Result<F::Output, Error> {
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()

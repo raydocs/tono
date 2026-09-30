@@ -217,7 +217,7 @@ pub(super) fn dispatch() -> Result<bool, Error> {
         report_gate_panics(&mode, reason_file.clone());
         let outcome = match mode.as_str() {
             "--manual-update-gate" => manual_update_gate(bring_scm_bfe_up, || {
-                tokio::runtime::Runtime::new()?.block_on(native::begin_manual())
+                super::shared::block_on_abandoning(native::begin_manual())?
             }),
             "--manual-orphan-gate" => native::begin_manual_orphan().map(|()| None),
             _ => native::begin_manual_uninstall().map(|()| None),
@@ -231,7 +231,7 @@ pub(super) fn dispatch() -> Result<bool, Error> {
             Ok(true)
         }
         [mode] if mode == "--retire-orphaned-owner" => {
-            tokio::runtime::Runtime::new()?.block_on(native::retire_orphaned_owner())?;
+            super::shared::block_on_abandoning(native::retire_orphaned_owner())??;
             Ok(true)
         }
         [mode] if mode == "--manual-update-finish" => {
