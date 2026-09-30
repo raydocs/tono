@@ -7,3 +7,8 @@
 - 验证：MacBook `git diff --check` exit 0；hosted red/green CI 和独立 Codex high 当前 diff review 待完成。本机未 native 编译/运行，未改系统网络。
 - 候选/发布：仅源码，无新包、无客户更新源变化；7424 不含本续修。
 - 剩余限制：防止记录没落盘却进入连接，不代表 PF/helper 自身不会在开机触发 panic；首次事故根因、helper 独立紧急解除和实机恢复仍未验证。
+
+### 2026-09-30 续记 · 后置同步失败
+- PR [#687](https://github.com/raydocs/tono/pull/687)，必须在 #686 后合。初次独立 Codex high 覆盖 `7ef29d00...4dd85bfa` 无 major、有一项 minor：rename 后目录同步失败会留下当前 boot 字节，同启动重开 App 可误解为记录成功。
+- 红候选 `52c999fc` 增加发布后失败、丢失 preferences 的 relaunch 反例。同步当前 boot 记录前先写入并同步 pending marker；仅当前记录及目录同步成功后删除 marker。失败保留 marker，读取时自动恢复保持暂停，不把可见字节当持久化成功。
+- 这是故障注入回归，不是物理磁盘故障/首次 panic 实机证明；最终 exact-head CI 与复核仍待完成。

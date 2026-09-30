@@ -15,16 +15,16 @@ final class DurableConnectAdmissionTests: XCTestCase {
 
         XCTAssertThrowsError(try RuntimeCleanup.recordConnectBootSession(in: file, writer: { _, path in
             writes += 1
-            XCTAssertEqual(path, file)
-            throw POSIXError(.ENOSPC)
+            if path == file { throw POSIXError(.ENOSPC) }
+            try RuntimeCleanup.writeSynced(RuntimeCleanup.unknownBootSession, to: path)
         })) { error in
             XCTAssertEqual((error as? POSIXError)?.code, .ENOSPC)
         }
 
-        XCTAssertEqual(writes, 1)
+        XCTAssertEqual(writes, 2)
         AppProfile.defaults.removeObject(forKey: SettingsKey.connectBootSession)
-        XCTAssertNil(RuntimeCleanup.recordedConnectBootSession(in: file),
-                     "missing durable evidence is why this connect must not be admitted")
+        XCTAssertEqual(RuntimeCleanup.recordedConnectBootSession(in: file), RuntimeCleanup.unknownBootSession,
+                       "failed admission retains a durable hold, not a successful boot record")
     }
 
     func testConnectRefusesUnsyncedBootRecordWithoutRetiringHeldProtection() {
