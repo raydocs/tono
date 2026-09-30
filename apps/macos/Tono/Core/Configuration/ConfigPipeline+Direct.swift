@@ -6,20 +6,37 @@ import Security
 /// Produces runtime.yaml from subscription YAML + minimal overlay.
 /// Follows Verge's principle: subscription config is immutable, overlay only control fields.
 nonisolated extension ConfigPipeline {
-    // Share the residential route list so a signed direct policy cannot bypass
-    // OpenAI or another assistant when the protected list falls behind.
-    static let managedDirectProtectedSuffixes = assistantHomeDomainSuffixes + [
+    static let managedDirectProtectedSuffixes = [
+        "anthropic.com", "claude.ai", "claude.com", "claude.app",
+        "claude.site", "clau.de", "anthropic.ai", "claudestudio.com",
+        "claudemcpclient.com", "claudemcpcontent.com", "claudeusercontent.com",
+        "servd-anthropic-website.b-cdn.net", "challenges.cloudflare.com",
+        "cf-assets.www.cloudflare.com", "cloudflareinsights.com",
+        "browser-intake-datadoghq.com", "browser-intake-us5-datadoghq.com",
+        "browser-intake-us3-datadoghq.com",
+        "browser-intake-ap1-datadoghq.com",
+        "browser-intake-ap2-datadoghq.com",
+        "browser-intake-datadoghq.eu", "browser-intake-ddog-gov.com",
+        "datadoghq.com", "statsig.com", "statsigapi.net", "featuregates.org",
+        "growthbook.io", "stripe.com", "stripecdn.com", "link.com", "hcaptcha.com", "stripe.network", "storage.googleapis.com",
+        "registry.npmjs.org", "raw.githubusercontent.com", "formulae.brew.sh",
+        "sentry.io",
         "tono.app", "tono.com",
     ]
 
+    // The explicit list above is a cross-platform contract; also guard the
+    // residential route list so a signed direct policy cannot bypass OpenAI or
+    // another assistant when that list grows.
+    static let managedDirectGuardSuffixes = managedDirectProtectedSuffixes + assistantHomeDomainSuffixes
+
     static func isProtectedFromDirect(_ host: String) -> Bool {
-        managedDirectProtectedSuffixes.contains {
+        managedDirectGuardSuffixes.contains {
             host == $0 || host.hasSuffix(".\($0)")
         }
     }
 
     static func directSuffixOverlapsProtected(_ host: String) -> Bool {
-        isProtectedFromDirect(host) || managedDirectProtectedSuffixes.contains {
+        isProtectedFromDirect(host) || managedDirectGuardSuffixes.contains {
             $0.hasSuffix(".\(host)")
         }
     }

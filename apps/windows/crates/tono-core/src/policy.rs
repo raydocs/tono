@@ -253,15 +253,55 @@ pub fn is_permanently_protected(address: Ipv4Addr) -> bool {
     address == Ipv4Addr::new(1, 1, 1, 1) || address == Ipv4Addr::new(8, 8, 8, 8)
 }
 
-/// Home-routed product hosts must never be moved to the physical interface,
-/// even by an otherwise trusted policy. Reuse the routing list so new
-/// assistant providers cannot miss this guard; retain Tono's own hosts below.
-const PROTECTED_DIRECT_SUFFIXES: &[&str] = &crate::config::CLAUDE_HOME_DOMAINS;
+/// Claude's first-party, login/challenge, telemetry and update hosts must never
+/// be moved to the physical interface, even by an otherwise trusted policy.
+/// Keep this in parity with the control-plane and macOS protected lists.
+const PROTECTED_DIRECT_SUFFIXES: &[&str] = &[
+    "anthropic.com",
+    "claude.ai",
+    "claude.com",
+    "claude.app",
+    "claude.site",
+    "clau.de",
+    "anthropic.ai",
+    "claudestudio.com",
+    "claudemcpclient.com",
+    "claudemcpcontent.com",
+    "claudeusercontent.com",
+    "servd-anthropic-website.b-cdn.net",
+    "challenges.cloudflare.com",
+    "cf-assets.www.cloudflare.com",
+    "cloudflareinsights.com",
+    "browser-intake-datadoghq.com",
+    "browser-intake-us5-datadoghq.com",
+    "browser-intake-us3-datadoghq.com",
+    "browser-intake-ap1-datadoghq.com",
+    "browser-intake-ap2-datadoghq.com",
+    "browser-intake-datadoghq.eu",
+    "browser-intake-ddog-gov.com",
+    "datadoghq.com",
+    "statsig.com",
+    "statsigapi.net",
+    "featuregates.org",
+    "growthbook.io",
+    "stripe.com",
+    "stripecdn.com",
+    "link.com",
+    "hcaptcha.com",
+    "stripe.network",
+    "storage.googleapis.com",
+    "registry.npmjs.org",
+    "raw.githubusercontent.com",
+    "formulae.brew.sh",
+    "sentry.io",
+    "tono.app",
+    "tono.com",
+];
 
 fn is_protected_from_direct(host: &str) -> bool {
     PROTECTED_DIRECT_SUFFIXES
         .iter()
-        .chain(["tono.app", "tono.com"].iter())
+        .chain(crate::config::CLAUDE_HOME_DOMAINS.iter())
         .any(|suffix| host == *suffix || host.ends_with(&format!(".{suffix}")))
 }
 
@@ -269,7 +309,7 @@ fn direct_suffix_overlaps_protected(host: &str) -> bool {
     is_protected_from_direct(host)
         || PROTECTED_DIRECT_SUFFIXES
             .iter()
-            .chain(["tono.app", "tono.com"].iter())
+            .chain(crate::config::CLAUDE_HOME_DOMAINS.iter())
             .any(|protected| protected.ends_with(&format!(".{host}")))
 }
 

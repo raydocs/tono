@@ -229,8 +229,12 @@ function canonicalTrafficPolicyEntries(value: unknown, trusted: boolean): Traffi
     'growthbook.io', 'stripe.com', 'stripecdn.com', 'link.com', 'hcaptcha.com', 'stripe.network', 'storage.googleapis.com',
     'registry.npmjs.org', 'raw.githubusercontent.com', 'formulae.brew.sh',
     'sentry.io',
-    // Match the clients' assistant home domains: a signed direct suffix must
-    // not override their residential routes, including assistant auth hosts.
+    'tono.app', 'tono.com',
+  ];
+  // Match the clients' assistant home domains: a signed direct entry must not
+  // override their residential routes, including assistant auth hosts. Kept
+  // apart from `protectedSuffixes`, whose exact set is a cross-platform contract.
+  const assistantHomeSuffixes = [
     'chatgpt.com', 'openai.com', 'chat.com', 'ai.com', 'oaistatic.com', 'oaiusercontent.com',
     'grok.com', 'grok.x.com', 'grokipedia.com', 'x.ai',
     'perplexity.ai', 'perplexity.com', 'pplx.ai',
@@ -242,8 +246,8 @@ function canonicalTrafficPolicyEntries(value: unknown, trusted: boolean): Traffi
     'gmail.com', 'mail.google.com', 'googlemail.com', 'inbox.google.com',
     'accounts.google.com', 'myaccount.google.com', 'oauth2.googleapis.com',
     'mail-pa.clients6.google.com', 'gmail.googleapis.com',
-    'tono.app', 'tono.com',
   ];
+  const directGuardSuffixes = [...protectedSuffixes, ...assistantHomeSuffixes];
   const seenHosts = new Set<string>();
   const canonicalDomains = (
     values: unknown[],
@@ -256,7 +260,7 @@ function canonicalTrafficPolicyEntries(value: unknown, trusted: boolean): Traffi
     }
     const { host, ports } = entry as Row;
     if (typeof host !== 'string' || host.length > 253 || !/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/.test(host) ||
-        protectedSuffixes.some((suffix) => host === suffix || host.endsWith(`.${suffix}`)) ||
+        directGuardSuffixes.some((suffix) => host === suffix || host.endsWith(`.${suffix}`)) ||
         seenHosts.has(host)) {
       throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid or duplicate domain host');
     }
@@ -324,7 +328,7 @@ function canonicalTrafficPolicyEntries(value: unknown, trusted: boolean): Traffi
     // whoever holds the key; it does not remove it.
     if (typeof host !== 'string' || host.length > 253 ||
         !/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/.test(host) ||
-        protectedSuffixes.some((suffix) =>
+        directGuardSuffixes.some((suffix) =>
           host === suffix || host.endsWith(`.${suffix}`) || suffix.endsWith(`.${host}`)) ||
         seenSuffixes.has(host)) {
       throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid or duplicate direct suffix host');
