@@ -31,9 +31,18 @@ pub fn enabled_for(path: &Path, device_id: &str) -> bool {
     }
 }
 
+/// sing-box `/delay` may run only after the data plane is already proven.
+///
+/// The connect path does not call this. While the flag is off, Windows still
+/// uses mihomo, and that path has its own delay ordering. A missing proof
+/// keeps the sing-box probe from opening a second Reality handshake.
+pub fn controller_delay_allowed(sing_box_selected: bool, data_plane_proven: bool) -> bool {
+    !sing_box_selected || data_plane_proven
+}
+
 #[cfg(test)]
 mod tests {
-    use super::enabled_for;
+    use super::{controller_delay_allowed, enabled_for};
     use std::fs;
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -84,5 +93,12 @@ mod tests {
         )
         .unwrap();
         assert!(!enabled_for(&file, "device-a"));
+    }
+
+    #[test]
+    fn sing_box_delay_waits_for_the_data_plane() {
+        assert!(controller_delay_allowed(false, false));
+        assert!(!controller_delay_allowed(true, false));
+        assert!(controller_delay_allowed(true, true));
     }
 }

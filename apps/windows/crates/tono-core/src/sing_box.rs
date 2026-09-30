@@ -32,7 +32,7 @@ use thiserror::Error;
 
 mod flag;
 mod runtime;
-pub use flag::enabled_for;
+pub use flag::{controller_delay_allowed, enabled_for};
 pub use runtime::{DialEndpoint, OwnedSingBoxRuntime, RuntimeInput, Transport, build_runtime};
 
 pub const PROFILE: &str = "reality-tcp-no-special-routing-v1";

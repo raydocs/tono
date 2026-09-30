@@ -7,3 +7,10 @@
 - 验证：Linux 上 `cargo test -p tono-core --lib sing_box::flag`。macOS XCTest 与 Windows 实机未运行。
 - 候选/发布：仅源码，无新候选。mihomo 仍是安装包里的核心，也是回退开关。
 - 剩余限制：开关默认保持关闭，直到实机清单通过。Service 改读 JSON、DIRECT 重载仍等 #703、#705、#706 合并后再决定。本记录不授权把默认改成开。
+
+## 2026-09-30 · 续记：sing-box 的 /delay 必须等数据面
+- 归属：同上。连接路径仍不读开关，也不调用这个谓词。
+- 来源：PERF-CONNECT-4。#736 只改了 mihomo 的 `/delay` 顺序。
+- 新增/优化：`controller_delay_allowed` 在选中 sing-box 且数据面还没证明时返回 false。mihomo 路径不受影响。没有把它接到 `probes.rs` 或连接状态机。
+- 验证：`cargo test -p tono-core --lib sing_box::flag`。
+- 剩余限制：Windows 在开关关闭时仍走 mihomo。真正的 sing-box 连接层要等第 4 阶段，本谓词还没有调用点。
