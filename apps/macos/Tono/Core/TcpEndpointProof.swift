@@ -49,7 +49,9 @@ enum TcpEndpointProof {
     }
 }
 
-private final class ResumeOnce: @unchecked Sendable {
+/// Lock-protected continuation. Nonisolated so the socket callback can resume
+/// it without hopping to the main actor. The lock is the only shared state.
+nonisolated private final class ResumeOnce: @unchecked Sendable {
     private let lock = NSLock()
     private var continuation: CheckedContinuation<Bool, Never>?
 

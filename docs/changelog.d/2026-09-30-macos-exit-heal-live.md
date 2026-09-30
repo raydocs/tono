@@ -17,3 +17,8 @@
 
 - 来源：两条提交重放到 [#706](https://github.com/raydocs/tono/pull/706) `55e68e93`。失败仍调用 `disarm`，证明成功前不 `connect()`。
 - 缺陷修复：`build` / `policy-tests` 编译失败。退避调用补上 `attempt:` 标签。测试闭包标成 `@MainActor @Sendable`，Observation 才能交出这个存储。放行条件和探测条件没有放宽。
+
+### 2026-09-30 续记 · 测试闭包不再交给 Observation
+
+- 工程与测试：`ce3c6932` 上 `macos/build` 与 `policy-tests` 仍失败。宏把存储看成 `(@concurrent (String) async -> Bool)?`，访问器却要交出 `(@MainActor @Sendable (String) async -> Bool)?`。`unarmedTcpProof` 改为 `@ObservationIgnored`，与其它测试缝一致，不再生成这个访问器。`ResumeOnce` 标成 `nonisolated`，套接字回调可以在后台队列结束探测。
+- 行为不变：普通失败仍 `disarm`；TCP 证明成功且保护已放下之前不 `connect()`。无 Xcode，本机未跑 `xcodebuild`。

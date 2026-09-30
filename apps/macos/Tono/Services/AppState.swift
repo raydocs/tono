@@ -93,7 +93,8 @@ final class AppState {
     /// Next dial chosen by ExitHeal while PF is down. Nil keeps the selected node.
     var unarmedDialName: String?
     /// Test seam. Nil uses a TCP connect that does not install PF.
-    /// `@Sendable` matches the Observation yield; the closure still does not arm PF.
+    /// Not observed: an optional MainActor closure cannot be yielded by Observation.
+    @ObservationIgnored
     var unarmedTcpProof: (@MainActor @Sendable (String) async -> Bool)?
     /// Failed update journal still on disk. Dashboard tells the customer to
     /// disconnect and reinstall; a later connect must not hide this.
