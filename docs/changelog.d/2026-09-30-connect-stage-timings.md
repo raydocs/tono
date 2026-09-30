@@ -22,3 +22,7 @@
 ### 2026-09-30 续记 · 变基到已含 #703 的 main
 
 - 来源：变基到 `origin/main` `01c2403f`（[#703](https://github.com/raydocs/tono/pull/703) 已合入）。没有把 main 合并进来。唯一冲突是 `docs/DECISIONS.md`：粘性自愈记录留在「不缩短预算」上面。两条都保留。`telemetryKey` 与 `wireKey` 仍同时存在。预算没有缩短。助手协议仍是 `4.52.6`。
+
+### 2026-09-30 续记 · 变基到已含 #700 与 #733 的 main
+
+- 来源：变基到 `origin/main` `cbb4f56a`。没有把 main 合并进来。唯一冲突是 `docs/DECISIONS.md`：Continuity 与 Windows WFP 放行记录留在「不缩短预算」上面。`telemetryKey` 与 `wireKey` 仍同时存在。预算没有缩短。助手协议仍是 `4.52.6`。
