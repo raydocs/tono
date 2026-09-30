@@ -10,3 +10,4 @@
 - 剩余限制：冷的第一次真实解析仍要付一次出口握手。控制器就绪时的预取在已合入的 #736（不阻塞连接）。TUN / PF / WFP / 系统 DNS 仍只在实机上构成时间。
 - 2026-09-30 续记：rebase 到 main `939177f4` 之后，`live_mihomo_yaml_stays_byte_for_byte_on_its_own_fake_ip_range` 仍钉着旧 YAML 摘要。摘要改为这次运行时的 `82c6545e00c8e42058d1a3d6b93d43218c563cc25c5755bc82b663d41630c501`。本机没有重跑 `cargo test`。
 - 2026-09-30 续记：再 rebase 到 main `658aed21`（#752 把同一枚钉改成常量 `2a0e26f4…`，生成器没变）。本分支的摘要仍是 `82c6545e…`，因为 fake-ip-ttl / prefer-h3 / lru 还在那些字节里。CI 上 Hysteria2 的 `fake_ip_*` 是 None：控制器已就绪时 UDP 监听还没绑上，单发数据报被丢掉。就绪重传和计时采样分开，15 ms 上限仍表示一次本地回答。完整 `--check` 未在这轮重跑。
+- 2026-09-30 续记：丢掉把 main 合并进来的 `cc781c75`，改成 rebase 到 `origin/main` `7e475245`。冲突只在 `docs/DECISIONS.md`：main 的条目都留着，fake-ip 这条仍在最前。helper 源码与 main 相同，`HelperProtocolVersion` 保持 `4.52.6`。YAML 摘要仍是 `82c6545e…`。
