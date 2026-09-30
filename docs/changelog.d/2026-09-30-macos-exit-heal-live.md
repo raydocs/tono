@@ -43,3 +43,8 @@
 
 - 工程与测试：`fd7d2f9e` 上 `macos/build` 与 `policy-tests` 编译失败。连接失败收尾在 `await MainActor.run` 里调用了异步的 `applyExhaustedArmedFailure`，闭包变成异步，而 `MainActor.run` 只要同步体。这段 `perform` 已经标了 `@MainActor`，收尾直接留在原闭包里。暂停条件和放行条件没有放宽。
 - 验证：本机无 Xcode，未跑 `xcodebuild`。需要 macOS CI。
+
+### 2026-09-30 续记 · 变基到已含 #700 与 #733 的 main
+
+- 来源：变基到 `origin/main` `cbb4f56a`。没有把 main 合并进来。`docs/DECISIONS.md` 把 Continuity 与 Windows WFP 放行留在这条 macOS 记录上面。暂停断言仍为真。失败收尾仍不套同步的 `MainActor.run`。助手协议仍是 `4.52.6`。
+- 验证：本机无 Xcode，未跑 `xcodebuild`。需要 macOS CI。
