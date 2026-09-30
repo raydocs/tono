@@ -389,9 +389,9 @@ pub fn build_runtime(input: RuntimeInput<'_>) -> Result<OwnedSingBoxRuntime, Sin
             .push(json!({"type":"hosts","tag":"Tono-Hosts","predefined":hosts}));
         runtime["dns"]["rules"].as_array_mut().unwrap().insert(1, json!({"inbound":["Tono-TUN","Tono-DNS","Tono-Mixed"],"query_type":["A"],"domain":hosts.keys().collect::<Vec<_>>(),"action":"route","server":"Tono-Hosts"}));
     }
-    // Residential NAT: stamp keep_alive_period on a hysteria2 outbound that
-    // this compiler already built. Today's HY2 arm still refuses a missing
-    // DER pin and pushes nothing, so this is a no-op until an outbound exists.
+    // Residential NAT: stamp keep_alive_period on every hysteria2 outbound
+    // this compiler already built. This does not add an outbound and does not
+    // relax the DER-pin refusal.
     let mut outbound_value = json!(outbounds);
     crate::hy2_idle::apply_sing_box_keep_alive(&mut outbound_value);
     runtime["outbounds"] = outbound_value;
@@ -614,6 +614,9 @@ mod tests {
         let selected = build_runtime(request).unwrap();
         let encoded = "q6urq6urq6urq6urq6urq6urq6urq6urq6urq6urq6s=";
         assert!(selected.runtime_json().contains(encoded));
+        assert!(selected.runtime_json().contains("\"keep_alive_period\":\"5s\""));
+        assert!(!selected.runtime_json().contains("idle_timeout"));
+        assert!(!selected.runtime_json().contains("disable_chrome_parrot"));
         assert!(!selected.runtime_json().contains("insecure"));
         assert!(
             !selected

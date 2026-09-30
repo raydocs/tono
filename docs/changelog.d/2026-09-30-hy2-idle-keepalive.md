@@ -7,5 +7,6 @@
 - 工程与测试：`hy2_idle` 单测两条；mihomo 映射一条；macOS `Hy2IdleSupportTests` 与既有 HY2 sing-box 断言；Windows `tono.test.ts` 一条。夹具 `hy2-certificate-sha256.json` 带上 `5s`，供 alpha.9 解析检查。
 - 验证：见本 PR 的工具回执。macOS XCTest 与 Windows `cargo test` 在这台 Linux 代理上不跑（无 Xcode，不安装工具链）。
 - 2026-09-30 续记：macOS CI `build` 失败在 `LocalizationCoverageTests.testEverySurfaceStringHasATranslatedChineseUnit`。同一句用户文案补进 `Localizable.xcstrings` 的 zh-Hans，状态 `translated`。Windows 中文案与这句相同。不改保活字段。
+- 2026-09-30 续记：线性变基到 `main` `658aed21`（#752）。`live_mihomo_yaml_stays_byte_for_byte_on_its_own_fake_ip_range` 的钉仍是 `2a0e26f477dc9aa7eab67cfa7ccbcc23b7eefd22480d60220e181a5b434ebb1c`，没有改。#729 已在 main 上发出带 DER 钉的 hysteria2，后处理给该出站写 `keep_alive_period: 5s`。
 - 候选/发布：仅源码，无新候选。
 - 剩余限制：钉住的 mihomo 仍是内部 10 秒保活 / 30 秒空闲，没有 YAML 旋钮。Windows 产品 JSON 今天仍不发出 HY2；后处理要等 DER 钉那条合入后才作用到字节上。需要住宅 NAT 实机才能证明 5 秒是否够。
