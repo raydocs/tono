@@ -1,6 +1,6 @@
 ## 2026-09-30 · macOS helper 启动与紧急恢复的放通加固
 - 归属：SHIP_PLAN §2 第 10 条（装上会坏）。macOS helper。
-- 来源：main `01c2403f` → 分支 `glm/mac-helper-recovery`；PR 待开；未合 main。
+- 来源：main `01c2403f` → 分支 `glm/mac-helper-recovery`；PR [#763](https://github.com/raydocs/tono/pull/763)；未合 main。
 - 缺陷修复：
   - MAC-EMERGENCY-STALE-CORE：`runEmergencyDisarm` 与 `releaseNetworkWithoutLedger` 里 `CoreManager` 构造失败（僵尸 Mihomo 扛过 SIGKILL）不再中止释放：stderr 高声警告后继续「先尽量恢复 DNS、再 `disarm()` PF」；有待定更新且拿不到 core 时退回普通释放路径，更新证据不动、不验证、不归档（与 disconnect 失败的既有回退一致）。决策钉在 `emergencyReleaseDespiteStaleCore`，与坏账本同形。
   - MAC-STARTUP-FAIL-DNS：生产 `secureFailedStartup`（main.swift 底部的装配）在 `KillSwitchManager.secureFailedStartup` 清 PF 之后，尽量恢复已保存的受保护 DNS 快照（`ProtectedDNSManager().restore(deferringLossNotice: true)`）：失败记 stderr、永不抛错、不装任何 block。`KillSwitchManager.secureFailedStartup` 本体语义不变（无其他调用方）。绑定用户被删导致 `SocketServer.init` 在 DNS 管理器建成之前抛错的 KeepAlive 重启循环不再把系统解析器留在 127.0.0.1。
