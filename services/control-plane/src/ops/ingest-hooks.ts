@@ -17,6 +17,7 @@ import { accrueActivityHours, applyFailureToStatus, applyWindowToStatus } from '
 import { parseAuditSegment, writeParsedSegment } from './traffic-parse';
 import { planAndSendAlerts, runCustomerVerdictPass, runNodeVerdictPass } from './verdict-run';
 import { loadKnownExitAsns, upsertExitAsn } from './exit-asns';
+import { recordFailureCluster } from '../telemetry/failure-clusters';
 
 const LOG_PARSE_MAX = 2 * 1024 * 1024;
 // 20k realistic JSONL lines inflate to ~5-6 MiB. 16 MiB is a generous
@@ -27,7 +28,7 @@ const CORE_ERROR_CHARS = 200;
 const FAILURE_KEYS = [
   'ts', 'stage', 'code', 'error', 'node', 'appVersion', 'osVersion', 'osArch',
   'platform', 'coreErrors', 'tcpDelayMs', 'exitDelayMs',
-  'attemptId', 'transport',
+  'attemptId', 'transport', 'appBuild', 'gitCommit', 'coreVersion', 'channel',
 ];
 const PLATFORMS = new Set(['windows', 'macos', 'linux', 'android', 'ios']);
 
@@ -241,6 +242,13 @@ export async function ingestConnectFailure(
     }
   }
   const errorText = failureError(b, cores);
+  const appBuild = b.appBuild == null ? null : str(b.appBuild, 'appBuild', 1, 40);
+  const gitCommit = b.gitCommit == null ? null : str(b.gitCommit, 'gitCommit', 1, 40);
+  const coreVersion = b.coreVersion == null ? null : str(b.coreVersion, 'coreVersion', 1, 40);
+  const channel = b.channel == null ? null : str(b.channel, 'channel', 1, 16);
+  if (channel && channel !== 'release' && channel !== 'beta') {
+    throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid channel');
+  }
   const t = now();
   // A client clock ahead of ours must not plant a failure that every
   // "recent" window counts for a month: like flatten, cap at receipt time.
@@ -253,9 +261,9 @@ export async function ingestConnectFailure(
        kind, node, stage, outcome, code, error,
        elapsed_ms, delay_ms, exit_delay_ms, tcp_delay_ms, catalog_revision,
        edge_asn, edge_as_org, edge_country, edge_region, edge_via_exit, attempt_id,
-       transport
+       transport, app_build, git_commit, core_version, channel
      ) VALUES(?, ?, ?, 'failure', NULL, ?, ?, ?, ?, ?, ?, 'connectFail', ?, ?, NULL, ?, ?,
-              NULL, NULL, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?)`,
+              NULL, NULL, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).bind(
     id(), atMs, t, a.userId, a.deviceId,
     platform, appVersion, osVersion, osArch,
@@ -264,7 +272,14 @@ export async function ingestConnectFailure(
     edge.edge_asn, edge.edge_as_org, edge.edge_country, edge.edge_region, edge.edge_via_exit,
     attemptId,
     transport,
+    appBuild, gitCommit, coreVersion, channel,
   ).run();
+  if (Number(inserted.meta.changes ?? 0) > 0) {
+    await swallow('ops failure cluster failed', () => recordFailureCluster(e.DB, {
+      atMs, code, stage, appVersion, platform: platform ?? 'unknown', node,
+      userId: a.userId, deviceId: a.deviceId, appBuild, gitCommit, coreVersion, channel, error: errorText,
+    }, e, t));
+  }
   if (Number(inserted.meta.changes ?? 0) > 0) {
     await swallow('ops failure status failed', () => applyFailureToStatus(e.DB, {
       userId: a.userId,

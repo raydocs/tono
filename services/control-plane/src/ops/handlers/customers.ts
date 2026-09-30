@@ -1,5 +1,6 @@
 import { ApiError } from '../../errors';
 import { sniffPlatform } from '../customers';
+import { loadCustomerDiagnostics } from '../../telemetry/diagnostics-read';
 import { loadCustomerListCounts, loadCustomerPage } from '../customers-list';
 import { activityHours, customerStatus, customerStatuses, deviceCountsFor, servicesForUsers } from '../customers-read';
 import {
@@ -7,6 +8,7 @@ import {
   assertActivityHour,
   assertConnectionEvent,
   assertCustomerDetail,
+  assertCustomerDiagnostics,
   assertCustomerSummary,
   assertDestinationRow,
   assertServiceUsage,
@@ -362,6 +364,14 @@ export async function getCustomerConnections(req: Request, e: Env, rawId: string
     e, req, sliced, nextCursor, updatedAt,
     weakEtag([userId, deviceId, updatedAt, rows.length]), assertConnectionEvent,
   );
+}
+
+export async function getCustomerDiagnostics(req: Request, e: Env, rawId: string): Promise<Response> {
+  const userId = decodeName(rawId, 'id');
+  await loadUser(e, userId);
+  const deviceId = parseDeviceId(new URL(req.url).searchParams.get('deviceId'));
+  const dto = await loadCustomerDiagnostics(e.DB, userId, deviceId);
+  return entityJson(e, req, dto, weakEtag([userId, deviceId, dto.updatedAt, dto.sessions.length]), assertCustomerDiagnostics);
 }
 
 export async function getCustomerActivity(req: Request, e: Env, rawId: string): Promise<Response> {

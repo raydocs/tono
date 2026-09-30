@@ -1199,6 +1199,7 @@ describe('ops v1 api', () => {
       'GET /api/v1/ops/customers/{id}/connections',
       'GET /api/v1/ops/customers/{id}/activity',
       'GET /api/v1/ops/customers/{id}/destinations',
+      'GET /api/v1/ops/customers/{id}/diagnostics',
       'GET /api/v1/ops/customers/{id}/services',
       'GET /api/v1/ops/customers/{id}/followups',
       'POST /api/v1/ops/customers/{id}/followups',

@@ -45,6 +45,7 @@
 | `GET customers/{id}/activity?range` | `ListDto<ActivityHourDto>` |
 | `GET customers/{id}/destinations?range` | `ListDto<DestinationRowDto>` |
 | `GET customers/{id}/services?range` | `ListDto<ServiceUsageDto>` |
+| `GET customers/{id}/diagnostics?deviceId=` | `CustomerDiagnosticsDto`（会话、链路跳、`/24` 出口、DNS 检查、已同意的 AI 路由；不含邮箱、主机名、完整 IP。字段见 [diagnostics-privacy.md](../diagnostics-privacy.md)） |
 | `GET incidents?status&severity&subjectType&since` | `ListDto<IncidentDto>`（`status=resolved` 含误报关闭；控制台再滤） |
 | `GET incidents/{id}` | `IncidentDetailDto` (`{ incident, events, jobs, deliveries }`) |
 | `POST incidents/{id}/ack\|snooze\|resolve\|notes` | `IncidentDto`。`snooze` 接受 `until`（epoch 秒）、`durationSec`，或控制台用的 `seconds`（1..7 天）。`resolve` 必带 `closure`：`verified` / `false_positive` / `manual`，另可 `note`；`false_positive` 写事件 `note`「误报：…」，不计入恢复 |

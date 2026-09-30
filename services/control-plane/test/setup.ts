@@ -39,6 +39,14 @@ beforeEach(async () => {
   await env.DB.prepare('DELETE FROM node_traffic_cycle_samples').run();
   await env.DB.prepare('DELETE FROM node_traffic_cycles').run();
   await env.DB.prepare('DELETE FROM node_error_daily').run();
+  await env.DB.prepare('DELETE FROM failure_alert_sends').run();
+  await env.DB.prepare('DELETE FROM failure_cluster_members').run();
+  await env.DB.prepare('DELETE FROM failure_clusters').run();
+  await env.DB.prepare('DELETE FROM ai_service_routes').run();
+  await env.DB.prepare('DELETE FROM dns_checks').run();
+  await env.DB.prepare('DELETE FROM session_exit_observations').run();
+  await env.DB.prepare('DELETE FROM chain_hops').run();
+  await env.DB.prepare('DELETE FROM client_sessions').run();
   await env.DB.prepare('DELETE FROM connection_events').run();
   await env.DB.prepare('DELETE FROM ops_flatten_cursor').run();
   await env.DB.prepare('DELETE FROM ops_connection_daily').run();

@@ -83,6 +83,12 @@ export interface Env {
   ROUTING_RESEARCH_RETENTION_SECONDS?: string;
   BUILD_SHA?: string;
   OPS_ROLES?: string;
+  // Engineering-bot failure webhook. Both must be set or no alert is sent.
+  // HTTPS only; private and link-local hosts are refused. See docs/diagnostics-privacy.md.
+  FAILURE_ALERT_WEBHOOK_URL?: string;
+  FAILURE_ALERT_WEBHOOK_SECRET?: string;
+  // Bearer token for GET /api/v1/diagnostics/clusters. Read-only. Unset → 503.
+  DIAGNOSTICS_READ_TOKEN?: string;
 }
 
 export type Row = Record<string, any>;

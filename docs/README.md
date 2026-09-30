@@ -49,6 +49,7 @@ Living operator docs. The current ops backlog is
 | [ops/d1-backups.md](ops/d1-backups.md) | D1 backup |
 | [ops/restore-production.md](ops/restore-production.md) | Production restore |
 | [ops/ingest-limits.md](ops/ingest-limits.md) | Ingest budgets |
+| [diagnostics-privacy.md](diagnostics-privacy.md) | Automatic diagnostics tables, privacy boundaries, failure-cluster webhook |
 | [ops/parity-audit.md](ops/parity-audit.md) | Client/ops parity |
 | [ops/rollout-ops2.md](ops/rollout-ops2.md) | `/ops2/` rollout runbook |
 | [ops/transport-hy2.md](ops/transport-hy2.md) | hy2 transport |
