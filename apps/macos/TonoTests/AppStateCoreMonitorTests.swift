@@ -131,7 +131,16 @@ final class AppStateCoreMonitorTests: XCTestCase {
         app.networkProtection = runtime
         app.tunInterfaceExists = { _ in true }
         var audits = ProtectionAuditOperations()
+        let stableUplink = NetworkUplinkSnapshot(
+            primaryService: "Wi-Fi",
+            primaryInterface: "en0",
+            ipv4Address: "192.168.1.20",
+            ipv4Gateway: "192.168.1.1",
+            ipv6Gateway: nil
+        )
+        app.lastUplinkSnapshot = stableUplink
         audits.primaryNetworkService = { "Wi-Fi" }
+        audits.uplinkSnapshot = { stableUplink }
         audits.protectedDNSIntegrity = { _ in .unverifiable }
         audits.killSwitchHealth = { (wanted: true, live: true, repairedSinceArm: true) }
         app.protectionAudits = audits
