@@ -620,7 +620,13 @@ async fn fail_connect_observed(
     }
     if let Some(result) = release_result {
         match result {
-            Ok(()) => { inner.fsm.connect_failed(); }
+            Ok(()) => {
+                inner.fsm.connect_failed();
+                // Armed, and this release opened the network. That is fail-open:
+                // protection had the host and then let go. The audit hook queues
+                // TONO_FAIL_OPEN for the next upload.
+                state.audit().log(AuditEvent::ProtectedOffline { reason: "failOpen" });
+            }
             Err(release_error) => {
                 inner.fsm.initial_release_failed();
                 inner.connect_error = Some(crate::tono::audit::redact(&format!("{err}; {release_error}")));
