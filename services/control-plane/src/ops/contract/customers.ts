@@ -622,3 +622,37 @@ export function assertCustomerDiagnostics(value: unknown, path = 'customerDiagno
     updatedAt: int(row, path, 'updatedAt'),
   };
 }
+
+const FAILURE_CLUSTER_KEYS = [
+  'id', 'code', 'stage', 'appVersion', 'platform', 'node', 'count', 'users', 'devices',
+  'firstSeenMs', 'lastSeenMs', 'status', 'sample', 'detailPath',
+];
+
+function assertFailureCluster(value: unknown, path: string) {
+  const row = fields(value, path, FAILURE_CLUSTER_KEYS);
+  return {
+    id: text(row, path, 'id'),
+    code: text(row, path, 'code'),
+    stage: text(row, path, 'stage'),
+    appVersion: text(row, path, 'appVersion'),
+    platform: text(row, path, 'platform'),
+    node: text(row, path, 'node'),
+    count: int(row, path, 'count'),
+    users: int(row, path, 'users'),
+    devices: int(row, path, 'devices'),
+    firstSeenMs: int(row, path, 'firstSeenMs'),
+    lastSeenMs: int(row, path, 'lastSeenMs'),
+    status: text(row, path, 'status'),
+    sample: optText(row, path, 'sample'),
+    detailPath: text(row, path, 'detailPath'),
+  };
+}
+
+/** Access-gated cluster list. `sample` is redacted JSON text, not the bot's object. */
+export function assertFailureClusterList(value: unknown, path = 'failureClusters') {
+  const row = fields(value, path, ['clusters', 'updatedAt']);
+  return {
+    clusters: arrayOf(row, path, 'clusters', assertFailureCluster),
+    updatedAt: int(row, path, 'updatedAt'),
+  };
+}

@@ -1,6 +1,6 @@
 import { ApiError } from '../../errors';
 import { sniffPlatform } from '../customers';
-import { loadCustomerDiagnostics } from '../../telemetry/diagnostics-read';
+import { listFailureClusters, loadCustomerDiagnostics } from '../../telemetry/diagnostics-read';
 import { loadCustomerListCounts, loadCustomerPage } from '../customers-list';
 import { activityHours, customerStatus, customerStatuses, deviceCountsFor, servicesForUsers } from '../customers-read';
 import {
@@ -9,6 +9,7 @@ import {
   assertConnectionEvent,
   assertCustomerDetail,
   assertCustomerDiagnostics,
+  assertFailureClusterList,
   assertCustomerSummary,
   assertDestinationRow,
   assertServiceUsage,
@@ -363,6 +364,21 @@ export async function getCustomerConnections(req: Request, e: Env, rawId: string
   return listJson(
     e, req, sliced, nextCursor, updatedAt,
     weakEtag([userId, deviceId, updatedAt, rows.length]), assertConnectionEvent,
+  );
+}
+
+export async function getFailureClusters(req: Request, e: Env): Promise<Response> {
+  const response = await listFailureClusters(e.DB, new URL(req.url));
+  const body = await response.json() as { clusters: Array<Record<string, unknown>> };
+  const clusters = (body.clusters ?? []).map((row) => ({
+    ...row,
+    sample: row.sample == null ? null : JSON.stringify(row.sample).slice(0, 500),
+  }));
+  const updatedAt = now();
+  return entityJson(
+    e, req, { clusters, updatedAt },
+    weakEtag([updatedAt, clusters.length]),
+    assertFailureClusterList,
   );
 }
 
