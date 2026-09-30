@@ -1,7 +1,7 @@
 ## 2026-09-30 · Windows 有效 wanted 意图在 Core 未证明时放行
 
 - 归属：SHIP_PLAN §2 第 10 条（装上会坏：重启后 Core 不回来，WFP 仍把机器拦死）。Windows Service 与 App。
-- 来源：`main` `d2363002` → 本分支；draft PR，未合 main。
+- 来源：`main` `d2363002` → 本分支；draft [#740](https://github.com/raydocs/tono/pull/740)，未合 main。
 - 缺陷修复：服务启动仍先装上可读且已验证的 wanted 拦截。若 90 秒内 Core 没有在跑，且会话不是已验证的 Locked、隧道许可也未渲染，则去掉 WFP、尽量恢复 DNS、写下 `reconnect_after_release` 墓碑。应用在冷启动或已处于 Protected Offline 时于后台重连。显式 `strict_kill_switch: true` 不启动这扇窗口，紧急解除仍可打开网络。
 - 新增/优化：无。未验证 wanted 仍走原来的 `retire_unverified`，不进这扇窗口。用户断开的墓碑不带重连标记。
 - 工程与测试：一条服务端回归覆盖窗口到期放行、墓碑跨一次服务启动仍在、严格记录不放行。一条应用侧纯函数回归覆盖何时允许后台重连。
