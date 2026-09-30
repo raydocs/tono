@@ -383,6 +383,13 @@
       "protected": "Protected",
       "standby": "Standby"
     },
+    "aiTraffic": {
+      "title": "Today's AI traffic",
+      "subtitle": "Home broadband traffic, not remaining quota.",
+      "empty": "Nothing yet today.",
+      "week": "Last 7 days",
+      "note": "Counted while the overview is open. Stays on this PC."
+    },
     "overview": {
       "protection": "Protection",
       "serverPool": "Server pool",

@@ -24,6 +24,7 @@ import {
   tonoDisconnect,
   tonoRetryNow,
 } from '@/services/tono'
+import { AiTrafficCard } from '@/tono-ui/AiTrafficCard'
 import { ConnectPill } from '@/tono-ui/ConnectPill'
 import { GlassCard } from '@/tono-ui/GlassCard'
 import { OpenDnsSettingsButton } from '@/tono-ui/OpenDnsSettingsButton'
@@ -1096,6 +1097,10 @@ const DashboardPage = () => {
             claudeHomeHost={status.claudeHomeHost}
           />
         )}
+        <AiTrafficCard
+          connected={connected}
+          generation={status?.controllerGeneration}
+        />
         {!status?.selectedServer && !busy && (
           <button
             type="button"
