@@ -109,6 +109,10 @@ extension AppState {
             // Until a verified selector has an exact endpoint set, a failed arm/rollback
             // cannot be treated as an ordinary UI error over a still-Connected session.
             var protectionTransitionInFlight = false
+            SingBoxDelayGate.suspend()
+            defer {
+                if self.isConnected { SingBoxDelayGate.prove() }
+            }
             do {
                 try checkSwitchCurrent()
                 let previousName = self.proxyService.activeNodeName
@@ -164,6 +168,7 @@ extension AppState {
                     self.lastClassifiedFailure = failure
                     throw CoreControllerError.protectionFailed(failure.userMessage)
                 }
+                SingBoxDelayGate.prove()
                 await self.closeConnectionsBoundToExit(previousName, using: api)
                 guard await self.connectionCoordinator.finishNodeSwitch(
                     generation: switchGeneration,
