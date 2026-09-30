@@ -11,7 +11,9 @@ use serde_yaml_ng::{Mapping, Value};
 use thiserror::Error;
 
 use crate::catalog::CatalogHomeSocks5;
-use crate::node::{EXIT_GROUP_NAME, NodeRejection, ValidatedNode, validate_node_set};
+use crate::node::{
+    EXIT_GROUP_NAME, NodeProtocol, NodeRejection, ValidatedNode, validate_node_set,
+};
 
 pub const MIXED_PORT: u16 = 28990;
 pub const EXTERNAL_CONTROLLER: &str = "127.0.0.1:9090";
@@ -768,6 +770,25 @@ fn put(mapping: &mut Mapping, key: &str, value: Value) {
     mapping.insert(string(key), value);
 }
 
+/// Mihomo proxy map for one admitted node.
+///
+/// Mihomo refuses a Reality dial that has no uTLS fingerprint
+/// (`REALITY is based on uTLS, please set a client-fingerprint`) and retries
+/// until the connect budget is gone. `chrome` is the default when the signed
+/// catalog omits `client-fingerprint`. An explicit catalog value is kept.
+/// This is not `skip-cert-verify`: Reality still checks the public key, and
+/// Hysteria2 still pins the leaf.
+fn proxy_mapping(node: &ValidatedNode) -> Value {
+    let mut mapping = node.to_runtime_mapping();
+    if node.protocol == NodeProtocol::VlessReality {
+        let key = string("client-fingerprint");
+        if !mapping.contains_key(&key) {
+            mapping.insert(key, string("chrome"));
+        }
+    }
+    Value::Mapping(mapping)
+}
+
 fn direct_outbound(name: &str, physical_interface: &str) -> Value {
     let mut outbound = Mapping::new();
     put(&mut outbound, "name", string(name));
@@ -841,6 +862,10 @@ fn runtime_value(
     // exit). Connect no longer treats `/delay` as the data-plane verdict, so
     // the doubled request cannot stall the fail-closed TUN check.
     put(&mut root, "unified-delay", Value::Bool(true));
+    // Dial every resolved address at once. With `ipv6: false` this does not open a
+    // second data plane; it only removes the serial wait when a name has more
+    // than one A record. Certificate checks are unchanged.
+    put(&mut root, "tcp-concurrent", Value::Bool(true));
     // Activity is an all-application view, not just a view of PROCESS rules.
     // `strict` may skip lookup when an earlier destination rule matched (notably
     // Claude residential traffic), and `off` loses every cloud-only attribution.
@@ -915,6 +940,9 @@ fn runtime_value(
     let mut dns = Mapping::new();
     put(&mut dns, "enable", Value::Bool(true));
     put(&mut dns, "listen", string(DNS_LISTEN));
+    // Top-level `ipv6: false` is not always enough to skip the AAAA lookup.
+    // An unanswered AAAA sits on the first request in front of the A answer.
+    put(&mut dns, "ipv6", Value::Bool(false));
     put(&mut dns, "enhanced-mode", string("fake-ip"));
     put(&mut dns, "fake-ip-range", string(FAKE_IP_RANGE));
     put(&mut dns, "respect-rules", Value::Bool(true));
@@ -947,10 +975,7 @@ fn runtime_value(
     );
     put(&mut root, "tun", Value::Mapping(tun));
 
-    let mut proxies: Vec<Value> = nodes
-        .iter()
-        .map(|node| Value::Mapping(node.to_runtime_mapping()))
-        .collect();
+    let mut proxies: Vec<Value> = nodes.iter().map(proxy_mapping).collect();
     if let Some(socks5) = home_socks5 {
         proxies.push(home_socks5_outbound(socks5));
     }
@@ -1254,7 +1279,9 @@ reality-opts:
         assert_eq!(get(&value, &["mode"]).as_str(), Some("rule"));
         assert_eq!(get(&value, &["log-level"]).as_str(), Some("warning"));
         assert_eq!(get(&value, &["unified-delay"]).as_bool(), Some(true));
+        assert_eq!(get(&value, &["tcp-concurrent"]).as_bool(), Some(true));
         assert_eq!(get(&value, &["find-process-mode"]).as_str(), Some("always"));
+        assert_eq!(get(&value, &["dns", "ipv6"]).as_bool(), Some(false));
         assert_eq!(
             get(&value, &["profile", "store-selected"]).as_bool(),
             Some(false)
@@ -1437,6 +1464,15 @@ reality-opts:
         );
         assert_eq!(first[string("tls")].as_bool(), Some(true));
         assert_eq!(first[string("network")].as_str(), Some("tcp"));
+        assert_eq!(
+            first[string("client-fingerprint")].as_str(),
+            Some("chrome"),
+            "an omitted catalog fingerprint still dials with uTLS chrome"
+        );
+        assert!(
+            !build().yaml().contains("skip-cert-verify"),
+            "dial defaults must not disable certificate checks"
+        );
         assert_eq!(first[string("flow")].as_str(), Some("xtls-rprx-vision"));
         assert_eq!(first[string("server")].as_str(), Some("8.8.8.8"));
         assert_eq!(

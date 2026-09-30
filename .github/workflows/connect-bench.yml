@@ -1,0 +1,29 @@
+name: Connect bench
+
+# Loopback only. Compares Tono's mihomo dial shape with a direct-DNS Clash
+# profile against local protocol servers. Fails when a pinned stage exceeds
+# tooling/perf/connect-bench/baseline.json. Does not touch TUN, routes or DNS.
+
+on:
+  pull_request:
+    paths:
+      - tooling/perf/connect-bench/**
+      - apps/windows/crates/tono-core/src/config.rs
+      - apps/windows/service/src/core/runtime_generation/owned_config.rs
+      - apps/macos/Tono/Core/Configuration/ConfigPipeline+Runtime.swift
+      - apps/macos/Tono/Core/Configuration/ConfigPipeline+Nodes.swift
+      - .github/workflows/connect-bench.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  bench:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v5
+
+      - name: Connect bench
+        run: python3 tooling/perf/connect-bench/bench.py --check
