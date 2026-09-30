@@ -1250,13 +1250,13 @@ extension KillSwitchManager {
                 ))
             }
             // The supervisor reinstalls saved state before any TUN exists,
-            // and only while the Core is running. Boot and status() do not.
-            // A saved utun that is not up must render the no-tunnel form:
-            // no Continuity, mDNS, LAN,
+            // and only while the Core is running. Boot, launch and status()
+            // do not. A saved utun that is not up must render the no-tunnel
+            // form: no Continuity, mDNS, LAN,
             // link-local, DHCP or NDP pass and no rule for that utun. A utun
-            // that is up (a helper restart mid-session) is kept. Those
-            // reinstall paths need root and pfctl, so this checks the
-            // `restorableState` filter they render through.
+            // that is up (a helper restart mid-session) is kept. The
+            // reinstall needs root and pfctl, so this checks the
+            // `restorableState` filter it renders through.
             let bootRestoreRules = renderRules(
                 state: restorableState(inactiveState, interfaceExists: { _ in false }),
                 allowedUID: 501
@@ -1448,6 +1448,12 @@ extension KillSwitchManager {
                 && !failureRecoveryReleasesNetwork(strictKillSwitchEnabled: true)
                 && shouldReinstallKillSwitch(coreRunning: true)
                 && !shouldReinstallKillSwitch(coreRunning: false)
+                && !shouldReleaseLeftoverAtLaunch(coreRunning: true, stateFilePresent: true)
+                && shouldReleaseLeftoverAtLaunch(coreRunning: false, stateFilePresent: true)
+                && !shouldReleaseLeftoverAtLaunch(coreRunning: false, stateFilePresent: false)
+                && !SocketServer.shouldRestoreSavedDNSAtLaunch(coreRunning: true, snapshotPresent: true)
+                && SocketServer.shouldRestoreSavedDNSAtLaunch(coreRunning: false, snapshotPresent: true)
+                && !SocketServer.shouldRestoreSavedDNSAtLaunch(coreRunning: false, snapshotPresent: false)
         } catch {
             return false
         }

@@ -21,9 +21,9 @@ final class SocketServer {
     private var openNetworkEpoch: UInt64 = 0
     private var consecutiveCoreDownChecks = 0
 
-    /// `killSwitch` has migrated the on-disk PF hook and has not re-armed.
-    /// Release of a leftover block happens in `run`, after this init has
-    /// stopped a stale Core.
+    /// Launch does not install PF. `run()` releases a leftover after this
+    /// init has stopped a stale Core. A Core that is still running is left
+    /// alone.
     init(allowedUID: uid_t, killSwitch: KillSwitchManager) throws {
         self.allowedUID = allowedUID
         self.killSwitch = killSwitch
@@ -98,12 +98,19 @@ final class SocketServer {
         }
     }
 
+    /// A saved DNS snapshot with the Core stopped still points the resolver
+    /// at a listener that is gone. Restore it at launch. Do not touch DNS
+    /// while the Core is running.
+    static func shouldRestoreSavedDNSAtLaunch(coreRunning: Bool, snapshotPresent: Bool) -> Bool {
+        !coreRunning && snapshotPresent
+    }
+
     func run() {
         // After listen, before any client. The stale Core is already gone.
-        // A saved kill switch is not kept across this start: macOS has no
-        // strict kill-switch opt-in, so boot, crash and helper restart open
-        // the original network. DNS restore uses the same SCPreferences path
-        // as disconnect and has no extra deadline.
+        // macOS has no strict kill-switch opt-in, so a helper start with the
+        // Core down opens the original network. A Core that is still running
+        // keeps the block it already has. DNS restore uses the same
+        // SCPreferences path as disconnect and has no extra deadline.
         releaseLeftoverBlockIfCoreStopped()
         recoverDNSAfterStoppedCore()
         var lastProtectionCheck = Date()
@@ -155,9 +162,12 @@ final class SocketServer {
     }
 
     /// Immediate release at start. Idempotent: no state file means no pfctl.
+    /// A running Core is not disarmed and is not reinstalled from the file.
     private func releaseLeftoverBlockIfCoreStopped() {
-        guard !core.status().running else { return }
-        guard KillSwitchManager.stateFileExists() else { return }
+        guard KillSwitchManager.shouldReleaseLeftoverAtLaunch(
+            coreRunning: core.status().running,
+            stateFilePresent: KillSwitchManager.stateFileExists()
+        ) else { return }
         do {
             _ = try killSwitch.disarm()
         } catch {
@@ -178,7 +188,7 @@ final class SocketServer {
             openNetworkEpoch = epoch
             consecutiveCoreDownChecks = 0
         }
-        if core.status().running {
+        if KillSwitchManager.shouldReinstallKillSwitch(coreRunning: core.status().running) {
             consecutiveCoreDownChecks = 0
             killSwitch.superviseProtection()
             return

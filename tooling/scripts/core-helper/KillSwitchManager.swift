@@ -698,6 +698,13 @@ final class KillSwitchManager {
         coreRunning
     }
 
+    /// Launch never installs a block. A leftover state file is released only
+    /// when the Core is not running. A running Core keeps the kernel rules
+    /// already in place; this start does not tear them down either.
+    static func shouldReleaseLeftoverAtLaunch(coreRunning: Bool, stateFilePresent: Bool) -> Bool {
+        !coreRunning && stateFilePresent
+    }
+
     /// Periodic check from the helper's idle loop, and only while the Core is
     /// running. `status()` does not load rules. Another program releasing its
     /// PF reference, a `pfctl -d`, or a main-ruleset reload without the Tono
@@ -826,10 +833,13 @@ final class KillSwitchManager {
     /// migration already ran in `init`. `SocketServer.run` releases the
     /// leftover block once the stale Core has been stopped.
     func restoreAtLaunch() throws {
+        // No block at launch. The Core is constructed after this init, so
+        // SocketServer.run decides: release a leftover when the Core is not
+        // running, and leave a live session's rules alone.
     }
 
-    /// What PF renders when it is reinstalled from the saved state: the daemon
-    /// start, the `status()` heal and the supervisor repair. The saved tunnel
+    /// What PF renders when the supervisor reinstalls saved state while the
+    /// Core is running. Launch does not. The saved tunnel
     /// is the last arm's intent, not a fact: at boot (before login, before any
     /// TUN) and after a Core that is gone, that utun does not exist. Rendering
     /// it anyway loads the Continuity, mDNS, LAN and link-local passes, which
