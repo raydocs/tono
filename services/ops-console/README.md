@@ -90,6 +90,9 @@ Telegram 告警点进来的那一页，横向不许出现滚动条。
   三个 `*.test.ts` 都断言 `计数 === 列表长度`。事故的影响人数只算没有父事故的那些，否则一台节点的故障会被数两遍。
 - 颜色只出现在状态词、严重度色条、额度条和主动作上。待办一律 rem 紫，且从不进事故列表。
 - 动作按不动的时候必须说明原因（`components/ops/Action.tsx` 的 `reason`），灰掉但不解释的按钮会让人反复刷新页面。
+- 放数字的块用 `components/ops/Panel.tsx`，给 `source` 和 `asOfSec`；超过 `staleAfterSec` 它自己写"可能不是最新"。
+  图表只用 `components/ops` 里的：一眼看的趋势用 `TimeSeries`/`Sparkline`，要报数的用 `LineChart`/`Bars`（整刻度、
+  逐列读数、键盘可达），缺测断线不补 0。系列色在 `styles/charts.css`，本身就是结论的系列（失败、错误）用 tone。
 
 ## 验收
 
