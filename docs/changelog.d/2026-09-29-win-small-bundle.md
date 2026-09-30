@@ -86,3 +86,10 @@
 - 候选/发布：仅本地源码；无新安装包、无生产节点部署、无客户发布。
 - 剩余限制：上文旧记录中「Service 拒绝仍报保护仍开启」已被本轮的未确认处理替代；有效的仍武装状态读数仍走既有失败路径。
   其余建议（错误文案优先级、逐线程恢复、Job 失败缓存）保持原样。新修正须 exact-head CI 和跨厂商复核后才能合并。
+
+### 2026-09-30 续记：已合 main
+- 来源：复审 `4cd55317` 退回一处重大问题（仍武装但 `live=false` 的新读数没有替换旧的 `live=true` 缓存）。修复 `027db93d`（`release_still_armed` 先写入新读数再返回原错误）。跟进复审 `5e0c86e8` 通过，三条重大问题已复查关闭。Jev-Decision `4cd55317`。
+- 验证：`fca25e05` 的 Windows CI https://github.com/raydocs/tono/actions/runs/36667250652 只失败预期的两项测试（558 通过）。`f6f80dc7` 的 push https://github.com/raydocs/tono/actions/runs/36667137820 与 PR https://github.com/raydocs/tono/actions/runs/36667141569 四项全绿。`027db93d` 的 push https://github.com/raydocs/tono/actions/runs/36670928625 与 PR https://github.com/raydocs/tono/actions/runs/36670932440 四项全绿；app-rust 561 通过，含 `an_armed_release_reading_with_live_false_replaces_cached_live_true`。审查线程 0。无 `CHANGES_REQUESTED`。
+- 来源合入：`gh pr merge 684 --merge --match-head-commit 027db93d`，merge commit `d092f80b`，树与 `027db93d` 相同。该批就是这次已通过的 PR 差异，没有另开一轮相同树的复审。
+- 候选/发布：仅源码合入 main。无新安装包，无生产节点部署，无客户发布。
+- 剩余限制：建议级仍开放，不挡这次合并。`CORE_EXIT_UNREACHABLE` 仍会盖住未确认文案；DNS 助手按线程恢复；`EXIT_JOB` 缓存一次创建失败；`ReleaseGotNoReading` 已没有读取方。登录中转方案 `0fe15ce7` 仍被退回，未实现、未部署。
