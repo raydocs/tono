@@ -560,7 +560,7 @@ private struct ConnectionProgressCard: View {
                         .font(.system(size: 12))
                         .foregroundStyle(.secondary)
                         if !appState.isProtectionBlocked {
-                            Text("Direct internet is available. Retry or choose another route.")
+                            Text("Direct internet is available. Support code TONO_CONNECT_RELEASED.")
                                 .font(.system(size: 12))
                                 .foregroundStyle(.secondary)
                                 .fixedSize(horizontal: false, vertical: true)

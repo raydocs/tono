@@ -28,30 +28,81 @@ pub struct FailurePlan {
     pub stop_core: Option<bool>,
     /// Restrict to the bootstrap recovery channel after the stop.
     pub restrict_bootstrap: bool,
+    /// The selective hook already rewrote filters. Do not full-release.
+    pub selective_ai_hold: bool,
 }
 
-pub fn plan_failure(armed: bool, session_verified: bool, was_disconnecting: bool) -> FailurePlan {
+pub fn plan_failure(
+    armed: bool,
+    session_verified: bool,
+    was_disconnecting: bool,
+    strict_kill_switch: bool,
+) -> FailurePlan {
+    // The hook runs only for a verified barrier that is not a raced
+    // disconnect and not an explicit strict kill switch. No barrier means
+    // the AI rules are not engaged.
+    let engage = if armed && session_verified && !was_disconnecting && !strict_kill_switch {
+        tono_core::registered_selective_ai_block()
+    } else {
+        None
+    };
+    plan_failure_using(
+        armed,
+        session_verified,
+        was_disconnecting,
+        strict_kill_switch,
+        engage,
+    )
+}
+
+/// `engage` is ignored unless a verified barrier is up and this is not a
+/// raced disconnect. The policy match itself lives in
+/// `tono_core::exhausted_protection_using` (#706). #703 must call that
+/// function rather than copy this table.
+pub fn plan_failure_using(
+    armed: bool,
+    session_verified: bool,
+    was_disconnecting: bool,
+    strict_kill_switch: bool,
+    engage: Option<fn() -> bool>,
+) -> FailurePlan {
     if was_disconnecting {
         // A disconnect is in flight and owns the release sequence end to
         // end; the failing transaction must not double it.
-        FailurePlan {
+        return FailurePlan {
             mark_armed: false,
             stop_core: None,
             restrict_bootstrap: false,
-        }
-    } else if armed && session_verified {
-        FailurePlan {
-            mark_armed: true,
-            stop_core: Some(false),
-            restrict_bootstrap: true,
-        }
-    } else {
-        // §6: failure before the WFP policy exists is a full release.
-        FailurePlan {
+            selective_ai_hold: false,
+        };
+    }
+    if !(armed && session_verified) {
+        return FailurePlan {
             mark_armed: false,
             stop_core: Some(true),
             restrict_bootstrap: false,
-        }
+            selective_ai_hold: false,
+        };
+    }
+    match tono_core::exhausted_protection_using(strict_kill_switch, engage) {
+        tono_core::ExhaustedProtection::KeepStrictBlock => FailurePlan {
+            mark_armed: true,
+            stop_core: Some(false),
+            restrict_bootstrap: true,
+            selective_ai_hold: false,
+        },
+        tono_core::ExhaustedProtection::ReleaseGeneralKeepAi => FailurePlan {
+            mark_armed: true,
+            stop_core: None,
+            restrict_bootstrap: false,
+            selective_ai_hold: true,
+        },
+        tono_core::ExhaustedProtection::ReleaseOriginalNetwork => FailurePlan {
+            mark_armed: false,
+            stop_core: Some(true),
+            restrict_bootstrap: false,
+            selective_ai_hold: false,
+        },
     }
 }
 

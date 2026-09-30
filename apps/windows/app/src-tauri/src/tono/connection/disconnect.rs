@@ -331,6 +331,7 @@ async fn release_failed(state: &TonoState, error: &anyhow::Error) -> String {
 pub async fn disconnect(state: Arc<TonoState>, app: AppHandle) -> Result<(), String> {
     let operation = {
         let mut inner = state.lock().await;
+        inner.client.transport().set_auth_tunnel_port(0);
         if inner.fsm.status().is_disconnecting {
             let operation = start_explicit_release(&state, &app, None, true).await;
             drop(inner);

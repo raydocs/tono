@@ -40,6 +40,16 @@ const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
 const AUTH_ERROR_CODES = new Set([
   'TONO_AUTH_UNREACHABLE',
+  'TONO_AUTH_DNS',
+  'TONO_AUTH_TCP',
+  'TONO_AUTH_TLS',
+  'TONO_AUTH_QUIC',
+  'TONO_AUTH_TIMEOUT',
+  'TONO_AUTH_CAPTIVE',
+  'TONO_AUTH_API',
+  'TONO_AUTH_LOCAL_CONFLICT',
+  'TONO_AUTH_FORBIDDEN',
+  'TONO_AUTH_STORE',
   'TONO_AUTH_RATE_LIMITED',
   'TONO_AUTH_DEVICE_LIMIT',
   'TONO_AUTH_UNAUTHORIZED',
@@ -65,7 +75,7 @@ const authSupportSummary = (
     foundCode && AUTH_ERROR_CODES.has(foundCode) ? foundCode : '(none)'
   const lines = [`Auth stage: ${stage}`, `Error code: ${code}`]
   const transport = raw.match(
-    /^TONO_(?:AUTH_UNREACHABLE|CLOCK_SKEW): could not reach Tono: ([\s\S]*)$/,
+    /^TONO_(?:AUTH_[A-Z0-9_]+|CLOCK_SKEW): could not reach Tono: ([\s\S]*)$/,
   )?.[1]
   if (transport) {
     const pinned = transport.match(

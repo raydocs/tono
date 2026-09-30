@@ -247,7 +247,7 @@ final class ConnectionActivityTests: XCTestCase {
         XCTAssertFalse(CatalogCityFailover.shouldRotate(after: nil))
         XCTAssertEqual(
             ProtectedFailureCode.coreExitUnreachable.userMessage,
-            String(localized: "This city could not complete a protected connection. Retry, choose another route, or try the backup channel if one is shown.")
+            String(localized: "The connection didn't complete. Support code CORE_EXIT_UNREACHABLE.")
         )
         XCTAssertTrue(IdleCatalogSelect.shouldConnect(connected: false, protectionBlocked: false))
         XCTAssertFalse(IdleCatalogSelect.shouldConnect(connected: false, protectionBlocked: true))

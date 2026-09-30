@@ -574,6 +574,18 @@ describe('ledger csv', () => {
     expect(Number(total[9])).toBe(20000 - 7200);
   });
 
+  it('cancels a same-currency reversal in the source-amount total', () => {
+    const csv = ledgerCsv([
+      csvEntry({ id: 'r', kind: 'revenue', amountMinor: 800, currency: 'CNY', cnyMinor: 800 }),
+      csvEntry({
+        id: 'rev', kind: 'revenue', amountMinor: 800, currency: 'CNY', cnyMinor: -800, reverses: 'r',
+      }),
+    ]);
+    const total = csv.replace(/^\uFEFF/, '').trim().split(/\r\n/).at(-1)!.split(',');
+    expect(Number(total[5])).toBe(0);
+    expect(Number(total[9])).toBe(0);
+  });
+
   it('prefixes formula-like cells with a quote', () => {
     const csv = ledgerCsv([csvEntry({ id: 'inj', note: '=1+1', subjectId: '+cmd' })]);
     expect(csv).not.toMatch(/(?:^|,)=/m);
