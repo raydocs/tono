@@ -21,14 +21,14 @@ may reverse), `reversed` (keep the line; say what replaced it).
 - Status: provisional
 - Chosen: no. macOS has no user-facing strict kill switch, so a leftover `killswitch.state` is not an opt-in. Startup does not re-arm. A Core that is not running releases the block and restores a DNS snapshot. A startup failure and a corrupt update ledger do not install a block. While a Core is running, the in-session supervisor may still reload the saved rules. Rejected: re-arming at every helper start, and holding DNS at `127.0.0.1` when the Core is dead because PF is not confirmed live. Also rejected: a second LaunchDaemon as the watchdog (it can fight this helper). The watchdog is the helper's idle loop; if this process itself is stuck, that loop does not run.
 - Why stricter: the host keeps a working network after reboot, crash, uninstall and Safe Mode. The cost is that a connected session's block does not survive helper restart unless the Core is still running, and there is a short gap after boot before this helper has migrated `/etc/pf.conf`. Traffic is not widened during a live Core.
-- Applied in: this branch (`KillSwitchManager.swift`, `SocketServer.swift`, `UpdateExecutor.swift`, `ProtectedDNSManager.swift`).
+- Applied in: [#701](https://github.com/raydocs/tono/pull/701) (`KillSwitchManager.swift`, `SocketServer.swift`, `UpdateExecutor.swift`, `ProtectedDNSManager.swift`).
 
 ## 2026-09-30 · Should `/etc/pf.conf` keep loading the kill-switch rule file at boot?
 
 - Status: provisional
 - Chosen: no. The on-disk hook only declares `anchor "tono.killswitch"`. While the helper is enforcing, it loads the rules with one `pfctl -f` of a temporary copy that still contains `load anchor from`, so an already-enabled PF does not see an empty anchor. Rejected: leaving `load anchor from` in `/etc/pf.conf` (Safe Mode still runs Apple's pfctl and does not run this LaunchDaemon, so a block file or a stuck file survives the mode people use to recover). Also rejected: skipping protection only when `kern.safeboot` is set (BRICK-M10). This daemon does not run in Safe Mode; the boot path does not re-arm at all.
 - Why stricter: a live Core can still install the block before PF is enabled. The cost is a short interval after boot, before the helper starts, where another program enabling PF evaluates an empty anchor. Safe Mode, where this helper does not run, no longer reinstalls the block from the rule file once this helper has rewritten the hook.
-- Applied in: this branch (`KillSwitchPF.swift`); BRICK-M9, MAC-BOOT-DNS-ORPHAN.
+- Applied in: [#701](https://github.com/raydocs/tono/pull/701) (`KillSwitchPF.swift`); BRICK-M9, MAC-BOOT-DNS-ORPHAN.
 
 ## 2026-09-30 · When a configured exit fails, may self-heal tear the tunnel down to try another, and may it leave the machine blocked?
 
