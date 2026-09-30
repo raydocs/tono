@@ -86,4 +86,25 @@ final class DurableConnectAdmissionTests: XCTestCase {
         XCTAssertNotNil(app.connectionCoordinator.connectTask)
         XCTAssertFalse(app.automaticResumeHeldAfterRestart)
     }
+
+    func testFailedAdmissionWritePreservesPreviousDurableRecoveryRecord() throws {
+        let preference = AppProfile.defaults.object(forKey: SettingsKey.connectBootSession)
+        defer { AppProfile.defaults.set(preference, forKey: SettingsKey.connectBootSession) }
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("tono-boot-previous-" + UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let file = directory.appendingPathComponent("connect-boot-session")
+        try RuntimeCleanup.writeSynced("previous-boot", to: file)
+
+        XCTAssertThrowsError(try RuntimeCleanup.recordConnectBootSession(in: file, writer: { _, _ in
+            throw POSIXError(.EIO)
+        }))
+
+        XCTAssertEqual(try String(contentsOf: file, encoding: .utf8), "previous-boot")
+        AppProfile.defaults.removeObject(forKey: SettingsKey.connectBootSession)
+        XCTAssertTrue(RuntimeCleanup.holdsAutomaticResume(
+            recordedBootSession: RuntimeCleanup.recordedConnectBootSession(in: file),
+            currentBootSession: RuntimeCleanup.currentBootSession()))
+    }
 }

@@ -73,16 +73,13 @@ enum RuntimeCleanup {
         do {
             try writer(record, file)
         } catch {
-            // Unless the file already holds this record, the preference is
-            // all this connect has: a file from an earlier boot must not
-            // outvote it.
-            if recordedConnectBootSession(in: file) != record {
-                try? FileManager.default.removeItem(at: file)
-            }
+            // Admission fails, so the previous durable recovery record must
+            // remain intact. The preference alone cannot authorize a session.
             LocalTrafficAudit.shared.recordEvent(
                 "connect_boot_session_not_synced",
                 details: ["error": error.localizedDescription]
             )
+            throw error
         }
     }
 
