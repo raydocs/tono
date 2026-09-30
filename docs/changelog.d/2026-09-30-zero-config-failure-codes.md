@@ -1,7 +1,7 @@
 ## 2026-09-30 · 登录与连接失败给出支持码，自愈不改系统网络
 
 - 归属：SHIP_PLAN §2 第 10 项（连不上且无下一手）。影响 Windows 登录/连接、tono-core、macOS 失败文案与隧道丢失后的释放选择。
-- 来源：基线 origin/main `d2363002`；分支 `cursor/failure-taxonomy-bba0`；未合 main。
+- 来源：基线 origin/main `d2363002`；分支 `cursor/failure-taxonomy-bba0`；[#706](https://github.com/raydocs/tono/pull/706)；未合 main。
 - 缺陷修复：登录、验证码和连接失败原先要么把「换网络 / 换节点 / 检查连接」当成解决办法，要么只给笼统的不可达。现在每个失败有稳定 code 和 stage（DNS、TCP、TLS、QUIC、API、超时、时钟、门户、本机冲突、隧道）。用户看到短句和支持码。完整原因仍走现有 telemetry 字符串里的 `TONO_` / `CORE_` 标记，没有第二套上传。
 - 新增/优化：登录在直连钉扎和系统 DNS 之后，对 API 主机再试 DoH（只问 1.1.1.1，不改系统 DNS）、备用 HTTPS 端口，以及已经存在的本机回环隧道。这些步骤不安装 WFP/PF、不改路由。耗尽后默认释放回原来的网络；只有用户明确选择 `permanent` 严格断网保护才保持阻断。macOS 上隧道连续丢失走同一条 fail-open 判定。
 - 工程与测试：`customer_failure` 覆盖每个 code 和回退顺序。Windows `plan_failure` 增加严格断网参数。

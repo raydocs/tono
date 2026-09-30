@@ -63,7 +63,7 @@ may reverse), `reversed` (keep the line; say what replaced it).
 - Status: owner
 - Chosen: fail open to the original network, unless the user explicitly enabled a strict kill switch (`permanent`). Rejected: keeping the block after every verified-session failure.
 - Why stricter: retries do not install filters, change system DNS, or replace routes. Certificate checks stay on. A strict kill switch the user turned on still keeps the block. The cost is a direct path after an exhausted failure when strict mode is off.
-- Applied in: `customer_failure` disposition and Windows `plan_failure`.
+- Applied in: [#706](https://github.com/raydocs/tono/pull/706)（`customer_failure`、Windows `plan_failure`）。
 
 ## 2026-09-29 · After an unexpected restart on Windows, does the Service start the Core by itself, and does the App say why it did not?
 
