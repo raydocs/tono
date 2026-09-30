@@ -677,6 +677,24 @@ func runStagingRefusalSelfTests() -> Bool {
         )
     }
 
+    // A FIFO swapped in for a user-writable runtime input must be refused
+    // without blocking. Without O_NONBLOCK on the source open this call hangs
+    // the helper's single request thread with PF armed instead of refusing;
+    // with it, a writerless FIFO opens at once and the regular-file check
+    // refuses it. A build without the fix hangs here rather than failing.
+    let fifo = "\(root)/fifo"
+    guard mkfifo(fifo, 0o600) == 0 else {
+        FileHandle.standardError.write(Data("could not create the FIFO fixture\n".utf8))
+        return false
+    }
+    expectRefusal("fifo-refused-without-blocking") {
+        try atomicCopy(
+            source: fifo, destination: "\(root)/out",
+            expectedOwner: 0, expectedSHA256: digest,
+            maximumBytes: 1024, required: true
+        )
+    }
+
     if failures.isEmpty { return true }
     FileHandle.standardError.write(Data(
         "staging self-test failed: \(Set(failures).sorted().joined(separator: ", "))\n".utf8
@@ -784,9 +802,66 @@ func requestHelperShutdown(_ signal: Int32) {
     helperShutdownRequested = 1
 }
 
+/// The production `secureFailedStartup`: after the saved kill switch is
+/// cleared, a saved protected-DNS snapshot is restored best-effort. Startup
+/// can fail before the server builds its DNS manager — the bound user was
+/// deleted and `allowedGroup` refuses — and launchd's KeepAlive restarts
+/// would repeat that failure forever with the system resolver still on
+/// 127.0.0.1 and no listener left (MAC-STARTUP-FAIL-DNS). Never throws and
+/// never installs a block: this already is a failure path.
+func secureFailedStartupRestoringDNS(
+    releaseBlock: () -> Void,
+    restoreDNS: () throws -> Void
+) {
+    releaseBlock()
+    do {
+        try restoreDNS()
+    } catch {
+        fputs("Tono helper startup recovery could not restore saved DNS: \(error)\n", stderr)
+    }
+}
+
+/// Failure of the startup recovery itself must stay contained: the DNS
+/// restore runs after the PF release, and a restore failure is logged
+/// instead of escaping into a crash loop launchd keeps restarting into.
+func runStartupDNSRecoverySelfTest() -> Bool {
+    var events: [String] = []
+    func secure(_ restoreDNS: () throws -> Void) {
+        secureFailedStartupRestoringDNS(
+            releaseBlock: { events.append("pf") },
+            restoreDNS: restoreDNS
+        )
+    }
+    secure { events.append("dns") }
+    guard events == ["pf", "dns"] else {
+        FileHandle.standardError.write(Data("startup DNS recovery order: \(events)\n".utf8))
+        return false
+    }
+    events = []
+    enum RestoreFailure: Error { case injected }
+    secure {
+        events.append("dns")
+        throw RestoreFailure.injected
+    }
+    guard events == ["pf", "dns"] else {
+        FileHandle.standardError.write(Data("startup DNS recovery failure: \(events)\n".utf8))
+        return false
+    }
+    return true
+}
+
 /// A corrupt or unreadable update ledger is not a strict kill switch.
 /// Recovery still releases the network. It does not delete the ledger.
 func emergencyReleaseDespiteUnreadableLedger(strictKillSwitchEnabled: Bool) -> Bool {
+    !strictKillSwitchEnabled
+}
+
+/// A stale core that survives even SIGKILL is not a strict kill switch either.
+/// Recovery still releases the network and only warns about the survivor:
+/// `--emergency-disarm` is the last outlet left to a machine whose GUI cannot
+/// reconnect, and aborting it over an unstoppable process keeps PF armed with
+/// nowhere left to go (MAC-EMERGENCY-STALE-CORE).
+func emergencyReleaseDespiteStaleCore(strictKillSwitchEnabled: Bool) -> Bool {
     !strictKillSwitchEnabled
 }
 
@@ -795,7 +870,20 @@ func emergencyReleaseDespiteUnreadableLedger(strictKillSwitchEnabled: Bool) -> B
 func releaseNetworkWithoutLedger() -> Bool {
     do {
         let allowedUID = try readAllowedUID()
-        _ = try CoreManager(allowedUID: allowedUID)
+        do {
+            _ = try CoreManager(allowedUID: allowedUID)
+        } catch {
+            // A stale core that even SIGKILL could not stop must not keep PF
+            // armed on this release of last resort either: the DNS restore and
+            // disarm below need no core (MAC-EMERGENCY-STALE-CORE).
+            guard emergencyReleaseDespiteStaleCore(strictKillSwitchEnabled: false) else {
+                throw error
+            }
+            fputs(
+                "Tono emergency recovery could not stop a stale Mihomo process; it may still be running. Releasing PF anyway: \(error)\n",
+                stderr
+            )
+        }
         let dns = try ProtectedDNSManager()
         let manager = try KillSwitchManager(allowedUID: allowedUID)
         do {
@@ -849,12 +937,28 @@ func runEmergencyDisarm(underLock suppliedStorage: UpdateStorage? = nil) -> Bool
         let allowedUID = try readAllowedUID()
         // Initialization terminates a stale owned Mihomo process before PF is
         // opened, preventing a half-running privileged runtime after recovery.
-        let core = try CoreManager(allowedUID: allowedUID)
+        // A process that survives even SIGKILL must not abort the release: this
+        // command is the last outlet of a machine that is already offline, so
+        // the plain DNS restore + disarm path below runs without a core and the
+        // update evidence is kept untouched, like the disconnect failure below
+        // (MAC-EMERGENCY-STALE-CORE).
+        var core: CoreManager?
+        do {
+            core = try CoreManager(allowedUID: allowedUID)
+        } catch {
+            guard emergencyReleaseDespiteStaleCore(strictKillSwitchEnabled: false) else {
+                throw error
+            }
+            fputs(
+                "Tono emergency recovery could not stop a stale Mihomo process; it may still be running. Releasing PF anyway: \(error)\n",
+                stderr
+            )
+        }
         // Restore DNS, then release PF. A DNS failure must not keep the block:
         // the host would stay offline with a dead resolver.
         let dns = try ProtectedDNSManager()
         let manager = try KillSwitchManager(allowedUID: allowedUID)
-        if pending, var ledger {
+        if pending, var ledger, let core {
             let runtime = UpdateRuntime(core: core, firewall: manager, dns: dns, power: PowerTransitionGate())
             do {
                 try runtime.disconnect()
@@ -1347,7 +1451,12 @@ func atomicCopy(
     ).map({ $0 == expectedSHA256.startIndex..<expectedSHA256.endIndex }) == true else {
         throw HelperFailure.invalid("Runtime input digest is invalid.")
     }
-    let sourceFD = open(source, O_RDONLY | O_CLOEXEC | O_NOFOLLOW)
+    // O_NONBLOCK: the source is a document a same-user process can swap for a
+    // FIFO with no writer, and without it this open hangs the helper's single
+    // request thread (and the watchdog behind it) with PF armed. A writerless
+    // FIFO returns at once and the regular-file check below refuses it;
+    // regular-file reads are unaffected (MAC-HELPER-CONFIG-FIFO).
+    let sourceFD = open(source, O_RDONLY | O_CLOEXEC | O_NONBLOCK | O_NOFOLLOW)
     if sourceFD < 0 {
         if !required, errno == ENOENT {
             var existing = stat()
@@ -1504,8 +1613,11 @@ if CommandLine.arguments.dropFirst() == ["--self-test"] {
             && runOwnedRuntimeContractSelfTests()
             && PowerTransitionGate.runSelfTests()
             && runStartupOrderSelfTest()
+            && runStartupDNSRecoverySelfTest()
             && emergencyReleaseDespiteUnreadableLedger(strictKillSwitchEnabled: false)
             && !emergencyReleaseDespiteUnreadableLedger(strictKillSwitchEnabled: true)
+            && emergencyReleaseDespiteStaleCore(strictKillSwitchEnabled: false)
+            && !emergencyReleaseDespiteStaleCore(strictKillSwitchEnabled: true)
             ? 0 : 1
     )
 }
@@ -1532,7 +1644,12 @@ do {
 if let server = startHelperDaemon(
     restoreProtection: { uid in try KillSwitchManager(allowedUID: uid) },
     startServer: { uid, killSwitch in try SocketServer(allowedUID: uid, killSwitch: killSwitch) },
-    secureFailedStartup: KillSwitchManager.secureFailedStartup
+    secureFailedStartup: {
+        secureFailedStartupRestoringDNS(
+            releaseBlock: KillSwitchManager.secureFailedStartup,
+            restoreDNS: { _ = try ProtectedDNSManager().restore(deferringLossNotice: true) }
+        )
+    }
 ) {
     server.run()
 } else {

@@ -148,7 +148,13 @@ enum UpdatePackage {
         var parent = open("/", O_RDONLY | O_DIRECTORY | O_CLOEXEC)
         guard parent >= 0 else { throw HelperFailure.system("Cannot open package root.") }
         for (index, part) in parts.enumerated() {
-            let flags = O_RDONLY | O_NOFOLLOW | O_CLOEXEC | (index == parts.count - 1 ? 0 : O_DIRECTORY)
+            // O_NONBLOCK as in atomicCopy: the peer-nominated package path runs
+            // through user-writable directories on the single request thread,
+            // and a FIFO swapped in for the final component must not hang the
+            // open. The regular-file check below refuses it. Directory and
+            // regular-file opens and reads are unaffected.
+            let flags = O_RDONLY | O_NOFOLLOW | O_CLOEXEC | O_NONBLOCK |
+                (index == parts.count - 1 ? 0 : O_DIRECTORY)
             let next = openat(parent, String(part), flags)
             close(parent)
             guard next >= 0 else { throw HelperFailure.invalid("Package path traverses an unavailable or linked entry.") }
