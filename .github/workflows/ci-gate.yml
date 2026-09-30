@@ -5,7 +5,12 @@ name: ci-gate
 # does not also trigger those workflows, so macOS and Windows do not run twice.
 on:
   pull_request:
+  # The merge queue asks for the required ci-gate check on each queued group.
+  # checks_requested is the only merge_group type; it is listed so the queue
+  # trigger is explicit. Called workflows inherit this event through
+  # workflow_call, and skipped paths still end in a ci-gate success.
   merge_group:
+    types: [checks_requested]
   workflow_dispatch:
 
 permissions:
