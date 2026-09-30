@@ -278,11 +278,12 @@ def dns_query(controller: int, name: str) -> tuple[bool, float]:
     return ok, (time.perf_counter() - started) * 1000
 
 
-def fake_ip_query(port: int, name: str = ORIGIN_HOST) -> tuple[bool, float]:
-    """Ask the core's DNS listener. A fake-ip answer must not dial the exit."""
-    query = b"\x12\x34\x01\x00\x00\x01\x00\x00\x00\x00\x00\x00" + encode_qname(name) + b"\x00\x01\x00\x01"
+def fake_ip_exchange(port: int, timeout: float, name: str = ORIGIN_HOST) -> tuple[bool, float]:
+    """One UDP query to the core DNS listener. A fake-ip answer must not dial the exit."""
+    query_id = os.urandom(2)
+    query = query_id + b"\x01\x00\x00\x01\x00\x00\x00\x00\x00\x00" + encode_qname(name) + b"\x00\x01\x00\x01"
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.settimeout(1)
+    sock.settimeout(timeout)
     started = time.perf_counter()
     try:
         sock.sendto(query, ("127.0.0.1", port))
@@ -292,7 +293,31 @@ def fake_ip_query(port: int, name: str = ORIGIN_HOST) -> tuple[bool, float]:
     finally:
         sock.close()
     elapsed = (time.perf_counter() - started) * 1000
+    if len(data) < 2 or data[:2] != query_id:
+        return False, elapsed
     return any(ip.startswith("198.18.") for ip in parse_a(data)), elapsed
+
+
+def wait_fake_ip(port: int, deadline_s: float = 2.0) -> bool:
+    """Retransmit until the listener answers. This is not the timed sample.
+
+    `/version` can succeed before the UDP listener binds. A datagram sent in
+    that window is dropped and never retransmitted. Hysteria2 and TUIC lose
+    the race; VLESS usually does not. Folding the wait into the sample would
+    blow the 15 ms local-answer ceiling.
+    """
+    deadline = time.perf_counter() + deadline_s
+    while time.perf_counter() < deadline:
+        remaining = deadline - time.perf_counter()
+        ok, _elapsed = fake_ip_exchange(port, timeout=min(0.25, max(remaining, 0.05)))
+        if ok:
+            return True
+    return False
+
+
+def fake_ip_query(port: int, name: str = ORIGIN_HOST) -> tuple[bool, float]:
+    """Timed fake-ip query. Call wait_fake_ip first so a lost datagram is not the sample."""
+    return fake_ip_exchange(port, timeout=1.0, name=name)
 
 
 def curl(proxy: int, url: str) -> tuple[int, float]:
@@ -510,6 +535,9 @@ def measure(mihomo: Path, work: Path, camo: Camo, profile: str, protocol: str, m
         starts.append((time.perf_counter() - t0) * 1000)
         # Fake-ip is local. It must not open a proxy handshake, and it must
         # finish before the first request so DoH is off the first-byte path.
+        # Readiness retransmits until the UDP listener answers; the timed
+        # query starts only after that, with the camouflage counter cleared.
+        wait_fake_ip(listen)
         camo.reset()
         fake_ok, fake_elapsed = fake_ip_query(listen)
         if fake_ok:
