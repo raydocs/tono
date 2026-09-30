@@ -838,9 +838,9 @@ func runEmergencyDisarm(underLock suppliedStorage: UpdateStorage? = nil) -> Bool
         if ProtectedDNSManager.originalLossRecorded {
             // Either branch above; the record stays for the app's next restore.
             print(
-                "The network service whose DNS settings Tono saved no longer exists, so those "
-                    + "DNS servers were not put back and DNS is now obtained automatically. If your "
-                    + "network needs manual DNS servers, set them again in System Settings > Network."
+                "Tono did not restore the saved DNS settings because the network service was removed "
+                    + "or its DNS settings changed. Any newer DNS settings were kept. Check "
+                    + "System Settings > Network if DNS needs adjustment."
             )
         }
         return true

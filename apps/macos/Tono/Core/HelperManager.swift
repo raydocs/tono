@@ -890,7 +890,7 @@ nonisolated struct HelperManager {
             // restore may run at launch, on Quit or in update preparation.
             AppProfile.defaults.set(true, forKey: protectedDNSOriginalLostKey)
             LocalTrafficAudit.shared.recordEvent(
-                "protected_dns_original_service_missing",
+                "protected_dns_original_not_restored",
                 details: ["service": envelope.service ?? ""]
             )
         }
@@ -910,7 +910,7 @@ nonisolated struct HelperManager {
 
     private static var protectedDNSOriginalLostNotice: String {
         String(
-            localized: "The network service whose DNS settings Tono saved has been deleted, so those DNS servers could not be put back. DNS is now obtained automatically. If your network needs manual DNS servers, set them again in System Settings > Network."
+            localized: "Tono did not restore the saved DNS settings because the network service was removed or its DNS settings changed. Any newer DNS settings were kept. Check System Settings > Network if DNS needs adjustment."
         )
     }
 
