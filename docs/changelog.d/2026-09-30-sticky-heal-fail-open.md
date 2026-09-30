@@ -8,3 +8,8 @@
 - 验证：本机 Cargo 1.83 解析不了工作区 edition 2024（工具链要求 1.98.1），`cargo test -p tono-core --lib heal` 未执行。macOS XCTest 未在本机跑（无 Xcode）。预算不是实机握手：串行阶段预算合计 47000 ms，重叠后的失败预算合计 35000 ms（配置/DNS/TCP/QUIC/鉴权取最大 5000 ms，TUN 10000 + 路由 8000 + 首字节 12000）。各阶段 after：config 0、dns 2500、tcp/quic 预检 2500、tun 10000、route 8000、hy2 quic+tls 5000、auth 5000、first-byte 12000。
 - 候选/发布：仅源码，无新候选。
 - 剩余限制：健康监视器里原有的失败闭合重连没有改，实机上它仍可能在释放之后再次武装。macOS 决策类型未接到 `AppState`。没有 Niagara/Erie 实机 hy2 计时。释放失败时屏障仍可能留着（既有释放失败行为）。#663 的 20 秒路由等待在 `release/windows`，本分支不改那段。
+
+### 2026-09-30 续记 · 住宅身份先转成 String 再比较
+
+- 缺陷修复：`stick_to_preferred` 在 `residential_id` 仍是 `impl Into<String>` 时和 `String` 比较，托管 CI 的 `core` 与 `app-rust` 编译失败。现在和首选节点一样，先 `into()` 成 `String` 再比较。两边都相等才保留绕行；住宅身份变了仍丢掉绕行并换上新身份。比较没有放宽。
+- 验证：本机 Cargo 1.83 仍解析不了 edition 2024，`cargo test -p tono-core --lib heal` 未执行。推送后等该 head 上的 `core` 与 `app-rust` 变绿。

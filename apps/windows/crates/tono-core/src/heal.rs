@@ -122,6 +122,7 @@ impl Session {
         residential_id: impl Into<String>,
     ) {
         let preferred = preferred.into();
+        let residential_id = residential_id.into();
         if self.preferred == preferred && self.residential_id == residential_id {
             return;
         }
@@ -723,6 +724,23 @@ mod tests {
             dialer_changed: false,
         });
         assert_eq!(session.residential_id, "socks5:198.51.100.8:1080");
+    }
+
+    #[test]
+    fn stick_to_preferred_compares_server_and_residential_identity() {
+        let mut session = Session::for_preferred("Buffalo · Niagara", "socks5:198.51.100.8:1080");
+        session.dial = "Buffalo · Other".into();
+        session.tried.insert("Buffalo · Niagara".into());
+        session.stick_to_preferred("Buffalo · Niagara", "socks5:198.51.100.8:1080");
+        assert_eq!(session.dial, "Buffalo · Other");
+        assert!(session.tried.contains("Buffalo · Niagara"));
+        assert_eq!(session.residential_id, "socks5:198.51.100.8:1080");
+
+        session.stick_to_preferred("Buffalo · Niagara", "socks5:198.51.100.9:1080");
+        assert_eq!(session.preferred, "Buffalo · Niagara");
+        assert_eq!(session.dial, "Buffalo · Niagara");
+        assert_eq!(session.residential_id, "socks5:198.51.100.9:1080");
+        assert!(session.tried.is_empty());
     }
 
     #[test]
