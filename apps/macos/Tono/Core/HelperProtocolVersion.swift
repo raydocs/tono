@@ -272,7 +272,23 @@ nonisolated enum HelperProtocolVersion {
     ///   may still be held; settling a past-deadline `pfctl -E` throws on a
     ///   non-listing answer instead of claiming the child took none. A 4.52.0
     ///   daemon can leave a token held past disarm with PF enabled.
-    static let current = "4.52.1"
+    /// - 4.52.1 → 4.52.2: `/etc/pf.conf` only declares the kill-switch anchor.
+    ///   Boot, including Safe Mode, no longer loads the rule file. The helper
+    ///   loads those rules in one `pfctl -f` of a temporary copy while a Core
+    ///   is running. Startup, a corrupt update ledger, and a Core that stays
+    ///   down release a leftover kill switch and restore a saved DNS snapshot.
+    ///   They do not install a block.
+    /// - 4.52.2 → 4.52.3: a failed arm commit and a failed sleep barrier
+    ///   release the kill switch instead of installing an all-block. Startup
+    ///   failure and a failed update rollback do the same, without needing
+    ///   the allowed uid.
+    /// - 4.52.3 → 4.52.4: `/killswitch/status` no longer loads PF rules.
+    ///   The idle supervisor reinstalls only while the Core is running.
+    ///   If the app is removed while the helper stays up, the existing
+    ///   removal release runs without waiting for the next start. Launch
+    ///   does not reinstall from the state file; a Core that is not running
+    ///   is released immediately and a saved DNS snapshot is restored.
+    static let current = "4.52.4"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS

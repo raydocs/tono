@@ -775,8 +775,9 @@ extension KillSwitchManager {
 
         // 12. A release puts back the main ruleset the emergency block
         //     displaced, only by reloading /etc/pf.conf and only when that
-        //     file attaches Tono's anchor from Tono's rule file (BRICK-M6).
-        //     Fixture paths; the reload is recorded, no pfctl runs.
+        //     file declares Tono's anchor (BRICK-M6, BRICK-M9). The on-disk
+        //     hook does not load the rule file. Fixture paths; the reload is
+        //     recorded, no pfctl runs.
         let displacedRoot = FileManager.default.temporaryDirectory
             .appendingPathComponent("tono-displaced-main-\(getpid())").path
         defer { try? FileManager.default.removeItem(atPath: displacedRoot) }
@@ -1248,14 +1249,14 @@ extension KillSwitchManager {
                     "self-test: Continuity passes missing or keeping state with a tunnel\n".utf8
                 ))
             }
-            // Every daemon start, a boot included, restores the saved state
-            // before any TUN exists; the status() heal and the supervisor
-            // repair reinstall it the same way. A saved utun that is not up
-            // must restore the no-tunnel form: no Continuity, mDNS, LAN,
+            // The supervisor reinstalls saved state before any TUN exists,
+            // and only while the Core is running. Boot, launch and status()
+            // do not. A saved utun that is not up must render the no-tunnel
+            // form: no Continuity, mDNS, LAN,
             // link-local, DHCP or NDP pass and no rule for that utun. A utun
-            // that is up (a helper restart mid-session) is kept. The three
-            // reinstall paths need root and pfctl, so this checks the
-            // `restorableState` filter they all render through.
+            // that is up (a helper restart mid-session) is kept. The
+            // reinstall needs root and pfctl, so this checks the
+            // `restorableState` filter it renders through.
             let bootRestoreRules = renderRules(
                 state: restorableState(inactiveState, interfaceExists: { _ in false }),
                 allowedUID: 501
@@ -1395,6 +1396,32 @@ extension KillSwitchManager {
                 let failure = "self-test: unanswered PF listing did not keep the unrecorded token\n"
                 FileHandle.standardError.write(Data(failure.utf8))
             }
+            let sampleMain = """
+            scrub-anchor "com.apple/*"
+            anchor "com.apple/*"
+            load anchor "com.apple" from "/etc/pf.anchors/com.apple"
+
+            """
+            let diskHook = try hookedMainConfiguration(sampleMain)
+            let anchorLine = "anchor \"\(killSwitchAnchor)\"\n"
+            let loadLine = "load anchor \"\(killSwitchAnchor)\" from \"\(killSwitchPFPath)\""
+            let oldHook = diskHook.replacingOccurrences(
+                of: anchorLine,
+                with: anchorLine + loadLine + "\n"
+            )
+            let migrated = try hookedMainConfiguration(oldHook)
+            let kernel = try kernelMainConfiguration(disk: oldHook, childPath: killSwitchPFPath)
+            let bootAnchorHolds = !mainConfigurationLoadsKillSwitchRules(diskHook)
+                && !mainConfigurationLoadsKillSwitchRules(migrated)
+                && mainConfigurationLoadsKillSwitchRules(oldHook)
+                && kernel.contains(loadLine)
+                && kernel.components(separatedBy: loadLine).count == 2
+                && (try? kernelMainConfiguration(disk: diskHook, childPath: "relative")) == nil
+            let watchdogReleases = !watchdogShouldRestoreNetwork(
+                consecutiveCoreDownChecks: coreDownRestoreThreshold - 1
+            ) && watchdogShouldRestoreNetwork(
+                consecutiveCoreDownChecks: coreDownRestoreThreshold
+            )
             return ruleShapesHold
                 && bundleShapesHold
                 && bundleOffWithoutTunnel
@@ -1415,6 +1442,18 @@ extension KillSwitchManager {
                 && rejectedQuicProxyTarget
                 && commandDeadlineHolds
                 && unansweredListingKeepsUnrecordedToken
+                && bootAnchorHolds
+                && watchdogReleases
+                && failureRecoveryReleasesNetwork(strictKillSwitchEnabled: false)
+                && !failureRecoveryReleasesNetwork(strictKillSwitchEnabled: true)
+                && shouldReinstallKillSwitch(coreRunning: true)
+                && !shouldReinstallKillSwitch(coreRunning: false)
+                && !shouldReleaseLeftoverAtLaunch(coreRunning: true, stateFilePresent: true)
+                && shouldReleaseLeftoverAtLaunch(coreRunning: false, stateFilePresent: true)
+                && !shouldReleaseLeftoverAtLaunch(coreRunning: false, stateFilePresent: false)
+                && !SocketServer.shouldRestoreSavedDNSAtLaunch(coreRunning: true, snapshotPresent: true)
+                && SocketServer.shouldRestoreSavedDNSAtLaunch(coreRunning: false, snapshotPresent: true)
+                && !SocketServer.shouldRestoreSavedDNSAtLaunch(coreRunning: false, snapshotPresent: false)
         } catch {
             return false
         }
