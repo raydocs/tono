@@ -171,7 +171,7 @@ test('merge_group diffs its base and head SHAs', () => {
 
 test('pull_request triggering moved into ci-gate', () => {
   const gate = workflow('ci-gate.yml')
-  assert.match(gate, /^on:\n {2}pull_request:\n {2}merge_group:\n {2}workflow_dispatch:\n/m)
+  assert.match(gate, /^on:\n {2}pull_request:\n {2}merge_group:\n {4}types: \[checks_requested\]\n {2}workflow_dispatch:\n/m)
   assert.match(gate, /^ {2}ci-gate:\n {4}name: ci-gate\n {4}needs: \[changes, macos, windows, services, sing_box, connect_bench\]\n {4}if: always\(\)/m)
   assert.match(gate, /uses: \.\/\.github\/workflows\/macos-ci\.yml/)
   assert.match(gate, /uses: \.\/\.github\/workflows\/windows-ci\.yml/)
