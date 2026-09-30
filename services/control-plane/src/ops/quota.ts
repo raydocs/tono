@@ -258,6 +258,7 @@ async function insertOpenCycle(
   quota: number | null,
   counters: NetCounters,
   nowSec: number,
+  previous?: Row,
 ): Promise<Row> {
   const cycleId = newId();
   await db.prepare(
@@ -268,7 +269,8 @@ async function insertOpenCycle(
      ) VALUES(?, ?, ?, ?, ?, 0, ?, ?, ?, ?, 0, 'open', ?)`,
   ).bind(
     cycleId, nodeName, bounds.start, bounds.end, quota,
-    counters.in, counters.out, counters.in, counters.out, nowSec,
+    counters.in, counters.out,
+    previous?.counter_in_last ?? counters.in, previous?.counter_out_last ?? counters.out, nowSec,
   ).run();
   return (await db.prepare('SELECT * FROM node_traffic_cycles WHERE id = ?').bind(cycleId).first<Row>())!;
 }
@@ -302,17 +304,20 @@ export async function rollNodeCycle(
   const counts = asCounts(field(profile, 'quota_counts', 'quotaCounts'));
   const kind = asKind(field(profile, 'cycle_kind', 'cycleKind'));
   let open = await openCycleRow(db, name);
+  let expired: Row | undefined;
   const expected = boundsFor(profile, nowSec);
 
   if (open && Number(open.cycle_end) <= nowSec && kind !== 'manual') {
     await db.prepare(
       "UPDATE node_traffic_cycles SET status = 'closed', updated_at = ? WHERE id = ?",
     ).bind(nowSec, open.id).run();
+    // Carry the last sample across expiry so traffic between hourly rolls is counted.
+    expired = open;
     open = null;
   }
   if (!open) {
     if (!expected) return null;
-    open = await insertOpenCycle(db, name, expected, quota, counters, nowSec);
+    open = await insertOpenCycle(db, name, expected, quota, counters, nowSec, expired);
   }
 
   const inReset = detectCounterReset(finite(open.counter_in_last), counters.in);
