@@ -16,34 +16,49 @@ final class PeriodicTelemetryConsentTests: XCTestCase {
     override func tearDown() {
         defaults.removeObject(forKey: SettingsKey.periodicTelemetryEnabled)
         defaults.removeObject(forKey: SettingsKey.periodicTelemetryDefaultV2Applied)
+        defaults.removeObject(forKey: SettingsKey.periodicTelemetryDefaultV3Applied)
+        defaults.removeObject(forKey: SettingsKey.periodicTelemetryUserChosen)
         defaults.removeObject(forKey: SettingsKey.internalFailureReportsOptedOut)
         super.tearDown()
     }
 
-    func testTheSnapshotDefaultsOff() {
+    func testTheSnapshotDefaultsOn() {
         defaults.removeObject(forKey: SettingsKey.periodicTelemetryEnabled)
         defaults.removeObject(forKey: SettingsKey.periodicTelemetryDefaultV2Applied)
-        XCTAssertFalse(
-            AccountSession.isPeriodicTelemetryEnabled,
-            "an unset key must not opt a new installation into periodic uploads"
-        )
-        XCTAssertTrue(defaults.bool(forKey: SettingsKey.periodicTelemetryDefaultV2Applied))
-    }
-
-    func testLegacyTrueIsResetOnceAndALaterExplicitOptInSurvives() {
-        defaults.set(true, forKey: SettingsKey.periodicTelemetryEnabled)
-        defaults.removeObject(forKey: SettingsKey.periodicTelemetryDefaultV2Applied)
-        XCTAssertFalse(
-            AccountSession.isPeriodicTelemetryEnabled,
-            "the v2 migration must reset the former default-on value"
-        )
-        XCTAssertTrue(defaults.bool(forKey: SettingsKey.periodicTelemetryDefaultV2Applied))
-
-        defaults.set(true, forKey: SettingsKey.periodicTelemetryEnabled)
-        XCTAssertTrue(AccountSession.isPeriodicTelemetryEnabled)
+        defaults.removeObject(forKey: SettingsKey.periodicTelemetryDefaultV3Applied)
+        defaults.removeObject(forKey: SettingsKey.periodicTelemetryUserChosen)
         XCTAssertTrue(
             AccountSession.isPeriodicTelemetryEnabled,
-            "the migration marker must preserve a later user opt-in"
+            "an unset key must upload the privacy-safe timeline"
+        )
+        XCTAssertTrue(defaults.bool(forKey: SettingsKey.periodicTelemetryDefaultV2Applied))
+        XCTAssertTrue(defaults.bool(forKey: SettingsKey.periodicTelemetryDefaultV3Applied))
+    }
+
+    func testAForcedOffWithoutAChoiceComesBackAndAnExplicitOptOutSticks() {
+        defaults.set(false, forKey: SettingsKey.periodicTelemetryEnabled)
+        defaults.set(true, forKey: SettingsKey.periodicTelemetryDefaultV2Applied)
+        defaults.removeObject(forKey: SettingsKey.periodicTelemetryDefaultV3Applied)
+        defaults.removeObject(forKey: SettingsKey.periodicTelemetryUserChosen)
+        XCTAssertTrue(
+            AccountSession.isPeriodicTelemetryEnabled,
+            "v3 undoes the v2 force-off when the person has not chosen"
+        )
+
+        defaults.set(true, forKey: SettingsKey.periodicTelemetryEnabled)
+        defaults.removeObject(forKey: SettingsKey.periodicTelemetryDefaultV2Applied)
+        defaults.removeObject(forKey: SettingsKey.periodicTelemetryDefaultV3Applied)
+        XCTAssertTrue(
+            AccountSession.isPeriodicTelemetryEnabled,
+            "a legacy on value must stay on"
+        )
+
+        defaults.set(false, forKey: SettingsKey.periodicTelemetryEnabled)
+        AccountSession.notePeriodicTelemetryChoice()
+        XCTAssertFalse(AccountSession.isPeriodicTelemetryEnabled)
+        XCTAssertFalse(
+            AccountSession.isPeriodicTelemetryEnabled,
+            "an explicit opt-out must survive the next read"
         )
     }
 
@@ -54,7 +69,7 @@ final class PeriodicTelemetryConsentTests: XCTestCase {
         defaults.set(true, forKey: SettingsKey.periodicTelemetryEnabled)
         defaults.removeObject(forKey: SettingsKey.periodicTelemetryDefaultV2Applied)
         let snapshot = AccountSession.isPeriodicTelemetryEnabled
-        XCTAssertFalse(snapshot, "the upgrade still resets the snapshot switch")
+        XCTAssertTrue(snapshot, "the upgrade keeps the privacy-safe snapshot on")
         XCTAssertTrue(AccountSession.isInternalBuild(["TonoBuildChannel": "internal"]))
         XCTAssertFalse(
             AccountSession.isInternalBuild(["TonoBuildChannel": ""]),
@@ -62,11 +77,16 @@ final class PeriodicTelemetryConsentTests: XCTestCase {
         )
         XCTAssertEqual(
             AccountSession.failureReportScope(internalBuild: true, snapshotOptedIn: snapshot, internalOptedOut: false),
-            .classified
+            .full
+        )
+        XCTAssertEqual(
+            AccountSession.failureReportScope(internalBuild: false, snapshotOptedIn: snapshot, internalOptedOut: false),
+            .full,
+            "release builds report failures while the snapshot stays on"
         )
         XCTAssertNil(
-            AccountSession.failureReportScope(internalBuild: false, snapshotOptedIn: snapshot, internalOptedOut: false),
-            "release builds keep today's opt-in"
+            AccountSession.failureReportScope(internalBuild: false, snapshotOptedIn: false, internalOptedOut: false),
+            "the snapshot opt-out stops release failure reports"
         )
         XCTAssertEqual(
             AccountSession.failureReportScope(internalBuild: false, snapshotOptedIn: true, internalOptedOut: false),
@@ -109,6 +129,15 @@ final class PeriodicTelemetryConsentTests: XCTestCase {
             AccountSession.failureReportStillAllowed(builtAs: .classified, internalBuild: true),
             "an opt-out saved while the report waited must stop its next send attempt"
         )
+    }
+
+    func testAFailedPostWaitsOnDiskAndATimeoutDoesNot() {
+        defaults.removeObject(forKey: TelemetryOutbox.key)
+        XCTAssertFalse(AccountSession.shouldQueueTelemetry(URLError(.timedOut)))
+        XCTAssertTrue(AccountSession.shouldQueueTelemetry(URLError(.notConnectedToInternet)))
+        TelemetryOutbox.enqueue(kind: "failure", body: Data("{\"ok\":true}".utf8), defaults: defaults)
+        XCTAssertEqual(TelemetryOutbox.pending(defaults: defaults).count, 1)
+        defaults.removeObject(forKey: TelemetryOutbox.key)
     }
 
     func testTheSnapshotDoesNotRideOnAnotherConsent() {
