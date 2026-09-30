@@ -204,4 +204,89 @@ final class NativeUpdateDisconnectReadbackTests: XCTestCase {
         XCTAssertTrue(app.nativeUpdatePending)
         XCTAssertTrue(RuntimeCleanup.nativeUpdateBlocksConnect)
     }
+
+    func testActivationReadsLivePFWhenOnlyLaunchRecoveryMarksUpdatePending() async {
+        let armed = KillSwitchService.isArmed
+        let pending = RuntimeCleanup.nativeUpdatePending
+        let blocksConnect = RuntimeCleanup.nativeUpdateBlocksConnect
+        defer {
+            KillSwitchService.isArmed = armed
+            RuntimeCleanup.nativeUpdatePending = pending
+            RuntimeCleanup.nativeUpdateBlocksConnect = blocksConnect
+        }
+        KillSwitchService.isArmed = true
+        RuntimeCleanup.nativeUpdatePending = true
+        RuntimeCleanup.nativeUpdateBlocksConnect = true
+        let app = AppState()
+        XCTAssertFalse(app.nativeUpdatePending, "launch's update recovery has not reached AppState")
+        app.isProtectionUnconfirmed = true
+        var reads = 0
+        app.protectionAudits.killSwitchHealth = {
+            reads += 1
+            return (wanted: true, live: false, repairedSinceArm: false)
+        }
+        app.networkProtection.refreshKillSwitchStatus = {
+            return .confirmed(requiresProtectionRecovery: true)
+        }
+
+        await app.resolveUnconfirmedProtection()
+
+        XCTAssertEqual(reads, 1)
+        XCTAssertFalse(app.isProtectionBlocked)
+        XCTAssertTrue(app.isProtectionUnconfirmed)
+        XCTAssertTrue(KillSwitchService.isArmed)
+        XCTAssertTrue(RuntimeCleanup.nativeUpdatePending)
+        XCTAssertTrue(RuntimeCleanup.nativeUpdateBlocksConnect)
+    }
+
+    func testActivationReadStartedDuringDisconnectCannotOverwriteVerifiedRelease() async {
+        let armed = KillSwitchService.isArmed
+        let blocksConnect = RuntimeCleanup.nativeUpdateBlocksConnect
+        let didStartCore = AppProfile.defaults.object(forKey: SettingsKey.didStartCore)
+        let lastTunEnabled = AppProfile.defaults.object(forKey: SettingsKey.lastTunEnabled)
+        defer {
+            KillSwitchService.isArmed = armed
+            RuntimeCleanup.nativeUpdateBlocksConnect = blocksConnect
+            AppProfile.defaults.set(didStartCore, forKey: SettingsKey.didStartCore)
+            AppProfile.defaults.set(lastTunEnabled, forKey: SettingsKey.lastTunEnabled)
+        }
+        KillSwitchService.isArmed = true
+        let app = AppState()
+        let (requests, requestStarted) = AsyncStream<Void>.makeStream()
+        let (disconnectReplies, replyDisconnect) = AsyncStream<Void>.makeStream()
+        let (reads, readStarted) = AsyncStream<Void>.makeStream()
+        let (healthReplies, replyHealth) = AsyncStream<Void>.makeStream()
+        defer {
+            requestStarted.finish()
+            replyDisconnect.finish()
+            readStarted.finish()
+            replyHealth.finish()
+        }
+        app.nativeUpdateDisconnect = {
+            requestStarted.yield(())
+            for await _ in disconnectReplies { break }
+            return .init(pending: true, receipt: nil, execution: nil,
+                         disconnectVerified: true, diagnostic: nil)
+        }
+        app.protectionAudits.killSwitchHealth = {
+            readStarted.yield(())
+            for await _ in healthReplies { break }
+            return (wanted: true, live: true, repairedSinceArm: false)
+        }
+
+        app.disconnectPendingNativeUpdate()
+        for await _ in requests { break }
+        let activation = Task { await app.resolveUnconfirmedProtection() }
+        for await _ in reads { break }
+        replyDisconnect.yield(())
+        await app.nativeUpdateDisconnectTask?.value
+        XCTAssertFalse(app.isProtectionBlocked)
+        replyHealth.yield(())
+        await activation.value
+
+        XCTAssertFalse(app.isProtectionBlocked, "pre-release health cannot replace verified release")
+        XCTAssertFalse(app.isProtectionUnconfirmed)
+        XCTAssertFalse(KillSwitchService.isArmed)
+        XCTAssertEqual(MenuBarProtectionStatus(app).kind, .standby)
+    }
 }
