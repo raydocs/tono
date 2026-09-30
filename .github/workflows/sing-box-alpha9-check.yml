@@ -4,12 +4,13 @@ name: sing-box alpha.9 check
 # and not a Mac Studio soak. The frozen M0 candidate stays the default of
 # certify.py; this workflow passes the alpha.9 candidate explicitly.
 on:
-  pull_request:
-    paths:
-      - .github/workflows/sing-box-alpha9-check.yml
-      - tooling/scripts/sing-box/**
-      - tooling/scripts/build-sing-box.sh
+  # pull_request and merge_group enter through ci-gate.yml.
+  workflow_call:
   push:
+    branches:
+      - main
+      - release/macos
+      - release/windows
     paths:
       - .github/workflows/sing-box-alpha9-check.yml
       - tooling/scripts/sing-box/**
