@@ -718,6 +718,10 @@ mod tests {
 
     #[test]
     fn live_mihomo_yaml_stays_byte_for_byte_on_its_own_fake_ip_range() {
+        // Pinned YAML includes #732's dial defaults: `tcp-concurrent: true`,
+        // `dns.ipv6: false`, and `client-fingerprint: chrome` on each Reality proxy.
+        const PINNED_YAML_SHA256: &str =
+            "2a0e26f477dc9aa7eab67cfa7ccbcc23b7eefd22480d60220e181a5b434ebb1c";
         let nodes = [
             mihomo_node("US Reality 01", "8.8.8.8"),
             mihomo_node("JP Reality 02", "1.1.1.1"),
@@ -731,10 +735,7 @@ mod tests {
         assert!(!yaml.contains("198.18.16.0/20"));
         let digest = Sha256::digest(yaml.as_bytes());
         let hex: String = digest.iter().map(|byte| format!("{byte:02x}")).collect();
-        assert_eq!(
-            hex,
-            "5565d5051be9416c96062dc61efa43f06fa064663586cb9407c188563b2f6cef"
-        );
+        assert_eq!(hex, PINNED_YAML_SHA256);
     }
 
     fn mihomo_node(name: &str, server: &str) -> ValidatedNode {
