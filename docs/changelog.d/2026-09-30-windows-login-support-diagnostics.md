@@ -12,3 +12,9 @@
 - root 独立检查真实 UI/clipboard 新测试、actual old-source red 原始 log、byte restore 收据和 scoped diff；重新复用既有 JS 依赖执行两份登录测试，2 files / 12 tests passed，无跳过；窄 ESLint / Biome / diff-check 通过。未编译本机 native 组件。
 - 修复与 regression/records 同步推送 `fix/windows-login-network-20260930` 并开 draft PR；精确 head 的 Windows hosted CI 和 gpt-6.1-sol/high 独立隐私/重置范围审查待完成，未合 main。前面的本地未提交状态是历史交接状态，由本段推进。
 - 此交付只修 Copy 诊断缺失；不能当作客户首次登录连通性已修、未更新本机 Tono，也无候选或客户发布。
+
+### 2026-09-30 · Hosted 完整验证与合入 main
+- 来源：[#694](https://github.com/raydocs/tono/pull/694) 准确 head `fb05cbd8e2b2895f59098271218ce29e46aca4db`，已合 main `edbd28a26d3138b339198ae2726cb153dd62d2a0`；GitHub 源码、测试、记录与 review/CI 评论均可见。前面的 draft/pending 是当时状态，不覆盖历史。
+- 验证：准确 head [Windows CI36693113251](https://github.com/raydocs/tono/actions/runs/36693113251) completed/success，app/core/service/app-rust 全 success；gpt-6.1-sol/requested high native read-only 独立审查 source PASS/major0/minor0，准确 range `90cc2bed..fb05cbd8`，隐私/重置/production clipboard checklist 见 [审查记录](https://github.com/raydocs/tono/pull/694#issuecomment-5907885721)。root 检查 reviews/threads 为空及 main 整合无 Windows source delta，见 [合入证据](https://github.com/raydocs/tono/pull/694#issuecomment-5908147766)。本 docs 状态更新不冒充新源码 CI。
+- 候选/发布：仅源码，无新候选、客户发布、本机安装更新或系统网络改动。
+- 剩余限制：Windows 实机与首次登录网络可达性尚未验证；此项只修客服复制诊断缺失。macOS 紧急恢复 #691 的三个 major 保持 draft/NO-GO，不因本项 CI 通过而解除。
