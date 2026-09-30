@@ -282,7 +282,13 @@ nonisolated enum HelperProtocolVersion {
     ///   release the kill switch instead of installing an all-block. Startup
     ///   failure and a failed update rollback do the same, without needing
     ///   the allowed uid.
-    static let current = "4.52.3"
+    /// - 4.52.3 → 4.52.4: `/killswitch/status` no longer loads PF rules.
+    ///   The idle supervisor reinstalls only while the Core is running.
+    ///   If the app is removed while the helper stays up, the existing
+    ///   removal release runs without waiting for the next start. Launch
+    ///   does not reinstall from the state file; a Core that is not running
+    ///   is released immediately and a saved DNS snapshot is restored.
+    static let current = "4.52.4"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS
