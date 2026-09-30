@@ -239,6 +239,11 @@ pub struct TonoTransport {
     /// Responses whose status line arrived (#582). Launch restore reads it around a budget
     /// timeout: an unchanged count is the only proof that the control plane gave no answer.
     answers: std::sync::atomic::AtomicU64,
+    /// Loopback mixed port of a tunnel this process already started, or 0.
+    ///
+    /// Auth may try it last. Setting it does not create a tunnel, change a
+    /// route, or install a filter. Cleared when the tunnel is released.
+    tunnel_port: std::sync::atomic::AtomicU16,
 }
 
 /// Holds `prefer_resolved` for one preferred attempt and clears it on drop unless the attempt
@@ -271,7 +276,14 @@ impl TonoTransport {
             resolved_first: Self::pinned_builder()
                 .build()
                 .context("failed to build the Tono HTTP preferred-fallback client")?,
+            tunnel_port: std::sync::atomic::AtomicU16::new(0),
         })
+    }
+
+    /// Publish the live loopback mixed port, or 0 when it is gone.
+    pub fn set_auth_tunnel_port(&self, port: u16) {
+        self.tunnel_port
+            .store(port, std::sync::atomic::Ordering::Relaxed);
     }
 
     /// How many responses have delivered a status line so far (#582).
@@ -341,6 +353,7 @@ impl TonoTransport {
                 .resolve_to_addrs(host, resolved)
                 .build()
                 .context("failed to build the preferred resolving test client")?,
+            tunnel_port: std::sync::atomic::AtomicU16::new(0),
         })
     }
 
@@ -559,6 +572,137 @@ impl TonoTransport {
         self.alternate_port.store(0, Ordering::Relaxed);
         None
     }
+
+    /// DNS-over-HTTPS raced across pinned resolvers. System DNS is not
+    /// read or written. A poisoned answer that is not a public IPv4 is ignored.
+    async fn attempt_doh(&self, request: &ApiRequest) -> Option<Result<ApiResponse, ApiError>> {
+        if !request.url.contains(bootstrap::API_HOST) {
+            return None;
+        }
+        tokio::time::sleep(tono_core::backoff_before(2)).await;
+        let ips = resolve_via_doh(bootstrap::API_HOST).await.ok()?;
+        if ips.is_empty() {
+            return None;
+        }
+        let pinned: Vec<std::net::SocketAddr> = ips
+            .into_iter()
+            .map(|ip| std::net::SocketAddr::new(std::net::IpAddr::V4(ip), 443))
+            .collect();
+        let client = Self::builder()
+            .connect_timeout(Duration::from_secs(2))
+            .timeout(Duration::from_secs(8))
+            .resolve_to_addrs(bootstrap::API_HOST, &pinned)
+            .build()
+            .ok()?;
+        match self.attempt(&client, request).await {
+            Ok(response) => Some(Ok(response)),
+            Err(ApiError::Transport { kind, .. }) if should_retry_transport(request.method, kind) => {
+                None
+            }
+            Err(other) => Some(Err(other)),
+        }
+    }
+
+    /// Last resort through an already-running loopback proxy. A 5xx from that
+    /// proxy is not an API answer and does not count as one.
+    async fn attempt_tunnel(&self, request: &ApiRequest) -> Option<Result<ApiResponse, ApiError>> {
+        let port = self.tunnel_port.load(std::sync::atomic::Ordering::Relaxed);
+        if port == 0 {
+            return None;
+        }
+        tokio::time::sleep(tono_core::backoff_before(4)).await;
+        let proxy = reqwest::Proxy::all(format!("http://127.0.0.1:{port}")).ok()?;
+        let client = reqwest::Client::builder()
+            .no_proxy()
+            .proxy(proxy)
+            .redirect(reqwest::redirect::Policy::none())
+            .cookie_store(false)
+            .connect_timeout(Duration::from_secs(2))
+            .timeout(Duration::from_secs(8))
+            .build()
+            .ok()?;
+        let before = self.answers_seen();
+        match self.attempt(&client, request).await {
+            Ok(response) if response.status >= 500 => {
+                if self.answers_seen() == before + 1 {
+                    self.answers
+                        .fetch_sub(1, std::sync::atomic::Ordering::AcqRel);
+                }
+                None
+            }
+            Ok(response) => Some(Ok(response)),
+            Err(ApiError::Transport { kind, .. }) if should_retry_transport(request.method, kind) => {
+                None
+            }
+            Err(other) => Some(Err(other)),
+        }
+    }
+}
+
+async fn resolve_via_doh(name: &str) -> Result<Vec<std::net::Ipv4Addr>, ()> {
+    let resolvers = tono_core::doh_resolvers();
+    let (tx, mut rx) = tokio::sync::mpsc::channel(resolvers.len());
+    for resolver in resolvers {
+        let tx = tx.clone();
+        let name = name.to_owned();
+        let host = resolver.host;
+        let pins = resolver.ipv4.to_vec();
+        tokio::spawn(async move {
+            let answer = query_one_doh(host, &pins, &name).await.ok();
+            let _ = tx.send(answer).await;
+        });
+    }
+    drop(tx);
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+    let mut seen = Vec::with_capacity(resolvers.len());
+    while seen.len() < resolvers.len() {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        if remaining.is_zero() {
+            break;
+        }
+        match tokio::time::timeout(remaining, rx.recv()).await {
+            Ok(Some(answer)) => {
+                seen.push(answer);
+                if let Some(ips) = tono_core::first_public_doh_answer(&seen) {
+                    return Ok(ips);
+                }
+            }
+            _ => break,
+        }
+    }
+    Err(())
+}
+
+async fn query_one_doh(
+    host: &'static str,
+    pins: &[std::net::Ipv4Addr],
+    name: &str,
+) -> Result<Vec<std::net::Ipv4Addr>, ()> {
+    let addrs: Vec<std::net::SocketAddr> = pins
+        .iter()
+        .copied()
+        .map(|ip| std::net::SocketAddr::new(std::net::IpAddr::V4(ip), 443))
+        .collect();
+    let client = reqwest::Client::builder()
+        .no_proxy()
+        .redirect(reqwest::redirect::Policy::none())
+        .connect_timeout(Duration::from_secs(2))
+        .timeout(Duration::from_secs(2))
+        .resolve_to_addrs(host, &addrs)
+        .build()
+        .map_err(|_| ())?;
+    let url = format!("https://{host}/dns-query?name={name}&type=A");
+    let body = client
+        .get(url)
+        .header("accept", "application/dns-json")
+        .send()
+        .await
+        .map_err(|_| ())?
+        .text()
+        .await
+        .map_err(|_| ())?;
+    let ips = tono_core::parse_doh_json_answers(&body);
+    if ips.is_empty() { Err(()) } else { Ok(ips) }
 }
 
 #[async_trait]
@@ -652,10 +796,20 @@ impl HttpTransport for TonoTransport {
                 // same server on a port an SNI blocklist is unlikely to be keyed on is the one
                 // route around that which needs no server change — Cloudflare answers the same
                 // zone, with the same certificate, on all of these.
-                if should_retry_transport(request.method, fallback_kind)
-                    && let Some(result) = self.attempt_alternate_ports(&request).await
-                {
-                    return result;
+                if should_retry_transport(request.method, fallback_kind) {
+                    // DoH, then the other direct ports, then a tunnel that is
+                    // already up. Each step is skipped when it cannot run.
+                    // A delivered response stops the walk. Nothing here changes
+                    // system DNS, routes, or filters.
+                    if let Some(result) = self.attempt_doh(&request).await {
+                        return result;
+                    }
+                    if let Some(result) = self.attempt_alternate_ports(&request).await {
+                        return result;
+                    }
+                    if let Some(result) = self.attempt_tunnel(&request).await {
+                        return result;
+                    }
                 }
                 Err(ApiError::Transport {
                     kind: fallback_kind,
@@ -1027,6 +1181,7 @@ mod tests {
             prefer_resolved: std::sync::atomic::AtomicBool::new(false),
             answers: std::sync::atomic::AtomicU64::new(0),
             resolved_first: TonoTransport::pinned_builder().resolve_to_addrs(host, &live).build().unwrap(),
+            tunnel_port: std::sync::atomic::AtomicU16::new(0),
         };
         let store = std::sync::Arc::new(MemoryCredentialStore::new());
         store.set_refresh_token("refresh-1").unwrap();
@@ -1054,6 +1209,7 @@ mod tests {
             prefer_resolved: std::sync::atomic::AtomicBool::new(true),
             answers: std::sync::atomic::AtomicU64::new(0),
             resolved_first: TonoTransport::pinned_builder().resolve_to_addrs(host, &dead).build().unwrap(),
+            tunnel_port: std::sync::atomic::AtomicU16::new(0),
         };
         let get = || ApiRequest {
             method: HttpMethod::Get,

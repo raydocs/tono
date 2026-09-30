@@ -92,7 +92,7 @@ final class AppStateCoreMonitorTests: XCTestCase {
         )
         XCTAssertEqual(
             app.errorMessage,
-            String(localized: "Protected TUN stopped; Kill Switch is blocking traffic while Tono retries.")
+            String(localized: "The connection didn't complete. Support code TONO_CONNECT_TUN.")
         )
 
         // Settle the queued teardown through the replaced seams; no real

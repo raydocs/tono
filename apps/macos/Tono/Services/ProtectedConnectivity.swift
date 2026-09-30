@@ -34,7 +34,7 @@ nonisolated enum ProtectedFailureCode: String, CaseIterable, Sendable {
         case .coreControllerUnavailable:
             return String(localized: "Part of the protected connection is temporarily unavailable. If your traffic still looks normal, the connection will stay up.")
         case .coreExitUnreachable:
-            return String(localized: "This city could not complete a protected connection. Retry, choose another route, or try the backup channel if one is shown.")
+            return String(localized: "The connection didn't complete. Support code CORE_EXIT_UNREACHABLE.")
         case .networkEnvironmentOffline:
             // Looked up rather than written in place: a physical-link
             // observation is what produces this code, and it reaches the
@@ -57,6 +57,35 @@ nonisolated enum ProtectedFailureCode: String, CaseIterable, Sendable {
         case .unknownClassifiedFailure:
             return String(localized: "The protected connection failed. Diagnostic details have been recorded.")
         }
+    }
+}
+
+/// Mirror of `tono_core::network_disposition::exhausted_protection`.
+/// #706 owns that function. This copy exists because the TUN-loss path is
+/// Swift and cannot call the Rust module. Strict wins. A ready selective
+/// hook means filters were already rewritten and this path must not
+/// full-release. Until that hook lands, `selectiveAiBlockReady` stays false
+/// and the result is a full release. This value does not install a filter.
+nonisolated enum ExhaustedFailureNetwork: Sendable, Equatable {
+    case failOpen
+    case keepStrictBlock
+    case selectiveFailOpen
+
+    static func afterFailure(
+        strictKillSwitchExplicit: Bool,
+        selectiveAiBlockReady: Bool = false
+    ) -> ExhaustedFailureNetwork {
+        if strictKillSwitchExplicit {
+            return .keepStrictBlock
+        }
+        if selectiveAiBlockReady {
+            return .selectiveFailOpen
+        }
+        return .failOpen
+    }
+
+    var releasesSystemNetwork: Bool {
+        self == .failOpen
     }
 }
 

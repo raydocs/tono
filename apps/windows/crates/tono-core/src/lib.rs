@@ -12,6 +12,8 @@ pub mod catalog;
 pub mod config;
 pub mod connection;
 pub mod credentials;
+pub mod customer_failure;
+pub mod network_disposition;
 pub mod node;
 pub mod policy;
 pub mod policy_signature;
@@ -29,6 +31,17 @@ pub use config::{
     DirectPlan, OwnedRuntime, build_owned_runtime, generate_controller_secret, redact_secret,
 };
 pub use connection::{ConnectStage, ConnectionStatus, ReconnectBackoff, UiState};
+pub use customer_failure::{
+    auth_recovery_plan, auth_support_prefix, backoff_before, classify_auth_transport,
+    classify_connect_text, customer_message, disposition_after_exhausted_failure, doh_resolvers,
+    extra_api_front_hosts, first_public_doh_answer, parse_doh_json_answers, stamp_connect_failure,
+    strict_kill_switch_explicit, AuthRecoveryStep, CustomerFailureCode, DohResolver, FailureStage,
+    NetworkDisposition,
+};
+pub use network_disposition::{
+    exhausted_protection, exhausted_protection_using, register_selective_ai_block,
+    registered_selective_ai_block, ExhaustedProtection,
+};
 pub use protected_connectivity::{
     PostLockDecision, ProtectedFailureCode, TUN_PROBE_ORIGINS, classify_exhausted_data_plane,
     classify_post_lock,

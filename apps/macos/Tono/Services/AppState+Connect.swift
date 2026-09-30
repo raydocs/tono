@@ -715,9 +715,10 @@ extension AppState {
         lastConnectionFailure = nil
     }
 
-    /// Stops Mihomo/TUN. Kill switch is NOT disarmed here — that only happens on
-    /// intentional logout / user "turn off protection" so a crash or health failure
-    /// leaves the host fail-closed via Kill Switch.
+    /// Stops Mihomo/TUN. The default leaves the kill switch armed. An exhausted
+    /// failure passes `releaseKillSwitch: true` unless the user explicitly
+    /// enabled a strict kill switch, so the original network comes back.
+    /// A crash mid-attempt still does not disarm by itself.
     ///
     /// `afterUnarmedConnectFailure` marks the automatic cleanup of a connect
     /// attempt that failed before its first arm. It is a release, but not the
@@ -1434,14 +1435,18 @@ extension AppState {
                 // process a fraction of a second from recreating the
                 // interface, so one missing sighting without a task in flight
                 // is not a verdict either. Require the absence to persist
-                // across consecutive ticks; a real TUN death fails closed on
+                // across consecutive ticks; a real TUN death disconnects on
                 // the next one.
                 guard state.consecutiveMissingTUNTicks >= Self.tunMissingVerdictTicks else {
                     return .continueMonitoring
                 }
-                self.disconnect(releaseKillSwitch: false)
+                // Exhausted tunnel loss. Fail open unless a strict kill switch
+                // was explicitly enabled. This call does not install a new filter.
+                // No user preference on this path is treated as not strict.
+                let disposition = ExhaustedFailureNetwork.afterFailure(strictKillSwitchExplicit: false)
+                self.disconnect(releaseKillSwitch: disposition.releasesSystemNetwork)
                 self.errorMessage = String(
-                    localized: "Protected TUN stopped; Kill Switch is blocking traffic while Tono retries."
+                    localized: "The connection didn't complete. Support code TONO_CONNECT_TUN."
                 )
                 self.scheduleProtectedReconnect()
                 return .stopMonitoring
