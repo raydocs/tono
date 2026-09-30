@@ -47,6 +47,8 @@ SINGBOX_SHA = "a684484d7477d1437282ee411f4d131d0340aaad60a7868841ebd5d87dd8a0c6"
 UUID = "9e107d9d-372b-4c81-8d2b-3f2d0a1b2c3d"
 SHORT_ID = "0123456789abcdef"
 ORIGIN_HOST = "bench.tono.test"
+OTHER_HOST = "other.tono.test"
+OTHER_HOST_2 = "other2.tono.test"
 CAMO_DELAY_S = 0.04
 SAMPLES = 5
 
@@ -226,8 +228,45 @@ def wait_port(port: int, timeout: float = 3) -> None:
     raise SystemExit(f"port {port} did not open")
 
 
-def dns_query(controller: int) -> tuple[bool, float]:
-    url = f"http://127.0.0.1:{controller}/dns/query?name={ORIGIN_HOST}&type=A"
+def encode_qname(name: str) -> bytes:
+    return b"".join(bytes([len(label)]) + label.encode() for label in name.split(".")) + b"\x00"
+
+
+def parse_a(packet: bytes) -> list[str]:
+    if len(packet) < 12:
+        return []
+    questions = int.from_bytes(packet[4:6], "big")
+    answers = int.from_bytes(packet[6:8], "big")
+    index = 12
+    for _ in range(questions):
+        while index < len(packet) and packet[index] != 0:
+            index += 1 + packet[index]
+        index += 5
+    found = []
+    for _ in range(answers):
+        if index >= len(packet):
+            break
+        if packet[index] & 0xC0 == 0xC0:
+            index += 2
+        else:
+            while index < len(packet) and packet[index] != 0:
+                index += 1 + packet[index]
+            index += 1
+        if index + 10 > len(packet):
+            break
+        rtype = int.from_bytes(packet[index:index + 2], "big")
+        rdlen = int.from_bytes(packet[index + 8:index + 10], "big")
+        rdata = packet[index + 10:index + 10 + rdlen]
+        if rtype == 1 and len(rdata) == 4:
+            found.append(".".join(str(byte) for byte in rdata))
+        index += 10 + rdlen
+    return found
+
+
+def dns_query(controller: int, name: str) -> tuple[bool, float]:
+    """Real resolve through `/dns/query`. This is not the fake-ip listener."""
+    quoted = urllib.parse.quote(name)
+    url = f"http://127.0.0.1:{controller}/dns/query?name={quoted}&type=A"
     req = urllib.request.Request(url, headers={"Authorization": "Bearer bench"})
     started = time.perf_counter()
     try:
@@ -237,6 +276,23 @@ def dns_query(controller: int) -> tuple[bool, float]:
     except Exception:
         return False, (time.perf_counter() - started) * 1000
     return ok, (time.perf_counter() - started) * 1000
+
+
+def fake_ip_query(port: int, name: str = ORIGIN_HOST) -> tuple[bool, float]:
+    """Ask the core's DNS listener. A fake-ip answer must not dial the exit."""
+    query = b"\x12\x34\x01\x00\x00\x01\x00\x00\x00\x00\x00\x00" + encode_qname(name) + b"\x00\x01\x00\x01"
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.settimeout(1)
+    started = time.perf_counter()
+    try:
+        sock.sendto(query, ("127.0.0.1", port))
+        data, _addr = sock.recvfrom(2048)
+    except Exception:
+        return False, (time.perf_counter() - started) * 1000
+    finally:
+        sock.close()
+    elapsed = (time.perf_counter() - started) * 1000
+    return any(ip.startswith("198.18.") for ip in parse_a(data)), elapsed
 
 
 def curl(proxy: int, url: str) -> tuple[int, float]:
@@ -405,6 +461,9 @@ dns:
   listen: 127.0.0.1:{controller + 1000}
 {dns_ipv6}  enhanced-mode: fake-ip
   fake-ip-range: 198.18.0.1/16
+  fake-ip-ttl: 30
+  prefer-h3: false
+  cache-algorithm: lru
 {respect}  nameserver:
 {nameserver}  proxy-server-nameserver:
 {proxy_ns}proxies:
@@ -421,6 +480,19 @@ rules:
     return text
 
 
+def _median(values: list) -> float | None:
+    nums = [v for v in values if v is not None]
+    if len(nums) != len(values) or not nums:
+        return None
+    return round(statistics.median(nums), 1)
+
+
+def _count(values: list) -> float | None:
+    if len(values) != SAMPLES:
+        return None
+    return round(statistics.median(values), 1)
+
+
 def measure(mihomo: Path, work: Path, camo: Camo, profile: str, protocol: str, material: dict, slot: int) -> dict:
     mixed = 30000 + slot
     controller = 31000 + slot
@@ -428,16 +500,21 @@ def measure(mihomo: Path, work: Path, camo: Camo, profile: str, protocol: str, m
     config.write_text(yaml_for(profile, protocol, material, mixed, controller))
     cold, warm, starts, handshakes = [], [], [], []
     dns_ms, dns_handshakes, handshake_ms = [], [], []
+    fake_ip_ms, fake_ip_handshakes = [], []
+    dns_cached_ms, dns_cached_handshakes = [], []
+    dns_reuse_ms, dns_reuse_handshakes = [], []
+    listen = controller + 1000
     for _ in range(SAMPLES):
         t0 = time.perf_counter()
         core = Core(mihomo, work, config, mixed, controller)
         starts.append((time.perf_counter() - t0) * 1000)
+        # Fake-ip is local. It must not open a proxy handshake, and it must
+        # finish before the first request so DoH is off the first-byte path.
         camo.reset()
-        dns_ok, dns_elapsed = dns_query(controller)
-        dns_marks = camo.snapshot()
-        if dns_ok:
-            dns_ms.append(dns_elapsed)
-            dns_handshakes.append(len(dns_marks))
+        fake_ok, fake_elapsed = fake_ip_query(listen)
+        if fake_ok:
+            fake_ip_ms.append(fake_elapsed)
+            fake_ip_handshakes.append(len(camo.snapshot()))
         camo.reset()
         code, elapsed = curl(mixed, f"http://{ORIGIN_HOST}:18080/")
         marks = camo.snapshot()
@@ -447,25 +524,49 @@ def measure(mihomo: Path, work: Path, camo: Camo, profile: str, protocol: str, m
             handshake_ms.append((marks[-1][1] - marks[-1][0]) * 1000)
         code2, elapsed2 = curl(mixed, f"http://{ORIGIN_HOST}:18080/")
         warm.append(elapsed2 if code2 == 200 else None)
+        # Cold `/dns/query` is a real DoH resolve through the exit. It is the
+        # pre-warm, not the first byte. A miss here leaves the request above.
+        camo.reset()
+        dns_ok, dns_elapsed = dns_query(controller, ORIGIN_HOST)
+        if dns_ok:
+            dns_ms.append(dns_elapsed)
+            dns_handshakes.append(len(camo.snapshot()))
+        camo.reset()
+        cached_ok, cached_elapsed = dns_query(controller, ORIGIN_HOST)
+        if cached_ok:
+            dns_cached_ms.append(cached_elapsed)
+            dns_cached_handshakes.append(len(camo.snapshot()))
+        # A different name misses the message cache and reuses the HTTP/2
+        # client. It must not open another Reality handshake. The remaining
+        # time is one tunnel round trip; the camouflage delay inflates that
+        # RTT, so the handshake count is the reuse signal.
+        camo.reset()
+        dns_query(controller, OTHER_HOST)
+        camo.reset()
+        reuse_ok, reuse_elapsed = dns_query(controller, OTHER_HOST_2)
+        if reuse_ok:
+            dns_reuse_ms.append(reuse_elapsed)
+            dns_reuse_handshakes.append(len(camo.snapshot()))
         core.close()
-    def med(values):
-        nums = [v for v in values if v is not None]
-        if len(nums) != len(values):
-            return None
-        return round(statistics.median(nums), 1)
 
     return {
         "profile": profile,
         "protocol": protocol,
         "config_ms": round(material["last_yaml_ms"], 3),
-        "startup_ms": med(starts),
-        "cold_ms": med(cold),
-        "warm_ms": med(warm),
-        "dns_ms": med(dns_ms) if len(dns_ms) == SAMPLES else None,
-        "dns_handshakes": round(statistics.median(dns_handshakes), 1) if len(dns_handshakes) == SAMPLES else None,
-        "handshake_ms": med(handshake_ms) if len(handshake_ms) == SAMPLES else None,
-        "handshakes": round(statistics.median(handshakes), 1) if len(handshakes) == SAMPLES else None,
-        "ok": med(cold) is not None,
+        "startup_ms": _median(starts),
+        "cold_ms": _median(cold),
+        "warm_ms": _median(warm),
+        "fake_ip_ms": _median(fake_ip_ms) if len(fake_ip_ms) == SAMPLES else None,
+        "fake_ip_handshakes": _count(fake_ip_handshakes),
+        "dns_ms": _median(dns_ms) if len(dns_ms) == SAMPLES else None,
+        "dns_handshakes": _count(dns_handshakes),
+        "dns_cached_ms": _median(dns_cached_ms) if len(dns_cached_ms) == SAMPLES else None,
+        "dns_cached_handshakes": _count(dns_cached_handshakes),
+        "dns_reuse_ms": _median(dns_reuse_ms) if len(dns_reuse_ms) == SAMPLES else None,
+        "dns_reuse_handshakes": _count(dns_reuse_handshakes),
+        "handshake_ms": _median(handshake_ms) if len(handshake_ms) == SAMPLES else None,
+        "handshakes": _count(handshakes),
+        "ok": _median(cold) is not None,
     }
 
 
@@ -657,7 +758,18 @@ def main() -> int:
             continue
         if row.get("profile") not in {"tono-fixed", "clash"}:
             continue
-        for field in ("cold_ms", "dns_ms", "handshakes", "dns_handshakes"):
+        for field in (
+            "cold_ms",
+            "dns_ms",
+            "handshakes",
+            "dns_handshakes",
+            "fake_ip_ms",
+            "fake_ip_handshakes",
+            "dns_cached_ms",
+            "dns_cached_handshakes",
+            "dns_reuse_ms",
+            "dns_reuse_handshakes",
+        ):
             key = f"{row['protocol']}/{row['profile']}/{field}"
             if key not in baseline["limits"]:
                 continue
