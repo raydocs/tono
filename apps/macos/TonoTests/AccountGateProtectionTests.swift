@@ -11,7 +11,10 @@ import XCTest
 final class AccountGateProtectionTests: XCTestCase {
     func testMenuBarRestoreRetiresTheMountedGateNotice() async {
         let storedIntent = KillSwitchService.isArmed
-        defer { KillSwitchService.isArmed = storedIntent }
+        defer {
+            KillSwitchService.isArmed = storedIntent
+            AppProfile.defaults.removeObject(forKey: TelemetryOutbox.key)
+        }
 
         let app = AppState()
         var runtime = NetworkProtectionOperations()
