@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { Search } from 'lucide-react';
 import type { NodeLifecycle, NodeSummaryDto, QuotaLevel } from '@contract';
 import { Chip } from '@/components/ops/Chip';
+import { Meter } from '@/components/ops/Meter';
 import { Panel, type PanelState } from '@/components/ops/Panel';
 import { Segmented } from '@/components/ops/Segmented';
 import { Spark } from '@/components/ops/Spark';
@@ -268,9 +269,7 @@ function QuotaCell({ view }: { view: NodeView }) {
   const tone = QUOTA_TONE[level];
   return (
     <span className="nodes-quota">
-      <span className={cn('nodes-meter', tone && `tone-${tone}`)} aria-hidden>
-        {ratio === null ? null : <span style={{ ['--fill' as string]: Math.max(0.02, ratio) }} />}
-      </span>
+      <Meter ratio={ratio} tone={tone} />
       <span className={cn('font-mono text-body', tone && tone !== 'rem' && `tone-${tone} tone-fg`)}>
         {used === null ? copy.missing : words.quotaOf(formatBytesMeasured(used), formatPercent(ratio))}
       </span>

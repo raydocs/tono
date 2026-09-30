@@ -87,6 +87,15 @@ export function labelWidth(text: string): number {
   return Math.ceil(width);
 }
 
+/**
+ * Label every how-many-th column so neighbours never overlap: the widest label
+ * sets the gap, with `minGap` as the floor short labels (dates) already used.
+ */
+export function labelStride(labels: readonly string[], slot: number, minGap: number): number {
+  const gap = Math.max(minGap, ...labels.map((text) => labelWidth(text) + 8));
+  return Math.max(1, Math.ceil(gap / Math.max(1, slot)));
+}
+
 const MINUTE = 60;
 const HOUR = 60 * MINUTE;
 const DAY = 24 * HOUR;

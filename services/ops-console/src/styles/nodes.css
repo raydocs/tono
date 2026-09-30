@@ -19,12 +19,6 @@
     gap: 16px;
   }
 
-  .segmented-count {
-    margin-left: 6px;
-    color: var(--muted-foreground);
-    font-variant-numeric: tabular-nums;
-  }
-
   .nodes-search {
     display: flex;
     align-items: center;
@@ -87,23 +81,6 @@
 
   .nodes-quota-col { width: 180px; }
   .nodes-quota { display: flex; align-items: center; gap: 8px; white-space: nowrap; }
-  .nodes-meter {
-    position: relative;
-    flex: none;
-    width: 48px;
-    height: 6px;
-    border-radius: 999px;
-    background: var(--chart-grid);
-    overflow: hidden;
-  }
-  .nodes-meter > span {
-    position: absolute;
-    inset: 0 auto 0 0;
-    width: calc(var(--fill) * 100%);
-    border-radius: 999px;
-    background: var(--tone-ink, var(--series-1));
-  }
-
   @media (max-width: 1280px) {
     .nodes-stats { grid-template-columns: repeat(3, minmax(0, 1fr)); }
     .nodes-load-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -115,6 +92,6 @@
     .nodes-search input { width: 120px; }
     .nodes-name { width: auto; }
     .nodes-quota-col { width: auto; }
-    .nodes-meter { width: 32px; }
+    .nodes-quota .meter { width: 32px; }
   }
 }
