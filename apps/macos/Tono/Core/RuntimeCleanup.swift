@@ -64,17 +64,20 @@ enum RuntimeCleanup {
     /// boot would reconnect by itself again. The file copy is synced before
     /// the connect goes on; the preference stays for a build that reads only
     /// it.
-    static func recordConnectBootSession() {
+    static func recordConnectBootSession(
+        in file: URL = connectBootSessionFile,
+        writer: (String, URL) throws -> Void = writeSynced
+    ) throws {
         let record = bootSessionRecord(current: currentBootSession())
         AppProfile.defaults.set(record, forKey: SettingsKey.connectBootSession)
         do {
-            try writeSynced(record, to: connectBootSessionFile)
+            try writer(record, file)
         } catch {
             // Unless the file already holds this record, the preference is
             // all this connect has: a file from an earlier boot must not
             // outvote it.
-            if recordedConnectBootSession != record {
-                try? FileManager.default.removeItem(at: connectBootSessionFile)
+            if recordedConnectBootSession(in: file) != record {
+                try? FileManager.default.removeItem(at: file)
             }
             LocalTrafficAudit.shared.recordEvent(
                 "connect_boot_session_not_synced",

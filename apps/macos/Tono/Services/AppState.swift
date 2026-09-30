@@ -297,6 +297,10 @@ final class AppState {
     let coreRuntime = CoreRuntimeManager()
     let connectionCoordinator = ConnectionCoordinator()
     var networkProtection = NetworkProtectionOperations()
+    /// Connect admission's durable-write boundary, before any network mutation.
+    var recordConnectBootSession: () throws -> Void = {
+        try RuntimeCleanup.recordConnectBootSession()
+    }
     /// System boundary for the connect tail's native-update resume, the same
     /// pattern as `networkProtection`.
     var nativeUpdateResume = NativeUpdateResumeOperations()

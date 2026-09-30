@@ -88,7 +88,7 @@ extension AppState {
                 // while that hold is set, so a connect admitted here is the
                 // user's, and it lifts the hold.
                 self.automaticResumeHeldAfterRestart = false
-                RuntimeCleanup.recordConnectBootSession()
+                try? self.recordConnectBootSession()
 
                 // Session-dynamic mixed/controller ports avoid collisions with leftover
                 // 7890/9090 listeners from other proxies or a previous core.
