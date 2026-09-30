@@ -1,6 +1,6 @@
 ## 2026-09-30 · arm 与睡眠屏障失败改为放行
 - 归属：SHIP_PLAN §2 第 10 条（装上会坏）。macOS helper。
-- 来源：基线 main `d2363002`；分支 `cursor/macos-fail-open-arm-581a`。尚未合 main。不包含 #701。
+- 来源：基线 main `d2363002`；分支 `cursor/macos-fail-open-arm-581a`；[#708](https://github.com/raydocs/tono/pull/708)。尚未合 main。不包含 #701。
 - 缺陷修复：
   - `arm` 在写入规则或状态之后失败时，立刻释放锚点和状态文件，不再把阻断留到下次 helper 启动。
   - 睡眠屏障提交失败时同样释放，不再调用 `installEmergencyBlock`。
