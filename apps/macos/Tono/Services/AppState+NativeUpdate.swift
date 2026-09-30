@@ -108,10 +108,13 @@ extension AppState {
             isProtectionUnconfirmed = true
             return true
         }
-        KillSwitchService.isArmed = health.wanted || health.live
+        // The current helper maps an unreadable PF status to live=false.
+        // A live reading proves a barrier; a non-live reading cannot certify
+        // release, even if the intent file is absent. Only the verified
+        // Disconnect reply may settle release and clear local recovery intent.
+        if health.wanted || health.live { KillSwitchService.isArmed = true }
         isProtectionBlocked = health.live
-        isProtectionUnconfirmed = !health.live && health.wanted
-        if !health.wanted, !health.live { resetReleasedSessionHistory() }
+        isProtectionUnconfirmed = !health.live
         return true
     }
 
