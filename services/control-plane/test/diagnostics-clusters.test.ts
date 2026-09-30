@@ -414,3 +414,63 @@ describe('diagnostics read API', () => {
     expect(body.exits[0].ipPrefix).toBe('203.0.113.0/24');
   });
 });
+
+// Both callers finish the "is there an open cluster?" read before either
+// insert. That is the window where the partial unique index rejects the
+// second INSERT and the diagnostics upload 500s.
+function holdOpenSelectsUntilBoth(real: D1Database): D1Database {
+  let openSelects = 0;
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  return {
+    prepare(sql: string) {
+      const statement = real.prepare(sql);
+      const holds = sql.includes('FROM failure_clusters')
+        && sql.includes("status = 'open'")
+        && sql.trimStart().startsWith('SELECT');
+      return {
+        bind(...values: unknown[]) {
+          const bound = statement.bind(...values);
+          if (!holds) return bound;
+          return new Proxy(bound, {
+            get(target, property, receiver) {
+              if (property !== 'first') {
+                const value = Reflect.get(target, property, receiver);
+                return typeof value === 'function' ? value.bind(target) : value;
+              }
+              return async () => {
+                const row = await target.first();
+                openSelects += 1;
+                if (openSelects === 2) release();
+                if (openSelects <= 2) await gate;
+                return row;
+              };
+            },
+          });
+        },
+      };
+    },
+  } as unknown as D1Database;
+}
+
+describe('failure cluster open race', () => {
+  it('counts both events when two opens pass the empty read together', async () => {
+    (env as unknown as Env).FAILURE_ALERT_WEBHOOK_URL = undefined;
+    (env as unknown as Env).FAILURE_ALERT_WEBHOOK_SECRET = undefined;
+    const atMs = 1_800_100_000_000;
+    const raced = holdOpenSelectsUntilBoth(db());
+    const [left, right] = await Promise.all([
+      recordFailureCluster(raced, failureInput('race-open', atMs), clusterEnv(), 1_800_100_000),
+      recordFailureCluster(raced, failureInput('race-open', atMs + 1), clusterEnv(), 1_800_100_000),
+    ]);
+    expect(left.clusterId).toBe(right.clusterId);
+    const row = await db().prepare(
+      `SELECT COUNT(*) AS clusters, SUM(event_count) AS events
+       FROM failure_clusters WHERE code = 'race-open' AND status = 'open'`,
+    ).first<{ clusters: number; events: number }>();
+    expect(Number(row?.clusters)).toBe(1);
+    expect(Number(row?.events)).toBe(2);
+  });
+});
