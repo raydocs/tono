@@ -1120,10 +1120,11 @@ def lifetime_totals(state: dict, counters: dict[str, int], *,
         totals[label] = total
         baseline[label] = observed
     # Accounts absent from this reading keep whatever they had: removal from the
-    # roster must not roll a total backwards.
+    # roster must not roll a total backwards. A restart resets even an absent
+    # account's baseline, or its later first reading would forgive old bytes.
     for label, carried in state["totals"].items():
         totals.setdefault(label, int(carried))
-        baseline.setdefault(label, int(state["counterBaseline"].get(label, 0)))
+        baseline.setdefault(label, 0 if restarted else int(state["counterBaseline"].get(label, 0)))
     state["counterBaseline"] = baseline
     return totals
 
@@ -1705,6 +1706,7 @@ def run_once(path: Path) -> None:
         raise Refusal(cache_error)
     if state is None:
         raise Refusal(f"clients were reconciled, but the state file is unusable: {state_error}")
+    durable_state = dict(state)
     source = source_id(state)
     for report in state["pendingReports"]:
         pending_at = report.get("observedAt")
@@ -1727,8 +1729,12 @@ def run_once(path: Path) -> None:
         raise Refusal(
             "the live client inventory is unavailable and no durable inventory can prove complete reconciliation"
         )
+    # Keep the reconciled inventory even if the ACK fails, or a newly installed
+    # client revoked before the next poll would never be a removal candidate.
+    state["installedClients"] = sorted(installed)
+    save_state(path, {**durable_state, "installedClients": state["installedClients"]})
     # Only a complete reconciliation is readiness evidence. Do this before any
-    # state save so a failed acknowledgement leaves the durable state intact and
+    # usage state save so a failed acknowledgement leaves that state intact and
     # the whole roster can be retried next round.
     acknowledge_roster(base, token, observed_at)
 
@@ -1742,8 +1748,6 @@ def run_once(path: Path) -> None:
         replayed, discarded = deliver_queue(base, token, path, state)
         print(f"replayed {replayed} queued report(s), dropped {discarded}")
 
-    if installed is not None:
-        state["installedClients"] = sorted(installed)
     recorded_marker = state.get("startMarker")
     restarted = bool(
         settled_marker
