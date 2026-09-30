@@ -28,6 +28,7 @@ import { Digest } from './today/Digest';
 import { HeroKpis } from './today/HeroKpis';
 import { IncidentList } from './today/IncidentCard';
 import { IncidentDrawer } from './today/IncidentDrawer';
+import { FailureClusters } from './diagnostics/FailureClusters';
 
 const TABS = ['open', 'resolved', 'chores'] as const;
 type TabId = (typeof TABS)[number];
@@ -170,6 +171,8 @@ export default function TodayPage({
           sweptTone={swept === null || swept === undefined || coverage?.tone === 'unk' ? 'unk' : 'ok'}
         />
       </section>
+
+      <FailureClusters />
 
       <div className="today-grid">
         <div className="today-aux">
