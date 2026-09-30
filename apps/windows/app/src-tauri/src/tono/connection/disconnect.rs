@@ -231,7 +231,7 @@ async fn run_release_sequence(
         // Only the user Disconnect command requests this durable release. Quit,
         // sign-out and automatic failure cleanup keep the pending-update fence.
         let update_release = if _explicit_disconnect {
-            commands::update::disconnect_if_pending().await.map_err(|e| format!("update Disconnect remains unproven: {e:#}"))?
+            pending_update_release_result(state, commands::update::disconnect_if_pending().await).await?
         } else { None };
         match update_release {
             Some(status) => status,
@@ -291,6 +291,14 @@ fn service_not_ready_release_error(error: impl std::fmt::Display) -> String {
 async fn release_unconfirmed(state: &TonoState, message: String) -> String {
     state.lock().await.kill_switch = None;
     message
+}
+
+#[cfg_attr(not(windows), allow(dead_code))]
+async fn pending_update_release_result(
+    _state: &TonoState,
+    result: anyhow::Result<Option<tono_service_protocol::KillSwitchStatus>>,
+) -> Result<Option<tono_service_protocol::KillSwitchStatus>, String> {
+    result.map_err(|error| format!("update Disconnect remains unproven: {error:#}"))
 }
 
 /// A Service refusal, or a reading that stays armed, is the Service's answer that protection is
@@ -528,15 +536,50 @@ mod tests {
         assert!(inner.fsm.status().is_protection_blocked && inner.fsm.kill_switch_armed());
     }
 
+    /// 56d02a04 grok:F1: update Disconnect may release WFP successfully before its separate
+    /// status read fails. The production result adapter must not publish the pre-release reading.
+    #[tokio::test]
+    async fn a_pending_update_readback_failure_drops_cached_protection() {
+        let state = Arc::new(TonoState::for_test());
+        {
+            let mut inner = state.lock().await;
+            inner.fsm.begin_connect();
+            inner.fsm.mark_kill_switch_armed();
+            inner.fsm.mark_session_verified();
+            inner.fsm.connect_succeeded().unwrap();
+            inner.fsm.begin_disconnect();
+            inner.kill_switch = Some(serde_json::from_value(serde_json::json!({
+                "wanted": true, "verified": true, "live": true, "mode": "blocked",
+            })).unwrap());
+        }
+        let sequence_state = Arc::clone(&state);
+        let operation = coordinate_release(&state, None,
+            move |_guard| async move {
+                let readback_failed = anyhow::anyhow!("the post-update release status pipe closed");
+                pending_update_release_result(&sequence_state, Err(readback_failed)).await.map(|_| ())
+            },
+            || async {},
+        ).await;
+        let message = operation.wait().await.unwrap_err();
+        assert!(message.starts_with(super::super::failure::PROTECTION_UNCONFIRMED_PREFIX), "{message}");
+        assert!(message.contains("the post-update release status pipe closed"), "{message}");
+        let inner = state.lock().await;
+        assert!(inner.kill_switch.is_none(), "released protection must not be claimed from the old reading");
+        assert!(inner.fsm.status().is_protection_blocked && inner.fsm.kill_switch_armed(),
+            "an unconfirmed release must retain the retry/blocking latch");
+    }
+
     /// deef9193 opus:F2: a release that got no reading from the Service (no owner credentials, or
     /// the release IPC and its read-back both failed) proves nothing, so it is unconfirmed and not
     /// "protection stays on".
     #[tokio::test]
     async fn a_release_that_got_no_service_reading_is_unconfirmed() {
         let state = Arc::new(TonoState::for_test());
+        state.lock().await.kill_switch = Some(serde_json::from_value(serde_json::json!({
+            "wanted": true, "verified": true, "live": true, "mode": "blocked",
+        })).unwrap());
         let lost = anyhow::anyhow!("the pipe closed")
-            .context("无法连接到Tono Service")
-            .context(service::ReleaseGotNoReading);
+            .context("无法连接到Tono Service");
         let message = release_failed(&state, &lost).await;
         assert!(
             message.starts_with(super::super::failure::PROTECTION_UNCONFIRMED_PREFIX),
@@ -544,5 +587,6 @@ mod tests {
         );
         assert!(!message.contains("protection stays on"), "{message}");
         assert!(message.contains("the pipe closed"), "{message}");
+        assert!(state.lock().await.kill_switch.is_none());
     }
 }
