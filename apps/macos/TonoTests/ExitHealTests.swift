@@ -91,6 +91,21 @@ final class ExitHealTests: XCTestCase {
         XCTAssertFalse(session.protectionArmed)
     }
 
+    func testSelectiveHookDoesNotAskForAFullRelease() {
+        XCTAssertEqual(
+            ExitHeal.exhaustedEffect(strict: false, selectiveReady: false, remember: "next", dialerChanged: false),
+            .failOpen(remember: "next", dialerChanged: false)
+        )
+        XCTAssertEqual(
+            ExitHeal.exhaustedEffect(strict: false, selectiveReady: true, remember: "next", dialerChanged: false),
+            .selectiveAiHold(remember: "next")
+        )
+        XCTAssertEqual(
+            ExitHeal.exhaustedEffect(strict: true, selectiveReady: true, remember: "next", dialerChanged: true),
+            .holdClosed
+        )
+    }
+
     func testArmedStrictFailureHoldsTheSameNode() {
         var session = ExitHeal.Session.forPreferred("Buffalo · Niagara", residentialId: "none")
         session.protectionArmed = true

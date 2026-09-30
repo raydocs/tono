@@ -270,6 +270,13 @@ pub(crate) async fn connect_for_generation(
                             );
                         }
                     }
+                    tono_core::heal::NetworkEffect::SelectiveAiHold { .. } => {
+                        logging!(
+                            warn,
+                            Type::Service,
+                            "Tono: self-heal kept AI-service destinations blocked and did not restore the whole network"
+                        );
+                    }
                     tono_core::heal::NetworkEffect::HoldClosed => {
                         reconnect::schedule_reconnect_for_generation(&state, &app, generation).await;
                     }

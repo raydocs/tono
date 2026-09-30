@@ -57,7 +57,24 @@ enum ExitHeal {
         case untouched
         case dialBeforeArm(name: String, change: Change, dialerChanged: Bool)
         case failOpen(remember: String?, dialerChanged: Bool)
+        /// General traffic released; AI destinations stay blocked.
+        /// #706 owns the decision. Callers must not full-release.
+        case selectiveAiHold(remember: String?)
         case holdClosed
+    }
+
+    /// Mirror of `network_disposition::exhausted_protection_using`.
+    /// #706 owns that function. This copy is not wired to `AppState`.
+    /// `selectiveReady` stays false on the live path until the PF hook lands.
+    static func exhaustedEffect(
+        strict: Bool,
+        selectiveReady: Bool,
+        remember: String?,
+        dialerChanged: Bool
+    ) -> Effect {
+        if strict { return .holdClosed }
+        if selectiveReady { return .selectiveAiHold(remember: remember) }
+        return .failOpen(remember: remember, dialerChanged: dialerChanged)
     }
 
     static func baseName(_ name: String) -> String {
@@ -146,13 +163,15 @@ enum ExitHeal {
         let next = nextCandidate(session, failure: failure, candidates: candidates)
         if session.protectionArmed {
             session.pendingDial = next?.candidate.name
-            switch stance {
-            case .strict:
-                return .holdClosed
-            case .ordinary:
-                let changed = next.map { baseName($0.candidate.name) != baseName(session.preferred) } ?? false
-                return .failOpen(remember: session.pendingDial, dialerChanged: changed)
-            }
+            let changed = next.map { baseName($0.candidate.name) != baseName(session.preferred) } ?? false
+            // The Rust hook is not visible here. Ordinary stays a full release
+            // until AppState is wired to the shared decision.
+            return exhaustedEffect(
+                strict: stance == .strict,
+                selectiveReady: false,
+                remember: session.pendingDial,
+                dialerChanged: changed
+            )
         }
         guard let next else { return .untouched }
         let changed = baseName(next.candidate.name) != baseName(session.preferred)

@@ -13,3 +13,8 @@
 
 - 缺陷修复：`stick_to_preferred` 在 `residential_id` 仍是 `impl Into<String>` 时和 `String` 比较，托管 CI 的 `core` 与 `app-rust` 编译失败。现在和首选节点一样，先 `into()` 成 `String` 再比较。两边都相等才保留绕行；住宅身份变了仍丢掉绕行并换上新身份。比较没有放宽。
 - 验证：本机 Cargo 1.83 仍解析不了 edition 2024，`cargo test -p tono-core --lib heal` 未执行。推送后等该 head 上的 `core` 与 `app-rust` 变绿。
+
+### 2026-09-30 续记 · 与 #706 共用耗尽后的网络决定
+
+- 新增/优化：普通失败放回原网络、严格模式保持封锁，不再在本模块里单独 match。两者都调用 `network_disposition::exhausted_protection_using`。这个函数的所有者是 [#706](https://github.com/raydocs/tono/pull/706)。本 PR 只消费它。钩子就绪时结果是 `SelectiveAiHold`：放行一般流量，不调用显式全量释放，AI 服务流量继续被挡。钩子未注册时仍是今天的 `FailOpen`。PF/WFP 规则归 bc-3c5ccfd4。
+- 剩余限制：#706 的 `plan_failure` 合入后，若它已经按同一决定释放过，本分支的 `FailOpen` 分支不应再释放第二次。选择性过滤器尚未落地。
