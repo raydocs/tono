@@ -8,6 +8,7 @@
 #![forbid(unsafe_code)]
 
 pub mod auth;
+pub mod hy2_idle;
 pub mod catalog;
 pub mod config;
 pub mod connect_timing;

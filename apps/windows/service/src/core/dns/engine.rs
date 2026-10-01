@@ -533,7 +533,21 @@ fn suppress_interface_doh() -> Result<()> {
         // A capture this build can read stays in force: it may have been written by an older
         // build mid-session (its cross-upgrade role), and the flags below may already be
         // zeroed by that session.
-        Ok(Some(_)) => {}
+        Ok(Some(mut saved)) => {
+            let before = saved.len();
+            for entry in &current {
+                if !saved.iter().any(|original| {
+                    original.guid.eq_ignore_ascii_case(&entry.guid)
+                        && original.family.eq_ignore_ascii_case(&entry.family)
+                        && original.server.eq_ignore_ascii_case(&entry.server)
+                }) {
+                    saved.push(entry.clone());
+                }
+            }
+            if saved.len() != before {
+                write_interface_doh_capture(&saved)?;
+            }
+        }
         unreadable => {
             if let Err(error) = unreadable {
                 let path = super::interface_doh_capture_path();

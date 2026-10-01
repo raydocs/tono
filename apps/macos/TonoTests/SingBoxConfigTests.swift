@@ -239,6 +239,9 @@ final class SingBoxConfigTests: XCTestCase {
         XCTAssertEqual(outbound["tls"] as? NSDictionary, [
             "enabled": true, "server_name": "exit.example.com", "certificate_public_key_sha256": [spki],
         ] as NSDictionary)
+        XCTAssertEqual(outbound["keep_alive_period"] as? String, "5s")
+        XCTAssertNil(outbound["idle_timeout"])
+        XCTAssertNil(outbound["disable_chrome_parrot"])
     }
 
     func testProductRuntimePreservesHomeDirectAndRejectsHY2WithoutSPKIPin() throws {
