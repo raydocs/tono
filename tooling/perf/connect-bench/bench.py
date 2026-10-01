@@ -565,14 +565,18 @@ class Core:
         )
         self.mixed = mixed
         self.controller = controller
-        deadline = time.perf_counter() + 5
-        while time.perf_counter() < deadline:
-            if controller_ready(controller):
-                return
-            if self.proc.poll() is not None:
-                raise SystemExit(f"mihomo exited for {config}")
-            time.sleep(0.02)
-        raise SystemExit(f"mihomo controller {controller} did not answer")
+        try:
+            deadline = time.perf_counter() + 5
+            while time.perf_counter() < deadline:
+                if controller_ready(controller):
+                    return
+                if self.proc.poll() is not None:
+                    raise SystemExit(f"mihomo exited for {config}")
+                time.sleep(0.02)
+            raise SystemExit(f"mihomo controller {controller} did not answer")
+        except BaseException:
+            self.close()
+            raise
 
     def close(self) -> None:
         self.proc.terminate()
@@ -580,6 +584,7 @@ class Core:
             self.proc.wait(timeout=2)
         except subprocess.TimeoutExpired:
             self.proc.kill()
+            self.proc.wait(timeout=2)
 
 
 def yaml_for(profile: str, protocol: str, material: dict, mixed: int, controller: int) -> str:
@@ -1005,31 +1010,42 @@ class SingBox:
         directory.mkdir(parents=True, exist_ok=True)
         log_path = work / f"singbox-{mixed}.log"
         self._log = log_path.open("w")
-        self.proc = subprocess.Popen(
-            [str(binary), "run", "-c", str(path), "-D", str(directory)],
-            stdout=self._log,
-            stderr=subprocess.STDOUT,
-        )
+        try:
+            self.proc = subprocess.Popen(
+                [str(binary), "run", "-c", str(path), "-D", str(directory)],
+                stdout=self._log,
+                stderr=subprocess.STDOUT,
+            )
+        except BaseException:
+            self._log.close()
+            raise
         self.mixed = mixed
         self.controller = controller
-        deadline = time.perf_counter() + 5
-        while time.perf_counter() < deadline:
-            if controller_ready(controller):
-                return
-            if self.proc.poll() is not None:
-                self._log.flush()
-                tail = log_path.read_text(errors="replace")[-400:]
-                raise SystemExit(f"sing-box exited for {path}: {tail}")
-            time.sleep(0.02)
-        raise SystemExit(f"sing-box controller {controller} did not answer")
+        try:
+            deadline = time.perf_counter() + 5
+            while time.perf_counter() < deadline:
+                if controller_ready(controller):
+                    return
+                if self.proc.poll() is not None:
+                    self._log.flush()
+                    tail = log_path.read_text(errors="replace")[-400:]
+                    raise SystemExit(f"sing-box exited for {path}: {tail}")
+                time.sleep(0.02)
+            raise SystemExit(f"sing-box controller {controller} did not answer")
+        except BaseException:
+            self.close()
+            raise
 
     def close(self) -> None:
-        self.proc.terminate()
         try:
-            self.proc.wait(timeout=2)
-        except subprocess.TimeoutExpired:
-            self.proc.kill()
-        self._log.close()
+            self.proc.terminate()
+            try:
+                self.proc.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                self.proc.kill()
+                self.proc.wait(timeout=2)
+        finally:
+            self._log.close()
 
 
 def measure_singbox(binary: Path, work: Path, camo: Camo, protocol: str, material: dict, slot: int) -> dict:
