@@ -672,15 +672,12 @@ pub fn run() {
                     // on the async runtime so the native event loop keeps pumping paint, drag and
                     // minimize messages while Service/Core shutdown completes.
                     handle::Handle::global().set_is_exiting();
-                    let app_handle = app_handle.clone();
                     AsyncHandler::spawn(move || async move {
                         // `feat::quit` is the sole explicit-release owner. A second release here
                         // used to consume another 2.5 s budget and could race the Service cleanup.
-                        if matches!(feat::quit().await, tono_signal::ShutdownOutcome::Canceled) {
-                            // The barrier may already be released while the FSM still claims
-                            // protection; re-sync only when quitting was actually cancelled.
-                            tono::commands::resync_after_cancelled_quit(app_handle).await;
-                        }
+                        // The barrier may already be released while the FSM still claims
+                        // protection; re-sync only when quitting was actually cancelled.
+                        feat::quit_or_resync().await;
                     });
                 }
             }

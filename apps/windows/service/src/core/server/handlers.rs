@@ -7,8 +7,9 @@ use crate::core::structure::is_protected_startup_replacement_candidate;
 use tracing::{info, trace, warn};
 
 /// Release restored public resolvers and then failed to stop Core. WFP is still armed.
-/// Put tunnel DNS back only when the stop itself did not finish. A finished stop with
-/// failed bookkeeping has nothing answering the tunnel resolver; this does not disarm.
+/// Put tunnel DNS back only when the stop itself did not finish. The route releases after a
+/// finished stop with failed bookkeeping (`release_despite_bookkeeping`); were one to reach
+/// here, nothing answers the tunnel resolver, so DNS stays public. This does not disarm.
 #[cfg(windows)]
 async fn refuse_release_after_failed_core_stop(
     failure: OwnerRollbackFailure,
@@ -517,9 +518,10 @@ pub(super) fn create_ipc_router() -> Result<Router> {
                 // Make the owner-gated release a complete last-resort Disconnect. The App may
                 // have lost the StartClash response and therefore have no session proof with
                 // which to stop a Core that did start. Restore DNS first; then stop and retire
-                // this owner's Core before disarming WFP. Any uncertainty stays fail-closed: a
-                // Core that survived (or whose durable desired state was not retired) could use
-                // the physical route directly after WFP is removed.
+                // this owner's Core before disarming WFP. A Core whose stop is unconfirmed keeps
+                // the refusal: it could use the physical route directly after WFP is removed. A
+                // confirmed stop whose owner bookkeeping failed releases anyway; see
+                // `release_despite_bookkeeping` for why that Core cannot be replayed.
                 if let Err(error) = dns::ensure_restored().await {
                     return service_unavailable(format!(
                         "Kill switch release refused; DNS restore is unproven: {error:#}"
@@ -527,7 +529,9 @@ pub(super) fn create_ipc_router() -> Result<Router> {
                 }
                 match load_active_owner().await {
                     Ok(Some(active)) if active.owner_key == owner.key => {
-                        if let Err(failure) = rollback_started_owner(&owner).await {
+                        if let Err(failure) =
+                            release_despite_bookkeeping(rollback_started_owner(&owner).await)
+                        {
                             return refuse_release_after_failed_core_stop(failure).await;
                         }
                     }
@@ -537,7 +541,9 @@ pub(super) fn create_ipc_router() -> Result<Router> {
                         );
                     }
                     Ok(None) => {
-                        if let Err(error) = retire_unrecorded_owner_core(&owner).await {
+                        if let Err(error) =
+                            release_despite_bookkeeping(retire_unrecorded_owner_core(&owner).await)
+                        {
                             return service_unavailable(format!(
                                 "Kill switch release refused; the unrecorded Core could not be safely stopped and retired: {error:#}"
                             ));
@@ -553,7 +559,9 @@ pub(super) fn create_ipc_router() -> Result<Router> {
                         warn!(
                             "Active Core ownership is unreadable; stopping and retiring the running Core before release: {error:#}"
                         );
-                        if let Err(failure) = rollback_started_owner(&owner).await {
+                        if let Err(failure) =
+                            release_despite_bookkeeping(rollback_started_owner(&owner).await)
+                        {
                             return refuse_release_after_failed_core_stop(failure).await;
                         }
                     }

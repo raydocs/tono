@@ -148,6 +148,9 @@ final class AppState {
     /// default resolver the audit checks, so a mismatch that outlives
     /// reconnects would otherwise tear the tunnel down forever.
     var consecutiveProtectedDNSBrokenAudits = 0
+    /// Publishes a failure release's "back on normal internet" text once
+    /// that release has settled open. Tests await it.
+    var failureReleaseNoticeTask: Task<Void, Never>?
     /// Connect attempts in a row that found no primary network service.
     /// Kept apart from `consecutiveProtectedFailureCount`, which exempts
     /// this environmental failure from its three-strike pause.
@@ -850,18 +853,30 @@ final class AppState {
                         continue
                     }
                 }
-                // A pause that waits for the user (a DNS conflict, Protected
-                // DNS that kept failing, a failure that needs their action)
-                // survives sleep: a wake reconnect would only reach the same
-                // verdict again. PF is reasserted above and the pause message
-                // stays. Pauses that lift on a network change do not stop here.
+                // A pause that waits for the user (a failure that needs their
+                // action, a helper that rejects this app) survives sleep: a
+                // wake reconnect would only reach the same verdict again.
+                // Pauses that lift on a network change do not stop here.
                 // Neither does a wake connect after an unexpected restart.
+                // Nothing reconnects, so a barrier the reassert above armed
+                // takes the automatic release (AI hold kept) at once; holding
+                // it only lasted until the helper's core-down watchdog lifted
+                // it about 30 s later under a UI that still claimed a block
+                // (decision 031, decision 044, MAC-PAUSE-WATCHDOG-STALE-BLOCK).
                 if self.protectedReconnectPausedForUserAction
                     && !self.protectedReconnectPauseLiftsOnNetworkChange
                     || self.automaticResumeHeldAfterRestart {
                     if !Task.isCancelled {
-                        if barrierArmed { self.isProtectionBlocked = true }
                         self.connectionCoordinator.wakeRecoveryTask = nil
+                        if barrierArmed {
+                            let reason = String(localized: "Tono did not reconnect after wake because automatic retries are paused.")
+                            self.releaseAfterPausedFailure(
+                                pending: reason + " "
+                                    + String(localized: "Tono is restoring this Mac's normal internet; AI services stay blocked."),
+                                released: reason + " "
+                                    + String(localized: "This Mac is back on its normal internet and AI services stay blocked. Connect again when you are ready.")
+                            )
+                        }
                     }
                     return
                 }
@@ -979,17 +994,23 @@ final class AppState {
     }
 
     /// Launch asked to resume protection, but `automaticResumeHeldAfterRestart`
-    /// holds it. PF stays armed. When the helper has confirmed that barrier,
-    /// also set the user-action pause so the actions read Repair and
-    /// reconnect / Restore internet, and say why; an unconfirmed one keeps
-    /// the unknown state launch published.
-    private func holdAutomaticResumeAfterUnexpectedRestart() {
+    /// holds it, so only the user reconnects. When the helper has confirmed
+    /// a barrier, take the automatic release (AI hold kept) and say why; an
+    /// unconfirmed one keeps the unknown state launch published. Holding PF
+    /// here was never real: with the Core down the helper's watchdog
+    /// released it about 30 s later under a UI that still claimed a block
+    /// (decision 031, decision 044, MAC-PAUSE-WATCHDOG-STALE-BLOCK).
+    func holdAutomaticResumeAfterUnexpectedRestart() {
         autoConnectRequested = false
         guard isProtectionBlocked else { return }
-        protectedReconnectPausedForUserAction = true
-        protectedReconnectPauseLiftsOnNetworkChange = false
         LocalTrafficAudit.shared.recordEvent("automatic_resume_held_after_restart")
-        errorMessage = String(localized: "This Mac restarted unexpectedly while Tono was connected, so Tono did not reconnect automatically. Kill Switch is still blocking traffic. Click Repair and reconnect to connect, or Restore internet to get back online.")
+        let reason = String(localized: "This Mac restarted unexpectedly while Tono was connected, so Tono did not reconnect automatically.")
+        releaseAfterPausedFailure(
+            pending: reason + " "
+                + String(localized: "Tono is restoring this Mac's normal internet; AI services stay blocked."),
+            released: reason + " "
+                + String(localized: "This Mac is back on its normal internet and AI services stay blocked. Connect again when you are ready.")
+        )
     }
 
     func attemptAutomaticConnect() {

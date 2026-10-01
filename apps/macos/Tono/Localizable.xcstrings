@@ -122,12 +122,12 @@
         }
       }
     },
-    "DNS conflict: a corporate VPN, profile or /etc/resolver rule sends some domains to a DNS server outside Tono's protection. Kill Switch is blocking traffic and automatic retries are paused. Turn that rule off, then click Repair and reconnect, or Restore internet to get back online.": {
+    "DNS conflict: a corporate VPN, profile or /etc/resolver rule sends some domains to a DNS server outside Tono's protection. This Mac is back on its normal internet and AI services stay blocked. Turn that rule off, then connect again.": {
       "localizations": {
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "DNS 冲突：企业 VPN、描述文件或 /etc/resolver 规则把部分域名交给 Tono 保护之外的 DNS 服务器解析。断网保护正在拦住直连，自动重试已暂停。请先关闭该规则，再点按「修复并重新连接」，或点按「恢复正常网络」恢复上网。"
+            "value": "DNS 冲突：企业 VPN、描述文件或 /etc/resolver 规则把部分域名交给 Tono 保护之外的 DNS 服务器解析。这台 Mac 已回到原来的网络，AI 服务继续拦截。请先关闭该规则，再重新连接。"
           }
         }
       }
@@ -352,12 +352,32 @@
         }
       }
     },
-    "Protected DNS did not take effect after repeated reconnects: macOS is still resolving through another DNS server. Kill Switch is blocking traffic and automatic retries are paused. Click Repair and reconnect to try again, or Restore internet to get back online.": {
+    "Protected DNS did not take effect after repeated reconnects: macOS is still resolving through another DNS server. Tono is restoring this Mac's normal internet; AI services stay blocked.": {
       "localizations": {
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "多次重连后受保护 DNS 仍未生效：macOS 仍在使用其他 DNS 服务器解析。断网保护正在拦住直连，自动重试已暂停。点按「修复并重新连接」再试一次，或点按「恢复正常网络」恢复上网。"
+            "value": "多次重连后受保护 DNS 仍未生效：macOS 仍在使用其他 DNS 服务器解析。Tono 正在恢复这台 Mac 原来的网络，AI 服务继续拦截。"
+          }
+        }
+      }
+    },
+    "DNS conflict: a corporate VPN, profile or /etc/resolver rule sends some domains to a DNS server outside Tono's protection. Tono is restoring this Mac's normal internet; AI services stay blocked. Turn that rule off, then connect again.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "DNS 冲突：企业 VPN、描述文件或 /etc/resolver 规则把部分域名交给 Tono 保护之外的 DNS 服务器解析。Tono 正在恢复这台 Mac 原来的网络，AI 服务继续拦截。请先关闭该规则，再重新连接。"
+          }
+        }
+      }
+    },
+    "Protected DNS did not take effect after repeated reconnects: macOS is still resolving through another DNS server. This Mac is back on its normal internet and AI services stay blocked. Connect again when you are ready.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "多次重连后受保护 DNS 仍未生效：macOS 仍在使用其他 DNS 服务器解析。这台 Mac 已回到原来的网络，AI 服务继续拦截。准备好后再连接。"
           }
         }
       }
@@ -6329,12 +6349,22 @@
         }
       }
     },
-    "The same failure repeated three times, so automatic retries are paused. Click Retry now to try again, or Restore internet to get back online.": {
+    "Tono is restoring this Mac's normal internet; AI services stay blocked.": {
       "localizations": {
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "同一错误已连续出现三次，自动重试已暂停。点按「立即重试」再试一次，或点按「恢复正常网络」恢复上网。"
+            "value": "Tono 正在恢复这台 Mac 原来的网络，AI 服务继续拦截。"
+          }
+        }
+      }
+    },
+    "This Mac is back on its normal internet and AI services stay blocked. Connect again when you are ready.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "这台 Mac 已回到原来的网络，AI 服务继续拦截。准备好后再连接。"
           }
         }
       }
@@ -8347,12 +8377,22 @@
         }
       }
     },
-    "This Mac restarted unexpectedly while Tono was connected, so Tono did not reconnect automatically. Kill Switch is still blocking traffic. Click Repair and reconnect to connect, or Restore internet to get back online.": {
+    "This Mac restarted unexpectedly while Tono was connected, so Tono did not reconnect automatically.": {
       "localizations": {
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "这台 Mac 在 Tono 连接期间意外重启，所以 Tono 没有自动重新连接。断网保护仍在拦住直连。点按「修复并重新连接」来连接，或点按「恢复正常网络」恢复上网。"
+            "value": "这台 Mac 在 Tono 连接期间意外重启，所以 Tono 没有自动重新连接。"
+          }
+        }
+      }
+    },
+    "Tono did not reconnect after wake because automatic retries are paused.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "唤醒后 Tono 没有重新连接，因为自动重试已暂停。"
           }
         }
       }

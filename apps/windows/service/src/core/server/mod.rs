@@ -403,19 +403,51 @@ impl std::fmt::Display for OwnerRollbackFailure {
 }
 
 #[cfg(any(windows, test))]
-async fn retire_unrecorded_owner_core(owner: &AuthenticatedOwner) -> AnyResult<()> {
+async fn retire_unrecorded_owner_core(
+    owner: &AuthenticatedOwner,
+) -> std::result::Result<(), OwnerRollbackFailure> {
     // Missing/corrupt ownership is not proof that the independently supervised Core is gone.
     // The caller has already proved ownership of the armed policy under the lifecycle lock.
     if let Err(error) = CORE_MANAGER.lock().await.stop_core().await {
         set_core_lifecycle_state(ServiceLifecycleState::Fatal);
-        return Err(error).context("failed to stop Core without an active owner record");
+        return Err(OwnerRollbackFailure::CoreStopUnconfirmed(
+            error.context("failed to stop Core without an active owner record"),
+        ));
     }
     // Do not add a disk-write dependency to an already idle release or create a default record.
-    // A retained runnable intent must still be retired before filters can be released.
-    if load_owner_desired_state(&owner.key).await?.core_should_be_running {
-        persist_owner_core_stopped(owner).await?;
+    // A retained runnable intent is retired here whenever the store allows it.
+    let retire = async {
+        if load_owner_desired_state(&owner.key)
+            .await?
+            .core_should_be_running
+        {
+            persist_owner_core_stopped(owner).await?;
+        }
+        AnyResult::Ok(())
+    };
+    retire.await.map_err(OwnerRollbackFailure::Bookkeeping)
+}
+
+/// Explicit release after the owner's Core was stopped and retired. A confirmed stop whose
+/// owner bookkeeping failed releases anyway (decision 031: a persistent ProgramData ACL or AV
+/// write failure must not keep a non-strict machine Blocked on every Restore). Replay stays
+/// fenced as in `retire_expired_fresh_arm`: `rollback_started_owner` clears the active owner
+/// independently of the run-intent write, the unrecorded path has no readable active owner,
+/// and the release writes a wanted:false tombstone or removes the wanted intent, without which
+/// `restore_desired_state` starts nothing. An unconfirmed stop is still returned for refusal.
+#[cfg(any(windows, test))]
+fn release_despite_bookkeeping(
+    retired: std::result::Result<(), OwnerRollbackFailure>,
+) -> std::result::Result<(), OwnerRollbackFailure> {
+    match retired {
+        Err(OwnerRollbackFailure::Bookkeeping(error)) => {
+            warn!(
+                "Owner bookkeeping failed after a confirmed Core stop; releasing anyway: {error:#}"
+            );
+            Ok(())
+        }
+        other => other,
     }
-    Ok(())
 }
 
 /// Automatic cleanup after abandoned Connect verification or exhausted Core recovery. The
