@@ -133,6 +133,22 @@ pub async fn finish_release(apply_narrow: bool) {
     request(apply_narrow).await;
 }
 
+#[cfg(any(windows, test))]
+fn firewall_command(
+    system_directory: &std::path::Path,
+    args: &[&str],
+) -> Option<std::process::Command> {
+    if !selective_fail_open::command_may_run(args) {
+        return None;
+    }
+    let (_, rest) = args.split_first()?;
+    // The policy's fixed executable marker validates the template. Bind the
+    // actual binary to the OS directory, without consulting PATH or SystemRoot.
+    let mut command = std::process::Command::new(system_directory.join("netsh.exe"));
+    command.args(rest);
+    Some(command)
+}
+
 #[cfg(all(windows, not(feature = "test")))]
 fn remove_blocking() {
     run_commands(&selective_fail_open::firewall_delete_commands());
@@ -190,6 +206,18 @@ mod tests {
     use once_cell::sync::Lazy;
     use serial_test::serial;
     use std::sync::{Arc, Condvar, Mutex};
+
+    #[test]
+    fn firewall_command_uses_the_os_system_directory_on_non_c_windows() {
+        let system = std::path::Path::new(r"D:\Windows\System32");
+        let args = selective_fail_open::firewall_add_commands().remove(0);
+        let command = firewall_command(system, &args).unwrap();
+        assert_eq!(command.get_program(), system.join("netsh.exe").as_os_str());
+        assert_eq!(
+            command.get_args().collect::<Vec<_>>(),
+            args[1..].iter().map(std::ffi::OsStr::new).collect::<Vec<_>>()
+        );
+    }
 
     #[derive(Default)]
     pub(super) struct PausedStep {
@@ -320,14 +348,18 @@ fn run_commands(commands: &[Vec<&str>]) {
 
 #[cfg(all(windows, not(feature = "test")))]
 fn run_command(args: &[&str], report_failure: bool) -> bool {
-    if !selective_fail_open::command_may_run(args) {
+    let system = match super::update::security::system_directory() {
+        Ok(system) => system,
+        Err(error) => {
+            tracing::warn!("selective fail-open: system directory unavailable: {error:#}");
+            return false;
+        }
+    };
+    let Some(mut command) = firewall_command(&system, args) else {
         tracing::error!("selective fail-open: refused a command that was not prefix-only");
         return false;
-    }
-    let Some((executable, rest)) = args.split_first() else {
-        return false;
     };
-    match std::process::Command::new(executable).args(rest).status() {
+    match command.status() {
         Ok(status) if status.success() => true,
         Ok(status) => {
             if report_failure {
