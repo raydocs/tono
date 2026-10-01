@@ -1,6 +1,6 @@
 ## 2026-10-01 · R3-A8A9 Windows 应用与 macOS 目录阅读记录
 - 归属：SHIP_PLAN §2 item 10 的狩猎记录，不是客户发布。
-- 来源：基线 `a864a9ca` → 分支 `cursor/r3-a8a9-report-89a9`（本 PR），未合 main。
+- 来源：基线 `a864a9ca` → 分支 `cursor/r3-a8a9-report-89a9`（#936），未合 main。
 - 缺陷修复：无。
 - 新增/优化：无。
 - 工程与测试：新增 `docs/agent-reports/R3-A8A9-grok.md`。无产品测试。
