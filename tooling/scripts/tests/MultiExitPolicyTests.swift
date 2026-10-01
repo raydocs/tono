@@ -806,6 +806,7 @@ struct MultiExitPolicyTests {
                 // bundle's PROCESS-PATH-REGEX DIRECT is first-match and would
                 // carry assistant names out the physical interface. TCP goes to
                 // the exit; UDP is rejected so it falls back to that TCP route.
+                // Dedicated model API hosts are part of the same suffix list.
                 "assistant-destinations-precede-bundle-direct-without-home",
                 assistantPhysicalNICGap == nil
             ),

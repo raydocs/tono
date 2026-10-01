@@ -22,3 +22,7 @@
 - `macos / policy-tests` 报 `missing tcp anthropic.com`。生成行是 `DOMAIN-SUFFIX,anthropic.com)),Tono-Exit`（两个右括号）。断言写成 `"DOMAIN-SUFFIX,\(suffix)),Tono-Exit"`，Swift 把紧跟插值的那个 `)` 当成插值结束，实际查找的是只带一个右括号的字符串，所以永远匹配不到。三个查找都补上这个 `)`。
 - 生成规则仍然没有改。助手域名和 `160.79.104.0/21` 不走物理网卡。
 - 验证：本环境无 Swift，`policy-tests` 未在本地执行。
+
+## 2026-10-01 · 续记（合入 DashScope）
+- 合入当时的 `origin/main`（含专用模型 API 先于阿里云 DIRECT）。没有住宅跳时仍发出完整助手后缀和 `160.79.104.0/21` 的 TCP 出口规则与 UDP 拒绝，不收成只剩 DashScope。DashScope 主机已在这份后缀表里，因此仍然先于 `aliyuncs.com` 直连；main 上的隧道 DNS 规则保留。
+- 验证：本环境无 Swift，XCTest 与 `policy-tests` 未在本地执行。

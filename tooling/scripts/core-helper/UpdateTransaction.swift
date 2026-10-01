@@ -41,8 +41,7 @@ final class UpdateTransaction {
         UpdateTransaction(storage: storage, effects: Effects(
             authenticate: UpdatePackage.livePeer,
             installedFloor: {
-                _ = try UpdatePackage.verifyCode(UpdatePackage.appPath, identifier: "com.raydocs.tono")
-                return try UpdatePackage.buildSource(UpdatePackage.appPath).releaseSequence!
+                try UpdatePackage.sealedBuildSource(UpdatePackage.appPath).releaseSequence!
             },
             installedComponents: {
                 try UpdatePackage.runningHelperMatchesInstalled()

@@ -369,6 +369,18 @@ pub async fn disconnect(state: Arc<TonoState>, app: AppHandle) -> Result<(), Str
     disconnect_for_generation(state, app, None).await
 }
 
+fn idle_release_can_be_skipped(
+    status: &tono_core::connection::ConnectionStatus,
+    update_incomplete: bool,
+    expected_generation: Option<u64>,
+) -> bool {
+    // Only automatic recovery may skip an idle FSM. User Restore must also
+    // remove the separate AI hold, which broad wanted/live status cannot see.
+    expected_generation.is_some()
+        && !status.is_connected && !status.is_connecting && !status.is_protection_blocked
+        && !update_incomplete
+}
+
 /// Failed Prepare recovery must not release a successor admitted after its status read.
 pub(crate) async fn disconnect_for_generation(
     state: Arc<TonoState>, app: AppHandle, expected_generation: Option<u64>,
@@ -388,8 +400,7 @@ pub(crate) async fn disconnect_for_generation(
         }
         inner.invalidate_connection(true);
         let status = inner.fsm.status();
-        if !status.is_connected && !status.is_connecting && !status.is_protection_blocked
-            && !commands::update::incomplete() {
+        if idle_release_can_be_skipped(&status, commands::update::incomplete(), expected_generation) {
             return Ok(());
         }
         inner.fsm.begin_disconnect();
@@ -424,6 +435,19 @@ pub(super) async fn stay_armed_after_failed_release(state: &Arc<TonoState>, app:
 mod tests {
     use super::*;
     use tokio::sync::oneshot;
+
+    #[test]
+    fn idle_user_restore_cannot_skip_the_selective_cleanup() {
+        let idle = tono_core::connection::ConnectionStatus::default();
+        assert!(
+            !idle_release_can_be_skipped(&idle, false, None),
+            "an idle FSM does not prove the secondary AI hold is absent"
+        );
+        assert!(
+            idle_release_can_be_skipped(&idle, false, Some(7)),
+            "automatic failed-Prepare recovery keeps its idle no-op"
+        );
+    }
 
     #[tokio::test]
     async fn automatic_failure_release_transfers_its_writer_and_keeps_the_ai_hold() {

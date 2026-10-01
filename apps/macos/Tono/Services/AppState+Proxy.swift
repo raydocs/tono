@@ -259,7 +259,7 @@ extension AppState {
             strictKillSwitchExplicit: false,
             selectiveAiBlockReady: false
         ).releasesSystemNetwork
-        disconnect(releaseKillSwitch: release)
+        disconnect(releaseKillSwitch: release, automaticFailureRelease: release)
         LocalTrafficAudit.shared.recordEvent(
             "node_switch_protection_convergence_failed",
             details: ["error": error.localizedDescription, "released": String(release)]

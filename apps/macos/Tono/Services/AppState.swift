@@ -92,6 +92,7 @@ final class AppState {
     var lastConnectionFailure: ConnectionFailure?
     /// Next dial chosen by ExitHeal while PF is down. Nil keeps the selected node.
     var unarmedDialName: String?
+    var unarmedReconnectAttempt = 0
     /// Test seam. Nil uses a TCP connect that does not install PF.
     /// Not observed: an optional MainActor closure cannot be yielded by Observation.
     @ObservationIgnored
@@ -2019,8 +2020,8 @@ final class AppState {
                   generation == connectionCoordinator.protectionOperationGeneration else { return }
             // Replacement already touched Core, or restoring the previous PF
             // arm failed. macOS stores no `permanent` strict switch. The
-            // selective AI hook is not registered, so this restores the
-            // original network instead of holding bootstrap. A ready hook
+            // existing automatic release restores ordinary traffic and keeps
+            // the secondary AI hold instead of holding bootstrap. A ready hook
             // must not be disarmed. Strict still holds and retries.
             let disposition = ExhaustedFailureNetwork.afterFailure(
                 strictKillSwitchExplicit: false,
@@ -2028,7 +2029,7 @@ final class AppState {
             )
             switch disposition {
             case .failOpen:
-                disconnect(releaseKillSwitch: true)
+                disconnect(releaseKillSwitch: true, automaticFailureRelease: true)
                 errorMessage = String(
                     localized: "Secure app routing could not be applied. This Mac is back on its normal internet."
                 )
