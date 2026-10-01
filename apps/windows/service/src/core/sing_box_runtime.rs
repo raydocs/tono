@@ -548,4 +548,18 @@ mod tests {
             "action":"route","outbound":"Tono-China-Direct"});
         assert!(with_rule(unpinned_process).is_err());
     }
+
+    /// A selector whose member is `Tono-China-Direct` is DIRECT too, so an
+    /// assistant host routed to it is refused like a rule to the direct outbound.
+    #[test]
+    fn assistant_rule_to_a_selector_reaching_direct_is_refused() {
+        let mut runtime = compiled();
+        runtime["outbounds"].as_array_mut().unwrap().extend([
+            json!({"type":"direct","tag":"Tono-China-Direct","bind_interface":"Ethernet"}),
+            json!({"type":"selector","tag":"AI-Bypass","outbounds":["Tono-China-Direct"]}),
+        ]);
+        runtime["route"]["rules"].as_array_mut().unwrap().push(json!({
+            "network":"tcp","domain_suffix":["claude.ai"],"action":"route","outbound":"AI-Bypass"}));
+        assert!(admit_owned_runtime(&runtime.to_string()).is_err());
+    }
 }
