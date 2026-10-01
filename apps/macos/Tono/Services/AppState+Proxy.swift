@@ -109,6 +109,10 @@ extension AppState {
             // Until a verified selector has an exact endpoint set, a failed arm/rollback
             // cannot be treated as an ordinary UI error over a still-Connected session.
             var protectionTransitionInFlight = false
+            SingBoxDelayGate.suspend()
+            defer {
+                if self.isConnected { SingBoxDelayGate.prove() }
+            }
             do {
                 try checkSwitchCurrent()
                 let previousName = self.proxyService.activeNodeName
@@ -164,6 +168,7 @@ extension AppState {
                     self.lastClassifiedFailure = failure
                     throw CoreControllerError.protectionFailed(failure.userMessage)
                 }
+                SingBoxDelayGate.prove()
                 await self.closeConnectionsBoundToExit(previousName, using: api)
                 guard await self.connectionCoordinator.finishNodeSwitch(
                     generation: switchGeneration,
@@ -547,6 +552,19 @@ extension AppState {
                     // exact PF convergence: disconnect is the only safe exit.
                     self.activeDirectPolicy = pendingDirectPolicy
                     pinsRuntimeCommitted = true
+                    // /core/sync above restarted the Core; like the full
+                    // reload (#608) the controller answers before the new
+                    // process recreates the owned utun. Wait for it before
+                    // the convergence arm names it, or a routine pins refresh
+                    // fails validateTunnels and lands in the fatal catch.
+                    // An unstructured Task does not inherit cancellation, so a
+                    // cancelled refresh still waits instead of returning false
+                    // at once (this window must not honor cancellation).
+                    guard await Task(operation: { await Self.waitForOwnedTunnelInterface() }).value else {
+                        throw KillSwitchService.Error.commandFailed(
+                            "Mihomo did not recreate the owned \(ConfigPipeline.tonoTunInterface) interface."
+                        )
+                    }
                     // The pre-reload arm intentionally allowed old ∪ new so
                     // the old runtime could keep dialing during the swap. Once
                     // Mihomo commits the new config, immediately remove the old

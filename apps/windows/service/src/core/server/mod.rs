@@ -574,7 +574,7 @@ async fn stop_ipc_server_inner() -> Result<()> {
         crate::core::desired::retire_legacy_active_owner()
             .await
             .map_err(|error| kode_bridge::KodeBridgeError::custom(error.to_string()))?;
-        windows_kill_switch::release()
+        windows_kill_switch::release_after_service_stop()
             .await
             .map_err(|error| kode_bridge::KodeBridgeError::custom(error.to_string()))?;
     }

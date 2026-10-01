@@ -1,5 +1,6 @@
 import { EmptyLine } from '@/components/ops/Empty';
 import { Section } from '@/components/ops/Section';
+import { copy } from '@/copy/copy';
 import { getJson } from '@/lib/api';
 import { useResource } from '@/lib/use-resource';
 import { clusterLine } from './format';
@@ -17,9 +18,9 @@ export function FailureClusters() {
     getJson<FailureClusterList>('failure-clusters', signal),
   );
   return (
-    <Section title="失败聚类">
+    <Section title={copy.diagnosticsPanel.clustersTitle}>
       {resource.status === 'ready' && resource.data.clusters.length === 0 ? (
-        <EmptyLine message="这段时间没有打开的失败聚类。" />
+        <EmptyLine message={copy.diagnosticsPanel.clustersNone} />
       ) : null}
       {resource.status === 'ready' && resource.data.clusters.length > 0 ? (
         <ul className="grid gap-2">
@@ -28,15 +29,15 @@ export function FailureClusters() {
               <span className="font-mono">{clusterLine(cluster)}</span>
               <span className="text-[var(--muted-foreground)]">
                 {' '}
-                {cluster.users} 人 / {cluster.devices} 台 · {cluster.status}
+                {copy.diagnosticsPanel.clusterReach(cluster.users, cluster.devices)} · {cluster.status}
               </span>
             </li>
           ))}
         </ul>
       ) : null}
-      {resource.status === 'loading' ? <EmptyLine message="正在读取失败聚类…" /> : null}
+      {resource.status === 'loading' ? <EmptyLine message={copy.diagnosticsPanel.clustersLoading} /> : null}
       {resource.status === 'error' ? (
-        <EmptyLine message="失败聚类还读不到。控制面的聚类接口部署之后，这里会列出同一类失败。" />
+        <EmptyLine message={copy.diagnosticsPanel.clustersUnavailable} />
       ) : null}
     </Section>
   );
