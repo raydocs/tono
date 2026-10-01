@@ -384,6 +384,16 @@ fn intent_path() -> PathBuf {
         .join("kill-switch.json")
 }
 
+/// Independent update recovery has no in-memory armed state. Like startup,
+/// only a readable wanted record with an explicit strict flag keeps it blocked.
+#[cfg(windows)]
+pub fn strict_kill_switch_intent_on_disk() -> bool {
+    std::fs::read(intent_path())
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<IntentRecord>(&bytes).ok())
+        .is_some_and(|intent| intent.wanted && intent.strict_kill_switch)
+}
+
 /// Per-write sequence for intent temporaries (BRICK-W11). A shared
 /// `kill-switch.tmp` let a later writer delete or overwrite an earlier
 /// writer's in-flight bytes, and a `replace` that reported a timeout can
