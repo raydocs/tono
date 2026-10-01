@@ -324,7 +324,10 @@ export function parseLineTags(value: string): string[] {
  */
 export function anchorDayOf(cycleStart: number | null): string {
   if (cycleStart === null) return '1';
-  return String(new Date(cycleStart * 1_000).getDate());
+  // The meter starts cycles at midnight in its zone, and that zone defaults to
+  // UTC (`quota.ts` `cycleBounds`). Local `getDate()` turns a UTC midnight into
+  // the previous evening west of UTC, and saving the form then stores that day.
+  return String(new Date(cycleStart * 1_000).getUTCDate());
 }
 
 /** A token the engine wrote, not a sentence a person did: `carrier_loss`, `ok`. */
