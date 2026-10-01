@@ -225,6 +225,92 @@ fn load(root: &Path) -> Result<Option<(Vec<u8>, State)>> {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RollbackFinalizationStage {
+    NetworkSettled,
+    Complete,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RollbackFinalizationRecord {
+    attempt_id: String,
+    release_sequence: u64,
+    stage: RollbackFinalizationStage,
+}
+
+/// Finalization evidence grants no publication/consumption authority. It survives dropping
+/// the Store lock for Service readiness and is bound to one private, consumed attempt.
+pub struct RollbackFinalizer {
+    path: PathBuf,
+    attempt_id: String,
+    release_sequence: u64,
+    explicitly_released: bool,
+}
+
+impl RollbackFinalizer {
+    fn stage(&self) -> Result<Option<RollbackFinalizationStage>> {
+        let file = match File::open(&self.path) {
+            Ok(file) => file,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(error.into()),
+        };
+        let mut bytes = Vec::new();
+        file.take(1_025).read_to_end(&mut bytes)?;
+        ensure!(
+            bytes.len() <= 1_024,
+            "rollback finalization record exceeds limit"
+        );
+        let record: RollbackFinalizationRecord = serde_json::from_slice(&bytes)?;
+        ensure!(
+            record.attempt_id == self.attempt_id
+                && record.release_sequence == self.release_sequence,
+            "rollback finalization belongs to another attempt"
+        );
+        Ok(Some(record.stage))
+    }
+
+    fn record(&self, stage: RollbackFinalizationStage) -> Result<()> {
+        atomic_write(
+            &self.path,
+            &serde_json::to_vec(&RollbackFinalizationRecord {
+                attempt_id: self.attempt_id.clone(),
+                release_sequence: self.release_sequence,
+                stage,
+            })?,
+        )
+    }
+
+    /// Settle the stopped-Service network once, then restore supervision/readiness. A marker
+    /// failure still runs restoration; replay after NetworkSettled never stops Service again.
+    pub fn finish(
+        &self,
+        strict: bool,
+        settle: impl FnOnce() -> Result<()>,
+        restore_service: impl FnOnce() -> Result<()>,
+    ) -> (Result<()>, Result<()>) {
+        // Ambiguous evidence cannot prove completion; retry only bounded cleanup, never install.
+        let stage = self.stage().ok().flatten();
+        if stage == Some(RollbackFinalizationStage::Complete) {
+            return (Ok(()), Ok(()));
+        }
+        let mut settled = if self.explicitly_released
+            || stage == Some(RollbackFinalizationStage::NetworkSettled)
+        {
+            Ok(())
+        } else {
+            (if strict { Ok(()) } else { settle() })
+                .and_then(|()| self.record(RollbackFinalizationStage::NetworkSettled))
+        };
+        let restored = restore_service();
+        if settled.is_ok() && restored.is_ok() {
+            // Evidence failure is not a Service readiness failure; never trigger another stop.
+            settled = self.record(RollbackFinalizationStage::Complete);
+        }
+        (settled, restored)
+    }
+}
+
 pub struct Store {
     root: PathBuf,
     _lock: File,
@@ -301,6 +387,35 @@ impl Store {
 
     pub fn pending(&self) -> bool {
         self.state.pending()
+    }
+
+    /// Shared startup/executor admission for interrupted installation recovery.
+    pub fn independent_recovery_pending(&self) -> Result<bool> {
+        Ok(match self.attempt()?.execution {
+            Execution::Consumed | Execution::Replaced | Execution::Uncertain => true,
+            Execution::RolledBack => {
+                self.rollback_finalizer()?.stage().ok().flatten()
+                    != Some(RollbackFinalizationStage::Complete)
+            }
+            _ => false,
+        })
+    }
+
+    pub fn rollback_finalizer(&self) -> Result<RollbackFinalizer> {
+        let a = self.consumed_attempt()?;
+        ensure!(
+            a.execution == Execution::RolledBack,
+            "only a resolved rollback can finalize"
+        );
+        Ok(RollbackFinalizer {
+            path: self.attempt_dir()?.join("rollback-finalization.json"),
+            attempt_id: a.receipt.attempt_id.clone(),
+            release_sequence: a.manifest.release_sequence,
+            explicitly_released: a
+                .disconnect
+                .as_ref()
+                .is_some_and(|release| release.verified_at_unix.is_some()),
+        })
     }
 
     pub fn attempt_dir(&self) -> Result<PathBuf> {
@@ -873,6 +988,232 @@ pub(crate) mod tests {
             )
             .unwrap();
         store.execution(Execution::Launching).unwrap();
+    }
+
+    #[test]
+    fn update_interrupted_rollback_remains_pending_for_independent_finalization() {
+        let (root, mut store, peer, executor) = reserved();
+        authorize(&mut store, &peer);
+        store.consume(&executor, 1_900_000_050).unwrap();
+        store.execution(Execution::RolledBack).unwrap();
+        let sequence = store.state.consumed_sequence;
+        let receipt = canonical(&store.attempt().unwrap().receipt).unwrap();
+        drop(store); // Executor died before its selective release / Service restoration.
+
+        let store = Store::open(&root).unwrap();
+        let pending = store.independent_recovery_pending().unwrap();
+        assert_eq!(store.state.consumed_sequence, sequence);
+        assert_eq!(
+            canonical(&store.attempt().unwrap().receipt).unwrap(),
+            receipt
+        );
+        assert!(
+            pending,
+            "RolledBack is not proof that selective finalization completed"
+        );
+        std::fs::create_dir_all(store.attempt_dir().unwrap()).unwrap();
+        let finalizer = store.rollback_finalizer().unwrap();
+        let events = std::cell::RefCell::new(Vec::new());
+        let (settled, restored) = finalizer.finish(
+            false,
+            || {
+                events.borrow_mut().push("AI-held release");
+                Ok(())
+            },
+            || {
+                events.borrow_mut().push("interrupted Service restoration");
+                Err(anyhow::anyhow!("executor died before Service ready"))
+            },
+        );
+        settled.unwrap();
+        assert!(restored.is_err());
+        drop(store);
+        let store = Store::open(&root).unwrap();
+        assert!(store.independent_recovery_pending().unwrap());
+        let (settled, restored) = store.rollback_finalizer().unwrap().finish(
+            false,
+            || panic!("NetworkSettled replay must not stop/release Service again"),
+            || {
+                events.borrow_mut().push("restore Service");
+                Ok(())
+            },
+        );
+        settled.unwrap();
+        restored.unwrap();
+        assert!(!store.independent_recovery_pending().unwrap());
+        assert!(
+            store.pending(),
+            "finalization must not fabricate recovery commit"
+        );
+        assert_eq!(store.state.consumed_sequence, sequence);
+        assert_eq!(
+            canonical(&store.attempt().unwrap().receipt).unwrap(),
+            receipt
+        );
+        assert_eq!(
+            *events.borrow(),
+            [
+                "AI-held release",
+                "interrupted Service restoration",
+                "restore Service"
+            ]
+        );
+        store
+            .rollback_finalizer()
+            .unwrap()
+            .finish(
+                false,
+                || panic!("completed rollback repeats network effects"),
+                || panic!("completed rollback restarts Service"),
+            )
+            .0
+            .unwrap();
+        drop(store);
+        let store = Store::open(&root).unwrap();
+        assert!(!store.independent_recovery_pending().unwrap());
+        drop(store);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn update_rollback_finalization_preserves_verified_explicit_restore() {
+        let (root, mut store, peer, executor) = reserved();
+        authorize(&mut store, &peer);
+        store.consume(&executor, 1_900_000_050).unwrap();
+        store.execution(Execution::RolledBack).unwrap();
+        store
+            .request_disconnect("windows:fixture-owner", &peer, 1_900_000_051)
+            .unwrap();
+        store
+            .verify_disconnect(
+                "windows:fixture-owner",
+                &peer,
+                1_900_000_052,
+                Protection::Unprotected,
+            )
+            .unwrap();
+        std::fs::create_dir_all(store.attempt_dir().unwrap()).unwrap();
+        let (settled, restored) = store.rollback_finalizer().unwrap().finish(
+            false,
+            || panic!("verified Restore cannot replay an automatic AI hold"),
+            || Ok(()),
+        );
+        settled.unwrap();
+        restored.unwrap();
+        assert!(!store.independent_recovery_pending().unwrap());
+        drop(store);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn update_rollback_marker_write_failure_still_restores_service() {
+        let (root, mut store, peer, executor) = reserved();
+        authorize(&mut store, &peer);
+        store.consume(&executor, 1_900_000_050).unwrap();
+        store.execution(Execution::RolledBack).unwrap();
+        let finalizer = store.rollback_finalizer().unwrap();
+        // No attempt directory: deterministic failed marker write after successful release.
+        let restored = std::cell::Cell::new(false);
+        let (settled, restarted) = finalizer.finish(
+            false,
+            || Ok(()),
+            || {
+                restored.set(true);
+                Ok(())
+            },
+        );
+        assert!(settled.is_err());
+        restarted.unwrap();
+        assert!(
+            restored.get(),
+            "failed evidence must not strand Service supervision"
+        );
+        assert!(store.independent_recovery_pending().unwrap());
+        drop(store);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn update_rollback_finalization_keeps_explicit_strict_protection() {
+        let (root, mut store, peer, executor) = reserved();
+        authorize(&mut store, &peer);
+        store.consume(&executor, 1_900_000_050).unwrap();
+        store.execution(Execution::RolledBack).unwrap();
+        std::fs::create_dir_all(store.attempt_dir().unwrap()).unwrap();
+        let (settled, restored) = store.rollback_finalizer().unwrap().finish(
+            true,
+            || panic!("strict rollback releases its block"),
+            || Ok(()),
+        );
+        settled.unwrap();
+        restored.unwrap();
+        assert!(!store.independent_recovery_pending().unwrap());
+        drop(store);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn update_rollback_finalization_rejects_another_attempts_complete_marker() {
+        let (root, mut store, peer, executor) = reserved();
+        authorize(&mut store, &peer);
+        store.consume(&executor, 1_900_000_050).unwrap();
+        store.execution(Execution::RolledBack).unwrap();
+        std::fs::create_dir_all(store.attempt_dir().unwrap()).unwrap();
+        let finalizer = store.rollback_finalizer().unwrap();
+        atomic_write(
+            &finalizer.path,
+            &serde_json::to_vec(&RollbackFinalizationRecord {
+                attempt_id: "another-attempt".into(),
+                release_sequence: finalizer.release_sequence,
+                stage: RollbackFinalizationStage::Complete,
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        assert!(store.independent_recovery_pending().unwrap());
+        let settled = std::cell::Cell::new(false);
+        let (released, restored) = finalizer.finish(
+            false,
+            || {
+                settled.set(true);
+                Ok(())
+            },
+            || Ok(()),
+        );
+        released.unwrap();
+        restored.unwrap();
+        assert!(
+            settled.get(),
+            "foreign completion cannot suppress this attempt's cleanup"
+        );
+        drop(store);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn update_rollback_complete_marker_failure_is_not_a_service_restart_failure() {
+        let (root, mut store, peer, executor) = reserved();
+        authorize(&mut store, &peer);
+        store.consume(&executor, 1_900_000_050).unwrap();
+        store.execution(Execution::RolledBack).unwrap();
+        let dir = store.attempt_dir().unwrap();
+        std::fs::create_dir_all(&dir).unwrap();
+        let finalizer = store.rollback_finalizer().unwrap();
+        let (settled, restored) = finalizer.finish(
+            false,
+            || Ok(()),
+            || {
+                // Remove only this test's marker directory to fail the final bookkeeping write.
+                std::fs::remove_file(&finalizer.path)?;
+                std::fs::remove_dir(&dir)?;
+                Ok(()) // Service readiness succeeded.
+            },
+        );
+        assert!(settled.is_err());
+        restored.unwrap();
+        assert!(store.independent_recovery_pending().unwrap());
+        drop(store);
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
