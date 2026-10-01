@@ -2156,6 +2156,29 @@ class StableXrayRead(unittest.TestCase):
                 )
         self.assertEqual(agent.refusal_installed(refused.exception), {"u:new"})
 
+    def test_a_listing_cli_timeout_still_revokes_from_the_durable_inventory(self) -> None:
+        removed: list[str] = []
+
+        def xray(binary: Path, arguments: list[str]):
+            if arguments[1] == "inbounduser":
+                raise agent.subprocess.TimeoutExpired("xray", 30)
+            if arguments[1] == "rmu":
+                removed.append(arguments[-1])
+                return agent.subprocess.CompletedProcess(
+                    arguments, 0, "Removed 1 user(s) in total.\n", "",
+                )
+            return agent.subprocess.CompletedProcess(arguments, 0, '{"stat": []}', "")
+
+        with patch.object(agent, "xray_start_marker", return_value="boot:1"), \
+             patch.object(agent, "run_xray", side_effect=xray):
+            _, revoked, installed, _, _ = agent.reconcile_and_read_stable(
+                Path("/unused"),
+                {"add_user": "adu", "remove_user": "rmu", "list_users": "inbounduser",
+                 "stats_query": "statsquery"},
+                "127.0.0.1:10085", "tono-vless", [], {"u:revoked"},
+            )
+        self.assertEqual((removed, revoked, installed), (["u:revoked"], 1, set()))
+
     def test_a_restart_during_the_read_reconciles_and_reads_the_new_process_again(self) -> None:
         with patch.object(agent, "xray_start_marker", side_effect=["old", "new", "new", "new"]), \
              patch.object(agent, "installed_clients", side_effect=[set(), set()]), \
