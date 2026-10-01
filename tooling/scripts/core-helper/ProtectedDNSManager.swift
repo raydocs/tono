@@ -248,6 +248,19 @@ final class ProtectedDNSManager {
         servers == [protectedDNSServer]
     }
 
+    /// Helper start, or the idle loop, after the Core is stopped. A snapshot
+    /// is the evidence this helper changed DNS. Restoring it while a Core is
+    /// still running would pull the resolver out from under a live session.
+    /// A stopped Core restores even if a kill switch was wanted: a dead
+    /// listener must not be left as the system resolver. Without a snapshot
+    /// this does not sweep a stranger's loopback DNS (BRICK-M12).
+    static func shouldRecoverDNSAtBoot(
+        coreRunning: Bool,
+        snapshotPresent: Bool
+    ) -> Bool {
+        !coreRunning && snapshotPresent
+    }
+
     /// The same recovery transaction runs against either System Configuration
     /// or controlled I/O. Snapshot removal is part of the transaction, not a
     /// decision a test or caller can make independently of service readback.
@@ -320,9 +333,17 @@ final class ProtectedDNSManager {
                 continue
             }
             // Only loopback is swept. A service the user pointed somewhere of
-            // their own is not ours to rewrite.
+            // their own is not ours to rewrite. When a snapshot names an
+            // owner, another service on exactly 127.0.0.1 is not proof we
+            // set it (BRICK-M12). A snapshotless restore (corrupt snapshot)
+            // still clears loopback: there is no owner to tell them apart.
             guard current == [Self.protectedDNSServer] else { continue }
-            attempt(service == target && !superseded ? snapshot?.servers ?? [] : [], for: service)
+            if snapshot != nil {
+                guard let target, service == target, !superseded else { continue }
+                attempt(snapshot?.servers ?? [], for: service)
+            } else {
+                attempt([], for: service)
+            }
         }
         if let failure {
             throw failure
@@ -1030,6 +1051,28 @@ final class ProtectedDNSManager {
         }
     }
 
+    /// A stopped Core with a snapshot restores DNS, including when a kill
+    /// switch was wanted. A running Core, or no snapshot, does not.
+    static func runBootDNSRecoveryDecisionSelfTest() -> Bool {
+        let restoresStopped = shouldRecoverDNSAtBoot(
+            coreRunning: false,
+            snapshotPresent: true
+        )
+        let skipsLiveCore = !shouldRecoverDNSAtBoot(
+            coreRunning: true,
+            snapshotPresent: true
+        )
+        let skipsForeign = !shouldRecoverDNSAtBoot(
+            coreRunning: false,
+            snapshotPresent: false
+        )
+        let ok = restoresStopped && skipsLiveCore && skipsForeign
+        if !ok {
+            FileHandle.standardError.write(Data("boot DNS recovery decision failed\n".utf8))
+        }
+        return ok
+    }
+
     /// Fault-injected lifecycle regression. No live DNS preferences or root
     /// snapshot are changed; production restoreServices owns every decision.
     static func runRestoreReadFailureSelfTest() -> Bool {
@@ -1060,7 +1103,7 @@ final class ProtectedDNSManager {
         do { try restore() } catch ReadFailure.injected { refused = true } catch {}
         guard refused, !snapshotRemoved,
               settings["Wi-Fi"] == ["9.9.9.9"],
-              settings["Bridge"] == [],
+              settings["Bridge"] == [protectedDNSServer],
               settings["Disabled Ethernet"] == [protectedDNSServer],
               settings["Custom"] == ["8.8.4.4"] else {
             print("DNS restore read-failure regression FAILED: refused=\(refused), snapshotRemoved=\(snapshotRemoved)")
@@ -1068,11 +1111,14 @@ final class ProtectedDNSManager {
         }
         unreadable = false
         do { try restore() } catch { return false }
-        guard snapshotRemoved, settings["Disabled Ethernet"] == [],
-              settings["Wi-Fi"] == ["9.9.9.9"], settings["Custom"] == ["8.8.4.4"] else {
+        guard snapshotRemoved,
+              settings["Disabled Ethernet"] == [protectedDNSServer],
+              settings["Bridge"] == [protectedDNSServer],
+              settings["Wi-Fi"] == ["9.9.9.9"],
+              settings["Custom"] == ["8.8.4.4"] else {
             return false
         }
-        print("DNS restore read-failure regression passed: failure retains snapshot; retry restores all services")
+        print("DNS restore read-failure regression passed: failure retains snapshot; other loopback services stay")
         return true
     }
 
@@ -1227,11 +1273,46 @@ final class ProtectedDNSManager {
             return false
         }
         guard !restored, !removed, archived == "superseded", ownerWrites == 0,
-              settings[owner] == ["9.9.9.9"], settings[other] == [] else {
-            print("DNS superseded-restore regression FAILED: newer DNS was changed or reported restored")
+              settings[owner] == ["9.9.9.9"], settings[other] == [protectedDNSServer] else {
+            print("DNS superseded-restore regression FAILED: newer DNS was changed or a foreign resolver was cleared")
             return false
         }
-        print("DNS superseded-restore regression passed: newer DNS retained, snapshot archived, loopback swept")
+        print("DNS superseded-restore regression passed: newer DNS retained, foreign loopback kept")
+        return true
+    }
+
+    /// A second service left on 127.0.0.1 is not Tono's just because the
+    /// address matches. The snapshot owner is restored; the other service stays.
+    static func runForeignLoopbackKeptSelfTest() -> Bool {
+        let snapshot = Snapshot(service: "Wi-Fi", serviceID: "S1", servers: ["10.0.0.53"])
+        let owner = NetworkService(id: "S1", name: "Wi-Fi")
+        let other = NetworkService(id: "S2", name: "Ethernet")
+        var settings = [owner: [protectedDNSServer], other: [protectedDNSServer]]
+        var removed = false
+        let restored: Bool
+        do {
+            restored = try restoreServices(
+                snapshot: snapshot,
+                services: Set(settings.keys),
+                read: { settings[$0]! },
+                write: { settings[$1] = $0 },
+                removeSnapshot: { removed = true },
+                archiveSnapshot: { _ in }
+            )
+        } catch {
+            print("DNS foreign-loopback regression FAILED: \(error)")
+            return false
+        }
+        guard restored, removed,
+              settings[owner] == ["10.0.0.53"],
+              settings[other] == [protectedDNSServer] else {
+            print(
+                "DNS foreign-loopback regression FAILED: owner=\(settings[owner] ?? []), "
+                    + "other=\(settings[other] ?? [])"
+            )
+            return false
+        }
+        print("DNS foreign-loopback regression passed: only the snapshot owner was rewritten")
         return true
     }
 
@@ -1483,10 +1564,12 @@ final class ProtectedDNSManager {
                 return false
             }
             return runSupersededRestoreSelfTest()
+                && runForeignLoopbackKeptSelfTest()
                 && runSupersededHandoffSelfTest()
                 && runStableIDIOFailureSelfTest()
                 && runSameOwnerReenableSelfTest()
                 && runEnableIdentityFailureSelfTest()
+                && runBootDNSRecoveryDecisionSelfTest()
         } catch {
             return false
         }

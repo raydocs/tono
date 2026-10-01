@@ -71,8 +71,8 @@ impl AuditRecord {
 }
 
 /// Audit events. Tokens, verification codes, controller secrets, and
-/// catalog YAML never appear in any payload; emails are recorded verbatim
-/// (this is a local-only log).
+/// catalog YAML never appear in any payload; emails are recorded verbatim in the private
+/// local audit. The network-log uploader redacts account identifiers before sending segments.
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "kind", rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum AuditEvent {
@@ -118,6 +118,8 @@ pub enum AuditEvent {
     Stage {
         stage: &'static str,
         elapsed_ms: u64,
+        /// Wall time of this completed step. `elapsed_ms` stays cumulative.
+        delay_ms: u64,
     },
     ConnectFail {
         stage: Option<&'static str>,

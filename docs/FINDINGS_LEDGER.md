@@ -129,7 +129,7 @@
 | R3-F3 | macOS `protected-dns.json` 损坏/权限异常时 restore、紧急解除、卸载、启动清理全被阻 | fixed(05c58d5d) | [#307](https://github.com/raydocs/tono/pull/307) | 中·推导 | 审查要求：DNS 恢复失败时紧急出口不得顺带拆 PF（M2） |
 | R3-F4 | macOS status() 把「快照有效但服务不可读」报成无快照，App 不再调用 restore | fixed(be1c75d2) | [#303](https://github.com/raydocs/tono/pull/303) | 低·已确认 | helper 契约版本级联（4.6.0 起） |
 | R3-O1 | Windows 恢复证明通过后删快照失败即拒绝拆 WFP，重试同样失败（ACL/AV 锁文件） | open | 待开 | 低·推导 | 观察项，未核实 |
-| R3-O2 | Windows 外层超时丢弃 restore future 时自写窗口提前关闭，自写通知被当外部变化 | open | 待开 | 低·推导 | 观察项；影响为多一次网络事件 |
+| R3-O2 | Windows 外层超时丢弃 restore future 时自写窗口提前关闭，自写通知被当外部变化 | in-PR | [#841](https://github.com/raydocs/tono/pull/841) | 低·推导 | 注册表写入在阻塞线程上另持一把自写窗口，直到写入返回；60 秒年龄上限仍会重新发布。异步调用方自己的 guard 超时仍会放下 |
 | R3-O3 | 无快照时把静态 DNS 改为 DHCP 的孤儿修复 | accepted-design | — | 低 | 有意取舍 |
 | R3-O4 | macOS `--emergency-disarm` 不先 bootout daemon，与在线 daemon 双写 | open | 待开 | 低·推导 | 观察项；操作员手动路径 |
 | R3-O5 | macOS 按名字取第一个网络服务，多 Network Location 同名时可能写错服务 | open | 待开 | 低·实机 | 观察项 |
@@ -269,7 +269,7 @@
 | H8-F1 | JPY 等零小数货币换算后存储值小 100 倍 | fixed(6cfa4d9e) | [#391](https://github.com/raydocs/tono/issues/391)，[#394](https://github.com/raydocs/tono/pull/394) | 中·推导 | — |
 | H8-F2 | 已冲销的账本行可改变归属主体 | fixed(6cfa4d9e) | [#398](https://github.com/raydocs/tono/issues/398)，[#400](https://github.com/raydocs/tono/pull/400) | 中·推导 | 关账计算与写入之间的窗口仍在；UTC 月归属见 #191 |
 | H8-F3 | v1 home-lines 退役绕过使用中/解绑/revision 守卫 | fixed(6cfa4d9e) | [#397](https://github.com/raydocs/tono/issues/397)，[#399](https://github.com/raydocs/tono/pull/399) | 中·推导 | 退役改为拒绝，需先手动解绑 |
-| H8-F4 | telemetry 窗口重复计入活动时长；字节数从未写入 | open | [#403](https://github.com/raydocs/tono/issues/403)，[#404](https://github.com/raydocs/tono/pull/404) | 低·推导 | migration 0082；字节来源缺失，客户端显示 pending；#404 已合入（只修重复计时），真实字节来源留在 #403，尚无修复 PR |
+| H8-F4 | telemetry 窗口重复计入活动时长；字节数从未写入 | in-PR | [#403](https://github.com/raydocs/tono/issues/403)，[#404](https://github.com/raydocs/tono/pull/404)，[#707](https://github.com/raydocs/tono/pull/707) | 低·推导 | migration 0082；#404 已合入（只修重复计时）。#707 服务端 flatten 写入 `bytes_up`/`bytes_down`，活动时长只在窗口最后一个重叠小时累加。客户端仍须上报这些字段，否则控制台继续 pending |
 | H8-F5 | 账号池分配存在并发重复分配 | fixed(6cfa4d9e) | [#401](https://github.com/raydocs/tono/issues/401)，[#402](https://github.com/raydocs/tono/pull/402) | 中·推导 | — |
 | H8-F6 | 影响客户的写操作缺少审计记录 | fixed(6cfa4d9e) | [#405](https://github.com/raydocs/tono/issues/405)，[#406](https://github.com/raydocs/tono/pull/406) | 低·推导 | token-admin 路由移到 src/ops/token-admin.ts |
 | H13-F5 | Worker 不可达时 exit-agent 没有 roster 回退 | fixed(85ba3945) | [#463](https://github.com/raydocs/tono/issues/463)，[#464](https://github.com/raydocs/tono/pull/464) | 中·推导 | 与 #375/#384/#389 冲突，解决步骤写在 PR |

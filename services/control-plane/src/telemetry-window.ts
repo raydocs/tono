@@ -10,7 +10,7 @@ const TELEMETRY_MAX_REPORTED_AT_MS = DIAGNOSTICS_MAX_REPORTED_AT_MS;
 
 const telemetryWindowKeys = [
   'schemaVersion', 'kind', 'windowStartMs', 'windowEndMs',
-  'appVersion', 'osVersion', 'osArch',
+  'appVersion', 'osVersion', 'osArch', 'appBuild', 'gitCommit', 'coreVersion', 'channel',
   'uiState', 'accountState', 'selectedServer', 'catalogRevision',
   'killSwitchMode', 'killSwitchWanted', 'killSwitchLive',
   'dnsEnabled', 'exitDelayMs', 'tcpDelayMs', 'exitDelayAtMs', 'tcpDelayAtMs',
@@ -61,6 +61,13 @@ export function canonicalTelemetryWindow(value: unknown) {
   const appVersion = str(source.appVersion, 'appVersion', 1, 40);
   const osVersion = str(source.osVersion, 'osVersion', 1, 80);
   const osArch = str(source.osArch ?? '', 'osArch', 0, 32);
+  const appBuild = str(source.appBuild ?? '', 'appBuild', 0, 40);
+  const gitCommit = str(source.gitCommit ?? '', 'gitCommit', 0, 40);
+  const coreVersion = str(source.coreVersion ?? '', 'coreVersion', 0, 40);
+  const channel = str(source.channel ?? '', 'channel', 0, 16);
+  if (channel && channel !== 'release' && channel !== 'beta') {
+    throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid channel');
+  }
   const uiState = str(source.uiState ?? '', 'uiState', 0, 40);
   const accountState = str(source.accountState ?? '', 'accountState', 0, 40);
   if (typeof source.eventCount !== 'number' || !Number.isSafeInteger(source.eventCount)
@@ -125,6 +132,10 @@ export function canonicalTelemetryWindow(value: unknown) {
     appVersion,
     osVersion,
     osArch,
+    ...(appBuild ? { appBuild } : {}),
+    ...(gitCommit ? { gitCommit } : {}),
+    ...(coreVersion ? { coreVersion } : {}),
+    ...(channel ? { channel } : {}),
     uiState,
     accountState,
     eventCount: source.eventCount,

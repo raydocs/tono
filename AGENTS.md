@@ -17,9 +17,8 @@ ship gate). Every PR names one of them; during the G4 freeze only SHIP_PLAN §2 
 
 These conditions are the approval: when they hold, act; do not stop to ask.
 
-**1. Merge** with `gh pr merge N --merge` when all hold:
-- CI is green on the exact head SHA for every tree the PR touches (workflow per tree, docs-only, and uncovered
-  paths needing dual_cross_family instead: [docs/BUILD_AND_TEST.md](docs/BUILD_AND_TEST.md#which-workflow-must-be-green-for-a-pr)). Dispatch a missing run; skipped is not green.
+**1. Merge** through the merge queue. Auto-merge is on for `main`. The only required status check is `ci-gate`. Merges use merge commits. Enable auto-merge with `gh pr merge --auto --merge` on a ready, non-draft PR when the conditions below hold. Do not enable it on a UI PR or a PR that needs real-hardware testing. On a conflict or a helper-version collision, rebase onto current `main` and set `HelperProtocolVersion.current` (`apps/macos/Tono/Core/HelperProtocolVersion.swift`) to main's value plus `0.0.1`.
+- `ci-gate` is green on the exact head SHA. It calls the path-filtered workflows and passes when each relevant job succeeded or was skipped because its paths were not touched. A missing `ci-gate` run is not green; dispatch `ci-gate`. Do not also dispatch those workflows on the pull request (they would run a second time). Docs-only and uncovered paths: [docs/BUILD_AND_TEST.md](docs/BUILD_AND_TEST.md#which-workflow-must-be-green-for-a-pr).
 - The jev-route review depth for the diff passed: from an up-to-date `origin/main` checkout (routing policy is
   main's, never the PR's) run `node ~/.agents/skills/jev-route/scripts/route.mjs review --git origin/<baseRefName>...<headRefOid>`,
   run every slot it names (cross-vendor for protected paths: global list plus [.jev-route.json](.jev-route.json); a PR changing it gets
@@ -46,7 +45,7 @@ value for a Tono-controlled secret the task names for creation or rotation (coor
 never fabricate third-party credentials or print or commit a secret. Rollback: `npx wrangler rollback` per Worker.
 
 Customer channel publish only after the owner has written `[x]` for G1, G2 and G3 in SHIP_PLAN §6
-(for 0.0.74 only: G1 and G2; G3 moves to 0.0.75 by owner decision 2026-09-26, [DECISIONS](docs/DECISIONS.md)) with evidence links; agents never edit those lines. The evidence names the candidate (source SHA, package
+(for 0.0.74 only: G1 and G2; G3 moves to 0.0.75 by owner decision 2026-09-26, [DECISIONS](docs/decisions/019-2026-09-26-release-0074-defers-g3.md)) with evidence links; agents never edit those lines. The evidence names the candidate (source SHA, package
 hashes); publish only that candidate. Any other SHA or version needs new owner evidence, except rebuilding
 a published good source as a higher build for rollback. Then G4 is the agent's, in SHIP_PLAN §5 order
 (G4.2 on the owner's devices first; G4.3 needs the release row's `verifiedAt`); steps, both Windows
@@ -54,7 +53,7 @@ environment approvals, the Mac Studio-only proven macOS path and rollback: [docs
 
 **3. Product decisions that used to wait for the owner:** choose the stricter, non-leaking option (append
 over replace, default off, keep hy2 stripped, never remove a node or disable a user unless the task says so;
-a credential suspected compromised is disabled at once), record it in [docs/DECISIONS.md](docs/DECISIONS.md) as provisional, continue.
+a credential suspected compromised is disabled at once), record it as a new file under [docs/decisions/](docs/decisions/README.md) with status `provisional`, and continue. Read them with `node tooling/scripts/records.mjs decisions`. Do not append to [docs/DECISIONS.md](docs/DECISIONS.md); that file is the index.
 
 ## Verification
 
@@ -93,3 +92,24 @@ Keep SESSION_STATE.md short (target < 80 lines). Only these sections:
 After compact, subagent start, or session resume: read SESSION_STATE.md first.
 Do not reconstruct tool results from chat history.
 Do not dump full logs, full diffs, or file contents into SESSION_STATE.md.
+
+## Cursor Cloud specific instructions
+
+Linux Cloud Agents run the checks below. `xcodebuild`, Swift, Windows service
+`cargo`, Tauri, and Core packaging stay on hosted `macos-26` and `windows-2025`
+CI ([BUILD_AND_TEST](docs/BUILD_AND_TEST.md)).
+
+- Node 24 matches services and Windows frontend CI. `/exec-daemon/node` is Node 22
+  and precedes nvm; a login shell prepends `~/.nvm/versions/node/v24.*/bin`.
+- `npm ci` in `services/control-plane` and `services/ops-console`. Ops fixtures:
+  `npm run dev:fixtures` → `http://127.0.0.1:5174/ops2/`. Playwright screenshot
+  baselines are macOS; on Linux pass `--ignore-snapshots`.
+- Windows UI only: `pnpm@11.26.0` (`packageManager`) and
+  `pnpm install --frozen-lockfile` in `apps/windows/app`, then `pnpm web:dev`
+  on port 3000. `pnpm dev` starts Tauri and does not run here. The page loads
+  a Tono shell; Tauri `invoke` is absent, so it stays on the splash.
+- Local D1, from `services/control-plane`: `npx wrangler d1 migrations apply DB --local`.
+  Do not deploy or write production D1.
+- Python 3.12 stdlib: exit-agent, home-agent, `ops-panel/tests`. Ruby 3.2:
+  `ruby tooling/scripts/tests/publish-managed-catalog.test.rb`.
+

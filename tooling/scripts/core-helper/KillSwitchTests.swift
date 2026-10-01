@@ -773,10 +773,40 @@ extension KillSwitchManager {
             released && releaseSteps == ["placeholder", "flush", "query", "intent", "hosts", "main", "reference"]
         )
 
+        // 11b. A rule file that cannot be rewritten (disk full, directory
+        //      unwritable) must not block the release either: the anchor is
+        //      still flushed and the intent still removed, as for the hosts
+        //      pins above. The displaced-main restore is skipped — a legacy
+        //      /etc/pf.conf would `load anchor from` the stale rules the
+        //      release could not clear — so "main" must not run. Recorded
+        //      effects only; nothing live is touched.
+        var unwritableReleaseSteps: [String] = []
+        let unwritableReleased = (try? releaseSequence(
+            writePlaceholder: {
+                unwritableReleaseSteps.append("placeholder")
+                throw HelperFailure.system("Could not commit a root-owned file.")
+            },
+            flushAnchor: {
+                unwritableReleaseSteps.append("flush")
+                return HelperCommandResult(status: 0, output: Data())
+            },
+            anchorStillActive: { unwritableReleaseSteps.append("query"); return false },
+            removeIntent: { unwritableReleaseSteps.append("intent") },
+            removeHostsPins: { unwritableReleaseSteps.append("hosts") },
+            restoreDisplacedMain: { unwritableReleaseSteps.append("main") },
+            releaseEnableReference: { unwritableReleaseSteps.append("reference") }
+        )) != nil
+        check(
+            "release-survives-unwritable-placeholder",
+            unwritableReleased
+                && unwritableReleaseSteps == ["placeholder", "flush", "query", "intent", "hosts", "reference"]
+        )
+
         // 12. A release puts back the main ruleset the emergency block
         //     displaced, only by reloading /etc/pf.conf and only when that
-        //     file attaches Tono's anchor from Tono's rule file (BRICK-M6).
-        //     Fixture paths; the reload is recorded, no pfctl runs.
+        //     file declares Tono's anchor (BRICK-M6, BRICK-M9). The on-disk
+        //     hook does not load the rule file. Fixture paths; the reload is
+        //     recorded, no pfctl runs.
         let displacedRoot = FileManager.default.temporaryDirectory
             .appendingPathComponent("tono-displaced-main-\(getpid())").path
         defer { try? FileManager.default.removeItem(atPath: displacedRoot) }
@@ -1248,14 +1278,14 @@ extension KillSwitchManager {
                     "self-test: Continuity passes missing or keeping state with a tunnel\n".utf8
                 ))
             }
-            // Every daemon start, a boot included, restores the saved state
-            // before any TUN exists; the status() heal and the supervisor
-            // repair reinstall it the same way. A saved utun that is not up
-            // must restore the no-tunnel form: no Continuity, mDNS, LAN,
+            // The supervisor reinstalls saved state before any TUN exists,
+            // and only while the Core is running. Boot, launch and status()
+            // do not. A saved utun that is not up must render the no-tunnel
+            // form: no Continuity, mDNS, LAN,
             // link-local, DHCP or NDP pass and no rule for that utun. A utun
-            // that is up (a helper restart mid-session) is kept. The three
-            // reinstall paths need root and pfctl, so this checks the
-            // `restorableState` filter they all render through.
+            // that is up (a helper restart mid-session) is kept. The
+            // reinstall needs root and pfctl, so this checks the
+            // `restorableState` filter it renders through.
             let bootRestoreRules = renderRules(
                 state: restorableState(inactiveState, interfaceExists: { _ in false }),
                 allowedUID: 501
@@ -1361,6 +1391,66 @@ extension KillSwitchManager {
                     + "\(deadlineElapsed) s, child gone \(overranChildGone))\n"
                 FileHandle.standardError.write(Data(failure.utf8))
             }
+            // R643-F1: an unrecorded PF enable token survives a hold whose
+            // listing gives no answer. Only a full listing proves it gone;
+            // a `DIOCGETSTARTERS` warning (exit 0) or a denied open (exit 1)
+            // must throw instead of reading as "not listed", or the hold
+            // clears the only handle to a reference that may still be held.
+            let pendingToken = PFEnableReference(token: "2222222222222222222", boot: "test-boot")
+            let listedRow = "4242     pfctl                        2222222222222222222      0 days 00:00:40\n"
+            let tokensHeader = "TOKENS:\n"
+                + "PID      Process Name                 TOKEN                    TIMESTAMP\n"
+            func heldWithStagedListing(status: Int32, output: String) throws -> Bool {
+                try unrecordedPFEnableReferenceHeld(
+                    pendingToken,
+                    deadline: 5,
+                    listReferences: { _ in .init(status: status, output: Data(output.utf8)) }
+                )
+            }
+            let listedWhenPresent = (try? heldWithStagedListing(
+                status: 0, output: tokensHeader + listedRow
+            )) == true
+            let clearedWhenAbsent = (try? heldWithStagedListing(
+                status: 0, output: "No pf starter references held\n"
+            )) == false
+            let warningThrows = (try? heldWithStagedListing(
+                status: 0, output: "pfctl: DIOCGETSTARTERS: Operation not permitted\n"
+            )) == nil
+            let deniedThrows = (try? heldWithStagedListing(
+                status: 1, output: "pfctl: /dev/pf: Permission denied\n"
+            )) == nil
+            let unansweredListingKeepsUnrecordedToken =
+                listedWhenPresent && clearedWhenAbsent && warningThrows && deniedThrows
+            if !unansweredListingKeepsUnrecordedToken {
+                let failure = "self-test: unanswered PF listing did not keep the unrecorded token\n"
+                FileHandle.standardError.write(Data(failure.utf8))
+            }
+            let sampleMain = """
+            scrub-anchor "com.apple/*"
+            anchor "com.apple/*"
+            load anchor "com.apple" from "/etc/pf.anchors/com.apple"
+
+            """
+            let diskHook = try hookedMainConfiguration(sampleMain)
+            let anchorLine = "anchor \"\(killSwitchAnchor)\"\n"
+            let loadLine = "load anchor \"\(killSwitchAnchor)\" from \"\(killSwitchPFPath)\""
+            let oldHook = diskHook.replacingOccurrences(
+                of: anchorLine,
+                with: anchorLine + loadLine + "\n"
+            )
+            let migrated = try hookedMainConfiguration(oldHook)
+            let kernel = try kernelMainConfiguration(disk: oldHook, childPath: killSwitchPFPath)
+            let bootAnchorHolds = !mainConfigurationLoadsKillSwitchRules(diskHook)
+                && !mainConfigurationLoadsKillSwitchRules(migrated)
+                && mainConfigurationLoadsKillSwitchRules(oldHook)
+                && kernel.contains(loadLine)
+                && kernel.components(separatedBy: loadLine).count == 2
+                && (try? kernelMainConfiguration(disk: diskHook, childPath: "relative")) == nil
+            let watchdogReleases = !watchdogShouldRestoreNetwork(
+                consecutiveCoreDownChecks: coreDownRestoreThreshold - 1
+            ) && watchdogShouldRestoreNetwork(
+                consecutiveCoreDownChecks: coreDownRestoreThreshold
+            )
             return ruleShapesHold
                 && bundleShapesHold
                 && bundleOffWithoutTunnel
@@ -1380,9 +1470,60 @@ extension KillSwitchManager {
                 && acceptedUDPProxyTarget
                 && rejectedQuicProxyTarget
                 && commandDeadlineHolds
+                && unansweredListingKeepsUnrecordedToken
+                && bootAnchorHolds
+                && watchdogReleases
+                && failureRecoveryReleasesNetwork(strictKillSwitchEnabled: false)
+                && !failureRecoveryReleasesNetwork(strictKillSwitchEnabled: true)
+                && shouldReinstallKillSwitch(coreRunning: true)
+                && !shouldReinstallKillSwitch(coreRunning: false)
+                && !shouldReleaseLeftoverAtLaunch(coreRunning: true, stateFilePresent: true)
+                && shouldReleaseLeftoverAtLaunch(coreRunning: false, stateFilePresent: true)
+                && !shouldReleaseLeftoverAtLaunch(coreRunning: false, stateFilePresent: false)
+                && !SocketServer.shouldRestoreSavedDNSAtLaunch(coreRunning: true, snapshotPresent: true)
+                && SocketServer.shouldRestoreSavedDNSAtLaunch(coreRunning: false, snapshotPresent: true)
+                && !SocketServer.shouldRestoreSavedDNSAtLaunch(coreRunning: false, snapshotPresent: false)
         } catch {
             return false
         }
+    }
+
+    /// A failed arm or sleep barrier must not flush a ruleset pfctl never
+    /// replaced. Only a load that was accepted, or that never answered, may
+    /// have committed.
+    static func runFailedCommitReleaseSelfTest() -> Bool {
+        !failedCommitReleasesInstalledBlock(load: .notIssued, strictKillSwitchEnabled: false)
+            && !failedCommitReleasesInstalledBlock(load: .rejected, strictKillSwitchEnabled: false)
+            && failedCommitReleasesInstalledBlock(
+                load: .acceptedOrUnknown,
+                strictKillSwitchEnabled: false
+            )
+            && !failedCommitReleasesInstalledBlock(
+                load: .acceptedOrUnknown,
+                strictKillSwitchEnabled: true
+            )
+    }
+
+    /// `/killswitch/health` disconnects the app without a release when `live`
+    /// is false. An unread sample and a down-read that the next read does not
+    /// confirm must not become that false.
+    static func runUnprovenHealthSelfTest() -> Bool {
+        struct Unreadable: Error {}
+        var confirmed = false
+        guard agreedFiltering(first: .success(true), confirmDown: {
+            confirmed = true
+            return false
+        }) == true, !confirmed else { return false }
+        guard agreedFiltering(first: .success(false), confirmDown: { false }) == false else {
+            return false
+        }
+        guard agreedFiltering(first: .success(false), confirmDown: { true }) == true else {
+            return false
+        }
+        guard agreedFiltering(first: .failure(Unreadable()), confirmDown: { false }) == nil else {
+            return false
+        }
+        return agreedFiltering(first: .success(false), confirmDown: { throw Unreadable() }) == nil
     }
 
     static func runNetworkSelfTest() -> Bool {

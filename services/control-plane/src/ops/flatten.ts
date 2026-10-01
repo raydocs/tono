@@ -20,6 +20,10 @@ export const FLATTEN_KINDS = [
   'disconnectOk',
   'releaseFail',
   'syncFail',
+  'signInFail',
+  'appCrash',
+  'networkRestore',
+  'killSwitchFail',
 ] as const;
 
 export type FlattenKind = (typeof FLATTEN_KINDS)[number];
@@ -69,7 +73,7 @@ const FLATTEN_WINDOW_SQL = `INSERT OR IGNORE INTO connection_events(
   kind, node, stage, outcome, code, error, action, reason, from_node, to_node,
   elapsed_ms, delay_ms, exit_delay_ms, tcp_delay_ms, catalog_revision,
   edge_asn, edge_as_org, edge_country, edge_region, edge_via_exit, attempt_id,
-  transport
+  transport, bytes_up, bytes_down, app_build, git_commit, core_version, channel
 )
 SELECT
   ? || ':' || ev.key,
@@ -116,7 +120,13 @@ SELECT
     WHEN 'tcp' THEN 'tcp'
     WHEN 'hy2' THEN 'hy2'
     ELSE NULL
-  END
+  END,
+  CAST(json_extract(ev.value, '$.bytesUp') AS INTEGER),
+  CAST(json_extract(ev.value, '$.bytesDown') AS INTEGER),
+  json_extract(?, '$.appBuild'),
+  json_extract(?, '$.gitCommit'),
+  json_extract(?, '$.coreVersion'),
+  json_extract(?, '$.channel')
 FROM json_each(?, '$.events') ev
 WHERE json_extract(ev.value, '$.kind') IN (${FLATTEN_KIND_SQL})`;
 
@@ -181,6 +191,10 @@ export function flattenWindowStatement(
     edge.edge_country,
     edge.edge_region,
     edge.edge_via_exit,
+    payload,
+    payload,
+    payload,
+    payload,
     payload,
   );
 }
