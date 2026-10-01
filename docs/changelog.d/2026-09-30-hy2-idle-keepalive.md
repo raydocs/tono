@@ -11,5 +11,6 @@
 - 2026-09-30 续记：`formatTonoActionError` 会在 `TONO_CONNECT_*` 的译文后附上支持码。空闲用例的期望改成 `…hy2Idle (TONO_CONNECT_HY2_IDLE)`。不改格式化本身，也不改「不建议换线路」的断言。
 - 2026-09-30 续记：`connect_bench` 在合并提交上把 `vless/clash/dns_ms` 记成 `None`（限额 30）。一次约 1ms 的 UDP `connection refused` 会让该样本缺失，五次里缺一次中位数就是 `None`，`--check` 仍把 `None` 和超限判失败。`baseline.json` 的天花板没有提高。回环 DNS 线程吞掉 Linux 在已关闭客户端上送回的 ICMP，短失败在 1 秒内重试；记入的毫秒是成功那一次自己的往返，慢失败不重试。
 - 2026-10-01 续记：线性变基到当时的 `main`。`dns_query` 仍带名字参数。fake-ip、缓存命中和 DoH 复用沿用 main 的天花板，`None` 仍判失败。
+- 2026-10-01 续记：`connect_bench` 上把每次约 1ms 的 DoH 失败也重试了 1 秒。无指纹的 `tono` 配置因此反复拨 Reality，伪装接受线程被占住，后面的 `tono-fixed` 和 sing-box VLESS 样本超时，`cold_ms` / `dns_ms` 变成 `None`。现在只重试直连 UDP `127.0.0.2:15353` 的 `connection refused`。出口 DoH 失败一次即记缺失。伪装握手超过 1 秒就放开接受线程，失败的尝试仍计入次数，指纹重试风暴仍会顶过握手天花板。限额不变。
 - 候选/发布：仅源码，无新候选。
 - 剩余限制：钉住的 mihomo 仍是内部 10 秒保活 / 30 秒空闲，没有 YAML 旋钮。Windows 产品 JSON 今天仍不发出 HY2；后处理要等 DER 钉那条合入后才作用到字节上。需要住宅 NAT 实机才能证明 5 秒是否够。

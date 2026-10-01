@@ -209,6 +209,12 @@ class Camo:
             accepted = time.perf_counter()
             time.sleep(CAMO_DELAY_S)
             try:
+                # One stalled ClientHello must not pin this thread. Later VLESS
+                # samples share the listener; a blocked accept turns their
+                # curls and DoH into timeouts and a None median. A failed
+                # attempt still counts, so a fingerprint retry storm stays
+                # above the handshake ceiling.
+                raw.settimeout(1.0)
                 tls = self._ctx.wrap_socket(raw, server_side=True)
                 tls.recv(8)
                 tls.close()
@@ -320,29 +326,44 @@ def dns_query_once(controller: int, name: str) -> tuple[bool, float, str]:
         detail = str(exc)
         if hasattr(exc, "read"):
             try:
-                detail = exc.read().decode("utf-8", "replace")[:180]
+                body = exc.read().decode("utf-8", "replace")
+                detail = body if len(body) <= 240 else body[-240:]
             except Exception:
                 pass
         return False, (time.perf_counter() - started) * 1000, detail
     return ok, (time.perf_counter() - started) * 1000, detail
 
 
+def retryable_direct_udp_miss(detail: str, elapsed_ms: float) -> bool:
+    """Only a fast ICMP refusal from the direct UDP resolver is retried.
+
+    A DoH miss (`https://…/dns-query`) is final. Retrying it re-dials Reality
+    on the fingerprint-less profile and stalls the shared camouflage, so the
+    next VLESS samples time out and the median becomes None.
+    """
+    if elapsed_ms >= FAST_DNS_MISS_MS:
+        return False
+    if "dns-query" in detail or "https://" in detail:
+        return False
+    return "connection refused" in detail and "15353" in detail
+
+
 def accept_dns_sample(pull, now, sleep) -> tuple[bool, float]:
     """Score one DNS sample.
 
-    `pull` returns `(ok, elapsed_ms)` for a single round trip. A fast miss is
-    retried until `DNS_MISS_BUDGET_S`. The number kept on success is that
-    attempt's own elapsed time, so a 0.8ms answer stays 0.8ms. A miss that
-    already took >= FAST_DNS_MISS_MS is final. Never-recovered misses stay
-    failures (`ok` false); callers must not treat that as a passing median.
+    `pull` returns `(ok, elapsed_ms, retry)`. A retryable fast miss is repeated
+    until `DNS_MISS_BUDGET_S`. The number kept on success is that attempt's own
+    elapsed time, so a 0.8ms answer stays 0.8ms. Any other miss is final.
+    Never-recovered misses stay failures; callers must not treat that as a
+    passing median.
     """
     deadline = now() + DNS_MISS_BUDGET_S
     elapsed = 0.0
     while True:
-        ok, elapsed = pull()
+        ok, elapsed, retry = pull()
         if ok:
             return True, elapsed
-        if elapsed >= FAST_DNS_MISS_MS or now() >= deadline:
+        if not retry or elapsed >= FAST_DNS_MISS_MS or now() >= deadline:
             return False, elapsed
         sleep(0.02)
 
@@ -368,21 +389,35 @@ def _assert_dns_sample_policy() -> None:
 
         return pull
 
-    ok, elapsed = accept_dns_sample(scripted([(False, 0.4), (True, 0.8)]), now, sleep)
+    ok, elapsed = accept_dns_sample(scripted([(False, 0.4, True), (True, 0.8, False)]), now, sleep)
     if not ok or elapsed != 0.8:
         raise SystemExit("dns sample policy dropped a recovered answer")
     clock["t"] = 0.0
-    ok, elapsed = accept_dns_sample(scripted([(True, 250.0)]), now, sleep)
+    ok, elapsed = accept_dns_sample(scripted([(True, 250.0, False)]), now, sleep)
     if not ok or elapsed != 250.0:
         raise SystemExit("dns sample policy hid a slow answer")
     clock["t"] = 0.0
-    ok, _elapsed = accept_dns_sample(scripted([(False, 0.5)] * 80), now, sleep)
+    ok, _elapsed = accept_dns_sample(scripted([(False, 0.5, True)] * 80), now, sleep)
     if ok:
         raise SystemExit("dns sample policy treated a miss as success")
     clock["t"] = 0.0
-    ok, _elapsed = accept_dns_sample(scripted([(False, 150.0), (True, 0.8)]), now, sleep)
+    ok, _elapsed = accept_dns_sample(scripted([(False, 150.0, True), (True, 0.8, False)]), now, sleep)
     if ok:
         raise SystemExit("dns sample policy retried a slow miss")
+    clock["t"] = 0.0
+    ok, _elapsed = accept_dns_sample(
+        scripted([(False, 0.8, False), (True, 0.8, False)]), now, sleep
+    )
+    if ok:
+        raise SystemExit("dns sample policy retried a DoH miss")
+    if retryable_direct_udp_miss(
+        'Get "https://127.0.0.2:18443/dns-query?dns=abc": EOF', 0.8
+    ):
+        raise SystemExit("dns sample policy would re-dial DoH")
+    if not retryable_direct_udp_miss(
+        "read udp 127.0.0.1:1->127.0.0.2:15353: read: connection refused", 0.8
+    ):
+        raise SystemExit("dns sample policy dropped a direct UDP refusal")
     if not exceeds_limit(None, 30) or exceeds_limit(0.8, 30) or exceeds_limit(30, 30):
         raise SystemExit("dns ceiling treats a miss as success or moves the limit")
 
@@ -393,7 +428,7 @@ def dns_query(controller: int, name: str) -> tuple[bool, float]:
     def pull():
         ok, elapsed, text = dns_query_once(controller, name)
         detail["text"] = text
-        return ok, elapsed
+        return ok, elapsed, retryable_direct_udp_miss(text, elapsed)
 
     ok, elapsed = accept_dns_sample(pull, time.perf_counter, time.sleep)
     if not ok:
