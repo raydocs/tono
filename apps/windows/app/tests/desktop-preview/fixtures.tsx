@@ -27,6 +27,7 @@ const status: TonoStatus = {
       ? 'protectedOffline'
       : location.hash.includes('servers') ||
           scenario === 'service' ||
+          scenario === 'idle' ||
           scenario === 'update-unprotected'
         ? 'notConnected'
         : 'connected',
@@ -88,7 +89,8 @@ export const tonoDevices = async () => [
 ]
 export const tonoRevokeDevice = async () => {}
 export const tonoSignOut = async () => {}
-export const tonoEncryptedDnsOverrides = async () => false
+export const tonoEncryptedDnsOverrides = async () =>
+  params.get('dns') === 'encrypted'
 export const openWindowsDnsSettings = async () => {}
 export const useUpdate = () => ({
   updateInfo: { version: '0.0.73', manifestSha256: 'a'.repeat(64) },
@@ -293,16 +295,31 @@ export const tonoCheckTerminalEnv = async () => ({
   canAutoClear: false,
 })
 export const tonoClearTerminalProxyEnv = async () => {}
-export const tonoConnectProgress = async () => ({
-  steps: [
-    { key: 'verifyingTraffic', label: '', state: 'failed', elapsedMs: 8000 },
-  ],
-  totalElapsedMs: 9100,
-  failedStage: 'verifyingTraffic',
-  error: 'TONO_NODE_OR_CORE_UNREACHABLE: tunnel probe timed out',
-  retryAttempt: 1,
-  nextRetryAtMs: scenario === 'recovery' ? Date.now() + 15_000 : null,
-})
+export const tonoConnectProgress = async () =>
+  scenario === 'idle'
+    ? {
+        steps: [],
+        totalElapsedMs: null,
+        failedStage: null,
+        error: null,
+        retryAttempt: 0,
+        nextRetryAtMs: null,
+      }
+    : {
+        steps: [
+          {
+            key: 'verifyingTraffic',
+            label: '',
+            state: 'failed',
+            elapsedMs: 8000,
+          },
+        ],
+        totalElapsedMs: 9100,
+        failedStage: 'verifyingTraffic',
+        error: 'TONO_NODE_OR_CORE_UNREACHABLE: tunnel probe timed out',
+        retryAttempt: 1,
+        nextRetryAtMs: scenario === 'recovery' ? Date.now() + 15_000 : null,
+      }
 const connections = [
   {
     id: 'cloud',

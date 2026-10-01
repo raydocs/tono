@@ -1098,6 +1098,7 @@ export interface TranslationResources {
           ready: string
           refreshingCatalog: string
           serverPool: string
+          sessionTotal: string
           telemetryFailed: string
           trafficRouted: string
           verifiedCatalog: string
