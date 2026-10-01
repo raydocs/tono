@@ -31,7 +31,7 @@ final class DiagnosticsLogUploadBoundaryTests: XCTestCase {
         try Data("{\"a\":1}\n".utf8).write(to: log)
         let gate = UploadGate()
         let uploader = DiagnosticsLogUploader(auditLogURL: log, isEnabled: { true }) {
-            _, _, _, _, _, _ in await gate.upload()
+            _, _, _, lines, _, _ in if lines > 0 { await gate.upload() }
         }
         let first = Task { await uploader.sweep() }
         await gate.waitUntilEntered()
@@ -51,7 +51,7 @@ final class DiagnosticsLogUploadBoundaryTests: XCTestCase {
         let gate = UploadGate()
         let uploader = DiagnosticsLogUploader(
             auditLogURL: log, isEnabled: { true },
-            upload: { _, _, _, _, _, _ in await gate.upload() }
+            upload: { _, _, _, lines, _, _ in if lines > 0 { await gate.upload() } }
         )
         let pending = Task { await uploader.sweep() }
         await gate.waitUntilEntered()

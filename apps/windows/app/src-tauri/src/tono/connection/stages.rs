@@ -28,7 +28,7 @@ use super::monitor::{
 use super::probes::{verify_fake_ip, verify_post_lock};
 use super::status::set_stage;
 use super::direct::{CapturedTrafficPolicy, WINDOWS_OPTIONAL_DIRECT_ENABLED, spawn_optional_direct_after_connected};
-use super::platform::detect_physical_interface;
+use super::platform::{detect_physical_interface, wait_for_tun_route_ready};
 use super::reconnect::active_runtime_resume_status;
 use super::{failure::StageFailure, transaction::ConnectTransaction};
 use crate::{
@@ -275,6 +275,14 @@ pub(super) async fn run_stages(
         .await?;
     controller_ready.map_err(StageFailure::error)?;
     lock_ready.map_err(StageFailure::error)?;
+
+    // The Service can resolve and permit the virtual adapter as soon as its alias exists, while
+    // Windows is still bringing it up and the core has not installed the protected routes. Keep
+    // the DNS snapshot unchanged until the effective routes select the active Tono interface.
+    transaction
+        .wait("waiting for protected TUN route", wait_for_tun_route_ready())
+        .await?
+        .map_err(StageFailure::error)?;
 
     // Optional DIRECT is applied only after Connected. The critical path stays full-tunnel.
 
