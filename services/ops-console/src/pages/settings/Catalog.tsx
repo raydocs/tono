@@ -65,7 +65,10 @@ export function Catalog() {
   async function publish() {
     if (draft === null) return;
     await doc.publish(
-      async (expected) => (await hubApi.publishCatalog(draft, expected)).revision,
+      async (expected) => {
+        const row = await hubApi.publishCatalog(draft, expected);
+        return { revision: row.revision, updatedAt: row.updatedAt, extra: row.sha256 };
+      },
       {
         told: (was, now) => ({ text: words.published(was, now), detail: null, bad: false }),
         conflict: (was, fresh, drift) => ({
@@ -138,7 +141,7 @@ export function Catalog() {
       </div>
 
       <FoldedSection title={words.history}>
-        <History />
+        <History revision={online.revision} />
       </FoldedSection>
 
       <ConfirmDialog
@@ -172,8 +175,8 @@ export function Catalog() {
  * not on the old console — so there is deliberately nothing to press that would
  * imply a rollback is one click away.
  */
-function History() {
-  const history = useResource('catalog-revisions', (signal) => hubApi.catalogHistory(signal));
+function History({ revision }: { revision: number }) {
+  const history = useResource(`catalog-revisions:${revision}`, (signal) => hubApi.catalogHistory(signal));
   const rows = history.status === 'ready' ? history.data : [];
   const state: TableState = history.status === 'loading'
     ? 'loading'

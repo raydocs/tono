@@ -100,3 +100,55 @@ Hunter: Grok 4.7。槽位 W2-grok-agents。基线 `origin/main` `50bbbbf0`。范
 - Windows 非 immutable 发布只警告：脚本写明旧发布没有该设置。没有改成失败。
 - Sparkle 手动发布不跑 `verify-release-gate.sh`，以及 `--expected-host` 可以改下载地址：本轮没有重新证明到能开题的程度，没有开 issue。
 
+## 2026-10-01 T2 / T4
+
+基线 `origin/main` `b341164b`。T1 发布脚本留给另一位代理（含 #908 和上面两条未证明的 Sparkle 笔记），这里没有改。没有新开 GitHub issue。文档 PR 不挂 auto-merge。修复 PR 各打开一次 auto-merge，没有直接合并。
+
+| ID | 区域 | 严重度 | 文件:行 | 一句话 | 结论 |
+|---|---|---|---|---|---|
+| CONNECT-BENCH-ZERO-HANDSHAKE | T2 | P2（中·已确认） | `tooling/perf/connect-bench/bench.py` `limit_failures` | 正数握手上限只拒绝更大的数，0 次 Reality 握手仍算通过 | [#948](https://github.com/raydocs/tono/pull/948)。auto-merge 已打开一次。毫秒仍是上界；mihomo 冷 DoH 的 1 次仍落在上限 2 里 |
+| T4-REACHABILITY-TOKEN | T4 | P3（低·已确认） | `tooling/scripts/test-suite-reachability.sh` 路径搜索 | `test-wired.sh.skip` 含有套件路径时，注册检查退出 0 | [#953](https://github.com/raydocs/tono/pull/953)。auto-merge 已打开一次。与 #823 的 SIGPIPE 不是同一处。当前 workflow 没有这种假引用 |
+
+### 请代为开题（本轮没有开 issue）
+
+| 建议 ID | 文件 | 证据 | 为何没改 |
+|---|---|---|---|
+| PEER-AUTH-CI-SKIP | `tooling/scripts/test-helper-peer-authorization.sh` 找不到 `Apple Development: Ruirui Wan` 时 `exit 0` | [macos-ci 36792958720](https://github.com/raydocs/tono/actions/runs/36792958720) 的 `policy-tests` 打出 `SKIP: no Apple Development identity for the Tono team`，整次运行仍是 success。`macos-ci.yml` 与 `macos-release.yml` 都跑这个脚本 | 托管的 `macos-26` 上没有这张开发证书。把跳过改成失败会让每次 macOS CI 变红，直到证书装上。这里不能装证书 |
+
+这条会跳过的用例包括：正确身份放行、ad-hoc 拒绝、错误 bundle id 拒绝、`get-task-allow` 拒绝。
+
+### 本地验证
+
+- `python3 tooling/perf/connect-bench/test_check.py`：修复前失败（`vless/tono-fixed/handshakes` 不在失败列表），修复后 1 test OK。对照运行 [36755690366](https://github.com/raydocs/tono/actions/runs/36755690366)：mihomo `dns_handshakes` 为 1，sing-box 为 2，所以上限没有改成必须相等。完整 `bench.py --check` 未跑。
+- `node --test tooling/scripts/tests/suite-reachability.test.mjs`：修复前新用例实际退出码 0，修复后 2 tests OK。对仓库跑 `test-suite-reachability.sh`，改前改后都退出 1，名单相同。
+- `node --test tooling/scripts/tests/ci-gate-changes.test.mjs`：7 passed。
+- `with-slot.sh tono-t4 1 --`：`false` 为 1，`true` 为 0，`exit 3` 为 3。
+- `core-helper/*.swift` 与 `build-core-helper.sh` 的编译列表一致。`CONTRACT.sha256` 为 `4.52.8 84af09c78bed94092906e57d4551fdf79d73f02d526b54c9df86adc19e25389b`。没有跑 `swiftc`。
+- 没有下载或替换 sing-box / mihomo 二进制，没有部署，没有写生产 D1。
+
+### 这轮否掉的
+
+考察 16 条。2 条已修。1 条留给上面开题。其余 13 条否掉：
+
+| 假设 | 为何否掉 |
+|---|---|
+| 握手次数必须等于上限 | 成功的基准运行里 mihomo 冷 DoH 是 1，上限是 2。改成相等会把绿的运行打红 |
+| sing-box prepare/verify 可以装上未核对的二进制 | 清单哈希、二进制哈希、源提交、脏树、工具链不一致即失败 |
+| `certify.py` 在 Go 省略 ldflags 时会换掉已发布字节 | 已发布字节另有哈希针；ldflags 只在 Go 写进二进制时才比对 |
+| mihomo adaptive 不核对产物哈希就会装错包 | 先核对上游提交，补丁和 `go test` 失败即停，再核对 Mach-O/PE 与版本串。输出哈希不钉死是因为构建写入当前时间 |
+| gvisor 缓冲无界 | 已记录，上限 128KiB |
+| connect-bench 解压后的缓存二进制可被调包 | 归档 SHA-256 会核对。CI 工作区是空的。同一次失败的解压会让该步失败 |
+| helper 从漏掉的 Swift 文件编出来 | 当前目录和编译列表一致，合同哈希与现算一致。没有未列出的文件 |
+| `with-slot.sh` 把失败收成 0 | 退出码原样传出 |
+| `records.mjs` 丢掉没有表格的发现分片 | 当前 `docs/findings.d` 没有空分片。它不是 CI 门 |
+| `test-macos-all.sh` 在有跳过时退出 0 | 脚本写明跳过名单会打印，且没有 workflow 调用它 |
+| D1 备份在 wrangler 退出 0 时上传空文件 | 小于 10 KiB 即拒绝 |
+| 策略签名检查漏掉中间失败 | 每一步都是 `\|\| fail` |
+| 注册脚本对 main 变红是这次引入的 | 改前改后名单相同。`services-ci` 用 `*.test.mjs` 通配符跑这些 mjs；脚本不把通配符当成逐文件路径，所以多报未接线。这是过严，不是假绿 |
+
+`tooling/scripts/tests/test_provision_tono_node.py`、`test_check_node_in_fleet.py`、`provision-reality-node.test.rb` 没有出现在 workflow 的 `run` 里。注册脚本因此报它们未接线。这是没跑，不是跑了还报成功。本轮没有把它们接进 CI。
+
+### 读过的范围
+
+T2：`sing-box/certify.py` 的构建与校验、`prepare-macos-sing-box.sh`、`verify-macos-sing-box.sh`、`build-mihomo-adaptive.sh` 与 gvisor 补丁、`connect-bench/bench.py` 与 `baseline.json`。T4：`test-*.sh` 的 `set -e` / `SKIP` / `exit 0`、`records.mjs`、`with-slot.sh`、`build-core-helper.sh`、注册检查、peer authorization、策略签名合同、D1 备份。`remote/` 下已由 #910 / #913 覆盖的脚本没有再改。发布与签名脚本没有打开。
+
