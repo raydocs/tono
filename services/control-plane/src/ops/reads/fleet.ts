@@ -32,7 +32,7 @@ import {
   operationsActivity,
   operationsNodeSelections,
 } from './activity';
-import { assertCatalogHomeUnbound, retireDependencies, revokeExitToken } from '../retire-dependencies';
+import { assertCatalogHomeUnbound, catalogHomeUnboundSql, retireDependencies, revokeExitToken } from '../retire-dependencies';
 
 export async function managedCatalogTemplate(e: Env) {
   const row = await e.DB.prepare(
@@ -232,8 +232,8 @@ export async function retireFleetNode(
     e.DB.prepare(
       `UPDATE managed_exit_catalog
        SET revision = ?, ciphertext = ?, nonce = ?, content_sha256 = ?, updated_at = ?
-       WHERE singleton_id = 1 AND revision = ?`,
-    ).bind(revision, encrypted.ciphertext, encrypted.nonce, digest, changedAt, preview.currentRevision),
+       WHERE singleton_id = 1 AND revision = ? AND ${catalogHomeUnboundSql}`,
+    ).bind(revision, encrypted.ciphertext, encrypted.nonce, digest, changedAt, preview.currentRevision, catalogBaseName(name), catalogHy2Name(name)),
     e.DB.prepare(
       `INSERT INTO ops_node_profiles(id, catalog_name, status, created_at, updated_at)
        SELECT ?, ?, 'retired', ?, ?
