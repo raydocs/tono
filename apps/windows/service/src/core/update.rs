@@ -969,21 +969,31 @@ pub fn unpack_gate(package: &Path) -> Result<()> {
 /// The ONSTART task [`register_consumed_recovery`] creates.
 pub const RECOVERY_TASK_NAME: &str = "Tono Update Recovery v1";
 
+/// `schtasks.exe` from the OS-reported system directory. Registration and
+/// retirement share this path: a Windows install on another volume can create
+/// the ONSTART task, and the same volume must be able to delete it.
+fn recovery_task_command(system_directory: &Path, args: &[&str]) -> std::process::Command {
+    let mut command = std::process::Command::new(system_directory.join("schtasks.exe"));
+    command.args(args);
+    command
+}
+
 /// Remove the SYSTEM boot task. The executor retires it once the committed
 /// cleanup ran, as macOS retires its launchd job at commit; a final uninstall
 /// retires it after WFP removal is proven. A task that is already gone is not
-/// an error. Same scheduler binary as the registration.
+/// an error. Same scheduler binary as [`recovery_task_registration`].
 pub fn retire_recovery_task() -> Result<()> {
-    let schtasks = Path::new("C:\\Windows\\System32\\schtasks.exe");
-    let deleted = std::process::Command::new(schtasks)
-        .args(["/Delete", "/TN", RECOVERY_TASK_NAME, "/F"])
-        .output()?;
+    let system = security::system_directory()?;
+    let deleted = recovery_task_command(
+        &system,
+        &["/Delete", "/TN", RECOVERY_TASK_NAME, "/F"],
+    )
+    .output()?;
     if deleted.status.success() {
         return Ok(());
     }
-    let present = std::process::Command::new(schtasks)
-        .args(["/Query", "/TN", RECOVERY_TASK_NAME])
-        .output()?;
+    let present =
+        recovery_task_command(&system, &["/Query", "/TN", RECOVERY_TASK_NAME]).output()?;
     ensure!(
         !present.status.success(),
         "could not retire the update recovery task"
@@ -1757,6 +1767,24 @@ mod tests {
         );
         assert_eq!(
             Path::new(registration.get_program()),
+            Path::new(r"D:\Windows\System32\schtasks.exe")
+        );
+    }
+
+    #[test]
+    fn update_recovery_retirement_uses_the_os_system_directory() {
+        // Delete and the follow-up query both come from the same directory the
+        // registration uses. A fixed C:\Windows leaves the ONSTART task in
+        // place when Windows itself is on another volume.
+        let system = Path::new(r"D:\Windows\System32");
+        let delete = recovery_task_command(system, &["/Delete", "/TN", RECOVERY_TASK_NAME, "/F"]);
+        let query = recovery_task_command(system, &["/Query", "/TN", RECOVERY_TASK_NAME]);
+        assert_eq!(
+            Path::new(delete.get_program()),
+            Path::new(r"D:\Windows\System32\schtasks.exe")
+        );
+        assert_eq!(
+            Path::new(query.get_program()),
             Path::new(r"D:\Windows\System32\schtasks.exe")
         );
     }
