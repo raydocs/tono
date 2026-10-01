@@ -971,7 +971,7 @@ extension AppState {
             if helperReadyForRelease {
                 do {
                     if disarming {
-                        if automaticFailureRelease {
+                        if automaticFailureRelease || afterUnarmedConnectFailure {
                             try await networkProtection.releaseAfterFailure()
                         } else {
                             try await networkProtection.disarm()
@@ -1643,7 +1643,7 @@ extension AppState {
                 // core-down watchdog released PF about 30 s later. macOS has
                 // no strict kill switch to hold; take that same open end
                 // state without the offline window.
-                self.disconnect(releaseKillSwitch: true)
+                self.disconnect(releaseKillSwitch: true, automaticFailureRelease: true)
                 self.errorMessage = browserDNS.failureMessage
                 return .stopMonitoring
             }

@@ -18,7 +18,7 @@ import {
 } from '../src/ops/jobs';
 import { redactJobResult } from '../src/ops/job-redaction';
 import { runWorkerJobs } from '../src/ops/jobs-worker';
-import { relistFleetNode } from '../src/ops/reads/fleet';
+import { relistFleetNode, retireFleetNode } from '../src/ops/reads/fleet';
 import { retirePendingDedupeKey } from '../src/ops/retire-dependencies';
 import { runVerdictPass } from '../src/ops/verdict-run';
 
@@ -392,6 +392,71 @@ describe('ops node jobs', () => {
       kind: string; severity: string; status: string; impact_count: number; dedupe_key: string;
     }>();
   }
+
+  function relistBeforeRevoke(e: Env, name: string): Env {
+    let relisted = false;
+    const raced = new Proxy(e.DB, {
+      get(target, key) {
+        const value = Reflect.get(target, key, target);
+        if (key !== 'prepare') return typeof value === 'function' ? value.bind(target) : value;
+        return (sql: string) => {
+          const statement = target.prepare(sql);
+          if (!sql.includes('SET revoked_token_hash = token_hash')) return statement;
+          return {
+            bind: (...values: unknown[]) => ({
+              run: async () => {
+                if (!relisted) {
+                  relisted = true;
+                  await relistFleetNode(e, 'ops@example.com', name, {
+                    block: realityBlock(name, '203.0.113.9'),
+                  });
+                }
+                return statement.bind(...values).run();
+              },
+            }),
+          };
+        };
+      },
+    });
+    return { ...e, DB: raced };
+  }
+
+  it('keeps an exit token when relist commits before direct retirement revocation', async () => {
+    const e = env as unknown as Env;
+    const t = 1_800_000_800;
+    const kite = 'Tokyo · Kite';
+    await seedTwoNodeCatalog(e, t, kite, 'Tokyo · Fuji');
+    const hash = await seedExitToken(kite, t);
+
+    await retireFleetNode(relistBeforeRevoke(e, kite), 'ops@example.com', kite, {
+      expectedRevision: 1, confirmation: kite, reason: 'retire',
+    }, undefined, t);
+
+    expect(await listedNames(e)).toContain(kite);
+    expect(await exitStatus(kite)).toEqual({ status: 'active', token_hash: hash });
+  });
+
+  it('keeps an exit token when relist commits before a retirement job revokes it', async () => {
+    const e = env as unknown as Env;
+    const t = 1_800_000_800;
+    const kite = 'Tokyo · Kite';
+    await seedTwoNodeCatalog(e, t, kite, 'Tokyo · Fuji');
+    await retireFleetNode(e, 'ops@example.com', kite, {
+      expectedRevision: 1, confirmation: kite, reason: 'retire before reenabling',
+    }, undefined, t);
+    const hash = await seedExitToken(kite, t);
+    const { job } = await enqueue('catalog_retire', t + 1, {
+      nodeName: kite, idempotencyKey: 'retire-relist-race',
+    });
+
+    expect(await runWorkerJobs(relistBeforeRevoke(e, kite), t + 1, 5)).toBe(1);
+
+    const row = await db().prepare('SELECT status FROM ops_node_jobs WHERE id = ?')
+      .bind(job.id).first<{ status: string }>();
+    expect(row?.status).toBe('succeeded');
+    expect(await listedNames(e)).toContain(kite);
+    expect(await exitStatus(kite)).toEqual({ status: 'active', token_hash: hash });
+  });
 
   it('retires an empty node: catalog gone, token revoked, no incident', async () => {
     const e = env as unknown as Env;
