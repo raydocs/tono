@@ -348,7 +348,7 @@ nonisolated enum HelperProtocolVersion {
     ///   model API namespaces while general Alibaba Cloud remains available.
     /// - 4.52.20 → 4.52.21: selective AI blackhole routes include Darwin
     ///   required loopback gateways; native dry-run regression checks routing messages.
-    static let current = "4.52.21"
+    static let current = "4.52.22"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS
