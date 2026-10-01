@@ -45,8 +45,12 @@ extension AppState {
                     // #585: while protection holds (Protected Offline, or an
                     // unconfirmed barrier after a failed wake reassert, which
                     // the same loop retries) this refusal is a failed attempt,
-                    // so the three-strike pause stops the loop. PF stays as it
-                    // is; only the user's choice lifts it.
+                    // so the third one stops the loop. Holding PF there was
+                    // never real: the Core is down, so the helper's watchdog
+                    // released PF about 30 s later under a UI that still said
+                    // Protected Offline. Take the automatic release (AI hold
+                    // kept) at once instead (decision 031, decision 044,
+                    // MAC-PAUSE-WATCHDOG-STALE-BLOCK).
                     if self.isProtectionBlocked || self.isProtectionUnconfirmed {
                         let signature = "\(ConnectionStage.preparing.rawValue)|\(reason)"
                         if signature == self.lastProtectedFailureSignature {
@@ -56,15 +60,16 @@ extension AppState {
                             self.consecutiveProtectedFailureCount = 1
                         }
                         if self.consecutiveProtectedFailureCount >= 3 {
-                            self.protectedReconnectPausedForUserAction = true
-                            self.protectedReconnectPauseLiftsOnNetworkChange = false
-                            // Retry now exists only in Protected Offline; with an
-                            // unconfirmed barrier the "Choose Reality" above is
-                            // the action to take.
-                            if self.isProtectionBlocked {
-                                self.errorMessage = (self.errorMessage ?? reason) + " "
-                                    + String(localized: "The same failure repeated three times, so automatic retries are paused. Click Retry now to try again, or Restore internet to get back online.")
-                            }
+                            // The release cancels the reconnect loop and
+                            // clears the strike count; "Choose Reality" above
+                            // stays the action to take.
+                            let refusal = self.errorMessage ?? reason
+                            self.releaseAfterPausedFailure(
+                                pending: refusal + " "
+                                    + String(localized: "Tono is restoring this Mac's normal internet; AI services stay blocked."),
+                                released: refusal + " "
+                                    + String(localized: "This Mac is back on its normal internet and AI services stay blocked. Connect again when you are ready.")
+                            )
                         }
                     }
                     return (false, UUID())
@@ -2550,7 +2555,7 @@ extension AppState {
             "protected_dns_broken_retries_exhausted",
             details: ["audits": String(consecutiveProtectedDNSBrokenAudits)]
         )
-        releaseAfterProtectedDNSFailure(
+        releaseAfterPausedFailure(
             pending: String(localized: "Protected DNS did not take effect after repeated reconnects: macOS is still resolving through another DNS server. Tono is restoring this Mac's normal internet; AI services stay blocked."),
             released: String(localized: "Protected DNS did not take effect after repeated reconnects: macOS is still resolving through another DNS server. This Mac is back on its normal internet and AI services stay blocked. Connect again when you are ready.")
         )
@@ -2562,12 +2567,12 @@ extension AppState {
     /// in place. Show `pending` until then; publish `released` only when the
     /// teardown settled on an open host. A failed release keeps its own
     /// "Kill Switch remains active" text, and a newer operation wins.
-    private func releaseAfterProtectedDNSFailure(pending: String, released: String) {
+    func releaseAfterPausedFailure(pending: String, released: String) {
         disconnect(releaseKillSwitch: true, automaticFailureRelease: true)
         errorMessage = pending
         let generation = connectionCoordinator.protectionOperationGeneration
         let teardown = connectionCoordinator.disconnectSequence
-        dnsFailureReleaseNoticeTask = Task { [weak self] in
+        failureReleaseNoticeTask = Task { [weak self] in
             await teardown?.value
             guard let self, !Task.isCancelled,
                   self.connectionCoordinator.protectionOperationGeneration == generation,
@@ -2607,7 +2612,7 @@ extension AppState {
             ]
         )
         let detail = " (" + summary + ")"
-        releaseAfterProtectedDNSFailure(
+        releaseAfterPausedFailure(
             pending: String(localized: "DNS conflict: a corporate VPN, profile or /etc/resolver rule sends some domains to a DNS server outside Tono's protection. Tono is restoring this Mac's normal internet; AI services stay blocked. Turn that rule off, then connect again.")
                 + detail,
             released: String(localized: "DNS conflict: a corporate VPN, profile or /etc/resolver rule sends some domains to a DNS server outside Tono's protection. This Mac is back on its normal internet and AI services stay blocked. Turn that rule off, then connect again.")

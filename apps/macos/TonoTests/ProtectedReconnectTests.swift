@@ -176,9 +176,12 @@ final class ProtectedReconnectTests: XCTestCase {
 
     /// #585: a saved pinned-certificate hy2 selection is refused in prepare
     /// (the bundled sing-box cannot authenticate the pin). That refusal must
-    /// count toward the three-strike pause; before, Protected Offline retried
-    /// it every 30 s forever. PF stays armed through the pause.
-    func testProtectedReconnectPausesWhenPrepareKeepsRefusingTheSelectedExit() async {
+    /// count toward the three-strike limit; before, Protected Offline retried
+    /// it every 30 s forever. The third refusal takes the automatic release
+    /// (AI hold kept) instead of holding PF with the Core down, which the
+    /// helper's watchdog lifted 30 s later under a stale Protected Offline
+    /// (MAC-PAUSE-WATCHDOG-STALE-BLOCK).
+    func testProtectedReconnectReleasesWhenPrepareKeepsRefusingTheSelectedExit() async {
         let app = AppState()
         app.proxyRegions = [
             ProxyRegion(
@@ -198,6 +201,18 @@ final class ProtectedReconnectTests: XCTestCase {
         runtime.refreshKillSwitchStatus = {
             .confirmed(requiresProtectionRecovery: true)
         }
+        var operations: [String] = []
+        runtime.repairForRelease = {}
+        runtime.stopCore = { _ in true }
+        runtime.coreStatus = { (false, true) }
+        runtime.restoreDNS = { true }
+        runtime.disableSystemProxy = {}
+        runtime.disarm = { operations.append("disarm") }
+        runtime.releaseAfterFailure = {
+            operations.append("releaseAfterFailure")
+            KillSwitchService.isArmed = false
+        }
+        runtime.restrictToBootstrap = { operations.append("restrictToBootstrap") }
         app.networkProtection = runtime
         defer {
             KillSwitchService.isArmed = false
@@ -214,13 +229,16 @@ final class ProtectedReconnectTests: XCTestCase {
         }
         await loop?.value
         watchdog.cancel()
+        await app.connectionCoordinator.disconnectSequence?.value
+        await app.failureReleaseNoticeTask?.value
 
-        XCTAssertTrue(
-            app.protectedReconnectPausedForUserAction,
-            "a prepare refusal that repeats must pause the protected reconnect loop"
+        XCTAssertEqual(
+            operations, ["releaseAfterFailure"],
+            "a prepare refusal that repeats must stop the loop with the AI-hold release"
         )
-        XCTAssertTrue(KillSwitchService.isArmed, "the pause keeps PF")
-        XCTAssertTrue(app.isProtectionBlocked)
+        XCTAssertFalse(KillSwitchService.isArmed)
+        XCTAssertFalse(app.isProtectionBlocked)
+        XCTAssertNotEqual(MenuBarProtectionStatus(app).kind, .blocked)
         XCTAssertFalse(app.isConnecting)
         XCTAssertNil(app.connectionCoordinator.protectedReconnectTask)
     }

@@ -60,7 +60,7 @@ final class UnexpectedRestartResumeTests: XCTestCase {
     /// resume intent it read at launch. A confirmed release accepted since
     /// then (the root emergency disarm) supersedes it: no notice that Kill
     /// Switch is blocking traffic, and no pause that waits for the user.
-    func testRestartHoldIgnoresAResumeThatAConfirmedReleaseSuperseded() throws {
+    func testRestartHoldIgnoresAResumeThatAConfirmedReleaseSuperseded() async throws {
         let storedIntent = KillSwitchService.isArmed
         let storedSelection = AppProfile.defaults.string(forKey: SettingsKey.selectedProxyTargetName)
         defer {
@@ -77,13 +77,28 @@ final class UnexpectedRestartResumeTests: XCTestCase {
             app.automaticResumeHeldAfterRestart = true
             KillSwitchService.isArmed = true
             app.isProtectionBlocked = true
+            // A confirmed barrier now takes the automatic release; keep it
+            // off the real helper.
+            var runtime = NetworkProtectionOperations()
+            runtime.repairForRelease = {}
+            runtime.stopCore = { _ in true }
+            runtime.coreStatus = { (false, true) }
+            runtime.restoreDNS = { true }
+            runtime.disableSystemProxy = {}
+            runtime.disarm = { KillSwitchService.isArmed = false }
+            runtime.releaseAfterFailure = { KillSwitchService.isArmed = false }
+            runtime.restrictToBootstrap = {}
+            app.networkProtection = runtime
             return app
         }
 
         let armed = heldLaunch()
         try armed.acceptCloudOnlyTransport(resumeProtection: true)
-        XCTAssertTrue(armed.protectedReconnectPausedForUserAction)
+        XCTAssertFalse(armed.protectedReconnectPausedForUserAction)
         XCTAssertNotNil(armed.errorMessage, "a confirmed barrier says why Tono did not reconnect")
+        // Let the queued release settle before `defer` restores shared state.
+        await armed.connectionCoordinator.disconnectSequence?.value
+        await armed.failureReleaseNoticeTask?.value
 
         let released = heldLaunch()
         released.acceptConfirmedExternalProtectionRelease()
