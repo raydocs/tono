@@ -35,7 +35,10 @@ final class AppState {
         didSet {
             guard connectionStage != oldValue else { return }
             let now = Date()
-            var details = ["stage": connectionStage.rawValue]
+            var details = [
+                "stage": connectionStage.rawValue,
+                "stage_key": connectionStage.wireKey,
+            ]
             if isConnecting {
                 completedConnectionStages.insert(oldValue)
                 if let connectionStageStartedAt {
@@ -44,6 +47,7 @@ final class AppState {
                         Int(now.timeIntervalSince(connectionStageStartedAt) * 1_000)
                     )
                     details["previous_stage"] = oldValue.rawValue
+                    details["previous_stage_key"] = oldValue.wireKey
                     details["previous_stage_duration_ms"] = String(elapsedMs)
                     // The audit log already carried this, but only as JSONL on
                     // disk, so nothing could show a user or support which step
