@@ -1626,7 +1626,7 @@ mod tests {
     #[test]
     fn connect_budget_covers_a_cold_first_connect() {
         let accounted: u64 = CONNECT_BUDGET_LEGS.iter().map(|(_, secs)| secs).sum();
-        assert_eq!(accounted, 208, "the table in the doc comment must stay in sync");
+        assert_eq!(accounted, 278, "the table in the doc comment must stay in sync");
         assert!(
             Duration::from_secs(accounted) <= CONNECT_TRANSACTION_TIMEOUT,
             "the accounted cold-connect worst case ({accounted} s) must fit the budget"
@@ -1639,6 +1639,8 @@ mod tests {
                 .map(|(_, secs)| Duration::from_secs(*secs))
                 .unwrap_or_default()
         };
+        assert!(leg("preparing Tono Core ownership") >= SERVICE_LIFECYCLE_TIMEOUT);
+        assert!(leg("browser Secure DNS preflight") >= Duration::from_secs(5));
         assert!(leg("controller readiness") >= CONTROLLER_READY_TIMEOUT);
         assert!(leg("lock ladder") >= LOCK_RETRY_INTERVAL * LOCK_ATTEMPTS);
         assert!(leg("checkingExit") >= EXIT_PROBE_ADVISORY_BUDGET);
