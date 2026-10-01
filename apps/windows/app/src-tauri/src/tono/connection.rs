@@ -300,6 +300,16 @@ fn attempt_for_generation<'a>(state: &'a Arc<TonoState>, app: &'a AppHandle, exp
     Box::pin(attempt_inner(state, app, expected_generation))
 }
 
+/// A new attempt has not committed an overlay. `applied_wechat_path_regexes == None`
+/// is the inactive latch: the two-minute path refresh must not reconnect a full tunnel.
+fn clear_uncommitted_direct_overlay(inner: &mut TonoInner) {
+    inner.optional_direct_active = false;
+    inner.applied_direct_interface = None;
+    inner.optional_direct_skip = None;
+    inner.direct_reload_until = None;
+    inner.applied_wechat_path_regexes = None;
+}
+
 /// The caller holds lifecycle admission and the state mutex. Idle is not an ownership token:
 /// every admitted retry gets a fresh epoch so a completed failure tail cannot act on its state.
 pub(crate) async fn begin_attempt(
@@ -367,10 +377,7 @@ async fn attempt_inner(state: &Arc<TonoState>, app: &AppHandle, expected_generat
         inner.connect_error = None;
         inner.connect_error_at_ms = None;
         inner.next_retry_at_ms = None;
-        inner.optional_direct_active = false;
-        inner.applied_direct_interface = None;
-        inner.optional_direct_skip = None;
-        inner.direct_reload_until = None;
+        clear_uncommitted_direct_overlay(&mut inner);
         commands::emit_status(app, &commands::status_of(&inner));
         let revision = inner.catalog_tracker.current_revision();
         let name = crate::tono::diagnostics::scrub_text_with(
@@ -1664,6 +1671,23 @@ mod tests {
             EXPLICIT_RELEASE_TIMEOUT < SERVICE_LIFECYCLE_TIMEOUT,
             "the IPC client must be the one that reports a genuine hang"
         );
+    }
+
+    #[tokio::test]
+    async fn a_new_attempt_drops_signed_app_paths_so_a_full_tunnel_does_not_reconnect() {
+        let state = std::sync::Arc::new(crate::tono::state::TonoState::for_test());
+        let mut inner = state.lock().await;
+        inner.applied_wechat_path_regexes = Some(vec![r"C:\old\Weixin.exe".into()]);
+        inner.optional_direct_active = true;
+        inner.applied_direct_interface = Some("Ethernet".into());
+        super::clear_uncommitted_direct_overlay(&mut inner);
+        assert!(inner.applied_wechat_path_regexes.is_none());
+        assert!(!inner.optional_direct_active);
+        assert!(inner.applied_direct_interface.is_none());
+        assert!(!wechat_paths_changed(
+            inner.applied_wechat_path_regexes.as_deref(),
+            &[r"C:\new\Weixin.exe".into()],
+        ));
     }
 
     #[test]
