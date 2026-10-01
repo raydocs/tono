@@ -57,3 +57,9 @@
 ### 2026-09-30 续记 · 去掉并入 main 的合并，改回变基
 
 - 来源：`b50e3a93` 把 `main` 合并进了本分支，那次 CI 被取消，`ci-gate` 把取消的 macOS 任务当成失败。这些合并提交没有留下。提交重放到 `origin/main` `80f4b4d0`。助手协议仍是 main 的 `4.52.7`，本分支没有改 helper。暂停断言和 PF 修复计数仍按原样。
+
+### 2026-10-01 续记 · 变基到当前 main，TUN 丢失仍带上更新屏障
+
+- 来源：`052b632fe8db` 相对 main 为 dirty。提交重放到 `origin/main` `d33399bb`。没有把 main 合并进来。冲突只在 `AppState+Connect.swift`：缺失 TUN 仍走 `applyExhaustedArmedFailure`，并传入 `exhaustedTunnelLoss: true`，这样待处理的原生更新不会走「恢复互联网」而拆掉 PF。更新屏障还在时，这次放行后不排无武装重连。助手协议仍是 main 的 `4.52.11`，本分支没有改 helper。
+- 行为不变：普通武装失败仍放行并做无武装 TCP 探测。助手仍拒绝时重新立上暂停，`testRepairAndReconnectReachesConnectWhenHelperRejectsThisApp` 仍断言暂停为真。PF 修复计数在放行后写回，`testUnverifiableDNSAuditStillRunsPFHealthCheck` 仍期待计数为 1。`unarmedTcpProof` 仍是 `@ObservationIgnored`。`ExitHeal` 这条路径的 `selectiveReady` 仍是 false。
+- 验证：本机无 Xcode，未跑 `xcodebuild`。需要 macOS CI。尚未合 main。
