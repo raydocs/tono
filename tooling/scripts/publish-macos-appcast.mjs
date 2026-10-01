@@ -38,6 +38,20 @@ function refuse(reason) {
   throw new AppcastRefusal(reason)
 }
 
+function runReleaseGate(appPath) {
+  const script = path.resolve(import.meta.dirname, 'verify-release-gate.sh')
+  try {
+    execFileSync(script, [appPath], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    })
+  } catch (error) {
+    const detail = `${error.stdout ?? ''}${error.stderr ?? ''}`.trim()
+    const line = detail.split('\n').filter(Boolean).at(-1) ?? error.message
+    refuse(`verify-release-gate.sh rejected ${appPath}: ${line}`)
+  }
+}
+
 function requireString(value, label) {
   if (typeof value !== 'string' || !value.trim()) {
     refuse(`${label} is required`)
@@ -875,6 +889,11 @@ async function main() {
   console.log(`url ${result.fields.enclosureUrl}`)
   console.log(`app SUPublicEDKey ${result.publicKey}`)
   console.log('signature verified against that key over the enclosure bytes')
+  // Dry-run is the workflow's publish rehearsal, and a later run without
+  // --dry-run is the manual publish. Both have to refuse an app the helper
+  // would reject. The Sparkle signature covers the zip bytes, not Developer ID,
+  // notarization, or the helper's client requirement.
+  runReleaseGate(appPath)
   if (options['dry-run'] || options['validate-only']) {
     console.log(`validated only; ${feedPath} was not modified`)
     return
