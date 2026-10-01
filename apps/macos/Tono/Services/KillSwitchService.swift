@@ -404,7 +404,8 @@ nonisolated enum KillSwitchService {
     /// helper is prepared without the administrator prompt (MAC3-ADD-F1): the
     /// version check and silent upgrade still run. A helper that needs the
     /// prompt (one rejecting this app, or one the silent upgrade could not
-    /// replace) fails the call, and PF stays as the helper holds it.
+    /// replace) fails the call. If preparing an authenticated older helper
+    /// stopped Core, the abandoned upgrade releases PF through `disarm`.
     static func restrictToBootstrap() throws {
         guard isArmed else { return }
         try installIfNeeded(administratorPrompt: false)

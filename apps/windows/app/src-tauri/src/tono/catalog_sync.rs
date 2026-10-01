@@ -461,7 +461,15 @@ fn compact_exit_name(name: &str) -> String {
 }
 
 pub fn names_equivalent(left: &str, right: &str) -> bool {
-    left == right || compact_exit_name(left) == compact_exit_name(right)
+    if left == right {
+        return true;
+    }
+    // ASCII folding exists so "Buffalo · Niagara" matches "Buffalo - Niagara"
+    // and a flag prefix still matches the legacy wire name. Names with no
+    // ASCII letters or digits all fold to empty; treating that as one city
+    // made 东京 and 大阪 the same exit, so failover never left the dead one.
+    let compact = compact_exit_name(left);
+    !compact.is_empty() && compact == compact_exit_name(right)
 }
 
 fn node_named<'a>(nodes: &'a [ValidatedNode], name: &str) -> Option<&'a ValidatedNode> {
@@ -844,6 +852,12 @@ mod tests {
         assert!(is_legacy_wire_name("🇺🇸 US-VLESS-Reality"));
         assert!(names_equivalent("🇺🇸 US-VLESS-Reality", "US-VLESS-Reality"));
         assert!(!is_legacy_wire_name("Salt Lake City · Summit"));
+        assert!(!names_equivalent("东京", "大阪"));
+        let cities = vec![node("东京"), node("大阪")];
+        assert_eq!(
+            next_catalog_exit(Some("东京"), &cities, &BTreeSet::new()).as_deref(),
+            Some("大阪")
+        );
         let nodes = vec![
             node("US-VLESS-Reality"),
             node("Salt Lake City · Summit"),

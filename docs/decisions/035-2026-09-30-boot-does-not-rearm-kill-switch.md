@@ -1,0 +1,6 @@
+## 2026-09-30 · On boot, crash, or helper death, does a saved kill switch stay up?
+
+- Status: provisional
+- Chosen: no. macOS has no user-facing strict kill switch, so a leftover `killswitch.state` is not an opt-in. Startup does not re-arm. A Core that is not running releases the block and restores a DNS snapshot. A startup failure and a corrupt update ledger do not install a block. While a Core is running, the in-session supervisor may still reload the saved rules. Rejected: re-arming at every helper start, and holding DNS at `127.0.0.1` when the Core is dead because PF is not confirmed live. Also rejected: a second LaunchDaemon as the watchdog (it can fight this helper). The watchdog is the helper's idle loop; if this process itself is stuck, that loop does not run.
+- Why stricter: the host keeps a working network after reboot, crash, uninstall and Safe Mode. The cost is that a connected session's block does not survive helper restart unless the Core is still running, and there is a short gap after boot before this helper has migrated `/etc/pf.conf`. Traffic is not widened during a live Core.
+- Applied in: [#701](https://github.com/raydocs/tono/pull/701) (`KillSwitchManager.swift`, `SocketServer.swift`, `UpdateExecutor.swift`, `ProtectedDNSManager.swift`).

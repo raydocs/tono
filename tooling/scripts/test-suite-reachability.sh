@@ -65,7 +65,9 @@ for suite in ${suites[@]+"${suites[@]}"}; do
   [[ $suite == "$aggregate" ]] && continue
   relative=${suite#"$repo_root/"}
   checked=$((checked + 1))
-  if ! printf '%s\n' "$references" | /usr/bin/grep -qF -- "$relative"; then
+  # Read the complete input: grep -q exits at its first match and can make
+  # printf fail with SIGPIPE, which pipefail mistakes for a missing reference.
+  if ! printf '%s\n' "$references" | /usr/bin/grep -F -- "$relative" >/dev/null; then
     unreachable="$unreachable  - $relative
 "
   fi

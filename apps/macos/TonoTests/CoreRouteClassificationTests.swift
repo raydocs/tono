@@ -336,6 +336,20 @@ final class CoreRouteClassificationTests: XCTestCase {
             "growthbook.io", "stripe.network", "storage.googleapis.com",
             "registry.npmjs.org", "raw.githubusercontent.com", "formulae.brew.sh",
             "o123.ingest.sentry.io", "tono.app", "tono.com",
+            "chatgpt.com", "openai.com", "chat.com", "ai.com",
+            "oaistatic.com", "oaiusercontent.com", "api.openai.com",
+            "cdn.oaistatic.com", "files.oaiusercontent.com",
+            "grok.com", "grok.x.com", "grokipedia.com", "x.ai",
+            "api.x.ai", "perplexity.ai", "perplexity.com", "pplx.ai",
+            "api.perplexity.ai", "gemini.google.com", "bard.google.com",
+            "aistudio.google.com", "generativelanguage.googleapis.com",
+            "notebooklm.google.com", "muse.ai", "meta.ai", "muse.meta.com",
+            "www.muse.ai", "meta.com", "facebook.com", "fb.com", "fb.me",
+            "fb.watch", "fbcdn.net", "facebook.net", "messenger.com",
+            "instagram.com", "cdninstagram.com", "ig.me", "threads.net",
+            "gmail.com", "mail.google.com", "googlemail.com", "inbox.google.com",
+            "accounts.google.com", "myaccount.google.com", "oauth2.googleapis.com",
+            "mail-pa.clients6.google.com", "gmail.googleapis.com",
         ] {
             XCTAssertThrowsError(
                 try ConfigPipeline.validatedManagedDirectDomain(host, trusted: true),
@@ -355,13 +369,17 @@ final class CoreRouteClassificationTests: XCTestCase {
         // makes every parent suffix unsafe even when the policy is signed.
         for host in [
             "googleapis.com", "githubusercontent.com", "npmjs.org", "brew.sh",
-            "b-cdn.net", "www.cloudflare.com",
+            "b-cdn.net", "www.cloudflare.com", "google.com", "clients6.google.com",
+            "x.com",
         ] {
             XCTAssertThrowsError(
                 try ConfigPipeline.validatedManagedDirectSuffix(host, trusted: true),
                 host
             )
         }
+        XCTAssertNoThrow(
+            try ConfigPipeline.validatedManagedDirectSuffix("example.com", trusted: true)
+        )
     }
 
     func testApplicationSubfolderScanFindsWeChatOneLevelDown() throws {

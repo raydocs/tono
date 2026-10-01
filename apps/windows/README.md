@@ -327,7 +327,9 @@ simplicity and Tono's PF semantics. Rule tables live in
   only sound inside a single sublayer.
 - `ALE_AUTH_CONNECT_V4/V6` for the outbound fail-closed boundary; IPv6 is
   blocked wholesale at WFP (no adapter reconfiguration needed).
-- Persistent flags only on the condition-free block-all pair; every rule
+- Persistent flags only on the intent floor: the condition-free block-alls
+  plus their loopback, DHCP and NDP permits, so a reboot without a running
+  service keeps loopback and address configuration working. Every rule
   carrying volatile data (app path, interface index, endpoint IP) is
   non-persistent and rebuilt by the service on start — the Proton
   upgrade/reboot lessons.

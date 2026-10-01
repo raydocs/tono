@@ -41,7 +41,8 @@ const usage = () => {
 
   With --publish: also PUTs the policy together with its signature.
 
-  --api defaults to https://api.afk.ccwu.cc
+  --api must be https://api.afk.ccwu.cc. Any other origin is refused before
+  the admin token is read.
   The admin token is read from the keychain (service tono-admin).
   The signing key is read from the keychain (service ${KEYCHAIN_SERVICE}).
 `);
@@ -64,6 +65,30 @@ const fail = (message) => {
   process.stderr.write(`publish-traffic-policy: ${message}\n`);
   process.exit(1);
 };
+
+// The admin token is a production credential. A caller-supplied origin would
+// receive it on the dry-run GET, before any signature check.
+const PINNED_API_ORIGIN = 'https://api.afk.ccwu.cc';
+const pinned = (() => {
+  let url;
+  try {
+    url = new URL(api);
+  } catch {
+    fail('--api is not a URL');
+  }
+  if (
+    url.origin !== PINNED_API_ORIGIN
+    || url.username
+    || url.password
+    || url.pathname !== '/'
+    || url.search
+    || url.hash
+  ) {
+    fail(`refusing to send the admin token anywhere but ${PINNED_API_ORIGIN}`);
+  }
+  return url.origin;
+})();
+api = pinned;
 
 const keychain = (service) => {
   try {

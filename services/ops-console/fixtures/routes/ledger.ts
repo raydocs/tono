@@ -324,7 +324,7 @@ export function createLedgerFixtures(rootDir: string) {
       return;
     }
     const paidAt = typeof body.paidAt === 'number' ? body.paidAt : null;
-    const day = dayOf(paidAt ?? nowSec());
+    const day = new Date(nowSec() * 1_000).toISOString().slice(0, 10);
     const fx = rateFor(day, currency);
     if (fx === null) {
       sendRefusal(res, 409, 'FX_RATE_MISSING', `${day} 的汇率还没拉到`);
