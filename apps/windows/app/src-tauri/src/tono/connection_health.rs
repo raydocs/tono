@@ -154,6 +154,31 @@ pub fn network_event_fires(changed: bool, since_last_event: Option<Duration>) ->
     changed && since_last_event.is_none_or(|elapsed| elapsed >= NETWORK_EVENT_DEBOUNCE)
 }
 
+/// Keep a counter the debounce did not accept. Advancing it anyway makes the
+/// next tick look quiet, so the change is lost instead of retried when
+/// [`NETWORK_EVENT_DEBOUNCE`] elapses. That is the loss H5 already named for
+/// the post-connect seed.
+pub fn next_network_events_counter(
+    stored: Option<u64>,
+    observed: u64,
+    first_sample: bool,
+    invalidated: bool,
+) -> Option<u64> {
+    let changed = !first_sample && stored != Some(observed);
+    if first_sample || !changed || invalidated {
+        Some(observed)
+    } else {
+        stored
+    }
+}
+
+/// A core-identity change inside the debounce window must stay visible.
+/// Committing the new pid while the event is suppressed makes the next
+/// sample look unchanged.
+pub const fn commit_core_baseline(first_sample: bool, core_changed: bool, invalidated: bool) -> bool {
+    first_sample || !core_changed || invalidated
+}
+
 /// A Windows route/interface notification is only a hint: WinTUN creation, protected-DNS
 /// reconciliation, and their delayed IP Helper callbacks can all arrive after Connect has
 /// already committed. Keep the fail-closed response for a changed Core identity or a failed
@@ -425,6 +450,16 @@ mod tests {
         NetworkEventProbeEffect, NetworkEventProbePlan, apply_network_event_probe, may_recover_in_place,
         plan_network_event_probe,
     };
+
+    #[test]
+    fn a_debounced_sample_stays_visible_until_the_window_elapses() {
+        use super::{commit_core_baseline, next_network_events_counter};
+        let pending = next_network_events_counter(Some(4), 5, false, false);
+        assert_eq!(pending, Some(4), "a suppressed tick must keep the old counter");
+        assert_eq!(next_network_events_counter(pending, 5, false, true), Some(5));
+        assert!(!commit_core_baseline(false, true, false));
+        assert!(commit_core_baseline(false, true, true));
+    }
 
     #[test]
     fn a_direct_overlay_bound_to_a_lost_adapter_cannot_recover_in_place() {

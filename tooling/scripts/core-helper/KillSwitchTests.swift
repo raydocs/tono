@@ -773,6 +773,35 @@ extension KillSwitchManager {
             released && releaseSteps == ["placeholder", "flush", "query", "intent", "hosts", "main", "reference"]
         )
 
+        // 11b. A rule file that cannot be rewritten (disk full, directory
+        //      unwritable) must not block the release either: the anchor is
+        //      still flushed and the intent still removed, as for the hosts
+        //      pins above. The displaced-main restore is skipped — a legacy
+        //      /etc/pf.conf would `load anchor from` the stale rules the
+        //      release could not clear — so "main" must not run. Recorded
+        //      effects only; nothing live is touched.
+        var unwritableReleaseSteps: [String] = []
+        let unwritableReleased = (try? releaseSequence(
+            writePlaceholder: {
+                unwritableReleaseSteps.append("placeholder")
+                throw HelperFailure.system("Could not commit a root-owned file.")
+            },
+            flushAnchor: {
+                unwritableReleaseSteps.append("flush")
+                return HelperCommandResult(status: 0, output: Data())
+            },
+            anchorStillActive: { unwritableReleaseSteps.append("query"); return false },
+            removeIntent: { unwritableReleaseSteps.append("intent") },
+            removeHostsPins: { unwritableReleaseSteps.append("hosts") },
+            restoreDisplacedMain: { unwritableReleaseSteps.append("main") },
+            releaseEnableReference: { unwritableReleaseSteps.append("reference") }
+        )) != nil
+        check(
+            "release-survives-unwritable-placeholder",
+            unwritableReleased
+                && unwritableReleaseSteps == ["placeholder", "flush", "query", "intent", "hosts", "reference"]
+        )
+
         // 12. A release puts back the main ruleset the emergency block
         //     displaced, only by reloading /etc/pf.conf and only when that
         //     file declares Tono's anchor (BRICK-M6, BRICK-M9). The on-disk
