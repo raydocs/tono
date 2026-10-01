@@ -46,8 +46,26 @@ Hunter: Grok 4.7。基线 `origin/main` `c26025ec`。范围：W4 服务生命周
 | PR | 自动合并 | 标签 |
 |---|---|---|
 | [#824](https://github.com/raydocs/tono/pull/824) `hunt/grok-winsvc-retire-schtasks-d3c7` | 已开，合并提交 | 无 `needs-hardware`（不改路由、TUN、WFP、DNS、防火墙、杀开关、代理），无 `ui-review` |
+| [#844](https://github.com/raydocs/tono/pull/844) `hunt/grok-winsvc-update-observe-dns-d3c7` | 已开，合并提交 | `needs-hardware` 加标签返回 403，未加上。无 `ui-review` |
 | [#831](https://github.com/raydocs/tono/pull/831) `hunt/grok-winsvc-report-d3c7` | 合并提交 | 仅文档 |
+
+## 后续（对照四路复查）
+
+复查来源：[W4 服务生命周期](bc-04deee14-656b-59d1-b89b-01b276e22031)、[W5 DNS](bc-666b6a00-68c6-5668-8e64-01dfeb45a2c7)、[W7 更新回滚](bc-cd43d64d-1210-5bb2-b711-331273d1b789)、[W9 安装卸载](bc-3b57c82d-bfcc-574f-94a6-80c1e7228c13)。下面只保留对照源码后仍成立的项。
+
+| ID | 区域 | 严重性 | 位置 | 一句话 | 结论 |
+|---|---|---|---|---|---|
+| WIN-UPD-OBSERVE-HEAL | W5/W7 | P1 | `dns/mod.rs` `observe_for_update` | 更新证明在快照缺失时把隧道 DNS 改成 DHCP 并拆 NRPT，屏障仍 wanted | 已在 [#844](https://github.com/raydocs/tono/pull/844) 修复。本机 Cargo 1.83 不能编译 edition 2024，测试未跑 |
+| WIN-REL-DNS-BEFORE-STOP | W4 | P1 | `server/handlers.rs` 释放杀开关 | 先恢复公网 DNS，Core 回滚失败就返回，WFP 仍挡住这些解析器 | 未修，[#846](https://github.com/raydocs/tono/issues/846)。Core 已死时是否放行是产品选择 |
+| WIN-UPD-SUSPENDED-SUCCESSOR | W7/W9 | P1 | `update_executor.rs` 活着的后继进程直接返回 | abort 或外部结束执行器后，从未 Resume 的进程被当成恢复成功，服务保持停止 | 未修，[#847](https://github.com/raydocs/tono/issues/847) |
+| WIN-SCM-STOP-HINT | W4 | P1 | `service.rs` `STOP_WAIT_HINT` 45s | 启动阶段已接受 Stop，只报一次 45s；DNS 恢复预算是 40s，还可能再来一次 | 未修，[#850](https://github.com/raydocs/tono/issues/850) |
+| WIN-DNS-CIM-84 | W5 | P2 | `dns/engine.rs` `Set-AdapterDns` | CIM 返回 84 时直接 return，IPv6 `netsh` 不跑，适配器却算成功 | 未修，[#849](https://github.com/raydocs/tono/issues/849) |
+| WIN-UPD-ADOPT-NONE | W7 | P2 | `update_transaction.rs` `authenticate_successor` 的 `None` 臂 | 没有记录后继进程时，不要求 `started_at` 晚于发布 | 未修，[#851](https://github.com/raydocs/tono/issues/851)。不能拿 Unix 时间去比 `started_at` |
+
+复查里没有另开的项：WFP 已释放后 DNS 恢复失败不再重试，是 #733 留下的限制。`schtasks` 无超时与 #776 同类。写死的 `C:\Windows\System32\schtasks.exe` 已由 #824 修。原生 IPv6 空列表被读回当成成功：模块自己写明 WFP 已拦截 IPv6 DNS，空注册表和 DHCP 在注册表里无法区分，不能把“空读回”单独证成漏放。`read_sz` 把长度为 0 或奇数的值当成缺失，奇数长度可疑，但 0 也是空值，没有拆开验证。回滚完成后仍保持 Blocked，是恢复义务，和 #793、#829 同一类决定，不另开修复。`--replace-runtime` 没有调用 `record_install_started_for_installed_app`，日志停在旧阶段，但不自己把机器留在离线。
+
+#844 需要 `needs-hardware`。`gh api` 加标签返回 403，标签没有加上。自动合并已开。
 
 ## 未完成
 
-W4–W9 的指定文件都读过调用关系。没有在 Windows 上跑 `cargo test`（`core/update.rs` 与 `dns/engine.rs` 是 Windows 专用）。没有实机验证 schtasks 删除或开机 DNS。没有做 jev-route 审查，也没有部署。
+W4–W9 的指定文件都读过调用关系。没有在 Windows 上跑 `cargo test`。没有实机验证 schtasks 删除、开机 DNS，或这次更新证明的自愈。没有做 jev-route 审查，也没有部署。

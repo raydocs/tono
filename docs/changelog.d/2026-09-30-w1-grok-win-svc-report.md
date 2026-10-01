@@ -7,3 +7,4 @@
 - 验证：读码。Windows 服务测试未在本 Linux 环境运行。
 - 候选/发布：仅文档，无新候选。
 - 剩余限制：见 `docs/agent-reports/W1-grok-win-svc.md`。
+- 续记（2026-09-30）：对照复查后补上 WIN-UPD-OBSERVE-HEAL（[#844](https://github.com/raydocs/tono/pull/844)）以及未修的 #846、#847、#849、#850、#851。报告基线仍从 `c26025ec` 写起，后续对照的是 `50bbbbf0`。
