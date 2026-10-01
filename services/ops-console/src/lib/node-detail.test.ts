@@ -230,6 +230,11 @@ describe('what the 这台机器 form sends back', () => {
     expect(gbToBytes('')).toBeNull();
   });
 
+  it('preserves a fractional allowance when saving an unrelated profile field', () => {
+    const quotaBytes = 1_500_000_001;
+    expect(gbToBytes(bytesToGb(quotaBytes))).toBe(quotaBytes);
+  });
+
   it('recovers the anchor day as the UTC day the meter used', () => {
     const march9 = Math.floor(Date.UTC(2026, 2, 9) / 1_000);
     expect(anchorDayOf(march9)).toBe('9');

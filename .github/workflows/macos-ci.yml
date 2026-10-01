@@ -200,6 +200,9 @@ jobs:
       - name: Install lifecycle recovery safety (no root)
         run: python3 tooling/scripts/tests/test_helper_install_recovery.py
 
+      - name: Install lifecycle argument refusal (no root)
+        run: python3 tooling/scripts/tests/test_helper_install_arguments.py
+
       - name: Release archive installs as Tono.app
         run: python3 tooling/scripts/tests/test_macos_archive_layout.py
 

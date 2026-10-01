@@ -6,6 +6,28 @@ use crate::core::windows_kill_switch;
 use crate::core::structure::is_protected_startup_replacement_candidate;
 use tracing::{info, trace, warn};
 
+/// Release restored public resolvers and then failed to stop Core. WFP is still armed.
+/// Put tunnel DNS back only when the stop itself did not finish. A finished stop with
+/// failed bookkeeping has nothing answering the tunnel resolver; this does not disarm.
+#[cfg(windows)]
+async fn refuse_release_after_failed_core_stop(
+    failure: OwnerRollbackFailure,
+) -> Result<HttpResponse> {
+    if release_puts_protected_dns_back(&failure) {
+        if let Err(dns_error) = dns::enable().await {
+            return service_unavailable(format!(
+                "Kill switch release refused; the active Core could not be safely stopped and retired: {failure:#}. Putting protected DNS back also failed: {dns_error:#}"
+            ));
+        }
+        return service_unavailable(format!(
+            "Kill switch release refused; the active Core could not be safely stopped and retired: {failure:#}. Protected DNS was put back because the barrier stays armed."
+        ));
+    }
+    service_unavailable(format!(
+        "Kill switch release refused; the active Core could not be safely stopped and retired: {failure:#}"
+    ))
+}
+
 /// The operation marker an update transaction publishes in `/status` while it runs. A Disconnect
 /// stops the Core and calls `wfp::release()` inside `update::request`; a failed non-strict Prepare
 /// can now do the same. Both are published as kill-switch releases: readers see them running,
@@ -32,7 +54,7 @@ pub(super) fn create_ipc_router() -> Result<Router> {
             // admitted it, still under this lock (TW-anthropic-4).
             let _lifecycle = OWNER_LIFECYCLE_LOCK.lock().await;
             #[cfg(windows)]
-            if IPC_STOPPING.load(std::sync::atomic::Ordering::SeqCst) {
+            if lifecycle_is_stopping() {
                 return service_unavailable("service is stopping");
             }
             let _operation_guard = update_operation(&request.payload);
@@ -410,10 +432,8 @@ pub(super) fn create_ipc_router() -> Result<Router> {
                 }
                 match load_active_owner().await {
                     Ok(Some(active)) if active.owner_key == owner.key => {
-                        if let Err(error) = rollback_started_owner(&owner).await {
-                            return service_unavailable(format!(
-                                "Kill switch release refused; the active Core could not be safely stopped and retired: {error:#}"
-                            ));
+                        if let Err(failure) = rollback_started_owner(&owner).await {
+                            return refuse_release_after_failed_core_stop(failure).await;
                         }
                     }
                     Ok(Some(_)) => {
@@ -438,10 +458,8 @@ pub(super) fn create_ipc_router() -> Result<Router> {
                         warn!(
                             "Active Core ownership is unreadable; stopping and retiring the running Core before release: {error:#}"
                         );
-                        if let Err(error) = rollback_started_owner(&owner).await {
-                            return service_unavailable(format!(
-                                "Kill switch release refused; the active Core could not be safely stopped and retired: {error:#}"
-                            ));
+                        if let Err(failure) = rollback_started_owner(&owner).await {
+                            return refuse_release_after_failed_core_stop(failure).await;
                         }
                     }
                 }
