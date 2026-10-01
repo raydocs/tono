@@ -44,6 +44,28 @@ pub fn admit_sing_box_direct_rules(outbounds: &[Value], rules: &[Value]) -> Resu
             direct.push(tag);
         }
     }
+    // A group that can choose a DIRECT outbound, itself or through another
+    // group, makes every rule to it a DIRECT rule. Each pass adds a new tag or
+    // stops, so a cycle ends.
+    loop {
+        let before = direct.len();
+        for outbound in outbounds {
+            let Some(tag) = outbound.get("tag").and_then(Value::as_str) else {
+                continue;
+            };
+            let reaches = ["outbounds", "default"].iter().any(|key| {
+                outbound
+                    .get(*key)
+                    .is_some_and(|members| json_names(members, &direct))
+            });
+            if reaches && !names(&direct, tag) {
+                direct.push(tag);
+            }
+        }
+        if direct.len() == before {
+            break;
+        }
+    }
     for (index, rule) in rules.iter().enumerate() {
         if json_names(rule, &direct) && !sing_box_direct_shape(rule, &rules[..index], &direct) {
             return Err(format!(
