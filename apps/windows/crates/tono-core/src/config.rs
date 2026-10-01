@@ -2511,7 +2511,10 @@ reality-opts:
         plan.wechat_process_path_regexes = vec![prefix.clone()];
         let runtime =
             build_owned_runtime(&three_nodes(), "JP Reality 02", "test-secret", Some(&plan)).unwrap();
-        let rules: Vec<&str> = get(&parsed(&runtime), &["rules"])
+        // `rules` borrows the YAML document. A temporary `parsed(...)` is freed
+        // at the end of the statement, which rustc rejects (E0716).
+        let parsed_runtime = parsed(&runtime);
+        let rules: Vec<&str> = get(&parsed_runtime, &["rules"])
             .as_sequence()
             .unwrap()
             .iter()

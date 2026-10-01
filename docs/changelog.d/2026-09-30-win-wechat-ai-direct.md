@@ -7,3 +7,12 @@
 - 验证：本机 rustc 1.83，crate 要求 edition 2024，未运行 `cargo test`。hosted Windows CI 执行。未做实机抓包。
 - 候选/发布：仅源码，无新候选。
 - 剩余限制：签名进程用 HTTPDNS 直拨 Anthropic 段以外的原始 IP 仍命中无地址端口规则。needs-hardware。
+
+## 2026-10-01 · 续记：规则顺序测试不再借用已释放的 YAML
+
+- 归属：同一修复 #871。已把 `origin/main` `78afd4d7` 合并进分支，无冲突。
+- 来源：`windows / core` 与 `windows / app-rust` 都在编译 `tono-core` 测试时失败，不是断言失败。
+- 缺陷修复：无行为变化。
+- 工程与测试：`assistant_hosts_precede_address_free_signed_app_direct_without_a_home_hop` 把 `parsed(&runtime)` 放进临时值，再把规则字符串收成 `Vec<&str>`。新 rustc 报 E0716（临时值在借用仍在时被释放）。改为与相邻测试一样先绑定 `parsed_runtime`。
+- 验证：本机 rustc 1.83 仍不能编译 edition 2024，`cargo test` 未跑。由 Windows CI 复跑。
+- 候选/发布：仅源码，无新候选。
