@@ -5,7 +5,8 @@ import { ApiError } from '../../errors';
 import { rejectUnexpectedKeys } from '../../request';
 import { QUOTA_COUNTS, QUOTA_CYCLE_KINDS } from '../contract';
 import { catalogNameExists, upsertNodeIdentity } from '../node-identity';
-import { closeOpenCycle, openNodeCycleWithoutSample, readAgentNetCounters, rollNodeCycle } from '../quota';
+import { closeOpenCycle, readAgentNetCounters, rollNodeCycle } from '../quota';
+import { openNodeCycleWithoutSample } from '../quota-unsampled';
 import {
   Env,
   Row,

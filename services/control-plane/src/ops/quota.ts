@@ -7,7 +7,7 @@ const DAY = 86400;
 const ROLLING_PERIOD = 30 * DAY;
 const SLOPE_WINDOW = 7 * DAY;
 const SAMPLE_RETENTION = 60 * DAY;
-const NAME_LIMIT = 120;
+export const NAME_LIMIT = 120;
 
 export type CycleKind = 'calendar_day' | 'anniversary' | 'rolling_30d' | 'manual';
 export type QuotaCounts = 'in' | 'out' | 'in_out';
@@ -39,13 +39,13 @@ const ERROR_CATEGORIES: ErrorCategory[] = [
   'dial_timeout', 'handshake_fail', 'auth_reject', 'upstream_reject', 'other',
 ];
 
-function finite(value: unknown): number | null {
+export function finite(value: unknown): number | null {
   if (value === null || value === undefined) return null;
   const n = Number(value);
   return Number.isFinite(n) ? n : null;
 }
 
-function field(profile: QuotaProfile, snake: keyof QuotaProfile, camel: keyof QuotaProfile): unknown {
+export function field(profile: QuotaProfile, snake: keyof QuotaProfile, camel: keyof QuotaProfile): unknown {
   return profile[snake] ?? profile[camel];
 }
 
@@ -218,7 +218,7 @@ function utcDay(unix: number): number {
   return Math.floor(unix / DAY) * DAY;
 }
 
-function newId(): string {
+export function newId(): string {
   return crypto.randomUUID();
 }
 
@@ -238,7 +238,7 @@ function asCounts(value: unknown): QuotaCounts {
   return 'in_out';
 }
 
-async function openCycleRow(db: D1Database, nodeName: string): Promise<Row | null> {
+export async function openCycleRow(db: D1Database, nodeName: string): Promise<Row | null> {
   return db.prepare(
     "SELECT * FROM node_traffic_cycles WHERE node_name = ? AND status = 'open'",
   ).bind(nodeName).first<Row>();
@@ -273,7 +273,7 @@ async function insertOpenCycle(
   return (await db.prepare('SELECT * FROM node_traffic_cycles WHERE id = ?').bind(cycleId).first<Row>())!;
 }
 
-function boundsFor(profile: QuotaProfile, nowSec: number): CycleBounds | null {
+export function boundsFor(profile: QuotaProfile, nowSec: number): CycleBounds | null {
   const kind = asKind(field(profile, 'cycle_kind', 'cycleKind'));
   const anchor = finite(field(profile, 'cycle_anchor_day', 'cycleAnchorDay'));
   if (kind === 'anniversary') {
@@ -287,39 +287,6 @@ function boundsFor(profile: QuotaProfile, nowSec: number): CycleBounds | null {
     return null;
   }
   return cycleBounds(kind, anchor, nowSec);
-}
-
-// A profile save can happen before any interface sample exists. Opening that
-// cycle at counter 0 makes the next cumulative reading look like a full
-// cycle of usage. Null baselines are the first-reading case in
-// detectCounterReset: delta 0, then the real counters become the baseline.
-export async function openNodeCycleWithoutSample(
-  db: D1Database,
-  nodeName: string,
-  profile: QuotaProfile,
-  nowSec: number,
-): Promise<Row | null> {
-  const name = nodeName.slice(0, NAME_LIMIT);
-  if (!name) return null;
-  const quota = finite(field(profile, 'traffic_quota_bytes', 'trafficQuotaBytes'));
-  const expected = boundsFor(profile, nowSec);
-  const open = await openCycleRow(db, name);
-  if (open) {
-    await db.prepare(
-      'UPDATE node_traffic_cycles SET quota_bytes = COALESCE(?, quota_bytes), updated_at = ? WHERE id = ?',
-    ).bind(quota, nowSec, open.id).run();
-    return db.prepare('SELECT * FROM node_traffic_cycles WHERE id = ?').bind(open.id).first<Row>();
-  }
-  if (!expected) return null;
-  const cycleId = newId();
-  await db.prepare(
-    `INSERT INTO node_traffic_cycles(
-       id, node_name, cycle_start, cycle_end, quota_bytes, used_bytes,
-       counter_in_start, counter_out_start, counter_in_last, counter_out_last,
-       resets_detected, status, updated_at
-     ) VALUES(?, ?, ?, ?, ?, 0, NULL, NULL, NULL, NULL, 0, 'open', ?)`,
-  ).bind(cycleId, name, expected.start, expected.end, quota, nowSec).run();
-  return db.prepare('SELECT * FROM node_traffic_cycles WHERE id = ?').bind(cycleId).first<Row>();
 }
 
 export async function rollNodeCycle(
