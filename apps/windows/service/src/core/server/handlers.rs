@@ -895,10 +895,26 @@ pub(super) fn create_ipc_router() -> Result<Router> {
                 }
             }
             // Persist the stopped intent before changing PF. If the daemon dies after this point,
-            // startup must never restore a core into an opened network.
+            // startup must never restore a core into an opened network. A failed write does not
+            // skip recovery: the core is already confirmed stopped, so protected DNS must not
+            // stay aimed at a resolver nothing answers.
             if let Err(e) = persist_owner_core_stopped(&owner).await {
-                set_core_lifecycle_state(ServiceLifecycleState::Fatal);
-                return service_unavailable(format!("Failed to persist desired state: {}", e));
+                match super::recover_after_unrecorded_stop(
+                    &owner,
+                    request.payload.release_kill_switch(),
+                )
+                .await
+                {
+                    Ok(()) => {
+                        return service_unavailable(format!("Failed to persist desired state: {e:#}"));
+                    }
+                    Err(recovery) => {
+                        set_core_lifecycle_state(ServiceLifecycleState::Fatal);
+                        return service_unavailable(format!(
+                            "Failed to persist desired state: {e:#}; stop recovery failed: {recovery:#}"
+                        ));
+                    }
+                }
             }
             if let Err(error) =
                 macos_kill_switch::transition_after_stop(request.payload.release_kill_switch()).await
