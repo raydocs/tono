@@ -1,0 +1,109 @@
+/* Dashboard pieces shared by the rebuilt pages: the quality band's header
+   and range switch, its grid, and the compact ranked table. Layered as
+   components so a Tailwind utility on the same element still wins. */
+@layer components {
+  .quality-band {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    min-width: 0;
+  }
+
+  .quality-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 12px 24px;
+  }
+  .quality-head .text-fine { margin-top: 4px; max-width: 60ch; }
+
+  .quality-range {
+    display: inline-flex;
+    padding: 2px;
+    border: 1px solid var(--hairline);
+    border-radius: 8px;
+    background: var(--surface);
+  }
+  .quality-range-btn {
+    min-height: 28px;
+    padding: 0 12px;
+    border-radius: 6px;
+    font-size: 12px;
+    color: var(--muted-foreground);
+  }
+  .quality-range-btn:hover { color: var(--foreground); }
+  .quality-range-btn[aria-pressed="true"] {
+    background: var(--hover-wash);
+    color: var(--foreground);
+    font-weight: 500;
+    box-shadow: inset 0 0 0 1px var(--hairline);
+  }
+  .quality-range-btn:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+
+  .quality-stats {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 12px;
+  }
+
+  .quality-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+    gap: 16px;
+    align-items: start;
+  }
+
+  .quality-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+  }
+  .quality-table th {
+    padding: 0 8px 8px;
+    text-align: left;
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.04em;
+    color: var(--muted-foreground);
+    border-bottom: 1px solid var(--hairline);
+    white-space: nowrap;
+  }
+  .quality-table td {
+    padding: 8px;
+    border-bottom: 1px solid var(--hairline);
+    vertical-align: middle;
+  }
+  .quality-table tr:last-child td { border-bottom: 0; }
+  .quality-table th:first-child, .quality-table td:first-child { padding-left: 0; }
+  .quality-table th:last-child, .quality-table td:last-child { padding-right: 0; }
+  .quality-table .num {
+    text-align: right;
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+  .quality-row { cursor: pointer; }
+  .quality-row:hover td { background: var(--hover-wash); }
+  .quality-node { max-width: 0; width: 38%; }
+  .quality-node a {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    border-radius: 4px;
+  }
+  .quality-node a:hover { text-decoration: underline; text-underline-offset: 4px; }
+  .quality-node a:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+  .quality-trend-col { width: 96px; }
+
+  @media (max-width: 1100px) {
+    .quality-stats { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .quality-grid { grid-template-columns: minmax(0, 1fr); }
+  }
+  @media (max-width: 640px) {
+    .quality-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .quality-stats > :last-child:nth-child(odd) { grid-column: 1 / -1; }
+    .quality-trend-col, .quality-p50-col { display: none; }
+  }
+}

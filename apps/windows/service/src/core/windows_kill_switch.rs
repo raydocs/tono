@@ -2742,6 +2742,8 @@ async fn disarm_unlocked_with_narrow(apply_narrow: Option<bool>) -> Result<()> {
             crate::core::selective_layer::finish_release(apply_narrow).await;
         }
         clear_wanted_core_window();
+        // This successful release supersedes any older crash-record retry.
+        CRASH_TOMBSTONE_PENDING.store(false, Ordering::Release);
         RECONNECT_AFTER_RELEASE.store(false, Ordering::Release);
         return Ok(());
     };
@@ -2807,6 +2809,7 @@ async fn disarm_unlocked_with_narrow(apply_narrow: Option<bool>) -> Result<()> {
         crate::core::selective_layer::finish_release(apply_narrow).await;
     }
     clear_wanted_core_window();
+    CRASH_TOMBSTONE_PENDING.store(false, Ordering::Release);
     RECONNECT_AFTER_RELEASE.store(false, Ordering::Release);
     Ok(())
 }
@@ -5330,6 +5333,33 @@ mod tests {
         .await
         .expect_err("DNS errors still propagate");
         assert!(format!("{error:#}").contains("corrupt"));
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn explicit_release_supersedes_a_pending_crash_tombstone() -> Result<()> {
+        cleanup().await;
+        arm_bootstrap(&test_config(), "/opt/tono/mihomo", "owner-alice").await?;
+        let failures = SimulatedStateFailures::arm(true, false);
+        release_unproven_wanted_session_unlocked().await
+            .expect_err("the crash tombstone write fails after WFP is released");
+        assert!(CRASH_TOMBSTONE_PENDING.load(Ordering::Acquire));
+        drop(failures);
+
+        release().await?;
+        assert!(!status().await.reconnect_after_release);
+        // The watchdog retries its old failed write after the successful Disconnect.
+        retry_crash_tombstone_unlocked().await;
+        // A later Service restart must recover the user's Disconnect, not the older crash.
+        restore_on_service_start().await?;
+        assert!(
+            !status().await.reconnect_after_release,
+            "a pending crash write must not resurrect reconnect intent after Disconnect"
+        );
+        assert!(!status().await.wanted);
+        assert!(!crate::core::selective_layer::test_hold_active());
+        cleanup().await;
         Ok(())
     }
 
