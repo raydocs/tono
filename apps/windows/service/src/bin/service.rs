@@ -772,7 +772,7 @@ async fn reconcile_startup_and_restore() {
                 ),
                 Ok(false) => {}
                 Err(error) => warn!(
-                    "Unverified Windows protection could not be released after reconciliation failed: {error:#}"
+                    "Unverified Windows protection could not be retired cleanly after reconciliation failed: {error:#}"
                 ),
             }
             finish_core_replay().await;
@@ -781,8 +781,9 @@ async fn reconcile_startup_and_restore() {
 }
 
 /// Reconciliation has proved that no process from the previous service instance survived. Only
-/// now may an unverified first-attempt barrier be retired. If that retirement is ambiguous, keep
-/// the machine fail-closed and do not restore a desired Core behind an ownership mismatch.
+/// now may an unverified first-attempt barrier be retired. If that retirement is ambiguous, general
+/// traffic is still released with the AI hold, but no desired Core is restored behind an ownership
+/// mismatch.
 async fn restore_reconciled_desired_state() {
     #[cfg(windows)]
     match tono_service_protocol::update_native::reconcile_before_desired() {
@@ -801,7 +802,7 @@ async fn restore_reconciled_desired_state() {
     if let Err(error) = retire_unverified_windows_kill_switch().await {
         warn!(
             "Unverified Windows protection could not be safely retired after Core reconciliation; \
-             keeping IPC available for recovery and skipping desired Core restore: {error:#}"
+             skipping desired Core restore: {error:#}"
         );
         finish_core_replay().await;
         return;
