@@ -406,16 +406,49 @@ fn matching_selected_delay(
 }
 
 impl TonoInner {
-    pub fn record_exit_delay(&mut self, delay_ms: u64) {
-        if delay_ms == 0 {
+    /// Record a delay that was measured while `measured_node` was selected.
+    ///
+    /// A same-generation hot switch updates `selected_node` before the in-flight
+    /// probe returns. Labeling the sample with whatever is selected at commit
+    /// time shows the previous exit's RTT on the new node. A sample whose node
+    /// is no longer selected is dropped, and it does not overwrite a sample
+    /// that still belongs to the current selection.
+    pub fn record_exit_delay(&mut self, measured_node: &str, delay_ms: u64) {
+        if delay_ms == 0 || measured_node.is_empty() {
             return;
         }
-        let Some(node) = self.selected_node.clone() else {
+        if self.selected_node.as_deref() != Some(measured_node) {
             return;
-        };
+        }
         self.last_exit_delay_ms = Some(delay_ms);
         self.last_exit_delay_at_ms = Some(now_ms());
-        self.last_exit_delay_node = Some(node);
+        self.last_exit_delay_node = Some(measured_node.to_string());
+    }
+
+    /// Drop the displayed exit IP. A selection change must not keep showing the
+    /// previous node's address under the new name.
+    pub fn clear_exit_identity(&mut self) {
+        self.exit_ip = None;
+        self.exit_org = None;
+        self.exit_location = None;
+    }
+
+    /// Store an exit-identity sample only when `measured_node` is still selected.
+    /// Returns whether the sample was stored.
+    pub fn commit_exit_identity(
+        &mut self,
+        measured_node: &str,
+        ip: String,
+        org: Option<String>,
+        location: Option<String>,
+    ) -> bool {
+        if measured_node.is_empty() || self.selected_node.as_deref() != Some(measured_node) {
+            return false;
+        }
+        self.exit_ip = Some(ip);
+        self.exit_org = org;
+        self.exit_location = location;
+        true
     }
 
     pub fn record_tcp_delay(&mut self, node: &str, delay_ms: u64) {
@@ -1249,5 +1282,39 @@ mod tests {
             matching_selected_delay(Some("Tokyo · Fuji"), Some(0), Some("Tokyo · Fuji")),
             None
         );
+    }
+
+    #[tokio::test]
+    async fn a_sample_from_the_previous_exit_is_not_shown_on_the_new_node() {
+        let state = super::TonoState::for_test();
+        let mut inner = state.lock().await;
+        inner.selected_node = Some("Tokyo · Neon".into());
+        inner.record_exit_delay("Tokyo · Neon", 80);
+        inner.exit_ip = Some("203.0.113.8".into());
+        assert_eq!(inner.selected_exit_delay_ms(), Some(80));
+
+        inner.selected_node = Some("Tokyo · Fuji".into());
+        inner.clear_exit_identity();
+        inner.record_exit_delay("Tokyo · Neon", 400);
+        assert_eq!(inner.selected_exit_delay_ms(), None);
+        assert_eq!(inner.last_exit_delay_node.as_deref(), Some("Tokyo · Neon"));
+        assert!(inner.exit_ip.is_none());
+        assert!(!inner.commit_exit_identity(
+            "Tokyo · Neon",
+            "203.0.113.8".into(),
+            None,
+            None,
+        ));
+        assert!(inner.exit_ip.is_none());
+
+        inner.record_exit_delay("Tokyo · Fuji", 120);
+        assert_eq!(inner.selected_exit_delay_ms(), Some(120));
+        assert!(inner.commit_exit_identity(
+            "Tokyo · Fuji",
+            "203.0.113.9".into(),
+            None,
+            Some("JP".into()),
+        ));
+        assert_eq!(inner.exit_ip.as_deref(), Some("203.0.113.9"));
     }
 }
