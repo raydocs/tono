@@ -87,22 +87,7 @@ pub(super) fn detect_physical_interface_windows() -> Result<String, String> {
         }
     }
 
-    let mut rejected = Vec::new();
-    for luid in candidates {
-        match hardware_uplink_alias(luid) {
-            Ok((alias, _)) => return Ok(alias),
-            Err(reason) => rejected.push(reason),
-        }
-    }
-
-    Err(format!(
-        "no usable hardware uplink found; rejected candidates: {}",
-        if rejected.is_empty() {
-            "none".to_string()
-        } else {
-            rejected.join("; ")
-        }
-    ))
+    first_up_hardware_alias(candidates.into_iter().map(hardware_uplink_alias))
 }
 
 /// X2-1: every hardware adapter that currently carries an IPv4 default route and is
@@ -221,6 +206,31 @@ pub(super) fn utf16_field(field: &[u16]) -> String {
     String::from_utf16_lossy(&field[..end])
 }
 
+/// First operationally-up hardware alias. A down NIC that still owns a
+/// default-route row must not become the DIRECT bind: capture time is the
+/// only choice, and the later "is this binding still up?" check does not
+/// run until a network change.
+pub(super) fn first_up_hardware_alias(
+    candidates: impl IntoIterator<Item = Result<(String, bool), String>>,
+) -> Result<String, String> {
+    let mut rejected = Vec::new();
+    for candidate in candidates {
+        match candidate {
+            Ok((alias, true)) => return Ok(alias),
+            Ok((alias, false)) => rejected.push(format!("{alias:?} is not operationally up")),
+            Err(reason) => rejected.push(reason),
+        }
+    }
+    Err(format!(
+        "no usable hardware uplink found; rejected candidates: {}",
+        if rejected.is_empty() {
+            "none".to_string()
+        } else {
+            rejected.join("; ")
+        }
+    ))
+}
+
 /// Adapter descriptions are diagnostic input, not a security identity. This filter is only
 /// used to choose a physical interface for optional DIRECT outbounds; it never disables or
 /// removes the matching adapter. Tono's Wintun adapter is included so it cannot become the
@@ -263,5 +273,20 @@ pub(crate) fn remove_legacy_runtime_copy(catalog_dir: &std::path::Path) {
             Type::Service,
             "Tono: failed to delete the previous build's runtime copy: {error}"
         ),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::first_up_hardware_alias;
+
+    #[test]
+    fn direct_bind_skips_a_down_hardware_alias() {
+        let picked = first_up_hardware_alias([
+            Err("VMware Virtual Ethernet".to_string()),
+            Ok(("Ethernet".to_string(), false)),
+            Ok(("Wi-Fi".to_string(), true)),
+        ]);
+        assert_eq!(picked.unwrap(), "Wi-Fi");
     }
 }

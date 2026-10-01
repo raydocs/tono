@@ -164,7 +164,7 @@ describe('tono activity wrappers', () => {
 describe('subscribeTonoStatus', () => {
   const payload = { accountState: 'ready' } as TonoStatus
 
-  it('shares one backend listener across subscribers and reference-counts the teardown', async () => {
+  it('reuses a live backend listener when a later subscriber mounts', async () => {
     const unlisten = vi.fn()
     let emit: ((event: { payload: TonoStatus }) => void) | undefined
     listenMock.mockImplementation((_name: string, callback: unknown) => {
@@ -173,30 +173,34 @@ describe('subscribeTonoStatus', () => {
     })
 
     const first = vi.fn()
+    const firstLive = vi.fn()
     const second = vi.fn()
     const secondLive = vi.fn()
-    const unsubFirst = subscribeTonoStatus(first)
+    const unsubFirst = subscribeTonoStatus(first, firstLive)
+    await vi.waitFor(() => expect(firstLive).toHaveBeenCalledTimes(1))
+    // A page mounts after the layout's asynchronous registration has settled.
+    await Promise.resolve()
     const unsubSecond = subscribeTonoStatus(second, secondLive)
 
-    // Registration starts once, synchronously, no matter how many subscribers.
-    expect(listenMock).toHaveBeenCalledTimes(1)
-    expect(listenMock).toHaveBeenCalledWith('tono://status', expect.anything())
-    // `secondLive` runs once the shared listener is live.
-    await vi.waitFor(() => expect(secondLive).toHaveBeenCalledTimes(1))
+    try {
+      expect(listenMock).toHaveBeenCalledTimes(1)
+      expect(listenMock).toHaveBeenCalledWith('tono://status', expect.anything())
+      expect(secondLive).toHaveBeenCalledTimes(1)
+      emit?.({ payload })
+      expect(first).toHaveBeenCalledTimes(1)
+      expect(second).toHaveBeenCalledTimes(1)
+      expect(first).toHaveBeenCalledWith(payload)
+      expect(second).toHaveBeenCalledWith(payload)
 
-    emit?.({ payload })
-    expect(first).toHaveBeenCalledWith(payload)
-    expect(second).toHaveBeenCalledWith(payload)
-
-    // One subscriber leaving keeps the listener alive for the rest.
-    unsubFirst()
-    expect(unlisten).not.toHaveBeenCalled()
-    emit?.({ payload })
-    expect(first).toHaveBeenCalledTimes(1)
-    expect(second).toHaveBeenCalledTimes(2)
-
-    // The last teardown unlistens.
-    unsubSecond()
+      unsubFirst()
+      expect(unlisten).not.toHaveBeenCalled()
+      emit?.({ payload })
+      expect(first).toHaveBeenCalledTimes(1)
+      expect(second).toHaveBeenCalledTimes(2)
+    } finally {
+      unsubFirst()
+      unsubSecond()
+    }
     expect(unlisten).toHaveBeenCalledTimes(1)
   })
 })
@@ -269,29 +273,40 @@ describe('connectErrorSuggestsServerSwitch', () => {
     }
   })
 
+  it('maps an auth DNS failure to a short message plus its support code', () => {
+    expect(
+      formatTonoActionError(
+        new Error('TONO_AUTH_DNS: could not reach Tono: dns: no such host'),
+        (key) => `translated:${key}`,
+      ),
+    ).toBe('translated:tono.login.errors.unreachable (TONO_AUTH_DNS)')
+  })
+
   it('maps the stable unreachable prefix to the actionable locale key', () => {
     expect(
       formatTonoActionError(
         new Error('TONO_NODE_OR_CORE_UNREACHABLE: all probes failed'),
         (key) => `translated:${key}`,
       ),
-    ).toBe('translated:tono.dashboard.errors.nodeUnreachable')
+    ).toBe(
+      'translated:tono.dashboard.errors.nodeUnreachable (TONO_NODE_OR_CORE_UNREACHABLE)',
+    )
   })
 
-  it('does not tell the user to switch cities when every probe dies at TLS', () => {
+  it('shows a support code and not a switch instruction when every probe dies at TLS', () => {
     const error = new Error(
       'TONO_NODE_OR_CORE_UNREACHABLE: tls handshake eof [CORE_EXIT_UNREACHABLE]',
     )
     expect(connectErrorSuggestsServerSwitch(error)).toBe(false)
     expect(formatTonoActionError(error, (key) => `translated:${key}`)).toBe(
-      'translated:tono.dashboard.errors.protectedHttpsFailed',
+      'translated:tono.dashboard.errors.protectedHttpsFailed (TONO_NODE_OR_CORE_UNREACHABLE)',
     )
   })
 
   it('maps a bare CORE_EXIT_UNREACHABLE token without leaking handshake debug', () => {
     const error = new Error('CORE_EXIT_UNREACHABLE: dial timeout')
     expect(formatTonoActionError(error, (key) => `translated:${key}`)).toBe(
-      'translated:tono.dashboard.errors.nodeUnreachable',
+      'translated:tono.dashboard.errors.nodeUnreachable (CORE_EXIT_UNREACHABLE)',
     )
     expect(
       formatTonoActionError(error, (key) => `translated:${key}`),
@@ -302,9 +317,7 @@ describe('connectErrorSuggestsServerSwitch', () => {
     const error = new Error(
       'TONO_PROTECTION_UNCONFIRMED: the Tono Service is not ready: failed to start the registered service: the helper exited with 1',
     )
-    expect(formatTonoActionError(error, (key) => `translated:${key}`)).toBe(
-      'translated:tono.progress.protectionUnknownBody',
-    )
+    expect(formatTonoActionError(error, (key) => `translated:${key}`)    ).toBe('translated:tono.progress.protectionUnknownBody')
   })
 
   it('maps kernel pin and DNS-port failures to user-facing keys', () => {
@@ -329,7 +342,7 @@ describe('connectErrorSuggestsServerSwitch', () => {
         ),
         (key) => `translated:${key}`,
       ),
-    ).toBe('translated:tono.login.errors.deviceLimit')
+    ).toBe('translated:tono.login.errors.deviceLimit (TONO_AUTH_DEVICE_LIMIT)')
     expect(
       formatTonoActionError(
         new Error(
@@ -468,13 +481,18 @@ describe('stable diagnostic copy', () => {
     ...overrides,
   })
 
-  it('extracts the stable code for Copy details without using it as the UI sentence', () => {
+  it('shows the support code on the sentence and keeps the handshake out of it', () => {
     const error =
       'TONO_NODE_OR_CORE_UNREACHABLE: tls handshake eof [CORE_EXIT_UNREACHABLE]'
     expect(stableTonoErrorCode(error)).toBe('TONO_NODE_OR_CORE_UNREACHABLE')
     expect(
       formatTonoActionError(new Error(error), (key) => `translated:${key}`),
-    ).toBe('translated:tono.dashboard.errors.protectedHttpsFailed')
+    ).toBe(
+      'translated:tono.dashboard.errors.protectedHttpsFailed (TONO_NODE_OR_CORE_UNREACHABLE)',
+    )
+    expect(
+      formatTonoActionError(new Error(error), (key) => `translated:${key}`),
+    ).not.toContain('handshake')
 
     const copied = formatTonoDiagnostics(report())
     expect(copied).toContain('Failed stage: checkingExit')

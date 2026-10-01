@@ -24,6 +24,7 @@ import { opsIngestRoutes } from './ops/ingest';
 import { tokenAdminWrite } from './ops/token-admin';
 import { ApiError } from './errors';
 import { recordClient } from './client-identity';
+import { exitIdentityRosterResponse } from './exit-identity-roster';
 import { parseBytesRange } from './http';
 import {
   type Env,
@@ -1029,6 +1030,7 @@ async function enqueueRevocation(
      ON CONFLICT(tailscale_node_id) DO UPDATE SET
        completed_at = NULL,
        last_error = NULL,
+       last_attempt_at = 0,
        device_id = excluded.device_id,
        created_at = excluded.created_at,
        ownership_generation = excluded.ownership_generation,
@@ -1063,6 +1065,7 @@ async function expirePending(e: Env, user: string) {
            ON CONFLICT(tailscale_node_id) DO UPDATE SET
              completed_at = NULL,
              last_error = NULL,
+             last_attempt_at = 0,
              device_id = excluded.device_id,
              created_at = excluded.created_at,
              ownership_generation = excluded.ownership_generation,
@@ -1209,6 +1212,7 @@ async function ensureDevice(e: Env, user: string, name: string, installation: st
          ON CONFLICT(tailscale_node_id) DO UPDATE SET
            completed_at = NULL,
            last_error = NULL,
+           last_attempt_at = 0,
            device_id = excluded.device_id,
            created_at = excluded.created_at,
            ownership_generation = excluded.ownership_generation,
@@ -1552,6 +1556,7 @@ async function revokeDevice(e: Env, d: Row, requireIneligibleUser = false) {
        ON CONFLICT(tailscale_node_id) DO UPDATE SET
          completed_at = NULL,
          last_error = NULL,
+         last_attempt_at = 0,
          device_id = excluded.device_id,
          created_at = excluded.created_at,
          ownership_generation = excluded.ownership_generation,
@@ -2103,6 +2108,7 @@ async function confirmDevice(
        ON CONFLICT(tailscale_node_id) DO UPDATE SET
          completed_at = NULL,
          last_error = NULL,
+         last_attempt_at = 0,
          device_id = excluded.device_id,
          created_at = excluded.created_at,
          ownership_generation = excluded.ownership_generation,
@@ -2451,18 +2457,23 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
     const b: Row = await body(req, 4 * 1024).catch(() => ({} as Row));
     const raw = b.refreshToken;
     const t = now();
-    const statements = [
-      e.DB.prepare('UPDATE sessions SET revoked_at = ? WHERE id = ? AND user_id = ?').bind(t, a.sessionId, a.userId),
-    ];
-    if (raw !== undefined) {
-      str(raw, 'refreshToken', 20, 500);
-      statements.push(
-        e.DB.prepare(
-          'UPDATE sessions SET revoked_at = ? WHERE user_id = ? AND refresh_hash = ? AND revoked_at IS NULL',
-        ).bind(t, a.userId, await sha256(raw)),
-      );
-    }
-    await e.DB.batch(statements);
+    const refreshHash = raw === undefined ? null : await sha256(str(raw, 'refreshToken', 20, 500));
+    // A refresh can rotate after auth() above. Follow revoked intermediates
+    // too, so its successor cannot survive a successful logout.
+    await e.DB.batch([
+      e.DB.prepare(
+        `WITH RECURSIVE logout_sessions(id, successor_id) AS (
+           SELECT id, successor_id FROM sessions
+           WHERE user_id = ? AND (id = ? OR refresh_hash = ?)
+           UNION
+           SELECT sessions.id, sessions.successor_id FROM sessions
+           JOIN logout_sessions ON sessions.id = logout_sessions.successor_id
+           WHERE sessions.user_id = ?
+         )
+         UPDATE sessions SET revoked_at = ?
+         WHERE id IN (SELECT id FROM logout_sessions) AND revoked_at IS NULL`,
+      ).bind(a.userId, a.sessionId, refreshHash, a.userId, t),
+    ]);
     return new Response(null, { status: 204 });
   }
 
@@ -2658,6 +2669,7 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
            ON CONFLICT(tailscale_node_id) DO UPDATE SET
              completed_at = NULL,
              last_error = NULL,
+             last_attempt_at = 0,
              device_id = excluded.device_id,
              created_at = excluded.created_at,
              ownership_generation = excluded.ownership_generation,
@@ -3214,23 +3226,7 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
     await recordExitAgentAsn(e, req, node?.name ?? null);
     const t = now();
     const roster = await exitCredentialRoster(e, t);
-    return Response.json({
-      // New agents verify this before touching Xray or billing state. Existing
-      // node source IDs are accounting identities and cannot be renamed without
-      // an exactly-once ledger migration. Legacy dual-phase readers receive no
-      // nodeId and old agents safely ignore this additive field.
-      nodeId: node?.id,
-      // Echoed so a reconciling agent can tell a stale response from an empty
-      // roster: applying an empty list as if it were current would disconnect
-      // every account at once.
-      observedAt: t,
-      retireSharedLegacy: roster.retireSharedLegacy,
-      identities: roster.rows.map((row) => ({
-        userId: String(row.user_id),
-        deviceId: row.device_id ? String(row.device_id) : undefined,
-        clientUUID: String(row.client_uuid),
-      })),
-    });
+    return exitIdentityRosterResponse(e, node?.id, t, roster);
   }
 
   if (p === '/api/v1/home/roster-ack' && m === 'POST') {

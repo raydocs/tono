@@ -105,6 +105,7 @@ export const customerCopy = {
   customerSections: {
     now: '现在',
     timeline: '连接时间线',
+    forensics: '链路、DNS 与版本',
     activity: '使用时段',
     destinations: '流量去向',
     services: '服务使用',
@@ -169,6 +170,10 @@ export const customerCopy = {
     disconnectOk: '断开',
     releaseFail: '发布失败',
     syncFail: '同步失败',
+    signInFail: '登录失败',
+    appCrash: '崩溃',
+    networkRestore: '网络恢复',
+    killSwitchFail: '断网保护失败',
   } as const,
   stageWord: {
     dial: '拨号',

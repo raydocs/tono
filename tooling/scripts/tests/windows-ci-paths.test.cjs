@@ -9,7 +9,7 @@ const root = path.resolve(__dirname, '../../..')
 const { load } = createRequire(path.join(root, 'apps/windows/app/package.json'))('js-yaml')
 const workflow = load(readFileSync(path.join(root, '.github/workflows/windows-ci.yml'), 'utf8'))
 
-for (const event of ['push', 'pull_request']) {
+for (const event of ['push']) {
   test(`${event}: Windows CI covers workspace pins and vendor-only edits`, () => {
     const paths = workflow.on[event].paths
     for (const required of [
@@ -126,17 +126,15 @@ test('Windows executes journal phase and persistence regressions with a nonzero-
 
 test('shared update contract changes execute both native implementations and reject zero tests', () => {
   const mac = load(readFileSync(path.join(root, '.github/workflows/macos-ci.yml'), 'utf8'))
-  for (const event of ['push', 'pull_request']) {
-    for (const changed of [
-      'tooling/scripts/tests/fixtures/update-protocol-v1/manifest.json',
-      'apps/macos/Tono/Models/UpdateContractV1.swift',
-      'apps/macos/TonoTests/UpdateContractV1Tests.swift',
-      'apps/windows/crates/tono-core/src/update_contract.rs',
-      'apps/windows/crates/tono-core/tests/update_contract.rs',
-    ]) {
-      assert.ok(workflow.on[event].paths.some(pattern => path.matchesGlob(changed, pattern)), `Windows omits ${changed}`)
-      assert.ok(mac.on[event].paths.some(pattern => path.matchesGlob(changed, pattern)), `macOS omits ${changed}`)
-    }
+  for (const changed of [
+    'tooling/scripts/tests/fixtures/update-protocol-v1/manifest.json',
+    'apps/macos/Tono/Models/UpdateContractV1.swift',
+    'apps/macos/TonoTests/UpdateContractV1Tests.swift',
+    'apps/windows/crates/tono-core/src/update_contract.rs',
+    'apps/windows/crates/tono-core/tests/update_contract.rs',
+  ]) {
+    assert.ok(workflow.on.push.paths.some(pattern => path.matchesGlob(changed, pattern)), `Windows omits ${changed}`)
+    assert.ok(mac.on.push.paths.some(pattern => path.matchesGlob(changed, pattern)), `macOS omits ${changed}`)
   }
   const step = workflow.jobs['app-rust'].steps.find(step =>
     step.run?.includes("$test = 'shared_wire_and_ownership_contract'"))
@@ -209,11 +207,29 @@ test('paired candidates share one source and sequence without granting signing o
   assert.ok(assembly?.run.includes('--source "$GITHUB_SHA"'))
   assert.ok(assembly.run.includes('manifest.unsigned.json'))
   assert.ok(workflow.jobs.app.steps.some(step => step.run?.includes('node --test ../../../tooling/scripts/tests/desktop-update-v1.test.mjs')))
-  for (const event of ['push', 'pull_request']) {
-    for (const changed of ['.github/workflows/desktop-update-candidate.yml', 'tooling/scripts/desktop-update-v1.mjs', 'tooling/scripts/tests/desktop-update-v1.test.mjs']) {
-      assert.ok(workflow.on[event].paths.some(pattern => path.matchesGlob(changed, pattern)), changed)
-    }
+  for (const changed of ['.github/workflows/desktop-update-candidate.yml', 'tooling/scripts/desktop-update-v1.mjs', 'tooling/scripts/tests/desktop-update-v1.test.mjs']) {
+    assert.ok(workflow.on.push.paths.some(pattern => path.matchesGlob(changed, pattern)), changed)
   }
+})
+
+test('ci-gate reuses the Windows and macOS push path lists for pull requests', async () => {
+  const { filtersFromRepo, pushPathList } = await import('../ci-gate-changes.mjs')
+  const filters = filtersFromRepo(root)
+  const mac = load(readFileSync(path.join(root, '.github/workflows/macos-ci.yml'), 'utf8'))
+  assert.deepEqual(filters.windows, workflow.on.push.paths)
+  assert.deepEqual(filters.macos, mac.on.push.paths)
+  assert.deepEqual(pushPathList(readFileSync(path.join(root, '.github/workflows/windows-ci.yml'), 'utf8')), workflow.on.push.paths)
+  assert.equal(workflow.on.pull_request, undefined)
+  assert.equal(mac.on.pull_request, undefined)
+  assert.ok('workflow_call' in workflow.on)
+  assert.equal(mac.on.workflow_call.inputs.update_release_sequence.required, true)
+  assert.ok(!JSON.stringify(workflow.concurrency).includes('inputs.'), 'push concurrency cannot read workflow_call inputs')
+  const gate = load(readFileSync(path.join(root, '.github/workflows/ci-gate.yml'), 'utf8'))
+  assert.equal(gate.jobs['ci-gate'].name, 'ci-gate')
+  assert.equal(gate.jobs.macos.uses, './.github/workflows/macos-ci.yml')
+  assert.equal(gate.jobs.windows.uses, './.github/workflows/windows-ci.yml')
+  assert.equal(gate.on.pull_request, null)
+  assert.deepEqual(Object.keys(gate.on), ['pull_request', 'merge_group', 'workflow_dispatch'])
 })
 
 test('Windows release jobs that run third-party build code never hold a writable token', () => {

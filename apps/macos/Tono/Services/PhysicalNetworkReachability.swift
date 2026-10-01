@@ -67,9 +67,11 @@ nonisolated final class PhysicalNetworkReachability: @unchecked Sendable {
     }
 }
 
-/// Physical network interface fingerprint used strictly for debouncing
-/// SCDynamicStore notification bursts when physical interface addresses
-/// have not changed.
+/// Physical network interface fingerprint. It is not the reconnect predicate:
+/// counting every up adapter made a dock or a second Ethernet address look
+/// like a roam and tore the tunnel down. `NetworkUplinkSnapshot` decides
+/// whether the default uplink moved. This value remains for tests that pin
+/// which interfaces are virtual.
 ///
 /// Deliberately excludes tunnel interfaces (`utun*`, including Tono's
 /// 198.18.0.1/30 TUN), loopback, bridge, and virtual interfaces.
