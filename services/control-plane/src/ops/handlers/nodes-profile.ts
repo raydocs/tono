@@ -215,11 +215,12 @@ export async function applyNodeProfilePatch(e: Env, name: string, body: Row): Pr
       cycleAnchorDay: patch.quota.cycleAnchorDay,
       quotaCounts: patch.quota.counts,
     };
-    const counters = await readAgentNetCounters(e.DB, name);
-    if (counters) {
-      await rollNodeCycle(e.DB, name, quotaProfile, counters, t);
-    } else {
-      await openNodeCycleWithoutSample(e.DB, name, quotaProfile, t);
-    }
+    let sampled = false;
+    await rollNodeCycle(e.DB, name, quotaProfile, async () => {
+      const counters = await readAgentNetCounters(e.DB, name);
+      sampled = counters != null;
+      return counters;
+    }, t);
+    if (!sampled) await openNodeCycleWithoutSample(e.DB, name, quotaProfile, t);
   }
 }
