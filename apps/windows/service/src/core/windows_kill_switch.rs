@@ -295,6 +295,35 @@ const FRESH_ARM_PROOF_WINDOW: std::time::Duration = std::time::Duration::from_se
 static FRESH_ARM_PROOF_PENDING: AtomicBool = AtomicBool::new(false);
 static FRESH_ARM_EPOCH: AtomicU64 = AtomicU64::new(0);
 
+/// Bind a Core watchdog to the arm that admitted it. A successor arms before joining the
+/// previous watchdog, so neither an owner key nor the absence of a Core fences old cleanup.
+pub(crate) fn core_arm_epoch() -> u64 {
+    FRESH_ARM_EPOCH.load(Ordering::Acquire)
+}
+
+/// Queue exhausted recovery for the independent WFP watchdog. The Core watchdog must finish
+/// without taking owner lifecycle: a Start/Stop can hold it while joining that same task.
+pub(crate) async fn note_core_recovery_exhausted(epoch: u64) {
+    if !SUPPORTED {
+        return;
+    }
+    let _operation = WFP_OPERATION.lock().await;
+    if core_arm_epoch() != epoch || current_core_instance_for_direct_security().is_some() {
+        return;
+    }
+    if !armed_guard().as_ref().is_some_and(|armed| {
+        armed.intent.wanted && !armed.intent.strict_kill_switch && armed.intent.owner_key.is_some()
+    }) {
+        return;
+    }
+    // Reuse the epoch-fenced lifecycle cleanup, including desired-owner retirement, installer
+    // and update admission, and the secondary AI hold. Failed cleanup remains retryable.
+    *WANTED_CORE_DEADLINE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(std::time::Instant::now());
+    FRESH_ARM_PROOF_PENDING.store(true, Ordering::Release);
+}
+
 /// This boot's desired state will start Core, and that start has not settled yet.
 /// The watchdog treats it as "starting" so a same-boot replay is not released before
 /// `start_core` runs. Cleared when desired-state restore finishes.
@@ -389,8 +418,8 @@ fn note_fresh_arm_core_window(intent: &IntentRecord) {
     }
 }
 
-/// Called after acquiring the owner lifecycle lock. An expired worker may only retire the
-/// exact arm it observed; successful verification, release, or a successor arm revokes it.
+/// Called after acquiring the owner lifecycle lock. An expired or exhausted worker may only
+/// retire the exact arm it observed; verification, release, or a successor arm revokes it.
 pub(super) fn expired_fresh_arm_owner(epoch: u64) -> Option<String> {
     if !FRESH_ARM_PROOF_PENDING.load(Ordering::Acquire)
         || FRESH_ARM_EPOCH.load(Ordering::Acquire) != epoch
@@ -548,11 +577,21 @@ fn spawn_startup_release_retry() {
                 .await
                 .ok()
                 .and_then(|bytes| serde_json::from_slice::<IntentRecord>(&bytes).ok());
-            if intent.as_ref().is_some_and(|intent| intent.wanted) {
+            if intent.as_ref().is_some_and(|intent| {
+                intent.wanted && (intent_is_valid(intent) || intent.strict_kill_switch)
+            }) {
                 drop(running);
                 return;
             }
             let release: Result<()> = async {
+                if intent.as_ref().is_none_or(|intent| intent.wanted) {
+                    // Incomplete non-strict evidence needs its startup AI hold and retention.
+                    // A newer valid or explicitly strict record was gated above.
+                    return release_general_traffic_unlocked(
+                        "startup incomplete-intent release retry",
+                    )
+                    .await;
+                }
                 remove_all_filters_unlocked().await?;
                 sweep_legacy_sublayers_unlocked().await;
                 if intent.is_some_and(|intent| intent.reconnect_after_release) {
@@ -3083,6 +3122,15 @@ async fn release_general_traffic_unlocked(reason: &str) -> Result<()> {
     Ok(())
 }
 
+async fn release_general_traffic_on_startup_unlocked(reason: &str) -> Result<()> {
+    let result = release_general_traffic_unlocked(reason).await;
+    if result.is_err() && armed_guard().is_none() {
+        // No in-memory intent exists for the watchdog to reconcile after this startup failure.
+        spawn_startup_release_retry();
+    }
+    result
+}
+
 async fn release_unhealthy_session_unlocked(reason: &str) -> Result<()> {
     release_general_traffic_unlocked(reason).await?;
     if let Err(error) = persist_disarmed_tombstone().await {
@@ -3299,7 +3347,7 @@ pub async fn restore_on_service_start() -> Result<()> {
                     tracing::warn!(
                         "unusable kill-switch intent; releasing general traffic and keeping the file"
                     );
-                    return release_general_traffic_unlocked("unusable kill-switch intent").await;
+                    return release_general_traffic_on_startup_unlocked("unusable kill-switch intent").await;
                 }
                 let emergency = emergency_armed();
                 *armed_guard() = Some(emergency.clone());
@@ -3317,7 +3365,7 @@ pub async fn restore_on_service_start() -> Result<()> {
                 tracing::warn!(
                     "corrupt kill-switch intent; releasing general traffic and keeping the file"
                 );
-                release_general_traffic_unlocked("corrupt kill-switch intent").await
+                release_general_traffic_on_startup_unlocked("corrupt kill-switch intent").await
             }
         },
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
@@ -3327,7 +3375,7 @@ pub async fn restore_on_service_start() -> Result<()> {
                 .await
                 .unwrap_or(true)
             {
-                return release_general_traffic_unlocked(
+                return release_general_traffic_on_startup_unlocked(
                     "residual WFP without a kill-switch intent",
                 )
                 .await;
@@ -3356,7 +3404,7 @@ pub async fn restore_on_service_start() -> Result<()> {
             tracing::warn!(
                 "kill-switch intent could not be read: {error:#}; releasing general traffic"
             );
-            release_general_traffic_unlocked("unreadable kill-switch intent").await
+            release_general_traffic_on_startup_unlocked("unreadable kill-switch intent").await
         }
     }
 }
@@ -4335,6 +4383,36 @@ mod tests {
             reconcile_wanted_core_window_unlocked().await?,
             WantedCoreWindow::Keep
         );
+        assert!(status().await.wanted);
+        cleanup().await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn exhausted_core_notification_cannot_expire_a_successor_arm() -> Result<()> {
+        cleanup().await;
+        arm_bootstrap(&test_config(), "/opt/tono/mihomo", "owner-alice").await?;
+        let exhausted_epoch = core_arm_epoch();
+        arm_bootstrap(&test_config(), "/opt/tono/mihomo", "owner-alice").await?;
+        let successor_deadline = *WANTED_CORE_DEADLINE.lock().unwrap();
+        note_core_recovery_exhausted(exhausted_epoch).await;
+        assert_eq!(*WANTED_CORE_DEADLINE.lock().unwrap(), successor_deadline);
+        assert!(expired_fresh_arm_owner(core_arm_epoch()).is_none());
+        assert!(status().await.wanted);
+        cleanup().await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn exhausted_core_notification_preserves_explicit_strict_protection() -> Result<()> {
+        cleanup().await;
+        arm_bootstrap(&test_config(), "/opt/tono/mihomo", "owner-alice").await?;
+        armed_guard().as_mut().unwrap().intent.strict_kill_switch = true;
+        clear_wanted_core_window();
+        note_core_recovery_exhausted(core_arm_epoch()).await;
+        assert!(WANTED_CORE_DEADLINE.lock().unwrap().is_none());
         assert!(status().await.wanted);
         cleanup().await;
         Ok(())
@@ -5383,6 +5461,86 @@ mod tests {
         );
         release().await?;
         assert!(!crate::core::selective_layer::test_hold_active());
+        cleanup().await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn corrupt_startup_removal_failure_retries_and_keeps_evidence_and_ai_hold() -> Result<()>
+    {
+        cleanup().await;
+        let evidence = b"{ incomplete intent";
+        atomic_write(&intent_path(), evidence).await?;
+        let residual = wfp_model::intent_floor()
+            .iter()
+            .map(|filter| filter.key)
+            .collect::<Vec<_>>();
+        *TEST_RESIDUAL_FILTER_KEYS.lock().unwrap() = residual.clone();
+        let failures = SimulatedStateFailures::arm_removal();
+
+        let error = restore_on_service_start()
+            .await
+            .expect_err("the initial native removal fails");
+        assert!(format!("{error:#}").contains("simulated WFP removal failure"));
+        assert!(armed_guard().is_none());
+        assert_eq!(*TEST_RESIDUAL_FILTER_KEYS.lock().unwrap(), residual);
+        drop(failures);
+
+        tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            while !TEST_RESIDUAL_FILTER_KEYS.lock().unwrap().is_empty()
+                || STARTUP_RELEASE_RETRY_RUNNING.load(Ordering::Acquire)
+            {
+                tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .expect("recovery must retry after the transient removal error clears");
+
+        assert!(TEST_REMOVE_ATTEMPTS.load(Ordering::Relaxed) >= 2);
+        assert_eq!(tokio::fs::read(intent_path()).await?, evidence);
+        assert!(crate::core::selective_layer::test_hold_active());
+        assert!(!status().await.wanted);
+        cleanup().await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn corrupt_startup_release_retry_preserves_a_new_unusable_strict_record() -> Result<()> {
+        cleanup().await;
+        atomic_write(&intent_path(), b"{ incomplete intent").await?;
+        let residual = wfp_model::intent_floor()
+            .iter()
+            .map(|filter| filter.key)
+            .collect::<Vec<_>>();
+        *TEST_RESIDUAL_FILTER_KEYS.lock().unwrap() = residual.clone();
+        let failures = SimulatedStateFailures::arm_removal();
+        restore_on_service_start()
+            .await
+            .expect_err("the initial removal fails");
+
+        let operation = WFP_OPERATION.lock().await;
+        let mut strict = valid_intent(KillSwitchStatusMode::Blocked, true);
+        strict.strict_kill_switch = true;
+        strict.endpoints.clear();
+        assert!(!intent_is_valid(&strict));
+        let strict_bytes = serde_json::to_vec_pretty(&strict)?;
+        atomic_write(&intent_path(), &strict_bytes).await?;
+        let attempts = TEST_REMOVE_ATTEMPTS.load(Ordering::Relaxed);
+        drop(failures);
+        drop(operation);
+
+        tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            while STARTUP_RELEASE_RETRY_RUNNING.load(Ordering::Acquire) {
+                tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+            }
+        })
+        .await?;
+
+        assert_eq!(TEST_REMOVE_ATTEMPTS.load(Ordering::Relaxed), attempts);
+        assert_eq!(*TEST_RESIDUAL_FILTER_KEYS.lock().unwrap(), residual);
+        assert_eq!(tokio::fs::read(intent_path()).await?, strict_bytes);
         cleanup().await;
         Ok(())
     }

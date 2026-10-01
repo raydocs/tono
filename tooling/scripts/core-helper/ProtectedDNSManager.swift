@@ -971,9 +971,7 @@ final class ProtectedDNSManager {
             throw HelperFailure.system("Could not open network preferences.")
         }
         if lock {
-            guard SCPreferencesLock(prefs, true) else {
-                throw HelperFailure.system("Could not lock network preferences.")
-            }
+            try lockPreferences(prefs)
         }
         defer {
             if lock {
@@ -981,6 +979,51 @@ final class ProtectedDNSManager {
             }
         }
         return try body(prefs)
+    }
+
+    private static func lockPreferences(_ prefs: SCPreferences) throws {
+        // The sole request/watchdog thread must not wait for another network
+        // settings writer. Keep the DNS snapshot and let the caller retry.
+        guard SCPreferencesLock(prefs, false) else {
+            throw HelperFailure.system("Could not lock network preferences.")
+        }
+    }
+
+    /// Uses isolated preferences, never the system network configuration.
+    /// The waiter must report contention while the other session still owns
+    /// the lock. Releasing the owner also unblocks the original implementation
+    /// before the test exits, so a regression cannot hang the test process.
+    static func runPreferencesContentionSelfTest() -> Bool {
+        guard geteuid() == 0 else { return false }
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("tono-dns-lock-test-\(UUID().uuidString)")
+        do {
+            try FileManager.default.createDirectory(
+                at: directory, withIntermediateDirectories: false,
+                attributes: [.posixPermissions: 0o700]
+            )
+        } catch { return false }
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let prefsID = directory.appendingPathComponent("preferences.plist").path as CFString
+        guard let owner = SCPreferencesCreate(nil, "tono-lock-owner" as CFString, prefsID),
+              let contender = SCPreferencesCreate(nil, "tono-lock-contender" as CFString, prefsID),
+              SCPreferencesLock(owner, false) else { return false }
+        let finished = DispatchSemaphore(value: 0)
+        let busy = DispatchSemaphore(value: 0)
+        DispatchQueue.global(qos: .userInitiated).async {
+            defer { finished.signal() }
+            do {
+                try lockPreferences(contender)
+                SCPreferencesUnlock(contender)
+            } catch {
+                if SCError() == kSCStatusPrefsBusy { busy.signal() }
+            }
+        }
+        let finishedWhileHeld = finished.wait(timeout: .now() + 3) == .success
+        SCPreferencesUnlock(owner)
+        if !finishedWhileHeld,
+           finished.wait(timeout: .now() + 3) != .success { return false }
+        return finishedWhileHeld && busy.wait(timeout: .now()) == .success
     }
 
     static func parseServices(

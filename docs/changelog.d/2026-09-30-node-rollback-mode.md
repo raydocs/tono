@@ -7,3 +7,5 @@
 - Verification: Linux Python fixture suite 2/2 passed after (1/2 failed before); bash syntax and diff checks passed. Independent fixture reproduced exact 0640→0440→0440 failure before editing.
 - Candidate/publication: source only; no new candidate, host operation, deployment or publication.
 - Remaining limits: no native VPS/systemd rollback acceptance; this fix does not address failures of the filesystem operations themselves.
+
+2026-09-30 continuation: [#997](https://github.com/raydocs/tono/pull/997) merged at main `857b9e73a9231340145ec88aa19c6f2fefbfaa78`. Exact head `b7a6d1b94fc6a76355ae0cd7202757d315958a6d` passed [ci-gate](https://github.com/raydocs/tono/actions/runs/36807592004/job/110211186449). Original fixture evidence remains tied to its tested source. No new candidate, real-host acceptance, deployment or publication.

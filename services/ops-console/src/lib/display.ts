@@ -48,6 +48,12 @@ export function formatDay(value: number | null | undefined): string {
   return `${date.getMonth() + 1}/${date.getDate()}`;
 }
 
+/** A load average to two places, the way `uptime` prints it. */
+export function formatLoadAverage(value: number | null | undefined): string {
+  if (value === null || value === undefined) return copy.missing;
+  return (Math.round(value * 100) / 100).toFixed(2);
+}
+
 /** A plain count with thousands separators, for attempts and sessions. */
 export function formatTally(value: number | null | undefined): string {
   if (value === null || value === undefined) return copy.missing;

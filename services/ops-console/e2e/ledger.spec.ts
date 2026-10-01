@@ -186,13 +186,13 @@ test.describe('账目', () => {
   test('节点详情上写着这台机器每 GB 花了多少', async ({ page }) => {
     await open(page, `/nodes/${encodeURIComponent('Tokyo · Fuji')}`);
     await expect(page.getByText('每 GB 成本')).toBeVisible();
-    await expect(page.getByText('¥0.11')).toBeVisible();
+    await expect(page.getByText('¥0.11', { exact: true })).toBeVisible();
   });
 
   test('计量还没对上的机器，每 GB 成本写着待核对', async ({ page }) => {
     await open(page, `/nodes/${encodeURIComponent('Seoul · Han')}`);
     await expect(page.getByText('每 GB 成本')).toBeVisible();
-    await expect(page.getByText('待核对')).toBeVisible();
+    await expect(page.getByText('待核对', { exact: true })).toBeVisible();
   });
 
   test('改到期的时候可以顺手把这笔收入记上', async ({ page }, testInfo) => {

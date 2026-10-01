@@ -2,7 +2,7 @@ import { useId, type PointerEvent } from 'react';
 import { copy } from '@/copy/copy';
 import { cn } from '@/lib/utils';
 import { ChartTip, Legend, type TipRow } from './ChartTip';
-import { axisTicks, labelWidth, linear, seriesColor, type AxisScale } from './chart-scale';
+import { axisTicks, labelStride, labelWidth, linear, seriesColor, type AxisScale } from './chart-scale';
 import type { Tone } from './StatusWord';
 import { useCursor, useWidth } from './use-chart';
 
@@ -56,7 +56,7 @@ export function Bars({
   const y = linear(0, max, height - BOTTOM, TOP);
   const slot = (width - left) / Math.max(1, columns.length);
   const barWidth = Math.max(3, Math.min(28, slot * 0.62));
-  const labelEvery = Math.max(1, Math.ceil(MIN_LABEL_GAP / Math.max(1, slot)));
+  const labelEvery = labelStride(columns.map((column) => column.label), slot, MIN_LABEL_GAP);
 
   const hover = cursor.index;
   const rows: TipRow[] = hover === null ? [] : stacks.map((stack, index) => {
@@ -138,7 +138,7 @@ export function Bars({
                     );
                   })}
                   {index % labelEvery === 0 ? (
-                    <text x={px(cx)} y={height - 6} textAnchor="middle" fontSize={11} fill="var(--muted-foreground)">
+                    <text {...labelAt(cx, labelWidth(column.label), left, width)} y={height - 6} fontSize={11} fill="var(--muted-foreground)">
                       {column.label}
                     </text>
                   ) : null}
@@ -157,4 +157,11 @@ export function Bars({
       <Legend items={stacks} label={copy.chartLegend} />
     </div>
   );
+}
+
+/** A label that would hang off either end of the plot is pinned to that end instead of clipped. */
+function labelAt(cx: number, textWidth: number, left: number, width: number) {
+  if (cx + textWidth / 2 > width) return { x: px(width), textAnchor: 'end' as const };
+  if (cx - textWidth / 2 < left) return { x: px(left), textAnchor: 'start' as const };
+  return { x: px(cx), textAnchor: 'middle' as const };
 }

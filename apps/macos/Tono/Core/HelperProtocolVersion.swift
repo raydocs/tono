@@ -329,9 +329,11 @@ nonisolated enum HelperProtocolVersion {
     ///   secondary AI sinkhole after clearing PF intent (same class as a
     ///   crash/hang release). Previously `releaseInstalledBlock` alone left
     ///   DNS on 127.0.0.1 and skipped SelectiveFailOpen.
-    /// - 4.52.13 → 4.52.14: DNS restore and service handoff retry
+    /// - 4.52.13 → 4.52.14: DNS writes refuse another preferences
+    ///   writer's lock promptly so helper requests and recovery can continue.
+    /// - 4.52.14 → 4.52.15: DNS restore and service handoff retry
     ///   Apply before retiring originals already committed to disk.
-    static let current = "4.52.14"
+    static let current = "4.52.15"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS
