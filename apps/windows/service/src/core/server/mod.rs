@@ -348,8 +348,16 @@ async fn retire_unrecorded_owner_core(owner: &AuthenticatedOwner) -> AnyResult<(
 
 // 防止旧 listener 的清理删除 supervisor 刚创建的新 socket。
 static IPC_LIFECYCLE_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
-#[cfg(windows)]
+#[cfg(any(windows, test))]
 static IPC_STOPPING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+#[cfg(any(windows, test))]
+static OWNER_GOODBYE_PENDING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+#[cfg(any(windows, test))]
+fn lifecycle_is_stopping() -> bool {
+    IPC_STOPPING.load(std::sync::atomic::Ordering::SeqCst)
+        || OWNER_GOODBYE_PENDING.load(std::sync::atomic::Ordering::SeqCst)
+}
 
 /// The listener and the two ends of its shutdown handshake.
 ///
@@ -389,7 +397,11 @@ pub async fn owner_goodbye_requested() {
 
 /// Fire the owner-goodbye after the response grace (see the constant for why the delay exists).
 /// A full channel means a goodbye is already in flight; either way one trigger is enough.
+/// The route holds OWNER_LIFECYCLE_LOCK: reserve process shutdown before admitting another
+/// mutation. Unlike IPC_STOPPING, this reservation survives a listener restart in the grace.
 fn schedule_owner_goodbye_shutdown() {
+    #[cfg(any(windows, test))]
+    OWNER_GOODBYE_PENDING.store(true, std::sync::atomic::Ordering::SeqCst);
     let sender = OWNER_GOODBYE_CHANNEL.0.clone();
     tokio::spawn(async move {
         tokio::time::sleep(OWNER_GOODBYE_RESPONSE_GRACE).await;
@@ -877,8 +889,8 @@ async fn enter_owner_lifecycle(
     gate: OwnerLifecycleGate<'_>,
 ) -> ControlFlow<Result<HttpResponse>, OwnerLifecycleGuard> {
     let lifecycle_guard = OWNER_LIFECYCLE_LOCK.lock().await;
-    #[cfg(windows)]
-    if IPC_STOPPING.load(std::sync::atomic::Ordering::SeqCst) {
+    #[cfg(any(windows, test))]
+    if lifecycle_is_stopping() {
         return ControlFlow::Break(service_unavailable("service is stopping"));
     }
     #[cfg(windows)]
