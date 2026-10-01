@@ -109,7 +109,12 @@ async function fetchKeys(url: string, force = false): Promise<SigningJWK[]> {
   if (Number.isFinite(declaredLength) && declaredLength > 256 * 1024) {
     throw new AccessVerificationError('unavailable');
   }
-  const raw = await response.text();
+  let raw: string;
+  try {
+    raw = await response.text();
+  } catch {
+    throw new AccessVerificationError('unavailable');
+  }
   if (raw.length > 256 * 1024) throw new AccessVerificationError('unavailable');
   let parsed: JsonWebKeySet;
   try {

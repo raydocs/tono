@@ -4,6 +4,7 @@ import worker, { type Env } from '../src/index';
 import { rollNodeCycle } from '../src/ops/quota';
 import { OPS_V1_ROUTES } from '../src/ops/router';
 import { closeExpiredLogWindows } from '../src/ops/shared-admin/diagnostics-logs';
+import { createAssignedProductAccount, replaceProductAccount } from '../src/product-account';
 import {
   assertActivityHour,
   assertAdoptionMatrix,
@@ -777,6 +778,55 @@ describe('ops v1 api', () => {
     expect(closed.status).toBe(200);
     const user = await db().prepare("SELECT status FROM users WHERE id = 'u-1'").first<{ status: string }>();
     expect(user?.status).toBe('disabled');
+  });
+
+  it('close retires a product replacement committed before the close transaction', async () => {
+    await seedUser();
+    const base = env as unknown as Env;
+    const original = await createAssignedProductAccount(
+      base, 'u-1', 'original-close@example.com', NOW, null, ACCESS_ADMIN_EMAIL,
+    );
+    let release!: () => void;
+    let reached!: () => void;
+    const parked = new Promise<void>((resolve) => { reached = resolve; });
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    let pause = true;
+    const DB = new Proxy(base.DB, {
+      get(target, prop, receiver) {
+        if (prop === 'batch') {
+          return async (statements: D1PreparedStatement[]) => {
+            if (pause) {
+              pause = false;
+              reached();
+              await gate;
+            }
+            return target.batch(statements);
+          };
+        }
+        const value = Reflect.get(target, prop, receiver);
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+    const closing = ops('users/u-1/close', json({ refund: true }), { ...base, DB });
+    await parked;
+    try {
+      const replacement = await replaceProductAccount(
+        base, String(original.id), 'replacement-close@example.com', null, ACCESS_ADMIN_EMAIL,
+      );
+      release();
+      expect((await closing).status).toBe(200);
+      expect(await db().prepare("SELECT status FROM users WHERE id = 'u-1'").first())
+        .toMatchObject({ status: 'disabled' });
+      expect(await db().prepare('SELECT status, close_reason FROM product_accounts WHERE id = ?')
+        .bind(replacement.current.id).first())
+        .toMatchObject({ status: 'retired', close_reason: 'other' });
+      expect(await db().prepare(
+        "SELECT account_id, detail FROM product_account_events WHERE user_id = 'u-1' AND type = 'note'",
+      ).all()).toMatchObject({ results: [{ account_id: replacement.current.id, detail: 'refund close' }] });
+    } finally {
+      release();
+      await closing;
+    }
   });
 
   it('close reclaims nothing when disabling the account fails', async () => {
