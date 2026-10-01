@@ -154,22 +154,16 @@ async fn run(state: Arc<TonoState>, app: AppHandle, ticket: u64, mut generation:
                 // `run` again. The trait object keeps the spawned task Send
                 // without embedding connect's concrete future.
                 let connect: std::pin::Pin<
-                    Box<dyn std::future::Future<Output = Result<(), String>> + Send>,
-                > = Box::pin(super::connect_for_generation(
+                    Box<dyn std::future::Future<Output = Result<(), super::ConnectFailure>> + Send>,
+                > = Box::pin(super::connect_for_generation_tracked(
                     Arc::clone(&state),
                     app.clone(),
                     Some(before),
                 ));
-                let result = connect.await;
-                let after = state.lock().await.connect_generation;
-                if result.is_ok() {
-                    return;
-                }
-                if after == before.wrapping_add(1) {
-                    generation = after;
-                } else if after != before {
-                    return;
-                }
+                let Err(failure) = connect.await else { return; };
+                let Some(owned) = adopt_failed_connect(&state, ticket, failure.retry_generation).await
+                else { return; };
+                generation = owned;
                 // TCP success is not a successful tunnel. Retain the ladder
                 // across our own failure generation and same-generation refusals.
                 schedule.connect_failed(elapsed_ms(clock));
@@ -224,6 +218,21 @@ async fn still_owner(state: &TonoState, ticket: u64, generation: u64) -> bool {
     }
     let inner = state.lock().await;
     inner.connect_generation == generation && inner.account_state == AccountState::Ready
+}
+
+async fn adopt_failed_connect(
+    state: &TonoState, ticket: u64, retry_generation: Option<u64>,
+) -> Option<u64> {
+    let generation = retry_generation?;
+    let inner = state.lock().await;
+    if state.unarmed_probe_ticket.load(Ordering::Acquire) == ticket
+        && inner.account_state == AccountState::Ready
+        && inner.connect_generation == generation
+    {
+        Some(generation)
+    } else {
+        None
+    }
 }
 
 async fn barrier_is_down(state: &TonoState, ticket: u64, generation: u64) -> bool {
@@ -363,6 +372,70 @@ pub(super) async fn tcp_proof_before_tunnel(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test(start_paused = true)]
+    async fn unarmed_owner_adopts_its_timeout_retirement_but_not_user_cancellation() {
+        let state = Arc::new(TonoState::for_test());
+        let ticket = state.unarmed_probe_ticket.load(Ordering::Acquire);
+        let (before, admitted, cancellation, account_owner, record) = {
+            let mut inner = state.lock().await;
+            inner.account_state = AccountState::Ready;
+            let before = inner.connect_generation;
+            let (admitted, cancellation, account_owner) =
+                super::super::begin_attempt(&mut inner, before).await.unwrap();
+            let record = inner.attempt_history.begin(0, "US A".into(), "vless", 0);
+            (before, admitted, cancellation, account_owner, record)
+        };
+        let transaction = super::super::transaction::ConnectTransaction::new(cancellation);
+        tokio::time::advance(super::super::transaction::CONNECT_TRANSACTION_TIMEOUT).await;
+        let failure = transaction.wait("wake after sleep", std::future::pending::<()>())
+            .await.unwrap_err();
+        let super::super::Attempt::Failed { generation, .. } =
+            super::super::attempt_from_stage_failure(&state, admitted, &record, failure, account_owner).await
+        else { panic!("timeout must return its own retired generation"); };
+        assert_eq!(generation, before.wrapping_add(2));
+        let cleanup_state = Arc::clone(&state);
+        let current = super::super::cleanup::reconcile_failure(
+            Arc::clone(&state), generation, async { None },
+            move |_, _guard| async move {
+                // Pre-arm timeout: the real failure FSM returns to idle without native IPC.
+                cleanup_state.lock().await.fsm.connect_failed();
+                true
+            },
+        ).await.unwrap();
+        assert!(current);
+        assert_eq!(adopt_failed_connect(&state, ticket, Some(generation)).await, Some(generation),
+            "the sole recovery owner must survive its own second retirement");
+        let mut schedule = Schedule::begin(0);
+        schedule.connect_failed(0);
+        let targets = [ProbeTarget {
+            name: "US A".into(), region: "US".into(), endpoint: "192.0.2.1:443".into(), tcp: true,
+        }];
+        assert_eq!(schedule.on_clock("US A", "US", &targets, 1999), Step::Wait { until_ms: 2000 });
+        assert!(matches!(schedule.on_clock("US A", "US", &targets, 2000), Step::Probe { .. }));
+        state.lock().await.invalidate_connection(true);
+        assert_eq!(adopt_failed_connect(&state, ticket, Some(generation)).await, None,
+            "a saved failure token cannot adopt the user's later cancellation");
+
+        let (before, admitted, cancellation, account_owner, record) = {
+            let mut inner = state.lock().await;
+            let before = inner.connect_generation;
+            let (admitted, cancellation, account_owner) =
+                super::super::begin_attempt(&mut inner, before).await.unwrap();
+            let record = inner.attempt_history.begin(0, "US A".into(), "vless", 0);
+            (before, admitted, cancellation, account_owner, record)
+        };
+        let transaction = super::super::transaction::ConnectTransaction::new(cancellation);
+        tokio::time::advance(super::super::transaction::CONNECT_TRANSACTION_TIMEOUT).await;
+        let failure = transaction.wait("late timeout", std::future::pending::<()>()).await.unwrap_err();
+        state.lock().await.invalidate_connection(true);
+        assert_eq!(state.lock().await.connect_generation, before.wrapping_add(2));
+        assert!(matches!(
+            super::super::attempt_from_stage_failure(&state, admitted, &record, failure, account_owner).await,
+            super::super::Attempt::Stale
+        ), "the same numeric +2 caused by user cancellation has no failure ownership token");
+        assert_eq!(adopt_failed_connect(&state, ticket, None).await, None);
+    }
 
     #[tokio::test]
     async fn replacing_an_observer_cannot_accumulate_hung_native_reads() {
