@@ -29,7 +29,7 @@ after the v2 force-off keeps that choice.
 | Table | What it stores | What it refuses |
 |---|---|---|
 | `connection_events` | kind, stage, code, node, timings, app/OS/core version, build, git commit, channel, directional `bytes_up` / `bytes_down` | hostnames, URLs, emails |
-| `client_sessions` | one session per account (`{userId}:{sessionId}`), entry node id, residential exit id, bytes, outcome, redacted excerpt | credentials, full IPs |
+| `client_sessions` | one session per account (`{userId}:{sessionId}`), entry node id, residential exit id, bytes, outcome | credentials, full IPs, arbitrary log excerpts |
 | `chain_hops` | hop index, role `entry` or `residential`, connected, handshake ms, failure code | SOCKS passwords, hostnames |
 | `session_exit_observations` | IPv4 `/24` prefix, SHA-256 `ip_hash`, ASN, country, city, residential or datacenter, previous ASN/geo | a full IP address |
 | `dns_checks` | resolver `system` / `tunnel` / `unknown`, leak and geo-mismatch flags, fake-ip or real-ip, IPv6 leak, resolver and exit ASN/country | queried domains |
@@ -38,6 +38,11 @@ after the v2 force-off keeps that choice.
 | `customer_activity_hours` | online minutes and, on the last overlapped hour of a window, the window's byte totals | per-site bytes |
 
 `v_failure_by_version` groups failure kinds by app version, build, channel, platform, and core version. `v_user_diagnostics` is the session rollup. Neither view joins `users.email`.
+
+The optional `logExcerpt` field retains its type, length, URL and session checks
+for compatibility, but automatic intake stores `log_excerpt` as null. Regex
+scrubbing cannot establish that arbitrary log text contains no destinations or
+credentials. Earlier stored excerpts remain subject to the existing retention.
 
 Retention: diagnostics rows 90 days, `ai_service_routes` 60 days, deleted by the housekeeping cron. AI rows are rejected unless `aiServicesConsent` is true.
 

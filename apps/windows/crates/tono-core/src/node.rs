@@ -589,6 +589,40 @@ ws-opts: { path: /ignored }
         admit_node(&value)
     }
 
+    #[test]
+    fn admit_node_bounded_inputs_reject_trojan_and_skip_cert_verify() {
+        let mut state: u64 = 0x1234_5678_9abc_def0;
+        let mut next = || {
+            state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+            state
+        };
+        for _ in 0..48 {
+            let n = next();
+            let yaml = format!(
+                "name: n{n}\ntype: trojan\nserver: 8.8.8.8\nport: 443\npassword: secret\n"
+            );
+            assert_eq!(admit_yaml(&yaml).unwrap_err(), NodeRejection::NotVless);
+        }
+        let skipped = format!("{}skip-cert-verify: true\n", passing_yaml());
+        assert_eq!(admit_yaml(&skipped).unwrap_err(), NodeRejection::SkipCertVerify);
+        for _ in 0..32 {
+            let n = next();
+            let garbage: String = (0..16)
+                .map(|shift| {
+                    let byte = ((n >> (shift % 8)) & 0x7f) as u8;
+                    if byte.is_ascii_graphic() {
+                        byte as char
+                    } else {
+                        'a'
+                    }
+                })
+                .collect();
+            if let Ok(value) = serde_yaml_ng::from_str::<serde_yaml_ng::Value>(&garbage) {
+                let _ = admit_node(&value);
+            }
+        }
+    }
+
     fn passing_yaml() -> String {
         serde_yaml_ng::to_string(&passing_node()).unwrap()
     }

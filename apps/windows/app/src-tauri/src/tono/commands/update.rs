@@ -227,7 +227,10 @@ pub async fn tono_install_update(
         super::emit_status(&app, &super::status_of(&inner));
     }
     super::quit::resync_after_cancelled_quit(app).await;
-    outcome.map_err(|e| format!("Protected update stopped; evidence and protection retained: {e:#}"))
+    // The Service error already says whether traffic was released or the barrier
+    // stayed. Do not wrap every failure, including a released spawn failure, as
+    // "protection retained".
+    outcome.map_err(|e| format!("Protected update stopped: {e:#}"))
 }
 
 /// Fold the connection FSM once a native update has taken over, whatever the
@@ -280,9 +283,14 @@ pub(crate) enum Adoption {
 impl Adoption {
     /// The state after one Adopt request. `answered` is the Service's `successor_relaunched`
     /// when the request succeeded, `None` when it failed.
+    ///
+    /// Only the first certain answer may allow recovery Connect. `adopt_successor` reports
+    /// `relaunched == false` again after it has rebound the record to this process, so a
+    /// retried restore in the same process would otherwise look like a fresh successor and
+    /// start another automatic Connect.
     pub(crate) fn after(self, answered: Option<bool>) -> Adoption {
         match (self, answered) {
-            (Adoption::Undecided | Adoption::Allowed, Some(false)) => Adoption::Allowed,
+            (Adoption::Undecided, Some(false)) => Adoption::Allowed,
             _ => Adoption::Held,
         }
     }
@@ -397,5 +405,20 @@ mod update_quiesce_tests {
         assert!(fsm.status().is_connecting);
         quiesce_connection_after_update(&mut fsm, false, Some(7), 8);
         assert!(fsm.status().is_connecting);
+    }
+
+    #[test]
+    fn a_retried_adopt_of_the_rebound_successor_does_not_stay_allowed() {
+        let first = Adoption::Undecided.after(Some(false));
+        assert_eq!(first, Adoption::Allowed);
+        assert_eq!(
+            first.after(Some(false)),
+            Adoption::Held,
+            "a second not-relaunched answer after the record was rebound started another recovery Connect"
+        );
+        assert_eq!(
+            Adoption::Undecided.after(None).after(Some(false)),
+            Adoption::Held
+        );
     }
 }

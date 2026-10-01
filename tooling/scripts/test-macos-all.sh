@@ -53,12 +53,14 @@ run "multi-exit policy (mihomo validates)" \
 run "policy signing contract" tooling/scripts/test-policy-signing-contract.sh
 run "mixed proxy verifies origin HTTPS" python3 tooling/scripts/tests/test_macos_mixed_probe.py
 run "macos incident regressions" tooling/scripts/test-macos-incident-regressions.sh
+run "helper install argument refusal" python3 tooling/scripts/tests/test_helper_install_arguments.py
 run "reload preserves connections" tooling/scripts/test-reload-preserves-connections.sh
 run "app traffic ledger" tooling/scripts/test-app-traffic-ledger.sh
 run "diagnostics log upload cursor" tooling/scripts/test-diagnostics-log-upload.sh
 run "access token expiry parsing" tooling/scripts/test-jwt-expiry.sh
 run "terminal proxy diagnostics" tooling/scripts/test-terminal-proxy-diagnostics.sh
 run "appcast publisher" node --test tooling/scripts/tests/publish-macos-appcast.test.mjs
+run "test suite registration guard" node --test tooling/scripts/tests/suite-reachability.test.mjs
 
 # Root-only. These cover the two faults that shipped, so a skip is reported
 # loudly rather than folded into the pass count.

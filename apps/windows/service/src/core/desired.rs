@@ -296,6 +296,30 @@ pub async fn restore_desired_state() -> Result<bool> {
     Ok(true)
 }
 
+/// Whether this Service start will try to start Core.
+///
+/// A crash reboot does not: the run intent's boot session does not match (BRICK-W1),
+/// so the kill switch must not sit on a block waiting for a process that will not appear.
+pub(crate) async fn core_replay_expected_this_boot() -> bool {
+    let Ok(Some(active_owner)) = load_active_owner().await else {
+        return false;
+    };
+    let Ok(state) = load_owner_desired_state(&active_owner.owner_key).await else {
+        return false;
+    };
+    if !state.core_should_be_running || state.last_clash_config.is_none() {
+        return false;
+    }
+    #[cfg(windows)]
+    {
+        let current = crate::core::boot_session::current();
+        if !recorded_in_this_boot(state.boot_session.as_deref(), current.as_deref()) {
+            return false;
+        }
+    }
+    true
+}
+
 /// Both markers present and equal. An unknown current boot or an intent recorded before this
 /// field existed reads as another boot.
 #[cfg(windows)]

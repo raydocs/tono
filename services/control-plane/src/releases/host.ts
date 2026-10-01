@@ -110,17 +110,9 @@ export async function handleReleaseHost(req: Request, e: Env): Promise<Response 
       if (req.method === 'HEAD') {
         return secureReleaseResponse(new Response(null, { status: 206, headers }), path);
       }
-      if (desktop) {
-        // R2's range restricts body itself. Keep v1 packages streaming even for
-        // large ranges rather than loading an installer into Worker memory.
-        return secureReleaseResponse(new Response(object.body, { status: 206, headers }), path);
-      }
-      const bytes = await object.arrayBuffer();
-      const start = bytes.byteLength === sizeHint ? range.offset : 0;
-      return secureReleaseResponse(new Response(bytes.slice(start, start + range.length), {
-        status: 206,
-        headers,
-      }), path);
+      // R2 already restricts the body to this range. Stream every installer
+      // path so resumed downloads cannot exhaust the Worker's memory.
+      return secureReleaseResponse(new Response(object.body, { status: 206, headers }), path);
     }
     headers.set('content-length', String(object.size));
     return secureReleaseResponse(new Response(req.method === 'HEAD' ? null : object.body, { headers }), path);

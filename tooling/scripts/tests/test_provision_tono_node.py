@@ -15,6 +15,9 @@ class Contracts(unittest.TestCase):
   for x in ("StrictHostKeyChecking=yes","UserKnownHostsFile=K","GlobalKnownHostsFile=","KnownHostsCommand=none","IdentityAgent=none","IdentitiesOnly=yes","BatchMode=yes","ClearAllForwardings=yes","ControlMaster=no","-i X"): self.assertIn(x,s)
  def test_acl_probe_fail_closed_and_repo_rejected(self):
   with self.assertRaises(P.ProvisionError): P.private_path(str(ROOT/"secret"),may_create=True,acl_probe=lambda p:True)
+  # tooling/ is not the git root. A 0700 directory under services/ used to pass.
+  with self.assertRaisesRegex(P.ProvisionError, "outside the repository"):
+   P.private_path(str(ROOT.parent/"services"/"provision-secret.json"), may_create=True, acl_probe=lambda p: True)
   # Never fake os.name: pathlib and tempfile cache process-global platform state.
   with tempfile.TemporaryDirectory() as d:
    if os.name == "nt":
