@@ -77,7 +77,9 @@ export const backupChannelName = (
 
 export const nodeDisplayName = (wireName: string) => {
   const base = catalogBaseName(wireName)
-  return NODE_DISPLAY_NAMES[base] ?? base
+  return Object.hasOwn(NODE_DISPLAY_NAMES, base)
+    ? NODE_DISPLAY_NAMES[base] ?? base
+    : base
 }
 
 const CITY_CODES: Record<string, string> = {
@@ -116,7 +118,8 @@ const KNOWN_REGION_CODES = new Set([
 /** Stable two-letter mark used in the Windows and macOS server cards. */
 export const nodeCode = (wireName: string) => {
   const displayName = nodeDisplayName(wireName)
-  const cityCode = CITY_CODES[cityOf(displayName)]
+  const city = cityOf(displayName)
+  const cityCode = Object.hasOwn(CITY_CODES, city) ? CITY_CODES[city] : undefined
   if (cityCode) return cityCode
 
   const tokenCode = wireName
@@ -206,13 +209,16 @@ const CITY_TITLE_KEYS: Record<string, TranslationKey> = {
   osaka: 'tono.cities.osaka',
 }
 
-export const nodeCityTitleKey = (wireName: string) =>
-  CITY_TITLE_KEYS[nodeCityParts(wireName).city.toLowerCase()] ?? null
+export const nodeCityTitleKey = (wireName: string) => {
+  const city = nodeCityParts(wireName).city.toLowerCase()
+  return Object.hasOwn(CITY_TITLE_KEYS, city) ? CITY_TITLE_KEYS[city] ?? null : null
+}
 
 /** Keep the UI's groups aligned with the backend's region ranking. */
 export const nodeRegion = (wireName: string): NodeRegion => {
   const tokens = wireName.split(/[^\p{L}\p{N}]+/u).filter(Boolean)
   if (tokens.some((token) => token.toLowerCase() === 'us')) return 'us'
   if (tokens.some((token) => token.toLowerCase() === 'jp')) return 'jp'
-  return CITY_REGIONS[cityOf(wireName)] ?? 'other'
+  const city = cityOf(wireName)
+  return Object.hasOwn(CITY_REGIONS, city) ? CITY_REGIONS[city] ?? 'other' : 'other'
 }

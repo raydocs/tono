@@ -307,18 +307,12 @@ fn backoff_delay(attempt: u32, max: Duration) -> Duration {
 }
 
 fn core_args(config: &ClashConfig) -> Vec<String> {
-    vec![
-        "-d".to_string(),
-        config.core_config.config_dir.clone(),
-        "-f".to_string(),
-        config.core_config.config_path.clone(),
-        if cfg!(windows) {
-            "-ext-ctl-pipe".to_string()
-        } else {
-            "-ext-ctl-unix".to_string()
-        },
-        config.core_config.core_ipc_path.clone(),
-    ]
+    crate::core::structure::core_launch_args(
+        &config.core_config.core_path,
+        &config.core_config.config_dir,
+        &config.core_config.config_path,
+        &config.core_config.core_ipc_path,
+    )
 }
 
 fn log_core_exit(status: &std::process::ExitStatus, uptime: Duration) -> String {
@@ -666,13 +660,7 @@ impl CoreManager {
         };
         let child_pid = child_guard.id();
 
-        if let Err(error) = secure_core_ipc_socket(
-            config.core_config.core_ipc_path.clone(),
-            owner.clone(),
-            child_pid,
-        )
-        .await
-        {
+        if let Err(error) = secure_core_ipc_for(&config, &owner, child_pid).await {
             if let Err(kill_error) = child_guard.kill_now().await {
                 let now_secs = unix_timestamp_secs();
                 *self.running_config.lock().await = Some(config.clone());
@@ -984,12 +972,7 @@ impl CoreManager {
                     {
                         Ok(mut new_guard) => {
                             let new_pid = new_guard.id();
-                            if let Err(error) = secure_core_ipc_socket(
-                                config.core_config.core_ipc_path.clone(),
-                                owner.clone(),
-                                new_pid,
-                            )
-                            .await
+                            if let Err(error) = secure_core_ipc_for(&config, &owner, new_pid).await
                             {
                                 error!("Failed to secure restarted core IPC: {error:#}");
                                 if let Err(kill_error) = new_guard.kill_now().await {
@@ -1434,6 +1417,29 @@ fn grant_core_ipc_directory_to_owner(target: &std::path::Path, uid: u32, gid: u3
     result
 }
 
+/// Only Mihomo serves the owner-scoped controller pipe (`-ext-ctl-pipe`). sing-box is launched
+/// with `run -c` and its controller is the loopback `clash_api` behind a 32-byte compiler secret,
+/// so it never creates that pipe. Waiting for it refused every sing-box start after two seconds.
+fn core_serves_ipc_pipe(core_path: &str) -> bool {
+    !crate::core::structure::is_sing_box_core_path(core_path)
+}
+
+async fn secure_core_ipc_for(
+    config: &ClashConfig,
+    owner: &OwnerIdentity,
+    expected_pid: Option<u32>,
+) -> Result<()> {
+    if !core_serves_ipc_pipe(&config.core_config.core_path) {
+        return Ok(());
+    }
+    secure_core_ipc_socket(
+        config.core_config.core_ipc_path.clone(),
+        owner.clone(),
+        expected_pid,
+    )
+    .await
+}
+
 async fn secure_core_ipc_socket(
     core_ipc_path: String,
     owner: OwnerIdentity,
@@ -1666,6 +1672,60 @@ mod prepare_start_action_tests {
         assert_eq!(
             prepare_start_core_action(0, false),
             PrepareStartCoreAction::NoCore
+        );
+    }
+}
+
+#[cfg(test)]
+mod sing_box_ipc_tests {
+    use super::secure_core_ipc_for;
+    use crate::core::structure::{ClashConfig, CoreConfig};
+    use crate::{OwnerIdentity, WriterConfig};
+
+    fn config(core_path: &str) -> ClashConfig {
+        ClashConfig {
+            core_config: CoreConfig {
+                core_path: core_path.into(),
+                core_ipc_path: if cfg!(windows) {
+                    r"\\.\pipe\tono-core-absent-test".into()
+                } else {
+                    "/tmp/tono-core-absent-test.sock".into()
+                },
+                config_path: "unused-config".into(),
+                config_dir: "unused-runtime".into(),
+            },
+            log_config: WriterConfig {
+                directory: "unused-logs".into(),
+                max_log_size: 1,
+                max_log_files: 1,
+            },
+        }
+    }
+
+    fn owner() -> OwnerIdentity {
+        #[cfg(windows)]
+        {
+            OwnerIdentity::Windows {
+                sid: "S-1-5-21-1-2-3-1001".into(),
+            }
+        }
+        #[cfg(not(windows))]
+        {
+            OwnerIdentity::Unix { uid: 501, gid: 20 }
+        }
+    }
+
+    #[tokio::test]
+    async fn a_sing_box_start_does_not_wait_for_the_mihomo_controller_pipe() {
+        assert!(
+            secure_core_ipc_for(&config("sing-box.exe"), &owner(), Some(4242))
+                .await
+                .is_ok()
+        );
+        assert!(
+            secure_core_ipc_for(&config("tono-core.exe"), &owner(), Some(4242))
+                .await
+                .is_err()
         );
     }
 }

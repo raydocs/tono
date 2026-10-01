@@ -225,6 +225,92 @@ fn load(root: &Path) -> Result<Option<(Vec<u8>, State)>> {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RollbackFinalizationStage {
+    NetworkSettled,
+    Complete,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RollbackFinalizationRecord {
+    attempt_id: String,
+    release_sequence: u64,
+    stage: RollbackFinalizationStage,
+}
+
+/// Finalization evidence grants no publication/consumption authority. It survives dropping
+/// the Store lock for Service readiness and is bound to one private, consumed attempt.
+pub struct RollbackFinalizer {
+    path: PathBuf,
+    attempt_id: String,
+    release_sequence: u64,
+    explicitly_released: bool,
+}
+
+impl RollbackFinalizer {
+    fn stage(&self) -> Result<Option<RollbackFinalizationStage>> {
+        let file = match File::open(&self.path) {
+            Ok(file) => file,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(error.into()),
+        };
+        let mut bytes = Vec::new();
+        file.take(1_025).read_to_end(&mut bytes)?;
+        ensure!(
+            bytes.len() <= 1_024,
+            "rollback finalization record exceeds limit"
+        );
+        let record: RollbackFinalizationRecord = serde_json::from_slice(&bytes)?;
+        ensure!(
+            record.attempt_id == self.attempt_id
+                && record.release_sequence == self.release_sequence,
+            "rollback finalization belongs to another attempt"
+        );
+        Ok(Some(record.stage))
+    }
+
+    fn record(&self, stage: RollbackFinalizationStage) -> Result<()> {
+        atomic_write(
+            &self.path,
+            &serde_json::to_vec(&RollbackFinalizationRecord {
+                attempt_id: self.attempt_id.clone(),
+                release_sequence: self.release_sequence,
+                stage,
+            })?,
+        )
+    }
+
+    /// Settle the stopped-Service network once, then restore supervision/readiness. A marker
+    /// failure still runs restoration; replay after NetworkSettled never stops Service again.
+    pub fn finish(
+        &self,
+        strict: bool,
+        settle: impl FnOnce() -> Result<()>,
+        restore_service: impl FnOnce() -> Result<()>,
+    ) -> (Result<()>, Result<()>) {
+        // Ambiguous evidence cannot prove completion; retry only bounded cleanup, never install.
+        let stage = self.stage().ok().flatten();
+        if stage == Some(RollbackFinalizationStage::Complete) {
+            return (Ok(()), Ok(()));
+        }
+        let mut settled = if self.explicitly_released
+            || stage == Some(RollbackFinalizationStage::NetworkSettled)
+        {
+            Ok(())
+        } else {
+            (if strict { Ok(()) } else { settle() })
+                .and_then(|()| self.record(RollbackFinalizationStage::NetworkSettled))
+        };
+        let restored = restore_service();
+        if settled.is_ok() && restored.is_ok() {
+            // Evidence failure is not a Service readiness failure; never trigger another stop.
+            settled = self.record(RollbackFinalizationStage::Complete);
+        }
+        (settled, restored)
+    }
+}
+
 pub struct Store {
     root: PathBuf,
     _lock: File,
@@ -303,6 +389,35 @@ impl Store {
         self.state.pending()
     }
 
+    /// Shared startup/executor admission for interrupted installation recovery.
+    pub fn independent_recovery_pending(&self) -> Result<bool> {
+        Ok(match self.attempt()?.execution {
+            Execution::Consumed | Execution::Replaced | Execution::Uncertain => true,
+            Execution::RolledBack => {
+                self.rollback_finalizer()?.stage().ok().flatten()
+                    != Some(RollbackFinalizationStage::Complete)
+            }
+            _ => false,
+        })
+    }
+
+    pub fn rollback_finalizer(&self) -> Result<RollbackFinalizer> {
+        let a = self.consumed_attempt()?;
+        ensure!(
+            a.execution == Execution::RolledBack,
+            "only a resolved rollback can finalize"
+        );
+        Ok(RollbackFinalizer {
+            path: self.attempt_dir()?.join("rollback-finalization.json"),
+            attempt_id: a.receipt.attempt_id.clone(),
+            release_sequence: a.manifest.release_sequence,
+            explicitly_released: a
+                .disconnect
+                .as_ref()
+                .is_some_and(|release| release.verified_at_unix.is_some()),
+        })
+    }
+
     pub fn attempt_dir(&self) -> Result<PathBuf> {
         Ok(self.root.join(&self.attempt()?.receipt.attempt_id))
     }
@@ -331,6 +446,49 @@ impl Store {
     /// retry observes `Consumed` and refuses: it is not another installation grant.
     pub fn consume(&mut self, executor: &Image, now: u64) -> Result<()> {
         self.consume_with(executor, now, atomic_write)
+    }
+
+    /// Capture the successor token before consuming or terminating the initiating App.
+    pub fn capture_before_consuming<T>(
+        &mut self,
+        executor: &Image,
+        mut clock: impl FnMut() -> Result<u64>,
+        capture: impl FnOnce() -> Result<T>,
+    ) -> Result<Result<T>> {
+        let a = self.live_attempt(clock()?)?;
+        ensure!(
+            a.receipt.phase == Phase::InstallationAuthorized
+                && a.execution == Execution::Launching
+                && a.executor.as_ref() == Some(executor)
+                && self.state.consumed_sequence < a.manifest.release_sequence,
+            "token capture requires the authorized unconsumed executor"
+        );
+        match capture() {
+            Ok(captured) => {
+                match self.consume(executor, clock()?) {
+                    Ok(()) => Ok(Ok(captured)),
+                    // The rename may be visible despite a failed durability acknowledgement.
+                    // Keep poisoned evidence; defer only cleanup, never another install grant.
+                    Err(error) if self.write_failed => Ok(Err(error)),
+                    Err(error) => Err(error), // Clock/expiry refusal retains its existing policy.
+                }
+            }
+            Err(capture_error) => {
+                // No install grant was consumed. Preserve the receipt for safe retry/retirement.
+                let mut next = self.state.clone();
+                let attempt = next.attempt.as_mut().context("attempt checked above")?;
+                attempt.execution = Execution::Staged;
+                attempt.executor = None;
+                let error = match self.save(next) {
+                    Ok(()) => capture_error,
+                    Err(record_error) => capture_error.context(format!(
+                        "capture refusal could not return the attempt to Staged: {record_error:#}"
+                    )),
+                };
+                // Even a failed refusal record cannot bypass the guarded failure finalizer.
+                Ok(Err(error))
+            }
+        }
     }
 
     fn consume_with(
@@ -640,6 +798,23 @@ impl Store {
         self.save(next)
     }
 
+    /// Fold a fully measured recovery without stopping Service or granting another install.
+    pub fn record_complete_publication_recovery(&mut self, clock: u64) -> Result<()> {
+        let a = self.consumed_attempt()?;
+        ensure!(
+            matches!(
+                a.execution,
+                Execution::Consumed | Execution::Replaced | Execution::Uncertain
+            ),
+            "complete publication recovery requires an in-flight consumed attempt"
+        );
+        self.note_publication_clock(clock)?;
+        if self.attempt()?.execution != Execution::Replaced {
+            self.execution(Execution::Replaced)?;
+        }
+        Ok(())
+    }
+
     pub fn execution(&mut self, execution: Execution) -> Result<()> {
         let mut next = self.state.clone();
         next.attempt.as_mut().context("no attempt")?.execution = execution;
@@ -873,6 +1048,232 @@ pub(crate) mod tests {
             )
             .unwrap();
         store.execution(Execution::Launching).unwrap();
+    }
+
+    #[test]
+    fn update_interrupted_rollback_remains_pending_for_independent_finalization() {
+        let (root, mut store, peer, executor) = reserved();
+        authorize(&mut store, &peer);
+        store.consume(&executor, 1_900_000_050).unwrap();
+        store.execution(Execution::RolledBack).unwrap();
+        let sequence = store.state.consumed_sequence;
+        let receipt = canonical(&store.attempt().unwrap().receipt).unwrap();
+        drop(store); // Executor died before its selective release / Service restoration.
+
+        let store = Store::open(&root).unwrap();
+        let pending = store.independent_recovery_pending().unwrap();
+        assert_eq!(store.state.consumed_sequence, sequence);
+        assert_eq!(
+            canonical(&store.attempt().unwrap().receipt).unwrap(),
+            receipt
+        );
+        assert!(
+            pending,
+            "RolledBack is not proof that selective finalization completed"
+        );
+        std::fs::create_dir_all(store.attempt_dir().unwrap()).unwrap();
+        let finalizer = store.rollback_finalizer().unwrap();
+        let events = std::cell::RefCell::new(Vec::new());
+        let (settled, restored) = finalizer.finish(
+            false,
+            || {
+                events.borrow_mut().push("AI-held release");
+                Ok(())
+            },
+            || {
+                events.borrow_mut().push("interrupted Service restoration");
+                Err(anyhow::anyhow!("executor died before Service ready"))
+            },
+        );
+        settled.unwrap();
+        assert!(restored.is_err());
+        drop(store);
+        let store = Store::open(&root).unwrap();
+        assert!(store.independent_recovery_pending().unwrap());
+        let (settled, restored) = store.rollback_finalizer().unwrap().finish(
+            false,
+            || panic!("NetworkSettled replay must not stop/release Service again"),
+            || {
+                events.borrow_mut().push("restore Service");
+                Ok(())
+            },
+        );
+        settled.unwrap();
+        restored.unwrap();
+        assert!(!store.independent_recovery_pending().unwrap());
+        assert!(
+            store.pending(),
+            "finalization must not fabricate recovery commit"
+        );
+        assert_eq!(store.state.consumed_sequence, sequence);
+        assert_eq!(
+            canonical(&store.attempt().unwrap().receipt).unwrap(),
+            receipt
+        );
+        assert_eq!(
+            *events.borrow(),
+            [
+                "AI-held release",
+                "interrupted Service restoration",
+                "restore Service"
+            ]
+        );
+        store
+            .rollback_finalizer()
+            .unwrap()
+            .finish(
+                false,
+                || panic!("completed rollback repeats network effects"),
+                || panic!("completed rollback restarts Service"),
+            )
+            .0
+            .unwrap();
+        drop(store);
+        let store = Store::open(&root).unwrap();
+        assert!(!store.independent_recovery_pending().unwrap());
+        drop(store);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn update_rollback_finalization_preserves_verified_explicit_restore() {
+        let (root, mut store, peer, executor) = reserved();
+        authorize(&mut store, &peer);
+        store.consume(&executor, 1_900_000_050).unwrap();
+        store.execution(Execution::RolledBack).unwrap();
+        store
+            .request_disconnect("windows:fixture-owner", &peer, 1_900_000_051)
+            .unwrap();
+        store
+            .verify_disconnect(
+                "windows:fixture-owner",
+                &peer,
+                1_900_000_052,
+                Protection::Unprotected,
+            )
+            .unwrap();
+        std::fs::create_dir_all(store.attempt_dir().unwrap()).unwrap();
+        let (settled, restored) = store.rollback_finalizer().unwrap().finish(
+            false,
+            || panic!("verified Restore cannot replay an automatic AI hold"),
+            || Ok(()),
+        );
+        settled.unwrap();
+        restored.unwrap();
+        assert!(!store.independent_recovery_pending().unwrap());
+        drop(store);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn update_rollback_marker_write_failure_still_restores_service() {
+        let (root, mut store, peer, executor) = reserved();
+        authorize(&mut store, &peer);
+        store.consume(&executor, 1_900_000_050).unwrap();
+        store.execution(Execution::RolledBack).unwrap();
+        let finalizer = store.rollback_finalizer().unwrap();
+        // No attempt directory: deterministic failed marker write after successful release.
+        let restored = std::cell::Cell::new(false);
+        let (settled, restarted) = finalizer.finish(
+            false,
+            || Ok(()),
+            || {
+                restored.set(true);
+                Ok(())
+            },
+        );
+        assert!(settled.is_err());
+        restarted.unwrap();
+        assert!(
+            restored.get(),
+            "failed evidence must not strand Service supervision"
+        );
+        assert!(store.independent_recovery_pending().unwrap());
+        drop(store);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn update_rollback_finalization_keeps_explicit_strict_protection() {
+        let (root, mut store, peer, executor) = reserved();
+        authorize(&mut store, &peer);
+        store.consume(&executor, 1_900_000_050).unwrap();
+        store.execution(Execution::RolledBack).unwrap();
+        std::fs::create_dir_all(store.attempt_dir().unwrap()).unwrap();
+        let (settled, restored) = store.rollback_finalizer().unwrap().finish(
+            true,
+            || panic!("strict rollback releases its block"),
+            || Ok(()),
+        );
+        settled.unwrap();
+        restored.unwrap();
+        assert!(!store.independent_recovery_pending().unwrap());
+        drop(store);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn update_rollback_finalization_rejects_another_attempts_complete_marker() {
+        let (root, mut store, peer, executor) = reserved();
+        authorize(&mut store, &peer);
+        store.consume(&executor, 1_900_000_050).unwrap();
+        store.execution(Execution::RolledBack).unwrap();
+        std::fs::create_dir_all(store.attempt_dir().unwrap()).unwrap();
+        let finalizer = store.rollback_finalizer().unwrap();
+        atomic_write(
+            &finalizer.path,
+            &serde_json::to_vec(&RollbackFinalizationRecord {
+                attempt_id: "another-attempt".into(),
+                release_sequence: finalizer.release_sequence,
+                stage: RollbackFinalizationStage::Complete,
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        assert!(store.independent_recovery_pending().unwrap());
+        let settled = std::cell::Cell::new(false);
+        let (released, restored) = finalizer.finish(
+            false,
+            || {
+                settled.set(true);
+                Ok(())
+            },
+            || Ok(()),
+        );
+        released.unwrap();
+        restored.unwrap();
+        assert!(
+            settled.get(),
+            "foreign completion cannot suppress this attempt's cleanup"
+        );
+        drop(store);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn update_rollback_complete_marker_failure_is_not_a_service_restart_failure() {
+        let (root, mut store, peer, executor) = reserved();
+        authorize(&mut store, &peer);
+        store.consume(&executor, 1_900_000_050).unwrap();
+        store.execution(Execution::RolledBack).unwrap();
+        let dir = store.attempt_dir().unwrap();
+        std::fs::create_dir_all(&dir).unwrap();
+        let finalizer = store.rollback_finalizer().unwrap();
+        let (settled, restored) = finalizer.finish(
+            false,
+            || Ok(()),
+            || {
+                // Remove only this test's marker directory to fail the final bookkeeping write.
+                std::fs::remove_file(&finalizer.path)?;
+                std::fs::remove_dir(&dir)?;
+                Ok(()) // Service readiness succeeded.
+            },
+        );
+        assert!(settled.is_err());
+        restored.unwrap();
+        assert!(store.independent_recovery_pending().unwrap());
+        drop(store);
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
@@ -1302,6 +1703,47 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn update_complete_publication_recovery_fences_an_old_mapped_app_incarnation() {
+        let (root, mut store, peer, executor) = reserved();
+        authorize(&mut store, &peer);
+        store.consume(&executor, 1_900_000_002).unwrap();
+        store.record_complete_publication_recovery(450).unwrap();
+        let old_mapped = Image {
+            pid: 41,
+            started_at: 400,
+            path: peer.path.clone(),
+            sha256: target(&store.attempt().unwrap().manifest)
+                .components
+                .app_sha256
+                .clone(),
+        };
+        drop(store);
+        let mut store = Store::open(&root).unwrap();
+        assert!(
+            store.authenticate_successor(&old_mapped).is_err(),
+            "recovery must reject an App mapped before target publication"
+        );
+        store.record_complete_publication_recovery(600).unwrap();
+        assert_eq!(
+            store.attempt().unwrap().publication_clock,
+            Some(450),
+            "later recovery must preserve the first durable publication floor"
+        );
+        let fresh = Image {
+            pid: 42,
+            started_at: 451,
+            ..old_mapped
+        };
+        store.authenticate_successor(&fresh).unwrap();
+        assert_eq!(
+            store.attempt().unwrap().successor_image.as_ref(),
+            Some(&fresh)
+        );
+        drop(store);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn update_fresh_registered_app_incarnation_can_disconnect_and_retire_unconsumed_attempt() {
         let (root, mut store, peer, _) = reserved();
         let mut next = store.state.clone();
@@ -1506,6 +1948,184 @@ pub(crate) mod tests {
             (store.state.consumed_sequence, store.state.generation),
             (74, 92)
         );
+        drop(store);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn update_capture_refusal_reaches_cleanup_without_consuming_or_publishing() {
+        let (root, mut store, peer, executor) = reserved();
+        authorize(&mut store, &peer);
+        let sequence = store.state.consumed_sequence;
+        let receipt = canonical(&store.attempt().unwrap().receipt).unwrap();
+        let captured = store
+            .capture_before_consuming(
+                &executor,
+                || Ok(1_900_000_050),
+                || Err::<(), _>(anyhow::anyhow!("initiating App token is unavailable")),
+            )
+            .unwrap();
+        assert!(
+            captured.is_err(),
+            "capture refusal must be deferred to selective cleanup"
+        );
+        assert_eq!(store.state.consumed_sequence, sequence);
+        assert_eq!(
+            canonical(&store.attempt().unwrap().receipt).unwrap(),
+            receipt
+        );
+        assert!(store.pending());
+        assert_eq!(store.attempt().unwrap().execution, Execution::Staged);
+        assert!(store.attempt().unwrap().executor.is_none());
+        drop(store);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn update_capture_refusal_cannot_reset_another_executor() {
+        let (root, mut store, peer, executor) = reserved();
+        authorize(&mut store, &peer);
+        let mut wrong_executor = executor.clone();
+        wrong_executor.started_at += 1;
+        let refused = store.capture_before_consuming(
+            &wrong_executor,
+            || Ok(1_900_000_050),
+            || -> Result<()> { panic!("unbound executor must not reach token capture") },
+        );
+        assert!(refused.is_err());
+        assert_eq!(store.attempt().unwrap().execution, Execution::Launching);
+        assert_eq!(store.attempt().unwrap().executor.as_ref(), Some(&executor));
+        drop(store);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn update_successful_capture_consumes_the_exact_executor_once() {
+        let (root, mut store, peer, executor) = reserved();
+        authorize(&mut store, &peer);
+        let captured = store
+            .capture_before_consuming(
+                &executor,
+                || Ok(1_900_000_050),
+                || Ok("captured user token"),
+            )
+            .unwrap()
+            .unwrap();
+        assert_eq!(captured, "captured user token");
+        assert_eq!(store.attempt().unwrap().execution, Execution::Consumed);
+        assert_eq!(
+            store.state.consumed_sequence,
+            store.attempt().unwrap().manifest.release_sequence
+        );
+        assert!(
+            store
+                .capture_before_consuming(
+                    &executor,
+                    || Ok(1_900_000_051),
+                    || -> Result<()> { panic!("a consumed attempt cannot recapture/reinstall") }
+                )
+                .is_err()
+        );
+        drop(store);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn update_capture_refusal_record_failure_still_reaches_the_failure_finalizer() {
+        let (root, mut store, peer, executor) = reserved();
+        authorize(&mut store, &peer);
+        let sequence = store.state.consumed_sequence;
+        std::fs::remove_file(root.join("state.json")).unwrap();
+        std::fs::create_dir(root.join("state.json")).unwrap();
+        let captured = store
+            .capture_before_consuming(
+                &executor,
+                || Ok(1_900_000_050),
+                || Err::<(), _>(anyhow::anyhow!("token capture refused")),
+            )
+            .unwrap();
+        let error = captured.unwrap_err();
+        assert_eq!(error.root_cause().to_string(), "token capture refused");
+        assert!(store.write_failed);
+        assert_eq!(store.state.consumed_sequence, sequence);
+        drop(store);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn update_consume_write_refusal_reaches_cleanup_without_install_authority() {
+        let (root, mut store, peer, executor) = reserved();
+        authorize(&mut store, &peer);
+        let before = serde_json::to_vec(&store.state).unwrap();
+        let state_path = root.join("state.json");
+        let retained_path = root.join("state-before-refusal.json");
+        let captured = std::cell::Cell::new(false);
+        let result = store.capture_before_consuming(
+            &executor,
+            || Ok(1_900_000_002),
+            || {
+                // Refuse the real atomic replacement deterministically without discarding evidence.
+                std::fs::rename(&state_path, &retained_path)?;
+                std::fs::create_dir(&state_path)?;
+                captured.set(true);
+                Ok("captured user token")
+            },
+        );
+        assert!(
+            captured.get(),
+            "token capture must succeed before the injected write refusal"
+        );
+        assert!(
+            result.is_ok(),
+            "a failed consume write must reach the guarded failure finalizer"
+        );
+        assert!(
+            result.unwrap().is_err(),
+            "a refused consume cannot grant a launch token"
+        );
+        assert!(store.write_failed);
+        assert_eq!(
+            serde_json::to_vec(&store.state).unwrap(),
+            before,
+            "a failed acknowledgement cannot publish memory authority"
+        );
+        assert!(store.consumed_attempt().is_err());
+        assert!(store.consume(&executor, 1_900_000_003).is_err());
+        drop(store);
+        std::fs::remove_dir(&state_path).unwrap();
+        std::fs::rename(&retained_path, &state_path).unwrap();
+        let store = Store::open(&root).unwrap();
+        assert_eq!(
+            serde_json::to_vec(&store.state).unwrap(),
+            before,
+            "retained evidence must remain unmodified"
+        );
+        drop(store);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn update_slow_token_capture_cannot_consume_after_receipt_expiry() {
+        let (root, mut store, peer, executor) = reserved();
+        authorize(&mut store, &peer);
+        let sequence = store.state.consumed_sequence;
+        let expiry = store.attempt().unwrap().receipt.expires_at_unix;
+        let captured = std::cell::Cell::new(false);
+        let result = store.capture_before_consuming(
+            &executor,
+            || Ok(if captured.get() { expiry } else { expiry - 1 }),
+            || {
+                captured.set(true);
+                Ok("user token")
+            },
+        );
+        assert!(captured.get());
+        assert!(
+            result.is_err(),
+            "consume must use time measured after token capture"
+        );
+        assert_eq!(store.state.consumed_sequence, sequence);
+        assert_eq!(store.attempt().unwrap().execution, Execution::Launching);
         drop(store);
         std::fs::remove_dir_all(root).unwrap();
     }

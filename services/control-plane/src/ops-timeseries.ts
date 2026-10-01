@@ -129,8 +129,15 @@ export async function recordAgentSamples(
          mem_used = excluded.mem_used,
          disk_total = excluded.disk_total,
          disk_used = excluded.disk_used,
-         net_in = excluded.net_in,
-         net_out = excluded.net_out,
+         -- A second observation can share this minute but lack one counter.
+         -- Keep a stored complete pair so quota cannot fall back to older
+         -- counters; partial pairs still replace other partial pairs.
+         net_in = CASE WHEN net_in IS NOT NULL AND net_out IS NOT NULL
+           AND (excluded.net_in IS NULL OR excluded.net_out IS NULL)
+           THEN net_in ELSE excluded.net_in END,
+         net_out = CASE WHEN net_in IS NOT NULL AND net_out IS NOT NULL
+           AND (excluded.net_in IS NULL OR excluded.net_out IS NULL)
+           THEN net_out ELSE excluded.net_out END,
          load1 = excluded.load1,
          load5 = excluded.load5,
          load15 = excluded.load15,

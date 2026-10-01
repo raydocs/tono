@@ -73,7 +73,9 @@ const activityProcessLabel = (
   process: string,
   translate: (key: string) => string,
 ) => {
-  const key = ACTIVITY_APP_KEYS[process]
+  const key = Object.hasOwn(ACTIVITY_APP_KEYS, process)
+    ? ACTIVITY_APP_KEYS[process]
+    : undefined
   return key ? translate(key) : process
 }
 

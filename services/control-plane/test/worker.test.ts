@@ -732,6 +732,44 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     expect((await unavailable.json() as any).error.code).toBe('ACCESS_UNAVAILABLE');
   });
 
+  it('reports unavailable when an Access key response body fails without rejecting the session', async () => {
+    const team = 'body-failure.cloudflareaccess.com';
+    const e = env as unknown as Env;
+    const originalTeam = e.ACCESS_TEAM_DOMAIN;
+    e.ACCESS_TEAM_DOMAIN = team;
+    const originalFetch = vi.mocked(globalThis.fetch).getMockImplementation()!;
+    let failBody = true;
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const url = input instanceof Request ? input.url : String(input);
+      if (url === `https://${team}/cdn-cgi/access/certs`) {
+        if (failBody) {
+          return new Response(new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.enqueue(new TextEncoder().encode('{"keys":['));
+              controller.error(new TypeError('Access key connection reset'));
+            },
+          }));
+        }
+        return Response.json({ keys: [oidcPublicKey] });
+      }
+      return originalFetch(input, init);
+    });
+    try {
+      const assertion = await accessAssertion(ACCESS_ADMIN_EMAIL, { iss: `https://${team}` });
+      const read = () => api('ops/dashboard', {
+        headers: { 'cf-access-jwt-assertion': assertion },
+      });
+      const unavailable = await read();
+      expect(unavailable.status).toBe(503);
+      expect((await unavailable.json() as any).error.code).toBe('ACCESS_UNAVAILABLE');
+      failBody = false;
+      expect((await read()).status).toBe(200);
+    } finally {
+      fetchSpy.mockImplementation(originalFetch);
+      e.ACCESS_TEAM_DOMAIN = originalTeam;
+    }
+  });
+
   it('reports an empty live state to Access admins without fetching an absorbed host', async () => {
     const unauthorized = await api('ops/live', {
       headers: { authorization: `Bearer ${ADMIN_TOKEN}` },
@@ -5076,6 +5114,48 @@ ${nameLine}
     expect(JSON.parse((await published.json() as any).json).directSuffixes).toEqual(allowed.directSuffixes);
   });
 
+  it('keeps dedicated DashScope APIs protected while serving the signed Alibaba DIRECT parent', async () => {
+    const policy = {
+      version: 3, domains: [], mediaEndpoints: [], webDomains: [],
+      directSuffixes: [{ host: 'aliyuncs.com', ports: [80, 443] }],
+    };
+    const preview = await admin('traffic-policy', { policy, dryRun: true }, 'PUT');
+    expect(preview.status).toBe(200);
+    const canonical = (await preview.json() as any).json;
+    const published = await admin('traffic-policy', {
+      policy, expectedRevision: 0, signature: await signPolicy(canonical),
+    }, 'PUT');
+    expect(published.status).toBe(200);
+    const account = await createAccount('dashscope-parent-policy');
+    const fetched = await api('traffic-policy', {
+      headers: { authorization: `Bearer ${account.accessToken}` },
+    });
+    expect(fetched.status).toBe(200);
+    expect((await fetched.json() as any).json).toBe(canonical);
+
+    for (const host of [
+      'dashscope.aliyuncs.com', 'cn-hongkong.dashscope.aliyuncs.com',
+      'coding-intl.dashscope.aliyuncs.com', 'dashscope-intl.aliyuncs.com',
+      'dashscope-us.aliyuncs.com', 'maas.aliyuncs.com',
+      'workspace.cn-beijing.maas.aliyuncs.com', 'trial.ap-southeast-1.maas.aliyuncs.com',
+      'token-plan.ap-southeast-1.maas.aliyuncs.com',
+    ]) {
+      for (const field of ['domains', 'webDomains', 'directSuffixes'] as const) {
+        const attempt = { ...policy, [field]: [{ host, ports: [443] }] };
+        const rejected = await admin('traffic-policy', {
+          policy: attempt, expectedRevision: 1, signature: await signPolicy(JSON.stringify(attempt)),
+        }, 'PUT');
+        expect(rejected.status, `${field}/${host}`).toBe(400);
+        expect((await rejected.json() as any).error.code).toBe('VALIDATION_ERROR');
+      }
+    }
+    // The exception is only the reviewed Alibaba parent, never arbitrary ancestors.
+    const rejected = await admin('traffic-policy', {
+      policy: { ...policy, directSuffixes: [{ host: 'googleapis.com', ports: [443] }] }, dryRun: true,
+    }, 'PUT');
+    expect(rejected.status).toBe(400);
+  });
+
   it('admits product China web suffixes as directSuffixes', async () => {
     const preview = await admin('traffic-policy', {
       policy: {
@@ -5405,6 +5485,54 @@ ${nameLine}
       "SELECT user_id, email FROM auth_identities WHERE provider = 'google' AND subject = ?",
     ).bind('google-user-1').first<any>();
     expect(identity.email).toBe(email);
+  });
+
+  it('keeps a sign-in challenge retryable when the provider key response body fails', async () => {
+    // Expire any keys cached by earlier sign-ins, then fail after HTTP headers
+    // arrived: this is a transport outage while reading the key response.
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(Date.now() + 3_601_000);
+    const originalFetch = vi.mocked(globalThis.fetch).getMockImplementation()!;
+    let failBody = true;
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const url = input instanceof Request ? input.url : String(input);
+      if (url === 'https://appleid.apple.com/auth/keys' && failBody) {
+        return new Response(new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode('{"keys":['));
+            controller.error(new TypeError('Provider connection reset'));
+          },
+        }));
+      }
+      return originalFetch(input, init);
+    });
+    try {
+      const challengeResponse = await api('auth/oidc/challenge', json({
+        provider: 'apple',
+        deviceName: 'Apple Mac',
+        installationId: 'apple-body-failure-installation',
+      }));
+      expect(challengeResponse.status).toBe(200);
+      const challenge = await challengeResponse.json() as any;
+      const idToken = await oidcToken('apple', challenge.nonce, {
+        subject: 'apple-body-failure-subject',
+        email: `apple-body-failure-${++sequence}@example.com`,
+      });
+      const verify = () => api('auth/oidc/verify', json({
+        provider: 'apple', challengeId: challenge.challengeId, idToken,
+      }));
+      const unavailable = await verify();
+      expect(unavailable.status).toBe(503);
+      expect((await unavailable.json() as any).error.code).toBe('IDENTITY_PROVIDER_UNAVAILABLE');
+      expect(await env.DB.prepare(
+        'SELECT consumed_at FROM auth_challenges WHERE id = ?',
+      ).bind(challenge.challengeId).first()).toMatchObject({ consumed_at: null });
+
+      failBody = false;
+      expect((await verify()).status).toBe(200);
+    } finally {
+      fetchSpy.mockImplementation(originalFetch);
+      clock.mockRestore();
+    }
   });
 
   it('links a verified Apple identity to the matching existing account', async () => {
@@ -6638,6 +6766,41 @@ ${nameLine}
     const identities = (await listed.json() as { identities: Array<{ userId: string; sourceUsageBytes: number }> }).identities;
     expect(identities.find((entry) => entry.userId === billed.user.id)?.sourceUsageBytes).toBe(1050);
     expect(identities.find((entry) => entry.userId === quiet.user.id)?.sourceUsageBytes).toBe(0);
+  });
+
+  it('returns inactive-user recovery watermarks without authorizing them and scopes them to this exit', async () => {
+    const billed = await createAccount('inactive-roster-watermark');
+    const observedAt = Math.floor(Date.now() / 1000);
+    expect((await api('home/usage', json({ reports: [{
+      reportId: 'inactive-watermark-default', userId: billed.user.id, sourceId: 'exit-default',
+      protocolVersion: 2, totalBytes: 1050, observedAt,
+    }] }, EXIT_NODE_TOKENS['exit-default']))).status).toBe(200);
+    expect((await api('home/usage', json({ reports: [{
+      reportId: 'inactive-watermark-other', userId: billed.user.id, sourceId: 'exit-a',
+      protocolVersion: 2, totalBytes: 630, observedAt,
+    }] }, EXIT_NODE_TOKENS['exit-a']))).status).toBe(200);
+    await env.DB.prepare('UPDATE users SET expires_at = ? WHERE id = ?')
+      .bind(observedAt - 1, billed.user.id).run();
+
+    const listed = await api('home/exit-identities', {
+      headers: { authorization: `Bearer ${EXIT_NODE_TOKENS['exit-default']}` },
+    });
+    expect(listed.status).toBe(200);
+    expect(await listed.json()).toMatchObject({
+      identities: [], sourceUsageWatermarks: [{ userId: billed.user.id, sourceUsageBytes: 1050 }],
+    });
+    const other = await api('home/exit-identities', {
+      headers: { authorization: `Bearer ${EXIT_NODE_TOKENS['exit-a']}` },
+    });
+    expect(await other.json()).toMatchObject({
+      identities: [], sourceUsageWatermarks: [{ userId: billed.user.id, sourceUsageBytes: 630 }],
+    });
+    expect((await api('home/usage', json({ reports: [{
+      reportId: 'inactive-watermark-recovery', userId: billed.user.id, sourceId: 'exit-default',
+      protocolVersion: 2, totalBytes: 1050, observedAt: observedAt + 1,
+    }] }, EXIT_NODE_TOKENS['exit-default']))).status).toBe(200);
+    expect(await env.DB.prepare('SELECT usage_bytes FROM users WHERE id = ?').bind(billed.user.id)
+      .first()).toEqual({ usage_bytes: 1680 });
   });
 
   it('revokes sessions and devices as soon as a usage report reaches quota', async () => {

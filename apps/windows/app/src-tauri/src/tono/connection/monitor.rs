@@ -1344,6 +1344,55 @@ async fn may_keep_session_in_place(state: &Arc<TonoState>, tunnel_proven: bool) 
     keep
 }
 
+/// Serialize failure admission with selection/switch completion before transferring lifecycle
+/// ownership to release. A hot switch deliberately keeps the connection generation.
+async fn admit_health_release(
+    state: &Arc<TonoState>,
+    generation: u64,
+    selected_node: Option<&str>,
+    switch_task: Option<tokio::task::Id>,
+    check_switch_task: bool,
+) -> Result<(
+    tokio::sync::OwnedRwLockReadGuard<()>,
+    tokio::sync::OwnedRwLockWriteGuard<()>,
+), NetworkChangeOutcome> {
+    let selection = state.begin_policy_activation().await;
+    let lifecycle = state.begin_privileged_release().await;
+    let mut inner = state.lock().await;
+    if inner.connect_generation != generation || !inner.fsm.status().is_connected {
+        return Err(NetworkChangeOutcome::Handled);
+    }
+    if inner.selected_node.as_deref() != selected_node {
+        // The runtime and its monitor still belong to this generation. Discard the old exit's
+        // failure and let the next monitor tick observe the replacement instead of exiting.
+        return Err(NetworkChangeOutcome::RecoveredInPlace);
+    }
+    // Finished switch handles stay registered until replacement, so even A → B → A or a
+    // proved rollback invalidates the old request without changing the connection generation.
+    if check_switch_task && inner.tasks.switch.as_ref().map(|task| task.inner().id()) != switch_task {
+        return Err(NetworkChangeOutcome::RecoveredInPlace);
+    }
+    inner.tasks.abort_reconnect();
+    Ok((selection, lifecycle))
+}
+
+fn capture_health_context(
+    inner: &TonoInner, allow_in_place: bool,
+) -> Result<(u64, Option<String>, Option<tokio::task::Id>), NetworkChangeOutcome> {
+    let status = inner.fsm.status();
+    if !status.is_connected || status.is_disconnecting {
+        return Err(NetworkChangeOutcome::Handled);
+    }
+    // Selection is published before the switch moves the live selector. Its own proof owns
+    // that transition; an old-runtime health request must not be labelled with the new exit.
+    // Forced protection/policy recovery has separate evidence and retains its authority.
+    if allow_in_place && inner.tasks.switch.as_ref().is_some_and(|task| !task.inner().is_finished()) {
+        return Err(NetworkChangeOutcome::RecoveredInPlace);
+    }
+    Ok((inner.connect_generation, inner.selected_node.clone(),
+        inner.tasks.switch.as_ref().map(|task| task.inner().id())))
+}
+
 pub(super) async fn handle_network_change_inner(
     state: &Arc<TonoState>,
     app: &AppHandle,
@@ -1360,18 +1409,12 @@ pub(super) async fn handle_network_change_inner(
     // walk into `attempt` and silently re-arm WFP and restart the core with no user action.
     // The netmon caller was protected only by accident, by `abort_network_monitor()` landing at
     // its next await; now both are protected on purpose.
-    let generation = {
-        let mut inner = state.lock().await;
-        // `is_disconnecting` is redundant now that `begin_disconnect` clears
-        // `is_connected`, and it is written out anyway: this guard is the one
-        // that has to say "not while a release is in flight" out loud, because
-        // the generation captured below is the disconnect's own once one has
-        // started, and the exit guard then compares a value to itself.
-        let status = inner.fsm.status();
-        if !status.is_connected || status.is_disconnecting {
-            return NetworkChangeOutcome::Handled;
+    let (generation, selected_node, switch_task) = {
+        let inner = state.lock().await;
+        match capture_health_context(&inner, allow_in_place) {
+            Ok(context) => context,
+            Err(outcome) => return outcome,
         }
-        inner.connect_generation
     };
     // Prefer an in-place proof while the core is still the same process.
     // Sleep/Wi-Fi flaps used to stop the core unconditionally, then burn the
@@ -1394,20 +1437,25 @@ pub(super) async fn handle_network_change_inner(
     // explicit strict kill switch keep the protected reconnect below.
     let policy_rebuild = POLICY_REBUILD.try_with(|_| ()).is_ok();
     let strict = tono_core::strict_kill_switch_explicit(None);
-    let health_release = release_after_health_failure(strict, policy_rebuild, |apply_narrow| async move {
-        {
-            let mut inner = state.lock().await;
-            inner.tasks.abort_reconnect();
+    let health_guard = if tono_core::unarmed_probe::health_monitor_releases(strict, policy_rebuild) {
+        match admit_health_release(state, generation, selected_node.as_deref(), switch_task, allow_in_place).await {
+            Ok(guards) => Some(guards),
+            Err(outcome) => return outcome,
         }
+    } else {
+        None
+    };
+    let health_release = release_after_health_failure(strict, policy_rebuild, |apply_narrow| async move {
+        let (_selection, lifecycle) = health_guard.expect("ordinary health release owns admission");
         logging!(
             warn,
             Type::Service,
             "Tono: health failure is restoring the original network with the secondary AI hold"
         );
         if apply_narrow {
-            super::disconnect::release_explicit_applying_narrow(state, app).await
+            super::disconnect::release_explicit_applying_narrow_with_guard(state, app, Some(lifecycle)).await
         } else {
-            super::disconnect::release_explicit(state, app).await
+            super::disconnect::release_explicit_with_guard(state, app, Some(lifecycle)).await
         }
     }).await;
     if let Some(result) = health_release {
@@ -1521,6 +1569,135 @@ mod tests {
     use super::{PolicyChangeDisposition, apply_policy_change_disposition};
     use crate::tono::state::TonoState;
     use std::sync::Arc;
+    use futures::FutureExt;
+
+    #[tokio::test]
+    async fn health_proof_cannot_release_a_completed_switch_back_to_the_same_exit() {
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            let state = Arc::new(TonoState::for_test());
+            let (generation, selected, switch_task) = {
+                let mut inner = state.lock().await;
+                inner.fsm.begin_connect();
+                inner.fsm.mark_kill_switch_armed();
+                inner.fsm.mark_session_verified();
+                inner.fsm.connect_succeeded().unwrap();
+                inner.selected_node = Some("A".to_owned());
+                super::capture_health_context(&inner, true).unwrap()
+            };
+            // The old request stays pending while two separately owned hot switches finish.
+            for next in ["B", "A"] {
+                let _selection = state.begin_policy_update().await;
+                let _lifecycle = state.begin_privileged_release().await;
+                {
+                    let mut inner = state.lock().await;
+                    inner.tasks.switch.take();
+                    inner.selected_node = Some(next.to_owned());
+                    inner.tasks.switch = Some(tauri::async_runtime::spawn(async {}));
+                }
+                while !state.lock().await.tasks.switch.as_ref().unwrap().inner().is_finished() {
+                    tokio::task::yield_now().await;
+                }
+            }
+            assert_eq!(state.lock().await.connect_generation, generation);
+            assert_eq!(state.lock().await.selected_node, selected);
+            match super::admit_health_release(&state, generation, selected.as_deref(), switch_task, true).await {
+                Ok(_) => panic!("an intervening switch must retire the old A proof even after selection returns to A"),
+                Err(outcome) => assert_eq!(outcome, super::NetworkChangeOutcome::RecoveredInPlace),
+            }
+            let forced = super::admit_health_release(&state, generation, selected.as_deref(), switch_task, false)
+                .await.expect("forced protection recovery keeps its authority across the switch fence");
+            drop(forced);
+            let fresh = {
+                let inner = state.lock().await;
+                super::capture_health_context(&inner, true).unwrap()
+            };
+            let admitted = super::admit_health_release(&state, fresh.0, fresh.1.as_deref(), fresh.2, true)
+                .await.expect("the next fresh proof can still release the current runtime");
+            drop(admitted);
+        }).await.expect("switch proof identity must settle without deadlock");
+    }
+
+    #[tokio::test]
+    async fn health_proof_during_published_selection_cannot_release_the_finishing_switch() {
+        let state = Arc::new(TonoState::for_test());
+        let selection = state.begin_policy_update().await;
+        let lifecycle = state.begin_privileged_release().await;
+        let (finish_switch, switch_finished) = tokio::sync::oneshot::channel();
+        let context = {
+            let mut inner = state.lock().await;
+            inner.fsm.begin_connect();
+            inner.fsm.mark_kill_switch_armed();
+            inner.fsm.mark_session_verified();
+            inner.fsm.connect_succeeded().unwrap();
+            // The command has published B; its registered worker has not moved A's selector yet.
+            inner.selected_node = Some("B".to_owned());
+            inner.tasks.switch = Some(tauri::async_runtime::spawn(async move {
+                switch_finished.await.unwrap();
+            }));
+            assert!(super::capture_health_context(&inner, false).is_ok(),
+                "forced protection and policy recovery must retain their existing authority");
+            super::capture_health_context(&inner, true)
+        };
+        finish_switch.send(()).unwrap();
+        let switch = state.lock().await.tasks.switch.take().unwrap();
+        switch.await.unwrap();
+        drop(lifecycle);
+        drop(selection);
+        match context {
+            Ok((generation, selected, switch_task)) => {
+                assert!(super::admit_health_release(&state, generation, selected.as_deref(), switch_task, true).await.is_err(),
+                    "a proof begun on old A after B publication must not release verified B");
+            }
+            Err(outcome) => assert_eq!(outcome, super::NetworkChangeOutcome::RecoveredInPlace),
+        }
+        let inner = state.lock().await;
+        assert!(inner.fsm.status().is_connected);
+        assert_eq!(inner.selected_node.as_deref(), Some("B"));
+        assert_eq!(super::capture_health_context(&inner, true).unwrap(),
+            (inner.connect_generation, Some("B".to_owned()), None),
+            "the next tick must capture the settled replacement for a fresh proof");
+    }
+
+    #[tokio::test]
+    async fn old_exit_health_failure_cannot_release_a_same_generation_hot_switch() {
+        let state = Arc::new(TonoState::for_test());
+        let (generation, selected) = {
+            let mut inner = state.lock().await;
+            inner.selected_node = Some("A".to_owned());
+            inner.fsm.begin_connect();
+            inner.fsm.mark_kill_switch_armed();
+            inner.fsm.mark_session_verified();
+            inner.fsm.connect_succeeded().unwrap();
+            (inner.connect_generation, inner.selected_node.clone())
+        };
+        let (finish_proof, proof_finished) = tokio::sync::oneshot::channel();
+        let proof_state = Arc::clone(&state);
+        let old_proof = tokio::spawn(async move {
+            proof_finished.await.unwrap();
+            match super::admit_health_release(&proof_state, generation, selected.as_deref(), None, true).await {
+                Ok(_) => panic!("an old A proof must not dispatch release against B"),
+                Err(outcome) => outcome,
+            }
+        });
+        {
+            // Selection publication and hot-switch completion own these locks in this order.
+            let _selection = state.begin_policy_update().await;
+            let _switch = state.begin_privileged_release().await;
+            let mut inner = state.lock().await;
+            inner.selected_node = Some("B".to_owned());
+            assert_eq!(inner.connect_generation, generation);
+        }
+        finish_proof.send(()).unwrap();
+        assert_eq!(old_proof.await.unwrap(), super::NetworkChangeOutcome::RecoveredInPlace,
+            "the same-generation monitor must continue watching the replacement");
+        assert_eq!(state.lock().await.selected_node.as_deref(), Some("B"));
+        assert!(state.lock().await.fsm.status().is_connected);
+        let (_selection, lifecycle) = super::admit_health_release(&state, generation, Some("B"), None, true)
+            .await.expect("a current B failure must still admit automatic AI-held release");
+        assert!(state.begin_connect_mutation().now_or_never().is_none(),
+            "the admitted release must exclude replacement startup");
+        drop(lifecycle);
+    }
 
     #[tokio::test]
     async fn automatic_health_release_keeps_ai_blocked_and_preserves_protected_recovery() {
