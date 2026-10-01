@@ -7,7 +7,7 @@
     "dev": "vite",
     "dev:fixtures": "vite --mode fixtures",
     "build": "vite build --base /ops2/ --outDir ../control-plane/public/ops2 --emptyOutDir && node scripts/check-budgets.mjs",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && node ../unchecked-index-ratchet.mjs --baseline unchecked-index.baseline -- ./node_modules/.bin/tsc --noEmit --pretty false --incremental false --noUncheckedIndexedAccess",
     "test": "vitest run",
     "lint": "eslint src --max-warnings=0",
     "budgets": "node scripts/check-budgets.mjs",

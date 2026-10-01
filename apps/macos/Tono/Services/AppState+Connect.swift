@@ -723,13 +723,20 @@ extension AppState {
     /// `afterUnarmedConnectFailure` marks the automatic cleanup of a connect
     /// attempt that failed before its first arm. It is a release, but not the
     /// user's explicit one: see the operation below.
+    ///
+    /// `exhaustedTunnelLoss` is only the core monitor's missing-TUN verdict.
+    /// That path must not run the pending-update disconnect: doing so releases
+    /// PF and sets `nativeUpdateBlocksConnect`, so assistant traffic goes
+    /// direct and a later connect will not restore protection. Restore
+    /// internet leaves this flag false and still releases.
     func disconnect(
         releaseKillSwitch: Bool = false,
-        afterUnarmedConnectFailure: Bool = false
+        afterUnarmedConnectFailure: Bool = false,
+        exhaustedTunnelLoss: Bool = false
     ) {
         if nativeUpdatePending || RuntimeCleanup.nativeUpdateBlocksConnect
             || (releaseKillSwitch && RuntimeCleanup.nativeUpdatePending) {
-            if releaseKillSwitch { disconnectPendingNativeUpdate() }
+            if releaseKillSwitch, !exhaustedTunnelLoss { disconnectPendingNativeUpdate() }
             return
         }
         let pendingConnect = self.connectionCoordinator.connectTask
@@ -1427,6 +1434,17 @@ extension AppState {
         }
     }
 
+    /// True when `message` is the recovery line or the classified failure this
+    /// monitor is still showing. Other notices, including a rejected catalog
+    /// update, are not owned here.
+    private func healthMonitorOwns(_ message: String?) -> Bool {
+        guard let message else { return false }
+        if message == String(localized: "Recovering protected connection…") {
+            return true
+        }
+        return message == lastClassifiedFailure?.userMessage
+    }
+
     /// One iteration of the core monitor. Extracted from the loop above so the
     /// owned-TUN verdict is drivable in tests through the `tunInterfaceExists`
     /// seam; the loop itself only owns sleeping and exit. Every `continue` the
@@ -1465,8 +1483,13 @@ extension AppState {
                 // Exhausted tunnel loss. Fail open unless a strict kill switch
                 // was explicitly enabled. This call does not install a new filter.
                 // No user preference on this path is treated as not strict.
+                // A pending native update keeps its barrier: this monitor must
+                // not take the Restore-internet release.
                 let disposition = ExhaustedFailureNetwork.afterFailure(strictKillSwitchExplicit: false)
-                self.disconnect(releaseKillSwitch: disposition.releasesSystemNetwork)
+                self.disconnect(
+                    releaseKillSwitch: disposition.releasesSystemNetwork,
+                    exhaustedTunnelLoss: true
+                )
                 self.errorMessage = String(
                     localized: "The connection didn't complete. Support code TONO_CONNECT_TUN."
                 )
@@ -1718,9 +1741,9 @@ extension AppState {
                 selectedExit: self.selectedExitNode()
             )
         }
-        let tun = await ProtectedConnectivityVerifier.raceSystemTUNProbes(
-            timeoutSeconds: 6,
-            preferredLabel: self.lastSuccessfulProbeOrigin
+        let tun = await self.raceHealthTrafficProbes(
+            6,
+            self.lastSuccessfulProbeOrigin
         )
         if case .won(let label) = tun {
             self.lastSuccessfulProbeOrigin = label
@@ -1770,11 +1793,12 @@ extension AppState {
             }
             self.isProxyDegraded = advisory != nil
             self.isRecoveringProtectedConnection = false
-            // The connection healed on its own. Leaving the retry-loop
-            // message in place kept "last error" showing a failure that
-            // had already resolved, which sends support down the wrong
-            // path.
-            if advisory == nil { self.errorMessage = nil }
+            // The connection healed on its own. Clear the retry-loop message
+            // this monitor posted. A catalog rejection or any other notice
+            // shares errorMessage and must stay up.
+            if advisory == nil, self.healthMonitorOwns(self.errorMessage) {
+                self.errorMessage = nil
+            }
             return .continueMonitoring
         case .retry(let failure):
             self.lastClassifiedFailure = failure

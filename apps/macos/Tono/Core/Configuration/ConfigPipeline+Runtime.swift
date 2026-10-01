@@ -140,6 +140,9 @@ nonisolated extension ConfigPipeline {
       ipv6: false
       enhanced-mode: fake-ip
       fake-ip-range: 198.18.0.1/16
+      fake-ip-ttl: 30
+      prefer-h3: false
+      cache-algorithm: lru
       use-hosts: true
       respect-rules: true
       proxy-server-nameserver:
