@@ -1019,6 +1019,30 @@
         Ok(())
     }
 
+    /// Update proof is a read. With the barrier still wanted, a missing snapshot must not
+    /// reset adapters to DHCP or remove NRPT: WFP is still denying the resolvers that heal
+    /// would put back. The heal stays for the already-disarmed orphan, where DHCP can answer.
+    #[tokio::test]
+    #[serial]
+    async fn update_observe_heals_snapshotless_dns_only_when_the_barrier_is_down() -> Result<()> {
+        reset_dns_state().await;
+        test_hooks::set_collected_adapters(vec![adapter("{A}", Some(PROTECTED_DNS_V4))]);
+        let status = observe_for_update_with(true).await?;
+        assert!(!status.enabled && !status.snapshot_present, "{status:?}");
+        assert_eq!(test_hooks::take_automatic_resets(), 0);
+        assert_eq!(test_hooks::take_encrypted_restores(), 0);
+
+        let healed = observe_for_update_with(false).await;
+        assert!(
+            healed.is_err(),
+            "adapters still on the TUN endpoint must not read as safe"
+        );
+        assert_eq!(test_hooks::take_automatic_resets(), 1);
+        assert_eq!(test_hooks::take_encrypted_restores(), 1);
+        reset_dns_state().await;
+        Ok(())
+    }
+
     /// The pure half of the P0 fix: what the window says, given only the four observable
     /// values. In particular an open window that has aged past the cap stops suppressing —
     /// a leaked depth cannot mute the machine's network events for the life of the service.
