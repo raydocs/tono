@@ -64,7 +64,12 @@ export function CarrierMatrix({ events }: { events: readonly ConnectionEventDto[
       aside={<span className="text-micro text-[var(--muted-foreground)]">{copy.timelineFilters.week}</span>}
     >
       {empty ? <Empty message={copy.noCarrierPaths} /> : (
-        <div className="overflow-x-auto rounded-[10px] border border-[var(--hairline)] bg-[var(--surface)]">
+        <div
+          className="overflow-x-auto rounded-[10px] border border-[var(--hairline)] bg-[var(--surface)]"
+          role="region"
+          aria-label={copy.customerSections.carriers}
+          tabIndex={0}
+        >
           <table className="w-full border-collapse text-body">
             <thead>
               <tr className="data-row border-b border-[var(--hairline)]">

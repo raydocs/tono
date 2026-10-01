@@ -9,10 +9,18 @@ import Network
 /// listener query. Neither path launches `dig`.
 nonisolated enum ProtectedDNSProbe {
     static let name = "www.gstatic.com"
+    /// Stale answers from the previous product pool. Still treated as fake-IP
+    /// so a leftover cache does not look like a public address.
     static let fakeIPPrefix = "198.19."
 
     static func isFakeIP(_ value: String) -> Bool {
-        value.hasPrefix(fakeIPPrefix)
+        if value.hasPrefix(fakeIPPrefix) { return true }
+        let parts = value.split(separator: ".")
+        guard parts.count == 4, parts[0] == "198", parts[1] == "18",
+              let third = Int(parts[2]), let fourth = Int(parts[3]),
+              (0...255).contains(fourth) else { return false }
+        // Product pool 198.18.16.0/20. TUN 198.18.0.1 and DNS 198.18.0.2 are outside it.
+        return (16..<32).contains(third)
     }
 
     static func containsFakeIP(_ answers: [String]) -> Bool {

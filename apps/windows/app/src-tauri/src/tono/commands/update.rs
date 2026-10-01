@@ -1,6 +1,6 @@
 //! The App transports untrusted bytes. Only Service admits, consumes, adopts,
 //! and commits an update. No Tauri updater installation or App journal authority.
-use crate::{core::owner_identity::current_owner_credentials, tono::state::TonoState, utils::dirs};
+use crate::{core::owner_identity::current_owner_credentials, tono::{connection, state::TonoState}, utils::dirs};
 use anyhow::{Context as _, Result, ensure};
 use once_cell::sync::Lazy;
 use serde::Serialize;
@@ -134,6 +134,7 @@ pub async fn tono_install_update(
     // The generation this update retired, if it got that far. Convergence may
     // only fold the attempt this update invalidated, never a live one.
     let mut invalidated = None;
+    let mut preparation_complete = false;
     let outcome = async {
         let (manifest, signature, decoded) = OFFER.lock().await.clone().context("Check for updates again")?;
         ensure!(
@@ -195,6 +196,7 @@ pub async fn tono_install_update(
             receipt.phase == Phase::InstallationAuthorized && receipt.manifest_sha256 == manifest_sha256,
             "update preparation is incomplete; retained evidence needs recovery"
         );
+        preparation_complete = true;
         let attempt_id = receipt.attempt_id;
         if let Err(error) = request(UpdateRequest::Install {
             attempt_id: attempt_id.clone(),
@@ -218,13 +220,26 @@ pub async fn tono_install_update(
     if outcome.is_err() && incomplete() {
         let _ = request(UpdateRequest::Status).await;
     }
-    // If preparation stopped Core but failed later, don't leave a Connected UI;
-    // and the attempt the update invalidated must never stay Connecting.
-    if let Ok(snapshot) = crate::core::service::tono_service_status_snapshot().await {
+    // A failed Prepare may leave Core running after its supervision was aborted.
+    // An unreadable snapshot still must not strand the retired Connecting attempt.
+    let core_running = crate::core::service::tono_service_status_snapshot()
+        .await
+        .ok()
+        .map(|snapshot| snapshot.core_pid.is_some());
+    let prepare_failed = outcome.is_err() && !preparation_complete;
+    let release = {
         let mut inner = state.lock().await;
         let current = inner.connect_generation;
-        quiesce_connection_after_update(&mut inner.fsm, snapshot.core_pid.is_some(), invalidated, current);
+        let release = quiesce_connection_after_update(&mut inner.fsm, core_running, prepare_failed, invalidated, current);
         super::emit_status(&app, &super::status_of(&inner));
+        release
+    };
+    if release {
+        if let Err(error) = connection::disconnect_for_generation(
+            Arc::clone(state.inner()), app.clone(), invalidated,
+        ).await {
+            logging!(warn, Type::Service, "Tono: failed update preparation could not restore internet: {error}");
+        }
     }
     super::quit::resync_after_cancelled_quit(app).await;
     // The Service error already says whether traffic was released or the barrier
@@ -242,9 +257,11 @@ pub async fn tono_install_update(
 /// that bumped the generation owns the cleanup, and this convergence is that
 /// cleanup. An attempt that never armed goes back to Not Connected; an armed
 /// one keeps the blocked latch and lands in Protected Offline: an update is
-/// not a Disconnect and must not loosen protection. A Connected session keeps
-/// its previous behavior — folded only when the Service reports the Core is
-/// no longer running (`core_running == false`).
+/// not a Disconnect and must not loosen protection. A Connected session is
+/// folded when Core stopped. If Prepare failed with Core still running, its
+/// retired supervision cannot renew DIRECT under the pending-update fence;
+/// return true to restore internet through the update-aware release worker.
+/// An unreadable snapshot is not evidence that Core stopped.
 ///
 /// Connecting is folded only when `invalidated` (the generation this update
 /// left behind) is still `current`: an update that failed before invalidating
@@ -252,16 +269,20 @@ pub async fn tono_install_update(
 /// (which bumps the generation) is live and owns its own FSM transitions.
 fn quiesce_connection_after_update(
     fsm: &mut ConnectionFsm,
-    core_running: bool,
+    core_running: Option<bool>,
+    prepare_failed: bool,
     invalidated: Option<u64>,
     current: u64,
-) {
+) -> bool {
+    let release = prepare_failed && core_running == Some(true) && invalidated == Some(current)
+        && fsm.status().is_connected;
     if fsm.status().is_connecting && invalidated == Some(current) {
         // Unarmed → Not Connected; armed → Protected Offline, latch retained.
         fsm.initial_release_failed();
-    } else if fsm.status().is_connected && !core_running {
+    } else if fsm.status().is_connected && (core_running == Some(false) || release) {
         fsm.tunnel_died();
     }
+    release
 }
 
 /// Whether this App process may run update recovery's automatic Connect (BRICK-W1).
@@ -335,7 +356,7 @@ pub async fn adopt() -> Result<Option<Protection>> {
     Ok(Some(receipt.required_recovery))
 }
 
-pub async fn disconnect_if_pending() -> Result<Option<tono_service_protocol::KillSwitchStatus>> {
+pub async fn disconnect_if_pending(apply_narrow: bool) -> Result<Option<tono_service_protocol::KillSwitchStatus>> {
     if !incomplete() {
         return Ok(None);
     }
@@ -348,7 +369,7 @@ pub async fn disconnect_if_pending() -> Result<Option<tono_service_protocol::Kil
     // A lost reply can follow a committed release; the caller treats errors as unconfirmed.
     // A release whose update record could not be proven or archived returns Ok with
     // `needs_attention`: the machine is open, so it must not read as armed.
-    let released = request(UpdateRequest::Disconnect).await?;
+    let released = request(UpdateRequest::disconnect(apply_narrow)).await?;
     if let Some(reason) = released.needs_attention.as_deref() {
         logging!(warn, Type::Service, "Tono: update Disconnect released protection; update record still pending: {reason}");
     }
@@ -381,7 +402,7 @@ mod update_quiesce_tests {
         // Cancelled before StartClash armed the WFP policy.
         let mut fsm = ConnectionFsm::new();
         fsm.begin_connect();
-        quiesce_connection_after_update(&mut fsm, false, Some(7), 7);
+        quiesce_connection_after_update(&mut fsm, Some(false), false, Some(7), 7);
         assert!(!fsm.status().is_connecting);
         assert_eq!(fsm.status().ui_state(), UiState::NotConnected);
         assert!(!fsm.kill_switch_armed());
@@ -391,7 +412,7 @@ mod update_quiesce_tests {
         let mut fsm = ConnectionFsm::new();
         fsm.begin_connect();
         fsm.mark_kill_switch_armed();
-        quiesce_connection_after_update(&mut fsm, false, Some(7), 7);
+        quiesce_connection_after_update(&mut fsm, Some(false), false, Some(7), 7);
         assert!(!fsm.status().is_connecting);
         assert!(fsm.kill_switch_armed());
         assert_eq!(fsm.status().ui_state(), UiState::ProtectedOffline);
@@ -401,10 +422,55 @@ mod update_quiesce_tests {
         // attempt is live and must not be touched.
         let mut fsm = ConnectionFsm::new();
         fsm.begin_connect();
-        quiesce_connection_after_update(&mut fsm, false, None, 7);
+        quiesce_connection_after_update(&mut fsm, Some(false), false, None, 7);
         assert!(fsm.status().is_connecting);
-        quiesce_connection_after_update(&mut fsm, false, Some(7), 8);
+        quiesce_connection_after_update(&mut fsm, Some(false), false, Some(7), 8);
         assert!(fsm.status().is_connecting);
+    }
+
+    #[test]
+    fn failed_prepare_with_running_core_releases_only_the_unsupervised_session() {
+        let mut connected = ConnectionFsm::new();
+        connected.begin_connect();
+        connected.mark_kill_switch_armed();
+        connected.mark_session_verified();
+        connected.connect_succeeded().unwrap();
+
+        let mut fsm = connected.clone();
+        assert!(quiesce_connection_after_update(&mut fsm, Some(true), true, Some(7), 7));
+        assert_eq!(fsm.status().ui_state(), UiState::ProtectedOffline);
+        // The worker, not this local fold, must prove DNS/Core/WFP release.
+        assert!(fsm.kill_switch_armed());
+        assert!(fsm.session_verified());
+
+        let mut fsm = connected;
+        assert!(!quiesce_connection_after_update(&mut fsm, Some(true), true, None, 7));
+        assert!(!quiesce_connection_after_update(&mut fsm, Some(true), true, Some(7), 8));
+        assert!(!quiesce_connection_after_update(&mut fsm, Some(true), false, Some(7), 7));
+        assert!(fsm.status().is_connected);
+    }
+
+    #[test]
+    fn failed_prepare_with_unreadable_snapshot_still_folds_connecting() {
+        let mut fsm = ConnectionFsm::new();
+        fsm.begin_connect();
+        assert!(!quiesce_connection_after_update(&mut fsm, None, true, Some(7), 7));
+        assert_eq!(fsm.status().ui_state(), UiState::NotConnected);
+
+        fsm.begin_connect();
+        fsm.mark_kill_switch_armed();
+        assert!(!quiesce_connection_after_update(&mut fsm, None, true, Some(7), 7));
+        assert_eq!(fsm.status().ui_state(), UiState::ProtectedOffline);
+        assert!(fsm.kill_switch_armed());
+
+        // Neither a newer live attempt nor Connected is disproven by missing IPC.
+        fsm.begin_connect();
+        assert!(!quiesce_connection_after_update(&mut fsm, None, true, Some(7), 8));
+        assert!(fsm.status().is_connecting);
+        fsm.mark_session_verified();
+        fsm.connect_succeeded().unwrap();
+        assert!(!quiesce_connection_after_update(&mut fsm, None, true, Some(8), 8));
+        assert!(fsm.status().is_connected);
     }
 
     #[test]

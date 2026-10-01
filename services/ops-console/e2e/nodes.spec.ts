@@ -1,34 +1,35 @@
 import { expect, test } from '@playwright/test';
 import { open, settle } from './ops';
 
+const rows = '.nodes-table tbody tr';
+
 test.describe('nodes page', () => {
-  test('cards', async ({ page }) => {
+  test('dashboard', async ({ page }) => {
     await open(page, '/nodes');
 
-    // R4 in the browser: the sentence and the grid must agree about 正常.
-    const fine = page.getByRole('button', { name: /台正常$/ });
+    // R4 in the browser: a filter that says N lists N rows.
+    const fine = page.getByRole('group', { name: '按状态筛选' }).getByRole('button', { name: /^正常/ });
     await fine.click();
     await settle(page);
     const claimed = Number((await fine.textContent())?.match(/\d+/)?.[0]);
-    expect(await page.locator('.node-card').count()).toBe(claimed);
-    await fine.click();
+    expect(await page.locator(rows).count()).toBe(claimed);
+    await page.getByRole('group', { name: '按状态筛选' }).getByRole('button', { name: /^全部/ }).click();
     await settle(page);
 
-    await expect(page.locator('.node-card').first()).toBeVisible();
-    await expect(page).toHaveScreenshot('cards.png');
+    await expect(page.getByRole('heading', { name: '机器负载' })).toBeVisible();
+    await expect(page.locator('.nodes-load-grid .chart-frame')).toHaveCount(4);
+    await expect(page).toHaveScreenshot('dashboard.png', { fullPage: true });
   });
 
-  test('table', async ({ page }) => {
+  /** Trouble first: the engine's worst word leads the table, whatever order the list came in. */
+  test('the table puts the machines that need action first', async ({ page }) => {
     await open(page, '/nodes');
-    await page.getByRole('button', { name: '表格' }).click();
-    await settle(page);
-
-    await expect(page.locator('tbody tr').first()).toHaveCSS('height', '36px');
-    await expect(page).toHaveScreenshot('table.png');
+    await expect(page.locator(rows).first().locator('.tone-pill')).toHaveCount(1);
+    await expect(page.locator(rows).last().locator('.tone-pill')).toHaveCount(0);
   });
 
   /**
-   * The count sentence is the health axis and nothing else: a machine that was
+   * The health filter is the health axis and nothing else: a machine that was
    * taken out of service answers no probe, and counting it as a fault is what
    * made this page disagree with 今天 about how broken the fleet was.
    */
@@ -38,50 +39,45 @@ test.describe('nodes page', () => {
     const chip = page.getByRole('button', { name: /^已退役/ });
     const claimed = Number((await chip.textContent())?.match(/\d+/)?.[0]);
     expect(claimed).toBeGreaterThan(0);
-    await expect(page.locator('.node-card').filter({ hasText: '已退役' })).toHaveCount(0);
-    const shown = await page.locator('.node-card').count();
+    await expect(page.locator(rows).filter({ hasText: '已退役' })).toHaveCount(0);
+    const shown = await page.locator(rows).count();
 
     await chip.click();
     await settle(page);
-    await expect(page.locator('.node-card')).toHaveCount(claimed);
+    await expect(page.locator(rows)).toHaveCount(claimed);
     expect(claimed).toBeLessThan(shown);
     // Never an alarm on a machine nobody sells: the word stays, the pill goes.
-    await expect(page.locator('.node-card .tone-pill')).toHaveCount(0);
-    await expect(page.locator('.node-card').first()).toContainText('已退役');
+    await expect(page.locator(`${rows} .tone-pill`)).toHaveCount(0);
+    await expect(page.locator(rows).first()).toContainText('已退役');
   });
 
-  /**
-   * The client-side leg is measured for some machines and not others, so the
-   * column is on and the machines without a measurement say so — one em dash
-   * and the word for who should have measured it, never a zero.
-   */
   test('the customer-side leg is a column once any node has one', async ({ page }) => {
     await open(page, '/nodes');
     await expect(page.getByText('客户去程数据尚未接入')).toHaveCount(0);
-    await expect(page.locator('.node-card').first()).toContainText('客户去程');
-
-    await page.getByRole('button', { name: '表格' }).click();
-    await settle(page);
     await expect(page.getByRole('columnheader', { name: '客户去程' })).toHaveCount(1);
   });
 
-  /** A machine with no cap is one line that goes somewhere, not two blank ones. */
-  test('a node with no quota entered offers the page where it is set', async ({ page }) => {
+  test('search narrows the rows the filter left', async ({ page }) => {
     await open(page, '/nodes');
-    const card = page.locator('.node-card').filter({ hasText: '未设额度' }).first();
-    await expect(card).toBeVisible();
-    await expect(card).not.toContainText('预计耗尽');
+    await page.getByRole('searchbox', { name: '搜索节点' }).fill('tokyo');
+    await expect(page.locator(rows)).toHaveCount(3);
+    await page.getByRole('searchbox', { name: '搜索节点' }).fill('没有这台');
+    await expect(page.getByText('没有符合条件的节点')).toBeVisible();
+  });
 
-    await card.getByRole('button', { name: '未设额度' }).click();
+  /** A machine with no cap says so in words, and the row still goes to the page where it is set. */
+  test('a node with no quota entered opens the page where it is set', async ({ page }) => {
+    await open(page, '/nodes');
+    const row = page.locator(rows).filter({ hasText: '未设额度' }).first();
+    await expect(row).toBeVisible();
+    await row.click();
     await expect(page).toHaveURL(/#\/nodes\/[^?]+$/);
   });
 
-  test('drawer', async ({ page }) => {
-    await open(page, '/nodes');
-    await page.locator('.node-card').first().click();
+  test('the ⌘K drawer still opens from ?node=', async ({ page }) => {
+    await open(page, '/nodes?node=Tokyo%20%C2%B7%20Fuji');
     await expect(page.getByRole('dialog')).toBeVisible();
     await settle(page);
-
     await expect(page).toHaveScreenshot('drawer.png');
   });
 });

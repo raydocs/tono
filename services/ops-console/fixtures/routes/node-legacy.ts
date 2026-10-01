@@ -69,6 +69,9 @@ function samplesFor(name: string, from: number, to: number, step: number): Point
   const silentFrom = from + Math.floor(total * 0.6) * step;
   const silentTo = silentFrom + 8 * step;
   const memTotal = 2 * GIB;
+  // Machines are not equally busy; without a spread the fleet's busiest line
+  // sits on top of its mean and the chart cannot show that it tells them apart.
+  const scale = 0.35 + random() * 0.9;
   let netIn = 41_000_000_000 + Math.floor(random() * 9_000_000_000);
   let netOut = 7_000_000_000 + Math.floor(random() * 2_000_000_000);
   const rows: Point[] = [];
@@ -79,8 +82,8 @@ function samplesFor(name: string, from: number, to: number, step: number): Point
     const jitter = random();
     // The counters keep climbing whether or not anything was reported; only
     // the reboot puts them back, and that is the case the chart must break on.
-    const inRate = 900_000 + busy * 5_600_000 + jitter * 700_000;
-    const outRate = 220_000 + busy * 1_500_000 + jitter * 180_000;
+    const inRate = (900_000 + busy * 5_600_000 + jitter * 700_000) * scale;
+    const outRate = (220_000 + busy * 1_500_000 + jitter * 180_000) * scale;
     if (at === rebootAt) {
       netIn = Math.floor(inRate * 30);
       netOut = Math.floor(outRate * 30);
@@ -91,18 +94,19 @@ function samplesFor(name: string, from: number, to: number, step: number): Point
     if (at >= silentFrom && at < silentTo) continue;
     rows.push({
       t: at,
-      cpu: Math.round((7 + busy * 46 + jitter * 9) * 10) / 10,
+      cpu: Math.round((7 + busy * 46 * scale + jitter * 9) * 10) / 10,
       memUsed: Math.round(memTotal * (0.51 + busy * 0.21 + jitter * 0.04)),
       memTotal,
       netIn,
       netOut,
       tcpConnections: Math.round(18 + busy * 118 + jitter * 14),
+      load1: Math.round((0.12 + busy * 1.6 * scale + jitter * 0.3) * 100) / 100,
     });
   }
   return rows;
 }
 
-const ALL_FIELDS = ['cpu', 'memUsed', 'memTotal', 'netIn', 'netOut', 'tcpConnections'] as const;
+const ALL_FIELDS = ['cpu', 'memUsed', 'memTotal', 'load1', 'netIn', 'netOut', 'tcpConnections'] as const;
 
 function only(row: Point, fields: string[]): Point {
   const out: Point = { t: row.t };
@@ -119,12 +123,16 @@ function only(row: Point, fields: string[]): Point {
  */
 export function metricsBody(options: {
   name: string | null;
+  /** Who answers when no node is named: the set's whole node list. */
+  fleet: readonly string[];
   range: string | null;
   fields: string | null;
   empty: boolean;
   nowUnix: number;
 }): unknown {
-  const shape = WINDOWS[options.range ?? '24h'] ?? WINDOWS['24h'];
+  const fallback = WINDOWS['24h'];
+  if (fallback === undefined) throw new Error('metrics fixture has no 24h window');
+  const shape = WINDOWS[options.range ?? '24h'] ?? fallback;
   const to = Math.floor(options.nowUnix / shape.step) * shape.step;
   const from = to - shape.span;
   const asked = (options.fields ?? '').split(',').map((field) => field.trim()).filter(Boolean);
@@ -132,9 +140,9 @@ export function metricsBody(options: {
     ? asked.filter((field) => (ALL_FIELDS as readonly string[]).includes(field))
     : [...ALL_FIELDS];
   const series: Record<string, Point[]> = {};
-  if (!options.empty && options.name) {
-    series[options.name] = samplesFor(options.name, from, to, shape.step)
-      .map((row) => only(row, fields));
+  const names = options.empty ? [] : options.name ? [options.name] : options.fleet;
+  for (const name of names) {
+    series[name] = samplesFor(name, from, to, shape.step).map((row) => only(row, fields));
   }
   return { metrics: { from, to, resolutionSeconds: shape.step, series } };
 }

@@ -1,0 +1,7 @@
+| ID | 问题（一句） | 状态 | Issue / PR | 等级 | 剩余限制 |
+|---|---|---|---|---|---|
+| WIN-DNS-SPACE-LIST | Documented space-delimited original DNS lists become one invalid server and are rejected by live restore command construction | in-PR | Branch `hunt/sol-r3dns-space-lists` (this PR) | 低·已确认（P2，Linux failing-then-passing regression） | Native CIM/netsh restoration needs Windows CI/device verification; no claim that this alone proves network loss; BRICK-W7 unchanged |
+
+Microsoft documents space-delimited IPv4/IPv6 `NameServer` values from ordinary mobile broadband drivers ([MB DNS updates](https://learn.microsoft.com/en-us/windows-hardware/drivers/network/mb-dns-updates)) and accepts this format in [DNS_INTERFACE_SETTINGS](https://learn.microsoft.com/en-us/windows/win32/api/netioapi/ns-netioapi-dns_interface_settings). The restore parser split only commas, so `10.20.30.41 10.20.30.40` became one server. `live_apply_batch` rejects internal whitespace and skips the adapter's live restore.
+
+Normalize commas and ASCII whitespace when constructing the restored per-family server lists. Original raw registry values, DHCP/profile precedence and protection/ownership predicates remain unchanged. The regression verifies separate IPv4 and IPv6 restore entries; it failed before and passes after. Actual effective DNS timing is the known BRICK-W7 limitation, so this command-generation bug is P2, not a claimed P0 outage.

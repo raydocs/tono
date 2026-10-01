@@ -1,5 +1,26 @@
 import XCTest
+import Security
 @testable import Tono
+
+nonisolated private final class RefuseOneTokenWrite: @unchecked Sendable {
+    private let lock = NSLock()
+    private let token: Data
+    private var refused = false
+
+    init(_ token: String) { self.token = Data(token.utf8) }
+
+    func update(_ query: CFDictionary, _ attributes: CFDictionary) -> OSStatus {
+        lock.lock()
+        let value = (attributes as NSDictionary)[kSecValueData as String] as? Data
+        if value == token, !refused {
+            refused = true
+            lock.unlock()
+            return errSecInteractionNotAllowed
+        }
+        lock.unlock()
+        return SecItemUpdate(query, attributes)
+    }
+}
 
 /// No sockets: responses are released explicitly by the test.
 nonisolated private final class HeldAccountProtocol: URLProtocol, @unchecked Sendable {
@@ -48,7 +69,8 @@ final class AccountSessionRequestTests: XCTestCase {
         protectionBlockedConsumer: @escaping @MainActor () -> Bool = { false },
         routeSplitConsumer: @escaping @MainActor () -> AppTrafficLedger.RouteSplit = { .init() },
         offlineGate: OfflineGrantGate? = nil,
-        installedCatalogConsumer: @escaping @MainActor () -> InstalledCatalogDigests? = { nil }
+        installedCatalogConsumer: @escaping @MainActor () -> InstalledCatalogDigests? = { nil },
+        keychainUpdate: @escaping @Sendable (CFDictionary, CFDictionary) -> OSStatus = { SecItemUpdate($0, $1) }
     ) -> (AccountSession, URLSession, String, AsyncStream<HeldAccountProtocol>) {
         let host = "\(UUID().uuidString.lowercased()).invalid"
         let (requests, continuation) = AsyncStream<HeldAccountProtocol>.makeStream()
@@ -56,11 +78,14 @@ final class AccountSessionRequestTests: XCTestCase {
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [HeldAccountProtocol.self]
         let transport = URLSession(configuration: config)
+        let keychain = KeychainStore(
+            service: "app.tono.tests.account-requests.\(host)", updateItem: keychainUpdate
+        )
         let api = TonoAPIClient(
-            baseURL: URL(string: "https://\(host)")!, keychain: testKeychain(host), session: transport,
+            baseURL: URL(string: "https://\(host)")!, keychain: keychain, session: transport,
             offlineGate: offlineGate ?? OfflineGrantGate(directory: Self.fixtureGrantDirectory)
         )
-        let account = AccountSession(api: api, keychain: testKeychain(host), sidecar: TonoSidecarService(), descriptorConsumer: descriptorConsumer, catalogConsumer: catalogConsumer, trafficPolicyConsumer: trafficPolicyConsumer, cloudFallbackConsumer: cloudFallbackConsumer, killSwitchDisarmConsumer: killSwitchDisarmConsumer, protectionBlockedConsumer: protectionBlockedConsumer, routeSplitConsumer: routeSplitConsumer, installedCatalogConsumer: installedCatalogConsumer)
+        let account = AccountSession(api: api, keychain: keychain, sidecar: TonoSidecarService(), descriptorConsumer: descriptorConsumer, catalogConsumer: catalogConsumer, trafficPolicyConsumer: trafficPolicyConsumer, cloudFallbackConsumer: cloudFallbackConsumer, killSwitchDisarmConsumer: killSwitchDisarmConsumer, protectionBlockedConsumer: protectionBlockedConsumer, routeSplitConsumer: routeSplitConsumer, installedCatalogConsumer: installedCatalogConsumer)
         account.state = .signedOut
         return (account, transport, host, requests)
     }
@@ -1336,6 +1361,57 @@ final class AccountSessionRequestTests: XCTestCase {
         retried.respond(status: 200, body: #"{"user":{"id":"original","email":"old@example.test"}}"#)
         let response = try await read.value
         XCTAssertEqual(response.user.id, "original")
+        XCTAssertEqual(try testKeychain(host).string(for: .refreshToken), "rotated-refresh")
+    }
+
+    func testHealthyBearerRetriesFailedRotatedTokenPersistence() async throws {
+        let healthyAccess = "test.eyJleHAiOjQxMDI0NDQ4MDB9.test" // exp: 2100-01-01
+        let refusal = RefuseOneTokenWrite("rotated-refresh")
+        let (account, transport, host, requests) = fixture(keychainUpdate: { refusal.update($0, $1) })
+        defer { transport.invalidateAndCancel(); HeldAccountProtocol.remove(host); try? testKeychain(host).remove(.refreshToken) }
+        try await adoptTestAccount(account)
+        let first = Task { try await account.api.me() }
+        let stale = try await nextRequest(requests)
+        stale.respond(status: 401, body: #"{"error":{"code":"UNAUTHORIZED"}}"#)
+        let renewal = try await nextRequest(requests)
+        renewal.respond(status: 200, body: "{\"accessToken\":\"\(healthyAccess)\",\"refreshToken\":\"rotated-refresh\"}")
+        let replay = try await nextRequest(requests)
+        replay.respond(status: 200, body: "{\"user\":\(Self.originalUser)}")
+        _ = try await first.value
+        XCTAssertEqual(try testKeychain(host).string(for: .refreshToken), "test-only-refresh")
+
+        // The next ordinary read uses the healthy bearer, without rotating it.
+        // Its persistence retry must repair the credential a later launch reads.
+        let second = Task { try await account.api.me() }
+        let healthy = try await nextRequest(requests)
+        XCTAssertTrue(healthy.request.url?.path.hasSuffix("/me") == true)
+        XCTAssertEqual(healthy.request.value(forHTTPHeaderField: "Authorization"), "Bearer \(healthyAccess)")
+        healthy.respond(status: 200, body: "{\"user\":\(Self.originalUser)}")
+        _ = try await second.value
+        XCTAssertEqual(try testKeychain(host).string(for: .refreshToken), "rotated-refresh")
+    }
+
+    func testExitPersistenceDrainsACancelledCallersRenewal() async throws {
+        let refusal = RefuseOneTokenWrite("rotated-refresh")
+        let (account, transport, host, requests) = fixture(keychainUpdate: { refusal.update($0, $1) })
+        defer { transport.invalidateAndCancel(); HeldAccountProtocol.remove(host); try? testKeychain(host).remove(.refreshToken) }
+        try await adoptTestAccount(account)
+        let read = Task { try await account.api.me() }
+        let stale = try await nextRequest(requests)
+        stale.respond(status: 401, body: #"{"error":{"code":"UNAUTHORIZED"}}"#)
+        let renewal = try await nextRequest(requests)
+        read.cancel()
+        _ = await read.result
+
+        // Cancelling the reader leaves the shared renewal alive. Exit must
+        // wait for that answer before retrying the successor's refused write.
+        let draining = expectation(description: "Exit observes the unfinished renewal")
+        let exiting = Task {
+            await account.api.finishCredentialPersistence(renewalObserved: { draining.fulfill() })
+        }
+        await fulfillment(of: [draining], timeout: 5)
+        renewal.respond(status: 200, body: #"{"accessToken":"rotated-access","refreshToken":"rotated-refresh"}"#)
+        await exiting.value
         XCTAssertEqual(try testKeychain(host).string(for: .refreshToken), "rotated-refresh")
     }
 

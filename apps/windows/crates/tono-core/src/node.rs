@@ -136,7 +136,10 @@ impl ValidatedNode {
                 // process. Do not emit `handshake-timeout`: a positive value
                 // makes sing-quic detach the handshake from the caller, so a
                 // cancelled connect keeps dialing in the background. Do not
-                // emit `skip-cert-verify`.
+                // emit `skip-cert-verify`. Do not emit a keepalive key either:
+                // `Hysteria2Option` has none, and sing-quic `38b0e9295f51`
+                // already applies a 10s keepalive and a 30s idle timeout when
+                // those fields are left at 0. An unknown YAML key is ignored.
                 put("type", Value::String("hysteria2".to_string()));
                 put("password", Value::String(self.uuid.clone()));
                 put("sni", Value::String(self.servername.clone()));
@@ -723,6 +726,19 @@ fingerprint: "E3:AA:4A:74:5A:A9:05:39:AB:1A:49:3D:94:0E:EB:A7:B4:30:5B:75:16:AB:
             admit_yaml(&rejected).unwrap_err(),
             NodeRejection::SkipCertVerify
         );
+    }
+
+    #[test]
+    fn hysteria2_runtime_mapping_does_not_invent_a_keepalive_key() {
+        let node = admit_yaml(passing_hy2_yaml()).unwrap();
+        let yaml = serde_yaml_ng::to_string(&node.to_runtime_mapping()).unwrap();
+        assert!(!yaml.contains("keep-alive"));
+        assert!(!yaml.contains("keepalive"));
+        assert!(!yaml.contains("idle-timeout"));
+        assert!(!yaml.contains("handshake-timeout"));
+        assert!(!yaml.contains("skip-cert-verify"));
+        assert_eq!(crate::hy2_idle::MIHOMO_PINNED_KEEP_ALIVE, "10s");
+        assert_eq!(crate::hy2_idle::MIHOMO_PINNED_IDLE_TIMEOUT, "30s");
     }
 
     #[test]
