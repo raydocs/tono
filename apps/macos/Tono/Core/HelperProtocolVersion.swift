@@ -362,7 +362,10 @@ nonisolated enum HelperProtocolVersion {
     ///   applies the secondary AI hold. Explicit emergency disarm still
     ///   removes that hold. Runtime inputs and package paths open with
     ///   `O_NONBLOCK` so a swapped-in FIFO is refused instead of hanging.
-    static let current = "4.52.30"
+    /// - 4.52.30 → 4.52.31: selective cleanup removes a pre-receipt sinkhole
+    ///   resolver (exact Tono body, no receipt) and apply never records one
+    ///   as the user's original, so a leftover cannot fail the DNS audit.
+    static let current = "4.52.31"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS
