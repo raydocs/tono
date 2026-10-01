@@ -1623,6 +1623,7 @@ if CommandLine.arguments.dropFirst() == ["--lifecycle-self-test"] {
     let pfPassed = KillSwitchManager.runLifecycleSelfTests()
         && KillSwitchManager.runInterruptedSelectiveReleaseSelfTest()
     let dnsPassed = ProtectedDNSManager.runRestoreReadFailureSelfTest()
+        && ProtectedDNSManager.runRepeatedOwnedRestoreSelfTest()
         && ProtectedDNSManager.runPreferencesContentionSelfTest()
         && ProtectedDNSManager.runStatusUnreadableServiceSelfTest()
         && ProtectedDNSManager.runCorruptSnapshotSelfTest()
