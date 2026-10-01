@@ -1381,3 +1381,12 @@ test('Support WebRTC check link is granted to the webview opener and nothing wid
   assert.ok(scope.test(urls[0]))
   assert.equal(scope.test('https://example.com/'), false)
 })
+
+test('prebuild.mjs parses, so the candidate build can run it', async () => {
+  const { spawnSync } = await import('node:child_process')
+  const prebuild = new URL('./prebuild.mjs', import.meta.url)
+  const result = spawnSync(process.execPath, ['--check', prebuild.pathname], {
+    encoding: 'utf8',
+  })
+  assert.equal(result.status, 0, result.stderr)
+})
