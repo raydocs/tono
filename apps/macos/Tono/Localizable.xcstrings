@@ -5197,6 +5197,46 @@
         }
       }
     },
+    "Secure app routing could not be applied. Ordinary internet stays open and AI services stay blocked.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "安全应用分流未能应用。普通互联网保持可用，AI 服务仍被拦截。"
+          }
+        }
+      }
+    },
+    "Secure app routing could not be applied. Strict mode is still blocking traffic while Tono retries.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "安全应用分流未能应用。严格模式仍在拦截流量，Tono 正在重试。"
+          }
+        }
+      }
+    },
+    "Secure app routing could not be applied. This Mac is back on its normal internet.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "安全应用分流未能应用。这台 Mac 已回到原来的网络。"
+          }
+        }
+      }
+    },
+    "Secure app routing was updated. Tono is applying it on this connection.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "安全应用分流已更新。Tono 正在这条连接上应用它。"
+          }
+        }
+      }
+    },
     "Secure app routing was updated; Tono is applying it without opening direct Internet.": {
       "localizations": {
         "zh-Hans": {
