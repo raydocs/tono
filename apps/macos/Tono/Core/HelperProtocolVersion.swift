@@ -379,9 +379,9 @@ nonisolated enum HelperProtocolVersion {
     ///   or finish a route delete keeps the removal pending ("releasing")
     ///   instead of recording it as released, so start and the watchdog retry it.
     /// - 4.52.35 → 4.52.36: app-removal cleanup keeps the helper (PF released,
-    ///   DNS restored) while an AI sinkhole resolver or blackhole route is
-    ///   still on the Mac, read from the system rather than the recovery
-    ///   record, and retries that removal itself before deciding.
+    ///   DNS restored) until every AI sinkhole resolver and blackhole route is
+    ///   proven absent, read from the system rather than the recovery record
+    ///   (unreadable counts as present), and retries that removal itself.
     static let current = "4.52.36"
 }
 

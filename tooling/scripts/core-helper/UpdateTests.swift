@@ -621,26 +621,33 @@ func runUpdateSelfTests() -> Bool {
     }
     // A full disk can lose the recovery record while the sinkhole stays, and
     // a corrupt receipt can keep the record pending after the sinkhole is
-    // gone. The removal check reads the resolver and the routes themselves.
-    test("selective-layer-check-reads-the-system") { directory in
+    // gone. The removal check reads the resolver and the routes themselves,
+    // and only proof of absence everywhere lets the helper go: an unsafe
+    // resolver directory or a route answer that proves nothing keeps it.
+    test("selective-layer-check-needs-proof-of-absence") { directory in
         let resolvers = directory + "/resolver"
-        try FileManager.default.createDirectory(atPath: resolvers, withIntermediateDirectories: false,
-                                                attributes: [.posixPermissions: 0o755])
+        try FileManager.default.createDirectory(atPath: resolvers, withIntermediateDirectories: false)
+        try check(chmod(resolvers, 0o775) == 0, "Could not make the test resolver directory group-writable")
         let resolver = URL(fileURLWithPath: resolvers + "/claude.ai")
-        let noRoute: ([String]) -> String? = { _ in "" }
         try Data("nameserver 10.0.0.53\n".utf8).write(to: resolver)
-        try check(!SelectiveFailOpenInstaller.layerRemains(directory: resolvers, routeReadback: noRoute),
-                  "An administrator resolver counted as a leftover AI layer")
-        let blackhole: ([String]) -> String? = { args in
-            args.last == SelectiveFailOpen.ipv4Prefix
-                ? "destination: 160.79.104.0\n       mask: 255.255.254.0\n      flags: <UP,DONE,STATIC,BLACKHOLE>\n"
-                : ""
+        try FileManager.default.createSymbolicLink(atPath: resolvers + "/anthropic.com",
+                                                   withDestinationPath: resolver.path)
+        let noRoute: ([String]) -> (status: Int32, output: String)? = { _ in
+            (1, "route: writing to routing socket: not in table\n")
         }
-        try check(SelectiveFailOpenInstaller.layerRemains(directory: resolvers, routeReadback: blackhole),
-                  "A leftover Tono blackhole route did not count as the AI layer")
+        try check(SelectiveFailOpenInstaller.layerProvenAbsent(directory: resolvers, routeReadback: noRoute),
+                  "An administrator resolver or symlink counted as Tono's AI layer")
+        try check(!SelectiveFailOpenInstaller.layerProvenAbsent(directory: resolvers, routeReadback: { _ in
+            (1, "route: writing to routing socket: No buffer space available\n")
+        }), "A failed route readback counted as proof that no blackhole remains")
+        try check(!SelectiveFailOpenInstaller.layerProvenAbsent(directory: resolvers, routeReadback: { args in
+            args.last == SelectiveFailOpen.ipv4Prefix
+                ? (0, "destination: 160.79.104.0\n       mask: 255.255.254.0\n      flags: <UP,DONE,STATIC,BLACKHOLE>\n")
+                : (1, "route: writing to routing socket: not in table\n")
+        }), "A leftover Tono blackhole route counted as absent")
         try Data(SelectiveFailOpen.resolverBody().utf8).write(to: resolver)
-        try check(SelectiveFailOpenInstaller.layerRemains(directory: resolvers, routeReadback: noRoute),
-                  "A leftover sinkhole resolver did not count as the AI layer")
+        try check(!SelectiveFailOpenInstaller.layerProvenAbsent(directory: resolvers, routeReadback: noRoute),
+                  "A sinkhole in an unsafe resolver directory counted as absent")
     }
     // An iPhone or iPad app on Apple silicon is a wrapper with no Contents
     // folder (`WrappedBundle -> Wrapper/<name>.app`). One of them kept every
