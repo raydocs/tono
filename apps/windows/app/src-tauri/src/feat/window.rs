@@ -476,6 +476,31 @@ async fn ask_to_restart_without_release(refusal: RefusalProtection) -> bool {
     rx.await.unwrap_or(false)
 }
 
+/// Quit from a user control (window close request, tray menu, tray flyout). A cancelled Quit has
+/// already run `quit_release`, which retired catalog/policy sync and every connection task, so
+/// the App that stays open must re-sync from the Service before it is used again.
+pub async fn quit_or_resync() -> tono_signal::ShutdownOutcome {
+    resync_if_cancelled(quit(), || {
+        crate::tono::commands::resync_after_cancelled_quit(handle::Handle::app_handle().clone())
+    })
+    .await
+}
+
+async fn resync_if_cancelled<R, RF>(
+    quit: impl std::future::Future<Output = tono_signal::ShutdownOutcome>,
+    resync: R,
+) -> tono_signal::ShutdownOutcome
+where
+    R: FnOnce() -> RF,
+    RF: std::future::Future<Output = ()>,
+{
+    let outcome = quit.await;
+    if outcome == tono_signal::ShutdownOutcome::Canceled {
+        resync().await;
+    }
+    outcome
+}
+
 pub async fn quit() -> tono_signal::ShutdownOutcome {
     logging!(debug, Type::System, "启动退出流程");
     // 设置退出标志
@@ -670,6 +695,23 @@ mod tests {
         assert!(!completed, "an unanswered optional shutdown must report its timeout");
         assert_eq!(started.elapsed(), super::OPTIONAL_SERVICE_STOP_BUDGET);
         assert!(super::wait_for_optional_service_stop(async {}).await);
+    }
+
+    /// The tray menu and tray flyout used to drop a cancelled Quit's outcome, so catalog/policy
+    /// sync that `quit_release` retired stayed stopped while the App kept running.
+    #[tokio::test]
+    async fn a_cancelled_quit_resyncs_the_app_that_stays_open() {
+        use tono_signal::ShutdownOutcome;
+        let resynced = AtomicBool::new(false);
+        let returned = super::resync_if_cancelled(async { ShutdownOutcome::Canceled }, || async {
+            resynced.store(true, Ordering::SeqCst);
+        })
+        .await;
+        assert_eq!(returned, ShutdownOutcome::Canceled);
+        assert!(
+            resynced.load(Ordering::SeqCst),
+            "a cancelled Quit must re-sync the running App"
+        );
     }
 
     use super::{

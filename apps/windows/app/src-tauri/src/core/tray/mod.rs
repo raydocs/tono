@@ -754,7 +754,7 @@ fn on_menu_event(_: &AppHandle, event: MenuEvent) {
                 let _ = help::open_core_latest_log().await;
             }
             MenuCommand::Exit => {
-                feat::quit().await;
+                feat::quit_or_resync().await;
             }
         }
     });

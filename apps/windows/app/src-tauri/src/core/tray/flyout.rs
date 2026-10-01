@@ -182,5 +182,5 @@ pub async fn tray_flyout_open_dashboard() {
 #[tauri::command]
 pub async fn tray_flyout_quit() {
     hide_flyout();
-    feat::quit().await;
+    feat::quit_or_resync().await;
 }
