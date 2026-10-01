@@ -310,7 +310,11 @@ fn direct_suffix_overlaps_protected(host: &str) -> bool {
         || PROTECTED_DIRECT_SUFFIXES
             .iter()
             .chain(crate::config::CLAUDE_HOME_DOMAINS.iter())
-            .any(|protected| protected.ends_with(&format!(".{host}")))
+            .any(|protected| protected.ends_with(&format!(".{host}"))
+                // Only these reviewed assistant children run ahead of the
+                // Alibaba parent in both emitters. All other overlaps stay denied.
+                && !(host == "aliyuncs.com"
+                    && crate::config::DEDICATED_MODEL_API_SUFFIXES.contains(protected)))
 }
 
 /// Wire shape of `GET traffic-policy` (digest semantics identical to the
@@ -1149,6 +1153,40 @@ mod tests {
         assert!(policy.domains.is_empty());
         assert!(policy.web_domains.is_empty());
         assert!(policy.direct_suffixes.is_empty());
+    }
+
+    #[test]
+    fn dashscope_children_cannot_be_direct_but_the_alibaba_parent_survives() {
+        let document = serde_json::json!({
+            "version": 3, "domains": [], "mediaEndpoints": [], "webDomains": [],
+            "directSuffixes": [{"host": "aliyuncs.com", "ports": [80, 443]}],
+        });
+        for trusted in [false, true] {
+            let policy = validate_policy_with_trust(
+                &response(1, &document.to_string()), &no_protected(), trusted,
+            ).unwrap();
+            assert_eq!(policy.direct_suffixes[0].host, "aliyuncs.com");
+            for host in [
+                "dashscope.aliyuncs.com", "cn-hongkong.dashscope.aliyuncs.com",
+                "coding-intl.dashscope.aliyuncs.com", "dashscope-intl.aliyuncs.com",
+                "dashscope-us.aliyuncs.com", "maas.aliyuncs.com",
+                "workspace.cn-beijing.maas.aliyuncs.com", "trial.ap-southeast-1.maas.aliyuncs.com",
+                "token-plan.ap-southeast-1.maas.aliyuncs.com",
+            ] {
+                for field in ["domains", "webDomains", "directSuffixes"] {
+                    let mut attempt = document.clone();
+                    attempt[field] = serde_json::json!([{"host": host, "ports": [443]}]);
+                    let policy = validate_policy_with_trust(
+                        &response(1, &attempt.to_string()), &no_protected(), trusted,
+                    ).unwrap();
+                    assert!(policy.domains.is_empty(), "{field}/{host}");
+                    assert!(policy.web_domains.is_empty(), "{field}/{host}");
+                    if field == "directSuffixes" {
+                        assert!(policy.direct_suffixes.is_empty(), "{host}");
+                    }
+                }
+            }
+        }
     }
 
     #[test]

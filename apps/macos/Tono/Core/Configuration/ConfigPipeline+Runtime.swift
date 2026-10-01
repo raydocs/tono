@@ -578,6 +578,15 @@ nonisolated extension ConfigPipeline {
             for host in Set(policyKeys).sorted() {
                 yaml += "    \"\(yamlScalar(host))\": [\(upstreams)]\n"
             }
+            // More-specific keys keep model API DNS on the tunnel while the
+            // remaining Alibaba subtree resolves through China DIRECT.
+            let protectedUpstreams = ["https://1.1.1.1/dns-query", "https://8.8.8.8/dns-query"]
+                .map { "\"\($0)#\(exitGroupName)\"" }.joined(separator: ", ")
+            for suffix in dedicatedModelAPISuffixes {
+                for key in [suffix, "+.\(suffix)"] {
+                    yaml += "    \"\(key)\": [\(protectedUpstreams)]\n"
+                }
+            }
         }
         if let directPolicy,
            !directPolicy.domainPins.isEmpty
@@ -686,15 +695,17 @@ nonisolated extension ConfigPipeline {
         // PF session allowlist.
         let hasResidentialHop = claudeHome != nil || claudeHomeSocks5 != nil
         let assistantTarget = hasResidentialHop ? claudeHomeGroupName : exitGroupName
-        // Domain rules exist only to divert assistant traffic onto the
-        // residential hop. Without that hop they would be pure noise — MATCH
-        // already sends these to the protected exit — and emitting them anyway
-        // would put DOMAIN-SUFFIX into a runtime whose direct exceptions are
-        // deliberately exact-host only.
+        // Dedicated API children must precede Alibaba DIRECT even without a
+        // residential hop; otherwise an ordinary curl/browser reaches DIRECT.
+        let assistantSuffixes = hasResidentialHop
+            ? Self.assistantHomeDomainSuffixes : Self.dedicatedModelAPISuffixes
+        for suffix in assistantSuffixes {
+            yaml += "  - AND,((NETWORK,TCP),(DOMAIN-SUFFIX,\(suffix))),\(assistantTarget)\n"
+        }
+        for suffix in Self.dedicatedModelAPISuffixes {
+            yaml += "  - AND,((NETWORK,UDP),(DOMAIN-SUFFIX,\(suffix))),REJECT\n"
+        }
         if hasResidentialHop {
-            for suffix in Self.assistantHomeDomainSuffixes {
-                yaml += "  - AND,((NETWORK,TCP),(DOMAIN-SUFFIX,\(suffix))),\(assistantTarget)\n"
-            }
             for cidr in Self.assistantHomeIPv4Cidrs {
                 yaml += "  - AND,((NETWORK,TCP),(IP-CIDR,\(cidr),no-resolve)),\(assistantTarget)\n"
             }
