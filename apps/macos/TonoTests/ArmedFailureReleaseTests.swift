@@ -257,4 +257,35 @@ final class ArmedFailureReleaseTests: XCTestCase {
         await retry?.value
         XCTAssertTrue(proved, "a slow successful release must retain its automatic recovery owner")
     }
+
+    func testFailedAutomaticAdmissionKeepsTheNextUnarmedBackoff() async {
+        let app = AppState()
+        let node = Fixture.realityNode()
+        app.proxyRegions = [ProxyRegion(id: AppState.managedCatalogRegionID, name: "TONO CLOUD", nodes: [node])]
+        app.applyProxySelection(node.name)
+        app.tonoTransport = TonoTransportDescriptor(port: 1080)
+        let savedArmed = KillSwitchService.isArmed
+        let savedUpdateBlock = RuntimeCleanup.nativeUpdateBlocksConnect
+        let savedUpdatePending = RuntimeCleanup.nativeUpdatePending
+        let savedSelection = AppProfile.defaults.string(forKey: SettingsKey.selectedProxyTargetName)
+        KillSwitchService.isArmed = false
+        RuntimeCleanup.nativeUpdateBlocksConnect = false
+        RuntimeCleanup.nativeUpdatePending = false
+        app.recordConnectBootSession = { throw POSIXError(.ENOSPC) }
+        app.unarmedTcpProof = { _ in true }
+        var delays: [TimeInterval] = []
+        defer {
+            app.connectionCoordinator.unarmedReconnectTask?.cancel()
+            app.connectionCoordinator.cancelConnectionTasks()
+            KillSwitchService.isArmed = savedArmed
+            RuntimeCleanup.nativeUpdateBlocksConnect = savedUpdateBlock
+            RuntimeCleanup.nativeUpdatePending = savedUpdatePending
+            AppProfile.defaults.set(savedSelection, forKey: SettingsKey.selectedProxyTargetName)
+        }
+        app.scheduleUnarmedReconnect(sleep: { delays.append($0) })
+        await app.connectionCoordinator.unarmedReconnectTask?.value
+        app.scheduleUnarmedReconnect(sleep: { delays.append($0) })
+        await app.connectionCoordinator.unarmedReconnectTask?.value
+        XCTAssertEqual(delays, [2, 5], "a failed automatic dial must not reset recovery to the first two-second rung")
+    }
 }

@@ -92,6 +92,7 @@ final class AppState {
     var lastConnectionFailure: ConnectionFailure?
     /// Next dial chosen by ExitHeal while PF is down. Nil keeps the selected node.
     var unarmedDialName: String?
+    var unarmedReconnectAttempt = 0
     /// Test seam. Nil uses a TCP connect that does not install PF.
     /// Not observed: an optional MainActor closure cannot be yielded by Observation.
     @ObservationIgnored
