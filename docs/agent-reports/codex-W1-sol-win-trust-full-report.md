@@ -1,22 +1,8 @@
-# W1-sol-win-trust: Codex (GPT-6.1 Sol) findings
+PR #843 has merged with its source and fixture corrections. Its body refresh failed twice (`gh pr edit`: GraphQL Projects classic deprecation). Metadata handoff: branch `hunt/sol-trust-vault-write-retry`; title `fix(windows): retry failed session vault mutations on flush`; updated body [vault-pr-body.md](/workspace/w1-codex/out/W1-sol-win-trust/vault-pr-body.md). Apply that body when GitHub tooling permits. No alternative API workaround attempted; no source commit awaits pushing.
 
-Generated 2026-09-30 21:05 MT from the run's findings.tsv / prs.tsv.
+Seven verified bugs fixed in seven PRs; 7 merged through CI. No deploy/publish, main edits, other branches, skipped tests or lowered CI gates. Only root edited; audits/reviews delegated read-only.
 
-## PRs
-
-| PR | Branch | Labels | Auto-merge requested | Title |
-|---|---|---|---|---|
-| PR#843 | hunt/sol-trust-vault-write-retry | none | yes | fix(windows): retry failed session vault mutations on flush |
-| PR#873 | hunt/sol-trust-release-absent-owner | needs-hardware | yes | fix(windows): stop unrecorded cores before owner-only release |
-| PR#912 | hunt/sol-trust-release-scm-probe-timeout | needs-hardware | yes | fix(windows): bound SCM reads in release and readiness paths |
-| PR#933 | hunt/sol-trust-scm-verifier-worker-cap | needs-hardware | yes | fix(windows): cap surviving SCM verification threads |
-| PR#955 | hunt/sol-trust-goodbye-admission | needs-hardware | yes | fix(windows): reserve accepted Service shutdown before new work |
-| PR#983 | hunt/sol-trust-selective-release-retry | needs-hardware | yes | fix(windows): retain the AI hold on selective release retries |
-| PR#990 | hunt/sol-trust-stale-replay-verdict | none | yes | fix(windows): keep obsolete token replays from rejecting a valid session |
-
-## Hypotheses
-
-| ID | Area | Sev | Location | Description | Verdict |
+| ID | area | severity | file:line (before fix) | one-line description | verdict |
 |---|---|---|---|---|---|
 | WIN-VAULT-WRITE-RETRY | A12 | P1 | apps/windows/app/src-tauri/src/tono/credentials.rs:743 | Failed vault mutations discarded; flush never retried persistence | real-fixed #843 |
 | WIN-IPC-CONNECTION-CAP | W6 | — | apps/windows/vendor/kode-bridge/src/ipc_http_server.rs:252 | Suspected unbounded concurrent IPC clients | false-positive default 128-connection semaphore |
@@ -107,3 +93,29 @@ Generated 2026-09-30 21:05 MT from the run's findings.tsv / prs.tsv.
 | JOURNAL-OVERSIZED-READ | A12 | — | apps/windows/crates/tono-core/src/update_journal/store.rs:137 | Large journal could exhaust memory | false-positive no ordinary producer writes unbounded journal |
 | CREDENTIAL-DEV-ACL | A12 | — | apps/windows/crates/tono-core/src/credentials.rs:127 | File credential implementation lacks native Windows ACL enforcement | false-positive production uses Credential Manager |
 | AUTH-CLOCK-REPLAY-VERDICT | A12 | P2 | apps/windows/crates/tono-core/src/auth.rs:1611 | Obsolete decisive replay under clock skew could refuse current rotated session | real-fixed #990 |
+
+PRs (merge commits, non-draft):
+
+| PR | Branch | Label | Auto-merge | CI/merge status |
+|---|---|---|---|---|
+| [#843](https://github.com/raydocs/tono/pull/843) | `hunt/sol-trust-vault-write-retry` | none | yes | merged after CI passed |
+| [#873](https://github.com/raydocs/tono/pull/873) | `hunt/sol-trust-release-absent-owner` | needs-hardware | yes | merged after CI passed |
+| [#912](https://github.com/raydocs/tono/pull/912) | `hunt/sol-trust-release-scm-probe-timeout` | needs-hardware | yes | merged after CI passed |
+| [#933](https://github.com/raydocs/tono/pull/933) | `hunt/sol-trust-scm-verifier-worker-cap` | needs-hardware | yes | merged after CI passed |
+| [#955](https://github.com/raydocs/tono/pull/955) | `hunt/sol-trust-goodbye-admission` | needs-hardware | yes | merged after CI passed |
+| [#983](https://github.com/raydocs/tono/pull/983) | `hunt/sol-trust-selective-release-retry` | needs-hardware | yes | merged after CI passed |
+| [#990](https://github.com/raydocs/tono/pull/990) | `hunt/sol-trust-stale-replay-verdict` | none | yes | merged after CI passed |
+
+Hypotheses: **89 total**, **73 false positives**, **9 known/duplicate**, **7 verified fixes**, **0 new real-unfixed**. Assigned A7/A12/W6/W8/A13 files read end to end; no source audit area unfinished. Windows native/Tauri/WFP/DNS/SCM/Authenticode and actual Credential Manager faults cannot run in this Linux VM. Native CI and final real-device batch remain separate evidence.
+
+Local evidence: prior vault exact writer harness 2 passed; absent-owner lifecycle suite 11 passed; SCM exact helper harness 3 passed; service client retry suite 10 passed; owner lifecycle/goodbye suite 16 passed. Each bug regression failed first. New selective retry exact helper: before 1 failed/1 passed, after 2 passed. New auth final crate: 325 unit + 15 integration (340 total) passed; original-exchange regression failed first. Current/missing-successor refusal boundaries remain authoritative. No doc tests ran (0). Raw receipts are retained beside this report.
+
+Prior CI integration receipt: #955 original head e6234455: native Windows core, App, App Rust, and Service checks passed. Original aggregate run36800226781 attempt1 failed the unchanged control-plane unchecked-index ratchet (522 errors against baseline521). git diff b341164b..e6234455 contains only Windows Service server sources and docs; the control-plane file tree is identical. Other hunters also observed the shared-main ratchet failure. This is not proven flaky, so no CI gate or test was weakened. Main was merged by the merge executor into head5662812c, whose exact-head Windows checks and aggregate ci-gate subsequently passed; #955 merged. The last printed TS diagnostic (worker.test.ts:6006) is old and is not evidence of the newly added error.
+
+
+New CI receipts:
+
+- #983 exact head `74e83a3925d9d53358bd1721310e8320f5bccf72`: MERGED; windows / core: SUCCESS, windows / app: SUCCESS, windows / app-rust: SUCCESS, windows / service: SUCCESS, ci-gate: SUCCESS.
+- #990 exact head `17ffe76029a9d4a551d2e4809736474970328405`: MERGED; windows / core: SUCCESS, windows / app: SUCCESS, windows / app-rust: SUCCESS, windows / service: SUCCESS, ci-gate: SUCCESS.
+
+Known decision/limitations were not patched: account-cache ownership/delete residual (#316/H3-F1), SFO-1/ZC-F1 selective-blocking architecture. Older Service null-payload compatibility remains; the current Service AI hold stays best effort/system resolver only. The auth fix preserves a per-request HTTP failure and does not repair the system clock or prevent repeated renewals while it remains ahead.

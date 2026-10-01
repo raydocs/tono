@@ -1,19 +1,21 @@
-All five fixes merged through CI.
+All seven fixes merged into main through CI.
 
-Metadata handoff: #843’s body update failed twice with GitHub’s Projects API error. Source is merged; no unpushed commits. Branch: `hunt/sol-trust-vault-write-retry`; title: “fix(windows): retry failed session vault mutations on flush”; [updated body](/workspace/w1-codex/out/W1-sol-win-trust/vault-pr-body.md).
+Metadata handoff: #843’s PR-body refresh failed twice in `gh pr edit`; its source merged. The [corrected body and handoff details](/workspace/w1-codex/out/W1-sol-win-trust/operator-handoff.md) are saved.
 
-Lines below refer to the audited baseline.
+File locations below are before the fixes.
 
 | ID | Area | Severity | File:line | Description | Verdict |
 |---|---|---|---|---|---|
-| WIN-VAULT-WRITE-RETRY | A12 | P1 | tono/credentials.rs:743 | Transient vault writes never retried | Fixed in [#843](https://github.com/raydocs/tono/pull/843) |
-| WIN-OWNER-RELEASE-NONE | W6 | P1 | server/handlers.rs:415 | Missing owner record let release skip a running core | Fixed in [#873](https://github.com/raydocs/tono/pull/873) |
-| WIN-RELEASE-SCM-PROBE-HANG | A7 | P1 | core/service/mod.rs:524 | Unbounded SCM reads hung lifecycle operations | Fixed in [#912](https://github.com/raydocs/tono/pull/912) |
-| WIN-SCM-VERIFIER-WORKERS | W6 | P2 | client/mod.rs:165 | Timed-out SCM verifier threads accumulated | Fixed in [#933](https://github.com/raydocs/tono/pull/933) |
-| WIN-GOODBYE-CONNECT-RACE | W6 | P2 | server/mod.rs:392 | Accepted shutdown still admitted new update work | Fixed in [#955](https://github.com/raydocs/tono/pull/955) |
+| WIN-VAULT-WRITE-RETRY | A12 | P1 | App `tono/credentials.rs:743` | Failed vault mutations were discarded instead of retried | Fixed in [#843](https://github.com/raydocs/tono/pull/843) |
+| WIN-OWNER-RELEASE-NONE | W6 | P1 | Service `core/server/handlers.rs:415` | Missing owner record skipped live core shutdown | Fixed in [#873](https://github.com/raydocs/tono/pull/873) |
+| WIN-RELEASE-SCM-PROBE-HANG | A7 | P1 | App `core/service/mod.rs:524` | SCM stall held the Disconnect release worker | Fixed in [#912](https://github.com/raydocs/tono/pull/912) |
+| WIN-SCM-VERIFIER-WORKERS | W6 | P2 | Service `client/mod.rs:165` | Sustained SCM stalls accumulated verifier threads | Fixed in [#933](https://github.com/raydocs/tono/pull/933) |
+| WIN-GOODBYE-CONNECT-RACE | W6 | P2 | Service `core/server/mod.rs:392` | Accepted shutdown still admitted new connections | Fixed in [#955](https://github.com/raydocs/tono/pull/955) |
+| WIN-SELECTIVE-RELEASE-RETRY | A7 | P2 | App `core/service/mod.rs:1323` | Automatic retry could drop the selective AI hold | Fixed in [#983](https://github.com/raydocs/tono/pull/983) |
+| AUTH-CLOCK-REPLAY-VERDICT | A12 | P2 | Core `auth.rs:1611` | Obsolete replay under clock skew rejected a valid rotated session | Fixed in [#990](https://github.com/raydocs/tono/pull/990) |
 
-All PRs used merge-commit auto-merge. #843 has no labels; the other four have `needs-hardware`. Each new regression failed before the fix and passed afterward.
+All seven were non-draft PRs with merge-commit auto-merge enabled. `needs-hardware` is applied to #873, #912, #933, #955 and #983; #843 and #990 have no labels.
 
-**75 hypotheses examined: 61 false positives, nine duplicates, five verified fixes, zero new real-unfixed findings.** The [full 75-row report](/workspace/w1-codex/out/W1-sol-win-trust/report.md) includes complete paths, rejection reasons and test receipts.
+**89 hypotheses examined:** 7 verified fixes, 73 false positives, 9 duplicates, 0 new real-unfixed findings. The [complete report](/workspace/w1-codex/out/W1-sol-win-trust/report.md) contains all 89 rows, rejection reasons and CI receipts.
 
-All assigned areas were reviewed. Actual Windows hardware failure scenarios remain for the final device-testing batch; they cannot run in this Linux VM.
+Each regression failed before its fix and passed afterward. The final portable core suite passed 340 tests, and required Windows CI passed. No assigned source-audit area remains unfinished; real-device validation remains for the coordinated hardware batch.

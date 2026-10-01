@@ -1,20 +1,6 @@
-# R3-W1hi: Codex (GPT-6.1 Sol) findings
+PR #976 supplemental body update failed twice because gh queried retired Projects Classic fields. The code is already merged. Branch: `hunt/sol-r3ks-arm-ai-hold`; title: “fix(windows): preserve the AI hold when WFP install fails”; saved body: `/workspace/w1-codex/out/R3-W1hi/arm-ai-pr-body.md`.
 
-Generated 2026-09-30 21:05 MT from the run's findings.tsv / prs.tsv.
-
-## PRs
-
-| PR | Branch | Labels | Auto-merge requested | Title |
-|---|---|---|---|---|
-| 974 | hunt/sol-r3ks-recovery-ai-hold | needs-hardware | yes | fix(windows): keep the AI hold after WFP recovery release |
-| 976 | hunt/sol-r3ks-arm-ai-hold | needs-hardware | yes | fix(windows): preserve the AI hold when WFP install fails |
-| 978 | hunt/sol-r3ks-update-ai-hold | needs-hardware | yes | fix(windows): keep the AI hold after failed update recovery |
-| 986 | hunt/sol-r3ks-startup-reconnect-marker | needs-hardware | yes | fix(windows): retain crash reconnect intent after startup cleanup retries |
-| 988 | hunt/sol-r3ks-selective-worker-order | needs-hardware | yes | fix(windows): order selective AI hold mutations after native timeouts |
-
-## Hypotheses
-
-| ID | Area | Sev | Location | Description | Verdict |
+| ID | Area | Severity | File:line | Description | Verdict |
 |---|---|---|---|---|---|
 | WIN-RECOVERY-AI-HOLD-OMISSION | Windows WFP | P1 | apps/windows/service/src/core/windows_kill_switch.rs:2946 | Crash/corrupt/unhealthy and unproven-Core releases omit the secondary AI hold | real-fixed #974 (merged) |
 | W1-DIRECT-EXPIRY | Windows WFP | P1 | apps/windows/service/src/core/windows_kill_switch.rs:3428 | Committed DIRECT heartbeat expiry remains exact Blocked | duplicate #777 / #926 |
@@ -44,3 +30,15 @@ Generated 2026-09-30 21:05 MT from the run's findings.tsv / prs.tsv.
 | W1-INHERITED-CORE-WINDOW | Windows WFP | P2 | apps/windows/service/src/core/windows_kill_switch.rs:299 | A replacement arm could inherit an old Core-proof deadline | duplicate #740; no distinct new ordinary trigger proved beyond existing proof-window behavior |
 | W1-LATE-INTENT-RENAME | Windows WFP | P2 | apps/windows/service/src/core/windows_kill_switch.rs:639 | A timed-out rename could overwrite a successor intent | duplicate BRICK-W11; unique temps/readback fixed shared corruption, later-than-readback rename remains documented |
 | W1-RECOVERY-CHECKPOINT | Windows WFP | P2 | apps/windows/service/src/core/windows_kill_switch.rs:2745 | Slow secondary hold expands the pre-tombstone crash window | duplicate #740 guarded wanted-intent recovery; immediate/failed-replay/30-second Core proof release; no new permanent outage proved |
+
+| PR | State | Auto-merge | Labels | Gate |
+|---|---|---|---|---|
+| [#974](https://github.com/raydocs/tono/pull/974) | merged | MERGE enabled before merge | needs-hardware | success |
+| [#976](https://github.com/raydocs/tono/pull/976) | merged | MERGE enabled before merge | needs-hardware | success |
+| [#978](https://github.com/raydocs/tono/pull/978) | merged | MERGE enabled before merge | needs-hardware | success |
+| [#986](https://github.com/raydocs/tono/pull/986) | merged | MERGE enabled before merge | needs-hardware | success |
+| [#988](https://github.com/raydocs/tono/pull/988) | merged | MERGE enabled before merge | needs-hardware | success |
+
+28 hypotheses: 5 fixed, 11 duplicates, 10 false positives, 2 unverified. All merged commits verified in origin/main. Each fixed regression failed before and passed after; focused local tests and hosted Windows gates passed.
+
+Assigned second half read end to end with relevant callers/callees. Native real-device networking unrun in Linux. Deferred proof: exceptional unrestored DNS plus independent unwanted-intent unlink failure, and surviving broken Core/TUN routes after WFP-only release. Process-local selective ordering does not fence a netsh child surviving Service death; native command failures/cache/DoH remain existing best-effort limits.
