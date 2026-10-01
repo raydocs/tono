@@ -506,6 +506,25 @@ describe('ops ledger, month close, live FX', () => {
     expect(after.frozenPartial).toBeUndefined();
   });
 
+  it('keeps closed-month reconciliation unchanged when a priced node is later retired', async () => {
+    const month = MONTH();
+    const t = tnow();
+    await db().prepare(
+      `INSERT INTO ops_node_profiles(id, catalog_name, status, price, currency, created_at, updated_at)
+       VALUES('frozen-recon-node', ?, 'active', 80, 'USD', ?, ?)`,
+    ).bind(NODE, t, t).run();
+    const closed = await ops(`months/${month}/close`, json({ notes: 'lock reconciliation' }));
+    expect(closed.status).toBe(200);
+    const before = assertMonthSummary(await closed.json());
+    expect(before.unreconciledBills).toBe(1);
+    await db().prepare("UPDATE ops_node_profiles SET status = 'retired' WHERE id = 'frozen-recon-node'").run();
+
+    const after = assertMonthSummary(await (await ops(`months/${month}`)).json());
+    expect(after.frozen).toBe(true);
+    expect(after.reconciliation).toEqual(before.reconciliation);
+    expect(after.unreconciledBills).toBe(1);
+  });
+
   it('paginates GET ledger in SQL and reports COUNT(*) as total', async () => {
     const month = MONTH();
     const t = tnow();
