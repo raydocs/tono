@@ -2545,8 +2545,11 @@ final class AppState {
         LocalTrafficAudit.shared.setResidentialRouteContext(context)
         LocalTrafficAudit.setAssistantDirectFirstMember(terminal)
         // Callback-time lookup alone would stamp a buffered old WebSocket
-        // frame with the new context. Invalidate its receive task at commit.
+        // frame with the new context. Invalidate its receive task at commit;
+        // recordCoreLogs has no generation guard, so the logs stream's
+        // coalescing buffer must be dropped for the same reason.
         webSocket?.restartConnectionsStreamAfterRuntimeChange()
+        webSocket?.restartLogsStreamAfterRuntimeChange()
     }
 
     func compactRemoteDiagnosticSnapshot() -> TonoDiagnosticSnapshot {
