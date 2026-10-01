@@ -79,6 +79,14 @@ impl LifecycleOperation {
     }
 }
 
+/// Release joiners share completion and a final disposition. Explicit removal dominates the
+/// automatic AI hold; only user Disconnect/failed-Prepare carries pending-update authority.
+struct ReleaseOperation {
+    operation: Arc<LifecycleOperation>,
+    apply_narrow: bool,
+    explicit_disconnect: bool,
+}
+
 /// Account state machine (macOS parity):
 /// `restoring → signedOut | authenticating | ready | suspended | error`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -580,7 +588,7 @@ pub struct TonoState {
     route_ledger: parking_lot::Mutex<crate::tono::route_ledger::RouteLedger>,
     /// Serializes login, periodic, and user-initiated catalog fetches for one account session.
     catalog_sync_operation: tokio::sync::Mutex<()>,
-    release_operation: tokio::sync::Mutex<Option<Arc<LifecycleOperation>>>,
+    release_operation: tokio::sync::Mutex<Option<ReleaseOperation>>,
     /// A late StartClash or DNS-enable commit must settle before explicit release reaches the
     /// Service. Connect mutations hold a read guard inside their detached reconciliation task;
     /// admission also takes a reader. Detached failure/switch cleanup and the one release worker
@@ -749,22 +757,38 @@ impl TonoState {
 
     /// Start one release or join the already-running one. The boolean is true only for the caller
     /// responsible for spawning the supervisor.
-    pub async fn begin_release(&self) -> (Arc<LifecycleOperation>, bool) {
+    pub async fn begin_release(
+        &self, explicit_disconnect: bool, apply_narrow: bool,
+    ) -> (Arc<LifecycleOperation>, bool) {
         let mut slot = self.release_operation.lock().await;
-        if let Some(operation) = slot.as_ref() {
-            return (Arc::clone(operation), false);
+        if let Some(release) = slot.as_mut() {
+            release.apply_narrow &= apply_narrow;
+            release.explicit_disconnect |= explicit_disconnect;
+            return (Arc::clone(&release.operation), false);
         }
         let id = self.next_release_id.fetch_add(1, Ordering::Relaxed);
         let operation = Arc::new(LifecycleOperation::new(id));
-        *slot = Some(Arc::clone(&operation));
+        *slot = Some(ReleaseOperation { operation: Arc::clone(&operation), apply_narrow, explicit_disconnect });
         (operation, true)
     }
 
     pub async fn finish_release(&self, id: u64) {
         let mut slot = self.release_operation.lock().await;
-        if slot.as_ref().is_some_and(|operation| operation.id() == id) {
+        if slot.as_ref().is_some_and(|release| release.operation.id() == id) {
             slot.take();
         }
+    }
+
+    /// Atomically seal successful release or retain admission exclusion for its plain follow-up.
+    /// The caller holds inner while sealing, so final metadata cannot race a new admission.
+    pub async fn finish_release_if_applied(&self, id: u64, applied_narrow: bool) -> Option<(bool, bool)> {
+        let mut slot = self.release_operation.lock().await;
+        let release = slot.as_ref().filter(|release| release.operation.id() == id)?;
+        if applied_narrow && !release.apply_narrow {
+            return Some((release.explicit_disconnect, false));
+        }
+        slot.take();
+        None
     }
 
     pub async fn release_in_progress(&self) -> bool {
