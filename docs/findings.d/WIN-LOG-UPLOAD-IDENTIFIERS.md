@@ -1,0 +1,5 @@
+| ID | 问题（一句） | 状态 | Issue / PR | 等级 | 剩余限制 |
+|---|---|---|---|---|---|
+| WIN-LOG-UPLOAD-IDENTIFIERS | Operator-authorized raw network-log uploads preserve sign-in emails and revoked-device IDs from the private local audit | in-PR | hunt/sol-winapp-upload-identifier-redaction | 低·已确认（P2，源码与回归） | Raw routing evidence intentionally remains gated by the device collection window; native uploader execution awaits Windows CI |
+
+`commands/account.rs:298` writes SignInOk after activating upload ownership. `log_upload.rs:223-229` formerly selected matching scope lines and compressed their original bytes, so the operator collection window stored the email verbatim. RevokeDevice similarly records its device UUID. The recipient already knows the authenticated account, and storage requires its collection window: P2 privacy-contract defect, not credential exposure. Upload-boundary redaction now masks those identifier fields and reapplies the existing credential redactor before JSON serialization; private local bytes and original-byte cursor accounting remain intact.

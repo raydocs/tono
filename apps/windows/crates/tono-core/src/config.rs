@@ -19,6 +19,14 @@ pub const MIXED_PORT: u16 = 28990;
 pub const EXTERNAL_CONTROLLER: &str = "127.0.0.1:9090";
 pub const TUN_DEVICE_NAME: &str = "Tono";
 pub const FAKE_IP_RANGE: &str = "198.18.0.1/16";
+/// How long the OS may cache a fake-ip answer.
+///
+/// Mihomo's default is 1s, so every app re-queries once a second. Those
+/// answers stay on the local fake-ip map and never leave the machine. 30s is
+/// the recovery bound: macOS does not flush mDNSResponder on disconnect, and a
+/// missed Windows flush must not leave apps on 198.18.0.0/16. After this TTL
+/// the next lookup uses the restored resolver and the machine has network again.
+pub const FAKE_IP_TTL_SECONDS: i64 = 30;
 pub const DNS_LISTEN: &str = "127.0.0.1:53";
 /// Names of the physical-interface-bound DIRECT outbounds (present only when
 /// the corresponding DirectPlan rules exist).
@@ -945,6 +953,15 @@ fn runtime_value(
     put(&mut dns, "ipv6", Value::Bool(false));
     put(&mut dns, "enhanced-mode", string("fake-ip"));
     put(&mut dns, "fake-ip-range", string(FAKE_IP_RANGE));
+    put(&mut dns, "fake-ip-ttl", Value::Number(FAKE_IP_TTL_SECONDS.into()));
+    // VLESS Reality cannot carry UDP. prefer-h3 races a QUIC probe against the
+    // first TLS handshake and, on failure, drops the HTTP client. HTTP/2
+    // keep-alive (mihomo's 5-minute idle pool) is the reuse path. Leave it off
+    // so a DoH miss still falls through to the second server instead of a reset.
+    put(&mut dns, "prefer-h3", Value::Bool(false));
+    // Default is already LRU with stale. Name it so a later edit cannot switch
+    // to arc, which drops stale answers and turns a slow upstream into a miss.
+    put(&mut dns, "cache-algorithm", string("lru"));
     put(&mut dns, "respect-rules", Value::Bool(true));
     put(&mut dns, "use-hosts", Value::Bool(true));
     put(&mut dns, "nameserver", strings(&DOH_NAMESERVERS));
@@ -1111,6 +1128,24 @@ fn runtime_value(
             || !plan.web_suffix_rules.is_empty()
             || !plan.udp_wechat_rules.is_empty()
         {
+            // The address-free signed-app rules below match every destination
+            // on the reviewed ports, including an assistant site opened in
+            // WeChat, DingTalk, or Feishu. Pin the same assistant hosts the
+            // residential hop uses before those rules exist. Hostname flows
+            // and the Anthropic range then stay on Tono-Exit; raw CDN IPs
+            // that are not in that set still take the signed-app shortcut.
+            if !plan.tcp_wechat_rules.is_empty() && !plan.wechat_process_path_regexes.is_empty() {
+                for domain in CLAUDE_HOME_DOMAINS {
+                    rules.push(format!(
+                        "AND,((NETWORK,TCP),(DOMAIN-SUFFIX,{domain})),{EXIT_GROUP_NAME}"
+                    ));
+                }
+                for cidr in CLAUDE_HOME_IPV4_CIDRS {
+                    rules.push(format!(
+                        "AND,((NETWORK,TCP),(IP-CIDR,{cidr},no-resolve)),{EXIT_GROUP_NAME}"
+                    ));
+                }
+            }
             for process in HOME_PROCESS_NAMES {
                 rules.push(format!(
                     "AND,((NETWORK,TCP),(PROCESS-NAME,{process})),Tono-Exit"
@@ -1384,6 +1419,15 @@ reality-opts:
         assert_eq!(
             get(&value, &["dns", "fake-ip-range"]).as_str(),
             Some("198.18.0.1/16")
+        );
+        assert_eq!(
+            get(&value, &["dns", "fake-ip-ttl"]).as_i64(),
+            Some(FAKE_IP_TTL_SECONDS)
+        );
+        assert_eq!(get(&value, &["dns", "prefer-h3"]).as_bool(), Some(false));
+        assert_eq!(
+            get(&value, &["dns", "cache-algorithm"]).as_str(),
+            Some("lru")
         );
         assert_eq!(get(&value, &["dns", "respect-rules"]).as_bool(), Some(true));
         assert_eq!(get(&value, &["dns", "use-hosts"]).as_bool(), Some(true));
@@ -2458,6 +2502,42 @@ reality-opts:
         assert!(rules.contains(
             &"AND,((NETWORK,TCP),(DST-PORT,443),(DOMAIN,wxs.qq.com),(IP-CIDR,9.0.0.10/32,no-resolve)),Tono-China-Direct"
         ));
+    }
+
+    #[test]
+    fn assistant_hosts_precede_address_free_signed_app_direct_without_a_home_hop() {
+        let mut plan = direct_plan();
+        let prefix = wechat_prefix_path_regex(r"C:\Program Files\Tencent\WeChat").unwrap();
+        plan.wechat_process_path_regexes = vec![prefix.clone()];
+        let runtime =
+            build_owned_runtime(&three_nodes(), "JP Reality 02", "test-secret", Some(&plan)).unwrap();
+        // `rules` borrows the YAML document. A temporary `parsed(...)` is freed
+        // at the end of the statement, which rustc rejects (E0716).
+        let parsed_runtime = parsed(&runtime);
+        let rules: Vec<&str> = get(&parsed_runtime, &["rules"])
+            .as_sequence()
+            .unwrap()
+            .iter()
+            .map(|rule| rule.as_str().unwrap())
+            .collect();
+        let direct = format!(
+            "AND,((NETWORK,TCP),(DST-PORT,443),(PROCESS-PATH-REGEX,{prefix})),{DIRECT_GROUP_NAME}"
+        );
+        let direct_at = rules
+            .iter()
+            .position(|rule| *rule == direct)
+            .expect("signed-app port rule");
+        for domain in ["claude.ai", "chatgpt.com", "openai.com"] {
+            let shield = format!("AND,((NETWORK,TCP),(DOMAIN-SUFFIX,{domain})),{EXIT_GROUP_NAME}");
+            let at = rules.iter().position(|rule| *rule == shield).expect(domain);
+            assert!(at < direct_at, "{domain} must win before the signed-app DIRECT rule");
+        }
+        let cidr = format!(
+            "AND,((NETWORK,TCP),(IP-CIDR,{},no-resolve)),{EXIT_GROUP_NAME}",
+            CLAUDE_HOME_IPV4_CIDRS[0]
+        );
+        let cidr_at = rules.iter().position(|rule| *rule == cidr).expect("anthropic range");
+        assert!(cidr_at < direct_at);
     }
 
     #[test]

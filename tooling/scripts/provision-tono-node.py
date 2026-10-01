@@ -15,7 +15,9 @@ XRAY_ASSETS = {
     "x86_64": ("Xray-linux-64.zip", "23cd9af937744d97776ee35ecad4972cf4b2109d1e0fe6be9930467608f7c8ae"),
     "aarch64": ("Xray-linux-arm64-v8a.zip", "4d30283ae614e3057f730f67cd088a42be6fdf91f8639d82cb69e48cde80413c"),
 }
-REPO = Path(__file__).resolve().parents[1]
+# Git root. parents[1] is tooling/, which let a private inventory under
+# services/ or apps/ through the "outside the repository" check.
+REPO = Path(__file__).resolve().parents[2]
 HELPER = Path(__file__).with_name("remote") / "manage-tono-node-v2.sh"
 # The one place the Reality front measurement lives, shared with
 # provision-reality-node.rb and check-node-in-fleet.py.
@@ -177,7 +179,11 @@ def execute(args: argparse.Namespace, runner_factory=Runner) -> dict:
     if state:
         if state.get("desired") != want: raise ProvisionError("desired state differs; rollback or rotation required")
         r=runner.call({"op":"verify","transactionId":state["transactionId"],"expected":state["expected"],"desired":state["desired"]})
-        if r.get("healthy"): return base|{"changed":False,"verified":True}
+        if r.get("healthy"):
+            if not state.get("verified"):
+                record={"transactionId":state["transactionId"],"desired":want,"expected":state["expected"],"verified":True,"client":r.get("client",state.get("client",{}))}
+                write_private(sf,record)
+            return base|{"changed":False,"verified":True}
         raise ProvisionError("existing transaction is not healthy; rollback required")
     pre=runner.call({"op":"preflight","desired":want})
     if pre.get("firewallChangeRequired") and not args.allow_firewall_change: raise ProvisionError("firewall approval required")

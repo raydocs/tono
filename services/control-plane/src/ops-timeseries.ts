@@ -251,7 +251,8 @@ async function rollupResolution(
   );
   // net_in/net_out are cumulative counters, not gauges. A node restart can make
   // them smaller inside a bucket, so MAX(value) is not the bucket's closing
-  // counter. Rank by time and carry the final observation into the next tier.
+  // counter. Carry the latest complete pair into the next tier; a missing
+  // field in a later observation must not erase the quota reader's watermark.
   if (source === 'samples') {
     await db.prepare(
       `WITH ranked AS (
@@ -262,7 +263,12 @@ async function rollupResolution(
              PARTITION BY node_name,
                (observed_at / CAST(? AS INTEGER)) * CAST(? AS INTEGER)
              ORDER BY observed_at DESC
-           ) AS bucket_rank
+           ) AS bucket_rank,
+           ROW_NUMBER() OVER (
+             PARTITION BY node_name,
+               (observed_at / CAST(? AS INTEGER)) * CAST(? AS INTEGER)
+             ORDER BY (net_in IS NULL OR net_out IS NULL), observed_at DESC
+           ) AS counter_rank
          FROM operations_agent_samples
          WHERE observed_at < ?
        )
@@ -293,8 +299,8 @@ async function rollupResolution(
          AVG(disk_used),
          MAX(CASE WHEN bucket_rank = 1 THEN disk_total END),
          AVG(load1),
-         MAX(CASE WHEN bucket_rank = 1 THEN net_in END),
-         MAX(CASE WHEN bucket_rank = 1 THEN net_out END),
+         MAX(CASE WHEN counter_rank = 1 THEN net_in END),
+         MAX(CASE WHEN counter_rank = 1 THEN net_out END),
          AVG(swap_used),
          AVG(tcp_connections)
        FROM ranked
@@ -321,6 +327,7 @@ async function rollupResolution(
          tcp_avg = excluded.tcp_avg
        WHERE excluded.samples >= operations_agent_rollups.samples`,
     ).bind(
+      toResolution, toResolution,
       toResolution, toResolution,
       toResolution, toResolution,
       bound, toResolution,
@@ -350,7 +357,12 @@ async function rollupResolution(
            PARTITION BY node_name,
              (bucket_at / CAST(? AS INTEGER)) * CAST(? AS INTEGER)
            ORDER BY bucket_at DESC
-         ) AS bucket_rank
+         ) AS bucket_rank,
+         ROW_NUMBER() OVER (
+           PARTITION BY node_name,
+             (bucket_at / CAST(? AS INTEGER)) * CAST(? AS INTEGER)
+           ORDER BY (net_in_last IS NULL OR net_out_last IS NULL), bucket_at DESC
+         ) AS counter_rank
        FROM operations_agent_rollups
        WHERE resolution_seconds = ? AND bucket_at < ?
      )
@@ -385,8 +397,8 @@ async function rollupResolution(
        MAX(CASE WHEN bucket_rank = 1 THEN disk_total END),
        CASE WHEN SUM(effective_load1_samples) = 0 THEN NULL
             ELSE SUM(load1_avg * effective_load1_samples) / SUM(effective_load1_samples) END,
-       MAX(CASE WHEN bucket_rank = 1 THEN net_in_last END),
-       MAX(CASE WHEN bucket_rank = 1 THEN net_out_last END),
+       MAX(CASE WHEN counter_rank = 1 THEN net_in_last END),
+       MAX(CASE WHEN counter_rank = 1 THEN net_out_last END),
        CASE WHEN SUM(effective_swap_used_samples) = 0 THEN NULL
             ELSE SUM(swap_used_avg * effective_swap_used_samples) / SUM(effective_swap_used_samples) END,
        CASE WHEN SUM(effective_tcp_samples) = 0 THEN NULL
@@ -414,6 +426,7 @@ async function rollupResolution(
        swap_used_avg = excluded.swap_used_avg,
        tcp_avg = excluded.tcp_avg`,
   ).bind(
+    toResolution, toResolution,
     toResolution, toResolution,
     toResolution, toResolution,
     fromResolution, bound, toResolution,
@@ -476,7 +489,7 @@ export async function queryAgentMetrics(
   if (span > ROLLUP_5M_RETENTION_SECONDS) resolutionSeconds = 3600;
   else if (span > SAMPLE_RETENTION_SECONDS) resolutionSeconds = 300;
 
-  const series: Record<string, MetricPoint[]> = {};
+  const series: Record<string, MetricPoint[]> = Object.create(null);
   const push = (name: string, row: Row) => {
     const point: MetricPoint = { t: Number(row.t) };
     for (const field of requested) point[field] = finite(row[field]);

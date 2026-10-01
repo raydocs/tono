@@ -170,6 +170,109 @@ mod tests {
     }
 
     #[cfg(unix)]
+    struct OwnerChildFixture(Child);
+
+    #[cfg(unix)]
+    impl Drop for OwnerChildFixture {
+        fn drop(&mut self) {
+            kill_child(&mut self.0);
+        }
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    #[serial]
+    async fn released_owner_is_reacquired_without_killing_a_stale_pid() -> Result<()> {
+        use std::future::Future as _;
+        use std::task::Poll;
+
+        let _ = stop_ipc_server().await;
+        let predecessor = acquire_service_owner().await?.context("first owner lock")?;
+        let mut foreign = OwnerChildFixture(
+            Command::new(ensure_test_bin("mock_binary")?)
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn()?,
+        );
+        // Model PID reuse with stale numeric evidence while retaining the actual lock.
+        std::fs::write(service_paths().pid_file_path(), foreign.0.id().to_string())?;
+        let takeover = acquire_service_owner();
+        tokio::pin!(takeover);
+        std::future::poll_fn(|cx| {
+            assert!(
+                takeover.as_mut().poll(cx).is_pending(),
+                "takeover must await health"
+            );
+            Poll::Ready(())
+        })
+        .await;
+        drop(predecessor);
+        let acquired = takeover
+            .await?
+            .context("released lock should be reacquired")?;
+        assert!(
+            foreign.0.try_wait()?.is_none(),
+            "reacquisition must preserve the foreign process"
+        );
+        drop(acquired);
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    #[serial]
+    async fn failed_owner_takeover_preserves_successor_pid_metadata() -> Result<()> {
+        use std::future::Future as _;
+        use std::task::Poll;
+
+        let _ = stop_ipc_server().await;
+        let mut predecessor = OwnerChildFixture(
+            Command::new(ensure_test_bin("owner_lock_holder")?)
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn()?,
+        );
+        let predecessor_pid = predecessor.0.id();
+        let paths = service_paths();
+        wait_until("predecessor owner metadata", Duration::from_secs(5), || {
+            std::fs::read_to_string(paths.pid_file_path())
+                .ok()
+                .and_then(|content| content.trim().parse::<u32>().ok())
+                == Some(predecessor_pid)
+        })
+        .await?;
+        let takeover = acquire_service_owner();
+        tokio::pin!(takeover);
+        std::future::poll_fn(|cx| {
+            assert!(
+                takeover.as_mut().poll(cx).is_pending(),
+                "takeover must await health"
+            );
+            Poll::Ready(())
+        })
+        .await;
+        kill_child(&mut predecessor.0);
+        let successor = acquire_service_owner()
+            .await?
+            .context("successor owner lock")?;
+        let refused = takeover.await.is_err();
+        let successor_pid = std::fs::read_to_string(paths.pid_file_path())
+            .ok()
+            .and_then(|content| content.trim().parse::<u32>().ok());
+        assert!(
+            refused,
+            "takeover must refuse while the successor owns the lock"
+        );
+        assert_eq!(
+            successor_pid,
+            Some(std::process::id()),
+            "failed takeover must retain successor metadata"
+        );
+        drop(successor);
+        Ok(())
+    }
+
+    #[cfg(unix)]
     #[tokio::test]
     #[serial]
     async fn stale_owner_without_ipc_is_cleaned_and_reacquired() -> Result<()> {
