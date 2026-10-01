@@ -144,3 +144,15 @@
 | M10-H09 | macOS native update | Sol (Codex acct 2, R3-M10gap) | P2 | duplicate of #891 | Monitor releases PF during staging before suspension [AppState+NativeUpdate.swift:9] |
 | MAC-UPDATE-CANCELLED-RELOAD | macOS native update | Sol (Codex acct 2, R3-M10gap) | P2 | real-fixed #991 | Cancelled reload handle survives failed update retirement [AppState+NativeUpdate.swift:34] |
 | MAC-UPDATE-METADATA-DEADLINE | macOS update download | Sol (Codex acct 2, R3-M10gap) | P2 | real-fixed #993 | Trickling metadata holds the update-check gate for days [NativeUpdateDownload.swift:23] |
+
+### R3-M6M8 (finished 21:19 MT; 36 hypotheses, 28 FP, PRs: #1001)
+| ID | Area | Model | Sev | Verdict | Description [location] |
+|---|---|---|---|---|---|
+| R3CONN-DUP01 | M6 | Sol (Codex acct 2, R3-M6M8) | P1 | duplicate #720 | Armed failure holds all traffic [AppState+Connect.swift:643] |
+| R3CONN-DUP02 | M6 | Sol (Codex acct 2, R3-M6M8) | P1 | duplicate #760 | Released PF health and browser DNS hold [AppState+Connect.swift:1589] |
+| R3CONN-DUP03 | M8 | Sol (Codex acct 2, R3-M6M8) | P2 | duplicate #795 | Protected Offline update commit remains pending [RuntimeCleanup.swift:218] |
+| R3CONN-DUP04 | M8 | Sol (Codex acct 2, R3-M6M8) | P2 | duplicate #991 | Cancelled reload handle survives update suspension [AppState+NativeUpdate.swift:38] |
+| MAC-UPDATE-WAKE-RETIREMENT | M8 | Sol (Codex acct 2, R3-M6M8) | P2 | real-fixed #1001; CI pending | Surviving wake task reconnects after explicit update release and retirement [AppState+NativeUpdate.swift:36] |
+| R3CONN-DUP05 | M6 | Sol (Codex acct 2, R3-M6M8) | P2 | duplicate #720 replaces this branch with unarmed recovery | Missing-TUN release retires its own reconnect intent [AppState+Connect.swift:1494] |
+| R3CONN-DEC01 | M6 | Sol (Codex acct 2, R3-M6M8) | P2 design | real-unfixed decision item; deliberate teardown, helper watchdog releases with merged #738 selective layer; preserving the live session needs a product decision | Supplemental DNS conflict deliberately stops core and holds general traffic [AppState+Connect.swift:2385] |
+| R3CONN-DUP06 | M8 | Sol (Codex acct 2, R3-M6M8) | P2 design | duplicate documented behavior in #854; helper fallback already tracked | Quit metadata-query error or deadline leaves protection held [AppDelegate.swift:326] |
