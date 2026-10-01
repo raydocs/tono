@@ -14,7 +14,12 @@ vi.mock('@/hooks/use-tono', () => ({
   tonoAccountQueryKey: ['tonoAccount'],
   tonoDevicesQueryKey: ['tonoDevices'],
   tonoServersQueryKey: ['tonoServers'],
-  useTonoStatus: () => ({ mutateTonoStatus: async () => {} }),
+  // The card only fetches account facts for a signed-in scope (see the
+  // account-scope test), so the mock carries one.
+  useTonoStatus: () => ({
+    status: { routePreferenceScope: 'account-a' },
+    mutateTonoStatus: async () => {},
+  }),
 }))
 vi.mock('@/services/tono', () => ({
   formatTonoActionError: (error: unknown) => String(error),
