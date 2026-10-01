@@ -20,7 +20,7 @@ import {
 import { minSupportedVersions } from '@/lib/releases';
 import { usePrivacy } from '@/lib/privacy';
 import type { FleetNodeDto } from '@/lib/types';
-import { newestFetch, useResource, type Resource } from '@/lib/use-resource';
+import { oldestFetch, useResource, type Resource } from '@/lib/use-resource';
 import { cn } from '@/lib/utils';
 import '@/styles/today.css';
 import { ChoreList } from './today/Chores';
@@ -156,7 +156,7 @@ export default function TodayPage({
 
           <PageNote
             className="today-hero-note"
-            fetchedAt={newestFetch(incidents, customers, health)}
+            fetchedAt={oldestFetch(incidents, customers, health)}
             backfill={health.status === 'ready' ? health.data.backfill : null}
           />
         </div>
