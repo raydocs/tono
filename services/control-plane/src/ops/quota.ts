@@ -251,16 +251,17 @@ export async function closeOpenCycle(db: D1Database, nodeName: string, nowSec: n
     .bind(nowSec, open.id).run();
 }
 
-async function insertOpenCycle(
+function openCycleInsert(
   db: D1Database,
   nodeName: string,
   bounds: CycleBounds,
   quota: number | null,
   counters: NetCounters,
-  nowSec: number, previous: Row | null = null, // expired cycle: carry its last counters over the gap
-): Promise<Row> {
+  nowSec: number,
+  previous: Row | null,
+) {
   const cycleId = newId();
-  await db.prepare(
+  const statement = db.prepare(
     `INSERT INTO node_traffic_cycles(
        id, node_name, cycle_start, cycle_end, quota_bytes, used_bytes,
        counter_in_start, counter_out_start, counter_in_last, counter_out_last,
@@ -269,7 +270,22 @@ async function insertOpenCycle(
   ).bind(
     cycleId, nodeName, bounds.start, bounds.end, quota,
     counters.in, counters.out, previous?.counter_in_last ?? counters.in, previous?.counter_out_last ?? counters.out, nowSec,
-  ).run();
+  );
+  return { cycleId, statement };
+}
+
+async function insertOpenCycle(
+  db: D1Database,
+  nodeName: string,
+  bounds: CycleBounds,
+  quota: number | null,
+  counters: NetCounters,
+  nowSec: number, previous: Row | null = null, // expired cycle: carry its last counters over the gap
+): Promise<Row> {
+  const { cycleId, statement } = openCycleInsert(
+    db, nodeName, bounds, quota, counters, nowSec, previous,
+  );
+  await statement.run();
   return (await db.prepare('SELECT * FROM node_traffic_cycles WHERE id = ?').bind(cycleId).first<Row>())!;
 }
 
@@ -306,10 +322,24 @@ export async function rollNodeCycle(
 
   const expired = open && Number(open.cycle_end) <= nowSec && kind !== 'manual' ? open : null;
   if (expired) {
-    await db.prepare(
-      "UPDATE node_traffic_cycles SET status = 'closed', updated_at = ? WHERE id = ?",
-    ).bind(nowSec, expired.id).run();
-    open = null;
+    if (!expected) {
+      await db.prepare(
+        "UPDATE node_traffic_cycles SET status = 'closed', updated_at = ? WHERE id = ?",
+      ).bind(nowSec, expired.id).run();
+      return null;
+    }
+    // Close and insert commit together. A failed insert must not leave the node
+    // with no open cycle: the next sample would baseline on the live counters
+    // and drop the carried last reading.
+    const replacement = openCycleInsert(db, name, expected, quota, counters, nowSec, expired);
+    await db.batch([
+      db.prepare(
+        "UPDATE node_traffic_cycles SET status = 'closed', updated_at = ? WHERE id = ?",
+      ).bind(nowSec, expired.id),
+      replacement.statement,
+    ]);
+    open = await db.prepare('SELECT * FROM node_traffic_cycles WHERE id = ?')
+      .bind(replacement.cycleId).first<Row>();
   }
   if (!open) {
     if (!expected) return null;
