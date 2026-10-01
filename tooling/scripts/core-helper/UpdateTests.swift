@@ -554,6 +554,20 @@ func runUpdateSelfTests() -> Bool {
                                           userApplicationsDirectory: nil, clientRunning: { false }, release: release)
                   && releases == 1, "A helper whose app was removed kept its installation")
     }
+    // A removal whose DNS restore failed deleted the only daemon that could
+    // retry it, leaving DNS on the stopped loopback resolver (#1165). PF is
+    // already open by then; the installation must stay.
+    test("removal-keeps-helper-when-dns-restore-failed") { directory in
+        let storage = try UpdateStorage(root: directory + "/idle")
+        var removals = 0
+        let remove: () -> Void = { removals += 1 }
+        let dnsFailed: (UpdateStorage) -> EmergencyReleaseOutcome = { _ in .dnsRestoreFailed }
+        let released: (UpdateStorage) -> EmergencyReleaseOutcome = { _ in .released }
+        try check(!releaseRemovedInstallationLocked(storage, release: dnsFailed, removeInstallation: remove)
+                  && removals == 0, "A removal whose DNS restore failed deleted the helper that retries it")
+        try check(releaseRemovedInstallationLocked(storage, release: released, removeInstallation: remove)
+                  && removals == 1, "A removal whose DNS was restored kept the installation")
+    }
     // An iPhone or iPad app on Apple silicon is a wrapper with no Contents
     // folder (`WrappedBundle -> Wrapper/<name>.app`). One of them kept every
     // removed Tono's protection (BRICK-M3). A bundle that has Contents but no

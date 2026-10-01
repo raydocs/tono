@@ -1,0 +1,3 @@
+| ID | 问题（一句） | 状态 | Issue / PR | 等级 | 剩余限制 |
+|---|---|---|---|---|---|
+| R4FMA-INTERRUPTED-EXPLICIT-AI-CLEANUP | An explicit macOS Restore interrupted after broad release never finishes selective AI cleanup | in-PR | [#1169](https://github.com/raydocs/tono/issues/1169) | 中·推导 | P2: explicit Restore plus helper death in a short window. Explicit release now records `releasing` before PF release and `released` only after cleanup; startup, the stopped-Core watchdog and failed startup finish a pending removal once. A completed tombstone removes nothing. Route deletion is still unowned (#1164). Native interruption not reproduced. |

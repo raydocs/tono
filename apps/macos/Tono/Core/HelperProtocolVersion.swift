@@ -351,7 +351,11 @@ nonisolated enum HelperProtocolVersion {
     /// - 4.52.22 → 4.52.23: pending-update automatic failure release retains the AI hold.
     /// - 4.52.27 → 4.52.28: the desktop update contract may name an optional
     ///   sing-box digest. The helper must be rebuilt to accept that field.
-    static let current = "4.52.28"
+    /// - 4.52.28 → 4.52.29: removal and `--emergency-reset` keep the helper
+    ///   (PF still released) when owned DNS was not restored, so its DNS
+    ///   recovery retries. An explicit selective-layer removal is recorded as
+    ///   pending until it finishes and a restarted helper finishes it.
+    static let current = "4.52.29"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS

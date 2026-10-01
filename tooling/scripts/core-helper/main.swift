@@ -1058,25 +1058,36 @@ func emergencyReleaseDespiteUnreadableLedger(strictKillSwitchEnabled: Bool) -> B
     !strictKillSwitchEnabled
 }
 
+/// What an emergency release achieved. PF is open in both released cases.
+/// `dnsRestoreFailed` keeps an owned DNS snapshot that can still point at the
+/// stopped resolver; only a helper that stays installed retries it (#1165).
+enum EmergencyReleaseOutcome: Equatable {
+    case refused
+    case dnsRestoreFailed
+    case released
+}
+
 /// PF and DNS release with no ledger access. Used when the store cannot be
 /// opened. Does not remove the installation or rewrite update files.
-func releaseNetworkWithoutLedger() -> Bool {
+func releaseNetworkWithoutLedger() -> EmergencyReleaseOutcome {
     do {
         let allowedUID = try readAllowedUID()
         _ = try CoreManager(allowedUID: allowedUID)
         let dns = try ProtectedDNSManager()
         let manager = try KillSwitchManager(allowedUID: allowedUID)
+        var dnsRestored = true
         do {
             _ = try dns.restore(deferringLossNotice: true)
         } catch {
+            dnsRestored = false
             fputs("Tono emergency recovery could not restore DNS; releasing PF anyway: \(error)\n", stderr)
         }
         _ = try manager.disarm()
         print("Tono network protection is disarmed. Update evidence was not modified.")
-        return true
+        return dnsRestored ? .released : .dnsRestoreFailed
     } catch {
         fputs("Tono emergency recovery could not release PF: \(error)\n", stderr)
-        return false
+        return .refused
     }
 }
 
@@ -1087,13 +1098,20 @@ func releaseNetworkWithoutLedger() -> Bool {
 /// does not boot out unrelated processes, does not require DNS verification
 /// before opening PF, and does not record a flag that stops later starts.
 func runEmergencyDisarm(underLock suppliedStorage: UpdateStorage? = nil) -> Bool {
+    emergencyRelease(underLock: suppliedStorage) != .refused
+}
+
+/// `runEmergencyDisarm` with the DNS result kept apart, for the callers that
+/// remove the installation afterwards.
+func emergencyRelease(underLock suppliedStorage: UpdateStorage? = nil) -> EmergencyReleaseOutcome {
     guard geteuid() == 0 else {
         fputs("Tono emergency recovery must be run with sudo.\n", stderr)
-        return false
+        return .refused
     }
     do {
         let storage = try suppliedStorage ?? UpdateStorage()
-        let disarm = { () throws -> Bool in
+        let disarm = { () throws -> EmergencyReleaseOutcome in
+        var dnsRestored = true
         var ledger: UpdateStorage.Ledger?
         var pending = false
         do {
@@ -1134,11 +1152,12 @@ func runEmergencyDisarm(underLock suppliedStorage: UpdateStorage? = nil) -> Bool
                 do {
                     _ = try dns.restore(deferringLossNotice: true)
                 } catch {
+                    dnsRestored = false
                     fputs("Tono emergency recovery could not restore DNS; releasing PF anyway: \(error)\n", stderr)
                 }
                 _ = try manager.disarm()
                 print("Tono network protection is disarmed. Update evidence was kept.")
-                return true
+                return dnsRestored ? .released : .dnsRestoreFailed
             }
             ledger.attempt?.disconnectVerified = true
             try storage.save(ledger)
@@ -1159,6 +1178,7 @@ func runEmergencyDisarm(underLock suppliedStorage: UpdateStorage? = nil) -> Bool
             do {
                 _ = try dns.restore(deferringLossNotice: true)
             } catch {
+                dnsRestored = false
                 fputs(
                     "Tono emergency recovery could not restore DNS; releasing PF anyway: \(error)\n",
                     stderr
@@ -1175,7 +1195,7 @@ func runEmergencyDisarm(underLock suppliedStorage: UpdateStorage? = nil) -> Bool
                     + "System Settings > Network if DNS needs adjustment."
             )
         }
-        return true
+        return dnsRestored ? .released : .dnsRestoreFailed
         }
         return try suppliedStorage == nil ? storage.locked(disarm) : disarm()
     } catch {
@@ -1184,7 +1204,7 @@ func runEmergencyDisarm(underLock suppliedStorage: UpdateStorage? = nil) -> Bool
             stderr
         )
         guard emergencyReleaseDespiteUnreadableLedger(strictKillSwitchEnabled: false) else {
-            return false
+            return .refused
         }
         return releaseNetworkWithoutLedger()
     }
@@ -1231,23 +1251,28 @@ private func runEmergencyResetLocked(_ storage: UpdateStorage) -> Bool {
     try? bootout.run()
     bootout.waitUntilExit()
 
-    guard runEmergencyDisarm(underLock: storage) else {
+    switch emergencyRelease(underLock: storage) {
+    case .released:
+        break
+    case .refused:
         // Protection could not be released; removing the installation now
         // would strand the machine fail-closed with nothing able to enforce
         // or undo it. Put the daemon registration back and keep everything.
-        let restore = Process()
-        restore.executableURL = URL(fileURLWithPath: "/bin/launchctl")
-        restore.arguments = [
-            "bootstrap", "system",
-            "/Library/LaunchDaemons/com.raydocs.tono.core-helper.plist",
-        ]
-        restore.standardOutput = FileHandle.nullDevice
-        restore.standardError = FileHandle.nullDevice
-        try? restore.run()
-        restore.waitUntilExit()
+        bootstrapHelperDaemon()
         fputs(
             "Tono emergency reset aborted: protection could not be released; "
             + "the installation was left in place.\n",
+            stderr
+        )
+        return false
+    case .dnsRestoreFailed:
+        // PF is open, but DNS may still point at the stopped resolver.
+        // The daemon retries that restore while the Core is down; removing
+        // it would leave nothing to retry (#1165).
+        bootstrapHelperDaemon()
+        fputs(
+            "Tono emergency reset released protection but could not restore DNS; "
+            + "the helper was kept to retry it. Run the reset again later.\n",
             stderr
         )
         return false
@@ -1255,6 +1280,19 @@ private func runEmergencyResetLocked(_ storage: UpdateStorage) -> Bool {
     removeHelperInstallation()
     print("Tono helper installation removed. Reopen Tono to reinstall it.")
     return true
+}
+
+private func bootstrapHelperDaemon() {
+    let restore = Process()
+    restore.executableURL = URL(fileURLWithPath: "/bin/launchctl")
+    restore.arguments = [
+        "bootstrap", "system",
+        "/Library/LaunchDaemons/com.raydocs.tono.core-helper.plist",
+    ]
+    restore.standardOutput = FileHandle.nullDevice
+    restore.standardError = FileHandle.nullDevice
+    try? restore.run()
+    restore.waitUntilExit()
 }
 
 /// Removal after a verified release. Callers have released PF first.
@@ -1455,7 +1493,7 @@ func releaseIfTonoWasRemoved(
     applicationsDirectory: String = "/Applications",
     userApplicationsDirectory: String? = boundUserApplicationsDirectory(),
     clientRunning: () -> Bool = tonoClientProcessRunning,
-    release: (UpdateStorage) -> Bool = releaseRemovedInstallationLocked
+    release: (UpdateStorage) -> Bool = { releaseRemovedInstallationLocked($0) }
 ) -> Bool {
     guard !tonoAppPresent(applicationsDirectory: applicationsDirectory,
                           userApplicationsDirectory: userApplicationsDirectory,
@@ -1480,9 +1518,27 @@ func releaseIfTonoWasRemoved(
 /// `SocketServer.run` releases a leftover kill switch when the Core is not
 /// running. The daemon has not opened its socket yet, so no GUI arm can
 /// interleave, unlike the `--emergency-reset` tool.
-func releaseRemovedInstallationLocked(_ storage: UpdateStorage) -> Bool {
-    guard runEmergencyDisarm(underLock: storage) else { return false }
-    removeHelperInstallation()
+///
+/// A DNS restore failure still opens PF but keeps the installation: this
+/// daemon's DNS recovery and the next removal check retry it (#1165).
+func releaseRemovedInstallationLocked(
+    _ storage: UpdateStorage,
+    release: (UpdateStorage) -> EmergencyReleaseOutcome = { emergencyRelease(underLock: $0) },
+    removeInstallation: () -> Void = { removeHelperInstallation(); bootoutRemovedHelper() }
+) -> Bool {
+    switch release(storage) {
+    case .released:
+        removeInstallation()
+        return true
+    case .refused:
+        return false
+    case .dnsRestoreFailed:
+        fputs("tono: removal kept the helper because DNS was not restored; retrying later\n", stderr)
+        return false
+    }
+}
+
+func bootoutRemovedHelper() {
     // Unload this job last. launchd ends it with SIGTERM, which must now stop
     // the process instead of setting the shutdown flag. If the bootout does
     // not happen, the plist and executable are already gone, so nothing loads
@@ -1495,7 +1551,6 @@ func releaseRemovedInstallationLocked(_ storage: UpdateStorage) -> Bool {
     bootout.standardError = FileHandle.nullDevice
     try? bootout.run()
     bootout.waitUntilExit()
-    return true
 }
 
 func fileType(_ value: stat) -> mode_t {
@@ -1755,6 +1810,7 @@ if CommandLine.arguments.dropFirst() == ["--staging-self-test"] {
 if CommandLine.arguments.dropFirst() == ["--lifecycle-self-test"] {
     let pfPassed = KillSwitchManager.runLifecycleSelfTests()
         && KillSwitchManager.runInterruptedSelectiveReleaseSelfTest()
+        && KillSwitchManager.runInterruptedExplicitRemovalSelfTest()
         && SelectiveFailOpenInstaller.runResolverOwnershipSelfTest()
     let dnsPassed = ProtectedDNSManager.runRestoreReadFailureSelfTest()
         && ProtectedDNSManager.runRepeatedOwnedRestoreSelfTest()

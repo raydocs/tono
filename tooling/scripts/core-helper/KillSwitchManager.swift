@@ -571,15 +571,27 @@ final class KillSwitchManager {
         }
     }
 
+    /// `false` records a pending removal ("releasing"). Only a finished
+    /// removal turns it into the "released" tombstone, so a helper that died
+    /// in between can tell the two apart and finish the removal (#1169).
     static func saveSelectiveRecoveryDisposition(
         _ preserveAIHold: Bool,
         path: String = selectiveRecoveryStatePath
     ) throws {
         try atomicWrite(
             path: path,
-            data: Data((preserveAIHold ? "retain-ai\n" : "released\n").utf8),
+            data: Data((preserveAIHold ? "retain-ai\n" : "releasing\n").utf8),
             permissions: 0o600
         )
+    }
+
+    static func saveSelectiveRemovalCompleted(path: String = selectiveRecoveryStatePath) throws {
+        try atomicWrite(path: path, data: Data("released\n".utf8), permissions: 0o600)
+    }
+
+    /// True only for a recorded removal that has not finished.
+    static func selectiveRemovalPending(path: String = selectiveRecoveryStatePath) -> Bool {
+        (try? secureRead(path, maximumBytes: 32)) == Data("releasing\n".utf8)
     }
 
     static func selectiveRecoveryDisposition(path: String = selectiveRecoveryStatePath) throws -> Bool? {
@@ -590,7 +602,7 @@ final class KillSwitchManager {
         }
         let data = try secureRead(path, maximumBytes: 32)
         if data == Data("retain-ai\n".utf8) { return true }
-        if data == Data("released\n".utf8) { return false }
+        if data == Data("released\n".utf8) || data == Data("releasing\n".utf8) { return false }
         throw HelperFailure.invalid("Selective recovery intent is invalid.")
     }
 
@@ -611,7 +623,8 @@ final class KillSwitchManager {
         clearDisposition: () throws -> Void = { try clearSelectiveRecoveryDisposition() },
         release: () throws -> Void = { try releasePersistedBlockUnlocked() },
         applySelectiveLayer: () -> Void = SelectiveFailOpenInstaller.applyBestEffort,
-        removeSelectiveLayer: () -> Void = SelectiveFailOpenInstaller.removeBestEffort
+        removeSelectiveLayer: () -> Void = SelectiveFailOpenInstaller.removeBestEffort,
+        completeRemoval: () throws -> Void = { try saveSelectiveRemovalCompleted() }
     ) throws {
         do { try recordDisposition(preserveAIHold) } catch {
             // A full disk can refuse a tombstone but still permit unlink.
@@ -622,16 +635,32 @@ final class KillSwitchManager {
             ))
         }
         try release()
-        if preserveAIHold { applySelectiveLayer() } else { removeSelectiveLayer() }
+        if preserveAIHold {
+            applySelectiveLayer()
+        } else {
+            removeSelectiveLayer()
+            try? completeRemoval()
+        }
     }
 
+    /// A completed "released" tombstone does nothing: routes or resolver
+    /// files added later are not Tono's to remove. Only a removal recorded
+    /// as pending is finished, once.
     static func reconcileSelectiveRecovery(
         generalIntentPresent: Bool,
         disposition: Bool?,
-        applySelectiveLayer: () -> Void = SelectiveFailOpenInstaller.applyBestEffort
+        removalPending: Bool = false,
+        applySelectiveLayer: () -> Void = SelectiveFailOpenInstaller.applyBestEffort,
+        removeSelectiveLayer: () -> Void = SelectiveFailOpenInstaller.removeBestEffort,
+        completeRemoval: () throws -> Void = { try saveSelectiveRemovalCompleted() }
     ) {
-        guard !generalIntentPresent, disposition == true else { return }
-        applySelectiveLayer()
+        guard !generalIntentPresent else { return }
+        if disposition == true {
+            applySelectiveLayer()
+        } else if removalPending {
+            removeSelectiveLayer()
+            try? completeRemoval()
+        }
     }
 
     /// Called only with the Core stopped. A retained record alone is enough
@@ -642,7 +671,8 @@ final class KillSwitchManager {
         guard !selectiveRecoveryReconciled, !Self.stateFileExists() else { return }
         Self.reconcileSelectiveRecovery(
             generalIntentPresent: false,
-            disposition: try? Self.selectiveRecoveryDisposition()
+            disposition: try? Self.selectiveRecoveryDisposition(),
+            removalPending: Self.selectiveRemovalPending()
         )
         selectiveRecoveryReconciled = true
     }
@@ -677,7 +707,8 @@ final class KillSwitchManager {
         guard stateFileExists() else {
             reconcileSelectiveRecovery(
                 generalIntentPresent: false,
-                disposition: try? selectiveRecoveryDisposition()
+                disposition: try? selectiveRecoveryDisposition(),
+                removalPending: selectiveRemovalPending()
             )
             return
         }
