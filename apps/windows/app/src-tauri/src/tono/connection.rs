@@ -2735,6 +2735,35 @@ mod tests {
     }
 
     #[test]
+    fn direct_lease_renewal_survives_revision_only_republish_but_stops_on_behavior_change() {
+        use tono_core::catalog::catalog_digest;
+        use tono_core::policy::{TonoTrafficPolicyResponse, validate_policy};
+
+        let response = |revision| {
+            let json = format!(
+                r#"{{"version":1,"revision":{revision},"domains":[{{"host":"wxs.qq.com","ports":[443]}}]}}"#
+            );
+            TonoTrafficPolicyResponse {
+                revision,
+                sha256: catalog_digest(&json),
+                json,
+                updated_at: None,
+                signature: None,
+            }
+        };
+        let original = response(3);
+        let republished = response(4);
+        let committed = validate_policy(&original, &BTreeSet::new()).unwrap();
+        let mut current = validate_policy(&republished, &BTreeSet::new()).unwrap();
+        assert_ne!(original.sha256, republished.sha256);
+        assert!(super::direct::direct_lease_policy_is_current(Some(&current), &committed));
+
+        current.domains[0].ports = vec![80];
+        assert!(!super::direct::direct_lease_policy_is_current(Some(&current), &committed));
+        assert!(!super::direct::direct_lease_policy_is_current(None, &committed));
+    }
+
+    #[test]
     fn direct_reload_receipts_bind_generation_reload_identity_and_exact_digest() {
         let session = OwnerSessionProof {
             generation: 42,
@@ -3345,6 +3374,54 @@ mod tests {
                 .all(|rule| { !rule.payload.contains("Network,TCP") && !rule.payload.contains("Network,UDP") })
         );
         assert!(plan.wechat_process_path_regexes.is_empty());
+    }
+
+    #[tokio::test]
+    async fn suffix_only_direct_policy_skips_before_runtime_staging() {
+        let node = node();
+        let document = tono_core::policy::TonoTrafficPolicy {
+            version: 3,
+            domains: Vec::new(),
+            media_endpoints: Vec::new(),
+            web_domains: Vec::new(),
+            direct_suffixes: vec![tono_core::policy::PolicyDomain {
+                host: "bilibili.com".to_string(),
+                ports: vec![443],
+            }],
+        };
+        let (plan, _) = build_direct_plan(
+            "Ethernet 2".to_string(), &[], &[], &[], &document.direct_suffixes, &node, Vec::new(),
+        )
+        .unwrap();
+        assert!(!plan.web_suffix_rules.is_empty());
+        assert!(expected_controller_direct_rules(&plan).is_empty());
+
+        let state = std::sync::Arc::new(crate::tono::state::TonoState::for_test());
+        // A stale generation makes reaching runtime staging fail before any Service call.
+        // An empty controller graph must skip even before that freshness check.
+        let generation = state.lock().await.connect_generation + 1;
+        let result = super::direct::apply_cloud_policy(
+            &state,
+            &node,
+            std::slice::from_ref(&node),
+            None,
+            None,
+            generation,
+            "fixture-controller-secret",
+            9097,
+            7897,
+            Some(super::CapturedTrafficPolicy {
+                revision: 3,
+                digest: "fixture-policy-digest".to_string(),
+                document,
+            }),
+            Some("Ethernet 2".to_string()),
+            &OwnerSessionProof { generation: 7, token: "fixture-session-token".to_string() },
+        )
+        .await
+        .expect("an empty DIRECT graph must skip before runtime staging or the Service bracket");
+        assert!(result.is_none());
+        assert!(state.lock().await.direct_reload_until.is_none());
     }
 
     #[test]
