@@ -80,6 +80,46 @@ func copyUpgradeSource(
     committed = true
 }
 
+/// Copies run outside the update lock. Their paths must belong exclusively to
+/// this attempt so cancellation cannot unlink an installer's replacement.
+struct SilentUpgradeStaging {
+    let directory: String
+    var helperPath: String { directory + "/tono-core-helper" }
+    var corePath: String { directory + "/tono-sing-box" }
+
+    init(parent: String = "/Library/PrivilegedHelperTools") throws {
+        var template = Array((parent + "/tono-upgrade.XXXXXX").utf8CString)
+        guard mkdtemp(&template) != nil else {
+            throw HelperFailure.system("Could not create private upgrade staging.")
+        }
+        directory = String(cString: template)
+    }
+
+    func remove() {
+        unlink(helperPath)
+        unlink(corePath)
+        rmdir(directory)
+    }
+}
+
+/// The caller admits the replacement under the durable update lock and keeps
+/// that lock until both renames have completed.
+func replaceSilentUpgradeCopies(
+    staging: SilentUpgradeStaging,
+    helperDestination: String = "/Library/PrivilegedHelperTools/tono-core-helper",
+    coreDestination: String = "/Library/PrivilegedHelperTools/tono-sing-box",
+    commit: (_ replace: () throws -> Void) throws -> Void
+) throws {
+    try commit {
+        guard rename(staging.helperPath, helperDestination) == 0 else {
+            throw HelperFailure.system("Could not replace helper binary.")
+        }
+        guard rename(staging.corePath, coreDestination) == 0 else {
+            throw HelperFailure.system("Could not replace core binary.")
+        }
+    }
+}
+
 final class SocketServer {
     private let allowedUID: uid_t
     private let allowedGID: gid_t
@@ -694,7 +734,7 @@ final class SocketServer {
             helperSource: helperSrc,
             mihomoSource: mihomoSrc,
             peerBundlePath: peerBundle.path
-        ) {
+        ) { replace in
             try updates.storage.locked {
                 guard helperShutdownRequested == 0 else {
                     throw HelperFailure.stopping("Helper is stopping.")
@@ -703,6 +743,7 @@ final class SocketServer {
                     throw HelperFailure.invalid("Cannot bind helper mutation to a peer bundle.")
                 }
                 try updates.gate(method: request.method, path: request.path, peer: peer)
+                try replace()
             }
         }
         sendResponse(client, status: 200, object: ["ok": true, "restarting": true])
@@ -713,7 +754,7 @@ final class SocketServer {
         helperSource: String,
         mihomoSource: String,
         peerBundlePath: String,
-        beforeCommit: () throws -> Void
+        commit: (_ replace: () throws -> Void) throws -> Void
     ) throws {
         let allowedPrefix = peerBundlePath.hasSuffix("/") ? peerBundlePath + "Contents/" : peerBundlePath + "/Contents/"
         guard helperSource.hasPrefix(allowedPrefix),
@@ -756,10 +797,10 @@ final class SocketServer {
         let mihomoFD = try openUpgradeSource(realMihomoPath)
         defer { close(mihomoFD) }
 
-        let helperTemp = "/Library/PrivilegedHelperTools/tono-core-helper.new"
-        let mihomoTemp = "/Library/PrivilegedHelperTools/tono-sing-box.new"
-        let helperDest = "/Library/PrivilegedHelperTools/tono-core-helper"
-        let mihomoDest = "/Library/PrivilegedHelperTools/tono-sing-box"
+        let staging = try SilentUpgradeStaging()
+        defer { staging.remove() }
+        let helperTemp = staging.helperPath
+        let mihomoTemp = staging.corePath
 
         let continueCopy = { helperShutdownRequested == 0 }
         try copyUpgradeSource(from: helperFD, to: helperTemp, shouldContinue: continueCopy)
@@ -797,21 +838,11 @@ final class SocketServer {
             guard helperShutdownRequested == 0 else {
                 throw HelperFailure.stopping("Helper is stopping.")
             }
-            try beforeCommit()
+            try replaceSilentUpgradeCopies(staging: staging, commit: commit)
         } catch {
             unlink(helperTemp)
             unlink(mihomoTemp)
             throw error
-        }
-
-        guard rename(helperTemp, helperDest) == 0 else {
-            unlink(helperTemp)
-            unlink(mihomoTemp)
-            throw HelperFailure.system("Could not replace helper binary.")
-        }
-        guard rename(mihomoTemp, mihomoDest) == 0 else {
-            unlink(mihomoTemp)
-            throw HelperFailure.system("Could not replace core binary.")
         }
     }
 }
