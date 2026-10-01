@@ -430,6 +430,7 @@ final class AppState {
     var residentialRouteAuditContext: ResidentialRouteAuditContext?
     var residentialRouteAuditGeneration: UInt64 = 0
     var pendingFullConfigReload = false
+    var pendingOptionalPolicyReload = false
     var pendingDirectPolicyReload:
         ConfigPipeline.ManagedDirectRuntimePolicy?
     var networkInfoTask: Task<Void, Never>?
@@ -1856,10 +1857,11 @@ final class AppState {
     }
 
     func scheduleBackgroundOptionalPolicy() {
+        guard isConnected, !isDisconnecting else { return }
         let policy = managedTrafficPolicy
-        guard activeDirectPolicy != nil || !policy.domains.isEmpty || !policy.webDomains.isEmpty
-            || !policy.directSuffixes.isEmpty || !policy.mediaEndpoints.isEmpty
-            || !policy.tcpEndpoints.isEmpty else { return }
+        // A full accepted document supersedes pins derived from earlier
+        // authorization. Read the newest document when the shared owner drains.
+        pendingDirectPolicyReload = nil
         // Arming PF, rewriting config.yaml, syncing it to the helper and
         // reloading the controller is the same runtime mutation the reload and
         // node-switch paths perform, and the helper hard-enforces the synced
@@ -1867,6 +1869,7 @@ final class AppState {
         // interleave, and so disconnect drains this one with the others rather
         // than letting it re-arm PF after a release.
         guard connectionCoordinator.configReloadTask == nil, switchingNodeId == nil else {
+            pendingOptionalPolicyReload = true
             ConnectionTelemetryBuffer.shared.record(
                 "optionalPolicyRollback",
                 reason: "runtime_mutation_in_flight",
@@ -1874,6 +1877,10 @@ final class AppState {
             )
             return
         }
+        pendingOptionalPolicyReload = false
+        guard activeDirectPolicy != nil || !policy.domains.isEmpty || !policy.webDomains.isEmpty
+            || !policy.directSuffixes.isEmpty || !policy.mediaEndpoints.isEmpty
+            || !policy.tcpEndpoints.isEmpty else { return }
         ConnectionTelemetryBuffer.shared.record(
             "optionalPolicyBegin",
             revision: managedTrafficPolicyRevision,

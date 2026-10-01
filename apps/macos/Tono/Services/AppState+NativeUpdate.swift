@@ -47,6 +47,7 @@ extension AppState {
         connectionCoordinator.configReloadRequestID &+= 1
         let reloadRetirementID = connectionCoordinator.configReloadRequestID
         pendingFullConfigReload = false
+        pendingOptionalPolicyReload = false
         pendingDirectPolicyReload = nil
         isConnected = false
         isConnecting = false

@@ -810,6 +810,7 @@ extension AppState {
                 self.networkInfoTask?.cancel()
                 self.networkInfoTask = nil
                 self.pendingFullConfigReload = false
+                self.pendingOptionalPolicyReload = false
                 self.pendingDirectPolicyReload = nil
                 self.loadedRuntimeConfigDigest = nil
                 self.residentialRouteAuditGeneration &+= 1

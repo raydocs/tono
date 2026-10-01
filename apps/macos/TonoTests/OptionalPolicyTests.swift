@@ -9,6 +9,74 @@ import XCTest
 /// in for that replacement.
 final class OptionalPolicyTests: XCTestCase {
 
+    func testBusyPolicyReplacementCoalescesTheLatestAcceptedRevocation() async throws {
+        let storage = ConfigStorage.shared
+        let url = storage.appSupportDirectory.appendingPathComponent("managed-traffic-policy.json")
+        let saved = try? Data(contentsOf: url)
+        defer {
+            if let saved { try? storage.writeSensitive(saved, to: url) }
+            else { try? FileManager.default.removeItem(at: url) }
+        }
+        try? FileManager.default.removeItem(at: url)
+        let app = AppState()
+        app.isConnected = true
+        app.coreController = CoreControllerClient()
+        app.activeDirectPolicy = try app.initialDirectPolicy(
+            physicalInterface: "en0",
+            policy: TonoTrafficPolicy(version: 3, domains: [], mediaEndpoints: [],
+                directSuffixes: [.init(host: "example.net", ports: [443])], trusted: true)
+        )
+        app.managedTrafficPolicy = TonoTrafficPolicy(version: 3, domains: [], mediaEndpoints: [],
+            directSuffixes: [.init(host: "example.org", ports: [443])], trusted: true)
+        let entered = expectation(description: "first policy owns runtime replacement")
+        var resume: CheckedContinuation<Void, Never>?
+        defer { resume?.resume() }
+        var replacements: [ConfigPipeline.ManagedDirectRuntimePolicy?] = []
+        app.optionalPolicyPreparedRuntimeMutation = { desired in
+            replacements.append(desired)
+            if replacements.count == 1 {
+                await withCheckedContinuation { continuation in
+                    resume = continuation
+                    entered.fulfill()
+                }
+            }
+        }
+        app.scheduleBackgroundOptionalPolicy()
+        let first = app.connectionCoordinator.configReloadTask
+        await fulfillment(of: [entered], timeout: 2)
+        // A pin refresh derived from the old authorization must not run after
+        // the accepted full-policy replacement.
+        app.pendingDirectPolicyReload = app.activeDirectPolicy
+        for (revision, json) in [
+            (40, #"{"version":3,"domains":[{"host":"example.com","ports":[443]}],"mediaEndpoints":[]}"#),
+            (41, #"{"version":3,"domains":[],"mediaEndpoints":[]}"#),
+        ] {
+            let digest = Data(SHA256.hash(data: Data(json.utf8))).base64EncodedString()
+                .replacingOccurrences(of: "=", with: "")
+                .replacingOccurrences(of: "+", with: "-")
+                .replacingOccurrences(of: "/", with: "_")
+            try await app.installManagedTrafficPolicy(
+                ManagedTrafficPolicyCache(revision: revision, json: json, sha256: digest, updatedAt: nil),
+                persistCache: false, allowRuntimeTransition: true
+            )
+        }
+        // Always release the real owner before assertions, including on the
+        // original implementation, so a failing test cannot strand its task.
+        let stalePinsRetained = app.pendingDirectPolicyReload != nil
+        app.pendingDirectPolicyReload = nil
+        let continuation = resume
+        resume = nil
+        continuation?.resume()
+        await first?.value
+        await app.connectionCoordinator.configReloadTask?.value
+        XCTAssertEqual(replacements.count, 2, "the latest accepted document must drain after the busy owner")
+        XCTAssertNil(replacements.last ?? nil, "coalescing must skip the intermediate policy and apply the revocation")
+        XCTAssertNil(app.activeDirectPolicy)
+        XCTAssertFalse(stalePinsRetained, "an accepted document must retire older queued pins")
+        XCTAssertTrue(app.isConnected)
+        XCTAssertNil(app.connectionCoordinator.disconnectSequence)
+    }
+
     /// MAC-OPTIONAL-POLICY-FAIL-CLOSED: a failure before /core/sync (resolver
     /// arm, writeRuntimeConfig on a full disk) has not touched the running
     /// Core, so the optional overlay must not tear the working session down.
