@@ -101,9 +101,18 @@ struct IntentRecord {
     /// consumes the record. The app treats `wanted: false` plus this flag as "reconnect".
     #[serde(default)]
     reconnect_after_release: bool,
+    /// Durable secondary-layer disposition for an automatic release. `None` is a legacy
+    /// record whose existing hold is left alone; this never authorizes a broad WFP block.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    apply_narrow_after_release: Option<bool>,
 }
 
 impl IntentRecord {
+    fn release_follow_up(&self) -> Option<bool> {
+        self.apply_narrow_after_release
+            .or_else(|| self.reconnect_after_release.then_some(true))
+    }
+
     fn is_verified(&self) -> bool {
         self.verified
             .unwrap_or(self.mode == KillSwitchStatusMode::Locked)
@@ -609,16 +618,19 @@ fn spawn_startup_release_retry() {
                     // Incomplete non-strict evidence needs its startup AI hold and retention.
                     // A newer valid or explicitly strict record was gated above.
                     return release_general_traffic_unlocked(
-                        "startup incomplete-intent release retry",
+                        "startup incomplete-intent release retry", false,
                     )
                     .await;
                 }
                 remove_all_filters_unlocked().await?;
                 sweep_legacy_sublayers_unlocked().await;
-                if intent.is_some_and(|intent| intent.reconnect_after_release) {
+                let follow_up = intent.as_ref().and_then(IntentRecord::release_follow_up);
+                let reconnect = intent.as_ref().is_some_and(|intent| intent.reconnect_after_release);
+                if reconnect {
                     // A retry must retain the same crash-reconnect intent as normal startup.
                     RECONNECT_AFTER_RELEASE.store(true, Ordering::Release);
-                } else {
+                }
+                if !reconnect && follow_up != Some(true) {
                     match tokio::fs::remove_file(intent_path()).await {
                         Ok(()) => {}
                         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
@@ -636,6 +648,9 @@ fn spawn_startup_release_retry() {
                     tracing::warn!(
                         "service start: leftover DNS snapshot could not be restored: {error:#}"
                     );
+                }
+                if let Some(apply_narrow) = follow_up {
+                    finish_release_follow_up(apply_narrow).await;
                 }
                 Ok(())
             }
@@ -797,12 +812,14 @@ fn disarmed_tombstone() -> IntentRecord {
         owner_key: None,
         strict_kill_switch: false,
         reconnect_after_release: false,
+        apply_narrow_after_release: Some(false),
     }
 }
 
 fn crash_recovery_tombstone() -> IntentRecord {
     let mut tombstone = disarmed_tombstone();
     tombstone.reconnect_after_release = true;
+    tombstone.apply_narrow_after_release = Some(true);
     tombstone
 }
 
@@ -812,6 +829,27 @@ async fn persist_disarmed_tombstone() -> Result<()> {
         &serde_json::to_vec_pretty(&disarmed_tombstone())?,
     )
     .await
+}
+
+async fn release_tombstone(apply_narrow: Option<bool>) -> IntentRecord {
+    if apply_narrow.is_none() {
+        // Idle SCM Stop preserves the automatic release/reconnect disposition on disk.
+        if let Ok(bytes) = tokio::fs::read(intent_path()).await {
+            if let Ok(intent) = serde_json::from_slice::<IntentRecord>(&bytes) {
+                if !intent.wanted {
+                    return intent;
+                }
+            }
+        }
+    }
+    let mut tombstone = disarmed_tombstone();
+    tombstone.apply_narrow_after_release = apply_narrow;
+    tombstone
+}
+
+async fn persist_automatic_release_tombstone() -> Result<()> {
+    let tombstone = release_tombstone(Some(true)).await;
+    atomic_write(&intent_path(), &serde_json::to_vec_pretty(&tombstone)?).await
 }
 
 /// Whether the facade's state machine runs on this build: the real service on Windows, plus
@@ -1587,6 +1625,7 @@ pub(crate) async fn arm_bootstrap(
             owner_key: Some(owner_key.to_owned()),
             strict_kill_switch: false,
             reconnect_after_release: false,
+            apply_narrow_after_release: None,
         },
         tun_luid: None,
         core_instance: None,
@@ -2814,6 +2853,18 @@ async fn bounded_dns_call_within<T>(
     }
 }
 
+#[cfg(test)]
+static TEST_INTERRUPT_RELEASE_FOLLOW_UP: AtomicBool = AtomicBool::new(false);
+
+async fn finish_release_follow_up(apply_narrow: bool) {
+    #[cfg(test)]
+    if TEST_INTERRUPT_RELEASE_FOLLOW_UP.swap(false, Ordering::SeqCst) {
+        // Model process death at the durable boundary, before native selective work starts.
+        return;
+    }
+    crate::core::selective_layer::finish_release(apply_narrow).await;
+}
+
 /// Normal release — only on explicit user request. See the DNS-before-disarm invariant.
 async fn disarm_unlocked(apply_narrow: bool) -> Result<()> {
     disarm_unlocked_with_narrow(Some(apply_narrow)).await
@@ -2821,13 +2872,20 @@ async fn disarm_unlocked(apply_narrow: bool) -> Result<()> {
 
 /// `None` preserves the existing AI disposition during an already-idle Service stop.
 async fn disarm_unlocked_with_narrow(apply_narrow: Option<bool>) -> Result<()> {
+    let tombstone = release_tombstone(apply_narrow).await;
     let previous = armed_guard().clone();
     let Some(previous) = previous else {
         // Not armed: still sweep possible residuals so a half-failed earlier run cannot
         // linger. Persist the explicit-release tombstone *after* proving the sweep so a Service
         // replacement cannot reinterpret late-visible persistent filters as a wanted session.
         remove_all_filters_unlocked().await?;
-        persist_disarmed_tombstone().await?;
+        // Idle Stop has no new disposition: keep existing bytes, including corrupt evidence
+        // that startup needs to resume its automatic AI hold. Synthesize only if absent.
+        if apply_narrow.is_some()
+            || matches!(tokio::fs::try_exists(intent_path()).await, Ok(false))
+        {
+            atomic_write(&intent_path(), &serde_json::to_vec_pretty(&tombstone)?).await?;
+        }
         // A leftover DNS snapshot must not be skipped just because nothing is armed: the
         // filters are already gone, so refusing would buy no blocking — but the resolver
         // must not stay on a dead loopback. Best-effort, surfaced via last_error.
@@ -2844,12 +2902,12 @@ async fn disarm_unlocked_with_narrow(apply_narrow: Option<bool>) -> Result<()> {
         // Filters are already gone. The secondary layer must not be able to
         // fail this release or put a general block back.
         if let Some(apply_narrow) = apply_narrow {
-            crate::core::selective_layer::finish_release(apply_narrow).await;
+            finish_release_follow_up(apply_narrow).await;
         }
         clear_wanted_core_window();
         // This successful release supersedes any older crash-record retry.
         CRASH_TOMBSTONE_PENDING.store(false, Ordering::Release);
-        RECONNECT_AFTER_RELEASE.store(false, Ordering::Release);
+        RECONNECT_AFTER_RELEASE.store(tombstone.reconnect_after_release, Ordering::Release);
         return Ok(());
     };
     // DNS-before-disarm invariant (identical to the macOS helper): the network may open only
@@ -2875,7 +2933,7 @@ async fn disarm_unlocked_with_narrow(apply_narrow: Option<bool>) -> Result<()> {
     // all (the contract `restore_on_service_start` already understands); only if even that
     // removal fails does a stale wanted record survive, and a later Service start may then
     // restore it — reported through `last_error`, never by reinstalling the block.
-    let tombstone_note = match persist_disarmed_tombstone().await {
+    let tombstone_note = match atomic_write(&intent_path(), &serde_json::to_vec_pretty(&tombstone)?).await {
         Ok(()) => None,
         Err(error) => {
             tracing::error!(
@@ -2911,11 +2969,11 @@ async fn disarm_unlocked_with_narrow(apply_narrow: Option<bool>) -> Result<()> {
     *last_error_guard() = tombstone_note;
     TUNNEL_PERMIT_RENDERED.store(false, Ordering::Relaxed);
     if let Some(apply_narrow) = apply_narrow {
-        crate::core::selective_layer::finish_release(apply_narrow).await;
+        finish_release_follow_up(apply_narrow).await;
     }
     clear_wanted_core_window();
     CRASH_TOMBSTONE_PENDING.store(false, Ordering::Release);
-    RECONNECT_AFTER_RELEASE.store(false, Ordering::Release);
+    RECONNECT_AFTER_RELEASE.store(tombstone.reconnect_after_release, Ordering::Release);
     Ok(())
 }
 
@@ -2946,9 +3004,8 @@ async fn release_unproven_wanted_session_unlocked() -> Result<()> {
     RECONNECT_AFTER_RELEASE.store(true, Ordering::Release);
     // WFP is already gone. Recovery keeps only the existing narrow AI hold;
     // its best-effort installation cannot refuse or undo the general release.
-    crate::core::selective_layer::finish_release(true).await;
     let tombstone = crash_recovery_tombstone();
-    match atomic_write(&intent_path(), &serde_json::to_vec_pretty(&tombstone)?).await {
+    let result = match atomic_write(&intent_path(), &serde_json::to_vec_pretty(&tombstone)?).await {
         Ok(()) => {
             CRASH_TOMBSTONE_PENDING.store(false, Ordering::Release);
             Ok(())
@@ -2959,7 +3016,9 @@ async fn release_unproven_wanted_session_unlocked() -> Result<()> {
                 "WFP was removed but the crash-recovery tombstone could not be written",
             )
         }
-    }
+    };
+    finish_release_follow_up(true).await;
+    result
 }
 
 async fn retry_crash_tombstone_unlocked() {
@@ -3163,7 +3222,7 @@ fn unhealthy_watchdog_action(
 /// Remove provider-scoped WFP and restore DNS. DNS failure does not keep the block.
 /// The caller decides whether the on-disk intent bytes stay (corrupt evidence) or are
 /// replaced by a disarmed tombstone (a live session the watchdog gave up on).
-async fn release_general_traffic_unlocked(reason: &str) -> Result<()> {
+async fn release_general_traffic_unlocked(reason: &str, replace_intent: bool) -> Result<()> {
     tracing::warn!("wfp: {reason}; releasing general traffic and restoring DNS");
     if let Err(error) = bounded_dns_call(reason, crate::core::dns::ensure_restored()).await {
         tracing::warn!("wfp: DNS restore during {reason} failed; still releasing WFP: {error:#}");
@@ -3182,14 +3241,23 @@ async fn release_general_traffic_unlocked(reason: &str) -> Result<()> {
     TUNNEL_PERMIT_RENDERED.store(false, Ordering::Relaxed);
     RESTORED_BARRIER_UNPROVEN.store(false, Ordering::Release);
     note_verify(false);
+    // Keep corrupt/unreadable bytes as evidence. A live-session or missing-record release
+    // needs its own durable narrow disposition before detached native work begins.
+    if replace_intent || tokio::fs::read(intent_path()).await.is_err_and(|error| {
+        error.kind() == std::io::ErrorKind::NotFound
+    }) {
+        if let Err(error) = persist_automatic_release_tombstone().await {
+            tracing::warn!("wfp: automatic release disposition could not be written: {error:#}");
+        }
+    }
     // Crash/corrupt-state recovery must retain the secondary AI floor just like
     // other non-strict failure releases, after the general block is removed.
-    crate::core::selective_layer::finish_release(true).await;
+    finish_release_follow_up(true).await;
     Ok(())
 }
 
 async fn release_general_traffic_on_startup_unlocked(reason: &str) -> Result<()> {
-    let result = release_general_traffic_unlocked(reason).await;
+    let result = release_general_traffic_unlocked(reason, false).await;
     if result.is_err() && armed_guard().is_none() {
         // No in-memory intent exists for the watchdog to reconcile after this startup failure.
         spawn_startup_release_retry();
@@ -3198,13 +3266,7 @@ async fn release_general_traffic_on_startup_unlocked(reason: &str) -> Result<()>
 }
 
 async fn release_unhealthy_session_unlocked(reason: &str) -> Result<()> {
-    release_general_traffic_unlocked(reason).await?;
-    if let Err(error) = persist_disarmed_tombstone().await {
-        tracing::warn!(
-            "wfp: general traffic was released but the disarmed record could not be written: {error:#}"
-        );
-    }
-    Ok(())
+    release_general_traffic_unlocked(reason, true).await
 }
 
 /// Ownerless block used only when the on-disk record explicitly enabled the strict kill
@@ -3223,6 +3285,7 @@ fn emergency_armed() -> Armed {
             owner_key: None,
             strict_kill_switch: true,
             reconnect_after_release: false,
+            apply_narrow_after_release: None,
         },
         tun_luid: None,
         core_instance: None,
@@ -3368,9 +3431,10 @@ pub async fn restore_on_service_start() -> Result<()> {
                 // disarm whose restore could not be proven) is swept here too — protection is
                 // off, so the machine must not stay on loopback DNS.
                 //
-                // The secondary AI hold is not removed here. A crash release writes this same
-                // wanted:false record and the hold is meant to survive until Restore, arm, or
-                // emergency disarm. Those rules name only the allowlisted suffixes and the two
+                // Replay a recorded secondary disposition only after broad cleanup. Automatic
+                // tombstones stay for future recovery; explicit Restore supersedes them. Legacy
+                // records without a disposition preserve their existing hold. The rules name
+                // only the allowlisted suffixes and the two
                 // Anthropic prefixes, so leaving them cannot block general traffic.
                 // `remove_all_filters` is provider-scoped, so filters in legacy sublayers go
                 // with it; the sweep afterwards only clears the emptied sublayer objects.
@@ -3381,11 +3445,13 @@ pub async fn restore_on_service_start() -> Result<()> {
                     return Err(error);
                 }
                 sweep_legacy_sublayers_unlocked().await;
+                let follow_up = intent.release_follow_up();
                 if intent.reconnect_after_release {
                     // Keep the crash-window tombstone so a later Service start still tells the
                     // app to reconnect. A user-disconnect tombstone is consumed as before.
                     RECONNECT_AFTER_RELEASE.store(true, Ordering::Release);
-                } else {
+                }
+                if !intent.reconnect_after_release && follow_up != Some(true) {
                     match tokio::fs::remove_file(intent_path()).await {
                         Ok(()) => {}
                         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
@@ -3403,6 +3469,9 @@ pub async fn restore_on_service_start() -> Result<()> {
                     tracing::warn!(
                         "service start: leftover DNS snapshot could not be restored: {error:#}"
                     );
+                }
+                if let Some(apply_narrow) = follow_up {
+                    finish_release_follow_up(apply_narrow).await;
                 }
                 Ok(())
             }
@@ -3550,8 +3619,8 @@ pub async fn prepare_for_service_replacement() -> Result<bool> {
     match tokio::fs::read(intent_path()).await {
         Ok(bytes) => match serde_json::from_slice::<IntentRecord>(&bytes) {
             Ok(intent) if intent.wanted => Ok(false),
-            Ok(_) => {
-                persist_disarmed_tombstone().await?;
+            Ok(intent) => {
+                atomic_write(&intent_path(), &serde_json::to_vec_pretty(&intent)?).await?;
                 Ok(true)
             }
             Err(error) => {
@@ -3983,9 +4052,11 @@ async fn emergency_disarm_with(apply_narrow: bool) -> Result<()> {
         owner_key: None,
         strict_kill_switch: false,
         reconnect_after_release: false,
+        apply_narrow_after_release: None,
     });
     tombstone.wanted = false;
     tombstone.reconnect_after_release = false;
+    tombstone.apply_narrow_after_release = Some(apply_narrow);
     tombstone.updated_at = now_unix();
     let tombstone_error =
         match atomic_write(&intent_path(), &serde_json::to_vec_pretty(&tombstone)?).await {
@@ -4014,7 +4085,7 @@ async fn emergency_disarm_with(apply_narrow: bool) -> Result<()> {
     engine_call("emergency disarm", crate::core::wfp::emergency_disarm).await?;
     // WFP is gone. Explicit Restore removes the secondary hold; automatic
     // failure recovery applies it. Neither may undo or refuse this release.
-    crate::core::selective_layer::finish_release(apply_narrow).await;
+    finish_release_follow_up(apply_narrow).await;
     *armed_guard() = None;
     *last_verify_guard() = None;
     TUNNEL_PERMIT_RENDERED.store(false, Ordering::Relaxed);
@@ -4027,17 +4098,20 @@ async fn emergency_disarm_with(apply_narrow: bool) -> Result<()> {
             tracing::warn!("uninstall disarm: post-WFP tombstone write still failed: {error:#}");
         }
     }
-    // Intent deletion is best-effort once WFP is gone. The tombstone (wanted:false) is already
+    // Automatic recovery retains its narrow disposition for future Service starts.
+    // Explicit intent deletion is best-effort once WFP is gone. The tombstone is already
     // on disk, so a leftover file cannot re-arm a block; refusing uninstall here recreated the
     // "result 3 forever" deadlock for Chinese test machines whose ProgramData ACLs deny the
     // final unlink under the elevated installer token.
-    match tokio::fs::remove_file(intent_path()).await {
-        Ok(()) => {}
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-        Err(error) => {
-            tracing::warn!(
-                "kill-switch intent could not be deleted after WFP removal (continuing): {error:#}"
-            );
+    if !apply_narrow {
+        match tokio::fs::remove_file(intent_path()).await {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => {
+                tracing::warn!(
+                    "kill-switch intent could not be deleted after WFP removal (continuing): {error:#}"
+                );
+            }
         }
     }
     // BRICK-W4: Tono's NRPT catch-all sends every lookup to 198.18.0.2, which nothing answers
@@ -4310,6 +4384,7 @@ mod tests {
             owner_key: None,
             strict_kill_switch: false,
             reconnect_after_release: false,
+            apply_narrow_after_release: None,
         }
     }
 
@@ -4661,6 +4736,7 @@ mod tests {
 
     async fn cleanup() {
         crate::core::selective_layer::remove().await;
+        TEST_INTERRUPT_RELEASE_FOLLOW_UP.store(false, Ordering::SeqCst);
         TEST_REMOVE_FAILURE.store(false, Ordering::Relaxed);
         TEST_REMOVE_ATTEMPTS.store(0, Ordering::Relaxed);
         TEST_RESIDUAL_FILTER_KEYS.lock().unwrap().clear();
@@ -5053,6 +5129,119 @@ mod tests {
 
     #[tokio::test]
     #[serial]
+    async fn interrupted_automatic_release_replays_the_ai_hold_on_service_start() -> Result<()> {
+        cleanup().await;
+        arm_bootstrap(&test_config(), "/opt/tono/mihomo", "owner-alice").await?;
+        TEST_INTERRUPT_RELEASE_FOLLOW_UP.store(true, Ordering::SeqCst);
+        release_after_service_stop().await?;
+        assert!(!status().await.wanted);
+        assert!(!crate::core::selective_layer::test_hold_active());
+
+        // A fresh Service has only the persisted disposition; no native hold was installed.
+        RECONNECT_AFTER_RELEASE.store(false, Ordering::Release);
+        restore_on_service_start().await?;
+        let held = crate::core::selective_layer::test_hold_active();
+        let wanted = status().await.wanted;
+        cleanup().await;
+        assert!(held, "automatic AI-hold intent must survive interruption before native installation");
+        assert!(!wanted, "replaying a narrow hold must not restore a general block");
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn idle_stop_preserves_automatic_ai_recovery_across_service_death() -> Result<()> {
+        cleanup().await;
+        release_applying_narrow().await?;
+        release_after_service_stop().await?;
+        crate::core::selective_layer::remove().await; // Native hold was lost during replacement.
+        restore_on_service_start().await?;
+        let held = crate::core::selective_layer::test_hold_active();
+        cleanup().await;
+        assert!(held, "idle Stop must keep the durable automatic AI disposition");
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn replacement_preserves_automatic_ai_recovery_disposition() -> Result<()> {
+        cleanup().await;
+        release_applying_narrow().await?;
+        assert!(prepare_for_service_replacement().await?);
+        crate::core::selective_layer::remove().await;
+        restore_on_service_start().await?;
+        let held = crate::core::selective_layer::test_hold_active();
+        cleanup().await;
+        assert!(held, "Service replacement must retain automatic AI intent");
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn interrupted_update_emergency_release_replays_the_ai_hold() -> Result<()> {
+        cleanup().await;
+        TEST_INTERRUPT_RELEASE_FOLLOW_UP.store(true, Ordering::SeqCst);
+        emergency_disarm_windows_kill_switch_applying_narrow().await?;
+        assert!(!crate::core::selective_layer::test_hold_active());
+        restore_on_service_start().await?;
+        let held = crate::core::selective_layer::test_hold_active();
+        let wanted = status().await.wanted;
+        cleanup().await;
+        assert!(held, "automatic emergency release must retain the replay record");
+        assert!(!wanted, "replay cannot re-arm broad WFP");
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn interrupted_explicit_restore_cancels_the_durable_ai_hold() -> Result<()> {
+        cleanup().await;
+        release_applying_narrow().await?;
+        TEST_INTERRUPT_RELEASE_FOLLOW_UP.store(true, Ordering::SeqCst);
+        release().await?;
+        assert!(crate::core::selective_layer::test_hold_active());
+        restore_on_service_start().await?;
+        let held = crate::core::selective_layer::test_hold_active();
+        cleanup().await;
+        assert!(!held, "explicit Restore must supersede persisted automatic AI intent");
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn idle_stop_keeps_corrupt_automatic_recovery_evidence() -> Result<()> {
+        cleanup().await;
+        atomic_write(&intent_path(), b"corrupt-auto-recovery").await?;
+        restore_on_service_start().await?;
+        release_after_service_stop().await?;
+        let evidence = tokio::fs::read(intent_path()).await?;
+        crate::core::selective_layer::remove().await;
+        restore_on_service_start().await?;
+        let held = crate::core::selective_layer::test_hold_active();
+        cleanup().await;
+        assert_eq!(evidence, b"corrupt-auto-recovery");
+        assert!(held, "corrupt evidence must still request automatic recovery on restart");
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn legacy_crash_reconnect_tombstone_replays_the_ai_hold() -> Result<()> {
+        cleanup().await;
+        let mut legacy = serde_json::to_value(crash_recovery_tombstone())?;
+        legacy.as_object_mut().unwrap().remove("apply_narrow_after_release");
+        atomic_write(&intent_path(), &serde_json::to_vec_pretty(&legacy)?).await?;
+        restore_on_service_start().await?;
+        let held = crate::core::selective_layer::test_hold_active();
+        let reconnect = status().await.reconnect_after_release;
+        cleanup().await;
+        assert!(held, "legacy crash reconnect intent still requests the automatic AI hold");
+        assert!(reconnect);
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
     async fn service_stop_release_keeps_the_ai_hold_for_an_armed_session() -> Result<()> {
         cleanup().await;
         arm_bootstrap(&test_config(), "/opt/tono/mihomo", "owner-alice").await?;
@@ -5368,6 +5557,7 @@ mod tests {
             "successful retry must still tell the app to reconnect"
         );
         let persisted: IntentRecord = serde_json::from_slice(&tokio::fs::read(intent_path()).await?)?;
+        assert!(crate::core::selective_layer::test_hold_active(), "startup retry must replay the durable AI hold");
         assert!(persisted.reconnect_after_release);
         assert!(!persisted.wanted);
         cleanup().await;
@@ -5813,6 +6003,7 @@ mod tests {
             owner_key: None,
             strict_kill_switch: false,
             reconnect_after_release: false,
+            apply_narrow_after_release: None,
         };
         apply_learned_bootstrap_pins(&mut intent);
         let _ = std::fs::remove_file(&path);
