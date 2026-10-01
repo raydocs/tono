@@ -288,4 +288,57 @@ final class ArmedFailureReleaseTests: XCTestCase {
         await app.connectionCoordinator.unarmedReconnectTask?.value
         XCTAssertEqual(delays, [2, 5], "a failed automatic dial must not reset recovery to the first two-second rung")
     }
+
+    @MainActor
+    func testPendingUpdateAutomaticFailurePreservesAIHold() async {
+        let armed = KillSwitchService.isArmed
+        let pending = RuntimeCleanup.nativeUpdatePending
+        let blocked = RuntimeCleanup.nativeUpdateBlocksConnect
+        let didStart = AppProfile.defaults.object(forKey: SettingsKey.didStartCore)
+        let lastTun = AppProfile.defaults.object(forKey: SettingsKey.lastTunEnabled)
+        let app = AppState()
+        defer {
+            app.connectionCoordinator.cancelConnectionTasks()
+            KillSwitchService.isArmed = armed
+            RuntimeCleanup.nativeUpdatePending = pending
+            RuntimeCleanup.nativeUpdateBlocksConnect = blocked
+            AppProfile.defaults.set(didStart, forKey: SettingsKey.didStartCore)
+            AppProfile.defaults.set(lastTun, forKey: SettingsKey.lastTunEnabled)
+        }
+        KillSwitchService.isArmed = true
+        RuntimeCleanup.nativeUpdatePending = true
+        RuntimeCleanup.nativeUpdateBlocksConnect = false
+        app.isConnecting = true
+        XCTAssertFalse(app.nativeUpdatePending, "the successor's pending receipt is launch-owned")
+        var explicitReleases = 0
+        var automaticReleases = 0
+        var aiHold = false
+        app.nativeUpdateDisconnect = {
+            explicitReleases += 1
+            aiHold = false
+            return .init(pending: true, receipt: nil, execution: nil,
+                         disconnectVerified: true, diagnostic: nil)
+        }
+        app.nativeUpdateReleaseAfterFailure = {
+            automaticReleases += 1
+            aiHold = true
+            return .init(pending: true, receipt: nil, execution: nil,
+                         disconnectVerified: true, diagnostic: nil)
+        }
+        var runtime = NetworkProtectionOperations()
+        runtime.refreshKillSwitchStatus = { .confirmed(requiresProtectionRecovery: false) }
+        app.networkProtection = runtime
+
+        await app.applyExhaustedArmedFailure(message: "successor Core failed", resumeWhenReachable: false)
+        await app.nativeUpdateDisconnectTask?.value
+
+        XCTAssertEqual(automaticReleases, 1)
+        XCTAssertEqual(explicitReleases, 0)
+        XCTAssertTrue(aiHold)
+        XCTAssertFalse(KillSwitchService.isArmed)
+        XCTAssertFalse(app.isProtectionBlocked)
+        XCTAssertTrue(app.nativeUpdatePending, "release retains update evidence")
+        XCTAssertTrue(RuntimeCleanup.nativeUpdateBlocksConnect)
+    }
+
 }
