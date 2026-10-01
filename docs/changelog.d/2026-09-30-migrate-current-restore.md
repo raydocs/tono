@@ -1,6 +1,6 @@
 ## 2026-09-30 · 节点布局迁移在链接失败时恢复 current
 - 归属：ops 计划（节点迁移），不是 SHIP_PLAN 发版门。影响 `tooling/scripts/remote/migrate-node-to-release-layout.sh`。
-- 来源：基线 `origin/main` → 本分支。未合 main。
+- 来源：基线 `origin/main` → 本分支；[#845](https://github.com/raydocs/tono/pull/845)。未合 main。
 - 缺陷修复：`mv current` 到备份之后，`ln -s` 或 `mv -T` 失败会在 `set -e` 下直接退出，`/opt/tono-xray/current` 消失，该出口直到人工恢复都没有二进制。现在这两步失败会把原目录移回去再退出。
 - 新增/优化：无。后面 `systemctl restart` 失败仍走原来的 `restore`。
 - 工程与测试：`tooling/scripts/tests/migrate_node_layout_test.py`。修复前 current 不是目录（链接报 File exists），修复后 1 test OK，`sh -n` 通过。
