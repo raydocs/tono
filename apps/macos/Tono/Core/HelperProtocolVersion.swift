@@ -335,7 +335,9 @@ nonisolated enum HelperProtocolVersion {
     ///   Apply before retiring originals already committed to disk.
     /// - 4.52.15 → 4.52.16: Automatic failed commits and orphaned bootstrap releases preserve the secondary AI hold after opening general traffic.
     /// - 4.52.16 → 4.52.17: exhausted App recovery has an AI-preserving release intent.
-    static let current = "4.52.17"
+    /// - 4.52.17 → 4.52.18: resolved update retirement keeps its active
+    ///   receipt until executor-job cleanup succeeds, preserving retry ownership.
+    static let current = "4.52.18"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS
