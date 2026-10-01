@@ -5,7 +5,7 @@ import { ApiError } from '../../errors';
 import { rejectUnexpectedKeys } from '../../request';
 import { QUOTA_COUNTS, QUOTA_CYCLE_KINDS } from '../contract';
 import { catalogNameExists, upsertNodeIdentity } from '../node-identity';
-import { closeOpenCycle, readAgentNetCounters, rollNodeCycle } from '../quota';
+import { closeOpenCycle, openNodeCycleWithoutSample, readAgentNetCounters, rollNodeCycle } from '../quota';
 import {
   Env,
   Row,
@@ -208,12 +208,17 @@ export async function applyNodeProfilePatch(e: Env, name: string, body: Row): Pr
   if (patch.quota === null) {
     await closeOpenCycle(e.DB, name, t);
   } else if (patch.quota) {
-    const counters = await readAgentNetCounters(e.DB, name) ?? { in: 0, out: 0, at: t };
-    await rollNodeCycle(e.DB, name, {
+    const quotaProfile = {
       trafficQuotaBytes: patch.quota.quotaBytes,
       cycleKind: patch.quota.cycleKind,
       cycleAnchorDay: patch.quota.cycleAnchorDay,
       quotaCounts: patch.quota.counts,
-    }, counters, t);
+    };
+    const counters = await readAgentNetCounters(e.DB, name);
+    if (counters) {
+      await rollNodeCycle(e.DB, name, quotaProfile, counters, t);
+    } else {
+      await openNodeCycleWithoutSample(e.DB, name, quotaProfile, t);
+    }
   }
 }
