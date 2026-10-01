@@ -7,3 +7,5 @@
 - 验证：本 Linux 工作树以 `80f4b4d0` 为基线；`git diff --check` 与记录读取检查通过，Swift 改动逐行复核。无 Swift/Xcode，helper self-test、XCTest 与原生编译未执行，须由 hosted macOS CI 运行；无 Windows 工具链，未运行 Windows 测试。
 - 候选/发布：仅源码，无新候选。
 - 剩余限制：`needs-hardware`；更新后普通互联网可用、界面已释放与再次 Connect 须签名候选实机验证。提交失败、回执丢失或提交后状态不可读时，既有路径仍可能保留旧保护意图或显示；本次只修成功提交后的实时对账。`HelperProtocolVersion.current` 为 main `4.52.18` + `0.0.1` = `4.52.19`，`CONTRACT.sha256` 按 helper 源重新计算。本条不代表 CI 或设备验收通过。
+
+- Windows CI：main 上的 `merge-manager/aux.sh` 是 Windows 保留设备名，检出失败。本分支将其改名为 `side.sh`，内容不变。
