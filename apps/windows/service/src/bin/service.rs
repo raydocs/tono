@@ -37,7 +37,7 @@ use {
 /// Teardown stops the core, restores DNS and writes the tombstone, so it is not instant. Without
 /// a hint SCM decides the service is hung after its own default.
 #[cfg(windows)]
-const STOP_WAIT_HINT: Duration = Duration::from_secs(45);
+const STOP_WAIT_HINT: Duration = Duration::from_secs(65);
 
 // --- Main Entry Points ---
 
@@ -459,6 +459,9 @@ fn run_service() -> platform_lib::Result<()> {
         drop(owner_guard);
         false
     });
+    // A timed-out DNS/WFP call can leave spawn_blocking work behind. A normal runtime drop
+    // waits for it forever, turning a bounded SCM stop back into a hung service process.
+    rt.shutdown_background();
 
     registered.set_service_status(ServiceStatus {
         service_type: ServiceType::OWN_PROCESS,

@@ -56,6 +56,9 @@ const IPC_RESTART_WINDOW: Duration = Duration::from_secs(10);
 const IPC_MAX_BACKOFF: Duration = Duration::from_millis(500);
 /// How long shutdown waits for the listener task to acknowledge that it is done.
 const IPC_SHUTDOWN_DONE_TIMEOUT: Duration = Duration::from_secs(5);
+/// SCM Stop must finish even if a lifecycle lock or a DNS/WFP worker never returns.
+#[cfg(windows)]
+const IPC_SERVICE_STOP_TIMEOUT: Duration = Duration::from_secs(60);
 /// The budget one privileged step *advertises*, and nothing more.
 ///
 /// This value is only ever handed to [`OperationGuard::begin`], which records it as a deadline in
@@ -329,6 +332,8 @@ async fn rollback_started_owner(owner: &AuthenticatedOwner) -> AnyResult<()> {
 
 // 防止旧 listener 的清理删除 supervisor 刚创建的新 socket。
 static IPC_LIFECYCLE_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
+#[cfg(windows)]
+static IPC_STOPPING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// The listener and the two ends of its shutdown handshake.
 ///
@@ -416,6 +421,8 @@ async fn shutdown_ipc_server() {
 
 pub async fn run_ipc_server() -> Result<JoinHandle<Result<()>>> {
     let _lifecycle_guard = IPC_LIFECYCLE_LOCK.lock().await;
+    #[cfg(windows)]
+    IPC_STOPPING.store(false, std::sync::atomic::Ordering::SeqCst);
 
     make_ipc_dir().await?;
     cleanup_stale_ipc_socket().await?;
@@ -446,7 +453,53 @@ pub async fn run_ipc_server() -> Result<JoinHandle<Result<()>>> {
 }
 
 pub async fn stop_ipc_server() -> Result<()> {
+    #[cfg(windows)]
+    {
+        // Connection handlers outlive the listener. Fence their queued mutations before
+        // releasing protection so none can re-arm it between teardown and process exit.
+        IPC_STOPPING.store(true, std::sync::atomic::Ordering::SeqCst);
+        match tokio::time::timeout(IPC_SERVICE_STOP_TIMEOUT, stop_ipc_server_inner()).await {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => warn!("Service stop cleanup failed; continuing shutdown: {error:#}"),
+            Err(_) => warn!("Service stop cleanup timed out; continuing shutdown"),
+        }
+        return Ok(());
+    }
+    #[cfg(not(windows))]
+    stop_ipc_server_inner().await
+}
+
+async fn stop_ipc_server_inner() -> Result<()> {
     let _lifecycle_guard = IPC_LIFECYCLE_LOCK.lock().await;
+
+    #[cfg(windows)]
+    let _owner_lifecycle_guard = OWNER_LIFECYCLE_LOCK.lock().await;
+    #[cfg(windows)]
+    let repair = match crate::acquire_service_repair_gate() {
+        Ok(guard) => guard,
+        Err(error) => {
+            warn!("Service stop repair gate unavailable; retaining protection: {error:#}");
+            None
+        }
+    };
+    #[cfg(windows)]
+    let lifecycle_owned = match crate::core::update::release_admission() {
+        Ok(()) => repair.is_none(),
+        Err(error) => {
+            warn!("Service stop release fenced by update/installer evidence: {error:#}");
+            true
+        }
+    };
+    #[cfg(windows)]
+    let release = windows_kill_switch::service_stop_release_allowed(lifecycle_owned);
+    #[cfg(windows)]
+    let dns_restore = if release {
+        // SCM Stop has no recovery restart. Use Disconnect's DNS -> Core -> WFP order so a
+        // non-strict session cannot leave a persistent block and a dead protected resolver.
+        dns::ensure_restored().await
+    } else {
+        Ok(())
+    };
 
     CORE_MANAGER
         .lock()
@@ -454,6 +507,21 @@ pub async fn stop_ipc_server() -> Result<()> {
         .stop_core()
         .await
         .map_err(|error| kode_bridge::KodeBridgeError::custom(error.to_string()))?;
+
+    #[cfg(windows)]
+    if release {
+        // Still stop Core if DNS restore failed, but never disarm without the DNS proof.
+        dns_restore
+            .map_err(|error| kode_bridge::KodeBridgeError::custom(error.to_string()))?;
+        // Retire the run intent before opening WFP, as the owner-gated release does: a later
+        // service start must not resurrect this Core on the now-open physical route.
+        crate::core::desired::retire_legacy_active_owner()
+            .await
+            .map_err(|error| kode_bridge::KodeBridgeError::custom(error.to_string()))?;
+        windows_kill_switch::release()
+            .await
+            .map_err(|error| kode_bridge::KodeBridgeError::custom(error.to_string()))?;
+    }
 
     if let Some(sender) = IPC_SHUTDOWN_SENDER.lock().await.take() {
         let _ = sender.send(());
@@ -793,6 +861,10 @@ async fn enter_owner_lifecycle(
     gate: OwnerLifecycleGate<'_>,
 ) -> ControlFlow<Result<HttpResponse>, OwnerLifecycleGuard> {
     let lifecycle_guard = OWNER_LIFECYCLE_LOCK.lock().await;
+    #[cfg(windows)]
+    if IPC_STOPPING.load(std::sync::atomic::Ordering::SeqCst) {
+        return ControlFlow::Break(service_unavailable("service is stopping"));
+    }
     #[cfg(windows)]
     let repair = match crate::acquire_service_repair_gate() {
         Ok(Some(guard)) => guard,
