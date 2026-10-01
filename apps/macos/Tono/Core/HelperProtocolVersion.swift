@@ -344,7 +344,9 @@ nonisolated enum HelperProtocolVersion {
     ///   that leaves the token listed keeps the record. A new physical NIC
     ///   reloads the LAN DNS block without flushing states. Protected DNS
     ///   status follows `serviceID`.
-    static let current = "4.52.19"
+    /// - 4.52.19 → 4.52.20: selective recovery holds dedicated DashScope/Qwen
+    ///   model API namespaces while general Alibaba Cloud remains available.
+    static let current = "4.52.20"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS
