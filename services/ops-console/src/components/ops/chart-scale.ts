@@ -45,7 +45,8 @@ export function niceTicks(lo: number, hi: number, count = 4): number[] {
   for (let value = first; value <= hi + step * 1e-9; value += step) {
     ticks.push(Math.round(value / step) * step);
   }
-  if (ticks[ticks.length - 1] < hi) ticks.push(ticks[ticks.length - 1] + step);
+  const last = ticks[ticks.length - 1];
+  if (last !== undefined && last < hi) ticks.push(last + step);
   return ticks.map((tick) => Number(tick.toPrecision(12)));
 }
 
@@ -103,7 +104,7 @@ const TIME_STEPS = [
 export function timeTicks(lo: number, hi: number, count = 5, offsetSec = localOffsetSec(lo)): number[] {
   if (!Number.isFinite(lo) || !Number.isFinite(hi) || hi <= lo || count < 1) return [];
   const raw = (hi - lo) / count;
-  const step = TIME_STEPS.find((candidate) => candidate >= raw) ?? TIME_STEPS[TIME_STEPS.length - 1];
+  const step = TIME_STEPS.find((candidate) => candidate >= raw) ?? TIME_STEPS[TIME_STEPS.length - 1] ?? raw;
   const first = Math.ceil((lo + offsetSec) / step) * step - offsetSec;
   const ticks: number[] = [];
   for (let at = first; at <= hi; at += step) ticks.push(at);
@@ -121,28 +122,33 @@ export function nearestIndex(sorted: readonly number[], value: number): number {
   let hi = sorted.length - 1;
   while (hi - lo > 1) {
     const mid = (lo + hi) >> 1;
-    if (sorted[mid] <= value) lo = mid;
+    if ((sorted[mid] ?? Infinity) <= value) lo = mid;
     else hi = mid;
   }
-  return Math.abs(sorted[hi] - value) < Math.abs(sorted[lo] - value) ? hi : lo;
+  return Math.abs((sorted[hi] ?? Infinity) - value) < Math.abs((sorted[lo] ?? Infinity) - value) ? hi : lo;
 }
 
 /**
  * Split a run of points at every gap. A stretch nobody measured is a break in
  * the line, never a dip to zero and never a straight line across the hole.
  */
-export function splitRuns<T>(points: readonly T[], isGap: (point: T) => boolean): T[][] {
-  const runs: T[][] = [];
-  let run: T[] = [];
+/** A run is never empty, so `run[0]` is always a point. */
+export type Run<T> = [T, ...T[]];
+
+export function splitRuns<T>(points: readonly T[], isGap: (point: T) => boolean): Run<T>[] {
+  const runs: Run<T>[] = [];
+  let run: Run<T> | null = null;
   for (const point of points) {
     if (isGap(point)) {
-      if (run.length > 0) runs.push(run);
-      run = [];
-    } else {
+      if (run) runs.push(run);
+      run = null;
+    } else if (run) {
       run.push(point);
+    } else {
+      run = [point];
     }
   }
-  if (run.length > 0) runs.push(run);
+  if (run) runs.push(run);
   return runs;
 }
 

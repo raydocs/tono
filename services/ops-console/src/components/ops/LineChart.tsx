@@ -94,18 +94,18 @@ export function LineChart({
 
   const [lo, hi] = domain ?? extent([...values, ...guides.map((guide) => guide.value)]);
   const yTicks = axisTicks(scale, lo, hi, height >= 160 ? 4 : 3);
-  const yMin = Math.min(lo, yTicks[0]);
-  const yMax = Math.max(hi, yTicks[yTicks.length - 1]);
+  const yMin = Math.min(lo, yTicks[0] ?? lo);
+  const yMax = Math.max(hi, yTicks[yTicks.length - 1] ?? hi);
   const left = Math.max(...yTicks.map((value) => labelWidth(format(value)))) + 12;
-  const t0 = times[0];
-  const t1 = times[times.length - 1];
+  const t0 = times[0] ?? 0;
+  const t1 = times[times.length - 1] ?? t0;
   const x = linear(t0, t1, left, width - RIGHT);
   const y = linear(yMin, yMax, height - BOTTOM, TOP);
   const xTicks = timeTicks(t0, t1, Math.max(2, Math.floor((width - left) / MIN_TICK_GAP)));
 
-  const at = cursor.index === null ? null : times[cursor.index];
+  const at = cursor.index === null ? null : times[cursor.index] ?? null;
   const rows: TipRow[] = at === null ? [] : series.map((line, index) => {
-    const value = lookup[index].get(at);
+    const value = lookup[index]?.get(at);
     return {
       key: line.key,
       name: line.name,
@@ -221,7 +221,7 @@ export function LineChart({
               <g>
                 <line x1={px(x(at))} x2={px(x(at))} y1={TOP} y2={height - BOTTOM} stroke="var(--chart-cursor)" />
                 {series.map((line, index) => {
-                  const value = lookup[index].get(at);
+                  const value = lookup[index]?.get(at);
                   if (value == null) return null;
                   return (
                     <circle

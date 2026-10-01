@@ -51,7 +51,7 @@ export function Bars({
 
   const totals = columns.map((column) => column.values.reduce<number>((sum, value) => sum + Math.max(0, value ?? 0), 0));
   const ticks = axisTicks(scale, 0, Math.max(1, ...totals), height >= 160 ? 4 : 3);
-  const max = ticks[ticks.length - 1];
+  const max = ticks[ticks.length - 1] ?? 1;
   const left = Math.max(...ticks.map((value) => labelWidth(format(value)))) + 12;
   const y = linear(0, max, height - BOTTOM, TOP);
   const slot = (width - left) / Math.max(1, columns.length);
@@ -60,7 +60,7 @@ export function Bars({
 
   const hover = cursor.index;
   const rows: TipRow[] = hover === null ? [] : stacks.map((stack, index) => {
-    const value = columns[hover].values[index];
+    const value = columns[hover]?.values[index];
     return { key: stack.key, name: stack.name, value: value == null ? copy.missing : format(value), index, tone: stack.tone };
   });
 
@@ -148,10 +148,10 @@ export function Bars({
           </svg>
         ) : null}
         {hover !== null ? (
-          <ChartTip heading={columns[hover].label} rows={rows} x={left + slot * hover + slot / 2} width={width} />
+          <ChartTip heading={columns[hover]?.label ?? ''} rows={rows} x={left + slot * hover + slot / 2} width={width} />
         ) : null}
         <span className="sr-only" aria-live="polite">
-          {hover === null ? '' : copy.chartReadout(columns[hover].label, rows)}
+          {hover === null ? '' : copy.chartReadout(columns[hover]?.label ?? '', rows)}
         </span>
       </div>
       <Legend items={stacks} label={copy.chartLegend} />
