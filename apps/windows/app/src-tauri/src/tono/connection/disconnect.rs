@@ -264,7 +264,7 @@ async fn run_release_sequence(
         // User Disconnect and failed-Prepare recovery request this durable release.
         // Quit, sign-out and ordinary failure cleanup keep the pending-update fence.
         let update_release = if _explicit_disconnect {
-            pending_update_release_result(state, commands::update::disconnect_if_pending().await).await?
+            pending_update_release_result(state, commands::update::disconnect_if_pending(apply_narrow).await).await?
         } else { None };
         match update_release {
             Some(status) => status,
