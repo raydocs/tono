@@ -1602,6 +1602,9 @@ final class AppState {
             url: ProtectedProbeOrigin.google.url,
             timeout: 5_000
         )
+        if health.message == SingBoxDelayGate.deferredMessage {
+            return .ok
+        }
         if let delay = health.delay, delay > 0 {
             return .ok
         }

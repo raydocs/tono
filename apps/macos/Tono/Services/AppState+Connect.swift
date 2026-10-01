@@ -472,6 +472,7 @@ extension AppState {
                 try Task.checkCancellation()
                 switch verdict {
                 case .connected(let advisory):
+                    SingBoxDelayGate.prove()
                     if let advisory {
                         LocalTrafficAudit.shared.recordEvent(
                             "controller_exit_advisory",
