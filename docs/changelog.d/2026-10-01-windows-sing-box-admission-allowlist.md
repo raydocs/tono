@@ -8,3 +8,10 @@
 - 验证：本机按规定不跑 `cargo`；仅 `rustfmt --check` 通过。Windows CI 是门禁。
 - 候选/发布：仅源码，无新候选。
 - 剩余限制：高风险（特权路径），合并前需要独立 Codex high 审查。
+
+### 2026-10-01 续记 · 独立审查一轮修复
+
+- Codex（gpt-6-sol，high）审查 `f9919bd6`：major 3 项、minor 1 项。
+- 本轮修复：`Tono-Exit` 必须是唯一的 selector，候选和默认只能是 VLESS/Hysteria2 出口（发现 2）；HTTPS DNS 必须 `detour: Tono-Exit`，socks 出站也必须走 `Tono-Exit`（发现 3）；hosts `predefined` 的域名键不再被当作禁用选项（发现 4）。新增测试 `exit_selector_and_doh_must_stay_on_an_exit`。
+- 未在本 PR 修：发现 1（DIRECT 规则形状不受限）是 main 上 mihomo 与 sing-box 共有的既有问题，记为 [#1204](https://github.com/raydocs/tono/issues/1204) / `WIN-CORE-DIRECT-RULE-ADMISSION`。
+- 验证：本机仅 `rustfmt --check`；Windows CI 是门禁。

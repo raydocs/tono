@@ -77,7 +77,13 @@ pub(crate) fn admit_owned_runtime(text: &str) -> Result<(), String> {
         if !OUTBOUND_TYPES.contains(&kind) {
             return Err(format!("outbound type `{kind}` is not owned"));
         }
+        // The home SOCKS hop rides the selected exit; on its own it would dial
+        // a caller-chosen server from the physical interface.
+        if kind == "socks" && outbound.get("detour").and_then(Value::as_str) != Some("Tono-Exit") {
+            return Err("a socks outbound must detour through Tono-Exit".to_string());
+        }
     }
+    admit_exit_selector(outbounds)?;
 
     let route = root
         .get("route")
@@ -105,6 +111,9 @@ pub(crate) fn admit_owned_runtime(text: &str) -> Result<(), String> {
         }
         if kind != "https" && server.get("path").is_some() {
             return Err("only an https DNS server may carry a path".to_string());
+        }
+        if kind == "https" && server.get("detour").and_then(Value::as_str) != Some("Tono-Exit") {
+            return Err("an https DNS server must detour through Tono-Exit".to_string());
         }
     }
 
@@ -141,6 +150,49 @@ pub(crate) fn admit_owned_runtime(text: &str) -> Result<(), String> {
     }
     if clash.get("default_mode").and_then(Value::as_str) != Some("rule") {
         return Err("clash_api default_mode must be rule".to_string());
+    }
+    Ok(())
+}
+
+/// `route.final` names `Tono-Exit`, so that tag must be the one selector the
+/// compiler emits, choosing only among VLESS and Hysteria2 exits. A selector
+/// that offers a direct outbound, or a direct outbound named `Tono-Exit`,
+/// would send default traffic out of the physical interface.
+fn admit_exit_selector(outbounds: &[Value]) -> Result<(), String> {
+    let tag = |outbound: &Value| outbound.get("tag").and_then(Value::as_str);
+    let mut exits = outbounds
+        .iter()
+        .filter(|outbound| tag(outbound) == Some("Tono-Exit"));
+    let (Some(selector), None) = (exits.next(), exits.next()) else {
+        return Err("runtime needs exactly one Tono-Exit outbound".to_string());
+    };
+    if selector.get("type").and_then(Value::as_str) != Some("selector") {
+        return Err("Tono-Exit must be a selector".to_string());
+    }
+    let is_exit = |name: &str| {
+        outbounds.iter().any(|outbound| {
+            tag(outbound) == Some(name)
+                && matches!(
+                    outbound.get("type").and_then(Value::as_str),
+                    Some("vless" | "hysteria2")
+                )
+        })
+    };
+    let choices = selector
+        .get("outbounds")
+        .and_then(Value::as_array)
+        .filter(|choices| !choices.is_empty())
+        .ok_or_else(|| "Tono-Exit has no exits".to_string())?;
+    if !choices
+        .iter()
+        .all(|choice| choice.as_str().is_some_and(is_exit))
+    {
+        return Err("Tono-Exit may choose only VLESS or Hysteria2 exits".to_string());
+    }
+    if let Some(default) = selector.get("default")
+        && !default.as_str().is_some_and(is_exit)
+    {
+        return Err("Tono-Exit default must be a VLESS or Hysteria2 exit".to_string());
     }
     Ok(())
 }
@@ -193,6 +245,11 @@ fn no_forbidden_keys(value: &Value) -> Result<(), String> {
             for (key, child) in map {
                 if FORBIDDEN_KEYS.contains(&key.as_str()) {
                     return Err(format!("`{key}` is not allowed in the owned runtime"));
+                }
+                // Hosts `predefined` is keyed by domain names, not options: a
+                // host called `output` is data. Its values are address lists.
+                if key == "predefined" && map.get("type").and_then(Value::as_str) == Some("hosts") {
+                    continue;
                 }
                 no_forbidden_keys(child)?;
             }
@@ -411,5 +468,34 @@ mod tests {
             1,
         );
         assert!(admit_owned_runtime(&duplicated).is_err());
+    }
+
+    /// `route.final` alone does not keep default traffic and DNS on the tunnel:
+    /// the `Tono-Exit` selector and every DoH server must stay on an exit.
+    #[test]
+    fn exit_selector_and_doh_must_stay_on_an_exit() {
+        let mut hosts = compiled();
+        hosts["dns"]["servers"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({"type":"hosts","tag":"Tono-Hosts","predefined":{"output":["192.0.2.1"]}}));
+        assert!(admit_owned_runtime(&hosts.to_string()).is_ok());
+
+        let mut direct_choice = compiled();
+        direct_choice["outbounds"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({"type":"direct","tag":"Tono-China-Direct","bind_interface":"Ethernet"}));
+        assert!(admit_owned_runtime(&direct_choice.to_string()).is_ok());
+        direct_choice["outbounds"][1]["outbounds"] = json!(["Fixture Alpha", "Tono-China-Direct"]);
+        assert!(admit_owned_runtime(&direct_choice.to_string()).is_err());
+
+        let mut renamed = compiled();
+        renamed["outbounds"][1] = json!({"type":"direct","tag":"Tono-Exit"});
+        assert!(admit_owned_runtime(&renamed.to_string()).is_err());
+
+        let mut doh = compiled();
+        doh["dns"]["servers"][1]["detour"] = json!("Tono-China-Direct");
+        assert!(admit_owned_runtime(&doh.to_string()).is_err());
     }
 }
