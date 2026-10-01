@@ -159,6 +159,12 @@ beforeEach(() => {
   ]
 })
 
+it('renders a constructor.exe connection without using inherited process families', () => {
+  connectionDataMock.activeConnections = [connection('constructor')]
+  render(<ActivityPage />)
+  expect(screen.getByText('constructor.exe')).toBeTruthy()
+})
+
 afterEach(cleanup)
 
 describe('Activity connection presentation', () => {
