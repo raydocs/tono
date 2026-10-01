@@ -325,6 +325,15 @@ final class AppState {
     /// interface index; tests substitute the syscall so a single monitor tick
     /// can be driven without the privileged helper.
     var tunInterfaceExists: (String) -> Bool = { KillSwitchService.interfaceExists($0) }
+    /// Health-tick traffic race. Production probes the real origins. Tests
+    /// return a won race so one tick can reach the healthy branch without TLS.
+    @ObservationIgnored
+    var raceHealthTrafficProbes: @MainActor (Int, String?) async -> OriginRace = { timeout, preferred in
+        await ProtectedConnectivityVerifier.raceSystemTUNProbes(
+            timeoutSeconds: timeout,
+            preferredLabel: preferred
+        )
+    }
     /// The account's say over Connect (#582), given the catalog digest and
     /// routing token Connect would dial: nil lets it proceed, a message
     /// refuses it. The app installs the account session's offline grant gate;
