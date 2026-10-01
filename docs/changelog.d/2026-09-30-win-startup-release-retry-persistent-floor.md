@@ -1,0 +1,12 @@
+## 2026-09-30 · Windows 启动清理失败自动重试，意图底座放行规则随重启保留
+- 归属：SHIP_PLAN §2 item 10（不断网最高规则，P0 断网路径）；Windows Service `windows_kill_switch.rs`、`wfp_model.rs`，发现 WIN-STARTUP-RELEASE-RETRY、WIN-FLOOR-PERMITS-PERSIST、WIN-MARK-VERIFIED-POISON。
+- 来源：基线 `5d46b896` → 分支 `codex/win-startup-release-retry`（本分支 PR），未合 main。GLM-5.3 发现，Codex gpt-6.1-sol（effort max）实现，审阅后提交。
+- 缺陷修复：
+  - 启动时读到 `wanted: false` 墓碑而 `remove_all_filters_unlocked` 瞬时失败，原来只返回错误（`service.rs` 只记日志），`ARMED` 为空、看门狗不管，持久 block-all 留着，机器一直断网而 status 报保护关闭。现在失败时把「release pending」写入 `last_error` 并启动一个后台重试（1 s 起倍增，封顶 30 s，直到成功）；每次持 `WFP_OPERATION`，若已有新会话 armed 或磁盘意图变成可读 `wanted: true` 则让位退出；成功后按启动分支同样清 legacy 子层、删墓碑、清 `ARMED`/隧道标记并做有界 DNS 恢复，清掉 pending 错误。
+  - 只有 block-all 是 PERSISTENT，回环/DHCP/NDP 放行不是；Service 起不来的重启后机器没有 DHCP 和回环。现在整个意图底座（回环地址/ALE 进出、DHCPv4/v6 及回包、NDP 进出）都持久，会话规则仍非持久。`FILTER_NAMESPACE` 按约定升到 v12（`…9e0b…`），让已装旧键的机器被整套替换。
+  - `mark_verified` 用 `ARMED.lock().unwrap()`，任何一次 panic 后 IPC 处理会跟着 panic；改用 `armed_guard()`。
+- 新增/优化：无。卸载程序关于「只有 block 过滤器持久」的提示和注释、`apps/windows/README.md` 同步为新规则（重启仍不会解除拦截）。
+- 工程与测试：新增 `unwanted_startup_removal_failure_retries_until_residual_filters_are_gone`、`mark_verified_recovers_a_poisoned_armed_lock`；`only_floor_blocks_are_persistent` 按新规则换成更严格的 `exactly_the_intent_floor_is_persistent_in_every_mode`（三种模式下持久集合恰好等于底座，其余全非持久）；命名空间钉子测试随 v12 移动。测试用的假引擎加了移除失败注入与残留键记录（仅 `cfg(test)`）。
+- 验证：Linux box，rustc 1.98.1，`cargo test --offline --locked --features standalone,client,test --lib` 340 passed / 0 failed（基线 338）。集成测试在 Linux 上本来就有约 28 个环境性失败，改前改后失败集合只是抖动、无新增。`cargo fmt`/clippy 的既有漂移与改动行无交集。Windows 原生 WFP、重启和 BFE 未验证。
+- 候选/发布：仅源码，无新候选。
+- 剩余限制：需真机（静杰批次）验证重启后回环/DHCP 和重试释放。重试是新函数，#740 合入后其 `reconnect_after_release` 墓碑保留规则不会自动用于重试路径，需要其中一个 PR 后合时对齐。

@@ -281,7 +281,6 @@ pub(super) async fn spawn_control_plane_pin_refresh(
         let mut wechat_interval = tokio::time::interval(WECHAT_PATH_REFRESH_INTERVAL);
         wechat_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         let mut skip_first_wechat = true;
-        let mut watching_wechat = true;
         let mut browser_dns_interval = tokio::time::interval_at(
             tokio::time::Instant::now() + BROWSER_DNS_RECHECK_INTERVAL,
             BROWSER_DNS_RECHECK_INTERVAL,
@@ -331,20 +330,22 @@ pub(super) async fn spawn_control_plane_pin_refresh(
                         }
                     }
                 }
-                _ = wechat_interval.tick(), if watching_wechat => {
+                _ = wechat_interval.tick() => {
                     if skip_first_wechat {
                         skip_first_wechat = false;
                         continue;
                     }
                     if signed_wechat_paths_require_reconnect(&task_state, generation).await {
-                        if !connection_loop_continues(handle_network_change(&task_state, &task_app).await) {
+                        // Only a real protected reconnect re-applies the signed path set, so
+                        // in-place recovery is not allowed here: a healthy TUN would otherwise
+                        // keep the old paths for the whole session. Without in-place recovery
+                        // the outcome is always Handled, and the new generation's task takes
+                        // over watching.
+                        if !connection_loop_continues(
+                            handle_network_change_inner(&task_state, &task_app, false).await,
+                        ) {
                             return;
                         }
-                        // Recovered in place: no reconnect ran, so the applied path set cannot
-                        // change for the rest of this session and this leg would report the same
-                        // difference every two minutes. Retire the leg, not the task — the pin
-                        // refresh and the direct sampling keep running.
-                        watching_wechat = false;
                     }
                 }
             }

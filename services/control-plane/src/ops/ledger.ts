@@ -79,7 +79,9 @@ const SNAPSHOT_MAX_BYTES = 65_536;
 const PARTIAL_SNAPSHOT = JSON.stringify({ customers: [], nodes: [], partial: true });
 
 export function encodeMonthSnapshot(summary: MonthSummaryDto): string {
-  const json = JSON.stringify({ customers: summary.customers, nodes: summary.nodes });
+  const json = JSON.stringify({
+    customers: summary.customers, nodes: summary.nodes, reconciliation: summary.reconciliation,
+  });
   return new TextEncoder().encode(json).length > SNAPSHOT_MAX_BYTES ? PARTIAL_SNAPSHOT : json;
 }
 
