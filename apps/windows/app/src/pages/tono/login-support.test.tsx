@@ -92,7 +92,7 @@ describe('login support diagnostics', () => {
       email: 'person@example.com',
     })
     expect(screen.getByRole('alert').textContent).toBe(
-      enTono.login.errors.unreachable,
+      `${enTono.login.errors.unreachable} (TONO_AUTH_UNREACHABLE)`,
     )
     expect(await copyForSupport()).toBe(
       `${supportHeader}\nAuth stage: send-code\nError code: TONO_AUTH_UNREACHABLE\nTransport: pinned=connect, system-dns=timeout`,
@@ -117,7 +117,7 @@ describe('login support diagnostics', () => {
       code: '654321',
     })
     expect(screen.getByRole('alert').textContent).toBe(
-      enTono.login.errors.clockSkew,
+      `${enTono.login.errors.clockSkew} (TONO_CLOCK_SKEW)`,
     )
     expect(await copyForSupport()).toBe(
       `${supportHeader}\nAuth stage: verify-code\nError code: TONO_CLOCK_SKEW\nTransport: tls`,

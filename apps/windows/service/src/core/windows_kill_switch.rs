@@ -3,7 +3,8 @@
 //! Layering mirrors `macos_kill_switch.rs`: this module owns the state machine, the persisted
 //! intent record (`kill-switch.json`, normally written atomically before widening WFP; the
 //! DIRECT retraction narrows live WFP first), the
-//! verify-after-write watchdog, startup recovery ("corrupt intent = armed"), and the emergency
+//! verify-after-write watchdog, startup recovery (corrupt or unhealthy state releases
+//! general traffic unless the user explicitly enabled the strict kill switch), and the emergency
 //! disarm. The rule set itself comes from the pure model (`wfp_model.rs`); the `Fwpm*` FFI is
 //! confined to `wfp.rs` and compiled only on Windows, so everything here builds and is
 //! unit-exercised on any host — off Windows every mutating entry point refuses with
@@ -89,6 +90,11 @@ struct IntentRecord {
     /// any authenticated owner (see `authorize_write_for`).
     #[serde(default)]
     owner_key: Option<String>,
+    /// Explicit strict kill switch. Missing or false means a crash, hang, or corrupt record
+    /// releases general traffic. Only `true` keeps a block, and a bounded unhealthy streak
+    /// still releases so that choice cannot brick the machine.
+    #[serde(default)]
+    strict_kill_switch: bool,
 }
 
 impl IntentRecord {
@@ -231,10 +237,11 @@ const DIRECT_COMMITTED_LEASE: std::time::Duration = std::time::Duration::from_se
 static RESTORE_WAS_LOCKED: AtomicBool = AtomicBool::new(false);
 /// Startup recovery published a *verified* intent carried over from before this Service start,
 /// and no WFP install or live verify has proved its filters in this process yet (TW-R-boot).
-/// A failed startup install keeps that intent published — fail-closed, the watchdog retries —
-/// while the machine is open, so `verified` alone no longer proves a live barrier and the
-/// Remote Desktop exception (`connect_session_refused`) must wait. Cleared by the first
-/// successful install or verify.
+/// A failed startup install keeps that intent published while the machine is open, so
+/// `verified` alone no longer proves a live barrier and the Remote Desktop exception
+/// (`connect_session_refused`) must wait. The watchdog releases general traffic unless this
+/// record explicitly enabled the strict kill switch. Cleared by the first successful install
+/// or verify.
 static RESTORED_BARRIER_UNPROVEN: AtomicBool = AtomicBool::new(false);
 /// The watchdog's latest verify-by-key result. `/kill-switch/status` reuses it instead of
 /// running a full WFP RPC sweep per request.
@@ -338,6 +345,95 @@ fn armed_guard() -> std::sync::MutexGuard<'static, Option<Armed>> {
         .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
+static STARTUP_RELEASE_RETRY_RUNNING: AtomicBool = AtomicBool::new(false);
+#[cfg(test)]
+static TEST_REMOVE_FAILURE: AtomicBool = AtomicBool::new(false);
+#[cfg(test)]
+static TEST_REMOVE_ATTEMPTS: AtomicU64 = AtomicU64::new(0);
+#[cfg(test)]
+static TEST_RESIDUAL_FILTER_KEYS: Lazy<Mutex<Vec<wfp_model::Guid>>> =
+    Lazy::new(|| Mutex::new(Vec::new()));
+
+fn spawn_startup_release_retry() {
+    if STARTUP_RELEASE_RETRY_RUNNING.swap(true, Ordering::AcqRel) {
+        return;
+    }
+    struct RetryRunningGuard;
+    impl Drop for RetryRunningGuard {
+        fn drop(&mut self) {
+            STARTUP_RELEASE_RETRY_RUNNING.store(false, Ordering::Release);
+        }
+    }
+    let running = RetryRunningGuard;
+    tokio::spawn(async move {
+        let mut delay = std::time::Duration::from_millis(if cfg!(test) { 10 } else { 1000 });
+        let mut last_error_log: Option<std::time::Instant> = None;
+        loop {
+            tokio::time::sleep(delay).await;
+            let _operation = WFP_OPERATION.lock().await;
+            if armed_guard().is_some() {
+                drop(running);
+                return;
+            }
+            let new_session_wanted = tokio::fs::read(intent_path())
+                .await
+                .ok()
+                .and_then(|bytes| serde_json::from_slice::<IntentRecord>(&bytes).ok())
+                .is_some_and(|intent| intent.wanted);
+            if new_session_wanted {
+                drop(running);
+                return;
+            }
+            let release: Result<()> = async {
+                remove_all_filters_unlocked().await?;
+                sweep_legacy_sublayers_unlocked().await;
+                match tokio::fs::remove_file(intent_path()).await {
+                    Ok(()) => {}
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(error) => return Err(error.into()),
+                }
+                *armed_guard() = None;
+                TUNNEL_PERMIT_RENDERED.store(false, Ordering::Relaxed);
+                if let Err(error) = bounded_dns_call(
+                    "service start (unwanted intent)",
+                    crate::core::dns::ensure_restored(),
+                )
+                .await
+                {
+                    tracing::warn!(
+                        "service start: leftover DNS snapshot could not be restored: {error:#}"
+                    );
+                }
+                Ok(())
+            }
+            .await;
+            match release {
+                Ok(()) => {
+                    *last_error_guard() = None;
+                    // Retire under the writer lock so a later startup cannot lose its retry.
+                    drop(running);
+                    return;
+                }
+                Err(error) => {
+                    *last_error_guard() =
+                        Some(format!("startup stale-filter release pending: {error:#}"));
+                    if last_error_log
+                        .is_none_or(|at| at.elapsed() >= std::time::Duration::from_secs(60))
+                    {
+                        tracing::error!("Windows stale-filter release retry failed: {error:#}");
+                        last_error_log = Some(std::time::Instant::now());
+                    } else {
+                        tracing::debug!(
+                            "Windows stale-filter release retry still failing: {error:#}"
+                        );
+                    }
+                }
+            }
+            delay = (delay * 2).min(std::time::Duration::from_secs(30));
+        }
+    });
+}
+
 /// Return the live tunnel identity that the current core instance is actually permitted to use.
 /// DNS recovery uses this to ignore Tono's own WinTUN adapter while still treating the same
 /// protected resolver on every physical adapter as an orphaned, fail-closed state. Re-validating
@@ -377,6 +473,24 @@ fn intent_path() -> PathBuf {
         .join("kill-switch.json")
 }
 
+/// Independent update recovery has no in-memory armed state. Like startup,
+/// only a readable wanted record with an explicit strict flag keeps it blocked.
+#[cfg(windows)]
+pub fn strict_kill_switch_intent_on_disk() -> bool {
+    std::fs::read(intent_path())
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<IntentRecord>(&bytes).ok())
+        .is_some_and(|intent| intent.wanted && intent.strict_kill_switch)
+}
+
+/// Per-write sequence for intent temporaries (BRICK-W11). A shared
+/// `kill-switch.tmp` let a later writer delete or overwrite an earlier
+/// writer's in-flight bytes, and a `replace` that reported a timeout can
+/// still commit afterwards and silently cover a successor's newer intent.
+static INTENT_WRITE_SEQ: AtomicU64 = AtomicU64::new(1);
+#[cfg(test)]
+static TEST_INTENT_VERIFY_CORRUPT: AtomicBool = AtomicBool::new(false);
+
 async fn atomic_write(path: &Path, bytes: &[u8]) -> Result<()> {
     #[cfg(test)]
     {
@@ -387,14 +501,36 @@ async fn atomic_write(path: &Path, bytes: &[u8]) -> Result<()> {
     }
     crate::core::paths::ensure_persistent_state_layout()?;
     crate::core::platform_security::secure_private_service_file_if_exists(path)?;
-    let temporary = path.with_extension("tmp");
-    if std::fs::symlink_metadata(&temporary).is_ok() {
-        std::fs::remove_file(&temporary)?;
-    }
+    // One temporary per write: no writer removes or reuses another's
+    // in-flight file. A timed-out rename's source is left alone rather
+    // than unlinked under it (cf. staging's reclaim rule).
+    let temporary = path.with_extension(format!(
+        "tmp-{}-{}",
+        std::process::id(),
+        INTENT_WRITE_SEQ.fetch_add(1, Ordering::Relaxed)
+    ));
     tokio::fs::write(&temporary, bytes).await?;
     crate::core::platform_security::secure_private_service_file_if_exists(&temporary)?;
-    crate::core::atomic_file::replace(&temporary, path).await?;
+    crate::core::atomic_file::replace(&temporary, path)
+        .await
+        .with_context(|| format!("failed to move state into {path:?}"))?;
     crate::core::platform_security::secure_private_service_file_if_exists(path)?;
+    #[cfg(test)]
+    if TEST_INTENT_VERIFY_CORRUPT.swap(false, Ordering::Relaxed) {
+        // Deterministic stand-in for a stale rename landing between the
+        // replace above and the read-back below.
+        std::fs::write(path, b"stale-intent")?;
+    }
+    // A stale commit that landed before this read is a loud error the
+    // caller already treats as "not proven" — never a quiet older intent.
+    // (A rename landing after this read is still uncovered; it needs the
+    // kernel rename to stall past a whole successor write. See BRICK-W11.)
+    let committed = tokio::fs::read(path)
+        .await
+        .with_context(|| format!("failed to verify state at {path:?}"))?;
+    if committed != bytes {
+        anyhow::bail!("intent write did not commit: destination differs after replace");
+    }
     Ok(())
 }
 
@@ -426,6 +562,7 @@ fn disarmed_tombstone() -> IntentRecord {
         api_host_ips: Vec::new(),
         updated_at: now_unix(),
         owner_key: None,
+        strict_kill_switch: false,
     }
 }
 
@@ -943,6 +1080,8 @@ async fn install_unlocked(armed: &Armed) -> Result<()> {
 /// from *that* read — see [`rule_config_rendering`]. `lock` is the only such caller, and it is
 /// the one where a second, disagreeing read is terminal.
 async fn install_unlocked_for(armed: &Armed, current_core: Option<CoreInstance>) -> Result<()> {
+    // A new arm must not leave crash-time AI names pointed at the sinkhole.
+    crate::core::selective_layer::remove().await;
     let config = rule_config_rendering(armed, current_core);
     let tunnel_permit_expected = config.tun_luid.is_some();
     let expected = wfp_model::expected_filters(&config);
@@ -1034,6 +1173,17 @@ async fn remove_all_filters_unlocked() -> Result<()> {
     }
     #[cfg(not(all(windows, not(feature = "test"))))]
     {
+        #[cfg(test)]
+        {
+            TEST_REMOVE_ATTEMPTS.fetch_add(1, Ordering::Relaxed);
+            if TEST_REMOVE_FAILURE.load(Ordering::Relaxed) {
+                bail!("simulated WFP removal failure");
+            }
+            TEST_RESIDUAL_FILTER_KEYS
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .clear();
+        }
         Ok(())
     }
 }
@@ -1194,6 +1344,7 @@ pub(crate) async fn arm_bootstrap(
             api_host_ips: api_host_ips.iter().map(ToString::to_string).collect(),
             updated_at: now_unix(),
             owner_key: Some(owner_key.to_owned()),
+            strict_kill_switch: false,
         },
         tun_luid: None,
         core_instance: None,
@@ -1213,11 +1364,7 @@ pub(crate) async fn arm_bootstrap(
 pub(crate) async fn mark_verified(owner_key: &str) -> Result<()> {
     ensure_supported()?;
     let _operation = WFP_OPERATION.lock().await;
-    let mut armed = ARMED
-        .lock()
-        .unwrap()
-        .clone()
-        .context("kill switch is not armed")?;
+    let mut armed = armed_guard().clone().context("kill switch is not armed")?;
     if armed.intent.owner_key.as_deref() != Some(owner_key) {
         bail!("kill switch belongs to a different owner");
     }
@@ -1668,9 +1815,9 @@ pub(crate) async fn lock(tunnel_interface: Option<&str>) -> Result<()> {
 /// Perform the tunnel lock while [`WFP_OPERATION`] is held. Once an install succeeds, publish its
 /// candidate immediately so every later error can reconcile the set that may actually be live.
 async fn lock_unlocked(tunnel_interface: Option<&str>) -> Result<()> {
-    let mut armed = ARMED
-        .lock()
-        .unwrap()
+    // Same poison contract as every other mutation: a prior panic while `ARMED` was held must
+    // not make the next tunnel lock panic the IPC task. `mark_verified` is the sibling path.
+    let mut armed = armed_guard()
         .clone()
         .context("kill switch is not armed")?;
     let recorded = armed.intent.tunnel_interface.clone();
@@ -2325,9 +2472,10 @@ pub(crate) async fn restrict_bootstrap() -> Result<()> {
 /// the DNS proof. Callers treat the timeout exactly like any other unprovable restore, so on the
 /// disarm/release path the filters stay installed and the barrier stays armed — a timeout can
 /// never open the network while DNS may still point at a dead loopback resolver. Cancelling the
-/// restore (the timeout drops the future) is safe for the same reason: `restore_protected`
-/// deletes its snapshot only *after* the restore is proven, so a cancelled attempt leaves the
-/// evidence — and the block — exactly where a failed attempt would, ready for the next retry.
+/// restore (the timeout drops the future) leaves the snapshot in place, because
+/// `restore_protected` deletes it only *after* the restore is proven. The abandoned registry
+/// write keeps its own self-write window until that write returns, so the notification is not
+/// published as a network change.
 async fn bounded_dns_call<T>(
     operation: &str,
     call: impl std::future::Future<Output = Result<T>>,
@@ -2361,7 +2509,7 @@ async fn bounded_dns_call_within<T>(
 }
 
 /// Normal release — only on explicit user request. See the DNS-before-disarm invariant.
-async fn disarm_unlocked() -> Result<()> {
+async fn disarm_unlocked(apply_narrow: bool) -> Result<()> {
     let previous = armed_guard().clone();
     let Some(previous) = previous else {
         // Not armed: still sweep possible residuals so a half-failed earlier run cannot
@@ -2382,6 +2530,9 @@ async fn disarm_unlocked() -> Result<()> {
                 "leftover DNS snapshot could not be restored: {error:#}"
             ));
         }
+        // Filters are already gone. The secondary layer must not be able to
+        // fail this release or put a general block back.
+        crate::core::selective_layer::finish_release(apply_narrow).await;
         return Ok(());
     };
     // DNS-before-disarm invariant (identical to the macOS helper): the network may open only
@@ -2421,6 +2572,7 @@ async fn disarm_unlocked() -> Result<()> {
     *armed_guard() = None;
     *last_error_guard() = None;
     TUNNEL_PERMIT_RENDERED.store(false, Ordering::Relaxed);
+    crate::core::selective_layer::finish_release(apply_narrow).await;
     Ok(())
 }
 
@@ -2430,10 +2582,20 @@ async fn disarm_unlocked() -> Result<()> {
 /// and the block stays armed.
 #[cfg_attr(not(windows), allow(dead_code))] // the route helper is cfg(windows); tests use it
 pub(crate) async fn release() -> Result<KillSwitchStatus> {
+    release_with(false).await
+}
+
+/// Same full release as [`release`], then the secondary AI hold. Restore and
+/// disconnect use [`release`] and do not pass true.
+pub(crate) async fn release_applying_narrow() -> Result<KillSwitchStatus> {
+    release_with(true).await
+}
+
+async fn release_with(apply_narrow: bool) -> Result<KillSwitchStatus> {
     ensure_supported()?;
     {
         let _operation = WFP_OPERATION.lock().await;
-        disarm_unlocked().await?;
+        disarm_unlocked(apply_narrow).await?;
         note_explicit_release();
     }
     Ok(status().await)
@@ -2450,15 +2612,105 @@ pub(crate) async fn transition_after_stop(release_requested: bool) -> Result<()>
         return Ok(());
     }
     if release_requested {
-        return disarm_unlocked().await;
+        return disarm_unlocked(false).await;
     }
     restrict_bootstrap_unlocked().await
 }
 
-/// The ownerless emergency block ("damaged/unknown state = armed"): strict Blocked, no app
-/// or endpoint permits, marked verified so startup recovery never retires it as stale. The
-/// missing `owner_key` is the documented escape hatch — any authenticated owner may release
-/// it (see `authorize_write_for`).
+#[cfg(windows)]
+pub(crate) fn strict_kill_switch_enabled() -> bool {
+    armed_guard()
+        .as_ref()
+        .is_some_and(|armed| armed.intent.strict_kill_switch)
+}
+
+/// Crash, hang, and unreadable state release general traffic unless the user explicitly
+/// enabled the strict kill switch. A missing flag is not that opt-in.
+fn crash_recovery_releases_network(strict_kill_switch_enabled: bool) -> bool {
+    !strict_kill_switch_enabled
+}
+
+/// Non-strict unhealthy ticks wait, then release. They do not reinstall a block.
+const UNHEALTHY_RELEASE_TICKS: u32 = 3;
+/// Strict mode keeps repairing, then releases so a wedged engine cannot stay closed forever.
+const STRICT_UNHEALTHY_RELEASE_TICKS: u32 = 30;
+
+#[cfg_attr(not(windows), allow(dead_code))]
+fn release_on_service_stop(strict_kill_switch_enabled: bool, lifecycle_owned: bool) -> bool {
+    !strict_kill_switch_enabled && !lifecycle_owned
+}
+
+/// Called under the owner lifecycle and repair gates; an update/installer stop must leave the
+/// recorded protection for its successor. Ordinary SCM Stop releases unless strict is on.
+#[cfg(windows)]
+pub(crate) fn service_stop_release_allowed(lifecycle_owned: bool) -> bool {
+    release_on_service_stop(strict_kill_switch_enabled(), lifecycle_owned)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum UnhealthyWatchdogAction {
+    Wait,
+    Reinstall,
+    Release,
+}
+
+fn unhealthy_watchdog_action(
+    strict_kill_switch_enabled: bool,
+    consecutive_unhealthy: u32,
+) -> UnhealthyWatchdogAction {
+    if consecutive_unhealthy == 0 {
+        return UnhealthyWatchdogAction::Wait;
+    }
+    if crash_recovery_releases_network(strict_kill_switch_enabled) {
+        if consecutive_unhealthy >= UNHEALTHY_RELEASE_TICKS {
+            UnhealthyWatchdogAction::Release
+        } else {
+            UnhealthyWatchdogAction::Wait
+        }
+    } else if consecutive_unhealthy >= STRICT_UNHEALTHY_RELEASE_TICKS {
+        UnhealthyWatchdogAction::Release
+    } else {
+        UnhealthyWatchdogAction::Reinstall
+    }
+}
+
+/// Remove provider-scoped WFP and restore DNS. DNS failure does not keep the block.
+/// The caller decides whether the on-disk intent bytes stay (corrupt evidence) or are
+/// replaced by a disarmed tombstone (a live session the watchdog gave up on).
+async fn release_general_traffic_unlocked(reason: &str) -> Result<()> {
+    tracing::warn!("wfp: {reason}; releasing general traffic and restoring DNS");
+    if let Err(error) = bounded_dns_call(reason, crate::core::dns::ensure_restored()).await {
+        tracing::warn!("wfp: DNS restore during {reason} failed; still releasing WFP: {error:#}");
+        *last_error_guard() = Some(format!("{error:#}"));
+    } else {
+        *last_error_guard() = None;
+    }
+    if let Err(error) = remove_all_filters_unlocked().await {
+        let message =
+            format!("wfp: {reason}; WFP removal failed after deciding to release: {error:#}");
+        *last_error_guard() = Some(message.clone());
+        return Err(error.context(message));
+    }
+    sweep_legacy_sublayers_unlocked().await;
+    *armed_guard() = None;
+    TUNNEL_PERMIT_RENDERED.store(false, Ordering::Relaxed);
+    RESTORED_BARRIER_UNPROVEN.store(false, Ordering::Release);
+    note_verify(false);
+    Ok(())
+}
+
+async fn release_unhealthy_session_unlocked(reason: &str) -> Result<()> {
+    release_general_traffic_unlocked(reason).await?;
+    if let Err(error) = persist_disarmed_tombstone().await {
+        tracing::warn!(
+            "wfp: general traffic was released but the disarmed record could not be written: {error:#}"
+        );
+    }
+    Ok(())
+}
+
+/// Ownerless block used only when the on-disk record explicitly enabled the strict kill
+/// switch and its details are unusable. Any authenticated owner may still release it.
 fn emergency_armed() -> Armed {
     Armed {
         intent: IntentRecord {
@@ -2471,6 +2723,7 @@ fn emergency_armed() -> Armed {
             api_host_ips: Vec::new(),
             updated_at: now_unix(),
             owner_key: None,
+            strict_kill_switch: true,
         },
         tun_luid: None,
         core_instance: None,
@@ -2578,21 +2831,27 @@ pub async fn restore_on_service_start() -> Result<()> {
                 }
                 reconciled
             }
-            // `wanted == false` is the *only* parseable record that may disarm the machine. The
-            // guard above rejects a record for several reasons besides that one — an empty
-            // interface, no endpoints, an endpoint the model no longer parses after a
-            // validation tightening — and every one of those is a `wanted: true` intent whose
-            // details went stale, never a request to open the network. Testing `wanted`
-            // explicitly here keeps that case on the fail-closed side with the corrupt and
-            // unreadable records below.
+            // `wanted == false` still disarms. A wanted record that no longer validates is not
+            // an explicit strict kill switch unless `strict_kill_switch` is true. Corrupt and
+            // unreadable bytes cannot prove that opt-in, so those paths release as well.
             Ok(intent) if !intent.wanted => {
                 // Unwanted-but-parseable, with possible residual objects: clean up, exactly the
                 // design's third recovery rule. A leftover DNS snapshot (e.g. from an emergency
                 // disarm whose restore could not be proven) is swept here too — protection is
                 // off, so the machine must not stay on loopback DNS.
+                //
+                // The secondary AI hold is not removed here. A crash release writes this same
+                // wanted:false record and the hold is meant to survive until Restore, arm, or
+                // emergency disarm. Those rules name only the allowlisted suffixes and the two
+                // Anthropic prefixes, so leaving them cannot block general traffic.
                 // `remove_all_filters` is provider-scoped, so filters in legacy sublayers go
                 // with it; the sweep afterwards only clears the emptied sublayer objects.
-                remove_all_filters_unlocked().await?;
+                if let Err(error) = remove_all_filters_unlocked().await {
+                    *last_error_guard() =
+                        Some(format!("startup stale-filter release pending: {error:#}"));
+                    spawn_startup_release_retry();
+                    return Err(error);
+                }
                 sweep_legacy_sublayers_unlocked().await;
                 match tokio::fs::remove_file(intent_path()).await {
                     Ok(()) => {}
@@ -2613,15 +2872,19 @@ pub async fn restore_on_service_start() -> Result<()> {
                 }
                 Ok(())
             }
-            Ok(_) => {
-                // A `wanted: true` record that no longer validates: the intent to stay blocked
-                // is intact, only its details are unusable. Treat it exactly like a corrupt
-                // record — emergency block, file left on disk as evidence — rather than
-                // disarming a machine that asked to stay closed.
+            Ok(intent) => {
+                // Details are unusable. Keep the file. Install a block only when this record
+                // itself says the strict kill switch is on.
+                if crash_recovery_releases_network(intent.strict_kill_switch) {
+                    tracing::warn!(
+                        "unusable kill-switch intent; releasing general traffic and keeping the file"
+                    );
+                    return release_general_traffic_unlocked("unusable kill-switch intent").await;
+                }
                 let emergency = emergency_armed();
                 *armed_guard() = Some(emergency.clone());
                 let installed = install_unlocked(&emergency).await.context(
-                    "unusable wanted kill-switch intent: failed to install emergency block",
+                    "unusable strict kill-switch intent: failed to install emergency block",
                 );
                 if installed.is_ok() {
                     sweep_legacy_sublayers_unlocked().await;
@@ -2629,36 +2892,25 @@ pub async fn restore_on_service_start() -> Result<()> {
                 installed
             }
             Err(_) => {
-                // Corrupt intent = wanted (fail-closed), exactly the macOS helper's "damaged
-                // state file ⇒ install emergency block". The corrupt file is left on disk as
-                // evidence; the in-memory intent below is what the watchdog reconciles.
-                let emergency = emergency_armed();
-                *armed_guard() = Some(emergency.clone());
-                let installed = install_unlocked(&emergency)
-                    .await
-                    .context("corrupt kill-switch intent: failed to install emergency block");
-                if installed.is_ok() {
-                    sweep_legacy_sublayers_unlocked().await;
-                }
-                installed
+                // The bytes do not parse, so they cannot prove an explicit strict opt-in.
+                // Leave them on disk and release general traffic.
+                tracing::warn!(
+                    "corrupt kill-switch intent; releasing general traffic and keeping the file"
+                );
+                release_general_traffic_unlocked("corrupt kill-switch intent").await
             }
         },
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            // Missing intent but residual objects exist → treat as wanted (fail-closed).
+            // No record can name an explicit strict kill switch. Residual filters are released.
             #[cfg(all(windows, not(feature = "test")))]
             if engine_call("residual filter check", crate::core::wfp::any_filters_exist)
                 .await
                 .unwrap_or(true)
             {
-                let emergency = emergency_armed();
-                *armed_guard() = Some(emergency.clone());
-                let installed = install_unlocked(&emergency)
-                    .await
-                    .context("missing intent with residual WFP objects: failed to reinstall block");
-                if installed.is_ok() {
-                    sweep_legacy_sublayers_unlocked().await;
-                }
-                return installed;
+                return release_general_traffic_unlocked(
+                    "residual WFP without a kill-switch intent",
+                )
+                .await;
             }
             // Not armed and no filters anywhere (the residual check is provider-scoped, legacy
             // sublayers included): sweeping empty leftover sublayer objects cannot remove
@@ -2679,21 +2931,12 @@ pub async fn restore_on_service_start() -> Result<()> {
             Ok(())
         }
         Err(error) => {
-            // The file may exist but be unreadable (ACL damage, transient I/O). Returning the
-            // error would leave `ARMED` empty and the watchdog idle — fully open even though a
-            // wanted intent may sit on disk. Treat it like the corrupt case above: fail closed
-            // with the emergency block. A clean NotFound never reaches here, so a fresh
-            // install stays a no-op.
-            tracing::warn!("kill-switch intent could not be read: {error:#}");
-            let emergency = emergency_armed();
-            *armed_guard() = Some(emergency.clone());
-            let installed = install_unlocked(&emergency)
-                .await
-                .context("unreadable kill-switch intent: failed to install emergency block");
-            if installed.is_ok() {
-                sweep_legacy_sublayers_unlocked().await;
-            }
-            installed
+            // Unreadable (ACL damage, a directory, transient I/O) cannot prove a strict
+            // opt-in. Release general traffic. A clean NotFound never reaches here.
+            tracing::warn!(
+                "kill-switch intent could not be read: {error:#}; releasing general traffic"
+            );
+            release_general_traffic_unlocked("unreadable kill-switch intent").await
         }
     }
 }
@@ -2702,9 +2945,9 @@ pub async fn restore_on_service_start() -> Result<()> {
 ///
 /// State files are not the source of truth for persistent WFP objects: an interrupted or older
 /// uninstall can leave provider-scoped filters behind after deleting `kill-switch.json` and the
-/// SCM record. The next Service start deliberately treats that combination as armed. Therefore
-/// an uninstaller may only skip the real disarm when this probe also proves that no Tono filter
-/// exists.
+/// SCM record. Service start releases that combination unless a readable record explicitly
+/// enabled the strict kill switch. An uninstaller may still skip the real disarm only when
+/// this probe also proves that no Tono filter exists.
 ///
 /// **Provider-absent is not an error:** `FwpmProviderGetByKey0` returning `0x80320005`
 /// (`FWP_E_PROVIDER_NOT_FOUND`) means there is no Tono provider and therefore no residual
@@ -2740,8 +2983,8 @@ pub async fn residual_filters_present() -> Result<bool> {
 /// tombstone a fixed release leaves so startup removes late-visible WFP debris instead of
 /// converting it into an ownerless emergency block.
 ///
-/// Corrupt wanted-state evidence stays fail-closed. It is intentionally not "repaired" into an
-/// open marker merely because an installer is running.
+/// Corrupt intent bytes are left untouched here. They are not an explicit strict opt-in;
+/// the next Service start releases general traffic and keeps the file.
 pub async fn prepare_for_service_replacement() -> Result<bool> {
     ensure_supported()?;
 
@@ -2833,7 +3076,7 @@ pub async fn retire_unverified_on_service_start() -> Result<bool> {
                 .await
                 .context("failed to retire active owner paired with legacy unowned protection")?;
         }
-        disarm_unlocked().await
+        disarm_unlocked(false).await
     }
     .await;
 
@@ -2904,10 +3147,11 @@ fn direct_reload_invalidation_reason(
     None
 }
 
-/// One-second verify-after-write watchdog (the macOS helper does the same for PF): any
-/// mismatch reinstalls the full expected set transactionally. Persistent failures are
-/// log-throttled — one error per minute, the rest at debug — so a broken engine cannot
-/// flood the service log.
+/// One-second verify-after-write watchdog. A healthy tick does nothing. An unhealthy tick
+/// does not reinstall unless the armed record explicitly enabled the strict kill switch.
+/// Without that opt-in, general traffic is released after [`UNHEALTHY_RELEASE_TICKS`].
+/// Strict mode repairs until [`STRICT_UNHEALTHY_RELEASE_TICKS`], then releases too.
+/// Persistent failures are log-throttled — one error per minute, the rest at debug.
 pub fn spawn_windows_kill_switch_watchdog() {
     /// One error line per minute; the rest at debug.
     const ERROR_LOG_INTERVAL: std::time::Duration = std::time::Duration::from_secs(60);
@@ -2919,6 +3163,7 @@ pub fn spawn_windows_kill_switch_watchdog() {
         // the verify-after-write reconciliation and the `LAST_VERIFY` refresh that `status()`
         // reports liveness from.
         let mut last_error_log: Option<std::time::Instant> = None;
+        let mut consecutive_unhealthy: u32 = 0;
         loop {
             tokio::time::sleep(WATCHDOG_PERIOD).await;
             let _operation = WFP_OPERATION.lock().await;
@@ -2970,6 +3215,7 @@ pub fn spawn_windows_kill_switch_watchdog() {
                             }
                         }
                     }
+                    consecutive_unhealthy = 0;
                     continue;
                 }
                 let healthy = if ENGINE_LIVE {
@@ -2979,17 +3225,53 @@ pub fn spawn_windows_kill_switch_watchdog() {
                 } else {
                     true
                 };
-                if !healthy && let Err(error) = install_unlocked_for(&armed, current_core).await {
-                    *last_error_guard() = Some(format!("{error:#}"));
-                    if last_error_log.is_none_or(|at| at.elapsed() >= ERROR_LOG_INTERVAL) {
-                        tracing::error!("Windows kill-switch reconciliation failed: {error:#}");
-                        last_error_log = Some(std::time::Instant::now());
-                    } else {
+                if healthy {
+                    consecutive_unhealthy = 0;
+                    continue;
+                }
+                consecutive_unhealthy = consecutive_unhealthy.saturating_add(1);
+                match unhealthy_watchdog_action(
+                    armed.intent.strict_kill_switch,
+                    consecutive_unhealthy,
+                ) {
+                    UnhealthyWatchdogAction::Wait => {
                         tracing::debug!(
-                            "Windows kill-switch reconciliation still failing: {error:#}"
+                            "Windows kill-switch unhealthy ({consecutive_unhealthy}); not reinstalling"
                         );
                     }
+                    UnhealthyWatchdogAction::Reinstall => {
+                        if let Err(error) = install_unlocked_for(&armed, current_core).await {
+                            *last_error_guard() = Some(format!("{error:#}"));
+                            if last_error_log.is_none_or(|at| at.elapsed() >= ERROR_LOG_INTERVAL) {
+                                tracing::error!(
+                                    "Windows kill-switch strict reconciliation failed: {error:#}"
+                                );
+                                last_error_log = Some(std::time::Instant::now());
+                            } else {
+                                tracing::debug!(
+                                    "Windows kill-switch strict reconciliation still failing: {error:#}"
+                                );
+                            }
+                        }
+                    }
+                    UnhealthyWatchdogAction::Release => {
+                        if let Err(error) = release_unhealthy_session_unlocked(
+                            "unhealthy Windows kill-switch watchdog",
+                        )
+                        .await
+                        {
+                            if last_error_log.is_none_or(|at| at.elapsed() >= ERROR_LOG_INTERVAL) {
+                                tracing::error!(
+                                    "Windows kill-switch unhealthy release failed: {error:#}"
+                                );
+                                last_error_log = Some(std::time::Instant::now());
+                            }
+                        }
+                        consecutive_unhealthy = 0;
+                    }
                 }
+            } else {
+                consecutive_unhealthy = 0;
             }
         }
     });
@@ -3069,6 +3351,7 @@ pub async fn emergency_disarm_windows_kill_switch() -> Result<()> {
         api_host_ips: Vec::new(),
         updated_at: now_unix(),
         owner_key: None,
+        strict_kill_switch: false,
     });
     tombstone.wanted = false;
     tombstone.updated_at = now_unix();
@@ -3097,6 +3380,9 @@ pub async fn emergency_disarm_windows_kill_switch() -> Result<()> {
     // the product promises. On engine failure the reported state therefore stays "armed".
     #[cfg(all(windows, not(feature = "test")))]
     engine_call("emergency disarm", crate::core::wfp::emergency_disarm).await?;
+    // WFP is gone. Drop the secondary hold too. A failure here must not
+    // report the barrier as still up.
+    crate::core::selective_layer::remove().await;
     *armed_guard() = None;
     *last_verify_guard() = None;
     TUNNEL_PERMIT_RENDERED.store(false, Ordering::Relaxed);
@@ -3256,6 +3542,11 @@ mod tests {
     struct SimulatedStateFailures;
 
     impl SimulatedStateFailures {
+        fn arm_removal() -> Self {
+            TEST_REMOVE_FAILURE.store(true, Ordering::Relaxed);
+            Self
+        }
+
         fn arm(persist: bool, install: bool) -> Self {
             TEST_PERSIST_ATTEMPTS.store(0, Ordering::Relaxed);
             TEST_INSTALL_ATTEMPTS.store(0, Ordering::Relaxed);
@@ -3277,6 +3568,7 @@ mod tests {
 
     impl Drop for SimulatedStateFailures {
         fn drop(&mut self) {
+            TEST_REMOVE_FAILURE.store(false, Ordering::Relaxed);
             TEST_PERSIST_FAILURE.store(false, Ordering::Relaxed);
             TEST_INSTALL_FAILURE.store(false, Ordering::Relaxed);
             TEST_AMBIGUOUS_INSTALL_FAILURE.store(false, Ordering::Relaxed);
@@ -3338,6 +3630,7 @@ mod tests {
             api_host_ips: vec!["1.1.1.1".to_owned()],
             updated_at: 1,
             owner_key: None,
+            strict_kill_switch: false,
         }
     }
 
@@ -3388,6 +3681,44 @@ mod tests {
         Ok(())
     }
 
+    #[tokio::test]
+    #[serial]
+    async fn mark_verified_recovers_a_poisoned_armed_lock() -> Result<()> {
+        cleanup().await;
+        arm_bootstrap(&test_config(), "/opt/tono/mihomo", "owner-alice").await?;
+        crate::core::manager::set_running_core_identity_for_kill_switch_tests(Some((4242, 1)))
+            .await;
+        lock(None).await?;
+
+        struct ClearPoison;
+        impl Drop for ClearPoison {
+            fn drop(&mut self) {
+                ARMED.clear_poison();
+            }
+        }
+        let poison = ClearPoison;
+        assert!(
+            std::thread::spawn(|| {
+                let _armed = ARMED.lock().unwrap();
+                panic!("simulate a panic while holding ARMED");
+            })
+            .join()
+            .is_err()
+        );
+        assert!(ARMED.is_poisoned());
+
+        mark_verified("owner-alice").await?;
+
+        assert!(armed_guard().as_ref().unwrap().intent.is_verified());
+        let persisted: IntentRecord =
+            serde_json::from_slice(&tokio::fs::read(intent_path()).await?)?;
+        assert_eq!(persisted.verified, Some(true));
+        assert_eq!(persisted.owner_key.as_deref(), Some("owner-alice"));
+        drop(poison);
+        cleanup().await;
+        Ok(())
+    }
+
     /// A corrupt snapshot only refuses a restore while the machine is still resolving through
     /// the loopback core; off Windows that answer comes from a test hook, so tests that mean
     /// "restore is unprovable" must say so explicitly.
@@ -3407,9 +3738,13 @@ mod tests {
     }
 
     async fn cleanup() {
+        TEST_REMOVE_FAILURE.store(false, Ordering::Relaxed);
+        TEST_REMOVE_ATTEMPTS.store(0, Ordering::Relaxed);
+        TEST_RESIDUAL_FILTER_KEYS.lock().unwrap().clear();
         TEST_PERSIST_FAILURE.store(false, Ordering::Relaxed);
         TEST_INSTALL_FAILURE.store(false, Ordering::Relaxed);
         TEST_AMBIGUOUS_INSTALL_FAILURE.store(false, Ordering::Relaxed);
+        TEST_INTENT_VERIFY_CORRUPT.store(false, Ordering::Relaxed);
         TEST_PERSIST_ATTEMPTS.store(0, Ordering::Relaxed);
         TEST_INSTALL_ATTEMPTS.store(0, Ordering::Relaxed);
         TEST_OWNER_SIGNED_OUT.store(false, Ordering::Relaxed);
@@ -3598,6 +3933,63 @@ mod tests {
 
     #[tokio::test]
     #[serial]
+    async fn intent_write_isolated_tmps_and_verified_commit() -> Result<()> {
+        cleanup().await;
+        let dir = crate::service_paths()
+            .persistent_state_dir()
+            .join("intent-write-test");
+        tokio::fs::create_dir_all(&dir).await?;
+        let path = dir.join("probe.json");
+
+        // Sequential writes commit exactly what was asked, with no shared
+        // temporary left behind for a later writer to delete or reuse.
+        atomic_write(&path, b"{\"wanted\":true}").await?;
+        atomic_write(&path, b"{\"wanted\":false}").await?;
+        assert_eq!(tokio::fs::read(&path).await?, b"{\"wanted\":false}");
+        let mut entries = tokio::fs::read_dir(&dir).await?;
+        let mut names = Vec::new();
+        while let Some(entry) = entries.next_entry().await? {
+            names.push(entry.file_name().to_string_lossy().into_owned());
+        }
+        assert_eq!(
+            names,
+            vec!["probe.json".to_owned()],
+            "unique tmps must be renamed away; a shared tmp must never exist"
+        );
+
+        // Concurrent writers never tear: the destination always holds one
+        // complete write, and at least the last writer verifies its own
+        // commit (a stale commit landing first is reported, not kept).
+        let (first, second) = tokio::join!(
+            atomic_write(&path, b"first-writer"),
+            atomic_write(&path, b"second-writer")
+        );
+        assert!(
+            first.is_ok() || second.is_ok(),
+            "at least the last writer verifies its own commit"
+        );
+        let committed = tokio::fs::read(&path).await?;
+        assert!(
+            committed.as_slice() == b"first-writer"
+                || committed.as_slice() == b"second-writer",
+            "concurrent intent writes must never tear"
+        );
+
+        // A stale rename landing between replace and read-back is a loud
+        // error, never a quiet older intent.
+        TEST_INTENT_VERIFY_CORRUPT.store(true, Ordering::Relaxed);
+        let error = atomic_write(&path, b"third-writer")
+            .await
+            .expect_err("a stale destination after replace must fail verification");
+        assert!(format!("{error:#}").contains("did not commit"));
+
+        tokio::fs::remove_dir_all(&dir).await?;
+        cleanup().await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
     async fn unverified_startup_intent_stays_blocked_until_core_and_dns_reconcile() -> Result<()> {
         cleanup().await;
         let mut intent = valid_intent(KillSwitchStatusMode::Blocked, true);
@@ -3707,6 +4099,64 @@ mod tests {
             "an unwanted intent record must be removed"
         );
         assert!(!status().await.wanted);
+        cleanup().await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn unwanted_startup_removal_failure_retries_until_residual_filters_are_gone() -> Result<()>
+    {
+        cleanup().await;
+        let mut intent = valid_intent(KillSwitchStatusMode::Blocked, false);
+        intent.endpoints.clear();
+        atomic_write(&intent_path(), &serde_json::to_vec_pretty(&intent)?).await?;
+        let residual = wfp_model::intent_floor()
+            .iter()
+            .map(|filter| filter.key)
+            .collect::<Vec<_>>();
+        *TEST_RESIDUAL_FILTER_KEYS.lock().unwrap() = residual.clone();
+        let failures = SimulatedStateFailures::arm_removal();
+
+        let error = restore_on_service_start()
+            .await
+            .expect_err("the initial WFP removal fails");
+
+        assert!(format!("{error:#}").contains("simulated WFP removal failure"));
+        assert!(armed_guard().is_none());
+        assert!(STARTUP_RELEASE_RETRY_RUNNING.load(Ordering::Acquire));
+        assert!(
+            status()
+                .await
+                .last_error
+                .unwrap()
+                .contains("release pending")
+        );
+        tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            while TEST_REMOVE_ATTEMPTS.load(Ordering::Relaxed) < 2 {
+                tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+            }
+        })
+        .await?;
+        assert_eq!(*TEST_RESIDUAL_FILTER_KEYS.lock().unwrap(), residual);
+        assert_disarmed_tombstone_present().await?;
+        drop(failures);
+
+        tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            while STARTUP_RELEASE_RETRY_RUNNING.load(Ordering::Acquire) {
+                tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+            }
+        })
+        .await?;
+
+        assert!(TEST_RESIDUAL_FILTER_KEYS.lock().unwrap().is_empty());
+        assert_eq!(
+            tokio::fs::metadata(intent_path()).await.unwrap_err().kind(),
+            std::io::ErrorKind::NotFound
+        );
+        assert!(armed_guard().is_none());
+        assert!(!TUNNEL_PERMIT_RENDERED.load(Ordering::Relaxed));
+        assert!(status().await.last_error.is_none());
         cleanup().await;
         Ok(())
     }
@@ -3823,49 +4273,51 @@ mod tests {
         Ok(())
     }
 
-    /// The disarm path is the one place a `wanted` record may open the machine, and only
-    /// `wanted == false` may do it. Every other way of failing `intent_is_valid` is a stale
-    /// *wanted* intent, and must land on the emergency block with the corrupt/unreadable cases.
+    /// An unusable wanted record is not an explicit strict opt-in. Startup releases and
+    /// leaves the file in place.
     #[tokio::test]
     #[serial]
-    async fn a_wanted_intent_that_no_longer_validates_stays_fail_closed() -> Result<()> {
-        let stale_endpoint = {
-            let mut intent = valid_intent(KillSwitchStatusMode::Locked, true);
-            // Parses as JSON, still says `wanted`, but the endpoint no longer satisfies the
-            // model — the shape an endpoint-validation tightening leaves on disk.
-            intent.endpoints = vec![ProxyEndpoint {
-                ip: "not-an-ip".to_owned(),
-                port: 443,
-                protocol: ProxyProtocol::Tcp,
-            }];
-            intent
-        };
-        let no_app_path = {
-            // A truncated record: without the staged core path every install would fall back to
-            // "block installed, endpoint permit missing" forever.
-            let mut intent = valid_intent(KillSwitchStatusMode::Locked, true);
-            intent.app_path = String::new();
-            intent
-        };
-        for (what, intent) in [
-            ("unparseable endpoint", stale_endpoint),
-            ("missing app path", no_app_path),
-        ] {
-            cleanup().await;
-            atomic_write(&intent_path(), &serde_json::to_vec_pretty(&intent)?).await?;
+    async fn an_unusable_wanted_intent_releases_unless_strict() -> Result<()> {
+        cleanup().await;
+        let mut intent = valid_intent(KillSwitchStatusMode::Locked, true);
+        intent.endpoints = vec![ProxyEndpoint {
+            ip: "not-an-ip".to_owned(),
+            port: 443,
+            protocol: ProxyProtocol::Tcp,
+        }];
+        let bytes = serde_json::to_vec_pretty(&intent)?;
+        atomic_write(&intent_path(), &bytes).await?;
 
-            restore_on_service_start().await?;
+        restore_on_service_start().await?;
 
-            let armed = armed_guard().clone().expect(what);
-            assert_eq!(armed.intent.mode, KillSwitchStatusMode::Blocked, "{what}");
-            assert!(armed.intent.wanted, "{what}");
-            assert!(armed.intent.endpoints.is_empty(), "{what}");
-            assert!(status().await.wanted, "{what}");
-            assert!(
-                tokio::fs::metadata(intent_path()).await.is_ok(),
-                "{what}: the unusable record is left on disk as evidence"
-            );
-        }
+        assert!(armed_guard().is_none());
+        assert!(!status().await.wanted);
+        assert_eq!(tokio::fs::read(intent_path()).await?, bytes);
+        cleanup().await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn an_unusable_strict_intent_keeps_the_emergency_block() -> Result<()> {
+        cleanup().await;
+        let mut intent = valid_intent(KillSwitchStatusMode::Locked, true);
+        intent.strict_kill_switch = true;
+        intent.endpoints = vec![ProxyEndpoint {
+            ip: "not-an-ip".to_owned(),
+            port: 443,
+            protocol: ProxyProtocol::Tcp,
+        }];
+        atomic_write(&intent_path(), &serde_json::to_vec_pretty(&intent)?).await?;
+
+        restore_on_service_start().await?;
+
+        let armed = armed_guard().clone().expect("strict opt-in keeps a block");
+        assert!(armed.intent.strict_kill_switch);
+        assert!(armed.intent.wanted);
+        assert!(armed.intent.endpoints.is_empty());
+        assert!(status().await.wanted);
+        assert!(tokio::fs::metadata(intent_path()).await.is_ok());
         cleanup().await;
         Ok(())
     }
@@ -3904,27 +4356,25 @@ mod tests {
 
     #[tokio::test]
     #[serial]
-    async fn restore_with_corrupt_intent_arms_emergency_block_and_keeps_evidence() -> Result<()> {
+    async fn restore_with_corrupt_intent_releases_and_keeps_evidence() -> Result<()> {
         cleanup().await;
         atomic_write(&intent_path(), b"{ not json").await?;
 
         restore_on_service_start().await?;
 
-        let armed = ARMED.lock().unwrap().clone().expect("corrupt = armed");
-        assert_eq!(armed.intent.mode, KillSwitchStatusMode::Blocked);
-        assert!(armed.intent.endpoints.is_empty());
         assert!(
-            tokio::fs::metadata(intent_path()).await.is_ok(),
-            "the corrupt record is left on disk as evidence"
+            armed_guard().is_none(),
+            "corrupt bytes are not an explicit strict opt-in"
         );
-        assert!(status().await.wanted);
+        assert!(!status().await.wanted);
+        assert_eq!(tokio::fs::read(intent_path()).await?, b"{ not json");
         cleanup().await;
         Ok(())
     }
 
     #[tokio::test]
     #[serial]
-    async fn restore_with_unreadable_intent_arms_emergency_block() -> Result<()> {
+    async fn restore_with_unreadable_intent_releases() -> Result<()> {
         cleanup().await;
         // A directory at the intent path makes the read fail with a non-NotFound error on
         // every platform — the stand-in for ACL damage or transient I/O on a real service.
@@ -3932,16 +4382,46 @@ mod tests {
 
         restore_on_service_start().await?;
 
-        let armed = ARMED.lock().unwrap().clone().expect("unreadable = armed");
-        assert_eq!(armed.intent.mode, KillSwitchStatusMode::Blocked);
-        assert!(armed.intent.wanted);
-        assert!(armed.intent.is_verified());
-        assert!(armed.intent.endpoints.is_empty());
-        assert!(status().await.wanted);
+        assert!(armed_guard().is_none());
+        assert!(!status().await.wanted);
 
         tokio::fs::remove_dir(intent_path()).await?;
         cleanup().await;
         Ok(())
+    }
+
+    #[test]
+    fn service_stop_releases_only_without_strict_or_lifecycle_ownership() {
+        assert!(release_on_service_stop(false, false));
+        assert!(!release_on_service_stop(true, false));
+        assert!(!release_on_service_stop(false, true));
+        assert!(!release_on_service_stop(true, true));
+    }
+
+    #[test]
+    fn unhealthy_watchdog_releases_without_a_strict_opt_in() {
+        assert!(crash_recovery_releases_network(false));
+        assert_eq!(
+            unhealthy_watchdog_action(false, UNHEALTHY_RELEASE_TICKS - 1),
+            UnhealthyWatchdogAction::Wait
+        );
+        assert_eq!(
+            unhealthy_watchdog_action(false, UNHEALTHY_RELEASE_TICKS),
+            UnhealthyWatchdogAction::Release
+        );
+    }
+
+    #[test]
+    fn strict_kill_switch_repairs_then_releases() {
+        assert!(!crash_recovery_releases_network(true));
+        assert_eq!(
+            unhealthy_watchdog_action(true, 1),
+            UnhealthyWatchdogAction::Reinstall
+        );
+        assert_eq!(
+            unhealthy_watchdog_action(true, STRICT_UNHEALTHY_RELEASE_TICKS),
+            UnhealthyWatchdogAction::Release
+        );
     }
 
     #[tokio::test]
@@ -4005,6 +4485,7 @@ mod tests {
             api_host_ips: vec!["104.20.26.170".to_owned()],
             updated_at: 0,
             owner_key: None,
+            strict_kill_switch: false,
         };
         apply_learned_bootstrap_pins(&mut intent);
         let _ = std::fs::remove_file(&path);
@@ -4638,6 +5119,53 @@ mod tests {
         let armed = ARMED.lock().unwrap().clone().expect("still armed");
         assert_eq!(armed.intent.mode, KillSwitchStatusMode::Locked);
         assert_eq!(armed.tun_luid, Some(0));
+        cleanup().await;
+        Ok(())
+    }
+
+    /// A panic while `ARMED` is held poisons the mutex. The next tunnel lock must recover the
+    /// guard and still install the permit; `ARMED.lock().unwrap()` would panic the IPC task
+    /// and leave the session unable to lock until the Service process restarts.
+    #[tokio::test]
+    #[serial]
+    async fn lock_recovers_a_poisoned_armed_lock() -> Result<()> {
+        cleanup().await;
+        arm_bootstrap(&test_config(), "/opt/tono/mihomo", "owner-alice").await?;
+        crate::core::manager::set_running_core_identity_for_kill_switch_tests(Some((4242, 1)))
+            .await;
+
+        struct ClearPoison;
+        impl Drop for ClearPoison {
+            fn drop(&mut self) {
+                ARMED.clear_poison();
+            }
+        }
+        let poison = ClearPoison;
+        assert!(
+            std::thread::spawn(|| {
+                let _armed = ARMED.lock().unwrap();
+                panic!("simulate a panic while holding ARMED");
+            })
+            .join()
+            .is_err()
+        );
+        assert!(ARMED.is_poisoned());
+
+        lock(Some("Tono")).await?;
+
+        let armed = armed_guard()
+            .clone()
+            .expect("lock must proceed on a poisoned ARMED mutex");
+        assert_eq!(armed.intent.mode, KillSwitchStatusMode::Locked);
+        assert_eq!(armed.tun_luid, Some(0));
+        assert_eq!(
+            armed.core_instance,
+            Some(CoreInstance {
+                pid: 4242,
+                generation: 1,
+            })
+        );
+        drop(poison);
         cleanup().await;
         Ok(())
     }

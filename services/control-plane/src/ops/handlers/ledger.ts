@@ -265,7 +265,8 @@ export async function postLedgerReverse(req: Request, e: Env, rawId: string, act
            AND NOT EXISTS (SELECT 1 FROM ops_month_close WHERE month = ?)`,
       ).bind(reverseId, month, note, actor.email, t, t, entryId, month),
       e.DB.prepare(
-        'UPDATE ops_ledger_entries SET reversed_by = ?, updated_at = ? WHERE id = ? AND reversed_by IS NULL',
+        `UPDATE ops_ledger_entries SET reversed_by = ?, updated_at = ?
+         WHERE id = ? AND reversed_by IS NULL AND changes() = 1`,
       ).bind(reverseId, t, entryId),
     ]);
     if (Number(results[0]?.meta.changes ?? 0) !== 1) {

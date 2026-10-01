@@ -266,7 +266,46 @@ nonisolated enum HelperProtocolVersion {
     ///   stable owner before writing old DNS. A newer external DNS choice is
     ///   retained and the snapshot archived, not reported as restored. Missing
     ///   identity or read failure still refuses release.
-    static let current = "4.52.0"
+    /// - 4.52.0 → 4.52.1: the hold path keeps an unrecorded PF enable token
+    ///   when its listing query gives no answer (only a full listing proves
+    ///   it gone), instead of clearing the only handle to a reference that
+    ///   may still be held; settling a past-deadline `pfctl -E` throws on a
+    ///   non-listing answer instead of claiming the child took none. A 4.52.0
+    ///   daemon can leave a token held past disarm with PF enabled.
+    /// - 4.52.1 → 4.52.2: `/etc/pf.conf` only declares the kill-switch anchor.
+    ///   Boot, including Safe Mode, no longer loads the rule file. The helper
+    ///   loads those rules in one `pfctl -f` of a temporary copy while a Core
+    ///   is running. Startup, a corrupt update ledger, and a Core that stays
+    ///   down release a leftover kill switch and restore a saved DNS snapshot.
+    ///   They do not install a block.
+    /// - 4.52.2 → 4.52.3: a failed arm commit and a failed sleep barrier
+    ///   release the kill switch instead of installing an all-block. Startup
+    ///   failure and a failed update rollback do the same, without needing
+    ///   the allowed uid.
+    /// - 4.52.3 → 4.52.4: `/killswitch/status` no longer loads PF rules.
+    ///   The idle supervisor reinstalls only while the Core is running.
+    ///   If the app is removed while the helper stays up, the existing
+    ///   removal release runs without waiting for the next start. Launch
+    ///   does not reinstall from the state file; a Core that is not running
+    ///   is released immediately and a saved DNS snapshot is restored.
+    /// - 4.52.4 → 4.52.5: `--emergency-disarm` and `--emergency-reset`
+    ///   release PF when the update ledger cannot be read. They keep the
+    ///   ledger bytes and do not remove the install in that case. A DNS
+    ///   restore failure no longer skips the PF release.
+    /// - 4.52.5 → 4.52.6: a DNS snapshot restores only its own service.
+    ///   Another service left on exactly 127.0.0.1 is not cleared.
+    ///   Update disconnect still releases PF when prepare cannot prove a
+    ///   foreign loopback proxy or resolver is Tono's. The lifecycle
+    ///   read-failure self-test expects that owner-only restore.
+    /// - 4.52.6 → 4.52.7: an update ledger whose receipt contains a key this
+    ///   build does not know is refused and kept on disk. Additive keys
+    ///   outside the receipt are still tolerated.
+    /// - 4.52.7 → 4.52.8: after that full release, a crash or hang may add a
+    ///   secondary blackhole route for Anthropic's inbound prefixes and
+    ///   `/etc/resolver` files for first-party AI suffixes. Arm, disarm, and
+    ///   emergency recovery remove them. The commands cannot name a default
+    ///   route. A failure leaves the original network open.
+    static let current = "4.52.8"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS

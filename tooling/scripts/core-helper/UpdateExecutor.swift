@@ -72,23 +72,20 @@ enum UpdateExecutor {
         catch { try UpdatePackage.run("/bin/launchctl", ["print", "system/" + label]) }
     }
 
-    /// The fail-closed response to a startup failure: install the emergency
-    /// PF barrier for the installed user. Best-effort, as it was in main —
-    /// the original error is what the caller surfaces and exits on.
+    /// Startup failure used to install an emergency block, and skipped that
+    /// block entirely when the allowed uid could not be read (BRICK-M13).
+    /// There is no strict kill switch, and no uid is required to release.
     private static func armEmergencyBlock() {
-        if let uid = try? readAllowedUID() { try? KillSwitchManager.installEmergencyBlock(allowedUID: uid) }
+        KillSwitchManager.releaseInstalledBlock()
     }
 
     /// Called before constructing CoreManager or restoring normal desired
-    /// state. A corrupt ledger stops launch, and installs a fail-closed
-    /// barrier only where protection is wanted (saved Kill Switch intent, the
-    /// predicate `secureFailedStartup` uses): a Mac that was never connected
-    /// was otherwise blocked at every boot by a store it could not read
-    /// (BRICK-M1). When the store opened, that intent is read and the barrier
-    /// installed under the update lock, which every release holds for its
-    /// whole release, so no release lands between the check and the install.
-    /// When the store or the lock could not be opened there is no lock to
-    /// decide under; the check runs where the unconditional install used to.
+    /// state. A corrupt ledger stops launch. The default failure action
+    /// releases a saved kill switch; it does not install one (BRICK-M13).
+    /// Intent is still read where the old install ran, including under the
+    /// update lock when the store opened, so tests can see that read. A Mac
+    /// that was never connected is not blocked by a store it cannot read
+    /// (BRICK-M1).
     /// A stop request that arrives while this daemon waits behind the update
     /// lock is not corruption: that SIGTERM is our own update executor's
     /// `launchctl bootout` (the spin guard exists precisely so a bootout can
@@ -210,6 +207,13 @@ enum UpdateExecutor {
             return true
         } catch {
             // Keep all evidence; do not turn an exception into "not installed".
+            // A failed rollback used to leave the helper stopped and PF up
+            // with no recovery short of another boot (BRICK-M8). Release the
+            // network first. Do not claim the rollback succeeded.
+            KillSwitchManager.releaseInstalledBlock()
+            if let dns = try? ProtectedDNSManager() {
+                try? dns.restore(deferringLossNotice: true)
+            }
             // Before the replacing write no binary mutation occurred. Mark
             // this consumed attempt blocked and make diagnostics available.
             if let storage = try? UpdateStorage() {

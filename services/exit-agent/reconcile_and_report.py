@@ -687,6 +687,40 @@ def save_state(path: Path, state: dict) -> None:
     temporary.replace(path)
 
 
+def attach_installed(error: Refusal, installed: set[str] | None) -> Refusal:
+    """Keep a known label set on a refusal that would otherwise drop it."""
+    if isinstance(installed, set):
+        error.installed = installed
+    return error
+
+
+def refusal_installed(error: BaseException) -> set[str] | None:
+    installed = getattr(error, "installed", None)
+    return installed if isinstance(installed, set) else None
+
+
+def persist_installed_inventory(path: Path, state: dict | None,
+                                installed: set[str] | None) -> None:
+    """Save clients this round already added or removed, and nothing else.
+
+    A refusal after those mutations must not acknowledge the roster and must
+    not advance usage totals. Without the label, a later round that cannot
+    list the inbound has nothing to remove when the roster drops that client.
+    None is not written: an empty list is a real inventory, and None means
+    this round could not say what the inbound holds.
+    """
+    if state is None or not isinstance(installed, set):
+        return
+    labels = sorted(
+        label for label in installed
+        if isinstance(label, str)
+        and (label == LEGACY_CLIENT_EMAIL or label.startswith(CLIENT_LABEL_PREFIX))
+    )
+    if state.get("installedClients") == labels:
+        return
+    save_state(path, {**state, "installedClients": labels})
+
+
 def roster_cache_path(path: Path) -> Path:
     return path.with_name(f"{path.name}.roster")
 
@@ -1092,7 +1126,10 @@ def reconcile(binary: Path, commands: dict[str, str], address: str, tag: str,
         if known_installed is not None:
             known_installed.add(label)
     if failures:
-        raise Refusal("; ".join(failures))
+        # Successful adds and removals already changed the inbound. The set has
+        # to leave with the error, or the caller keeps the previous inventory
+        # and a later unlistable round cannot revoke the client just installed.
+        raise attach_installed(Refusal("; ".join(failures)), known_installed)
     return added, removed, known_installed
 
 
@@ -1120,10 +1157,11 @@ def lifetime_totals(state: dict, counters: dict[str, int], *,
         totals[label] = total
         baseline[label] = observed
     # Accounts absent from this reading keep whatever they had: removal from the
-    # roster must not roll a total backwards.
+    # roster must not roll a total backwards. A restart resets even an absent
+    # account's baseline, or its later first reading would forgive old bytes.
     for label, carried in state["totals"].items():
         totals.setdefault(label, int(carried))
-        baseline.setdefault(label, int(state["counterBaseline"].get(label, 0)))
+        baseline.setdefault(label, 0 if restarted else int(state["counterBaseline"].get(label, 0)))
     state["counterBaseline"] = baseline
     return totals
 
@@ -1277,11 +1315,18 @@ def reconcile_and_read_stable(
                 retire_shared_legacy=retire_shared_legacy,
             )
         if "stats_query" not in commands:
-            raise Refusal(
-                "clients were reconciled, but this xray offers no stats command "
-                "(tried statsquery, stats); usage cannot be metered"
+            raise attach_installed(
+                Refusal(
+                    "clients were reconciled, but this xray offers no stats command "
+                    "(tried statsquery, stats); usage cannot be metered"
+                ),
+                installed,
             )
-        counters = read_counters(binary, commands["stats_query"], address)
+        try:
+            counters = read_counters(binary, commands["stats_query"], address)
+        except Refusal as error:
+            attach_installed(error, installed)
+            raise
         marker_after = xray_start_marker(binary)
         if marker_before and marker_after and marker_before != marker_after:
             if attempt == 0:
@@ -1527,11 +1572,15 @@ def run_outage_round(path: Path, configured: str, binary: Path,
         roster, server_retire, age, unusable = None, False, 0, refusal
     retire_shared_legacy = server_retire if override is None else override
     remembered = state.get("installedClients") if state else None
-    added, removed, installed, counters, settled_marker = reconcile_and_read_stable(
-        binary, commands, address, tag, roster,
-        set(remembered) if isinstance(remembered, list) else None,
-        retire_shared_legacy=retire_shared_legacy,
-    )
+    try:
+        added, removed, installed, counters, settled_marker = reconcile_and_read_stable(
+            binary, commands, address, tag, roster,
+            set(remembered) if isinstance(remembered, list) else None,
+            retire_shared_legacy=retire_shared_legacy,
+        )
+    except Refusal as error:
+        persist_installed_inventory(path, state, refusal_installed(error))
+        raise
     if state is None:
         raise Refusal(
             f"control plane unreachable ({failure}); the state file is unusable: {state_error}"
@@ -1674,6 +1723,7 @@ def run_once(path: Path) -> None:
             retire_shared_legacy=retire_shared_legacy,
         )
     except Refusal as error:
+        persist_installed_inventory(path, state, refusal_installed(error))
         if hy2_error is None:
             raise
         raise Refusal(f"{hy2_error}; {error}") from error
@@ -1694,18 +1744,28 @@ def run_once(path: Path) -> None:
         # node as converged and nothing is reported or acknowledged.
         if state is None:
             raise Refusal(f"{hy2_error}; the state file is unusable: {state_error}")
+        inventory_base = dict(state)
         try:
             keep_usage_locally(path, state, installed, counters, settled_marker)
         except (Refusal, OSError) as error:
+            # source_id can refuse before keep_usage_locally writes. The clients
+            # already reconciled still have to be remembered.
+            persist_installed_inventory(path, inventory_base, installed)
             raise Refusal(f"{hy2_error}; usage not kept: {error}") from error
         raise hy2_error
     if cache_error:
         # An older saved roster is still on disk and may name an account this
         # roster revoked. Never report the round as complete while it is.
+        persist_installed_inventory(path, state, installed)
         raise Refusal(cache_error)
     if state is None:
         raise Refusal(f"clients were reconciled, but the state file is unusable: {state_error}")
-    source = source_id(state)
+    durable_state = dict(state)
+    try:
+        source = source_id(state)
+    except Refusal:
+        persist_installed_inventory(path, durable_state, installed)
+        raise
     for report in state["pendingReports"]:
         pending_at = report.get("observedAt")
         if (
@@ -1713,12 +1773,14 @@ def run_once(path: Path) -> None:
             or isinstance(pending_at, bool)
             or not 0 <= pending_at <= MAX_SAFE_INTEGER
         ):
+            persist_installed_inventory(path, durable_state, installed)
             raise Refusal("a queued usage report has an invalid observedAt")
         if pending_at > observed_at + 300:
             # A 400 is normally isolated and dropped so one bad account cannot
             # wedge the queue. This report is locally known to be outside the
             # server window, though, so retain it until the server clock catches
             # up instead of silently losing the last growth for an idle account.
+            persist_installed_inventory(path, durable_state, installed)
             raise Refusal("queued usage is more than five minutes ahead of the roster clock")
     if installed is None:
         # Additions can be attempted safely without a live listing, but they do
@@ -1727,8 +1789,12 @@ def run_once(path: Path) -> None:
         raise Refusal(
             "the live client inventory is unavailable and no durable inventory can prove complete reconciliation"
         )
+    # Keep the reconciled inventory even if the ACK fails, or a newly installed
+    # client revoked before the next poll would never be a removal candidate.
+    state["installedClients"] = sorted(installed)
+    save_state(path, {**durable_state, "installedClients": state["installedClients"]})
     # Only a complete reconciliation is readiness evidence. Do this before any
-    # state save so a failed acknowledgement leaves the durable state intact and
+    # usage state save so a failed acknowledgement leaves that state intact and
     # the whole roster can be retried next round.
     acknowledge_roster(base, token, observed_at)
 
@@ -1742,8 +1808,6 @@ def run_once(path: Path) -> None:
         replayed, discarded = deliver_queue(base, token, path, state)
         print(f"replayed {replayed} queued report(s), dropped {discarded}")
 
-    if installed is not None:
-        state["installedClients"] = sorted(installed)
     recorded_marker = state.get("startMarker")
     restarted = bool(
         settled_marker

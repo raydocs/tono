@@ -489,3 +489,9 @@ export function assertCustomerDetail(value: unknown, path = 'customerDetail'): C
       : { logWindows: arrayOf(row, path, 'logWindows', assertLogWindow) }),
   };
 }
+
+export {
+  assertCustomerDiagnostics,
+  assertFailureClusterList,
+  type CustomerDiagnosticsDto,
+} from './customer-diagnostics';

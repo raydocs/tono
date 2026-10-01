@@ -16,6 +16,104 @@ may reverse), `reversed` (keep the line; say what replaced it).
 - Applied in: PR / commit / command
 ```
 
+## 2026-09-30 · How long may a fake-ip answer live, and may DoH try HTTP/3?
+
+- Status: provisional
+- Chosen: `fake-ip-ttl: 30`, `prefer-h3: false`, `cache-algorithm: lru`, both DoH servers kept. Rejected: plaintext DNS, a 600s fake-ip TTL, `prefer-h3: true`, `cache-algorithm: arc`, and collapsing to one DoH server.
+- Why stricter: lookups stay on the exit. 30s is the recovery bound so a missed OS flush cannot leave apps on 198.18.0.0/16. HTTP/3 would race a UDP probe the VLESS exit cannot carry and drop the HTTP client. LRU keeps stale answers; one dead DoH server still falls through to the other. A pre-warm miss does not block the first request.
+- Applied in: [#741](https://github.com/raydocs/tono/pull/741).
+
+## 2026-09-30 · macOS 已连接时，哪些网络变化可以拆掉隧道？
+
+- Status: provisional
+- Chosen: 只在默认上行的服务、接口、可用 IPv4 地址或 IPv4 网关变成另一个具体值时重建；IPv6-only 才把 IPv6 默认下一跳算进身份。次要网卡出现、DHCP 空窗、APIPA、动态库读失败、双栈上的 IPv6 路由器抖动都保持隧道。拒绝：继续用「所有 up 的 IPv4 地址」指纹（插扩展坞就拆隧道），以及为了门户登录临时放开 PF。
+- Why stricter: PF 保持失败关闭，不新增旁路。少拆一次隧道就是少一次 Kill Switch 把机器扣在无网络上的窗口。双栈不因 IPv6 RA 抖动拆掉仍可用的 IPv4 上行。
+- Applied in: [#702](https://github.com/raydocs/tono/pull/702)（`NetworkUplinkSnapshot`）。
+
+## 2026-09-30 · Windows 网络事件的第一次数据面探测失败，要不要立刻拆隧道？
+
+- Status: provisional
+- Chosen: 不拆。核心和 WFP 保持原样，下一拍监视器再探一次；第二次仍失败才按原路径重建。核心身份变化、WFP/DNS 不健康、DIRECT 绑的网卡不再有默认路由，都不走这次等待。拒绝：一次失败就 Stop core（弱网闪断会把机器扣在 Kill Switch 里，比闪断更长）。
+- Why stricter: 不放开 WFP，不增加旁路。少一次无谓的拆隧道。确认失败后的重建仍然失败关闭。
+- Applied in: [#705](https://github.com/raydocs/tono/pull/705)（`plan_network_event_probe`）。
+
+## 2026-09-30 · On crash or hang without an explicit strict kill switch, what happens to general traffic and to AI services?
+
+- Status: owner
+- Chosen: full release of general traffic comes first. The user always has a network. After that release, a narrow secondary layer is allowed: a system-resolver sinkhole of exclusive first-party AI suffixes, plus a static block of Anthropic's published inbound prefixes `160.79.104.0/23` and `2607:6bc0::/48` only. That layer may exist only when it cannot block general traffic or captive-portal login, and Restore network removes it. Customers are in mainland China, where direct access to those AI services does not work, so real-IP exposure after a crash is limited. Never trade network availability for that exposure. Rejected: blocking Cloudflare, Fastly, Azure, Google, or AS13335; using `CLAUDE_HOME_DOMAINS` as the sinkhole list; a TLS-SNI callout; fetching a fresh prefix list while the core is dead; keeping any general block up in order to hide the real IP; re-enabling PF to carry the two prefixes; putting the prefixes in the Windows kill-switch provider (a leftover filter there is treated as still armed and installs an emergency block-all). Strict mode keeps the full block. [#701](https://github.com/raydocs/tono/pull/701) and [#703](https://github.com/raydocs/tono/pull/703) are still open, so this layer is prepared on top of them and must not merge first.
+- Why stricter: availability is the constraint the owner put above the AI hold. The narrow layer does not widen a general outage, and refusing a CDN block does not widen exposure past the full release. The cost, accepted here, is that a crash can still let the real IP reach an AI service when that service is reachable from the network.
+- Applied in: [#709](https://github.com/raydocs/tono/pull/709), [selective-fail-open.md](selective-fail-open.md). The layer is [#738](https://github.com/raydocs/tono/pull/738), blocked on #701 and #703.
+
+## 2026-09-30 · On boot, crash, or helper death, does a saved kill switch stay up?
+
+- Status: provisional
+- Chosen: no. macOS has no user-facing strict kill switch, so a leftover `killswitch.state` is not an opt-in. Startup does not re-arm. A Core that is not running releases the block and restores a DNS snapshot. A startup failure and a corrupt update ledger do not install a block. While a Core is running, the in-session supervisor may still reload the saved rules. Rejected: re-arming at every helper start, and holding DNS at `127.0.0.1` when the Core is dead because PF is not confirmed live. Also rejected: a second LaunchDaemon as the watchdog (it can fight this helper). The watchdog is the helper's idle loop; if this process itself is stuck, that loop does not run.
+- Why stricter: the host keeps a working network after reboot, crash, uninstall and Safe Mode. The cost is that a connected session's block does not survive helper restart unless the Core is still running, and there is a short gap after boot before this helper has migrated `/etc/pf.conf`. Traffic is not widened during a live Core.
+- Applied in: [#701](https://github.com/raydocs/tono/pull/701) (`KillSwitchManager.swift`, `SocketServer.swift`, `UpdateExecutor.swift`, `ProtectedDNSManager.swift`).
+
+## 2026-09-30 · Should `/etc/pf.conf` keep loading the kill-switch rule file at boot?
+
+- Status: provisional
+- Chosen: no. The on-disk hook only declares `anchor "tono.killswitch"`. While the helper is enforcing, it loads the rules with one `pfctl -f` of a temporary copy that still contains `load anchor from`, so an already-enabled PF does not see an empty anchor. Rejected: leaving `load anchor from` in `/etc/pf.conf` (Safe Mode still runs Apple's pfctl and does not run this LaunchDaemon, so a block file or a stuck file survives the mode people use to recover). Also rejected: skipping protection only when `kern.safeboot` is set (BRICK-M10). This daemon does not run in Safe Mode; the boot path does not re-arm at all.
+- Why stricter: a live Core can still install the block before PF is enabled. The cost is a short interval after boot, before the helper starts, where another program enabling PF evaluates an empty anchor. Safe Mode, where this helper does not run, no longer reinstalls the block from the rule file once this helper has rewritten the hook.
+- Applied in: [#701](https://github.com/raydocs/tono/pull/701) (`KillSwitchPF.swift`); BRICK-M9, MAC-BOOT-DNS-ORPHAN.
+
+## 2026-09-30 · On arm or sleep-barrier failure, keep the all-block until the next helper start?
+
+- Status: provisional
+- Chosen: no. Release the anchor and the saved intent immediately. A failed update rollback does the same before it returns. Rejected: installing an emergency all-block and waiting for the next daemon start. macOS has no strict kill-switch opt-in.
+- Why stricter: a failed commit does not leave the host offline. A successful sleep barrier is unchanged. The cost is that a failed re-arm also drops the previous block.
+- Applied in: [#708](https://github.com/raydocs/tono/pull/708) (`KillSwitchManager.swift`, `UpdateExecutor.swift`); BRICK-M8, BRICK-M13.
+
+## 2026-09-30 · Should an unreadable update ledger refuse emergency network release?
+
+- Status: provisional
+- Chosen: no. `--emergency-disarm` releases PF and attempts DNS restore, and leaves the ledger bytes in place. `--emergency-reset` does not remove the install when the ledger cannot be trusted, but it still releases the network. Rejected: #691's bootout of every `pfctl`/`networksetup`, requiring DNS verification before opening PF, and a durable flag that stops later helper starts. That draft stays untouched.
+- Why stricter: recovery cannot be refused by evidence the helper cannot read. Nothing is deleted. Launch does not re-arm, and a DNS restore failure still releases PF.
+- Applied in: [#711](https://github.com/raydocs/tono/pull/711) (`main.swift`).
+
+## 2026-09-30 · When fail-open runs, does AI-service traffic also go out on the real address?
+
+- Status: owner
+- Chosen: selective. Release general traffic, and keep blocking AI-service traffic (Claude/OpenAI and the same class) so the real address never reaches them. The PF/WFP rule set is bc-3c5ccfd4's. Until that hook is registered and returns true, the decision stays today's full release. An explicit strict kill switch (`permanent`) still keeps the whole block and is not overridden. Rejected: inventing the filter rules in this change, and leaving every exhausted failure fully blocked.
+- Why stricter: the real address stays off AI services once the hook exists. Until then nothing new is blocked, and nothing new is punched through a filter the hook did not install. Certificate checks stay on. System DNS is not changed.
+- Applied in: [#706](https://github.com/raydocs/tono/pull/706) owns `network_disposition::exhausted_protection`. [#703](https://github.com/raydocs/tono/pull/703) calls that function and does not keep a second match. The later decision above (#709) governs a crash: full release first. This hook stays unregistered until that narrow layer exists, and a true return must not hold general traffic.
+
+## 2026-09-30 · After login or connect recovery is exhausted, does the machine stay blocked?
+
+- Status: owner
+- Chosen: fail open to the original network, unless the user explicitly enabled a strict kill switch (`permanent`). Rejected: keeping the block after every verified-session failure.
+- Why stricter: retries do not install filters, change system DNS, or replace routes. Certificate checks stay on. A strict kill switch the user turned on still keeps the block. The cost is a direct path after an exhausted failure when strict mode is off.
+- Applied in: [#706](https://github.com/raydocs/tono/pull/706)（`customer_failure`、Windows `plan_failure`）。
+
+## 2026-09-30 · When a configured exit fails, may self-heal tear the tunnel down to try another, and may it leave the machine blocked?
+
+- Status: provisional
+- Chosen: no tear-down between hops. A new dial name is used only while protection is down, before the next tunnel exists. If a verified barrier is already up and the user has not explicitly enabled a strict kill switch, stop and restore the original network through the existing explicit release, once, with no reconnect. Strict (macOS Kill Switch "Permanent" only; Windows has no such toggle, so Windows is ordinary) may keep the barrier and retries the same node. Rejected: rotating cities under WFP/PF, a positive mihomo `handshake-timeout` (it detaches the QUIC dial from the caller), and `skip-cert-verify`.
+- Why stricter: the healer writes no PF, WFP, TUN, or route. It does not widen the permit set to probe backups. Residential SOCKS identity is not replaced. The cost is that a dead preferred path is not hot-swapped under an armed barrier; the machine goes back to its original network instead of sitting in Protected Offline.
+- Applied in: `tono-core` `heal` and the Windows connect failure path. macOS has the same decision type and tests; it is not called from the live connect path until a device proves the PF release.
+
+## 2026-09-30 · Continuity 要不要改 PF 在网放行或组播状态
+
+- Status: provisional
+- Chosen: 只把静态、不可路由的前缀（有限广播 `255.255.255.255/32`、IPv6 组播 `ff00::/8`，加上原先已排除的私网/链路本地/IPv4 组播）放进 sing-box `route_exclude_address`，让 Darwin auto-route 不要把它们装进 utun。不改 PF、不升级 helper、不按网卡现算在网前缀、不把 mDNS/链路本地从 `keep state` 改成 `no state`、不恢复 Apple 进程的公网 DIRECT。
+- Why stricter: 连接时 Kill Switch 在 TUN 起来之前就已经武装。动态 PF 或未在 Mac 上解析过的规则一旦写坏，整份规则装不进去，恢复仍要靠已有的 Restore internet，但这次改动本身不能增加那条路径的失败面。排除有限广播不会打开公网，也不替换默认路由。在网全球 IPv6 / 非私网 IPv4 仍按现有 Kill Switch 丢弃，直到有实机证明一条静态、可重复的放行。
+- Applied in: [#700](https://github.com/raydocs/tono/pull/700) `cursor/macos-continuity-onlink-3d9f`（`ConfigPipeline.tunRouteExcludeCIDRs`）。
+
+## 2026-09-30 · On Windows, should corrupt WFP state or an unhealthy watchdog keep a block?
+
+- Status: provisional
+- Chosen: no, unless the on-disk record explicitly sets `strict_kill_switch` (or the PF desired mode is Permanent). Corrupt, unreadable, unusable, and residual-without-intent paths release WFP and attempt DNS restore. The unhealthy watchdog waits three ticks, then releases; strict mode reinstalls and still releases after thirty consecutive unhealthy ticks. Rejected: keeping the ownerless emergency block, and deleting corrupt bytes to synthesize a tombstone.
+- Why stricter: an unreadable file is not an opt-in, so it cannot keep the machine closed. A live wanted session is still restored when the record parses and the install verifies. The cost is a connected session whose WFP verify fails for about three seconds loses the block until the next arm. Needs real-hardware testing.
+- Applied in: [#733](https://github.com/raydocs/tono/pull/733) (`windows_kill_switch.rs`, `macos_kill_switch.rs`).
+
+## 2026-09-30 · Should the 10s TUN and 12s first-byte budgets be shortened now?
+
+- Status: provisional
+- Chosen: no. Record per-stage durations under the existing wire keys (`preparing` … `verifyingTraffic`) so a later field trace can be compared. Rejected: cutting those budgets without a device trace, installing the tunnel in parallel with the handshake, and building a Clash-versus-Tono harness here.
+- Why stricter: a shorter budget fails connects that are merely slow, and a parallel tunnel install is the silent-drop case. The keys do not add a second telemetry upload.
+- Applied in: branch `cursor/connect-stage-timings-a925`.
+
 ## 2026-09-29 · After an unexpected restart on Windows, does the Service start the Core by itself, and does the App say why it did not?
 
 - Status: provisional
@@ -346,3 +444,33 @@ may reverse), `reversed` (keep the line; say what replaced it).
 - Why stricter: customers only receive bytes the owner accepted on a device.
 - Applied in: [AGENTS.md](../AGENTS.md) "Finish the work" item 2;
   [RELEASE_LINES.md](RELEASE_LINES.md#customer-publish-g4).
+
+## 2026-09-30 · Automatic diagnostics stay on; raw hostname logs stay gated
+
+- Status: provisional
+- Chosen: failure, usage, DNS, and chain uploads are on by default and are not
+  gated on `diagnostics_log_access`. Raw network logs stay operator-granted.
+  AI-service rows (claude / openai only) require explicit consent and expire
+  after 60 days; other diagnostics rows expire after 90 days. A one-shot client
+  migration may turn the periodic snapshot back on only when the user has not
+  recorded a choice after the v2 force-off. Rejected: re-enabling hostname log
+  upload, or leaving the snapshot default off.
+- Why stricter: the reports the owner never received were privacy-safe failure
+  facts, not browsing history. Hostname logs stay denied.
+- Applied in: [diagnostics-privacy.md](diagnostics-privacy.md);
+  [#707](https://github.com/raydocs/tono/pull/707).
+
+## 2026-09-30 · Failure-cluster alerts are off until both webhook settings exist
+
+- Status: provisional
+- Chosen: the engineering webhook sends only when `FAILURE_ALERT_WEBHOOK_URL`
+  and `FAILURE_ALERT_WEBHOOK_SECRET` are both set, the secret is at least 32
+  characters, and the URL is public https. One open cluster per
+  code+stage+app version+platform+node. A 30-minute quiet gap closes it. Spike
+  alerts need a 5× growth of at least 10 events and 15 minutes since the last
+  send, with at most 12 sends an hour. The read API is GET-only and uses a
+  separate `DIAGNOSTICS_READ_TOKEN`. Rejected: posting to the human alert
+  allowlist, or a token that can write.
+- Why stricter: an unset bot cannot be reached, and one outage is one alert.
+- Applied in: [diagnostics-privacy.md](diagnostics-privacy.md);
+  [#707](https://github.com/raydocs/tono/pull/707).

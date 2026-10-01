@@ -359,7 +359,25 @@ pub(super) async fn wait_controller(secret: &str, controller_port: u16) -> Resul
         )
         .await
         {
-            Ok(Ok(response)) if response.status().is_success() => return Ok(()),
+            Ok(Ok(response)) if response.status().is_success() => {
+                // Warm the exit DoH for the probe host while PF/WFP and the
+                // system DNS switch are still in front of the data-plane
+                // check. A failure here must not fail connect. The host is
+                // FAKE_IP_LOOKUP_HOST / PROBE_ORIGINS[0]; imported from
+                // probes.rs this module would cycle.
+                let prefetch_secret = secret.to_string();
+                tokio::spawn(async move {
+                    let Ok(prefetch) = controller_client(Duration::from_secs(5)) else {
+                        return;
+                    };
+                    let url = controller_url(
+                        controller_port,
+                        "/dns/query?name=www.google.com&type=A",
+                    );
+                    let _ = prefetch.get(url).bearer_auth(prefetch_secret).send().await;
+                });
+                return Ok(());
+            },
             Ok(Ok(response)) => last = format!("controller answered {}", response.status()),
             Ok(Err(err)) => last = err.to_string(),
             Err(_) => last = format!("controller poll exceeded {CONTROLLER_POLL_TIMEOUT:?}"),

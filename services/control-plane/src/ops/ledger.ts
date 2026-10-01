@@ -79,7 +79,9 @@ const SNAPSHOT_MAX_BYTES = 65_536;
 const PARTIAL_SNAPSHOT = JSON.stringify({ customers: [], nodes: [], partial: true });
 
 export function encodeMonthSnapshot(summary: MonthSummaryDto): string {
-  const json = JSON.stringify({ customers: summary.customers, nodes: summary.nodes });
+  const json = JSON.stringify({
+    customers: summary.customers, nodes: summary.nodes, reconciliation: summary.reconciliation,
+  });
   return new TextEncoder().encode(json).length > SNAPSHOT_MAX_BYTES ? PARTIAL_SNAPSHOT : json;
 }
 
@@ -311,7 +313,11 @@ export function ledgerCsv(entries: LedgerEntryDto[]): string {
   let cny = 0;
   const currencies = new Set<string>();
   for (const entry of entries) {
-    amount += signedTotal(entry.kind, entry.amountMinor);
+    // amount_minor is a non-negative magnitude (CHECK). A reversal stores the
+    // opposite effect only in cny_minor, so the source-currency total has to
+    // apply that opposite effect itself or a same-currency export doubles.
+    const source = signedTotal(entry.kind, entry.amountMinor);
+    amount += entry.reverses ? -source : source;
     cny += signedTotal(entry.kind, entry.cnyMinor);
     currencies.add(entry.currency);
     lines.push([

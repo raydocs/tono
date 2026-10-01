@@ -1,32 +1,151 @@
 {
-  "log": {"level": "warn"},
+  "log": {
+    "level": "warn"
+  },
   "dns": {
     "servers": [
-      {"type": "fakeip", "tag": "Tono-FakeIP", "inet4_range": "198.19.0.0/16"},
-      {"type": "https", "tag": "Tono-DoH", "server": "1.1.1.1", "server_port": 443, "path": "/dns-query", "tls": {"enabled": true, "server_name": "1.1.1.1"}, "detour": "Tono-Exit"}
+      {
+        "type": "fakeip",
+        "tag": "Tono-FakeIP",
+        "inet4_range": "198.18.16.0/20"
+      },
+      {
+        "type": "https",
+        "tag": "Tono-DoH",
+        "server": "1.1.1.1",
+        "server_port": 443,
+        "path": "/dns-query",
+        "tls": {
+          "enabled": true,
+          "server_name": "1.1.1.1",
+          "alpn": [
+            "h2"
+          ]
+        },
+        "detour": "Tono-Exit"
+      },
+      {
+        "type": "https",
+        "tag": "Tono-DoH-Backup",
+        "server": "8.8.8.8",
+        "server_port": 443,
+        "path": "/dns-query",
+        "tls": {
+          "enabled": true,
+          "server_name": "dns.google",
+          "alpn": [
+            "h2"
+          ]
+        },
+        "detour": "Tono-Exit"
+      }
     ],
     "rules": [
-      {"query_type": ["AAAA"], "action": "predefined", "rcode": "NOERROR"},
-      {"inbound": ["Tono-TUN"], "query_type": ["A"], "action": "route", "server": "Tono-FakeIP"}
+      {
+        "query_type": [
+          "AAAA"
+        ],
+        "action": "predefined",
+        "rcode": "NOERROR"
+      },
+      {
+        "inbound": [
+          "Tono-TUN"
+        ],
+        "query_type": [
+          "A"
+        ],
+        "action": "route",
+        "server": "Tono-FakeIP",
+        "rewrite_ttl": 30
+      },
+      {
+        "action": "evaluate",
+        "server": "Tono-DoH",
+        "tag": "primary"
+      },
+      {
+        "match_response": "primary",
+        "response_rcode": "NOERROR",
+        "action": "respond"
+      },
+      {
+        "action": "evaluate",
+        "server": "Tono-DoH-Backup",
+        "tag": "backup"
+      },
+      {
+        "match_response": "backup",
+        "action": "respond"
+      }
     ],
     "final": "Tono-DoH",
     "strategy": "ipv4_only"
   },
   "inbounds": [
-    {"type": "tun", "tag": "Tono-TUN", "interface_name": "Tono", "address": ["198.18.0.1/30"], "dns_address": ["198.18.0.2"], "dns_mode": "disabled", "auto_route": true, "strict_route": false, "mtu": 1500, "multi_queue": false, "route_exclude_address": ["8.8.4.4/32"]}
+    {
+      "type": "tun",
+      "tag": "Tono-TUN",
+      "interface_name": "Tono",
+      "address": [
+        "198.18.0.1/30"
+      ],
+      "dns_address": [
+        "198.18.0.2"
+      ],
+      "dns_mode": "disabled",
+      "auto_route": true,
+      "strict_route": false,
+      "mtu": 1500,
+      "multi_queue": false,
+      "route_exclude_address": [
+        "8.8.4.4/32"
+      ]
+    }
   ],
   "outbounds": [
-    {"type": "hysteria2", "tag": "Shape HY2", "server": "8.8.4.4", "server_port": 8444, "password": "11111111-1111-4111-8111-111111111111", "tls": {"enabled": true, "server_name": "hy2.example", "certificate_sha256": ["q6urq6urq6urq6urq6urq6urq6urq6urq6urq6urq6s="]}},
-    {"type": "selector", "tag": "Tono-Exit", "outbounds": ["Shape HY2"], "default": "Shape HY2", "interrupt_exist_connections": true}
+    {
+      "type": "hysteria2",
+      "tag": "Shape HY2",
+      "server": "8.8.4.4",
+      "server_port": 8444,
+      "password": "11111111-1111-4111-8111-111111111111",
+      "tls": {
+        "enabled": true,
+        "server_name": "hy2.example",
+        "certificate_sha256": [
+          "q6urq6urq6urq6urq6urq6urq6urq6urq6urq6urq6s="
+        ]
+      }
+    },
+    {
+      "type": "selector",
+      "tag": "Tono-Exit",
+      "outbounds": [
+        "Shape HY2"
+      ],
+      "default": "Shape HY2",
+      "interrupt_exist_connections": true
+    }
   ],
   "route": {
     "auto_detect_interface": true,
     "default_domain_resolver": "Tono-DoH",
     "rules": [
-      {"ip_version": 6, "action": "reject"},
-      {"network": "icmp", "action": "reject"}
+      {
+        "ip_version": 6,
+        "action": "reject"
+      },
+      {
+        "network": "icmp",
+        "action": "reject"
+      }
     ],
     "final": "Tono-Exit"
   },
-  "experimental": {"cache_file": {"enabled": false}}
+  "experimental": {
+    "cache_file": {
+      "enabled": false
+    }
+  }
 }

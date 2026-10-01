@@ -24,6 +24,7 @@ const TOP_LEVEL_KEYS: &[&str] = &[
     "log-level",
     "udp",
     "unified-delay",
+    "tcp-concurrent",
     "find-process-mode",
     "profile",
     "external-controller",
@@ -39,8 +40,12 @@ const TOP_LEVEL_KEYS: &[&str] = &[
 const DNS_KEYS: &[&str] = &[
     "enable",
     "listen",
+    "ipv6",
     "enhanced-mode",
     "fake-ip-range",
+    "fake-ip-ttl",
+    "prefer-h3",
+    "cache-algorithm",
     "respect-rules",
     "use-hosts",
     "nameserver",
@@ -293,6 +298,21 @@ rules:
     #[test]
     fn the_service_refuses_runtime_yaml_outside_the_owned_contract() {
         assert_eq!(ensure_owned_runtime_config_is_safe(OWNED), Ok(()));
+        let with_dial_defaults = OWNED.replacen(
+            "unified-delay: true\n",
+            "unified-delay: true\ntcp-concurrent: true\n",
+            1,
+        ).replacen(
+            "  enable: true\n  listen:",
+            "  enable: true\n  ipv6: false\n  listen:",
+            1,
+        ).replacen(
+            "  fake-ip-range: 198.18.0.1/16\n",
+            "  fake-ip-range: 198.18.0.1/16\n  fake-ip-ttl: 30\n  prefer-h3: false\n  cache-algorithm: lru\n",
+            1,
+        );
+        assert_ne!(with_dial_defaults, OWNED);
+        assert_eq!(ensure_owned_runtime_config_is_safe(&with_dial_defaults), Ok(()));
         for (from, to) in [
             ("external-controller: 127.0.0.1:9090", "external-controller: 0.0.0.0:9090"),
             ("  network: tcp", "  network: tcp\n  skip-cert-verify: true"),

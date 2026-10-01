@@ -13,10 +13,11 @@ use crate::tono::{
     audit::{self, AuditEvent},
     bootstrap, commands, signed_apps,
     connection_health::{
-        CoreSample, HealthLegs, NetworkChangeOutcome, classify_core_sample, connection_loop_continues,
-        core_change_fires, health_threshold_reached, kill_switch_unhealthy_for_monitor,
-        may_recover_in_place, monitor_requires_reconnect, owned_direct_reload_in_flight,
-        network_event_fires, protected_dns_unhealthy,
+        CoreSample, HealthLegs, NetworkChangeOutcome, NetworkEventProbeEffect, NetworkEventProbePlan,
+        apply_network_event_probe, classify_core_sample, connection_loop_continues, core_change_fires,
+        health_threshold_reached, kill_switch_unhealthy_for_monitor, may_recover_in_place,
+        monitor_requires_reconnect, network_event_fires, owned_direct_reload_in_flight,
+        plan_network_event_probe, protected_dns_unhealthy,
     },
     connection_plan::{guard_rejection_is_transient, reconnect_allowed},
     state::{TonoInner, TonoState},
@@ -280,7 +281,6 @@ pub(super) async fn spawn_control_plane_pin_refresh(
         let mut wechat_interval = tokio::time::interval(WECHAT_PATH_REFRESH_INTERVAL);
         wechat_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         let mut skip_first_wechat = true;
-        let mut watching_wechat = true;
         let mut browser_dns_interval = tokio::time::interval_at(
             tokio::time::Instant::now() + BROWSER_DNS_RECHECK_INTERVAL,
             BROWSER_DNS_RECHECK_INTERVAL,
@@ -330,20 +330,22 @@ pub(super) async fn spawn_control_plane_pin_refresh(
                         }
                     }
                 }
-                _ = wechat_interval.tick(), if watching_wechat => {
+                _ = wechat_interval.tick() => {
                     if skip_first_wechat {
                         skip_first_wechat = false;
                         continue;
                     }
                     if signed_wechat_paths_require_reconnect(&task_state, generation).await {
-                        if !connection_loop_continues(handle_network_change(&task_state, &task_app).await) {
+                        // Only a real protected reconnect re-applies the signed path set, so
+                        // in-place recovery is not allowed here: a healthy TUN would otherwise
+                        // keep the old paths for the whole session. Without in-place recovery
+                        // the outcome is always Handled, and the new generation's task takes
+                        // over watching.
+                        if !connection_loop_continues(
+                            handle_network_change_inner(&task_state, &task_app, false).await,
+                        ) {
                             return;
                         }
-                        // Recovered in place: no reconnect ran, so the applied path set cannot
-                        // change for the rest of this session and this leg would report the same
-                        // difference every two minutes. Retire the leg, not the task — the pin
-                        // refresh and the direct sampling keep running.
-                        watching_wechat = false;
                     }
                 }
             }
@@ -754,6 +756,9 @@ pub(super) async fn network_monitor_loop(state: Arc<TonoState>, app: AppHandle) 
     // proof is a proof whichever path paid for it, and reusing it inside
     // [`NETWORK_EVENT_PROBE_COOLDOWN`] is what keeps the hold from probing every other tick.
     let mut last_event_probe_ok: Option<std::time::Instant> = None;
+    // Failed network-event proofs that have not yet been confirmed. One failure
+    // keeps the core up; the next tick probes again even if Windows is quiet.
+    let mut pending_event_probe_failures: u32 = 0;
     // The last recovered-in-place verdict, so a leg that stays failed while the tunnel keeps
     // working re-proves the data plane at the exit-probe cadence rather than every two ticks.
     let mut last_in_place_recovery: Option<std::time::Instant> = None;
@@ -928,30 +933,31 @@ pub(super) async fn network_monitor_loop(state: Arc<TonoState>, app: AppHandle) 
         // asynchronously. A callback can therefore land after the Service write window and
         // after this monitor seeded its counter, producing the old connectOk -> networkChange ->
         // reconnect loop. Do not trust the event either way: under the still-locked barrier,
-        // repeat the same multi-origin HTTPS proof that admitted Connected. Success proves the
-        // current tunnel still carries user traffic; failure corroborates the event and keeps the
-        // existing fail-closed reconnect. Core identity and health failures remain unconditional.
-        let event_probe_failed = if invalidate && network_changed && !core_changed && !health_invalid && !owned_direct_reload {
-            let recently_proven = last_event_probe_ok
-                .is_some_and(|at| at.elapsed() < NETWORK_EVENT_PROBE_COOLDOWN);
-            if recently_proven {
+        // repeat the same multi-origin HTTPS proof that admitted Connected. One failure is a
+        // blip — the core stays up and the next tick confirms. A second failure rebuilds.
+        // Core identity and health failures remain unconditional.
+        let recent_proof = last_event_probe_ok
+            .is_some_and(|at| at.elapsed() < NETWORK_EVENT_PROBE_COOLDOWN);
+        let plan = plan_network_event_probe(
+            invalidate,
+            network_changed,
+            core_changed,
+            health_invalid,
+            owned_direct_reload,
+            pending_event_probe_failures,
+            recent_proof,
+        );
+        let probed = match plan {
+            NetworkEventProbePlan::Probe => Some(periodic_data_plane_probe_failed(&state).await),
+            NetworkEventProbePlan::ReuseRecentProof => {
                 logging!(
                     info,
                     Type::Service,
                     "Tono: another Windows network change inside the proof window; reusing the last data-plane proof instead of probing again"
                 );
-                false
-            } else {
-                let failed = periodic_data_plane_probe_failed(&state).await;
-                last_event_probe_ok = if failed {
-                    None
-                } else {
-                    Some(std::time::Instant::now())
-                };
-                failed
+                None
             }
-        } else {
-            false
+            NetworkEventProbePlan::Idle => None,
         };
         // A reload can start while the HTTPS request is awaiting its result. Re-read its
         // bounded owner marker before treating that expected blocked probe as a dead tunnel.
@@ -959,17 +965,48 @@ pub(super) async fn network_monitor_loop(state: Arc<TonoState>, app: AppHandle) 
             let inner = state.lock().await;
             owned_direct_reload_in_flight(inner.direct_reload_until, inner.connect_generation, std::time::Instant::now())
         };
-        let keeps_in_place =
-            invalidate && network_changed && !core_changed && !health_invalid && !event_probe_failed && !owned_direct_reload;
-        // X2-1: the proof above covers the tunnel only. A DIRECT overlay bound to an adapter
-        // that no longer carries a default route needs the protected rebuild, not "keep".
-        if keeps_in_place && !may_keep_session_in_place(&state, true).await {
+        let discard_expected_block = owned_direct_reload && probed == Some(true);
+        let (effect, next_pending) = if discard_expected_block {
+            (NetworkEventProbeEffect::Unchanged, pending_event_probe_failures)
+        } else {
+            if matches!(plan, NetworkEventProbePlan::Probe) {
+                last_event_probe_ok = match probed {
+                    Some(true) => None,
+                    Some(false) => Some(std::time::Instant::now()),
+                    None => last_event_probe_ok,
+                };
+            }
+            apply_network_event_probe(plan, probed.unwrap_or(false), pending_event_probe_failures)
+        };
+        pending_event_probe_failures = next_pending;
+        if effect == NetworkEventProbeEffect::Hold {
+            logging!(
+                info,
+                Type::Service,
+                "Tono: network-change probe failed once; keeping the tunnel until the next tick confirms it"
+            );
+        }
+        if effect == NetworkEventProbeEffect::Rebuild {
+            if !connection_loop_continues(handle_network_change_inner(&state, &app, true).await) {
+                return;
+            }
+            last_in_place_recovery = Some(std::time::Instant::now());
+            legs = HealthLegs::default();
+            pending_event_probe_failures = 0;
+            continue;
+        }
+        // X2-1: a proven tunnel still has to drop a DIRECT overlay whose adapter
+        // no longer carries a default route. A held blip has not proven the tunnel.
+        if effect == NetworkEventProbeEffect::Proven && !may_keep_session_in_place(&state, true).await {
             if !connection_loop_continues(handle_network_change_inner(&state, &app, false).await) {
                 return;
             }
+            last_in_place_recovery = Some(std::time::Instant::now());
+            legs = HealthLegs::default();
+            pending_event_probe_failures = 0;
             continue;
         }
-        if keeps_in_place {
+        if effect == NetworkEventProbeEffect::Proven {
             logging!(
                 info,
                 Type::Service,
@@ -979,7 +1016,9 @@ pub(super) async fn network_monitor_loop(state: Arc<TonoState>, app: AppHandle) 
             let generation = state.lock().await.connect_generation;
             let _ = refresh_control_plane_pins_once(&state, generation).await;
         }
-        if monitor_requires_reconnect(invalidate, core_changed, health_invalid, event_probe_failed, owned_direct_reload) {
+        // Probe failure is decided above. Passing false here keeps a single blip from
+        // taking the old immediate-rebuild path. Core identity and protection legs still fire.
+        if monitor_requires_reconnect(invalidate, core_changed, health_invalid, false, owned_direct_reload) {
             // A Service transport outage may reuse a recent proof in the branch
             // above. A successful Service snapshot that explicitly says WFP or
             // protected DNS is broken may not: HTTPS can still work while the
@@ -995,6 +1034,7 @@ pub(super) async fn network_monitor_loop(state: Arc<TonoState>, app: AppHandle) 
             // legs against the fresh TUN proof rather than leaving the counters that fired.
             last_in_place_recovery = Some(std::time::Instant::now());
             legs = HealthLegs::default();
+            pending_event_probe_failures = 0;
         }
     }
 }

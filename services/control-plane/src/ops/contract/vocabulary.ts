@@ -189,6 +189,10 @@ export const CONNECTION_EVENT_KINDS = [
   'disconnectOk',
   'releaseFail',
   'syncFail',
+  'signInFail',
+  'appCrash',
+  'networkRestore',
+  'killSwitchFail',
 ] as const;
 export type ConnectionEventKind = (typeof CONNECTION_EVENT_KINDS)[number];
 

@@ -1,0 +1,94 @@
+name: Dependency audit
+
+# Advisory only. Not called by ci-gate and not a required status check.
+# A vulnerable lockfile is written to the job summary. The job exits 0.
+
+on:
+  schedule:
+    - cron: '17 6 * * 1'
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '**/package-lock.json'
+      - '**/pnpm-lock.yaml'
+      - '**/Cargo.lock'
+      - '**/Package.resolved'
+      - '.github/workflows/dependency-audit.yml'
+  push:
+    branches:
+      - main
+      - release/macos
+      - release/windows
+    paths:
+      - '**/package-lock.json'
+      - '**/pnpm-lock.yaml'
+      - '**/Cargo.lock'
+      - '**/Package.resolved'
+      - '.github/workflows/dependency-audit.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 24
+
+      - name: Report advisory audits
+        run: |
+          set +e
+          summary="$GITHUB_STEP_SUMMARY"
+          note() {
+            echo "### $1" >> "$summary"
+            echo '```' >> "$summary"
+            tail -n 40 "$2" >> "$summary"
+            echo '```' >> "$summary"
+            echo >> "$summary"
+          }
+          echo '## Dependency audit (advisory)' >> "$summary"
+          echo >> "$summary"
+          echo 'This job does not fail the pull request and is not part of ci-gate.' >> "$summary"
+          echo >> "$summary"
+          for lock in services/control-plane/package-lock.json services/ops-console/package-lock.json; do
+            dir=$(dirname "$lock")
+            log=$(mktemp)
+            (cd "$dir" && npm audit --omit=dev) > "$log" 2>&1
+            note "npm audit --omit=dev ($dir)" "$log"
+          done
+          log=$(mktemp)
+          npm install --global pnpm@11.26.0 > "$log" 2>&1
+          (cd apps/windows/app && pnpm audit --prod) >> "$log" 2>&1
+          note 'pnpm audit --prod (apps/windows/app)' "$log"
+          log=$(mktemp)
+          if command -v cargo >/dev/null 2>&1; then
+            cargo install cargo-audit > "$log" 2>&1
+            (cd apps/windows && cargo audit) >> "$log" 2>&1
+          else
+            echo 'cargo is not on PATH; Rust advisories were not scanned.' > "$log"
+          fi
+          note 'cargo audit (apps/windows)' "$log"
+          log=$(mktemp)
+          resolved=apps/macos/Tono.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
+          python3 - "$resolved" > "$log" 2>&1 <<'PY'
+          import json, sys
+          path = sys.argv[1]
+          try:
+              data = json.load(open(path))
+          except FileNotFoundError:
+              print('no Package.resolved')
+              raise SystemExit(0)
+          pins = data.get('pins') or data.get('object', {}).get('pins') or []
+          print(f'{path}: {len(pins)} pins')
+          for pin in pins:
+              ident = pin.get('identity') or pin.get('package')
+              state = pin.get('state') or {}
+              print(f"{ident} {state.get('version') or state.get('revision')}")
+          PY
+          note 'Swift package pins' "$log"
+          exit 0

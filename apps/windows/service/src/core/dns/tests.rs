@@ -466,6 +466,35 @@
     }
 
     #[test]
+    fn restored_local_dns_accepts_guid_case_drift() {
+        let saved = adapter("{A1B2C3D4-E5F6-4718-9ABC-DEF012345678}", Some(LOOPBACK_V4));
+        let snapshot = DnsSnapshot {
+            version: SNAPSHOT_VERSION,
+            taken_at: 1,
+            adapters: vec![saved.clone()],
+        };
+        let current = vec![AdapterDnsSnapshot {
+            interface_guid: saved.interface_guid.to_ascii_lowercase(),
+            ..saved.clone()
+        }];
+
+        assert!(registry_values_match(&saved, &current[0]));
+        assert!(registry_restore_matches(&snapshot, &current));
+        assert!(adapters_owing_live_proof(&snapshot, &current).is_empty());
+        assert!(restore_is_proven(&snapshot, &current, Some(false)));
+        assert!(!restore_is_proven(&snapshot, &current, Some(true)));
+        assert!(!restore_is_proven(&snapshot, &current, None));
+
+        let drifted = vec![AdapterDnsSnapshot {
+            ipv4_name_server: Some(PROTECTED_DNS_V4.to_owned()),
+            ..current[0].clone()
+        }];
+        assert!(!registry_values_match(&saved, &drifted[0]));
+        assert!(!registry_restore_matches(&snapshot, &drifted));
+        assert!(!restore_is_proven(&snapshot, &drifted, Some(false)));
+    }
+
+    #[test]
     fn live_restore_uses_profile_overrides_and_keeps_the_families_apart() {
         let saved = AdapterDnsSnapshot {
             interface_guid: "{DUAL}".to_owned(),
@@ -1019,6 +1048,30 @@
         Ok(())
     }
 
+    /// Update proof is a read. With the barrier still wanted, a missing snapshot must not
+    /// reset adapters to DHCP or remove NRPT: WFP is still denying the resolvers that heal
+    /// would put back. The heal stays for the already-disarmed orphan, where DHCP can answer.
+    #[tokio::test]
+    #[serial]
+    async fn update_observe_heals_snapshotless_dns_only_when_the_barrier_is_down() -> Result<()> {
+        reset_dns_state().await;
+        test_hooks::set_collected_adapters(vec![adapter("{A}", Some(PROTECTED_DNS_V4))]);
+        let status = observe_for_update_with(true).await?;
+        assert!(!status.enabled && !status.snapshot_present, "{status:?}");
+        assert_eq!(test_hooks::take_automatic_resets(), 0);
+        assert_eq!(test_hooks::take_encrypted_restores(), 0);
+
+        let healed = observe_for_update_with(false).await;
+        assert!(
+            healed.is_err(),
+            "adapters still on the TUN endpoint must not read as safe"
+        );
+        assert_eq!(test_hooks::take_automatic_resets(), 1);
+        assert_eq!(test_hooks::take_encrypted_restores(), 1);
+        reset_dns_state().await;
+        Ok(())
+    }
+
     /// The pure half of the P0 fix: what the window says, given only the four observable
     /// values. In particular an open window that has aged past the cap stops suppressing —
     /// a leaked depth cannot mute the machine's network events for the life of the service.
@@ -1078,6 +1131,35 @@
             depth_before,
             "unwinding through the guard must close the window"
         );
+    }
+
+    /// The async caller can time out and drop its guard while `spawn_blocking` is still writing
+    /// the registry. The window has to stay up until that write returns, or the notification
+    /// looks like the machine's network changed.
+    #[test]
+    #[serial]
+    fn an_abandoned_caller_does_not_close_the_window_the_write_still_holds() {
+        let depth_before = SELF_WRITE_DEPTH.load(Ordering::Acquire);
+        let (started, started_rx) = std::sync::mpsc::channel();
+        let (release, release_rx) = std::sync::mpsc::channel();
+        let writer = std::thread::spawn(move || {
+            hold_self_write_across_the_write(|| {
+                started.send(()).expect("test thread still listening");
+                release_rx.recv().expect("test released the write");
+            });
+        });
+        started_rx.recv().expect("write started");
+        assert!(
+            in_self_write_window(),
+            "the write still owns the window after its caller would have returned"
+        );
+        assert_eq!(
+            SELF_WRITE_DEPTH.load(Ordering::Acquire),
+            depth_before + 1
+        );
+        release.send(()).expect("writer still waiting");
+        writer.join().expect("writer thread");
+        assert_eq!(SELF_WRITE_DEPTH.load(Ordering::Acquire), depth_before);
     }
 
     /// The end-to-end shape of the P0: an `enable` applies loopback DNS inside a window, and
