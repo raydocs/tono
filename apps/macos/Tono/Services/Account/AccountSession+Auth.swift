@@ -2,6 +2,33 @@ import Foundation
 import Observation
 
 extension AccountSession {
+    /// Signed-out launch cleanup is automatic recovery, not the user's Restore.
+    /// When an authenticated helper proves no broad barrier is held, only DNS
+    /// is restored, so an AI hold kept by automatic recovery survives. Any
+    /// other answer (older, rejecting or unreachable helper, DNS failure)
+    /// keeps the full release so a signed-out launch never stays blocked.
+    static func releaseSignedOutLaunchProtection(
+        status: () async -> KillSwitchService.StatusObservation = {
+            await PrivilegedRuntimeCoordinator.shared.refreshKillSwitchStatus()
+        },
+        restoreDNS: () async throws -> Void = {
+            _ = try await PrivilegedRuntimeCoordinator.shared.restoreProtectedDNSIfConfigured()
+        },
+        disarm: () async throws -> Void = {
+            try await PrivilegedRuntimeCoordinator.shared.disarmKillSwitch()
+        }
+    ) async throws {
+        if await status() == .confirmed(requiresProtectionRecovery: false) {
+            do {
+                try await restoreDNS()
+                return
+            } catch {
+                // Fall through to the full release, which restores DNS too.
+            }
+        }
+        try await disarm()
+    }
+
     func restore() async {
         await accountLifecycle.run { await self.performRestore() }
     }
@@ -38,7 +65,7 @@ extension AccountSession {
                 }
                 if !shouldResumeProtection && !KillSwitchService.isArmed {
                     do {
-                        try await PrivilegedRuntimeCoordinator.shared.disarmKillSwitch()
+                        try await Self.releaseSignedOutLaunchProtection()
                     } catch {
                         state = .error(
                             String(localized: "Tono could not release a protection state left by an earlier session. Run the documented sudo emergency-disarm command, then reopen Tono. \(error.localizedDescription)")
