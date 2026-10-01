@@ -1018,7 +1018,13 @@ fn status(store: &Store) -> Result<UpdateStatus> {
             .map(|a| format!("{:?}", a.execution))
             .unwrap_or_else(|| "none".into()),
         offer: None,
-        needs_attention: None,
+        // An exhausted recovery is no longer relaunched (#1292); the App must ask for repair.
+        needs_attention: store.recovery_exhausted().unwrap_or(false).then(|| {
+            format!(
+                "automatic update recovery failed {MAX_RECOVERY_RUNS} times and stopped; \
+                 the installation needs manual repair"
+            )
+        }),
         successor_relaunched: false,
     })
 }
@@ -1650,6 +1656,11 @@ pub fn reconcile_before_desired() -> Result<bool> {
                 .arg("--update-recover")
                 .spawn()?;
         }
+    } else if store.recovery_exhausted()? {
+        // Each counted run already left the network released with the AI hold (or strict).
+        tracing::warn!(
+            "update recovery failed {MAX_RECOVERY_RUNS} times; not relaunching it (manual repair required)"
+        );
     }
     Ok(true)
 }

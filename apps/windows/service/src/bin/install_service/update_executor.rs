@@ -460,6 +460,14 @@ fn execute(recovery: bool) -> Result<(), Error> {
             store.record_complete_publication_recovery(native::process_clock_now())?;
             return Ok(());
         }
+        // As in the RolledBack replay: the Service this run restarts must see a live
+        // recovery owner, not relaunch a second recovery that stops it again (#1292).
+        let mut next = store.state.clone();
+        next.attempt
+            .as_mut()
+            .context("attempt checked above")?
+            .executor = Some(self_image.clone());
+        store.save(next)?;
     } else {
         ensure!(
             tx::file_digest(&dir.join("package.exe"))? == tx::target(&a.manifest).artifact_sha256,
@@ -652,10 +660,11 @@ fn execute(recovery: bool) -> Result<(), Error> {
     } else {
         None
     };
+    let released = std::cell::Cell::new(false);
     let release = || {
         // The original repair/store guards still fence lifecycle writers. The
         // publication outcome has released its owner, and SCM remains stopped.
-        shared::block_on_abandoning(async {
+        let result = shared::block_on_abandoning(async {
             let _owner = tono_service_protocol::acquire_service_owner()
                 .await?
                 .context("Service still owns rolled-back update recovery")?;
@@ -663,9 +672,21 @@ fn execute(recovery: bool) -> Result<(), Error> {
                 return Ok(());
             }
             tono_service_protocol::emergency_disarm_windows_kill_switch_applying_narrow().await
-        })?
+        })
+        .and_then(|settled| settled);
+        released.set(result.is_ok());
+        result
     };
+    let failed_recovery = recovery && outcome.is_err();
     let restart = || {
+        // Count a failed recovery only once its network settled: released with the AI
+        // hold, or strict. A failed release keeps being retried, never abandoned (#1292).
+        if failed_recovery
+            && (released.get() || native::strict_kill_switch_intent_on_disk())
+            && let Err(error) = store.note_recovery_run()
+        {
+            eprintln!("failed update recovery could not be counted: {error:#}");
+        }
         // Even a failed plan/rollback must leave the IPC recovery Service available.
         configure_windows_service_recovery(&service)?;
         drop(store);

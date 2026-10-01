@@ -23,6 +23,10 @@ use std::{
 /// (retained), not as corruption. See docs/UPDATE_PROTOCOL_V1.md.
 pub const STATE_SCHEMA_VERSION: u64 = 1;
 
+/// Failed recovery runs after which startup stops relaunching the recovery executor (#1292).
+/// Each counted run already settled the network: released with the AI hold, or strict.
+pub const MAX_RECOVERY_RUNS: u32 = 3;
+
 #[derive(Deserialize)]
 struct SchemaProbe {
     #[serde(default)]
@@ -392,13 +396,46 @@ impl Store {
     /// Shared startup/executor admission for interrupted installation recovery.
     pub fn independent_recovery_pending(&self) -> Result<bool> {
         Ok(match self.attempt()?.execution {
-            Execution::Consumed | Execution::Replaced | Execution::Uncertain => true,
+            Execution::Consumed | Execution::Replaced | Execution::Uncertain => {
+                self.recovery_runs()? < MAX_RECOVERY_RUNS
+            }
             Execution::RolledBack => {
                 self.rollback_finalizer()?.stage().ok().flatten()
                     != Some(RollbackFinalizationStage::Complete)
             }
             _ => false,
         })
+    }
+
+    /// An in-flight attempt whose recovery failed [`MAX_RECOVERY_RUNS`] times. Startup no
+    /// longer relaunches the executor; the record stays pending and needs manual repair.
+    pub fn recovery_exhausted(&self) -> Result<bool> {
+        Ok(matches!(
+            self.attempt()?.execution,
+            Execution::Consumed | Execution::Replaced | Execution::Uncertain
+        ) && self.recovery_runs()? >= MAX_RECOVERY_RUNS)
+    }
+
+    /// Count one failed recovery run whose network outcome settled. Like rollback
+    /// finalization, this private sidecar grants no publication or consumption authority.
+    pub fn note_recovery_run(&self) -> Result<()> {
+        let runs = self.recovery_runs()?.saturating_add(1);
+        atomic_write(&self.recovery_runs_path()?, runs.to_string().as_bytes())
+    }
+
+    fn recovery_runs(&self) -> Result<u32> {
+        let file = match File::open(self.recovery_runs_path()?) {
+            Ok(file) => file,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(0),
+            Err(error) => return Err(error.into()),
+        };
+        let mut text = String::new();
+        file.take(16).read_to_string(&mut text)?;
+        text.trim().parse().context("corrupt update recovery count")
+    }
+
+    fn recovery_runs_path(&self) -> Result<PathBuf> {
+        Ok(self.attempt_dir()?.join("recovery-runs"))
     }
 
     pub fn rollback_finalizer(&self) -> Result<RollbackFinalizer> {
@@ -1131,6 +1168,30 @@ pub(crate) mod tests {
         drop(store);
         let store = Store::open(&root).unwrap();
         assert!(!store.independent_recovery_pending().unwrap());
+        drop(store);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn update_recovery_stops_relaunching_after_bounded_failed_runs() {
+        let (root, mut store, peer, executor) = reserved();
+        authorize(&mut store, &peer);
+        store.consume(&executor, 1_900_000_050).unwrap();
+        // The rollback itself keeps failing, so every recovery run ends Uncertain (#1292).
+        store.execution(Execution::Uncertain).unwrap();
+        std::fs::create_dir_all(store.attempt_dir().unwrap()).unwrap();
+        for _ in 0..MAX_RECOVERY_RUNS {
+            assert!(store.independent_recovery_pending().unwrap());
+            store.note_recovery_run().unwrap();
+        }
+        drop(store);
+        let store = Store::open(&root).unwrap();
+        assert!(
+            !store.independent_recovery_pending().unwrap(),
+            "Service startup must stop relaunching a recovery that keeps failing"
+        );
+        assert!(store.recovery_exhausted().unwrap());
+        assert!(store.pending(), "exhaustion must not fabricate recovery");
         drop(store);
         std::fs::remove_dir_all(root).unwrap();
     }
