@@ -162,8 +162,8 @@ actor PrivilegedRuntimeCoordinator {
         )
     }
 
-    func disarmKillSwitch() throws {
-        try KillSwitchService.disarm()
+    func disarmKillSwitch(preserveAIHold: Bool = false) throws {
+        try KillSwitchService.disarm(preserveAIHold: preserveAIHold)
     }
 
     func restrictKillSwitchToBootstrap() throws {

@@ -41,6 +41,7 @@ final class ProtectedReconnectTests: XCTestCase {
         runtime.restoreDNS = { true }
         runtime.disableSystemProxy = {}
         runtime.disarm = {}
+        runtime.releaseAfterFailure = {}
         runtime.restrictToBootstrap = {}
         // The helper holds no persisted kill-switch state for this session:
         // an authenticated status answers armed=false / wanted=false. Reading
@@ -139,6 +140,7 @@ final class ProtectedReconnectTests: XCTestCase {
         runtime.restoreDNS = { true }
         runtime.disableSystemProxy = {}
         runtime.disarm = {}
+        runtime.releaseAfterFailure = {}
         runtime.restrictToBootstrap = {}
         runtime.refreshKillSwitchStatus = { .rejected }
         app.networkProtection = runtime
