@@ -324,6 +324,24 @@ pub fn build_runtime(input: RuntimeInput<'_>) -> Result<OwnedSingBoxRuntime, Sin
             }
         }
     }
+    if home_target.is_some() {
+        // The residential pins above are TCP only. A Hysteria2 exit carries UDP,
+        // so assistant QUIC would otherwise ride `final` out of the cloud exit and
+        // show that identity instead of the residential one. Reject it so the
+        // app retries over TCP, as mihomo and the macOS compiler already do.
+        rules.push(json!({"network":"udp","domain_suffix":config::CLAUDE_HOME_DOMAINS.to_vec(),"action":"reject"}));
+        rules.push(json!({"network":"udp","ip_cidr":config::CLAUDE_HOME_IPV4_CIDRS.to_vec(),"action":"reject"}));
+        for (field, values) in [
+            ("process_name", input.home_process_names),
+            ("process_path_regex", input.home_process_path_regexes),
+        ] {
+            if !values.is_empty() {
+                let mut rule = json!({"network":"udp","action":"reject"});
+                rule[field] = json!(values);
+                rules.push(rule);
+            }
+        }
+    }
     let mut direct_endpoints = BTreeSet::new();
     let mut hosts: BTreeMap<String, BTreeSet<Ipv4Addr>> = BTreeMap::new();
     if let Some(plan) = input.direct_plan {
@@ -782,6 +800,26 @@ mod tests {
             certificate_sha256("abcd").unwrap_err(),
             SingBoxError::UnsupportedCertificatePin
         );
+    }
+
+    #[test]
+    fn hy2_exit_with_a_home_hop_rejects_assistant_udp() {
+        use base64::Engine as _;
+        let mut nodes = nodes();
+        let spki = base64::engine::general_purpose::STANDARD.encode([0x11u8; 32]);
+        nodes.push(node::admit_node(&serde_yaml_ng::to_value(json!({"name":"Fixture Gamma · hy2","type":"hysteria2",
+            "server":"1.0.0.1","port":8445,"password":"22222222-2222-4222-8222-222222222222","sni":"hy2.example",
+            "fingerprint":"ab".repeat(32),"certificate-public-key-sha256":spki})).unwrap()).unwrap());
+        let routing = CatalogRouting { home_proxy: Some("Fixture Alpha".into()), ..Default::default() };
+        let mut request = input(&nodes, &routing);
+        request.selected = "Fixture Gamma · hy2";
+        let runtime = build_runtime(request).unwrap();
+        let value: Value = serde_json::from_str(runtime.runtime_json()).unwrap();
+        let rules = value["route"]["rules"].as_array().unwrap();
+        assert!(rules.iter().any(|rule| rule["network"] == "udp" && rule["action"] == "reject"
+            && rule["domain_suffix"].as_array().is_some_and(|hosts| hosts.contains(&json!("claude.ai")))));
+        assert!(rules.iter().any(|rule| rule["network"] == "udp" && rule["action"] == "reject"
+            && rule["ip_cidr"] == json!(config::CLAUDE_HOME_IPV4_CIDRS.to_vec())));
     }
 
     #[test]
