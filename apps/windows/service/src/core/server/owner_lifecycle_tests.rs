@@ -299,3 +299,32 @@ async fn disconnect_path_gates_stay_open_after_stop_clears_the_owner_record()
     drop(guard);
     Ok(())
 }
+
+#[tokio::test]
+#[serial]
+async fn accepted_goodbye_refuses_new_lifecycle_work_before_its_response_grace() {
+    struct ResetGoodbye;
+    impl Drop for ResetGoodbye {
+        fn drop(&mut self) {
+            super::OWNER_GOODBYE_PENDING.store(false, std::sync::atomic::Ordering::SeqCst);
+        }
+    }
+    let _reset = ResetGoodbye;
+    let reserved_before_unlock = {
+        let _lifecycle = super::OWNER_LIFECYCLE_LOCK.lock().await;
+        super::owner_goodbye_verdict(false, Some(false)).expect("an idle daemon may stop");
+        super::schedule_owner_goodbye_shutdown();
+        // No await between scheduling and this sample: the response-grace task cannot run yet.
+        super::lifecycle_is_stopping()
+    };
+    let result = super::enter_owner_lifecycle(&owner(97_004), super::OwnerLifecycleGate::Unchecked).await;
+    match result {
+        std::ops::ControlFlow::Break(response) => {
+            let response = response.expect("a shutdown refusal must encode");
+            assert_eq!(response.status, http::StatusCode::SERVICE_UNAVAILABLE);
+        }
+        std::ops::ControlFlow::Continue(_) => panic!("a goodbye-reserved process admitted lifecycle work"),
+    }
+    assert!(super::lifecycle_is_stopping(), "shutdown must stay reserved");
+    assert!(reserved_before_unlock, "shutdown must be reserved before dropping the lifecycle lock");
+}
