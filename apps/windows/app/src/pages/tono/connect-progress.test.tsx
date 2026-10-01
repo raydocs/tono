@@ -501,7 +501,7 @@ describe('ConnectProgressCard', () => {
     ).toBeDefined()
     expect(
       screen.getByText(
-        /Switching cities will not help. Open Windows DNS settings/,
+        'Encrypted DNS blocked this connection.',
       ),
     ).toBeDefined()
     expect(

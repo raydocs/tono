@@ -80,6 +80,12 @@ export function formatDate(value: number | null | undefined): string {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
 }
 
+/** A UTC day bucket keeps its calendar date in every operator timezone. */
+export function formatUtcDate(value: number): string {
+  const date = new Date(value * 1_000);
+  return `${date.getUTCFullYear()}-${pad(date.getUTCMonth() + 1)}-${pad(date.getUTCDate())}`;
+}
+
 function pad(n: number): string {
   return n < 10 ? `0${n}` : String(n);
 }
@@ -96,4 +102,3 @@ export function splitPercent(ratio: number | null | undefined): { number: string
   if (ratio === null || ratio === undefined) return { number: copy.missing, unit: copy.unit.pct };
   return { number: (ratio * 100).toFixed(1), unit: copy.unit.pct };
 }
-

@@ -16,6 +16,9 @@ mod process;
 mod tono;
 pub mod utils;
 
+#[cfg(test)]
+mod ws_handle_ipc_tests;
+
 use crate::constants::files;
 use crate::{
     core::handle,

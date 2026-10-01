@@ -1,0 +1,197 @@
+{
+  "log": {
+    "level": "warn"
+  },
+  "dns": {
+    "servers": [
+      {
+        "type": "fakeip",
+        "tag": "Tono-FakeIP",
+        "inet4_range": "198.18.16.0/20"
+      },
+      {
+        "type": "https",
+        "tag": "Tono-DoH",
+        "server": "1.1.1.1",
+        "server_port": 443,
+        "path": "/dns-query",
+        "tls": {
+          "enabled": true,
+          "server_name": "1.1.1.1",
+          "alpn": [
+            "h2"
+          ]
+        },
+        "detour": "Tono-Exit"
+      },
+      {
+        "type": "https",
+        "tag": "Tono-DoH-Backup",
+        "server": "8.8.8.8",
+        "server_port": 443,
+        "path": "/dns-query",
+        "tls": {
+          "enabled": true,
+          "server_name": "dns.google",
+          "alpn": [
+            "h2"
+          ]
+        },
+        "detour": "Tono-Exit"
+      }
+    ],
+    "rules": [
+      {
+        "query_type": [
+          "AAAA"
+        ],
+        "action": "predefined",
+        "rcode": "NOERROR"
+      },
+      {
+        "inbound": [
+          "Tono-DNS",
+          "Tono-TUN",
+          "Tono-Mixed"
+        ],
+        "query_type": [
+          "A"
+        ],
+        "action": "route",
+        "server": "Tono-FakeIP",
+        "rewrite_ttl": 30
+      },
+      {
+        "action": "evaluate",
+        "server": "Tono-DoH",
+        "tag": "primary"
+      },
+      {
+        "match_response": "primary",
+        "response_rcode": "NOERROR",
+        "action": "respond"
+      },
+      {
+        "action": "evaluate",
+        "server": "Tono-DoH-Backup",
+        "tag": "backup"
+      },
+      {
+        "match_response": "backup",
+        "action": "respond"
+      }
+    ],
+    "final": "Tono-DoH",
+    "strategy": "ipv4_only"
+  },
+  "inbounds": [
+    {
+      "type": "tun",
+      "tag": "Tono-TUN",
+      "interface_name": "utun199",
+      "address": [
+        "198.18.0.1/30"
+      ],
+      "dns_address": [
+        "198.18.0.2"
+      ],
+      "dns_mode": "disabled",
+      "auto_route": true,
+      "strict_route": false,
+      "mtu": 1500,
+      "multi_queue": false,
+      "route_exclude_address": [
+        "8.8.4.4/32"
+      ]
+    },
+    {
+      "type": "direct",
+      "tag": "Tono-DNS",
+      "listen": "127.0.0.1",
+      "listen_port": 53
+    },
+    {
+      "type": "mixed",
+      "tag": "Tono-Mixed",
+      "listen": "127.0.0.1",
+      "listen_port": 29190
+    }
+  ],
+  "outbounds": [
+    {
+      "type": "vless",
+      "tag": "Shape Alpha",
+      "server": "8.8.4.4",
+      "server_port": 443,
+      "uuid": "11111111-1111-4111-8111-111111111111",
+      "flow": "xtls-rprx-vision",
+      "tls": {
+        "enabled": true,
+        "server_name": "alpha.example",
+        "utls": {
+          "enabled": true,
+          "fingerprint": "chrome"
+        },
+        "reality": {
+          "enabled": true,
+          "public_key": "3p7bfXt9wbTTW2HC7OQ1Nz-DQ8hbeGdNrfx-FG-IK08",
+          "short_id": "a1b2"
+        }
+      }
+    },
+    {
+      "type": "selector",
+      "tag": "Tono-Exit",
+      "outbounds": [
+        "Shape Alpha"
+      ],
+      "default": "Shape Alpha",
+      "interrupt_exist_connections": true
+    }
+  ],
+  "route": {
+    "auto_detect_interface": true,
+    "default_domain_resolver": {
+      "server": "Tono-DoH",
+      "strategy": "ipv4_only"
+    },
+    "rules": [
+      {
+        "inbound": [
+          "Tono-DNS"
+        ],
+        "action": "hijack-dns"
+      },
+      {
+        "port": [
+          53
+        ],
+        "action": "hijack-dns"
+      },
+      {
+        "ip_version": 6,
+        "action": "reject"
+      },
+      {
+        "network": [
+          "udp",
+          "icmp"
+        ],
+        "action": "reject"
+      }
+    ],
+    "final": "Tono-Exit"
+  },
+  "experimental": {
+    "cache_file": {
+      "enabled": false
+    },
+    "clash_api": {
+      "external_controller": "127.0.0.1:29191",
+      "secret": "shape-secret-not-a-customer-credential",
+      "default_mode": "rule",
+      "access_control_allow_origin": [],
+      "access_control_allow_private_network": false
+    }
+  }
+}

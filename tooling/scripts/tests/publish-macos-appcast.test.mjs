@@ -15,6 +15,7 @@ import {
   validateEdSignature,
   validateEnclosureUrl,
   validateHardwareRequirements,
+  validateReleaseLink,
   validateReleaseNotes,
   verifyEnclosureSignature,
 } from '../publish-macos-appcast.mjs'
@@ -442,4 +443,60 @@ test('pure helpers refuse independently of the aggregate validator', () => {
     itemIndent: '        ',
     childIndent: '            ',
   })
+})
+
+test('expected-host cannot move the download URL off the release host', () => {
+  const evil = 'https://evil.example/download/tono-0.0.2-build43/Tono-0.0.2-build43-arm64.zip'
+  assert.throws(
+    () =>
+      validateEnclosureUrl(evil, {
+        version: '43',
+        shortVersionString: '0.0.2',
+        expectedHost: 'evil.example',
+      }),
+    /enclosure host is fixed at releases\.afk\.ccwu\.cc/,
+  )
+  assert.throws(
+    () =>
+      validateEnclosureUrl(
+        'https://releases.afk.ccwu.cc/other/tono-0.0.2-build43/Tono-0.0.2-build43-arm64.zip',
+        {
+          version: '43',
+          shortVersionString: '0.0.2',
+          expectedPathPrefix: '/other/',
+        },
+      ),
+    /enclosure path prefix is fixed at \/download\//,
+  )
+  refusal(
+    {
+      enclosureUrl: evil,
+      link: 'https://evil.example/releases/tag/tono-0.0.2-build43',
+      expectedHost: 'evil.example',
+    },
+    /enclosure host is fixed at releases\.afk\.ccwu\.cc/,
+  )
+  const published = buildAppcastUpdate(input({ expectedHost: 'releases.afk.ccwu.cc' }))
+  assert.equal(
+    published.fields.enclosureUrl,
+    'https://releases.afk.ccwu.cc/download/tono-0.0.2-build43/Tono-0.0.2-build43-arm64.zip',
+  )
+  assert.equal(
+    published.fields.link,
+    'https://github.com/raydocs/tono/releases/tag/tono-0.0.2-build43',
+  )
+  assert.throws(
+    () =>
+      validateReleaseLink('https://github.com/raydocs/tono/releases/tag/tono-0.0.2-build43', {
+        version: '43',
+        expectedHost: 'releases.afk.ccwu.cc',
+      }),
+    /release link host is fixed at github\.com/,
+  )
+  assert.equal(
+    validateReleaseLink('https://github.com/raydocs/tono/releases/tag/tono-0.0.2-build43', {
+      version: '43',
+    }),
+    'https://github.com/raydocs/tono/releases/tag/tono-0.0.2-build43',
+  )
 })

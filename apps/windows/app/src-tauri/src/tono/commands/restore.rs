@@ -31,7 +31,8 @@ enum StoredProtection {
     /// The Service answered and wants the barrier.
     Armed(Box<KillSwitchStatus>),
     /// The Service answered and wants no barrier. The only reading that proves absence.
-    ProvenAbsent,
+    /// `reconnect_after_release` is set only by the crash-window tombstone.
+    ProvenAbsent { reconnect_after_release: bool },
     /// The Service did not answer. Never treated as absence.
     Unknown(String),
 }
@@ -44,7 +45,12 @@ async fn probe_stored_protection(deadline: tokio::time::Instant) -> StoredProtec
             Ok(Ok(snapshot)) => {
                 return match snapshot.kill_switch {
                     Some(status) if status.wanted => StoredProtection::Armed(Box::new(status)),
-                    _ => StoredProtection::ProvenAbsent,
+                    Some(status) => StoredProtection::ProvenAbsent {
+                        reconnect_after_release: status.reconnect_after_release,
+                    },
+                    None => StoredProtection::ProvenAbsent {
+                        reconnect_after_release: false,
+                    },
                 };
             }
             Ok(Err(error)) => last_error = error.to_string(),
@@ -86,7 +92,7 @@ fn apply_stored_protection(inner: &mut TonoInner, protection: &StoredProtection)
             inner.fsm.mark_kill_switch_armed();
         }
         StoredProtection::Unknown(_) => inner.fsm.mark_kill_switch_armed(),
-        StoredProtection::ProvenAbsent => {}
+        StoredProtection::ProvenAbsent { .. } => {}
     }
 }
 
@@ -211,7 +217,40 @@ pub async fn restore_session(app: AppHandle, state: Arc<TonoState>) {
                     logging!(info, Type::Service, "Tono: update recovery Connect skipped; a Restore internet or newer connection action during restore owns the connection");
                 }
             }
-            Ok(None) => connection::schedule_startup_resume_if_proven(&state, &app, generation).await,
+            Ok(None) => {
+                let spawn_reconnect = {
+                    let inner = state.lock().await;
+                    connection::crash_recovery_reconnect_allowed(
+                        matches!(
+                            protection,
+                            StoredProtection::ProvenAbsent {
+                                reconnect_after_release: true
+                            }
+                        ),
+                        matches!(inner.account_state, AccountState::Ready),
+                        inner.selected_node.is_some(),
+                        inner.catalog_requires_choice,
+                        inner.fsm.status().is_disconnecting,
+                    )
+                };
+                if spawn_reconnect {
+                    let state = state.clone();
+                    let app = app.clone();
+                    AsyncHandler::spawn(move || async move {
+                        if let Err(error) =
+                            connection::connect_for_generation(state, app, Some(connect_epoch)).await
+                        {
+                            logging!(
+                                warn,
+                                Type::Service,
+                                "Tono: 崩溃恢复放行后的后台重连未完成: {error}"
+                            );
+                        }
+                    });
+                } else {
+                    connection::schedule_startup_resume_if_proven(&state, &app, generation).await;
+                }
+            }
             // An offline obligation must stay offline. Failed adoption
             // cannot grant reconnect by falling through legacy restore.
             _ => {}
@@ -805,7 +844,9 @@ mod offline_admission_tests {
         leave_verified_session(&dir, &catalog_a, "session-a").await;
         let grant_path = dir.join(GRANT_FILE_NAME);
         let saved_grant = std::fs::read(&grant_path).unwrap();
-        let known = || StoredProtection::ProvenAbsent;
+        let known = || StoredProtection::ProvenAbsent {
+            reconnect_after_release: false,
+        };
 
         assert_eq!(restore_unreachable(&dir, "session-a", known(), None).await, (AccountState::Ready, Some(1_000)),
             "a matching grant admits offline, verified when the online session confirmed the catalog");
@@ -855,7 +896,15 @@ mod offline_admission_tests {
         );
         crate::tono::state::write_private_file(&dir.join(GRANT_FILE_NAME), revoked_a.as_bytes()).unwrap();
 
-        let (account, offline) = restore_unreachable(&dir, "session-b", StoredProtection::ProvenAbsent, None).await;
+        let (account, offline) = restore_unreachable(
+            &dir,
+            "session-b",
+            StoredProtection::ProvenAbsent {
+                reconnect_after_release: false,
+            },
+            None,
+        )
+        .await;
         assert!(
             account != AccountState::Suspended && account != AccountState::Ready && offline.is_none(),
             "A's revocation must not decide B's launch: {account:?}"

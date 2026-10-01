@@ -234,17 +234,7 @@ const SERVER_TEST_TIMEOUT: Duration = Duration::from_secs(4);
 
 /// Stable wire key for a connect stage (`TonoStatus.stage`).
 pub fn stage_key(stage: ConnectStage) -> &'static str {
-    match stage {
-        ConnectStage::Preparing => "preparing",
-        ConnectStage::PreparingService => "preparingService",
-        ConnectStage::StartingKillSwitch => "startingKillSwitch",
-        ConnectStage::StartingTunnel => "startingTunnel",
-        ConnectStage::LockingTraffic => "lockingTraffic",
-        ConnectStage::ApplyingCloudPolicy => "applyingCloudPolicy",
-        ConnectStage::SecuringDns => "securingDNS",
-        ConnectStage::CheckingExit => "checkingExit",
-        ConnectStage::VerifyingTraffic => "verifyingTraffic",
-    }
+    tono_core::connect_timing::wire_key(stage)
 }
 
 /// Stable wire key for the top-level UI state (`TonoStatus.uiState`).
