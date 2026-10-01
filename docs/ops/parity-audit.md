@@ -55,11 +55,11 @@
 | 机器流量总览 + Top | `TrafficPage.tsx` | GET `metrics?range=` | `operations_agent_samples` `operations_agent_rollups` | 缺 | 独立页或节点详情曲线。`legacy-handlers/metrics.ts` |
 | 客户本期累计 | `TrafficPage.tsx` | GET `users` | `users` | `Customers.tsx` 额度 | 列表够用，不必单独页 |
 | 客户小时用量 | `TrafficPage.tsx` | GET `usage-hours?range=` | `operations_user_usage_hours` `users` | `CustomerDetail.tsx` 使用时段（另一套 `customers/{id}/activity`） | 机队小时合计缺。接口在 `legacy-handlers/usage-hours.ts` |
-| 发布概况（目录/规则/客户端落后） | `ControlPage.tsx` | GET `exit-catalog` `traffic-policy` `activity` | `managed_exit_catalog` `managed_traffic_policy` `telemetry_windows` | `settings/Catalog.tsx` **路牌**，链回 `/ops/` | 设置·目录要编辑器 |
-| 节点目录 YAML 编辑/diff/发布 | `ControlPage.tsx` | GET/PUT `exit-catalog` | `managed_exit_catalog` `operations_catalog_revision_metadata` | 缺（明确不双开） | 设置节。`shared-admin/catalog.ts`。409 要保留 |
-| 直连规则 JSON 编辑/签名发布 | `ControlPage.tsx` | GET/PUT `traffic-policy` | `managed_traffic_policy` | `settings/Candidates.tsx` 只能出草稿 POST `traffic-policy/draft-from-candidates` | 缺发布。PUT 在 `shared-admin/traffic-policy.ts` |
-| 关闭网页直连 / 关掉全部直连 | `ControlPage.tsx` | PUT `traffic-policy`（改草稿再发） | `managed_traffic_policy` | 缺 | 编辑器里的快捷，不必独立页 |
-| 目录历史（sha/台数，无原文） | `ControlPage.tsx` | GET `catalog-revisions` | `operations_catalog_revision_metadata` `managed_exit_catalog` | 缺 | 目录编辑器旁折叠。`router.ts` → `reads/catalog-revisions.ts` |
+| 发布概况（目录/规则/客户端落后） | `ControlPage.tsx` | GET `exit-catalog` `traffic-policy` `activity` | `managed_exit_catalog` `managed_traffic_policy` `telemetry_windows` | `settings/Catalog.tsx` `settings/Policy.tsx` | 覆盖。旧页 2026-09-30 起只读，按钮链到新后台 |
+| 节点目录 YAML 编辑/diff/发布 | `ControlPage.tsx`（已删） | GET/PUT `exit-catalog` | `managed_exit_catalog` `operations_catalog_revision_metadata` | `settings/Catalog.tsx` | 覆盖。唯一发布点；旧页的 PUT 已删 |
+| 直连规则 JSON 编辑/签名发布 | `ControlPage.tsx`（已删） | GET/PUT `traffic-policy` | `managed_traffic_policy` | `settings/Policy.tsx`（先 `dryRun` 再发） | 覆盖。唯一发布点；旧页的 PUT 已删 |
+| 关闭网页直连 / 关掉全部直连 | `ControlPage.tsx`（已删） | PUT `traffic-policy`（改草稿再发） | `managed_traffic_policy` | `settings/Policy.tsx` 快捷 | 覆盖 |
+| 目录历史（sha/台数，无原文） | `ControlPage.tsx`（只读保留） | GET `catalog-revisions` | `operations_catalog_revision_metadata` `managed_exit_catalog` | `settings/Catalog.tsx` 历史 | 覆盖 |
 | 顶栏：搜节点/客户、隐私、主题、刷新 | `main.tsx` | 本地 + 已拉资源 | — | `app/Shell.tsx` `CommandPalette.tsx` | 覆盖。不要搬旧顶栏 |
 
 旧后台 **API 有、页面没有**（仍算缺口，因为关 `/ops/` 后没入口）：

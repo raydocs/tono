@@ -91,11 +91,48 @@ if [ "$PREVIEW_D1_NAME" = "DB" ]; then
   fail "preview database name is the production binding DB; refusing to run"
 fi
 
+# wrangler uses database_id from --config when database_name matches the
+# positional argument. A preview config that kept the production id would
+# migrate that live database. Compare before any remote call.
+jsonc_database_ids() {
+  node -e '
+    const fs = require("fs");
+    const text = fs.readFileSync(process.argv[1], "utf8");
+    const re = /"database_id"\s*:\s*"([^"]+)"/g;
+    const ids = [];
+    for (const match of text.matchAll(re)) ids.push(match[1].toLowerCase());
+    if (ids.length) process.stdout.write(ids.join("\n") + "\n");
+  ' "$1"
+}
+
+refuse_preview_config_targeting_production() {
+  preview_config=$1
+  [ -f "$preview_config" ] || return 0
+  prod_ids=$(jsonc_database_ids "$control_plane/wrangler.jsonc"
+    jsonc_database_ids "$control_plane/wrangler.admin.jsonc")
+  preview_ids=$(jsonc_database_ids "$preview_config")
+  old_ifs=$IFS
+  IFS='
+'
+  for id in $preview_ids; do
+    [ -n "$id" ] || continue
+    for prod in $prod_ids; do
+      [ -n "$prod" ] || continue
+      if [ "$id" = "$prod" ]; then
+        IFS=$old_ifs
+        fail "wrangler.preview.jsonc database_id matches production ($prod); refusing to run"
+      fi
+    done
+  done
+  IFS=$old_ifs
+}
+
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 repo_root=$(CDPATH= cd -- "$script_dir/../.." && pwd)
 control_plane=$repo_root/services/control-plane
 [ -f "$control_plane/wrangler.jsonc" ] \
   || fail "missing $control_plane/wrangler.jsonc"
+refuse_preview_config_targeting_production "$control_plane/wrangler.preview.jsonc"
 
 if [ -n "$keep_local_dir" ]; then
   mkdir -p "$keep_local_dir" || fail "could not create $keep_local_dir"
