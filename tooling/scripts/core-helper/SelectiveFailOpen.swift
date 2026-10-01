@@ -139,16 +139,30 @@ enum SelectiveFailOpen {
     /// A `route -n get` of one prefix. Absent only on proof: "not in table",
     /// a different best match, or this exact prefix held by a route that is
     /// not a blackhole (not Tono's). A blackhole on this exact prefix is
-    /// Tono's. Any other exit or output proves nothing.
+    /// Tono's. Any other exit or output proves nothing, and so does a
+    /// destination or mask that is not an address of the prefix's family
+    /// (route.c prints "invalid" when it cannot format one). route.c exits 0
+    /// even after the routing-socket write fails, so its ESRCH diagnostic
+    /// "not in table" counts whatever the exit code.
     static func routeLayerReading(status: Int32, output: String, prefix: String) -> LayerReading {
-        guard status == 0 else { return output.contains("not in table") ? .absent : .unknown }
-        if let names = readbackFlags(output, prefix: prefix), !names.isEmpty {
+        if status == 0, let names = readbackFlags(output, prefix: prefix), !names.isEmpty {
             return names.contains("BLACKHOLE") ? .present : .absent
         }
+        if output.contains("not in table") { return .absent }
+        guard status == 0 else { return .unknown }
         let fields = readbackFields(output)
         guard let identity = routeReadbackIdentity[prefix],
-              let destination = fields["destination"], let mask = fields["mask"] else { return .unknown }
+              let destination = fields["destination"], let mask = fields["mask"],
+              readbackAddressParses(destination, prefix: prefix),
+              readbackAddressParses(mask, prefix: prefix) else { return .unknown }
         return destination == identity.destination && mask == identity.mask ? .unknown : .absent
+    }
+
+    /// "default" or an address of the family `prefix` belongs to.
+    private static func readbackAddressParses(_ text: String, prefix: String) -> Bool {
+        if text == "default" { return true }
+        var address = [UInt8](repeating: 0, count: 16)
+        return inet_pton(prefix == ipv4Prefix ? AF_INET : AF_INET6, text, &address) == 1
     }
 
     private static func readbackFields(_ output: String) -> [String: String] {

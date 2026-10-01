@@ -632,8 +632,9 @@ func runUpdateSelfTests() -> Bool {
         try Data("nameserver 10.0.0.53\n".utf8).write(to: resolver)
         try FileManager.default.createSymbolicLink(atPath: resolvers + "/anthropic.com",
                                                    withDestinationPath: resolver.path)
+        // route.c exits 0 after the routing-socket write fails.
         let noRoute: ([String]) -> (status: Int32, output: String)? = { _ in
-            (1, "route: writing to routing socket: not in table\n")
+            (0, "route: writing to routing socket: not in table\n")
         }
         try check(SelectiveFailOpenInstaller.layerProvenAbsent(directory: resolvers, routeReadback: noRoute),
                   "An administrator resolver or symlink counted as Tono's AI layer")
@@ -648,6 +649,16 @@ func runUpdateSelfTests() -> Bool {
         try Data(SelectiveFailOpen.resolverBody().utf8).write(to: resolver)
         try check(!SelectiveFailOpenInstaller.layerProvenAbsent(directory: resolvers, routeReadback: noRoute),
                   "A sinkhole in an unsafe resolver directory counted as absent")
+    }
+    // route.c prints "invalid" for an address it cannot format; that is not
+    // a different best match, even beside BLACKHOLE.
+    test("selective-route-readback-needs-parseable-addresses") { _ in
+        let reading = SelectiveFailOpen.routeLayerReading(
+            status: 0,
+            output: "destination: invalid\n       mask: ffff:ffff:ffff::\n      flags: <UP,DONE,STATIC,BLACKHOLE>\n",
+            prefix: SelectiveFailOpen.ipv6Prefix
+        )
+        try check(reading == .unknown, "An unparseable route readback counted as \(reading)")
     }
     // An iPhone or iPad app on Apple silicon is a wrapper with no Contents
     // folder (`WrappedBundle -> Wrapper/<name>.app`). One of them kept every
