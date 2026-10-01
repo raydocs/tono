@@ -15,3 +15,10 @@
 - 本轮修复：`Tono-Exit` 必须是唯一的 selector，候选和默认只能是 VLESS/Hysteria2 出口（发现 2）；HTTPS DNS 必须 `detour: Tono-Exit`，socks 出站也必须走 `Tono-Exit`（发现 3）；hosts `predefined` 的域名键不再被当作禁用选项（发现 4）。新增测试 `exit_selector_and_doh_must_stay_on_an_exit`。
 - 未在本 PR 修：发现 1（DIRECT 规则形状不受限）是 main 上 mihomo 与 sing-box 共有的既有问题，记为 [#1204](https://github.com/raydocs/tono/issues/1204) / `WIN-CORE-DIRECT-RULE-ADMISSION`。
 - 验证：本机仅 `rustfmt --check`；Windows CI 是门禁。
+
+### 2026-10-01 续记 · 复审修复
+
+- Codex 复审 `58c2ecf6`：1 个 major、2 个 minor。
+- major：出站 tag 重名时，选择项能同时指向出口和 direct 出站。已修：所有出站 tag 必须唯一。
+- minor：缺少 `default` 时仍会通过准入。已修：`default` 必须存在，并且是它的候选项之一。测试加了重名 tag 的情形。
+- 仍未修的 minor：hosts `predefined` 的域名键也会按 Go 规则折叠，所以同一个域名只是大小写不同的两条会被拒绝。这只会多拒，不会漏放，记在 PR 的限制里。

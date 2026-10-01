@@ -160,12 +160,18 @@ pub(crate) fn admit_owned_runtime(text: &str) -> Result<(), String> {
 /// would send default traffic out of the physical interface.
 fn admit_exit_selector(outbounds: &[Value]) -> Result<(), String> {
     let tag = |outbound: &Value| outbound.get("tag").and_then(Value::as_str);
-    let mut exits = outbounds
+    // A name must resolve to one outbound, or a choice could name an exit here
+    // and a direct outbound in the core.
+    let mut tags = std::collections::HashSet::new();
+    for outbound in outbounds {
+        if !tag(outbound).is_some_and(|name| tags.insert(name)) {
+            return Err("every outbound needs a unique tag".to_string());
+        }
+    }
+    let selector = outbounds
         .iter()
-        .filter(|outbound| tag(outbound) == Some("Tono-Exit"));
-    let (Some(selector), None) = (exits.next(), exits.next()) else {
-        return Err("runtime needs exactly one Tono-Exit outbound".to_string());
-    };
+        .find(|outbound| tag(outbound) == Some("Tono-Exit"))
+        .ok_or_else(|| "runtime has no Tono-Exit outbound".to_string())?;
     if selector.get("type").and_then(Value::as_str) != Some("selector") {
         return Err("Tono-Exit must be a selector".to_string());
     }
@@ -189,10 +195,11 @@ fn admit_exit_selector(outbounds: &[Value]) -> Result<(), String> {
     {
         return Err("Tono-Exit may choose only VLESS or Hysteria2 exits".to_string());
     }
-    if let Some(default) = selector.get("default")
-        && !default.as_str().is_some_and(is_exit)
+    if !selector
+        .get("default")
+        .is_some_and(|default| choices.contains(default))
     {
-        return Err("Tono-Exit default must be a VLESS or Hysteria2 exit".to_string());
+        return Err("Tono-Exit default must be one of its exits".to_string());
     }
     Ok(())
 }
@@ -493,6 +500,13 @@ mod tests {
         let mut renamed = compiled();
         renamed["outbounds"][1] = json!({"type":"direct","tag":"Tono-Exit"});
         assert!(admit_owned_runtime(&renamed.to_string()).is_err());
+
+        let mut shadowed = compiled();
+        shadowed["outbounds"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({"type":"direct","tag":"Fixture Alpha"}));
+        assert!(admit_owned_runtime(&shadowed.to_string()).is_err());
 
         let mut doh = compiled();
         doh["dns"]["servers"][1]["detour"] = json!("Tono-China-Direct");
