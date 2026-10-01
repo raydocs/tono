@@ -60,6 +60,9 @@ struct LoginView: View {
     }
 
     private var busy: Bool { session.state == .authenticating }
+    /// Sign-out or Restore internet cleanup drops any sign-in submitted
+    /// before it finishes, so the controls stay disabled until then (#1256).
+    private var locked: Bool { busy || session.accountLifecycle.isCleaningUp }
     private var error: String? { if case let .error(message) = session.state { message } else { nil } }
     private var methods: TonoAuthMethodsResponse? { session.authMethods }
     private var nativeAppleSignInEnabled: Bool {
@@ -192,7 +195,7 @@ struct LoginView: View {
                             }
                         }
                         .buttonStyle(GateProminentButtonStyle())
-                        .disabled(busy)
+                        .disabled(locked)
                     }
                 }
                 .transition(
@@ -241,7 +244,7 @@ struct LoginView: View {
                                     }
                                     .buttonStyle(GateSecondaryButtonStyle())
                                     .frame(width: 74)
-                                    .disabled(busy)
+                                    .disabled(locked)
                                 }
                             }
                             .padding(.horizontal, 12)
@@ -273,7 +276,7 @@ struct LoginView: View {
                         VStack(spacing: 10) {
                             gateField("Email", text: $email)
                                 .focused($focusedField, equals: .email)
-                                .disabled(busy || session.emailChallenge != nil)
+                                .disabled(locked || session.emailChallenge != nil)
                             if !showsCodeStep {
                                 DisclosureGroup(isExpanded: $isDeviceNameExpanded) {
                                     gateField("Device name", text: $deviceName)
@@ -286,7 +289,7 @@ struct LoginView: View {
                                     .contentShape(Rectangle())
                                 }
                                 .font(.caption)
-                                .disabled(busy)
+                                .disabled(locked)
                                 Label {
                                     Text("Your email is only used to sign in. Traffic logs are never uploaded unless you turn that on in Settings.")
                                 } icon: {
@@ -299,7 +302,7 @@ struct LoginView: View {
                             if showsCodeStep {
                                 gateField("Six-digit email code", text: $emailCode)
                                     .focused($focusedField, equals: .code)
-                                    .disabled(busy)
+                                    .disabled(locked)
                                     .textContentType(.oneTimeCode)
                                     .onChange(of: emailCode) { _, newValue in
                                         handleCodeChange(newValue)
@@ -310,7 +313,7 @@ struct LoginView: View {
                                     busyLabel("Verify email code")
                                 }
                                 .buttonStyle(GateProminentButtonStyle())
-                                .disabled(busy || emailCode.count != 6)
+                                .disabled(locked || emailCode.count != 6)
                             }
                             sendCodeButton
                             if showsCodeStep {
@@ -343,7 +346,7 @@ struct LoginView: View {
                                     focusedField = .email
                                 }
                                 .buttonStyle(.link)
-                                .disabled(busy)
+                                .disabled(locked)
                             }
 
                             #if DEBUG
@@ -357,7 +360,7 @@ struct LoginView: View {
                                 }
                                 .frame(height: 44)
                                 .frame(maxWidth: .infinity)
-                                .disabled(busy)
+                                .disabled(locked)
                             }
                             #endif
                         }
@@ -376,7 +379,7 @@ struct LoginView: View {
                                     }
                                     .frame(height: 44)
                                     .frame(maxWidth: .infinity)
-                                    .disabled(busy)
+                                    .disabled(locked)
                                 }
                                 #endif
                             }
@@ -397,7 +400,7 @@ struct LoginView: View {
                                     .frame(maxWidth: .infinity)
                                 }
                                 .buttonStyle(GateSecondaryButtonStyle())
-                                .disabled(busy)
+                                .disabled(locked)
                             }
                             #endif
                         }
@@ -420,7 +423,7 @@ struct LoginView: View {
                             .foregroundStyle(.secondary)
                     }
                     Button("Retry") { Task { await session.retryRestore() } }
-                        .disabled(busy || error == nil)
+                        .disabled(locked || error == nil)
                     if error != nil {
                         // A launch failure at the gate is exactly when runtime
                         // logs don't exist yet; the local audit log is the only
@@ -436,7 +439,7 @@ struct LoginView: View {
                 }
                 // The dashboard needs .ready, so this is the explicit escape
                 // hatch for a fail-closed host stuck at sign-in.
-                GateProtectionSection(session: session, disabled: busy)
+                GateProtectionSection(session: session, disabled: locked)
             }
         }
         .padding(28)
@@ -474,7 +477,7 @@ struct LoginView: View {
             if !isBusy && showsCodeStep { focusedField = .code }
         }
         .onSubmit {
-            guard !busy else { return }
+            guard !locked else { return }
             Task {
                 if !showsCodeStep && session.emailChallenge == nil {
                     await sendEmailCode()
@@ -512,7 +515,7 @@ struct LoginView: View {
             .buttonStyle(GateAdaptiveButtonStyle(
                 prominent: error == nil && session.emailChallenge == nil
             ))
-            .disabled(busy || resendCountdown > 0)
+            .disabled(locked || resendCountdown > 0)
         } else {
             Button {
                 Task { await sendEmailCode() }
@@ -527,7 +530,7 @@ struct LoginView: View {
                 .frame(maxWidth: .infinity)
             }
             .buttonStyle(ProgressPillButtonStyle(phase: sendPillPhase))
-            .disabled(busy || sendPillPhase == .sent)
+            .disabled(locked || sendPillPhase == .sent)
         }
     }
 
@@ -556,7 +559,7 @@ struct LoginView: View {
             autoSubmittedCode = nil
             return
         }
-        guard !busy, autoSubmittedCode != digits else { return }
+        guard !locked, autoSubmittedCode != digits else { return }
         autoSubmittedCode = digits
         Task { await session.verifyEmailCode(digits) }
     }
