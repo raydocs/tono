@@ -36,9 +36,10 @@ function across(
   lines: readonly LoadPoint[][],
   reduce: (values: number[]) => number,
 ): LoadPoint[] {
-  if (lines.length === 0) return [];
-  return lines[0].map((point, slot) => {
-    const values = lines.map((line) => line[slot].v).filter((v): v is number => v !== null);
+  const head = lines[0];
+  if (head === undefined) return [];
+  return head.map((point, slot) => {
+    const values = lines.map((line) => line[slot]?.v ?? null).filter((v): v is number => v !== null);
     return { t: point.t, v: values.length === 0 ? null : reduce(values) };
   });
 }
@@ -49,8 +50,8 @@ const sum = (values: number[]) => values.reduce((total, v) => total + v, 0);
 
 function last(points: readonly LoadPoint[]): number | null {
   for (let index = points.length - 1; index >= 0; index -= 1) {
-    const v = points[index].v;
-    if (v !== null) return v;
+    const point = points[index];
+    if (point !== undefined && point.v !== null) return point.v;
   }
   return null;
 }
@@ -59,9 +60,11 @@ export function foldFleetLoad(window: FleetLoadWindow): FleetLoad {
   let newest: number | null = null;
   let earliest = window.from;
   for (const samples of window.series.values()) {
-    if (samples.length === 0) continue;
-    earliest = Math.min(earliest, samples[0].t);
-    newest = Math.max(newest ?? 0, samples[samples.length - 1].t);
+    const first = samples[0];
+    const latest = samples[samples.length - 1];
+    if (first === undefined || latest === undefined) continue;
+    earliest = Math.min(earliest, first.t);
+    newest = Math.max(newest ?? 0, latest.t);
   }
   const from = earliest;
   const to = Math.max(window.to, newest ?? window.to);
@@ -75,7 +78,10 @@ export function foldFleetLoad(window: FleetLoadWindow): FleetLoad {
   const load1 = lines((row) => row.load1);
   const perNode = new Map<string, NodeLoadRow>();
   derived.forEach(([name], index) => {
-    perNode.set(name, { cpu: cpu[index], cpuNow: last(cpu[index]), memoryNow: last(memory[index]) });
+    const cpuLine = cpu[index];
+    const memoryLine = memory[index];
+    if (cpuLine === undefined || memoryLine === undefined) return;
+    perNode.set(name, { cpu: cpuLine, cpuNow: last(cpuLine), memoryNow: last(memoryLine) });
   });
 
   return {

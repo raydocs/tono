@@ -130,7 +130,9 @@ export function metricsBody(options: {
   empty: boolean;
   nowUnix: number;
 }): unknown {
-  const shape = WINDOWS[options.range ?? '24h'] ?? WINDOWS['24h'];
+  const fallback = WINDOWS['24h'];
+  if (fallback === undefined) throw new Error('metrics fixture has no 24h window');
+  const shape = WINDOWS[options.range ?? '24h'] ?? fallback;
   const to = Math.floor(options.nowUnix / shape.step) * shape.step;
   const from = to - shape.span;
   const asked = (options.fields ?? '').split(',').map((field) => field.trim()).filter(Boolean);

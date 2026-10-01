@@ -18,10 +18,10 @@ describe('foldFleetLoad', () => {
       a: [sample(0, 10), sample(60, 30)],
       b: [sample(0, 50)],
     }));
-    expect(load.cpu.mean[0].v).toBe(30);
-    expect(load.cpu.max[0].v).toBe(50);
-    expect(load.cpu.mean[1].v).toBe(30);
-    expect(load.cpu.mean[2].v).toBeNull();
+    expect(load.cpu.mean[0]?.v).toBe(30);
+    expect(load.cpu.max[0]?.v).toBe(50);
+    expect(load.cpu.mean[1]?.v).toBe(30);
+    expect(load.cpu.mean[2]?.v).toBeNull();
   });
 
   it('totals traffic as the sum of each machine’s rate, not of its counters', () => {
@@ -29,6 +29,6 @@ describe('foldFleetLoad', () => {
       a: [sample(0, null, 1_000), sample(60, null, 7_000)],
       b: [sample(0, null, 90_000), sample(60, null, 96_000)],
     }));
-    expect(load.netIn[1].v).toBe(200);
+    expect(load.netIn[1]?.v).toBe(200);
   });
 });

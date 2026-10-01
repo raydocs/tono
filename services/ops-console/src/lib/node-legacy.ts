@@ -109,9 +109,10 @@ function readWindow(value: unknown, name: string): NodeLoadWindow {
   const body = record(record(value).metrics);
   const series = record(body.series);
   const keys = Object.keys(series);
+  const only = keys[0];
   const key = Object.prototype.hasOwnProperty.call(series, name)
     ? name
-    : keys.length === 1 ? keys[0] : null;
+    : keys.length === 1 && only !== undefined ? only : null;
   const rows = key === null ? [] : series[key];
   return {
     from: count(body.from),
@@ -227,10 +228,11 @@ export function derive(samples: readonly LoadSample[]): Derived[] {
   const out: Derived[] = [];
   for (let index = 0; index < samples.length; index += 1) {
     const row = samples[index];
-    const previous = index === 0 ? null : samples[index - 1];
-    const seconds = previous === null ? 0 : row.t - previous.t;
-    const netIn = previous === null ? null : ratePerSecond(previous.netIn, row.netIn, seconds);
-    const netOut = previous === null ? null : ratePerSecond(previous.netOut, row.netOut, seconds);
+    if (row === undefined) continue;
+    const previous = samples[index - 1];
+    const seconds = previous === undefined ? 0 : row.t - previous.t;
+    const netIn = previous === undefined ? null : ratePerSecond(previous.netIn, row.netIn, seconds);
+    const netOut = previous === undefined ? null : ratePerSecond(previous.netOut, row.netOut, seconds);
     const share = row.memUsed !== null && row.memTotal !== null && row.memTotal > 0
       ? (row.memUsed / row.memTotal) * 100
       : null;
@@ -271,13 +273,16 @@ export function columns(
     const value = pick(row);
     if (value === null) continue;
     const slot = Math.min(COLUMNS - 1, Math.max(0, Math.floor((row.t - from) / width)));
-    sums[slot] += value;
-    seen[slot] += 1;
+    sums[slot] = (sums[slot] ?? 0) + value;
+    seen[slot] = (seen[slot] ?? 0) + 1;
   }
-  return sums.map((sum, slot) => ({
-    t: Math.round(from + (slot + 0.5) * width),
-    v: seen[slot] === 0 ? null : sum / seen[slot],
-  }));
+  return sums.map((sum, slot) => {
+    const count = seen[slot] ?? 0;
+    return {
+      t: Math.round(from + (slot + 0.5) * width),
+      v: count === 0 ? null : sum / count,
+    };
+  });
 }
 
 /** The value at the 95th percentile, or nothing when too little was measured. */
@@ -285,17 +290,19 @@ function percentile95(values: number[]): number | null {
   if (values.length === 0) return null;
   const sorted = [...values].sort((a, b) => a - b);
   const at = Math.min(sorted.length - 1, Math.max(0, Math.ceil(sorted.length * P95) - 1));
-  return sorted[at];
+  return sorted[at] ?? null;
 }
 
 export function foldLoad(taken: NodeLoadWindow): LoadCharts {
   const rows = derive(taken.samples);
-  const last = taken.samples.length === 0 ? null : taken.samples[taken.samples.length - 1].t;
+  const newest = taken.samples[taken.samples.length - 1];
+  const oldest = taken.samples[0];
+  const last = newest === undefined ? null : newest.t;
   const totals = rows.map((row) => row.total).filter((row): row is number => row !== null);
   const peaks = taken.samples
     .map((row) => row.tcpConnections)
     .filter((row): row is number => row !== null);
-  const from = taken.samples.length === 0 ? taken.from : Math.min(taken.from, taken.samples[0].t);
+  const from = oldest === undefined ? taken.from : Math.min(taken.from, oldest.t);
   const to = Math.max(taken.to, last ?? taken.to);
   return {
     cpu: columns(rows, (row) => row.cpu, from, to),
