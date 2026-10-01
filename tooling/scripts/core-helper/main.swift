@@ -836,7 +836,17 @@ func runPFTokenForgetSelfTest() -> Bool {
 func runLanDNSScopeSelfTest() -> Bool {
     let scoped = #"block drop out quick on { en0, en5 } inet proto { tcp, udp } port { 53, 853 } label "tono-lan-dns""#
     let unscoped = #"block drop out quick inet proto { tcp, udp } port { 53, 853 } label "tono-lan-dns""#
+    // Kernel output expands the renderer's interface/protocol/port lists.
+    let expanded = #"block drop out quick on en5 inet proto udp from any to 10.0.0.0/8 port = 53 label "tono-lan-dns""#
+        + "\n" + #"block drop out quick on en0 inet proto tcp from any to 10.0.0.0/8 port = 853 label "tono-lan-dns""#
+        + "\n" + #"block drop out quick on en0 inet6 proto udp from any to fc00::/7 port = 53 label "tono-lan-dns""#
     return KillSwitchManager.lanDNSInterfaces(in: scoped) == ["en0", "en5"]
+        && KillSwitchManager.lanDNSInterfaces(in: expanded) == ["en0", "en5"]
+        && KillSwitchManager.lanDNSScopeNeedsReload(
+            loaded: KillSwitchManager.lanDNSInterfaces(in: expanded),
+            current: ["en0", "en5", "en7"]
+        )
+        && KillSwitchManager.lanDNSInterfaces(in: expanded + "\n" + unscoped) == []
         && KillSwitchManager.lanDNSInterfaces(in: unscoped) == []
         && KillSwitchManager.lanDNSInterfaces(in: "pass out all\n") == nil
         && KillSwitchManager.lanDNSScopeNeedsReload(loaded: ["en0"], current: ["en0", "en7"])
@@ -844,6 +854,38 @@ func runLanDNSScopeSelfTest() -> Bool {
         && !KillSwitchManager.lanDNSScopeNeedsReload(loaded: ["en0"], current: [])
         && !KillSwitchManager.lanDNSScopeNeedsReload(loaded: [], current: ["en0"])
         && !KillSwitchManager.lanDNSScopeNeedsReload(loaded: nil, current: ["en0"])
+}
+
+func runLANScopePreservationSelfTest() -> Bool {
+    let state = KillSwitchState(
+        armed: true, tailscaleBootstrapEnabled: false,
+        apiHosts: [], exitHints: [], tunnelInterfaces: ["utun199"],
+        resolvedHosts: [:], pinnedHosts: [:], derpEndpoints: [],
+        cachedDERPEndpoints: [], proxyTargets: [],
+        sessionDirectEndpoints: [.init(address: "203.0.113.50", transport: "tcp", port: 443)],
+        reviewedBundleDirectEnabled: true
+    )
+    let source = KillSwitchManager.renderRules(
+        state: state, allowedUID: 501, physicalInterfaces: ["en0"]
+    )
+    let baseline = KillSwitchManager.passRules(in: source)
+    guard source.contains("203.0.113.50"), source.contains(KillSwitchManager.reviewedBundleLabel),
+          let widened = KillSwitchManager.widenLANScope(
+            in: source, current: ["en5"], baseline: baseline
+          ),
+          KillSwitchManager.lanDNSInterfaces(in: widened) == ["en0", "en5"],
+          KillSwitchManager.passRules(in: widened) == baseline,
+          source.split(separator: "\n").filter({ !$0.contains("\"tono-lan-dns\"") })
+            == widened.split(separator: "\n").filter({ !$0.contains("\"tono-lan-dns\"") }),
+          KillSwitchManager.stateDisposal(replacing: baseline, with: KillSwitchManager.passRules(in: widened)) == .keep,
+          KillSwitchManager.widenLANScope(in: source, current: ["en5"], baseline: nil) == nil,
+          KillSwitchManager.widenLANScope(in: source, current: ["en5"], baseline: []) == nil,
+          case .withhold(let withheld, _, _) = KillSwitchManager.reviewedBundleWithholding(
+            loaded: source, baseline: baseline
+          ) else { return false }
+    // A transient withhold must never be reconstructed from persisted state
+    // or mistaken for the full baseline while the Core is being replaced.
+    return KillSwitchManager.widenLANScope(in: withheld, current: ["en5"], baseline: baseline) == nil
 }
 
 func runReadRequestBoundSelfTest() -> Bool {
@@ -1643,6 +1685,7 @@ if CommandLine.arguments.dropFirst() == ["--self-test"] {
             && runBuildSourceSealSelfTest()
             && runPFTokenForgetSelfTest()
             && runLanDNSScopeSelfTest()
+            && runLANScopePreservationSelfTest()
             && runReadRequestBoundSelfTest()
             && runCoreLifecyclePolicySelfTests()
             && runOwnedRuntimeContractSelfTests()

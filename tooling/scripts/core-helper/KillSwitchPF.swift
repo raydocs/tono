@@ -80,18 +80,54 @@ extension KillSwitchManager {
     /// the rules (no tunnel). `[]` means the block is unscoped, which stays
     /// fail-closed and must not be narrowed onto a NIC list.
     static func lanDNSInterfaces(in rules: String) -> [String]? {
-        guard let line = rules.split(separator: "\n", omittingEmptySubsequences: false)
-            .first(where: { $0.contains("\"tono-lan-dns\"") }) else {
-            return nil
+        let lines = rules.split(separator: "\n")
+            .filter { $0.contains("\"tono-lan-dns\"") }
+        guard !lines.isEmpty else { return nil }
+        var interfaces = Set<String>()
+        for line in lines {
+            guard let start = line.range(of: " on ") else { return [] }
+            let scope = line[start.upperBound...]
+            let names: [String]
+            if scope.hasPrefix("{") {
+                guard let end = scope.firstIndex(of: "}") else { return [] }
+                names = scope[scope.index(after: scope.startIndex)..<end]
+                    .split(whereSeparator: { $0 == "," || $0.isWhitespace }).map(String.init)
+            } else {
+                names = scope.split(whereSeparator: \.isWhitespace).prefix(1).map(String.init)
+            }
+            guard !names.isEmpty, names.allSatisfy(isPhysicalInterfaceName) else { return [] }
+            interfaces.formUnion(names)
         }
-        guard let start = line.range(of: "on { "),
-              let end = line[start.upperBound...].range(of: " }") else {
-            return []
+        return interfaces.sorted()
+    }
+
+    private static func isPhysicalInterfaceName(_ name: String) -> Bool {
+        name.hasPrefix("en") && name.count > 2
+            && name.dropFirst(2).allSatisfy { $0.isASCII && $0.isNumber }
+    }
+
+    /// Widen only the managed DNS blocks. The persisted recovery state omits
+    /// live DIRECT exceptions, so re-rendering it here would revoke traffic.
+    /// A withheld or unconfirmed source is left for the next committed arm.
+    static func widenLANScope(
+        in source: String,
+        current: [String],
+        baseline: Set<String>?
+    ) -> String? {
+        guard let baseline, passRules(in: source) == baseline,
+              !current.isEmpty, current.allSatisfy(isPhysicalInterfaceName),
+              let loaded = lanDNSInterfaces(in: source), !loaded.isEmpty else { return nil }
+        let interfaces = Set(loaded).union(current).sorted().joined(separator: ", ")
+        var lines = source.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        for index in lines.indices where lines[index].contains("\"tono-lan-dns\"") {
+            guard lines[index].hasPrefix("block drop out quick on { "),
+                  let start = lines[index].range(of: "on { "),
+                  let end = lines[index][start.upperBound...].range(of: " }") else { return nil }
+            lines[index].replaceSubrange(start.lowerBound..<end.upperBound, with: "on { \(interfaces) }")
         }
-        return line[start.upperBound..<end.lowerBound]
-            .split(separator: ",")
-            .map { $0.trimmingCharacters(in: .whitespaces) }
-            .filter { !$0.isEmpty }
+        let widened = lines.joined(separator: "\n")
+        guard passRules(in: widened) == baseline else { return nil }
+        return widened
     }
 
     /// Reload only to add a physical NIC. An empty current set must not turn
