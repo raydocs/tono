@@ -739,11 +739,20 @@ def save_state(path: Path, state: dict) -> None:
     temporary = path.with_suffix(".new")
     with temporary.open("w", encoding="utf-8") as handle:
         json.dump(state, handle, sort_keys=True)
+        # The rename below must not reach disk before these bytes do, or a
+        # power loss leaves an empty ledger that refuses metering.
+        handle.flush()
+        os.fsync(handle.fileno())
     os.chmod(temporary, STATE_MODE)
     # Rename rather than write in place: a crash mid-write would otherwise leave
     # lifetime totals truncated, and truncated totals bill nobody for what they
     # already used.
     temporary.replace(path)
+    directory_fd = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(directory_fd)
+    finally:
+        os.close(directory_fd)
 
 
 def attach_installed(error: Refusal, installed: set[str] | None) -> Refusal:

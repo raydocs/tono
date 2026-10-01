@@ -349,6 +349,23 @@ class ReporterTests(unittest.TestCase):
             "Bearer test-home-agent-token-with-32-characters",
         )
 
+    def test_every_control_plane_request_sends_an_explicit_user_agent(self) -> None:
+        opener = mock.Mock()
+        opener.open.side_effect = OSError("captured")
+        token = "test-home-agent-token-with-32-characters"
+        with mock.patch.object(reporter.urllib.request, "build_opener", return_value=opener):
+            for call in (
+                lambda: reporter.fetch_inventory("https://api.example.com", token, "home-exit-one"),
+                lambda: reporter.post_reports("https://api.example.com", token, []),
+                lambda: reporter.acknowledge_metering("https://api.example.com", token, 1_700_000_000),
+            ):
+                with self.assertRaises(OSError):
+                    call()
+        agents = [request.args[0].get_header("User-agent") for request in opener.open.call_args_list]
+        self.assertEqual(len(agents), 3)
+        for agent in agents:
+            self.assertIn("tono-home-agent/", agent or "")
+
     def test_delivery_chunks_at_the_worker_distinct_user_limit(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "state" / "state.json"

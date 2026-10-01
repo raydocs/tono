@@ -164,6 +164,24 @@ class ApiOrigin(unittest.TestCase):
 
 
 class LifetimeTotals(unittest.TestCase):
+    def test_save_state_syncs_the_ledger_before_and_the_directory_after_the_rename(self) -> None:
+        events: list[str] = []
+        real_fsync, real_replace = agent.os.fsync, Path.replace
+
+        def fsync(descriptor: int) -> None:
+            events.append("fsync-dir" if os.path.isdir(f"/dev/fd/{descriptor}") else "fsync-file")
+            real_fsync(descriptor)
+
+        def replace(source: Path, target: Path) -> Path:
+            events.append("rename")
+            return real_replace(source, target)
+
+        with tempfile.TemporaryDirectory() as directory, \
+             patch.object(agent.os, "fsync", side_effect=fsync), \
+             patch.object(Path, "replace", replace):
+            agent.save_state(Path(directory) / "state.json", fresh_state())
+        self.assertEqual(events, ["fsync-file", "rename", "fsync-dir"])
+
     def test_first_reading_is_the_whole_total(self) -> None:
         state = fresh_state()
         self.assertEqual(agent.lifetime_totals(state, {"u1": 500}), {"u1": 500})
