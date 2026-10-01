@@ -767,3 +767,19 @@ describe('Activity apps view filters out hidden local DNS', () => {
     ).toBeDefined()
   })
 })
+
+it('renders an extensionless process whose basename is an inherited translation key', () => {
+  const original = connection('extensionless')
+  connectionDataMock.activeConnections = [
+    {
+      ...original,
+      metadata: {
+        ...original.metadata,
+        process: 'toString',
+        processPath: 'C:\\Tools\\toString',
+      },
+    },
+  ]
+  render(<ActivityPage />)
+  expect(screen.getByText('toString')).toBeDefined()
+})
