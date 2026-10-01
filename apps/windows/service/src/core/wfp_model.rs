@@ -12,8 +12,8 @@
 //! rule lives in a *single* sublayer (Mullvad-style): "weighted permits over a low block-all"
 //! only holds when filter weight is the sole ordering axis. A second, higher-weight sublayer
 //! carrying a match-all block would decide every packet before any permit here is consulted.
-//! Persistence is still reserved for the condition-free block-all filters, which are what
-//! survive a reboot; everything else is rebuilt on service start. Enforcement stays entirely at
+//! The entire intent floor persists across reboot, including loopback, DHCP and NDP permits;
+//! session rules are rebuilt on service start. Enforcement stays entirely at
 //! ALE authorization layers so identity (`ALE_APP_ID`) and endpoint tuple are evaluated in the
 //! same filter. Adding or removing an ALE filter triggers policy-change reauthorization on the
 //! affected flow's next packet, which blocks stale TCP/UDP (including QUIC) flows without an
@@ -79,8 +79,9 @@ pub const MAX_API_HOST_IPS: usize = 8;
 /// tuple in one filter and relying on documented policy-change reauthorization for stale flows;
 /// v10: `…9e09…` inbound `ALE_AUTH_RECV_ACCEPT` default-deny with loopback, tunnel and
 /// DHCP/NDP permits (#343); v11: `…9e0a…` DHCP client permits bounded to broadcast/multicast
-/// and non-public servers (#345).)
-const FILTER_NAMESPACE: u128 = 0x2f7c_9e0a_0000_4a6c_0000_0000_0000_0000;
+/// and non-public servers (#345); v12: `…9e0b…` intent-floor loopback/DHCP/NDP permits
+/// persistent alongside the block-alls.)
+const FILTER_NAMESPACE: u128 = 0x2f7c_9e0b_0000_4a6c_0000_0000_0000_0000;
 
 const fn fnv1a64(bytes: &[u8]) -> u64 {
     let mut hash = 0xcbf2_9ce4_8422_2325_u64;
@@ -173,8 +174,7 @@ pub struct FilterSpec {
     /// needs a hard permit so a later filtering provider cannot veto local control traffic;
     /// Internet endpoint and tunnel permits intentionally remain soft.
     pub hard_permit: bool,
-    /// Only the intent floor's condition-free block-all set is persistent — Proton's rule
-    /// that persistence is reserved for condition-free blocking.
+    /// The entire intent floor is persistent; all session rules are non-persistent.
     pub persistent: bool,
 }
 
@@ -300,7 +300,7 @@ pub fn intent_floor() -> Vec<FilterSpec> {
                 addr: [127, 0, 0, 0],
                 prefix: 8,
             }],
-            false,
+            true,
         )),
         hard_permit(spec(
             "intent/permit-loopback-address-v6".into(),
@@ -312,7 +312,7 @@ pub fn intent_floor() -> Vec<FilterSpec> {
                 addr: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
                 prefix: 128,
             }],
-            false,
+            true,
         )),
         hard_permit(spec(
             "intent/permit-loopback-ale-v4".into(),
@@ -321,7 +321,7 @@ pub fn intent_floor() -> Vec<FilterSpec> {
             WEIGHT_HARD_PERMIT,
             A::Permit,
             vec![C::AleLoopback],
-            false,
+            true,
         )),
         hard_permit(spec(
             "intent/permit-loopback-ale-v6".into(),
@@ -330,7 +330,7 @@ pub fn intent_floor() -> Vec<FilterSpec> {
             WEIGHT_HARD_PERMIT,
             A::Permit,
             vec![C::AleLoopback],
-            false,
+            true,
         )),
         spec(
             "intent/permit-dhcp-v4".into(),
@@ -339,7 +339,7 @@ pub fn intent_floor() -> Vec<FilterSpec> {
             WEIGHT_INFRA_PERMIT,
             A::Permit,
             dhcp_v4,
-            false,
+            true,
         ),
         spec(
             "intent/permit-dhcp-v6".into(),
@@ -348,7 +348,7 @@ pub fn intent_floor() -> Vec<FilterSpec> {
             WEIGHT_INFRA_PERMIT,
             A::Permit,
             dhcp_v6,
-            false,
+            true,
         ),
         spec(
             "intent/permit-ndp-out".into(),
@@ -360,7 +360,7 @@ pub fn intent_floor() -> Vec<FilterSpec> {
                 C::Protocol(IpProtocol::IcmpV6),
                 C::IcmpV6TypeRange { min: 133, max: 137 },
             ],
-            false,
+            true,
         ),
         spec(
             "intent/permit-ndp-in".into(),
@@ -372,7 +372,7 @@ pub fn intent_floor() -> Vec<FilterSpec> {
                 C::Protocol(IpProtocol::IcmpV6),
                 C::IcmpV6TypeRange { min: 133, max: 137 },
             ],
-            false,
+            true,
         ),
         spec(
             "intent/block-all-v4".into(),
@@ -420,7 +420,7 @@ pub fn intent_floor() -> Vec<FilterSpec> {
             WEIGHT_HARD_PERMIT,
             A::Permit,
             vec![address],
-            false,
+            true,
         )));
         filters.push(hard_permit(spec(
             format!("intent/permit-inbound-loopback-ale-{tag}"),
@@ -429,7 +429,7 @@ pub fn intent_floor() -> Vec<FilterSpec> {
             WEIGHT_HARD_PERMIT,
             A::Permit,
             vec![C::AleLoopback],
-            false,
+            true,
         )));
     }
     // DHCP server replies arrive from the server's address, which is not the broadcast or
@@ -449,7 +449,7 @@ pub fn intent_floor() -> Vec<FilterSpec> {
             C::LocalPort(68),
             C::RemotePort(67),
         ],
-        false,
+        true,
     ));
     filters.push(spec(
         "intent/permit-dhcp-v6-in".into(),
@@ -466,7 +466,7 @@ pub fn intent_floor() -> Vec<FilterSpec> {
                 prefix: 10,
             },
         ],
-        false,
+        true,
     ));
     for (tag, layer) in [
         ("v4", L::AleAuthRecvAcceptV4),
@@ -821,7 +821,7 @@ pub fn session_rules(config: &RuleConfig) -> Vec<FilterSpec> {
     // Windows resolver traffic starts at 127.0.0.1 and can transition to the TUN address, and a
     // terminating block action overrides the legitimate loopback/TUN path on real machines.
     // Never persistent — persistence is
-    // reserved for the condition-free floor set. Note non-persistent filters still outlive
+    // reserved for the intent floor. Note non-persistent filters still outlive
     // the process in BFE's runtime store (until BFE restarts); only the PERSISTENT floor
     // survives a BFE restart or reboot, and service start reconciles the rest by key.
     for layer in [
@@ -1019,19 +1019,28 @@ mod tests {
     }
 
     #[test]
-    fn only_floor_blocks_are_persistent() {
-        let filters = expected_filters(&config(KillSwitchStatusMode::Locked));
-        let persistent = filters
-            .iter()
-            .filter(|filter| filter.persistent)
-            .collect::<Vec<_>>();
-        assert_eq!(persistent.len(), 4);
-        assert!(
-            persistent.iter().all(|filter| {
-                filter.action == FilterAction::Block && filter.conditions.is_empty()
-            }),
-            "persistence is reserved for the condition-free floor block"
-        );
+    fn exactly_the_intent_floor_is_persistent_in_every_mode() {
+        let floor = intent_floor();
+        assert!(floor.iter().all(|filter| filter.persistent));
+        for mode in [
+            KillSwitchStatusMode::Bootstrap,
+            KillSwitchStatusMode::Locked,
+            KillSwitchStatusMode::Blocked,
+        ] {
+            let filters = expected_filters(&config(mode));
+            let persistent = filters
+                .iter()
+                .filter(|filter| filter.persistent)
+                .collect::<Vec<_>>();
+            assert_eq!(persistent.len(), floor.len(), "{mode:?}");
+            assert_eq!(persistent, floor.iter().collect::<Vec<_>>(), "{mode:?}");
+            for filter in filters
+                .iter()
+                .filter(|filter| !floor.iter().any(|floor| floor.key == filter.key))
+            {
+                assert!(!filter.persistent, "{mode:?}: {}", filter.name);
+            }
+        }
     }
 
     #[test]
@@ -1142,7 +1151,7 @@ mod tests {
         // Upgrade safety: the key-only diff adopts anything with a matching key, so the
         // namespace must change whenever the rule tables do. Pin the current marker (see the
         // constant's doc comment); any rule-table change must bump it and this pin.
-        assert_eq!(FILTER_NAMESPACE >> 64, 0x2f7c_9e0a_0000_4a6c);
+        assert_eq!(FILTER_NAMESPACE >> 64, 0x2f7c_9e0b_0000_4a6c);
     }
 
     #[test]

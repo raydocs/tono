@@ -67,6 +67,11 @@ pub struct Attempt {
     pub old_components: Components,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub disconnect: Option<DisconnectEvidence>,
+    /// Process-start clock (`Image::started_at`) sampled after the new bytes
+    /// were durable and before a successor was created. Not Unix time. Absent
+    /// on records written before this field existed; those still adopt.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub publication_clock: Option<u64>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -593,6 +598,16 @@ impl Store {
                     peer != &a.initiating_image && !incarnation_live(&a.initiating_image),
                     "initiating incarnation is still live"
                 );
+                // `image()` hashes the file on disk. A process that started
+                // before publication can still present the new hash while its
+                // mapped bytes are the old App. The floor is the same clock as
+                // `started_at`, not the receipt's Unix time.
+                if let Some(floor) = a.publication_clock {
+                    ensure!(
+                        peer.started_at > floor,
+                        "peer started before the published bytes were durable"
+                    );
+                }
                 let mut next = self.state.clone();
                 next.attempt.as_mut().unwrap().successor_image = Some(peer.clone());
                 self.save(next)
@@ -609,6 +624,20 @@ impl Store {
         let relaunched = self.attempt()?.successor_image.as_ref() != Some(peer);
         self.authenticate_successor(peer)?;
         Ok(relaunched)
+    }
+
+    /// Record the publication floor once. Later calls leave the saved sample
+    /// in place.
+    pub fn note_publication_clock(&mut self, clock: u64) -> Result<()> {
+        if self.attempt()?.publication_clock.is_some() {
+            return Ok(());
+        }
+        let mut next = self.state.clone();
+        next.attempt
+            .as_mut()
+            .context("no attempt")?
+            .publication_clock = Some(clock);
+        self.save(next)
     }
 
     pub fn execution(&mut self, execution: Execution) -> Result<()> {
@@ -823,6 +852,7 @@ pub(crate) mod tests {
                     execution: Execution::Staged,
                     executor: Some(executor.clone()),
                     disconnect: None,
+                    publication_clock: None,
                 }),
             })
             .unwrap();
@@ -1476,6 +1506,76 @@ pub(crate) mod tests {
             (store.state.consumed_sequence, store.state.generation),
             (74, 92)
         );
+        drop(store);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// No recorded successor: a process that started before the publication
+    /// clock can present the new file hash while still mapped to the old App.
+    /// A record with no clock (written before the field existed) still adopts.
+    #[test]
+    fn update_unregistered_successor_must_start_after_the_publication_clock() {
+        let (root, mut store, peer, executor) = reserved();
+        authorize(&mut store, &peer);
+        store.consume(&executor, 1_900_000_002).unwrap();
+        let hash = target(&store.attempt().unwrap().manifest)
+            .components
+            .app_sha256
+            .clone();
+        let mut next = store.state.clone();
+        let attempt = next.attempt.as_mut().unwrap();
+        attempt.execution = Execution::Replaced;
+        attempt.successor_image = None;
+        attempt.publication_clock = Some(450);
+        store.save(next).unwrap();
+        let started_at_the_floor = Image {
+            pid: 41,
+            started_at: 450,
+            path: peer.path.clone(),
+            sha256: hash.clone(),
+        };
+        assert!(store.authenticate_successor(&started_at_the_floor).is_err());
+        let mapped_before_publication = Image {
+            pid: 40,
+            started_at: 300,
+            path: peer.path.clone(),
+            sha256: hash.clone(),
+        };
+        assert!(
+            store
+                .authenticate_successor(&mapped_before_publication)
+                .is_err()
+        );
+        let after = Image {
+            pid: 42,
+            started_at: 451,
+            path: peer.path.clone(),
+            sha256: hash,
+        };
+        store.authenticate_successor(&after).unwrap();
+        drop(store);
+        std::fs::remove_dir_all(root).unwrap();
+
+        let (root, mut store, peer, executor) = reserved();
+        authorize(&mut store, &peer);
+        store.consume(&executor, 1_900_000_002).unwrap();
+        let hash = target(&store.attempt().unwrap().manifest)
+            .components
+            .app_sha256
+            .clone();
+        let mut next = store.state.clone();
+        let attempt = next.attempt.as_mut().unwrap();
+        attempt.execution = Execution::Replaced;
+        attempt.successor_image = None;
+        attempt.publication_clock = None;
+        store.save(next).unwrap();
+        let legacy = Image {
+            pid: 43,
+            started_at: 50,
+            path: peer.path.clone(),
+            sha256: hash,
+        };
+        store.authenticate_successor(&legacy).unwrap();
         drop(store);
         std::fs::remove_dir_all(root).unwrap();
     }
