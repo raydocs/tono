@@ -292,6 +292,6 @@ test.describe('设置', () => {
     await open(page, '/settings/homeinventory');
     const row = page.locator('tbody tr').filter({ hasText: 'Preview Home Alpha' });
     await expect(row.getByRole('button', { name: '删除' })).toBeDisabled();
-    await expect(row.getByText('2 人')).toBeVisible();
+    await expect(row.getByText('2 人', { exact: true })).toBeVisible();
   });
 });

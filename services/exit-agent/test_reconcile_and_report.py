@@ -681,6 +681,69 @@ class RosterControlSignals(unittest.TestCase):
         self.acknowledge_metering.assert_called_once()
         self.assertTrue(path.exists())
 
+    def test_a_static_validation_timeout_keeps_new_clients_removable(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "state.json"
+            config = Path(directory) / "config.json"
+            path.write_text(json.dumps({**fresh_state(), "installedClients": ["u:stay"]}))
+            original_config = json.dumps({"inbounds": [{
+                "protocol": "vless", "settings": {"clients": [{"email": "shared-legacy"}]},
+            }]})
+            config.write_text(original_config)
+            live = {"u:stay"}
+            posted: list[dict] = []
+
+            def invoke(_binary, arguments):
+                if arguments[0] == "run":
+                    raise agent.subprocess.TimeoutExpired("xray -test", 30)
+                if "adu" in arguments:
+                    snippet = json.loads(Path(arguments[-1]).read_text())
+                    live.add(snippet["inbounds"][0]["settings"]["clients"][0]["email"])
+                    stdout = "Added 1 user(s) in total."
+                else:
+                    live.discard(arguments[-1])
+                    stdout = "Removed 1 user(s) in total."
+                return agent.subprocess.CompletedProcess(arguments, 0, stdout, "")
+
+            def deliver(_base, _token, state_path, state):
+                posted.extend(state["pendingReports"])
+                state["pendingReports"] = []
+                agent.save_state(state_path, state)
+                return len(posted), 0
+
+            with patch.dict(agent.os.environ, {
+                     "TONO_HOME_AGENT_TOKEN": "node-token", "TONO_SOURCE_ID": "exit-node-a",
+                 }, clear=True), \
+                 patch.object(agent, "api_base", return_value="https://control.example"), \
+                 patch.object(agent, "xray_binary", return_value=Path("/unused/xray")), \
+                 patch.object(agent, "xray_config_path", return_value=config), \
+                 patch.object(agent, "xray_start_marker", return_value="boot:1"), \
+                 patch.object(agent, "require_commands", return_value={
+                     "add_user": "adu", "remove_user": "rmu", "stats_query": "statsquery",
+                 }), \
+                 patch.object(agent, "fetch_roster", side_effect=[
+                     ("exit-node-a", 200, [
+                         {"userId": "new", "clientUUID": "11111111-1111-4111-8111-111111111111"},
+                         {"userId": "stay", "clientUUID": "22222222-2222-4222-8222-222222222222"},
+                     ], True),
+                     ("exit-node-a", 260, [], False),
+                 ]), \
+                 patch.object(agent, "run_xray", side_effect=invoke), \
+                 patch.object(agent, "read_counters", return_value={"u:new": 50}), \
+                 patch.object(agent, "acknowledge_roster") as acknowledge, \
+                 patch.object(agent, "acknowledge_metering"), \
+                 patch.object(agent, "deliver_queue", side_effect=deliver):
+                with self.assertRaisesRegex(agent.Refusal, "cannot persist.*retirement"):
+                    agent.run_once(path)
+                saved = json.loads(path.read_text())
+                self.assertEqual(saved["installedClients"], ["u:new", "u:stay"])
+                self.assertEqual([report["totalBytes"] for report in posted], [50])
+                self.assertEqual(config.read_text(), original_config)
+                self.assertEqual(list(config.parent.glob(".config-*.json")), [])
+                acknowledge.assert_called_once()
+                agent.run_once(path)
+                self.assertEqual(live, set())
+
     def test_an_ack_failure_does_not_persist_the_round(self) -> None:
         path, _, _ = self.run_round(
             server_retire=False,

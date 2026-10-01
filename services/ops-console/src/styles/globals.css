@@ -376,6 +376,15 @@ button.ops-chip:hover:not(:disabled) { transform: translateY(-1px); border-color
   border-bottom: 1px solid var(--hairline);
 }
 
+/* Each day folds; the heading is the toggle, so it looks like one. */
+summary.day-head { cursor: pointer; list-style: none; }
+summary.day-head::-webkit-details-marker { display: none; }
+summary.day-head:hover { color: var(--foreground); }
+summary.day-head:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.day-caret { align-self: center; color: var(--muted-foreground); transition: transform 120ms ease; }
+.timeline-day[open] > summary .day-caret { transform: rotate(90deg); }
+.timeline-body { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: 0.01ms !important;

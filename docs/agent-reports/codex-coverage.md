@@ -16,3 +16,15 @@
 | R3-A11 | A11 tono-core config/node/sing_box, connection_plan | Sol (Codex acct 2) | finished 21:46 MT | unfinished: none (0 real) | PRs:  |
 | R3-M9M11 | M9 config pipeline/catalog/policy signature, M11 account/keychain | Sol (Codex acct 2) | finished 21:46 MT | unfinished: none | PRs: #1008 #1016 #1019 |
 | R3-M5M7 | M5 runtime coordinator/helper manager, M7 persistence/launch protection/exit heal | Sol (Codex acct 2) | finished 21:46 MT | unfinished: 3 unverified candidates; 1 real-unfixed | PRs:  |
+| R3-W3W9gap | W3 process.rs/proxy.rs, W9 uninstall/legacy cleanup | Sol (Codex acct 2) | finished 22:00 MT | unfinished: 1 real-unfixed (core job spawn window) | PRs: #994 #999 #1004 #1012 #1022 #1026 |
+| R3-M12 | M12 protected connectivity, probes, websocket, sidecar | Sol (Codex acct 2) | finished 22:00 MT | unfinished: none | PRs: #1027 |
+| R3-W4W7 | W4 service lifecycle, W7 update | Sol (Codex acct 2) | finished 22:10 MT | unfinished: none | PRs: #1005 #1007 #1014 #1017 #1025 |
+| R3-MacQuitHold | MAC-QUIT-AI-HOLD focused check | Sol (Codex acct 2) | finished 22:10 MT | unfinished: decision item (docs PR #1031) | PRs: #1031 |
+| R3-E2T2 | E2 home-agent/provisioning/remote, T2 sing-box/mihomo tooling | Sol (Codex acct 2) | finished 22:24 MT | unfinished: real-device HY2/VPS acceptance; peer-history retention design | PRs: #995 #996 #997 #998 #1000 #1002 #1011 #1018 #1035 |
+| R3-W2W3 | W2 WFP engine/model/security, W3 manager/netmon | Sol (Codex acct 2) | finished 22:24 MT | unfinished: DHCPv6 identity decision item | PRs: #PR#1032 |
+| R3-W1lo | W1 windows_kill_switch.rs lines 1-3278 | Sol (Codex acct 2) | finished 22:24 MT | unfinished: none | PRs: #1021 #1024 #1029 |
+| R3-M1M3 | M1 helper socket/power/http, M2 PF kill switch, M3 protected DNS/core manager | Sol (Codex acct 2) | finished 22:47 MT | unfinished: 6 unverified; 1 real-unfixed app-side (MAC-APP-FAILURE-AI-HOLD, handed to R3-P1mac) | PRs: #1028 #1030 #1033 |
+| R3-RegMac | regression review: 49 merged macOS PRs | Sol (Codex acct 2) | finished 22:47 MT | unfinished: none | PRs: #1039 #1043 |
+| R3-W9inst | W9 install_service, update_executor/journal, NSIS | Sol (Codex acct 2) | finished 22:47 MT | unfinished: lower-priority candidates unverified | PRs: #1042 |
+| R3-P1mac | macOS AI hold after exhausted connection failure (fixed, #1048); DashScope coverage investigated | Sol (Codex acct 2) | finished 22:58 MT | unfinished: MAC-DASHSCOPE-DIRECT-COVERAGE unfixed -> issue #1050 | PRs: #1048 |
+| R3-P1win | Windows automatic DIRECT release + update Connecting cleanup investigated; decision record #1046 | Sol (Codex acct 2) | finished 22:58 MT | unfinished: WIN-DIRECT-RESTORE-WRITER-DELAY-AUTO + WIN-UPDATE-CONNECTING-CLEANUP unfixed -> issue #1051 (now R4-Issue1051) | PRs: #1046 |

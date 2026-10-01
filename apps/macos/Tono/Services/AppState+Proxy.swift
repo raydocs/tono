@@ -426,20 +426,41 @@ extension AppState {
         if isConnected { reloadCoreConfig() }
     }
 
+    /// I/O boundaries for the config-reload transaction. Tests can model a
+    /// successful helper replacement followed by a controller-readiness error
+    /// without changing the host's Core, tunnel, or PF state.
+    struct ConfigReloadOperations {
+        var sync: (String, String) async throws -> String = { directory, digest in
+            try await PrivilegedRuntimeCoordinator.shared.syncCoreConfig(
+                configDirectory: directory, configSHA256: digest
+            )
+        }
+        var reload: (CoreControllerClient, String) async throws -> Void = { api, path in
+            try await api.reloadConfig(path: path)
+        }
+        var waitUntilReady: (CoreControllerClient) async throws -> Void = { api in
+            try await api.waitUntilReady()
+        }
+        var waitForTunnel: () async -> Bool = {
+            await AppState.waitForOwnedTunnelInterface()
+        }
+    }
+
     /// Rewrite config on disk and tell mihomo to reload it.
     ///
     /// `applyingDirectPolicy` switches the transaction into a lightweight
     /// pins-only refresh: the pending policy is armed and written instead of
     /// `activeDirectPolicy`, established connections are left alone (no
     /// close-all, no exit health gate), and the pending policy is committed
-    /// only after a successful reload. A failure before that commit keeps the
-    /// session up: the old config is still in force, PF is unchanged or is
-    /// the temporary old∪new superset, and the next monitor cycle retries.
-    /// Once Mihomo has accepted the new pins, PF must converge from that
-    /// union or the session stops fail-closed.
+    /// only after the helper installs the new runtime. Controller readiness
+    /// is advisory for this refresh: the owned tunnel and exact PF convergence
+    /// must restore the DIRECT permit withheld during the replacement even
+    /// when the controller cannot answer. Earlier preparation failures keep
+    /// the session up for the next monitor retry.
     func reloadCoreConfig(
         applyingDirectPolicy pendingDirectPolicy:
-            ConfigPipeline.ManagedDirectRuntimePolicy? = nil
+            ConfigPipeline.ManagedDirectRuntimePolicy? = nil,
+        operations: ConfigReloadOperations = ConfigReloadOperations()
     ) {
         // Do not cancel a mutation after PF or Mihomo may already have accepted
         // part of it. Coalesce behind the active transaction instead; the most
@@ -534,12 +555,13 @@ extension AppState {
                     finishConfigReloadRequest(requestID)
                     return
                 }
-                let runtimeConfigPath = try await PrivilegedRuntimeCoordinator.shared.syncCoreConfig(
-                    configDirectory: coreRuntime.configDirectory.path,
-                    configSHA256: digest
+                let runtimeConfigPath = try await operations.sync(
+                    coreRuntime.configDirectory.path, digest
                 )
                 try Task.checkCancellation()
-                try await api.reloadConfig(path: runtimeConfigPath)
+                if !pinsOnlyRefresh {
+                    try await operations.reload(api, runtimeConfigPath)
+                }
                 self.loadedRuntimeConfigDigest = digest
                 self.commitResidentialRouteAuditContext(
                     overlay: overlay,
@@ -569,7 +591,7 @@ extension AppState {
                 }
 
                 if let pendingDirectPolicy {
-                    // Mihomo has accepted the new pins, so they are now the
+                    // /core/sync has installed the new pins, so they are now the
                     // authoritative in-memory policy even if a later PF call
                     // fails. Do not honor cancellation between this commit and
                     // exact PF convergence: disconnect is the only safe exit.
@@ -583,7 +605,7 @@ extension AppState {
                     // An unstructured Task does not inherit cancellation, so a
                     // cancelled refresh still waits instead of returning false
                     // at once (this window must not honor cancellation).
-                    guard await Task(operation: { await Self.waitForOwnedTunnelInterface() }).value else {
+                    guard await Task(operation: { await operations.waitForTunnel() }).value else {
                         throw KillSwitchService.Error.commandFailed(
                             "Mihomo did not recreate the owned \(ConfigPipeline.tonoTunInterface) interface."
                         )
@@ -611,7 +633,7 @@ extension AppState {
                     )
                     // Let the controller answer before the connection
                     // close below asks it anything.
-                    try? await api.waitUntilReady()
+                    try? await operations.waitUntilReady(api)
                     LocalTrafficAudit.shared.recordEvent(
                         "managed_direct_pins_refreshed",
                         details: [

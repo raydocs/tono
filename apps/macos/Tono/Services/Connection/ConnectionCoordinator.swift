@@ -161,6 +161,8 @@ final class ConnectionCoordinator {
     func cancelReconnectTasks() {
         protectedReconnectTask?.cancel()
         protectedReconnectTask = nil
+        unarmedReconnectTask?.cancel()
+        unarmedReconnectTask = nil
         protectedReconnectID = nil
         lastProtectedReconnectKick = nil
         wakeRecoveryTask?.cancel()

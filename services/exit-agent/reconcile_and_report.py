@@ -1501,7 +1501,7 @@ def persist_shared_legacy_retirement(binary: Path, config: Path) -> bool:
             os.fsync(directory_fd)
         finally:
             os.close(directory_fd)
-    except OSError as error:
+    except (OSError, subprocess.TimeoutExpired) as error:
         raise Refusal(f"cannot persist {LEGACY_CLIENT_EMAIL} retirement to {config}: {error}") from error
     finally:
         if temporary is not None:

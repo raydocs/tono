@@ -144,6 +144,24 @@ fn release_after_failed_restart(
     restart
 }
 
+/// A rollback has no successor to prove the retained update barrier. Release ordinary
+/// traffic with the AI hold while the Service is still stopped, then restart it even
+/// if cleanup failed. Strict rollback and a completed publication retain protection.
+fn restart_after_publication(
+    rolled_back: bool,
+    strict: bool,
+    release: impl FnOnce() -> Result<(), Error>,
+    restart: impl FnOnce() -> Result<(), Error>,
+) -> (Result<(), Error>, Result<(), Error>) {
+    let released = if rolled_back && !strict {
+        release()
+    } else {
+        Ok(())
+    };
+    let restarted = restart();
+    (released, restarted)
+}
+
 /// `--manual-update-gate`: every refusal in `begin_manual` starts with a WFP read, an RPC to BFE,
 /// so BFE comes up first. Reading first refused a merely stopped BFE as an unconfirmable network
 /// state, before the install could ever repair it (H22-O-F1).
@@ -554,18 +572,36 @@ fn execute(recovery: bool) -> Result<(), Error> {
         // This marker cannot turn uncertain execution into another install grant.
         let _ = store.execution(tx::Execution::Uncertain);
     }
-    // Even a failed plan/rollback must leave the IPC recovery Service available.
-    configure_windows_service_recovery(&service)?;
-    drop(store);
-    drop(repair);
     // Resume the durable successor even when the restarted Service is slow or
     // failed to become ready: a suspended child dropped at this point would
     // terminate the registered successor of a complete, verified installation
     // and leave the next recovery a state it would otherwise roll back.
-    let restart = (|| -> Result<(), Error> {
-        service.start(&Vec::<&std::ffi::OsStr>::new())?;
-        wait_for_service_ready()
-    })();
+    let rolled_back = store.attempt()?.execution == tx::Execution::RolledBack;
+    let (rollback_release, restart) = restart_after_publication(
+        rolled_back,
+        native::strict_kill_switch_intent_on_disk(),
+        || {
+            // The original repair/store guards still fence lifecycle writers. The
+            // publication outcome has released its owner, and SCM remains stopped.
+            shared::block_on_abandoning(async {
+                let _owner = tono_service_protocol::acquire_service_owner()
+                    .await?
+                    .context("Service still owns rolled-back update recovery")?;
+                if native::strict_kill_switch_intent_on_disk() {
+                    return Ok(());
+                }
+                tono_service_protocol::emergency_disarm_windows_kill_switch_applying_narrow().await
+            })?
+        },
+        || {
+            // Even a failed plan/rollback must leave the IPC recovery Service available.
+            configure_windows_service_recovery(&service)?;
+            drop(store);
+            drop(repair);
+            service.start(&Vec::<&std::ffi::OsStr>::new())?;
+            wait_for_service_ready()
+        },
+    );
     let strict = restart.is_err() && native::strict_kill_switch_intent_on_disk();
     let restart = release_after_failed_restart(restart, strict, || {
         let _repair = tono_service_protocol::acquire_service_repair_gate()?
@@ -606,6 +642,12 @@ fn execute(recovery: bool) -> Result<(), Error> {
     };
     restart?;
     resume?;
+    rollback_release?;
+    if rolled_back {
+        // Retain receipt/high-water/backups for verified retirement. No successor
+        // exists to commit this failed publication, so do not wait for one.
+        return Ok(());
+    }
     // Backups are not freed on IPC readiness. Only durable recovery commit
     // permits cleanup; the boot task handles a later commit after this wait.
     for _ in 0..120 {
@@ -785,6 +827,49 @@ mod tests {
     use tono_service_protocol::update_contract::{
         Observation, Protection, Receipt, ReleaseManifest,
     };
+
+    #[test]
+    fn update_rollback_releases_non_strict_protection_before_restarting_the_service() {
+        let events = std::cell::RefCell::new(Vec::new());
+        let (released, restarted) = restart_after_publication(
+            true,
+            false,
+            || {
+                events.borrow_mut().push("release with AI hold");
+                Ok(())
+            },
+            || {
+                events.borrow_mut().push("restart");
+                Ok(())
+            },
+        );
+        released.unwrap();
+        restarted.unwrap();
+        assert_eq!(*events.borrow(), ["release with AI hold", "restart"]);
+        let (released, restarted) =
+            restart_after_publication(true, true, || panic!("strict rollback releases"), || Ok(()));
+        released.unwrap();
+        restarted.unwrap();
+        let (released, restarted) =
+            restart_after_publication(false, false, || panic!("successful update releases"), || Ok(()));
+        released.unwrap();
+        restarted.unwrap();
+
+        let restarted = std::cell::Cell::new(false);
+        let (released, restart) = restart_after_publication(
+            true,
+            false,
+            || Err(anyhow::anyhow!("release failed")),
+            || {
+                restarted.set(true);
+                Ok(())
+            },
+        );
+        let error = released.unwrap_err();
+        assert!(restart.is_ok(), "release error is not a restart failure");
+        assert!(restarted.get(), "release failure must still restart the Service");
+        assert_eq!(error.to_string(), "release failed");
+    }
 
     #[test]
     fn update_commit_keeps_the_recovery_task_until_locked_artifacts_are_removed() {

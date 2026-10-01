@@ -705,6 +705,9 @@ extension AppState {
     /// attempt that failed before its first arm. It is a release, but not the
     /// user's explicit one: see the operation below.
     ///
+    /// `automaticFailureRelease` uses the helper's selective release so an
+    /// exhausted recovery does not remove the secondary AI hold.
+    ///
     /// `exhaustedTunnelLoss` is only the core monitor's missing-TUN verdict.
     /// That path must not run the pending-update disconnect: doing so releases
     /// PF and sets `nativeUpdateBlocksConnect`, so assistant traffic goes
@@ -713,7 +716,8 @@ extension AppState {
     func disconnect(
         releaseKillSwitch: Bool = false,
         afterUnarmedConnectFailure: Bool = false,
-        exhaustedTunnelLoss: Bool = false
+        exhaustedTunnelLoss: Bool = false,
+        automaticFailureRelease: Bool = false
     ) {
         if nativeUpdatePending || RuntimeCleanup.nativeUpdateBlocksConnect
             || (releaseKillSwitch && RuntimeCleanup.nativeUpdatePending) {
@@ -967,7 +971,11 @@ extension AppState {
             if helperReadyForRelease {
                 do {
                     if disarming {
-                        try await networkProtection.disarm()
+                        if automaticFailureRelease {
+                            try await networkProtection.releaseAfterFailure()
+                        } else {
+                            try await networkProtection.disarm()
+                        }
                         transitionLeavesProtectionBlocked = false
                     } else {
                         try await networkProtection.restrictToBootstrap()
@@ -2256,14 +2264,25 @@ extension AppState {
             let holdsUpdateBarrier = nativeUpdatePending
                 || RuntimeCleanup.nativeUpdateBlocksConnect
                 || RuntimeCleanup.nativeUpdatePending
-            disconnect(releaseKillSwitch: true, exhaustedTunnelLoss: exhaustedTunnelLoss)
+            disconnect(
+                releaseKillSwitch: true,
+                exhaustedTunnelLoss: exhaustedTunnelLoss,
+                automaticFailureRelease: true
+            )
             if exhaustedTunnelLoss, holdsUpdateBarrier { return }
+            let releaseGeneration = connectionCoordinator.protectionOperationGeneration
             lastConnectionFailure = preservedFailure
             completedConnectionStages = preservedStages
             // Release clears the pause. Put it back when the helper rejects
             // this app, and do not start an unarmed connect that would clear
             // it again.
-            if await networkProtection.refreshKillSwitchStatus() == .rejected {
+            let observation = await networkProtection.refreshKillSwitchStatus()
+            // The release may cancel this failure's own monitor/connect task.
+            // Its generation, rather than that task's cancellation, distinguishes
+            // a newer user Restore/Connect from this automatic release.
+            guard connectionCoordinator.protectionOperationGeneration == releaseGeneration,
+                  !nativeUpdatePending, !RuntimeCleanup.nativeUpdateBlocksConnect else { return }
+            if observation == .rejected {
                 protectedReconnectPausedForUserAction = true
                 protectedReconnectPauseLiftsOnNetworkChange = false
             } else if resumeWhenReachable {
@@ -2275,18 +2294,25 @@ extension AppState {
         }
     }
 
-    func scheduleUnarmedReconnect() {
+    func scheduleUnarmedReconnect(
+        sleep: @escaping @MainActor (TimeInterval) async throws -> Void = { delay in
+            try await Task.sleep(for: .seconds(delay))
+        }
+    ) {
         if protectedReconnectPausedForUserAction { return }
         connectionCoordinator.protectedReconnectTask?.cancel()
         connectionCoordinator.protectedReconnectTask = nil
         isProtectedReconnectScheduled = false
         connectionCoordinator.unarmedReconnectTask?.cancel()
+        let generation = connectionCoordinator.protectionOperationGeneration
         connectionCoordinator.unarmedReconnectTask = Task { [weak self] in
             var attempt = 0
             while !Task.isCancelled {
                 let delay = UnarmedReconnect.delaySeconds(attempt: attempt)
-                try? await Task.sleep(for: .seconds(delay))
-                guard let self, !Task.isCancelled else { return }
+                try? await sleep(delay)
+                guard let self, !Task.isCancelled,
+                      self.connectionCoordinator.protectionOperationGeneration == generation,
+                      !self.nativeUpdatePending, !RuntimeCleanup.nativeUpdateBlocksConnect else { return }
                 if self.isConnected || self.isConnecting || self.isDisconnecting { return }
                 if self.protectedReconnectPausedForUserAction { return }
                 if KillSwitchService.isArmed || self.isProtectionBlocked { return }
@@ -2296,6 +2322,13 @@ extension AppState {
                     nodes: self.proxyRegions.flatMap(\.nodes),
                     override: self.unarmedTcpProof
                 )
+                // Socket completion is a continuation and can arrive after
+                // cancellation or a newer lifecycle owner has taken over.
+                guard !Task.isCancelled,
+                      self.connectionCoordinator.protectionOperationGeneration == generation,
+                      !self.isConnected, !self.isConnecting, !self.isDisconnecting,
+                      !self.protectedReconnectPausedForUserAction,
+                      !self.nativeUpdatePending, !RuntimeCleanup.nativeUpdateBlocksConnect else { return }
                 guard UnarmedReconnect.shouldConnect(
                     tcpReachable: reachable,
                     protectionArmed: KillSwitchService.isArmed || self.isProtectionBlocked

@@ -35,6 +35,7 @@ final class AppStateConnectRecoveryTests: XCTestCase {
         runtime.restoreDNS = { true }
         runtime.disableSystemProxy = {}
         runtime.disarm = {}
+        runtime.releaseAfterFailure = {}
         runtime.restrictToBootstrap = {}
         app.networkProtection = runtime
         return app

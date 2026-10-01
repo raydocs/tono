@@ -10,12 +10,14 @@
  * the directory itself.
  */
 import { clientCopy } from './clients';
+import { customerBoardCopy } from './customer-board';
 import { ledgerCopy } from './ledger';
 import { nodeBoardCopy } from './node-board';
 import { nodeDetailCopy } from './node-detail';
 import { nodesBoardCopy } from './nodes-board';
 import { panelCopy } from './panel';
 import { qualityCopy } from './quality';
+import { residentialCopy } from './residential';
 import { settingsCopy } from './settings';
 import { settingsPublishCopy } from './settings-publish';
 import { customerCopy } from './customers';
@@ -38,6 +40,8 @@ export const copy = {
   ...panelCopy,
   ...diagnosticsCopy,
   ...qualityCopy,
+  ...residentialCopy,
+  ...customerBoardCopy,
 } as const;
 
 

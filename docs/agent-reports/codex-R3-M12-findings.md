@@ -1,11 +1,12 @@
 # R3-M12: Codex (GPT-6.1 Sol) findings
 
-Generated 2026-09-30 21:46 MT from the run's findings.tsv / prs.tsv.
+Generated 2026-09-30 22:59 MT from the run's findings.tsv / prs.tsv.
 
 ## PRs
 
 | PR | Branch | Labels | Auto-merge requested | Title |
 |---|---|---|---|---|
+| 1027 | hunt/sol-r3probe-quiet-logs | needs-hardware | yes | fix(macos): stop reconnecting quiet sing-box log streams |
 
 ## Hypotheses
 
@@ -21,7 +22,7 @@ Generated 2026-09-30 21:46 MT from the run's findings.tsv / prs.tsv.
 | M12-FP07 | DNS | — | AppState.swift:2298 | Browser diagnostic read blocks main actor | false-positive detached scan and fail-closed diagnostics |
 | M12-FP08 | DNS | — | ProtectedDNSProbe.swift:409 | Missing browser state grants unsafe default | false-positive intentional tested default; managed policy still applies |
 | M12-FP09 | DNS | — | ProtectedDNSProbe.swift:373 | Policy precedence masks browser settings | false-positive tested per-key precedence |
-| M12-U01 | DNS | P2 | ProtectedDNSProbe.swift:12 | Historical cached fake-IP may mask active resolver path | unconfirmed no ordinary bypass proved; intended compatibility plus stop flush and TTL30 |
+| M12-U01 | DNS | P2 | ProtectedDNSProbe.swift:12 | Historical cached fake-IP may mask active resolver path | false-positive unproved: no ordinary bypass established; intended compatibility plus stop flush and TTL30 |
 | M12-FP10 | sidecar | — | TonoSidecarService.swift:429 | CLI failure hangs product startup | false-positive bounded 15s plus 2s watchdog; product skips CLI |
 | M12-FP11 | sidecar | — | TonoSidecarService.swift:601 | Partial SOCKS reply grants health | false-positive greeting/header/full-payload exact-read guards |
 | M12-FP12 | sidecar | — | Support/AppProfile.swift:9 | Hardcoded SOCKS health origin tears down live product | false-positive Home-US disabled in shipping profile |
@@ -31,7 +32,7 @@ Generated 2026-09-30 21:46 MT from the run's findings.tsv / prs.tsv.
 | M12-FP16 | proxy | — | AppState+Proxy.swift:264 | Failed selector mutation commits main exit | false-positive protected exit uses config replacement and TUN proof |
 | M12-FP17 | proxy | — | ProxyService.swift:172 | Latency failure tears down protection | false-positive latency is timestamped display/heartbeat data |
 | M12-FP18 | proxy | — | ProxyService.swift:191 | Bulk latency sweep has unlimited concurrency | false-positive ten-task ceiling |
-| M12-U02 | proxy | P2 | ProxyService.swift:106 | Stale refresh overwrites newer selection | unconfirmed narrow cancellation/response timing; no ordinary-failure effect proved |
+| M12-U02 | proxy | P2 | ProxyService.swift:106 | Stale refresh overwrites newer selection | false-positive unproved: narrow cancellation timing; no ordinary harmful trigger established |
 | M12-DUP02 | sidecar | P3 | TonoSidecarService.swift:302 | Stale reused legacy PID blocks account startup | duplicate #788 |
 | M12-FP19 | probe | — | ProtectedConnectivity.swift:236 | Advisory controller or mixed success grants Connected | false-positive only real TUN success grants Connected |
 | M12-FP20 | probe | — | ProtectedConnectivityVerifier.swift:278 | Cancellation resumes HTTP continuation twice | false-positive OnceResume lock grants one terminal completion |
@@ -43,3 +44,7 @@ Generated 2026-09-30 21:46 MT from the run's findings.tsv / prs.tsv.
 | M12-FP26 | websocket | — | CoreWebSocket.swift:104 | Reconnect resurrects stopped session | false-positive enabled/stopped/cancellation guards |
 | M12-FP27 | websocket | — | CoreWebSocket.swift:433 | Disconnect leaks active sockets | false-positive stopAll cancels tasks and invalidates URLSession |
 | M12-DUP03 | websocket | P3 | CoreWebSocket.swift:96 | Receive errors leave traffic/connection feeds falsely live | duplicate #799 merged |
+| MAC-LOGS-PONG-UNSUPPORTED | websocket | P2 | apps/macos/Tono/Core/CoreWebSocket.swift:375 (baseline 262b1864) | Unsupported log Pong watchdog causes false reconnects and retained Core subscriptions | real-fixed #1027 (CI pending) |
+| M12-DUP04 | websocket | P2 | CoreWebSocket.swift:235 | Old runtime log buffer publishes under successor route | duplicate #762 |
+| M12-FP28 | websocket | — | CoreWebSocket.swift:94 | Malformed frames recover feed falsely | false-positive pinned producer emits compatible text JSON; additional protocol violation required |
+| M12-FP29 | controller | — | CoreControllerClient.swift:286 | Readiness cancellation hangs | false-positive bounded requests/sleep budget and cancellation checks |
