@@ -9294,6 +9294,7 @@ ${nameLine}
         installationId: 'lru-test-installation-one',
       });
       expect(reLogin.status).toBe(200);
+      const relogged = await reLogin.json() as any;
       const afterReLogin = await env.DB.prepare('SELECT last_seen_at FROM devices WHERE id = ?').bind(devId).first<any>();
       expect(Number(afterReLogin.last_seen_at)).toBeGreaterThan(backdatedTime);
 
@@ -9303,9 +9304,10 @@ ${nameLine}
       // 3. Telemetry is already an immutable, device-attributed heartbeat for
       // the activity view. It must not duplicate that write into the device LRU
       // watermark merely because another periodic window arrived.
+      // Re-login revoked the first session; the new access token is the live one.
       const telRes = await api('telemetry/windows', json(telemetryWindowPayload({
         selectedServer: 'Test Node',
-      }), account.accessToken));
+      }), relogged.accessToken));
       expect(telRes.status).toBe(201);
       const afterTel = await env.DB.prepare('SELECT last_seen_at FROM devices WHERE id = ?').bind(devId).first<any>();
       expect(Number(afterTel.last_seen_at)).toBe(backdatedTime);
@@ -9317,7 +9319,7 @@ ${nameLine}
       await env.DB.prepare('UPDATE devices SET last_seen_at = ? WHERE id = ?').bind(backdatedTime, devId).run();
 
       // 4. Auth refresh update
-      const refreshRes = await api('auth/refresh', json({ refreshToken: account.refreshToken }));
+      const refreshRes = await api('auth/refresh', json({ refreshToken: relogged.refreshToken }));
       expect(refreshRes.status).toBe(200);
       const afterRefresh = await env.DB.prepare('SELECT last_seen_at FROM devices WHERE id = ?').bind(devId).first<any>();
       expect(Number(afterRefresh.last_seen_at)).toBeGreaterThan(backdatedTime);
