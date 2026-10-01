@@ -3466,8 +3466,8 @@ pub async fn restore_on_service_start() -> Result<()> {
                     // this function and must first prove that any previous Core is gone. It then
                     // calls `retire_unverified_on_service_start`, which durably retires the desired
                     // owner, proves DNS restoration, and only then removes WFP. Keeping a strict
-                    // Blocked snapshot here closes the old Core/WFP ordering window and preserves
-                    // the DNS-before-disarm invariant when recovery itself fails.
+                    // Blocked snapshot here closes the old Core/WFP ordering window. If that
+                    // retirement fails, a non-strict intent still releases with the AI hold.
                     let mut intent = intent;
                     apply_learned_bootstrap_pins(&mut intent);
                     let mut armed = Armed {
@@ -3794,7 +3794,9 @@ pub async fn prepare_for_service_replacement() -> Result<bool> {
 /// 2. prove DNS restoration;
 /// 3. remove WFP and its intent record.
 ///
-/// Any ambiguity leaves the stricter Blocked policy installed and IPC available for recovery.
+/// When owner retirement or the DNS proof fails, a non-strict intent still releases general
+/// traffic with the AI hold (decision 031) and the error is returned so callers skip desired-Core
+/// restore. Strict intents are never retired here.
 /// Returns `true` when an unverified intent was retired, `false` when there was none.
 pub async fn retire_unverified_on_service_start() -> Result<bool> {
     if !SUPPORTED {
@@ -3834,10 +3836,25 @@ pub async fn retire_unverified_on_service_start() -> Result<bool> {
     match result {
         Ok(()) => Ok(true),
         Err(error) => {
+            // Decision 031: only strict mode (returned above) may stay fully Blocked. Retirement
+            // or DNS proof failed, so open general traffic with the AI hold and best-effort DNS.
+            // The error still reaches the caller, which then skips desired-Core restore.
+            let reason = "stale unverified startup protection could not be retired cleanly";
+            if let Err(release_error) = release_general_traffic_unlocked(reason, true).await {
+                // WFP is still armed: the watchdog's core window retries the release each tick.
+                *WANTED_CORE_DEADLINE
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner) =
+                    Some(std::time::Instant::now());
+                *last_error_guard() = Some(format!(
+                    "stale unverified session could not release general traffic yet; retrying: {release_error:#}"
+                ));
+                return Err(error.context("general traffic release is pending a watchdog retry"));
+            }
             *last_error_guard() = Some(format!(
-                "stale unverified session remains fail-closed: {error:#}"
+                "stale unverified session released general traffic with the AI hold: {error:#}"
             ));
-            Err(error)
+            Err(error.context("general traffic was released with the AI hold"))
         }
     }
 }
@@ -5494,7 +5511,8 @@ mod tests {
 
     #[tokio::test]
     #[serial]
-    async fn unverified_startup_intent_stays_blocked_until_core_and_dns_reconcile() -> Result<()> {
+    async fn unverified_startup_intent_releases_with_ai_hold_when_dns_cannot_be_proven()
+    -> Result<()> {
         cleanup().await;
         let mut intent = valid_intent(KillSwitchStatusMode::Blocked, true);
         intent.verified = Some(false);
@@ -5506,25 +5524,29 @@ mod tests {
 
         assert!(ARMED.lock().unwrap().is_some());
         assert!(status().await.wanted);
-        assert!(tokio::fs::metadata(intent_path()).await.is_ok());
 
+        // Decision 031 (#1259): a non-strict machine must not stay Blocked because retirement
+        // could not prove DNS. The error still reaches the caller so no desired Core is restored.
         let error = retire_unverified_on_service_start()
             .await
-            .expect_err("unproven DNS restoration must keep the startup barrier armed");
-        assert!(format!("{error:#}").contains("corrupt"));
-        assert!(ARMED.lock().unwrap().is_some());
-        assert!(tokio::fs::metadata(intent_path()).await.is_ok());
+            .expect_err("an unclean retirement is still reported to the caller");
+        let released = ARMED.lock().unwrap().is_none() && !status().await.wanted;
+        let ai_held = crate::core::selective_layer::test_hold_active();
+        let dns_evidence_kept = tokio::fs::metadata(dns_snapshot_path()).await.is_ok();
+        let tombstone = assert_disarmed_tombstone_present().await;
+        cleanup().await;
+
+        assert!(format!("{error:#}").contains("corrupt"), "{error:#}");
         assert!(
-            tokio::fs::metadata(dns_snapshot_path()).await.is_ok(),
+            released,
+            "non-strict startup recovery must release general traffic"
+        );
+        assert!(ai_held, "the release must keep the secondary AI hold");
+        assert!(
+            dns_evidence_kept,
             "failed DNS evidence must remain available for recovery"
         );
-
-        tokio::fs::remove_file(dns_snapshot_path()).await?;
-        assert!(retire_unverified_on_service_start().await?);
-        assert!(ARMED.lock().unwrap().is_none());
-        assert_disarmed_tombstone_present().await?;
-        cleanup().await;
-        Ok(())
+        tombstone
     }
 
     #[tokio::test]
