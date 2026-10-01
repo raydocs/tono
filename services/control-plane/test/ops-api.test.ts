@@ -157,6 +157,24 @@ describe('ops v1 api', () => {
     expect(again.status).toBe(304);
   });
 
+  it('pages accepted 200-character Unicode node names with a usable cursor', async () => {
+    const firstName = '东'.repeat(200);
+    const secondName = '西'.repeat(200);
+    for (const catalogName of [firstName, secondName]) {
+      expect((await ops('node-profiles', json({ catalogName }))).status).toBe(201);
+    }
+    const first = await ops('nodes?limit=1');
+    expect(first.status).toBe(200);
+    const page = assertList(await first.json(), assertNodeSummary);
+    expect(page.items.map((node) => node.name)).toEqual([firstName]);
+    expect(page.nextCursor).toBeTruthy();
+    const second = await ops(`nodes?limit=1&cursor=${encodeURIComponent(page.nextCursor!)}`);
+    expect(second.status).toBe(200);
+    const tail = assertList(await second.json(), assertNodeSummary);
+    expect(tail.items.map((node) => node.name)).toEqual([secondName]);
+    expect(tail.nextCursor).toBeNull();
+  });
+
   it('GET nodes/{name} detail, history, connections, errors, bindings, jobs', async () => {
     await seedNode();
     await db().prepare(
