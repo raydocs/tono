@@ -2707,27 +2707,48 @@ async fn disarm_unlocked(apply_narrow: bool) -> Result<()> {
         let _ = install_unlocked(&previous).await;
         return Err(error.context("failed to remove kill-switch filters; protection restored"));
     }
-    if let Err(error) = persist_disarmed_tombstone().await {
-        // The old wanted intent is still the only durable recovery evidence if writing the
-        // replacement tombstone failed. Put it back before reinstalling the previous policy;
-        // otherwise a later Service restart could open a release that this call reports failed.
-        let restore_intent = atomic_write(
-            &intent_path(),
-            &serde_json::to_vec_pretty(&previous.intent)?,
-        )
-        .await;
-        let restore_filters = install_unlocked(&previous).await;
-        restore_intent.context(
-            "network opened and the disarmed tombstone could not be written; failed to restore the wanted intent",
-        )?;
-        restore_filters.context(
-            "network opened and the disarmed tombstone could not be written; failed to restore protection",
-        )?;
-        return Err(error)
-            .context("network opened but the disarmed tombstone could not be written");
-    }
+    // The tombstone tells a later Service start this release won (see `disarmed_tombstone`).
+    // When it cannot be written the release is still final: the filters are proven gone and
+    // DNS is proven restored, and putting the previous policy back would re-block the machine
+    // on every Disconnect for as long as the write keeps failing — a fail-open violation with
+    // no strict kill switch to justify it. The next-best durable state is no wanted intent at
+    // all (the contract `restore_on_service_start` already understands); only if even that
+    // removal fails does a stale wanted record survive, and a later Service start may then
+    // restore it — reported through `last_error`, never by reinstalling the block.
+    let tombstone_note = match persist_disarmed_tombstone().await {
+        Ok(()) => None,
+        Err(error) => {
+            tracing::error!(
+                "Windows kill switch: the disarmed tombstone could not be written ({error:#}); \
+                 staying released and removing the wanted intent instead"
+            );
+            let intent_removed = match tokio::fs::remove_file(intent_path()).await {
+                Ok(()) => true,
+                Err(remove_error) if remove_error.kind() == std::io::ErrorKind::NotFound => true,
+                Err(remove_error) => {
+                    tracing::error!(
+                        "Windows kill switch: the wanted intent could not be removed either \
+                         ({remove_error}); a later Service start may re-arm it"
+                    );
+                    false
+                }
+            };
+            Some(if intent_removed {
+                format!(
+                    "network was released, but recording the release failed ({error:#}); the \
+                     wanted kill-switch intent was removed instead of replaced by a tombstone"
+                )
+            } else {
+                format!(
+                    "network was released, but recording the release failed ({error:#}) and the \
+                     wanted intent survived: the next Service start may re-arm it — disconnect \
+                     again once the Service has restarted"
+                )
+            })
+        }
+    };
     *armed_guard() = None;
-    *last_error_guard() = None;
+    *last_error_guard() = tombstone_note;
     TUNNEL_PERMIT_RENDERED.store(false, Ordering::Relaxed);
     crate::core::selective_layer::finish_release(apply_narrow).await;
     clear_wanted_core_window();
@@ -2849,7 +2870,8 @@ pub async fn note_core_replay_finished() -> Result<()> {
 /// `POST /kill-switch/release`: the explicit user-requested disarm. Idempotent — not armed
 /// is a successful no-op that still sweeps residuals — and shares the DNS-before-disarm
 /// invariant via `disarm_unlocked`: when DNS restore cannot be proven the release is refused
-/// and the block stays armed.
+/// and the block stays armed. StartClash also rolls a bootstrap arm it just made back through
+/// here when the start itself fails, so the arm can never outlive its start.
 #[cfg_attr(not(windows), allow(dead_code))] // the route helper is cfg(windows); tests use it
 pub(crate) async fn release() -> Result<KillSwitchStatus> {
     release_with(false).await
@@ -5569,6 +5591,45 @@ mod tests {
         assert!(!status.wanted, "released status reports wanted=false");
         assert!(ARMED.lock().unwrap().is_none());
         assert_disarmed_tombstone_present().await?;
+        cleanup().await;
+        Ok(())
+    }
+
+    /// WIN-TOMBSTONE-REBLOCK: the tombstone write failing after the filters are proven gone
+    /// must not walk the release back. Reinstalling the previous policy re-blocked the machine
+    /// on every Disconnect for as long as the write kept failing (ACL damage, an AV lock); the
+    /// release now stands, no wanted intent survives, and the residual is surfaced through
+    /// `last_error` instead.
+    #[tokio::test]
+    #[serial]
+    async fn a_failed_tombstone_write_after_removal_stays_released() -> Result<()> {
+        cleanup().await;
+        arm_bootstrap(&test_config(), "/opt/tono/mihomo", "owner-alice").await?;
+        // Every persistent write fails from here on (the arm above already committed).
+        let failures = SimulatedStateFailures::arm(true, false);
+
+        let status = release().await?;
+
+        assert!(!status.wanted, "the release is final once the filters are gone");
+        assert!(ARMED.lock().unwrap().is_none());
+        assert_eq!(
+            TEST_INSTALL_ATTEMPTS.load(Ordering::Relaxed),
+            0,
+            "the previous policy must not be reinstalled over a failed tombstone write"
+        );
+        assert!(
+            tokio::fs::metadata(intent_path()).await.is_err(),
+            "no wanted intent may survive a failed tombstone write"
+        );
+        let last_error = status
+            .last_error
+            .expect("the failed release recording must be reported");
+        assert!(
+            last_error.contains("recording the release failed"),
+            "unexpected last_error: {last_error}"
+        );
+
+        drop(failures);
         cleanup().await;
         Ok(())
     }

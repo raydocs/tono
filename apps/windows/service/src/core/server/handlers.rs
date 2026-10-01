@@ -43,6 +43,25 @@ fn update_operation(request: &crate::update_wire::UpdateRequest) -> Option<Opera
     .then(|| OperationGuard::begin(ServiceOperationKind::ReleaseKillSwitch, IPC_HANDLER_TIMEOUT))
 }
 
+/// How a StartClash whose owner-proxy transition failed reports the error after this request
+/// armed the Windows kill switch: the transition's refusal stays the verdict, and a failed arm
+/// rollback is appended to it — the machine may still be blocked, so the message must say so.
+fn windows_arm_rollback_error(
+    transition_error: ServiceError,
+    release_error: Option<&anyhow::Error>,
+) -> ServiceError {
+    match release_error {
+        None => transition_error,
+        Some(release_error) => ServiceError::new(
+            transition_error.code,
+            format!(
+                "{transition_error}; the Windows kill switch armed for this start could not be \
+                 released: {release_error:#}"
+            ),
+        ),
+    }
+}
+
 pub(super) fn create_ipc_router() -> Result<Router> {
     let router = Router::new()
         .post(IpcCommand::UpdateTransaction.as_ref(), |ctx| async move {
@@ -733,7 +752,22 @@ pub(super) fn create_ipc_router() -> Result<Router> {
             };
             let (active, proxy_outcome) = match owner_proxy_transition(&mut transition).await {
                 Ok(result) => result,
-                Err(error) => return service_error(error),
+                Err(error) => {
+                    // The bootstrap arm must not outlive the start it was made for: this
+                    // request returns no session handle, so the App cannot stop a core it
+                    // never learned about, and when its follow-up status read also fails its
+                    // failure path falls back to the unarmed FSM latch — the machine would
+                    // stay WFP-blocked while the UI shows Not Connected. Open general traffic
+                    // and put the secondary AI hold back. An explicit Disconnect above still
+                    // uses `release()` and drops that hold; a start that never began is a
+                    // crash-style rollback, not that disconnect.
+                    let release_error = if start_request.windows_kill_switch.is_some() {
+                        windows_kill_switch::release_applying_narrow().await.err()
+                    } else {
+                        None
+                    };
+                    return service_error(windows_arm_rollback_error(error, release_error.as_ref()));
+                }
             };
             if disable_kill_switch
                 && let Err(error) = macos_kill_switch::release().await
@@ -1111,5 +1145,37 @@ mod update_operation_tests {
         );
         assert!(during_prepare > before_prepare);
         drop(guard);
+    }
+}
+
+#[cfg(test)]
+mod start_clash_arm_rollback_tests {
+    use super::windows_arm_rollback_error;
+    use crate::ServiceErrorCode;
+    use crate::core::auth::ServiceError;
+
+    /// WIN-STARTCLASH-FAIL-WFP: a failed owner-proxy transition must return its own refusal
+    /// while the handler rolls the Windows bootstrap arm back. This is the reporting half of
+    /// that fix: a successful rollback keeps the original error verbatim, a failed one keeps
+    /// the original code and appends the release failure (the block may still be installed).
+    #[test]
+    fn a_failed_transition_keeps_its_error_and_appends_a_failed_arm_release() {
+        let original = ServiceError::owner_switch_failed("Failed to start owner core: boom");
+        let rolled_back = windows_arm_rollback_error(original.clone(), None);
+        assert_eq!(rolled_back, original);
+
+        let release_failure = anyhow::anyhow!("simulated release failure");
+        let appended = windows_arm_rollback_error(original.clone(), Some(&release_failure));
+        assert_eq!(appended.code, ServiceErrorCode::OwnerSwitchFailed);
+        assert!(
+            appended.message.contains("Failed to start owner core"),
+            "the original refusal stays the verdict: {}",
+            appended.message
+        );
+        assert!(
+            appended.message.contains("could not be released"),
+            "a failed rollback must be visible in the message: {}",
+            appended.message
+        );
     }
 }
