@@ -60,7 +60,7 @@ final class UnexpectedRestartResumeTests: XCTestCase {
     /// resume intent it read at launch. A confirmed release accepted since
     /// then (the root emergency disarm) supersedes it: no notice that Kill
     /// Switch is blocking traffic, and no pause that waits for the user.
-    func testRestartHoldIgnoresAResumeThatAConfirmedReleaseSuperseded() throws {
+    func testRestartHoldIgnoresAResumeThatAConfirmedReleaseSuperseded() async throws {
         let storedIntent = KillSwitchService.isArmed
         let storedSelection = AppProfile.defaults.string(forKey: SettingsKey.selectedProxyTargetName)
         defer {
@@ -96,6 +96,9 @@ final class UnexpectedRestartResumeTests: XCTestCase {
         try armed.acceptCloudOnlyTransport(resumeProtection: true)
         XCTAssertFalse(armed.protectedReconnectPausedForUserAction)
         XCTAssertNotNil(armed.errorMessage, "a confirmed barrier says why Tono did not reconnect")
+        // Let the queued release settle before `defer` restores shared state.
+        await armed.connectionCoordinator.disconnectSequence?.value
+        await armed.failureReleaseNoticeTask?.value
 
         let released = heldLaunch()
         released.acceptConfirmedExternalProtectionRelease()

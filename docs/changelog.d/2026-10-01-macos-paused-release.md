@@ -7,3 +7,4 @@
 - 验证：本机不运行 xcodebuild（所有者规则）；以 hosted CI macOS TonoTests 为准。
 - 候选/发布：仅源码，无新候选；未部署、发布。
 - 剩余限制：helper 拒绝（`.rejected`）暂停不能在无管理员提示时释放或读回状态，未改，拆到 #1305。浏览器 Secure DNS 释放（`AppState+Connect.swift` 健康检查）的文案不声称已恢复网络，未改。needs-hardware：真机 HY2 三振、意外重启、合盖唤醒下的释放与 AI 拦截。
+- 续记（2026-10-01，Codex 审查 1abd459e，无 major）：`testRestartHoldIgnoresAResumeThatAConfirmedReleaseSuperseded` 改为 async，等排队的释放落定后再还原共享状态，避免污染后续测试；决定 044 写明重启保持只在启动已确认 PF 时立即释放，未确认后经 `resolveUnconfirmedProtection` 变为保持的分支本 PR 不释放。
