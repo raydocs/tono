@@ -504,6 +504,17 @@ impl TonoInner {
         }
     }
 
+    /// Drop the latest attempt's live failure, steps and step clock. They belong to the account
+    /// that made the attempt: account adoption and account close call this, while an ordinary
+    /// same-account Disconnect keeps them for the UI and diagnostics.
+    pub fn clear_live_connect_attempt(&mut self) {
+        self.connect_steps = crate::tono::steps::pending_steps();
+        self.step_started_at = None;
+        self.failed_stage = None;
+        self.connect_error = None;
+        self.connect_error_at_ms = None;
+    }
+
     /// Retire the current connection generation and wake every stage waiting on its cancellation
     /// token. `release_on_stale` preserves the existing late-commit contract: releasing flows
     /// patch a late arm; protected reconnect/switch flows keep the barrier.
