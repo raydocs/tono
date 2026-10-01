@@ -235,9 +235,26 @@ enum RuntimeCleanup {
     /// under Allow in the Background, not loaded by launchd, crash-looping),
     /// the query used to throw a generic "helper unavailable" before any
     /// repair or notice in `recoverStaleRuntime` could run, and Retry repeated
-    /// it forever. Say that this Mac is not protected and repair the helper
-    /// here instead. The administrator install runs root's update-install
-    /// guard, which refuses while an update transaction is unfinished.
+    /// it forever. A connect that never lands and a read that times out are
+    /// the same fact here: this call is a status read, so a lost reply cannot
+    /// mean the helper committed a mutation. Say that this Mac is not
+    /// protected and repair the helper here instead. The administrator
+    /// install runs root's update-install guard, which refuses while an
+    /// update transaction is unfinished.
+
+    /// No usable reply. A forbidden or malformed body is an answer and stays
+    /// on the caller's error path. A status read has no PF commit to protect,
+    /// unlike an arm whose reply was lost.
+    static func helperGaveNoAnswer(_ error: Error) -> Bool {
+        switch error {
+        case HelperIPCError.connectFailed,
+             HelperIPCError.emptyResponse,
+             HelperIPCError.socketFailed:
+            true
+        default:
+            false
+        }
+    }
     static func queryPendingNativeUpdate(
         query: () async throws -> HelperManager.UpdateStatus?,
         launchState: () async -> HelperManager.LaunchState,
@@ -245,14 +262,14 @@ enum RuntimeCleanup {
     ) async throws -> HelperManager.UpdateStatus? {
         do {
             return try await query()
-        } catch HelperIPCError.connectFailed {
+        } catch let error where helperGaveNoAnswer(error) {
             let state = await launchState()
             if state == .loadedOrUnknown {
                 // launchd has the job; give a restarting helper one moment.
                 try? await Task.sleep(for: .seconds(2))
                 do {
                     return try await query()
-                } catch HelperIPCError.connectFailed {}
+                } catch let error where helperGaveNoAnswer(error) {}
             }
             let notice = HelperManager.unprotectedNotice(for: state)
                 ?? String(localized: "Tono's network helper is not responding, so this Mac may not be protected right now. Click Retry and approve the administrator prompt to repair it.")
@@ -267,7 +284,7 @@ enum RuntimeCleanup {
             }
             do {
                 return try await query()
-            } catch HelperIPCError.connectFailed {
+            } catch let error where helperGaveNoAnswer(error) {
                 // The repair returned and nothing answers yet (a restart loop
                 // it did not catch): say so, with the Retry that repairs it.
                 throw CoreRuntimeError.startFailed(notice)
