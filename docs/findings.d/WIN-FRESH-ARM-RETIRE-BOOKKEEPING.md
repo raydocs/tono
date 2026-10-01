@@ -10,3 +10,7 @@ release's wanted:false tombstone fences the unretired run intent. Regression:
 `fresh_arm_expiry_releases_when_the_run_intent_cannot_be_retired`.
 
 2026-10-01 review round (Codex gpt-6.1-sol high at `6bc359cb`: no blocker/major, one minor). Replay fencing no longer rests on the tombstone alone: `retire_abandoned_run_intent` clears the active owner even when the run-intent write fails, and `release_unproven_wanted_session_unlocked` removes the stale wanted record when its tombstone write fails (the pending retry still writes the tombstone). Residual: all three writes failing, or a crash before the release writes anything, can still leave a same-boot replay. The regression now covers the same-boot restart.
+
+Open residual (Codex re-review at `c5c3a13c`, minor; stop rule reached, not fixed in #1275): the original minor is only partly mitigated. If the active-owner removal and the stale-intent deletion both fail, or the Service crashes before either runs, a same-boot restart can still restore the old wanted barrier and replay the retired Core (`server/mod.rs` 476–505, `windows_kill_switch.rs` 3152–3172 and 3507–3566, `desired.rs` 219–273).
+
+Open residual (Codex re-review at `c5c3a13c`, new minor; not fixed in #1275): the deletion fallback (`windows_kill_switch.rs` 3163–3175) removes the only durable release disposition before the AI hold is installed. A crash between the two restarts with no intent and no residual WFP, and startup (about 3661–3689) does not re-apply the AI hold, so AI destinations are briefly reachable until the next Connect.
