@@ -159,7 +159,9 @@ pub(crate) fn admit_owned_runtime(text: &str) -> Result<(), String> {
 /// that offers a direct outbound, or a direct outbound named `Tono-Exit`,
 /// would send default traffic out of the physical interface.
 fn admit_exit_selector(outbounds: &[Value]) -> Result<(), String> {
-    let tag = |outbound: &Value| outbound.get("tag").and_then(Value::as_str);
+    fn tag(outbound: &Value) -> Option<&str> {
+        outbound.get("tag").and_then(Value::as_str)
+    }
     // A name must resolve to one outbound, or a choice could name an exit here
     // and a direct outbound in the core.
     let mut tags = std::collections::HashSet::new();
