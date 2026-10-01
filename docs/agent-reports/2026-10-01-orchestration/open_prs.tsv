@@ -1,0 +1,72 @@
+795	codex2/mac-update-offline-commit	false	needs-hardware	fix(macos): a Protected Offline native update commits after the fail-open helper launch (helper 4.52.8)
+794	codex2/mac-helper-upgrade-cancel-release	false	needs-hardware	fix(macos): a cancelled or failed helper upgrade after the old Core stopped releases PF
+793	codex2/win-update-prepare-fail-open	false	needs-hardware	fix(windows): a failed update Prepare after the Core stop releases non-strict protection, keeping the evidence
+792	codex2/win-scm-stop-fail-open	false	needs-hardware	fix(windows): an ordinary TonoService stop restores DNS and releases non-strict WFP
+791	codex2/win-catalog-exit-removed-release	false	needs-hardware	fix(windows): a catalog-removed exit releases non-strict protection instead of blocking until the user picks a node
+788	codex2/mac-sidecar-stale-pid	false		fix(macos): a reused PID in a stale legacy sidecar marker no longer blocks account startup
+787	codex2/win-switch-cleanup-routing	false	needs-hardware	fix(windows): bound switch connection cleanup; rebuild the live session when catalog residential routing changes
+786	codex2/win-direct-heartbeat-policy	false	needs-hardware	fix(windows): DIRECT lease keeps renewing across revision-only policy republish; empty DIRECT graph skips the reload bracket
+785	codex2/mac-update-retire-state	false		fix(macos): publish a verified update Disconnect before retirement so a failed retire can't keep claiming protection
+784	codex2/win-quit-fixes	false	needs-hardware	fix(windows): Quit before discovery still releases this user's Service protection; cancelled Quit resumes catalog sync
+782	glm/mac-pins-refresh-tun-wait	false	needs-hardware	fix(macos): a pins refresh no longer drops the session by arming PF before utun199 is back
+781	codex2/mac-home-proxy-reload	false	needs-hardware	fix(macos): reload the live session when the residential node rotates under the same name
+779	codex2/win-update-failure-supervision	false	needs-hardware	fix(windows): failed update Prepare no longer leaves an unsupervised Connected session or a stuck Connecting
+778	codex2/mac-optional-policy-fail-open	false	needs-hardware	fix(macos): optional DIRECT policy failure before /core/sync keeps the working session
+777	codex2/win-direct-fail-open	false	needs-hardware	fix(windows): app death with a committed DIRECT lease releases non-strict sessions; persist-only failure no longer blocks Disconnect
+776	codex2/win-installer-hangs	false		fix(windows): installer gates can't hang on a stuck BFE call; recovery task and reboot-pending repair fixes
+775	glm/win-core-runtime-record	false		fix(windows): an unparseable core runtime record no longer refuses every Core start
+774	glm/mac-proxy-prompt-bound	false	needs-hardware	fix(macos): bound the system-proxy administrator prompt so it cannot wedge Disconnect or Quit
+773	glm/mac-helper-orphan-bootstrap	false	needs-hardware	fix(macos-helper): an app crash mid-connect no longer leaves PF blocking
+772	cursor/update-adopt-retry-a706	false		fix(windows): do not auto-connect again after a rebound update adoption
+771	cursor/unicode-exit-names-a706	false		fix(windows): distinct non-ASCII exit names are not the same city
+770	cursor/ops-cursor-colon-a706	false		fix(ops): page a customer email that contains a colon
+769	glm/win-release-fail-open	false	needs-hardware	fix(windows): StartClash failure, a failed release record and an undeletable DNS snapshot no longer keep WFP blocking
+768	cursor/ws-onconnected-watchdog-a706	false		fix(windows): reconnect the controller subscription after a late init failure
+765	glm/mac-helper-dns-cap	false	needs-hardware	fix(macos-helper): one protected-DNS server-count cap so a saved snapshot always restores
+763	glm/mac-helper-recovery	false	needs-hardware	fix(macos-helper): emergency disarm survives a stale core, failed startup restores DNS, FIFO inputs can't hang the helper
+762	glm/mac-logs-route-restart	false		fix(macos): restart the log stream on a residential route commit
+761	glm/mac-helper-pf-release	false	needs-hardware	fix(macos-helper): a failed placeholder write no longer blocks PF release; keep the repair signal
+760	glm/mac-app-fail-open	false	needs-hardware	fix(macos): two fail-open gaps in the connected-session health monitor
+759	glm/mac-helper-upgrade-stall	false		fix(macos): don't wait 45 s for a helper upgrade that was never delivered
+757	codex/win-wechat-path-reconnect	false	needs-hardware	fix(windows): signed WeChat path changes force a protected reconnect
+756	codex/macos-launch-repair-dns-sweep	true		fix(macos): sweep protected DNS after launch helper repair without a snapshot
+754	codex/win-dns-restore-guid-case	false	needs-hardware	fix(windows): compare adapter GUIDs case-insensitively in the DNS restore proof
+753	codex/win-startup-release-retry	false	needs-hardware	fix(windows): retry failed startup release and persist the intent-floor permits
+749	cursor/hy2-idle-keepalive-9d88	true		fix(connect): HY2 QUIC keepalive for residential NAT
+748	cursor/ops-console-customers-3a37	false		ops-console: customers list and customer detail as dashboards (Ops 2, stacked on #747)
+747	cursor/ops-console-residential-3a37	false		ops-console: residential inventory and lines as dashboards (Ops 2, stacked on #746)
+746	cursor/ops-console-nodes-3a37	false		ops-console phase 2b: Nodes and Node detail dashboards (stacked on #745)
+745	cursor/ops-console-overview-quality-d728	false		ops-console phase 2a: overview dashboard + connection quality (stacked on #743)
+744	cursor/singbox-macos-alpha9-gaps-01d4	false	needs-hardware	macOS：sing-box alpha.9 发出器对齐 Windows 的 DNS 形状
+743	cursor/ops-console-foundation-d728	false		ops-console: rebuild phase 1 — chart tokens, Panel, LineChart, Bars, ProbeStrip
+742	cursor/connect-bench-singbox-73ab	false		test(connect): 基准增加 sing-box 1.15.0-alpha.9
+741	cursor/connect-doh-reuse-73ab	true		fix(connect): 出口 DoH 离开首包并复用连接
+740	cursor/win-wanted-core-window-581a	false		fix(windows): Core 未证明时放行恢复出来的 wanted 拦截
+739	cursor/windows-ai-traffic-card-b9f5	false		Windows: local-only "Today's AI traffic" card on the overview (UI proposal item 9)
+738	cursor/selective-fail-open-layer-4352	false	needs-hardware	fix: 崩溃先放行全网，再加窄的 AI 第二层
+737	cursor/ops-console-prototype-d728	false		运维后台重做：信息架构、设计规范与可点击原型（第二阶段设计稿）
+735	cursor/windows-account-facts-b9f5	false		Windows account page: show plan, expiry and data used
+734	cursor/diagnostics-ops-panel-e0fd	false		运维控制台显示失败聚类和客户诊断
+731	cursor/windows-session-traffic-b9f5	false		Windows dashboard: show this connection's data total on the live traffic card
+730	cursor/macos-singbox-alpha9-pin-01d4	false	needs-hardware	macOS：sing-box 安装针从 alpha.3 改到 alpha.9
+726	cursor/windows-connected-tagline-b9f5	false		Windows dashboard: one-line protected status when connected
+725	cursor/diagnostics-macos-e0fd	false		macOS 默认重新开启保护快照上传
+724	cursor/diagnostics-windows-e0fd	false		Windows 默认重新开启隐私安全诊断上传
+723	cursor/windows-drop-first-connect-checklist-b9f5	false		Windows dashboard: drop idle "First connect" checklist, keep the measured Encrypted DNS hint
+722	cursor/connect-stage-timings-a925	false		feat(connect): share stage wire keys for timing
+721	cursor/macos-code-hint-no-finder-b9f5	false		macOS sign-in: drop "Show Diagnostics Log in Finder" from the code-not-received hint
+720	cursor/macos-exit-heal-live-a925	false		fix(macos): release PF after an armed failure and probe unarmed
+719	cursor/macos-traffic-session-label-b9f5	false		macOS: traffic popover shows "本次连接" only, drop fake today/this-month columns
+718	cursor/preflight-before-tun-a925	false		fix(connect): prove TCP before the first tunnel is installed
+717	cursor/onboarding-one-screen-b9f5	false		UI: first-run intro collapsed to one screen with a solid primary button (macOS + Windows)
+716	cursor/ops-role-gate-shared-admin-d728	false		fix(ops): 角色门覆盖 shared-admin 与 legacy 路由，原始日志要 customers.raw-logs（H4-F3）
+715	cursor/health-monitor-fail-open-a925	false		fix(windows): release protection when the health monitor gives up
+714	cursor/unarmed-background-heal-a925	false		fix(connect): probe in the background after fail-open
+713	cursor/ops1-catalog-read-only-d728	false		fix(ops): 旧后台目录页只读，目录与分流规则只剩一个发布点
+691	fix/macos-admin-recovery-20260930	false		fix(macos): isolate root emergency release from corrupt update evidence
+673	dependabot/npm_and_yarn/apps/windows/app/windows-frontend-d0823025ca	false	dependencies	chore(deps): Bump the windows-frontend group in /apps/windows/app with 15 updates
+670	dependabot/npm_and_yarn/apps/windows/crates/tono-plugin-core/plugin-core-js-4b498cc5aa	false	dependencies	chore(deps-dev): Bump rollup from 4.63.3 to 4.63.5 in /apps/windows/crates/tono-plugin-core in the plugin-core-js group
+663	codex/fix-windows-tun-route-ready-wait	false	needs-hardware	fix(windows): wait up to 20s for protected TUN routes
+352	fix/win-service-app-image-20260923	false	needs-hardware	fix(windows): bind Service protection routes to the installed Tono App image
+204	feat/ios-native-companion	false		feat(ios): integrate pinned mobile runtime and public packet flow (Draft)
+203	feat/windows-sing-box-product	false		feat(windows): migrate product lifecycle to pinned sing-box JSON (blocked)

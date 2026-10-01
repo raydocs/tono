@@ -1,0 +1,5 @@
+| ID | 问题（一句） | 状态 | Issue / PR | 等级 | 剩余限制 |
+|---|---|---|---|---|---|
+| R4-WIN-CONNECT-CATALOG-ROUTING | Windows Connecting 时住宅目录路由轮换只更新内存，成功连接继续使用旧住宅身份且不会重建 | in-PR | #1066 | 中·已确认 | P1; native Windows pipeline regression and real-machine route behavior require CI / needs-hardware |
+
+Follow-up to #787's explicitly excluded Connecting path. The attempt captures nodes/routing before asynchronous service startup; a catalog install during Connecting does not schedule `ResidentialRoutingChanged`. The runtime therefore commits the old homeProxy endpoint or SOCKS credentials, while the installed catalog records the new identity. A repeated unchanged response cannot repair it. Compare the startup snapshot with the installed residential graph under the final Connected commit lock, then schedule the existing generation-checked catalog rebuild under selection/policy ownership. Skip the old snapshot's optional DIRECT and pin-refresh work. A regression drives a credentials rotation while a real TonoState remains Connecting and checks that the commit returns rebuild authority.

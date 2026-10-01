@@ -252,6 +252,24 @@ describe('ops ledger, month close, live FX', () => {
     expect(original.items[0].reversedBy).toBe(reverse.id);
   });
 
+  it('invalidates a ledger page validator when an existing entry is edited', async () => {
+    const created = await ops('ledger', json({
+      kind: 'revenue', category: 'plan', subjectType: 'fleet',
+      amountMinor: 800, currency: 'CNY', month: MONTH(), note: 'before',
+    }));
+    const entry = assertLedgerEntry(await created.json());
+    const before = await ops(`ledger?month=${MONTH()}`);
+    const etag = before.headers.get('etag')!;
+    expect((await ops(`ledger/${entry.id}`, json({ note: 'after' }, 'PATCH'))).status).toBe(200);
+    const after = await ops(`ledger?month=${MONTH()}`, { headers: { 'if-none-match': etag } });
+    expect(after.status).toBe(200);
+    expect(assertList(await after.json(), assertLedgerEntry).items.at(0)?.note).toBe('after');
+    expect(after.headers.get('etag')).not.toBe(etag);
+    expect((await ops(`ledger?month=${MONTH()}`, {
+      headers: { 'if-none-match': after.headers.get('etag')! },
+    })).status).toBe(304);
+  });
+
   it('keeps the subject of a reversed entry and of its reversal fixed', async () => {
     const created = await ops('ledger', json({
       kind: 'revenue', category: 'plan', subjectType: 'user', subjectId: 'u-A',
