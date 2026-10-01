@@ -469,8 +469,8 @@ fn execute(recovery: bool) -> Result<(), Error> {
             native::UserLaunch::capture(&a.initiating_image).map(Some)
         })?
     };
-    // A capture refusal has no consumed authority: skip repair registration and defer its
-    // error until the stopped-Service failure finalizer can restore the network.
+    // Capture or consume-write refusal has no proven consumed authority. Skip repair
+    // registration and defer its error until the stopped-Service finalizer restores the network.
     let registration = if launch.is_err() {
         Ok(())
     } else if recovery {

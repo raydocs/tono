@@ -465,8 +465,13 @@ impl Store {
         );
         match capture() {
             Ok(captured) => {
-                self.consume(executor, clock()?)?;
-                Ok(Ok(captured))
+                match self.consume(executor, clock()?) {
+                    Ok(()) => Ok(Ok(captured)),
+                    // The rename may be visible despite a failed durability acknowledgement.
+                    // Keep poisoned evidence; defer only cleanup, never another install grant.
+                    Err(error) if self.write_failed => Ok(Err(error)),
+                    Err(error) => Err(error), // Clock/expiry refusal retains its existing policy.
+                }
             }
             Err(capture_error) => {
                 // No install grant was consumed. Preserve the receipt for safe retry/retirement.
@@ -1985,6 +1990,58 @@ pub(crate) mod tests {
         assert_eq!(error.root_cause().to_string(), "token capture refused");
         assert!(store.write_failed);
         assert_eq!(store.state.consumed_sequence, sequence);
+        drop(store);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn update_consume_write_refusal_reaches_cleanup_without_install_authority() {
+        let (root, mut store, peer, executor) = reserved();
+        authorize(&mut store, &peer);
+        let before = serde_json::to_vec(&store.state).unwrap();
+        let state_path = root.join("state.json");
+        let retained_path = root.join("state-before-refusal.json");
+        let captured = std::cell::Cell::new(false);
+        let result = store.capture_before_consuming(
+            &executor,
+            || Ok(1_900_000_002),
+            || {
+                // Refuse the real atomic replacement deterministically without discarding evidence.
+                std::fs::rename(&state_path, &retained_path)?;
+                std::fs::create_dir(&state_path)?;
+                captured.set(true);
+                Ok("captured user token")
+            },
+        );
+        assert!(
+            captured.get(),
+            "token capture must succeed before the injected write refusal"
+        );
+        assert!(
+            result.is_ok(),
+            "a failed consume write must reach the guarded failure finalizer"
+        );
+        assert!(
+            result.unwrap().is_err(),
+            "a refused consume cannot grant a launch token"
+        );
+        assert!(store.write_failed);
+        assert_eq!(
+            serde_json::to_vec(&store.state).unwrap(),
+            before,
+            "a failed acknowledgement cannot publish memory authority"
+        );
+        assert!(store.consumed_attempt().is_err());
+        assert!(store.consume(&executor, 1_900_000_003).is_err());
+        drop(store);
+        std::fs::remove_dir(&state_path).unwrap();
+        std::fs::rename(&retained_path, &state_path).unwrap();
+        let store = Store::open(&root).unwrap();
+        assert_eq!(
+            serde_json::to_vec(&store.state).unwrap(),
+            before,
+            "retained evidence must remain unmodified"
+        );
         drop(store);
         std::fs::remove_dir_all(root).unwrap();
     }
