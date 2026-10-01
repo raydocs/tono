@@ -12,3 +12,4 @@ Collected 2026-09-30 (MDT) from the box; credential values, auth paths, and emai
 - [glm-fix-readme.md](glm-fix-readme.md) — GLM-5.3 fix/hunt harness description and workflow; 2026-09-30; source model: GLM-5.3 harness documentation.
 - [glm-bughunt-report.md](glm-bughunt-report.md) — read-only GLM-5.3 bug-hunt evaluation and verified findings; 2026-09-30; source model: GLM-5.3.
 - [sol-bughunt-report.md](sol-bughunt-report.md) — partial read-only GPT-6.1 Sol benchmark against the same prompts; 2026-09-30; source model: GPT-6.1 Sol.
+- [R3-A8A9-grok.md](R3-A8A9-grok.md) — wave-3 Grok pass on Windows A8/A9 plus the remaining macOS catalog and proxy read; 2026-10-01; source model: Grok 4.7.
