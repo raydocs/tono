@@ -1,6 +1,6 @@
 | ID | 问题（一句） | 状态 | Issue / PR | 等级 | 剩余限制 |
 |---|---|---|---|---|---|
-| WIN-FRESH-ARM-RETIRE-BOOKKEEPING | After abandoned Connect, Core recovery exhaustion or committed DIRECT expiry, `retire_expired_fresh_arm` stopped the Core but refused the release on a repair-gate I/O error or a failed run-intent read/write, every watchdog tick, so a non-strict machine stayed Blocked | in-PR | 待开 | 中·推导（P2，源码与回归） | Not reproduced on hardware (needs-hardware); CI runs the regression |
+| WIN-FRESH-ARM-RETIRE-BOOKKEEPING | After abandoned Connect, Core recovery exhaustion or committed DIRECT expiry, `retire_expired_fresh_arm` stopped the Core but refused the release on a repair-gate I/O error or a failed run-intent read/write, every watchdog tick, so a non-strict machine stayed Blocked | in-PR | #1275 | 中·推导（P2，源码与回归） | Not reproduced on hardware (needs-hardware); CI runs the regression |
 
 Found in the round-3 Windows Service hunt (main `10ce26c9`). Same class as WIN-SCM-RETIREMENT-FAILURE-RELEASE (SCM Stop) and
 H-IPC-2 (stop gate I/O): a persistent ProgramData ACL or AV-handle failure repeats every tick. The fix keeps the Core-stop
