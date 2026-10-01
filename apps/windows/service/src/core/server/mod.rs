@@ -330,6 +330,50 @@ async fn rollback_started_owner(owner: &AuthenticatedOwner) -> AnyResult<()> {
     }
 }
 
+/// The core is already confirmed stopped, and recording that stop failed.
+///
+/// The on-disk run intent is therefore still the previous one. Leaving protected
+/// DNS pointed at `198.18.0.2` with nothing listening blackholes the machine.
+/// When the caller asked to release, run the same stop transition a recorded
+/// stop runs: restore DNS, then the non-strict WFP release. Otherwise the
+/// intent still wants the core, so bring it back and leave the barrier armed.
+/// If that restart cannot be proven, restore DNS and keep the barrier. A kept
+/// session is not full-opened here, and the success path of `StopClash` is
+/// unchanged.
+pub(crate) async fn recover_after_unrecorded_stop(
+    owner: &AuthenticatedOwner,
+    release_kill_switch: bool,
+) -> AnyResult<()> {
+    if release_kill_switch {
+        macos_kill_switch::transition_after_stop(true).await?;
+        return windows_kill_switch::transition_after_stop(true).await;
+    }
+    if let Err(error) = restart_still_wanted_core(owner).await {
+        warn!(
+            "stop was not recorded and the core could not be brought back; restoring DNS and keeping the barrier: {error:#}"
+        );
+        dns::ensure_restored().await.context(
+            "protected DNS stayed pointed at the dead resolver after the core could not be restarted",
+        )?;
+    }
+    Ok(())
+}
+
+async fn restart_still_wanted_core(owner: &AuthenticatedOwner) -> AnyResult<()> {
+    let state = load_owner_desired_state(&owner.key).await?;
+    if !state.core_should_be_running {
+        anyhow::bail!("desired state does not still ask for the core");
+    }
+    let config = state
+        .last_clash_config
+        .context("desired state has no core config to bring back")?;
+    CORE_MANAGER
+        .lock()
+        .await
+        .start_core(config, owner.identity.clone())
+        .await
+}
+
 // 防止旧 listener 的清理删除 supervisor 刚创建的新 socket。
 static IPC_LIFECYCLE_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 #[cfg(windows)]
