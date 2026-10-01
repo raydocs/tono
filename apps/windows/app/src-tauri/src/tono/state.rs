@@ -234,6 +234,8 @@ pub struct TonoInner {
     /// adopted sign-in whose commit task waits for its session to be durable.
     pub session_marker: crate::tono::credentials::SessionMarker,
     pub installation_id: String,
+    /// The core this connect armed. DIRECT in-place reload is mihomo-only.
+    pub sing_box_core: bool,
     pub catalog_tracker: CatalogTracker,
     /// Directory holding `managed-exit-catalog.json` (`app_home_dir()/tono`).
     /// The cache itself is built on demand: `CatalogCache` boxes its safety
@@ -650,6 +652,7 @@ impl TonoState {
                 sign_in_generation: 0,
                 session_marker: Default::default(),
                 installation_id,
+                sing_box_core: false,
                 catalog_tracker: CatalogTracker::new(),
                 catalog_dir,
                 nodes: Vec::new(),

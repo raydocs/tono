@@ -32,8 +32,13 @@ use thiserror::Error;
 
 mod flag;
 mod runtime;
-pub use flag::{controller_delay_allowed, enabled_for};
+mod select;
+pub use flag::{PreferredCore, controller_delay_allowed, enabled_for, preferred_core};
 pub use runtime::{DialEndpoint, OwnedSingBoxRuntime, RuntimeInput, Transport, build_runtime};
+pub use select::{
+    CoreChoice, CoreSelection, SingBoxBinaryProof, prove_sing_box_binary, resolve,
+    sing_box_pin_from_env_or_file,
+};
 
 pub const PROFILE: &str = "reality-tcp-no-special-routing-v1";
 const MAX_BYTES: usize = 8 * 1024 * 1024;

@@ -57,6 +57,8 @@ pub enum NodeRejection {
     NotVless,
     #[error("hy2 fingerprint must be a 64-hex SHA-256")]
     BadFingerprint,
+    #[error("hy2 certificate-public-key-sha256 must be standard base64 of 32 bytes")]
+    BadSpkiPin,
     #[error("tls must be enabled")]
     TlsDisabled,
     #[error("uuid is missing or not a valid UUID")]
@@ -112,6 +114,9 @@ pub struct ValidatedNode {
     pub protocol: NodeProtocol,
     /// SHA-256 of the hy2 leaf cert, lowercase hex, no colons.
     pub tls_fingerprint: Option<String>,
+    /// sing-box SPKI pin, standard base64 of 32 bytes. Never derived from
+    /// [`Self::tls_fingerprint`]. Absent is allowed on the mihomo path.
+    pub certificate_public_key_sha256: Option<String>,
 }
 
 impl ValidatedNode {
@@ -145,6 +150,12 @@ impl ValidatedNode {
                 put("sni", Value::String(self.servername.clone()));
                 if let Some(fingerprint) = &self.tls_fingerprint {
                     put("fingerprint", Value::String(fingerprint.clone()));
+                }
+                if let Some(spki) = &self.certificate_public_key_sha256 {
+                    put(
+                        "certificate-public-key-sha256",
+                        Value::String(spki.clone()),
+                    );
                 }
             }
             NodeProtocol::VlessReality => {
@@ -238,6 +249,9 @@ struct RawProxy {
     client_fingerprint: Option<String>,
     #[serde(default, rename = "reality-opts")]
     reality_opts: Option<RawRealityOpts>,
+    /// Present only on a hysteria2 block that published an SPKI pin.
+    #[serde(default, rename = "certificate-public-key-sha256")]
+    certificate_public_key_sha256: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -364,6 +378,7 @@ pub fn admit_node(value: &serde_yaml_ng::Value) -> Result<ValidatedNode, NodeRej
         reality_short_id: short_id.to_string(),
         protocol: NodeProtocol::VlessReality,
         tls_fingerprint: None,
+        certificate_public_key_sha256: None,
     })
 }
 
@@ -418,6 +433,15 @@ fn admit_hysteria2(raw: RawProxy) -> Result<ValidatedNode, NodeRejection> {
         .filter(|value| !value.is_empty())
         .and_then(normalize_sha256_fingerprint)
         .ok_or(NodeRejection::BadFingerprint)?;
+    let certificate_public_key_sha256 = match raw
+        .certificate_public_key_sha256
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        None => None,
+        Some(value) => Some(canonical_spki_pin(value).ok_or(NodeRejection::BadSpkiPin)?),
+    };
     match raw.network.as_deref().map(str::trim) {
         None | Some("") | Some("udp") => {}
         Some(network) if network.eq_ignore_ascii_case("udp") => {}
@@ -445,7 +469,20 @@ fn admit_hysteria2(raw: RawProxy) -> Result<ValidatedNode, NodeRejection> {
         reality_short_id: String::new(),
         protocol: NodeProtocol::Hysteria2,
         tls_fingerprint: Some(fingerprint),
+        certificate_public_key_sha256,
     })
+}
+
+/// Standard base64 of exactly 32 bytes, re-encoded so later compares are stable.
+fn canonical_spki_pin(value: &str) -> Option<String> {
+    use base64::Engine as _;
+    let raw = base64::engine::general_purpose::STANDARD
+        .decode(value)
+        .ok()?;
+    if raw.len() != 32 {
+        return None;
+    }
+    Some(base64::engine::general_purpose::STANDARD.encode(raw))
 }
 
 /// Admit a whole catalog `proxies:` sequence and enforce the set-level rules:
@@ -726,6 +763,19 @@ fingerprint: "E3:AA:4A:74:5A:A9:05:39:AB:1A:49:3D:94:0E:EB:A7:B4:30:5B:75:16:AB:
             admit_yaml(&rejected).unwrap_err(),
             NodeRejection::SkipCertVerify
         );
+    }
+
+    #[test]
+    fn a_malformed_hy2_spki_pin_is_rejected_and_never_derived() {
+        let rejected = format!(
+            "{}\ncertificate-public-key-sha256: \"not-a-pin\"\n",
+            passing_hy2_yaml().trim()
+        );
+        assert_eq!(admit_yaml(&rejected).unwrap_err(), NodeRejection::BadSpkiPin);
+        let node = admit_yaml(passing_hy2_yaml()).unwrap();
+        assert!(node.certificate_public_key_sha256.is_none());
+        let yaml = serde_yaml_ng::to_string(&node.to_runtime_mapping()).unwrap();
+        assert!(!yaml.contains("certificate-public-key-sha256"));
     }
 
     #[test]
