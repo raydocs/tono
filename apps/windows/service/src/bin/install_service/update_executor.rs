@@ -440,13 +440,11 @@ fn execute(recovery: bool) -> Result<(), Error> {
         if !store.independent_recovery_pending()? {
             return Ok(());
         }
-        // Classify before touching the Service: a complete publication keeps
-        // the running Service and only records the Replaced marker.
+        // Classify before touching Service: complete publication keeps it running and
+        // records the publication floor before its Replaced marker.
         let publication = classify_before_stop(&mut store, || classify_installed(&a, &plan_path))?;
         if !publication.requires_service_stop() {
-            if a.execution != tx::Execution::Replaced {
-                store.execution(tx::Execution::Replaced)?;
-            }
+            store.record_complete_publication_recovery(native::process_clock_now())?;
             return Ok(());
         }
     } else {
@@ -541,12 +539,7 @@ fn execute(recovery: bool) -> Result<(), Error> {
                     // same way after its recorded incarnation exited.
                     // Sample only when the publishing run did not. Do not move
                     // a floor that was saved before the successor could start.
-                    if store.attempt()?.publication_clock.is_none() {
-                        store.note_publication_clock(native::process_clock_now())?;
-                    }
-                    if a.execution != tx::Execution::Replaced {
-                        store.execution(tx::Execution::Replaced)?;
-                    }
+                    store.record_complete_publication_recovery(native::process_clock_now())?;
                     return Ok(None);
                 }
                 RecoveryPublication::Interrupted => {}
