@@ -1,6 +1,6 @@
 ## 2026-09-30 · Windows 健康监视把防抖窗口内的下一次变化留到窗口结束
 - 归属：SHIP_PLAN §2 第 10 项（网络变化后 DIRECT 绑定或 Core 身份不再被看见）；影响 Windows 连接健康监视。
-- 来源：main `5ba113d2` → 分支 `hunt/grok-winapp-debounce-defer-2a89`；PR 待开；未合 main。
+- 来源：main `5ba113d2` → `ecc374fa`；分支 `hunt/grok-winapp-debounce-defer-2a89`；PR #878；未合 main。
 - 缺陷修复：防抖抑制的那一拍不再前进网络事件计数，也不提交被抑制的 Core 身份基线。窗口结束后下一拍仍能看到这次变化。窗口内的第一次变化仍立即处理。关联 `WIN-DEBOUNCE-DROPS-EVENT`。
 - 新增/优化：无。
 - 工程与测试：`a_debounced_sample_stays_visible_until_the_window_elapses`。
