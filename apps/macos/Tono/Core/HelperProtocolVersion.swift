@@ -349,7 +349,9 @@ nonisolated enum HelperProtocolVersion {
     /// - 4.52.20 → 4.52.21: selective AI blackhole routes include Darwin
     ///   required loopback gateways; native dry-run regression checks routing messages.
     /// - 4.52.22 → 4.52.23: pending-update automatic failure release retains the AI hold.
-    static let current = "4.52.27"
+    /// - 4.52.27 → 4.52.28: the desktop update contract may name an optional
+    ///   sing-box digest. The helper must be rebuilt to accept that field.
+    static let current = "4.52.28"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS
