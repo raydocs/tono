@@ -312,7 +312,8 @@ pub struct TonoInner {
     /// blocking" and strand WFP armed after a completed Disconnect. The history is short
     /// because a stale attempt that has not returned within this many bumps lost every race it
     /// could have won long ago.
-    retired_intents: VecDeque<(u64, bool)>,
+    /// The third field marks the automatic connect-timeout retirement (#1134).
+    retired_intents: VecDeque<(u64, bool, bool)>,
     /// Last `core_pid` / `restart_count` seen in the Service `/status`
     /// feed (runtime crash / TUN rebuild detection, M4).
     pub last_core_pid: Option<u32>,
@@ -531,6 +532,17 @@ impl TonoInner {
     /// token cancellation already retire every other task's in-flight work at its next stage
     /// boundary.
     pub fn retire_connection_generation(&mut self, release_on_stale: bool) {
+        self.retire_connection_generation_as(release_on_stale, false);
+    }
+
+    /// [`retire_connection_generation`] for the automatic connect timeout. A late StartClash
+    /// commit of this generation is compensated with the secondary AI hold, as the failure
+    /// release it pre-empts would have been (#1134).
+    pub fn retire_timed_out_connection_generation(&mut self, release_on_stale: bool) {
+        self.retire_connection_generation_as(release_on_stale, true);
+    }
+
+    fn retire_connection_generation_as(&mut self, release_on_stale: bool, automatic: bool) {
         let retired = self.connect_generation;
         self.connect_generation = self.connect_generation.wrapping_add(1);
         self.release_on_stale = release_on_stale;
@@ -539,7 +551,7 @@ impl TonoInner {
         if self.retired_intents.len() == RETIRED_INTENT_HISTORY {
             self.retired_intents.pop_front();
         }
-        self.retired_intents.push_back((retired, release_on_stale));
+        self.retired_intents.push_back((retired, release_on_stale, automatic));
         self.connect_cancellation.cancel();
         self.connect_cancellation = CancellationToken::new();
     }
@@ -553,10 +565,21 @@ impl TonoInner {
         self.retired_intents
             .iter()
             .rev()
-            .find_map(|(retired, intent)| (*retired == generation).then_some(*intent))
+            .find_map(|(retired, intent, _)| (*retired == generation).then_some(*intent))
             // Older than the window: fall back to the global bit, which is what every caller
             // used to read unconditionally.
             .unwrap_or(self.release_on_stale)
+    }
+
+    /// Whether the automatic connect timeout retired `generation`. Outside the window this is
+    /// false, so the compensation keeps the plain release it always used.
+    #[must_use]
+    pub fn automatic_retirement_for(&self, generation: u64) -> bool {
+        self.retired_intents
+            .iter()
+            .rev()
+            .find_map(|(retired, _, automatic)| (*retired == generation).then_some(*automatic))
+            .unwrap_or(false)
     }
 
     /// Build the on-disk catalog cache rooted at the state's directory.
