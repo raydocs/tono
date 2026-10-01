@@ -492,6 +492,7 @@ pub(super) async fn apply_cloud_policy(
     if !WINDOWS_OPTIONAL_DIRECT_ENABLED {
         skip_optional_direct_policy(
             state,
+            generation,
             "optional Windows DIRECT policy is disabled; retaining the proven full-tunnel runtime".to_string(),
         )
         .await;
@@ -501,6 +502,7 @@ pub(super) async fn apply_cloud_policy(
     let Some(interface) = physical_interface else {
         skip_optional_direct_policy(
             state,
+            generation,
             "cloud DIRECT policy has no pre-TUN physical interface snapshot".to_string(),
         ).await;
         return Ok(None);
@@ -529,7 +531,7 @@ pub(super) async fn apply_cloud_policy(
     let (wechat_pins, web_pins) = match classify_optional_direct_resolution(resolution) {
         OptionalDirectResolution::Ready(pins) => pins,
         OptionalDirectResolution::Skip(reason) => {
-            skip_optional_direct_policy(state, reason).await;
+            skip_optional_direct_policy(state, generation, reason).await;
             return Ok(None);
         }
     };
@@ -545,7 +547,7 @@ pub(super) async fn apply_cloud_policy(
     ) {
         Ok(plan) => plan,
         Err(reason) => {
-            skip_optional_direct_policy(state, reason).await;
+            skip_optional_direct_policy(state, generation, reason).await;
             return Ok(None);
         }
     };
@@ -598,6 +600,7 @@ pub(super) async fn apply_cloud_policy(
             // must not tear that tunnel down.
             skip_optional_direct_policy(
                 state,
+                generation,
                 format!("optional DIRECT runtime could not be built: {error}"),
             ).await;
             return Ok(None);
@@ -609,6 +612,7 @@ pub(super) async fn apply_cloud_policy(
         Err(error) => {
             skip_optional_direct_policy(
                 state,
+                generation,
                 format!("optional DIRECT staging could not resolve the core path: {error}"),
             ).await;
             return Ok(None);
@@ -625,6 +629,7 @@ pub(super) async fn apply_cloud_policy(
         Err(error) => {
             skip_optional_direct_policy(
                 state,
+                generation,
                 format!("optional DIRECT endpoint digest could not be calculated: {error}"),
             ).await;
             return Ok(None);
@@ -638,6 +643,7 @@ pub(super) async fn apply_cloud_policy(
         drop(policy_guard);
         skip_optional_direct_policy(
             state,
+            generation,
             "cloud DIRECT policy changed before activation; retaining the full-tunnel runtime".to_owned(),
         )
         .await;
@@ -1556,7 +1562,13 @@ pub(super) fn classify_optional_direct_resolution<T>(result: Result<T, String>) 
     }
 }
 
-pub(super) async fn skip_optional_direct_policy(state: &Arc<TonoState>, reason: String) {
+pub(super) async fn skip_optional_direct_policy(state: &Arc<TonoState>, generation: u64, reason: String) {
+    let mut inner = state.lock().await;
+    // Optional discovery is detached and can finish after Disconnect and a successor Connect.
+    // Neither its failure evidence nor its audit event belongs to that successor.
+    if inner.connect_generation != generation {
+        return;
+    }
     let reason = audit::redact(&reason);
     logging!(
         warn,
@@ -1566,7 +1578,6 @@ pub(super) async fn skip_optional_direct_policy(state: &Arc<TonoState>, reason: 
     state.audit().log(AuditEvent::PolicyActivationSkipped {
         reason: reason.clone(),
     });
-    let mut inner = state.lock().await;
     inner.optional_direct_active = false;
     inner.applied_direct_interface = None;
     inner.optional_direct_skip = Some(reason);
@@ -1868,6 +1879,24 @@ mod tests {
 #[cfg(test)]
 mod cancellation_tests {
     use super::*;
+
+    #[tokio::test]
+    async fn stale_optional_discovery_cannot_clear_the_successors_direct_evidence() {
+        let state = Arc::new(TonoState::for_test());
+        {
+            let mut inner = state.lock().await;
+            inner.connect_generation = 12;
+            inner.optional_direct_active = true;
+            inner.applied_direct_interface = Some("successor-uplink".into());
+            inner.optional_direct_skip = None;
+        }
+        // The detached predecessor's resolver completes after generation 12 committed DIRECT.
+        skip_optional_direct_policy(&state, 11, "predecessor DNS timed out".into()).await;
+        let inner = state.lock().await;
+        assert!(inner.optional_direct_active, "a predecessor cannot disable the current overlay evidence");
+        assert_eq!(inner.applied_direct_interface.as_deref(), Some("successor-uplink"));
+        assert!(inner.optional_direct_skip.is_none(), "a stale failure must not be attributed to the successor");
+    }
     use tokio::io::AsyncReadExt as _;
     use tokio::sync::oneshot;
 
