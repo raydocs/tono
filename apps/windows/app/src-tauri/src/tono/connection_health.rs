@@ -289,6 +289,11 @@ pub fn core_identity_change_owned(
         || owned_direct_reload_in_flight(marker_now, connect_generation, now)
 }
 
+/// While this session owns a DIRECT reload, a retracted tunnel permit is expected whether the
+/// Service has already published Blocked or still reports Locked: the sing-box replacement's
+/// retraction renders the permit away before it publishes Blocked, and that render waits on
+/// the selective-layer cleanup (up to its 3 s step budget), so two 2 s ticks can both read
+/// Locked without a permit. The owned marker's deadline still bounds the exemption.
 pub fn kill_switch_unhealthy_for_monitor(
     status: Option<&KillSwitchStatus>,
     owned_direct_reload: bool,
@@ -297,7 +302,8 @@ pub fn kill_switch_unhealthy_for_monitor(
         && let Some(status) = status
         && status.wanted
         && status.live
-        && status.mode == KillSwitchStatusMode::Blocked
+        && (status.mode == KillSwitchStatusMode::Blocked
+            || (status.mode == KillSwitchStatusMode::Locked && !status.tunnel_permit_rendered))
     {
         return false;
     }
@@ -483,6 +489,31 @@ mod tests {
         assert!(
             !core_identity_change_owned(false, None, None, 7, now),
             "an unexplained pid change still fires"
+        );
+    }
+
+    #[test]
+    fn an_owned_sing_box_replacement_reporting_locked_without_permit_is_not_unhealthy() {
+        use super::kill_switch_unhealthy_for_monitor;
+        use tono_service_protocol::{KillSwitchStatus, KillSwitchStatusMode};
+        let retracted = KillSwitchStatus {
+            wanted: true,
+            verified: true,
+            live: true,
+            mode: KillSwitchStatusMode::Locked,
+            tunnel_permit_rendered: false,
+            endpoints: Vec::new(),
+            direct_endpoint_digest: String::new(),
+            last_error: None,
+            reconnect_after_release: false,
+        };
+        assert!(
+            !kill_switch_unhealthy_for_monitor(Some(&retracted), true),
+            "the session's own replacement retracts the permit before the Service publishes Blocked"
+        );
+        assert!(
+            kill_switch_unhealthy_for_monitor(Some(&retracted), false),
+            "outside an owned reload a Locked session without its permit is still unhealthy"
         );
     }
 
