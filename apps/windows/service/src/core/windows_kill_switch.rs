@@ -3659,9 +3659,6 @@ async fn reconcile_direct_watchdog_invalidation_unlocked(
     if release {
         let message = format!("{reason}; exact DIRECT permits were retracted; non-strict session");
         release_unhealthy_session_unlocked(&message).await?;
-        // General traffic is open. Put the secondary AI hold back; strict sessions never
-        // enter this branch.
-        crate::core::selective_layer::finish_release(true).await;
         Ok(())
     } else {
         let message =
@@ -7006,6 +7003,33 @@ mod tests {
         assert!(blocked.direct_endpoints.is_empty());
         assert!(blocked.direct_reload.is_none());
         cleanup().await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn committed_direct_expiry_does_not_interrupt_its_new_ai_hold() -> Result<()> {
+        cleanup().await;
+        let (core, _) = committed_direct_test_session(125).await?;
+        let removals_before = crate::core::selective_layer::test_active_hold_removals();
+        let mut armed = armed_guard().clone().expect("committed session");
+        let now = std::time::Instant::now();
+        armed.direct_reload.as_mut().unwrap().expires_at = Some(now);
+        let reason = direct_reload_invalidation_reason(&armed, Some(core), armed.tun_luid, now)
+            .expect("committed heartbeat expiry must invalidate DIRECT");
+
+        reconcile_direct_watchdog_invalidation_unlocked(armed, Some(core), now, reason).await?;
+        let wanted = status().await.wanted;
+        let held = crate::core::selective_layer::test_hold_active();
+        let removals_after = crate::core::selective_layer::test_active_hold_removals();
+        cleanup().await;
+
+        assert!(!wanted, "ordinary internet must be released on App death");
+        assert!(held, "AI services must remain blocked after release");
+        assert_eq!(
+            removals_after, removals_before,
+            "expiry must not delete the AI hold it has just installed"
+        );
         Ok(())
     }
 

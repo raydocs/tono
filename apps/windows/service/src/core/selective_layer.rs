@@ -104,8 +104,17 @@ fn reconcile_blocking() {
 static TEST_HOLD_ACTIVE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 #[cfg(test)]
+static TEST_ACTIVE_HOLD_REMOVALS: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(0);
+
+#[cfg(test)]
 pub(super) fn test_hold_active() -> bool {
     TEST_HOLD_ACTIVE.load(std::sync::atomic::Ordering::SeqCst)
+}
+
+#[cfg(test)]
+pub(super) fn test_active_hold_removals() -> usize {
+    TEST_ACTIVE_HOLD_REMOVALS.load(std::sync::atomic::Ordering::SeqCst)
 }
 
 pub async fn remove() {
@@ -140,7 +149,9 @@ fn remove_blocking() {
     #[cfg(test)]
     {
         let pause = tests::pause(&tests::REMOVE_PAUSE);
-        TEST_HOLD_ACTIVE.store(false, std::sync::atomic::Ordering::SeqCst);
+        if TEST_HOLD_ACTIVE.swap(false, std::sync::atomic::Ordering::SeqCst) {
+            TEST_ACTIVE_HOLD_REMOVALS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        }
         if let Some(pause) = pause {
             pause.completed.notify_one();
         }
