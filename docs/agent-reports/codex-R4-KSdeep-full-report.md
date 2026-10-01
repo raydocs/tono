@@ -1,0 +1,44 @@
+Two verified bugs shipped: committed DIRECT expiry now retires Core before fallback (#1074), and repeated AI-hold application preserves existing rules (#1087). Strict-mode behavior remains unchanged.
+
+Paths below are relative to `apps/windows/service/src/`.
+
+| ID | Area | Severity | File:line | Description | Verdict |
+|---|---|---|---|---|---|
+| R4KS-OLD-WATCHDOG | Windows Core | — | `core/manager.rs:616` | New start overwrites old watchdog during recovery | false-positive StartClash unconditionally joins previous watchdog before start |
+| R4KS-PID-REUSE | Windows Core | P2 | `core/manager.rs:1146` | Watchdog cleanup targets recycled PID | duplicate #1012 cached identity fences fallback |
+| R4KS-DEAD-PID | Windows Core | P2 | `core/manager.rs:868` | Confirmed-dead PID remains published during cleanup | duplicate #999 PID clears before awaits |
+| R4KS-FAILED-CHILD-LOCK | Windows Core | P1 | `core/manager.rs:772` | Tracked child cleanup recursively locks failed_child | duplicate existing one-guard fix |
+| R4KS-BOOKKEEPING | Windows recovery | P2 | `core/server/mod.rs:401` | Core retirement bookkeeping failure delays broad release | duplicate #1021/#1032 cleanup-failure limitation |
+| R4KS-UNARMED-TOMBSTONE | Windows release | P2 | `core/windows_kill_switch.rs:2764` | Unarmed tombstone error skips requested AI disposition | duplicate R3KS1-UNARMED-TOMBSTONE known #769 limitation |
+| R4KS-STRICT-WATCHDOG | Windows WFP | decision | `core/windows_kill_switch.rs:3090` | Strict unhealthy watchdog releases after 30 ticks | duplicate documented decision 027; not changed |
+| R4KS-SELECTIVE-HANG | Windows AI hold | P2 | `core/selective_layer.rs:290` | Hung native command strands reconciler | duplicate R3KS1-SELECTIVE-WORKER-HANG #988 limitation |
+| R4KS-NRPT-BYPASS | Windows AI hold | decision | `core/selective_fail_open.rs:36` | Cached DNS DoH or literals bypass suffix hold | duplicate SFO-1 accepted-design boundary |
+| R4KS-LATE-HOLD | Windows AI hold | P2 | `core/selective_layer.rs:74` | Late apply overrides newer Restore | duplicate #988 revisioned worker |
+| R4KS-EARLY-HOLD-REMOVE | Windows AI hold | P2 | `core/windows_kill_switch.rs:1317` | Arm removes hold before replacement barrier exists | duplicate #976 removal follows exact successful install |
+| R4KS-SELECTIVE-LOCK | Windows AI hold | — | `core/selective_layer.rs:83` | Worker lock held through native application | false-positive temporary condition guard drops before body |
+| R4KS-SELECTIVE-POISON | Windows AI hold | — | `core/selective_layer.rs:38` | Poison strands hold worker | false-positive guard recovers poison; unwind resets worker |
+| R4KS-REVISION-OVERFLOW | Windows AI hold | — | `core/selective_layer.rs:46` | Revision overflow crashes worker | false-positive requires approximately 2^64 requests |
+| R4KS-COMMAND-INPUT | Windows AI hold | — | `core/selective_fail_open.rs:177` | Permissive command predicate executes arbitrary input | false-positive only fixed generated commands reach runner |
+| R4KS-NRPT-COLLATERAL | Windows AI hold | — | `core/selective_fail_open.rs:75` | NRPT blocks general or LAN domains | false-positive fixed first-party suffixes and separate GUIDs exclude catch-all |
+| R4KS-UNWANTED-STARTUP | Windows AI hold | — | `core/windows_kill_switch.rs:3305` | Unwanted startup erases crash AI hold | false-positive startup preserves hold |
+| R4KS-IDLE-STOP | Windows AI hold | — | `core/windows_kill_switch.rs:3007` | Idle SCM Stop erases crash AI hold | false-positive idle passes None preserving disposition |
+| R4KS-NRPT-GUID | Windows AI hold | — | `core/dns/engine.rs:1888` | Selective GUID collides with catch-all | false-positive fixed separate GUIDs plus install guard |
+| R4KS-WFP-FLOOR-KEY | Windows WFP | — | `core/wfp_model.rs:57` | Same stable keys retain old filter body on upgrade | false-positive filter namespace bumped to v12 |
+| R4KS-WFP-POINTER | Windows WFP | — | `core/wfp/mod.rs:860` | Moving condition containers invalidates FFI pointers | false-positive boxed values stay heap-pinned |
+| R4KS-WFP-PERSISTENCE | Windows WFP | — | `core/wfp/mod.rs:854` | Persistent floor permits survive handle close | false-positive deliberate recoverable floor includes DHCP/loopback/NDP |
+| WIN-DIRECT-EXPIRY-LIVE-CORE | Windows recovery | P1 | `core/windows_kill_switch.rs:3100` | Automatic broad release leaves TUN Core and its native strict-route filters alive | real-fixed [#1074](https://github.com/raydocs/tono/pull/1074) |
+| WIN-SELECTIVE-REAPPLY-GAP | Windows AI hold | P2 | `core/selective_layer.rs:82` | Repeated apply deletes existing AI hold before reapplying | real-fixed [#1087](https://github.com/raydocs/tono/pull/1087) |
+| R4KS-GENERIC-LIVE-CORE | Windows recovery | P2 | `core/windows_kill_switch.rs:3127` | Generic WFP-only fallback may retain Core routes and DNS hijack | duplicate W1-LIVE-CORE-RELEASE; safe teardown without a new install dependency remains unresolved |
+| R4KS-DURABLE-AI-INTENT | Windows AI hold | P2 | `core/windows_kill_switch.rs:2799` | Automatic release can lose AI disposition across Service death | duplicate issue #1077; another hunter verified and owns reporting |
+| R4KS-LATE-DIRECT-BEGIN | Windows recovery | — | `core/windows_kill_switch.rs:2309` | Late reload Begin cancels queued DIRECT retirement | false-positive Bracket preserves pending/deadline; retirement checked before lease and Lock is denied |
+| R4KS-OWNER-STARTUP-SPLIT | Windows startup | P2 | `core/windows_kill_switch.rs:3534` | Interrupted user takeover leaves unverified owner B paired with active owner A and healthy Blocked | duplicate W1-UNVERIFIED-OWNER-RETIRE; intentional ambiguity guard needs a decision |
+| R4KS-NETSH-SYSTEMROOT | Windows AI hold | P2 | `core/selective_fail_open.rs:106` | Hard-coded C Windows netsh path fails on another system drive | duplicate issue #1085 R3REGW-SELECTIVE-NETSH-PATH |
+
+- [#1074](https://github.com/raydocs/tono/pull/1074): merged through green CI; `needs-hardware`; merge-commit auto-merge completed.
+- [#1087](https://github.com/raydocs/tono/pull/1087): merged through green CI; `needs-hardware`; merge-commit auto-merge completed.
+
+Both regressions failed before their fixes and passed afterward. All required hosted Windows CI checks passed for both PRs. Local checks passed: 112 kill-switch tests and six manager tests for #1074; seven selective tests and 111 kill-switch tests for #1087.
+
+False positives: **13 / 29 hypotheses**. Source audit completed for all four assigned files and their relevant callers. Installed-device network/packet acceptance could not run in this Linux VM.
+
+Hunter: GPT-6.1 Sol (Codex CLI)

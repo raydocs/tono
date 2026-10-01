@@ -10,7 +10,7 @@ import {
 } from '../src/ops/contract';
 import { runOpsCron } from '../src/ops/cron';
 import { ledgerCsv } from '../src/ops/ledger';
-import { postLedgerReverse } from '../src/ops/handlers/ledger';
+import { postLedgerReverse, postMonthClose } from '../src/ops/handlers/ledger';
 
 const ACCESS_TEAM_DOMAIN = 'test-team.cloudflareaccess.com';
 const ACCESS_AUDIENCE = 'test-access-audience-0001';
@@ -252,6 +252,62 @@ describe('ops ledger, month close, live FX', () => {
     expect(original.items[0].reversedBy).toBe(reverse.id);
   });
 
+  it('invalidates a ledger page validator when an existing entry is edited', async () => {
+    const created = await ops('ledger', json({
+      kind: 'revenue', category: 'plan', subjectType: 'fleet',
+      amountMinor: 800, currency: 'CNY', month: MONTH(), note: 'before',
+    }));
+    const entry = assertLedgerEntry(await created.json());
+    const before = await ops(`ledger?month=${MONTH()}`);
+    const etag = before.headers.get('etag')!;
+    expect((await ops(`ledger/${entry.id}`, json({ note: 'after' }, 'PATCH'))).status).toBe(200);
+    const after = await ops(`ledger?month=${MONTH()}`, { headers: { 'if-none-match': etag } });
+    expect(after.status).toBe(200);
+    expect(assertList(await after.json(), assertLedgerEntry).items.at(0)?.note).toBe('after');
+    expect(after.headers.get('etag')).not.toBe(etag);
+    expect((await ops(`ledger?month=${MONTH()}`, {
+      headers: { 'if-none-match': after.headers.get('etag')! },
+    })).status).toBe(304);
+  });
+
+  it('exports the source effect when a reversal is reversed again', async () => {
+    const created = await ops('ledger', json({
+      kind: 'revenue', category: 'plan', subjectType: 'fleet',
+      amountMinor: 800, currency: 'CNY', month: MONTH(),
+    }));
+    const entry = assertLedgerEntry(await created.json());
+    const reverse = assertLedgerEntry(await (await ops(`ledger/${entry.id}/reverse`, json({}))).json());
+    expect((await ops(`ledger/${encodeURIComponent(reverse.id)}/reverse`, json({}))).status).toBe(201);
+    const csv = await (await ops(`months/${MONTH()}/export.csv`)).text();
+    const total = csv.trim().split(/\r\n/).at(-1)!.split(',');
+    expect(Number(total[5])).toBe(800);
+    expect(Number(total[9])).toBe(800);
+  });
+
+  it('resolves zero-rounded legacy reversal ancestry outside the exported month', async () => {
+    const previous = shiftMonth(MONTH(), -1);
+    const rootId = crypto.randomUUID();
+    const legacyReverseId = crypto.randomUUID();
+    const t = tnow();
+    for (const [entryId, reverses, reversedBy] of [
+      [rootId, null, legacyReverseId], [legacyReverseId, rootId, null],
+    ]) {
+      await db().prepare(
+        `INSERT INTO ops_ledger_entries(
+           id, kind, category, subject_type, amount_minor, currency,
+           fx_rate_to_cny, fx_date, cny_minor, month, reverses, reversed_by, created_at, updated_at
+         ) VALUES(?, 'cost', 'other', 'fleet', 1, 'KRW', 0.004, ?, 0, ?, ?, ?, ?, ?)`,
+      ).bind(entryId, DAY(), previous, reverses, reversedBy, t, t).run();
+    }
+    expect((await ops(`ledger/${legacyReverseId}/reverse`, json({}))).status).toBe(201);
+    const csv = await (await ops(`months/${MONTH()}/export.csv`)).text();
+    const lines = csv.trim().split(/\r\n/);
+    expect(lines).toHaveLength(3);
+    const total = lines.at(-1)!.split(',');
+    expect(Number(total[5])).toBe(-1);
+    expect(Number(total[9])).toBe(0);
+  });
+
   it('keeps the subject of a reversed entry and of its reversal fixed', async () => {
     const created = await ops('ledger', json({
       kind: 'revenue', category: 'plan', subjectType: 'user', subjectId: 'u-A',
@@ -469,6 +525,43 @@ describe('ops ledger, month close, live FX', () => {
     expect(statuses).toEqual([200, 409]);
     const loser = a.status === 409 ? a : b;
     expect((await loser.json() as { error: { code: string } }).error.code).toBe('MONTH_CLOSED');
+  });
+
+  it('refuses a stale month-close snapshot when a ledger write commits before the lock', async () => {
+    const month = MONTH();
+    expect((await ops('ledger', json({
+      kind: 'revenue', category: 'plan', subjectType: 'user', subjectId: 'u-1',
+      amountMinor: 1000, currency: 'CNY', month,
+    }))).status).toBe(201);
+    const real = db();
+    const racingDb = new Proxy(real, {
+      get(target, key) {
+        const value = Reflect.get(target, key, target);
+        if (key !== 'prepare') return typeof value === 'function' ? value.bind(target) : value;
+        return (sql: string) => {
+          const statement = target.prepare(sql);
+          if (!sql.includes('INSERT OR IGNORE INTO ops_month_close')) return statement;
+          return {
+            bind: (...values: unknown[]) => ({
+              run: async () => {
+                expect((await ops('ledger', json({
+                  kind: 'revenue', category: 'plan', subjectType: 'user', subjectId: 'u-1',
+                  amountMinor: 2000, currency: 'CNY', month,
+                }))).status).toBe(201);
+                return statement.bind(...values).run();
+              },
+            }),
+          };
+        };
+      },
+    });
+    await expect(postMonthClose(
+      new Request(`https://test/api/v1/ops/months/${month}/close`, json({ notes: 'lock' })),
+      { ...(env as unknown as Env), DB: racingDb }, month, { email: ACCESS_ADMIN_EMAIL },
+    )).rejects.toMatchObject({ status: 409, code: 'LEDGER_CHANGED' });
+    expect(await real.prepare('SELECT month FROM ops_month_close WHERE month = ?').bind(month).first()).toBeNull();
+    const summary = assertMonthSummary(await (await ops(`months/${month}`)).json());
+    expect(summary.revenueCnyMinor).toBe(3000);
   });
 
   it('serves frozen totals for a closed month after later metering arrives', async () => {

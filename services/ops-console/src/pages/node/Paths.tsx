@@ -1,11 +1,16 @@
 import type { CarrierKey, ForwardPathDto, Measured, ReturnPathDto } from '@contract';
-import { EmptyLine } from '@/components/ops/Empty';
-import { Section } from '@/components/ops/Section';
+import { Panel } from '@/components/ops/Panel';
+import { ProbeStrip } from '@/components/ops/ProbeStrip';
 import { Value } from '@/components/ops/Value';
 import { copy } from '@/copy/copy';
-import { formatCount, formatLatency, formatLoss, formatPercent, formatWhenAgo } from '@/lib/display';
+import { formatCount, formatLatency, formatLoss, formatPercent } from '@/lib/display';
+import { probesOf } from '@/lib/probes';
 import { sourceWord } from '@/lib/sources';
-import { cn } from '@/lib/utils';
+import type { CarrierPingMapDto } from '@/lib/types';
+
+const words = copy.nodeBoard.paths;
+/** The hub sweeps every five minutes; three missed sweeps is late. */
+const STALE_AFTER_SEC = 15 * 60;
 
 /**
  * The two directions, side by side, because they answer different questions
@@ -17,38 +22,44 @@ import { cn } from '@/lib/utils';
 export function NodePaths({
   forward,
   back,
+  pings,
 }: {
   forward: Measured<ForwardPathDto[]>;
   back: Measured<ReturnPathDto[]>;
+  /** The hub's recent rounds per carrier, from the legacy read; null when it has not answered. */
+  pings: CarrierPingMapDto;
 }) {
+  const forwardRows = forward.value.filter((row) => row.attempts > 0);
+  const backRows = back.value.filter((row) => row.samples > 0);
   return (
     <div className="flex flex-col gap-3">
-      <div className="grid gap-8 lg:grid-cols-2">
-        <Section
+      <div className="node-paths-grid">
+        <Panel
           title={copy.nodeSections.forward}
-          aside={<Stamp measured={forward} />}
-          className="min-w-0"
+          description={words.forwardLead}
+          source={sourceWord(forward.source)}
+          asOfSec={forward.asOfSec}
+          state={forwardRows.length === 0 ? 'empty' : 'ready'}
+          emptyText={copy.nodeNoForward}
+          bodyHeight={96}
         >
-          <ForwardTable rows={forward.value} source={sourceWord(forward.source)} />
-        </Section>
-        <Section
+          <ForwardTable rows={forwardRows} source={sourceWord(forward.source)} />
+        </Panel>
+        <Panel
           title={copy.nodeSections.back}
-          aside={<Stamp measured={back} />}
-          className="min-w-0"
+          description={words.backLead}
+          source={sourceWord(back.source)}
+          asOfSec={back.asOfSec}
+          staleAfterSec={STALE_AFTER_SEC}
+          state={backRows.length === 0 ? 'empty' : 'ready'}
+          emptyText={copy.nodeNoReturn}
+          bodyHeight={96}
         >
-          <ReturnTable rows={back.value} source={sourceWord(back.source)} />
-        </Section>
+          <ReturnTable rows={backRows} pings={pings} source={sourceWord(back.source)} />
+        </Panel>
       </div>
-      <p className="text-micro text-[var(--muted-foreground)]">{copy.nodePathNote}</p>
+      <p className="text-fine">{copy.nodePathNote}</p>
     </div>
-  );
-}
-
-function Stamp({ measured }: { measured: Measured<unknown> }) {
-  return (
-    <span className="text-micro text-[var(--muted-foreground)]">
-      {measured.asOfSec === null ? sourceWord(measured.source) : formatWhenAgo(measured.asOfSec)}
-    </span>
   );
 }
 
@@ -57,101 +68,80 @@ function carrierName(carrier: CarrierKey): string {
 }
 
 function ForwardTable({ rows, source }: { rows: readonly ForwardPathDto[]; source: string }) {
-  const measuredRows = rows.filter((row) => row.attempts > 0);
-  if (measuredRows.length === 0) return <EmptyLine message={copy.nodeNoForward} />;
+  const cols = copy.nodeForwardColumns;
   return (
-    <Frame
-      heads={[
-        copy.nodeForwardColumns.carrier,
-        copy.nodeForwardColumns.okRate,
-        copy.nodeForwardColumns.tcp,
-        copy.nodeForwardColumns.worst,
-        copy.nodeForwardColumns.tries,
-      ]}
-    >
-      {measuredRows.map((row) => (
-        <tr key={row.carrier} className="data-row border-b border-[var(--hairline)] last:border-b-0">
-          <td className="px-3 whitespace-nowrap">{carrierName(row.carrier)}</td>
-          <td className="px-3 text-right font-mono whitespace-nowrap">
-            <Value
-              value={row.successRate === null ? null : formatPercent(row.successRate)}
-              source={source}
-              mono
-            />
-          </td>
-          <td className="px-3 text-right font-mono whitespace-nowrap">
-            <Value
-              value={row.medianTcpMs === null ? null : formatLatency(row.medianTcpMs)}
-              source={source}
-              mono
-            />
-          </td>
-          <td className="min-w-0 px-3">
-            <span className="block truncate" title={row.topFailure ?? undefined}>
-              {row.topFailure ?? copy.missing}
-            </span>
-          </td>
-          <td className="px-3 text-right font-mono whitespace-nowrap">
-            {copy.nodeTries(formatCount(row.attempts), formatCount(row.users))}
-          </td>
+    <table className="quality-table">
+      <thead>
+        <tr>
+          <th scope="col">{cols.carrier}</th>
+          <th scope="col" className="num">{cols.okRate}</th>
+          <th scope="col" className="num">{cols.tcp}</th>
+          <th scope="col" className="quality-p50-col">{cols.worst}</th>
+          <th scope="col" className="num">{cols.tries}</th>
         </tr>
-      ))}
-    </Frame>
-  );
-}
-
-function ReturnTable({ rows, source }: { rows: readonly ReturnPathDto[]; source: string }) {
-  const measuredRows = rows.filter((row) => row.samples > 0);
-  if (measuredRows.length === 0) return <EmptyLine message={copy.nodeNoReturn} />;
-  return (
-    <Frame
-      heads={[
-        copy.nodeReturnColumns.carrier,
-        copy.nodeReturnColumns.loss,
-        copy.nodeReturnColumns.latency,
-      ]}
-    >
-      {measuredRows.map((row) => (
-        <tr key={row.carrier} className="data-row border-b border-[var(--hairline)] last:border-b-0">
-          <td className="px-3 whitespace-nowrap">{carrierName(row.carrier)}</td>
-          <td className="px-3 text-right font-mono whitespace-nowrap">
-            <Value value={row.lossPct === null ? null : formatLoss(row.lossPct)} source={source} mono />
-          </td>
-          <td className="px-3 text-right font-mono whitespace-nowrap">
-            <Value
-              value={row.latencyMs === null ? null : formatLatency(row.latencyMs)}
-              source={source}
-              mono
-            />
-          </td>
-        </tr>
-      ))}
-    </Frame>
-  );
-}
-
-/** The same hairline frame both tables sit in; the first column is the only left-aligned one. */
-function Frame({ heads, children }: { heads: string[]; children: React.ReactNode }) {
-  return (
-    <div className="overflow-x-auto rounded-[10px] border border-[var(--hairline)] bg-[var(--surface)]">
-      <table className="w-full border-collapse text-body">
-        <thead>
-          <tr className="data-row border-b border-[var(--hairline)]">
-            {heads.map((head, index) => (
-              <th
-                key={head}
-                className={cn(
-                  'px-3 text-micro font-medium whitespace-nowrap text-[var(--muted-foreground)]',
-                  index === 0 || index === 3 ? 'text-left' : 'text-right',
-                )}
-              >
-                {head}
-              </th>
-            ))}
+      </thead>
+      <tbody>
+        {rows.map((row) => (
+          <tr key={row.carrier}>
+            <td className="whitespace-nowrap">{carrierName(row.carrier)}</td>
+            <td className="num">
+              <Value value={row.successRate === null ? null : formatPercent(row.successRate)} source={source} mono />
+            </td>
+            <td className="num">
+              <Value value={row.medianTcpMs === null ? null : formatLatency(row.medianTcpMs)} source={source} mono />
+            </td>
+            <td className="quality-p50-col node-path-failure">
+              <span className="block truncate" title={row.topFailure ?? undefined}>
+                {row.topFailure ?? copy.missing}
+              </span>
+            </td>
+            <td className="num">{copy.nodeTries(formatCount(row.attempts), formatCount(row.users))}</td>
           </tr>
-        </thead>
-        <tbody>{children}</tbody>
-      </table>
-    </div>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+function ReturnTable({
+  rows,
+  pings,
+  source,
+}: {
+  rows: readonly ReturnPathDto[];
+  pings: CarrierPingMapDto;
+  source: string;
+}) {
+  const cols = copy.nodeReturnColumns;
+  return (
+    <table className="quality-table">
+      <thead>
+        <tr>
+          <th scope="col">{cols.carrier}</th>
+          <th scope="col" className="num">{cols.loss}</th>
+          <th scope="col" className="num">{cols.latency}</th>
+          <th scope="col" className="node-probe-col">{words.probes}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((row) => {
+          const history = row.carrier === 'other' ? [] : pings?.[row.carrier]?.history ?? [];
+          return (
+            <tr key={row.carrier}>
+              <td className="whitespace-nowrap">{carrierName(row.carrier)}</td>
+              <td className="num">
+                <Value value={row.lossPct === null ? null : formatLoss(row.lossPct)} source={source} mono />
+              </td>
+              <td className="num">
+                <Value value={row.latencyMs === null ? null : formatLatency(row.latencyMs)} source={source} mono />
+              </td>
+              <td className="node-probe-col">
+                {history.length === 0 ? copy.missing : <ProbeStrip probes={probesOf(history)} className="justify-end" />}
+              </td>
+            </tr>
+          );
+        })}
+      </tbody>
+    </table>
   );
 }

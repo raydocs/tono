@@ -105,9 +105,11 @@ type AccountRow = { id: string; user_id: string | null };
 type UserRow = { id: string; email: string };
 type CycleRow = { node_name: string };
 
-export async function loadMonthSummary(db: D1Database, month: string, nowSec: number): Promise<MonthSummaryDto> {
+export async function loadMonthSummary(
+  db: D1Database, month: string, nowSec: number, snapshotEntries?: Row[],
+): Promise<MonthSummaryDto> {
   const { start, end } = monthBounds(month);
-  const entries = (await db.prepare(
+  const entries = snapshotEntries ?? (await db.prepare(
     'SELECT * FROM ops_ledger_entries WHERE month = ?',
   ).bind(month).all<Row>()).results ?? [];
   const closed = await db.prepare(
@@ -307,17 +309,20 @@ function signedTotal(kind: string, minor: number): number {
   return 0;
 }
 
-export function ledgerCsv(entries: LedgerEntryDto[]): string {
+export function ledgerCsv(
+  entries: LedgerEntryDto[], zeroPolarities: ReadonlyMap<string, number> = new Map(),
+): string {
   const lines = [CSV_HEADERS.join(',')];
   let amount = 0;
   let cny = 0;
   const currencies = new Set<string>();
   for (const entry of entries) {
-    // amount_minor is a non-negative magnitude (CHECK). A reversal stores the
-    // opposite effect only in cny_minor, so the source-currency total has to
-    // apply that opposite effect itself or a same-currency export doubles.
+    // CNY retains the effect's sign through repeated reversals. When FX
+    // rounded it to zero, the exporter resolves polarity from the ancestors.
+    const polarity = entry.cnyMinor < 0 ? -1 : entry.cnyMinor > 0 ? 1
+      : zeroPolarities.get(entry.id) ?? (entry.reverses ? -1 : 1);
     const source = signedTotal(entry.kind, entry.amountMinor);
-    amount += entry.reverses ? -source : source;
+    amount += polarity * source;
     cny += signedTotal(entry.kind, entry.cnyMinor);
     currencies.add(entry.currency);
     lines.push([

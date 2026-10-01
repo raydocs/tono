@@ -12,14 +12,19 @@ nonisolated struct KeychainStore: Sendable {
     /// `SecItemCopyMatching`, unless a test stands in for a keychain that
     /// refuses a read (locked, or interaction not allowed).
     private let copyMatching: @Sendable (CFDictionary, UnsafeMutablePointer<CFTypeRef?>?) -> OSStatus
+    private let updateItem: @Sendable (CFDictionary, CFDictionary) -> OSStatus
     init(
         service: String = Bundle.main.bundleIdentifier.map { "\($0).tono" } ?? "app.tono.account",
         copyMatching: @escaping @Sendable (CFDictionary, UnsafeMutablePointer<CFTypeRef?>?) -> OSStatus = {
             SecItemCopyMatching($0, $1)
+        },
+        updateItem: @escaping @Sendable (CFDictionary, CFDictionary) -> OSStatus = {
+            SecItemUpdate($0, $1)
         }
     ) {
         self.service = service
         self.copyMatching = copyMatching
+        self.updateItem = updateItem
     }
 
     func data(for key: Key) throws -> Data? {
@@ -37,7 +42,7 @@ nonisolated struct KeychainStore: Sendable {
     func set(_ data: Data, for key: Key) throws {
         let query = base(key)
         let update = [kSecValueData as String: data]
-        let status = SecItemUpdate(query as CFDictionary, update as CFDictionary)
+        let status = updateItem(query as CFDictionary, update as CFDictionary)
         if status == errSecItemNotFound {
             var add = query; add[kSecValueData as String] = data
             let addStatus = SecItemAdd(add as CFDictionary, nil)

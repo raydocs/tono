@@ -126,7 +126,9 @@ export const activityProcessFamily = (
   }
   const stem = fileStem(process || processPath || '')
   if (!stem) return ''
-  if (ACTIVITY_FAMILY_STEMS[stem]) return ACTIVITY_FAMILY_STEMS[stem]
+  if (Object.hasOwn(ACTIVITY_FAMILY_STEMS, stem)) {
+    return ACTIVITY_FAMILY_STEMS[stem]
+  }
   if (stem.startsWith('cursor')) return 'Cursor'
   if (stem.startsWith('code -')) return 'Code'
   const file = (process || processPath || '').split(/[\\/]/).pop() || ''

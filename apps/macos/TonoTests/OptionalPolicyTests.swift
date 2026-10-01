@@ -1,27 +1,37 @@
+import CryptoKit
 import XCTest
 @testable import Tono
 
-/// R1-F4 regression: every connect parks a background optional-policy runtime
-/// replacement behind the shared config-reload handle (arm → writeRuntimeConfig
-/// → helper /core/sync → reload → TUN verify). When any step throws, the catch
-/// tears the session down fail-closed via disconnect(releaseKillSwitch: false)
-/// — and then stopped: PF stayed armed bootstrap-only, protection stayed
-/// blocked, and no protected reconnect was scheduled. On a stable network no
-/// kick ever follows, so the host sat in Protected Offline indefinitely, the
-/// stranded state the wake path explicitly avoids. Every sibling fail-closed
-/// failure branch (reloadCoreConfig, recoverFailedNodeSwitch, the monitor and
-/// wake paths) schedules the loop. XCTest cannot drive the resolver, the
-/// privileged helper, or sing-box; the `optionalPolicyRuntimeMutation` seam
-/// stands in for that whole runtime replacement, exactly as the monitor tests
-/// replace `tunInterfaceExists` and the disconnect-owner tests replace
-/// `NetworkProtectionOperations`.
+/// A background policy apply that throws must not leave a whole-machine
+/// block. Non-strict macOS has no `permanent` switch and the selective AI
+/// hook is not registered, so the catch restores the original network and
+/// does not schedule a protected reconnect. XCTest cannot drive the resolver,
+/// the privileged helper, or sing-box; `optionalPolicyRuntimeMutation` stands
+/// in for that replacement.
 final class OptionalPolicyTests: XCTestCase {
 
-    func testBackgroundPolicyFailureSchedulesProtectedReconnect() async {
+    /// MAC-OPTIONAL-POLICY-FAIL-CLOSED: a failure before /core/sync (resolver
+    /// arm, writeRuntimeConfig on a full disk) has not touched the running
+    /// Core, so the optional overlay must not tear the working session down.
+    /// The runtime-mutation seam replaces the whole operation (it models a
+    /// failure after replacement started), so check the production decision
+    /// at the writeRuntimeConfig → /core/sync boundary directly.
+    func testOptionalPolicyFailureBeforeReplacementKeepsSession() {
+        XCTAssertEqual(
+            AppState.optionalPolicyFailureAction(replacementStarted: false),
+            .keepSession
+        )
+        XCTAssertEqual(
+            AppState.optionalPolicyFailureAction(replacementStarted: true),
+            .teardown
+        )
+    }
+
+    func testBackgroundPolicyFailureRestoresTheOriginalNetwork() async {
         let app = AppState()
         // Post-connect: onCoreStarted has already published connected and the
-        // session's PF arm is live — the state the catch's preserve teardown
-        // and the scheduling snapshot in scheduleProtectedReconnect inherit.
+        // session's PF arm is live. The mutation seam marks replacement as
+        // started, so this failure releases the original network.
         app.isConnected = true
         KillSwitchService.isArmed = true
         // Admission requires a core controller handle and a policy with at
@@ -60,19 +70,65 @@ final class OptionalPolicyTests: XCTestCase {
         await mutation?.value
         await app.connectionCoordinator.disconnectSequence?.value
 
-        // The host is parked fail-closed, exactly as before the fix…
-        XCTAssertTrue(app.isProtectionBlocked)
-        XCTAssertNotNil(app.errorMessage)
-        // …but the persistent reconnect loop now owns the recovery instead of
-        // waiting for a network-change kick a stable network never sends.
-        // Before the fix both assertions failed: no loop was ever scheduled.
-        XCTAssertTrue(app.isProtectedReconnectScheduled)
-        XCTAssertNotNil(app.connectionCoordinator.protectedReconnectTask)
-
-        // Leave no sleeping loop behind for later tests. The loop never
-        // disarms, so cancelling it here cannot loosen protection.
-        let loop = app.connectionCoordinator.protectedReconnectTask
+        XCTAssertFalse(app.isConnected)
+        XCTAssertFalse(app.isProtectionBlocked)
+        XCTAssertFalse(app.isProtectedReconnectScheduled)
+        XCTAssertNil(app.connectionCoordinator.protectedReconnectTask)
+        XCTAssertEqual(
+            app.errorMessage,
+            String(localized: "Secure app routing could not be applied. This Mac is back on its normal internet.")
+        )
         app.connectionCoordinator.cancelReconnectTasks()
-        await loop?.value
+    }
+
+    func testConnectedPolicyUpdateKeepsTheSession() async throws {
+        let storage = ConfigStorage.shared
+        let url = storage.appSupportDirectory.appendingPathComponent(
+            "managed-traffic-policy.json"
+        )
+        let saved = try? Data(contentsOf: url)
+        defer {
+            if let saved { try? storage.writeSensitive(saved, to: url) }
+            else { try? FileManager.default.removeItem(at: url) }
+        }
+        try? FileManager.default.removeItem(at: url)
+
+        let app = AppState()
+        var runtime = NetworkProtectionOperations()
+        runtime.repairForRelease = {}
+        runtime.stopCore = { _ in true }
+        runtime.coreStatus = { (false, true) }
+        runtime.restoreDNS = { true }
+        runtime.disableSystemProxy = {}
+        runtime.disarm = {}
+        runtime.restrictToBootstrap = {}
+        app.networkProtection = runtime
+        app.isConnected = true
+        app.coreController = nil
+
+        let json = #"{"version":2,"domains":[],"mediaEndpoints":[]}"#
+        let digest = Data(SHA256.hash(data: Data(json.utf8))).base64EncodedString()
+            .replacingOccurrences(of: "=", with: "")
+            .replacingOccurrences(of: "+", with: "-")
+            .replacingOccurrences(of: "/", with: "_")
+        try await app.installManagedTrafficPolicy(
+            ManagedTrafficPolicyCache(
+                revision: 2,
+                json: json,
+                sha256: digest,
+                updatedAt: nil
+            ),
+            persistCache: false,
+            allowRuntimeTransition: true
+        )
+
+        XCTAssertTrue(app.isConnected)
+        XCTAssertNil(app.connectionCoordinator.disconnectSequence)
+        XCTAssertFalse(app.isProtectedReconnectScheduled)
+        XCTAssertEqual(app.managedTrafficPolicy.version, 2)
+        XCTAssertEqual(
+            app.errorMessage,
+            String(localized: "Secure app routing was updated. Tono is applying it on this connection.")
+        )
     }
 }

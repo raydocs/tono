@@ -69,3 +69,24 @@ Hunter: Grok 4.7。基线 `origin/main` `c26025ec`。范围：W4 服务生命周
 ## 未完成
 
 W4–W9 的指定文件都读过调用关系。没有在 Windows 上跑 `cargo test`。没有实机验证 schtasks 删除、开机 DNS，或这次更新证明的自愈。没有做 jev-route 审查，也没有部署。
+
+## 修复轮（2026-10-01）
+
+对照当时的 `origin/main`。认领评论 `Taking this (Grok win-svc)` 没有写上：`gh issue comment` 和 REST 发评论都返回 403 `Resource not accessible by integration`。开工时 #847、#850、#851 没有别人的评论或 PR。标签 403 按约定忽略。
+
+| Issue | 处理 | 头 / 状态 |
+|---|---|---|
+| [#846](https://github.com/raydocs/tono/issues/846) WIN-REL-DNS-BEFORE-STOP | 跳过。另一位 Grok 的 [#866](https://github.com/raydocs/tono/pull/866) 仍开放，可合并，自动合并开着 | `fc8b86dc` |
+| [#849](https://github.com/raydocs/tono/issues/849) WIN-DNS-CIM-84 | 跳过。同一位的 [#868](https://github.com/raydocs/tono/pull/868) 已合入。IPv4 CIM 84 只清掉 IPv4 期望，随后仍配置 IPv6。Issue 已关闭 | 合并 `36844a4a` |
+| [#847](https://github.com/raydocs/tono/issues/847) WIN-UPD-SUSPENDED-SUCCESSOR | Codex [#858](https://github.com/raydocs/tono/pull/858) 已合入：恢复前 `resume_successor` 唤醒身份匹配的后继；非严格下目标 Service 起不来走 `emergency_disarm_windows_kill_switch`，严格杀开关仍阻断。本代理的 [#887](https://github.com/raydocs/tono/pull/887) 是第二套实现，与 main 冲突，自动合并已关，留在队列外 | #858 合并 `b17ddc32`；#887 头 `dcc07de0` |
+| [#850](https://github.com/raydocs/tono/issues/850) WIN-SCM-STOP-HINT | [#902](https://github.com/raydocs/tono/pull/902)。main 上的等待提示已是 65 秒。刷新周期 15 秒，短于一次 40 秒 DNS 预算，也短于提示本身。检查点每次重报递增。刷新线程在最终 Stopped 之前 join。自动合并开着，可合并，检查尚未跑完 | `506ce4fa` |
+| [#851](https://github.com/raydocs/tono/issues/851) WIN-UPD-ADOPT-NONE | [#911](https://github.com/raydocs/tono/pull/911)，基线已含 #858 和 #868。`publication_clock` 可选；缺省仍采纳旧记录；已有下限不再后移。时钟与 `Image.started_at` 相同，是 FILETIME，不是收据的 Unix 时间。字节落盘之后、CreateProcess 之前记下。自动合并开着，可合并，检查尚未跑完 | `4b6c6cca` |
+
+本机（rustc 1.98.1）跑过：
+
+- `cargo test --locked --features standalone,client,test --lib scm_stop_hint_refreshes_before_a_dns_restore_can_outlive_it`：1 passed。
+- `cargo check --locked --target x86_64-pc-windows-gnu --features standalone,client --bin tono-service`：通过。
+- `cargo test --locked --features standalone,client,test --lib update_transaction::`：14 passed（rebase 前）。rebase 到含 #858 的 main 之后，`update_unregistered_successor_must_start_after_the_publication_clock` 1 passed。
+- `cargo check --locked --target x86_64-pc-windows-gnu --features standalone,client --bin tono-service-install --lib`：通过。
+
+没有 Windows SCM，也没有挂起进程或真实发布时钟。旧执行器重写 `state.json` 时会丢掉可选的 `publication_clock`，下限随之消失。本报告 PR 不开自动合并。没有部署，没有 jev-route。

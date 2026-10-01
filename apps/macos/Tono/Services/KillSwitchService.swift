@@ -302,9 +302,10 @@ nonisolated enum KillSwitchService {
 
     /// Explicit disconnect/logout/quit path. DNS recovery is an invariant of
     /// every PF release, even if a caller forgets to request it separately.
+    /// Automatic failure callers preserve the secondary AI hold.
     /// Failure leaves local intent armed so an unreachable helper can never be
     /// mistaken for a successful disarm.
-    static func disarm() throws {
+    static func disarm(preserveAIHold: Bool = false) throws {
         // Recovery must remain possible across helper-version upgrades. An
         // older authenticated helper may not satisfy the current feature
         // version, but its status/disarm contract is still the authoritative
@@ -330,7 +331,7 @@ nonisolated enum KillSwitchService {
         }
         do {
             _ = try HelperManager.restoreProtectedDNSIfConfigured()
-            try HelperManager.disarmKillSwitch()
+            try HelperManager.disarmKillSwitch(preserveAIHold: preserveAIHold)
             isArmed = false
         } catch HelperIPCError.forbidden {
             throw Error.helperRejected
