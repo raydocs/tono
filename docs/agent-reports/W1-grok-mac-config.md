@@ -1,22 +1,28 @@
-# W1-grok-mac-config（2026-09-30）
+# W1-grok-mac-config（2026-09-30，续记 2026-10-01）
 
-Hunter: Grok 4.7。范围：macOS M9 配置与策略签名、M10 代理/更新/订阅/线路、M11 账号与钥匙串、M12 连通性/sidecar/WebSocket。基线 `origin/main` `50bbbbf0`。不部署、不跑 jev-route。Swift XCTest 在这台 Linux 云代理上不能跑（没有 `xcodebuild` / Swift），未安装工具链。
+Hunter: Grok 4.7。范围：macOS M9 配置与策略签名、M10 代理/更新/订阅/线路、M11 账号与钥匙串、M12 连通性/sidecar/WebSocket。首轮基线 `origin/main` `50bbbbf0`；10-01 续记对照 `17580a26`。不部署、不跑 jev-route。Swift XCTest 在这台 Linux 云代理上不能跑（没有 `xcodebuild` / Swift），未安装工具链。
 
 ## 结论表
 
 | ID | 区域 | 严重级别 | 文件:行 | 一句话 | 结论 |
 |---|---|---|---|---|---|
-| MAC-ASSISTANT-DIRECT-GAP | M9 路由 | P1（中·推导） | `ConfigPipeline+SingBoxProduct.swift:157`、`ConfigPipeline+Runtime.swift:691`（基线 `50bbbbf0`） | 没有住宅跳时不发出助手域名/`160.79.104.0/21` 规则，已审核应用的进程直连先匹配，TCP 直出物理网卡；有住宅跳时这些规则只覆盖 TCP，同一进程的 UDP 仍直连 | 已在 [#867](https://github.com/raydocs/tono/pull/867) 修复。曾打开 auto-merge（MERGE）；随后看到已关闭，按排队规则不再重新打开。`needs-hardware` 标签两次 `POST` 均 403（集成令牌不能改标签），未打上 |
-| AI-DIRECT-SUFFIX（在途） | M9 策略 | 不新开等级 | `ConfigPipeline+Direct.swift` `directSuffixOverlapsProtected` | 受保护后缀列表没有 OpenAI 等助手域，签名策略仍可能写入这些后缀 | 重复 #797（`codex2/ai-direct-suffix-guard`，进行中）。本槽不改该校验。#867 让路由规则先于后缀直连，但 DNS 仍可能把被接受的后缀交给中国 DoH，那部分留给 #797 |
+| MAC-ASSISTANT-DIRECT-GAP | M9 路由 | P1（中·推导） | `ConfigPipeline+SingBoxProduct.swift:157`、`ConfigPipeline+Runtime.swift:691`（基线 `50bbbbf0`） | 没有住宅跳时不发出助手域名/`160.79.104.0/21` 规则，已审核应用的进程直连先匹配，TCP 直出物理网卡；有住宅跳时这些规则只覆盖 TCP，同一进程的 UDP 仍直连 | 已在 [#867](https://github.com/raydocs/tono/pull/867) 修复。2026-10-01 00:33 UTC 起 auto-merge 为 MERGE（启用者 raydocs）。本回合没有切换它。`needs-hardware` 仍未打上（先前两次 `POST` 403） |
+| AI-DIRECT-SUFFIX | M9 策略 | 不新开等级 | `ConfigPipeline+Direct.swift` `directSuffixOverlapsProtected` | 受保护后缀列表没有 OpenAI 等助手域，签名策略仍可能写入这些后缀 | 重复已合并的 #797（`c6cae3b9`）。本槽不改该校验。#867 让路由规则先于后缀直连 |
+| MAC-DNS-CACHE-BATCH | M12 DNS | P1（中·推导） | `ProtectedSystemResolver.swift:170`（基线 `17580a26`） | `MoreComing` 清零的第一批公网 A 被当成最终答案并拆掉查询，缓存里的 `www.gstatic.com` 挡住随后的假 IP；PF 已武装时系统 DNS 检查失败并保持断网 | 已在 [#886](https://github.com/raydocs/tono/pull/886) 修复。auto-merge 已开一次（MERGE）。`needs-hardware` 一次 `POST` 403，未再试 |
+| MAC-UPDATE-TUN-RELEASE | M10 更新 | P1（中·推导） | `AppState+Connect.swift:1469`（基线 `17580a26`） | 原生更新已标记 pending、监控尚未 suspend 时，隧道丢失走 Restore internet，放开 PF 并挡住保护重连，助手流量直连 | 已在 [#891](https://github.com/raydocs/tono/pull/891) 修复。auto-merge 已开一次（MERGE）。`needs-hardware` 一次 `POST` 403，未再试。不打开 `selectiveAiBlockReady` |
+| MAC-SIGNIN-KEYCHAIN-ADOPT | M11 账号 | P1（中·推导） | `TonoAPIClient.swift:388`、`AccountSession+Auth.swift:849` | 登录成功后钥匙串写刷新令牌失败：`adopt` 把令牌留在内存然后抛出，`performAuthentication` 在写入 `user` 之前 `fail()`，会话停在 `.error`，重启后钥匙串里仍是旧令牌 | 已核实，本槽不修。#796 合入后仍故意抛出，注释写明要用内存令牌压过钥匙串里的上一账号。集成令牌不能开 GitHub issue，所以只记在这里 |
+| MAC-SINGBOX-DIRECT-BLACKHOLE | M9 路由 | 决定项，不单列缺陷等级 | `ConfigPipeline+SingBoxProduct.swift:138`（基线 `17580a26`） | sing-box 中国直连是单成员 selector，注释写明没有自动回落到出口。绑定接口到不了中国目的地时，微信/钉钉和产品网页后缀失败，不是整机断网 | 接受该注释，不改代码，不改 `docs/DECISIONS.md`，不另开 issue。mihomo 侧仍有第二成员 `Tono-Exit` 的 fallback，产品连接走的是 sing-box |
 
-没有已核实、又决定不修的缺陷，因此没有新开 GitHub issue。
+集成令牌不能创建 GitHub issue。上表里未修的一项只记在本报告。
 
 ## PR
 
 | PR | 分支 | 头 SHA | auto-merge | 标签 |
 |---|---|---|---|---|
-| [#867](https://github.com/raydocs/tono/pull/867) | `hunt/grok-maccfg-assistant-direct-guard-89a9` | `e4b5ca6d` | 曾打开（MERGE），复查时已关，未再打开 | `needs-hardware` 未打上（`gh api` 403 `Resource not accessible by integration`，重试一次仍 403） |
-| [#875](https://github.com/raydocs/tono/pull/875) | `hunt/grok-maccfg-report-89a9` | #875 的 head | 未开。非草稿，留给合并队列 | 无。不是 UI，也不是路由改动 |
+| [#867](https://github.com/raydocs/tono/pull/867) | `hunt/grok-maccfg-assistant-direct-guard-89a9` | `e4b5ca6d` | 2026-10-01 00:33 UTC 为 MERGE（raydocs 打开）。本回合没有切换 | `needs-hardware` 未打上（先前 403，未再试） |
+| [#886](https://github.com/raydocs/tono/pull/886) | `hunt/grok-maccfg-dns-cache-batch-89a9` | `4f7e06b2` | 已开一次，MERGE | `needs-hardware` 未打上（一次 403，未再试） |
+| [#891](https://github.com/raydocs/tono/pull/891) | `hunt/grok-maccfg-update-tun-release-89a9` | `b1fe37b2` | 已开一次，MERGE | `needs-hardware` 未打上（一次 403，未再试） |
+| [#875](https://github.com/raydocs/tono/pull/875) | `hunt/grok-maccfg-report-89a9` | 本 PR head | 未开，也不开。非草稿，留给合并队列成批处理 | 无 |
 
 ## 假阳性与已排除（34）
 
@@ -61,12 +67,13 @@ Hunter: Grok 4.7。范围：macOS M9 配置与策略签名、M10 代理/更新/�
 
 ## 计数
 
-假设共 36。核实并修复 1（#867）。重复在途 PR 1（#797）。假阳性或已有守卫 34。
+假设共 40。核实并修复 3（#867、#886、#891）。重复已合并 PR 1（#797）。接受为书面产品选择 1（sing-box 中国直连不回落）。已核实未修 1（登录钥匙串，见上表）。假阳性或已有守卫 34。
 
 ## 没做完的部分
 
 - `AppState+Catalog.swift`、`AppState+Proxy.swift` 只追了直连策略装配、运行时写入和住宅终端，没有逐行读完。
 - `ConfigParser` 的 YAML 中段、`TonoAPIClient` 刷新以外的请求、`UpdateHandoffJournal` 的后半段状态机，是抽样而不是通读。
 - `AccountSession+Runtime` / `Telemetry` 确认了 `fail()`、权利封锁和「不解除 PF」，没有把遥测上传再猎一遍（那是 M13 / #725）。
-- 上一轮派出的四个探索子代理在上下文压缩后没有可核对的结论；本报告只采用这次直接读到的代码和 sing-box 匹配器。
-- XCTest `testAssistantDestinationsPrecedeReviewedBundleDirectWithoutAHomeHop` 未在本机运行。
+- 10-01 对照了四个探索结果里能在当前 `main` 上读到的控制流：[Hunt M9 config routing](bc-96077312-84b3-5f2b-b850-d885dcd3ac88)、[Hunt M10 update and proxy](bc-880948d6-6334-5e38-b4d2-1f21e0a041d0)、[Hunt M11 account tokens](bc-d55b1294-044c-5bf9-bf27-7755ff8eb73b)、[Hunt M12 connectivity WS](bc-54c28811-8116-5d38-abd1-1a797a4c9948)。同一修订的目录回滚、`reloadConfig` 交接、暂停与 `startCloudOnlyRuntime` 的顺序、无名拒绝墓碑、回调内 `DNSServiceRefDeallocate` 是否安全，这几条没有在本回合重读，不计入上表。
+- 公网地址和假 IP 出现在同一次最终答案里是 `containsFakeIP` 的既有契约，不另算一条缺陷。
+- XCTest（助手规则、DNS 缓存批次、待更新隧道丢失）未在本机运行。
