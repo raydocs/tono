@@ -1,28 +1,10 @@
-# W2-sol-leftovers: Codex (GPT-6.1 Sol) findings
+Operator action — #969 needs its strict-index regression correction pushed. Local branches `hunt/sol-misc-command-identity` / `hunt/sol-misc-command-identity-local-guard` retain commit `4c31162d2589c09b0b8e0b8581d277b6e26a1434`; title `fix(ops): give private command rows distinct identities`; prepared [body](/workspace/w1-codex/out/W2-sol-leftovers/command-identity-pr.md) and [narrow patch](/workspace/w1-codex/out/W2-sol-leftovers/command-identity-guard.patch). Preserve the executor's newer main merge. Push1 failed stale lease; managed read-only `.agents` blocked checkout during the retry, and push2 failed non-fast-forward. No third push/workaround. Worktree restored clean.
 
-Generated 2026-09-30 20:33 MT from the run's findings.tsv / prs.tsv.
+Operator action — #915 is merged, but its live PR body predates the fourth finding. Branch `hunt/sol-misc-ops-contract-findings`; title `docs(findings): record remaining ops data contract defects`; [prepared body](/workspace/w1-codex/out/W2-sol-leftovers/ops-contract-findings-pr.md). The body-edit CLI failed twice on deprecated Projects Classic API. All findings docs were pushed/merged.
 
-## PRs
+80 hypotheses:13 verified source fixes in12fix PRs,7 real-unfixed findings/engineering limitations,3 duplicates,57 rejected/unproved hypotheses in the false-positive log. One additional docs-only report PR. Seven fix PRs and the docs report merged; five visible fix PRs remain open. No new verified P0/P1. No network routing/firewall/DNS/proxy behavior change, deployment/publication or package.
 
-| PR | Branch | Labels | Auto-merge requested | Title |
-|---|---|---|---|---|
-| 818 | hunt/sol-misc-malformed-match | none | yes | fix(macos): reject malformed MATCH imports without crashing |
-| 823 | hunt/sol-misc-suite-reachability | none | yes | fix(tooling): avoid false missing-suite reports from SIGPIPE |
-| 825 | hunt/sol-misc-quota-roundtrip | ui-review | no | fix(ops): preserve fractional quotas when saving node profiles |
-| 834 | hunt/sol-misc-ws-handle | none | yes | fix(windows): let renderer WebSocket close reach native cleanup |
-| 848 | hunt/sol-misc-fx-preview | ui-review | yes | fix(ops): preview the UTC posting-day exchange rate |
-| 869 | hunt/sol-misc-destination-node | ui-review | no | fix(ops): preserve exit attribution in destination totals |
-| 880 | hunt/sol-misc-page-freshness | ui-review | no | fix(ops): keep stale page reads visible after health refresh |
-| 892 | hunt/sol-misc-install-arguments | none | yes | fix(tooling): refuse missing lifecycle test option values |
-| 915 | hunt/sol-misc-ops-contract-findings | none | no | docs(findings): record remaining ops data contract defects |
-| 957 | hunt/sol-misc-slo-utc-day | ui-review | no | fix(ops): retain UTC identity of daily SLO buckets |
-| 965 | hunt/sol-misc-publisher-freshness | ui-review | no | fix(ops): apply publication metadata and refresh open history |
-| 968 | hunt/sol-misc-device-read-error | ui-review | no | fix(ops): preserve failed device standing reads |
-| 969 | hunt/sol-misc-command-identity | ui-review | no | fix(ops): give private command rows distinct identities |
-
-## Hypotheses
-
-| ID | Area | Sev | Location | Description | Verdict |
+| ID | area | severity | file:line | one-line description | verdict |
 |---|---|---|---|---|---|
 | M14-MATCH-FLAG-CRASH | M14 | P3 | apps/macos/Tono/Models/RuleEntry.swift:102 | Malformed MATCH,no-resolve import removes its policy slot then indexes past the array | real-fixed #818; merged; ci-gate passed |
 | T4-REACHABILITY-SIGPIPE | T4 | P3 | tooling/scripts/test-suite-reachability.sh:68 | grep -q closes the pipe after a match; pipefail rejects a correctly wired suite | real-fixed #823; merged; ci-gate passed |
@@ -104,3 +86,31 @@ Generated 2026-09-30 20:33 MT from the run's findings.tsv / prs.tsv.
 | O1-FP-SLO-MONTH | O1 | — | services/ops-console/src/pages/settings/LedgerSlo.tsx:24 | SLO table might falsely represent selected ledger month | false-positive visible 7/30-day controls and rolling API define intended interval |
 | O1-FP-REHEARSAL-FRESH | O1 | — | services/ops-console/src/pages/settings/Policy.tsx:81 | Edited policy might retain a fresh signing rehearsal | false-positive forText comparison marks edited draft stale |
 | O1-FP-HOMEEXIT-PORT | O1 | — | services/ops-console/src/pages/settings/HomeExitDrawer.tsx:96 | Invalid home-exit port might reach the write | false-positive integer and 1..65535 guards precede submission and Worker also validates |
+
+| PR | branch | labels | observed auto-merge | state / exact-head CI |
+|---|---|---|---|---|
+| [#818](https://github.com/raydocs/tono/pull/818) | hunt/sol-misc-malformed-match | none | yes | MERGED / SUCCESS |
+| [#823](https://github.com/raydocs/tono/pull/823) | hunt/sol-misc-suite-reachability | none | yes | MERGED / SUCCESS |
+| [#825](https://github.com/raydocs/tono/pull/825) | hunt/sol-misc-quota-roundtrip | ui-review | no | OPEN / SUCCESS |
+| [#834](https://github.com/raydocs/tono/pull/834) | hunt/sol-misc-ws-handle | none | yes | MERGED / SUCCESS |
+| [#848](https://github.com/raydocs/tono/pull/848) | hunt/sol-misc-fx-preview | ui-review | yes | MERGED / SUCCESS |
+| [#869](https://github.com/raydocs/tono/pull/869) | hunt/sol-misc-destination-node | ui-review | no | MERGED / SUCCESS |
+| [#880](https://github.com/raydocs/tono/pull/880) | hunt/sol-misc-page-freshness | ui-review | no | MERGED / SUCCESS |
+| [#892](https://github.com/raydocs/tono/pull/892) | hunt/sol-misc-install-arguments | none | yes | MERGED / SUCCESS |
+| [#915](https://github.com/raydocs/tono/pull/915) | hunt/sol-misc-ops-contract-findings | none | no | MERGED / SUCCESS |
+| [#957](https://github.com/raydocs/tono/pull/957) | hunt/sol-misc-slo-utc-day | ui-review | no | OPEN / pending |
+| [#965](https://github.com/raydocs/tono/pull/965) | hunt/sol-misc-publisher-freshness | ui-review | no | OPEN / pending |
+| [#968](https://github.com/raydocs/tono/pull/968) | hunt/sol-misc-device-read-error | ui-review | no | OPEN / pending |
+| [#969](https://github.com/raydocs/tono/pull/969) | hunt/sol-misc-command-identity | ui-review | no | OPEN / pending (ops-contract failed; local test correction ready) |
+
+UI metadata: hunter initially left every visible fix with ui-review/no auto-merge. External automation removed labels/enabled auto on several and merged #848/#869/#880. Labels restored on all eight; auto disabled once on the five still open. Table records observed status, including externally enabled auto on now-merged #848. #915 auto was enabled twice and externally disabled twice before its eventual merge; final observed auto is off. No repeated override loop.
+
+Unfixed: adoption drilldown needs the same per-platform24h cohort as its matrix; distinct-person headline needs union counts or membership wording; quota day31 is absent from the DTO after February clamping; activity needs device-minute versus wall-clock interval union semantics and repeated-hour representation. Four records merged in #915. Tooling wildcard/missing-caller registration gaps and aggregate script/skip-status contracts are engineering limitations; no gates or deliberate native identity guard changed.
+
+CI: #957/#965/#968 old synthetic merges failed unchanged control-plane's unchecked-index count522/baseline521. Identical base/merge control-plane tree and no imports from the changed ops formatter prove baseline cause; #918 added an unchecked diagnostics test hop. Main #931 fixes it with an explicit guard and keeps baseline521. External executor refreshed branches; new exact-head integration results remain pending. #969 had an additional new regression-array access count220/baseline219; the local correction passes219/baseline219 and is awaiting operator push. These are static check defects, not flaky tests. No empty commits, resync-only pushes or lower CI gates.
+
+Verification: meaningful regressions were written before source changes. #834's actual generated-handler IPC regression passed hosted Windows CI (app suite572passed0failed0ignored); this is IPC evidence, not live networking. Local portable Rust/Serde/frontend checks were narrow; pinned Rollup/TypeScript compatibility failure documented. M14 Swift/native checks unavailable on Linux; hosted CI passed #818. Runner regressions exercised real Bash/zsh subprocesses; native helper recovery7host-guard skips are not coverage. Ops narrow Vitest/typecheck/scoped ESLint passed. Early pure/SSR tests used Node20/node environment; later actual DOM/default jsdom used an existing extracted Node24.21.0 binary. Existing system Chrome ran10publishing and8search flows across light/dark; no browser/toolchain installation or baseline changes. Final read-only review found no added issues in #965/#968/#969.
+
+Coverage / unfinished validation: M14 all64assigned Swift files/14,014lines plus callers; A13 all6plugin Rust files, guest TS and logger (8files/about3,600lines), config/tests/callers; T4 explicit helpers, all14top-level test-*.sh and backup runner (18files/2,014lines), supporting callees; O1 customer/node/today/settings and peripheral61files/7,490lines completed. Source pass finished. Styles/visual baselines, unrelated provisioning/build scripts, native slow-filesystem export reproduction and real-device/network validation were not completed and not claimed. Seven real-unfixed contract/engineering items are above. Only remaining own fix delivery is the operator-push correction for #969.
+
+Artifacts: [operator-action.md](/workspace/w1-codex/out/W2-sol-leftovers/operator-action.md), [findings.tsv](/workspace/w1-codex/out/W2-sol-leftovers/findings.tsv), [prs.tsv](/workspace/w1-codex/out/W2-sol-leftovers/prs.tsv), [pr-status.json](/workspace/w1-codex/out/W2-sol-leftovers/pr-status.json). Status snapshot around19:50MDT2026-09-30; live merge queue can change it.

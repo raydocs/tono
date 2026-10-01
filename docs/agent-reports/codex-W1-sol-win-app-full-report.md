@@ -1,23 +1,25 @@
-# W1-sol-win-app: Codex (GPT-6.1 Sol) findings
+# Windows hunter report — GPT-6.1 Sol (Codex CLI)
 
-Generated 2026-09-30 20:33 MT from the run's findings.tsv / prs.tsv.
+107 hypotheses examined: 8 verified fixes, 1 real-unfixed follow-up, 11 duplicates, 87 rejected/unverified hypotheses.
+
+The repeated #898 automatic-health variant remains a decision item: the monitor does not cancel a stalled DIRECT reader, and cancellation-only cleanup would open AI traffic sooner. Existing SFO-1/#738 and ZC-F1/#706 need a guaranteed fallback before that variant can safely be patched. Detailed trace: [direct-auto-health-decision.md](./direct-auto-health-decision.md).
 
 ## PRs
 
-| PR | Branch | Labels | Auto-merge requested | Title |
-|---|---|---|---|---|
-| 820 | hunt/sol-winapp-shared-status-listener | none | yes | fix(windows): reuse the live shared status listener |
-| 828 | hunt/sol-winapp-dns-callback-lifetime | needs-hardware | yes | fix(windows): retain DNS completion through callback return |
-| 898 | hunt/sol-winapp-direct-restore-cancellation | needs-hardware | yes | fix(windows): let Restore cancel a stalled DIRECT controller reload |
-| 916 | hunt/sol-winapp-upload-identifier-redaction | none | yes | fix(windows): redact account identifiers from uploaded audit segments |
-| 932 | hunt/sol-winapp-account-cache-scope | none | yes | fix(windows): isolate account card caches by sign-in generation |
-| 951 | hunt/sol-winapp-activity-process-key | none | yes | fix(windows): keep Activity process families limited to declared keys |
-| 980 | hunt/sol-winapp-quit-vault-flush | none | yes | fix(windows): flush rotated session credentials on committed exit |
-| 984 | hunt/sol-winapp-singleton-proxy | none | yes | fix(windows): bypass inherited proxies for singleton notification |
+| PR | Branch | Labels | Auto-merge | Status | CI gate |
+|---|---|---|---|---|---|
+| [#820](https://github.com/raydocs/tono/pull/820) | hunt/sol-winapp-shared-status-listener | none | merge commit enabled | MERGED | SUCCESS |
+| [#828](https://github.com/raydocs/tono/pull/828) | hunt/sol-winapp-dns-callback-lifetime | needs-hardware | merge commit enabled | MERGED | SUCCESS |
+| [#898](https://github.com/raydocs/tono/pull/898) | hunt/sol-winapp-direct-restore-cancellation | needs-hardware | merge commit enabled | MERGED | SUCCESS |
+| [#916](https://github.com/raydocs/tono/pull/916) | hunt/sol-winapp-upload-identifier-redaction | none | merge commit enabled | MERGED | SUCCESS |
+| [#932](https://github.com/raydocs/tono/pull/932) | hunt/sol-winapp-account-cache-scope | none | merge commit enabled | MERGED | SUCCESS |
+| [#951](https://github.com/raydocs/tono/pull/951) | hunt/sol-winapp-activity-process-key | none | merge commit enabled | MERGED | SUCCESS |
+| [#980](https://github.com/raydocs/tono/pull/980) | hunt/sol-winapp-quit-vault-flush | none | merge commit enabled | MERGED | SUCCESS |
+| [#984](https://github.com/raydocs/tono/pull/984) | hunt/sol-winapp-singleton-proxy | none | merge commit enabled | MERGED | SUCCESS |
 
-## Hypotheses
+## All hypotheses
 
-| ID | Area | Sev | Location | Description | Verdict |
+| ID | Area | Severity | File:line | Description | Verdict |
 |---|---|---|---|---|---|
 | W1-CONNECT-BUDGET | A1 | — | apps/windows/app/src-tauri/src/tono/connection/transaction.rs:25 | Cumulative connect timeouts could hang indefinitely | false-positive shared 240-second deadline and cancellation bound stages; deliberate cold-start budget |
 | W1-CONNECTION-RACES | A1 | P3 | apps/windows/app/src-tauri/src/tono/connection.rs:275 | Duplicate fail_connect release and stale recovery selection | duplicate #798 |
@@ -126,3 +128,15 @@ Generated 2026-09-30 20:33 MT from the run's findings.tsv / prs.tsv.
 | W1-SHORTCUT-FIND-GATE | A10 | — | apps/windows/app/src/utils/disable-webview-shortcuts.ts:12 | Keyboard shortcut suppression blocks Ctrl+F search | false-positive preventDefault does not stop event bubbling; layout still handles Ctrl+F |
 | W1-TRAFFIC-FORMAT-PANIC | A10 | — | apps/windows/app/src/utils/parse-traffic.ts:8 | Invalid rate values throw and crash renderer | false-positive NaN infinity and negative inputs return strings; no throw verified in Node |
 | W1-UPDATE-LATE-CALLBACK | A10 | — | apps/windows/app/src/components/setting/mods/update-viewer.tsx:213 | Late progress callback after route unmount corrupts update ownership | false-positive only retired React state changes; Service retains staging/install/recovery ownership |
+
+## Validation and coverage
+
+Every source fix has a focused regression and a small PR with the required finding/changelog records. All eight PRs merged through green CI. The exact-head #980 Windows Tauri suite ran the new exit-flush regression successfully among 591 passing tests (zero failures and zero ignored tests in that suite). #984 has passed both its failing-then-passing portable notifier regression and the exact-head hosted Windows Tauri suite: the new proxy-isolation regression passed among 592 passing tests (zero failures and zero ignored tests in that suite). The final ci-gate also passed, and #984 merged at 2026-10-01 02:29:37 UTC. The new native regression uses a child test process to avoid altering parallel tests' proxy environment. Local builds used CARGO_BUILD_JOBS=2; full Tauri/Windows FFI was left to hosted CI. No deployment, publication, main-branch mutation, foreign-branch push or jev-route review was performed.
+
+A9, A8, A5 and A1 were reviewed, including cross-file callers and guards. All 106 handwritten production TypeScript/TSX/JavaScript files in A10 were read end to end, including dormant helpers and compatibility polyfills. Excluded from exhaustive source review were 36 test files and two generated translation type files. No assigned production source area remains unfinished. No visual review was performed. Windows installed-device fault injection, real WFP/DNS behavior and guaranteed secondary AI fallback are unfinished. The two needs-hardware PRs require the operator's final device batch.
+
+One protected skill file differs from the checked-out main because the read-only mount prevented replacement; it was excluded from every commit. All source changes were committed and pushed to own-prefix branches.
+
+Optional PR-body metadata update: the attempt to append the completed native-CI evidence to merged #980 was rejected twice by gh because its GraphQL query requests deprecated classic project cards. No workaround was attempted. The original body and all source commits remain published; local updated body: pr-quit-vault-flush.md.
+
+Native CI receipts: [quit suite](https://github.com/raydocs/tono/actions/runs/36803589927/job/110183212616), [singleton suite](https://github.com/raydocs/tono/actions/runs/36804790418/job/110186777304). Both exact-head runs are green; raw job logs and JSON statuses are saved alongside this report.
