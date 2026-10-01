@@ -23,6 +23,7 @@ pub mod policy_signature;
 pub mod protected_connectivity;
 pub mod recovery;
 pub mod sing_box;
+pub mod unarmed_probe;
 pub mod update_contract;
 pub mod update_journal;
 

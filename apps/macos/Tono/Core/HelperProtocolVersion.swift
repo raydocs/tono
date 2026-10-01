@@ -305,7 +305,13 @@ nonisolated enum HelperProtocolVersion {
     ///   `/etc/resolver` files for first-party AI suffixes. Arm, disarm, and
     ///   emergency recovery remove them. The commands cannot name a default
     ///   route. A failure leaves the original network open.
-    static let current = "4.52.8"
+    /// - 4.52.8 → 4.52.9: a release whose placeholder rule file cannot be
+    ///   written still flushes the anchor and removes the intent, and then
+    ///   keeps the standalone emergency main instead of reloading a legacy
+    ///   pf.conf that would load the stale rules back. A PF repair records
+    ///   repairedSinceArm before it can replace kernel rules, so a repair that
+    ///   throws after loading still makes the app re-arm.
+    static let current = "4.52.9"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS

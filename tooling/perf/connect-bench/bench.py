@@ -55,6 +55,46 @@ OTHER_HOST = "other.tono.test"
 OTHER_HOST_2 = "other2.tono.test"
 CAMO_DELAY_S = 0.04
 SAMPLES = 5
+CHECKED_PROTOCOLS = {"vless", "hysteria2"}
+CHECKED_PROFILES = {"tono-fixed", "clash", "sing-box"}
+CHECKED_FIELDS = (
+    "cold_ms",
+    "dns_ms",
+    "handshakes",
+    "dns_handshakes",
+    "fake_ip_ms",
+    "fake_ip_handshakes",
+    "dns_cached_ms",
+    "dns_cached_handshakes",
+    "dns_reuse_ms",
+    "dns_reuse_handshakes",
+)
+
+
+def limit_failures(rows, limits) -> list[str]:
+    """Baseline keys this run missed.
+
+    Millisecond limits are ceilings. A handshake ceiling above zero is also a
+    floor of one: mihomo's cold DoH count of 1 stays inside a ceiling of 2,
+    and a count of 0 is a miss even when the millisecond sample is fast.
+    """
+    failures = []
+    for row in rows:
+        if row.get("protocol") not in CHECKED_PROTOCOLS:
+            continue
+        if row.get("profile") not in CHECKED_PROFILES:
+            continue
+        for field in CHECKED_FIELDS:
+            key = f"{row['protocol']}/{row['profile']}/{field}"
+            if key not in limits:
+                continue
+            limit = limits[key]
+            got = row.get(field)
+            if got is None or got > limit:
+                failures.append(f"REGRESSION {key}: {got} > {limit}")
+            elif field.endswith("handshakes") and limit > 0 and got < 1:
+                failures.append(f"REGRESSION {key}: {got} handshake(s) under ceiling {limit}")
+    return failures
 
 
 def sha256_file(path: Path) -> str:
@@ -1149,33 +1189,10 @@ def main() -> int:
         print("no baseline.json", file=sys.stderr)
         return 1
     baseline = json.loads(BASELINE.read_text())
-    failed = False
-    for row in rows:
-        if row.get("protocol") not in {"vless", "hysteria2"}:
-            continue
-        if row.get("profile") not in {"tono-fixed", "clash", "sing-box"}:
-            continue
-        for field in (
-            "cold_ms",
-            "dns_ms",
-            "handshakes",
-            "dns_handshakes",
-            "fake_ip_ms",
-            "fake_ip_handshakes",
-            "dns_cached_ms",
-            "dns_cached_handshakes",
-            "dns_reuse_ms",
-            "dns_reuse_handshakes",
-        ):
-            key = f"{row['protocol']}/{row['profile']}/{field}"
-            if key not in baseline["limits"]:
-                continue
-            limit = baseline["limits"][key]
-            got = row.get(field)
-            if exceeds_limit(got, limit):
-                print(f"REGRESSION {key}: {got} > {limit}", file=sys.stderr)
-                failed = True
-    return 1 if failed else 0
+    failures = limit_failures(rows, baseline["limits"])
+    for line in failures:
+        print(line, file=sys.stderr)
+    return 1 if failures else 0
 
 
 if __name__ == "__main__":

@@ -770,8 +770,9 @@ pub(super) fn collect_interface_key_adapters() -> Result<Vec<AdapterDnsSnapshot>
 ///   unsaved Tono-owned DNS address remains" when restoring
 ///   (a restored family's servers may legitimately come back from DHCP in another order).
 ///   A family with no live DNS instance, an interface index of 0, or a CIM `ReturnValue` of
-///   84 ("IP not enabled on adapter") is a non-participant: there is no resolver on it to
-///   leak, and recording it as a failure is what used to pin `live_apply_failed` on forever.
+///   84 ("IP not enabled on adapter") is a non-participant for *that family*: there is no
+///   resolver on it to leak. IPv4 returning 84 must not skip the IPv6 block. Recording the
+///   whole adapter as a failure is what used to pin `live_apply_failed` on forever.
 ///
 /// The script prints `fails|skips`; results are recorded per adapter and required for any
 /// restore proof (see the module docs). An adapter that reports *no* configurable family at
@@ -974,9 +975,9 @@ function Set-AdapterDns($g, $i4, $i6, $v4, $v6, $restoring) {
 $c = Get-CimInstance Win32_NetworkAdapterConfiguration -Filter "SettingID='$g'" -ErrorAction SilentlyContinue
 if ($null -eq $c) { $global:fails += $g; return }
 $r = Invoke-CimMethod -InputObject $c -MethodName SetDNSServerSearchOrder -Arguments @{ DNSServerSearchOrder = $v4 } -ErrorAction SilentlyContinue
-if ($r -and $r.ReturnValue -eq 84) { $global:skips += $g; return }
-if (-not $r -or $r.ReturnValue -ne 0) { $global:fails += $g; return }
-$touched = $true
+if ($r -and $r.ReturnValue -eq 84) { $v4 = $null }
+elseif (-not $r -or $r.ReturnValue -ne 0) { $global:fails += $g; return }
+else { $touched = $true }
   }
   if ($i6 -ne 0) {
 $e = 0
@@ -1002,6 +1003,24 @@ $touched = $true
   if (-not (Test-Family $i6 'IPv6' $v6 $restoring)) { $global:fails += $g; return }
 }
 "#;
+
+#[cfg(test)]
+#[test]
+fn ipv4_not_enabled_does_not_skip_the_ipv6_block() {
+    let line = SCRIPT_PRELUDE
+        .lines()
+        .find(|line| line.contains("ReturnValue -eq 84"))
+        .expect("CIM 84 branch");
+    assert!(
+        !line.contains("return"),
+        "IPv4 CIM 84 must not leave Set-AdapterDns before IPv6: {line}"
+    );
+    let at_84 = SCRIPT_PRELUDE
+        .find("ReturnValue -eq 84")
+        .expect("84");
+    let at_v6 = SCRIPT_PRELUDE.find("if ($i6 -ne 0)").expect("ipv6 block");
+    assert!(at_84 < at_v6);
+}
 
 /// The result marker the batch must print. Its presence is what distinguishes "the script
 /// ran and found no failures" from "the script produced nothing useful"; without it the

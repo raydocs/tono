@@ -7,9 +7,8 @@ import { ApiError } from '../errors';
 import { id, now, str, type Row } from '../env';
 import { diagnosticsInt, rejectUnexpectedKeys } from '../request';
 import { DIAGNOSTICS_MAX_REPORTED_AT_MS } from '../diagnostics-limits';
-import { redactJobResult } from '../ops/job-redaction';
 import { isPlatform } from '../ops/platform';
-import { recordFailureCluster, type ClusterEnv } from './failure-clusters';
+import { recordFailureCluster, type ClusterEnv, type FailureClusterInput } from './failure-clusters';
 
 export const DIAGNOSTICS_BUNDLE_MAX_BYTES = 32 * 1024;
 const AI_RETENTION_NOTE = 'ai routes require aiServicesConsent and expire after 60 days';
@@ -133,6 +132,8 @@ export async function storeDiagnosticsBundle(
   const client = clientOf(root.client);
   const received = now();
   let sessionKey: string | null = null;
+  const statements: D1PreparedStatement[] = [];
+  const failures: FailureClusterInput[] = [];
 
   if (root.session !== undefined && root.session !== null) {
     rejectUnexpectedKeys(root.session, SESSION_KEYS);
@@ -148,12 +149,14 @@ export async function storeDiagnosticsBundle(
     const reason = optionalText(session.reason, 'reason', 80);
     if (reason) rejectSecrets(reason, 'reason');
     const excerpt = optionalText(root.logExcerpt, 'logExcerpt', 1500);
-    const redacted = excerpt ? redactJobResult(excerpt).slice(0, 1500) : null;
-    if (redacted && /https?:\/\//i.test(redacted)) {
+    if (excerpt && /https?:\/\//i.test(excerpt)) {
       throw new ApiError(400, 'VALIDATION_ERROR', 'logExcerpt must not contain a URL');
     }
+    // Arbitrary core logs cannot be proven destination/credential-free by
+    // regex scrubbing. Keep this compatible field out of automatic storage;
+    // raw logs remain on the separately operator-granted upload route.
     sessionKey = `${userId}:${sessionId}`;
-    await db.prepare(
+    statements.push(db.prepare(
       `INSERT INTO client_sessions(
          id, user_id, device_id, started_at_ms, ended_at_ms, node, entry_node_id, residential_exit_id,
          bytes_up, bytes_down, outcome, reason, app_version, app_build, git_commit, platform, os_version,
@@ -167,15 +170,16 @@ export async function storeDiagnosticsBundle(
          reason = excluded.reason,
          log_excerpt = excluded.log_excerpt,
          received_at = excluded.received_at
-       WHERE client_sessions.user_id = excluded.user_id`,
+       WHERE client_sessions.user_id = excluded.user_id
+         AND (client_sessions.ended_at_ms IS NULL OR excluded.ended_at_ms IS NOT NULL)`,
     ).bind(
       sessionKey, userId, deviceId, started, ended ?? null,
       nodeId(session.node, 'node'), nodeId(session.entryNodeId, 'entryNodeId'),
       nodeId(session.residentialExitId, 'residentialExitId'),
       bytesUp, bytesDown, outcome, reason,
       client.appVersion, client.appBuild, client.gitCommit, client.platform, client.osVersion,
-      client.coreVersion, client.channel, redacted, received,
-    ).run();
+      client.coreVersion, client.channel, null, received,
+    ));
   } else if (root.logExcerpt !== undefined && root.logExcerpt !== null) {
     throw new ApiError(400, 'VALIDATION_ERROR', 'logExcerpt requires a session');
   }
@@ -190,7 +194,7 @@ export async function storeDiagnosticsBundle(
     const role = str(row.role, 'role', 1, 20);
     if (role !== 'entry' && role !== 'residential') throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid hop role');
     const atMs = diagnosticsInt(row, 'atMs', 1, DIAGNOSTICS_MAX_REPORTED_AT_MS, false)!;
-    await db.prepare(
+    statements.push(db.prepare(
       `INSERT INTO chain_hops(
          id, session_id, user_id, device_id, hop_index, hop_role, node_id, connected,
          handshake_ms, failure_code, at_ms, received_at
@@ -206,7 +210,7 @@ export async function storeDiagnosticsBundle(
       nodeId(row.nodeId, 'nodeId'), flag(row.connected, 'connected'),
       diagnosticsInt(row, 'handshakeMs', 0, 120_000, true) ?? null,
       optionalText(row.failureCode, 'failureCode', 80), atMs, received,
-    ).run();
+    ));
   }
 
   const exits = Array.isArray(root.exitObservations) ? root.exitObservations : [];
@@ -226,7 +230,7 @@ export async function storeDiagnosticsBundle(
       throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid networkKind');
     }
     const atMs = diagnosticsInt(row, 'atMs', 1, DIAGNOSTICS_MAX_REPORTED_AT_MS, false)!;
-    await db.prepare(
+    statements.push(db.prepare(
       `INSERT INTO session_exit_observations(
          id, session_id, user_id, device_id, at_ms, ip_prefix, ip_hash, asn, country, city,
          network_kind, previous_asn, previous_country, previous_city, received_at
@@ -238,7 +242,7 @@ export async function storeDiagnosticsBundle(
       diagnosticsInt(row, 'previousAsn', 0, 4_294_967_295, true) ?? null,
       optionalText(row.previousCountry, 'previousCountry', 8),
       optionalText(row.previousCity, 'previousCity', 40), received,
-    ).run();
+    ));
     void index;
   }
 
@@ -253,7 +257,7 @@ export async function storeDiagnosticsBundle(
     if (mode !== 'fake-ip' && mode !== 'real-ip' && mode !== 'unknown') {
       throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid dns mode');
     }
-    await db.prepare(
+    statements.push(db.prepare(
       `INSERT INTO dns_checks(
          id, user_id, device_id, session_id, at_ms, received_at, resolver, leak_outside,
          geo_matches_exit, mode, ipv6_leak, resolver_asn, resolver_country, exit_asn, exit_country,
@@ -270,7 +274,7 @@ export async function storeDiagnosticsBundle(
       optionalText(dns.exitCountry, 'exitCountry', 8),
       client.appVersion, client.appBuild, client.gitCommit, client.platform, client.osVersion,
       client.coreVersion, client.channel,
-    ).run();
+    ));
   }
 
   const events = Array.isArray(root.events) ? root.events : [];
@@ -290,7 +294,7 @@ export async function storeDiagnosticsBundle(
     const code = optionalText(row.code, 'code', 80);
     const stage = optionalText(row.stage, 'stage', 40);
     const node = nodeId(row.node, 'node');
-    await db.prepare(
+    statements.push(db.prepare(
       `INSERT INTO connection_events(
          id, at_ms, received_at, source, user_id, device_id, platform, app_version, os_version,
          kind, node, stage, outcome, code, elapsed_ms, edge_via_exit,
@@ -301,13 +305,13 @@ export async function storeDiagnosticsBundle(
       kind, node, stage, optionalText(row.outcome, 'outcome', 40), code,
       diagnosticsInt(row, 'elapsedMs', 0, 600_000, true) ?? null,
       client.appBuild, client.gitCommit, client.coreVersion, client.channel,
-    ).run();
+    ));
     if (FAILURE_KINDS.has(kind) && code && stage && node) {
-      await recordFailureCluster(db, {
+      failures.push({
         atMs, code, stage, appVersion: client.appVersion, platform: client.platform, node,
         userId, deviceId, appBuild: client.appBuild, gitCommit: client.gitCommit,
         coreVersion: client.coreVersion, channel: client.channel,
-      }, env, received);
+      });
     }
   }
 
@@ -329,7 +333,7 @@ export async function storeDiagnosticsBundle(
     }
     const locale = optionalText(row.locale, 'locale', 16);
     if (locale) rejectSecrets(locale, 'locale');
-    await db.prepare(
+    statements.push(db.prepare(
       `INSERT INTO ai_service_routes(
          id, user_id, device_id, bucket_start_ms, service, exit_kind, exit_id, exit_asn, exit_country,
          exit_city, routing_leak, exit_switched, dns_ok, tz_mismatch, locale, app_version, app_build,
@@ -345,8 +349,18 @@ export async function storeDiagnosticsBundle(
       optionalFlag(row.dnsOk, 'dnsOk'), optionalFlag(row.tzMismatch, 'tzMismatch'), locale,
       client.appVersion, client.appBuild, client.gitCommit, client.platform, client.osVersion,
       client.coreVersion, client.channel, received,
-    ).run();
+    ));
   }
 
+  // Validate every bounded section before committing any of the bundle.
+  if (statements.length) await db.batch(statements);
+  for (const failure of failures) {
+    try {
+      await recordFailureCluster(db, failure, env, received);
+    } catch (error) {
+      // Derived alerts must not turn a committed bundle into a failed upload.
+      console.error('diagnostics failure cluster failed', (error instanceof Error ? error.message : String(error)).slice(0, 300));
+    }
+  }
   return { sessionId: sessionKey, events: events.length };
 }
