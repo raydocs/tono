@@ -123,6 +123,12 @@ mod sample_commit_tests {
         // In-place controller replacement need not change the connect generation.
         assert!(!super::sample_commit_is_current(started, (7, 13), true));
     }
+
+    #[test]
+    fn a_kill_switch_sample_is_not_published_after_the_service_generation_moves() {
+        assert!(super::service_snapshot_is_current(4, 4));
+        assert!(!super::service_snapshot_is_current(4, 6));
+    }
 }
 
 #[cfg(test)]
@@ -743,6 +749,13 @@ pub(super) async fn in_place_hold_still_proven(
     !failed
 }
 
+/// A Service status sample taken before DNS and the TUN probe must not be published once a
+/// lifecycle operation has moved `snapshot_generation`. That write was showing the earlier kill
+/// switch, including Locked, over a newer Blocked DIRECT reload.
+pub(super) fn service_snapshot_is_current(sampled_generation: u64, latest_generation: u64) -> bool {
+    sampled_generation == latest_generation
+}
+
 pub(super) async fn network_monitor_loop(state: Arc<TonoState>, app: AppHandle) {
     // H7: `Delay`, never the default `Burst` — see `HEALTH_FAILURE_THRESHOLD`.
     let mut interval = monitor_interval();
@@ -820,12 +833,7 @@ pub(super) async fn network_monitor_loop(state: Arc<TonoState>, app: AppHandle) 
             }
         };
         legs.observe_service_ok();
-
-        // F2 leg 1: kill-switch completeness every tick.
-        legs.observe_kill_switch(kill_switch_unhealthy_for_monitor(
-            snapshot.kill_switch.as_ref(),
-            owned_direct_reload,
-        ));
+        let sampled_generation = snapshot.snapshot_generation;
 
         // DNS health is checked independently of netmon. The first network event is used only
         // to seed the counter (to ignore our own connect-time interface churn), so an adapter
@@ -844,9 +852,33 @@ pub(super) async fn network_monitor_loop(state: Arc<TonoState>, app: AppHandle) 
                 legs.observe_probe(periodic_data_plane_probe_failed(&state).await);
             }
         }
+        // The snapshot above is from before those awaits. A DIRECT reload or hot switch can
+        // move the Service during a probe of up to 18s. Publishing that sample shows the old
+        // kill switch. When the generation still matches, publish the post-await sample;
+        // otherwise drop the tick and let the next one read the new generation.
+        let snapshot = match service::tono_service_status_snapshot().await {
+            Ok(latest)
+                if service_snapshot_is_current(sampled_generation, latest.snapshot_generation) =>
+            {
+                latest
+            }
+            _ => continue,
+        };
+
+        // F2 leg 1: kill-switch completeness every tick, only from a sample that is still current.
+        legs.observe_kill_switch(kill_switch_unhealthy_for_monitor(
+            snapshot.kill_switch.as_ref(),
+            owned_direct_reload,
+        ));
         let health_invalid = legs.invalid();
         let protection_invalid = legs.protection_invalid();
 
+        {
+            let inner = state.lock().await;
+            if !inner.fsm.status().is_connected {
+                return;
+            }
+        }
         let (invalidate, network_changed, core_changed, service_events) = {
             let mut inner = state.lock().await;
 
