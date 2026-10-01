@@ -9,6 +9,12 @@ mod core;
 pub mod update_contract;
 #[cfg(any(feature = "client", feature = "standalone"))]
 pub mod update_wire;
+// The DIRECT admission lists, compiled from the same source as the compilers.
+#[cfg(any(feature = "client", feature = "standalone"))]
+#[path = "../../crates/tono-core/src/direct_domains.rs"]
+pub mod direct_domains;
+#[cfg(any(feature = "client", feature = "standalone"))]
+pub use core::{admit_mihomo_direct_rules, admit_sing_box_runtime};
 #[cfg(feature = "standalone")]
 pub mod update_transaction;
 #[cfg(all(feature = "standalone", windows))]

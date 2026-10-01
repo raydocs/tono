@@ -31,11 +31,12 @@ worker_policy="$repo_root/services/control-plane/src/traffic-policy.ts"
 wrangler="$repo_root/services/control-plane/wrangler.jsonc"
 swift="$repo_root/apps/macos/Tono/Core/ManagedTrafficPolicySignature.swift"
 windows_policy="$repo_root/apps/windows/crates/tono-core/src/policy.rs"
+windows_direct="$repo_root/apps/windows/crates/tono-core/src/direct_domains.rs"
 windows_draft="$repo_root/apps/windows/crates/tono-core/src/sing_box.rs"
 publisher="$repo_root/tooling/scripts/publish-traffic-policy.mjs"
 worker_publish="$repo_root/services/control-plane/src/ops/shared-admin/traffic-policy.ts"
 
-for file in "$worker" "$worker_policy" "$wrangler" "$swift" "$windows_policy" "$windows_draft" \
+for file in "$worker" "$worker_policy" "$wrangler" "$swift" "$windows_policy" "$windows_direct" "$windows_draft" \
             "$publisher" "$worker_publish"; do
   [[ -f $file ]] || fail "missing $(basename -- "$file"); the contract cannot be checked"
 done
@@ -122,7 +123,7 @@ protected_swift=$(extract "$repo_root/apps/macos/Tono/Core/Configuration/ConfigP
 protected_worker=$(extract "$worker_policy" \
   'const protectedSuffixes = \[(.*?)\]') \
   || fail "the control plane's protected list could not be read"
-protected_windows=$(extract "$windows_policy" \
+protected_windows=$(extract "$windows_direct" \
   'const PROTECTED_DIRECT_SUFFIXES: &\[&str\] = &\[(.*?)\];') \
   || fail "the Windows protected list could not be read"
 

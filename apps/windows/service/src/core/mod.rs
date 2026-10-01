@@ -74,8 +74,14 @@ mod selective_layer;
 mod server;
 #[cfg(feature = "standalone")]
 mod sing_box_direct;
-#[cfg(feature = "standalone")]
+#[cfg(any(feature = "standalone", feature = "client"))]
 mod sing_box_runtime;
+#[cfg(any(feature = "standalone", feature = "client"))]
+mod direct_admission;
+#[cfg(any(feature = "standalone", feature = "client"))]
+pub use direct_admission::admit_mihomo_direct_rules;
+#[cfg(any(feature = "standalone", feature = "client"))]
+pub use sing_box_runtime::admit_owned_runtime as admit_sing_box_runtime;
 #[cfg(feature = "standalone")]
 mod state;
 #[cfg(feature = "standalone")]

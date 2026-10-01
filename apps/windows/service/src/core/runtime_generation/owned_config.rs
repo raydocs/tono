@@ -171,8 +171,53 @@ pub(crate) fn ensure_owned_runtime_config_is_safe(yaml: &str) -> Result<(), Stri
     if !rules.iter().all(Value::is_string) {
         return Err("every rule must be a string".into());
     }
+    let rule_text: Vec<&str> = rules.iter().filter_map(Value::as_str).collect();
+    let mut proxies = Vec::new();
+    for proxy in sequence(root, "proxies")? {
+        let proxy = proxy.as_mapping().ok_or("a proxy is not a mapping")?;
+        unique_folded_keys(proxy)?;
+        let field = |key: &str| proxy.get(key).and_then(Value::as_str).unwrap_or("");
+        proxies.push((field("name"), field("type")));
+    }
+    let members = groups
+        .iter()
+        .map(group_members)
+        .collect::<Result<Vec<_>, String>>()?;
+    crate::core::direct_admission::admit_mihomo_direct_rules(&rule_text, &proxies, &members)?;
 
     no_forbidden_keys(&Value::Mapping(root.clone()))
+}
+
+/// Mihomo folds proxy and group keys, so `Name` beside `name` could rename a DIRECT proxy
+/// after this check read it.
+fn unique_folded_keys(mapping: &Mapping) -> Result<(), String> {
+    let mut seen = std::collections::HashSet::new();
+    for key in mapping.keys() {
+        if !seen.insert(mihomo_key(key.as_str().unwrap_or("<non-string>"))) {
+            return Err("a proxy or group repeats a key after folding".into());
+        }
+    }
+    Ok(())
+}
+
+/// A group is only `name`, `type: select` and its `proxies`: `include-all`, `use` or `filter`
+/// would let it choose a DIRECT proxy no member list shows.
+fn group_members(group: &Value) -> Result<(&str, Vec<&str>), String> {
+    let group = group.as_mapping().ok_or("a proxy group is not a mapping")?;
+    unique_folded_keys(group)?;
+    let mut members = None;
+    for (key, value) in group {
+        match mihomo_key(key.as_str().unwrap_or("<non-string>")).as_str() {
+            "name" | "type" => {}
+            "proxies" => {
+                let list = value.as_sequence().ok_or("group `proxies` is not a list")?;
+                members = Some(list.iter().map(|member| member.as_str().unwrap_or("")).collect());
+            }
+            other => return Err(format!("`{other}` is not allowed in a proxy group")),
+        }
+    }
+    let name = group.get("name").and_then(Value::as_str).unwrap_or("");
+    Ok((name, members.ok_or("a proxy group has no proxies")?))
 }
 
 /// `route-exclude-address` is how the core keeps its own exit sockets out of the TUN.
@@ -458,5 +503,29 @@ rules:
                 "accepted `{to}`"
             );
         }
+    }
+
+    /// A rule to a DIRECT proxy is admitted only as the compiler writes it: an exact
+    /// host and /32 pin passes, an assistant suffix does not, and no group may offer
+    /// the DIRECT proxy as a choice.
+    #[test]
+    fn direct_rules_outside_compiler_shapes_are_refused() {
+        let with_direct = OWNED.replacen(
+            "proxy-groups:",
+            "- name: Tono-China-Direct\n  type: direct\n  interface-name: Ethernet\nproxy-groups:",
+            1,
+        );
+        let with_rule = |rule: &str| {
+            with_direct.replacen("- MATCH,Tono-Exit", &format!("- {rule}\n- MATCH,Tono-Exit"), 1)
+        };
+        let exact = with_rule(
+            "AND,((NETWORK,TCP),(DST-PORT,443),(DOMAIN,qq.com),(IP-CIDR,101.1.2.3/32,no-resolve)),Tono-China-Direct",
+        );
+        assert_eq!(ensure_owned_runtime_config_is_safe(&exact), Ok(()));
+        let assistant =
+            with_rule("AND,((NETWORK,TCP),(DOMAIN-SUFFIX,anthropic.com)),Tono-China-Direct");
+        assert!(ensure_owned_runtime_config_is_safe(&assistant).is_err());
+        let offered = with_direct.replacen("  - JP Reality 02", "  - JP Reality 02\n  - Tono-China-Direct", 1);
+        assert!(ensure_owned_runtime_config_is_safe(&offered).is_err());
     }
 }
