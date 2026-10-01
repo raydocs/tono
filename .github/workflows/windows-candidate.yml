@@ -166,19 +166,26 @@ jobs:
           if ($installer.Count -ne 1) { throw 'Expected exactly one NSIS package' }
           $extracted = Join-Path $env:RUNNER_TEMP 'paired-windows-payload'
           7z x -y "-o$extracted" $installer[0].FullName
+          # Same selector as desktop-update-sign.yml: the package also carries a $PLUGINSDIR gate
+          # copy of every resource, and the Service compares sing-box.exe as a fourth component.
           $components = @{}
-          foreach ($name in @('Tono.exe.next', 'tono-core.exe.next', 'tono-service.exe')) {
-            $matches = @(Get-ChildItem -LiteralPath $extracted -Recurse -File | Where-Object Name -eq $name)
-            if ($matches.Count -ne 1) { throw "Expected one packaged $name, found $($matches.Count)" }
-            $components[$name] = $matches[0].FullName
+          foreach ($line in @(node ../../../tooling/scripts/windows-package-components.mjs $extracted)) {
+            $name, $value = $line -split '=', 2
+            $components[$name] = $value
+          }
+          foreach ($name in @('WINDOWS_APP', 'WINDOWS_CORE', 'WINDOWS_SERVICE')) {
+            if (-not $components[$name]) { throw "The component selector did not return $name" }
           }
           $version = node -p "require('./package.json').version"
-          node ../../../tooling/scripts/desktop-update-v1.mjs measure `
-            --version $version --source $env:GITHUB_SHA --sequence $env:TONO_UPDATE_RELEASE_SEQUENCE `
-            --target windows-x86_64 --artifact $installer[0].FullName `
-            --app $components['Tono.exe.next'] --core $components['tono-core.exe.next'] `
-            --privileged $components['tono-service.exe'] `
-            --output target/release/bundle/nsis/update-target.windows-x86_64.json
+          $measureArgs = @(
+            '--version', $version, '--source', $env:GITHUB_SHA, '--sequence', $env:TONO_UPDATE_RELEASE_SEQUENCE,
+            '--artifact', $installer[0].FullName,
+            '--app', $components['WINDOWS_APP'], '--core', $components['WINDOWS_CORE'],
+            '--privileged', $components['WINDOWS_SERVICE'],
+            '--output', 'target/release/bundle/nsis/update-target.windows-x86_64.json'
+          )
+          if ($components['WINDOWS_SING_BOX']) { $measureArgs += @('--sing-box', $components['WINDOWS_SING_BOX']) }
+          node ../../../tooling/scripts/desktop-update-v1.mjs measure --target windows-x86_64 @measureArgs
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
