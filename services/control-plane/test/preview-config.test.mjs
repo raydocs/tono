@@ -74,12 +74,13 @@ describe('isolated operations preview', () => {
     expect(api.secrets.required).not.toContain('TAILSCALE_OAUTH_CLIENT_SECRET');
   });
 
-  it('refuses production-shaped hostnames, bucket names, and invalid build identifiers', () => {
+  it('refuses production-shaped hostnames, bucket names, the production D1 id, and invalid build identifiers', () => {
     expect(() => renderPreviewConfigs({ ...input, adminHostname: 'admin.afk.ccwu.cc' })).toThrow(/non-production hostname/);
     expect(() => renderPreviewConfigs({ ...input, adminHostname: 'ops-preview.afk.ccwu.cc' })).toThrow(/non-production hostname/);
     expect(() => renderPreviewConfigs({ ...input, adminHostname: 'ops-preview-11e0d95f.afk.ccwu.cc' })).not.toThrow();
     expect(() => renderPreviewConfigs({ ...input, diagnosticsBucket: 'tono-diagnostics-logs' })).toThrow(/tono-ops-preview-/);
     expect(() => renderPreviewConfigs({ ...input, d1DatabaseId: '00000000-0000-0000-0000-000000000000' })).toThrow(/non-placeholder D1 UUID/);
+    expect(() => renderPreviewConfigs({ ...input, d1DatabaseId: 'CAF9B9FB-B4D5-498D-A1AD-7D5CDBB4237C' })).toThrow(/production D1/);
     expect(() => previewDeploymentPlan('development')).toThrow(/40-character Git SHA/);
   });
 

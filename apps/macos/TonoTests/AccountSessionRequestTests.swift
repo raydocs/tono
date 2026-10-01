@@ -1339,6 +1339,75 @@ final class AccountSessionRequestTests: XCTestCase {
         XCTAssertEqual(try testKeychain(host).string(for: .refreshToken), "rotated-refresh")
     }
 
+    /// A delayed bearer refusal must reuse the session that superseded it,
+    /// including a decisive replay whose truncated 200 led to transport retry.
+    func testSupersededBearerRefusalsReuseTheCurrentTokenWithoutSuspending() async throws {
+        let directory = Self.offlineGrantDirectory("stale-bearer")
+        let (account, transport, host, requests) = fixture(offlineGate: OfflineGrantGate(directory: directory))
+        defer {
+            transport.invalidateAndCancel(); HeldAccountProtocol.remove(host)
+            try? testKeychain(host).remove(.refreshToken)
+            try? FileManager.default.removeItem(at: directory)
+        }
+        try await adoptTestAccount(account)
+        XCTAssertTrue(account.api.offlineGate.writeGrant(Self.adoptedSessionGrant))
+        let first = Task { try await account.api.me() }
+        let firstA = try await nextRequest(requests)
+        let late = Task { try await account.api.me() }
+        let lateA = try await nextRequest(requests)
+        XCTAssertEqual(lateA.request.value(forHTTPHeaderField: "Authorization"), "Bearer test-only-access")
+
+        firstA.respond(status: 401, body: #"{"error":{"code":"UNAUTHORIZED"}}"#)
+        let refreshB = try await nextRequest(requests)
+        XCTAssertTrue(refreshB.request.url?.path.hasSuffix("/auth/refresh") == true)
+        refreshB.respond(status: 200, body: #"{"accessToken":"access-b","refreshToken":"refresh-b"}"#)
+        let decisiveB = try await nextRequest(requests)
+        XCTAssertEqual(decisiveB.request.value(forHTTPHeaderField: "Authorization"), "Bearer access-b")
+
+        // A current B refusal legitimately renews to C. Hold that renewal so
+        // the truncated replay's transport retry is still built with B.
+        let rotation = Task { try await account.api.me() }
+        let currentB = try await nextRequest(requests)
+        XCTAssertEqual(currentB.request.value(forHTTPHeaderField: "Authorization"), "Bearer access-b")
+        currentB.respond(status: 401, body: #"{"error":{"code":"UNAUTHORIZED"}}"#)
+        let refreshC = try await nextRequest(requests)
+        XCTAssertTrue(refreshC.request.url?.path.hasSuffix("/auth/refresh") == true)
+        let truncated = HTTPURLResponse(url: decisiveB.request.url!, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: ["Content-Type": "application/json"])!
+        decisiveB.client?.urlProtocol(decisiveB, didReceive: truncated, cacheStoragePolicy: .notAllowed)
+        decisiveB.client?.urlProtocol(decisiveB, didLoad: Data(#"{"user":"#.utf8))
+        decisiveB.client?.urlProtocol(decisiveB, didFailWithError: URLError(.networkConnectionLost))
+        let retriedB = try await nextRequest(requests)
+        XCTAssertEqual(retriedB.request.value(forHTTPHeaderField: "Authorization"), "Bearer access-b")
+        refreshC.respond(status: 200, body: #"{"accessToken":"access-c","refreshToken":"refresh-c"}"#)
+        let rotatedRead = try await nextRequest(requests)
+        XCTAssertEqual(rotatedRead.request.value(forHTTPHeaderField: "Authorization"), "Bearer access-c")
+        rotatedRead.respond(status: 200, body: "{\"user\":\(Self.originalUser)}")
+        _ = try await rotation.value
+
+        // Even an entitlement-coded stale 401 must bypass the verdict sink
+        // and error classification, then replay C without another renewal.
+        lateA.respond(status: 401, body: #"{"error":{"code":"USER_DISABLED"}}"#)
+        let lateReplay = try await nextRequest(requests)
+        XCTAssertTrue(lateReplay.request.url?.path.hasSuffix("/me") == true)
+        XCTAssertEqual(lateReplay.request.value(forHTTPHeaderField: "Authorization"), "Bearer access-c")
+        lateReplay.respond(status: 200, body: "{\"user\":\(Self.originalUser)}")
+        _ = try await late.value
+        retriedB.respond(status: 401, body: #"{"error":{"code":"UNAUTHORIZED"}}"#)
+        let decisiveReplay = try await nextRequest(requests)
+        XCTAssertTrue(decisiveReplay.request.url?.path.hasSuffix("/me") == true)
+        XCTAssertEqual(decisiveReplay.request.value(forHTTPHeaderField: "Authorization"), "Bearer access-c")
+        decisiveReplay.respond(status: 200, body: "{\"user\":\(Self.originalUser)}")
+        _ = try await first.value
+
+        XCTAssertEqual(account.state, .ready)
+        XCTAssertNil(account.entitlementDetail)
+        XCTAssertEqual(try testKeychain(host).string(for: .refreshToken), "refresh-c")
+        XCTAssertNil(account.api.offlineGate.connectRefusal(catalogDigest: "catalog-a", routingToken: "routing-a"))
+        let written = try Data(contentsOf: directory.appendingPathComponent(OfflineGrantGate.fileName))
+        let record = try XCTUnwrap(JSONSerialization.jsonObject(with: written) as? [String: Any])
+        XCTAssertEqual(record["verdict"] as? String, "granted", "obsolete refusals must not revoke the offline grant")
+    }
+
     func testLogoutCanRenewThenRevokeTheRotatedSession() async throws {
         let (account, transport, host, requests) = fixture()
         defer { transport.invalidateAndCancel(); HeldAccountProtocol.remove(host); try? testKeychain(host).remove(.refreshToken) }
