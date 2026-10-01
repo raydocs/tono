@@ -4,7 +4,7 @@ extension AppState {
     // MARK: - Proxy Management
 
     /// Select a node/group by name or id.
-    func selectNode(_ nameOrId: String) {
+    func selectNode(_ nameOrId: String, releaseNetworkIfSwitchFails: Bool = false) {
         guard !isDisconnecting, switchingNodeId == nil else { return }
         guard connectionCoordinator.configReloadTask == nil else {
             errorMessage = String(
@@ -229,7 +229,12 @@ extension AppState {
                     ]
                 )
                 if protectionTransitionInFlight || isRecoveringProtectedConnection {
-                    recoverFailedNodeSwitch(desiredNode, name: nodeName, error: error)
+                    recoverFailedNodeSwitch(
+                        desiredNode,
+                        name: nodeName,
+                        error: error,
+                        releaseNetwork: releaseNetworkIfSwitchFails
+                    )
                 } else {
                     errorMessage = error.localizedDescription
                 }
@@ -237,18 +242,35 @@ extension AppState {
         }
     }
 
-    private func recoverFailedNodeSwitch(_ node: ProxyNode?, name: String, error: Error) {
+    private func recoverFailedNodeSwitch(
+        _ node: ProxyNode?,
+        name: String,
+        error: Error,
+        releaseNetwork: Bool
+    ) {
         // Preserve the requested intent, but never claim the transition completed. The existing
         // disconnect owner withdraws Connected synchronously and drains this switch task before
-        // touching Core/PF. The reconnect loop waits for that teardown and never disarms.
+        // touching Core/PF. A user switch still holds PF and retries. A catalog
+        // removal switch must not: the session could not move, and a non-strict
+        // host goes back to its original network instead of bootstrap.
         rememberSwitchedNode(node, name: name)
-        disconnect(releaseKillSwitch: false)
-        errorMessage = error.localizedDescription
+        let release = releaseNetwork && ExhaustedFailureNetwork.afterFailure(
+            strictKillSwitchExplicit: false,
+            selectiveAiBlockReady: false
+        ).releasesSystemNetwork
+        disconnect(releaseKillSwitch: release)
         LocalTrafficAudit.shared.recordEvent(
             "node_switch_protection_convergence_failed",
-            details: ["error": error.localizedDescription]
+            details: ["error": error.localizedDescription, "released": String(release)]
         )
-        scheduleProtectedReconnect()
+        if release {
+            errorMessage = String(
+                localized: "The cloud server switch failed. This Mac is back on its normal internet."
+            )
+        } else {
+            errorMessage = error.localizedDescription
+            scheduleProtectedReconnect()
+        }
     }
 
     private func rememberSwitchedNode(_ node: ProxyNode?, name: String) {

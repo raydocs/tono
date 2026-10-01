@@ -1043,7 +1043,7 @@ final class AppState {
         return preferred
     }
 
-    private func defaultCloudExitNode() -> ProxyNode? {
+    func defaultCloudExitNode() -> ProxyNode? {
         let nodes = managedCatalogNodes
         if let preferred = managedCatalogRouting?.defaultProxy,
            let node = nodes.first(where: { proxyTarget($0.name, matches: preferred) }) {

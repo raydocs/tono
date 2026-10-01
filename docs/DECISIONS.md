@@ -21,6 +21,13 @@ node tooling/scripts/records.mjs decisions
 - Why stricter: 更密的保活不放开流量，不新增出口，不拆隧道。失败时留在同一条线路上。
 - Applied in: [#749](https://github.com/raydocs/tono/pull/749)。mihomo 仍停在 10 秒，见 `docs/findings.d/HY2-IDLE-MIHOMO.md`。
 
+## 2026-10-01 · When the selected catalog exit disappears, may the Mac stay fully blocked?
+
+- Status: owner
+- Chosen: no, unless the user explicitly enabled a strict kill switch (`permanent`). The TOP rule is that Tono never cuts the network; if it cannot keep the protected session, ordinary internet returns and AI services stay blocked by the selective floor. Here that means: switch to another catalog exit and keep the session when one exists. When none exists, follow `ExhaustedFailureNetwork`: strict keeps the block, a ready selective hook leaves that hook's filters in place, and otherwise restore the original network. Rejected: `disconnect(releaseKillSwitch: false)` until the user picks a server, and inventing PF or DNS sinkhole rules in this change.
+- Why stricter: a removed exit no longer holds the whole machine in bootstrap. The cost is that, until the selective hook is registered and returns true, a Mac with no remaining exit is on the original network, so AI services are not held by a new filter. Keeping the session on another exit still blocks them through the tunnel. Strict mode is unchanged. macOS does not store `permanent`.
+- Applied in: branch `cursor/r3-catalog-exit-removed-89a9`. The policy-update path is the same rule and lands separately.
+
 ## 2026-09-30 · How long may a fake-ip answer live, and may DoH try HTTP/3?
 
 - Status: provisional

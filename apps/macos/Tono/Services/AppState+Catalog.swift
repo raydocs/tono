@@ -141,12 +141,8 @@ extension AppState {
         let liveSessionTornDown = allowRuntimeTransition
             && selectedCloudNodeWasRemoved
             && (isConnected || isConnecting)
-        if liveSessionTornDown {
-            // Remove both the old TUN and its exact PF endpoint before changing
-            // the visible selection. Automatic connect remains blocked until
-            // the user explicitly chooses a surviving exit.
-            disconnect(releaseKillSwitch: false)
-        }
+        // Do not bootstrap-disconnect here. The replacement list is not
+        // visible yet, and a whole-machine block is not the fallback.
 
         let customRegions = proxyRegions.filter { $0.id == "custom" }
         let managedRegions = nodes.isEmpty
@@ -178,12 +174,9 @@ extension AppState {
 
         if selectedCloudNodeWasRemoved {
             if liveSessionTornDown {
-                // A removal that took a session down is a real classified
-                // outcome, so the copyable diagnostic names it instead of
-                // reporting no classification at all for the teardown the user
-                // just saw. A removal on an idle Mac ended no session, and
-                // recording one there would leave every later report and every
-                // unrelated failure attributed to it.
+                // The removal is a real classified outcome. An idle Mac ended
+                // no session, and recording one there would attribute later
+                // reports to it.
                 lastClassifiedFailure = ProtectedConnectivity.failure(
                     .catalogNodeRemoved,
                     stage: "catalogInstall",
@@ -191,22 +184,20 @@ extension AppState {
                     generation: connectionCoordinator.protectionOperationGeneration,
                     detail: "selected catalog exit absent at revision \(catalog.revision)"
                 )
-            }
-            applyDefaultProxySelection(persist: true)
-            if managedCatalogRouting?.defaultProxy != nil,
-               currentProxySelectionTarget() != nil {
-                catalogSelectionRequiresChoice = false
-                errorMessage = String(localized: "The selected cloud server was removed. Tono switched to the managed default cloud server.")
-                if liveSessionTornDown {
-                    autoConnectRequested = true
-                    attemptAutomaticConnect()
-                }
+                settleRemovedCatalogExit(wasConnected: isConnected)
             } else {
-                catalogSelectionRequiresChoice = true
-                autoConnectRequested = false
-                errorMessage = isProtectionBlocked || KillSwitchService.isArmed
-                    ? String(localized: "The selected cloud server was removed. Kill Switch is still blocking traffic; choose another cloud server.")
-                    : String(localized: "The selected cloud server was removed. Choose another cloud server.")
+                applyDefaultProxySelection(persist: true)
+                if managedCatalogRouting?.defaultProxy != nil,
+                   currentProxySelectionTarget() != nil {
+                    catalogSelectionRequiresChoice = false
+                    errorMessage = String(localized: "The selected cloud server was removed. Tono switched to the managed default cloud server.")
+                } else {
+                    catalogSelectionRequiresChoice = true
+                    autoConnectRequested = false
+                    errorMessage = isProtectionBlocked || KillSwitchService.isArmed
+                        ? String(localized: "The selected cloud server was removed. Kill Switch is still blocking traffic; choose another cloud server.")
+                        : String(localized: "The selected cloud server was removed. Choose another cloud server.")
+                }
             }
         } else if !migrateCloudExitDefaultIfNeeded() {
             restoreProxySelection(preferredTarget: previousSelection, persistFallback: true)
@@ -218,7 +209,10 @@ extension AppState {
         }
 
         guard allowRuntimeTransition else { return }
-        if isConnected {
+        // A removed exit already settled above: a hot switch owns the reload,
+        // and reloadCoreConfig's failure path would bootstrap-disconnect the
+        // session we just kept.
+        if isConnected, !(selectedCloudNodeWasRemoved && liveSessionTornDown) {
             let previousSelected = previousCloudNodes.first {
                 proxyTarget($0.name, matches: previousSelection ?? "")
             }
@@ -310,6 +304,74 @@ extension AppState {
         catalog.revision == installedRevision
             && installedDigest == catalog.sha256
             && installedRoutingToken == routingToken
+    }
+
+    /// The selected exit is gone and a session was up or still connecting.
+    /// Another catalog exit keeps the session. No survivor restores the
+    /// original network unless a strict kill switch was explicitly enabled.
+    /// macOS has no `permanent` toggle, and the selective AI hook is not
+    /// registered, so the non-strict result is a full release. This does not
+    /// install a new filter.
+    private func settleRemovedCatalogExit(wasConnected: Bool) {
+        let replacement = defaultCloudExitNode()
+        let action = CatalogRemovedExitAction.decide(
+            replacementName: replacement?.name,
+            strictKillSwitchExplicit: false,
+            selectiveAiBlockReady: false
+        )
+        switch action {
+        case .keepSession(let name):
+            catalogSelectionRequiresChoice = false
+            errorMessage = String(
+                localized: "The selected cloud server was removed. Tono switched to another cloud server and kept this connection."
+            )
+            if wasConnected, coreController != nil {
+                let previousSwitch = connectionCoordinator.nodeSwitchTask
+                selectNode(name, releaseNetworkIfSwitchFails: true)
+                let started = connectionCoordinator.nodeSwitchTask != nil
+                    && connectionCoordinator.nodeSwitchTask != previousSwitch
+                if !started {
+                    _ = applyProxySelection(name)
+                    persistProxySelection(name)
+                }
+            } else {
+                _ = applyProxySelection(name)
+                persistProxySelection(name)
+                if !wasConnected {
+                    // The in-flight attempt is still aimed at the removed exit.
+                    // Release it, then connect the survivor. Bootstrap would
+                    // cut the machine for the whole reconnect.
+                    disconnect(releaseKillSwitch: true)
+                    autoConnectRequested = true
+                    attemptAutomaticConnect()
+                }
+            }
+        case .keepStrictBlock:
+            catalogSelectionRequiresChoice = true
+            autoConnectRequested = false
+            applyDefaultProxySelection(persist: true)
+            disconnect(releaseKillSwitch: false)
+            errorMessage = String(
+                localized: "The selected cloud server was removed. Strict mode is still blocking traffic. Choose another cloud server."
+            )
+        case .selectiveRelease:
+            // The hook already released general traffic and kept the AI floor.
+            // Bootstrap or a full disarm would undo that.
+            catalogSelectionRequiresChoice = true
+            autoConnectRequested = false
+            applyDefaultProxySelection(persist: true)
+            errorMessage = String(
+                localized: "The selected cloud server was removed. Ordinary internet stays open and AI services stay blocked. Choose another cloud server."
+            )
+        case .releaseOriginalNetwork:
+            catalogSelectionRequiresChoice = true
+            autoConnectRequested = false
+            applyDefaultProxySelection(persist: true)
+            disconnect(releaseKillSwitch: true)
+            errorMessage = String(
+                localized: "The selected cloud server was removed. This Mac is back on its normal internet. Choose another cloud server."
+            )
+        }
     }
 
     /// Applying a catalog rewrites the whole runtime config, and the full
