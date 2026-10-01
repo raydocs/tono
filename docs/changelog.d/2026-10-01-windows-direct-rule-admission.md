@@ -1,6 +1,6 @@
 ## 2026-10-01 · Windows Service admits DIRECT rules only in compiler shapes
 - Scope: ship plan; Windows Service admission for mihomo and sing-box runtimes ([#1204](https://github.com/raydocs/tono/issues/1204), finding WIN-CORE-DIRECT-RULE-ADMISSION).
-- Source: origin/main `e2bf1603`; branch `fix/win-1204-direct-admission`.
+- Source: origin/main `e2bf1603`; branch `fix/win-1204-direct-admission`, PR [#1248](https://github.com/raydocs/tono/pull/1248).
 - Fix: before a runtime runs as LocalSystem, every rule that names a DIRECT outbound must match a shape the product compiler emits: an exact domain plus /32 pin, a signed-app process rule on reviewed ports after all assistant pins, a reviewed UDP media endpoint, or an address-free China web suffix that does not overlap an assistant domain. Direct outbounds must carry the compiler's names, and no selectable group may offer them. mihomo's two loopback rules stay admitted.
 - Shared lists: the assistant and China suffix lists moved to `crates/tono-core/src/direct_domains.rs`; the Service compiles that file by path, so the compilers and admission read one source.
 - Compiler: the sing-box no-home DIRECT branch now pins every assistant domain and range to the exit (it pinned only the four Model Studio children), the same pins mihomo emits.
