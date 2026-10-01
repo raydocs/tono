@@ -3588,6 +3588,17 @@ pub fn spawn_windows_kill_switch_watchdog() {
 /// still present, which the uninstall helper's own sweep (`with_resolver_rule_proof`) checks
 /// again and blocks on with result 3.
 pub async fn emergency_disarm_windows_kill_switch() -> Result<()> {
+    emergency_disarm_with(false).await
+}
+
+/// Automatic failed-update recovery uses the same WFP/DNS proof and reporting,
+/// but retains the secondary AI hold. The caller must first exclude strict mode
+/// and stop the Service while holding the repair and singleton owner gates.
+pub async fn emergency_disarm_windows_kill_switch_applying_narrow() -> Result<()> {
+    emergency_disarm_with(true).await
+}
+
+async fn emergency_disarm_with(apply_narrow: bool) -> Result<()> {
     let _operation = WFP_OPERATION.lock().await;
     // This is still the fail-open escape hatch: WFP objects are removed even if protected DNS
     // cannot be restored. The DNS failure is nevertheless returned *after* WFP and intent
@@ -3677,9 +3688,9 @@ pub async fn emergency_disarm_windows_kill_switch() -> Result<()> {
     // the product promises. On engine failure the reported state therefore stays "armed".
     #[cfg(all(windows, not(feature = "test")))]
     engine_call("emergency disarm", crate::core::wfp::emergency_disarm).await?;
-    // WFP is gone. Drop the secondary hold too. A failure here must not
-    // report the barrier as still up.
-    crate::core::selective_layer::remove().await;
+    // WFP is gone. Explicit Restore removes the secondary hold; automatic
+    // failure recovery applies it. Neither may undo or refuse this release.
+    crate::core::selective_layer::finish_release(apply_narrow).await;
     *armed_guard() = None;
     *last_verify_guard() = None;
     TUNNEL_PERMIT_RENDERED.store(false, Ordering::Relaxed);
@@ -4058,6 +4069,7 @@ mod tests {
     }
 
     async fn cleanup() {
+        crate::core::selective_layer::remove().await;
         TEST_REMOVE_FAILURE.store(false, Ordering::Relaxed);
         TEST_REMOVE_ATTEMPTS.store(0, Ordering::Relaxed);
         TEST_RESIDUAL_FILTER_KEYS.lock().unwrap().clear();
@@ -5053,6 +5065,32 @@ mod tests {
         assert!(ARMED.lock().unwrap().is_none());
         assert!(tokio::fs::metadata(dns_snapshot_path()).await.is_err());
         assert_disarmed_tombstone_present().await?;
+        cleanup().await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn failed_update_emergency_release_keeps_the_secondary_ai_hold() -> Result<()> {
+        cleanup().await;
+        arm_bootstrap(&test_config(), "/opt/tono/mihomo", "owner-alice").await?;
+        simulate_machine_still_on_loopback_dns();
+        atomic_write(&dns_snapshot_path(), b"{ corrupt").await?;
+
+        let error = emergency_disarm_windows_kill_switch_applying_narrow()
+            .await
+            .expect_err("DNS restore failure must still be reported after WFP removal");
+        assert!(
+            format!("{error:#}").contains(crate::core::dns::WFP_REMOVED_CONTINUE_PREFIX)
+        );
+        assert!(!status().await.wanted);
+        assert!(
+            crate::core::selective_layer::test_hold_active(),
+            "automatic update failure must retain the narrow AI hold after opening general traffic"
+        );
+
+        emergency_disarm_windows_kill_switch().await.unwrap_err();
+        assert!(!crate::core::selective_layer::test_hold_active());
         cleanup().await;
         Ok(())
     }
@@ -6439,6 +6477,7 @@ mod tests {
     /// "Locked with the permit retracted". `tunnel_permit_rendered` changes only after the exact
     /// install/verify operation succeeds, never while merely constructing an expected model.
     #[tokio::test]
+    #[serial]
     async fn the_status_flag_tracks_what_the_last_exact_install_proved() {
         let running = CoreInstance {
             pid: 90,
