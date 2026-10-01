@@ -11,7 +11,7 @@
 | PR | 分支 | SHA | 自动合并 | 标签 |
 |---|---|---|---|---|
 | [#812](https://github.com/raydocs/tono/pull/812) | `hunt/grok-wfp-lock-poison-d8c1` | `2e527713` | 已开，`merge`（merge commit） | `needs-hardware` 未加上：`gh api` 与 `gh pr edit --add-label` 都是 HTTP 403 `Resource not accessible by integration`。这是 kill switch 路径，应按 `needs-hardware` 补标。 |
-| [#819](https://github.com/raydocs/tono/pull/819) | `hunt/grok-wfp-report-d8c1` | `ec26cccc` | 文档 PR，`merge` | 无。不是 UI，也不改网络行为。 |
+| [#819](https://github.com/raydocs/tono/pull/819) | `hunt/grok-wfp-report-d8c1` | `80a46a4d`（本记录提交之前） | 文档 PR，`merge` | 无。不是 UI，也不改网络行为。 |
 
 没有另开 GitHub issue。核对后没有「已核实、本席不修」的缺陷：其余项是误报、已有 PR，或与 #777 的看门狗改动重叠且需要两次失败。
 
