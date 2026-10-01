@@ -306,7 +306,11 @@ enum SelectiveFailOpenInstaller {
         }
     }
 
-    static func removeBestEffort() {
+    /// False when a route delete did not finish or a resolver could not be
+    /// restored, so the caller keeps the removal pending and retries it.
+    @discardableResult
+    static func removeBestEffort() -> Bool {
+        var removed = true
         for (lookup, args) in zip(SelectiveFailOpen.routeGetArguments(), SelectiveFailOpen.routeDeleteArguments()) {
             if routeIsForeign(lookup) {
                 FileHandle.standardError.write(Data(
@@ -315,9 +319,9 @@ enum SelectiveFailOpenInstaller {
                 continue
             }
             // A missing route is the normal case on disconnect. Do not log it.
-            runRoute(args, logFailure: false)
+            if !runRoute(args, logFailure: false) { removed = false }
         }
-        removeResolvers()
+        return removeResolvers() && removed
     }
 
     /// Read-only. Any failure answers false, which keeps the delete.
@@ -396,14 +400,16 @@ enum SelectiveFailOpenInstaller {
 
     /// Missing ownership evidence means this file belongs to someone else.
     /// A newer administrator replacement also survives Tono cleanup.
+    @discardableResult
     static func removeResolvers(
         directory: String = "/etc/resolver",
         originalsDirectory: String = originalsPath
-    ) {
-        guard isSecureDirectory(directory) else { return }
+    ) -> Bool {
+        guard isSecureDirectory(directory) else { return true }
         var originalsMetadata = stat()
         let originalsPresent = lstat(originalsDirectory, &originalsMetadata) == 0
-        guard !originalsPresent || isSecureDirectory(originalsDirectory) else { return }
+        guard !originalsPresent || isSecureDirectory(originalsDirectory) else { return true }
+        var removed = true
         let body = Data(SelectiveFailOpen.resolverBody().utf8)
         for suffix in SelectiveFailOpen.suffixes {
             guard SelectiveFailOpen.resolverPath(for: suffix) != nil else { continue }
@@ -411,7 +417,9 @@ enum SelectiveFailOpenInstaller {
             let receipt = originalsDirectory + "/" + suffix
             var metadata = stat()
             guard originalsPresent, lstat(receipt, &metadata) == 0 else {
-                if !originalsPresent || errno == ENOENT { removeLegacySinkhole(at: path, body: body) }
+                if !originalsPresent || errno == ENOENT, !removeLegacySinkhole(at: path, body: body) {
+                    removed = false
+                }
                 continue
             }
             do {
@@ -431,18 +439,26 @@ enum SelectiveFailOpenInstaller {
                 }
                 guard unlink(receipt) == 0 else { throw HelperFailure.system("Cannot retire resolver receipt.") }
                 try KillSwitchManager.fsyncParent(receipt)
-            } catch { logResolverFailure(error) }
+            } catch {
+                logResolverFailure(error)
+                removed = false
+            }
         }
+        return removed
     }
 
     /// Helpers before 4.52.27 wrote the sinkhole without a receipt. Only Tono
     /// writes this exact body, and a leftover one fails the connected DNS audit.
-    private static func removeLegacySinkhole(at path: String, body: Data) {
+    private static func removeLegacySinkhole(at path: String, body: Data) -> Bool {
         do {
-            guard try resolverOriginal(at: path).contents == body else { return }
+            guard try resolverOriginal(at: path).contents == body else { return true }
             guard unlink(path) == 0 else { throw HelperFailure.system("Cannot remove legacy resolver.") }
             try KillSwitchManager.fsyncParent(path)
-        } catch { logResolverFailure(error) }
+            return true
+        } catch {
+            logResolverFailure(error)
+            return false
+        }
     }
 
     private static func resolverOriginal(at path: String) throws -> ResolverOriginal {
@@ -483,21 +499,26 @@ enum SelectiveFailOpenInstaller {
         FileHandle.standardError.write(Data("tono: selective resolver recovery failed: \(error)\n".utf8))
     }
 
-    private static func runRoute(_ args: [String], logFailure: Bool) {
+    /// False only when the command did not finish. A nonzero exit (no such
+    /// route) is the normal answer and counts as done.
+    @discardableResult
+    private static func runRoute(_ args: [String], logFailure: Bool) -> Bool {
         guard let executable = args.first, SelectiveFailOpen.commandIsPrefixOnly(args) else {
             FileHandle.standardError.write(Data(
                 "tono: refused a selective route command that was not prefix-only\n".utf8
             ))
-            return
+            return true
         }
         do {
             _ = try KillSwitchManager.run(executable, Array(args.dropFirst()), deadline: 3)
+            return true
         } catch {
             if logFailure {
                 FileHandle.standardError.write(Data(
                     "tono: selective route command did not finish: \(error)\n".utf8
                 ))
             }
+            return false
         }
     }
 

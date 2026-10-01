@@ -1566,7 +1566,7 @@ extension KillSwitchManager {
                         throw Interrupted()
                     },
                     applySelectiveLayer: { applied = true },
-                    removeSelectiveLayer: {}
+                    removeSelectiveLayer: { true }
                 )
                 return false
             } catch is Interrupted {}
@@ -1581,7 +1581,7 @@ extension KillSwitchManager {
             try releaseWithAIHold(
                 preserveAIHold: false,
                 recordDisposition: { try saveSelectiveRecoveryDisposition($0, path: record) },
-                release: {}, applySelectiveLayer: { return }, removeSelectiveLayer: {},
+                release: {}, applySelectiveLayer: { return }, removeSelectiveLayer: { true },
                 completeRemoval: { try saveSelectiveRemovalCompleted(path: record) }
             )
             applied = false
@@ -1610,7 +1610,7 @@ extension KillSwitchManager {
                 disposition: try? selectiveRecoveryDisposition(path: record),
                 removalPending: selectiveRemovalPending(path: record),
                 applySelectiveLayer: {},
-                removeSelectiveLayer: { removals += 1 },
+                removeSelectiveLayer: { removals += 1; return true },
                 completeRemoval: { try saveSelectiveRemovalCompleted(path: record) }
             )
         }
@@ -1624,7 +1624,7 @@ extension KillSwitchManager {
                     clearDisposition: { try clearSelectiveRecoveryDisposition(path: record) },
                     release: { throw Interrupted() },
                     applySelectiveLayer: {},
-                    removeSelectiveLayer: { removals += 1 },
+                    removeSelectiveLayer: { removals += 1; return true },
                     completeRemoval: { try saveSelectiveRemovalCompleted(path: record) }
                 )
                 return false
@@ -1635,6 +1635,38 @@ extension KillSwitchManager {
                   try selectiveRecoveryDisposition(path: record) == false else { return false }
             resume()
             return removals == 1
+        } catch { return false }
+    }
+
+    /// A cleanup that fails (a resolver it could not restore) keeps the
+    /// removal pending instead of writing "released", so a later pass retries.
+    static func runFailedSelectiveRemovalRetrySelfTest() -> Bool {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("tono-selective-retry-\(UUID().uuidString)")
+        let record = directory.appendingPathComponent("intent").path
+        var removals = 0
+        do {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
+            defer { try? FileManager.default.removeItem(at: directory) }
+            let settled = try releaseWithAIHold(
+                preserveAIHold: false,
+                recordDisposition: { try saveSelectiveRecoveryDisposition($0, path: record) },
+                clearDisposition: { try clearSelectiveRecoveryDisposition(path: record) },
+                release: {},
+                applySelectiveLayer: {},
+                removeSelectiveLayer: { removals += 1; return false },
+                completeRemoval: { try saveSelectiveRemovalCompleted(path: record) }
+            )
+            guard !settled, removals == 1, selectiveRemovalPending(path: record) else { return false }
+            let retried = reconcileSelectiveRecovery(
+                generalIntentPresent: false,
+                disposition: try selectiveRecoveryDisposition(path: record),
+                removalPending: selectiveRemovalPending(path: record),
+                applySelectiveLayer: {},
+                removeSelectiveLayer: { removals += 1; return true },
+                completeRemoval: { try saveSelectiveRemovalCompleted(path: record) }
+            )
+            return retried && removals == 2 && !selectiveRemovalPending(path: record)
         } catch { return false }
     }
 
