@@ -1309,6 +1309,9 @@ def adopt_source_watermarks(
             continue
         labels = sorted(label for label in totals if attributed_user(label) == user_id)
         if not labels:
+            # Accounting-only carry after a complete empty counter observation;
+            # it never enters the roster or installed-client inventory.
+            totals[client_label(user_id)] = watermark
             continue
         for index, label in enumerate(labels):
             totals[label] = watermark if index == 0 else 0

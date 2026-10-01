@@ -42,6 +42,9 @@ counters before reporting; it installs only the active identities. Both the
 control plane and agent must support this additive field to recover inactive
 accounts. Older control planes retain the identity-only fallback. Outage rounds
 never use a saved recovery watermark as a fresh billing observation.
+If a successful counter snapshot contains no label for an account, its watermark
+is retained as an accounting-only carry so later counters add new usage. That
+carry never authorizes a client or enters the installed-client inventory.
 
 The roster cycle is ordered deliberately:
 
