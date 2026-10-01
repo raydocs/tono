@@ -1,3 +1,5 @@
+> 已被 [2026-10-02-hardware-checklist-final.md](2026-10-02-hardware-checklist-final.md) 取代。
+
 # 实机测试总清单（2026-10-01）
 
 给测试的静杰，也给老板看。一次构建，一份清单。不按 PR 逐个测。
