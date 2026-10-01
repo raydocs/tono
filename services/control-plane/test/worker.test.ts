@@ -5037,6 +5037,45 @@ ${nameLine}
     }
   });
 
+  it('rejects signed direct suffixes overlapping every other assistant home domain', async () => {
+    const assistantSuffixes = [
+      'chatgpt.com', 'openai.com', 'chat.com', 'ai.com', 'oaistatic.com', 'oaiusercontent.com',
+      'grok.com', 'grok.x.com', 'grokipedia.com', 'x.ai',
+      'perplexity.ai', 'perplexity.com', 'pplx.ai',
+      'gemini.google.com', 'bard.google.com', 'aistudio.google.com',
+      'generativelanguage.googleapis.com', 'notebooklm.google.com',
+      'muse.ai', 'meta.ai', 'muse.meta.com', 'www.muse.ai',
+      'meta.com', 'facebook.com', 'fb.com', 'fb.me', 'fb.watch', 'fbcdn.net',
+      'facebook.net', 'messenger.com', 'instagram.com', 'cdninstagram.com', 'ig.me', 'threads.net',
+      'gmail.com', 'mail.google.com', 'googlemail.com', 'inbox.google.com',
+      'accounts.google.com', 'myaccount.google.com', 'oauth2.googleapis.com',
+      'mail-pa.clients6.google.com', 'gmail.googleapis.com',
+    ];
+    // Test exact suffixes, their children and parents with real signatures:
+    // the signer may extend reviewed direct routing, never residential routes.
+    for (const host of [
+      ...assistantSuffixes.flatMap((suffix) => [suffix, `api.${suffix}`]),
+      'x.com', 'google.com', 'clients6.google.com',
+    ]) {
+      const attempt = { ...unlistedPolicy, webDomains: [], directSuffixes: [{ host, ports: [443] }] };
+      const rejected = await admin('traffic-policy', {
+        policy: attempt, expectedRevision: 0, signature: await signPolicy(JSON.stringify(attempt)),
+      }, 'PUT');
+      expect(rejected.status, host).toBe(400);
+      expect((await rejected.json() as any).error.code, host).toBe('VALIDATION_ERROR');
+    }
+
+    const allowed = {
+      ...unlistedPolicy, webDomains: [],
+      directSuffixes: [{ host: 'policy-signature-fixture.example.net', ports: [443] }],
+    };
+    const published = await admin('traffic-policy', {
+      policy: allowed, expectedRevision: 0, signature: await signPolicy(JSON.stringify(allowed)),
+    }, 'PUT');
+    expect(published.status).toBe(200);
+    expect(JSON.parse((await published.json() as any).json).directSuffixes).toEqual(allowed.directSuffixes);
+  });
+
   it('admits product China web suffixes as directSuffixes', async () => {
     const preview = await admin('traffic-policy', {
       policy: {
