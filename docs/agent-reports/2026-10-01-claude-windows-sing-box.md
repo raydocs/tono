@@ -12,6 +12,7 @@
 | 2 | Service 以 SYSTEM 运行 sing-box 前，只对配置做黑名单检查。缺少 mihomo 和 macOS helper 都有的白名单：文件路径、非回环监听、`route.final`、Go 键折叠。 | 高·推导 | 已修：#1188（Fixes #1187）。 |
 | 3 | 代码判断"已武装"用的是 `active_runtime_resume`，比 WFP 实际武装的范围窄。Protected Offline 下重连时，仍可能在武装状态下换到 mihomo。另外，显式写了 mihomo 偏好时也会在武装状态下换核。 | 低·推导 | 未修，#1197。要在可用性和决策 040 之间取舍，需所有者拍板。 |
 | 4 | 查询 Service 版本时只要出错，就报成"Service 太旧"，提示用户重装。 | 低·推导 | 未修，#1197。 |
+| 5 | Service 准入 mihomo 和 sing-box 文档时只看最终规则，不限定哪些规则可以送往 DIRECT 出站。DIRECT 计划期间，WFP 对核心的直连许可不限目的地，政策要求走出口的流量可能从物理网卡出去。（由 #1188 的 Codex 审查发现，main 上两种核心原本就有。） | 高·推导 | 未修，#1204。要和进行中的按进程直连对齐规则形状。 |
 
 ### 重点核对项
 
@@ -30,5 +31,7 @@
 
 - #1188：Windows CI `windows/service` 在 `f9919bd6` 上通过，新的准入测试已在 Windows 上实跑。其余作业见 PR。
 - #1196：等 Windows CI。
-- 独立审查：#1188 和 #1196 属于特权路径或核心生命周期，属高风险，交给 Codex（gpt-6-sol，high）审查，结果见各 PR 的评论。审查完成前不合并。
+- 独立审查（Codex gpt-6-sol，high）：
+  - #1196：PASS，无 major 及以上问题。Windows CI 四个作业在 `13fcf1ff` 上全部通过。
+  - #1188：`f9919bd6` 审查结果 FAIL，3 个 major、1 个 minor。其中 3 项（`Tono-Exit` 选择器约束、DoH 的 detour、hosts 域名键）已在 `58c2ecf6` 修复；剩下 1 项是 main 上原有的问题，记为 #1204。修复部分正在复审，复审完成前不合并。
 - 未执行：本机 `cargo test`、实机 sing-box 启动。
