@@ -7,7 +7,7 @@ const DAY = 86400;
 const ROLLING_PERIOD = 30 * DAY;
 const SLOPE_WINDOW = 7 * DAY;
 const SAMPLE_RETENTION = 60 * DAY;
-const NAME_LIMIT = 120;
+export const NAME_LIMIT = 120;
 
 export type CycleKind = 'calendar_day' | 'anniversary' | 'rolling_30d' | 'manual';
 export type QuotaCounts = 'in' | 'out' | 'in_out';
@@ -39,13 +39,13 @@ const ERROR_CATEGORIES: ErrorCategory[] = [
   'dial_timeout', 'handshake_fail', 'auth_reject', 'upstream_reject', 'other',
 ];
 
-function finite(value: unknown): number | null {
+export function finite(value: unknown): number | null {
   if (value === null || value === undefined) return null;
   const n = Number(value);
   return Number.isFinite(n) ? n : null;
 }
 
-function field(profile: QuotaProfile, snake: keyof QuotaProfile, camel: keyof QuotaProfile): unknown {
+export function field(profile: QuotaProfile, snake: keyof QuotaProfile, camel: keyof QuotaProfile): unknown {
   return profile[snake] ?? profile[camel];
 }
 
@@ -218,7 +218,7 @@ function utcDay(unix: number): number {
   return Math.floor(unix / DAY) * DAY;
 }
 
-function newId(): string {
+export function newId(): string {
   return crypto.randomUUID();
 }
 
@@ -238,7 +238,7 @@ function asCounts(value: unknown): QuotaCounts {
   return 'in_out';
 }
 
-async function openCycleRow(db: D1Database, nodeName: string): Promise<Row | null> {
+export async function openCycleRow(db: D1Database, nodeName: string): Promise<Row | null> {
   return db.prepare(
     "SELECT * FROM node_traffic_cycles WHERE node_name = ? AND status = 'open'",
   ).bind(nodeName).first<Row>();
@@ -257,7 +257,7 @@ async function insertOpenCycle(
   bounds: CycleBounds,
   quota: number | null,
   counters: NetCounters,
-  nowSec: number,
+  nowSec: number, previous: Row | null = null, // expired cycle: carry its last counters over the gap
 ): Promise<Row> {
   const cycleId = newId();
   await db.prepare(
@@ -268,12 +268,12 @@ async function insertOpenCycle(
      ) VALUES(?, ?, ?, ?, ?, 0, ?, ?, ?, ?, 0, 'open', ?)`,
   ).bind(
     cycleId, nodeName, bounds.start, bounds.end, quota,
-    counters.in, counters.out, counters.in, counters.out, nowSec,
+    counters.in, counters.out, previous?.counter_in_last ?? counters.in, previous?.counter_out_last ?? counters.out, nowSec,
   ).run();
   return (await db.prepare('SELECT * FROM node_traffic_cycles WHERE id = ?').bind(cycleId).first<Row>())!;
 }
 
-function boundsFor(profile: QuotaProfile, nowSec: number): CycleBounds | null {
+export function boundsFor(profile: QuotaProfile, nowSec: number): CycleBounds | null {
   const kind = asKind(field(profile, 'cycle_kind', 'cycleKind'));
   const anchor = finite(field(profile, 'cycle_anchor_day', 'cycleAnchorDay'));
   if (kind === 'anniversary') {
@@ -304,15 +304,16 @@ export async function rollNodeCycle(
   let open = await openCycleRow(db, name);
   const expected = boundsFor(profile, nowSec);
 
-  if (open && Number(open.cycle_end) <= nowSec && kind !== 'manual') {
+  const expired = open && Number(open.cycle_end) <= nowSec && kind !== 'manual' ? open : null;
+  if (expired) {
     await db.prepare(
       "UPDATE node_traffic_cycles SET status = 'closed', updated_at = ? WHERE id = ?",
-    ).bind(nowSec, open.id).run();
+    ).bind(nowSec, expired.id).run();
     open = null;
   }
   if (!open) {
     if (!expected) return null;
-    open = await insertOpenCycle(db, name, expected, quota, counters, nowSec);
+    open = await insertOpenCycle(db, name, expected, quota, counters, nowSec, expired);
   }
 
   const inReset = detectCounterReset(finite(open.counter_in_last), counters.in);

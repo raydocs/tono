@@ -21,6 +21,8 @@ const ROUTE_ACTIONS: Record<OpsV1Route, OpsAction> = {
   'GET /api/v1/ops/customers/funnel': 'customers.read',
   'GET /api/v1/ops/customers/{id}': 'customers.read',
   'GET /api/v1/ops/customers/{id}/connections': 'customers.read',
+  'GET /api/v1/ops/customers/{id}/diagnostics': 'customers.read',
+  'GET /api/v1/ops/failure-clusters': 'customers.read',
   'GET /api/v1/ops/customers/{id}/activity': 'customers.read',
   'GET /api/v1/ops/customers/{id}/destinations': 'customers.read',
   'GET /api/v1/ops/customers/{id}/services': 'customers.read',

@@ -309,7 +309,12 @@ nonisolated extension ConfigPipeline {
         // makes the server reject the handshake with `tls: internal error`.
         append("servername", value.sni)
         append("flow", value.flow)
-        append("client-fingerprint", value.clientFingerprint)
+        // uTLS chrome when the catalog omits a fingerprint. Reality still
+        // checks the public key; this does not skip certificate verification.
+        append(
+            "client-fingerprint",
+            value.clientFingerprint ?? (value.type == .vless ? "chrome" : nil)
+        )
         if let alterId = value.alterId {
             guard (0...65_535).contains(alterId) else {
                 throw TonoInjectionError.unsafeNode(value.name)

@@ -44,6 +44,7 @@ vi.mock('react-markdown', () => ({
 }))
 vi.mock('rehype-raw', () => ({ default: () => {} }))
 import { UpdateStateProvider } from '@/services/states'
+
 import { UpdateViewer } from './update-viewer'
 
 afterEach(cleanup)

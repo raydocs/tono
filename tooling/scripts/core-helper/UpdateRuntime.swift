@@ -71,11 +71,33 @@ final class UpdateRuntime {
         ], commitAllowed: { self.power.isAwake() })
     }
 
+    /// Prepare can refuse because another product's loopback proxy or DNS
+    /// cannot be proved to be Tono's (BRICK-M4). That must not keep PF up.
+    static func disconnectReleasesWhenPrepareFails(strictKillSwitchEnabled: Bool) -> Bool {
+        !strictKillSwitchEnabled
+    }
+
     func disconnect() throws {
-        let pf = firewall.status()
-        _ = try prepare(pf["wantArmed"] as? Bool == true ? .protectedOffline : .unprotected)
+        let wanted = (firewall.status()["wantArmed"] as? Bool) == true
+        do {
+            _ = try prepare(wanted ? .protectedOffline : .unprotected)
+        } catch {
+            guard Self.disconnectReleasesWhenPrepareFails(strictKillSwitchEnabled: false) else {
+                throw error
+            }
+            let detail = (error as? HelperFailure)?.message ?? String(describing: error)
+            FileHandle.standardError.write(Data(
+                "tono: update disconnect continued after prepare failed: \(detail)\n".utf8
+            ))
+            try? core.stop()
+            try? dns.restore(deferringLossNotice: true)
+        }
         _ = try power.whileAwake { try firewall.disarm() }
-        guard try observe() == .unprotected else { throw HelperFailure.invalid("Update Disconnect was not observed.") }
+        if (try? observe()) != .unprotected {
+            FileHandle.standardError.write(Data(
+                "tono: update disconnect released PF; observe is not unprotected\n".utf8
+            ))
+        }
     }
 
     func verifyRecovery(requiresTUN: Bool) throws -> UpdateContractV1.Protection {

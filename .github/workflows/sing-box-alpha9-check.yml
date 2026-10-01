@@ -1,0 +1,64 @@
+name: sing-box alpha.9 check
+
+# Parser check of the pinned v1.15.0-alpha.9 linux core. Not a customer install
+# and not a Mac Studio soak. The frozen M0 candidate stays the default of
+# certify.py; this workflow passes the alpha.9 candidate explicitly.
+on:
+  # pull_request and merge_group enter through ci-gate.yml.
+  workflow_call:
+  push:
+    branches:
+      - main
+      - release/macos
+      - release/windows
+    paths:
+      - .github/workflows/sing-box-alpha9-check.yml
+      - tooling/scripts/sing-box/**
+      - tooling/scripts/build-sing-box.sh
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version: "1.27.1"
+          cache: false
+      - name: Rebuild linux-amd64-v2 and check frozen plus emitted shapes
+        run: |
+          set -eu
+          work=$(mktemp -d)
+          trap 'rm -rf "$work"' EXIT
+          git init -q "$work/source"
+          git -C "$work/source" fetch -q --depth=1 https://github.com/SagerNet/sing-box \
+            132b38e9caaba1a1959354d518e54d2d08419afe
+          git -C "$work/source" checkout -q --detach FETCH_HEAD
+          export GOENV=off GOWORK=off GOTOOLCHAIN=local
+          export GOFLAGS=-mod=readonly GOTELEMETRY=off
+          go -C "$work/source" mod download
+          cand=tooling/scripts/sing-box/candidates/v1.15.0-alpha.9.json
+          python3 tooling/scripts/sing-box/certify.py build \
+            --candidate "$cand" \
+            --source "$work/source" --go "$(command -v go)" \
+            --target linux-amd64-v2 --output "$work/linux"
+          manifest_sha=$(python3 -c 'import hashlib,pathlib,sys; print(hashlib.sha256(pathlib.Path(sys.argv[1]).read_bytes()).hexdigest())' "$work/linux/manifest.json")
+          python3 tooling/scripts/sing-box/certify.py verify \
+            --candidate "$cand" \
+            --go "$(command -v go)" --target linux-amd64-v2 \
+            --binary "$work/linux/sing-box" --manifest "$work/linux/manifest.json" \
+            --manifest-sha256 "$manifest_sha"
+          python3 tooling/scripts/sing-box/certify.py check \
+            --candidate "$cand" \
+            --go "$(command -v go)" --target linux-amd64-v2 \
+            --binary "$work/linux/sing-box" --manifest "$work/linux/manifest.json" \
+            --manifest-sha256 "$manifest_sha" \
+            --fixture docs/reports/sing-box-evaluation/migration-m0/reference.json \
+            --emitted tooling/scripts/sing-box/fixtures/macos-product-shape.json \
+            --emitted tooling/scripts/sing-box/fixtures/hy2-certificate-sha256.json \
+            --output "$work/check"
+          cmp "$work/linux/manifest.json" tooling/scripts/sing-box/manifests/alpha9/linux-amd64-v2.json

@@ -77,13 +77,20 @@ final class AppStateCoreMonitorTests: XCTestCase {
         XCTAssertNil(app.errorMessage)
 
         // The replacement finishes and its task handle clears, but the
-        // interface is still absent. The tick inside the window already banked
-        // one missing sighting, so this sighting completes the persistence
-        // requirement and the fail-closed verdict arrives — a real TUN death
-        // is still a disconnect, never a skip.
+        // interface is still absent. The tick inside the window banked
+        // nothing, so the first sighting after it is not a verdict yet; the
+        // next one completes the persistence requirement and the fail-closed
+        // verdict arrives — a real TUN death is still a disconnect, never a skip.
         app.connectionCoordinator.configReloadTask?.cancel()
         gate.open()
         app.connectionCoordinator.configReloadTask = nil
+        let settleOutcome = await app.runCoreMonitorTick(state: &state)
+        XCTAssertEqual(settleOutcome, .continueMonitoring)
+        XCTAssertTrue(
+            app.isConnected,
+            "one missing sighting right after the replacement window is not a verdict"
+        )
+        XCTAssertNil(app.errorMessage)
         let verdictOutcome = await app.runCoreMonitorTick(state: &state)
         XCTAssertEqual(verdictOutcome, .stopMonitoring)
         XCTAssertFalse(
@@ -92,7 +99,7 @@ final class AppStateCoreMonitorTests: XCTestCase {
         )
         XCTAssertEqual(
             app.errorMessage,
-            String(localized: "Protected TUN stopped; Kill Switch is blocking traffic while Tono retries.")
+            String(localized: "The connection didn't complete. Support code TONO_CONNECT_TUN.")
         )
 
         // Settle the queued teardown through the replaced seams; no real
@@ -131,7 +138,16 @@ final class AppStateCoreMonitorTests: XCTestCase {
         app.networkProtection = runtime
         app.tunInterfaceExists = { _ in true }
         var audits = ProtectionAuditOperations()
+        let stableUplink = NetworkUplinkSnapshot(
+            primaryService: "Wi-Fi",
+            primaryInterface: "en0",
+            ipv4Address: "192.168.1.20",
+            ipv4Gateway: "192.168.1.1",
+            ipv6Gateway: nil
+        )
+        app.lastUplinkSnapshot = stableUplink
         audits.primaryNetworkService = { "Wi-Fi" }
+        audits.uplinkSnapshot = { stableUplink }
         audits.protectedDNSIntegrity = { _ in .unverifiable }
         audits.killSwitchHealth = { (wanted: true, live: true, repairedSinceArm: true) }
         app.protectionAudits = audits

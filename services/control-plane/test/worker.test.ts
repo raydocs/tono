@@ -5037,6 +5037,45 @@ ${nameLine}
     }
   });
 
+  it('rejects signed direct suffixes overlapping every other assistant home domain', async () => {
+    const assistantSuffixes = [
+      'chatgpt.com', 'openai.com', 'chat.com', 'ai.com', 'oaistatic.com', 'oaiusercontent.com',
+      'grok.com', 'grok.x.com', 'grokipedia.com', 'x.ai',
+      'perplexity.ai', 'perplexity.com', 'pplx.ai',
+      'gemini.google.com', 'bard.google.com', 'aistudio.google.com',
+      'generativelanguage.googleapis.com', 'notebooklm.google.com',
+      'muse.ai', 'meta.ai', 'muse.meta.com', 'www.muse.ai',
+      'meta.com', 'facebook.com', 'fb.com', 'fb.me', 'fb.watch', 'fbcdn.net',
+      'facebook.net', 'messenger.com', 'instagram.com', 'cdninstagram.com', 'ig.me', 'threads.net',
+      'gmail.com', 'mail.google.com', 'googlemail.com', 'inbox.google.com',
+      'accounts.google.com', 'myaccount.google.com', 'oauth2.googleapis.com',
+      'mail-pa.clients6.google.com', 'gmail.googleapis.com',
+    ];
+    // Test exact suffixes, their children and parents with real signatures:
+    // the signer may extend reviewed direct routing, never residential routes.
+    for (const host of [
+      ...assistantSuffixes.flatMap((suffix) => [suffix, `api.${suffix}`]),
+      'x.com', 'google.com', 'clients6.google.com',
+    ]) {
+      const attempt = { ...unlistedPolicy, webDomains: [], directSuffixes: [{ host, ports: [443] }] };
+      const rejected = await admin('traffic-policy', {
+        policy: attempt, expectedRevision: 0, signature: await signPolicy(JSON.stringify(attempt)),
+      }, 'PUT');
+      expect(rejected.status, host).toBe(400);
+      expect((await rejected.json() as any).error.code, host).toBe('VALIDATION_ERROR');
+    }
+
+    const allowed = {
+      ...unlistedPolicy, webDomains: [],
+      directSuffixes: [{ host: 'policy-signature-fixture.example.net', ports: [443] }],
+    };
+    const published = await admin('traffic-policy', {
+      policy: allowed, expectedRevision: 0, signature: await signPolicy(JSON.stringify(allowed)),
+    }, 'PUT');
+    expect(published.status).toBe(200);
+    expect(JSON.parse((await published.json() as any).json).directSuffixes).toEqual(allowed.directSuffixes);
+  });
+
   it('admits product China web suffixes as directSuffixes', async () => {
     const preview = await admin('traffic-policy', {
       policy: {
@@ -5621,6 +5660,51 @@ ${nameLine}
     expect((await api('auth/refresh', json({ refreshToken: recovered.refreshToken }))).status).toBe(401);
   });
 
+  it('revokes refresh successors committed after logout authentication while preserving unrelated sessions', async () => {
+    const account = await createAccount('logout-refresh-race');
+    const login = await emailSignIn({
+      email: account.email,
+      deviceName: 'Second Mac',
+      installationId: 'logout-refresh-race-installation-two',
+    });
+    expect(login.status).toBe(200);
+    const unrelated = await login.json() as any;
+    const bearer = (token: string) => ({ headers: { authorization: `Bearer ${token}` } });
+    let recovered!: { accessToken: string; refreshToken: string };
+    const base = env as unknown as Env;
+    // Commit a rotation and grace replay after logout authenticates, just
+    // before its revocation batch: both intermediate sessions are revoked.
+    const DB = new Proxy(base.DB, {
+      get(target, prop) {
+        if (prop === 'batch') {
+          return async (statements: D1PreparedStatement[]) => {
+            const rotated = await api('auth/refresh', json({ refreshToken: account.refreshToken }));
+            expect(rotated.status).toBe(200);
+            const replay = await api('auth/refresh', json({ refreshToken: account.refreshToken }));
+            expect(replay.status).toBe(200);
+            recovered = await replay.json();
+            expect((await api('me', bearer(recovered.accessToken))).status).toBe(200);
+            return target.batch(statements);
+          };
+        }
+        const value = Reflect.get(target, prop, target);
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+    const context = createExecutionContext();
+    const logout = await worker.fetch(
+      new Request('https://test/api/v1/auth/logout', json({ refreshToken: account.refreshToken }, account.accessToken)),
+      { ...base, DB },
+      context,
+    );
+    await waitOnExecutionContext(context);
+    expect(logout.status).toBe(204);
+    expect((await api('me', bearer(recovered.accessToken))).status).toBe(401);
+    expect((await api('auth/refresh', json({ refreshToken: recovered.refreshToken }))).status).toBe(401);
+    expect((await api('me', bearer(unrelated.accessToken))).status).toBe(200);
+    expect((await api('auth/refresh', json({ refreshToken: unrelated.refreshToken }))).status).toBe(200);
+  });
+
   it('rejects a session inserted after its device was revoked', async () => {
     const account = await createAccount('late-session');
     await env.DB.batch([
@@ -6124,6 +6208,64 @@ ${nameLine}
     }
   });
 
+  it('reopens a revocation job with a fresh attempt stamp so failing work cannot delay it', async () => {
+    const originalFetch = vi.mocked(globalThis.fetch).getMockImplementation()!;
+    const attempts: string[] = [];
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const request = input instanceof Request ? input : new Request(String(input), init);
+      if (request.method === 'DELETE') {
+        const node = new URL(request.url).pathname.split('/').pop()!;
+        attempts.push(node);
+        if (node.startsWith('poison-')) return new Response('upstream failure', { status: 500 });
+      }
+      return originalFetch(input, init);
+    });
+    try {
+      const account = await createAccount('reopen-fairness');
+      const t = Math.floor(Date.now() / 1000);
+      // This node was revoked before: the completed job keeps the stamp of that
+      // attempt, and a full batch of failing jobs was attempted around it.
+      await env.DB.prepare(
+        `INSERT INTO revocation_jobs(
+           id, device_id, tailscale_node_id, created_at, last_attempt_at, completed_at, reason
+         ) VALUES('reopen-prior', ?, ?, ?, ?, ?, 'device_revoked')`,
+      ).bind(account.device.id, MGMT_ID, t - 100, t, t).run();
+      await env.DB.batch(Array.from({ length: 40 }, (_, index) => env.DB.prepare(
+        `INSERT INTO revocation_jobs(id, device_id, tailscale_node_id, created_at, last_attempt_at)
+         VALUES(?, ?, ?, ?, ?)`,
+      ).bind(`reopen-fair-${index}`, `missing-${index}`, `poison-${index}`, index, t)));
+
+      // The login path (expirePending) reopens the completed job without
+      // processing it, so the inherited stamp is observable before any attempt.
+      await env.DB.prepare(
+        `UPDATE devices SET tailscale_node_id = ?, pending_expires_at = ?, status = 'pending' WHERE id = ?`,
+      ).bind(MGMT_ID, t - 10, account.device.id).run();
+      const login = await emailSignIn({
+        email: account.email,
+        deviceName: 'Primary Mac',
+        installationId: 'reopen-fairness-installation-one',
+      });
+      expect(login.status).toBe(409);
+      const reopened = await env.DB.prepare(
+        "SELECT last_attempt_at FROM revocation_jobs WHERE id = 'reopen-prior'",
+      ).first<any>();
+      expect(reopened.last_attempt_at).toBe(0);
+
+      const context = createExecutionContext();
+      await worker.scheduled(createScheduledController(), env as unknown as Env, context);
+      await waitOnExecutionContext(context);
+      expect(attempts).toContain(MGMT_ID);
+      expect(attempts.indexOf(MGMT_ID)).toBeLessThan(attempts.indexOf('poison-0'));
+      const done = await env.DB.prepare(
+        "SELECT completed_at, last_error FROM revocation_jobs WHERE id = 'reopen-prior'",
+      ).first<any>();
+      expect(done.completed_at).toBeTypeOf('number');
+      expect(done.last_error).toBeNull();
+    } finally {
+      fetchSpy.mockImplementation(originalFetch);
+    }
+  });
+
   it('keeps cron enforcement cost flat as already-enforced users accumulate', async () => {
     const tick = async () => {
       let prepares = 0;
@@ -6405,6 +6547,45 @@ ${nameLine}
       headers: { authorization: `Bearer ${HOME_TOKEN}` },
     });
     expect((await afterSuspend.json() as any).identities).toEqual([]);
+  });
+
+  it('names each exit identity with this node source watermark', async () => {
+    await env.DB.prepare("UPDATE exit_nodes SET name = 'Metered' WHERE id = 'exit-default'").run();
+    const yaml = `proxies:
+  - name: "Metered"
+    type: vless
+    server: 8.8.4.4
+    port: 443
+    uuid: {{TONO_CLIENT_UUID}}
+    tls: true
+`;
+    expect((await admin('exit-catalog', { yaml, expectedRevision: 0 }, 'PUT')).status).toBe(200);
+    const billed = await createAccount('roster-watermark');
+    const quiet = await createAccount('roster-watermark-quiet');
+    for (const account of [billed, quiet]) {
+      expect((await api('exit-catalog', {
+        headers: { authorization: `Bearer ${account.accessToken}` },
+      })).status).toBe(200);
+    }
+    const observedAt = Math.floor(Date.now() / 1000);
+    expect((await api('home/usage', json({
+      reports: [{
+        reportId: `roster-watermark-${observedAt}`,
+        userId: billed.user.id,
+        sourceId: 'exit-default',
+        protocolVersion: 2,
+        totalBytes: 1050,
+        observedAt,
+      }],
+    }, EXIT_NODE_TOKENS['exit-default']))).status).toBe(200);
+
+    const listed = await api('home/exit-identities', {
+      headers: { authorization: `Bearer ${EXIT_NODE_TOKENS['exit-default']}` },
+    });
+    expect(listed.status).toBe(200);
+    const identities = (await listed.json() as { identities: Array<{ userId: string; sourceUsageBytes: number }> }).identities;
+    expect(identities.find((entry) => entry.userId === billed.user.id)?.sourceUsageBytes).toBe(1050);
+    expect(identities.find((entry) => entry.userId === quiet.user.id)?.sourceUsageBytes).toBe(0);
   });
 
   it('revokes sessions and devices as soon as a usage report reaches quota', async () => {
