@@ -587,6 +587,94 @@ class RosterValidation(unittest.TestCase):
 
 
 class RosterControlSignals(unittest.TestCase):
+    def test_missing_ledger_preserves_accounting_carry_before_a_new_device_counter_appears(self) -> None:
+        import io
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        path = Path(directory.name) / "state.json"
+        posted: list[dict] = []
+        old = {
+            "userId": "usr_saved", "deviceId": "dev_old",
+            "clientUUID": "11111111-1111-4111-8111-111111111111", "sourceUsageBytes": 1050,
+        }
+        new = {
+            "userId": "usr_saved", "deviceId": "dev_new",
+            "clientUUID": "22222222-2222-4222-8222-222222222222", "sourceUsageBytes": 1050,
+        }
+        old_label = agent.client_label(old["userId"], old["deviceId"], old["clientUUID"])
+        new_label = agent.client_label(new["userId"], new["deviceId"], new["clientUUID"])
+        carry_label = agent.client_label("usr_saved")
+        payloads = [{
+            "nodeId": "exit-node-a", "observedAt": 200 + index, "identities": [identity],
+            "sourceUsageWatermarks": [{"userId": "usr_saved", "sourceUsageBytes": 1050}],
+        } for index, identity in enumerate([old, new])]
+        installed: set[str] = set()
+        counter_samples = iter([{}, {new_label: 80}])
+        mutations: list[tuple[str, str]] = []
+
+        def fake_xray(_binary, arguments):
+            command = arguments[1]
+            if command == "inbounduser":
+                output = json.dumps({"users": [{"email": label} for label in sorted(installed)]})
+            elif command == "adu":
+                client = json.loads(Path(arguments[-1]).read_text())["inbounds"][0]["settings"]["clients"][0]
+                installed.add(client["email"])
+                mutations.append(("add", client["email"]))
+                output = "Added 1 user(s) in total."
+            elif command == "rmu":
+                installed.discard(arguments[-1])
+                mutations.append(("remove", arguments[-1]))
+                output = "Removed 1 user(s) in total."
+            elif command == "statsquery":
+                output = json.dumps({"stat": [{
+                    "name": f"user>>>{label}>>>traffic>>>uplink", "value": count,
+                } for label, count in next(counter_samples).items()]})
+            else:
+                raise AssertionError(arguments)
+            return agent.subprocess.CompletedProcess([], 0, output, "")
+
+        def capture_deliver(_base, _token, state_path, state):
+            posted.extend(state["pendingReports"])
+            count = len(state["pendingReports"])
+            state["pendingReports"] = []
+            agent.save_state(state_path, state)
+            return count, 0
+
+        with patch.dict(agent.os.environ, {
+                 "TONO_HOME_AGENT_TOKEN": "node-token", "TONO_SOURCE_ID": "exit-node-a",
+             }, clear=True), \
+             patch.object(agent, "api_base", return_value="https://control.example"), \
+             patch.object(agent, "xray_binary", return_value=Path("/unused/xray")), \
+             patch.object(agent, "require_commands", return_value={
+                 "add_user": "adu", "remove_user": "rmu", "stats_query": "statsquery", "list_users": "inbounduser",
+             }), \
+             patch.object(agent, "open_control_plane", side_effect=[
+                 io.BytesIO(json.dumps(payload).encode()) for payload in payloads
+             ]), \
+             patch.object(agent, "run_xray", side_effect=fake_xray), \
+             patch.object(agent, "xray_start_marker", return_value="boot:100"), \
+             patch.object(agent, "sync_hy2_roster") as hy2, \
+             patch.object(agent, "acknowledge_roster"), \
+             patch.object(agent, "acknowledge_metering"), \
+             patch.object(agent, "deliver_queue", side_effect=capture_deliver):
+            agent.run_once(path)
+            first = json.loads(path.read_text())
+            self.assertEqual(first["totals"], {carry_label: 1050})
+            self.assertEqual(first["installedClients"], [old_label])
+            self.assertEqual(first["startMarker"], "boot:100")
+            self.assertEqual([report["totalBytes"] for report in posted], [1050])
+            agent.run_once(path)
+
+        saved = json.loads(path.read_text())
+        self.assertEqual([report["totalBytes"] for report in posted], [1050, 1130])
+        self.assertEqual(saved["totals"], {carry_label: 1050, new_label: 80})
+        self.assertEqual(saved["counterBaseline"], {carry_label: 0, new_label: 80})
+        self.assertEqual(saved["installedClients"], [new_label])
+        self.assertEqual(saved["startMarker"], "boot:100")
+        self.assertEqual(mutations, [("add", old_label), ("remove", old_label), ("add", new_label)])
+        self.assertEqual(hy2.call_args_list[0].args[0], [old])
+        self.assertEqual(hy2.call_args_list[1].args[0], [new])
+
     def test_missing_ledger_recovers_inactive_counters_without_reauthorizing_or_rebilling(self) -> None:
         import io
         directory = tempfile.TemporaryDirectory()
