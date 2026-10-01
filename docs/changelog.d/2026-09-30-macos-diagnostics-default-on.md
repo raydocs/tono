@@ -10,3 +10,4 @@
 - 2026-09-30 续记：变基到 `origin/main` `7e475245`（#706），没有把 main 合并进来。`HelperProtocolVersion` 没有冲突，保持 main 的 `4.52.6`。网络变化的 P0 改挂在 `NetworkUplinkSnapshot` 的 `.moved` 上；失败后放行网络的断开说明保持 main 的写法。上述 CI 修正仍在。本环境没有 Xcode，XCTest 未执行。
 - 2026-09-30 续记：main 又前进到 `01c2403f`（#703）。再次变基，没有冲突，helper 仍是 `4.52.6`。耗尽的隧道丢失仍走 main 的放行网络，这次没有给它新加 `TONO_FAIL_OPEN` 调用点。本环境没有 Xcode，XCTest 未执行。
 - 2026-10-01 续记：再变基到 `origin/main` `262b1864`。helper 保持 main 的 `4.52.12`。耗尽后的放行仍走 `applyExhaustedArmedFailure`，隧道丢失仍带 `exhaustedTunnelLoss`。这条放行现在写入 `TONO_FAIL_OPEN`；更新屏障把过滤器留住、或处置不放行时写入 `TONO_KILL_SWITCH_STUCK`。网络变化的 `TONO_NETWORK_LOSS` 仍在 `.moved`。`ArmedFailureReleaseTests` 仍要求卸下 PF，并核对队列里的放行代号。本环境没有 Xcode，XCTest 未执行。#724 仍可合并，没有动。
+- 2026-10-01 续记：推送前 main 又到 `3ea3fd01`（含 #760）。再次变基，没有冲突。helper 仍是 `4.52.12`。浏览器 Secure DNS 冲突和耗尽隧道的放行保持 main 的写法。本环境没有 Xcode，XCTest 未执行。
