@@ -3015,6 +3015,9 @@ async fn release_with(apply_narrow: bool) -> Result<KillSwitchStatus> {
     ensure_supported()?;
     {
         let _operation = WFP_OPERATION.lock().await;
+        if apply_narrow && armed_guard().as_ref().is_some_and(|armed| armed.intent.strict_kill_switch) {
+            bail!("automatic release refused: explicit strict kill switch remains armed");
+        }
         disarm_unlocked(apply_narrow).await?;
         note_explicit_release();
     }
@@ -4366,6 +4369,21 @@ mod tests {
         assert!(status().await.wanted);
         assert_eq!(current_core_instance().await, Some(CoreInstance { pid: 4243, generation: 2 }));
         assert!(!crate::core::selective_layer::test_hold_active());
+        cleanup().await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn automatic_narrow_release_preserves_strict_and_explicit_restore_still_releases() -> Result<()> {
+        cleanup().await;
+        arm_bootstrap(&test_config(), "/opt/tono/mihomo", "owner-alice").await?;
+        armed_guard().as_mut().unwrap().intent.strict_kill_switch = true;
+        let automatic = release_applying_narrow().await;
+        assert!(automatic.is_err(), "automatic failure must not disarm explicit strict protection");
+        assert!(status().await.wanted);
+        release().await?;
+        assert!(!status().await.wanted, "explicit Restore must still disarm strict protection");
         cleanup().await;
         Ok(())
     }

@@ -227,6 +227,22 @@ where
     operation
 }
 
+/// Pending-update Disconnect is explicit Restore intent, not automatic recovery.
+async fn pending_update_release_for_intent<T, F>(
+    explicit_disconnect: bool,
+    apply_narrow: bool,
+    pending: impl FnOnce() -> F,
+) -> Option<T>
+where
+    F: std::future::Future<Output = T>,
+{
+    if explicit_disconnect && !apply_narrow {
+        Some(pending().await)
+    } else {
+        None
+    }
+}
+
 /// The release worker is never owned by one UI call. On Windows the owner-gated Service route is
 /// already the transaction boundary: under one lifecycle lock it proves DNS restoration, stops
 /// and retires the matching Core, then removes WFP. Calling those as three App-owned IPCs would
@@ -261,11 +277,14 @@ async fn run_release_sequence(
 
     #[cfg(windows)]
     let status = {
-        // User Disconnect and failed-Prepare recovery request this durable release.
-        // Quit, sign-out and ordinary failure cleanup keep the pending-update fence.
-        let update_release = if _explicit_disconnect {
-            pending_update_release_result(state, commands::update::disconnect_if_pending().await).await?
-        } else { None };
+        // Only explicit user Restore may release a pending update obligation.
+        // Automatic failed-Prepare recovery keeps its narrow intent and update fence.
+        let update_release = match pending_update_release_for_intent(
+            _explicit_disconnect, apply_narrow, || commands::update::disconnect_if_pending(),
+        ).await {
+            Some(result) => pending_update_release_result(state, result).await?,
+            None => None,
+        };
         match update_release {
             Some(status) => status,
             None => match if apply_narrow {
@@ -424,6 +443,21 @@ pub(super) async fn stay_armed_after_failed_release(state: &Arc<TonoState>, app:
 mod tests {
     use super::*;
     use tokio::sync::oneshot;
+
+    #[tokio::test]
+    async fn automatic_prepare_recovery_never_dispatches_user_update_disconnect() {
+        let automatic = pending_update_release_for_intent(true, true, || async {
+            panic!("automatic recovery must not remove the AI hold through explicit update Disconnect")
+        }).await;
+        assert_eq!(automatic, None::<()>);
+        let mut requested = false;
+        let user = pending_update_release_for_intent(true, false, || async {
+            requested = true;
+            "userRestore"
+        }).await;
+        assert_eq!(user, Some("userRestore"));
+        assert!(requested, "explicit Restore must keep its pending-update release path");
+    }
 
     #[tokio::test]
     async fn automatic_failure_release_transfers_its_writer_and_keeps_the_ai_hold() {

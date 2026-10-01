@@ -318,8 +318,28 @@ fn begin_update_release(
     Ok(())
 }
 
-fn prepare_failure_releases(strict: bool, core_stop_attempted: bool) -> bool {
-    core_stop_attempted && !strict
+fn prepare_failure_releases(strict: bool) -> bool {
+    !strict
+}
+
+/// Finish a reserved Prepare without treating automatic failure as user Restore.
+async fn settle_reserved_preparation<T, F>(
+    prepared: Result<T>,
+    strict: bool,
+    release: impl FnOnce() -> F,
+) -> Result<T>
+where
+    F: std::future::Future<Output = Result<()>>,
+{
+    match prepared {
+        Err(error) if prepare_failure_releases(strict) => {
+            if let Err(release_error) = release().await {
+                return Err(error.context(format!("Prepare failure cleanup also failed: {release_error:#}")));
+            }
+            Err(error)
+        }
+        outcome => outcome,
+    }
 }
 
 async fn release_failed_preparation(
@@ -483,56 +503,56 @@ pub(crate) async fn request(
                 publication_clock: None,
             });
             save_prepared_attempt(&mut store, next)?; // Before staging, quiescence, or ownership changes.
-            let dir = store.attempt_dir()?;
-            windows_security::ensure_private_installer_directory(&dir)?;
-            windows_security::ensure_private_installer_directory(&dir.join("payload"))?;
-            let target = target(&store.attempt()?.manifest).clone();
-            let source = PathBuf::from(package_path);
-            let _source_pins = pin_path(&source, false)?;
-            ensure!(
-                source.canonicalize()?.starts_with(&owner.app_data_root),
-                "download is outside the authenticated App data root"
-            );
-            copy_private(
-                &source,
-                &dir.join("package.exe"),
-                target.artifact_size_bytes,
-                &target.artifact_sha256,
-            )?;
-            let helper = root.join("resources/tono-service-install.exe");
-            copy_private(
-                &helper,
-                &dir.join("executor.exe"),
-                std::fs::metadata(&helper)?.len(),
-                &file_digest(&helper)?,
-            )?;
-            store.execution(Execution::Extracting)?;
-            drop(store);
-            // Verified package code only unpacks private files. Its NSIS entry
-            // authenticates this exact private package before any Section runs.
-            let exit = tokio::process::Command::new(dir.join("package.exe"))
-                .args(["/S", "/TONO-PRIVATE-UNPACK"])
-                .status()
-                .await?;
-            ensure!(
-                exit.success(),
-                "private package extraction failed; evidence retained"
-            );
-            store = open_store()?;
-            ensure!(
-                components(
-                    &dir.join("payload"),
-                    &dir.join("payload/resources/tono-service.exe")
-                )? == target.components,
-                "package components do not match signed target"
-            );
-            store.execution(Execution::Staged)?;
             let strict = wfp::strict_kill_switch_enabled();
-            let mut core_stop_attempted = false;
             let mut core_stopped = false;
+            // All work after the durable reservation can fail, including private
+            // copy/extraction before Core stop. Automatic cleanup owns those errors too.
             let prepared = async {
+                let dir = store.attempt_dir()?;
+                windows_security::ensure_private_installer_directory(&dir)?;
+                windows_security::ensure_private_installer_directory(&dir.join("payload"))?;
+                let target = target(&store.attempt()?.manifest).clone();
+                let source = PathBuf::from(package_path);
+                let _source_pins = pin_path(&source, false)?;
+                ensure!(
+                    source.canonicalize()?.starts_with(&owner.app_data_root),
+                    "download is outside the authenticated App data root"
+                );
+                copy_private(
+                    &source,
+                    &dir.join("package.exe"),
+                    target.artifact_size_bytes,
+                    &target.artifact_sha256,
+                )?;
+                let helper = root.join("resources/tono-service-install.exe");
+                copy_private(
+                    &helper,
+                    &dir.join("executor.exe"),
+                    std::fs::metadata(&helper)?.len(),
+                    &file_digest(&helper)?,
+                )?;
+                store.execution(Execution::Extracting)?;
+                drop(store);
+                // Verified package code only unpacks private files. Its NSIS entry
+                // authenticates this exact private package before any Section runs.
+                let exit = tokio::process::Command::new(dir.join("package.exe"))
+                    .args(["/S", "/TONO-PRIVATE-UNPACK"])
+                    .status()
+                    .await?;
+                ensure!(
+                    exit.success(),
+                    "private package extraction failed; evidence retained"
+                );
+                let mut store = open_store()?;
+                ensure!(
+                    components(
+                        &dir.join("payload"),
+                        &dir.join("payload/resources/tono-service.exe")
+                    )? == target.components,
+                    "package components do not match signed target"
+                );
+                store.execution(Execution::Staged)?;
                 let prior_core = super::runtime::read_core_runtime_record().await?;
-                core_stop_attempted = true;
                 manager::CORE_MANAGER.lock().await.stop_core().await?;
                 core_stopped = true;
                 if let Some(prior) = prior_core {
@@ -564,23 +584,14 @@ pub(crate) async fn request(
                         protection: observed,
                     },
                 )?;
-                Ok::<_, anyhow::Error>(())
-            }
-            .await;
-            if let Err(error) = prepared {
-                if prepare_failure_releases(strict, core_stop_attempted) {
-                    // Failed Prepare must not strand a non-strict owner behind bootstrap WFP
-                    // and dead DNS. Use Disconnect's recorded release; keep the attempt evidence.
-                    let released =
-                        release_failed_preparation(&mut store, owner, &peer, core_stopped).await;
-                    if let Err(release_error) = released {
-                        return Err(error.context(format!(
-                            "Prepare failure cleanup also failed: {release_error:#}"
-                        )));
-                    }
-                }
-                return Err(error);
-            }
+                Ok::<_, anyhow::Error>(store)
+            }.await;
+            store = settle_reserved_preparation(prepared, strict, || async {
+                // The preparation future dropped its owned Store on error, including
+                // while extraction had released it. Reopen the same retained evidence.
+                let mut failed_store = open_store()?;
+                release_failed_preparation(&mut failed_store, owner, &peer, core_stopped).await
+            }).await?;
         }
         UpdateRequest::Install { attempt_id } => {
             let a = store.live_attempt(now()?)?;
@@ -1739,12 +1750,29 @@ mod tests {
         assert!(retained);
     }
 
+    #[tokio::test]
+    async fn update_staging_failure_releases_automatically_before_core_stop() {
+        let mut released = false;
+        let error = settle_reserved_preparation::<(), _>(
+            Err(anyhow::anyhow!("private package copy failed")),
+            false,
+            || async { released = true; Ok(()) },
+        ).await.unwrap_err();
+        assert!(error.to_string().contains("private package copy failed"));
+        assert!(released, "a post-reservation staging error must use automatic release even before Core stop");
+
+        let strict = settle_reserved_preparation::<(), _>(
+            Err(anyhow::anyhow!("private package copy failed")),
+            true,
+            || async { panic!("strict protection must not dispatch automatic release") },
+        ).await.unwrap_err();
+        assert!(strict.to_string().contains("private package copy failed"));
+    }
+
     #[test]
-    fn update_prepare_failure_releases_only_after_stop_without_strict_kill_switch() {
-        assert!(prepare_failure_releases(false, true));
-        assert!(!prepare_failure_releases(true, true));
-        assert!(!prepare_failure_releases(false, false));
-        assert!(!prepare_failure_releases(true, false));
+    fn update_prepare_failure_releases_only_without_strict_kill_switch() {
+        assert!(prepare_failure_releases(false));
+        assert!(!prepare_failure_releases(true));
     }
 
     #[cfg(feature = "test")]
