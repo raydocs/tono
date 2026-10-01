@@ -39,7 +39,11 @@ struct MenuBarProtectionStatus {
             title = "Protection unknown"
             color = TonoStatus.blocked
             symbolName = Self.unconfirmedSymbol
-        } else if appState.protectedReconnectPausedForUserAction {
+        } else if appState.protectedReconnectPausedForUserAction,
+                  appState.isProtectionBlocked {
+            // The pause can outlive a completed release (the third
+            // supervisor repair releases, then pauses the unarmed retry).
+            // An open host is not Protected Offline (MAC-PAUSED-OPEN-STATUS).
             kind = .blocked
             title = "Protected Offline · retries paused"
             color = TonoStatus.blocked
