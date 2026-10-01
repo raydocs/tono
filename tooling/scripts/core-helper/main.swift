@@ -799,6 +799,97 @@ func runUpgradeSourceSelfTest() -> Bool {
     }
 }
 
+/// Cancelling a silent copy must leave an administrator installer's staging
+/// files intact, including files it replaces while the copy is in progress.
+func runSilentUpgradeStagingSelfTest() -> Bool {
+    let parent = FileManager.default.temporaryDirectory.path
+        + "/tono-upgrade-isolation-\(UUID().uuidString)"
+    do {
+        try FileManager.default.createDirectory(atPath: parent, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(atPath: parent) }
+        let staging = try SilentUpgradeStaging(parent: parent)
+        defer { staging.remove() }
+        let other = try SilentUpgradeStaging(parent: parent)
+        defer { other.remove() }
+        guard staging.directory != other.directory else { return false }
+        let otherPayload = Data("other-upgrade\n".utf8)
+        try otherPayload.write(to: URL(fileURLWithPath: other.helperPath))
+        let source = parent + "/source"
+        let installerHelper = parent + "/tono-core-helper.new"
+        let installerCore = parent + "/tono-sing-box.new"
+        let sentinel = Data("administrator-install\n".utf8)
+        try Data("silent-upgrade\n".utf8).write(to: URL(fileURLWithPath: source))
+        let fd = try openUpgradeSource(source)
+        defer { close(fd) }
+        var checks = 0
+        var aborted = false
+        do {
+            try copyUpgradeSource(from: fd, to: staging.helperPath) {
+                checks += 1
+                if checks == 2 {
+                    do {
+                        try sentinel.write(to: URL(fileURLWithPath: installerHelper), options: .atomic)
+                        try sentinel.write(to: URL(fileURLWithPath: installerCore), options: .atomic)
+                    } catch { return false }
+                    return false
+                }
+                return true
+            }
+        } catch { aborted = true }
+        staging.remove()
+        return aborted && checks == 2
+            && (try? Data(contentsOf: URL(fileURLWithPath: installerHelper))) == sentinel
+            && (try? Data(contentsOf: URL(fileURLWithPath: installerCore))) == sentinel
+            && (try? Data(contentsOf: URL(fileURLWithPath: other.helperPath))) == otherPayload
+            && access(staging.helperPath, F_OK) != 0
+    } catch { return false }
+}
+
+/// The authorization check and binary replacement share the actual durable
+/// lock; another installer cannot enter between them.
+func runSilentUpgradeCommitSelfTest() -> Bool {
+    guard geteuid() == 0 else { return false }
+    let root = FileManager.default.temporaryDirectory.path
+        + "/tono-upgrade-commit-\(UUID().uuidString)"
+    defer { try? FileManager.default.removeItem(atPath: root) }
+    do {
+        let storage = try UpdateStorage(root: root)
+        let staging = try SilentUpgradeStaging(parent: root)
+        defer { staging.remove() }
+        let helperDestination = root + "/helper"
+        let coreDestination = root + "/core"
+        let helperBytes = Data("new-helper\n".utf8)
+        let coreBytes = Data("new-core\n".utf8)
+        try helperBytes.write(to: URL(fileURLWithPath: staging.helperPath))
+        try coreBytes.write(to: URL(fileURLWithPath: staging.corePath))
+        let contender = open(root + "/lock", O_RDWR | O_CLOEXEC)
+        guard contender >= 0 else { return false }
+        defer { close(contender) }
+        var replaced = false
+        try replaceSilentUpgradeCopies(
+            staging: staging,
+            helperDestination: helperDestination,
+            coreDestination: coreDestination
+        ) { replace in
+            try storage.locked {
+                guard flock(contender, LOCK_EX | LOCK_NB) != 0,
+                      errno == EWOULDBLOCK else {
+                    throw HelperFailure.system("Upgrade replacement did not hold the update lock.")
+                }
+                try replace()
+                guard (try? Data(contentsOf: URL(fileURLWithPath: helperDestination))) == helperBytes,
+                      (try? Data(contentsOf: URL(fileURLWithPath: coreDestination))) == coreBytes else {
+                    throw HelperFailure.system("Upgrade copies were not replaced inside the update lock.")
+                }
+                replaced = true
+            }
+        }
+        guard replaced, flock(contender, LOCK_EX | LOCK_NB) == 0 else { return false }
+        flock(contender, LOCK_UN)
+        return true
+    } catch { return false }
+}
+
 func runBuildSourceSealSelfTest() -> Bool {
     let json = Data(
         #"{"commit":"0123456789abcdef0123456789abcdef01234567","releaseSequence":3}"#.utf8
@@ -1672,7 +1763,8 @@ if CommandLine.arguments.dropFirst() == ["--lifecycle-self-test"] {
         && ProtectedDNSManager.runRenamedServiceRestoreSelfTest()
         && ProtectedDNSManager.runDeferredOriginalLossSelfTest()
     let selectiveRoutesPassed = SelectiveFailOpen.runRouteGatewaySelfTest()
-    exit(pfPassed && dnsPassed && selectiveRoutesPassed ? 0 : 1)
+    let upgradeCommitPassed = runSilentUpgradeCommitSelfTest()
+    exit(pfPassed && dnsPassed && selectiveRoutesPassed && upgradeCommitPassed ? 0 : 1)
 }
 if CommandLine.arguments.dropFirst() == ["--self-test"] {
     exit(
@@ -1682,6 +1774,7 @@ if CommandLine.arguments.dropFirst() == ["--self-test"] {
             && runRequestContractSelfTests()
             && runHelperUpgradeAdmissionSelfTest()
             && runUpgradeSourceSelfTest()
+            && runSilentUpgradeStagingSelfTest()
             && runBuildSourceSealSelfTest()
             && runPFTokenForgetSelfTest()
             && runLanDNSScopeSelfTest()
