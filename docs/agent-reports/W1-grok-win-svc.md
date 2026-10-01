@@ -46,7 +46,7 @@ Hunter: Grok 4.7。基线 `origin/main` `c26025ec`。范围：W4 服务生命周
 | PR | 自动合并 | 标签 |
 |---|---|---|
 | [#824](https://github.com/raydocs/tono/pull/824) `hunt/grok-winsvc-retire-schtasks-d3c7` | 已开，合并提交 | 无 `needs-hardware`（不改路由、TUN、WFP、DNS、防火墙、杀开关、代理），无 `ui-review` |
-| 本报告 | 合并提交 | 仅文档 |
+| [#831](https://github.com/raydocs/tono/pull/831) `hunt/grok-winsvc-report-d3c7` | 合并提交 | 仅文档 |
 
 ## 未完成
 
