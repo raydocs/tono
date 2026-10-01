@@ -770,8 +770,9 @@ pub(super) fn collect_interface_key_adapters() -> Result<Vec<AdapterDnsSnapshot>
 ///   unsaved Tono-owned DNS address remains" when restoring
 ///   (a restored family's servers may legitimately come back from DHCP in another order).
 ///   A family with no live DNS instance, an interface index of 0, or a CIM `ReturnValue` of
-///   84 ("IP not enabled on adapter") is a non-participant: there is no resolver on it to
-///   leak, and recording it as a failure is what used to pin `live_apply_failed` on forever.
+///   84 ("IP not enabled on adapter") is a non-participant for *that family*: there is no
+///   resolver on it to leak. IPv4 returning 84 must not skip the IPv6 block. Recording the
+///   whole adapter as a failure is what used to pin `live_apply_failed` on forever.
 ///
 /// The script prints `fails|skips`; results are recorded per adapter and required for any
 /// restore proof (see the module docs). An adapter that reports *no* configurable family at
@@ -974,9 +975,9 @@ function Set-AdapterDns($g, $i4, $i6, $v4, $v6, $restoring) {
 $c = Get-CimInstance Win32_NetworkAdapterConfiguration -Filter "SettingID='$g'" -ErrorAction SilentlyContinue
 if ($null -eq $c) { $global:fails += $g; return }
 $r = Invoke-CimMethod -InputObject $c -MethodName SetDNSServerSearchOrder -Arguments @{ DNSServerSearchOrder = $v4 } -ErrorAction SilentlyContinue
-if ($r -and $r.ReturnValue -eq 84) { $global:skips += $g; return }
-if (-not $r -or $r.ReturnValue -ne 0) { $global:fails += $g; return }
-$touched = $true
+if ($r -and $r.ReturnValue -eq 84) { $v4 = $null }
+elseif (-not $r -or $r.ReturnValue -ne 0) { $global:fails += $g; return }
+else { $touched = $true }
   }
   if ($i6 -ne 0) {
 $e = 0
@@ -1002,6 +1003,24 @@ $touched = $true
   if (-not (Test-Family $i6 'IPv6' $v6 $restoring)) { $global:fails += $g; return }
 }
 "#;
+
+#[cfg(test)]
+#[test]
+fn ipv4_not_enabled_does_not_skip_the_ipv6_block() {
+    let line = SCRIPT_PRELUDE
+        .lines()
+        .find(|line| line.contains("ReturnValue -eq 84"))
+        .expect("CIM 84 branch");
+    assert!(
+        !line.contains("return"),
+        "IPv4 CIM 84 must not leave Set-AdapterDns before IPv6: {line}"
+    );
+    let at_84 = SCRIPT_PRELUDE
+        .find("ReturnValue -eq 84")
+        .expect("84");
+    let at_v6 = SCRIPT_PRELUDE.find("if ($i6 -ne 0)").expect("ipv6 block");
+    assert!(at_84 < at_v6);
+}
 
 /// The result marker the batch must print. Its presence is what distinguishes "the script
 /// ran and found no failures" from "the script produced nothing useful"; without it the
@@ -1782,4 +1801,48 @@ fn system_lookup_a_blocking(host: &str) -> std::result::Result<Vec<std::net::Ipv
         return Err(format!("DnsQuery_W returned {status}"));
     }
     Ok(addresses)
+}
+
+/// Per-suffix NRPT rules for the secondary hold. Never writes the catch-all
+/// name `.` and never reuses the catch-all key. A refused name writes nothing.
+pub(super) fn install_selective_nrpt() -> Result<()> {
+    use crate::core::selective_fail_open::{self, CATCH_ALL_NRPT_GUID, SINKHOLE_DNS};
+    let mut prepared = Vec::new();
+    for rule in selective_fail_open::NRPT_RULES {
+        if rule.guid.eq_ignore_ascii_case(CATCH_ALL_NRPT_GUID) {
+            bail!("selective NRPT guid collides with the catch-all");
+        }
+        let names = selective_fail_open::names_for_rule(rule)
+            .context("selective NRPT suffix was refused")?;
+        if names.iter().any(|name| !selective_fail_open::nrpt_name_is_safe(name)) {
+            bail!("selective NRPT name was refused");
+        }
+        prepared.push((rule.guid, names));
+    }
+    let _root = create_key(NRPT_ROOT)?;
+    drop(_root);
+    for (guid, names) in &prepared {
+        let key = format!(r"{NRPT_ROOT}\{guid}");
+        let _rule = create_key(&key)?;
+        drop(_rule);
+        let refs: Vec<&str> = names.iter().map(String::as_str).collect();
+        write_multi_sz(&key, "Name", &refs)?;
+        write_dword(&key, "Version", NRPT_VERSION)?;
+        write_dword(&key, "ConfigOptions", NRPT_CONFIG_DNS)?;
+        write_sz(&key, "GenericDNSServers", SINKHOLE_DNS)?;
+    }
+    Ok(())
+}
+
+/// Delete only the selective keys. An absent key is success. The catch-all
+/// key is not in this set.
+pub(super) fn remove_selective_nrpt() -> Result<()> {
+    use crate::core::selective_fail_open::{self, CATCH_ALL_NRPT_GUID};
+    for rule in selective_fail_open::NRPT_RULES {
+        if rule.guid.eq_ignore_ascii_case(CATCH_ALL_NRPT_GUID) {
+            bail!("selective NRPT guid collides with the catch-all");
+        }
+        delete_key(&format!(r"{NRPT_ROOT}\{}", rule.guid))?;
+    }
+    Ok(())
 }

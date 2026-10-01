@@ -365,9 +365,11 @@ static DNS_LAST_ERROR: Lazy<Mutex<Option<String>>> = Lazy::new(|| Mutex::new(Non
 // decision function, and every race in it resolves toward *publishing* — never toward silence.
 //
 // **The window cannot stick on.** It is opened by an RAII guard whose `Drop` is the only writer
-// that lowers the depth, so a panic, an early `?`, a timed-out `bounded_dns_call` or a dropped
-// (cancelled) future all close it. `SELF_WRITE_MAX_WINDOW` is the belt-and-braces half: past
-// that age an open window stops suppressing even if the depth were somehow leaked.
+// that lowers the depth, so a panic or an early `?` closes the guard that the async caller
+// holds. A timed-out `bounded_dns_call` or a dropped future does **not** finish the registry
+// write: `spawn_blocking` keeps running. That write holds its own guard until it returns, so
+// the notification it raises is still ours. `SELF_WRITE_MAX_WINDOW` is the belt-and-braces
+// half: past that age an open window stops suppressing even if a depth were leaked.
 //
 // **It is harmless if DNS writes never raise the notification at all** (the one link in the
 // audit that only a Windows machine can settle): with no notification there is nothing to
@@ -467,9 +469,12 @@ pub(crate) fn self_write_depth_for_tests() -> u32 {
 
 /// RAII marker for "this service is writing adapter DNS right now".
 ///
-/// Deliberately a guard and not a flag: the apply it wraps can fail, panic, time out inside
-/// `bounded_dns_call`, or have its future dropped, and every one of those must close the
-/// window. Nothing else in this module may set the state directly.
+/// Deliberately a guard and not a flag: the apply it wraps can fail or panic, and unwinding
+/// closes the window. Nothing else in this module may set the state directly.
+///
+/// The guard the async function holds dies when `bounded_dns_call` times out or the future is
+/// dropped. The registry write does not: it runs on a blocking thread. [`hold_self_write_across_the_write`]
+/// is that thread's guard, and it is the one that must stay up until the write returns.
 #[must_use = "the suppression window closes the moment the guard is dropped"]
 pub(crate) struct SelfWriteWindow(());
 
@@ -485,6 +490,17 @@ impl SelfWriteWindow {
         SELF_WRITE_DEPTH.fetch_add(1, Ordering::AcqRel);
         SelfWriteWindow(())
     }
+}
+
+/// Hold the self-write window for the whole registry write, including after the async
+/// caller has given up and dropped its own guard.
+#[cfg_attr(
+    not(any(test, all(windows, not(feature = "test")))),
+    allow(dead_code)
+)]
+fn hold_self_write_across_the_write<T>(work: impl FnOnce() -> T) -> T {
+    let _window = SelfWriteWindow::open();
+    work()
 }
 
 impl Drop for SelfWriteWindow {
@@ -720,11 +736,10 @@ fn unrecorded_adapters(
         .iter()
         .filter(|adapter| {
             existing.is_none_or(|snapshot| {
-                !snapshot.adapters.iter().any(|saved| {
-                    saved
-                        .interface_guid
-                        .eq_ignore_ascii_case(&adapter.interface_guid)
-                })
+                !snapshot
+                    .adapters
+                    .iter()
+                    .any(|saved| same_adapter_guid(&saved.interface_guid, &adapter.interface_guid))
             })
         })
         .cloned()
@@ -866,11 +881,11 @@ fn merge_snapshot(existing: Option<DnsSnapshot>, fresh: DnsSnapshot) -> DnsSnaps
         return fresh;
     };
     for adapter in fresh.adapters {
-        if !existing.adapters.iter().any(|saved| {
-            saved
-                .interface_guid
-                .eq_ignore_ascii_case(&adapter.interface_guid)
-        }) {
+        if !existing
+            .adapters
+            .iter()
+            .any(|saved| same_adapter_guid(&saved.interface_guid, &adapter.interface_guid))
+        {
             existing.adapters.push(adapter);
         }
     }
@@ -887,9 +902,9 @@ fn active_snapshot_adapters(
         .adapters
         .iter()
         .filter(|saved| {
-            current.iter().any(|adapter| {
-                adapter.interface_guid.eq_ignore_ascii_case(&saved.interface_guid)
-            })
+            current
+                .iter()
+                .any(|adapter| same_adapter_guid(&adapter.interface_guid, &saved.interface_guid))
         })
         .cloned()
         .collect()
@@ -1024,10 +1039,14 @@ fn needs_reconcile(
     protection_wanted && snapshot_present && (!enabled || unverified)
 }
 
+fn same_adapter_guid(a: &str, b: &str) -> bool {
+    a.eq_ignore_ascii_case(b)
+}
+
 /// Registry-only comparison of one adapter: the four saved values against the read-back
 /// (deliberately excluding the `live_apply_failed` bookkeeping flag).
 fn registry_values_match(saved: &AdapterDnsSnapshot, current: &AdapterDnsSnapshot) -> bool {
-    saved.interface_guid == current.interface_guid
+    same_adapter_guid(&saved.interface_guid, &current.interface_guid)
         && saved.ipv4_name_server == current.ipv4_name_server
         && saved.ipv4_profile_name_server == current.ipv4_profile_name_server
         && saved.ipv6_name_server == current.ipv6_name_server
@@ -1040,7 +1059,7 @@ fn registry_restore_matches(snapshot: &DnsSnapshot, current: &[AdapterDnsSnapsho
     snapshot.adapters.iter().all(|saved| {
         current
             .iter()
-            .find(|adapter| adapter.interface_guid == saved.interface_guid)
+            .find(|adapter| same_adapter_guid(&adapter.interface_guid, &saved.interface_guid))
             .is_none_or(|adapter| registry_values_match(saved, adapter))
     })
 }
@@ -1082,7 +1101,7 @@ fn restore_is_proven(
     snapshot.adapters.iter().all(|saved| {
         current
             .iter()
-            .find(|adapter| adapter.interface_guid == saved.interface_guid)
+            .find(|adapter| same_adapter_guid(&adapter.interface_guid, &saved.interface_guid))
             .is_none_or(|adapter| registry_values_match(saved, adapter))
     })
 }
@@ -1112,7 +1131,8 @@ fn adapters_owing_live_proof(
         .iter()
         .filter(|adapter| {
             !snapshot.adapters.iter().any(|saved| {
-                saved.interface_guid == adapter.interface_guid && saved_dns_was_loopback(saved)
+                same_adapter_guid(&saved.interface_guid, &adapter.interface_guid)
+                    && saved_dns_was_loopback(saved)
             })
         })
         .cloned()
@@ -1900,7 +1920,7 @@ async fn engine_apply_protected(adapters: &[AdapterDnsSnapshot]) -> Result<Vec<(
             .map(|adapter| adapter.interface_guid.clone())
             .collect::<Vec<_>>();
         return bounded_dns_call(DNS_APPLY_TIMEOUT, "apply protected DNS", move || {
-            engine::apply_protected_set(&guids)
+            hold_self_write_across_the_write(|| engine::apply_protected_set(&guids))
         })
         .await;
     }
@@ -1930,7 +1950,7 @@ async fn engine_apply_snapshot(snapshot: &DnsSnapshot) -> Result<Vec<(String, bo
     {
         let snapshot = snapshot.clone();
         return bounded_dns_call(DNS_APPLY_TIMEOUT, "restore snapshot", move || {
-            engine::apply_snapshot(&snapshot)
+            hold_self_write_across_the_write(|| engine::apply_snapshot(&snapshot))
         })
         .await;
     }
@@ -2175,7 +2195,7 @@ async fn engine_suppress_encrypted_dns() -> Result<()> {
         return bounded_dns_call(
             DNS_APPLY_TIMEOUT,
             "suppress encrypted DNS",
-            engine::suppress_encrypted_dns,
+            || hold_self_write_across_the_write(engine::suppress_encrypted_dns),
         )
         .await;
     }
@@ -2192,7 +2212,7 @@ async fn engine_restore_encrypted_dns() -> Result<bool> {
         return bounded_dns_call(
             DNS_APPLY_TIMEOUT,
             "restore encrypted DNS",
-            engine::restore_encrypted_dns,
+            || hold_self_write_across_the_write(engine::restore_encrypted_dns),
         )
         .await;
     }
@@ -3139,7 +3159,7 @@ fn run_on_detached_thread<T: Send + 'static>(
 /// The removal itself: Tono's key only, an absent key is success, and the result is read back.
 #[cfg(all(windows, not(feature = "test")))]
 fn sweep_tono_resolver_rule() -> Result<()> {
-    engine::remove_nrpt_rule()
+    hold_self_write_across_the_write(engine::remove_nrpt_rule)
 }
 
 /// The stub stands in for a registry call that never returns, or one that fails.
@@ -3176,10 +3196,20 @@ pub(crate) async fn status() -> DnsProtectionStatus {
 
 /// Transaction proof reads actual adapter state under the DNS writer lock.
 /// The diagnostic cache is deliberately not proof of update recovery.
+///
+/// A missing snapshot is healed only when the barrier is already down. Healing
+/// while it is wanted resets adapters to DHCP and, on the no-session path,
+/// removes the NRPT catch-all, while WFP is still denying physical DNS.
 #[cfg(windows)]
 pub(crate) async fn observe_for_update() -> Result<DnsProtectionStatus> {
+    let barrier_wanted = crate::core::windows_kill_switch::status().await.wanted;
+    observe_for_update_with(barrier_wanted).await
+}
+
+#[cfg(any(windows, test))]
+async fn observe_for_update_with(barrier_wanted: bool) -> Result<DnsProtectionStatus> {
     let _operation = DNS_OPERATION.lock().await;
-    if !snapshot_path().exists() {
+    if !snapshot_path().exists() && !barrier_wanted {
         ensure_snapshotless_dns_is_safe().await?;
     }
     status_unlocked().await
@@ -3463,6 +3493,16 @@ fn is_active_dns_adapter(oper_status: i32, if_type: u32, has_bound_ip: bool) -> 
 }
 
 // --- Windows engine: registry snapshot/set + native apply, legacy compatibility/restore ---
+
+#[cfg(all(windows, not(feature = "test")))]
+pub(crate) fn install_selective_nrpt() -> Result<()> {
+    engine::install_selective_nrpt()
+}
+
+#[cfg(all(windows, not(feature = "test")))]
+pub(crate) fn remove_selective_nrpt() -> Result<()> {
+    engine::remove_selective_nrpt()
+}
 
 #[cfg(all(windows, not(feature = "test")))]
 mod engine;
