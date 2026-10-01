@@ -25,6 +25,41 @@ export function formatPercent(ratio: number | null | undefined): string {
   return `${Math.round(ratio * 100)}${copy.unit.pct}`;
 }
 
+/**
+ * A success rate to one decimal. Whole per cents are right for a quota bar
+ * and wrong here: 99 % and 99.4 % are the same word and a very different day.
+ */
+export function formatRate(ratio: number | null | undefined): string {
+  if (ratio === null || ratio === undefined) return copy.missing;
+  return formatLoss(ratio * 100);
+}
+
+/** Minutes, switching to hours past three of them so 1 980 reads as 33 小时. */
+export function formatMinutes(minutes: number | null | undefined): string {
+  if (minutes === null || minutes === undefined) return copy.missing;
+  if (minutes < 180) return copy.quality.minutes(Math.round(minutes));
+  return copy.quality.hours(Math.round(minutes / 60));
+}
+
+/** A calendar day as month/day, for an axis tick where the year is noise. */
+export function formatDay(value: number | null | undefined): string {
+  if (value === null || value === undefined) return copy.missing;
+  const date = new Date(value * 1_000);
+  return `${date.getMonth() + 1}/${date.getDate()}`;
+}
+
+/** A load average to two places, the way `uptime` prints it. */
+export function formatLoadAverage(value: number | null | undefined): string {
+  if (value === null || value === undefined) return copy.missing;
+  return (Math.round(value * 100) / 100).toFixed(2);
+}
+
+/** A plain count with thousands separators, for attempts and sessions. */
+export function formatTally(value: number | null | undefined): string {
+  if (value === null || value === undefined) return copy.missing;
+  return String(Math.round(value)).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+}
+
 export function formatBytesMeasured(value: number | null | undefined): string {
   return formatBytes(value);
 }
@@ -80,6 +115,12 @@ export function formatDate(value: number | null | undefined): string {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
 }
 
+/** A UTC day bucket keeps its calendar date in every operator timezone. */
+export function formatUtcDate(value: number): string {
+  const date = new Date(value * 1_000);
+  return `${date.getUTCFullYear()}-${pad(date.getUTCMonth() + 1)}-${pad(date.getUTCDate())}`;
+}
+
 function pad(n: number): string {
   return n < 10 ? `0${n}` : String(n);
 }
@@ -96,4 +137,3 @@ export function splitPercent(ratio: number | null | undefined): { number: string
   if (ratio === null || ratio === undefined) return { number: copy.missing, unit: copy.unit.pct };
   return { number: (ratio * 100).toFixed(1), unit: copy.unit.pct };
 }
-

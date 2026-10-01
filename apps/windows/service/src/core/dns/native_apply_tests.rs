@@ -812,6 +812,75 @@ fn a_failed_policy_restore_keeps_the_capture_loss_for_the_retry() -> Result<()> 
     Ok(())
 }
 
+#[test]
+#[serial_test::serial]
+fn locked_restored_captures_do_not_refuse_release_or_replay_stale_settings() -> Result<()> {
+    use super::super::{
+        DNSCACHE_PARAMETERS, ENABLE_AUTO_DOH, DOH_FLAGS, INTERFACE_DOH_ROOT,
+        interface_doh_key, restore_encrypted_dns, suppress_encrypted_dns,
+        read_capture_file, read_interface_doh_capture, nrpt_rule_key, test_io::{self, Fixture},
+    };
+    use crate::core::dns as facade;
+    use std::os::windows::fs::OpenOptionsExt;
+    use windows_sys::Win32::Storage::FileSystem::{FILE_SHARE_READ, FILE_SHARE_WRITE};
+
+    let fixture = Fixture::new(Vec::new())?;
+    let doh_key = interface_doh_key("{A}", "Doh", "1.1.1.1");
+    let (snapshot, global, interface) = test_io::with(|io| {
+        io.keys.insert(nrpt_rule_key(), Default::default());
+        io.keys.insert(DNSCACHE_PARAMETERS.into(), [(ENABLE_AUTO_DOH.into(), "0".into())].into());
+        for key in [
+            format!(r"{INTERFACE_DOH_ROOT}\{{A}}"),
+            format!(r"{INTERFACE_DOH_ROOT}\{{A}}\DohInterfaceSettings\Doh"),
+        ] {
+            io.keys.insert(key, Default::default());
+        }
+        io.keys.insert(doh_key.clone(), [(DOH_FLAGS.into(), "0".into())].into());
+        (
+            io.snapshot_path.clone(),
+            io.capture_dir.join("protected-secure-dns.json"),
+            io.capture_dir.join("protected-interface-doh.json"),
+        )
+    }).unwrap();
+    std::fs::write(&snapshot, serde_json::to_vec(&fixture.originals)?)?;
+    std::fs::write(&global, facade::format_encrypted_dns_capture(Some(3)))?;
+    std::fs::write(&interface, facade::format_interface_doh_capture(&[facade::InterfaceDohEntry {
+        guid: "{A}".into(), family: "Doh".into(), server: "1.1.1.1".into(), flags: 2,
+    }]).map_err(anyhow::Error::msg)?)?;
+    // A normal sharing violation: capture reads remain possible, but deletion/rename fails.
+    let lock = |path: &std::path::Path| std::fs::OpenOptions::new()
+        .read(true).share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE).open(path);
+    let global_lock = lock(&global)?;
+    let interface_lock = lock(&interface)?;
+    assert!(!restore_encrypted_dns()?, "no originals were lost");
+    test_io::with(|io| {
+        assert!(!io.keys.contains_key(&nrpt_rule_key()), "the catch-all must be gone");
+        assert_eq!(io.read(DNSCACHE_PARAMETERS, ENABLE_AUTO_DOH).as_deref(), Some("3"));
+        assert_eq!(io.read(&doh_key, DOH_FLAGS).as_deref(), Some("2"));
+        // The user changes settings after the release while the capture remains locked.
+        io.keys.get_mut(DNSCACHE_PARAMETERS).unwrap().insert(ENABLE_AUTO_DOH.into(), "2".into());
+        io.keys.get_mut(&doh_key).unwrap().insert(DOH_FLAGS.into(), "1".into());
+    });
+    assert!(!restore_encrypted_dns()?);
+    test_io::with(|io| {
+        assert_eq!(io.read(DNSCACHE_PARAMETERS, ENABLE_AUTO_DOH).as_deref(), Some("2"));
+        assert_eq!(io.read(&doh_key, DOH_FLAGS).as_deref(), Some("1"));
+        io.apply_resolver_policy = true;
+    });
+    drop(global_lock);
+    drop(interface_lock);
+    suppress_encrypted_dns()?;
+    assert_eq!(read_capture_file()?, Some(Some(2)));
+    assert_eq!(read_interface_doh_capture()?.unwrap()[0].flags, 1);
+    assert!(!restore_encrypted_dns()?);
+    assert!(!global.exists() && !interface.exists());
+    test_io::with(|io| {
+        assert_eq!(io.read(DNSCACHE_PARAMETERS, ENABLE_AUTO_DOH).as_deref(), Some("2"));
+        assert_eq!(io.read(&doh_key, DOH_FLAGS).as_deref(), Some("1"));
+    });
+    Ok(())
+}
+
 /// #305 review (codex:F1): a normal Disconnect runs two restores — the release handler's, then
 /// the disarm gate's snapshot-less one. The second used to find the evidence already consumed,
 /// clear `last_error` and publish a clean result over the loss the first one had reported.
@@ -907,6 +976,52 @@ fn an_unwritable_lost_record_keeps_the_unreadable_capture_in_place() -> Result<(
         b"",
         "the unreadable capture must stay in place as the evidence"
     );
+    Ok(())
+}
+
+#[test]
+#[serial_test::serial]
+fn a_new_doh_template_is_captured_before_an_existing_session_suppresses_it() -> Result<()> {
+    use super::super::{
+        DOH_FLAGS, INTERFACE_DOH_ROOT, interface_doh_key, read_interface_doh_capture,
+        restore_interface_doh, suppress_interface_doh, test_io::{self, Fixture},
+    };
+    use crate::core::dns as facade;
+
+    let fixture = Fixture::new(Vec::new())?;
+    let a_key = interface_doh_key("{A}", "Doh", "1.1.1.1");
+    let b_key = interface_doh_key("{B}", "Doh6", "2001:db8::53");
+    let capture = test_io::with(|io| {
+        for (guid, family) in [("{A}", "Doh"), ("{B}", "Doh6")] {
+            io.keys.insert(format!(r"{INTERFACE_DOH_ROOT}\{guid}"), Default::default());
+            io.keys.insert(format!(r"{INTERFACE_DOH_ROOT}\{guid}\DohInterfaceSettings\{family}"), Default::default());
+        }
+        // A already belongs to the session; B just appeared with encrypted-only DNS.
+        io.keys.insert(a_key.clone(), [(DOH_FLAGS.into(), "0".into())].into());
+        io.keys.insert(b_key.clone(), [(DOH_FLAGS.into(), "2".into())].into());
+        io.capture_dir.join("protected-interface-doh.json")
+    }).unwrap();
+    std::fs::write(facade::snapshot_path(), serde_json::to_vec(&fixture.originals)?)?;
+    std::fs::write(&capture, facade::format_interface_doh_capture(&[facade::InterfaceDohEntry {
+        guid: "{A}".into(), family: "Doh".into(), server: "1.1.1.1".into(), flags: 1,
+    }]).map_err(anyhow::Error::msg)?)?;
+
+    suppress_interface_doh()?;
+    let saved = read_interface_doh_capture()?.unwrap();
+    assert_eq!(saved.len(), 2, "B's originals must be durable before its flags are cleared");
+    assert_eq!(saved[0].flags, 1, "A's original must survive reconciliation");
+    assert_eq!(saved[1].flags, 2);
+    test_io::with(|io| {
+        assert_eq!(io.read(&b_key, DOH_FLAGS).as_deref(), Some("0"));
+        let at_mutation = io.before_doh_write[0].as_ref().unwrap();
+        assert_eq!(at_mutation.len(), 2, "capture precedes the first DoH mutation");
+        assert_eq!(at_mutation[1].flags, 2);
+    });
+    assert!(!restore_interface_doh()?);
+    test_io::with(|io| {
+        assert_eq!(io.read(&a_key, DOH_FLAGS).as_deref(), Some("1"));
+        assert_eq!(io.read(&b_key, DOH_FLAGS).as_deref(), Some("2"));
+    });
     Ok(())
 }
 

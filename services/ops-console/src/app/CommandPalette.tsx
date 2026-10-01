@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { defaultFilter } from 'cmdk';
 import {
   CommandDialog,
   CommandEmpty,
@@ -16,6 +17,11 @@ import { usePrivacy } from '@/lib/privacy';
 import { can, currentRole, PAGE_REQUIRES } from '@/lib/roles';
 
 const PAGE_IDS = Object.keys(copy.pages) as PageId[];
+
+// Identifiers select a row; only its displayed address/known handle are searchable.
+const filter = (value: string, search: string, keywords?: string[]) => (
+  defaultFilter(keywords?.length ? keywords.join(' ') : value, search)
+);
 
 /**
  * Four things to type at: a page, an open incident, a customer, a machine.
@@ -51,7 +57,7 @@ export function CommandPalette({
   }, []);
 
   return (
-    <CommandDialog open={open} onOpenChange={setOpen} title={copy.searchPrompt} description={copy.searchPrompt}>
+    <CommandDialog filter={filter} open={open} onOpenChange={setOpen} title={copy.searchPrompt} description={copy.searchPrompt}>
       <CommandInput placeholder={copy.searchPrompt} />
       <CommandList>
         <CommandEmpty>{copy.commandEmpty}</CommandEmpty>
@@ -91,11 +97,12 @@ export function CommandPalette({
         <CommandGroup heading={copy.commandCustomers}>
           {customers.map((customer) => (
             <CommandItem
-              key={customer.userId}
-              value={[
+              key={JSON.stringify([customer.userId, privacy.privacy, customer.email, customer.wechatId])}
+              value={`customer:${customer.userId}`}
+              keywords={[
                 privacy.privacy ? privacy.email(customer.email) : customer.email,
                 customer.wechatId ?? '',
-              ].join(' ')}
+              ]}
               onSelect={() => {
                 openCustomer(customer.userId);
                 setOpen(false);
@@ -115,11 +122,12 @@ export function CommandPalette({
         <CommandGroup heading={copy.commandInvites}>
           {invitesOf(funnel).map((row) => (
             <CommandItem
-              key={row.key}
-              value={[
+              key={JSON.stringify([row.key, privacy.privacy, row.email, row.wechatId])}
+              value={`invite:${row.key}`}
+              keywords={[
                 privacy.privacy ? privacy.email(row.email) : row.email,
                 row.wechatId ?? '',
-              ].join(' ')}
+              ]}
               onSelect={() => {
                 openInvite(row.email);
                 setOpen(false);

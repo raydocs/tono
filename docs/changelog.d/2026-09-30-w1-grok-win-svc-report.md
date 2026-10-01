@@ -8,3 +8,4 @@
 - 候选/发布：仅文档，无新候选。
 - 剩余限制：见 `docs/agent-reports/W1-grok-win-svc.md`。
 - 续记（2026-09-30）：对照复查后补上 WIN-UPD-OBSERVE-HEAL（[#844](https://github.com/raydocs/tono/pull/844)）以及未修的 #846、#847、#849、#850、#851。报告基线仍从 `c26025ec` 写起，后续对照的是 `50bbbbf0`。
+- 续记（2026-10-01）：修复轮结果写回同一份报告。来源 main `71bd69d8`。#849 已由 [#868](https://github.com/raydocs/tono/pull/868) 合入。#847 已由 [#858](https://github.com/raydocs/tono/pull/858)（`b17ddc32`）合入；[#887](https://github.com/raydocs/tono/pull/887) 是重复实现，自动合并已关。#850 在 [#902](https://github.com/raydocs/tono/pull/902)（`506ce4fa`），#851 在 [#911](https://github.com/raydocs/tono/pull/911)（`4b6c6cca`），两份自动合并开着。#846 仍由 [#866](https://github.com/raydocs/tono/pull/866) 处理。认领评论 403，没有写上。仅文档，无新候选。Linux 上的 Cargo 结果见报告；未实机，未部署，未做 jev-route。

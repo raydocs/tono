@@ -153,18 +153,37 @@ where
 /// Returns `None` when the work has not answered in time; the caller decides what that means
 /// (for server verification it means *refuse*, never *accept*). The thread is deliberately not
 /// joined: a Service Control Manager RPC parked in the kernel cannot be cancelled, and joining
-/// it would reintroduce exactly the unbounded wait this exists to bound. The leak is bounded by
-/// the caller — connect attempts are capped, and nothing retries a verification on its own.
+/// it would reintroduce exactly the unbounded wait this exists to bound. Keep a worker permit
+/// until the OS call actually finishes: per-request retries do not bound surviving threads
+/// across the application's recurring status polls. A full budget remains an unproven answer.
 #[cfg(any(all(windows, not(feature = "test")), test))]
 pub(crate) fn run_with_deadline<T, F>(deadline: Duration, work: F) -> Option<T>
 where
     F: FnOnce() -> T + Send + 'static,
     T: Send + 'static,
 {
+    // Match the transport's eight concurrent blocking connects, including abandoned OS work.
+    static SLOTS: Lazy<Arc<tokio::sync::Semaphore>> =
+        Lazy::new(|| Arc::new(tokio::sync::Semaphore::new(8)));
+    run_with_deadline_in_slots(deadline, &SLOTS, work)
+}
+
+#[cfg(any(all(windows, not(feature = "test")), test))]
+fn run_with_deadline_in_slots<T, F>(
+    deadline: Duration,
+    slots: &Arc<tokio::sync::Semaphore>,
+    work: F,
+) -> Option<T>
+where
+    F: FnOnce() -> T + Send + 'static,
+    T: Send + 'static,
+{
+    let slot = Arc::clone(slots).try_acquire_owned().ok()?;
     let (sender, receiver) = std::sync::mpsc::sync_channel(1);
     std::thread::Builder::new()
         .name("tono-service-ipc-verify".to_string())
         .spawn(move || {
+            let _slot = slot;
             // A closed channel means the caller already gave up; dropping the answer is right.
             let _ = sender.send(work());
         })
@@ -219,7 +238,8 @@ pub async fn update_transaction(
 ) -> Result<Response<crate::update_wire::UpdateStatus>> {
     let seconds = match request {
         crate::update_wire::UpdateRequest::Prepare { .. } => 240,
-        crate::update_wire::UpdateRequest::Disconnect => 65,
+        crate::update_wire::UpdateRequest::Disconnect
+            | crate::update_wire::UpdateRequest::DisconnectApplyingNarrow => 65,
         _ => 20,
     };
     protected_call(Verb::Post, IpcCommand::UpdateTransaction, credentials, None,
@@ -1101,6 +1121,37 @@ mod retry_safety_tests {
             started.elapsed() < Duration::from_secs(2),
             "the deadline did not bound the wait: {:?}",
             started.elapsed()
+        );
+    }
+
+    #[tokio::test]
+    async fn timed_out_os_work_retains_its_slot_until_the_thread_finishes() {
+        let slots = Arc::new(tokio::sync::Semaphore::new(1));
+        let (release, gate) = std::sync::mpsc::channel();
+        let first = super::run_with_deadline_in_slots(Duration::from_millis(10), &slots, move || {
+            gate.recv().unwrap();
+            7_u32
+        });
+        let started = Arc::new(AtomicBool::new(false));
+        let second_started = Arc::clone(&started);
+        let second = super::run_with_deadline_in_slots(Duration::from_secs(1), &slots, move || {
+            second_started.store(true, Ordering::SeqCst);
+            9_u32
+        });
+        // Always release the injected stall before checking assertions.
+        release.send(()).unwrap();
+        let returned = tokio::time::timeout(Duration::from_secs(2), Arc::clone(&slots).acquire_owned())
+            .await
+            .expect("completed OS work must return its capacity")
+            .unwrap();
+        drop(returned);
+        assert_eq!(first, None, "the stalled query must time out");
+        assert_eq!(second, None, "a timed-out query still owns its OS thread");
+        assert!(!started.load(Ordering::SeqCst), "capacity refusal must not start work");
+        assert_eq!(
+            super::run_with_deadline_in_slots(Duration::from_secs(1), &slots, || 11_u32),
+            Some(11),
+            "real completion must admit the next query"
         );
     }
 }

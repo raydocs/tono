@@ -10,7 +10,7 @@ use std::{
     time::Duration,
 };
 use sysproxy::{Autoproxy, GuardMonitor, GuardType, Sysproxy};
-use tokio::sync::Mutex as TokioMutex;
+use tokio::sync::{Mutex as TokioMutex, Notify};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[allow(dead_code)]
@@ -34,6 +34,7 @@ pub(crate) struct Sysopt {
     update_lock: TokioMutex<()>,
     guard_operation_lock: TokioMutex<()>,
     reset_sysproxy: AtomicBool,
+    reset_finished: Notify,
     inner_proxy: Arc<RwLock<(Sysproxy, Autoproxy)>>,
     guard: Arc<RwLock<GuardMonitor>>,
 }
@@ -44,6 +45,7 @@ impl Default for Sysopt {
             update_lock: TokioMutex::new(()),
             guard_operation_lock: TokioMutex::new(()),
             reset_sysproxy: AtomicBool::new(false),
+            reset_finished: Notify::new(),
             inner_proxy: Arc::new(RwLock::new((Sysproxy::default(), Autoproxy::default()))),
             guard: Arc::new(RwLock::new(GuardMonitor::new(GuardType::None, Duration::from_secs(30)))),
         }
@@ -105,16 +107,16 @@ impl Sysopt {
     }
 
     async fn reset_locked(&self, only_owned: bool) -> Result<()> {
-        if self
-            .reset_sysproxy
-            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
-            .is_err()
-        {
-            return Ok(());
-        }
-        defer! {
-            self.reset_sysproxy.store(false, Ordering::SeqCst);
-        }
+        // A second clear used to return Ok while the first was still writing, or
+        // about to fail. Callers treat Ok as "the proxy is off" (update staging,
+        // owner-loss retries, controlled stop). Wait, then run this clear itself.
+        join_exclusive(&self.reset_sysproxy, &self.reset_finished, || async {
+            self.reset_after_admission(only_owned).await
+        })
+        .await
+    }
+
+    async fn reset_after_admission(&self, only_owned: bool) -> Result<()> {
         let _lock = self.update_lock.lock().await;
         let _guard_operation = self.guard_operation_lock.lock().await;
         self.stop_proxy_guard_locked().await;
@@ -139,6 +141,38 @@ impl Sysopt {
         .await??;
 
         Ok(())
+    }
+}
+
+/// Run `body` only while `flag` is held. A caller that arrives during another
+/// run waits for it to finish, then runs `body` itself. Returning the leader's
+/// success early is wrong: the leader can still fail, and the waiter has
+/// already told its caller the clear completed.
+async fn join_exclusive<T, F, Fut>(flag: &AtomicBool, done: &Notify, body: F) -> T
+where
+    F: FnOnce() -> Fut,
+    Fut: std::future::Future<Output = T>,
+{
+    loop {
+        if flag
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .is_ok()
+        {
+            defer! {
+                flag.store(false, Ordering::SeqCst);
+                done.notify_waiters();
+            }
+            return body().await;
+        }
+        let notified = done.notified();
+        tokio::pin!(notified);
+        // Register before re-reading the flag. `notify_waiters` leaves no permit,
+        // so a finish between the failed claim and this wait would otherwise stick.
+        notified.as_mut().enable();
+        if !flag.load(Ordering::SeqCst) {
+            continue;
+        }
+        notified.await;
     }
 }
 
@@ -212,7 +246,12 @@ async fn current_proxy_is_tono_owned() -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{ProxyApplyStep, ProxyReading, proxy_apply_steps, tono_owns_proxy};
+    use super::{ProxyApplyStep, ProxyReading, join_exclusive, proxy_apply_steps, tono_owns_proxy};
+    use std::sync::{
+        Arc,
+        atomic::{AtomicBool, AtomicUsize, Ordering},
+    };
+    use tokio::sync::{Barrier, Notify};
 
     #[test]
     fn pure_sysproxy_mode_clears_pac_before_enabling_global_proxy() {
@@ -277,5 +316,56 @@ mod tests {
             17970,
             Some(33331)
         ));
+    }
+
+    #[tokio::test]
+    async fn a_second_clear_waits_for_the_first_and_then_runs() {
+        let flag = Arc::new(AtomicBool::new(false));
+        let done = Arc::new(Notify::new());
+        let started = Arc::new(Barrier::new(2));
+        let release = Arc::new(Barrier::new(2));
+        let runs = Arc::new(AtomicUsize::new(0));
+
+        let leader = {
+            let flag = Arc::clone(&flag);
+            let done = Arc::clone(&done);
+            let started = Arc::clone(&started);
+            let release = Arc::clone(&release);
+            let runs = Arc::clone(&runs);
+            tokio::spawn(async move {
+                join_exclusive(&flag, &done, || async move {
+                    runs.fetch_add(1, Ordering::SeqCst);
+                    started.wait().await;
+                    release.wait().await;
+                    Err::<(), &str>("clear failed")
+                })
+                .await
+            })
+        };
+        started.wait().await;
+
+        let follower = {
+            let flag = Arc::clone(&flag);
+            let done = Arc::clone(&done);
+            let runs = Arc::clone(&runs);
+            tokio::spawn(async move {
+                join_exclusive(&flag, &done, || async move {
+                    runs.fetch_add(1, Ordering::SeqCst);
+                    Ok::<(), &str>(())
+                })
+                .await
+            })
+        };
+        tokio::task::yield_now().await;
+        assert!(
+            !follower.is_finished(),
+            "the second clear must not succeed while the first is still running"
+        );
+
+        release.wait().await;
+        assert_eq!(leader.await.expect("leader task"), Err("clear failed"));
+        assert_eq!(follower.await.expect("follower task"), Ok(()));
+        assert_eq!(runs.load(Ordering::SeqCst), 2, "the waiter retries instead of inheriting Ok");
+        assert!(!flag.load(Ordering::SeqCst));
     }
 }
