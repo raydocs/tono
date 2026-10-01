@@ -63,7 +63,7 @@ extension AppState {
         // journal is treated as its proof.
     }
 
-    func disconnectPendingNativeUpdate() {
+    func disconnectPendingNativeUpdate(preserveAIHold: Bool = false) {
         guard nativeUpdateDisconnectTask == nil else { return }
         nativeUpdatePending = true
         RuntimeCleanup.nativeUpdateBlocksConnect = true
@@ -75,7 +75,8 @@ extension AppState {
             isProtectionBlocked = false
             isProtectionUnconfirmed = true
             do {
-                let result = try await nativeUpdateDisconnect()
+                let result = try await (preserveAIHold
+                    ? nativeUpdateReleaseAfterFailure() : nativeUpdateDisconnect())
                 guard !Task.isCancelled,
                       connectionCoordinator.protectionOperationGeneration == generation else { return }
                 guard result.disconnectVerified == true else { throw NativeUpdateDownload.failure("Update Disconnect was not verified.") }

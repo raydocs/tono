@@ -107,6 +107,9 @@ final class AppState {
     var nativeUpdateDisconnect: () async throws -> HelperManager.UpdateStatus = {
         try await PrivilegedRuntimeCoordinator.shared.nativeUpdate("disconnect")
     }
+    var nativeUpdateReleaseAfterFailure: () async throws -> HelperManager.UpdateStatus = {
+        try await PrivilegedRuntimeCoordinator.shared.nativeUpdate("release")
+    }
     var isProtectedReconnectScheduled = false
     var protectedReconnectAttempt = 0
     var protectedReconnectNextAttemptAt: Date?

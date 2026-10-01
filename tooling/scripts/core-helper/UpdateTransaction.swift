@@ -16,6 +16,9 @@ final class UpdateTransaction {
         var recovery: (Bool) throws -> UpdateContractV1.Protection
         var disconnect: () throws -> Void
         var launchExecutor: (UpdateStorage.Attempt) throws -> Void
+        var disconnectPreservingAIHold: () throws -> Void = {
+            throw HelperFailure.invalid("Automatic update release is unavailable.")
+        }
         var cleanupCommitted: () throws -> Void = {}
         /// Whether a bound successor's audit token still resolves to a live
         /// process. Re-adoption is allowed only when this is false (or the
@@ -54,6 +57,7 @@ final class UpdateTransaction {
             recovery: runtime.verifyRecovery,
             disconnect: runtime.disconnect,
             launchExecutor: { try UpdateExecutor.launch(storage: storage, attempt: $0) },
+            disconnectPreservingAIHold: runtime.disconnectPreservingAIHold,
             cleanupCommitted: UpdateExecutor.retire
         ))
     }
@@ -304,18 +308,22 @@ final class UpdateTransaction {
         try block(.cancelled, ledger: ledger)
     }
 
-    func disconnect(peer: TonoAuthenticatedPeer) throws {
+    func disconnect(peer: TonoAuthenticatedPeer, preserveAIHold: Bool = false) throws {
         var ledger = try storage.load()
         guard var attempt = ledger.attempt, attempt.receipt.phase != .committed else {
             throw HelperFailure.invalid("No pending update owns Disconnect.")
         }
-        // Expiry/blocked status does not deny a real owner's explicit release.
+        // Expiry/blocked status does not deny a real owner's cleanup release.
         try effects.authenticate(peer)
         guard attempt.receipt.owner == Self.owner(peer) else { throw HelperFailure.invalid("Update Disconnect owner differs.") }
         attempt.disconnectRequested = true
         ledger.attempt = attempt
         try persist(ledger)
-        try effects.disconnect()
+        if preserveAIHold {
+            try effects.disconnectPreservingAIHold()
+        } else {
+            try effects.disconnect()
+        }
         attempt.disconnectVerified = true
         ledger.attempt = attempt
         try persist(ledger)

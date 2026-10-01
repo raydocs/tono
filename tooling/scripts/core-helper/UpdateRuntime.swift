@@ -78,6 +78,14 @@ final class UpdateRuntime {
     }
 
     func disconnect() throws {
+        try disconnect(preserveAIHold: false)
+    }
+
+    func disconnectPreservingAIHold() throws {
+        try disconnect(preserveAIHold: true)
+    }
+
+    private func disconnect(preserveAIHold: Bool) throws {
         let wanted = (firewall.status()["wantArmed"] as? Bool) == true
         do {
             _ = try prepare(wanted ? .protectedOffline : .unprotected)
@@ -92,7 +100,7 @@ final class UpdateRuntime {
             try? core.stop()
             try? dns.restore(deferringLossNotice: true)
         }
-        _ = try power.whileAwake { try firewall.disarm() }
+        _ = try power.whileAwake { try firewall.disarm(preserveAIHold: preserveAIHold) }
         if (try? observe()) != .unprotected {
             FileHandle.standardError.write(Data(
                 "tono: update disconnect released PF; observe is not unprotected\n".utf8
