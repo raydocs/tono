@@ -136,7 +136,7 @@ export function App() {
         )
           : page === 'customers' ? (
             route.customerId
-              ? <CustomerDetailPage userId={route.customerId} />
+              ? <CustomerDetailPage key={route.customerId} userId={route.customerId} />
               : (
                 <CustomersPage
                   key={`${route.platform ?? ''}/${route.bucket ?? ''}`}
