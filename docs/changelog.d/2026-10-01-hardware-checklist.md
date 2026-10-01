@@ -6,4 +6,4 @@
 - Engineering/tests: none; nothing was run on a device.
 - Verification: every `needs-hardware` PR number is now referenced in the file (`gh pr list --label needs-hardware --state all` against the file). Items were derived from the PR bodies; none was executed.
 - Candidate/publication: none; the sing-box items need a package that carries `sing-box.exe`, which is not built yet.
-- Limits: expected results quote the PR bodies. Whether the macOS App-side selective AI hook is now registered is not verified; M18 and the known-gap note ask the tester to record it. #1197 (kernel swap in Protected Offline) and #1204 (DIRECT outbound rule bound) remain open and are named in W23 and W28.
+- Limits: no unsigned Windows candidate can be built from main until #1215 (tauri updater plugin version mismatch) is fixed. Expected results quote the PR bodies. Whether the macOS App-side selective AI hook is now registered is not verified; M18 and the known-gap note ask the tester to record it. #1197 (kernel swap in Protected Offline) and #1204 (DIRECT outbound rule bound) remain open and are named in W23 and W28.
