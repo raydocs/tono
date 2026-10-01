@@ -224,6 +224,8 @@ pub struct TonoInner {
     /// Startup credential hydration completed (load task ran, whatever the
     /// outcome). Restore/sign-in wait for it before deciding anything.
     pub credentials_loaded: bool,
+    /// Enrollment may use this ID only after its vault read or first-run write succeeds.
+    pub installation_id_ready: bool,
     /// Vault read failure recorded by the load task (M1: drives the
     /// `error` account state instead of a mistaken signed-out).
     pub credential_error: Option<String>,
@@ -626,7 +628,10 @@ impl TonoState {
     pub(crate) fn for_test_in(catalog_dir: PathBuf) -> Self {
         let (sender, _receiver) = tokio::sync::mpsc::channel(1);
         let audit = crate::tono::audit::Audit::for_test(sender, &catalog_dir, false);
-        Self::with_catalog_dir(catalog_dir, audit, Arc::new(SessionCredentialStore::for_test())).unwrap()
+        let mut state = Self::with_catalog_dir(catalog_dir, audit, Arc::new(SessionCredentialStore::for_test())).unwrap();
+        // The memory-only fixture owns its identity without an OS vault.
+        state.inner.get_mut().installation_id_ready = true;
+        state
     }
 
     fn with_catalog_dir(
@@ -652,6 +657,7 @@ impl TonoState {
                 client,
                 credentials,
                 credentials_loaded: false,
+                installation_id_ready: false,
                 credential_error: None,
                 account_state: AccountState::SignedOut,
                 account_close: None,
