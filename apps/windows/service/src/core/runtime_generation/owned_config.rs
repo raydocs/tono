@@ -52,6 +52,8 @@ const DNS_KEYS: &[&str] = &[
     "respect-rules",
     "use-hosts",
     "nameserver",
+    "fallback",
+    "fallback-lazy-query",
     "proxy-server-nameserver",
 ];
 const TUN_KEYS: &[&str] = &[
@@ -134,6 +136,7 @@ pub(crate) fn ensure_owned_runtime_config_is_safe(yaml: &str) -> Result<(), Stri
     require(dns, "listen", |v| {
         v.as_str().is_some_and(|l| l.starts_with(LOOPBACK_PREFIX))
     })?;
+    ensure_dns_fallback_stays_on_exit_doh(dns)?;
 
     let tun = mapping(root, "tun")?;
     only_keys(tun, TUN_KEYS, "tun")?;
@@ -227,6 +230,32 @@ fn exit_server_addresses(root: &Mapping) -> Result<Vec<Ipv4Addr>, String> {
         }
     }
     Ok(servers)
+}
+
+/// A backup resolver is allowed only as exit-pinned DoH, and only in lazy
+/// mode. Plaintext, or a racing fallback, would resolve beside the tunnel.
+fn ensure_dns_fallback_stays_on_exit_doh(dns: &Mapping) -> Result<(), String> {
+    if let Some(fallback) = dns.get("fallback") {
+        let entries = fallback
+            .as_sequence()
+            .ok_or("`fallback` is not a list")?;
+        for entry in entries {
+            let text = entry
+                .as_str()
+                .ok_or("`fallback` entries must be strings")?;
+            if !text.starts_with("https://") || !text.ends_with("#Tono-Exit") {
+                return Err(format!(
+                    "`fallback` entry `{text}` is not an exit DoH server"
+                ));
+            }
+        }
+    }
+    if let Some(lazy) = dns.get("fallback-lazy-query")
+        && lazy.as_bool() != Some(true)
+    {
+        return Err("`fallback-lazy-query` must stay enabled".into());
+    }
+    Ok(())
 }
 
 fn only_keys(mapping: &Mapping, allowed: &[&str], section: &str) -> Result<(), String> {
@@ -391,6 +420,25 @@ rules:
                 "accepted `{to}`"
             );
         }
+    }
+
+    #[test]
+    fn the_service_refuses_a_plaintext_dns_fallback() {
+        let lazy = OWNED.replacen(
+            "  nameserver:\n  - https://1.1.1.1/dns-query#Tono-Exit\n",
+            "  nameserver:\n  - https://1.1.1.1/dns-query#Tono-Exit\n  fallback:\n  - https://8.8.8.8/dns-query#Tono-Exit\n  fallback-lazy-query: true\n",
+            1,
+        );
+        assert_ne!(lazy, OWNED);
+        assert_eq!(ensure_owned_runtime_config_is_safe(&lazy), Ok(()));
+        let plaintext = lazy.replacen(
+            "  - https://8.8.8.8/dns-query#Tono-Exit\n",
+            "  - 8.8.8.8\n",
+            1,
+        );
+        assert!(ensure_owned_runtime_config_is_safe(&plaintext).is_err());
+        let racing = lazy.replacen("fallback-lazy-query: true", "fallback-lazy-query: false", 1);
+        assert!(ensure_owned_runtime_config_is_safe(&racing).is_err());
     }
 
     #[test]

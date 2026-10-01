@@ -334,11 +334,12 @@ pub const CLAUDE_HOME_DOMAINS: [&str; 84] = [
 /// stay on `Tono-Exit`. `no-resolve` keeps the match on the packet address.
 pub const CLAUDE_HOME_IPV4_CIDRS: [&str; 1] = ["160.79.104.0/21"];
 /// DoH resolvers pinned through the exit group; the `#Tono-Exit` fragment
-/// routes the lookups through the tunnel.
-pub const DOH_NAMESERVERS: [&str; 2] = [
-    "https://1.1.1.1/dns-query#Tono-Exit",
-    "https://8.8.8.8/dns-query#Tono-Exit",
-];
+/// routes the lookups through the tunnel. Mihomo races every `nameserver`
+/// in parallel. The backup stays on `fallback` and is queried only when
+/// `fallback-lazy-query` is set and the primary answer is not usable.
+pub const DOH_PRIMARY_NAMESERVER: &str = "https://1.1.1.1/dns-query#Tono-Exit";
+pub const DOH_BACKUP_NAMESERVER: &str = "https://8.8.8.8/dns-query#Tono-Exit";
+pub const DOH_NAMESERVERS: [&str; 2] = [DOH_PRIMARY_NAMESERVER, DOH_BACKUP_NAMESERVER];
 /// The only rules the runtime ever carries (§5).
 pub const RULES: [&str; 3] = [
     "IP-CIDR,127.0.0.0/8,DIRECT,no-resolve",
@@ -978,11 +979,17 @@ fn runtime_value(
     put(&mut dns, "cache-algorithm", string("lru"));
     put(&mut dns, "respect-rules", Value::Bool(true));
     put(&mut dns, "use-hosts", Value::Bool(true));
-    put(&mut dns, "nameserver", strings(&DOH_NAMESERVERS));
+    // One primary. A second URL on this list is a second Reality handshake
+    // on every lookup. The backup is https through the same exit, and
+    // mihomo asks it only after the primary answer is empty or an error.
+    // Exits are IPv4, and the proxy resolver has no fallback of its own.
+    put(&mut dns, "nameserver", strings(&[DOH_PRIMARY_NAMESERVER]));
+    put(&mut dns, "fallback", strings(&[DOH_BACKUP_NAMESERVER]));
+    put(&mut dns, "fallback-lazy-query", Value::Bool(true));
     put(
         &mut dns,
         "proxy-server-nameserver",
-        strings(&DOH_NAMESERVERS),
+        strings(&[DOH_PRIMARY_NAMESERVER]),
     );
     put(&mut root, "dns", Value::Mapping(dns));
 
@@ -1445,19 +1452,25 @@ reality-opts:
         );
         assert_eq!(get(&value, &["dns", "respect-rules"]).as_bool(), Some(true));
         assert_eq!(get(&value, &["dns", "use-hosts"]).as_bool(), Some(true));
-        let expected: Vec<Value> = DOH_NAMESERVERS
-            .iter()
-            .map(|server| string(server))
-            .collect();
+        let primary = vec![string(DOH_PRIMARY_NAMESERVER)];
+        let backup = vec![string(DOH_BACKUP_NAMESERVER)];
         assert_eq!(
             get(&value, &["dns", "nameserver"]).as_sequence().unwrap(),
-            &expected
+            &primary
+        );
+        assert_eq!(
+            get(&value, &["dns", "fallback"]).as_sequence().unwrap(),
+            &backup
+        );
+        assert_eq!(
+            get(&value, &["dns", "fallback-lazy-query"]).as_bool(),
+            Some(true)
         );
         assert_eq!(
             get(&value, &["dns", "proxy-server-nameserver"])
                 .as_sequence()
                 .unwrap(),
-            &expected
+            &primary
         );
     }
 
