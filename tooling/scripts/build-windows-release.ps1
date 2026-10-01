@@ -66,6 +66,18 @@ $env:TONO_CORE_SHA256 = $coreSha256
 New-Item -ItemType Directory -Force $resourceRoot | Out-Null
 Set-Content -LiteralPath (Join-Path $resourceRoot 'core-sha256.txt') -Value $coreSha256 -Encoding ascii
 
+$singBoxPath = Join-Path $appRoot 'src-tauri/sidecar/sing-box-x86_64-pc-windows-msvc.exe'
+if (-not (Test-Path -LiteralPath $singBoxPath -PathType Leaf)) {
+    throw "Pinned sing-box sidecar is missing: $singBoxPath"
+}
+$singBoxSha256 = (Get-FileHash -LiteralPath $singBoxPath -Algorithm SHA256).Hash.ToLowerInvariant()
+$expectedSingBox = 'b2e6902ee75d9c4af79df28a61ded67afc4283fc83a44dee8896f3737a4ed027'
+if ($singBoxSha256 -ne $expectedSingBox) {
+    throw "sing-box sidecar $singBoxSha256 is not the pinned alpha.9 digest $expectedSingBox"
+}
+$env:TONO_SING_BOX_SHA256 = $singBoxSha256
+Set-Content -LiteralPath (Join-Path $resourceRoot 'sing-box-sha256.txt') -Value $singBoxSha256 -Encoding ascii
+
 $serviceBins = @('tono-service', 'tono-service-install', 'tono-service-uninstall')
 $cargoArguments = @(
     'build',
@@ -95,6 +107,9 @@ foreach ($pinnedBinary in @($servicePath, (Join-Path $resourceRoot 'tono-service
     $binaryAscii = [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($pinnedBinary))
     if (-not $binaryAscii.Contains($coreSha256)) {
         throw "The built $(Split-Path -Leaf $pinnedBinary) does not contain the injected Mihomo SHA-256 pin."
+    }
+    if (-not $binaryAscii.Contains($singBoxSha256)) {
+        throw "The built $(Split-Path -Leaf $pinnedBinary) does not contain the pinned sing-box SHA-256."
     }
 }
 

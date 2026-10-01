@@ -1,7 +1,7 @@
 //! Independent SYSTEM executor copied before quiescence. It never trusts an
 //! App journal, an installer-supplied path, or version-string adoption.
 use super::*;
-use anyhow::ensure;
+use anyhow::{bail, ensure};
 use tono_service_protocol::update_contract::{Components, Phase};
 use tono_service_protocol::{update_native as native, update_transaction as tx};
 
@@ -304,6 +304,13 @@ fn open_waiting() -> Result<tx::Store, Error> {
     }
 }
 
+fn new_member_is_sing_box(target: &Path) -> bool {
+    target.file_name().is_some_and(|name| {
+        name.eq_ignore_ascii_case("sing-box.exe")
+            || name.eq_ignore_ascii_case("sing-box-sha256.txt")
+    })
+}
+
 fn collect_candidates(
     source: &Path,
     target: &Path,
@@ -319,16 +326,22 @@ fn collect_candidates(
             let entry = entry?;
             collect_candidates(&entry.path(), &target.join(entry.file_name()), members)?;
         }
-    } else {
-        ensure!(
-            target.is_file(),
-            "new installation member requires a separate bootstrap install"
-        );
+    } else if target.is_file() {
         members.push(CoordinatedBinaryReplacement::prepare(
             source,
             target,
             sha256(source)?,
         )?);
+    } else if new_member_is_sing_box(target) {
+        // The first package that carries sing-box.exe has no previous file to
+        // restore. Rollback deletes the introduction; it does not invent bytes.
+        members.push(CoordinatedBinaryReplacement::prepare_introduced(
+            source,
+            target,
+            sha256(source)?,
+        )?);
+    } else {
+        bail!("new installation member requires a separate bootstrap install");
     }
     Ok(())
 }
@@ -828,9 +841,17 @@ fn clear_retired_publish_scratch(store_root: &Path) -> Result<(), Error> {
                     .components()
                     .all(|c| !matches!(c, std::path::Component::ParentDir))
                 && m.publish_scratch == path_with_suffix(&m.target, PUBLISH_SUFFIX);
+            let target_is_previous = if m.introduced {
+                matches!(
+                    std::fs::symlink_metadata(&m.target),
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound
+                )
+            } else {
+                sha256(&m.target).ok() == Some(m.old_digest)
+            };
             if bound
                 && sha256(&m.publish_scratch).ok() == Some(m.new_digest)
-                && sha256(&m.target).ok() == Some(m.old_digest)
+                && target_is_previous
             {
                 remove_ordinary_file_if_exists(&m.publish_scratch)?;
             }
@@ -1780,11 +1801,13 @@ mod tests {
             app_sha256: "t".into(),
             core_sha256: "tc".into(),
             privileged_sha256: "tp".into(),
+            sing_box_sha256: String::new(),
         };
         let old = Components {
             app_sha256: "o".into(),
             core_sha256: "oc".into(),
             privileged_sha256: "op".into(),
+            sing_box_sha256: String::new(),
         };
         // A complete verified installation survives its successor exiting first.
         assert_eq!(
@@ -1796,6 +1819,7 @@ mod tests {
             app_sha256: "t".into(),
             core_sha256: "oc".into(),
             privileged_sha256: "op".into(),
+            sing_box_sha256: String::new(),
         };
         assert_eq!(
             classify_recovery(true, false, &mixed, &target),
@@ -1819,11 +1843,13 @@ mod tests {
             app_sha256: "t".into(),
             core_sha256: "tc".into(),
             privileged_sha256: "tp".into(),
+            sing_box_sha256: String::new(),
         };
         let old = Components {
             app_sha256: "o".into(),
             core_sha256: "oc".into(),
             privileged_sha256: "op".into(),
+            sing_box_sha256: String::new(),
         };
         // Replaced, successor closed before commit: nothing to restore, so the
         // Service is not stopped (a stop/start would spawn recovery again).

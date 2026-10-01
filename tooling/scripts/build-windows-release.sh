@@ -47,6 +47,21 @@ export TONO_CORE_SHA256
 echo "pinning core digest for the Service: $TONO_CORE_SHA256"
 printf '%s\n' "$TONO_CORE_SHA256" > "$app_root/src-tauri/resources/core-sha256.txt"
 
+sing_box_sidecar="$app_root/src-tauri/sidecar/sing-box-x86_64-pc-windows-msvc.exe"
+expected_sing_box="b2e6902ee75d9c4af79df28a61ded67afc4283fc83a44dee8896f3737a4ed027"
+if [[ ! -f $sing_box_sidecar ]]; then
+  echo "sing-box sidecar missing, cannot pin alpha.9: $sing_box_sidecar" >&2
+  exit 1
+fi
+TONO_SING_BOX_SHA256=$(/usr/bin/shasum -a 256 "$sing_box_sidecar" | /usr/bin/cut -d' ' -f1)
+if [[ $TONO_SING_BOX_SHA256 != "$expected_sing_box" ]]; then
+  echo "sing-box sidecar $TONO_SING_BOX_SHA256 is not the pinned alpha.9 digest $expected_sing_box" >&2
+  exit 1
+fi
+export TONO_SING_BOX_SHA256
+echo "pinning sing-box digest for the Service: $TONO_SING_BOX_SHA256"
+printf '%s\n' "$TONO_SING_BOX_SHA256" > "$app_root/src-tauri/resources/sing-box-sha256.txt"
+
 (
   # From the service directory: its .cargo/config.toml links the CRT statically (H22-O-F2).
   cd "$windows_root/service"

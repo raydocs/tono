@@ -31,6 +31,11 @@ test('measures the installed payload copy and refuses a gate copy that differs',
       core: path.join(root, 'tono-core.exe.next'),
       privileged: path.join(root, 'resources', 'tono-service.exe'),
     })
+    await put('sing-box.exe.next', 'sing-box')
+    assert.equal(
+      (await windowsPackageComponents(root)).singBox,
+      path.join(root, 'sing-box.exe.next'),
+    )
 
     await put('$PLUGINSDIR/tono-gate/resources/tono-service-install.exe', 'other')
     await assert.rejects(windowsPackageComponents(root), /tono-service-install\.exe differs from the installed/)
