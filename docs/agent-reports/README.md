@@ -16,6 +16,7 @@ Collected 2026-09-30 (MDT) from the box; credential values, auth paths, and emai
 - [R3-A8A9-grok.md](R3-A8A9-grok.md) — wave-3 Grok pass on Windows A8/A9 plus the remaining macOS catalog and proxy read; 2026-10-01; source model: Grok 4.7.
 - [glm-bughunt-report.md](glm-bughunt-report.md) — read-only GLM-5.3 bug-hunt evaluation and verified findings; 2026-09-30; source model: GLM-5.3.
 - [sol-bughunt-report.md](sol-bughunt-report.md) — partial read-only GPT-6.1 Sol benchmark against the same prompts; 2026-09-30; source model: GPT-6.1 Sol.
+- [2026-10-01-hardware-checklist.md](2026-10-01-hardware-checklist.md) — 合并后的实机测试总清单（虚拟机可测 / 必须真机 / CI 已覆盖 / 未合入），含先备份与恢复网络步骤；2026-10-01; source model: Grok Bot (executor).
 - [macos-open-issues-grok.md](macos-open-issues-grok.md) — open macOS-app issues with no unclaimed fix; 2026-10-01; source model: Grok 4.7.
 - [W2-grok-helper.md](W2-grok-helper.md) — macOS root helper hunt (M1–M4): findings, false positives, and PR list; 2026-09-30; source model: Grok 4.7.
 - [W1-grok-mac-config.md](W1-grok-mac-config.md) — W1 macOS config/account/connectivity hunt (M9–M12); 2026-09-30, addendum 2026-10-01; source model: Grok 4.7.
