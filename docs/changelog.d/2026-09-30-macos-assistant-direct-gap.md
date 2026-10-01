@@ -17,3 +17,8 @@
 - 再合入当时的 `origin/main`。`macos / policy-tests` 的 `assistant-destinations-precede-bundle-direct-without-home` 只报检查名。断言改为 `.literal` 搜索：每个助手域名和 `160.79.104.0/21` 的 TCP 必须指向 `Tono-Exit`、UDP 必须 `REJECT`，并且都在审核包直连之前；同一条字面规则不得指向 `Tono-China-App`、`Tono-China-Web`、`Tono-China-Direct`、`Tono-China-Web-Direct` 或 `DIRECT`。失败时带上后缀和那一行。
 - 生成规则没有改。没有住宅跳时这些目的地仍然先于物理网卡直连。
 - 验证：本环境无 Swift，`policy-tests` 未在本地执行。
+
+## 2026-10-01 · 续记（括号）
+- `macos / policy-tests` 报 `missing tcp anthropic.com`。生成行是 `DOMAIN-SUFFIX,anthropic.com)),Tono-Exit`（两个右括号）。断言写成 `"DOMAIN-SUFFIX,\(suffix)),Tono-Exit"`，Swift 把紧跟插值的那个 `)` 当成插值结束，实际查找的是只带一个右括号的字符串，所以永远匹配不到。三个查找都补上这个 `)`。
+- 生成规则仍然没有改。助手域名和 `160.79.104.0/21` 不走物理网卡。
+- 验证：本环境无 Swift，`policy-tests` 未在本地执行。

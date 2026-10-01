@@ -1524,17 +1524,20 @@ struct MultiExitPolicyTests {
             }
             return nil
         }
+        // The `)` that closes `\(suffix)` is not part of the rule text.
+        // The emitted row is `DOMAIN-SUFFIX,<suffix>)),<target>` — two
+        // parentheses — so the literal needs one extra `)` in source.
         for suffix in ConfigPipeline.assistantHomeDomainSuffixes {
             if let gap = precedes(
-                "DOMAIN-SUFFIX,\(suffix)),\(ConfigPipeline.exitGroupName)",
+                "DOMAIN-SUFFIX,\(suffix))),\(ConfigPipeline.exitGroupName)",
                 label: "tcp \(suffix)"
             ) { return gap }
             if let gap = precedes(
-                "DOMAIN-SUFFIX,\(suffix)),REJECT",
+                "DOMAIN-SUFFIX,\(suffix))),REJECT",
                 label: "udp \(suffix)"
             ) { return gap }
             for group in directGroups {
-                let needle = "DOMAIN-SUFFIX,\(suffix)),\(group)"
+                let needle = "DOMAIN-SUFFIX,\(suffix))),\(group)"
                 if let found = runtime.range(of: needle, options: .literal) {
                     return "direct \(suffix): \(line(at: found.lowerBound))"
                 }
