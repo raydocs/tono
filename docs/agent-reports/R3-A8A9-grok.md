@@ -79,7 +79,7 @@ A9（16），与 [Hunt Windows A9 commands](bc-7a8634bd-488b-533e-b90e-5589fb2a9
 
 ## 没做完的部分
 
-- #950 的 XCTest 没有在这台 Linux 上跑，交给 hosted macOS CI。
+- #950、#963、#966 的 XCTest 没有在这台 Linux 上跑，交给 hosted macOS CI。
 - Sol 的 `W1-sol-win-app` 报告正文没有入库，不能逐条对照它写过的句子，只能对照上面的 PR。
 - `signed_apps.rs` 的 Authenticode 调用和 `audit.rs` 的轮转写入没有在 Windows 上跑。
 - `account.rs`、`quit.rs`、`update.rs` 不在本槽，只在 A9 调用它们的地方看过。
