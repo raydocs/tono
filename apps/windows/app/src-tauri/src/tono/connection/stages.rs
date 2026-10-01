@@ -19,7 +19,7 @@ use super::controller::{
     allocate_runtime_ports, configure_owned_controller_for_ui, lock_kill_switch_with_retries, preflight_bfe,
     preflight_dns_listener, wait_controller,
 };
-use super::endpoints::proxy_endpoint_of;
+use super::endpoints::proxy_endpoints_for;
 use super::monitor::{
     bootstrap_hosts, refresh_control_plane_pins_from_service, spawn_control_plane_pin_refresh,
     spawn_deferred_policy_reconnect, spawn_exit_identity_lookup, spawn_network_monitor,
@@ -64,12 +64,7 @@ pub(super) async fn run_stages(
             .and_then(|routing| routing.home_proxy.as_deref())
             .and_then(|name| nodes.iter().find(|entry| entry.name == name))
     };
-    let mut proxy_endpoints = vec![proxy_endpoint_of(node)];
-    if let Some(home) = home_node
-        && (home.server != node.server || home.port != node.port)
-    {
-        proxy_endpoints.push(proxy_endpoint_of(home));
-    }
+    let proxy_endpoints = proxy_endpoints_for(node, nodes, routing);
 
     transaction.check("preparing service")?;
     set_stage(state, app, ConnectStage::PreparingService, generation, started).await?;
@@ -156,6 +151,11 @@ pub(super) async fn run_stages(
     bfe_preflight.map_err(StageFailure::error)?;
     let controller_port = runtime_ports.controller_port;
     let mixed_port = runtime_ports.mixed_port;
+    // Auth may use this loopback port last. It does not install a route or a filter.
+    {
+        let inner = state.lock().await;
+        inner.client.transport().set_auth_tunnel_port(mixed_port);
+    }
     if let Err(error) = dns_preflight {
         if active_runtime_resume.is_some() {
             // The old, strongly proven same-owner Core is expected to own TCP/UDP loopback:53.

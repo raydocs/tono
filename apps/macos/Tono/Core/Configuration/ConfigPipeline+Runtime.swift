@@ -137,8 +137,12 @@ nonisolated extension ConfigPipeline {
     dns:
       enable: true
       listen: \(ProtectedDNSContract.listener)
+      ipv6: false
       enhanced-mode: fake-ip
       fake-ip-range: 198.18.0.1/16
+      fake-ip-ttl: 30
+      prefer-h3: false
+      cache-algorithm: lru
       use-hosts: true
       respect-rules: true
       proxy-server-nameserver:
@@ -518,6 +522,7 @@ nonisolated extension ConfigPipeline {
         log-level: \(overlay.logLevel)
         # Warm-path RTT for UI delay. Connect uses the TUN probe, not /delay.
         unified-delay: true
+        tcp-concurrent: true
         find-process-mode: \(directPolicy != nil || overlay.tonoTransport != nil || overlay.claudeHomeSocks5 != nil || overlay.claudeHomeNodeName != nil ? "strict" : "off")
         profile:
           # Runtime config order is the committed selection. Never let a stale

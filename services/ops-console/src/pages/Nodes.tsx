@@ -24,7 +24,7 @@ import {
   type NodeFilter,
   type NodeFilterId,
 } from '@/lib/selectors';
-import { newestFetch, type Resource } from '@/lib/use-resource';
+import { oldestFetch, type Resource } from '@/lib/use-resource';
 import { cn } from '@/lib/utils';
 import type { Tone } from '@/components/ops/StatusWord';
 import type { FleetNodeDto } from '@/lib/types';
@@ -179,7 +179,7 @@ export default function NodesPage({
 
           <PageNote
             className="nodes-hero-note"
-            fetchedAt={newestFetch(nodes, health, fleet)}
+            fetchedAt={oldestFetch(nodes, health, fleet)}
             backfill={health.status === 'ready' ? health.data.backfill : null}
           />
 

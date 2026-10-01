@@ -270,6 +270,17 @@ pub fn install_root() -> Result<PathBuf> {
     Ok(expected.canonicalize()?)
 }
 
+/// Current time on the same clock as [`Image::started_at`] (`GetProcessTimes`
+/// creation FILETIME). Not Unix time.
+pub fn process_clock_now() -> u64 {
+    use windows_sys::Win32::Foundation::FILETIME;
+    use windows_sys::Win32::System::SystemInformation::GetSystemTimeAsFileTime;
+
+    let mut now = FILETIME::default();
+    unsafe { GetSystemTimeAsFileTime(&mut now) };
+    (u64::from(now.dwHighDateTime) << 32) | u64::from(now.dwLowDateTime)
+}
+
 pub fn image(pid: u32) -> Result<Image> {
     let identity = super::super::process::process_identity(pid)?.context("peer exited")?;
     let path = PathBuf::from(&identity.executable);
@@ -683,4 +694,56 @@ impl Drop for SuspendedApp {
             unsafe { windows_sys::Win32::System::Threading::TerminateProcess(self.process.0, 1) };
         }
     }
+}
+
+/// Recover a durably recorded successor after its executor died before resume.
+/// Pin the process against PID reuse and recheck the full image identity; opened
+/// thread handles are checked too because snapshot thread IDs can be reused.
+pub fn resume_successor(expected: &Image) -> Result<()> {
+    use windows_sys::Win32::System::{Diagnostics::ToolHelp::*, Threading::*};
+    let process = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, expected.pid) };
+    ensure!(!process.is_null(), "cannot open recorded successor");
+    let _process = Handle(process);
+    ensure!(
+        image(expected.pid)? == *expected,
+        "successor incarnation changed"
+    );
+    let snapshot = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0) };
+    ensure!(
+        snapshot != INVALID_HANDLE_VALUE,
+        "successor thread snapshot failed"
+    );
+    let snapshot = Handle(snapshot);
+    let mut entry = THREADENTRY32::default();
+    entry.dwSize = std::mem::size_of_val(&entry) as u32;
+    let mut matched = false;
+    let mut found = unsafe { Thread32First(snapshot.0, &mut entry) };
+    while found != 0 {
+        if entry.th32OwnerProcessID == expected.pid {
+            let thread = unsafe {
+                OpenThread(
+                    THREAD_SUSPEND_RESUME | THREAD_QUERY_LIMITED_INFORMATION,
+                    0,
+                    entry.th32ThreadID,
+                )
+            };
+            ensure!(!thread.is_null(), "cannot open successor thread");
+            let thread = Handle(thread);
+            if unsafe { GetProcessIdOfThread(thread.0) } == expected.pid {
+                // CREATE_SUSPENDED adds one count. Resume once, never drain an
+                // unrelated suspension; zero already means running (idempotent).
+                let previous = unsafe { ResumeThread(thread.0) };
+                ensure!(previous != u32::MAX, "successor resume failed");
+                ensure!(previous <= 1, "successor thread remains suspended");
+                matched = true;
+            }
+        }
+        found = unsafe { Thread32Next(snapshot.0, &mut entry) };
+    }
+    ensure!(
+        unsafe { GetLastError() } == ERROR_NO_MORE_FILES,
+        "successor thread enumeration failed"
+    );
+    ensure!(matched, "recorded successor has no live thread");
+    Ok(())
 }

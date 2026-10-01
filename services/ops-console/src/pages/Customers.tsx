@@ -36,7 +36,7 @@ import { closeInvite, openCustomer, openInvite, setCustomerFilter } from '@/lib/
 import { usePrivacy } from '@/lib/privacy';
 import { publishedVersions } from '@/lib/releases';
 import { cn } from '@/lib/utils';
-import { newestFetch, useResource, type Resource } from '@/lib/use-resource';
+import { oldestFetch, useResource, type Resource } from '@/lib/use-resource';
 import '@/styles/customers.css';
 import type { Tone } from '@/components/ops/StatusWord';
 import { useCohort } from './customer/Cohort';
@@ -221,7 +221,7 @@ export default function CustomersPage({
 
           <PageNote
             className="customers-hero-note"
-            fetchedAt={newestFetch(customers, health)}
+            fetchedAt={oldestFetch(customers, health)}
             backfill={health.status === 'ready' ? health.data.backfill : null}
           />
 

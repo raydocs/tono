@@ -15,7 +15,9 @@ XRAY_ASSETS = {
     "x86_64": ("Xray-linux-64.zip", "23cd9af937744d97776ee35ecad4972cf4b2109d1e0fe6be9930467608f7c8ae"),
     "aarch64": ("Xray-linux-arm64-v8a.zip", "4d30283ae614e3057f730f67cd088a42be6fdf91f8639d82cb69e48cde80413c"),
 }
-REPO = Path(__file__).resolve().parents[1]
+# Git root. parents[1] is tooling/, which let a private inventory under
+# services/ or apps/ through the "outside the repository" check.
+REPO = Path(__file__).resolve().parents[2]
 HELPER = Path(__file__).with_name("remote") / "manage-tono-node-v2.sh"
 # The one place the Reality front measurement lives, shared with
 # provision-reality-node.rb and check-node-in-fleet.py.

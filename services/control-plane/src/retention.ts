@@ -56,6 +56,24 @@ export async function runHousekeepingRetention(e: Env, t: number) {
     e.DB.prepare('DELETE FROM telemetry_windows WHERE received_at <= ?')
       .bind(t - envInt(e, 'TELEMETRY_RETENTION_SECONDS', TELEMETRY_RETENTION_DEFAULT_SECONDS))
       .run());
+  const diagnosticsKeep = t - 90 * 86_400;
+  const aiKeep = t - 60 * 86_400;
+  for (const table of ['client_sessions', 'chain_hops', 'session_exit_observations', 'dns_checks']) {
+    await cronStep(`${table} retention`, () =>
+      e.DB.prepare(`DELETE FROM ${table} WHERE received_at <= ?`).bind(diagnosticsKeep).run());
+  }
+  await cronStep('ai service route retention', () =>
+    e.DB.prepare('DELETE FROM ai_service_routes WHERE received_at <= ?').bind(aiKeep).run());
+  await cronStep('failure cluster retention', async () => {
+    await e.DB.prepare(
+      `DELETE FROM failure_cluster_members WHERE cluster_id IN (
+         SELECT id FROM failure_clusters WHERE opened_at <= ?
+       )`,
+    ).bind(diagnosticsKeep).run();
+    await e.DB.prepare('DELETE FROM failure_clusters WHERE opened_at <= ?').bind(diagnosticsKeep).run();
+  });
+  await cronStep('failure alert send retention', () =>
+    e.DB.prepare('DELETE FROM failure_alert_sends WHERE sent_at <= ?').bind(diagnosticsKeep).run());
   // Individual report ids are bounded retry evidence, not the billing ledger.
   // usage_report_sources retains the monotonic per-node totals, so deleting old
   // ids cannot lower or double-count usage; a stale replay is ignored by that
