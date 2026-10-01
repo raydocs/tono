@@ -4,11 +4,14 @@
 //
 //   node tooling/scripts/records.mjs changelog [--since YYYY-MM-DD]
 //   node tooling/scripts/records.mjs findings [--status open|in-PR|fixed|refuted|accepted-design] [--id X]
+//   node tooling/scripts/records.mjs decisions
 //
 // changelog: docs/changelog.d/*.md newest first, then the dated sections of
 //            docs/INTERNAL_CHANGELOG.md.
 // findings:  one table built from docs/FINDINGS_LEDGER.md rows, with each
 //            docs/findings.d/*.md row replacing a ledger row of the same ID.
+// decisions: docs/decisions/NNN-*.md, highest NNN first. README.md is skipped.
+//            docs/DECISIONS.md is the index, not a copy of the entries.
 // --root DIR points at another repository root (used by the test).
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import path from 'node:path'
@@ -34,6 +37,19 @@ function fragmentFiles(dir) {
     .filter(name => name.endsWith('.md') && name !== 'README.md')
     .sort()
     .map(name => ({ name, text: readFileSync(path.join(dir, name), 'utf8') }))
+}
+
+function decisionNumber(name) {
+  const match = /^(\d+)/.exec(name)
+  return match ? Number(match[1]) : -1
+}
+
+/** Decision entries, highest filename number first. */
+export function decisions(root) {
+  const files = fragmentFiles(path.join(root, 'docs/decisions'))
+  files.sort((a, b) => decisionNumber(b.name) - decisionNumber(a.name) || a.name.localeCompare(b.name))
+  if (files.length === 0) return ''
+  return files.map(({ text }) => text.trimEnd()).join('\n\n') + '\n'
 }
 
 export function changelog(root, since) {
@@ -100,8 +116,10 @@ function main() {
     process.stdout.write(changelog(root, options.since))
   } else if (options.command === 'findings') {
     process.stdout.write(findings(root, options))
+  } else if (options.command === 'decisions') {
+    process.stdout.write(decisions(root))
   } else {
-    process.stderr.write('usage: records.mjs changelog [--since YYYY-MM-DD] | findings [--status S] [--id X]\n')
+    process.stderr.write('usage: records.mjs changelog [--since YYYY-MM-DD] | findings [--status S] [--id X] | decisions\n')
     process.exit(2)
   }
 }

@@ -61,4 +61,29 @@ final class HelperSilentUpgradeTimeoutTests: XCTestCase {
             "silent upgrade poll window must allow 45s for helper restart and version reconciliation"
         )
     }
+
+    /// Cancelling or failing a replacement after Core stopped must release
+    /// the old helper's PF; success and a never-stopped Core keep protection.
+    func testAbandonedUpgradeReleasesOnlyAfterPreviousCoreStopped() {
+        XCTAssertTrue(
+            HelperManager.shouldReleaseAfterAbandonedUpgrade(
+                coreStopped: true, succeeded: false
+            )
+        )
+        XCTAssertFalse(
+            HelperManager.shouldReleaseAfterAbandonedUpgrade(
+                coreStopped: true, succeeded: true
+            )
+        )
+        XCTAssertFalse(
+            HelperManager.shouldReleaseAfterAbandonedUpgrade(
+                coreStopped: false, succeeded: false
+            )
+        )
+        XCTAssertFalse(
+            HelperManager.shouldReleaseAfterAbandonedUpgrade(
+                coreStopped: false, succeeded: true
+            )
+        )
+    }
 }

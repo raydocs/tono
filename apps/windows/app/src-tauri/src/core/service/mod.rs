@@ -273,6 +273,13 @@ where
     (captured, operation().await)
 }
 
+/// `NotActive` on the core-log snapshot recovers the owner only when this
+/// process still holds a session. The StartClash handoff has already dropped
+/// that session, so the same code during a start is not displacement.
+pub(super) fn log_snapshot_should_recover_owner(code: u16, session_held: bool) -> bool {
+    code == tono_service_protocol::ServiceErrorCode::NotActive as u16 && session_held
+}
+
 pub(crate) async fn get_clash_log_snapshot_by_service() -> Result<String> {
     let credentials = current_owner_credentials()?;
     let (generation, response) = capture_generation_before(&OWNER_MONITOR_GENERATION, || {
@@ -281,7 +288,12 @@ pub(crate) async fn get_clash_log_snapshot_by_service() -> Result<String> {
     .await;
     let response = response.context("无法连接到Tono Service")?;
     if response.code > 0 {
-        if response.code == tono_service_protocol::ServiceErrorCode::NotActive as u16 {
+        // StartClash clears the local session before the Service replies, and that
+        // window lasts for the whole start. NotActive there is our own handoff.
+        // The owner monitor already debounces the same reply; this log read must
+        // not run recovery and mark the core stopped under the start still in flight.
+        // A session we still hold, plus NotActive, is a real displacement.
+        if log_snapshot_should_recover_owner(response.code, active_service_session().is_ok()) {
             recover_after_owner_loss(generation, OwnerRecoveryReason::Displaced).await;
         }
         bail!(response.message);
@@ -1273,8 +1285,35 @@ impl std::error::Error for ReleaseGotNoReading {}
 /// released, the session that armed the switch is long gone. Idempotent on
 /// the Service side and itself enforces DNS-before-disarm.
 pub(crate) async fn tono_release_kill_switch() -> Result<KillSwitchStatus> {
+    tono_release_kill_switch_inner(false).await
+}
+
+/// Full release, then the secondary AI hold. Used only after a non-strict
+/// fail-open. Restore and disconnect call [`tono_release_kill_switch`].
+pub(crate) async fn tono_release_kill_switch_applying_narrow() -> Result<KillSwitchStatus> {
+    match tono_release_kill_switch_inner(true).await {
+        Ok(status) => Ok(status),
+        Err(error) => {
+            // The secondary hold is optional. A service that rejects the extra
+            // payload, or a hold that fails after the barrier is still up, must
+            // still open the original network.
+            logging!(
+                warn,
+                Type::Service,
+                "Tono: secondary AI hold was not applied; releasing the original network without it: {error:#}"
+            );
+            tono_release_kill_switch_inner(false).await
+        }
+    }
+}
+
+async fn tono_release_kill_switch_inner(apply_narrow: bool) -> Result<KillSwitchStatus> {
     let credentials = current_owner_credentials().context(ReleaseGotNoReading)?;
-    let response = match tono_service_protocol::release_kill_switch(&credentials).await {
+    let response = match if apply_narrow {
+        tono_service_protocol::release_kill_switch_applying_narrow(&credentials).await
+    } else {
+        tono_service_protocol::release_kill_switch(&credentials).await
+    } {
         Ok(response) => response,
         Err(error) => {
             // Release is idempotent. If only its response was lost, a read-back prevents the UI

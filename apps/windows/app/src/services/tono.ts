@@ -859,7 +859,7 @@ let sharedListenerLive = false
 let sharedRegistration: Promise<void> | null = null
 
 const ensureSharedListener = () => {
-  if (sharedRegistration) return
+  if (sharedListenerLive || sharedRegistration) return
 
   sharedRegistration = listen<TonoStatus>(TONO_STATUS_EVENT, ({ payload }) => {
     statusHandlers.forEach((handler) => handler(payload))
