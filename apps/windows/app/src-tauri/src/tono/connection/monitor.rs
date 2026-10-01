@@ -1573,7 +1573,7 @@ mod tests {
 
     #[tokio::test]
     async fn health_proof_cannot_release_a_completed_switch_back_to_the_same_exit() {
-        tokio::time::timeout(Duration::from_secs(5), async {
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
             let state = Arc::new(TonoState::for_test());
             let (generation, selected, switch_task) = {
                 let mut inner = state.lock().await;
