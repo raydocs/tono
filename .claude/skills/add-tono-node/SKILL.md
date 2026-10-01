@@ -28,8 +28,8 @@ The onboarding repo lives on the ops machine, not on every checkout; run
 scripts: `tooling/scripts/provision-reality-node.rb` (preflight/apply) and
 `tooling/scripts/check-node-in-fleet.py` (audit). They cover only Xray and the catalog:
 do not run `tooling/scripts/publish-managed-catalog.rb --append` until the audit reports
-every other place present; otherwise stop after provisioning and record the gap in
-`docs/DECISIONS.md`.
+every other place present; otherwise stop after provisioning and record the gap as
+a new file under `docs/decisions/` (see `docs/decisions/README.md`).
 
 ```sh
 cd ~/Downloads/Project/tono-node-provisioning
@@ -97,7 +97,7 @@ Each of these is a trap that cost real downtime before it was automated.
 - **Keychain entry for the admin token.** `publish-managed-catalog.rb` and
   `manage-tono-user.rb` read `com.raydocs.tono.staging.admin-api-token`; `onboard-node.rb`
   reads `tono-admin`. If the older entry 401s, use the entry that works, record the choice
-  in `docs/DECISIONS.md`, and open the one-line script fix.
+  as a new file under `docs/decisions/`, and open the one-line script fix.
 - **Names must match exactly** between `nodes.secrets.json` and the catalog; a suffix
   such as `（家宽测试）` on one side is a mismatch the audit reports.
 

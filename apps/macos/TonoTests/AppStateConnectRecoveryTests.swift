@@ -35,6 +35,7 @@ final class AppStateConnectRecoveryTests: XCTestCase {
         runtime.restoreDNS = { true }
         runtime.disableSystemProxy = {}
         runtime.disarm = {}
+        runtime.releaseAfterFailure = {}
         runtime.restrictToBootstrap = {}
         app.networkProtection = runtime
         return app
@@ -67,6 +68,32 @@ final class AppStateConnectRecoveryTests: XCTestCase {
         app.connectionCoordinator.protectedReconnectTask?.cancel()
         app.connectionCoordinator.protectedReconnectTask = nil
         await app.finishPendingDisconnect()
+    }
+
+    func testExhaustedTunnelLossLeavesPendingNativeUpdateArmed() async {
+        let blocksConnect = RuntimeCleanup.nativeUpdateBlocksConnect
+        defer { RuntimeCleanup.nativeUpdateBlocksConnect = blocksConnect }
+        RuntimeCleanup.nativeUpdateBlocksConnect = false
+        let app = makeApp()
+        app.isConnected = true
+        app.nativeUpdatePending = true
+        app.tunInterfaceExists = { _ in false }
+        app.nativeUpdateDisconnect = {
+            XCTFail("exhausted TUN loss must not release a pending update")
+            return .init(pending: true, receipt: nil, execution: nil,
+                          disconnectVerified: false, diagnostic: nil)
+        }
+        var state = AppState.CoreMonitorState()
+
+        let first = await app.runCoreMonitorTick(state: &state)
+        XCTAssertEqual(first, .continueMonitoring)
+        let verdict = await app.runCoreMonitorTick(state: &state)
+
+        XCTAssertEqual(verdict, .stopMonitoring)
+        XCTAssertNil(app.nativeUpdateDisconnectTask)
+        XCTAssertFalse(RuntimeCleanup.nativeUpdateBlocksConnect)
+        XCTAssertTrue(app.nativeUpdatePending)
+        XCTAssertNil(app.connectionCoordinator.protectedReconnectTask)
     }
 
     func testProtectionRepairsAreForgivenOnlyAfterAnUninterruptedHealthyAuditStreak() async {
@@ -117,6 +144,39 @@ final class AppStateConnectRecoveryTests: XCTestCase {
         XCTAssertTrue(app.isConnected)
         XCTAssertFalse(app.isDisconnecting)
         XCTAssertFalse(app.protectedReconnectPausedForUserAction)
+    }
+
+    func testUnarmedFailureCleanupKeepsTheHelpersAIHold() async {
+        let saved = RuntimeState()
+        defer { saved.restore() }
+        KillSwitchService.isArmed = false
+        let app = makeApp()
+        app.isConnecting = true
+        let connectFailure = "PF arm failed after the helper released ordinary traffic."
+        app.errorMessage = connectFailure
+        // An unsuccessful native arm can already have installed the helper's
+        // selective floor while the App's armed latch remains false.
+        var aiHeld = true
+        var releases: [String] = []
+        app.networkProtection.repairForRelease = {
+            XCTFail("Unarmed automatic cleanup must not repair the helper")
+        }
+        app.networkProtection.disarm = {
+            releases.append("disarm")
+            aiHeld = false
+        }
+        app.networkProtection.releaseAfterFailure = {
+            releases.append("releaseAfterFailure")
+        }
+
+        app.disconnect(releaseKillSwitch: true, afterUnarmedConnectFailure: true)
+        await app.finishPendingDisconnect()
+
+        XCTAssertEqual(releases, ["releaseAfterFailure"])
+        XCTAssertTrue(aiHeld, "automatic cleanup must not remove the helper's AI hold")
+        XCTAssertFalse(app.isProtectionBlocked, "ordinary traffic must remain released")
+        XCTAssertFalse(app.isDisconnecting)
+        XCTAssertEqual(app.errorMessage, connectFailure)
     }
 
     func testUnarmedCleanupKeepsProxyAndDNSFailuresWithoutUnverifiedCoreNoise() async {

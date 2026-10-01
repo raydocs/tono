@@ -44,6 +44,8 @@ export type LoadSample = {
   netIn: number | null;
   netOut: number | null;
   tcpConnections: number | null;
+  /** Only the fleet read asks for it; one node's window leaves it null. */
+  load1?: number | null;
 };
 
 export type NodeLoadWindow = {
@@ -91,6 +93,7 @@ function readSample(value: unknown): LoadSample {
     netIn: maybeCount(row.netIn),
     netOut: maybeCount(row.netOut),
     tcpConnections: maybeCount(row.tcpConnections),
+    load1: maybeCount(row.load1),
   };
 }
 
@@ -106,9 +109,10 @@ function readWindow(value: unknown, name: string): NodeLoadWindow {
   const body = record(record(value).metrics);
   const series = record(body.series);
   const keys = Object.keys(series);
+  const only = keys[0];
   const key = Object.prototype.hasOwnProperty.call(series, name)
     ? name
-    : keys.length === 1 ? keys[0] : null;
+    : keys.length === 1 && only !== undefined ? only : null;
   const rows = key === null ? [] : series[key];
   return {
     from: count(body.from),
@@ -117,6 +121,30 @@ function readWindow(value: unknown, name: string): NodeLoadWindow {
     samples: (Array.isArray(rows) ? rows : []).map(readSample).sort((a, b) => a.t - b.t),
   };
 }
+
+/** Every machine the collector reported in the window, keyed by its name. */
+export type FleetLoadWindow = {
+  from: number;
+  to: number;
+  resolutionSeconds: number;
+  series: Map<string, LoadSample[]>;
+};
+
+function readFleetWindow(value: unknown): FleetLoadWindow {
+  const body = record(record(value).metrics);
+  const series = new Map<string, LoadSample[]>();
+  for (const [name, rows] of Object.entries(record(body.series))) {
+    series.set(name, (Array.isArray(rows) ? rows : []).map(readSample).sort((a, b) => a.t - b.t));
+  }
+  return {
+    from: count(body.from),
+    to: count(body.to),
+    resolutionSeconds: count(body.resolutionSeconds),
+    series,
+  };
+}
+
+const FLEET_FIELDS = 'cpu,memUsed,memTotal,load1,netIn,netOut';
 
 function readQualityText(value: unknown): NodeQualityText {
   const row = record(value);
@@ -132,6 +160,9 @@ export const nodeLegacyApi = {
       await getJson<unknown>('metrics', signal, { range, node: name, fields: FIELDS }),
       name,
     ),
+  /** The same window for every machine at once, for the 节点 page's fleet charts. */
+  fleetLoad: async (range: NodeLoadRange, signal?: AbortSignal) =>
+    readFleetWindow(await getJson<unknown>('metrics', signal, { range, fields: FLEET_FIELDS })),
   qualityText: async (name: string, signal?: AbortSignal) =>
     readQualityText(
       await getJson<unknown>(`fleet-nodes/${encodeURIComponent(name)}/quality-text`, signal),
@@ -150,6 +181,8 @@ export type LoadCharts = {
   /** Bytes per second, worked out from the counters between two samples. */
   netIn: LoadPoint[];
   netOut: LoadPoint[];
+  /** Open TCP connections as the agent counted them at each sample. */
+  connections: LoadPoint[];
   /**
    * The 95th percentile of in+out, which is how transit is billed — the
    * number an operator compares against what they are paying for.
@@ -165,13 +198,15 @@ const COLUMNS = 96;
 
 const P95 = 0.95;
 
-type Derived = {
+export type Derived = {
   t: number;
   cpu: number | null;
   memory: number | null;
+  load1: number | null;
   netIn: number | null;
   netOut: number | null;
   total: number | null;
+  connections: number | null;
 };
 
 /**
@@ -189,14 +224,15 @@ function ratePerSecond(before: number | null, after: number | null, seconds: num
   return delta < 0 ? null : delta / seconds;
 }
 
-function derive(samples: readonly LoadSample[]): Derived[] {
+export function derive(samples: readonly LoadSample[]): Derived[] {
   const out: Derived[] = [];
   for (let index = 0; index < samples.length; index += 1) {
     const row = samples[index];
-    const previous = index === 0 ? null : samples[index - 1];
-    const seconds = previous === null ? 0 : row.t - previous.t;
-    const netIn = previous === null ? null : ratePerSecond(previous.netIn, row.netIn, seconds);
-    const netOut = previous === null ? null : ratePerSecond(previous.netOut, row.netOut, seconds);
+    if (row === undefined) continue;
+    const previous = samples[index - 1];
+    const seconds = previous === undefined ? 0 : row.t - previous.t;
+    const netIn = previous === undefined ? null : ratePerSecond(previous.netIn, row.netIn, seconds);
+    const netOut = previous === undefined ? null : ratePerSecond(previous.netOut, row.netOut, seconds);
     const share = row.memUsed !== null && row.memTotal !== null && row.memTotal > 0
       ? (row.memUsed / row.memTotal) * 100
       : null;
@@ -204,9 +240,11 @@ function derive(samples: readonly LoadSample[]): Derived[] {
       t: row.t,
       cpu: row.cpu,
       memory: share,
+      load1: row.load1 ?? null,
       netIn,
       netOut,
       total: netIn === null || netOut === null ? null : netIn + netOut,
+      connections: row.tcpConnections,
     });
   }
   return out;
@@ -221,7 +259,7 @@ function derive(samples: readonly LoadSample[]): Derived[] {
  * read as the same picture at two zooms, and a column nobody measured stays
  * empty instead of being joined across.
  */
-function columns(
+export function columns(
   rows: readonly Derived[],
   pick: (row: Derived) => number | null,
   from: number,
@@ -235,13 +273,16 @@ function columns(
     const value = pick(row);
     if (value === null) continue;
     const slot = Math.min(COLUMNS - 1, Math.max(0, Math.floor((row.t - from) / width)));
-    sums[slot] += value;
-    seen[slot] += 1;
+    sums[slot] = (sums[slot] ?? 0) + value;
+    seen[slot] = (seen[slot] ?? 0) + 1;
   }
-  return sums.map((sum, slot) => ({
-    t: Math.round(from + (slot + 0.5) * width),
-    v: seen[slot] === 0 ? null : sum / seen[slot],
-  }));
+  return sums.map((sum, slot) => {
+    const count = seen[slot] ?? 0;
+    return {
+      t: Math.round(from + (slot + 0.5) * width),
+      v: count === 0 ? null : sum / count,
+    };
+  });
 }
 
 /** The value at the 95th percentile, or nothing when too little was measured. */
@@ -249,23 +290,26 @@ function percentile95(values: number[]): number | null {
   if (values.length === 0) return null;
   const sorted = [...values].sort((a, b) => a - b);
   const at = Math.min(sorted.length - 1, Math.max(0, Math.ceil(sorted.length * P95) - 1));
-  return sorted[at];
+  return sorted[at] ?? null;
 }
 
 export function foldLoad(taken: NodeLoadWindow): LoadCharts {
   const rows = derive(taken.samples);
-  const last = taken.samples.length === 0 ? null : taken.samples[taken.samples.length - 1].t;
+  const newest = taken.samples[taken.samples.length - 1];
+  const oldest = taken.samples[0];
+  const last = newest === undefined ? null : newest.t;
   const totals = rows.map((row) => row.total).filter((row): row is number => row !== null);
   const peaks = taken.samples
     .map((row) => row.tcpConnections)
     .filter((row): row is number => row !== null);
-  const from = taken.samples.length === 0 ? taken.from : Math.min(taken.from, taken.samples[0].t);
+  const from = oldest === undefined ? taken.from : Math.min(taken.from, oldest.t);
   const to = Math.max(taken.to, last ?? taken.to);
   return {
     cpu: columns(rows, (row) => row.cpu, from, to),
     memory: columns(rows, (row) => row.memory, from, to),
     netIn: columns(rows, (row) => row.netIn, from, to),
     netOut: columns(rows, (row) => row.netOut, from, to),
+    connections: columns(rows, (row) => row.connections, from, to),
     bandwidth95: percentile95(totals),
     peakConnections: peaks.length === 0 ? null : Math.max(...peaks),
     asOfSec: last,

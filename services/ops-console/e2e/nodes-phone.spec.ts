@@ -4,19 +4,21 @@ import { open, settle } from './ops';
 test.use({ viewport: { width: 390, height: 844 } });
 
 /**
- * One card per screen at 390 px is a scroll through forty-five screens to
- * find the broken one. Three columns answer the same question in one.
+ * Nine columns do not fit 390 px, and a table that scrolls sideways hides the
+ * one column that matters. Three columns answer the same question in one
+ * screen, and the list comes before the charts because it is what a phone
+ * opens this page for.
  */
-test('the fleet is a three column table at 390 px', async ({ page }) => {
+test('the fleet is a three column table at 390 px, ahead of the charts', async ({ page }) => {
   await open(page, '/nodes');
 
-  await expect(page.locator('.node-card')).toHaveCount(0);
-  await expect(page.locator('thead th')).toHaveCount(3);
+  await expect(page.locator('.nodes-table thead th')).toHaveCount(3);
   for (const header of ['状态', '节点', '本周期流量']) {
     await expect(page.getByRole('columnheader', { name: header })).toBeVisible();
   }
-  // The toggle is gone: there is nothing to toggle to.
-  await expect(page.getByRole('button', { name: '卡片' })).toHaveCount(0);
+  const table = await page.getByRole('heading', { name: '全部节点' }).boundingBox();
+  const load = await page.getByRole('heading', { name: '机器负载' }).boundingBox();
+  expect(table!.y).toBeLessThan(load!.y);
 
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
   expect(overflow).toBeLessThanOrEqual(0);

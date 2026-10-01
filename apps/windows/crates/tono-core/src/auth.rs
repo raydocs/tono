@@ -1603,13 +1603,36 @@ impl<T: HttpTransport, S: CredentialStore> ApiClient<T, S> {
     /// transport retry and below renewal's swallowed refresh error, so every
     /// answer is classified and reported, whatever its caller does with it.
     async fn exchange(&self, request: ApiRequest, session: SessionUse) -> Result<Vec<u8>, ApiError> {
+        let decisive_bearer = if matches!(session, SessionUse::Decisive(_)) {
+            request.bearer.clone()
+        } else {
+            None
+        };
         let response = self.transport.send(request).await?;
-        if let (Some(sink), Some((identity, verdict))) = (&self.verdict_sink, session.classify(&response)) {
+        if let Some((identity, verdict)) = session.classify(&response) {
             // Under the identity lock: adopt/logout cannot retire this identity
             // between the check and the report.
             let state = self.state.lock().await;
+            // A replay's refreshed bearer can itself be rotated by another request while
+            // in flight (especially with a clock ahead of the JWT lifetime). Its 401 then
+            // rejects an obsolete token, not the current session. Refresh refusals have
+            // no bearer and remain decisive, as do refusals of the current replay token.
+            let obsolete_replay = response.status == 401
+                && decisive_bearer.as_ref().is_some_and(|bearer| {
+                    state.access_token.as_ref().is_some_and(|current| current != bearer)
+                });
             if state.identity_epoch == identity {
-                sink.report(identity, verdict);
+                if obsolete_replay {
+                    // Callers also use Unauthorized to suspend a session. Keep the actual
+                    // HTTP failure, without claiming that the accepted successor was refused.
+                    return Err(ApiError::Server {
+                        status: 401,
+                        message: "session changed during this request; please try again".to_string(),
+                    });
+                }
+                if let Some(sink) = &self.verdict_sink {
+                    sink.report(identity, verdict);
+                }
             }
         }
         map_status(response)
@@ -2516,6 +2539,133 @@ mod tests {
 
     const REFRESH_REFUSED: &str =
         r#"{"error":{"message":"Invalid or expired refresh token","code":"INVALID_REFRESH_TOKEN"}}"#;
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn an_obsolete_device_replay_under_clock_skew_does_not_refuse_the_current_session() {
+        use base64::Engine as _;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        struct ClockSkewTransport {
+            expiry: i64,
+            active: AtomicUsize,
+            device_calls: AtomicUsize,
+            first_sent: tokio::sync::Notify,
+            first_reply: tokio::sync::Notify,
+            replay_sent: tokio::sync::Notify,
+            replay_reply: tokio::sync::Notify,
+        }
+
+        impl ClockSkewTransport {
+            fn token(&self, index: usize) -> String {
+                let payload = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(format!(
+                    r#"{{"exp":{},"session":"s{index}"}}"#,
+                    self.expiry
+                ));
+                format!("header.{payload}.sig")
+            }
+        }
+
+        #[async_trait]
+        impl HttpTransport for ClockSkewTransport {
+            async fn send(&self, request: ApiRequest) -> Result<ApiResponse, ApiError> {
+                if request.url.ends_with("auth/refresh") {
+                    let index = self.active.fetch_add(1, Ordering::SeqCst) + 1;
+                    return json(200, &serde_json::json!({
+                        "accessToken": self.token(index),
+                        "refreshToken": format!("r{index}")
+                    }).to_string());
+                }
+                if request.url.ends_with("/devices") {
+                    if self.device_calls.fetch_add(1, Ordering::SeqCst) == 0 {
+                        self.first_sent.notify_one();
+                        self.first_reply.notified().await;
+                    } else {
+                        self.replay_sent.notify_one();
+                        self.replay_reply.notified().await;
+                    }
+                }
+                // Each refresh revokes its predecessor, matching the control plane.
+                if request.bearer.as_deref() != Some(self.token(self.active.load(Ordering::SeqCst)).as_str()) {
+                    return json(401, r#"{"error":{"code":"AUTHENTICATION_FAILED"}}"#);
+                }
+                if request.url.ends_with("/me") {
+                    json(200, &format!(r#"{{"user":{}}}"#, user_json()))
+                } else {
+                    json(200, r#"{"devices":[]}"#)
+                }
+            }
+        }
+
+        let transport = Arc::new(ClockSkewTransport {
+            // A server-valid JWT looks expired when the system clock is ahead of its lifetime.
+            expiry: unix_now_secs() - 1,
+            active: AtomicUsize::new(0),
+            device_calls: AtomicUsize::new(0),
+            first_sent: tokio::sync::Notify::new(),
+            first_reply: tokio::sync::Notify::new(),
+            replay_sent: tokio::sync::Notify::new(),
+            replay_reply: tokio::sync::Notify::new(),
+        });
+        let verdicts = Arc::new(Verdicts::default());
+        let client = Arc::new(ApiClient::new(
+            DEFAULT_BASE_URL, transport.clone(), Arc::new(MemoryCredentialStore::new()),
+        ).unwrap().with_verdict_sink(verdicts.clone()));
+        client.adopt(&auth_response(&transport.token(0), Some("r0"))).await.unwrap();
+        let devices = tokio::spawn({
+            let client = client.clone();
+            async move { client.devices().await }
+        });
+        tokio::time::timeout(Duration::from_secs(2), transport.first_sent.notified()).await.unwrap();
+        client.me().await.unwrap();
+        transport.first_reply.notify_one();
+        tokio::time::timeout(Duration::from_secs(2), transport.replay_sent.notified()).await.unwrap();
+        client.me().await.unwrap();
+        transport.replay_reply.notify_one();
+        let response = tokio::time::timeout(Duration::from_secs(2), devices).await.unwrap().unwrap();
+        assert!(matches!(response.unwrap_err(), ApiError::Server { status: 401, .. }));
+        assert_eq!(transport.active.load(Ordering::SeqCst), 3);
+        assert!(verdicts.0.lock().unwrap().iter().all(|(_, verdict)| {
+            !matches!(verdict, SessionVerdict::Refused { .. })
+        }), "obsolete replay must not permanently refuse a valid rotated session");
+    }
+
+    #[tokio::test]
+    async fn a_current_replay_401_still_refuses_the_session() {
+        let (client, _, _) = test_client(|request| {
+            if request.url.ends_with("auth/refresh") {
+                return json(200, r#"{"accessToken":"current","refreshToken":"refresh-2"}"#);
+            }
+            json(401, r#"{"error":{"code":"AUTHENTICATION_FAILED"}}"#)
+        });
+        let verdicts = Arc::new(Verdicts::default());
+        let client = client.with_verdict_sink(verdicts.clone());
+        client.adopt(&auth_response("old", Some("refresh-1"))).await.unwrap();
+        assert_eq!(client.me().await.unwrap_err(), ApiError::Unauthorized);
+        assert!(verdicts.0.lock().unwrap().iter().any(|(_, verdict)| {
+            matches!(verdict, SessionVerdict::Refused { .. })
+        }), "a refusal of the current refreshed token must remain authoritative");
+    }
+
+    #[tokio::test]
+    async fn a_replay_401_without_a_committed_successor_still_refuses_the_session() {
+        let (client, _, _) = test_client(|_| {
+            json(401, r#"{"error":{"code":"AUTHENTICATION_FAILED"}}"#)
+        });
+        let verdicts = Arc::new(Verdicts::default());
+        let client = client.with_verdict_sink(verdicts.clone());
+        client.adopt(&auth_response("current", Some("refresh-1"))).await.unwrap();
+        let identity = client.diagnostics_log_identity().await;
+        // Another first-401 handler clears the bearer before its refresh has committed.
+        // That alone does not prove an accepted successor to this replay's token exists.
+        client.state.lock().await.access_token = None;
+        let response = client.send(
+            HttpMethod::Get, endpoints::ME, None, Some("current"), SessionUse::Decisive(identity),
+        ).await;
+        assert_eq!(response.unwrap_err(), ApiError::Unauthorized);
+        assert!(verdicts.0.lock().unwrap().iter().any(|(_, verdict)| {
+            matches!(verdict, SessionVerdict::Refused { .. })
+        }), "only a committed different token can supersede a decisive refusal");
+    }
 
     /// #582 T1: a refusal that only the transport retry heard still reaches the
     /// sink, once; the first attempt's stale-token 401 is not a refusal.

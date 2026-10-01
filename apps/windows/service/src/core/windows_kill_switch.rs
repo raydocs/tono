@@ -90,11 +90,17 @@ struct IntentRecord {
     /// any authenticated owner (see `authorize_write_for`).
     #[serde(default)]
     owner_key: Option<String>,
-    /// Explicit strict kill switch. Missing or false means a crash, hang, or corrupt record
-    /// releases general traffic. Only `true` keeps a block, and a bounded unhealthy streak
-    /// still releases so that choice cannot brick the machine.
+    /// Explicit strict kill switch. Missing or false means a crash, hang, corrupt record,
+    /// or an unproven restored wanted session releases general traffic. Only `true` keeps
+    /// a block, and a bounded unhealthy streak still releases so that choice cannot brick
+    /// the machine. Production never writes `true`. Absent on older records, which stay
+    /// non-strict.
     #[serde(default)]
     strict_kill_switch: bool,
+    /// Crash-window tombstone only. A user disconnect leaves this false so startup still
+    /// consumes the record. The app treats `wanted: false` plus this flag as "reconnect".
+    #[serde(default)]
+    reconnect_after_release: bool,
 }
 
 impl IntentRecord {
@@ -164,6 +170,7 @@ enum DirectReloadPhase {
     Bracket,
     Pending,
     Committed,
+    Retracting,
 }
 
 #[derive(Debug, Clone)]
@@ -274,6 +281,205 @@ const WATCHDOG_PERIOD: std::time::Duration = std::time::Duration::from_secs(1);
 /// seconds, well inside the app's own reconnect budget.
 const VERIFY_CACHE_TTL: std::time::Duration = std::time::Duration::from_secs(5);
 
+/// Calibration knob. Needs real-hardware calibration.
+///
+/// Used only when Core is already running or this boot will start it. Thirty seconds
+/// matches the macOS helper's idle release (three checks, ten seconds apart). A Core
+/// that is neither running nor starting does not wait: the block is released immediately.
+const WANTED_CORE_PROOF_WINDOW: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// A newly admitted Connect has a 310-second App deadline. Give it the same seven-minute
+/// grace as a DIRECT bracket, then retire an attempt whose App never commits verification.
+/// Unlike startup recovery, Core may not have been published yet when this window starts.
+const FRESH_ARM_PROOF_WINDOW: std::time::Duration = std::time::Duration::from_secs(7 * 60);
+static FRESH_ARM_PROOF_PENDING: AtomicBool = AtomicBool::new(false);
+/// Committed DIRECT expiry must retire its Service-owned Core before opening general traffic.
+/// A late Lock/MarkVerified from the expired session cannot cancel that retirement.
+static DIRECT_EXPIRY_RETIREMENT_PENDING: AtomicBool = AtomicBool::new(false);
+static FRESH_ARM_EPOCH: AtomicU64 = AtomicU64::new(0);
+
+/// Bind a Core watchdog to the arm that admitted it. A successor arms before joining the
+/// previous watchdog, so neither an owner key nor the absence of a Core fences old cleanup.
+pub(crate) fn core_arm_epoch() -> u64 {
+    FRESH_ARM_EPOCH.load(Ordering::Acquire)
+}
+
+/// Queue exhausted recovery for the independent WFP watchdog. The Core watchdog must finish
+/// without taking owner lifecycle: a Start/Stop can hold it while joining that same task.
+pub(crate) async fn note_core_recovery_exhausted(epoch: u64) {
+    if !SUPPORTED {
+        return;
+    }
+    let _operation = WFP_OPERATION.lock().await;
+    if core_arm_epoch() != epoch || current_core_instance_for_direct_security().is_some() {
+        return;
+    }
+    if !armed_guard().as_ref().is_some_and(|armed| {
+        armed.intent.wanted && !armed.intent.strict_kill_switch && armed.intent.owner_key.is_some()
+    }) {
+        return;
+    }
+    // Reuse the epoch-fenced lifecycle cleanup, including desired-owner retirement, installer
+    // and update admission, and the secondary AI hold. Failed cleanup remains retryable.
+    *WANTED_CORE_DEADLINE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(std::time::Instant::now());
+    FRESH_ARM_PROOF_PENDING.store(true, Ordering::Release);
+}
+
+/// This boot's desired state will start Core, and that start has not settled yet.
+/// The watchdog treats it as "starting" so a same-boot replay is not released before
+/// `start_core` runs. Cleared when desired-state restore finishes.
+static CORE_REPLAY_EXPECTED: AtomicBool = AtomicBool::new(false);
+
+/// Tests pretend a Core start is in flight without a process.
+#[cfg(test)]
+static TEST_CORE_STARTING: AtomicBool = AtomicBool::new(false);
+
+/// Expiry of the core-proof window for the verified wanted intent restored by this process.
+/// `None` means the window is not running (strict opt-in, unverified recovery, a proven
+/// tunnel, or an explicit release).
+static WANTED_CORE_DEADLINE: Lazy<Mutex<Option<std::time::Instant>>> = Lazy::new(|| Mutex::new(None));
+
+/// In-memory copy of a crash-window tombstone's reconnect flag. Status reports it after
+/// `ARMED` is cleared; the on-disk tombstone restores it across a Service restart.
+static RECONNECT_AFTER_RELEASE: AtomicBool = AtomicBool::new(false);
+
+/// WFP is already gone but the crash-window tombstone write failed. The watchdog retries
+/// the write without reinstalling the block.
+static CRASH_TOMBSTONE_PENDING: AtomicBool = AtomicBool::new(false);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum WantedCoreWindow {
+    /// Strict opt-in, or still inside the window: leave the restored block.
+    Keep,
+    /// Core is running, the session is verified and Locked, and the tunnel permit is up.
+    Proven,
+    /// The window elapsed without that proof, or Core is neither running nor starting.
+    Release,
+}
+
+fn restored_connection_proven(
+    core_running: bool,
+    verified: bool,
+    mode: KillSwitchStatusMode,
+    tunnel_permit_rendered: bool,
+) -> bool {
+    core_running && verified && mode == KillSwitchStatusMode::Locked && tunnel_permit_rendered
+}
+
+fn wanted_core_window_action(
+    strict_kill_switch: bool,
+    core_running_or_starting: bool,
+    deadline_reached: bool,
+    connection_proven: bool,
+) -> WantedCoreWindow {
+    if strict_kill_switch {
+        return WantedCoreWindow::Keep;
+    }
+    if connection_proven {
+        return WantedCoreWindow::Proven;
+    }
+    // No process and nothing about to start one: do not wait out the cap.
+    if !core_running_or_starting || deadline_reached {
+        return WantedCoreWindow::Release;
+    }
+    WantedCoreWindow::Keep
+}
+
+fn core_is_running_or_starting(running: bool, replay_expected: bool) -> bool {
+    if running || replay_expected {
+        return true;
+    }
+    #[cfg(test)]
+    if TEST_CORE_STARTING.load(Ordering::Relaxed) {
+        return true;
+    }
+    false
+}
+
+fn core_still_expected(running: bool) -> bool {
+    core_is_running_or_starting(running, CORE_REPLAY_EXPECTED.load(Ordering::Relaxed))
+}
+
+fn clear_wanted_core_window() {
+    DIRECT_EXPIRY_RETIREMENT_PENDING.store(false, Ordering::Release);
+    FRESH_ARM_PROOF_PENDING.store(false, Ordering::Release);
+    *WANTED_CORE_DEADLINE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+}
+
+fn note_fresh_arm_core_window(intent: &IntentRecord) {
+    clear_wanted_core_window();
+    FRESH_ARM_EPOCH.fetch_add(1, Ordering::AcqRel);
+    if !intent.strict_kill_switch {
+        *WANTED_CORE_DEADLINE
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) =
+            Some(std::time::Instant::now() + FRESH_ARM_PROOF_WINDOW);
+        FRESH_ARM_PROOF_PENDING.store(true, Ordering::Release);
+    }
+}
+
+/// Called after acquiring the owner lifecycle lock. An expired or exhausted worker may only
+/// retire the exact arm it observed; verification, release, or a successor arm revokes it.
+pub(super) fn expired_fresh_arm_owner(epoch: u64) -> Option<String> {
+    if !FRESH_ARM_PROOF_PENDING.load(Ordering::Acquire)
+        || FRESH_ARM_EPOCH.load(Ordering::Acquire) != epoch
+        || !wanted_core_deadline_reached(std::time::Instant::now())
+    {
+        return None;
+    }
+    armed_guard()
+        .as_ref()
+        .filter(|armed| armed.intent.wanted && !armed.intent.strict_kill_switch)
+        .and_then(|armed| armed.intent.owner_key.clone())
+}
+
+pub(super) async fn release_expired_fresh_arm(epoch: u64) -> Result<()> {
+    let _operation = WFP_OPERATION.lock().await;
+    if expired_fresh_arm_owner(epoch).is_none() {
+        return Ok(());
+    }
+    release_unproven_wanted_session_unlocked().await
+}
+
+/// Reuse the epoch-fenced owner lifecycle cleanup after committed DIRECT expiry. Caller holds
+/// WFP_OPERATION and has already proved exact Blocked. Core owns its own routes and strict-route
+/// WFP session, so removing only Tono's filters cannot complete selective fallback.
+fn queue_direct_expiry_retirement() -> bool {
+    if !armed_guard().as_ref().is_some_and(|armed| {
+        armed.intent.wanted && !armed.intent.strict_kill_switch && armed.intent.owner_key.is_some()
+    }) {
+        return false;
+    }
+    DIRECT_EXPIRY_RETIREMENT_PENDING.store(true, Ordering::Release);
+    *WANTED_CORE_DEADLINE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(std::time::Instant::now());
+    FRESH_ARM_PROOF_PENDING.store(true, Ordering::Release);
+    true
+}
+
+fn note_wanted_core_window(intent: &IntentRecord) {
+    let mut deadline = WANTED_CORE_DEADLINE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if intent.strict_kill_switch || !intent.wanted || !intent.is_verified() {
+        *deadline = None;
+        return;
+    }
+    *deadline = Some(std::time::Instant::now() + WANTED_CORE_PROOF_WINDOW);
+}
+
+fn wanted_core_deadline_reached(now: std::time::Instant) -> bool {
+    WANTED_CORE_DEADLINE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .is_some_and(|deadline| now >= deadline)
+}
+
 /// Stable, App-mappable marker for "the WFP engine stopped answering". The App keys its i18n
 /// off prefixes like `TONO_SERVICE_BUSY` by substring, and every handler wraps this message in
 /// its own context ("Failed to arm Windows kill switch: …"), so the marker has to survive
@@ -293,6 +499,19 @@ const DNS_RESTORE_STALLED_PREFIX: &str = "TONO_DNS_RESTORE_STALLED";
 /// the module's own worst case fits inside this and the bound only fires on a genuine stall. It
 /// also stays under the IPC handler's 60 s budget, so the refusal still reaches the client.
 const DNS_RESTORE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(40);
+
+/// SCM `StopPending` hint posted by the service. Stop is accepted before startup
+/// finishes, and startup can still be inside this DNS budget — twice, when an
+/// unverified barrier is retired. One post of the hint does not cover that.
+/// The service refreshes the checkpoint on [`SCM_STOP_HINT_REFRESH`], which has
+/// to land inside one DNS budget and inside the posted hint or SCM kills the
+/// process mid-restore.
+pub const SCM_STOP_WAIT_HINT: std::time::Duration = std::time::Duration::from_secs(65);
+pub const SCM_STOP_HINT_REFRESH: std::time::Duration = std::time::Duration::from_secs(15);
+
+pub fn stop_pending_refresh_due(elapsed_since_last_post: std::time::Duration) -> bool {
+    elapsed_since_last_post >= SCM_STOP_HINT_REFRESH
+}
 
 /// Budget for the uninstall-only DNS escalation ladder (`dns::restore_for_uninstall`), which is
 /// up to two full restore rounds back to back — the exact restore, then the automatic (DHCP)
@@ -375,22 +594,36 @@ fn spawn_startup_release_retry() {
                 drop(running);
                 return;
             }
-            let new_session_wanted = tokio::fs::read(intent_path())
+            let intent = tokio::fs::read(intent_path())
                 .await
                 .ok()
-                .and_then(|bytes| serde_json::from_slice::<IntentRecord>(&bytes).ok())
-                .is_some_and(|intent| intent.wanted);
-            if new_session_wanted {
+                .and_then(|bytes| serde_json::from_slice::<IntentRecord>(&bytes).ok());
+            if intent.as_ref().is_some_and(|intent| {
+                intent.wanted && (intent_is_valid(intent) || intent.strict_kill_switch)
+            }) {
                 drop(running);
                 return;
             }
             let release: Result<()> = async {
+                if intent.as_ref().is_none_or(|intent| intent.wanted) {
+                    // Incomplete non-strict evidence needs its startup AI hold and retention.
+                    // A newer valid or explicitly strict record was gated above.
+                    return release_general_traffic_unlocked(
+                        "startup incomplete-intent release retry",
+                    )
+                    .await;
+                }
                 remove_all_filters_unlocked().await?;
                 sweep_legacy_sublayers_unlocked().await;
-                match tokio::fs::remove_file(intent_path()).await {
-                    Ok(()) => {}
-                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-                    Err(error) => return Err(error.into()),
+                if intent.is_some_and(|intent| intent.reconnect_after_release) {
+                    // A retry must retain the same crash-reconnect intent as normal startup.
+                    RECONNECT_AFTER_RELEASE.store(true, Ordering::Release);
+                } else {
+                    match tokio::fs::remove_file(intent_path()).await {
+                        Ok(()) => {}
+                        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                        Err(error) => return Err(error.into()),
+                    }
                 }
                 *armed_guard() = None;
                 TUNNEL_PERMIT_RENDERED.store(false, Ordering::Relaxed);
@@ -563,7 +796,14 @@ fn disarmed_tombstone() -> IntentRecord {
         updated_at: now_unix(),
         owner_key: None,
         strict_kill_switch: false,
+        reconnect_after_release: false,
     }
+}
+
+fn crash_recovery_tombstone() -> IntentRecord {
+    let mut tombstone = disarmed_tombstone();
+    tombstone.reconnect_after_release = true;
+    tombstone
 }
 
 async fn persist_disarmed_tombstone() -> Result<()> {
@@ -1080,8 +1320,6 @@ async fn install_unlocked(armed: &Armed) -> Result<()> {
 /// from *that* read — see [`rule_config_rendering`]. `lock` is the only such caller, and it is
 /// the one where a second, disagreeing read is terminal.
 async fn install_unlocked_for(armed: &Armed, current_core: Option<CoreInstance>) -> Result<()> {
-    // A new arm must not leave crash-time AI names pointed at the sinkhole.
-    crate::core::selective_layer::remove().await;
     let config = rule_config_rendering(armed, current_core);
     let tunnel_permit_expected = config.tun_luid.is_some();
     let expected = wfp_model::expected_filters(&config);
@@ -1099,6 +1337,8 @@ async fn install_unlocked_for(armed: &Armed, current_core: Option<CoreInstance>)
         note_verify(result.is_ok());
         if result.is_ok() {
             RESTORED_BARRIER_UNPROVEN.store(false, Ordering::Release);
+            // Retire the crash-time AI hold only after its replacement is proven.
+            crate::core::selective_layer::remove().await;
         }
         result
     }
@@ -1124,6 +1364,7 @@ async fn install_unlocked_for(armed: &Armed, current_core: Option<CoreInstance>)
         }
         TUNNEL_PERMIT_RENDERED.store(tunnel_permit_expected, Ordering::Relaxed);
         RESTORED_BARRIER_UNPROVEN.store(false, Ordering::Release);
+        crate::core::selective_layer::remove().await;
         Ok(())
     }
 }
@@ -1345,6 +1586,7 @@ pub(crate) async fn arm_bootstrap(
             updated_at: now_unix(),
             owner_key: Some(owner_key.to_owned()),
             strict_kill_switch: false,
+            reconnect_after_release: false,
         },
         tun_luid: None,
         core_instance: None,
@@ -1356,7 +1598,10 @@ pub(crate) async fn arm_bootstrap(
     // Persist fail-closed intent before touching WFP: a daemon restart installs at least the
     // floor if this process dies during the following transaction.
     atomic_write(&intent_path(), &serde_json::to_vec_pretty(&armed.intent)?).await?;
+    CRASH_TOMBSTONE_PENDING.store(false, Ordering::Release);
+    RECONNECT_AFTER_RELEASE.store(false, Ordering::Release);
     *armed_guard() = Some(armed.clone());
+    note_fresh_arm_core_window(&armed.intent);
     record_outcome(install_unlocked(&armed).await)
 }
 
@@ -1365,6 +1610,9 @@ pub(crate) async fn mark_verified(owner_key: &str) -> Result<()> {
     ensure_supported()?;
     let _operation = WFP_OPERATION.lock().await;
     let mut armed = armed_guard().clone().context("kill switch is not armed")?;
+    if DIRECT_EXPIRY_RETIREMENT_PENDING.load(Ordering::Acquire) {
+        bail!("expired DIRECT session is retiring Core; a fresh Connect is required");
+    }
     if armed.intent.owner_key.as_deref() != Some(owner_key) {
         bail!("kill switch belongs to a different owner");
     }
@@ -1372,12 +1620,14 @@ pub(crate) async fn mark_verified(owner_key: &str) -> Result<()> {
         bail!("kill switch must be locked before verification");
     }
     if armed.intent.is_verified() && armed.intent.verified == Some(true) {
+        clear_wanted_core_window();
         return Ok(());
     }
     armed.intent.verified = Some(true);
     armed.intent.updated_at = now_unix();
     atomic_write(&intent_path(), &serde_json::to_vec_pretty(&armed.intent)?).await?;
     *armed_guard() = Some(armed);
+    clear_wanted_core_window();
     Ok(())
 }
 
@@ -1815,6 +2065,9 @@ pub(crate) async fn lock(tunnel_interface: Option<&str>) -> Result<()> {
 /// Perform the tunnel lock while [`WFP_OPERATION`] is held. Once an install succeeds, publish its
 /// candidate immediately so every later error can reconcile the set that may actually be live.
 async fn lock_unlocked(tunnel_interface: Option<&str>) -> Result<()> {
+    if DIRECT_EXPIRY_RETIREMENT_PENDING.load(Ordering::Acquire) {
+        bail!("expired DIRECT session is retiring Core; a fresh Connect is required");
+    }
     // Same poison contract as every other mutation: a prior panic while `ARMED` was held must
     // not make the next tunnel lock panic the IPC task. `mark_verified` is the sibling path.
     let mut armed = armed_guard()
@@ -1965,6 +2218,10 @@ fn direct_reload_matches(
     Ok(lease)
 }
 
+#[derive(Debug, thiserror::Error)]
+#[error("live WFP is Blocked but the DIRECT intent could not be persisted")]
+struct DirectBlockedIntentPersistenceFailure;
+
 /// Reconcile to exact Blocked without publishing a state stricter than live WFP proved.
 ///
 /// The Blocked intent is attempted first so a Service restart cannot revive volatile DIRECT
@@ -2024,7 +2281,7 @@ async fn transition_direct_to_blocked_unlocked(
         }
         (Ok(()), Err(error)) => {
             *last_error_guard() = Some(format!("{error:#}"));
-            Err(error.context("live WFP is Blocked but the DIRECT intent could not be persisted"))
+            Err(error.context(DirectBlockedIntentPersistenceFailure))
         }
         (Err(install), Err(persist)) => {
             let message = format!(
@@ -2439,9 +2696,19 @@ pub(crate) async fn retract_direct_before_core_replacement() -> Result<()> {
     // Even an empty volatile receipt is not proof that live WFP is empty: session filters survive
     // a Service-process restart while BFE remains running, and startup's first exact install may
     // have failed. Always overwrite the provider set before allowing the same App-ID path to run.
-    transition_direct_to_blocked_unlocked(armed, None, None)
-        .await
-        .context("could not prove exact Blocked WFP before replacing Core; replacement is refused")
+    match transition_direct_to_blocked_unlocked(armed, None, None).await {
+        // Volatile DIRECT grants cannot be restored by an older intent. Once live WFP is
+        // exact Blocked, a full disk or state-directory ACL must not prevent Disconnect.
+        Err(error) if error.is::<DirectBlockedIntentPersistenceFailure>() => {
+            tracing::warn!(
+                "wfp: exact Blocked WFP was proved before replacing Core; continuing despite intent persistence failure: {error:#}"
+            );
+            Ok(())
+        }
+        result => result.context(
+            "could not prove exact Blocked WFP before replacing Core; replacement is refused",
+        ),
+    }
 }
 
 /// Disconnected-but-armed ("Protected Offline"): floor + endpoint/DNS rules stay, the API
@@ -2510,6 +2777,11 @@ async fn bounded_dns_call_within<T>(
 
 /// Normal release — only on explicit user request. See the DNS-before-disarm invariant.
 async fn disarm_unlocked(apply_narrow: bool) -> Result<()> {
+    disarm_unlocked_with_narrow(Some(apply_narrow)).await
+}
+
+/// `None` preserves the existing AI disposition during an already-idle Service stop.
+async fn disarm_unlocked_with_narrow(apply_narrow: Option<bool>) -> Result<()> {
     let previous = armed_guard().clone();
     let Some(previous) = previous else {
         // Not armed: still sweep possible residuals so a half-failed earlier run cannot
@@ -2532,7 +2804,13 @@ async fn disarm_unlocked(apply_narrow: bool) -> Result<()> {
         }
         // Filters are already gone. The secondary layer must not be able to
         // fail this release or put a general block back.
-        crate::core::selective_layer::finish_release(apply_narrow).await;
+        if let Some(apply_narrow) = apply_narrow {
+            crate::core::selective_layer::finish_release(apply_narrow).await;
+        }
+        clear_wanted_core_window();
+        // This successful release supersedes any older crash-record retry.
+        CRASH_TOMBSTONE_PENDING.store(false, Ordering::Release);
+        RECONNECT_AFTER_RELEASE.store(false, Ordering::Release);
         return Ok(());
     };
     // DNS-before-disarm invariant (identical to the macOS helper): the network may open only
@@ -2550,36 +2828,181 @@ async fn disarm_unlocked(apply_narrow: bool) -> Result<()> {
         let _ = install_unlocked(&previous).await;
         return Err(error.context("failed to remove kill-switch filters; protection restored"));
     }
-    if let Err(error) = persist_disarmed_tombstone().await {
-        // The old wanted intent is still the only durable recovery evidence if writing the
-        // replacement tombstone failed. Put it back before reinstalling the previous policy;
-        // otherwise a later Service restart could open a release that this call reports failed.
-        let restore_intent = atomic_write(
-            &intent_path(),
-            &serde_json::to_vec_pretty(&previous.intent)?,
-        )
-        .await;
-        let restore_filters = install_unlocked(&previous).await;
-        restore_intent.context(
-            "network opened and the disarmed tombstone could not be written; failed to restore the wanted intent",
-        )?;
-        restore_filters.context(
-            "network opened and the disarmed tombstone could not be written; failed to restore protection",
-        )?;
-        return Err(error)
-            .context("network opened but the disarmed tombstone could not be written");
-    }
+    // The tombstone tells a later Service start this release won (see `disarmed_tombstone`).
+    // When it cannot be written the release is still final: the filters are proven gone and
+    // DNS is proven restored, and putting the previous policy back would re-block the machine
+    // on every Disconnect for as long as the write keeps failing — a fail-open violation with
+    // no strict kill switch to justify it. The next-best durable state is no wanted intent at
+    // all (the contract `restore_on_service_start` already understands); only if even that
+    // removal fails does a stale wanted record survive, and a later Service start may then
+    // restore it — reported through `last_error`, never by reinstalling the block.
+    let tombstone_note = match persist_disarmed_tombstone().await {
+        Ok(()) => None,
+        Err(error) => {
+            tracing::error!(
+                "Windows kill switch: the disarmed tombstone could not be written ({error:#}); \
+                 staying released and removing the wanted intent instead"
+            );
+            let intent_removed = match tokio::fs::remove_file(intent_path()).await {
+                Ok(()) => true,
+                Err(remove_error) if remove_error.kind() == std::io::ErrorKind::NotFound => true,
+                Err(remove_error) => {
+                    tracing::error!(
+                        "Windows kill switch: the wanted intent could not be removed either \
+                         ({remove_error}); a later Service start may re-arm it"
+                    );
+                    false
+                }
+            };
+            Some(if intent_removed {
+                format!(
+                    "network was released, but recording the release failed ({error:#}); the \
+                     wanted kill-switch intent was removed instead of replaced by a tombstone"
+                )
+            } else {
+                format!(
+                    "network was released, but recording the release failed ({error:#}) and the \
+                     wanted intent survived: the next Service start may re-arm it — disconnect \
+                     again once the Service has restarted"
+                )
+            })
+        }
+    };
     *armed_guard() = None;
-    *last_error_guard() = None;
+    *last_error_guard() = tombstone_note;
     TUNNEL_PERMIT_RENDERED.store(false, Ordering::Relaxed);
-    crate::core::selective_layer::finish_release(apply_narrow).await;
+    if let Some(apply_narrow) = apply_narrow {
+        crate::core::selective_layer::finish_release(apply_narrow).await;
+    }
+    clear_wanted_core_window();
+    CRASH_TOMBSTONE_PENDING.store(false, Ordering::Release);
+    RECONNECT_AFTER_RELEASE.store(false, Ordering::Release);
     Ok(())
+}
+
+/// Open the network after the core-proof window. DNS is best-effort: a restore that cannot
+/// be proven must not keep the block, because Core is not coming back to answer loopback.
+/// Filter removal failure leaves `ARMED` set so the next tick retries. A tombstone failure
+/// after the filters are gone does not reinstall them.
+async fn release_unproven_wanted_session_unlocked() -> Result<()> {
+    if let Err(error) = bounded_dns_call(
+        "wanted session core window",
+        crate::core::dns::ensure_restored(),
+    )
+    .await
+    {
+        tracing::warn!(
+            "wanted-session core window: DNS restore could not be proven; still removing WFP: {error:#}"
+        );
+        *last_error_guard() = Some(format!(
+            "wanted-session core window opened the network but DNS restore could not be proven: {error:#}"
+        ));
+    }
+    remove_all_filters_unlocked().await.context(
+        "wanted-session core window could not remove WFP; the block stays until the next tick",
+    )?;
+    clear_wanted_core_window();
+    *armed_guard() = None;
+    TUNNEL_PERMIT_RENDERED.store(false, Ordering::Relaxed);
+    RECONNECT_AFTER_RELEASE.store(true, Ordering::Release);
+    // WFP is already gone. Recovery keeps only the existing narrow AI hold;
+    // its best-effort installation cannot refuse or undo the general release.
+    crate::core::selective_layer::finish_release(true).await;
+    let tombstone = crash_recovery_tombstone();
+    match atomic_write(&intent_path(), &serde_json::to_vec_pretty(&tombstone)?).await {
+        Ok(()) => {
+            CRASH_TOMBSTONE_PENDING.store(false, Ordering::Release);
+            Ok(())
+        }
+        Err(error) => {
+            CRASH_TOMBSTONE_PENDING.store(true, Ordering::Release);
+            Err(error).context(
+                "WFP was removed but the crash-recovery tombstone could not be written",
+            )
+        }
+    }
+}
+
+async fn retry_crash_tombstone_unlocked() {
+    if !CRASH_TOMBSTONE_PENDING.load(Ordering::Acquire) {
+        return;
+    }
+    if armed_guard().is_some() {
+        CRASH_TOMBSTONE_PENDING.store(false, Ordering::Release);
+        return;
+    }
+    let tombstone = crash_recovery_tombstone();
+    match serde_json::to_vec_pretty(&tombstone) {
+        Ok(encoded) => match atomic_write(&intent_path(), &encoded).await {
+            Ok(()) => CRASH_TOMBSTONE_PENDING.store(false, Ordering::Release),
+            Err(error) => tracing::warn!(
+                "wanted-session core window: crash-recovery tombstone still unwritten: {error:#}"
+            ),
+        },
+        Err(error) => tracing::warn!(
+            "wanted-session core window: crash-recovery tombstone could not be encoded: {error:#}"
+        ),
+    }
+}
+
+/// One watchdog step for a restored verified wanted session. Caller holds `WFP_OPERATION`.
+async fn reconcile_wanted_core_window_unlocked() -> Result<WantedCoreWindow> {
+    retry_crash_tombstone_unlocked().await;
+    let Some(armed) = armed_guard().clone() else {
+        return Ok(WantedCoreWindow::Keep);
+    };
+    let watching = WANTED_CORE_DEADLINE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .is_some();
+    if !watching {
+        return Ok(WantedCoreWindow::Keep);
+    }
+    let running = current_core_instance().await.is_some();
+    let fresh_arm = FRESH_ARM_PROOF_PENDING.load(Ordering::Acquire);
+    let proven = !fresh_arm
+        && restored_connection_proven(
+            running,
+            armed.intent.is_verified(),
+            armed.intent.mode,
+            TUNNEL_PERMIT_RENDERED.load(Ordering::Relaxed),
+        );
+    let action = wanted_core_window_action(
+        armed.intent.strict_kill_switch,
+        fresh_arm || core_still_expected(running),
+        wanted_core_deadline_reached(std::time::Instant::now()),
+        proven,
+    );
+    match action {
+        WantedCoreWindow::Proven => clear_wanted_core_window(),
+        // A fresh arm can own a live, unverified TUN Core. Its lifecycle worker must stop
+        // that Core and retire the run intent outside WFP_OPERATION before opening WFP.
+        WantedCoreWindow::Release if !fresh_arm => {
+            release_unproven_wanted_session_unlocked().await?
+        }
+        WantedCoreWindow::Release => {}
+        WantedCoreWindow::Keep => {}
+    }
+    Ok(action)
+}
+
+/// Desired-state restore has finished, or was skipped. A Core that is still
+/// neither running nor starting is released on this call instead of waiting
+/// out [`WANTED_CORE_PROOF_WINDOW`].
+pub async fn note_core_replay_finished() -> Result<()> {
+    if !SUPPORTED {
+        return Ok(());
+    }
+    CORE_REPLAY_EXPECTED.store(false, Ordering::Release);
+    let _operation = WFP_OPERATION.lock().await;
+    reconcile_wanted_core_window_unlocked().await.map(|_| ())
 }
 
 /// `POST /kill-switch/release`: the explicit user-requested disarm. Idempotent — not armed
 /// is a successful no-op that still sweeps residuals — and shares the DNS-before-disarm
 /// invariant via `disarm_unlocked`: when DNS restore cannot be proven the release is refused
-/// and the block stays armed.
+/// and the block stays armed. StartClash also rolls a bootstrap arm it just made back through
+/// here when the start itself fails, so the arm can never outlive its start.
 #[cfg_attr(not(windows), allow(dead_code))] // the route helper is cfg(windows); tests use it
 pub(crate) async fn release() -> Result<KillSwitchStatus> {
     release_with(false).await
@@ -2589,6 +3012,30 @@ pub(crate) async fn release() -> Result<KillSwitchStatus> {
 /// disconnect use [`release`] and do not pass true.
 pub(crate) async fn release_applying_narrow() -> Result<KillSwitchStatus> {
     release_with(true).await
+}
+
+#[cfg_attr(not(windows), allow(dead_code))]
+pub(crate) async fn release_after_service_stop() -> Result<()> {
+    ensure_supported()?;
+    let _operation = WFP_OPERATION.lock().await;
+    let apply_narrow = {
+        let armed = armed_guard();
+        if armed
+            .as_ref()
+            .is_some_and(|armed| armed.intent.strict_kill_switch)
+        {
+            return Ok(());
+        }
+        // An armed session stopped automatically keeps the AI hold. Idle Stop preserves
+        // either the previous crash hold or an explicit Restore's absent hold.
+        armed
+            .as_ref()
+            .is_some_and(|armed| armed.intent.wanted)
+            .then_some(true)
+    };
+    disarm_unlocked_with_narrow(apply_narrow).await?;
+    note_explicit_release();
+    Ok(())
 }
 
 async fn release_with(apply_narrow: bool) -> Result<KillSwitchStatus> {
@@ -2617,7 +3064,7 @@ pub(crate) async fn transition_after_stop(release_requested: bool) -> Result<()>
     restrict_bootstrap_unlocked().await
 }
 
-#[cfg(windows)]
+#[cfg(any(windows, test))]
 pub(crate) fn strict_kill_switch_enabled() -> bool {
     armed_guard()
         .as_ref()
@@ -2696,7 +3143,19 @@ async fn release_general_traffic_unlocked(reason: &str) -> Result<()> {
     TUNNEL_PERMIT_RENDERED.store(false, Ordering::Relaxed);
     RESTORED_BARRIER_UNPROVEN.store(false, Ordering::Release);
     note_verify(false);
+    // Crash/corrupt-state recovery must retain the secondary AI floor just like
+    // other non-strict failure releases, after the general block is removed.
+    crate::core::selective_layer::finish_release(true).await;
     Ok(())
+}
+
+async fn release_general_traffic_on_startup_unlocked(reason: &str) -> Result<()> {
+    let result = release_general_traffic_unlocked(reason).await;
+    if result.is_err() && armed_guard().is_none() {
+        // No in-memory intent exists for the watchdog to reconcile after this startup failure.
+        spawn_startup_release_retry();
+    }
+    result
 }
 
 async fn release_unhealthy_session_unlocked(reason: &str) -> Result<()> {
@@ -2724,6 +3183,7 @@ fn emergency_armed() -> Armed {
             updated_at: now_unix(),
             owner_key: None,
             strict_kill_switch: true,
+            reconnect_after_release: false,
         },
         tun_luid: None,
         core_instance: None,
@@ -2746,8 +3206,12 @@ pub async fn restore_on_service_start() -> Result<()> {
     if !SUPPORTED {
         return Ok(());
     }
+    // Read before the WFP lock. Desired-state I/O must not nest under it.
+    let replay_expected = crate::core::desired::core_replay_expected_this_boot().await;
     let _operation = WFP_OPERATION.lock().await;
     RESTORE_WAS_LOCKED.store(false, Ordering::Release);
+    clear_wanted_core_window();
+    RECONNECT_AFTER_RELEASE.store(false, Ordering::Release);
     match tokio::fs::read(intent_path()).await {
         Ok(bytes) => match serde_json::from_slice::<IntentRecord>(&bytes) {
             Ok(intent) if intent_is_valid(&intent) => {
@@ -2829,7 +3293,32 @@ pub async fn restore_on_service_start() -> Result<()> {
                 if wfp_live {
                     sweep_legacy_sublayers_unlocked().await;
                 }
-                reconciled
+                // Strict keeps the block. Otherwise the block stays only while Core is
+                // running or this boot will start it, and only until the calibrated cap.
+                // A Core that is neither running nor starting is released here.
+                if armed.intent.strict_kill_switch {
+                    clear_wanted_core_window();
+                    CORE_REPLAY_EXPECTED.store(false, Ordering::Release);
+                    reconciled
+                } else {
+                    let running = current_core_instance().await.is_some();
+                    let starting = core_is_running_or_starting(running, replay_expected);
+                    note_wanted_core_window(&armed.intent);
+                    if starting {
+                        CORE_REPLAY_EXPECTED.store(!running, Ordering::Release);
+                        reconciled
+                    } else {
+                        CORE_REPLAY_EXPECTED.store(false, Ordering::Release);
+                        *WANTED_CORE_DEADLINE
+                            .lock()
+                            .unwrap_or_else(std::sync::PoisonError::into_inner) =
+                            Some(std::time::Instant::now());
+                        match release_unproven_wanted_session_unlocked().await {
+                            Ok(()) => Ok(()),
+                            Err(release_error) => Err(release_error),
+                        }
+                    }
+                }
             }
             // `wanted == false` still disarms. A wanted record that no longer validates is not
             // an explicit strict kill switch unless `strict_kill_switch` is true. Corrupt and
@@ -2853,10 +3342,16 @@ pub async fn restore_on_service_start() -> Result<()> {
                     return Err(error);
                 }
                 sweep_legacy_sublayers_unlocked().await;
-                match tokio::fs::remove_file(intent_path()).await {
-                    Ok(()) => {}
-                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-                    Err(error) => return Err(error.into()),
+                if intent.reconnect_after_release {
+                    // Keep the crash-window tombstone so a later Service start still tells the
+                    // app to reconnect. A user-disconnect tombstone is consumed as before.
+                    RECONNECT_AFTER_RELEASE.store(true, Ordering::Release);
+                } else {
+                    match tokio::fs::remove_file(intent_path()).await {
+                        Ok(()) => {}
+                        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                        Err(error) => return Err(error.into()),
+                    }
                 }
                 *armed_guard() = None;
                 TUNNEL_PERMIT_RENDERED.store(false, Ordering::Relaxed);
@@ -2879,7 +3374,7 @@ pub async fn restore_on_service_start() -> Result<()> {
                     tracing::warn!(
                         "unusable kill-switch intent; releasing general traffic and keeping the file"
                     );
-                    return release_general_traffic_unlocked("unusable kill-switch intent").await;
+                    return release_general_traffic_on_startup_unlocked("unusable kill-switch intent").await;
                 }
                 let emergency = emergency_armed();
                 *armed_guard() = Some(emergency.clone());
@@ -2897,7 +3392,7 @@ pub async fn restore_on_service_start() -> Result<()> {
                 tracing::warn!(
                     "corrupt kill-switch intent; releasing general traffic and keeping the file"
                 );
-                release_general_traffic_unlocked("corrupt kill-switch intent").await
+                release_general_traffic_on_startup_unlocked("corrupt kill-switch intent").await
             }
         },
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
@@ -2907,7 +3402,7 @@ pub async fn restore_on_service_start() -> Result<()> {
                 .await
                 .unwrap_or(true)
             {
-                return release_general_traffic_unlocked(
+                return release_general_traffic_on_startup_unlocked(
                     "residual WFP without a kill-switch intent",
                 )
                 .await;
@@ -2936,7 +3431,7 @@ pub async fn restore_on_service_start() -> Result<()> {
             tracing::warn!(
                 "kill-switch intent could not be read: {error:#}; releasing general traffic"
             );
-            release_general_traffic_unlocked("unreadable kill-switch intent").await
+            release_general_traffic_on_startup_unlocked("unreadable kill-switch intent").await
         }
     }
 }
@@ -3057,7 +3552,7 @@ pub async fn retire_unverified_on_service_start() -> Result<bool> {
     let Some(armed) = armed_guard().clone() else {
         return Ok(false);
     };
-    if armed.intent.is_verified() {
+    if armed.intent.is_verified() || armed.intent.strict_kill_switch {
         return Ok(false);
     }
 
@@ -3076,7 +3571,9 @@ pub async fn retire_unverified_on_service_start() -> Result<bool> {
                 .await
                 .context("failed to retire active owner paired with legacy unowned protection")?;
         }
-        disarm_unlocked(false).await
+        // This is recovery from an interrupted connection, not an explicit Restore.
+        // Open general traffic and retain the same AI hold as other crash releases.
+        disarm_unlocked(true).await
     }
     .await;
 
@@ -3132,6 +3629,7 @@ fn direct_reload_invalidation_reason(
             DirectReloadPhase::Committed => {
                 "committed DIRECT heartbeat lease expired after App/session liveness was lost"
             }
+            DirectReloadPhase::Retracting => "DIRECT permits await exact Blocked retraction",
         });
     }
     if lease.phase != DirectReloadPhase::Bracket
@@ -3147,11 +3645,73 @@ fn direct_reload_invalidation_reason(
     None
 }
 
-/// One-second verify-after-write watchdog. A healthy tick does nothing. An unhealthy tick
-/// does not reinstall unless the armed record explicitly enabled the strict kill switch.
-/// Without that opt-in, general traffic is released after [`UNHEALTHY_RELEASE_TICKS`].
-/// Strict mode repairs until [`STRICT_UNHEALTHY_RELEASE_TICKS`], then releases too.
-/// Persistent failures are log-throttled — one error per minute, the rest at debug.
+async fn reconcile_direct_watchdog_invalidation_unlocked(
+    mut armed: Armed,
+    current_core: Option<CoreInstance>,
+    now: std::time::Instant,
+    reason: &str,
+) -> Result<()> {
+    let release = crash_recovery_releases_network(armed.intent.strict_kill_switch)
+        && armed.direct_reload.as_ref().is_some_and(|lease| {
+            lease.phase == DirectReloadPhase::Committed
+                && lease.expires_at.is_none_or(|deadline| now >= deadline)
+        });
+    // Narrowing failure poisons the deadline. Keep ownership-change retries distinct from
+    // App death, even if the heartbeat deadline passes while the failed install is awaited.
+    if !release {
+        if let Some(lease) = armed.direct_reload.as_mut() {
+            if lease.phase == DirectReloadPhase::Committed {
+                lease.phase = DirectReloadPhase::Retracting;
+                lease.expires_at = Some(now);
+            }
+        }
+    }
+    // App death must release a non-strict session after exact DIRECT retraction. Keep only
+    // its expired receipt until release succeeds so a failed WFP removal retries next tick.
+    let next_lease = if release {
+        armed.direct_reload.clone()
+    } else {
+        None
+    };
+    let transition = transition_direct_to_blocked_unlocked(armed, current_core, next_lease).await;
+    note_verify(transition.is_ok());
+    if let Err(error) = transition {
+        if !release || !error.is::<DirectBlockedIntentPersistenceFailure>() {
+            return Err(error);
+        }
+        tracing::warn!(
+            "wfp: {reason}; exact Blocked WFP was proved; releasing despite intent persistence failure: {error:#}"
+        );
+    }
+    if release {
+        if queue_direct_expiry_retirement() {
+            tracing::warn!("wfp: {reason}; retiring the expired session's Core before selective fallback");
+            return Ok(());
+        }
+        let message = format!("{reason}; exact DIRECT permits were retracted; non-strict session");
+        release_unhealthy_session_unlocked(&message).await?;
+        Ok(())
+    } else {
+        let message =
+            format!("{reason}; exact DIRECT permits were retracted and traffic is Blocked");
+        *last_error_guard() = Some(message.clone());
+        tracing::warn!("{message}");
+        Ok(())
+    }
+}
+
+/// One-second verify-after-write watchdog (the macOS helper does the same for PF).
+///
+/// A restored verified wanted session releases immediately when Core is neither running
+/// nor about to start. While Core is running or this boot will start it, a bounded
+/// core-proof window applies: if Core is not running with a Locked, verified tunnel
+/// permit when that window ends, the tick releases WFP and restores DNS instead of
+/// reinstalling the block. An explicit strict kill switch does not start the window.
+/// An unhealthy tick does not reinstall unless that opt-in is set. Without it, general
+/// traffic is released after [`UNHEALTHY_RELEASE_TICKS`]. Strict mode repairs until
+/// [`STRICT_UNHEALTHY_RELEASE_TICKS`], then releases too. Persistent failures are
+/// log-throttled — one error per minute, the rest at debug — so a broken engine cannot
+/// flood the service log.
 pub fn spawn_windows_kill_switch_watchdog() {
     /// One error line per minute; the rest at debug.
     const ERROR_LOG_INTERVAL: std::time::Duration = std::time::Duration::from_secs(60);
@@ -3167,6 +3727,24 @@ pub fn spawn_windows_kill_switch_watchdog() {
         loop {
             tokio::time::sleep(WATCHDOG_PERIOD).await;
             let _operation = WFP_OPERATION.lock().await;
+            if let Err(error) = reconcile_wanted_core_window_unlocked().await {
+                tracing::warn!(
+                    "wanted-session core window could not open the network yet: {error:#}"
+                );
+            }
+            let fresh_epoch = FRESH_ARM_EPOCH.load(Ordering::Acquire);
+            if expired_fresh_arm_owner(fresh_epoch).is_some() {
+                // Lifecycle handlers take owner lifecycle before WFP. Never invert that order;
+                // stop_core also reacquires WFP to retract permits before terminating Core.
+                drop(_operation);
+                if let Err(error) = crate::core::server::retire_expired_fresh_arm(fresh_epoch).await {
+                    if last_error_log.is_none_or(|at| at.elapsed() >= ERROR_LOG_INTERVAL) {
+                        tracing::error!("abandoned Connect could not be retired: {error:#}");
+                        last_error_log = Some(std::time::Instant::now());
+                    }
+                }
+                continue;
+            }
             let armed = { armed_guard().clone() };
             if let Some(armed) = armed {
                 let direct_transaction_active = armed.direct_reload.is_some();
@@ -3184,24 +3762,22 @@ pub fn spawn_windows_kill_switch_watchdog() {
                 } else {
                     None
                 };
+                let now = std::time::Instant::now();
                 if let Some(reason) = direct_reload_invalidation_reason(
                     &armed,
                     current_core,
                     current_tunnel_luid,
-                    std::time::Instant::now(),
+                    now,
                 ) {
-                    let transition =
-                        transition_direct_to_blocked_unlocked(armed, current_core, None).await;
-                    let healthy = transition.is_ok();
-                    note_verify(healthy);
-                    match transition {
-                        Ok(()) => {
-                            let message = format!(
-                                "{reason}; exact DIRECT permits were retracted and traffic is Blocked"
-                            );
-                            *last_error_guard() = Some(message.clone());
-                            tracing::warn!("{message}");
-                        }
+                    match reconcile_direct_watchdog_invalidation_unlocked(
+                        armed,
+                        current_core,
+                        now,
+                        reason,
+                    )
+                    .await
+                    {
+                        Ok(()) => {}
                         Err(error) => {
                             if last_error_log.is_none_or(|at| at.elapsed() >= ERROR_LOG_INTERVAL) {
                                 tracing::error!(
@@ -3293,6 +3869,17 @@ pub fn spawn_windows_kill_switch_watchdog() {
 /// still present, which the uninstall helper's own sweep (`with_resolver_rule_proof`) checks
 /// again and blocks on with result 3.
 pub async fn emergency_disarm_windows_kill_switch() -> Result<()> {
+    emergency_disarm_with(false).await
+}
+
+/// Automatic failed-update recovery uses the same WFP/DNS proof and reporting,
+/// but retains the secondary AI hold. The caller must first exclude strict mode
+/// and stop the Service while holding the repair and singleton owner gates.
+pub async fn emergency_disarm_windows_kill_switch_applying_narrow() -> Result<()> {
+    emergency_disarm_with(true).await
+}
+
+async fn emergency_disarm_with(apply_narrow: bool) -> Result<()> {
     let _operation = WFP_OPERATION.lock().await;
     // This is still the fail-open escape hatch: WFP objects are removed even if protected DNS
     // cannot be restored. The DNS failure is nevertheless returned *after* WFP and intent
@@ -3352,8 +3939,10 @@ pub async fn emergency_disarm_windows_kill_switch() -> Result<()> {
         updated_at: now_unix(),
         owner_key: None,
         strict_kill_switch: false,
+        reconnect_after_release: false,
     });
     tombstone.wanted = false;
+    tombstone.reconnect_after_release = false;
     tombstone.updated_at = now_unix();
     let tombstone_error =
         match atomic_write(&intent_path(), &serde_json::to_vec_pretty(&tombstone)?).await {
@@ -3380,9 +3969,9 @@ pub async fn emergency_disarm_windows_kill_switch() -> Result<()> {
     // the product promises. On engine failure the reported state therefore stays "armed".
     #[cfg(all(windows, not(feature = "test")))]
     engine_call("emergency disarm", crate::core::wfp::emergency_disarm).await?;
-    // WFP is gone. Drop the secondary hold too. A failure here must not
-    // report the barrier as still up.
-    crate::core::selective_layer::remove().await;
+    // WFP is gone. Explicit Restore removes the secondary hold; automatic
+    // failure recovery applies it. Neither may undo or refuse this release.
+    crate::core::selective_layer::finish_release(apply_narrow).await;
     *armed_guard() = None;
     *last_verify_guard() = None;
     TUNNEL_PERMIT_RENDERED.store(false, Ordering::Relaxed);
@@ -3497,6 +4086,7 @@ pub(crate) async fn status() -> KillSwitchStatus {
             endpoints: Vec::new(),
             direct_endpoint_digest: crate::direct_endpoint_digest(&[]).unwrap_or_default(),
             last_error: last_error_guard().clone(),
+            reconnect_after_release: RECONNECT_AFTER_RELEASE.load(Ordering::Relaxed),
         };
     };
     let live = if ENGINE_LIVE {
@@ -3507,7 +4097,9 @@ pub(crate) async fn status() -> KillSwitchStatus {
     };
     KillSwitchStatus {
         wanted: armed.intent.wanted,
-        verified: armed.intent.is_verified(),
+        // Durable predecessor proof permits crash recovery, but cannot acknowledge this
+        // arm's MarkVerified request while its independent Connect deadline is pending.
+        verified: armed.intent.is_verified() && !FRESH_ARM_PROOF_PENDING.load(Ordering::Acquire),
         live,
         mode: armed.intent.mode,
         // What the last render decided, not what a render right now would decide: this is a
@@ -3518,6 +4110,20 @@ pub(crate) async fn status() -> KillSwitchStatus {
         direct_endpoint_digest: crate::direct_endpoint_digest(&armed.direct_endpoints)
             .unwrap_or_default(),
         last_error: last_error_guard().clone(),
+        reconnect_after_release: !armed.intent.wanted
+            && (armed.intent.reconnect_after_release
+                || RECONNECT_AFTER_RELEASE.load(Ordering::Relaxed)),
+    }
+}
+
+/// Pending-update recovery has the same selective disposition as ordinary automatic cleanup.
+#[cfg(any(windows, test))]
+pub(crate) async fn release_for_update_disconnect(apply_narrow: bool) -> Result<KillSwitchStatus> {
+    if apply_narrow {
+        anyhow::ensure!(!strict_kill_switch_enabled(), "automatic update cleanup cannot release explicit strict protection");
+        release_applying_narrow().await
+    } else {
+        release().await
     }
 }
 
@@ -3536,6 +4142,24 @@ mod tests {
     use super::*;
     use crate::core::structure::{KillSwitchConfig, ProxyEndpoint, ProxyProtocol};
     use serial_test::serial;
+
+    /// Stop is accepted while startup can still be inside DNS restore, and an
+    /// unverified retirement can run that restore again. The posted hint is
+    /// shorter than those two budgets, so the checkpoint has to be refreshed
+    /// inside a single budget.
+    #[test]
+    fn scm_stop_hint_refreshes_before_a_dns_restore_can_outlive_it() {
+        assert!(
+            SCM_STOP_WAIT_HINT < DNS_RESTORE_TIMEOUT.saturating_mul(2),
+            "one wait hint cannot cover startup restore plus unverified retirement"
+        );
+        assert!(SCM_STOP_HINT_REFRESH < DNS_RESTORE_TIMEOUT);
+        assert!(SCM_STOP_HINT_REFRESH < SCM_STOP_WAIT_HINT);
+        assert!(stop_pending_refresh_due(SCM_STOP_HINT_REFRESH));
+        assert!(!stop_pending_refresh_due(
+            SCM_STOP_HINT_REFRESH - std::time::Duration::from_secs(1)
+        ));
+    }
 
     /// Scoped failure seams: reset even when an assertion panics so the serial suite cannot be
     /// poisoned for every later WFP/persistence test.
@@ -3631,6 +4255,7 @@ mod tests {
             updated_at: 1,
             owner_key: None,
             strict_kill_switch: false,
+            reconnect_after_release: false,
         }
     }
 
@@ -3647,6 +4272,249 @@ mod tests {
             assert_eq!(intent.verified, None);
             assert_eq!(intent.is_verified(), expected, "{mode:?}");
         }
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn a_failed_arm_keeps_the_existing_secondary_ai_hold() -> Result<()> {
+        cleanup().await;
+        crate::core::selective_layer::finish_release(true).await;
+        let failures = SimulatedStateFailures::arm(false, true);
+
+        arm_bootstrap(&test_config(), "/opt/tono/mihomo", "owner-alice")
+            .await
+            .expect_err("the live WFP installation fails");
+        assert!(
+            crate::core::selective_layer::test_hold_active(),
+            "a failed replacement barrier must not remove the existing AI hold"
+        );
+
+        drop(failures);
+        arm_bootstrap(&test_config(), "/opt/tono/mihomo", "owner-alice").await?;
+        assert!(status().await.wanted);
+        assert!(
+            !crate::core::selective_layer::test_hold_active(),
+            "a successful replacement removes the sinkhole so tunnel DNS can work"
+        );
+        cleanup().await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn fresh_arm_releases_after_app_verification_never_arrives() -> Result<()> {
+        cleanup().await;
+        arm_bootstrap(&test_config(), "/opt/tono/mihomo", "owner-alice").await?;
+        assert_eq!(
+            reconcile_wanted_core_window_unlocked().await?,
+            WantedCoreWindow::Keep,
+            "StartClash must have time to publish Core after arming"
+        );
+        let deadline = *WANTED_CORE_DEADLINE
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let deadline = deadline.expect("a fresh arm must bound an interrupted Connect");
+        assert!(
+            deadline > std::time::Instant::now() + std::time::Duration::from_secs(310),
+            "the service must allow the App's complete cold-connect budget"
+        );
+        // StartClash completed, but the App died before the separate Lock/MarkVerified IPCs.
+        let owner = crate::core::auth::AuthenticatedOwner {
+            key: "owner-alice".to_owned(),
+            identity: crate::OwnerIdentity::Unix { uid: 97005, gid: 20 },
+            app_data_root: std::env::temp_dir(),
+            peer_pid: None,
+            peer_session_id: None,
+        };
+        crate::core::desired::persist_owner_core_started(&owner, &crate::ClashConfig::default())
+            .await?;
+        crate::core::desired::persist_active_owner(&owner).await?;
+        crate::core::manager::set_running_core_identity_for_kill_switch_tests(Some((4242, 1)))
+            .await;
+        assert_eq!(
+            reconcile_wanted_core_window_unlocked().await?,
+            WantedCoreWindow::Keep
+        );
+        *WANTED_CORE_DEADLINE
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(std::time::Instant::now());
+        spawn_windows_kill_switch_watchdog();
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            loop {
+                let intent = tokio::fs::read(intent_path()).await.ok()
+                    .and_then(|bytes| serde_json::from_slice::<IntentRecord>(&bytes).ok());
+                if !status().await.wanted
+                    && crate::core::selective_layer::test_hold_active()
+                    && intent.is_some_and(|intent| !intent.wanted && intent.reconnect_after_release)
+                {
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("the watchdog must retire an abandoned Connect");
+        assert!(current_core_instance().await.is_none(), "Core must stop before WFP opens");
+        assert!(!crate::core::desired::load_owner_desired_state(&owner.key).await?.core_should_be_running);
+        assert!(crate::core::desired::load_active_owner().await?.is_none());
+        assert!(crate::core::selective_layer::test_hold_active());
+        let intent: IntentRecord = serde_json::from_slice(&tokio::fs::read(intent_path()).await?)?;
+        assert!(!intent.wanted);
+        assert!(intent.reconnect_after_release);
+        assert!(lock(None).await.is_err(), "a late Lock cannot revive the expired arm");
+        tokio::fs::remove_file(crate::service_paths().for_owner_key(&owner.key).desired_state_path()).await?;
+        cleanup().await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn automatic_pending_update_disconnect_retains_the_ai_hold() -> Result<()> {
+        cleanup().await;
+        locked_direct_test_session().await?;
+        let request = crate::update_wire::UpdateRequest::disconnect(true);
+        let wire = serde_json::to_vec(&request)?;
+        let received: crate::update_wire::UpdateRequest = serde_json::from_slice(&wire)?;
+        let released = release_for_update_disconnect(received.applies_narrow_on_disconnect()).await?;
+        let ai_held = crate::core::selective_layer::test_hold_active();
+        cleanup().await;
+        assert!(!released.wanted, "automatic failed-update cleanup must release general traffic");
+        assert!(ai_held, "pending-update dispatch must not lose automatic cleanup's AI hold");
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn automatic_pending_update_disconnect_preserves_strict_protection() -> Result<()> {
+        cleanup().await;
+        locked_direct_test_session().await?;
+        armed_guard().as_mut().unwrap().intent.strict_kill_switch = true;
+        let result = release_for_update_disconnect(true).await;
+        let wanted = status().await.wanted;
+        cleanup().await;
+        assert!(result.is_err(), "automatic cleanup cannot release strict protection");
+        assert!(wanted);
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn fresh_arm_verification_retires_the_connect_deadline() -> Result<()> {
+        cleanup().await;
+        arm_bootstrap(&test_config(), "/opt/tono/mihomo", "owner-alice").await?;
+        crate::core::manager::set_running_core_identity_for_kill_switch_tests(Some((4242, 1)))
+            .await;
+        lock(None).await?;
+        assert!(WANTED_CORE_DEADLINE.lock().unwrap_or_else(std::sync::PoisonError::into_inner).is_some());
+        mark_verified("owner-alice").await?;
+        assert!(WANTED_CORE_DEADLINE.lock().unwrap_or_else(std::sync::PoisonError::into_inner).is_none());
+        // A reconnect inherits verified=true, but still needs its own App proof.
+        arm_bootstrap(&test_config(), "/opt/tono/mihomo", "owner-alice").await?;
+        lock(None).await?;
+        assert!(WANTED_CORE_DEADLINE.lock().unwrap_or_else(std::sync::PoisonError::into_inner).is_some());
+        mark_verified("owner-alice").await?;
+        assert!(WANTED_CORE_DEADLINE.lock().unwrap_or_else(std::sync::PoisonError::into_inner).is_none());
+        assert!(status().await.wanted);
+        cleanup().await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn inherited_verification_cannot_acknowledge_a_fresh_arm() -> Result<()> {
+        cleanup().await;
+        arm_bootstrap(&test_config(), "/opt/tono/mihomo", "owner-alice").await?;
+        crate::core::manager::set_running_core_identity_for_kill_switch_tests(Some((4242, 1)))
+            .await;
+        lock(None).await?;
+        mark_verified("owner-alice").await?;
+        assert!(status().await.verified);
+
+        // The new arm retains durable reconnect evidence, but no new MarkVerified arrived.
+        arm_bootstrap(&test_config(), "/opt/tono/mihomo", "owner-alice").await?;
+        lock(None).await?;
+        assert!(armed_guard().as_ref().unwrap().intent.is_verified());
+        let readback = status().await;
+        assert!(readback.wanted && readback.tunnel_permit_rendered);
+        assert_eq!(readback.mode, KillSwitchStatusMode::Locked);
+        assert!(!readback.verified, "a lost request cannot be acknowledged by its predecessor's proof");
+        assert!(FRESH_ARM_PROOF_PENDING.load(Ordering::Acquire));
+
+        mark_verified("owner-alice").await?;
+        assert!(status().await.verified, "a lost reply can still be acknowledged by fresh proof");
+        assert!(!FRESH_ARM_PROOF_PENDING.load(Ordering::Acquire));
+        cleanup().await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn fresh_arm_expiry_cannot_retire_a_successor_connect() -> Result<()> {
+        cleanup().await;
+        arm_bootstrap(&test_config(), "/opt/tono/mihomo", "owner-alice").await?;
+        let expired_epoch = FRESH_ARM_EPOCH.load(Ordering::Acquire);
+        *WANTED_CORE_DEADLINE
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(std::time::Instant::now());
+        assert!(expired_fresh_arm_owner(expired_epoch).is_some());
+        // The old expiry queued for lifecycle while a successor Connect acquired it first.
+        arm_bootstrap(&test_config(), "/opt/tono/mihomo", "owner-alice").await?;
+        crate::core::manager::set_running_core_identity_for_kill_switch_tests(Some((4243, 2)))
+            .await;
+        crate::core::server::retire_expired_fresh_arm(expired_epoch).await?;
+        assert!(status().await.wanted);
+        assert_eq!(current_core_instance().await, Some(CoreInstance { pid: 4243, generation: 2 }));
+        assert!(!crate::core::selective_layer::test_hold_active());
+        cleanup().await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn fresh_arm_deadline_preserves_explicit_strict_protection() -> Result<()> {
+        cleanup().await;
+        arm_bootstrap(&test_config(), "/opt/tono/mihomo", "owner-alice").await?;
+        armed_guard().as_mut().unwrap().intent.strict_kill_switch = true;
+        *WANTED_CORE_DEADLINE
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(std::time::Instant::now());
+        assert_eq!(
+            reconcile_wanted_core_window_unlocked().await?,
+            WantedCoreWindow::Keep
+        );
+        assert!(status().await.wanted);
+        cleanup().await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn exhausted_core_notification_cannot_expire_a_successor_arm() -> Result<()> {
+        cleanup().await;
+        arm_bootstrap(&test_config(), "/opt/tono/mihomo", "owner-alice").await?;
+        let exhausted_epoch = core_arm_epoch();
+        arm_bootstrap(&test_config(), "/opt/tono/mihomo", "owner-alice").await?;
+        let successor_deadline = *WANTED_CORE_DEADLINE.lock().unwrap();
+        note_core_recovery_exhausted(exhausted_epoch).await;
+        assert_eq!(*WANTED_CORE_DEADLINE.lock().unwrap(), successor_deadline);
+        assert!(expired_fresh_arm_owner(core_arm_epoch()).is_none());
+        assert!(status().await.wanted);
+        cleanup().await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn exhausted_core_notification_preserves_explicit_strict_protection() -> Result<()> {
+        cleanup().await;
+        arm_bootstrap(&test_config(), "/opt/tono/mihomo", "owner-alice").await?;
+        armed_guard().as_mut().unwrap().intent.strict_kill_switch = true;
+        clear_wanted_core_window();
+        note_core_recovery_exhausted(core_arm_epoch()).await;
+        assert!(WANTED_CORE_DEADLINE.lock().unwrap().is_none());
+        assert!(status().await.wanted);
+        cleanup().await;
+        Ok(())
     }
 
     #[tokio::test]
@@ -3738,6 +4606,7 @@ mod tests {
     }
 
     async fn cleanup() {
+        crate::core::selective_layer::remove().await;
         TEST_REMOVE_FAILURE.store(false, Ordering::Relaxed);
         TEST_REMOVE_ATTEMPTS.store(0, Ordering::Relaxed);
         TEST_RESIDUAL_FILTER_KEYS.lock().unwrap().clear();
@@ -3755,6 +4624,12 @@ mod tests {
         *LAST_VERIFY.lock().unwrap() = None;
         RESTORE_WAS_LOCKED.store(false, Ordering::Release);
         RESTORED_BARRIER_UNPROVEN.store(false, Ordering::Release);
+        clear_wanted_core_window();
+        RECONNECT_AFTER_RELEASE.store(false, Ordering::Release);
+        CRASH_TOMBSTONE_PENDING.store(false, Ordering::Release);
+        CORE_REPLAY_EXPECTED.store(false, Ordering::Release);
+        #[cfg(test)]
+        TEST_CORE_STARTING.store(false, Ordering::Release);
         for path in [
             intent_path(),
             dns_snapshot_path(),
@@ -3772,6 +4647,7 @@ mod tests {
     #[serial]
     async fn restore_with_valid_wanted_intent_rearms_and_downgrades_locked() -> Result<()> {
         cleanup().await;
+        TEST_CORE_STARTING.store(true, Ordering::Relaxed);
         let intent = valid_intent(KillSwitchStatusMode::Locked, true);
         atomic_write(&intent_path(), &serde_json::to_vec_pretty(&intent)?).await?;
 
@@ -3793,10 +4669,139 @@ mod tests {
         Ok(())
     }
 
+    /// A restored verified wanted block is released at once when Core is neither
+    /// running nor starting. While Core is starting, it stays up only until
+    /// [`WANTED_CORE_PROOF_WINDOW`]. Needs real-hardware calibration of that cap.
+    #[tokio::test]
+    #[serial]
+    async fn wanted_session_releases_when_core_is_not_proven_in_time() -> Result<()> {
+        assert_eq!(WANTED_CORE_PROOF_WINDOW, std::time::Duration::from_secs(30));
+        assert_eq!(
+            wanted_core_window_action(true, false, true, false),
+            WantedCoreWindow::Keep,
+            "an explicit strict kill switch keeps the restored block"
+        );
+        assert_eq!(
+            wanted_core_window_action(false, false, false, false),
+            WantedCoreWindow::Release,
+            "a Core that is neither running nor starting is released immediately"
+        );
+        assert_eq!(
+            wanted_core_window_action(false, true, false, false),
+            WantedCoreWindow::Keep,
+            "a starting Core keeps the block until the cap"
+        );
+        assert_eq!(
+            wanted_core_window_action(false, true, true, false),
+            WantedCoreWindow::Release
+        );
+        assert_eq!(
+            wanted_core_window_action(false, true, true, true),
+            WantedCoreWindow::Proven
+        );
+        assert!(!restored_connection_proven(
+            false,
+            true,
+            KillSwitchStatusMode::Locked,
+            true
+        ));
+        assert!(restored_connection_proven(
+            true,
+            true,
+            KillSwitchStatusMode::Locked,
+            true
+        ));
+
+        cleanup().await;
+        let intent = valid_intent(KillSwitchStatusMode::Locked, true);
+        atomic_write(&intent_path(), &serde_json::to_vec_pretty(&intent)?).await?;
+        restore_on_service_start().await?;
+        let released = status().await;
+        assert!(
+            !released.wanted,
+            "no Core process and no replay releases before the cap"
+        );
+        assert!(released.reconnect_after_release);
+        assert!(
+            crate::core::selective_layer::test_hold_active(),
+            "an unproven Core must leave AI destinations blocked after general traffic is released"
+        );
+        let on_disk: IntentRecord =
+            serde_json::from_slice(&tokio::fs::read(intent_path()).await?)?;
+        assert!(!on_disk.wanted);
+        assert!(on_disk.reconnect_after_release);
+
+        *ARMED.lock().unwrap() = None;
+        RECONNECT_AFTER_RELEASE.store(false, Ordering::Release);
+        restore_on_service_start().await?;
+        assert!(!status().await.wanted);
+        assert!(status().await.reconnect_after_release);
+        assert!(
+            tokio::fs::metadata(intent_path()).await.is_ok(),
+            "the crash tombstone survives the next Service start"
+        );
+
+        cleanup().await;
+        TEST_CORE_STARTING.store(true, Ordering::Relaxed);
+        atomic_write(&intent_path(), &serde_json::to_vec_pretty(&intent)?).await?;
+        restore_on_service_start().await?;
+        assert!(status().await.wanted, "a starting Core keeps the block");
+        let deadline = WANTED_CORE_DEADLINE
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .expect("a starting restore arms the core-proof window");
+        assert!(deadline > std::time::Instant::now());
+        assert_eq!(
+            reconcile_wanted_core_window_unlocked().await?,
+            WantedCoreWindow::Keep
+        );
+        TEST_CORE_STARTING.store(false, Ordering::Relaxed);
+        note_core_replay_finished().await?;
+        assert!(
+            !status().await.wanted,
+            "replay that settled with no process releases before the cap"
+        );
+        assert!(status().await.reconnect_after_release);
+
+        cleanup().await;
+        TEST_CORE_STARTING.store(true, Ordering::Relaxed);
+        atomic_write(&intent_path(), &serde_json::to_vec_pretty(&intent)?).await?;
+        restore_on_service_start().await?;
+        *WANTED_CORE_DEADLINE
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) =
+            Some(std::time::Instant::now() - std::time::Duration::from_secs(1));
+        assert_eq!(
+            reconcile_wanted_core_window_unlocked().await?,
+            WantedCoreWindow::Release
+        );
+        assert!(!status().await.wanted);
+
+        cleanup().await;
+        let mut strict = valid_intent(KillSwitchStatusMode::Locked, true);
+        strict.strict_kill_switch = true;
+        atomic_write(&intent_path(), &serde_json::to_vec_pretty(&strict)?).await?;
+        restore_on_service_start().await?;
+        assert!(
+            WANTED_CORE_DEADLINE
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .is_none()
+        );
+        assert_eq!(
+            reconcile_wanted_core_window_unlocked().await?,
+            WantedCoreWindow::Keep
+        );
+        assert!(status().await.wanted, "strict keeps the block with no window");
+        cleanup().await;
+        Ok(())
+    }
+
     #[tokio::test]
     #[serial]
     async fn startup_persist_failure_still_installs_and_publishes_blocked() -> Result<()> {
         cleanup().await;
+        TEST_CORE_STARTING.store(true, Ordering::Relaxed);
         let intent = valid_intent(KillSwitchStatusMode::Locked, true);
         atomic_write(&intent_path(), &serde_json::to_vec_pretty(&intent)?).await?;
 
@@ -3832,6 +4837,7 @@ mod tests {
     #[serial]
     async fn startup_install_failure_still_persists_and_arms_watchdog_state() -> Result<()> {
         cleanup().await;
+        TEST_CORE_STARTING.store(true, Ordering::Relaxed);
         let intent = valid_intent(KillSwitchStatusMode::Locked, true);
         atomic_write(&intent_path(), &serde_json::to_vec_pretty(&intent)?).await?;
 
@@ -3881,6 +4887,7 @@ mod tests {
     #[serial]
     async fn startup_double_failure_reports_both_and_keeps_conservative_state() -> Result<()> {
         cleanup().await;
+        TEST_CORE_STARTING.store(true, Ordering::Relaxed);
         let intent = valid_intent(KillSwitchStatusMode::Locked, true);
         atomic_write(&intent_path(), &serde_json::to_vec_pretty(&intent)?).await?;
 
@@ -3912,6 +4919,8 @@ mod tests {
     #[serial]
     async fn legacy_locked_migration_stays_verified_across_a_second_restart() -> Result<()> {
         cleanup().await;
+        // The migration is about a session Core may still return to, not the idle release.
+        TEST_CORE_STARTING.store(true, Ordering::Relaxed);
         let mut value = serde_json::to_value(valid_intent(KillSwitchStatusMode::Locked, true))?;
         value.as_object_mut().unwrap().remove("verified");
         atomic_write(&intent_path(), &serde_json::to_vec_pretty(&value)?).await?;
@@ -3990,6 +4999,77 @@ mod tests {
 
     #[tokio::test]
     #[serial]
+    async fn service_stop_release_keeps_the_ai_hold_for_an_armed_session() -> Result<()> {
+        cleanup().await;
+        arm_bootstrap(&test_config(), "/opt/tono/mihomo", "owner-alice").await?;
+
+        release_after_service_stop().await?;
+        let released = !status().await.wanted && armed_guard().is_none();
+        let ai_held = crate::core::selective_layer::test_hold_active();
+        cleanup().await;
+
+        assert!(released, "ordinary Service stop must release general traffic");
+        assert!(ai_held, "automatic Service stop must apply the AI hold");
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn service_stop_release_does_not_reapply_ai_hold_after_explicit_restore() -> Result<()> {
+        cleanup().await;
+        crate::core::selective_layer::finish_release(true).await;
+        release().await?;
+
+        release_after_service_stop().await?;
+        let ai_held = crate::core::selective_layer::test_hold_active();
+        cleanup().await;
+
+        assert!(
+            !ai_held,
+            "idle Stop after explicit Restore must stay unprotected"
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn service_stop_release_preserves_an_existing_idle_ai_hold() -> Result<()> {
+        cleanup().await;
+        crate::core::selective_layer::finish_release(true).await;
+
+        release_after_service_stop().await?;
+        let ai_held = crate::core::selective_layer::test_hold_active();
+        cleanup().await;
+
+        assert!(
+            ai_held,
+            "idle Stop cannot remove a previous crash recovery hold"
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn service_stop_release_preserves_an_explicit_strict_intent() -> Result<()> {
+        cleanup().await;
+        let mut intent = valid_intent(KillSwitchStatusMode::Blocked, true);
+        intent.strict_kill_switch = true;
+        atomic_write(&intent_path(), &serde_json::to_vec_pretty(&intent)?).await?;
+        restore_on_service_start().await?;
+
+        release_after_service_stop().await?;
+        let wanted = status().await.wanted;
+        cleanup().await;
+
+        assert!(
+            wanted,
+            "automatic Stop cannot retire explicit strict protection"
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
     async fn unverified_startup_intent_stays_blocked_until_core_and_dns_reconcile() -> Result<()> {
         cleanup().await;
         let mut intent = valid_intent(KillSwitchStatusMode::Blocked, true);
@@ -4025,8 +5105,57 @@ mod tests {
 
     #[tokio::test]
     #[serial]
+    async fn unverified_startup_recovery_keeps_ai_hold_after_releasing_general_traffic() -> Result<()> {
+        cleanup().await;
+        crate::core::desired::clear_active_owner().await?;
+        let mut intent = valid_intent(KillSwitchStatusMode::Bootstrap, true);
+        intent.verified = Some(false);
+        atomic_write(&intent_path(), &serde_json::to_vec_pretty(&intent)?).await?;
+
+        restore_on_service_start().await?;
+        assert!(retire_unverified_on_service_start().await?);
+        let released = !status().await.wanted && armed_guard().is_none();
+        let ai_held = crate::core::selective_layer::test_hold_active();
+        cleanup().await;
+
+        assert!(
+            released,
+            "interrupted initial connection must release general traffic"
+        );
+        assert!(
+            ai_held,
+            "automatic startup recovery must keep the secondary AI hold"
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn unverified_startup_recovery_preserves_an_explicit_strict_intent() -> Result<()> {
+        cleanup().await;
+        let mut intent = valid_intent(KillSwitchStatusMode::Bootstrap, true);
+        intent.verified = Some(false);
+        intent.strict_kill_switch = true;
+        atomic_write(&intent_path(), &serde_json::to_vec_pretty(&intent)?).await?;
+
+        restore_on_service_start().await?;
+        let retired = retire_unverified_on_service_start().await?;
+        let wanted = status().await.wanted;
+        cleanup().await;
+
+        assert!(
+            !retired,
+            "automatic recovery cannot retire an explicit strict intent"
+        );
+        assert!(wanted, "the strict barrier must remain armed");
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
     async fn verified_startup_intent_is_never_retired_by_initial_attempt_cleanup() -> Result<()> {
         cleanup().await;
+        TEST_CORE_STARTING.store(true, Ordering::Relaxed);
         let intent = valid_intent(KillSwitchStatusMode::Locked, true);
         atomic_write(&intent_path(), &serde_json::to_vec_pretty(&intent)?).await?;
 
@@ -4157,6 +5286,36 @@ mod tests {
         assert!(armed_guard().is_none());
         assert!(!TUNNEL_PERMIT_RENDERED.load(Ordering::Relaxed));
         assert!(status().await.last_error.is_none());
+        cleanup().await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn startup_release_retry_preserves_the_crash_reconnect_marker() -> Result<()> {
+        cleanup().await;
+        let intent = crash_recovery_tombstone();
+        atomic_write(&intent_path(), &serde_json::to_vec_pretty(&intent)?).await?;
+        let failures = SimulatedStateFailures::arm_removal();
+
+        restore_on_service_start()
+            .await
+            .expect_err("the initial WFP removal fails");
+        drop(failures);
+        tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            while STARTUP_RELEASE_RETRY_RUNNING.load(Ordering::Acquire) {
+                tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+            }
+        })
+        .await?;
+
+        assert!(
+            status().await.reconnect_after_release,
+            "successful retry must still tell the app to reconnect"
+        );
+        let persisted: IntentRecord = serde_json::from_slice(&tokio::fs::read(intent_path()).await?)?;
+        assert!(persisted.reconnect_after_release);
+        assert!(!persisted.wanted);
         cleanup().await;
         Ok(())
     }
@@ -4356,6 +5515,33 @@ mod tests {
 
     #[tokio::test]
     #[serial]
+    async fn explicit_release_supersedes_a_pending_crash_tombstone() -> Result<()> {
+        cleanup().await;
+        arm_bootstrap(&test_config(), "/opt/tono/mihomo", "owner-alice").await?;
+        let failures = SimulatedStateFailures::arm(true, false);
+        release_unproven_wanted_session_unlocked().await
+            .expect_err("the crash tombstone write fails after WFP is released");
+        assert!(CRASH_TOMBSTONE_PENDING.load(Ordering::Acquire));
+        drop(failures);
+
+        release().await?;
+        assert!(!status().await.reconnect_after_release);
+        // The watchdog retries its old failed write after the successful Disconnect.
+        retry_crash_tombstone_unlocked().await;
+        // A later Service restart must recover the user's Disconnect, not the older crash.
+        restore_on_service_start().await?;
+        assert!(
+            !status().await.reconnect_after_release,
+            "a pending crash write must not resurrect reconnect intent after Disconnect"
+        );
+        assert!(!status().await.wanted);
+        assert!(!crate::core::selective_layer::test_hold_active());
+        cleanup().await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
     async fn restore_with_corrupt_intent_releases_and_keeps_evidence() -> Result<()> {
         cleanup().await;
         atomic_write(&intent_path(), b"{ not json").await?;
@@ -4368,6 +5554,92 @@ mod tests {
         );
         assert!(!status().await.wanted);
         assert_eq!(tokio::fs::read(intent_path()).await?, b"{ not json");
+        assert!(
+            crate::core::selective_layer::test_hold_active(),
+            "crash recovery must retain the narrow AI hold after opening general traffic"
+        );
+        release().await?;
+        assert!(!crate::core::selective_layer::test_hold_active());
+        cleanup().await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn corrupt_startup_removal_failure_retries_and_keeps_evidence_and_ai_hold() -> Result<()>
+    {
+        cleanup().await;
+        let evidence = b"{ incomplete intent";
+        atomic_write(&intent_path(), evidence).await?;
+        let residual = wfp_model::intent_floor()
+            .iter()
+            .map(|filter| filter.key)
+            .collect::<Vec<_>>();
+        *TEST_RESIDUAL_FILTER_KEYS.lock().unwrap() = residual.clone();
+        let failures = SimulatedStateFailures::arm_removal();
+
+        let error = restore_on_service_start()
+            .await
+            .expect_err("the initial native removal fails");
+        assert!(format!("{error:#}").contains("simulated WFP removal failure"));
+        assert!(armed_guard().is_none());
+        assert_eq!(*TEST_RESIDUAL_FILTER_KEYS.lock().unwrap(), residual);
+        drop(failures);
+
+        tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            while !TEST_RESIDUAL_FILTER_KEYS.lock().unwrap().is_empty()
+                || STARTUP_RELEASE_RETRY_RUNNING.load(Ordering::Acquire)
+            {
+                tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .expect("recovery must retry after the transient removal error clears");
+
+        assert!(TEST_REMOVE_ATTEMPTS.load(Ordering::Relaxed) >= 2);
+        assert_eq!(tokio::fs::read(intent_path()).await?, evidence);
+        assert!(crate::core::selective_layer::test_hold_active());
+        assert!(!status().await.wanted);
+        cleanup().await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn corrupt_startup_release_retry_preserves_a_new_unusable_strict_record() -> Result<()> {
+        cleanup().await;
+        atomic_write(&intent_path(), b"{ incomplete intent").await?;
+        let residual = wfp_model::intent_floor()
+            .iter()
+            .map(|filter| filter.key)
+            .collect::<Vec<_>>();
+        *TEST_RESIDUAL_FILTER_KEYS.lock().unwrap() = residual.clone();
+        let failures = SimulatedStateFailures::arm_removal();
+        restore_on_service_start()
+            .await
+            .expect_err("the initial removal fails");
+
+        let operation = WFP_OPERATION.lock().await;
+        let mut strict = valid_intent(KillSwitchStatusMode::Blocked, true);
+        strict.strict_kill_switch = true;
+        strict.endpoints.clear();
+        assert!(!intent_is_valid(&strict));
+        let strict_bytes = serde_json::to_vec_pretty(&strict)?;
+        atomic_write(&intent_path(), &strict_bytes).await?;
+        let attempts = TEST_REMOVE_ATTEMPTS.load(Ordering::Relaxed);
+        drop(failures);
+        drop(operation);
+
+        tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            while STARTUP_RELEASE_RETRY_RUNNING.load(Ordering::Acquire) {
+                tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+            }
+        })
+        .await?;
+
+        assert_eq!(TEST_REMOVE_ATTEMPTS.load(Ordering::Relaxed), attempts);
+        assert_eq!(*TEST_RESIDUAL_FILTER_KEYS.lock().unwrap(), residual);
+        assert_eq!(tokio::fs::read(intent_path()).await?, strict_bytes);
         cleanup().await;
         Ok(())
     }
@@ -4486,6 +5758,7 @@ mod tests {
             updated_at: 0,
             owner_key: None,
             strict_kill_switch: false,
+            reconnect_after_release: false,
         };
         apply_learned_bootstrap_pins(&mut intent);
         let _ = std::fs::remove_file(&path);
@@ -4595,6 +5868,32 @@ mod tests {
         assert!(ARMED.lock().unwrap().is_none());
         assert!(tokio::fs::metadata(dns_snapshot_path()).await.is_err());
         assert_disarmed_tombstone_present().await?;
+        cleanup().await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn failed_update_emergency_release_keeps_the_secondary_ai_hold() -> Result<()> {
+        cleanup().await;
+        arm_bootstrap(&test_config(), "/opt/tono/mihomo", "owner-alice").await?;
+        simulate_machine_still_on_loopback_dns();
+        atomic_write(&dns_snapshot_path(), b"{ corrupt").await?;
+
+        let error = emergency_disarm_windows_kill_switch_applying_narrow()
+            .await
+            .expect_err("DNS restore failure must still be reported after WFP removal");
+        assert!(
+            format!("{error:#}").contains(crate::core::dns::WFP_REMOVED_CONTINUE_PREFIX)
+        );
+        assert!(!status().await.wanted);
+        assert!(
+            crate::core::selective_layer::test_hold_active(),
+            "automatic update failure must retain the narrow AI hold after opening general traffic"
+        );
+
+        emergency_disarm_windows_kill_switch().await.unwrap_err();
+        assert!(!crate::core::selective_layer::test_hold_active());
         cleanup().await;
         Ok(())
     }
@@ -4932,6 +6231,45 @@ mod tests {
         Ok(())
     }
 
+    /// WIN-TOMBSTONE-REBLOCK: the tombstone write failing after the filters are proven gone
+    /// must not walk the release back. Reinstalling the previous policy re-blocked the machine
+    /// on every Disconnect for as long as the write kept failing (ACL damage, an AV lock); the
+    /// release now stands, no wanted intent survives, and the residual is surfaced through
+    /// `last_error` instead.
+    #[tokio::test]
+    #[serial]
+    async fn a_failed_tombstone_write_after_removal_stays_released() -> Result<()> {
+        cleanup().await;
+        arm_bootstrap(&test_config(), "/opt/tono/mihomo", "owner-alice").await?;
+        // Every persistent write fails from here on (the arm above already committed).
+        let failures = SimulatedStateFailures::arm(true, false);
+
+        let status = release().await?;
+
+        assert!(!status.wanted, "the release is final once the filters are gone");
+        assert!(ARMED.lock().unwrap().is_none());
+        assert_eq!(
+            TEST_INSTALL_ATTEMPTS.load(Ordering::Relaxed),
+            0,
+            "the previous policy must not be reinstalled over a failed tombstone write"
+        );
+        assert!(
+            tokio::fs::metadata(intent_path()).await.is_err(),
+            "no wanted intent may survive a failed tombstone write"
+        );
+        let last_error = status
+            .last_error
+            .expect("the failed release recording must be reported");
+        assert!(
+            last_error.contains("recording the release failed"),
+            "unexpected last_error: {last_error}"
+        );
+
+        drop(failures);
+        cleanup().await;
+        Ok(())
+    }
+
     #[tokio::test]
     #[serial]
     async fn release_when_not_armed_is_an_idempotent_success() -> Result<()> {
@@ -5040,6 +6378,7 @@ mod tests {
     #[serial]
     async fn a_failed_startup_install_withholds_the_remote_reconnect_exception() -> Result<()> {
         cleanup().await;
+        TEST_CORE_STARTING.store(true, Ordering::Relaxed);
         let intent = IntentRecord {
             owner_key: Some("owner-alice".to_owned()),
             ..valid_intent(KillSwitchStatusMode::Locked, true)
@@ -5507,6 +6846,45 @@ mod tests {
 
     #[tokio::test]
     #[serial]
+    async fn core_replacement_barrier_accepts_only_persist_failure_after_live_blocked() -> Result<()>
+    {
+        cleanup().await;
+        committed_direct_test_session(78).await?;
+        let failures = SimulatedStateFailures::arm(true, false);
+
+        retract_direct_before_core_replacement().await?;
+
+        assert_eq!(TEST_INSTALL_ATTEMPTS.load(Ordering::Relaxed), 1);
+        assert_eq!(TEST_PERSIST_ATTEMPTS.load(Ordering::Relaxed), 1);
+        let blocked = armed_guard().clone().expect("live Blocked remains published");
+        assert_eq!(blocked.intent.mode, KillSwitchStatusMode::Blocked);
+        assert!(blocked.direct_endpoints.is_empty());
+        assert!(blocked.direct_reload.is_none());
+        assert!(blocked.tun_luid.is_none());
+        assert!(blocked.core_instance.is_none());
+        assert!(crate::core::manager::security_core_instance_snapshot().is_none());
+        assert!(
+            status()
+                .await
+                .last_error
+                .expect("persistence error remains visible")
+                .contains("simulated persistent-state write failure")
+        );
+        drop(failures);
+
+        // A previously Blocked record is not proof that a new live installation succeeded.
+        let failures = SimulatedStateFailures::arm(false, true);
+        let error = retract_direct_before_core_replacement()
+            .await
+            .expect_err("live WFP failure must still refuse Core replacement");
+        assert!(format!("{error:#}").contains("simulated WFP install failure"));
+        drop(failures);
+        cleanup().await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
     async fn ambiguous_first_direct_install_publishes_candidate_for_retry() -> Result<()> {
         cleanup().await;
         let core = locked_direct_test_session().await?;
@@ -5655,6 +7033,158 @@ mod tests {
         assert_eq!(blocked.intent.mode, KillSwitchStatusMode::Blocked);
         assert!(blocked.direct_endpoints.is_empty());
         assert!(blocked.direct_reload.is_none());
+        cleanup().await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn committed_direct_expiry_retires_core_before_selective_fallback() -> Result<()> {
+        cleanup().await;
+        committed_direct_test_session(126).await?;
+        mark_verified("owner-alice").await?;
+        let owner = crate::core::auth::AuthenticatedOwner {
+            key: "owner-alice".to_owned(),
+            identity: crate::OwnerIdentity::Unix { uid: 97006, gid: 20 },
+            app_data_root: std::env::temp_dir(),
+            peer_pid: None,
+            peer_session_id: None,
+        };
+        crate::core::desired::persist_owner_core_started(&owner, &crate::ClashConfig::default())
+            .await?;
+        crate::core::desired::persist_active_owner(&owner).await?;
+        armed_guard().as_mut().unwrap().direct_reload.as_mut().unwrap().expires_at =
+            Some(std::time::Instant::now());
+
+        spawn_windows_kill_switch_watchdog();
+        let retired = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            loop {
+                if !status().await.wanted && current_core_instance().await.is_none()
+                    && crate::core::selective_layer::test_hold_active()
+                {
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+        }).await.is_ok();
+        let wanted_core = crate::core::desired::load_owner_desired_state(&owner.key)
+            .await?.core_should_be_running;
+        let active = crate::core::desired::load_active_owner().await?;
+        tokio::fs::remove_file(crate::service_paths().for_owner_key(&owner.key).desired_state_path())
+            .await?;
+        cleanup().await;
+
+        assert!(retired, "fallback must retire Core and its TUN before applying the AI hold");
+        assert!(!wanted_core, "fallback must not replay the retired Core");
+        assert!(active.is_none(), "the retired session must no longer own Core");
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn committed_direct_expiry_does_not_interrupt_its_new_ai_hold() -> Result<()> {
+        cleanup().await;
+        let (core, _) = committed_direct_test_session(125).await?;
+        let removals_before = crate::core::selective_layer::test_active_hold_removals();
+        let mut armed = armed_guard().clone().expect("committed session");
+        let now = std::time::Instant::now();
+        armed.direct_reload.as_mut().unwrap().expires_at = Some(now);
+        let reason = direct_reload_invalidation_reason(&armed, Some(core), armed.tun_luid, now)
+            .expect("committed heartbeat expiry must invalidate DIRECT");
+
+        reconcile_direct_watchdog_invalidation_unlocked(armed, Some(core), now, reason).await?;
+        crate::core::server::retire_expired_fresh_arm(core_arm_epoch()).await?;
+        let wanted = status().await.wanted;
+        let held = crate::core::selective_layer::test_hold_active();
+        let removals_after = crate::core::selective_layer::test_active_hold_removals();
+        cleanup().await;
+
+        assert!(!wanted, "ordinary internet must be released on App death");
+        assert!(held, "AI services must remain blocked after release");
+        assert_eq!(
+            removals_after, removals_before,
+            "expiry must not delete the AI hold it has just installed"
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn committed_direct_lease_expiry_releases_only_non_strict_sessions() -> Result<()> {
+        cleanup().await;
+        let (core, _) = committed_direct_test_session(122).await?;
+        let mut armed = armed_guard().clone().expect("committed session");
+        let now = std::time::Instant::now();
+        armed.direct_reload.as_mut().unwrap().expires_at = Some(now);
+        let reason = direct_reload_invalidation_reason(&armed, Some(core), armed.tun_luid, now)
+            .expect("committed heartbeat expiry must invalidate DIRECT");
+        assert!(reason.contains("heartbeat lease expired"));
+
+        let failures = SimulatedStateFailures::arm(false, true);
+        reconcile_direct_watchdog_invalidation_unlocked(armed, Some(core), now, reason)
+            .await
+            .expect_err("failed live retraction must retry before releasing");
+        let retry = armed_guard().clone().expect("failed retraction stays armed");
+        assert_eq!(retry.intent.mode, KillSwitchStatusMode::Locked);
+        assert!(!retry.direct_endpoints.is_empty());
+        assert!(retry.direct_reload.is_some());
+        drop(failures);
+
+        let now = std::time::Instant::now();
+        let reason = direct_reload_invalidation_reason(&retry, Some(core), retry.tun_luid, now)
+            .expect("expired committed receipt must retry release on the next tick");
+        reconcile_direct_watchdog_invalidation_unlocked(retry, Some(core), now, reason).await?;
+        assert!(lock(None).await.is_err(), "the expired session cannot cancel retirement");
+        assert!(mark_verified("owner-alice").await.is_err());
+        crate::core::server::retire_expired_fresh_arm(core_arm_epoch()).await?;
+        assert!(
+            armed_guard().is_none(),
+            "non-strict expiry must release the session"
+        );
+        assert!(!status().await.wanted);
+        assert!(!TUNNEL_PERMIT_RENDERED.load(Ordering::Relaxed));
+        assert!(
+            crate::core::selective_layer::test_hold_active(),
+            "non-strict expiry opens general traffic and puts the AI hold back"
+        );
+        assert_disarmed_tombstone_present().await?;
+
+        committed_direct_test_session(123).await?;
+        let armed = armed_guard().clone().expect("committed session before Core loss");
+        let now = std::time::Instant::now();
+        let reason = direct_reload_invalidation_reason(&armed, None, armed.tun_luid, now)
+            .expect("Core ownership loss must retract DIRECT");
+        assert!(reason.contains("ownership changed"));
+        let failures = SimulatedStateFailures::arm(false, true);
+        reconcile_direct_watchdog_invalidation_unlocked(armed, None, now, reason)
+            .await
+            .expect_err("ownership retraction failure must retry Blocked");
+        let retry = armed_guard().clone().expect("ownership retraction retry");
+        let now = std::time::Instant::now();
+        let reason = direct_reload_invalidation_reason(&retry, None, retry.tun_luid, now)
+            .expect("poisoned ownership receipt must still retract");
+        drop(failures);
+        reconcile_direct_watchdog_invalidation_unlocked(retry, None, now, reason).await?;
+        assert_eq!(
+            armed_guard().as_ref().unwrap().intent.mode,
+            KillSwitchStatusMode::Blocked
+        );
+
+        let (core, _) = committed_direct_test_session(124).await?;
+        let mut strict = armed_guard().clone().expect("strict committed session");
+        strict.intent.strict_kill_switch = true;
+        let now = std::time::Instant::now();
+        strict.direct_reload.as_mut().unwrap().expires_at = Some(now);
+        let reason = direct_reload_invalidation_reason(&strict, Some(core), strict.tun_luid, now)
+            .expect("strict heartbeat expiry must still retract DIRECT");
+        reconcile_direct_watchdog_invalidation_unlocked(strict, Some(core), now, reason).await?;
+        let blocked = armed_guard().clone().expect("strict session stays armed");
+        assert_eq!(blocked.intent.mode, KillSwitchStatusMode::Blocked);
+        assert!(blocked.direct_endpoints.is_empty());
+        assert!(blocked.direct_reload.is_none());
+        assert!(blocked.tun_luid.is_none());
+        assert!(blocked.core_instance.is_none());
+        crate::core::selective_layer::remove().await;
         cleanup().await;
         Ok(())
     }
@@ -5980,6 +7510,7 @@ mod tests {
     /// "Locked with the permit retracted". `tunnel_permit_rendered` changes only after the exact
     /// install/verify operation succeeds, never while merely constructing an expected model.
     #[tokio::test]
+    #[serial]
     async fn the_status_flag_tracks_what_the_last_exact_install_proved() {
         let running = CoreInstance {
             pid: 90,
@@ -6101,6 +7632,7 @@ mod tests {
     #[serial]
     async fn restored_locked_intent_relocks_after_core_restore() -> Result<()> {
         cleanup().await;
+        TEST_CORE_STARTING.store(true, Ordering::Relaxed);
         let intent = valid_intent(KillSwitchStatusMode::Locked, true);
         atomic_write(&intent_path(), &serde_json::to_vec_pretty(&intent)?).await?;
 
@@ -6375,7 +7907,9 @@ mod tests {
         );
 
         // Startup recovery also rebuilds with an empty set (fail-closed until the App's next
-        // authenticated lease transaction).
+        // authenticated lease transaction). Core is treated as starting so this observes the
+        // rebuilt session rather than the idle release.
+        TEST_CORE_STARTING.store(true, Ordering::Relaxed);
         restore_on_service_start().await?;
         assert!(
             ARMED

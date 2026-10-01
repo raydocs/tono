@@ -14,7 +14,7 @@
     "dev": "wrangler dev",
     "deploy": "../../tooling/scripts/deploy-control-plane-main.sh",
     "typecheck": "tsc --noEmit && tsc -p admin/tsconfig.json --noEmit && node ../unchecked-index-ratchet.mjs --baseline unchecked-index.baseline -- ./node_modules/.bin/tsc --noEmit --pretty false --incremental false --noUncheckedIndexedAccess && node ../unchecked-index-ratchet.mjs --baseline admin/unchecked-index.baseline -- ./node_modules/.bin/tsc -p admin/tsconfig.json --noEmit --pretty false --incremental false --noUncheckedIndexedAccess",
-    "test": "vitest run",
+    "test": "vitest run --coverage",
     "check:contract": "node ../../tooling/scripts/check-ops-contract-purity.mjs",
     "check:budgets": "node ../../tooling/scripts/check-ops-budgets.mjs"
   },
@@ -28,6 +28,8 @@
     "@testing-library/react": "^16.3.3",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
+    "@vitest/coverage-istanbul": "4.1.11",
+    "fast-check": "4.5.3",
     "jsdom": "^30.0.1",
     "typescript": "^7.0.2",
     "vite": "^8.3.0",

@@ -338,6 +338,36 @@ fn snapshot_path() -> PathBuf {
         .join("protected-dns.json")
 }
 
+fn snapshot_retirement_path() -> PathBuf {
+    snapshot_path().with_extension("restored.sha256")
+}
+
+fn snapshot_fingerprint(bytes: &[u8]) -> Vec<u8> {
+    use sha2::Digest;
+    sha2::Sha256::digest(bytes).to_vec()
+}
+
+/// A retained file is housekeeping only after this exact snapshot's restore committed.
+/// Binding the record to its bytes keeps a stale/late record from retiring a newer session.
+async fn snapshot_was_restored(bytes: &[u8]) -> bool {
+    match tokio::fs::read(snapshot_retirement_path()).await {
+        Ok(record) => record == snapshot_fingerprint(bytes),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
+        Err(error) => {
+            tracing::warn!("dns: snapshot retirement record could not be read; using full restore proof: {error}");
+            false
+        }
+    }
+}
+
+async fn clear_snapshot_retirement() -> Result<()> {
+    match tokio::fs::remove_file(snapshot_retirement_path()).await {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error).context("failed to clear DNS snapshot retirement record"),
+    }
+}
+
 static DNS_OPERATION: Lazy<tokio::sync::Mutex<()>> = Lazy::new(|| tokio::sync::Mutex::new(()));
 static DNS_LAST_ERROR: Lazy<Mutex<Option<String>>> = Lazy::new(|| Mutex::new(None));
 
@@ -548,9 +578,19 @@ fn parse_name_server_list(value: &str) -> Vec<String> {
 /// (`engine::apply_snapshot`), which is what the restore proof compares.
 #[cfg_attr(any(not(windows), feature = "test"), allow(dead_code))]
 fn restored_family_servers(profile: Option<&str>, base: Option<&str>) -> Option<Vec<String>> {
-    let profile = profile.map(parse_name_server_list).unwrap_or_default();
+    // Windows also accepts space-separated servers, used by mobile broadband drivers.
+    // Normalize at the restore boundary; ownership/protection predicates keep their contract.
+    let parse_servers = |value: &str| {
+        value
+            .split(|separator: char| separator == ',' || separator.is_ascii_whitespace())
+            .map(str::trim)
+            .filter(|server| !server.is_empty())
+            .map(ToOwned::to_owned)
+            .collect::<Vec<_>>()
+    };
+    let profile = profile.map(parse_servers).unwrap_or_default();
     let effective = if profile.is_empty() {
-        base.map(parse_name_server_list).unwrap_or_default()
+        base.map(parse_servers).unwrap_or_default()
     } else {
         profile
     };
@@ -1602,6 +1642,12 @@ const DNS_FLUSH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15
 /// "busy".
 #[cfg(any(all(windows, not(feature = "test")), test))]
 const DNS_SLOW_CALL: std::time::Duration = std::time::Duration::from_secs(5);
+/// Retries for the snapshot delete after a proven restore: an AV or backup handle on the
+/// file is typically transient, and the delete is housekeeping — it must never outvote the
+/// proof above it.
+const SNAPSHOT_DELETE_ATTEMPTS: usize = 3;
+const SNAPSHOT_DELETE_RETRY_DELAY: std::time::Duration = std::time::Duration::from_millis(100);
+const SNAPSHOT_RETIREMENT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(1);
 
 /// A DNS engine call that was handed to a blocking thread and has not come back yet.
 ///
@@ -2128,6 +2174,20 @@ pub(crate) mod test_hooks {
         NRPT_SWEEP_HANGS.store(hangs, Ordering::Relaxed);
     }
 
+    static SNAPSHOT_DELETE_FAILS: AtomicBool = AtomicBool::new(false);
+
+    /// While set, the snapshot delete after a proven restore fails every round: an antivirus
+    /// or backup handle on the file that outlives the retry budget.
+    #[cfg(any(not(windows), feature = "test"))]
+    pub(crate) fn snapshot_delete_fails() -> bool {
+        SNAPSHOT_DELETE_FAILS.load(Ordering::Relaxed)
+    }
+
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn set_snapshot_delete_fails(fails: bool) {
+        SNAPSHOT_DELETE_FAILS.store(fails, Ordering::Relaxed);
+    }
+
     #[cfg(test)]
     static AUTOMATIC_RESETS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
@@ -2457,6 +2517,7 @@ async fn enable_unlocked(trigger: EnableTrigger) -> Result<DnsProtectionStatus> 
             .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
     }
     let existing = match tokio::fs::read(snapshot_path()).await {
+        Ok(bytes) if snapshot_was_restored(&bytes).await => None,
         Ok(bytes) => match parse_snapshot(&bytes) {
             Ok(snapshot) => Some(snapshot),
             // Quarantining an unreadable snapshot is a decision for an explicit request, never
@@ -2554,6 +2615,9 @@ async fn enable_unlocked(trigger: EnableTrigger) -> Result<DnsProtectionStatus> 
     // Snapshot first, even on an otherwise idempotent replay: `snapshot` may now include adapters
     // that appeared after the first enable. Any error retains originals AND unfinished work.
     atomic_write(&snapshot_path(), &serde_json::to_vec_pretty(&snapshot)?).await?;
+    // New originals are durable before retiring the old marker. Refuse before any protected
+    // mutation if it cannot be cleared, including the otherwise-idempotent policy pin below.
+    clear_snapshot_retirement().await?;
     if !replay {
         // No active adapter owes work. Do not let an absent historical adapter's note keep
         // the reconciler writing; its saved pending bit still applies when it returns.
@@ -2667,6 +2731,17 @@ async fn restore_resolver_policy() -> Result<Option<String>> {
     }))
 }
 
+/// The committed restore's last housekeeping step: delete the snapshot. Test builds can
+/// inject a persistent failure here (the AV/backup-handle scenario), so the retry-and-note
+/// behavior in [`restore_protected`] stays exercisable off Windows.
+async fn remove_restored_snapshot() -> std::io::Result<()> {
+    #[cfg(any(not(windows), feature = "test"))]
+    if test_hooks::snapshot_delete_fails() {
+        return Err(std::io::Error::other("simulated snapshot delete failure"));
+    }
+    tokio::fs::remove_file(snapshot_path()).await
+}
+
 /// Restore adapters and resolver policies before dropping their recovery snapshot. A failed
 /// proof keeps the snapshot and, via the disarm invariant, the block armed.
 pub(crate) async fn restore_protected() -> Result<DnsProtectionStatus> {
@@ -2718,10 +2793,17 @@ pub(crate) async fn restore_protected() -> Result<DnsProtectionStatus> {
             return status_unlocked().await;
         }
     };
+    let already_restored = snapshot_was_restored(&bytes).await;
     let mut snapshot = with_live_failures(&snapshot, &LIVE_APPLY_FAILURES.lock().unwrap());
     // `Some(note)` = the restore was accepted on the documented degraded path and the note must
     // reach `last_error`; `None` = fully proven.
     let outcome: Result<Option<String>> = async {
+        if already_restored {
+            // Do not overwrite DNS the user changed after the previous successful restore.
+            // Tono-owned residue still needs the existing snapshotless safety proof/repair.
+            ensure_snapshotless_dns_is_safe().await?;
+            return Ok(None);
+        }
         // The engine applies all adapters in one PowerShell batch and retries the failures
         // once in a second batch, reporting final per-adapter results.
         let live = engine_apply_snapshot(&snapshot).await?;
@@ -2809,14 +2891,70 @@ pub(crate) async fn restore_protected() -> Result<DnsProtectionStatus> {
     // Required resolver cleanup belongs to the disarm proof, not best-effort housekeeping.
     // A failed NRPT/DoH restore retains the adapter snapshot and its independent captures.
     let capture_note = record_outcome(restore_resolver_policy().await)?;
-    match tokio::fs::remove_file(snapshot_path()).await {
-        Ok(()) => {}
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-        Err(error) => return Err(error.into()),
+    // The restore is proven by here; deleting the snapshot is housekeeping. A delete that
+    // fails on something other than absence (typically a transient AV sharing violation)
+    // used to fail the whole restore and, through the disarm gate, refuse the WFP release —
+    // the machine stayed blocked over a file that no longer describes a redirect. Retry
+    // briefly, then record its retirement so later restores do not replay it and the next
+    // enable captures the user's current originals. Failure to record is a second I/O fault;
+    // it must still not undo a proven restore or re-block the machine.
+    let mut leftover: Option<std::io::Error> = None;
+    for attempt in 0..SNAPSHOT_DELETE_ATTEMPTS {
+        match remove_restored_snapshot().await {
+            Ok(()) => {
+                leftover = None;
+                break;
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                leftover = None;
+                break;
+            }
+            Err(error) => {
+                if attempt + 1 < SNAPSHOT_DELETE_ATTEMPTS {
+                    tokio::time::sleep(SNAPSHOT_DELETE_RETRY_DELAY).await;
+                }
+                leftover = Some(error);
+            }
+        }
     }
-    // Committed: the snapshot is gone. The degraded-restore note (adapter DNS) and the capture
-    // note (Encrypted DNS) describe different losses, so both reach `last_error`.
-    if let Some(note) = join_notes(degraded, settle_capture_loss(capture_note).await) {
+    let retirement_error = if leftover.is_some() {
+        let record = async {
+            // Apply bookkeeping may have rewritten flags since entry; hash the retained bytes.
+            let retained = tokio::fs::read(snapshot_path()).await?;
+            atomic_write(&snapshot_retirement_path(), &snapshot_fingerprint(&retained)).await
+        };
+        match tokio::time::timeout(SNAPSHOT_RETIREMENT_TIMEOUT, record).await {
+            Ok(recorded) => recorded.err(),
+            Err(_) => Some(anyhow::anyhow!("DNS snapshot retirement record timed out")),
+        }
+    } else {
+        if let Err(error) = clear_snapshot_retirement().await {
+            tracing::warn!("dns: obsolete snapshot retirement record could not be removed: {error:#}");
+        }
+        None
+    };
+    let leftover_note = leftover.map(|error| {
+        tracing::warn!(
+            "dns: the restored protected-dns snapshot could not be deleted ({error}); it will \
+             be retried on the next restore"
+        );
+        let disposition = match retirement_error {
+            Some(error) => format!("its retirement could not be recorded ({error:#}); a later retry may replay the saved originals"),
+            None => "its retirement was recorded; later sessions capture fresh originals".to_owned(),
+        };
+        format!(
+            "{DNS_RESTORE_DEGRADED_PREFIX}: the original DNS servers were restored and \
+             verified, but the recovery snapshot file could not be deleted ({error}); the \
+             next disconnect retries the deletion; {disposition}"
+        )
+    });
+    // Committed as far as the machine is concerned. The degraded-restore note (adapter
+    // DNS), the leftover-snapshot note and the capture note (Encrypted DNS) describe
+    // different losses, so all reach `last_error`.
+    if let Some(note) = join_notes(
+        degraded,
+        join_notes(leftover_note, settle_capture_loss(capture_note).await),
+    ) {
         surface_success_note(&note);
     }
     if let Err(error) = engine_flush_cache().await {
@@ -3185,8 +3323,12 @@ pub async fn initialize_status_cache() {
             // clone of an in-memory value: no IO, no queue, nothing that can deadlock under
             // `DNS_OPERATION`.
             let barrier_wanted = crate::core::windows_kill_switch::status().await.wanted;
-            let protection_wanted = status.snapshot_present && barrier_wanted;
-            if status.snapshot_present && !barrier_wanted {
+            let retired = match tokio::fs::read(snapshot_path()).await {
+                Ok(bytes) => snapshot_was_restored(&bytes).await,
+                Err(_) => false,
+            };
+            let protection_wanted = status.snapshot_present && barrier_wanted && !retired;
+            if status.snapshot_present && (!barrier_wanted || retired) {
                 tracing::warn!(
                     "dns: a protected-DNS snapshot survived a disarm; leaving reconciliation off \
                      rather than re-pointing adapters at a resolver with no barrier behind it"
