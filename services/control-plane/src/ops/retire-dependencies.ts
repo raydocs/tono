@@ -2,6 +2,7 @@
 // existing exit-token revoke (rotate hash + disable) used once they have left.
 
 import { randomToken, sha256 } from '../crypto';
+import { catalogHy2Name } from '../catalog-yaml';
 import { type Env, type Row, id, now } from '../env';
 import { writeOpsAudit } from '../product-account';
 import {
@@ -40,7 +41,7 @@ async function queryCustomers(
   cutoff: number,
 ): Promise<RetireCustomerOnNodeDto[]> {
   try {
-    const rows = await e.DB.prepare(sql).bind(name, cutoff).all<Row>();
+    const rows = await e.DB.prepare(sql).bind(name, catalogHy2Name(name), cutoff).all<Row>();
     return (rows.results ?? []).map((row) => ({
       userId: String(row.user_id),
       email: String(row.email ?? ''),
@@ -63,7 +64,7 @@ export async function retireDependencies(
       e,
       `SELECT s.user_id, u.email, s.last_seen_at
        FROM ops_customer_status s JOIN users u ON u.id = s.user_id
-       WHERE s.selected_server = ? AND s.last_seen_at >= ?`,
+       WHERE s.selected_server IN (?, ?) AND s.last_seen_at >= ?`,
       name,
       cutoff,
     ),
@@ -71,15 +72,15 @@ export async function retireDependencies(
       e,
       `SELECT d.user_id, u.email, d.last_seen_at
        FROM ops_device_status d JOIN users u ON u.id = d.user_id
-       WHERE d.selected_server = ? AND d.last_seen_at >= ?`,
+       WHERE d.selected_server IN (?, ?) AND d.last_seen_at >= ?`,
       name,
       cutoff,
     ),
     (async () => {
       try {
         const row = await e.DB.prepare(
-          'SELECT COUNT(*) AS n FROM user_home_bindings WHERE default_proxy_name = ?',
-        ).bind(name).first<Row>();
+          'SELECT COUNT(*) AS n FROM user_home_bindings WHERE default_proxy_name IN (?, ?)',
+        ).bind(name, catalogHy2Name(name)).first<Row>();
         return Number(row?.n ?? 0) || 0;
       } catch (error) {
         if (!missingTable(error)) throw error;
