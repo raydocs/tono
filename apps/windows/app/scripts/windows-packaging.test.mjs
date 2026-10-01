@@ -1384,8 +1384,9 @@ test('Support WebRTC check link is granted to the webview opener and nothing wid
 
 test('prebuild.mjs parses, so the candidate build can run it', async () => {
   const { spawnSync } = await import('node:child_process')
-  const prebuild = new URL('./prebuild.mjs', import.meta.url)
-  const result = spawnSync(process.execPath, ['--check', prebuild.pathname], {
+  const { fileURLToPath } = await import('node:url')
+  const prebuild = fileURLToPath(new URL('./prebuild.mjs', import.meta.url))
+  const result = spawnSync(process.execPath, ['--check', prebuild], {
     encoding: 'utf8',
   })
   assert.equal(result.status, 0, result.stderr)
