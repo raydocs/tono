@@ -14,6 +14,9 @@ const REPO_ROOT = path.resolve(HERE, '..', '..');
 const CONTROL_PLANE = path.resolve(REPO_ROOT, 'services', 'control-plane');
 
 export const REFUSED_DATABASES = Object.freeze(['tono-control-plane', 'DB']);
+const PRODUCTION_CONFIGS = Object.freeze(['wrangler.jsonc', 'wrangler.admin.jsonc']);
+const DATABASE_ID_RE = /"database_id"\s*:\s*"([^"]+)"/g;
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const ALLOWED_REMAINDERS = new Set(['_cf_KV', 'sqlite_sequence']);
 
 const SQLITE_MASTER_SELECT =
@@ -38,9 +41,9 @@ Always skips sqlite_* and _cf_* (never drop _cf_KV). d1_migrations is dropped
   blank line between batches. --apply runs each batch via wrangler, stops on
   the first failure, then asserts only _cf_KV / sqlite_sequence remain.
 
---apply against tono-control-plane or DB is refused unless both
-  --i-mean-production and TONO_ALLOW_PRODUCTION_WIPE=1 are set; even then the
-  database name and table count print before the first batch.
+--apply against tono-control-plane, DB, or its database_id is refused unless
+  both --i-mean-production and TONO_ALLOW_PRODUCTION_WIPE=1 are set; even then
+  the database name and table count print before the first batch.
 
 Options: --batch N  --keep NAME  --i-mean-production
 Exit: 0 ok; 1 usage/refusal; 2 FK cycle; 3 leftovers after apply; 4 batch failed.`;
@@ -307,8 +310,37 @@ function productionAllowed(opts) {
   return Boolean(opts.iMeanProduction) && process.env.TONO_ALLOW_PRODUCTION_WIPE === '1';
 }
 
+export function productionDatabaseIdsFromText(text) {
+  const ids = new Set();
+  const re = new RegExp(DATABASE_ID_RE.source, 'g');
+  for (const match of String(text ?? '').matchAll(re)) {
+    if (match[1]) ids.add(match[1].toLowerCase());
+  }
+  return ids;
+}
+
+let productionIdsCache;
+function productionDatabaseIds() {
+  if (productionIdsCache) return productionIdsCache;
+  const ids = new Set();
+  for (const name of PRODUCTION_CONFIGS) {
+    const text = readFileSync(path.join(CONTROL_PLANE, name), 'utf8');
+    for (const id of productionDatabaseIdsFromText(text)) ids.add(id);
+  }
+  productionIdsCache = ids;
+  return ids;
+}
+
 function isRefusedName(name) {
-  return REFUSED_DATABASES.includes(name);
+  if (REFUSED_DATABASES.includes(name)) return true;
+  if (typeof name !== 'string' || !UUID_RE.test(name)) return false;
+  try {
+    const ids = productionDatabaseIds();
+    if (ids.size === 0) return true;
+    return ids.has(name.toLowerCase());
+  } catch {
+    return true;
+  }
 }
 
 function refuseProductionArgv(args, allowProduction) {

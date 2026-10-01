@@ -353,6 +353,7 @@ jobs:
           /usr/bin/codesign --verify --deep --strict --all-architectures "$RUNNER_TEMP/release/$ARTIFACT_NAME.app"
           /usr/bin/xcrun stapler validate "$RUNNER_TEMP/release/$ARTIFACT_NAME.app"
           /usr/sbin/spctl -a -t exec -vv "$RUNNER_TEMP/release/$ARTIFACT_NAME.app"
+          sh tooling/scripts/verify-release-gate.sh "$RUNNER_TEMP/release/$ARTIFACT_NAME.app"
 
       - name: Record signed candidate provenance without update authority
         if: github.event_name == 'workflow_dispatch' && inputs.candidate_only
