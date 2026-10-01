@@ -274,6 +274,10 @@ pub fn build_runtime(input: RuntimeInput<'_>) -> Result<OwnedSingBoxRuntime, Sin
     if let Some(target) = home_target {
         rules.push(json!({"network":"tcp","domain_suffix":config::CLAUDE_HOME_DOMAINS.to_vec(),"action":"route","outbound":target}));
         rules.push(json!({"network":"tcp","ip_cidr":config::CLAUDE_HOME_IPV4_CIDRS.to_vec(),"action":"route","outbound":target}));
+    } else if input.direct_plan.is_some() {
+        // Dedicated API children must never fall through to Alibaba DIRECT,
+        // including browser/curl requests without a residential hop.
+        rules.push(json!({"network":"tcp","domain_suffix":config::DEDICATED_MODEL_API_SUFFIXES.to_vec(),"action":"route","outbound":"Tono-Exit"}));
     }
     if home_target.is_some() || input.direct_plan.is_some() {
         for (field, values) in [
@@ -535,8 +539,9 @@ mod tests {
         let runtime = build_runtime(request).unwrap();
         let value: Value = serde_json::from_str(runtime.runtime_json()).unwrap();
         assert_eq!(
-            value["route"]["rules"][3],
-            json!({"type":"logical","mode":"and","rules":[
+            value["route"]["rules"].as_array().unwrap().iter()
+                .find(|rule| rule["type"] == "logical").unwrap(),
+            &json!({"type":"logical","mode":"and","rules":[
             {"network":"tcp","port":443,"domain":["qq.com"]},{"ip_cidr":["101.1.2.3/32"]}],
             "action":"route","outbound":"Tono-China-Direct"})
         );
@@ -556,6 +561,41 @@ mod tests {
             build_runtime(request).unwrap_err(),
             SingBoxError::UnsupportedPolicy
         );
+    }
+
+    #[test]
+    fn dashscope_routes_precede_alibaba_direct_with_and_without_a_home_hop() {
+        let nodes = nodes();
+        let plan = DirectPlan {
+            physical_interface: "Ethernet".into(),
+            hosts: vec![("qq.com".into(), "101.1.2.3".into())],
+            tcp_wechat_rules: vec![("qq.com".into(), "101.1.2.3".parse().unwrap(), 443)],
+            tcp_web_rules: vec![], web_suffix_rules: vec![("aliyuncs.com".into(), 443)],
+            udp_wechat_rules: vec![], wechat_process_path_regexes: vec![r"^C:\\WeChat\\.*$".into()],
+            reviewed_direct_ports: vec![443],
+        };
+        let check = |routing: CatalogRouting, target: &str| {
+            let mut request = input(&nodes, &routing);
+            request.direct_plan = Some(&plan);
+            let runtime = build_runtime(request).unwrap();
+            let value: Value = serde_json::from_str(runtime.runtime_json()).unwrap();
+            let rules = value["route"]["rules"].as_array().unwrap();
+            let direct = rules.iter().position(|rule| rule["outbound"] == config::DIRECT_GROUP_NAME).unwrap();
+            assert!(rules.iter().any(|rule| rule["domain_suffix"] == json!(["aliyuncs.com"])
+                && rule["outbound"] == config::DIRECT_GROUP_NAME));
+            for suffix in ["dashscope.aliyuncs.com", "dashscope-intl.aliyuncs.com", "dashscope-us.aliyuncs.com", "maas.aliyuncs.com"] {
+                let protected = rules.iter().position(|rule| rule["network"] == "tcp"
+                    && rule["domain_suffix"].as_array().is_some_and(|hosts| hosts.contains(&json!(suffix)))
+                    && rule["outbound"] == target).expect(suffix);
+                assert!(protected < direct, "{suffix}");
+            }
+            assert_eq!(value["dns"]["final"], "Tono-DoH");
+        };
+        check(CatalogRouting::default(), "Tono-Exit");
+        check(CatalogRouting { home_proxy: Some("Fixture Alpha".into()), ..Default::default() }, "Fixture Alpha");
+        check(CatalogRouting { home_socks5: Some(crate::catalog::CatalogHomeSocks5 {
+            host: "home.example.com".into(), port: 1080, username: "u".into(), password: "p".into(),
+        }), ..Default::default() }, config::HOME_SOCKS5_OUTBOUND_NAME);
     }
 
     #[test]

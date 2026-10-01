@@ -234,7 +234,14 @@ function canonicalTrafficPolicyEntries(value: unknown, trusted: boolean): Traffi
   // Match the clients' assistant home domains: a signed direct entry must not
   // override their residential routes, including assistant auth hosts. Kept
   // apart from `protectedSuffixes`, whose exact set is a cross-platform contract.
+  // Dedicated Model Studio API namespaces, not Alibaba's general cloud tree.
+  // Clients evaluate these assistant children before the reviewed DIRECT parent.
+  const dedicatedModelAPISuffixes = [
+    'dashscope.aliyuncs.com', 'dashscope-intl.aliyuncs.com',
+    'dashscope-us.aliyuncs.com', 'maas.aliyuncs.com',
+  ];
   const assistantHomeSuffixes = [
+    ...dedicatedModelAPISuffixes,
     'chatgpt.com', 'openai.com', 'chat.com', 'ai.com', 'oaistatic.com', 'oaiusercontent.com',
     'grok.com', 'grok.x.com', 'grokipedia.com', 'x.ai',
     'perplexity.ai', 'perplexity.com', 'pplx.ai',
@@ -329,7 +336,9 @@ function canonicalTrafficPolicyEntries(value: unknown, trusted: boolean): Traffi
     if (typeof host !== 'string' || host.length > 253 ||
         !/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/.test(host) ||
         directGuardSuffixes.some((suffix) =>
-          host === suffix || host.endsWith(`.${suffix}`) || suffix.endsWith(`.${host}`)) ||
+          host === suffix || host.endsWith(`.${suffix}`) ||
+          (suffix.endsWith(`.${host}`) &&
+            !(host === 'aliyuncs.com' && dedicatedModelAPISuffixes.includes(suffix)))) ||
         seenSuffixes.has(host)) {
       throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid or duplicate direct suffix host');
     }

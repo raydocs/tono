@@ -293,6 +293,65 @@ final class SingBoxConfigTests: XCTestCase {
         }
     }
 
+    func testDashScopeRoutesAndDNSPrecedeAlibabaDirectWithoutOrWithAHomeHop() throws {
+        let values = try nodes()
+        let plan = ConfigPipeline.ManagedDirectRuntimePolicy(physicalInterface: "en0",
+            domainPins: [], webDomainPins: [], mediaEndpoints: [], trusted: true)
+        let check: (String?) throws -> Void = { home in
+            let overlay = ConfigPipeline.OverlayConfig(mixedPort: 29190,
+                externalController: "127.0.0.1:29191", secret: self.secret, tunEnabled: true,
+                selectedNodeName: "Fixture Beta", claudeHomeNodeName: home)
+            let result = try ConfigPipeline.buildSingBoxRuntime(overlay: overlay, nodes: values, directPlan: plan)
+            let json = try XCTUnwrap(JSONSerialization.jsonObject(with: result.runtimeJSON) as? [String: Any])
+            let route = try XCTUnwrap(json["route"] as? [String: Any])
+            let rules = try XCTUnwrap(route["rules"] as? [[String: Any]])
+            let direct = try XCTUnwrap(rules.firstIndex {
+                $0["domain_suffix"] as? [String] == ["aliyuncs.com"] && $0["outbound"] as? String == ConfigPipeline.webDirectGroupName
+            })
+            let dns = try XCTUnwrap(json["dns"] as? [String: Any])
+            let dnsRules = try XCTUnwrap(dns["rules"] as? [[String: Any]])
+            let directDNS = try XCTUnwrap(dnsRules.firstIndex { $0["server"] as? String == "Tono-China-DNS" })
+            let target = home == nil ? ConfigPipeline.exitGroupName : ConfigPipeline.claudeHomeGroupName
+            for suffix in ["dashscope.aliyuncs.com", "dashscope-intl.aliyuncs.com", "dashscope-us.aliyuncs.com", "maas.aliyuncs.com"] {
+                let tcp = try XCTUnwrap(rules.firstIndex {
+                    $0["network"] as? String == "tcp" && ($0["domain_suffix"] as? [String])?.contains(suffix) == true && $0["outbound"] as? String == target
+                }, suffix)
+                let udp = try XCTUnwrap(rules.firstIndex {
+                    $0["network"] as? String == "udp" && ($0["domain_suffix"] as? [String])?.contains(suffix) == true && $0["action"] as? String == "reject"
+                }, suffix)
+                XCTAssertLessThan(tcp, direct, suffix)
+                XCTAssertLessThan(udp, direct, suffix)
+                let protectedDNS = try XCTUnwrap(dnsRules.firstIndex {
+                    ($0["domain_suffix"] as? [String])?.contains(suffix) == true && $0["server"] as? String == "Tono-FakeIP"
+                }, suffix)
+                let outboundDNS = try XCTUnwrap(dnsRules.firstIndex {
+                    ($0["domain_suffix"] as? [String])?.contains(suffix) == true && $0["server"] as? String == "Tono-DoH"
+                }, suffix)
+                let backupDNS = try XCTUnwrap(dnsRules.firstIndex {
+                    ($0["domain_suffix"] as? [String])?.contains(suffix) == true && $0["server"] as? String == "Tono-DoH-Backup"
+                }, suffix)
+                let failedDNS = try XCTUnwrap(dnsRules.firstIndex {
+                    ($0["domain_suffix"] as? [String])?.contains(suffix) == true && $0["action"] as? String == "reject"
+                }, "failed protected lookups must not fall through to China DNS: \(suffix)")
+                let primaryResponse = try XCTUnwrap(dnsRules.dropFirst(outboundDNS + 1).first)
+                XCTAssertEqual(primaryResponse["match_response"] as? String, dnsRules[outboundDNS]["tag"] as? String)
+                XCTAssertEqual(primaryResponse["response_rcode"] as? String, "NOERROR")
+                XCTAssertEqual(primaryResponse["action"] as? String, "respond")
+                let backupResponse = try XCTUnwrap(dnsRules.dropFirst(backupDNS + 1).first)
+                XCTAssertEqual(backupResponse["match_response"] as? String, dnsRules[backupDNS]["tag"] as? String)
+                XCTAssertEqual(backupResponse["action"] as? String, "respond")
+                XCTAssertLessThan(protectedDNS, directDNS, suffix)
+                XCTAssertLessThan(outboundDNS, directDNS, suffix)
+                XCTAssertLessThan(outboundDNS, backupDNS, suffix)
+                XCTAssertLessThan(backupDNS, directDNS, suffix)
+                XCTAssertLessThan(backupDNS, failedDNS, suffix)
+                XCTAssertLessThan(failedDNS, directDNS, suffix)
+            }
+        }
+        try check(nil)
+        try check("Fixture Alpha")
+    }
+
     func testDirectRoutesNeverMatchOnProcessName() throws {
         // A plan opens root's web ports in PF, so any rule that sends a
         // basename to a direct outbound lets a renamed process leave untunneled.
@@ -425,8 +484,10 @@ final class SingBoxConfigTests: XCTestCase {
         let fake = try XCTUnwrap(rules.first { $0["server"] as? String == "Tono-FakeIP" })
         XCTAssertEqual(fake["rewrite_ttl"] as? Int, 30)
         XCTAssertEqual(dns["final"] as? String, "Tono-DoH")
-        let evaluate = rules.filter { $0["action"] as? String == "evaluate" }.map { $0["server"] as? String }
-        XCTAssertEqual(evaluate, ["Tono-DoH", "Tono-DoH-Backup"])
+        let generalEvaluate = rules.filter {
+            $0["action"] as? String == "evaluate" && $0["domain_suffix"] == nil
+        }.map { $0["server"] as? String }
+        XCTAssertEqual(generalEvaluate, ["Tono-DoH", "Tono-DoH-Backup"])
         XCTAssertFalse(rules.contains { $0["race"] != nil })
         XCTAssertTrue(ProtectedDNSProbe.isFakeIP("198.18.16.1"))
         XCTAssertTrue(ProtectedDNSProbe.isFakeIP("198.18.31.255"))
