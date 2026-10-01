@@ -321,7 +321,10 @@ final class SingBoxConfigTests: XCTestCase {
             nodes: [node],
             directPolicy: plan
         )
-        let bundle = try XCTUnwrap(yaml.range(of: "PROCESS-PATH-REGEX,^/Applications/WeChat"))
+        // `rulePathRegex` hex-escapes `/` and `.`. A search for the raw path
+        // never matches the emitted PROCESS-PATH-REGEX payload.
+        let wechatRegex = ConfigPipeline.rulePathRegex(for: "/Applications/WeChat.app/")
+        let bundle = try XCTUnwrap(yaml.range(of: "PROCESS-PATH-REGEX,\(wechatRegex)"))
         for marker in [
             "DOMAIN-SUFFIX,claude.ai)),Tono-Exit",
             "DOMAIN-SUFFIX,claude.ai)),REJECT",

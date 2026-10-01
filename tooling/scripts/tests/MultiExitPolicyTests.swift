@@ -795,13 +795,39 @@ struct MultiExitPolicyTests {
             ("rule-delimiters-are-hex-escaped", delimitersAreHexEscaped),
             ("assistant-path-verdicts", assistantPathVerdictsHold),
             (
-                "no-assistant-domain-suffix-without-home",
+                // Without a residential hop, MATCH is not enough: the reviewed
+                // bundle's PROCESS-PATH-REGEX DIRECT is first-match and would
+                // carry assistant names out the physical interface. TCP goes to
+                // the exit; UDP is rejected so it falls back to that TCP route.
+                "assistant-destinations-precede-bundle-direct-without-home",
                 ConfigPipeline.assistantHomeDomainSuffixes.allSatisfy { suffix in
-                    !managedDirectRuntime.contains(
-                        "DOMAIN-SUFFIX,\(suffix)),\(ConfigPipeline.claudeHomeGroupName)"
-                    ) && !managedDirectRuntime.contains(
-                        "DOMAIN-SUFFIX,\(suffix)),\(ConfigPipeline.exitGroupName)"
-                    )
+                    guard let tcp = managedDirectRuntime.range(
+                            of: "DOMAIN-SUFFIX,\(suffix)),\(ConfigPipeline.exitGroupName)"
+                        ),
+                        let udp = managedDirectRuntime.range(
+                            of: "DOMAIN-SUFFIX,\(suffix)),REJECT"
+                        ),
+                        let bundle = managedDirectRuntime.range(of: bundleWideRule)
+                    else { return false }
+                    return tcp.lowerBound < bundle.lowerBound
+                        && udp.lowerBound < bundle.lowerBound
+                        && !managedDirectRuntime.contains(
+                            "DOMAIN-SUFFIX,\(suffix)),\(ConfigPipeline.appDirectGroupName)"
+                        )
+                        && !managedDirectRuntime.contains(
+                            "DOMAIN-SUFFIX,\(suffix)),\(ConfigPipeline.webDirectGroupName)"
+                        )
+                } && ConfigPipeline.assistantHomeIPv4Cidrs.allSatisfy { cidr in
+                    guard let tcp = managedDirectRuntime.range(
+                            of: "IP-CIDR,\(cidr),no-resolve)),\(ConfigPipeline.exitGroupName)"
+                        ),
+                        let udp = managedDirectRuntime.range(
+                            of: "IP-CIDR,\(cidr),no-resolve)),REJECT"
+                        ),
+                        let bundle = managedDirectRuntime.range(of: bundleWideRule)
+                    else { return false }
+                    return tcp.lowerBound < bundle.lowerBound
+                        && udp.lowerBound < bundle.lowerBound
                 }
             ),
             (

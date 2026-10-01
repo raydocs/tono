@@ -7,3 +7,8 @@
 - 验证：Linux 云代理无 Swift 工具链，XCTest 未在本地执行，由托管 macOS CI 验证。
 - 候选/发布：仅源码，无新候选。
 - 剩余限制：需 `needs-hardware`。不能声称客户设备上的 QUIC 回退已实测。不改严格断网开关，也不把非助手流量改成拒绝。
+
+## 2026-10-01 · 续记
+- 合入当时的 `origin/main`。mihomo 的 `PROCESS-PATH-REGEX` 会把 `/` 和 `.` 写成 `\x` 转义（`rulePathRegex`），测试仍在找未转义的 `^/Applications/WeChat`，所以 `macos / build` 在 `XCTUnwrap` 失败。断言改为用 `rulePathRegex` 的实际载荷。
+- `MultiExitPolicyTests` 里「无住宅跳就不写助手域名」与这次修复相反，已改为要求这些 TCP 行指向 `Tono-Exit`、UDP 行 `REJECT`，并且都排在审核包直连规则之前。
+- 验证：本环境无 Xcode，`xcodebuild` 未跑。
