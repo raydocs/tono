@@ -20,3 +20,7 @@
 ### 2026-09-30 续记 · 跟着重放到已含 #733 的探测分支
 
 - 来源：`--onto` 重放到 `cursor/unarmed-background-heal-a925` `125721ef`（该分支已变基到 main `cbb4f56a`）。没有把 main 合并进来。TCP 证明失败仍在 `run_stages` 之前返回。预算没有缩短。助手协议仍是 `4.52.6`。
+
+### 2026-10-01 续记 · 跟着重放到当前 #714
+
+- 来源：`--onto` 重放到 `cursor/unarmed-background-heal-a925` `ffa9b3c0`。没有把 main 合并进来。TCP 证明失败仍在 `run_stages` 之前返回。10 秒 TUN 和 12 秒首字节预算没有缩短。助手协议仍是该基线上的 `4.52.8`。
