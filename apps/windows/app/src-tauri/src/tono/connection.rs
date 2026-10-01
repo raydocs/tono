@@ -2245,6 +2245,29 @@ mod tests {
     }
 
     #[test]
+    fn select_action_while_disconnecting_does_not_switch_or_reconnect() {
+        let disconnecting = ConnectionStatus {
+            is_disconnecting: true,
+            ..ConnectionStatus::default()
+        };
+        for armed in [true, false] {
+            assert_eq!(
+                select_action(true, false, &disconnecting, armed),
+                SelectAction::UpdateOnly
+            );
+        }
+        let disconnecting_blocked = ConnectionStatus {
+            is_disconnecting: true,
+            is_protection_blocked: true,
+            ..ConnectionStatus::default()
+        };
+        assert_eq!(
+            select_action(true, true, &disconnecting_blocked, true),
+            SelectAction::UpdateOnly
+        );
+    }
+
+    #[test]
     fn hot_switch_requires_known_matching_transport() {
         use super::switch::hot_switch_allowed;
 

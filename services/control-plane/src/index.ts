@@ -3,7 +3,7 @@ import {
   randomToken,
   sha256,
 } from './crypto';
-import { refreshSession, tokens } from './sessions';
+import { refreshSession, revokeOnLogout, tokens } from './sessions';
 import {
   OidcVerificationError,
   verifyOidcIdToken,
@@ -2455,19 +2455,8 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
     const a = await auth(req, e);
     const b: Row = await body(req, 4 * 1024).catch(() => ({} as Row));
     const raw = b.refreshToken;
-    const t = now();
-    const statements = [
-      e.DB.prepare('UPDATE sessions SET revoked_at = ? WHERE id = ? AND user_id = ?').bind(t, a.sessionId, a.userId),
-    ];
-    if (raw !== undefined) {
-      str(raw, 'refreshToken', 20, 500);
-      statements.push(
-        e.DB.prepare(
-          'UPDATE sessions SET revoked_at = ? WHERE user_id = ? AND refresh_hash = ? AND revoked_at IS NULL',
-        ).bind(t, a.userId, await sha256(raw)),
-      );
-    }
-    await e.DB.batch(statements);
+    if (raw !== undefined) str(raw, 'refreshToken', 20, 500);
+    await revokeOnLogout(e, a.userId, a.sessionId, typeof raw === 'string' ? raw : undefined);
     return new Response(null, { status: 204 });
   }
 
