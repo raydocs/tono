@@ -660,6 +660,17 @@ func runUpdateSelfTests() -> Bool {
         )
         try check(reading == .unknown, "An unparseable route readback counted as \(reading)")
     }
+    // Only the whole ESRCH diagnostic proves absence; "not in table" inside
+    // a readback with fields does not.
+    test("selective-route-not-in-table-must-be-the-whole-output") { _ in
+        let reading = SelectiveFailOpen.routeLayerReading(
+            status: 0,
+            output: "destination: invalid\n       mask: ffff:ffff:ffff::\n      flags: <UP,DONE,STATIC,BLACKHOLE>\n"
+                + "  interface: not in table\n",
+            prefix: SelectiveFailOpen.ipv6Prefix
+        )
+        try check(reading == .unknown, "A readback that mentions not in table counted as \(reading)")
+    }
     // An iPhone or iPad app on Apple silicon is a wrapper with no Contents
     // folder (`WrappedBundle -> Wrapper/<name>.app`). One of them kept every
     // removed Tono's protection (BRICK-M3). A bundle that has Contents but no
