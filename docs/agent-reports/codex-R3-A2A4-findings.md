@@ -1,18 +1,19 @@
 # R3-A2A4: Codex (GPT-6.1 Sol) findings
 
-Generated 2026-09-30 21:05 MT from the run's findings.tsv / prs.tsv.
+Generated 2026-09-30 21:19 MT from the run's findings.tsv / prs.tsv.
 
 ## PRs
 
 | PR | Branch | Labels | Auto-merge requested | Title |
 |---|---|---|---|---|
 | 1003 | hunt/sol-r3wconn-monitor-ai-hold | needs-hardware | yes | fix(windows): preserve AI hold after automatic health release |
+| 1010 | hunt/sol-r3wconn-failed-connect-ai-hold | needs-hardware | yes | fix(windows): keep AI hold during guarded connect-failure release |
 
 ## Hypotheses
 
 | ID | Area | Sev | Location | Description | Verdict |
 |---|---|---|---|---|---|
-| WIN-MONITOR-AI-HOLD-OMISSION | A3 | P1 | connection/monitor.rs:1390 | Automatic health release removes the secondary AI hold | real-fixed #1003 (CI pending) |
+| WIN-MONITOR-AI-HOLD-OMISSION | A3 | P1 | connection/monitor.rs:1391 | Automatic health release removes the secondary AI hold | real-fixed #1003 (CI pending) |
 | R3-A2-01 | A2 | — | connection/reconnect.rs:139 | Reconnect budget leaves ordinary users blocked | false-positive ordinary failure releases; persistent hold needs another release failure |
 | R3-A2-02 | A2 | — | connection/cleanup.rs:30 | Cancellation loses failure cleanup | false-positive detached writer survives cancellation and checks generation |
 | R3-A2-03 | A2 | — | connection/cleanup.rs:77 | Late StartClash tears down replacement | false-positive reader guard excludes replacement until compensation settles |
@@ -32,12 +33,12 @@ Generated 2026-09-30 21:05 MT from the run's findings.tsv / prs.tsv.
 | R3-A3-08 | A3 | — | connection_health.rs:245 | One missing core sample tears down tunnel | false-positive two sustained samples required |
 | R3-A3-09 | A3 | — | connection/probes.rs:551 | Transient probe strands protection | false-positive retry recovery and unarmed probing paths |
 | R3-A3-10 | A3 | — | state.rs:166 | Monitor replacement aborts its own connect tail | false-positive registration checks task identity |
-| R3-A3-11 | A3 | — | core/proxy_control.rs | Proxy guard pending loop hangs release | false-positive no product path starts guard |
+| R3-A3-11 | A3 | — | ../core/proxy_control.rs:80 | Proxy guard pending loop hangs release | false-positive no product path starts guard |
 | R3-A4-02 | A4 | — | connection/direct.rs:62 | Policy revision stops heartbeat | duplicate #786 |
 | R3-A4-03 | A4 | — | connection/direct.rs:495 | Suffix-only activates empty DIRECT graph | duplicate #786 |
 | R3-A4-04 | A4 | — | connection/direct.rs:82 | Failed DIRECT renewal blocks general network | duplicate #926 |
 | R3-A4-05 | A4 | — | connection/direct.rs:1250 | Activation reload stalls Restore | duplicate #898 |
-| R3-A4-06 | A4 | — | catalog_sync.rs | Routing changes leave stale runtime permits | duplicate #787 |
+| R3-A4-06 | A4 | — | catalog_sync.rs:113 | Routing changes leave stale runtime permits | duplicate #787 |
 | R3-A4-07 | A4 | — | connection.rs:308 | Signed paths survive fresh full tunnel | duplicate #900 |
 | R3-A4-08 | A4 | — | route_ledger.rs:65 | Route ledger survives crash with OS routes | false-positive process-local byte accounting |
 | R3-A4-09 | A4 | — | route_ledger.rs:184 | Closed connection cursors accumulate | false-positive live IDs inserted before retain comparison |
@@ -51,3 +52,4 @@ Generated 2026-09-30 21:05 MT from the run's findings.tsv / prs.tsv.
 | R3-A2-10 | A2 | — | connection/controller.rs:314 | DNS bind preflight retains successful socket after another protocol failed | false-positive moved Results drop successful listeners each retry |
 | R3-A2-11 | A2 | — | connection/monitor.rs:616 | Old stage tail monitor registration adopts new session | false-positive monitor independently checks live status and generations; harmful overlap unproved |
 | R3-A2-12 | A2 | — | connection/switch.rs:238 | Hot switch stops committed DIRECT heartbeat | false-positive hot switch preserves generation; heartbeat policy identity unchanged |
+| WIN-CONNECT-FAILURE-AI-HOLD-OMISSION | A2/A3 | P1 | connection.rs:680 | Failed protected connect/cold switch performs one plain release without AI hold | real-fixed #1010 (CI pending) |

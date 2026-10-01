@@ -1,12 +1,13 @@
 # R3-W4W7: Codex (GPT-6.1 Sol) findings
 
-Generated 2026-09-30 21:05 MT from the run's findings.tsv / prs.tsv.
+Generated 2026-09-30 21:19 MT from the run's findings.tsv / prs.tsv.
 
 ## PRs
 
 | PR | Branch | Labels | Auto-merge requested | Title |
 |---|---|---|---|---|
 | 1005 | hunt/sol-r3svc-unverified-recovery-ai-hold | needs-hardware | yes | fix(windows): retain AI blocking after interrupted first connection |
+| 1007 | hunt/sol-r3svc-prepare-failure-ai-hold | needs-hardware | yes | fix(windows): retain AI blocking after update Prepare failure |
 
 ## Hypotheses
 
@@ -25,4 +26,5 @@ Generated 2026-09-30 21:05 MT from the run's findings.tsv / prs.tsv.
 | R3S-11 | W4 | — | core/runtime.rs:98 | Unparseable runtime record wedges all Core starts | duplicate #775 quarantine already merged |
 | R3S-12 | W4 | — | core/desired.rs:249 | Reboot replays old run intent without user | duplicate BRICK-W1 boot-session guard already merged |
 | R3S-13 | W4 | — | core/desired.rs:189 | Retired owner resurrects Core on next restart | false-positive retirement persists desired stopped before owner clear |
-| R3S-14 | W7 | P1 | core/update.rs:535 | Failed Prepare uses plain release and omits AI hold | real-unfixed regression in progress; follow-up to #793 |
+| R3S-14 | W7 | P1 | core/update.rs:535 | Failed Prepare uses plain release and omits AI hold | real-fixed #1007 (native CI pending); follow-up to #793 |
+| R3S-15 | W4 | P1 | core/server/mod.rs:578 | Automatic armed SCM Stop releases without AI hold | real-unfixed regression in progress; selective follow-up to #792 |
