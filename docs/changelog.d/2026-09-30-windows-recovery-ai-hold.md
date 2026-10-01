@@ -1,6 +1,6 @@
 ## 2026-09-30 · Windows recovery keeps the secondary AI hold
 - 归属：SHIP_PLAN §2 item 10；Windows Service WFP recovery.
-- 来源：origin/main `c8b6aab4` → `hunt/sol-r3ks-recovery-ai-hold`; source fix awaiting CI/merge.
+- 来源：origin/main `c8b6aab4` → `a2058e0e`, `hunt/sol-r3ks-recovery-ai-hold`, [#974](https://github.com/raydocs/tono/pull/974); source fix awaiting CI/merge.
 - 缺陷修复：corrupt/unreadable/unusable-state and unhealthy-watchdog recovery, plus the unproven-Core recovery added by #740, opened general traffic without applying the existing narrow AI layer. Both release helpers now apply it after removing WFP. Finding: WIN-RECOVERY-AI-HOLD-OMISSION.
 - 新增/优化：无；no new filter shape, suffix, prefix, or strict-mode decision.
 - 工程与测试：the non-native selective-layer backend records its active state for the existing recovery regressions.
