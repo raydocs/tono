@@ -739,11 +739,12 @@ pub(super) fn create_ipc_router() -> Result<Router> {
                     // request returns no session handle, so the App cannot stop a core it
                     // never learned about, and when its follow-up status read also fails its
                     // failure path falls back to the unarmed FSM latch — the machine would
-                    // stay WFP-blocked while the UI shows Not Connected. Roll the arm back
-                    // with the same release the superseded-by-Disconnect branch above uses
-                    // (the Windows arm only; the macOS path is not this product's).
+                    // stay WFP-blocked while the UI shows Not Connected. Open general traffic
+                    // and put the secondary AI hold back. An explicit Disconnect above still
+                    // uses `release()` and drops that hold; a start that never began is a
+                    // crash-style rollback, not that disconnect.
                     let release_error = if start_request.windows_kill_switch.is_some() {
-                        windows_kill_switch::release().await.err()
+                        windows_kill_switch::release_applying_narrow().await.err()
                     } else {
                         None
                     };
