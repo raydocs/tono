@@ -11,12 +11,22 @@ use serde_yaml_ng::{Mapping, Value};
 use thiserror::Error;
 
 use crate::catalog::CatalogHomeSocks5;
-use crate::node::{EXIT_GROUP_NAME, NodeRejection, ValidatedNode, validate_node_set};
+use crate::node::{
+    EXIT_GROUP_NAME, NodeProtocol, NodeRejection, ValidatedNode, validate_node_set,
+};
 
 pub const MIXED_PORT: u16 = 28990;
 pub const EXTERNAL_CONTROLLER: &str = "127.0.0.1:9090";
 pub const TUN_DEVICE_NAME: &str = "Tono";
 pub const FAKE_IP_RANGE: &str = "198.18.0.1/16";
+/// How long the OS may cache a fake-ip answer.
+///
+/// Mihomo's default is 1s, so every app re-queries once a second. Those
+/// answers stay on the local fake-ip map and never leave the machine. 30s is
+/// the recovery bound: macOS does not flush mDNSResponder on disconnect, and a
+/// missed Windows flush must not leave apps on 198.18.0.0/16. After this TTL
+/// the next lookup uses the restored resolver and the machine has network again.
+pub const FAKE_IP_TTL_SECONDS: i64 = 30;
 pub const DNS_LISTEN: &str = "127.0.0.1:53";
 /// Names of the physical-interface-bound DIRECT outbounds (present only when
 /// the corresponding DirectPlan rules exist).
@@ -768,6 +778,25 @@ fn put(mapping: &mut Mapping, key: &str, value: Value) {
     mapping.insert(string(key), value);
 }
 
+/// Mihomo proxy map for one admitted node.
+///
+/// Mihomo refuses a Reality dial that has no uTLS fingerprint
+/// (`REALITY is based on uTLS, please set a client-fingerprint`) and retries
+/// until the connect budget is gone. `chrome` is the default when the signed
+/// catalog omits `client-fingerprint`. An explicit catalog value is kept.
+/// This is not `skip-cert-verify`: Reality still checks the public key, and
+/// Hysteria2 still pins the leaf.
+fn proxy_mapping(node: &ValidatedNode) -> Value {
+    let mut mapping = node.to_runtime_mapping();
+    if node.protocol == NodeProtocol::VlessReality {
+        let key = string("client-fingerprint");
+        if !mapping.contains_key(&key) {
+            mapping.insert(key, string("chrome"));
+        }
+    }
+    Value::Mapping(mapping)
+}
+
 fn direct_outbound(name: &str, physical_interface: &str) -> Value {
     let mut outbound = Mapping::new();
     put(&mut outbound, "name", string(name));
@@ -841,6 +870,10 @@ fn runtime_value(
     // exit). Connect no longer treats `/delay` as the data-plane verdict, so
     // the doubled request cannot stall the fail-closed TUN check.
     put(&mut root, "unified-delay", Value::Bool(true));
+    // Dial every resolved address at once. With `ipv6: false` this does not open a
+    // second data plane; it only removes the serial wait when a name has more
+    // than one A record. Certificate checks are unchanged.
+    put(&mut root, "tcp-concurrent", Value::Bool(true));
     // Activity is an all-application view, not just a view of PROCESS rules.
     // `strict` may skip lookup when an earlier destination rule matched (notably
     // Claude residential traffic), and `off` loses every cloud-only attribution.
@@ -915,8 +948,20 @@ fn runtime_value(
     let mut dns = Mapping::new();
     put(&mut dns, "enable", Value::Bool(true));
     put(&mut dns, "listen", string(DNS_LISTEN));
+    // Top-level `ipv6: false` is not always enough to skip the AAAA lookup.
+    // An unanswered AAAA sits on the first request in front of the A answer.
+    put(&mut dns, "ipv6", Value::Bool(false));
     put(&mut dns, "enhanced-mode", string("fake-ip"));
     put(&mut dns, "fake-ip-range", string(FAKE_IP_RANGE));
+    put(&mut dns, "fake-ip-ttl", Value::Number(FAKE_IP_TTL_SECONDS.into()));
+    // VLESS Reality cannot carry UDP. prefer-h3 races a QUIC probe against the
+    // first TLS handshake and, on failure, drops the HTTP client. HTTP/2
+    // keep-alive (mihomo's 5-minute idle pool) is the reuse path. Leave it off
+    // so a DoH miss still falls through to the second server instead of a reset.
+    put(&mut dns, "prefer-h3", Value::Bool(false));
+    // Default is already LRU with stale. Name it so a later edit cannot switch
+    // to arc, which drops stale answers and turns a slow upstream into a miss.
+    put(&mut dns, "cache-algorithm", string("lru"));
     put(&mut dns, "respect-rules", Value::Bool(true));
     put(&mut dns, "use-hosts", Value::Bool(true));
     put(&mut dns, "nameserver", strings(&DOH_NAMESERVERS));
@@ -947,10 +992,7 @@ fn runtime_value(
     );
     put(&mut root, "tun", Value::Mapping(tun));
 
-    let mut proxies: Vec<Value> = nodes
-        .iter()
-        .map(|node| Value::Mapping(node.to_runtime_mapping()))
-        .collect();
+    let mut proxies: Vec<Value> = nodes.iter().map(proxy_mapping).collect();
     if let Some(socks5) = home_socks5 {
         proxies.push(home_socks5_outbound(socks5));
     }
@@ -1026,7 +1068,7 @@ fn runtime_value(
         .map(|rule| rule.to_string())
         .collect();
     if home.is_some() || home_socks5.is_some() {
-        // TCP-scoped on purpose: these pins sit ahead of the UDP REJECT row,
+        // TCP-scoped on purpose: these pins sit ahead of the UDP REJECT rows,
         // and a network-agnostic Claude pin would swallow UDP into a group
         // that cannot carry it (Vision) — Mihomo's fallback for that is a
         // ruleless DIRECT dial, leaking Claude's UDP to the physical egress.
@@ -1056,6 +1098,28 @@ fn runtime_value(
         for regex in home_process_path_regexes() {
             rules.push(format!(
                 "AND,((NETWORK,TCP),(PROCESS-PATH-REGEX,{regex})),{CLAUDE_HOME_GROUP_NAME}"
+            ));
+        }
+        // An HY2 exit can carry UDP, so reject the same assistant matchers
+        // before MATCH to keep retries on the residential TCP hop.
+        for domain in CLAUDE_HOME_DOMAINS {
+            rules.push(format!(
+                "AND,((NETWORK,UDP),(DOMAIN-SUFFIX,{domain})),REJECT"
+            ));
+        }
+        for cidr in CLAUDE_HOME_IPV4_CIDRS {
+            rules.push(format!(
+                "AND,((NETWORK,UDP),(IP-CIDR,{cidr},no-resolve)),REJECT"
+            ));
+        }
+        for process in HOME_PROCESS_NAMES {
+            rules.push(format!(
+                "AND,((NETWORK,UDP),(PROCESS-NAME,{process})),REJECT"
+            ));
+        }
+        for regex in home_process_path_regexes() {
+            rules.push(format!(
+                "AND,((NETWORK,UDP),(PROCESS-PATH-REGEX,{regex})),REJECT"
             ));
         }
     } else if let Some(plan) = direct {
@@ -1254,7 +1318,9 @@ reality-opts:
         assert_eq!(get(&value, &["mode"]).as_str(), Some("rule"));
         assert_eq!(get(&value, &["log-level"]).as_str(), Some("warning"));
         assert_eq!(get(&value, &["unified-delay"]).as_bool(), Some(true));
+        assert_eq!(get(&value, &["tcp-concurrent"]).as_bool(), Some(true));
         assert_eq!(get(&value, &["find-process-mode"]).as_str(), Some("always"));
+        assert_eq!(get(&value, &["dns", "ipv6"]).as_bool(), Some(false));
         assert_eq!(
             get(&value, &["profile", "store-selected"]).as_bool(),
             Some(false)
@@ -1335,6 +1401,15 @@ reality-opts:
         assert_eq!(
             get(&value, &["dns", "fake-ip-range"]).as_str(),
             Some("198.18.0.1/16")
+        );
+        assert_eq!(
+            get(&value, &["dns", "fake-ip-ttl"]).as_i64(),
+            Some(FAKE_IP_TTL_SECONDS)
+        );
+        assert_eq!(get(&value, &["dns", "prefer-h3"]).as_bool(), Some(false));
+        assert_eq!(
+            get(&value, &["dns", "cache-algorithm"]).as_str(),
+            Some("lru")
         );
         assert_eq!(get(&value, &["dns", "respect-rules"]).as_bool(), Some(true));
         assert_eq!(get(&value, &["dns", "use-hosts"]).as_bool(), Some(true));
@@ -1437,6 +1512,15 @@ reality-opts:
         );
         assert_eq!(first[string("tls")].as_bool(), Some(true));
         assert_eq!(first[string("network")].as_str(), Some("tcp"));
+        assert_eq!(
+            first[string("client-fingerprint")].as_str(),
+            Some("chrome"),
+            "an omitted catalog fingerprint still dials with uTLS chrome"
+        );
+        assert!(
+            !build().yaml().contains("skip-cert-verify"),
+            "dial defaults must not disable certificate checks"
+        );
         assert_eq!(first[string("flow")].as_str(), Some("xtls-rprx-vision"));
         assert_eq!(first[string("server")].as_str(), Some("8.8.8.8"));
         assert_eq!(
@@ -1650,6 +1734,14 @@ reality-opts:
             ));
         }
         rules.extend(expected_home_process_rules(CLAUDE_HOME_GROUP_NAME));
+        let udp_rules: Vec<String> = rules[2..]
+            .iter()
+            .map(|rule| {
+                rule.replace("(NETWORK,TCP)", "(NETWORK,UDP)")
+                    .replace(CLAUDE_HOME_GROUP_NAME, "REJECT")
+            })
+            .collect();
+        rules.extend(udp_rules);
         rules.push("AND,((NETWORK,UDP)),REJECT".to_string());
         rules.push("MATCH,Tono-Exit".to_string());
         rules
@@ -1671,6 +1763,14 @@ reality-opts:
             ));
         }
         rules.extend(expected_home_process_rules(CLAUDE_HOME_GROUP_NAME));
+        let udp_rules: Vec<String> = rules[2..]
+            .iter()
+            .map(|rule| {
+                rule.replace("(NETWORK,TCP)", "(NETWORK,UDP)")
+                    .replace(CLAUDE_HOME_GROUP_NAME, "REJECT")
+            })
+            .collect();
+        rules.extend(udp_rules);
         rules.extend(expected_wechat_direct_rules());
         rules.push("AND,((NETWORK,TCP),(DST-PORT,443),(DOMAIN,www.bilibili.com),(IP-CIDR,9.0.0.30/32,no-resolve)),Tono-China-Web-Direct".to_string());
         // This fixture has no signed native-app path regex, so its suffix rows are
@@ -2715,6 +2815,55 @@ reality-opts:
                 .map(String::as_str)
                 .collect::<Vec<_>>()
         );
+    }
+
+    #[test]
+    fn hysteria2_home_route_rejects_assistant_udp_before_match() {
+        let yaml = r#"
+name: "Buffalo · Niagara · hy2"
+type: hysteria2
+server: 23.94.79.123
+port: 443
+password: "9e107d9d-372b-4c81-8d2b-3f2d0a1b2c3d"
+sni: "www.microsoft.com"
+fingerprint: "1e5374a79bdb83b04c3d3c84722c03211d1c941c2de9f92431d2198ba7212cad"
+"#;
+        let hy2_node = admit_node(&serde_yaml_ng::from_str(yaml).unwrap()).unwrap();
+        let nodes = vec![hy2_node, node("Home Reality", "8.8.8.8")];
+        let runtime = build_owned_runtime_with_ports(
+            &nodes,
+            "Buffalo · Niagara · hy2",
+            "test-secret",
+            None,
+            Some("Home Reality"),
+            None,
+            RuntimePorts::default(),
+        )
+        .unwrap();
+        let value = parsed(&runtime);
+        let rules: Vec<&str> = get(&value, &["rules"])
+            .as_sequence()
+            .unwrap()
+            .iter()
+            .map(|rule| rule.as_str().unwrap())
+            .collect();
+        let tcp_home_rules: Vec<&str> = rules
+            .iter()
+            .copied()
+            .filter(|rule| rule.ends_with(",Tono-Claude-Home"))
+            .collect();
+        let home_rows = CLAUDE_HOME_DOMAINS.len() + CLAUDE_HOME_IPV4_CIDRS.len()
+            + HOME_PROCESS_NAMES.len() + home_process_path_regexes().len();
+        assert_eq!(tcp_home_rules.len(), home_rows);
+        let first_udp = 2 + home_rows;
+        for (offset, tcp_rule) in tcp_home_rules.iter().enumerate() {
+            let udp_rule = tcp_rule.replace("(NETWORK,TCP)", "(NETWORK,UDP)")
+                .replace(CLAUDE_HOME_GROUP_NAME, "REJECT");
+            assert_eq!(rules[first_udp + offset], udp_rule);
+        }
+        assert_eq!(rules.len(), first_udp + home_rows + 1);
+        assert_eq!(rules.last().copied(), Some("MATCH,Tono-Exit"));
+        assert!(!rules.contains(&"AND,((NETWORK,UDP)),REJECT"));
     }
 
     #[test]

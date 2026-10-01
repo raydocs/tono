@@ -6,6 +6,8 @@ import { canonicalTelemetryWindow } from '../telemetry-window';
 import { DIAGNOSTICS_DAY_SECONDS, DIAGNOSTICS_MAX_REPORTED_AT_MS } from '../diagnostics-limits';
 import { rateLimitDiagnostics, rateLimitDiagnosticsLog, rateLimitTelemetry } from '../ops/ingest-limits';
 import { afterLogSegment, afterTelemetryWindow, ingestConnectFailure } from '../ops/ingest-hooks';
+import { storeDiagnosticsBundle, DIAGNOSTICS_BUNDLE_MAX_BYTES } from './diagnostics';
+import { authorizeDiagnosticsRead, failureClusterDetail, listFailureClusters } from './diagnostics-read';
 
 // A degraded client on the kill-switch recovery channel gets one bounded
 // upload, never a log firehose. Anything larger is rejected, not truncated:
@@ -468,6 +470,32 @@ export async function telemetryRoutes(
   p: string,
   m: string,
 ): Promise<Response | null> {
+  // Engineering-bot read API. A bearer token, not a user session and not
+  // Cloudflare Access. GET only; the token is not accepted as a writer.
+  if (p === '/api/v1/diagnostics/clusters' && m === 'GET') {
+    await authorizeDiagnosticsRead(req, e.DIAGNOSTICS_READ_TOKEN);
+    return listFailureClusters(e.DB, new URL(req.url));
+  }
+  const clusterDetail = p.match(/^\/api\/v1\/diagnostics\/clusters\/([^/]+)$/);
+  if (clusterDetail && m === 'GET') {
+    await authorizeDiagnosticsRead(req, e.DIAGNOSTICS_READ_TOKEN);
+    return failureClusterDetail(e.DB, decodeURIComponent(clusterDetail[1]));
+  }
+  if (p.startsWith('/api/v1/diagnostics/clusters')) {
+    throw new ApiError(405, 'METHOD_NOT_ALLOWED', 'Diagnostics clusters are read-only');
+  }
+
+  // Automatic privacy-safe diagnostics. MUST stay available to every signed-in
+  // device. Do not gate this on diagnostics_log_access: that grant is only for
+  // raw hostname logs. Do not default the client off. See docs/diagnostics-privacy.md.
+  if (p === '/api/v1/telemetry/diagnostics' && m === 'POST') {
+    const a = await auth(req, e);
+    const bundle = await body(req, DIAGNOSTICS_BUNDLE_MAX_BYTES);
+    await rateLimitTelemetry(e, a.userId, 'FAILURE');
+    const stored = await storeDiagnosticsBundle(e.DB, a.userId, a.deviceId ?? null, bundle, e);
+    return Response.json({ accepted: true, sessionId: stored.sessionId, events: stored.events }, { status: 202 });
+  }
+
   // User-initiated only: there is no silent reporting path, and the normal
   // access token is required so every stored report has an owner (and inherits
   // account rate limiting). An unauthenticated fallback for "auth itself is

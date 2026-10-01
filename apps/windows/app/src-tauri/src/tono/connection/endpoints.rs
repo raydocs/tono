@@ -31,12 +31,11 @@ pub(super) fn proxy_endpoints_for(
             .and_then(|name| nodes.iter().find(|entry| entry.name == name))
     };
     let mut endpoints = vec![proxy_endpoint_of(node)];
-    if let Some(home) = home_node
-        && (home.server != node.server || home.port != node.port)
-    {
+    if let Some(home) = home_node {
         endpoints.push(proxy_endpoint_of(home));
     }
-    endpoints
+    // A VLESS home and hy2 exit sharing an IP/port still need TCP and UDP permits.
+    unique_proxy_endpoints(endpoints)
 }
 
 pub fn unique_proxy_endpoints(endpoints: Vec<ProxyEndpoint>) -> Vec<ProxyEndpoint> {

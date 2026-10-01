@@ -131,6 +131,12 @@ impl ValidatedNode {
         );
         match self.protocol {
             NodeProtocol::Hysteria2 => {
+                // Pinned mihomo v1.19.30 already dials with QUIC early-data
+                // (`Early: true`) and defaults ALPN to h3 inside one core
+                // process. Do not emit `handshake-timeout`: a positive value
+                // makes sing-quic detach the handshake from the caller, so a
+                // cancelled connect keeps dialing in the background. Do not
+                // emit `skip-cert-verify`.
                 put("type", Value::String("hysteria2".to_string()));
                 put("password", Value::String(self.uuid.clone()));
                 put("sni", Value::String(self.servername.clone()));
@@ -583,6 +589,40 @@ ws-opts: { path: /ignored }
         admit_node(&value)
     }
 
+    #[test]
+    fn admit_node_bounded_inputs_reject_trojan_and_skip_cert_verify() {
+        let mut state: u64 = 0x1234_5678_9abc_def0;
+        let mut next = || {
+            state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+            state
+        };
+        for _ in 0..48 {
+            let n = next();
+            let yaml = format!(
+                "name: n{n}\ntype: trojan\nserver: 8.8.8.8\nport: 443\npassword: secret\n"
+            );
+            assert_eq!(admit_yaml(&yaml).unwrap_err(), NodeRejection::NotVless);
+        }
+        let skipped = format!("{}skip-cert-verify: true\n", passing_yaml());
+        assert_eq!(admit_yaml(&skipped).unwrap_err(), NodeRejection::SkipCertVerify);
+        for _ in 0..32 {
+            let n = next();
+            let garbage: String = (0..16)
+                .map(|shift| {
+                    let byte = ((n >> (shift % 8)) & 0x7f) as u8;
+                    if byte.is_ascii_graphic() {
+                        byte as char
+                    } else {
+                        'a'
+                    }
+                })
+                .collect();
+            if let Ok(value) = serde_yaml_ng::from_str::<serde_yaml_ng::Value>(&garbage) {
+                let _ = admit_node(&value);
+            }
+        }
+    }
+
     fn passing_yaml() -> String {
         serde_yaml_ng::to_string(&passing_node()).unwrap()
     }
@@ -671,6 +711,10 @@ fingerprint: "E3:AA:4A:74:5A:A9:05:39:AB:1A:49:3D:94:0E:EB:A7:B4:30:5B:75:16:AB:
         assert!(yaml.contains("password:"));
         assert!(yaml.contains("fingerprint:"));
         assert!(!yaml.contains("skip-cert-verify"));
+        assert!(
+            !yaml.contains("handshake-timeout"),
+            "a positive handshake-timeout detaches the QUIC dial from the caller"
+        );
         assert!(!yaml.contains("uuid:"));
         assert!(!yaml.contains("reality-opts"));
 
