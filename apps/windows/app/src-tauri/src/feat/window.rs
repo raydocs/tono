@@ -476,6 +476,62 @@ async fn ask_to_restart_without_release(refusal: RefusalProtection) -> bool {
     rx.await.unwrap_or(false)
 }
 
+/// Quit from a user control (window close request, tray menu, tray flyout). A cancelled Quit has
+/// already run `quit_release`, which retired catalog/policy sync and every connection task, so
+/// the App that stays open must re-sync from the Service before it is used again.
+///
+/// Single-flight over the whole Quit → cancelled-resync lifecycle: a second Quit (say the tray
+/// while a window Quit waits on its release) would otherwise run a parallel flow, and one "stay
+/// open" could clear the exiting flag and resume sync while the other flow exits. A call made
+/// while one is in flight returns without doing anything.
+pub async fn quit_or_resync() {
+    let admitted = single_flight(&QUIT_IN_FLIGHT, || {
+        resync_if_cancelled(quit(), || {
+            crate::tono::commands::resync_after_cancelled_quit(handle::Handle::app_handle().clone())
+        })
+    })
+    .await;
+    if admitted.is_none() {
+        logging!(info, Type::System, "Quit ignored: another Quit is already in flight");
+    }
+}
+
+static QUIT_IN_FLIGHT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Run `run` only when `slot` is free, holding it until `run` finishes (or is dropped).
+/// `None` means another run held the slot and `run` was not started.
+async fn single_flight<F: std::future::Future>(
+    slot: &std::sync::atomic::AtomicBool,
+    run: impl FnOnce() -> F,
+) -> Option<F::Output> {
+    use std::sync::atomic::Ordering;
+    struct Held<'a>(&'a std::sync::atomic::AtomicBool);
+    impl Drop for Held<'_> {
+        fn drop(&mut self) {
+            self.0.store(false, Ordering::Release);
+        }
+    }
+    slot.compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+        .ok()?;
+    let _held = Held(slot);
+    Some(run().await)
+}
+
+async fn resync_if_cancelled<R, RF>(
+    quit: impl std::future::Future<Output = tono_signal::ShutdownOutcome>,
+    resync: R,
+) -> tono_signal::ShutdownOutcome
+where
+    R: FnOnce() -> RF,
+    RF: std::future::Future<Output = ()>,
+{
+    let outcome = quit.await;
+    if outcome == tono_signal::ShutdownOutcome::Canceled {
+        resync().await;
+    }
+    outcome
+}
+
 pub async fn quit() -> tono_signal::ShutdownOutcome {
     logging!(debug, Type::System, "启动退出流程");
     // 设置退出标志
@@ -670,6 +726,46 @@ mod tests {
         assert!(!completed, "an unanswered optional shutdown must report its timeout");
         assert_eq!(started.elapsed(), super::OPTIONAL_SERVICE_STOP_BUDGET);
         assert!(super::wait_for_optional_service_stop(async {}).await);
+    }
+
+    /// The tray menu and tray flyout used to drop a cancelled Quit's outcome, so catalog/policy
+    /// sync that `quit_release` retired stayed stopped while the App kept running.
+    #[tokio::test]
+    async fn a_cancelled_quit_resyncs_the_app_that_stays_open() {
+        use tono_signal::ShutdownOutcome;
+        let resynced = AtomicBool::new(false);
+        let returned = super::resync_if_cancelled(async { ShutdownOutcome::Canceled }, || async {
+            resynced.store(true, Ordering::SeqCst);
+        })
+        .await;
+        assert_eq!(returned, ShutdownOutcome::Canceled);
+        assert!(
+            resynced.load(Ordering::SeqCst),
+            "a cancelled Quit must re-sync the running App"
+        );
+    }
+
+    /// A tray Quit while a window Quit is still waiting on its release must not start a second
+    /// Quit flow; the slot frees once the first flow settles.
+    #[tokio::test]
+    async fn a_second_quit_while_one_is_in_flight_does_not_run() {
+        let slot = AtomicBool::new(false);
+        let (release, gate) = tokio::sync::oneshot::channel::<()>();
+        let first = super::single_flight(&slot, || async move {
+            gate.await.unwrap();
+            "first"
+        });
+        tokio::pin!(first);
+        assert!(futures::poll!(&mut first).is_pending());
+        let second_ran = AtomicBool::new(false);
+        let second = super::single_flight(&slot, || async {
+            second_ran.store(true, Ordering::SeqCst);
+        })
+        .await;
+        assert!(second.is_none() && !second_ran.load(Ordering::SeqCst));
+        release.send(()).unwrap();
+        assert_eq!(first.await, Some("first"));
+        assert!(super::single_flight(&slot, || async {}).await.is_some());
     }
 
     use super::{
