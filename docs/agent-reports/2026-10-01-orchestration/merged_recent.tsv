@@ -1,0 +1,52 @@
+790	infra/merge-queue-trigger	ci: explicit merge_group trigger on ci-gate
+783	codex2/win-hy2-routing	fix(windows): HY2 exits keep residential routing (home permit dedup by protocol, assistant UDP reject, cross-transport switch rebuild)
+780	codex2/metering-undercount	fix(metering): no forgiven bytes after xray restart, keep installed-client inventory on ACK failure, carry counters across cycle rollover
+767	cursor/ledger-reversal-amount-a706	fix(ops): ledger reversal cancels the source-currency CSV total
+766	cursor/cluster-open-race-a706	fix(control-plane): concurrent failure-cluster opens no longer 500 the diagnostics upload
+764	cursor/receipt-exact-shape-5636	fix(macos): refuse unknown fields inside the update receipt
+758	glm/cp-revocation-reopen	fix(control-plane): reopened revocation jobs no longer inherit their old attempt stamp
+755	codex/macos-connect-recovery-fixes	fix(macos): connect monitor and failed-connect cleanup recovery fixes
+752	cursor/repin-mihomo-yaml-digest-2004	fix(windows): re-pin mihomo YAML digest after #732 uTLS default
+751	cursor/ci-gate-merge-queue-670c	ci: one required check, ci-gate, for auto-merge and the merge queue
+750	cursor/release-readiness-9d88	docs: launch readiness gap list
+736	cursor/connect-prefetch-no-contention-73ab	fix(connect): 成功路径不再和 /delay 抢第一次握手
+733	cursor/win-wfp-fail-open-581a	fix(windows): 损坏状态和不健康看门狗放行
+732	cursor/connect-bench-dial-defaults-73ab	fix(connect): 补上 Reality uTLS 指纹并加上回环连接基准
+727	cursor/singbox-alpha9-certify-01d4	认证 sing-box v1.15.0-alpha.9 的三份构建
+728	cursor/singbox-core-flag-01d4	Windows：sing-box 核心按设备开关，默认关闭
+729	cursor/singbox-hy2-der-pin-01d4	Windows sing-box 路径写出 HY2 DER 钉并对齐 fake-IP
+712	cursor/macos-dns-owner-only-581a	fix(macos): 只恢复快照里的 DNS，断开不再被别人的代理挡住
+711	cursor/macos-emergency-ledger-581a	fix(macos): 坏账本不再挡住紧急恢复
+710	cursor/macos-status-no-rearm-581a	fix(macos): 更新准备期间 status 不再重装阻断
+709	cursor/selective-fail-open-study-4352	docs: 选择性放行做不到包过滤保证，本步不装规则
+708	cursor/macos-fail-open-arm-581a	fix(macos): arm 或睡眠屏障失败时放行
+707	cursor/diagnostics-control-plane-e0fd	feat(control-plane): failure-cluster webhook and privacy-safe diagnostics
+706	cursor/failure-taxonomy-bba0	登录和连接失败给出支持码，耗尽后放回原网络
+705	cursor/win-network-blip-4352	fix(windows): confirm a network-change probe before stopping the core
+704	cursor/hy2-keep-handshake-attached-a925	fix(hy2): keep the QUIC handshake attached to the caller
+703	cursor/sticky-heal-fail-open-a925	fix(connect): sticky self-heal fails open instead of tearing the network down
+702	cursor/macos-uplink-roam-4352	fix(macos): rebuild the tunnel only when the default uplink changes
+701	cursor/fix-macos-boot-anchor-581a	fix(macos): 开机不再从规则文件装入阻断，启动放行
+700	cursor/macos-continuity-onlink-3d9f	fix(macos): keep limited broadcast out of the TUN route table
+699	cursor/cloud-agent-linux-notes-3564	Document Linux Cloud Agent check scope
+698	docs/windows-login-support-merged-20260930	docs(windows): record login diagnostics source merge
+697	cursor/fix-win-app-lint-8a8e	fix(windows): zero frontend lint warnings, render-time refresh clear
+696	cursor/fix-win-intent-tmp-race-8a8e	fix(windows): isolate kill-switch intent tmps, verify commit (BRICK-W11)
+695	cursor/fix-macos-pf-hold-listing-8a8e	fix(macos): keep unrecorded PF token past unanswered listings (R643-F1)
+694	fix/windows-login-network-20260930	fix(windows): preserve safe sign-in support diagnostics
+693	docs/macos-dns-merged-20260930	docs(macos): record DNS ownership source merge
+692	docs/macos-7424-fix-receipts-20260930	docs: record four merged macOS 7424 fixes and exact verification
+690	fix/macos-dns-external-ownership-20260930	fix(macos): retain newer DNS when snapshot ownership is superseded
+689	fix/macos-login-audit-20260930	fix(macos): keep verified cloud login independent of device inventory
+688	fix/macos-continuity-local-direct-20260930	fix(macos): keep Continuity direct bypass local, not process-wide
+687	fix/macos-durable-connect-admission-20260930	fix(macos): reject Connect when restart safety record cannot sync
+686	fix/macos-7424-recovery-20260930	fix(macos): use live PF readback after native update Disconnect errors
+685	docs/win-684-merged-20260930	docs: record the #684 merge and exact-head CI
+684	fix/win-small-bundle-20260929	fix(windows): DNS children bound to the exit Job before they run; unconfirmed protection text for an older service installer
+683	docs/candidate-7424-20260929	docs: internal candidate 0.0.74 seq 7424
+682	docs/regression-ccbc50a8-20260929	docs: regression review ccbc50a8...6f399bac and candidate 7423 record
+681	fix/win-release-min-20260929	fix(windows): release admission under unreadable update store, dead lease holder, start-only service recovery
+680	fix/win-boot-uninstall-20260929	fix(windows): boot-session guard, uninstall lease hand-back, NRPT removal
+679	fix/macos-brick-helper-20260929	fix(macos): helper brick fixes — intent-gated startup barrier, hosts never blocks release, displaced main ruleset restore
+678	chore/session-state-20260929	chore(agents): SESSION_STATE.md workflow with SessionStart and Stop hooks
+674	dependabot/cargo/apps/windows/windows-rust-f1e99261e2	chore(deps): Bump the windows-rust group across 3 directories with 3 updates
