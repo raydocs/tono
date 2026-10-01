@@ -10,3 +10,5 @@
 - 验证：本机 Linux 无 Swift 工具链，未编译、未跑 self-test；hosted macOS CI（macos-ci.yml privileged-tests：sudo `--self-test`、`--staging-self-test`）待跑。
 - 候选/发布：仅源码，无新候选。
 - 剩余限制：紧急放通对「僵尸 core 仍在跑」只高声警告不强杀；A/C 的守护内端到端行为没有 self-test（会动真实 PF/DNS），靠策略断言与原语用例钉住；core 构造失败且有待定更新时走通用释放提示，不打印「证据保留」专用文案；未实机。
+
+- Windows CI：main 上的 `merge-manager/aux.sh` 是 Windows 保留设备名，检出失败。本分支将其改名为 `side.sh`，内容不变。
