@@ -484,19 +484,35 @@ actor DiagnosticsLogUploader {
                 // AccountSession always supplies authenticated ownership.
                 eligible = Data(complete)
             }
+            let consumed = UInt64(complete.count)
+            let nextOffset = offset + consumed
+            let remaining = Self.remainingBytes(
+                size: size,
+                consumedThrough: nextOffset
+            )
+            // A whole window of another account, or of lines written before
+            // this scope existed, is not a failed read. gzip refuses an empty
+            // buffer, and returning nil parks the cursor on that prefix: the
+            // live file never reaches this scope's later lines, and a rotated
+            // backup is abandoned after a few sweeps. A zero-line segment
+            // advances the cursor and uploads nothing.
+            if eligible.isEmpty {
+                return Read(
+                    payload: Data(),
+                    lineCount: 0,
+                    nextOffset: nextOffset,
+                    remainingBytes: remaining
+                )
+            }
             guard let payload = Self.gzip(eligible) else { return nil }
             if payload.count <= Self.compressedLimitBytes {
-                let consumed = UInt64(complete.count)
                 return Read(
                     payload: payload,
                     lineCount: eligible.reduce(into: 0) { total, byte in
                         if byte == 0x0A { total += 1 }
                     },
-                    nextOffset: offset + consumed,
-                    remainingBytes: Self.remainingBytes(
-                        size: size,
-                        consumedThrough: offset + consumed
-                    )
+                    nextOffset: nextOffset,
+                    remainingBytes: remaining
                 )
             }
             // Incompressible or unusually dense window: halve and retry rather

@@ -6,6 +6,11 @@
 pub(super) struct Topology {
     pub interfaces: Vec<(u64, u32, u32, u32, bool)>,
     pub routes: Vec<(u64, u32, u8, u32, u32)>,
+    /// IPv6 default routes only (`::/0`): interface LUID, next hop, metric.
+    /// Temporary host addresses are not recorded; they churn without a roam.
+    /// An unreadable IPv6 table leaves this empty rather than failing the
+    /// whole observation, so a DNS echo is not reported as "unknown".
+    pub ipv6_defaults: Vec<(u64, [u8; 16], u32)>,
 }
 
 #[cfg(not(feature = "test"))]
@@ -73,7 +78,57 @@ pub(super) fn read() -> Result<Topology, String> {
     topology.routes.sort_unstable();
     topology.interfaces.dedup();
     topology.routes.dedup();
+    // IPv4 is the observation that must succeed. A missing IPv6 stack must not
+    // turn every later DNS echo into an unknown topology.
+    if let Ok(defaults) = read_ipv6_defaults() {
+        topology.ipv6_defaults = defaults;
+    }
     Ok(topology)
+}
+
+#[cfg(not(feature = "test"))]
+fn read_ipv6_defaults() -> Result<Vec<(u64, [u8; 16], u32)>, String> {
+    use windows_sys::Win32::NetworkManagement::IpHelper::{
+        GetIfEntry2, GetIpForwardTable2, MIB_IF_ROW2, MIB_IF_TYPE_LOOPBACK, MIB_IPFORWARD_TABLE2,
+    };
+    use windows_sys::Win32::Networking::WinSock::AF_INET6;
+
+    let mut routes: *mut MIB_IPFORWARD_TABLE2 = std::ptr::null_mut();
+    // SAFETY: initialized out pointer, IPv6 family; successful allocation is held by Table.
+    let status = unsafe { GetIpForwardTable2(AF_INET6, &mut routes) };
+    if status != 0 || routes.is_null() {
+        return Err(format!("GetIpForwardTable2(AF_INET6) failed: {status}"));
+    }
+    let _routes = Table(routes.cast());
+    let count = unsafe { (*routes).NumEntries } as usize;
+    if count > 4096 {
+        return Err("IPv6 route observation exceeds 4096 rows".into());
+    }
+    let rows = unsafe { std::slice::from_raw_parts((*routes).Table.as_ptr(), count) };
+    let mut defaults = Vec::new();
+    for row in rows {
+        if row.Loopback || row.DestinationPrefix.PrefixLength != 0 {
+            continue;
+        }
+        let mut interface = MIB_IF_ROW2 { InterfaceLuid: row.InterfaceLuid, ..Default::default() };
+        // SAFETY: InterfaceLuid is taken from the route row; GetIfEntry2 writes the rest.
+        let status = unsafe { GetIfEntry2(&mut interface) };
+        if status != 0 || interface.Type == MIB_IF_TYPE_LOOPBACK {
+            continue;
+        }
+        let end = interface.Alias.iter().position(|ch| *ch == 0).unwrap_or(interface.Alias.len());
+        let alias = String::from_utf16_lossy(&interface.Alias[..end]);
+        if alias.eq_ignore_ascii_case(crate::core::dns::TUN_ADAPTER_NAME) {
+            continue;
+        }
+        // SAFETY: GetIpForwardTable2(AF_INET6) returns IPv6 rows.
+        let next_hop = unsafe { row.NextHop.Ipv6.sin6_addr.u.Byte };
+        let luid = unsafe { row.InterfaceLuid.Value };
+        defaults.push((luid, next_hop, row.Metric));
+    }
+    defaults.sort_unstable();
+    defaults.dedup();
+    Ok(defaults)
 }
 
 #[cfg(not(feature = "test"))]

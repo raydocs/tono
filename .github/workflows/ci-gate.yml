@@ -1,0 +1,101 @@
+name: ci-gate
+
+# One status check for pull requests and the merge queue. Path filters stay on
+# the called workflows' push lists (connect-bench: CONNECT_BENCH_PATHS). A PR
+# does not also trigger those workflows, so macOS and Windows do not run twice.
+# merge_group lists checks_requested (its only type) so the queue trigger is
+# explicit. Called workflows inherit the event through workflow_call, and
+# skipped paths still end in a ci-gate success.
+on:
+  pull_request:
+  merge_group:
+    types: [checks_requested]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-gate-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'merge_group' }}
+
+jobs:
+  changes:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    outputs:
+      macos: ${{ steps.filter.outputs.macos }}
+      windows: ${{ steps.filter.outputs.windows }}
+      services: ${{ steps.filter.outputs.services }}
+      sing_box: ${{ steps.filter.outputs.sing_box }}
+      connect_bench: ${{ steps.filter.outputs.connect_bench }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 24
+      - name: Path-filter unit tests
+        run: node --test tooling/scripts/tests/ci-gate-changes.test.mjs
+      - name: Detect changed paths
+        id: filter
+        run: node tooling/scripts/ci-gate-changes.mjs detect
+
+  macos:
+    needs: changes
+    if: needs.changes.outputs.macos == 'true'
+    uses: ./.github/workflows/macos-ci.yml
+    with:
+      update_release_sequence: ''
+
+  windows:
+    needs: changes
+    if: needs.changes.outputs.windows == 'true'
+    uses: ./.github/workflows/windows-ci.yml
+
+  services:
+    needs: changes
+    if: needs.changes.outputs.services == 'true'
+    permissions:
+      contents: read
+      pull-requests: write
+    uses: ./.github/workflows/services-ci.yml
+
+  sing_box:
+    needs: changes
+    if: needs.changes.outputs.sing_box == 'true'
+    uses: ./.github/workflows/sing-box-alpha9-check.yml
+
+  connect_bench:
+    needs: changes
+    if: needs.changes.outputs.connect_bench == 'true'
+    uses: ./.github/workflows/connect-bench.yml
+
+  ci-gate:
+    name: ci-gate
+    needs: [changes, macos, windows, services, sing_box, connect_bench]
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 24
+      - name: Fail if a relevant job failed or was cancelled
+        env:
+          CHANGES: ${{ needs.changes.result }}
+          MACOS: ${{ needs.macos.result }}
+          MACOS_SHOULD: ${{ needs.changes.outputs.macos }}
+          WINDOWS: ${{ needs.windows.result }}
+          WINDOWS_SHOULD: ${{ needs.changes.outputs.windows }}
+          SERVICES: ${{ needs.services.result }}
+          SERVICES_SHOULD: ${{ needs.changes.outputs.services }}
+          SING_BOX: ${{ needs.sing_box.result }}
+          SING_BOX_SHOULD: ${{ needs.changes.outputs.sing_box }}
+          CONNECT_BENCH: ${{ needs.connect_bench.result }}
+          CONNECT_BENCH_SHOULD: ${{ needs.changes.outputs.connect_bench }}
+        run: node tooling/scripts/ci-gate-changes.mjs aggregate

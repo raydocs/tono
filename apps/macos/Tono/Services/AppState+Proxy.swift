@@ -147,11 +147,13 @@ extension AppState {
                 // previous destination. Closing everything first dumped the
                 // session onto an unverified node.
                 let switchVerdict = await self.verifyProtectedConnection(
-                    controllerTask: Task {
-                        await self.advisoryControllerExitProbe(
-                            api: api,
-                            selectedExit: desiredNode
-                        )
+                    advisoryProbe: {
+                        Task {
+                            await self.advisoryControllerExitProbe(
+                                api: api,
+                                selectedExit: desiredNode
+                            )
+                        }
                     },
                     mixedPort: self.config.mixedPort,
                     generation: switchGeneration,
@@ -401,9 +403,12 @@ extension AppState {
     /// `applyingDirectPolicy` switches the transaction into a lightweight
     /// pins-only refresh: the pending policy is armed and written instead of
     /// `activeDirectPolicy`, established connections are left alone (no
-    /// close-all, no exit health gate), the pending policy is committed only
-    /// after a successful reload, and a failure keeps the session up instead
-    /// of tearing it down fail-closed.
+    /// close-all, no exit health gate), and the pending policy is committed
+    /// only after a successful reload. A failure before that commit keeps the
+    /// session up: the old config is still in force, PF is unchanged or is
+    /// the temporary old∪new superset, and the next monitor cycle retries.
+    /// Once Mihomo has accepted the new pins, PF must converge from that
+    /// union or the session stops fail-closed.
     func reloadCoreConfig(
         applyingDirectPolicy pendingDirectPolicy:
             ConfigPipeline.ManagedDirectRuntimePolicy? = nil
@@ -635,7 +640,19 @@ extension AppState {
                 }
                 guard !Task.isCancelled, !isDisconnecting else { return }
                 guard connectionCoordinator.configReloadRequestID == requestID else { return }
-                if ownedRuntime || pinsOnlyRefresh {
+                if pinsOnlyRefresh {
+                    // A background pin refresh must never take the session
+                    // down. The armed endpoint set is a superset of the
+                    // active one, the old config is still in force, and the
+                    // next monitor cycle will retry. This is not an explicit
+                    // strict kill switch: disconnecting here holds PF in
+                    // bootstrap and cuts ordinary internet.
+                    LocalTrafficAudit.shared.recordEvent(
+                        "managed_direct_refresh_failed",
+                        details: ["error": String(describing: error)]
+                    )
+                    finishConfigReloadRequest(requestID)
+                } else if ownedRuntime {
                     finishConfigReloadRequest(requestID, startPending: false)
                     disconnect(releaseKillSwitch: false)
                     errorMessage = String(

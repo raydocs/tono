@@ -608,7 +608,7 @@ describe('dashboard claude residential route badge', () => {
     renderDashboard()
     expect(
       await screen.findByText(
-        'Pages failing? Settings → Network & internet → DNS: turn Encrypted DNS off, then reconnect.',
+        "The connection didn't complete.",
       ),
     ).toBeDefined()
     expect(

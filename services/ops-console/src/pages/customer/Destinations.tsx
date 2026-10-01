@@ -18,16 +18,16 @@ type Merged = {
 };
 
 /**
- * The rows arrive per day per destination per route; the question the block
+ * The rows arrive per day per destination per route per exit; the question the block
  * answers is "where did this person's traffic go this week", so they are
- * folded on destination × route before anything is rendered. Folding on
+ * folded on destination × route × exit before anything is rendered. Folding on
  * destination alone would hide the one column that makes the direct-route
  * button meaningful — a domestic site currently going out through a paid exit.
  */
 function merge(rows: readonly DestinationRowDto[]): Merged[] {
   const byKey = new Map<string, Merged>();
   for (const row of rows) {
-    const id = `${row.etld1}|${row.route}`;
+    const id = JSON.stringify([row.etld1, row.route, row.node]);
     const found = byKey.get(id);
     if (found) {
       found.connections += row.connections;

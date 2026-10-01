@@ -2,7 +2,7 @@
 // finding fragment override the ledger row with the same ID.
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
@@ -54,4 +54,37 @@ test('fragments come first and override ledger rows by ID', () => {
   } finally {
     rmSync(root, { recursive: true, force: true })
   }
+})
+
+test('decision files sort by numeric prefix, highest first', () => {
+  const root = mkdtempSync(path.join(tmpdir(), 'records-'))
+  try {
+    const files = {
+      'docs/decisions/README.md': '# how to add one\n\n## YYYY-MM-DD · template\n',
+      'docs/decisions/001-2026-09-24-old.md': '## 2026-09-24 · old\n- Status: owner\n',
+      'docs/decisions/010-2026-09-30-new.md': '## 2026-09-30 · new\n- Status: provisional\n',
+      'docs/decisions/002-2026-09-26-mid.md': '## 2026-09-26 · mid\n',
+    }
+    for (const [relative, text] of Object.entries(files)) {
+      mkdirSync(path.dirname(path.join(root, relative)), { recursive: true })
+      writeFileSync(path.join(root, relative), text)
+    }
+    const result = spawnSync(process.execPath, [SCRIPT, 'decisions', '--root', root], { encoding: 'utf8' })
+    assert.equal(result.status, 0, result.stderr)
+    const headings = result.stdout.split('\n').filter(line => line.startsWith('## '))
+    assert.deepEqual(headings, ['## 2026-09-30 · new', '## 2026-09-26 · mid', '## 2026-09-24 · old'])
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('checked-in decisions are one heading per numbered file', () => {
+  const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..')
+  const files = readdirSync(path.join(repo, 'docs/decisions')).filter(name => /^\d+-.*\.md$/.test(name))
+  const result = spawnSync(process.execPath, [SCRIPT, 'decisions', '--root', repo], { encoding: 'utf8' })
+  assert.equal(result.status, 0, result.stderr)
+  const headings = result.stdout.split('\n').filter(line => line.startsWith('## '))
+  assert.equal(headings.length, files.length)
+  assert.ok(files.length >= 38)
+  assert.equal(headings[0], '## 2026-09-30 · macOS 已连接时，哪些网络变化可以拆掉隧道？')
 })
