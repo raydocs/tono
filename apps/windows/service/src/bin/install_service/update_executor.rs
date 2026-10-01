@@ -304,13 +304,6 @@ fn open_waiting() -> Result<tx::Store, Error> {
     }
 }
 
-fn new_member_is_sing_box(target: &Path) -> bool {
-    target.file_name().is_some_and(|name| {
-        name.eq_ignore_ascii_case("sing-box.exe")
-            || name.eq_ignore_ascii_case("sing-box-sha256.txt")
-    })
-}
-
 fn collect_candidates(
     source: &Path,
     target: &Path,
@@ -332,7 +325,7 @@ fn collect_candidates(
             target,
             sha256(source)?,
         )?);
-    } else if new_member_is_sing_box(target) {
+    } else if native::new_member_is_sing_box(target) {
         // The first package that carries sing-box.exe has no previous file to
         // restore. Rollback deletes the introduction; it does not invent bytes.
         members.push(CoordinatedBinaryReplacement::prepare_introduced(
