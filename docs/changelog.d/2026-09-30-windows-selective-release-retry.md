@@ -1,6 +1,6 @@
 ## 2026-09-30 · Windows selective-release retries retain the AI hold
 - Ownership: SHIP_PLAN §2 item 10; Windows App Service client.
-- Source: origin/main `d8c6a15a` → branch `hunt/sol-trust-selective-release-retry`; pending PR, not merged at writing.
+- Source: origin/main `d8c6a15a` → branch `hunt/sol-trust-selective-release-retry`; [#983](https://github.com/raydocs/tono/pull/983), not merged at writing.
 - Defect fix: an automatic release refused transiently could retry as ordinary release and omit/remove the AI hold. Operational retries now retain the selective flavor. Only an explicit legacy JSON-payload refusal falls back to null, preserving older-Service network recovery.
 - Added/optimized: none. Strict admission, full network release ordering and explicit Restore/Disconnect remain unchanged.
 - Engineering/tests: one regression for transient refusal and one compatibility regression for legacy Service deserialization refusal; no test removal or gate change.
