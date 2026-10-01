@@ -987,17 +987,14 @@ enum OwnerLifecycleGate<'a> {
 }
 
 /// Owner authentication proves the *user* (pipe PID token SID plus the `%APPDATA%` token file),
-/// and any process of that user can read the token. Every route that enters the owner lifecycle
-/// arms, releases or reconfigures WFP, DNS or the Core, so it must also come from the registered
-/// installation's `Tono.exe` — the same image binding the update routes use. Other legitimate
-/// actors (uninstaller, installer repair) act as administrators through `--emergency-disarm` and
-/// the SCM, not through this pipe.
+/// and any process of that user can read the token. Routes that arm protection or widen what it
+/// lets through must also come from the registered installation's `Tono.exe` — the same image
+/// binding the update routes use. See [`enter_protecting_owner_lifecycle`] for which routes those
+/// are and why release routes never run this proof.
 ///
 /// Only "the peer's image is not the registered `Tono.exe`" is a 401. A proof that could not be
-/// completed is `AppIdentityUnproven` (503): retryable, and it names the administrator exit. It
-/// still refuses — Release included — because an ordinary process of the user can make the proof
-/// fail on purpose (for example by holding a file in the installation tree open without read
-/// sharing), so admitting on an incomplete proof would reopen the bypass this closes.
+/// completed is `AppIdentityUnproven` (503): retryable. Both refusals happen before anything is
+/// armed or widened, so they leave the machine on whatever network it already had.
 #[cfg(windows)]
 #[cfg_attr(feature = "test", allow(dead_code))]
 async fn prove_installed_app_peer(
@@ -1031,8 +1028,7 @@ fn app_identity_unproven(detail: &str) -> ServiceError {
         format!(
             "Tono Service could not confirm that this request came from the installed Tono App \
              ({detail}), so nothing was changed. Try again. If this keeps happening, repair \
-             Tono, or release network protection by running `tono-service.exe \
-             --emergency-disarm` as Administrator from the Tono installation folder."
+             Tono. Disconnect still works."
         ),
     )
 }
@@ -1080,6 +1076,31 @@ async fn require_installed_app_peer(
     proof(owner)
 }
 
+/// [`enter_owner_lifecycle`] for routes that arm protection or widen what it lets through:
+/// Connect (`PrepareCoreStart`, `StartClash`, `LockKillSwitch`, `MarkKillSwitchVerified`,
+/// `EnableProtectedDns`), runtime and endpoint installs (`StageRuntime`, the DIRECT reload
+/// `Begin`/`Replace*`/`Commit` steps) and setting a system proxy. The installed-App image proof
+/// runs first and its refusal is side-effect free: a first Connect stays on the ordinary network,
+/// and a refused step inside an armed session fails like any other stage failure, whose tail
+/// releases through the routes below.
+///
+/// Release, `RestoreProtectedDns`, `StopClash`, `RestrictKillSwitchBootstrap`, `OwnerGoodbye`,
+/// clearing the system proxy, committing or renewing a DIRECT set the gated steps already
+/// installed (`Finalize`/`Renew`), `UpdateWriter` and the log reads enter through
+/// [`enter_owner_lifecycle`] directly and never run the proof: a proof that fails or is
+/// unavailable while WFP is armed must not keep the machine off the network (fail-open,
+/// decision 031).
+async fn enter_protecting_owner_lifecycle(
+    owner: &AuthenticatedOwner,
+    gate: OwnerLifecycleGate<'_>,
+) -> ControlFlow<Result<HttpResponse>, OwnerLifecycleGuard> {
+    #[cfg(windows)]
+    if let Err(error) = require_installed_app_peer(owner).await {
+        return ControlFlow::Break(service_error(error));
+    }
+    enter_owner_lifecycle(owner, gate).await
+}
+
 /// Takes `OWNER_LIFECYCLE_LOCK` and then applies the route's gate, in that order — the gate
 /// reads the very state the lock protects.
 ///
@@ -1096,10 +1117,6 @@ async fn enter_owner_lifecycle(
     owner: &AuthenticatedOwner,
     gate: OwnerLifecycleGate<'_>,
 ) -> ControlFlow<Result<HttpResponse>, OwnerLifecycleGuard> {
-    #[cfg(windows)]
-    if let Err(error) = require_installed_app_peer(owner).await {
-        return ControlFlow::Break(service_error(error));
-    }
     let lifecycle_guard = OWNER_LIFECYCLE_LOCK.lock().await;
     #[cfg(any(windows, test))]
     if lifecycle_is_stopping() {

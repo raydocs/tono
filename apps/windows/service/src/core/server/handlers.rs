@@ -163,7 +163,7 @@ pub(super) fn create_ipc_router() -> Result<Router> {
             };
             // The second phase of the arm is part of the connect flow, so it is session-gated
             // like the other mid-session mutations.
-            let _lifecycle_guard = match enter_owner_lifecycle(
+            let _lifecycle_guard = match enter_protecting_owner_lifecycle(
                 &owner,
                 OwnerLifecycleGate::ActiveSession(&request.session),
             )
@@ -185,7 +185,7 @@ pub(super) fn create_ipc_router() -> Result<Router> {
                     ControlFlow::Continue(authenticated) => authenticated,
                     ControlFlow::Break(response) => return response,
                 };
-            let _lifecycle_guard = match enter_owner_lifecycle(
+            let _lifecycle_guard = match enter_protecting_owner_lifecycle(
                 &owner,
                 OwnerLifecycleGate::ActiveSession(&request.session),
             )
@@ -218,7 +218,7 @@ pub(super) fn create_ipc_router() -> Result<Router> {
                 ControlFlow::Continue(authenticated) => authenticated,
                 ControlFlow::Break(response) => return response,
             };
-            let _lifecycle_guard = match enter_owner_lifecycle(
+            let _lifecycle_guard = match enter_protecting_owner_lifecycle(
                 &owner,
                 OwnerLifecycleGate::ActiveSession(&request.session),
             )
@@ -254,7 +254,7 @@ pub(super) fn create_ipc_router() -> Result<Router> {
                 ControlFlow::Continue(authenticated) => authenticated,
                 ControlFlow::Break(response) => return response,
             };
-            let _lifecycle_guard = match enter_owner_lifecycle(
+            let _lifecycle_guard = match enter_protecting_owner_lifecycle(
                 &owner,
                 OwnerLifecycleGate::ActiveSession(&request.session),
             )
@@ -293,7 +293,7 @@ pub(super) fn create_ipc_router() -> Result<Router> {
                 ControlFlow::Continue(authenticated) => authenticated,
                 ControlFlow::Break(response) => return response,
             };
-            let _lifecycle_guard = match enter_owner_lifecycle(
+            let _lifecycle_guard = match enter_protecting_owner_lifecycle(
                 &owner,
                 OwnerLifecycleGate::ActiveSession(&request.session),
             )
@@ -333,7 +333,7 @@ pub(super) fn create_ipc_router() -> Result<Router> {
                 ControlFlow::Continue(authenticated) => authenticated,
                 ControlFlow::Break(response) => return response,
             };
-            let _lifecycle_guard = match enter_owner_lifecycle(
+            let _lifecycle_guard = match enter_protecting_owner_lifecycle(
                 &owner,
                 OwnerLifecycleGate::ActiveSession(&request.session),
             )
@@ -445,7 +445,7 @@ pub(super) fn create_ipc_router() -> Result<Router> {
                     ControlFlow::Continue(authenticated) => authenticated,
                     ControlFlow::Break(response) => return response,
                 };
-            let _lifecycle_guard = match enter_owner_lifecycle(
+            let _lifecycle_guard = match enter_protecting_owner_lifecycle(
                 &owner,
                 OwnerLifecycleGate::ActiveSession(&request.session),
             )
@@ -568,7 +568,7 @@ pub(super) fn create_ipc_router() -> Result<Router> {
                     ControlFlow::Continue(authenticated) => authenticated,
                     ControlFlow::Break(response) => return response,
                 };
-            let _lifecycle_guard = match enter_owner_lifecycle(
+            let _lifecycle_guard = match enter_protecting_owner_lifecycle(
                 &owner,
                 OwnerLifecycleGate::ActiveSession(&request.session),
             )
@@ -677,11 +677,15 @@ pub(super) fn create_ipc_router() -> Result<Router> {
                 PrepareCoreStartPayload::Freshness(snapshot) => snapshot.release_epoch,
                 PrepareCoreStartPayload::Legacy(()) => windows_kill_switch::attempt_epoch(),
             };
-            let _lifecycle_guard =
-                match enter_owner_lifecycle(&owner, OwnerLifecycleGate::ArmedPolicyTakeover).await {
-                    ControlFlow::Continue(guard) => guard,
-                    ControlFlow::Break(response) => return response,
-                };
+            let _lifecycle_guard = match enter_protecting_owner_lifecycle(
+                &owner,
+                OwnerLifecycleGate::ArmedPolicyTakeover,
+            )
+            .await
+            {
+                ControlFlow::Continue(guard) => guard,
+                ControlFlow::Break(response) => return response,
+            };
             // Compare under the lifecycle lock, before anything is touched: a release that won
             // the lock while this request waited invalidates it exactly like one that completed
             // before it arrived. The refusal is side-effect free — no snapshot, no operation
@@ -775,11 +779,15 @@ pub(super) fn create_ipc_router() -> Result<Router> {
             let release_epoch = windows_kill_switch::release_epoch();
             #[cfg(feature = "test")]
             test_proxy_barrier_note_start_waiting();
-            let _lifecycle_guard =
-                match enter_owner_lifecycle(&owner, OwnerLifecycleGate::ArmedPolicyTakeover).await {
-                    ControlFlow::Continue(guard) => guard,
-                    ControlFlow::Break(response) => return response,
-                };
+            let _lifecycle_guard = match enter_protecting_owner_lifecycle(
+                &owner,
+                OwnerLifecycleGate::ArmedPolicyTakeover,
+            )
+            .await
+            {
+                ControlFlow::Continue(guard) => guard,
+                ControlFlow::Break(response) => return response,
+            };
             let _operation_guard =
                 OperationGuard::begin(ServiceOperationKind::StartCore, IPC_HANDLER_TIMEOUT);
             let previous_owner = match load_active_owner().await {
@@ -1053,7 +1061,7 @@ pub(super) fn create_ipc_router() -> Result<Router> {
             // holds it: a core must not be stopped, started, or handed to another owner while its
             // generation is being rewritten underneath it. Staging writes into the directory the
             // *running* core reads from, which is why the gate is the session and not the owner.
-            let _lifecycle_guard = match enter_owner_lifecycle(
+            let _lifecycle_guard = match enter_protecting_owner_lifecycle(
                 &owner,
                 OwnerLifecycleGate::ActiveSession(&request.session),
             )
@@ -1125,13 +1133,15 @@ pub(super) fn create_ipc_router() -> Result<Router> {
                 };
             // The proxy config is still validated here, after the gate, and not alongside
             // `StartClash`'s pre-lock validation: a stale session must keep winning over an
-            // invalid payload.
-            let _lifecycle_guard = match enter_owner_lifecycle(
-                &owner,
-                OwnerLifecycleGate::ActiveSession(&request.session),
-            )
-            .await
-            {
+            // invalid payload. Setting a proxy needs the installed-App proof; clearing one never
+            // does, so a failed proof cannot leave the system pointed at a stopped Core.
+            let gate = OwnerLifecycleGate::ActiveSession(&request.session);
+            let entered = if matches!(request.payload, MacosProxyConfig::Disabled) {
+                enter_owner_lifecycle(&owner, gate).await
+            } else {
+                enter_protecting_owner_lifecycle(&owner, gate).await
+            };
+            let _lifecycle_guard = match entered {
                 ControlFlow::Continue(guard) => guard,
                 ControlFlow::Break(response) => return response,
             };
