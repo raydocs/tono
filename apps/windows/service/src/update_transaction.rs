@@ -448,6 +448,44 @@ impl Store {
         self.consume_with(executor, now, atomic_write)
     }
 
+    /// Capture the successor token before consuming or terminating the initiating App.
+    pub fn capture_before_consuming<T>(
+        &mut self,
+        executor: &Image,
+        mut clock: impl FnMut() -> Result<u64>,
+        capture: impl FnOnce() -> Result<T>,
+    ) -> Result<Result<T>> {
+        let a = self.live_attempt(clock()?)?;
+        ensure!(
+            a.receipt.phase == Phase::InstallationAuthorized
+                && a.execution == Execution::Launching
+                && a.executor.as_ref() == Some(executor)
+                && self.state.consumed_sequence < a.manifest.release_sequence,
+            "token capture requires the authorized unconsumed executor"
+        );
+        match capture() {
+            Ok(captured) => {
+                self.consume(executor, clock()?)?;
+                Ok(Ok(captured))
+            }
+            Err(capture_error) => {
+                // No install grant was consumed. Preserve the receipt for safe retry/retirement.
+                let mut next = self.state.clone();
+                let attempt = next.attempt.as_mut().context("attempt checked above")?;
+                attempt.execution = Execution::Staged;
+                attempt.executor = None;
+                let error = match self.save(next) {
+                    Ok(()) => capture_error,
+                    Err(record_error) => capture_error.context(format!(
+                        "capture refusal could not return the attempt to Staged: {record_error:#}"
+                    )),
+                };
+                // Even a failed refusal record cannot bypass the guarded failure finalizer.
+                Ok(Err(error))
+            }
+        }
+    }
+
     fn consume_with(
         &mut self,
         executor: &Image,
@@ -1847,6 +1885,132 @@ pub(crate) mod tests {
             (store.state.consumed_sequence, store.state.generation),
             (74, 92)
         );
+        drop(store);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn update_capture_refusal_reaches_cleanup_without_consuming_or_publishing() {
+        let (root, mut store, peer, executor) = reserved();
+        authorize(&mut store, &peer);
+        let sequence = store.state.consumed_sequence;
+        let receipt = canonical(&store.attempt().unwrap().receipt).unwrap();
+        let captured = store
+            .capture_before_consuming(
+                &executor,
+                || Ok(1_900_000_050),
+                || Err::<(), _>(anyhow::anyhow!("initiating App token is unavailable")),
+            )
+            .unwrap();
+        assert!(
+            captured.is_err(),
+            "capture refusal must be deferred to selective cleanup"
+        );
+        assert_eq!(store.state.consumed_sequence, sequence);
+        assert_eq!(
+            canonical(&store.attempt().unwrap().receipt).unwrap(),
+            receipt
+        );
+        assert!(store.pending());
+        assert_eq!(store.attempt().unwrap().execution, Execution::Staged);
+        assert!(store.attempt().unwrap().executor.is_none());
+        drop(store);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn update_capture_refusal_cannot_reset_another_executor() {
+        let (root, mut store, peer, executor) = reserved();
+        authorize(&mut store, &peer);
+        let mut wrong_executor = executor.clone();
+        wrong_executor.started_at += 1;
+        let refused = store.capture_before_consuming(
+            &wrong_executor,
+            || Ok(1_900_000_050),
+            || -> Result<()> { panic!("unbound executor must not reach token capture") },
+        );
+        assert!(refused.is_err());
+        assert_eq!(store.attempt().unwrap().execution, Execution::Launching);
+        assert_eq!(store.attempt().unwrap().executor.as_ref(), Some(&executor));
+        drop(store);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn update_successful_capture_consumes_the_exact_executor_once() {
+        let (root, mut store, peer, executor) = reserved();
+        authorize(&mut store, &peer);
+        let captured = store
+            .capture_before_consuming(
+                &executor,
+                || Ok(1_900_000_050),
+                || Ok("captured user token"),
+            )
+            .unwrap()
+            .unwrap();
+        assert_eq!(captured, "captured user token");
+        assert_eq!(store.attempt().unwrap().execution, Execution::Consumed);
+        assert_eq!(
+            store.state.consumed_sequence,
+            store.attempt().unwrap().manifest.release_sequence
+        );
+        assert!(
+            store
+                .capture_before_consuming(
+                    &executor,
+                    || Ok(1_900_000_051),
+                    || -> Result<()> { panic!("a consumed attempt cannot recapture/reinstall") }
+                )
+                .is_err()
+        );
+        drop(store);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn update_capture_refusal_record_failure_still_reaches_the_failure_finalizer() {
+        let (root, mut store, peer, executor) = reserved();
+        authorize(&mut store, &peer);
+        let sequence = store.state.consumed_sequence;
+        std::fs::remove_file(root.join("state.json")).unwrap();
+        std::fs::create_dir(root.join("state.json")).unwrap();
+        let captured = store
+            .capture_before_consuming(
+                &executor,
+                || Ok(1_900_000_050),
+                || Err::<(), _>(anyhow::anyhow!("token capture refused")),
+            )
+            .unwrap();
+        let error = captured.unwrap_err();
+        assert_eq!(error.root_cause().to_string(), "token capture refused");
+        assert!(store.write_failed);
+        assert_eq!(store.state.consumed_sequence, sequence);
+        drop(store);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn update_slow_token_capture_cannot_consume_after_receipt_expiry() {
+        let (root, mut store, peer, executor) = reserved();
+        authorize(&mut store, &peer);
+        let sequence = store.state.consumed_sequence;
+        let expiry = store.attempt().unwrap().receipt.expires_at_unix;
+        let captured = std::cell::Cell::new(false);
+        let result = store.capture_before_consuming(
+            &executor,
+            || Ok(if captured.get() { expiry } else { expiry - 1 }),
+            || {
+                captured.set(true);
+                Ok("user token")
+            },
+        );
+        assert!(captured.get());
+        assert!(
+            result.is_err(),
+            "consume must use time measured after token capture"
+        );
+        assert_eq!(store.state.consumed_sequence, sequence);
+        assert_eq!(store.attempt().unwrap().execution, Execution::Launching);
         drop(store);
         std::fs::remove_dir_all(root).unwrap();
     }
