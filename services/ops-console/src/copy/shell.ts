@@ -50,12 +50,12 @@ export const shellCopy = {
   sourceLine: (who: string, state: string, when: string) => `${who} ${state} · ${when}`,
   sourceLineNever: (who: string, state: string) => `${who} ${state}`,
   /**
-   * How old the page in front of you is. It refreshes itself every minute, so
-   * a stamp that has stopped moving means the console stopped hearing back —
-   * which the reader has to be told, not left to infer from numbers that look
-   * as current as ever.
+   * How old the page in front of you is. An old displayed read must remain
+   * visible even when another request succeeds, rather than leaving the
+   * reader to infer its age from numbers that look as current as ever.
    */
   pageAsOf: (when: string) => `本页截至 ${when}`,
+  pageStale: '本页数据可能不是最新',
   consoleStale: '后台没响应',
   /**
    * Right after a deploy the pages read as silent for hours while thirty days
