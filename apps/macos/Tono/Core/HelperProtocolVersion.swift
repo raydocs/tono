@@ -372,7 +372,10 @@ nonisolated enum HelperProtocolVersion {
     /// - 4.52.32 → 4.52.33: selective cleanup reads each Anthropic prefix
     ///   back first and keeps a route for that exact prefix that is not a
     ///   blackhole (someone else's), instead of deleting it by destination.
-    static let current = "4.52.33"
+    /// - 4.52.33 → 4.52.34: app-removal cleanup keeps the helper (PF still
+    ///   released, DNS restored) while a stale Core survives SIGKILL, so the
+    ///   next removal check retries the stop.
+    static let current = "4.52.34"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS

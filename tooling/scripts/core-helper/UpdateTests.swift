@@ -596,6 +596,17 @@ func runUpdateSelfTests() -> Bool {
         try check(releaseRemovedInstallationLocked(storage, release: released, removeInstallation: remove)
                   && removals == 1, "A removal whose DNS was restored kept the installation")
     }
+    // #1251: since #763 a Core that survives SIGKILL no longer refuses the
+    // release, so removal deleted the only helper that could stop it.
+    test("removal-keeps-helper-while-stale-core-survives") { directory in
+        let storage = try UpdateStorage(root: directory + "/idle")
+        var removals = 0
+        let survived: (UpdateStorage) -> EmergencyReleaseOutcome = { _ in
+            emergencyReleaseOutcome(dnsRestored: true, coreSurvived: true)
+        }
+        try check(!releaseRemovedInstallationLocked(storage, release: survived, removeInstallation: { removals += 1 })
+                  && removals == 0, "A removal deleted the helper while a stale Core was still running")
+    }
     // An iPhone or iPad app on Apple silicon is a wrapper with no Contents
     // folder (`WrappedBundle -> Wrapper/<name>.app`). One of them kept every
     // removed Tono's protection (BRICK-M3). A bundle that has Contents but no

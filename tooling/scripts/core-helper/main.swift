@@ -1136,10 +1136,18 @@ func emergencyReleaseDespiteStaleCore(strictKillSwitchEnabled: Bool) -> Bool {
 /// What an emergency release achieved. PF is open in both released cases.
 /// `dnsRestoreFailed` keeps an owned DNS snapshot that can still point at the
 /// stopped resolver; only a helper that stays installed retries it (#1165).
+/// `coreStillRunning`: DNS is restored, but a Core survived SIGKILL. Only an
+/// installed helper retries the stop or sees its TUN go (#1251).
 enum EmergencyReleaseOutcome: Equatable {
     case refused
     case dnsRestoreFailed
+    case coreStillRunning
     case released
+}
+
+func emergencyReleaseOutcome(dnsRestored: Bool, coreSurvived: Bool) -> EmergencyReleaseOutcome {
+    if !dnsRestored { return .dnsRestoreFailed }
+    return coreSurvived ? .coreStillRunning : .released
 }
 
 /// PF and DNS release with no ledger access. Used when the store cannot be
@@ -1147,6 +1155,7 @@ enum EmergencyReleaseOutcome: Equatable {
 func releaseNetworkWithoutLedger() -> EmergencyReleaseOutcome {
     do {
         let allowedUID = try readAllowedUID()
+        var coreSurvived = false
         do {
             _ = try CoreManager(allowedUID: allowedUID)
         } catch {
@@ -1160,6 +1169,7 @@ func releaseNetworkWithoutLedger() -> EmergencyReleaseOutcome {
                 "Tono emergency recovery could not stop a stale Mihomo process; it may still be running. Releasing PF anyway: \(error)\n",
                 stderr
             )
+            coreSurvived = true
         }
         let dns = try ProtectedDNSManager()
         let manager = try KillSwitchManager(allowedUID: allowedUID)
@@ -1172,7 +1182,7 @@ func releaseNetworkWithoutLedger() -> EmergencyReleaseOutcome {
         }
         _ = try manager.disarm()
         print("Tono network protection is disarmed. Update evidence was not modified.")
-        return dnsRestored ? .released : .dnsRestoreFailed
+        return emergencyReleaseOutcome(dnsRestored: dnsRestored, coreSurvived: coreSurvived)
     } catch {
         fputs("Tono emergency recovery could not release PF: \(error)\n", stderr)
         return .refused
@@ -1229,6 +1239,7 @@ func emergencyRelease(underLock suppliedStorage: UpdateStorage? = nil) -> Emerge
         // update evidence is kept untouched, like the disconnect failure below
         // (MAC-EMERGENCY-STALE-CORE).
         var core: CoreManager?
+        var coreSurvived = false
         do {
             core = try CoreManager(allowedUID: allowedUID)
         } catch {
@@ -1239,6 +1250,7 @@ func emergencyRelease(underLock suppliedStorage: UpdateStorage? = nil) -> Emerge
                 "Tono emergency recovery could not stop a stale Mihomo process; it may still be running. Releasing PF anyway: \(error)\n",
                 stderr
             )
+            coreSurvived = true
         }
         // Restore DNS, then release PF. A DNS failure must not keep the block:
         // the host would stay offline with a dead resolver.
@@ -1261,7 +1273,7 @@ func emergencyRelease(underLock suppliedStorage: UpdateStorage? = nil) -> Emerge
                 }
                 _ = try manager.disarm()
                 print("Tono network protection is disarmed. Update evidence was kept.")
-                return dnsRestored ? .released : .dnsRestoreFailed
+                return emergencyReleaseOutcome(dnsRestored: dnsRestored, coreSurvived: coreSurvived)
             }
             ledger.attempt?.disconnectVerified = true
             try storage.save(ledger)
@@ -1299,7 +1311,7 @@ func emergencyRelease(underLock suppliedStorage: UpdateStorage? = nil) -> Emerge
                     + "System Settings > Network if DNS needs adjustment."
             )
         }
-        return dnsRestored ? .released : .dnsRestoreFailed
+        return emergencyReleaseOutcome(dnsRestored: dnsRestored, coreSurvived: coreSurvived)
         }
         return try suppliedStorage == nil ? storage.locked(disarm) : disarm()
     } catch {
@@ -1356,7 +1368,8 @@ private func runEmergencyResetLocked(_ storage: UpdateStorage) -> Bool {
     bootout.waitUntilExit()
 
     switch emergencyRelease(underLock: storage) {
-    case .released:
+    case .released, .coreStillRunning:
+        // The administrator asked for removal; the survivor was reported.
         break
     case .refused:
         // Protection could not be released; removing the installation now
@@ -1624,7 +1637,9 @@ func releaseIfTonoWasRemoved(
 /// interleave, unlike the `--emergency-reset` tool.
 ///
 /// A DNS restore failure still opens PF but keeps the installation: this
-/// daemon's DNS recovery and the next removal check retry it (#1165).
+/// daemon's DNS recovery and the next removal check retry it (#1165). So
+/// does a Core that survived SIGKILL: the next removal check stops it again
+/// (#1251).
 func releaseRemovedInstallationLocked(
     _ storage: UpdateStorage,
     release: (UpdateStorage) -> EmergencyReleaseOutcome = { emergencyRelease(underLock: $0) },
@@ -1638,6 +1653,9 @@ func releaseRemovedInstallationLocked(
         return false
     case .dnsRestoreFailed:
         fputs("tono: removal kept the helper because DNS was not restored; retrying later\n", stderr)
+        return false
+    case .coreStillRunning:
+        fputs("tono: removal kept the helper because a stale Core is still running; retrying later\n", stderr)
         return false
     }
 }
