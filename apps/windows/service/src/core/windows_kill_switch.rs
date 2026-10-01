@@ -2366,9 +2366,10 @@ pub(crate) async fn restrict_bootstrap() -> Result<()> {
 /// the DNS proof. Callers treat the timeout exactly like any other unprovable restore, so on the
 /// disarm/release path the filters stay installed and the barrier stays armed — a timeout can
 /// never open the network while DNS may still point at a dead loopback resolver. Cancelling the
-/// restore (the timeout drops the future) is safe for the same reason: `restore_protected`
-/// deletes its snapshot only *after* the restore is proven, so a cancelled attempt leaves the
-/// evidence — and the block — exactly where a failed attempt would, ready for the next retry.
+/// restore (the timeout drops the future) leaves the snapshot in place, because
+/// `restore_protected` deletes it only *after* the restore is proven. The abandoned registry
+/// write keeps its own self-write window until that write returns, so the notification is not
+/// published as a network change.
 async fn bounded_dns_call<T>(
     operation: &str,
     call: impl std::future::Future<Output = Result<T>>,
