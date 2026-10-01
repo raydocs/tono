@@ -466,6 +466,35 @@
     }
 
     #[test]
+    fn restored_local_dns_accepts_guid_case_drift() {
+        let saved = adapter("{A1B2C3D4-E5F6-4718-9ABC-DEF012345678}", Some(LOOPBACK_V4));
+        let snapshot = DnsSnapshot {
+            version: SNAPSHOT_VERSION,
+            taken_at: 1,
+            adapters: vec![saved.clone()],
+        };
+        let current = vec![AdapterDnsSnapshot {
+            interface_guid: saved.interface_guid.to_ascii_lowercase(),
+            ..saved.clone()
+        }];
+
+        assert!(registry_values_match(&saved, &current[0]));
+        assert!(registry_restore_matches(&snapshot, &current));
+        assert!(adapters_owing_live_proof(&snapshot, &current).is_empty());
+        assert!(restore_is_proven(&snapshot, &current, Some(false)));
+        assert!(!restore_is_proven(&snapshot, &current, Some(true)));
+        assert!(!restore_is_proven(&snapshot, &current, None));
+
+        let drifted = vec![AdapterDnsSnapshot {
+            ipv4_name_server: Some(PROTECTED_DNS_V4.to_owned()),
+            ..current[0].clone()
+        }];
+        assert!(!registry_values_match(&saved, &drifted[0]));
+        assert!(!registry_restore_matches(&snapshot, &drifted));
+        assert!(!restore_is_proven(&snapshot, &drifted, Some(false)));
+    }
+
+    #[test]
     fn live_restore_uses_profile_overrides_and_keeps_the_families_apart() {
         let saved = AdapterDnsSnapshot {
             interface_guid: "{DUAL}".to_owned(),

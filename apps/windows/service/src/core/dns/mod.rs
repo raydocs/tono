@@ -720,11 +720,10 @@ fn unrecorded_adapters(
         .iter()
         .filter(|adapter| {
             existing.is_none_or(|snapshot| {
-                !snapshot.adapters.iter().any(|saved| {
-                    saved
-                        .interface_guid
-                        .eq_ignore_ascii_case(&adapter.interface_guid)
-                })
+                !snapshot
+                    .adapters
+                    .iter()
+                    .any(|saved| same_adapter_guid(&saved.interface_guid, &adapter.interface_guid))
             })
         })
         .cloned()
@@ -866,11 +865,11 @@ fn merge_snapshot(existing: Option<DnsSnapshot>, fresh: DnsSnapshot) -> DnsSnaps
         return fresh;
     };
     for adapter in fresh.adapters {
-        if !existing.adapters.iter().any(|saved| {
-            saved
-                .interface_guid
-                .eq_ignore_ascii_case(&adapter.interface_guid)
-        }) {
+        if !existing
+            .adapters
+            .iter()
+            .any(|saved| same_adapter_guid(&saved.interface_guid, &adapter.interface_guid))
+        {
             existing.adapters.push(adapter);
         }
     }
@@ -887,9 +886,9 @@ fn active_snapshot_adapters(
         .adapters
         .iter()
         .filter(|saved| {
-            current.iter().any(|adapter| {
-                adapter.interface_guid.eq_ignore_ascii_case(&saved.interface_guid)
-            })
+            current
+                .iter()
+                .any(|adapter| same_adapter_guid(&adapter.interface_guid, &saved.interface_guid))
         })
         .cloned()
         .collect()
@@ -1024,10 +1023,14 @@ fn needs_reconcile(
     protection_wanted && snapshot_present && (!enabled || unverified)
 }
 
+fn same_adapter_guid(a: &str, b: &str) -> bool {
+    a.eq_ignore_ascii_case(b)
+}
+
 /// Registry-only comparison of one adapter: the four saved values against the read-back
 /// (deliberately excluding the `live_apply_failed` bookkeeping flag).
 fn registry_values_match(saved: &AdapterDnsSnapshot, current: &AdapterDnsSnapshot) -> bool {
-    saved.interface_guid == current.interface_guid
+    same_adapter_guid(&saved.interface_guid, &current.interface_guid)
         && saved.ipv4_name_server == current.ipv4_name_server
         && saved.ipv4_profile_name_server == current.ipv4_profile_name_server
         && saved.ipv6_name_server == current.ipv6_name_server
@@ -1040,7 +1043,7 @@ fn registry_restore_matches(snapshot: &DnsSnapshot, current: &[AdapterDnsSnapsho
     snapshot.adapters.iter().all(|saved| {
         current
             .iter()
-            .find(|adapter| adapter.interface_guid == saved.interface_guid)
+            .find(|adapter| same_adapter_guid(&adapter.interface_guid, &saved.interface_guid))
             .is_none_or(|adapter| registry_values_match(saved, adapter))
     })
 }
@@ -1082,7 +1085,7 @@ fn restore_is_proven(
     snapshot.adapters.iter().all(|saved| {
         current
             .iter()
-            .find(|adapter| adapter.interface_guid == saved.interface_guid)
+            .find(|adapter| same_adapter_guid(&adapter.interface_guid, &saved.interface_guid))
             .is_none_or(|adapter| registry_values_match(saved, adapter))
     })
 }
@@ -1112,7 +1115,8 @@ fn adapters_owing_live_proof(
         .iter()
         .filter(|adapter| {
             !snapshot.adapters.iter().any(|saved| {
-                saved.interface_guid == adapter.interface_guid && saved_dns_was_loopback(saved)
+                same_adapter_guid(&saved.interface_guid, &adapter.interface_guid)
+                    && saved_dns_was_loopback(saved)
             })
         })
         .cloned()
