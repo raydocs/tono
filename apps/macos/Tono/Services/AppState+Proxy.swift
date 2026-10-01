@@ -4,7 +4,8 @@ extension AppState {
     // MARK: - Proxy Management
 
     /// Select a node/group by name or id.
-    func selectNode(_ nameOrId: String, releaseNetworkIfSwitchFails: Bool = false) {
+    func selectNode(_ nameOrId: String, releaseNetworkIfSwitchFails: Bool = false,
+                    forceRuntimeReplacement: Bool = false) {
         guard !isDisconnecting, switchingNodeId == nil else { return }
         guard connectionCoordinator.configReloadTask == nil else {
             errorMessage = String(
@@ -30,7 +31,7 @@ extension AppState {
             return
         }
 
-        if isConnected,
+        if isConnected, !forceRuntimeReplacement,
            let current = proxyService.activeNodeName,
            proxyTarget(current, matches: nodeName) {
             selectedNodeId = desiredNode?.id ?? ConfigPipeline.homeNodeName
@@ -96,7 +97,11 @@ extension AppState {
                     // the switch was going, not back to the exit it was
                     // leaving (X1-5). The session is already down, so this is
                     // the next connect target, not a claim about the runtime.
-                    self.rememberSwitchedNode(desiredNode, name: nodeName)
+                    if nodeName == ConfigPipeline.homeNodeName {
+                        self.rememberSwitchedNode(nil, name: nodeName)
+                    } else if let current = self.localProxyNode(matching: nodeName) {
+                        self.rememberSwitchedNode(current, name: current.name)
+                    }
                 }
             }
             guard let api else { return }
@@ -254,12 +259,17 @@ extension AppState {
         // touching Core/PF. A user switch still holds PF and retries. A catalog
         // removal switch must not: the session could not move, and a non-strict
         // host goes back to its original network instead of bootstrap.
-        rememberSwitchedNode(node, name: name)
-        let release = releaseNetwork && ExhaustedFailureNetwork.afterFailure(
+        let catalogRemovalPending = pendingRemovedCatalogExit
+        if catalogRemovalPending {
+            applyDefaultProxySelection(persist: true)
+        } else {
+            rememberSwitchedNode(node, name: name)
+        }
+        let release = (releaseNetwork || catalogRemovalPending) && ExhaustedFailureNetwork.afterFailure(
             strictKillSwitchExplicit: false,
             selectiveAiBlockReady: false
         ).releasesSystemNetwork
-        disconnect(releaseKillSwitch: release)
+        disconnect(releaseKillSwitch: release, automaticFailureRelease: release)
         LocalTrafficAudit.shared.recordEvent(
             "node_switch_protection_convergence_failed",
             details: ["error": error.localizedDescription, "released": String(release)]
@@ -680,6 +690,15 @@ extension AppState {
                 )
                 scheduleProtectedReconnect(immediate: true)
             } catch {
+                if pendingRemovedCatalogExit, !Task.isCancelled, !isDisconnecting,
+                   connectionCoordinator.configReloadRequestID == requestID {
+                    // A failed old owner cannot retry its retired exit or keep
+                    // bootstrap PF while the catalog replacement is pending.
+                    applyDefaultProxySelection(persist: true)
+                    finishConfigReloadRequest(requestID, startPending: false)
+                    disconnect(releaseKillSwitch: true, automaticFailureRelease: true)
+                    return
+                }
                 // Once Mihomo accepted new pins, neither cancellation nor a
                 // superseding reload may leave PF at the temporary union. This
                 // branch must win over the ordinary stale-request guards.
@@ -717,11 +736,12 @@ extension AppState {
                     finishConfigReloadRequest(requestID)
                 } else if ownedRuntime {
                     finishConfigReloadRequest(requestID, startPending: false)
-                    disconnect(releaseKillSwitch: false)
-                    errorMessage = String(
-                        localized: "Updated cloud route failed; Kill Switch is blocking traffic while Tono retries. \(error.localizedDescription)"
+                    await applyExhaustedArmedFailure(
+                        message: ConnectionFailurePresentation.userFacingMessage(
+                            classified: lastClassifiedFailure
+                        ),
+                        resumeWhenReachable: true
                     )
-                    scheduleProtectedReconnect()
                 } else {
                     finishConfigReloadRequest(requestID)
                     errorMessage = String(
@@ -733,8 +753,8 @@ extension AppState {
     }
 
     /// Completes one serialized runtime mutation and starts the newest queued
-    /// request. Pin changes take precedence because a full rewrite will then
-    /// naturally include the newly committed exact direct policy.
+    /// request. Accepted authorization takes precedence over pin snapshots;
+    /// a full rewrite then includes the newly committed exact direct policy.
     func finishConfigReloadRequest(
         _ requestID: Int,
         startPending: Bool = true
@@ -743,6 +763,8 @@ extension AppState {
         connectionCoordinator.configReloadTask = nil
         guard startPending, isConnected, !isDisconnecting else {
             if !startPending {
+                pendingOptionalPolicyReload = false
+                pendingRemovedCatalogExit = false
                 pendingDirectPolicyReload = nil
                 pendingFullConfigReload = false
             }
@@ -754,7 +776,23 @@ extension AppState {
     private func startPendingConfigReloadIfPossible() {
         guard connectionCoordinator.configReloadTask == nil, switchingNodeId == nil,
               isConnected, !isDisconnecting else { return }
-        if let policy = pendingDirectPolicyReload {
+        if pendingRemovedCatalogExit {
+            pendingRemovedCatalogExit = false
+            // The catalog switch writes the complete latest configuration,
+            // including full rewrites queued while the old owner was busy.
+            pendingFullConfigReload = false
+            settleRemovedCatalogExit(wasConnected: true)
+            if connectionCoordinator.configReloadTask == nil, switchingNodeId == nil {
+                startPendingConfigReloadIfPossible()
+            }
+        } else if pendingOptionalPolicyReload {
+            scheduleBackgroundOptionalPolicy()
+            // An empty document with no active grants needs no replacement,
+            // but any queued full rewrite must still drain.
+            if connectionCoordinator.configReloadTask == nil {
+                startPendingConfigReloadIfPossible()
+            }
+        } else if let policy = pendingDirectPolicyReload {
             pendingDirectPolicyReload = nil
             reloadCoreConfig(applyingDirectPolicy: policy)
         } else if pendingFullConfigReload {

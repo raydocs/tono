@@ -72,6 +72,8 @@ mod selective_layer;
 #[cfg(feature = "standalone")]
 mod server;
 #[cfg(feature = "standalone")]
+mod sing_box_runtime;
+#[cfg(feature = "standalone")]
 mod state;
 #[cfg(feature = "standalone")]
 mod status;

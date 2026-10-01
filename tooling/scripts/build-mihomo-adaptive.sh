@@ -11,7 +11,7 @@ mode=${1:---install-adaptive}
 upstream_tag="v1.19.30"
 upstream_commit="ac017cdd246ce8bd547653d927e7bf77d7ee73d5"
 sing_tun_version="v0.4.22"
-adaptive_version="v1.19.30-tono-gvisor-adaptive.1"
+adaptive_version="v1.19.30-tono-gvisor-adaptive.2"
 required_go_version="go1.27.1"
 stock_archive_sha256="2c7f3a7904fa1cee291e124123e630e7b1ebd13765dd9bf26c0a28432004d9f4"
 stock_binary_sha256="e80c6334b4e3aae53dfbc86cddd4434cec1565a61d4483931fac2ae12fec6d30"
@@ -192,11 +192,11 @@ install_adaptive() {
   "tonoCoreVersion": "$adaptive_version",
   "mihomoUpstreamTag": "$upstream_tag",
   "upstreamCommit": "$upstream_commit",
-  "tonoPatchRevision": "gvisor-adaptive.1",
+  "tonoPatchRevision": "gvisor-adaptive.2",
   "goVersion": "$go_version",
   "buildTags": ["with_gvisor"],
   "singTun": "$sing_tun_version",
-  "tcpBufferBytes": { "min": 4096, "default": 32768, "max": 131072 }
+  "tcpBufferBytes": { "min": 4096, "default": 32768, "max": 2097152 }
 }
 JSON
   )

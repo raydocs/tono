@@ -130,6 +130,53 @@ impl ProtocolInfo {
         self.protocol.epoch == ProtocolVersion::current().epoch
             && self.protocol.revision >= crate::MIN_SERVICE_REVISION_FOR_PREPARE_START_EPOCH
     }
+
+    /// Whether `StartClash` can run `sing-box.exe` instead of treating every core as mihomo.
+    pub const fn supports_sing_box_core(&self) -> bool {
+        self.protocol.epoch == ProtocolVersion::current().epoch
+            && self.protocol.revision >= crate::MIN_SERVICE_REVISION_FOR_SING_BOX
+    }
+}
+
+/// The image file name selects the engine. Omitted and unknown names stay mihomo,
+/// which is what a revision-17 App sends.
+pub fn is_sing_box_core_path(path: &str) -> bool {
+    std::path::Path::new(path)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| {
+            name.eq_ignore_ascii_case("sing-box.exe") || name.eq_ignore_ascii_case("sing-box")
+        })
+}
+
+/// Arguments for one core start. sing-box ignores the mihomo directory and pipe flags.
+pub fn core_launch_args(
+    core_path: &str,
+    config_dir: &str,
+    config_path: &str,
+    ipc_path: &str,
+) -> Vec<String> {
+    if is_sing_box_core_path(core_path) {
+        vec![
+            "run".to_string(),
+            "-c".to_string(),
+            config_path.to_string(),
+            "--disable-color".to_string(),
+        ]
+    } else {
+        vec![
+            "-d".to_string(),
+            config_dir.to_string(),
+            "-f".to_string(),
+            config_path.to_string(),
+            if cfg!(windows) {
+                "-ext-ctl-pipe".to_string()
+            } else {
+                "-ext-ctl-unix".to_string()
+            },
+            ipc_path.to_string(),
+        ]
+    }
 }
 
 /// Learned control-plane addresses persisted by GET/POST `/bootstrap-pins`.
@@ -906,7 +953,8 @@ impl<T> JsonConvert for T where T: Serialize + for<'de> Deserialize<'de> {}
 mod tests {
     use super::{
         MacosProxyConfig, OwnerIdentity, ProtocolInfo, ProtocolVersion, ReleaseKillSwitchBody,
-        RuntimeBundle, ServiceErrorCode, StartClashRequest, StopClashPayload, owner_key,
+        RuntimeBundle, ServiceErrorCode, StartClashRequest, StopClashPayload, core_launch_args,
+        is_sing_box_core_path, owner_key,
     };
 
     #[test]
@@ -1288,5 +1336,47 @@ mod tests {
         assert!(present.apply_narrow_layer());
         let omitted: ReleaseKillSwitchBody = serde_json::from_str("{}").unwrap();
         assert!(!omitted.apply_narrow_layer());
+    }
+
+    #[test]
+    fn sing_box_launch_args_are_run_c_and_mihomo_keeps_its_flags() {
+        let sing = core_launch_args(
+            r"C:\Program Files\Tono\sing-box.exe",
+            r"C:\runtime",
+            r"C:\runtime\config.json",
+            r"\\.\pipe\tono",
+        );
+        assert_eq!(
+            sing,
+            vec![
+                "run".to_string(),
+                "-c".to_string(),
+                r"C:\runtime\config.json".to_string(),
+                "--disable-color".to_string(),
+            ]
+        );
+        let mihomo = core_launch_args(
+            r"C:\Program Files\Tono\tono-core.exe",
+            r"C:\runtime",
+            r"C:\runtime\config.yaml",
+            r"\\.\pipe\tono",
+        );
+        assert!(
+            mihomo
+                .windows(2)
+                .any(|pair| pair[0] == "-f" && pair[1] == r"C:\runtime\config.yaml")
+        );
+        assert!(!mihomo.iter().any(|arg| arg == "run"));
+        assert!(is_sing_box_core_path("sing-box"));
+        assert!(!is_sing_box_core_path("tono-core.exe"));
+    }
+
+    #[test]
+    fn sing_box_core_requires_revision_eighteen() {
+        let mut info = ProtocolInfo::current();
+        info.protocol.revision = 17;
+        assert!(!info.supports_sing_box_core());
+        info.protocol.revision = 18;
+        assert!(info.supports_sing_box_core());
     }
 }

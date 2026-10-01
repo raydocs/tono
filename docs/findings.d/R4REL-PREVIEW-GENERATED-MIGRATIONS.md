@@ -1,0 +1,5 @@
+| ID | 问题（一句） | 状态 | Issue / PR | 等级 | 剩余限制 |
+|---|---|---|---|---|---|
+| R4REL-PREVIEW-GENERATED-MIGRATIONS | Preview backup restore ignores the current renderer's config and exits successfully without rehearsing pending migrations | in-PR | hunt/sol-r4rel-preview-migrations | 低·已确认（P2，isolated shell regression） | Real D1 restore/migrations intentionally not run; legacy config fallback remains supported. |
+
+Main `fdddde02`, `restore-control-plane-d1-preview.sh:230` checks only wrangler.preview.jsonc. The supported renderer writes wrangler.preview.generated.jsonc (`preview/render-config.mjs:62`). A restore using only generated configuration imports an older dump and reports success after skipping pending migrations. The complete copied-script regression records one import and zero migration calls on baseline. The fix selects the current generated file with a legacy fallback, checks the selected database UUID against production before any remote call, and applies migrations with that same config.

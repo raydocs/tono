@@ -34,6 +34,30 @@ use super::probes::verify_tun_data_plane;
 /// blackholes that look like random application hangs.
 pub(super) const MAX_DIRECT_ENDPOINTS: usize = 256;
 
+/// Same spellings as `windows_kill_switch`. A non-strict renewal failure releases.
+const DIRECT_RENEW_FAILED_PREFIX: &str = "TONO_DIRECT_RENEW_FAILED";
+/// Same spelling as the Service. An explicit strict kill switch stays Blocked.
+const DIRECT_RENEW_STRICT_BLOCKED_PREFIX: &str = "TONO_DIRECT_RENEW_STRICT_BLOCKED";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum DirectRenewalFollowUp {
+    /// Open the original network and keep AI-service destinations blocked.
+    SelectiveRelease,
+    /// The Service already narrowed to Blocked because strict mode is on.
+    StrictKeepBlocked,
+}
+
+pub(super) fn direct_renewal_follow_up(error: &str) -> DirectRenewalFollowUp {
+    if error.contains(DIRECT_RENEW_STRICT_BLOCKED_PREFIX) {
+        DirectRenewalFollowUp::StrictKeepBlocked
+    } else if error.contains(DIRECT_RENEW_FAILED_PREFIX) {
+        DirectRenewalFollowUp::SelectiveRelease
+    } else {
+        // The Service handler never ran. Still release; do not cut the network.
+        DirectRenewalFollowUp::SelectiveRelease
+    }
+}
+
 pub(super) async fn spawn_direct_lease_heartbeat(state: &Arc<TonoState>, generation: u64, heartbeat: DirectLeaseHeartbeat) {
     let task_state = Arc::clone(state);
     let handle = AsyncHandler::spawn(move || {
@@ -80,26 +104,50 @@ pub(super) async fn direct_lease_heartbeat_loop(state: Arc<TonoState>, generatio
             Err(error) => Err(format!("{error:#}")),
         };
         if let Err(error) = renewal {
-            let redacted = audit::redact(&error);
-            logging!(
-                error,
-                Type::Service,
-                "Tono: authenticated DIRECT lease renewal failed; restricting traffic to fail-closed Blocked: {redacted}"
-            );
+            let raw = format!("{error:#}");
+            let follow_up = direct_renewal_follow_up(&raw);
+            let redacted = audit::redact(&raw);
             state.audit().log(AuditEvent::HealthProbeFail {
                 probe: "directLeaseHeartbeat",
-                error: redacted,
+                error: redacted.clone(),
             });
             // Do not reconnect from inside the heartbeat task: a successful fresh attempt would
-            // replace this task and abort its own caller mid-commit. Restrict immediately; the
-            // independent health monitor observes Blocked and owns the normal reconnect path.
-            if let Err(restrict_error) = service::tono_restrict_bootstrap().await {
-                logging!(
-                    error,
-                    Type::Service,
-                    "Tono: DIRECT renewal failure could not immediately restrict WFP; the Service lease watchdog remains authoritative: {}",
-                    audit::redact(&format!("{restrict_error:#}"))
-                );
+            // replace this task and abort its own caller mid-commit. Do not restrict to Blocked.
+            // A non-strict failure releases the original network and keeps AI destinations blocked.
+            match follow_up {
+                DirectRenewalFollowUp::StrictKeepBlocked => {
+                    logging!(
+                        error,
+                        Type::Service,
+                        "Tono: authenticated DIRECT lease renewal failed; explicit strict kill switch kept traffic Blocked: {redacted}"
+                    );
+                }
+                DirectRenewalFollowUp::SelectiveRelease => {
+                    logging!(
+                        error,
+                        Type::Service,
+                        "Tono: authenticated DIRECT lease renewal failed; releasing general traffic and keeping AI-service destinations blocked: {redacted}"
+                    );
+                    match service::tono_release_kill_switch_applying_narrow().await {
+                        Ok(status) => {
+                            logging!(
+                                warn,
+                                Type::Service,
+                                "Tono: DIRECT renewal failure released general traffic (wanted={}, live={}); AI-service destinations stay blocked",
+                                status.wanted,
+                                status.live
+                            );
+                        }
+                        Err(release_error) => {
+                            logging!(
+                                error,
+                                Type::Service,
+                                "Tono: DIRECT renewal failure could not release general traffic; protection stays as the Service left it: {}",
+                                audit::redact(&format!("{release_error:#}"))
+                            );
+                        }
+                    }
+                }
             }
             return;
         }
@@ -410,7 +458,7 @@ pub(super) fn spawn_optional_direct_after_connected(
                 logging!(
                     warn,
                     Type::Service,
-                    "Tono: optional DIRECT commit rolled back to full tunnel: {error:?}"
+                    "Tono: optional DIRECT commit failed; Service reconciliation leaves traffic Blocked, not on a full tunnel: {error:?}"
                 );
             }
         }
@@ -441,9 +489,22 @@ pub(super) async fn apply_cloud_policy(
     {
         return Ok(None);
     }
+    if state.lock().await.sing_box_core {
+        // PUT /configs is a no-op on sing-box alpha.9. Entering the reload
+        // bracket and then failing would leave traffic Blocked. Keep the
+        // proven full tunnel until a protected process replace exists.
+        skip_optional_direct_policy(
+            state,
+            generation,
+            "sing-box keeps the proven full tunnel; in-place config reload does not apply".to_string(),
+        )
+        .await;
+        return Ok(None);
+    }
     if !WINDOWS_OPTIONAL_DIRECT_ENABLED {
         skip_optional_direct_policy(
             state,
+            generation,
             "optional Windows DIRECT policy is disabled; retaining the proven full-tunnel runtime".to_string(),
         )
         .await;
@@ -453,6 +514,7 @@ pub(super) async fn apply_cloud_policy(
     let Some(interface) = physical_interface else {
         skip_optional_direct_policy(
             state,
+            generation,
             "cloud DIRECT policy has no pre-TUN physical interface snapshot".to_string(),
         ).await;
         return Ok(None);
@@ -481,7 +543,7 @@ pub(super) async fn apply_cloud_policy(
     let (wechat_pins, web_pins) = match classify_optional_direct_resolution(resolution) {
         OptionalDirectResolution::Ready(pins) => pins,
         OptionalDirectResolution::Skip(reason) => {
-            skip_optional_direct_policy(state, reason).await;
+            skip_optional_direct_policy(state, generation, reason).await;
             return Ok(None);
         }
     };
@@ -497,7 +559,7 @@ pub(super) async fn apply_cloud_policy(
     ) {
         Ok(plan) => plan,
         Err(reason) => {
-            skip_optional_direct_policy(state, reason).await;
+            skip_optional_direct_policy(state, generation, reason).await;
             return Ok(None);
         }
     };
@@ -550,6 +612,7 @@ pub(super) async fn apply_cloud_policy(
             // must not tear that tunnel down.
             skip_optional_direct_policy(
                 state,
+                generation,
                 format!("optional DIRECT runtime could not be built: {error}"),
             ).await;
             return Ok(None);
@@ -561,6 +624,7 @@ pub(super) async fn apply_cloud_policy(
         Err(error) => {
             skip_optional_direct_policy(
                 state,
+                generation,
                 format!("optional DIRECT staging could not resolve the core path: {error}"),
             ).await;
             return Ok(None);
@@ -577,6 +641,7 @@ pub(super) async fn apply_cloud_policy(
         Err(error) => {
             skip_optional_direct_policy(
                 state,
+                generation,
                 format!("optional DIRECT endpoint digest could not be calculated: {error}"),
             ).await;
             return Ok(None);
@@ -590,6 +655,7 @@ pub(super) async fn apply_cloud_policy(
         drop(policy_guard);
         skip_optional_direct_policy(
             state,
+            generation,
             "cloud DIRECT policy changed before activation; retaining the full-tunnel runtime".to_owned(),
         )
         .await;
@@ -1508,7 +1574,13 @@ pub(super) fn classify_optional_direct_resolution<T>(result: Result<T, String>) 
     }
 }
 
-pub(super) async fn skip_optional_direct_policy(state: &Arc<TonoState>, reason: String) {
+pub(super) async fn skip_optional_direct_policy(state: &Arc<TonoState>, generation: u64, reason: String) {
+    let mut inner = state.lock().await;
+    // Optional discovery is detached and can finish after Disconnect and a successor Connect.
+    // Neither its failure evidence nor its audit event belongs to that successor.
+    if inner.connect_generation != generation {
+        return;
+    }
     let reason = audit::redact(&reason);
     logging!(
         warn,
@@ -1518,7 +1590,6 @@ pub(super) async fn skip_optional_direct_policy(state: &Arc<TonoState>, reason: 
     state.audit().log(AuditEvent::PolicyActivationSkipped {
         reason: reason.clone(),
     });
-    let mut inner = state.lock().await;
     inner.optional_direct_active = false;
     inner.applied_direct_interface = None;
     inner.optional_direct_skip = Some(reason);
@@ -1789,8 +1860,55 @@ pub fn build_direct_plan(
 }
 
 #[cfg(test)]
+mod tests {
+    use super::{
+        DIRECT_RENEW_FAILED_PREFIX, DIRECT_RENEW_STRICT_BLOCKED_PREFIX, DirectRenewalFollowUp,
+        direct_renewal_follow_up,
+    };
+
+    #[test]
+    fn a_direct_renewal_failure_releases_unless_the_kill_switch_is_strict() {
+        assert_eq!(
+            direct_renewal_follow_up(&format!(
+                "{DIRECT_RENEW_FAILED_PREFIX}: proof mismatched; WFP was left unchanged"
+            )),
+            DirectRenewalFollowUp::SelectiveRelease
+        );
+        assert_eq!(
+            direct_renewal_follow_up("connection refused"),
+            DirectRenewalFollowUp::SelectiveRelease,
+            "a transport failure never reached the handler and must not stay Blocked"
+        );
+        assert_eq!(
+            direct_renewal_follow_up(&format!(
+                "{DIRECT_RENEW_STRICT_BLOCKED_PREFIX}: strict kill switch kept traffic Blocked"
+            )),
+            DirectRenewalFollowUp::StrictKeepBlocked
+        );
+    }
+}
+
+#[cfg(test)]
 mod cancellation_tests {
     use super::*;
+
+    #[tokio::test]
+    async fn stale_optional_discovery_cannot_clear_the_successors_direct_evidence() {
+        let state = Arc::new(TonoState::for_test());
+        {
+            let mut inner = state.lock().await;
+            inner.connect_generation = 12;
+            inner.optional_direct_active = true;
+            inner.applied_direct_interface = Some("successor-uplink".into());
+            inner.optional_direct_skip = None;
+        }
+        // The detached predecessor's resolver completes after generation 12 committed DIRECT.
+        skip_optional_direct_policy(&state, 11, "predecessor DNS timed out".into()).await;
+        let inner = state.lock().await;
+        assert!(inner.optional_direct_active, "a predecessor cannot disable the current overlay evidence");
+        assert_eq!(inner.applied_direct_interface.as_deref(), Some("successor-uplink"));
+        assert!(inner.optional_direct_skip.is_none(), "a stale failure must not be attributed to the successor");
+    }
     use tokio::io::AsyncReadExt as _;
     use tokio::sync::oneshot;
 

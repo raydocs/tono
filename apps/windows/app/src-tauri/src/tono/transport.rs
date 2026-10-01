@@ -603,8 +603,8 @@ impl TonoTransport {
         }
     }
 
-    /// Last resort through an already-running loopback proxy. A 5xx from that
-    /// proxy is not an API answer and does not count as one.
+    /// Last resort through an already-running loopback proxy. HTTPS CONNECT failures
+    /// surface as transport errors; a response after TLS belongs to the API, including 5xx.
     async fn attempt_tunnel(&self, request: &ApiRequest) -> Option<Result<ApiResponse, ApiError>> {
         let port = self.tunnel_port.load(std::sync::atomic::Ordering::Relaxed);
         if port == 0 {
@@ -621,15 +621,13 @@ impl TonoTransport {
             .timeout(Duration::from_secs(8))
             .build()
             .ok()?;
-        let before = self.answers_seen();
-        match self.attempt(&client, request).await {
-            Ok(response) if response.status >= 500 => {
-                if self.answers_seen() == before + 1 {
-                    self.answers
-                        .fetch_sub(1, std::sync::atomic::Ordering::AcqRel);
-                }
-                None
-            }
+        self.attempt_tunnel_response(&client, request).await
+    }
+
+    async fn attempt_tunnel_response(
+        &self, client: &reqwest::Client, request: &ApiRequest,
+    ) -> Option<Result<ApiResponse, ApiError>> {
+        match self.attempt(client, request).await {
             Ok(response) => Some(Ok(response)),
             Err(ApiError::Transport { kind, .. }) if should_retry_transport(request.method, kind) => {
                 None
@@ -834,6 +832,87 @@ mod tests {
         should_retry_transport,
     };
 
+
+    /// A successful HTTPS CONNECT carries a TLS-authenticated origin response, including 5xx.
+    #[tokio::test]
+    async fn a_tunneled_server_error_keeps_its_status_and_answer_evidence() {
+        use std::sync::Arc;
+        use rustls::pki_types::{CertificateDer, PrivateKeyDer, pem::PemObject as _};
+        use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+
+        // Public, self-signed localhost fixture; explicitly trusted only by this test client.
+        const CERT: &[u8] = br#"-----BEGIN CERTIFICATE-----
+MIIBkjCCATigAwIBAgIUbrR/uEngND/q3kEU4UZPL7whowIwCgYIKoZIzj0EAwIw
+FDESMBAGA1UEAwwJbG9jYWxob3N0MCAXDTI2MTAwMTA2MTE0NFoYDzIxMjYwOTA3
+MDYxMTQ0WjAUMRIwEAYDVQQDDAlsb2NhbGhvc3QwWTATBgcqhkjOPQIBBggqhkjO
+PQMBBwNCAATwJUx0VKbCsLuPMCMDfumu5NkY8T0YQs5+2gzS+WTLmkUi3DGTLOM5
+MNkGJLQmYawD5NeOSSgCtMv3Jk59yqgBo2YwZDAdBgNVHQ4EFgQU63iNGtUXjrwT
+6HwTEHqn5gWpBmcwHwYDVR0jBBgwFoAU63iNGtUXjrwT6HwTEHqn5gWpBmcwFAYD
+VR0RBA0wC4IJbG9jYWxob3N0MAwGA1UdEwEB/wQCMAAwCgYIKoZIzj0EAwIDSAAw
+RQIgCsPAdoC0Rg8T3GlV1TAURVMVeklDILtiylJCvqr6r4cCIQC8LCBljlLce+un
+KKXlMCmoSInGBUpy3EBDjYAVZY8Inw==
+-----END CERTIFICATE-----
+"#;
+        const KEY: &[u8] = br#"-----BEGIN PRIVATE KEY-----
+MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgSFr9xgWbx9S9/uVA
+Ok+kFhTGRkDmYZ/UtQdExIb+X9ihRANCAATwJUx0VKbCsLuPMCMDfumu5NkY8T0Y
+Qs5+2gzS+WTLmkUi3DGTLOM5MNkGJLQmYawD5NeOSSgCtMv3Jk59yqgB
+-----END PRIVATE KEY-----
+"#;
+        let server_config = rustls::ServerConfig::builder_with_provider(Arc::new(
+            rustls::crypto::ring::default_provider(),
+        ))
+            .with_safe_default_protocol_versions().unwrap()
+            .with_no_client_auth()
+            .with_single_cert(
+                vec![CertificateDer::from_pem_slice(CERT).unwrap()],
+                PrivateKeyDer::from_pem_slice(KEY).unwrap(),
+            ).unwrap();
+        let acceptor = tokio_rustls::TlsAcceptor::from(Arc::new(server_config));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let proxy_address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut connect = Vec::new();
+            while !connect.ends_with(b"\r\n\r\n") {
+                connect.push(stream.read_u8().await.unwrap());
+                assert!(connect.len() < 4096);
+            }
+            assert!(connect.starts_with(b"CONNECT localhost:443 HTTP/1.1\r\n"));
+            stream.write_all(b"HTTP/1.1 200 Connection Established\r\n\r\n").await.unwrap();
+            let mut tls = acceptor.accept(stream).await.unwrap();
+            let mut request = Vec::new();
+            while !request.ends_with(b"\r\n\r\n") {
+                request.push(tls.read_u8().await.unwrap());
+                assert!(request.len() < 4096);
+            }
+            tls.write_all(
+                b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 4\r\nConnection: close\r\n\r\nbusy",
+            ).await.unwrap();
+            tls.shutdown().await.unwrap();
+        });
+        let transport = TonoTransport::new().unwrap();
+        let client = TonoTransport::builder()
+            .proxy(reqwest::Proxy::all(format!("http://{proxy_address}")).unwrap())
+            .tls_certs_only([reqwest::Certificate::from_pem(CERT).unwrap()])
+            .build().unwrap();
+        let request = ApiRequest {
+            method: HttpMethod::Get,
+            url: "https://localhost/api/v1/me".into(),
+            bearer: None,
+            json_body: None,
+            binary_body: None,
+            headers: Vec::new(),
+        };
+        let response = tokio::time::timeout(
+            Duration::from_secs(5), transport.attempt_tunnel_response(&client, &request),
+        ).await.unwrap();
+        server.await.unwrap();
+        let response = response.expect("an origin 503 must end the fallback walk").unwrap();
+        assert_eq!(response.status, 503);
+        assert_eq!(response.body, b"busy");
+        assert_eq!(transport.answers_seen(), 1, "the origin did answer");
+    }
 
     /// A pending response owns a client snapshot, not the lock used to publish new pins.
     #[tokio::test]

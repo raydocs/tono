@@ -362,14 +362,31 @@ export async function getMonthExport(req: Request, e: Env, rawMonth: string): Pr
   void req;
   const month = parseMonth(decodeName(rawMonth, 'month'));
   let rows: Row[] = [];
+  const zeroPolarities = new Map<string, number>();
   try {
     rows = (await e.DB.prepare(
       `SELECT * FROM ops_ledger_entries WHERE month = ? ORDER BY created_at ASC, id ASC`,
     ).bind(month).all<Row>()).results ?? [];
+    if (rows.some((row) => Number(row.cny_minor) === 0 && Number(row.amount_minor) > 0 && row.reverses != null)) {
+      // Ancestors may belong to earlier months, and legacy reversals used
+      // UUIDs. Follow the immutable links rather than guessing from the id.
+      const ancestry = await e.DB.prepare(
+        `WITH RECURSIVE ancestry(entry_id, reverses, depth) AS (
+           SELECT id, reverses, 0 FROM ops_ledger_entries
+           WHERE month = ? AND cny_minor = 0 AND amount_minor > 0 AND reverses IS NOT NULL
+           UNION ALL
+           SELECT a.entry_id, parent.reverses, a.depth + 1
+           FROM ancestry a JOIN ops_ledger_entries parent ON parent.id = a.reverses
+         ) SELECT entry_id, depth FROM ancestry WHERE reverses IS NULL`,
+      ).bind(month).all<Row>();
+      for (const row of ancestry.results ?? []) {
+        zeroPolarities.set(String(row.entry_id), Number(row.depth) % 2 ? -1 : 1);
+      }
+    }
   } catch (error) {
     if (!missingTable(error)) throw error;
   }
-  const csv = ledgerCsv(rows.map(ledgerDto));
+  const csv = ledgerCsv(rows.map(ledgerDto), zeroPolarities);
   return new Response(new TextEncoder().encode(csv), {
     headers: {
       'content-type': 'text/csv; charset=utf-8',

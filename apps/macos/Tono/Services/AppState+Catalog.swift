@@ -154,6 +154,13 @@ extension AppState {
                 nodes: nodes
             )]
         proxyRegions = managedRegions + customRegions
+        if allowRuntimeTransition, isConnected, switchTargetChanged, let previousSelection,
+           previousSelection != ConfigPipeline.homeNodeName,
+           localProxyNode(matching: previousSelection) == nil {
+            // A replacement switch can itself lose its target to a newer
+            // catalog while the old removed selection is still authoritative.
+            pendingRemovedCatalogExit = true
+        }
         if switchingNodeId != nil, let previousSwitchTarget,
            let id = nodes.first(where: { proxyTarget($0.name, matches: previousSwitchTarget.name) })?.id {
             // Parsing assigns fresh IDs even when an unrelated city changes.
@@ -318,10 +325,9 @@ extension AppState {
     /// The selected exit is gone and a session was up or still connecting.
     /// Another catalog exit keeps the session. No survivor restores the
     /// original network unless a strict kill switch was explicitly enabled.
-    /// macOS has no `permanent` toggle, and the selective AI hook is not
-    /// registered, so the non-strict result is a full release. This does not
-    /// install a new filter.
-    private func settleRemovedCatalogExit(wasConnected: Bool) {
+    /// The existing automatic release restores ordinary traffic and retains
+    /// the secondary AI hold. Explicit strict protection keeps its own branch.
+    func settleRemovedCatalogExit(wasConnected: Bool) {
         let replacement = defaultCloudExitNode()
         let action = CatalogRemovedExitAction.decide(
             replacementName: replacement?.name,
@@ -330,13 +336,19 @@ extension AppState {
         )
         switch action {
         case .keepSession(let name):
+            if wasConnected, connectionCoordinator.configReloadTask != nil || switchingNodeId != nil {
+                // The current owner may still commit its captured, removed
+                // exit. Retain convergence, not a snapshot of this survivor.
+                pendingRemovedCatalogExit = true
+                return
+            }
             catalogSelectionRequiresChoice = false
             errorMessage = String(
                 localized: "The selected cloud server was removed. Tono switched to another cloud server and kept this connection."
             )
             if wasConnected, coreController != nil {
                 let previousSwitch = connectionCoordinator.nodeSwitchTask
-                selectNode(name, releaseNetworkIfSwitchFails: true)
+                selectNode(name, releaseNetworkIfSwitchFails: true, forceRuntimeReplacement: true)
                 let started = connectionCoordinator.nodeSwitchTask != nil
                     && connectionCoordinator.nodeSwitchTask != previousSwitch
                 if !started {
@@ -350,7 +362,7 @@ extension AppState {
                     // The in-flight attempt is still aimed at the removed exit.
                     // Release it, then connect the survivor. Bootstrap would
                     // cut the machine for the whole reconnect.
-                    disconnect(releaseKillSwitch: true)
+                    disconnect(releaseKillSwitch: true, automaticFailureRelease: true)
                     autoConnectRequested = true
                     attemptAutomaticConnect()
                 }
@@ -376,7 +388,7 @@ extension AppState {
             catalogSelectionRequiresChoice = true
             autoConnectRequested = false
             applyDefaultProxySelection(persist: true)
-            disconnect(releaseKillSwitch: true)
+            disconnect(releaseKillSwitch: true, automaticFailureRelease: true)
             errorMessage = String(
                 localized: "The selected cloud server was removed. This Mac is back on its normal internet. Choose another cloud server."
             )
@@ -891,7 +903,10 @@ extension AppState {
             >= Self.pinRefreshStreamGraceSeconds
     }
 
-    func refreshManagedDirectPins() async {
+    func refreshManagedDirectPins(
+        resolver: ((TonoTrafficPolicy, ConfigPipeline.ManagedDirectRuntimePolicy, CoreControllerClient)
+            async -> ConfigPipeline.ManagedDirectRuntimePolicy?)? = nil
+    ) async {
         guard isConnected, isOwnedTonoMode,
               switchingNodeId == nil,
               connectionCoordinator.configReloadTask == nil,
@@ -900,12 +915,20 @@ extension AppState {
               !managedTrafficPolicy.domains.isEmpty
                 || !managedTrafficPolicy.webDomains.isEmpty
         else { return }
-        let resolved = await resolveManagedDirectDomains(
-            policy: managedTrafficPolicy,
-            base: base,
-            api: api
-        )
+        let policy = managedTrafficPolicy
+        let generation = connectionCoordinator.protectionOperationGeneration
+        let resolved: ConfigPipeline.ManagedDirectRuntimePolicy?
+        if let resolver {
+            resolved = await resolver(policy, base, api)
+        } else {
+            resolved = await resolveManagedDirectDomains(policy: policy, base: base, api: api)
+        }
+        // Resolution owns no runtime mutation handle. A newer accepted policy
+        // or session can finish while DNS is pending; its DIRECT authority must
+        // not be replaced by a merge carrying the captured plan's old grants.
         guard !Task.isCancelled, isConnected,
+              connectionCoordinator.protectionOperationGeneration == generation,
+              managedTrafficPolicy == policy, activeDirectPolicy == base,
               switchingNodeId == nil, connectionCoordinator.configReloadTask == nil,
               let resolved else { return }
         guard let merged = Self.mergedManagedDirectPolicy(
@@ -1076,10 +1099,21 @@ extension AppState {
         )
     }
 
+    nonisolated static func budgetManagedDirectWebPins(
+        _ pins: [ConfigPipeline.DirectDomainPin],
+        seed: ConfigPipeline.ManagedDirectRuntimePolicy,
+        preservingSessionEndpoints: [ConfigPipeline.DirectEndpoint]
+    ) -> (kept: [ConfigPipeline.DirectDomainPin], dropped: [String]) {
+        ConfigPipeline.pinsWithinSessionEndpointBudget(
+            pins, seededBy: preservingSessionEndpoints + seed.sessionEndpoints
+        )
+    }
+
     func resolveManagedDirectDomains(
         policy: TonoTrafficPolicy,
         base: ConfigPipeline.ManagedDirectRuntimePolicy?,
-        api: CoreControllerClient
+        api: CoreControllerClient,
+        preservingSessionEndpoints: [ConfigPipeline.DirectEndpoint] = []
     ) async -> ConfigPipeline.ManagedDirectRuntimePolicy? {
         guard !policy.webDomains.isEmpty,
               let physicalInterface = base?.physicalInterface else {
@@ -1140,9 +1174,9 @@ extension AppState {
         // reviewed host to keep the ones that did not fit. The control plane
         // can reach that on its own: 32 `webDomains` is its published maximum
         // and resolves to as many as 258 session endpoints.
-        let budgeted = ConfigPipeline.pinsWithinSessionEndpointBudget(
-            webPins,
-            seededBy: withoutWebPins.sessionEndpoints
+        let budgeted = Self.budgetManagedDirectWebPins(
+            webPins, seed: withoutWebPins,
+            preservingSessionEndpoints: preservingSessionEndpoints
         )
         if !budgeted.dropped.isEmpty {
             // Named, because the alternative reading of a short pin list is
