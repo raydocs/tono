@@ -32,8 +32,8 @@ pub struct UpdateStatus {
     pub execution: String,
     pub offer: Option<ReleaseManifest>,
     /// Set only by a Disconnect that already released network protection but
-    /// could not prove or archive the update record, which stays pending. An
-    /// Err response means no release completed. Absent from older Services.
+    /// could not prove or archive the update record, which stays pending. A
+    /// Disconnect Err response means no release completed. Absent from older Services.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub needs_attention: Option<String>,
     /// Set only by an Adopt from any App but the incarnation the update executor launched, such

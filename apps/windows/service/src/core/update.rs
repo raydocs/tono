@@ -305,6 +305,22 @@ fn owner_proxy_absent(owner: &AuthenticatedOwner) -> Result<()> {
     security::no_proxy(sid)
 }
 
+fn begin_update_release(
+    store: &mut Store,
+    owner: &AuthenticatedOwner,
+    peer: &Image,
+) -> Result<()> {
+    // Record the authenticated request before any release.
+    // The original recovery obligation is never rewritten as Unprotected.
+    store.request_disconnect(&owner.key, peer, now()?)?;
+    wfp::authorize_write_for(&owner.key)?;
+    Ok(())
+}
+
+fn prepare_failure_releases(strict: bool, core_stop_attempted: bool) -> bool {
+    core_stop_attempted && !strict
+}
+
 pub(crate) async fn request(
     owner: &AuthenticatedOwner,
     request: UpdateRequest,
@@ -453,37 +469,75 @@ pub(crate) async fn request(
                 "package components do not match signed target"
             );
             store.execution(Execution::Staged)?;
-            let prior_core = super::runtime::read_core_runtime_record().await?;
-            manager::CORE_MANAGER.lock().await.stop_core().await?;
-            if let Some(prior) = prior_core {
+            let strict = wfp::strict_kill_switch_enabled();
+            let mut core_stop_attempted = false;
+            let mut core_stopped = false;
+            let prepared = async {
+                let prior_core = super::runtime::read_core_runtime_record().await?;
+                core_stop_attempted = true;
+                manager::CORE_MANAGER.lock().await.stop_core().await?;
+                core_stopped = true;
+                if let Some(prior) = prior_core {
+                    ensure!(
+                        super::process::process_identity(prior.pid)?.as_ref() != Some(&prior.identity),
+                        "stopped Core incarnation is still running"
+                    );
+                }
+                desired::persist_owner_core_stopped(owner).await?;
+                wfp::transition_after_stop(false).await?;
+                let restored = dns::restore_protected().await?;
                 ensure!(
-                    super::process::process_identity(prior.pid)?.as_ref() != Some(&prior.identity),
-                    "stopped Core incarnation is still running"
+                    !restored.enabled && restored.last_error.is_none(),
+                    "strict DNS cleanup not observed"
                 );
+                owner_proxy_absent(owner)?;
+                ensure!(
+                    app_image(peer.pid)? == peer,
+                    "initiating image changed during preparation"
+                );
+                let observed = protection(owner).await?;
+                store.observe(
+                    &owner.key,
+                    &peer,
+                    generation,
+                    now()?,
+                    Observation::PreparationVerified {
+                        artifact_sha256: file_digest(&dir.join("package.exe"))?,
+                        protection: observed,
+                    },
+                )?;
+                Ok::<_, anyhow::Error>(())
             }
-            desired::persist_owner_core_stopped(owner).await?;
-            wfp::transition_after_stop(false).await?;
-            let restored = dns::restore_protected().await?;
-            ensure!(
-                !restored.enabled && restored.last_error.is_none(),
-                "strict DNS cleanup not observed"
-            );
-            owner_proxy_absent(owner)?;
-            ensure!(
-                app_image(peer.pid)? == peer,
-                "initiating image changed during preparation"
-            );
-            let observed = protection(owner).await?;
-            store.observe(
-                &owner.key,
-                &peer,
-                generation,
-                now()?,
-                Observation::PreparationVerified {
-                    artifact_sha256: file_digest(&dir.join("package.exe"))?,
-                    protection: observed,
-                },
-            )?;
+            .await;
+            if let Err(error) = prepared {
+                if prepare_failure_releases(strict, core_stop_attempted) {
+                    // Failed Prepare must not strand a non-strict owner behind bootstrap WFP
+                    // and dead DNS. Use Disconnect's recorded release; keep the attempt evidence.
+                    let released = async {
+                        begin_update_release(&mut store, owner, &peer)?;
+                        let stopped = if core_stopped {
+                            Ok(())
+                        } else {
+                            manager::CORE_MANAGER.lock().await.stop_core().await
+                        };
+                        let persisted = desired::persist_owner_core_stopped(owner).await;
+                        let cleared = desired::clear_active_owner().await;
+                        // Desired-state failures must not prevent the standard DNS/WFP release.
+                        wfp::release().await?;
+                        stopped?;
+                        persisted?;
+                        cleared?;
+                        Ok::<_, anyhow::Error>(())
+                    }
+                    .await;
+                    if let Err(release_error) = released {
+                        return Err(error.context(format!(
+                            "Prepare failure cleanup also failed: {release_error:#}"
+                        )));
+                    }
+                }
+                return Err(error);
+            }
         }
         UpdateRequest::Install { attempt_id } => {
             let a = store.live_attempt(now()?)?;
@@ -514,10 +568,7 @@ pub(crate) async fn request(
             if !store.pending() {
                 return status(&store);
             }
-            // Record the explicit authenticated request before any release.
-            // The original recovery obligation is never rewritten as Unprotected.
-            store.request_disconnect(&owner.key, &peer, now()?)?;
-            wfp::authorize_write_for(&owner.key)?;
+            begin_update_release(&mut store, owner, &peer)?;
             if let Some(active) = desired::load_active_owner().await? {
                 ensure!(
                     active.owner_key == owner.key,
@@ -1497,6 +1548,14 @@ pub fn reconcile_before_desired() -> Result<bool> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn update_prepare_failure_releases_only_after_stop_without_strict_kill_switch() {
+        assert!(prepare_failure_releases(false, true));
+        assert!(!prepare_failure_releases(true, true));
+        assert!(!prepare_failure_releases(false, false));
+        assert!(!prepare_failure_releases(true, false));
+    }
 
     /// WIN-GATE-OPAQUE: a core runtime record outlives its Core when the Service is removed
     /// without stopping it cleanly. After a reboot its pid can belong to any program, including

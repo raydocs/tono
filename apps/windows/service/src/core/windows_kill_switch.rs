@@ -2607,6 +2607,13 @@ pub(crate) async fn transition_after_stop(release_requested: bool) -> Result<()>
     restrict_bootstrap_unlocked().await
 }
 
+#[cfg(windows)]
+pub(crate) fn strict_kill_switch_enabled() -> bool {
+    armed_guard()
+        .as_ref()
+        .is_some_and(|armed| armed.intent.strict_kill_switch)
+}
+
 /// Crash, hang, and unreadable state release general traffic unless the user explicitly
 /// enabled the strict kill switch. A missing flag is not that opt-in.
 fn crash_recovery_releases_network(strict_kill_switch_enabled: bool) -> bool {
