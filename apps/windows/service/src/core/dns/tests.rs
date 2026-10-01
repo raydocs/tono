@@ -1080,6 +1080,35 @@
         );
     }
 
+    /// The async caller can time out and drop its guard while `spawn_blocking` is still writing
+    /// the registry. The window has to stay up until that write returns, or the notification
+    /// looks like the machine's network changed.
+    #[test]
+    #[serial]
+    fn an_abandoned_caller_does_not_close_the_window_the_write_still_holds() {
+        let depth_before = SELF_WRITE_DEPTH.load(Ordering::Acquire);
+        let (started, started_rx) = std::sync::mpsc::channel();
+        let (release, release_rx) = std::sync::mpsc::channel();
+        let writer = std::thread::spawn(move || {
+            hold_self_write_across_the_write(|| {
+                started.send(()).expect("test thread still listening");
+                release_rx.recv().expect("test released the write");
+            });
+        });
+        started_rx.recv().expect("write started");
+        assert!(
+            in_self_write_window(),
+            "the write still owns the window after its caller would have returned"
+        );
+        assert_eq!(
+            SELF_WRITE_DEPTH.load(Ordering::Acquire),
+            depth_before + 1
+        );
+        release.send(()).expect("writer still waiting");
+        writer.join().expect("writer thread");
+        assert_eq!(SELF_WRITE_DEPTH.load(Ordering::Acquire), depth_before);
+    }
+
     /// The end-to-end shape of the P0: an `enable` applies loopback DNS inside a window, and
     /// the window is closed again by the time the call returns. A notification arriving during
     /// the apply is attributable to us; one arriving a second later is the machine's.
