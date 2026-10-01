@@ -43,12 +43,17 @@ actor DiagnosticsLogUploader {
     static let compressedLimitBytes = 2 * 1_024 * 1_024
     /// After the server declines storage (no collection window for this
     /// device, the usual case since upload is on by default), check back at
-    /// this interval with a probe of at most `declinedProbeBytes` raw bytes.
-    /// Resending the full segment every 16 minutes cost up to 2 MiB a time,
-    /// through the exit node and the user's quota, for nothing. The cursor
-    /// stays put, so once ops opens a window the log is sent from where it was.
+    /// this interval with an empty probe. The cursor stays put, so once ops
+    /// opens a window the log is sent from where it was.
     static let declinedIntervalSeconds: UInt64 = 1_800
-    static let declinedProbeBytes = 64 * 1_024
+    /// A gzip member holding zero bytes. Until the server has stored an upload
+    /// from this uploader, only this is sent: the server answers `not_enabled`
+    /// before it reads the body, so a probe with real lines would carry
+    /// hostnames and process paths off the device just to be discarded.
+    static let emptyProbePayload = Data([
+        0x1F, 0x8B, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03,
+        0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    ])
 
     private let logger = Logger(subsystem: "com.raydocs.tono", category: "log-upload")
     private let fileManager = FileManager.default
@@ -82,6 +87,9 @@ actor DiagnosticsLogUploader {
     private var uploadEpoch: UInt64 = 0
     private var consecutiveFailures = 0
     private var serverDeclined = false
+    /// The server stored an upload (the empty probe included) since the last
+    /// decline. Until then no log line is sent.
+    private var serverConfirmed = false
     private var unreadableBackupSweeps = 0
     /// How long to keep believing a rotated file's tail will become readable.
     /// The only writer that can still complete it is the flush that was already
@@ -157,6 +165,7 @@ actor DiagnosticsLogUploader {
         persistCursor()
         consecutiveFailures = 0
         serverDeclined = false
+        serverConfirmed = false
     }
 
     /// Header values are rejected unless they are 1...max printable ASCII.
@@ -236,6 +245,11 @@ actor DiagnosticsLogUploader {
                 pendingSegment = nil
                 cursor = segment.nextCursor
                 persistCursor()
+            } else if !serverConfirmed {
+                // Probe only when this scope has lines to send; the segment
+                // stays pending and goes out on the next pass once stored.
+                if let failure = await probe(epoch: epoch) { return .failed(failure) }
+                continue
             } else {
                 if let failure = await send(segment, epoch: epoch) { return .failed(failure) }
                 uploaded = true
@@ -261,13 +275,33 @@ actor DiagnosticsLogUploader {
     }
 
     private func send(_ segment: Segment, epoch: UInt64) async -> String? {
+        if let failure = await post(segment.payload, lineCount: segment.lineCount, epoch: epoch) {
+            return failure
+        }
+        pendingSegment = nil
+        cursor = segment.nextCursor
+        persistCursor()
+        return nil
+    }
+
+    /// The empty probe takes its own receipt key, so a stored probe is never
+    /// confused with the first real segment.
+    private func probe(epoch: UInt64) async -> String? {
+        if let failure = await post(Self.emptyProbePayload, lineCount: 0, epoch: epoch) {
+            return failure
+        }
+        serverConfirmed = true
+        return nil
+    }
+
+    private func post(_ payload: Data, lineCount: Int, epoch: UInt64) async -> String? {
         guard uploadPermitted(epoch: epoch) else { return "Log upload was cancelled." }
         do {
             try await upload(
-                segment.payload,
+                payload,
                 sessionID,
                 sequence,
-                segment.lineCount,
+                lineCount,
                 clientVersion,
                 osVersion
             )
@@ -276,6 +310,7 @@ actor DiagnosticsLogUploader {
             // The server said it did not store this key, so dropping the
             // payload cannot orphan a stored receipt. The cursor stays.
             serverDeclined = true
+            serverConfirmed = false
             consecutiveFailures = 0
             pendingSegment = nil
             return declined.errorDescription
@@ -292,9 +327,6 @@ actor DiagnosticsLogUploader {
         consecutiveFailures = 0
         serverDeclined = false
         sequence += 1
-        pendingSegment = nil
-        cursor = segment.nextCursor
-        persistCursor()
         return nil
     }
 
@@ -342,7 +374,7 @@ actor DiagnosticsLogUploader {
                 from: backup,
                 offset: cursor.offset,
                 expectedInode: recorded,
-                maxChunk: readChunkLimit
+                maxChunk: Self.readChunkBytes
             )
             guard let segment else {
                 unreadableBackupSweeps += 1
@@ -390,7 +422,7 @@ actor DiagnosticsLogUploader {
             from: auditLogURL,
             offset: offset,
             expectedInode: live,
-            maxChunk: readChunkLimit
+            maxChunk: Self.readChunkBytes
         ) else { return nil }
         return Segment(
             payload: read.payload,
@@ -398,10 +430,6 @@ actor DiagnosticsLogUploader {
             nextCursor: Cursor(inode: live, offset: read.nextOffset),
             remainingBytes: read.remainingBytes
         )
-    }
-
-    private var readChunkLimit: Int {
-        serverDeclined ? Self.declinedProbeBytes : Self.readChunkBytes
     }
 
     private struct Read {

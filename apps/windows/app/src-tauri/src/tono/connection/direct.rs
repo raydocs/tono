@@ -1724,7 +1724,7 @@ async fn replace_sing_box_for_direct(
         .await;
         return Ok(None);
     }
-    ensure_fresh(state, generation).await?;
+    let (policy_guard, _mutation_guard) = admit_sing_box_replacement(state, generation, &node.name, policy).await?;
     if let Err(error) =
         service::tono_replace_sing_box_runtime(session, direct_document.clone(), true).await
     {
@@ -1736,13 +1736,19 @@ async fn replace_sing_box_for_direct(
         .await;
         return Ok(None);
     }
-    let proved = async {
-        wait_controller(secret, controller_port).await?;
-        let client = controller_client(CONTROLLER_HTTP_TIMEOUT)?;
-        let rules = controller_json(&client, secret, controller_port, "/rules").await?;
-        clash_rules_match(&rules, &expected)
-    }
-    .await;
+    // The connect-mutation reader is held from here on: a Disconnect waits for it, so a
+    // stalled controller must not hold Disconnect for the full readiness timeout.
+    let cancellation = state.lock().await.connect_cancellation.clone();
+    let proved = tokio::select! {
+        biased;
+        _ = cancellation.cancelled() => Err("the connection was cancelled".to_owned()),
+        result = async {
+            wait_controller(secret, controller_port).await?;
+            let client = controller_client(CONTROLLER_HTTP_TIMEOUT)?;
+            let rules = controller_json(&client, secret, controller_port, "/rules").await?;
+            clash_rules_match(&rules, &expected)
+        } => result,
+    };
     if let Err(error) = proved {
         return restore_sing_box_full_tunnel(
             state,
@@ -1809,7 +1815,6 @@ async fn replace_sing_box_for_direct(
             .await;
         }
     };
-    let policy_guard = state.begin_policy_activation().await;
     Ok(Some(PendingDirectCommit {
         _policy_guard: policy_guard,
         policy: policy.clone(),
@@ -1833,6 +1838,30 @@ async fn replace_sing_box_for_direct(
         wechat_process_path_regexes: plan.wechat_process_path_regexes.clone(),
         permits_already_committed: true,
     }))
+}
+
+/// The mihomo bracket's admission, for the sing-box process replacement. A hot switch or policy
+/// update holds the policy writer and the privileged writer until its selector and endpoints
+/// settle. Restarting Core with the document compiled for the connect-time node after that
+/// would dial an exit WFP no longer permits. Policy before mutation, as everywhere else.
+async fn admit_sing_box_replacement(
+    state: &Arc<TonoState>,
+    generation: u64,
+    selected_node: &str,
+    policy: &CapturedTrafficPolicy,
+) -> Result<
+    (
+        tokio::sync::OwnedRwLockReadGuard<()>,
+        tokio::sync::OwnedRwLockReadGuard<()>,
+    ),
+    StageFailure,
+> {
+    let policy_guard = state.begin_policy_activation().await;
+    let mutation_guard = state.begin_connect_mutation().await;
+    if !direct_context_is_current(state, generation, selected_node, policy).await {
+        return Err(StageFailure::Stale);
+    }
+    Ok((policy_guard, mutation_guard))
 }
 
 async fn restore_sing_box_full_tunnel(
@@ -2165,6 +2194,45 @@ mod tests {
 #[cfg(test)]
 mod cancellation_tests {
     use super::*;
+
+    #[tokio::test]
+    async fn sing_box_direct_replacement_waits_for_a_hot_switch_and_then_goes_stale() {
+        let state = Arc::new(TonoState::for_test());
+        let document = tono_core::policy::TonoTrafficPolicy {
+            version: 1,
+            domains: Vec::new(),
+            media_endpoints: Vec::new(),
+            web_domains: Vec::new(),
+            direct_suffixes: Vec::new(),
+        };
+        let policy = CapturedTrafficPolicy {
+            revision: 7,
+            digest: "digest".into(),
+            document: document.clone(),
+        };
+        {
+            let mut inner = state.lock().await;
+            inner.connect_generation = 12;
+            inner.selected_node = Some("A".into());
+            inner.policy_tracker = tono_core::policy::PolicyTracker::from_installed(7, "digest".into());
+            inner.traffic_policy = Some(document);
+        }
+        // A hot switch to B owns the policy writer while its selector and endpoints settle.
+        let switch = state.begin_policy_update().await;
+        let admission = admit_sing_box_replacement(&state, 12, "A", &policy);
+        tokio::pin!(admission);
+        assert!(
+            futures::poll!(&mut admission).is_pending(),
+            "replacement must wait for the switch"
+        );
+        state.lock().await.selected_node = Some("B".into());
+        drop(switch);
+        let result = tokio::time::timeout(Duration::from_secs(5), admission).await.unwrap();
+        assert!(
+            matches!(result, Err(StageFailure::Stale)),
+            "Core must not restart on the node the switch left"
+        );
+    }
 
     #[tokio::test]
     async fn stale_optional_discovery_cannot_clear_the_successors_direct_evidence() {

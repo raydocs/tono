@@ -5,7 +5,7 @@ import { EmptyLine } from '@/components/ops/Empty';
 import { Section } from '@/components/ops/Section';
 import { copy } from '@/copy/copy';
 import { nodeApi } from '@/lib/api-node';
-import { formatCount, formatDate, formatWhenAgo } from '@/lib/display';
+import { formatCount, formatUtcDate, formatWhenAgo } from '@/lib/display';
 import { barSize, foldErrors } from '@/lib/node-detail';
 import { sourceWord } from '@/lib/sources';
 import { useResource } from '@/lib/use-resource';
@@ -83,7 +83,7 @@ export function NodeErrors({
                 {group.days.map((day) => (
                   <span
                     key={day.dayAt}
-                    title={`${formatDate(day.dayAt)} · ${copy.nodeErrorTimes(formatCount(day.count))}`}
+                    title={`${formatUtcDate(day.dayAt)} · ${copy.nodeErrorTimes(formatCount(day.count))}`}
                     className="w-2 shrink-0 rounded-[1px] bg-[var(--muted-foreground)] opacity-45"
                     style={{ height: barSize(day.count, busiest) }}
                   />

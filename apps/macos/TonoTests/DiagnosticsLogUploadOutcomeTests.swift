@@ -84,21 +84,22 @@ final class DiagnosticsLogUploadOutcomeTests: XCTestCase {
     }
 
     /// Upload is on by default and the server stores nothing unless ops opened
-    /// a collection window, so "not stored" is the everyday answer. It used to
-    /// be treated as a failed send: the same full segment went out again every
-    /// 16 minutes, forever, through the exit node.
-    func testANotStoredReceiptStandsDownToASmallProbe() async throws {
+    /// a collection window, so "not stored" is the everyday answer. The server
+    /// decides before it reads the body, yet the client used to probe with real
+    /// lines: hostnames and process paths left the Mac on every launch only to
+    /// be discarded. Until a store is confirmed, only an empty probe goes out.
+    func testNoLogLineLeavesBeforeTheServerStoresAnEmptyProbe() async throws {
         let directory = try makeDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
         let log = directory.appendingPathComponent("audit.jsonl")
-        let line = "{\"host\":\"example.com\",\"pad\":\"" + String(repeating: "x", count: 200) + "\"}\n"
-        try String(repeating: line, count: 1_200).write(to: log, atomically: true, encoding: .utf8)
+        try "{\"host\":\"visited.example\"}\n".write(to: log, atomically: true, encoding: .utf8)
 
         let sent = SentLineCounts()
         let uploader = DiagnosticsLogUploader(
             auditLogURL: log,
             isEnabled: { true },
-            upload: { _, _, _, lineCount, _, _ in
+            upload: { payload, _, _, lineCount, _, _ in
+                XCTAssertEqual(payload, DiagnosticsLogUploader.emptyProbePayload)
                 await sent.append(lineCount)
                 throw DiagnosticsLogNotStoredError()
             }
@@ -112,11 +113,7 @@ final class DiagnosticsLogUploadOutcomeTests: XCTestCase {
         _ = await uploader.sweep()
 
         let counts = await sent.values
-        guard counts.count == 2 else {
-            return XCTFail("expected one full segment and one probe, got \(counts)")
-        }
-        XCTAssertEqual(counts[0], 1_200)
-        XCTAssertLessThanOrEqual(counts[1] * line.utf8.count, DiagnosticsLogUploader.declinedProbeBytes)
+        XCTAssertEqual(counts, [0, 0], "only empty probes may be sent before a store")
     }
 
     func testAnAcceptedSegmentIsReportedAsUploaded() async throws {

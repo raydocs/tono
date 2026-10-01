@@ -85,6 +85,7 @@ extension AppState {
                 self.lastConnectionFailure = nil
                 self.connectionStartedAt = Date()
                 self.connectionStageStartedAt = self.connectionStartedAt
+                self.connectedSessionStartedAt = nil
                 if !self.isProtectedReconnectScheduled {
                     self.protectedReconnectAttempt = 0
                     self.protectedReconnectNextAttemptAt = nil
@@ -540,6 +541,7 @@ extension AppState {
                 self.isConnecting = false
                 self.connectionStartedAt = nil
                 self.connectionStageStartedAt = nil
+                self.connectedSessionStartedAt = Date()
                 self.protectedReconnectNextAttemptAt = nil
                 self.connectionStage = .preparing
                 self.lastProtectedFailureSignature = nil
@@ -771,12 +773,12 @@ extension AppState {
                 // Recorded here, at the top, because everything it reports is gone by
                 // the time the teardown below returns: `trafficStats` is replaced with
                 // a fresh one and `isConnected` goes false further down, and the
-                // release branch clears `connectionStartedAt`. Guarded on `isConnected`
-                // as well as the start date so a health-driven disconnect followed by
-                // the user's own "Restore internet" — which reaches this function a
-                // second time with the start date still set — cannot bank a second,
-                // empty session.
-                if self.isConnected, let sessionStartedAt = self.connectionStartedAt {
+                // release branch resets session history. The session start is
+                // consumed here so a health-driven disconnect followed by the user's
+                // own "Restore internet" cannot bank a second, empty session.
+                let sessionStartedAt = self.connectedSessionStartedAt
+                self.connectedSessionStartedAt = nil
+                if self.isConnected, let sessionStartedAt {
                     ConnectionTelemetryBuffer.shared.record(
                         "disconnectOk",
                         elapsedMs: max(0, Int(Date().timeIntervalSince(sessionStartedAt) * 1_000)),

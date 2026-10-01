@@ -94,6 +94,7 @@ export const TrayPanel = () => {
   const connected = uiState === 'connected'
   const {
     response: { data: traffic },
+    live: trafficLive,
   } = useTrafficData({
     enabled: connected,
     generation: status?.controllerGeneration,
@@ -294,12 +295,18 @@ export const TrayPanel = () => {
 
       {connected && (
         <div className="tono-tray-traffic" style={{ color: text.secondary }}>
-          <span style={{ color: '#64D2FF' }}>
-            ↑ {up} {upUnit}/s
-          </span>
-          <span style={{ color: TONO_COLORS.connected }}>
-            ↓ {down} {downUnit}/s
-          </span>
+          {/* A retained sample is not current throughput: hide the /s claims
+              while the controller feed is unavailable. */}
+          {trafficLive && (
+            <>
+              <span style={{ color: '#64D2FF' }}>
+                ↑ {up} {upUnit}/s
+              </span>
+              <span style={{ color: TONO_COLORS.connected }}>
+                ↓ {down} {downUnit}/s
+              </span>
+            </>
+          )}
           {status?.claudeHomeActive && (
             <span
               style={{

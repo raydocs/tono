@@ -185,6 +185,9 @@ jobs:
           TONO_PEER_AUTH_MODE: ci
         run: tooling/scripts/test-helper-peer-authorization.sh
 
+      - name: Helper contract guard
+        run: tooling/scripts/test-core-helper-contract-guard.sh
+
       - name: Multi-exit policy
         run: tooling/scripts/test-multi-exit-policy.sh "$GITHUB_WORKSPACE/tooling/scripts/tests/fixtures/multi-vless-reality.yaml"
 

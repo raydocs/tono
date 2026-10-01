@@ -1058,7 +1058,12 @@ def installed_clients(binary: Path, commands: dict[str, str], address: str,
     command = commands.get("list_users")
     if not command:
         return None
-    result = run_xray(binary, ["api", command, f"--server={address}", f"--tag={tag}"])
+    try:
+        result = run_xray(binary, ["api", command, f"--server={address}", f"--tag={tag}"])
+    except (OSError, subprocess.TimeoutExpired):
+        # A listing that could not run is unknown like a failed one; raising
+        # here would skip revocation from the durable inventory entirely.
+        return None
     if result.returncode != 0:
         return None
     try:
