@@ -17,7 +17,7 @@ import { createHash } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, matchesGlob } from 'node:path'
 
 export const BUCKET = 'tono-releases'
 export const DOWNLOAD_BASE = 'https://releases.afk.ccwu.cc/download/'
@@ -93,7 +93,7 @@ async function main(argv) {
 
   const candidates = release.assets.filter((asset) => {
     if (asset.name.endsWith('.sig') || asset.name === 'latest.json') return false
-    return pattern ? asset.name.includes(pattern) : /\.(exe|zip|dmg)$/.test(asset.name)
+    return pattern ? matchesGlob(asset.name, pattern) : /\.(exe|zip|dmg)$/.test(asset.name)
   })
   if (candidates.length === 0) refuse(`${tag} carries no installer asset`)
 
