@@ -223,11 +223,12 @@ pub fn copy_private(
 pub fn components(root: &Path, service: &Path) -> Result<Components> {
     verify_tree(root, 0)?;
     let _service = pin_path(service, true)?;
-    for path in [
-        root.join("Tono.exe"),
-        root.join("tono-core.exe"),
-        service.into(),
-    ] {
+    let sing_box = root.join("sing-box.exe");
+    let mut images = vec![root.join("Tono.exe"), root.join("tono-core.exe"), service.to_path_buf()];
+    if sing_box.is_file() {
+        images.push(sing_box.clone());
+    }
+    for path in images {
         ensure!(
             !matches!(
                 tono_authenticode::verify(&path),
@@ -240,6 +241,11 @@ pub fn components(root: &Path, service: &Path) -> Result<Components> {
         app_sha256: file_digest(&root.join("Tono.exe"))?,
         core_sha256: file_digest(&root.join("tono-core.exe"))?,
         privileged_sha256: file_digest(service)?,
+        sing_box_sha256: if sing_box.is_file() {
+            file_digest(&sing_box)?
+        } else {
+            String::new()
+        },
     })
 }
 
@@ -807,6 +813,10 @@ struct PlanMemberView {
     publish_scratch: PathBuf,
     old_digest: [u8; 32],
     new_digest: [u8; 32],
+    /// First publication of a file that had no previous generation. The old
+    /// side is absence, not a digest of bytes that were never installed.
+    #[serde(default)]
+    introduced: bool,
 }
 
 /// Which side of every durable plan member the installation must equal.
@@ -859,6 +869,19 @@ pub fn plan_members_at(
     side: PlanSide,
 ) -> Result<bool> {
     for m in read_plan(plan_path, attempt_id, roots)? {
+        if m.introduced && side == PlanSide::Old {
+            match std::fs::symlink_metadata(&m.target) {
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(error) => return Err(error.into()),
+                Ok(metadata) => {
+                    ensure!(
+                        metadata.file_type().is_file(),
+                        "introduced plan member is not an ordinary file"
+                    );
+                    return Ok(false);
+                }
+            }
+        }
         let expected = match side {
             PlanSide::Old => &m.old_digest,
             PlanSide::New => &m.new_digest,
@@ -1609,10 +1632,7 @@ pub fn reconcile_before_desired() -> Result<bool> {
         return Ok(true);
     }
     let a = store.attempt()?;
-    if matches!(
-        a.execution,
-        Execution::Consumed | Execution::Replaced | Execution::Uncertain
-    ) {
+    if store.independent_recovery_pending()? {
         // Recovery itself does not run through the task; the task only covers a Service that
         // cannot load. A failed registration must not keep the recovery executor from running
         // and leave the attempt Consumed (#484).

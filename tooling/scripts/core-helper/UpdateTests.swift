@@ -145,6 +145,27 @@ func runUpdateSelfTests() -> Bool {
         try check(FileManager.default.fileExists(atPath: backup), "Rollback asset was deleted")
     }
 
+    test("protected-offline-fail-open-commits-and-unblocks-connect") { directory in
+        let store = try UpdateStorage(root: directory)
+        var observed: UpdateContractV1.Protection = .protectedOffline
+        var io = effects()
+        io.observe = { observed }
+        io.recovery = { _ in observed }
+        let engine = UpdateTransaction(storage: store, effects: io)
+        try reserved(store, engine)
+        try engine.execute(peer: owner)
+        try UpdateExecutor.perform(storage: store, validate: { _ in }, replace: { _ in }, rollback: { _ in })
+        // Successor helper launch releases PF while the Core is stopped.
+        observed = .unprotected
+        try engine.reconcile(peer: successor)
+        try refuses { try engine.gate(method: "POST", path: "/core/start", peer: successor) }
+        try engine.commit(peer: successor)
+        try check(store.load().attempt?.receipt.phase == .committed, "Fail-open recovery left update pending")
+        try check(store.load().attempt?.receipt.requiredRecovery == .protectedOffline, "Commit rewrote the captured obligation")
+        try check(engine.status()["pending"] as? Bool == false, "Committed update still reports pending")
+        try engine.gate(method: "POST", path: "/core/start", peer: successor)
+    }
+
     test("successor-incarnation-components-and-recovery-binding") { directory in
         let store = try UpdateStorage(root: directory)
         var recovery: UpdateContractV1.Protection = .protectedOffline
@@ -198,6 +219,9 @@ func runUpdateSelfTests() -> Bool {
         try check(store.load().generation == generation, "Idempotent query allocated a second successor")
         try refuses { try engine.commit(peer: successor) } // Protected Offline is not captured Connected.
         try check(store.load().attempt?.receipt.phase == .installedIdentityVerified, "Wrong recovery committed")
+        recovery = .unprotected
+        try refuses { try engine.commit(peer: successor) }
+        try check(store.load().attempt?.receipt.phase == .installedIdentityVerified, "Fail-open satisfied Connected recovery")
         recovery = .connected
         refusePhase = .recoveryVerified
         try refuses { try engine.commit(peer: successor) }
@@ -206,6 +230,10 @@ func runUpdateSelfTests() -> Bool {
         try refuses { try engine.commit(peer: successor) }
         try check(store.load().attempt?.receipt.phase == .recoveryVerified, "Failed commit released pending state")
         refusePhase = nil
+        recovery = .unprotected
+        try refuses { try engine.commit(peer: successor) }
+        try check(store.load().attempt?.receipt.phase == .recoveryVerified, "Fail-open satisfied Connected commit")
+        recovery = .connected
         try engine.commit(peer: successor)
         try check(store.load().attempt?.receipt.phase == .committed, "Verified successor did not commit")
     }
@@ -230,6 +258,42 @@ func runUpdateSelfTests() -> Bool {
         try refuses { try engine.retireUnconsumed(peer: owner) }
         try refuses { try engine.gate(method: "POST", path: "/helper/upgrade", peer: owner) }
         try refuses { try engine.gate(method: "POST", path: "/core/start", peer: successor) }
+    }
+
+    test("automatic-update-release-preserves-ai-and-consumed-obligation") { directory in
+        let store = try UpdateStorage(root: directory)
+        var observed: UpdateContractV1.Protection = .connected
+        var explicitReleases = 0
+        var selectiveReleases = 0
+        var io = effects()
+        io.observe = { observed }
+        io.disconnect = { explicitReleases += 1 }
+        io.disconnectPreservingAIHold = {
+            try check(store.load().attempt?.disconnectRequested == true,
+                      "Automatic release preceded its durable stop intent")
+            selectiveReleases += 1
+        }
+        let engine = UpdateTransaction(storage: store, effects: io)
+        try reserved(store, engine)
+        observed = .protectedOffline
+        try engine.execute(peer: owner)
+        try UpdateExecutor.perform(storage: store, validate: { _ in }, replace: { _ in }, rollback: { _ in })
+        try engine.reconcile(peer: successor)
+        let before = try store.load()
+        let wrongOwner = TonoAuthenticatedPeer(uid: 502, auditToken: successor.auditToken, bundleURL: owner.bundleURL)
+        try refuses { try engine.disconnect(peer: wrongOwner, preserveAIHold: true) }
+        try engine.disconnect(peer: successor, preserveAIHold: true)
+        let result = try store.load()
+        try check(selectiveReleases == 1 && explicitReleases == 0,
+                  "Automatic update cleanup used explicit release")
+        try check(result.attempt?.disconnectVerified == true,
+                  "Automatic cleanup was not recorded")
+        try check(result.highWater == before.highWater && result.generation == before.generation
+                  && result.attempt?.execution == .replaced
+                  && result.attempt?.receipt.phase == .installedIdentityVerified
+                  && result.attempt?.receipt.requiredRecovery == .connected
+                  && result.attempt?.successorToken == before.attempt?.successorToken,
+                  "Automatic release rewrote the update obligation or incarnation")
     }
 
     test("unconsumed-retirement-archives-before-new-admission") { directory in

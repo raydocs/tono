@@ -16,6 +16,7 @@ export const WINDOWS_RESOURCE_ALLOWLIST = Object.freeze([
   'tono-service-uninstall.exe',
   'core-sha256.txt',
   'core-identity.json',
+  'sing-box-sha256.txt',
 ])
 
 export const WINDOWS_RESOURCE_BUNDLE_ENTRIES = Object.freeze(
@@ -23,6 +24,22 @@ export const WINDOWS_RESOURCE_BUNDLE_ENTRIES = Object.freeze(
 )
 
 export const STABLE_EXTERNAL_BIN = 'sidecar/tono-core'
+
+/** Fourth install member. Tauri names the file `sing-box-<target>.exe`. */
+export const SING_BOX_EXTERNAL_BIN = 'sidecar/sing-box'
+
+export const STABLE_EXTERNAL_BINS = Object.freeze([
+  STABLE_EXTERNAL_BIN,
+  SING_BOX_EXTERNAL_BIN,
+])
+
+/**
+ * Windows sing-box v1.15.0-alpha.9-tono-a9.1. Same pin as
+ * tooling/scripts/sing-box/manifests/alpha9/windows-amd64-v2.json.
+ * A different digest is not this product's core.
+ */
+export const WINDOWS_SING_BOX_SHA256 =
+  'b2e6902ee75d9c4af79df28a61ded67afc4283fc83a44dee8896f3737a4ed027'
 
 export const FORBIDDEN_PAYLOAD_NAME_PATTERNS = Object.freeze([
   /verge-mihomo/i,
@@ -65,6 +82,10 @@ export const WINDOWS_RUNTIME_REPAIR_ARTIFACTS = Object.freeze([
   'tono-core.exe.rollback',
   'tono-core.exe.restore',
   'tono-core.exe.publish',
+  'sing-box.exe.next',
+  'sing-box.exe.rollback',
+  'sing-box.exe.restore',
+  'sing-box.exe.publish',
 ])
 
 // These inherited Clash Verge commands are not used by any route in the Tono
@@ -597,8 +618,8 @@ export function validateNsisAutomaticUpgradeFlow(source) {
 
 /**
  * Keep the privileged helper and the NSIS staging contract in lockstep. A protocol-revision
- * upgrade is safe only when the stopped-Service transaction owns all three live executables:
- * Service, Mihomo, and the GUI. This source gate complements the helper's file-level unit tests;
+ * upgrade is safe only when the stopped-Service transaction owns Service, Mihomo,
+ * sing-box (when the alpha.9 pin is present) and the GUI. This source gate complements the helper's file-level unit tests;
  * it cannot replace an elevated failure-injection upgrade test on a Windows VM.
  *
  * @param {string} source service/src/bin/install_service.rs source
@@ -620,10 +641,13 @@ export function validateWindowsReplacementHelperSource(source) {
   }
 
   const dispatch = text.match(
-    /if let Some\(\(runtime_candidate, app_candidate\)\)[\s\S]*?return replace_existing_service_and_runtime\(([\s\S]*?)\);/,
+    /if let Some\(\(runtime_candidate, app_candidate, sing_box_candidates\)\)[\s\S]*?return replace_existing_service_and_runtime\(([\s\S]*?)\);/,
   )?.[1]
-  if (!dispatch || !/runtime_candidate,\s*app_candidate,/.test(dispatch)) {
-    return 'the replace-runtime dispatch must pass both Mihomo and GUI candidates into the transaction'
+  if (
+    !dispatch ||
+    !/runtime_candidate,\s*app_candidate,\s*sing_box_candidates,/.test(dispatch)
+  ) {
+    return 'the replace-runtime dispatch must pass both Mihomo and GUI candidates, and the sing-box candidates, into the transaction'
   }
 
   const transaction = text.match(
@@ -640,6 +664,9 @@ export function validateWindowsReplacementHelperSource(source) {
     'app_replacement.publish()?;',
     'app_replacement.is_old()',
     'app_replacement.is_new()',
+    'sing_box_candidates: Vec<InstalledBinaryCandidate>',
+    'sing_box_replacements.iter().all(|replacement| replacement.is_old())',
+    'sing_box_replacements.iter().all(|replacement| replacement.is_new())',
   ]) {
     if (!transaction.includes(snippet)) {
       return `the coordinated replacement helper omits GUI transaction step: ${snippet}`
@@ -658,6 +685,9 @@ export function validateWindowsReplacementHelperSource(source) {
 
   const runtimePublishAt = transaction.indexOf(
     'runtime_replacement.publish()?;',
+  )
+  const singBoxPublishAt = transaction.indexOf(
+    'for replacement in &mut sing_box_replacements',
   )
   const servicePublishAt = transaction.indexOf(
     'service_replacement.publish()?;',
@@ -682,6 +712,8 @@ export function validateWindowsReplacementHelperSource(source) {
     recoverySuppressedAt < 0 ||
     runtimePublishAt < 0 ||
     servicePublishAt <= runtimePublishAt ||
+    singBoxPublishAt <= runtimePublishAt ||
+    servicePublishAt <= singBoxPublishAt ||
     recoverySuppressedAt >= runtimePublishAt ||
     serviceStartAt <= servicePublishAt ||
     readinessAt <= serviceStartAt ||
@@ -781,14 +813,28 @@ export function validateTlsPolicySources(sources) {
  * @returns {string | null} error message, or null when valid
  */
 export function validateExternalBin(externalBin) {
-  if (!Array.isArray(externalBin) || externalBin.length !== 1) {
-    return `bundle.externalBin must be exactly one stable sidecar entry, got: ${JSON.stringify(externalBin)}`
+  if (
+    !Array.isArray(externalBin) ||
+    externalBin.length !== STABLE_EXTERNAL_BINS.length
+  ) {
+    return `bundle.externalBin must be exactly the stable Mihomo and pinned sing-box sidecars, got: ${JSON.stringify(externalBin)}`
   }
   if (externalBin.some((entry) => String(entry).includes('alpha'))) {
     return 'release config still bundles the unaudited alpha Mihomo sidecar'
   }
-  if (externalBin[0] !== STABLE_EXTERNAL_BIN) {
-    return `bundle.externalBin[0] must be "${STABLE_EXTERNAL_BIN}", got: ${externalBin[0]}`
+  for (let index = 0; index < STABLE_EXTERNAL_BINS.length; index += 1) {
+    if (externalBin[index] !== STABLE_EXTERNAL_BINS[index]) {
+      return `bundle.externalBin[${index}] must be "${STABLE_EXTERNAL_BINS[index]}", got: ${externalBin[index]}`
+    }
+  }
+  return null
+}
+
+/** @param {unknown} digest @returns {string | null} */
+export function validateSingBoxDigest(digest) {
+  const normalized = String(digest ?? '').trim().toLowerCase()
+  if (normalized !== WINDOWS_SING_BOX_SHA256) {
+    return `sing-box digest ${normalized || '(empty)'} is not the pinned alpha.9 digest ${WINDOWS_SING_BOX_SHA256}`
   }
   return null
 }
@@ -890,6 +936,20 @@ export function validatePayloadEntries(entries) {
   if (stagedMihomo.length !== 1) {
     return `installer payload is missing stable Tono Core staging contract (expected exactly one tono-core.exe.next, found ${stagedMihomo.length})`
   }
+  const stagedSingBox = bases.filter((base) =>
+    /^sing-box\.exe\.next$/i.test(base),
+  )
+  if (stagedSingBox.length !== 1) {
+    return `installer payload is missing pinned sing-box staging contract (expected exactly one sing-box.exe.next, found ${stagedSingBox.length})`
+  }
+  const unexpectedSingBox = bases.filter(
+    (base) =>
+      /^sing-box\.exe(?:\..*)?$/i.test(base) &&
+      !/^sing-box\.exe\.next$/i.test(base),
+  )
+  if (unexpectedSingBox.length) {
+    return `installer payload must not contain a live or repair sing-box basename: ${[...new Set(unexpectedSingBox)].join(', ')}`
+  }
   const unexpectedMihomo = bases.filter(
     (base) =>
       /^(verge-mihomo|tono-core)/i.test(base) &&
@@ -915,6 +975,7 @@ export function validatePayloadEntries(entries) {
     'tono-service-install.exe',
     'tono-service-uninstall.exe',
     'core-sha256.txt',
+    'sing-box-sha256.txt',
   ]) {
     if (!bases.some((base) => base.toLowerCase() === required.toLowerCase())) {
       return `installer payload is missing required file basename: ${required}`

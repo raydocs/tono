@@ -64,6 +64,7 @@ export const useTrafficData = (options?: {
     setupHandlers: ({ next, scheduleReconnect }) => ({
       handleMessage: (data) => {
         if (data.startsWith('Websocket error')) {
+          setLive(false)
           next(data, FALLBACK_TRAFFIC)
           void scheduleReconnect()
           return

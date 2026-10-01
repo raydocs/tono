@@ -57,11 +57,20 @@ impl Schedule {
     }
 
     /// A proof succeeded. The caller may dial `name` only while protection is down.
+    /// TCP reachability does not reset the full-connection failure backoff.
     pub fn proven(&mut self, name: &str) -> String {
         self.down.clear();
-        self.attempt = 0;
-        self.next_due_ms = 0;
         name.to_string()
+    }
+
+    /// The proved endpoint failed the full connection (or admission refused it).
+    /// Leave protection down and wait before another attempt, even if TCP answers.
+    pub fn connect_failed(&mut self, now_ms: u64) {
+        let index = (self.attempt as usize).min(BACKOFF_MS.len() - 1);
+        let delay = BACKOFF_MS[index];
+        self.attempt = self.attempt.saturating_add(1);
+        self.down.clear();
+        self.next_due_ms = now_ms.saturating_add(delay);
     }
 
     pub fn on_clock(
@@ -76,11 +85,7 @@ impl Schedule {
         }
         let names = ordered_tcp_names(preferred, region, targets, &self.down);
         if names.is_empty() {
-            let index = (self.attempt as usize).min(BACKOFF_MS.len() - 1);
-            let delay = BACKOFF_MS[index];
-            self.attempt = self.attempt.saturating_add(1);
-            self.down.clear();
-            self.next_due_ms = now_ms.saturating_add(delay);
+            self.connect_failed(now_ms);
             return Step::Wait { until_ms: self.next_due_ms };
         }
         Step::Probe { names }
@@ -219,6 +224,33 @@ mod tests {
         assert_eq!(step, Step::Wait { until_ms: 10 + BACKOFF_MS[0] });
         let early = schedule.on_clock("Buffalo · Niagara", "us", &targets, 10 + BACKOFF_MS[0] - 1);
         assert!(matches!(early, Step::Wait { .. }));
+    }
+
+    #[test]
+    fn reachable_tcp_does_not_reset_repeated_failure_backoff() {
+        let targets = vec![target("Buffalo · Niagara", "us", true)];
+        let mut schedule = Schedule::begin(0);
+        let mut now = 0;
+        for delay in [2_000, 5_000, 15_000, 30_000, 60_000, 120_000, 120_000] {
+            assert!(matches!(
+                schedule.on_clock("Buffalo · Niagara", "us", &targets, now),
+                Step::Probe { .. }
+            ));
+            schedule.proven("Buffalo · Niagara");
+            // TCP answered, but the full connection failed. Use the same wait
+            // as an exhausted TCP round without restarting the ladder.
+            schedule.connect_failed(now);
+            let due = now + delay;
+            assert_eq!(
+                schedule.on_clock("Buffalo · Niagara", "us", &targets, now),
+                Step::Wait { until_ms: due }
+            );
+            assert_eq!(
+                schedule.on_clock("Buffalo · Niagara", "us", &targets, due - 1),
+                Step::Wait { until_ms: due }
+            );
+            now = due;
+        }
     }
 
     #[test]

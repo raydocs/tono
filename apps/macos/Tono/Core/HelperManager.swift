@@ -1175,7 +1175,7 @@ nonisolated struct HelperManager {
     static func receiveTimeout(for path: String) -> Int {
         switch path {
         case "/update/stage": return 600
-        case "/update/prepare", "/update/commit", "/update/reconcile", "/update/disconnect", "/update/retire": return 45
+        case "/update/prepare", "/update/commit", "/update/reconcile", "/update/disconnect", "/update/release", "/update/retire": return 45
         case "/update/offer", "/update/execute": return 30
         case "/killswitch/arm", "/helper/upgrade":
             return 30
@@ -1540,10 +1540,15 @@ enum HelperPathConfinement {
             throw Error.escapesBundle(path)
         }
 
-        let fd = open(realPath, O_RDONLY | O_CLOEXEC | O_NOFOLLOW)
+        let fd = open(realPath, O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK)
         guard fd >= 0 else {
             throw Error.cannotSafelyOpen(path)
         }
-        close(fd)
+        defer { close(fd) }
+        var metadata = stat()
+        guard fstat(fd, &metadata) == 0,
+              metadata.st_mode & mode_t(S_IFMT) == mode_t(S_IFREG) else {
+            throw Error.cannotSafelyOpen(path)
+        }
     }
 }

@@ -337,13 +337,32 @@ nonisolated enum HelperProtocolVersion {
     /// - 4.52.16 → 4.52.17: exhausted App recovery has an AI-preserving release intent.
     /// - 4.52.17 → 4.52.18: resolved update retirement keeps its active
     ///   receipt until executor-job cleanup succeeds, preserving retry ownership.
-    /// - 4.52.18 → 4.52.19: `--emergency-disarm` and its ledger-less fallback
+    /// - 4.52.18 → 4.52.19: silent upgrade copies a regular file from a
+    ///   non-blocking fd and does not hold the update lock across that copy.
+    ///   Stale-core signals re-check path and uid. The installed update floor
+    ///   is the bytes read before and after the signature check. A `pfctl -X`
+    ///   that leaves the token listed keeps the record. A new physical NIC
+    ///   reloads the LAN DNS block without flushing states. Protected DNS
+    ///   status follows `serviceID`.
+    /// - 4.52.19 → 4.52.20: selective recovery holds dedicated DashScope/Qwen
+    ///   model API namespaces while general Alibaba Cloud remains available.
+    /// - 4.52.20 → 4.52.21: selective AI blackhole routes include Darwin
+    ///   required loopback gateways; native dry-run regression checks routing messages.
+    /// - 4.52.22 → 4.52.23: pending-update automatic failure release retains the AI hold.
+    /// - 4.52.27 → 4.52.28: the desktop update contract may name an optional
+    ///   sing-box digest. The helper must be rebuilt to accept that field.
+    /// - 4.52.28 → 4.52.29: a Protected Offline update recovers fail-open. The
+    ///   successor helper releases PF at launch with the Core stopped, so an
+    ///   observed Unprotected state now satisfies a Protected Offline
+    ///   recovery and commit; Connected still requires Connected. The
+    ///   secondary AI hold on that standard release is unchanged.
+    /// - 4.52.29 → 4.52.30: `--emergency-disarm` and its ledger-less fallback
     ///   release PF even when a stale core survives SIGKILL. A failed daemon
     ///   startup restores saved DNS after `releasePersistedBlock`, which still
     ///   applies the secondary AI hold. Explicit emergency disarm still
     ///   removes that hold. Runtime inputs and package paths open with
     ///   `O_NONBLOCK` so a swapped-in FIFO is refused instead of hanging.
-    static let current = "4.52.19"
+    static let current = "4.52.30"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS

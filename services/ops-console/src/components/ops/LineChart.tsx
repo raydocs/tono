@@ -48,6 +48,7 @@ export function LineChart({
   format,
   when,
   tick,
+  tickOffsetSec,
   label,
   guides = [],
   domain,
@@ -61,6 +62,8 @@ export function LineChart({
   when: (atSec: number) => string;
   /** The short time under an axis tick. */
   tick: (atSec: number) => string;
+  /** Daily UTC buckets use 0; event charts default to the operator's offset. */
+  tickOffsetSec?: number;
   /** What a reader who cannot see the chart is told it shows. */
   label: string;
   guides?: readonly Guide[];
@@ -101,7 +104,7 @@ export function LineChart({
   const t1 = times[times.length - 1] ?? t0;
   const x = linear(t0, t1, left, width - RIGHT);
   const y = linear(yMin, yMax, height - BOTTOM, TOP);
-  const xTicks = timeTicks(t0, t1, Math.max(2, Math.floor((width - left) / MIN_TICK_GAP)));
+  const xTicks = timeTicks(t0, t1, Math.max(2, Math.floor((width - left) / MIN_TICK_GAP)), tickOffsetSec);
 
   const at = cursor.index === null ? null : times[cursor.index] ?? null;
   const rows: TipRow[] = at === null ? [] : series.map((line, index) => {

@@ -16,7 +16,8 @@
 #   After sha256 verification the preview database is emptied in place
 #   (tooling/scripts/wipe-d1-in-order.mjs) so a second restore does not collide
 #   on primary keys. --no-wipe skips that step. The dump is then imported, and
-#   pending migrations are applied when wrangler.preview.jsonc is present.
+#   pending migrations use the renderer-generated preview config, or the legacy
+#   wrangler.preview.jsonc when no generated config is present.
 set -eu
 
 PRODUCTION_D1_NAME=tono-control-plane
@@ -120,7 +121,7 @@ refuse_preview_config_targeting_production() {
       [ -n "$prod" ] || continue
       if [ "$id" = "$prod" ]; then
         IFS=$old_ifs
-        fail "wrangler.preview.jsonc database_id matches production ($prod); refusing to run"
+        fail "$preview_config database_id matches production ($prod); refusing to run"
       fi
     done
   done
@@ -132,7 +133,11 @@ repo_root=$(CDPATH= cd -- "$script_dir/../.." && pwd)
 control_plane=$repo_root/services/control-plane
 [ -f "$control_plane/wrangler.jsonc" ] \
   || fail "missing $control_plane/wrangler.jsonc"
-refuse_preview_config_targeting_production "$control_plane/wrangler.preview.jsonc"
+preview_config=$control_plane/wrangler.preview.generated.jsonc
+if [ ! -f "$preview_config" ]; then
+  preview_config=$control_plane/wrangler.preview.jsonc
+fi
+refuse_preview_config_targeting_production "$preview_config"
 
 if [ -n "$keep_local_dir" ]; then
   mkdir -p "$keep_local_dir" || fail "could not create $keep_local_dir"
@@ -227,13 +232,13 @@ refuse_production_argv "$@"
 run_wrangler "$@" \
   || fail "d1 execute into $PREVIEW_D1_NAME failed"
 
-if [ -f "$control_plane/wrangler.preview.jsonc" ]; then
-  set -- d1 migrations apply "$PREVIEW_D1_NAME" --remote --config wrangler.preview.jsonc
+if [ -f "$preview_config" ]; then
+  set -- d1 migrations apply "$PREVIEW_D1_NAME" --remote --config "$preview_config"
   refuse_production_argv "$@"
   run_wrangler "$@" \
     || fail "migrations apply on $PREVIEW_D1_NAME failed"
 else
-  printf 'restore-control-plane-d1-preview: wrangler.preview.jsonc not found; migrations were not applied (see docs/ops/rollout-ops2.md §1)\n'
+  printf 'restore-control-plane-d1-preview: no generated or legacy preview config found; migrations were not applied (see docs/ops/rollout-ops2.md §1)\n'
 fi
 
 printf 'restore-control-plane-d1-preview: imported %s into %s\n' \

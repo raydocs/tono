@@ -202,10 +202,11 @@ export async function homeExitsResource(
         'SELECT 1 FROM user_home_bindings WHERE home_exit_id = ? LIMIT 1',
       ).bind(previousHomeId).first<Row>();
       if (!stillUsed) {
-        await e.DB.prepare(
-          "UPDATE home_exits SET status = 'retired', updated_at = ? WHERE id = ?",
+        const retired = await e.DB.prepare(
+          `UPDATE home_exits SET status = 'retired', updated_at = ? WHERE id = ?
+           AND NOT EXISTS (SELECT 1 FROM user_home_bindings WHERE home_exit_id = home_exits.id)`,
         ).bind(now(), previousHomeId).run();
-        retiredHomeExitId = previousHomeId;
+        if (retired.meta.changes) retiredHomeExitId = previousHomeId;
       }
     }
     await bumpCatalogRevision(e);
@@ -331,14 +332,19 @@ export async function homeExitsResource(
              socks5_host = ?, socks5_port = ?, socks5_username = ?, socks5_password = ?,
              socks5_rotation_required_at = ?,
              status = ?, notes = ?, updated_at = ?
-         WHERE id = ?`,
+         WHERE id = ? AND (? != 'retired' OR NOT EXISTS (
+           SELECT 1 FROM user_home_bindings WHERE home_exit_id = home_exits.id
+         ))`,
       ).bind(
         proxyName, displayName, egressIpv4, kind,
         socks5Host, socks5Port, socks5Username, socks5Password,
         rotationRequiredAt,
-        status, notes, t, mt[1],
+        status, notes, t, mt[1], status,
       ).run();
-      if (!updated.meta.changes) throw new ApiError(404, 'NOT_FOUND', 'Home exit not found');
+      if (!updated.meta.changes) {
+        if (status === 'retired') throw new ApiError(409, 'HOME_EXIT_IN_USE', 'Unbind all users before retiring this home exit');
+        throw new ApiError(404, 'NOT_FOUND', 'Home exit not found');
+      }
     } catch (error) {
       if (error instanceof ApiError) throw error;
       throw new ApiError(409, 'HOME_EXIT_CONFLICT', 'A home exit with this proxyName already exists');

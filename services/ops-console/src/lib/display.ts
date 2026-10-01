@@ -121,6 +121,12 @@ export function formatUtcDate(value: number): string {
   return `${date.getUTCFullYear()}-${pad(date.getUTCMonth() + 1)}-${pad(date.getUTCDate())}`;
 }
 
+/** A UTC day bucket as month/day for daily chart ticks and columns. */
+export function formatUtcDay(value: number): string {
+  const date = new Date(value * 1_000);
+  return `${date.getUTCMonth() + 1}/${date.getUTCDate()}`;
+}
+
 function pad(n: number): string {
   return n < 10 ? `0${n}` : String(n);
 }

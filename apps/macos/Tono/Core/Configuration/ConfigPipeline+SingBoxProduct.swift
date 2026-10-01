@@ -170,23 +170,62 @@ nonisolated extension ConfigPipeline {
              "detour": exitGroupName],
         ]
         var dnsRules: [[String: Any]] = [["query_type": ["AAAA"], "action": "predefined", "rcode": "NOERROR"]]
+        // Preserve hostname identity for protected listeners before the broad
+        // Alibaba China-DNS rule; outbound lookups still use tunnelled real DNS.
+        dnsRules.append(["inbound": ["Tono-DNS", "Tono-TUN", "Tono-Mixed"], "query_type": ["A"],
+            "domain_suffix": dedicatedModelAPISuffixes, "action": "route", "server": "Tono-FakeIP", "rewrite_ttl": 30])
+        dnsRules.append(["domain_suffix": dedicatedModelAPISuffixes, "action": "evaluate", "server": "Tono-DoH", "tag": "model-api-primary"])
+        dnsRules.append(["match_response": "model-api-primary", "response_rcode": "NOERROR", "action": "respond"])
+        dnsRules.append(["domain_suffix": dedicatedModelAPISuffixes, "action": "evaluate", "server": "Tono-DoH-Backup", "tag": "model-api-backup"])
+        dnsRules.append(["match_response": "model-api-backup", "action": "respond"])
+        // Failed evaluations have no named response. Never let both failures
+        // fall through to the broad Alibaba DIRECT DNS rule below.
+        dnsRules.append(["domain_suffix": dedicatedModelAPISuffixes, "action": "reject"])
         var rules: [[String: Any]] = [
             ["inbound": ["Tono-DNS"], "action": "hijack-dns"],
             ["port": [53], "action": "hijack-dns"],
         ]
         let assistant = home == nil ? exitGroupName : claudeHomeGroupName
-        if home != nil {
-            rules.append(["network": "tcp", "domain_suffix": assistantHomeDomainSuffixes, "action": "route", "outbound": assistant])
-            rules.append(["network": "tcp", "ip_cidr": assistantHomeIPv4Cidrs, "action": "route", "outbound": assistant])
-        }
+        // Always, including when no residential hop is bound. Later reviewed-bundle
+        // and suffix rules are first-match DIRECT; without these rows a WeChat
+        // (or other reviewed) process reaches claude.ai and 160.79.104.0/21 on
+        // the physical interface. MATCH would only have caught what those
+        // exceptions did not. The suffix list includes dedicated model API
+        // hosts, so those children still precede Alibaba DIRECT. UDP exceptions
+        // sit above the terminal UDP reject, so assistant UDP is rejected here
+        // and falls back to the TCP route.
+        rules.append(["network": "tcp", "domain_suffix": assistantHomeDomainSuffixes, "action": "route", "outbound": assistant])
+        rules.append(["network": "tcp", "ip_cidr": assistantHomeIPv4Cidrs, "action": "route", "outbound": assistant])
+        rules.append(["network": "udp", "domain_suffix": assistantHomeDomainSuffixes, "action": "reject"])
+        rules.append(["network": "udp", "ip_cidr": assistantHomeIPv4Cidrs, "action": "reject"])
         rules.append(["network": "tcp", "process_name": assistantHomeProcessNames, "action": "route", "outbound": assistant])
         rules.append(["network": "tcp", "process_path_regex": assistantHomeProcessPathRegexes, "action": "route", "outbound": assistant])
         if let plan {
+            // sing-box 1.15.0-alpha.3 (93fff595) walks DNS rules in order and
+            // restores a domain only from the fake-ip store. reverse_mapping
+            // stays off: that tree documents it as unreliable where macOS
+            // caches DNS, and a shared real address could be labeled as a
+            // web-direct name. Client A queries for web-direct names therefore
+            // get a fake IP before hosts or China DNS. The pin `resolve`
+            // action and the direct outbound's domain_resolver name their
+            // transport, so those lookups skip this table and still return
+            // the pinned or China answer at dial time.
+            let clientListeners = ["Tono-DNS", "Tono-TUN", "Tono-Mixed"]
+            let webPinHosts = plan.webDomainPins.map(\.host).sorted()
+            if !webPinHosts.isEmpty {
+                dnsRules.append(["inbound": clientListeners, "query_type": ["A"], "domain": webPinHosts,
+                    "action": "route", "server": "Tono-FakeIP", "rewrite_ttl": 30])
+            }
+            let webSuffixHosts = plan.effectiveWebDomainSuffixes.map(\.host).sorted()
+            if !webSuffixHosts.isEmpty {
+                dnsRules.append(["inbound": clientListeners, "query_type": ["A"], "domain_suffix": webSuffixHosts,
+                    "action": "route", "server": "Tono-FakeIP", "rewrite_ttl": 30])
+            }
             var hosts: [String: [String]] = [:]
             for pin in plan.domainPins + plan.webDomainPins { hosts[pin.host] = pin.addresses }
             if !hosts.isEmpty {
                 dnsServers.append(["type": "hosts", "tag": "Tono-Hosts", "predefined": hosts])
-                dnsRules.append(["inbound": ["Tono-DNS", "Tono-TUN", "Tono-Mixed"],
+                dnsRules.append(["inbound": clientListeners,
                     "domain": hosts.keys.sorted(), "action": "route", "server": "Tono-Hosts"])
             }
             dnsServers.append(["type": "https", "tag": "Tono-China-DNS", "server": "223.5.5.5", "server_port": 443,
