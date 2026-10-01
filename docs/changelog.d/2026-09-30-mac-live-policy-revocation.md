@@ -7,3 +7,7 @@
 - 验证：`git diff --check` passed; independent source/task/test review passed. Native Swift/XCTest cannot run on Linux; hosted macOS CI required. Baseline skips empty policy and retains old authorization; no native failing execution claimed here.
 - 候选/发布：仅源码，无新候选；no deploy/publish; no helper contract or UI change.
 - 剩余限制：needs-hardware for ordinary traffic through transition and exact PF grant convergence; busy-owner policy overlap remains issue #1114; catalog-removal owner overlap issue #1113.
+
+### 2026-10-01 · transition endpoint-budget follow-up
+- Independent review caught an admitted old/new 250-tuple union exceeding the helper's unchanged 256-tuple ceiling. Before push completion, the real resolver now reserves old session endpoints in the existing pin budget; overflow new web names fall through to the protected tunnel while revoked authorization is still rebuilt.
+- One admission-stage regression validates both original plans, observes their 498-tuple unbounded union, and requires a valid bounded replacement/union. Focused source checks confirm the real preparation/resolver wiring; native XCTest remains pending.

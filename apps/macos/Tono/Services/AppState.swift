@@ -1896,7 +1896,10 @@ final class AppState {
         }
         guard let physicalInterface else { throw ConfigPipeline.TonoInjectionError.unsafeOverlay }
         let seed = try initialDirectPolicy(physicalInterface: physicalInterface, policy: policy)
-        guard let resolved = await resolveManagedDirectDomains(policy: policy, base: seed, api: api) else {
+        guard let resolved = await resolveManagedDirectDomains(
+            policy: policy, base: seed, api: api,
+            preservingSessionEndpoints: base?.sessionEndpoints ?? []
+        ) else {
             throw ConfigPipeline.TonoInjectionError.unsafeOverlay
         }
         return resolved
