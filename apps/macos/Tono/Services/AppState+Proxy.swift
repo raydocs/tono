@@ -717,11 +717,12 @@ extension AppState {
                     finishConfigReloadRequest(requestID)
                 } else if ownedRuntime {
                     finishConfigReloadRequest(requestID, startPending: false)
-                    disconnect(releaseKillSwitch: false)
-                    errorMessage = String(
-                        localized: "Updated cloud route failed; Kill Switch is blocking traffic while Tono retries. \(error.localizedDescription)"
+                    await applyExhaustedArmedFailure(
+                        message: ConnectionFailurePresentation.userFacingMessage(
+                            classified: lastClassifiedFailure
+                        ),
+                        resumeWhenReachable: true
                     )
-                    scheduleProtectedReconnect()
                 } else {
                     finishConfigReloadRequest(requestID)
                     errorMessage = String(
