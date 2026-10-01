@@ -223,13 +223,21 @@ pub const CLAUDE_HOME_GROUP_NAME: &str = "Tono-Claude-Home";
 /// (`dialer-proxy`), so the chain hop follows the user's node selection and
 /// the VPS needs no change.
 pub const HOME_SOCKS5_OUTBOUND_NAME: &str = "Tono-Home-Residential";
+/// Dedicated Model Studio namespaces within Alibaba's general DIRECT tree.
+pub const DEDICATED_MODEL_API_SUFFIXES: [&str; 4] = [
+    "dashscope.aliyuncs.com", "dashscope-intl.aliyuncs.com",
+    "dashscope-us.aliyuncs.com", "maas.aliyuncs.com",
+];
+
 /// First-party assistant domains pinned to the home-broadband exit when
 /// `homeProxy` / `homeSocks5` is in force. These are DOMAIN-SUFFIX rules
 /// with no process constraint, so Chrome / Edge / Arc count the same as
 /// the desktop apps. `google.com`, `googleapis.com`, and `gstatic.com`
 /// stay out: they are shared by Search, YouTube, Gmail, and Tono's own
 /// exit probe. Gemini is pinned by its product hostnames instead.
-pub const CLAUDE_HOME_DOMAINS: [&str; 80] = [
+pub const CLAUDE_HOME_DOMAINS: [&str; 84] = [
+    DEDICATED_MODEL_API_SUFFIXES[0], DEDICATED_MODEL_API_SUFFIXES[1],
+    DEDICATED_MODEL_API_SUFFIXES[2], DEDICATED_MODEL_API_SUFFIXES[3],
     "anthropic.com",
     "claude.ai",
     "claude.com",
@@ -2840,6 +2848,36 @@ reality-opts:
                 .unwrap(),
             &vec![string("1.1.1.1/32")]
         );
+    }
+
+    #[test]
+    fn dashscope_routes_precede_signed_app_and_alibaba_direct_routes() {
+        let mut plan = direct_plan();
+        plan.wechat_process_path_regexes = vec![r"^C:\\Program Files\\Tencent\\WeChat\\.*$".into()];
+        plan.web_suffix_rules = vec![("aliyuncs.com".into(), 443)];
+        let check = |home: Option<&str>, socks: Option<&CatalogHomeSocks5>| {
+            let runtime = build_owned_runtime_with_ports(
+                &three_nodes(), "JP Reality 02", "test-secret", Some(&plan), home, socks,
+                RuntimePorts::default(),
+            ).unwrap();
+            let value = parsed(&runtime);
+            let rules: Vec<_> = get(&value, &["rules"]).as_sequence().unwrap()
+                .iter().map(|rule| rule.as_str().unwrap()).collect();
+            let first_direct = rules.iter().position(|rule| rule.ends_with(",Tono-China-Direct")).unwrap();
+            let alibaba = rules.iter().position(|rule| rule.contains("DOMAIN-SUFFIX,aliyuncs.com)")
+                && rule.ends_with(",Tono-China-Web-Direct")).unwrap();
+            let target = if home.is_some() || socks.is_some() { CLAUDE_HOME_GROUP_NAME } else { EXIT_GROUP_NAME };
+            for suffix in ["dashscope.aliyuncs.com", "dashscope-intl.aliyuncs.com", "dashscope-us.aliyuncs.com", "maas.aliyuncs.com"] {
+                let guard = format!("AND,((NETWORK,TCP),(DOMAIN-SUFFIX,{suffix})),{target}");
+                let protected = rules.iter().position(|rule| *rule == guard).expect(suffix);
+                assert!(protected < first_direct && protected < alibaba, "{suffix}");
+            }
+            assert!(get(&value, &["dns", "nameserver"]).as_sequence().unwrap()
+                .iter().all(|server| server.as_str().unwrap().ends_with("#Tono-Exit")));
+        };
+        check(None, None);
+        check(Some("US Reality 01"), None);
+        check(None, Some(&home_socks5()));
     }
 
     #[test]
