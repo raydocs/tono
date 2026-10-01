@@ -1,0 +1,5 @@
+| ID | 问题（一句） | 状态 | Issue / PR | 等级 | 剩余限制 |
+|---|---|---|---|---|---|
+| R4SW-MAC-POLICY-REVOCATION | macOS 接受新的策略撤销后仍保留旧的物理 DIRECT 后缀和原生应用许可 | in-PR | #1115 | 中·已确认 | P1; native XCTest and needs-hardware pending; busy-owner overlap issue #1114 |
+
+Merged #966 keeps the connected session during a policy change, but its optional owner skips empty/suffix-only documents and fills pins against the old authorization seed. The old suffix and native-app permission therefore remain until a fresh Connect. Rebuild a fresh sanitized seed from the latest document, represent an empty policy as an intentional nil replacement, and commit it only after successful runtime replacement and verification. Preserve the old runtime's PF endpoints/reviewed permit through replacement, then converge to the exact new grants, including clearing them. The existing AI-family guard and strict branches are retained; no AI-suffix bypass is claimed. An actual accepted empty policy regression tests preparation and commit while replacing only privileged I/O; a separate production preparation/compiler regression proves changed suffix/native authority reaches emitted runtime rules.
