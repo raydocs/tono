@@ -395,7 +395,8 @@
       "idle": "Idle",
       "noActiveRoute": "No active route",
       "reading": "Reading traffic…",
-      "telemetryFailed": "Dashboard has not reached the core yet — retrying"
+      "telemetryFailed": "Dashboard has not reached the core yet — retrying",
+      "sessionTotal": "This connection {{total}}"
     },
     "info": {
       "protection": "Traffic protection",

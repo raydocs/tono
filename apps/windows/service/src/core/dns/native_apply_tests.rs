@@ -812,6 +812,75 @@ fn a_failed_policy_restore_keeps_the_capture_loss_for_the_retry() -> Result<()> 
     Ok(())
 }
 
+#[test]
+#[serial_test::serial]
+fn locked_restored_captures_do_not_refuse_release_or_replay_stale_settings() -> Result<()> {
+    use super::super::{
+        DNSCACHE_PARAMETERS, ENABLE_AUTO_DOH, DOH_FLAGS, INTERFACE_DOH_ROOT,
+        interface_doh_key, restore_encrypted_dns, suppress_encrypted_dns,
+        read_capture_file, read_interface_doh_capture, nrpt_rule_key, test_io::{self, Fixture},
+    };
+    use crate::core::dns as facade;
+    use std::os::windows::fs::OpenOptionsExt;
+    use windows_sys::Win32::Storage::FileSystem::{FILE_SHARE_READ, FILE_SHARE_WRITE};
+
+    let fixture = Fixture::new(Vec::new())?;
+    let doh_key = interface_doh_key("{A}", "Doh", "1.1.1.1");
+    let (snapshot, global, interface) = test_io::with(|io| {
+        io.keys.insert(nrpt_rule_key(), Default::default());
+        io.keys.insert(DNSCACHE_PARAMETERS.into(), [(ENABLE_AUTO_DOH.into(), "0".into())].into());
+        for key in [
+            format!(r"{INTERFACE_DOH_ROOT}\{{A}}"),
+            format!(r"{INTERFACE_DOH_ROOT}\{{A}}\DohInterfaceSettings\Doh"),
+        ] {
+            io.keys.insert(key, Default::default());
+        }
+        io.keys.insert(doh_key.clone(), [(DOH_FLAGS.into(), "0".into())].into());
+        (
+            io.snapshot_path.clone(),
+            io.capture_dir.join("protected-secure-dns.json"),
+            io.capture_dir.join("protected-interface-doh.json"),
+        )
+    }).unwrap();
+    std::fs::write(&snapshot, serde_json::to_vec(&fixture.originals)?)?;
+    std::fs::write(&global, facade::format_encrypted_dns_capture(Some(3)))?;
+    std::fs::write(&interface, facade::format_interface_doh_capture(&[facade::InterfaceDohEntry {
+        guid: "{A}".into(), family: "Doh".into(), server: "1.1.1.1".into(), flags: 2,
+    }]).map_err(anyhow::Error::msg)?)?;
+    // A normal sharing violation: capture reads remain possible, but deletion/rename fails.
+    let lock = |path: &std::path::Path| std::fs::OpenOptions::new()
+        .read(true).share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE).open(path);
+    let global_lock = lock(&global)?;
+    let interface_lock = lock(&interface)?;
+    assert!(!restore_encrypted_dns()?, "no originals were lost");
+    test_io::with(|io| {
+        assert!(!io.keys.contains_key(&nrpt_rule_key()), "the catch-all must be gone");
+        assert_eq!(io.read(DNSCACHE_PARAMETERS, ENABLE_AUTO_DOH).as_deref(), Some("3"));
+        assert_eq!(io.read(&doh_key, DOH_FLAGS).as_deref(), Some("2"));
+        // The user changes settings after the release while the capture remains locked.
+        io.keys.get_mut(DNSCACHE_PARAMETERS).unwrap().insert(ENABLE_AUTO_DOH.into(), "2".into());
+        io.keys.get_mut(&doh_key).unwrap().insert(DOH_FLAGS.into(), "1".into());
+    });
+    assert!(!restore_encrypted_dns()?);
+    test_io::with(|io| {
+        assert_eq!(io.read(DNSCACHE_PARAMETERS, ENABLE_AUTO_DOH).as_deref(), Some("2"));
+        assert_eq!(io.read(&doh_key, DOH_FLAGS).as_deref(), Some("1"));
+        io.apply_resolver_policy = true;
+    });
+    drop(global_lock);
+    drop(interface_lock);
+    suppress_encrypted_dns()?;
+    assert_eq!(read_capture_file()?, Some(Some(2)));
+    assert_eq!(read_interface_doh_capture()?.unwrap()[0].flags, 1);
+    assert!(!restore_encrypted_dns()?);
+    assert!(!global.exists() && !interface.exists());
+    test_io::with(|io| {
+        assert_eq!(io.read(DNSCACHE_PARAMETERS, ENABLE_AUTO_DOH).as_deref(), Some("2"));
+        assert_eq!(io.read(&doh_key, DOH_FLAGS).as_deref(), Some("1"));
+    });
+    Ok(())
+}
+
 /// #305 review (codex:F1): a normal Disconnect runs two restores — the release handler's, then
 /// the disarm gate's snapshot-less one. The second used to find the evidence already consumed,
 /// clear `last_error` and publish a clean result over the loss the first one had reported.

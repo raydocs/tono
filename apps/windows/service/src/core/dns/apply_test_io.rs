@@ -44,6 +44,8 @@ pub(crate) struct Machine {
     pub native_calls: usize,
     pub effective_reads: usize,
     pub policy_restores: usize,
+    /// Opt in to fixture-only policy suppression for capture lifecycle regressions.
+    pub apply_resolver_policy: bool,
     pub before_write: Vec<DnsSnapshot>,
     /// X2-2: what the effective-NRPT read and the cache-bypassing system lookup return.
     pub effective_nrpt: std::result::Result<Vec<facade::EffectiveNrptRule>, String>,
@@ -259,6 +261,7 @@ impl Fixture {
             native_calls: 0,
             effective_reads: 0,
             policy_restores: 0,
+            apply_resolver_policy: false,
             before_write: Vec::new(),
             // Tono's catch-all in force and a fake-ip answer: the healthy default.
             effective_nrpt: Ok(vec![facade::EffectiveNrptRule {
