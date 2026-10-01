@@ -1129,6 +1129,7 @@
         test_hooks::set_live_apply_fails(false);
         test_hooks::set_apply_batch_unavailable(false);
         test_hooks::set_encrypted_restore_fails(false);
+        test_hooks::set_snapshot_retire_fails(false);
         test_hooks::take_automatic_resets();
         test_hooks::take_encrypted_restores();
         test_hooks::set_collected_adapters(Vec::new());
@@ -1454,6 +1455,46 @@
             status.last_error, None,
             "the live state confirms the restore outright — this is not the degraded exit"
         );
+        reset_dns_state().await;
+        Ok(())
+    }
+
+    /// A proven restore whose snapshot file cannot be deleted used to return an error. The
+    /// disarm gate treats that error as an unproven restore and leaves WFP armed, and the same
+    /// lock makes every retry fail. DNS is already the user's; the leftover file is a warning.
+    #[tokio::test]
+    #[serial]
+    async fn a_locked_snapshot_does_not_fail_a_proven_restore() -> Result<()> {
+        reset_dns_state().await;
+        seed_snapshot(vec![adapter("{A}", Some("1.1.1.1"))]).await?;
+        test_hooks::set_snapshot_retire_fails(true);
+
+        let status = restore_protected().await?;
+
+        assert!(
+            status
+                .last_error
+                .as_deref()
+                .is_some_and(|error| error.contains(DNS_SNAPSHOT_RETAINED_PREFIX)),
+            "the lock is a warning on a successful restore, not a failed proof: {status:?}"
+        );
+        assert!(
+            snapshot_path().exists(),
+            "the injected lock leaves the recovery file in place"
+        );
+        assert!(
+            !PROTECTION_WANTED.load(Ordering::Acquire),
+            "a requested restore is no longer wanted, so the leftover file is not re-applied"
+        );
+        let again = restore_protected().await?;
+        assert!(
+            again
+                .last_error
+                .as_deref()
+                .is_some_and(|error| error.contains(DNS_SNAPSHOT_RETAINED_PREFIX)),
+            "a retry of the same lock still succeeds: {again:?}"
+        );
+
         reset_dns_state().await;
         Ok(())
     }

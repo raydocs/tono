@@ -106,7 +106,11 @@
 //! `DNS_RESTORE_DEGRADED_PREFIX` in `last_error` and in the status payload. Everything short
 //! of that stays fail-closed, because automatically opening WFP while the live resolver may
 //! still point at a dead loopback server strands the machine in an ambiguous and often
-//! unrecoverable network state.
+//! unrecoverable network state. Deleting `protected-dns.json` is not part of that proof.
+//! Once the restore is proven, a snapshot that cannot be deleted or quarantined (a lock,
+//! an ACL, an antivirus hold) is a warning (`DNS_SNAPSHOT_RETAINED_PREFIX`). It must not
+//! fail the restore: the disarm gate would then leave WFP armed on a machine whose DNS is
+//! already the user's own, and the same lock makes every retry fail the same way.
 //!
 //! **Nothing here may hang, and nothing here may become permanently unsatisfiable.** Every
 //! engine call is bounded and holds a single-writer claim (`bounded_dns_call`), so an
@@ -1439,6 +1443,13 @@ pub(crate) const DNS_RESTORE_DEGRADED_PREFIX: &str = "TONO_DNS_RESTORE_DEGRADED"
 /// encrypted DNS was restored to the user's chosen setting.
 pub(crate) const DNS_CAPTURE_QUARANTINED_PREFIX: &str = "TONO_DNS_CAPTURE_QUARANTINED";
 
+/// Stable, App-mappable marker for "DNS restore was proven, but `protected-dns.json` could
+/// not be deleted or moved aside". It rides in `last_error` on an otherwise *successful*
+/// restore. The disarm gate follows that success: a locked snapshot file is not evidence
+/// that resolvers still point at Tono, and treating the delete as a failed proof leaves WFP
+/// armed with no retry that can succeed while the lock holds.
+pub(crate) const DNS_SNAPSHOT_RETAINED_PREFIX: &str = "TONO_DNS_SNAPSHOT_RETAINED";
+
 /// Stable, App-mappable marker for "protected DNS was applied, but the apply or its read-back
 /// could not be verified on every adapter". Like [`DNS_RESTORE_DEGRADED_PREFIX`] it rides in
 /// `last_error` on an otherwise **successful** operation, so the App must treat it as a warning
@@ -2095,6 +2106,19 @@ pub(crate) mod test_hooks {
         ENCRYPTED_RESTORE_FAILS.store(fails, Ordering::Relaxed);
     }
 
+    static SNAPSHOT_RETIRE_FAILS: AtomicBool = AtomicBool::new(false);
+
+    pub(crate) fn snapshot_retire_fails() -> bool {
+        SNAPSHOT_RETIRE_FAILS.load(Ordering::Relaxed)
+    }
+
+    /// Simulate a proven restore whose snapshot file cannot be deleted or renamed (AV lock,
+    /// ACL). The restore must still succeed so WFP disarm is not refused.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn set_snapshot_retire_fails(fails: bool) {
+        SNAPSHOT_RETIRE_FAILS.store(fails, Ordering::Relaxed);
+    }
+
     static NRPT_SWEEP_HANGS: AtomicBool = AtomicBool::new(false);
 
     /// While set, the stubbed NRPT removal does not return: a registry call behind a filter
@@ -2647,8 +2671,52 @@ async fn restore_resolver_policy() -> Result<Option<String>> {
     }))
 }
 
+fn snapshot_retained_note(delete_error: &str, quarantine_error: &str) -> String {
+    format!(
+        "{DNS_SNAPSHOT_RETAINED_PREFIX}: DNS was restored and verified, but protected-dns.json \
+         could not be deleted ({delete_error}) or moved aside ({quarantine_error}). The leftover \
+         file is not a reason to keep the network blocked."
+    )
+}
+
+/// Drop the live snapshot after a proven restore. Failure to delete or quarantine the file is a
+/// warning, not a failed proof: the resolvers are already the user's, and refusing here is what
+/// keeps WFP armed across every retry while an antivirus lock or ACL holds the file.
+async fn retire_proven_snapshot() -> Option<String> {
+    #[cfg(not(all(windows, not(feature = "test"))))]
+    if test_hooks::snapshot_retire_fails() {
+        return Some(snapshot_retained_note(
+            "injected snapshot delete failure",
+            "injected snapshot quarantine failure",
+        ));
+    }
+    match tokio::fs::remove_file(snapshot_path()).await {
+        Ok(()) => None,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(error) => {
+            let delete_error = format!("{error:#}");
+            tracing::warn!(
+                "dns: a proven restore could not delete the snapshot ({delete_error}); moving it aside"
+            );
+            match quarantine_snapshot(
+                "locked",
+                "protected-dns.json could not be deleted after a proven restore",
+            )
+            .await
+            {
+                Ok(()) => None,
+                Err(quarantine_error) => Some(snapshot_retained_note(
+                    &delete_error,
+                    &format!("{quarantine_error:#}"),
+                )),
+            }
+        }
+    }
+}
+
 /// Restore adapters and resolver policies before dropping their recovery snapshot. A failed
-/// proof keeps the snapshot and, via the disarm invariant, the block armed.
+/// proof keeps the snapshot and, via the disarm invariant, the block armed. A proven restore
+/// whose snapshot file cannot be removed still succeeds, so the same lock cannot keep WFP up.
 pub(crate) async fn restore_protected() -> Result<DnsProtectionStatus> {
     if !SUPPORTED {
         return status_unlocked().await;
@@ -2789,14 +2857,15 @@ pub(crate) async fn restore_protected() -> Result<DnsProtectionStatus> {
     // Required resolver cleanup belongs to the disarm proof, not best-effort housekeeping.
     // A failed NRPT/DoH restore retains the adapter snapshot and its independent captures.
     let capture_note = record_outcome(restore_resolver_policy().await)?;
-    match tokio::fs::remove_file(snapshot_path()).await {
-        Ok(()) => {}
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-        Err(error) => return Err(error.into()),
-    }
-    // Committed: the snapshot is gone. The degraded-restore note (adapter DNS) and the capture
-    // note (Encrypted DNS) describe different losses, so both reach `last_error`.
-    if let Some(note) = join_notes(degraded, settle_capture_loss(capture_note).await) {
+    // The proof already succeeded. Retiring the file is bookkeeping: a lock here must not
+    // turn a restored machine back into a refused disarm.
+    let retained = retire_proven_snapshot().await;
+    // The degraded-restore note (adapter DNS), a retained snapshot, and the capture note
+    // (Encrypted DNS) describe different losses, so each reaches `last_error`.
+    if let Some(note) = join_notes(
+        join_notes(degraded, retained),
+        settle_capture_loss(capture_note).await,
+    ) {
         surface_success_note(&note);
     }
     if let Err(error) = engine_flush_cache().await {

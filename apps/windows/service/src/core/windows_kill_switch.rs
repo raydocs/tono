@@ -2367,6 +2367,8 @@ pub(crate) async fn restrict_bootstrap() -> Result<()> {
 /// restore (the timeout drops the future) is safe for the same reason: `restore_protected`
 /// deletes its snapshot only *after* the restore is proven, so a cancelled attempt leaves the
 /// evidence — and the block — exactly where a failed attempt would, ready for the next retry.
+/// A proven restore whose snapshot file cannot be deleted is not that failure: DNS is already
+/// the user's, and the restore returns success so this gate can drop WFP.
 async fn bounded_dns_call<T>(
     operation: &str,
     call: impl std::future::Future<Output = Result<T>>,
