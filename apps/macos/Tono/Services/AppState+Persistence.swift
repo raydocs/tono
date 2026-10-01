@@ -12,7 +12,7 @@ extension AppState {
     func loadInitialData() async {
         if initialDataLoaded { return }
         if let initialDataApplyTask {
-            initialDataApplyJoinCount += 1
+            recordInitialDataApplyJoined()
             initialDataApplyJoined?()
             await initialDataApplyTask.value
             return
@@ -23,7 +23,7 @@ extension AppState {
     }
 
     private func applyClaimedInitialData() async {
-        initialDataApplyCount += 1
+        recordInitialDataApplyStarted()
         if let initialDataApplySuspension {
             await initialDataApplySuspension()
         }

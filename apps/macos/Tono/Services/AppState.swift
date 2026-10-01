@@ -316,6 +316,16 @@ final class AppState {
     /// How many callers found an apply already claimed.
     @ObservationIgnored
     private(set) var initialDataApplyJoinCount = 0
+
+    /// `private(set)` setters are file-private. The persistence extension
+    /// lives in another file, so it records through these.
+    func recordInitialDataApplyJoined() {
+        initialDataApplyJoinCount += 1
+    }
+
+    func recordInitialDataApplyStarted() {
+        initialDataApplyCount += 1
+    }
     /// Test seam, called synchronously when a caller joins an in-flight apply
     /// and before it awaits that task.
     @ObservationIgnored

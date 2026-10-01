@@ -7,3 +7,7 @@
 - 验证：本环境无 Xcode，`xcodebuild` 未跑。hosted macOS CI 待跑。
 - 候选/发布：仅源码，无新包。
 - 剩余限制：已经完成的应用仍把 `initialDataLoaded` 设为 true；之后的调用直接返回。
+
+## 2026-10-01 · 续记
+- 合入当时的 `origin/main`。计数器保持 `private(set)`；`AppState+Persistence` 通过同文件方法 `recordInitialDataApplyJoined` / `recordInitialDataApplyStarted` 递增，避免另一文件写 file-private setter 导致 macOS build / policy-tests 编译失败。
+- 验证：本环境无 Xcode，`xcodebuild` 未跑。
