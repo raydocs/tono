@@ -5788,6 +5788,58 @@ ${nameLine}
     expect((await api('auth/refresh', json({ refreshToken: recovered.refreshToken }))).status).toBe(401);
   });
 
+  it('revokes earlier refresh tokens on the same device at refresh, the next sign-in, and logout', async () => {
+    const account = await createAccount('same-device-sessions');
+    const leftoverId = `same-device-leftover-${account.user.id}`;
+    await env.DB.prepare(
+      `INSERT INTO sessions(id, user_id, refresh_hash, expires_at, created_at, device_id)
+       VALUES(?, ?, ?, unixepoch() + 2592000, unixepoch(), ?)`,
+    ).bind(
+      leftoverId,
+      account.user.id,
+      await sha256(`leftover-refresh-${account.user.id}-not-a-client-token`),
+      account.device.id,
+    ).run();
+
+    const rotated = await api('auth/refresh', json({ refreshToken: account.refreshToken }));
+    expect(rotated.status).toBe(200);
+    const current = await rotated.json() as any;
+    const leftover = await env.DB.prepare(
+      'SELECT revoked_at FROM sessions WHERE id = ?',
+    ).bind(leftoverId).first<any>();
+    expect(leftover.revoked_at).not.toBeNull();
+
+    // A second sign-in on a still-pending device asks for another enrollment
+    // key and hits the 60s cooldown. That cooldown is not this behavior.
+    (env as unknown as Env).TAILSCALE_ENROLLMENT_ENABLED = 'false';
+    const again = await emailSignIn({
+      email: account.email,
+      deviceName: 'Primary Mac',
+      installationId: 'same-device-sessions-installation-one',
+    });
+    expect(again.status).toBe(200);
+    const second = await again.json() as any;
+    expect(second.device.id).toBe(account.device.id);
+    expect((await api('auth/refresh', json({ refreshToken: current.refreshToken }))).status).toBe(401);
+    const liveOnDevice = await env.DB.prepare(
+      'SELECT COUNT(*) AS c FROM sessions WHERE device_id = ? AND revoked_at IS NULL',
+    ).bind(account.device.id).first<any>();
+    expect(liveOnDevice.c).toBe(1);
+
+    const other = await emailSignIn({
+      email: account.email,
+      deviceName: 'Other Mac',
+      installationId: 'same-device-sessions-installation-two',
+    });
+    expect(other.status).toBe(200);
+    const elsewhere = await other.json() as any;
+
+    expect((await api('auth/logout', json({}, second.accessToken))).status).toBe(204);
+    expect((await api('auth/refresh', json({ refreshToken: second.refreshToken }))).status).toBe(401);
+    expect((await api('me', { headers: { authorization: `Bearer ${second.accessToken}` } })).status).toBe(401);
+    expect((await api('auth/refresh', json({ refreshToken: elsewhere.refreshToken }))).status).toBe(200);
+  });
+
   it('revokes refresh successors committed after logout authentication while preserving unrelated sessions', async () => {
     const account = await createAccount('logout-refresh-race');
     const login = await emailSignIn({
@@ -9528,6 +9580,7 @@ ${nameLine}
         installationId: 'lru-test-installation-one',
       });
       expect(reLogin.status).toBe(200);
+      const relogged = await reLogin.json() as any;
       const afterReLogin = await env.DB.prepare('SELECT last_seen_at FROM devices WHERE id = ?').bind(devId).first<any>();
       expect(Number(afterReLogin.last_seen_at)).toBeGreaterThan(backdatedTime);
 
@@ -9537,9 +9590,10 @@ ${nameLine}
       // 3. Telemetry is already an immutable, device-attributed heartbeat for
       // the activity view. It must not duplicate that write into the device LRU
       // watermark merely because another periodic window arrived.
+      // Re-login revoked the first session; the new access token is the live one.
       const telRes = await api('telemetry/windows', json(telemetryWindowPayload({
         selectedServer: 'Test Node',
-      }), account.accessToken));
+      }), relogged.accessToken));
       expect(telRes.status).toBe(201);
       const afterTel = await env.DB.prepare('SELECT last_seen_at FROM devices WHERE id = ?').bind(devId).first<any>();
       expect(Number(afterTel.last_seen_at)).toBe(backdatedTime);
@@ -9551,7 +9605,7 @@ ${nameLine}
       await env.DB.prepare('UPDATE devices SET last_seen_at = ? WHERE id = ?').bind(backdatedTime, devId).run();
 
       // 4. Auth refresh update
-      const refreshRes = await api('auth/refresh', json({ refreshToken: account.refreshToken }));
+      const refreshRes = await api('auth/refresh', json({ refreshToken: relogged.refreshToken }));
       expect(refreshRes.status).toBe(200);
       const afterRefresh = await env.DB.prepare('SELECT last_seen_at FROM devices WHERE id = ?').bind(devId).first<any>();
       expect(Number(afterRefresh.last_seen_at)).toBeGreaterThan(backdatedTime);

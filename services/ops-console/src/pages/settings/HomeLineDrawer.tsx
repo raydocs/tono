@@ -4,7 +4,7 @@ import { BILLING_KINDS, METER_SOURCES } from '@contract';
 import { DetailDrawer, Fact } from '@/components/ops/DetailDrawer';
 import { copy } from '@/copy/copy';
 import { settingsApi, type HomeLineInput } from '@/lib/api-settings';
-import { formatBytesMeasured, formatDate } from '@/lib/display';
+import { formatBytesMeasured, formatDate, formatUtcDate } from '@/lib/display';
 import { measured } from '@/components/ops/measured';
 import { fromDateInput, toDateInput, usageDays, type UsageDay } from '@/lib/settings';
 import { shown } from '@/lib/sources';
@@ -293,7 +293,7 @@ function UsageFacts({ line }: { line: HomeLineDto }) {
  * because the two are the same picture and only one of them is a reason to go
  * and look at the meter.
  */
-function UsageStrip({ days, ready }: { days: UsageDay[]; ready: boolean }) {
+export function UsageStrip({ days, ready }: { days: UsageDay[]; ready: boolean }) {
   const peak = days.reduce((max, day) => Math.max(max, day.bytes ?? 0), 0);
   if (!ready || peak === 0) {
     return (
@@ -322,7 +322,7 @@ function UsageBar({ day, peak }: { day: UsageDay; peak: number }) {
   const height = missing ? '2px' : `${share}%`;
   return (
     <span
-      title={`${formatDate(day.dayAt)} · ${missing ? copy.missing : formatBytesMeasured(bytes)}`}
+      title={`${formatUtcDate(day.dayAt)} · ${missing ? copy.missing : formatBytesMeasured(bytes)}`}
       className="min-w-0 flex-1 rounded-[1px]"
       style={{
         height,
