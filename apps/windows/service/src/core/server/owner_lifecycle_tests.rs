@@ -328,3 +328,13 @@ async fn accepted_goodbye_refuses_new_lifecycle_work_before_its_response_grace()
     assert!(super::lifecycle_is_stopping(), "shutdown must stay reserved");
     assert!(reserved_before_unlock, "shutdown must be reserved before dropping the lifecycle lock");
 }
+
+#[test]
+fn scm_stop_releases_when_the_repair_gate_cannot_be_opened() {
+    let unreadable: anyhow::Result<Option<()>> = Err(anyhow::anyhow!("failed to open service repair gate"));
+    assert!(
+        !super::installer_holds_repair_gate(&unreadable),
+        "a gate I/O error is not an installer; stop must not keep protection on it"
+    );
+    assert!(super::installer_holds_repair_gate::<()>(&Ok(None)), "a gate held elsewhere still fences stop");
+}

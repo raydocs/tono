@@ -96,6 +96,41 @@ fn apply_stored_protection(inner: &mut TonoInner, protection: &StoredProtection)
     }
 }
 
+/// H3-restore: a sign-in that supersedes startup restore used to skip the stored-protection
+/// probe, so a stale armed barrier read as Disconnected and the Service-truth poll never watched
+/// it. Probe anyway and surface it as Protected Offline. Startup no longer owns the account
+/// transaction, so the session is never marked verified here and auto-reconnect stays out of it.
+async fn surface_superseded_startup_protection(app: &AppHandle, state: &Arc<TonoState>) {
+    let connect_epoch = state.lock().await.connect_generation;
+    let protection =
+        probe_stored_protection(tokio::time::Instant::now() + RESTORE_TRANSACTION_TIMEOUT).await;
+    let mut inner = state.lock().await;
+    if fold_superseded_startup_protection(&mut inner, connect_epoch, &protection) {
+        emit_status(app, &status_of(&inner));
+    }
+}
+
+/// A Connect or release admitted during the probe owns newer protection state.
+fn fold_superseded_startup_protection(
+    inner: &mut TonoInner, connect_epoch: u64, protection: &StoredProtection,
+) -> bool {
+    let status = inner.fsm.status();
+    if inner.connect_generation != connect_epoch
+        || status.is_connected
+        || status.is_connecting
+        || status.is_disconnecting
+    {
+        return false;
+    }
+    match protection {
+        StoredProtection::Armed(status) => inner.kill_switch = Some((**status).clone()),
+        StoredProtection::Unknown(_) => {}
+        StoredProtection::ProvenAbsent { .. } => return false,
+    }
+    inner.fsm.mark_kill_switch_armed();
+    true
+}
+
 /// The single wording for "we could not read the barrier". It has to name the consequence and
 /// the escape hatch, because the user may be looking at a machine with no network.
 pub(super) fn unknown_protection_message(reason: &str) -> String {
@@ -157,7 +192,10 @@ async fn restore_session_for_generation(
     if let Err(error) = &update_recovery {
         logging!(warn, Type::Service, "Protected update adoption not established: {error:#}");
     }
-    let Some((generation, connect_epoch)) = transaction else { return; };
+    let Some((generation, connect_epoch)) = transaction else {
+        surface_superseded_startup_protection(&app, &state).await;
+        return;
+    };
     let restore_deadline = tokio::time::Instant::now() + RESTORE_TRANSACTION_TIMEOUT;
     {
         let mut inner = state.lock().await;
@@ -716,6 +754,24 @@ mod barrier_before_me_tests {
             inner.sign_in_generation
         };
         (state, generation)
+    }
+
+    #[tokio::test]
+    async fn superseded_startup_restore_still_surfaces_a_stale_barrier() {
+        let state = Arc::new(TonoState::for_test());
+        let mut inner = state.lock().await;
+        let epoch = inner.connect_generation;
+        let armed = StoredProtection::Armed(Box::new(kill_switch(true)));
+        assert!(
+            !fold_superseded_startup_protection(&mut inner, epoch.wrapping_add(1), &armed),
+            "a Connect admitted during the probe owns newer protection state"
+        );
+        assert!(fold_superseded_startup_protection(&mut inner, epoch, &armed));
+        assert!(
+            inner.fsm.status().is_protection_blocked,
+            "a sign-in during startup must not hide a stale armed barrier"
+        );
+        assert!(!inner.fsm.session_verified(), "the superseded restore never promotes the session");
     }
 
     /// H16-O-F7: a stored barrier is published before the network call, not after `me()` answers.
