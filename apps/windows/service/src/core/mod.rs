@@ -22,6 +22,7 @@ pub use structure::{
 };
 
 pub mod paths;
+mod selective_fail_open;
 #[cfg(feature = "standalone")]
 pub use paths::prepare_service_install_directory;
 pub use paths::{OwnerPaths, ServicePaths, mihomo_ipc_path, service_paths};
@@ -66,6 +67,8 @@ mod repair;
 mod runtime;
 #[cfg(feature = "standalone")]
 mod runtime_generation;
+#[cfg(feature = "standalone")]
+mod selective_layer;
 #[cfg(feature = "standalone")]
 mod server;
 #[cfg(feature = "standalone")]

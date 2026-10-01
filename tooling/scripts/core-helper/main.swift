@@ -1508,6 +1508,7 @@ if CommandLine.arguments.dropFirst() == ["--self-test"] {
             && KillSwitchManager.runUnprovenHealthSelfTest()
             && emergencyReleaseDespiteUnreadableLedger(strictKillSwitchEnabled: false)
             && !emergencyReleaseDespiteUnreadableLedger(strictKillSwitchEnabled: true)
+            && SelectiveFailOpen.runSelfTests()
             ? 0 : 1
     )
 }

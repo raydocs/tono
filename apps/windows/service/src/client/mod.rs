@@ -649,12 +649,31 @@ pub async fn restore_protected_dns(
 pub async fn release_kill_switch(
     credentials: &OwnerCredentials,
 ) -> Result<Response<KillSwitchStatus>> {
+    // `null` is the pre-narrow body. Restore and disconnect keep sending it so
+    // a service that has not learned the optional object still opens the network.
     protected_call(
         Verb::Post,
         IpcCommand::ReleaseKillSwitch,
         credentials,
         None,
         (),
+        Some(LIFECYCLE_TIMEOUT),
+    )
+    .await
+}
+
+/// Full release, then the secondary AI hold. Restore and disconnect do not use this.
+pub async fn release_kill_switch_applying_narrow(
+    credentials: &OwnerCredentials,
+) -> Result<Response<KillSwitchStatus>> {
+    protected_call(
+        Verb::Post,
+        IpcCommand::ReleaseKillSwitch,
+        credentials,
+        None,
+        crate::core::structure::ReleaseKillSwitchPayload {
+            apply_narrow_layer: true,
+        },
         Some(LIFECYCLE_TIMEOUT),
     )
     .await

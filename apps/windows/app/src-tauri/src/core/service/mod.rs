@@ -1273,8 +1273,35 @@ impl std::error::Error for ReleaseGotNoReading {}
 /// released, the session that armed the switch is long gone. Idempotent on
 /// the Service side and itself enforces DNS-before-disarm.
 pub(crate) async fn tono_release_kill_switch() -> Result<KillSwitchStatus> {
+    tono_release_kill_switch_inner(false).await
+}
+
+/// Full release, then the secondary AI hold. Used only after a non-strict
+/// fail-open. Restore and disconnect call [`tono_release_kill_switch`].
+pub(crate) async fn tono_release_kill_switch_applying_narrow() -> Result<KillSwitchStatus> {
+    match tono_release_kill_switch_inner(true).await {
+        Ok(status) => Ok(status),
+        Err(error) => {
+            // The secondary hold is optional. A service that rejects the extra
+            // payload, or a hold that fails after the barrier is still up, must
+            // still open the original network.
+            logging!(
+                warn,
+                Type::Service,
+                "Tono: secondary AI hold was not applied; releasing the original network without it: {error:#}"
+            );
+            tono_release_kill_switch_inner(false).await
+        }
+    }
+}
+
+async fn tono_release_kill_switch_inner(apply_narrow: bool) -> Result<KillSwitchStatus> {
     let credentials = current_owner_credentials().context(ReleaseGotNoReading)?;
-    let response = match tono_service_protocol::release_kill_switch(&credentials).await {
+    let response = match if apply_narrow {
+        tono_service_protocol::release_kill_switch_applying_narrow(&credentials).await
+    } else {
+        tono_service_protocol::release_kill_switch(&credentials).await
+    } {
         Ok(response) => response,
         Err(error) => {
             // Release is idempotent. If only its response was lost, a read-back prevents the UI
