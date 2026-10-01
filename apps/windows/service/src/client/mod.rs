@@ -22,7 +22,8 @@ use crate::{
     KillSwitchLockRequest, KillSwitchStatus, MacosProxyConfig, OwnerCredentials, OwnerSessionProof,
     PrepareCoreStartFreshness, PrepareCoreStartPayload, ProtocolInfo, ProtocolVersion,
     ProxyApplyOutcome, RenewDirectRuntimeReloadRequest, ReplaceDirectEndpointsRequest,
-    ReplaceProxyEndpointsRequest, RuntimeBundle, ServiceStatusSnapshot, StageRuntimeOutcome,
+    ReplaceProxyEndpointsRequest, ReplaceSingBoxRuntimeRequest, CommitSingBoxDirectRequest,
+    RuntimeBundle, ServiceStatusSnapshot, StageRuntimeOutcome,
     StartClashRequest, StartClashResult, WriterConfig,
     core::structure::{JsonConvert, Response},
 };
@@ -506,6 +507,38 @@ pub async fn lock_kill_switch(
     protected_call(
         Verb::Post,
         IpcCommand::LockKillSwitch,
+        credentials,
+        Some(session),
+        body,
+        Some(LIFECYCLE_TIMEOUT),
+    )
+    .await
+}
+
+pub async fn replace_sing_box_runtime(
+    credentials: &OwnerCredentials,
+    session: &OwnerSessionProof,
+    body: ReplaceSingBoxRuntimeRequest,
+) -> Result<Response<()>> {
+    protected_call(
+        Verb::Post,
+        IpcCommand::ReplaceSingBoxRuntime,
+        credentials,
+        Some(session),
+        body,
+        Some(LIFECYCLE_TIMEOUT),
+    )
+    .await
+}
+
+pub async fn commit_sing_box_direct(
+    credentials: &OwnerCredentials,
+    session: &OwnerSessionProof,
+    body: CommitSingBoxDirectRequest,
+) -> Result<Response<DirectRuntimeReloadResult>> {
+    protected_call(
+        Verb::Post,
+        IpcCommand::CommitSingBoxDirect,
         credentials,
         Some(session),
         body,
