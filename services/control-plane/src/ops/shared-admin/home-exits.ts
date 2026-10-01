@@ -324,6 +324,9 @@ export async function homeExitsResource(
       || (existing.socks5_password != null && socks5Password !== String(existing.socks5_password))
       ? null
       : (existing.socks5_rotation_required_at == null ? null : Number(existing.socks5_rotation_required_at));
+    // Only a new catalog name is fenced; editing other fields keeps working.
+    const takesCatalogName = kind === 'catalog'
+      && (proxyName !== String(existing.proxy_name) || String(existing.kind ?? 'catalog') !== 'catalog');
     const t = now();
     try {
       const updated = await e.DB.prepare(
@@ -334,15 +337,26 @@ export async function homeExitsResource(
              status = ?, notes = ?, updated_at = ?
          WHERE id = ? AND (? != 'retired' OR NOT EXISTS (
            SELECT 1 FROM user_home_bindings WHERE home_exit_id = home_exits.id
+         ))
+         -- A bound catalog home must not take a fleet-retired node's name:
+         -- the binding fence (home.ts HOME_BINDABLE_SQL) only runs at bind time.
+         AND (? = 0 OR NOT EXISTS (
+           SELECT 1 FROM user_home_bindings WHERE home_exit_id = home_exits.id
+         ) OR NOT EXISTS (
+           SELECT 1 FROM ops_node_profiles WHERE catalog_name = ? AND status = 'retired'
          ))`,
       ).bind(
         proxyName, displayName, egressIpv4, kind,
         socks5Host, socks5Port, socks5Username, socks5Password,
         rotationRequiredAt,
-        status, notes, t, mt[1], status,
+        status, notes, t, mt[1], status, takesCatalogName ? 1 : 0, proxyName,
       ).run();
       if (!updated.meta.changes) {
         if (status === 'retired') throw new ApiError(409, 'HOME_EXIT_IN_USE', 'Unbind all users before retiring this home exit');
+        const stillThere = await e.DB.prepare('SELECT 1 FROM home_exits WHERE id = ?').bind(mt[1]).first<Row>();
+        if (stillThere) {
+          throw new ApiError(409, 'HOME_EXIT_INACTIVE', 'A bound home exit cannot take the name of a fleet-retired node');
+        }
         throw new ApiError(404, 'NOT_FOUND', 'Home exit not found');
       }
     } catch (error) {
