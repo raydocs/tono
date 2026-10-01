@@ -1,6 +1,6 @@
 # R4-Issue1050: Codex (GPT-6.1 Sol) findings
 
-Generated 2026-09-30 23:23 MT from the run's findings.tsv / prs.tsv.
+Generated 2026-09-30 23:48 MT from the run's findings.tsv / prs.tsv.
 
 ## PRs
 
@@ -15,3 +15,4 @@ Generated 2026-09-30 23:23 MT from the run's findings.tsv / prs.tsv.
 | MAC-DASHSCOPE-DIRECT-COVERAGE | shared policy / macOS / Windows | P1 | apps/macos/Tono/Core/ConfigPipeline.swift:114 | Dedicated DashScope/Qwen API hosts fall through Alibaba DIRECT and are absent from recovery holds | real-fixed #1084; local checks pass, native CI pending |
 | FP-1050-SCHEMA | control plane | — | services/control-plane/src/traffic-policy.ts:5 | Assistant carveout requires a new signed-policy wire field | false-positive assistant classifications are compiled into canonical validation and emitters; no schema/signature migration needed |
 | FP-1050-GENERAL-PARENT | shared policy | — | services/control-plane/src/traffic-policy.ts:331 | Permit all DIRECT parents of assistant children to preserve Alibaba routing | false-positive only the reviewed aliyuncs.com parent is needed; other protected-parent overlaps remain rejected |
+| CI-WINDOWS-REPORT-AUX | Windows CI / archived reports | P2 engineering | docs/agent-reports/2026-10-01-orchestration/scripts/merge-manager/aux.sh:1 | Reserved DOS basename causes Windows actions/checkout to fail before compilation | real-unfixed #1100; outside focused #1050 files, awaiting archive-path fix |

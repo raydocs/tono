@@ -346,6 +346,54 @@ final class SingBoxConfigTests: XCTestCase {
         XCTAssertEqual(route["final"] as? String, ConfigPipeline.exitGroupName)
     }
 
+    func testWebDirectClientQueriesAreFakeIPBeforeRealResolvers() throws {
+        ConfigPipeline.managedDirectBundlePathsOverride = ["/Applications/WeChat.app/"]
+        defer { ConfigPipeline.managedDirectBundlePathsOverride = nil }
+        let overlay = ConfigPipeline.OverlayConfig(mixedPort: 29190,
+            externalController: "127.0.0.1:29191", secret: secret, tunEnabled: true,
+            selectedNodeName: "Fixture Beta", claudeHomeNodeName: "Fixture Alpha")
+        let plan = ConfigPipeline.ManagedDirectRuntimePolicy(physicalInterface: "en0",
+            domainPins: [], webDomainPins: [.init(host: "www.qq.com", addresses: ["101.32.104.4"], ports: [443])],
+            mediaEndpoints: [], directResolverHosts: ["www.qq.com"], trusted: true)
+        let result = try ConfigPipeline.buildSingBoxRuntime(overlay: overlay, nodes: nodes(), directPlan: plan)
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: result.runtimeJSON) as? [String: Any])
+        let dns = try XCTUnwrap(json["dns"] as? [String: Any])
+        XCTAssertNil(dns["reverse_mapping"])
+        let dnsRules = try XCTUnwrap(dns["rules"] as? [[String: Any]])
+        let fakePin = try XCTUnwrap(dnsRules.firstIndex {
+            $0["server"] as? String == "Tono-FakeIP" && ($0["domain"] as? [String]) == ["www.qq.com"]
+                && ($0["query_type"] as? [String]) == ["A"]
+        })
+        let fakeSuffix = try XCTUnwrap(dnsRules.firstIndex {
+            $0["server"] as? String == "Tono-FakeIP"
+                && ($0["domain_suffix"] as? [String])?.contains("qq.com") == true
+                && ($0["query_type"] as? [String]) == ["A"]
+        })
+        let hostsRule = try XCTUnwrap(dnsRules.firstIndex { $0["server"] as? String == "Tono-Hosts" })
+        let chinaSuffix = try XCTUnwrap(dnsRules.firstIndex {
+            $0["server"] as? String == "Tono-China-DNS"
+                && ($0["domain_suffix"] as? [String])?.contains("wechat.com") == true
+        })
+        XCTAssertLessThan(fakePin, hostsRule)
+        XCTAssertLessThan(fakeSuffix, chinaSuffix)
+        let earlySuffixes = try XCTUnwrap(dnsRules[fakeSuffix]["domain_suffix"] as? [String])
+        XCTAssertFalse(earlySuffixes.contains("wechat.com"))
+        XCTAssertFalse(earlySuffixes.contains("anthropic.com"))
+        let outbounds = try XCTUnwrap(json["outbounds"] as? [[String: Any]])
+        let webDirect = try XCTUnwrap(outbounds.first { $0["tag"] as? String == ConfigPipeline.webDirectProxyName })
+        XCTAssertEqual((webDirect["domain_resolver"] as? [String: Any])?["server"] as? String, "Tono-China-DNS")
+        let routeRules = try XCTUnwrap((json["route"] as? [String: Any])?["rules"] as? [[String: Any]])
+        let assistant = try XCTUnwrap(routeRules.firstIndex {
+            $0["outbound"] as? String == "Tono-Claude-Home"
+                && ($0["domain_suffix"] as? [String])?.contains("anthropic.com") == true
+        })
+        let web = try XCTUnwrap(routeRules.firstIndex {
+            $0["outbound"] as? String == ConfigPipeline.webDirectGroupName
+                && ($0["domain_suffix"] as? [String]) == ["qq.com"]
+        })
+        XCTAssertLessThan(assistant, web)
+    }
+
     func testProductRuntimeRequiresChromeAndSequentialDoH() throws {
         var values = try nodes()
         values[0].clientFingerprint = "firefox"

@@ -1557,6 +1557,33 @@
         Ok(())
     }
 
+    #[tokio::test]
+    #[serial]
+    async fn a_snapshot_refresh_failure_does_not_block_a_proven_restore() -> Result<()> {
+        reset_dns_state().await;
+        seed_snapshot(vec![adapter("{A}", Some("9.9.9.9"))]).await?;
+        // The original remains readable, but its temporary rewrite cannot be created.
+        // This exercises the same error path as a full disk or a locked temporary file.
+        let temporary = snapshot_path().with_extension("tmp");
+        tokio::fs::create_dir(&temporary).await?;
+
+        test_hooks::set_live_dns_on_loopback(true);
+        let unproven = restore_protected().await;
+        let original_retained = snapshot_path().exists();
+        test_hooks::set_live_dns_on_loopback(false);
+        let proven = restore_protected().await;
+        let policy_restores = test_hooks::take_encrypted_restores();
+        tokio::fs::remove_dir(&temporary).await?;
+        reset_dns_state().await;
+
+        assert!(unproven.is_err(), "a write failure must never bypass the DNS proof");
+        assert!(original_retained, "an unproven restore keeps the user's original DNS");
+        let status = proven.expect("bookkeeping must not refuse a proven DNS restore");
+        assert!(!status.snapshot_present, "a proven restore opens the DNS disarm gate");
+        assert_eq!(policy_restores, 1, "the NRPT/DoH restore must still run");
+        Ok(())
+    }
+
     /// WIN-DNS-SNAPSHOT-DELETE-BLOCKS: with the restore proven and the resolver policy back,
     /// a snapshot delete that keeps failing (an AV or backup handle on the file) is
     /// housekeeping — it must not refuse the release. The restore succeeds, the leftover is
@@ -1794,5 +1821,136 @@
         .expect_err("engine errors still propagate");
         assert!(format!("{error:#}").contains("engine said no"));
         assert!(dns_call_in_flight().is_none());
+        Ok(())
+    }
+
+    fn unrecorded_stop_owner(uid: u32) -> crate::core::auth::AuthenticatedOwner {
+        crate::core::auth::AuthenticatedOwner {
+            key: uid.to_string(),
+            identity: crate::OwnerIdentity::Unix { uid, gid: 20 },
+            app_data_root: std::env::temp_dir(),
+            peer_pid: None,
+            peer_session_id: None,
+        }
+    }
+
+    /// A path no core binary occupies, with logs aimed at the temp dir so a failed restart
+    /// cannot create a writer under the service checkout.
+    fn missing_core_config() -> crate::ClashConfig {
+        let path = std::env::temp_dir().join("tono-core-unrecorded-stop-missing");
+        let _ = std::fs::remove_file(&path);
+        let mut config = crate::ClashConfig::default();
+        config.core_config.core_path = path.to_string_lossy().into_owned();
+        config.log_config.directory = std::env::temp_dir().to_string_lossy().into_owned();
+        config
+    }
+
+    fn unrecorded_stop_kill_switch() -> crate::KillSwitchConfig {
+        crate::KillSwitchConfig {
+            tunnel_interface: "Tono".to_owned(),
+            proxy_endpoints: vec![crate::ProxyEndpoint {
+                ip: "8.8.8.8".to_owned(),
+                port: 443,
+                protocol: crate::ProxyProtocol::Tcp,
+            }],
+            bootstrap_api_hosts: vec!["1.1.1.1".to_owned()],
+            direct_endpoints: Vec::new(),
+        }
+    }
+
+    async fn arm_for_unrecorded_stop(owner_key: &str) -> Result<()> {
+        if crate::core::windows_kill_switch::status().await.wanted {
+            crate::core::windows_kill_switch::release().await?;
+        }
+        crate::core::windows_kill_switch::arm_bootstrap(
+            &unrecorded_stop_kill_switch(),
+            "/opt/tono/mihomo",
+            owner_key,
+        )
+        .await?;
+        Ok(())
+    }
+
+    /// Confirmed stop, desired-state write failed, caller is keeping the session. The core
+    /// binary is absent, so the restart cannot be proven. Protected DNS must come back and
+    /// the barrier must stay; a kept session is not full-opened.
+    #[tokio::test]
+    #[serial]
+    async fn an_unrecorded_stop_restores_dns_without_dropping_the_barrier() -> Result<()> {
+        reset_dns_state().await;
+        test_hooks::set_collected_adapters(vec![adapter("{A}", Some("1.1.1.1"))]);
+        test_hooks::set_live_dns_on_loopback(false);
+        let enabled = enable().await?;
+        assert!(
+            enabled.snapshot_present,
+            "the unrecorded stop starts from protected DNS: {enabled:?}"
+        );
+
+        let owner = unrecorded_stop_owner(91_441);
+        crate::core::desired::persist_owner_core_started(&owner, &missing_core_config()).await?;
+        arm_for_unrecorded_stop(&owner.key).await?;
+        assert!(crate::core::windows_kill_switch::status().await.wanted);
+
+        crate::core::server::recover_after_unrecorded_stop(&owner, false).await?;
+
+        let barrier = crate::core::windows_kill_switch::status().await;
+        assert!(
+            barrier.wanted,
+            "a kept session stays behind the barrier: {barrier:?}"
+        );
+        let dns = status().await;
+        assert!(
+            !dns.snapshot_present,
+            "protected DNS must not stay aimed at the dead resolver: {dns:?}"
+        );
+        let desired = crate::core::desired::load_owner_desired_state(&owner.key).await?;
+        assert!(desired.core_should_be_running);
+        let core = crate::core::manager::CORE_MANAGER.lock().await.status().await;
+        assert!(
+            core.core_pid.is_none(),
+            "the failed restart must not leave a live core: {core:?}"
+        );
+
+        crate::core::windows_kill_switch::release().await?;
+        reset_dns_state().await;
+        Ok(())
+    }
+
+    /// The same unrecorded stop when the caller asked to release. Recovery runs the recorded
+    /// stop transition: DNS is restored, then the non-strict barrier comes down. The failed
+    /// persist is left as it was, so desired state still says the core should be running;
+    /// startup does not replay a run intent that has no restored barrier.
+    #[tokio::test]
+    #[serial]
+    async fn an_unrecorded_release_restores_dns_and_drops_the_non_strict_barrier() -> Result<()> {
+        reset_dns_state().await;
+        test_hooks::set_collected_adapters(vec![adapter("{A}", Some("1.1.1.1"))]);
+        test_hooks::set_live_dns_on_loopback(false);
+        let enabled = enable().await?;
+        assert!(enabled.snapshot_present, "{enabled:?}");
+
+        let owner = unrecorded_stop_owner(91_442);
+        crate::core::desired::persist_owner_core_started(&owner, &missing_core_config()).await?;
+        arm_for_unrecorded_stop(&owner.key).await?;
+
+        crate::core::server::recover_after_unrecorded_stop(&owner, true).await?;
+
+        let barrier = crate::core::windows_kill_switch::status().await;
+        assert!(
+            !barrier.wanted,
+            "an explicit release still drops the non-strict barrier: {barrier:?}"
+        );
+        let dns = status().await;
+        assert!(
+            !dns.snapshot_present,
+            "an explicit release still restores DNS: {dns:?}"
+        );
+        let desired = crate::core::desired::load_owner_desired_state(&owner.key).await?;
+        assert!(desired.core_should_be_running);
+
+        if crate::core::windows_kill_switch::status().await.wanted {
+            crate::core::windows_kill_switch::release().await?;
+        }
+        reset_dns_state().await;
         Ok(())
     }

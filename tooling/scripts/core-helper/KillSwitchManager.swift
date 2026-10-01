@@ -827,6 +827,7 @@ final class KillSwitchManager {
                     keeping: held.token
                 )
             }
+            widenLANScopeIfNeeded()
             return
         }
         do {
@@ -868,6 +869,41 @@ final class KillSwitchManager {
         let message = "tono: kill switch was not filtering while armed; reinstalled "
             + "(live: \(liveAfter))\n"
         FileHandle.standardError.write(Data(message.utf8))
+    }
+
+    /// A NIC that appeared after arm is outside the interface-scoped LAN DNS
+    /// block and falls through to the unscoped `tono-lan` pass. Reload the
+    /// anchor with the wider set. Do not flush states, and do not release the
+    /// anchor if the load fails: the previous rules stay.
+    private func widenLANScopeIfNeeded() {
+        let shown: HelperCommandResult
+        do {
+            shown = try Self.run("/sbin/pfctl", ["-a", killSwitchAnchor, "-sr"])
+        } catch {
+            return
+        }
+        guard shown.status == 0,
+              let text = String(data: shown.output, encoding: .utf8) else { return }
+        let current = Self.physicalEgressInterfaces()
+        guard Self.lanDNSScopeNeedsReload(
+            loaded: Self.lanDNSInterfaces(in: text),
+            current: current
+        ) else { return }
+        do {
+            guard let state = try loadState(), state.armed else { return }
+            _ = try Self.writeRules(
+                state: state,
+                allowedUID: allowedUID,
+                physicalInterfaces: current
+            )
+            var outcome = KernelLoadOutcome.notIssued
+            try Self.ensureAnchorLoaded(flushStates: false, loadOutcome: &outcome)
+        } catch {
+            let detail = (error as? HelperFailure)?.message ?? String(describing: error)
+            FileHandle.standardError.write(Data(
+                "tono: LAN DNS scope reload skipped: \(detail)\n".utf8
+            ))
+        }
     }
 
     /// Read-only view for the connected app. Unlike `status()`, this never
