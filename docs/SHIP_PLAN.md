@@ -34,7 +34,7 @@
 | **G3 发出去还能再发** | 客户能从旧版自动更到这一版，失败证据还在 | issue #26 的 journal 全相位 + 一台已装 Windows / 一台 macOS 真机走通 |
 | **G4 客户版本=你以为的版本** | 更新源指向 0.0.74，不是 GitHub 上挂着、客户还在用 0.0.34 | Sparkle 与 `windows-updates` 推进后，内部设备先吃，再小范围朋友 |
 
-四条齐了才叫过发布标准。老板在 §6 为 G1、G2、G3（仅 0.0.74：G1、G2 即可，G3 按老板 2026-09-26 决定推迟到 0.0.75，见 [DECISIONS](DECISIONS.md)）写下 `[x]` 并附证据链接之前，不改 `public/appcast.xml`、不推 `windows-updates`、不把 0.0.74 标成客户频道；之后由 agent 按 [AGENTS.md](../AGENTS.md) 执行 G4。
+四条齐了才叫过发布标准。老板在 §6 为 G1、G2、G3（仅 0.0.74：G1、G2 即可，G3 按老板 2026-09-26 决定推迟到 0.0.75，见 [DECISIONS](decisions/019-2026-09-26-release-0074-defers-g3.md)）写下 `[x]` 并附证据链接之前，不改 `public/appcast.xml`、不推 `windows-updates`、不把 0.0.74 标成客户频道；之后由 agent 按 [AGENTS.md](../AGENTS.md) 执行 G4。
 
 ---
 
@@ -81,7 +81,7 @@
 ## 2. 硬规则
 
 1. **四条门是发布门，不是愿望清单。** 任何 PR 说明必须写它服务 G1–G4 的哪一条；写不上来的不合进这一发的集成分支。
-2. **客户源只在 G1–G3 证据之后推（仅 0.0.74：G1、G2 即可，G3 按老板 2026-09-26 决定推迟到 0.0.75，见 [DECISIONS](DECISIONS.md)）。** 老板在 §6 为 G1、G2、G3 写下 `[x]` 与证据链接之前，不改 `public/appcast.xml`、不推 `windows-updates`、不把 GitHub release 从 prerelease 改成客户频道。之后由 agent 按 [AGENTS.md](../AGENTS.md) 的发布步骤执行 G4；agent 不改 §6 中 G1–G3 的勾选行，G4 各行由执行 agent 在推源过程中勾。
+2. **客户源只在 G1–G3 证据之后推（仅 0.0.74：G1、G2 即可，G3 按老板 2026-09-26 决定推迟到 0.0.75，见 [DECISIONS](decisions/019-2026-09-26-release-0074-defers-g3.md)）。** 老板在 §6 为 G1、G2、G3 写下 `[x]` 与证据链接之前，不改 `public/appcast.xml`、不推 `windows-updates`、不把 GitHub release 从 prerelease 改成客户频道。之后由 agent 按 [AGENTS.md](../AGENTS.md) 的发布步骤执行 G4；agent 不改 §6 中 G1–G3 的勾选行，G4 各行由执行 agent 在推源过程中勾。
 3. **版本。** 已升到 0.0.74 / macOS build 74（[RELEASE_LINES](RELEASE_LINES.md)），后续提交不回退版本号。冻结提交改的是：`apps/macos/Tono.xcodeproj/project.pbxproj` 的 `MARKETING_VERSION` / `CURRENT_PROJECT_VERSION`、`apps/windows/app/package.json`、`apps/windows/app/src-tauri/Cargo.toml`，以及 `python3 tooling/scripts/verify-desktop-version.py --expected 0.0.74`。夹具里的 `0.0.72` 示例不必全改，那是演示数据。
 4. **目录合同。** 托管目录仍然只有 Tono 签发的出口。hy2 是同一节点的第二块，名字后缀 ` · hy2`（中间是空格+间隔号+空格）。展示名、判定、退役都折叠到基名。禁止为 hy2 另开一套节点身份。
 5. **保护面不得放宽。** hy2 只把 **那一个** `(IPv4, hy2_port, UDP)` 放进 PF/WFP 允许集；禁止 `skip-cert-verify`；禁止非公开 IPv4；Windows `admit_node` 与 macOS `validatedOwnedNode` 只**增** hy2 分支，不删 VLESS Reality 约束。
@@ -99,9 +99,9 @@
 2. Windows 11 真机：编 #138、跑 `cargo test`、装候选包、走 G1 与 G3 清单。云端 Linux agent 不能代替 WFP。
 3. macOS 真机：Developer ID、公证、Sparkle EdDSA、`tooling/scripts/verify-release-gate.sh /path/to/Tono.app`、Helper 安装。
 4. hy2 三网证明（T0）：在 **vm-Gk43AX**（东京 JP Plus，`45.8.173.206`）手工装 hysteria2，电信/联通/移动各 5 次握手 + 30 秒下载；同一套配置再在 **vm-nvLHV3**（洛杉矶，`144.225.255.38`）各测一轮。结果写 `docs/ops/transport-hy2.md`。不通就执行 §2.6 的降级，不要让 agent 猜。
-5. 内部账号灰度：`HY2_CATALOG_EMAILS`（逗号分隔）的邮箱值由老板提供，不写进仓库。其余按 [DECISIONS](DECISIONS.md) 的暂定口径：客户目录默认剥掉 ` · hy2`（未设变量则谁也看不见；Ops/admin 明文目录不剥），不 PUT hy2 块，直到客户端准入合进 `main` 且变量已设。改这个变量之后必须 bump catalog revision（Windows 把同 revision 不同 digest 当篡改）。
+5. 内部账号灰度：`HY2_CATALOG_EMAILS`（逗号分隔）的邮箱值由老板提供，不写进仓库。其余按 [hy2 目录决定](decisions/005-2026-09-24-hy2-stripped-until-admission.md) 的暂定口径：客户目录默认剥掉 ` · hy2`（未设变量则谁也看不见；Ops/admin 明文目录不剥），不 PUT hy2 块，直到客户端准入合进 `main` 且变量已设。改这个变量之后必须 bump catalog revision（Windows 把同 revision 不同 digest 当篡改）。
 6. 在 §6 为 G1–G3 勾 `[x]` 并附证据链接（0.0.74 为 G1、G2；G3 推迟到 0.0.75）。之后推 Sparkle / `windows-updates` / R2 `tono-releases`（G4）由 agent 执行。
-7. 小范围朋友：名单由老板给；看哪些失败率、何时扩大按 G4.4，拿不准时取更保守的一侧并记入 [DECISIONS](DECISIONS.md)。
+7. 小范围朋友：名单由老板给；看哪些失败率、何时扩大按 G4.4，拿不准时取更保守的一侧，并在 [docs/decisions/](decisions/README.md) 新加一个文件。
 
 ---
 
@@ -427,5 +427,5 @@ G3 不要与 G1 并行改同一份 Windows 连接/更新代码；G3.1 基于已�
 1. 每条任务开分支 `cursor/<gate>-<slug>-d57f` 或沿用已有 PR 分支，PR 标题写 `G1.x:` / `G2.x:` / `G3.x:`。
 2. PR 说明：服务哪一扇门、原始测试输出、真机笔录链接或「待老板 G1 清单」、触碰的共享合同（`catalog-yaml.ts`、`telemetry-window.ts`、Helper 协议）。
 3. 控制面迁移 0072 先在 preview apply，再进生产部署脚本。
-4. 需要老板的只有 §3 所列：真机、三网测试、朋友名单与 §6 G1–G3 勾选（0.0.74 为 G1、G2）。其余按本计划与 [AGENTS.md](../AGENTS.md) 推进，产品取舍记入 [DECISIONS](DECISIONS.md)。
+4. 需要老板的只有 §3 所列：真机、三网测试、朋友名单与 §6 G1–G3 勾选（0.0.74 为 G1、G2）。其余按本计划与 [AGENTS.md](../AGENTS.md) 推进，产品取舍在 [docs/decisions/](decisions/README.md) 新加一个文件。
 5. 与 `docs/ops/plan-2026-09-11.md` 冲突时：客户发布门优先。不要把 ChangeReceipt / 角色 / 分页塞进 0.0.74。

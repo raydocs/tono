@@ -154,6 +154,31 @@ pub struct OwnerCredentials {
     pub token: Option<String>,
 }
 
+/// Body of `POST /kill-switch/release`. Absent on older clients, which must
+/// keep the full release and must not install the secondary AI hold.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReleaseKillSwitchPayload {
+    #[serde(default)]
+    pub apply_narrow_layer: bool,
+}
+
+/// `null` (older clients) or the payload object.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+pub enum ReleaseKillSwitchBody {
+    Options(ReleaseKillSwitchPayload),
+    Absent(()),
+}
+
+impl ReleaseKillSwitchBody {
+    pub fn apply_narrow_layer(&self) -> bool {
+        match self {
+            Self::Options(options) => options.apply_narrow_layer,
+            Self::Absent(()) => false,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AuthenticatedRequest<T> {
     pub credentials: OwnerCredentials,
@@ -459,6 +484,10 @@ pub struct KillSwitchStatus {
     pub direct_endpoint_digest: String,
     #[serde(default)]
     pub last_error: Option<String>,
+    /// The Service opened the network because a restored wanted session never proved Core.
+    /// Older payloads omit it and read as false, so a user disconnect does not reconnect.
+    #[serde(default)]
+    pub reconnect_after_release: bool,
 }
 
 /// `POST /kill-switch/lock` payload. `None` locks the interface named at arm time.
@@ -876,8 +905,8 @@ impl<T> JsonConvert for T where T: Serialize + for<'de> Deserialize<'de> {}
 #[cfg(test)]
 mod tests {
     use super::{
-        MacosProxyConfig, OwnerIdentity, ProtocolInfo, ProtocolVersion, RuntimeBundle,
-        ServiceErrorCode, StartClashRequest, StopClashPayload, owner_key,
+        MacosProxyConfig, OwnerIdentity, ProtocolInfo, ProtocolVersion, ReleaseKillSwitchBody,
+        RuntimeBundle, ServiceErrorCode, StartClashRequest, StopClashPayload, owner_key,
     };
 
     #[test]
@@ -965,6 +994,32 @@ mod tests {
             Some(current)
         );
         assert!(ProtocolVersion::parse_header(crate::VERSION).is_none());
+    }
+
+    #[test]
+    fn parse_header_bounded_garbage_does_not_panic() {
+        assert_eq!(
+            ProtocolVersion::parse_header("1.2"),
+            Some(ProtocolVersion {
+                epoch: 1,
+                revision: 2
+            })
+        );
+        assert!(ProtocolVersion::parse_header("").is_none());
+        assert!(ProtocolVersion::parse_header("1").is_none());
+        assert!(ProtocolVersion::parse_header("1.2.3").is_none());
+        assert!(ProtocolVersion::parse_header("a.b").is_none());
+        let mut state: u64 = 7;
+        for _ in 0..32 {
+            state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+            let text: String = (0..12)
+                .map(|shift| {
+                    let byte = b'0' + ((state >> (shift % 8)) & 0x0f) as u8;
+                    byte as char
+                })
+                .collect();
+            let _ = ProtocolVersion::parse_header(&text);
+        }
     }
 
     #[test]
@@ -1126,6 +1181,7 @@ mod tests {
             endpoints: config.proxy_endpoints.clone(),
             direct_endpoint_digest: super::direct_endpoint_digest(&[]).unwrap(),
             last_error: None,
+            reconnect_after_release: false,
         };
         let encoded = serde_json::to_vec(&status).expect("status should serialize");
         assert_eq!(
@@ -1145,6 +1201,7 @@ mod tests {
         let parsed = serde_json::from_value::<KillSwitchStatus>(older)
             .expect("an older payload without the field must still parse");
         assert!(!parsed.tunnel_permit_rendered);
+        assert!(!parsed.reconnect_after_release);
         assert_eq!(parsed.mode, KillSwitchStatusMode::Locked);
         assert_eq!(
             serde_json::from_value::<KillSwitchStatusMode>(serde_json::json!("locked")).unwrap(),
@@ -1219,5 +1276,17 @@ mod tests {
                 .bytes()
                 .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
         );
+    }
+
+    #[cfg(feature = "test")]
+    #[test]
+    fn an_absent_release_body_does_not_apply_the_narrow_layer() {
+        let absent: ReleaseKillSwitchBody = serde_json::from_str("null").unwrap();
+        assert!(!absent.apply_narrow_layer());
+        let present: ReleaseKillSwitchBody =
+            serde_json::from_str(r#"{"apply_narrow_layer":true}"#).unwrap();
+        assert!(present.apply_narrow_layer());
+        let omitted: ReleaseKillSwitchBody = serde_json::from_str("{}").unwrap();
+        assert!(!omitted.apply_narrow_layer());
     }
 }

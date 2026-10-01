@@ -1,5 +1,6 @@
 import { env } from 'cloudflare:test';
 import { beforeEach, describe, expect, it } from 'vitest';
+import { accrueActivityHours } from '../src/ops/customers';
 import {
   edgeAttribution,
   flattenBacklog,
@@ -180,6 +181,51 @@ describe('telemetry flatten', () => {
   it('writes nothing for a window with no events', async () => {
     expect(await flattenWindow(db(), windowRow('win-empty', []), edgeAttribution(undefined, new Set()))).toBe(0);
     expect(await eventCount()).toBe(0);
+  });
+
+  it('copies directional bytes and client version fields onto the connection event', async () => {
+    const row = windowRow('win-bytes', [{
+      ts: RECEIVED * 1000, kind: 'disconnectOk', bytesUp: 10, bytesDown: 40, node: 'Tokyo',
+    }]);
+    const body = JSON.parse(row.payload_json) as Record<string, unknown>;
+    body.appBuild = '74';
+    body.gitCommit = 'abc';
+    body.coreVersion = '1.8';
+    body.channel = 'release';
+    row.payload_json = JSON.stringify(body);
+    expect(await flattenWindow(db(), row, edgeAttribution(undefined, new Set()))).toBe(1);
+    const stored = await db().prepare(
+      `SELECT bytes_up, bytes_down, app_build, git_commit, core_version, channel
+       FROM connection_events WHERE window_id = ?`,
+    ).bind('win-bytes').first();
+    expect(stored).toMatchObject({
+      bytes_up: 10, bytes_down: 40, app_build: '74', git_commit: 'abc', core_version: '1.8', channel: 'release',
+    });
+  });
+
+  it('accrues directional bytes once, on the last overlapped hour', async () => {
+    const startMs = RECEIVED * 1000 - 3_600_000;
+    const endMs = RECEIVED * 1000 + 60_000;
+    const written = await accrueActivityHours(db(), {
+      id: 'win-hours',
+      user_id: USER,
+      device_id: DEVICE,
+      received_at: RECEIVED,
+      client_version: '0.0.74',
+      os_version: 'macOS 14.4',
+      window_start_ms: startMs,
+      window_end_ms: endMs,
+      payload_json: JSON.stringify({
+        uiState: 'connected',
+        selectedServer: 'Tokyo',
+        events: [{ ts: endMs, kind: 'disconnectOk', bytesUp: 10, bytesDown: 40 }],
+      }),
+    }, RECEIVED);
+    expect(written).toBe(2);
+    const rows = await db().prepare(
+      `SELECT bytes_up, bytes_down FROM customer_activity_hours WHERE user_id = ? ORDER BY hour_at`,
+    ).bind(USER).all<{ bytes_up: number; bytes_down: number }>();
+    expect(rows.results.map((hour) => [hour.bytes_up, hour.bytes_down])).toEqual([[0, 0], [10, 40]]);
   });
 
   it('stores attemptId from window events onto connection_events', async () => {

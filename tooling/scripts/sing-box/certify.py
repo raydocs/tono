@@ -111,6 +111,26 @@ def pins():
     return read_json(M0 / "candidate.json", CANDIDATE_SHA)
 
 
+def load_pins(args):
+    """Default stays the frozen M0 candidate. --candidate never rewrites that file."""
+    path = getattr(args, "candidate", None)
+    if not path:
+        return pins(), CANDIDATE_SHA, "M1_OFFLINE_NOT_INSTALLABLE", FROZEN
+    path = Path(path)
+    require(path.is_file(), "TONO_SINGBOX_INVALID_CANDIDATE")
+    digest = file_sha(path)
+    require(digest != CANDIDATE_SHA, "TONO_SINGBOX_INVALID_CANDIDATE")
+    data = read_json(path, digest)
+    scope = data.get("manifest_scope")
+    commit = data.get("contract_commit")
+    require(isinstance(scope, str) and scope and scope != "M1_OFFLINE_NOT_INSTALLABLE",
+            "TONO_SINGBOX_INVALID_CANDIDATE")
+    require(isinstance(commit, str) and len(commit) == 40 and all(c in "0123456789abcdef" for c in commit),
+            "TONO_SINGBOX_INVALID_CANDIDATE")
+    require(data.get("source", {}).get("commit") == commit, "TONO_SINGBOX_INVALID_CANDIDATE")
+    return data, digest, scope, commit
+
+
 def target_for(candidate, name):
     targets = {target_name(t): t for t in candidate["build"]["targets"]}
     require(name in targets, "TONO_SINGBOX_UNSUPPORTED_TARGET")
@@ -186,7 +206,7 @@ def external_directory(path, source=None):
 
 
 def build(args):
-    candidate = pins()
+    candidate, candidate_sha, scope, contract = load_pins(args)
     target = target_for(candidate, args.target)
     source, go = args.source.resolve(), args.go.resolve()
     output = external_directory(args.output, source)
@@ -202,8 +222,8 @@ def build(args):
     command(argv, cwd=source, env=env, seconds=1800)
     source_identity(source, candidate)
     identity = build_info(go, binary, candidate, target)
-    manifest = {"schema_version": 1, "scope": "M1_OFFLINE_NOT_INSTALLABLE",
-                "contract_commit": FROZEN, "candidate_sha256": CANDIDATE_SHA,
+    manifest = {"schema_version": 1, "scope": scope,
+                "contract_commit": contract, "candidate_sha256": candidate_sha,
                 "profile": candidate["profile"], "source": candidate["source"],
                 "build": candidate["build"], "target": target,
                 "binary": binary.name, "binary_sha256": file_sha(binary),
@@ -215,7 +235,7 @@ def build(args):
 
 
 def verify(args):
-    candidate = pins()
+    candidate, candidate_sha, scope, contract = load_pins(args)
     target = target_for(candidate, args.target)
     manifest = read_json(args.manifest, args.manifest_sha256)
     binary = args.binary.resolve()
@@ -223,8 +243,8 @@ def verify(args):
                 "source", "build", "target", "binary", "binary_sha256", "build_info"}
     require(isinstance(manifest, dict) and set(manifest) == expected,
             "TONO_SINGBOX_INVALID_MANIFEST")
-    for key, value in {"schema_version": 1, "scope": "M1_OFFLINE_NOT_INSTALLABLE",
-                       "contract_commit": FROZEN, "candidate_sha256": CANDIDATE_SHA,
+    for key, value in {"schema_version": 1, "scope": scope,
+                       "contract_commit": contract, "candidate_sha256": candidate_sha,
                        "profile": candidate["profile"], "source": candidate["source"],
                        "build": candidate["build"], "target": target,
                        "binary": "sing-box.exe" if target["goos"] == "windows" else "sing-box"}.items():
@@ -294,7 +314,22 @@ def check(args):
         diagnostic = command([binary, "check", "-c", config], cwd=staging,
                              env={"PATH": os.defpath, "HOME": staging}, seconds=15, expected_exit=1)
         require("invalid public_key" in diagnostic, "TONO_SINGBOX_NEGATIVE_CONTROL_FAILED")
-    report = {"status": "parser-only-not-authenticated", "profile": pins()["profile"],
+        for emitted in getattr(args, "emitted", None) or []:
+            raw = Path(emitted).read_bytes()
+            require(0 < len(raw) <= LIMIT and not raw.startswith(b"\xef\xbb\xbf"),
+                    "TONO_SINGBOX_INVALID_JSON")
+            try:
+                json.loads(raw.decode("utf-8"))
+            except (ValueError, UnicodeError):
+                raise Refusal("TONO_SINGBOX_INVALID_JSON") from None
+            config = Path(staging) / "emitted.json"
+            config.write_bytes(raw)
+            config.chmod(0o400)
+            command([binary, "check", "-c", config], cwd=staging,
+                    env={"PATH": os.defpath, "HOME": staging}, seconds=15)
+            receipts.append({"platform_shape": "emitted-json", "runtime_sha256": sha(raw), "check_exit": 0})
+            config.unlink()
+    report = {"status": "parser-only-not-authenticated", "profile": load_pins(args)[0]["profile"],
               "binary_sha256": result["binary_sha256"], "node_count": 2,
               "selected_index": 1, "checks": receipts, "invalid_key_check_exit": 1}
     (output / "check.json").write_bytes(encoded(report))
@@ -309,6 +344,7 @@ def main():
     build_parser.add_argument("--output", type=Path, required=True)
     for name, sub in (("build", build_parser), ("verify", commands.add_parser("verify")),
                       ("check", commands.add_parser("check"))):
+        sub.add_argument("--candidate", type=Path)
         sub.add_argument("--go", type=Path, required=True)
         sub.add_argument("--target", required=True)
         if name != "build":
@@ -318,6 +354,7 @@ def main():
         if name == "check":
             sub.add_argument("--fixture", type=Path, required=True)
             sub.add_argument("--output", type=Path, required=True)
+            sub.add_argument("--emitted", type=Path, action="append")
     args = parser.parse_args()
     try:
         print(encoded({"ok": True, **globals()[args.action](args)}).decode(), end="")

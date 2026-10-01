@@ -55,4 +55,35 @@ final class DiagnosticsLogOwnershipTests: XCTestCase {
         guard case .uploaded = await uploader.sweep() else { return XCTFail("owned record not uploaded") }
         guard case .idle = await uploader.sweep() else { return XCTFail("cursor did not consume excluded lines") }
     }
+
+    /// A prefix that fills one read chunk and contains no line for this scope
+    /// used to look like a failed gzip. The cursor stayed put, so the owned
+    /// line after that chunk never uploaded.
+    func testOwnedLinesAfterAFullForeignChunkStillUpload() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let log = directory.appendingPathComponent("audit.jsonl")
+        let foreign = Data("{\"_uploadScope\":\"old\",\"host\":\"old.example\"}\n".utf8)
+        var body = Data()
+        body.reserveCapacity(DiagnosticsLogUploader.readChunkBytes + foreign.count + 64)
+        while body.count < DiagnosticsLogUploader.readChunkBytes {
+            body.append(foreign)
+        }
+        let ownedLine = "{\"_uploadScope\":\"new\",\"host\":\"new.example\"}\n"
+        body.append(Data(ownedLine.utf8))
+        try body.write(to: log)
+        let expected = try XCTUnwrap(DiagnosticsLogUploader.gzip(Data(ownedLine.utf8)))
+        let uploader = DiagnosticsLogUploader(auditLogURL: log, scopeID: "new", isEnabled: { true }) {
+            data, _, _, lines, _, _ in
+            XCTAssertEqual(lines, 1)
+            XCTAssertEqual(data, expected)
+        }
+        guard case .uploaded = await uploader.sweep() else {
+            return XCTFail("owned line after a foreign chunk was not uploaded")
+        }
+        guard case .idle = await uploader.sweep() else {
+            return XCTFail("cursor did not advance past the foreign chunk")
+        }
+    }
 }
