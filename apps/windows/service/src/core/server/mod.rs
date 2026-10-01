@@ -427,9 +427,21 @@ pub(crate) async fn retire_expired_fresh_arm(epoch: u64) -> AnyResult<()> {
     if lifecycle_is_stopping() {
         return Ok(());
     }
+    // H-IPC-2 again: only a gate another process holds means an installer owns this cleanup.
+    // An I/O error preparing or locking `.repair.lock` proves no installer, and refusing on it
+    // retried the same refusal every tick while the machine stayed Blocked.
     #[cfg(windows)]
-    let _repair = crate::acquire_service_repair_gate()?
-        .context("native installer owns abandoned-Connect cleanup")?;
+    let repair = crate::acquire_service_repair_gate();
+    #[cfg(windows)]
+    if installer_holds_repair_gate(&repair) {
+        anyhow::bail!("native installer owns abandoned-Connect cleanup");
+    }
+    #[cfg(windows)]
+    if let Err(error) = &repair {
+        warn!(
+            "Repair gate unavailable; no installer holds it, so abandoned-Connect cleanup proceeds: {error:#}"
+        );
+    }
     #[cfg(windows)]
     crate::core::update::release_admission()?;
 
@@ -454,13 +466,45 @@ pub(crate) async fn retire_expired_fresh_arm(epoch: u64) -> AnyResult<()> {
     } else {
         warn!("Abandoned Connect does not own the active Core; releasing its arm and leaving that Core running");
     }
-    if load_owner_desired_state(&owner_key).await?.core_should_be_running {
-        persist_owner_core_stopped_by_key(&owner_key).await?;
-    }
-    if stops_core {
-        clear_active_owner().await?;
+    // The Core stop is confirmed (or the Core is another owner's). A run-intent write that
+    // keeps failing (ProgramData ACL damage, an AV handle) must not refuse the release every
+    // tick. Replay stays fenced without it: `restore_desired_state` starts nothing when the
+    // active-owner record is gone (cleared independently of the run-intent write below) or
+    // when no wanted barrier is restored (the release writes a wanted:false tombstone and,
+    // if that write fails, removes the stale wanted record). Only all three writes failing,
+    // or a crash before the release writes anything, can leave a same-boot replay behind.
+    if let Err(error) = retire_abandoned_run_intent(&owner_key, stops_core).await {
+        warn!(
+            "Abandoned Connect run intent could not be retired; releasing after the confirmed Core stop: {error:#}"
+        );
     }
     windows_kill_switch::release_expired_fresh_arm(epoch).await
+}
+
+async fn retire_abandoned_run_intent(owner_key: &str, clears_active_owner: bool) -> AnyResult<()> {
+    let run_intent = async {
+        if load_owner_desired_state(owner_key)
+            .await?
+            .core_should_be_running
+        {
+            persist_owner_core_stopped_by_key(owner_key).await?;
+        }
+        AnyResult::Ok(())
+    }
+    .await;
+    // Independent of the run-intent write: an absent active owner alone fences Core replay.
+    let active_owner = if clears_active_owner {
+        clear_active_owner().await
+    } else {
+        Ok(())
+    };
+    match (run_intent, active_owner) {
+        (Ok(()), Ok(())) => Ok(()),
+        (Err(error), Ok(())) | (Ok(()), Err(error)) => Err(error),
+        (Err(run_intent), Err(active_owner)) => Err(anyhow!(
+            "{run_intent:#}; the active owner could not be cleared either: {active_owner:#}"
+        )),
+    }
 }
 
 // 防止旧 listener 的清理删除 supervisor 刚创建的新 socket。

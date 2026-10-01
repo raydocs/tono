@@ -3260,6 +3260,17 @@ async fn release_unproven_wanted_session_unlocked() -> Result<()> {
         }
         Err(error) => {
             CRASH_TOMBSTONE_PENDING.store(true, Ordering::Release);
+            // The old wanted record would put the barrier back on a same-boot restart, and
+            // `restore_desired_state` would replay its Core behind it. No record is the
+            // next-best durable state (startup then restores no barrier); the pending retry
+            // still writes the tombstone once the store is writable.
+            match tokio::fs::remove_file(intent_path()).await {
+                Ok(()) => {}
+                Err(remove) if remove.kind() == std::io::ErrorKind::NotFound => {}
+                Err(remove) => tracing::warn!(
+                    "wanted-session core window: the stale wanted intent could not be removed either: {remove}"
+                ),
+            }
             Err(error).context(
                 "WFP was removed but the crash-recovery tombstone could not be written",
             )
@@ -4904,6 +4915,69 @@ mod tests {
         assert!(held, "the release keeps AI blocked");
         assert_eq!(core, Some(CoreInstance { pid: 4251, generation: 1 }), "another owner's Core is not stopped");
         assert_eq!(active.map(|owner| owner.owner_key).as_deref(), Some("owner-bob"));
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn fresh_arm_expiry_releases_when_the_run_intent_cannot_be_retired() -> Result<()> {
+        cleanup().await;
+        arm_bootstrap(&test_config(), "/opt/tono/mihomo", "owner-alice").await?;
+        // A directory where the desired-state file belongs: every read and write of it fails,
+        // like a persistent ProgramData ACL or AV-handle failure.
+        let desired = crate::core::paths::service_paths()
+            .for_owner_key("owner-alice")
+            .desired_state_path();
+        tokio::fs::create_dir_all(&desired).await?;
+        let alice = crate::core::auth::AuthenticatedOwner {
+            key: "owner-alice".to_owned(),
+            identity: crate::OwnerIdentity::Unix {
+                uid: 97_013,
+                gid: 20,
+            },
+            app_data_root: std::env::temp_dir(),
+            peer_pid: None,
+            peer_session_id: None,
+        };
+        crate::core::desired::persist_active_owner(&alice).await?;
+        *WANTED_CORE_DEADLINE
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(std::time::Instant::now());
+
+        // The intent store fails too, so the release cannot write its tombstone.
+        let failures = SimulatedStateFailures::arm(true, false);
+        let retired =
+            crate::core::server::retire_expired_fresh_arm(FRESH_ARM_EPOCH.load(Ordering::Acquire))
+                .await;
+        let wanted = status().await.wanted;
+        let held = crate::core::selective_layer::test_hold_active();
+        drop(failures);
+        // The fault clears and the Service restarts in the same boot.
+        let restarted = restore_on_service_start().await;
+        let wanted_after_restart = status().await.wanted;
+        let active = crate::core::desired::load_active_owner().await;
+        let _ = crate::core::desired::clear_active_owner().await;
+        tokio::fs::remove_dir_all(&desired).await?;
+        cleanup().await;
+
+        assert!(
+            retired.is_err(),
+            "the unwritten tombstone is still reported: {retired:?}"
+        );
+        assert!(
+            !wanted,
+            "a stopped abandoned Connect must not stay Blocked on a run-intent write failure"
+        );
+        assert!(held, "the release keeps AI blocked");
+        restarted?;
+        assert!(
+            !wanted_after_restart,
+            "a same-boot restart must not restore the retired session's barrier"
+        );
+        assert!(
+            active?.is_none(),
+            "the active owner is cleared even though the run intent could not be written"
+        );
         Ok(())
     }
 
