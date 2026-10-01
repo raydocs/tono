@@ -164,7 +164,7 @@ describe('tono activity wrappers', () => {
 describe('subscribeTonoStatus', () => {
   const payload = { accountState: 'ready' } as TonoStatus
 
-  it('shares one backend listener across subscribers and reference-counts the teardown', async () => {
+  it('reuses a live backend listener when a later subscriber mounts', async () => {
     const unlisten = vi.fn()
     let emit: ((event: { payload: TonoStatus }) => void) | undefined
     listenMock.mockImplementation((_name: string, callback: unknown) => {
@@ -173,30 +173,34 @@ describe('subscribeTonoStatus', () => {
     })
 
     const first = vi.fn()
+    const firstLive = vi.fn()
     const second = vi.fn()
     const secondLive = vi.fn()
-    const unsubFirst = subscribeTonoStatus(first)
+    const unsubFirst = subscribeTonoStatus(first, firstLive)
+    await vi.waitFor(() => expect(firstLive).toHaveBeenCalledTimes(1))
+    // A page mounts after the layout's asynchronous registration has settled.
+    await Promise.resolve()
     const unsubSecond = subscribeTonoStatus(second, secondLive)
 
-    // Registration starts once, synchronously, no matter how many subscribers.
-    expect(listenMock).toHaveBeenCalledTimes(1)
-    expect(listenMock).toHaveBeenCalledWith('tono://status', expect.anything())
-    // `secondLive` runs once the shared listener is live.
-    await vi.waitFor(() => expect(secondLive).toHaveBeenCalledTimes(1))
+    try {
+      expect(listenMock).toHaveBeenCalledTimes(1)
+      expect(listenMock).toHaveBeenCalledWith('tono://status', expect.anything())
+      expect(secondLive).toHaveBeenCalledTimes(1)
+      emit?.({ payload })
+      expect(first).toHaveBeenCalledTimes(1)
+      expect(second).toHaveBeenCalledTimes(1)
+      expect(first).toHaveBeenCalledWith(payload)
+      expect(second).toHaveBeenCalledWith(payload)
 
-    emit?.({ payload })
-    expect(first).toHaveBeenCalledWith(payload)
-    expect(second).toHaveBeenCalledWith(payload)
-
-    // One subscriber leaving keeps the listener alive for the rest.
-    unsubFirst()
-    expect(unlisten).not.toHaveBeenCalled()
-    emit?.({ payload })
-    expect(first).toHaveBeenCalledTimes(1)
-    expect(second).toHaveBeenCalledTimes(2)
-
-    // The last teardown unlistens.
-    unsubSecond()
+      unsubFirst()
+      expect(unlisten).not.toHaveBeenCalled()
+      emit?.({ payload })
+      expect(first).toHaveBeenCalledTimes(1)
+      expect(second).toHaveBeenCalledTimes(2)
+    } finally {
+      unsubFirst()
+      unsubSecond()
+    }
     expect(unlisten).toHaveBeenCalledTimes(1)
   })
 })
@@ -385,6 +389,17 @@ describe('connectErrorSuggestsServerSwitch', () => {
 })
 
 describe('connectErrorSuggestsBackupChannel', () => {
+  it('does not offer another route when the UDP hop only went idle', () => {
+    const error = new Error(
+      'TONO_CONNECT_HY2_IDLE: timeout: no recent network activity',
+    )
+    expect(connectErrorSuggestsServerSwitch(error)).toBe(false)
+    expect(connectErrorSuggestsBackupChannel(error)).toBe(false)
+    expect(formatTonoActionError(error, (key) => `translated:${key}`)).toBe(
+      'translated:tono.dashboard.errors.hy2Idle (TONO_CONNECT_HY2_IDLE)',
+    )
+  })
+
   it('offers the backup channel for handshake eof and unreachable exits', () => {
     for (const error of [
       new Error(

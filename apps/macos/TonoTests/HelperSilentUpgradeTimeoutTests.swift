@@ -61,4 +61,54 @@ final class HelperSilentUpgradeTimeoutTests: XCTestCase {
             "silent upgrade poll window must allow 45s for helper restart and version reconciliation"
         )
     }
+
+    func testUpgradeRequestThatNeverReachedHelperSkipsSilentUpgradePoll() {
+        XCTAssertFalse(
+            HelperManager.upgradeRequestMayHaveBeenDelivered(HelperIPCError.socketFailed),
+            "a socket or send failure means the helper never received the upgrade request; polling would stall the caller 45s"
+        )
+        XCTAssertFalse(
+            HelperManager.upgradeRequestMayHaveBeenDelivered(HelperIPCError.connectFailed),
+            "a failed connect means the helper never received the upgrade request"
+        )
+        XCTAssertFalse(
+            HelperManager.upgradeRequestMayHaveBeenDelivered(
+                HelperIPCError.boundToAnotherUser("other-account")
+            ),
+            "a socket bound to another account means the helper never received the upgrade request"
+        )
+        XCTAssertTrue(
+            HelperManager.upgradeRequestMayHaveBeenDelivered(HelperIPCError.emptyResponse),
+            "a reply lost after the whole request was written may still leave an upgrade under way, so the poll stays"
+        )
+        XCTAssertTrue(
+            HelperManager.upgradeRequestMayHaveBeenDelivered(HelperIPCError.invalidResponse),
+            "an unparseable reply still proves the helper received the request, so the poll stays"
+        )
+    }
+
+    /// Cancelling or failing a replacement after Core stopped must release
+    /// the old helper's PF; success and a never-stopped Core keep protection.
+    func testAbandonedUpgradeReleasesOnlyAfterPreviousCoreStopped() {
+        XCTAssertTrue(
+            HelperManager.shouldReleaseAfterAbandonedUpgrade(
+                coreStopped: true, succeeded: false
+            )
+        )
+        XCTAssertFalse(
+            HelperManager.shouldReleaseAfterAbandonedUpgrade(
+                coreStopped: true, succeeded: true
+            )
+        )
+        XCTAssertFalse(
+            HelperManager.shouldReleaseAfterAbandonedUpgrade(
+                coreStopped: false, succeeded: false
+            )
+        )
+        XCTAssertFalse(
+            HelperManager.shouldReleaseAfterAbandonedUpgrade(
+                coreStopped: false, succeeded: true
+            )
+        )
+    }
 }

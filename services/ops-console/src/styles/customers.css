@@ -50,3 +50,55 @@
     border-radius: 18px;
   }
 }
+
+/* The dashboard band above the list: six tiles, then the expiry weeks and the
+   heaviest users. The page takes the dashboard width; outside any layer,
+   because `.page-wrap` itself is unlayered. */
+.page-wrap.customers-page.customers-wide { max-width: 1280px; }
+
+.customers-page .customers-board { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+
+.customers-page .customers-stats {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.customers-page .customers-charts {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.customers-page .customers-top { display: flex; flex-direction: column; }
+.customers-page .customers-top li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--hairline);
+}
+.customers-page .customers-top li:last-child { border-bottom: 0; }
+.customers-page .customers-top-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.customers-page .customers-top-name:hover { text-decoration: underline; }
+.customers-page .customers-top-use { display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; }
+
+@media (max-width: 1280px) {
+  .customers-page .customers-stats { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (max-width: 1100px) {
+  .customers-page .customers-charts { grid-template-columns: minmax(0, 1fr); }
+}
+/* On a phone the list is the job; the dashboard follows it. */
+@media (max-width: 640px) {
+  .customers-page .customers-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .customers-page .customers-board { order: 1; }
+}

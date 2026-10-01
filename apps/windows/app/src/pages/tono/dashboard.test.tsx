@@ -9,6 +9,7 @@ import {
 import i18n from 'i18next'
 import { initReactI18next } from 'react-i18next'
 import { MemoryRouter } from 'react-router'
+import { SWRConfig } from 'swr'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import enShared from '@/locales/en/shared.json'
@@ -25,7 +26,9 @@ const mocks = vi.hoisted(() => ({
   tonoPrepareSupportReport: vi.fn(),
   tonoUploadDiagnostics: vi.fn(),
   trafficLive: false,
-  traffic: undefined as { up: number; down: number } | undefined,
+  traffic: undefined as
+    | { up: number; down: number; upTotal?: number; downTotal?: number }
+    | undefined,
   refreshGetClashTraffic: vi.fn(),
   encryptedDnsOverrides: false,
 }))
@@ -60,6 +63,7 @@ vi.mock('@/services/tono', async (importOriginal) => ({
 }))
 
 vi.mock('./connect-progress', () => ({ ConnectProgressCard: () => null }))
+vi.mock('@/tono-ui/AiTrafficCard', () => ({ AiTrafficCard: () => null }))
 
 import DashboardPage from './dashboard'
 
@@ -84,9 +88,11 @@ const makeStatus = (overrides: Partial<TonoStatus> = {}): TonoStatus => ({
 
 const renderDashboard = () =>
   render(
-    <MemoryRouter>
-      <DashboardPage />
-    </MemoryRouter>,
+    <SWRConfig value={{ provider: () => new Map() }}>
+      <MemoryRouter>
+        <DashboardPage />
+      </MemoryRouter>
+    </SWRConfig>,
   )
 
 beforeEach(() => {
@@ -112,11 +118,6 @@ beforeEach(() => {
   mocks.traffic = undefined
   mocks.refreshGetClashTraffic.mockReset()
   mocks.encryptedDnsOverrides = false
-  try {
-    window.localStorage.removeItem('tono.connectChecklistDismissed')
-  } catch {
-    /* ignore */
-  }
 })
 
 afterEach(async () => {
@@ -515,6 +516,25 @@ describe('dashboard live traffic copy', () => {
     expect(screen.queryByText('Reading traffic…')).toBeNull()
     expect(screen.getByText('4.00 KB/s')).toBeDefined()
   })
+
+  it('adds this connection total next to the upload rate', () => {
+    mocks.status = makeStatus({
+      uiState: 'connected',
+      selectedServer: 'US West 1',
+    })
+    mocks.trafficLive = true
+    mocks.traffic = {
+      up: 2048,
+      down: 4096,
+      upTotal: 512 * 1024 * 1024,
+      downTotal: 512 * 1024 * 1024,
+    }
+    renderDashboard()
+
+    expect(
+      screen.getByText('↑ 2.00 KB/s · This connection 1.00 GB'),
+    ).toBeDefined()
+  })
 })
 
 describe('dashboard claude residential route badge', () => {
@@ -562,7 +582,8 @@ describe('dashboard claude residential route badge', () => {
     ).toBeDefined()
   })
 
-  it('hides the first-connect checklist after handshake eof so the next hand is visible', async () => {
+  it('hides the idle Encrypted DNS hint after handshake eof so the next hand is visible', async () => {
+    mocks.encryptedDnsOverrides = true
     mocks.status = makeStatus({ selectedServer: 'Tokyo · Sakura' })
     mocks.tonoConnect.mockRejectedValue(
       new Error(
@@ -570,22 +591,35 @@ describe('dashboard claude residential route badge', () => {
       ),
     )
     renderDashboard()
-    expect(screen.getByText('First connect')).toBeDefined()
+    expect(
+      await screen.findByText(
+        'Turn off Windows Encrypted DNS (Settings → Network & internet → DNS).',
+      ),
+    ).toBeDefined()
 
     fireEvent.click(
       screen.getByRole('button', {
         name: 'Standby — Click to connect',
       }),
     )
-    await waitFor(() => expect(screen.queryByText('First connect')).toBeNull())
+    await waitFor(() =>
+      expect(
+        screen.queryByRole('button', { name: 'Open Windows DNS settings' }),
+      ).toBeNull(),
+    )
     // Progress card owns Retry / Choose route. This box used to say
     // switching cities will not help, which hid the next hand.
     expect(screen.queryByTestId('tono-action-error-message')).toBeNull()
   })
 
-  it('does not put Open Windows DNS settings on the idle first-connect card', async () => {
+  it('shows no first-connect checklist while idle and Windows DNS is fine', async () => {
     renderDashboard()
-    expect(await screen.findByText('First connect')).toBeDefined()
+    expect(
+      await screen.findByRole('button', {
+        name: 'Standby — Click to connect',
+      }),
+    ).toBeDefined()
+    expect(screen.queryByText('First connect')).toBeNull()
     expect(
       screen.queryByRole('button', { name: 'Open Windows DNS settings' }),
     ).toBeNull()
@@ -615,6 +649,25 @@ describe('dashboard claude residential route badge', () => {
       screen.getByRole('button', { name: 'Open Windows DNS settings' }),
     ).toBeDefined()
     expect(screen.queryByText('First connect')).toBeNull()
+  })
+
+  it('says protected in one line when connected instead of explaining every route', async () => {
+    mocks.status = makeStatus({
+      uiState: 'connected',
+      selectedServer: 'Tokyo · Sakura',
+      directOverlay: 'on',
+    })
+    renderDashboard()
+    expect(
+      (
+        await screen.findAllByText(
+          'Traffic is protected. A drop will not leak your IP.',
+        )
+      ).length,
+    ).toBeGreaterThan(0)
+    expect(
+      screen.queryByText(/WeChat and other China apps go direct/),
+    ).toBeNull()
   })
 
   it('offers explicit confirmed Disconnect for an incomplete update even while idle, without calling it cancellation', async () => {

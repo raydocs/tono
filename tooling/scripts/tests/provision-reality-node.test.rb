@@ -13,6 +13,7 @@ require "minitest/autorun"
 require "open3"
 require "rbconfig"
 require "tmpdir"
+require "yaml"
 
 SCRIPT = File.expand_path("../provision-reality-node.rb", __dir__)
 FRONTS = JSON.parse(File.read(File.expand_path("../reality-fronts.json", __dir__))).freeze
@@ -70,6 +71,49 @@ end
 class Hy2StaysOptIn < Minitest::Test
   REALITY_REMOTE = File.expand_path("../remote/manage-tono-reality-node.sh", __dir__)
   HY2_REMOTE = File.expand_path("../remote/manage-tono-hy2-node.sh", __dir__)
+
+  def test_hy2_catalog_keeps_the_public_key_pin_returned_by_the_node
+    Dir.mktmpdir("provision-hy2-pin") do |directory|
+      File.chmod(0o700, directory)
+      output = File.join(directory, "hy2.yaml")
+      fixture = <<~RUBY
+        module FixtureProvisioning
+          def run_remote(_target, _script, mode, _arguments)
+            case mode
+            when "preflight"
+              {"xrayActive" => true, "existingHy2" => false, "udpPortInUse" => false,
+               "arch" => "x86_64", "os" => "debian-12", "ufwActive" => false}
+            when "apply"
+              {"deploymentId" => "20260930T120000Z-1234abcd", "fingerprint" => (["AA"] * 32).join(":"),
+               "certificatePublicKeySha256" => "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=", "xrayUntouched" => true}
+            else
+              raise "Unexpected remote operation: " + mode
+            end
+          end
+          def verified_hysteria_binary(_asset, directory)
+            path = File.join(directory, "fixture-binary")
+            File.write(path, "fixture-only")
+            path
+          end
+          def upload_artifact(*); end
+          def remove_uploaded_artifact(*); end
+        end
+        Object.prepend(FixtureProvisioning)
+        $PROGRAM_NAME = ARGV.shift
+        load $PROGRAM_NAME
+      RUBY
+      stdout, stderr, status = Open3.capture3(
+        RbConfig.ruby, "-e", fixture, SCRIPT,
+        "--ssh", "fixture-only", "--name", "Fixture Node", "--server", "203.0.113.10",
+        "--hy2", "--apply", "--output", output,
+      )
+      assert_predicate(status, :success?, stdout + stderr)
+      proxy = YAML.safe_load(File.read(output)).fetch("proxies").first
+      assert_equal("AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=", proxy.fetch("certificate-public-key-sha256"))
+      assert_equal("aa" * 32, proxy.fetch("fingerprint"))
+      assert_equal(false, proxy.fetch("skip-cert-verify"))
+    end
+  end
 
   def test_debian11_complement_requires_the_supported_systemd_runtime
     # Source only function definitions: no SSH, service mutation, or host OS reads.

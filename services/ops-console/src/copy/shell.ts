@@ -50,12 +50,12 @@ export const shellCopy = {
   sourceLine: (who: string, state: string, when: string) => `${who} ${state} · ${when}`,
   sourceLineNever: (who: string, state: string) => `${who} ${state}`,
   /**
-   * How old the page in front of you is. It refreshes itself every minute, so
-   * a stamp that has stopped moving means the console stopped hearing back —
-   * which the reader has to be told, not left to infer from numbers that look
-   * as current as ever.
+   * How old the page in front of you is. An old displayed read must remain
+   * visible even when another request succeeds, rather than leaving the
+   * reader to infer its age from numbers that look as current as ever.
    */
   pageAsOf: (when: string) => `本页截至 ${when}`,
+  pageStale: '本页数据可能不是最新',
   consoleStale: '后台没响应',
   /**
    * Right after a deploy the pages read as silent for hours while thirty days
@@ -67,18 +67,7 @@ export const shellCopy = {
   sessionExpired: '登录已过期',
   sessionExpiredBody: '登录已过期，页面上的数据不会再更新。重新登录后继续。',
   reload: '重新登录',
-  viewCards: '卡片',
-  viewTable: '表格',
-  occupancy: '在用人数',
-  occupancyUnit: '人',
-  fleetOccupancyTotal: (n: number) => `机队在用 ${n} 人`,
-  fleetTrafficTotal: (used: string, quota: string) => `已用 ${used} / 额度 ${quota}`,
-  fleetTrafficUsedOnly: (used: string) => `已用 ${used}`,
-  periodTraffic: '本周期流量',
-  customerPath: '客户去程',
-  notWired: '未接入',
   pathNotWired: '客户去程数据尚未接入',
-  mainlandReturn: '大陆回程',
   renew: '续费/到期',
   lastMeasured: '最后测量',
   missing: '—',
@@ -127,19 +116,6 @@ export const shellCopy = {
     ok: '正常',
     unmeasured: '未测',
   } as const,
-  /**
-   * The count sentence, one fragment per health word, in the order the engine
-   * ranks them. It reads as prose and behaves as a filter, so the words are the
-   * same ones the cards carry — 在售 belongs to the lifecycle chips and is
-   * deliberately not repeated here.
-   */
-  count: {
-    lost: (n: number) => `${n} 台失联`,
-    blocked: (n: number) => `${n} 台被墙`,
-    degraded: (n: number) => `${n} 台劣化`,
-    ok: (n: number) => `${n} 台正常`,
-    unmeasured: (n: number) => `${n} 台未测`,
-  },
   /** The worst carrier on each leg, as the card prints it. */
   worstCarrier: (who: string, first: string, second: string) => `${who} ${first} · ${second}`,
   /** A span, not a point: "已持续 2 小时" reads wrong as "2 小时前". */

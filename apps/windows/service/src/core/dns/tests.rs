@@ -539,6 +539,21 @@
     }
 
     #[test]
+    fn space_delimited_originals_restore_as_separate_servers() {
+        // Mobile broadband drivers write this documented NameServer representation.
+        let mut saved = adapter("{A}", Some("10.20.30.41 10.20.30.40"));
+        saved.ipv6_name_server = Some("2001:db8::53 2001:db8::54".to_owned());
+        assert_eq!(
+            restored_live_servers_v4(&saved),
+            Some(vec!["10.20.30.41".to_owned(), "10.20.30.40".to_owned()]),
+        );
+        assert_eq!(
+            restored_live_servers_v6(&saved),
+            Some(vec!["2001:db8::53".to_owned(), "2001:db8::54".to_owned()]),
+        );
+    }
+
+    #[test]
     fn restore_proof_covers_v6_only_adapters() {
         let v6_only = AdapterDnsSnapshot {
             interface_guid: "{V6}".to_owned(),
@@ -1048,6 +1063,30 @@
         Ok(())
     }
 
+    /// Update proof is a read. With the barrier still wanted, a missing snapshot must not
+    /// reset adapters to DHCP or remove NRPT: WFP is still denying the resolvers that heal
+    /// would put back. The heal stays for the already-disarmed orphan, where DHCP can answer.
+    #[tokio::test]
+    #[serial]
+    async fn update_observe_heals_snapshotless_dns_only_when_the_barrier_is_down() -> Result<()> {
+        reset_dns_state().await;
+        test_hooks::set_collected_adapters(vec![adapter("{A}", Some(PROTECTED_DNS_V4))]);
+        let status = observe_for_update_with(true).await?;
+        assert!(!status.enabled && !status.snapshot_present, "{status:?}");
+        assert_eq!(test_hooks::take_automatic_resets(), 0);
+        assert_eq!(test_hooks::take_encrypted_restores(), 0);
+
+        let healed = observe_for_update_with(false).await;
+        assert!(
+            healed.is_err(),
+            "adapters still on the TUN endpoint must not read as safe"
+        );
+        assert_eq!(test_hooks::take_automatic_resets(), 1);
+        assert_eq!(test_hooks::take_encrypted_restores(), 1);
+        reset_dns_state().await;
+        Ok(())
+    }
+
     /// The pure half of the P0 fix: what the window says, given only the four observable
     /// values. In particular an open window that has aged past the cap stops suppressing —
     /// a leaked depth cannot mute the machine's network events for the life of the service.
@@ -1109,6 +1148,35 @@
         );
     }
 
+    /// The async caller can time out and drop its guard while `spawn_blocking` is still writing
+    /// the registry. The window has to stay up until that write returns, or the notification
+    /// looks like the machine's network changed.
+    #[test]
+    #[serial]
+    fn an_abandoned_caller_does_not_close_the_window_the_write_still_holds() {
+        let depth_before = SELF_WRITE_DEPTH.load(Ordering::Acquire);
+        let (started, started_rx) = std::sync::mpsc::channel();
+        let (release, release_rx) = std::sync::mpsc::channel();
+        let writer = std::thread::spawn(move || {
+            hold_self_write_across_the_write(|| {
+                started.send(()).expect("test thread still listening");
+                release_rx.recv().expect("test released the write");
+            });
+        });
+        started_rx.recv().expect("write started");
+        assert!(
+            in_self_write_window(),
+            "the write still owns the window after its caller would have returned"
+        );
+        assert_eq!(
+            SELF_WRITE_DEPTH.load(Ordering::Acquire),
+            depth_before + 1
+        );
+        release.send(()).expect("writer still waiting");
+        writer.join().expect("writer thread");
+        assert_eq!(SELF_WRITE_DEPTH.load(Ordering::Acquire), depth_before);
+    }
+
     /// The end-to-end shape of the P0: an `enable` applies loopback DNS inside a window, and
     /// the window is closed again by the time the call returns. A notification arriving during
     /// the apply is attributable to us; one arriving a second later is the machine's.
@@ -1158,6 +1226,7 @@
         test_hooks::set_live_apply_fails(false);
         test_hooks::set_apply_batch_unavailable(false);
         test_hooks::set_encrypted_restore_fails(false);
+        test_hooks::set_snapshot_delete_fails(false);
         test_hooks::take_automatic_resets();
         test_hooks::take_encrypted_restores();
         test_hooks::set_collected_adapters(Vec::new());
@@ -1483,6 +1552,48 @@
             status.last_error, None,
             "the live state confirms the restore outright — this is not the degraded exit"
         );
+        reset_dns_state().await;
+        Ok(())
+    }
+
+    /// WIN-DNS-SNAPSHOT-DELETE-BLOCKS: with the restore proven and the resolver policy back,
+    /// a snapshot delete that keeps failing (an AV or backup handle on the file) is
+    /// housekeeping — it must not refuse the release. The restore succeeds, the leftover is
+    /// surfaced as a warning-grade note, and the next restore retries the deletion.
+    #[tokio::test]
+    #[serial]
+    async fn a_snapshot_delete_failure_after_a_proven_restore_still_releases() -> Result<()> {
+        reset_dns_state().await;
+        seed_snapshot(vec![adapter("{A}", Some("1.1.1.1"))]).await?;
+        test_hooks::set_snapshot_delete_fails(true);
+
+        let status = restore_protected().await?;
+
+        assert!(
+            status.snapshot_present,
+            "the leftover snapshot stays on disk instead of failing the restore"
+        );
+        let note = status
+            .last_error
+            .expect("the undeletable leftover must be surfaced as a note");
+        assert!(
+            note.contains(DNS_RESTORE_DEGRADED_PREFIX),
+            "the App must read it as a warning, not a failed restore: {note}"
+        );
+        assert!(
+            note.contains("could not be deleted"),
+            "unexpected note: {note}"
+        );
+        // The disarm gate runs a second restore on the same leftover: it must pass too.
+        ensure_restored().await?;
+
+        // The leftover is inert housekeeping, not a life sentence: once the handle is gone
+        // the next restore deletes the file and reports a clean status.
+        test_hooks::set_snapshot_delete_fails(false);
+        let cleaned = restore_protected().await?;
+        assert!(!cleaned.snapshot_present);
+        assert_eq!(cleaned.last_error, None);
+
         reset_dns_state().await;
         Ok(())
     }

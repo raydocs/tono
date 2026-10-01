@@ -29,11 +29,14 @@ import { Providers } from './settings/Providers';
  * into a note — and a hash that names none of them lands on the alert rules,
  * which is the section an operator opens without being sent to it.
  */
+/** The sections that are dashboards take the wider column the dashboard pages use. */
+const WIDE: ReadonlySet<SettingsSection> = new Set(['homeinventory', 'homelines']);
+
 export default function SettingsPage({ section }: { section: string | null }) {
   const active = resolveSection(section);
 
   return (
-    <div className="page-wrap settings-page">
+    <div className={cn('page-wrap settings-page', WIDE.has(active) && 'settings-wide')}>
       <div className="settings-layout flex flex-col gap-6 min-[900px]:flex-row min-[900px]:gap-10">
         <Rail active={active} />
         <div className="flex min-w-0 flex-1 flex-col gap-6">

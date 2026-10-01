@@ -23,6 +23,8 @@ export const todayCopy = {
     due: '今日到期',
     swept: '节点已测',
   } as const,
+  todayKpiGroup: '今天的四个数',
+  todaySweptOf: (swept: string, listed: string) => `${swept}/${listed}`,
   severity: {
     severe: '严重',
     warn: '注意',

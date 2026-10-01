@@ -365,9 +365,11 @@ static DNS_LAST_ERROR: Lazy<Mutex<Option<String>>> = Lazy::new(|| Mutex::new(Non
 // decision function, and every race in it resolves toward *publishing* — never toward silence.
 //
 // **The window cannot stick on.** It is opened by an RAII guard whose `Drop` is the only writer
-// that lowers the depth, so a panic, an early `?`, a timed-out `bounded_dns_call` or a dropped
-// (cancelled) future all close it. `SELF_WRITE_MAX_WINDOW` is the belt-and-braces half: past
-// that age an open window stops suppressing even if the depth were somehow leaked.
+// that lowers the depth, so a panic or an early `?` closes the guard that the async caller
+// holds. A timed-out `bounded_dns_call` or a dropped future does **not** finish the registry
+// write: `spawn_blocking` keeps running. That write holds its own guard until it returns, so
+// the notification it raises is still ours. `SELF_WRITE_MAX_WINDOW` is the belt-and-braces
+// half: past that age an open window stops suppressing even if a depth were leaked.
 //
 // **It is harmless if DNS writes never raise the notification at all** (the one link in the
 // audit that only a Windows machine can settle): with no notification there is nothing to
@@ -467,9 +469,12 @@ pub(crate) fn self_write_depth_for_tests() -> u32 {
 
 /// RAII marker for "this service is writing adapter DNS right now".
 ///
-/// Deliberately a guard and not a flag: the apply it wraps can fail, panic, time out inside
-/// `bounded_dns_call`, or have its future dropped, and every one of those must close the
-/// window. Nothing else in this module may set the state directly.
+/// Deliberately a guard and not a flag: the apply it wraps can fail or panic, and unwinding
+/// closes the window. Nothing else in this module may set the state directly.
+///
+/// The guard the async function holds dies when `bounded_dns_call` times out or the future is
+/// dropped. The registry write does not: it runs on a blocking thread. [`hold_self_write_across_the_write`]
+/// is that thread's guard, and it is the one that must stay up until the write returns.
 #[must_use = "the suppression window closes the moment the guard is dropped"]
 pub(crate) struct SelfWriteWindow(());
 
@@ -485,6 +490,17 @@ impl SelfWriteWindow {
         SELF_WRITE_DEPTH.fetch_add(1, Ordering::AcqRel);
         SelfWriteWindow(())
     }
+}
+
+/// Hold the self-write window for the whole registry write, including after the async
+/// caller has given up and dropped its own guard.
+#[cfg_attr(
+    not(any(test, all(windows, not(feature = "test")))),
+    allow(dead_code)
+)]
+fn hold_self_write_across_the_write<T>(work: impl FnOnce() -> T) -> T {
+    let _window = SelfWriteWindow::open();
+    work()
 }
 
 impl Drop for SelfWriteWindow {
@@ -532,9 +548,19 @@ fn parse_name_server_list(value: &str) -> Vec<String> {
 /// (`engine::apply_snapshot`), which is what the restore proof compares.
 #[cfg_attr(any(not(windows), feature = "test"), allow(dead_code))]
 fn restored_family_servers(profile: Option<&str>, base: Option<&str>) -> Option<Vec<String>> {
-    let profile = profile.map(parse_name_server_list).unwrap_or_default();
+    // Windows also accepts space-separated servers, used by mobile broadband drivers.
+    // Normalize at the restore boundary; ownership/protection predicates keep their contract.
+    let parse_servers = |value: &str| {
+        value
+            .split(|separator: char| separator == ',' || separator.is_ascii_whitespace())
+            .map(str::trim)
+            .filter(|server| !server.is_empty())
+            .map(ToOwned::to_owned)
+            .collect::<Vec<_>>()
+    };
+    let profile = profile.map(parse_servers).unwrap_or_default();
     let effective = if profile.is_empty() {
-        base.map(parse_name_server_list).unwrap_or_default()
+        base.map(parse_servers).unwrap_or_default()
     } else {
         profile
     };
@@ -1586,6 +1612,11 @@ const DNS_FLUSH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15
 /// "busy".
 #[cfg(any(all(windows, not(feature = "test")), test))]
 const DNS_SLOW_CALL: std::time::Duration = std::time::Duration::from_secs(5);
+/// Retries for the snapshot delete after a proven restore: an AV or backup handle on the
+/// file is typically transient, and the delete is housekeeping — it must never outvote the
+/// proof above it.
+const SNAPSHOT_DELETE_ATTEMPTS: usize = 3;
+const SNAPSHOT_DELETE_RETRY_DELAY: std::time::Duration = std::time::Duration::from_millis(100);
 
 /// A DNS engine call that was handed to a blocking thread and has not come back yet.
 ///
@@ -1899,7 +1930,7 @@ async fn engine_apply_protected(adapters: &[AdapterDnsSnapshot]) -> Result<Vec<(
             .map(|adapter| adapter.interface_guid.clone())
             .collect::<Vec<_>>();
         return bounded_dns_call(DNS_APPLY_TIMEOUT, "apply protected DNS", move || {
-            engine::apply_protected_set(&guids)
+            hold_self_write_across_the_write(|| engine::apply_protected_set(&guids))
         })
         .await;
     }
@@ -1929,7 +1960,7 @@ async fn engine_apply_snapshot(snapshot: &DnsSnapshot) -> Result<Vec<(String, bo
     {
         let snapshot = snapshot.clone();
         return bounded_dns_call(DNS_APPLY_TIMEOUT, "restore snapshot", move || {
-            engine::apply_snapshot(&snapshot)
+            hold_self_write_across_the_write(|| engine::apply_snapshot(&snapshot))
         })
         .await;
     }
@@ -2112,6 +2143,20 @@ pub(crate) mod test_hooks {
         NRPT_SWEEP_HANGS.store(hangs, Ordering::Relaxed);
     }
 
+    static SNAPSHOT_DELETE_FAILS: AtomicBool = AtomicBool::new(false);
+
+    /// While set, the snapshot delete after a proven restore fails every round: an antivirus
+    /// or backup handle on the file that outlives the retry budget.
+    #[cfg(any(not(windows), feature = "test"))]
+    pub(crate) fn snapshot_delete_fails() -> bool {
+        SNAPSHOT_DELETE_FAILS.load(Ordering::Relaxed)
+    }
+
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn set_snapshot_delete_fails(fails: bool) {
+        SNAPSHOT_DELETE_FAILS.store(fails, Ordering::Relaxed);
+    }
+
     #[cfg(test)]
     static AUTOMATIC_RESETS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
@@ -2160,7 +2205,7 @@ async fn engine_suppress_encrypted_dns() -> Result<()> {
         return bounded_dns_call(
             DNS_APPLY_TIMEOUT,
             "suppress encrypted DNS",
-            engine::suppress_encrypted_dns,
+            || hold_self_write_across_the_write(engine::suppress_encrypted_dns),
         )
         .await;
     }
@@ -2177,7 +2222,7 @@ async fn engine_restore_encrypted_dns() -> Result<bool> {
         return bounded_dns_call(
             DNS_APPLY_TIMEOUT,
             "restore encrypted DNS",
-            engine::restore_encrypted_dns,
+            || hold_self_write_across_the_write(engine::restore_encrypted_dns),
         )
         .await;
     }
@@ -2651,6 +2696,17 @@ async fn restore_resolver_policy() -> Result<Option<String>> {
     }))
 }
 
+/// The committed restore's last housekeeping step: delete the snapshot. Test builds can
+/// inject a persistent failure here (the AV/backup-handle scenario), so the retry-and-note
+/// behavior in [`restore_protected`] stays exercisable off Windows.
+async fn remove_restored_snapshot() -> std::io::Result<()> {
+    #[cfg(any(not(windows), feature = "test"))]
+    if test_hooks::snapshot_delete_fails() {
+        return Err(std::io::Error::other("simulated snapshot delete failure"));
+    }
+    tokio::fs::remove_file(snapshot_path()).await
+}
+
 /// Restore adapters and resolver policies before dropping their recovery snapshot. A failed
 /// proof keeps the snapshot and, via the disarm invariant, the block armed.
 pub(crate) async fn restore_protected() -> Result<DnsProtectionStatus> {
@@ -2793,14 +2849,51 @@ pub(crate) async fn restore_protected() -> Result<DnsProtectionStatus> {
     // Required resolver cleanup belongs to the disarm proof, not best-effort housekeeping.
     // A failed NRPT/DoH restore retains the adapter snapshot and its independent captures.
     let capture_note = record_outcome(restore_resolver_policy().await)?;
-    match tokio::fs::remove_file(snapshot_path()).await {
-        Ok(()) => {}
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-        Err(error) => return Err(error.into()),
+    // The restore is proven by here; deleting the snapshot is housekeeping. A delete that
+    // fails on something other than absence (typically a transient AV sharing violation)
+    // used to fail the whole restore and, through the disarm gate, refuse the WFP release —
+    // the machine stayed blocked over a file that no longer describes a redirect. Retry
+    // briefly, then keep the leftover and surface it: with `PROTECTION_WANTED` false the
+    // watchdog will not re-apply it, the next enable merges it as the originals it already
+    // holds, and the next restore retries the delete.
+    let mut leftover: Option<std::io::Error> = None;
+    for attempt in 0..SNAPSHOT_DELETE_ATTEMPTS {
+        match remove_restored_snapshot().await {
+            Ok(()) => {
+                leftover = None;
+                break;
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                leftover = None;
+                break;
+            }
+            Err(error) => {
+                if attempt + 1 < SNAPSHOT_DELETE_ATTEMPTS {
+                    tokio::time::sleep(SNAPSHOT_DELETE_RETRY_DELAY).await;
+                }
+                leftover = Some(error);
+            }
+        }
     }
-    // Committed: the snapshot is gone. The degraded-restore note (adapter DNS) and the capture
-    // note (Encrypted DNS) describe different losses, so both reach `last_error`.
-    if let Some(note) = join_notes(degraded, settle_capture_loss(capture_note).await) {
+    let leftover_note = leftover.map(|error| {
+        tracing::warn!(
+            "dns: the restored protected-dns snapshot could not be deleted ({error}); it will \
+             be retried on the next restore"
+        );
+        format!(
+            "{DNS_RESTORE_DEGRADED_PREFIX}: the original DNS servers were restored and \
+             verified, but the recovery snapshot file could not be deleted ({error}); the \
+             leftover matches the restored DNS and is inert — the next disconnect retries \
+             the deletion"
+        )
+    });
+    // Committed as far as the machine is concerned. The degraded-restore note (adapter
+    // DNS), the leftover-snapshot note and the capture note (Encrypted DNS) describe
+    // different losses, so all reach `last_error`.
+    if let Some(note) = join_notes(
+        degraded,
+        join_notes(leftover_note, settle_capture_loss(capture_note).await),
+    ) {
         surface_success_note(&note);
     }
     if let Err(error) = engine_flush_cache().await {
@@ -3076,7 +3169,7 @@ fn run_on_detached_thread<T: Send + 'static>(
 /// The removal itself: Tono's key only, an absent key is success, and the result is read back.
 #[cfg(all(windows, not(feature = "test")))]
 fn sweep_tono_resolver_rule() -> Result<()> {
-    engine::remove_nrpt_rule()
+    hold_self_write_across_the_write(engine::remove_nrpt_rule)
 }
 
 /// The stub stands in for a registry call that never returns, or one that fails.
@@ -3113,10 +3206,20 @@ pub(crate) async fn status() -> DnsProtectionStatus {
 
 /// Transaction proof reads actual adapter state under the DNS writer lock.
 /// The diagnostic cache is deliberately not proof of update recovery.
+///
+/// A missing snapshot is healed only when the barrier is already down. Healing
+/// while it is wanted resets adapters to DHCP and, on the no-session path,
+/// removes the NRPT catch-all, while WFP is still denying physical DNS.
 #[cfg(windows)]
 pub(crate) async fn observe_for_update() -> Result<DnsProtectionStatus> {
+    let barrier_wanted = crate::core::windows_kill_switch::status().await.wanted;
+    observe_for_update_with(barrier_wanted).await
+}
+
+#[cfg(any(windows, test))]
+async fn observe_for_update_with(barrier_wanted: bool) -> Result<DnsProtectionStatus> {
     let _operation = DNS_OPERATION.lock().await;
-    if !snapshot_path().exists() {
+    if !snapshot_path().exists() && !barrier_wanted {
         ensure_snapshotless_dns_is_safe().await?;
     }
     status_unlocked().await
@@ -3400,6 +3503,16 @@ fn is_active_dns_adapter(oper_status: i32, if_type: u32, has_bound_ip: bool) -> 
 }
 
 // --- Windows engine: registry snapshot/set + native apply, legacy compatibility/restore ---
+
+#[cfg(all(windows, not(feature = "test")))]
+pub(crate) fn install_selective_nrpt() -> Result<()> {
+    engine::install_selective_nrpt()
+}
+
+#[cfg(all(windows, not(feature = "test")))]
+pub(crate) fn remove_selective_nrpt() -> Result<()> {
+    engine::remove_selective_nrpt()
+}
 
 #[cfg(all(windows, not(feature = "test")))]
 mod engine;
