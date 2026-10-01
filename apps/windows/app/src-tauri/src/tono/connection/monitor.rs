@@ -14,9 +14,10 @@ use crate::tono::{
     bootstrap, commands, signed_apps,
     connection_health::{
         CoreSample, HealthLegs, NetworkChangeOutcome, NetworkEventProbeEffect, NetworkEventProbePlan,
-        apply_network_event_probe, classify_core_sample, connection_loop_continues, core_change_fires,
+        apply_network_event_probe,         classify_core_sample, commit_core_baseline, connection_loop_continues, core_change_fires,
         health_threshold_reached, kill_switch_unhealthy_for_monitor, may_recover_in_place,
-        monitor_requires_reconnect, network_event_fires, owned_direct_reload_in_flight,
+        monitor_requires_reconnect, network_event_fires, next_network_events_counter,
+        owned_direct_reload_in_flight,
         plan_network_event_probe, protected_dns_unhealthy,
     },
     connection_plan::{guard_rejection_is_transient, reconnect_allowed},
@@ -861,7 +862,6 @@ pub(super) async fn network_monitor_loop(state: Arc<TonoState>, app: AppHandle) 
             let first_sample = inner.network_events_counter.is_none();
             let counter = snapshot.network_events.counter;
             let network_changed = !first_sample && inner.network_events_counter != Some(counter);
-            inner.network_events_counter = Some(counter);
 
             // M4: a core crash/restart shows up as a new pid or a bumped restart counter; the
             // TUN LUID is re-resolved by the fresh transaction's lock phase.
@@ -884,17 +884,27 @@ pub(super) async fn network_monitor_loop(state: Arc<TonoState>, app: AppHandle) 
                 0
             };
             let core_changed = !first_sample && core_change_fires(sample, missing_core_samples);
-            if sample != CoreSample::Missing || core_changed {
-                inner.last_core_pid = snapshot.core_pid;
-                inner.last_restart_count = Some(snapshot.restart_count);
-            }
 
-            // P0-13: merge event bursts — only the first change inside the
-            // debounce window invalidates Connected.
+            // P0-13: the first change inside the window invalidates Connected.
+            // A later change in that window stays pending. Consuming the
+            // counter or the core baseline here would make the next tick look
+            // quiet, so the event would be lost instead of retried.
             let invalidated = network_event_fires(
                 network_changed || core_changed,
                 inner.last_network_event_at.map(|at| at.elapsed()),
             );
+            inner.network_events_counter = next_network_events_counter(
+                inner.network_events_counter,
+                counter,
+                first_sample,
+                invalidated,
+            );
+            if (sample != CoreSample::Missing || core_changed)
+                && commit_core_baseline(first_sample, core_changed, invalidated)
+            {
+                inner.last_core_pid = snapshot.core_pid;
+                inner.last_restart_count = Some(snapshot.restart_count);
+            }
             if invalidated {
                 inner.last_network_event_at = Some(std::time::Instant::now());
             }
