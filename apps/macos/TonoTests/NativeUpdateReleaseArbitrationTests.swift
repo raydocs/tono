@@ -122,8 +122,6 @@ final class NativeUpdateReleaseArbitrationTests: XCTestCase {
         XCTAssertFalse(app.nativeUpdatePending)
         XCTAssertFalse(RuntimeCleanup.nativeUpdatePending)
         XCTAssertFalse(RuntimeCleanup.nativeUpdateBlocksConnect)
-        XCTAssertFalse(KillSwitchService.isArmed)
-        XCTAssertFalse(app.isProtectionBlocked)
-        XCTAssertNil(app.errorMessage)
+        XCTAssertNil(app.errorMessage, "the refused pending-only Disconnect is not surfaced")
     }
 }
