@@ -1,6 +1,8 @@
 import { createHash, createPublicKey, verify } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
+import { lstatSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, rmSync } from 'node:fs'
 import { readFile, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 import path from 'node:path'
 import process from 'node:process'
 import { pathToFileURL } from 'node:url'
@@ -36,6 +38,128 @@ export class AppcastRefusal extends Error {
 
 function refuse(reason) {
   throw new AppcastRefusal(reason)
+}
+
+function runReleaseGate(appPath) {
+  const script = path.resolve(import.meta.dirname, 'verify-release-gate.sh')
+  try {
+    execFileSync(script, [appPath], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    })
+  } catch (error) {
+    const detail = `${error.stdout ?? ''}${error.stderr ?? ''}`.trim()
+    const line = detail.split('\n').filter(Boolean).at(-1) ?? error.message
+    refuse(`verify-release-gate.sh rejected ${appPath}: ${line}`)
+  }
+}
+
+// Manifest of the app that is actually inside the zip. Symlinks are hashed as
+// the link text stored in the entry, not as the file they point at. __MACOSX
+// is AppleDouble sidecars, not part of the bundle Sparkle installs.
+const ZIP_APP_MANIFEST_PY = `
+import hashlib, sys, zipfile
+from pathlib import Path
+rows = []
+with zipfile.ZipFile(sys.argv[1]) as archive:
+    for info in archive.infolist():
+        name = info.filename.replace('\\\\', '/')
+        parts = Path(name).parts
+        if not name or name.startswith('/') or '..' in parts:
+            raise SystemExit(f'refusing zip entry {name!r}')
+        if name.startswith('__MACOSX/') or name.endswith('/'):
+            continue
+        if not name.startswith('Tono.app/'):
+            raise SystemExit(f'published zip entry is not inside Tono.app: {name}')
+        rel = name[len('Tono.app/'):]
+        if not rel:
+            continue
+        mode = (info.external_attr >> 16) & 0o170000
+        kind = 'link' if mode == 0o120000 else 'file'
+        digest = hashlib.sha256(archive.read(info)).hexdigest()
+        rows.append(f'{kind} {rel}\\0{digest}')
+if not rows:
+    raise SystemExit('published zip has no files under Tono.app')
+print('\\n'.join(sorted(rows)))
+`
+
+const EXTRACT_APP_PY = `
+import os, sys, zipfile
+from pathlib import Path
+dest = Path(sys.argv[2]).resolve()
+with zipfile.ZipFile(sys.argv[1]) as archive:
+    for info in archive.infolist():
+        name = info.filename.replace('\\\\', '/')
+        parts = Path(name).parts
+        if not name or name.startswith('/') or '..' in parts:
+            raise SystemExit(f'refusing zip entry {name!r}')
+    archive.extractall(dest)
+for dirpath, dirnames, filenames in os.walk(dest, followlinks=False):
+    for name in dirnames + filenames:
+        path = Path(dirpath) / name
+        if not path.is_symlink():
+            continue
+        resolved = path.resolve()
+        if os.path.commonpath([str(dest), str(resolved)]) != str(dest):
+            raise SystemExit(f'symlink escapes the published zip: {path}')
+`
+
+export function appBundleManifest(root) {
+  const rows = []
+  const visit = (rel) => {
+    const abs = rel ? path.join(root, rel) : root
+    const info = lstatSync(abs)
+    if (rel && info.isSymbolicLink()) {
+      const target = readlinkSync(abs)
+      rows.push(`link ${rel}\0${createHash('sha256').update(target).digest('hex')}`)
+      return
+    }
+    if (info.isDirectory()) {
+      for (const name of readdirSync(abs).sort()) visit(rel ? `${rel}/${name}` : name)
+      return
+    }
+    if (!rel || !info.isFile()) refuse(`${rel || root} is not a regular file in the app bundle`)
+    rows.push(`file ${rel}\0${createHash('sha256').update(readFileSync(abs)).digest('hex')}`)
+  }
+  visit('')
+  rows.sort()
+  return rows.join('\n')
+}
+
+function zipAppManifest(zipPath) {
+  try {
+    return execFileSync('python3', ['-c', ZIP_APP_MANIFEST_PY, zipPath], { encoding: 'utf8' }).replace(
+      /\n$/,
+      '',
+    )
+  } catch (error) {
+    const detail = `${error.stderr ?? ''}`.trim().split('\n').filter(Boolean).at(-1) ?? error.message
+    refuse(`could not read Tono.app inside the published zip: ${detail}`)
+  }
+}
+
+function extractPublishedApp(zipPath) {
+  const dest = mkdtempSync(path.join(tmpdir(), 'tono-appcast-zip-'))
+  try {
+    execFileSync('python3', ['-c', EXTRACT_APP_PY, zipPath, dest], { encoding: 'utf8' })
+  } catch (error) {
+    rmSync(dest, { recursive: true, force: true })
+    const detail = `${error.stderr ?? ''}`.trim().split('\n').filter(Boolean).at(-1) ?? error.message
+    refuse(`could not extract Tono.app from the published zip: ${detail}`)
+  }
+  return { dest, appPath: path.join(dest, 'Tono.app') }
+}
+
+function gatePublishedApp(zipPath, appPath) {
+  if (zipAppManifest(zipPath) !== appBundleManifest(appPath)) {
+    refuse('the --app bundle is not byte-identical to Tono.app inside the zip being published')
+  }
+  const extracted = extractPublishedApp(zipPath)
+  try {
+    runReleaseGate(extracted.appPath)
+  } finally {
+    rmSync(extracted.dest, { recursive: true, force: true })
+  }
 }
 
 function requireString(value, label) {
@@ -891,6 +1015,13 @@ async function main() {
   console.log(`url ${result.fields.enclosureUrl}`)
   console.log(`app SUPublicEDKey ${result.publicKey}`)
   console.log('signature verified against that key over the enclosure bytes')
+  // Dry-run is the workflow's publish rehearsal, and a later run without
+  // --dry-run is the manual publish. Both have to refuse an app the helper
+  // would reject. The gate runs on the app extracted from this zip, and only
+  // after that tree matches --app byte for byte. The Sparkle signature covers
+  // the zip bytes, not Developer ID, notarization, or the helper's client
+  // requirement.
+  gatePublishedApp(zipPath, appPath)
   if (options['dry-run'] || options['validate-only']) {
     console.log(`validated only; ${feedPath} was not modified`)
     return

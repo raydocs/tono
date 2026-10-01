@@ -144,7 +144,8 @@ pub use test_credentials::test_owner_credentials;
 pub use test_credentials::test_owner_credentials_for_uid;
 #[cfg(feature = "standalone")]
 pub use windows_kill_switch::{
-    emergency_disarm_windows_kill_switch, note_core_replay_finished,
+    emergency_disarm_windows_kill_switch, emergency_disarm_windows_kill_switch_applying_narrow,
+    note_core_replay_finished,
     prepare_for_service_replacement, relock_restored_tunnel, residual_filters_present,
     restore_on_service_start as restore_windows_kill_switch,
     retire_unverified_on_service_start as retire_unverified_windows_kill_switch,
