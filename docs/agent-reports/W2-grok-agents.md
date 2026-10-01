@@ -77,3 +77,26 @@ Hunter: Grok 4.7。槽位 W2-grok-agents。基线 `origin/main` `50bbbbf0`。范
 | [#842](https://github.com/raydocs/tono/pull/842) `hunt/grok-agents-provision-repo-path-2c38` | 已请求；落后于 main 时被 `raydocs` 关掉 | 无 |
 | [#845](https://github.com/raydocs/tono/pull/845) `hunt/grok-agents-migrate-current-2c38` | 已请求；落后于 main 时被 `raydocs` 关掉 | 无 |
 | [#853](https://github.com/raydocs/tono/pull/853) `hunt/grok-agents-report-2c38` | 已请求；落后于 main 时被 `raydocs` 关掉 | 无。仅文档 |
+
+## 2026-10-01 续查
+
+四份排查笔记回来之后又对过当前 `main`。能用失败测试钉住、而且现有 PR 没覆盖的，各开了一条修复。文档 PR 不挂 auto-merge。#842 的 auto-merge 由队列管理，本轮没有再打开或关掉。#845 与 #853 已合入。
+
+| ID | 区域 | 严重度 | 文件:行 | 一句话 | 结论 |
+|---|---|---|---|---|---|
+| HOME-AGENT-REPORT-400-WEDGE | E2 | P1（中·推导） | `services/home-agent/report_example.py` `deliver_pending` | 一条永久拒绝的用量报告挡住后面所有账号 | [#899](https://github.com/raydocs/tono/pull/899)。auto-merge 已打开一次 |
+| NODE-QUOTA-ZERO-BASELINE | C4 调用方 | P1（中·推导） | `services/control-plane/src/ops/handlers/nodes-profile.ts` 保存配额 | 没有接口采样时基线记成 0，下一次累计读数整段计入节点配额 | [#904](https://github.com/raydocs/tono/pull/904)。与 #811 / #852 不是同一个缺口。auto-merge 已打开一次 |
+| TRAFFIC-POLICY-API-PIN | T1 | P2（中·推导） | `tooling/scripts/publish-traffic-policy.mjs` `--api` | 管理员令牌会发给任意源站 | [#908](https://github.com/raydocs/tono/pull/908)。auto-merge 已打开一次 |
+| TCP-TUNE-FALSE-SUCCESS | E2 | P2（低·推导） | `tooling/scripts/remote/tune-tono-tcp.sh` 文本一致就退出 | drop-in 已写上但内核仍是旧值时仍报成功 | [#910](https://github.com/raydocs/tono/pull/910)。auto-merge 已打开一次 |
+| MIGRATE-STALE-CONFIG | E2 | P1（中·推导） | `tooling/scripts/remote/migrate-node-to-release-layout.sh` 测试前的那一次拷贝 | 测试期间 hub 改写的配置留在备份里，新链接仍是旧配置 | [#913](https://github.com/raydocs/tono/pull/913)。与已合入的 #845 是不同段落。auto-merge 已打开一次 |
+
+续查本地验证：home-agent 25 tests OK（修复前该测试以 HTTP 400 失败）；配额测试修复前 `counter_in_last` 为 0，修复后通过，`ops-quota` 11 passed，本机 Node 22；另外三条 Python unittest 都是修复前 FAIL、修复后 OK。没有对真实节点做开通、迁移或 sysctl。
+
+续查里不再开题的笔记：
+
+- 出口代理在 #838 之后，[Hunt exit-agent bugs](bc-ef986c7b-9069-5af6-8c6c-4d93e2cb99ef) 没有新的可修缺陷。
+- 六份计费入库文件不写客户 `usage_bytes`。#811 仍由 #852 处理，不重复改。
+- macOS 更新包只核对 Content-Length：客户端安装前仍验签名。与正文里同一条否决。
+- Windows 非 immutable 发布只警告：脚本写明旧发布没有该设置。没有改成失败。
+- Sparkle 手动发布不跑 `verify-release-gate.sh`，以及 `--expected-host` 可以改下载地址：本轮没有重新证明到能开题的程度，没有开 issue。
+
