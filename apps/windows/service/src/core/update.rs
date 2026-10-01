@@ -352,6 +352,32 @@ fn executor_spawn_failure_releases(strict: bool) -> bool {
     !strict
 }
 
+fn save_prepared_attempt(store: &mut Store, next: State) -> Result<()> {
+    if let Some(a) = &store.state.attempt
+        && a.receipt.phase == Phase::Committed
+    {
+        let plan = store.attempt_dir()?.join("replacement.json");
+        let service_dir = crate::service_paths().install_dir();
+        let roots = [a.install_root.as_path(), service_dir.as_path()];
+        let mut scratch_remains = false;
+        for member in read_plan(&plan, &a.receipt.attempt_id, &roots)? {
+            for path in [&member.backup, &member.restore, &member.publish_scratch] {
+                match std::fs::symlink_metadata(path) {
+                    Ok(_) => scratch_remains = true,
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(error) => return Err(error.into()),
+                }
+            }
+        }
+        // An already cleaned manual replacement may differ from this old
+        // plan. Remaining backups need every-member proof before deletion.
+        if scratch_remains {
+            release_replaced_backups(&plan, &a.receipt.attempt_id, &roots)?;
+        }
+    }
+    store.save(next)
+}
+
 pub(crate) async fn request(
     owner: &AuthenticatedOwner,
     request: UpdateRequest,
@@ -456,7 +482,7 @@ pub(crate) async fn request(
                 disconnect: None,
                 publication_clock: None,
             });
-            store.save(next)?; // Before staging, quiescence, or ownership changes.
+            save_prepared_attempt(&mut store, next)?; // Before staging, quiescence, or ownership changes.
             let dir = store.attempt_dir()?;
             windows_security::ensure_private_installer_directory(&dir)?;
             windows_security::ensure_private_installer_directory(&dir.join("payload"))?;
@@ -1605,6 +1631,113 @@ pub fn reconcile_before_desired() -> Result<bool> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn committed_with_backup() -> (PathBuf, Store, State, PathBuf) {
+        use sha2::{Digest, Sha256};
+
+        let (root, mut store, _, _) = crate::update_transaction::tests::reserved();
+        let mut committed = store.state.clone();
+        committed.generation += 1;
+        let a = committed.attempt.as_mut().unwrap();
+        committed.consumed_sequence = a.manifest.release_sequence;
+        a.execution = Execution::Replaced;
+        a.receipt.phase = Phase::Committed;
+        a.receipt.successor_generation = Some(committed.generation);
+        store.save(committed).unwrap();
+        let target = root.join("Tono.exe");
+        let bound = |suffix: &str| {
+            let mut path = target.clone().into_os_string();
+            path.push(suffix);
+            PathBuf::from(path)
+        };
+        let backup = bound(".rollback");
+        std::fs::write(&target, b"new-app").unwrap();
+        std::fs::write(&backup, b"old-app").unwrap();
+        let digest = |bytes: &[u8]| -> [u8; 32] { Sha256::digest(bytes).into() };
+        let dir = store.attempt_dir().unwrap();
+        std::fs::create_dir(&dir).unwrap();
+        std::fs::write(
+            dir.join("replacement.json"),
+            serde_json::to_vec(&serde_json::json!({
+                "attempt_id": store.attempt().unwrap().receipt.attempt_id,
+                "members": [{
+                    "target": target,
+                    "backup": backup,
+                    "restore": bound(".restore"),
+                    "publish_scratch": bound(".publish"),
+                    "old_digest": digest(b"old-app"),
+                    "new_digest": digest(b"new-app"),
+                }],
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        let mut next = store.state.clone();
+        next.generation += 1;
+        let a = next.attempt.as_mut().unwrap();
+        a.manifest.release_sequence += 1;
+        a.receipt.manifest_sha256 = a.manifest.sha256().unwrap();
+        a.receipt.attempt_id = "2".repeat(64);
+        a.receipt.phase = Phase::Preparing;
+        a.receipt.initiating_generation = next.generation;
+        a.receipt.successor_generation = None;
+        a.execution = Execution::Reserved;
+        a.executor = None;
+        (root, store, next, backup)
+    }
+
+    #[test]
+    fn update_prepare_preserves_committed_retry_until_locked_backups_are_cleaned() {
+        use std::os::windows::fs::OpenOptionsExt as _;
+        use windows_sys::Win32::Storage::FileSystem::FILE_SHARE_READ;
+
+        let (root, mut store, next, backup) = committed_with_backup();
+        let before = std::fs::read(root.join("state.json")).unwrap();
+        let held = OpenOptions::new()
+            .read(true)
+            .share_mode(FILE_SHARE_READ)
+            .open(&backup)
+            .unwrap();
+        let locked = save_prepared_attempt(&mut store, next.clone());
+        let durable_while_locked = std::fs::read(root.join("state.json")).unwrap();
+        drop(held);
+        let retry = save_prepared_attempt(&mut store, next);
+        let removed = !backup.exists();
+        let replacement = store.attempt().unwrap().receipt.attempt_id.clone();
+        drop(store);
+        std::fs::remove_dir_all(root).unwrap();
+
+        assert!(locked.is_err(), "committed cleanup must precede supersession");
+        assert_eq!(durable_while_locked, before);
+        assert!(retry.is_ok() && removed);
+        assert_eq!(replacement, "2".repeat(64));
+    }
+
+    #[test]
+    fn update_prepare_allows_manual_replacement_after_committed_scratch_is_absent() {
+        let (root, mut store, next, backup) = committed_with_backup();
+        std::fs::remove_file(backup).unwrap();
+        std::fs::write(root.join("Tono.exe"), b"manual-install").unwrap();
+        let result = save_prepared_attempt(&mut store, next);
+        drop(store);
+        std::fs::remove_dir_all(root).unwrap();
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn update_prepare_keeps_committed_backups_when_installed_members_are_unproven() {
+        let (root, mut store, next, backup) = committed_with_backup();
+        std::fs::write(root.join("Tono.exe"), b"different-install").unwrap();
+        let before = std::fs::read(root.join("state.json")).unwrap();
+        let result = save_prepared_attempt(&mut store, next);
+        let durable = std::fs::read(root.join("state.json")).unwrap();
+        let retained = backup.exists();
+        drop(store);
+        std::fs::remove_dir_all(root).unwrap();
+        assert!(result.is_err());
+        assert_eq!(durable, before);
+        assert!(retained);
+    }
 
     #[test]
     fn update_prepare_failure_releases_only_after_stop_without_strict_kill_switch() {
