@@ -54,3 +54,5 @@
   (pid, started_at) 缓存。StartClash 配置的 Service 端校验在 #351 第 2 部分单独 PR。
 
 - 续记 2026-09-26：合入 main（#300/#305/#632/#633 之后）解决 `service/src/core/update.rs` 的 `pub use security::{…}` 冲突（取两边并集：`NotRegisteredApp` + `record_installed_version`）；本条从 INTERNAL_CHANGELOG.md 移为分片（#631 规则）。合并前置条件不变。
+
+- Windows CI：main 上的 `merge-manager/aux.sh` 是 Windows 保留设备名，检出失败。本分支将其改名为 `side.sh`，内容不变。
