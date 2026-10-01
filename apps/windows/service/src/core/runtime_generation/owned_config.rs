@@ -54,8 +54,10 @@ const DNS_KEYS: &[&str] = &[
     "nameserver",
     "fallback",
     "fallback-lazy-query",
+    "fallback-filter",
     "proxy-server-nameserver",
 ];
+const FALLBACK_FILTER_KEYS: &[&str] = &["geoip"];
 const TUN_KEYS: &[&str] = &[
     "enable",
     "stack",
@@ -255,6 +257,21 @@ fn ensure_dns_fallback_stays_on_exit_doh(dns: &Mapping) -> Result<(), String> {
     {
         return Err("`fallback-lazy-query` must stay enabled".into());
     }
+    // Mihomo's default filter is GeoIP CN. With a `fallback` it loads Country.mmdb while
+    // parsing; the SYSTEM core would download it off-tunnel or refuse to start.
+    match dns.get("fallback-filter") {
+        Some(filter) => {
+            let filter = filter
+                .as_mapping()
+                .ok_or("`fallback-filter` is not a mapping")?;
+            only_keys(filter, FALLBACK_FILTER_KEYS, "dns.fallback-filter")?;
+            require(filter, "geoip", |v| v.as_bool() == Some(false))?;
+        }
+        None if dns.get("fallback").is_some() => {
+            return Err("`fallback` requires `fallback-filter.geoip: false`".into());
+        }
+        None => {}
+    }
     Ok(())
 }
 
@@ -426,11 +443,16 @@ rules:
     fn the_service_refuses_a_plaintext_dns_fallback() {
         let lazy = OWNED.replacen(
             "  nameserver:\n  - https://1.1.1.1/dns-query#Tono-Exit\n",
-            "  nameserver:\n  - https://1.1.1.1/dns-query#Tono-Exit\n  fallback:\n  - https://8.8.8.8/dns-query#Tono-Exit\n  fallback-lazy-query: true\n",
+            "  nameserver:\n  - https://1.1.1.1/dns-query#Tono-Exit\n  fallback:\n  - https://8.8.8.8/dns-query#Tono-Exit\n  fallback-lazy-query: true\n  fallback-filter:\n    geoip: false\n",
             1,
         );
         assert_ne!(lazy, OWNED);
         assert_eq!(ensure_owned_runtime_config_is_safe(&lazy), Ok(()));
+        let geoip_default = lazy.replacen("  fallback-filter:\n    geoip: false\n", "", 1);
+        assert!(
+            ensure_owned_runtime_config_is_safe(&geoip_default).is_err(),
+            "the default GeoIP filter makes the SYSTEM core fetch an MMDB before the tunnel"
+        );
         let plaintext = lazy.replacen(
             "  - https://8.8.8.8/dns-query#Tono-Exit\n",
             "  - 8.8.8.8\n",

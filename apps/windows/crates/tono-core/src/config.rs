@@ -986,6 +986,13 @@ fn runtime_value(
     put(&mut dns, "nameserver", strings(&[DOH_PRIMARY_NAMESERVER]));
     put(&mut dns, "fallback", strings(&[DOH_BACKUP_NAMESERVER]));
     put(&mut dns, "fallback-lazy-query", Value::Bool(true));
+    // Mihomo's default fallback filter is GeoIP CN. With any `fallback` it must
+    // load Country.mmdb while parsing, which Windows does not ship, so it tries a
+    // download before the tunnel exists and refuses the config when that fails.
+    // The default would also send every non-CN answer to the backup.
+    let mut fallback_filter = Mapping::new();
+    put(&mut fallback_filter, "geoip", Value::Bool(false));
+    put(&mut dns, "fallback-filter", Value::Mapping(fallback_filter));
     put(
         &mut dns,
         "proxy-server-nameserver",
@@ -1465,6 +1472,11 @@ reality-opts:
         assert_eq!(
             get(&value, &["dns", "fallback-lazy-query"]).as_bool(),
             Some(true)
+        );
+        assert_eq!(
+            get(&value, &["dns", "fallback-filter", "geoip"]).as_bool(),
+            Some(false),
+            "the default GeoIP filter needs an MMDB download before the tunnel exists"
         );
         assert_eq!(
             get(&value, &["dns", "proxy-server-nameserver"])
