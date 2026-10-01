@@ -57,6 +57,8 @@ on:
       - tooling/scripts/publish-managed-catalog.rb
       - tooling/scripts/write-dedirock-hy2-catalog-sources.rb
       - tooling/scripts/tests/publish-managed-catalog.test.rb
+      - tooling/scripts/provision-reality-node.rb
+      - tooling/scripts/tests/provision-reality-node.test.rb
       - .github/workflows/services-ci.yml
       # desktop-update-sign-workflow.test.mjs guards this file; run it on every edit.
       - .github/workflows/desktop-update-sign.yml
@@ -151,6 +153,9 @@ jobs:
         # disconnects every account that still holds that credential, and claiming
         # work when there is none spends the one restart this change costs.
         run: python3 tooling/scripts/remote/test_exit_metering_config.py
+
+      - name: Node provisioner fixtures
+        run: ruby tooling/scripts/tests/provision-reality-node.test.rb
 
       - name: Home usage reporter
         run: python3 services/home-agent/test_report_example.py

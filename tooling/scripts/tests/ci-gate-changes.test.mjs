@@ -61,6 +61,8 @@ const SERVICES_PATHS = [
   'tooling/scripts/publish-managed-catalog.rb',
   'tooling/scripts/write-dedirock-hy2-catalog-sources.rb',
   'tooling/scripts/tests/publish-managed-catalog.test.rb',
+  'tooling/scripts/provision-reality-node.rb',
+  'tooling/scripts/tests/provision-reality-node.test.rb',
   '.github/workflows/services-ci.yml',
   '.github/workflows/desktop-update-sign.yml',
 ]
