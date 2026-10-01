@@ -2,7 +2,7 @@
 
 槽位 W1-qg。Hunter: Grok 4.7。基线 `main` `5ba113d2`。2026-09-30。
 
-这些 PR 都是非草稿，自动合并，合并方式是 merge commit。它们不改产品杀开关，不放宽 fail-closed，不把任何现有检查改成可忽略。`dependency-audit` 不进 `ci-gate`。
+这些 PR 都是非草稿。修复类 PR 使用 merge commit 的自动合并；合并管理员可以关掉或打开，关掉之后不再由本槽重新打开。报告 PR [#877](https://github.com/raydocs/tono/pull/877) 不自动合并，留给合并管理员成批处理。它们不改产品杀开关，不放宽 fail-closed，不把任何现有检查改成可忽略。`dependency-audit` 不进 `ci-gate`。
 
 ## Pull requests
 
