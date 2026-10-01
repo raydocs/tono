@@ -1540,6 +1540,33 @@
         Ok(())
     }
 
+    #[tokio::test]
+    #[serial]
+    async fn a_snapshot_refresh_failure_does_not_block_a_proven_restore() -> Result<()> {
+        reset_dns_state().await;
+        seed_snapshot(vec![adapter("{A}", Some("9.9.9.9"))]).await?;
+        // The original remains readable, but its temporary rewrite cannot be created.
+        // This exercises the same error path as a full disk or a locked temporary file.
+        let temporary = snapshot_path().with_extension("tmp");
+        tokio::fs::create_dir(&temporary).await?;
+
+        test_hooks::set_live_dns_on_loopback(true);
+        let unproven = restore_protected().await;
+        let original_retained = snapshot_path().exists();
+        test_hooks::set_live_dns_on_loopback(false);
+        let proven = restore_protected().await;
+        let policy_restores = test_hooks::take_encrypted_restores();
+        tokio::fs::remove_dir(&temporary).await?;
+        reset_dns_state().await;
+
+        assert!(unproven.is_err(), "a write failure must never bypass the DNS proof");
+        assert!(original_retained, "an unproven restore keeps the user's original DNS");
+        let status = proven.expect("bookkeeping must not refuse a proven DNS restore");
+        assert!(!status.snapshot_present, "a proven restore opens the DNS disarm gate");
+        assert_eq!(policy_restores, 1, "the NRPT/DoH restore must still run");
+        Ok(())
+    }
+
     /// The other half of the same change: dropping the historical veto must not drop the
     /// ordering invariant. A machine that is provably still resolving through the loopback core
     /// is refused however good the registry looks and however long the failure streak is, and
