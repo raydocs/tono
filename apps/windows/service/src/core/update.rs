@@ -1780,8 +1780,9 @@ mod tests {
             |_| false
         ));
         // A dead consumed executor waits for relaunched recovery, until the bound stops it.
-        store.execution(Execution::Consumed).unwrap();
-        let state = || Ok(store.state.clone());
+        let mut consumed = store.state.clone();
+        consumed.attempt.as_mut().unwrap().execution = Execution::Consumed;
+        let state = || Ok(consumed.clone());
         assert!(!startup_barrier_release_owed_by(
             state(),
             |_| false,
