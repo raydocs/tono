@@ -1019,16 +1019,14 @@ fn sing_box_replacement_candidates(app_root: &Path) -> Result<Vec<InstalledBinar
     let pin = sing_box_release_pin()?;
     let target = app_root.join(SING_BOX_BINARY_NAME);
     let staged = path_with_suffix(&target, RUNTIME_STAGED_SUFFIX);
-    let staged_meta = std::fs::symlink_metadata(&staged);
-    let staged_present = match &staged_meta {
-        Ok(metadata) => {
+    let staged_present = match std::fs::symlink_metadata(&staged) {
+        Ok(_metadata) => {
             ensure_ordinary_windows_entry(&staged, false)?;
-            let _ = metadata;
             true
         }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
         Err(error) => {
-            return Err(error).with_context(|| format!("failed to inspect {staged:?}"));
+            return Err(error).context(format!("failed to inspect {staged:?}"));
         }
     };
     let Some(pin) = pin else {
