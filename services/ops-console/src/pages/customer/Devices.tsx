@@ -67,6 +67,7 @@ export function Devices({
           device={device}
           standing={rows.get(device.id) ?? null}
           loading={standing.status === 'loading'}
+          failure={standing.status === 'error' ? standing.message : null}
           onChanged={() => {
             standing.reload();
             onChanged();
@@ -82,12 +83,14 @@ function DeviceCard({
   device,
   standing,
   loading,
+  failure,
   onChanged,
 }: {
   userId: string;
   device: CustomerDeviceDto;
   standing: Standing | null;
   loading: boolean;
+  failure: string | null;
   onChanged: () => void;
 }) {
   const ask = useAsk(onChanged);
@@ -128,7 +131,7 @@ function DeviceCard({
       </div>
 
       <p className="text-micro normal-case tracking-normal text-[var(--muted-foreground)]">
-        {standingWord(standing, loading)}
+        {standingWord(standing, loading, failure)}
         {open && window !== null && window.expiresAt !== null
           ? ` · ${copy.deviceLogsUntil(formatWhen(window.expiresAt))}`
           : ''}
@@ -155,7 +158,7 @@ function DeviceCard({
           </Action>
         ))}
         <Action
-          reason={gone ? copy.deviceRevoked : null}
+          reason={gone ? copy.deviceRevoked : standing === null ? failure ?? copy.loading : null}
           pending={ask.pending}
           onClick={() => ask.ask(open ? {
             title: copy.deviceLogsOffTitle,
@@ -204,7 +207,8 @@ function DeviceCard({
 }
 
 /** What was last asked of this machine, or that nothing has been. */
-function standingWord(standing: Standing | null, loading: boolean): string {
+function standingWord(standing: Standing | null, loading: boolean, failure: string | null): string {
+  if (failure !== null) return failure;
   if (standing === null) return loading ? copy.loading : copy.deviceNoAction;
   if (standing.last === null) return copy.deviceNoAction;
   return copy.deviceLastAction(

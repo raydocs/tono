@@ -11,7 +11,7 @@ Operate Tono infrastructure as a staged transaction: inspect, plan, apply, verif
 
 ## Non-negotiable safety rules
 
-- Start read-only; dry-run every mutation first. Migrations and Worker deploys go only through `npm run deploy` from `main` (see `AGENTS.md`). Publish a tested node with `--append`. Full catalog replacement, credential rotation and user disablement only when the task names them (a credential suspected compromised is the exception, see below); otherwise record the question in `docs/DECISIONS.md`.
+- Start read-only; dry-run every mutation first. Migrations and Worker deploys go only through `npm run deploy` from `main` (see `AGENTS.md`). Publish a tested node with `--append`. Full catalog replacement, credential rotation and user disablement only when the task names them (a credential suspected compromised is the exception, see below); otherwise record the question as a new file under `docs/decisions/` (see `docs/decisions/README.md`). Do not append to `docs/DECISIONS.md`.
 - Prefer an SSH alias from `~/.ssh/config` that references an existing private-key path. Never ask the user to paste a private key or password into chat, a command argument, the repository, or a log. If a fresh VPS has only password authentication, have the user copy the password to the local clipboard and use the bounded bootstrap below.
 - Never use `StrictHostKeyChecking=no`. For a new host, compare its key fingerprint with the VPS provider console before accepting it.
 - Never print or log VLESS UUIDs, Reality private keys, public keys, short IDs, admin tokens, full node YAML, authorization headers, or remote configuration bodies.
@@ -110,7 +110,7 @@ Apply with `modprobe tcp_bbr` and `sysctl --system`. Because `default_qdisc` doe
 
 ### 7. Publish as the final commit point
 
-Summarize the node name, pinned server version, non-secret config digest, health results, old/new catalog membership, and rollback plan. Publish only when the isolated test passed and `tooling/scripts/check-node-in-fleet.py` reports every place except the catalog present (identities, metering, hub registry, Komari; the provisioner covers only Xray). Otherwise stop after provisioning and record the gap in `docs/DECISIONS.md`. Put this summary in the report.
+Summarize the node name, pinned server version, non-secret config digest, health results, old/new catalog membership, and rollback plan. Publish only when the isolated test passed and `tooling/scripts/check-node-in-fleet.py` reports every place except the catalog present (identities, metering, hub registry, Komari; the provisioner covers only Xray). Otherwise stop after provisioning and record the gap as a new file under `docs/decisions/`. Put this summary in the report.
 
 For a newly added uniquely named node, preserve the deployed catalog and append only the tested source:
 
@@ -128,7 +128,7 @@ After publication, verify the returned revision and perform an authenticated cat
 
 ## Remove or rotate a node
 
-Remove or rotate a node only when the task names it. Deleting a catalog entry does not erase credentials already delivered to clients. For removal, first provision a replacement if needed, publish the catalog without the old node, confirm clients have moved, then rotate or disable the old VPS UUID/Reality key. For suspected compromise, disable the old credential immediately, even if no task named it, and accept the availability impact: a leaking credential is worse (AGENTS.md decision 3). Record it in `docs/DECISIONS.md`. Never reuse a Reality private key or UUID across VPS hosts.
+Remove or rotate a node only when the task names it. Deleting a catalog entry does not erase credentials already delivered to clients. For removal, first provision a replacement if needed, publish the catalog without the old node, confirm clients have moved, then rotate or disable the old VPS UUID/Reality key. For suspected compromise, disable the old credential immediately, even if no task named it, and accept the availability impact: a leaking credential is worse (AGENTS.md decision 3). Record it as a new file under `docs/decisions/`. Never reuse a Reality private key or UUID across VPS hosts.
 
 ## Authorize and manage users
 

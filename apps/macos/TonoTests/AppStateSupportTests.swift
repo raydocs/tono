@@ -4,6 +4,12 @@ import XCTest
 /// Exercise the helpers through the compiled app module, not concatenated source
 /// snippets. This also guards the cross-file visibility needed by AppState.
 final class AppStateSupportTests: XCTestCase {
+    func testMalformedMatchWithOnlyNoResolveDoesNotTrapRuleImport() {
+        let rules = ConfigParser.parseClashYAMLRules("rules:\n  - MATCH,no-resolve\n  - MATCH,REJECT\n")
+        XCTAssertEqual(rules.count, 1)
+        XCTAssertEqual(rules.first?.policy, .reject)
+    }
+
     private func provider(_ name: String, behavior: String = "domain") -> APIRuleProvider {
         APIRuleProvider(
             name: name, type: "http", behavior: behavior, ruleCount: 0,

@@ -134,6 +134,34 @@ it('shows the recorded cause under a failed catalog refresh', async () => {
   expect(await screen.findByText(cause)).toBeDefined()
 })
 
+it('clears the page refresh failure once a later sync moves', async () => {
+  const cause = 'could not reach Tono: connection refused'
+  serversMock.mockResolvedValue([])
+  renderPage()
+  expect(await screen.findByText('No servers available')).toBeDefined()
+  refreshCatalogMock.mockRejectedValue(new Error(cause))
+  catalogStatusMock.mockResolvedValue({
+    revision: null,
+    nodeCount: 0,
+    lastSyncedAtMs: null,
+    error: null,
+  })
+  fireEvent.click(screen.getByRole('button', { name: 'Refresh' }))
+  expect(await screen.findByText(cause)).toBeDefined()
+  // A later successful sync supersedes the page's own failure (#590): the
+  // backend status speaks for the catalog from then on. Adjusted during
+  // render, not in an effect.
+  refreshCatalogMock.mockResolvedValue(undefined)
+  catalogStatusMock.mockResolvedValue({
+    revision: 54,
+    nodeCount: 0,
+    lastSyncedAtMs: 1_750_000_000_000,
+    error: null,
+  })
+  fireEvent.click(screen.getByRole('button', { name: 'Refresh' }))
+  await waitFor(() => expect(screen.queryByText(cause)).toBeNull())
+})
+
 it('does not claim an empty list while the first server read is pending', async () => {
   let resolve!: (servers: TonoServer[]) => void
   serversMock.mockReturnValue(

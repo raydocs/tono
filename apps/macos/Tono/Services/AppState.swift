@@ -35,7 +35,10 @@ final class AppState {
         didSet {
             guard connectionStage != oldValue else { return }
             let now = Date()
-            var details = ["stage": connectionStage.rawValue]
+            var details = [
+                "stage": connectionStage.rawValue,
+                "stage_key": connectionStage.wireKey,
+            ]
             if isConnecting {
                 completedConnectionStages.insert(oldValue)
                 if let connectionStageStartedAt {
@@ -44,6 +47,7 @@ final class AppState {
                         Int(now.timeIntervalSince(connectionStageStartedAt) * 1_000)
                     )
                     details["previous_stage"] = oldValue.rawValue
+                    details["previous_stage_key"] = oldValue.wireKey
                     details["previous_stage_duration_ms"] = String(elapsedMs)
                     // The audit log already carried this, but only as JSONL on
                     // disk, so nothing could show a user or support which step
@@ -53,6 +57,15 @@ final class AppState {
                             StageDuration(stage: oldValue, milliseconds: elapsedMs)
                         )
                     }
+                    let cumulative = connectionStartedAt.map {
+                        max(0, Int(now.timeIntervalSince($0) * 1_000))
+                    }
+                    ConnectionTelemetryBuffer.shared.record(
+                        "stage",
+                        stage: oldValue.telemetryKey,
+                        elapsedMs: cumulative,
+                        delayMs: elapsedMs
+                    )
                 }
                 connectionStageStartedAt = now
             }
@@ -141,7 +154,10 @@ final class AppState {
     /// it is still the current generation, no protection operation followed
     /// that release.
     @ObservationIgnored var confirmedReleaseGeneration: UInt64? = nil
-    var lastPhysicalFingerprint: PhysicalInterfaceFingerprint?
+    /// Default uplink captured when this session became connected. Nil until
+    /// that capture succeeds. Reconciliation compares against it and does not
+    /// replace it with an inconclusive reading.
+    var lastUplinkSnapshot: NetworkUplinkSnapshot?
     var switchingNodeId: String? = nil
     var proxyMode: ProxyMode = .rule
     var activeNode: ProxyNode? = nil
@@ -309,6 +325,15 @@ final class AppState {
     /// interface index; tests substitute the syscall so a single monitor tick
     /// can be driven without the privileged helper.
     var tunInterfaceExists: (String) -> Bool = { KillSwitchService.interfaceExists($0) }
+    /// Health-tick traffic race. Production probes the real origins. Tests
+    /// return a won race so one tick can reach the healthy branch without TLS.
+    @ObservationIgnored
+    var raceHealthTrafficProbes: @MainActor (Int, String?) async -> OriginRace = { timeout, preferred in
+        await ProtectedConnectivityVerifier.raceSystemTUNProbes(
+            timeoutSeconds: timeout,
+            preferredLabel: preferred
+        )
+    }
     /// The account's say over Connect (#582), given the catalog digest and
     /// routing token Connect would dial: nil lets it proceed, a message
     /// refuses it. The app installs the account session's offline grant gate;
@@ -481,10 +506,10 @@ final class AppState {
     }
 
     /// Debounced reconciliation of the committed network environment against
-    /// the session's captured baseline: primary service vs
-    /// `protectedDNSService`, root-owned DNS integrity, and the physical
-    /// fingerprint (which is how Tono's own DNS writes are excluded). Shared
-    /// by the connected branch of `handleSystemNetworkChange()` and by
+    /// the session's captured uplink: default service, interface, address and
+    /// gateway, plus root-owned DNS integrity. Tono's own DNS writes do not
+    /// change that uplink, so they are not a roam. Shared by the connected
+    /// branch of `handleSystemNetworkChange()` and by
     /// `consumePendingNetworkChange()` so a deferred observation runs exactly
     /// the comparison a live one would.
     private func scheduleNetworkEnvironmentReconciliation() {
@@ -493,24 +518,34 @@ final class AppState {
             try? await Task.sleep(for: .milliseconds(750))
             guard let self, !Task.isCancelled, self.isConnected,
                   !self.isConnecting, !self.isDisconnecting else { return }
-            let primaryService =
-                await PrivilegedRuntimeCoordinator.shared.primaryNetworkService()
+            let currentUplink = await self.protectionAudits.uplinkSnapshot()
             let dnsIntegrity = if let service = self.protectedDNSService {
                 await self.protectedDNSIntegrityConfirmingBroken(service: service)
             } else {
                 PrivilegedRuntimeCoordinator.ProtectedDNSIntegrity.broken
             }
             guard !Task.isCancelled, self.isConnected else { return }
-            // An unreachable helper is not evidence that DNS was tampered with;
-            // tearing the session down on it closes every flow for a restart
-            // that resolves itself.
-            guard dnsIntegrity != .unverifiable else {
+            let transition = NetworkUplinkSnapshot.classify(
+                from: self.lastUplinkSnapshot,
+                to: currentUplink,
+                protectedService: self.protectedDNSService
+            )
+            switch transition {
+            case .stay, .adopt:
+                if self.lastUplinkSnapshot != currentUplink {
+                    self.lastUplinkSnapshot = currentUplink
+                }
+            case .inconclusive, .moved:
+                break
+            }
+            let networkMoved = transition == .moved
+            // An unreachable helper is not evidence that DNS was tampered with.
+            // A real uplink move still reconnects; withholding that because the
+            // helper missed one read left the session on the old gateway.
+            guard dnsIntegrity != .unverifiable || networkMoved else {
                 self.connectionCoordinator.networkEnvironmentTask = nil
                 return
             }
-            let currentFingerprint = PhysicalInterfaceFingerprint.current()
-            let physicalChanged = (self.lastPhysicalFingerprint != nil && self.lastPhysicalFingerprint != currentFingerprint)
-            let networkMoved = primaryService != self.protectedDNSService || physicalChanged
             if dnsIntegrity == .intact { self.consecutiveProtectedDNSBrokenAudits = 0 }
             if !networkMoved, case .supplementalConflict(let resolvers) = dnsIntegrity {
                 self.connectionCoordinator.networkEnvironmentTask = nil
@@ -527,7 +562,6 @@ final class AppState {
                 self.connectionCoordinator.networkEnvironmentTask = nil
                 return
             }
-            self.lastPhysicalFingerprint = currentFingerprint
             self.connectionCoordinator.networkEnvironmentTask = nil
             LocalTrafficAudit.shared.recordEvent(
                 "system_network_change_requires_reconnect",
@@ -1577,6 +1611,7 @@ final class AppState {
     func verifyProtectedConnection(
         controller: ProbeCheck? = nil,
         controllerTask: Task<ProbeCheck, Never>? = nil,
+        advisoryProbe: (@MainActor () -> Task<ProbeCheck, Never>)? = nil,
         mixedPort: Int,
         generation: UInt64,
         rounds: Int,
@@ -1653,6 +1688,11 @@ final class AppState {
             let controllerResult: ProbeCheck
             if case .ok = tun {
                 controllerResult = controller ?? .ok
+                // The tunnel is already proved. A delay sample after that
+                // does not sit on the handshake the probe just paid for.
+                if controllerTask == nil, let advisoryProbe {
+                    _ = advisoryProbe()
+                }
             } else if includeMixed {
                 if let controller {
                     controllerResult = controller
@@ -1661,6 +1701,14 @@ final class AppState {
                         await controllerTask.value
                     } onCancel: {
                         controllerTask.cancel()
+                    }
+                    if let result = interrupted(round) { return result }
+                } else if let advisoryProbe {
+                    let task = advisoryProbe()
+                    controllerResult = await withTaskCancellationHandler {
+                        await task.value
+                    } onCancel: {
+                        task.cancel()
                     }
                     if let result = interrupted(round) { return result }
                 } else {
@@ -2124,18 +2172,34 @@ final class AppState {
         return ip
     }
 
+    /// `interfaceExists` and `sleep` are test seams. Production asks the
+    /// kernel and sleeps. A cancel that lands in the last interval must not
+    /// report the interface as ready: connect arms PF before it checks
+    /// cancellation.
     nonisolated static func waitForOwnedTunnelInterface(
         attempts: Int = 50,
-        intervalMs: UInt64 = 100
+        intervalMs: UInt64 = 100,
+        interfaceExists: @escaping @Sendable (String) -> Bool = {
+            KillSwitchService.interfaceExists($0)
+        },
+        sleep: @escaping @Sendable (UInt64) async throws -> Void = { milliseconds in
+            try await Task.sleep(for: .milliseconds(milliseconds))
+        }
     ) async -> Bool {
+        let name = ConfigPipeline.tonoTunInterface
         for _ in 0..<max(1, attempts) {
             if Task.isCancelled { return false }
-            if KillSwitchService.interfaceExists(ConfigPipeline.tonoTunInterface) {
-                return true
+            if interfaceExists(name) { return true }
+            do {
+                try await sleep(intervalMs)
+            } catch is CancellationError {
+                return false
+            } catch {
+                return false
             }
-            try? await Task.sleep(for: .milliseconds(intervalMs))
         }
-        return KillSwitchService.interfaceExists(ConfigPipeline.tonoTunInterface)
+        if Task.isCancelled { return false }
+        return interfaceExists(name)
     }
 
     /// Query Mihomo's DNS listener directly while macOS is still using its

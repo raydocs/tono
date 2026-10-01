@@ -127,7 +127,8 @@ impl StageFailure {
     /// translated once — whichever stage (arm, lock, release) surfaced them.
     pub(super) fn error(err: impl std::fmt::Display) -> Self {
         let text = err.to_string();
-        StageFailure::Error(map_wfp_engine_error(&text).unwrap_or(text))
+        let text = map_wfp_engine_error(&text).unwrap_or(text);
+        StageFailure::Error(tono_core::stamp_connect_failure(&text))
     }
 }
 

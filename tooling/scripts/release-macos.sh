@@ -237,11 +237,12 @@ if [[ -n $lifecycle_token ]]; then
 fi
 
 step "verifying the release gate"
-gate_ok=$("$repo_root/tooling/scripts/verify-release-gate.sh" "$app" 2>&1 | /usr/bin/grep -cE '^  ok:')
-(( gate_ok >= 6 )) || fail "the release gate reported only $gate_ok checks"
+# The gate's own exit status is the result. Counting `ok:` lines and ignoring
+# the status stays green when the script prints six passes and then exits 1.
+"$repo_root/tooling/scripts/verify-release-gate.sh" "$app" || fail "the release gate failed"
 /usr/bin/xcrun stapler validate "$app" >/dev/null 2>&1 || fail "the notarisation ticket is not stapled"
 /usr/sbin/spctl -a -t exec "$app" >/dev/null 2>&1 || fail "Gatekeeper does not accept the app"
-print "  gate $gate_ok/6, stapled, accepted by Gatekeeper"
+print "  release gate passed, stapled, accepted by Gatekeeper"
 
 step "confirming the app carries the contract the tree declares"
 declared_contract=$(/usr/bin/sed -n 's/.*static let current = "\([^"]*\)".*/\1/p' \
