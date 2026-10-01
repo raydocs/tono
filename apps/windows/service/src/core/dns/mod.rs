@@ -494,6 +494,10 @@ impl SelfWriteWindow {
 
 /// Hold the self-write window for the whole registry write, including after the async
 /// caller has given up and dropped its own guard.
+#[cfg_attr(
+    not(any(test, all(windows, not(feature = "test")))),
+    allow(dead_code)
+)]
 fn hold_self_write_across_the_write<T>(work: impl FnOnce() -> T) -> T {
     let _window = SelfWriteWindow::open();
     work()
