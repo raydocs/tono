@@ -111,7 +111,12 @@ final class NativeUpdateReleaseArbitrationTests: XCTestCase {
         runtime.coreStatus = { (false, true) }
         runtime.restoreDNS = { true }
         runtime.disableSystemProxy = {}
-        runtime.disarm = { disarms += 1 }
+        // Like the real disarm (and sibling release tests), a confirmed release
+        // clears the stored intent; a launch verdict must not read it as held.
+        runtime.disarm = {
+            disarms += 1
+            KillSwitchService.isArmed = false
+        }
         runtime.restrictToBootstrap = {}
         runtime.refreshKillSwitchStatus = { .confirmed(requiresProtectionRecovery: false) }
         app.networkProtection = runtime
@@ -122,6 +127,8 @@ final class NativeUpdateReleaseArbitrationTests: XCTestCase {
         XCTAssertFalse(app.nativeUpdatePending)
         XCTAssertFalse(RuntimeCleanup.nativeUpdatePending)
         XCTAssertFalse(RuntimeCleanup.nativeUpdateBlocksConnect)
+        XCTAssertFalse(KillSwitchService.isArmed)
+        XCTAssertFalse(app.isProtectionBlocked, "the released host is not shown as Protected Offline")
         XCTAssertNil(app.errorMessage, "the refused pending-only Disconnect is not surfaced")
     }
 }
