@@ -6,4 +6,8 @@
 - 工程与测试：新增 `docs/agent-reports/R3-A8A9-grok.md`。无产品测试。
 - 验证：文档。未跑 XCTest，未跑 Windows 原生测试，未部署。
 - 候选/发布：仅文档，无新候选。
-- 剩余限制：没有新的修复 PR。目录删除当前出口和已连接时的策略更新仍保持整机阻断，记为决定项，不改代码。本报告 PR 不开启 auto-merge。
+- 剩余限制：目录删除当前出口和已连接时的策略更新仍保持整机阻断，记为决定项，不改代码。本报告 PR 不开启 auto-merge。
+
+### 2026-10-01 续记
+- 同一轮 `AppState+Proxy.swift` 阅读补上 MAC-PIN-REFRESH-TEARDOWN。修复在 #950（`cursor/r3-pin-refresh-keep-session-89a9`，基线 `e69db58d`），不在本 PR。提交前失败不再拆会话；提交后 PF 收口失败仍拆。
+- 假设改为 41：修复 1，决定项 2，假阳性 38。XCTest 仍未在本机运行。
