@@ -718,10 +718,11 @@ mod tests {
 
     #[test]
     fn live_mihomo_yaml_stays_byte_for_byte_on_its_own_fake_ip_range() {
-        // Pinned YAML includes #732's dial defaults: `tcp-concurrent: true`,
-        // `dns.ipv6: false`, and `client-fingerprint: chrome` on each Reality proxy.
+        // Pinned YAML includes #732's dial defaults (`tcp-concurrent: true`,
+        // `dns.ipv6: false`, chrome on each Reality proxy) plus fake-ip-ttl,
+        // prefer-h3 and cache-algorithm.
         const PINNED_YAML_SHA256: &str =
-            "2a0e26f477dc9aa7eab67cfa7ccbcc23b7eefd22480d60220e181a5b434ebb1c";
+            "82c6545e00c8e42058d1a3d6b93d43218c563cc25c5755bc82b663d41630c501";
         let nodes = [
             mihomo_node("US Reality 01", "8.8.8.8"),
             mihomo_node("JP Reality 02", "1.1.1.1"),

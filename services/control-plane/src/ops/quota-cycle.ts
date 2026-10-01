@@ -5,7 +5,7 @@ type Row = Record<string, any>;
 type Bounds = { start: number; end: number };
 type Counters = { in: number; out: number };
 
-function newId(): string {
+export function newId(): string {
   return crypto.randomUUID();
 }
 

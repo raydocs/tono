@@ -6,7 +6,10 @@
 //! Windows counterpart of the macOS helper's `ownedRuntimeConfigIsSafe`
 //! (`tooling/scripts/core-helper/main.swift`): the same kinds of checks, mapped onto the keys
 //! Mihomo uses. It is a whitelist of what the App emits, not a full re-derivation of the App's
-//! routing plan.
+//! routing plan. It does require the switches that keep packets on that plan: `udp`,
+//! `tun.auto-route`, and host-only `route-exclude-address` entries.
+use std::net::Ipv4Addr;
+
 use serde_yaml_ng::{Mapping, Value};
 
 /// Top-level keys the App's generator emits. Anything else — `external-ui`, `rule-providers`,
@@ -43,6 +46,9 @@ const DNS_KEYS: &[&str] = &[
     "ipv6",
     "enhanced-mode",
     "fake-ip-range",
+    "fake-ip-ttl",
+    "prefer-h3",
+    "cache-algorithm",
     "respect-rules",
     "use-hosts",
     "nameserver",
@@ -106,6 +112,9 @@ pub(crate) fn ensure_owned_runtime_config_is_safe(yaml: &str) -> Result<(), Stri
     require(root, "bind-address", |v| v.as_str() == Some("127.0.0.1"))?;
     require(root, "allow-lan", |v| v.as_bool() == Some(false))?;
     require(root, "mode", |v| v.as_str() == Some("rule"))?;
+    // Without this flag Mihomo shortcuts TUN UDP to a ruleless physical dial
+    // (`tono-core` `config::runtime_value`). The App always emits `true`.
+    require(root, "udp", |v| v.as_bool() == Some(true))?;
     require(root, "external-controller", |v| {
         v.as_str().is_some_and(|c| c.starts_with(LOOPBACK_PREFIX))
     })?;
@@ -130,6 +139,7 @@ pub(crate) fn ensure_owned_runtime_config_is_safe(yaml: &str) -> Result<(), Stri
     only_keys(tun, TUN_KEYS, "tun")?;
     require(tun, "enable", |v| v.as_bool() == Some(true))?;
     require(tun, "device", |v| v.as_str() == Some(TUN_DEVICE_NAME))?;
+    require(tun, "auto-route", |v| v.as_bool() == Some(true))?;
     require(tun, "strict-route", |v| v.as_bool() == Some(true))?;
 
     for proxy in sequence(root, "proxies")? {
@@ -138,6 +148,7 @@ pub(crate) fn ensure_owned_runtime_config_is_safe(yaml: &str) -> Result<(), Stri
             return Err(format!("proxy type `{kind}` is not an owned outbound"));
         }
     }
+    ensure_route_exclusions_match_exits(root, tun)?;
     let groups = sequence(root, "proxy-groups")?;
     for group in groups {
         if group.get("type").and_then(Value::as_str) != Some("select") {
@@ -159,6 +170,63 @@ pub(crate) fn ensure_owned_runtime_config_is_safe(yaml: &str) -> Result<(), Stri
     }
 
     no_forbidden_keys(&Value::Mapping(root.clone()))
+}
+
+/// `route-exclude-address` is how the core keeps its own exit sockets out of the TUN.
+/// The App emits one IPv4 `/32` per VLESS or Hysteria2 server it must dial on the
+/// physical NIC (`tono-core` `config::build_owned_runtime_with_ports`). Anything wider,
+/// or an address that is not one of those servers, leaves ordinary traffic on the
+/// physical NIC while `strict-route` still reads as enabled. Armed WFP then drops that
+/// traffic instead of proxying it.
+fn ensure_route_exclusions_match_exits(root: &Mapping, tun: &Mapping) -> Result<(), String> {
+    let Some(value) = tun.get("route-exclude-address") else {
+        return Ok(());
+    };
+    let entries = value.as_sequence().ok_or("`route-exclude-address` is not a list")?;
+    let servers = exit_server_addresses(root)?;
+    for entry in entries {
+        let text = entry
+            .as_str()
+            .ok_or("`route-exclude-address` entries must be strings")?;
+        let Some((address, prefix)) = text.split_once('/') else {
+            return Err(format!(
+                "`route-exclude-address` entry `{text}` is not an IPv4 host route"
+            ));
+        };
+        if prefix != "32" {
+            return Err(format!("`route-exclude-address` entry `{text}` is not an IPv4 /32"));
+        }
+        let ip = address.parse::<Ipv4Addr>().map_err(|_| {
+            format!("`route-exclude-address` entry `{text}` is not an IPv4 host route")
+        })?;
+        if !servers.contains(&ip) {
+            return Err(format!(
+                "`route-exclude-address` entry `{text}` is not an exit server in this runtime"
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn exit_server_addresses(root: &Mapping) -> Result<Vec<Ipv4Addr>, String> {
+    let mut servers = Vec::new();
+    for proxy in sequence(root, "proxies")? {
+        let kind = proxy.get("type").and_then(Value::as_str).unwrap_or("");
+        if kind != "vless" && kind != "hysteria2" {
+            continue;
+        }
+        let server = proxy
+            .get("server")
+            .and_then(Value::as_str)
+            .ok_or("an exit proxy is missing its server")?;
+        let ip = server
+            .parse::<Ipv4Addr>()
+            .map_err(|_| format!("exit server `{server}` is not an IPv4 address"))?;
+        if !servers.contains(&ip) {
+            servers.push(ip);
+        }
+    }
+    Ok(servers)
 }
 
 fn only_keys(mapping: &Mapping, allowed: &[&str], section: &str) -> Result<(), String> {
@@ -303,6 +371,10 @@ rules:
             "  enable: true\n  listen:",
             "  enable: true\n  ipv6: false\n  listen:",
             1,
+        ).replacen(
+            "  fake-ip-range: 198.18.0.1/16\n",
+            "  fake-ip-range: 198.18.0.1/16\n  fake-ip-ttl: 30\n  prefer-h3: false\n  cache-algorithm: lru\n",
+            1,
         );
         assert_ne!(with_dial_defaults, OWNED);
         assert_eq!(ensure_owned_runtime_config_is_safe(&with_dial_defaults), Ok(()));
@@ -311,6 +383,25 @@ rules:
             ("  network: tcp", "  network: tcp\n  skip-cert-verify: true"),
             ("  network: tcp", "  network: tcp\n  Skip_Cert_Verify: true"),
             ("- MATCH,Tono-Exit", "- MATCH,DIRECT"),
+        ] {
+            let changed = OWNED.replacen(from, to, 1);
+            assert_ne!(changed, OWNED, "fixture edit `{from}` did not apply");
+            assert!(
+                ensure_owned_runtime_config_is_safe(&changed).is_err(),
+                "accepted `{to}`"
+            );
+        }
+    }
+
+    #[test]
+    fn the_service_refuses_a_runtime_that_leaves_traffic_off_the_tunnel() {
+        assert_eq!(ensure_owned_runtime_config_is_safe(OWNED), Ok(()));
+        for (from, to) in [
+            ("udp: true", "udp: false"),
+            ("auto-route: true", "auto-route: false"),
+            ("- 203.0.113.10/32", "- 0.0.0.0/0"),
+            ("- 203.0.113.10/32", "- 203.0.113.10/24"),
+            ("- 203.0.113.10/32", "- 198.51.100.20/32"),
         ] {
             let changed = OWNED.replacen(from, to, 1);
             assert_ne!(changed, OWNED, "fixture edit `{from}` did not apply");

@@ -1,13 +1,23 @@
 // Traffic-quota cycles on cumulative interface counters. Production callers
 // inject them; the rollup columns are net_in_last / net_out_last (300s, 3600s).
 
+import {
+  closeOpenCycle,
+  insertOpenCycle,
+  newId,
+  openCycleRow,
+  replaceExpiredOpenCycle,
+} from './quota-cycle';
+
+export { closeOpenCycle, newId, openCycleRow };
+
 type Row = Record<string, any>;
 
 const DAY = 86400;
 const ROLLING_PERIOD = 30 * DAY;
 const SLOPE_WINDOW = 7 * DAY;
 const SAMPLE_RETENTION = 60 * DAY;
-const NAME_LIMIT = 120;
+export const NAME_LIMIT = 120;
 
 export type CycleKind = 'calendar_day' | 'anniversary' | 'rolling_30d' | 'manual';
 export type QuotaCounts = 'in' | 'out' | 'in_out';
@@ -39,13 +49,13 @@ const ERROR_CATEGORIES: ErrorCategory[] = [
   'dial_timeout', 'handshake_fail', 'auth_reject', 'upstream_reject', 'other',
 ];
 
-function finite(value: unknown): number | null {
+export function finite(value: unknown): number | null {
   if (value === null || value === undefined) return null;
   const n = Number(value);
   return Number.isFinite(n) ? n : null;
 }
 
-function field(profile: QuotaProfile, snake: keyof QuotaProfile, camel: keyof QuotaProfile): unknown {
+export function field(profile: QuotaProfile, snake: keyof QuotaProfile, camel: keyof QuotaProfile): unknown {
   return profile[snake] ?? profile[camel];
 }
 
@@ -234,16 +244,7 @@ function asCounts(value: unknown): QuotaCounts {
   return 'in_out';
 }
 
-import {
-  closeOpenCycle,
-  insertOpenCycle,
-  openCycleRow,
-  replaceExpiredOpenCycle,
-} from './quota-cycle';
-
-export { closeOpenCycle };
-
-function boundsFor(profile: QuotaProfile, nowSec: number): CycleBounds | null {
+export function boundsFor(profile: QuotaProfile, nowSec: number): CycleBounds | null {
   const kind = asKind(field(profile, 'cycle_kind', 'cycleKind'));
   const anchor = finite(field(profile, 'cycle_anchor_day', 'cycleAnchorDay'));
   if (kind === 'anniversary') {
