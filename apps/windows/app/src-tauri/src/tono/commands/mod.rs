@@ -174,13 +174,19 @@ pub struct TonoSignInChallenge {
     pub message: String,
 }
 
-/// TS: `interface TonoAccountInfo { email: string; suspended: boolean; deviceLimit: number }`
+/// TS: `interface TonoAccount { email; suspended; deviceLimit; plan; quotaBytes; usageBytes; expiresAt }`
+/// The last four are display-only and `null` when the server did not send them (or offline);
+/// `expiresAt` is epoch seconds.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TonoAccountInfo {
     pub email: String,
     pub suspended: bool,
     pub device_limit: i64,
+    pub plan: Option<String>,
+    pub quota_bytes: Option<i64>,
+    pub usage_bytes: Option<i64>,
+    pub expires_at: Option<i64>,
 }
 
 /// TS: `interface TonoDevice { id: string; name: string; createdAt: number | null; current: boolean }`
@@ -228,17 +234,7 @@ const SERVER_TEST_TIMEOUT: Duration = Duration::from_secs(4);
 
 /// Stable wire key for a connect stage (`TonoStatus.stage`).
 pub fn stage_key(stage: ConnectStage) -> &'static str {
-    match stage {
-        ConnectStage::Preparing => "preparing",
-        ConnectStage::PreparingService => "preparingService",
-        ConnectStage::StartingKillSwitch => "startingKillSwitch",
-        ConnectStage::StartingTunnel => "startingTunnel",
-        ConnectStage::LockingTraffic => "lockingTraffic",
-        ConnectStage::ApplyingCloudPolicy => "applyingCloudPolicy",
-        ConnectStage::SecuringDns => "securingDNS",
-        ConnectStage::CheckingExit => "checkingExit",
-        ConnectStage::VerifyingTraffic => "verifyingTraffic",
-    }
+    tono_core::connect_timing::wire_key(stage)
 }
 
 /// Stable wire key for the top-level UI state (`TonoStatus.uiState`).
@@ -330,6 +326,10 @@ fn account_info_of(user: &User) -> TonoAccountInfo {
         email: user.email.clone(),
         suspended: user.suspended.unwrap_or(false),
         device_limit: user.device_limit.unwrap_or(i64::from(DEFAULT_DEVICE_LIMIT)),
+        plan: user.plan.clone().filter(|plan| !plan.trim().is_empty()),
+        quota_bytes: user.quota_bytes,
+        usage_bytes: user.usage_bytes,
+        expires_at: user.expires_at,
     }
 }
 
@@ -375,6 +375,27 @@ mod tests {
         vscode_workspace_discovery, powershell_profile_roots,
     };
     use tono_core::connection::{ConnectStage, UiState};
+
+    #[test]
+    fn account_info_carries_plan_usage_and_expiry_for_display() {
+        let user = tono_core::auth::User {
+            id: "u1".into(),
+            email: "a@example.test".into(),
+            name: None,
+            plan: Some("Pro".into()),
+            device_limit: Some(3),
+            quota_bytes: Some(100 * 1024 * 1024 * 1024),
+            usage_bytes: Some(12 * 1024 * 1024 * 1024),
+            expires_at: Some(1_798_675_200),
+            suspended: Some(false),
+        };
+        let json = serde_json::to_value(super::account_info_of(&user)).unwrap();
+        assert_eq!(json["plan"], "Pro");
+        assert_eq!(json["quotaBytes"], 100_i64 * 1024 * 1024 * 1024);
+        assert_eq!(json["usageBytes"], 12_i64 * 1024 * 1024 * 1024);
+        assert_eq!(json["expiresAt"], 1_798_675_200_i64);
+        assert_eq!(json["deviceLimit"], 3);
+    }
 
     #[cfg(unix)]
     #[test]

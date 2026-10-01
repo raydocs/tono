@@ -28,9 +28,18 @@ export async function tokens(
   // chain, retires every other still-valid session on that device. Other
   // devices stay signed in. The rotated session itself is revoked by the first
   // statement, which must stay first: meta.changes == 0 means this refresh lost.
-  const retireSiblings = e.DB.prepare(
-    'UPDATE sessions SET revoked_at = ? WHERE user_id = ? AND device_id = ? AND revoked_at IS NULL AND id != ?',
-  ).bind(t, user, device, rotate ? rotate.from : sid);
+  // On rotation this runs in the same batch as the compare-and-swap. Gate it on
+  // that swap having set this request's successor, so a refresh that lost does
+  // not revoke the winner's new session.
+  const retireSiblings = rotate
+    ? e.DB.prepare(
+        `UPDATE sessions SET revoked_at = ?
+         WHERE user_id = ? AND device_id = ? AND revoked_at IS NULL AND id != ?
+           AND EXISTS (SELECT 1 FROM sessions WHERE id = ? AND successor_id = ?)`,
+      ).bind(t, user, device, rotate.from, rotate.from, sid)
+    : e.DB.prepare(
+        'UPDATE sessions SET revoked_at = ? WHERE user_id = ? AND device_id = ? AND revoked_at IS NULL AND id != ?',
+      ).bind(t, user, device, sid);
   try {
     if (rotate) {
       // Revoke and successor insert commit together, and only the request that

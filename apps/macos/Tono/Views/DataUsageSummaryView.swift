@@ -1,10 +1,11 @@
 import SwiftUI
 
-/// Clean, compact Today vs. This Month upload/download/total data usage grid view.
+/// Upload / download / total for the current connection. The core's counters
+/// start at zero on connect and are cleared on disconnect, so there is no
+/// honest "today" or "this month" to show here.
 public struct DataUsageSummaryView: View {
     @Environment(\.colorScheme) private var colorScheme
 
-    /// Data usage metrics for a specific time period.
     public struct PeriodUsage: Equatable, Sendable {
         public var upload: Int64
         public var download: Int64
@@ -16,8 +17,7 @@ public struct DataUsageSummaryView: View {
         }
     }
 
-    public let today: PeriodUsage
-    public let month: PeriodUsage
+    public let session: PeriodUsage
     public var title: LocalizedStringKey?
     public var isCard: Bool
 
@@ -37,58 +37,50 @@ public struct DataUsageSummaryView: View {
     }
 
     public init(
-        today: PeriodUsage = PeriodUsage(),
-        month: PeriodUsage = PeriodUsage(),
-        title: LocalizedStringKey? = "DATA USAGE",
+        session: PeriodUsage = PeriodUsage(),
+        title: LocalizedStringKey? = "This connection",
         isCard: Bool = true
     ) {
-        self.today = today
-        self.month = month
+        self.session = session
         self.title = title
         self.isCard = isCard
     }
 
     public init(
-        todayUpload: Int64,
-        todayDownload: Int64,
-        monthUpload: Int64,
-        monthDownload: Int64,
-        title: LocalizedStringKey? = "DATA USAGE",
+        upload: Int64,
+        download: Int64,
+        title: LocalizedStringKey? = "This connection",
         isCard: Bool = true
     ) {
-        self.today = PeriodUsage(upload: todayUpload, download: todayDownload)
-        self.month = PeriodUsage(upload: monthUpload, download: monthDownload)
-        self.title = title
-        self.isCard = isCard
+        self.init(session: PeriodUsage(upload: upload, download: download), title: title, isCard: isCard)
     }
 
     init(
         appState: AppState,
-        title: LocalizedStringKey? = "DATA USAGE",
+        title: LocalizedStringKey? = "This connection",
         isCard: Bool = true
     ) {
-        let todayUp = appState.trafficStats.totalUpload
-        let todayDown = appState.trafficStats.totalDownload
-        let ledgerTotal = appState.appTrafficLedger.overall.total
-        let monthUp = max(todayUp, ledgerTotal > 0 ? ledgerTotal : todayUp)
-        let monthDown = max(todayDown, appState.trafficStats.totalDownload)
-        self.today = PeriodUsage(upload: todayUp, download: todayDown)
-        self.month = PeriodUsage(upload: monthUp, download: monthDown)
-        self.title = title
-        self.isCard = isCard
+        self.init(
+            upload: appState.trafficStats.totalUpload,
+            download: appState.trafficStats.totalDownload,
+            title: title,
+            isCard: isCard
+        )
     }
 
     public var body: some View {
         let content = VStack(alignment: .leading, spacing: 10) {
             if let title {
                 Text(title)
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                    .kerning(0.6)
-                    .textCase(.uppercase)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.primary)
             }
 
             gridLayout
+
+            Text("Resets when you disconnect.")
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
         }
 
         if isCard {
@@ -112,31 +104,6 @@ public struct DataUsageSummaryView: View {
     private var gridLayout: some View {
         Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 9) {
             GridRow {
-                Text("DIRECTION")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                    .kerning(0.5)
-                    .textCase(.uppercase)
-
-                Text("TODAY")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                    .kerning(0.5)
-                    .textCase(.uppercase)
-                    .gridColumnAlignment(.trailing)
-
-                Text("THIS MONTH")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                    .kerning(0.5)
-                    .textCase(.uppercase)
-                    .gridColumnAlignment(.trailing)
-            }
-
-            Divider()
-                .gridCellColumns(3)
-
-            GridRow {
                 HStack(spacing: 6) {
                     Image(systemName: "arrow.up")
                         .font(.system(size: 9, weight: .bold))
@@ -145,13 +112,10 @@ public struct DataUsageSummaryView: View {
                         .font(.system(size: 12, weight: .medium))
                 }
 
-                Text(Self.formatBytes(today.upload))
+                Text(Self.formatBytes(session.upload))
                     .font(.system(size: 12, weight: .regular, design: .monospaced))
                     .foregroundStyle(.primary)
-
-                Text(Self.formatBytes(month.upload))
-                    .font(.system(size: 12, weight: .regular, design: .monospaced))
-                    .foregroundStyle(.primary)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
             }
 
             GridRow {
@@ -163,17 +127,14 @@ public struct DataUsageSummaryView: View {
                         .font(.system(size: 12, weight: .medium))
                 }
 
-                Text(Self.formatBytes(today.download))
+                Text(Self.formatBytes(session.download))
                     .font(.system(size: 12, weight: .regular, design: .monospaced))
                     .foregroundStyle(.primary)
-
-                Text(Self.formatBytes(month.download))
-                    .font(.system(size: 12, weight: .regular, design: .monospaced))
-                    .foregroundStyle(.primary)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
             }
 
             Divider()
-                .gridCellColumns(3)
+                .gridCellColumns(2)
 
             GridRow {
                 HStack(spacing: 6) {
@@ -184,25 +145,17 @@ public struct DataUsageSummaryView: View {
                         .font(.system(size: 12, weight: .semibold))
                 }
 
-                Text(Self.formatBytes(today.total))
+                Text(Self.formatBytes(session.total))
                     .font(.system(size: 12, weight: .semibold, design: .monospaced))
                     .foregroundStyle(TonoBrand.accent)
-
-                Text(Self.formatBytes(month.total))
-                    .font(.system(size: 12, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(TonoBrand.accent)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
             }
         }
     }
 }
 
 #Preview {
-    DataUsageSummaryView(
-        todayUpload: 125_000_000,
-        todayDownload: 1_420_000_000,
-        monthUpload: 3_500_000_000,
-        monthDownload: 42_800_000_000
-    )
-    .padding()
-    .frame(width: 360)
+    DataUsageSummaryView(upload: 125_000_000, download: 1_420_000_000)
+        .padding()
+        .frame(width: 320)
 }

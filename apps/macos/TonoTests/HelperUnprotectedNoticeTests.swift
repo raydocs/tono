@@ -37,6 +37,36 @@ final class HelperUnprotectedNoticeTests: XCTestCase {
         XCTAssertNil(status)
     }
 
+    /// A status read that connects and then times out is the same "nothing
+    /// answered" as a refused socket. Launch used to throw that timeout
+    /// before the repair notice, and Retry repeated it.
+    func testUpdateStatusTimeoutGetsTheSameLaunchRepairAsARefusedSocket() async throws {
+        var repairs = 0
+        do {
+            _ = try await RuntimeCleanup.queryPendingNativeUpdate(
+                query: { throw HelperIPCError.emptyResponse },
+                launchState: { .backgroundDisabled },
+                repairHelper: { repairs += 1 }
+            )
+            XCTFail("A timed-out, disabled helper must stop the launch with a notice")
+        } catch {
+            XCTAssertTrue(error.localizedDescription.contains("not protected right now"))
+        }
+        XCTAssertEqual(repairs, 0)
+
+        var repaired = false
+        let status = try await RuntimeCleanup.queryPendingNativeUpdate(
+            query: {
+                guard repaired else { throw HelperIPCError.socketFailed }
+                return nil
+            },
+            launchState: { .notLoaded },
+            repairHelper: { repaired = true }
+        )
+        XCTAssertTrue(repaired)
+        XCTAssertNil(status)
+    }
+
     /// TM-claude-2: a current helper whose startup keeps failing exits, and
     /// launchd restarts it every ten seconds forever. Installation saw a
     /// current, registered binary and returned, so no repair ever ran.
