@@ -1,0 +1,10 @@
+## 2026-09-30 · macOS pending-update automatic recovery preserves AI blocking
+
+- 归属：SHIP_PLAN §2 item 10；macOS update/health release and helper contract.
+- 来源：origin/main `561b17f2` → branch `hunt/sol-r4fo-update-failure-ai-hold` (this PR); source only, not merged at authoring.
+- 缺陷修复：Browser DNS failure while private update staging runs reaches the update-owned dispatcher. It now retains automatic-failure intent and uses `/update/disconnect-after-failure`, preserving the narrow AI hold after opening ordinary traffic. Explicit Restore still removes it; a Restore joining the automatic task owns a serialized follow-up even when staging advanced the connection generation. Finding: R4FO-MAC-UPD-BROWSER-HOLD.
+- 新增/优化：无；same authenticated update owner, empty request body, update storage lock, Core/DNS/proxy cleanup, receipt obligations, high-water and install/recovery gates. No strict-mode relaxation.
+- 工程与测试：One helper regression checks the true AI disposition and unchanged durable update obligation. Existing explicit-disconnect regression now asserts false. One AppState regression drives actual pending dispatcher plus an explicit Restore joining across a generation advance. New operation retains proxy cleanup and the 45-second IPC budget. Helper protocol bumped from main by 0.0.1 and CONTRACT.sha256 regenerated with the build script's exact source manifest and hash pipeline.
+- 验证：Linux `git diff --check` and records parser passed; two independent read-only contract/task reviews. XCTest/helper native regressions were authored before implementation; Swift/Xcode unavailable, so no executed failing/passing claim. Hosted macOS CI must run app and helper tests.
+- 候选/发布：仅源码，无新候选；未部署或发布。
+- 剩余限制：needs-hardware for DNS/PF/proxy/update staging and explicit Restore. A manually replaced App paired with an old helper cannot use the new operation; ordinary native staging requires an exact version pair and no plain-release fallback is added. Interrupted selective-intent durability remains issue #1078.

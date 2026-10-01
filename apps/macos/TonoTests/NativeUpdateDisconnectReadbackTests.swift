@@ -3,6 +3,59 @@ import XCTest
 
 @MainActor
 final class NativeUpdateDisconnectReadbackTests: XCTestCase {
+    func testAutomaticUpdateReleaseKeepsAIUntilAnExplicitRestoreJoins() async {
+        let armed = KillSwitchService.isArmed
+        let blocksConnect = RuntimeCleanup.nativeUpdateBlocksConnect
+        let didStartCore = AppProfile.defaults.object(forKey: SettingsKey.didStartCore)
+        let lastTunEnabled = AppProfile.defaults.object(forKey: SettingsKey.lastTunEnabled)
+        defer {
+            KillSwitchService.isArmed = armed
+            RuntimeCleanup.nativeUpdateBlocksConnect = blocksConnect
+            AppProfile.defaults.set(didStartCore, forKey: SettingsKey.didStartCore)
+            AppProfile.defaults.set(lastTunEnabled, forKey: SettingsKey.lastTunEnabled)
+        }
+        let app = AppState()
+        app.nativeUpdatePending = true
+        app.isConnected = true
+        KillSwitchService.isArmed = true
+        var operations = [String]()
+        var aiHeld = true
+        let (requests, requestStarted) = AsyncStream<Void>.makeStream()
+        let (replies, replyRelease) = AsyncStream<Void>.makeStream()
+        defer { requestStarted.finish(); replyRelease.finish() }
+        app.nativeUpdateFailureDisconnect = {
+            operations.append("automatic")
+            requestStarted.yield(())
+            for await _ in replies { break }
+            aiHeld = true
+            return .init(pending: true, receipt: nil, execution: nil,
+                         disconnectVerified: true, diagnostic: nil)
+        }
+        app.nativeUpdateDisconnect = {
+            operations.append("explicit")
+            requestStarted.yield(())
+            aiHeld = false
+            return .init(pending: true, receipt: nil, execution: nil,
+                         disconnectVerified: true, diagnostic: nil)
+        }
+
+        app.disconnect(releaseKillSwitch: true, automaticFailureRelease: true)
+        for await _ in requests { break }
+        XCTAssertEqual(operations, ["automatic"], "pending updates must retain failure-release intent")
+        // Private staging can finish and suspend the connection while the
+        // automatic helper reply is pending. Restore still owns a fresh call.
+        app.connectionCoordinator.bumpGeneration()
+        app.disconnect(releaseKillSwitch: true)
+        replyRelease.yield(())
+        await app.nativeUpdateDisconnectTask?.value
+
+        XCTAssertEqual(operations, ["automatic", "explicit"])
+        XCTAssertFalse(aiHeld, "an explicit Restore must win over the automatic AI hold")
+        XCTAssertFalse(app.isProtectionBlocked)
+        XCTAssertFalse(KillSwitchService.isArmed)
+        XCTAssertTrue(app.nativeUpdatePending, "network release does not complete the update")
+    }
+
     private enum Failure: Error { case lostAcknowledgement }
 
     func testLostDisconnectReplyWithNonLiveReadingDoesNotClaimProtectionOrRetireUpdate() async {

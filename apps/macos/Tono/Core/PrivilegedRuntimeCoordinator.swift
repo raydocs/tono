@@ -21,7 +21,7 @@ actor PrivilegedRuntimeCoordinator {
     }
 
     func nativeUpdate(_ operation: String) throws -> HelperManager.UpdateStatus {
-        if operation == "prepare" || operation == "disconnect" {
+        if operation == "prepare" || operation == "disconnect" || operation == "disconnect-after-failure" {
             try disableSystemProxyIfNeeded()
         }
         return try HelperManager.updateRequest(operation)

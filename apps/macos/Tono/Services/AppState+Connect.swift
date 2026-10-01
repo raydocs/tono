@@ -721,7 +721,11 @@ extension AppState {
     ) {
         if nativeUpdatePending || RuntimeCleanup.nativeUpdateBlocksConnect
             || (releaseKillSwitch && RuntimeCleanup.nativeUpdatePending) {
-            if releaseKillSwitch, !exhaustedTunnelLoss { disconnectPendingNativeUpdate() }
+            if releaseKillSwitch, !exhaustedTunnelLoss {
+                disconnectPendingNativeUpdate(
+                    automaticFailureRelease: automaticFailureRelease || afterUnarmedConnectFailure
+                )
+            }
             return
         }
         let pendingConnect = self.connectionCoordinator.connectTask

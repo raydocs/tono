@@ -14,7 +14,7 @@ final class UpdateTransaction {
         var observe: () throws -> UpdateContractV1.Protection
         var prepare: (UpdateContractV1.Protection) throws -> UpdateContractV1.Protection
         var recovery: (Bool) throws -> UpdateContractV1.Protection
-        var disconnect: () throws -> Void
+        var disconnect: (Bool) throws -> Void
         var launchExecutor: (UpdateStorage.Attempt) throws -> Void
         var cleanupCommitted: () throws -> Void = {}
         /// Whether a bound successor's audit token still resolves to a live
@@ -304,7 +304,7 @@ final class UpdateTransaction {
         try block(.cancelled, ledger: ledger)
     }
 
-    func disconnect(peer: TonoAuthenticatedPeer) throws {
+    func disconnect(peer: TonoAuthenticatedPeer, keepAIHold: Bool = false) throws {
         var ledger = try storage.load()
         guard var attempt = ledger.attempt, attempt.receipt.phase != .committed else {
             throw HelperFailure.invalid("No pending update owns Disconnect.")
@@ -315,7 +315,7 @@ final class UpdateTransaction {
         attempt.disconnectRequested = true
         ledger.attempt = attempt
         try persist(ledger)
-        try effects.disconnect()
+        try effects.disconnect(keepAIHold)
         attempt.disconnectVerified = true
         ledger.attempt = attempt
         try persist(ledger)

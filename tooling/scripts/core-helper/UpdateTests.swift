@@ -40,7 +40,7 @@ func runUpdateSelfTests() -> Bool {
     func effects() -> UpdateTransaction.Effects {
         .init(authenticate: { _ in }, installedFloor: { 5 }, installedComponents: { components },
               stage: { _, _, _, _ in components }, observe: { .protectedOffline }, prepare: { _ in .protectedOffline },
-              recovery: { _ in .protectedOffline }, disconnect: {}, launchExecutor: { _ in })
+              recovery: { _ in .protectedOffline }, disconnect: { _ in }, launchExecutor: { _ in })
     }
     func reserved(_ store: UpdateStorage, _ engine: UpdateTransaction) throws {
         try engine.reserve(peer: owner, manifest: manifest, manifestBytes: UpdateContractV1.canonical(manifest), signature: Data())
@@ -214,7 +214,10 @@ func runUpdateSelfTests() -> Bool {
         let store = try UpdateStorage(root: directory)
         var releases = 0
         var io = effects()
-        io.disconnect = { releases += 1 }
+        io.disconnect = { keepAIHold in
+            try check(!keepAIHold, "Explicit Disconnect must remove the AI hold")
+            releases += 1
+        }
         let engine = UpdateTransaction(storage: store, effects: io)
         try reserved(store, engine)
         try engine.execute(peer: owner)
@@ -230,6 +233,25 @@ func runUpdateSelfTests() -> Bool {
         try refuses { try engine.retireUnconsumed(peer: owner) }
         try refuses { try engine.gate(method: "POST", path: "/helper/upgrade", peer: owner) }
         try refuses { try engine.gate(method: "POST", path: "/core/start", peer: successor) }
+    }
+
+    test("automatic-update-disconnect-retains-ai-disposition-and-obligation") { directory in
+        let store = try UpdateStorage(root: directory)
+        var dispositions = [Bool]()
+        var io = effects()
+        io.disconnect = { dispositions.append($0) }
+        let engine = UpdateTransaction(storage: store, effects: io)
+        try reserved(store, engine)
+        let before = try store.load()
+        try engine.disconnect(peer: owner, keepAIHold: true)
+        let after = try store.load()
+        try check(dispositions == [true], "Automatic update cleanup removed the AI hold")
+        try check(after.attempt?.disconnectRequested == true && after.attempt?.disconnectVerified == true,
+                  "Automatic cleanup lost the verified update release")
+        try check(after.highWater == before.highWater && after.generation == before.generation
+                  && after.attempt?.receipt == before.attempt?.receipt
+                  && after.attempt?.execution == before.attempt?.execution,
+                  "Automatic release fabricated update completion or changed its obligation")
     }
 
     test("unconsumed-retirement-archives-before-new-admission") { directory in

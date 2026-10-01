@@ -63,39 +63,72 @@ extension AppState {
         // journal is treated as its proof.
     }
 
-    func disconnectPendingNativeUpdate() {
-        guard nativeUpdateDisconnectTask == nil else { return }
+    func disconnectPendingNativeUpdate(automaticFailureRelease: Bool = false) {
+        guard nativeUpdateDisconnectTask == nil else {
+            // An explicit Restore wins even if an automatic helper call is
+            // already in flight. The same task drains it before removing AI.
+            if !automaticFailureRelease { nativeUpdateDisconnectKeepAIHold = false }
+            return
+        }
+        nativeUpdateDisconnectKeepAIHold = automaticFailureRelease
         nativeUpdatePending = true
         RuntimeCleanup.nativeUpdateBlocksConnect = true
         nativeUpdateDisconnectTask = Task {
             defer { nativeUpdateDisconnectTask = nil }
             await suspendForNativeUpdate()
-            let generation = connectionCoordinator.protectionOperationGeneration
+            var generation = connectionCoordinator.protectionOperationGeneration
             guard !Task.isCancelled else { return }
             isProtectionBlocked = false
             isProtectionUnconfirmed = true
-            do {
-                let result = try await nativeUpdateDisconnect()
-                guard !Task.isCancelled,
-                      connectionCoordinator.protectionOperationGeneration == generation else { return }
-                guard result.disconnectVerified == true else { throw NativeUpdateDownload.failure("Update Disconnect was not verified.") }
-                launchProtectionSequence &+= 1
-                isProtectionBlocked = false
-                KillSwitchService.isArmed = false
-                resetReleasedSessionHistory()
-                RuntimeCleanup.clearCoreStarted()
-            } catch {
-                guard !Task.isCancelled,
-                      connectionCoordinator.protectionOperationGeneration == generation else { return }
-                // The helper may have released PF before the reply or ledger
-                // write failed. Until a live readback arrives, neither the old
-                // cached intent nor this error proves protection is held.
-                isProtectionBlocked = false
-                isProtectionUnconfirmed = true
-                guard await refreshNativeUpdateProtectionStatus() else { return }
-                guard !Task.isCancelled,
-                      connectionCoordinator.protectionOperationGeneration == generation else { return }
-                errorMessage = error.localizedDescription
+            // This disposition can change only from automatic to explicit,
+            // so a joining Restore adds at most one serialized helper call.
+            while true {
+                let appliedAIHold = nativeUpdateDisconnectKeepAIHold
+                do {
+                    let result: HelperManager.UpdateStatus
+                    if appliedAIHold {
+                        result = try await nativeUpdateFailureDisconnect()
+                    } else {
+                        result = try await nativeUpdateDisconnect()
+                    }
+                    guard !Task.isCancelled else { return }
+                    if appliedAIHold, !nativeUpdateDisconnectKeepAIHold {
+                        // Staging may have advanced the generation while the
+                        // automatic call ran. This new user request owns a
+                        // fresh release; only its result may settle that state.
+                        generation = connectionCoordinator.protectionOperationGeneration
+                        continue
+                    }
+                    guard connectionCoordinator.protectionOperationGeneration == generation else { return }
+                    guard result.disconnectVerified == true else { throw NativeUpdateDownload.failure("Update Disconnect was not verified.") }
+                    launchProtectionSequence &+= 1
+                    isProtectionBlocked = false
+                    KillSwitchService.isArmed = false
+                    resetReleasedSessionHistory()
+                    RuntimeCleanup.clearCoreStarted()
+                    return
+                } catch {
+                    guard !Task.isCancelled else { return }
+                    if appliedAIHold, !nativeUpdateDisconnectKeepAIHold {
+                        generation = connectionCoordinator.protectionOperationGeneration
+                        continue
+                    }
+                    guard connectionCoordinator.protectionOperationGeneration == generation else { return }
+                    // A lost reply may follow PF release. Re-read live state,
+                    // retaining explicit intent received during that await.
+                    isProtectionBlocked = false
+                    isProtectionUnconfirmed = true
+                    let refreshed = await refreshNativeUpdateProtectionStatus()
+                    guard !Task.isCancelled else { return }
+                    if appliedAIHold, !nativeUpdateDisconnectKeepAIHold {
+                        generation = connectionCoordinator.protectionOperationGeneration
+                        continue
+                    }
+                    guard refreshed,
+                          connectionCoordinator.protectionOperationGeneration == generation else { return }
+                    errorMessage = error.localizedDescription
+                    return
+                }
             }
         }
     }
