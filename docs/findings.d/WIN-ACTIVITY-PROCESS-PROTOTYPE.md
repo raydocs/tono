@@ -1,6 +1,6 @@
 | ID | 问题（一句） | 状态 | Issue / PR | 等级 | 剩余限制 |
 |---|---|---|---|---|---|
-| WIN-ACTIVITY-PROCESS-PROTOTYPE | Inherited process-family/translation keys crash Activity; extensionless names remain affected after #951 | in-PR | [#951](https://github.com/raydocs/tono/pull/951); follow-up hunt/sol-r4ts-metadata-owned-keys | 低·已确认（P3 续修；原 P2 已合 #951） | Actual Windows game socket ownership not captured; real executable/networking capability verified from developer sources |
+| WIN-ACTIVITY-PROCESS-PROTOTYPE | Inherited process-family/translation keys crash Activity; extensionless names remain affected after #951 | in-PR | [#951](https://github.com/raydocs/tono/pull/951); follow-up [#1129](https://github.com/raydocs/tono/pull/1129) | 低·已确认（P3 续修；原 P2 已合 #951） | Actual Windows game socket ownership not captured; real executable/networking capability verified from developer sources |
 
 `activity-model.ts:133` read an ordinary object's inherited properties as if they were declared family labels. The live connection normalization preserves a valid process filename, `toActivityRow` adopts the function returned for the lowercase constructor stem, and `aggregateActivityApps` throws at its string operation during `ActivityPage` rendering. The actual React page regression reproduces the exception before the fix and renders the executable normally afterward.
 
