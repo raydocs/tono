@@ -27,6 +27,51 @@ fn fake_store() -> RunStateStore<FakeEnv> {
     RunStateStore::new(FakeEnv::new())
 }
 
+#[tokio::test]
+async fn selective_release_retry_keeps_the_ai_hold_after_a_transient_refusal() {
+    let calls = std::cell::RefCell::new(Vec::new());
+    let hold = super::release_applying_narrow_with(|apply_narrow| {
+        calls.borrow_mut().push(apply_narrow);
+        let first = calls.borrow().len() == 1;
+        async move {
+            if first {
+                Err(super::release_refusal(
+                    1,
+                    "Kill switch release refused; DNS restore is unproven".to_owned(),
+                ))
+            } else {
+                // The Service opens general traffic in both flavors; false removes the AI hold.
+                Ok(apply_narrow)
+            }
+        }
+    })
+    .await
+    .expect("a transient DNS refusal still gets one release retry");
+    assert!(hold, "automatic recovery must retain its requested AI hold");
+    assert_eq!(&*calls.borrow(), &[true, true]);
+}
+
+#[tokio::test]
+async fn selective_release_keeps_null_payload_compatibility_for_a_legacy_service() {
+    let calls = std::cell::RefCell::new(Vec::new());
+    let released = super::release_applying_narrow_with(|apply_narrow| {
+        calls.borrow_mut().push(apply_narrow);
+        async move {
+            if apply_narrow {
+                Err(super::release_refusal(
+                    400,
+                    "Invalid JSON: JSON serialization error: Failed to parse request JSON: invalid type: map, expected unit".to_owned(),
+                ))
+            } else {
+                Ok(())
+            }
+        }
+    })
+    .await;
+    assert!(released.is_ok(), "an older Service must still open general traffic");
+    assert_eq!(&*calls.borrow(), &[true, false]);
+}
+
 /// How often each step of the release path's readiness choice ran.
 #[derive(Default)]
 struct ReleaseCalls {
