@@ -484,6 +484,10 @@ pub struct KillSwitchStatus {
     pub direct_endpoint_digest: String,
     #[serde(default)]
     pub last_error: Option<String>,
+    /// The Service opened the network because a restored wanted session never proved Core.
+    /// Older payloads omit it and read as false, so a user disconnect does not reconnect.
+    #[serde(default)]
+    pub reconnect_after_release: bool,
 }
 
 /// `POST /kill-switch/lock` payload. `None` locks the interface named at arm time.
@@ -993,6 +997,32 @@ mod tests {
     }
 
     #[test]
+    fn parse_header_bounded_garbage_does_not_panic() {
+        assert_eq!(
+            ProtocolVersion::parse_header("1.2"),
+            Some(ProtocolVersion {
+                epoch: 1,
+                revision: 2
+            })
+        );
+        assert!(ProtocolVersion::parse_header("").is_none());
+        assert!(ProtocolVersion::parse_header("1").is_none());
+        assert!(ProtocolVersion::parse_header("1.2.3").is_none());
+        assert!(ProtocolVersion::parse_header("a.b").is_none());
+        let mut state: u64 = 7;
+        for _ in 0..32 {
+            state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+            let text: String = (0..12)
+                .map(|shift| {
+                    let byte = b'0' + ((state >> (shift % 8)) & 0x0f) as u8;
+                    byte as char
+                })
+                .collect();
+            let _ = ProtocolVersion::parse_header(&text);
+        }
+    }
+
+    #[test]
     fn staging_capability_keeps_its_feature_revision_after_the_protocol_floor_advances() {
         let mut older = ProtocolInfo::current();
         older.protocol.revision = crate::MIN_SERVICE_REVISION_FOR_RUNTIME_STAGING - 1;
@@ -1151,6 +1181,7 @@ mod tests {
             endpoints: config.proxy_endpoints.clone(),
             direct_endpoint_digest: super::direct_endpoint_digest(&[]).unwrap(),
             last_error: None,
+            reconnect_after_release: false,
         };
         let encoded = serde_json::to_vec(&status).expect("status should serialize");
         assert_eq!(
@@ -1170,6 +1201,7 @@ mod tests {
         let parsed = serde_json::from_value::<KillSwitchStatus>(older)
             .expect("an older payload without the field must still parse");
         assert!(!parsed.tunnel_permit_rendered);
+        assert!(!parsed.reconnect_after_release);
         assert_eq!(parsed.mode, KillSwitchStatusMode::Locked);
         assert_eq!(
             serde_json::from_value::<KillSwitchStatusMode>(serde_json::json!("locked")).unwrap(),
