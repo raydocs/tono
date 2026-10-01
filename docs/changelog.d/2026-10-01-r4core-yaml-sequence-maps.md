@@ -6,4 +6,4 @@
 - 工程与测试：one admitted-input regression checks both runnable and redacted YAML mappings.
 - 验证：Linux, Rust 1.98.1; the new regression failed before the fix with `generated YAML must parse` and a parser error at line 50. `CARGO_BUILD_JOBS=2 cargo test -p tono-core` passed after the fix: 337 unit and 15 integration tests, no failures. `git diff --check` passed. Existing unused-constant warning remains.
 - 候选/发布：仅源码，无新候选；未部署或发布。
-- 剩余限制：Windows/Tauri/service and installed-device startup unrun locally; covered by hosted CI and needs-hardware acceptance. The default sing-box path is unaffected; this fixes explicit Mihomo and eligible binary fallback.
+- 剩余限制：Windows/Tauri/service and installed-device startup unrun locally; covered by hosted CI and needs-hardware acceptance. Current publication rejects new bracketed names; retained legacy catalogs/caches still admit them. No production inventory inspected. The default sing-box path is unaffected; this fixes explicit Mihomo and eligible binary fallback.
