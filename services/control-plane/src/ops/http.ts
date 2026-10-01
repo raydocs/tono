@@ -18,11 +18,12 @@ export interface Cursor {
   id: string;
 }
 
-const CURSOR_TOKEN = /^[A-Za-z0-9_-]{1,2048}$/;
+const CURSOR_TOKEN = /^[A-Za-z0-9_-]{1,4802}$/;
 // Parts are percent-encoded before the colon join, so a customer email that
 // contains ':' cannot be read as the separator. The id may still contain
-// colons after decoding. Limits are on the encoded form.
-const CURSOR_BODY = /^([^:\u0000-\u001f]{1,800}):([^\u0000-\u001f]{1,800})$/;
+// colons after decoding. A supported 200-character name can expand to 1800
+// percent-encoded characters; two such parts yield 4802 base64url characters.
+const CURSOR_BODY = /^([^:\u0000-\u001f]{1,1800}):([^\u0000-\u001f]{1,1800})$/;
 
 const invalidCursor = () => new ApiError(400, 'VALIDATION_ERROR', 'Invalid cursor');
 
