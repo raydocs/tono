@@ -1,4 +1,5 @@
 import { ApiError } from '../../errors';
+import { sha256 } from '../../crypto';
 import { body, rejectUnexpectedKeys } from '../../request';
 import {
   LEDGER_CATEGORIES,
@@ -150,7 +151,7 @@ export async function getLedger(req: Request, e: Env): Promise<Response> {
   const updatedAt = sliced[0]?.createdAt ?? t;
   return listJson(
     e, req, sliced, nextCursor, updatedAt,
-    weakEtag([month, updatedAt, total]),
+    weakEtag([month, updatedAt, total, await sha256(JSON.stringify({ items: sliced, nextCursor, total }))]),
     assertLedgerEntry, total,
   );
 }
