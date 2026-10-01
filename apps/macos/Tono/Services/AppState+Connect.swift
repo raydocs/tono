@@ -1434,6 +1434,17 @@ extension AppState {
         }
     }
 
+    /// True when `message` is the recovery line or the classified failure this
+    /// monitor is still showing. Other notices, including a rejected catalog
+    /// update, are not owned here.
+    private func healthMonitorOwns(_ message: String?) -> Bool {
+        guard let message else { return false }
+        if message == String(localized: "Recovering protected connection…") {
+            return true
+        }
+        return message == lastClassifiedFailure?.userMessage
+    }
+
     /// One iteration of the core monitor. Extracted from the loop above so the
     /// owned-TUN verdict is drivable in tests through the `tunInterfaceExists`
     /// seam; the loop itself only owns sleeping and exit. Every `continue` the
@@ -1730,9 +1741,9 @@ extension AppState {
                 selectedExit: self.selectedExitNode()
             )
         }
-        let tun = await ProtectedConnectivityVerifier.raceSystemTUNProbes(
-            timeoutSeconds: 6,
-            preferredLabel: self.lastSuccessfulProbeOrigin
+        let tun = await self.raceHealthTrafficProbes(
+            6,
+            self.lastSuccessfulProbeOrigin
         )
         if case .won(let label) = tun {
             self.lastSuccessfulProbeOrigin = label
@@ -1782,11 +1793,12 @@ extension AppState {
             }
             self.isProxyDegraded = advisory != nil
             self.isRecoveringProtectedConnection = false
-            // The connection healed on its own. Leaving the retry-loop
-            // message in place kept "last error" showing a failure that
-            // had already resolved, which sends support down the wrong
-            // path.
-            if advisory == nil { self.errorMessage = nil }
+            // The connection healed on its own. Clear the retry-loop message
+            // this monitor posted. A catalog rejection or any other notice
+            // shares errorMessage and must stay up.
+            if advisory == nil, self.healthMonitorOwns(self.errorMessage) {
+                self.errorMessage = nil
+            }
             return .continueMonitoring
         case .retry(let failure):
             self.lastClassifiedFailure = failure

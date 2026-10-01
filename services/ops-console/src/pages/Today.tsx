@@ -28,6 +28,7 @@ import { Digest } from './today/Digest';
 import { HeroKpis } from './today/HeroKpis';
 import { IncidentList } from './today/IncidentCard';
 import { IncidentDrawer } from './today/IncidentDrawer';
+import { FailureClusters } from './diagnostics/FailureClusters';
 
 const TABS = ['open', 'resolved', 'chores'] as const;
 type TabId = (typeof TABS)[number];
@@ -224,6 +225,11 @@ export default function TodayPage({
               />
             )}
           </div>
+
+          {/* Under the list, not above it. On a phone the first 认领 has to
+              be on screen when the page opens; a block here used to push it
+              past the fold. */}
+          <FailureClusters />
         </div>
       </div>
 
