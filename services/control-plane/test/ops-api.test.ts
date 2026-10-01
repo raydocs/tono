@@ -1,6 +1,7 @@
 import { createExecutionContext, env, waitOnExecutionContext } from 'cloudflare:test';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import worker, { type Env } from '../src/index';
+import { rollNodeCycle } from '../src/ops/quota';
 import { OPS_V1_ROUTES } from '../src/ops/router';
 import { closeExpiredLogWindows } from '../src/ops/shared-admin/diagnostics-logs';
 import {
@@ -292,6 +293,30 @@ describe('ops v1 api', () => {
     }, 'PATCH'));
     expect(res.status).toBe(400);
     expect(await res.json()).toMatchObject({ error: { code: 'VALIDATION_ERROR' } });
+  });
+
+  it('PATCH profile quota without a sample does not baseline the cycle at zero', async () => {
+    await seedNode();
+    const enc = encodeURIComponent(NODE);
+    const res = await ops(`nodes/${enc}/profile`, json({
+      quota: { quotaBytes: 1_000_000_000, cycleKind: 'calendar_day', cycleAnchorDay: 1, counts: 'in_out' },
+    }, 'PATCH'));
+    expect(res.status).toBe(200);
+    const opened = await db().prepare(
+      `SELECT counter_in_last, counter_out_last, used_bytes
+       FROM node_traffic_cycles WHERE node_name = ? AND status = 'open'`,
+    ).bind(NODE).first<{ counter_in_last: number | null; counter_out_last: number | null; used_bytes: number }>();
+    expect(opened?.counter_in_last).toBeNull();
+    expect(opened?.counter_out_last).toBeNull();
+    expect(Number(opened?.used_bytes)).toBe(0);
+    const rolled = await rollNodeCycle(db(), NODE, {
+      cycle_kind: 'calendar_day',
+      cycle_anchor_day: 1,
+      traffic_quota_bytes: 1_000_000_000,
+      quota_counts: 'in_out',
+    }, { in: 8_000_000_000, out: 2_000_000_000, at: NOW + 60 }, NOW + 60);
+    expect(Number(rolled?.used_bytes)).toBe(0);
+    expect(Number(rolled?.counter_in_last)).toBe(8_000_000_000);
   });
 
   it('PATCH nodes/{name}/profile quota null clears the open cycle', async () => {
