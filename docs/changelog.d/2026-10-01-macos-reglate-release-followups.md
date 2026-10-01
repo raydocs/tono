@@ -1,0 +1,11 @@
+## 2026-10-01 · macOS automatic-release follow-ups from the late regression pass
+- 归属：SHIP_PLAN §2 item 10 / G1，macOS runtime recovery (`AppState+Connect.swift`).
+- 来源：baseline `0676435b`; branch `hunt/claude-reglate-macos`; found by the RegLate macOS regression pass (`docs/agent-reports/2026-10-01-claude-reglate-macos.md`).
+- 缺陷修复：
+  - REGLATE-MAC-F1 (#1086 follow-up): with no selected exit (saved target missing from the catalog), the unarmed reconnect loop proved "other"-region nodes, failed the selection check and reset to the 2 s rung forever. It now backs off without dialing.
+  - REGLATE-MAC-F2 (#1099 sibling): a failed unarmed successor connect while an update is pending sent the explicit `/update/disconnect` (AI layer removed). It now uses the automatic release that keeps the AI hold, like the non-update teardown.
+- 新增/优化：无。
+- 工程与测试：two XCTests in `ArmedFailureReleaseTests.swift`, one per behavior.
+- 验证：code reading only on the MacBook; XCTest runs in hosted macOS CI. No PF/DNS/helper commands run locally.
+- 候选/发布：仅源码，无新候选。
+- 剩余限制：needs-hardware acceptance with the merged checklist; no helper contract change.

@@ -727,7 +727,9 @@ extension AppState {
         if nativeUpdatePending || RuntimeCleanup.nativeUpdateBlocksConnect
             || (releaseKillSwitch && RuntimeCleanup.nativeUpdatePending) {
             if releaseKillSwitch, !exhaustedTunnelLoss {
-                disconnectPendingNativeUpdate(preserveAIHold: automaticFailureRelease)
+                disconnectPendingNativeUpdate(
+                    preserveAIHold: automaticFailureRelease || afterUnarmedConnectFailure
+                )
             }
             return
         }
@@ -2333,7 +2335,12 @@ extension AppState {
                 if self.isConnected || self.isConnecting || self.isDisconnecting { return }
                 if self.protectedReconnectPausedForUserAction { return }
                 if KillSwitchService.isArmed || self.isProtectionBlocked { return }
-                let preferred = self.selectedExitNode()?.name ?? ""
+                // No selected exit (a target missing from the catalog) has nothing this loop
+                // may dial. Back off; an empty name would prove "other"-region nodes and spin.
+                guard let preferred = self.selectedExitNode()?.name else {
+                    attempt += 1
+                    continue
+                }
                 let candidates = UnarmedReconnect.tcpCandidateNames(
                     preferred: preferred, remembered: self.unarmedDialName,
                     candidates: self.exitHealCandidates()

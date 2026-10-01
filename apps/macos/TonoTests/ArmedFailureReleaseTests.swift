@@ -341,4 +341,71 @@ final class ArmedFailureReleaseTests: XCTestCase {
         XCTAssertTrue(RuntimeCleanup.nativeUpdateBlocksConnect)
     }
 
+    func testPendingUpdateUnarmedConnectFailurePreservesAIHold() async {
+        let armed = KillSwitchService.isArmed
+        let pending = RuntimeCleanup.nativeUpdatePending
+        let blocked = RuntimeCleanup.nativeUpdateBlocksConnect
+        let app = AppState()
+        defer {
+            app.connectionCoordinator.cancelConnectionTasks()
+            KillSwitchService.isArmed = armed
+            RuntimeCleanup.nativeUpdatePending = pending
+            RuntimeCleanup.nativeUpdateBlocksConnect = blocked
+        }
+        KillSwitchService.isArmed = false
+        RuntimeCleanup.nativeUpdatePending = true
+        RuntimeCleanup.nativeUpdateBlocksConnect = false
+        var explicitReleases = 0
+        var automaticReleases = 0
+        app.nativeUpdateDisconnect = {
+            explicitReleases += 1
+            return .init(pending: true, receipt: nil, execution: nil,
+                         disconnectVerified: true, diagnostic: nil)
+        }
+        app.nativeUpdateReleaseAfterFailure = {
+            automaticReleases += 1
+            return .init(pending: true, receipt: nil, execution: nil,
+                         disconnectVerified: true, diagnostic: nil)
+        }
+
+        app.disconnect(releaseKillSwitch: true, afterUnarmedConnectFailure: true)
+        await app.nativeUpdateDisconnectTask?.value
+
+        XCTAssertEqual(automaticReleases, 1, "a failed successor connect is automatic and keeps the AI hold")
+        XCTAssertEqual(explicitReleases, 0)
+    }
+
+    func testUnarmedReconnectBacksOffWithoutASelectedExit() async {
+        let app = AppState()
+        let node = Fixture.realityNode(name: "Frankfurt · Main")
+        app.proxyRegions = [ProxyRegion(id: AppState.managedCatalogRegionID, name: "TONO CLOUD", nodes: [node])]
+        app.proxyService.activeNodeName = "Removed · Exit"
+        app.tonoTransport = TonoTransportDescriptor(port: 1080)
+        let savedArmed = KillSwitchService.isArmed
+        let savedUpdateBlock = RuntimeCleanup.nativeUpdateBlocksConnect
+        let savedUpdatePending = RuntimeCleanup.nativeUpdatePending
+        let savedSelection = AppProfile.defaults.string(forKey: SettingsKey.selectedProxyTargetName)
+        KillSwitchService.isArmed = false
+        RuntimeCleanup.nativeUpdateBlocksConnect = false
+        RuntimeCleanup.nativeUpdatePending = false
+        app.recordConnectBootSession = { throw POSIXError(.ENOSPC) }
+        app.unarmedTcpProof = { _ in true }
+        var delays: [TimeInterval] = []
+        defer {
+            app.connectionCoordinator.unarmedReconnectTask?.cancel()
+            app.connectionCoordinator.cancelConnectionTasks()
+            KillSwitchService.isArmed = savedArmed
+            RuntimeCleanup.nativeUpdateBlocksConnect = savedUpdateBlock
+            RuntimeCleanup.nativeUpdatePending = savedUpdatePending
+            AppProfile.defaults.set(savedSelection, forKey: SettingsKey.selectedProxyTargetName)
+        }
+        XCTAssertNil(app.selectedExitNode())
+        app.scheduleUnarmedReconnect(sleep: { delay in
+            delays.append(delay)
+            if delays.count == 3 { app.connectionCoordinator.unarmedReconnectTask?.cancel() }
+        })
+        await app.connectionCoordinator.unarmedReconnectTask?.value
+        XCTAssertEqual(delays, [2, 5, 15], "no selected exit must back off, not spin on the two-second rung")
+    }
+
 }
