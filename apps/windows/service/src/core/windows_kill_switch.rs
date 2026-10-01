@@ -295,6 +295,35 @@ const FRESH_ARM_PROOF_WINDOW: std::time::Duration = std::time::Duration::from_se
 static FRESH_ARM_PROOF_PENDING: AtomicBool = AtomicBool::new(false);
 static FRESH_ARM_EPOCH: AtomicU64 = AtomicU64::new(0);
 
+/// Bind a Core watchdog to the arm that admitted it. A successor arms before joining the
+/// previous watchdog, so neither an owner key nor the absence of a Core fences old cleanup.
+pub(crate) fn core_arm_epoch() -> u64 {
+    FRESH_ARM_EPOCH.load(Ordering::Acquire)
+}
+
+/// Queue exhausted recovery for the independent WFP watchdog. The Core watchdog must finish
+/// without taking owner lifecycle: a Start/Stop can hold it while joining that same task.
+pub(crate) async fn note_core_recovery_exhausted(epoch: u64) {
+    if !SUPPORTED {
+        return;
+    }
+    let _operation = WFP_OPERATION.lock().await;
+    if core_arm_epoch() != epoch || current_core_instance_for_direct_security().is_some() {
+        return;
+    }
+    if !armed_guard().as_ref().is_some_and(|armed| {
+        armed.intent.wanted && !armed.intent.strict_kill_switch && armed.intent.owner_key.is_some()
+    }) {
+        return;
+    }
+    // Reuse the epoch-fenced lifecycle cleanup, including desired-owner retirement, installer
+    // and update admission, and the secondary AI hold. Failed cleanup remains retryable.
+    *WANTED_CORE_DEADLINE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(std::time::Instant::now());
+    FRESH_ARM_PROOF_PENDING.store(true, Ordering::Release);
+}
+
 /// This boot's desired state will start Core, and that start has not settled yet.
 /// The watchdog treats it as "starting" so a same-boot replay is not released before
 /// `start_core` runs. Cleared when desired-state restore finishes.
@@ -389,8 +418,8 @@ fn note_fresh_arm_core_window(intent: &IntentRecord) {
     }
 }
 
-/// Called after acquiring the owner lifecycle lock. An expired worker may only retire the
-/// exact arm it observed; successful verification, release, or a successor arm revokes it.
+/// Called after acquiring the owner lifecycle lock. An expired or exhausted worker may only
+/// retire the exact arm it observed; verification, release, or a successor arm revokes it.
 pub(super) fn expired_fresh_arm_owner(epoch: u64) -> Option<String> {
     if !FRESH_ARM_PROOF_PENDING.load(Ordering::Acquire)
         || FRESH_ARM_EPOCH.load(Ordering::Acquire) != epoch
@@ -4332,6 +4361,36 @@ mod tests {
             reconcile_wanted_core_window_unlocked().await?,
             WantedCoreWindow::Keep
         );
+        assert!(status().await.wanted);
+        cleanup().await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn exhausted_core_notification_cannot_expire_a_successor_arm() -> Result<()> {
+        cleanup().await;
+        arm_bootstrap(&test_config(), "/opt/tono/mihomo", "owner-alice").await?;
+        let exhausted_epoch = core_arm_epoch();
+        arm_bootstrap(&test_config(), "/opt/tono/mihomo", "owner-alice").await?;
+        let successor_deadline = *WANTED_CORE_DEADLINE.lock().unwrap();
+        note_core_recovery_exhausted(exhausted_epoch).await;
+        assert_eq!(*WANTED_CORE_DEADLINE.lock().unwrap(), successor_deadline);
+        assert!(expired_fresh_arm_owner(core_arm_epoch()).is_none());
+        assert!(status().await.wanted);
+        cleanup().await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn exhausted_core_notification_preserves_explicit_strict_protection() -> Result<()> {
+        cleanup().await;
+        arm_bootstrap(&test_config(), "/opt/tono/mihomo", "owner-alice").await?;
+        armed_guard().as_mut().unwrap().intent.strict_kill_switch = true;
+        clear_wanted_core_window();
+        note_core_recovery_exhausted(core_arm_epoch()).await;
+        assert!(WANTED_CORE_DEADLINE.lock().unwrap().is_none());
         assert!(status().await.wanted);
         cleanup().await;
         Ok(())

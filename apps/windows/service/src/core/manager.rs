@@ -822,6 +822,7 @@ impl CoreManager {
         let failed_child_arc = Arc::clone(&self.failed_child);
         let (shutdown_tx, shutdown_rx) = oneshot::channel();
         let watchdog_config = watchdog_config();
+        let arm_epoch = crate::core::windows_kill_switch::core_arm_epoch();
 
         let handle = tokio::spawn(async move {
             let mut recovery_exhausted = false;
@@ -1105,6 +1106,7 @@ impl CoreManager {
             remove_core_runtime_record().await;
             if recovery_exhausted {
                 set_core_lifecycle_state(ServiceLifecycleState::Fatal);
+                crate::core::windows_kill_switch::note_core_recovery_exhausted(arm_epoch).await;
             }
             Ok(())
         });
@@ -1948,5 +1950,108 @@ mod windows_pipe_tests {
         assert!(sddl.contains(";;;BA)"));
         assert!(!sddl.contains(";;;WD)"));
         assert!(!sddl.contains(";;;AU)"));
+    }
+}
+
+#[cfg(all(test, unix))]
+mod exhaustion_tests {
+    use super::*;
+    use serial_test::serial;
+    #[tokio::test]
+    #[serial]
+    async fn exhausted_core_recovery_releases_non_strict_general_traffic() -> Result<()> {
+        let manager = CoreManager::new();
+        set_core_watchdog_config_for_tests(Some(CoreWatchdogTestConfig {
+            max_restarts: 0,
+            restart_window: Duration::from_secs(10),
+            max_backoff: Duration::ZERO,
+        }));
+        struct Reset;
+        impl Drop for Reset {
+            fn drop(&mut self) {
+                set_core_watchdog_config_for_tests(None);
+            }
+        }
+        let _reset = Reset;
+        let child = Command::new("/bin/sh")
+            .args(["-c", "exit 1"])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()?;
+        let pid = child.id().unwrap();
+        publish_core_identity(&manager.running_pid, pid);
+        let owner = OwnerIdentity::Unix {
+            uid: unsafe { platform_lib::geteuid() },
+            gid: unsafe { platform_lib::getegid() },
+        };
+        let kill_switch = crate::core::structure::KillSwitchConfig {
+            tunnel_interface: "Tono".into(),
+            proxy_endpoints: vec![crate::ProxyEndpoint {
+                ip: "11.22.33.44".into(),
+                port: 443,
+                protocol: crate::ProxyProtocol::Tcp,
+            }],
+            bootstrap_api_hosts: vec!["1.1.1.1".into()],
+            direct_endpoints: vec![],
+        };
+        crate::core::windows_kill_switch::arm_bootstrap(
+            &kill_switch,
+            "/opt/tono/mihomo",
+            "owner-alice",
+        )
+        .await?;
+        crate::core::windows_kill_switch::lock(None).await?;
+        crate::core::windows_kill_switch::mark_verified("owner-alice").await?;
+        let config = ClashConfig {
+            core_config: crate::CoreConfig {
+                core_path: "unused".into(),
+                core_ipc_path: "unused".into(),
+                config_path: "unused".into(),
+                config_dir: "unused".into(),
+            },
+            log_config: WriterConfig {
+                directory: "unused".into(),
+                max_log_size: 1,
+                max_log_files: 1,
+            },
+        };
+        manager
+            .start_watchdog(
+                ChildGuard {
+                    child: Some(child),
+                    readers: vec![],
+                },
+                config,
+                owner,
+            )
+            .await;
+        let handle = manager.watchdog_handle.lock().await.take().unwrap();
+        tokio::time::timeout(Duration::from_secs(3), handle).await???;
+        crate::core::windows_kill_switch::spawn_windows_kill_switch_watchdog();
+        let released = tokio::time::timeout(Duration::from_secs(3), async {
+            while crate::core::windows_kill_switch::status().await.wanted {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .is_ok();
+        let status = crate::core::windows_kill_switch::status().await;
+        let ai_hold = crate::core::selective_layer::test_hold_active();
+        let core_missing = security_core_instance_snapshot().is_none();
+        eprintln!(
+            "exhausted Core: missing={core_missing}, wanted={}, verified={}, mode={:?}, tun={}",
+            status.wanted, status.verified, status.mode, status.tunnel_permit_rendered
+        );
+        crate::core::windows_kill_switch::release().await?;
+        assert!(core_missing);
+        assert!(
+            released && !status.wanted,
+            "exhausted non-strict recovery must release ordinary internet even when the App monitor is absent"
+        );
+        assert!(
+            ai_hold,
+            "automatic exhaustion release must retain the secondary AI hold"
+        );
+        Ok(())
     }
 }
