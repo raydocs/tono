@@ -1594,6 +1594,19 @@ extension AppState {
                     self.connectionCoordinator.unarmedReconnectTask = nil
                 }
                 return .stopMonitoring
+            } else if let health, !health.wanted, !health.live, KillSwitchService.isArmed {
+                // The helper failed open under this session: a re-arm it
+                // could not commit released the block and deleted its
+                // intent, so PF is gone while the tunnel still carries the
+                // session. Do not tear that session down over a barrier that
+                // no longer exists. Drop the stale armed latch — the UI and
+                // every failure path read it as "PF holds this host" — and
+                // let the reassert below re-arm in place. A nil health is a
+                // helper that did not answer; that says nothing and keeps
+                // today's behaviour.
+                LocalTrafficAudit.shared.recordEvent("killswitch_released_under_session")
+                KillSwitchService.isArmed = false
+                KillSwitchService.needsSessionExceptionReassert = true
             }
         }
         // Browser preferences can change after connect. Recheck on the
@@ -1615,7 +1628,14 @@ extension AppState {
                     generation: observedGeneration,
                     detail: browserDNS.diagnosticDetail
                 )
-                self.disconnect(releaseKillSwitch: false)
+                // No reconnect is scheduled here — only the user can change
+                // the browser setting — so a preserve teardown left the host
+                // offline: core stopped, PF held bootstrap-only, system DNS
+                // still pointed at the dead resolver, until the helper's
+                // core-down watchdog released PF about 30 s later. macOS has
+                // no strict kill switch to hold; take that same open end
+                // state without the offline window.
+                self.disconnect(releaseKillSwitch: true)
                 self.errorMessage = browserDNS.failureMessage
                 return .stopMonitoring
             }
