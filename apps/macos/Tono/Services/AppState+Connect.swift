@@ -2306,6 +2306,9 @@ extension AppState {
         connectionCoordinator.unarmedReconnectTask?.cancel()
         let generation = connectionCoordinator.protectionOperationGeneration
         connectionCoordinator.unarmedReconnectTask = Task { [weak self] in
+            // This distinct owner may wait for the automatic release. The failed connect or
+            // monitor caller cannot: the teardown queue drains that caller before releasing.
+            await self?.finishPendingDisconnect()
             var attempt = 0
             while !Task.isCancelled {
                 let delay = UnarmedReconnect.delaySeconds(attempt: attempt)
@@ -2316,12 +2319,24 @@ extension AppState {
                 if self.isConnected || self.isConnecting || self.isDisconnecting { return }
                 if self.protectedReconnectPausedForUserAction { return }
                 if KillSwitchService.isArmed || self.isProtectionBlocked { return }
-                let name = self.unarmedDialName ?? self.selectedExitNode()?.name ?? ""
-                let reachable = await TcpEndpointProof.prove(
-                    name: name,
-                    nodes: self.proxyRegions.flatMap(\.nodes),
-                    override: self.unarmedTcpProof
+                let preferred = self.selectedExitNode()?.name ?? ""
+                let candidates = UnarmedReconnect.tcpCandidateNames(
+                    preferred: preferred, remembered: self.unarmedDialName,
+                    candidates: self.exitHealCandidates()
                 )
+                var provenName: String?
+                for name in candidates {
+                    guard !Task.isCancelled,
+                          self.connectionCoordinator.protectionOperationGeneration == generation else { return }
+                    if await TcpEndpointProof.prove(
+                        name: name,
+                        nodes: self.proxyRegions.flatMap(\.nodes),
+                        override: self.unarmedTcpProof
+                    ) {
+                        provenName = name
+                        break
+                    }
+                }
                 // Socket completion is a continuation and can arrive after
                 // cancellation or a newer lifecycle owner has taken over.
                 guard !Task.isCancelled,
@@ -2330,12 +2345,23 @@ extension AppState {
                       !self.protectedReconnectPausedForUserAction,
                       !self.nativeUpdatePending, !RuntimeCleanup.nativeUpdateBlocksConnect else { return }
                 guard UnarmedReconnect.shouldConnect(
-                    tcpReachable: reachable,
+                    tcpReachable: provenName != nil,
                     protectionArmed: KillSwitchService.isArmed || self.isProtectionBlocked
                 ) else {
                     attempt += 1
                     continue
                 }
+                // Selection can change without a protection-generation bump while idle. A proof
+                // captured before that choice cannot replace the user's newer target.
+                guard self.selectedExitNode()?.name == preferred else {
+                    attempt = 0
+                    continue
+                }
+                guard let provenName, self.applyProxySelection(provenName) else {
+                    attempt += 1
+                    continue
+                }
+                self.persistProxySelection(provenName)
                 self.connect()
                 return
             }
