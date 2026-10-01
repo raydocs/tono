@@ -1,6 +1,6 @@
 # R3-RegWin: Codex (GPT-6.1 Sol) findings
 
-Generated 2026-09-30 22:59 MT from the run's findings.tsv / prs.tsv.
+Generated 2026-09-30 23:48 MT from the run's findings.tsv / prs.tsv.
 
 ## PRs
 
@@ -158,3 +158,6 @@ Generated 2026-09-30 22:59 MT from the run's findings.tsv / prs.tsv.
 | REG-718 | Windows protected policy reconnect | P2 | apps/windows/app/src-tauri/src/tono/connection.rs:440 | Unconditional App TCP proof runs behind retained blocked WFP on policy rebuild | concern: real-unfixed; source-proven, native-unverified; healthy VLESS reconnect fails after cache expiry; cutoff passed |
 | R3REGW-PROTECTED-TCP-PROOF | Windows protected policy reconnect | P2 | apps/windows/app/src-tauri/src/tono/connection.rs:440 | Retained protected policy rebuild blocks its own App TCP preflight before Core restart | real-unfixed: Core-only physical endpoint permit; later failure restores normal internet; native unverified; cutoff passed |
 | R3REGW-FP-26 | Windows health preflight | — | apps/windows/app/src-tauri/src/tono/connection/monitor.rs:1397 | Ordinary health-loss reconnect performs TCP proof behind retained WFP | false-positive: ordinary health loss releases before spawning unarmed probe; policy rebuild separately affected |
+| REG-739 | Windows AI tally | P2/P3 | apps/windows/app/src/tono-ui/AiTrafficCard.tsx:48 | Unscoped account cache shows prior local tally; flow receipt Map retains historical IDs | concern: real-unfixed; actual SWR component and accumulator tests failed; cutoff passed |
+| R3REGW-AI-TALLY-ACCOUNT-SCOPE | Windows AI tally | P2 | apps/windows/app/src/tono-ui/AiTrafficCard.tsx:48 | Cached prior account loads and displays its local tally after replacement sign-in | real-unfixed: real SWR/component test fails under pending replacement local IPC; transient UI data exposure; cutoff passed |
+| R3REGW-AI-TALLY-SEEN-GROWTH | Windows AI tally | P3 | apps/windows/app/src/tono-ui/AiTrafficCard.tsx:28 | Module deduplication retains every historical flow ID until controller generation changes | real-unfixed: actual accumulator retains6000 completed IDs after empty frame; OOM/hang not demonstrated; cutoff passed |

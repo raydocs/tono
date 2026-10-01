@@ -233,11 +233,13 @@ fn now_ms() -> u64 {
 ///
 /// Runs beside Service startup. A fresh proof skips the wait. Hysteria2 has no
 /// TCP proof; refusing to install a tunnel for it would block a working UDP exit.
+/// Protected re-entry retains WFP, whose endpoint permits belong to Core rather
+/// than the App. The normal protected transaction proves that path after startup.
 pub(super) async fn tcp_proof_before_tunnel(
     state: &Arc<TonoState>,
     node: &ValidatedNode,
 ) -> Result<(), String> {
-    if node.is_hysteria2() {
+    if state.lock().await.fsm.kill_switch_armed() || node.is_hysteria2() {
         return Ok(());
     }
     let endpoint = format!("{}:{}", node.server, node.port);
@@ -252,4 +254,43 @@ pub(super) async fn tcp_proof_before_tunnel(
         "tcp connect to the selected exit did not complete before a tunnel was installed"
             .to_string(),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn protected_reconnect_does_not_open_an_app_tcp_probe() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let node = ValidatedNode {
+            name: "US Reality fixture".into(),
+            server: std::net::Ipv4Addr::LOCALHOST,
+            port: address.port(),
+            uuid: "9e107d9d-372b-4c81-8d2b-3f2d0a1b2c3d".into(),
+            servername: "www.microsoft.com".into(),
+            flow: None,
+            client_fingerprint: None,
+            reality_public_key: "0123456789abcdef0123456789abcdef0123456789a".into(),
+            reality_short_id: "0123456789abcdef".into(),
+            protocol: tono_core::node::NodeProtocol::VlessReality,
+            tls_fingerprint: None,
+        };
+        let state = Arc::new(TonoState::for_test());
+        {
+            let mut inner = state.lock().await;
+            inner.fsm.begin_connect();
+            inner.fsm.mark_kill_switch_armed();
+            inner.fsm.mark_session_verified();
+            inner.fsm.connect_succeeded().unwrap();
+            inner.fsm.tunnel_died();
+            inner.fsm.begin_connect();
+            assert!(inner.fsm.kill_switch_armed());
+        }
+        let endpoint = format!("{}:{}", node.server, node.port);
+        tcp_proof_before_tunnel(&state, &node).await.unwrap();
+        assert!(!state.unarmed_proofs.lock().fresh(&endpoint, now_ms()),
+            "protected re-entry must leave App TCP proof to the unarmed path; WFP permits only Core to dial the exit");
+    }
 }

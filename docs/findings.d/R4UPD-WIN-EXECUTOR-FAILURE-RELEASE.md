@@ -1,0 +1,9 @@
+| ID | 问题（一句） | 状态 | Issue / PR | 等级 | 剩余限制 |
+|---|---|---|---|---|---|
+| R4UPD-WIN-EXECUTOR-FAILURE-RELEASE | Task-registration refusal and failed successor creation bypass non-strict selective update-failure release | in-PR | hunt/sol-r4upd-win-register-release | 高·已确认（P1，源码路径与可移植回归） | Native Windows SCM/WFP/NRPT and installed-update faults require CI/hardware; existing cleanup failures and narrow-layer limits remain. |
+
+Two sibling exits missed #1042's rollback-only finalizer. Prepare has already stopped Core and retained bootstrap Blocked WFP. Task registration can fail, save RolledBack, and return directly before release while the initiating App and Service remain alive. After successful publication, successor creation/identity/persistence can fail; the executor saves Uncertain and restarts the Service successfully, so neither rollback-only release nor failed-restart release runs. In the supported unverified Protected Offline starting state, the pending update suppresses startup retirement and the healthy Blocked policy has no Core-proof deadline. Ordinary traffic stays blocked until manual recovery.
+
+Capture the registration result before Service stop, refuse publication inside the stopped-Service outcome, and preserve an already-proven RolledBack marker. The common finalizer also uses the actual failed outcome to select its existing AI-preserving emergency release before restarting the Service. Strict mode and successful publication retain their previous disposition; evidence is not relabelled as successful recovery.
+
+One new narrow finalizer regression was authored before the behavior change. The exact production function and regression extracted to a Linux harness failed with only `restart` recorded, then passed with selective release preceding restart. The existing rollback/strict/success regression also passes in that harness. This validates control-flow disposition, not native networking or token/process creation.

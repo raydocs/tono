@@ -293,6 +293,9 @@ const WANTED_CORE_PROOF_WINDOW: std::time::Duration = std::time::Duration::from_
 /// Unlike startup recovery, Core may not have been published yet when this window starts.
 const FRESH_ARM_PROOF_WINDOW: std::time::Duration = std::time::Duration::from_secs(7 * 60);
 static FRESH_ARM_PROOF_PENDING: AtomicBool = AtomicBool::new(false);
+/// Committed DIRECT expiry must retire its Service-owned Core before opening general traffic.
+/// A late Lock/MarkVerified from the expired session cannot cancel that retirement.
+static DIRECT_EXPIRY_RETIREMENT_PENDING: AtomicBool = AtomicBool::new(false);
 static FRESH_ARM_EPOCH: AtomicU64 = AtomicU64::new(0);
 
 /// Bind a Core watchdog to the arm that admitted it. A successor arms before joining the
@@ -400,6 +403,7 @@ fn core_still_expected(running: bool) -> bool {
 }
 
 fn clear_wanted_core_window() {
+    DIRECT_EXPIRY_RETIREMENT_PENDING.store(false, Ordering::Release);
     FRESH_ARM_PROOF_PENDING.store(false, Ordering::Release);
     *WANTED_CORE_DEADLINE
         .lock()
@@ -439,6 +443,23 @@ pub(super) async fn release_expired_fresh_arm(epoch: u64) -> Result<()> {
         return Ok(());
     }
     release_unproven_wanted_session_unlocked().await
+}
+
+/// Reuse the epoch-fenced owner lifecycle cleanup after committed DIRECT expiry. Caller holds
+/// WFP_OPERATION and has already proved exact Blocked. Core owns its own routes and strict-route
+/// WFP session, so removing only Tono's filters cannot complete selective fallback.
+fn queue_direct_expiry_retirement() -> bool {
+    if !armed_guard().as_ref().is_some_and(|armed| {
+        armed.intent.wanted && !armed.intent.strict_kill_switch && armed.intent.owner_key.is_some()
+    }) {
+        return false;
+    }
+    DIRECT_EXPIRY_RETIREMENT_PENDING.store(true, Ordering::Release);
+    *WANTED_CORE_DEADLINE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(std::time::Instant::now());
+    FRESH_ARM_PROOF_PENDING.store(true, Ordering::Release);
+    true
 }
 
 fn note_wanted_core_window(intent: &IntentRecord) {
@@ -1589,6 +1610,9 @@ pub(crate) async fn mark_verified(owner_key: &str) -> Result<()> {
     ensure_supported()?;
     let _operation = WFP_OPERATION.lock().await;
     let mut armed = armed_guard().clone().context("kill switch is not armed")?;
+    if DIRECT_EXPIRY_RETIREMENT_PENDING.load(Ordering::Acquire) {
+        bail!("expired DIRECT session is retiring Core; a fresh Connect is required");
+    }
     if armed.intent.owner_key.as_deref() != Some(owner_key) {
         bail!("kill switch belongs to a different owner");
     }
@@ -2041,6 +2065,9 @@ pub(crate) async fn lock(tunnel_interface: Option<&str>) -> Result<()> {
 /// Perform the tunnel lock while [`WFP_OPERATION`] is held. Once an install succeeds, publish its
 /// candidate immediately so every later error can reconcile the set that may actually be live.
 async fn lock_unlocked(tunnel_interface: Option<&str>) -> Result<()> {
+    if DIRECT_EXPIRY_RETIREMENT_PENDING.load(Ordering::Acquire) {
+        bail!("expired DIRECT session is retiring Core; a fresh Connect is required");
+    }
     // Same poison contract as every other mutation: a prior panic while `ARMED` was held must
     // not make the next tunnel lock panic the IPC task. `mark_verified` is the sibling path.
     let mut armed = armed_guard()
@@ -2577,10 +2604,45 @@ pub(crate) async fn finalize_direct_runtime_reload(
     reload_result(owner_generation, reload_id, &armed.direct_endpoints)
 }
 
+/// Marker the App matches. A non-strict renewal failure must not say the machine is Blocked:
+/// WFP is left as it was so the caller can release general traffic and keep AI destinations blocked.
+pub(crate) const DIRECT_RENEW_FAILED_PREFIX: &str = "TONO_DIRECT_RENEW_FAILED";
+/// An explicit strict kill switch is the one renewal failure that stays Blocked.
+pub(crate) const DIRECT_RENEW_STRICT_BLOCKED_PREFIX: &str = "TONO_DIRECT_RENEW_STRICT_BLOCKED";
+
+/// A lost committed DIRECT lease is a renewal failure. Non-strict sessions release general
+/// traffic. An in-flight reload bracket and an explicit strict kill switch still narrow to Blocked.
+fn committed_direct_lease_failure_releases(reason: &str, strict_kill_switch: bool) -> bool {
+    !strict_kill_switch && reason.starts_with("committed DIRECT heartbeat lease expired")
+}
+
+/// Non-strict renewal failures do not install Blocked. The App's selective release is what
+/// opens the original network and keeps the secondary AI hold. Strict mode still narrows.
+async fn reject_direct_renewal_unlocked(
+    armed: Armed,
+    current_core: Option<CoreInstance>,
+    detail: &str,
+) -> anyhow::Error {
+    if !armed.intent.strict_kill_switch {
+        return anyhow::anyhow!(
+            "{DIRECT_RENEW_FAILED_PREFIX}: {detail}; WFP was left unchanged so general traffic can be released while AI-service destinations stay blocked"
+        );
+    }
+    match transition_direct_to_blocked_unlocked(armed, current_core, None).await {
+        Ok(()) => anyhow::anyhow!(
+            "{DIRECT_RENEW_STRICT_BLOCKED_PREFIX}: {detail}; strict kill switch kept traffic Blocked"
+        ),
+        Err(error) => error.context(format!(
+            "{DIRECT_RENEW_STRICT_BLOCKED_PREFIX}: {detail}; strict Blocked reconciliation failed"
+        )),
+    }
+}
+
 /// Extend a committed DIRECT lease only for the authenticated owner session and the exact
 /// Core/TUN/endpoint proof finalized by that session. This performs no widening WFP mutation: it
-/// merely moves the Service-owned deadline after every identity check passes. Any malformed,
-/// stale, expired, or mismatched heartbeat first reconciles live policy to exact Blocked.
+/// merely moves the Service-owned deadline after every identity check passes. A malformed,
+/// stale, expired, or mismatched heartbeat does not cut the network: unless the armed record
+/// has an explicit strict kill switch, WFP is left unchanged and the caller selective-releases.
 pub(crate) async fn renew_direct_runtime_reload(
     expected_digest: &str,
     owner_generation: u64,
@@ -2593,10 +2655,12 @@ pub(crate) async fn renew_direct_runtime_reload(
     let lease = match direct_reload_matches(&armed, owner_generation, reload_id) {
         Ok(lease) => lease,
         Err(error) => {
-            transition_direct_to_blocked_unlocked(armed, current_core, None)
-                .await
-                .context("stale DIRECT renewal could not be reconciled to Blocked")?;
-            return Err(error.context("DIRECT renewal was rejected; traffic is Blocked"));
+            return Err(reject_direct_renewal_unlocked(
+                armed,
+                current_core,
+                &format!("{error:#}"),
+            )
+            .await);
         }
     };
 
@@ -2613,16 +2677,20 @@ pub(crate) async fn renew_direct_runtime_reload(
         && lease.tunnel_luid.is_some()
         && lease.tunnel_luid == armed.tun_luid;
     if !identity_valid {
-        transition_direct_to_blocked_unlocked(armed, current_core, None)
-            .await
-            .context("invalid DIRECT renewal could not be reconciled to Blocked")?;
-        bail!("DIRECT renewal proof was stale, expired, or mismatched; traffic is Blocked");
+        return Err(reject_direct_renewal_unlocked(
+            armed,
+            current_core,
+            "DIRECT renewal proof was stale, expired, or mismatched",
+        )
+        .await);
     }
     if let Err(error) = prove_current_tunnel_luid(&armed).await {
-        transition_direct_to_blocked_unlocked(armed, current_core, None)
-            .await
-            .context("DIRECT renewal tunnel mismatch could not be reconciled to Blocked")?;
-        return Err(error.context("DIRECT renewal lost its tunnel identity; traffic is Blocked"));
+        return Err(reject_direct_renewal_unlocked(
+            armed,
+            current_core,
+            &format!("DIRECT renewal lost its tunnel identity: {error:#}"),
+        )
+        .await);
     }
 
     let core_after = current_core_instance_authoritative().await;
@@ -2632,14 +2700,12 @@ pub(crate) async fn renew_direct_runtime_reload(
             .expires_at
             .is_none_or(|deadline| final_now >= deadline)
     {
-        transition_direct_to_blocked_unlocked(armed, core_after, None)
-            .await
-            .context(
-                "DIRECT identity changed during renewal and could not be reconciled to Blocked",
-            )?;
-        bail!(
-            "DIRECT renewal expired or changed Core identity while being proven; traffic is Blocked"
-        );
+        return Err(reject_direct_renewal_unlocked(
+            armed,
+            core_after,
+            "DIRECT renewal expired or changed Core identity while being proven",
+        )
+        .await);
     }
 
     let mut renewed = lease;
@@ -3624,7 +3690,11 @@ async fn reconcile_direct_watchdog_invalidation_unlocked(
     now: std::time::Instant,
     reason: &str,
 ) -> Result<()> {
-    let release = crash_recovery_releases_network(armed.intent.strict_kill_switch)
+    // Only a lost committed heartbeat releases. Pending finalization and an
+    // explicit strict kill switch stay Blocked. The structural lease check is
+    // what authorizes the release; the reason prefix is the same contract the
+    // App matches, so a pending-expiry string cannot open the network.
+    let release = committed_direct_lease_failure_releases(reason, armed.intent.strict_kill_switch)
         && armed.direct_reload.as_ref().is_some_and(|lease| {
             lease.phase == DirectReloadPhase::Committed
                 && lease.expires_at.is_none_or(|deadline| now >= deadline)
@@ -3657,6 +3727,10 @@ async fn reconcile_direct_watchdog_invalidation_unlocked(
         );
     }
     if release {
+        if queue_direct_expiry_retirement() {
+            tracing::warn!("wfp: {reason}; retiring the expired session's Core before selective fallback");
+            return Ok(());
+        }
         let message = format!("{reason}; exact DIRECT permits were retracted; non-strict session");
         release_unhealthy_session_unlocked(&message).await?;
         Ok(())
@@ -4111,6 +4185,17 @@ mod tests {
     use super::*;
     use crate::core::structure::{KillSwitchConfig, ProxyEndpoint, ProxyProtocol};
     use serial_test::serial;
+
+    #[test]
+    fn a_lost_committed_direct_lease_releases_unless_the_kill_switch_is_strict() {
+        let expired = "committed DIRECT heartbeat lease expired after App/session liveness was lost";
+        assert!(committed_direct_lease_failure_releases(expired, false));
+        assert!(!committed_direct_lease_failure_releases(expired, true));
+        assert!(!committed_direct_lease_failure_releases(
+            "pending DIRECT endpoints expired before App finalization",
+            false,
+        ));
+    }
 
     /// Stop is accepted while startup can still be inside DNS restore, and an
     /// unverified retirement can run that restore again. The posted hint is
@@ -7008,6 +7093,49 @@ mod tests {
 
     #[tokio::test]
     #[serial]
+    async fn committed_direct_expiry_retires_core_before_selective_fallback() -> Result<()> {
+        cleanup().await;
+        committed_direct_test_session(126).await?;
+        mark_verified("owner-alice").await?;
+        let owner = crate::core::auth::AuthenticatedOwner {
+            key: "owner-alice".to_owned(),
+            identity: crate::OwnerIdentity::Unix { uid: 97006, gid: 20 },
+            app_data_root: std::env::temp_dir(),
+            peer_pid: None,
+            peer_session_id: None,
+        };
+        crate::core::desired::persist_owner_core_started(&owner, &crate::ClashConfig::default())
+            .await?;
+        crate::core::desired::persist_active_owner(&owner).await?;
+        armed_guard().as_mut().unwrap().direct_reload.as_mut().unwrap().expires_at =
+            Some(std::time::Instant::now());
+
+        spawn_windows_kill_switch_watchdog();
+        let retired = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            loop {
+                if !status().await.wanted && current_core_instance().await.is_none()
+                    && crate::core::selective_layer::test_hold_active()
+                {
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+        }).await.is_ok();
+        let wanted_core = crate::core::desired::load_owner_desired_state(&owner.key)
+            .await?.core_should_be_running;
+        let active = crate::core::desired::load_active_owner().await?;
+        tokio::fs::remove_file(crate::service_paths().for_owner_key(&owner.key).desired_state_path())
+            .await?;
+        cleanup().await;
+
+        assert!(retired, "fallback must retire Core and its TUN before applying the AI hold");
+        assert!(!wanted_core, "fallback must not replay the retired Core");
+        assert!(active.is_none(), "the retired session must no longer own Core");
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
     async fn committed_direct_expiry_does_not_interrupt_its_new_ai_hold() -> Result<()> {
         cleanup().await;
         let (core, _) = committed_direct_test_session(125).await?;
@@ -7019,6 +7147,7 @@ mod tests {
             .expect("committed heartbeat expiry must invalidate DIRECT");
 
         reconcile_direct_watchdog_invalidation_unlocked(armed, Some(core), now, reason).await?;
+        crate::core::server::retire_expired_fresh_arm(core_arm_epoch()).await?;
         let wanted = status().await.wanted;
         let held = crate::core::selective_layer::test_hold_active();
         let removals_after = crate::core::selective_layer::test_active_hold_removals();
@@ -7059,6 +7188,9 @@ mod tests {
         let reason = direct_reload_invalidation_reason(&retry, Some(core), retry.tun_luid, now)
             .expect("expired committed receipt must retry release on the next tick");
         reconcile_direct_watchdog_invalidation_unlocked(retry, Some(core), now, reason).await?;
+        assert!(lock(None).await.is_err(), "the expired session cannot cancel retirement");
+        assert!(mark_verified("owner-alice").await.is_err());
+        crate::core::server::retire_expired_fresh_arm(core_arm_epoch()).await?;
         assert!(
             armed_guard().is_none(),
             "non-strict expiry must release the session"
@@ -7215,7 +7347,7 @@ mod tests {
 
     #[tokio::test]
     #[serial]
-    async fn mismatched_renewal_revokes_committed_direct_permits() -> Result<()> {
+    async fn mismatched_renewal_does_not_block_the_network() -> Result<()> {
         cleanup().await;
         locked_direct_test_session().await?;
         let begin = begin_direct_runtime_reload(146).await?;
@@ -7225,13 +7357,18 @@ mod tests {
         replace_direct_endpoints(&endpoints, &crate::REVIEWED_DIRECT_PORTS, 146, begin.reload_id).await?;
         finalize_direct_runtime_reload(&digest, 146, begin.reload_id).await?;
 
-        renew_direct_runtime_reload(&"0".repeat(64), 146, begin.reload_id)
+        let error = renew_direct_runtime_reload(&"0".repeat(64), 146, begin.reload_id)
             .await
-            .expect_err("a heartbeat for another endpoint set must revoke, not renew");
-        let blocked = armed_guard().clone().expect("blocked state");
-        assert_eq!(blocked.intent.mode, KillSwitchStatusMode::Blocked);
-        assert!(blocked.direct_endpoints.is_empty());
-        assert!(blocked.direct_reload.is_none());
+            .expect_err("a heartbeat for another endpoint set must not renew");
+        let message = format!("{error:#}");
+        assert!(
+            message.contains(DIRECT_RENEW_FAILED_PREFIX),
+            "{message}"
+        );
+        assert!(!message.contains("traffic is Blocked"), "{message}");
+        let still = armed_guard().clone().expect("renewal failure must not disarm by itself");
+        assert_eq!(still.intent.mode, KillSwitchStatusMode::Locked);
+        assert!(!still.direct_endpoints.is_empty());
         cleanup().await;
         Ok(())
     }

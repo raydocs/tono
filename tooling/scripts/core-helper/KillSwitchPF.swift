@@ -5,9 +5,12 @@ extension KillSwitchManager {
     @discardableResult
     static func writeRules(
         state: KillSwitchState,
-        allowedUID: uid_t
+        allowedUID: uid_t,
+        physicalInterfaces: [String]? = nil
     ) throws -> String {
-        let rules = renderRules(state: state, allowedUID: allowedUID)
+        let rules = physicalInterfaces.map {
+            renderRules(state: state, allowedUID: allowedUID, physicalInterfaces: $0)
+        } ?? renderRules(state: state, allowedUID: allowedUID)
         // Detach the boot load before the rule file holds a block. A throw
         // leaves the previous file in place.
         _ = try ensureMainHook()
@@ -71,6 +74,32 @@ extension KillSwitchManager {
             names.insert(name)
         }
         return names.sorted()
+    }
+
+    /// Interfaces named on the LAN DNS block. `nil` means that block is not in
+    /// the rules (no tunnel). `[]` means the block is unscoped, which stays
+    /// fail-closed and must not be narrowed onto a NIC list.
+    static func lanDNSInterfaces(in rules: String) -> [String]? {
+        guard let line = rules.split(separator: "\n", omittingEmptySubsequences: false)
+            .first(where: { $0.contains("\"tono-lan-dns\"") }) else {
+            return nil
+        }
+        guard let start = line.range(of: "on { "),
+              let end = line[start.upperBound...].range(of: " }") else {
+            return []
+        }
+        return line[start.upperBound..<end.lowerBound]
+            .split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+    }
+
+    /// Reload only to add a physical NIC. An empty current set must not turn
+    /// the scoped block into a global one (that would catch DNS on a company
+    /// VPN's utun). An already-unscoped block is left alone.
+    static func lanDNSScopeNeedsReload(loaded: [String]?, current: [String]) -> Bool {
+        guard let loaded, !loaded.isEmpty, !current.isEmpty else { return false }
+        return !Set(current).isSubset(of: Set(loaded))
     }
 
     static func renderRules(
@@ -1015,7 +1044,7 @@ extension KillSwitchManager {
     static func holdPFEnableReference(
         recordPath: String = killSwitchPFReferencePath,
         releaseToken: (String) throws -> Void = {
-            _ = try KillSwitchManager.run("/sbin/pfctl", ["-X", $0])
+            try KillSwitchManager.releasePFEnableTokenOrThrow($0)
         },
         heldReference: (String) throws -> PFEnableReference? = {
             try KillSwitchManager.heldPFEnableReference(recordPath: $0)
@@ -1187,7 +1216,7 @@ extension KillSwitchManager {
         keeping: String?,
         queryDeadline: TimeInterval = KillSwitchManager.pfctlQueryDeadline,
         releaseToken: (String) throws -> Void = {
-            _ = try KillSwitchManager.run("/sbin/pfctl", ["-X", $0])
+            try KillSwitchManager.releasePFEnableTokenOrThrow($0)
         },
         listReferences: (TimeInterval) throws -> HelperCommandResult = {
             try KillSwitchManager.listPFEnableReferences(deadline: $0)
@@ -1248,6 +1277,30 @@ extension KillSwitchManager {
         return (try? pfEnabled()) == true
     }
 
+    /// A non-zero `-X` forgets the token only when a later full listing no
+    /// longer contains it. "Already released" and "still held" are the same
+    /// exit; the listing tells them apart. A `-X` or listing that never
+    /// answers throws from `run` / `pfEnableReferenceListing` and keeps the
+    /// record.
+    static func shouldKeepPFEnableRecord(releaseStatus: Int32, stillListed: Bool) -> Bool {
+        releaseStatus != 0 && stillListed
+    }
+
+    static func releasePFEnableTokenOrThrow(_ token: String) throws {
+        let released = try run("/sbin/pfctl", ["-X", token])
+        if released.status == 0 { return }
+        let listing = try pfEnableReferenceListing(
+            deadline: pfctlQueryDeadline,
+            listReferences: { try listPFEnableReferences(deadline: $0) }
+        )
+        if shouldKeepPFEnableRecord(
+            releaseStatus: released.status,
+            stillListed: listing.split(whereSeparator: \.isWhitespace).contains(where: { $0 == token })
+        ) {
+            throw HelperFailure.system("PF enable reference survived -X; record kept.")
+        }
+    }
+
     /// Releases the reference this helper recorded, if the kernel still holds
     /// it in this boot, and then forgets it. PF stops only if no other program
     /// holds a reference, which is exactly the correct outcome.
@@ -1277,13 +1330,13 @@ extension KillSwitchManager {
         if let held = readPFEnableReference(recordPath), held.boot == boot,
            try pfEnableReferenceListing(deadline: queryDeadline, listReferences: listReferences)
             .split(whereSeparator: \.isWhitespace).contains(where: { $0 == held.token }) {
-            _ = try run("/sbin/pfctl", ["-X", held.token])
+            try releasePFEnableTokenOrThrow(held.token)
         }
         unlink(recordPath)
         if let pending = unrecordedPFEnableReference, pending.boot == boot,
            try pfEnableReferenceListing(deadline: queryDeadline, listReferences: listReferences)
             .split(whereSeparator: \.isWhitespace).contains(where: { $0 == pending.token }) {
-            _ = try run("/sbin/pfctl", ["-X", pending.token])
+            try releasePFEnableTokenOrThrow(pending.token)
         }
         unrecordedPFEnableReference = nil
         try releaseSupersededPFEnableReferences(

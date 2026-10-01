@@ -194,7 +194,7 @@ fn selected_exit_still_present(selected: &str, nodes: &[ValidatedNode]) -> bool 
 
 /// Residential routing is baked into the runtime, including a same-name home node's dial identity.
 /// Catalog growth and default-exit hints alone do not require a live session rebuild.
-fn residential_routing_changed(
+pub(crate) fn residential_routing_changed(
     previous_routing: Option<&tono_core::CatalogRouting>,
     previous_nodes: &[ValidatedNode],
     next_routing: Option<&tono_core::CatalogRouting>,
