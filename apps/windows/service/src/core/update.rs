@@ -305,6 +305,22 @@ fn owner_proxy_absent(owner: &AuthenticatedOwner) -> Result<()> {
     security::no_proxy(sid)
 }
 
+fn begin_update_release(
+    store: &mut Store,
+    owner: &AuthenticatedOwner,
+    peer: &Image,
+) -> Result<()> {
+    // Record the authenticated request before any release.
+    // The original recovery obligation is never rewritten as Unprotected.
+    store.request_disconnect(&owner.key, peer, now()?)?;
+    wfp::authorize_write_for(&owner.key)?;
+    Ok(())
+}
+
+fn prepare_failure_releases(strict: bool, core_stop_attempted: bool) -> bool {
+    core_stop_attempted && !strict
+}
+
 pub(crate) async fn request(
     owner: &AuthenticatedOwner,
     request: UpdateRequest,
@@ -453,37 +469,75 @@ pub(crate) async fn request(
                 "package components do not match signed target"
             );
             store.execution(Execution::Staged)?;
-            let prior_core = super::runtime::read_core_runtime_record().await?;
-            manager::CORE_MANAGER.lock().await.stop_core().await?;
-            if let Some(prior) = prior_core {
+            let strict = wfp::strict_kill_switch_enabled();
+            let mut core_stop_attempted = false;
+            let mut core_stopped = false;
+            let prepared = async {
+                let prior_core = super::runtime::read_core_runtime_record().await?;
+                core_stop_attempted = true;
+                manager::CORE_MANAGER.lock().await.stop_core().await?;
+                core_stopped = true;
+                if let Some(prior) = prior_core {
+                    ensure!(
+                        super::process::process_identity(prior.pid)?.as_ref() != Some(&prior.identity),
+                        "stopped Core incarnation is still running"
+                    );
+                }
+                desired::persist_owner_core_stopped(owner).await?;
+                wfp::transition_after_stop(false).await?;
+                let restored = dns::restore_protected().await?;
                 ensure!(
-                    super::process::process_identity(prior.pid)?.as_ref() != Some(&prior.identity),
-                    "stopped Core incarnation is still running"
+                    !restored.enabled && restored.last_error.is_none(),
+                    "strict DNS cleanup not observed"
                 );
+                owner_proxy_absent(owner)?;
+                ensure!(
+                    app_image(peer.pid)? == peer,
+                    "initiating image changed during preparation"
+                );
+                let observed = protection(owner).await?;
+                store.observe(
+                    &owner.key,
+                    &peer,
+                    generation,
+                    now()?,
+                    Observation::PreparationVerified {
+                        artifact_sha256: file_digest(&dir.join("package.exe"))?,
+                        protection: observed,
+                    },
+                )?;
+                Ok::<_, anyhow::Error>(())
             }
-            desired::persist_owner_core_stopped(owner).await?;
-            wfp::transition_after_stop(false).await?;
-            let restored = dns::restore_protected().await?;
-            ensure!(
-                !restored.enabled && restored.last_error.is_none(),
-                "strict DNS cleanup not observed"
-            );
-            owner_proxy_absent(owner)?;
-            ensure!(
-                app_image(peer.pid)? == peer,
-                "initiating image changed during preparation"
-            );
-            let observed = protection(owner).await?;
-            store.observe(
-                &owner.key,
-                &peer,
-                generation,
-                now()?,
-                Observation::PreparationVerified {
-                    artifact_sha256: file_digest(&dir.join("package.exe"))?,
-                    protection: observed,
-                },
-            )?;
+            .await;
+            if let Err(error) = prepared {
+                if prepare_failure_releases(strict, core_stop_attempted) {
+                    // Failed Prepare must not strand a non-strict owner behind bootstrap WFP
+                    // and dead DNS. Use Disconnect's recorded release; keep the attempt evidence.
+                    let released = async {
+                        begin_update_release(&mut store, owner, &peer)?;
+                        let stopped = if core_stopped {
+                            Ok(())
+                        } else {
+                            manager::CORE_MANAGER.lock().await.stop_core().await
+                        };
+                        let persisted = desired::persist_owner_core_stopped(owner).await;
+                        let cleared = desired::clear_active_owner().await;
+                        // Desired-state failures must not prevent the standard DNS/WFP release.
+                        wfp::release().await?;
+                        stopped?;
+                        persisted?;
+                        cleared?;
+                        Ok::<_, anyhow::Error>(())
+                    }
+                    .await;
+                    if let Err(release_error) = released {
+                        return Err(error.context(format!(
+                            "Prepare failure cleanup also failed: {release_error:#}"
+                        )));
+                    }
+                }
+                return Err(error);
+            }
         }
         UpdateRequest::Install { attempt_id } => {
             let a = store.live_attempt(now()?)?;
@@ -514,10 +568,7 @@ pub(crate) async fn request(
             if !store.pending() {
                 return status(&store);
             }
-            // Record the explicit authenticated request before any release.
-            // The original recovery obligation is never rewritten as Unprotected.
-            store.request_disconnect(&owner.key, &peer, now()?)?;
-            wfp::authorize_write_for(&owner.key)?;
+            begin_update_release(&mut store, owner, &peer)?;
             if let Some(active) = desired::load_active_owner().await? {
                 ensure!(
                     active.owner_key == owner.key,
@@ -969,21 +1020,31 @@ pub fn unpack_gate(package: &Path) -> Result<()> {
 /// The ONSTART task [`register_consumed_recovery`] creates.
 pub const RECOVERY_TASK_NAME: &str = "Tono Update Recovery v1";
 
+/// `schtasks.exe` from the OS-reported system directory. Registration and
+/// retirement share this path: a Windows install on another volume can create
+/// the ONSTART task, and the same volume must be able to delete it.
+fn recovery_task_command(system_directory: &Path, args: &[&str]) -> std::process::Command {
+    let mut command = std::process::Command::new(system_directory.join("schtasks.exe"));
+    command.args(args);
+    command
+}
+
 /// Remove the SYSTEM boot task. The executor retires it once the committed
 /// cleanup ran, as macOS retires its launchd job at commit; a final uninstall
 /// retires it after WFP removal is proven. A task that is already gone is not
-/// an error. Same scheduler binary as the registration.
+/// an error. Same scheduler binary as [`recovery_task_registration`].
 pub fn retire_recovery_task() -> Result<()> {
-    let schtasks = Path::new("C:\\Windows\\System32\\schtasks.exe");
-    let deleted = std::process::Command::new(schtasks)
-        .args(["/Delete", "/TN", RECOVERY_TASK_NAME, "/F"])
-        .output()?;
+    let system = security::system_directory()?;
+    let deleted = recovery_task_command(
+        &system,
+        &["/Delete", "/TN", RECOVERY_TASK_NAME, "/F"],
+    )
+    .output()?;
     if deleted.status.success() {
         return Ok(());
     }
-    let present = std::process::Command::new(schtasks)
-        .args(["/Query", "/TN", RECOVERY_TASK_NAME])
-        .output()?;
+    let present =
+        recovery_task_command(&system, &["/Query", "/TN", RECOVERY_TASK_NAME]).output()?;
     ensure!(
         !present.status.success(),
         "could not retire the update recovery task"
@@ -1488,6 +1549,14 @@ pub fn reconcile_before_desired() -> Result<bool> {
 mod tests {
     use super::*;
 
+    #[test]
+    fn update_prepare_failure_releases_only_after_stop_without_strict_kill_switch() {
+        assert!(prepare_failure_releases(false, true));
+        assert!(!prepare_failure_releases(true, true));
+        assert!(!prepare_failure_releases(false, false));
+        assert!(!prepare_failure_releases(true, false));
+    }
+
     /// WIN-GATE-OPAQUE: a core runtime record outlives its Core when the Service is removed
     /// without stopping it cleanly. After a reboot its pid can belong to any program, including
     /// one whose image cannot be read (`Registry`, `MemCompression`, a protected process). That
@@ -1757,6 +1826,24 @@ mod tests {
         );
         assert_eq!(
             Path::new(registration.get_program()),
+            Path::new(r"D:\Windows\System32\schtasks.exe")
+        );
+    }
+
+    #[test]
+    fn update_recovery_retirement_uses_the_os_system_directory() {
+        // Delete and the follow-up query both come from the same directory the
+        // registration uses. A fixed C:\Windows leaves the ONSTART task in
+        // place when Windows itself is on another volume.
+        let system = Path::new(r"D:\Windows\System32");
+        let delete = recovery_task_command(system, &["/Delete", "/TN", RECOVERY_TASK_NAME, "/F"]);
+        let query = recovery_task_command(system, &["/Query", "/TN", RECOVERY_TASK_NAME]);
+        assert_eq!(
+            Path::new(delete.get_program()),
+            Path::new(r"D:\Windows\System32\schtasks.exe")
+        );
+        assert_eq!(
+            Path::new(query.get_program()),
             Path::new(r"D:\Windows\System32\schtasks.exe")
         );
     }

@@ -3,8 +3,9 @@
 //! Every privileged step goes through the Service IPC wrappers in
 //! `core::service` — the owner/session machinery is never bypassed. The
 //! fail-closed invariant: once the WFP policy exists, only Disconnect,
-//! Sign Out, Quit, or one ordinary self-heal exhaustion release it. That
-//! exhaustion uses the explicit release and does not build another tunnel.
+//! Sign Out, Quit, ordinary self-heal exhaustion, or non-strict catalog
+//! removal release it. Both automatic paths use the explicit release and
+//! do not build another tunnel.
 //! Windows has no strict kill switch, so a verified connect failure restores
 //! the original network instead of sitting in Protected Offline. Self-heal
 //! does not rewrite routes while a hop is still unproven.
@@ -262,7 +263,7 @@ pub(crate) async fn connect_for_generation(
                             Type::Service,
                             "Tono: self-heal stopped; restoring the original network without another tunnel"
                         );
-                        if let Err(release_error) = disconnect::release_explicit(&state, &app).await {
+                        if let Err(release_error) = disconnect::release_explicit_applying_narrow(&state, &app).await {
                             logging!(
                                 error,
                                 Type::Service,
@@ -1775,6 +1776,35 @@ mod tests {
     }
 
     #[test]
+    fn home_proxy_permits_keep_same_address_with_different_protocols() {
+        use tono_service_protocol::{ProxyEndpoint, ProxyProtocol};
+        let mut selected = hy2_node();
+        selected.port = 443;
+        let mut home = node();
+        home.port = 443;
+        let routing = tono_core::CatalogRouting {
+            home_proxy: Some(home.name.clone()),
+            ..Default::default()
+        };
+        let nodes = vec![selected.clone(), home];
+        assert_eq!(
+            super::proxy_endpoints_for(&selected, &nodes, Some(&routing)),
+            vec![
+                ProxyEndpoint {
+                    ip: "203.0.113.7".into(),
+                    port: 443,
+                    protocol: ProxyProtocol::Udp,
+                },
+                ProxyEndpoint {
+                    ip: "203.0.113.7".into(),
+                    port: 443,
+                    protocol: ProxyProtocol::Tcp,
+                },
+            ]
+        );
+    }
+
+    #[test]
     fn dns_warnings_do_not_tear_down_a_live_tunnel() {
         // The Service reports these on operations that SUCCEEDED. Judging them unhealthy costs
         // two samples and then a full teardown, so a machine that can never verify its DNS
@@ -2213,6 +2243,20 @@ mod tests {
             select_action(true, false, &ConnectionStatus::default(), false),
             SelectAction::UpdateOnly
         );
+    }
+
+    #[test]
+    fn hot_switch_requires_known_matching_transport() {
+        use super::switch::hot_switch_allowed;
+
+        let vless = node();
+        let hy2 = hy2_node();
+        assert!(hot_switch_allowed(Some(&vless), &vless));
+        assert!(hot_switch_allowed(Some(&hy2), &hy2));
+        assert!(!hot_switch_allowed(Some(&vless), &hy2));
+        assert!(!hot_switch_allowed(Some(&hy2), &vless));
+        assert!(!hot_switch_allowed(None, &vless));
+        assert!(!hot_switch_allowed(None, &hy2));
     }
 
     #[test]
@@ -2842,6 +2886,14 @@ mod tests {
             serde_json::json!({"type": "IPCIDR", "payload": "::1/128", "proxy": "DIRECT"}),
         ];
         rules.extend(home_controller_rules(home_proxy, include_home_domains));
+        if include_home_domains {
+            for mut rule in home_controller_rules("REJECT", true) {
+                let payload = rule["payload"].as_str().unwrap()
+                    .replace("(Network,tcp)", "(Network,udp)");
+                rule["payload"] = serde_json::json!(payload);
+                rules.push(rule);
+            }
+        }
         rules.extend(extra);
         rules.push(serde_json::json!({"type": "AND", "payload": "((Network,udp))", "proxy": "REJECT"}));
         rules.push(serde_json::json!({"type": "Match", "payload": "", "proxy": "Tono-Exit"}));

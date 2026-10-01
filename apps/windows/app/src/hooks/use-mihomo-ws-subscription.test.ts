@@ -96,6 +96,48 @@ describe('shared Mihomo WebSocket recovery', () => {
     expect(entry.ws).toBe(second)
   })
 
+  it('still reconnects when onConnected fails after the connect watchdog deadline', async () => {
+    vi.useFakeTimers()
+    const first = socket()
+    const second = socket()
+    const connect = vi
+      .fn<() => Promise<MihomoWebSocket>>()
+      .mockResolvedValueOnce(first)
+      .mockResolvedValueOnce(second)
+    let rejectConnected!: (error: Error) => void
+    const onConnected = vi
+      .fn()
+      .mockImplementationOnce(
+        () =>
+          new Promise<void>((_resolve, reject) => {
+            rejectConnected = reject
+          }),
+      )
+      .mockResolvedValueOnce(undefined)
+    const entry = createSharedSubscriptionEntry(connect)
+    entry.owners.add({
+      handleMessage: vi.fn(),
+      onConnected,
+      isMounted: () => true,
+    })
+
+    const pending = entry.connectWs()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(entry.ws).toBe(first)
+    await vi.advanceTimersByTimeAsync(CONNECT_TIMEOUT_MS)
+    rejectConnected(new Error('snapshot failed'))
+    await pending
+
+    expect(first.close).toHaveBeenCalledOnce()
+    expect(entry.ws).toBeNull()
+    expect(entry.reconnectTimer).not.toBeNull()
+
+    await vi.runOnlyPendingTimersAsync()
+
+    expect(connect).toHaveBeenCalledTimes(2)
+    expect(entry.ws).toBe(second)
+  })
+
   it('still reconnects when the stale socket close handshake fails', async () => {
     vi.useFakeTimers()
     const first = socket(

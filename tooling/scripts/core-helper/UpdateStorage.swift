@@ -123,11 +123,17 @@ final class UpdateStorage {
         return ledger
     }
 
-    /// Keys this build does not know are skipped; every key it does know must
-    /// carry exactly the value that re-encodes canonically.
+    /// Keys this build does not know are skipped on the ledger envelope; every
+    /// key it does know must carry exactly the value that re-encodes canonically.
+    /// The receipt is the exception: it is an exact shape, matching Windows
+    /// `deny_unknown_fields`. An unknown key inside it fails the match instead
+    /// of being stripped and then accepted on the re-encoded object (CR-01).
     static func knownFieldsMatch(_ bytes: Data, canonical: Data) -> Bool {
         func project(_ value: Any, onto reference: Any) -> Any {
             guard let object = value as? [String: Any], let known = reference as? [String: Any] else { return value }
+            if known["attemptId"] != nil && known["phase"] != nil && object.keys.contains(where: { known[$0] == nil }) {
+                return object
+            }
             var kept = [String: Any]()
             for (key, knownValue) in known { if let present = object[key] { kept[key] = project(present, onto: knownValue) } }
             return kept
