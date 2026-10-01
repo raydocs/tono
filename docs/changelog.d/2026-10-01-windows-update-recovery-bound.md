@@ -12,3 +12,11 @@
   - Repair exit: an exhausted recovery admits the manual installer. `begin_manual` skips the pending refusal and the lease may coexist with an `Uncertain` record. `finish_manual` archives the record only when the installed identity is proven to be the original (every plan member old) or the target (every member new; rollback copies freed; version recorded). Otherwise the record stays pending. The consumed high-water, generation and archive are kept.
   - Tests: `failed_update_startup_releases_a_non_strict_barrier_with_the_ai_hold`, `update_exhausted_recovery_is_retired_by_the_manual_installer` (Windows CI).
   - Still open: a newer signed update cannot repair an exhausted record (Check/Prepare still refuse while it is pending). A reinstall of any version other than the original or the target leaves it pending. If the AI-hold filters count as residual filters, the manual install gate may still refuse.
+- 2026-10-01 continuation (Codex re-review at `dc1bead3`; scope narrowed to the loop bound plus a guaranteed non-strict release):
+  - The repair exit above was reverted: the `begin_manual` relaxation, `retire_repaired_installation`, the lease next to `Uncertain`, and their test. The rest of the install chain still refused, and `finish_manual` could self-deadlock (exit 76). It moved to [#1307](https://github.com/raydocs/tono/issues/1307).
+  - The release is now owed on every startup exit, not only the `Ok(true)` one:
+    - pending evidence that is `Uncertain`, or that cannot be read (lock-free read, no write);
+    - every `reconcile_before_desired` error;
+    - the Core startup reconciliation error with update evidence pending.
+  - Non-strict only, AI hold kept, strict unchanged.
+  - Tests: `update_recovery_stops_relaunching_after_bounded_failed_runs` and `failed_update_startup_releases_a_non_strict_barrier_with_the_ai_hold`. The startup error branches in `bin/service.rs` have no unit test.

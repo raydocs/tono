@@ -775,8 +775,26 @@ async fn reconcile_startup_and_restore() {
                     "Unverified Windows protection could not be retired cleanly after reconciliation failed: {error:#}"
                 ),
             }
+            // Pending update evidence makes that retirement skip; a failure still releases.
+            #[cfg(windows)]
+            if tono_service_protocol::update_native::pending() {
+                owe_update_failure_release(
+                    "Startup reconciliation failed with update evidence pending",
+                )
+                .await;
+            }
             finish_core_replay().await;
         }
+    }
+}
+
+/// #1292: a failed, unreadable or unreconciled update record owes the decision-031 release of a
+/// non-strict barrier (AI hold kept, strict unchanged). `finish_core_replay` releases it at once
+/// and the watchdog retries every tick until WFP is gone.
+#[cfg(windows)]
+async fn owe_update_failure_release(context: &str) {
+    if tono_service_protocol::owe_failed_update_release().await {
+        warn!("{context}: releasing general traffic with the AI hold");
     }
 }
 
@@ -789,12 +807,8 @@ async fn restore_reconciled_desired_state() {
     match tono_service_protocol::update_native::reconcile_before_desired() {
         Ok(false) => {}
         Ok(true) => {
-            if tono_service_protocol::update_native::failed_update_release_owed()
-                && tono_service_protocol::owe_failed_update_release().await
-            {
-                warn!(
-                    "Failed update pending: releasing general traffic with the AI hold, no desired-state restoration"
-                );
+            if tono_service_protocol::update_native::failed_update_release_owed() {
+                owe_update_failure_release("Failed or unreadable update evidence").await;
             } else {
                 warn!(
                     "Update evidence pending: retaining protection and skipping desired-state restoration"
@@ -805,6 +819,7 @@ async fn restore_reconciled_desired_state() {
         }
         Err(error) => {
             warn!("Update reconciliation uncertain; no desired-state restoration: {error:#}");
+            owe_update_failure_release("Update reconciliation uncertain").await;
             finish_core_replay().await;
             return;
         }

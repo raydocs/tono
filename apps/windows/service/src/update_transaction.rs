@@ -150,12 +150,8 @@ impl State {
                     "proof/execution evidence conflicts"
                 );
             }
-            // An exhausted recovery (#1292) admits the manual installer as its repair exit;
-            // the gate checks exhaustion before it takes the lease.
             ensure!(
-                self.manual_installer.is_none()
-                    || a.receipt.phase == Phase::Committed
-                    || a.execution == Execution::Uncertain,
+                self.manual_installer.is_none() || a.receipt.phase == Phase::Committed,
                 "manual lease conflicts with pending update"
             );
             if let Some(disconnect) = &a.disconnect {
@@ -719,22 +715,6 @@ impl Store {
         self.archive_attempt(&attempt_id, atomic_write)
     }
 
-    /// Repair exit for an exhausted recovery (#1292): the leased manual installer ran and the
-    /// caller proved the installed identity. Archived like the other retirements; the consumed
-    /// high-water, generation and evidence stay, and nothing is re-granted.
-    pub fn retire_repaired_installation(&mut self, installer: &Image) -> Result<()> {
-        ensure!(
-            self.state.manual_installer.as_ref() == Some(installer),
-            "manual installer mismatch"
-        );
-        ensure!(
-            self.recovery_exhausted()?,
-            "only an exhausted recovery is retired by a manual installation"
-        );
-        let attempt_id = self.attempt()?.receipt.attempt_id.clone();
-        self.archive_attempt(&attempt_id, atomic_write)
-    }
-
     /// "Installed and released" terminal for a completed replacement whose
     /// owner then released protection with a verified explicit Disconnect.
     /// This is not commit: the phase, recorded obligation, successor evidence
@@ -1212,39 +1192,6 @@ pub(crate) mod tests {
         );
         assert!(store.recovery_exhausted().unwrap());
         assert!(store.pending(), "exhaustion must not fabricate recovery");
-        drop(store);
-        std::fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn update_exhausted_recovery_is_retired_by_the_manual_installer() {
-        let (root, mut store, peer, executor) = reserved();
-        authorize(&mut store, &peer);
-        store.consume(&executor, 1_900_000_050).unwrap();
-        store.execution(Execution::Uncertain).unwrap();
-        std::fs::create_dir_all(store.attempt_dir().unwrap()).unwrap();
-        let installer = Image {
-            pid: 30,
-            started_at: 300,
-            path: root.join("Tono-setup.exe"),
-            sha256: "a".repeat(64),
-        };
-        let mut leased = store.state.clone();
-        leased.manual_installer = Some(installer.clone());
-        store.save(leased).unwrap();
-        assert!(
-            store.retire_repaired_installation(&installer).is_err(),
-            "a recovery that can still run is not retired by an installer"
-        );
-        for _ in 0..MAX_RECOVERY_RUNS {
-            store.note_recovery_run().unwrap();
-        }
-        let sequence = store.state.consumed_sequence;
-        let attempt_id = store.attempt().unwrap().receipt.attempt_id.clone();
-        store.retire_repaired_installation(&installer).unwrap();
-        assert!(!store.pending());
-        assert_eq!(store.state.consumed_sequence, sequence);
-        assert!(root.join(format!("retired-{attempt_id}.json")).exists());
         drop(store);
         std::fs::remove_dir_all(root).unwrap();
     }
