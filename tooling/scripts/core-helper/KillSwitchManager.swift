@@ -617,15 +617,17 @@ final class KillSwitchManager {
 
     /// Saving the narrow disposition must never prevent ordinary Internet
     /// release. Keep it before every effect that can discard broad intent.
+    /// Returns false when a removal failed and stays pending for a retry.
+    @discardableResult
     static func releaseWithAIHold(
         preserveAIHold: Bool,
         recordDisposition: (Bool) throws -> Void = { try saveSelectiveRecoveryDisposition($0) },
         clearDisposition: () throws -> Void = { try clearSelectiveRecoveryDisposition() },
         release: () throws -> Void = { try releasePersistedBlockUnlocked() },
         applySelectiveLayer: () -> Void = SelectiveFailOpenInstaller.applyBestEffort,
-        removeSelectiveLayer: () -> Void = SelectiveFailOpenInstaller.removeBestEffort,
+        removeSelectiveLayer: () -> Bool = SelectiveFailOpenInstaller.removeBestEffort,
         completeRemoval: () throws -> Void = { try saveSelectiveRemovalCompleted() }
-    ) throws {
+    ) throws -> Bool {
         do { try recordDisposition(preserveAIHold) } catch {
             // A full disk can refuse a tombstone but still permit unlink.
             // Do not replay an old automatic intent after explicit Restore.
@@ -637,30 +639,40 @@ final class KillSwitchManager {
         try release()
         if preserveAIHold {
             applySelectiveLayer()
-        } else {
-            removeSelectiveLayer()
-            try? completeRemoval()
+            return true
         }
+        return finishSelectiveRemoval(removeSelectiveLayer, completeRemoval)
+    }
+
+    /// "released" is written only after the layer is gone. A failed cleanup
+    /// keeps "releasing", so the next start or watchdog pass tries again.
+    private static func finishSelectiveRemoval(
+        _ removeSelectiveLayer: () -> Bool,
+        _ completeRemoval: () throws -> Void
+    ) -> Bool {
+        guard removeSelectiveLayer() else { return false }
+        return (try? completeRemoval()) != nil
     }
 
     /// A completed "released" tombstone does nothing: routes or resolver
     /// files added later are not Tono's to remove. Only a removal recorded
-    /// as pending is finished, once.
+    /// as pending is finished, once. False while that removal stays pending.
+    @discardableResult
     static func reconcileSelectiveRecovery(
         generalIntentPresent: Bool,
         disposition: Bool?,
         removalPending: Bool = false,
         applySelectiveLayer: () -> Void = SelectiveFailOpenInstaller.applyBestEffort,
-        removeSelectiveLayer: () -> Void = SelectiveFailOpenInstaller.removeBestEffort,
+        removeSelectiveLayer: () -> Bool = SelectiveFailOpenInstaller.removeBestEffort,
         completeRemoval: () throws -> Void = { try saveSelectiveRemovalCompleted() }
-    ) {
-        guard !generalIntentPresent else { return }
+    ) -> Bool {
+        guard !generalIntentPresent else { return true }
         if disposition == true {
             applySelectiveLayer()
         } else if removalPending {
-            removeSelectiveLayer()
-            try? completeRemoval()
+            return finishSelectiveRemoval(removeSelectiveLayer, completeRemoval)
         }
+        return true
     }
 
     /// Called only with the Core stopped. A retained record alone is enough
@@ -669,12 +681,12 @@ final class KillSwitchManager {
         lock.lock()
         defer { lock.unlock() }
         guard !selectiveRecoveryReconciled, !Self.stateFileExists() else { return }
-        Self.reconcileSelectiveRecovery(
+        // A failed removal stays unreconciled: the next 10 s pass retries it.
+        selectiveRecoveryReconciled = Self.reconcileSelectiveRecovery(
             generalIntentPresent: false,
             disposition: try? Self.selectiveRecoveryDisposition(),
             removalPending: Self.selectiveRemovalPending()
         )
-        selectiveRecoveryReconciled = true
     }
 
     static func automaticReleasePreservesAIHold() -> Bool {
@@ -691,8 +703,7 @@ final class KillSwitchManager {
         // window must never survive into a re-armed kill switch.
         lastLoadedPassRules = nil
 
-        try Self.releaseWithAIHold(preserveAIHold: preserveAIHold)
-        selectiveRecoveryReconciled = true
+        selectiveRecoveryReconciled = try Self.releaseWithAIHold(preserveAIHold: preserveAIHold)
         stateGeneration &+= 1
         openNetworkEpoch &+= 1
         lastLoadedPassRules = nil

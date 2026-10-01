@@ -1938,6 +1938,7 @@ if CommandLine.arguments.dropFirst() == ["--lifecycle-self-test"] {
     let pfPassed = KillSwitchManager.runLifecycleSelfTests()
         && KillSwitchManager.runInterruptedSelectiveReleaseSelfTest()
         && KillSwitchManager.runInterruptedExplicitRemovalSelfTest()
+        && KillSwitchManager.runFailedSelectiveRemovalRetrySelfTest()
         && SelectiveFailOpenInstaller.runResolverOwnershipSelfTest()
     let dnsPassed = ProtectedDNSManager.runRestoreReadFailureSelfTest()
         && ProtectedDNSManager.runRepeatedOwnedRestoreSelfTest()
