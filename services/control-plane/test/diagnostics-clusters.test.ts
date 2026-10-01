@@ -205,6 +205,23 @@ describe('failure cluster webhook', () => {
     vi.restoreAllMocks();
   });
 
+  it('keeps a live outage together when a delayed report arrives out of order', async () => {
+    const atMs = 1_800_000_000_000;
+    const first = await recordFailureCluster(db(), failureInput('delayed', atMs), clusterEnv(), atMs / 1000);
+    const delayed = await recordFailureCluster(
+      db(), failureInput('delayed', atMs - 3_600_000), clusterEnv(), atMs / 1000 + 30,
+    );
+    const latest = await recordFailureCluster(
+      db(), failureInput('delayed', atMs + 60_000), clusterEnv(), atMs / 1000 + 60,
+    );
+    expect(delayed.clusterId).toBe(first.clusterId);
+    expect(latest.clusterId).toBe(first.clusterId);
+    const cluster = await db().prepare(
+      'SELECT last_seen_ms, event_count, status FROM failure_clusters WHERE id = ?',
+    ).bind(first.clusterId).first();
+    expect(cluster).toMatchObject({ last_seen_ms: atMs + 60_000, event_count: 3, status: 'open' });
+  });
+
   it('sends one signed alert for an outage and a second only after a spike', async () => {
     (env as unknown as Env).FAILURE_ALERT_WEBHOOK_URL = HOOK;
     (env as unknown as Env).FAILURE_ALERT_WEBHOOK_SECRET = SECRET;
