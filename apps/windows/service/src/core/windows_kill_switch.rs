@@ -264,6 +264,9 @@ static RESTORED_BARRIER_UNPROVEN: AtomicBool = AtomicBool::new(false);
 static STARTUP_UNVERIFIED_BARRIER: AtomicBool = AtomicBool::new(false);
 /// Startup reconciliation and desired-state replay have finished, so a previous Core is settled.
 static STARTUP_SETTLED: AtomicBool = AtomicBool::new(false);
+/// The core window deadline was set by the update-held startup release, so each attempt
+/// re-checks that the release is still owed before WFP removal.
+static UPDATE_RELEASE_LATCHED: AtomicBool = AtomicBool::new(false);
 /// The watchdog's latest verify-by-key result. `/kill-switch/status` reuses it instead of
 /// running a full WFP RPC sweep per request.
 static LAST_VERIFY: Lazy<Mutex<Option<(std::time::Instant, bool)>>> =
@@ -417,6 +420,7 @@ fn core_still_expected(running: bool) -> bool {
 }
 
 fn clear_wanted_core_window() {
+    UPDATE_RELEASE_LATCHED.store(false, Ordering::Release);
     DIRECT_EXPIRY_RETIREMENT_PENDING.store(false, Ordering::Release);
     FRESH_ARM_PROOF_PENDING.store(false, Ordering::Release);
     *WANTED_CORE_DEADLINE
@@ -3366,7 +3370,8 @@ pub async fn note_core_replay_finished() -> Result<()> {
 /// Decision 031 for #1292: the unverified barrier restored at this Service start is held only
 /// by pending update evidence once startup has settled. When `owed` says no live process still
 /// owns that update, expire the core window: this call or the next watchdog tick then releases
-/// general traffic with the AI hold, retrying each tick until WFP is gone. Strict stays.
+/// general traffic with the AI hold, retrying each tick until WFP is gone. Each retry first asks
+/// `owed` again and withdraws the expiry when a live owner appeared. Strict stays.
 /// Caller holds `WFP_OPERATION`.
 fn owe_update_held_startup_release_unlocked(owed: impl FnOnce() -> bool) {
     if !STARTUP_UNVERIFIED_BARRIER.load(Ordering::Acquire)
@@ -3384,9 +3389,12 @@ fn owe_update_held_startup_release_unlocked(owed: impl FnOnce() -> bool) {
     let mut deadline = WANTED_CORE_DEADLINE
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    if deadline.is_none() && owed() {
-        *deadline = Some(std::time::Instant::now());
+    if deadline.is_some() && !UPDATE_RELEASE_LATCHED.load(Ordering::Acquire) {
+        return; // Another core window owns this deadline.
     }
+    let owed = owed();
+    UPDATE_RELEASE_LATCHED.store(owed, Ordering::Release);
+    *deadline = owed.then(std::time::Instant::now);
 }
 
 fn update_holds_no_live_owner() -> bool {
@@ -4938,16 +4946,25 @@ mod tests {
         clear_wanted_core_window();
         STARTUP_UNVERIFIED_BARRIER.store(true, Ordering::Release);
         STARTUP_SETTLED.store(true, Ordering::Release);
-        let released = {
+        let (withdrawn, released) = {
             let _operation = WFP_OPERATION.lock().await;
             owe_update_held_startup_release_unlocked(|| true);
-            reconcile_wanted_core_window_unlocked().await
+            // A recovery owner registered before the removal attempt: the expiry is withdrawn.
+            owe_update_held_startup_release_unlocked(|| false);
+            let withdrawn = reconcile_wanted_core_window_unlocked().await;
+            let kept = status().await.wanted;
+            owe_update_held_startup_release_unlocked(|| true);
+            (
+                withdrawn.map(|_| kept),
+                reconcile_wanted_core_window_unlocked().await,
+            )
         };
         let wanted = status().await.wanted;
         let held = crate::core::selective_layer::test_hold_active();
         STARTUP_UNVERIFIED_BARRIER.store(false, Ordering::Release);
         cleanup().await;
 
+        assert!(withdrawn?, "a release no longer owed must not remove WFP");
         released?;
         assert!(
             !wanted,

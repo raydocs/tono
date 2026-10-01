@@ -378,6 +378,17 @@ fn execute(recovery: bool) -> Result<(), Error> {
         {
             return Ok(()); // Live original executor, not an interrupted install.
         }
+        // Register as the live recovery owner before classifying anything, forward recovery
+        // included: Service startup then sees this run, not the dead previous executor, and
+        // neither relaunches a second recovery nor owes the barrier release under it (#1292).
+        if store.independent_recovery_pending()? {
+            let mut next = store.state.clone();
+            next.attempt
+                .as_mut()
+                .context("attempt checked above")?
+                .executor = Some(self_image.clone());
+            store.save(next)?;
+        }
         if a.execution == tx::Execution::RolledBack {
             if !store.independent_recovery_pending()? {
                 return Ok(());
@@ -389,13 +400,6 @@ fn execute(recovery: bool) -> Result<(), Error> {
                 native::components(&a.install_root, &service_path)? == a.old_components,
                 "resolved rollback no longer has its retained original identity"
             );
-            // Service startup must see this live replay owner while readiness drops our locks.
-            let mut next = store.state.clone();
-            next.attempt
-                .as_mut()
-                .context("attempt checked above")?
-                .executor = Some(self_image.clone());
-            store.save(next)?;
             let finalizer = store.rollback_finalizer()?;
             let manager =
                 ServiceManager::local_computer(None::<&str>, ServiceManagerAccess::CONNECT)?;
@@ -453,14 +457,6 @@ fn execute(recovery: bool) -> Result<(), Error> {
             store.record_complete_publication_recovery(native::process_clock_now())?;
             return Ok(());
         }
-        // As in the RolledBack replay: the Service this run restarts must see a live
-        // recovery owner, not relaunch a second recovery that stops it again (#1292).
-        let mut next = store.state.clone();
-        next.attempt
-            .as_mut()
-            .context("attempt checked above")?
-            .executor = Some(self_image.clone());
-        store.save(next)?;
     } else {
         ensure!(
             tx::file_digest(&dir.join("package.exe"))? == tx::target(&a.manifest).artifact_sha256,

@@ -1685,9 +1685,12 @@ pub fn reconcile_before_desired() -> Result<bool> {
             .as_ref()
             .is_none_or(|e| image(e.pid).ok().as_ref() != Some(e))
         {
-            std::process::Command::new(store.attempt_dir()?.join("executor.exe"))
+            let child = std::process::Command::new(store.attempt_dir()?.join("executor.exe"))
                 .arg("--update-recover")
                 .spawn()?;
+            *SPAWNED_RECOVERY
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(child);
         }
     } else if store.recovery_exhausted()? {
         // Each counted run already left the network released with the AI hold (or strict).
@@ -1703,16 +1706,37 @@ pub fn reconcile_before_desired() -> Result<bool> {
 /// process still owns the update. Read without the lock or a write: another holder's lock is not
 /// evidence of failure, and evidence that cannot be read owes the release.
 pub fn startup_barrier_release_owed() -> bool {
-    startup_barrier_release_owed_by(
-        read_store_state(),
-        |e| image(e.pid).ok().as_ref() == Some(e),
-        recovery_exhausted_unlocked,
-    )
+    !spawned_recovery_running()
+        && startup_barrier_release_owed_by(
+            read_store_state(),
+            super::process::process_identity,
+            recovery_exhausted_unlocked,
+        )
+}
+
+/// The recovery executor startup spawned last. Until it registers as `attempt.executor` the
+/// record still names the previous, dead executor, so while it runs it owns the update (#1292).
+static SPAWNED_RECOVERY: std::sync::Mutex<Option<std::process::Child>> =
+    std::sync::Mutex::new(None);
+
+fn spawned_recovery_running() -> bool {
+    let mut child = SPAWNED_RECOVERY
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    match child.as_mut().map(std::process::Child::try_wait) {
+        None => false,
+        Some(Ok(Some(_))) => {
+            *child = None;
+            false
+        }
+        // Running, or a wait that cannot tell: not proof that the owner is gone.
+        Some(Ok(None) | Err(_)) => true,
+    }
 }
 
 fn startup_barrier_release_owed_by(
     state: Result<State>,
-    live: impl Fn(&Image) -> bool,
+    probe: impl Fn(u32) -> Result<Option<super::process::ProcessIdentity>>,
     exhausted: impl Fn(&Attempt) -> bool,
 ) -> bool {
     let Ok(state) = state else {
@@ -1721,7 +1745,12 @@ fn startup_barrier_release_owed_by(
     let Some(a) = state.attempt.as_ref().filter(|_| state.pending()) else {
         return false;
     };
-    let dead = !a.executor.as_ref().is_some_and(&live);
+    // Only conclusive death frees the update; a probe that cannot tell keeps the barrier and
+    // the next watchdog tick asks again.
+    let dead = a
+        .executor
+        .as_ref()
+        .is_none_or(|e| holder_conclusively_dead(e, probe(e.pid)));
     match a.execution {
         // A settled failure, or a record nothing will run any more once its executor is gone.
         Execution::Uncertain
@@ -1760,39 +1789,40 @@ mod tests {
 
     #[test]
     fn update_startup_barrier_release_waits_only_for_a_live_executor() {
-        let (root, mut store, peer, _) = crate::update_transaction::tests::reserved();
+        let (root, mut store, peer, executor) = crate::update_transaction::tests::reserved();
         crate::update_transaction::tests::authorize(&mut store, &peer);
         // A dead Launching that startup demoted to Staged (#1292): nothing will run it.
         store.execution(Execution::Staged).unwrap();
         let state = || Ok(store.state.clone());
-        assert!(startup_barrier_release_owed_by(
-            state(),
-            |_| false,
-            |_| false
-        ));
+        type Probe = Result<Option<super::super::process::ProcessIdentity>>;
+        let gone = |_: u32| -> Probe { Ok(None) };
+        let running = |_: u32| -> Probe {
+            Ok(Some(super::super::process::ProcessIdentity {
+                executable: executor.path.display().to_string(),
+                started_at: executor.started_at,
+            }))
+        };
+        let inconclusive = |_: u32| -> Probe { Err(anyhow::anyhow!("access denied")) };
+        assert!(startup_barrier_release_owed_by(state(), gone, |_| false));
         assert!(
-            !startup_barrier_release_owed_by(state(), |_| true, |_| true),
+            !startup_barrier_release_owed_by(state(), running, |_| true),
             "a live executor still owns the update; its lock or record is not a failure"
+        );
+        assert!(
+            !startup_barrier_release_owed_by(state(), inconclusive, |_| true),
+            "only conclusive death frees the update"
         );
         assert!(startup_barrier_release_owed_by(
             Err(anyhow::anyhow!("unreadable")),
-            |_| true,
+            running,
             |_| false
         ));
         // A dead consumed executor waits for relaunched recovery, until the bound stops it.
         let mut consumed = store.state.clone();
         consumed.attempt.as_mut().unwrap().execution = Execution::Consumed;
         let state = || Ok(consumed.clone());
-        assert!(!startup_barrier_release_owed_by(
-            state(),
-            |_| false,
-            |_| false
-        ));
-        assert!(startup_barrier_release_owed_by(
-            state(),
-            |_| false,
-            |_| true
-        ));
+        assert!(!startup_barrier_release_owed_by(state(), gone, |_| false));
+        assert!(startup_barrier_release_owed_by(state(), gone, |_| true));
         drop(store);
         std::fs::remove_dir_all(root).unwrap();
     }

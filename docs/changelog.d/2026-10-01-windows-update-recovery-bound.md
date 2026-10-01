@@ -29,3 +29,8 @@
   - When owed, the core window expires and general traffic is released with the AI hold, retried each tick until WFP is gone. Non-strict only; a fresh arm clears the mark; strict unchanged.
   - Pre-existing and not closed here: a recovery executor that cannot start below the bound, an unfinished rollback finalizer, and `Replaced` with no successor still hold the barrier with no timeout ([#1308](https://github.com/raydocs/tono/issues/1308), P1).
   - Tests: `update_startup_barrier_release_waits_only_for_a_live_executor`, `update_held_startup_barrier_releases_with_the_ai_hold` (Windows CI).
+- 2026-10-01 continuation (Codex review at `04db1a08`, F3/F4):
+  - F3: the recovery executor now records itself as `attempt.executor` before classifying, forward recovery included. Previously it did so only after classification, and never on the TargetVerified branch. Startup keeps the recovery child it spawns, and `startup_barrier_release_owed` owes nothing while that child runs. This covers the gap before the child registers.
+  - F3: a latched update-held expiry is re-checked before each WFP removal attempt and withdrawn once a live owner appears.
+  - F4: an executor counts as dead only when the process is gone or the PID names another incarnation (`holder_conclusively_dead`). A probe that cannot tell (pinning, ACL or digest read) counts as live: no release that tick, and the next tick asks again.
+  - Tests: `update_startup_barrier_release_waits_only_for_a_live_executor` (inconclusive probe) and `update_held_startup_barrier_releases_with_the_ai_hold` (withdrawn expiry), on Windows CI.
