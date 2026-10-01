@@ -24,13 +24,12 @@
 | 控制器回读 | `/rules` 用 mihomo 字符串 | 本批还没有 sing-box 的 String() 对照 |
 | TUN | gVisor 窗口是 #1119，与 sing-box 无关 | 不写 `stack`，也不写 `tcp_fast_open`。发送 2 MiB、接收 4 MiB 是 alpha.9 sing-tun 的二进制上限，不是 JSON 字段。与 macOS 同一条 |
 | DoH | #1121 把 mihomo 改成懒查询 | 模板已是：先 evaluate 主用，只有 NOERROR 才 respond，然后才 evaluate 备用。无 `race`，ALPN `h2`，detour `Tono-Exit`，无明文 DNS |
-| 两个二进制 | `tono-core.exe` 仍在 | `sing-box.exe` 应放在同目录。安装事务仍是三个文件；缺镜像时武装前回退 mihomo |
-| 协议版本 | 17 及更早仍可释放 WFP | 18 才会按 sing-box 启动 |
+| 两个二进制 | `tono-core.exe` 仍在 | `sing-box.exe` 是安装事务的第四个成员，摘要钉死 alpha.9。pin 未设置且没有 staged 文件时（开发构建）仍跳过，连接前回到 mihomo |
+| 协议版本 | 17 及更早仍可释放 WFP | 18 才会按 sing-box 启动。第四个二进制不另加 IPC |
 
 ## 还没做
 
-- 把 `sing-box.exe` 和 `sing-box-sha256.txt` 放进安装与升级的替换事务。pin 未设置或文件不在时，连接前回到 mihomo，这是批准过的回退，不是把默认改回去。
-- sing-box 的 DIRECT：在 WFP 仍武装时换进程，再用 alpha.9 的 `/rules` 字符串核对。现在跳过，全隧道保持可用。
+- sing-box 的 DIRECT：在 WFP 仍武装时换进程，再用 alpha.9 的 `/rules` 字符串核对。现在跳过，全隧道保持可用。失败必须回到已证明的全隧道，不能留在 Blocked，也不能切断网络。AI 继续拦截。
 - 真实 Windows 上的吞吐、首包和 DoH。需要备用机。
 
 ## 备用机清单

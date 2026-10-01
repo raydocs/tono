@@ -706,7 +706,32 @@ const PUBLISH_SUFFIX: &str = ".publish";
 #[cfg(windows)]
 const COMPILED_IN_CORE_SHA256: Option<&str> = option_env!("TONO_CORE_SHA256");
 #[cfg(windows)]
+const COMPILED_IN_SING_BOX_SHA256: Option<&str> = option_env!("TONO_SING_BOX_SHA256");
+#[cfg(windows)]
 const CORE_DIGEST_PIN_FILE_NAME: &str = "core-sha256.txt";
+#[cfg(windows)]
+const SING_BOX_DIGEST_PIN_FILE_NAME: &str = "sing-box-sha256.txt";
+#[cfg(windows)]
+const SING_BOX_BINARY_NAME: &str = "sing-box.exe";
+
+/// Windows sing-box v1.15.0-alpha.9-tono-a9.1. The only digest this installer will publish.
+const SING_BOX_ALPHA9_SHA256: &str =
+    "b2e6902ee75d9c4af79df28a61ded67afc4283fc83a44dee8896f3737a4ed027";
+
+fn admit_sing_box_pin(pin: Option<&str>) -> Result<Option<[u8; 32]>, Error> {
+    let Some(value) = pin.map(str::trim).filter(|value| !value.is_empty()) else {
+        return Ok(None);
+    };
+    if !value.eq_ignore_ascii_case(SING_BOX_ALPHA9_SHA256) {
+        bail!("sing-box pin is not the Windows alpha.9 digest");
+    }
+    let mut digest = [0_u8; 32];
+    for (index, slot) in digest.iter_mut().enumerate() {
+        *slot = u8::from_str_radix(&value[index * 2..index * 2 + 2], 16)
+            .context("failed to decode the sing-box SHA-256 pin")?;
+    }
+    Ok(Some(digest))
+}
 
 /// Persist the Mihomo digest next to the Service so a later build that forgot
 /// `TONO_CORE_SHA256` still has a pin file to fail-closed against.
@@ -738,6 +763,23 @@ fn publish_core_digest_pin(install_dir: &Path) -> Result<(), Error> {
         .with_context(|| format!("failed to write core digest pin {tmp:?}"))?;
     std::fs::rename(&tmp, &path)
         .with_context(|| format!("failed to publish core digest pin {path:?}"))?;
+    Ok(())
+}
+
+/// Write the alpha.9 pin beside the Service. The compile-time pin or the
+/// resource file is the source; a development build with neither writes nothing.
+#[cfg(windows)]
+fn publish_sing_box_digest_pin(install_dir: &Path) -> Result<(), Error> {
+    if sing_box_release_pin()?.is_none() {
+        return Ok(());
+    }
+    let path = install_dir.join(SING_BOX_DIGEST_PIN_FILE_NAME);
+    let tmp = path.with_extension("txt.tmp");
+    let _ = std::fs::remove_file(&tmp);
+    std::fs::write(&tmp, format!("{SING_BOX_ALPHA9_SHA256}\n"))
+        .with_context(|| format!("failed to write sing-box digest pin {tmp:?}"))?;
+    std::fs::rename(&tmp, &path)
+        .with_context(|| format!("failed to publish sing-box digest pin {path:?}"))?;
     Ok(())
 }
 
@@ -880,6 +922,9 @@ struct InstalledBinaryCandidate {
     staged: PathBuf,
     target: PathBuf,
     expected_digest: [u8; 32],
+    /// The live path did not exist. Rollback removes the file instead of
+    /// restoring a previous generation.
+    introduced: bool,
 }
 
 #[cfg(windows)]
@@ -935,7 +980,121 @@ fn runtime_replacement_candidate(helper: &Path) -> Result<InstalledBinaryCandida
         staged,
         target,
         expected_digest,
+        introduced: false,
     })
+}
+
+#[cfg(windows)]
+fn sing_box_release_pin() -> Result<Option<[u8; 32]>, Error> {
+    let compiled = admit_sing_box_pin(COMPILED_IN_SING_BOX_SHA256)?;
+    let bundled = std::env::current_exe().ok().and_then(|helper| {
+        helper
+            .parent()
+            .map(|dir| dir.join(SING_BOX_DIGEST_PIN_FILE_NAME))
+    });
+    let file_pin = match bundled {
+        Some(path) => match std::fs::read_to_string(&path) {
+            Ok(text) => admit_sing_box_pin(Some(text.as_str()))?,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+            Err(error) => {
+                return Err(error).context(format!("failed to read sing-box pin {path:?}"));
+            }
+        },
+        None => None,
+    };
+    match (compiled, file_pin) {
+        (Some(compiled_pin), Some(file)) if compiled_pin != file => {
+            bail!("compiled sing-box pin and sing-box-sha256.txt disagree");
+        }
+        (Some(pin), _) | (None, Some(pin)) => Ok(Some(pin)),
+        (None, None) => Ok(None),
+    }
+}
+
+/// Staged sing-box plus the pin file that must land beside it. Absent pin and
+/// absent staged image is a development build: the three-member transaction
+/// is unchanged. A staged image without the alpha.9 pin is refused.
+#[cfg(windows)]
+fn sing_box_replacement_candidates(app_root: &Path) -> Result<Vec<InstalledBinaryCandidate>, Error> {
+    let pin = sing_box_release_pin()?;
+    let target = app_root.join(SING_BOX_BINARY_NAME);
+    let staged = path_with_suffix(&target, RUNTIME_STAGED_SUFFIX);
+    let staged_meta = std::fs::symlink_metadata(&staged);
+    let staged_present = match &staged_meta {
+        Ok(metadata) => {
+            ensure_ordinary_windows_entry(&staged, false)?;
+            let _ = metadata;
+            true
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
+        Err(error) => {
+            return Err(error).with_context(|| format!("failed to inspect {staged:?}"));
+        }
+    };
+    let Some(pin) = pin else {
+        if staged_present {
+            bail!("staged sing-box.exe.next has no alpha.9 digest pin");
+        }
+        return Ok(Vec::new());
+    };
+    if !staged_present {
+        bail!("sing-box digest is pinned but sing-box.exe.next is missing");
+    }
+    if sha256(&staged)? != pin {
+        bail!("staged sing-box.exe.next does not match the pinned alpha.9 digest");
+    }
+    let introduced = match std::fs::symlink_metadata(&target) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => true,
+        Ok(_) => {
+            ensure_ordinary_windows_entry(&target, false)?;
+            false
+        }
+        Err(error) => {
+            return Err(error).with_context(|| format!("failed to inspect {target:?}"));
+        }
+    };
+    if introduced {
+        for suffix in [ROLLBACK_SUFFIX, RESTORE_SUFFIX, PUBLISH_SUFFIX] {
+            ensure_update_scratch_absent(&path_with_suffix(&target, suffix))?;
+        }
+    } else {
+        for suffix in [ROLLBACK_SUFFIX, RESTORE_SUFFIX, PUBLISH_SUFFIX] {
+            adopt_or_refuse_update_scratch(&target, &path_with_suffix(&target, suffix))?;
+        }
+    }
+    let pin_text = format!("{SING_BOX_ALPHA9_SHA256}\n");
+    let pin_target = app_root.join(SING_BOX_DIGEST_PIN_FILE_NAME);
+    let pin_staged = path_with_suffix(&pin_target, RUNTIME_STAGED_SUFFIX);
+    let _ = std::fs::remove_file(&pin_staged);
+    std::fs::write(&pin_staged, pin_text.as_bytes())
+        .with_context(|| format!("failed to stage sing-box pin {pin_staged:?}"))?;
+    let pin_introduced = match std::fs::symlink_metadata(&pin_target) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => true,
+        Ok(_) => {
+            ensure_ordinary_windows_entry(&pin_target, false)?;
+            false
+        }
+        Err(error) => {
+            return Err(error).with_context(|| format!("failed to inspect {pin_target:?}"));
+        }
+    };
+    Ok(vec![
+        InstalledBinaryCandidate {
+            staged,
+            target,
+            expected_digest: pin,
+            introduced,
+        },
+        InstalledBinaryCandidate {
+            staged: pin_staged,
+            target: pin_target,
+            expected_digest: sha256(&path_with_suffix(
+                &app_root.join(SING_BOX_DIGEST_PIN_FILE_NAME),
+                RUNTIME_STAGED_SUFFIX,
+            ))?,
+            introduced: pin_introduced,
+        },
+    ])
 }
 
 #[cfg(windows)]
@@ -963,6 +1122,7 @@ fn app_replacement_candidate(
         staged,
         target,
         expected_digest,
+        introduced: false,
     })
 }
 
@@ -1009,6 +1169,9 @@ struct CoordinatedBinaryReplacement {
     new_digest: [u8; 32],
     changed: bool,
     published: bool,
+    /// No previous file. `is_old` means the target is absent.
+    #[serde(default)]
+    introduced: bool,
 }
 
 #[cfg(windows)]
@@ -1059,6 +1222,46 @@ impl CoordinatedBinaryReplacement {
             new_digest: measured_new_digest,
             changed,
             published: false,
+            introduced: false,
+        })
+    }
+
+    fn prepare_introduced(
+        staged: &Path,
+        target: &Path,
+        expected_new_digest: [u8; 32],
+    ) -> Result<Self, Error> {
+        ensure_ordinary_windows_entry(staged, false)?;
+        match std::fs::symlink_metadata(target) {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Ok(_) => bail!(
+                "introduced executable {target:?} already exists; refusing to discard it"
+            ),
+            Err(error) => {
+                return Err(error).with_context(|| format!("failed to inspect {target:?}"));
+            }
+        }
+        let measured_new_digest = sha256(staged)?;
+        if measured_new_digest != expected_new_digest {
+            bail!("staged executable {staged:?} changed after it was validated");
+        }
+        let backup = path_with_suffix(target, ROLLBACK_SUFFIX);
+        let restore = path_with_suffix(target, RESTORE_SUFFIX);
+        let publish_scratch = path_with_suffix(target, PUBLISH_SUFFIX);
+        ensure_update_scratch_absent(&backup)?;
+        ensure_update_scratch_absent(&restore)?;
+        ensure_update_scratch_absent(&publish_scratch)?;
+        Ok(Self {
+            staged: staged.to_owned(),
+            target: target.to_owned(),
+            backup,
+            restore,
+            publish_scratch,
+            old_digest: [0_u8; 32],
+            new_digest: measured_new_digest,
+            changed: true,
+            published: false,
+            introduced: true,
         })
     }
 
@@ -1092,6 +1295,23 @@ impl CoordinatedBinaryReplacement {
 
     fn rollback(&mut self) -> Result<(), Error> {
         if self.is_old() {
+            self.published = false;
+            return Ok(());
+        }
+        if self.introduced {
+            if sha256(&self.target).ok() != Some(self.new_digest) {
+                bail!(
+                    "introduced executable {:?} is neither absent nor the staged bytes",
+                    self.target
+                );
+            }
+            remove_ordinary_file_if_exists(&self.target)?;
+            if !self.is_old() {
+                bail!(
+                    "introduced executable {:?} could not be removed",
+                    self.target
+                );
+            }
             self.published = false;
             return Ok(());
         }
@@ -1138,6 +1358,12 @@ impl CoordinatedBinaryReplacement {
     }
 
     fn is_old(&self) -> bool {
+        if self.introduced {
+            return matches!(
+                std::fs::symlink_metadata(&self.target),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound
+            );
+        }
         sha256(&self.target).ok() == Some(self.old_digest)
     }
 
@@ -1319,6 +1545,7 @@ fn replace_existing_service_and_runtime(
     service_target: &Path,
     runtime_candidate: InstalledBinaryCandidate,
     app_candidate: InstalledBinaryCandidate,
+    sing_box_candidates: Vec<InstalledBinaryCandidate>,
 ) -> Result<(), Error> {
     use std::ffi::OsStr;
 
@@ -1328,6 +1555,7 @@ fn replace_existing_service_and_runtime(
     let mut runtime_replacement = None;
     let mut service_replacement = None;
     let mut app_replacement = None;
+    let mut sing_box_replacements = Vec::new();
     let preparation_result = (|| -> Result<(), Error> {
         replacement_owner = Some(prepare_windows_replacement_state_held()?);
         service.change_config(service_info)?;
@@ -1352,6 +1580,21 @@ fn replace_existing_service_and_runtime(
             &app_candidate.target,
             app_candidate.expected_digest,
         )?);
+        for candidate in &sing_box_candidates {
+            sing_box_replacements.push(if candidate.introduced {
+                CoordinatedBinaryReplacement::prepare_introduced(
+                    &candidate.staged,
+                    &candidate.target,
+                    candidate.expected_digest,
+                )?
+            } else {
+                CoordinatedBinaryReplacement::prepare(
+                    &candidate.staged,
+                    &candidate.target,
+                    candidate.expected_digest,
+                )?
+            });
+        }
         Ok(())
     })();
 
@@ -1366,9 +1609,15 @@ fn replace_existing_service_and_runtime(
         {
             replacement.discard_unpublished();
         }
+        for replacement in &sing_box_replacements {
+            replacement.discard_unpublished();
+        }
         let _ = remove_ordinary_file_if_exists(service_staged);
         let _ = remove_ordinary_file_if_exists(&runtime_candidate.staged);
         let _ = remove_ordinary_file_if_exists(&app_candidate.staged);
+        for candidate in &sing_box_candidates {
+            let _ = remove_ordinary_file_if_exists(&candidate.staged);
+        }
         restart_on_failure.disarm();
         return match recover_unpublished_previous_service(
             service,
@@ -1400,6 +1649,9 @@ fn replace_existing_service_and_runtime(
     restart_on_failure.disarm();
     let update_result = (|| -> Result<(), Error> {
         runtime_replacement.publish()?;
+        for replacement in &mut sing_box_replacements {
+            replacement.publish()?;
+        }
         service_replacement.publish()?;
         drop(replacement_owner.take());
         service.start(&Vec::<&OsStr>::new())?;
@@ -1417,8 +1669,11 @@ fn replace_existing_service_and_runtime(
         Ok(()) => {
             service_replacement.cleanup();
             runtime_replacement.cleanup();
+            for replacement in &sing_box_replacements {
+                replacement.cleanup();
+            }
             app_replacement.cleanup();
-            println!("Service, Mihomo and App replacement committed after IPC readiness.");
+            println!("Service, Mihomo, sing-box and App replacement committed after IPC readiness.");
             Ok(())
         }
         Err(update_error) => {
@@ -1480,9 +1735,22 @@ fn replace_existing_service_and_runtime(
                         }
                     }
                 }
+                for (index, replacement) in sing_box_replacements.iter_mut().enumerate() {
+                    if let Err(first_error) = replacement.rollback() {
+                        old_restore_failures.push(format!(
+                            "sing-box member {index} old-byte restore failed: {first_error:#}"
+                        ));
+                        if let Err(retry_error) = replacement.rollback() {
+                            old_restore_failures.push(format!(
+                                "sing-box member {index} old-byte restore retry failed: {retry_error:#}"
+                            ));
+                        }
+                    }
+                }
                 if service_replacement.is_old()
                     && runtime_replacement.is_old()
                     && app_replacement.is_old()
+                    && sing_box_replacements.iter().all(|replacement| replacement.is_old())
                 {
                     let recovery_result = recover_unpublished_previous_service(
                         service,
@@ -1502,6 +1770,9 @@ fn replace_existing_service_and_runtime(
                         keep_installer_retry_candidates(&update_error, recovery_result.is_ok());
                     service_replacement.cleanup();
                     runtime_replacement.cleanup_with_staged_retained(keep_staged);
+                    for replacement in &sing_box_replacements {
+                        replacement.cleanup_with_staged_retained(keep_staged);
+                    }
                     app_replacement.cleanup_with_staged_retained(keep_staged);
                     return recovery_result;
                 }
@@ -1520,9 +1791,17 @@ fn replace_existing_service_and_runtime(
                             .push(format!("{name} new-byte convergence failed: {error:#}"));
                     }
                 }
+                for (index, replacement) in sing_box_replacements.iter_mut().enumerate() {
+                    if let Err(error) = replacement.converge_new() {
+                        new_convergence_failures.push(format!(
+                            "sing-box member {index} new-byte convergence failed: {error:#}"
+                        ));
+                    }
+                }
                 let matched_new_generation = service_replacement.is_new()
                     && runtime_replacement.is_new()
-                    && app_replacement.is_new();
+                    && app_replacement.is_new()
+                    && sing_box_replacements.iter().all(|replacement| replacement.is_new());
                 let demand_result = set_windows_service_on_demand(service, service_info);
                 drop(replacement_owner.take());
 
@@ -1976,7 +2255,13 @@ fn main() -> anyhow::Result<()> {
     let mut replacement_candidates = if install_mode == WindowsInstallMode::ReplaceRuntime {
         let runtime = runtime_replacement_candidate(&std::env::current_exe()?)?;
         let app = app_replacement_candidate(&runtime)?;
-        Some((runtime, app))
+        let sing_box = sing_box_replacement_candidates(
+            runtime
+                .target
+                .parent()
+                .context("installed Mihomo target has no application root")?,
+        )?;
+        Some((runtime, app, sing_box))
     } else {
         None
     };
@@ -1993,6 +2278,19 @@ fn main() -> anyhow::Result<()> {
     shared::block_on_abandoning(tono_service_protocol::update_native::manual_gate())??;
     let install_dir = tono_service_protocol::prepare_service_install_directory()?;
     publish_core_digest_pin(&install_dir)?;
+    if install_mode != WindowsInstallMode::ReplaceRuntime
+        && let Some(pin) = sing_box_release_pin()?
+    {
+        let live = windows_program_files_directory()?
+            .join("Tono")
+            .join(SING_BOX_BINARY_NAME);
+        if sha256(&live).ok() != Some(pin) {
+            bail!(
+                "installed sing-box.exe is missing or does not match the pinned alpha.9 digest"
+            );
+        }
+    }
+    publish_sing_box_digest_pin(&install_dir)?;
     let target = install_dir.join("tono-service.exe");
     if install_mode == WindowsInstallMode::ReplaceRuntime {
         // Discover stale recovery state before stopping a healthy Service. The coordinated
@@ -2045,7 +2343,9 @@ fn main() -> anyhow::Result<()> {
         service_access,
     ) {
         Ok(service) => {
-            if let Some((runtime_candidate, app_candidate)) = replacement_candidates.take() {
+            if let Some((runtime_candidate, app_candidate, sing_box_candidates)) =
+                replacement_candidates.take()
+            {
                 return replace_existing_service_and_runtime(
                     &service,
                     &service_info,
@@ -2053,6 +2353,7 @@ fn main() -> anyhow::Result<()> {
                     &target,
                     runtime_candidate,
                     app_candidate,
+                    sing_box_candidates,
                 );
             }
             let was_active = stop_windows_service(&service)?;
@@ -2575,6 +2876,35 @@ mod tests {
             assert!(!replacement.restore.exists());
             assert!(!replacement.publish_scratch.exists());
         }
+    }
+
+    #[test]
+    fn sing_box_pin_accepts_only_the_windows_alpha9_digest() {
+        assert!(super::admit_sing_box_pin(None).unwrap().is_none());
+        assert!(super::admit_sing_box_pin(Some("  ")).unwrap().is_none());
+        assert!(super::admit_sing_box_pin(Some(super::SING_BOX_ALPHA9_SHA256))
+            .unwrap()
+            .is_some());
+        assert!(super::admit_sing_box_pin(Some(&"ab".repeat(32))).is_err());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn introduced_sing_box_publish_rolls_back_by_deleting_the_new_file() {
+        let directory = TransactionTestDirectory::new("sing-box-introduce");
+        let target = directory.0.join("sing-box.exe");
+        let staged = path_with_suffix(&target, RUNTIME_STAGED_SUFFIX);
+        std::fs::write(&staged, b"alpha9-bytes").unwrap();
+        let expected = sha256(&staged).unwrap();
+        let mut replacement =
+            CoordinatedBinaryReplacement::prepare_introduced(&staged, &target, expected).unwrap();
+        replacement.publish().unwrap();
+        assert_eq!(std::fs::read(&target).unwrap(), b"alpha9-bytes");
+        assert!(replacement.is_new());
+        replacement.rollback().unwrap();
+        assert!(replacement.is_old());
+        assert!(!target.exists());
+        replacement.cleanup();
     }
 
     #[cfg(windows)]

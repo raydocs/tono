@@ -21,6 +21,8 @@ nonisolated enum UpdateContractV1 {
         let appSha256: String
         let coreSha256: String
         let privilegedSha256: String
+        /// Absent on packages that predate Windows `sing-box.exe`. A present value is 64 lowercase hex.
+        var singBoxSha256: String? = nil
     }
 
     struct Target: Codable, Equatable, Sendable {
@@ -58,6 +60,7 @@ nonisolated enum UpdateContractV1 {
                           && hex(target.components.appSha256, size: 64)
                           && hex(target.components.coreSha256, size: 64)
                           && hex(target.components.privilegedSha256, size: 64)
+                          && (target.components.singBoxSha256.map { hex($0, size: 64) } ?? true)
                   }) else { throw ContractError.document }
         }
 
