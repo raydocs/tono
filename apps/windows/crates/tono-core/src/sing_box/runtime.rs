@@ -230,7 +230,9 @@ pub fn build_runtime(input: RuntimeInput<'_>) -> Result<OwnedSingBoxRuntime, Sin
                     "password":node.uuid, "tls":tls})
             }
             NodeProtocol::VlessReality => {
-                if node.client_fingerprint.as_deref() != Some("chrome") {
+                // Catalog admission allows omission. Match the Mihomo and
+                // macOS product default while keeping explicit overrides bounded.
+                if node.client_fingerprint.as_deref().unwrap_or("chrome") != "chrome" {
                     return Err(UnsupportedFingerprint);
                 }
                 if URL_SAFE_NO_PAD
@@ -504,6 +506,22 @@ mod tests {
             home_process_path_regexes: &[],
             direct_process_names: &[],
         }
+    }
+
+    #[test]
+    fn admitted_vless_without_a_fingerprint_uses_the_product_chrome_default() {
+        let mut nodes = nodes();
+        let mut proxy = nodes[0].to_runtime_mapping();
+        proxy.remove(serde_yaml_ng::Value::String("client-fingerprint".into()));
+        nodes[0] = node::admit_node(&serde_yaml_ng::Value::Mapping(proxy)).unwrap();
+        assert_eq!(nodes[0].client_fingerprint, None);
+        let routing = CatalogRouting::default();
+        // Even an unselected node must compile: the full catalog is emitted.
+        let runtime = build_runtime(input(&nodes, &routing)).unwrap();
+        let value: Value = serde_json::from_str(runtime.runtime_json()).unwrap();
+        assert_eq!(value["outbounds"][0]["tls"]["utls"]["fingerprint"], "chrome");
+        assert_eq!(value["outbounds"][0]["tls"]["reality"]["enabled"], true);
+        assert!(value["outbounds"][0]["tls"].get("insecure").is_none());
     }
 
     #[test]
