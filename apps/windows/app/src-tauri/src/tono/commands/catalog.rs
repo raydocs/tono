@@ -277,6 +277,9 @@ pub async fn tono_select_server(
             }
             inner.tasks.switch.take();
         }
+        if changed {
+            inner.clear_exit_identity();
+        }
         inner.selected_node = Some(name.clone());
         // A fresh user choice re-arms auto-reconnect (§3).
         inner.catalog_requires_choice = false;

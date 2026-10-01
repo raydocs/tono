@@ -305,7 +305,20 @@ nonisolated enum HelperProtocolVersion {
     ///   `/etc/resolver` files for first-party AI suffixes. Arm, disarm, and
     ///   emergency recovery remove them. The commands cannot name a default
     ///   route. A failure leaves the original network open.
-    static let current = "4.52.8"
+    /// - 4.52.8 → 4.52.9: a release whose placeholder rule file cannot be
+    ///   written still flushes the anchor and removes the intent, and then
+    ///   keeps the standalone emergency main instead of reloading a legacy
+    ///   pf.conf that would load the stale rules back. A PF repair records
+    ///   repairedSinceArm before it can replace kernel rules, so a repair that
+    ///   throws after loading still makes the app re-arm.
+    /// - 4.52.9 → 4.52.10: a failed arm or sleep barrier flushes the installed
+    ///   anchor only after a `pfctl` load that was accepted or never answered.
+    ///   A failure before that load, or a load pfctl rejected, leaves the
+    ///   previous rules in the kernel. `/killswitch/health` omits `live` when
+    ///   pfctl does not answer, and reports down only when a second read
+    ///   agrees. A 4.52.7 daemon still drops a live ruleset on `pfctl -nf`
+    ///   failure and treats one unread health sample as "not filtering".
+    static let current = "4.52.10"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS

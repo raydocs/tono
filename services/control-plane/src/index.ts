@@ -24,6 +24,7 @@ import { opsIngestRoutes } from './ops/ingest';
 import { tokenAdminWrite } from './ops/token-admin';
 import { ApiError } from './errors';
 import { recordClient } from './client-identity';
+import { exitIdentityRosterResponse } from './exit-identity-roster';
 import { parseBytesRange } from './http';
 import {
   type Env,
@@ -3224,23 +3225,7 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
     await recordExitAgentAsn(e, req, node?.name ?? null);
     const t = now();
     const roster = await exitCredentialRoster(e, t);
-    return Response.json({
-      // New agents verify this before touching Xray or billing state. Existing
-      // node source IDs are accounting identities and cannot be renamed without
-      // an exactly-once ledger migration. Legacy dual-phase readers receive no
-      // nodeId and old agents safely ignore this additive field.
-      nodeId: node?.id,
-      // Echoed so a reconciling agent can tell a stale response from an empty
-      // roster: applying an empty list as if it were current would disconnect
-      // every account at once.
-      observedAt: t,
-      retireSharedLegacy: roster.retireSharedLegacy,
-      identities: roster.rows.map((row) => ({
-        userId: String(row.user_id),
-        deviceId: row.device_id ? String(row.device_id) : undefined,
-        clientUUID: String(row.client_uuid),
-      })),
-    });
+    return exitIdentityRosterResponse(e, node?.id, t, roster);
   }
 
   if (p === '/api/v1/home/roster-ack' && m === 'POST') {

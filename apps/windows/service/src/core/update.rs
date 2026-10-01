@@ -11,10 +11,11 @@ use crate::update_contract::{
 use crate::update_transaction::*;
 use crate::update_wire::{UpdateRequest, UpdateStatus};
 use anyhow::{Context as _, Result, ensure};
+pub use super::windows_kill_switch::strict_kill_switch_intent_on_disk;
 pub use gate::{GateReason, GateRefusal, GateReport, reason_of, refusal};
 pub use security::{
-    UserLaunch, app_image, image, install_root, parent_image, pin_path, program_files,
-    record_installed_version, tunnel_absent, verify_tree,
+    UserLaunch, app_image, image, install_root, parent_image, pin_path, process_clock_now,
+    program_files, record_installed_version, resume_successor, tunnel_absent, verify_tree,
 };
 use std::{
     fs::OpenOptions,
@@ -321,6 +322,13 @@ fn prepare_failure_releases(strict: bool, core_stop_attempted: bool) -> bool {
     core_stop_attempted && !strict
 }
 
+/// Prepare already stopped Core and narrowed WFP to bootstrap Blocked before Install
+/// spawns the executor. A `spawn` error means that process never existed. Non-strict
+/// sessions release general traffic and keep the AI hold. Strict stays Blocked.
+fn executor_spawn_failure_releases(strict: bool) -> bool {
+    !strict
+}
+
 pub(crate) async fn request(
     owner: &AuthenticatedOwner,
     request: UpdateRequest,
@@ -423,6 +431,7 @@ pub(crate) async fn request(
                 executor: None,
                 old_components,
                 disconnect: None,
+                publication_clock: None,
             });
             store.save(next)?; // Before staging, quiescence, or ownership changes.
             let dir = store.attempt_dir()?;
@@ -554,10 +563,46 @@ pub(crate) async fn request(
                 "preparation incomplete"
             );
             let dir = store.attempt_dir()?;
-            store.execution(Execution::Launching)?;
-            let child = std::process::Command::new(dir.join("executor.exe"))
+            // Do not persist Launching before the process exists. The App treats
+            // Launching as "the executor is in flight" and would hide this error
+            // while bootstrap WFP kept the machine offline.
+            let child = match std::process::Command::new(dir.join("executor.exe"))
                 .arg("--update-execute")
-                .spawn()?;
+                .spawn()
+            {
+                Ok(child) => child,
+                Err(error) => {
+                    let error = anyhow::Error::from(error);
+                    if executor_spawn_failure_releases(wfp::strict_kill_switch_enabled()) {
+                        let released = async {
+                            begin_update_release(&mut store, owner, &peer)?;
+                            wfp::release_applying_narrow().await?;
+                            if let Err(clear_error) = desired::clear_active_owner().await {
+                                tracing::warn!(
+                                    "executor did not start; general traffic was released, \
+                                     active owner was not cleared: {clear_error:#}"
+                                );
+                            }
+                            Ok::<_, anyhow::Error>(())
+                        }
+                        .await;
+                        if let Err(release_error) = released {
+                            return Err(error.context(format!(
+                                "executor did not start; selective release was refused \
+                                 and the previous protection remains: {release_error:#}"
+                            )));
+                        }
+                        return Err(error.context(
+                            "executor did not start; general traffic was released \
+                             and AI-service destinations stay blocked",
+                        ));
+                    }
+                    return Err(error.context(
+                        "executor did not start; explicit strict kill switch kept traffic Blocked",
+                    ));
+                }
+            };
+            store.execution(Execution::Launching)?;
             let executor = image(child.id())?;
             let mut next = store.state.clone();
             next.attempt.as_mut().unwrap().executor = Some(executor);
@@ -1555,6 +1600,12 @@ mod tests {
         assert!(!prepare_failure_releases(true, true));
         assert!(!prepare_failure_releases(false, false));
         assert!(!prepare_failure_releases(true, false));
+    }
+
+    #[test]
+    fn an_executor_that_never_starts_releases_unless_the_kill_switch_is_strict() {
+        assert!(executor_spawn_failure_releases(false));
+        assert!(!executor_spawn_failure_releases(true));
     }
 
     /// WIN-GATE-OPAQUE: a core runtime record outlives its Core when the Service is removed
