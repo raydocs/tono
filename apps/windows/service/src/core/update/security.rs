@@ -270,6 +270,17 @@ pub fn install_root() -> Result<PathBuf> {
     Ok(expected.canonicalize()?)
 }
 
+/// Current time on the same clock as [`Image::started_at`] (`GetProcessTimes`
+/// creation FILETIME). Not Unix time.
+pub fn process_clock_now() -> u64 {
+    use windows_sys::Win32::Foundation::FILETIME;
+    use windows_sys::Win32::System::SystemInformation::GetSystemTimeAsFileTime;
+
+    let mut now = FILETIME::default();
+    unsafe { GetSystemTimeAsFileTime(&mut now) };
+    (u64::from(now.dwHighDateTime) << 32) | u64::from(now.dwLowDateTime)
+}
+
 pub fn image(pid: u32) -> Result<Image> {
     let identity = super::super::process::process_identity(pid)?.context("peer exited")?;
     let path = PathBuf::from(&identity.executable);
