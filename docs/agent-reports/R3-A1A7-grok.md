@@ -73,7 +73,7 @@ Hunter: Grok 4.7。槽位 R3-A1A7-grok。
 | [#923](https://github.com/raydocs/tono/pull/923) | `cursor/win-settled-quarantine-1cf5` | 合并提交，2026-10-01T00:54:11Z 打开一次 | 无 `needs-hardware`，无 `ui-review` |
 | [#925](https://github.com/raydocs/tono/pull/925) | `cursor/win-proxy-reset-join-1cf5` | 合并提交，2026-10-01T00:55:52Z 打开一次 | 同上。归属判断不变 |
 | [#929](https://github.com/raydocs/tono/pull/929) | `cursor/win-log-snapshot-recover-1cf5` | 合并提交，2026-10-01T00:58:38Z 打开一次 | 同上 |
-| 本报告 | `cursor/r3-a1a7-report-1cf5` | 不开 | 仅文档 |
+| [#934](https://github.com/raydocs/tono/pull/934) | `cursor/r3-a1a7-report-1cf5` | 不开 | 仅文档 |
 
 管理器若关掉自动合并，保持关掉，不重新打开。没有直接合并。
 
