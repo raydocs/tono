@@ -1,6 +1,6 @@
 ## 2026-09-30 · Windows committed exit drains session credentials
 - 归属：SHIP_PLAN §2 item 10; Windows sign-in durability and Quit reliability.
-- 来源：origin/main `f8e32e00` → branch `hunt/sol-winapp-quit-vault-flush`; source PR, not merged at authoring.
+- 来源：origin/main `f8e32e00` → branch `hunt/sol-winapp-quit-vault-flush`, [#980](https://github.com/raydocs/tono/pull/980); source PR, not merged at authoring.
 - 缺陷修复：WIN-QUIT-ROTATED-TOKEN-DURABILITY (P1): a rotated token whose first vault write failed could survive only in memory when Quit cancelled the next sync; committed exit now asks the existing ordered writer to retry and acknowledge it before exit.
 - 新增/优化：无; audit and credential drains run together within the existing two-second allowance, including bounded state acquisition. Network release, AI blocking, strict mode and vault ownership rules are unchanged.
 - 工程与测试：one regression uses the production session writer and a vault whose first write fails; the committed-exit helper must persist the rotated token before a later launch.
