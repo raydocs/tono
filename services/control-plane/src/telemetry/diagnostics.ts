@@ -7,7 +7,6 @@ import { ApiError } from '../errors';
 import { id, now, str, type Row } from '../env';
 import { diagnosticsInt, rejectUnexpectedKeys } from '../request';
 import { DIAGNOSTICS_MAX_REPORTED_AT_MS } from '../diagnostics-limits';
-import { redactJobResult } from '../ops/job-redaction';
 import { isPlatform } from '../ops/platform';
 import { recordFailureCluster, type ClusterEnv, type FailureClusterInput } from './failure-clusters';
 
@@ -150,10 +149,12 @@ export async function storeDiagnosticsBundle(
     const reason = optionalText(session.reason, 'reason', 80);
     if (reason) rejectSecrets(reason, 'reason');
     const excerpt = optionalText(root.logExcerpt, 'logExcerpt', 1500);
-    const redacted = excerpt ? redactJobResult(excerpt).slice(0, 1500) : null;
-    if (redacted && /https?:\/\//i.test(redacted)) {
+    if (excerpt && /https?:\/\//i.test(excerpt)) {
       throw new ApiError(400, 'VALIDATION_ERROR', 'logExcerpt must not contain a URL');
     }
+    // Arbitrary core logs cannot be proven destination/credential-free by
+    // regex scrubbing. Keep this compatible field out of automatic storage;
+    // raw logs remain on the separately operator-granted upload route.
     sessionKey = `${userId}:${sessionId}`;
     statements.push(db.prepare(
       `INSERT INTO client_sessions(
@@ -176,7 +177,7 @@ export async function storeDiagnosticsBundle(
       nodeId(session.residentialExitId, 'residentialExitId'),
       bytesUp, bytesDown, outcome, reason,
       client.appVersion, client.appBuild, client.gitCommit, client.platform, client.osVersion,
-      client.coreVersion, client.channel, redacted, received,
+      client.coreVersion, client.channel, null, received,
     ));
   } else if (root.logExcerpt !== undefined && root.logExcerpt !== null) {
     throw new ApiError(400, 'VALIDATION_ERROR', 'logExcerpt requires a session');
