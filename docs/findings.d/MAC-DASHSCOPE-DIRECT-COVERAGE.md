@@ -2,7 +2,7 @@
 |---|---|---|---|---|---|
 | MAC-DASHSCOPE-DIRECT-COVERAGE | macOS 专属模型 API 域名缺少助手路由与 DIRECT 排除，携带主机名的普通代理请求会被 Alibaba 网页后缀送到物理网卡 | open | [#1016](https://github.com/raydocs/tono/pull/1016)（仅记录） | 高·推导 | P1；只确认携带域名的 mixed/代理请求，不声称当前默认 TUN 的每个 Python 请求都直连。专属 API 域名需与签名后缀策略迁移及选择性失败恢复名单协调；本槽禁止编辑 helper，不削弱原受保护后缀重叠拒绝。未编译或实机验证。 |
 
-基线 `1fb29265`：`ConfigPipeline.swift:114` 的产品网页直连包含 Alibaba 服务树，而 `:309–403` 的助手服务列表没有其专属模型 API；`ConfigPipeline+Direct.swift:32–41` 的排除列表随之遗漏。`ConfigPipeline+SingBoxProduct.swift:205–208` 在普通助手客户端的保护规则未命中后选择物理接口绑定的网页 DIRECT。此路径在住宅跳存在时也成立，故不是 #867 的「没有住宅跳就不发助手域名规则」缺口。#958 改变默认 TUN 的域名保留，不会补齐服务分类。
+基线 `1fb29265`：`ConfigPipeline.swift:114` 的产品网页直连包含 Alibaba 服务树，而 `:309–403` 的助手服务列表没有其专属模型 API；`ConfigPipeline+Direct.swift:32–41` 的排除列表随之遗漏。`ConfigPipeline+SingBoxProduct.swift:224–227` 在普通助手客户端的保护规则未命中后选择物理接口绑定的网页 DIRECT。此路径在住宅跳存在时也成立，故不是 #867 的「没有住宅跳就不发助手域名规则」缺口。#958 改变默认 TUN 的域名保留，不会补齐服务分类。
 
 [Alibaba 官方模型 API 端点文档](https://www.alibabacloud.com/help/en/model-studio/base-url)（2026-09-28）确认专属 DashScope / Model Studio API 系列和区域、workspace/trial 端点；[官方 Python SDK](https://github.com/dashscope/dashscope-sdk-python) 确认默认 Qwen 模型调用。这里只记录缺失的专属服务分类，不建议阻断 Alibaba 的共享服务树或其 IP。
 
