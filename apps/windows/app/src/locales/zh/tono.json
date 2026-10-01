@@ -384,6 +384,13 @@
       "protected": "已连接",
       "standby": "待机"
     },
+    "aiTraffic": {
+      "title": "今天的 AI 流量",
+      "subtitle": "家宽上的流量，不是剩余额度。",
+      "empty": "今天还没有。",
+      "week": "近 7 天",
+      "note": "在总览页打开时累计，只存在这台电脑上。"
+    },
     "overview": {
       "protection": "保护",
       "serverPool": "节点池",

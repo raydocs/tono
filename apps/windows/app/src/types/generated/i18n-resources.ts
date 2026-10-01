@@ -1025,6 +1025,13 @@ export interface TranslationResources {
         tokyo: string
       }
       dashboard: {
+        aiTraffic: {
+          empty: string
+          note: string
+          subtitle: string
+          title: string
+          week: string
+        }
         catalogRequiresChoice: string
         checklist: {
           admin: string
