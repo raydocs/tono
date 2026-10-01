@@ -185,3 +185,43 @@
 | SOL-C4-QUOTA-RETENTION-REWIND | C4 | Sol (Codex acct 2, R3-C4E1) | P2 | real-fixed #1015; ops display only; no production incident claim | Null final metric samples discard last valid counter at retention; fallback rebills older cumulative bytes [services/control-plane/src/ops/quota.ts:438] |
 | SOL-C4-ACTIVITY-OVERLAP | C4 | Sol (Codex acct 2, R3-C4E1) | P3 | real-unfixed: interval/aggregation decision related O1-ACTIVITY-HOUR-COLLISION; source trace only; ops only | 22-minute windows every20 minutes sum beyond60 minutes for one device [services/control-plane/src/ops/customers.ts:178] |
 | SOL-C4-CYCLE-INSERT-GAP | C4 | Sol (Codex acct 2, R3-C4E1) | — | duplicate: fixed #852, successor insert and old close atomic batch | A failed successor insert could leave an expired cycle closed without successor [services/control-plane/src/ops/quota-cycle.ts:86] |
+
+### R3-A11 (finished 21:46 MT; 42 hypotheses, 34 FP, PRs: )
+| ID | Area | Model | Sev | Verdict | Description [location] |
+|---|---|---|---|---|---|
+| A11-H01 | sing-box | Sol (Codex acct 2, R3-A11) | — | duplicate #871; dormant compiler has no production callers | No-home process DIRECT could precede AI protection [apps/windows/crates/tono-core/src/sing_box/runtime.rs:274] |
+| A11-H02 | sing-box | Sol (Codex acct 2, R3-A11) | — | duplicate #783; dormant gap already recorded | HY2 assistant UDP bypasses residential TCP route [apps/windows/crates/tono-core/src/sing_box/runtime.rs:275] |
+| A11-H03 | sing-box | Sol (Codex acct 2, R3-A11) | — | duplicate #203 migration blocker; dormant compiler | Stock core rejects emitted DER certificate pin field [apps/windows/crates/tono-core/src/sing_box/runtime.rs:203] |
+| A11-H11 | config | Sol (Codex acct 2, R3-A11) | — | duplicate #871; current main emits AI guards before signed-app DIRECT | Signed-app DIRECT might win over AI domains/IPs [apps/windows/crates/tono-core/src/config.rs:1135] |
+| A11-H12 | config | Sol (Codex acct 2, R3-A11) | — | duplicate #783; current main rejects matching assistant UDP before DIRECT and MATCH | HY2 UDP might miss required home route [apps/windows/crates/tono-core/src/config.rs:1080] |
+| A11-H23 | node | Sol (Codex acct 2, R3-A11) | — | duplicate accepted-design D6; Worker rejects mismatch | HY2 protocol might disagree with suffix-derived transport [apps/windows/crates/tono-core/src/node.rs:181] |
+| A11-H24 | node | Sol (Codex acct 2, R3-A11) | — | duplicate PERF-CONNECT-1; config proxy_mapping supplies chrome | Missing Reality fingerprint might break connection [apps/windows/crates/tono-core/src/node.rs:347] |
+| A11-H35 | config/policy | Sol (Codex acct 2, R3-A11) | — | duplicate #797 protected overlap guards | Trusted DIRECT policy might insert protected AI host or parent suffix [apps/windows/crates/tono-core/src/config.rs:1222] |
+
+### R3-M9M11 (finished 21:46 MT; 30 hypotheses, 22 FP, PRs: #1008 #1016 #1019)
+| ID | Area | Model | Sev | Verdict | Description [location] |
+|---|---|---|---|---|---|
+| R3CFG-H01 | M9 | Sol (Codex acct 2, R3-M9M11) | — | duplicate #867 | Assistant domain/IP/process DIRECT guard gap [ConfigPipeline+Runtime.swift:694] |
+| R3CFG-H10 | M9 | Sol (Codex acct 2, R3-M9M11) | — | duplicate #958 | Web-direct real DNS loses hostname routing [ConfigPipeline+SingBoxProduct.swift:169] |
+| MAC-ROTATED-TOKEN-DURABILITY | M11 | Sol (Codex acct 2, R3-M9M11) | P1 | real-fixed #1008 | Rotated token write refusal remains unpersisted until next refresh [Services/TonoAPIClient.swift:591] |
+| R3CFG-H11 | M11 | Sol (Codex acct 2, R3-M9M11) | — | duplicate #796 guards obsolete bearer verdicts | Delayed bearer refusal suspends newer session [Services/TonoAPIClient.swift:800] |
+| R3CFG-H18 | M11 | Sol (Codex acct 2, R3-M9M11) | — | duplicate #314/#329; server predecessor replay grace exists | Lost renewal response permanently destroys session [services/control-plane/src/sessions.ts:75] |
+| R3CFG-H19 | M11 | Sol (Codex acct 2, R3-M9M11) | — | duplicate H11-F2/#409 with hardware-anchor mitigation | Migrated Keychain shares old device identity [Services/KeychainStore.swift:90] |
+| MAC-WEB-PINS-SUFFIX-STALE | M9 | Sol (Codex acct 2, R3-M9M11) | P2 | real-unfixed coordinated DNS/pin design needed to avoid documented whole-session reload interruption | Suffix presence disables refresh of web pins still used for dialing [Services/AppState+Connect.swift:1726] |
+| MAC-DASHSCOPE-DIRECT-COVERAGE | M9 | Sol (Codex acct 2, R3-M9M11) | P1 | real-unfixed policy migration/recovery-domain coverage requires coordinated scope; helper edits forbidden | Dedicated Qwen model API names match broad Alibaba DIRECT suffix [Core/ConfigPipeline.swift:114] |
+
+### R3-M5M7 (finished 21:46 MT; 34 hypotheses, 22 FP, PRs: )
+| ID | Area | Model | Sev | Verdict | Description [location] |
+|---|---|---|---|---|---|
+| M5M7-H02 | M7 | Sol (Codex acct 2, R3-M5M7) | P3 | duplicate #854 | Concurrent scene loads apply the disk snapshot twice [apps/macos/Tono/Services/AppState+Persistence.swift:22] |
+| M5M7-H07 | M5 | Sol (Codex acct 2, R3-M5M7) | P0 | duplicate user ALREADY-KNOWN SIGPIPE in HelperManager.writeAll | Helper socket write can deliver SIGPIPE [apps/macos/Tono/Core/HelperManager.swift:1396] |
+| M5M7-H08 | M7 | Sol (Codex acct 2, R3-M5M7) | P2 | duplicate #1001 | Wake owner survives native-update release and reconnects [apps/macos/Tono/Services/AppState.swift:740] |
+| MAC-QUIT-AI-HOLD | M5/M7 | Sol (Codex acct 2, R3-M5M7) | P1 | real-unfixed helper release-disposition contract required; helper edits forbidden for this slot; older explicit-disconnect design needs reconciliation with TOP rule for stop | Normal Quit removes the selective AI blocking floor through plain helper disarm [apps/macos/Tono/App/AppDelegate.swift:343] |
+| M5M7-H18 | M5 | Sol (Codex acct 2, R3-M5M7) | — | unverified no ordinary launchctl hang trigger proved; retained hardening candidate | Unbounded launchctl wait could wedge cleanup [apps/macos/Tono/Core/HelperManager.swift:680] |
+| M5M7-H19 | M5 | Sol (Codex acct 2, R3-M5M7) | — | unverified no surviving inherited writer demonstrated; helper daemon uses /dev/null | Installer stderr pipe hangs after AppleScript exit [apps/macos/Tono/Core/HelperManager.swift:388] |
+| M5M7-H20 | M5 | Sol (Codex acct 2, R3-M5M7) | P2 | duplicate #759 | Failed silent upgrade delivery incurs a 45-second poll [apps/macos/Tono/Core/HelperManager.swift:1210] |
+| M5M7-H21 | M5 | Sol (Codex acct 2, R3-M5M7) | P1 | duplicate #840; current main handles emptyResponse and socketFailed | Launch update-status timeout bypasses helper recovery [apps/macos/Tono/Core/RuntimeCleanup.swift:263] |
+| M5M7-H22 | M5 | Sol (Codex acct 2, R3-M5M7) | P1 | duplicate #794; current main has standard release cleanup | Abandoned helper replacement retains PF after Core stop [apps/macos/Tono/Core/HelperManager.swift:259] |
+| M5M7-H31 | M7 | Sol (Codex acct 2, R3-M5M7) | — | unverified ordinary corruption path not proved; optional policy refresh does not block sign-in or protected connectivity | Decodable corrupt policy metadata can reject a matching revision [apps/macos/Tono/Services/AppState+Catalog.swift:537] |
+| M5M7-H32 | M5 | Sol (Codex acct 2, R3-M5M7) | P2 | duplicate #795 | Protected Offline native update never commits after fail-open launch [apps/macos/Tono/Core/RuntimeCleanup.swift:224] |
+| M5M7-H33 | M5 | Sol (Codex acct 2, R3-M5M7) | P2 | duplicate #756; current main restores after an available recheck | Helper repair skips snapshotless DNS restoration [apps/macos/Tono/Core/RuntimeCleanup.swift:410] |

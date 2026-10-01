@@ -1,15 +1,12 @@
-# R3-A11: Codex (GPT-6.1 Sol) findings
+# R3-A11 audit report — GPT-6.1 Sol (Codex CLI)
 
-Generated 2026-09-30 21:46 MT from the run's findings.tsv / prs.tsv.
+Baseline: `origin/main` `7c16960c`, branch `hunt/sol-r3gen-a11-audit`, September 30, 2026. No new verified ordinary-user bug and no source changes or PRs. Dedupe included all open PR titles/bodies touching assigned files, findings ledger/fragments, and open issues. Final PR-list refresh showed only blocked migration #203 touching the assigned files.
 
-## PRs
+All assigned files were read end to end: `config.rs` (2,957 lines), `node.rs` (1,392), `sing_box.rs` (728), `sing_box/flag.rs` (104), `sing_box/runtime.rs` (768), and `connection_plan.rs` (213). Callers/callees followed through catalog/policy admission, staging, DIRECT, controller selection, healing, cleanup, owner sessions, Service WFP/DNS and the pinned Mihomo source.
 
-| PR | Branch | Labels | Auto-merge requested | Title |
-|---|---|---|---|---|
+Windows production still builds Mihomo YAML (`connection/stages.rs:202`, `connection/direct.rs:535`). The sing-box compiler and local migration flag have no production callers. Dormant versions of known defects were not fixed or reported as new production bugs.
 
-## Hypotheses
-
-| ID | Area | Sev | Location | Description | Verdict |
+| ID | Area | Severity | File:line | One-line description | Verdict |
 |---|---|---|---|---|---|
 | A11-H01 | sing-box | — | apps/windows/crates/tono-core/src/sing_box/runtime.rs:274 | No-home process DIRECT could precede AI protection | duplicate #871; dormant compiler has no production callers |
 | A11-H02 | sing-box | — | apps/windows/crates/tono-core/src/sing_box/runtime.rs:275 | HY2 assistant UDP bypasses residential TCP route | duplicate #783; dormant gap already recorded |
@@ -53,3 +50,25 @@ Generated 2026-09-30 21:46 MT from the run's findings.tsv / prs.tsv.
 | A11-H40 | config DNS | — | apps/windows/crates/tono-core/src/config.rs:982 | DIRECT reload might discard fake-IP map | false-positive pinned Mihomo executor PatchFrom preserves fake-IP and real-host mappings |
 | A11-H41 | config DNS | — | apps/windows/crates/tono-core/src/config.rs:982 | Fake-IP recovery TTL might be ignored | false-positive pinned Mihomo DNS middleware writes configured TTL |
 | A11-H42 | config IPv6 | — | apps/windows/crates/tono-core/src/config.rs:861 | IPv6 defaults might create unreviewed TUN plane | false-positive ipv6=false clears upstream default TUN IPv6 addresses and fake IPv6 pool |
+
+## PRs and counts
+
+- PRs opened: none; auto-merge and labels: not applicable. `prs.tsv` is empty.
+- Total hypotheses examined: **42**. False positives/rejected hypotheses: **34**. Known duplicates/accepted design: **8**. New verified bugs: **0**.
+- Findings receipt: `findings.tsv`, one line per hypothesis. Source worktree is clean.
+
+## Verification
+
+Linux, Rust 1.98.1, baseline 7c16960c: `CARGO_BUILD_JOBS=2 cargo test -p tono-core --locked` passed. Raw suite receipts: `329 passed; 0 failed` unit; integration suites `10 passed`, `1 passed`, `1 passed`, `3 passed`. Total **344 executed tests, zero failures, zero ignored tests**. Doc-test runner had zero tests and is not additional qualification. Existing dead-code warning for `SING_BOX_FAKE_IPV4` remains.
+
+No new tests were added because no new bug was verified. Native Windows/Tauri, installed WFP/DNS/TUN, actual crash, sleep/wake and transport behavior could not run in this Linux VM.
+
+Pinned upstream source `ac017cdd246ce8bd547653d927e7bf77d7ee73d5` was read to verify DNS/host-map preservation, fake-IP TTL, explicit resolver proxy routing and transport mapping. Evidence retained at `/tmp/R3-A11-mihomo-source`; primary references: [DNS middleware](https://github.com/MetaCubeX/mihomo/blob/ac017cdd246ce8bd547653d927e7bf77d7ee73d5/dns/middleware.go), [DNS dialer](https://github.com/MetaCubeX/mihomo/blob/ac017cdd246ce8bd547653d927e7bf77d7ee73d5/tunnel/dns_dialer.go), [reload mapping preservation](https://github.com/MetaCubeX/mihomo/blob/ac017cdd246ce8bd547653d927e7bf77d7ee73d5/hub/executor/executor.go), [DER verifier](https://github.com/MetaCubeX/mihomo/blob/ac017cdd246ce8bd547653d927e7bf77d7ee73d5/component/ca/fingerprint.go).
+
+## Remaining limits
+
+Assigned static scope finished. Native-device qualification remains unavailable. The compound-delay or sleep/wake version of H37 was not proved: a hypothetical automatic transaction timeout followed by a successful late startup uses plain release in `cleanup.rs:145`, but a single delayed StartClash is externally bounded below the 310-second total deadline. Changing that release unconditionally would also recreate an AI hold after explicit Restore; any later fix must preserve the retirement cause. This is an unverified follow-up, not a new verified finding or product decision.
+
+The administrator-selected Unicode provisioning-name candidate H30 lies outside ordinary-user/failure reachability and the assigned fix scope; no fleet occurrence was proved. Client byte bounds remain intact.
+
+Hunter: GPT-6.1 Sol (Codex CLI)

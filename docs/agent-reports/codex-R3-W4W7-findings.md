@@ -1,6 +1,6 @@
 # R3-W4W7: Codex (GPT-6.1 Sol) findings
 
-Generated 2026-09-30 21:33 MT from the run's findings.tsv / prs.tsv.
+Generated 2026-09-30 21:46 MT from the run's findings.tsv / prs.tsv.
 
 ## PRs
 
@@ -29,8 +29,8 @@ Generated 2026-09-30 21:33 MT from the run's findings.tsv / prs.tsv.
 | R3S-12 | W4 | — | core/desired.rs:249 | Reboot replays old run intent without user | duplicate BRICK-W1 boot-session guard already merged |
 | R3S-13 | W4 | — | core/desired.rs:189 | Retired owner resurrects Core on next restart | false-positive retirement persists desired stopped before owner clear |
 | R3S-14 | W7 | P1 | core/update.rs:535 | Failed Prepare uses plain release and omits AI hold | real-fixed #1007 (merged; native CI passed); follow-up to #793 |
-| R3S-15 | W4 | P1 | core/server/mod.rs:578 | Automatic armed SCM Stop releases without AI hold | real-fixed #1014 (CI pending); selective follow-up to #792 |
-| R3S-16 | W7 | P2 | bin/install_service/update_executor.rs:768 | Committed cleanup ignores locked rollback deletion and retires retry task | real-fixed #1017 (native CI pending) |
+| R3S-15 | W4 | P1 | core/server/mod.rs:578 | Automatic armed SCM Stop releases without AI hold | real-fixed #1014 (merged; native CI passed); selective follow-up to #792 |
+| R3S-16 | W7 | P2 | bin/install_service/update_executor.rs:768 | Committed cleanup ignores locked rollback deletion and retires retry task | real-fixed #1017 (merged; native sharing test passed twice) |
 | R3S-17 | W7 | — | update_transaction.rs:332 | Lost consume acknowledgement grants a second executor | false-positive durable high-water, incarnation binding and poisoned-write reopen guards |
 | R3S-18 | W7 | — | update_transaction.rs:453 | Archive failure clears live update obligation | false-positive archive persistence precedes slot clearing |
 | R3S-19 | W7 | — | update_transaction.rs:571 | Restarted successor cannot adopt pending update | false-positive dead successor can rebind to target-identity process |
@@ -49,3 +49,4 @@ Generated 2026-09-30 21:33 MT from the run's findings.tsv / prs.tsv.
 | R3S-32 | W7 | — | core/update/security.rs:90 | TrustedInstaller default ACL rejects updates | duplicate #352 default ACL fix |
 | R3S-33 | W7 | — | bin/install_service/update_executor.rs:262 | Timed-out BFE work hangs installer Runtime drop | duplicate-fixed #776 block_on_abandoning |
 | R3S-34 | W7 | — | core/update.rs:464 | Hung extractor causes network loss after Prepare | false-positive Core stop follows extraction; no single-failure outage; extraction stall remains unqualified |
+| R3S-35 | W7 | P2 | core/update.rs:442 | Later Prepare overwrites a committed attempt before retained backups are cleaned | real-unfixed verified; regression in progress |
