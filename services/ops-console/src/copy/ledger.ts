@@ -97,14 +97,14 @@ export const ledgerCopy = {
      */
     currencyCny: '收款只收人民币',
     monthHint: '这笔算在哪个月的账上，跟付钱那天可以不是同一个月。',
-    paidHint: '真正付钱或收钱的那一天，汇率按这一天取。',
+    paidHint: '真正付钱或收钱的那一天，汇率按入账日取。',
 
     /* ----------------------------------------------------------------- 汇率 */
 
     fxLine: (day: string, rate: string, cny: string) => `按 ${day} 汇率 ${rate} ≈ ${cny}`,
     fxStale: (asked: string, used: string) => `${asked} 的汇率还没拉到，用的是 ${used} 的。`,
     fxLoading: '正在取汇率',
-    fxMissing: (day: string) => `${day} 的汇率还没拉到，等今天的汇率进来再记，或者换一个付款日。`,
+    fxMissing: (day: string) => `${day} 的汇率还没拉到，等入账日的汇率进来再记。`,
     fxNoNeed: '人民币不用换算。',
 
     /* ---------------------------------------------------------------- 条目表 */

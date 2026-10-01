@@ -176,7 +176,11 @@ nonisolated struct NetworkUplinkSnapshot: Equatable, Sendable {
     }
 
     private static func usableIPv4Gateway(_ gateway: String?) -> String? {
-        guard let gateway = nonempty(gateway), gateway != "0.0.0.0" else { return nil }
+        // 0.0.0.0 and link-local (169.254/16) are the same DHCP/APIPA gap as a
+        // 169.254 address. A concrete 169.254 router used to compare unequal
+        // to the previous gateway and classify `.moved`, which tore the tunnel
+        // down for the length of the renewal.
+        guard let gateway = usableIPv4(gateway), gateway != "0.0.0.0" else { return nil }
         return gateway
     }
 }

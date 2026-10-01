@@ -651,7 +651,7 @@ export function validateWindowsReplacementHelperSource(source) {
     return 'both old-generation rollback and new-generation convergence must include the GUI'
   }
   const appCleanupAttempts =
-    transaction.match(/app_replacement\.cleanup\(\);/g)?.length ?? 0
+    transaction.match(/app_replacement\.cleanup(?:\(\)|_with_staged_retained\([^)]*\));/g)?.length ?? 0
   if (appCleanupAttempts < 2) {
     return 'both successful commit and successful rollback must clean GUI transaction artifacts'
   }

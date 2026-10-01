@@ -3,11 +3,14 @@
 //! Every privileged step goes through the Service IPC wrappers in
 //! `core::service` — the owner/session machinery is never bypassed. The
 //! fail-closed invariant: once the WFP policy exists, only Disconnect,
-//! Sign Out, Quit, or one ordinary self-heal exhaustion release it. That
-//! exhaustion uses the explicit release and does not build another tunnel.
+//! Sign Out, Quit, ordinary self-heal exhaustion, or non-strict catalog
+//! removal release it. Both automatic paths use the explicit release and
+//! do not build another tunnel.
 //! Windows has no strict kill switch, so a verified connect failure restores
-//! the original network instead of sitting in Protected Offline. Self-heal
-//! does not rewrite routes while a hop is still unproven.
+//! the original network instead of sitting in Protected Offline. After that
+//! release, TCP probes run while the original network stays up. A tunnel
+//! starts only after one proof. Self-heal does not rewrite routes while a
+//! hop is still unproven. An explicit strict kill switch keeps the block.
 //!
 //! Concurrency: `connect_generation` (in `TonoInner`) is bumped by
 //! disconnect, sign-out, node switches, and catalog-driven teardowns. An
@@ -26,10 +29,12 @@ mod probes;
 mod status;
 mod disconnect;
 mod reconnect;
+pub(crate) use reconnect::crash_recovery_reconnect_allowed;
 mod switch;
 mod direct;
 mod heal;
 mod platform;
+mod unarmed_probe;
 
 // Compatibility surface for existing command and test callers. The transaction
 // and error modules do not import this orchestration facade.
@@ -262,13 +267,14 @@ pub(crate) async fn connect_for_generation(
                             Type::Service,
                             "Tono: self-heal stopped; restoring the original network without another tunnel"
                         );
-                        if let Err(release_error) = disconnect::release_explicit(&state, &app).await {
+                        if let Err(release_error) = disconnect::release_explicit_applying_narrow(&state, &app).await {
                             logging!(
                                 error,
                                 Type::Service,
                                 "Tono: restoring the original network failed; protection stays as the release left it: {release_error}"
                             );
                         }
+                        unarmed_probe::spawn_after_release(&state, &app, generation);
                     }
                     tono_core::heal::NetworkEffect::SelectiveAiHold { .. } => {
                         logging!(
@@ -293,6 +299,16 @@ pub(crate) async fn connect_for_generation(
 /// before.
 fn attempt_for_generation<'a>(state: &'a Arc<TonoState>, app: &'a AppHandle, expected_generation: Option<u64>) -> BoxedAttempt<'a> {
     Box::pin(attempt_inner(state, app, expected_generation))
+}
+
+/// A new attempt has not committed an overlay. `applied_wechat_path_regexes == None`
+/// is the inactive latch: the two-minute path refresh must not reconnect a full tunnel.
+fn clear_uncommitted_direct_overlay(inner: &mut TonoInner) {
+    inner.optional_direct_active = false;
+    inner.applied_direct_interface = None;
+    inner.optional_direct_skip = None;
+    inner.direct_reload_until = None;
+    inner.applied_wechat_path_regexes = None;
 }
 
 /// The caller holds lifecycle admission and the state mutex. Idle is not an ownership token:
@@ -362,10 +378,7 @@ async fn attempt_inner(state: &Arc<TonoState>, app: &AppHandle, expected_generat
         inner.connect_error = None;
         inner.connect_error_at_ms = None;
         inner.next_retry_at_ms = None;
-        inner.optional_direct_active = false;
-        inner.applied_direct_interface = None;
-        inner.optional_direct_skip = None;
-        inner.direct_reload_until = None;
+        clear_uncommitted_direct_overlay(&mut inner);
         commands::emit_status(app, &commands::status_of(&inner));
         let revision = inner.catalog_tracker.current_revision();
         let name = crate::tono::diagnostics::scrub_text_with(
@@ -422,10 +435,10 @@ async fn attempt_inner(state: &Arc<TonoState>, app: &AppHandle, expected_generat
             }
         }
 
-        match transaction
-            .wait("service readiness", ensure_service_ready())
-            .await
-        {
+        let proof = unarmed_probe::tcp_proof_before_tunnel(state, &node);
+        let service = transaction.wait("service readiness", ensure_service_ready());
+        let (proof, service) = tokio::join!(proof, service);
+        match service {
             Ok(Ok(())) => {}
             Ok(Err(err)) => {
                 // The kill switch may already be armed from a previous session, so this is a
@@ -437,6 +450,9 @@ async fn attempt_inner(state: &Arc<TonoState>, app: &AppHandle, expected_generat
                 return attempt_from_stage_failure(state, generation, &attempt_record, failure, account_owner)
                     .await;
             }
+        }
+        if let Err(error) = proof {
+            return Attempt::Failed { generation, error, account_owner };
         }
 
         match run_stages(
@@ -1461,6 +1477,7 @@ mod tests {
             last_error: Some(
                 "Windows kill-switch reconciliation failed: FwpmTransactionCommit0 returned 0x80320017".into(),
             ),
+            reconnect_after_release: false,
         };
         let data_plane = lock_unverified_error(&kill_switch_not_locked(&status));
         let last = classify_exhausted_data_plane(Ok(()), data_plane, Ok(()));
@@ -1611,7 +1628,7 @@ mod tests {
     #[test]
     fn connect_budget_covers_a_cold_first_connect() {
         let accounted: u64 = CONNECT_BUDGET_LEGS.iter().map(|(_, secs)| secs).sum();
-        assert_eq!(accounted, 208, "the table in the doc comment must stay in sync");
+        assert_eq!(accounted, 278, "the table in the doc comment must stay in sync");
         assert!(
             Duration::from_secs(accounted) <= CONNECT_TRANSACTION_TIMEOUT,
             "the accounted cold-connect worst case ({accounted} s) must fit the budget"
@@ -1624,6 +1641,8 @@ mod tests {
                 .map(|(_, secs)| Duration::from_secs(*secs))
                 .unwrap_or_default()
         };
+        assert!(leg("preparing Tono Core ownership") >= SERVICE_LIFECYCLE_TIMEOUT);
+        assert!(leg("browser Secure DNS preflight") >= Duration::from_secs(5));
         assert!(leg("controller readiness") >= CONTROLLER_READY_TIMEOUT);
         assert!(leg("lock ladder") >= LOCK_RETRY_INTERVAL * LOCK_ATTEMPTS);
         assert!(leg("checkingExit") >= EXIT_PROBE_ADVISORY_BUDGET);
@@ -1656,6 +1675,23 @@ mod tests {
             EXPLICIT_RELEASE_TIMEOUT < SERVICE_LIFECYCLE_TIMEOUT,
             "the IPC client must be the one that reports a genuine hang"
         );
+    }
+
+    #[tokio::test]
+    async fn a_new_attempt_drops_signed_app_paths_so_a_full_tunnel_does_not_reconnect() {
+        let state = std::sync::Arc::new(crate::tono::state::TonoState::for_test());
+        let mut inner = state.lock().await;
+        inner.applied_wechat_path_regexes = Some(vec![r"C:\old\Weixin.exe".into()]);
+        inner.optional_direct_active = true;
+        inner.applied_direct_interface = Some("Ethernet".into());
+        super::clear_uncommitted_direct_overlay(&mut inner);
+        assert!(inner.applied_wechat_path_regexes.is_none());
+        assert!(!inner.optional_direct_active);
+        assert!(inner.applied_direct_interface.is_none());
+        assert!(!wechat_paths_changed(
+            inner.applied_wechat_path_regexes.as_deref(),
+            &[r"C:\new\Weixin.exe".into()],
+        ));
     }
 
     #[test]
@@ -1878,6 +1914,7 @@ mod tests {
                     tunnel_permit_rendered: true,
                     direct_endpoint_digest: tono_service_protocol::direct_endpoint_digest(&[]).unwrap(),
                     last_error: None,
+                    reconnect_after_release: false,
                 }),
                 network_events: Default::default(),
             },
@@ -2413,6 +2450,7 @@ mod tests {
             tunnel_permit_rendered: true,
             direct_endpoint_digest: tono_service_protocol::direct_endpoint_digest(&[]).unwrap(),
             last_error: None,
+            reconnect_after_release: false,
         };
         assert!(!kill_switch_unhealthy(Some(&healthy)));
         assert!(kill_switch_unhealthy(None));
@@ -2431,6 +2469,7 @@ mod tests {
                 tunnel_permit_rendered: true,
                 direct_endpoint_digest: tono_service_protocol::direct_endpoint_digest(&[]).unwrap(),
                 last_error: None,
+                reconnect_after_release: false,
             };
             assert!(kill_switch_unhealthy(Some(&status)), "{wanted} {live} {mode:?}");
         }
@@ -2753,6 +2792,7 @@ mod tests {
             tunnel_permit_rendered: true,
             direct_endpoint_digest: digest.clone(),
             last_error: None,
+            reconnect_after_release: false,
         };
         prove_service_endpoint_digest(&status, &digest).unwrap();
 

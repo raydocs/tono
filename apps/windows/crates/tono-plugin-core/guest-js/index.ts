@@ -439,7 +439,7 @@ async function openWebSocketCommand(
     dispatchWebSocketMessage(listeners, message);
   };
 
-  const id = await invoke<number>(`plugin:tono-plugin-core|${command}`, {
+  const id = await invoke<string>(`plugin:tono-plugin-core|${command}`, {
     ...args,
     onMessage,
   });
@@ -447,11 +447,11 @@ async function openWebSocketCommand(
 }
 
 export class MihomoWebSocket {
-  id: number;
+  id: string;
   private readonly listeners: Set<(arg: Message) => void>;
   private static instances = new Set<MihomoWebSocket>();
 
-  constructor(id: number, listeners: Set<(arg: Message) => void>) {
+  constructor(id: string, listeners: Set<(arg: Message) => void>) {
     this.id = id;
     this.listeners = listeners;
   }
