@@ -7,3 +7,8 @@
 - 验证：Linux 云代理无 Swift 工具链，XCTest 未在本地执行。
 - 候选/发布：仅源码，无新候选。
 - 剩余限制：需 `needs-hardware`。不能声称已在真机上看过缓存回调顺序。
+
+## 2026-10-01 · 续记（系统 DNS 截止时间）
+- 合入当时的 `origin/main`。`testSystemDNSDeadlineReturnsWhileSetupIsHeldAndRefusesStackedSetup` 在 1 秒到期，结果仍是 nil。截止回调把 `finishOnOwner` 派回 `ownershipQueue`，而测试里的 `DNSServiceGetAddrInfo` 正堵在这条队列上，等待方要等 C 调用返回才继续。这不是把超时改大能解决的抖动。
+- 截止回调改在定时器队列上直接 `finish`。已收集的地址用锁里的快照，不在定时器线程读属主队列的数组。拆 `DNSServiceRef` 仍异步留在属主队列，堵着的 C 调用返回之前不会拆。助手域名和网段的路由没有改。失败时仍交回原来的网络，不在这里改成整机断网。
+- 验证：本环境无 Swift，XCTest 未在本地执行。

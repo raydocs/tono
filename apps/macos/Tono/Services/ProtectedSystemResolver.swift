@@ -87,6 +87,9 @@ nonisolated enum ProtectedSystemResolver {
         private var timer: DispatchSourceTimer?
         private var continuation: CheckedContinuation<[String], Never>?
         private var terminal: [String]?
+        // Lock-protected copy of `answers` so the deadline can publish without
+        // hopping onto ownershipQueue. That queue may be inside GetAddrInfo.
+        private var collected: [String] = []
         // Owner-queue-only state. Never read these under the waiter lock.
         private var service: DNSServiceRef?
         private var answers: [String] = []
@@ -108,12 +111,17 @@ nonisolated enum ProtectedSystemResolver {
             // work. Neither the timer nor onCancel waits for ownershipQueue.
             let timer = DispatchSource.makeTimerSource(queue: .global(qos: .userInitiated))
             self.timer = timer
-            // The deadline publishes whatever was collected. A fake-IP that
-            // arrives only as the clock expires is dropped in finish(); a
-            // public-only set is kept so the failure message can name it.
+            // Resume the waiter on this timer queue. Hopping to ownershipQueue
+            // waits behind DNSServiceGetAddrInfo, so a blocked C setup holds
+            // the caller past the deadline. Deallocation stays in finish()'s
+            // async dispose, which cannot run until that C call returns.
+            // A fake-IP that arrives only as the clock expires is dropped in
+            // finish(); a public-only snapshot is kept so the failure message
+            // can name it.
             timer.setEventHandler { [weak self] in
                 guard let self else { return }
-                ownershipQueue.async { self.finishOnOwner(self.answers) }
+                let snapshot = self.lock.withLock { self.collected }
+                self.finish(snapshot)
             }
             timer.schedule(deadline: deadline)
             timer.resume()
@@ -175,6 +183,7 @@ nonisolated enum ProtectedSystemResolver {
                 } else {
                     answers.removeAll { $0 == answer }
                 }
+                lock.withLock { collected = answers }
             }
             if flags & DNSServiceFlags(kDNSServiceFlagsMoreComing) == 0,
                ProtectedDNSProbe.containsFakeIP(answers) {
