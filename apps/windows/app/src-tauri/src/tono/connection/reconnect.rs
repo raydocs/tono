@@ -156,6 +156,23 @@ pub(super) fn schedule_reconnect_locked(inner: &mut TonoInner, state: &Arc<TonoS
     });
 }
 
+/// Whether a crash-window release may start a background connect. A user disconnect
+/// leaves `reconnect_after_release` false, and a catalog choice or an in-flight
+/// disconnect still wins.
+pub(crate) fn crash_recovery_reconnect_allowed(
+    reconnect_after_release: bool,
+    account_ready: bool,
+    selected_present: bool,
+    catalog_requires_choice: bool,
+    disconnecting: bool,
+) -> bool {
+    reconnect_after_release
+        && account_ready
+        && selected_present
+        && !catalog_requires_choice
+        && !disconnecting
+}
+
 /// After account/catalog restore, take control of a strongly proven same-owner active runtime by
 /// scheduling the normal protected reconnect. This never marks Connected directly. If any proof
 /// disappeared, the GUI remains truthfully Protected Offline and waits for an explicit action.
@@ -363,5 +380,27 @@ mod tests {
         let inner = state.lock().await;
         assert!(inner.tasks.reconnect.is_none());
         assert!(inner.fsm.kill_switch_armed(), "task retirement must not release protection");
+    }
+
+    #[test]
+    fn crash_recovery_reconnects_only_after_the_service_asks() {
+        assert!(super::crash_recovery_reconnect_allowed(
+            true, true, true, false, false
+        ));
+        assert!(!super::crash_recovery_reconnect_allowed(
+            false, true, true, false, false
+        ));
+        assert!(!super::crash_recovery_reconnect_allowed(
+            true, true, true, true, false
+        ));
+        assert!(!super::crash_recovery_reconnect_allowed(
+            true, false, true, false, false
+        ));
+        assert!(!super::crash_recovery_reconnect_allowed(
+            true, true, false, false, false
+        ));
+        assert!(!super::crash_recovery_reconnect_allowed(
+            true, true, true, false, true
+        ));
     }
 }

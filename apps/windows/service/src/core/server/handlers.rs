@@ -29,13 +29,18 @@ async fn refuse_release_after_failed_core_stop(
 }
 
 /// The operation marker an update transaction publishes in `/status` while it runs. A Disconnect
-/// stops the Core and calls `wfp::release()` inside `update::request`, so it is published as the
-/// kill-switch release it is: readers see it running, and its start and end advance
-/// `snapshot_generation` (F520-1). A Disconnect with nothing pending releases nothing; showing
-/// it as a release for that moment only weakens what the App may promise.
+/// stops the Core and calls `wfp::release()` inside `update::request`; a failed non-strict Prepare
+/// can now do the same. Both are published as kill-switch releases: readers see them running,
+/// and their start and end advance `snapshot_generation` (F520-1). A Disconnect with nothing
+/// pending releases nothing; showing it as a release for that moment only weakens what the App
+/// may promise.
 fn update_operation(request: &crate::update_wire::UpdateRequest) -> Option<OperationGuard> {
-    matches!(request, crate::update_wire::UpdateRequest::Disconnect)
-        .then(|| OperationGuard::begin(ServiceOperationKind::ReleaseKillSwitch, IPC_HANDLER_TIMEOUT))
+    matches!(
+        request,
+        crate::update_wire::UpdateRequest::Disconnect
+            | crate::update_wire::UpdateRequest::Prepare { .. }
+    )
+    .then(|| OperationGuard::begin(ServiceOperationKind::ReleaseKillSwitch, IPC_HANDLER_TIMEOUT))
 }
 
 pub(super) fn create_ipc_router() -> Result<Router> {
@@ -48,11 +53,15 @@ pub(super) fn create_ipc_router() -> Result<Router> {
             // A Prepare supersedes in-flight connect attempts only once `update::request` has
             // admitted it, still under this lock (TW-anthropic-4).
             let _lifecycle = OWNER_LIFECYCLE_LOCK.lock().await;
+            #[cfg(windows)]
+            if IPC_STOPPING.load(std::sync::atomic::Ordering::SeqCst) {
+                return service_unavailable("service is stopping");
+            }
             let _operation_guard = update_operation(&request.payload);
             #[cfg(windows)]
             return match crate::core::update::request(&owner, request.payload).await {
                 Ok(status) => ok_json(status),
-                Err(error) => service_unavailable(format!("Update refused; evidence retained and no protection release completed: {error:#}")),
+                Err(error) => service_unavailable(format!("Update refused; evidence retained: {error:#}")),
             };
             #[cfg(not(windows))] {
                 let _ = (request, owner);
@@ -390,8 +399,8 @@ pub(super) fn create_ipc_router() -> Result<Router> {
         })
         .post(IpcCommand::ReleaseKillSwitch.as_ref(), |ctx| async move {
             trace!("Received ReleaseKillSwitch command");
-            let (_request, owner) =
-                match authenticate_request::<AuthenticatedRequest<()>>(&ctx).await {
+            let (request, owner) =
+                match authenticate_request::<AuthenticatedRequest<crate::core::structure::ReleaseKillSwitchBody>>(&ctx).await {
                     ControlFlow::Continue(authenticated) => authenticated,
                     ControlFlow::Break(response) => return response,
                 };
@@ -432,7 +441,13 @@ pub(super) fn create_ipc_router() -> Result<Router> {
                             "Kill switch release refused; active Core ownership does not match the protection owner",
                         );
                     }
-                    Ok(None) => {}
+                    Ok(None) => {
+                        if let Err(error) = retire_unrecorded_owner_core(&owner).await {
+                            return service_unavailable(format!(
+                                "Kill switch release refused; the unrecorded Core could not be safely stopped and retired: {error:#}"
+                            ));
+                        }
+                    }
                     Err(error) => {
                         // An unreadable ownership record proves nothing either way, and refusing
                         // on it is what leaves an armed machine with no way back: every retry
@@ -449,7 +464,7 @@ pub(super) fn create_ipc_router() -> Result<Router> {
                     }
                 }
             }
-            release_kill_switch_for_platform().await
+            release_kill_switch_for_platform(request.payload.apply_narrow_layer()).await
         })
         .post(IpcCommand::EnableProtectedDns.as_ref(), |ctx| async move {
             trace!("Received EnableProtectedDns command");
@@ -1067,9 +1082,9 @@ mod update_operation_tests {
     use crate::update_wire::UpdateRequest;
     use serial_test::serial;
 
-    /// F520-1: a native-update Disconnect releases WFP. `/status` must show it as a release and
-    /// advance `snapshot_generation`, or the App's two-reading check can still say "stays
-    /// protected" after it.
+    /// F520-1: a native-update Disconnect or failed non-strict Prepare releases WFP. `/status`
+    /// must show it as a release and advance `snapshot_generation`, or the App's two-reading
+    /// check can still say "stays protected" after it.
     #[test]
     #[serial]
     fn update_disconnect_is_published_as_a_kill_switch_release() {
@@ -1081,6 +1096,20 @@ mod update_operation_tests {
             Some(ServiceOperationKind::ReleaseKillSwitch)
         );
         assert!(during > before);
+        drop(guard);
+
+        let before_prepare = snapshot().0;
+        let guard = update_operation(&UpdateRequest::Prepare {
+            manifest: String::new(),
+            signature: String::new(),
+            package_path: String::new(),
+        });
+        let (during_prepare, active) = snapshot();
+        assert_eq!(
+            active.map(|operation| operation.kind),
+            Some(ServiceOperationKind::ReleaseKillSwitch)
+        );
+        assert!(during_prepare > before_prepare);
         drop(guard);
     }
 }

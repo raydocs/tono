@@ -13,7 +13,9 @@ use super::failure::StageFailure;
 ///
 /// | leg                                                    | worst |
 /// |--------------------------------------------------------|-------|
+/// | browser Secure DNS preflight (residential catalogs)     |   5 s |
 /// | service readiness probe                                  |   3 s |
+/// | PrepareCoreStart (`LIFECYCLE_TIMEOUT`)                   |  65 s |
 /// | StartClash #1 — cold WinTUN install + WFP arm             |  60 s | Service handler budget
 /// | controller readiness (`CONTROLLER_READY_TIMEOUT`)         |  15 s |
 /// | lock ladder (`LOCK_ATTEMPTS` × `LOCK_RETRY_INTERVAL`)     |  10 s |
@@ -23,15 +25,19 @@ use super::failure::StageFailure;
 /// | verifyingTraffic (WFP status + mainland App HTTP over TUN) |  26 s |
 /// | C3 second TUN round + concurrent proxy check + delay       |  27 s |
 /// | MarkVerified commit IPC                                   |   5 s |
-/// | **total**                                                 | 208 s |
+/// | **total**                                                 | 278 s |
 ///
 /// Optional DIRECT resolution runs after Connected and no longer sits on this clock.
-/// 240 s leaves margin over the remaining critical-path sum.
-pub(super) const CONNECT_TRANSACTION_TIMEOUT: Duration = Duration::from_secs(240);
+/// PrepareCoreStart and the residential browser-DNS scan sit on this clock and were
+/// missing from the 208 s sum, so a slow cold connect died at 240 s while those
+/// legs were still inside their own budgets. 310 s keeps the previous 32 s margin.
+pub(super) const CONNECT_TRANSACTION_TIMEOUT: Duration = Duration::from_secs(310);
 /// The accounting table above, machine-checked by `connect_budget_covers_a_cold_first_connect`.
 #[cfg(test)]
-pub(super) const CONNECT_BUDGET_LEGS: [(&str, u64); 10] = [
+pub(super) const CONNECT_BUDGET_LEGS: [(&str, u64); 12] = [
+    ("browser Secure DNS preflight", 5),
     ("service readiness", 3),
+    ("preparing Tono Core ownership", 65),
     ("StartClash #1 (cold WinTUN + WFP arm)", 60),
     ("controller readiness", 15),
     ("lock ladder", 10),
