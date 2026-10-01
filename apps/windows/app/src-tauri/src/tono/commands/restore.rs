@@ -579,6 +579,10 @@ fn offline_account_info() -> TonoAccountInfo {
         email: String::new(),
         suspended: false,
         device_limit: i64::from(DEFAULT_DEVICE_LIMIT),
+        plan: None,
+        quota_bytes: None,
+        usage_bytes: None,
+        expires_at: None,
     }
 }
 

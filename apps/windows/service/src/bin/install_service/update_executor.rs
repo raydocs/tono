@@ -765,7 +765,15 @@ fn record_committed_version(a: &tx::Attempt) -> Result<(), Error> {
 fn cleanup_committed(plan_path: &Path) -> Result<(), Error> {
     let plan: Plan = serde_json::from_slice(&std::fs::read(plan_path)?)?;
     for member in plan.members {
-        member.cleanup();
+        // A sharing violation must leave the boot task available to retry.
+        for path in [
+            &member.staged,
+            &member.backup,
+            &member.restore,
+            &member.publish_scratch,
+        ] {
+            remove_ordinary_file_if_exists(path)?;
+        }
     }
     // Keep state.json, manifest, consumed sequence, plan and executor as evidence.
     Ok(())
@@ -777,6 +785,83 @@ mod tests {
     use tono_service_protocol::update_contract::{
         Observation, Protection, Receipt, ReleaseManifest,
     };
+
+    #[test]
+    fn update_commit_keeps_the_recovery_task_until_locked_artifacts_are_removed() {
+        use std::os::windows::fs::OpenOptionsExt as _;
+        use windows_sys::Win32::Storage::FileSystem::FILE_SHARE_READ;
+
+        let root = std::env::temp_dir().join(format!(
+            "tono-update-commit-locked-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir(&root).unwrap();
+        let target = root.join("Tono.exe");
+        let staged = root.join("Tono.exe.next");
+        std::fs::write(&target, b"old-app").unwrap();
+        std::fs::write(&staged, b"new-app").unwrap();
+        let mut member =
+            CoordinatedBinaryReplacement::prepare(&staged, &target, sha256(&staged).unwrap())
+                .unwrap();
+        member.publish().unwrap();
+        let backup = member.backup.clone();
+        let plan_path = root.join("replacement.json");
+        tx::atomic_write(
+            &plan_path,
+            &serde_json::to_vec(&Plan {
+                attempt_id: "attempt".into(),
+                members: vec![member],
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        // AV and other readers can temporarily hold a completed rollback
+        // copy without granting delete sharing.
+        let held = OpenOptions::new()
+            .read(true)
+            .share_mode(FILE_SHARE_READ)
+            .open(&backup)
+            .unwrap();
+        let mut recorded_while_locked = false;
+        let mut retired_while_locked = false;
+        let locked_result = finish_committed(
+            &plan_path,
+            || {
+                recorded_while_locked = true;
+                Ok(())
+            },
+            || {
+                retired_while_locked = true;
+                Ok(())
+            },
+        );
+        let backup_remained = backup.exists();
+        drop(held);
+
+        // Retry also tolerates artifacts removed before the first failure.
+        let mut retired_on_retry = false;
+        let retry = finish_committed(
+            &plan_path,
+            || Ok(()),
+            || {
+                retired_on_retry = true;
+                Ok(())
+            },
+        );
+        let backup_removed = !backup.exists();
+        let installed = std::fs::read(&target).unwrap();
+        std::fs::remove_dir_all(root).unwrap();
+
+        assert!(locked_result.is_err(), "locked cleanup must remain retryable");
+        assert!(!recorded_while_locked && !retired_while_locked);
+        assert!(backup_remained);
+        assert!(retry.is_ok() && retired_on_retry && backup_removed);
+        assert_eq!(installed, b"new-app");
+    }
 
     #[test]
     fn update_commit_retires_the_recovery_task_after_cleanup() {

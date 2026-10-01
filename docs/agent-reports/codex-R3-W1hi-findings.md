@@ -1,6 +1,6 @@
 # R3-W1hi: Codex (GPT-6.1 Sol) findings
 
-Generated 2026-09-30 20:33 MT from the run's findings.tsv / prs.tsv.
+Generated 2026-09-30 21:46 MT from the run's findings.tsv / prs.tsv.
 
 ## PRs
 
@@ -34,8 +34,8 @@ Generated 2026-09-30 20:33 MT from the run's findings.tsv / prs.tsv.
 | W1-RESTORED-RELOCK | Windows WFP | P1 | apps/windows/service/src/core/windows_kill_switch.rs:3386 | A failed restored re-lock consumes its retry flag | duplicate #740 Core-proof deadline and non-strict release |
 | W1-UPDATE-TOMBSTONE | Windows WFP | P2 | apps/windows/service/src/bin/install_service/update_executor.rs:586 | Automatic failed-update release can be refused by tombstone write failure | duplicate recorded #858 limitation; restart failure plus independent write error |
 | W1-PERSISTENT-PERMITS | Windows WFP | P1 | apps/windows/service/src/core/wfp_model.rs:287 | Persistent deny can outlive nonpersistent DHCP/loopback permits | duplicate #753; main makes infrastructure permits persistent |
-| WIN-STARTUP-RETRY-RECONNECT | Windows WFP | P2 | apps/windows/service/src/core/windows_kill_switch.rs:513 | Successful startup-release retry deletes the crash reconnect marker | real-fixed #986 |
-| WIN-SELECTIVE-LATE-WORKER | Windows WFP | P2 | apps/windows/service/src/core/selective_layer.rs:24 | Timed-out native delete/apply can overwrite a newer AI hold or Restore | real-fixed #988 |
+| WIN-STARTUP-RETRY-RECONNECT | Windows WFP | P2 | apps/windows/service/src/core/windows_kill_switch.rs:513 | Successful startup-release retry deletes the crash reconnect marker | real-fixed #986 (merged) |
+| WIN-SELECTIVE-LATE-WORKER | Windows WFP | P2 | apps/windows/service/src/core/selective_layer.rs:24 | Timed-out native delete/apply can overwrite a newer AI hold or Restore | real-fixed #988 (merged) |
 | W1-ASYNC-LOCK-CYCLE | Windows WFP | — | apps/windows/service/src/core/windows_kill_switch.rs:125 | Watchdog Core identity lookup could wait behind lifecycle locks | false-positive coherent packed atomic identity; no manager lock await and state guards dropped before native calls |
 | W1-DETACHED-ENGINE-OVERLAP | Windows WFP | — | apps/windows/service/src/core/windows_kill_switch.rs:951 | Timed-out WFP native calls could overlap later filter mutations | false-positive in-flight epoch claim stays owned by native worker until it returns |
 | W1-EMERGENCY-SWEEP-HANG | Windows WFP | — | apps/windows/service/src/core/windows_kill_switch.rs:3730 | Emergency resolver-rule sweep could hang an async Service task | false-positive sweep has 10-second bound and runs in isolated owner-gated recovery CLI |
@@ -43,3 +43,4 @@ Generated 2026-09-30 20:33 MT from the run's findings.tsv / prs.tsv.
 | W1-STATUS-MIXED | Windows WFP | P2 | apps/windows/service/src/core/status.rs:47 | Service status can mix separately sampled Core/WFP state | duplicate F520-1; existing generation and double-reading guard; millisecond snapshot limitation |
 | W1-INHERITED-CORE-WINDOW | Windows WFP | P2 | apps/windows/service/src/core/windows_kill_switch.rs:299 | A replacement arm could inherit an old Core-proof deadline | duplicate #740; no distinct new ordinary trigger proved beyond existing proof-window behavior |
 | W1-LATE-INTENT-RENAME | Windows WFP | P2 | apps/windows/service/src/core/windows_kill_switch.rs:639 | A timed-out rename could overwrite a successor intent | duplicate BRICK-W11; unique temps/readback fixed shared corruption, later-than-readback rename remains documented |
+| W1-RECOVERY-CHECKPOINT | Windows WFP | P2 | apps/windows/service/src/core/windows_kill_switch.rs:2745 | Slow secondary hold expands the pre-tombstone crash window | duplicate #740 guarded wanted-intent recovery; immediate/failed-replay/30-second Core proof release; no new permanent outage proved |

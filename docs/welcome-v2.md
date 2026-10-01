@@ -30,7 +30,6 @@ sampling, no animation.
 | Sheen 2 (bottom warmth) | radial, centre (0.60, 1.10), size 1.6 × 0.8, `#D6C8B2` 0.55 → transparent at 70% | radial, centre (0.85, 0.90), size 1.2 × 0.8, `#FFB07A` 0.10 → transparent |
 | Headline ink | `#1B1F4B` | `#F3F1F7` |
 | Body / secondary | `#5A5E7A` | `#B9B7CC` |
-| Small controls (跳过, dots, 下一步) | `#7A7C90` / active `#2B2FB8` | `#8E90A8` / active `#FFB07A` |
 | Card | `#FFFFFF` | `#1B1C36` |
 | Action fill (unchanged Clarity control color) | `#3658C9` + white | same |
 
@@ -51,7 +50,7 @@ welcome-hero-1024.png` (macOS asset catalog, 1x/2x from it) and
 | Placement | Size | Position |
 | --- | --- | --- |
 | Intro, wide | 34% of window width, max 320 pt/px | right column, vertically centred on the window |
-| Intro, narrow (< 800) | 46% of width, max 260 | centred above the text |
+| Intro, narrow (< 800) | 32% of width, max 180 | centred above the text |
 | Sign-in story | 22% of story width, max 180 | lower-left of the story column, under the body text |
 
 Rendering: the PNG has its own tile; draw it with corner radius 22% of its
@@ -70,26 +69,23 @@ rotates or follows the pointer.
 
 Shown before sign-in when the user has never signed in on this install and
 has not seen it (`introSeen` flag; macOS `AppStorage`, Windows
-`localStorage`). Skippable at every step. Never shown again after "开始使用".
+`localStorage`). One screen; Esc leaves it too. Never shown again after "开始使用".
 
-Composition on the §1 ground: headline in the left column, vertically centred
-around 38% of the height; hero tile on the right (wide) or above the text
-(narrow, < 800 px);
-"跳过" as a small secondary control top-right, progress dots bottom-left, the
-action bottom-right. Cross-fade 200 ms between steps; Reduce Motion: instant.
+Composition on the §1 ground: the title "欢迎使用 Tono" (34 pt / 36 px,
+semibold), the three promises below as a list, then one solid primary
+button "开始使用 →" (the sign-in action surface: `GateProminentButtonStyle` /
+`.tono-action`, 44 pt/px tall, max 320). The copy column is at most 460 wide,
+vertically centred; the hero tile sits to the right (wide) or above the text
+(narrow, < 800 px). No steps, dots, Skip or Continue.
 
-| Step | Headline (zh) | Body (zh) | Headline (en) | Body (en) |
+| Promise | Headline (zh) | Body (zh) | Headline (en) | Body (en) |
 | --- | --- | --- | --- | --- |
 | 1 | 连上，就受保护。 | 打开 Tono，点一下，所有流量都走受保护线路。 | Connected means protected. | Open Tono, click once, and all your traffic takes the protected route. |
 | 2 | 断网，也不裸奔。 | 线路出问题时，Tono 会先切断，不让流量漏出去。 | Offline, never exposed. | If the route fails, Tono cuts off first so nothing leaks out. |
 | 3 | 线路，Tono 替你选。 | 没有设置要调。想换地区，选一个节点就好。 | Routes are Tono's job. | Nothing to configure. To change region, pick a node. |
-| 4 | 开始使用 → | — | Get started → | — |
 
-Step 4 has no body; the headline itself is the button (48 pt / 56 px,
-semibold, tight tracking) filled with the brand ramp as a text gradient
-(indigo → violet → peach, left to right), sitting low-left, like ego lite's
-"Get started" but on the calm ground. Steps 1–3 use a 34 pt / 40 px headline with a 15 pt / 17 px body in the
-ink / secondary colors from §1; the hero tile sits to the right (wide) or above the text (narrow).
+Each promise: a 16 pt/px semibold headline in ink over a 14 pt/px body in
+secondary, with a 2 pt/px accent rule at 35% on the left.
 
 Copy rules: 你 not 您, full-width punctuation, no product jargon (no TUN,
 mihomo, Reality, DNS). English uses Click on macOS, not Tap.

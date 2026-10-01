@@ -91,7 +91,9 @@ export function Timeline({
         : state === 'error' ? <EmptyLine message={message || copy.loadError} />
           : days.length === 0 ? <EmptyLine message={emptyMessage} />
             : (
-              <div className="overflow-x-auto">
+              // Wider than a phone on purpose; the region takes focus so the
+              // rows past the edge can be scrolled from the keyboard.
+              <div className="overflow-x-auto" role="region" aria-label={title} tabIndex={0}>
                 <div className="min-w-[860px]">
                   <div className={cn(GRID, 'pb-1 text-micro text-[var(--muted-foreground)]')}>
                     <span>{copy.timelineColumns.at}</span>

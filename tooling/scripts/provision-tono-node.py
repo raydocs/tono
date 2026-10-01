@@ -179,7 +179,11 @@ def execute(args: argparse.Namespace, runner_factory=Runner) -> dict:
     if state:
         if state.get("desired") != want: raise ProvisionError("desired state differs; rollback or rotation required")
         r=runner.call({"op":"verify","transactionId":state["transactionId"],"expected":state["expected"],"desired":state["desired"]})
-        if r.get("healthy"): return base|{"changed":False,"verified":True}
+        if r.get("healthy"):
+            if not state.get("verified"):
+                record={"transactionId":state["transactionId"],"desired":want,"expected":state["expected"],"verified":True,"client":r.get("client",state.get("client",{}))}
+                write_private(sf,record)
+            return base|{"changed":False,"verified":True}
         raise ProvisionError("existing transaction is not healthy; rollback required")
     pre=runner.call({"op":"preflight","desired":want})
     if pre.get("firewallChangeRequired") and not args.allow_firewall_change: raise ProvisionError("firewall approval required")

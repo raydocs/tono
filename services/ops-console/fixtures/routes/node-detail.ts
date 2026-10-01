@@ -87,6 +87,13 @@ function readJson<T>(relative: string): T {
   return JSON.parse(readFileSync(path.resolve(rootDir, relative), 'utf8')) as T;
 }
 
+/** The machines a fleet-wide `metrics` read reports: every one the set's node list has. */
+function fleetNames(set: FixtureSetName): string[] {
+  if (set === 'empty' || set === 'error') return [];
+  const file = set === 'dense' ? 'fixtures/nodes.dense.json' : 'fixtures/nodes.json';
+  return readJson<{ list: { items: Array<{ name: string }> } }>(file).list.items.map((node) => node.name);
+}
+
 /**
  * The empty set is assembled from the captured files rather than written by
  * hand: a node with nothing behind it is the one shape the capture already
@@ -125,7 +132,11 @@ function sheetFor(name: string, set: FixtureSetName): AcceptanceSheet {
   const file = acceptance();
   const named = file.nodes[name];
   const key = named?.sheet ?? file.bySet[set] ?? file.bySet.default;
-  return file.sheets[key] ?? file.sheets[file.bySet.default];
+  const fallback = file.bySet.default;
+  const sheet = (key === undefined ? undefined : file.sheets[key])
+    ?? (fallback === undefined ? undefined : file.sheets[fallback]);
+  if (sheet === undefined) throw new Error(`acceptance fixture has no sheet for ${name}`);
+  return sheet;
 }
 
 /** How the machine is listed, when the acceptance fixture says so. */
@@ -242,20 +253,33 @@ export function serveNodeRoutes(options: {
       res.end();
       return true;
     }
-    send(res, parts[0] === 'metrics'
-      ? metricsBody({
+    if (parts[0] === 'metrics') {
+      send(res, metricsBody({
         name: query.get('node'),
+        fleet: fleetNames(set),
         range: query.get('range'),
         fields: query.get('fields'),
         empty: set === 'empty',
         nowUnix: nowSec(),
-      })
-      : qualityTextBody(parts[1], set === 'empty'));
+      }));
+      return true;
+    }
+    const node = parts[1];
+    if (node === undefined) {
+      fail(res, 404, 'NOT_FOUND', route);
+      return true;
+    }
+    send(res, qualityTextBody(node, set === 'empty'));
     return true;
   }
 
   const file = fileFor(set, session);
-  const name = parts[0] === 'jobs' ? String(file.detail.name) : parts[1];
+  const named = parts[1];
+  const name = parts[0] === 'jobs' ? String(file.detail.name) : named;
+  if (name === undefined) {
+    fail(res, 404, 'NOT_FOUND', route);
+    return true;
+  }
 
   if (method === 'POST') {
     void handleWrite(req, res, file, parts, name, set);
@@ -443,9 +467,10 @@ async function handleWrite(
   const body = await readBody(req);
 
   if (parts[0] === 'jobs') {
-    const row = file.jobs.items.find((item) => item.id === parts[1]);
+    const id = parts[1];
+    const row = id === undefined ? undefined : file.jobs.items.find((item) => item.id === id);
     if (!row) {
-      fail(res, 404, 'NOT_FOUND', parts[1]);
+      fail(res, 404, 'NOT_FOUND', id ?? 'jobs');
       return;
     }
     if (row.status !== 'queued' && row.status !== 'leased') {

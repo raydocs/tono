@@ -113,6 +113,7 @@ extension AppState {
 
         let previousSelection = currentProxySelectionTarget()
         let previousRoutingToken = managedCatalogRoutingToken
+        let previousHomeName = managedCatalogRouting?.homeProxy
         let previousCloudNodes = proxyRegions
             .filter { $0.id != "custom" }
             .flatMap(\.nodes)
@@ -219,10 +220,18 @@ extension AppState {
             let nextSelected = nodes.first {
                 proxyTarget($0.name, matches: previousSelection ?? "")
             }
+            let previousHome = previousHomeName.flatMap { homeName in
+                previousCloudNodes.first { proxyTarget($0.name, matches: homeName) }
+            }
+            let nextHome = (validatedRouting?.homeProxy).flatMap { homeName in
+                nodes.first { proxyTarget($0.name, matches: homeName) }
+            }
             let routingChanged = previousRoutingToken != routingToken
             if CatalogLiveSession.shouldReload(
                 previousSelected: previousSelected,
                 nextSelected: nextSelected,
+                previousHome: previousHome,
+                nextHome: nextHome,
                 routingChanged: routingChanged,
                 switchTargetChanged: switchTargetChanged
             ) {

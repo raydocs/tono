@@ -7,3 +7,5 @@
 - Verification: Linux suite failed before (4/5 failures), passed after (5/5), then combined cache/startup suite passed after rebase (7/7); diff check and independent read-only review passed. No native core execution or network operation.
 - Candidate/publication: source only, no new candidate, deployment or publication.
 - Remaining limits: full loopback benchmark delegated to hosted CI; exceptions during successfully started samples are a separate unmodified lifecycle path.
+
+2026-09-30 continuation: source merged in [#1000](https://github.com/raydocs/tono/pull/1000), main merge `08aac566e3adde2f8beaffce84da2bb5c774bd92`, with ci-gate success. Original fixture evidence above remains tied to the original tested source; no new package, device acceptance, deployment or publication.

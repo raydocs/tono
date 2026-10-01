@@ -78,3 +78,150 @@
 | WIN-DIRECT-RESTORE-WRITER-DELAY-AUTO | A1 | Sol (Codex acct 2, W1-sol-win-app) | P1 | real-unfixed follow-up to #898; cancellation-only opens AI sooner and existing best-effort AI fallback cannot guarantee top rule | Automatic health release never cancels the stalled DIRECT reader and normal internet remains Blocked about two minutes [apps/windows/app/src-tauri/src/tono/connection/monitor.rs:1384] |
 | W1-AUTO-HEALTH-AI-HOLD | A1 | Sol (Codex acct 2, W1-sol-win-app) | — | duplicate SFO-1/#738 and ZC-F1/#706; needs existing guaranteed-fallback decision/implementation | Automatic health release omits guaranteed secondary AI blocking [apps/windows/app/src-tauri/src/tono/connection/monitor.rs:1391] |
 | WIN-SINGLETON-INHERITED-PROXY | A9 | Sol (Codex acct 2, W1-sol-win-app) | P3 | real-fixed #984 | Inherited HTTP proxy intercepts authenticated localhost notification and second launch fails after twenty seconds [apps/windows/app/src-tauri/src/utils/server.rs:100] |
+
+### W1-sol-win-trust (finished 21:05 MT; 89 hypotheses, 73 FP, PRs: #PR#843 #PR#873 #PR#912 #PR#933 #PR#955 #PR#983 #PR#990)
+| ID | Area | Model | Sev | Verdict | Description [location] |
+|---|---|---|---|---|---|
+| WIN-VAULT-WRITE-RETRY | A12 | Sol (Codex acct 2, W1-sol-win-trust) | P1 | real-fixed #843 | Failed vault mutations discarded; flush never retried persistence [apps/windows/app/src-tauri/src/tono/credentials.rs:743] |
+| WIN-OWNER-RELEASE-NONE | W6 | Sol (Codex acct 2, W1-sol-win-trust) | P1 | real-fixed #873 | Missing/corrupt active-owner lets release skip live Core stop [apps/windows/service/src/core/server/handlers.rs:415] |
+| AUTH-LOGOUT-REPLACEMENT | A12 | Sol (Codex acct 2, W1-sol-win-trust) | — | duplicate previously fixed identity race | Logout could erase replacement account [apps/windows/crates/tono-core/src/auth.rs:1334] |
+| POLICY-AI-SUFFIX | A12 | Sol (Codex acct 2, W1-sol-win-trust) | — | duplicate #797 | Signed direct suffix could cover AI services [apps/windows/crates/tono-core/src/policy.rs:334] |
+| RECOVERY-STALE-SELECTION | A12 | Sol (Codex acct 2, W1-sol-win-trust) | — | duplicate codex2 in-flight stale-preflight candidate | Late preflight could use deselected exit [apps/windows/app/src-tauri/src/tono/connection/heal.rs:99] |
+| W6-APP-IDENTITY | W6 | Sol (Codex acct 2, W1-sol-win-trust) | — | duplicate #352 | Same-user non-App mutation access [apps/windows/service/src/core/server/mod.rs:800] |
+| W6-START-FAILURE | W6 | Sol (Codex acct 2, W1-sol-win-trust) | — | duplicate #769 | Post-arm Core start failure keeps protection [apps/windows/service/src/core/server/handlers.rs:703] |
+| W6-SERVICE-STOP | W6 | Sol (Codex acct 2, W1-sol-win-trust) | — | duplicate #792 | Ordinary service stop retains protection [apps/windows/service/src/core/server/mod.rs:457] |
+| WIN-GOODBYE-CONNECT-RACE | W6 | Sol (Codex acct 2, W1-sol-win-trust) | P2 | real-fixed #955 | Accepted goodbye can stop a connection started in its 250ms grace [apps/windows/service/src/core/server/mod.rs:392] |
+| WIN-RELEASE-SCM-PROBE-HANG | A7 | Sol (Codex acct 2, W1-sol-win-trust) | P1 | real-fixed #912 | Unbounded stopped-state query permanently holds Disconnect release worker [apps/windows/app/src-tauri/src/core/service/mod.rs:524] |
+| A7-INSTALLER-INHERITED-PIPE | A7 | Sol (Codex acct 2, W1-sol-win-trust) | — | duplicate known installer hang fixed by status and bounded quarantine | Inherited output handles deadlock installer [apps/windows/app/src-tauri/src/core/service/install.rs:559] |
+| A7-SCM-ERROR-PATH | A7 | Sol (Codex acct 2, W1-sol-win-trust) | P1 | duplicate same root cause WIN-RELEASE-SCM-PROBE-HANG; included in fix | Connect and Repair also perform unbounded SCM evidence/BFE reads [apps/windows/app/src-tauri/src/core/service/mod.rs:614] |
+| AUTH-UNOWNED-CACHE-RESIDUAL | A12 | Sol (Codex acct 2, W1-sol-win-trust) | P2 | duplicate documented H3-F1/#316 residual; no ownership binding | Persistent cache-file sharing failure retains previous account catalog [apps/windows/app/src-tauri/src/tono/catalog_sync.rs:147] |
+| WIN-SCM-VERIFIER-WORKERS | W6 | Sol (Codex acct 2, W1-sol-win-trust) | P2 | real-fixed #933 | Repeated monitor calls spawn unbounded detached SCM verifier threads during a sustained stall [apps/windows/service/src/client/mod.rs:165] |
+| WIN-SELECTIVE-RELEASE-RETRY | A7 | Sol (Codex acct 2, W1-sol-win-trust) | P2 | real-fixed #983 | Automatic selective release retries all failures as plain release, dropping AI hold [apps/windows/app/src-tauri/src/core/service/mod.rs:1323] |
+| AUTH-CLOCK-REPLAY-VERDICT | A12 | Sol (Codex acct 2, W1-sol-win-trust) | P2 | real-fixed #990 | Obsolete decisive replay under clock skew could refuse current rotated session [apps/windows/crates/tono-core/src/auth.rs:1611] |
+
+### R3-W1hi (finished 21:05 MT; 28 hypotheses, 10 FP, PRs: #974 #976 #978 #986 #988)
+| ID | Area | Model | Sev | Verdict | Description [location] |
+|---|---|---|---|---|---|
+| WIN-RECOVERY-AI-HOLD-OMISSION | Windows WFP | Sol (Codex acct 2, R3-W1hi) | P1 | real-fixed #974 (merged) | Crash/corrupt/unhealthy and unproven-Core releases omit the secondary AI hold [apps/windows/service/src/core/windows_kill_switch.rs:2946] |
+| W1-DIRECT-EXPIRY | Windows WFP | Sol (Codex acct 2, R3-W1hi) | P1 | duplicate #777 / #926 | Committed DIRECT heartbeat expiry remains exact Blocked [apps/windows/service/src/core/windows_kill_switch.rs:3428] |
+| W1-WANTED-NO-CORE | Windows WFP | Sol (Codex acct 2, R3-W1hi) | P1 | duplicate #740 (now merged) | Restored wanted block can outlive its Core [apps/windows/service/src/core/windows_kill_switch.rs:2800] |
+| W1-LOCK-POISON | Windows WFP | Sol (Codex acct 2, R3-W1hi) | P2 | duplicate #812 (now merged) | ARMED poison can panic lock IPC [apps/windows/service/src/core/windows_kill_switch.rs:1910] |
+| WIN-FAILED-ARM-AI-HOLD | Windows WFP | Sol (Codex acct 2, R3-W1hi) | P2 | real-fixed #976 (merged) | A failed WFP install removes the existing narrow AI hold [apps/windows/service/src/core/windows_kill_switch.rs:1216] |
+| W1-LIVE-CORE-RELEASE | Windows WFP | Sol (Codex acct 2, R3-W1hi) | P2 | unverified needs unavailable App plus broken Core and native proof that TUN routes still blackhole after WFP release | A live broken Core can survive a WFP-only recovery release [apps/windows/service/src/core/windows_kill_switch.rs:2737] |
+| WIN-UPDATE-FAILURE-AI-HOLD | Windows WFP | Sol (Codex acct 2, R3-W1hi) | P1 | real-fixed #978 (merged) | Automatic failed-update emergency release removes the secondary AI layer [apps/windows/service/src/bin/install_service/update_executor.rs:586] |
+| W1-UNWANTED-UNLINK-DNS | Windows WFP | Sol (Codex acct 2, R3-W1hi) | P2 | unverified skipped cleanup is source-proven; user harm needs exceptional DNS residue plus independent unlink error; native/fault evidence deferred | An undeletable unwanted intent can skip remaining DNS restoration [apps/windows/service/src/core/windows_kill_switch.rs:3138] |
+| W1-UNVERIFIED-OWNER-RETIRE | Windows WFP | Sol (Codex acct 2, R3-W1hi) | P2 | duplicate documented adjacent #777 limitation; interrupted startup plus record error | Failed unverified-owner retirement can retain healthy Blocked policy [apps/windows/service/src/core/windows_kill_switch.rs:3349] |
+| W1-RESTORED-RELOCK | Windows WFP | Sol (Codex acct 2, R3-W1hi) | P1 | duplicate #740 Core-proof deadline and non-strict release | A failed restored re-lock consumes its retry flag [apps/windows/service/src/core/windows_kill_switch.rs:3386] |
+| W1-UPDATE-TOMBSTONE | Windows WFP | Sol (Codex acct 2, R3-W1hi) | P2 | duplicate recorded #858 limitation; restart failure plus independent write error | Automatic failed-update release can be refused by tombstone write failure [apps/windows/service/src/bin/install_service/update_executor.rs:586] |
+| W1-PERSISTENT-PERMITS | Windows WFP | Sol (Codex acct 2, R3-W1hi) | P1 | duplicate #753; main makes infrastructure permits persistent | Persistent deny can outlive nonpersistent DHCP/loopback permits [apps/windows/service/src/core/wfp_model.rs:287] |
+| WIN-STARTUP-RETRY-RECONNECT | Windows WFP | Sol (Codex acct 2, R3-W1hi) | P2 | real-fixed #986 (merged) | Successful startup-release retry deletes the crash reconnect marker [apps/windows/service/src/core/windows_kill_switch.rs:513] |
+| WIN-SELECTIVE-LATE-WORKER | Windows WFP | Sol (Codex acct 2, R3-W1hi) | P2 | real-fixed #988 (merged) | Timed-out native delete/apply can overwrite a newer AI hold or Restore [apps/windows/service/src/core/selective_layer.rs:24] |
+| W1-STATUS-MIXED | Windows WFP | Sol (Codex acct 2, R3-W1hi) | P2 | duplicate F520-1; existing generation and double-reading guard; millisecond snapshot limitation | Service status can mix separately sampled Core/WFP state [apps/windows/service/src/core/status.rs:47] |
+| W1-INHERITED-CORE-WINDOW | Windows WFP | Sol (Codex acct 2, R3-W1hi) | P2 | duplicate #740; no distinct new ordinary trigger proved beyond existing proof-window behavior | A replacement arm could inherit an old Core-proof deadline [apps/windows/service/src/core/windows_kill_switch.rs:299] |
+| W1-LATE-INTENT-RENAME | Windows WFP | Sol (Codex acct 2, R3-W1hi) | P2 | duplicate BRICK-W11; unique temps/readback fixed shared corruption, later-than-readback rename remains documented | A timed-out rename could overwrite a successor intent [apps/windows/service/src/core/windows_kill_switch.rs:639] |
+| W1-RECOVERY-CHECKPOINT | Windows WFP | Sol (Codex acct 2, R3-W1hi) | P2 | duplicate #740 guarded wanted-intent recovery; immediate/failed-replay/30-second Core proof release; no new permanent outage proved | Slow secondary hold expands the pre-tombstone crash window [apps/windows/service/src/core/windows_kill_switch.rs:2745] |
+
+### R3-W5gap (finished 21:05 MT; 32 hypotheses, 21 FP, PRs: #982 #985 #987 #989)
+| ID | Area | Model | Sev | Verdict | Description [location] |
+|---|---|---|---|---|---|
+| WIN-DNS-RESTORE-SNAPSHOT-WRITE | W5 DNS facade | Sol (Codex acct 2, R3-W5gap) | P1 | real-fixed #982 | Snapshot refresh write failure skips resolver-policy restore and blocks disarm [apps/windows/service/src/core/dns/mod.rs:2731] |
+| BRICK-W7 | W5 restore proof | Sol (Codex acct 2, R3-W5gap) | P1 | duplicate of known BRICK-W7 | Live restore verifier reads the registry [apps/windows/service/src/core/dns/engine.rs:1323] |
+| WIN-DNS-SNAPSHOT-DELETE-BLOCKS | W5 DNS facade | Sol (Codex acct 2, R3-W5gap) | P1 | duplicate of #769 and #827 | Snapshot delete failure blocks disarm [apps/windows/service/src/core/dns/mod.rs:2812] |
+| WIN-STOPCLASH-UNRECORDED | W5 DNS callers | Sol (Codex acct 2, R3-W5gap) | P1 | duplicate of #930 | Failed stop bookkeeping skips DNS restore [apps/windows/service/src/core/server/handlers.rs:842] |
+| WIN-DNS-DOH-CAPTURE-DELETE | W5 DNS engine | Sol (Codex acct 2, R3-W5gap) | P1 | real-fixed #985 | Capture deletion failure aborts restored resolver policy and disarm [apps/windows/service/src/core/dns/engine.rs:1634] |
+| WIN-DNS-DOH-NEW-TEMPLATE | W5 DNS engine | Sol (Codex acct 2, R3-W5gap) | P2 | real-fixed #987 | New adapter DoH flags suppressed without saved originals [apps/windows/service/src/core/dns/engine.rs:481] |
+| WIN-DNS-SPACE-LIST | W5 DNS parsing | Sol (Codex acct 2, R3-W5gap) | P2 | real-fixed #989 | Documented space-delimited original DNS lists rejected by compatibility apply [apps/windows/service/src/core/dns/mod.rs:550] |
+| W5-PROFILE-ORIGINALS | W5 originals | Sol (Codex acct 2, R3-W5gap) | — | unverified Windows profile-transition evidence required | SSID change may restore old ProfileNameServer [apps/windows/service/src/core/dns/mod.rs:879] |
+| W5-NETSH-LATE | W5 engine processes | Sol (Codex acct 2, R3-W5gap) | — | unverified native subprocess timing required; related R680 limitation | Timed-out netsh descendant may commit DNS6 late [apps/windows/service/src/core/dns/engine.rs:827] |
+| W5-SCOPED-V6 | W5 engine parsing | Sol (Codex acct 2, R3-W5gap) | — | unverified ordinary registry producer for percent scope suffix not established | Scoped IPv6 resolver may be rejected by script guard [apps/windows/service/src/core/dns/engine.rs:1067] |
+| BRICK-W11-DNS | W5 snapshot writes | Sol (Codex acct 2, R3-W5gap) | P2 | duplicate of known BRICK-W11 mechanism; DNS extension and native timing untested | Abandoned shared-temp replacement can publish a stale DNS snapshot after release [apps/windows/service/src/core/dns/mod.rs:1403] |
+
+### R3-M10gap (finished 21:05 MT; 27 hypotheses, 22 FP, PRs: #991 #993)
+| ID | Area | Model | Sev | Verdict | Description [location] |
+|---|---|---|---|---|---|
+| M10-H07 | macOS native update | Sol (Codex acct 2, R3-M10gap) | P3 | duplicate of #785 | Retirement error retains released protection display [AppState+NativeUpdate.swift:134] |
+| M10-H08 | macOS native update | Sol (Codex acct 2, R3-M10gap) | P2 | duplicate of #795 | Protected Offline successor cannot commit [RuntimeCleanup.swift:217] |
+| M10-H09 | macOS native update | Sol (Codex acct 2, R3-M10gap) | P2 | duplicate of #891 | Monitor releases PF during staging before suspension [AppState+NativeUpdate.swift:9] |
+| MAC-UPDATE-CANCELLED-RELOAD | macOS native update | Sol (Codex acct 2, R3-M10gap) | P2 | real-fixed #991 | Cancelled reload handle survives failed update retirement [AppState+NativeUpdate.swift:34] |
+| MAC-UPDATE-METADATA-DEADLINE | macOS update download | Sol (Codex acct 2, R3-M10gap) | P2 | real-fixed #993 | Trickling metadata holds the update-check gate for days [NativeUpdateDownload.swift:23] |
+
+### R3-M6M8 (finished 21:19 MT; 36 hypotheses, 28 FP, PRs: #1001)
+| ID | Area | Model | Sev | Verdict | Description [location] |
+|---|---|---|---|---|---|
+| R3CONN-DUP01 | M6 | Sol (Codex acct 2, R3-M6M8) | P1 | duplicate #720 | Armed failure holds all traffic [AppState+Connect.swift:643] |
+| R3CONN-DUP02 | M6 | Sol (Codex acct 2, R3-M6M8) | P1 | duplicate #760 | Released PF health and browser DNS hold [AppState+Connect.swift:1589] |
+| R3CONN-DUP03 | M8 | Sol (Codex acct 2, R3-M6M8) | P2 | duplicate #795 | Protected Offline update commit remains pending [RuntimeCleanup.swift:218] |
+| R3CONN-DUP04 | M8 | Sol (Codex acct 2, R3-M6M8) | P2 | duplicate #991 | Cancelled reload handle survives update suspension [AppState+NativeUpdate.swift:38] |
+| MAC-UPDATE-WAKE-RETIREMENT | M8 | Sol (Codex acct 2, R3-M6M8) | P2 | real-fixed #1001; CI pending | Surviving wake task reconnects after explicit update release and retirement [AppState+NativeUpdate.swift:36] |
+| R3CONN-DUP05 | M6 | Sol (Codex acct 2, R3-M6M8) | P2 | duplicate #720 replaces this branch with unarmed recovery | Missing-TUN release retires its own reconnect intent [AppState+Connect.swift:1494] |
+| R3CONN-DEC01 | M6 | Sol (Codex acct 2, R3-M6M8) | P2 design | real-unfixed decision item; deliberate teardown, helper watchdog releases with merged #738 selective layer; preserving the live session needs a product decision | Supplemental DNS conflict deliberately stops core and holds general traffic [AppState+Connect.swift:2385] |
+| R3CONN-DUP06 | M8 | Sol (Codex acct 2, R3-M6M8) | P2 design | duplicate documented behavior in #854; helper fallback already tracked | Quit metadata-query error or deadline leaves protection held [AppDelegate.swift:326] |
+
+### R3-A2A4 (finished 21:33 MT; 40 hypotheses, 25 FP, PRs: #1003 #1010)
+| ID | Area | Model | Sev | Verdict | Description [location] |
+|---|---|---|---|---|---|
+| WIN-MONITOR-AI-HOLD-OMISSION | A3 | Sol (Codex acct 2, R3-A2A4) | P1 | real-fixed #1003 (CI pending) | Automatic health release removes the secondary AI hold [connection/monitor.rs:1391] |
+| R3-A2-06 | A2 | Sol (Codex acct 2, R3-A2A4) | — | duplicate WIN-HEAL-SIGNOUT-DIAL #874 | Heal retains another account dial [connection/heal.rs:29] |
+| R3-A2-07 | A2 | Sol (Codex acct 2, R3-A2A4) | — | duplicate #798 | Recovery preflight connects deselected node [connection/heal.rs:78] |
+| R3-A2-08 | A2 | Sol (Codex acct 2, R3-A2A4) | — | duplicate #798 | Self-heal double release [connection.rs:263] |
+| R3-A2-09 | A2 | Sol (Codex acct 2, R3-A2A4) | P2? | unverified narrow race; no ordinary trigger proved | Stale failure clears successor auth tunnel port [connection.rs:639] |
+| R3-A4-01 | A4 | Sol (Codex acct 2, R3-A2A4) | — | duplicate acknowledged follow-up WIN-HY2-HOME-UDP-LEAK #783 | HY2 DIRECT graph expects absent generic UDP reject [connection/direct.rs:973] |
+| R3-A4-02 | A4 | Sol (Codex acct 2, R3-A2A4) | — | duplicate #786 | Policy revision stops heartbeat [connection/direct.rs:62] |
+| R3-A4-03 | A4 | Sol (Codex acct 2, R3-A2A4) | — | duplicate #786 | Suffix-only activates empty DIRECT graph [connection/direct.rs:495] |
+| R3-A4-04 | A4 | Sol (Codex acct 2, R3-A2A4) | — | duplicate #926 | Failed DIRECT renewal blocks general network [connection/direct.rs:82] |
+| R3-A4-05 | A4 | Sol (Codex acct 2, R3-A2A4) | — | duplicate #898 | Activation reload stalls Restore [connection/direct.rs:1250] |
+| R3-A4-06 | A4 | Sol (Codex acct 2, R3-A2A4) | — | duplicate #787 | Routing changes leave stale runtime permits [catalog_sync.rs:197] |
+| R3-A4-07 | A4 | Sol (Codex acct 2, R3-A2A4) | — | duplicate #900 | Signed paths survive fresh full tunnel [connection.rs:308] |
+| R3-A4-15 | A4 | Sol (Codex acct 2, R3-A2A4) | P2? | unverified ordinary old request ends on Core stop; successor overlap not proved | Stale optional skip overwrites replacement metadata [connection/direct.rs:1497] |
+| R3-A4-16 | A4 | Sol (Codex acct 2, R3-A2A4) | P3? | unverified route is unknown; attribution semantics need decision | Empty chains attribution disagrees with frontend [route_ledger.rs:46] |
+| WIN-CONNECT-FAILURE-AI-HOLD-OMISSION | A2/A3 | Sol (Codex acct 2, R3-A2A4) | P1 | real-fixed #1010 (CI pending) | Failed protected connect/cold switch performs one plain release without AI hold [connection.rs:680] |
+
+### R3-C4E1 (finished 21:33 MT; 41 hypotheses, 35 FP, PRs: #1009 #1015)
+| ID | Area | Model | Sev | Verdict | Description [location] |
+|---|---|---|---|---|---|
+| EXIT-CLI-EXCEPTION-INVENTORY | E1 | Sol (Codex acct 2, R3-C4E1) | P1 | real-fixed #1009 | CLI timeout or filesystem exception drops partial client inventory; later revocation misses clients [services/exit-agent/reconcile_and_report.py:1153] |
+| MAC-ASSISTANT-DIRECT-GAP | C4 caller | Sol (Codex acct 2, R3-C4E1) | P1 | duplicate of #867 | Native DIRECT can capture AI without residential hop [apps/macos/Tono/Core/ConfigPipeline+Runtime.swift] |
+| E1-HY2-LEDGER-MISSING | E1 | Sol (Codex acct 2, R3-C4E1) | P2 | duplicate of #914 recovery boundary plus second independent failure | Ledger loss plus HY2 failure can retain raw lifetime [services/exit-agent/reconcile_and_report.py:1873] |
+| SOL-C4-QUOTA-RETENTION-REWIND | C4 | Sol (Codex acct 2, R3-C4E1) | P2 | real-fixed #1015; ops display only; no production incident claim | Null final metric samples discard last valid counter at retention; fallback rebills older cumulative bytes [services/control-plane/src/ops/quota.ts:438] |
+| SOL-C4-ACTIVITY-OVERLAP | C4 | Sol (Codex acct 2, R3-C4E1) | P3 | real-unfixed: interval/aggregation decision related O1-ACTIVITY-HOUR-COLLISION; source trace only; ops only | 22-minute windows every20 minutes sum beyond60 minutes for one device [services/control-plane/src/ops/customers.ts:178] |
+| SOL-C4-CYCLE-INSERT-GAP | C4 | Sol (Codex acct 2, R3-C4E1) | — | duplicate: fixed #852, successor insert and old close atomic batch | A failed successor insert could leave an expired cycle closed without successor [services/control-plane/src/ops/quota-cycle.ts:86] |
+
+### R3-A11 (finished 21:46 MT; 42 hypotheses, 34 FP, PRs: )
+| ID | Area | Model | Sev | Verdict | Description [location] |
+|---|---|---|---|---|---|
+| A11-H01 | sing-box | Sol (Codex acct 2, R3-A11) | — | duplicate #871; dormant compiler has no production callers | No-home process DIRECT could precede AI protection [apps/windows/crates/tono-core/src/sing_box/runtime.rs:274] |
+| A11-H02 | sing-box | Sol (Codex acct 2, R3-A11) | — | duplicate #783; dormant gap already recorded | HY2 assistant UDP bypasses residential TCP route [apps/windows/crates/tono-core/src/sing_box/runtime.rs:275] |
+| A11-H03 | sing-box | Sol (Codex acct 2, R3-A11) | — | duplicate #203 migration blocker; dormant compiler | Stock core rejects emitted DER certificate pin field [apps/windows/crates/tono-core/src/sing_box/runtime.rs:203] |
+| A11-H11 | config | Sol (Codex acct 2, R3-A11) | — | duplicate #871; current main emits AI guards before signed-app DIRECT | Signed-app DIRECT might win over AI domains/IPs [apps/windows/crates/tono-core/src/config.rs:1135] |
+| A11-H12 | config | Sol (Codex acct 2, R3-A11) | — | duplicate #783; current main rejects matching assistant UDP before DIRECT and MATCH | HY2 UDP might miss required home route [apps/windows/crates/tono-core/src/config.rs:1080] |
+| A11-H23 | node | Sol (Codex acct 2, R3-A11) | — | duplicate accepted-design D6; Worker rejects mismatch | HY2 protocol might disagree with suffix-derived transport [apps/windows/crates/tono-core/src/node.rs:181] |
+| A11-H24 | node | Sol (Codex acct 2, R3-A11) | — | duplicate PERF-CONNECT-1; config proxy_mapping supplies chrome | Missing Reality fingerprint might break connection [apps/windows/crates/tono-core/src/node.rs:347] |
+| A11-H35 | config/policy | Sol (Codex acct 2, R3-A11) | — | duplicate #797 protected overlap guards | Trusted DIRECT policy might insert protected AI host or parent suffix [apps/windows/crates/tono-core/src/config.rs:1222] |
+
+### R3-M9M11 (finished 21:46 MT; 30 hypotheses, 22 FP, PRs: #1008 #1016 #1019)
+| ID | Area | Model | Sev | Verdict | Description [location] |
+|---|---|---|---|---|---|
+| R3CFG-H01 | M9 | Sol (Codex acct 2, R3-M9M11) | — | duplicate #867 | Assistant domain/IP/process DIRECT guard gap [ConfigPipeline+Runtime.swift:694] |
+| R3CFG-H10 | M9 | Sol (Codex acct 2, R3-M9M11) | — | duplicate #958 | Web-direct real DNS loses hostname routing [ConfigPipeline+SingBoxProduct.swift:169] |
+| MAC-ROTATED-TOKEN-DURABILITY | M11 | Sol (Codex acct 2, R3-M9M11) | P1 | real-fixed #1008 | Rotated token write refusal remains unpersisted until next refresh [Services/TonoAPIClient.swift:591] |
+| R3CFG-H11 | M11 | Sol (Codex acct 2, R3-M9M11) | — | duplicate #796 guards obsolete bearer verdicts | Delayed bearer refusal suspends newer session [Services/TonoAPIClient.swift:800] |
+| R3CFG-H18 | M11 | Sol (Codex acct 2, R3-M9M11) | — | duplicate #314/#329; server predecessor replay grace exists | Lost renewal response permanently destroys session [services/control-plane/src/sessions.ts:75] |
+| R3CFG-H19 | M11 | Sol (Codex acct 2, R3-M9M11) | — | duplicate H11-F2/#409 with hardware-anchor mitigation | Migrated Keychain shares old device identity [Services/KeychainStore.swift:90] |
+| MAC-WEB-PINS-SUFFIX-STALE | M9 | Sol (Codex acct 2, R3-M9M11) | P2 | real-unfixed coordinated DNS/pin design needed to avoid documented whole-session reload interruption | Suffix presence disables refresh of web pins still used for dialing [Services/AppState+Connect.swift:1726] |
+| MAC-DASHSCOPE-DIRECT-COVERAGE | M9 | Sol (Codex acct 2, R3-M9M11) | P1 | real-unfixed policy migration/recovery-domain coverage requires coordinated scope; helper edits forbidden | Dedicated Qwen model API names match broad Alibaba DIRECT suffix [Core/ConfigPipeline.swift:114] |
+
+### R3-M5M7 (finished 21:46 MT; 34 hypotheses, 22 FP, PRs: )
+| ID | Area | Model | Sev | Verdict | Description [location] |
+|---|---|---|---|---|---|
+| M5M7-H02 | M7 | Sol (Codex acct 2, R3-M5M7) | P3 | duplicate #854 | Concurrent scene loads apply the disk snapshot twice [apps/macos/Tono/Services/AppState+Persistence.swift:22] |
+| M5M7-H07 | M5 | Sol (Codex acct 2, R3-M5M7) | P0 | duplicate user ALREADY-KNOWN SIGPIPE in HelperManager.writeAll | Helper socket write can deliver SIGPIPE [apps/macos/Tono/Core/HelperManager.swift:1396] |
+| M5M7-H08 | M7 | Sol (Codex acct 2, R3-M5M7) | P2 | duplicate #1001 | Wake owner survives native-update release and reconnects [apps/macos/Tono/Services/AppState.swift:740] |
+| MAC-QUIT-AI-HOLD | M5/M7 | Sol (Codex acct 2, R3-M5M7) | P1 | real-unfixed helper release-disposition contract required; helper edits forbidden for this slot; older explicit-disconnect design needs reconciliation with TOP rule for stop | Normal Quit removes the selective AI blocking floor through plain helper disarm [apps/macos/Tono/App/AppDelegate.swift:343] |
+| M5M7-H18 | M5 | Sol (Codex acct 2, R3-M5M7) | — | unverified no ordinary launchctl hang trigger proved; retained hardening candidate | Unbounded launchctl wait could wedge cleanup [apps/macos/Tono/Core/HelperManager.swift:680] |
+| M5M7-H19 | M5 | Sol (Codex acct 2, R3-M5M7) | — | unverified no surviving inherited writer demonstrated; helper daemon uses /dev/null | Installer stderr pipe hangs after AppleScript exit [apps/macos/Tono/Core/HelperManager.swift:388] |
+| M5M7-H20 | M5 | Sol (Codex acct 2, R3-M5M7) | P2 | duplicate #759 | Failed silent upgrade delivery incurs a 45-second poll [apps/macos/Tono/Core/HelperManager.swift:1210] |
+| M5M7-H21 | M5 | Sol (Codex acct 2, R3-M5M7) | P1 | duplicate #840; current main handles emptyResponse and socketFailed | Launch update-status timeout bypasses helper recovery [apps/macos/Tono/Core/RuntimeCleanup.swift:263] |
+| M5M7-H22 | M5 | Sol (Codex acct 2, R3-M5M7) | P1 | duplicate #794; current main has standard release cleanup | Abandoned helper replacement retains PF after Core stop [apps/macos/Tono/Core/HelperManager.swift:259] |
+| M5M7-H31 | M7 | Sol (Codex acct 2, R3-M5M7) | — | unverified ordinary corruption path not proved; optional policy refresh does not block sign-in or protected connectivity | Decodable corrupt policy metadata can reject a matching revision [apps/macos/Tono/Services/AppState+Catalog.swift:537] |
+| M5M7-H32 | M5 | Sol (Codex acct 2, R3-M5M7) | P2 | duplicate #795 | Protected Offline native update never commits after fail-open launch [apps/macos/Tono/Core/RuntimeCleanup.swift:224] |
+| M5M7-H33 | M5 | Sol (Codex acct 2, R3-M5M7) | P2 | duplicate #756; current main restores after an available recheck | Helper repair skips snapshotless DNS restoration [apps/macos/Tono/Core/RuntimeCleanup.swift:410] |

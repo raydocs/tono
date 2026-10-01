@@ -43,6 +43,8 @@ on:
       - services/**
       - ops-panel/**
       - tooling/scripts/remote/**
+      - tooling/scripts/provision-tono-node.py
+      - tooling/scripts/tests/test_provision_tono_node.py
       # The download-page check and its tests live here. Without these two the
       # generator could be changed without ever running the job that guards it.
       - tooling/scripts/generate-release-center.mjs
@@ -57,6 +59,8 @@ on:
       - tooling/scripts/publish-managed-catalog.rb
       - tooling/scripts/write-dedirock-hy2-catalog-sources.rb
       - tooling/scripts/tests/publish-managed-catalog.test.rb
+      - tooling/scripts/provision-reality-node.rb
+      - tooling/scripts/tests/provision-reality-node.test.rb
       - .github/workflows/services-ci.yml
       # desktop-update-sign-workflow.test.mjs guards this file; run it on every edit.
       - .github/workflows/desktop-update-sign.yml
@@ -146,17 +150,29 @@ jobs:
         # used before a restart, and both look plausible from outside.
         run: python3 services/exit-agent/test_reconcile_and_report.py
 
+      - name: Transactional node provisioner fixtures
+        run: python3 tooling/scripts/tests/test_provision_tono_node.py
+
       - name: Exit configuration edit
         # Additive and idempotent by requirement: dropping the existing client
         # disconnects every account that still holds that credential, and claiming
         # work when there is none spends the one restart this change costs.
         run: python3 tooling/scripts/remote/test_exit_metering_config.py
 
+      - name: Node provisioner fixtures
+        run: ruby tooling/scripts/tests/provision-reality-node.test.rb
+
       - name: Home usage reporter
         run: python3 services/home-agent/test_report_example.py
 
+      - name: Node restart verification fixtures
+        run: python3 tooling/scripts/remote/test_node_verification.py
+
       - name: Operator SSH collector jobs
         run: python3 -m unittest discover -s ops-panel/tests -p 'test_*.py'
+
+      - name: Node rollback metadata fixtures
+        run: python3 tooling/scripts/remote/test_node_rollback.py
 
   ops-contract:
     runs-on: ubuntu-24.04

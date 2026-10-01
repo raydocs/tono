@@ -1,6 +1,8 @@
 use crate::core::ClashConfig;
 use crate::core::logger::{get_writer, set_or_update_writer};
-use crate::core::process::{process_identity, terminate_process};
+use crate::core::process::{
+    ProcessIdentity, process_identity, terminate_process_if_identity_matches,
+};
 use crate::core::reconcile::ensure_startup_reconciled;
 use crate::core::runtime::{
     CoreRuntimeRecord, remove_core_runtime_record, write_core_runtime_record,
@@ -363,11 +365,16 @@ fn non_zero_u64(value: u64) -> Option<u64> {
 async fn write_runtime_record_for_config(
     pid: Option<u32>,
     config: &ClashConfig,
+    identity_cache: &RwLock<Option<(u32, ProcessIdentity)>>,
     context: &'static str,
 ) -> Result<()> {
+    // Every caller still owns the original, unreaped Child handle. Reuse is impossible during
+    // this existing query. Cache before disk IO so a failed record write cannot lose identity.
+    *identity_cache.write().unwrap() = None;
     let pid = pid.context("spawned core did not expose a process ID")?;
     let identity = process_identity(pid)?
         .with_context(|| format!("core process {pid} exited before runtime record {context}"))?;
+    *identity_cache.write().unwrap() = Some((pid, identity.clone()));
     write_core_runtime_record(&CoreRuntimeRecord {
         pid,
         ipc_path: config.core_config.core_ipc_path.clone(),
@@ -399,6 +406,7 @@ const fn prepare_start_core_action(
 
 pub struct CoreManager {
     running_pid: Arc<AtomicU32>,
+    running_process_identity: Arc<RwLock<Option<(u32, ProcessIdentity)>>>,
     running_config: Mutex<Option<ClashConfig>>,
     core_start_time: Arc<Mutex<Option<Instant>>>,
     core_started_at: Arc<AtomicU64>,
@@ -520,6 +528,7 @@ impl CoreManager {
     fn new() -> Self {
         CoreManager {
             running_pid: Arc::new(AtomicU32::new(0)),
+            running_process_identity: Arc::new(RwLock::new(None)),
             running_config: Mutex::new(None),
             core_start_time: Arc::new(Mutex::new(None)),
             core_started_at: Arc::new(AtomicU64::new(0)),
@@ -672,6 +681,7 @@ impl CoreManager {
                 if let Err(record_error) = write_runtime_record_for_config(
                     child_pid,
                     &config,
+                    &self.running_process_identity,
                     "after failed initial cleanup",
                 )
                 .await
@@ -691,8 +701,13 @@ impl CoreManager {
             return Err(error);
         }
 
-        if let Err(record_error) =
-            write_runtime_record_for_config(child_pid, &config, "after start").await
+        if let Err(record_error) = write_runtime_record_for_config(
+            child_pid,
+            &config,
+            &self.running_process_identity,
+            "after start",
+        )
+        .await
         {
             if let Err(kill_error) = child_guard.kill_now().await {
                 let now_secs = unix_timestamp_secs();
@@ -798,6 +813,7 @@ impl CoreManager {
         owner: OwnerIdentity,
     ) {
         let running_pid_arc = Arc::clone(&self.running_pid);
+        let process_identity_arc = Arc::clone(&self.running_process_identity);
         let start_time_arc = Arc::clone(&self.core_start_time);
         let started_at_arc = Arc::clone(&self.core_started_at);
         let last_exit_reason_arc = Arc::clone(&self.last_core_exit_reason);
@@ -834,6 +850,9 @@ impl CoreManager {
                                     "failed to terminate core during watchdog shutdown",
                                 ));
                             }
+                            // Death is confirmed. Retire the PID before final WFP cleanup can
+                            // stall and the join timeout can reopen this recycled number.
+                            running_pid_arc.store(0, Ordering::Release);
                             break 'watchdog;
                         }
                         wait_result = child.wait() => wait_result,
@@ -841,9 +860,22 @@ impl CoreManager {
                 };
 
                 let status = match wait_result {
-                    Ok(status) => status,
+                    Ok(status) => {
+                        // wait() has reaped the child and released its process handle. Process
+                        // bookkeeping must stop naming it before any metadata or WFP await.
+                        // Packed security identity is still revoked under the WFP barrier below.
+                        running_pid_arc.store(0, Ordering::Release);
+                        status
+                    }
                     Err(error) => {
                         warn!("Failed to wait for core process: {}", error);
+                        if let Err(kill_error) = current_guard.kill_now().await {
+                            *failed_child_arc.lock().await = Some(current_guard);
+                            set_core_lifecycle_state(ServiceLifecycleState::Fatal);
+                            return Err(kill_error
+                                .context("failed to terminate core after its wait failed"));
+                        }
+                        running_pid_arc.store(0, Ordering::Release);
                         recovery_exhausted = true;
                         break;
                     }
@@ -969,6 +1001,7 @@ impl CoreManager {
                                     if let Err(record_error) = write_runtime_record_for_config(
                                         new_pid,
                                         &config,
+                                        &process_identity_arc,
                                         "after failed restart cleanup",
                                     )
                                     .await
@@ -994,9 +1027,13 @@ impl CoreManager {
                                 restart_timestamps.push(now);
                                 continue;
                             }
-                            if let Err(record_error) =
-                                write_runtime_record_for_config(new_pid, &config, "after restart")
-                                    .await
+                            if let Err(record_error) = write_runtime_record_for_config(
+                                new_pid,
+                                &config,
+                                &process_identity_arc,
+                                "after restart",
+                            )
+                            .await
                             {
                                 error!("Failed to commit restarted core runtime: {record_error:#}");
                                 if let Err(kill_error) = new_guard.kill_now().await {
@@ -1102,9 +1139,22 @@ impl CoreManager {
                     let _ = handle.await;
                     let pid = self.running_pid.load(Ordering::Acquire);
                     if pid != 0 {
-                        terminate_process(pid).await.with_context(|| {
-                            format!("failed to terminate core {pid} after watchdog timeout")
-                        })?;
+                        // The original Job/Child handles may have closed during abort. Do not
+                        // authorize the reopened PID using a fresh query or a disk record.
+                        let (cached_pid, expected) = self
+                            .running_process_identity
+                            .read()
+                            .unwrap()
+                            .clone()
+                            .context("core identity is unavailable after watchdog timeout")?;
+                        if cached_pid != pid {
+                            anyhow::bail!("core identity changed before watchdog timeout cleanup");
+                        }
+                        terminate_process_if_identity_matches(pid, &expected)
+                            .await
+                            .with_context(|| {
+                                format!("failed to terminate core {pid} after watchdog timeout")
+                            })?;
                     }
                     info!("Watchdog aborted and core process reconciled");
                 }
@@ -1670,6 +1720,108 @@ mod tests {
             child: Some(child),
             readers: Vec::new(),
         })
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn an_exited_core_pid_is_retired_before_watchdog_cleanup_waits() -> anyhow::Result<()> {
+        let manager = CoreManager::new();
+        let child = tokio::process::Command::new("/bin/sh")
+            .args(["-c", "exit 0"])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()?;
+        let pid = child.id().expect("the unreaped child exposes its PID");
+        manager
+            .running_pid
+            .store(pid, std::sync::atomic::Ordering::Release);
+        // The actual watchdog must process the exit, then wait here before final teardown.
+        let reason_guard = manager.last_core_exit_reason.lock().await;
+        manager
+            .start_watchdog(
+                ChildGuard {
+                    child: Some(child),
+                    readers: Vec::new(),
+                },
+                ClashConfig {
+                    core_config: CoreConfig {
+                        core_path: "unused-core".into(),
+                        core_ipc_path: "unused-controller".into(),
+                        config_path: "unused-config".into(),
+                        config_dir: "unused-runtime".into(),
+                    },
+                    log_config: WriterConfig {
+                        directory: "unused-logs".into(),
+                        max_log_size: 1,
+                        max_log_files: 1,
+                    },
+                },
+                OwnerIdentity::Unix {
+                    uid: unsafe { platform_lib::geteuid() },
+                    gid: unsafe { platform_lib::getegid() },
+                },
+            )
+            .await;
+        let retired = tokio::time::timeout(Duration::from_secs(2), async {
+            while manager
+                .running_pid
+                .load(std::sync::atomic::Ordering::Acquire)
+                != 0
+            {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .is_ok();
+        // Abort directly: the baseline's PID fallback is the behavior under review and must
+        // never be allowed to signal an unrelated process in a failing test.
+        let handle = manager
+            .watchdog_handle
+            .lock()
+            .await
+            .take()
+            .expect("watchdog is installed");
+        handle.abort();
+        let _ = handle.await;
+        drop(reason_guard);
+        assert!(
+            retired,
+            "confirmed exit must retire the PID before cleanup can block"
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn watchdog_timeout_does_not_kill_a_reused_pid() -> anyhow::Result<()> {
+        let manager = CoreManager::new();
+        let mut child = tokio::process::Command::new("/bin/sleep")
+            .arg("30")
+            .kill_on_drop(true)
+            .spawn()?;
+        let pid = child.id().expect("the child exposes its PID");
+        let mut expected = super::process_identity(pid)?.expect("the child has an identity");
+        expected.started_at += 1;
+        manager
+            .running_pid
+            .store(pid, std::sync::atomic::Ordering::Release);
+        *manager.running_process_identity.write().unwrap() = Some((pid, expected));
+        // Represent the stalled watchdog after its original guard has been dropped. The live
+        // child models another process now using the recorded PID; only creation time differs.
+        *manager.watchdog_handle.lock().await = Some(tokio::spawn(async {
+            std::future::pending::<anyhow::Result<()>>().await
+        }));
+        let result = manager.stop_watchdog().await;
+        let survived = child.try_wait()?.is_none();
+        // Clean up before assertions, including when the original fallback killed the fixture.
+        let _ = child.kill().await;
+        let _ = child.wait().await;
+        result?;
+        assert!(
+            survived,
+            "watchdog timeout must not terminate a different process incarnation"
+        );
+        Ok(())
     }
 
     #[tokio::test]

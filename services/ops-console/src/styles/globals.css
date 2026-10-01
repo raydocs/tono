@@ -1,6 +1,8 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "./tokens.css";
+@import "./charts.css";
+@import "./dashboard.css";
 
 
 .hairline { border-color: var(--hairline); }
@@ -158,6 +160,9 @@
 button.ops-chip:hover:not(:disabled) { transform: translateY(-1px); border-color: color-mix(in srgb, var(--foreground) 22%, transparent); }
 .ops-chip[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
 .ops-chip[aria-pressed="true"] .font-mono { color: var(--accent); }
+/* The accent is too dark to read as 11 px text on the dark surface; the ring keeps it. */
+.dark .ops-chip[aria-pressed="true"],
+.dark .ops-chip[aria-pressed="true"] .font-mono { color: var(--foreground); }
 /* 未发布: shown, greyed, with the reason in words — never dropped, never a 0. */
 .ops-chip-muted { color: var(--muted-foreground); background: transparent; border-style: dashed; cursor: default; }
 

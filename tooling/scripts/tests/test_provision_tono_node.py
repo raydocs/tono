@@ -105,6 +105,22 @@ class Flow(unittest.TestCase):
   sf=P.state_file(self.state,P.anonymous_id("opaque")); want=P.desired(self.node,self.args()); P.write_private(sf,{"transactionId":"a"*32,"desired":want,"expected":{},"verified":True,"client":{}})
   FakeRunner.script=[{"ok":True,"healthy":True}]; out=P.execute(self.args(),FakeRunner)
   self.assertFalse(out["changed"]); self.assertEqual("verify",FakeRunner.instances[0].calls[0][0]["op"])
+ def test_pending_remote_success_is_durable_before_enrollment_after_a_restart(self):
+  self.node["mode"]="fresh"; self.inv.write_text(json.dumps({"nodes":{"opaque":self.node}}))
+  sf=P.state_file(self.state,P.anonymous_id("opaque")); want=P.desired(self.node,self.args())
+  # A crash after remote verification, before the final local record, leaves
+  # the durable pre-mutation intent while the remote transaction is healthy.
+  P.write_private(sf,{"transactionId":"a"*32,"desired":want,"expected":{},"verified":False,"recoveryRequired":True,"phase":"pending"})
+  client={"uuid":"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee","publicKey":"C"*43,"shortId":"0123456701234567"}
+  FakeRunner.script=[{"ok":True,"healthy":True,"client":client}]
+  self.assertTrue(P.execute(self.args(),FakeRunner)["verified"])
+  recovered=json.loads(sf.read_text())
+  self.assertTrue(recovered["verified"]); self.assertEqual(client,recovered["client"])
+  self.assertNotIn("recoveryRequired",recovered)
+  self.assertEqual(["verify"],[c[0]["op"] for i in FakeRunner.instances for c in i.calls])
+  self.assertFalse(P.execute(self.args("enroll-draft",expected_revision=0),FakeRunner)["published"])
+  draft=json.loads((self.state/(P.anonymous_id("opaque")+"-enrollment-draft.json")).read_text())
+  self.assertEqual(client["uuid"],draft["node"]["uuid"])
  def test_indeterminate_then_fresh_verify(self):
   FakeRunner.script=[{"ok":True,"arch":"x86_64"},{"ok":True,"prepared":True},P.IndeterminateRestart(),{"ok":True,"healthy":True,"client":{}}]
   out=P.execute(self.args(),FakeRunner); self.assertTrue(out["verified"]); self.assertGreaterEqual(len(FakeRunner.instances),2)

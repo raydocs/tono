@@ -421,6 +421,7 @@ actor TonoAPIClient {
     /// Every authorized path went through the same `if let accessToken` dance,
     /// which used a token right up to its final second and then paid for a 401.
     private func currentAccessToken() async throws -> String {
+        retryRefreshTokenPersistence()
         if let accessToken {
             guard let expiry = accessTokenExpiry else { return accessToken }
             if expiry.timeIntervalSinceNow > Self.accessTokenRenewalWindow {
@@ -537,13 +538,26 @@ actor TonoAPIClient {
     /// Retry after a failed sign-in write must keep the adopted session, even
     /// if the keychain still cannot acknowledge its refresh token.
     func hasRestorableSession() throws -> Bool {
-        if let pending = unpersistedRefreshToken {
-            if (try? keychain.set(pending, for: .refreshToken)) != nil {
-                unpersistedRefreshToken = nil
-            }
-            return true
-        }
+        retryRefreshTokenPersistence()
         return try currentRefreshToken() != nil
+    }
+
+    private func retryRefreshTokenPersistence() {
+        if let pending = unpersistedRefreshToken,
+           (try? keychain.set(pending, for: .refreshToken)) != nil {
+            unpersistedRefreshToken = nil
+        }
+    }
+
+    /// Exit starts no request, but a shared renewal can outlive its cancelled
+    /// caller. Save its successor before losing the in-memory replacement.
+    /// The app's termination deadline bounds this wait after network cleanup.
+    func finishCredentialPersistence(renewalObserved: (@Sendable () -> Void)? = nil) async {
+        if let pending = refreshTask {
+            renewalObserved?()
+            _ = await pending.task.result
+        }
+        retryRefreshTokenPersistence()
     }
 
     /// A delayed 401 must not rotate the session that superseded its bearer.
@@ -567,10 +581,7 @@ actor TonoAPIClient {
             // token this one is rotating (535R-C-F2).
             defer { if refreshTask?.id == id { refreshTask = nil } }
             try requireCredentialGeneration(generation)
-            if let pending = unpersistedRefreshToken,
-               (try? keychain.set(pending, for: .refreshToken)) != nil {
-                unpersistedRefreshToken = nil
-            }
+            retryRefreshTokenPersistence()
             guard let refresh = try currentRefreshToken() else { throw APIError.unauthorized }
             // The renewal answers for the session: its 401 is the server refusing it.
             let response: TonoTokenResponse = try await publicRequest(
@@ -587,7 +598,7 @@ actor TonoAPIClient {
             } catch {
                 // The server has already rotated; dropping the new token here
                 // would be an irreversible logout. Keep it usable in-memory
-                // and retry persistence on the next refresh.
+                // and retry persistence on ordinary reads and before exit.
                 unpersistedRefreshToken = response.refreshToken
             }
             return response.accessToken

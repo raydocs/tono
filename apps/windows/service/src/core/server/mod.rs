@@ -374,6 +374,39 @@ async fn retire_unrecorded_owner_core(owner: &AuthenticatedOwner) -> AnyResult<(
     Ok(())
 }
 
+/// Automatic cleanup of a Connect whose App never committed verification. The watchdog
+/// releases its WFP lock before entering here; serialize with Start/Lock/MarkVerified and
+/// recheck the arm epoch so a queued timeout cannot tear down a verified or newer session.
+pub(crate) async fn retire_expired_fresh_arm(epoch: u64) -> AnyResult<()> {
+    let _lifecycle = OWNER_LIFECYCLE_LOCK.lock().await;
+    #[cfg(any(windows, test))]
+    if lifecycle_is_stopping() {
+        return Ok(());
+    }
+    #[cfg(windows)]
+    let _repair = crate::acquire_service_repair_gate()?
+        .context("native installer owns abandoned-Connect cleanup")?;
+    #[cfg(windows)]
+    crate::core::update::release_admission()?;
+
+    let Some(owner_key) = windows_kill_switch::expired_fresh_arm_owner(epoch) else {
+        return Ok(());
+    };
+    if load_active_owner()
+        .await?
+        .is_some_and(|owner| owner.owner_key != owner_key)
+    {
+        anyhow::bail!("abandoned Connect does not own the active Core");
+    }
+    CORE_MANAGER.lock().await.stop_core().await
+        .context("failed to stop the abandoned Connect Core")?;
+    if load_owner_desired_state(&owner_key).await?.core_should_be_running {
+        persist_owner_core_stopped_by_key(&owner_key).await?;
+    }
+    clear_active_owner().await?;
+    windows_kill_switch::release_expired_fresh_arm(epoch).await
+}
+
 // 防止旧 listener 的清理删除 supervisor 刚创建的新 socket。
 static IPC_LIFECYCLE_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 #[cfg(any(windows, test))]
@@ -574,7 +607,7 @@ async fn stop_ipc_server_inner() -> Result<()> {
         crate::core::desired::retire_legacy_active_owner()
             .await
             .map_err(|error| kode_bridge::KodeBridgeError::custom(error.to_string()))?;
-        windows_kill_switch::release()
+        windows_kill_switch::release_after_service_stop()
             .await
             .map_err(|error| kode_bridge::KodeBridgeError::custom(error.to_string()))?;
     }

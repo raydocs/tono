@@ -32,6 +32,7 @@ const SECTIONS = [
   '五处登记',
   '本周期流量',
   '机器负载',
+  '连接质量',
   '客户连得上吗',
   '大陆回得来吗',
   '线路原文',
@@ -75,7 +76,7 @@ test.describe('node detail page', () => {
     await expect(page.getByText('大陆三网都握不上手，像是被墙了')).toBeVisible();
     await expect(page.locator('body')).not.toContainText('likely_blocked');
     expect(await page.locator('tbody tr').count()).toBeGreaterThan(15);
-    await expect(page.locator('tbody tr').first()).toHaveCSS('height', '36px');
+    await expect(section(page, '现在谁在用').locator('tbody tr').first()).toHaveCSS('height', '36px');
 
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
     expect(overflow).toBeLessThanOrEqual(0);
@@ -112,8 +113,7 @@ test.describe('node detail page', () => {
   });
 
   test('the fleet drawer opens the page it summarises', async ({ page }) => {
-    await open(page, '/nodes');
-    await page.locator('.node-card').first().click();
+    await open(page, `/nodes?node=${encodeURIComponent(NODE)}`);
     await expect(page.getByRole('dialog')).toBeVisible();
 
     await page.getByRole('button', { name: '打开详情' }).click();
@@ -156,25 +156,17 @@ test.describe('node detail page', () => {
   });
 
   /**
-   * The block the parity audit calls 全机队 24h 趋势, on one machine. The four
-   * charts are the point, but so is the fold: nothing is requested until it is
-   * opened, which is why the first assertion is that there is no chart yet.
+   * The block the parity audit calls 全机队 24h 趋势, on one machine: four
+   * charts over one read, drawn open, with the two billing facts in the
+   * panel lines rather than behind a fold.
    */
-  test('the load charts are drawn only once somebody asks for them', async ({ page }) => {
+  test('the load charts are drawn up front and switch range together', async ({ page }) => {
     await open(page, page1(NODE));
     const block = section(page, '机器负载');
-    await expect(block.locator('svg[role="img"]')).toHaveCount(0);
+    await expect(block.locator('.chart-frame')).toHaveCount(4);
+    await expect(block.getByText(/95 分位/)).toBeVisible();
+    await expect(block.getByText(/峰值 \d+ 条/)).toBeVisible();
 
-    await page.getByRole('button', { name: /机器负载/ }).click();
-    await expect(block.locator('svg[role="img"]')).toHaveCount(4);
-    await expect(block.getByText('95 分位带宽')).toBeVisible();
-    await expect(block.getByText('并发峰值')).toBeVisible();
-    // The counters are lifetime totals; the note is the one thing about these
-    // shapes a reader cannot work out by looking at them.
-    await expect(block.getByText(/上下行按两次上报之间的增量算/)).toBeVisible();
-
-    // Four charts and two right-aligned facts inside a fold: the page still
-    // may not gain a horizontal scrollbar from any of it.
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
     expect(overflow).toBeLessThanOrEqual(0);
 
@@ -182,7 +174,21 @@ test.describe('node detail page', () => {
     await expect(block).toHaveScreenshot('load.png');
 
     await block.getByRole('button', { name: '7 天' }).click();
-    await expect(block.locator('svg[role="img"]')).toHaveCount(4);
+    await expect(block.getByRole('button', { name: '7 天' })).toHaveAttribute('aria-pressed', 'true');
+    await expect(block.locator('.chart-frame')).toHaveCount(4);
+  });
+
+  /** One node's share of the overview's quality band, per carrier. */
+  test('connection quality is this machine\'s days, per carrier', async ({ page }) => {
+    await open(page, page1(NODE));
+    const block = section(page, '连接质量');
+    await expect(block.getByRole('heading', { name: '每日成功率' })).toBeVisible();
+    await expect(block.getByRole('heading', { name: '每日连接尝试' })).toBeVisible();
+    await expect(block.locator('.chart-frame')).toHaveCount(2);
+
+    await block.getByRole('button', { name: '30 天' }).click();
+    await expect(block.getByRole('button', { name: '30 天' })).toHaveAttribute('aria-pressed', 'true');
+    await expect(block.locator('.chart-frame')).toHaveCount(2);
   });
 
   /** The evidence under 大陆回得来吗, in the machine's own words. */
@@ -200,11 +206,10 @@ test.describe('node detail page', () => {
     await expect(block).toHaveScreenshot('quality-text.png');
   });
 
-  test('a machine nobody measured says so in both folds rather than drawing a flat line', async ({ page }) => {
+  test('a machine nobody measured says so rather than drawing a flat line', async ({ page }) => {
     await open(page, page1(NODE), 'empty');
 
-    await page.getByRole('button', { name: /机器负载/ }).click();
-    await expect(page.getByText('这台机器最近没有报过负载')).toBeVisible();
+    await expect(page.getByText('这段时间这台机器没有报过负载')).toBeVisible();
 
     await page.getByRole('button', { name: /线路原文/ }).click();
     await expect(page.getByText('中控机还没留下这台机器的扫描原文')).toBeVisible();
