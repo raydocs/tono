@@ -113,9 +113,51 @@ enum UpdatePackage {
         let releaseSequence: UInt64?
     }
 
-    static func buildSource(_ bundle: String) throws -> BuildSource {
-        // Caller first validates the entire signature, including this resource.
-        let bytes = try Data(contentsOf: URL(fileURLWithPath: bundle + "/Contents/Resources/tono-build-source.json"))
+    /// Read a regular file without following a symlink or blocking on a FIFO.
+    /// The size cap is applied to `st_size` before any byte is copied, so a
+    /// replaced huge file cannot be pulled into memory first.
+    static func readBoundedRegularFile(_ path: String, maximum: Int) throws -> Data {
+        var metadata = stat()
+        guard lstat(path, &metadata) == 0 else {
+            throw HelperFailure.invalid("Update build metadata is unavailable.")
+        }
+        guard fileType(metadata) == mode_t(S_IFREG),
+              metadata.st_size >= 0, metadata.st_size < maximum else {
+            throw HelperFailure.invalid("Invalid update build metadata.")
+        }
+        let fd = open(path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC)
+        guard fd >= 0 else { throw HelperFailure.invalid("Update build metadata cannot be opened.") }
+        defer { close(fd) }
+        var opened = stat()
+        guard fstat(fd, &opened) == 0,
+              fileType(opened) == mode_t(S_IFREG),
+              opened.st_dev == metadata.st_dev,
+              opened.st_ino == metadata.st_ino,
+              opened.st_size == metadata.st_size else {
+            throw HelperFailure.invalid("Update build metadata changed before it was read.")
+        }
+        var bytes = Data()
+        bytes.reserveCapacity(Int(opened.st_size))
+        var buffer = [UInt8](repeating: 0, count: 4096)
+        while bytes.count < maximum {
+            let count = Darwin.read(fd, &buffer, buffer.count)
+            if count == 0 { break }
+            if count < 0 {
+                if errno == EINTR { continue }
+                throw HelperFailure.system("Update build metadata could not be read.")
+            }
+            guard bytes.count + count < maximum else {
+                throw HelperFailure.invalid("Invalid update build metadata.")
+            }
+            bytes.append(buffer, count: count)
+        }
+        guard bytes.count == Int(opened.st_size) else {
+            throw HelperFailure.invalid("Update build metadata changed during the read.")
+        }
+        return bytes
+    }
+
+    static func buildSource(from bytes: Data) throws -> BuildSource {
         guard bytes.count < 4096 else { throw HelperFailure.invalid("Invalid update build metadata.") }
         let value = try JSONDecoder().decode(BuildSource.self, from: bytes)
         guard let sequence = value.releaseSequence, (1...UpdateContractV1.maxInteger).contains(sequence),
@@ -125,11 +167,35 @@ enum UpdatePackage {
         return value
     }
 
+    /// The two reads must be the same bytes. Callers put `verifyCode` between
+    /// them so a file swapped for the signature check does not become the floor.
+    static func buildSource(matching first: Data, and second: Data) throws -> BuildSource {
+        guard first == second else {
+            throw HelperFailure.invalid("Update build metadata changed during the signature check.")
+        }
+        return try buildSource(from: first)
+    }
+
+    static func sealedBuildSource(_ bundle: String) throws -> BuildSource {
+        let path = bundle + "/Contents/Resources/tono-build-source.json"
+        let first = try readBoundedRegularFile(path, maximum: 4096)
+        _ = try verifyCode(bundle, identifier: "com.raydocs.tono")
+        let second = try readBoundedRegularFile(path, maximum: 4096)
+        return try buildSource(matching: first, and: second)
+    }
+
+    static func buildSource(_ bundle: String) throws -> BuildSource {
+        try buildSource(from: try readBoundedRegularFile(
+            bundle + "/Contents/Resources/tono-build-source.json",
+            maximum: 4096
+        ))
+    }
+
     static func checkTarget(_ bundle: String, manifest: UpdateContractV1.ReleaseManifest) throws {
         guard try components(bundle) == manifest.target(.macosArm64).components else {
             throw HelperFailure.invalid("Private update components do not match the manifest.")
         }
-        let source = try buildSource(bundle)
+        let source = try sealedBuildSource(bundle)
         let info = try PropertyListSerialization.propertyList(
             from: Data(contentsOf: URL(fileURLWithPath: bundle + "/Contents/Info.plist")), format: nil
         ) as? [String: Any]

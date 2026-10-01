@@ -129,7 +129,7 @@
 | R3-F3 | macOS `protected-dns.json` 损坏/权限异常时 restore、紧急解除、卸载、启动清理全被阻 | fixed(05c58d5d) | [#307](https://github.com/raydocs/tono/pull/307) | 中·推导 | 审查要求：DNS 恢复失败时紧急出口不得顺带拆 PF（M2） |
 | R3-F4 | macOS status() 把「快照有效但服务不可读」报成无快照，App 不再调用 restore | fixed(be1c75d2) | [#303](https://github.com/raydocs/tono/pull/303) | 低·已确认 | helper 契约版本级联（4.6.0 起） |
 | R3-O1 | Windows 恢复证明通过后删快照失败即拒绝拆 WFP，重试同样失败（ACL/AV 锁文件） | open | 待开 | 低·推导 | 观察项，未核实 |
-| R3-O2 | Windows 外层超时丢弃 restore future 时自写窗口提前关闭，自写通知被当外部变化 | open | 待开 | 低·推导 | 观察项；影响为多一次网络事件 |
+| R3-O2 | Windows 外层超时丢弃 restore future 时自写窗口提前关闭，自写通知被当外部变化 | in-PR | [#841](https://github.com/raydocs/tono/pull/841) | 低·推导 | 注册表写入在阻塞线程上另持一把自写窗口，直到写入返回；60 秒年龄上限仍会重新发布。异步调用方自己的 guard 超时仍会放下 |
 | R3-O3 | 无快照时把静态 DNS 改为 DHCP 的孤儿修复 | accepted-design | — | 低 | 有意取舍 |
 | R3-O4 | macOS `--emergency-disarm` 不先 bootout daemon，与在线 daemon 双写 | open | 待开 | 低·推导 | 观察项；操作员手动路径 |
 | R3-O5 | macOS 按名字取第一个网络服务，多 Network Location 同名时可能写错服务 | open | 待开 | 低·实机 | 观察项 |
@@ -176,7 +176,7 @@
 |---|---|---|---|---|---|
 | H4-F1 | dual 阶段吊销设备不退役共享 legacy 出口凭据，被吊销设备仍可用出口并计入账户 | fixed(6cfa4d9e) | [#313](https://github.com/raydocs/tono/issues/313)，[#323](https://github.com/raydocs/tono/pull/323) | 高·推导 | 暴露面取决于生产 rollout phase（本机无法查）；列车 #570 审查 TC-anthropic-1：退役账户的就绪判断看全部 active 出口，一个未上架的新节点就让所有退役账户 503，已在分支 `fix/cp-a-20260924` 改为只看本次下发目录中的节点（未合 main） |
 | H4-F2 | 停用/退役/删除/改名的住宅（catalog 型）home exit 及其 hy2 孪生块从限制名单掉出，下发给所有账户 | fixed(6cfa4d9e) | [#322](https://github.com/raydocs/tono/issues/322)，[#326](https://github.com/raydocs/tono/pull/326) | 高·推导 | roster 不按节点隔离（身份隔离）列为后续 |
-| H4-F3 | ops 角色门不覆盖 shared-admin；另有原始日志读取与 signup-allowlist 写两处未拦截且文档未列 | open | [#646](https://github.com/raydocs/tono/pull/646) | 低·推导 | 只修了 signup-allowlist PATCH（补 `customers.write`）；shared-admin 不拦截（已记录限制）与原始诊断日志读取（`shared-admin/diagnostics-logs.ts`）仍未拦截；只有配置 OPS_ROLES 且有非 owner 角色时可利用；#646 已合入（只补 signup-allowlist PATCH 的 `customers.write`），原始诊断日志读取与 shared-admin 仍无角色门，尚无修复 PR |
+| H4-F3 | ops 角色门不覆盖 shared-admin；另有原始日志读取与 signup-allowlist 写两处未拦截且文档未列 | in-PR | [#646](https://github.com/raydocs/tono/pull/646)、[#716](https://github.com/raydocs/tono/pull/716) | 低·推导 | #646 补了 signup-allowlist PATCH；#716 在 Access 门进入 shared-admin 前按表判定角色：shared-admin 资源与 legacy 读全部有门，原始诊断日志一律要 `customers.raw-logs`，未登记路径仅 owner。只有配置 OPS_ROLES 且有非 owner 角色时可利用；未合 main |
 | H3-F4 | refresh 严格单次轮换无宽限且非原子：响应丢失即产生伪 401，客户端登出并释放保护 | fixed(6cfa4d9e) | [#314](https://github.com/raydocs/tono/issues/314)，[#329](https://github.com/raydocs/tono/pull/329) | 高·推导 | 修复在服务端，客户端「真 401 才释放」不变；Windows 启动恢复遇 401 已不再释放（[#515](https://github.com/raydocs/tono/pull/515)） |
 | H3-F5 | 策略 revision 不在签名字节内，历史签名策略配伪造 revision 可永久钉住客户端 | fixed(6cfa4d9e) | [#317](https://github.com/raydocs/tono/issues/317)，[#342](https://github.com/raydocs/tono/pull/342)（Windows 客户端）、[#472](https://github.com/raydocs/tono/pull/472)（Windows sing_box）、[#473](https://github.com/raydocs/tono/pull/473)（macOS）、[#474](https://github.com/raydocs/tono/pull/474)（Worker/签名工具） | 中·推导 | 前提是 Worker/D1 被攻破或 TLS 中间人；#474 的开关默认关闭，四个 PR 都合入并由发布侧启用后才生效 |
 | H10-F1 | 控制面节点名校验与客户端 YAML 解码不一致，受限住宅出口可能下发给其他账户 | fixed(6cfa4d9e) | [#418](https://github.com/raydocs/tono/issues/418)，[#419](https://github.com/raydocs/tono/pull/419) | 高·推导 | — |
@@ -190,7 +190,7 @@
 | H17-O-F3 | 到期与超额在一个 cron 周期内吊销全部设备、会话与出口凭据，控制台却写「到期不撤设备」；续期或重置用量不能自行恢复服务 | open | 待开 | 中·已确认 | 需 owner 在两种修法间决定（只对非 active 账户吊销，或保留吊销并改文案、告知需重新登录）；修复队列暂按更严格的后者 |
 | H17-G-F2 | Tailscale enrollment 关闭（生产配置）时吊销任务永不执行，带 tailnet 绑定设备的账户停用或销户后重新启用永远返回 409（= H17-O-F5） | open | 待开 | 中·推导 | 取决于生产是否仍有带 tailscale_node_id 的设备行（未查 D1）；这些设备的 tailnet 节点也不会被删除 |
 | H17-C-F2 | 退款销户由多次独立提交组成，中途失败可留下「住宅线与产品账户已回收、VPN 仍有效」的账户 | open | 待开 | 中·推导 | 需故障注入确认；cron 不识别这种部分销户状态 |
-| H17-G-F5 | 同一设备再次登录或登出只作废当前会话，更早签发的 refresh token 仍然有效 | open | 待开 | 中·已确认 | refresh 有效期默认 30 天；显式吊销设备会作废该设备全部会话 |
+| H17-G-F5 | 同一设备再次登录或登出只作废当前会话，更早签发的 refresh token 仍然有效 | in-PR | [#833](https://github.com/raydocs/tono/pull/833) | 中·已确认 | 同一设备的再次登录、refresh 与登出都会作废该设备其余未吊销会话；其他设备保持登录。refresh 有效期默认仍为 30 天 |
 | H17-C-F1 | 调低账户设备上限不会移除已超出上限的设备，直到有新设备登录（= H17-G-F1） | open | 待开 | 低·已确认 | 超出部分在下一次新设备登录时才按 LRU 轮换 |
 
 ## 6. 客户端信任与账户隔离

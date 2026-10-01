@@ -1,3 +1,4 @@
+import Darwin
 import XCTest
 @testable import Tono
 
@@ -83,4 +84,37 @@ final class HelperUpgradePathConfinementTests: XCTestCase {
         XCTAssertTrue(HelperPathConfinement.isBundleConfined(path: regularFile.path, bundlePath: tempApp.path))
         XCTAssertNoThrow(try HelperPathConfinement.validateUpgradePath(regularFile.path, bundlePath: tempApp.path))
     }
+    func testRejectWriterlessFIFOInsideAppBundleWithoutBlocking() throws {
+        let tempRoot = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let tempApp = tempRoot.appendingPathComponent("Test.app")
+        let resources = tempApp.appendingPathComponent("Contents/Resources")
+        try FileManager.default.createDirectory(at: resources, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+        let path = resources.appendingPathComponent("tono-core-helper").path
+        XCTAssertEqual(mkfifo(path, 0o600), 0)
+
+        let completed = DispatchSemaphore(value: 0)
+        let cleanupFinished = DispatchSemaphore(value: 0)
+        let neededWriter = DispatchSemaphore(value: 0)
+        DispatchQueue.global(qos: .userInitiated).async {
+            defer { cleanupFinished.signal() }
+            guard completed.wait(timeout: .now() + 1) == .timedOut else { return }
+            // Unblock the baseline reader without leaving CI parked in open().
+            neededWriter.signal()
+            let fd = open(path, O_RDWR | O_CLOEXEC | O_NONBLOCK)
+            if fd >= 0 {
+                _ = completed.wait(timeout: .now() + 2)
+                close(fd)
+            }
+        }
+
+        XCTAssertThrowsError(try HelperPathConfinement.validateUpgradePath(path, bundlePath: tempApp.path)) {
+            XCTAssertEqual($0 as? HelperPathConfinement.Error, .cannotSafelyOpen(path))
+        }
+        completed.signal()
+        XCTAssertEqual(cleanupFinished.wait(timeout: .now() + 3), .success)
+        XCTAssertEqual(neededWriter.wait(timeout: .now()), .timedOut,
+                       "validation must reject the FIFO before fixture cleanup supplies a writer")
+    }
+
 }

@@ -402,6 +402,17 @@ test('--batch 0 is a usage error', () => {
   assert.match(result.stderr, /--batch/)
 })
 
+test('--apply against the production database_id without gates exits 1 before wrangler', () => {
+  const text = readFileSync(path.join(CONTROL_PLANE, 'wrangler.jsonc'), 'utf8')
+  const id = /"database_id"\s*:\s*"([^"]+)"/.exec(text)?.[1]
+  assert.ok(id, 'wrangler.jsonc should publish the production database_id')
+  const result = runWithSimpleNpx(['--apply', '--database', id])
+  assert.equal(result.code, 1)
+  assert.match(result.stderr, new RegExp(id))
+  assert.match(result.stderr, /TONO_ALLOW_PRODUCTION_WIPE/)
+  assert.equal(result.invoked, false)
+})
+
 test('--apply against tono-control-plane without gates exits 1 before wrangler', () => {
   const dir = mkdtempSync(path.join(tmpdir(), 'wipe-d1-npx-'))
   try {

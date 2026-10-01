@@ -15,7 +15,7 @@ diff --git a/stack_gvisor.go b/stack_gvisor.go
 -	})
 +	// Tono keeps a small initial allocation but lets active, high-RTT flows
 +	// grow within a bounded window instead of pinning every flow at 20 KiB.
-+	bufMin, bufDefault, bufMax := 4*1024, 32*1024, 128*1024
++	bufMin, bufDefault, bufMax := 4*1024, 32*1024, 2*1024*1024
 +	ipStack.SetTransportProtocolOption(tcp.ProtocolNumber, &tcpip.TCPReceiveBufferSizeRangeOption{
 +		Min:     bufMin,
 +		Default: bufDefault,
@@ -53,7 +53,7 @@ new file mode 100644
 +	const (
 +		wantMin     = 4 * 1024
 +		wantDefault = 32 * 1024
-+		wantMax     = 128 * 1024
++		wantMax     = 2 * 1024 * 1024
 +	)
 +	var receive tcpip.TCPReceiveBufferSizeRangeOption
 +	if optionErr := ipStack.TransportProtocolOption(

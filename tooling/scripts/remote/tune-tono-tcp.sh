@@ -63,7 +63,18 @@ net.ipv4.tcp_slow_start_after_idle = 0"
 echo "before:"
 for k in $KEYS; do printf '  %-38s %s\n' "$k" "$(sysctl -n "$k" | tr '\t' ' ')"; done
 
-if [ -f "$DROPIN" ] && [ "$(cat "$DROPIN")" = "$DESIRED" ]; then
+# A drop-in that matches the desired text is not proof the kernel applied it.
+# sysctl -p can fail after the file is written, and a later drop-in can win.
+live_matches() {
+  for k in $KEYS; do
+    want=$(printf '%s\n' "$DESIRED" | sed -n "s|^$k = ||p" | tr -s ' ')
+    got=$(sysctl -n "$k" | tr '\t' ' ' | tr -s ' ')
+    [ "$want" = "$got" ] || return 1
+  done
+  return 0
+}
+
+if [ -f "$DROPIN" ] && [ "$(cat "$DROPIN")" = "$DESIRED" ] && live_matches; then
   echo "already tuned; leaving this host alone"
   exit 0
 fi

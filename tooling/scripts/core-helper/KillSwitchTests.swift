@@ -1,6 +1,25 @@
 import Foundation
 import Darwin
 
+extension SocketServer {
+    static func runOrphanedBootstrapSelectiveReleaseSelfTest() -> Bool {
+        var intentPresent = true
+        var events: [String] = []
+        do {
+            try releaseOrphanedBootstrapProtection(
+                disarm: {
+                    events.append("disarm")
+                    intentPresent = false
+                },
+                applySelectiveLayer: {
+                    events.append(intentPresent ? "applied-before-disarm" : "apply-ai-hold")
+                }
+            )
+        } catch { return false }
+        return events == ["disarm", "apply-ai-hold"]
+    }
+}
+
 extension KillSwitchManager {
     static func runLifecycleSelfTests() -> Bool {
         let testAnchor = "tono.lifecycle-test"
@@ -84,7 +103,11 @@ extension KillSwitchManager {
 
         // 1. Armed with the reviewed-bundle permit: it must be installed, and
         //    the catch-all must still be the last word.
-        let armedRules = renderRules(state: state(reviewedBundleDirect: true), allowedUID: 501)
+        let physicalInterfaces = physicalEgressInterfaces()
+        let armedRules = renderRules(
+            state: state(reviewedBundleDirect: true), allowedUID: 501,
+            physicalInterfaces: physicalInterfaces
+        )
         guard let armed = load(armedRules) else {
             FileHandle.standardError.write(Data("lifecycle: armed ruleset failed to load\n".utf8))
             return false
@@ -93,6 +116,7 @@ extension KillSwitchManager {
             FileHandle.standardError.write(Data("--- kernel holds ---\n\(armed)\n".utf8))
         }
         check("armed-permit-installed", permitCount(armed) == expectedPermitRules)
+        check("kernel-lan-dns-interfaces", lanDNSInterfaces(in: armed) == physicalInterfaces)
         check("armed-fails-closed", armed.contains("block drop out quick all"))
         // Order is only observable in what the kernel holds. A permit placed
         // after the catch-all parses, prints, and satisfies every substring
@@ -773,6 +797,35 @@ extension KillSwitchManager {
             released && releaseSteps == ["placeholder", "flush", "query", "intent", "hosts", "main", "reference"]
         )
 
+        // 11b. A rule file that cannot be rewritten (disk full, directory
+        //      unwritable) must not block the release either: the anchor is
+        //      still flushed and the intent still removed, as for the hosts
+        //      pins above. The displaced-main restore is skipped — a legacy
+        //      /etc/pf.conf would `load anchor from` the stale rules the
+        //      release could not clear — so "main" must not run. Recorded
+        //      effects only; nothing live is touched.
+        var unwritableReleaseSteps: [String] = []
+        let unwritableReleased = (try? releaseSequence(
+            writePlaceholder: {
+                unwritableReleaseSteps.append("placeholder")
+                throw HelperFailure.system("Could not commit a root-owned file.")
+            },
+            flushAnchor: {
+                unwritableReleaseSteps.append("flush")
+                return HelperCommandResult(status: 0, output: Data())
+            },
+            anchorStillActive: { unwritableReleaseSteps.append("query"); return false },
+            removeIntent: { unwritableReleaseSteps.append("intent") },
+            removeHostsPins: { unwritableReleaseSteps.append("hosts") },
+            restoreDisplacedMain: { unwritableReleaseSteps.append("main") },
+            releaseEnableReference: { unwritableReleaseSteps.append("reference") }
+        )) != nil
+        check(
+            "release-survives-unwritable-placeholder",
+            unwritableReleased
+                && unwritableReleaseSteps == ["placeholder", "flush", "query", "intent", "hosts", "reference"]
+        )
+
         // 12. A release puts back the main ruleset the emergency block
         //     displaced, only by reloading /etc/pf.conf and only when that
         //     file declares Tono's anchor (BRICK-M6, BRICK-M9). The on-disk
@@ -1422,6 +1475,37 @@ extension KillSwitchManager {
             ) && watchdogShouldRestoreNetwork(
                 consecutiveCoreDownChecks: coreDownRestoreThreshold
             )
+            // MAC-ORPHAN-BOOTSTRAP-PF: a bootstrap-only block (empty
+            // tunnelInterfaces) outlives the app only when the recorded
+            // owner stayed dead past the threshold. A committed session, a
+            // helper that restarted mid-session (no owner), and a live
+            // owner are all untouched however long the loop runs.
+            let orphanedBootstrapUntouched = SocketServer.orphanedBootstrapAction(
+                stateFilePresent: true, bootstrapOnly: false, ownerRecorded: true,
+                ownerAlive: false, consecutiveChecks: 99
+            ) == .reset
+                && SocketServer.orphanedBootstrapAction(
+                    stateFilePresent: true, bootstrapOnly: true, ownerRecorded: false,
+                    ownerAlive: false, consecutiveChecks: 99
+                ) == .reset
+                && SocketServer.orphanedBootstrapAction(
+                    stateFilePresent: true, bootstrapOnly: true, ownerRecorded: true,
+                    ownerAlive: true, consecutiveChecks: 99
+                ) == .reset
+                && SocketServer.orphanedBootstrapAction(
+                    stateFilePresent: false, bootstrapOnly: true, ownerRecorded: true,
+                    ownerAlive: false, consecutiveChecks: 99
+                ) == .reset
+            let orphanedBootstrapReleases = SocketServer.orphanedBootstrapAction(
+                stateFilePresent: true, bootstrapOnly: true, ownerRecorded: true,
+                ownerAlive: false,
+                consecutiveChecks: SocketServer.orphanedBootstrapReleaseThreshold - 1
+            ) == .count
+                && SocketServer.orphanedBootstrapAction(
+                    stateFilePresent: true, bootstrapOnly: true, ownerRecorded: true,
+                    ownerAlive: false,
+                    consecutiveChecks: SocketServer.orphanedBootstrapReleaseThreshold
+                ) == .release
             return ruleShapesHold
                 && bundleShapesHold
                 && bundleOffWithoutTunnel
@@ -1444,6 +1528,8 @@ extension KillSwitchManager {
                 && unansweredListingKeepsUnrecordedToken
                 && bootAnchorHolds
                 && watchdogReleases
+                && orphanedBootstrapUntouched
+                && orphanedBootstrapReleases
                 && failureRecoveryReleasesNetwork(strictKillSwitchEnabled: false)
                 && !failureRecoveryReleasesNetwork(strictKillSwitchEnabled: true)
                 && shouldReinstallKillSwitch(coreRunning: true)
@@ -1457,6 +1543,119 @@ extension KillSwitchManager {
         } catch {
             return false
         }
+    }
+
+    /// The old general intent may be gone when an automatic release dies.
+    /// A fresh reader must resume only the persisted selective disposition.
+    static func runInterruptedSelectiveReleaseSelfTest() -> Bool {
+        struct Interrupted: Error {}
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("tono-selective-recovery-\(UUID().uuidString)")
+        let record = directory.appendingPathComponent("intent").path
+        var generalIntentPresent = true
+        var applied = false
+        do {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
+            defer { try? FileManager.default.removeItem(at: directory) }
+            do {
+                try releaseWithAIHold(
+                    preserveAIHold: true,
+                    recordDisposition: { try saveSelectiveRecoveryDisposition($0, path: record) },
+                    release: {
+                        generalIntentPresent = false
+                        throw Interrupted()
+                    },
+                    applySelectiveLayer: { applied = true },
+                    removeSelectiveLayer: {}
+                )
+                return false
+            } catch is Interrupted {}
+            guard !generalIntentPresent, !applied,
+                  try selectiveRecoveryDisposition(path: record) == true else { return false }
+            reconcileSelectiveRecovery(
+                generalIntentPresent: generalIntentPresent,
+                disposition: try selectiveRecoveryDisposition(path: record),
+                applySelectiveLayer: { applied = true }
+            )
+            guard applied else { return false }
+            try releaseWithAIHold(
+                preserveAIHold: false,
+                recordDisposition: { try saveSelectiveRecoveryDisposition($0, path: record) },
+                release: {}, applySelectiveLayer: { return }, removeSelectiveLayer: {}
+            )
+            applied = false
+            reconcileSelectiveRecovery(
+                generalIntentPresent: false,
+                disposition: try selectiveRecoveryDisposition(path: record),
+                applySelectiveLayer: { applied = true }
+            )
+            return !applied
+        } catch { return false }
+    }
+
+    /// A failed arm or sleep barrier must not flush a ruleset pfctl never
+    /// replaced. Only a load that was accepted, or that never answered, may
+    /// have committed.
+    static func runFailedCommitReleaseSelfTest() -> Bool {
+        !failedCommitReleasesInstalledBlock(load: .notIssued, strictKillSwitchEnabled: false)
+            && !failedCommitReleasesInstalledBlock(load: .rejected, strictKillSwitchEnabled: false)
+            && failedCommitReleasesInstalledBlock(
+                load: .acceptedOrUnknown,
+                strictKillSwitchEnabled: false
+            )
+            && !failedCommitReleasesInstalledBlock(
+                load: .acceptedOrUnknown,
+                strictKillSwitchEnabled: true
+            )
+    }
+
+    static func runFailedBarrierSelectiveReleaseSelfTest() -> Bool {
+        var intentPresent = true
+        var events: [String] = []
+        releaseInstalledBlock(
+            recordDisposition: { _ in },
+            release: {
+                events.append("release")
+                intentPresent = false
+            },
+            applySelectiveLayer: {
+                events.append(intentPresent ? "applied-before-release" : "apply-ai-hold")
+            }
+        )
+        return events == ["release", "apply-ai-hold"]
+    }
+
+    static func runFailedBarrierUnreleasedSelfTest() -> Bool {
+        struct ReleaseFailed: Error {}
+        var applied = false
+        releaseInstalledBlock(
+            recordDisposition: { _ in },
+            release: { throw ReleaseFailed() },
+            applySelectiveLayer: { applied = true }
+        )
+        return !applied
+    }
+
+    /// `/killswitch/health` disconnects the app without a release when `live`
+    /// is false. An unread sample and a down-read that the next read does not
+    /// confirm must not become that false.
+    static func runUnprovenHealthSelfTest() -> Bool {
+        struct Unreadable: Error {}
+        var confirmed = false
+        guard agreedFiltering(first: .success(true), confirmDown: {
+            confirmed = true
+            return false
+        }) == true, !confirmed else { return false }
+        guard agreedFiltering(first: .success(false), confirmDown: { false }) == false else {
+            return false
+        }
+        guard agreedFiltering(first: .success(false), confirmDown: { true }) == true else {
+            return false
+        }
+        guard agreedFiltering(first: .failure(Unreadable()), confirmDown: { false }) == nil else {
+            return false
+        }
+        return agreedFiltering(first: .success(false), confirmDown: { throw Unreadable() }) == nil
     }
 
     static func runNetworkSelfTest() -> Bool {

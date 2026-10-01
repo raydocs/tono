@@ -17,6 +17,14 @@ nonisolated extension ConfigPipeline {
     }
 
     static func singBoxUnavailableReason(_ node: ProxyNode) -> String? {
+        // A missing fingerprint is chrome. Any other value is not emitted:
+        // Reality without chrome retries the handshake instead of connecting.
+        if node.type == .vless {
+            let raw = node.clientFingerprint?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            if !raw.isEmpty, raw != "chrome" {
+                return "TONO_SINGBOX_UNSUPPORTED_FINGERPRINT"
+            }
+        }
         // sing-box pins the SPKI, not the leaf DER; never derive one from the other.
         if node.type == .hysteria2, canonicalSPKIPin(node.certificatePublicKeySHA256) == nil {
             return "TONO_SINGBOX_HY2_DER_PIN_UNSUPPORTED"
@@ -45,14 +53,19 @@ nonisolated extension ConfigPipeline {
               base64Secret || hexSecret else { throw SingBoxError.invalidControl }
         let nodes = try validatedOwnedNodes(inputNodes)
         let plan = try validatedManagedDirectPolicy(directPlan, excluding: Set(nodes.map(\.server)))
-        let reserved: Set<String> = ["Tono-TUN", "Tono-DNS", "Tono-Mixed", "Tono-FakeIP", "Tono-DoH", "Tono-Hosts", "Tono-China-DNS"]
+        let reserved: Set<String> = ["Tono-TUN", "Tono-DNS", "Tono-Mixed", "Tono-FakeIP", "Tono-DoH", "Tono-DoH-Backup", "Tono-Hosts", "Tono-China-DNS"]
         guard nodes.allSatisfy({ !reserved.contains($0.name) }) else { throw SingBoxError.invalidNode }
         let unavailable = Dictionary(uniqueKeysWithValues: nodes.compactMap { node in
             singBoxUnavailableReason(node).map { (node.name, $0) }
         })
         let usable = nodes.filter { unavailable[$0.name] == nil }
         let selected = overlay.selectedNodeName
-        if unavailable[selected] != nil { throw SingBoxError.unsupportedTransport }
+        if let reason = unavailable[selected] {
+            if reason == "TONO_SINGBOX_UNSUPPORTED_FINGERPRINT" {
+                throw SingBoxError.unsupportedFingerprint
+            }
+            throw SingBoxError.unsupportedTransport
+        }
         if requiredCapabilities.contains("hy2"), !usable.contains(where: { $0.type == .hysteria2 }) {
             throw SingBoxError.unsupportedTransport
         }
@@ -79,14 +92,14 @@ nonisolated extension ConfigPipeline {
                       let key = node.realityPublicKey, let shortID = node.realityShortId else {
                     throw SingBoxError.unsupportedTransport
                 }
-                let fingerprint = node.clientFingerprint ?? "chrome"
-                guard ["chrome", "firefox", "safari", "ios", "android", "edge", "360", "qq", "random", "randomized"].contains(fingerprint) else {
+                let rawFingerprint = node.clientFingerprint?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                guard rawFingerprint.isEmpty || rawFingerprint == "chrome" else {
                     throw SingBoxError.unsupportedFingerprint
                 }
                 var outbound: [String: Any] = [
                     "type": "vless", "tag": node.name, "server": node.server, "server_port": node.port,
                     "uuid": uuid, "tls": ["enabled": true, "server_name": sni,
-                        "utls": ["enabled": true, "fingerprint": fingerprint],
+                        "utls": ["enabled": true, "fingerprint": "chrome"],
                         "reality": ["enabled": true, "public_key": key, "short_id": shortID]],
                 ]
                 if let flow = node.flow { outbound["flow"] = flow }
@@ -97,12 +110,16 @@ nonisolated extension ConfigPipeline {
                     throw SingBoxError.unsupportedTransport
                 }
                 let serverName = node.sni ?? node.server
+                // 5s stays under quic-go's half-of-30s cap. Do not set
+                // idle_timeout: Chrome parrot forces 30s and a shorter idle
+                // drops the session sooner. Do not disable the parrot.
                 let outbound: [String: Any] = [
                     "type": "hysteria2",
                     "tag": node.name,
                     "server": node.server,
                     "server_port": node.port,
                     "password": password,
+                    "keep_alive_period": Hy2IdleSupport.singBoxKeepAlivePeriod,
                     "tls": [
                         "enabled": true,
                         "server_name": serverName,
@@ -144,28 +161,71 @@ nonisolated extension ConfigPipeline {
             outbounds.append(["type": "selector", "tag": webDirectGroupName, "outbounds": [webDirectProxyName], "default": webDirectProxyName])
         }
         var dnsServers: [[String: Any]] = [
-            ["type": "fakeip", "tag": "Tono-FakeIP", "inet4_range": "198.19.0.0/16"],
+            ["type": "fakeip", "tag": "Tono-FakeIP", "inet4_range": "198.18.16.0/20"],
             ["type": "https", "tag": "Tono-DoH", "server": "1.1.1.1", "server_port": 443,
-             "path": "/dns-query", "tls": ["enabled": true, "server_name": "1.1.1.1"], "detour": exitGroupName],
+             "path": "/dns-query", "tls": ["enabled": true, "server_name": "1.1.1.1", "alpn": ["h2"]],
+             "detour": exitGroupName],
+            ["type": "https", "tag": "Tono-DoH-Backup", "server": "8.8.8.8", "server_port": 443,
+             "path": "/dns-query", "tls": ["enabled": true, "server_name": "dns.google", "alpn": ["h2"]],
+             "detour": exitGroupName],
         ]
         var dnsRules: [[String: Any]] = [["query_type": ["AAAA"], "action": "predefined", "rcode": "NOERROR"]]
+        // Preserve hostname identity for protected listeners before the broad
+        // Alibaba China-DNS rule; outbound lookups still use tunnelled real DNS.
+        dnsRules.append(["inbound": ["Tono-DNS", "Tono-TUN", "Tono-Mixed"], "query_type": ["A"],
+            "domain_suffix": dedicatedModelAPISuffixes, "action": "route", "server": "Tono-FakeIP", "rewrite_ttl": 30])
+        dnsRules.append(["domain_suffix": dedicatedModelAPISuffixes, "action": "evaluate", "server": "Tono-DoH", "tag": "model-api-primary"])
+        dnsRules.append(["match_response": "model-api-primary", "response_rcode": "NOERROR", "action": "respond"])
+        dnsRules.append(["domain_suffix": dedicatedModelAPISuffixes, "action": "evaluate", "server": "Tono-DoH-Backup", "tag": "model-api-backup"])
+        dnsRules.append(["match_response": "model-api-backup", "action": "respond"])
+        // Failed evaluations have no named response. Never let both failures
+        // fall through to the broad Alibaba DIRECT DNS rule below.
+        dnsRules.append(["domain_suffix": dedicatedModelAPISuffixes, "action": "reject"])
         var rules: [[String: Any]] = [
             ["inbound": ["Tono-DNS"], "action": "hijack-dns"],
             ["port": [53], "action": "hijack-dns"],
         ]
         let assistant = home == nil ? exitGroupName : claudeHomeGroupName
-        if home != nil {
-            rules.append(["network": "tcp", "domain_suffix": assistantHomeDomainSuffixes, "action": "route", "outbound": assistant])
-            rules.append(["network": "tcp", "ip_cidr": assistantHomeIPv4Cidrs, "action": "route", "outbound": assistant])
-        }
+        // Always, including when no residential hop is bound. Later reviewed-bundle
+        // and suffix rules are first-match DIRECT; without these rows a WeChat
+        // (or other reviewed) process reaches claude.ai and 160.79.104.0/21 on
+        // the physical interface. MATCH would only have caught what those
+        // exceptions did not. The suffix list includes dedicated model API
+        // hosts, so those children still precede Alibaba DIRECT. UDP exceptions
+        // sit above the terminal UDP reject, so assistant UDP is rejected here
+        // and falls back to the TCP route.
+        rules.append(["network": "tcp", "domain_suffix": assistantHomeDomainSuffixes, "action": "route", "outbound": assistant])
+        rules.append(["network": "tcp", "ip_cidr": assistantHomeIPv4Cidrs, "action": "route", "outbound": assistant])
+        rules.append(["network": "udp", "domain_suffix": assistantHomeDomainSuffixes, "action": "reject"])
+        rules.append(["network": "udp", "ip_cidr": assistantHomeIPv4Cidrs, "action": "reject"])
         rules.append(["network": "tcp", "process_name": assistantHomeProcessNames, "action": "route", "outbound": assistant])
         rules.append(["network": "tcp", "process_path_regex": assistantHomeProcessPathRegexes, "action": "route", "outbound": assistant])
         if let plan {
+            // sing-box 1.15.0-alpha.3 (93fff595) walks DNS rules in order and
+            // restores a domain only from the fake-ip store. reverse_mapping
+            // stays off: that tree documents it as unreliable where macOS
+            // caches DNS, and a shared real address could be labeled as a
+            // web-direct name. Client A queries for web-direct names therefore
+            // get a fake IP before hosts or China DNS. The pin `resolve`
+            // action and the direct outbound's domain_resolver name their
+            // transport, so those lookups skip this table and still return
+            // the pinned or China answer at dial time.
+            let clientListeners = ["Tono-DNS", "Tono-TUN", "Tono-Mixed"]
+            let webPinHosts = plan.webDomainPins.map(\.host).sorted()
+            if !webPinHosts.isEmpty {
+                dnsRules.append(["inbound": clientListeners, "query_type": ["A"], "domain": webPinHosts,
+                    "action": "route", "server": "Tono-FakeIP", "rewrite_ttl": 30])
+            }
+            let webSuffixHosts = plan.effectiveWebDomainSuffixes.map(\.host).sorted()
+            if !webSuffixHosts.isEmpty {
+                dnsRules.append(["inbound": clientListeners, "query_type": ["A"], "domain_suffix": webSuffixHosts,
+                    "action": "route", "server": "Tono-FakeIP", "rewrite_ttl": 30])
+            }
             var hosts: [String: [String]] = [:]
             for pin in plan.domainPins + plan.webDomainPins { hosts[pin.host] = pin.addresses }
             if !hosts.isEmpty {
                 dnsServers.append(["type": "hosts", "tag": "Tono-Hosts", "predefined": hosts])
-                dnsRules.append(["inbound": ["Tono-DNS", "Tono-TUN", "Tono-Mixed"],
+                dnsRules.append(["inbound": clientListeners,
                     "domain": hosts.keys.sorted(), "action": "route", "server": "Tono-Hosts"])
             }
             dnsServers.append(["type": "https", "tag": "Tono-China-DNS", "server": "223.5.5.5", "server_port": 443,
@@ -207,7 +267,15 @@ nonisolated extension ConfigPipeline {
         }
         // Controller /dns/query and outbound resolution need real answers.
         // Only packets arriving from the protected client listeners get fake IP.
-        dnsRules.append(["inbound": ["Tono-DNS", "Tono-TUN", "Tono-Mixed"], "query_type": ["A"], "action": "route", "server": "Tono-FakeIP"])
+        // rewrite_ttl is the fake-IP TTL: the server itself has no TTL field and
+        // would answer for 600 seconds. Backup DoH runs only after the primary
+        // answer is not NOERROR. It is https through the exit, never plaintext.
+        dnsRules.append(["inbound": ["Tono-DNS", "Tono-TUN", "Tono-Mixed"], "query_type": ["A"],
+            "action": "route", "server": "Tono-FakeIP", "rewrite_ttl": 30])
+        dnsRules.append(["action": "evaluate", "server": "Tono-DoH", "tag": "primary"])
+        dnsRules.append(["match_response": "primary", "response_rcode": "NOERROR", "action": "respond"])
+        dnsRules.append(["action": "evaluate", "server": "Tono-DoH-Backup", "tag": "backup"])
+        dnsRules.append(["match_response": "backup", "action": "respond"])
         rules.append(["ip_cidr": ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16", "224.0.0.0/4", "255.255.255.255/32", "fe80::/10", "fc00::/7", "ff00::/8", "127.0.0.0/8", "::1/128"], "action": "route", "outbound": "DIRECT"])
         rules.append(["network": "udp", "port": [5353], "action": "route", "outbound": "DIRECT"])
         rules.append(["ip_version": 6, "action": "reject"])

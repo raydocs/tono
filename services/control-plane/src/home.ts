@@ -359,6 +359,16 @@ export async function assertHomeExitBindable(e: Env, userId: string, homeExitId:
   }
 }
 
+// Fleet removal and its retired profile commit in one batch. Alongside the
+// retirement write's binding check, this fences either commit order without
+// refusing a newly provisioned home that has no fleet profile yet.
+const HOME_BINDABLE_SQL = `EXISTS (
+  SELECT 1 FROM home_exits h WHERE h.id = ? AND h.status = 'active'
+    AND (h.kind <> 'catalog' OR NOT EXISTS (
+      SELECT 1 FROM ops_node_profiles p WHERE p.catalog_name = h.proxy_name AND p.status = 'retired'
+    ))
+)`;
+
 export async function upsertHomeBinding(
   e: Env,
   userId: string,
@@ -374,17 +384,23 @@ export async function upsertHomeBinding(
     const updated = await e.DB.prepare(
       `UPDATE user_home_bindings
        SET home_exit_id = ?, default_proxy_name = ?, updated_at = ?
-       WHERE user_id = ?`,
-    ).bind(homeExitId, defaultProxyName, t, userId).run();
+       WHERE user_id = ? AND ${HOME_BINDABLE_SQL}`,
+    ).bind(homeExitId, defaultProxyName, t, userId, homeExitId).run();
     if (updated.meta.changes) return { created: false };
-    // An unbind landed after the read above. Continue as if it had landed
-    // first: its trigger may have flagged the line for rotation, which the
-    // re-check refuses before the caller writes anything else.
+    // A missed update may mean the target became unavailable or an unbind
+    // landed after the read. Only the latter may fall back to an insertion;
+    // recheck its rotation trigger before the caller writes anything else.
     await assertHomeExitBindable(e, userId, homeExitId);
+    if (await e.DB.prepare('SELECT 1 FROM user_home_bindings WHERE user_id = ?').bind(userId).first()) {
+      throw new ApiError(409, 'HOME_EXIT_INACTIVE', 'Home exit must be active and not fleet-retired before binding');
+    }
   }
-  await e.DB.prepare(
+  const inserted = await e.DB.prepare(
     `INSERT INTO user_home_bindings(user_id, home_exit_id, default_proxy_name, created_at, updated_at)
-     VALUES(?, ?, ?, ?, ?)`,
-  ).bind(userId, homeExitId, defaultProxyName, t, t).run();
+     SELECT ?, ?, ?, ?, ? WHERE ${HOME_BINDABLE_SQL}`,
+  ).bind(userId, homeExitId, defaultProxyName, t, t, homeExitId).run();
+  if (!inserted.meta.changes) {
+    throw new ApiError(409, 'HOME_EXIT_INACTIVE', 'Home exit must be active and not fleet-retired before binding');
+  }
   return { created: true };
 }

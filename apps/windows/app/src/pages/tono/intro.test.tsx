@@ -35,39 +35,23 @@ afterEach(() => {
 })
 
 describe('intro page', () => {
-  it('skips to login and records that the intro was seen', () => {
+  it('shows every point on one screen and one focused primary that goes to sign-in', () => {
     renderIntro()
-    expect(
-      screen.getByRole('heading', { name: 'Connected means protected.' }),
-    ).toBeDefined()
-    fireEvent.click(screen.getByRole('button', { name: 'Skip' }))
+    expect(screen.getByText('Connected means protected.')).toBeDefined()
+    expect(screen.getByText('Offline, never exposed.')).toBeDefined()
+    expect(screen.getByText("Routes are Tono's job.")).toBeDefined()
+    const buttons = screen.getAllByRole('button')
+    expect(buttons).toHaveLength(1)
+    expect(document.activeElement).toBe(buttons[0])
+
+    fireEvent.click(screen.getByRole('button', { name: 'Get started →' }))
     expect(localStorage.getItem(TONO_INTRO_SEEN_KEY)).toBe('1')
     expect(screen.getByText('login page')).toBeDefined()
   })
 
-  it('advances with ArrowRight and Enter, and skips with Escape', () => {
+  it('leaves for sign-in with Escape', () => {
     renderIntro()
-    fireEvent.keyDown(window, { key: 'ArrowRight' })
-    expect(
-      screen.getByRole('heading', { name: 'Offline, never exposed.' }),
-    ).toBeDefined()
-    fireEvent.keyDown(window, { key: 'Enter' })
-    expect(
-      screen.getByRole('heading', { name: "Routes are Tono's job." }),
-    ).toBeDefined()
     fireEvent.keyDown(window, { key: 'Escape' })
-    expect(localStorage.getItem(TONO_INTRO_SEEN_KEY)).toBe('1')
-    expect(screen.getByText('login page')).toBeDefined()
-  })
-
-  it('sets the seen flag and navigates from the final CTA', () => {
-    renderIntro()
-    fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
-    const start = screen.getByRole('button', { name: 'Get started →' })
-    expect(document.activeElement).toBe(start)
-    fireEvent.click(start)
     expect(localStorage.getItem(TONO_INTRO_SEEN_KEY)).toBe('1')
     expect(screen.getByText('login page')).toBeDefined()
   })

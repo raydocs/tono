@@ -1,0 +1,5 @@
+| ID | 问题（一句） | 状态 | Issue / PR | 等级 | 剩余限制 |
+|---|---|---|---|---|---|
+| R4CP-RETIRE-VALIDATION-TIMEOUT | Static shared-legacy config validation timeout skips saving newly installed clients, so later revocation can miss them | in-PR | hunt/sol-r4cp-retirement-timeout | 高·已确认 (P1) | Python regression covers supported Xray without live client listing; real-node execution not run, no deployment. |
+
+Sibling path missed by #1009: `persist_shared_legacy_retirement` invokes the bounded Xray config validator after live reconciliation but catches only `OSError`. Its `TimeoutExpired` escapes `run_once` before the updated inventory is saved. On Xray without a list-users command, the next ordinary empty roster removes only remembered clients and leaves the new client authorized. Convert the timeout to the same `Refusal` as filesystem persistence errors, so the existing deferred-error path saves inventory, meters usage and then refuses the round. One two-round regression first fails with the uncaught timeout, then passes and proves the later revocation removes the client.

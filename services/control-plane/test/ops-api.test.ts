@@ -1,7 +1,10 @@
 import { createExecutionContext, env, waitOnExecutionContext } from 'cloudflare:test';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import worker, { type Env } from '../src/index';
+import { rollNodeCycle } from '../src/ops/quota';
 import { OPS_V1_ROUTES } from '../src/ops/router';
+import { closeExpiredLogWindows } from '../src/ops/shared-admin/diagnostics-logs';
+import { createAssignedProductAccount, replaceProductAccount } from '../src/product-account';
 import {
   assertActivityHour,
   assertAdoptionMatrix,
@@ -157,6 +160,24 @@ describe('ops v1 api', () => {
     expect(again.status).toBe(304);
   });
 
+  it('pages accepted 200-character Unicode node names with a usable cursor', async () => {
+    const firstName = '东'.repeat(200);
+    const secondName = '西'.repeat(200);
+    for (const catalogName of [firstName, secondName]) {
+      expect((await ops('node-profiles', json({ catalogName }))).status).toBe(201);
+    }
+    const first = await ops('nodes?limit=1');
+    expect(first.status).toBe(200);
+    const page = assertList(await first.json(), assertNodeSummary);
+    expect(page.items.map((node) => node.name)).toEqual([firstName]);
+    expect(page.nextCursor).toBeTruthy();
+    const second = await ops(`nodes?limit=1&cursor=${encodeURIComponent(page.nextCursor!)}`);
+    expect(second.status).toBe(200);
+    const tail = assertList(await second.json(), assertNodeSummary);
+    expect(tail.items.map((node) => node.name)).toEqual([secondName]);
+    expect(tail.nextCursor).toBeNull();
+  });
+
   it('GET nodes/{name} detail, history, connections, errors, bindings, jobs', async () => {
     await seedNode();
     await db().prepare(
@@ -275,6 +296,30 @@ describe('ops v1 api', () => {
     expect(await res.json()).toMatchObject({ error: { code: 'VALIDATION_ERROR' } });
   });
 
+  it('PATCH profile quota without a sample does not baseline the cycle at zero', async () => {
+    await seedNode();
+    const enc = encodeURIComponent(NODE);
+    const res = await ops(`nodes/${enc}/profile`, json({
+      quota: { quotaBytes: 1_000_000_000, cycleKind: 'calendar_day', cycleAnchorDay: 1, counts: 'in_out' },
+    }, 'PATCH'));
+    expect(res.status).toBe(200);
+    const opened = await db().prepare(
+      `SELECT counter_in_last, counter_out_last, used_bytes
+       FROM node_traffic_cycles WHERE node_name = ? AND status = 'open'`,
+    ).bind(NODE).first<{ counter_in_last: number | null; counter_out_last: number | null; used_bytes: number }>();
+    expect(opened?.counter_in_last).toBeNull();
+    expect(opened?.counter_out_last).toBeNull();
+    expect(Number(opened?.used_bytes)).toBe(0);
+    const rolled = await rollNodeCycle(db(), NODE, {
+      cycle_kind: 'calendar_day',
+      cycle_anchor_day: 1,
+      traffic_quota_bytes: 1_000_000_000,
+      quota_counts: 'in_out',
+    }, { in: 8_000_000_000, out: 2_000_000_000, at: NOW + 60 }, NOW + 60);
+    expect(Number(rolled?.used_bytes)).toBe(0);
+    expect(Number(rolled?.counter_in_last)).toBe(8_000_000_000);
+  });
+
   it('PATCH nodes/{name}/profile quota null clears the open cycle', async () => {
     await seedNode();
     const enc = encodeURIComponent(NODE);
@@ -315,6 +360,44 @@ describe('ops v1 api', () => {
     assertList(await (await ops('customers/u-1/activity?range=24h')).json(), assertActivityHour);
     assertList(await (await ops('customers/u-1/destinations?range=7d')).json(), assertDestinationRow);
     assertList(await (await ops('customers/u-1/services?range=7d')).json(), assertServiceUsage);
+  });
+
+  it('keeps a renewed log grant when expiry cleanup already selected it', async () => {
+    await seedUser();
+    const t = Math.floor(Date.now() / 1000);
+    for (const [deviceId, expiresAt] of [['d-expired', t - 2], ['d-renewed', t - 1]] as const) {
+      await db().prepare(
+        `INSERT INTO devices(id, user_id, installation_id, name, status, created_at, updated_at)
+         VALUES(?, 'u-1', ?, 'Test', 'active', ?, ?)`,
+      ).bind(deviceId, `inst-${deviceId}`, t, t).run();
+      await db().prepare(
+        `INSERT INTO diagnostics_log_access(device_id, user_id, expires_at, created_at, updated_at)
+         VALUES(?, 'u-1', ?, ?, ?)`,
+      ).bind(deviceId, expiresAt, t, t).run();
+    }
+    let renewed = false;
+    const racingDb = new Proxy(db(), {
+      get(target, key) {
+        if (key === 'batch') return async (statements: D1PreparedStatement[]) => {
+          if (!renewed) {
+            renewed = true;
+            expect((await ops('users/u-1/devices/d-renewed/diagnostics-logs', json({ expiresAt: t + 3600 }, 'PUT'))).status)
+              .toBe(200);
+          }
+          return target.batch(statements);
+        };
+        const value = Reflect.get(target, key, target);
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+    await closeExpiredLogWindows(racingDb, t);
+    expect(renewed).toBe(true);
+    const grants = await db().prepare('SELECT device_id, expires_at FROM diagnostics_log_access').all();
+    expect(grants.results).toEqual([{ device_id: 'd-renewed', expires_at: t + 3600 }]);
+    const audits = await db().prepare(
+      "SELECT summary FROM ops_audit WHERE action = 'diagnostics.window.close' AND target_id = 'u-1'",
+    ).all();
+    expect(audits.results).toEqual([{ summary: 'window:d-expired key:- expired' }]);
   });
 
   it('GET customers/{id} exposes per-device live status and connections filter by deviceId', async () => {
@@ -695,6 +778,55 @@ describe('ops v1 api', () => {
     expect(closed.status).toBe(200);
     const user = await db().prepare("SELECT status FROM users WHERE id = 'u-1'").first<{ status: string }>();
     expect(user?.status).toBe('disabled');
+  });
+
+  it('close retires a product replacement committed before the close transaction', async () => {
+    await seedUser();
+    const base = env as unknown as Env;
+    const original = await createAssignedProductAccount(
+      base, 'u-1', 'original-close@example.com', NOW, null, ACCESS_ADMIN_EMAIL,
+    );
+    let release!: () => void;
+    let reached!: () => void;
+    const parked = new Promise<void>((resolve) => { reached = resolve; });
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    let pause = true;
+    const DB = new Proxy(base.DB, {
+      get(target, prop, receiver) {
+        if (prop === 'batch') {
+          return async (statements: D1PreparedStatement[]) => {
+            if (pause) {
+              pause = false;
+              reached();
+              await gate;
+            }
+            return target.batch(statements);
+          };
+        }
+        const value = Reflect.get(target, prop, receiver);
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+    const closing = ops('users/u-1/close', json({ refund: true }), { ...base, DB });
+    await parked;
+    try {
+      const replacement = await replaceProductAccount(
+        base, String(original.id), 'replacement-close@example.com', null, ACCESS_ADMIN_EMAIL,
+      );
+      release();
+      expect((await closing).status).toBe(200);
+      expect(await db().prepare("SELECT status FROM users WHERE id = 'u-1'").first())
+        .toMatchObject({ status: 'disabled' });
+      expect(await db().prepare('SELECT status, close_reason FROM product_accounts WHERE id = ?')
+        .bind(replacement.current.id).first())
+        .toMatchObject({ status: 'retired', close_reason: 'other' });
+      expect(await db().prepare(
+        "SELECT account_id, detail FROM product_account_events WHERE user_id = 'u-1' AND type = 'note'",
+      ).all()).toMatchObject({ results: [{ account_id: replacement.current.id, detail: 'refund close' }] });
+    } finally {
+      release();
+      await closing;
+    }
   });
 
   it('close reclaims nothing when disabling the account fails', async () => {

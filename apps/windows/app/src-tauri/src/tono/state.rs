@@ -79,6 +79,14 @@ impl LifecycleOperation {
     }
 }
 
+/// Release joiners share completion and a final disposition. Explicit removal dominates the
+/// automatic AI hold; only user Disconnect/failed-Prepare carries pending-update authority.
+struct ReleaseOperation {
+    operation: Arc<LifecycleOperation>,
+    apply_narrow: bool,
+    explicit_disconnect: bool,
+}
+
 /// Account state machine (macOS parity):
 /// `restoring → signedOut | authenticating | ready | suspended | error`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -125,6 +133,9 @@ pub struct TaskRegistry {
     /// on entry to that state, retired on exit; the loop itself also stops once the state is
     /// gone, so it is never a resident task.
     pub protection_resync: Option<JoinHandle<()>>,
+    /// TCP proofs after a fail-open release. Disconnect aborts this task.
+    /// It must not be aborted from inside its own connect attempt.
+    pub unarmed_probe: Option<JoinHandle<()>>,
 }
 
 impl TaskRegistry {
@@ -187,6 +198,10 @@ impl TaskRegistry {
         Self::abort(&mut self.protection_resync);
     }
 
+    pub fn abort_unarmed_probe(&mut self) {
+        Self::abort(&mut self.unarmed_probe);
+    }
+
     /// Connection-scoped tasks: everything that drives the connect
     /// transaction or reacts to the tunnel. Aborted on disconnect and on a
     /// node switch; the catalog sync is account-scoped and survives both.
@@ -197,6 +212,7 @@ impl TaskRegistry {
         self.abort_pin_refresh();
         self.abort_switch();
         self.abort_protection_resync();
+        self.abort_unarmed_probe();
     }
 }
 
@@ -208,6 +224,8 @@ pub struct TonoInner {
     /// Startup credential hydration completed (load task ran, whatever the
     /// outcome). Restore/sign-in wait for it before deciding anything.
     pub credentials_loaded: bool,
+    /// Enrollment may use this ID only after its vault read or first-run write succeeds.
+    pub installation_id_ready: bool,
     /// Vault read failure recorded by the load task (M1: drives the
     /// `error` account state instead of a mistaken signed-out).
     pub credential_error: Option<String>,
@@ -226,6 +244,8 @@ pub struct TonoInner {
     /// adopted sign-in whose commit task waits for its session to be durable.
     pub session_marker: crate::tono::credentials::SessionMarker,
     pub installation_id: String,
+    /// The core this connect armed. DIRECT in-place reload is mihomo-only.
+    pub sing_box_core: bool,
     pub catalog_tracker: CatalogTracker,
     /// Directory holding `managed-exit-catalog.json` (`app_home_dir()/tono`).
     /// The cache itself is built on demand: `CatalogCache` boxes its safety
@@ -398,16 +418,49 @@ fn matching_selected_delay(
 }
 
 impl TonoInner {
-    pub fn record_exit_delay(&mut self, delay_ms: u64) {
-        if delay_ms == 0 {
+    /// Record a delay that was measured while `measured_node` was selected.
+    ///
+    /// A same-generation hot switch updates `selected_node` before the in-flight
+    /// probe returns. Labeling the sample with whatever is selected at commit
+    /// time shows the previous exit's RTT on the new node. A sample whose node
+    /// is no longer selected is dropped, and it does not overwrite a sample
+    /// that still belongs to the current selection.
+    pub fn record_exit_delay(&mut self, measured_node: &str, delay_ms: u64) {
+        if delay_ms == 0 || measured_node.is_empty() {
             return;
         }
-        let Some(node) = self.selected_node.clone() else {
+        if self.selected_node.as_deref() != Some(measured_node) {
             return;
-        };
+        }
         self.last_exit_delay_ms = Some(delay_ms);
         self.last_exit_delay_at_ms = Some(now_ms());
-        self.last_exit_delay_node = Some(node);
+        self.last_exit_delay_node = Some(measured_node.to_string());
+    }
+
+    /// Drop the displayed exit IP. A selection change must not keep showing the
+    /// previous node's address under the new name.
+    pub fn clear_exit_identity(&mut self) {
+        self.exit_ip = None;
+        self.exit_org = None;
+        self.exit_location = None;
+    }
+
+    /// Store an exit-identity sample only when `measured_node` is still selected.
+    /// Returns whether the sample was stored.
+    pub fn commit_exit_identity(
+        &mut self,
+        measured_node: &str,
+        ip: String,
+        org: Option<String>,
+        location: Option<String>,
+    ) -> bool {
+        if measured_node.is_empty() || self.selected_node.as_deref() != Some(measured_node) {
+            return false;
+        }
+        self.exit_ip = Some(ip);
+        self.exit_org = org;
+        self.exit_location = location;
+        true
     }
 
     pub fn record_tcp_delay(&mut self, node: &str, delay_ms: u64) {
@@ -537,7 +590,7 @@ pub struct TonoState {
     route_ledger: parking_lot::Mutex<crate::tono::route_ledger::RouteLedger>,
     /// Serializes login, periodic, and user-initiated catalog fetches for one account session.
     catalog_sync_operation: tokio::sync::Mutex<()>,
-    release_operation: tokio::sync::Mutex<Option<Arc<LifecycleOperation>>>,
+    release_operation: tokio::sync::Mutex<Option<ReleaseOperation>>,
     /// A late StartClash or DNS-enable commit must settle before explicit release reaches the
     /// Service. Connect mutations hold a read guard inside their detached reconciliation task;
     /// admission also takes a reader. Detached failure/switch cleanup and the one release worker
@@ -548,6 +601,10 @@ pub struct TonoState {
     /// activation transaction retains an owned reader through its final proof.
     policy_activation: Arc<tokio::sync::RwLock<()>>,
     next_release_id: AtomicU64,
+    /// Replaces an older unarmed probe. The probe task exits when this changes.
+    pub(crate) unarmed_probe_ticket: AtomicU64,
+    /// Recent TCP proofs, keyed by `ip:port`. Not a tunnel and not a route.
+    pub(crate) unarmed_proofs: parking_lot::Mutex<tono_core::unarmed_probe::ProofCache>,
 }
 
 impl TonoState {
@@ -571,7 +628,10 @@ impl TonoState {
     pub(crate) fn for_test_in(catalog_dir: PathBuf) -> Self {
         let (sender, _receiver) = tokio::sync::mpsc::channel(1);
         let audit = crate::tono::audit::Audit::for_test(sender, &catalog_dir, false);
-        Self::with_catalog_dir(catalog_dir, audit, Arc::new(SessionCredentialStore::for_test())).unwrap()
+        let mut state = Self::with_catalog_dir(catalog_dir, audit, Arc::new(SessionCredentialStore::for_test())).unwrap();
+        // The memory-only fixture owns its identity without an OS vault.
+        state.inner.get_mut().installation_id_ready = true;
+        state
     }
 
     fn with_catalog_dir(
@@ -597,6 +657,7 @@ impl TonoState {
                 client,
                 credentials,
                 credentials_loaded: false,
+                installation_id_ready: false,
                 credential_error: None,
                 account_state: AccountState::SignedOut,
                 account_close: None,
@@ -605,6 +666,7 @@ impl TonoState {
                 sign_in_generation: 0,
                 session_marker: Default::default(),
                 installation_id,
+                sing_box_core: false,
                 catalog_tracker: CatalogTracker::new(),
                 catalog_dir,
                 nodes: Vec::new(),
@@ -669,6 +731,8 @@ impl TonoState {
             privileged_transition: Arc::new(tokio::sync::RwLock::new(())),
             policy_activation: Arc::new(tokio::sync::RwLock::new(())),
             next_release_id: AtomicU64::new(1),
+            unarmed_probe_ticket: AtomicU64::new(1),
+            unarmed_proofs: parking_lot::Mutex::new(tono_core::unarmed_probe::ProofCache::default()),
         })
     }
 
@@ -684,28 +748,53 @@ impl TonoState {
         self.inner.lock().await
     }
 
+    /// Non-blocking lock. The unarmed probe starter is synchronous: connect
+    /// calls it, and the probe later calls connect, so the starter cannot be
+    /// an async function.
+    pub(crate) fn try_lock(
+        &self,
+    ) -> Result<tokio::sync::MutexGuard<'_, TonoInner>, tokio::sync::TryLockError> {
+        self.inner.try_lock()
+    }
+
     pub async fn lock_catalog_sync(&self) -> tokio::sync::MutexGuard<'_, ()> {
         self.catalog_sync_operation.lock().await
     }
 
     /// Start one release or join the already-running one. The boolean is true only for the caller
     /// responsible for spawning the supervisor.
-    pub async fn begin_release(&self) -> (Arc<LifecycleOperation>, bool) {
+    pub async fn begin_release(
+        &self, explicit_disconnect: bool, apply_narrow: bool,
+    ) -> (Arc<LifecycleOperation>, bool) {
         let mut slot = self.release_operation.lock().await;
-        if let Some(operation) = slot.as_ref() {
-            return (Arc::clone(operation), false);
+        if let Some(release) = slot.as_mut() {
+            release.apply_narrow &= apply_narrow;
+            release.explicit_disconnect |= explicit_disconnect;
+            return (Arc::clone(&release.operation), false);
         }
         let id = self.next_release_id.fetch_add(1, Ordering::Relaxed);
         let operation = Arc::new(LifecycleOperation::new(id));
-        *slot = Some(Arc::clone(&operation));
+        *slot = Some(ReleaseOperation { operation: Arc::clone(&operation), apply_narrow, explicit_disconnect });
         (operation, true)
     }
 
     pub async fn finish_release(&self, id: u64) {
         let mut slot = self.release_operation.lock().await;
-        if slot.as_ref().is_some_and(|operation| operation.id() == id) {
+        if slot.as_ref().is_some_and(|release| release.operation.id() == id) {
             slot.take();
         }
+    }
+
+    /// Atomically seal successful release or retain admission exclusion for its plain follow-up.
+    /// The caller holds inner while sealing, so final metadata cannot race a new admission.
+    pub async fn finish_release_if_applied(&self, id: u64, applied_narrow: bool) -> Option<(bool, bool)> {
+        let mut slot = self.release_operation.lock().await;
+        let release = slot.as_ref().filter(|release| release.operation.id() == id)?;
+        if applied_narrow && !release.apply_narrow {
+            return Some((release.explicit_disconnect, false));
+        }
+        slot.take();
+        None
     }
 
     pub async fn release_in_progress(&self) -> bool {
@@ -1226,5 +1315,39 @@ mod tests {
             matching_selected_delay(Some("Tokyo · Fuji"), Some(0), Some("Tokyo · Fuji")),
             None
         );
+    }
+
+    #[tokio::test]
+    async fn a_sample_from_the_previous_exit_is_not_shown_on_the_new_node() {
+        let state = super::TonoState::for_test();
+        let mut inner = state.lock().await;
+        inner.selected_node = Some("Tokyo · Neon".into());
+        inner.record_exit_delay("Tokyo · Neon", 80);
+        inner.exit_ip = Some("203.0.113.8".into());
+        assert_eq!(inner.selected_exit_delay_ms(), Some(80));
+
+        inner.selected_node = Some("Tokyo · Fuji".into());
+        inner.clear_exit_identity();
+        inner.record_exit_delay("Tokyo · Neon", 400);
+        assert_eq!(inner.selected_exit_delay_ms(), None);
+        assert_eq!(inner.last_exit_delay_node.as_deref(), Some("Tokyo · Neon"));
+        assert!(inner.exit_ip.is_none());
+        assert!(!inner.commit_exit_identity(
+            "Tokyo · Neon",
+            "203.0.113.8".into(),
+            None,
+            None,
+        ));
+        assert!(inner.exit_ip.is_none());
+
+        inner.record_exit_delay("Tokyo · Fuji", 120);
+        assert_eq!(inner.selected_exit_delay_ms(), Some(120));
+        assert!(inner.commit_exit_identity(
+            "Tokyo · Fuji",
+            "203.0.113.9".into(),
+            None,
+            Some("JP".into()),
+        ));
+        assert_eq!(inner.exit_ip.as_deref(), Some("203.0.113.9"));
     }
 }

@@ -1,5 +1,5 @@
 | ID | 问题（一句） | 状态 | Issue / PR | 等级 | 剩余限制 |
 |---|---|---|---|---|---|
-| EXIT-AGENT-PARTIAL-INVENTORY | 对账部分成功或完整对账后的非 ACK 拒绝仍不落盘新增客户端，后续无法列出时吊销会漏掉它 | open | [#810](https://github.com/raydocs/tono/issues/810) | 高·推导 | 未改代码。#780 只覆盖完整对账后的名册 ACK 失败。本轮不再改 exit-agent |
+| EXIT-AGENT-PARTIAL-INVENTORY | 对账部分成功或完整对账后的非 ACK 拒绝不落盘新增客户端，后续无法列出时吊销会漏掉它 | fixed(5ba113d2) | [#810](https://github.com/raydocs/tono/issues/810) [#838](https://github.com/raydocs/tono/pull/838) | 中·推导 | 只保存已知 installedClients，不 ACK、不推进用量；未知库存仍不写。下一轮若能列出 inbound 仍按实况撤除。未部署 |
 
-`reconcile` 在成功的增删上更新 `known_installed`，失败时于 `reconcile_and_report.py` 1094 行抛出且不返回该集合。`run_once` 只在对账函数返回后保存 `installedClients`（1732–1735）。缓存写入失败、状态文件不可用、source 不匹配、待报 `observedAt` 超窗（1703–1724）也发生在这次保存之前。实时列表未知时不得把空集写成库存。
+`reconcile` 把已成功的增删留在异常的 `installed` 上。计数读取失败、名册缓存删不掉、source 不匹配、待报 `observedAt` 非法或超窗，都在名册 ACK 之前把该集合写入状态文件。停机轮次的对账拒绝同样只补库存。

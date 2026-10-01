@@ -86,18 +86,10 @@ function IncidentRow({
   }
 
   return (
-    <div
-      role="button"
-      tabIndex={0}
-      className="incident-row"
-      onClick={() => openIncident(row.id)}
-      onKeyDown={(event) => {
-        if (event.key === 'Enter' || event.key === ' ') {
-          event.preventDefault();
-          openIncident(row.id);
-        }
-      }}
-    >
+    // The whole row opens the drawer for a pointer; the keyboard gets the
+    // title button, because a row that is itself a button cannot also hold
+    // the claim and resolve buttons without nesting one control inside another.
+    <div className="incident-row" onClick={() => openIncident(row.id)}>
       <span className={cn('sev-rail', `tone-${severityTone(row.severity)}`)} aria-hidden />
       <div className="flex min-w-0 flex-1 flex-col gap-1">
         <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
@@ -106,7 +98,11 @@ function IncidentRow({
             {subject}
           </span>
         </div>
-        <p className="text-row">{row.title}</p>
+        <p className="text-row">
+          <button type="button" className="incident-title" onClick={(event) => { event.stopPropagation(); openIncident(row.id); }}>
+            {row.title}
+          </button>
+        </p>
         <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1 text-micro text-[var(--muted-foreground)]">
           <span>{copy.incidentImpact(row.impactCount)}</span>
           {/* Recovered, mistaken, or merely dropped: the row says which of

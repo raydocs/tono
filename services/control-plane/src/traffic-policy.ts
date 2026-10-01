@@ -231,6 +231,30 @@ function canonicalTrafficPolicyEntries(value: unknown, trusted: boolean): Traffi
     'sentry.io',
     'tono.app', 'tono.com',
   ];
+  // Match the clients' assistant home domains: a signed direct entry must not
+  // override their residential routes, including assistant auth hosts. Kept
+  // apart from `protectedSuffixes`, whose exact set is a cross-platform contract.
+  // Dedicated Model Studio API namespaces, not Alibaba's general cloud tree.
+  // Clients evaluate these assistant children before the reviewed DIRECT parent.
+  const dedicatedModelAPISuffixes = [
+    'dashscope.aliyuncs.com', 'dashscope-intl.aliyuncs.com',
+    'dashscope-us.aliyuncs.com', 'maas.aliyuncs.com',
+  ];
+  const assistantHomeSuffixes = [
+    ...dedicatedModelAPISuffixes,
+    'chatgpt.com', 'openai.com', 'chat.com', 'ai.com', 'oaistatic.com', 'oaiusercontent.com',
+    'grok.com', 'grok.x.com', 'grokipedia.com', 'x.ai',
+    'perplexity.ai', 'perplexity.com', 'pplx.ai',
+    'gemini.google.com', 'bard.google.com', 'aistudio.google.com',
+    'generativelanguage.googleapis.com', 'notebooklm.google.com',
+    'muse.ai', 'meta.ai', 'muse.meta.com', 'www.muse.ai',
+    'meta.com', 'facebook.com', 'fb.com', 'fb.me', 'fb.watch', 'fbcdn.net',
+    'facebook.net', 'messenger.com', 'instagram.com', 'cdninstagram.com', 'ig.me', 'threads.net',
+    'gmail.com', 'mail.google.com', 'googlemail.com', 'inbox.google.com',
+    'accounts.google.com', 'myaccount.google.com', 'oauth2.googleapis.com',
+    'mail-pa.clients6.google.com', 'gmail.googleapis.com',
+  ];
+  const directGuardSuffixes = [...protectedSuffixes, ...assistantHomeSuffixes];
   const seenHosts = new Set<string>();
   const canonicalDomains = (
     values: unknown[],
@@ -243,7 +267,7 @@ function canonicalTrafficPolicyEntries(value: unknown, trusted: boolean): Traffi
     }
     const { host, ports } = entry as Row;
     if (typeof host !== 'string' || host.length > 253 || !/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/.test(host) ||
-        protectedSuffixes.some((suffix) => host === suffix || host.endsWith(`.${suffix}`)) ||
+        directGuardSuffixes.some((suffix) => host === suffix || host.endsWith(`.${suffix}`)) ||
         seenHosts.has(host)) {
       throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid or duplicate domain host');
     }
@@ -311,8 +335,10 @@ function canonicalTrafficPolicyEntries(value: unknown, trusted: boolean): Traffi
     // whoever holds the key; it does not remove it.
     if (typeof host !== 'string' || host.length > 253 ||
         !/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/.test(host) ||
-        protectedSuffixes.some((suffix) =>
-          host === suffix || host.endsWith(`.${suffix}`) || suffix.endsWith(`.${host}`)) ||
+        directGuardSuffixes.some((suffix) =>
+          host === suffix || host.endsWith(`.${suffix}`) ||
+          (suffix.endsWith(`.${host}`) &&
+            !(host === 'aliyuncs.com' && dedicatedModelAPISuffixes.includes(suffix)))) ||
         seenSuffixes.has(host)) {
       throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid or duplicate direct suffix host');
     }

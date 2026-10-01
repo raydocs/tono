@@ -140,6 +140,9 @@ nonisolated extension ConfigPipeline {
       ipv6: false
       enhanced-mode: fake-ip
       fake-ip-range: 198.18.0.1/16
+      fake-ip-ttl: 30
+      prefer-h3: false
+      cache-algorithm: lru
       use-hosts: true
       respect-rules: true
       proxy-server-nameserver:
@@ -575,6 +578,15 @@ nonisolated extension ConfigPipeline {
             for host in Set(policyKeys).sorted() {
                 yaml += "    \"\(yamlScalar(host))\": [\(upstreams)]\n"
             }
+            // More-specific keys keep model API DNS on the tunnel while the
+            // remaining Alibaba subtree resolves through China DIRECT.
+            let protectedUpstreams = ["https://1.1.1.1/dns-query", "https://8.8.8.8/dns-query"]
+                .map { "\"\($0)#\(exitGroupName)\"" }.joined(separator: ", ")
+            for suffix in dedicatedModelAPISuffixes {
+                for key in [suffix, "+.\(suffix)"] {
+                    yaml += "    \"\(key)\": [\(protectedUpstreams)]\n"
+                }
+            }
         }
         if let directPolicy,
            !directPolicy.domainPins.isEmpty
@@ -683,18 +695,20 @@ nonisolated extension ConfigPipeline {
         // PF session allowlist.
         let hasResidentialHop = claudeHome != nil || claudeHomeSocks5 != nil
         let assistantTarget = hasResidentialHop ? claudeHomeGroupName : exitGroupName
-        // Domain rules exist only to divert assistant traffic onto the
-        // residential hop. Without that hop they would be pure noise — MATCH
-        // already sends these to the protected exit — and emitting them anyway
-        // would put DOMAIN-SUFFIX into a runtime whose direct exceptions are
-        // deliberately exact-host only.
-        if hasResidentialHop {
-            for suffix in Self.assistantHomeDomainSuffixes {
-                yaml += "  - AND,((NETWORK,TCP),(DOMAIN-SUFFIX,\(suffix))),\(assistantTarget)\n"
-            }
-            for cidr in Self.assistantHomeIPv4Cidrs {
-                yaml += "  - AND,((NETWORK,TCP),(IP-CIDR,\(cidr),no-resolve)),\(assistantTarget)\n"
-            }
+        // These rows stay on without a residential hop. MATCH is not enough:
+        // reviewed-bundle process rules and suffix routes are first-match and
+        // would otherwise carry assistant names and 160.79.104.0/21 out the
+        // physical interface. `assistantHomeDomainSuffixes` includes the
+        // dedicated model API hosts, so those children still precede Alibaba
+        // DIRECT. UDP exceptions are above the terminal UDP reject, so
+        // assistant UDP is rejected here and falls back to TCP.
+        for suffix in Self.assistantHomeDomainSuffixes {
+            yaml += "  - AND,((NETWORK,TCP),(DOMAIN-SUFFIX,\(suffix))),\(assistantTarget)\n"
+            yaml += "  - AND,((NETWORK,UDP),(DOMAIN-SUFFIX,\(suffix))),REJECT\n"
+        }
+        for cidr in Self.assistantHomeIPv4Cidrs {
+            yaml += "  - AND,((NETWORK,TCP),(IP-CIDR,\(cidr),no-resolve)),\(assistantTarget)\n"
+            yaml += "  - AND,((NETWORK,UDP),(IP-CIDR,\(cidr),no-resolve)),REJECT\n"
         }
         // Process rules are a fallback after hostname identity. In particular,
         // npm and bun run Claude Code as node/node.exe; a process-wide Node rule

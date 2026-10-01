@@ -109,6 +109,11 @@ pub(super) const POST_LOCK_VERIFY_ROUNDS: u32 = 2;
 
 pub(super) const POST_LOCK_VERIFY_ROUND_DELAY: Duration = Duration::from_millis(500);
 
+/// Wait after the data plane is already proved before the advisory `/delay`.
+/// The verdict does not wait. 1500 ms lets the first page open its own
+/// handshakes; the probe itself is a second Reality connection.
+pub(super) const ADVISORY_EXIT_PROBE_DEFER: Duration = Duration::from_millis(1500);
+
 /// C3 — the post-lock verification group: an advisory controller delay check followed by the
 /// authoritative real App data-plane check, retried up to [`POST_LOCK_VERIFY_ROUNDS`] times
 /// inside the still-live transaction.
@@ -183,6 +188,7 @@ pub(super) async fn verify_post_lock(
                 path: "controller",
                 outcomes: outcomes.clone(),
             });
+            let measured_node = state.lock().await.selected_node.clone();
             transaction
                 .wait("advisory exit measurement", async {
                     let began = std::time::Instant::now();
@@ -199,8 +205,10 @@ pub(super) async fn verify_post_lock(
                     match result {
                         Ok(delay) => {
                             if delay > 0 {
-                                let mut inner = state.lock().await;
-                                inner.record_exit_delay(delay);
+                                if let Some(node) = measured_node.as_deref() {
+                                    let mut inner = state.lock().await;
+                                    inner.record_exit_delay(node, delay);
+                                }
                             }
                             Ok(())
                         }
@@ -229,12 +237,17 @@ pub(super) async fn verify_post_lock(
                         error,
                     });
                 }
-                // The data plane already succeeded. Sample RTT afterwards so
-                // the UI still has a delay, without sharing the handshake
-                // that proved the tunnel.
+                // The data plane already succeeded. Wait before the advisory
+                // sample so the first page does not share the tunnel with a
+                // second Reality handshake. The UI still gets a delay.
                 let delay_state = state.clone();
                 let delay_secret = secret.to_string();
+                let measured_node = state.lock().await.selected_node.clone();
                 tokio::spawn(async move {
+                    tokio::time::sleep(ADVISORY_EXIT_PROBE_DEFER).await;
+                    if delay_state.lock().await.connect_generation != generation {
+                        return;
+                    }
                     let Ok(delay) = probe_exit_once(&delay_secret, controller_port).await else {
                         return;
                     };
@@ -243,7 +256,9 @@ pub(super) async fn verify_post_lock(
                     }
                     let mut inner = delay_state.lock().await;
                     if inner.connect_generation == generation {
-                        inner.record_exit_delay(delay);
+                        if let Some(node) = measured_node.as_deref() {
+                            inner.record_exit_delay(node, delay);
+                        }
                     }
                 });
                 log_current_stage_duration(state, generation, started).await;
@@ -536,23 +551,26 @@ pub(super) async fn probe_exit_once(secret: &str, controller_port: u16) -> Resul
 /// in-memory controller endpoint is never exposed to the WebView; only the measured milliseconds
 /// cross the Tauri command boundary.
 pub async fn test_current_server(state: &Arc<TonoState>, app: &AppHandle) -> Result<u64, String> {
-    let (secret, controller_port) = {
+    let (secret, controller_port, measured_node) = {
         let inner = state.lock().await;
         if !inner.fsm.status().is_connected {
             return Err("connect before testing the current server".to_string());
         }
-        inner
+        let (secret, controller_port) = inner
             .controller_secret
             .clone()
             .zip(inner.controller_port)
-            .ok_or_else(|| "connected controller endpoint is unavailable".to_string())?
+            .ok_or_else(|| "connected controller endpoint is unavailable".to_string())?;
+        (secret, controller_port, inner.selected_node.clone())
     };
     let delay = probe_exit_once(&secret, controller_port)
         .await
         .map_err(|error| format!("current server test failed: {error}"))?;
     {
         let mut inner = state.lock().await;
-        inner.record_exit_delay(delay);
+        if let Some(node) = measured_node.as_deref() {
+            inner.record_exit_delay(node, delay);
+        }
         crate::tono::commands::emit_status(app, &crate::tono::commands::status_of(&inner));
     }
     Ok(delay)
@@ -747,10 +765,26 @@ pub(super) fn describe_reqwest_error(error: &reqwest::Error) -> String {
     controller_error_detail(&joined).unwrap_or_else(|| category.to_string())
 }
 
+#[cfg(test)]
+mod advisory_delay_tests {
+    #[test]
+    fn advisory_exit_probe_waits_until_the_first_page_can_start() {
+        assert_eq!(super::ADVISORY_EXIT_PROBE_DEFER.as_millis(), 1500);
+    }
+}
+
 pub(super) fn format_tun_probe_failures(failures: &[String]) -> String {
     format!(
         "all {} independent real TUN data-plane probes failed: {}",
         TUN_DATA_PLANE_PROBES.len(),
         failures.join(" | ")
     )
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn advisory_exit_probe_waits_until_the_first_page_can_start() {
+        assert_eq!(super::ADVISORY_EXIT_PROBE_DEFER.as_millis(), 1500);
+    }
 }

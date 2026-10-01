@@ -158,6 +158,7 @@ jobs:
           New-Item -ItemType Directory -Force -Path sidecar, resources | Out-Null
           $paths = @(
             'sidecar/tono-core-x86_64-pc-windows-msvc.exe',
+            'sidecar/sing-box-x86_64-pc-windows-msvc.exe',
             'resources/Country.mmdb',
             'resources/geoip.dat',
             'resources/geosite.dat',
@@ -165,6 +166,7 @@ jobs:
             'resources/tono-service-install.exe',
             'resources/tono-service-uninstall.exe',
             'resources/core-sha256.txt',
+            'resources/sing-box-sha256.txt',
             'resources/core-identity.json'
           )
           foreach ($p in $paths) {
