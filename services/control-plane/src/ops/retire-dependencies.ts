@@ -22,6 +22,12 @@ import { RETIRE_DRAIN_SECONDS } from './verdict';
 
 export type { RetireDependenciesDto };
 
+// Recheck at the catalog write: a binding can land after retirement preview.
+export const catalogHomeUnboundSql = `NOT EXISTS (
+  SELECT 1 FROM user_home_bindings b JOIN home_exits h ON h.id = b.home_exit_id
+  WHERE h.kind = 'catalog' AND h.proxy_name IN (?, ?)
+)`;
+
 /** Residential routing uses its home even when the selected cloud exit differs. */
 export async function assertCatalogHomeUnbound(e: Env, name: string): Promise<void> {
   const base = catalogBaseName(name);

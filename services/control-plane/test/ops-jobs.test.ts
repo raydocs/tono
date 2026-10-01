@@ -21,6 +21,7 @@ import { runWorkerJobs } from '../src/ops/jobs-worker';
 import { relistFleetNode, retireFleetNode } from '../src/ops/reads/fleet';
 import { retirePendingDedupeKey } from '../src/ops/retire-dependencies';
 import { runVerdictPass } from '../src/ops/verdict-run';
+import { homeExitsResource } from '../src/ops/shared-admin/home-exits';
 
 const db = () => (env as unknown as { DB: D1Database }).DB;
 
@@ -491,6 +492,143 @@ describe('ops node jobs', () => {
     expect(await exitStatus(kite)).toEqual({ status: 'active', token_hash: hash });
     expect(await db().prepare('SELECT home_exit_id FROM user_home_bindings WHERE user_id = ?')
       .bind('u-home-bound').first<{ home_exit_id: string }>()).toEqual({ home_exit_id: 'home-kite' });
+  });
+
+  async function seedBindableHome(e: Env, t: number) {
+    await seedTwoNodeCatalog(e, t, 'Tokyo · Kite', 'Tokyo · Fuji');
+    const hash = await seedExitToken('Tokyo · Kite', t);
+    await db().prepare(
+      `INSERT INTO users(id, email, password_hash, password_salt, created_at, updated_at)
+       VALUES('u-home-race', 'home-race@example.com', 'x', 'y', ?, ?)`,
+    ).bind(t, t).run();
+    await db().prepare(
+      `INSERT INTO home_exits(id, proxy_name, display_name, kind, status, created_at, updated_at)
+       VALUES('home-kite', 'Tokyo · Kite', 'Customer home', 'catalog', 'active', ?, ?)`,
+    ).bind(t, t).run();
+    return hash;
+  }
+
+  function bindHome(e: Env) {
+    return homeExitsResource(new Request('https://test/ops/users/u-home-race/home-binding', {
+      method: 'PUT', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ homeExitId: 'home-kite', defaultProxyName: 'Tokyo · Fuji' }),
+    }), e, 'users/u-home-race/home-binding', 'PUT', 'ops@example.com');
+  }
+
+  it('refuses retirement when a home binding commits after preview but before its revision bump', async () => {
+    const e = env as unknown as Env;
+    const t = 1_800_001_100;
+    const hash = await seedBindableHome(e, t);
+    let boundStatus: number | undefined;
+    const racingDb = new Proxy(e.DB, {
+      get(target, key) {
+        if (key === 'batch') return async (statements: D1PreparedStatement[]) => {
+          let results: D1Result[] | undefined;
+          const bindingDb = new Proxy(target, {
+            get(bindingTarget, bindingKey) {
+              if (bindingKey === 'prepare') return (sql: string) => {
+                const statement = bindingTarget.prepare(sql);
+                if (!sql.includes('WHERE user_home_bindings.user_id = ?')) return statement;
+                return { bind: (...values: unknown[]) => ({ first: async () => {
+                  results = await target.batch(statements);
+                  return statement.bind(...values).first();
+                } }) };
+              };
+              const value = Reflect.get(bindingTarget, bindingKey, bindingTarget);
+              return typeof value === 'function' ? value.bind(bindingTarget) : value;
+            },
+          });
+          boundStatus = (await bindHome({ ...e, DB: bindingDb }))?.status;
+          expect(results).toBeDefined();
+          return results!;
+        };
+        const value = Reflect.get(target, key, target);
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+    await expect(retireFleetNode({ ...e, DB: racingDb }, 'ops@example.com', 'Tokyo · Kite', {
+      expectedRevision: 1, confirmation: 'Tokyo · Kite', reason: 'race',
+    }, undefined, t)).rejects.toMatchObject({ status: 409, code: 'CATALOG_CONFLICT' });
+    expect(boundStatus).toBe(201);
+    expect(await listedNames(e)).toContain('Tokyo · Kite');
+    expect(await exitStatus('Tokyo · Kite')).toEqual({ status: 'active', token_hash: hash });
+    expect(await db().prepare("SELECT status FROM ops_node_profiles WHERE catalog_name = 'Tokyo · Kite'")
+      .first()).toEqual({ status: 'active' });
+    expect(await db().prepare("SELECT 1 FROM ops_audit WHERE action = 'node.retire'").first()).toBeNull();
+    expect(await db().prepare('SELECT home_exit_id FROM user_home_bindings WHERE user_id = ?')
+      .bind('u-home-race').first()).toEqual({ home_exit_id: 'home-kite' });
+  });
+
+  it('refuses a catalog home binding when fleet retirement commits after binding preflight', async () => {
+    const e = env as unknown as Env;
+    const t = 1_800_001_100;
+    await seedBindableHome(e, t);
+    let retired = false;
+    const racingDb = new Proxy(e.DB, {
+      get(target, key) {
+        if (key === 'prepare') return (sql: string) => {
+          const statement = target.prepare(sql);
+          if (!sql.includes('INSERT INTO user_home_bindings')) return statement;
+          return { bind: (...values: unknown[]) => ({ run: async () => {
+            retired = true;
+            await retireFleetNode(e, 'ops@example.com', 'Tokyo · Kite', {
+              expectedRevision: 1, confirmation: 'Tokyo · Kite', reason: 'race',
+            }, undefined, t);
+            return statement.bind(...values).run();
+          } }) };
+        };
+        const value = Reflect.get(target, key, target);
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+    await expect(bindHome({ ...e, DB: racingDb })).rejects.toMatchObject({ status: 409, code: 'HOME_EXIT_INACTIVE' });
+    expect(retired).toBe(true);
+    expect(await listedNames(e)).not.toContain('Tokyo · Kite');
+    expect((await exitStatus('Tokyo · Kite'))?.status).toBe('disabled');
+    expect(await db().prepare('SELECT 1 FROM user_home_bindings WHERE user_id = ?')
+      .bind('u-home-race').first()).toBeNull();
+    expect(await db().prepare('SELECT revision FROM managed_exit_catalog WHERE singleton_id = 1')
+      .first()).toEqual({ revision: 2 });
+    await db().prepare("UPDATE exit_nodes SET status = 'active' WHERE name = 'Tokyo · Kite'").run();
+    await relistFleetNode(e, 'ops@example.com', 'Tokyo · Kite', { block: realityBlock('Tokyo · Kite', '203.0.113.9') });
+    expect((await bindHome(e))?.status).toBe(201);
+  });
+
+  it('preserves the previous binding when retirement commits before a home replacement', async () => {
+    const e = env as unknown as Env;
+    const t = 1_800_001_100;
+    await seedBindableHome(e, t);
+    await db().prepare(
+      `INSERT INTO home_exits(id, proxy_name, display_name, kind, status, created_at, updated_at)
+       VALUES('home-old', 'Old home', 'Previous home', 'socks5', 'active', ?, ?)`,
+    ).bind(t, t).run();
+    await db().prepare(
+      `INSERT INTO user_home_bindings(user_id, home_exit_id, created_at, updated_at)
+       VALUES('u-home-race', 'home-old', ?, ?)`,
+    ).bind(t, t).run();
+    const racingDb = new Proxy(e.DB, {
+      get(target, key) {
+        if (key === 'prepare') return (sql: string) => {
+          const statement = target.prepare(sql);
+          if (!sql.includes('UPDATE user_home_bindings')) return statement;
+          return { bind: (...values: unknown[]) => ({ run: async () => {
+            await retireFleetNode(e, 'ops@example.com', 'Tokyo · Kite', {
+              expectedRevision: 1, confirmation: 'Tokyo · Kite', reason: 'race',
+            }, undefined, t);
+            return statement.bind(...values).run();
+          } }) };
+        };
+        const value = Reflect.get(target, key, target);
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+    await expect(bindHome({ ...e, DB: racingDb })).rejects.toMatchObject({ status: 409, code: 'HOME_EXIT_INACTIVE' });
+    expect(await db().prepare('SELECT home_exit_id FROM user_home_bindings WHERE user_id = ?')
+      .bind('u-home-race').first()).toEqual({ home_exit_id: 'home-old' });
+    expect(await db().prepare('SELECT socks5_rotation_required_at FROM home_exits WHERE id = ?')
+      .bind('home-old').first()).toEqual({ socks5_rotation_required_at: null });
+    expect(await db().prepare('SELECT revision FROM managed_exit_catalog WHERE singleton_id = 1')
+      .first()).toEqual({ revision: 2 });
   });
 
   it('retires an empty node: catalog gone, token revoked, no incident', async () => {
