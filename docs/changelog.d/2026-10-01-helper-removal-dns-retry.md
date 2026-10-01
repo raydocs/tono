@@ -1,11 +1,11 @@
 ## 2026-10-01 · macOS helper：卸载保留 DNS 重试，显式恢复中断后补完 AI 清理
-- 归属：macOS helper（G4 冻结外的 issue 修复）；协议 4.52.29 → 4.52.30（#795 已占 4.52.29）。
+- 归属：macOS helper（G4 冻结外的 issue 修复）；协议 4.52.30 → 4.52.31（#795、#763 已占 4.52.29、4.52.30）。
 - 来源：origin/main `0676435b` → 分支 `claude/fix-1165-removal-dns-retry`（PR 见 GitHub，Fixes #1165、#1169）。
 - 缺陷修复：
   - #1165：Tono.app 被删后 helper 自行卸载、或 `--emergency-reset`，在自有 DNS 恢复失败（如 SCPreferences 锁被占）时仍删除 daemon，DNS 可能停在已停止的 127.0.0.1。现在 PF 照常放开，但 DNS 未恢复就保留安装；空闲检查与 Core 停止后的 DNS 恢复继续重试。reset 会重新 bootstrap daemon 并返回失败，提示稍后再运行。
   - #1169：显式 Restore 在放开 PF 之后、清理选择性 AI 层之前 helper 退出，之后的启动不会补完清理。现在显式放开先写 `releasing`，清理完成后写 `released`；启动、Core 停止后的 watchdog 与启动失败路径只对 `releasing` 补完一次清理，已完成的 `released` 不再动任何路由或 resolver 文件。
 - 新增/优化：无。自动保留 AI 的 `retain-ai` 行为不变；不重新启用全局 PF。
 - 工程与测试：`--update-self-test` 加 `removal-keeps-helper-when-dns-restore-failed`；`--lifecycle-self-test` 加 `runInterruptedExplicitRemovalSelfTest`；原中断自测的显式释放改写到临时路径。
-- 验证：本机不运行 Swift；CONTRACT 哈希用 build-core-helper.sh 的同一清单和规则重算（main 上复算得 4.52.29 原值 86c629a0…，本分支 4.52.30 a926aae0…）。Swift 自测由托管 macOS CI 运行。
+- 验证：本机不运行 Swift；CONTRACT 哈希用 build-core-helper.sh 的同一清单和规则重算（main 上复算得 4.52.30 原值 948f7ef5…，本分支 4.52.31 0b5c6fc5…）。Swift 自测由托管 macOS CI 运行。
 - 候选/发布：仅源码，无新候选。
 - 剩余限制：DNS 持续失败时 helper 一直保留（PF 已放开）；选择性路由删除仍按目的地不验归属（#1164，未修）；未做原生中断/锁竞争实机验证（needs-hardware）。

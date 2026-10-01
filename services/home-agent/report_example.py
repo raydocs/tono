@@ -36,6 +36,9 @@ REJECTED_REPORT_STATUSES = frozenset({400, 409, 413, 422})
 MAX_INVENTORY_DEVICES = 2_000
 MAX_TAILSCALE_STATUS_BYTES = 4 * 1024 * 1024
 DEFAULT_STATE = "/Library/Application Support/Tono/HomeAgent/state.json"
+# Zone browser-integrity rejects a bare urllib UA with CF 403/1010; same
+# shape as the exit agent's header.
+USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) tono-home-agent/1.0"
 DEFAULT_TAILSCALE_CLI = "/usr/local/bin/tailscale"
 DEFAULT_TOKEN_FILE = "/Library/Application Support/Tono/HomeAgent/token"
 SOURCE_ID_PATTERN = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
@@ -321,6 +324,7 @@ def fetch_inventory(
         method="GET",
         headers={
             "authorization": f"Bearer {token}",
+            "user-agent": USER_AGENT,
             "accept": "application/json",
         },
     )
@@ -535,6 +539,7 @@ def post_reports(base: str, token: str, reports: list[dict[str, Any]]) -> None:
         method="POST",
         headers={
             "authorization": f"Bearer {token}",
+            "user-agent": USER_AGENT,
             "content-type": "application/json",
             "accept": "application/json",
         },
@@ -557,6 +562,7 @@ def acknowledge_metering(base: str, token: str, observed_at: int) -> None:
         method="POST",
         headers={
             "authorization": f"Bearer {token}",
+            "user-agent": USER_AGENT,
             "content-type": "application/json",
             "accept": "application/json",
         },
