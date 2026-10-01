@@ -32,16 +32,17 @@ Hunter: Grok 4.7。席位：macOS 运行时 M5–M8（第二个强模型，在 S
 
 ## 拉取请求
 
-自动合并用 merge commit（`gh pr merge --auto --merge`）。本席对下面四个 head 启用过，GitHub 当时记下 method MERGE。`raydocs` 用户随后关闭（最近一次 2026-10-01T00:27:22Z 至 00:27:27Z，`performed_via_github_app` 为空）。这不是推送 token 失败。标签接口对本集成返回 HTTP 403（`Resource not accessible by integration`），本席加不上标签。
+修复 PR 曾用 `gh pr merge --auto --merge` 打开自动合并（merge commit）。合并管理员随后关掉（最近一次 2026-10-01T00:27:22Z 至 00:27:27Z）。这是排队行为，本席不再打开。没有对本席任何 PR 执行不带 `--auto` 的合并。文档 PR [#876](https://github.com/raydocs/tono/pull/876) 保持非草稿、不启用自动合并，交给合并管理员分批。标签接口对本集成返回 HTTP 403，本席加不上标签。
 
 | PR | 分支 | head | 自动合并 | 标签 |
 |---|---|---|---|---|
-| [#835](https://github.com/raydocs/tono/pull/835) | `hunt/grok-macrt-apipa-gateway` | `2dcc2471be50132b19bf5d5f8f488a62dc4dce6c` | MERGE | `needs-hardware` 已在 PR 上（不是本 token 加上的） |
-| [#836](https://github.com/raydocs/tono/pull/836) | `hunt/grok-macrt-split-dns-files` | `54d94095f1553d7549c3ccfa650390be7e750d94` | MERGE | `needs-hardware` 已在 PR 上（不是本 token 加上的） |
-| [#840](https://github.com/raydocs/tono/pull/840) | `hunt/grok-macrt-launch-status-timeout` | `c14512a713c57196d443f75d39bee928e8061110` | MERGE | 应有 `needs-hardware`。POST labels 403，目前无标签 |
-| [#854](https://github.com/raydocs/tono/pull/854) | `hunt/grok-macrt-initial-data-once` | `25a111c715e8de9b8687824faccadf767f2d8620` | MERGE | 不需要。只改启动时的内存应用，不改路由、TUN、PF、DNS、防火墙 |
+| [#835](https://github.com/raydocs/tono/pull/835) | `hunt/grok-macrt-apipa-gateway` | `2dcc2471be50132b19bf5d5f8f488a62dc4dce6c` | 曾启用，现已关闭，不再打开 | `needs-hardware` 已在 PR 上（不是本 token 加上的） |
+| [#836](https://github.com/raydocs/tono/pull/836) | `hunt/grok-macrt-split-dns-files` | `54d94095f1553d7549c3ccfa650390be7e750d94` | 曾启用，现已关闭，不再打开 | `needs-hardware` 已在 PR 上（不是本 token 加上的） |
+| [#840](https://github.com/raydocs/tono/pull/840) | `hunt/grok-macrt-launch-status-timeout` | `c14512a713c57196d443f75d39bee928e8061110` | 曾启用，现已关闭，不再打开 | 应有 `needs-hardware`。POST labels 403，目前无标签 |
+| [#854](https://github.com/raydocs/tono/pull/854) | `hunt/grok-macrt-initial-data-once` | `25a111c715e8de9b8687824faccadf767f2d8620` | 曾启用，现已关闭，不再打开 | 不需要。只改启动时的内存应用，不改路由、TUN、PF、DNS、防火墙 |
+| [#876](https://github.com/raydocs/tono/pull/876) | `hunt/grok-macrt-w1-report` | 本 PR | 不启用 | 仅文档 |
 
-四个 head 都已合入当时的 `origin/main`（报告时 `5ba113d2`），避免 BEHIND 卡住合并队列。
+四个修复 head 都已合入当时的 `origin/main`（报告时 `5ba113d2`）。
 
 ## 已开问题
 
