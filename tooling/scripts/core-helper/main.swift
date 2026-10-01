@@ -1639,14 +1639,21 @@ func releaseIfTonoWasRemoved(
 /// A DNS restore failure still opens PF but keeps the installation: this
 /// daemon's DNS recovery and the next removal check retry it (#1165). So
 /// does a Core that survived SIGKILL: the next removal check stops it again
-/// (#1251).
+/// (#1251). So does an AI-layer removal (resolver restore or route delete)
+/// that stayed pending: only this helper's start and watchdog retry it, and
+/// without them the `/etc/resolver` sinkhole outlives Tono.
 func releaseRemovedInstallationLocked(
     _ storage: UpdateStorage,
     release: (UpdateStorage) -> EmergencyReleaseOutcome = { emergencyRelease(underLock: $0) },
+    selectiveRemovalPending: () -> Bool = { KillSwitchManager.selectiveRemovalPending() },
     removeInstallation: () -> Void = { removeHelperInstallation(); bootoutRemovedHelper() }
 ) -> Bool {
     switch release(storage) {
     case .released:
+        if selectiveRemovalPending() {
+            fputs("tono: removal kept the helper because the AI-service layer was not removed; retrying later\n", stderr)
+            return false
+        }
         removeInstallation()
         return true
     case .refused:

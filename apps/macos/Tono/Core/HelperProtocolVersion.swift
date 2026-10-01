@@ -378,7 +378,10 @@ nonisolated enum HelperProtocolVersion {
     /// - 4.52.34 → 4.52.35: a selective cleanup that cannot restore a resolver
     ///   or finish a route delete keeps the removal pending ("releasing")
     ///   instead of recording it as released, so start and the watchdog retry it.
-    static let current = "4.52.35"
+    /// - 4.52.35 → 4.52.36: app-removal cleanup keeps the helper (PF released,
+    ///   DNS restored) while that AI-layer removal is still pending, so the
+    ///   retry above still has a helper to run it.
+    static let current = "4.52.36"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS

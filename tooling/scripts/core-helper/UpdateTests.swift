@@ -607,6 +607,16 @@ func runUpdateSelfTests() -> Bool {
         try check(!releaseRemovedInstallationLocked(storage, release: survived, removeInstallation: { removals += 1 })
                   && removals == 0, "A removal deleted the helper while a stale Core was still running")
     }
+    // MAC-REMOVAL-SELECTIVE-PENDING: a failed AI-layer cleanup stays pending
+    // for start and the watchdog; removal deleted the only helper to retry it.
+    test("removal-keeps-helper-while-selective-removal-pending") { directory in
+        let storage = try UpdateStorage(root: directory + "/idle")
+        var removals = 0
+        try check(!releaseRemovedInstallationLocked(storage, release: { _ in .released },
+                                                    selectiveRemovalPending: { true },
+                                                    removeInstallation: { removals += 1 })
+                  && removals == 0, "A removal deleted the helper while the AI-layer removal was pending")
+    }
     // An iPhone or iPad app on Apple silicon is a wrapper with no Contents
     // folder (`WrappedBundle -> Wrapper/<name>.app`). One of them kept every
     // removed Tono's protection (BRICK-M3). A bundle that has Contents but no
