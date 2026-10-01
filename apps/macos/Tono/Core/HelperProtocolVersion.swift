@@ -311,12 +311,13 @@ nonisolated enum HelperProtocolVersion {
     ///   pf.conf that would load the stale rules back. A PF repair records
     ///   repairedSinceArm before it can replace kernel rules, so a repair that
     ///   throws after loading still makes the app re-arm.
-    /// - 4.52.9 → 4.52.10: update-failure and unreadable-ledger emergency
+    /// - 4.52.9 → 4.52.10: (other open helper PRs)
+    /// - 4.52.10 → 4.52.11: update-failure and unreadable-ledger emergency
     ///   release restore a saved dead-loopback DNS snapshot and apply the
     ///   secondary AI sinkhole after clearing PF intent (same class as a
     ///   crash/hang release). Previously `releaseInstalledBlock` alone left
     ///   DNS on 127.0.0.1 and skipped SelectiveFailOpen.
-    static let current = "4.52.10"
+    static let current = "4.52.11"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS
