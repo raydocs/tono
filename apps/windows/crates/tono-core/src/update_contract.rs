@@ -38,6 +38,10 @@ pub struct Components {
     pub app_sha256: String,
     pub core_sha256: String,
     pub privileged_sha256: String,
+    /// Empty on packages that predate the fourth binary. A present value is the
+    /// SHA-256 of `sing-box.exe` and must be 64 lowercase hex characters.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub sing_box_sha256: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -86,6 +90,8 @@ impl ReleaseManifest {
                     || !hex(&t.components.app_sha256, 64)
                     || !hex(&t.components.core_sha256, 64)
                     || !hex(&t.components.privileged_sha256, 64)
+                    || (!t.components.sing_box_sha256.is_empty()
+                        && !hex(&t.components.sing_box_sha256, 64))
             })
         {
             return Err(ContractError::Document);

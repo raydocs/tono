@@ -34,6 +34,18 @@ Do not delete the state file or rename a source to a friendlier node ID during
 this upgrade. Either action loses the only durable counter baseline or creates a
 second cumulative ledger.
 
+The authenticated roster also carries `sourceUsageWatermarks`, separately from
+its active `identities`: every account previously billed by this source keeps
+its `last_total_bytes` recovery watermark even after expiry or quota removal.
+After a missing local ledger, the agent adopts those totals for retained Xray
+counters before reporting; it installs only the active identities. Both the
+control plane and agent must support this additive field to recover inactive
+accounts. Older control planes retain the identity-only fallback. Outage rounds
+never use a saved recovery watermark as a fresh billing observation.
+If a successful counter snapshot contains no label for an account, its watermark
+is retained as an accounting-only carry so later counters add new usage. That
+carry never authorizes a client or enters the installed-client inventory.
+
 The roster cycle is ordered deliberately:
 
 1. Fetch and validate the roster.

@@ -53,7 +53,7 @@ is a label, **not** a downgrade comparator or installed-identity proof.
 | `targets` | Exactly one `macos-arm64` and one `windows-x86_64` target |
 | target `id` | One of those two identifiers; not the native updater's feed key |
 | target `artifactSha256`, `artifactSizeBytes` | Expected archive digest and 1–4,294,967,296 bytes |
-| target `components` | Required `appSha256`, `coreSha256`, `privilegedSha256` |
+| target `components` | Required `appSha256`, `coreSha256`, `privilegedSha256`. Optional `singBoxSha256` (64 lowercase hex) when the Windows package includes `sing-box.exe`; omitted on older manifests |
 
 One release/build binds both targets, but their bytes, native signing identities,
 installers and OS verification remain distinct. There are no URLs, arbitrary

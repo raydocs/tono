@@ -103,7 +103,11 @@ extension KillSwitchManager {
 
         // 1. Armed with the reviewed-bundle permit: it must be installed, and
         //    the catch-all must still be the last word.
-        let armedRules = renderRules(state: state(reviewedBundleDirect: true), allowedUID: 501)
+        let physicalInterfaces = physicalEgressInterfaces()
+        let armedRules = renderRules(
+            state: state(reviewedBundleDirect: true), allowedUID: 501,
+            physicalInterfaces: physicalInterfaces
+        )
         guard let armed = load(armedRules) else {
             FileHandle.standardError.write(Data("lifecycle: armed ruleset failed to load\n".utf8))
             return false
@@ -112,6 +116,7 @@ extension KillSwitchManager {
             FileHandle.standardError.write(Data("--- kernel holds ---\n\(armed)\n".utf8))
         }
         check("armed-permit-installed", permitCount(armed) == expectedPermitRules)
+        check("kernel-lan-dns-interfaces", lanDNSInterfaces(in: armed) == physicalInterfaces)
         check("armed-fails-closed", armed.contains("block drop out quick all"))
         // Order is only observable in what the kernel holds. A permit placed
         // after the catch-all parses, prints, and satisfies every substring
@@ -1540,6 +1545,54 @@ extension KillSwitchManager {
         }
     }
 
+    /// The old general intent may be gone when an automatic release dies.
+    /// A fresh reader must resume only the persisted selective disposition.
+    static func runInterruptedSelectiveReleaseSelfTest() -> Bool {
+        struct Interrupted: Error {}
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("tono-selective-recovery-\(UUID().uuidString)")
+        let record = directory.appendingPathComponent("intent").path
+        var generalIntentPresent = true
+        var applied = false
+        do {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
+            defer { try? FileManager.default.removeItem(at: directory) }
+            do {
+                try releaseWithAIHold(
+                    preserveAIHold: true,
+                    recordDisposition: { try saveSelectiveRecoveryDisposition($0, path: record) },
+                    release: {
+                        generalIntentPresent = false
+                        throw Interrupted()
+                    },
+                    applySelectiveLayer: { applied = true },
+                    removeSelectiveLayer: {}
+                )
+                return false
+            } catch is Interrupted {}
+            guard !generalIntentPresent, !applied,
+                  try selectiveRecoveryDisposition(path: record) == true else { return false }
+            reconcileSelectiveRecovery(
+                generalIntentPresent: generalIntentPresent,
+                disposition: try selectiveRecoveryDisposition(path: record),
+                applySelectiveLayer: { applied = true }
+            )
+            guard applied else { return false }
+            try releaseWithAIHold(
+                preserveAIHold: false,
+                recordDisposition: { try saveSelectiveRecoveryDisposition($0, path: record) },
+                release: {}, applySelectiveLayer: { return }, removeSelectiveLayer: {}
+            )
+            applied = false
+            reconcileSelectiveRecovery(
+                generalIntentPresent: false,
+                disposition: try selectiveRecoveryDisposition(path: record),
+                applySelectiveLayer: { applied = true }
+            )
+            return !applied
+        } catch { return false }
+    }
+
     /// A failed arm or sleep barrier must not flush a ruleset pfctl never
     /// replaced. Only a load that was accepted, or that never answered, may
     /// have committed.
@@ -1560,6 +1613,7 @@ extension KillSwitchManager {
         var intentPresent = true
         var events: [String] = []
         releaseInstalledBlock(
+            recordDisposition: { _ in },
             release: {
                 events.append("release")
                 intentPresent = false
@@ -1575,6 +1629,7 @@ extension KillSwitchManager {
         struct ReleaseFailed: Error {}
         var applied = false
         releaseInstalledBlock(
+            recordDisposition: { _ in },
             release: { throw ReleaseFailed() },
             applySelectiveLayer: { applied = true }
         )

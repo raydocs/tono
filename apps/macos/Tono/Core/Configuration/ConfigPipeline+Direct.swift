@@ -38,6 +38,7 @@ nonisolated extension ConfigPipeline {
     static func directSuffixOverlapsProtected(_ host: String) -> Bool {
         isProtectedFromDirect(host) || managedDirectGuardSuffixes.contains {
             $0.hasSuffix(".\(host)")
+                && !(host == "aliyuncs.com" && dedicatedModelAPISuffixes.contains($0))
         }
     }
 

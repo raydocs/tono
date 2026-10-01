@@ -232,6 +232,42 @@ func runUpdateSelfTests() -> Bool {
         try refuses { try engine.gate(method: "POST", path: "/core/start", peer: successor) }
     }
 
+    test("automatic-update-release-preserves-ai-and-consumed-obligation") { directory in
+        let store = try UpdateStorage(root: directory)
+        var observed: UpdateContractV1.Protection = .connected
+        var explicitReleases = 0
+        var selectiveReleases = 0
+        var io = effects()
+        io.observe = { observed }
+        io.disconnect = { explicitReleases += 1 }
+        io.disconnectPreservingAIHold = {
+            try check(store.load().attempt?.disconnectRequested == true,
+                      "Automatic release preceded its durable stop intent")
+            selectiveReleases += 1
+        }
+        let engine = UpdateTransaction(storage: store, effects: io)
+        try reserved(store, engine)
+        observed = .protectedOffline
+        try engine.execute(peer: owner)
+        try UpdateExecutor.perform(storage: store, validate: { _ in }, replace: { _ in }, rollback: { _ in })
+        try engine.reconcile(peer: successor)
+        let before = try store.load()
+        let wrongOwner = TonoAuthenticatedPeer(uid: 502, auditToken: successor.auditToken, bundleURL: owner.bundleURL)
+        try refuses { try engine.disconnect(peer: wrongOwner, preserveAIHold: true) }
+        try engine.disconnect(peer: successor, preserveAIHold: true)
+        let result = try store.load()
+        try check(selectiveReleases == 1 && explicitReleases == 0,
+                  "Automatic update cleanup used explicit release")
+        try check(result.attempt?.disconnectVerified == true,
+                  "Automatic cleanup was not recorded")
+        try check(result.highWater == before.highWater && result.generation == before.generation
+                  && result.attempt?.execution == .replaced
+                  && result.attempt?.receipt.phase == .installedIdentityVerified
+                  && result.attempt?.receipt.requiredRecovery == .connected
+                  && result.attempt?.successorToken == before.attempt?.successorToken,
+                  "Automatic release rewrote the update obligation or incarnation")
+    }
+
     test("unconsumed-retirement-archives-before-new-admission") { directory in
         let store = try UpdateStorage(root: directory)
         var baseline = UpdateStorage.Ledger()

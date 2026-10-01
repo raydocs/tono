@@ -270,6 +270,44 @@ describe('ops ledger, month close, live FX', () => {
     })).status).toBe(304);
   });
 
+  it('exports the source effect when a reversal is reversed again', async () => {
+    const created = await ops('ledger', json({
+      kind: 'revenue', category: 'plan', subjectType: 'fleet',
+      amountMinor: 800, currency: 'CNY', month: MONTH(),
+    }));
+    const entry = assertLedgerEntry(await created.json());
+    const reverse = assertLedgerEntry(await (await ops(`ledger/${entry.id}/reverse`, json({}))).json());
+    expect((await ops(`ledger/${encodeURIComponent(reverse.id)}/reverse`, json({}))).status).toBe(201);
+    const csv = await (await ops(`months/${MONTH()}/export.csv`)).text();
+    const total = csv.trim().split(/\r\n/).at(-1)!.split(',');
+    expect(Number(total[5])).toBe(800);
+    expect(Number(total[9])).toBe(800);
+  });
+
+  it('resolves zero-rounded legacy reversal ancestry outside the exported month', async () => {
+    const previous = shiftMonth(MONTH(), -1);
+    const rootId = crypto.randomUUID();
+    const legacyReverseId = crypto.randomUUID();
+    const t = tnow();
+    for (const [entryId, reverses, reversedBy] of [
+      [rootId, null, legacyReverseId], [legacyReverseId, rootId, null],
+    ]) {
+      await db().prepare(
+        `INSERT INTO ops_ledger_entries(
+           id, kind, category, subject_type, amount_minor, currency,
+           fx_rate_to_cny, fx_date, cny_minor, month, reverses, reversed_by, created_at, updated_at
+         ) VALUES(?, 'cost', 'other', 'fleet', 1, 'KRW', 0.004, ?, 0, ?, ?, ?, ?, ?)`,
+      ).bind(entryId, DAY(), previous, reverses, reversedBy, t, t).run();
+    }
+    expect((await ops(`ledger/${legacyReverseId}/reverse`, json({}))).status).toBe(201);
+    const csv = await (await ops(`months/${MONTH()}/export.csv`)).text();
+    const lines = csv.trim().split(/\r\n/);
+    expect(lines).toHaveLength(3);
+    const total = lines.at(-1)!.split(',');
+    expect(Number(total[5])).toBe(-1);
+    expect(Number(total[9])).toBe(0);
+  });
+
   it('keeps the subject of a reversed entry and of its reversal fixed', async () => {
     const created = await ops('ledger', json({
       kind: 'revenue', category: 'plan', subjectType: 'user', subjectId: 'u-A',

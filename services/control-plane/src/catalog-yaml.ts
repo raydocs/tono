@@ -299,6 +299,25 @@ function catalogScalar(block: string, key: string): string | null {
   return raw.replace(/^"(.*)"$/, '$1').replace(/^'(.*)'$/, '$1').trim();
 }
 
+/** Relisting cannot reconstruct the separately issued SPKI pin from a profile's DER hash. */
+export function catalogHy2RelistBlockIsComplete(block: string): boolean {
+  const rawPort = catalogScalar(block, 'port') ?? '';
+  const port = Number(rawPort);
+  return catalogProxyType(block) === 'hysteria2'
+    && Boolean(catalogScalar(block, 'server'))
+    && Boolean(catalogScalar(block, 'sni') ?? catalogScalar(block, 'servername'))
+    && /^\d+$/.test(rawPort)
+    && Number.isSafeInteger(port) && port > 0 && port <= 65535
+    && /^[0-9a-f]{64}$/i.test((catalogScalar(block, 'fingerprint') ?? '').replace(/:/g, ''))
+    && block.includes(HY2_SPKI_PIN_KEY) && catalogSpkiPinIsAdmissible(block);
+}
+
+/** Job parameters are stored before execution; never persist a live client credential. */
+export function catalogRelistTemplateUsesManagedIdentity(block: string): boolean {
+  return catalogProxyUsesManagedIdentity(block)
+    && (catalogProxyType(block) !== 'vless' || catalogFieldKeys(block, 'password') === 0);
+}
+
 /**
  * The VLESS fields both clients require before they admit a node (macOS
  * `validatedOwnedNode`, Windows `admit_node`). One inadmissible entry makes
