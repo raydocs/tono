@@ -1711,8 +1711,8 @@ pub fn startup_barrier_release_owed() -> bool {
 /// Cross-process fence for the update-held release (#1292): every update writer takes the
 /// store's lock, so the Service holds it from the final re-check until WFP removal commits.
 /// Another holder is a live owner, and so is a re-check that no longer owes the release: this
-/// attempt aborts and the next watchdog tick asks again. A lock that fails for another reason
-/// cannot fence a writer either; in doubt the release stays owed.
+/// attempt aborts and the next watchdog tick asks again. So does any other lock failure: no
+/// teardown runs without the fence.
 pub fn startup_release_fence() -> Result<Option<std::fs::File>> {
     let root = crate::service_paths()
         .persistent_state_dir()
@@ -1721,16 +1721,9 @@ pub fn startup_release_fence() -> Result<Option<std::fs::File>> {
 }
 
 fn release_fence_at(root: &Path, owed: impl FnOnce() -> bool) -> Result<Option<std::fs::File>> {
-    let lock = match Store::lock_only(root) {
-        Ok(lock) => Some(lock),
-        Err(error) if error.is::<StoreBusy>() => return Err(error),
-        Err(error) => {
-            tracing::warn!("update release fence could not take the store lock: {error:#}");
-            None
-        }
-    };
+    let lock = Store::lock_only(root).context("update release fence")?;
     ensure!(owed(), "the update-held barrier release is no longer owed");
-    Ok(lock)
+    Ok(Some(lock))
 }
 
 /// Conclusive death of a recorded incarnation: no live process has its PID, or the PID now
@@ -1887,6 +1880,10 @@ mod tests {
         );
         drop(fence);
         assert!(release_fence_at(&root, || false).is_err());
+        assert!(
+            release_fence_at(&root.join("missing"), || true).is_err(),
+            "a lock that was not taken is no fence"
+        );
         std::fs::remove_dir_all(root).unwrap();
     }
 

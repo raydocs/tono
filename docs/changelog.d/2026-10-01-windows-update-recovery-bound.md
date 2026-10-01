@@ -46,3 +46,7 @@
     - a different creation time means another incarnation;
     - only a refused open is inconclusive.
   - Tests: `update_release_fence_yields_to_a_store_holder`, `update_inconclusive_probe_does_not_demote_a_launching_executor`, `process_started_at_proves_exit_without_the_image_path`, and the fence abort in `update_held_startup_barrier_releases_with_the_ai_hold`, all on Windows CI.
+- 2026-10-01 continuation (Codex review at `5db589ec`, F3 residual and F6):
+  - F3 residual: the store-lock fence now moves into the blocking WFP removal call (`remove_all_filters_holding`). The lock is released only when the removal itself returns (commit or abort). Before, it was released when the 25 s bounded wait gave up while the kernel call could still commit.
+  - F6: every lock failure aborts the tick, not only `StoreBusy`. No teardown runs without the fence.
+  - Tests: `update_release_fence_yields_to_a_store_holder` now also asserts that a lock that was not taken aborts. The lock moving into the native removal closure has no unit seam: `engine_call` runs only in the non-`test` Windows build. Hardware verification remains (`needs-hardware`).

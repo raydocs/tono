@@ -1485,6 +1485,26 @@ async fn remove_all_filters_unlocked() -> Result<()> {
     }
 }
 
+/// [`remove_all_filters_unlocked`] with the update release fence moved into the engine call: the
+/// store lock is released only when the blocking removal itself returns (commit or abort), not
+/// when the bounded wait for it gives up (#1292).
+async fn remove_all_filters_holding(fence: Option<std::fs::File>) -> Result<()> {
+    #[cfg(all(windows, not(feature = "test")))]
+    {
+        engine_call("remove all filters", move || {
+            let _fence = fence;
+            crate::core::wfp::remove_all_filters()
+        })
+        .await
+    }
+    #[cfg(not(all(windows, not(feature = "test"))))]
+    {
+        let removed = remove_all_filters_unlocked().await;
+        drop(fence);
+        removed
+    }
+}
+
 /// Upgrade/migration sweep: remove sublayers left by older builds (filters included). Must
 /// run strictly *after* the current expected set is committed (or all filters were removed
 /// on purpose): an older build's PERSISTENT block-all pair may be the only protection at
@@ -3240,7 +3260,7 @@ async fn disarm_unlocked_with_narrow(apply_narrow: Option<bool>) -> Result<()> {
 /// after the filters are gone does not reinstall them.
 async fn release_unproven_wanted_session_unlocked() -> Result<()> {
     // Held until WFP removal commits: no update writer can start under this release (#1292).
-    let _update_fence = update_release_fence()?;
+    let update_fence = update_release_fence()?;
     if let Err(error) = bounded_dns_call(
         "wanted session core window",
         crate::core::dns::ensure_restored(),
@@ -3255,7 +3275,7 @@ async fn release_unproven_wanted_session_unlocked() -> Result<()> {
         ));
     }
     hold_ai_before_release(true).await;
-    remove_all_filters_unlocked().await.context(
+    remove_all_filters_holding(update_fence).await.context(
         "wanted-session core window could not remove WFP; the block stays until the next tick",
     )?;
     clear_wanted_core_window();
