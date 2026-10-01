@@ -795,13 +795,13 @@ struct MultiExitPolicyTests {
             ("rule-delimiters-are-hex-escaped", delimitersAreHexEscaped),
             ("assistant-path-verdicts", assistantPathVerdictsHold),
             (
-                "no-assistant-domain-suffix-without-home",
+                "only-dedicated-api-carveouts-without-home",
                 ConfigPipeline.assistantHomeDomainSuffixes.allSatisfy { suffix in
                     !managedDirectRuntime.contains(
-                        "DOMAIN-SUFFIX,\(suffix)),\(ConfigPipeline.claudeHomeGroupName)"
-                    ) && !managedDirectRuntime.contains(
-                        "DOMAIN-SUFFIX,\(suffix)),\(ConfigPipeline.exitGroupName)"
-                    )
+                        "DOMAIN-SUFFIX,\(suffix))),\(ConfigPipeline.claudeHomeGroupName)"
+                    ) && managedDirectRuntime.contains(
+                        "DOMAIN-SUFFIX,\(suffix))),\(ConfigPipeline.exitGroupName)"
+                    ) == ConfigPipeline.dedicatedModelAPISuffixes.contains(suffix)
                 }
             ),
             (

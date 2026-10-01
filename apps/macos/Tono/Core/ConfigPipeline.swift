@@ -286,6 +286,13 @@ nonisolated struct ConfigPipeline {
     /// generic 204 already distinguishes a stalled hop from a healthy one.
     static let claudeHomeHealthURL = "https://www.gstatic.com/generate_204"
 
+    /// Dedicated Model Studio APIs within the otherwise DIRECT Alibaba tree.
+    /// Regional, coding, workspace, trial and token-plan hosts are descendants.
+    static let dedicatedModelAPISuffixes = [
+        "dashscope.aliyuncs.com", "dashscope-intl.aliyuncs.com",
+        "dashscope-us.aliyuncs.com", "maas.aliyuncs.com",
+    ]
+
     /// Assistant providers that must egress through the residential hop. They
     /// score datacenter ranges as abuse, so a shared cloud exit invites
     /// challenges and blocks that a residential identity avoids.
@@ -306,7 +313,7 @@ nonisolated struct ConfigPipeline {
     /// traffic onto a consumer uplink. `gstatic.com` would be actively harmful:
     /// it is this group's own liveness probe, and sending the probe through the
     /// hop it is meant to test would mask exactly the stalls we check for.
-    static let assistantHomeDomainSuffixes = [
+    static let assistantHomeDomainSuffixes = dedicatedModelAPISuffixes + [
         // Anthropic
         "anthropic.com",
         "claude.ai",

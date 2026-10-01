@@ -170,13 +170,26 @@ nonisolated extension ConfigPipeline {
              "detour": exitGroupName],
         ]
         var dnsRules: [[String: Any]] = [["query_type": ["AAAA"], "action": "predefined", "rcode": "NOERROR"]]
+        // Preserve hostname identity for protected listeners before the broad
+        // Alibaba China-DNS rule; outbound lookups still use tunnelled real DNS.
+        dnsRules.append(["inbound": ["Tono-DNS", "Tono-TUN", "Tono-Mixed"], "query_type": ["A"],
+            "domain_suffix": dedicatedModelAPISuffixes, "action": "route", "server": "Tono-FakeIP", "rewrite_ttl": 30])
+        dnsRules.append(["domain_suffix": dedicatedModelAPISuffixes, "action": "evaluate", "server": "Tono-DoH", "tag": "model-api-primary"])
+        dnsRules.append(["match_response": "model-api-primary", "response_rcode": "NOERROR", "action": "respond"])
+        dnsRules.append(["domain_suffix": dedicatedModelAPISuffixes, "action": "evaluate", "server": "Tono-DoH-Backup", "tag": "model-api-backup"])
+        dnsRules.append(["match_response": "model-api-backup", "action": "respond"])
+        // Failed evaluations have no named response. Never let both failures
+        // fall through to the broad Alibaba DIRECT DNS rule below.
+        dnsRules.append(["domain_suffix": dedicatedModelAPISuffixes, "action": "reject"])
         var rules: [[String: Any]] = [
             ["inbound": ["Tono-DNS"], "action": "hijack-dns"],
             ["port": [53], "action": "hijack-dns"],
         ]
         let assistant = home == nil ? exitGroupName : claudeHomeGroupName
+        rules.append(["network": "tcp", "domain_suffix": home == nil ? dedicatedModelAPISuffixes : assistantHomeDomainSuffixes,
+            "action": "route", "outbound": assistant])
+        rules.append(["network": "udp", "domain_suffix": dedicatedModelAPISuffixes, "action": "reject"])
         if home != nil {
-            rules.append(["network": "tcp", "domain_suffix": assistantHomeDomainSuffixes, "action": "route", "outbound": assistant])
             rules.append(["network": "tcp", "ip_cidr": assistantHomeIPv4Cidrs, "action": "route", "outbound": assistant])
         }
         rules.append(["network": "tcp", "process_name": assistantHomeProcessNames, "action": "route", "outbound": assistant])

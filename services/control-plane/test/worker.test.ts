@@ -5076,6 +5076,48 @@ ${nameLine}
     expect(JSON.parse((await published.json() as any).json).directSuffixes).toEqual(allowed.directSuffixes);
   });
 
+  it('keeps dedicated DashScope APIs protected while serving the signed Alibaba DIRECT parent', async () => {
+    const policy = {
+      version: 3, domains: [], mediaEndpoints: [], webDomains: [],
+      directSuffixes: [{ host: 'aliyuncs.com', ports: [80, 443] }],
+    };
+    const preview = await admin('traffic-policy', { policy, dryRun: true }, 'PUT');
+    expect(preview.status).toBe(200);
+    const canonical = (await preview.json() as any).json;
+    const published = await admin('traffic-policy', {
+      policy, expectedRevision: 0, signature: await signPolicy(canonical),
+    }, 'PUT');
+    expect(published.status).toBe(200);
+    const account = await createAccount('dashscope-parent-policy');
+    const fetched = await api('traffic-policy', {
+      headers: { authorization: `Bearer ${account.accessToken}` },
+    });
+    expect(fetched.status).toBe(200);
+    expect((await fetched.json() as any).json).toBe(canonical);
+
+    for (const host of [
+      'dashscope.aliyuncs.com', 'cn-hongkong.dashscope.aliyuncs.com',
+      'coding-intl.dashscope.aliyuncs.com', 'dashscope-intl.aliyuncs.com',
+      'dashscope-us.aliyuncs.com', 'maas.aliyuncs.com',
+      'workspace.cn-beijing.maas.aliyuncs.com', 'trial.ap-southeast-1.maas.aliyuncs.com',
+      'token-plan.ap-southeast-1.maas.aliyuncs.com',
+    ]) {
+      for (const field of ['domains', 'webDomains', 'directSuffixes'] as const) {
+        const attempt = { ...policy, [field]: [{ host, ports: [443] }] };
+        const rejected = await admin('traffic-policy', {
+          policy: attempt, expectedRevision: 1, signature: await signPolicy(JSON.stringify(attempt)),
+        }, 'PUT');
+        expect(rejected.status, `${field}/${host}`).toBe(400);
+        expect((await rejected.json() as any).error.code).toBe('VALIDATION_ERROR');
+      }
+    }
+    // The exception is only the reviewed Alibaba parent, never arbitrary ancestors.
+    const rejected = await admin('traffic-policy', {
+      policy: { ...policy, directSuffixes: [{ host: 'googleapis.com', ports: [443] }] }, dryRun: true,
+    }, 'PUT');
+    expect(rejected.status).toBe(400);
+  });
+
   it('admits product China web suffixes as directSuffixes', async () => {
     const preview = await admin('traffic-policy', {
       policy: {
