@@ -218,10 +218,6 @@ function utcDay(unix: number): number {
   return Math.floor(unix / DAY) * DAY;
 }
 
-function newId(): string {
-  return crypto.randomUUID();
-}
-
 function missingTable(error: unknown): boolean {
   return String(error).includes('no such table');
 }
@@ -238,56 +234,14 @@ function asCounts(value: unknown): QuotaCounts {
   return 'in_out';
 }
 
-async function openCycleRow(db: D1Database, nodeName: string): Promise<Row | null> {
-  return db.prepare(
-    "SELECT * FROM node_traffic_cycles WHERE node_name = ? AND status = 'open'",
-  ).bind(nodeName).first<Row>();
-}
+import {
+  closeOpenCycle,
+  insertOpenCycle,
+  openCycleRow,
+  replaceExpiredOpenCycle,
+} from './quota-cycle';
 
-export async function closeOpenCycle(db: D1Database, nodeName: string, nowSec: number): Promise<void> {
-  const open = await openCycleRow(db, nodeName);
-  if (!open) return;
-  await db.prepare("UPDATE node_traffic_cycles SET status = 'closed', updated_at = ? WHERE id = ?")
-    .bind(nowSec, open.id).run();
-}
-
-function openCycleInsert(
-  db: D1Database,
-  nodeName: string,
-  bounds: CycleBounds,
-  quota: number | null,
-  counters: NetCounters,
-  nowSec: number,
-  previous: Row | null,
-) {
-  const cycleId = newId();
-  const statement = db.prepare(
-    `INSERT INTO node_traffic_cycles(
-       id, node_name, cycle_start, cycle_end, quota_bytes, used_bytes,
-       counter_in_start, counter_out_start, counter_in_last, counter_out_last,
-       resets_detected, status, updated_at
-     ) VALUES(?, ?, ?, ?, ?, 0, ?, ?, ?, ?, 0, 'open', ?)`,
-  ).bind(
-    cycleId, nodeName, bounds.start, bounds.end, quota,
-    counters.in, counters.out, previous?.counter_in_last ?? counters.in, previous?.counter_out_last ?? counters.out, nowSec,
-  );
-  return { cycleId, statement };
-}
-
-async function insertOpenCycle(
-  db: D1Database,
-  nodeName: string,
-  bounds: CycleBounds,
-  quota: number | null,
-  counters: NetCounters,
-  nowSec: number, previous: Row | null = null, // expired cycle: carry its last counters over the gap
-): Promise<Row> {
-  const { cycleId, statement } = openCycleInsert(
-    db, nodeName, bounds, quota, counters, nowSec, previous,
-  );
-  await statement.run();
-  return (await db.prepare('SELECT * FROM node_traffic_cycles WHERE id = ?').bind(cycleId).first<Row>())!;
-}
+export { closeOpenCycle };
 
 function boundsFor(profile: QuotaProfile, nowSec: number): CycleBounds | null {
   const kind = asKind(field(profile, 'cycle_kind', 'cycleKind'));
@@ -322,24 +276,8 @@ export async function rollNodeCycle(
 
   const expired = open && Number(open.cycle_end) <= nowSec && kind !== 'manual' ? open : null;
   if (expired) {
-    if (!expected) {
-      await db.prepare(
-        "UPDATE node_traffic_cycles SET status = 'closed', updated_at = ? WHERE id = ?",
-      ).bind(nowSec, expired.id).run();
-      return null;
-    }
-    // Close and insert commit together. A failed insert must not leave the node
-    // with no open cycle: the next sample would baseline on the live counters
-    // and drop the carried last reading.
-    const replacement = openCycleInsert(db, name, expected, quota, counters, nowSec, expired);
-    await db.batch([
-      db.prepare(
-        "UPDATE node_traffic_cycles SET status = 'closed', updated_at = ? WHERE id = ?",
-      ).bind(nowSec, expired.id),
-      replacement.statement,
-    ]);
-    open = await db.prepare('SELECT * FROM node_traffic_cycles WHERE id = ?')
-      .bind(replacement.cycleId).first<Row>();
+    open = await replaceExpiredOpenCycle(db, name, expected, quota, counters, nowSec, expired);
+    if (!open && !expected) return null;
   }
   if (!open) {
     if (!expected) return null;
