@@ -154,10 +154,16 @@ nonisolated extension ConfigPipeline {
             ["port": [53], "action": "hijack-dns"],
         ]
         let assistant = home == nil ? exitGroupName : claudeHomeGroupName
-        if home != nil {
-            rules.append(["network": "tcp", "domain_suffix": assistantHomeDomainSuffixes, "action": "route", "outbound": assistant])
-            rules.append(["network": "tcp", "ip_cidr": assistantHomeIPv4Cidrs, "action": "route", "outbound": assistant])
-        }
+        // Always, including when no residential hop is bound. Later reviewed-bundle
+        // and suffix rules are first-match DIRECT; without these rows a WeChat
+        // (or other reviewed) process reaches claude.ai and 160.79.104.0/21 on
+        // the physical interface. MATCH would only have caught what those
+        // exceptions did not. UDP exceptions sit above the terminal UDP reject,
+        // so assistant UDP is rejected here and falls back to the TCP route.
+        rules.append(["network": "tcp", "domain_suffix": assistantHomeDomainSuffixes, "action": "route", "outbound": assistant])
+        rules.append(["network": "tcp", "ip_cidr": assistantHomeIPv4Cidrs, "action": "route", "outbound": assistant])
+        rules.append(["network": "udp", "domain_suffix": assistantHomeDomainSuffixes, "action": "reject"])
+        rules.append(["network": "udp", "ip_cidr": assistantHomeIPv4Cidrs, "action": "reject"])
         rules.append(["network": "tcp", "process_name": assistantHomeProcessNames, "action": "route", "outbound": assistant])
         rules.append(["network": "tcp", "process_path_regex": assistantHomeProcessPathRegexes, "action": "route", "outbound": assistant])
         if let plan {

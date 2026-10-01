@@ -683,18 +683,20 @@ nonisolated extension ConfigPipeline {
         // PF session allowlist.
         let hasResidentialHop = claudeHome != nil || claudeHomeSocks5 != nil
         let assistantTarget = hasResidentialHop ? claudeHomeGroupName : exitGroupName
-        // Domain rules exist only to divert assistant traffic onto the
-        // residential hop. Without that hop they would be pure noise — MATCH
-        // already sends these to the protected exit — and emitting them anyway
-        // would put DOMAIN-SUFFIX into a runtime whose direct exceptions are
-        // deliberately exact-host only.
-        if hasResidentialHop {
-            for suffix in Self.assistantHomeDomainSuffixes {
-                yaml += "  - AND,((NETWORK,TCP),(DOMAIN-SUFFIX,\(suffix))),\(assistantTarget)\n"
-            }
-            for cidr in Self.assistantHomeIPv4Cidrs {
-                yaml += "  - AND,((NETWORK,TCP),(IP-CIDR,\(cidr),no-resolve)),\(assistantTarget)\n"
-            }
+        // These rows used to be omitted without a residential hop, on the
+        // theory that MATCH already sends the names to the exit. That is true
+        // only for traffic that does not hit an earlier DIRECT exception.
+        // Reviewed-bundle process rules and suffix routes are first-match and
+        // would otherwise carry assistant names and 160.79.104.0/21 out the
+        // physical interface. UDP exceptions are above the terminal UDP
+        // reject, so assistant UDP is rejected here and falls back to TCP.
+        for suffix in Self.assistantHomeDomainSuffixes {
+            yaml += "  - AND,((NETWORK,TCP),(DOMAIN-SUFFIX,\(suffix))),\(assistantTarget)\n"
+            yaml += "  - AND,((NETWORK,UDP),(DOMAIN-SUFFIX,\(suffix))),REJECT\n"
+        }
+        for cidr in Self.assistantHomeIPv4Cidrs {
+            yaml += "  - AND,((NETWORK,TCP),(IP-CIDR,\(cidr),no-resolve)),\(assistantTarget)\n"
+            yaml += "  - AND,((NETWORK,UDP),(IP-CIDR,\(cidr),no-resolve)),REJECT\n"
         }
         // Process rules are a fallback after hostname identity. In particular,
         // npm and bun run Claude Code as node/node.exe; a process-wide Node rule
