@@ -59,7 +59,13 @@ pub(super) async fn release_explicit_applying_narrow_with_guard(
     let operation = start_narrow_release_with_guard(guard, |guard, apply_narrow| {
         start_explicit_release(state, app, guard, false, apply_narrow)
     }).await;
-    wait_explicit_release(&operation).await
+    complete_automatic_release(&operation).await
+}
+
+async fn complete_automatic_release(operation: &LifecycleOperation) -> Result<(), String> {
+    // Recovery's next step needs the real result, even after a UI waiter has given up.
+    // The detached sequence owns its native deadlines; this wait holds no state lock.
+    operation.wait().await
 }
 
 async fn start_narrow_release_with_guard<G, F>(
@@ -470,6 +476,53 @@ pub(super) async fn stay_armed_after_failed_release(state: &Arc<TonoState>, app:
 mod tests {
     use super::*;
     use tokio::sync::oneshot;
+
+    #[tokio::test(start_paused = true)]
+    async fn automatic_release_keeps_its_success_continuation_after_the_ui_budget() {
+        let state = Arc::new(TonoState::for_test());
+        {
+            let mut inner = state.lock().await;
+            inner.fsm.begin_connect();
+            inner.fsm.mark_kill_switch_armed();
+            inner.fsm.mark_session_verified();
+            inner.fsm.connect_succeeded().unwrap();
+        }
+        let (entered, at_release) = oneshot::channel();
+        let mut entered = Some(entered);
+        let operation = coordinate_release_with_disposition(&state, None, false, true,
+            move |_guard, explicit_disconnect, apply_narrow| {
+                let entered = entered.take().expect("one native release");
+                async move {
+                    assert!(!explicit_disconnect && apply_narrow);
+                    entered.send(()).unwrap();
+                    tokio::time::sleep(EXPLICIT_RELEASE_TIMEOUT + Duration::from_secs(1)).await;
+                    Ok(())
+                }
+            },
+            || async {},
+        ).await;
+        at_release.await.unwrap();
+        let automatic = async {
+            complete_automatic_release(&operation).await?;
+            // Health recovery starts its unarmed probe only after this successful return.
+            Ok::<_, String>("start unarmed recovery")
+        };
+        let explicit = wait_explicit_release(&operation);
+        tokio::pin!(automatic, explicit);
+        assert!(futures::poll!(&mut automatic).is_pending());
+        assert!(futures::poll!(&mut explicit).is_pending());
+        tokio::time::advance(EXPLICIT_RELEASE_TIMEOUT).await;
+        assert!(explicit.await.unwrap_err().contains("background reconciliation continues"));
+        assert!(futures::poll!(&mut automatic).is_pending(),
+            "automatic recovery must not abandon a real release at the UI wait deadline");
+        assert!(state.release_in_progress().await);
+        tokio::time::advance(Duration::from_secs(1)).await;
+        assert_eq!(automatic.await, Ok("start unarmed recovery"));
+        assert!(!state.release_in_progress().await);
+        let inner = state.lock().await;
+        assert!(!inner.fsm.kill_switch_armed());
+        assert!(!inner.fsm.status().is_connected);
+    }
 
     #[tokio::test]
     async fn user_disconnect_join_removes_ai_before_the_shared_release_completes() {
