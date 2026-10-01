@@ -154,7 +154,7 @@ struct GateSecondaryButtonStyle: ButtonStyle {
 
 /// The code step's way out when no email arrives (#596). `auth/email/start`
 /// answers 202 for every address and a failed delivery is silent by design,
-/// so the gate offers the same support actions it offers for a failed launch.
+/// so the gate offers one support action: copy the details for Tono support.
 struct SignInCodeNotReceivedHint: View {
     static let delay: Duration = .seconds(60)
 
@@ -169,16 +169,10 @@ struct SignInCodeNotReceivedHint: View {
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
-            HStack(spacing: 14) {
-                Button {
-                    copyDetails()
-                } label: {
-                    Label("Copy details", systemImage: "doc.on.doc")
-                }
-                Button("Show Diagnostics Log in Finder") {
-                    let url = LocalTrafficAudit.shared.prepareForReveal()
-                    NSWorkspace.shared.activateFileViewerSelecting([url])
-                }
+            Button {
+                copyDetails()
+            } label: {
+                Label("Copy details", systemImage: "doc.on.doc")
             }
             .buttonStyle(.link)
             .font(.caption)

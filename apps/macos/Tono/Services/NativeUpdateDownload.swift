@@ -20,10 +20,14 @@ nonisolated enum NativeUpdateDownload {
         return .init(bytes: bytes, signature: signature, manifest: manifest, directory: directory)
     }
 
-    static func bounded(_ url: URL, maximum: Int) async throws -> Data {
-        let session = URLSession(configuration: .ephemeral)
+    static func bounded(_ url: URL, maximum: Int, timeoutInterval: TimeInterval = 30) async throws -> Data {
+        let configuration = URLSessionConfiguration.ephemeral
+        // The request timeout resets on every received byte. Bound the whole
+        // metadata transfer too, so a trickling response cannot hold the updater.
+        configuration.timeoutIntervalForResource = timeoutInterval
+        let session = URLSession(configuration: configuration)
         defer { session.invalidateAndCancel() }
-        let (stream, response) = try await session.bytes(for: URLRequest(url: url, timeoutInterval: 30))
+        let (stream, response) = try await session.bytes(for: URLRequest(url: url, timeoutInterval: timeoutInterval))
         guard let http = response as? HTTPURLResponse, http.statusCode == 200, http.url == url,
               response.expectedContentLength <= maximum else { throw failure("Update discovery metadata is unavailable or invalid.") }
         var data = Data()

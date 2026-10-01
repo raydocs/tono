@@ -300,7 +300,42 @@ nonisolated enum HelperProtocolVersion {
     /// - 4.52.6 → 4.52.7: an update ledger whose receipt contains a key this
     ///   build does not know is refused and kept on disk. Additive keys
     ///   outside the receipt are still tolerated.
-    static let current = "4.52.7"
+    /// - 4.52.7 → 4.52.8: after that full release, a crash or hang may add a
+    ///   secondary blackhole route for Anthropic's inbound prefixes and
+    ///   `/etc/resolver` files for first-party AI suffixes. Arm, disarm, and
+    ///   emergency recovery remove them. The commands cannot name a default
+    ///   route. A failure leaves the original network open.
+    /// - 4.52.8 → 4.52.9: a release whose placeholder rule file cannot be
+    ///   written still flushes the anchor and removes the intent, and then
+    ///   keeps the standalone emergency main instead of reloading a legacy
+    ///   pf.conf that would load the stale rules back. A PF repair records
+    ///   repairedSinceArm before it can replace kernel rules, so a repair that
+    ///   throws after loading still makes the app re-arm.
+    /// - 4.52.9 → 4.52.10: a failed arm or sleep barrier flushes the installed
+    ///   anchor only after a `pfctl` load that was accepted or never answered.
+    ///   A failure before that load, or a load pfctl rejected, leaves the
+    ///   previous rules in the kernel. `/killswitch/health` omits `live` when
+    ///   pfctl does not answer, and reports down only when a second read
+    ///   agrees. A 4.52.7 daemon still drops a live ruleset on `pfctl -nf`
+    ///   failure and treats one unread health sample as "not filtering".
+    /// - 4.52.10 → 4.52.11: one protected-DNS server-count cap (32) for save,
+    ///   load and write; enable refuses over-cap lists before any change (MAC-
+    ///   DNS-SNAPSHOT-OVER-8).
+    /// - 4.52.11 → 4.52.12: the watchdog releases a bootstrap-only block whose
+    ///   recorded app owner died before committing the tunnel (MAC-ORPHAN-
+    ///   BOOTSTRAP-PF).
+    /// - 4.52.12 → 4.52.13: update-failure and unreadable-ledger emergency
+    ///   release restore a saved dead-loopback DNS snapshot and apply the
+    ///   secondary AI sinkhole after clearing PF intent (same class as a
+    ///   crash/hang release). Previously `releaseInstalledBlock` alone left
+    ///   DNS on 127.0.0.1 and skipped SelectiveFailOpen.
+    /// - 4.52.13 → 4.52.14: DNS writes refuse another preferences
+    ///   writer's lock promptly so helper requests and recovery can continue.
+    /// - 4.52.14 → 4.52.15: DNS restore and service handoff retry
+    ///   Apply before retiring originals already committed to disk.
+    /// - 4.52.15 → 4.52.16: Automatic failed commits and orphaned bootstrap releases preserve the secondary AI hold after opening general traffic.
+    /// - 4.52.16 → 4.52.17: exhausted App recovery has an AI-preserving release intent.
+    static let current = "4.52.17"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS

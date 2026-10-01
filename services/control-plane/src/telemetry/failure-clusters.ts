@@ -226,7 +226,7 @@ export async function recordFailureCluster(
       clusterId = String(winner.id);
       await db.prepare(
         `UPDATE failure_clusters
-         SET event_count = event_count + 1, last_seen_ms = ?, sample_json = ?, updated_at = ?
+         SET event_count = event_count + 1, last_seen_ms = MAX(last_seen_ms, ?), sample_json = ?, updated_at = ?
          WHERE id = ? AND status = 'open'`,
       ).bind(nowMs, sample, nowSec, clusterId).run();
     }
@@ -234,7 +234,7 @@ export async function recordFailureCluster(
     clusterId = decisionRow.id;
     await db.prepare(
       `UPDATE failure_clusters
-       SET event_count = event_count + 1, last_seen_ms = ?, sample_json = ?, updated_at = ?
+       SET event_count = event_count + 1, last_seen_ms = MAX(last_seen_ms, ?), sample_json = ?, updated_at = ?
        WHERE id = ?`,
     ).bind(nowMs, sample, nowSec, clusterId).run();
   }

@@ -6,7 +6,7 @@ import { MetricCard } from '@/components/ops/MetricCard';
 import { Value } from '@/components/ops/Value';
 import { copy } from '@/copy/copy';
 import { sloApi, type SloRowDto, type SloSummaryDto } from '@/lib/api-slo';
-import { formatCount, formatDate, splitPercent } from '@/lib/display';
+import { formatCount, formatUtcDate, splitPercent } from '@/lib/display';
 import { useResource } from '@/lib/use-resource';
 import { cn } from '@/lib/utils';
 
@@ -38,7 +38,7 @@ export function LedgerSlo({
       id: 'day',
       header: words.sloColumns.day,
       cell: (row) => (
-        <span className="font-mono text-body">{formatDate(row.dayAt)}</span>
+        <span className="font-mono text-body">{formatUtcDate(row.dayAt)}</span>
       ),
       sortValue: (row) => row.dayAt,
     },

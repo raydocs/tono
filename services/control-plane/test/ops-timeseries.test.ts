@@ -13,6 +13,8 @@ import {
   retainOperationsTimeseries,
 } from '../src/ops-timeseries';
 
+import { readAgentNetCounters, rollNodeCycle } from '../src/ops/quota';
+
 const db = () => (env as unknown as { DB: D1Database }).DB;
 
 const sample = (name: string, observedAt: number, cpu: number) => ({
@@ -37,6 +39,21 @@ const sample = (name: string, observedAt: number, cpu: number) => ({
 });
 
 describe('operations timeseries retention', () => {
+  it('serves metrics for node names that collide with object prototype properties', async () => {
+    const now = 1_800_000_000;
+    const names = ['constructor', 'toString', '__proto__'];
+    await recordAgentSamples(db(), names.map((name) => sample(name, now - 60, 42)), now);
+
+    const metrics = await queryAgentMetrics(db(), {
+      range: '24h', node: null, nowUnix: now, fields: ['cpu'],
+    });
+    for (const name of names) {
+      expect(Object.hasOwn(metrics.series, name)).toBe(true);
+      expect(metrics.series[name]).toEqual([{ t: now - 60, cpu: 42 }]);
+    }
+    expect(JSON.parse(JSON.stringify(metrics)).series.constructor).toEqual([{ t: now - 60, cpu: 42 }]);
+  });
+
   it('fences the pre-migration rollup writer before it can update or delete source rows', async () => {
     const bucket = 1_800_000_000;
     await recordAgentSamples(db(), [
@@ -137,6 +154,54 @@ describe('operations timeseries retention', () => {
     ).first<Record<string, any>>();
     // Sixty minutes at five-minute resolution is twelve buckets, not sixty.
     expect(Number(rollups!.c)).toBe(12);
+  });
+
+  it('keeps the latest complete raw counter pair through retention and quota recovery', async () => {
+    const hour = Math.floor(1_800_000_000 / 3600) * 3600;
+    const name = 'Missing counters';
+    const profile = { cycleKind: 'manual', trafficCycleStart: hour - 3600,
+      trafficCycleEnd: hour + 30 * 86400, quotaCounts: 'in_out' };
+    await recordAgentSamples(db(), [
+      { ...sample(name, hour - 3600, 30), netIn: 1000, netOut: 0 },
+      { ...sample(name, hour + 60, 10), netIn: 10000, netOut: 2000 },
+      // These are incomplete pairs, not evidence of either counter's reset.
+      { ...sample(name, hour + 120, 90), netIn: 12000, netOut: null },
+      { ...sample(name, hour + 180, 50), netIn: null, netOut: 9000 },
+    ], hour + 180);
+    await rollNodeCycle(db(), name, profile, { in: 1000, out: 0, at: hour - 3600 }, hour);
+    await rollNodeCycle(db(), name, profile, (await readAgentNetCounters(db(), name))!, hour + 180);
+
+    const now = hour + 3600 + 48 * 3600;
+    await retainOperationsTimeseries(db(), now);
+    const retained = await readAgentNetCounters(db(), name);
+    expect(retained).toMatchObject({ in: 10000, out: 2000 });
+    const repeated = await rollNodeCycle(db(), name, profile, retained!, now);
+    expect(repeated).toMatchObject({ used_bytes: 11000, resets_detected: 0 });
+    const recovered = await rollNodeCycle(db(), name, profile, { in: 11000, out: 2000, at: now + 60 }, now + 60);
+    expect(recovered).toMatchObject({ used_bytes: 12000, resets_detected: 0 });
+    const gauge = await db().prepare(`SELECT cpu_avg FROM operations_agent_rollups
+      WHERE node_name = ? AND resolution_seconds = 300 AND bucket_at = ?`)
+      .bind(name, hour).first<{ cpu_avg: number }>();
+    expect(gauge?.cpu_avg).toBe(50);
+  });
+
+  it('keeps the latest complete counter pair through hourly retention', async () => {
+    const hour = Math.floor(1_800_000_000 / 3600) * 3600;
+    const name = 'Missing hourly counters';
+    await db().batch([
+      db().prepare(`INSERT INTO operations_agent_rollups(node_name, resolution_seconds, bucket_at, samples,
+        rollup_writer_version, sample_counts_exact, net_in_last, net_out_last)
+        VALUES(?,300,?,1,2,1,1000,0)`).bind(name, hour - 3600),
+      db().prepare(`INSERT INTO operations_agent_rollups(node_name, resolution_seconds, bucket_at, samples,
+        rollup_writer_version, sample_counts_exact, net_in_last, net_out_last)
+        VALUES(?,300,?,1,2,1,10000,2000)`).bind(name, hour),
+      db().prepare(`INSERT INTO operations_agent_rollups(node_name, resolution_seconds, bucket_at, samples,
+        rollup_writer_version, sample_counts_exact, net_in_last, net_out_last)
+        VALUES(?,300,?,1,2,1,NULL,NULL)`).bind(name, hour + 300),
+    ]);
+    expect(await readAgentNetCounters(db(), name)).toMatchObject({ in: 10000, out: 2000 });
+    await retainOperationsTimeseries(db(), hour + 3600 + 8 * 86400);
+    expect(await readAgentNetCounters(db(), name)).toMatchObject({ in: 10000, out: 2000 });
   });
 
   it('keeps the last counter in each bucket across a node restart', async () => {

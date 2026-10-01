@@ -41,6 +41,7 @@ final class ProtectedReconnectTests: XCTestCase {
         runtime.restoreDNS = { true }
         runtime.disableSystemProxy = {}
         runtime.disarm = {}
+        runtime.releaseAfterFailure = {}
         runtime.restrictToBootstrap = {}
         // The helper holds no persisted kill-switch state for this session:
         // an authenticated status answers armed=false / wanted=false. Reading
@@ -113,7 +114,9 @@ final class ProtectedReconnectTests: XCTestCase {
     /// X1-3: a helper that answers 403 pauses automatic retries and asks the
     /// user to choose Repair and reconnect. That explicit loop must reach
     /// connect(), whose helper preparation is the administrator reinstall,
-    /// instead of re-pausing on the same rejection before connect runs.
+    /// instead of re-pausing on the same rejection before connect runs. After
+    /// that attempt the helper still rejects, so the automatic follow-up
+    /// pauses. The original network is released either way.
     func testRepairAndReconnectReachesConnectWhenHelperRejectsThisApp() async {
         let app = AppState()
         // Same fast, pre-helper connect failure as above: the attempt is on
@@ -137,6 +140,7 @@ final class ProtectedReconnectTests: XCTestCase {
         runtime.restoreDNS = { true }
         runtime.disableSystemProxy = {}
         runtime.disarm = {}
+        runtime.releaseAfterFailure = {}
         runtime.restrictToBootstrap = {}
         runtime.refreshKillSwitchStatus = { .rejected }
         app.networkProtection = runtime
@@ -162,7 +166,12 @@ final class ProtectedReconnectTests: XCTestCase {
             app.protectedReconnectPausedForUserAction,
             "the automatic attempt after the repair still pauses on a rejection"
         )
+        XCTAssertFalse(
+            app.isProtectionBlocked,
+            "the pause stops automatic retries after the original network is released"
+        )
         XCTAssertNil(app.connectionCoordinator.protectedReconnectTask)
+        XCTAssertNil(app.connectionCoordinator.unarmedReconnectTask)
     }
 
     /// #585: a saved pinned-certificate hy2 selection is refused in prepare

@@ -389,7 +389,12 @@ pub fn build_runtime(input: RuntimeInput<'_>) -> Result<OwnedSingBoxRuntime, Sin
             .push(json!({"type":"hosts","tag":"Tono-Hosts","predefined":hosts}));
         runtime["dns"]["rules"].as_array_mut().unwrap().insert(1, json!({"inbound":["Tono-TUN","Tono-DNS","Tono-Mixed"],"query_type":["A"],"domain":hosts.keys().collect::<Vec<_>>(),"action":"route","server":"Tono-Hosts"}));
     }
-    runtime["outbounds"] = json!(outbounds);
+    // Residential NAT: stamp keep_alive_period on every hysteria2 outbound
+    // this compiler already built. This does not add an outbound and does not
+    // relax the DER-pin refusal.
+    let mut outbound_value = json!(outbounds);
+    crate::hy2_idle::apply_sing_box_keep_alive(&mut outbound_value);
+    runtime["outbounds"] = outbound_value;
     let runtime_json = runtime.to_string();
     if runtime_json.len() > MAX_BYTES {
         return Err(UnsupportedPolicy);
@@ -609,6 +614,9 @@ mod tests {
         let selected = build_runtime(request).unwrap();
         let encoded = "q6urq6urq6urq6urq6urq6urq6urq6urq6urq6urq6s=";
         assert!(selected.runtime_json().contains(encoded));
+        assert!(selected.runtime_json().contains("\"keep_alive_period\":\"5s\""));
+        assert!(!selected.runtime_json().contains("idle_timeout"));
+        assert!(!selected.runtime_json().contains("disable_chrome_parrot"));
         assert!(!selected.runtime_json().contains("insecure"));
         assert!(
             !selected
@@ -718,10 +726,11 @@ mod tests {
 
     #[test]
     fn live_mihomo_yaml_stays_byte_for_byte_on_its_own_fake_ip_range() {
-        // Pinned YAML includes #732's dial defaults: `tcp-concurrent: true`,
-        // `dns.ipv6: false`, and `client-fingerprint: chrome` on each Reality proxy.
+        // Pinned YAML includes #732's dial defaults (`tcp-concurrent: true`,
+        // `dns.ipv6: false`, chrome on each Reality proxy) plus fake-ip-ttl,
+        // prefer-h3 and cache-algorithm.
         const PINNED_YAML_SHA256: &str =
-            "2a0e26f477dc9aa7eab67cfa7ccbcc23b7eefd22480d60220e181a5b434ebb1c";
+            "82c6545e00c8e42058d1a3d6b93d43218c563cc25c5755bc82b663d41630c501";
         let nodes = [
             mihomo_node("US Reality 01", "8.8.8.8"),
             mihomo_node("JP Reality 02", "1.1.1.1"),

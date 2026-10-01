@@ -191,6 +191,25 @@ fn gzip_within_limit(raw: &[u8]) -> Option<Vec<u8>> {
     (bytes.len() <= MAX_DIAGNOSTICS_LOG_SEGMENT_BYTES).then_some(bytes)
 }
 
+/// Account identifiers are useful in the private local audit but must not leave in a support
+/// segment. Audit records are flat objects; keep their routing evidence and opaque scope tags.
+fn redact_uploaded_record(record: &mut serde_json::Value) {
+    let Some(fields) = record.as_object_mut() else { return };
+    let identifier = match fields.get("kind").and_then(serde_json::Value::as_str) {
+        Some("signInStart" | "signInOk") => Some("email"),
+        Some("revokeDevice") => Some("id"),
+        _ => None,
+    };
+    if let Some(value) = identifier.and_then(|key| fields.get_mut(key)) {
+        *value = serde_json::Value::String("[redacted]".to_string());
+    }
+    for value in fields.values_mut() {
+        if let serde_json::Value::String(text) = value {
+            *text = crate::tono::audit::redact(text);
+        }
+    }
+}
+
 /// None is used only by the low-level unfiltered reader tests. Production must
 /// supply an authenticated scope: legacy/unattributed records remain local.
 fn read_open_segment(
@@ -208,10 +227,19 @@ fn read_open_segment(
         raw.truncate(end);
         let selected = match scope {
             None => raw.clone(),
-            Some(scope) => raw.split_inclusive(|b| *b == b'\n').filter(|line| {
-                serde_json::from_slice::<serde_json::Value>(line).ok()
-                    .is_some_and(|record| record.get("_uploadScope").and_then(|v| v.as_str()) == Some(scope))
-            }).flatten().copied().collect::<Vec<_>>(),
+            Some(scope) => {
+                let mut selected = Vec::new();
+                for line in raw.split_inclusive(|b| *b == b'\n') {
+                    let Ok(mut record) = serde_json::from_slice::<serde_json::Value>(line) else { continue };
+                    if record.get("_uploadScope").and_then(|value| value.as_str()) != Some(scope) {
+                        continue;
+                    }
+                    redact_uploaded_record(&mut record);
+                    serde_json::to_writer(&mut selected, &record).ok()?;
+                    selected.push(b'\n');
+                }
+                selected
+            },
         };
         if let Some(gzip) = gzip_within_limit(&selected) {
             return Some(Segment { gzip, line_count: selected.iter().filter(|b| **b == b'\n').count() as u32,
@@ -399,6 +427,32 @@ mod tests {
         let mut out = String::new();
         GzDecoder::new(bytes).read_to_string(&mut out).unwrap();
         out
+    }
+
+    #[test]
+    fn uploaded_records_remove_account_identifiers_but_keep_routing_evidence() {
+        let dir = Dir::new("redaction");
+        let path = dir.join("traffic-audit.jsonl");
+        let email = "fixture-account@example.test";
+        let device = "7d3a18b9-431c-4c7f-82a3-93cfae145002";
+        let body = format!(
+            "{{\"_uploadScope\":\"owner-a\",\"kind\":\"signInOk\",\"email\":\"{email}\"}}\n\
+             {{\"_uploadScope\":\"owner-a\",\"kind\":\"revokeDevice\",\"id\":\"{device}\"}}\n\
+             {{\"_uploadScope\":\"owner-a\",\"kind\":\"directDial\",\"host\":\"cdn.example.test\",\"address\":\"203.0.113.7\",\"process\":\"WeChat.exe\",\"rule\":\"AND\"}}\n"
+        );
+        std::fs::write(&path, &body).unwrap();
+        let mut queue = UploadQueue::new(path.clone(), "owner-a");
+        let pending = queue.prepare().unwrap();
+        let uploaded = gunzip(&pending.segment.gzip);
+        assert!(!uploaded.contains(email), "the upload includes the account email");
+        assert!(!uploaded.contains(device), "the upload includes a device identifier");
+        assert!(uploaded.contains("cdn.example.test") && uploaded.contains("203.0.113.7")
+            && uploaded.contains("WeChat.exe") && uploaded.contains("AND"),
+            "operator-authorized routing evidence must remain usable");
+        assert_eq!(pending.segment.line_count, 3);
+        assert_eq!(pending.segment.consumed, body.len() as u64);
+        assert_eq!(pending.next_cursor.offset, body.len() as u64);
+        assert_eq!(std::fs::read_to_string(path).unwrap(), body, "local audit stays intact");
     }
 
     #[test]

@@ -20,6 +20,22 @@ final class SocketServer {
     /// an arm or a release committed, so the core-down count starts over.
     private var openNetworkEpoch: UInt64 = 0
     private var consecutiveCoreDownChecks = 0
+    /// The peer that last successfully armed or started the Core, with the
+    /// kernel's start time for that pid so a reused pid is not mistaken for
+    /// the recorded incarnation. In memory only: a restarted helper has no
+    /// owner and keeps its current behavior.
+    private var sessionOwner: SessionOwner?
+    /// Idle-loop checks, 10s apart, with the bootstrap-only block still held
+    /// after its recorded owner died.
+    private var consecutiveOrphanedOwnerChecks = 0
+
+    /// The process identity behind a peer socket, as read from the kernel —
+    /// never app-supplied.
+    struct SessionOwner {
+        let pid: pid_t
+        let startSeconds: UInt64
+        let startMicroseconds: UInt64
+    }
 
     /// Launch does not install PF. `run()` releases a leftover after this
     /// init has stopped a stale Core. A Core that is still running is left
@@ -105,6 +121,32 @@ final class SocketServer {
         !coreRunning && snapshotPresent
     }
 
+    /// Idle-loop checks, 10s apart, with a bootstrap-only block still held
+    /// after its recorded owner died. Three is about 30s, like the core-down
+    /// threshold: long enough that a slow live connect is never misread,
+    /// short enough not to stretch the outage.
+    static let orphanedBootstrapReleaseThreshold = 3
+
+    /// What the Core-running branch of the idle loop should do about a
+    /// bootstrap-only block (a saved state whose `tunnelInterfaces` is
+    /// empty). A committed session never releases: it stays online through
+    /// its tunnel even when the app died. No recorded owner (this daemon
+    /// restarted mid-session) never releases either: the owner is unknown,
+    /// not gone. Anything unreadable counts as alive, so doubt keeps
+    /// protection.
+    static func orphanedBootstrapAction(
+        stateFilePresent: Bool,
+        bootstrapOnly: Bool,
+        ownerRecorded: Bool,
+        ownerAlive: Bool,
+        consecutiveChecks: Int
+    ) -> OrphanedBootstrapAction {
+        guard stateFilePresent, bootstrapOnly, ownerRecorded, !ownerAlive else {
+            return .reset
+        }
+        return consecutiveChecks >= orphanedBootstrapReleaseThreshold ? .release : .count
+    }
+
     func run() {
         // After listen, before any client. The stale Core is already gone.
         // macOS has no strict kill-switch opt-in, so a helper start with the
@@ -175,7 +217,11 @@ final class SocketServer {
             FileHandle.standardError.write(Data(
                 "tono: startup release could not clear the kill switch: \(detail)\n".utf8
             ))
+            return
         }
+        // The general block is already gone. Skip the secondary layer if an
+        // arm committed while this release held the lock.
+        killSwitch.applySelectiveLayerIfReleased()
     }
 
     /// While the Core is running, keep the in-session block (a live connect
@@ -190,6 +236,10 @@ final class SocketServer {
         }
         if KillSwitchManager.shouldReinstallKillSwitch(coreRunning: core.status().running) {
             consecutiveCoreDownChecks = 0
+            // MAC-ORPHAN-BOOTSTRAP-PF: an app that died between /core/start
+            // and the lock arm leaves this branch reinstalling a bootstrap
+            // block nobody is left to lift. Check that before supervising.
+            if observeOrphanedBootstrap() { return }
             killSwitch.superviseProtection()
             return
         }
@@ -213,10 +263,150 @@ final class SocketServer {
                 ))
                 return
             }
+            killSwitch.applySelectiveLayerIfReleased()
         } else {
             consecutiveCoreDownChecks = 0
         }
         recoverDNSAfterStoppedCore()
+    }
+
+    /// MAC-ORPHAN-BOOTSTRAP-PF: the app armed the bootstrap block (empty
+    /// `tunnelInterfaces`), called /core/start, and then died before the arm
+    /// that commits the tunnel — with chained residential proxies that window
+    /// runs to tens of seconds. The Core is still running, so the branch
+    /// above would reinstall that block every 10s and the Mac stays offline
+    /// until Tono is relaunched. Returns true once the release has run, so
+    /// this pass does not also supervise the block it just lifted.
+    private func observeOrphanedBootstrap() -> Bool {
+        // A pending native update owns runtime changes and may arm in-process
+        // after the old app exited. Leave it to the update's own recovery; an
+        // unreadable ledger counts as pending.
+        let updatePending: Bool
+        if let ledger = try? updates.storage.load() {
+            updatePending = ledger.attempt.map { attempt in attempt.receipt.phase != .committed } ?? false
+        } else {
+            updatePending = true
+        }
+        if updatePending {
+            consecutiveOrphanedOwnerChecks = 0
+            return false
+        }
+        let owner = sessionOwner
+        switch Self.orphanedBootstrapAction(
+            stateFilePresent: KillSwitchManager.stateFileExists(),
+            bootstrapOnly: (try? killSwitch.loadState())?.tunnelInterfaces.isEmpty ?? false,
+            ownerRecorded: owner != nil,
+            ownerAlive: owner.map { !Self.sessionOwnerHasExited($0) } ?? true,
+            consecutiveChecks: consecutiveOrphanedOwnerChecks
+        ) {
+        case .reset:
+            consecutiveOrphanedOwnerChecks = 0
+        case .count:
+            consecutiveOrphanedOwnerChecks += 1
+        case .release:
+            releaseOrphanedBootstrap(owner: owner)
+            return true
+        }
+        return false
+    }
+
+    /// Fail open exactly as a disconnect would, minus the app: stop the Core
+    /// (it holds the TUN and the protected DNS listener), lift PF, then put
+    /// the saved resolvers back. Best-effort at every step; with the owner
+    /// cleared, later passes supervise or release again as their findings
+    /// dictate.
+    private func releaseOrphanedBootstrap(owner: SessionOwner?) {
+        do {
+            try core.stop()
+        } catch {
+            let detail = (error as? HelperFailure)?.message ?? String(describing: error)
+            FileHandle.standardError.write(Data(
+                "tono: orphaned bootstrap core stop failed: \(detail)\n".utf8
+            ))
+        }
+        do {
+            try Self.releaseOrphanedBootstrapProtection(
+                disarm: { _ = try killSwitch.disarm() },
+                applySelectiveLayer: killSwitch.applySelectiveLayerIfReleased
+            )
+        } catch {
+            let detail = (error as? HelperFailure)?.message ?? String(describing: error)
+            FileHandle.standardError.write(Data(
+                "tono: orphaned bootstrap release failed: \(detail)\n".utf8
+            ))
+        }
+        recoverDNSAfterStoppedCore()
+        clearSessionOwner()
+        FileHandle.standardError.write(Data(
+            "tono: the app (pid \(owner?.pid ?? 0)) died before committing the tunnel; released its bootstrap kill switch\n".utf8
+        ))
+    }
+
+    static func releaseOrphanedBootstrapProtection(
+        disarm: () throws -> Void,
+        applySelectiveLayer: () -> Void
+    ) throws {
+        try disarm()
+        applySelectiveLayer()
+    }
+
+    /// A successful arm or start from an authenticated peer makes that peer
+    /// the session owner; a later one replaces it. Only the main app passes
+    /// the authorizer for these routes, and it is long-lived.
+    private func recordSessionOwner(socket: Int32) {
+        let pid = Self.peerPID(socket: socket)
+        guard pid > 0, let start = Self.processStartTime(pid: pid) else { return }
+        sessionOwner = SessionOwner(
+            pid: pid,
+            startSeconds: start.seconds,
+            startMicroseconds: start.microseconds
+        )
+        consecutiveOrphanedOwnerChecks = 0
+    }
+
+    /// The session is over: stop, disarm, or the orphan release above.
+    private func clearSessionOwner() {
+        sessionOwner = nil
+        consecutiveOrphanedOwnerChecks = 0
+    }
+
+    /// PID of the process that opened the peer socket, straight from the
+    /// kernel; -1 when the option does not answer.
+    static func peerPID(socket: Int32) -> pid_t {
+        var pid: pid_t = -1
+        var length = socklen_t(MemoryLayout<pid_t>.size)
+        let outcome = withUnsafeMutablePointer(to: &pid) {
+            getsockopt(socket, SOL_LOCAL, LOCAL_PEERPID, $0, &length)
+        }
+        return outcome == 0 ? pid : -1
+    }
+
+    /// Process start time from the kernel, so pid reuse is detectable. nil
+    /// when the process cannot be read.
+    static func processStartTime(pid: pid_t) -> (seconds: UInt64, microseconds: UInt64)? {
+        var info = proc_bsdinfo()
+        let size = withUnsafeMutablePointer(to: &info) { pointer in
+            proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, pointer, Int32(MemoryLayout<proc_bsdinfo>.size))
+        }
+        guard size == MemoryLayout<proc_bsdinfo>.size else { return nil }
+        return (info.pbi_start_tvsec, info.pbi_start_tvusec)
+    }
+
+    /// Whether the recorded owner incarnation is definitely gone: no such
+    /// pid, a zombie, or a start time that moved (the kernel reissued the
+    /// pid to another process). Anything unreadable counts as alive, so
+    /// doubt keeps protection.
+    static func sessionOwnerHasExited(_ owner: SessionOwner) -> Bool {
+        var info = proc_bsdinfo()
+        let size = withUnsafeMutablePointer(to: &info) { pointer in
+            proc_pidinfo(owner.pid, PROC_PIDTBSDINFO, 0, pointer, Int32(MemoryLayout<proc_bsdinfo>.size))
+        }
+        if size == MemoryLayout<proc_bsdinfo>.size {
+            return info.pbi_status == UInt32(SZOMB)
+                || info.pbi_start_tvsec != owner.startSeconds
+                || info.pbi_start_tvusec != owner.startMicroseconds
+        }
+        return kill(owner.pid, 0) == -1 && errno == ESRCH
     }
 
     private func handle(_ client: Int32) {
@@ -287,6 +477,7 @@ final class SocketServer {
                         transitionGate.isAwake() && killSwitch.status()["live"] as? Bool == true
                     }
                 )
+                recordSessionOwner(socket: client)
                 sendResponse(client, status: 200, object: ["ok": true])
             case ("POST", "/core/sync"):
                 let object = try jsonObject(request.body)
@@ -317,6 +508,7 @@ final class SocketServer {
                     FileHandle.standardError.write(Data("tono: \(detail)\n".utf8))
                 }
                 try core.stop()
+                clearSessionOwner()
                 sendResponse(client, status: 200, object: ["ok": true])
             case ("GET", "/killswitch/status"):
                 guard request.body.isEmpty else { throw HelperFailure.invalid("Unexpected request body.") }
@@ -331,12 +523,14 @@ final class SocketServer {
                     object,
                     commitAllowed: { transitionGate.isAwake() }
                 )
+                recordSessionOwner(socket: client)
                 sendResponse(client, status: 200, object: response)
-            case ("POST", "/killswitch/disarm"):
+            case ("POST", "/killswitch/disarm"), ("POST", "/killswitch/release"):
                 guard request.body.isEmpty else { throw HelperFailure.invalid("Unexpected request body.") }
                 let response = try transitionGate.whileAwake {
-                    try killSwitch.disarm()
+                    try killSwitch.disarm(preserveAIHold: request.path == "/killswitch/release")
                 }
+                clearSessionOwner()
                 sendResponse(client, status: 200, object: response)
             case ("GET", "/dns/status"):
                 guard request.body.isEmpty else { throw HelperFailure.invalid("Unexpected request body.") }
@@ -536,6 +730,17 @@ final class SocketServer {
             throw HelperFailure.system("Could not replace core binary.")
         }
     }
+}
+
+/// The idle loop's verdict on a bootstrap-only block whose recorded owner
+/// may be gone.
+enum OrphanedBootstrapAction: Equatable {
+    /// The conditions do not hold; any count from earlier checks is void.
+    case reset
+    /// The owner is gone; count this check.
+    case count
+    /// The owner stayed gone past the threshold; fail open.
+    case release
 }
 
 /// Silent upgrades never move the root helper backwards. Versions are the

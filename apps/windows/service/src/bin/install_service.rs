@@ -261,9 +261,9 @@ fn wait_for_service_ready() -> Result<(), Error> {
     })
 }
 
-/// Rollback only needs proof that the restored predecessor is the live IPC owner. Requiring it to
-/// satisfy the *new* helper's protocol floor would misclassify a healthy older Service as failed
-/// recovery during a cross-version upgrade. Commit readiness above remains deliberately strict.
+/// Rollback or reboot-pending publication only needs proof that the predecessor is the live IPC
+/// owner. Requiring it to satisfy the *new* helper's protocol floor would misclassify a healthy
+/// older Service as failed during a cross-version upgrade. Commit readiness above remains strict.
 #[cfg(windows)]
 fn wait_for_previous_service_liveness() -> Result<(), Error> {
     const LIVE_TIMEOUT: Duration = Duration::from_secs(20);
@@ -1146,12 +1146,19 @@ impl CoordinatedBinaryReplacement {
     }
 
     fn cleanup(&self) {
+        self.cleanup_with_staged_retained(false);
+    }
+
+    fn cleanup_with_staged_retained(&self, keep_staged: bool) {
         for path in [
             &self.staged,
             &self.backup,
             &self.restore,
             &self.publish_scratch,
         ] {
+            if keep_staged && path == &self.staged {
+                continue;
+            }
             if let Err(error) = remove_ordinary_file_if_exists(path) {
                 eprintln!("could not remove completed replacement artifact {path:?}: {error:#}");
             }
@@ -1163,6 +1170,16 @@ impl CoordinatedBinaryReplacement {
             self.cleanup();
         }
     }
+}
+
+#[cfg(windows)]
+fn keep_installer_retry_candidates(update_error: &Error, rollback_succeeded: bool) -> bool {
+    // NSIS retries without restaging after a locked executable was restored. Access denied (5)
+    // can also mean a mapped image; sharing/lock violations are 32/33. Validation errors stay fatal.
+    rollback_succeeded
+        && update_error
+            .downcast_ref::<std::io::Error>()
+            .is_some_and(|error| matches!(error.raw_os_error(), Some(5 | 32 | 33)))
 }
 
 #[cfg(windows)]
@@ -1479,9 +1496,13 @@ fn replace_existing_service_and_runtime(
                     // `--replace-runtime` run calls `ensure_update_scratch_absent` before any
                     // other work and refuses, so the "run the same installer again" remedy
                     // this function's own error prints would be permanently unavailable.
+                    // Retain verified `.next` candidates for NSIS's retry after a transient lock;
+                    // the next invocation revalidates them before preparing another transaction.
+                    let keep_staged =
+                        keep_installer_retry_candidates(&update_error, recovery_result.is_ok());
                     service_replacement.cleanup();
-                    runtime_replacement.cleanup();
-                    app_replacement.cleanup();
+                    runtime_replacement.cleanup_with_staged_retained(keep_staged);
+                    app_replacement.cleanup_with_staged_retained(keep_staged);
                     return recovery_result;
                 }
 
@@ -1969,7 +1990,7 @@ fn main() -> anyhow::Result<()> {
     bring_scm_bfe_up()?;
     // Legacy user journals are diagnostics only. This entry has no v1 grant:
     // both runtime replacement and service-only repair require verified Disconnect.
-    tokio::runtime::Runtime::new()?.block_on(tono_service_protocol::update_native::manual_gate())?;
+    shared::block_on_abandoning(tono_service_protocol::update_native::manual_gate())??;
     let install_dir = tono_service_protocol::prepare_service_install_directory()?;
     publish_core_digest_pin(&install_dir)?;
     let target = install_dir.join("tono-service.exe");
@@ -2051,9 +2072,13 @@ fn main() -> anyhow::Result<()> {
                     configure_windows_service_recovery(&service)?;
                     service.start(&Vec::<&OsStr>::new())?;
                     // The service is running on either path here — the old binary when the swap
-                    // was deferred — so readiness stays provable, and a build that dies on start
+                    // was deferred — so liveness stays provable, and a build that dies on start
                     // must not pass as a successful "reboot pending" install.
-                    wait_for_service_ready()?;
+                    if publish_outcome == PublishOutcome::RebootRequired {
+                        wait_for_previous_service_liveness()?;
+                    } else {
+                        wait_for_service_ready()?;
+                    }
                     restart_on_failure.disarm();
                     if publish_outcome == PublishOutcome::RebootRequired {
                         println!(
@@ -2231,6 +2256,36 @@ fn configure_windows_service_recovery(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A timed-out BFE RPC must let the installer return and release its repair gate even
+    /// while the blocking engine call is still running.
+    #[test]
+    fn installer_gate_runtime_returns_after_a_timed_out_blocking_call() {
+        let (release, hang) = std::sync::mpsc::channel::<()>();
+        let (answer, answered) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let value = super::shared::block_on_abandoning(async move {
+                let (started, running) = tokio::sync::oneshot::channel();
+                let task = tokio::task::spawn_blocking(move || {
+                    let _ = started.send(());
+                    let _ = hang.recv();
+                });
+                running.await.unwrap();
+                tokio::time::timeout(Duration::from_millis(100), task)
+                    .await
+                    .is_err()
+            });
+            let _ = answer.send(value.ok());
+        });
+        let returned = answered.recv_timeout(Duration::from_secs(5));
+        // Lets the abandoned blocking call end, whatever the answer was.
+        let _ = release.send(());
+        assert_eq!(
+            returned.ok().flatten(),
+            Some(true),
+            "the installer runtime waited for an abandoned blocking call"
+        );
+    }
 
     #[test]
     fn missing_launchd_service_skips_bootout() {
@@ -2434,6 +2489,25 @@ mod tests {
         fn drop(&mut self) {
             let _ = std::fs::remove_dir_all(&self.0);
         }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn installer_retry_keeps_candidates_only_after_a_recovered_file_lock() {
+        let locked = Error::new(std::io::Error::from_raw_os_error(32))
+            .context("failed to publish coordinated executable");
+        assert!(keep_installer_retry_candidates(&locked, true));
+        assert!(!keep_installer_retry_candidates(&locked, false));
+
+        let mapped_image = Error::new(std::io::Error::from_raw_os_error(5));
+        assert!(keep_installer_retry_candidates(&mapped_image, true));
+        let lock_violation = Error::new(std::io::Error::from_raw_os_error(33));
+        assert!(keep_installer_retry_candidates(&lock_violation, true));
+
+        let validation_error = anyhow::anyhow!("published executable failed hash verification");
+        assert!(!keep_installer_retry_candidates(&validation_error, true));
+        let disk_full = Error::new(std::io::Error::from_raw_os_error(112));
+        assert!(!keep_installer_retry_candidates(&disk_full, true));
     }
 
     #[cfg(windows)]

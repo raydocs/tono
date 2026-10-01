@@ -1,0 +1,7 @@
+| ID | 问题（一句） | 状态 | Issue / PR | 等级 | 剩余限制 |
+|---|---|---|---|---|---|
+| MAC-DNS-PREFS-LOCK | Another network-preferences writer can hold the helper's DNS restore, update lock and watchdog indefinitely | in-PR | hunt/sol-r3helper-dns-prefs-contention | 中·已确认（P1，源码/API 路径） | Native contention regression authored before the fix, not executed on Linux. Framework startup/create/commit/apply stalls and kernel hangs are not bounded by this correction. Contention still refuses DNS writes and preserves the snapshot. |
+
+SHIP_PLAN §2 item 10. Baseline `72a9c98d`: `ProtectedDNSManager.withPreferences` called `SCPreferencesLock(prefs, true)` on the serialized helper request thread. Ordinary Disconnect/update preparation stops Core before DNS restoration. A hung/paused ordinary network settings writer then prevents the helper from returning to accept, watchdog or shutdown, while its update flock also prevents emergency recovery. Acquisition now requests nonblocking contention failure; the existing error path retains recovery evidence and allows later requests/retries.
+
+Apple's [API contract](https://developer.apple.com/documentation/systemconfiguration/scpreferenceslock(_:_:)) and [SCPLock.c](https://github.com/apple-oss-distributions/configd/blob/main/SystemConfiguration.fproj/SCPLock.c#L494) explicitly distinguish blocking acquisition from nonblocking `PrefsBusy`. The root-only regression uses two real SCPreferences sessions for a unique temporary file, never network preferences.
