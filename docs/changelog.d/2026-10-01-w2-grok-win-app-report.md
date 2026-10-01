@@ -12,7 +12,7 @@
 ## 2026-10-01 · W2 续记：#907、重复 PR、A6
 
 - 归属：SHIP_PLAN §2 item 10。仍是文档，不改产品行为。
-- 来源：对照 `origin/main` `c2626f53`。续记写在 `docs/agent-reports/W2-grok-win-app.md`。叠在 #909 的分支上。未开 auto-merge。
+- 来源：对照 `origin/main` `c2626f53`。续记写在 `docs/agent-reports/W2-grok-win-app.md`。叠在 #909 上，PR #962。未开 auto-merge。
 - 缺陷修复：无（在别的 PR）。#907 由 #926 做选择性释放，不再算未决决策。#905 / #906 由 #942 / #945 修；本代理的 #937 / #944 已关自动合并并作为重复 PR 关闭。A6 新开 #961：executor `spawn` 失败时非严格选择性释放，严格仍阻断。
 - 新增/优化：无。
 - 工程与测试：无产品代码。`cargo test` 未在本机跑。
