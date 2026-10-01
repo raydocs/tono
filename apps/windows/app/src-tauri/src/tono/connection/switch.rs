@@ -373,50 +373,84 @@ pub(super) async fn cold_switch_selected_node(
     }
 }
 
+/// Called by the detached catalog owner while it retains selection/policy ownership.
+pub(crate) async fn rebuild_for_catalog_routing_change(state: Arc<TonoState>, app: AppHandle, generation: u64) {
+    let guard = state.begin_privileged_release().await;
+    {
+        let inner = state.lock().await;
+        // A queued catalog update must not tear down a replacement or an in-flight connect.
+        if inner.connect_generation != generation
+            || !inner.fsm.status().is_connected
+            || inner.fsm.status().is_connecting
+            || inner.fsm.status().is_disconnecting
+        {
+            return;
+        }
+    }
+    cold_switch_selected_node(state, app, generation, guard).await;
+}
+
 pub(super) async fn close_connections_bound_to(state: &Arc<TonoState>, generation: u64, exit_name: &str) {
     if exit_name.is_empty() {
         return;
     }
-    let (secret, port) = {
+    let (secret, port, cancellation) = {
         let inner = state.lock().await;
         if inner.connect_generation != generation {
             return;
         }
         match inner.controller_secret.clone().zip(inner.controller_port) {
-            Some(pair) => pair,
+            Some((secret, port)) => (secret, port, inner.connect_cancellation.clone()),
             None => return,
         }
     };
-    let Some(payload) = fetch_connections(&secret, port).await else {
-        return;
-    };
-    let Ok(client) = controller_client(Duration::from_secs(2)) else {
-        return;
-    };
-    for connection in payload.connections {
-        if !connection
-            .chains
-            .iter()
-            .any(|hop| hop.eq_ignore_ascii_case(exit_name))
-        {
-            continue;
-        }
-        if connection.id.is_empty() {
-            continue;
-        }
-        let Ok(mut url) = reqwest::Url::parse(&controller_url(port, "/connections")) else {
-            continue;
+    bounded_connection_cleanup(&cancellation, async {
+        let Some(payload) = fetch_connections(&secret, port).await else {
+            return;
         };
-        if url.path_segments_mut().is_ok() {
-            let _ = url.path_segments_mut().map(|mut segments| {
-                segments.push(&connection.id);
-            });
+        let Ok(client) = controller_client(Duration::from_secs(2)) else {
+            return;
+        };
+        for connection in payload.connections {
+            if state.lock().await.connect_generation != generation {
+                return;
+            }
+            if !connection
+                .chains
+                .iter()
+                .any(|hop| hop.eq_ignore_ascii_case(exit_name))
+            {
+                continue;
+            }
+            if connection.id.is_empty() {
+                continue;
+            }
+            let Ok(mut url) = reqwest::Url::parse(&controller_url(port, "/connections")) else {
+                continue;
+            };
+            if url.path_segments_mut().is_ok() {
+                let _ = url.path_segments_mut().map(|mut segments| {
+                    segments.push(&connection.id);
+                });
+            }
+            match client.delete(url).bearer_auth(&secret).send().await {
+                Ok(response) if response.status().is_success() => {}
+                _ => break,
+            }
         }
-        let _ = client
-            .delete(url)
-            .bearer_auth(&secret)
-            .send()
-            .await;
+    }).await;
+}
+
+// A browser can leave hundreds of sockets behind. Cleanup holds the lifecycle writer, so
+// a hung controller must not multiply its per-request timeout and delay Restore internet.
+async fn bounded_connection_cleanup(
+    cancellation: &tokio_util::sync::CancellationToken,
+    cleanup: impl std::future::Future<Output = ()> + Send,
+) {
+    tokio::select! {
+        biased;
+        _ = cancellation.cancelled() => {}
+        _ = tokio::time::timeout(Duration::from_secs(3), cleanup) => {}
     }
 }
 
@@ -424,6 +458,34 @@ pub(super) async fn close_connections_bound_to(state: &Arc<TonoState>, generatio
 mod convergence_tests {
     use super::converge_or_recover;
     use tono_core::connection::ConnectionFsm;
+
+    #[tokio::test(start_paused = true)]
+    async fn connection_cleanup_bounds_the_lifecycle_writer_for_many_sockets() {
+        let state = std::sync::Arc::new(crate::tono::state::TonoState::for_test());
+        let guard = state.begin_privileged_release().await;
+        let release = state.begin_privileged_release();
+        tokio::pin!(release);
+        let cancellation = tokio_util::sync::CancellationToken::new();
+        let mut completed = 0;
+        let started = tokio::time::Instant::now();
+
+        let cleanup_finished = tokio::select! {
+            biased;
+            _ = super::bounded_connection_cleanup(&cancellation, async {
+                for _ in 0..100 {
+                    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                    completed += 1;
+                }
+            }) => true,
+            _ = &mut release => false,
+        };
+
+        assert!(cleanup_finished, "release must wait for the switch's lifecycle writer");
+        assert_eq!(started.elapsed(), std::time::Duration::from_secs(3));
+        assert_eq!(completed, 1, "cleanup must not spend two seconds on every socket");
+        drop(guard);
+        let _released = release.await;
+    }
 
     #[test]
     fn vanished_exit_releases_only_without_strict_kill_switch() {

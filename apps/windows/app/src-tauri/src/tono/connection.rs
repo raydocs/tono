@@ -141,6 +141,7 @@ use disconnect::{EXPLICIT_RELEASE_TIMEOUT, SERVICE_LIFECYCLE_TIMEOUT};
 pub use reconnect::{retry_reconnect_now, schedule_reconnect, schedule_startup_resume_if_proven};
 use reconnect::active_runtime_resume_status;
 pub use switch::{selected_node_vanished, switch_selected_node};
+pub(crate) use switch::rebuild_for_catalog_routing_change;
 pub use direct::{build_direct_plan, collect_ipv4_literals};
 use direct::{
     WINDOWS_OPTIONAL_DIRECT_ENABLED, CapturedTrafficPolicy, ControllerDirectRuleProof, MAX_DIRECT_ENDPOINTS,
