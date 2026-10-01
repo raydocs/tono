@@ -7,8 +7,10 @@
 //! removal release it. Both automatic paths use the explicit release and
 //! do not build another tunnel.
 //! Windows has no strict kill switch, so a verified connect failure restores
-//! the original network instead of sitting in Protected Offline. Self-heal
-//! does not rewrite routes while a hop is still unproven.
+//! the original network instead of sitting in Protected Offline. After that
+//! release, TCP probes run while the original network stays up. A tunnel
+//! starts only after one proof. Self-heal does not rewrite routes while a
+//! hop is still unproven. An explicit strict kill switch keeps the block.
 //!
 //! Concurrency: `connect_generation` (in `TonoInner`) is bumped by
 //! disconnect, sign-out, node switches, and catalog-driven teardowns. An
@@ -31,6 +33,7 @@ mod switch;
 mod direct;
 mod heal;
 mod platform;
+mod unarmed_probe;
 
 // Compatibility surface for existing command and test callers. The transaction
 // and error modules do not import this orchestration facade.
@@ -270,6 +273,7 @@ pub(crate) async fn connect_for_generation(
                                 "Tono: restoring the original network failed; protection stays as the release left it: {release_error}"
                             );
                         }
+                        unarmed_probe::spawn_after_release(&state, &app, generation);
                     }
                     tono_core::heal::NetworkEffect::SelectiveAiHold { .. } => {
                         logging!(
