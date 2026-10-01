@@ -84,3 +84,33 @@ A2, A3, A4, and A11 were read through area passes plus the call sites for the fi
 In-flight items were not re-reported: #714, #715, #718, #741, #749, #757, #784, #786, #787, #791, #798.
 
 Hunter: Grok 4.7
+
+## Follow-up, 2026-10-01
+
+The "Filed, not fixed" row for #907 is superseded. It is not an open decision. On failure Tono falls back to normal internet and keeps AI-service destinations blocked. Only an explicit strict kill switch may stay fully Blocked.
+
+| Item | Result |
+|---|---|
+| [#907](https://github.com/raydocs/tono/issues/907) | Fixed by [#926](https://github.com/raydocs/tono/pull/926) (`hunt/grok-winapp-direct-renew-2a89`). Non-strict DIRECT renew failure leaves WFP unchanged and the App calls `tono_release_kill_switch_applying_narrow`. The watchdog does the same selective release for a lost committed DIRECT lease. Strict stays Blocked. The optional DIRECT commit log now says Blocked, which is what reconciliation does. Auto-merge was already enabled once (MERGE, app/cursor, 2026-10-01T00:56:00Z). This follow-up does not touch that flag. |
+| [#905](https://github.com/raydocs/tono/issues/905) | Not fixed here. [#942](https://github.com/raydocs/tono/pull/942) is the other agent's fix. This agent's [#937](https://github.com/raydocs/tono/pull/937) was closed as a duplicate after auto-merge was turned off. |
+| [#906](https://github.com/raydocs/tono/issues/906) | Not fixed here. [#945](https://github.com/raydocs/tono/pull/945) is the other agent's fix. This agent's [#944](https://github.com/raydocs/tono/pull/944) was closed as a duplicate after auto-merge was turned off. |
+
+### A6
+
+Read against `origin/main` `c2626f53`: `tono/commands/update.rs`, `tono/update_handoff.rs`, `tono/commands/quit.rs`, `feat/window.rs`, `lib.rs`, `tono/bootstrap.rs`, `tono/steps.rs`, `core/updater.rs`.
+
+| Check | Verdict |
+|---|---|
+| Install `spawn` fails after Prepare has already narrowed WFP to bootstrap Blocked | Bug. Launching was persisted first, so the App treated the status as success and the machine stayed offline. Fixed by [#961](https://github.com/raydocs/tono/pull/961): spawn first; non-strict selective-release (`release_applying_narrow`); strict stays Blocked; the App error no longer says every failure retained protection. Auto-merge enabled once (MERGE, app/cursor, 2026-10-01T01:18:38Z). `needs-hardware` label call returned HTTP 403. |
+| Prepare failure after Core stop | Already on main via #793 (`prepare_failure_releases`). Not changed. |
+| Interactive Quit / Restart | `quit_release` must be proved. If it is not, the user can cancel or explicitly leave the barrier armed. Session-ending `RunEvent::Exit` abandons an unfinished release and leaves WFP armed; `lib.rs` states that. Not a new hole. |
+| `clean_async` / `stop_core(true)` after that choice | Windows sessions store `supports_macos_kill_switch: false`, so this stop uses the legacy payload, which does not release. A successful release has already disarmed, and `transition_after_stop` returns when nothing is armed, so cleanup does not re-block. |
+| `restore_dns_after_core_stop` | No-op on Windows. DNS restore is inside the Service release. |
+| `tono/bootstrap.rs`, `tono/steps.rs` | No WFP, system proxy, or DNS writes. |
+| `tono_prepare_update` | Not registered in `lib.rs`. No caller. The DNS-failure path that keeps WFP is not live. |
+| `core/updater.rs` NSIS startup install | Does not quiesce WFP. A failed install continues the process with the protection it already had. |
+| Service start sees `Launching` and the recorded executor process is gone | `reconcile_before_desired` rewinds that attempt to `Staged` and `restore_reconciled_desired_state` keeps the barrier on purpose ("retaining protection"). Not changed. A half-applied replacement is the reason this follow-up does not release there. |
+
+`cargo test` was not run (rustc 1.83, workspace rust-version 1.98 / edition 2024).
+
+Hunter: Grok 4.7
