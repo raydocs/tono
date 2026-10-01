@@ -56,7 +56,6 @@ if (-not (Test-Path -LiteralPath $mihomoPath -PathType Leaf)) {
 }
 
 Invoke-Checked -FilePath 'pnpm' -ArgumentList @('release-version', $Version) -WorkingDirectory $appRoot
-Invoke-Checked -FilePath 'pnpm' -ArgumentList @('release:preflight', '--config-only') -WorkingDirectory $appRoot
 
 $coreSha256 = (Get-FileHash -LiteralPath $mihomoPath -Algorithm SHA256).Hash.ToLowerInvariant()
 if ($coreSha256 -notmatch '^[0-9a-f]{64}$') {
@@ -87,6 +86,7 @@ foreach ($serviceBin in $serviceBins) {
     }
     Copy-Item -LiteralPath $source -Destination $destination -Force
 }
+Copy-Item -LiteralPath (Join-Path $appRoot 'src-tauri/core-identity.json') -Destination (Join-Path $resourceRoot 'core-identity.json') -Force
 
 # `option_env!("TONO_CORE_SHA256")` must survive into both executables that trust or publish the
 # core. A missing pin is deliberately fatal, so prove the exact digest is embedded before packaging.
@@ -98,6 +98,8 @@ foreach ($pinnedBinary in @($servicePath, (Join-Path $resourceRoot 'tono-service
     }
 }
 
+# The complete config gate also requires generated resources on disk.
+Invoke-Checked -FilePath 'pnpm' -ArgumentList @('release:preflight', '--config-only') -WorkingDirectory $appRoot
 Invoke-Checked -FilePath 'pnpm' -ArgumentList @('build') -WorkingDirectory $appRoot
 if (-not (Test-Path -LiteralPath $installerPath -PathType Leaf)) {
     throw "NSIS installer was not produced: $installerPath"
