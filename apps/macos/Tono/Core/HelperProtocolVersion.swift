@@ -300,7 +300,12 @@ nonisolated enum HelperProtocolVersion {
     /// - 4.52.6 → 4.52.7: an update ledger whose receipt contains a key this
     ///   build does not know is refused and kept on disk. Additive keys
     ///   outside the receipt are still tolerated.
-    static let current = "4.52.7"
+    /// - 4.52.7 → 4.52.8: after that full release, a crash or hang may add a
+    ///   secondary blackhole route for Anthropic's inbound prefixes and
+    ///   `/etc/resolver` files for first-party AI suffixes. Arm, disarm, and
+    ///   emergency recovery remove them. The commands cannot name a default
+    ///   route. A failure leaves the original network open.
+    static let current = "4.52.8"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS

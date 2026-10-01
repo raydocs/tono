@@ -1506,6 +1506,7 @@ if CommandLine.arguments.dropFirst() == ["--self-test"] {
             && runStartupOrderSelfTest()
             && emergencyReleaseDespiteUnreadableLedger(strictKillSwitchEnabled: false)
             && !emergencyReleaseDespiteUnreadableLedger(strictKillSwitchEnabled: true)
+            && SelectiveFailOpen.runSelfTests()
             ? 0 : 1
     )
 }

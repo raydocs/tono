@@ -981,6 +981,8 @@ async fn install_unlocked(armed: &Armed) -> Result<()> {
 /// from *that* read — see [`rule_config_rendering`]. `lock` is the only such caller, and it is
 /// the one where a second, disagreeing read is terminal.
 async fn install_unlocked_for(armed: &Armed, current_core: Option<CoreInstance>) -> Result<()> {
+    // A new arm must not leave crash-time AI names pointed at the sinkhole.
+    crate::core::selective_layer::remove().await;
     let config = rule_config_rendering(armed, current_core);
     let tunnel_permit_expected = config.tun_luid.is_some();
     let expected = wfp_model::expected_filters(&config);
@@ -2400,7 +2402,7 @@ async fn bounded_dns_call_within<T>(
 }
 
 /// Normal release — only on explicit user request. See the DNS-before-disarm invariant.
-async fn disarm_unlocked() -> Result<()> {
+async fn disarm_unlocked(apply_narrow: bool) -> Result<()> {
     let previous = armed_guard().clone();
     let Some(previous) = previous else {
         // Not armed: still sweep possible residuals so a half-failed earlier run cannot
@@ -2421,6 +2423,9 @@ async fn disarm_unlocked() -> Result<()> {
                 "leftover DNS snapshot could not be restored: {error:#}"
             ));
         }
+        // Filters are already gone. The secondary layer must not be able to
+        // fail this release or put a general block back.
+        crate::core::selective_layer::finish_release(apply_narrow).await;
         return Ok(());
     };
     // DNS-before-disarm invariant (identical to the macOS helper): the network may open only
@@ -2460,6 +2465,7 @@ async fn disarm_unlocked() -> Result<()> {
     *armed_guard() = None;
     *last_error_guard() = None;
     TUNNEL_PERMIT_RENDERED.store(false, Ordering::Relaxed);
+    crate::core::selective_layer::finish_release(apply_narrow).await;
     Ok(())
 }
 
@@ -2469,10 +2475,20 @@ async fn disarm_unlocked() -> Result<()> {
 /// and the block stays armed.
 #[cfg_attr(not(windows), allow(dead_code))] // the route helper is cfg(windows); tests use it
 pub(crate) async fn release() -> Result<KillSwitchStatus> {
+    release_with(false).await
+}
+
+/// Same full release as [`release`], then the secondary AI hold. Restore and
+/// disconnect use [`release`] and do not pass true.
+pub(crate) async fn release_applying_narrow() -> Result<KillSwitchStatus> {
+    release_with(true).await
+}
+
+async fn release_with(apply_narrow: bool) -> Result<KillSwitchStatus> {
     ensure_supported()?;
     {
         let _operation = WFP_OPERATION.lock().await;
-        disarm_unlocked().await?;
+        disarm_unlocked(apply_narrow).await?;
         note_explicit_release();
     }
     Ok(status().await)
@@ -2489,7 +2505,7 @@ pub(crate) async fn transition_after_stop(release_requested: bool) -> Result<()>
         return Ok(());
     }
     if release_requested {
-        return disarm_unlocked().await;
+        return disarm_unlocked(false).await;
     }
     restrict_bootstrap_unlocked().await
 }
@@ -2697,6 +2713,11 @@ pub async fn restore_on_service_start() -> Result<()> {
                 // design's third recovery rule. A leftover DNS snapshot (e.g. from an emergency
                 // disarm whose restore could not be proven) is swept here too — protection is
                 // off, so the machine must not stay on loopback DNS.
+                //
+                // The secondary AI hold is not removed here. A crash release writes this same
+                // wanted:false record and the hold is meant to survive until Restore, arm, or
+                // emergency disarm. Those rules name only the allowlisted suffixes and the two
+                // Anthropic prefixes, so leaving them cannot block general traffic.
                 // `remove_all_filters` is provider-scoped, so filters in legacy sublayers go
                 // with it; the sweep afterwards only clears the emptied sublayer objects.
                 remove_all_filters_unlocked().await?;
@@ -2924,7 +2945,7 @@ pub async fn retire_unverified_on_service_start() -> Result<bool> {
                 .await
                 .context("failed to retire active owner paired with legacy unowned protection")?;
         }
-        disarm_unlocked().await
+        disarm_unlocked(false).await
     }
     .await;
 
@@ -3228,6 +3249,9 @@ pub async fn emergency_disarm_windows_kill_switch() -> Result<()> {
     // the product promises. On engine failure the reported state therefore stays "armed".
     #[cfg(all(windows, not(feature = "test")))]
     engine_call("emergency disarm", crate::core::wfp::emergency_disarm).await?;
+    // WFP is gone. Drop the secondary hold too. A failure here must not
+    // report the barrier as still up.
+    crate::core::selective_layer::remove().await;
     *armed_guard() = None;
     *last_verify_guard() = None;
     TUNNEL_PERMIT_RENDERED.store(false, Ordering::Relaxed);
