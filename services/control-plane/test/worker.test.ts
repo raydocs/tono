@@ -732,6 +732,44 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     expect((await unavailable.json() as any).error.code).toBe('ACCESS_UNAVAILABLE');
   });
 
+  it('reports unavailable when an Access key response body fails without rejecting the session', async () => {
+    const team = 'body-failure.cloudflareaccess.com';
+    const e = env as unknown as Env;
+    const originalTeam = e.ACCESS_TEAM_DOMAIN;
+    e.ACCESS_TEAM_DOMAIN = team;
+    const originalFetch = vi.mocked(globalThis.fetch).getMockImplementation()!;
+    let failBody = true;
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const url = input instanceof Request ? input.url : String(input);
+      if (url === `https://${team}/cdn-cgi/access/certs`) {
+        if (failBody) {
+          return new Response(new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.enqueue(new TextEncoder().encode('{"keys":['));
+              controller.error(new TypeError('Access key connection reset'));
+            },
+          }));
+        }
+        return Response.json({ keys: [oidcPublicKey] });
+      }
+      return originalFetch(input, init);
+    });
+    try {
+      const assertion = await accessAssertion(ACCESS_ADMIN_EMAIL, { iss: `https://${team}` });
+      const read = () => api('ops/dashboard', {
+        headers: { 'cf-access-jwt-assertion': assertion },
+      });
+      const unavailable = await read();
+      expect(unavailable.status).toBe(503);
+      expect((await unavailable.json() as any).error.code).toBe('ACCESS_UNAVAILABLE');
+      failBody = false;
+      expect((await read()).status).toBe(200);
+    } finally {
+      fetchSpy.mockImplementation(originalFetch);
+      e.ACCESS_TEAM_DOMAIN = originalTeam;
+    }
+  });
+
   it('reports an empty live state to Access admins without fetching an absorbed host', async () => {
     const unauthorized = await api('ops/live', {
       headers: { authorization: `Bearer ${ADMIN_TOKEN}` },
@@ -6676,6 +6714,41 @@ ${nameLine}
     const identities = (await listed.json() as { identities: Array<{ userId: string; sourceUsageBytes: number }> }).identities;
     expect(identities.find((entry) => entry.userId === billed.user.id)?.sourceUsageBytes).toBe(1050);
     expect(identities.find((entry) => entry.userId === quiet.user.id)?.sourceUsageBytes).toBe(0);
+  });
+
+  it('returns inactive-user recovery watermarks without authorizing them and scopes them to this exit', async () => {
+    const billed = await createAccount('inactive-roster-watermark');
+    const observedAt = Math.floor(Date.now() / 1000);
+    expect((await api('home/usage', json({ reports: [{
+      reportId: 'inactive-watermark-default', userId: billed.user.id, sourceId: 'exit-default',
+      protocolVersion: 2, totalBytes: 1050, observedAt,
+    }] }, EXIT_NODE_TOKENS['exit-default']))).status).toBe(200);
+    expect((await api('home/usage', json({ reports: [{
+      reportId: 'inactive-watermark-other', userId: billed.user.id, sourceId: 'exit-a',
+      protocolVersion: 2, totalBytes: 630, observedAt,
+    }] }, EXIT_NODE_TOKENS['exit-a']))).status).toBe(200);
+    await env.DB.prepare('UPDATE users SET expires_at = ? WHERE id = ?')
+      .bind(observedAt - 1, billed.user.id).run();
+
+    const listed = await api('home/exit-identities', {
+      headers: { authorization: `Bearer ${EXIT_NODE_TOKENS['exit-default']}` },
+    });
+    expect(listed.status).toBe(200);
+    expect(await listed.json()).toMatchObject({
+      identities: [], sourceUsageWatermarks: [{ userId: billed.user.id, sourceUsageBytes: 1050 }],
+    });
+    const other = await api('home/exit-identities', {
+      headers: { authorization: `Bearer ${EXIT_NODE_TOKENS['exit-a']}` },
+    });
+    expect(await other.json()).toMatchObject({
+      identities: [], sourceUsageWatermarks: [{ userId: billed.user.id, sourceUsageBytes: 630 }],
+    });
+    expect((await api('home/usage', json({ reports: [{
+      reportId: 'inactive-watermark-recovery', userId: billed.user.id, sourceId: 'exit-default',
+      protocolVersion: 2, totalBytes: 1050, observedAt: observedAt + 1,
+    }] }, EXIT_NODE_TOKENS['exit-default']))).status).toBe(200);
+    expect(await env.DB.prepare('SELECT usage_bytes FROM users WHERE id = ?').bind(billed.user.id)
+      .first()).toEqual({ usage_bytes: 1680 });
   });
 
   it('revokes sessions and devices as soon as a usage report reaches quota', async () => {

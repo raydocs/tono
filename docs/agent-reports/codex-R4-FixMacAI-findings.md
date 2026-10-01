@@ -1,6 +1,6 @@
 # R4-FixMacAI: Codex (GPT-6.1 Sol) findings
 
-Generated 2026-10-01 01:50 MT from the run's findings.tsv / prs.tsv.
+Generated 2026-10-01 02:55 MT from the run's findings.tsv / prs.tsv.
 
 ## PRs
 
@@ -10,7 +10,7 @@ Generated 2026-10-01 01:50 MT from the run's findings.tsv / prs.tsv.
 | 1141 | hunt/sol-r4fma-resolver-ownership | needs-hardware | yes | fix(macos): preserve ownership and originals of selective resolver files |
 | 1144 | hunt/sol-r4fma-snapshotless-dns-apply | needs-hardware | yes | fix(macos): activate committed DNS during snapshotless restore retry |
 | 1154 | hunt/sol-r4fma-dns-retirement-proof | needs-hardware | yes | fix(macos): retain DNS ownership proof across repeated Disconnect cleanup |
-| 1166 | hunt/sol-r4fma-upgrade-fifo | none | yes | fix(macos): reject blocking special files in app upgrade validation |
+| 1166 | hunt/sol-r4fma-upgrade-fifo | needs-hardware | yes | fix(macos): reject blocking special files in app upgrade validation |
 
 ## Hypotheses
 
@@ -47,3 +47,5 @@ Generated 2026-10-01 01:50 MT from the run's findings.tsv / prs.tsv.
 | R4FMA-AUDIT-DNS-UPDATE-ACTIVE-PROOF | macOS helper | — | tooling/scripts/core-helper/ProtectedDNSManager.swift:245 | Update trusts stored DNS while active still loopback | false-positive verifyRestored reads active service DNS |
 | R4FMA-AUDIT-CONNECT-UNARMED-PLAIN | macOS app | — | apps/macos/Tono/Services/AppState+Connect.swift:982 | Ordinary unarmed failed-connect cleanup uses plain disarm | duplicate merged #1061 selects AI-preserving cleanup; #1071 upgrade defer remains distinct |
 | R4FMA-INTERRUPTED-EXPLICIT-AI-CLEANUP | macOS helper/app | P2 | tooling/scripts/core-helper/KillSwitchManager.swift:633 | Interrupted explicit Restore suppresses apply but never resumes selective removal | real-unfixed #1169; preexisting, pending/completed removal and route ownership/native qualification required |
+| R4FMA-AUDIT-FIFO-REFUSAL-AI-GAP | macOS app | P2 | apps/macos/Tono/Core/HelperManager.swift:259 | FIFO rejection reaches plain abandoned-upgrade cleanup | duplicate known #1071; modern Connect later reapplies AI, legacy/prompt-free callers cannot; early reorder lacks legacy recovery guarantee |
+| R4FMA-AUDIT-FIFO-SIGNATURE-FALLBACK | macOS app | — | apps/macos/Tono/Core/HelperManager.swift:339 | Administrator fallback passes rejected FIFO to Security.framework | unverified Security.framework special-file behavior requires native evidence; path validator fixed in #1166, whole signing API hang not claimed |

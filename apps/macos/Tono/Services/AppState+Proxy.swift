@@ -680,15 +680,18 @@ extension AppState {
                 }
                 finishConfigReloadRequest(requestID)
             } catch is CancellationError {
-                guard pinsRuntimeCommitted, !isDisconnecting else { return }
+                guard pinsRuntimeCommitted, !isDisconnecting,
+                      connectionCoordinator.configReloadRequestID == requestID else { return }
                 LocalTrafficAudit.shared.recordEvent(
                     "managed_direct_pf_convergence_cancelled"
                 )
-                disconnect(releaseKillSwitch: false)
-                errorMessage = String(
-                    localized: "Secure WeChat routing was interrupted while updating; Kill Switch is blocking traffic while Tono retries."
+                finishConfigReloadRequest(requestID, startPending: false)
+                await applyExhaustedArmedFailure(
+                    message: ConnectionFailurePresentation.userFacingMessage(
+                        classified: lastClassifiedFailure
+                    ),
+                    resumeWhenReachable: true
                 )
-                scheduleProtectedReconnect(immediate: true)
             } catch {
                 if pendingRemovedCatalogExit, !Task.isCancelled, !isDisconnecting,
                    connectionCoordinator.configReloadRequestID == requestID {
@@ -699,25 +702,28 @@ extension AppState {
                     disconnect(releaseKillSwitch: true, automaticFailureRelease: true)
                     return
                 }
-                // Once Mihomo accepted new pins, neither cancellation nor a
-                // superseding reload may leave PF at the temporary union. This
-                // branch must win over the ordinary stale-request guards.
+                // A current owner that installed new pins must retire the
+                // temporary PF union even when cancelled. A newer disconnect
+                // or update owner already owns that cleanup.
                 if pinsOnlyRefresh, pinsRuntimeCommitted {
-                    guard !isDisconnecting else { return }
+                    guard !isDisconnecting,
+                          connectionCoordinator.configReloadRequestID == requestID else { return }
                     // The core is already using the new exact pins but PF could
-                    // not converge from old ∪ new to the new set. Stop the core
-                    // and return to bootstrap-only protection; treating this as
-                    // a harmless background failure would retain stale direct
-                    // permissions indefinitely.
+                    // not converge from old ∪ new to the new set. Retire this
+                    // owner and stop the core before selectively releasing PF;
+                    // neither stale DIRECT permits nor bootstrap protection
+                    // may remain while ordinary internet waits for recovery.
                     LocalTrafficAudit.shared.recordEvent(
                         "managed_direct_pf_convergence_failed",
                         details: ["error": String(describing: error)]
                     )
-                    disconnect(releaseKillSwitch: false)
-                    errorMessage = String(
-                        localized: "Secure WeChat routing could not finish updating; Kill Switch is blocking traffic while Tono retries."
+                    finishConfigReloadRequest(requestID, startPending: false)
+                    await applyExhaustedArmedFailure(
+                        message: ConnectionFailurePresentation.userFacingMessage(
+                            classified: lastClassifiedFailure
+                        ),
+                        resumeWhenReachable: true
                     )
-                    scheduleProtectedReconnect(immediate: true)
                     return
                 }
                 guard !Task.isCancelled, !isDisconnecting else { return }

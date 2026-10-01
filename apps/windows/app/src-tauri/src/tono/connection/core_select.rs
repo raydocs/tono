@@ -48,7 +48,7 @@ pub(super) async fn prepare_owned_core(
     let home_socks5 = routing.and_then(|routing| routing.home_socks5.as_ref());
     match resolve(preferred, proof, protection_armed, service_can_run) {
         CoreSelection::Run(CoreChoice::SingBox) => {
-            compile_sing_box(nodes, selected, routing, secret, ports, binary)
+            compile_sing_box(nodes, selected, routing, secret, ports, None, binary)
         }
         CoreSelection::Run(CoreChoice::Mihomo { automatic_fallback }) => {
             if automatic_fallback {
@@ -77,15 +77,14 @@ pub(super) async fn prepare_owned_core(
     }
 }
 
-fn compile_sing_box(
+pub(super) fn sing_box_runtime_document(
     nodes: &[ValidatedNode],
     selected: &str,
-    routing: Option<&CatalogRouting>,
+    routing: &CatalogRouting,
     secret: &str,
     ports: RuntimePorts,
-    binary: PathBuf,
-) -> Result<PreparedCore, StageFailure> {
-    let routing_owned = routing.cloned().unwrap_or_default();
+    plan: Option<&tono_core::config::DirectPlan>,
+) -> Result<String, String> {
     let home_names: Vec<String> = config::HOME_PROCESS_NAMES
         .iter()
         .copied()
@@ -101,8 +100,8 @@ fn compile_sing_box(
         nodes,
         selected,
         controller_secret: secret,
-        direct_plan: None,
-        routing: &routing_owned,
+        direct_plan: plan,
+        routing,
         platform: "windows-amd64-v2",
         ports,
         required_capabilities: &[],
@@ -110,9 +109,25 @@ fn compile_sing_box(
         home_process_path_regexes: &home_paths,
         direct_process_names: &direct_names,
     };
-    let runtime = build_runtime(input).map_err(|error| StageFailure::error(error.to_string()))?;
+    build_runtime(input)
+        .map(|runtime| runtime.runtime_json().to_string())
+        .map_err(|error| error.to_string())
+}
+
+fn compile_sing_box(
+    nodes: &[ValidatedNode],
+    selected: &str,
+    routing: Option<&CatalogRouting>,
+    secret: &str,
+    ports: RuntimePorts,
+    plan: Option<&tono_core::config::DirectPlan>,
+    binary: PathBuf,
+) -> Result<PreparedCore, StageFailure> {
+    let routing_owned = routing.cloned().unwrap_or_default();
+    let document = sing_box_runtime_document(nodes, selected, &routing_owned, secret, ports, plan)
+        .map_err(StageFailure::error)?;
     Ok(PreparedCore {
-        document: runtime.runtime_json().to_string(),
+        document,
         core_path: binary,
         sing_box: true,
     })

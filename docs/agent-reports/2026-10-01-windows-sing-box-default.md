@@ -14,24 +14,22 @@
 | 服务太旧 | 协议 &lt; 18 不能跑 sing-box | 拒绝，不偷偷改跑 mihomo |
 | 武装后失败 | 既有放行普通网络、AI 仍拦（决策 031） | 同样，不改去启动 mihomo |
 | AI 拦截 | 进程与域名规则，严格模式才全拦 | 编译器同一套 home / 模型域名规则 |
-| 已审应用 DIRECT | 进程路径，连接成功后热更新 | 首连仍是全隧道。`PUT /configs` 在 alpha.9 是空操作，所以成功后的 DIRECT 先跳过，避免重载括号失败把流量留在 Blocked |
+| 已审应用 DIRECT | 进程路径，连接成功后热更新 | 首连仍是全隧道。协议 19 在连上之后换进程，不走 mihomo 重载括号，也不调用会进 Blocked 的 begin。`/rules` 必须先证明 AI 后缀不走物理网卡，并且含 `process_path_regex`。对不上、许可装不上或装上后状态对不上，就换回全隧道文档。这次回滚失败不会把 DIRECT 规则写回去；隧道仍证明不了，才放行普通网络，AI 仍拦。协议 18 没有这条路由，保持全隧道 |
 | DNS | 回环 :53，保护 DNS 由 Service 指到隧道 | 模板 inbound `127.0.0.1:53`，同样由 Service 保护 |
 | fake-ip | `198.18.0.1/16` | `198.18.16.0/20`，在 Windows 探测前缀内、在 TUN /30 外 |
 | HY2 | DER `fingerprint` | 有 SPKI 才发出 `certificate_public_key_sha256`。不从 DER 推导。选中却没有 SPKI 则编译失败；没选中的记为不可用 |
 | 协议 | VLESS Reality、HY2 | 相同。目录不收 Trojan / VMess / SS |
 | 连通判定 | 数据面证明之后才 Connected | 同一条 `verify_post_lock` |
 | 延迟探测 | 数据面证明后等 1.5 s（与 #1122 同一常量） | 同一条成功路径，不挡住 Connected |
-| 控制器回读 | `/rules` 用 mihomo 字符串 | 本批还没有 sing-box 的 String() 对照 |
+| 控制器回读 | `/rules` 用 mihomo 字符串 | alpha.9 的 `Type()` / `String()` / `Action().String()`。只含 route 规则，不含 DNS。许可用服务返回的端点摘要核对，不用本机另算的一份 |
 | TUN | gVisor 窗口是 #1119，与 sing-box 无关 | 不写 `stack`，也不写 `tcp_fast_open`。发送 2 MiB、接收 4 MiB 是 alpha.9 sing-tun 的二进制上限，不是 JSON 字段。与 macOS 同一条 |
 | DoH | #1121 把 mihomo 改成懒查询 | 模板已是：先 evaluate 主用，只有 NOERROR 才 respond，然后才 evaluate 备用。无 `race`，ALPN `h2`，detour `Tono-Exit`，无明文 DNS |
-| 两个二进制 | `tono-core.exe` 仍在 | `sing-box.exe` 应放在同目录。安装事务仍是三个文件；缺镜像时武装前回退 mihomo |
-| 协议版本 | 17 及更早仍可释放 WFP | 18 才会按 sing-box 启动 |
+| 两个二进制 | `tono-core.exe` 仍在 | `sing-box.exe` 是安装事务的第四个成员，摘要钉死 alpha.9。pin 未设置且没有 staged 文件时（开发构建）仍跳过，连接前回到 mihomo |
+| 协议版本 | 17 及更早仍可释放 WFP | 18 才会按 sing-box 启动。19 才会为 DIRECT 换进程。第四个二进制不另加 IPC。`MIN_REQUIRED` 仍是 14 |
 
 ## 还没做
 
-- 把 `sing-box.exe` 和 `sing-box-sha256.txt` 放进安装与升级的替换事务。pin 未设置或文件不在时，连接前回到 mihomo，这是批准过的回退，不是把默认改回去。
-- sing-box 的 DIRECT：在 WFP 仍武装时换进程，再用 alpha.9 的 `/rules` 字符串核对。现在跳过，全隧道保持可用。
-- 真实 Windows 上的吞吐、首包和 DoH。需要备用机。
+- 真实 Windows 上的吞吐、首包、DoH，以及审阅应用走 DIRECT 时 AI 仍被拦。需要备用机。`sing-box.exe` 不在 git 里。
 
 ## 备用机清单
 
@@ -45,3 +43,4 @@
 6. 把 sing-box.exe 挪走再连接（此时未武装）：应改跑 mihomo，普通网络仍在。
 7. 连上之后再让 sing-box 退出：应放行普通网络并继续拦 AI，不应改去启动 mihomo。
 8. 写上本机的 `{"schema":2,"device_id":"<installation_id>","core":"mihomo"}` 再连接：应是 mihomo。
+9. 用默认 sing-box 连上之后，审阅应用应能走 DIRECT，AI 站点仍被拦。若 `/rules` 对不上，普通流量应留在全隧道，机器不应停在断网。

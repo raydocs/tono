@@ -156,6 +156,49 @@ describe('operations timeseries retention', () => {
     expect(Number(rollups!.c)).toBe(12);
   });
 
+  it('keeps a complete counter pair when an incomplete observation overwrites its minute', async () => {
+    const minute = 1_800_000_000;
+    const name = 'Same-minute missing counters';
+    const profile = { cycleKind: 'manual', trafficCycleStart: minute,
+      trafficCycleEnd: minute + 30 * 86400, quotaCounts: 'in_out' };
+    await recordAgentSamples(db(), [
+      { ...sample(name, minute, 10), netIn: 100, netOut: 20 },
+    ], minute);
+    await rollNodeCycle(db(), name, profile, (await readAgentNetCounters(db(), name))!, minute);
+    await recordAgentSamples(db(), [
+      { ...sample(name, minute + 60, 20), netIn: 200, netOut: 40 },
+    ], minute + 60);
+    expect(await rollNodeCycle(db(), name, profile,
+      (await readAgentNetCounters(db(), name))!, minute + 60))
+      .toMatchObject({ used_bytes: 120, resets_detected: 0 });
+
+    await recordAgentSamples(db(), [
+      { ...sample(name, minute + 80, 90), netIn: 999, netOut: null },
+    ], minute + 80);
+    const retained = await readAgentNetCounters(db(), name);
+    expect(retained).toEqual({ in: 200, out: 40, at: minute + 60 });
+    expect(await db().prepare(
+      'SELECT cpu FROM operations_agent_samples WHERE node_name = ? AND observed_at = ?',
+    ).bind(name, minute + 60).first()).toMatchObject({ cpu: 90 });
+    expect(await rollNodeCycle(db(), name, profile, retained!, minute + 80))
+      .toMatchObject({ used_bytes: 120, resets_detected: 0 });
+
+    await recordAgentSamples(db(), [
+      { ...sample(name, minute + 120, 30), netIn: 300, netOut: 60 },
+    ], minute + 120);
+    expect(await rollNodeCycle(db(), name, profile,
+      (await readAgentNetCounters(db(), name))!, minute + 120))
+      .toMatchObject({ used_bytes: 240, resets_detected: 0 });
+
+    // Complete lower counters still prove a real reset.
+    await recordAgentSamples(db(), [
+      { ...sample(name, minute + 180, 40), netIn: 5, netOut: 2 },
+    ], minute + 180);
+    expect(await rollNodeCycle(db(), name, profile,
+      (await readAgentNetCounters(db(), name))!, minute + 180))
+      .toMatchObject({ used_bytes: 247, resets_detected: 2 });
+  });
+
   it('keeps the latest complete raw counter pair through retention and quota recovery', async () => {
     const hour = Math.floor(1_800_000_000 / 3600) * 3600;
     const name = 'Missing counters';

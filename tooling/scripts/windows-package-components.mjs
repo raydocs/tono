@@ -59,15 +59,24 @@ export async function windowsPackageComponents(root) {
       throw new Error(`${file} differs from the installed ${reference}; refusing the package`)
     }
   }
-  return Object.fromEntries(Object.entries(INSTALLED).map(([role, expected]) => [role, path.join(root, installed(expected))]))
+  const measured = Object.fromEntries(Object.entries(INSTALLED).map(([role, expected]) => [role, path.join(root, installed(expected))]))
+  const singBox = byPath.get('sing-box.exe.next')
+  if (singBox) measured.singBox = path.join(root, singBox)
+  return measured
 }
 
 async function main() {
   const [root, ...rest] = process.argv.slice(2)
   if (!root || rest.length) throw new Error('usage: windows-package-components.mjs <7-Zip extraction of the NSIS installer>')
-  const { app, core, privileged } = await windowsPackageComponents(path.resolve(root))
+  const measured = await windowsPackageComponents(path.resolve(root))
   // KEY=path lines for GITHUB_ENV; nothing else goes to stdout.
-  console.log(`WINDOWS_APP=${app}\nWINDOWS_CORE=${core}\nWINDOWS_SERVICE=${privileged}`)
+  const lines = [
+    `WINDOWS_APP=${measured.app}`,
+    `WINDOWS_CORE=${measured.core}`,
+    `WINDOWS_SERVICE=${measured.privileged}`,
+  ]
+  if (measured.singBox) lines.push(`WINDOWS_SING_BOX=${measured.singBox}`)
+  console.log(lines.join('\n'))
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

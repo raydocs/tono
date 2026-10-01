@@ -42,8 +42,13 @@ function targetShape(target, expectedId) {
   requireValue(hex(target.artifactSha256, 64), 'invalid artifact digest')
   requireValue(Number.isSafeInteger(target.artifactSizeBytes)
     && target.artifactSizeBytes > 0 && target.artifactSizeBytes <= MAX_ARTIFACT_BYTES, 'invalid artifact size')
-  requireValue(exactKeys(target.components, ['appSha256', 'coreSha256', 'privilegedSha256'])
-    && Object.values(target.components).every(value => hex(value, 64)), 'invalid component digests')
+  const componentKeys = Object.keys(target.components)
+  const required = ['appSha256', 'coreSha256', 'privilegedSha256']
+  requireValue(required.every(key => componentKeys.includes(key))
+    && componentKeys.every(key => required.includes(key) || key === 'singBoxSha256')
+    && required.every(key => hex(target.components[key], 64))
+    && (!Object.hasOwn(target.components, 'singBoxSha256') || hex(target.components.singBoxSha256, 64)),
+  'invalid component digests')
 }
 
 function sorted(value) {
@@ -99,7 +104,7 @@ async function digestFile(file) {
   }
 }
 
-export async function measureTarget({ appVersion, buildCommit, releaseSequence, targetId, artifact, app, core, privileged }) {
+export async function measureTarget({ appVersion, buildCommit, releaseSequence, targetId, artifact, app, core, privileged, singBox }) {
   requireValue(identifier(appVersion, 64) && hex(buildCommit, 40), 'invalid measurement identity')
   sequence(releaseSequence)
   requireValue(TARGETS.includes(targetId), 'unsupported native target')
@@ -112,6 +117,7 @@ export async function measureTarget({ appVersion, buildCommit, releaseSequence, 
         appSha256: (await digestFile(app)).sha256,
         coreSha256: (await digestFile(core)).sha256,
         privilegedSha256: (await digestFile(privileged)).sha256,
+        ...(singBox ? { singBoxSha256: (await digestFile(singBox)).sha256 } : {}),
       },
     },
   }
@@ -198,7 +204,7 @@ async function boundedRead(file, limit) {
 
 async function main() {
   const [command, ...args] = process.argv.slice(2)
-  const names = ['version', 'source', 'sequence', 'target', 'artifact', 'app', 'core', 'privileged',
+  const names = ['version', 'source', 'sequence', 'target', 'artifact', 'app', 'core', 'privileged', 'sing-box',
     'macos', 'windows', 'release-id', 'output', 'manifest', 'macos-signature', 'windows-signature',
     'macos-public-key', 'windows-public-key', 'macos-artifact', 'windows-artifact']
   const { values } = parseArgs({ args, options: Object.fromEntries(names.map(name => [name, { type: 'string' }])) })
@@ -215,6 +221,7 @@ async function main() {
     const result = await measureTarget({
       appVersion: arg('version'), buildCommit: arg('source'), releaseSequence: sequenceArg(),
       targetId: arg('target'), artifact: arg('artifact'), app: arg('app'), core: arg('core'), privileged: arg('privileged'),
+      singBox: values['sing-box'],
     })
     await writeFile(arg('output'), canonical(result), { flag: 'wx' })
     console.log('Measured package and native components; not a signature or installed-device acceptance.')

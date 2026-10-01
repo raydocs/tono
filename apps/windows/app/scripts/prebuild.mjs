@@ -828,6 +828,32 @@ async function writeCoreDigestPin() {
     'utf8',
   )
   log_success(`wrote resources/core-sha256.txt (${digest})`)
+}
+
+async function writeSingBoxDigestPin() {
+  if (platform !== 'win32') return
+  const { validateSingBoxDigest, WINDOWS_SING_BOX_SHA256 } = await import(
+    './windows-packaging.mjs'
+  )
+  const sidecar = path.join(SIDECAR_DIR, `sing-box-${SIDECAR_HOST}.exe`)
+  if (!fs.existsSync(sidecar)) {
+    throw new Error(
+      `cannot write sing-box-sha256.txt: missing ${sidecar} (pinned ${WINDOWS_SING_BOX_SHA256})`,
+    )
+  }
+  const digest = createHash('sha256')
+    .update(await fsp.readFile(sidecar))
+    .digest('hex')
+  const pinError = validateSingBoxDigest(digest)
+  if (pinError) throw new Error(pinError)
+  await fsp.mkdir(RESOURCES_DIR, { recursive: true })
+  await fsp.writeFile(
+    path.join(RESOURCES_DIR, 'sing-box-sha256.txt'),
+    `${digest}\n`,
+    'utf8',
+  )
+  log_success(`wrote resources/sing-box-sha256.txt (${digest})`)
+}
   const identitySource = path.join(cwd, 'src-tauri', 'core-identity.json')
   const identityDest = path.join(RESOURCES_DIR, 'core-identity.json')
   if (!fs.existsSync(identitySource)) {
@@ -841,6 +867,7 @@ async function writeCoreDigestPin() {
 
 runTask()
   .then(() => writeCoreDigestPin())
+  .then(() => writeSingBoxDigestPin())
   .then(() => assertWindowsPackagingConfig())
   .catch((error) => {
     log_error(error.message || error)

@@ -209,6 +209,81 @@ pub(super) fn create_ipc_router() -> Result<Router> {
                 )),
             }
         })
+        .post(IpcCommand::ReplaceSingBoxRuntime.as_ref(), |ctx| async move {
+            let (request, owner) = match authenticate_request::<
+                AuthenticatedSessionRequest<crate::ReplaceSingBoxRuntimeRequest>,
+            >(&ctx)
+            .await
+            {
+                ControlFlow::Continue(authenticated) => authenticated,
+                ControlFlow::Break(response) => return response,
+            };
+            let _lifecycle_guard = match enter_owner_lifecycle(
+                &owner,
+                OwnerLifecycleGate::ActiveSession(&request.session),
+            )
+            .await
+            {
+                ControlFlow::Continue(guard) => guard,
+                ControlFlow::Break(response) => return response,
+            };
+            if let Err(error) = require_active_session(&owner, &request.session).await {
+                return service_error(error);
+            }
+            let _operation_guard =
+                OperationGuard::begin(ServiceOperationKind::StartCore, IPC_HANDLER_TIMEOUT);
+            match crate::core::sing_box_direct::replace_running_sing_box_document(
+                &owner.identity,
+                &request.payload.runtime_json,
+                request.payload.restore_previous,
+            )
+            .await
+            {
+                Ok(()) => ok_empty("sing-box runtime replaced and the full tunnel was locked"),
+                Err(error) => service_unavailable(format!(
+                    "Failed to replace sing-box runtime: {error:#}"
+                )),
+            }
+        })
+        .post(IpcCommand::CommitSingBoxDirect.as_ref(), |ctx| async move {
+            let (request, owner) = match authenticate_request::<
+                AuthenticatedSessionRequest<crate::CommitSingBoxDirectRequest>,
+            >(&ctx)
+            .await
+            {
+                ControlFlow::Continue(authenticated) => authenticated,
+                ControlFlow::Break(response) => return response,
+            };
+            let _lifecycle_guard = match enter_owner_lifecycle(
+                &owner,
+                OwnerLifecycleGate::ActiveSession(&request.session),
+            )
+            .await
+            {
+                ControlFlow::Continue(guard) => guard,
+                ControlFlow::Break(response) => return response,
+            };
+            let active = match require_active_session(&owner, &request.session).await {
+                Ok(active) => active,
+                Err(error) => return service_error(error),
+            };
+            let _operation_guard = OperationGuard::begin(
+                ServiceOperationKind::ReplaceDirectEndpoints,
+                IPC_HANDLER_TIMEOUT,
+            );
+            match windows_kill_switch::commit_sing_box_direct_while_locked(
+                &request.payload.direct_endpoints,
+                &request.payload.reviewed_direct_ports,
+                active.generation,
+            )
+            .await
+            {
+                Ok(result) => ok_json(result),
+                Err(error) => service_unavailable(format!(
+                    "Failed to commit sing-box DIRECT permits: {error:#}"
+                )),
+            }
+        })
         .post(IpcCommand::ReplaceDirectEndpoints.as_ref(), |ctx| async move {
             let (request, owner) = match authenticate_request::<
                 AuthenticatedSessionRequest<ReplaceDirectEndpointsRequest>,
