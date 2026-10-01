@@ -6401,6 +6401,16 @@
         }
       }
     },
+    "The UDP backup path went idle and the home router likely dropped it. Tono stays on this same route and retries. Support code TONO_CONNECT_HY2_IDLE. Send diagnostics if it keeps happening.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "备用 UDP 通道空闲后断了，多半是家里的路由器清掉了闲置连接。Tono 会留在同一条线路上重试。支持码 TONO_CONNECT_HY2_IDLE。如果反复出现，请发诊断。"
+          }
+        }
+      }
+    },
     "The protected connection did not come back after the update. Reconnect to restore protection.": {
       "localizations": {
         "zh-Hans": {

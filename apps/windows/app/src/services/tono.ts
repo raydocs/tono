@@ -223,6 +223,10 @@ const STABLE_ERROR_KEYS: Array<{ prefix: string; key: string }> = [
     key: 'tono.dashboard.errors.browserDnsPreflight',
   },
   {
+    prefix: 'TONO_CONNECT_HY2_IDLE',
+    key: 'tono.dashboard.errors.hy2Idle',
+  },
+  {
     prefix: 'TONO_NODE_OR_CORE_UNREACHABLE',
     key: 'tono.dashboard.errors.nodeUnreachable',
   },
@@ -431,6 +435,8 @@ export const connectRejectionNeedsServerChoice = (error: unknown): boolean => {
 /** True when the failure is likely a blocked/dead exit the user should switch. */
 export const connectErrorSuggestsServerSwitch = (error: unknown): boolean => {
   const raw = error instanceof Error ? error.message : String(error ?? '')
+  // A quiet UDP mapping is this same route. Another city will not refill it.
+  if (raw.includes('TONO_CONNECT_HY2_IDLE')) return false
   // Same TLS close on every city is not a "pick another server" problem.
   if (/tls handshake eof/i.test(raw)) {
     return false
@@ -450,6 +456,8 @@ export const connectErrorSuggestsServerSwitch = (error: unknown): boolean => {
 export const connectErrorSuggestsBackupChannel = (error: unknown): boolean => {
   const raw = error instanceof Error ? error.message : String(error ?? '')
   if (!raw) return false
+  // Already on the UDP hop. Offering it again is not a different route.
+  if (raw.includes('TONO_CONNECT_HY2_IDLE')) return false
   if (/tls handshake eof/i.test(raw)) return true
   if (raw.includes('CORE_EXIT_UNREACHABLE')) return true
   if (raw.includes('TONO_NODE_OR_CORE_UNREACHABLE')) return true

@@ -495,6 +495,8 @@ async fn retain_attempt_failure(
     attempt_record: &crate::tono::local_evidence::ConnectionAttempt,
     error: &str,
 ) {
+    let annotated = tono_core::hy2_idle::annotate(error);
+    let error = annotated.as_ref();
     let mut inner = state.lock().await;
     // Timeouts capture before retiring their generation. Superseded attempts must
     // not read another transition's steps or overwrite its evidence.
@@ -719,6 +721,8 @@ async fn record_connect_failure(
     state: &Arc<TonoState>, generation: u64, err: &str, observed: Option<KillSwitchStatus>,
     account_owner: (u64, u64),
 ) -> Option<RecordedFailure> {
+    let annotated = tono_core::hy2_idle::annotate(err);
+    let err = annotated.as_ref();
     logging!(error, Type::Service, "Tono: 连接事务失败: {err}");
     let (plan, armed, report) = {
         let mut inner = state.lock().await;
