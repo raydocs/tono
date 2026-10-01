@@ -220,6 +220,10 @@ fn enum_subkeys(subkey: &str) -> Result<Vec<String>> {
 }
 
 fn read_flags(subkey: &str, value: &str) -> Result<Option<u64>> {
+    #[cfg(test)]
+    if let Some(value) = test_io::with(|io| io.read(subkey, value)) {
+        return value.map(|value| value.parse::<u64>().context("invalid fixture flags")).transpose();
+    }
     let Some(key) = RegKey::open(subkey, false)? else {
         return Ok(None);
     };
@@ -482,7 +486,21 @@ fn suppress_interface_doh() -> Result<()> {
         // A capture this build can read stays in force: it may have been written by an older
         // build mid-session (its cross-upgrade role), and the flags below may already be
         // zeroed by that session.
-        Ok(Some(_)) => {}
+        Ok(Some(mut saved)) => {
+            let before = saved.len();
+            for entry in &current {
+                if !saved.iter().any(|original| {
+                    original.guid.eq_ignore_ascii_case(&entry.guid)
+                        && original.family.eq_ignore_ascii_case(&entry.family)
+                        && original.server.eq_ignore_ascii_case(&entry.server)
+                }) {
+                    saved.push(entry.clone());
+                }
+            }
+            if saved.len() != before {
+                write_interface_doh_capture(&saved)?;
+            }
+        }
         unreadable => {
             if let Err(error) = unreadable {
                 let path = super::interface_doh_capture_path();

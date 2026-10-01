@@ -45,6 +45,7 @@ pub(crate) struct Machine {
     pub effective_reads: usize,
     pub policy_restores: usize,
     pub before_write: Vec<DnsSnapshot>,
+    pub before_doh_write: Vec<Option<Vec<facade::InterfaceDohEntry>>>,
     /// X2-2: what the effective-NRPT read and the cache-bypassing system lookup return.
     pub effective_nrpt: std::result::Result<Vec<facade::EffectiveNrptRule>, String>,
     pub system_lookup: std::result::Result<Vec<std::net::Ipv4Addr>, String>,
@@ -76,6 +77,13 @@ impl Machine {
             facade::parse_snapshot(&std::fs::read(&self.snapshot_path)?)
                 .map_err(anyhow::Error::msg)?,
         );
+        if value == DOH_FLAGS {
+            self.before_doh_write.push(
+                std::fs::read_to_string(self.capture_dir.join("protected-interface-doh.json"))
+                    .ok()
+                    .and_then(|body| facade::parse_interface_doh_capture(&body).ok()),
+            );
+        }
         if self
             .fail_write
             .as_ref()
@@ -260,6 +268,7 @@ impl Fixture {
             effective_reads: 0,
             policy_restores: 0,
             before_write: Vec::new(),
+            before_doh_write: Vec::new(),
             // Tono's catch-all in force and a fake-ip answer: the healthy default.
             effective_nrpt: Ok(vec![facade::EffectiveNrptRule {
                 namespaces: vec![".".to_owned()],
