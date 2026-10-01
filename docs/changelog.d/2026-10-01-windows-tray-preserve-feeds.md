@@ -1,6 +1,6 @@
 ## 2026-10-01 · Windows tray startup preserves controller feeds
 - Ownership: SHIP_PLAN §2 item 10; Windows lifecycle reliability.
-- Source: baseline `0bac2732`; branch `hunt/sol-r4ts-traffic-feed-recovery`; PR pending, not merged at authoring.
+- Source: baseline `0bac2732`; branch `hunt/sol-r4ts-traffic-feed-recovery`; PR [#1118](https://github.com/raydocs/tono/pull/1118), not merged at authoring.
 - Defect fix: the first tray WebView load globally cancelled the main window's telemetry sockets; remove the startup cleanup so existing dashboard and Activity feeds continue. Finding R4TS-TRAY-CLEARS-FEEDS (P2).
 - Added/optimized: none; no layout or native protection change.
 - Engineering/tests: one regression executes the application entry and actual packaged plugin JS with a shared registry double. Before the fix, both existing feeds were removed.
