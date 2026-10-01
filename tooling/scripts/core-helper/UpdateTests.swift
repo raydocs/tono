@@ -680,6 +680,11 @@ func runUpdateSelfTests() -> Bool {
             prefix: SelectiveFailOpen.ipv4Prefix
         )
         try check(reading == .unknown, "Malformed route flags counted as \(reading)")
+        // route.c prints its lowercase bit names as they are.
+        try check(SelectiveFailOpen.readbackShowsForeignRoute(
+            "destination: 160.79.104.0\n       mask: 255.255.254.0\n      flags: <UP,GATEWAY,DONE,STATIC,b016>\n",
+            prefix: SelectiveFailOpen.ipv4Prefix
+        ), "A real route readback with a lowercase bit name did not parse")
     }
     // An iPhone or iPad app on Apple silicon is a wrapper with no Contents
     // folder (`WrappedBundle -> Wrapper/<name>.app`). One of them kept every

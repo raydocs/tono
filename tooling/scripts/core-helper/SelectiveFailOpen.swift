@@ -181,7 +181,8 @@ enum SelectiveFailOpen {
     }
 
     /// The flag names of an exact-prefix readback; nil for any other answer,
-    /// including flags that are not `<` + comma-separated [A-Z0-9]+ + `>`
+    /// including flags that are not `<` + comma-separated [A-Za-z0-9]+ + `>`
+    /// (route.c's bit names include lowercase `b016` and `b024`)
     /// (an empty name or stray whitespace could hide BLACKHOLE).
     private static func readbackFlags(_ output: String, prefix: String) -> [String]? {
         guard let identity = routeReadbackIdentity[prefix] else { return nil }
@@ -194,7 +195,9 @@ enum SelectiveFailOpen {
         let names = flags.dropFirst().dropLast()
             .split(separator: ",", omittingEmptySubsequences: false).map(String.init)
         guard names.allSatisfy({ name in
-            !name.isEmpty && name.unicodeScalars.allSatisfy { ("A"..."Z").contains($0) || ("0"..."9").contains($0) }
+            !name.isEmpty && name.unicodeScalars.allSatisfy {
+                ("A"..."Z").contains($0) || ("a"..."z").contains($0) || ("0"..."9").contains($0)
+            }
         }) else { return nil }
         return names
     }
