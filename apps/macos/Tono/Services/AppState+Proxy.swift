@@ -734,8 +734,8 @@ extension AppState {
     }
 
     /// Completes one serialized runtime mutation and starts the newest queued
-    /// request. Pin changes take precedence because a full rewrite will then
-    /// naturally include the newly committed exact direct policy.
+    /// request. Accepted authorization takes precedence over pin snapshots;
+    /// a full rewrite then includes the newly committed exact direct policy.
     func finishConfigReloadRequest(
         _ requestID: Int,
         startPending: Bool = true
@@ -744,6 +744,7 @@ extension AppState {
         connectionCoordinator.configReloadTask = nil
         guard startPending, isConnected, !isDisconnecting else {
             if !startPending {
+                pendingOptionalPolicyReload = false
                 pendingDirectPolicyReload = nil
                 pendingFullConfigReload = false
             }
@@ -755,7 +756,14 @@ extension AppState {
     private func startPendingConfigReloadIfPossible() {
         guard connectionCoordinator.configReloadTask == nil, switchingNodeId == nil,
               isConnected, !isDisconnecting else { return }
-        if let policy = pendingDirectPolicyReload {
+        if pendingOptionalPolicyReload {
+            scheduleBackgroundOptionalPolicy()
+            // An empty document with no active grants needs no replacement,
+            // but any queued full rewrite must still drain.
+            if connectionCoordinator.configReloadTask == nil {
+                startPendingConfigReloadIfPossible()
+            }
+        } else if let policy = pendingDirectPolicyReload {
             pendingDirectPolicyReload = nil
             reloadCoreConfig(applyingDirectPolicy: policy)
         } else if pendingFullConfigReload {
