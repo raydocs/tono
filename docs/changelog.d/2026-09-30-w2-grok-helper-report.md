@@ -7,3 +7,13 @@
 - 验证：报告与 issue 链接核对到 GitHub。helper 自测未在本机执行。
 - 候选/发布：无新包。
 - 剩余限制：#889 的 `needs-hardware` 标签因令牌 403 没打上；auto-merge 已开且本报告不再改它。
+
+## 2026-10-01 · 续记
+- 归属：同一份 SHIP_PLAN §2 item 10 排查记录。
+- 来源：M1 复核晚到。`origin/main` 上 `SocketServer.stageAndUpgrade` 仍是阻塞 `open`。#763 的 diff 不含 `SocketServer.swift`。
+- 缺陷修复：无新行为。新开 [#928](https://github.com/raydocs/tono/issues/928)（MAC-UPGRADE-FIFO-OPEN）。不另开 helper PR。
+- 新增/优化：无。
+- 工程与测试：只补报告和 findings 分片。
+- 验证：读源码。没有在 Mac 上执行 FIFO。issue 正文里的 LaunchServices 路径写错；`gh issue edit` 与评论接口都是 403，正确路径写在本报告。
+- 候选/发布：无新包。
+- 剩余限制：等 #889 合入后再改协议号。

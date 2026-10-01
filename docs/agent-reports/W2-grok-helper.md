@@ -15,6 +15,7 @@ Hunter: Grok 4.7。槽位 W2-grok-helper。开始时基线 `origin/main` `ff8111
 | MAC-PF-X-FORGET | M2 | P3（低·推导） | `KillSwitchPF.releasePFEnableReference` | `pfctl -X` 非 0 仍删掉 token 记录；锚点已经空，不留下阻断 | 未修，[#895](https://github.com/raydocs/tono/issues/895) |
 | MAC-UPDATE-FLOOR-REREAD | M4 | P2（低·推导） | `UpdateTransaction.live` `installedFloor` → `UpdatePackage.buildSource` | 签名校验之后再按路径读 `tono-build-source.json`，用户仍拥有 App 包时可以在窗口里把下限换成更旧的已签名版本 | 未修，[#896](https://github.com/raydocs/tono/issues/896)。毫秒级；原生更新把包收成 root 之后窗口关闭 |
 | MAC-STALE-CORE-PID-REUSE | M3 | P2（低·推导） | `CoreManager.terminateOwnedCore` | 等待期间 pid 被复用后，SIGKILL 不再核对路径和 uid | 未修，[#897](https://github.com/raydocs/tono/issues/897) |
+| MAC-UPGRADE-FIFO-OPEN | M1 | P2（中·推导） | `SocketServer.stageAndUpgrade` 对 `Contents/Resources/tono-core-helper` 和 `sing-box` 的 `open` | bundle `verifyCode` 之后用没有 `O_NONBLOCK` 的 `open`，无写端 FIFO 堵住唯一的 accept 线程和更新锁；`/usr/bin/install` 会再次打开同一路径 | 未修，[#928](https://github.com/raydocs/tono/issues/928)。#763 的 FIFO 补丁不改这个文件。等 #889 的协议号。issue 正文误写了 LaunchServices 路径，令牌 403，改不了正文 |
 | #765 DNS 超过 8 台 | M3 | — | `ProtectedDNSManager` 快照 `count > 8` | 保存时不封顶，读回拒绝，恢复改走无快照清扫 | 重复。在飞 PR，不另开 |
 | #761 占位文件先于 flush | M2 | — | `releaseSequence` | 占位写入失败就到不了 flush | 重复。在飞 PR |
 | #763 启动失败 DNS / FIFO / 僵尸 core | M1 | — | `main.swift` 启动失败路径 | 启动失败只拆 PF、不恢复 DNS | 重复。在飞 PR |
@@ -33,7 +34,7 @@ Hunter: Grok 4.7。槽位 W2-grok-helper。开始时基线 `origin/main` `ff8111
 
 ## 假阳性（21）
 
-考察 36 条假设。2 条已修，5 条证实后只开 issue，8 条是上表里的重复项，21 条否掉。
+先考察 36 条假设。M1 复核晚到后又加了 1 条：静默升级的阻塞 `open`。合计 37 条。2 条已修，6 条证实后只开 issue，8 条是上表里的重复项，21 条否掉。
 
 | 假设 | 为何否掉 |
 |---|---|
@@ -55,7 +56,7 @@ Hunter: Grok 4.7。槽位 W2-grok-helper。开始时基线 `origin/main` `ff8111
 | 启动成功路径先拆 PF 再恢复 DNS 是新洞 | 与 #763 的恢复顺序相同；恢复失败仍放行。偏好锁卡住是第二次失败 |
 | 套接字只认 UID | 要求标识符、团队 OU，以及 `get-task-allow` absent |
 | `peerIdentity` 失败时 GET 仍可用，等于提权 | 变更仍要求 peer bundle；GET 只读状态 |
-| 静默升级在校验和 `install` 之间被换源 | 根目录副本在 `rename` 之前再次 `verifyCode` |
+| 静默升级在校验和 `install` 之间被换源，从而装上未签名二进制 | 根目录副本在 `rename` 之前再次 `verifyCode`。这只否定未签名安装。同一窗口换成无写端 FIFO 会堵住，见 MAC-UPGRADE-FIFO-OPEN |
 | 更新签名没有绑到包字节 | stage 和执行器都会再哈希 `package.zip` |
 | 已消费的更新失败会让 KeepAlive 空转着装屏障 | `armEmergencyBlock` 现在是 `releaseInstalledBlock` |
 | 活着但卡住的 sing-box 应该被 watchdog 拆掉全阻断 | 拆掉就是把网络全开。#738 的窄层只挂在 Core 已退出的崩溃/启动释放上。要改这条得另做产品决定 |
@@ -64,6 +65,7 @@ Hunter: Grok 4.7。槽位 W2-grok-helper。开始时基线 `origin/main` `ff8111
 ## 没做完的
 
 - 没有在本机跑 `swiftc` 或 `--self-test`。#889 的自测交给托管 macOS CI。
-- 按「一次只开一个 helper PR」，DNS 状态、LAN DNS 范围、`-X`、更新下限、pid 复用都只开了 issue，没有第二份协议号改动。
+- 按「一次只开一个 helper PR」，DNS 状态、LAN DNS 范围、`-X`、更新下限、pid 复用、升级 FIFO 都只开了 issue，没有第二份协议号改动。
+- M1 复核晚到。它指出的 #773 仍是在飞重复。动态校验的 `SecCSFlags(0)` 仍要求 `get-task-allow` absent，升级校验用严格静态标志，不是新的提权。
 - 没有实机 pfctl。`pfctl -f` 非 0 是否从不改内核，没有在 Mac 上核对。
 - M4 的包校验和状态机按调用链核对过决定性函数；没有把 `UpdateExecutor` 的每一行都当成新的失败注入再跑一遍。
