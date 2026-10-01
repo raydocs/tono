@@ -47,8 +47,29 @@ pub async fn release_explicit_applying_narrow(
     state: &Arc<TonoState>,
     app: &AppHandle,
 ) -> Result<(), String> {
-    let operation = start_explicit_release(state, app, None, false, true).await;
+    release_explicit_applying_narrow_with_guard(state, app, None).await
+}
+
+/// Automatic failure cleanup already owns the writer. Transfer it to the same
+/// coordinated release while retaining the secondary AI hold.
+pub(super) async fn release_explicit_applying_narrow_with_guard(
+    state: &Arc<TonoState>, app: &AppHandle,
+    guard: Option<tokio::sync::OwnedRwLockWriteGuard<()>>,
+) -> Result<(), String> {
+    let operation = start_narrow_release_with_guard(guard, |guard, apply_narrow| {
+        start_explicit_release(state, app, guard, false, apply_narrow)
+    }).await;
     wait_explicit_release(&operation).await
+}
+
+async fn start_narrow_release_with_guard<G, F>(
+    guard: Option<G>,
+    start: impl FnOnce(Option<G>, bool) -> F,
+) -> F::Output
+where
+    F: std::future::Future,
+{
+    start(guard, true).await
 }
 
 /// Account teardown must own the release, not just the UI's wait for it.
@@ -403,6 +424,21 @@ pub(super) async fn stay_armed_after_failed_release(state: &Arc<TonoState>, app:
 mod tests {
     use super::*;
     use tokio::sync::oneshot;
+
+    #[tokio::test]
+    async fn automatic_failure_release_transfers_its_writer_and_keeps_the_ai_hold() {
+        let lifecycle = Arc::new(tokio::sync::RwLock::new(()));
+        let guard = Arc::clone(&lifecycle).write_owned().await;
+        let release_lifecycle = Arc::clone(&lifecycle);
+        let result = start_narrow_release_with_guard(Some(guard), move |guard, apply_narrow| async move {
+            assert!(guard.is_some(), "release must retain failure's existing writer");
+            assert!(release_lifecycle.try_read().is_err(), "replacement admission stays excluded");
+            assert!(apply_narrow, "automatic failure release must retain the secondary AI hold");
+            Err::<(), _>("injected release refusal".to_string())
+        }).await;
+        assert_eq!(result, Err("injected release refusal".to_string()));
+        assert!(lifecycle.try_read().is_ok(), "the settled request relinquishes ownership");
+    }
 
     #[tokio::test]
     async fn release_owner_finishes_session_metadata_after_the_ui_waiter_is_cancelled() {
