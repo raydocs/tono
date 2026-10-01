@@ -281,12 +281,13 @@ final class SocketServer {
     /// Immediate release at start. Idempotent: no state file means no pfctl.
     /// A running Core is not disarmed and is not reinstalled from the file.
     private func releaseLeftoverBlockIfCoreStopped() {
-        guard KillSwitchManager.shouldReleaseLeftoverAtLaunch(
-            coreRunning: core.status().running,
-            stateFilePresent: KillSwitchManager.stateFileExists()
-        ) else { return }
+        guard !core.status().running else { return }
+        guard KillSwitchManager.stateFileExists() else {
+            killSwitch.reconcileSelectiveRecoveryIfReleased()
+            return
+        }
         do {
-            _ = try killSwitch.disarm()
+            _ = try killSwitch.disarm(preserveAIHold: KillSwitchManager.automaticReleasePreservesAIHold())
         } catch {
             let detail = (error as? HelperFailure)?.message ?? String(describing: error)
             FileHandle.standardError.write(Data(
@@ -294,9 +295,6 @@ final class SocketServer {
             ))
             return
         }
-        // The general block is already gone. Skip the secondary layer if an
-        // arm committed while this release held the lock.
-        killSwitch.applySelectiveLayerIfReleased()
     }
 
     /// While the Core is running, keep the in-session block (a live connect
@@ -330,7 +328,7 @@ final class SocketServer {
                 consecutiveCoreDownChecks: consecutiveCoreDownChecks
             ) else { return }
             do {
-                _ = try killSwitch.disarm()
+                _ = try killSwitch.disarm(preserveAIHold: KillSwitchManager.automaticReleasePreservesAIHold())
             } catch {
                 let detail = (error as? HelperFailure)?.message ?? String(describing: error)
                 FileHandle.standardError.write(Data(
@@ -338,9 +336,9 @@ final class SocketServer {
                 ))
                 return
             }
-            killSwitch.applySelectiveLayerIfReleased()
         } else {
             consecutiveCoreDownChecks = 0
+            killSwitch.reconcileSelectiveRecoveryIfReleased()
         }
         recoverDNSAfterStoppedCore()
     }
@@ -401,8 +399,8 @@ final class SocketServer {
         }
         do {
             try Self.releaseOrphanedBootstrapProtection(
-                disarm: { _ = try killSwitch.disarm() },
-                applySelectiveLayer: killSwitch.applySelectiveLayerIfReleased
+                disarm: { _ = try killSwitch.disarm(preserveAIHold: KillSwitchManager.automaticReleasePreservesAIHold()) },
+                applySelectiveLayer: {}
             )
         } catch {
             let detail = (error as? HelperFailure)?.message ?? String(describing: error)

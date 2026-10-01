@@ -293,6 +293,51 @@ final class SingBoxConfigTests: XCTestCase {
         }
     }
 
+    func testAssistantDestinationsPrecedeReviewedBundleDirectWithoutAHomeHop() throws {
+        let overlay = ConfigPipeline.OverlayConfig(mixedPort: 29190,
+            externalController: "127.0.0.1:29191", secret: secret, tunEnabled: true,
+            selectedNodeName: "Fixture Beta")
+        let plan = ConfigPipeline.ManagedDirectRuntimePolicy(physicalInterface: "en0",
+            domainPins: [], webDomainPins: [], mediaEndpoints: [], trusted: true, nativeAppDirect: true)
+        ConfigPipeline.managedDirectBundlePathsOverride = ["/Applications/WeChat.app/"]
+        defer { ConfigPipeline.managedDirectBundlePathsOverride = nil }
+        let result = try ConfigPipeline.buildSingBoxRuntime(overlay: overlay, nodes: nodes(), directPlan: plan)
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: result.runtimeJSON) as? [String: Any])
+        let rules = try XCTUnwrap((json["route"] as? [String: Any])?["rules"] as? [[String: Any]])
+        let appDirect = try XCTUnwrap(rules.firstIndex { $0["outbound"] as? String == ConfigPipeline.appDirectGroupName })
+        func precedesDirect(network: String, action: String, outbound: String?, key: String, value: String) {
+            let index = rules.firstIndex { candidate in
+                candidate["network"] as? String == network
+                    && candidate["action"] as? String == action
+                    && candidate["outbound"] as? String == outbound
+                    && (candidate[key] as? [String])?.contains(value) == true
+            }
+            XCTAssertLessThan(try XCTUnwrap(index), appDirect)
+        }
+        precedesDirect(network: "tcp", action: "route", outbound: ConfigPipeline.exitGroupName, key: "domain_suffix", value: "claude.ai")
+        precedesDirect(network: "tcp", action: "route", outbound: ConfigPipeline.exitGroupName, key: "ip_cidr", value: "160.79.104.0/21")
+        precedesDirect(network: "udp", action: "reject", outbound: nil, key: "domain_suffix", value: "claude.ai")
+        precedesDirect(network: "udp", action: "reject", outbound: nil, key: "ip_cidr", value: "160.79.104.0/21")
+        let node = Fixture.realityNode()
+        let yaml = try Fixture.ownedRuntime(
+            overlay: Fixture.overlay(selectedNodeName: node.name),
+            nodes: [node],
+            directPolicy: plan
+        )
+        // `rulePathRegex` hex-escapes `/` and `.`. A search for the raw path
+        // never matches the emitted PROCESS-PATH-REGEX payload.
+        let wechatRegex = ConfigPipeline.rulePathRegex(for: "/Applications/WeChat.app/")
+        let bundle = try XCTUnwrap(yaml.range(of: "PROCESS-PATH-REGEX,\(wechatRegex)"))
+        for marker in [
+            "DOMAIN-SUFFIX,claude.ai)),Tono-Exit",
+            "DOMAIN-SUFFIX,claude.ai)),REJECT",
+            "IP-CIDR,160.79.104.0/21,no-resolve)),Tono-Exit",
+            "IP-CIDR,160.79.104.0/21,no-resolve)),REJECT",
+        ] {
+            XCTAssertLessThan(try XCTUnwrap(yaml.range(of: marker)).lowerBound, bundle.lowerBound)
+        }
+    }
+
     func testDashScopeRoutesAndDNSPrecedeAlibabaDirectWithoutOrWithAHomeHop() throws {
         let values = try nodes()
         let plan = ConfigPipeline.ManagedDirectRuntimePolicy(physicalInterface: "en0",

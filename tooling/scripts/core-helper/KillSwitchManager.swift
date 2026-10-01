@@ -1,6 +1,7 @@
 import Foundation
 import Darwin
 
+let selectiveRecoveryStatePath = "/Library/Application Support/Tono/selective-recovery.state"
 let killSwitchStatePath = "/Library/Application Support/Tono/killswitch.state"
 let killSwitchPFPath = "/Library/Application Support/Tono/pf.tono.conf"
 /// The `pfctl -E` token this helper holds, bound to its boot session.
@@ -134,6 +135,7 @@ final class KillSwitchManager {
     /// its core-down counter from this, so a connect that has just armed is
     /// not released by a counter that already reached the threshold.
     private(set) var openNetworkEpoch: UInt64 = 0
+    private var selectiveRecoveryReconciled = false
     /// Idle-loop checks, 10s apart, with the Core continuously down before a
     /// leftover kill switch is released. Three checks is about 30s: long
     /// enough for a connect to start the Core, short enough that a dead Core
@@ -336,6 +338,9 @@ final class KillSwitchManager {
         }
         var load = KernelLoadOutcome.notIssued
         do {
+        // Retire an earlier explicit release before saving a new armed intent.
+        // If this arm is interrupted, its fallback remains selective.
+        try Self.saveSelectiveRecoveryDisposition(true)
         let renderedRules = try Self.writeRules(state: state, allowedUID: allowedUID)
         // Persist fail-closed intent before activating the new rules.
         try saveState(state)
@@ -363,6 +368,8 @@ final class KillSwitchManager {
         reviewedBundleFileUnconfirmed = false
         // The tunnel is up. Drop the crash-time sinkhole so AI names resolve
         // through it. Failure here does not roll back the block.
+        try? Self.clearSelectiveRecoveryDisposition()
+        selectiveRecoveryReconciled = false
         SelectiveFailOpenInstaller.removeBestEffort()
         return response(
             armed: true,
@@ -564,6 +571,86 @@ final class KillSwitchManager {
         }
     }
 
+    static func saveSelectiveRecoveryDisposition(
+        _ preserveAIHold: Bool,
+        path: String = selectiveRecoveryStatePath
+    ) throws {
+        try atomicWrite(
+            path: path,
+            data: Data((preserveAIHold ? "retain-ai\n" : "released\n").utf8),
+            permissions: 0o600
+        )
+    }
+
+    static func selectiveRecoveryDisposition(path: String = selectiveRecoveryStatePath) throws -> Bool? {
+        var metadata = stat()
+        guard lstat(path, &metadata) == 0 else {
+            if errno == ENOENT { return nil }
+            throw HelperFailure.system("Could not inspect selective recovery intent.")
+        }
+        let data = try secureRead(path, maximumBytes: 32)
+        if data == Data("retain-ai\n".utf8) { return true }
+        if data == Data("released\n".utf8) { return false }
+        throw HelperFailure.invalid("Selective recovery intent is invalid.")
+    }
+
+    static func clearSelectiveRecoveryDisposition(path: String = selectiveRecoveryStatePath) throws {
+        // Validate ownership/type before deleting the record.
+        guard try selectiveRecoveryDisposition(path: path) != nil else { return }
+        guard unlink(path) == 0 else {
+            throw HelperFailure.system("Could not retire selective recovery intent.")
+        }
+        try fsyncParent(path)
+    }
+
+    /// Saving the narrow disposition must never prevent ordinary Internet
+    /// release. Keep it before every effect that can discard broad intent.
+    static func releaseWithAIHold(
+        preserveAIHold: Bool,
+        recordDisposition: (Bool) throws -> Void = { try saveSelectiveRecoveryDisposition($0) },
+        clearDisposition: () throws -> Void = { try clearSelectiveRecoveryDisposition() },
+        release: () throws -> Void = { try releasePersistedBlockUnlocked() },
+        applySelectiveLayer: () -> Void = SelectiveFailOpenInstaller.applyBestEffort,
+        removeSelectiveLayer: () -> Void = SelectiveFailOpenInstaller.removeBestEffort
+    ) throws {
+        do { try recordDisposition(preserveAIHold) } catch {
+            // A full disk can refuse a tombstone but still permit unlink.
+            // Do not replay an old automatic intent after explicit Restore.
+            if !preserveAIHold { try? clearDisposition() }
+            FileHandle.standardError.write(Data(
+                "tono: selective recovery intent was not saved: \(error)\n".utf8
+            ))
+        }
+        try release()
+        if preserveAIHold { applySelectiveLayer() } else { removeSelectiveLayer() }
+    }
+
+    static func reconcileSelectiveRecovery(
+        generalIntentPresent: Bool,
+        disposition: Bool?,
+        applySelectiveLayer: () -> Void = SelectiveFailOpenInstaller.applyBestEffort
+    ) {
+        guard !generalIntentPresent, disposition == true else { return }
+        applySelectiveLayer()
+    }
+
+    /// Called only with the Core stopped. A retained record alone is enough
+    /// to finish an interrupted release; it never re-arms general PF.
+    func reconcileSelectiveRecoveryIfReleased() {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !selectiveRecoveryReconciled, !Self.stateFileExists() else { return }
+        Self.reconcileSelectiveRecovery(
+            generalIntentPresent: false,
+            disposition: try? Self.selectiveRecoveryDisposition()
+        )
+        selectiveRecoveryReconciled = true
+    }
+
+    static func automaticReleasePreservesAIHold() -> Bool {
+        (try? selectiveRecoveryDisposition()) ?? true
+    }
+
     func disarm(preserveAIHold: Bool = false) throws -> [String: Any] {
         lock.lock()
         defer { lock.unlock() }
@@ -574,48 +661,34 @@ final class KillSwitchManager {
         // window must never survive into a re-armed kill switch.
         lastLoadedPassRules = nil
 
-        try Self.releasePersistedBlockUnlocked()
+        try Self.releaseWithAIHold(preserveAIHold: preserveAIHold)
+        selectiveRecoveryReconciled = true
         stateGeneration &+= 1
         openNetworkEpoch &+= 1
         lastLoadedPassRules = nil
         repairedSinceArm = false
-        // Apply only after the general block is gone, under the arm lock.
-        // Automatic failures retain the existing narrow floor; an explicit
-        // Restore, disconnect, or emergency disarm removes it.
-        if preserveAIHold {
-            SelectiveFailOpenInstaller.applyBestEffort()
-        } else {
-            SelectiveFailOpenInstaller.removeBestEffort()
-        }
         return response(armed: false, wanted: false, live: false)
     }
 
-    /// Crash and startup release call this after a successful disarm.
-    /// Restore, disconnect, and emergency disarm do not. The state-file
-    /// check is under the same lock as arm: a tunnel that has committed
-    /// does not inherit the sinkhole.
-    func applySelectiveLayerIfReleased() {
-        lock.lock()
-        defer { lock.unlock() }
-        guard !Self.stateFileExists() else { return }
-        SelectiveFailOpenInstaller.applyBestEffort()
-    }
-
     /// Best-effort release used when the daemon cannot finish starting.
-    /// Never installs a block. A second call is a no-op once the state file
-    /// is gone.
+    /// Also resumes a previously requested narrow layer after broad intent
+    /// has already been removed. It never installs a general block.
     static func releasePersistedBlock() {
-        guard stateFileExists() else { return }
+        guard stateFileExists() else {
+            reconcileSelectiveRecovery(
+                generalIntentPresent: false,
+                disposition: try? selectiveRecoveryDisposition()
+            )
+            return
+        }
         do {
-            try releasePersistedBlockUnlocked()
+            try releaseWithAIHold(preserveAIHold: automaticReleasePreservesAIHold())
         } catch {
             let detail = (error as? HelperFailure)?.message ?? String(describing: error)
             FileHandle.standardError.write(Data(
                 "tono: startup release could not clear the kill switch: \(detail)\n".utf8
             ))
-            return
         }
-        SelectiveFailOpenInstaller.applyBestEffort()
     }
 
     /// The steps of `disarm()` without taking `lock`. Callers that already
@@ -642,14 +715,17 @@ final class KillSwitchManager {
     /// re-arms PF or blocks general traffic. Restores the secondary AI hold
     /// after a successful release.
     static func releaseInstalledBlock(
+        recordDisposition: (Bool) throws -> Void = { try saveSelectiveRecoveryDisposition($0) },
         release: () throws -> Void = { try KillSwitchManager.releasePersistedBlockUnlocked() },
         applySelectiveLayer: () -> Void = SelectiveFailOpenInstaller.applyBestEffort
     ) {
         do {
-            try release()
-            // An automatic failed commit has no explicit Restore intent.
-            // Only after the general block is gone, preserve the AI hold.
-            applySelectiveLayer()
+            try releaseWithAIHold(
+                preserveAIHold: true,
+                recordDisposition: recordDisposition,
+                release: release,
+                applySelectiveLayer: applySelectiveLayer
+            )
         } catch {
             let detail = (error as? HelperFailure)?.message ?? String(describing: error)
             FileHandle.standardError.write(Data(
