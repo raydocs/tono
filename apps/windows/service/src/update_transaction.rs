@@ -640,6 +640,23 @@ impl Store {
         self.save(next)
     }
 
+    /// Fold a fully measured recovery without stopping Service or granting another install.
+    pub fn record_complete_publication_recovery(&mut self, clock: u64) -> Result<()> {
+        let a = self.consumed_attempt()?;
+        ensure!(
+            matches!(
+                a.execution,
+                Execution::Consumed | Execution::Replaced | Execution::Uncertain
+            ),
+            "complete publication recovery requires an in-flight consumed attempt"
+        );
+        self.note_publication_clock(clock)?;
+        if self.attempt()?.execution != Execution::Replaced {
+            self.execution(Execution::Replaced)?;
+        }
+        Ok(())
+    }
+
     pub fn execution(&mut self, execution: Execution) -> Result<()> {
         let mut next = self.state.clone();
         next.attempt.as_mut().context("no attempt")?.execution = execution;
@@ -1298,6 +1315,47 @@ pub(crate) mod tests {
             Store::open(&root).is_err(),
             "absence cannot erase orphan evidence"
         );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn update_complete_publication_recovery_fences_an_old_mapped_app_incarnation() {
+        let (root, mut store, peer, executor) = reserved();
+        authorize(&mut store, &peer);
+        store.consume(&executor, 1_900_000_002).unwrap();
+        store.record_complete_publication_recovery(450).unwrap();
+        let old_mapped = Image {
+            pid: 41,
+            started_at: 400,
+            path: peer.path.clone(),
+            sha256: target(&store.attempt().unwrap().manifest)
+                .components
+                .app_sha256
+                .clone(),
+        };
+        drop(store);
+        let mut store = Store::open(&root).unwrap();
+        assert!(
+            store.authenticate_successor(&old_mapped).is_err(),
+            "recovery must reject an App mapped before target publication"
+        );
+        store.record_complete_publication_recovery(600).unwrap();
+        assert_eq!(
+            store.attempt().unwrap().publication_clock,
+            Some(450),
+            "later recovery must preserve the first durable publication floor"
+        );
+        let fresh = Image {
+            pid: 42,
+            started_at: 451,
+            ..old_mapped
+        };
+        store.authenticate_successor(&fresh).unwrap();
+        assert_eq!(
+            store.attempt().unwrap().successor_image.as_ref(),
+            Some(&fresh)
+        );
+        drop(store);
         std::fs::remove_dir_all(root).unwrap();
     }
 
