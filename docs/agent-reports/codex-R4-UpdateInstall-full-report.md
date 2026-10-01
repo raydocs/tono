@@ -1,17 +1,32 @@
-# R4-UpdateInstall: Codex (GPT-6.1 Sol) findings
+# R4 Update / Install / Rollback audit
 
-Generated 2026-09-30 23:48 MT from the run's findings.tsv / prs.tsv.
+Hunter: GPT-6.1 Sol (Codex CLI)
 
-## PRs
+Base snapshots: initial latest main `231750bc`; fixes from fresh main `7f382af7`. No deploy or publish. Read all assigned production files and callers/callees; reviewed 32 relevant merged PRs. Raw audit receipts and all 76 rows are below.
 
-| PR | Branch | Labels | Auto-merge requested | Title |
-|---|---|---|---|---|
-| 1064 | hunt/sol-r4upd-mac-retire-cleanup | needs-hardware | yes | fix(macos): retain update retirement until executor cleanup succeeds |
-| 1075 | hunt/sol-r4upd-win-register-release | needs-hardware | yes | fix(windows): selectively release failed update executor outcomes |
+PRs:
+- #1064, hunt/sol-r4upd-mac-retire-cleanup: merged by merge-commit auto-merge after green macOS ci-gate; needs-hardware (current GitHub label). Helper 4.52.17→4.52.18 with exact source contract regeneration.
+- #1075, hunt/sol-r4upd-win-register-release: merged `ce013033` by merge-commit auto-merge after green Windows ci-gate; needs-hardware. Native Service executor tests and Tauri/update journal tests passed.
 
-## Hypotheses
+New unresolved issues:
+- #1071: abandoned macOS helper replacement drops AI hold; legacy helpers reject the new selective release route, so compatibility design is needed.
+- #1081: interruption between durable rollback and release is not finalized on startup/ONSTART recovery; needs replayable finalization without restart loops.
+- #1082: pre-consumption user-token capture refusal bypasses release; preserve unconsumed anti-replay/retry semantics; verified non-strict intent can recover on later Service restart, but capture refusal does not trigger one; native fault evidence unavailable.
 
-| ID | Area | Sev | Location | Description | Verdict |
+Verification:
+- Exact production Windows finalizer + exact new regression extracted to Linux: baseline 0 passed/1 failed, fixed new and existing disposition regressions 2 passed/0 failed.
+- Service portable journal tests: 14 passed/0 failed; 6 existing warnings.
+- macOS diff/records/source-manifest+sed contract-hash verification passed locally; Swift unavailable. Hosted macOS ci-gate on exact `1bb45e8e` passed (including privileged and build jobs); PR #1064 merged `7d33a838`.
+- Windows module parsed with rustfmt; unrelated preexisting formatting retained. Two read-only reviews approved failure admission/guard lifetimes, strict checks and success disposition.
+- Installed PF/WFP/DNS/NRPT/SCM/launchd fault execution remains unavailable on this Linux host. Hosted Windows ci-gate passed on exact `25154020`, including native independent executor and Tauri/update-journal checks. Installed-device fault acceptance remains required.
+
+Counts: 44 unique hypotheses, 26 false positives, 12 duplicates, 3 fixed hypotheses (two Windows sibling paths in one tight PR), 3 real-unfixed. 32 merged-diff audit receipts are additional rows, not hypotheses.
+
+Unresolved-issue falsification: verified non-strict wanted intent has a startup release guard; #1081 is explicitly limited to unverified intent. #1082 holds ordinary traffic with the existing live Service; a later restart can rescue verified intent. #1071 has neither a watchdog nor connect-tail AI restoration guard after default disarm.
+
+Unfinished: native installed-device acceptance; replayable interruption and pre-consumption failure finalization; legacy-compatible selective upgrade cleanup. No assigned source file was left unread; lower-priority known issue #1055 remains with its existing owner/report. No network restoration guarantee is claimed for independent native cleanup failure or the documented narrow-layer coverage limits.
+
+| ID | area | severity | file:line | one-line description | verdict |
 |---|---|---|---|---|---|
 | REG-1005 | Windows startup/update combination | — | apps/windows/service/src/core/windows_kill_switch.rs:3523 | Unverified startup retains AI and strict mode; pending updates intentionally defer retirement | ok |
 | REG-1007 | Windows failed Prepare | — | apps/windows/service/src/core/update.rs:325 | Automatic post-stop cleanup retains AI disposition and durable obligation | ok |
@@ -59,7 +74,7 @@ Generated 2026-09-30 23:48 MT from the run's findings.tsv / prs.tsv.
 | MAC-UPD-FP10 | macOS update/install | — | tooling/scripts/core-helper/UpdateRuntime.swift:20 | Bootstrap can be observed Connected and suppress orphan release forever | false-positive DNS enable follows final tunnel-lock arm; ordinary state cannot satisfy claimed combination |
 | MAC-UPD-FP2 | macOS update/install | — | tooling/scripts/core-helper/UpdateRuntime.swift:43 | Post-stop Prepare failure keeps normal traffic blocked forever | false-positive Core-down watchdog releases after three ten-second checks and applies AI hold |
 | MAC-UPD-FP3 | macOS update/install | — | tooling/scripts/core-helper/UpdateTransaction.swift:307 | Pending update gate denies explicit release | false-positive /update/disconnect bypasses ordinary gate and expiry refusal |
-| MAC-UPD-FP4 | macOS update/install | — | tooling/scripts/core-helper/UpdateTransaction.swift:146 | Successful executor job blocks every later update | false-positive Commit and previous-committed reservation retry job cleanup |
+| MAC-UPD-FP4 | macOS update/install | — | tooling/scripts/core-helper/UpdateTransaction.swift: 146 | Successful executor job blocks every later update | false-positive Commit and previous-committed reservation retry job cleanup |
 | MAC-UPD-FP5 | macOS update/install | — | tooling/scripts/core-helper/UpdateTransaction.swift:374 | Expired or blocked receipt cannot retire | false-positive Explicit release plus current-component proof bypasses clock grants |
 | MAC-UPD-FP6 | macOS update/install | — | apps/macos/Tono/Services/NativeUpdateDownload.swift:114 | Package cancellation hangs the machine | false-positive No cancel UI; resource deadline is finite and no machine hang established |
 | MAC-UPD-FP7 | macOS update/install | — | apps/macos/Tono/Services/NativeUpdateDownload.swift:23 | Chunked metadata bypasses size limit | false-positive Stream byte limit and resource deadline both apply |
@@ -79,7 +94,7 @@ Generated 2026-09-30 23:48 MT from the run's findings.tsv / prs.tsv.
 | WAPP-DOWNLOAD-CANCEL | Windows App update | — | apps/windows/app/src-tauri/src/tono/commands/update.rs:155 | Download/channel failure leaves stale network protection | false-positive: all streaming/progress errors precede proxy clear and generation retirement; HTTPS client download timeout is 600s and documents 30s, existing connection owner remains live. |
 | WAPP-INCOMPLETE-ORDER | Windows App update | — | apps/windows/app/src-tauri/src/tono/commands/update.rs:50 | Out-of-order App status responses clear pending marker | false-positive/unproved effect: Service lifecycle serializes requests; any possible millisecond App projection race cannot bypass durable Service update admission. No verified machine/network consequence. |
 | WAPP-JOURNAL-STATUS-HANG | Windows App update | — | apps/windows/app/src-tauri/src/tono/update_handoff.rs:137 | Filesystem read in status retains connection mutex and freezes app controls | false-positive: JournalProjection.incomplete_with try-locks short projection state and spawns blocking I/O; stale/unknown evidence warns; local writers fence stale reads using generation. |
-| WAPP-LEGACY-UPDATE-CLEANUP | Windows App update | — | apps/windows/app/src-tauri/src/tono/commands/quit.rs:141 | Legacy tono_prepare_update retains barrier on cleanup errors | false-positive: command is not in lib.rs invoke handler and current frontend invokes native tono_install_update exclusively; legacy app journal is warning/compatibility evidence, not Service authority. |
+| WAPP-LEGACY-UPDATE-CLEANUP | Windows App update | — | apps/windows/app/src-tauri/src/tono/commands/quit.rs: 141 | Legacy tono_prepare_update retains barrier on cleanup errors | false-positive: command is not in lib.rs invoke handler and current frontend invokes native tono_install_update exclusively; legacy app journal is warning/compatibility evidence, not Service authority. |
 | WAPP-SPAWN-PENDING-FOREVER | Windows App update | — | apps/windows/app/src-tauri/src/tono/commands/update.rs:201 / apps/windows/app/src-tauri/src/tono/connection/disconnect.rs:391 | Failed executor spawn leaves a receipt that user cannot retire from Not Connected | false-positive: native incomplete prevents disconnected no-op, update-incomplete banner dashboard.tsx:748-779 provides active Disconnect; recorded release/retirement is reachable. |
 | WAPP-UNOWNED-PROXY-CLEAR | Windows App update | — | apps/windows/app/src-tauri/src/tono/commands/update.rs:180 / apps/windows/app/src-tauri/src/core/proxy_control.rs:177 | Update clears non-Tono proxy with no restoration | duplicate: known H19-C-F1 explicitly lists installation/update proxy clear as remaining limitation; no new evidence or fix claimed. |
 | WAPP-UPDATE-AI-HOLD | Windows App update | — | apps/windows/app/src-tauri/src/tono/connection/disconnect.rs:267 | Early staging failure uses explicit update Disconnect and clears AI hold | duplicate: #1040 wires apply_narrow through additive request and actual WFP release; old Service rejects unknown op rather than silently dropping intent. |
