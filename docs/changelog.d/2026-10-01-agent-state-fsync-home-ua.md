@@ -1,0 +1,14 @@
+## 2026-10-01 · Exit-agent ledger is fsynced across its rename; home agent sends an explicit User-Agent
+- Ownership: ops plan; exit-agent metering state and home-agent control-plane requests. Fixes #1233.
+- Source: baseline `origin/main`; branch `hunt/claude-be-1233-durability`. Source only.
+- Defect fixes:
+  - `save_state` now fsyncs `state.json.new` before the rename and the directory after it, as the roster and hy2 writers already do (CBS-XA-02).
+  - The home agent's three control-plane requests now send `tono-home-agent/1.0` instead of the default urllib UA, which Cloudflare browser-integrity rejects (CBS-HA-01).
+- Added/optimized: none. State format, endpoints and request bodies are unchanged.
+- Engineering/tests: two unittests, both failing on the old code:
+  - exit-agent: the file fsync, the rename and the directory fsync happen in that order;
+  - home-agent: all three requests carry the UA.
+- Verification: macOS Python 3. `python3 -m unittest test_reconcile_and_report`: 118 passed. `python3 -m unittest test_report_example`: 26 passed.
+- Records: CBS-XA-01 moves to fixed (#1232 merged).
+- Candidate/publication: no deploy, publication or new candidate.
+- Remaining limits: a live node power loss and the production zone's behavior were not tested.
