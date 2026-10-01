@@ -297,6 +297,29 @@ final class AppState {
     var catalogSelectionRequiresChoice = false
     let initialDataLoader = InitialDataLoader()
     var initialDataLoadTask: Task<InitialDiskSnapshot, Never>?
+    /// Claimed synchronously in `loadInitialData` before that call awaits.
+    /// A second WindowGroup scene joins this task instead of applying the
+    /// same disk snapshot again.
+    @ObservationIgnored
+    var initialDataApplyTask: Task<Void, Never>?
+    /// Test seam. Production leaves this nil. The claimed apply parks here,
+    /// before it reads disk, so a test can observe a second caller joining.
+    @ObservationIgnored
+    var initialDataApplySuspension: (() async -> Void)?
+    /// How many times the claimed apply body has started.
+    @ObservationIgnored
+    private(set) var initialDataApplyCount = 0
+    /// How many callers found an apply already claimed.
+    @ObservationIgnored
+    private(set) var initialDataApplyJoinCount = 0
+    /// Test seam, called synchronously when a caller joins an in-flight apply
+    /// and before it awaits that task.
+    @ObservationIgnored
+    var initialDataApplyJoined: (() -> Void)?
+    /// Test seam. When set, the apply uses this snapshot and does not read
+    /// `ConfigStorage.shared`.
+    @ObservationIgnored
+    var initialDataSnapshotOverride: InitialDiskSnapshot?
     let managedCatalogProcessor = ManagedCatalogProcessor()
     let managedTrafficPolicyProcessor = ManagedTrafficPolicyProcessor()
     let persistenceWriter = AppStatePersistenceWriter()
