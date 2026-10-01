@@ -125,6 +125,9 @@ pub struct TaskRegistry {
     /// on entry to that state, retired on exit; the loop itself also stops once the state is
     /// gone, so it is never a resident task.
     pub protection_resync: Option<JoinHandle<()>>,
+    /// TCP proofs after a fail-open release. Disconnect aborts this task.
+    /// It must not be aborted from inside its own connect attempt.
+    pub unarmed_probe: Option<JoinHandle<()>>,
 }
 
 impl TaskRegistry {
@@ -187,6 +190,10 @@ impl TaskRegistry {
         Self::abort(&mut self.protection_resync);
     }
 
+    pub fn abort_unarmed_probe(&mut self) {
+        Self::abort(&mut self.unarmed_probe);
+    }
+
     /// Connection-scoped tasks: everything that drives the connect
     /// transaction or reacts to the tunnel. Aborted on disconnect and on a
     /// node switch; the catalog sync is account-scoped and survives both.
@@ -197,6 +204,7 @@ impl TaskRegistry {
         self.abort_pin_refresh();
         self.abort_switch();
         self.abort_protection_resync();
+        self.abort_unarmed_probe();
     }
 }
 
@@ -398,16 +406,49 @@ fn matching_selected_delay(
 }
 
 impl TonoInner {
-    pub fn record_exit_delay(&mut self, delay_ms: u64) {
-        if delay_ms == 0 {
+    /// Record a delay that was measured while `measured_node` was selected.
+    ///
+    /// A same-generation hot switch updates `selected_node` before the in-flight
+    /// probe returns. Labeling the sample with whatever is selected at commit
+    /// time shows the previous exit's RTT on the new node. A sample whose node
+    /// is no longer selected is dropped, and it does not overwrite a sample
+    /// that still belongs to the current selection.
+    pub fn record_exit_delay(&mut self, measured_node: &str, delay_ms: u64) {
+        if delay_ms == 0 || measured_node.is_empty() {
             return;
         }
-        let Some(node) = self.selected_node.clone() else {
+        if self.selected_node.as_deref() != Some(measured_node) {
             return;
-        };
+        }
         self.last_exit_delay_ms = Some(delay_ms);
         self.last_exit_delay_at_ms = Some(now_ms());
-        self.last_exit_delay_node = Some(node);
+        self.last_exit_delay_node = Some(measured_node.to_string());
+    }
+
+    /// Drop the displayed exit IP. A selection change must not keep showing the
+    /// previous node's address under the new name.
+    pub fn clear_exit_identity(&mut self) {
+        self.exit_ip = None;
+        self.exit_org = None;
+        self.exit_location = None;
+    }
+
+    /// Store an exit-identity sample only when `measured_node` is still selected.
+    /// Returns whether the sample was stored.
+    pub fn commit_exit_identity(
+        &mut self,
+        measured_node: &str,
+        ip: String,
+        org: Option<String>,
+        location: Option<String>,
+    ) -> bool {
+        if measured_node.is_empty() || self.selected_node.as_deref() != Some(measured_node) {
+            return false;
+        }
+        self.exit_ip = Some(ip);
+        self.exit_org = org;
+        self.exit_location = location;
+        true
     }
 
     pub fn record_tcp_delay(&mut self, node: &str, delay_ms: u64) {
@@ -548,6 +589,10 @@ pub struct TonoState {
     /// activation transaction retains an owned reader through its final proof.
     policy_activation: Arc<tokio::sync::RwLock<()>>,
     next_release_id: AtomicU64,
+    /// Replaces an older unarmed probe. The probe task exits when this changes.
+    pub(crate) unarmed_probe_ticket: AtomicU64,
+    /// Recent TCP proofs, keyed by `ip:port`. Not a tunnel and not a route.
+    pub(crate) unarmed_proofs: parking_lot::Mutex<tono_core::unarmed_probe::ProofCache>,
 }
 
 impl TonoState {
@@ -669,6 +714,8 @@ impl TonoState {
             privileged_transition: Arc::new(tokio::sync::RwLock::new(())),
             policy_activation: Arc::new(tokio::sync::RwLock::new(())),
             next_release_id: AtomicU64::new(1),
+            unarmed_probe_ticket: AtomicU64::new(1),
+            unarmed_proofs: parking_lot::Mutex::new(tono_core::unarmed_probe::ProofCache::default()),
         })
     }
 
@@ -682,6 +729,15 @@ impl TonoState {
 
     pub async fn lock(&self) -> tokio::sync::MutexGuard<'_, TonoInner> {
         self.inner.lock().await
+    }
+
+    /// Non-blocking lock. The unarmed probe starter is synchronous: connect
+    /// calls it, and the probe later calls connect, so the starter cannot be
+    /// an async function.
+    pub(crate) fn try_lock(
+        &self,
+    ) -> Result<tokio::sync::MutexGuard<'_, TonoInner>, tokio::sync::TryLockError> {
+        self.inner.try_lock()
     }
 
     pub async fn lock_catalog_sync(&self) -> tokio::sync::MutexGuard<'_, ()> {
@@ -1226,5 +1282,39 @@ mod tests {
             matching_selected_delay(Some("Tokyo · Fuji"), Some(0), Some("Tokyo · Fuji")),
             None
         );
+    }
+
+    #[tokio::test]
+    async fn a_sample_from_the_previous_exit_is_not_shown_on_the_new_node() {
+        let state = super::TonoState::for_test();
+        let mut inner = state.lock().await;
+        inner.selected_node = Some("Tokyo · Neon".into());
+        inner.record_exit_delay("Tokyo · Neon", 80);
+        inner.exit_ip = Some("203.0.113.8".into());
+        assert_eq!(inner.selected_exit_delay_ms(), Some(80));
+
+        inner.selected_node = Some("Tokyo · Fuji".into());
+        inner.clear_exit_identity();
+        inner.record_exit_delay("Tokyo · Neon", 400);
+        assert_eq!(inner.selected_exit_delay_ms(), None);
+        assert_eq!(inner.last_exit_delay_node.as_deref(), Some("Tokyo · Neon"));
+        assert!(inner.exit_ip.is_none());
+        assert!(!inner.commit_exit_identity(
+            "Tokyo · Neon",
+            "203.0.113.8".into(),
+            None,
+            None,
+        ));
+        assert!(inner.exit_ip.is_none());
+
+        inner.record_exit_delay("Tokyo · Fuji", 120);
+        assert_eq!(inner.selected_exit_delay_ms(), Some(120));
+        assert!(inner.commit_exit_identity(
+            "Tokyo · Fuji",
+            "203.0.113.9".into(),
+            None,
+            Some("JP".into()),
+        ));
+        assert_eq!(inner.exit_ip.as_deref(), Some("203.0.113.9"));
     }
 }

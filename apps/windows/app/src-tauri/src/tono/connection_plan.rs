@@ -10,8 +10,8 @@ const CATALOG_NOT_READY_REJECTION: &str = "the exit catalog is not available yet
 /// H-1 decision: a stale exit only patches the late arm when the StartClash
 /// IPC actually returned success (a failed IPC never armed anything) *and*
 /// the generation bump came from a releasing flow (disconnect / sign-out /
-/// quit) — a node switch or catalog teardown re-arms or keeps the barrier,
-/// so releasing here would tear down their protection instead.
+/// quit / non-strict catalog teardown) — a node switch or strict catalog
+/// teardown keeps the barrier, so releasing here would tear down their protection instead.
 pub fn stale_exit_needs_release(start_clash_committed: bool, release_intent: bool) -> bool {
     start_clash_committed && release_intent
 }

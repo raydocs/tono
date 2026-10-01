@@ -35,7 +35,10 @@ final class AppState {
         didSet {
             guard connectionStage != oldValue else { return }
             let now = Date()
-            var details = ["stage": connectionStage.rawValue]
+            var details = [
+                "stage": connectionStage.rawValue,
+                "stage_key": connectionStage.wireKey,
+            ]
             if isConnecting {
                 completedConnectionStages.insert(oldValue)
                 if let connectionStageStartedAt {
@@ -44,6 +47,7 @@ final class AppState {
                         Int(now.timeIntervalSince(connectionStageStartedAt) * 1_000)
                     )
                     details["previous_stage"] = oldValue.rawValue
+                    details["previous_stage_key"] = oldValue.wireKey
                     details["previous_stage_duration_ms"] = String(elapsedMs)
                     // The audit log already carried this, but only as JSONL on
                     // disk, so nothing could show a user or support which step
@@ -344,6 +348,15 @@ final class AppState {
     /// interface index; tests substitute the syscall so a single monitor tick
     /// can be driven without the privileged helper.
     var tunInterfaceExists: (String) -> Bool = { KillSwitchService.interfaceExists($0) }
+    /// Health-tick traffic race. Production probes the real origins. Tests
+    /// return a won race so one tick can reach the healthy branch without TLS.
+    @ObservationIgnored
+    var raceHealthTrafficProbes: @MainActor (Int, String?) async -> OriginRace = { timeout, preferred in
+        await ProtectedConnectivityVerifier.raceSystemTUNProbes(
+            timeoutSeconds: timeout,
+            preferredLabel: preferred
+        )
+    }
     /// The account's say over Connect (#582), given the catalog digest and
     /// routing token Connect would dial: nil lets it proceed, a message
     /// refuses it. The app installs the account session's offline grant gate;
@@ -2182,18 +2195,34 @@ final class AppState {
         return ip
     }
 
+    /// `interfaceExists` and `sleep` are test seams. Production asks the
+    /// kernel and sleeps. A cancel that lands in the last interval must not
+    /// report the interface as ready: connect arms PF before it checks
+    /// cancellation.
     nonisolated static func waitForOwnedTunnelInterface(
         attempts: Int = 50,
-        intervalMs: UInt64 = 100
+        intervalMs: UInt64 = 100,
+        interfaceExists: @escaping @Sendable (String) -> Bool = {
+            KillSwitchService.interfaceExists($0)
+        },
+        sleep: @escaping @Sendable (UInt64) async throws -> Void = { milliseconds in
+            try await Task.sleep(for: .milliseconds(milliseconds))
+        }
     ) async -> Bool {
+        let name = ConfigPipeline.tonoTunInterface
         for _ in 0..<max(1, attempts) {
             if Task.isCancelled { return false }
-            if KillSwitchService.interfaceExists(ConfigPipeline.tonoTunInterface) {
-                return true
+            if interfaceExists(name) { return true }
+            do {
+                try await sleep(intervalMs)
+            } catch is CancellationError {
+                return false
+            } catch {
+                return false
             }
-            try? await Task.sleep(for: .milliseconds(intervalMs))
         }
-        return KillSwitchService.interfaceExists(ConfigPipeline.tonoTunInterface)
+        if Task.isCancelled { return false }
+        return interfaceExists(name)
     }
 
     /// Query Mihomo's DNS listener directly while macOS is still using its

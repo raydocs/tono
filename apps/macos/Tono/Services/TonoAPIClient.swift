@@ -475,9 +475,7 @@ actor TonoAPIClient {
                     try await sendLogout(bearer: token, session: .bearer(scope))
                 } catch APIError.unauthorized {
                     guard generation == credentialGeneration else { return }
-                    accessToken = nil
-                    accessTokenExpiry = nil
-                    let renewed = try await refreshAccessToken()
+                    let renewed = try await accessTokenAfterUnauthorized(token)
                     guard generation == credentialGeneration else { return }
                     try await sendLogout(bearer: renewed, session: .decisive(scope))
                 }
@@ -534,6 +532,28 @@ actor TonoAPIClient {
     /// an account the server never refused.
     private func currentRefreshToken() throws -> String? {
         try unpersistedRefreshToken ?? keychain.string(for: .refreshToken)
+    }
+
+    /// Retry after a failed sign-in write must keep the adopted session, even
+    /// if the keychain still cannot acknowledge its refresh token.
+    func hasRestorableSession() throws -> Bool {
+        if let pending = unpersistedRefreshToken {
+            if (try? keychain.set(pending, for: .refreshToken)) != nil {
+                unpersistedRefreshToken = nil
+            }
+            return true
+        }
+        return try currentRefreshToken() != nil
+    }
+
+    /// A delayed 401 must not rotate the session that superseded its bearer.
+    private func accessTokenAfterUnauthorized(_ bearer: String) async throws -> String {
+        if let accessToken, accessToken != bearer { return accessToken }
+        if let refreshTask { return try await Self.awaitRenewal(refreshTask.task) }
+        // Still current, or already dropped with no renewal running: renew as before.
+        accessToken = nil
+        accessTokenExpiry = nil
+        return try await refreshAccessToken()
     }
 
     private func refreshAccessToken() async throws -> String {
@@ -658,9 +678,7 @@ actor TonoAPIClient {
         catch APIError.unauthorized {
             try requireAuthenticatedRequest(generation)
             try Self.requireCurrent(requestIsCurrent)
-            accessToken = nil
-            accessTokenExpiry = nil
-            let renewed = try await refreshAccessToken()
+            let renewed = try await accessTokenAfterUnauthorized(token)
             try requireAuthenticatedRequest(generation)
             try Self.requireCurrent(requestIsCurrent)
             do {
@@ -693,9 +711,7 @@ actor TonoAPIClient {
         do { _ = try await sendData(path, method: method, body: nil, bearer: token, session: .bearer(scope)) }
         catch APIError.unauthorized {
             try requireAuthenticatedRequest(generation)
-            accessToken = nil
-            accessTokenExpiry = nil
-            let renewed = try await refreshAccessToken()
+            let renewed = try await accessTokenAfterUnauthorized(token)
             try requireAuthenticatedRequest(generation)
             _ = try await sendData(path, method: method, body: nil, bearer: renewed, session: .decisive(scope))
         }
@@ -711,9 +727,7 @@ actor TonoAPIClient {
         do { _ = try await sendData(path, method: method, body: bodyData, bearer: token, session: .bearer(scope)) }
         catch APIError.unauthorized {
             try requireAuthenticatedRequest(generation)
-            accessToken = nil
-            accessTokenExpiry = nil
-            let renewed = try await refreshAccessToken()
+            let renewed = try await accessTokenAfterUnauthorized(token)
             try requireAuthenticatedRequest(generation)
             _ = try await sendData(path, method: method, body: bodyData, bearer: renewed, session: .decisive(scope))
         }
@@ -748,7 +762,8 @@ actor TonoAPIClient {
         bearer: String?,
         session: SessionUse,
         additionalHeaders: [String: String] = [:],
-        requestIsCurrent: (@Sendable () -> Bool)? = nil
+        requestIsCurrent: (@Sendable () -> Bool)? = nil,
+        retryStaleBearer: Bool = true
     ) async throws -> Data {
         let validOrigin: Bool
         #if DEBUG
@@ -823,6 +838,33 @@ actor TonoAPIClient {
             }
             let status = answer.status
             let data = answer.body
+            // A renewal revokes the predecessor SID. Its delayed 401, even on
+            // a decisive replay's transport retry, says nothing about the
+            // replacement session and must not reach the verdict sink.
+            if status == 401, let bearer, bearer != accessToken {
+                switch session {
+                case .noSession:
+                    break
+                case let .bearer(scope), let .decisive(scope):
+                    try requireCredentialGeneration(scope.generation)
+                    try Self.requireCurrent(requestIsCurrent)
+                    if let failure = answer.bodyFailure, Self.isCancellation(failure) {
+                        throw CancellationError()
+                    }
+                    // The first attempt's existing handler replays with the
+                    // newer token, including an entitlement-coded stale 401.
+                    if case .bearer = session { throw APIError.unauthorized }
+                    guard retryStaleBearer else { throw CancellationError() }
+                    let current = try await accessTokenAfterUnauthorized(bearer)
+                    try requireCredentialGeneration(scope.generation)
+                    try Self.requireCurrent(requestIsCurrent)
+                    return try await sendData(
+                        path, method: method, body: body, bearer: current, session: session,
+                        additionalHeaders: additionalHeaders,
+                        requestIsCurrent: requestIsCurrent, retryStaleBearer: false
+                    )
+                }
+            }
             if let failure = answer.bodyFailure {
                 guard !(200..<300).contains(status) else {
                     try await handleTransportFailure(

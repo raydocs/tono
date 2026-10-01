@@ -64,9 +64,10 @@ test.describe('账目', () => {
     await drawer.getByLabel('对象').selectOption({ value: 'Tokyo · Fuji' });
     await drawer.getByLabel('金额').fill('12.00');
     await drawer.getByLabel('币种').selectOption({ value: 'USD' });
+    await drawer.getByLabel('付款日').fill('2025-01-01');
     await drawer.getByLabel('备注').fill('续了一个月');
 
-    await expect(drawer.getByText('按 2026-09-09 汇率 7.1342 ≈ ¥85.61')).toBeVisible();
+    await expect(drawer.getByText('按 2026-09-08 汇率 7.1342 ≈ ¥85.61')).toBeVisible();
     await settle(page);
     await expect(page).toHaveScreenshot('ledger-drawer.png');
 
@@ -132,14 +133,18 @@ test.describe('账目', () => {
   });
 
   test('汇率还没拉到的那天，直接说出来', async ({ page }, testInfo) => {
+    await page.route('**/api/v1/ops/fx?**', (route) => route.fulfill({
+      status: 409,
+      contentType: 'application/json',
+      body: JSON.stringify({ error: { code: 'FX_RATE_MISSING', message: 'missing rate' } }),
+    }));
     await open(page, LEDGER, 'default', `ledger-fx-${testInfo.project.name}`);
     await page.getByRole('button', { name: '记一笔' }).click();
 
     const drawer = page.getByRole('dialog');
     await drawer.getByLabel('类型').selectOption({ value: 'cost' });
     await drawer.getByLabel('币种').selectOption({ value: 'USD' });
-    await drawer.getByLabel('付款日').fill('2025-01-01');
-    await expect(drawer.getByText('2025-01-01 的汇率还没拉到，等今天的汇率进来再记，或者换一个付款日。')).toBeVisible();
+    await expect(drawer.getByText('2026-09-08 的汇率还没拉到，等入账日的汇率进来再记。')).toBeVisible();
   });
 
   test('冲正之后两笔都标上，说清楚落在哪个月', async ({ page }, testInfo) => {

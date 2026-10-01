@@ -15,11 +15,26 @@ enum ConnectionStage: String, CaseIterable, Hashable {
         String(localized: String.LocalizationValue(rawValue))
     }
 
-    /// Wire key shared with the Windows connect stage enum.
+    /// Existing stage string for the local telemetry buffer.
     var telemetryKey: String {
         switch self {
         case .preparing: "preparing"
         case .preparingHelper: "preparingHelper"
+        case .startingKillSwitch: "startingKillSwitch"
+        case .startingTunnel: "startingTunnel"
+        case .lockingTraffic: "lockingTraffic"
+        case .applyingCloudPolicy: "applyingCloudPolicy"
+        case .securingDNS: "securingDNS"
+        case .checkingExit: "checkingExit"
+        case .verifyingTraffic: "verifyingTraffic"
+        }
+    }
+
+    /// Same strings as `tono-core` `connect_timing::WIRE_KEYS` and Windows `stage_key`.
+    var wireKey: String {
+        switch self {
+        case .preparing: "preparing"
+        case .preparingHelper: "preparingService"
         case .startingKillSwitch: "startingKillSwitch"
         case .startingTunnel: "startingTunnel"
         case .lockingTraffic: "lockingTraffic"
