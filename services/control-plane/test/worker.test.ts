@@ -5621,6 +5621,51 @@ ${nameLine}
     expect((await api('auth/refresh', json({ refreshToken: recovered.refreshToken }))).status).toBe(401);
   });
 
+  it('revokes refresh successors committed after logout authentication while preserving unrelated sessions', async () => {
+    const account = await createAccount('logout-refresh-race');
+    const login = await emailSignIn({
+      email: account.email,
+      deviceName: 'Second Mac',
+      installationId: 'logout-refresh-race-installation-two',
+    });
+    expect(login.status).toBe(200);
+    const unrelated = await login.json() as any;
+    const bearer = (token: string) => ({ headers: { authorization: `Bearer ${token}` } });
+    let recovered!: { accessToken: string; refreshToken: string };
+    const base = env as unknown as Env;
+    // Commit a rotation and grace replay after logout authenticates, just
+    // before its revocation batch: both intermediate sessions are revoked.
+    const DB = new Proxy(base.DB, {
+      get(target, prop) {
+        if (prop === 'batch') {
+          return async (statements: D1PreparedStatement[]) => {
+            const rotated = await api('auth/refresh', json({ refreshToken: account.refreshToken }));
+            expect(rotated.status).toBe(200);
+            const replay = await api('auth/refresh', json({ refreshToken: account.refreshToken }));
+            expect(replay.status).toBe(200);
+            recovered = await replay.json();
+            expect((await api('me', bearer(recovered.accessToken))).status).toBe(200);
+            return target.batch(statements);
+          };
+        }
+        const value = Reflect.get(target, prop, target);
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+    const context = createExecutionContext();
+    const logout = await worker.fetch(
+      new Request('https://test/api/v1/auth/logout', json({ refreshToken: account.refreshToken }, account.accessToken)),
+      { ...base, DB },
+      context,
+    );
+    await waitOnExecutionContext(context);
+    expect(logout.status).toBe(204);
+    expect((await api('me', bearer(recovered.accessToken))).status).toBe(401);
+    expect((await api('auth/refresh', json({ refreshToken: recovered.refreshToken }))).status).toBe(401);
+    expect((await api('me', bearer(unrelated.accessToken))).status).toBe(200);
+    expect((await api('auth/refresh', json({ refreshToken: unrelated.refreshToken }))).status).toBe(200);
+  });
+
   it('rejects a session inserted after its device was revoked', async () => {
     const account = await createAccount('late-session');
     await env.DB.batch([
