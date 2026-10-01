@@ -1,0 +1,9 @@
+## 2026-09-30 · Windows obsolete auth replay no longer rejects the current session
+- Ownership: SHIP_PLAN §2 item 10; Windows portable authentication and session verdicts.
+- Source: origin/main `0484176a` → branch `hunt/sol-trust-stale-replay-verdict`; pending PR, not merged at writing.
+- Defect fix: a clock ahead of the server JWT lifetime makes overlapping requests renew repeatedly. An obsolete replay's late 401 used to reject the current valid rotated session. It now remains a request failure without publishing session refusal or returning the session-rejection error used by catalog/policy sync.
+- Added/optimized: none. Current bearer/refresh refusals stay authoritative. An empty token slot does not prove an accepted replacement. No protection, credential durability, retry-budget or strict-mode change.
+- Engineering/tests: one bounded concurrency regression, one current-replay refusal guard, one missing-successor refusal guard. No removed/skipped tests or gate changes.
+- Verification: Linux Rust 1.98.1, CARGO_BUILD_JOBS=2. The checked-in obsolete replay regression fails with the original production exchange and passes with the fix. A first review correction (requiring a committed successor) also has a failing-then-passing guard regression. `cargo test -p tono-core --locked`: 325 unit + 15 integration tests passed; 0 doc tests. `git diff --check` passed. One existing unused sing-box constant warning remains. Native Windows/Tauri application and actual clock/network behavior cannot run in this VM; hosted CI and device qualification remain.
+- Candidate/publication: source only, no new candidate, deployment or publication.
+- Remaining limits: P2 prerequisites; this does not correct the system clock or prevent repeated renewals while the clock remains ahead. An obsolete request still fails and the existing sync retry budget remains bounded. See AUTH-CLOCK-REPLAY-VERDICT.
