@@ -33,16 +33,26 @@ extension AppState {
 
     private func suspendForNativeUpdate() async {
         connectionCoordinator.bumpGeneration()
+        let retirementGeneration = connectionCoordinator.protectionOperationGeneration
         let tasks = [connectionCoordinator.coreMonitorTask, connectionCoordinator.nodeSwitchTask,
                      connectionCoordinator.protectedReconnectTask, connectionCoordinator.connectTask,
-                     connectionCoordinator.configReloadTask, connectionCoordinator.networkEnvironmentTask]
+                     connectionCoordinator.configReloadTask, connectionCoordinator.networkEnvironmentTask,
+                     connectionCoordinator.wakeRecoveryTask, connectionCoordinator.sleepRestrictTask]
             .compactMap { $0 }
         for task in tasks { task.cancel() }
+        resumeProtectionAfterWake = false
         isProtectedReconnectScheduled = false
         autoConnectRequested = false
         stopProxyGuard()
         stopLatencyTestTimer()
         for task in tasks { await task.value }
+        // Wake retries check cancellation, not the protection generation. They
+        // must drain before update release, or a later retry can reconnect once
+        // retirement clears the update gates. Keep the handles until that drain.
+        if connectionCoordinator.protectionOperationGeneration == retirementGeneration {
+            connectionCoordinator.wakeRecoveryTask = nil
+            connectionCoordinator.sleepRestrictTask = nil
+        }
         webSocket?.stopAll()
         webSocket = nil
         coreController = nil
