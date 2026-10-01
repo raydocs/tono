@@ -1,0 +1,3 @@
+# noUncheckedIndexedAccess error count for `tsc --noEmit` in this package.
+# Fail only when the count rises. Lowering it is a ratchet tightening.
+521

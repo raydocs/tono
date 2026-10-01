@@ -1,6 +1,6 @@
 | ID | 问题（一句） | 状态 | Issue / PR | 等级 | 剩余限制 |
 |---|---|---|---|---|---|
-| R680-dns-marker-doc-stale | opus:F2 修正之后，Windows Service 几处文档注释与代码不符：仍说 `TONO_DNS_POLICY_REMAINS` 本身挡住卸载且从不与 `TONO_WFP_REMOVED` 同时出现、WFP 残留是唯一的阻塞条件；实际两个标记会同时出现，挡住卸载的是 `with_resolver_rule_proof` 的再次清扫 | open | [#680](https://github.com/raydocs/tono/pull/680)（评审修正轮留下） | 低·已确认 | 尚无修复；只是注释，行为与测试（T4、T5、T6）已按新语义 |
+| R680-dns-marker-doc-stale | opus:F2 修正之后，Windows Service 几处文档注释与代码不符：仍说 `TONO_DNS_POLICY_REMAINS` 本身挡住卸载且从不与 `TONO_WFP_REMOVED` 同时出现、WFP 残留是唯一的阻塞条件；实际两个标记会同时出现，挡住卸载的是 `with_resolver_rule_proof` 的再次清扫 | fixed(d092f80b) | [#684](https://github.com/raydocs/tono/pull/684)（来源 [#680](https://github.com/raydocs/tono/pull/680) 评审修正轮） | 低·已确认 | 所列四处注释已进 main `d092f80b`：两个标记会同时出现，挡住卸载的是 `with_resolver_rule_proof` 的再次清扫；只改注释，行为与测试不变 |
 
 来源：PR #680 复评 opus:F2。证据（行号为 `83b0c623`）：
 - `apps/windows/service/src/core/dns/mod.rs:1208-1211`（`DNS_RESOLVER_POLICY_REMAINS_PREFIX` 的注释：挡住卸载、从不与

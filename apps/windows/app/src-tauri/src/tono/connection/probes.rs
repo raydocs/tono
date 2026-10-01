@@ -24,7 +24,7 @@ use super::failure::{
     NODE_OR_CORE_UNREACHABLE_PREFIX, TUN_DATA_PLANE_BROKEN_PREFIX, TUN_INGRESS_BROKEN_PREFIX,
     WFP_LOCK_UNVERIFIED_PREFIX, StageFailure,
 };
-use super::status::set_stage;
+use super::status::{log_current_stage_duration, set_stage};
 use super::transaction::ConnectTransaction;
 
 /// §6.8 exit probe target.
@@ -109,6 +109,11 @@ pub(super) const POST_LOCK_VERIFY_ROUNDS: u32 = 2;
 
 pub(super) const POST_LOCK_VERIFY_ROUND_DELAY: Duration = Duration::from_millis(500);
 
+/// Wait after the data plane is already proved before the advisory `/delay`.
+/// The verdict does not wait. 1500 ms lets the first page open its own
+/// handshakes; the probe itself is a second Reality connection.
+pub(super) const ADVISORY_EXIT_PROBE_DEFER: Duration = Duration::from_millis(1500);
+
 /// C3 — the post-lock verification group: an advisory controller delay check followed by the
 /// authoritative real App data-plane check, retried up to [`POST_LOCK_VERIFY_ROUNDS`] times
 /// inside the still-live transaction.
@@ -136,11 +141,9 @@ pub(super) async fn verify_post_lock(
     started: std::time::Instant,
     transaction: &ConnectTransaction,
 ) -> Result<KillSwitchStatus, StageFailure> {
-    // §6.8 is deliberately one advisory measurement for the whole verification group. Repeating
-    // Mihomo's doubled `unified-delay` request on every TUN retry used to spend another full
-    // cross-border round without adding any connection proof.
-    // CheckingExit is only a UI label. The real TUN race starts immediately;
-    // controller /delay may finish later and is never required for Connected.
+    // §6.8 is one advisory measurement. It must not run beside the TUN probe:
+    // unified-delay doubles `/delay`, and each sample is another Reality
+    // handshake on the same exit. Success does not wait for it.
     set_stage(state, app, ConnectStage::CheckingExit, generation, started).await?;
     let outcomes = {
         let inner = state.lock().await;
@@ -150,23 +153,10 @@ pub(super) async fn verify_post_lock(
             None
         }
     };
-    let controller_recorder = outcomes.as_ref().map(|outcomes| ProbeRecorder { round: 1, path: "controller", outcomes: outcomes.clone() });
-    let controller_secret = secret.to_string();
-    let mut controller_task = Some(tokio::spawn(async move {
-        let began = std::time::Instant::now();
-        let result = probe_exit_once(&controller_secret, controller_port).await;
-        if let Some(recorder) = controller_recorder {
-            recorder.record("Google", result.is_ok(), "advisory", None, began.elapsed().as_millis() as u64);
-        }
-        result
-    }));
     set_stage(state, app, ConnectStage::VerifyingTraffic, generation, started).await?;
     let mut last = String::from("post-lock verification did not run");
     for round in 0..POST_LOCK_VERIFY_ROUNDS {
         if round > 0 && state.lock().await.connect_generation != generation {
-            if let Some(task) = controller_task.take() {
-                task.abort();
-            }
             return Err(StageFailure::Stale);
         }
         let final_round = round + 1 == POST_LOCK_VERIFY_ROUNDS;
@@ -191,41 +181,38 @@ pub(super) async fn verify_post_lock(
         };
         let data_plane_error = data_plane.as_ref().err().cloned();
         let controller_probe = if data_plane.is_ok() {
-            match controller_task.as_ref() {
-                Some(task) if task.is_finished() => match controller_task.take().unwrap().await {
-                    Ok(result) => match result {
+            Ok(())
+        } else if final_round {
+            let controller_recorder = outcomes.as_ref().map(|outcomes| ProbeRecorder {
+                round: round + 1,
+                path: "controller",
+                outcomes: outcomes.clone(),
+            });
+            let measured_node = state.lock().await.selected_node.clone();
+            transaction
+                .wait("advisory exit measurement", async {
+                    let began = std::time::Instant::now();
+                    let result = probe_exit_once(secret, controller_port).await;
+                    if let Some(recorder) = controller_recorder {
+                        recorder.record(
+                            "Google",
+                            result.is_ok(),
+                            "advisory",
+                            None,
+                            began.elapsed().as_millis() as u64,
+                        );
+                    }
+                    match result {
                         Ok(delay) => {
                             if delay > 0 {
-                                let mut inner = state.lock().await;
-                                inner.record_exit_delay(delay);
+                                if let Some(node) = measured_node.as_deref() {
+                                    let mut inner = state.lock().await;
+                                    inner.record_exit_delay(node, delay);
+                                }
                             }
                             Ok(())
                         }
                         Err(error) => Err(error),
-                    },
-                    Err(_) => Ok(()),
-                },
-                _ => Ok(()),
-            }
-        } else if final_round {
-            let task = controller_task.take();
-            transaction
-                .wait("advisory exit measurement", async {
-                    match task {
-                        Some(task) => match task.await {
-                            Ok(result) => match result {
-                                Ok(delay) => {
-                                    if delay > 0 {
-                                        let mut inner = state.lock().await;
-                                        inner.record_exit_delay(delay);
-                                    }
-                                    Ok(())
-                                }
-                                Err(error) => Err(error),
-                            },
-                            Err(_) => Err("controller probe cancelled".to_string()),
-                        },
-                        None => Ok(()),
                     }
                 })
                 .await?
@@ -250,6 +237,31 @@ pub(super) async fn verify_post_lock(
                         error,
                     });
                 }
+                // The data plane already succeeded. Wait before the advisory
+                // sample so the first page does not share the tunnel with a
+                // second Reality handshake. The UI still gets a delay.
+                let delay_state = state.clone();
+                let delay_secret = secret.to_string();
+                let measured_node = state.lock().await.selected_node.clone();
+                tokio::spawn(async move {
+                    tokio::time::sleep(ADVISORY_EXIT_PROBE_DEFER).await;
+                    if delay_state.lock().await.connect_generation != generation {
+                        return;
+                    }
+                    let Ok(delay) = probe_exit_once(&delay_secret, controller_port).await else {
+                        return;
+                    };
+                    if delay == 0 {
+                        return;
+                    }
+                    let mut inner = delay_state.lock().await;
+                    if inner.connect_generation == generation {
+                        if let Some(node) = measured_node.as_deref() {
+                            inner.record_exit_delay(node, delay);
+                        }
+                    }
+                });
+                log_current_stage_duration(state, generation, started).await;
                 return Ok(status);
             }
             PostLockVerification::Retry { error } => {
@@ -539,23 +551,26 @@ pub(super) async fn probe_exit_once(secret: &str, controller_port: u16) -> Resul
 /// in-memory controller endpoint is never exposed to the WebView; only the measured milliseconds
 /// cross the Tauri command boundary.
 pub async fn test_current_server(state: &Arc<TonoState>, app: &AppHandle) -> Result<u64, String> {
-    let (secret, controller_port) = {
+    let (secret, controller_port, measured_node) = {
         let inner = state.lock().await;
         if !inner.fsm.status().is_connected {
             return Err("connect before testing the current server".to_string());
         }
-        inner
+        let (secret, controller_port) = inner
             .controller_secret
             .clone()
             .zip(inner.controller_port)
-            .ok_or_else(|| "connected controller endpoint is unavailable".to_string())?
+            .ok_or_else(|| "connected controller endpoint is unavailable".to_string())?;
+        (secret, controller_port, inner.selected_node.clone())
     };
     let delay = probe_exit_once(&secret, controller_port)
         .await
         .map_err(|error| format!("current server test failed: {error}"))?;
     {
         let mut inner = state.lock().await;
-        inner.record_exit_delay(delay);
+        if let Some(node) = measured_node.as_deref() {
+            inner.record_exit_delay(node, delay);
+        }
         crate::tono::commands::emit_status(app, &crate::tono::commands::status_of(&inner));
     }
     Ok(delay)
@@ -750,10 +765,26 @@ pub(super) fn describe_reqwest_error(error: &reqwest::Error) -> String {
     controller_error_detail(&joined).unwrap_or_else(|| category.to_string())
 }
 
+#[cfg(test)]
+mod advisory_delay_tests {
+    #[test]
+    fn advisory_exit_probe_waits_until_the_first_page_can_start() {
+        assert_eq!(super::ADVISORY_EXIT_PROBE_DEFER.as_millis(), 1500);
+    }
+}
+
 pub(super) fn format_tun_probe_failures(failures: &[String]) -> String {
     format!(
         "all {} independent real TUN data-plane probes failed: {}",
         TUN_DATA_PLANE_PROBES.len(),
         failures.join(" | ")
     )
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn advisory_exit_probe_waits_until_the_first_page_can_start() {
+        assert_eq!(super::ADVISORY_EXIT_PROBE_DEFER.as_millis(), 1500);
+    }
 }

@@ -388,13 +388,34 @@ final class CoreManager {
         return pids.prefix(Int(count)).compactMap(processIdentity)
     }
 
-    private func terminateOwnedCore(_ pid: Int32) throws {
-        guard kill(pid, 0) == 0 else { return }
-        _ = kill(pid, SIGTERM)
-        for _ in 0..<30 where kill(pid, 0) == 0 { usleep(100_000) }
-        if kill(pid, 0) == 0 { _ = kill(pid, SIGKILL) }
-        for _ in 0..<20 where kill(pid, 0) == 0 { usleep(50_000) }
-        guard kill(pid, 0) != 0 else {
+    private func terminateOwnedCore(_ pid: Int32, expectedPath: String) throws {
+        func stillOwned() -> Bool {
+            guard let identity = processIdentity(pid) else { return false }
+            return maySignalOwnedCore(
+                path: identity.executablePath,
+                uid: identity.uid,
+                expectedPath: expectedPath
+            )
+        }
+        guard stillOwned() else { return }
+        if kill(pid, SIGTERM) != 0 {
+            if errno == ESRCH { return }
+            throw HelperFailure.system("A stale Mihomo process could not be stopped.")
+        }
+        for _ in 0..<30 {
+            if !stillOwned() { return }
+            usleep(100_000)
+        }
+        guard stillOwned() else { return }
+        if kill(pid, SIGKILL) != 0 {
+            if errno == ESRCH { return }
+            throw HelperFailure.system("A stale Mihomo process could not be stopped.")
+        }
+        for _ in 0..<20 {
+            if !stillOwned() { return }
+            usleep(50_000)
+        }
+        guard !stillOwned() else {
             throw HelperFailure.system("A stale Mihomo process could not be stopped.")
         }
     }
@@ -408,8 +429,8 @@ final class CoreManager {
             identities.append(recordedIdentity)
         }
 
-        for pid in staleOwnedCorePIDs(in: identities) {
-            try terminateOwnedCore(pid)
+        for identity in identities where staleOwnedCorePIDs(in: [identity]) == [identity.pid] {
+            try terminateOwnedCore(identity.pid, expectedPath: identity.executablePath)
         }
         try? removePIDFile()
     }

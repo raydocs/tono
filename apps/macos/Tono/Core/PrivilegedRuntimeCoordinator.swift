@@ -21,7 +21,7 @@ actor PrivilegedRuntimeCoordinator {
     }
 
     func nativeUpdate(_ operation: String) throws -> HelperManager.UpdateStatus {
-        if operation == "prepare" || operation == "disconnect" {
+        if operation == "prepare" || operation == "disconnect" || operation == "release" {
             try disableSystemProxyIfNeeded()
         }
         return try HelperManager.updateRequest(operation)
@@ -162,8 +162,8 @@ actor PrivilegedRuntimeCoordinator {
         )
     }
 
-    func disarmKillSwitch() throws {
-        try KillSwitchService.disarm()
+    func disarmKillSwitch(preserveAIHold: Bool = false) throws {
+        try KillSwitchService.disarm(preserveAIHold: preserveAIHold)
     }
 
     func restrictKillSwitchToBootstrap() throws {

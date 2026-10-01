@@ -2,7 +2,9 @@
 // existing exit-token revoke (rotate hash + disable) used once they have left.
 
 import { randomToken, sha256 } from '../crypto';
+import { catalogBaseName, catalogHy2Name } from '../catalog-yaml';
 import { type Env, type Row, id, now } from '../env';
+import { assertHomeExitUnbound } from '../home';
 import { writeOpsAudit } from '../product-account';
 import {
   assertRetireDependencies,
@@ -19,6 +21,21 @@ import { catalogNames, requireNode } from './handlers/nodes-data';
 import { RETIRE_DRAIN_SECONDS } from './verdict';
 
 export type { RetireDependenciesDto };
+
+// Recheck at the catalog write: a binding can land after retirement preview.
+export const catalogHomeUnboundSql = `NOT EXISTS (
+  SELECT 1 FROM user_home_bindings b JOIN home_exits h ON h.id = b.home_exit_id
+  WHERE h.kind = 'catalog' AND h.proxy_name IN (?, ?)
+)`;
+
+/** Residential routing uses its home even when the selected cloud exit differs. */
+export async function assertCatalogHomeUnbound(e: Env, name: string): Promise<void> {
+  const base = catalogBaseName(name);
+  const homes = await e.DB.prepare(
+    "SELECT id FROM home_exits WHERE kind = 'catalog' AND proxy_name IN (?, ?)",
+  ).bind(base, catalogHy2Name(base)).all<Row>();
+  for (const home of homes.results) await assertHomeExitUnbound(e, String(home.id));
+}
 
 export function retirePendingDedupeKey(name: string): string {
   return `node:${name}:retire_pending`;
@@ -40,7 +57,7 @@ async function queryCustomers(
   cutoff: number,
 ): Promise<RetireCustomerOnNodeDto[]> {
   try {
-    const rows = await e.DB.prepare(sql).bind(name, cutoff).all<Row>();
+    const rows = await e.DB.prepare(sql).bind(name, catalogHy2Name(name), cutoff).all<Row>();
     return (rows.results ?? []).map((row) => ({
       userId: String(row.user_id),
       email: String(row.email ?? ''),
@@ -63,7 +80,7 @@ export async function retireDependencies(
       e,
       `SELECT s.user_id, u.email, s.last_seen_at
        FROM ops_customer_status s JOIN users u ON u.id = s.user_id
-       WHERE s.selected_server = ? AND s.last_seen_at >= ?`,
+       WHERE s.selected_server IN (?, ?) AND s.last_seen_at >= ?`,
       name,
       cutoff,
     ),
@@ -71,15 +88,15 @@ export async function retireDependencies(
       e,
       `SELECT d.user_id, u.email, d.last_seen_at
        FROM ops_device_status d JOIN users u ON u.id = d.user_id
-       WHERE d.selected_server = ? AND d.last_seen_at >= ?`,
+       WHERE d.selected_server IN (?, ?) AND d.last_seen_at >= ?`,
       name,
       cutoff,
     ),
     (async () => {
       try {
         const row = await e.DB.prepare(
-          'SELECT COUNT(*) AS n FROM user_home_bindings WHERE default_proxy_name = ?',
-        ).bind(name).first<Row>();
+          'SELECT COUNT(*) AS n FROM user_home_bindings WHERE default_proxy_name IN (?, ?)',
+        ).bind(name, catalogHy2Name(name)).first<Row>();
         return Number(row?.n ?? 0) || 0;
       } catch (error) {
         if (!missingTable(error)) throw error;

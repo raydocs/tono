@@ -239,6 +239,9 @@ final class SingBoxConfigTests: XCTestCase {
         XCTAssertEqual(outbound["tls"] as? NSDictionary, [
             "enabled": true, "server_name": "exit.example.com", "certificate_public_key_sha256": [spki],
         ] as NSDictionary)
+        XCTAssertEqual(outbound["keep_alive_period"] as? String, "5s")
+        XCTAssertNil(outbound["idle_timeout"])
+        XCTAssertNil(outbound["disable_chrome_parrot"])
     }
 
     func testProductRuntimePreservesHomeDirectAndRejectsHY2WithoutSPKIPin() throws {
@@ -290,6 +293,110 @@ final class SingBoxConfigTests: XCTestCase {
         }
     }
 
+    func testAssistantDestinationsPrecedeReviewedBundleDirectWithoutAHomeHop() throws {
+        let overlay = ConfigPipeline.OverlayConfig(mixedPort: 29190,
+            externalController: "127.0.0.1:29191", secret: secret, tunEnabled: true,
+            selectedNodeName: "Fixture Beta")
+        let plan = ConfigPipeline.ManagedDirectRuntimePolicy(physicalInterface: "en0",
+            domainPins: [], webDomainPins: [], mediaEndpoints: [], trusted: true, nativeAppDirect: true)
+        ConfigPipeline.managedDirectBundlePathsOverride = ["/Applications/WeChat.app/"]
+        defer { ConfigPipeline.managedDirectBundlePathsOverride = nil }
+        let result = try ConfigPipeline.buildSingBoxRuntime(overlay: overlay, nodes: nodes(), directPlan: plan)
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: result.runtimeJSON) as? [String: Any])
+        let rules = try XCTUnwrap((json["route"] as? [String: Any])?["rules"] as? [[String: Any]])
+        let appDirect = try XCTUnwrap(rules.firstIndex { $0["outbound"] as? String == ConfigPipeline.appDirectGroupName })
+        func precedesDirect(network: String, action: String, outbound: String?, key: String, value: String) {
+            let index = rules.firstIndex { candidate in
+                candidate["network"] as? String == network
+                    && candidate["action"] as? String == action
+                    && candidate["outbound"] as? String == outbound
+                    && (candidate[key] as? [String])?.contains(value) == true
+            }
+            XCTAssertLessThan(try XCTUnwrap(index), appDirect)
+        }
+        precedesDirect(network: "tcp", action: "route", outbound: ConfigPipeline.exitGroupName, key: "domain_suffix", value: "claude.ai")
+        precedesDirect(network: "tcp", action: "route", outbound: ConfigPipeline.exitGroupName, key: "ip_cidr", value: "160.79.104.0/21")
+        precedesDirect(network: "udp", action: "reject", outbound: nil, key: "domain_suffix", value: "claude.ai")
+        precedesDirect(network: "udp", action: "reject", outbound: nil, key: "ip_cidr", value: "160.79.104.0/21")
+        let node = Fixture.realityNode()
+        let yaml = try Fixture.ownedRuntime(
+            overlay: Fixture.overlay(selectedNodeName: node.name),
+            nodes: [node],
+            directPolicy: plan
+        )
+        // `rulePathRegex` hex-escapes `/` and `.`. A search for the raw path
+        // never matches the emitted PROCESS-PATH-REGEX payload.
+        let wechatRegex = ConfigPipeline.rulePathRegex(for: "/Applications/WeChat.app/")
+        let bundle = try XCTUnwrap(yaml.range(of: "PROCESS-PATH-REGEX,\(wechatRegex)"))
+        for marker in [
+            "DOMAIN-SUFFIX,claude.ai)),Tono-Exit",
+            "DOMAIN-SUFFIX,claude.ai)),REJECT",
+            "IP-CIDR,160.79.104.0/21,no-resolve)),Tono-Exit",
+            "IP-CIDR,160.79.104.0/21,no-resolve)),REJECT",
+        ] {
+            XCTAssertLessThan(try XCTUnwrap(yaml.range(of: marker)).lowerBound, bundle.lowerBound)
+        }
+    }
+
+    func testDashScopeRoutesAndDNSPrecedeAlibabaDirectWithoutOrWithAHomeHop() throws {
+        let values = try nodes()
+        let plan = ConfigPipeline.ManagedDirectRuntimePolicy(physicalInterface: "en0",
+            domainPins: [], webDomainPins: [], mediaEndpoints: [], trusted: true)
+        let check: (String?) throws -> Void = { home in
+            let overlay = ConfigPipeline.OverlayConfig(mixedPort: 29190,
+                externalController: "127.0.0.1:29191", secret: self.secret, tunEnabled: true,
+                selectedNodeName: "Fixture Beta", claudeHomeNodeName: home)
+            let result = try ConfigPipeline.buildSingBoxRuntime(overlay: overlay, nodes: values, directPlan: plan)
+            let json = try XCTUnwrap(JSONSerialization.jsonObject(with: result.runtimeJSON) as? [String: Any])
+            let route = try XCTUnwrap(json["route"] as? [String: Any])
+            let rules = try XCTUnwrap(route["rules"] as? [[String: Any]])
+            let direct = try XCTUnwrap(rules.firstIndex {
+                $0["domain_suffix"] as? [String] == ["aliyuncs.com"] && $0["outbound"] as? String == ConfigPipeline.webDirectGroupName
+            })
+            let dns = try XCTUnwrap(json["dns"] as? [String: Any])
+            let dnsRules = try XCTUnwrap(dns["rules"] as? [[String: Any]])
+            let directDNS = try XCTUnwrap(dnsRules.firstIndex { $0["server"] as? String == "Tono-China-DNS" })
+            let target = home == nil ? ConfigPipeline.exitGroupName : ConfigPipeline.claudeHomeGroupName
+            for suffix in ["dashscope.aliyuncs.com", "dashscope-intl.aliyuncs.com", "dashscope-us.aliyuncs.com", "maas.aliyuncs.com"] {
+                let tcp = try XCTUnwrap(rules.firstIndex {
+                    $0["network"] as? String == "tcp" && ($0["domain_suffix"] as? [String])?.contains(suffix) == true && $0["outbound"] as? String == target
+                }, suffix)
+                let udp = try XCTUnwrap(rules.firstIndex {
+                    $0["network"] as? String == "udp" && ($0["domain_suffix"] as? [String])?.contains(suffix) == true && $0["action"] as? String == "reject"
+                }, suffix)
+                XCTAssertLessThan(tcp, direct, suffix)
+                XCTAssertLessThan(udp, direct, suffix)
+                let protectedDNS = try XCTUnwrap(dnsRules.firstIndex {
+                    ($0["domain_suffix"] as? [String])?.contains(suffix) == true && $0["server"] as? String == "Tono-FakeIP"
+                }, suffix)
+                let outboundDNS = try XCTUnwrap(dnsRules.firstIndex {
+                    ($0["domain_suffix"] as? [String])?.contains(suffix) == true && $0["server"] as? String == "Tono-DoH"
+                }, suffix)
+                let backupDNS = try XCTUnwrap(dnsRules.firstIndex {
+                    ($0["domain_suffix"] as? [String])?.contains(suffix) == true && $0["server"] as? String == "Tono-DoH-Backup"
+                }, suffix)
+                let failedDNS = try XCTUnwrap(dnsRules.firstIndex {
+                    ($0["domain_suffix"] as? [String])?.contains(suffix) == true && $0["action"] as? String == "reject"
+                }, "failed protected lookups must not fall through to China DNS: \(suffix)")
+                let primaryResponse = try XCTUnwrap(dnsRules.dropFirst(outboundDNS + 1).first)
+                XCTAssertEqual(primaryResponse["match_response"] as? String, dnsRules[outboundDNS]["tag"] as? String)
+                XCTAssertEqual(primaryResponse["response_rcode"] as? String, "NOERROR")
+                XCTAssertEqual(primaryResponse["action"] as? String, "respond")
+                let backupResponse = try XCTUnwrap(dnsRules.dropFirst(backupDNS + 1).first)
+                XCTAssertEqual(backupResponse["match_response"] as? String, dnsRules[backupDNS]["tag"] as? String)
+                XCTAssertEqual(backupResponse["action"] as? String, "respond")
+                XCTAssertLessThan(protectedDNS, directDNS, suffix)
+                XCTAssertLessThan(outboundDNS, directDNS, suffix)
+                XCTAssertLessThan(outboundDNS, backupDNS, suffix)
+                XCTAssertLessThan(backupDNS, directDNS, suffix)
+                XCTAssertLessThan(backupDNS, failedDNS, suffix)
+                XCTAssertLessThan(failedDNS, directDNS, suffix)
+            }
+        }
+        try check(nil)
+        try check("Fixture Alpha")
+    }
+
     func testDirectRoutesNeverMatchOnProcessName() throws {
         // A plan opens root's web ports in PF, so any rule that sends a
         // basename to a direct outbound lets a renamed process leave untunneled.
@@ -305,7 +412,146 @@ final class SingBoxConfigTests: XCTestCase {
         let direct: Set<String> = ["DIRECT", ConfigPipeline.appDirectGroupName, ConfigPipeline.webDirectGroupName]
         let directRules = rules.filter { direct.contains($0["outbound"] as? String ?? "") }
         XCTAssertFalse(directRules.contains { $0["process_name"] != nil })
-        let continuity = try XCTUnwrap(directRules.first { $0["process_path"] != nil })
-        XCTAssertEqual(continuity["process_path"] as? [String], ConfigPipeline.continuityDirectProcessPaths)
+        XCTAssertFalse(directRules.contains { $0["process_path"] != nil },
+                       "a process identity alone cannot authorize public DIRECT")
+    }
+
+    func testContinuityLocalBypassDoesNotForcePublicAppleTrafficDirectWithoutPolicy() throws {
+        let overlay = ConfigPipeline.OverlayConfig(mixedPort: 29190,
+            externalController: "127.0.0.1:29191", secret: secret, tunEnabled: true,
+            selectedNodeName: "Fixture Beta")
+        let result = try ConfigPipeline.buildSingBoxRuntime(overlay: overlay, nodes: nodes(), directPlan: nil)
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: result.runtimeJSON) as? [String: Any])
+        let route = try XCTUnwrap(json["route"] as? [String: Any])
+        let rules = try XCTUnwrap(route["rules"] as? [[String: Any]])
+        let localIndex = try XCTUnwrap(rules.firstIndex {
+            $0["outbound"] as? String == "DIRECT" && $0["ip_cidr"] != nil
+        })
+        let local = Set(try XCTUnwrap(rules[localIndex]["ip_cidr"] as? [String]))
+        XCTAssertTrue(Set(["169.254.0.0/16", "fe80::/10", "fc00::/7", "224.0.0.0/4", "ff00::/8"])
+            .isSubset(of: local), "AWDL/link-local and multicast remain direct")
+        let inbounds = try XCTUnwrap(json["inbounds"] as? [[String: Any]])
+        let tun = try XCTUnwrap(inbounds.first { $0["type"] as? String == "tun" })
+        let excluded = Set(try XCTUnwrap(tun["route_exclude_address"] as? [String]))
+        let capturedUnlessExcluded: Set<String> = [
+            "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16",
+            "224.0.0.0/4", "255.255.255.255/32", "fe80::/10", "fc00::/7", "ff00::/8",
+        ]
+        XCTAssertTrue(capturedUnlessExcluded.isSubset(of: excluded),
+            "Darwin auto-route must not deliver link broadcast or multicast to utun")
+        XCTAssertFalse(excluded.contains { $0.hasSuffix("/0") },
+            "route exclusion must not punch out a default route")
+        let ipv6RejectIndex = try XCTUnwrap(rules.firstIndex { $0["ip_version"] as? Int == 6 })
+        XCTAssertLessThan(localIndex, ipv6RejectIndex, "local IPv6 must bypass the public IPv6 reject")
+        XCTAssertFalse(rules.contains {
+            $0["outbound"] as? String == "DIRECT" && $0["process_path"] != nil
+                && $0["ip_cidr"] == nil
+        }, "Apple public TCP traffic must not bypass a healthy tunnel without matching PF authorization")
+        XCTAssertEqual(route["final"] as? String, ConfigPipeline.exitGroupName)
+    }
+
+    func testWebDirectClientQueriesAreFakeIPBeforeRealResolvers() throws {
+        ConfigPipeline.managedDirectBundlePathsOverride = ["/Applications/WeChat.app/"]
+        defer { ConfigPipeline.managedDirectBundlePathsOverride = nil }
+        let overlay = ConfigPipeline.OverlayConfig(mixedPort: 29190,
+            externalController: "127.0.0.1:29191", secret: secret, tunEnabled: true,
+            selectedNodeName: "Fixture Beta", claudeHomeNodeName: "Fixture Alpha")
+        let plan = ConfigPipeline.ManagedDirectRuntimePolicy(physicalInterface: "en0",
+            domainPins: [], webDomainPins: [.init(host: "www.qq.com", addresses: ["101.32.104.4"], ports: [443])],
+            mediaEndpoints: [], directResolverHosts: ["www.qq.com"], trusted: true)
+        let result = try ConfigPipeline.buildSingBoxRuntime(overlay: overlay, nodes: nodes(), directPlan: plan)
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: result.runtimeJSON) as? [String: Any])
+        let dns = try XCTUnwrap(json["dns"] as? [String: Any])
+        XCTAssertNil(dns["reverse_mapping"])
+        let dnsRules = try XCTUnwrap(dns["rules"] as? [[String: Any]])
+        let fakePin = try XCTUnwrap(dnsRules.firstIndex {
+            $0["server"] as? String == "Tono-FakeIP" && ($0["domain"] as? [String]) == ["www.qq.com"]
+                && ($0["query_type"] as? [String]) == ["A"]
+        })
+        let fakeSuffix = try XCTUnwrap(dnsRules.firstIndex {
+            $0["server"] as? String == "Tono-FakeIP"
+                && ($0["domain_suffix"] as? [String])?.contains("qq.com") == true
+                && ($0["query_type"] as? [String]) == ["A"]
+        })
+        let hostsRule = try XCTUnwrap(dnsRules.firstIndex { $0["server"] as? String == "Tono-Hosts" })
+        let chinaSuffix = try XCTUnwrap(dnsRules.firstIndex {
+            $0["server"] as? String == "Tono-China-DNS"
+                && ($0["domain_suffix"] as? [String])?.contains("wechat.com") == true
+        })
+        XCTAssertLessThan(fakePin, hostsRule)
+        XCTAssertLessThan(fakeSuffix, chinaSuffix)
+        let earlySuffixes = try XCTUnwrap(dnsRules[fakeSuffix]["domain_suffix"] as? [String])
+        XCTAssertFalse(earlySuffixes.contains("wechat.com"))
+        XCTAssertFalse(earlySuffixes.contains("anthropic.com"))
+        let outbounds = try XCTUnwrap(json["outbounds"] as? [[String: Any]])
+        let webDirect = try XCTUnwrap(outbounds.first { $0["tag"] as? String == ConfigPipeline.webDirectProxyName })
+        XCTAssertEqual((webDirect["domain_resolver"] as? [String: Any])?["server"] as? String, "Tono-China-DNS")
+        let routeRules = try XCTUnwrap((json["route"] as? [String: Any])?["rules"] as? [[String: Any]])
+        let assistant = try XCTUnwrap(routeRules.firstIndex {
+            $0["outbound"] as? String == "Tono-Claude-Home"
+                && ($0["domain_suffix"] as? [String])?.contains("anthropic.com") == true
+        })
+        let web = try XCTUnwrap(routeRules.firstIndex {
+            $0["outbound"] as? String == ConfigPipeline.webDirectGroupName
+                && ($0["domain_suffix"] as? [String]) == ["qq.com"]
+        })
+        XCTAssertLessThan(assistant, web)
+    }
+
+    func testProductRuntimeRequiresChromeAndSequentialDoH() throws {
+        var values = try nodes()
+        values[0].clientFingerprint = "firefox"
+        values[1].clientFingerprint = nil
+        let overlay = ConfigPipeline.OverlayConfig(mixedPort: 29190,
+            externalController: "127.0.0.1:29191", secret: secret, tunEnabled: true,
+            selectedNodeName: "Fixture Beta")
+        let result = try ConfigPipeline.buildSingBoxRuntime(overlay: overlay, nodes: values, directPlan: nil)
+        XCTAssertEqual(result.unavailableNodes, ["Fixture Alpha": "TONO_SINGBOX_UNSUPPORTED_FINGERPRINT"])
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: result.runtimeJSON) as? [String: Any])
+        let outbounds = try XCTUnwrap(json["outbounds"] as? [[String: Any]])
+        XCTAssertFalse(outbounds.contains { $0["tag"] as? String == "Fixture Alpha" })
+        let beta = try XCTUnwrap(outbounds.first { $0["tag"] as? String == "Fixture Beta" })
+        let tls = try XCTUnwrap(beta["tls"] as? [String: Any])
+        XCTAssertEqual((tls["utls"] as? [String: Any])?["fingerprint"] as? String, "chrome")
+        let dns = try XCTUnwrap(json["dns"] as? [String: Any])
+        let servers = try XCTUnwrap(dns["servers"] as? [[String: Any]])
+        XCTAssertEqual(servers[0]["inet4_range"] as? String, "198.18.16.0/20")
+        XCTAssertTrue(servers.allSatisfy { ["fakeip", "https"].contains($0["type"] as? String ?? "") })
+        XCTAssertEqual(servers[1]["server"] as? String, "1.1.1.1")
+        XCTAssertEqual((servers[1]["tls"] as? [String: Any])?["alpn"] as? [String], ["h2"])
+        XCTAssertEqual(servers[1]["detour"] as? String, ConfigPipeline.exitGroupName)
+        XCTAssertEqual(servers[2]["tag"] as? String, "Tono-DoH-Backup")
+        XCTAssertEqual(servers[2]["server"] as? String, "8.8.8.8")
+        XCTAssertEqual((servers[2]["tls"] as? [String: Any])?["server_name"] as? String, "dns.google")
+        XCTAssertEqual((servers[2]["tls"] as? [String: Any])?["alpn"] as? [String], ["h2"])
+        XCTAssertEqual(servers[2]["detour"] as? String, ConfigPipeline.exitGroupName)
+        let rules = try XCTUnwrap(dns["rules"] as? [[String: Any]])
+        let fake = try XCTUnwrap(rules.first { $0["server"] as? String == "Tono-FakeIP" })
+        XCTAssertEqual(fake["rewrite_ttl"] as? Int, 30)
+        XCTAssertEqual(dns["final"] as? String, "Tono-DoH")
+        let generalEvaluate = rules.filter {
+            $0["action"] as? String == "evaluate" && $0["domain_suffix"] == nil
+        }.map { $0["server"] as? String }
+        XCTAssertEqual(generalEvaluate, ["Tono-DoH", "Tono-DoH-Backup"])
+        XCTAssertFalse(rules.contains { $0["race"] != nil })
+        XCTAssertTrue(ProtectedDNSProbe.isFakeIP("198.18.16.1"))
+        XCTAssertTrue(ProtectedDNSProbe.isFakeIP("198.18.31.255"))
+        XCTAssertTrue(ProtectedDNSProbe.isFakeIP("198.19.0.1"))
+        XCTAssertFalse(ProtectedDNSProbe.isFakeIP("198.18.0.1"))
+        XCTAssertFalse(ProtectedDNSProbe.isFakeIP("198.18.0.2"))
+        XCTAssertFalse(ProtectedDNSProbe.isFakeIP("1.1.1.1"))
+        var selectedFirefox = values
+        selectedFirefox[1].clientFingerprint = "firefox"
+        var rejected = overlay
+        rejected.selectedNodeName = "Fixture Beta"
+        XCTAssertThrowsError(try ConfigPipeline.buildSingBoxRuntime(
+            overlay: rejected, nodes: selectedFirefox, directPlan: nil
+        )) { error in
+            XCTAssertEqual(error as? ConfigPipeline.SingBoxError, .unsupportedFingerprint)
+        }
+        SingBoxDelayGate.prove()
+        XCTAssertTrue(SingBoxDelayGate.isProven)
+        SingBoxDelayGate.suspend()
+        XCTAssertFalse(SingBoxDelayGate.isProven)
     }
 }

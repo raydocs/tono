@@ -115,6 +115,13 @@ func staleOwnedCorePIDs(
     }.sorted()
 }
 
+/// A signal is still aimed at the core only when the pid's path and uid are
+/// the ones captured before the wait. `kill(pid, 0)` stays true after the pid
+/// is reused.
+func maySignalOwnedCore(path: String, uid: uid_t, expectedPath: String) -> Bool {
+    uid == 0 && path == expectedPath
+}
+
 func runCoreLifecyclePolicySelfTests() -> Bool {
     staleOwnedCorePIDs(in: [
         .init(pid: 31, executablePath: mihomoPath, uid: 0),
@@ -122,6 +129,9 @@ func runCoreLifecyclePolicySelfTests() -> Bool {
         .init(pid: 33, executablePath: "/tmp/tono-mihomo", uid: 0),
         .init(pid: 34, executablePath: "/Library/PrivilegedHelperTools/tono-mihomo", uid: 0),
     ]) == [31, 34]
+        && maySignalOwnedCore(path: mihomoPath, uid: 0, expectedPath: mihomoPath)
+        && !maySignalOwnedCore(path: "/usr/libexec/rosetta/runtime", uid: 0, expectedPath: mihomoPath)
+        && !maySignalOwnedCore(path: mihomoPath, uid: 501, expectedPath: mihomoPath)
 }
 
 /// Folds an object key the way Go's JSON decoder matches it to a struct field
@@ -717,18 +727,16 @@ func runOwnedRuntimeContractSelfTests() -> Bool {
         )
 }
 
-/// Daemon startup after executor recovery, in the order protection needs.
+/// Daemon startup after executor recovery.
 ///
-/// After a boot, macOS loads /etc/pf.conf with PF disabled; this daemon is the
-/// only thing that enables it. PF used to be restored only once the socket
-/// server had resolved the user's group and home, set up its directories and
-/// swept a stale core, and any failure on the way exited without touching PF,
-/// so an armed machine came up open and stayed open across every launchd
-/// retry. PF is now restored right after the allowed user is read, and any
-/// later failure installs the emergency block when protection was wanted.
-///
-/// A stop request is a clean stop, as in `UpdateExecutor.startup`: the
-/// executor's own bootout must not leave a barrier behind.
+/// After a boot, macOS loads /etc/pf.conf with PF disabled. That file only
+/// declares the Tono anchor; it does not load the rule file, so Safe Mode
+/// (where this LaunchDaemon does not run) cannot reinstall a block from it.
+/// This daemon does not re-arm on startup. Once the socket is listening, a
+/// Core that is not running releases any leftover kill switch. A failure
+/// before that release clears a saved kill switch instead of installing a
+/// block. A stop request is a clean stop, as in `UpdateExecutor.startup`:
+/// the executor's own bootout must not change PF.
 func startHelperDaemon<KillSwitch, Server>(
     readUID: () throws -> uid_t = {
         guard geteuid() == 0 else {
@@ -751,8 +759,266 @@ func startHelperDaemon<KillSwitch, Server>(
     }
 }
 
-/// PF is restored before the server initialises, a server failure leaves the
-/// machine fail-closed, and a requested stop does not (H12-F2).
+func runUpgradeSourceSelfTest() -> Bool {
+    let directory = FileManager.default.temporaryDirectory.path
+    let fifo = directory + "/tono-upgrade-fifo-\(getpid())"
+    let file = directory + "/tono-upgrade-file-\(getpid())"
+    let dest = directory + "/tono-upgrade-dest-\(getpid())"
+    let stopped = dest + ".stop"
+    unlink(fifo)
+    unlink(file)
+    unlink(dest)
+    unlink(stopped)
+    defer {
+        unlink(fifo)
+        unlink(file)
+        unlink(dest)
+        unlink(stopped)
+    }
+    guard mkfifo(fifo, 0o644) == 0 else { return false }
+    let started = Date()
+    var rejectedFIFO = false
+    do { close(try openUpgradeSource(fifo)) } catch { rejectedFIFO = true }
+    guard rejectedFIFO, Date().timeIntervalSince(started) < 2 else { return false }
+    let payload = Data("tono-upgrade\n".utf8)
+    do {
+        try payload.write(to: URL(fileURLWithPath: file), options: .atomic)
+        let fd = try openUpgradeSource(file)
+        defer { close(fd) }
+        try copyUpgradeSource(from: fd, to: dest) { true }
+        guard (try? Data(contentsOf: URL(fileURLWithPath: dest))) == payload else { return false }
+        var aborted = false
+        do {
+            try copyUpgradeSource(from: fd, to: stopped) { false }
+        } catch {
+            aborted = true
+        }
+        return aborted && access(stopped, F_OK) != 0
+    } catch {
+        return false
+    }
+}
+
+/// Cancelling a silent copy must leave an administrator installer's staging
+/// files intact, including files it replaces while the copy is in progress.
+func runSilentUpgradeStagingSelfTest() -> Bool {
+    let parent = FileManager.default.temporaryDirectory.path
+        + "/tono-upgrade-isolation-\(UUID().uuidString)"
+    do {
+        try FileManager.default.createDirectory(atPath: parent, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(atPath: parent) }
+        let staging = try SilentUpgradeStaging(parent: parent)
+        defer { staging.remove() }
+        let other = try SilentUpgradeStaging(parent: parent)
+        defer { other.remove() }
+        guard staging.directory != other.directory else { return false }
+        let otherPayload = Data("other-upgrade\n".utf8)
+        try otherPayload.write(to: URL(fileURLWithPath: other.helperPath))
+        let source = parent + "/source"
+        let installerHelper = parent + "/tono-core-helper.new"
+        let installerCore = parent + "/tono-sing-box.new"
+        let sentinel = Data("administrator-install\n".utf8)
+        try Data("silent-upgrade\n".utf8).write(to: URL(fileURLWithPath: source))
+        let fd = try openUpgradeSource(source)
+        defer { close(fd) }
+        var checks = 0
+        var aborted = false
+        do {
+            try copyUpgradeSource(from: fd, to: staging.helperPath) {
+                checks += 1
+                if checks == 2 {
+                    do {
+                        try sentinel.write(to: URL(fileURLWithPath: installerHelper), options: .atomic)
+                        try sentinel.write(to: URL(fileURLWithPath: installerCore), options: .atomic)
+                    } catch { return false }
+                    return false
+                }
+                return true
+            }
+        } catch { aborted = true }
+        staging.remove()
+        return aborted && checks == 2
+            && (try? Data(contentsOf: URL(fileURLWithPath: installerHelper))) == sentinel
+            && (try? Data(contentsOf: URL(fileURLWithPath: installerCore))) == sentinel
+            && (try? Data(contentsOf: URL(fileURLWithPath: other.helperPath))) == otherPayload
+            && access(staging.helperPath, F_OK) != 0
+    } catch { return false }
+}
+
+/// The authorization check and binary replacement share the actual durable
+/// lock; another installer cannot enter between them.
+func runSilentUpgradeCommitSelfTest() -> Bool {
+    guard geteuid() == 0 else { return false }
+    let root = FileManager.default.temporaryDirectory.path
+        + "/tono-upgrade-commit-\(UUID().uuidString)"
+    defer { try? FileManager.default.removeItem(atPath: root) }
+    do {
+        let storage = try UpdateStorage(root: root)
+        let staging = try SilentUpgradeStaging(parent: root)
+        defer { staging.remove() }
+        let helperDestination = root + "/helper"
+        let coreDestination = root + "/core"
+        let helperBytes = Data("new-helper\n".utf8)
+        let coreBytes = Data("new-core\n".utf8)
+        try helperBytes.write(to: URL(fileURLWithPath: staging.helperPath))
+        try coreBytes.write(to: URL(fileURLWithPath: staging.corePath))
+        let contender = open(root + "/lock", O_RDWR | O_CLOEXEC)
+        guard contender >= 0 else { return false }
+        defer { close(contender) }
+        var replaced = false
+        try replaceSilentUpgradeCopies(
+            staging: staging,
+            helperDestination: helperDestination,
+            coreDestination: coreDestination
+        ) { replace in
+            try storage.locked {
+                guard flock(contender, LOCK_EX | LOCK_NB) != 0,
+                      errno == EWOULDBLOCK else {
+                    throw HelperFailure.system("Upgrade replacement did not hold the update lock.")
+                }
+                try replace()
+                guard (try? Data(contentsOf: URL(fileURLWithPath: helperDestination))) == helperBytes,
+                      (try? Data(contentsOf: URL(fileURLWithPath: coreDestination))) == coreBytes else {
+                    throw HelperFailure.system("Upgrade copies were not replaced inside the update lock.")
+                }
+                replaced = true
+            }
+        }
+        guard replaced, flock(contender, LOCK_EX | LOCK_NB) == 0 else { return false }
+        flock(contender, LOCK_UN)
+        return true
+    } catch { return false }
+}
+
+func runBuildSourceSealSelfTest() -> Bool {
+    let json = Data(
+        #"{"commit":"0123456789abcdef0123456789abcdef01234567","releaseSequence":3}"#.utf8
+    )
+    guard (try? UpdatePackage.buildSource(matching: json, and: json))?.releaseSequence == 3 else {
+        return false
+    }
+    do {
+        _ = try UpdatePackage.buildSource(matching: json, and: Data(#"{"commit":"0123456789abcdef0123456789abcdef01234567","releaseSequence":2}"#.utf8))
+        return false
+    } catch {}
+    do {
+        _ = try UpdatePackage.buildSource(from: Data(count: 4096))
+        return false
+    } catch {}
+    let fifo = FileManager.default.temporaryDirectory.path + "/tono-build-source-fifo-\(getpid())"
+    unlink(fifo)
+    defer { unlink(fifo) }
+    guard mkfifo(fifo, 0o644) == 0 else { return false }
+    let started = Date()
+    do {
+        _ = try UpdatePackage.readBoundedRegularFile(fifo, maximum: 4096)
+        return false
+    } catch {
+        return Date().timeIntervalSince(started) < 2
+    }
+}
+
+func runPFTokenForgetSelfTest() -> Bool {
+    !KillSwitchManager.shouldKeepPFEnableRecord(releaseStatus: 0, stillListed: true)
+        && KillSwitchManager.shouldKeepPFEnableRecord(releaseStatus: 1, stillListed: true)
+        && !KillSwitchManager.shouldKeepPFEnableRecord(releaseStatus: 1, stillListed: false)
+}
+
+func runLanDNSScopeSelfTest() -> Bool {
+    let scoped = #"block drop out quick on { en0, en5 } inet proto { tcp, udp } port { 53, 853 } label "tono-lan-dns""#
+    let unscoped = #"block drop out quick inet proto { tcp, udp } port { 53, 853 } label "tono-lan-dns""#
+    // Kernel output expands the renderer's interface/protocol/port lists.
+    let expanded = #"block drop out quick on en5 inet proto udp from any to 10.0.0.0/8 port = 53 label "tono-lan-dns""#
+        + "\n" + #"block drop out quick on en0 inet proto tcp from any to 10.0.0.0/8 port = 853 label "tono-lan-dns""#
+        + "\n" + #"block drop out quick on en0 inet6 proto udp from any to fc00::/7 port = 53 label "tono-lan-dns""#
+    return KillSwitchManager.lanDNSInterfaces(in: scoped) == ["en0", "en5"]
+        && KillSwitchManager.lanDNSInterfaces(in: expanded) == ["en0", "en5"]
+        && KillSwitchManager.lanDNSScopeNeedsReload(
+            loaded: KillSwitchManager.lanDNSInterfaces(in: expanded),
+            current: ["en0", "en5", "en7"]
+        )
+        && KillSwitchManager.lanDNSInterfaces(in: expanded + "\n" + unscoped) == []
+        && KillSwitchManager.lanDNSInterfaces(in: unscoped) == []
+        && KillSwitchManager.lanDNSInterfaces(in: "pass out all\n") == nil
+        && KillSwitchManager.lanDNSScopeNeedsReload(loaded: ["en0"], current: ["en0", "en7"])
+        && !KillSwitchManager.lanDNSScopeNeedsReload(loaded: ["en0", "en7"], current: ["en0"])
+        && !KillSwitchManager.lanDNSScopeNeedsReload(loaded: ["en0"], current: [])
+        && !KillSwitchManager.lanDNSScopeNeedsReload(loaded: [], current: ["en0"])
+        && !KillSwitchManager.lanDNSScopeNeedsReload(loaded: nil, current: ["en0"])
+}
+
+func runLANScopePreservationSelfTest() -> Bool {
+    let state = KillSwitchState(
+        armed: true, tailscaleBootstrapEnabled: false,
+        apiHosts: [], exitHints: [], tunnelInterfaces: ["utun199"],
+        resolvedHosts: [:], pinnedHosts: [:], derpEndpoints: [],
+        cachedDERPEndpoints: [], proxyTargets: [],
+        sessionDirectEndpoints: [.init(address: "203.0.113.50", transport: "tcp", port: 443)],
+        reviewedBundleDirectEnabled: true
+    )
+    let source = KillSwitchManager.renderRules(
+        state: state, allowedUID: 501, physicalInterfaces: ["en0"]
+    )
+    let baseline = KillSwitchManager.passRules(in: source)
+    guard source.contains("203.0.113.50"), source.contains(KillSwitchManager.reviewedBundleLabel),
+          let widened = KillSwitchManager.widenLANScope(
+            in: source, current: ["en5"], baseline: baseline
+          ),
+          KillSwitchManager.lanDNSInterfaces(in: widened) == ["en0", "en5"],
+          KillSwitchManager.passRules(in: widened) == baseline,
+          source.split(separator: "\n").filter({ !$0.contains("\"tono-lan-dns\"") })
+            == widened.split(separator: "\n").filter({ !$0.contains("\"tono-lan-dns\"") }),
+          KillSwitchManager.stateDisposal(replacing: baseline, with: KillSwitchManager.passRules(in: widened)) == .keep,
+          KillSwitchManager.widenLANScope(in: source, current: ["en5"], baseline: nil) == nil,
+          KillSwitchManager.widenLANScope(in: source, current: ["en5"], baseline: []) == nil,
+          case .withhold(let withheld, _, _) = KillSwitchManager.reviewedBundleWithholding(
+            loaded: source, baseline: baseline
+          ) else { return false }
+    // A transient withhold must never be reconstructed from persisted state
+    // or mistaken for the full baseline while the Core is being replaced.
+    return KillSwitchManager.widenLANScope(in: withheld, current: ["en5"], baseline: baseline) == nil
+}
+
+func runReadRequestBoundSelfTest() -> Bool {
+    func withPipe(_ body: (Int32, Int32) throws -> Bool) -> Bool {
+        var ends = [Int32](repeating: -1, count: 2)
+        guard pipe(&ends) == 0 else { return false }
+        defer {
+            if ends[0] >= 0 { close(ends[0]) }
+            if ends[1] >= 0 { close(ends[1]) }
+        }
+        return (try? body(ends[0], ends[1])) == true
+    }
+    let accepted = withPipe { readEnd, writeEnd in
+        let bytes = Data("GET /version HTTP/1.1\r\nContent-Length: 0\r\n\r\n".utf8)
+        let wrote = bytes.withUnsafeBytes { raw -> Int in
+            guard let base = raw.baseAddress else { return -1 }
+            return Darwin.write(writeEnd, base, bytes.count)
+        }
+        guard wrote == bytes.count else { return false }
+        let request = try readRequest(readEnd)
+        return request.method == "GET" && request.path == "/version" && request.body.isEmpty
+    }
+    let rejected = withPipe { readEnd, writeEnd in
+        var header = Data("POST /helper/upgrade HTTP/1.1\r\nX: ".utf8)
+        header.append(Data(repeating: 0x61, count: maximumHeaderBytes))
+        let wrote = header.withUnsafeBytes { raw -> Int in
+            guard let base = raw.baseAddress else { return -1 }
+            return Darwin.write(writeEnd, base, header.count)
+        }
+        guard wrote == header.count else { return false }
+        do {
+            _ = try readRequest(readEnd)
+            return false
+        } catch {
+            return true
+        }
+    }
+    return accepted && rejected
+}
+
+/// The manager is constructed before the server. A server failure runs the
+/// startup release, and a requested stop does not (H12-F2).
 func runStartupOrderSelfTest() -> Bool {
     struct StartupFailed: Error {}
     var events: [String] = []
@@ -786,9 +1052,40 @@ func requestHelperShutdown(_ signal: Int32) {
     helperShutdownRequested = 1
 }
 
+/// A corrupt or unreadable update ledger is not a strict kill switch.
+/// Recovery still releases the network. It does not delete the ledger.
+func emergencyReleaseDespiteUnreadableLedger(strictKillSwitchEnabled: Bool) -> Bool {
+    !strictKillSwitchEnabled
+}
+
+/// PF and DNS release with no ledger access. Used when the store cannot be
+/// opened. Does not remove the installation or rewrite update files.
+func releaseNetworkWithoutLedger() -> Bool {
+    do {
+        let allowedUID = try readAllowedUID()
+        _ = try CoreManager(allowedUID: allowedUID)
+        let dns = try ProtectedDNSManager()
+        let manager = try KillSwitchManager(allowedUID: allowedUID)
+        do {
+            _ = try dns.restore(deferringLossNotice: true)
+        } catch {
+            fputs("Tono emergency recovery could not restore DNS; releasing PF anyway: \(error)\n", stderr)
+        }
+        _ = try manager.disarm()
+        print("Tono network protection is disarmed. Update evidence was not modified.")
+        return true
+    } catch {
+        fputs("Tono emergency recovery could not release PF: \(error)\n", stderr)
+        return false
+    }
+}
+
 /// Last-resort recovery for a machine whose GUI cannot reconnect or quit
 /// normally. This path is intentionally unavailable over the user socket and
 /// requires an administrator to execute the installed, signed helper as root.
+/// An unreadable ledger does not refuse the release. This is not #691: it
+/// does not boot out unrelated processes, does not require DNS verification
+/// before opening PF, and does not record a flag that stops later starts.
 func runEmergencyDisarm(underLock suppliedStorage: UpdateStorage? = nil) -> Bool {
     guard geteuid() == 0 else {
         fputs("Tono emergency recovery must be run with sudo.\n", stderr)
@@ -797,24 +1094,52 @@ func runEmergencyDisarm(underLock suppliedStorage: UpdateStorage? = nil) -> Bool
     do {
         let storage = try suppliedStorage ?? UpdateStorage()
         let disarm = { () throws -> Bool in
-        var ledger = try storage.load()
-        let pending = ledger.attempt != nil && ledger.attempt?.receipt.phase != .committed
-        if pending {
-            ledger.attempt?.disconnectRequested = true
-            try storage.save(ledger)
+        var ledger: UpdateStorage.Ledger?
+        var pending = false
+        do {
+            var loaded = try storage.load()
+            pending = loaded.attempt != nil && loaded.attempt?.receipt.phase != .committed
+            if pending {
+                loaded.attempt?.disconnectRequested = true
+                try storage.save(loaded)
+            }
+            ledger = loaded
+        } catch {
+            fputs(
+                "Tono emergency recovery could not read update evidence; releasing the network and keeping the files: \(error)\n",
+                stderr
+            )
+            guard emergencyReleaseDespiteUnreadableLedger(strictKillSwitchEnabled: false) else {
+                throw error
+            }
+            pending = false
         }
         let allowedUID = try readAllowedUID()
         // Initialization terminates a stale owned Mihomo process before PF is
         // opened, preventing a half-running privileged runtime after recovery.
         let core = try CoreManager(allowedUID: allowedUID)
-        // Restore the user's DHCP/custom DNS before opening PF. If DNS recovery
-        // fails, retain fail-closed protection instead of returning a machine
-        // with direct egress but a dead resolver.
+        // Restore DNS, then release PF. A DNS failure must not keep the block:
+        // the host would stay offline with a dead resolver.
         let dns = try ProtectedDNSManager()
         let manager = try KillSwitchManager(allowedUID: allowedUID)
-        if pending {
+        if pending, var ledger {
             let runtime = UpdateRuntime(core: core, firewall: manager, dns: dns, power: PowerTransitionGate())
-            try runtime.disconnect()
+            do {
+                try runtime.disconnect()
+            } catch {
+                fputs(
+                    "Tono emergency recovery could not finish the update disconnect; releasing PF anyway: \(error)\n",
+                    stderr
+                )
+                do {
+                    _ = try dns.restore(deferringLossNotice: true)
+                } catch {
+                    fputs("Tono emergency recovery could not restore DNS; releasing PF anyway: \(error)\n", stderr)
+                }
+                _ = try manager.disarm()
+                print("Tono network protection is disarmed. Update evidence was kept.")
+                return true
+            }
             ledger.attempt?.disconnectVerified = true
             try storage.save(ledger)
             // The verified release above is the abandon intent this command
@@ -831,24 +1156,37 @@ func runEmergencyDisarm(underLock suppliedStorage: UpdateStorage? = nil) -> Bool
                 fputs("Tono emergency recovery disarmed PF but could not archive the resolved update attempt: \(error)\n", stderr)
             }
         } else {
-            _ = try dns.restore(deferringLossNotice: true)
+            do {
+                _ = try dns.restore(deferringLossNotice: true)
+            } catch {
+                fputs(
+                    "Tono emergency recovery could not restore DNS; releasing PF anyway: \(error)\n",
+                    stderr
+                )
+            }
             _ = try manager.disarm()
         }
         print("Tono network protection is disarmed.")
         if ProtectedDNSManager.originalLossRecorded {
             // Either branch above; the record stays for the app's next restore.
             print(
-                "The network service whose DNS settings Tono saved no longer exists, so those "
-                    + "DNS servers were not put back and DNS is now obtained automatically. If your "
-                    + "network needs manual DNS servers, set them again in System Settings > Network."
+                "Tono did not restore the saved DNS settings because the network service was removed "
+                    + "or its DNS settings changed. Any newer DNS settings were kept. Check "
+                    + "System Settings > Network if DNS needs adjustment."
             )
         }
         return true
         }
         return try suppliedStorage == nil ? storage.locked(disarm) : disarm()
     } catch {
-        fputs("Tono emergency recovery failed; PF remains fail-closed.\n", stderr)
-        return false
+        fputs(
+            "Tono emergency recovery could not use update evidence (\(error)). Releasing the network.\n",
+            stderr
+        )
+        guard emergencyReleaseDespiteUnreadableLedger(strictKillSwitchEnabled: false) else {
+            return false
+        }
+        return releaseNetworkWithoutLedger()
     }
 }
 
@@ -870,8 +1208,11 @@ func runEmergencyReset() -> Bool {
             return runEmergencyResetLocked(storage)
         }
     } catch {
-        fputs("Helper reset refused; pending or corrupt update evidence is retained.\n", stderr)
-        return false
+        fputs(
+            "Helper removal refused (\(error)). Update evidence kept. Releasing the network.\n",
+            stderr
+        )
+        return runEmergencyDisarm()
     }
 }
 
@@ -1135,9 +1476,10 @@ func releaseIfTonoWasRemoved(
 }
 
 /// Nothing is removed unless the stale core stops, DNS is restored and PF is
-/// disarmed (`runEmergencyDisarm`); otherwise startup continues and restores
-/// protection as before. The daemon has not opened its socket yet, so no GUI
-/// arm can interleave, unlike the `--emergency-reset` tool.
+/// disarmed (`runEmergencyDisarm`); otherwise startup continues and
+/// `SocketServer.run` releases a leftover kill switch when the Core is not
+/// running. The daemon has not opened its socket yet, so no GUI arm can
+/// interleave, unlike the `--emergency-reset` tool.
 func releaseRemovedInstallationLocked(_ storage: UpdateStorage) -> Bool {
     guard runEmergencyDisarm(underLock: storage) else { return false }
     removeHelperInstallation()
@@ -1412,12 +1754,18 @@ if CommandLine.arguments.dropFirst() == ["--staging-self-test"] {
 }
 if CommandLine.arguments.dropFirst() == ["--lifecycle-self-test"] {
     let pfPassed = KillSwitchManager.runLifecycleSelfTests()
+        && KillSwitchManager.runInterruptedSelectiveReleaseSelfTest()
+        && SelectiveFailOpenInstaller.runResolverOwnershipSelfTest()
     let dnsPassed = ProtectedDNSManager.runRestoreReadFailureSelfTest()
+        && ProtectedDNSManager.runRepeatedOwnedRestoreSelfTest()
+        && ProtectedDNSManager.runPreferencesContentionSelfTest()
         && ProtectedDNSManager.runStatusUnreadableServiceSelfTest()
         && ProtectedDNSManager.runCorruptSnapshotSelfTest()
         && ProtectedDNSManager.runRenamedServiceRestoreSelfTest()
         && ProtectedDNSManager.runDeferredOriginalLossSelfTest()
-    exit(pfPassed && dnsPassed ? 0 : 1)
+    let selectiveRoutesPassed = SelectiveFailOpen.runRouteGatewaySelfTest()
+    let upgradeCommitPassed = runSilentUpgradeCommitSelfTest()
+    exit(pfPassed && dnsPassed && selectiveRoutesPassed && upgradeCommitPassed ? 0 : 1)
 }
 if CommandLine.arguments.dropFirst() == ["--self-test"] {
     exit(
@@ -1426,10 +1774,25 @@ if CommandLine.arguments.dropFirst() == ["--self-test"] {
             && TonoPeerAuthorizer.runSelfTests()
             && runRequestContractSelfTests()
             && runHelperUpgradeAdmissionSelfTest()
+            && runUpgradeSourceSelfTest()
+            && runSilentUpgradeStagingSelfTest()
+            && runBuildSourceSealSelfTest()
+            && runPFTokenForgetSelfTest()
+            && runLanDNSScopeSelfTest()
+            && runLANScopePreservationSelfTest()
+            && runReadRequestBoundSelfTest()
             && runCoreLifecyclePolicySelfTests()
             && runOwnedRuntimeContractSelfTests()
             && PowerTransitionGate.runSelfTests()
             && runStartupOrderSelfTest()
+            && KillSwitchManager.runFailedCommitReleaseSelfTest()
+            && KillSwitchManager.runFailedBarrierSelectiveReleaseSelfTest()
+            && KillSwitchManager.runFailedBarrierUnreleasedSelfTest()
+            && SocketServer.runOrphanedBootstrapSelectiveReleaseSelfTest()
+            && KillSwitchManager.runUnprovenHealthSelfTest()
+            && emergencyReleaseDespiteUnreadableLedger(strictKillSwitchEnabled: false)
+            && !emergencyReleaseDespiteUnreadableLedger(strictKillSwitchEnabled: true)
+            && SelectiveFailOpen.runSelfTests()
             ? 0 : 1
     )
 }
@@ -1443,13 +1806,11 @@ if CommandLine.arguments.dropFirst() == ["--emergency-reset"] {
     exit(runEmergencyReset() ? 0 : 1)
 }
 do {
-    // Executor recovery must precede CoreManager's stale-child cleanup and
-    // normal PF restoration. The independent job owns a consumed replacement.
-    // startup() installs the corrupt-ledger emergency barrier itself, only
-    // where Kill Switch intent is saved (BRICK-M1), and also returns a clean
-    // stop when the executor's own bootout interrupts this daemon behind the
-    // update lock — in that window the executor owns the flow and no PF
-    // action is ours to take.
+    // Executor recovery must precede CoreManager's stale-child cleanup.
+    // startup() does not install a PF block, including when the ledger is
+    // corrupt (BRICK-M1). It returns a clean stop when the executor's own
+    // bootout interrupts this daemon behind the update lock — in that window
+    // the executor owns the flow and no PF action is ours to take.
     if try UpdateExecutor.startup() { exit(0) }
     if releaseIfTonoWasRemoved() { exit(0) }
 } catch {

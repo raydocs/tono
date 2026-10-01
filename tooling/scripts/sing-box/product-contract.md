@@ -90,7 +90,7 @@ after all platform callers have migrated; this PR does not break main callers.
 |---|---|
 | Reality TCP | `vless`, TLS Reality + explicit uTLS chrome, optional vision; re-admit all nodes |
 | HY2 without pin | upstream can parse CA-only TLS, but Tono admission requires DER pin; **not a product-supported path** |
-| HY2 DER pin only | **refuse** `TONO_SINGBOX_UNSUPPORTED_CERTIFICATE_PIN` (Swift: `TONO_SINGBOX_HY2_DER_PIN_UNSUPPORTED`, node unavailable); never map DER to SPKI |
+| HY2 DER pin only | Rust emitter maps the admitted 64-hex leaf DER pin to `tls.certificate_sha256` (standard base64 of those 32 bytes). A pin that is not 32 bytes refuses `TONO_SINGBOX_UNSUPPORTED_CERTIFICATE_PIN`. Never emit `insecure`, never drop the pin, never substitute `certificate_public_key_sha256`. Swift still refuses DER-only (`TONO_SINGBOX_HY2_DER_PIN_UNSUPPORTED`) until a separate macOS change. The Windows Service does not run this JSON yet |
 | HY2 DER + published SPKI pin | Swift (macOS): catalog `certificate-public-key-sha256` → `tls: {enabled, server_name: <sni>, certificate_public_key_sha256: [<pin>]}`; never `insecure`. Rust emitter does not consume it yet (Windows ships mihomo on the DER pin) |
 | DIRECT exact | logical AND: network, domain, IP /32, port; concrete `direct` outbound with `bind_interface` |
 | DIRECT native | signature-admitted anchored `process_path_regex` AND reviewed TCP ports; no name-only TCP escape |
@@ -100,8 +100,8 @@ after all platform callers have migrated; this PR does not break main callers.
 | homeProxy | fixed home outbound selection before DIRECT; home endpoint joins proxy tuples |
 | homeSocks5 | `socks` version 5, credentials, `detour: Tono-Exit`; home server NOT a physical permit |
 | home precedence | SOCKS wins over homeProxy as existing catalog contract; domain/CIDR/process/path TCP rules precede DIRECT |
-| DNS | AAAA empty NOERROR, pinned A, fake A, proxied DoH; single resolver, no redundancy claim |
-| TUN | utun199/Tono; 198.18.0.1/30, DNS 198.18.0.2, fake 198.19.0.0/16; no `stack`; core DNS disabled |
+| DNS | AAAA empty NOERROR, pinned A, fake A with `rewrite_ttl` 30; primary DoH then, only when that answer is not NOERROR, backup DoH. Both are `https` through `Tono-Exit` with `alpn: h2`. No udp, tcp, or local DNS. `final` stays `Tono-DoH` |
+| TUN | utun199/Tono; 198.18.0.1/30, DNS 198.18.0.2; Windows sing-box template fake `198.18.16.0/20` (inside the probe's 198.18/16, outside the TUN /30). Live mihomo YAML stays `198.18.0.1/16`. Frozen M0 reference and the synthetic draft stay on `198.19.0.0/16`. No `stack`; core DNS disabled |
 | control | authenticated loopback Clash API for observation; no PUT configs success assumption or selector change |
 | state | draft → bounded check → protected start → native receipts → Connected; reload is protected stop/start |
 
@@ -109,7 +109,10 @@ Fake-IP and pinned-host A rules are scoped to `inbound: [Tono-TUN, Tono-DNS,
 Tono-Mixed]`. Internal `/dns/query` has no inbound and must reach real DoH, not
 fake-IP or stale pins. `route.default_domain_resolver: Tono-DoH` is mandatory
 when direct/domain outbounds exist; alpha.3 rejects missing resolver without a
-deprecated-feature environment override. Do not set that override.
+deprecated-feature environment override. Do not set that override. That resolver
+dials the primary DoH directly and does not see the backup rule. The backup
+runs only for queries that walk DNS rules and do not already have a NOERROR
+answer. It is not a parallel race, and it is never a plaintext server.
 
 ### macOS policy variant (Swift owner, not Windows DirectPlan)
 

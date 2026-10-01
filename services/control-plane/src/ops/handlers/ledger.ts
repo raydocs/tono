@@ -1,4 +1,5 @@
 import { ApiError } from '../../errors';
+import { sha256 } from '../../crypto';
 import { body, rejectUnexpectedKeys } from '../../request';
 import {
   LEDGER_CATEGORIES,
@@ -150,7 +151,7 @@ export async function getLedger(req: Request, e: Env): Promise<Response> {
   const updatedAt = sliced[0]?.createdAt ?? t;
   return listJson(
     e, req, sliced, nextCursor, updatedAt,
-    weakEtag([month, updatedAt, total]),
+    weakEtag([month, updatedAt, total, await sha256(JSON.stringify({ items: sliced, nextCursor, total }))]),
     assertLedgerEntry, total,
   );
 }
@@ -265,7 +266,8 @@ export async function postLedgerReverse(req: Request, e: Env, rawId: string, act
            AND NOT EXISTS (SELECT 1 FROM ops_month_close WHERE month = ?)`,
       ).bind(reverseId, month, note, actor.email, t, t, entryId, month),
       e.DB.prepare(
-        'UPDATE ops_ledger_entries SET reversed_by = ?, updated_at = ? WHERE id = ? AND reversed_by IS NULL',
+        `UPDATE ops_ledger_entries SET reversed_by = ?, updated_at = ?
+         WHERE id = ? AND reversed_by IS NULL AND changes() = 1`,
       ).bind(reverseId, t, entryId),
     ]);
     if (Number(results[0]?.meta.changes ?? 0) !== 1) {
@@ -320,7 +322,16 @@ export async function postMonthClose(req: Request, e: Env, rawMonth: string, act
   const existing = await e.DB.prepare('SELECT month FROM ops_month_close WHERE month = ?').bind(month).first<Row>();
   if (existing) throw new ApiError(409, 'MONTH_CLOSED', `Month ${month} is already closed`);
   const t = now();
-  const summary = await loadMonthSummary(e.DB, month, t);
+  const entries = (await e.DB.prepare(
+    'SELECT * FROM ops_ledger_entries WHERE month = ? ORDER BY id',
+  ).bind(month).all<Row>()).results ?? [];
+  const summary = await loadMonthSummary(e.DB, month, t, entries);
+  // Amounts are immutable. New entries and subject moves are the ledger writes
+  // that can change these totals or allocations while the summary is loading.
+  const ledgerState = JSON.stringify(entries.map((row) => ({
+    id: String(row.id), subjectType: String(row.subject_type),
+    subjectId: row.subject_id == null ? null : String(row.subject_id),
+  })));
   // The four totals and, beside them, the two halves under them. A month whose
   // snapshot does not fit stores `{ customers: [], nodes: [], partial: true }`
   // and answers `frozenPartial` afterwards — an oversized month is still closed.
@@ -328,13 +339,18 @@ export async function postMonthClose(req: Request, e: Env, rawMonth: string, act
     `INSERT OR IGNORE INTO ops_month_close(
        month, closed_at, closed_by, revenue_cny_minor, cost_cny_minor,
        margin_cny_minor, unreconciled, notes, summary_json
-     ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     ) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?
+     WHERE (
+       SELECT json_group_array(json_object('id', id, 'subjectType', subject_type, 'subjectId', subject_id))
+       FROM (SELECT id, subject_type, subject_id FROM ops_ledger_entries WHERE month = ? ORDER BY id)
+     ) = ?`,
   ).bind(
     month, t, actor.email, summary.revenueCnyMinor, summary.costCnyMinor,
-    summary.marginCnyMinor, summary.unreconciled, notes, encodeMonthSnapshot(summary),
+    summary.marginCnyMinor, summary.unreconciled, notes, encodeMonthSnapshot(summary), month, ledgerState,
   ).run();
   if (Number(inserted.meta.changes ?? 0) !== 1) {
-    throw new ApiError(409, 'MONTH_CLOSED', `Month ${month} is already closed`);
+    await requireOpenMonth(e.DB, month);
+    throw new ApiError(409, 'LEDGER_CHANGED', 'Ledger changed while closing the month; retry the close');
   }
   await auditWrite(e, actor.email, 'month.close', 'month', month, `closed ${month}`);
   const dto = await loadMonthSummary(e.DB, month, t);
@@ -346,14 +362,31 @@ export async function getMonthExport(req: Request, e: Env, rawMonth: string): Pr
   void req;
   const month = parseMonth(decodeName(rawMonth, 'month'));
   let rows: Row[] = [];
+  const zeroPolarities = new Map<string, number>();
   try {
     rows = (await e.DB.prepare(
       `SELECT * FROM ops_ledger_entries WHERE month = ? ORDER BY created_at ASC, id ASC`,
     ).bind(month).all<Row>()).results ?? [];
+    if (rows.some((row) => Number(row.cny_minor) === 0 && Number(row.amount_minor) > 0 && row.reverses != null)) {
+      // Ancestors may belong to earlier months, and legacy reversals used
+      // UUIDs. Follow the immutable links rather than guessing from the id.
+      const ancestry = await e.DB.prepare(
+        `WITH RECURSIVE ancestry(entry_id, reverses, depth) AS (
+           SELECT id, reverses, 0 FROM ops_ledger_entries
+           WHERE month = ? AND cny_minor = 0 AND amount_minor > 0 AND reverses IS NOT NULL
+           UNION ALL
+           SELECT a.entry_id, parent.reverses, a.depth + 1
+           FROM ancestry a JOIN ops_ledger_entries parent ON parent.id = a.reverses
+         ) SELECT entry_id, depth FROM ancestry WHERE reverses IS NULL`,
+      ).bind(month).all<Row>();
+      for (const row of ancestry.results ?? []) {
+        zeroPolarities.set(String(row.entry_id), Number(row.depth) % 2 ? -1 : 1);
+      }
+    }
   } catch (error) {
     if (!missingTable(error)) throw error;
   }
-  const csv = ledgerCsv(rows.map(ledgerDto));
+  const csv = ledgerCsv(rows.map(ledgerDto), zeroPolarities);
   return new Response(new TextEncoder().encode(csv), {
     headers: {
       'content-type': 'text/csv; charset=utf-8',

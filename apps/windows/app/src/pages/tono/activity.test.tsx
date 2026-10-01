@@ -159,6 +159,12 @@ beforeEach(() => {
   ]
 })
 
+it('renders a constructor.exe connection without using inherited process families', () => {
+  connectionDataMock.activeConnections = [connection('constructor')]
+  render(<ActivityPage />)
+  expect(screen.getByText('constructor.exe')).toBeTruthy()
+})
+
 afterEach(cleanup)
 
 describe('Activity connection presentation', () => {
@@ -760,4 +766,20 @@ describe('Activity apps view filters out hidden local DNS', () => {
       screen.getByText('No connections match these filters.'),
     ).toBeDefined()
   })
+})
+
+it('renders an extensionless process whose basename is an inherited translation key', () => {
+  const original = connection('extensionless')
+  connectionDataMock.activeConnections = [
+    {
+      ...original,
+      metadata: {
+        ...original.metadata,
+        process: 'toString',
+        processPath: 'C:\\Tools\\toString',
+      },
+    },
+  ]
+  render(<ActivityPage />)
+  expect(screen.getByText('toString')).toBeDefined()
 })

@@ -242,6 +242,16 @@
         }
       }
     },
+    "Network protection was interrupted by another program. The original network is back while Tono looks for a reachable exit.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "另一个程序中断了网络保护。原来的网络已经恢复，Tono 正在寻找可连接的出口。"
+          }
+        }
+      }
+    },
     "Network protection was interrupted by another program; Kill Switch is blocking traffic while Tono reconnects.": {
       "localizations": {
         "zh-Hans": {
@@ -488,6 +498,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "检查期间账户或连接已变化。请重新检查以获取一致的快照。"
+          }
+        }
+      }
+    },
+    "Another program keeps replacing Tono's network protection. The original network is back. Quit the other VPN or firewall, then connect again.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "另一个程序一直在替换 Tono 的网络保护。原来的网络已经恢复。请退出其他 VPN 或防火墙，然后再连接。"
           }
         }
       }
@@ -4286,6 +4306,16 @@
         }
       }
     },
+    "Protected DNS stopped. Tono released the filter and will reconnect only after a proof.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "受保护的 DNS 已停止。Tono 已放开过滤，只有在证明出口可达之后才会重新连接。"
+          }
+        }
+      }
+    },
     "Protected DNS stopped; Kill Switch is blocking traffic while Tono retries.": {
       "localizations": {
         "zh-Hans": {
@@ -4569,6 +4599,26 @@
           "stringUnit": {
             "state": "translated",
             "value": "正在读取流量…"
+          }
+        }
+      }
+    },
+    "Resets when you disconnect.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "断开后清零。"
+          }
+        }
+      }
+    },
+    "This connection": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "本次连接"
           }
         }
       }
@@ -5143,6 +5193,46 @@
           "stringUnit": {
             "state": "translated",
             "value": "微信安全分流在更新时被中断。断网保护正在阻断流量，Tono 正在重试。"
+          }
+        }
+      }
+    },
+    "Secure app routing could not be applied. Ordinary internet stays open and AI services stay blocked.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "安全应用分流未能应用。普通互联网保持可用，AI 服务仍被拦截。"
+          }
+        }
+      }
+    },
+    "Secure app routing could not be applied. Strict mode is still blocking traffic while Tono retries.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "安全应用分流未能应用。严格模式仍在拦截流量，Tono 正在重试。"
+          }
+        }
+      }
+    },
+    "Secure app routing could not be applied. This Mac is back on its normal internet.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "安全应用分流未能应用。这台 Mac 已回到原来的网络。"
+          }
+        }
+      }
+    },
+    "Secure app routing was updated. Tono is applying it on this connection.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "安全应用分流已更新。Tono 正在这条连接上应用它。"
           }
         }
       }
@@ -6089,6 +6179,16 @@
         }
       }
     },
+    "The cloud server switch failed. This Mac is back on its normal internet.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "切换云端节点失败。这台 Mac 已回到原来的网络。"
+          }
+        }
+      }
+    },
     "The cloud servers no longer match what Tono last verified. Connect again when Tono is reachable.": {
       "localizations": {
         "zh-Hans": {
@@ -6105,6 +6205,26 @@
           "stringUnit": {
             "state": "translated",
             "value": "连接尝试长时间无进展，已停止。"
+          }
+        }
+      }
+    },
+    "The connection didn't complete. Support code CORE_EXIT_UNREACHABLE.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "连接没有完成。支持码 CORE_EXIT_UNREACHABLE。"
+          }
+        }
+      }
+    },
+    "The connection didn't complete. Support code TONO_CONNECT_TUN.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "连接没有完成。支持码 TONO_CONNECT_TUN。"
           }
         }
       }
@@ -6239,6 +6359,46 @@
         }
       }
     },
+    "The selected cloud server was removed. Ordinary internet stays open and AI services stay blocked. Choose another cloud server.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "所选云端节点已被移除。普通互联网保持可用，AI 服务仍被拦截。请另选一个云端节点。"
+          }
+        }
+      }
+    },
+    "The selected cloud server was removed. Strict mode is still blocking traffic. Choose another cloud server.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "所选云端节点已被移除。严格模式仍在拦截流量。请另选一个云端节点。"
+          }
+        }
+      }
+    },
+    "The selected cloud server was removed. This Mac is back on its normal internet. Choose another cloud server.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "所选云端节点已被移除。这台 Mac 已回到原来的网络。请另选一个云端节点。"
+          }
+        }
+      }
+    },
+    "The selected cloud server was removed. Tono switched to another cloud server and kept this connection.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "所选云端节点已被移除。Tono 已改用另一个云端节点，并保持了这次连接。"
+          }
+        }
+      }
+    },
     "The selected cloud server was removed. Tono switched to the managed default cloud server.": {
       "localizations": {
         "zh-Hans": {
@@ -6277,6 +6437,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "主题模式"
+          }
+        }
+      }
+    },
+    "This needs your action, so Tono will not reconnect by itself. The original network is back.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "这需要你来处理，Tono 不会自行重连。原来的网络已经恢复。"
           }
         }
       }
@@ -6361,12 +6531,12 @@
         }
       }
     },
-    "The network service whose DNS settings Tono saved has been deleted, so those DNS servers could not be put back. DNS is now obtained automatically. If your network needs manual DNS servers, set them again in System Settings > Network.": {
+    "Tono did not restore the saved DNS settings because the network service was removed or its DNS settings changed. Any newer DNS settings were kept. Check System Settings > Network if DNS needs adjustment.": {
       "localizations": {
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "Tono 保存的 DNS 设置所属的网络服务已被删除，原来的 DNS 服务器无法写回，现已改为自动获取 DNS。如果该网络需要手动填写 DNS 服务器，请在系统设置 > 网络中重新设置。"
+            "value": "网络服务已被移除，或其 DNS 设置已更改，因此 Tono 未恢复保存的 DNS 设置。较新的 DNS 设置已保留。如需调整 DNS，请检查系统设置 > 网络。"
           }
         }
       }
@@ -6377,6 +6547,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "更新未完成，请手动断开后重装"
+          }
+        }
+      }
+    },
+    "The UDP backup path went idle and the home router likely dropped it. Tono stays on this same route and retries. Support code TONO_CONNECT_HY2_IDLE. Send diagnostics if it keeps happening.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "备用 UDP 通道空闲后断了，多半是家里的路由器清掉了闲置连接。Tono 会留在同一条线路上重试。支持码 TONO_CONNECT_HY2_IDLE。如果反复出现，请发诊断。"
           }
         }
       }
@@ -8173,6 +8353,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "这台 Mac 在 Tono 连接期间意外重启，所以 Tono 没有自动重新连接。断网保护仍在拦住直连。点按「修复并重新连接」来连接，或点按「恢复正常网络」恢复上网。"
+          }
+        }
+      }
+    },
+    "Tono could not save its restart safety record, so the connection was not started. Check available disk space and retry. %@": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tono 无法保存重启安全记录，因此没有启动连接。请检查可用磁盘空间后重试。%@"
           }
         }
       }

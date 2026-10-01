@@ -9,14 +9,21 @@ use tono_plugin_core::{MihomoExt as _, models::Protocol};
 
 use crate::core::service;
 use crate::process::AsyncHandler;
+
+tokio::task_local! {
+    /// Policy rebuilds keep the existing protected reconnect. Health failures do not.
+    static POLICY_REBUILD: ();
+}
 use crate::tono::{
     audit::{self, AuditEvent},
     bootstrap, commands, signed_apps,
     connection_health::{
-        CoreSample, HealthLegs, NetworkChangeOutcome, classify_core_sample, connection_loop_continues,
-        core_change_fires, health_threshold_reached, kill_switch_unhealthy_for_monitor,
-        may_recover_in_place, monitor_requires_reconnect, owned_direct_reload_in_flight,
-        network_event_fires, protected_dns_unhealthy,
+        CoreSample, HealthLegs, NetworkChangeOutcome, NetworkEventProbeEffect, NetworkEventProbePlan,
+        apply_network_event_probe,         classify_core_sample, commit_core_baseline, connection_loop_continues, core_change_fires,
+        health_threshold_reached, kill_switch_unhealthy_for_monitor, may_recover_in_place,
+        monitor_requires_reconnect, network_event_fires, next_network_events_counter,
+        owned_direct_reload_in_flight,
+        plan_network_event_probe, protected_dns_unhealthy,
     },
     connection_plan::{guard_rejection_is_transient, reconnect_allowed},
     state::{TonoInner, TonoState},
@@ -113,6 +120,36 @@ fn sample_commit_is_current(expected: (u64, u64), current: (u64, u64), connected
     connected && expected == current
 }
 
+/// Which kill-switch reading the health monitor may publish after it has awaited DNS and the
+/// data-plane probe. The captured aggregate is already stale if a lifecycle operation started
+/// or finished in that gap (`snapshot_generation` moves), or if this connect generation ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CapturedKillSwitchPublish {
+    /// The Service aggregate did not move. The captured reading is still current.
+    Captured,
+    /// A newer aggregate exists. Publish that one.
+    Fresh,
+    /// The session ended, or the second read failed. Leave the app's last reading in place.
+    Skip,
+}
+
+fn captured_kill_switch_publish(
+    captured_snapshot_generation: u64,
+    fresh_snapshot_generation: Option<u64>,
+    captured_connect_generation: u64,
+    connect_generation_now: u64,
+    still_connected: bool,
+) -> CapturedKillSwitchPublish {
+    if !still_connected || connect_generation_now != captured_connect_generation {
+        return CapturedKillSwitchPublish::Skip;
+    }
+    match fresh_snapshot_generation {
+        Some(fresh) if fresh == captured_snapshot_generation => CapturedKillSwitchPublish::Captured,
+        Some(_) => CapturedKillSwitchPublish::Fresh,
+        None => CapturedKillSwitchPublish::Skip,
+    }
+}
+
 #[cfg(test)]
 mod sample_commit_tests {
     #[test]
@@ -121,6 +158,32 @@ mod sample_commit_tests {
         assert!(super::sample_commit_is_current(started, started, true));
         // In-place controller replacement need not change the connect generation.
         assert!(!super::sample_commit_is_current(started, (7, 13), true));
+    }
+
+    #[test]
+    fn a_stale_kill_switch_aggregate_is_not_published_after_the_service_moves() {
+        use super::CapturedKillSwitchPublish;
+        assert_eq!(
+            super::captured_kill_switch_publish(4, Some(4), 7, 7, true),
+            CapturedKillSwitchPublish::Captured
+        );
+        assert_eq!(
+            super::captured_kill_switch_publish(4, Some(5), 7, 7, true),
+            CapturedKillSwitchPublish::Fresh,
+            "a DIRECT reload that finishes during the probe must win over the earlier Locked reading"
+        );
+        assert_eq!(
+            super::captured_kill_switch_publish(4, None, 7, 7, true),
+            CapturedKillSwitchPublish::Skip
+        );
+        assert_eq!(
+            super::captured_kill_switch_publish(4, Some(4), 7, 8, true),
+            CapturedKillSwitchPublish::Skip
+        );
+        assert_eq!(
+            super::captured_kill_switch_publish(4, Some(5), 7, 7, false),
+            CapturedKillSwitchPublish::Skip
+        );
     }
 }
 
@@ -280,7 +343,6 @@ pub(super) async fn spawn_control_plane_pin_refresh(
         let mut wechat_interval = tokio::time::interval(WECHAT_PATH_REFRESH_INTERVAL);
         wechat_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         let mut skip_first_wechat = true;
-        let mut watching_wechat = true;
         let mut browser_dns_interval = tokio::time::interval_at(
             tokio::time::Instant::now() + BROWSER_DNS_RECHECK_INTERVAL,
             BROWSER_DNS_RECHECK_INTERVAL,
@@ -330,20 +392,22 @@ pub(super) async fn spawn_control_plane_pin_refresh(
                         }
                     }
                 }
-                _ = wechat_interval.tick(), if watching_wechat => {
+                _ = wechat_interval.tick() => {
                     if skip_first_wechat {
                         skip_first_wechat = false;
                         continue;
                     }
                     if signed_wechat_paths_require_reconnect(&task_state, generation).await {
-                        if !connection_loop_continues(handle_network_change(&task_state, &task_app).await) {
+                        // Only a real protected reconnect re-applies the signed path set, so
+                        // in-place recovery is not allowed here: a healthy TUN would otherwise
+                        // keep the old paths for the whole session. Without in-place recovery
+                        // the outcome is always Handled, and the new generation's task takes
+                        // over watching.
+                        if !connection_loop_continues(
+                            handle_network_change_inner(&task_state, &task_app, false).await,
+                        ) {
                             return;
                         }
-                        // Recovered in place: no reconnect ran, so the applied path set cannot
-                        // change for the rest of this session and this leg would report the same
-                        // difference every two minutes. Retire the leg, not the task — the pin
-                        // refresh and the direct sampling keep running.
-                        watching_wechat = false;
                     }
                 }
             }
@@ -450,6 +514,16 @@ pub(super) fn spawn_exit_identity_lookup(state: &Arc<TonoState>, app: &AppHandle
     let state = Arc::clone(state);
     let app = app.clone();
     AsyncHandler::spawn(move || async move {
+        let measured_node = {
+            let inner = state.lock().await;
+            if inner.connect_generation != generation || !inner.fsm.status().is_connected {
+                return;
+            }
+            let Some(node) = inner.selected_node.clone() else {
+                return;
+            };
+            node
+        };
         let Ok(client) = reqwest::Client::builder()
             .no_proxy()
             .redirect(reqwest::redirect::Policy::none())
@@ -501,9 +575,14 @@ pub(super) fn spawn_exit_identity_lookup(state: &Arc<TonoState>, app: &AppHandle
         if inner.connect_generation != generation || !inner.fsm.status().is_connected {
             return;
         }
-        inner.exit_ip = Some(ip.to_string());
-        inner.exit_org = (!org.is_empty()).then(|| org.to_string());
-        inner.exit_location = location;
+        if !inner.commit_exit_identity(
+            &measured_node,
+            ip.to_string(),
+            (!org.is_empty()).then(|| org.to_string()),
+            location,
+        ) {
+            return;
+        }
         commands::emit_status(&app, &commands::status_of(&inner));
     });
 }
@@ -628,6 +707,10 @@ async fn protection_resync_loop(state: Arc<TonoState>, app: AppHandle) {
         let previous_kill_switch = inner.kill_switch.clone();
         let previous_status = inner.fsm.status().clone();
         let service_disarmed = matches!(&kill_switch, Some(status) if !status.wanted);
+        let reconnect_after_release = kill_switch
+            .as_ref()
+            .is_some_and(|status| status.reconnect_after_release);
+        let disconnecting = inner.fsm.status().is_disconnecting;
         commands::quit::apply_service_kill_switch(&mut inner, kill_switch);
         if service_disarmed {
             logging!(
@@ -639,7 +722,31 @@ async fn protection_resync_loop(state: Arc<TonoState>, app: AppHandle) {
         if inner.kill_switch != previous_kill_switch || inner.fsm.status() != &previous_status {
             commands::emit_status(&app, &commands::status_of(&inner));
         }
+        let reconnect = service_disarmed
+            && super::reconnect::crash_recovery_reconnect_allowed(
+                reconnect_after_release,
+                matches!(inner.account_state, crate::tono::state::AccountState::Ready),
+                inner.selected_node.is_some(),
+                inner.catalog_requires_choice,
+                disconnecting,
+            );
         if service_disarmed {
+            drop(inner);
+            if reconnect {
+                let state = state.clone();
+                let app = app.clone();
+                AsyncHandler::spawn(move || async move {
+                    if let Err(error) =
+                        super::connect_for_generation(state, app, Some(generation)).await
+                    {
+                        logging!(
+                            warn,
+                            Type::Service,
+                            "Tono: 崩溃恢复放行后的后台重连未完成: {error}"
+                        );
+                    }
+                });
+            }
             return;
         }
     }
@@ -694,6 +801,7 @@ mod protection_resync_tests {
             endpoints: Vec::new(),
             direct_endpoint_digest: String::new(),
             last_error: None,
+            reconnect_after_release: false,
         };
         let mut inner = state.lock().await;
         crate::tono::commands::quit::apply_service_kill_switch(&mut inner, Some(service_disarmed));
@@ -754,20 +862,26 @@ pub(super) async fn network_monitor_loop(state: Arc<TonoState>, app: AppHandle) 
     // proof is a proof whichever path paid for it, and reusing it inside
     // [`NETWORK_EVENT_PROBE_COOLDOWN`] is what keeps the hold from probing every other tick.
     let mut last_event_probe_ok: Option<std::time::Instant> = None;
+    // Failed network-event proofs that have not yet been confirmed. One failure
+    // keeps the core up; the next tick probes again even if Windows is quiet.
+    let mut pending_event_probe_failures: u32 = 0;
     // The last recovered-in-place verdict, so a leg that stays failed while the tunnel keeps
     // working re-proves the data plane at the exit-probe cadence rather than every two ticks.
     let mut last_in_place_recovery: Option<std::time::Instant> = None;
     loop {
         interval.tick().await;
-        let owned_direct_reload = {
+        let (owned_direct_reload, captured_connect_generation) = {
             let inner = state.lock().await;
             if !inner.fsm.status().is_connected {
                 return;
             }
-            owned_direct_reload_in_flight(
-                inner.direct_reload_until,
+            (
+                owned_direct_reload_in_flight(
+                    inner.direct_reload_until,
+                    inner.connect_generation,
+                    std::time::Instant::now(),
+                ),
                 inner.connect_generation,
-                std::time::Instant::now(),
             )
         };
         let snapshot = match service::tono_service_status_snapshot().await {
@@ -842,13 +956,38 @@ pub(super) async fn network_monitor_loop(state: Arc<TonoState>, app: AppHandle) 
         let health_invalid = legs.invalid();
         let protection_invalid = legs.protection_invalid();
 
+        // The health legs above already consumed the snapshot from the start of this tick.
+        // Publishing that same aggregate after the DNS read and the data-plane probe would
+        // overwrite a kill switch the Service has since replaced (a DIRECT reload moves to
+        // Blocked while this task is still in the probe). Read the generation again and
+        // publish only a reading that is still current.
+        let fresh_kill_switch = match service::tono_service_status_snapshot().await {
+            Ok(fresh) => Some((fresh.snapshot_generation, fresh.kill_switch)),
+            Err(_) => None,
+        };
+
         let (invalidate, network_changed, core_changed, service_events) = {
             let mut inner = state.lock().await;
 
-            // L3: surface kill switch changes as they are observed.
-            let kill_switch_changed = snapshot.kill_switch.is_some() && inner.kill_switch != snapshot.kill_switch;
-            if let Some(kill_switch) = &snapshot.kill_switch {
-                inner.kill_switch = Some(kill_switch.clone());
+            let publish = captured_kill_switch_publish(
+                snapshot.snapshot_generation,
+                fresh_kill_switch.as_ref().map(|(generation, _)| *generation),
+                captured_connect_generation,
+                inner.connect_generation,
+                inner.fsm.status().is_connected,
+            );
+            let published = match publish {
+                CapturedKillSwitchPublish::Captured => snapshot.kill_switch.clone(),
+                CapturedKillSwitchPublish::Fresh => {
+                    fresh_kill_switch.as_ref().and_then(|(_, status)| status.clone())
+                }
+                CapturedKillSwitchPublish::Skip => None,
+            };
+            // L3: surface kill switch changes as they are observed. A skipped publish leaves
+            // the previous reading; it does not clear a barrier the Service still holds.
+            let kill_switch_changed = published.is_some() && inner.kill_switch != published;
+            if let Some(kill_switch) = published {
+                inner.kill_switch = Some(kill_switch);
             }
 
             // The first sample seeds every leg without firing (unchanged
@@ -857,7 +996,6 @@ pub(super) async fn network_monitor_loop(state: Arc<TonoState>, app: AppHandle) 
             let first_sample = inner.network_events_counter.is_none();
             let counter = snapshot.network_events.counter;
             let network_changed = !first_sample && inner.network_events_counter != Some(counter);
-            inner.network_events_counter = Some(counter);
 
             // M4: a core crash/restart shows up as a new pid or a bumped restart counter; the
             // TUN LUID is re-resolved by the fresh transaction's lock phase.
@@ -880,17 +1018,27 @@ pub(super) async fn network_monitor_loop(state: Arc<TonoState>, app: AppHandle) 
                 0
             };
             let core_changed = !first_sample && core_change_fires(sample, missing_core_samples);
-            if sample != CoreSample::Missing || core_changed {
-                inner.last_core_pid = snapshot.core_pid;
-                inner.last_restart_count = Some(snapshot.restart_count);
-            }
 
-            // P0-13: merge event bursts — only the first change inside the
-            // debounce window invalidates Connected.
+            // P0-13: the first change inside the window invalidates Connected.
+            // A later change in that window stays pending. Consuming the
+            // counter or the core baseline here would make the next tick look
+            // quiet, so the event would be lost instead of retried.
             let invalidated = network_event_fires(
                 network_changed || core_changed,
                 inner.last_network_event_at.map(|at| at.elapsed()),
             );
+            inner.network_events_counter = next_network_events_counter(
+                inner.network_events_counter,
+                counter,
+                first_sample,
+                invalidated,
+            );
+            if (sample != CoreSample::Missing || core_changed)
+                && commit_core_baseline(first_sample, core_changed, invalidated)
+            {
+                inner.last_core_pid = snapshot.core_pid;
+                inner.last_restart_count = Some(snapshot.restart_count);
+            }
             if invalidated {
                 inner.last_network_event_at = Some(std::time::Instant::now());
             }
@@ -900,7 +1048,7 @@ pub(super) async fn network_monitor_loop(state: Arc<TonoState>, app: AppHandle) 
                 commands::emit_status(&app, &commands::status_of(&inner));
             }
             let mut events: Vec<AuditEvent> = Vec::new();
-            if kill_switch_changed && let Some(kill_switch) = &snapshot.kill_switch {
+            if kill_switch_changed && let Some(kill_switch) = inner.kill_switch.as_ref() {
                 events.push(AuditEvent::KillSwitchSnapshot {
                     wanted: kill_switch.wanted,
                     live: kill_switch.live,
@@ -928,30 +1076,31 @@ pub(super) async fn network_monitor_loop(state: Arc<TonoState>, app: AppHandle) 
         // asynchronously. A callback can therefore land after the Service write window and
         // after this monitor seeded its counter, producing the old connectOk -> networkChange ->
         // reconnect loop. Do not trust the event either way: under the still-locked barrier,
-        // repeat the same multi-origin HTTPS proof that admitted Connected. Success proves the
-        // current tunnel still carries user traffic; failure corroborates the event and keeps the
-        // existing fail-closed reconnect. Core identity and health failures remain unconditional.
-        let event_probe_failed = if invalidate && network_changed && !core_changed && !health_invalid && !owned_direct_reload {
-            let recently_proven = last_event_probe_ok
-                .is_some_and(|at| at.elapsed() < NETWORK_EVENT_PROBE_COOLDOWN);
-            if recently_proven {
+        // repeat the same multi-origin HTTPS proof that admitted Connected. One failure is a
+        // blip — the core stays up and the next tick confirms. A second failure rebuilds.
+        // Core identity and health failures remain unconditional.
+        let recent_proof = last_event_probe_ok
+            .is_some_and(|at| at.elapsed() < NETWORK_EVENT_PROBE_COOLDOWN);
+        let plan = plan_network_event_probe(
+            invalidate,
+            network_changed,
+            core_changed,
+            health_invalid,
+            owned_direct_reload,
+            pending_event_probe_failures,
+            recent_proof,
+        );
+        let probed = match plan {
+            NetworkEventProbePlan::Probe => Some(periodic_data_plane_probe_failed(&state).await),
+            NetworkEventProbePlan::ReuseRecentProof => {
                 logging!(
                     info,
                     Type::Service,
                     "Tono: another Windows network change inside the proof window; reusing the last data-plane proof instead of probing again"
                 );
-                false
-            } else {
-                let failed = periodic_data_plane_probe_failed(&state).await;
-                last_event_probe_ok = if failed {
-                    None
-                } else {
-                    Some(std::time::Instant::now())
-                };
-                failed
+                None
             }
-        } else {
-            false
+            NetworkEventProbePlan::Idle => None,
         };
         // A reload can start while the HTTPS request is awaiting its result. Re-read its
         // bounded owner marker before treating that expected blocked probe as a dead tunnel.
@@ -959,17 +1108,48 @@ pub(super) async fn network_monitor_loop(state: Arc<TonoState>, app: AppHandle) 
             let inner = state.lock().await;
             owned_direct_reload_in_flight(inner.direct_reload_until, inner.connect_generation, std::time::Instant::now())
         };
-        let keeps_in_place =
-            invalidate && network_changed && !core_changed && !health_invalid && !event_probe_failed && !owned_direct_reload;
-        // X2-1: the proof above covers the tunnel only. A DIRECT overlay bound to an adapter
-        // that no longer carries a default route needs the protected rebuild, not "keep".
-        if keeps_in_place && !may_keep_session_in_place(&state, true).await {
+        let discard_expected_block = owned_direct_reload && probed == Some(true);
+        let (effect, next_pending) = if discard_expected_block {
+            (NetworkEventProbeEffect::Unchanged, pending_event_probe_failures)
+        } else {
+            if matches!(plan, NetworkEventProbePlan::Probe) {
+                last_event_probe_ok = match probed {
+                    Some(true) => None,
+                    Some(false) => Some(std::time::Instant::now()),
+                    None => last_event_probe_ok,
+                };
+            }
+            apply_network_event_probe(plan, probed.unwrap_or(false), pending_event_probe_failures)
+        };
+        pending_event_probe_failures = next_pending;
+        if effect == NetworkEventProbeEffect::Hold {
+            logging!(
+                info,
+                Type::Service,
+                "Tono: network-change probe failed once; keeping the tunnel until the next tick confirms it"
+            );
+        }
+        if effect == NetworkEventProbeEffect::Rebuild {
+            if !connection_loop_continues(handle_network_change_inner(&state, &app, true).await) {
+                return;
+            }
+            last_in_place_recovery = Some(std::time::Instant::now());
+            legs = HealthLegs::default();
+            pending_event_probe_failures = 0;
+            continue;
+        }
+        // X2-1: a proven tunnel still has to drop a DIRECT overlay whose adapter
+        // no longer carries a default route. A held blip has not proven the tunnel.
+        if effect == NetworkEventProbeEffect::Proven && !may_keep_session_in_place(&state, true).await {
             if !connection_loop_continues(handle_network_change_inner(&state, &app, false).await) {
                 return;
             }
+            last_in_place_recovery = Some(std::time::Instant::now());
+            legs = HealthLegs::default();
+            pending_event_probe_failures = 0;
             continue;
         }
-        if keeps_in_place {
+        if effect == NetworkEventProbeEffect::Proven {
             logging!(
                 info,
                 Type::Service,
@@ -979,7 +1159,9 @@ pub(super) async fn network_monitor_loop(state: Arc<TonoState>, app: AppHandle) 
             let generation = state.lock().await.connect_generation;
             let _ = refresh_control_plane_pins_once(&state, generation).await;
         }
-        if monitor_requires_reconnect(invalidate, core_changed, health_invalid, event_probe_failed, owned_direct_reload) {
+        // Probe failure is decided above. Passing false here keeps a single blip from
+        // taking the old immediate-rebuild path. Core identity and protection legs still fire.
+        if monitor_requires_reconnect(invalidate, core_changed, health_invalid, false, owned_direct_reload) {
             // A Service transport outage may reuse a recent proof in the branch
             // above. A successful Service snapshot that explicitly says WFP or
             // protected DNS is broken may not: HTTPS can still work while the
@@ -995,6 +1177,7 @@ pub(super) async fn network_monitor_loop(state: Arc<TonoState>, app: AppHandle) 
             // legs against the fresh TUN proof rather than leaving the counters that fired.
             last_in_place_recovery = Some(std::time::Instant::now());
             legs = HealthLegs::default();
+            pending_event_probe_failures = 0;
         }
     }
 }
@@ -1044,7 +1227,12 @@ pub(crate) async fn handle_policy_behavior_change(
             PolicyChangeDisposition::Ignore => return NetworkChangeOutcome::Handled,
         }
     }
-    handle_network_change_inner(state, app, policy_behavior_change_allows_in_place_recovery()).await
+    POLICY_REBUILD
+        .scope(
+            (),
+            handle_network_change_inner(state, app, policy_behavior_change_allows_in_place_recovery()),
+        )
+        .await
 }
 
 /// What a traffic-policy behavior change should do when it arrives, given the
@@ -1116,6 +1304,22 @@ pub(crate) const fn policy_behavior_change_allows_in_place_recovery() -> bool {
     false
 }
 
+/// Automatic health recovery releases general traffic with the secondary AI hold.
+/// Strict protection and policy rebuilds keep their existing protected recovery path.
+async fn release_after_health_failure<F>(
+    strict: bool,
+    policy_rebuild: bool,
+    release: impl FnOnce(bool) -> F,
+) -> Option<Result<(), String>>
+where
+    F: std::future::Future<Output = Result<(), String>>,
+{
+    if !tono_core::unarmed_probe::health_monitor_releases(strict, policy_rebuild) {
+        return None;
+    }
+    Some(release(true).await)
+}
+
 /// X2-1: apply [`may_recover_in_place`] to the live session. The uplinks are read only when a
 /// DIRECT overlay is committed, so a full-tunnel session pays nothing for it.
 async fn may_keep_session_in_place(state: &Arc<TonoState>, tunnel_proven: bool) -> bool {
@@ -1140,6 +1344,55 @@ async fn may_keep_session_in_place(state: &Arc<TonoState>, tunnel_proven: bool) 
     keep
 }
 
+/// Serialize failure admission with selection/switch completion before transferring lifecycle
+/// ownership to release. A hot switch deliberately keeps the connection generation.
+async fn admit_health_release(
+    state: &Arc<TonoState>,
+    generation: u64,
+    selected_node: Option<&str>,
+    switch_task: Option<tokio::task::Id>,
+    check_switch_task: bool,
+) -> Result<(
+    tokio::sync::OwnedRwLockReadGuard<()>,
+    tokio::sync::OwnedRwLockWriteGuard<()>,
+), NetworkChangeOutcome> {
+    let selection = state.begin_policy_activation().await;
+    let lifecycle = state.begin_privileged_release().await;
+    let mut inner = state.lock().await;
+    if inner.connect_generation != generation || !inner.fsm.status().is_connected {
+        return Err(NetworkChangeOutcome::Handled);
+    }
+    if inner.selected_node.as_deref() != selected_node {
+        // The runtime and its monitor still belong to this generation. Discard the old exit's
+        // failure and let the next monitor tick observe the replacement instead of exiting.
+        return Err(NetworkChangeOutcome::RecoveredInPlace);
+    }
+    // Finished switch handles stay registered until replacement, so even A → B → A or a
+    // proved rollback invalidates the old request without changing the connection generation.
+    if check_switch_task && inner.tasks.switch.as_ref().map(|task| task.inner().id()) != switch_task {
+        return Err(NetworkChangeOutcome::RecoveredInPlace);
+    }
+    inner.tasks.abort_reconnect();
+    Ok((selection, lifecycle))
+}
+
+fn capture_health_context(
+    inner: &TonoInner, allow_in_place: bool,
+) -> Result<(u64, Option<String>, Option<tokio::task::Id>), NetworkChangeOutcome> {
+    let status = inner.fsm.status();
+    if !status.is_connected || status.is_disconnecting {
+        return Err(NetworkChangeOutcome::Handled);
+    }
+    // Selection is published before the switch moves the live selector. Its own proof owns
+    // that transition; an old-runtime health request must not be labelled with the new exit.
+    // Forced protection/policy recovery has separate evidence and retains its authority.
+    if allow_in_place && inner.tasks.switch.as_ref().is_some_and(|task| !task.inner().is_finished()) {
+        return Err(NetworkChangeOutcome::RecoveredInPlace);
+    }
+    Ok((inner.connect_generation, inner.selected_node.clone(),
+        inner.tasks.switch.as_ref().map(|task| task.inner().id())))
+}
+
 pub(super) async fn handle_network_change_inner(
     state: &Arc<TonoState>,
     app: &AppHandle,
@@ -1156,18 +1409,12 @@ pub(super) async fn handle_network_change_inner(
     // walk into `attempt` and silently re-arm WFP and restart the core with no user action.
     // The netmon caller was protected only by accident, by `abort_network_monitor()` landing at
     // its next await; now both are protected on purpose.
-    let generation = {
-        let mut inner = state.lock().await;
-        // `is_disconnecting` is redundant now that `begin_disconnect` clears
-        // `is_connected`, and it is written out anyway: this guard is the one
-        // that has to say "not while a release is in flight" out loud, because
-        // the generation captured below is the disconnect's own once one has
-        // started, and the exit guard then compares a value to itself.
-        let status = inner.fsm.status();
-        if !status.is_connected || status.is_disconnecting {
-            return NetworkChangeOutcome::Handled;
+    let (generation, selected_node, switch_task) = {
+        let inner = state.lock().await;
+        match capture_health_context(&inner, allow_in_place) {
+            Ok(context) => context,
+            Err(outcome) => return outcome,
         }
-        inner.connect_generation
     };
     // Prefer an in-place proof while the core is still the same process.
     // Sleep/Wi-Fi flaps used to stop the core unconditionally, then burn the
@@ -1184,6 +1431,48 @@ pub(super) async fn handle_network_change_inner(
             "Tono: network change recovered in place; core was not restarted"
         );
         return NetworkChangeOutcome::RecoveredInPlace;
+    }
+    // In-place proof failed. Ordinary health loss uses the shared disposition:
+    // release the barrier and probe without a tunnel. A policy rebuild and an
+    // explicit strict kill switch keep the protected reconnect below.
+    let policy_rebuild = POLICY_REBUILD.try_with(|_| ()).is_ok();
+    let strict = tono_core::strict_kill_switch_explicit(None);
+    let health_guard = if tono_core::unarmed_probe::health_monitor_releases(strict, policy_rebuild) {
+        match admit_health_release(state, generation, selected_node.as_deref(), switch_task, allow_in_place).await {
+            Ok(guards) => Some(guards),
+            Err(outcome) => return outcome,
+        }
+    } else {
+        None
+    };
+    let health_release = release_after_health_failure(strict, policy_rebuild, |apply_narrow| async move {
+        let (_selection, lifecycle) = health_guard.expect("ordinary health release owns admission");
+        logging!(
+            warn,
+            Type::Service,
+            "Tono: health failure is restoring the original network with the secondary AI hold"
+        );
+        if apply_narrow {
+            super::disconnect::release_explicit_applying_narrow_with_guard(state, app, Some(lifecycle)).await
+        } else {
+            super::disconnect::release_explicit_with_guard(state, app, Some(lifecycle)).await
+        }
+    }).await;
+    if let Some(result) = health_release {
+        match result {
+            Ok(()) => {
+                let generation = state.lock().await.connect_generation;
+                super::unarmed_probe::spawn_after_release(state, app, generation);
+            }
+            Err(error) => {
+                logging!(
+                    error,
+                    Type::Service,
+                    "Tono: health-failure release failed; not starting a tunnel: {error}"
+                );
+            }
+        }
+        return NetworkChangeOutcome::Handled;
     }
     // The exclusive release guard also excludes StartClash/DNS readers, including Retry now.
     // Keep it inside a detached worker: aborting netmon must not expose a still-running stop.
@@ -1280,6 +1569,165 @@ mod tests {
     use super::{PolicyChangeDisposition, apply_policy_change_disposition};
     use crate::tono::state::TonoState;
     use std::sync::Arc;
+    use futures::FutureExt;
+
+    #[tokio::test]
+    async fn health_proof_cannot_release_a_completed_switch_back_to_the_same_exit() {
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            let state = Arc::new(TonoState::for_test());
+            let (generation, selected, switch_task) = {
+                let mut inner = state.lock().await;
+                inner.fsm.begin_connect();
+                inner.fsm.mark_kill_switch_armed();
+                inner.fsm.mark_session_verified();
+                inner.fsm.connect_succeeded().unwrap();
+                inner.selected_node = Some("A".to_owned());
+                super::capture_health_context(&inner, true).unwrap()
+            };
+            // The old request stays pending while two separately owned hot switches finish.
+            for next in ["B", "A"] {
+                let _selection = state.begin_policy_update().await;
+                let _lifecycle = state.begin_privileged_release().await;
+                {
+                    let mut inner = state.lock().await;
+                    inner.tasks.switch.take();
+                    inner.selected_node = Some(next.to_owned());
+                    inner.tasks.switch = Some(tauri::async_runtime::spawn(async {}));
+                }
+                while !state.lock().await.tasks.switch.as_ref().unwrap().inner().is_finished() {
+                    tokio::task::yield_now().await;
+                }
+            }
+            assert_eq!(state.lock().await.connect_generation, generation);
+            assert_eq!(state.lock().await.selected_node, selected);
+            match super::admit_health_release(&state, generation, selected.as_deref(), switch_task, true).await {
+                Ok(_) => panic!("an intervening switch must retire the old A proof even after selection returns to A"),
+                Err(outcome) => assert_eq!(outcome, super::NetworkChangeOutcome::RecoveredInPlace),
+            }
+            let forced = super::admit_health_release(&state, generation, selected.as_deref(), switch_task, false)
+                .await.expect("forced protection recovery keeps its authority across the switch fence");
+            drop(forced);
+            let fresh = {
+                let inner = state.lock().await;
+                super::capture_health_context(&inner, true).unwrap()
+            };
+            let admitted = super::admit_health_release(&state, fresh.0, fresh.1.as_deref(), fresh.2, true)
+                .await.expect("the next fresh proof can still release the current runtime");
+            drop(admitted);
+        }).await.expect("switch proof identity must settle without deadlock");
+    }
+
+    #[tokio::test]
+    async fn health_proof_during_published_selection_cannot_release_the_finishing_switch() {
+        let state = Arc::new(TonoState::for_test());
+        let selection = state.begin_policy_update().await;
+        let lifecycle = state.begin_privileged_release().await;
+        let (finish_switch, switch_finished) = tokio::sync::oneshot::channel();
+        let context = {
+            let mut inner = state.lock().await;
+            inner.fsm.begin_connect();
+            inner.fsm.mark_kill_switch_armed();
+            inner.fsm.mark_session_verified();
+            inner.fsm.connect_succeeded().unwrap();
+            // The command has published B; its registered worker has not moved A's selector yet.
+            inner.selected_node = Some("B".to_owned());
+            inner.tasks.switch = Some(tauri::async_runtime::spawn(async move {
+                switch_finished.await.unwrap();
+            }));
+            assert!(super::capture_health_context(&inner, false).is_ok(),
+                "forced protection and policy recovery must retain their existing authority");
+            super::capture_health_context(&inner, true)
+        };
+        finish_switch.send(()).unwrap();
+        let switch = state.lock().await.tasks.switch.take().unwrap();
+        switch.await.unwrap();
+        drop(lifecycle);
+        drop(selection);
+        match context {
+            Ok((generation, selected, switch_task)) => {
+                assert!(super::admit_health_release(&state, generation, selected.as_deref(), switch_task, true).await.is_err(),
+                    "a proof begun on old A after B publication must not release verified B");
+            }
+            Err(outcome) => assert_eq!(outcome, super::NetworkChangeOutcome::RecoveredInPlace),
+        }
+        let inner = state.lock().await;
+        assert!(inner.fsm.status().is_connected);
+        assert_eq!(inner.selected_node.as_deref(), Some("B"));
+        assert_eq!(super::capture_health_context(&inner, true).unwrap(),
+            (inner.connect_generation, Some("B".to_owned()), None),
+            "the next tick must capture the settled replacement for a fresh proof");
+    }
+
+    #[tokio::test]
+    async fn old_exit_health_failure_cannot_release_a_same_generation_hot_switch() {
+        let state = Arc::new(TonoState::for_test());
+        let (generation, selected) = {
+            let mut inner = state.lock().await;
+            inner.selected_node = Some("A".to_owned());
+            inner.fsm.begin_connect();
+            inner.fsm.mark_kill_switch_armed();
+            inner.fsm.mark_session_verified();
+            inner.fsm.connect_succeeded().unwrap();
+            (inner.connect_generation, inner.selected_node.clone())
+        };
+        let (finish_proof, proof_finished) = tokio::sync::oneshot::channel();
+        let proof_state = Arc::clone(&state);
+        let old_proof = tokio::spawn(async move {
+            proof_finished.await.unwrap();
+            match super::admit_health_release(&proof_state, generation, selected.as_deref(), None, true).await {
+                Ok(_) => panic!("an old A proof must not dispatch release against B"),
+                Err(outcome) => outcome,
+            }
+        });
+        {
+            // Selection publication and hot-switch completion own these locks in this order.
+            let _selection = state.begin_policy_update().await;
+            let _switch = state.begin_privileged_release().await;
+            let mut inner = state.lock().await;
+            inner.selected_node = Some("B".to_owned());
+            assert_eq!(inner.connect_generation, generation);
+        }
+        finish_proof.send(()).unwrap();
+        assert_eq!(old_proof.await.unwrap(), super::NetworkChangeOutcome::RecoveredInPlace,
+            "the same-generation monitor must continue watching the replacement");
+        assert_eq!(state.lock().await.selected_node.as_deref(), Some("B"));
+        assert!(state.lock().await.fsm.status().is_connected);
+        let (_selection, lifecycle) = super::admit_health_release(&state, generation, Some("B"), None, true)
+            .await.expect("a current B failure must still admit automatic AI-held release");
+        assert!(state.begin_connect_mutation().now_or_never().is_none(),
+            "the admitted release must exclude replacement startup");
+        drop(lifecycle);
+    }
+
+    #[tokio::test]
+    async fn automatic_health_release_keeps_ai_blocked_and_preserves_protected_recovery() {
+        let mut general_blocked = true;
+        let mut ai_blocked = true;
+        let general = &mut general_blocked;
+        let ai = &mut ai_blocked;
+        let result = super::release_after_health_failure(false, false, |apply_narrow| async move {
+            *general = false;
+            *ai = apply_narrow;
+            Ok(())
+        }).await;
+        assert_eq!(result, Some(Ok(())));
+        assert!(!general_blocked, "ordinary health loss must restore general internet");
+        assert!(ai_blocked, "automatic recovery must retain the secondary AI hold");
+
+        let strict = super::release_after_health_failure(true, false, |_| async {
+            panic!("strict protection must not dispatch a release")
+        }).await;
+        assert_eq!(strict, None);
+        let rebuild = super::release_after_health_failure(false, true, |_| async {
+            panic!("policy rebuild must stay on protected recovery")
+        }).await;
+        assert_eq!(rebuild, None);
+        let refused = super::release_after_health_failure(false, false, |apply_narrow| async move {
+            assert!(apply_narrow, "release refusal must not downgrade the AI hold");
+            Err("injected release refusal".to_string())
+        }).await;
+        assert_eq!(refused, Some(Err("injected release refusal".to_string())));
+    }
 
     /// F5: a policy behavior change that lands while Connecting is deferred to
     /// that attempt's commit, and only that attempt's. A deferral left behind by

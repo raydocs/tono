@@ -31,47 +31,117 @@ extension AppState {
         }
     }
 
-    private func suspendForNativeUpdate() async {
+    func suspendForNativeUpdate() async {
         connectionCoordinator.bumpGeneration()
+        let retirementGeneration = connectionCoordinator.protectionOperationGeneration
         let tasks = [connectionCoordinator.coreMonitorTask, connectionCoordinator.nodeSwitchTask,
                      connectionCoordinator.protectedReconnectTask, connectionCoordinator.connectTask,
-                     connectionCoordinator.configReloadTask, connectionCoordinator.networkEnvironmentTask]
+                     connectionCoordinator.configReloadTask, connectionCoordinator.networkEnvironmentTask,
+                     connectionCoordinator.wakeRecoveryTask, connectionCoordinator.sleepRestrictTask]
             .compactMap { $0 }
         for task in tasks { task.cancel() }
+        resumeProtectionAfterWake = false
+        // A cancelled reload may return without clearing its serialization
+        // handle. Retire its completion and queued work before draining it;
+        // neither may start another mutation during the helper handoff.
+        connectionCoordinator.configReloadRequestID &+= 1
+        let reloadRetirementID = connectionCoordinator.configReloadRequestID
+        pendingFullConfigReload = false
+        pendingOptionalPolicyReload = false
+        if pendingRemovedCatalogExit {
+            applyDefaultProxySelection(persist: true)
+        }
+        pendingRemovedCatalogExit = false
+        pendingDirectPolicyReload = nil
+        isConnected = false
+        isConnecting = false
         isProtectedReconnectScheduled = false
         autoConnectRequested = false
         stopProxyGuard()
         stopLatencyTestTimer()
         for task in tasks { await task.value }
+        // Wake retries check cancellation, not the protection generation. They
+        // must drain before update release, or a later retry can reconnect once
+        // retirement clears the update gates. Keep the handles until that drain.
+        if connectionCoordinator.protectionOperationGeneration == retirementGeneration {
+            connectionCoordinator.wakeRecoveryTask = nil
+            connectionCoordinator.sleepRestrictTask = nil
+        }
+        if connectionCoordinator.configReloadRequestID == reloadRetirementID {
+            connectionCoordinator.configReloadTask = nil
+        }
         webSocket?.stopAll()
         webSocket = nil
         coreController = nil
         proxyService.setAPI(nil)
-        isConnected = false
-        isConnecting = false
         // Root performs Core/TUN/DNS cleanup; no App-owned disconnect or
         // journal is treated as its proof.
     }
 
-    func disconnectPendingNativeUpdate() {
+    func disconnectPendingNativeUpdate(preserveAIHold: Bool = false) {
         guard nativeUpdateDisconnectTask == nil else { return }
         nativeUpdatePending = true
         RuntimeCleanup.nativeUpdateBlocksConnect = true
         nativeUpdateDisconnectTask = Task {
             defer { nativeUpdateDisconnectTask = nil }
             await suspendForNativeUpdate()
+            let generation = connectionCoordinator.protectionOperationGeneration
+            guard !Task.isCancelled else { return }
+            isProtectionBlocked = false
+            isProtectionUnconfirmed = true
             do {
-                let result = try await PrivilegedRuntimeCoordinator.shared.nativeUpdate("disconnect")
+                let result = try await (preserveAIHold
+                    ? nativeUpdateReleaseAfterFailure() : nativeUpdateDisconnect())
+                guard !Task.isCancelled,
+                      connectionCoordinator.protectionOperationGeneration == generation else { return }
                 guard result.disconnectVerified == true else { throw NativeUpdateDownload.failure("Update Disconnect was not verified.") }
+                launchProtectionSequence &+= 1
                 isProtectionBlocked = false
                 KillSwitchService.isArmed = false
                 resetReleasedSessionHistory()
                 RuntimeCleanup.clearCoreStarted()
             } catch {
-                isProtectionBlocked = true
+                guard !Task.isCancelled,
+                      connectionCoordinator.protectionOperationGeneration == generation else { return }
+                // The helper may have released PF before the reply or ledger
+                // write failed. Until a live readback arrives, neither the old
+                // cached intent nor this error proves protection is held.
+                isProtectionBlocked = false
+                isProtectionUnconfirmed = true
+                guard await refreshNativeUpdateProtectionStatus() else { return }
+                guard !Task.isCancelled,
+                      connectionCoordinator.protectionOperationGeneration == generation else { return }
                 errorMessage = error.localizedDescription
             }
         }
+    }
+
+    /// Read-only PF reconciliation: desired intent alone is not live protection.
+    /// This never acknowledges Core/DNS cleanup or retires the pending receipt.
+    @discardableResult
+    func refreshNativeUpdateProtectionStatus() async -> Bool {
+        let generation = connectionCoordinator.protectionOperationGeneration
+        let sequence = launchProtectionSequence
+        let health = await protectionAudits.killSwitchHealth()
+        guard !Task.isCancelled,
+              nativeUpdatePending || RuntimeCleanup.nativeUpdatePending
+                || RuntimeCleanup.nativeUpdateBlocksConnect,
+              connectionCoordinator.protectionOperationGeneration == generation,
+              launchProtectionSequence == sequence else { return false }
+        launchProtectionSequence &+= 1
+        guard let health else {
+            isProtectionBlocked = false
+            isProtectionUnconfirmed = true
+            return true
+        }
+        // The current helper maps an unreadable PF status to live=false.
+        // A live reading proves a barrier; a non-live reading cannot certify
+        // release, even if the intent file is absent. Only the verified
+        // Disconnect reply may settle release and clear local recovery intent.
+        if health.wanted || health.live { KillSwitchService.isArmed = true }
+        isProtectionBlocked = health.live
+        isProtectionUnconfirmed = !health.live
+        return true
     }
 
     /// The retry button explicitly requests Internet release. Root rechecks
@@ -79,25 +149,31 @@ extension AppState {
     /// before, and a consumed-side attempt retires only after the privileged
     /// resolved predicates hold (verified Disconnect plus on-disk component
     /// proof). Consumed evidence is archived, never fabricated into commit.
-    func retireDisconnectedNativeUpdate() async throws {
-        let coordinator = PrivilegedRuntimeCoordinator.shared
-        let pending = try await coordinator.nativeUpdate("status")
+    func retireDisconnectedNativeUpdate(
+        nativeUpdate: (String) async throws -> HelperManager.UpdateStatus = {
+            try await PrivilegedRuntimeCoordinator.shared.nativeUpdate($0)
+        }
+    ) async throws {
+        let pending = try await nativeUpdate("status")
         guard pending.pending, AppUpdater.disconnectRetriable(pending) else {
             throw NativeUpdateDownload.failure("This attempt cannot be retried before installation recovery.")
         }
         nativeUpdatePending = true
         await suspendForNativeUpdate()
-        let released = try await coordinator.nativeUpdate("disconnect")
+        let released = try await nativeUpdate("disconnect")
         guard released.disconnectVerified == true else { throw NativeUpdateDownload.failure("Update Disconnect was not verified.") }
-        let retired = try await coordinator.nativeUpdate("retire")
+        // An evidence archive failure cannot undo verified PF release.
+        // Publish it before retirement so the UI cannot retain protection.
+        launchProtectionSequence &+= 1
+        KillSwitchService.isArmed = false
+        isProtectionBlocked = false
+        resetReleasedSessionHistory()
+        let retired = try await nativeUpdate("retire")
         guard !retired.pending else { throw NativeUpdateDownload.failure("Update retirement did not commit.") }
         nativeUpdatePending = false
         RuntimeCleanup.nativeUpdatePending = false
         RuntimeCleanup.nativeUpdateBlocksConnect = false
         RuntimeCleanup.nativeUpdateRecovery = nil
-        KillSwitchService.isArmed = false
-        isProtectionBlocked = false
-        resetReleasedSessionHistory()
         updateIncomplete = UpdateHandoffStore.showsIncompleteUpdate()
         errorMessage = nil
         RuntimeCleanup.clearCoreStarted()

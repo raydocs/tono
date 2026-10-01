@@ -13,37 +13,20 @@ name: Windows CI
 # whole of Windows CI red for a reason nobody can locate.
 
 on:
+  workflow_call:
   # Manual re-run, so a flake or an infrastructure hiccup does not need a
-  # pointless commit to retry.
+  # pointless commit to retry. pull_request and merge_group enter through
+  # ci-gate.yml so a PR does not start this workflow twice.
   workflow_dispatch:
-  pull_request:
-    paths:
-      - apps/windows/Cargo.toml
-      - apps/windows/Cargo.lock
-      - apps/windows/vendor/**
-      - apps/windows/crates/**
-      - apps/windows/service/**
-      - apps/windows/app/**
-      - .github/workflows/windows-ci.yml
-      - .github/workflows/windows-candidate.yml
-      - .github/workflows/windows-installer-smoke.yml
-      - .github/workflows/desktop-update-candidate.yml
-      - tooling/scripts/desktop-update-v1.mjs
-      - tooling/scripts/tests/desktop-update-v1.test.mjs
-      - tooling/scripts/test-windows-candidate-install.ps1
-      - tooling/scripts/tests/windows-ci-paths.test.cjs
-      - tooling/scripts/test-windows-qa.ps1
-      - tooling/scripts/tests/windows-qa-guards.Tests.ps1
-      - tooling/scripts/tests/fixtures/update-protocol-v1/**
-      - apps/macos/Tono/Models/UpdateContractV1.swift
-      - apps/macos/TonoTests/UpdateContractV1Tests.swift
-  # Every branch, not just the default one. This repository is a fork, and no
-  # `pull_request` event has ever produced a run here — PR #1 merged without one.
-  # Restricted to `main` and paired with a trigger that does not fire, this
-  # workflow could only ever have run after a merge, which is the wrong time to
-  # learn something is broken. It is also why `macos-ci.yml` existed for days and
-  # never executed once.
+  # Direct pushes on main and the release lines. A pull-request branch is
+  # already covered by ci-gate; keeping push on that branch runs these jobs
+  # twice, because the push ref and the pull_request ref do not share a
+  # concurrency group.
   push:
+    branches:
+      - main
+      - release/macos
+      - release/windows
     paths:
       - apps/windows/Cargo.toml
       - apps/windows/Cargo.lock
@@ -70,7 +53,7 @@ permissions:
 
 concurrency:
   group: windows-ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name != 'merge_group' && github.event_name != 'workflow_call' }}
 
 jobs:
   core:
@@ -175,6 +158,7 @@ jobs:
           New-Item -ItemType Directory -Force -Path sidecar, resources | Out-Null
           $paths = @(
             'sidecar/tono-core-x86_64-pc-windows-msvc.exe',
+            'sidecar/sing-box-x86_64-pc-windows-msvc.exe',
             'resources/Country.mmdb',
             'resources/geoip.dat',
             'resources/geosite.dat',
@@ -182,6 +166,7 @@ jobs:
             'resources/tono-service-install.exe',
             'resources/tono-service-uninstall.exe',
             'resources/core-sha256.txt',
+            'resources/sing-box-sha256.txt',
             'resources/core-identity.json'
           )
           foreach ($p in $paths) {

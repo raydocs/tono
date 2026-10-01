@@ -18,7 +18,6 @@ import {
 } from '../../catalog';
 import {
   writeOpsAudit,
-  assignedProductForUser,
   optionalNotes,
 } from '../../product-account';
 import { writeChangeReceipt } from '../change-receipts';
@@ -53,7 +52,6 @@ export async function catalogResource(
     const user = await e.DB.prepare('SELECT * FROM users WHERE id = ?').bind(mt[1]).first<Row>();
     if (!user) throw new ApiError(404, 'NOT_FOUND', 'User not found');
     const t = now();
-    const assigned = await assignedProductForUser(e, mt[1]);
     // One D1 batch is one transaction: the account is disabled together with
     // the home line, Claude account and allowlist entry being reclaimed, or
     // nothing changes. Separate commits could reclaim them and then fail
@@ -73,20 +71,19 @@ export async function catalogResource(
         `UPDATE managed_exit_catalog SET revision = revision + 1, updated_at = ?
          WHERE singleton_id = 1 AND changes() > 0`,
       ).bind(t),
+      // Select the assignment inside the close transaction: an account
+      // replacement may have committed after the user was read above.
+      e.DB.prepare(
+        `INSERT INTO product_account_events(id, account_id, user_id, type, at, detail)
+         SELECT ?, id, user_id, 'note', ?, ? FROM product_accounts
+         WHERE user_id = ? AND status = 'assigned'`,
+      ).bind(id(), t, refund ? 'refund close' : 'account closed', mt[1]),
+      e.DB.prepare(
+        `UPDATE product_accounts
+         SET status = 'retired', closed_at = ?, close_reason = 'other', updated_at = ?
+         WHERE user_id = ? AND status = 'assigned'`,
+      ).bind(t, t, mt[1]),
     ];
-    if (assigned) {
-      statements.push(
-        e.DB.prepare(
-          `UPDATE product_accounts
-           SET status = 'retired', closed_at = ?, close_reason = 'other', updated_at = ?
-           WHERE id = ? AND status = 'assigned'`,
-        ).bind(t, t, assigned.id),
-        e.DB.prepare(
-          `INSERT INTO product_account_events(id, account_id, user_id, type, at, detail)
-           SELECT ?, ?, ?, 'note', ?, ? WHERE changes() > 0`,
-        ).bind(id(), String(assigned.id), mt[1], t, refund ? 'refund close' : 'account closed'),
-      );
-    }
     statements.push(e.DB.prepare('DELETE FROM signup_allowlist WHERE email = ?').bind(user.email));
     await e.DB.batch(statements);
     await deps.enforceUser(e, mt[1]);

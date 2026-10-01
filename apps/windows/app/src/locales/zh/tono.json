@@ -275,13 +275,13 @@
       "stillRunningDescription": "上次会话的隧道仍在转发流量。恢复网络会停止它。"
     },
     "errors": {
-      "unreachable": "连不上登录服务器。换可用网络（热点，或先开其他翻墙）登录一次即可。",
+      "unreachable": "登录没有完成。",
       "rateLimited": "尝试过多，请稍后再试。",
-      "deviceLimit": "设备数已满。请先在已登录设备上移除一台。",
+      "deviceLimit": "登录没有完成。",
       "sessionExpired": "验证码已过期，请重新获取。",
       "codeRejected": "验证码错误或已过期，请重新获取。",
       "signInNotSaved": "无法在这台电脑上保存登录。请重新获取验证码后再试。",
-      "clockSkew": "这台电脑的日期和时间不对，Tono 无法验证服务器。请在「设置 > 时间和语言 > 日期和时间」中改为正确的日期和时间，然后重试。",
+      "clockSkew": "登录没有完成。",
       "serverError": "登录服务暂时繁忙或不可用，请稍后重试或联系客服。"
     }
   },
@@ -335,7 +335,7 @@
     "rulesTitle": "Claude / AI 住宅专线保护范围",
     "rulesDescription": "以下流量通过纯 TUN 虚拟网卡透明接管，并通过高信用家庭宽带跳点转发，免除数据中心 IP 风控：\n\n• Anthropic 核心服务：*.anthropic.com, *.claude.ai\n• 人机安全验证：challenges.cloudflare.com, cf-assets.www.cloudflare.com\n• 遥测与灰度：*.datadoghq.com, *.statsigapi.net, *.stripe.network\n• 本地应用进程：Claude Code、Claude Desktop\n\n终端零代理配置，开箱即用。",
     "secureDnsHint": "Claude 网页要求 Chrome / Edge 的「安全 DNS」为关闭，或自动且未指定自定义提供商。修改后请彻底重启浏览器，再重新连接 Tono。",
-    "encryptedDnsHint": "网页打不开：设置 → 网络和 Internet → DNS，关掉「加密 DNS」，再连接。",
+    "encryptedDnsHint": "连接没有完成。",
     "checklist": {
       "title": "第一次连接",
       "dismiss": "知道了",
@@ -365,10 +365,11 @@
       "protectionHeldByAnotherUser": "本机另一位用户正在使用 Tono 的保护（即使其会话只是已断开）。需对方在这台电脑上点击「断开」或注销。若对方无法操作，本机管理员可先停止 Tono 服务（在管理员 PowerShell 中运行 sc.exe stop TonoService），再以管理员身份运行「开始」菜单中的「Tono — 恢复网络 (Restore Network)」。",
       "remoteSessionConnectRefused": "不能在远程桌面会话中连接：Tono 的保护会阻断这条远程连接，且无法远程恢复。请在这台电脑本机的屏幕和键盘上连接。",
       "browserDnsPreflight": "无法连接 Claude 住宅专线，因为不能确认 Chrome / Edge 的「安全 DNS」配置安全。Tono 会统一路由 Chrome / Edge 的所有用户资料，不支持按资料单独路由。请将「安全 DNS」设为关闭，或自动且不指定自定义提供商；然后彻底重启浏览器，再重新连接 Tono。",
-      "nodeUnreachable": "连不上这个节点。请重试或换节点。",
-      "tunDataPlaneBroken": "节点是通的，但 Windows 没有转发隧道流量。换节点没用——请重启电脑后再连；若还是这样，请发诊断。",
+      "hy2Idle": "备用 UDP 通道空闲后断了，多半是家里的路由器清掉了闲置连接。Tono 会留在同一条线路上重试。支持码 TONO_CONNECT_HY2_IDLE。如果反复出现，请发诊断。",
+      "nodeUnreachable": "连接没有完成。",
+      "tunDataPlaneBroken": "连接没有完成。",
       "tunIngressBroken": "节点是通的，但本机流量进不了隧道。通常是别的 VPN 或安全软件占住了网络，请先关掉再连。",
-      "protectedHttpsFailed": "这座城市没有完成受保护连接。请重试或换线路；若有备用通道也可以试用。每个节点都一样时再发诊断。",
+      "protectedHttpsFailed": "连接没有完成。",
       "coreUnpinned": "此安装缺少内核校验，请安装最新版。",
       "coreMismatch": "内核与安装不匹配，请安装最新版。",
       "dnsPortBusy": "检测到其他代理软件（如 Clash Verge、CFW 等）正在运行并占用了系统网络。请在系统托盘彻底退出其他代理后再连接。",
@@ -383,6 +384,13 @@
       "protected": "已连接",
       "standby": "待机"
     },
+    "aiTraffic": {
+      "title": "今天的 AI 流量",
+      "subtitle": "家宽上的流量，不是剩余额度。",
+      "empty": "今天还没有。",
+      "week": "近 7 天",
+      "note": "在总览页打开时累计，只存在这台电脑上。"
+    },
     "overview": {
       "protection": "保护",
       "serverPool": "节点池",
@@ -395,7 +403,8 @@
       "idle": "空闲",
       "noActiveRoute": "当前没有活动线路",
       "reading": "正在读取流量…",
-      "telemetryFailed": "仪表盘还没接到核心，正在重试"
+      "telemetryFailed": "仪表盘还没接到核心，正在重试",
+      "sessionTotal": "本次连接 {{total}}"
     },
     "info": {
       "protection": "流量保护",
@@ -423,8 +432,8 @@
     "statusTitle": "当前线路未通过检查",
     "statusBody": "当前连接不可用，直连流量仍被拦截。可以重试，或恢复正常网络。",
     "encryptedDnsTitle": "Windows 加密 DNS 拦住了连接",
-    "encryptedDnsBody": "换线路没用。打开 Windows DNS 设置，关掉「加密 DNS」，再连接。也可以先恢复正常网络。",
-    "releasedFailureBody": "这座城市没有连上。直连网络可用。可以立即重试、选择其他线路；若有备用通道也可以试用。",
+    "encryptedDnsBody": "加密 DNS 拦住了这次连接。",
+    "releasedFailureBody": "连接没有完成。原来的网络仍然可用。",
     "protectionUnknownBody": "Tono 无法确认网络保护状态。如有提示，请修复服务；也可以选择「恢复正常网络」。",
     "completedCount": "已完成 {{count}} 项",
     "technicalDetails": "技术详情",
@@ -451,7 +460,7 @@
       "errors": {
         "signedOut": "你当前未登录，报告无法关联到账号。请登录后重试，或使用“复制诊断信息”把文本发送给支持人员。",
         "rateLimited": "最近上传的报告过多。请几分钟后再试，或使用“复制诊断信息”把文本发送给支持人员。",
-        "unreachable": "无法连接到 Tono。请检查网络；若断网保护正在拦住全部流量，请先点「恢复正常网络」再重试。",
+        "unreachable": "登录没有完成。",
         "unavailable": "该账号暂不支持上传诊断信息。请使用“复制诊断信息”把文本发送给支持人员。",
         "failed": "上传失败。请使用“复制诊断信息”把文本发送给支持人员。"
       }
@@ -525,6 +534,11 @@
     "title": "账号",
     "subtitle": "登录邮箱和设备。",
     "email": "邮箱",
+    "plan": "套餐",
+    "expires": "有效期至",
+    "noExpiry": "长期有效",
+    "usage": "已用流量",
+    "usageOf": "{{used}} / {{quota}}",
     "devices": "设备",
     "deviceLimit": "设备 {{count}} / {{limit}}",
     "currentDevice": "当前设备",

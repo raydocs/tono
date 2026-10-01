@@ -64,28 +64,40 @@ enum RuntimeCleanup {
     /// boot would reconnect by itself again. The file copy is synced before
     /// the connect goes on; the preference stays for a build that reads only
     /// it.
-    static func recordConnectBootSession() {
+    static func recordConnectBootSession(
+        in file: URL = connectBootSessionFile,
+        writer: (String, URL) throws -> Void = writeSynced
+    ) throws {
         let record = bootSessionRecord(current: currentBootSession())
-        AppProfile.defaults.set(record, forKey: SettingsKey.connectBootSession)
         do {
-            try writeSynced(record, to: connectBootSessionFile)
-        } catch {
-            // Unless the file already holds this record, the preference is
-            // all this connect has: a file from an earlier boot must not
-            // outvote it.
-            if recordedConnectBootSession != record {
-                try? FileManager.default.removeItem(at: connectBootSessionFile)
+            // A durable pending marker outlives any failure after rename but
+            // before directory sync. Visible current-boot bytes alone cannot
+            // make a failed admission look successful on the next launch.
+            let pending = file.appendingPathExtension("pending")
+            try writer(unknownBootSession, pending)
+            try writer(record, file)
+            guard Darwin.unlink(pending.path) == 0 else {
+                throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
             }
+            // The record and its directory were already synced by writer.
+            // Marker removal is not a new admission grant: if it reappears
+            // after power loss, the next launch only holds more conservatively.
+            AppProfile.defaults.set(record, forKey: SettingsKey.connectBootSession)
+        } catch {
+            // Admission fails. Preserve the prior record or the pending marker
+            // instead of trusting the preference or a visible replacement.
             LocalTrafficAudit.shared.recordEvent(
                 "connect_boot_session_not_synced",
                 details: ["error": error.localizedDescription]
             )
+            throw error
         }
     }
 
     static func clearConnectBootSession() {
         AppProfile.defaults.removeObject(forKey: SettingsKey.connectBootSession)
         try? FileManager.default.removeItem(at: connectBootSessionFile)
+        try? FileManager.default.removeItem(at: connectBootSessionFile.appendingPathExtension("pending"))
     }
 
     static var recordedConnectBootSession: String? {
@@ -98,6 +110,11 @@ enum RuntimeCleanup {
     /// only the preference, which a panic can lose, so its absence proves
     /// nothing.
     static func recordedConnectBootSession(in file: URL) -> String? {
+        var metadata = stat()
+        if Darwin.lstat(file.appendingPathExtension("pending").path, &metadata) == 0
+            || errno != ENOENT {
+            return unknownBootSession
+        }
         do {
             let data = try Data(contentsOf: file)
             guard let record = String(data: data, encoding: .utf8), !record.isEmpty else {
@@ -218,9 +235,26 @@ enum RuntimeCleanup {
     /// under Allow in the Background, not loaded by launchd, crash-looping),
     /// the query used to throw a generic "helper unavailable" before any
     /// repair or notice in `recoverStaleRuntime` could run, and Retry repeated
-    /// it forever. Say that this Mac is not protected and repair the helper
-    /// here instead. The administrator install runs root's update-install
-    /// guard, which refuses while an update transaction is unfinished.
+    /// it forever. A connect that never lands and a read that times out are
+    /// the same fact here: this call is a status read, so a lost reply cannot
+    /// mean the helper committed a mutation. Say that this Mac is not
+    /// protected and repair the helper here instead. The administrator
+    /// install runs root's update-install guard, which refuses while an
+    /// update transaction is unfinished.
+
+    /// No usable reply. A forbidden or malformed body is an answer and stays
+    /// on the caller's error path. A status read has no PF commit to protect,
+    /// unlike an arm whose reply was lost.
+    static func helperGaveNoAnswer(_ error: Error) -> Bool {
+        switch error {
+        case HelperIPCError.connectFailed,
+             HelperIPCError.emptyResponse,
+             HelperIPCError.socketFailed:
+            true
+        default:
+            false
+        }
+    }
     static func queryPendingNativeUpdate(
         query: () async throws -> HelperManager.UpdateStatus?,
         launchState: () async -> HelperManager.LaunchState,
@@ -228,14 +262,14 @@ enum RuntimeCleanup {
     ) async throws -> HelperManager.UpdateStatus? {
         do {
             return try await query()
-        } catch HelperIPCError.connectFailed {
+        } catch let error where helperGaveNoAnswer(error) {
             let state = await launchState()
             if state == .loadedOrUnknown {
                 // launchd has the job; give a restarting helper one moment.
                 try? await Task.sleep(for: .seconds(2))
                 do {
                     return try await query()
-                } catch HelperIPCError.connectFailed {}
+                } catch let error where helperGaveNoAnswer(error) {}
             }
             let notice = HelperManager.unprotectedNotice(for: state)
                 ?? String(localized: "Tono's network helper is not responding, so this Mac may not be protected right now. Click Retry and approve the administrator prompt to repair it.")
@@ -250,7 +284,7 @@ enum RuntimeCleanup {
             }
             do {
                 return try await query()
-            } catch HelperIPCError.connectFailed {
+            } catch let error where helperGaveNoAnswer(error) {
                 // The repair returned and nothing answers yet (a restart loop
                 // it did not catch): say so, with the Retry that repairs it.
                 throw CoreRuntimeError.startFailed(notice)
@@ -365,16 +399,17 @@ enum RuntimeCleanup {
             // install path once before declaring the launch failed.
             var repaired = false
             do {
-                try await PrivilegedRuntimeCoordinator.shared.prepareHelper()
-                let recheck = await PrivilegedRuntimeCoordinator.shared
-                    .protectedDNSStatus()
-                if recheck.snapshotPresent {
-                    _ = try await PrivilegedRuntimeCoordinator.shared
-                        .restoreProtectedDNSIfConfigured()
-                    repaired = true
-                } else {
-                    repaired = recheck.available
-                }
+                repaired = try await repairProtectedDNSAtLaunch(
+                    prepareHelper: {
+                        try await PrivilegedRuntimeCoordinator.shared.prepareHelper()
+                    },
+                    status: {
+                        await PrivilegedRuntimeCoordinator.shared.protectedDNSStatus()
+                    },
+                    restoreDNS: {
+                        try await PrivilegedRuntimeCoordinator.shared.restoreProtectedDNSIfConfigured()
+                    }
+                )
             } catch {
                 // Losing the real cause here (most often a cancelled
                 // administrator prompt) would present the unrelated DNS
@@ -398,6 +433,20 @@ enum RuntimeCleanup {
             }
         }
         return shouldResumeProtection
+    }
+
+    static func repairProtectedDNSAtLaunch(
+        prepareHelper: () async throws -> Void,
+        status: () async -> (
+            available: Bool, configured: Bool, snapshotPresent: Bool, service: String?
+        ),
+        restoreDNS: () async throws -> Bool
+    ) async throws -> Bool {
+        try await prepareHelper()
+        let recheck = await status()
+        guard recheck.available else { return false }
+        _ = try await restoreDNS()
+        return true
     }
 
     /// Folds launch's helper answer into the stored fail-closed intent,

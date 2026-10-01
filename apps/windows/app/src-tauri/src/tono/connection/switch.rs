@@ -3,7 +3,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 use tauri::AppHandle;
-use tono_core::EXIT_GROUP_NAME;
+use tono_core::{node::ValidatedNode, EXIT_GROUP_NAME};
 use tono_logging::{Type, logging};
 use tono_plugin_core::{MihomoExt as _, models::Protocol};
 use crate::core::service;
@@ -19,14 +19,16 @@ use super::endpoints::{proxy_endpoints_for, unique_proxy_endpoints};
 use super::probes::verify_tun_data_plane;
 use super::reconnect::schedule_reconnect_for_generation;
 
-/// §3: the selected node vanished from a new catalog while a tunnel was up —
-/// stop the core, keep the kill switch armed, and wait for the user to pick
-/// a surviving node (no auto-reconnect).
+/// The selected node vanished from a new catalog while a tunnel was up —
+/// release non-strict protection through DNS → Core → WFP, then retain the AI hold.
+/// Strict mode keeps blocking; both wait for a surviving node (no auto-reconnect).
 pub async fn selected_node_vanished(state: Arc<TonoState>, app: AppHandle, expected_generation: u64) {
-    let guard_state = Arc::clone(&state);
-    let result = tono_core::recovery::reconcile_recovery(
-        async move { guard_state.begin_privileged_release().await },
+    // Own the writer in the detached worker so fail-open can transfer it to release.
+    let result = tokio::spawn(
         async move {
+            let mut guard = Some(state.begin_privileged_release().await);
+            // As in connect failure, no Windows preference means no explicit strict opt-in.
+            let releases = vanished_exit_releases(tono_core::strict_kill_switch_explicit(None));
             let generation = {
                 let mut inner = state.lock().await;
                 let active = inner.fsm.status().is_connected || inner.fsm.status().is_connecting;
@@ -35,8 +37,8 @@ pub async fn selected_node_vanished(state: Arc<TonoState>, app: AppHandle, expec
                 if inner.connect_generation != expected_generation || !inner.catalog_requires_choice || !active {
                     return false;
                 }
-                // Retire connection tasks without permitting them to release the barrier.
-                inner.invalidate_connection(false);
+                // A non-strict catalog teardown also releases any late connection commit.
+                inner.invalidate_connection(releases);
                 // Withdraw Connected before IPC so a new choice cannot hot-switch a
                 // runtime being stopped. A retry must enter normal guarded startup.
                 if inner.fsm.status().is_connected {
@@ -47,18 +49,36 @@ pub async fn selected_node_vanished(state: Arc<TonoState>, app: AppHandle, expec
                     inner.fsm.initial_release_failed();
                 }
                 commands::emit_status(&app, &commands::status_of(&inner));
-                // R2-F2: the unverified arm this leaves behind idles in Protected Offline
-                // until the user picks a node — it must keep its Service-truth poll.
+                // R2-F2: a strict hold or failed release can idle in Protected Offline;
+                // keep its Service-truth poll until release is proved.
                 super::monitor::ensure_protection_resync_locked(&mut inner, || {
                     super::monitor::spawn_protection_resync(&state, &app)
                 });
                 inner.connect_generation
             };
-            logging!(warn, Type::Service, "Tono: 选中节点从新目录中消失，停止核心但保持封锁");
-            // Stop(false) restricts WFP under the Service lifecycle lock. Keep exclusive
-            // ownership through bookkeeping even if the account-scoped caller is aborted.
-            if let Err(error) = service::tono_stop_core(false).await {
-                logging!(warn, Type::Service, "Tono: catalog teardown requires reconciliation: {error:#}");
+            if releases {
+                logging!(warn, Type::Service, "Tono: 选中节点从新目录中消失，释放非严格保护并等待选择");
+                // Transfer the writer; reacquiring it here would deadlock the normal release.
+                if let Err(error) = release_after_catalog_vanish(guard.take(), |guard, apply_narrow| {
+                    let state = &state;
+                    let app = &app;
+                    async move {
+                        if apply_narrow {
+                            super::disconnect::release_explicit_applying_narrow_with_guard(state, app, guard).await
+                        } else {
+                            super::disconnect::release_explicit_with_guard(state, app, guard).await
+                        }
+                    }
+                }).await {
+                    logging!(warn, Type::Service, "Tono: catalog fail-open requires reconciliation: {error}");
+                }
+            } else {
+                logging!(warn, Type::Service, "Tono: 选中节点从新目录中消失，停止核心但保持严格封锁");
+                // Stop(false) restricts WFP under the Service lifecycle lock. Keep exclusive
+                // ownership through bookkeeping even if the account-scoped caller is aborted.
+                if let Err(error) = service::tono_stop_core(false).await {
+                    logging!(warn, Type::Service, "Tono: catalog teardown requires reconciliation: {error:#}");
+                }
             }
 
             let mut inner = state.lock().await;
@@ -70,20 +90,39 @@ pub async fn selected_node_vanished(state: Arc<TonoState>, app: AppHandle, expec
             inner.controller_secret = None;
             inner.controller_port = None;
             let vanished_node = inner.selected_node.clone();
+            let protection_blocked = inner.fsm.status().is_protection_blocked;
             commands::emit_status(&app, &commands::status_of(&inner));
             drop(inner);
             if let Some(node) = vanished_node {
                 state.audit().log(AuditEvent::SelectionVanished { node });
             }
-            state.audit().log(AuditEvent::ProtectedOffline {
-                reason: "catalogSelectionVanished",
-            });
+            if protection_blocked {
+                state.audit().log(AuditEvent::ProtectedOffline {
+                    reason: "catalogSelectionVanished",
+                });
+            }
             true
         },
     ).await;
     if let Err(error) = result {
         logging!(error, Type::Service, "Tono: catalog teardown worker failed; keeping protection: {error}");
     }
+}
+
+/// Transfer automatic catalog teardown's writer to the coordinated release.
+/// Explicit user restoration and automatic recovery have different AI-hold intent.
+async fn release_after_catalog_vanish<G, F>(
+    guard: Option<G>,
+    release: impl FnOnce(Option<G>, bool) -> F,
+) -> Result<(), String>
+where
+    F: std::future::Future<Output = Result<(), String>>,
+{
+    release(guard, true).await
+}
+
+fn vanished_exit_releases(strict_kill_switch: bool) -> bool {
+    !strict_kill_switch
 }
 
 /// Connected node switch: keep the core and WinTUN, widen WFP to old ∪ new,
@@ -135,6 +174,10 @@ fn restore_selection_value(
     crate::tono::state::save_selection(catalog_dir, previous_name)
 }
 
+pub(super) fn hot_switch_allowed(previous: Option<&ValidatedNode>, next: &ValidatedNode) -> bool {
+    previous.is_some_and(|previous| previous.is_hysteria2() == next.is_hysteria2())
+}
+
 pub async fn switch_selected_node(
     state: Arc<TonoState>,
     app: AppHandle,
@@ -179,6 +222,12 @@ pub async fn switch_selected_node(
         restore_selected_node(&state, &app, generation, &previous_name).await;
         return;
     };
+    // UDP fallback rules are fixed when the runtime is built. A VLESS/HY2 change,
+    // or an unknown previous transport, needs a rebuild with WFP still armed.
+    if !hot_switch_allowed(previous.as_ref(), &next) {
+        cold_switch_selected_node(state, app, generation, guard).await;
+        return;
+    }
     let old_endpoints = previous
         .as_ref()
         .map(|node| proxy_endpoints_for(node, &nodes, routing.as_ref()))
@@ -318,7 +367,7 @@ pub(super) async fn cold_switch_selected_node(
             inner.fsm.initial_release_failed();
         }
         commands::emit_status(&app, &commands::status_of(&inner));
-        // R2-F2: same armed idle state as the vanish path; the re-entry attempt below may
+        // R2-F2: same armed idle state as the strict vanish path; the re-entry attempt below may
         // be guard-rejected, and the barrier's Service truth must not go unwatched then.
         super::monitor::ensure_protection_resync_locked(&mut inner, || {
             super::monitor::spawn_protection_resync(&state, &app)
@@ -346,50 +395,100 @@ pub(super) async fn cold_switch_selected_node(
     }
 }
 
+/// Called by the detached catalog owner while it retains selection/policy ownership.
+pub(crate) async fn rebuild_for_catalog_routing_change(state: Arc<TonoState>, app: AppHandle, generation: u64) {
+    let guard = state.begin_privileged_release().await;
+    {
+        let inner = state.lock().await;
+        // A queued catalog update must not tear down a replacement or an in-flight connect.
+        if inner.connect_generation != generation
+            || !inner.fsm.status().is_connected
+            || inner.fsm.status().is_connecting
+            || inner.fsm.status().is_disconnecting
+        {
+            return;
+        }
+    }
+    cold_switch_selected_node(state, app, generation, guard).await;
+}
+
+/// Startup detected a catalog rotation at its Connected commit. Serialize its detached rebuild
+/// with catalog publication and hot selection. The replacement attempt captures the installed
+/// catalog anew. Do not acquire this writer inside startup: a catalog-driven startup may already
+/// have a caller retaining it through the recovery transaction.
+pub(super) fn spawn_deferred_catalog_rebuild(
+    state: &Arc<TonoState>, app: &AppHandle, generation: u64,
+) {
+    let state = Arc::clone(state);
+    let app = app.clone();
+    let task: BoxedTask = Box::pin(async move {
+        let _catalog_update = state.begin_policy_update().await;
+        rebuild_for_catalog_routing_change(state, app, generation).await;
+    });
+    AsyncHandler::spawn(move || task);
+}
+
 pub(super) async fn close_connections_bound_to(state: &Arc<TonoState>, generation: u64, exit_name: &str) {
     if exit_name.is_empty() {
         return;
     }
-    let (secret, port) = {
+    let (secret, port, cancellation) = {
         let inner = state.lock().await;
         if inner.connect_generation != generation {
             return;
         }
         match inner.controller_secret.clone().zip(inner.controller_port) {
-            Some(pair) => pair,
+            Some((secret, port)) => (secret, port, inner.connect_cancellation.clone()),
             None => return,
         }
     };
-    let Some(payload) = fetch_connections(&secret, port).await else {
-        return;
-    };
-    let Ok(client) = controller_client(Duration::from_secs(2)) else {
-        return;
-    };
-    for connection in payload.connections {
-        if !connection
-            .chains
-            .iter()
-            .any(|hop| hop.eq_ignore_ascii_case(exit_name))
-        {
-            continue;
-        }
-        if connection.id.is_empty() {
-            continue;
-        }
-        let Ok(mut url) = reqwest::Url::parse(&controller_url(port, "/connections")) else {
-            continue;
+    bounded_connection_cleanup(&cancellation, async {
+        let Some(payload) = fetch_connections(&secret, port).await else {
+            return;
         };
-        if url.path_segments_mut().is_ok() {
-            let _ = url.path_segments_mut().map(|mut segments| {
-                segments.push(&connection.id);
-            });
+        let Ok(client) = controller_client(Duration::from_secs(2)) else {
+            return;
+        };
+        for connection in payload.connections {
+            if state.lock().await.connect_generation != generation {
+                return;
+            }
+            if !connection
+                .chains
+                .iter()
+                .any(|hop| hop.eq_ignore_ascii_case(exit_name))
+            {
+                continue;
+            }
+            if connection.id.is_empty() {
+                continue;
+            }
+            let Ok(mut url) = reqwest::Url::parse(&controller_url(port, "/connections")) else {
+                continue;
+            };
+            if url.path_segments_mut().is_ok() {
+                let _ = url.path_segments_mut().map(|mut segments| {
+                    segments.push(&connection.id);
+                });
+            }
+            match client.delete(url).bearer_auth(&secret).send().await {
+                Ok(response) if response.status().is_success() => {}
+                _ => break,
+            }
         }
-        let _ = client
-            .delete(url)
-            .bearer_auth(&secret)
-            .send()
-            .await;
+    }).await;
+}
+
+// A browser can leave hundreds of sockets behind. Cleanup holds the lifecycle writer, so
+// a hung controller must not multiply its per-request timeout and delay Restore internet.
+async fn bounded_connection_cleanup(
+    cancellation: &tokio_util::sync::CancellationToken,
+    cleanup: impl std::future::Future<Output = ()> + Send,
+) {
+    tokio::select! {
+        biased;
+        _ = cancellation.cancelled() => {}
+        _ = tokio::time::timeout(Duration::from_secs(3), cleanup) => {}
     }
 }
 
@@ -397,6 +496,60 @@ pub(super) async fn close_connections_bound_to(state: &Arc<TonoState>, generatio
 mod convergence_tests {
     use super::converge_or_recover;
     use tono_core::connection::ConnectionFsm;
+
+    #[tokio::test(start_paused = true)]
+    async fn connection_cleanup_bounds_the_lifecycle_writer_for_many_sockets() {
+        let state = std::sync::Arc::new(crate::tono::state::TonoState::for_test());
+        let guard = state.begin_privileged_release().await;
+        let release = state.begin_privileged_release();
+        tokio::pin!(release);
+        let cancellation = tokio_util::sync::CancellationToken::new();
+        let mut completed = 0;
+        let started = tokio::time::Instant::now();
+
+        let cleanup_finished = tokio::select! {
+            biased;
+            _ = super::bounded_connection_cleanup(&cancellation, async {
+                for _ in 0..100 {
+                    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                    completed += 1;
+                }
+            }) => true,
+            _ = &mut release => false,
+        };
+
+        assert!(cleanup_finished, "release must wait for the switch's lifecycle writer");
+        assert_eq!(started.elapsed(), std::time::Duration::from_secs(3));
+        assert_eq!(completed, 1, "cleanup must not spend two seconds on every socket");
+        drop(guard);
+        let _released = release.await;
+    }
+
+    #[tokio::test]
+    async fn automatic_catalog_release_keeps_ai_blocked_and_transfers_its_writer() {
+        let writer = std::sync::Arc::new(tokio::sync::RwLock::new(()));
+        let guard = writer.clone().write_owned().await;
+        let mut general_blocked = true;
+        let mut ai_blocked = true;
+        let general = &mut general_blocked;
+        let ai = &mut ai_blocked;
+        let result = super::release_after_catalog_vanish(Some(guard), |guard, apply_narrow| async move {
+            let _guard = guard.expect("catalog teardown must transfer its existing writer");
+            assert!(writer.try_write().is_err(), "release must retain exclusive lifecycle ownership");
+            *general = false;
+            *ai = apply_narrow;
+            Ok(())
+        }).await;
+        assert_eq!(result, Ok(()));
+        assert!(!general_blocked, "a vanished exit must restore ordinary internet");
+        assert!(ai_blocked, "automatic catalog recovery must retain the secondary AI hold");
+    }
+
+    #[test]
+    fn vanished_exit_releases_only_without_strict_kill_switch() {
+        assert!(super::vanished_exit_releases(false), "a removed exit must restore non-strict internet");
+        assert!(!super::vanished_exit_releases(true), "an explicit strict kill switch keeps blocking");
+    }
 
     #[test]
     fn verified_rollback_restores_the_selection_used_on_next_launch() {

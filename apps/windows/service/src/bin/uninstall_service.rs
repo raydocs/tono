@@ -12,7 +12,7 @@ use shared::run_command;
 use shared::uninstall_old_service;
 use shared::{enter_repair_gate, run_maintenance_if_requested};
 #[cfg(windows)]
-use shared::{force_stop_windows_service, read_service_pid_file, stop_windows_service, terminate_process_by_pid};
+use shared::{force_stop_windows_service, read_service_pid_file, stop_windows_service, terminate_service_process_by_pid};
 
 /// How Windows cleanup ended. `main` maps this onto the exit-code contract with the NSIS
 /// uninstall macro, which must only block when the machine cannot be proven safe; the mapping
@@ -25,9 +25,10 @@ use shared::{force_stop_windows_service, read_service_pid_file, stop_windows_ser
 /// uninstalled** — the failure this ladder exists to correct. The danger being guarded against
 /// is real, but it is narrower than the guard was: what must never happen is *removing the app
 /// while leaving persistent WFP filters armed*, i.e. a blocked machine with no software left to
-/// unblock it. That is now the whole of the blocking condition. An inexact resolver is not a
-/// blocked machine: the user can change DNS from Windows' own network settings, and cannot
-/// conjure back an uninstaller that refuses to run.
+/// unblock it. That blocks, and so does Tono's NRPT catch-all when `with_resolver_rule_proof`
+/// cannot prove it removed: every lookup would still go to a resolver that is gone. An inexact
+/// resolver is not a blocked machine: the user can change DNS from Windows' own network
+/// settings, and cannot conjure back an uninstaller that refuses to run.
 #[cfg(any(windows, test))]
 #[derive(Debug)]
 enum CleanupOutcome {
@@ -70,8 +71,9 @@ const EXIT_RESTORED_AUTOMATIC: i32 = 4;
 /// (`app/src-tauri/src/tono/connection.rs`). Matched by substring, because every layer wraps the
 /// message in its own context.
 ///
-/// Any of these lets the uninstall/install continue (exit 4 family). The only blocking condition
-/// is "the WFP barrier may still be installed".
+/// Any of these lets the uninstall/install continue (exit 4 family). What blocks is "the WFP
+/// barrier may still be installed", and an NRPT rule that `with_resolver_rule_proof` cannot prove
+/// removed.
 #[cfg(any(windows, test))]
 const DNS_RESTORED_AUTOMATIC_MARKER: &str = "TONO_DNS_RESTORED_AUTOMATIC";
 #[cfg(any(windows, test))]
@@ -176,8 +178,9 @@ fn poll_until<T>(
 }
 
 /// The only safe "already clean" classification. A missing SCM record and missing state files
-/// are insufficient: persistent WFP filters can outlive both, and Service startup intentionally
-/// converts exactly that orphaned combination back into a strict emergency block.
+/// are insufficient: persistent WFP filters can outlive both. Service startup releases that
+/// orphan when no readable record explicitly enabled the strict kill switch, but this process
+/// may be the only one running, so residual filters still take the full disarm.
 #[cfg(any(windows, test))]
 fn cleanup_fast_path_allowed(
     service_present: bool,
@@ -370,10 +373,10 @@ fn main() -> anyhow::Result<()> {
             eprintln!(
                 "Cleanup could not prove this machine was made safe. The service registration \
                  was deleted whenever a service handle was available, and the recovery state \
-                 files were preserved. Do NOT rely on a reboot: the floor's two condition-free \
-                 block filters are the only persistent ones, while the loopback, DHCP and NDP \
-                 permits beside them are not, so restarting removes the exceptions and keeps \
-                 the block. Run the elevated Start-Menu shortcut \"Tono — 恢复网络 (Restore \
+                 files were preserved. Do NOT rely on a reboot: the floor's condition-free \
+                 block filters are persistent (only its loopback, DHCP and NDP permits persist \
+                 beside them), so restarting keeps Internet traffic blocked. Run the elevated \
+                 Start-Menu shortcut \"Tono — 恢复网络 (Restore \
                  Network)\", or run this uninstaller again, before restarting: {error:#}"
             );
             std::process::exit(code);
@@ -528,7 +531,9 @@ fn windows_cleanup() -> CleanupOutcome {
                     println!(
                         "Owner lock is held by live daemon {pid}; terminating it before disarm."
                     );
-                    terminate_process_by_pid(pid)?;
+                    if !terminate_service_process_by_pid(pid)? {
+                        println!("Owner pid {pid} is gone or belongs to a different image.");
+                    }
                     tono_service_protocol::acquire_service_owner()
                         .await
                         .ok()
@@ -614,20 +619,20 @@ fn windows_cleanup() -> CleanupOutcome {
                         }
                         _ => {
                             // The barrier could not be proven gone. A reboot does NOT clear it:
-                            // `only_floor_blocks_are_persistent` pins that exactly two filters
-                            // are persistent and that both are the condition-free block, so a
-                            // restart drops the loopback, DHCP and NDP permits and keeps the
-                            // block. The registration is still deleted — an orphaned auto-start
+                            // `exactly_the_intent_floor_is_persistent_in_every_mode` pins that
+                            // the persistent set is exactly the intent floor, so a restart keeps
+                            // the condition-free block (with only its loopback, DHCP and NDP
+                            // permits). The registration is still deleted — an orphaned auto-start
                             // service registration is the one leftover nothing else clears — but
                             // the user must be pointed at the elevated disarm, not at a restart.
                             eprintln!(
                                 "Disarm could not prove the network barrier was removed ({error:#}); \
                                  the service registration will still be deleted so no orphaned \
                                  auto-start service remains, and the state files are preserved for \
-                                 recovery. A reboot will NOT clear the barrier — only the \
-                                 condition-free block filters are persistent, and the permits \
-                                 beside them are not — so use the elevated Restore Network \
-                                 shortcut or run this uninstaller again first."
+                                 recovery. A reboot will NOT clear the barrier — the \
+                                 condition-free block filters are persistent, with only the \
+                                 loopback, DHCP and NDP permits beside them — so use the elevated \
+                                 Restore Network shortcut or run this uninstaller again first."
                             );
                             if blocking_error.is_none() {
                                 blocking_error = Some(error);

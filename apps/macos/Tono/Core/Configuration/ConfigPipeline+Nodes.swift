@@ -295,6 +295,10 @@ nonisolated extension ConfigPipeline {
             yaml += "    \(key): \"\(yamlScalar(scalar))\"\n"
         }
         if value.type == .hysteria2 {
+            // Pinned mihomo v1.19.30 has no keepalive field. sing-quic
+            // already sends a 10s QUIC keepalive and uses a 30s idle timeout.
+            // An unknown key would be ignored. Do not emit handshake-timeout
+            // or skip-cert-verify.
             append("password", value.password)
             append("sni", value.sni)
             append("fingerprint", value.tlsFingerprint)
@@ -309,7 +313,12 @@ nonisolated extension ConfigPipeline {
         // makes the server reject the handshake with `tls: internal error`.
         append("servername", value.sni)
         append("flow", value.flow)
-        append("client-fingerprint", value.clientFingerprint)
+        // uTLS chrome when the catalog omits a fingerprint. Reality still
+        // checks the public key; this does not skip certificate verification.
+        append(
+            "client-fingerprint",
+            value.clientFingerprint ?? (value.type == .vless ? "chrome" : nil)
+        )
         if let alterId = value.alterId {
             guard (0...65_535).contains(alterId) else {
                 throw TonoInjectionError.unsafeNode(value.name)

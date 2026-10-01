@@ -23,6 +23,10 @@ struct NetworkProtectionOperations {
     var disarm: () async throws -> Void = {
         try await PrivilegedRuntimeCoordinator.shared.disarmKillSwitch()
     }
+    /// Automatic recovery releases ordinary traffic while retaining the AI floor.
+    var releaseAfterFailure: () async throws -> Void = {
+        try await PrivilegedRuntimeCoordinator.shared.disarmKillSwitch(preserveAIHold: true)
+    }
     var restrictToBootstrap: () async throws -> Void = {
         try await PrivilegedRuntimeCoordinator.shared.restrictKillSwitchToBootstrap()
     }
@@ -45,6 +49,11 @@ struct NetworkProtectionOperations {
 struct ProtectionAuditOperations {
     var primaryNetworkService: () async -> String? = {
         await PrivilegedRuntimeCoordinator.shared.primaryNetworkService()
+    }
+    /// Default uplink for the connected reconciler and the one-minute audit.
+    /// Tests substitute a snapshot so a tick does not read the live store.
+    var uplinkSnapshot: () async -> NetworkUplinkSnapshot = {
+        NetworkUplinkSnapshot.current()
     }
     var protectedDNSIntegrity:
         (String) async -> PrivilegedRuntimeCoordinator.ProtectedDNSIntegrity = {

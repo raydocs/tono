@@ -5,6 +5,121 @@ import IOKit
 import IOKit.pwr_mgt
 import Security
 
+func upgradeSourceIsRegular(_ mode: mode_t) -> Bool {
+    (mode & S_IFMT) == S_IFREG
+}
+
+/// `lstat` rejects a FIFO or symlink before `open`. `O_NONBLOCK` covers the
+/// replacement that lands between the two. The fd is the inode that was
+/// checked, so a later copy does not reopen the user path.
+func openUpgradeSource(_ path: String) throws -> Int32 {
+    var metadata = stat()
+    guard lstat(path, &metadata) == 0 else {
+        throw HelperFailure.invalid("Cannot inspect upgrade source.")
+    }
+    guard upgradeSourceIsRegular(metadata.st_mode) else {
+        throw HelperFailure.invalid("Upgrade source is not a regular file.")
+    }
+    let fd = open(path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK)
+    guard fd >= 0 else {
+        throw HelperFailure.invalid("Cannot safely open upgrade source.")
+    }
+    var opened = stat()
+    guard fstat(fd, &opened) == 0,
+          upgradeSourceIsRegular(opened.st_mode),
+          opened.st_dev == metadata.st_dev,
+          opened.st_ino == metadata.st_ino else {
+        close(fd)
+        throw HelperFailure.invalid("Upgrade source changed before it was opened.")
+    }
+    return fd
+}
+
+func copyUpgradeSource(
+    from source: Int32,
+    to destination: String,
+    shouldContinue: () -> Bool
+) throws {
+    guard shouldContinue() else {
+        throw HelperFailure.stopping("Helper is stopping.")
+    }
+    unlink(destination)
+    let output = open(destination, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0o755)
+    guard output >= 0 else {
+        throw HelperFailure.system("Could not create upgrade copy.")
+    }
+    var committed = false
+    defer {
+        close(output)
+        if !committed { unlink(destination) }
+    }
+    var buffer = [UInt8](repeating: 0, count: 65_536)
+    while true {
+        guard shouldContinue() else {
+            throw HelperFailure.stopping("Helper is stopping.")
+        }
+        let count = Darwin.read(source, &buffer, buffer.count)
+        if count == 0 { break }
+        if count < 0 {
+            if errno == EINTR { continue }
+            throw HelperFailure.system("Could not read upgrade source.")
+        }
+        try buffer.withUnsafeBytes { raw in
+            guard let base = raw.baseAddress else {
+                throw HelperFailure.system("Could not read upgrade source.")
+            }
+            try writeAll(output, bytes: base, count: count)
+        }
+    }
+    let owner = geteuid()
+    guard fchown(output, owner, getegid()) == 0,
+          fchmod(output, 0o755) == 0,
+          fsync(output) == 0 else {
+        throw HelperFailure.system("Could not finish upgrade copy.")
+    }
+    committed = true
+}
+
+/// Copies run outside the update lock. Their paths must belong exclusively to
+/// this attempt so cancellation cannot unlink an installer's replacement.
+struct SilentUpgradeStaging {
+    let directory: String
+    var helperPath: String { directory + "/tono-core-helper" }
+    var corePath: String { directory + "/tono-sing-box" }
+
+    init(parent: String = "/Library/PrivilegedHelperTools") throws {
+        var template = Array((parent + "/tono-upgrade.XXXXXX").utf8CString)
+        guard mkdtemp(&template) != nil else {
+            throw HelperFailure.system("Could not create private upgrade staging.")
+        }
+        directory = String(cString: template)
+    }
+
+    func remove() {
+        unlink(helperPath)
+        unlink(corePath)
+        rmdir(directory)
+    }
+}
+
+/// The caller admits the replacement under the durable update lock and keeps
+/// that lock until both renames have completed.
+func replaceSilentUpgradeCopies(
+    staging: SilentUpgradeStaging,
+    helperDestination: String = "/Library/PrivilegedHelperTools/tono-core-helper",
+    coreDestination: String = "/Library/PrivilegedHelperTools/tono-sing-box",
+    commit: (_ replace: () throws -> Void) throws -> Void
+) throws {
+    try commit {
+        guard rename(staging.helperPath, helperDestination) == 0 else {
+            throw HelperFailure.system("Could not replace helper binary.")
+        }
+        guard rename(staging.corePath, coreDestination) == 0 else {
+            throw HelperFailure.system("Could not replace core binary.")
+        }
+    }
+}
+
 final class SocketServer {
     private let allowedUID: uid_t
     private let allowedGID: gid_t
@@ -16,8 +131,30 @@ final class SocketServer {
     private let powerMonitor: HelperPowerMonitor
     private let updates: UpdateTransaction
     private var serverFD: Int32 = -1
+    /// Last `openNetworkEpoch` observed by the idle loop. A newer epoch means
+    /// an arm or a release committed, so the core-down count starts over.
+    private var openNetworkEpoch: UInt64 = 0
+    private var consecutiveCoreDownChecks = 0
+    /// The peer that last successfully armed or started the Core, with the
+    /// kernel's start time for that pid so a reused pid is not mistaken for
+    /// the recorded incarnation. In memory only: a restarted helper has no
+    /// owner and keeps its current behavior.
+    private var sessionOwner: SessionOwner?
+    /// Idle-loop checks, 10s apart, with the bootstrap-only block still held
+    /// after its recorded owner died.
+    private var consecutiveOrphanedOwnerChecks = 0
 
-    /// `killSwitch` has already restored PF: see `startHelperDaemon`.
+    /// The process identity behind a peer socket, as read from the kernel —
+    /// never app-supplied.
+    struct SessionOwner {
+        let pid: pid_t
+        let startSeconds: UInt64
+        let startMicroseconds: UInt64
+    }
+
+    /// Launch does not install PF. `run()` releases a leftover after this
+    /// init has stopped a stale Core. A Core that is still running is left
+    /// alone.
     init(allowedUID: uid_t, killSwitch: KillSwitchManager) throws {
         self.allowedUID = allowedUID
         self.killSwitch = killSwitch
@@ -37,6 +174,26 @@ final class SocketServer {
         )
         try setupSocket()
         try powerMonitor.start()
+    }
+
+    /// The Core constructor has already stopped a stale child. A snapshot
+    /// left behind then points the system resolver at a listener that is
+    /// gone. Failure stays on the snapshot: startup must not turn it into
+    /// a PF block.
+    private func recoverDNSAfterStoppedCore() {
+        let snapshotPresent = protectedDNS.status()["snapshotPresent"] as? Bool == true
+        guard ProtectedDNSManager.shouldRecoverDNSAtBoot(
+            coreRunning: core.status().running,
+            snapshotPresent: snapshotPresent
+        ) else { return }
+        do {
+            _ = try protectedDNS.restore(deferringLossNotice: true)
+        } catch {
+            let detail = (error as? HelperFailure)?.message ?? String(describing: error)
+            FileHandle.standardError.write(Data(
+                "tono: boot DNS recovery kept the saved resolvers: \(detail)\n".utf8
+            ))
+        }
     }
 
     deinit {
@@ -72,19 +229,63 @@ final class SocketServer {
         }
     }
 
+    /// A saved DNS snapshot with the Core stopped still points the resolver
+    /// at a listener that is gone. Restore it at launch. Do not touch DNS
+    /// while the Core is running.
+    static func shouldRestoreSavedDNSAtLaunch(coreRunning: Bool, snapshotPresent: Bool) -> Bool {
+        !coreRunning && snapshotPresent
+    }
+
+    /// Idle-loop checks, 10s apart, with a bootstrap-only block still held
+    /// after its recorded owner died. Three is about 30s, like the core-down
+    /// threshold: long enough that a slow live connect is never misread,
+    /// short enough not to stretch the outage.
+    static let orphanedBootstrapReleaseThreshold = 3
+
+    /// What the Core-running branch of the idle loop should do about a
+    /// bootstrap-only block (a saved state whose `tunnelInterfaces` is
+    /// empty). A committed session never releases: it stays online through
+    /// its tunnel even when the app died. No recorded owner (this daemon
+    /// restarted mid-session) never releases either: the owner is unknown,
+    /// not gone. Anything unreadable counts as alive, so doubt keeps
+    /// protection.
+    static func orphanedBootstrapAction(
+        stateFilePresent: Bool,
+        bootstrapOnly: Bool,
+        ownerRecorded: Bool,
+        ownerAlive: Bool,
+        consecutiveChecks: Int
+    ) -> OrphanedBootstrapAction {
+        guard stateFilePresent, bootstrapOnly, ownerRecorded, !ownerAlive else {
+            return .reset
+        }
+        return consecutiveChecks >= orphanedBootstrapReleaseThreshold ? .release : .count
+    }
+
     func run() {
+        // After listen, before any client. The stale Core is already gone.
+        // macOS has no strict kill-switch opt-in, so a helper start with the
+        // Core down opens the original network. A Core that is still running
+        // keeps the block it already has. DNS restore uses the same
+        // SCPreferences path as disconnect and has no extra deadline.
+        releaseLeftoverBlockIfCoreStopped()
+        recoverDNSAfterStoppedCore()
         var lastProtectionCheck = Date()
         while helperShutdownRequested == 0 {
-            // Low-frequency PF liveness check between requests. Under the update
-            // lock like every IPC mutation, so it cannot interleave with an
-            // out-of-process emergency disarm or an update transition.
+            // Low-frequency check between requests. Under the update lock
+            // like every IPC mutation, so it cannot interleave with an arm
+            // or an out-of-process emergency disarm.
             if Date().timeIntervalSince(lastProtectionCheck) >= 10 {
                 lastProtectionCheck = Date()
+                // BRICK-M11: deleting the app while this daemon stays up used
+                // to leave PF in place until the next start. This takes the
+                // update lock itself; do not call it from inside locked.
+                if releaseIfTonoWasRemoved() { return }
+                // Supervise only while the Core is running. While it is down,
+                // withhold the bundle permit at once and release the saved
+                // block after the watchdog threshold.
                 try? updates.storage.locked {
-                    killSwitch.superviseProtection()
-                    // A Core that exited took its utun with it (#608). Only
-                    // the app's next arm with a live tunnel restores the permit.
-                    if !core.status().running { try? killSwitch.withholdReviewedBundlePermit() }
+                    observeCoreForWatchdog()
                 }
             }
             var descriptor = pollfd(
@@ -117,6 +318,210 @@ final class SocketServer {
         try? core.stop()
     }
 
+    /// Immediate release at start. Idempotent: no state file means no pfctl.
+    /// A running Core is not disarmed and is not reinstalled from the file.
+    private func releaseLeftoverBlockIfCoreStopped() {
+        guard !core.status().running else { return }
+        guard KillSwitchManager.stateFileExists() else {
+            killSwitch.reconcileSelectiveRecoveryIfReleased()
+            return
+        }
+        do {
+            _ = try killSwitch.disarm(preserveAIHold: KillSwitchManager.automaticReleasePreservesAIHold())
+        } catch {
+            let detail = (error as? HelperFailure)?.message ?? String(describing: error)
+            FileHandle.standardError.write(Data(
+                "tono: startup release could not clear the kill switch: \(detail)\n".utf8
+            ))
+            return
+        }
+    }
+
+    /// While the Core is running, keep the in-session block (a live connect
+    /// must not leak). When the Core stays down, release instead of
+    /// reinstalling that block. The threshold skips the short gap between
+    /// arm and the Core process appearing.
+    private func observeCoreForWatchdog() {
+        let epoch = killSwitch.openNetworkEpoch
+        if epoch != openNetworkEpoch {
+            openNetworkEpoch = epoch
+            consecutiveCoreDownChecks = 0
+        }
+        if KillSwitchManager.shouldReinstallKillSwitch(coreRunning: core.status().running) {
+            consecutiveCoreDownChecks = 0
+            // MAC-ORPHAN-BOOTSTRAP-PF: an app that died between /core/start
+            // and the lock arm leaves this branch reinstalling a bootstrap
+            // block nobody is left to lift. Check that before supervising.
+            if observeOrphanedBootstrap() { return }
+            killSwitch.superviseProtection()
+            return
+        }
+        // The Core took its utun with it (#608). Narrow the reviewed-bundle
+        // permit immediately. The all-block, if still saved, waits for the
+        // threshold below so a connect can start the Core.
+        try? killSwitch.withholdReviewedBundlePermit()
+        if KillSwitchManager.stateFileExists() {
+            consecutiveCoreDownChecks += 1
+            // DNS stays put until the block is released. Restoring it during
+            // the gap between arm and the Core process would undo a connect.
+            guard KillSwitchManager.watchdogShouldRestoreNetwork(
+                consecutiveCoreDownChecks: consecutiveCoreDownChecks
+            ) else { return }
+            do {
+                _ = try killSwitch.disarm(preserveAIHold: KillSwitchManager.automaticReleasePreservesAIHold())
+            } catch {
+                let detail = (error as? HelperFailure)?.message ?? String(describing: error)
+                FileHandle.standardError.write(Data(
+                    "tono: watchdog could not clear the kill switch: \(detail)\n".utf8
+                ))
+                return
+            }
+        } else {
+            consecutiveCoreDownChecks = 0
+            killSwitch.reconcileSelectiveRecoveryIfReleased()
+        }
+        recoverDNSAfterStoppedCore()
+    }
+
+    /// MAC-ORPHAN-BOOTSTRAP-PF: the app armed the bootstrap block (empty
+    /// `tunnelInterfaces`), called /core/start, and then died before the arm
+    /// that commits the tunnel — with chained residential proxies that window
+    /// runs to tens of seconds. The Core is still running, so the branch
+    /// above would reinstall that block every 10s and the Mac stays offline
+    /// until Tono is relaunched. Returns true once the release has run, so
+    /// this pass does not also supervise the block it just lifted.
+    private func observeOrphanedBootstrap() -> Bool {
+        // A pending native update owns runtime changes and may arm in-process
+        // after the old app exited. Leave it to the update's own recovery; an
+        // unreadable ledger counts as pending.
+        let updatePending: Bool
+        if let ledger = try? updates.storage.load() {
+            updatePending = ledger.attempt.map { attempt in attempt.receipt.phase != .committed } ?? false
+        } else {
+            updatePending = true
+        }
+        if updatePending {
+            consecutiveOrphanedOwnerChecks = 0
+            return false
+        }
+        let owner = sessionOwner
+        switch Self.orphanedBootstrapAction(
+            stateFilePresent: KillSwitchManager.stateFileExists(),
+            bootstrapOnly: (try? killSwitch.loadState())?.tunnelInterfaces.isEmpty ?? false,
+            ownerRecorded: owner != nil,
+            ownerAlive: owner.map { !Self.sessionOwnerHasExited($0) } ?? true,
+            consecutiveChecks: consecutiveOrphanedOwnerChecks
+        ) {
+        case .reset:
+            consecutiveOrphanedOwnerChecks = 0
+        case .count:
+            consecutiveOrphanedOwnerChecks += 1
+        case .release:
+            releaseOrphanedBootstrap(owner: owner)
+            return true
+        }
+        return false
+    }
+
+    /// Fail open exactly as a disconnect would, minus the app: stop the Core
+    /// (it holds the TUN and the protected DNS listener), lift PF, then put
+    /// the saved resolvers back. Best-effort at every step; with the owner
+    /// cleared, later passes supervise or release again as their findings
+    /// dictate.
+    private func releaseOrphanedBootstrap(owner: SessionOwner?) {
+        do {
+            try core.stop()
+        } catch {
+            let detail = (error as? HelperFailure)?.message ?? String(describing: error)
+            FileHandle.standardError.write(Data(
+                "tono: orphaned bootstrap core stop failed: \(detail)\n".utf8
+            ))
+        }
+        do {
+            try Self.releaseOrphanedBootstrapProtection(
+                disarm: { _ = try killSwitch.disarm(preserveAIHold: KillSwitchManager.automaticReleasePreservesAIHold()) },
+                applySelectiveLayer: {}
+            )
+        } catch {
+            let detail = (error as? HelperFailure)?.message ?? String(describing: error)
+            FileHandle.standardError.write(Data(
+                "tono: orphaned bootstrap release failed: \(detail)\n".utf8
+            ))
+        }
+        recoverDNSAfterStoppedCore()
+        clearSessionOwner()
+        FileHandle.standardError.write(Data(
+            "tono: the app (pid \(owner?.pid ?? 0)) died before committing the tunnel; released its bootstrap kill switch\n".utf8
+        ))
+    }
+
+    static func releaseOrphanedBootstrapProtection(
+        disarm: () throws -> Void,
+        applySelectiveLayer: () -> Void
+    ) throws {
+        try disarm()
+        applySelectiveLayer()
+    }
+
+    /// A successful arm or start from an authenticated peer makes that peer
+    /// the session owner; a later one replaces it. Only the main app passes
+    /// the authorizer for these routes, and it is long-lived.
+    private func recordSessionOwner(socket: Int32) {
+        let pid = Self.peerPID(socket: socket)
+        guard pid > 0, let start = Self.processStartTime(pid: pid) else { return }
+        sessionOwner = SessionOwner(
+            pid: pid,
+            startSeconds: start.seconds,
+            startMicroseconds: start.microseconds
+        )
+        consecutiveOrphanedOwnerChecks = 0
+    }
+
+    /// The session is over: stop, disarm, or the orphan release above.
+    private func clearSessionOwner() {
+        sessionOwner = nil
+        consecutiveOrphanedOwnerChecks = 0
+    }
+
+    /// PID of the process that opened the peer socket, straight from the
+    /// kernel; -1 when the option does not answer.
+    static func peerPID(socket: Int32) -> pid_t {
+        var pid: pid_t = -1
+        var length = socklen_t(MemoryLayout<pid_t>.size)
+        let outcome = withUnsafeMutablePointer(to: &pid) {
+            getsockopt(socket, SOL_LOCAL, LOCAL_PEERPID, $0, &length)
+        }
+        return outcome == 0 ? pid : -1
+    }
+
+    /// Process start time from the kernel, so pid reuse is detectable. nil
+    /// when the process cannot be read.
+    static func processStartTime(pid: pid_t) -> (seconds: UInt64, microseconds: UInt64)? {
+        var info = proc_bsdinfo()
+        let size = withUnsafeMutablePointer(to: &info) { pointer in
+            proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, pointer, Int32(MemoryLayout<proc_bsdinfo>.size))
+        }
+        guard size == MemoryLayout<proc_bsdinfo>.size else { return nil }
+        return (info.pbi_start_tvsec, info.pbi_start_tvusec)
+    }
+
+    /// Whether the recorded owner incarnation is definitely gone: no such
+    /// pid, a zombie, or a start time that moved (the kernel reissued the
+    /// pid to another process). Anything unreadable counts as alive, so
+    /// doubt keeps protection.
+    static func sessionOwnerHasExited(_ owner: SessionOwner) -> Bool {
+        var info = proc_bsdinfo()
+        let size = withUnsafeMutablePointer(to: &info) { pointer in
+            proc_pidinfo(owner.pid, PROC_PIDTBSDINFO, 0, pointer, Int32(MemoryLayout<proc_bsdinfo>.size))
+        }
+        if size == MemoryLayout<proc_bsdinfo>.size {
+            return info.pbi_status == UInt32(SZOMB)
+                || info.pbi_start_tvsec != owner.startSeconds
+                || info.pbi_start_tvusec != owner.startMicroseconds
+        }
+        return kill(owner.pid, 0) == -1 && errno == ESRCH
+    }
+
     private func handle(_ client: Int32) {
         _ = fcntl(client, F_SETFD, FD_CLOEXEC)
         var timeout = timeval(tv_sec: 3, tv_usec: 0)
@@ -134,17 +539,24 @@ final class SocketServer {
 
         do {
             let request = try readRequest(client)
-            try updates.storage.locked {
-                // Keep the existing authorizer for ordinary networking. A
-                // pending update additionally requires the registered bundle.
-                let peer = authorizer.peerIdentity(socket: client)
-                if let peer { try updates.gate(method: request.method, path: request.path, peer: peer) }
-                else if request.method != "GET" { throw HelperFailure.invalid("Cannot bind helper mutation to a peer bundle.") }
-                if request.path.hasPrefix("/update/") {
-                    guard let peer else { throw HelperFailure.invalid("Cannot authenticate update peer.") }
-                    try handleUpdate(request, peer: peer, client: client)
-                } else {
-                    try handleRuntime(request, client: client)
+            if request.method == "POST", request.path == "/helper/upgrade" {
+                // The copy must not hold the update lock. A FIFO used to block
+                // inside this lock, so SIGTERM was never observed and
+                // `--emergency-disarm` spun until the open returned.
+                try handleSilentUpgrade(request, client: client)
+            } else {
+                try updates.storage.locked {
+                    // Keep the existing authorizer for ordinary networking. A
+                    // pending update additionally requires the registered bundle.
+                    let peer = authorizer.peerIdentity(socket: client)
+                    if let peer { try updates.gate(method: request.method, path: request.path, peer: peer) }
+                    else if request.method != "GET" { throw HelperFailure.invalid("Cannot bind helper mutation to a peer bundle.") }
+                    if request.path.hasPrefix("/update/") {
+                        guard let peer else { throw HelperFailure.invalid("Cannot authenticate update peer.") }
+                        try handleUpdate(request, peer: peer, client: client)
+                    } else {
+                        try handleRuntime(request, client: client)
+                    }
                 }
             }
         } catch let failure as HelperFailure {
@@ -185,6 +597,7 @@ final class SocketServer {
                         transitionGate.isAwake() && killSwitch.status()["live"] as? Bool == true
                     }
                 )
+                recordSessionOwner(socket: client)
                 sendResponse(client, status: 200, object: ["ok": true])
             case ("POST", "/core/sync"):
                 let object = try jsonObject(request.body)
@@ -215,6 +628,7 @@ final class SocketServer {
                     FileHandle.standardError.write(Data("tono: \(detail)\n".utf8))
                 }
                 try core.stop()
+                clearSessionOwner()
                 sendResponse(client, status: 200, object: ["ok": true])
             case ("GET", "/killswitch/status"):
                 guard request.body.isEmpty else { throw HelperFailure.invalid("Unexpected request body.") }
@@ -229,12 +643,14 @@ final class SocketServer {
                     object,
                     commitAllowed: { transitionGate.isAwake() }
                 )
+                recordSessionOwner(socket: client)
                 sendResponse(client, status: 200, object: response)
-            case ("POST", "/killswitch/disarm"):
+            case ("POST", "/killswitch/disarm"), ("POST", "/killswitch/release"):
                 guard request.body.isEmpty else { throw HelperFailure.invalid("Unexpected request body.") }
                 let response = try transitionGate.whileAwake {
-                    try killSwitch.disarm()
+                    try killSwitch.disarm(preserveAIHold: request.path == "/killswitch/release")
                 }
+                clearSessionOwner()
                 sendResponse(client, status: 200, object: response)
             case ("GET", "/dns/status"):
                 guard request.body.isEmpty else { throw HelperFailure.invalid("Unexpected request body.") }
@@ -253,22 +669,6 @@ final class SocketServer {
             case ("POST", "/dns/restore"):
                 guard request.body.isEmpty else { throw HelperFailure.invalid("Unexpected request body.") }
                 sendResponse(client, status: 200, object: try protectedDNS.restore())
-            case ("POST", "/helper/upgrade"):
-                let object = try jsonObject(request.body)
-                guard let helperSrc = object["helperSource"] as? String,
-                      let mihomoSrc = object["mihomoSource"] as? String else {
-                    throw HelperFailure.invalid("Invalid helper upgrade request.")
-                }
-                guard let peerBundle = authorizer.peerBundleURL(socket: client) else {
-                    throw HelperFailure.invalid("Upgrade requires an authenticated peer bundle.")
-                }
-                try stageAndUpgrade(
-                    helperSource: helperSrc,
-                    mihomoSource: mihomoSrc,
-                    peerBundlePath: peerBundle.path
-                )
-                sendResponse(client, status: 200, object: ["ok": true, "restarting": true])
-                helperShutdownRequested = 1
             default:
                 sendResponse(client, status: 404, object: ["ok": false, "error": "Not found."])
             }
@@ -304,6 +704,7 @@ final class SocketServer {
             case ("POST", "/update/commit"): try transitionGate.whileAwake { try updates.commit(peer: peer) }
             case ("POST", "/update/cancel"): try updates.cancel(peer: peer)
             case ("POST", "/update/disconnect"): try updates.disconnect(peer: peer)
+            case ("POST", "/update/release"): try updates.disconnect(peer: peer, preserveAIHold: true)
             case ("POST", "/update/retire"): try transitionGate.whileAwake { try updates.retire(peer: peer) }
             default: throw HelperFailure.invalid("Unknown update operation.")
             }
@@ -311,10 +712,49 @@ final class SocketServer {
         sendResponse(client, status: 200, object: try updates.status())
     }
 
+    /// Auth and the pending-update gate take the lock only for the ledger
+    /// read. The file copy runs outside it, and the rename takes the lock
+    /// again so a shutdown or a new pending update can still win.
+    private func handleSilentUpgrade(_ request: HTTPRequest, client: Int32) throws {
+        let object = try jsonObject(request.body)
+        guard let helperSrc = object["helperSource"] as? String,
+              let mihomoSrc = object["mihomoSource"] as? String else {
+            throw HelperFailure.invalid("Invalid helper upgrade request.")
+        }
+        guard let peerBundle = authorizer.peerBundleURL(socket: client) else {
+            throw HelperFailure.invalid("Upgrade requires an authenticated peer bundle.")
+        }
+        try updates.storage.locked {
+            guard let peer = authorizer.peerIdentity(socket: client) else {
+                throw HelperFailure.invalid("Cannot bind helper mutation to a peer bundle.")
+            }
+            try updates.gate(method: request.method, path: request.path, peer: peer)
+        }
+        try stageAndUpgrade(
+            helperSource: helperSrc,
+            mihomoSource: mihomoSrc,
+            peerBundlePath: peerBundle.path
+        ) { replace in
+            try updates.storage.locked {
+                guard helperShutdownRequested == 0 else {
+                    throw HelperFailure.stopping("Helper is stopping.")
+                }
+                guard let peer = authorizer.peerIdentity(socket: client) else {
+                    throw HelperFailure.invalid("Cannot bind helper mutation to a peer bundle.")
+                }
+                try updates.gate(method: request.method, path: request.path, peer: peer)
+                try replace()
+            }
+        }
+        sendResponse(client, status: 200, object: ["ok": true, "restarting": true])
+        helperShutdownRequested = 1
+    }
+
     private func stageAndUpgrade(
         helperSource: String,
         mihomoSource: String,
-        peerBundlePath: String
+        peerBundlePath: String,
+        commit: (_ replace: () throws -> Void) throws -> Void
     ) throws {
         let allowedPrefix = peerBundlePath.hasSuffix("/") ? peerBundlePath + "Contents/" : peerBundlePath + "/Contents/"
         guard helperSource.hasPrefix(allowedPrefix),
@@ -352,46 +792,23 @@ final class SocketServer {
         }
         _ = try UpdatePackage.verifyCode(bundlePath, identifier: "com.raydocs.tono")
 
-        let helperFD = open(realHelperPath, O_RDONLY | O_CLOEXEC | O_NOFOLLOW)
-        guard helperFD >= 0 else {
-            throw HelperFailure.invalid("Cannot safely open helper source.")
-        }
-        close(helperFD)
+        let helperFD = try openUpgradeSource(realHelperPath)
+        defer { close(helperFD) }
+        let mihomoFD = try openUpgradeSource(realMihomoPath)
+        defer { close(mihomoFD) }
 
-        let mihomoFD = open(realMihomoPath, O_RDONLY | O_CLOEXEC | O_NOFOLLOW)
-        guard mihomoFD >= 0 else {
-            throw HelperFailure.invalid("Cannot safely open core source.")
-        }
-        close(mihomoFD)
+        let staging = try SilentUpgradeStaging()
+        defer { staging.remove() }
+        let helperTemp = staging.helperPath
+        let mihomoTemp = staging.corePath
 
-        try UpdatePackage.verifyCode(realHelperPath, identifier: "com.raydocs.tono.helper")
-        try UpdatePackage.verifyCode(realMihomoPath, identifier: "sing-box")
-
-        let helperTemp = "/Library/PrivilegedHelperTools/tono-core-helper.new"
-        let mihomoTemp = "/Library/PrivilegedHelperTools/tono-sing-box.new"
-        let helperDest = "/Library/PrivilegedHelperTools/tono-core-helper"
-        let mihomoDest = "/Library/PrivilegedHelperTools/tono-sing-box"
-
-        unlink(helperTemp)
-        unlink(mihomoTemp)
-
-        let p1 = Process()
-        p1.executableURL = URL(fileURLWithPath: "/usr/bin/install")
-        p1.arguments = ["-o", "root", "-g", "wheel", "-m", "0755", realHelperPath, helperTemp]
-        try p1.run()
-        p1.waitUntilExit()
-        guard p1.terminationStatus == 0 else {
-            throw HelperFailure.system("Could not copy helper binary.")
-        }
-
-        let p2 = Process()
-        p2.executableURL = URL(fileURLWithPath: "/usr/bin/install")
-        p2.arguments = ["-o", "root", "-g", "wheel", "-m", "0755", realMihomoPath, mihomoTemp]
-        try p2.run()
-        p2.waitUntilExit()
-        guard p2.terminationStatus == 0 else {
+        let continueCopy = { helperShutdownRequested == 0 }
+        try copyUpgradeSource(from: helperFD, to: helperTemp, shouldContinue: continueCopy)
+        do {
+            try copyUpgradeSource(from: mihomoFD, to: mihomoTemp, shouldContinue: continueCopy)
+        } catch {
             unlink(helperTemp)
-            throw HelperFailure.system("Could not copy core binary.")
+            throw error
         }
 
         do {
@@ -418,22 +835,27 @@ final class SocketServer {
                   helperUpgradeAdmissible(running: helperVersion, candidate: candidate) else {
                 throw HelperFailure.invalid("Silent helper upgrade requires a newer helper version.")
             }
+            guard helperShutdownRequested == 0 else {
+                throw HelperFailure.stopping("Helper is stopping.")
+            }
+            try replaceSilentUpgradeCopies(staging: staging, commit: commit)
         } catch {
             unlink(helperTemp)
             unlink(mihomoTemp)
             throw error
         }
-
-        guard rename(helperTemp, helperDest) == 0 else {
-            unlink(helperTemp)
-            unlink(mihomoTemp)
-            throw HelperFailure.system("Could not replace helper binary.")
-        }
-        guard rename(mihomoTemp, mihomoDest) == 0 else {
-            unlink(mihomoTemp)
-            throw HelperFailure.system("Could not replace core binary.")
-        }
     }
+}
+
+/// The idle loop's verdict on a bootstrap-only block whose recorded owner
+/// may be gone.
+enum OrphanedBootstrapAction: Equatable {
+    /// The conditions do not hold; any count from earlier checks is void.
+    case reset
+    /// The owner is gone; count this check.
+    case count
+    /// The owner stayed gone past the threshold; fail open.
+    case release
 }
 
 /// Silent upgrades never move the root helper backwards. Versions are the

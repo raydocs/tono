@@ -45,6 +45,8 @@
 | `GET customers/{id}/activity?range` | `ListDto<ActivityHourDto>` |
 | `GET customers/{id}/destinations?range` | `ListDto<DestinationRowDto>` |
 | `GET customers/{id}/services?range` | `ListDto<ServiceUsageDto>` |
+| `GET customers/{id}/diagnostics?deviceId=` | `CustomerDiagnosticsDto`（会话、链路跳、`/24` 出口、DNS 检查、已同意的 AI 路由；不含邮箱、主机名、完整 IP。字段见 [diagnostics-privacy.md](../diagnostics-privacy.md)） |
+| `GET failure-clusters?from&to` | `{ clusters, updatedAt }`。与工程机器人的只读 token 接口同一批聚类，但这条走 Cloudflare Access（`customers.read`）。`sample` 是脱敏后的 JSON 文本。窗口规则与 token 接口相同 |
 | `GET incidents?status&severity&subjectType&since` | `ListDto<IncidentDto>`（`status=resolved` 含误报关闭；控制台再滤） |
 | `GET incidents/{id}` | `IncidentDetailDto` (`{ incident, events, jobs, deliveries }`) |
 | `POST incidents/{id}/ack\|snooze\|resolve\|notes` | `IncidentDto`。`snooze` 接受 `until`（epoch 秒）、`durationSec`，或控制台用的 `seconds`（1..7 天）。`resolve` 必带 `closure`：`verified` / `false_positive` / `manual`，另可 `note`；`false_positive` 写事件 `note`「误报：…」，不计入恢复 |
@@ -153,4 +155,4 @@
 
 环境变量 `OPS_ROLES` 是 JSON 对象（email → 角色）；解析时 email 一律小写。非法 JSON、非对象、非字符串值、未知角色：忽略并 `console.warn` 一次，不抛错。未列出的 Access 邮箱默认为 `owner`（今天的行为不变）。邮箱写错时也会静默得到 `owner`。
 
-闸门：匹配到的 v1 路由在 `dispatchOpsV1` 里检查；另外五条 legacy 写（`POST fleet-nodes/{n}/retire` → `nodes.retire`；`PATCH signup-allowlist`、`DELETE signup-allowlist`、`POST users/onboard`、`PATCH users/{id}` → `customers.write`）在 `opsRoutes` 里检查。不通过则 `403` `{ error: { code: "ROLE_FORBIDDEN" } }`。shared-admin 的资源尚未按角色拦截（exit-catalog PUT、signup-allowlist POST、users/{id}/close、exit-nodes POST/DELETE/token、exit-credential-rollout POST、users/{id}/devices/{d}/diagnostics-logs、traffic-policy PUT、home-exits POST/assign/import、device-actions POST、product-accounts POST/ban/replace、node-profiles POST、usage-metering-rollout POST，以及由 shared-admin 先于 v1 dispatch 承接的 `GET audit`）。`ops_audit` 行上的 `actor_role` 仍记为 `owner`，本版不改。
+闸门：匹配到的 v1 路由在 `dispatchOpsV1` 里检查。Access 门（`/api/v1/ops/*`）进入 shared-admin 之前先查 `src/ops/access-roles.ts`：shared-admin 资源与 legacy 路由各有一张表（例：`PUT exit-catalog`、`PUT traffic-policy`、`home-exits` 写 → `settings.publish`；`exit-nodes` 写与 `exit-credential-rollout` POST → `nodes.publish`；全部 `diagnostics-logs` / `diagnostics/logs*` → `customers.raw-logs`；`POST users/{id}/close` 仅 owner；`device-actions` POST、`users/{id}/home-binding` 写、`POST signup-allowlist` → `customers.write`；legacy 读按资源归 `nodes.read` / `customers.read` / `settings.read` / `system.read` / `incidents.read`）。三张表都不认识的路径仅 owner 可用。五条 legacy 写在 `opsRoutes` 里另有同样的检查。不通过则 `403` `{ error: { code: "ROLE_FORBIDDEN" } }`。bearer 门（`/api/v1/admin/*`）不分角色。`ops_audit` 行上的 `actor_role` 仍记为 `owner`，本版不改。

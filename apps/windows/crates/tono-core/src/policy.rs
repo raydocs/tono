@@ -301,6 +301,7 @@ const PROTECTED_DIRECT_SUFFIXES: &[&str] = &[
 fn is_protected_from_direct(host: &str) -> bool {
     PROTECTED_DIRECT_SUFFIXES
         .iter()
+        .chain(crate::config::CLAUDE_HOME_DOMAINS.iter())
         .any(|suffix| host == *suffix || host.ends_with(&format!(".{suffix}")))
 }
 
@@ -308,7 +309,12 @@ fn direct_suffix_overlaps_protected(host: &str) -> bool {
     is_protected_from_direct(host)
         || PROTECTED_DIRECT_SUFFIXES
             .iter()
-            .any(|protected| protected.ends_with(&format!(".{host}")))
+            .chain(crate::config::CLAUDE_HOME_DOMAINS.iter())
+            .any(|protected| protected.ends_with(&format!(".{host}"))
+                // Only these reviewed assistant children run ahead of the
+                // Alibaba parent in both emitters. All other overlaps stay denied.
+                && !(host == "aliyuncs.com"
+                    && crate::config::DEDICATED_MODEL_API_SUFFIXES.contains(protected)))
 }
 
 /// Wire shape of `GET traffic-policy` (digest semantics identical to the
@@ -1147,6 +1153,86 @@ mod tests {
         assert!(policy.domains.is_empty());
         assert!(policy.web_domains.is_empty());
         assert!(policy.direct_suffixes.is_empty());
+    }
+
+    #[test]
+    fn dashscope_children_cannot_be_direct_but_the_alibaba_parent_survives() {
+        let document = serde_json::json!({
+            "version": 3, "domains": [], "mediaEndpoints": [], "webDomains": [],
+            "directSuffixes": [{"host": "aliyuncs.com", "ports": [80, 443]}],
+        });
+        for trusted in [false, true] {
+            let policy = validate_policy_with_trust(
+                &response(1, &document.to_string()), &no_protected(), trusted,
+            ).unwrap();
+            assert_eq!(policy.direct_suffixes[0].host, "aliyuncs.com");
+            for host in [
+                "dashscope.aliyuncs.com", "cn-hongkong.dashscope.aliyuncs.com",
+                "coding-intl.dashscope.aliyuncs.com", "dashscope-intl.aliyuncs.com",
+                "dashscope-us.aliyuncs.com", "maas.aliyuncs.com",
+                "workspace.cn-beijing.maas.aliyuncs.com", "trial.ap-southeast-1.maas.aliyuncs.com",
+                "token-plan.ap-southeast-1.maas.aliyuncs.com",
+            ] {
+                for field in ["domains", "webDomains", "directSuffixes"] {
+                    let mut attempt = document.clone();
+                    attempt[field] = serde_json::json!([{"host": host, "ports": [443]}]);
+                    let policy = validate_policy_with_trust(
+                        &response(1, &attempt.to_string()), &no_protected(), trusted,
+                    ).unwrap();
+                    assert!(policy.domains.is_empty(), "{field}/{host}");
+                    assert!(policy.web_domains.is_empty(), "{field}/{host}");
+                    if field == "directSuffixes" {
+                        assert!(policy.direct_suffixes.is_empty(), "{host}");
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn trusted_policy_cannot_direct_other_assistant_suffixes() {
+        for host in [
+            "openai.com",
+            "chatgpt.com",
+            "chat.com",
+            "ai.com",
+            "oaistatic.com",
+            "oaiusercontent.com",
+            "api.openai.com",
+            "grok.com",
+            "grok.x.com",
+            "grokipedia.com",
+            "x.ai",
+            "x.com",
+            "perplexity.ai",
+            "perplexity.com",
+            "pplx.ai",
+            "gemini.google.com",
+            "bard.google.com",
+            "aistudio.google.com",
+            "generativelanguage.googleapis.com",
+            "notebooklm.google.com",
+            "google.com",
+            "googleapis.com",
+            "muse.ai",
+            "meta.ai",
+            "muse.meta.com",
+            "meta.com",
+            "facebook.com",
+            "instagram.com",
+            "threads.net",
+            "gmail.com",
+            "accounts.google.com",
+        ] {
+            let document = format!(
+                r#"{{"version":3,"domains":[],"mediaEndpoints":[],"webDomains":[],"directSuffixes":[{{"host":"{host}","ports":[443]}},{{"host":"example.com","ports":[443]}}]}}"#
+            );
+            let policy =
+                validate_policy_with_trust(&response(1, &document), &no_protected(), true).unwrap();
+
+            assert_eq!(policy.direct_suffixes.len(), 1, "{host}");
+            assert_eq!(policy.direct_suffixes[0].host, "example.com", "{host}");
+        }
     }
 
     #[test]

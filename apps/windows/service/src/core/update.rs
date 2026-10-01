@@ -11,10 +11,11 @@ use crate::update_contract::{
 use crate::update_transaction::*;
 use crate::update_wire::{UpdateRequest, UpdateStatus};
 use anyhow::{Context as _, Result, ensure};
+pub use super::windows_kill_switch::strict_kill_switch_intent_on_disk;
 pub use gate::{GateReason, GateRefusal, GateReport, reason_of, refusal};
 pub use security::{
-    UserLaunch, app_image, image, install_root, parent_image, pin_path, program_files,
-    record_installed_version, tunnel_absent, verify_tree,
+    UserLaunch, app_image, image, install_root, parent_image, pin_path, process_clock_now,
+    program_files, record_installed_version, resume_successor, tunnel_absent, verify_tree,
 };
 use std::{
     fs::OpenOptions,
@@ -222,11 +223,12 @@ pub fn copy_private(
 pub fn components(root: &Path, service: &Path) -> Result<Components> {
     verify_tree(root, 0)?;
     let _service = pin_path(service, true)?;
-    for path in [
-        root.join("Tono.exe"),
-        root.join("tono-core.exe"),
-        service.into(),
-    ] {
+    let sing_box = root.join("sing-box.exe");
+    let mut images = vec![root.join("Tono.exe"), root.join("tono-core.exe"), service.to_path_buf()];
+    if sing_box.is_file() {
+        images.push(sing_box.clone());
+    }
+    for path in images {
         ensure!(
             !matches!(
                 tono_authenticode::verify(&path),
@@ -239,6 +241,11 @@ pub fn components(root: &Path, service: &Path) -> Result<Components> {
         app_sha256: file_digest(&root.join("Tono.exe"))?,
         core_sha256: file_digest(&root.join("tono-core.exe"))?,
         privileged_sha256: file_digest(service)?,
+        sing_box_sha256: if sing_box.is_file() {
+            file_digest(&sing_box)?
+        } else {
+            String::new()
+        },
     })
 }
 
@@ -303,6 +310,78 @@ fn owner_proxy_absent(owner: &AuthenticatedOwner) -> Result<()> {
         anyhow::bail!("not a Windows owner");
     };
     security::no_proxy(sid)
+}
+
+fn begin_update_release(
+    store: &mut Store,
+    owner: &AuthenticatedOwner,
+    peer: &Image,
+) -> Result<()> {
+    // Record the authenticated request before any release.
+    // The original recovery obligation is never rewritten as Unprotected.
+    store.request_disconnect(&owner.key, peer, now()?)?;
+    wfp::authorize_write_for(&owner.key)?;
+    Ok(())
+}
+
+fn prepare_failure_releases(strict: bool, core_stop_attempted: bool) -> bool {
+    core_stop_attempted && !strict
+}
+
+async fn release_failed_preparation(
+    store: &mut Store,
+    owner: &AuthenticatedOwner,
+    peer: &Image,
+    core_stopped: bool,
+) -> Result<()> {
+    begin_update_release(store, owner, peer)?;
+    let stopped = if core_stopped {
+        Ok(())
+    } else {
+        manager::CORE_MANAGER.lock().await.stop_core().await
+    };
+    let persisted = desired::persist_owner_core_stopped(owner).await;
+    let cleared = desired::clear_active_owner().await;
+    // Automatic failure opens general traffic but retains the secondary AI hold.
+    // Desired-state failures must not prevent the DNS/WFP release.
+    wfp::release_applying_narrow().await?;
+    stopped?;
+    persisted?;
+    cleared?;
+    Ok(())
+}
+
+/// Prepare already stopped Core and narrowed WFP to bootstrap Blocked before Install
+/// spawns the executor. A `spawn` error means that process never existed. Non-strict
+/// sessions release general traffic and keep the AI hold. Strict stays Blocked.
+fn executor_spawn_failure_releases(strict: bool) -> bool {
+    !strict
+}
+
+fn save_prepared_attempt(store: &mut Store, next: State) -> Result<()> {
+    if let Some(a) = &store.state.attempt
+        && a.receipt.phase == Phase::Committed
+    {
+        let plan = store.attempt_dir()?.join("replacement.json");
+        let service_dir = crate::service_paths().install_dir();
+        let roots = [a.install_root.as_path(), service_dir.as_path()];
+        let mut scratch_remains = false;
+        for member in read_plan(&plan, &a.receipt.attempt_id, &roots)? {
+            for path in [&member.backup, &member.restore, &member.publish_scratch] {
+                match std::fs::symlink_metadata(path) {
+                    Ok(_) => scratch_remains = true,
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(error) => return Err(error.into()),
+                }
+            }
+        }
+        // An already cleaned manual replacement may differ from this old
+        // plan. Remaining backups need every-member proof before deletion.
+        if scratch_remains {
+            release_replaced_backups(&plan, &a.receipt.attempt_id, &roots)?;
+        }
+    }
+    store.save(next)
 }
 
 pub(crate) async fn request(
@@ -407,8 +486,9 @@ pub(crate) async fn request(
                 executor: None,
                 old_components,
                 disconnect: None,
+                publication_clock: None,
             });
-            store.save(next)?; // Before staging, quiescence, or ownership changes.
+            save_prepared_attempt(&mut store, next)?; // Before staging, quiescence, or ownership changes.
             let dir = store.attempt_dir()?;
             windows_security::ensure_private_installer_directory(&dir)?;
             windows_security::ensure_private_installer_directory(&dir.join("payload"))?;
@@ -453,37 +533,60 @@ pub(crate) async fn request(
                 "package components do not match signed target"
             );
             store.execution(Execution::Staged)?;
-            let prior_core = super::runtime::read_core_runtime_record().await?;
-            manager::CORE_MANAGER.lock().await.stop_core().await?;
-            if let Some(prior) = prior_core {
+            let strict = wfp::strict_kill_switch_enabled();
+            let mut core_stop_attempted = false;
+            let mut core_stopped = false;
+            let prepared = async {
+                let prior_core = super::runtime::read_core_runtime_record().await?;
+                core_stop_attempted = true;
+                manager::CORE_MANAGER.lock().await.stop_core().await?;
+                core_stopped = true;
+                if let Some(prior) = prior_core {
+                    ensure!(
+                        super::process::process_identity(prior.pid)?.as_ref() != Some(&prior.identity),
+                        "stopped Core incarnation is still running"
+                    );
+                }
+                desired::persist_owner_core_stopped(owner).await?;
+                wfp::transition_after_stop(false).await?;
+                let restored = dns::restore_protected().await?;
                 ensure!(
-                    super::process::process_identity(prior.pid)?.as_ref() != Some(&prior.identity),
-                    "stopped Core incarnation is still running"
+                    !restored.enabled && restored.last_error.is_none(),
+                    "strict DNS cleanup not observed"
                 );
+                owner_proxy_absent(owner)?;
+                ensure!(
+                    app_image(peer.pid)? == peer,
+                    "initiating image changed during preparation"
+                );
+                let observed = protection(owner).await?;
+                store.observe(
+                    &owner.key,
+                    &peer,
+                    generation,
+                    now()?,
+                    Observation::PreparationVerified {
+                        artifact_sha256: file_digest(&dir.join("package.exe"))?,
+                        protection: observed,
+                    },
+                )?;
+                Ok::<_, anyhow::Error>(())
             }
-            desired::persist_owner_core_stopped(owner).await?;
-            wfp::transition_after_stop(false).await?;
-            let restored = dns::restore_protected().await?;
-            ensure!(
-                !restored.enabled && restored.last_error.is_none(),
-                "strict DNS cleanup not observed"
-            );
-            owner_proxy_absent(owner)?;
-            ensure!(
-                app_image(peer.pid)? == peer,
-                "initiating image changed during preparation"
-            );
-            let observed = protection(owner).await?;
-            store.observe(
-                &owner.key,
-                &peer,
-                generation,
-                now()?,
-                Observation::PreparationVerified {
-                    artifact_sha256: file_digest(&dir.join("package.exe"))?,
-                    protection: observed,
-                },
-            )?;
+            .await;
+            if let Err(error) = prepared {
+                if prepare_failure_releases(strict, core_stop_attempted) {
+                    // Failed Prepare must not strand a non-strict owner behind bootstrap WFP
+                    // and dead DNS. Use Disconnect's recorded release; keep the attempt evidence.
+                    let released =
+                        release_failed_preparation(&mut store, owner, &peer, core_stopped).await;
+                    if let Err(release_error) = released {
+                        return Err(error.context(format!(
+                            "Prepare failure cleanup also failed: {release_error:#}"
+                        )));
+                    }
+                }
+                return Err(error);
+            }
         }
         UpdateRequest::Install { attempt_id } => {
             let a = store.live_attempt(now()?)?;
@@ -500,24 +603,62 @@ pub(crate) async fn request(
                 "preparation incomplete"
             );
             let dir = store.attempt_dir()?;
-            store.execution(Execution::Launching)?;
-            let child = std::process::Command::new(dir.join("executor.exe"))
+            // Do not persist Launching before the process exists. The App treats
+            // Launching as "the executor is in flight" and would hide this error
+            // while bootstrap WFP kept the machine offline.
+            let child = match std::process::Command::new(dir.join("executor.exe"))
                 .arg("--update-execute")
-                .spawn()?;
+                .spawn()
+            {
+                Ok(child) => child,
+                Err(error) => {
+                    let error = anyhow::Error::from(error);
+                    if executor_spawn_failure_releases(wfp::strict_kill_switch_enabled()) {
+                        let released = async {
+                            begin_update_release(&mut store, owner, &peer)?;
+                            wfp::release_applying_narrow().await?;
+                            if let Err(clear_error) = desired::clear_active_owner().await {
+                                tracing::warn!(
+                                    "executor did not start; general traffic was released, \
+                                     active owner was not cleared: {clear_error:#}"
+                                );
+                            }
+                            Ok::<_, anyhow::Error>(())
+                        }
+                        .await;
+                        if let Err(release_error) = released {
+                            return Err(error.context(format!(
+                                "executor did not start; selective release was refused \
+                                 and the previous protection remains: {release_error:#}"
+                            )));
+                        }
+                        return Err(error.context(
+                            "executor did not start; general traffic was released \
+                             and AI-service destinations stay blocked",
+                        ));
+                    }
+                    return Err(error.context(
+                        "executor did not start; explicit strict kill switch kept traffic Blocked",
+                    ));
+                }
+            };
+            store.execution(Execution::Launching)?;
             let executor = image(child.id())?;
             let mut next = store.state.clone();
             next.attempt.as_mut().unwrap().executor = Some(executor);
             store.save(next)?;
             // Child waits for the persisted identity while this lock is held.
         }
-        UpdateRequest::Disconnect => {
+        release @ (UpdateRequest::Disconnect | UpdateRequest::DisconnectApplyingNarrow) => {
             if !store.pending() {
                 return status(&store);
             }
-            // Record the explicit authenticated request before any release.
-            // The original recovery obligation is never rewritten as Unprotected.
-            store.request_disconnect(&owner.key, &peer, now()?)?;
-            wfp::authorize_write_for(&owner.key)?;
+            // Automatic failed-Prepare cleanup must never override an explicit strict hold.
+            ensure!(
+                !release.applies_narrow_on_disconnect() || !wfp::strict_kill_switch_enabled(),
+                "automatic update cleanup cannot release explicit strict protection"
+            );
+            begin_update_release(&mut store, owner, &peer)?;
             if let Some(active) = desired::load_active_owner().await? {
                 ensure!(
                     active.owner_key == owner.key,
@@ -537,7 +678,7 @@ pub(crate) async fn request(
             desired::persist_owner_core_stopped(owner).await?;
             desired::clear_active_owner().await?;
             tunnel_absent("Tono")?;
-            wfp::release().await?;
+            wfp::release_for_update_disconnect(release.applies_narrow_on_disconnect()).await?;
             // WFP is gone from here on. Proving the release for the update
             // evidence and archiving the record are update bookkeeping: their
             // failure keeps the record pending but is not a release failure.
@@ -672,6 +813,10 @@ struct PlanMemberView {
     publish_scratch: PathBuf,
     old_digest: [u8; 32],
     new_digest: [u8; 32],
+    /// First publication of a file that had no previous generation. The old
+    /// side is absence, not a digest of bytes that were never installed.
+    #[serde(default)]
+    introduced: bool,
 }
 
 /// Which side of every durable plan member the installation must equal.
@@ -724,6 +869,19 @@ pub fn plan_members_at(
     side: PlanSide,
 ) -> Result<bool> {
     for m in read_plan(plan_path, attempt_id, roots)? {
+        if m.introduced && side == PlanSide::Old {
+            match std::fs::symlink_metadata(&m.target) {
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(error) => return Err(error.into()),
+                Ok(metadata) => {
+                    ensure!(
+                        metadata.file_type().is_file(),
+                        "introduced plan member is not an ordinary file"
+                    );
+                    return Ok(false);
+                }
+            }
+        }
         let expected = match side {
             PlanSide::Old => &m.old_digest,
             PlanSide::New => &m.new_digest,
@@ -885,7 +1043,7 @@ fn recovery_task_registration(system_directory: &Path, dir: &Path) -> std::proce
         "\"{}\" --update-recover",
         dir.join("executor.exe").display()
     );
-    let mut registration = std::process::Command::new(system_directory.join("schtasks.exe"));
+    let mut registration = std::process::Command::new(schtasks_path(system_directory));
     registration.args([
         "/Create",
         "/TN",
@@ -901,6 +1059,10 @@ fn recovery_task_registration(system_directory: &Path, dir: &Path) -> std::proce
         "/F",
     ]);
     registration
+}
+
+fn schtasks_path(system_directory: &Path) -> PathBuf {
+    system_directory.join("schtasks.exe")
 }
 
 fn register_recovery_with(store: &Store, register: impl FnOnce(&Path) -> Result<()>) -> Result<()> {
@@ -969,21 +1131,31 @@ pub fn unpack_gate(package: &Path) -> Result<()> {
 /// The ONSTART task [`register_consumed_recovery`] creates.
 pub const RECOVERY_TASK_NAME: &str = "Tono Update Recovery v1";
 
+/// `schtasks.exe` from the OS-reported system directory. Registration and
+/// retirement share this path: a Windows install on another volume can create
+/// the ONSTART task, and the same volume must be able to delete it.
+fn recovery_task_command(system_directory: &Path, args: &[&str]) -> std::process::Command {
+    let mut command = std::process::Command::new(system_directory.join("schtasks.exe"));
+    command.args(args);
+    command
+}
+
 /// Remove the SYSTEM boot task. The executor retires it once the committed
 /// cleanup ran, as macOS retires its launchd job at commit; a final uninstall
 /// retires it after WFP removal is proven. A task that is already gone is not
-/// an error. Same scheduler binary as the registration.
+/// an error. Same scheduler binary as [`recovery_task_registration`].
 pub fn retire_recovery_task() -> Result<()> {
-    let schtasks = Path::new("C:\\Windows\\System32\\schtasks.exe");
-    let deleted = std::process::Command::new(schtasks)
-        .args(["/Delete", "/TN", RECOVERY_TASK_NAME, "/F"])
-        .output()?;
+    let system = security::system_directory()?;
+    let deleted = recovery_task_command(
+        &system,
+        &["/Delete", "/TN", RECOVERY_TASK_NAME, "/F"],
+    )
+    .output()?;
     if deleted.status.success() {
         return Ok(());
     }
-    let present = std::process::Command::new(schtasks)
-        .args(["/Query", "/TN", RECOVERY_TASK_NAME])
-        .output()?;
+    let present =
+        recovery_task_command(&system, &["/Query", "/TN", RECOVERY_TASK_NAME]).output()?;
     ensure!(
         !present.status.success(),
         "could not retire the update recovery task"
@@ -1460,10 +1632,7 @@ pub fn reconcile_before_desired() -> Result<bool> {
         return Ok(true);
     }
     let a = store.attempt()?;
-    if matches!(
-        a.execution,
-        Execution::Consumed | Execution::Replaced | Execution::Uncertain
-    ) {
+    if store.independent_recovery_pending()? {
         // Recovery itself does not run through the task; the task only covers a Service that
         // cannot load. A failed registration must not keep the recovery executor from running
         // and leave the attempt Consumed (#484).
@@ -1487,6 +1656,188 @@ pub fn reconcile_before_desired() -> Result<bool> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn committed_with_backup() -> (PathBuf, Store, State, PathBuf) {
+        use sha2::{Digest, Sha256};
+
+        let (root, mut store, _, _) = crate::update_transaction::tests::reserved();
+        let mut committed = store.state.clone();
+        committed.generation += 1;
+        let a = committed.attempt.as_mut().unwrap();
+        committed.consumed_sequence = a.manifest.release_sequence;
+        a.execution = Execution::Replaced;
+        a.receipt.phase = Phase::Committed;
+        a.receipt.successor_generation = Some(committed.generation);
+        store.save(committed).unwrap();
+        let target = root.join("Tono.exe");
+        let bound = |suffix: &str| {
+            let mut path = target.clone().into_os_string();
+            path.push(suffix);
+            PathBuf::from(path)
+        };
+        let backup = bound(".rollback");
+        std::fs::write(&target, b"new-app").unwrap();
+        std::fs::write(&backup, b"old-app").unwrap();
+        let digest = |bytes: &[u8]| -> [u8; 32] { Sha256::digest(bytes).into() };
+        let dir = store.attempt_dir().unwrap();
+        std::fs::create_dir(&dir).unwrap();
+        std::fs::write(
+            dir.join("replacement.json"),
+            serde_json::to_vec(&serde_json::json!({
+                "attempt_id": store.attempt().unwrap().receipt.attempt_id,
+                "members": [{
+                    "target": target,
+                    "backup": backup,
+                    "restore": bound(".restore"),
+                    "publish_scratch": bound(".publish"),
+                    "old_digest": digest(b"old-app"),
+                    "new_digest": digest(b"new-app"),
+                }],
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        let mut next = store.state.clone();
+        next.generation += 1;
+        let a = next.attempt.as_mut().unwrap();
+        a.manifest.release_sequence += 1;
+        a.receipt.manifest_sha256 = a.manifest.sha256().unwrap();
+        a.receipt.attempt_id = "2".repeat(64);
+        a.receipt.phase = Phase::Preparing;
+        a.receipt.initiating_generation = next.generation;
+        a.receipt.successor_generation = None;
+        a.execution = Execution::Reserved;
+        a.executor = None;
+        (root, store, next, backup)
+    }
+
+    #[test]
+    fn update_prepare_preserves_committed_retry_until_locked_backups_are_cleaned() {
+        use std::os::windows::fs::OpenOptionsExt as _;
+        use windows_sys::Win32::Storage::FileSystem::FILE_SHARE_READ;
+
+        let (root, mut store, next, backup) = committed_with_backup();
+        let before = std::fs::read(root.join("state.json")).unwrap();
+        let held = OpenOptions::new()
+            .read(true)
+            .share_mode(FILE_SHARE_READ)
+            .open(&backup)
+            .unwrap();
+        let locked = save_prepared_attempt(&mut store, next.clone());
+        let durable_while_locked = std::fs::read(root.join("state.json")).unwrap();
+        drop(held);
+        let retry = save_prepared_attempt(&mut store, next);
+        let removed = !backup.exists();
+        let replacement = store.attempt().unwrap().receipt.attempt_id.clone();
+        drop(store);
+        std::fs::remove_dir_all(root).unwrap();
+
+        assert!(locked.is_err(), "committed cleanup must precede supersession");
+        assert_eq!(durable_while_locked, before);
+        assert!(retry.is_ok() && removed);
+        assert_eq!(replacement, "2".repeat(64));
+    }
+
+    #[test]
+    fn update_prepare_allows_manual_replacement_after_committed_scratch_is_absent() {
+        let (root, mut store, next, backup) = committed_with_backup();
+        std::fs::remove_file(backup).unwrap();
+        std::fs::write(root.join("Tono.exe"), b"manual-install").unwrap();
+        let result = save_prepared_attempt(&mut store, next);
+        drop(store);
+        std::fs::remove_dir_all(root).unwrap();
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn update_prepare_keeps_committed_backups_when_installed_members_are_unproven() {
+        let (root, mut store, next, backup) = committed_with_backup();
+        std::fs::write(root.join("Tono.exe"), b"different-install").unwrap();
+        let before = std::fs::read(root.join("state.json")).unwrap();
+        let result = save_prepared_attempt(&mut store, next);
+        let durable = std::fs::read(root.join("state.json")).unwrap();
+        let retained = backup.exists();
+        drop(store);
+        std::fs::remove_dir_all(root).unwrap();
+        assert!(result.is_err());
+        assert_eq!(durable, before);
+        assert!(retained);
+    }
+
+    #[test]
+    fn update_prepare_failure_releases_only_after_stop_without_strict_kill_switch() {
+        assert!(prepare_failure_releases(false, true));
+        assert!(!prepare_failure_releases(true, true));
+        assert!(!prepare_failure_releases(false, false));
+        assert!(!prepare_failure_releases(true, false));
+    }
+
+    #[cfg(feature = "test")]
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn failed_prepare_releases_general_traffic_with_the_secondary_ai_hold() -> Result<()> {
+        use crate::update_transaction::tests::reserved;
+
+        wfp::emergency_disarm_windows_kill_switch().await?;
+        desired::clear_active_owner().await?;
+        let (root, mut store, peer, _) = reserved();
+        let owner = AuthenticatedOwner {
+            key: "failed-prepare-ai-fixture".to_owned(),
+            identity: crate::OwnerIdentity::Windows {
+                sid: "S-1-5-21-1-2-3-1001".to_owned(),
+            },
+            app_data_root: root.clone(),
+            peer_pid: None,
+            peer_session_id: None,
+        };
+        let mut next = store.state.clone();
+        next.attempt.as_mut().unwrap().receipt.owner = owner.key.clone();
+        store.save(next)?;
+        let obligation = store.attempt()?.receipt.required_recovery;
+        wfp::arm_bootstrap(
+            &crate::KillSwitchConfig {
+                tunnel_interface: "Tono".to_owned(),
+                proxy_endpoints: vec![crate::ProxyEndpoint {
+                    ip: "8.8.8.8".to_owned(),
+                    port: 443,
+                    protocol: crate::ProxyProtocol::Tcp,
+                }],
+                bootstrap_api_hosts: vec!["1.1.1.1".to_owned()],
+                direct_endpoints: Vec::new(),
+            },
+            r"C:\Program Files\Tono\tono-core.exe",
+            &owner.key,
+        )
+        .await?;
+
+        release_failed_preparation(&mut store, &owner, &peer, true).await?;
+        let released = !wfp::status().await.wanted;
+        let ai_held = super::super::selective_layer::test_hold_active();
+        let recorded = store.attempt()?.disconnect.is_some()
+            && store.attempt()?.receipt.required_recovery == obligation;
+        // The explicit Restore path still removes the automatic AI hold.
+        wfp::release().await?;
+        let restored = !super::super::selective_layer::test_hold_active();
+        drop(store);
+        std::fs::remove_dir_all(root)?;
+        std::fs::remove_file(
+            crate::service_paths()
+                .for_owner_key(&owner.key)
+                .desired_state_path(),
+        )?;
+
+        assert!(released, "failed Prepare must release general traffic");
+        assert!(ai_held, "automatic failure cleanup must apply the AI hold");
+        assert!(recorded, "release must retain the original recovery obligation");
+        assert!(restored, "explicit Restore must remove the AI hold");
+        Ok(())
+    }
+
+    #[test]
+    fn an_executor_that_never_starts_releases_unless_the_kill_switch_is_strict() {
+        assert!(executor_spawn_failure_releases(false));
+        assert!(!executor_spawn_failure_releases(true));
+    }
 
     /// WIN-GATE-OPAQUE: a core runtime record outlives its Core when the Service is removed
     /// without stopping it cleanly. After a reboot its pid can belong to any program, including
@@ -1757,6 +2108,24 @@ mod tests {
         );
         assert_eq!(
             Path::new(registration.get_program()),
+            Path::new(r"D:\Windows\System32\schtasks.exe")
+        );
+    }
+
+    #[test]
+    fn update_recovery_retirement_uses_the_os_system_directory() {
+        // Delete and the follow-up query both come from the same directory the
+        // registration uses. A fixed C:\Windows leaves the ONSTART task in
+        // place when Windows itself is on another volume.
+        let system = Path::new(r"D:\Windows\System32");
+        let delete = recovery_task_command(system, &["/Delete", "/TN", RECOVERY_TASK_NAME, "/F"]);
+        let query = recovery_task_command(system, &["/Query", "/TN", RECOVERY_TASK_NAME]);
+        assert_eq!(
+            Path::new(delete.get_program()),
+            Path::new(r"D:\Windows\System32\schtasks.exe")
+        );
+        assert_eq!(
+            Path::new(query.get_program()),
             Path::new(r"D:\Windows\System32\schtasks.exe")
         );
     }

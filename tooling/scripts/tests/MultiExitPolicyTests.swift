@@ -183,6 +183,11 @@ struct MultiExitPolicyTests {
             ("udp-rule-engine", "\nudp: true\n"),
             ("rule-mode", "\nmode: rule\n"),
             ("unified-delay", "\nunified-delay: true\n"),
+            ("tcp-concurrent", "\ntcp-concurrent: true\n"),
+            ("dns-ipv4-only", "\n  ipv6: false\n"),
+            ("dns-fake-ip-ttl", "\n  fake-ip-ttl: 30\n"),
+            ("dns-prefer-h3-off", "\n  prefer-h3: false\n"),
+            ("dns-cache-lru", "\n  cache-algorithm: lru\n"),
             ("demand-process-lookup", "\nfind-process-mode: strict\n"),
             ("disable-stale-selection-cache", "\n  store-selected: false\n"),
             ("disable-direct-icmp", "\n  disable-icmp-forwarding: true\n"),
@@ -730,6 +735,13 @@ struct MultiExitPolicyTests {
                 processPath: "/Users/x/.local/share/claude/versions/2.1.225"
             )
 
+        // Default `String.contains` is not a literal character search, and the
+        // old check named only the failed case. `.literal` matches the rule
+        // text mihomo parses, and a failure names the suffix and the line.
+        let assistantPhysicalNICGap = Self.assistantPhysicalNICGap(
+            in: managedDirectRuntime,
+            bundleRule: bundleWideRule
+        )
         let managedDirectChecks = [
             ("proxy", managedDirectRuntime.contains("\n  - name: \"Tono-China-Direct\"\n")),
             ("web-proxy", managedDirectRuntime.contains("\n  - name: \"Tono-China-Web-Direct\"\n")),
@@ -790,14 +802,13 @@ struct MultiExitPolicyTests {
             ("rule-delimiters-are-hex-escaped", delimitersAreHexEscaped),
             ("assistant-path-verdicts", assistantPathVerdictsHold),
             (
-                "no-assistant-domain-suffix-without-home",
-                ConfigPipeline.assistantHomeDomainSuffixes.allSatisfy { suffix in
-                    !managedDirectRuntime.contains(
-                        "DOMAIN-SUFFIX,\(suffix)),\(ConfigPipeline.claudeHomeGroupName)"
-                    ) && !managedDirectRuntime.contains(
-                        "DOMAIN-SUFFIX,\(suffix)),\(ConfigPipeline.exitGroupName)"
-                    )
-                }
+                // Without a residential hop, MATCH is not enough: the reviewed
+                // bundle's PROCESS-PATH-REGEX DIRECT is first-match and would
+                // carry assistant names out the physical interface. TCP goes to
+                // the exit; UDP is rejected so it falls back to that TCP route.
+                // Dedicated model API hosts are part of the same suffix list.
+                "assistant-destinations-precede-bundle-direct-without-home",
+                assistantPhysicalNICGap == nil
             ),
             (
                 "reviewed-bundle-tcp80-has-no-exit-detour",
@@ -842,10 +853,15 @@ struct MultiExitPolicyTests {
             .filter { !$0.1 }
             .map(\.0)
         guard failedManagedDirectChecks.isEmpty else {
-            throw TestFailure(
-                "managed DIRECT runtime failed: "
-                    + failedManagedDirectChecks.joined(separator: ",")
-            )
+            var message = "managed DIRECT runtime failed: "
+                + failedManagedDirectChecks.joined(separator: ",")
+            if let assistantPhysicalNICGap,
+               failedManagedDirectChecks.contains(
+                   "assistant-destinations-precede-bundle-direct-without-home"
+               ) {
+                message += " (\(assistantPhysicalNICGap))"
+            }
+            throw TestFailure(message)
         }
 
         let suffixOnlyPolicy = ConfigPipeline.ManagedDirectRuntimePolicy(
@@ -1476,6 +1492,79 @@ struct MultiExitPolicyTests {
         }
 
         print("policy signing contract verified: trust opens the allowlist, never the protected list")
+    }
+
+    /// Nil when every assistant suffix and `assistantHomeIPv4Cidrs` entry has
+    /// a TCP rule to the exit and a UDP reject before the reviewed-bundle
+    /// direct rule, and no literal rule sends that exact payload to a
+    /// physical-NIC direct group.
+    private static func assistantPhysicalNICGap(in runtime: String, bundleRule: String) -> String? {
+        guard let bundle = runtime.range(of: bundleRule, options: .literal) else {
+            return "reviewed-bundle rule missing"
+        }
+        let directGroups = [
+            ConfigPipeline.appDirectGroupName,
+            ConfigPipeline.webDirectGroupName,
+            ConfigPipeline.directProxyName,
+            ConfigPipeline.webDirectProxyName,
+            "DIRECT",
+        ]
+        func line(at index: String.Index) -> String {
+            let start = runtime[..<index].lastIndex(of: "\n").map {
+                runtime.index(after: $0)
+            } ?? runtime.startIndex
+            let end = runtime[index...].firstIndex(of: "\n") ?? runtime.endIndex
+            return String(runtime[start..<end])
+        }
+        func precedes(_ needle: String, label: String) -> String? {
+            guard let found = runtime.range(of: needle, options: .literal) else {
+                return "missing \(label)"
+            }
+            if found.lowerBound >= bundle.lowerBound {
+                return "after bundle \(label): \(line(at: found.lowerBound))"
+            }
+            return nil
+        }
+        // The `)` that closes `\(suffix)` is not part of the rule text.
+        // The emitted row is `DOMAIN-SUFFIX,<suffix>)),<target>` — two
+        // parentheses — so the literal needs one extra `)` in source.
+        for suffix in ConfigPipeline.assistantHomeDomainSuffixes {
+            if let gap = precedes(
+                "DOMAIN-SUFFIX,\(suffix))),\(ConfigPipeline.exitGroupName)",
+                label: "tcp \(suffix)"
+            ) { return gap }
+            if let gap = precedes(
+                "DOMAIN-SUFFIX,\(suffix))),REJECT",
+                label: "udp \(suffix)"
+            ) { return gap }
+            for group in directGroups {
+                let needle = "DOMAIN-SUFFIX,\(suffix))),\(group)"
+                if let found = runtime.range(of: needle, options: .literal) {
+                    return "direct \(suffix): \(line(at: found.lowerBound))"
+                }
+            }
+        }
+        for cidr in ConfigPipeline.assistantHomeIPv4Cidrs {
+            if let gap = precedes(
+                "IP-CIDR,\(cidr),no-resolve)),\(ConfigPipeline.exitGroupName)",
+                label: "tcp \(cidr)"
+            ) { return gap }
+            if let gap = precedes(
+                "IP-CIDR,\(cidr),no-resolve)),REJECT",
+                label: "udp \(cidr)"
+            ) { return gap }
+            for group in directGroups {
+                let needle = "IP-CIDR,\(cidr),no-resolve)),\(group)"
+                if let found = runtime.range(of: needle, options: .literal) {
+                    return "direct \(cidr): \(line(at: found.lowerBound))"
+                }
+                let bare = "IP-CIDR,\(cidr),\(group)"
+                if let found = runtime.range(of: bare, options: .literal) {
+                    return "direct \(cidr): \(line(at: found.lowerBound))"
+                }
+            }
+        }
+        return nil
     }
 
     private static func escaped(_ value: String) -> String {

@@ -232,6 +232,42 @@ func runUpdateSelfTests() -> Bool {
         try refuses { try engine.gate(method: "POST", path: "/core/start", peer: successor) }
     }
 
+    test("automatic-update-release-preserves-ai-and-consumed-obligation") { directory in
+        let store = try UpdateStorage(root: directory)
+        var observed: UpdateContractV1.Protection = .connected
+        var explicitReleases = 0
+        var selectiveReleases = 0
+        var io = effects()
+        io.observe = { observed }
+        io.disconnect = { explicitReleases += 1 }
+        io.disconnectPreservingAIHold = {
+            try check(store.load().attempt?.disconnectRequested == true,
+                      "Automatic release preceded its durable stop intent")
+            selectiveReleases += 1
+        }
+        let engine = UpdateTransaction(storage: store, effects: io)
+        try reserved(store, engine)
+        observed = .protectedOffline
+        try engine.execute(peer: owner)
+        try UpdateExecutor.perform(storage: store, validate: { _ in }, replace: { _ in }, rollback: { _ in })
+        try engine.reconcile(peer: successor)
+        let before = try store.load()
+        let wrongOwner = TonoAuthenticatedPeer(uid: 502, auditToken: successor.auditToken, bundleURL: owner.bundleURL)
+        try refuses { try engine.disconnect(peer: wrongOwner, preserveAIHold: true) }
+        try engine.disconnect(peer: successor, preserveAIHold: true)
+        let result = try store.load()
+        try check(selectiveReleases == 1 && explicitReleases == 0,
+                  "Automatic update cleanup used explicit release")
+        try check(result.attempt?.disconnectVerified == true,
+                  "Automatic cleanup was not recorded")
+        try check(result.highWater == before.highWater && result.generation == before.generation
+                  && result.attempt?.execution == .replaced
+                  && result.attempt?.receipt.phase == .installedIdentityVerified
+                  && result.attempt?.receipt.requiredRecovery == .connected
+                  && result.attempt?.successorToken == before.attempt?.successorToken,
+                  "Automatic release rewrote the update obligation or incarnation")
+    }
+
     test("unconsumed-retirement-archives-before-new-admission") { directory in
         let store = try UpdateStorage(root: directory)
         var baseline = UpdateStorage.Ledger()
@@ -314,8 +350,8 @@ func runUpdateSelfTests() -> Bool {
             try check(clean, "A bootout while waiting behind the executor's lock is a clean stop")
         }
         try check(armed == 0, "Executor bootout during startup armed the emergency block")
-        // Only the bootout whitelist is clean; an unreadable ledger keeps
-        // arming the fail-closed barrier and stops launch as before.
+        // An unreadable ledger still stops launch. It must not install a
+        // block: a store the daemon cannot read is not a strict kill switch.
         let corrupt = try UpdateStorage(root: directory + "/corrupt")
         try UpdateStorage.write(Data("not a ledger".utf8), to: directory + "/corrupt/ledger.json")
         var corrupted = 0
@@ -323,12 +359,11 @@ func runUpdateSelfTests() -> Bool {
             _ = try UpdateExecutor.startup(storage: corrupt, protectionWanted: { true },
                                            emergencyBlock: { corrupted += 1 })
         }
-        try check(corrupted == 1, "Corrupt-ledger startup stopped arming the emergency block")
+        try check(corrupted == 1, "Corrupt-ledger startup did not release a saved kill switch")
     }
     // A Mac that was never connected was blocked at every boot by a store it
-    // could not read (BRICK-M1): the startup barrier needs saved intent, and
-    // when the store opened that intent is read under the update lock, where
-    // no release can interleave between the check and the install.
+    // could not read (BRICK-M1). Startup still reads saved intent under the
+    // update lock, and never installs a block from that read.
     test("startup-barrier-only-with-intent-decided-under-the-update-lock") { directory in
         let corrupt = try UpdateStorage(root: directory)
         try UpdateStorage.write(Data("not a ledger".utf8), to: directory + "/ledger.json")
@@ -374,6 +409,46 @@ func runUpdateSelfTests() -> Bool {
                   && retained.disconnectVerified && retained.receipt.phase == .installationAuthorized,
                   "Resolved retirement erased failure evidence or fabricated a proof phase")
         try engine.gate(method: "POST", path: "/core/start", peer: successor)
+    }
+    test("resolved-retirement-keeps-cleanup-retry-before-new-admission") { directory in
+        let store = try UpdateStorage(root: directory)
+        var observed: UpdateContractV1.Protection = .protectedOffline
+        var failCleanup = true
+        var cleanups = 0
+        var io = effects()
+        io.observe = { observed }
+        io.cleanupCommitted = {
+            cleanups += 1
+            if failCleanup { throw HelperFailure.system("injected executor retirement failure") }
+        }
+        let engine = UpdateTransaction(storage: store, effects: io)
+        try reserved(store, engine)
+        try engine.execute(peer: owner)
+        try UpdateExecutor.perform(storage: store, validate: { _ in }, replace: { _ in
+            throw HelperFailure.system("injected replacement failure")
+        }, rollback: { _ in })
+        try engine.disconnect(peer: owner)
+        observed = .unprotected
+        let before = try store.load()
+        let nextManifest = UpdateContractV1.ReleaseManifest(appVersion: manifest.appVersion,
+            buildCommit: manifest.buildCommit, kind: manifest.kind, protocolVersion: manifest.protocolVersion,
+            releaseId: "next-native-test", releaseSequence: 15, targets: manifest.targets)
+        try refuses { try engine.retire(peer: owner) }
+        let retained = try store.load()
+        try check(retained.attempt?.receipt.attemptId == before.attempt?.receipt.attemptId
+                  && retained.highWater == before.highWater && retained.generation == before.generation,
+                  "Failed executor cleanup lost its durable retry owner")
+        try refuses { try engine.reserve(peer: owner, manifest: nextManifest,
+            manifestBytes: UpdateContractV1.canonical(nextManifest), signature: Data()) }
+        failCleanup = false
+        try engine.retire(peer: owner)
+        try check(cleanups == 2 && store.load().attempt == nil,
+                  "Retirement did not retry executor cleanup before clearing the slot")
+        try engine.reserve(peer: owner, manifest: nextManifest,
+            manifestBytes: UpdateContractV1.canonical(nextManifest), signature: Data())
+        try check(store.load().attempt?.receipt.attemptId != before.attempt?.receipt.attemptId
+                  && store.load().highWater == 14 && store.load().generation == before.generation + 1,
+                  "Successful cleanup did not admit a fresh update without lowering ordering evidence")
     }
     test("successor-relaunch-after-adoption-can-be-readopted-and-commit") { directory in
         let store = try UpdateStorage(root: directory)
@@ -427,6 +502,25 @@ func runUpdateSelfTests() -> Bool {
         do { _ = try store.load() } catch HelperFailure.invalid(let message) { refusal = message }
         try check(refusal.contains("newer Tono (schema 2)"), "A newer schema major must be refused as newer, not corrupt")
         try check(UpdateStorage.read(path, maximum: 128 * 1024) == newer, "Newer evidence must be retained")
+    }
+    test("ledger-refuses-an-unknown-field-inside-the-receipt") { directory in
+        let store = try UpdateStorage(root: directory)
+        try reserved(store, UpdateTransaction(storage: store, effects: effects()))
+        let path = directory + "/ledger.json"
+        guard var file = try JSONSerialization.jsonObject(with: UpdateStorage.read(path, maximum: 128 * 1024)) as? [String: Any],
+              var attempt = file["attempt"] as? [String: Any],
+              var receipt = attempt["receipt"] as? [String: Any] else {
+            throw HelperFailure.invalid("Fixture ledger is not an object")
+        }
+        receipt["futureFact"] = "x"
+        attempt["receipt"] = receipt
+        file["attempt"] = attempt
+        let refused = try JSONSerialization.data(withJSONObject: file, options: [.sortedKeys])
+        try UpdateStorage.write(refused, to: path)
+        var refusal = ""
+        do { _ = try store.load() } catch HelperFailure.invalid(let message) { refusal = message }
+        try check(refusal.contains("corrupt"), "An unknown receipt field must be refused, not stripped: \(refusal)")
+        try check(UpdateStorage.read(path, maximum: 128 * 1024) == refused, "Refused receipt evidence must stay on disk")
     }
     // Tono.app dragged to the Trash left a KeepAlive helper that re-armed PF
     // at every boot with no app left to release it (H19-O-F1). A helper start
@@ -558,6 +652,10 @@ func runUpdateSelfTests() -> Bool {
         try check(UpdateRuntime.mayBeTonoProxy(loopbackPorts: [nil], corePorts: [28990]),
                   "A loopback proxy without a port was accepted")
         try check(!UpdateRuntime.mayBeTonoProxy(loopbackPorts: [], corePorts: nil), "No loopback proxy was refused")
+        try check(UpdateRuntime.disconnectReleasesWhenPrepareFails(strictKillSwitchEnabled: false),
+                  "Prepare failure kept the kill switch up")
+        try check(!UpdateRuntime.disconnectReleasesWhenPrepareFails(strictKillSwitchEnabled: true),
+                  "A strict kill switch released during disconnect")
         try check(!ProtectedDNSManager.isStoppedTonoResolver(["127.0.0.1", "1.1.1.1"]),
                   "A mixed resolver list counted as Tono's")
         try check(ProtectedDNSManager.isStoppedTonoResolver(["127.0.0.1"]), "Tono's resolver list was not refused")

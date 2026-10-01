@@ -113,9 +113,24 @@ extension AppState {
 
         let previousSelection = currentProxySelectionTarget()
         let previousRoutingToken = managedCatalogRoutingToken
+        let previousHomeName = managedCatalogRouting?.homeProxy
         let previousCloudNodes = proxyRegions
             .filter { $0.id != "custom" }
             .flatMap(\.nodes)
+        let previousSwitchTarget = switchingNodeId.flatMap { target in
+            previousCloudNodes.first {
+                proxyTarget($0.id, matches: target) || proxyTarget($0.name, matches: target)
+            }
+        }
+        let switchTargetChanged: Bool = if let previousSwitchTarget {
+            CatalogLiveSession.shouldReload(
+                previousSelected: previousSwitchTarget,
+                nextSelected: nodes.first { proxyTarget($0.name, matches: previousSwitchTarget.name) },
+                routingChanged: false
+            )
+        } else {
+            false
+        }
         let selectedCloudNodeWasRemoved: Bool = if let previousSelection,
                                                    previousSelection != ConfigPipeline.homeNodeName {
             previousCloudNodes.contains { proxyTarget($0.name, matches: previousSelection) }
@@ -127,12 +142,8 @@ extension AppState {
         let liveSessionTornDown = allowRuntimeTransition
             && selectedCloudNodeWasRemoved
             && (isConnected || isConnecting)
-        if liveSessionTornDown {
-            // Remove both the old TUN and its exact PF endpoint before changing
-            // the visible selection. Automatic connect remains blocked until
-            // the user explicitly chooses a surviving exit.
-            disconnect(releaseKillSwitch: false)
-        }
+        // Do not bootstrap-disconnect here. The replacement list is not
+        // visible yet, and a whole-machine block is not the fallback.
 
         let customRegions = proxyRegions.filter { $0.id == "custom" }
         let managedRegions = nodes.isEmpty
@@ -143,6 +154,19 @@ extension AppState {
                 nodes: nodes
             )]
         proxyRegions = managedRegions + customRegions
+        if allowRuntimeTransition, isConnected, switchTargetChanged, let previousSelection,
+           previousSelection != ConfigPipeline.homeNodeName,
+           localProxyNode(matching: previousSelection) == nil {
+            // A replacement switch can itself lose its target to a newer
+            // catalog while the old removed selection is still authoritative.
+            pendingRemovedCatalogExit = true
+        }
+        if switchingNodeId != nil, let previousSwitchTarget,
+           let id = nodes.first(where: { proxyTarget($0.name, matches: previousSwitchTarget.name) })?.id {
+            // Parsing assigns fresh IDs even when an unrelated city changes.
+            // Keep the in-flight target identifiable for the next install.
+            switchingNodeId = id
+        }
         managedCatalogRevision = catalog.revision
         managedCatalogDigest = catalog.sha256
         managedCatalogRoutingToken = routingToken
@@ -158,12 +182,9 @@ extension AppState {
 
         if selectedCloudNodeWasRemoved {
             if liveSessionTornDown {
-                // A removal that took a session down is a real classified
-                // outcome, so the copyable diagnostic names it instead of
-                // reporting no classification at all for the teardown the user
-                // just saw. A removal on an idle Mac ended no session, and
-                // recording one there would leave every later report and every
-                // unrelated failure attributed to it.
+                // The removal is a real classified outcome. An idle Mac ended
+                // no session, and recording one there would attribute later
+                // reports to it.
                 lastClassifiedFailure = ProtectedConnectivity.failure(
                     .catalogNodeRemoved,
                     stage: "catalogInstall",
@@ -171,22 +192,20 @@ extension AppState {
                     generation: connectionCoordinator.protectionOperationGeneration,
                     detail: "selected catalog exit absent at revision \(catalog.revision)"
                 )
-            }
-            applyDefaultProxySelection(persist: true)
-            if managedCatalogRouting?.defaultProxy != nil,
-               currentProxySelectionTarget() != nil {
-                catalogSelectionRequiresChoice = false
-                errorMessage = String(localized: "The selected cloud server was removed. Tono switched to the managed default cloud server.")
-                if liveSessionTornDown {
-                    autoConnectRequested = true
-                    attemptAutomaticConnect()
-                }
+                settleRemovedCatalogExit(wasConnected: isConnected)
             } else {
-                catalogSelectionRequiresChoice = true
-                autoConnectRequested = false
-                errorMessage = isProtectionBlocked || KillSwitchService.isArmed
-                    ? String(localized: "The selected cloud server was removed. Kill Switch is still blocking traffic; choose another cloud server.")
-                    : String(localized: "The selected cloud server was removed. Choose another cloud server.")
+                applyDefaultProxySelection(persist: true)
+                if managedCatalogRouting?.defaultProxy != nil,
+                   currentProxySelectionTarget() != nil {
+                    catalogSelectionRequiresChoice = false
+                    errorMessage = String(localized: "The selected cloud server was removed. Tono switched to the managed default cloud server.")
+                } else {
+                    catalogSelectionRequiresChoice = true
+                    autoConnectRequested = false
+                    errorMessage = isProtectionBlocked || KillSwitchService.isArmed
+                        ? String(localized: "The selected cloud server was removed. Kill Switch is still blocking traffic; choose another cloud server.")
+                        : String(localized: "The selected cloud server was removed. Choose another cloud server.")
+                }
             }
         } else if !migrateCloudExitDefaultIfNeeded() {
             restoreProxySelection(preferredTarget: previousSelection, persistFallback: true)
@@ -198,19 +217,37 @@ extension AppState {
         }
 
         guard allowRuntimeTransition else { return }
-        if isConnected {
+        // A removed exit already settled above: a hot switch owns the reload,
+        // and reloadCoreConfig's failure path would bootstrap-disconnect the
+        // session we just kept.
+        if isConnected, !(selectedCloudNodeWasRemoved && liveSessionTornDown) {
             let previousSelected = previousCloudNodes.first {
                 proxyTarget($0.name, matches: previousSelection ?? "")
             }
             let nextSelected = nodes.first {
                 proxyTarget($0.name, matches: previousSelection ?? "")
             }
+            let previousHome = previousHomeName.flatMap { homeName in
+                previousCloudNodes.first { proxyTarget($0.name, matches: homeName) }
+            }
+            let nextHome = (validatedRouting?.homeProxy).flatMap { homeName in
+                nodes.first { proxyTarget($0.name, matches: homeName) }
+            }
             let routingChanged = previousRoutingToken != routingToken
             if CatalogLiveSession.shouldReload(
                 previousSelected: previousSelected,
                 nextSelected: nextSelected,
-                routingChanged: routingChanged
+                previousHome: previousHome,
+                nextHome: nextHome,
+                routingChanged: routingChanged,
+                switchTargetChanged: switchTargetChanged
             ) {
+                if switchTargetChanged {
+                    LocalTrafficAudit.shared.recordEvent(
+                        "managed_catalog_switch_target_changed",
+                        details: ["revision": String(catalog.revision)]
+                    )
+                }
                 applyManagedCatalogToRuntime()
             } else {
                 LocalTrafficAudit.shared.recordEvent(
@@ -283,6 +320,79 @@ extension AppState {
         catalog.revision == installedRevision
             && installedDigest == catalog.sha256
             && installedRoutingToken == routingToken
+    }
+
+    /// The selected exit is gone and a session was up or still connecting.
+    /// Another catalog exit keeps the session. No survivor restores the
+    /// original network unless a strict kill switch was explicitly enabled.
+    /// The existing automatic release restores ordinary traffic and retains
+    /// the secondary AI hold. Explicit strict protection keeps its own branch.
+    func settleRemovedCatalogExit(wasConnected: Bool) {
+        let replacement = defaultCloudExitNode()
+        let action = CatalogRemovedExitAction.decide(
+            replacementName: replacement?.name,
+            strictKillSwitchExplicit: false,
+            selectiveAiBlockReady: false
+        )
+        switch action {
+        case .keepSession(let name):
+            if wasConnected, connectionCoordinator.configReloadTask != nil || switchingNodeId != nil {
+                // The current owner may still commit its captured, removed
+                // exit. Retain convergence, not a snapshot of this survivor.
+                pendingRemovedCatalogExit = true
+                return
+            }
+            catalogSelectionRequiresChoice = false
+            errorMessage = String(
+                localized: "The selected cloud server was removed. Tono switched to another cloud server and kept this connection."
+            )
+            if wasConnected, coreController != nil {
+                let previousSwitch = connectionCoordinator.nodeSwitchTask
+                selectNode(name, releaseNetworkIfSwitchFails: true, forceRuntimeReplacement: true)
+                let started = connectionCoordinator.nodeSwitchTask != nil
+                    && connectionCoordinator.nodeSwitchTask != previousSwitch
+                if !started {
+                    _ = applyProxySelection(name)
+                    persistProxySelection(name)
+                }
+            } else {
+                _ = applyProxySelection(name)
+                persistProxySelection(name)
+                if !wasConnected {
+                    // The in-flight attempt is still aimed at the removed exit.
+                    // Release it, then connect the survivor. Bootstrap would
+                    // cut the machine for the whole reconnect.
+                    disconnect(releaseKillSwitch: true, automaticFailureRelease: true)
+                    autoConnectRequested = true
+                    attemptAutomaticConnect()
+                }
+            }
+        case .keepStrictBlock:
+            catalogSelectionRequiresChoice = true
+            autoConnectRequested = false
+            applyDefaultProxySelection(persist: true)
+            disconnect(releaseKillSwitch: false)
+            errorMessage = String(
+                localized: "The selected cloud server was removed. Strict mode is still blocking traffic. Choose another cloud server."
+            )
+        case .selectiveRelease:
+            // The hook already released general traffic and kept the AI floor.
+            // Bootstrap or a full disarm would undo that.
+            catalogSelectionRequiresChoice = true
+            autoConnectRequested = false
+            applyDefaultProxySelection(persist: true)
+            errorMessage = String(
+                localized: "The selected cloud server was removed. Ordinary internet stays open and AI services stay blocked. Choose another cloud server."
+            )
+        case .releaseOriginalNetwork:
+            catalogSelectionRequiresChoice = true
+            autoConnectRequested = false
+            applyDefaultProxySelection(persist: true)
+            disconnect(releaseKillSwitch: true, automaticFailureRelease: true)
+            errorMessage = String(
+                localized: "The selected cloud server was removed. This Mac is back on its normal internet. Choose another cloud server."
+            )
+        }
     }
 
     /// Applying a catalog rewrites the whole runtime config, and the full
@@ -573,14 +683,16 @@ extension AppState {
 
         guard allowRuntimeTransition, behaviorChanged,
               isConnected || isConnecting else { return }
-        // Policy changes are rare. Reuse the already-audited full protected
-        // reconnect instead of hot-editing PF states under an active Reality
-        // socket. The bootstrap-only transition clears every session exception.
-        disconnect(releaseKillSwitch: false)
+        // Keep the session and apply on it. Tearing down into bootstrap cut
+        // the machine for a policy write. A connect still in flight already
+        // stores this policy and applies it from onCoreStarted. Failure of
+        // the in-place apply releases the original network unless strict.
         errorMessage = String(
-            localized: "Secure app routing was updated; Tono is applying it without opening direct Internet."
+            localized: "Secure app routing was updated. Tono is applying it on this connection."
         )
-        scheduleProtectedReconnect(immediate: true)
+        if isConnected {
+            scheduleBackgroundOptionalPolicy()
+        }
     }
 
     private func managedDirectProtectedAddresses() -> Set<String> {
@@ -791,7 +903,10 @@ extension AppState {
             >= Self.pinRefreshStreamGraceSeconds
     }
 
-    func refreshManagedDirectPins() async {
+    func refreshManagedDirectPins(
+        resolver: ((TonoTrafficPolicy, ConfigPipeline.ManagedDirectRuntimePolicy, CoreControllerClient)
+            async -> ConfigPipeline.ManagedDirectRuntimePolicy?)? = nil
+    ) async {
         guard isConnected, isOwnedTonoMode,
               switchingNodeId == nil,
               connectionCoordinator.configReloadTask == nil,
@@ -800,12 +915,20 @@ extension AppState {
               !managedTrafficPolicy.domains.isEmpty
                 || !managedTrafficPolicy.webDomains.isEmpty
         else { return }
-        let resolved = await resolveManagedDirectDomains(
-            policy: managedTrafficPolicy,
-            base: base,
-            api: api
-        )
+        let policy = managedTrafficPolicy
+        let generation = connectionCoordinator.protectionOperationGeneration
+        let resolved: ConfigPipeline.ManagedDirectRuntimePolicy?
+        if let resolver {
+            resolved = await resolver(policy, base, api)
+        } else {
+            resolved = await resolveManagedDirectDomains(policy: policy, base: base, api: api)
+        }
+        // Resolution owns no runtime mutation handle. A newer accepted policy
+        // or session can finish while DNS is pending; its DIRECT authority must
+        // not be replaced by a merge carrying the captured plan's old grants.
         guard !Task.isCancelled, isConnected,
+              connectionCoordinator.protectionOperationGeneration == generation,
+              managedTrafficPolicy == policy, activeDirectPolicy == base,
               switchingNodeId == nil, connectionCoordinator.configReloadTask == nil,
               let resolved else { return }
         guard let merged = Self.mergedManagedDirectPolicy(
@@ -976,10 +1099,21 @@ extension AppState {
         )
     }
 
+    nonisolated static func budgetManagedDirectWebPins(
+        _ pins: [ConfigPipeline.DirectDomainPin],
+        seed: ConfigPipeline.ManagedDirectRuntimePolicy,
+        preservingSessionEndpoints: [ConfigPipeline.DirectEndpoint]
+    ) -> (kept: [ConfigPipeline.DirectDomainPin], dropped: [String]) {
+        ConfigPipeline.pinsWithinSessionEndpointBudget(
+            pins, seededBy: preservingSessionEndpoints + seed.sessionEndpoints
+        )
+    }
+
     func resolveManagedDirectDomains(
         policy: TonoTrafficPolicy,
         base: ConfigPipeline.ManagedDirectRuntimePolicy?,
-        api: CoreControllerClient
+        api: CoreControllerClient,
+        preservingSessionEndpoints: [ConfigPipeline.DirectEndpoint] = []
     ) async -> ConfigPipeline.ManagedDirectRuntimePolicy? {
         guard !policy.webDomains.isEmpty,
               let physicalInterface = base?.physicalInterface else {
@@ -1040,9 +1174,9 @@ extension AppState {
         // reviewed host to keep the ones that did not fit. The control plane
         // can reach that on its own: 32 `webDomains` is its published maximum
         // and resolves to as many as 258 session endpoints.
-        let budgeted = ConfigPipeline.pinsWithinSessionEndpointBudget(
-            webPins,
-            seededBy: withoutWebPins.sessionEndpoints
+        let budgeted = Self.budgetManagedDirectWebPins(
+            webPins, seed: withoutWebPins,
+            preservingSessionEndpoints: preservingSessionEndpoints
         )
         if !budgeted.dropped.isEmpty {
             // Named, because the alternative reading of a short pin list is

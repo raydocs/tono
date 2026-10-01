@@ -22,13 +22,13 @@ import {
 } from '@/tono-ui/theme'
 import { TonoIcon } from '@/tono-ui/TonoIcon'
 
+import { ActivityRouteExplanation } from './activity-explanation'
 import {
   aggregateActivityApps,
   type ActivityRoute,
   WECHAT_ACTIVITY_PROCESS,
   toActivityRow,
 } from './activity-model'
-import { ActivityRouteExplanation } from './activity-explanation'
 
 type ActivityFilter = 'all' | Exclude<ActivityRoute, 'local'>
 type ActivityView = 'apps' | 'connections'
@@ -73,7 +73,9 @@ const activityProcessLabel = (
   process: string,
   translate: (key: string) => string,
 ) => {
-  const key = ACTIVITY_APP_KEYS[process]
+  const key = Object.hasOwn(ACTIVITY_APP_KEYS, process)
+    ? ACTIVITY_APP_KEYS[process]
+    : undefined
   return key ? translate(key) : process
 }
 
