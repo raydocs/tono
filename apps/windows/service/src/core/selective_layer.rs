@@ -1,6 +1,7 @@
-//! Install and remove the secondary AI hold. Best-effort, and only after a
-//! full release has already opened the network. A failure here is logged and
-//! does not restore the general block.
+//! Install and remove the secondary AI hold. Best-effort. Automatic releases
+//! install it while the general block is still armed (#1271), then again after
+//! the release at the durable boundary. A failure is logged and reported, and
+//! never keeps or restores the general block.
 //!
 //! The firewall rules are Windows Firewall entries with a fixed remote prefix,
 //! not filters in the kill-switch provider. Residual kill-switch filters are
@@ -20,6 +21,7 @@ struct WorkerState {
     revision: u64,
     apply_narrow: bool,
     running: bool,
+    succeeded: bool,
     completed: tokio::sync::watch::Sender<u64>,
 }
 
@@ -29,6 +31,7 @@ static WORKER: Lazy<Mutex<WorkerState>> = Lazy::new(|| {
         revision: 0,
         apply_narrow: false,
         running: false,
+        succeeded: true,
         completed,
     })
 });
@@ -39,7 +42,8 @@ fn worker_guard() -> MutexGuard<'static, WorkerState> {
         .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
-async fn request(apply_narrow: bool) {
+/// True only when the requested state was reached natively within the wait budget.
+async fn request(apply_narrow: bool) -> bool {
     let (revision, mut completed, start) = {
         let mut worker = worker_guard();
         worker.revision += 1;
@@ -58,17 +62,18 @@ async fn request(apply_narrow: bool) {
     } else {
         STEP_BUDGET
     };
-    let _ = tokio::time::timeout(budget, async {
+    let finished = tokio::time::timeout(budget, async {
         loop {
             if *completed.borrow_and_update() >= revision {
-                break;
+                return true;
             }
             if completed.changed().await.is_err() {
-                break;
+                return false;
             }
         }
     })
     .await;
+    matches!(finished, Ok(true)) && worker_guard().succeeded
 }
 
 fn reconcile_blocking() {
@@ -79,25 +84,25 @@ fn reconcile_blocking() {
         };
         // No state lock is held during native commands. In unwind builds, a panic must not
         // strand the running flag and prevent subsequent best-effort recovery attempts.
-        if std::panic::catch_unwind(|| {
+        let succeeded = std::panic::catch_unwind(|| {
             if apply_narrow {
-                if worker_guard().revision == revision {
-                    // Reconcile in place: an existing hold must never be deleted by another
-                    // request for that same hold, including recovery after Service restart.
-                    apply_blocking();
-                }
+                // Reconcile in place: an existing hold must never be deleted by another
+                // request for that same hold, including recovery after Service restart.
+                worker_guard().revision != revision || apply_blocking()
             } else {
                 remove_blocking();
+                true
             }
         })
-        .is_err()
-        {
+        .unwrap_or_else(|_| {
             tracing::warn!("selective fail-open: native reconciliation panicked");
-        }
+            false
+        });
         let mut worker = worker_guard();
         if worker.revision == revision {
             // Retire and publish completion under the same lock as new-request admission.
             worker.running = false;
+            worker.succeeded = succeeded;
             worker.completed.send_replace(revision);
             return;
         }
@@ -126,11 +131,12 @@ pub async fn remove() {
     request(false).await;
 }
 
-pub async fn finish_release(apply_narrow: bool) {
+/// True when the resulting disposition is in place: the hold is installed, or none is wanted.
+pub async fn finish_release(apply_narrow: bool) -> bool {
     let apply_narrow = apply_narrow
         && selective_fail_open::follow_up(selective_fail_open::ReleaseKind::CrashOrHang)
             == selective_fail_open::FollowUp::Apply;
-    request(apply_narrow).await;
+    request(apply_narrow).await
 }
 
 #[cfg(any(windows, test))]
@@ -158,20 +164,23 @@ fn remove_blocking() {
 }
 
 #[cfg(all(windows, not(feature = "test")))]
-fn apply_blocking() {
+fn apply_blocking() -> bool {
+    let mut applied = true;
     for (update, add) in selective_fail_open::firewall_set_commands()
         .iter()
         .zip(selective_fail_open::firewall_add_commands())
     {
         // Set preserves existing rules and updates all same-name copies. A missing rule
         // needs an add; only that rule falls back, so the other prefix is never duplicated.
-        if !run_command(update, false) {
-            run_command(&add, true);
+        if !run_command(update, false) && !run_command(&add, true) {
+            applied = false;
         }
     }
     if let Err(error) = super::dns::install_selective_nrpt() {
         tracing::warn!("selective fail-open: NRPT sinkhole was not installed: {error:#}");
+        applied = false;
     }
+    applied
 }
 
 #[cfg(not(all(windows, not(feature = "test"))))]
@@ -189,7 +198,7 @@ fn remove_blocking() {
 }
 
 #[cfg(not(all(windows, not(feature = "test"))))]
-fn apply_blocking() {
+fn apply_blocking() -> bool {
     #[cfg(test)]
     {
         let pause = tests::pause(&tests::APPLY_PAUSE);
@@ -198,6 +207,7 @@ fn apply_blocking() {
             pause.completed.notify_one();
         }
     }
+    true
 }
 
 #[cfg(test)]
