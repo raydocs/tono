@@ -412,7 +412,13 @@ pub(super) fn create_ipc_router() -> Result<Router> {
                             "Kill switch release refused; active Core ownership does not match the protection owner",
                         );
                     }
-                    Ok(None) => {}
+                    Ok(None) => {
+                        if let Err(error) = retire_unrecorded_owner_core(&owner).await {
+                            return service_unavailable(format!(
+                                "Kill switch release refused; the unrecorded Core could not be safely stopped and retired: {error:#}"
+                            ));
+                        }
+                    }
                     Err(error) => {
                         // An unreadable ownership record proves nothing either way, and refusing
                         // on it is what leaves an armed machine with no way back: every retry

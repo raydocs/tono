@@ -327,6 +327,22 @@ async fn rollback_started_owner(owner: &AuthenticatedOwner) -> AnyResult<()> {
     }
 }
 
+#[cfg(any(windows, test))]
+async fn retire_unrecorded_owner_core(owner: &AuthenticatedOwner) -> AnyResult<()> {
+    // Missing/corrupt ownership is not proof that the independently supervised Core is gone.
+    // The caller has already proved ownership of the armed policy under the lifecycle lock.
+    if let Err(error) = CORE_MANAGER.lock().await.stop_core().await {
+        set_core_lifecycle_state(ServiceLifecycleState::Fatal);
+        return Err(error).context("failed to stop Core without an active owner record");
+    }
+    // Do not add a disk-write dependency to an already idle release or create a default record.
+    // A retained runnable intent must still be retired before filters can be released.
+    if load_owner_desired_state(&owner.key).await?.core_should_be_running {
+        persist_owner_core_stopped(owner).await?;
+    }
+    Ok(())
+}
+
 // 防止旧 listener 的清理删除 supervisor 刚创建的新 socket。
 static IPC_LIFECYCLE_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 
