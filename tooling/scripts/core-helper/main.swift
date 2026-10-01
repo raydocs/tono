@@ -115,6 +115,13 @@ func staleOwnedCorePIDs(
     }.sorted()
 }
 
+/// A signal is still aimed at the core only when the pid's path and uid are
+/// the ones captured before the wait. `kill(pid, 0)` stays true after the pid
+/// is reused.
+func maySignalOwnedCore(path: String, uid: uid_t, expectedPath: String) -> Bool {
+    uid == 0 && path == expectedPath
+}
+
 func runCoreLifecyclePolicySelfTests() -> Bool {
     staleOwnedCorePIDs(in: [
         .init(pid: 31, executablePath: mihomoPath, uid: 0),
@@ -122,6 +129,9 @@ func runCoreLifecyclePolicySelfTests() -> Bool {
         .init(pid: 33, executablePath: "/tmp/tono-mihomo", uid: 0),
         .init(pid: 34, executablePath: "/Library/PrivilegedHelperTools/tono-mihomo", uid: 0),
     ]) == [31, 34]
+        && maySignalOwnedCore(path: mihomoPath, uid: 0, expectedPath: mihomoPath)
+        && !maySignalOwnedCore(path: "/usr/libexec/rosetta/runtime", uid: 0, expectedPath: mihomoPath)
+        && !maySignalOwnedCore(path: mihomoPath, uid: 501, expectedPath: mihomoPath)
 }
 
 /// Folds an object key the way Go's JSON decoder matches it to a struct field
@@ -747,6 +757,131 @@ func startHelperDaemon<KillSwitch, Server>(
         if !stopRequested() { secureFailedStartup() }
         return nil
     }
+}
+
+func runUpgradeSourceSelfTest() -> Bool {
+    let directory = FileManager.default.temporaryDirectory.path
+    let fifo = directory + "/tono-upgrade-fifo-\(getpid())"
+    let file = directory + "/tono-upgrade-file-\(getpid())"
+    let dest = directory + "/tono-upgrade-dest-\(getpid())"
+    let stopped = dest + ".stop"
+    unlink(fifo)
+    unlink(file)
+    unlink(dest)
+    unlink(stopped)
+    defer {
+        unlink(fifo)
+        unlink(file)
+        unlink(dest)
+        unlink(stopped)
+    }
+    guard mkfifo(fifo, 0o644) == 0 else { return false }
+    let started = Date()
+    var rejectedFIFO = false
+    do { close(try openUpgradeSource(fifo)) } catch { rejectedFIFO = true }
+    guard rejectedFIFO, Date().timeIntervalSince(started) < 2 else { return false }
+    let payload = Data("tono-upgrade\n".utf8)
+    do {
+        try payload.write(to: URL(fileURLWithPath: file), options: .atomic)
+        let fd = try openUpgradeSource(file)
+        defer { close(fd) }
+        try copyUpgradeSource(from: fd, to: dest) { true }
+        guard (try? Data(contentsOf: URL(fileURLWithPath: dest))) == payload else { return false }
+        var aborted = false
+        do {
+            try copyUpgradeSource(from: fd, to: stopped) { false }
+        } catch {
+            aborted = true
+        }
+        return aborted && access(stopped, F_OK) != 0
+    } catch {
+        return false
+    }
+}
+
+func runBuildSourceSealSelfTest() -> Bool {
+    let json = Data(
+        #"{"commit":"0123456789abcdef0123456789abcdef01234567","releaseSequence":3}"#.utf8
+    )
+    guard (try? UpdatePackage.buildSource(matching: json, and: json))?.releaseSequence == 3 else {
+        return false
+    }
+    do {
+        _ = try UpdatePackage.buildSource(matching: json, and: Data(#"{"commit":"0123456789abcdef0123456789abcdef01234567","releaseSequence":2}"#.utf8))
+        return false
+    } catch {}
+    do {
+        _ = try UpdatePackage.buildSource(from: Data(count: 4096))
+        return false
+    } catch {}
+    let fifo = FileManager.default.temporaryDirectory.path + "/tono-build-source-fifo-\(getpid())"
+    unlink(fifo)
+    defer { unlink(fifo) }
+    guard mkfifo(fifo, 0o644) == 0 else { return false }
+    let started = Date()
+    do {
+        _ = try UpdatePackage.readBoundedRegularFile(fifo, maximum: 4096)
+        return false
+    } catch {
+        return Date().timeIntervalSince(started) < 2
+    }
+}
+
+func runPFTokenForgetSelfTest() -> Bool {
+    !KillSwitchManager.shouldKeepPFEnableRecord(releaseStatus: 0, stillListed: true)
+        && KillSwitchManager.shouldKeepPFEnableRecord(releaseStatus: 1, stillListed: true)
+        && !KillSwitchManager.shouldKeepPFEnableRecord(releaseStatus: 1, stillListed: false)
+}
+
+func runLanDNSScopeSelfTest() -> Bool {
+    let scoped = #"block drop out quick on { en0, en5 } inet proto { tcp, udp } port { 53, 853 } label "tono-lan-dns""#
+    let unscoped = #"block drop out quick inet proto { tcp, udp } port { 53, 853 } label "tono-lan-dns""#
+    return KillSwitchManager.lanDNSInterfaces(in: scoped) == ["en0", "en5"]
+        && KillSwitchManager.lanDNSInterfaces(in: unscoped) == []
+        && KillSwitchManager.lanDNSInterfaces(in: "pass out all\n") == nil
+        && KillSwitchManager.lanDNSScopeNeedsReload(loaded: ["en0"], current: ["en0", "en7"])
+        && !KillSwitchManager.lanDNSScopeNeedsReload(loaded: ["en0", "en7"], current: ["en0"])
+        && !KillSwitchManager.lanDNSScopeNeedsReload(loaded: ["en0"], current: [])
+        && !KillSwitchManager.lanDNSScopeNeedsReload(loaded: [], current: ["en0"])
+        && !KillSwitchManager.lanDNSScopeNeedsReload(loaded: nil, current: ["en0"])
+}
+
+func runReadRequestBoundSelfTest() -> Bool {
+    func withPipe(_ body: (Int32, Int32) throws -> Bool) -> Bool {
+        var ends = [Int32](repeating: -1, count: 2)
+        guard pipe(&ends) == 0 else { return false }
+        defer {
+            if ends[0] >= 0 { close(ends[0]) }
+            if ends[1] >= 0 { close(ends[1]) }
+        }
+        return (try? body(ends[0], ends[1])) == true
+    }
+    let accepted = withPipe { readEnd, writeEnd in
+        let bytes = Data("GET /version HTTP/1.1\r\nContent-Length: 0\r\n\r\n".utf8)
+        let wrote = bytes.withUnsafeBytes { raw -> Int in
+            guard let base = raw.baseAddress else { return -1 }
+            return Darwin.write(writeEnd, base, bytes.count)
+        }
+        guard wrote == bytes.count else { return false }
+        let request = try readRequest(readEnd)
+        return request.method == "GET" && request.path == "/version" && request.body.isEmpty
+    }
+    let rejected = withPipe { readEnd, writeEnd in
+        var header = Data("POST /helper/upgrade HTTP/1.1\r\nX: ".utf8)
+        header.append(Data(repeating: 0x61, count: maximumHeaderBytes))
+        let wrote = header.withUnsafeBytes { raw -> Int in
+            guard let base = raw.baseAddress else { return -1 }
+            return Darwin.write(writeEnd, base, header.count)
+        }
+        guard wrote == header.count else { return false }
+        do {
+            _ = try readRequest(readEnd)
+            return false
+        } catch {
+            return true
+        }
+    }
+    return accepted && rejected
 }
 
 /// The manager is constructed before the server. A server failure runs the
@@ -1500,6 +1635,11 @@ if CommandLine.arguments.dropFirst() == ["--self-test"] {
             && TonoPeerAuthorizer.runSelfTests()
             && runRequestContractSelfTests()
             && runHelperUpgradeAdmissionSelfTest()
+            && runUpgradeSourceSelfTest()
+            && runBuildSourceSealSelfTest()
+            && runPFTokenForgetSelfTest()
+            && runLanDNSScopeSelfTest()
+            && runReadRequestBoundSelfTest()
             && runCoreLifecyclePolicySelfTests()
             && runOwnedRuntimeContractSelfTests()
             && PowerTransitionGate.runSelfTests()

@@ -318,7 +318,14 @@ nonisolated enum HelperProtocolVersion {
     ///   pfctl does not answer, and reports down only when a second read
     ///   agrees. A 4.52.7 daemon still drops a live ruleset on `pfctl -nf`
     ///   failure and treats one unread health sample as "not filtering".
-    static let current = "4.52.10"
+    /// - 4.52.10 → 4.52.11: silent upgrade copies a regular file from a
+    ///   non-blocking fd and does not hold the update lock across that copy.
+    ///   Stale-core signals re-check path and uid. The installed update floor
+    ///   is the bytes read before and after the signature check. A `pfctl -X`
+    ///   that leaves the token listed keeps the record. A new physical NIC
+    ///   reloads the LAN DNS block without flushing states. Protected DNS
+    ///   status follows `serviceID`.
+    static let current = "4.52.11"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS
