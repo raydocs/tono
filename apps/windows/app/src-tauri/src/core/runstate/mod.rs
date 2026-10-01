@@ -7,7 +7,7 @@
 //! mid-restart would describe a transition rather than a state.
 //!
 //! Reads come in three flavours that differ only in *freshness* — [`RunStateStore::state`]
-//! (cached), [`RunStateStore::settled`] (waits for any in-flight operation) and
+//! (cached), [`RunStateStore::settled`] (waits for a live operation; a timed-out one returns) and
 //! [`RunStateStore::probe`] (forces live IPC). What the answer *means* is decided by methods
 //! on [`RunState`], so no caller writes its own availability formula.
 
@@ -111,6 +111,10 @@ pub struct RunStateStore<E: RunStateEnv> {
     mode: ArcSwap<RunningMode>,
     operation_running: AtomicBool,
     privileged_outcome_uncertain: AtomicBool,
+    /// Set only when a timed-out helper drops its guard without clearing the slot.
+    /// Distinct from `privileged_outcome_uncertain`, which is also set for the whole
+    /// of a helper that is still running and will notify on completion.
+    operation_quarantined: AtomicBool,
     operation_done: Notify,
     privileged_timeout: Duration,
     evidence_timeout: Duration,
@@ -141,6 +145,7 @@ impl<E: RunStateEnv> RunStateStore<E> {
             mode: ArcSwap::new(Arc::new(RunningMode::NotRunning)),
             operation_running: AtomicBool::new(false),
             privileged_outcome_uncertain: AtomicBool::new(false),
+            operation_quarantined: AtomicBool::new(false),
             operation_done: Notify::new(),
             privileged_timeout: PRIVILEGED_ACTION_TIMEOUT,
             evidence_timeout: INSTALL_EVIDENCE_TIMEOUT,
@@ -179,6 +184,11 @@ impl<E: RunStateEnv> RunStateStore<E> {
     /// operation claims it, and the snapshot then *describes* that operation instead of waiting
     /// for it. `prepare_startup` reads this: it would see a requested install as a reason not to
     /// start, where waiting would have told it whether the install worked.
+    ///
+    /// A timed-out helper never clears the slot (the elevated process cannot be cancelled), so
+    /// waiting for that clear would park Connect, Disconnect, and `get_runtime_state` until the
+    /// process exits. Quarantine still owns the slot — the snapshot says `op_in_flight` — and
+    /// this returns that snapshot instead of waiting for a notify that will not come.
     pub async fn settled(&self) -> RunState {
         loop {
             let notified = self.operation_done.notified();
@@ -191,7 +201,7 @@ impl<E: RunStateEnv> RunStateStore<E> {
             notified.as_mut().enable();
 
             let state = self.state();
-            if !state.op_in_flight {
+            if !state.op_in_flight || self.operation_quarantined.load(Ordering::Acquire) {
                 return state;
             }
             notified.await;
@@ -681,6 +691,11 @@ impl<E: RunStateEnv> Drop for OperationGuard<'_, E> {
             // A timed-out/cancelled elevation may still be mutating the SCM. Keep the slot
             // quarantined rather than admitting a conflicting helper. Process restart is the
             // only reliable cancellation boundary exposed by the current elevation library.
+            // Publish the quarantine before waking waiters: `notify_waiters` stores nothing
+            // when nobody is registered yet, and a waiter that observes the flag returns
+            // without parking.
+            self.store.operation_quarantined.store(true, Ordering::Release);
+            self.store.operation_done.notify_waiters();
             self.store.announce();
             return;
         }
@@ -739,6 +754,49 @@ mod tests {
         let error = store
             .begin_operation()
             .expect_err("a later helper must not race the orphaned one");
+        assert!(error.to_string().contains("restart Tono"), "{error:#}");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn settled_returns_when_a_privileged_operation_times_out() {
+        let store = Arc::new(
+            RunStateStore::new(HungEnv).with_privileged_timeout(Duration::from_millis(50)),
+        );
+        let guard = store.begin_operation().expect("slot is free");
+
+        let waiting = {
+            let store = Arc::clone(&store);
+            tokio::spawn(async move { store.settled().await })
+        };
+        tokio::task::yield_now().await;
+        assert!(!waiting.is_finished(), "an in-flight helper has not finished");
+
+        let performing = {
+            let store = Arc::clone(&store);
+            tokio::spawn(async move { store.perform(PendingAction::Install).await })
+        };
+        let error = performing
+            .await
+            .expect("perform task")
+            .expect_err("the helper times out");
+        assert!(format!("{error:#}").contains("timed out"), "{error:#}");
+        tokio::task::yield_now().await;
+        assert!(
+            !waiting.is_finished(),
+            "the slot stays owned until the guard drops; uncertainty during the helper is not quarantine"
+        );
+
+        drop(guard);
+        let settled = waiting.await.expect("settled waiter");
+        assert!(
+            settled.op_in_flight,
+            "quarantine keeps the slot so a second helper cannot start"
+        );
+        assert!(store.operation_in_flight());
+
+        let later = store.settled().await;
+        assert!(later.op_in_flight, "a later status read must not park on the orphaned helper");
+        let error = store.begin_operation().expect_err("no second helper");
         assert!(error.to_string().contains("restart Tono"), "{error:#}");
     }
 

@@ -46,15 +46,20 @@ export const TonoAccountCard = () => {
   const dark = useThemeMode() !== 'light'
   const text = tonoText(dark)
   const navigate = useNavigate()
-  const { mutateTonoStatus } = useTonoStatus()
+  const { status, mutateTonoStatus } = useTonoStatus()
+  const accountScope = status?.routePreferenceScope
+  const accountQueryKey = [...tonoAccountQueryKey, accountScope]
+  const devicesQueryKey = [...tonoDevicesQueryKey, accountScope]
 
   const { data: account } = useQuery({
-    queryKey: tonoAccountQueryKey,
+    queryKey: accountQueryKey,
     queryFn: tonoAccount,
+    enabled: Boolean(accountScope),
   })
   const { data: devices, refetch: mutateDevices } = useQuery({
-    queryKey: tonoDevicesQueryKey,
+    queryKey: devicesQueryKey,
     queryFn: tonoDevices,
+    enabled: Boolean(accountScope),
   })
 
   const [revokeTarget, setRevokeTarget] = useState<TonoDevice | null>(null)
@@ -88,8 +93,8 @@ export const TonoAccountCard = () => {
     setSignOutOpen(false)
     // Drop account-scoped caches so the next sign-in never flashes the
     // previous account's email/devices/servers.
-    removeCacheData(tonoAccountQueryKey)
-    removeCacheData(tonoDevicesQueryKey)
+    removeCacheData(accountQueryKey)
+    removeCacheData(devicesQueryKey)
     removeCacheData(tonoServersQueryKey)
     await mutateTonoStatus()
     navigate('/login', { replace: true })
