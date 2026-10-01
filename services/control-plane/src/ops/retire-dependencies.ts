@@ -2,8 +2,9 @@
 // existing exit-token revoke (rotate hash + disable) used once they have left.
 
 import { randomToken, sha256 } from '../crypto';
-import { catalogHy2Name } from '../catalog-yaml';
+import { catalogBaseName, catalogHy2Name } from '../catalog-yaml';
 import { type Env, type Row, id, now } from '../env';
+import { assertHomeExitUnbound } from '../home';
 import { writeOpsAudit } from '../product-account';
 import {
   assertRetireDependencies,
@@ -20,6 +21,15 @@ import { catalogNames, requireNode } from './handlers/nodes-data';
 import { RETIRE_DRAIN_SECONDS } from './verdict';
 
 export type { RetireDependenciesDto };
+
+/** Residential routing uses its home even when the selected cloud exit differs. */
+export async function assertCatalogHomeUnbound(e: Env, name: string): Promise<void> {
+  const base = catalogBaseName(name);
+  const homes = await e.DB.prepare(
+    "SELECT id FROM home_exits WHERE kind = 'catalog' AND proxy_name IN (?, ?)",
+  ).bind(base, catalogHy2Name(base)).all<Row>();
+  for (const home of homes.results) await assertHomeExitUnbound(e, String(home.id));
+}
 
 export function retirePendingDedupeKey(name: string): string {
   return `node:${name}:retire_pending`;

@@ -458,6 +458,41 @@ describe('ops node jobs', () => {
     expect(await exitStatus(kite)).toEqual({ status: 'active', token_hash: hash });
   });
 
+  it('refuses fleet retirement of a bound catalog home even when the customer selects another cloud node', async () => {
+    const e = env as unknown as Env;
+    const t = 1_800_000_980;
+    const kite = 'Tokyo · Kite';
+    const fuji = 'Tokyo · Fuji';
+    await seedTwoNodeCatalog(e, t, kite, fuji);
+    const hash = await seedExitToken(kite, t);
+    await db().prepare(
+      `INSERT INTO users(id, email, password_hash, password_salt, created_at, updated_at)
+       VALUES('u-home-bound', 'home-bound@example.com', 'x', 'y', ?, ?)`,
+    ).bind(t, t).run();
+    await db().prepare(
+      `INSERT INTO home_exits(id, proxy_name, display_name, kind, status, created_at, updated_at)
+       VALUES('home-kite', ?, 'Customer home', 'catalog', 'active', ?, ?)`,
+    ).bind(kite, t, t).run();
+    await db().prepare(
+      `INSERT INTO user_home_bindings(user_id, home_exit_id, default_proxy_name, created_at, updated_at)
+       VALUES('u-home-bound', 'home-kite', ?, ?, ?)`,
+    ).bind(fuji, t, t).run();
+    await db().prepare(
+      `INSERT INTO ops_customer_status(user_id, connected, selected_server, last_seen_at, updated_at)
+       VALUES('u-home-bound', 1, ?, ?, ?)`,
+    ).bind(fuji, t - 60, t).run();
+    const { job } = await enqueue('catalog_retire', t, { nodeName: kite, idempotencyKey: 'retire-bound-home' });
+    expect(await runWorkerJobs(e, t, 5)).toBe(1);
+    const row = await db().prepare('SELECT status, result_summary FROM ops_node_jobs WHERE id = ?')
+      .bind(job.id).first<{ status: string; result_summary: string }>();
+    expect(row?.status).toBe('failed');
+    expect(row?.result_summary).toContain('Unbind all users');
+    expect(await listedNames(e)).toContain(kite);
+    expect(await exitStatus(kite)).toEqual({ status: 'active', token_hash: hash });
+    expect(await db().prepare('SELECT home_exit_id FROM user_home_bindings WHERE user_id = ?')
+      .bind('u-home-bound').first<{ home_exit_id: string }>()).toEqual({ home_exit_id: 'home-kite' });
+  });
+
   it('retires an empty node: catalog gone, token revoked, no incident', async () => {
     const e = env as unknown as Env;
     const t = 1_800_000_800;
