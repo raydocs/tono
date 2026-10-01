@@ -180,7 +180,9 @@ enum SelectiveFailOpen {
         return fields
     }
 
-    /// The flag names of an exact-prefix readback; nil for any other answer.
+    /// The flag names of an exact-prefix readback; nil for any other answer,
+    /// including flags that are not `<` + comma-separated [A-Z0-9]+ + `>`
+    /// (an empty name or stray whitespace could hide BLACKHOLE).
     private static func readbackFlags(_ output: String, prefix: String) -> [String]? {
         guard let identity = routeReadbackIdentity[prefix] else { return nil }
         let fields = readbackFields(output)
@@ -189,7 +191,12 @@ enum SelectiveFailOpen {
               let flags = fields["flags"], flags.hasPrefix("<"), flags.hasSuffix(">") else {
             return nil
         }
-        return flags.dropFirst().dropLast().split(separator: ",").map(String.init)
+        let names = flags.dropFirst().dropLast()
+            .split(separator: ",", omittingEmptySubsequences: false).map(String.init)
+        guard names.allSatisfy({ name in
+            !name.isEmpty && name.unicodeScalars.allSatisfy { ("A"..."Z").contains($0) || ("0"..."9").contains($0) }
+        }) else { return nil }
+        return names
     }
 
     /// A command may run only when it names exactly one of the two prefixes

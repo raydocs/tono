@@ -671,6 +671,16 @@ func runUpdateSelfTests() -> Bool {
         )
         try check(reading == .unknown, "A readback that mentions not in table counted as \(reading)")
     }
+    // A flag name with stray whitespace hides BLACKHOLE from the match; the
+    // exact prefix with flags that do not parse proves nothing.
+    test("selective-route-flags-must-parse") { _ in
+        let reading = SelectiveFailOpen.routeLayerReading(
+            status: 0,
+            output: "destination: 160.79.104.0\n       mask: 255.255.254.0\n      flags: <UP,DONE,STATIC,BLACKHOLE >\n",
+            prefix: SelectiveFailOpen.ipv4Prefix
+        )
+        try check(reading == .unknown, "Malformed route flags counted as \(reading)")
+    }
     // An iPhone or iPad app on Apple silicon is a wrapper with no Contents
     // folder (`WrappedBundle -> Wrapper/<name>.app`). One of them kept every
     // removed Tono's protection (BRICK-M3). A bundle that has Contents but no
