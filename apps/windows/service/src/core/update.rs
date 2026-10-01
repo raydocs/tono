@@ -322,6 +322,29 @@ fn prepare_failure_releases(strict: bool, core_stop_attempted: bool) -> bool {
     core_stop_attempted && !strict
 }
 
+async fn release_failed_preparation(
+    store: &mut Store,
+    owner: &AuthenticatedOwner,
+    peer: &Image,
+    core_stopped: bool,
+) -> Result<()> {
+    begin_update_release(store, owner, peer)?;
+    let stopped = if core_stopped {
+        Ok(())
+    } else {
+        manager::CORE_MANAGER.lock().await.stop_core().await
+    };
+    let persisted = desired::persist_owner_core_stopped(owner).await;
+    let cleared = desired::clear_active_owner().await;
+    // Automatic failure opens general traffic but retains the secondary AI hold.
+    // Desired-state failures must not prevent the DNS/WFP release.
+    wfp::release_applying_narrow().await?;
+    stopped?;
+    persisted?;
+    cleared?;
+    Ok(())
+}
+
 /// Prepare already stopped Core and narrowed WFP to bootstrap Blocked before Install
 /// spawns the executor. A `spawn` error means that process never existed. Non-strict
 /// sessions release general traffic and keep the AI hold. Strict stays Blocked.
@@ -522,23 +545,8 @@ pub(crate) async fn request(
                 if prepare_failure_releases(strict, core_stop_attempted) {
                     // Failed Prepare must not strand a non-strict owner behind bootstrap WFP
                     // and dead DNS. Use Disconnect's recorded release; keep the attempt evidence.
-                    let released = async {
-                        begin_update_release(&mut store, owner, &peer)?;
-                        let stopped = if core_stopped {
-                            Ok(())
-                        } else {
-                            manager::CORE_MANAGER.lock().await.stop_core().await
-                        };
-                        let persisted = desired::persist_owner_core_stopped(owner).await;
-                        let cleared = desired::clear_active_owner().await;
-                        // Desired-state failures must not prevent the standard DNS/WFP release.
-                        wfp::release().await?;
-                        stopped?;
-                        persisted?;
-                        cleared?;
-                        Ok::<_, anyhow::Error>(())
-                    }
-                    .await;
+                    let released =
+                        release_failed_preparation(&mut store, owner, &peer, core_stopped).await;
                     if let Err(release_error) = released {
                         return Err(error.context(format!(
                             "Prepare failure cleanup also failed: {release_error:#}"
@@ -981,7 +989,7 @@ fn recovery_task_registration(system_directory: &Path, dir: &Path) -> std::proce
         "\"{}\" --update-recover",
         dir.join("executor.exe").display()
     );
-    let mut registration = std::process::Command::new(system_directory.join("schtasks.exe"));
+    let mut registration = std::process::Command::new(schtasks_path(system_directory));
     registration.args([
         "/Create",
         "/TN",
@@ -997,6 +1005,10 @@ fn recovery_task_registration(system_directory: &Path, dir: &Path) -> std::proce
         "/F",
     ]);
     registration
+}
+
+fn schtasks_path(system_directory: &Path) -> PathBuf {
+    system_directory.join("schtasks.exe")
 }
 
 fn register_recovery_with(store: &Store, register: impl FnOnce(&Path) -> Result<()>) -> Result<()> {
@@ -1600,6 +1612,67 @@ mod tests {
         assert!(!prepare_failure_releases(true, true));
         assert!(!prepare_failure_releases(false, false));
         assert!(!prepare_failure_releases(true, false));
+    }
+
+    #[cfg(feature = "test")]
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn failed_prepare_releases_general_traffic_with_the_secondary_ai_hold() -> Result<()> {
+        use crate::update_transaction::tests::reserved;
+
+        wfp::emergency_disarm_windows_kill_switch().await?;
+        desired::clear_active_owner().await?;
+        let (root, mut store, peer, _) = reserved();
+        let owner = AuthenticatedOwner {
+            key: "failed-prepare-ai-fixture".to_owned(),
+            identity: crate::OwnerIdentity::Windows {
+                sid: "S-1-5-21-1-2-3-1001".to_owned(),
+            },
+            app_data_root: root.clone(),
+            peer_pid: None,
+            peer_session_id: None,
+        };
+        let mut next = store.state.clone();
+        next.attempt.as_mut().unwrap().receipt.owner = owner.key.clone();
+        store.save(next)?;
+        let obligation = store.attempt()?.receipt.required_recovery;
+        wfp::arm_bootstrap(
+            &crate::KillSwitchConfig {
+                tunnel_interface: "Tono".to_owned(),
+                proxy_endpoints: vec![crate::ProxyEndpoint {
+                    ip: "8.8.8.8".to_owned(),
+                    port: 443,
+                    protocol: crate::ProxyProtocol::Tcp,
+                }],
+                bootstrap_api_hosts: vec!["1.1.1.1".to_owned()],
+                direct_endpoints: Vec::new(),
+            },
+            r"C:\Program Files\Tono\tono-core.exe",
+            &owner.key,
+        )
+        .await?;
+
+        release_failed_preparation(&mut store, &owner, &peer, true).await?;
+        let released = !wfp::status().await.wanted;
+        let ai_held = super::super::selective_layer::test_hold_active();
+        let recorded = store.attempt()?.disconnect.is_some()
+            && store.attempt()?.receipt.required_recovery == obligation;
+        // The explicit Restore path still removes the automatic AI hold.
+        wfp::release().await?;
+        let restored = !super::super::selective_layer::test_hold_active();
+        drop(store);
+        std::fs::remove_dir_all(root)?;
+        std::fs::remove_file(
+            crate::service_paths()
+                .for_owner_key(&owner.key)
+                .desired_state_path(),
+        )?;
+
+        assert!(released, "failed Prepare must release general traffic");
+        assert!(ai_held, "automatic failure cleanup must apply the AI hold");
+        assert!(recorded, "release must retain the original recovery obligation");
+        assert!(restored, "explicit Restore must remove the AI hold");
+        Ok(())
     }
 
     #[test]

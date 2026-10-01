@@ -14,6 +14,13 @@ Read them together, highest number first:
 node tooling/scripts/records.mjs decisions
 ```
 
+## 2026-09-30 · 住宅 NAT 上的 HY2/QUIC 空闲，保活要不要写短一点？
+
+- Status: provisional
+- Chosen: sing-box 出口写 `keep_alive_period: 5s`。不写 `idle_timeout`，不关 Chrome parrot（parrot 把空闲钉在 30 秒，更短的空闲会更快拆会话；quic-go 把保活截到空闲的一半以内，5 秒发得出去）。钉住的 mihomo v1.19.30 没有保活字段，核心内部已经是 10 秒保活 / 30 秒空闲，不发明 YAML 键，也不写 `handshake-timeout` 或 `skip-cert-verify`。Windows sing-box 仍在没有 DER 钉时拒绝 HY2，只给已经存在的 hysteria2 出站补字段。空闲错误记 `TONO_CONNECT_HY2_IDLE`，文案不要求换节点或换网络。拒绝：把 mihomo 保活谎称成 5 秒；为了更短保活去改核心或放宽证书校验。
+- Why stricter: 更密的保活不放开流量，不新增出口，不拆隧道。失败时留在同一条线路上。
+- Applied in: [#749](https://github.com/raydocs/tono/pull/749)。mihomo 仍停在 10 秒，见 `docs/findings.d/HY2-IDLE-MIHOMO.md`。
+
 ## 2026-09-30 · How long may a fake-ip answer live, and may DoH try HTTP/3?
 
 - Status: provisional

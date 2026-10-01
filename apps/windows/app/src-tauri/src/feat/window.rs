@@ -141,6 +141,7 @@ pub async fn restart_app() {
             handle::Handle::global().clear_is_exiting();
             surface_cancelled_quit().await;
             handle::Handle::notice_message("app_restart::core_stop_failed", "");
+            crate::tono::commands::resync_after_cancelled_quit(handle::Handle::app_handle().clone()).await;
             return;
         }
         confirmed_protected_exit = true;
@@ -167,6 +168,7 @@ pub async fn restart_app() {
         handle::Handle::global().clear_is_exiting();
         refresh_tray_after_cancelled_exit().await;
         handle::Handle::notice_message("app_restart::core_stop_failed", "");
+        crate::tono::commands::resync_after_cancelled_quit(handle::Handle::app_handle().clone()).await;
         return;
     }
 

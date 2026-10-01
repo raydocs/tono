@@ -66,6 +66,32 @@ export const useTrafficData = () => ({
   live: false,
   refreshGetClashTraffic: async () => {},
 })
+export const formatTonoActionError = (error: unknown) => String(error)
+export const tonoAccount = async () => ({
+  email: 'preview@example.test',
+  suspended: false,
+  deviceLimit: 3,
+  plan: 'Pro',
+  quotaBytes: 200 * 1024 ** 3,
+  usageBytes: 37.4 * 1024 ** 3,
+  expiresAt: Date.UTC(2027, 2, 31, 12) / 1000,
+})
+export const tonoDevices = async () => [
+  {
+    id: 'this-pc',
+    name: 'DESKTOP-TONO.local',
+    createdAt: 1_756_000_000,
+    current: true,
+  },
+  {
+    id: 'mac',
+    name: 'MacBook-Air.local',
+    createdAt: 1_757_000_000,
+    current: false,
+  },
+]
+export const tonoRevokeDevice = async () => {}
+export const tonoSignOut = async () => {}
 export const tonoEncryptedDnsOverrides = async () =>
   params.get('dns') === 'encrypted'
 export const openWindowsDnsSettings = async () => {}

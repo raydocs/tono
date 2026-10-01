@@ -929,7 +929,10 @@ export interface TranslationResources {
         deviceLimit: string
         devices: string
         email: string
+        expires: string
+        noExpiry: string
         otherDevices: string
+        plan: string
         revoke: string
         revokeConfirmMessage: string
         revokeConfirmTitle: string
@@ -939,6 +942,8 @@ export interface TranslationResources {
         subtitle: string
         thisComputer: string
         title: string
+        usage: string
+        usageOf: string
       }
       activity: {
         appCount: string

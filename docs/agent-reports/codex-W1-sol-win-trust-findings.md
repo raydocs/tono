@@ -1,16 +1,18 @@
 # W1-sol-win-trust: Codex (GPT-6.1 Sol) findings
 
-Generated 2026-09-30 20:05 MT from the run's findings.tsv / prs.tsv.
+Generated 2026-09-30 21:19 MT from the run's findings.tsv / prs.tsv.
 
 ## PRs
 
 | PR | Branch | Labels | Auto-merge requested | Title |
 |---|---|---|---|---|
-| 843 | hunt/sol-trust-vault-write-retry | none | yes | fix(windows): retry failed session vault mutations on flush |
-| 873 | hunt/sol-trust-release-absent-owner | needs-hardware | yes | fix(windows): stop unrecorded cores before owner-only release |
-| 912 | hunt/sol-trust-release-scm-probe-timeout | needs-hardware | yes | fix(windows): bound SCM reads in release and readiness paths |
-| 933 | hunt/sol-trust-scm-verifier-worker-cap | needs-hardware | yes | fix(windows): cap surviving SCM verification threads |
-| 955 | hunt/sol-trust-goodbye-admission | needs-hardware | yes | fix(windows): reserve accepted Service shutdown before new work |
+| PR#843 | hunt/sol-trust-vault-write-retry | none | yes | fix(windows): retry failed session vault mutations on flush |
+| PR#873 | hunt/sol-trust-release-absent-owner | needs-hardware | yes | fix(windows): stop unrecorded cores before owner-only release |
+| PR#912 | hunt/sol-trust-release-scm-probe-timeout | needs-hardware | yes | fix(windows): bound SCM reads in release and readiness paths |
+| PR#933 | hunt/sol-trust-scm-verifier-worker-cap | needs-hardware | yes | fix(windows): cap surviving SCM verification threads |
+| PR#955 | hunt/sol-trust-goodbye-admission | needs-hardware | yes | fix(windows): reserve accepted Service shutdown before new work |
+| PR#983 | hunt/sol-trust-selective-release-retry | needs-hardware | yes | fix(windows): retain the AI hold on selective release retries |
+| PR#990 | hunt/sol-trust-stale-replay-verdict | none | yes | fix(windows): keep obsolete token replays from rejecting a valid session |
 
 ## Hypotheses
 
@@ -91,4 +93,17 @@ Generated 2026-09-30 20:05 MT from the run's findings.tsv / prs.tsv.
 | WIN-CORE-STOP-WAIT | W6 | — | apps/windows/service/src/core/manager.rs:213 | Core stop could wait forever for a wedged child | false-positive child wait has termination deadline; tracked failed child retained for retry |
 | WIN-SCM-VERIFIER-WORKERS | W6 | P2 | apps/windows/service/src/client/mod.rs:165 | Repeated monitor calls spawn unbounded detached SCM verifier threads during a sustained stall | real-fixed #933 |
 | WIN-GOODBYE-RELAUNCH | A7 | — | apps/windows/app/src-tauri/src/lib.rs:419 | Second same-user App relaunch triggers goodbye race | false-positive as primary trigger: persistent singleton coordination; same-App update provides actual trigger |
-| WIN-SELECTIVE-RELEASE-RETRY | A7 | P2 | apps/windows/app/src-tauri/src/core/service/mod.rs:1323 | Automatic selective release retries all failures as plain release, dropping AI hold | real-unfixed implementing compatibility-safe retry |
+| WIN-SELECTIVE-RELEASE-RETRY | A7 | P2 | apps/windows/app/src-tauri/src/core/service/mod.rs:1323 | Automatic selective release retries all failures as plain release, dropping AI hold | real-fixed #983 |
+| W6-SESSION-GENERATION-REPLAY | W6 | — | apps/windows/service/src/core/server/mod.rs:1116 | Obsolete same-user session proof could mutate a replacement Core | false-positive owner, generation and token-hash checks reject it |
+| W6-WRITER-ROTATION-AMPLIFICATION | W6 | — | apps/windows/service/src/core/server/handlers.rs:940 | Writer rotation could create excessive privileged files | false-positive size and retention clamped before persistence |
+| W6-UPDATE-START-EPOCH | W6 | — | apps/windows/service/src/core/windows_kill_switch.rs:47 | Update takeover should invalidate StartClash via release epoch | false-positive documented update and Disconnect epochs have separate purposes |
+| W6-STATUS-WRITER-CONTENTION | W6 | — | apps/windows/service/src/core/server/handlers.rs:63 | Status reads could queue behind slow lifecycle mutations | false-positive diagnostics avoid writer lock and read published snapshots |
+| A13-THUMBPRINT-NORMALIZATION | A13 | — | apps/windows/service/src/core/runtime_generation/core_integrity.rs:82 | Malformed thumbprint could bypass trust | false-positive compile-time pin, mandatory binary digest remains |
+| A13-SIGNER-BUFFER-BOUNDS | A13 | — | apps/windows/crates/tono-authenticode/src/windows_impl.rs:168 | Signer property read could panic or trust failed certificate extraction | false-positive bounded hashes, checked API results, fail-closed callers |
+| W8-PROGRAMDATA-OWNER-PATH | W8 | — | apps/windows/service/src/core/paths.rs:65 | Owner key or ProgramData resolution could select arbitrary paths | false-positive known-folder resolution and validated owner keys |
+| PROTECTED-DIAGNOSTIC-HANG | A12 | — | apps/windows/crates/tono-core/src/protected_connectivity.rs:98 | Failed authoritative proof could await diagnosis without bound | false-positive production transaction uses shared deadline |
+| POLICY-SWITCH-MEDIA-PIN | A12 | — | apps/windows/crates/tono-core/src/policy.rs:609 | Switching to a media IP could leave it permitted DIRECT | false-positive plan builder rechecks selected node |
+| AUTH-REFUSED-VERIFIED-LIFT | A12 | — | apps/windows/crates/tono-core/src/auth.rs:1044 | Old successful request could undo permanent Refused | false-positive sink lifts only Forbidden |
+| JOURNAL-OVERSIZED-READ | A12 | — | apps/windows/crates/tono-core/src/update_journal/store.rs:137 | Large journal could exhaust memory | false-positive no ordinary producer writes unbounded journal |
+| CREDENTIAL-DEV-ACL | A12 | — | apps/windows/crates/tono-core/src/credentials.rs:127 | File credential implementation lacks native Windows ACL enforcement | false-positive production uses Credential Manager |
+| AUTH-CLOCK-REPLAY-VERDICT | A12 | P2 | apps/windows/crates/tono-core/src/auth.rs:1611 | Obsolete decisive replay under clock skew could refuse current rotated session | real-fixed #990 |

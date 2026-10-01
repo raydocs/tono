@@ -1,0 +1,5 @@
+| ID | 问题（一句） | 状态 | Issue / PR | 等级 | 剩余限制 |
+|---|---|---|---|---|---|
+| MAC-UPDATE-METADATA-DEADLINE | 原生更新元数据只有随数据重置的空闲超时，慢速持续响应可长时间占住检查更新入口 | in-PR | hunt/sol-r3mac-update-metadata-deadline | 低·推导（P2） | 不会挂起机器或停止当前网络；重启 App 可恢复检查。真实 TCP 滴流 XCTest 已编写但 Linux 无 Swift，待 hosted CI |
+
+Baseline `b1825a3a`: `NativeUpdateDownload.swift:23–30` uses a 30-second request timeout but leaves the resource timeout at its seven-day default. [Apple's request timer](https://developer.apple.com/documentation/foundation/urlsessionconfiguration/timeoutintervalforrequest) resets whenever data arrives; the [resource timer](https://developer.apple.com/documentation/foundation/urlsessionconfiguration/timeoutintervalforresource) bounds the entire transfer. `AppUpdater.swift:35–39` keeps `canCheckForUpdates` false until this await completes. Both manifest and signature now have a 30-second total deadline as well as the existing idle timeout. Package downloading, helper staging, signature verification and protection rules are unchanged.

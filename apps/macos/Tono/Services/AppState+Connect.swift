@@ -472,6 +472,7 @@ extension AppState {
                 try Task.checkCancellation()
                 switch verdict {
                 case .connected(let advisory):
+                    SingBoxDelayGate.prove()
                     if let advisory {
                         LocalTrafficAudit.shared.recordEvent(
                             "controller_exit_advisory",
@@ -558,7 +559,7 @@ extension AppState {
                 }
                 let status = await PrivilegedRuntimeCoordinator.shared.coreStatus()
                 var failureDetails = [
-                    "error": error.localizedDescription,
+                    "error": Hy2IdleSupport.annotate(error.localizedDescription),
                     "stage": failedStage.rawValue,
                 ]
                 if let totalDuration {
@@ -575,16 +576,19 @@ extension AppState {
                 // on disk. The same failure as a typed event is what lets a
                 // success rate be split by stage and code instead of parsing
                 // uploaded audit prose.
+                let coreErrors = [status.lastError]
+                    .compactMap { $0 }
+                    .map(Hy2IdleSupport.annotate)
                 ConnectionTelemetryBuffer.shared.recordConnectFailure(
                     stage: failedStage.rawValue,
                     code: self.lastClassifiedFailure?.code ?? .unknownClassifiedFailure,
                     elapsedMs: totalDuration,
                     node: selectedExit?.name,
                     generation: Int(self.connectionCoordinator.protectionOperationGeneration),
-                    error: error.localizedDescription,
+                    error: Hy2IdleSupport.annotate(error.localizedDescription),
                     // The core's own last words are what turn "handshake failed"
                     // into a dial error an operator can act on.
-                    coreErrors: [status.lastError].compactMap { $0 }
+                    coreErrors: coreErrors
                 )
                 await MainActor.run {
                     // An explicit Disconnect/Quit can cancel while the status
@@ -595,9 +599,11 @@ extension AppState {
                     // and the copyable classified detail. The dashboard must
                     // not interpolate them — handshake eof used to land as
                     // English debug on the main card.
-                    let failureMessage = ConnectionFailurePresentation.userFacingMessage(
-                        classified: self.lastClassifiedFailure
-                    )
+                    let failureMessage = coreErrors.contains(where: Hy2IdleSupport.isQuicIdle)
+                        ? Hy2IdleSupport.userMessage
+                        : ConnectionFailurePresentation.userFacingMessage(
+                            classified: self.lastClassifiedFailure
+                        )
                     // Deterministic failures repeat verbatim; a fourth try of
                     // three identical same-stage outcomes will not differ.
                     // Environmental failures (no network service while Wi-Fi
