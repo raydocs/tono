@@ -333,7 +333,8 @@ nonisolated enum HelperProtocolVersion {
     ///   writer's lock promptly so helper requests and recovery can continue.
     /// - 4.52.14 → 4.52.15: DNS restore and service handoff retry
     ///   Apply before retiring originals already committed to disk.
-    static let current = "4.52.15"
+    /// - 4.52.15 → 4.52.16: Automatic failed commits and orphaned bootstrap releases preserve the secondary AI hold after opening general traffic.
+    static let current = "4.52.16"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS
