@@ -2533,8 +2533,14 @@ extension AppState {
     }
 
     /// Called for a `.broken` audit on an unchanged network. At the limit it
-    /// tears the session down with PF kept and pauses automatic retries until
-    /// the user acts; returns true so the caller does not reconnect.
+    /// ends the session and returns true so the caller does not reconnect.
+    ///
+    /// The limit is an exhausted failure, so it takes the automatic release
+    /// (ordinary traffic back, AI hold kept). A preserve teardown here stopped
+    /// the Core with nothing scheduled: the host sat offline on a dead
+    /// loopback resolver until the helper's core-down watchdog released PF
+    /// about 30 s later, and the UI kept saying Kill Switch was blocking
+    /// traffic over that open host (decision 031, MAC-DNS-PAUSE-HOLDS-PF).
     func pauseIfProtectedDNSKeepsFailing() -> Bool {
         consecutiveProtectedDNSBrokenAudits += 1
         guard consecutiveProtectedDNSBrokenAudits >= Self.protectedDNSBrokenAuditLimit else {
@@ -2544,24 +2550,49 @@ extension AppState {
             "protected_dns_broken_retries_exhausted",
             details: ["audits": String(consecutiveProtectedDNSBrokenAudits)]
         )
-        disconnect(releaseKillSwitch: false)
-        protectedReconnectPausedForUserAction = true
-        protectedReconnectPauseLiftsOnNetworkChange = false
-        errorMessage = String(localized: "Protected DNS did not take effect after repeated reconnects: macOS is still resolving through another DNS server. Kill Switch is blocking traffic and automatic retries are paused. Click Repair and reconnect to try again, or Restore internet to get back online.")
+        releaseAfterProtectedDNSFailure(
+            pending: String(localized: "Protected DNS did not take effect after repeated reconnects: macOS is still resolving through another DNS server. Tono is restoring this Mac's normal internet; AI services stay blocked."),
+            released: String(localized: "Protected DNS did not take effect after repeated reconnects: macOS is still resolving through another DNS server. This Mac is back on its normal internet and AI services stay blocked. Connect again when you are ready.")
+        )
         return true
+    }
+
+    /// The automatic release only queues behind the teardown, which may still
+    /// be repairing the helper or waiting on an administrator prompt with PF
+    /// in place. Show `pending` until then; publish `released` only when the
+    /// teardown settled on an open host. A failed release keeps its own
+    /// "Kill Switch remains active" text, and a newer operation wins.
+    private func releaseAfterProtectedDNSFailure(pending: String, released: String) {
+        disconnect(releaseKillSwitch: true, automaticFailureRelease: true)
+        errorMessage = pending
+        let generation = connectionCoordinator.protectionOperationGeneration
+        let teardown = connectionCoordinator.disconnectSequence
+        dnsFailureReleaseNoticeTask = Task { [weak self] in
+            await teardown?.value
+            guard let self, !Task.isCancelled,
+                  self.connectionCoordinator.protectionOperationGeneration == generation,
+                  !self.isProtectionBlocked, !self.isProtectionUnconfirmed,
+                  !self.isConnected, !self.isConnecting, !self.isDisconnecting,
+                  self.errorMessage == pending else { return }
+            self.errorMessage = released
+        }
     }
 
     /// Split-DNS rules send some domains to a server off this Mac, past the
     /// protected listener. A reconnect rewrites the same default resolver
     /// and cannot change that, and PF is not loosened to make those domains
-    /// work: keep PF, stop the session, and pause until the user removes the
-    /// rule or chooses Restore internet.
+    /// work inside a session: stop the session and do not reconnect until
+    /// the user removes the rule.
     ///
     /// This includes a corporate VPN's split DNS on its own utun. The helper's
     /// LAN DNS block is scoped to physical interfaces so PF itself lets that
-    /// DNS through, but this audit still holds the session on it. Keeping the
-    /// stricter behavior (pause, PF held) over a "stay connected and warn"
-    /// mode is a provisional product decision pending the owner.
+    /// DNS through, but this audit still ends the session on it. Ending it
+    /// over a "stay connected and warn" mode remains a provisional product
+    /// decision pending the owner. Holding PF afterwards was never real: the
+    /// stopped Core let the helper's watchdog release PF about 30 s later
+    /// while the UI still claimed a block. Without a strict kill switch the
+    /// end state is the automatic release (AI hold kept), taken at once
+    /// (decision 031, MAC-DNS-PAUSE-HOLDS-PF).
     func holdProtectedDNSSupplementalConflict(
         _ resolvers: [SystemNetworkObservation.SupplementalResolver]
     ) {
@@ -2575,11 +2606,13 @@ extension AppState {
                 "resolvers": summary,
             ]
         )
-        disconnect(releaseKillSwitch: false)
-        protectedReconnectPausedForUserAction = true
-        protectedReconnectPauseLiftsOnNetworkChange = false
-        errorMessage = String(localized: "DNS conflict: a corporate VPN, profile or /etc/resolver rule sends some domains to a DNS server outside Tono's protection. Kill Switch is blocking traffic and automatic retries are paused. Turn that rule off, then click Repair and reconnect, or Restore internet to get back online.")
-            + " (" + summary + ")"
+        let detail = " (" + summary + ")"
+        releaseAfterProtectedDNSFailure(
+            pending: String(localized: "DNS conflict: a corporate VPN, profile or /etc/resolver rule sends some domains to a DNS server outside Tono's protection. Tono is restoring this Mac's normal internet; AI services stay blocked. Turn that rule off, then connect again.")
+                + detail,
+            released: String(localized: "DNS conflict: a corporate VPN, profile or /etc/resolver rule sends some domains to a DNS server outside Tono's protection. This Mac is back on its normal internet and AI services stay blocked. Turn that rule off, then connect again.")
+                + detail
+        )
     }
 
     /// Let the user bypass the weak-network backoff without weakening PF. The
