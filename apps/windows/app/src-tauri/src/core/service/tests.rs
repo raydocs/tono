@@ -157,7 +157,9 @@ async fn a_stalled_read_only_service_probe_returns_without_waiting_for_its_threa
         tokio::time::timeout(Duration::from_secs(6), probe).await
     });
     tokio::task::yield_now().await;
-    tokio::time::advance(Duration::from_secs(6)).await;
+    tokio::time::advance(Duration::from_secs(5)).await;
+    tokio::task::yield_now().await;
+    tokio::time::advance(Duration::from_secs(1)).await;
     let result = waiter.await.unwrap();
     // Release the fault injection even if the deadline failed, so runtime shutdown can finish.
     release.send(()).unwrap();
