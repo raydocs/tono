@@ -811,6 +811,10 @@ extension AppState {
                 self.networkInfoTask = nil
                 self.pendingFullConfigReload = false
                 self.pendingOptionalPolicyReload = false
+                if self.pendingRemovedCatalogExit {
+                    self.applyDefaultProxySelection(persist: true)
+                }
+                self.pendingRemovedCatalogExit = false
                 self.pendingDirectPolicyReload = nil
                 self.loadedRuntimeConfigDigest = nil
                 self.residentialRouteAuditGeneration &+= 1

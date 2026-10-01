@@ -431,6 +431,7 @@ final class AppState {
     var residentialRouteAuditGeneration: UInt64 = 0
     var pendingFullConfigReload = false
     var pendingOptionalPolicyReload = false
+    var pendingRemovedCatalogExit = false
     var pendingDirectPolicyReload:
         ConfigPipeline.ManagedDirectRuntimePolicy?
     var networkInfoTask: Task<Void, Never>?

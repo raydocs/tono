@@ -48,6 +48,10 @@ extension AppState {
         let reloadRetirementID = connectionCoordinator.configReloadRequestID
         pendingFullConfigReload = false
         pendingOptionalPolicyReload = false
+        if pendingRemovedCatalogExit {
+            applyDefaultProxySelection(persist: true)
+        }
+        pendingRemovedCatalogExit = false
         pendingDirectPolicyReload = nil
         isConnected = false
         isConnecting = false

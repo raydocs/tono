@@ -8,6 +8,138 @@ import XCTest
 /// not store it.
 final class CatalogRemovedExitTests: XCTestCase {
 
+    func testBusyCatalogRemovalDrainsTheLatestSurvivorAfterOldRuntimeCompletion() async throws {
+        let storage = ConfigStorage.shared
+        let savedFiles = ["regions.json", "rules.json", "config.json"].map { name in
+            let url = storage.appSupportDirectory.appendingPathComponent(name)
+            return (url, try? Data(contentsOf: url))
+        }
+        let selection = AppProfile.defaults.object(forKey: SettingsKey.selectedProxyTargetName)
+        defer {
+            AppProfile.defaults.set(selection, forKey: SettingsKey.selectedProxyTargetName)
+            for (url, data) in savedFiles {
+                if let data { try? storage.writeSensitive(data, to: url) }
+                else { try? FileManager.default.removeItem(at: url) }
+            }
+            ManagedExitCatalogOwnership.purge()
+        }
+        ManagedExitCatalogOwnership.adopt("removal-owner")
+        let app = await makeApp()
+        let removed = Fixture.realityNode(name: "US-Removed", id: "us-removed")
+        let obsolete = Fixture.realityNode(name: "GB-Obsolete", id: "gb-obsolete", server: "203.0.114.8")
+        let firstSurvivor = Fixture.realityNode(name: "JP-Survivor", id: "jp-survivor", server: "203.0.114.9")
+        let newestSurvivor = Fixture.realityNode(name: "DE-Survivor", id: "de-survivor", server: "203.0.114.10")
+        try await app.installManagedExitCatalog(
+            try catalog([removed, obsolete, firstSurvivor], revision: 90),
+            persistCache: false, allowRuntimeTransition: false
+        )
+        XCTAssertTrue(app.applyProxySelection(removed.name))
+        app.isConnected = true
+        app.coreController = CoreControllerClient()
+        app.activeDirectPolicy = try app.initialDirectPolicy(
+            physicalInterface: "en0",
+            policy: TonoTrafficPolicy(version: 3, domains: [], mediaEndpoints: [],
+                directSuffixes: [.init(host: "example.net", ports: [443])], trusted: true)
+        )
+        app.managedTrafficPolicy = TonoTrafficPolicy(version: 3, domains: [], mediaEndpoints: [],
+            directSuffixes: [.init(host: "example.org", ports: [443])], trusted: true)
+        let entered = expectation(description: "runtime owner is suspended")
+        var resume: CheckedContinuation<Void, Never>?
+        defer { resume?.resume() }
+        app.optionalPolicyPreparedRuntimeMutation = { _ in
+            await withCheckedContinuation { continuation in
+                resume = continuation
+                entered.fulfill()
+            }
+            // Model the old owner's authoritative completion. The controller
+            // boundary is then absent so catalog drain uses the existing local
+            // settlement path; no helper, PF, DNS or Core operation runs.
+            app.activeNode = obsolete
+            app.selectedNodeId = obsolete.id
+            app.proxyService.activeNodeName = obsolete.name
+            app.coreController = nil
+        }
+        app.scheduleBackgroundOptionalPolicy()
+        let owner = app.connectionCoordinator.configReloadTask
+        await fulfillment(of: [entered], timeout: 2)
+        guard resume != nil, app.connectionCoordinator.configReloadTask != nil else {
+            XCTFail("the fixture must hold runtime ownership before catalog installation")
+            return
+        }
+        try await app.installManagedExitCatalog(
+            try catalog([firstSurvivor], revision: 91),
+            persistCache: false, allowRuntimeTransition: true
+        )
+        try await app.installManagedExitCatalog(
+            try catalog([newestSurvivor], revision: 92),
+            persistCache: false, allowRuntimeTransition: true
+        )
+        let continuation = resume
+        resume = nil
+        continuation?.resume()
+        await owner?.value
+        XCTAssertEqual(app.proxyService.activeNodeName, newestSurvivor.name,
+                       "an old completion must drain removal against the newest catalog")
+        XCTAssertEqual(app.activeNode?.name, newestSurvivor.name)
+        XCTAssertTrue(app.isConnected)
+        XCTAssertNil(app.connectionCoordinator.disconnectSequence)
+        app.optionalPolicyPreparedRuntimeMutation = nil
+        ManagedExitCatalogOwnership.purge()
+        await app.finishPendingPersistence()
+    }
+
+    func testOldSwitchFailureDuringCatalogRemovalReleasesWithAIHold() async {
+        let selection = AppProfile.defaults.object(forKey: SettingsKey.selectedProxyTargetName)
+        let armed = KillSwitchService.isArmed
+        let delayWasProven = SingBoxDelayGate.isProven
+        let savedIPC = KillSwitchService.armIPC
+        let updateBlocked = RuntimeCleanup.nativeUpdateBlocksConnect
+        let updatePending = RuntimeCleanup.nativeUpdatePending
+        RuntimeCleanup.nativeUpdateBlocksConnect = false
+        RuntimeCleanup.nativeUpdatePending = false
+        let app = await makeApp()
+        let previous = Fixture.realityNode(name: "US-Removed", id: "us-removed")
+        let obsolete = Fixture.realityNode(name: "GB-Obsolete", id: "gb-obsolete", server: "203.0.114.8")
+        let survivor = Fixture.realityNode(name: "JP-Survivor", id: "jp-survivor", server: "203.0.114.9")
+        app.proxyRegions = [ProxyRegion(id: AppState.managedCatalogRegionID, name: "TONO CLOUD", nodes: [previous, obsolete, survivor])]
+        _ = app.applyProxySelection(previous.name)
+        app.isConnected = true
+        app.coreController = CoreControllerClient()
+        var aiHold = false
+        var explicitDisarms = 0
+        app.networkProtection.disarm = { explicitDisarms += 1; aiHold = false }
+        app.networkProtection.releaseAfterFailure = { aiHold = true; KillSwitchService.isArmed = false }
+        KillSwitchService.armIPC.prepare = { _ in throw HelperIPCError.connectFailed }
+        KillSwitchService.armIPC.deliver = { _ in
+            XCTFail("a refused preparation must never deliver a privileged arm")
+            throw HelperIPCError.connectFailed
+        }
+        defer {
+            KillSwitchService.armIPC = savedIPC
+            KillSwitchService.isArmed = armed
+            AppProfile.defaults.set(selection, forKey: SettingsKey.selectedProxyTargetName)
+            RuntimeCleanup.nativeUpdateBlocksConnect = updateBlocked
+            RuntimeCleanup.nativeUpdatePending = updatePending
+            app.connectionCoordinator.cancelReconnectTasks()
+            if delayWasProven { SingBoxDelayGate.prove() }
+            else { SingBoxDelayGate.suspend() }
+        }
+        KillSwitchService.isArmed = true
+        app.selectNode(obsolete.name)
+        let owner = app.connectionCoordinator.nodeSwitchTask
+        // Model the accepted catalog state before the scheduled switch starts:
+        // its captured target remains obsolete, and removal must win on error.
+        app.proxyRegions = [ProxyRegion(id: AppState.managedCatalogRegionID, name: "TONO CLOUD", nodes: [survivor])]
+        app.pendingRemovedCatalogExit = true
+        await owner?.value
+        await app.connectionCoordinator.disconnectSequence?.value
+        XCTAssertTrue(aiHold)
+        XCTAssertEqual(explicitDisarms, 0)
+        XCTAssertFalse(app.isProtectionBlocked)
+        XCTAssertEqual(app.proxyService.activeNodeName, survivor.name)
+        XCTAssertNil(app.connectionCoordinator.protectedReconnectTask)
+    }
+
     func testRemovedExitKeepsASurvivorOrRestoresTheOriginalNetwork() async throws {
         XCTAssertEqual(
             CatalogRemovedExitAction.decide(
