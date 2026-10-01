@@ -2665,6 +2665,11 @@ async fn bounded_dns_call_within<T>(
 
 /// Normal release — only on explicit user request. See the DNS-before-disarm invariant.
 async fn disarm_unlocked(apply_narrow: bool) -> Result<()> {
+    disarm_unlocked_with_narrow(Some(apply_narrow)).await
+}
+
+/// `None` preserves the existing AI disposition during an already-idle Service stop.
+async fn disarm_unlocked_with_narrow(apply_narrow: Option<bool>) -> Result<()> {
     let previous = armed_guard().clone();
     let Some(previous) = previous else {
         // Not armed: still sweep possible residuals so a half-failed earlier run cannot
@@ -2687,7 +2692,9 @@ async fn disarm_unlocked(apply_narrow: bool) -> Result<()> {
         }
         // Filters are already gone. The secondary layer must not be able to
         // fail this release or put a general block back.
-        crate::core::selective_layer::finish_release(apply_narrow).await;
+        if let Some(apply_narrow) = apply_narrow {
+            crate::core::selective_layer::finish_release(apply_narrow).await;
+        }
         clear_wanted_core_window();
         RECONNECT_AFTER_RELEASE.store(false, Ordering::Release);
         return Ok(());
@@ -2750,7 +2757,9 @@ async fn disarm_unlocked(apply_narrow: bool) -> Result<()> {
     *armed_guard() = None;
     *last_error_guard() = tombstone_note;
     TUNNEL_PERMIT_RENDERED.store(false, Ordering::Relaxed);
-    crate::core::selective_layer::finish_release(apply_narrow).await;
+    if let Some(apply_narrow) = apply_narrow {
+        crate::core::selective_layer::finish_release(apply_narrow).await;
+    }
     clear_wanted_core_window();
     RECONNECT_AFTER_RELEASE.store(false, Ordering::Release);
     Ok(())
@@ -2881,6 +2890,30 @@ pub(crate) async fn release() -> Result<KillSwitchStatus> {
 /// disconnect use [`release`] and do not pass true.
 pub(crate) async fn release_applying_narrow() -> Result<KillSwitchStatus> {
     release_with(true).await
+}
+
+#[cfg_attr(not(windows), allow(dead_code))]
+pub(crate) async fn release_after_service_stop() -> Result<()> {
+    ensure_supported()?;
+    let _operation = WFP_OPERATION.lock().await;
+    let apply_narrow = {
+        let armed = armed_guard();
+        if armed
+            .as_ref()
+            .is_some_and(|armed| armed.intent.strict_kill_switch)
+        {
+            return Ok(());
+        }
+        // An armed session stopped automatically keeps the AI hold. Idle Stop preserves
+        // either the previous crash hold or an explicit Restore's absent hold.
+        armed
+            .as_ref()
+            .is_some_and(|armed| armed.intent.wanted)
+            .then_some(true)
+    };
+    disarm_unlocked_with_narrow(apply_narrow).await?;
+    note_explicit_release();
+    Ok(())
 }
 
 async fn release_with(apply_narrow: bool) -> Result<KillSwitchStatus> {
@@ -4586,6 +4619,77 @@ mod tests {
 
         tokio::fs::remove_dir_all(&dir).await?;
         cleanup().await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn service_stop_release_keeps_the_ai_hold_for_an_armed_session() -> Result<()> {
+        cleanup().await;
+        arm_bootstrap(&test_config(), "/opt/tono/mihomo", "owner-alice").await?;
+
+        release_after_service_stop().await?;
+        let released = !status().await.wanted && armed_guard().is_none();
+        let ai_held = crate::core::selective_layer::test_hold_active();
+        cleanup().await;
+
+        assert!(released, "ordinary Service stop must release general traffic");
+        assert!(ai_held, "automatic Service stop must apply the AI hold");
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn service_stop_release_does_not_reapply_ai_hold_after_explicit_restore() -> Result<()> {
+        cleanup().await;
+        crate::core::selective_layer::finish_release(true).await;
+        release().await?;
+
+        release_after_service_stop().await?;
+        let ai_held = crate::core::selective_layer::test_hold_active();
+        cleanup().await;
+
+        assert!(
+            !ai_held,
+            "idle Stop after explicit Restore must stay unprotected"
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn service_stop_release_preserves_an_existing_idle_ai_hold() -> Result<()> {
+        cleanup().await;
+        crate::core::selective_layer::finish_release(true).await;
+
+        release_after_service_stop().await?;
+        let ai_held = crate::core::selective_layer::test_hold_active();
+        cleanup().await;
+
+        assert!(
+            ai_held,
+            "idle Stop cannot remove a previous crash recovery hold"
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn service_stop_release_preserves_an_explicit_strict_intent() -> Result<()> {
+        cleanup().await;
+        let mut intent = valid_intent(KillSwitchStatusMode::Blocked, true);
+        intent.strict_kill_switch = true;
+        atomic_write(&intent_path(), &serde_json::to_vec_pretty(&intent)?).await?;
+        restore_on_service_start().await?;
+
+        release_after_service_stop().await?;
+        let wanted = status().await.wanted;
+        cleanup().await;
+
+        assert!(
+            wanted,
+            "automatic Stop cannot retire explicit strict protection"
+        );
         Ok(())
     }
 
