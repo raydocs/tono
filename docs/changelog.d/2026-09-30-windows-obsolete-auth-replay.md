@@ -1,6 +1,6 @@
 ## 2026-09-30 · Windows obsolete auth replay no longer rejects the current session
 - Ownership: SHIP_PLAN §2 item 10; Windows portable authentication and session verdicts.
-- Source: origin/main `0484176a` → branch `hunt/sol-trust-stale-replay-verdict`; pending PR, not merged at writing.
+- Source: origin/main `0484176a` → branch `hunt/sol-trust-stale-replay-verdict`; [#990](https://github.com/raydocs/tono/pull/990), not merged at writing.
 - Defect fix: a clock ahead of the server JWT lifetime makes overlapping requests renew repeatedly. An obsolete replay's late 401 used to reject the current valid rotated session. It now remains a request failure without publishing session refusal or returning the session-rejection error used by catalog/policy sync.
 - Added/optimized: none. Current bearer/refresh refusals stay authoritative. An empty token slot does not prove an accepted replacement. No protection, credential durability, retry-budget or strict-mode change.
 - Engineering/tests: one bounded concurrency regression, one current-replay refusal guard, one missing-successor refusal guard. No removed/skipped tests or gate changes.
