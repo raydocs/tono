@@ -1,6 +1,6 @@
 ## 2026-09-30 · 开通脚本按 git 根拒绝仓库内私钥路径
 - 归属：ops 计划（节点开通），不是 SHIP_PLAN 发版门。影响 `tooling/scripts/provision-tono-node.py`。
-- 来源：基线 `origin/main` → 本分支。未合 main。
+- 来源：基线 `origin/main` → 本分支；[#842](https://github.com/raydocs/tono/pull/842)。未合 main。
 - 缺陷修复：`REPO` 取的是 `parents[1]`（`tooling/`）。错误文案要求路径在仓库外，但 `services/` 或 `apps/` 下 mode 0700 的目录能通过。改为 `parents[2]`（git 根）。
 - 新增/优化：无。
 - 工程与测试：`Contracts.test_acl_probe_fail_closed_and_repo_rejected` 增加仓库内 `services/provision-secret.json` 必须报 outside the repository。修复前失败信息是 path must be owner-only，修复后整文件 20 tests OK。
