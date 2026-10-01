@@ -144,16 +144,17 @@ fn release_after_failed_restart(
     restart
 }
 
-/// A rollback has no successor to prove the retained update barrier. Release ordinary
-/// traffic with the AI hold while the Service is still stopped, then restart it even
-/// if cleanup failed. Strict rollback and a completed publication retain protection.
-fn restart_after_publication(
+/// A rollback or failed executor outcome has no successful successor recovery.
+/// Release ordinary traffic with the AI hold while the Service is still stopped,
+/// then restart even if cleanup failed. Strict and successful updates retain protection.
+fn restart_after_publication<T>(
     rolled_back: bool,
+    publication: &Result<T, Error>,
     strict: bool,
     release: impl FnOnce() -> Result<(), Error>,
     restart: impl FnOnce() -> Result<(), Error>,
 ) -> (Result<(), Error>, Result<(), Error>) {
-    let released = if rolled_back && !strict {
+    let released = if (rolled_back || publication.is_err()) && !strict {
         release()
     } else {
         Ok(())
@@ -419,7 +420,7 @@ fn execute(recovery: bool) -> Result<(), Error> {
         store.consume(&self_image, tx::now()?)?;
     }
     // From here every live/repair mutation has a durable consumed high-water.
-    if recovery {
+    let registration = if recovery {
         // Classification and rollback do not run through the ONSTART task; it only re-arms the
         // net for this run. An unavailable Task Scheduler must not strand the attempt (#484).
         if let Err(error) = native::register_consumed_recovery(&store) {
@@ -427,6 +428,7 @@ fn execute(recovery: bool) -> Result<(), Error> {
                 "update recovery task could not be registered; recovering without it: {error:#}"
             );
         }
+        Ok(())
     } else {
         // No publication without the net: nothing is replaced yet, so the attempt ends
         // RolledBack against the retained original identity instead of staying Consumed.
@@ -437,8 +439,8 @@ fn execute(recovery: bool) -> Result<(), Error> {
                     .install_dir()
                     .join("tono-service.exe"),
             )
-        })?;
-    }
+        })
+    };
     let manager = ServiceManager::local_computer(None::<&str>, ServiceManagerAccess::CONNECT)?;
     let service = manager.open_service(
         tono_service_protocol::WINDOWS_SERVICE_NAME,
@@ -448,6 +450,9 @@ fn execute(recovery: bool) -> Result<(), Error> {
     stop_windows_service(&service)?;
     let runtime = tokio::runtime::Runtime::new()?;
     let outcome = (|| -> Result<_, Error> {
+        // Registration still precedes Service stop and every publication. Its
+        // refusal must reach the same selective failure finalizer as rollback.
+        registration?;
         let _owner = runtime
             .block_on(tono_service_protocol::acquire_service_owner())?
             .context("Service replacement ownership unavailable")?;
@@ -568,7 +573,7 @@ fn execute(recovery: bool) -> Result<(), Error> {
         store.save(next)?;
         Ok(Some(child))
     })();
-    if outcome.is_err() {
+    if outcome.is_err() && store.attempt()?.execution != tx::Execution::RolledBack {
         // This marker cannot turn uncertain execution into another install grant.
         let _ = store.execution(tx::Execution::Uncertain);
     }
@@ -579,6 +584,7 @@ fn execute(recovery: bool) -> Result<(), Error> {
     let rolled_back = store.attempt()?.execution == tx::Execution::RolledBack;
     let (rollback_release, restart) = restart_after_publication(
         rolled_back,
+        &outcome,
         native::strict_kill_switch_intent_on_disk(),
         || {
             // The original repair/store guards still fence lifecycle writers. The
@@ -833,6 +839,7 @@ mod tests {
         let events = std::cell::RefCell::new(Vec::new());
         let (released, restarted) = restart_after_publication(
             true,
+            &Ok::<_, Error>(()),
             false,
             || {
                 events.borrow_mut().push("release with AI hold");
@@ -846,18 +853,29 @@ mod tests {
         released.unwrap();
         restarted.unwrap();
         assert_eq!(*events.borrow(), ["release with AI hold", "restart"]);
-        let (released, restarted) =
-            restart_after_publication(true, true, || panic!("strict rollback releases"), || Ok(()));
+        let (released, restarted) = restart_after_publication(
+            true,
+            &Ok::<_, Error>(()),
+            true,
+            || panic!("strict rollback releases"),
+            || Ok(()),
+        );
         released.unwrap();
         restarted.unwrap();
-        let (released, restarted) =
-            restart_after_publication(false, false, || panic!("successful update releases"), || Ok(()));
+        let (released, restarted) = restart_after_publication(
+            false,
+            &Ok::<_, Error>(()),
+            false,
+            || panic!("successful update releases"),
+            || Ok(()),
+        );
         released.unwrap();
         restarted.unwrap();
 
         let restarted = std::cell::Cell::new(false);
         let (released, restart) = restart_after_publication(
             true,
+            &Ok::<_, Error>(()),
             false,
             || Err(anyhow::anyhow!("release failed")),
             || {
@@ -869,6 +887,42 @@ mod tests {
         assert!(restart.is_ok(), "release error is not a restart failure");
         assert!(restarted.get(), "release failure must still restart the Service");
         assert_eq!(error.to_string(), "release failed");
+    }
+
+    #[test]
+    fn update_executor_error_releases_non_strict_protection_before_service_restart() {
+        let publication = Err::<(), _>(anyhow::anyhow!("successor creation failed"));
+        let events = std::cell::RefCell::new(Vec::new());
+        let (released, restarted) = restart_after_publication(
+            false,
+            &publication,
+            false,
+            || {
+                events.borrow_mut().push("release with AI hold");
+                Ok(())
+            },
+            || {
+                events.borrow_mut().push("restart");
+                Ok(())
+            },
+        );
+        released.unwrap();
+        restarted.unwrap();
+        assert_eq!(*events.borrow(), ["release with AI hold", "restart"]);
+        assert_eq!(
+            publication.unwrap_err().to_string(),
+            "successor creation failed"
+        );
+        let failed = Err::<(), _>(anyhow::anyhow!("recovery task registration failed"));
+        let (released, restarted) = restart_after_publication(
+            false,
+            &failed,
+            true,
+            || panic!("strict failed update releases"),
+            || Ok(()),
+        );
+        released.unwrap();
+        restarted.unwrap();
     }
 
     #[test]
