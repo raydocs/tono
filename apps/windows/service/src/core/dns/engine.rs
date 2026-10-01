@@ -220,6 +220,10 @@ fn enum_subkeys(subkey: &str) -> Result<Vec<String>> {
 }
 
 fn read_flags(subkey: &str, value: &str) -> Result<Option<u64>> {
+    #[cfg(test)]
+    if let Some(value) = test_io::with(|io| io.read(subkey, value)) {
+        return value.map(|value| value.parse::<u64>().context("invalid fixture flags")).transpose();
+    }
     let Some(key) = RegKey::open(subkey, false)? else {
         return Ok(None);
     };
@@ -382,6 +386,52 @@ fn lost_capture_marker(capture: &std::path::Path) -> std::path::PathBuf {
     capture.with_extension("lost.json")
 }
 
+// A retained capture whose OS values were already restored must not replay stale originals
+// on another restore or after the user changes settings while disconnected. This marker is
+// written only when deletion fails, and is removed before a new suppression can mutate DNS.
+fn restored_capture_marker(capture: &std::path::Path) -> std::path::PathBuf {
+    capture.with_extension("restored.json")
+}
+
+fn restored_capture_recorded(capture: &std::path::Path) -> Result<bool> {
+    match std::fs::symlink_metadata(restored_capture_marker(capture)) {
+        Ok(_) => Ok(true),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(error).context("failed to check restored DNS capture record"),
+    }
+}
+
+fn clear_restored_capture_record(capture: &std::path::Path) -> Result<()> {
+    match std::fs::remove_file(restored_capture_marker(capture)) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error).context("failed to remove restored DNS capture record"),
+    }
+}
+
+fn retire_restored_capture(capture: &std::path::Path) -> Result<()> {
+    match std::fs::remove_file(capture) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => {
+            if !restored_capture_recorded(capture)? {
+                write_capture_atomically(&restored_capture_marker(capture), "restored\n")?;
+            }
+            tracing::warn!(
+                "dns: restored capture {} could not be deleted ({error}); its retirement was recorded",
+                capture.display()
+            );
+            return Ok(());
+        }
+    }
+    // Without the capture there is no stale original left to replay. A leftover marker only
+    // asks the next suppression to capture current settings again, so it cannot fail release.
+    if let Err(error) = clear_restored_capture_record(capture) {
+        tracing::warn!("dns: restored capture record could not be removed: {error:#}");
+    }
+    Ok(())
+}
+
 fn record_lost_capture(capture: &std::path::Path) -> Result<()> {
     write_capture_atomically(
         &lost_capture_marker(capture),
@@ -468,17 +518,18 @@ fn read_interface_doh_capture() -> Result<Option<Vec<super::InterfaceDohEntry>>>
 }
 
 fn delete_interface_doh_capture() -> Result<()> {
-    let path = super::interface_doh_capture_path();
-    match std::fs::remove_file(&path) {
-        Ok(()) => Ok(()),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(error).with_context(|| format!("failed to delete {}", path.display())),
-    }
+    retire_restored_capture(&super::interface_doh_capture_path())
 }
 
 fn suppress_interface_doh() -> Result<()> {
     let current = collect_interface_doh()?;
+    let path = super::interface_doh_capture_path();
     match read_interface_doh_capture() {
+        _ if restored_capture_recorded(&path)? => {
+            // Even an empty set is now the user's configuration, not suppressed originals.
+            write_interface_doh_capture(&current)?;
+            clear_restored_capture_record(&path)?;
+        }
         // A capture this build can read stays in force: it may have been written by an older
         // build mid-session (its cross-upgrade role), and the flags below may already be
         // zeroed by that session.
@@ -525,6 +576,10 @@ fn suppress_interface_doh() -> Result<()> {
 /// Idempotent when no capture exists.
 fn restore_interface_doh() -> Result<bool> {
     let path = super::interface_doh_capture_path();
+    if restored_capture_recorded(&path)? {
+        delete_interface_doh_capture()?;
+        return Ok(lost_capture_recorded(&path));
+    }
     let unreadable = match read_interface_doh_capture() {
         Ok(Some(entries)) => {
             for entry in entries {
@@ -1377,6 +1432,10 @@ const NRPT_CONFIG_DNS: u32 = 0x8;
 const NRPT_VERSION: u32 = 2;
 
 fn read_dword(subkey: &str, value: &str) -> Result<Option<u32>> {
+    #[cfg(test)]
+    if let Some(value) = test_io::with(|io| io.read(subkey, value)) {
+        return value.map(|value| value.parse::<u32>().context("invalid fixture DWORD")).transpose();
+    }
     let Some(key) = RegKey::open(subkey, false)? else {
         return Ok(None);
     };
@@ -1521,12 +1580,7 @@ fn read_capture_file() -> Result<Option<Option<u32>>> {
 }
 
 fn delete_capture_file() -> Result<()> {
-    let path = super::encrypted_dns_capture_path();
-    match std::fs::remove_file(&path) {
-        Ok(()) => Ok(()),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(error).with_context(|| format!("failed to delete {}", path.display())),
-    }
+    retire_restored_capture(&super::encrypted_dns_capture_path())
 }
 
 fn nrpt_rule_key() -> String {
@@ -1546,6 +1600,10 @@ pub(super) fn remove_nrpt_rule() -> Result<()> {
 }
 
 fn install_nrpt() -> Result<()> {
+    #[cfg(test)]
+    if test_io::active() {
+        return Ok(()); // Capture tests never create an NRPT rule on the test host.
+    }
     let _root = create_key(NRPT_ROOT)?;
     drop(_root);
     let key = nrpt_rule_key();
@@ -1568,12 +1626,17 @@ fn install_nrpt() -> Result<()> {
 /// instead, so the next restore reports the loss rather than a clean result.
 pub(super) fn suppress_encrypted_dns() -> Result<()> {
     #[cfg(test)]
-    if test_io::active() {
+    if test_io::with(|io| !io.apply_resolver_policy).unwrap_or(false) {
         return Ok(()); // Resolver-policy OS effects are outside this apply regression.
     }
     // Both the quarantined-rewrite and the missing-file (re)capture read the live value
     // before it is zeroed below — after that write it is ours, not the user's.
+    let path = super::encrypted_dns_capture_path();
     match read_capture_file() {
+        _ if restored_capture_recorded(&path)? => {
+            write_capture_file(read_dword(DNSCACHE_PARAMETERS, ENABLE_AUTO_DOH)?)?;
+            clear_restored_capture_record(&path)?;
+        }
         Ok(Some(_)) => {}
         unreadable => {
             let current = read_dword(DNSCACHE_PARAMETERS, ENABLE_AUTO_DOH)?;
@@ -1626,6 +1689,9 @@ pub(super) fn restore_encrypted_dns() -> Result<bool> {
     }
     let mut lost = false;
     match read_capture_file() {
+        _ if restored_capture_recorded(&super::encrypted_dns_capture_path())? => {
+            delete_capture_file()?;
+        }
         Ok(Some(saved)) => {
             match saved {
                 Some(value) => write_dword(DNSCACHE_PARAMETERS, ENABLE_AUTO_DOH, value)?,

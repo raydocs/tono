@@ -395,7 +395,8 @@
       "idle": "空闲",
       "noActiveRoute": "当前没有活动线路",
       "reading": "正在读取流量…",
-      "telemetryFailed": "仪表盘还没接到核心，正在重试"
+      "telemetryFailed": "仪表盘还没接到核心，正在重试",
+      "sessionTotal": "本次连接 {{total}}"
     },
     "info": {
       "protection": "流量保护",
