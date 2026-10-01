@@ -1,6 +1,6 @@
 ## 2026-09-30 · Windows selective AI hold serializes late native work
 - 归属：SHIP_PLAN §2 item 10；Windows Service secondary AI hold.
-- 来源：origin/main `0484176a` → `d69a7f62`, `hunt/sol-r3ks-selective-worker-order`; PR pending, not merged.
+- 来源：origin/main `0484176a` → `d69a7f62`, `hunt/sol-r3ks-selective-worker-order`; [#988](https://github.com/raydocs/tono/pull/988), awaiting CI/merge.
 - 缺陷修复：a timed-out native delete could finish after replacement and erase the requested hold; a delayed add could finish after Restore and reapply it. One coalescing worker retains native ownership and converges to the latest request. Finding: WIN-SELECTIVE-LATE-WORKER.
 - 新增/优化：无；same fixed firewall names/prefixes and NRPT suffixes; general WFP release still precedes this layer; strict admission unchanged. Async removal/apply budgets remain 3/6 seconds.
 - 工程与测试：one paused-native regression per ordering behavior; each latch releases on assertion failure. No gate/test removal.
