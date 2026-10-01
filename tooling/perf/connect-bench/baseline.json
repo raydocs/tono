@@ -1,7 +1,7 @@
 {
   "measured": "2026-09-30",
   "camo_delay_ms": 40,
-  "note": "Ceilings sit above one loopback Reality handshake and below a fingerprint retry storm. Handshake counts are the stable signal; absolute milliseconds include the fixed camouflage delay. dns_reuse_ms allows one tunnel round trip on the kept DoH connection and rejects a second handshake.",
+  "note": "Ceilings sit above one loopback Reality handshake and below a fingerprint retry storm. Handshake counts are the stable signal: a ceiling above zero still rejects a count of zero, and a count of one stays inside a ceiling of two. Absolute milliseconds include the fixed camouflage delay. dns_reuse_ms allows one tunnel round trip on the kept DoH connection and rejects a second handshake.",
   "limits": {
     "vless/tono-fixed/cold_ms": 120,
     "vless/clash/cold_ms": 120,

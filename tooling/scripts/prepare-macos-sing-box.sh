@@ -16,7 +16,7 @@ git init -q "$work/source"
 attempt=0
 while true; do
   if git -C "$work/source" fetch -q --depth=1 https://github.com/SagerNet/sing-box \
-    93fff5954390367dd456cad3cbd79be54f8b941f; then
+    132b38e9caaba1a1959354d518e54d2d08419afe; then
     break
   fi
   attempt=$((attempt + 1))
@@ -32,11 +32,13 @@ export GOFLAGS=-mod=readonly GOTELEMETRY=off
 # Explicit cache preparation, not a fallback inside the offline builder.
 go -C "$work/source" mod download
 sh "$repo/tooling/scripts/build-sing-box.sh" build \
+  --candidate "$repo/tooling/scripts/sing-box/candidates/v1.15.0-alpha.9.json" \
   --source "$work/source" --go "$work/go/bin/go" \
   --target darwin-arm64 --output "$work/darwin"
 sh "$repo/tooling/scripts/build-sing-box.sh" verify \
+  --candidate "$repo/tooling/scripts/sing-box/candidates/v1.15.0-alpha.9.json" \
   --go "$work/go/bin/go" --target darwin-arm64 \
   --binary "$work/darwin/sing-box" --manifest "$work/darwin/manifest.json" \
-  --manifest-sha256 c765b9d2cc7d1cb31debd9bc699cb906bdd495e0cde08f401527879ac7eb394a
-echo "6c86720c7baf60057ad9ea05b64149939d29a37397e93599563de0db5677baae  $work/darwin/sing-box" | sha256sum -c -
+  --manifest-sha256 4932227756b774f2132f272878d554574584c7ebb69454c3c3ae44ccd1e1a40c
+echo "ab0187a774e2515e7e6761e23ece0b656818cb4c31c983070b3fd023db172258  $work/darwin/sing-box" | sha256sum -c -
 install -m 755 "$work/darwin/sing-box" "$repo/apps/macos/Tono/Resources/sing-box"
