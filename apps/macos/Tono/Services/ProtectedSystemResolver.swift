@@ -108,7 +108,13 @@ nonisolated enum ProtectedSystemResolver {
             // work. Neither the timer nor onCancel waits for ownershipQueue.
             let timer = DispatchSource.makeTimerSource(queue: .global(qos: .userInitiated))
             self.timer = timer
-            timer.setEventHandler { self.finish([]) }
+            // The deadline publishes whatever was collected. A fake-IP that
+            // arrives only as the clock expires is dropped in finish(); a
+            // public-only set is kept so the failure message can name it.
+            timer.setEventHandler { [weak self] in
+                guard let self else { return }
+                ownershipQueue.async { self.finishOnOwner(self.answers) }
+            }
             timer.schedule(deadline: deadline)
             timer.resume()
             ownershipQueue.async { self.start(name: name) }
@@ -156,6 +162,9 @@ nonisolated enum ProtectedSystemResolver {
             // Preserve the initial IPv4 batch so a fake-IP is not hidden by an
             // earlier public answer. A removal in that batch must also withdraw
             // its evidence, never leave a stale fake-IP granting DNS readiness.
+            // MoreComing clear ends that burst only. mDNSResponder delivers a
+            // cached public A that way, then the fresh answer in a later
+            // callback. Finishing here used to deallocate before the fake-IP.
             guard let address, address.pointee.sa_family == sa_family_t(AF_INET) else { return }
             var ipv4 = address.withMemoryRebound(to: sockaddr_in.self, capacity: 1) { $0.pointee }
             var buffer = [CChar](repeating: 0, count: Int(INET_ADDRSTRLEN))
@@ -167,7 +176,8 @@ nonisolated enum ProtectedSystemResolver {
                     answers.removeAll { $0 == answer }
                 }
             }
-            if flags & DNSServiceFlags(kDNSServiceFlagsMoreComing) == 0, !answers.isEmpty {
+            if flags & DNSServiceFlags(kDNSServiceFlagsMoreComing) == 0,
+               ProtectedDNSProbe.containsFakeIP(answers) {
                 finishOnOwner(answers)
             }
         }
@@ -194,9 +204,18 @@ nonisolated enum ProtectedSystemResolver {
         func finish(_ result: [String]) {
             lock.lock()
             guard terminal == nil else { lock.unlock(); return }
-            // Also enforce the clock at publication if the timer was delayed.
-            let result = DispatchTime.now() < deadline ? result : []
-            terminal = result
+            // A delayed timer or a late callback must not grant readiness from
+            // a fake-IP. Public answers collected before the deadline still
+            // publish, so a bypass can be told apart from silence.
+            let publish: [String]
+            if DispatchTime.now() < deadline {
+                publish = result
+            } else if ProtectedDNSProbe.containsFakeIP(result) {
+                publish = []
+            } else {
+                publish = result
+            }
+            terminal = publish
             let timer = self.timer
             self.timer = nil
             let continuation = self.continuation
@@ -205,7 +224,7 @@ nonisolated enum ProtectedSystemResolver {
             timer?.setEventHandler {}
             timer?.cancel()
             ownershipQueue.async { self.dispose() }
-            continuation?.resume(returning: result)
+            continuation?.resume(returning: publish)
         }
     }
 }
