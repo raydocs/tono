@@ -16,6 +16,7 @@ import {
 } from '../contract';
 import { enqueueJob, JOB_TYPES, listJobs, type JobTypeName } from '../jobs';
 import { operationsLive } from '../live';
+import { requireCan, resolveOpsRole } from '../roles';
 import { identityFields, loadIdentities, loadIdentity } from '../node-identity';
 import {
   Actor,
@@ -288,6 +289,9 @@ export async function postNodeJob(req: Request, e: Env, rawName: string, actor: 
   if (!Object.prototype.hasOwnProperty.call(JOB_TYPES, type)) {
     throw new ApiError(400, 'VALIDATION_ERROR', 'Unknown job type');
   }
+  const role = actor.role ?? resolveOpsRole(actor.email, e);
+  if (type === 'catalog_retire') requireCan('nodes.retire', role);
+  if (type === 'catalog_relist') requireCan('nodes.publish', role);
   if (JOB_TYPES[type as JobTypeName].destructive && b.confirmName !== name) {
     throw new ApiError(400, 'VALIDATION_ERROR', 'confirmName must match the node name');
   }

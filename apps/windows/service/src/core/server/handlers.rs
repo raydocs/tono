@@ -32,7 +32,7 @@ pub(super) fn create_ipc_router() -> Result<Router> {
             // admitted it, still under this lock (TW-anthropic-4).
             let _lifecycle = OWNER_LIFECYCLE_LOCK.lock().await;
             #[cfg(windows)]
-            if IPC_STOPPING.load(std::sync::atomic::Ordering::SeqCst) {
+            if lifecycle_is_stopping() {
                 return service_unavailable("service is stopping");
             }
             let _operation_guard = update_operation(&request.payload);
