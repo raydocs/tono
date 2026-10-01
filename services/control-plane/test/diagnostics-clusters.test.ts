@@ -430,6 +430,20 @@ describe('diagnostics read API', () => {
     expect(Number(ai?.n)).toBe(0);
   });
 
+  it('keeps a completed session when its delayed start report arrives', async () => {
+    const account = await seedAccount();
+    const atMs = Date.now();
+    const payload = bundle(atMs);
+    const completed = { ...payload, session: { ...payload.session, endedAtMs: atMs, outcome: 'ok' } };
+    expect((await api('telemetry/diagnostics', json(completed, account.token))).status).toBe(202);
+    const { bytesUp: _up, bytesDown: _down, outcome: _outcome, ...started } = payload.session;
+    expect((await api('telemetry/diagnostics', json({ ...payload, session: started }, account.token))).status).toBe(202);
+    const session = await db().prepare(
+      'SELECT ended_at_ms, bytes_up, bytes_down, outcome FROM client_sessions WHERE user_id = ?',
+    ).bind(account.userId).first();
+    expect(session).toMatchObject({ ended_at_ms: atMs, bytes_up: 100, bytes_down: 400, outcome: 'ok' });
+  });
+
   it('lists a window and returns the cluster timeline only to the read token', async () => {
     const account = await seedAccount();
     expect((await api('telemetry/diagnostics', json(bundle(), account.token))).status).toBe(202);
