@@ -35,6 +35,7 @@ mod direct;
 mod heal;
 mod platform;
 mod unarmed_probe;
+mod core_select;
 
 // Compatibility surface for existing command and test callers. The transaction
 // and error modules do not import this orchestration facade.
@@ -1768,6 +1769,7 @@ mod tests {
             reality_short_id: "0123456789abcdef".to_string(),
             protocol: NodeProtocol::VlessReality,
             tls_fingerprint: None,
+            certificate_public_key_sha256: None,
         }
     }
 
@@ -1786,6 +1788,7 @@ mod tests {
             tls_fingerprint: Some(
                 "e3aa4a745aa90539ab1a493d940eeba7b4305b7516ab84167e46c98ad9fed3db".to_string(),
             ),
+            certificate_public_key_sha256: None,
         }
     }
 

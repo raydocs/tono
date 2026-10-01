@@ -388,6 +388,7 @@ mod tests {
             reality_short_id: "0123456789abcdef".into(),
             protocol: tono_core::node::NodeProtocol::VlessReality,
             tls_fingerprint: None,
+            certificate_public_key_sha256: None,
         };
         let state = Arc::new(TonoState::for_test());
         {

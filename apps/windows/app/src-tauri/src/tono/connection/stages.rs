@@ -5,7 +5,7 @@
 use std::sync::Arc;
 use tauri::AppHandle;
 use tono_core::{
-    config::{self, build_owned_runtime_with_ports, generate_controller_secret},
+    config::{self, generate_controller_secret},
     connection::ConnectStage,
     node::ValidatedNode,
 };
@@ -15,6 +15,7 @@ use tono_service_protocol::{KillSwitchConfig, RuntimeBundle};
 use super::cleanup::{
     enable_dns_cancellation_safe, ensure_fresh, start_core_cancellation_safe,
 };
+use super::core_select::prepare_owned_core;
 use super::controller::{
     allocate_runtime_ports, configure_owned_controller_for_ui, lock_kill_switch_with_retries, preflight_bfe,
     preflight_dns_listener, wait_controller,
@@ -199,21 +200,26 @@ pub(super) async fn run_stages(
     // account's exit credentials. The App never writes it to the user profile;
     // it reaches the Service over IPC.
     let secret = generate_controller_secret();
-    let runtime = build_owned_runtime_with_ports(
+    let prepared = prepare_owned_core(
+        state,
+        active_runtime_resume.is_some(),
         nodes,
         &node.name,
+        routing,
         &secret,
-        None,
-        home_node.map(|home| home.name.as_str()),
-        home_socks5,
         runtime_ports,
+        &core_path,
     )
-    .map_err(StageFailure::error)?;
+    .await?;
+    {
+        let mut inner = state.lock().await;
+        inner.sing_box_core = prepared.sing_box;
+    }
     let bundle = RuntimeBundle {
-        yaml: runtime.yaml().to_string(),
+        yaml: prepared.document,
         assets: Vec::new(),
         remote_providers: Vec::new(),
-        core_path: core_path.to_string_lossy().into_owned(),
+        core_path: prepared.core_path.to_string_lossy().into_owned(),
     };
     let kill_switch = KillSwitchConfig {
         tunnel_interface: config::TUN_DEVICE_NAME.to_string(),

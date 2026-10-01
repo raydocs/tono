@@ -1,0 +1,166 @@
+//! Choose the core before StartClash arms WFP.
+//!
+//! sing-box is the default. Mihomo runs when this device asked for it, or when
+//! the sing-box image is missing or unauthenticated and protection is not armed.
+//! A Service that cannot run sing-box is a refusal, not a swap.
+
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+
+use tono_core::{
+    CatalogRouting,
+    config::{self, RuntimePorts, build_owned_runtime_with_ports},
+    node::ValidatedNode,
+    sing_box::{
+        CoreChoice, CoreSelection, RuntimeInput, build_runtime, preferred_core,
+        prove_sing_box_binary, resolve, sing_box_pin_from_env_or_file,
+    },
+};
+use tono_logging::{Type, logging};
+use tono_service_protocol::ProtocolInfo;
+
+use super::failure::StageFailure;
+use crate::{tono::state::TonoState, utils::dirs};
+
+pub(super) struct PreparedCore {
+    pub document: String,
+    pub core_path: PathBuf,
+    pub sing_box: bool,
+}
+
+pub(super) async fn prepare_owned_core(
+    state: &Arc<TonoState>,
+    protection_armed: bool,
+    nodes: &[ValidatedNode],
+    selected: &str,
+    routing: Option<&CatalogRouting>,
+    secret: &str,
+    ports: RuntimePorts,
+    mihomo_path: &Path,
+) -> Result<PreparedCore, StageFailure> {
+    let installation_id = state.lock().await.installation_id.clone();
+    let preferred = preferred_core(&preference_path(), &installation_id);
+    let binary = sing_box_binary(mihomo_path);
+    let pin = sing_box_pin_from_env_or_file(&binary.with_file_name("sing-box-sha256.txt"));
+    let proof = prove_sing_box_binary(&binary, pin.as_deref());
+    let service_can_run = service_can_run_sing_box().await;
+    let home_proxy = routing.and_then(|routing| routing.home_proxy.as_deref());
+    let home_socks5 = routing.and_then(|routing| routing.home_socks5.as_ref());
+    match resolve(preferred, proof, protection_armed, service_can_run) {
+        CoreSelection::Run(CoreChoice::SingBox) => {
+            compile_sing_box(nodes, selected, routing, secret, ports, binary)
+        }
+        CoreSelection::Run(CoreChoice::Mihomo { automatic_fallback }) => {
+            if automatic_fallback {
+                logging!(
+                    warn,
+                    Type::Service,
+                    "Tono: sing-box image is missing or unauthenticated before WFP; starting mihomo"
+                );
+            }
+            compile_mihomo(
+                nodes,
+                selected,
+                secret,
+                ports,
+                mihomo_path,
+                home_proxy,
+                home_socks5,
+            )
+        }
+        CoreSelection::ArmedRefusesFallback => Err(StageFailure::error(
+            "sing-box image is missing or unauthenticated and protection is already armed",
+        )),
+        CoreSelection::ServiceRefusesSingBox => Err(StageFailure::error(
+            "this Tono Service cannot run sing-box; install the current service before connecting",
+        )),
+    }
+}
+
+fn compile_sing_box(
+    nodes: &[ValidatedNode],
+    selected: &str,
+    routing: Option<&CatalogRouting>,
+    secret: &str,
+    ports: RuntimePorts,
+    binary: PathBuf,
+) -> Result<PreparedCore, StageFailure> {
+    let routing_owned = routing.cloned().unwrap_or_default();
+    let home_names: Vec<String> = config::HOME_PROCESS_NAMES
+        .iter()
+        .copied()
+        .map(str::to_string)
+        .collect();
+    let home_paths = config::home_process_path_regexes();
+    let direct_names: Vec<String> = config::REVIEWED_DIRECT_PROCESS_NAMES
+        .iter()
+        .copied()
+        .map(str::to_string)
+        .collect();
+    let input = RuntimeInput {
+        nodes,
+        selected,
+        controller_secret: secret,
+        direct_plan: None,
+        routing: &routing_owned,
+        platform: "windows-amd64-v2",
+        ports,
+        required_capabilities: &[],
+        home_process_names: &home_names,
+        home_process_path_regexes: &home_paths,
+        direct_process_names: &direct_names,
+    };
+    let runtime = build_runtime(input).map_err(|error| StageFailure::error(error.to_string()))?;
+    Ok(PreparedCore {
+        document: runtime.runtime_json().to_string(),
+        core_path: binary,
+        sing_box: true,
+    })
+}
+
+fn compile_mihomo(
+    nodes: &[ValidatedNode],
+    selected: &str,
+    secret: &str,
+    ports: RuntimePorts,
+    mihomo_path: &Path,
+    home_proxy: Option<&str>,
+    home_socks5: Option<&tono_core::CatalogHomeSocks5>,
+) -> Result<PreparedCore, StageFailure> {
+    let runtime = build_owned_runtime_with_ports(
+        nodes,
+        selected,
+        secret,
+        None,
+        home_proxy,
+        home_socks5,
+        ports,
+    )
+    .map_err(|error| StageFailure::error(error.to_string()))?;
+    Ok(PreparedCore {
+        document: runtime.yaml().to_string(),
+        core_path: mihomo_path.to_path_buf(),
+        sing_box: false,
+    })
+}
+
+fn preference_path() -> PathBuf {
+    dirs::app_home_dir()
+        .unwrap_or_else(|_| std::env::temp_dir())
+        .join("sing-box-core.json")
+}
+
+fn sing_box_binary(mihomo: &Path) -> PathBuf {
+    let extension = if cfg!(windows) { ".exe" } else { "" };
+    mihomo.with_file_name(format!("sing-box{extension}"))
+}
+
+async fn service_can_run_sing_box() -> bool {
+    match tono_service_protocol::get_version().await {
+        Ok(response) if response.code == 0 => response
+            .data
+            .as_ref()
+            .is_some_and(ProtocolInfo::supports_sing_box_core),
+        _ => false,
+    }
+}

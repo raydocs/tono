@@ -489,6 +489,18 @@ pub(super) async fn apply_cloud_policy(
     {
         return Ok(None);
     }
+    if state.lock().await.sing_box_core {
+        // PUT /configs is a no-op on sing-box alpha.9. Entering the reload
+        // bracket and then failing would leave traffic Blocked. Keep the
+        // proven full tunnel until a protected process replace exists.
+        skip_optional_direct_policy(
+            state,
+            generation,
+            "sing-box keeps the proven full tunnel; in-place config reload does not apply".to_string(),
+        )
+        .await;
+        return Ok(None);
+    }
     if !WINDOWS_OPTIONAL_DIRECT_ENABLED {
         skip_optional_direct_policy(
             state,
