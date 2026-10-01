@@ -356,7 +356,10 @@ nonisolated enum HelperProtocolVersion {
     ///   observed Unprotected state now satisfies a Protected Offline
     ///   recovery and commit; Connected still requires Connected. The
     ///   secondary AI hold on that standard release is unchanged.
-    static let current = "4.52.29"
+    /// - 4.52.29 → 4.52.30: selective cleanup removes a pre-receipt sinkhole
+    ///   resolver (exact Tono body, no receipt) and apply never records one
+    ///   as the user's original, so a leftover cannot fail the DNS audit.
+    static let current = "4.52.30"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS
