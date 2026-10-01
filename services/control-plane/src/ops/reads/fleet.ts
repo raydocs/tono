@@ -266,7 +266,7 @@ export async function retireFleetNode(
     throw new ApiError(409, 'CATALOG_CONFLICT', 'Managed catalog changed; preview retirement again');
   }
   if (dependencies.customersOnNode.length === 0) {
-    await revokeExitToken(e, name, actorEmail, nowSec);
+    await revokeExitToken(e, name, actorEmail, nowSec, revision);
   }
   const refreshed = await operationsFleetNodes(e, cache);
   return {

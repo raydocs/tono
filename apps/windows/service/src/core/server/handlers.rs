@@ -38,6 +38,7 @@ fn update_operation(request: &crate::update_wire::UpdateRequest) -> Option<Opera
     matches!(
         request,
         crate::update_wire::UpdateRequest::Disconnect
+            | crate::update_wire::UpdateRequest::DisconnectApplyingNarrow
             | crate::update_wire::UpdateRequest::Prepare { .. }
     )
     .then(|| OperationGuard::begin(ServiceOperationKind::ReleaseKillSwitch, IPC_HANDLER_TIMEOUT))
@@ -1119,6 +1120,18 @@ mod update_operation_tests {
     /// F520-1: a native-update Disconnect or failed non-strict Prepare releases WFP. `/status`
     /// must show it as a release and advance `snapshot_generation`, or the App's two-reading
     /// check can still say "stays protected" after it.
+    #[test]
+    #[serial]
+    fn automatic_update_disconnect_is_published_as_a_kill_switch_release() {
+        let before = snapshot().0;
+        let guard = update_operation(&UpdateRequest::disconnect(true));
+        let (during, active) = snapshot();
+        assert_eq!(active.unwrap().kind, ServiceOperationKind::ReleaseKillSwitch);
+        assert!(during > before);
+        drop(guard);
+        assert!(snapshot().0 > during);
+    }
+
     #[test]
     #[serial]
     fn update_disconnect_is_published_as_a_kill_switch_release() {

@@ -116,5 +116,48 @@ class BinaryCacheTest(unittest.TestCase):
             self.assertEqual(b"fixture-sing-box", sing.read_bytes())
 
 
+class StartupCleanupTest(unittest.TestCase):
+    def test_mihomo_controller_timeout_stops_and_reaps_the_started_core(self):
+        process = mock.Mock()
+        process.poll.return_value = None
+        with tempfile.TemporaryDirectory() as directory, \
+                mock.patch.object(bench.subprocess, "Popen", return_value=process), \
+                mock.patch.object(bench.time, "perf_counter", side_effect=[0, 6]):
+            work = Path(directory)
+            with self.assertRaisesRegex(SystemExit, "controller.*did not answer"):
+                bench.Core(work / "mihomo", work, work / "config.yaml", 30000, 31000)
+        process.terminate.assert_called_once_with()
+        process.wait.assert_called_once_with(timeout=2)
+
+    def test_singbox_controller_timeout_stops_the_core_and_closes_its_log(self):
+        process = mock.Mock()
+        process.poll.return_value = None
+        with tempfile.TemporaryDirectory() as directory, \
+                mock.patch.object(bench.subprocess, "Popen", return_value=process) as spawn, \
+                mock.patch.object(bench.time, "perf_counter", side_effect=[0, 6]):
+            work = Path(directory)
+            with self.assertRaisesRegex(SystemExit, "controller.*did not answer"):
+                bench.SingBox(work / "sing-box", work, {}, 30000, 31000)
+            self.assertTrue(spawn.call_args.kwargs["stdout"].closed)
+        process.terminate.assert_called_once_with()
+        process.wait.assert_called_once_with(timeout=2)
+
+    def test_singbox_spawn_failure_closes_its_opened_log(self):
+        with tempfile.TemporaryDirectory() as directory, \
+                mock.patch.object(bench.subprocess, "Popen", side_effect=OSError("spawn failed")) as spawn:
+            work = Path(directory)
+            with self.assertRaisesRegex(OSError, "spawn failed"):
+                bench.SingBox(work / "sing-box", work, {}, 30000, 31000)
+            self.assertTrue(spawn.call_args.kwargs["stdout"].closed)
+
+    def test_forced_core_stop_reaps_after_the_terminate_budget_expires(self):
+        core = bench.Core.__new__(bench.Core)
+        core.proc = mock.Mock()
+        core.proc.wait.side_effect = [subprocess.TimeoutExpired("fixture-core", 2), 0]
+        core.close()
+        core.proc.kill.assert_called_once_with()
+        self.assertEqual([mock.call(timeout=2), mock.call(timeout=2)], core.proc.wait.call_args_list)
+
+
 if __name__ == "__main__":
     unittest.main()

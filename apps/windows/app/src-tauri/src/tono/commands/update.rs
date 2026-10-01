@@ -356,7 +356,7 @@ pub async fn adopt() -> Result<Option<Protection>> {
     Ok(Some(receipt.required_recovery))
 }
 
-pub async fn disconnect_if_pending() -> Result<Option<tono_service_protocol::KillSwitchStatus>> {
+pub async fn disconnect_if_pending(apply_narrow: bool) -> Result<Option<tono_service_protocol::KillSwitchStatus>> {
     if !incomplete() {
         return Ok(None);
     }
@@ -369,7 +369,7 @@ pub async fn disconnect_if_pending() -> Result<Option<tono_service_protocol::Kil
     // A lost reply can follow a committed release; the caller treats errors as unconfirmed.
     // A release whose update record could not be proven or archived returns Ok with
     // `needs_attention`: the machine is open, so it must not read as armed.
-    let released = request(UpdateRequest::Disconnect).await?;
+    let released = request(UpdateRequest::disconnect(apply_narrow)).await?;
     if let Some(reason) = released.needs_attention.as_deref() {
         logging!(warn, Type::Service, "Tono: update Disconnect released protection; update record still pending: {reason}");
     }

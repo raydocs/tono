@@ -1,18 +1,18 @@
 # W1-sol-win-trust: Codex (GPT-6.1 Sol) findings
 
-Generated 2026-09-30 20:33 MT from the run's findings.tsv / prs.tsv.
+Generated 2026-09-30 23:23 MT from the run's findings.tsv / prs.tsv.
 
 ## PRs
 
 | PR | Branch | Labels | Auto-merge requested | Title |
 |---|---|---|---|---|
-| 843 | hunt/sol-trust-vault-write-retry | none | yes | fix(windows): retry failed session vault mutations on flush |
-| 873 | hunt/sol-trust-release-absent-owner | needs-hardware | yes | fix(windows): stop unrecorded cores before owner-only release |
-| 912 | hunt/sol-trust-release-scm-probe-timeout | needs-hardware | yes | fix(windows): bound SCM reads in release and readiness paths |
-| 933 | hunt/sol-trust-scm-verifier-worker-cap | needs-hardware | yes | fix(windows): cap surviving SCM verification threads |
-| 955 | hunt/sol-trust-goodbye-admission | needs-hardware | yes | fix(windows): reserve accepted Service shutdown before new work |
-| 983 | hunt/sol-trust-selective-release-retry | needs-hardware | yes | fix(windows): retain the AI hold on selective release retries |
-| 990 | hunt/sol-trust-stale-replay-verdict | none | yes | fix(windows): keep obsolete token replays from rejecting a valid session |
+| PR#843 | hunt/sol-trust-vault-write-retry | none | yes | fix(windows): retry failed session vault mutations on flush |
+| PR#873 | hunt/sol-trust-release-absent-owner | needs-hardware | yes | fix(windows): stop unrecorded cores before owner-only release |
+| PR#912 | hunt/sol-trust-release-scm-probe-timeout | needs-hardware | yes | fix(windows): bound SCM reads in release and readiness paths |
+| PR#933 | hunt/sol-trust-scm-verifier-worker-cap | needs-hardware | yes | fix(windows): cap surviving SCM verification threads |
+| PR#955 | hunt/sol-trust-goodbye-admission | needs-hardware | yes | fix(windows): reserve accepted Service shutdown before new work |
+| PR#983 | hunt/sol-trust-selective-release-retry | needs-hardware | yes | fix(windows): retain the AI hold on selective release retries |
+| PR#990 | hunt/sol-trust-stale-replay-verdict | none | yes | fix(windows): keep obsolete token replays from rejecting a valid session |
 
 ## Hypotheses
 

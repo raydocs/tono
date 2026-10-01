@@ -1,4 +1,6 @@
-use crate::core::process::{process_identity, sweep_orphan_core_processes, terminate_process};
+use crate::core::process::{
+    process_identity, sweep_orphan_core_processes, terminate_process_if_identity_matches,
+};
 use crate::core::runtime::{
     cleanup_core_socket, is_core_socket_reachable, read_core_runtime_record,
     remove_core_runtime_record,
@@ -31,24 +33,26 @@ pub async fn reconcile_service_startup() -> Result<()> {
     let record = read_core_runtime_record().await?;
     if let Some(record) = record.as_ref() {
         let current_identity = process_identity(record.pid)?;
-        let socket_reachable = is_core_socket_reachable(&record.ipc_path).await;
-
-        if current_identity.as_ref() == Some(&record.identity) {
+        let terminated = if current_identity.as_ref() == Some(&record.identity) {
             warn!(
                 "Found verified previous core process {} during startup; stopping it before supervision resumes",
                 record.pid
             );
-            terminate_process(record.pid).await?;
+            terminate_process_if_identity_matches(record.pid, &record.identity).await?
+        } else {
+            false
+        };
+        if terminated {
             cleanup_core_socket(&record.ipc_path).await;
             remove_core_runtime_record().await;
         } else {
             if let Some(current_identity) = current_identity {
                 warn!(
-                    "Runtime PID {} now belongs to a different process ({:?}); refusing to terminate it",
+                    "Runtime PID {} is no longer verified as the previous core ({:?}); leaving it untouched",
                     record.pid, current_identity
                 );
             }
-            if !socket_reachable {
+            if !is_core_socket_reachable(&record.ipc_path).await {
                 info!(
                     "Cleaning stale core socket from dead process: {}",
                     record.ipc_path

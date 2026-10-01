@@ -69,39 +69,6 @@ export function lifecycleCounts(
   return out;
 }
 
-/**
- * The fragments worth printing.
- *
- * A zero is a measurement here — the engine judged every machine — but five
- * fragments of prose at 32 px wrap to two lines, and "0 台失联" is a line of
- * the sentence spent saying nothing happened. So the sentence names only what
- * is there, in the engine's own precedence order, and a fleet that is entirely
- * fine reads "42 台正常".
- */
-export function countFragments(counts: Record<NodeFilterId, number>): NodeFilterId[] {
-  return NODE_FILTERS.filter((id) => counts[id] > 0);
-}
-
-/**
- * The same sentence at 390 px.
- *
- * Five fragments of 32 px prose is four lines on a phone, which pushes the
- * table — the thing the phone is for — off the first screen. The list is
- * already in severity order, so the head of it is what an operator on a phone
- * came to see; a filter they have turned on stays whatever its rank, or the
- * sentence would stop explaining the list under it.
- */
-export function topFragments(
-  ids: readonly NodeFilterId[],
-  limit: number,
-  keep: NodeFilter,
-): NodeFilterId[] {
-  if (ids.length <= limit) return [...ids];
-  const head = ids.slice(0, limit);
-  if (keep === null || head.includes(keep)) return head;
-  return [...head.slice(0, limit - 1), keep];
-}
-
 export function nodeRegion(name: string): string {
   const cut = name.indexOf('·');
   if (cut <= 0) return name;

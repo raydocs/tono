@@ -345,4 +345,59 @@ final class SingBoxConfigTests: XCTestCase {
         }, "Apple public TCP traffic must not bypass a healthy tunnel without matching PF authorization")
         XCTAssertEqual(route["final"] as? String, ConfigPipeline.exitGroupName)
     }
+
+    func testProductRuntimeRequiresChromeAndSequentialDoH() throws {
+        var values = try nodes()
+        values[0].clientFingerprint = "firefox"
+        values[1].clientFingerprint = nil
+        let overlay = ConfigPipeline.OverlayConfig(mixedPort: 29190,
+            externalController: "127.0.0.1:29191", secret: secret, tunEnabled: true,
+            selectedNodeName: "Fixture Beta")
+        let result = try ConfigPipeline.buildSingBoxRuntime(overlay: overlay, nodes: values, directPlan: nil)
+        XCTAssertEqual(result.unavailableNodes, ["Fixture Alpha": "TONO_SINGBOX_UNSUPPORTED_FINGERPRINT"])
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: result.runtimeJSON) as? [String: Any])
+        let outbounds = try XCTUnwrap(json["outbounds"] as? [[String: Any]])
+        XCTAssertFalse(outbounds.contains { $0["tag"] as? String == "Fixture Alpha" })
+        let beta = try XCTUnwrap(outbounds.first { $0["tag"] as? String == "Fixture Beta" })
+        let tls = try XCTUnwrap(beta["tls"] as? [String: Any])
+        XCTAssertEqual((tls["utls"] as? [String: Any])?["fingerprint"] as? String, "chrome")
+        let dns = try XCTUnwrap(json["dns"] as? [String: Any])
+        let servers = try XCTUnwrap(dns["servers"] as? [[String: Any]])
+        XCTAssertEqual(servers[0]["inet4_range"] as? String, "198.18.16.0/20")
+        XCTAssertTrue(servers.allSatisfy { ["fakeip", "https"].contains($0["type"] as? String ?? "") })
+        XCTAssertEqual(servers[1]["server"] as? String, "1.1.1.1")
+        XCTAssertEqual((servers[1]["tls"] as? [String: Any])?["alpn"] as? [String], ["h2"])
+        XCTAssertEqual(servers[1]["detour"] as? String, ConfigPipeline.exitGroupName)
+        XCTAssertEqual(servers[2]["tag"] as? String, "Tono-DoH-Backup")
+        XCTAssertEqual(servers[2]["server"] as? String, "8.8.8.8")
+        XCTAssertEqual((servers[2]["tls"] as? [String: Any])?["server_name"] as? String, "dns.google")
+        XCTAssertEqual((servers[2]["tls"] as? [String: Any])?["alpn"] as? [String], ["h2"])
+        XCTAssertEqual(servers[2]["detour"] as? String, ConfigPipeline.exitGroupName)
+        let rules = try XCTUnwrap(dns["rules"] as? [[String: Any]])
+        let fake = try XCTUnwrap(rules.first { $0["server"] as? String == "Tono-FakeIP" })
+        XCTAssertEqual(fake["rewrite_ttl"] as? Int, 30)
+        XCTAssertEqual(dns["final"] as? String, "Tono-DoH")
+        let evaluate = rules.filter { $0["action"] as? String == "evaluate" }.map { $0["server"] as? String }
+        XCTAssertEqual(evaluate, ["Tono-DoH", "Tono-DoH-Backup"])
+        XCTAssertFalse(rules.contains { $0["race"] != nil })
+        XCTAssertTrue(ProtectedDNSProbe.isFakeIP("198.18.16.1"))
+        XCTAssertTrue(ProtectedDNSProbe.isFakeIP("198.18.31.255"))
+        XCTAssertTrue(ProtectedDNSProbe.isFakeIP("198.19.0.1"))
+        XCTAssertFalse(ProtectedDNSProbe.isFakeIP("198.18.0.1"))
+        XCTAssertFalse(ProtectedDNSProbe.isFakeIP("198.18.0.2"))
+        XCTAssertFalse(ProtectedDNSProbe.isFakeIP("1.1.1.1"))
+        var selectedFirefox = values
+        selectedFirefox[1].clientFingerprint = "firefox"
+        var rejected = overlay
+        rejected.selectedNodeName = "Fixture Beta"
+        XCTAssertThrowsError(try ConfigPipeline.buildSingBoxRuntime(
+            overlay: rejected, nodes: selectedFirefox, directPlan: nil
+        )) { error in
+            XCTAssertEqual(error as? ConfigPipeline.SingBoxError, .unsupportedFingerprint)
+        }
+        SingBoxDelayGate.prove()
+        XCTAssertTrue(SingBoxDelayGate.isProven)
+        SingBoxDelayGate.suspend()
+        XCTAssertFalse(SingBoxDelayGate.isProven)
+    }
 }

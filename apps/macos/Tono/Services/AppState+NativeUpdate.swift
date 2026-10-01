@@ -31,7 +31,7 @@ extension AppState {
         }
     }
 
-    private func suspendForNativeUpdate() async {
+    func suspendForNativeUpdate() async {
         connectionCoordinator.bumpGeneration()
         let retirementGeneration = connectionCoordinator.protectionOperationGeneration
         let tasks = [connectionCoordinator.coreMonitorTask, connectionCoordinator.nodeSwitchTask,
@@ -41,6 +41,15 @@ extension AppState {
             .compactMap { $0 }
         for task in tasks { task.cancel() }
         resumeProtectionAfterWake = false
+        // A cancelled reload may return without clearing its serialization
+        // handle. Retire its completion and queued work before draining it;
+        // neither may start another mutation during the helper handoff.
+        connectionCoordinator.configReloadRequestID &+= 1
+        let reloadRetirementID = connectionCoordinator.configReloadRequestID
+        pendingFullConfigReload = false
+        pendingDirectPolicyReload = nil
+        isConnected = false
+        isConnecting = false
         isProtectedReconnectScheduled = false
         autoConnectRequested = false
         stopProxyGuard()
@@ -53,12 +62,13 @@ extension AppState {
             connectionCoordinator.wakeRecoveryTask = nil
             connectionCoordinator.sleepRestrictTask = nil
         }
+        if connectionCoordinator.configReloadRequestID == reloadRetirementID {
+            connectionCoordinator.configReloadTask = nil
+        }
         webSocket?.stopAll()
         webSocket = nil
         coreController = nil
         proxyService.setAPI(nil)
-        isConnected = false
-        isConnecting = false
         // Root performs Core/TUN/DNS cleanup; no App-owned disconnect or
         // journal is treated as its proof.
     }

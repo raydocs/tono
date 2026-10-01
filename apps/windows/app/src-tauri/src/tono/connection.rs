@@ -678,7 +678,7 @@ async fn fail_connect_observed(
     } else if plan.stop_core == Some(true) && armed {
         // Register the real release before transferring this writer. If Disconnect already
         // registered its worker, the coordinator drops our writer and joins that actual result.
-        Some(disconnect::release_explicit_with_guard(state, app, guard.take()).await)
+        Some(disconnect::release_explicit_applying_narrow_with_guard(state, app, guard.take()).await)
     } else {
         if let Some(release) = plan.stop_core {
             let _ = service::tono_stop_core(release).await;
