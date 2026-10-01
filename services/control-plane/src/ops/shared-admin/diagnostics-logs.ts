@@ -93,13 +93,13 @@ export async function closeExpiredLogWindows(
         const userId = String(row.user_id);
         statements.push(
           db.prepare(
-            'DELETE FROM diagnostics_log_access WHERE device_id = ? AND user_id = ?',
-          ).bind(windowId, userId),
+            'DELETE FROM diagnostics_log_access WHERE device_id = ? AND user_id = ? AND expires_at < ?',
+          ).bind(windowId, userId, nowSec),
           db.prepare(
             `INSERT INTO ops_audit(
                id, at, actor_email, action, target_type, target_id, summary,
                actor_type, actor_role, request_id
-             ) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?`,
+             ) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE changes() = 1`,
           ).bind(
             id(), nowSec, 'system', 'diagnostics.window.close', 'user', userId,
             windowDetail(windowId, null, 'expired'), 'system', 'owner', null,
