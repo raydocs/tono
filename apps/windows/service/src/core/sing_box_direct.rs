@@ -9,7 +9,9 @@
 //! Nothing here publishes Blocked as the outcome, and nothing calls the
 //! mihomo reload bracket.
 
+use std::future::Future;
 use std::path::Path;
+use std::time::Duration;
 
 use anyhow::{Context as _, Result, bail};
 
@@ -52,7 +54,7 @@ pub(crate) async fn replace_running_sing_box_document(
     };
     let failed = match started {
         Err(error) => Some(error),
-        Ok(()) => windows_kill_switch::lock(None).await.err(),
+        Ok(()) => lock_new_tunnel().await.err(),
     };
     let Some(error) = failed else {
         return Ok(());
@@ -83,7 +85,7 @@ async fn restore_or_release(
         ))
     };
     let locked = if started.is_ok() {
-        windows_kill_switch::lock(None).await
+        lock_new_tunnel().await
     } else {
         Err(anyhow::anyhow!("previous sing-box process did not start"))
     };
@@ -108,12 +110,51 @@ async fn retry_requested_or_release(
             "requested sing-box config could not be written"
         ))
     };
-    if started.is_ok() && windows_kill_switch::lock(None).await.is_ok() {
+    if started.is_ok() && lock_new_tunnel().await.is_ok() {
         return Err(error.context(
             "sing-box replacement failed; the requested full tunnel is running",
         ));
     }
     release_general_traffic(error).await
+}
+
+/// The App's connect lock budget (`LOCK_ATTEMPTS` × `LOCK_RETRY_INTERVAL` in
+/// `connection/controller.rs`): 50 × 200 ms.
+const LOCK_ATTEMPTS: u32 = 50;
+const LOCK_RETRY_INTERVAL: Duration = Duration::from_millis(200);
+
+/// `start_core` returns as soon as sing-box is spawned, before it has created
+/// its WinTUN adapter, and the killed predecessor leaves a not-present row
+/// under the same alias. A lock at that moment is refused as "did not resolve
+/// to a LUID". The App's connect path retries exactly these refusals; without
+/// the same retry here a replacement that locked before the adapter was up
+/// failed, fell through to the restore (which races the same way) and
+/// released general traffic.
+async fn lock_new_tunnel() -> Result<()> {
+    lock_with_retries(|| windows_kill_switch::lock(None), LOCK_RETRY_INTERVAL).await
+}
+
+async fn lock_with_retries<F, Fut>(mut lock: F, interval: Duration) -> Result<()>
+where
+    F: FnMut() -> Fut,
+    Fut: Future<Output = Result<()>>,
+{
+    let mut attempt = 1;
+    loop {
+        match lock().await {
+            Err(error) if attempt < LOCK_ATTEMPTS && tunnel_not_ready(&error) => {
+                attempt += 1;
+                tokio::time::sleep(interval).await;
+            }
+            result => return result,
+        }
+    }
+}
+
+/// The adapter-not-ready refusals the App's `is_retryable_lock_error` retries.
+fn tunnel_not_ready(error: &anyhow::Error) -> bool {
+    let text = format!("{error:#}").to_lowercase();
+    text.contains("did not resolve to a luid") || text.contains("is not a tunnel device")
 }
 
 async fn release_general_traffic(error: anyhow::Error) -> Result<()> {
@@ -139,4 +180,54 @@ async fn write_document(path: &Path, bytes: &[u8]) -> Result<()> {
         .await
         .with_context(|| format!("failed to publish sing-box config {}", path.display()))?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::atomic::{AtomicU32, Ordering};
+    use std::time::Duration;
+
+    use super::lock_with_retries;
+
+    #[tokio::test]
+    async fn a_replacement_lock_waits_for_the_new_sing_box_adapter() {
+        let calls = AtomicU32::new(0);
+        let result = lock_with_retries(
+            || {
+                let call = calls.fetch_add(1, Ordering::SeqCst);
+                async move {
+                    if call < 2 {
+                        anyhow::bail!(
+                            "interface LUID 7 is reported as not present, so the tunnel alias did not resolve to a LUID of a present adapter; refusing to lock"
+                        );
+                    }
+                    Ok(())
+                }
+            },
+            Duration::ZERO,
+        )
+        .await;
+        assert!(result.is_ok(), "the adapter came up on the third attempt");
+        assert_eq!(calls.load(Ordering::SeqCst), 3);
+
+        let calls = AtomicU32::new(0);
+        let result = lock_with_retries(
+            || {
+                calls.fetch_add(1, Ordering::SeqCst);
+                async {
+                    anyhow::bail!(
+                        "core changed before tunnel lock install; a fresh lock is required"
+                    )
+                }
+            },
+            Duration::ZERO,
+        )
+        .await;
+        assert!(result.is_err());
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            1,
+            "other lock failures are not retried"
+        );
+    }
 }
