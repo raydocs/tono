@@ -1,0 +1,12 @@
+## 2026-10-01 · macOS helper：卸载清理在 AI 拦截层未证实撤掉时保留 helper
+- 归属：macOS helper（G4 冻结外的 R5 bug hunt 修复）；协议 4.52.35 → 4.52.36。
+- 来源：origin/main `4bb0ba4a` → 分支 `claude/r5-mac-removal-selective-pending`。
+- 缺陷修复：
+  - MAC-REMOVAL-SELECTIVE-PENDING：#1283 让撤不掉的 AI 拦截层（`/etc/resolver` 汇点文件、Anthropic 黑洞路由）保持「releasing」，由 helper 启动和看门狗重试。但 Tono.app 被删时，紧急释放只看 DNS 和 Core，结果是 `.released` 就删掉 helper 安装，没有东西再重试，`/etc/resolver` 里的 AI 汇点文件在卸载后一直留着（路由重启后消失）。现在卸载清理直接读系统，只有每个 AI 后缀 resolver 和两条前缀路由都「证实不在」才删 helper；否则先就地再撤一次，仍未证实就保留安装（PF 已放开、DNS 已恢复），空闲检查 10 秒后重试。
+  - 三态判定（在 / 证实不在 / 未知）：resolver 条目不存在、父路径不是目录、符号链接或其他非普通文件（不跟随）、大小不等于汇点内容的普通文件 → 不在；内容恰为汇点 → 在；无法 lstat 或读取 → 未知。不看目录权限：不安全目录里清理不敢碰的汇点同样算在。路由：整个输出恰为 ESRCH 诊断 `route: writing to routing socket: not in table`（可带结尾换行，不论退出码，route.c 写路由套接字失败后仍 exit 0；其他位置出现 "not in table" 判未知）、最佳匹配是别的前缀、或该前缀上不是黑洞（他人路由）→ 不在；该前缀黑洞 → 在；命令没跑完、其他非零退出、无法解析（含 flags 不是 `<` + 逗号分隔的 [A-Za-z0-9]+ + `>`（route.c 的位名含小写 `b016`、`b024`），如带多余空格的 `BLACKHOLE `），或 destination / mask 不是该地址族的地址（如 route.c 打印的 "invalid"、空掩码）→ 未知。未知保留 helper。
+  - Codex 复审六轮修正：不再只看恢复记录（磁盘满丢记录、回执损坏记录永远挂起）；不安全目录、路由非零退出不再被当作「不在」；管理员自己的符号链接或超大文件不再让 helper 永远留着；无法解析的 destination / mask 不再被当作「别的前缀」；exit 0 的 ESRCH 诊断算「不在」，但只认整个输出；flags 格式不对不再被当作「他人路由」；小写位名（`b016`）照常解析，#1164 不会误删他人路由。
+- 新增/优化：无。`--emergency-disarm`、`--emergency-reset` 不变。
+- 工程与测试：`--update-self-test` 加 `removal-keeps-helper-while-selective-layer-remains`（判定）和 `selective-layer-check-needs-proof-of-absence`（0775 目录、符号链接、exit 0 的路由 not in table / 其他失败 / 黑洞、汇点）、`selective-route-readback-needs-parseable-addresses`（"invalid" destination 判未知）、`selective-route-not-in-table-must-be-the-whole-output`（带字段的输出里出现 not in table 判未知）和 `selective-route-flags-must-parse`（`BLACKHOLE ` 判未知；带 `b016` 的真实输出照常解析为他人路由）。
+- 验证：本机不运行 Swift；CONTRACT 用 build-core-helper.sh 的同一清单和规则重算（先在 main 上复现 `07bee54b…`）。Swift 自测由托管 macOS CI 运行。
+- 候选/发布：仅源码，无新候选。
+- 剩余限制：回执损坏且汇点仍在、或某个 resolver 条目一直无法读取、或 `route get` 一直给不出证明时，helper 每 10 秒重试并保持安装（普通网络可用，AI 可能仍被拦），没有重试上限；只对末级 resolver 条目不跟随符号链接，`/etc/resolver` 本身是符号链接时仍沿其目标只读检查（Codex MINOR，记录为未修：MAC-REMOVAL-RESOLVER-PARENT-SYMLINK）；`--emergency-reset` 仍按管理员要求删除安装。未实机验证（needs-hardware）。

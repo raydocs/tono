@@ -125,7 +125,50 @@ enum SelectiveFailOpen {
     /// BLACKHOLE. No answer, unparseable output or a different best match
     /// keeps the delete, so a Tono blackhole is never left behind.
     static func readbackShowsForeignRoute(_ output: String, prefix: String) -> Bool {
-        guard let identity = routeReadbackIdentity[prefix] else { return false }
+        guard let names = readbackFlags(output, prefix: prefix) else { return false }
+        return !names.isEmpty && !names.contains("BLACKHOLE")
+    }
+
+    /// What is known about one part of Tono's AI layer on this Mac.
+    enum LayerReading: Equatable {
+        case present
+        case absent
+        case unknown
+    }
+
+    /// A `route -n get` of one prefix. Absent only on proof: "not in table",
+    /// a different best match, or this exact prefix held by a route that is
+    /// not a blackhole (not Tono's). A blackhole on this exact prefix is
+    /// Tono's. Any other exit or output proves nothing, and so does a
+    /// destination or mask that is not an address of the prefix's family
+    /// (route.c prints "invalid" when it cannot format one). route.c exits 0
+    /// even after the routing-socket write fails, so its ESRCH diagnostic
+    /// counts whatever the exit code, but only as the whole output: "not in
+    /// table" anywhere else (beside readback fields, say) proves nothing.
+    static func routeLayerReading(status: Int32, output: String, prefix: String) -> LayerReading {
+        if status == 0, let names = readbackFlags(output, prefix: prefix), !names.isEmpty {
+            return names.contains("BLACKHOLE") ? .present : .absent
+        }
+        var diagnostic = Substring(output)
+        if diagnostic.hasSuffix("\n") { diagnostic = diagnostic.dropLast() }
+        if diagnostic == "route: writing to routing socket: not in table" { return .absent }
+        guard status == 0 else { return .unknown }
+        let fields = readbackFields(output)
+        guard let identity = routeReadbackIdentity[prefix],
+              let destination = fields["destination"], let mask = fields["mask"],
+              readbackAddressParses(destination, prefix: prefix),
+              readbackAddressParses(mask, prefix: prefix) else { return .unknown }
+        return destination == identity.destination && mask == identity.mask ? .unknown : .absent
+    }
+
+    /// "default" or an address of the family `prefix` belongs to.
+    private static func readbackAddressParses(_ text: String, prefix: String) -> Bool {
+        if text == "default" { return true }
+        var address = [UInt8](repeating: 0, count: 16)
+        return inet_pton(prefix == ipv4Prefix ? AF_INET : AF_INET6, text, &address) == 1
+    }
+
+    private static func readbackFields(_ output: String) -> [String: String] {
         var fields: [String: String] = [:]
         for line in output.split(separator: "\n") {
             let parts = line.split(separator: ":", maxSplits: 1)
@@ -134,13 +177,29 @@ enum SelectiveFailOpen {
             guard ["destination", "mask", "flags"].contains(key), fields[key] == nil else { continue }
             fields[key] = parts[1].trimmingCharacters(in: .whitespaces)
         }
+        return fields
+    }
+
+    /// The flag names of an exact-prefix readback; nil for any other answer,
+    /// including flags that are not `<` + comma-separated [A-Za-z0-9]+ + `>`
+    /// (route.c's bit names include lowercase `b016` and `b024`)
+    /// (an empty name or stray whitespace could hide BLACKHOLE).
+    private static func readbackFlags(_ output: String, prefix: String) -> [String]? {
+        guard let identity = routeReadbackIdentity[prefix] else { return nil }
+        let fields = readbackFields(output)
         guard fields["destination"] == identity.destination,
               fields["mask"] == identity.mask,
               let flags = fields["flags"], flags.hasPrefix("<"), flags.hasSuffix(">") else {
-            return false
+            return nil
         }
-        let names = flags.dropFirst().dropLast().split(separator: ",").map(String.init)
-        return !names.isEmpty && !names.contains("BLACKHOLE")
+        let names = flags.dropFirst().dropLast()
+            .split(separator: ",", omittingEmptySubsequences: false).map(String.init)
+        guard names.allSatisfy({ name in
+            !name.isEmpty && name.unicodeScalars.allSatisfy {
+                ("A"..."Z").contains($0) || ("a"..."z").contains($0) || ("0"..."9").contains($0)
+            }
+        }) else { return nil }
+        return names
     }
 
     /// A command may run only when it names exactly one of the two prefixes
@@ -333,6 +392,51 @@ enum SelectiveFailOpenInstaller {
         return SelectiveFailOpen.readbackShowsForeignRoute(
             String(decoding: result.output.prefix(16 * 1024), as: UTF8.self), prefix: prefix
         )
+    }
+
+    /// Read-only. True only when this Mac provably holds none of Tono's AI
+    /// layer. It reads the system, not the recovery record or the receipts:
+    /// a full disk can lose the record, and a corrupt receipt can keep it
+    /// pending after the layer is gone. Every resolver and route must read
+    /// `.absent`; `.present` or `.unknown` anywhere answers false.
+    static func layerProvenAbsent(
+        directory: String = "/etc/resolver",
+        routeReadback: ([String]) -> (status: Int32, output: String)? = { args in
+            guard let executable = args.first, SelectiveFailOpen.commandIsPrefixOnly(args),
+                  let result = try? KillSwitchManager.run(executable, Array(args.dropFirst()), deadline: 3)
+            else { return nil }
+            return (result.status, String(decoding: result.output.prefix(16 * 1024), as: UTF8.self))
+        }
+    ) -> Bool {
+        for suffix in SelectiveFailOpen.suffixes where SelectiveFailOpen.resolverPath(for: suffix) != nil {
+            guard resolverLayerReading(at: directory + "/" + suffix) == .absent else { return false }
+        }
+        for args in SelectiveFailOpen.routeGetArguments() {
+            guard let prefix = args.last, let answer = routeReadback(args),
+                  SelectiveFailOpen.routeLayerReading(
+                      status: answer.status, output: answer.output, prefix: prefix
+                  ) == .absent else { return false }
+        }
+        return true
+    }
+
+    /// Tono writes only a regular file holding exactly the sinkhole body.
+    /// Absent: no entry, a parent that is not a directory, a symlink or
+    /// other non-regular entry (never followed), or a regular file of
+    /// another size. Unknown: an entry that cannot be inspected or read.
+    /// Directory permissions are not checked: reading is safe, and an unsafe
+    /// directory can still hold a sinkhole that cleanup refused to touch.
+    static func resolverLayerReading(at path: String) -> SelectiveFailOpen.LayerReading {
+        let body = Data(SelectiveFailOpen.resolverBody().utf8)
+        var metadata = stat()
+        guard lstat(path, &metadata) == 0 else {
+            return errno == ENOENT || errno == ENOTDIR ? .absent : .unknown
+        }
+        guard metadata.st_mode & S_IFMT == S_IFREG, metadata.st_size == off_t(body.count) else { return .absent }
+        guard let contents = try? KillSwitchManager.secureRead(
+            path, maximumBytes: body.count, requireRootOwnership: false
+        ) else { return .unknown }
+        return contents == body ? .present : .absent
     }
 
     private static let originalsPath = "/Library/Application Support/Tono/selective-resolvers"

@@ -593,7 +593,8 @@ func runUpdateSelfTests() -> Bool {
         let released: (UpdateStorage) -> EmergencyReleaseOutcome = { _ in .released }
         try check(!releaseRemovedInstallationLocked(storage, release: dnsFailed, removeInstallation: remove)
                   && removals == 0, "A removal whose DNS restore failed deleted the helper that retries it")
-        try check(releaseRemovedInstallationLocked(storage, release: released, removeInstallation: remove)
+        try check(releaseRemovedInstallationLocked(storage, release: released, clearSelectiveLayer: { true },
+                                                   removeInstallation: remove)
                   && removals == 1, "A removal whose DNS was restored kept the installation")
     }
     // #1251: since #763 a Core that survives SIGKILL no longer refuses the
@@ -606,6 +607,84 @@ func runUpdateSelfTests() -> Bool {
         }
         try check(!releaseRemovedInstallationLocked(storage, release: survived, removeInstallation: { removals += 1 })
                   && removals == 0, "A removal deleted the helper while a stale Core was still running")
+    }
+    // MAC-REMOVAL-SELECTIVE-PENDING: a failed AI-layer cleanup is retried only
+    // by this helper; removal deleted it and orphaned the sinkhole. The layer
+    // on the Mac decides, not the recovery record.
+    test("removal-keeps-helper-while-selective-layer-remains") { directory in
+        let storage = try UpdateStorage(root: directory + "/idle")
+        var removals = 0
+        try check(!releaseRemovedInstallationLocked(storage, release: { _ in .released },
+                                                    clearSelectiveLayer: { false },
+                                                    removeInstallation: { removals += 1 })
+                  && removals == 0, "A removal deleted the helper while the AI layer was still installed")
+    }
+    // A full disk can lose the recovery record while the sinkhole stays, and
+    // a corrupt receipt can keep the record pending after the sinkhole is
+    // gone. The removal check reads the resolver and the routes themselves,
+    // and only proof of absence everywhere lets the helper go: an unsafe
+    // resolver directory or a route answer that proves nothing keeps it.
+    test("selective-layer-check-needs-proof-of-absence") { directory in
+        let resolvers = directory + "/resolver"
+        try FileManager.default.createDirectory(atPath: resolvers, withIntermediateDirectories: false)
+        try check(chmod(resolvers, 0o775) == 0, "Could not make the test resolver directory group-writable")
+        let resolver = URL(fileURLWithPath: resolvers + "/claude.ai")
+        try Data("nameserver 10.0.0.53\n".utf8).write(to: resolver)
+        try FileManager.default.createSymbolicLink(atPath: resolvers + "/anthropic.com",
+                                                   withDestinationPath: resolver.path)
+        // route.c exits 0 after the routing-socket write fails.
+        let noRoute: ([String]) -> (status: Int32, output: String)? = { _ in
+            (0, "route: writing to routing socket: not in table\n")
+        }
+        try check(SelectiveFailOpenInstaller.layerProvenAbsent(directory: resolvers, routeReadback: noRoute),
+                  "An administrator resolver or symlink counted as Tono's AI layer")
+        try check(!SelectiveFailOpenInstaller.layerProvenAbsent(directory: resolvers, routeReadback: { _ in
+            (1, "route: writing to routing socket: No buffer space available\n")
+        }), "A failed route readback counted as proof that no blackhole remains")
+        try check(!SelectiveFailOpenInstaller.layerProvenAbsent(directory: resolvers, routeReadback: { args in
+            args.last == SelectiveFailOpen.ipv4Prefix
+                ? (0, "destination: 160.79.104.0\n       mask: 255.255.254.0\n      flags: <UP,DONE,STATIC,BLACKHOLE>\n")
+                : (1, "route: writing to routing socket: not in table\n")
+        }), "A leftover Tono blackhole route counted as absent")
+        try Data(SelectiveFailOpen.resolverBody().utf8).write(to: resolver)
+        try check(!SelectiveFailOpenInstaller.layerProvenAbsent(directory: resolvers, routeReadback: noRoute),
+                  "A sinkhole in an unsafe resolver directory counted as absent")
+    }
+    // route.c prints "invalid" for an address it cannot format; that is not
+    // a different best match, even beside BLACKHOLE.
+    test("selective-route-readback-needs-parseable-addresses") { _ in
+        let reading = SelectiveFailOpen.routeLayerReading(
+            status: 0,
+            output: "destination: invalid\n       mask: ffff:ffff:ffff::\n      flags: <UP,DONE,STATIC,BLACKHOLE>\n",
+            prefix: SelectiveFailOpen.ipv6Prefix
+        )
+        try check(reading == .unknown, "An unparseable route readback counted as \(reading)")
+    }
+    // Only the whole ESRCH diagnostic proves absence; "not in table" inside
+    // a readback with fields does not.
+    test("selective-route-not-in-table-must-be-the-whole-output") { _ in
+        let reading = SelectiveFailOpen.routeLayerReading(
+            status: 0,
+            output: "destination: invalid\n       mask: ffff:ffff:ffff::\n      flags: <UP,DONE,STATIC,BLACKHOLE>\n"
+                + "  interface: not in table\n",
+            prefix: SelectiveFailOpen.ipv6Prefix
+        )
+        try check(reading == .unknown, "A readback that mentions not in table counted as \(reading)")
+    }
+    // A flag name with stray whitespace hides BLACKHOLE from the match; the
+    // exact prefix with flags that do not parse proves nothing.
+    test("selective-route-flags-must-parse") { _ in
+        let reading = SelectiveFailOpen.routeLayerReading(
+            status: 0,
+            output: "destination: 160.79.104.0\n       mask: 255.255.254.0\n      flags: <UP,DONE,STATIC,BLACKHOLE >\n",
+            prefix: SelectiveFailOpen.ipv4Prefix
+        )
+        try check(reading == .unknown, "Malformed route flags counted as \(reading)")
+        // route.c prints its lowercase bit names as they are.
+        try check(SelectiveFailOpen.readbackShowsForeignRoute(
+            "destination: 160.79.104.0\n       mask: 255.255.254.0\n      flags: <UP,GATEWAY,DONE,STATIC,b016>\n",
+            prefix: SelectiveFailOpen.ipv4Prefix
+        ), "A real route readback with a lowercase bit name did not parse")
     }
     // An iPhone or iPad app on Apple silicon is a wrapper with no Contents
     // folder (`WrappedBundle -> Wrapper/<name>.app`). One of them kept every
