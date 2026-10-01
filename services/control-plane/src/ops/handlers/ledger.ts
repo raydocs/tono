@@ -265,7 +265,8 @@ export async function postLedgerReverse(req: Request, e: Env, rawId: string, act
            AND NOT EXISTS (SELECT 1 FROM ops_month_close WHERE month = ?)`,
       ).bind(reverseId, month, note, actor.email, t, t, entryId, month),
       e.DB.prepare(
-        'UPDATE ops_ledger_entries SET reversed_by = ?, updated_at = ? WHERE id = ? AND reversed_by IS NULL',
+        `UPDATE ops_ledger_entries SET reversed_by = ?, updated_at = ?
+         WHERE id = ? AND reversed_by IS NULL AND changes() = 1`,
       ).bind(reverseId, t, entryId),
     ]);
     if (Number(results[0]?.meta.changes ?? 0) !== 1) {
@@ -320,7 +321,16 @@ export async function postMonthClose(req: Request, e: Env, rawMonth: string, act
   const existing = await e.DB.prepare('SELECT month FROM ops_month_close WHERE month = ?').bind(month).first<Row>();
   if (existing) throw new ApiError(409, 'MONTH_CLOSED', `Month ${month} is already closed`);
   const t = now();
-  const summary = await loadMonthSummary(e.DB, month, t);
+  const entries = (await e.DB.prepare(
+    'SELECT * FROM ops_ledger_entries WHERE month = ? ORDER BY id',
+  ).bind(month).all<Row>()).results ?? [];
+  const summary = await loadMonthSummary(e.DB, month, t, entries);
+  // Amounts are immutable. New entries and subject moves are the ledger writes
+  // that can change these totals or allocations while the summary is loading.
+  const ledgerState = JSON.stringify(entries.map((row) => ({
+    id: String(row.id), subjectType: String(row.subject_type),
+    subjectId: row.subject_id == null ? null : String(row.subject_id),
+  })));
   // The four totals and, beside them, the two halves under them. A month whose
   // snapshot does not fit stores `{ customers: [], nodes: [], partial: true }`
   // and answers `frozenPartial` afterwards — an oversized month is still closed.
@@ -328,13 +338,18 @@ export async function postMonthClose(req: Request, e: Env, rawMonth: string, act
     `INSERT OR IGNORE INTO ops_month_close(
        month, closed_at, closed_by, revenue_cny_minor, cost_cny_minor,
        margin_cny_minor, unreconciled, notes, summary_json
-     ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     ) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?
+     WHERE (
+       SELECT json_group_array(json_object('id', id, 'subjectType', subject_type, 'subjectId', subject_id))
+       FROM (SELECT id, subject_type, subject_id FROM ops_ledger_entries WHERE month = ? ORDER BY id)
+     ) = ?`,
   ).bind(
     month, t, actor.email, summary.revenueCnyMinor, summary.costCnyMinor,
-    summary.marginCnyMinor, summary.unreconciled, notes, encodeMonthSnapshot(summary),
+    summary.marginCnyMinor, summary.unreconciled, notes, encodeMonthSnapshot(summary), month, ledgerState,
   ).run();
   if (Number(inserted.meta.changes ?? 0) !== 1) {
-    throw new ApiError(409, 'MONTH_CLOSED', `Month ${month} is already closed`);
+    await requireOpenMonth(e.DB, month);
+    throw new ApiError(409, 'LEDGER_CHANGED', 'Ledger changed while closing the month; retry the close');
   }
   await auditWrite(e, actor.email, 'month.close', 'month', month, `closed ${month}`);
   const dto = await loadMonthSummary(e.DB, month, t);
