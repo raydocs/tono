@@ -2,6 +2,10 @@ import XCTest
 @testable import Tono
 
 final class ProtectedConnectivityTests: XCTestCase {
+    func testAdvisoryDelayDeferralLeavesTheDataPlaneVerdictImmediate() {
+        XCTAssertEqual(ProtectedConnectivity.advisoryDelayDeferralMilliseconds, 1_500)
+    }
+
     func testExhaustedFailureSelectiveHookDefaultsToFullRelease() {
         XCTAssertEqual(ExhaustedFailureNetwork.afterFailure(strictKillSwitchExplicit: false), .failOpen)
         XCTAssertEqual(

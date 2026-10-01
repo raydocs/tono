@@ -30,6 +30,10 @@ DEVELOPER_DIR="$tono_developer_dir" /usr/bin/xcrun swiftc \
   "$repo_root/apps/macos/Tono/Models/TonoAPIModels.swift" \
   "$repo_root/apps/macos/Tono/Models/TonoBytesByRoute.swift" \
   "$repo_root/apps/macos/Tono/Services/ConfigParser.swift" \
+  "$repo_root/apps/macos/Tono/Services/ProtectedConnectivity.swift" \
+  "$repo_root/apps/macos/Tono/Services/ProtectedConnectivityVerifier.swift" \
+  "$repo_root/apps/macos/Tono/Services/ProtectedDNSProbe.swift" \
+  "$repo_root/apps/macos/Tono/Services/ProtectedSystemResolver.swift" \
   "$repo_root/apps/macos/Tono/Core/HelperProtocolVersion.swift" \
   "$repo_root/apps/macos/Tono/Core/ConfigPipeline.swift" \
   "$repo_root/apps/macos/Tono/Core/Configuration/ConfigPipeline+Identity.swift" \

@@ -20,6 +20,8 @@ export const AI_TRAFFIC_FAMILIES = [
 export type AiTrafficFamily = (typeof AI_TRAFFIC_FAMILIES)[number]
 
 export const AI_TRAFFIC_DAYS = 7
+// Match useConnectionData's 2,000 active + 500 closed connection window.
+const MAX_SEEN_CONNECTIONS = 2_500
 
 /** Local day (`YYYY-MM-DD`) → family → bytes. */
 export type AiTrafficDays = Record<
@@ -37,8 +39,9 @@ const isAiFamily = (family: string | undefined): family is AiTrafficFamily =>
 
 /**
  * Adds the bytes each home-routed AI connection moved since it was last seen.
- * `seen` holds each connection's cumulative bytes; a connection is only ever
- * counted forward, so replaying a frame adds nothing.
+ * `seen` holds cumulative bytes for the current feed window and recent flows.
+ * Replaying a retained frame adds nothing, including after an empty remount
+ * snapshot. Historical receipts outside this bounded window can be evicted.
  */
 export const accumulateAiTraffic = (
   days: AiTrafficDays,
@@ -56,6 +59,7 @@ export const accumulateAiTraffic = (
     if (classifyActivityRoute(connection) !== 'home') continue
     const bytes = Math.max(0, connection.upload + connection.download)
     const previous = seen.get(connection.id) ?? 0
+    seen.delete(connection.id)
     seen.set(connection.id, Math.max(previous, bytes))
     const delta = bytes - previous
     if (delta <= 0) continue
@@ -63,6 +67,12 @@ export const accumulateAiTraffic = (
     const today = { ...next[day] }
     today[family] = (today[family] ?? 0) + delta
     next[day] = today
+  }
+  // Refresh all current receipts before eviction, even when bytes did not
+  // grow. Evicting during iteration could forget a later flow in this frame.
+  for (const id of seen.keys()) {
+    if (seen.size <= MAX_SEEN_CONNECTIONS) break
+    seen.delete(id)
   }
   return next
 }

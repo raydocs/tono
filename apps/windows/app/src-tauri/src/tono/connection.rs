@@ -35,6 +35,7 @@ mod direct;
 mod heal;
 mod platform;
 mod unarmed_probe;
+mod core_select;
 
 // Compatibility surface for existing command and test callers. The transaction
 // and error modules do not import this orchestration facade.
@@ -198,8 +199,9 @@ enum Attempt {
     /// The transaction ran (or reached the service checks) and failed.
     Failed { generation: u64, error: String, account_owner: (u64, u64) },
     /// The connect generation moved under us (disconnect / sign-out / node
-    /// switch / catalog teardown). Exit without touching the FSM, the core,
-    /// or the UI: the flow that bumped the generation owns the cleanup.
+    /// switch / catalog teardown), or selection changed before admission.
+    /// Exit without touching the FSM, the core, or the UI: the superseding
+    /// transition owns any required cleanup.
     Stale,
 }
 
@@ -221,21 +223,35 @@ pub async fn connect(state: Arc<TonoState>, app: AppHandle) -> Result<(), String
 pub(crate) async fn connect_for_generation(
     state: Arc<TonoState>, app: AppHandle, expected_generation: Option<u64>,
 ) -> Result<(), String> {
+    connect_for_generation_tracked(state, app, expected_generation).await.map_err(|failure| failure.error)
+}
+
+/// The reconciled failure owner, including timeout's extra retirement. An unarmed recovery
+/// caller must not infer ownership from a numeric generation delta.
+struct ConnectFailure {
+    error: String,
+    retry_generation: Option<u64>,
+}
+
+async fn connect_for_generation_tracked(
+    state: Arc<TonoState>, app: AppHandle, expected_generation: Option<u64>,
+) -> Result<(), ConnectFailure> {
+    let refused = |error: String| ConnectFailure { error, retry_generation: expected_generation };
     {
         let mut inner = state.lock().await;
         match &inner.account_state {
             AccountState::Ready => {}
-            AccountState::Suspended => return Err("account is suspended".to_string()),
-            _ => return Err("not signed in".to_string()),
+            AccountState::Suspended => return Err(refused("account is suspended".to_string())),
+            _ => return Err(refused("not signed in".to_string())),
         }
         if let Some(refusal) = crate::tono::offline_grant::connect_refusal(&inner) {
-            return Err(refusal.to_string());
+            return Err(refused(refusal.to_string()));
         }
         if inner.fsm.status().is_connected {
-            return Err("already connected".to_string());
+            return Err(refused("already connected".to_string()));
         }
         if inner.fsm.status().is_connecting {
-            return Err("already connecting".to_string());
+            return Err(refused("already connecting".to_string()));
         }
         if let Some(replacement) = catalog_sync::ensure_usable_selection(&mut inner) {
             logging!(
@@ -254,28 +270,30 @@ pub(crate) async fn connect_for_generation(
             seed_autostart_after_connect();
             Ok(())
         }
-        Attempt::GuardRejected(err) => Err(err),
-        Attempt::Stale => Err("connection superseded by a newer transition".to_string()),
+        Attempt::GuardRejected(err) => Err(refused(err)),
+        Attempt::Stale => Err(ConnectFailure {
+            error: "connection superseded by a newer transition".to_string(), retry_generation: None,
+        }),
         Attempt::Failed { generation, error, account_owner } => {
             let effect = {
                 let mut inner = state.lock().await;
                 heal::on_failure(&mut inner, &error)
             };
-            if fail_connect(&state, &app, generation, error.clone(), account_owner).await {
+            let current = fail_connect(&state, &app, generation, error.clone(), account_owner).await;
+            if current {
                 match effect {
                     tono_core::heal::NetworkEffect::FailOpen { .. } => {
+                        // `fail_connect` already owns the ordinary release. Releasing again
+                        // here could tear down a successor admitted after it returned.
                         logging!(
                             warn,
                             Type::Service,
                             "Tono: self-heal stopped; restoring the original network without another tunnel"
                         );
-                        if let Err(release_error) = disconnect::release_explicit_applying_narrow(&state, &app).await {
-                            logging!(
-                                error,
-                                Type::Service,
-                                "Tono: restoring the original network failed; protection stays as the release left it: {release_error}"
-                            );
-                        }
+                        // `fail_connect` already ran `release_explicit_applying_narrow_with_guard`
+                        // for this FailOpen plan. A second release can tear down a successor
+                        // admitted after it returned. The unarmed probe still belongs to that
+                        // release: general traffic is back, and it must not open another tunnel.
                         unarmed_probe::spawn_after_release(&state, &app, generation);
                     }
                     tono_core::heal::NetworkEffect::SelectiveAiHold { .. } => {
@@ -291,7 +309,7 @@ pub(crate) async fn connect_for_generation(
                     _ => {}
                 }
             }
-            Err(error)
+            Err(ConnectFailure { error, retry_generation: current.then_some(generation) })
         }
     }
 }
@@ -333,11 +351,15 @@ pub(crate) async fn begin_attempt(
     Some((inner.connect_generation, inner.connect_cancellation.clone(), account_owner))
 }
 
+fn selection_still_current(captured: Option<&str>, current: Option<&str>) -> bool {
+    captured == current
+}
+
 async fn attempt_inner(state: &Arc<TonoState>, app: &AppHandle, expected_generation: Option<u64>) -> Attempt {
     // Admission is a lifecycle mutation too: failure may have made the FSM idle while its
     // detached cleanup still owns the Core. Do not reuse that idle window or its generation.
     let admission = state.begin_connect_mutation().await;
-    let (node, nodes, routing, generation, _) = match guard_snapshot(state).await {
+    let (node, nodes, routing, generation, _, selected_node) = match guard_snapshot(state).await {
         Ok(snapshot) => snapshot,
         Err(err) => return Attempt::GuardRejected(err),
     };
@@ -358,6 +380,11 @@ async fn attempt_inner(state: &Arc<TonoState>, app: &AppHandle, expected_generat
     // here with no side effects (the real-machine double-probe this kills).
     let (attempt_record, generation, cancellation, account_owner, route_owner) = {
         let mut inner = state.lock().await;
+        // The recovery TCP wait leaves the FSM idle, so a new selection may not bump the
+        // generation. Check the user's preference, not the healer's possible backup dial.
+        if !selection_still_current(selected_node.as_deref(), inner.selected_node.as_deref()) {
+            return Attempt::Stale;
+        }
         let Some((admitted_generation, cancellation, account_owner)) = begin_attempt(&mut inner, generation).await else {
             if inner.connect_generation != generation {
                 return Attempt::Stale;
@@ -559,7 +586,7 @@ async fn attempt_from_stage_failure(
 /// only while protection is down.
 async fn guard_snapshot(
     state: &Arc<TonoState>,
-) -> Result<(ValidatedNode, Vec<ValidatedNode>, Option<tono_core::CatalogRouting>, u64, CancellationToken), String> {
+) -> Result<(ValidatedNode, Vec<ValidatedNode>, Option<tono_core::CatalogRouting>, u64, CancellationToken, Option<String>), String> {
     if state.release_in_progress().await {
         return Err(format!(
             "{RELEASE_RECONCILING_PREFIX}: network protection release is still reconciling; wait before reconnecting"
@@ -605,6 +632,7 @@ async fn guard_snapshot(
         inner.routing.clone(),
         inner.connect_generation,
         inner.connect_cancellation.clone(),
+        inner.selected_node.clone(),
     ))
 }
 
@@ -1031,6 +1059,14 @@ mod tests {
         connection::ConnectionStatus,
         node::{NodeProtocol, ValidatedNode},
     };
+
+    #[test]
+    fn recovery_preflight_rejects_a_changed_or_cleared_selection() {
+        let captured = Some("Fixture City");
+        assert!(super::selection_still_current(captured, Some("Fixture City")));
+        assert!(!super::selection_still_current(captured, Some("Other City")));
+        assert!(!super::selection_still_current(captured, None));
+    }
 
     #[tokio::test]
     async fn retained_failure_keeps_bounded_scrubbed_cause_when_retry_clears_live_error() {
@@ -1750,6 +1786,7 @@ mod tests {
             reality_short_id: "0123456789abcdef".to_string(),
             protocol: NodeProtocol::VlessReality,
             tls_fingerprint: None,
+            certificate_public_key_sha256: None,
         }
     }
 
@@ -1768,6 +1805,7 @@ mod tests {
             tls_fingerprint: Some(
                 "e3aa4a745aa90539ab1a493d940eeba7b4305b7516ab84167e46c98ad9fed3db".to_string(),
             ),
+            certificate_public_key_sha256: None,
         }
     }
 

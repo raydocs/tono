@@ -223,13 +223,21 @@ pub const CLAUDE_HOME_GROUP_NAME: &str = "Tono-Claude-Home";
 /// (`dialer-proxy`), so the chain hop follows the user's node selection and
 /// the VPS needs no change.
 pub const HOME_SOCKS5_OUTBOUND_NAME: &str = "Tono-Home-Residential";
+/// Dedicated Model Studio namespaces within Alibaba's general DIRECT tree.
+pub const DEDICATED_MODEL_API_SUFFIXES: [&str; 4] = [
+    "dashscope.aliyuncs.com", "dashscope-intl.aliyuncs.com",
+    "dashscope-us.aliyuncs.com", "maas.aliyuncs.com",
+];
+
 /// First-party assistant domains pinned to the home-broadband exit when
 /// `homeProxy` / `homeSocks5` is in force. These are DOMAIN-SUFFIX rules
 /// with no process constraint, so Chrome / Edge / Arc count the same as
 /// the desktop apps. `google.com`, `googleapis.com`, and `gstatic.com`
 /// stay out: they are shared by Search, YouTube, Gmail, and Tono's own
 /// exit probe. Gemini is pinned by its product hostnames instead.
-pub const CLAUDE_HOME_DOMAINS: [&str; 80] = [
+pub const CLAUDE_HOME_DOMAINS: [&str; 84] = [
+    DEDICATED_MODEL_API_SUFFIXES[0], DEDICATED_MODEL_API_SUFFIXES[1],
+    DEDICATED_MODEL_API_SUFFIXES[2], DEDICATED_MODEL_API_SUFFIXES[3],
     "anthropic.com",
     "claude.ai",
     "claude.com",
@@ -326,11 +334,12 @@ pub const CLAUDE_HOME_DOMAINS: [&str; 80] = [
 /// stay on `Tono-Exit`. `no-resolve` keeps the match on the packet address.
 pub const CLAUDE_HOME_IPV4_CIDRS: [&str; 1] = ["160.79.104.0/21"];
 /// DoH resolvers pinned through the exit group; the `#Tono-Exit` fragment
-/// routes the lookups through the tunnel.
-pub const DOH_NAMESERVERS: [&str; 2] = [
-    "https://1.1.1.1/dns-query#Tono-Exit",
-    "https://8.8.8.8/dns-query#Tono-Exit",
-];
+/// routes the lookups through the tunnel. Mihomo races every `nameserver`
+/// in parallel. The backup stays on `fallback` and is queried only when
+/// `fallback-lazy-query` is set and the primary answer is not usable.
+pub const DOH_PRIMARY_NAMESERVER: &str = "https://1.1.1.1/dns-query#Tono-Exit";
+pub const DOH_BACKUP_NAMESERVER: &str = "https://8.8.8.8/dns-query#Tono-Exit";
+pub const DOH_NAMESERVERS: [&str; 2] = [DOH_PRIMARY_NAMESERVER, DOH_BACKUP_NAMESERVER];
 /// The only rules the runtime ever carries (§5).
 pub const RULES: [&str; 3] = [
     "IP-CIDR,127.0.0.0/8,DIRECT,no-resolve",
@@ -716,6 +725,12 @@ fn quote_block_sequence_scalars_with_flow_indicators(yaml: &str) -> String {
             if scalar.starts_with('\'') || scalar.starts_with('"') {
                 return line.to_string();
             }
+            // A sequence entry can start a mapping (`- name: Tokyo [primary]`).
+            // Its value is already serialized safely; quoting the entire entry
+            // would turn the mapping into a scalar and orphan the following keys.
+            if scalar.contains(": ") {
+                return line.to_string();
+            }
             if !(scalar.contains('[') || scalar.contains(']') || scalar.contains('{') || scalar.contains('}'))
             {
                 return line.to_string();
@@ -964,11 +979,17 @@ fn runtime_value(
     put(&mut dns, "cache-algorithm", string("lru"));
     put(&mut dns, "respect-rules", Value::Bool(true));
     put(&mut dns, "use-hosts", Value::Bool(true));
-    put(&mut dns, "nameserver", strings(&DOH_NAMESERVERS));
+    // One primary. A second URL on this list is a second Reality handshake
+    // on every lookup. The backup is https through the same exit, and
+    // mihomo asks it only after the primary answer is empty or an error.
+    // Exits are IPv4, and the proxy resolver has no fallback of its own.
+    put(&mut dns, "nameserver", strings(&[DOH_PRIMARY_NAMESERVER]));
+    put(&mut dns, "fallback", strings(&[DOH_BACKUP_NAMESERVER]));
+    put(&mut dns, "fallback-lazy-query", Value::Bool(true));
     put(
         &mut dns,
         "proxy-server-nameserver",
-        strings(&DOH_NAMESERVERS),
+        strings(&[DOH_PRIMARY_NAMESERVER]),
     );
     put(&mut root, "dns", Value::Mapping(dns));
 
@@ -1431,19 +1452,25 @@ reality-opts:
         );
         assert_eq!(get(&value, &["dns", "respect-rules"]).as_bool(), Some(true));
         assert_eq!(get(&value, &["dns", "use-hosts"]).as_bool(), Some(true));
-        let expected: Vec<Value> = DOH_NAMESERVERS
-            .iter()
-            .map(|server| string(server))
-            .collect();
+        let primary = vec![string(DOH_PRIMARY_NAMESERVER)];
+        let backup = vec![string(DOH_BACKUP_NAMESERVER)];
         assert_eq!(
             get(&value, &["dns", "nameserver"]).as_sequence().unwrap(),
-            &expected
+            &primary
+        );
+        assert_eq!(
+            get(&value, &["dns", "fallback"]).as_sequence().unwrap(),
+            &backup
+        );
+        assert_eq!(
+            get(&value, &["dns", "fallback-lazy-query"]).as_bool(),
+            Some(true)
         );
         assert_eq!(
             get(&value, &["dns", "proxy-server-nameserver"])
                 .as_sequence()
                 .unwrap(),
-            &expected
+            &primary
         );
     }
 
@@ -2215,6 +2242,18 @@ reality-opts:
     }
 
     #[test]
+    fn flow_indicators_in_admitted_node_names_preserve_proxy_mappings() {
+        let name = "Tokyo [primary]";
+        let nodes = [node(name, "9.9.9.9")];
+        let runtime = build_owned_runtime(&nodes, name, "test-secret", None).unwrap();
+        let value = parsed(&runtime);
+        assert_eq!(value["proxies"][0]["name"].as_str(), Some(name));
+        let redacted: Value = serde_yaml_ng::from_str(&runtime.redacted_yaml()).unwrap();
+        assert_eq!(redacted["proxies"][0]["name"].as_str(), Some(name));
+        assert_eq!(redacted["secret"].as_str(), Some(""));
+    }
+
+    #[test]
     fn home_domains_cover_reviewed_assistants_without_google_at_large() {
         for required in [
             "stripe.com", "stripecdn.com", "link.com", "hcaptcha.com", "statsig.com",
@@ -2840,6 +2879,36 @@ reality-opts:
                 .unwrap(),
             &vec![string("1.1.1.1/32")]
         );
+    }
+
+    #[test]
+    fn dashscope_routes_precede_signed_app_and_alibaba_direct_routes() {
+        let mut plan = direct_plan();
+        plan.wechat_process_path_regexes = vec![r"^C:\\Program Files\\Tencent\\WeChat\\.*$".into()];
+        plan.web_suffix_rules = vec![("aliyuncs.com".into(), 443)];
+        let check = |home: Option<&str>, socks: Option<&CatalogHomeSocks5>| {
+            let runtime = build_owned_runtime_with_ports(
+                &three_nodes(), "JP Reality 02", "test-secret", Some(&plan), home, socks,
+                RuntimePorts::default(),
+            ).unwrap();
+            let value = parsed(&runtime);
+            let rules: Vec<_> = get(&value, &["rules"]).as_sequence().unwrap()
+                .iter().map(|rule| rule.as_str().unwrap()).collect();
+            let first_direct = rules.iter().position(|rule| rule.ends_with(",Tono-China-Direct")).unwrap();
+            let alibaba = rules.iter().position(|rule| rule.contains("DOMAIN-SUFFIX,aliyuncs.com)")
+                && rule.ends_with(",Tono-China-Web-Direct")).unwrap();
+            let target = if home.is_some() || socks.is_some() { CLAUDE_HOME_GROUP_NAME } else { EXIT_GROUP_NAME };
+            for suffix in ["dashscope.aliyuncs.com", "dashscope-intl.aliyuncs.com", "dashscope-us.aliyuncs.com", "maas.aliyuncs.com"] {
+                let guard = format!("AND,((NETWORK,TCP),(DOMAIN-SUFFIX,{suffix})),{target}");
+                let protected = rules.iter().position(|rule| *rule == guard).expect(suffix);
+                assert!(protected < first_direct && protected < alibaba, "{suffix}");
+            }
+            assert!(get(&value, &["dns", "nameserver"]).as_sequence().unwrap()
+                .iter().all(|server| server.as_str().unwrap().ends_with("#Tono-Exit")));
+        };
+        check(None, None);
+        check(Some("US Reality 01"), None);
+        check(None, Some(&home_socks5()));
     }
 
     #[test]

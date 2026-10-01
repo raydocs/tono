@@ -424,17 +424,9 @@ pub async fn resync_after_cancelled_quit(app: AppHandle) {
     let Some(state) = app.try_state::<Arc<TonoState>>().map(|state| state.inner().clone()) else {
         return;
     };
-    let kill_switch = service::tono_service_status_snapshot()
-        .await
-        .ok()
-        .and_then(|snapshot| snapshot.kill_switch);
-    let mut inner = state.lock().await;
-    if matches!(&kill_switch, Some(status) if status.wanted) {
-        // Quit-specific side effect of a retained barrier: no read-only probing should keep
-        // running over it while the user decides their next move.
-        inner.cancel_server_tests();
-    }
-    apply_service_kill_switch(&mut inner, kill_switch);
+    let mut inner = resync_cancelled_quit_from(&state, async {
+        service::tono_service_status_snapshot().await.ok().and_then(|snapshot| snapshot.kill_switch)
+    }).await;
     // The quit was cancelled into (or out of) an armed state: whatever idle Protected Offline
     // remains must keep polling the Service's own verdict (R2-F2) — a Service restart can
     // retire an unverified barrier and nothing else would ever re-read that here. A
@@ -455,10 +447,67 @@ pub async fn resync_after_cancelled_quit(app: AppHandle) {
     }
 }
 
+async fn resync_cancelled_quit_from<'a>(
+    state: &'a TonoState,
+    reading: impl std::future::Future<Output = Option<KillSwitchStatus>>,
+) -> tokio::sync::MutexGuard<'a, TonoInner> {
+    let generation = state.lock().await.connect_generation;
+    let kill_switch = reading.await;
+    let mut inner = state.lock().await;
+    if inner.connect_generation == generation {
+        if matches!(&kill_switch, Some(status) if status.wanted) {
+            // Quit-specific side effect of a retained barrier: no read-only probing should keep
+            // running over it while the user decides their next move.
+            inner.cancel_server_tests();
+        }
+        apply_service_kill_switch(&mut inner, kill_switch);
+    }
+    inner
+}
+
 #[cfg(test)]
 mod quit_tests {
     use super::*;
     use tono_service_protocol::{KillSwitchStatusMode, ServiceLifecycleState};
+
+    #[tokio::test]
+    async fn cancelled_quit_resync_cannot_apply_an_old_disarm_to_a_successor() {
+        let state = Arc::new(TonoState::for_test());
+        let disarmed = KillSwitchStatus {
+            wanted: false, verified: false, live: false, mode: KillSwitchStatusMode::Blocked,
+            tunnel_permit_rendered: false, endpoints: Vec::new(),
+            direct_endpoint_digest: String::new(), last_error: None, reconnect_after_release: false,
+        };
+        let (entered, sampled) = tokio::sync::oneshot::channel();
+        let (release, deliver) = tokio::sync::oneshot::channel();
+        let resync_state = state.clone();
+        let resync = tokio::spawn(async move {
+            let inner = resync_cancelled_quit_from(&resync_state, async move {
+                entered.send(()).unwrap();
+                deliver.await.unwrap();
+                Some(disarmed)
+            }).await;
+            (inner.fsm.status().is_connected, inner.fsm.kill_switch_armed(),
+                inner.kill_switch.as_ref().is_some_and(|status| status.wanted))
+        });
+        sampled.await.unwrap();
+        {
+            let mut inner = state.lock().await;
+            inner.connect_generation = inner.connect_generation.wrapping_add(1);
+            inner.fsm.begin_connect();
+            inner.fsm.mark_kill_switch_armed();
+            inner.fsm.mark_session_verified();
+            inner.fsm.connect_succeeded().unwrap();
+            inner.kill_switch = Some(KillSwitchStatus {
+                wanted: true, verified: true, live: true, mode: KillSwitchStatusMode::Locked,
+                tunnel_permit_rendered: true, endpoints: Vec::new(),
+                direct_endpoint_digest: String::new(), last_error: None, reconnect_after_release: false,
+            });
+        }
+        release.send(()).unwrap();
+        assert_eq!(resync.await.unwrap(), (true, true, true),
+            "an old Quit reading must not erase successor protection or stop its monitoring");
+    }
 
     #[test]
     fn quit_before_discovery_releases_service_protection_or_own_running_core() {

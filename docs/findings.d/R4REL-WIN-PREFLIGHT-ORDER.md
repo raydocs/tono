@@ -1,0 +1,5 @@
+| ID | 问题（一句） | 状态 | Issue / PR | 等级 | 剩余限制 |
+|---|---|---|---|---|---|
+| R4REL-WIN-PREFLIGHT-ORDER | Windows release scripts require generated Service resources before compiling/staging them, so a fresh release checkout aborts | in-PR | hunt/sol-r4rel-windows-staging | 中·已确认（P1，portable regression） | Native PowerShell/zsh packaging cannot run in this Linux VM; no candidate or publication. |
+
+Baseline main `1458a9de`: `build-windows-release.ps1:59` and `build-windows-release.sh:31` run the full `--config-only` preflight before staging generated files. `windows-release-preflight.mjs:134` requires every allowlisted resource and aborts on absent `resources/tono-service.exe`. Both scripts create/copy the Service outputs only later. The cross-build additionally writes its digest into an absent resources directory, and neither script stages `core-identity.json` before a relocated full gate. The fix stages all these inputs before the unchanged gate and still runs the payload gate after packaging.

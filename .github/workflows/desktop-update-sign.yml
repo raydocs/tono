@@ -451,11 +451,15 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $PSNativeCommandUseErrorActionPreference = $true
           $output = Join-Path $env:RUNNER_TEMP 'update-target.windows-x86_64.json'
-          node tooling/scripts/desktop-update-v1.mjs measure `
-            --version $env:VERSION --source $env:SOURCE_SHA --sequence $env:SEQUENCE `
-            --target windows-x86_64 --artifact $env:INSTALLER `
-            --app $env:WINDOWS_APP --core $env:WINDOWS_CORE --privileged $env:WINDOWS_SERVICE `
-            --output $output
+          $measureArgs = @(
+            'tooling/scripts/desktop-update-v1.mjs', 'measure',
+            '--version', $env:VERSION, '--source', $env:SOURCE_SHA, '--sequence', $env:SEQUENCE,
+            '--target', 'windows-x86_64', '--artifact', $env:INSTALLER,
+            '--app', $env:WINDOWS_APP, '--core', $env:WINDOWS_CORE, '--privileged', $env:WINDOWS_SERVICE,
+            '--output', $output
+          )
+          if ($env:WINDOWS_SING_BOX) { $measureArgs += @('--sing-box', $env:WINDOWS_SING_BOX) }
+          node @measureArgs
           "measurement=$([Convert]::ToBase64String([IO.File]::ReadAllBytes($output)))" |
             Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
 

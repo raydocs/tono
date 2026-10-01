@@ -80,9 +80,14 @@ fn reconcile_blocking() {
         // No state lock is held during native commands. In unwind builds, a panic must not
         // strand the running flag and prevent subsequent best-effort recovery attempts.
         if std::panic::catch_unwind(|| {
-            remove_blocking();
-            if apply_narrow && worker_guard().revision == revision {
-                apply_blocking();
+            if apply_narrow {
+                if worker_guard().revision == revision {
+                    // Reconcile in place: an existing hold must never be deleted by another
+                    // request for that same hold, including recovery after Service restart.
+                    apply_blocking();
+                }
+            } else {
+                remove_blocking();
             }
         })
         .is_err()
@@ -128,6 +133,22 @@ pub async fn finish_release(apply_narrow: bool) {
     request(apply_narrow).await;
 }
 
+#[cfg(any(windows, test))]
+fn firewall_command(
+    system_directory: &std::path::Path,
+    args: &[&str],
+) -> Option<std::process::Command> {
+    if !selective_fail_open::command_may_run(args) {
+        return None;
+    }
+    let (_, rest) = args.split_first()?;
+    // The policy's fixed executable marker validates the template. Bind the
+    // actual binary to the OS directory, without consulting PATH or SystemRoot.
+    let mut command = std::process::Command::new(system_directory.join("netsh.exe"));
+    command.args(rest);
+    Some(command)
+}
+
 #[cfg(all(windows, not(feature = "test")))]
 fn remove_blocking() {
     run_commands(&selective_fail_open::firewall_delete_commands());
@@ -138,7 +159,16 @@ fn remove_blocking() {
 
 #[cfg(all(windows, not(feature = "test")))]
 fn apply_blocking() {
-    run_commands(&selective_fail_open::firewall_add_commands());
+    for (update, add) in selective_fail_open::firewall_set_commands()
+        .iter()
+        .zip(selective_fail_open::firewall_add_commands())
+    {
+        // Set preserves existing rules and updates all same-name copies. A missing rule
+        // needs an add; only that rule falls back, so the other prefix is never duplicated.
+        if !run_command(update, false) {
+            run_command(&add, true);
+        }
+    }
     if let Err(error) = super::dns::install_selective_nrpt() {
         tracing::warn!("selective fail-open: NRPT sinkhole was not installed: {error:#}");
     }
@@ -176,6 +206,18 @@ mod tests {
     use once_cell::sync::Lazy;
     use serial_test::serial;
     use std::sync::{Arc, Condvar, Mutex};
+
+    #[test]
+    fn firewall_command_uses_the_os_system_directory_on_non_c_windows() {
+        let system = std::path::Path::new(r"D:\Windows\System32");
+        let args = selective_fail_open::firewall_add_commands().remove(0);
+        let command = firewall_command(system, &args).unwrap();
+        assert_eq!(command.get_program(), system.join("netsh.exe").as_os_str());
+        assert_eq!(
+            command.get_args().collect::<Vec<_>>(),
+            args[1..].iter().map(std::ffi::OsStr::new).collect::<Vec<_>>()
+        );
+    }
 
     #[derive(Default)]
     pub(super) struct PausedStep {
@@ -225,17 +267,38 @@ mod tests {
 
     #[tokio::test]
     #[serial]
+    async fn repeated_application_never_removes_the_existing_ai_hold() {
+        remove().await;
+        finish_release(true).await;
+        let before = test_active_hold_removals();
+        finish_release(true).await;
+        let held = test_hold_active();
+        let after = test_active_hold_removals();
+        remove().await;
+
+        assert!(held, "the requested AI hold must remain installed");
+        assert_eq!(after, before, "reapplying the same hold must never delete it first");
+    }
+
+    #[tokio::test]
+    #[serial]
     async fn timed_out_cleanup_cannot_erase_the_replacement_ai_hold() {
         remove().await;
         let pause = pause_next(&REMOVE_PAUSE);
-        let release = tokio::spawn(finish_release(true));
+        let cleanup = tokio::spawn(remove());
         tokio::time::timeout(Duration::from_secs(1), pause.0.entered.notified())
             .await
             .unwrap();
-        tokio::time::timeout(STEP_BUDGET * 3, release)
+        tokio::time::timeout(STEP_BUDGET * 2, cleanup)
             .await
             .unwrap()
             .unwrap();
+        let release = tokio::spawn(finish_release(true));
+        tokio::time::timeout(Duration::from_secs(1), async {
+            while !worker_guard().apply_narrow {
+                tokio::task::yield_now().await;
+            }
+        }).await.unwrap();
 
         pause.0.release();
         tokio::time::timeout(Duration::from_secs(1), pause.0.completed.notified())
@@ -248,6 +311,7 @@ mod tests {
         })
         .await
         .expect("late cleanup must leave the requested AI hold installed");
+        release.await.unwrap();
         remove().await;
     }
 
@@ -278,17 +342,36 @@ mod tests {
 #[cfg(all(windows, not(feature = "test")))]
 fn run_commands(commands: &[Vec<&str>]) {
     for args in commands {
-        if !selective_fail_open::command_may_run(args) {
-            tracing::error!("selective fail-open: refused a command that was not prefix-only");
-            continue;
+        run_command(args, true);
+    }
+}
+
+#[cfg(all(windows, not(feature = "test")))]
+fn run_command(args: &[&str], report_failure: bool) -> bool {
+    let system = match super::update::security::system_directory() {
+        Ok(system) => system,
+        Err(error) => {
+            tracing::warn!("selective fail-open: system directory unavailable: {error:#}");
+            return false;
         }
-        let Some((executable, rest)) = args.split_first() else {
-            continue;
-        };
-        match std::process::Command::new(executable).args(rest).status() {
-            Ok(status) if status.success() => {}
-            Ok(status) => tracing::warn!("selective fail-open: command exited {status}"),
-            Err(error) => tracing::warn!("selective fail-open: command did not start: {error}"),
+    };
+    let Some(mut command) = firewall_command(&system, args) else {
+        tracing::error!("selective fail-open: refused a command that was not prefix-only");
+        return false;
+    };
+    match command.status() {
+        Ok(status) if status.success() => true,
+        Ok(status) => {
+            if report_failure {
+                tracing::warn!("selective fail-open: command exited {status}");
+            }
+            false
+        }
+        Err(error) => {
+            if report_failure {
+                tracing::warn!("selective fail-open: command did not start: {error}");
+            }
+            false
         }
     }
 }

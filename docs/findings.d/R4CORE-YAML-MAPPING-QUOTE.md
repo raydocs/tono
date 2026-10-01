@@ -1,0 +1,7 @@
+| ID | 问题（一句） | 状态 | Issue / PR | 等级 | 剩余限制 |
+|---|---|---|---|---|---|
+| R4CORE-YAML-MAPPING-QUOTE | The Mihomo YAML quoting pass turns a valid bracketed catalog node's proxy mapping into a scalar, preventing runtime admission | in-PR | branch `hunt/sol-r4core-yaml-sequence-maps` | 低·已确认（P2，Linux regression） | Applies to explicit Mihomo selection and pre-arm binary fallback after the sing-box default. Native Windows/core startup requires CI and hardware; no claim of persistent network loss. |
+
+A catalog node named `Tokyo [primary]` passes `admit_node`, but the generated `- name: Tokyo [primary]` mapping opener is quoted as one string by `config.rs:716`. Its following `server` and other mapping keys then make the YAML invalid. The Service rejects this in `core/runtime_generation/owned_config.rs:102`; all catalog nodes are emitted, so an unselected node can also prevent startup. The regression uses admitted input and checks both runnable and redacted documents. Skipping mapping openers preserves the existing rule-scalar quoting and every routing/protection control.
+
+Publication-scope limit: current `managedCatalogYAML` rejects new names containing flow punctuation. Previously stored catalogs still reach `publicManagedCatalog` (`services/control-plane/src/catalog.ts:261`) through digest checking and name extraction without rerunning that publication validator; verified client caches also retain the wider admitted-name contract. This compatibility fix covers those legacy inputs, not new catalog publication. No production inventory was read.

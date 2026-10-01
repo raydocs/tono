@@ -318,6 +318,25 @@ final class CoreRouteClassificationTests: XCTestCase {
         }
     }
 
+    func testDashScopeChildrenStayProtectedWhileTheAlibabaDirectParentIsAdmitted() throws {
+        for trusted in [false, true] {
+            XCTAssertEqual(try ConfigPipeline.validatedManagedDirectSuffix("aliyuncs.com", trusted: trusted), "aliyuncs.com")
+            for host in [
+                "dashscope.aliyuncs.com", "cn-hongkong.dashscope.aliyuncs.com",
+                "coding-intl.dashscope.aliyuncs.com", "dashscope-intl.aliyuncs.com",
+                "dashscope-us.aliyuncs.com", "maas.aliyuncs.com",
+                "workspace.cn-beijing.maas.aliyuncs.com", "trial.ap-southeast-1.maas.aliyuncs.com",
+                "token-plan.ap-southeast-1.maas.aliyuncs.com",
+            ] {
+                XCTAssertThrowsError(try ConfigPipeline.validatedManagedDirectDomain(host, trusted: trusted), host)
+                XCTAssertThrowsError(try ConfigPipeline.validatedWebDirectDomain(host, trusted: trusted), host)
+                XCTAssertThrowsError(try ConfigPipeline.validatedManagedDirectSuffix(host, trusted: trusted), host)
+            }
+        }
+        XCTAssertThrowsError(try ConfigPipeline.validatedManagedDirectSuffix("googleapis.com", trusted: true))
+        XCTAssertThrowsError(try ConfigPipeline.validatedManagedDirectSuffix("com", trusted: true))
+    }
+
     func testSignatureDoesNotRelaxProtectedAssistantHosts() {
         for host in [
             "api.anthropic.com", "claude.ai", "claude.com", "claude.app",

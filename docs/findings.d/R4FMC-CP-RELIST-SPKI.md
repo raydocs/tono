@@ -1,0 +1,5 @@
+| ID | 问题（一句） | 状态 | Issue / PR | 等级 | 剩余限制 |
+|---|---|---|---|---|---|
+| R4FMC-CP-RELIST-SPKI | Retired HY2 relisting silently loses the separately issued macOS SPKI pin | in-PR | #1073 | 中·已确认（P2） | Partial transport outage; complete operator-issued template now required; native HY2 acceptance pending |
+
+Baseline `d3a38043`: retirement removes the full HY2 sibling, and fleet:290–302/367–374 regenerates only its DER fingerprint from the profile. macOS SingBoxProduct:29 rejects the missing SPKI. The Worker regression really failed before the fix: an incomplete relist unexpectedly published revision 3. Require the full operator-issued HY2 template when that sibling is absent; preserve an existing sibling and retain its pins. Explicit input must carry canonical SPKI, valid DER, decimal port and required SNI. All downstream managed-name/identity/no-skip checks remain. Bounded job parameters forward full templates, validating managed placeholders before storing them. No certificate bypass, hash derivation, AI-policy change or production mutation.

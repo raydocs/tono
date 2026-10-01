@@ -671,7 +671,7 @@ fn core_image_candidates() -> Result<Vec<(u32, ProcessIdentity)>> {
         TH32CS_SNAPPROCESS,
     };
 
-    const CORE_IMAGE_FILE_NAMES: &[&str] = &["tono-core.exe", "verge-mihomo.exe"];
+    const CORE_IMAGE_FILE_NAMES: &[&str] = &["tono-core.exe", "verge-mihomo.exe", "sing-box.exe"];
 
     // SAFETY: a snapshot of the process table has no caller-supplied pointers to invalidate.
     let raw = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) };

@@ -50,6 +50,11 @@ pub static NRPT_RULES: &[NrptRule] = &[
     NrptRule { suffix: "perplexity.ai", guid: "{a17e4c10-5b21-4e08-9c1a-198018000023}" },
     NrptRule { suffix: "perplexity.com", guid: "{a17e4c10-5b21-4e08-9c1a-198018000024}" },
     NrptRule { suffix: "pplx.ai", guid: "{a17e4c10-5b21-4e08-9c1a-198018000025}" },
+    // Model API namespaces only; general Alibaba Cloud stays available.
+    NrptRule { suffix: "dashscope.aliyuncs.com", guid: "{a17e4c10-5b21-4e08-9c1a-198018000026}" },
+    NrptRule { suffix: "dashscope-intl.aliyuncs.com", guid: "{a17e4c10-5b21-4e08-9c1a-198018000027}" },
+    NrptRule { suffix: "dashscope-us.aliyuncs.com", guid: "{a17e4c10-5b21-4e08-9c1a-198018000028}" },
+    NrptRule { suffix: "maas.aliyuncs.com", guid: "{a17e4c10-5b21-4e08-9c1a-198018000029}" },
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -129,6 +134,17 @@ pub fn firewall_add_commands() -> Vec<Vec<&'static str>> {
     ]
 }
 
+/// Update existing outbound rules without deleting their protection. Netsh selects by fixed
+/// name and direction before `new`; the remaining properties retain the same narrow block.
+pub fn firewall_set_commands() -> Vec<Vec<&'static str>> {
+    let mut commands = firewall_add_commands();
+    for command in &mut commands {
+        command[3] = "set";
+        command.insert(7, "new");
+    }
+    commands
+}
+
 pub fn firewall_delete_commands() -> Vec<Vec<&'static str>> {
     vec![
         vec![
@@ -150,9 +166,9 @@ pub fn firewall_delete_commands() -> Vec<Vec<&'static str>> {
     ]
 }
 
-/// Add commands must name exactly one Anthropic prefix. Delete commands must
-/// name one of the two fixed rule names and must not carry a remote prefix
-/// of their own.
+/// Add commands must name exactly one Anthropic prefix. Set commands must match one of the
+/// fixed generated updates. Delete commands must name one of the two fixed rule names and
+/// must not carry a remote prefix of their own.
 pub fn command_may_run(args: &[&str]) -> bool {
     if args.first().copied() != Some(r"C:\Windows\System32\netsh.exe") {
         return false;
@@ -165,6 +181,11 @@ pub fn command_may_run(args: &[&str]) -> bool {
         || joined.contains("remoteip=0.0.0.0")
     {
         return false;
+    }
+    if args.iter().any(|arg| *arg == "set") {
+        // Set is admitted only in its complete generated form: no broader prefix, alternate
+        // action, selector, executable or extra argument can reach the firewall runner.
+        return firewall_set_commands().iter().any(|expected| expected.as_slice() == args);
     }
     let adds = args.iter().any(|arg| *arg == "add");
     let deletes = args.iter().any(|arg| *arg == "delete");
@@ -214,6 +235,16 @@ mod tests {
     }
 
     #[test]
+    fn model_api_hold_covers_dedicated_families_without_blocking_alibaba_cloud() {
+        for suffix in ["dashscope.aliyuncs.com", "dashscope-intl.aliyuncs.com", "dashscope-us.aliyuncs.com", "maas.aliyuncs.com"] {
+            let rule = NRPT_RULES.iter().find(|rule| rule.suffix == suffix).expect(suffix);
+            assert_eq!(names_for_rule(rule).unwrap(), vec![suffix.to_string(), format!(".{suffix}")]);
+        }
+        assert!(!nrpt_name_is_safe("aliyuncs.com"));
+        assert!(!nrpt_name_is_safe("oss-cn-hangzhou.aliyuncs.com"));
+    }
+
+    #[test]
     fn nrpt_rules_stay_off_the_catch_all() {
         let mut guids = Vec::new();
         for rule in NRPT_RULES {
@@ -230,7 +261,11 @@ mod tests {
     #[test]
     fn firewall_commands_cannot_name_every_address() {
         assert!(firewall_add_commands().iter().all(|cmd| command_may_run(cmd)));
+        assert!(firewall_set_commands().iter().all(|cmd| command_may_run(cmd)));
         assert!(firewall_delete_commands().iter().all(|cmd| command_may_run(cmd)));
+        let mut broad_update = firewall_set_commands().remove(0);
+        broad_update[9] = "remoteip=any";
+        assert!(!command_may_run(&broad_update));
         assert!(!command_may_run(&[
             r"C:\Windows\System32\netsh.exe",
             "advfirewall",
