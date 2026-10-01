@@ -316,6 +316,29 @@ mod disarm_error_tests {
     }
 }
 
+#[cfg(test)]
+mod startup_reconcile_tests {
+    use super::reconcile_with_retries;
+
+    #[tokio::test]
+    async fn persistent_reconcile_failure_gives_up_after_the_bounded_attempts() {
+        let mut calls = 0;
+        let result = reconcile_with_retries(3, std::time::Duration::ZERO, || {
+            calls += 1;
+            async { Err(anyhow::anyhow!("orphan sweep failed")) }
+        })
+        .await;
+        assert!(
+            result.is_err(),
+            "the caller must reach the decision-031 release"
+        );
+        assert_eq!(
+            calls, 3,
+            "startup must not retry forever while the machine stays Blocked"
+        );
+    }
+}
+
 // --- Windows Service Implementation ---
 
 #[cfg(windows)]
@@ -469,13 +492,7 @@ fn run_service() -> platform_lib::Result<()> {
         spawn_windows_kill_switch_watchdog();
         tono_service_protocol::start_network_monitor();
 
-        match reconcile_service_startup().await {
-            Ok(()) => restore_reconciled_desired_state().await,
-            Err(error) => tracing::warn!(
-                "Service startup reconciliation failed; core starts remain blocked while IPC is available: {}",
-                error
-            ),
-        }
+        reconcile_startup_and_restore().await;
 
         let result = run_ipc_supervisor_until_shutdown(async {
             tokio::select! {
@@ -703,6 +720,66 @@ impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for RotatingLogFile {
     }
 }
 
+/// Bounded so one transient failure keeps the ordered path below.
+const STARTUP_RECONCILE_ATTEMPTS: u32 = 3;
+const STARTUP_RECONCILE_RETRY_DELAY: std::time::Duration = std::time::Duration::from_secs(2);
+
+async fn reconcile_with_retries<F, Fut>(
+    attempts: u32,
+    delay: std::time::Duration,
+    mut reconcile: F,
+) -> Result<()>
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = Result<()>>,
+{
+    let mut attempt = 1;
+    loop {
+        match reconcile().await {
+            Ok(()) => return Ok(()),
+            Err(error) if attempt >= attempts => return Err(error),
+            Err(error) => {
+                warn!(
+                    "Service startup reconciliation attempt {attempt} failed; retrying: {error:#}"
+                );
+                attempt += 1;
+                tokio::time::sleep(delay).await;
+            }
+        }
+    }
+}
+
+/// H-IPC-1: a startup reconciliation that keeps failing used to leave an unverified barrier
+/// installed with nothing left to retire it, so the machine stayed Blocked. After the bounded
+/// retries, take the decision-031 release: general traffic opens and the AI hold stays. Core
+/// starts stay gated on reconciliation, which every start retries.
+async fn reconcile_startup_and_restore() {
+    match reconcile_with_retries(
+        STARTUP_RECONCILE_ATTEMPTS,
+        STARTUP_RECONCILE_RETRY_DELAY,
+        reconcile_service_startup,
+    )
+    .await
+    {
+        Ok(()) => restore_reconciled_desired_state().await,
+        Err(error) => {
+            warn!(
+                "Service startup reconciliation failed; core starts remain blocked while IPC is available: {error:#}"
+            );
+            match retire_unverified_windows_kill_switch().await {
+                Ok(true) => warn!(
+                    "Unverified Windows protection released with the AI hold after reconciliation failed"
+                ),
+                Ok(false) => {}
+                Err(error) => warn!(
+                    "Unverified Windows protection could not be released after reconciliation failed: {error:#}"
+                ),
+            }
+            finish_core_replay().await;
+        }
+    }
+}
+
 /// Reconciliation has proved that no process from the previous service instance survived. Only
 /// now may an unverified first-attempt barrier be retired. If that retirement is ambiguous, keep
 /// the machine fail-closed and do not restore a desired Core behind an ownership mismatch.
@@ -788,12 +865,7 @@ async fn run_standalone() -> Result<()> {
 
     // 启动恢复只做 best-effort；即使失败也要启动 IPC，让 GUI 重连后重推配置自愈。
     // 否则失效的 desired-state 路径会导致进程退出并被 launchd 反复拉起。
-    match reconcile_service_startup().await {
-        Ok(()) => restore_reconciled_desired_state().await,
-        Err(error) => warn!(
-            "Service startup reconciliation failed; core starts remain blocked while IPC is available: {error:#}"
-        ),
-    }
+    reconcile_startup_and_restore().await;
 
     run_ipc_supervisor_until_shutdown(shutdown_signal()).await?;
 

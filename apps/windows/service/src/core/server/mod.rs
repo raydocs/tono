@@ -436,18 +436,30 @@ pub(crate) async fn retire_expired_fresh_arm(epoch: u64) -> AnyResult<()> {
     let Some(owner_key) = windows_kill_switch::expired_fresh_arm_owner(epoch) else {
         return Ok(());
     };
-    if load_active_owner()
-        .await?
-        .is_some_and(|owner| owner.owner_key != owner_key)
-    {
-        anyhow::bail!("abandoned Connect does not own the active Core");
+    // REG-1074: refusing on an unreadable or foreign owner record retried the same refusal every
+    // tick and left the machine Blocked. An unreadable record proves nothing, so retire the Core
+    // as unrecorded, as the owner-gated release does. A readable record naming another owner
+    // keeps that owner's Core and record; the abandoned arm is still this owner's, and releasing
+    // it keeps the AI hold (decision 031).
+    let stops_core = match load_active_owner().await {
+        Ok(active) => active.is_none_or(|owner| owner.owner_key == owner_key),
+        Err(error) => {
+            warn!("Active Core ownership is unreadable; retiring the abandoned Connect as unrecorded: {error:#}");
+            true
+        }
+    };
+    if stops_core {
+        CORE_MANAGER.lock().await.stop_core().await
+            .context("failed to stop the abandoned Connect Core")?;
+    } else {
+        warn!("Abandoned Connect does not own the active Core; releasing its arm and leaving that Core running");
     }
-    CORE_MANAGER.lock().await.stop_core().await
-        .context("failed to stop the abandoned Connect Core")?;
     if load_owner_desired_state(&owner_key).await?.core_should_be_running {
         persist_owner_core_stopped_by_key(&owner_key).await?;
     }
-    clear_active_owner().await?;
+    if stops_core {
+        clear_active_owner().await?;
+    }
     windows_kill_switch::release_expired_fresh_arm(epoch).await
 }
 
@@ -602,22 +614,28 @@ pub async fn stop_ipc_server() -> Result<()> {
     stop_ipc_server_inner().await
 }
 
+/// H-IPC-2: only a gate another process holds means an installer owns the stop. An I/O error
+/// opening or locking `.repair.lock` proves no installer, and retaining protection on it left a
+/// stopped Service blocking the machine; update/installer evidence still fences the release.
+#[cfg(any(windows, test))]
+fn installer_holds_repair_gate<T>(gate: &AnyResult<Option<T>>) -> bool {
+    matches!(gate, Ok(None))
+}
+
 async fn stop_ipc_server_inner() -> Result<()> {
     let _lifecycle_guard = IPC_LIFECYCLE_LOCK.lock().await;
 
     #[cfg(windows)]
     let _owner_lifecycle_guard = OWNER_LIFECYCLE_LOCK.lock().await;
     #[cfg(windows)]
-    let repair = match crate::acquire_service_repair_gate() {
-        Ok(guard) => guard,
-        Err(error) => {
-            warn!("Service stop repair gate unavailable; retaining protection: {error:#}");
-            None
-        }
-    };
+    let repair = crate::acquire_service_repair_gate();
+    #[cfg(windows)]
+    if let Err(error) = &repair {
+        warn!("Service stop repair gate unavailable; no installer holds it, so stop still releases: {error:#}");
+    }
     #[cfg(windows)]
     let lifecycle_owned = match crate::core::update::release_admission() {
-        Ok(()) => repair.is_none(),
+        Ok(()) => installer_holds_repair_gate(&repair),
         Err(error) => {
             warn!("Service stop release fenced by update/installer evidence: {error:#}");
             true

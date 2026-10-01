@@ -3785,8 +3785,10 @@ pub async fn prepare_for_service_replacement() -> Result<bool> {
 }
 
 /// Finish startup recovery for an initial attempt that never crossed the durable verification
-/// barrier. This must run only *after* `reconcile_service_startup` has stopped and identified any
-/// surviving Core. The order is deliberately irreversible-safe:
+/// barrier. This runs *after* `reconcile_service_startup` has stopped and identified any surviving
+/// Core, or after that reconciliation failed its bounded startup retries: then the decision-031
+/// release (AI hold kept) replaces a Blocked machine nothing would retire. The order is
+/// deliberately irreversible-safe:
 ///
 /// 1. retire the matching owner's desired run state;
 /// 2. prove DNS restoration;
@@ -4739,6 +4741,41 @@ mod tests {
         assert_eq!(current_core_instance().await, Some(CoreInstance { pid: 4243, generation: 2 }));
         assert!(!crate::core::selective_layer::test_hold_active());
         cleanup().await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn fresh_arm_expiry_releases_when_another_owner_holds_the_core_record() -> Result<()> {
+        cleanup().await;
+        arm_bootstrap(&test_config(), "/opt/tono/mihomo", "owner-alice").await?;
+        let bob = crate::core::auth::AuthenticatedOwner {
+            key: "owner-bob".to_owned(),
+            identity: crate::OwnerIdentity::Unix { uid: 97_011, gid: 20 },
+            app_data_root: std::env::temp_dir(),
+            peer_pid: None,
+            peer_session_id: None,
+        };
+        crate::core::desired::persist_active_owner(&bob).await?;
+        crate::core::manager::set_running_core_identity_for_kill_switch_tests(Some((4251, 1)))
+            .await;
+        *WANTED_CORE_DEADLINE
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(std::time::Instant::now());
+
+        let retired = crate::core::server::retire_expired_fresh_arm(FRESH_ARM_EPOCH.load(Ordering::Acquire)).await;
+        let wanted = status().await.wanted;
+        let held = crate::core::selective_layer::test_hold_active();
+        let core = current_core_instance().await;
+        let active = crate::core::desired::load_active_owner().await?;
+        crate::core::desired::clear_active_owner().await?;
+        cleanup().await;
+
+        retired?;
+        assert!(!wanted, "an expired arm must not stay Blocked over a foreign owner record");
+        assert!(held, "the release keeps AI blocked");
+        assert_eq!(core, Some(CoreInstance { pid: 4251, generation: 1 }), "another owner's Core is not stopped");
+        assert_eq!(active.map(|owner| owner.owner_key).as_deref(), Some("owner-bob"));
         Ok(())
     }
 
