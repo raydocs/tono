@@ -167,7 +167,8 @@ export async function storeDiagnosticsBundle(
          reason = excluded.reason,
          log_excerpt = excluded.log_excerpt,
          received_at = excluded.received_at
-       WHERE client_sessions.user_id = excluded.user_id`,
+       WHERE client_sessions.user_id = excluded.user_id
+         AND (client_sessions.ended_at_ms IS NULL OR excluded.ended_at_ms IS NOT NULL)`,
     ).bind(
       sessionKey, userId, deviceId, started, ended ?? null,
       nodeId(session.node, 'node'), nodeId(session.entryNodeId, 'entryNodeId'),
