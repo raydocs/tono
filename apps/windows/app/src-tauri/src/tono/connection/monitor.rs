@@ -707,6 +707,10 @@ async fn protection_resync_loop(state: Arc<TonoState>, app: AppHandle) {
         let previous_kill_switch = inner.kill_switch.clone();
         let previous_status = inner.fsm.status().clone();
         let service_disarmed = matches!(&kill_switch, Some(status) if !status.wanted);
+        let reconnect_after_release = kill_switch
+            .as_ref()
+            .is_some_and(|status| status.reconnect_after_release);
+        let disconnecting = inner.fsm.status().is_disconnecting;
         commands::quit::apply_service_kill_switch(&mut inner, kill_switch);
         if service_disarmed {
             logging!(
@@ -718,7 +722,31 @@ async fn protection_resync_loop(state: Arc<TonoState>, app: AppHandle) {
         if inner.kill_switch != previous_kill_switch || inner.fsm.status() != &previous_status {
             commands::emit_status(&app, &commands::status_of(&inner));
         }
+        let reconnect = service_disarmed
+            && super::reconnect::crash_recovery_reconnect_allowed(
+                reconnect_after_release,
+                matches!(inner.account_state, crate::tono::state::AccountState::Ready),
+                inner.selected_node.is_some(),
+                inner.catalog_requires_choice,
+                disconnecting,
+            );
         if service_disarmed {
+            drop(inner);
+            if reconnect {
+                let state = state.clone();
+                let app = app.clone();
+                AsyncHandler::spawn(move || async move {
+                    if let Err(error) =
+                        super::connect_for_generation(state, app, Some(generation)).await
+                    {
+                        logging!(
+                            warn,
+                            Type::Service,
+                            "Tono: 崩溃恢复放行后的后台重连未完成: {error}"
+                        );
+                    }
+                });
+            }
             return;
         }
     }
@@ -773,6 +801,7 @@ mod protection_resync_tests {
             endpoints: Vec::new(),
             direct_endpoint_digest: String::new(),
             last_error: None,
+            reconnect_after_release: false,
         };
         let mut inner = state.lock().await;
         crate::tono::commands::quit::apply_service_kill_switch(&mut inner, Some(service_disarmed));

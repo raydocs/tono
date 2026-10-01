@@ -29,6 +29,7 @@ mod probes;
 mod status;
 mod disconnect;
 mod reconnect;
+pub(crate) use reconnect::crash_recovery_reconnect_allowed;
 mod switch;
 mod direct;
 mod heal;
@@ -1476,6 +1477,7 @@ mod tests {
             last_error: Some(
                 "Windows kill-switch reconciliation failed: FwpmTransactionCommit0 returned 0x80320017".into(),
             ),
+            reconnect_after_release: false,
         };
         let data_plane = lock_unverified_error(&kill_switch_not_locked(&status));
         let last = classify_exhausted_data_plane(Ok(()), data_plane, Ok(()));
@@ -1912,6 +1914,7 @@ mod tests {
                     tunnel_permit_rendered: true,
                     direct_endpoint_digest: tono_service_protocol::direct_endpoint_digest(&[]).unwrap(),
                     last_error: None,
+                    reconnect_after_release: false,
                 }),
                 network_events: Default::default(),
             },
@@ -2447,6 +2450,7 @@ mod tests {
             tunnel_permit_rendered: true,
             direct_endpoint_digest: tono_service_protocol::direct_endpoint_digest(&[]).unwrap(),
             last_error: None,
+            reconnect_after_release: false,
         };
         assert!(!kill_switch_unhealthy(Some(&healthy)));
         assert!(kill_switch_unhealthy(None));
@@ -2465,6 +2469,7 @@ mod tests {
                 tunnel_permit_rendered: true,
                 direct_endpoint_digest: tono_service_protocol::direct_endpoint_digest(&[]).unwrap(),
                 last_error: None,
+                reconnect_after_release: false,
             };
             assert!(kill_switch_unhealthy(Some(&status)), "{wanted} {live} {mode:?}");
         }
@@ -2787,6 +2792,7 @@ mod tests {
             tunnel_permit_rendered: true,
             direct_endpoint_digest: digest.clone(),
             last_error: None,
+            reconnect_after_release: false,
         };
         prove_service_endpoint_digest(&status, &digest).unwrap();
 

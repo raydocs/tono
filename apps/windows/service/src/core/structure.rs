@@ -484,6 +484,10 @@ pub struct KillSwitchStatus {
     pub direct_endpoint_digest: String,
     #[serde(default)]
     pub last_error: Option<String>,
+    /// The Service opened the network because a restored wanted session never proved Core.
+    /// Older payloads omit it and read as false, so a user disconnect does not reconnect.
+    #[serde(default)]
+    pub reconnect_after_release: bool,
 }
 
 /// `POST /kill-switch/lock` payload. `None` locks the interface named at arm time.
@@ -1177,6 +1181,7 @@ mod tests {
             endpoints: config.proxy_endpoints.clone(),
             direct_endpoint_digest: super::direct_endpoint_digest(&[]).unwrap(),
             last_error: None,
+            reconnect_after_release: false,
         };
         let encoded = serde_json::to_vec(&status).expect("status should serialize");
         assert_eq!(
@@ -1196,6 +1201,7 @@ mod tests {
         let parsed = serde_json::from_value::<KillSwitchStatus>(older)
             .expect("an older payload without the field must still parse");
         assert!(!parsed.tunnel_permit_rendered);
+        assert!(!parsed.reconnect_after_release);
         assert_eq!(parsed.mode, KillSwitchStatusMode::Locked);
         assert_eq!(
             serde_json::from_value::<KillSwitchStatusMode>(serde_json::json!("locked")).unwrap(),
