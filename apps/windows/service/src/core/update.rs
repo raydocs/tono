@@ -1609,10 +1609,7 @@ pub fn reconcile_before_desired() -> Result<bool> {
         return Ok(true);
     }
     let a = store.attempt()?;
-    if matches!(
-        a.execution,
-        Execution::Consumed | Execution::Replaced | Execution::Uncertain
-    ) {
+    if store.independent_recovery_pending()? {
         // Recovery itself does not run through the task; the task only covers a Service that
         // cannot load. A failed registration must not keep the recovery executor from running
         // and leave the attempt Consumed (#484).

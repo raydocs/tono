@@ -372,6 +372,60 @@ fn execute(recovery: bool) -> Result<(), Error> {
         {
             return Ok(()); // Live original executor, not an interrupted install.
         }
+        if a.execution == tx::Execution::RolledBack {
+            if !store.independent_recovery_pending()? {
+                return Ok(());
+            }
+            let service_path = tono_service_protocol::service_paths()
+                .install_dir()
+                .join("tono-service.exe");
+            ensure!(
+                native::components(&a.install_root, &service_path)? == a.old_components,
+                "resolved rollback no longer has its retained original identity"
+            );
+            // Service startup must see this live replay owner while readiness drops our locks.
+            let mut next = store.state.clone();
+            next.attempt
+                .as_mut()
+                .context("attempt checked above")?
+                .executor = Some(self_image.clone());
+            store.save(next)?;
+            let finalizer = store.rollback_finalizer()?;
+            let manager =
+                ServiceManager::local_computer(None::<&str>, ServiceManagerAccess::CONNECT)?;
+            let service = manager.open_service(
+                tono_service_protocol::WINDOWS_SERVICE_NAME,
+                ServiceAccess::ALL_ACCESS,
+            )?;
+            let (settled, restored) = finalizer.finish(
+                false,
+                || {
+                    suppress_windows_service_recovery(&service)?;
+                    stop_windows_service(&service)?;
+                    shared::block_on_abandoning(async {
+                        let _owner = tono_service_protocol::acquire_service_owner()
+                            .await?
+                            .context("Service still owns rollback finalization")?;
+                        if native::strict_kill_switch_intent_on_disk() {
+                            return Ok(());
+                        }
+                        tono_service_protocol::emergency_disarm_windows_kill_switch_applying_narrow(
+                        )
+                        .await
+                    })?
+                },
+                || {
+                    configure_windows_service_recovery(&service)?;
+                    drop(store);
+                    drop(repair);
+                    start_service_if_stopped(&service)?;
+                    wait_for_service_ready()
+                },
+            );
+            restored?;
+            settled?;
+            return Ok(());
+        }
         // A dead executor must not re-execute a live publication below. The
         // installed identity — not successor liveness — then classifies the
         // interruption: only an incomplete publication rolls back.
@@ -383,10 +437,7 @@ fn execute(recovery: bool) -> Result<(), Error> {
         )? {
             return Ok(()); // Only the specifically launched successor can recover forward.
         }
-        if !matches!(
-            a.execution,
-            tx::Execution::Consumed | tx::Execution::Replaced | tx::Execution::Uncertain
-        ) {
+        if !store.independent_recovery_pending()? {
             return Ok(());
         }
         // Classify before touching the Service: a complete publication keeps
@@ -582,32 +633,43 @@ fn execute(recovery: bool) -> Result<(), Error> {
     // terminate the registered successor of a complete, verified installation
     // and leave the next recovery a state it would otherwise roll back.
     let rolled_back = store.attempt()?.execution == tx::Execution::RolledBack;
-    let (rollback_release, restart) = restart_after_publication(
-        rolled_back,
-        &outcome,
-        native::strict_kill_switch_intent_on_disk(),
-        || {
-            // The original repair/store guards still fence lifecycle writers. The
-            // publication outcome has released its owner, and SCM remains stopped.
-            shared::block_on_abandoning(async {
-                let _owner = tono_service_protocol::acquire_service_owner()
-                    .await?
-                    .context("Service still owns rolled-back update recovery")?;
-                if native::strict_kill_switch_intent_on_disk() {
-                    return Ok(());
-                }
-                tono_service_protocol::emergency_disarm_windows_kill_switch_applying_narrow().await
-            })?
-        },
-        || {
-            // Even a failed plan/rollback must leave the IPC recovery Service available.
-            configure_windows_service_recovery(&service)?;
-            drop(store);
-            drop(repair);
-            service.start(&Vec::<&std::ffi::OsStr>::new())?;
-            wait_for_service_ready()
-        },
-    );
+    let finalizer = if rolled_back {
+        Some(store.rollback_finalizer()?)
+    } else {
+        None
+    };
+    let release = || {
+        // The original repair/store guards still fence lifecycle writers. The
+        // publication outcome has released its owner, and SCM remains stopped.
+        shared::block_on_abandoning(async {
+            let _owner = tono_service_protocol::acquire_service_owner()
+                .await?
+                .context("Service still owns rolled-back update recovery")?;
+            if native::strict_kill_switch_intent_on_disk() {
+                return Ok(());
+            }
+            tono_service_protocol::emergency_disarm_windows_kill_switch_applying_narrow().await
+        })?
+    };
+    let restart = || {
+        // Even a failed plan/rollback must leave the IPC recovery Service available.
+        configure_windows_service_recovery(&service)?;
+        drop(store);
+        drop(repair);
+        service.start(&Vec::<&std::ffi::OsStr>::new())?;
+        wait_for_service_ready()
+    };
+    let (rollback_release, restart) = match finalizer {
+        Some(finalizer) => finalizer.finish(false, release, restart),
+        None => restart_after_publication(
+            false,
+            &outcome,
+            native::strict_kill_switch_intent_on_disk(),
+            release,
+            restart,
+        ),
+    };
+
     let strict = restart.is_err() && native::strict_kill_switch_intent_on_disk();
     let restart = release_after_failed_restart(restart, strict, || {
         let _repair = tono_service_protocol::acquire_service_repair_gate()?
@@ -666,6 +728,26 @@ fn execute(recovery: bool) -> Result<(), Error> {
                 native::retire_recovery_task,
             )?;
             return Ok(());
+        }
+    }
+    Ok(())
+}
+
+fn start_service_if_stopped(service: &platform_lib::service::Service) -> Result<(), Error> {
+    use platform_lib::{Error as ServiceError, service::ServiceState};
+    let deadline = std::time::Instant::now() + Duration::from_secs(20);
+    while service.query_status()?.current_state == ServiceState::StopPending {
+        ensure!(
+            std::time::Instant::now() < deadline,
+            "Service stop did not settle for rollback recovery"
+        );
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    if service.query_status()?.current_state == ServiceState::Stopped {
+        match service.start(&Vec::<&std::ffi::OsStr>::new()) {
+            Ok(()) => {}
+            Err(ServiceError::Winapi(error)) if error.raw_os_error() == Some(1056) => {} // SCM beat us.
+            Err(error) => return Err(error.into()),
         }
     }
     Ok(())
