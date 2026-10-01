@@ -95,7 +95,8 @@ export function LedgerDrawer({
   const subjectType = subjectTypeFor(category);
   const choices = useSubjects(open, subjectType);
   const amountMinor = parseAmountMinor(amount, currency);
-  const rate = useRate(open, currency, paid);
+  const fxDay = new Date(nowSec() * 1_000).toISOString().slice(0, 10);
+  const rate = useRate(open, currency, fxDay);
 
   return (
     <DetailDrawer open={open} title={words.entryTitle} onClose={onClose}>
@@ -171,7 +172,7 @@ export function LedgerDrawer({
         <TextField label={words.fieldNote} value={note} onChange={setNote} />
       </FieldGrid>
 
-      <FxLine state={rate} currency={currency} amountMinor={amountMinor} day={paid} />
+      <FxLine state={rate} currency={currency} amountMinor={amountMinor} day={fxDay} />
 
       <FormFooter
         pending={pending}
@@ -208,7 +209,7 @@ export function LedgerDrawer({
               setPending(false);
               const code = refusalCode(error);
               if (code === FX_RATE_MISSING) {
-                setFault(words.fxMissing(paid));
+                setFault(words.fxMissing(fxDay));
                 return;
               }
               // The hub turning down the currency says the same thing the

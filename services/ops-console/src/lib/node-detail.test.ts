@@ -235,8 +235,8 @@ describe('what the 这台机器 form sends back', () => {
     expect(gbToBytes(bytesToGb(quotaBytes))).toBe(quotaBytes);
   });
 
-  it('recovers the anchor day from the cycle the meter is already using', () => {
-    const march9 = Math.floor(new Date(2026, 2, 9).getTime() / 1_000);
+  it('recovers the anchor day as the UTC day the meter used', () => {
+    const march9 = Math.floor(Date.UTC(2026, 2, 9) / 1_000);
     expect(anchorDayOf(march9)).toBe('9');
     expect(anchorDayOf(null)).toBe('1');
   });

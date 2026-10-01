@@ -37,6 +37,21 @@ const sample = (name: string, observedAt: number, cpu: number) => ({
 });
 
 describe('operations timeseries retention', () => {
+  it('serves metrics for node names that collide with object prototype properties', async () => {
+    const now = 1_800_000_000;
+    const names = ['constructor', 'toString', '__proto__'];
+    await recordAgentSamples(db(), names.map((name) => sample(name, now - 60, 42)), now);
+
+    const metrics = await queryAgentMetrics(db(), {
+      range: '24h', node: null, nowUnix: now, fields: ['cpu'],
+    });
+    for (const name of names) {
+      expect(Object.hasOwn(metrics.series, name)).toBe(true);
+      expect(metrics.series[name]).toEqual([{ t: now - 60, cpu: 42 }]);
+    }
+    expect(JSON.parse(JSON.stringify(metrics)).series.constructor).toEqual([{ t: now - 60, cpu: 42 }]);
+  });
+
   it('fences the pre-migration rollup writer before it can update or delete source rows', async () => {
     const bucket = 1_800_000_000;
     await recordAgentSamples(db(), [
