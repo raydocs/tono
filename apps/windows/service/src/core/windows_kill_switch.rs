@@ -3388,7 +3388,7 @@ pub async fn retire_unverified_on_service_start() -> Result<bool> {
     let Some(armed) = armed_guard().clone() else {
         return Ok(false);
     };
-    if armed.intent.is_verified() {
+    if armed.intent.is_verified() || armed.intent.strict_kill_switch {
         return Ok(false);
     }
 
@@ -3407,7 +3407,9 @@ pub async fn retire_unverified_on_service_start() -> Result<bool> {
                 .await
                 .context("failed to retire active owner paired with legacy unowned protection")?;
         }
-        disarm_unlocked(false).await
+        // This is recovery from an interrupted connection, not an explicit Restore.
+        // Open general traffic and retain the same AI hold as other crash releases.
+        disarm_unlocked(true).await
     }
     .await;
 
@@ -4619,6 +4621,54 @@ mod tests {
         assert!(ARMED.lock().unwrap().is_none());
         assert_disarmed_tombstone_present().await?;
         cleanup().await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn unverified_startup_recovery_keeps_ai_hold_after_releasing_general_traffic() -> Result<()> {
+        cleanup().await;
+        crate::core::desired::clear_active_owner().await?;
+        let mut intent = valid_intent(KillSwitchStatusMode::Bootstrap, true);
+        intent.verified = Some(false);
+        atomic_write(&intent_path(), &serde_json::to_vec_pretty(&intent)?).await?;
+
+        restore_on_service_start().await?;
+        assert!(retire_unverified_on_service_start().await?);
+        let released = !status().await.wanted && armed_guard().is_none();
+        let ai_held = crate::core::selective_layer::test_hold_active();
+        cleanup().await;
+
+        assert!(
+            released,
+            "interrupted initial connection must release general traffic"
+        );
+        assert!(
+            ai_held,
+            "automatic startup recovery must keep the secondary AI hold"
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn unverified_startup_recovery_preserves_an_explicit_strict_intent() -> Result<()> {
+        cleanup().await;
+        let mut intent = valid_intent(KillSwitchStatusMode::Bootstrap, true);
+        intent.verified = Some(false);
+        intent.strict_kill_switch = true;
+        atomic_write(&intent_path(), &serde_json::to_vec_pretty(&intent)?).await?;
+
+        restore_on_service_start().await?;
+        let retired = retire_unverified_on_service_start().await?;
+        let wanted = status().await.wanted;
+        cleanup().await;
+
+        assert!(
+            !retired,
+            "automatic recovery cannot retire an explicit strict intent"
+        );
+        assert!(wanted, "the strict barrier must remain armed");
         Ok(())
     }
 
