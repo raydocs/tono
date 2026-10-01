@@ -1,7 +1,7 @@
 ## 2026-09-30 · Windows 释放路径三处保块缺陷（StartClash 失败不收臂 / tombstone 写失败重封 / DNS 快照删不掉拒绝释放）
 
 - 归属：[SHIP_PLAN](../SHIP_PLAN.md) §2 item 10（装上会坏：释放路径把用户锁在块里）；影响 Windows Service（`apps/windows/service/src/core/server/handlers.rs`、`core/windows_kill_switch.rs`、`core/dns/mod.rs`）。
-- 来源：`main` `01c2403f` → 分支 `glm/win-release-fail-open`；PR [#769](https://github.com/raydocs/tono/pull/769)；已并入 `origin/main` `e504f6f4`。
+- 来源：`main` `01c2403f` → 分支 `glm/win-release-fail-open`；PR [#769](https://github.com/raydocs/tono/pull/769)；已并入 `origin/main` `b1825a3a`。
 - 缺陷修复：三条同族「该开网时仍封网」：
   - WIN-STARTCLASH-FAIL-WFP：StartClash 在 `arm_bootstrap` 成功后，`owner_proxy_transition` 失败只返回原错误、不回收本次刚装的 WFP bootstrap 臂；App 侧后续 status 读取再失败时 `armed` 回落 FSM 闩锁（false），会话门控的停止核失败被忽略——机器保持全封而界面显示未连接。改后：本次请求装过 Windows 臂且迁移失败时，用 `windows_kill_switch::release_applying_narrow()` 回滚臂（DNS-before-disarm 不变式仍在；普通网络打开，二次 AI 拦截装回）。显式 Disconnect 仍走 `release()`。回滚失败并入错误消息（`windows_arm_rollback_error`）。仅回滚 Windows 臂，macOS kill-switch 路径不动。
   - WIN-TOMBSTONE-REBLOCK：`disarm_unlocked` 在 DNS 恢复已证明、`remove_all_filters_unlocked` 已成功后，`persist_disarmed_tombstone` 写失败（ProgramData ACL/杀软锁）会改回旧 wanted 意图并 `install_unlocked(previous)` 重装块——写失败持续多久，每次 Disconnect 就把刚打开的网络再封多久。改后：过滤器已删即保持释放（与紧急卸载路径同一取舍，见其 3082 行注释所载中国客户机 ProgramData ACL 实况）：回退删除 `intent_path()` 使无 wanted 意图幸存；删除也失败则保持释放并在 `last_error` 说明（下次 Service 启动可能恢复陈旧意图）；按成功路径清 ARMED/TUNNEL_PERMIT_RENDERED 并返回 Ok。
