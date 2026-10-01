@@ -64,6 +64,8 @@ const MARK_VERIFIED_RETRY_DELAY: Duration = Duration::from_millis(500);
 /// is ambiguous; a Service refusal is authoritative and is never retried.
 const DIRECT_MUTATION_ATTEMPTS: u32 = 2;
 const DIRECT_MUTATION_RETRY_DELAY: Duration = Duration::from_millis(350);
+/// A read-only SCM request may outlive its caller; it must not retain the release worker.
+const REGISTERED_SERVICE_PROBE_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// The Service session that owns the running Core, and what that Service can do.
 ///
@@ -500,7 +502,8 @@ pub(crate) async fn tono_service_ready_or_start_now() -> Result<()> {
 /// ([`StartTargetUnverified`]) falls back to the repair. Any other failed start is returned: after
 /// a declined prompt, or a verified binary that fails to start, the repair would fail the same
 /// way, and with filters armed `manual_gate` refuses it. A Service that is not Stopped, or an SCM
-/// that cannot be read, takes the repair path as before.
+/// that cannot be read, takes the repair path as before. A stalled read returns an error without
+/// entering another SCM-dependent operation, so the release coordinator can settle and retry.
 #[cfg_attr(not(windows), allow(dead_code))]
 async fn ready_or_start_with<Ready, ReadyFuture, Stopped, StoppedFuture, Start, StartFuture, Repair, RepairFuture>(
     ready: Ready,
@@ -521,7 +524,10 @@ where
     if ready().await.is_ok() {
         return Ok(());
     }
-    if !matches!(stopped().await, Ok(true)) {
+    let stopped = tokio::time::timeout(REGISTERED_SERVICE_PROBE_TIMEOUT, stopped())
+        .await
+        .context("Windows service state probe timed out")?;
+    if !matches!(stopped, Ok(true)) {
         return repair().await;
     }
     match start().await {
@@ -529,6 +535,18 @@ where
         Err(error) if error.is::<StartTargetUnverified>() => repair().await,
         Err(error) => Err(error),
     }
+}
+
+#[cfg(any(windows, test))]
+/// Read-only SCM probes may finish late, but must not retain an async lifecycle operation.
+pub(crate) async fn probe_service_state<T>(probe: impl FnOnce() -> Result<T> + Send + 'static) -> Result<T>
+where
+    T: Send + 'static,
+{
+    tokio::time::timeout(REGISTERED_SERVICE_PROBE_TIMEOUT, tokio::task::spawn_blocking(probe))
+        .await
+        .context("Windows service state probe timed out")?
+        .context("service state probe thread did not finish")?
 }
 
 /// The release path's start, admitted and bounded like every privileged operation (BRICK-W5 e).
@@ -611,7 +629,7 @@ fn record_service_repair(cause: &str, recovered: bool) {
 /// the caller on its original error path.
 #[cfg(windows)]
 async fn repair_registered_stopped_service() -> ServiceRepairAttempt {
-    if !trusted_service_evidence().unwrap_or(false) {
+    if !probe_service_state(trusted_service_evidence).await.unwrap_or(false) {
         return ServiceRepairAttempt::Skipped;
     }
     logging!(
