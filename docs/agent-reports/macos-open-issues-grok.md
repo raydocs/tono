@@ -8,7 +8,7 @@ Hunter: Grok 4.7。基线 `origin/main` `b341164b`。开着的 issue 38 个，�
 
 空。没有一条同时满足：macOS 应用缺陷、没有开着的 PR 提到它、没有需要决定或实机才能动、也还没合进 main。
 
-因此这一轮没有新的修复 PR，没有 `Fixes #N`，也没有打开自动合并。
+因此这一轮没有新的修复 PR，没有 `Fixes #N`，也没有打开自动合并。清点本身在 [#940](https://github.com/raydocs/tono/pull/940)，不开自动合并。
 
 ## 已有开着的修复 PR（main 上还在）
 
