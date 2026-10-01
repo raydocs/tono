@@ -34,3 +34,15 @@
   - F3: a latched update-held expiry is re-checked before each WFP removal attempt and withdrawn once a live owner appears.
   - F4: an executor counts as dead only when the process is gone or the PID names another incarnation (`holder_conclusively_dead`). A probe that cannot tell (pinning, ACL or digest read) counts as live: no release that tick, and the next tick asks again.
   - Tests: `update_startup_barrier_release_waits_only_for_a_live_executor` (inconclusive probe) and `update_held_startup_barrier_releases_with_the_ai_hold` (withdrawn expiry), on Windows CI.
+- 2026-10-01 continuation (Codex review at `5019a2bd`, F3/F4/F5):
+  - F3, cross-process fence:
+    - When the update-held release fires, the Service first takes the update store lock without blocking (`Store::lock_only`, no write), then re-checks that the release is still owed. It holds the lock until WFP removal commits.
+    - If another holder has the lock (`StoreBusy`), that holder is a live owner: the attempt aborts with nothing changed, and the next tick asks again. The same happens if the re-check no longer owes the release.
+    - Nothing in the release path opens the store.
+    - A recovery that meets the held lock waits up to 15 s in `open_waiting`. If it gives up, it exits uncounted and does not loop.
+  - F4: the startup `Launching → Staged` demotion now also requires conclusive death; an inconclusive probe leaves the record unchanged.
+  - F5: the death probe no longer reads the image path. `process_started_at` uses `OpenProcess` + `GetProcessTimes`:
+    - an unknown PID or an exited process means gone;
+    - a different creation time means another incarnation;
+    - only a refused open is inconclusive.
+  - Tests: `update_release_fence_yields_to_a_store_holder`, `update_inconclusive_probe_does_not_demote_a_launching_executor`, `process_started_at_proves_exit_without_the_image_path`, and the fence abort in `update_held_startup_barrier_releases_with_the_ai_hold`, all on Windows CI.

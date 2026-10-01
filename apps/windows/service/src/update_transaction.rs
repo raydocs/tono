@@ -355,6 +355,20 @@ impl Store {
         })
     }
 
+    /// Only the store's lock, taken without blocking and without a write: a reader that acts on
+    /// [`Self::read_state`] holds it to keep every update writer out until its action commits
+    /// (#1292 release fence). Another holder is [`StoreBusy`].
+    pub fn lock_only(root: &Path) -> Result<File> {
+        let lock = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(root.join("transaction.lock"))?;
+        take_store_lock(lock.try_lock())?;
+        Ok(lock)
+    }
+
     /// The evidence as it stands, read without the store's lock and without a write: no
     /// `transaction.lock` is created or taken and `state.json` is not re-published. Only the
     /// release admission (BRICK-W5 d) and the start helper's lease check read this way; both

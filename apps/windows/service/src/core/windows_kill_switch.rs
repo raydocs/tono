@@ -3239,6 +3239,8 @@ async fn disarm_unlocked_with_narrow(apply_narrow: Option<bool>) -> Result<()> {
 /// Filter removal failure leaves `ARMED` set so the next tick retries. A tombstone failure
 /// after the filters are gone does not reinstall them.
 async fn release_unproven_wanted_session_unlocked() -> Result<()> {
+    // Held until WFP removal commits: no update writer can start under this release (#1292).
+    let _update_fence = update_release_fence()?;
     if let Err(error) = bounded_dns_call(
         "wanted session core window",
         crate::core::dns::ensure_restored(),
@@ -3396,6 +3398,30 @@ fn owe_update_held_startup_release_unlocked(owed: impl FnOnce() -> bool) {
     UPDATE_RELEASE_LATCHED.store(owed, Ordering::Release);
     *deadline = owed.then(std::time::Instant::now);
 }
+
+/// For an update-held release, the store lock every update writer takes, after a final re-check
+/// that the release is still owed. A busy store or a release no longer owed aborts this attempt;
+/// the next watchdog tick asks again. Nothing in the release path opens the store itself.
+fn update_release_fence() -> Result<Option<std::fs::File>> {
+    if !UPDATE_RELEASE_LATCHED.load(Ordering::Acquire) {
+        return Ok(None);
+    }
+    #[cfg(test)]
+    if let Some(owed) = *TEST_UPDATE_FENCE_OWED
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+    {
+        anyhow::ensure!(owed, "the update-held barrier release is no longer owed");
+        return Ok(None);
+    }
+    #[cfg(windows)]
+    return crate::core::update::startup_release_fence();
+    #[cfg(not(windows))]
+    Ok(None)
+}
+
+#[cfg(test)]
+static TEST_UPDATE_FENCE_OWED: std::sync::Mutex<Option<bool>> = std::sync::Mutex::new(None);
 
 fn update_holds_no_live_owner() -> bool {
     #[cfg(windows)]
@@ -4946,25 +4972,33 @@ mod tests {
         clear_wanted_core_window();
         STARTUP_UNVERIFIED_BARRIER.store(true, Ordering::Release);
         STARTUP_SETTLED.store(true, Ordering::Release);
-        let (withdrawn, released) = {
+        let (withdrawn, fenced, released) = {
             let _operation = WFP_OPERATION.lock().await;
             owe_update_held_startup_release_unlocked(|| true);
             // A recovery owner registered before the removal attempt: the expiry is withdrawn.
             owe_update_held_startup_release_unlocked(|| false);
             let withdrawn = reconcile_wanted_core_window_unlocked().await;
             let kept = status().await.wanted;
+            // The re-check under the store fence no longer owes it: this attempt aborts.
             owe_update_held_startup_release_unlocked(|| true);
+            *TEST_UPDATE_FENCE_OWED.lock().unwrap() = Some(false);
+            let fenced =
+                reconcile_wanted_core_window_unlocked().await.is_err() && status().await.wanted;
+            *TEST_UPDATE_FENCE_OWED.lock().unwrap() = Some(true);
             (
                 withdrawn.map(|_| kept),
+                fenced,
                 reconcile_wanted_core_window_unlocked().await,
             )
         };
+        *TEST_UPDATE_FENCE_OWED.lock().unwrap() = None;
         let wanted = status().await.wanted;
         let held = crate::core::selective_layer::test_hold_active();
         STARTUP_UNVERIFIED_BARRIER.store(false, Ordering::Release);
         cleanup().await;
 
         assert!(withdrawn?, "a release no longer owed must not remove WFP");
+        assert!(fenced, "a fence that no longer owes the release keeps WFP");
         released?;
         assert!(
             !wanted,

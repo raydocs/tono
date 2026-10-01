@@ -115,6 +115,64 @@ pub(super) fn process_identity(pid: u32) -> Result<Option<ProcessIdentity>> {
     }
 }
 
+/// Creation time of the process that now has `pid`, or `None` when no live process has it. It
+/// reads no image path, so a reused PID whose path cannot be read still answers (#1292). Only
+/// an open refused for another reason than an unknown PID is an error: inconclusive.
+#[cfg(windows)]
+pub(super) fn process_started_at(pid: u32) -> Result<Option<u64>> {
+    {
+        use std::os::windows::io::{AsRawHandle as _, FromRawHandle as _, OwnedHandle};
+        use windows_sys::Win32::Foundation::{
+            ERROR_INVALID_PARAMETER, FILETIME, HANDLE, WAIT_OBJECT_0, WAIT_TIMEOUT,
+        };
+        use windows_sys::Win32::System::Threading::{
+            GetProcessTimes, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, WaitForSingleObject,
+        };
+
+        let raw = unsafe {
+            OpenProcess(
+                PROCESS_QUERY_LIMITED_INFORMATION
+                    | windows_sys::Win32::Storage::FileSystem::SYNCHRONIZE,
+                0,
+                pid,
+            )
+        };
+        if raw.is_null() {
+            let error = std::io::Error::last_os_error();
+            if error.raw_os_error() == Some(ERROR_INVALID_PARAMETER as i32) {
+                return Ok(None);
+            }
+            return Err(error.into());
+        }
+        // SAFETY: `OpenProcess` returned an owned process handle.
+        let handle = unsafe { OwnedHandle::from_raw_handle(raw.cast()) };
+        match unsafe { WaitForSingleObject(handle.as_raw_handle() as HANDLE, 0) } {
+            WAIT_OBJECT_0 => return Ok(None),
+            WAIT_TIMEOUT => {}
+            _ => return Err(std::io::Error::last_os_error().into()),
+        }
+        let mut creation = FILETIME::default();
+        let mut exit = FILETIME::default();
+        let mut kernel = FILETIME::default();
+        let mut user = FILETIME::default();
+        if unsafe {
+            GetProcessTimes(
+                handle.as_raw_handle() as HANDLE,
+                &mut creation,
+                &mut exit,
+                &mut kernel,
+                &mut user,
+            )
+        } == 0
+        {
+            return Err(std::io::Error::last_os_error().into());
+        }
+        Ok(Some(
+            (u64::from(creation.dwHighDateTime) << 32) | u64::from(creation.dwLowDateTime),
+        ))
+    }
+}
+
 /// Query one already-open process object. A caller that also terminates this object must keep
 /// the same handle through both operations, so PID reuse cannot retarget the termination.
 #[cfg(windows)]
@@ -722,6 +780,19 @@ fn core_image_candidates() -> Result<Vec<(u32, ProcessIdentity)>> {
 mod tests {
     use super::{orphan_core_exemptions, select_orphan_core_pids};
     use std::collections::BTreeSet;
+
+    #[cfg(windows)]
+    #[test]
+    fn process_started_at_proves_exit_without_the_image_path() -> anyhow::Result<()> {
+        let own = super::process_identity(std::process::id())?.map(|p| p.started_at);
+        assert_eq!(super::process_started_at(std::process::id())?, own);
+        let mut child = std::process::Command::new("cmd.exe")
+            .args(["/C", "exit 0"])
+            .spawn()?;
+        child.wait()?;
+        assert_eq!(super::process_started_at(child.id())?, None);
+        Ok(())
+    }
 
     #[tokio::test]
     async fn stale_creation_identity_does_not_terminate_the_live_process() -> anyhow::Result<()> {
