@@ -1,6 +1,6 @@
 # W1-sol-win-trust: Codex (GPT-6.1 Sol) findings
 
-Generated 2026-09-30 19:37 MT from the run's findings.tsv / prs.tsv.
+Generated 2026-09-30 20:05 MT from the run's findings.tsv / prs.tsv.
 
 ## PRs
 
@@ -91,3 +91,4 @@ Generated 2026-09-30 19:37 MT from the run's findings.tsv / prs.tsv.
 | WIN-CORE-STOP-WAIT | W6 | — | apps/windows/service/src/core/manager.rs:213 | Core stop could wait forever for a wedged child | false-positive child wait has termination deadline; tracked failed child retained for retry |
 | WIN-SCM-VERIFIER-WORKERS | W6 | P2 | apps/windows/service/src/client/mod.rs:165 | Repeated monitor calls spawn unbounded detached SCM verifier threads during a sustained stall | real-fixed #933 |
 | WIN-GOODBYE-RELAUNCH | A7 | — | apps/windows/app/src-tauri/src/lib.rs:419 | Second same-user App relaunch triggers goodbye race | false-positive as primary trigger: persistent singleton coordination; same-App update provides actual trigger |
+| WIN-SELECTIVE-RELEASE-RETRY | A7 | P2 | apps/windows/app/src-tauri/src/core/service/mod.rs:1323 | Automatic selective release retries all failures as plain release, dropping AI hold | real-unfixed implementing compatibility-safe retry |

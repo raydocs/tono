@@ -65,9 +65,31 @@ for suite in ${suites[@]+"${suites[@]}"}; do
   [[ $suite == "$aggregate" ]] && continue
   relative=${suite#"$repo_root/"}
   checked=$((checked + 1))
-  # Read the complete input: grep -q exits at its first match and can make
-  # printf fail with SIGPIPE, which pipefail mistakes for a missing reference.
-  if ! printf '%s\n' "$references" | /usr/bin/grep -F -- "$relative" >/dev/null; then
+  # Read the complete input. An early-exit search can SIGPIPE printf, and
+  # pipefail then reports a real reference as missing. A hit also has to be
+  # the whole token: `test-wired.sh.skip` contains `test-wired.sh` and would
+  # otherwise count as wiring while running nothing. A leading `../../` is
+  # still a hit; a following path character is not.
+  if ! printf '%s\n' "$references" | /usr/bin/awk -v path="$relative" '
+    BEGIN { found = 0 }
+    {
+      from = 1
+      plen = length(path)
+      while (from <= length($0)) {
+        i = index(substr($0, from), path)
+        if (i == 0) break
+        pos = from + i - 1
+        before = (pos == 1 ? "" : substr($0, pos - 1, 1))
+        after_at = pos + plen
+        after = (after_at > length($0) ? "" : substr($0, after_at, 1))
+        before_ok = (before == "" || before !~ /[A-Za-z0-9_.-]/)
+        after_ok = (after == "" || after !~ /[A-Za-z0-9_.\/-]/)
+        if (before_ok && after_ok) found = 1
+        from = pos + 1
+      }
+    }
+    END { exit (found ? 0 : 1) }
+  '; then
     unreachable="$unreachable  - $relative
 "
   fi
