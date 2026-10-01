@@ -337,7 +337,14 @@ nonisolated enum HelperProtocolVersion {
     /// - 4.52.16 → 4.52.17: exhausted App recovery has an AI-preserving release intent.
     /// - 4.52.17 → 4.52.18: resolved update retirement keeps its active
     ///   receipt until executor-job cleanup succeeds, preserving retry ownership.
-    static let current = "4.52.18"
+    /// - 4.52.18 → 4.52.19: silent upgrade copies a regular file from a
+    ///   non-blocking fd and does not hold the update lock across that copy.
+    ///   Stale-core signals re-check path and uid. The installed update floor
+    ///   is the bytes read before and after the signature check. A `pfctl -X`
+    ///   that leaves the token listed keeps the record. A new physical NIC
+    ///   reloads the LAN DNS block without flushing states. Protected DNS
+    ///   status follows `serviceID`.
+    static let current = "4.52.19"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS
