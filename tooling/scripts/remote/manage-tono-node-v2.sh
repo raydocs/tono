@@ -148,7 +148,11 @@ backup(){
 }
 restore_one(){
  local d=$TX/backup/$1 path=$2; rm -rf -- "$path"
- if grep -qx present "$d/presence"; then mkdir -p "$(dirname "$path")"; cp -a "$d/value" "$path"; fi
+ if grep -qx present "$d/presence"; then
+   mkdir -p "$(dirname "$path")"; cp -a "$d/value" "$path"
+   # Snapshot write bits were removed for integrity, not from the live artifact.
+   if [[ ! -L $path ]]; then chmod "$(awk '{print $3}' "$d/stat")" "$path"; fi
+ fi
 }
 rollback(){
  exec 9>"/run/lock/tono-node.lock"
