@@ -30,7 +30,9 @@ it('opens the selected invite when its private label matches a customer', async 
     const rows = Array.from(document.querySelectorAll<HTMLElement>('[cmdk-item]'))
       .filter((item) => item.textContent === 'al***@example.test');
     expect(rows).toHaveLength(2);
-    await act(async () => rows[1].dispatchEvent(new MouseEvent('pointermove', { bubbles: true })));
+    const invite = rows[1];
+    if (!invite) throw new Error('Expected the private invite row');
+    await act(async () => invite.dispatchEvent(new MouseEvent('pointermove', { bubbles: true })));
     await act(async () => document.querySelector('[cmdk-root]')!.dispatchEvent(
       new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }),
     ));
