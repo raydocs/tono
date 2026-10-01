@@ -217,7 +217,11 @@ final class SocketServer {
             FileHandle.standardError.write(Data(
                 "tono: startup release could not clear the kill switch: \(detail)\n".utf8
             ))
+            return
         }
+        // The general block is already gone. Skip the secondary layer if an
+        // arm committed while this release held the lock.
+        killSwitch.applySelectiveLayerIfReleased()
     }
 
     /// While the Core is running, keep the in-session block (a live connect
@@ -259,6 +263,7 @@ final class SocketServer {
                 ))
                 return
             }
+            killSwitch.applySelectiveLayerIfReleased()
         } else {
             consecutiveCoreDownChecks = 0
         }

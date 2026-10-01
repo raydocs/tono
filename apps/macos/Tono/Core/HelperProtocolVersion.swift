@@ -300,10 +300,15 @@ nonisolated enum HelperProtocolVersion {
     /// - 4.52.6 → 4.52.7: an update ledger whose receipt contains a key this
     ///   build does not know is refused and kept on disk. Additive keys
     ///   outside the receipt are still tolerated.
-    /// - 4.52.7 → 4.52.8: the watchdog releases a bootstrap-only block whose
+    /// - 4.52.7 → 4.52.8: after that full release, a crash or hang may add a
+    ///   secondary blackhole route for Anthropic's inbound prefixes and
+    ///   `/etc/resolver` files for first-party AI suffixes. Arm, disarm, and
+    ///   emergency recovery remove them. The commands cannot name a default
+    ///   route. A failure leaves the original network open.
+    /// - 4.52.8 → 4.52.9: the watchdog releases a bootstrap-only block whose
     ///   recorded app owner died before committing the tunnel (MAC-ORPHAN-
     ///   BOOTSTRAP-PF).
-    static let current = "4.52.8"
+    static let current = "4.52.9"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS

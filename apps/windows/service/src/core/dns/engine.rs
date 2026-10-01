@@ -1783,3 +1783,47 @@ fn system_lookup_a_blocking(host: &str) -> std::result::Result<Vec<std::net::Ipv
     }
     Ok(addresses)
 }
+
+/// Per-suffix NRPT rules for the secondary hold. Never writes the catch-all
+/// name `.` and never reuses the catch-all key. A refused name writes nothing.
+pub(super) fn install_selective_nrpt() -> Result<()> {
+    use crate::core::selective_fail_open::{self, CATCH_ALL_NRPT_GUID, SINKHOLE_DNS};
+    let mut prepared = Vec::new();
+    for rule in selective_fail_open::NRPT_RULES {
+        if rule.guid.eq_ignore_ascii_case(CATCH_ALL_NRPT_GUID) {
+            bail!("selective NRPT guid collides with the catch-all");
+        }
+        let names = selective_fail_open::names_for_rule(rule)
+            .context("selective NRPT suffix was refused")?;
+        if names.iter().any(|name| !selective_fail_open::nrpt_name_is_safe(name)) {
+            bail!("selective NRPT name was refused");
+        }
+        prepared.push((rule.guid, names));
+    }
+    let _root = create_key(NRPT_ROOT)?;
+    drop(_root);
+    for (guid, names) in &prepared {
+        let key = format!(r"{NRPT_ROOT}\{guid}");
+        let _rule = create_key(&key)?;
+        drop(_rule);
+        let refs: Vec<&str> = names.iter().map(String::as_str).collect();
+        write_multi_sz(&key, "Name", &refs)?;
+        write_dword(&key, "Version", NRPT_VERSION)?;
+        write_dword(&key, "ConfigOptions", NRPT_CONFIG_DNS)?;
+        write_sz(&key, "GenericDNSServers", SINKHOLE_DNS)?;
+    }
+    Ok(())
+}
+
+/// Delete only the selective keys. An absent key is success. The catch-all
+/// key is not in this set.
+pub(super) fn remove_selective_nrpt() -> Result<()> {
+    use crate::core::selective_fail_open::{self, CATCH_ALL_NRPT_GUID};
+    for rule in selective_fail_open::NRPT_RULES {
+        if rule.guid.eq_ignore_ascii_case(CATCH_ALL_NRPT_GUID) {
+            bail!("selective NRPT guid collides with the catch-all");
+        }
+        delete_key(&format!(r"{NRPT_ROOT}\{}", rule.guid))?;
+    }
+    Ok(())
+}

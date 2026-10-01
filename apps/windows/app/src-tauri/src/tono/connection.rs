@@ -3,8 +3,9 @@
 //! Every privileged step goes through the Service IPC wrappers in
 //! `core::service` — the owner/session machinery is never bypassed. The
 //! fail-closed invariant: once the WFP policy exists, only Disconnect,
-//! Sign Out, Quit, or one ordinary self-heal exhaustion release it. That
-//! exhaustion uses the explicit release and does not build another tunnel.
+//! Sign Out, Quit, ordinary self-heal exhaustion, or non-strict catalog
+//! removal release it. Both automatic paths use the explicit release and
+//! do not build another tunnel.
 //! Windows has no strict kill switch, so a verified connect failure restores
 //! the original network instead of sitting in Protected Offline. Self-heal
 //! does not rewrite routes while a hop is still unproven.
@@ -262,7 +263,7 @@ pub(crate) async fn connect_for_generation(
                             Type::Service,
                             "Tono: self-heal stopped; restoring the original network without another tunnel"
                         );
-                        if let Err(release_error) = disconnect::release_explicit(&state, &app).await {
+                        if let Err(release_error) = disconnect::release_explicit_applying_narrow(&state, &app).await {
                             logging!(
                                 error,
                                 Type::Service,
