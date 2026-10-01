@@ -169,6 +169,20 @@ final class ProtectedSystemResolverTests: XCTestCase {
         XCTAssertEqual(resolver.deallocations, 1)
     }
 
+    func testCachedPublicAnswerWaitsForALaterFakeIP() async {
+        let resolver = HeldDNSService()
+        defer { resolver.releaseContext() }
+        let query = Task { await ProtectedDNSProbe.querySystemResolver(timeout: 2, resolver: resolver.functions) }
+        await fulfillment(of: [resolver.started], timeout: 1)
+        await resolver.send("203.0.113.2")
+        XCTAssertEqual(resolver.deallocations, 0, "a cached public A is one burst, not the end of the query")
+        await resolver.send("198.19.4.4")
+        let answers = await query.value
+        XCTAssertEqual(answers, ["203.0.113.2", "198.19.4.4"])
+        XCTAssertTrue(ProtectedDNSProbe.containsFakeIP(answers))
+        XCTAssertEqual(resolver.deallocations, 1)
+    }
+
     func testSystemDNSQueueInstallationFailureReleasesCreatedRef() async {
         let resolver = HeldDNSService(queueError: DNSServiceErrorType(kDNSServiceErr_NoMemory))
         defer { resolver.releaseContext() }

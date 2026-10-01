@@ -6,7 +6,7 @@ import XCTest
 
 @MainActor
 final class NativeUpdateCallerTests: XCTestCase {
-    private enum Failure: Error { case preparation, lostAcknowledgement }
+    private enum Failure: Error { case preparation, lostAcknowledgement, retirement }
 
     private func status(_ phase: UpdateContractV1.Phase, execution: String) -> HelperManager.UpdateStatus {
         let receipt = UpdateContractV1.Receipt(attemptId: String(repeating: "a", count: 64), blockedReason: nil,
@@ -123,6 +123,74 @@ final class NativeUpdateCallerTests: XCTestCase {
         XCTAssertEqual(MenuBarProtectionStatus(app).kind, .standby)
         XCTAssertFalse(RuntimeCleanup.nativeUpdatePending)
         XCTAssertFalse(RuntimeCleanup.nativeUpdateBlocksConnect, "a committed update must allow Connect")
+    }
+
+    func testVerifiedReleaseIsPublishedBeforeFailedRetirementWithoutClearingUpdate() async throws {
+        let armed = KillSwitchService.isArmed
+        let pending = RuntimeCleanup.nativeUpdatePending
+        let blocksConnect = RuntimeCleanup.nativeUpdateBlocksConnect
+        let recovery = RuntimeCleanup.nativeUpdateRecovery
+        let didStartCore = AppProfile.defaults.object(forKey: SettingsKey.didStartCore)
+        let lastTunEnabled = AppProfile.defaults.object(forKey: SettingsKey.lastTunEnabled)
+        defer {
+            KillSwitchService.isArmed = armed
+            RuntimeCleanup.nativeUpdatePending = pending
+            RuntimeCleanup.nativeUpdateBlocksConnect = blocksConnect
+            RuntimeCleanup.nativeUpdateRecovery = recovery
+            AppProfile.defaults.set(didStartCore, forKey: SettingsKey.didStartCore)
+            AppProfile.defaults.set(lastTunEnabled, forKey: SettingsKey.lastTunEnabled)
+        }
+        KillSwitchService.isArmed = true
+        RuntimeCleanup.nativeUpdatePending = true
+        RuntimeCleanup.nativeUpdateBlocksConnect = true
+        RuntimeCleanup.nativeUpdateRecovery = .protectedOffline
+        RuntimeCleanup.markCoreStarted(tunEnabled: true)
+        let app = AppState()
+        app.isConnected = true
+        app.isProtectionBlocked = true
+        app.isProtectionUnconfirmed = true
+        app.protectedReconnectPausedForUserAction = true
+        app.consecutiveProtectionRepairCount = 3
+        app.updateIncomplete = true
+        app.errorMessage = "Update evidence is pending."
+        let sequence = app.launchProtectionSequence
+        var calls = [String]()
+
+        do {
+            try await app.retireDisconnectedNativeUpdate(nativeUpdate: { operation in
+                calls.append(operation)
+                switch operation {
+                case "status":
+                    return self.status(.preparing, execution: "staged")
+                case "disconnect":
+                    return .init(pending: true, receipt: nil, execution: nil,
+                                 disconnectVerified: true, diagnostic: nil)
+                default:
+                    XCTAssertEqual(operation, "retire")
+                    XCTAssertFalse(KillSwitchService.isArmed)
+                    XCTAssertEqual(MenuBarProtectionStatus(app).kind, .standby)
+                    XCTAssertEqual(app.launchProtectionSequence, sequence &+ 1)
+                    throw Failure.retirement
+                }
+            })
+            XCTFail("Retirement failure must remain actionable")
+        } catch Failure.retirement {}
+
+        XCTAssertEqual(calls, ["status", "disconnect", "retire"])
+        XCTAssertFalse(KillSwitchService.isArmed)
+        XCTAssertFalse(app.isProtectionBlocked)
+        XCTAssertFalse(app.isProtectionUnconfirmed)
+        XCTAssertFalse(app.protectedReconnectPausedForUserAction)
+        XCTAssertEqual(app.consecutiveProtectionRepairCount, 0)
+        XCTAssertTrue(app.nativeUpdatePending)
+        XCTAssertTrue(RuntimeCleanup.nativeUpdatePending)
+        XCTAssertTrue(RuntimeCleanup.nativeUpdateBlocksConnect)
+        XCTAssertEqual(RuntimeCleanup.nativeUpdateRecovery, .protectedOffline)
+        XCTAssertTrue(app.updateIncomplete)
+        XCTAssertEqual(app.errorMessage, "Update evidence is pending.")
+        XCTAssertTrue(AppProfile.defaults.bool(forKey: SettingsKey.didStartCore),
+                      "Retirement still owns the independent Core/DNS cleanup proof")
+        XCTAssertTrue(AppProfile.defaults.bool(forKey: SettingsKey.lastTunEnabled))
     }
 
     func testUpdateSuspensionRetiresACancelledReloadBeforeTheNextSession() async {

@@ -158,9 +158,3 @@ window.addEventListener('beforeunload', () => {
   // Clean up all WebSocket instances to prevent memory leaks
   MihomoWebSocket.cleanupAll()
 })
-
-// Page loaded event
-window.addEventListener('DOMContentLoaded', () => {
-  // Clean up all WebSocket instances to prevent memory leaks
-  MihomoWebSocket.cleanupAll()
-})

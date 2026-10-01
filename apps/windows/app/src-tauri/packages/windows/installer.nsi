@@ -814,9 +814,10 @@ FunctionEnd
   StrCpy $ServiceInstallRetries 0
   serviceInstallAttempt:
   ${If} $ConfirmedExistingInstall = 1
-    ; The helper owns a short three-executable transaction: it stops the Service only after Mihomo
-    ; and the GUI are staged, verifies the new Service + core before publishing the GUI, and restores
-    ; all three before returning any failure. Never give nsExec a TerminateProcess timeout here—killing Rust during
+    ; The helper owns the Service, Mihomo, sing-box and GUI transaction: it stops the Service only
+    ; after those executables are staged, verifies the new Service before publishing the GUI, and
+    ; restores every member before returning any failure. A sing-box.exe that did not exist before
+    ; this upgrade is removed on rollback. Never give nsExec a TerminateProcess timeout here—killing Rust during
     ; rollback would strand the stopped Service. Every SCM and IPC wait inside the helper is bounded.
     ; `--replace-runtime` records InstallStarted on the per-user update journal
     ; as soon as the replacement transaction starts. The App must not guess this
@@ -993,6 +994,10 @@ FunctionEnd
   Delete /REBOOTOK "$INSTDIR\tono-core.exe.rollback"
   Delete /REBOOTOK "$INSTDIR\tono-core.exe.restore"
   Delete /REBOOTOK "$INSTDIR\tono-core.exe.publish"
+  Delete /REBOOTOK "$INSTDIR\sing-box.exe.next"
+  Delete /REBOOTOK "$INSTDIR\sing-box.exe.rollback"
+  Delete /REBOOTOK "$INSTDIR\sing-box.exe.restore"
+  Delete /REBOOTOK "$INSTDIR\sing-box.exe.publish"
 !macroend
 
 Section CheckAndInstallVSRuntime
@@ -1280,10 +1285,9 @@ Section Install
   {{/each}}
 
   ; Stage external binaries under a non-live name. A connected Service owns tono-core.exe and
-  ; Windows correctly refuses to overwrite that mapped image. Confirmed repairs leave `.next` for
-  ; the Service helper's fail-closed three-executable transaction; a clean install has no live
-  ; target and publishes it immediately with one same-volume rename. Packaging gates keep this
-  ; loop to the single stable Mihomo binary until the helper explicitly supports another member.
+  ; sing-box.exe, and Windows refuses to overwrite a mapped image. Confirmed repairs leave `.next`
+  ; for the Service helper's fail-closed transaction (Mihomo, sing-box, Service, GUI). A clean
+  ; install has no live target and publishes each one immediately with one same-volume rename.
   {{#each binaries}}
     File /a "/oname={{this}}.next" "{{no-escape @key}}"
     ${If} $ConfirmedExistingInstall <> 1
@@ -1297,6 +1301,15 @@ Section Install
       ${EndIf}
     ${EndIf}
   {{/each}}
+
+  ; The App reads sing-box-sha256.txt beside sing-box.exe. Resources land under resources/.
+  ; Confirmed upgrades leave publication to the helper so a rolled-back introduction does not
+  ; keep a pin for a binary that was removed.
+  ${If} $ConfirmedExistingInstall <> 1
+  ${AndIf} ${FileExists} "$INSTDIR\sing-box.exe"
+  ${AndIf} ${FileExists} "$INSTDIR\resources\sing-box-sha256.txt"
+    CopyFiles /SILENT "$INSTDIR\resources\sing-box-sha256.txt" "$INSTDIR\sing-box-sha256.txt"
+  ${EndIf}
 
   ; Register the removal path BEFORE the Service is created and started. NSIS rolls back neither
   ; `File` nor an SCM registration, and StartVergeService can Abort after create/start succeeded

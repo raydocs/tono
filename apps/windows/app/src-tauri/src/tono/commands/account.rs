@@ -26,6 +26,8 @@ pub async fn load_credentials(state: &Arc<TonoState>) {
         let refresh = TonoCredentialStore::get_session_async().await;
         let id = TonoCredentialStore::get_async(CredentialKey::InstallationId).await;
         (refresh, id)
+    }, |installation_id| async move {
+        TonoCredentialStore::set_async(CredentialKey::InstallationId, &installation_id).await
     })
     .await;
     if rebind {
@@ -40,19 +42,28 @@ type SessionRead = Result<Option<crate::tono::credentials::StoredSession>, tono_
 
 /// Returns whether the adopted session was stored roaming by an earlier build and should now be
 /// bound to this machine ([`VaultSessionOwnership::Owned`]).
-async fn load_credentials_from<F, Fut>(state: &Arc<TonoState>, read: F) -> bool
+async fn load_credentials_from<F, Fut, P, PF>(state: &Arc<TonoState>, read: F, persist_id: P) -> bool
 where
     F: FnOnce() -> Fut,
     Fut: std::future::Future<Output = (SessionRead, VaultRead)>,
+    P: FnOnce(String) -> PF,
+    PF: std::future::Future<Output = Result<(), tono_core::credentials::CredentialError>>,
 {
-    let generation = {
+    let (generation, proposed_id) = {
         let inner = state.lock().await;
         if inner.credentials_loaded || inner.account_close.is_some() {
             return false;
         }
-        inner.sign_in_generation
+        (inner.sign_in_generation, inner.installation_id.clone())
     };
-    let outcome = tokio::time::timeout(CREDENTIAL_LOAD_TIMEOUT, read()).await;
+    let outcome = tokio::time::timeout(CREDENTIAL_LOAD_TIMEOUT, async {
+        let (refresh, id) = read().await;
+        let id = match id {
+            Ok(None) => persist_id(proposed_id.clone()).await.map(|()| Some(proposed_id)),
+            other => other,
+        };
+        (refresh, id)
+    }).await;
 
     let mut inner = state.lock().await;
     // Another hydration may have won while this vault read was in flight. More importantly,
@@ -62,7 +73,6 @@ where
         return false;
     }
     if inner.sign_in_generation != generation {
-        inner.credentials_loaded = true;
         return false;
     }
     // A fresh attempt must not inherit the previous verdict. Retry re-enters
@@ -84,21 +94,26 @@ where
     // means the next sign-in presents a new device.
     match id {
         Ok(Some(persisted)) => {
-            if let Ok(persisted) = normalize_installation_id(&persisted) {
-                inner.installation_id = persisted;
+            match normalize_installation_id(&persisted) {
+                Ok(persisted) => inner.installation_id = persisted,
+                Err(error) => {
+                    inner.credential_error = Some(error.to_string());
+                    return false;
+                }
             }
         }
         Ok(None) => {
-            // First run: persist the in-memory id off-thread (§2).
-            let installation_id = inner.installation_id.clone();
-            tokio::spawn(async move {
-                let _ = TonoCredentialStore::set_async(CredentialKey::InstallationId, &installation_id).await;
-            });
+            // A first-run id is usable only after the bounded write above acknowledges it.
+            inner.credential_error = Some("installation id was not persisted".to_string());
+            return false;
         }
-        Err(_) => {
-            // The id is not auth-critical: keep the ephemeral one.
+        Err(error) => {
+            // An unknown identity must not enroll a phantom device and evict another session.
+            inner.credential_error = Some(error.to_string());
+            return false;
         }
     }
+    inner.installation_id_ready = true;
     let mut rebind = false;
     match refresh {
         Ok(Some(stored)) => {
@@ -334,6 +349,14 @@ pub(crate) async fn begin_sign_in(
     if inner.account_close.is_some() {
         return Err("account sign-out is still reconciling".to_string());
     }
+    if !inner.installation_id_ready {
+        return Err(inner.credential_error.clone()
+            .unwrap_or_else(|| "installation identity is not ready; retry sign-in".to_string()));
+    }
+    // Interactive auth now owns the session. A late startup read must not hydrate the old token
+    // over its replacement, even when only the previous refresh-token read failed.
+    inner.credentials_loaded = true;
+    inner.credential_error = None;
     inner.sign_in_generation = inner.sign_in_generation.wrapping_add(1);
     state.audit().abandon_log_upload_owner();
     Ok((inner.client.clone(), inner.installation_id.clone(), inner.sign_in_generation))
@@ -657,6 +680,72 @@ mod lifecycle_tests {
     use tokio::sync::oneshot;
 
     #[tokio::test]
+    async fn installation_id_read_failure_blocks_sign_in_until_the_stable_id_is_loaded() {
+        let state = Arc::new(TonoState::for_test());
+        state.lock().await.installation_id_ready = false;
+        load_credentials_from(&state, || async {
+            (Ok(None), Err(tono_core::credentials::CredentialError::Store("installation id read failed".into())))
+        }, |_| async { panic!("a failed id read must not write a replacement") }).await;
+        {
+            let inner = state.lock().await;
+            assert!(!inner.credentials_loaded, "an unreadable identity must remain retryable");
+            assert!(inner.credential_error.is_some());
+        }
+        assert!(begin_sign_in(&state).await.is_err(), "a fresh process UUID must not enroll another device");
+        let stable = "9e107d9d-372b-4c81-8d2b-3f2d0a1b2c3d";
+        load_credentials_from(&state, || async { (Ok(None), Ok(Some(stable.into()))) },
+            |_| async { panic!("an existing id must not be rewritten") }).await;
+        let (_, installation_id, _) = begin_sign_in(&state).await.unwrap();
+        assert_eq!(installation_id, stable);
+        assert!(state.lock().await.credential_error.is_none());
+    }
+
+    #[tokio::test]
+    async fn a_first_run_identity_is_not_ready_before_its_vault_write_commits() {
+        let state = Arc::new(TonoState::for_test());
+        state.lock().await.installation_id_ready = false;
+        let proposed = state.lock().await.installation_id.clone();
+        let (entered, writing) = oneshot::channel();
+        let (release, resumed) = oneshot::channel();
+        let loading_state = state.clone();
+        let load = tokio::spawn(async move {
+            load_credentials_from(&loading_state, || async { (Ok(None), Ok(None)) },
+                move |id| async move {
+                    entered.send(id).unwrap();
+                    resumed.await.unwrap();
+                    Err(tono_core::credentials::CredentialError::Store("installation id write failed".into()))
+                }).await
+        });
+        assert_eq!(writing.await.unwrap(), proposed);
+        assert!(!state.lock().await.credentials_loaded, "enrollment must await durable identity");
+        release.send(()).unwrap();
+        load.await.unwrap();
+        assert!(begin_sign_in(&state).await.is_err(), "a refused write must not enroll an ephemeral device");
+        let expected = proposed.clone();
+        load_credentials_from(&state, || async { (Ok(None), Ok(None)) }, |id| async move {
+            assert_eq!(id, expected, "retry must keep this process's first-run identity");
+            Ok(())
+        }).await;
+        assert_eq!(begin_sign_in(&state).await.unwrap().1, proposed);
+    }
+
+    #[tokio::test]
+    async fn a_stable_installation_can_replace_an_unreadable_refresh_token() {
+        let state = Arc::new(TonoState::for_test());
+        state.lock().await.installation_id_ready = false;
+        let stable = "9e107d9d-372b-4c81-8d2b-3f2d0a1b2c3d";
+        load_credentials_from(&state, || async {
+            (Err(tono_core::credentials::CredentialError::Store("refresh token read failed".into())),
+                Ok(Some(stable.into())))
+        }, |_| async { panic!("an existing id must not be rewritten") }).await;
+        assert!(!state.lock().await.credentials_loaded, "restore can retry the token read");
+        assert_eq!(begin_sign_in(&state).await.unwrap().1, stable);
+        let inner = state.lock().await;
+        assert!(inner.credentials_loaded, "interactive auth supersedes old token hydration");
+        assert!(inner.credential_error.is_none());
+    }
+
+    #[tokio::test]
     async fn fresh_data_dir_does_not_adopt_a_vault_refresh_token() {
         let state = Arc::new(TonoState::for_test());
         let vault = |legacy_roaming: bool| move || async move {
@@ -667,7 +756,7 @@ mod lifecycle_tests {
             let id: VaultRead = Ok(Some("9e107d9d-372b-4c81-8d2b-3f2d0a1b2c3d".to_string()));
             (refresh, id)
         };
-        load_credentials_from(&state, vault(false)).await;
+        load_credentials_from(&state, vault(false), |_| async { Ok(()) }).await;
         {
             let mut inner = state.lock().await;
             assert!(inner.credentials_loaded);
@@ -677,7 +766,7 @@ mod lifecycle_tests {
             crate::tono::credentials::mark_vault_session_owned(&inner.catalog_dir).unwrap();
             inner.credentials_loaded = false;
         }
-        load_credentials_from(&state, vault(false)).await;
+        load_credentials_from(&state, vault(false), |_| async { Ok(()) }).await;
         {
             let inner = state.lock().await;
             assert_eq!(inner.credentials.refresh_token().unwrap().as_deref(), Some("previous-install-session"));
@@ -695,7 +784,7 @@ mod lifecycle_tests {
             assert!(!inner.catalog_cache().path().exists());
             std::fs::write(inner.policy_cache().path(), b"{}").unwrap();
         }
-        load_credentials_from(&upgraded, vault(true)).await;
+        load_credentials_from(&upgraded, vault(true), |_| async { Ok(()) }).await;
         let inner = upgraded.lock().await;
         assert_eq!(inner.credentials.refresh_token().unwrap().as_deref(), Some("previous-install-session"),
             "an upgrade must not sign out, and release the protection of, an account that never cached a catalog");
@@ -786,6 +875,7 @@ mod lifecycle_tests {
                 reality_short_id: "0123456789abcdef".into(),
                 protocol: tono_core::node::NodeProtocol::VlessReality,
                 tls_fingerprint: None,
+                certificate_public_key_sha256: None,
             }];
             inner.routing = Some(tono_core::CatalogRouting {
                 home_socks5: Some(tono_core::CatalogHomeSocks5 {
@@ -1017,6 +1107,7 @@ mod lifecycle_tests {
                 reality_short_id: "0123456789abcdef".into(),
                 protocol: tono_core::node::NodeProtocol::VlessReality,
                 tls_fingerprint: None,
+                certificate_public_key_sha256: None,
             }];
             inner.routing = Some(tono_core::CatalogRouting {
                 home_socks5: Some(tono_core::CatalogHomeSocks5 {

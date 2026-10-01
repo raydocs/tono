@@ -33,6 +33,8 @@ export function listStats(rows: readonly CustomerSummaryDto[], now: number): Lis
     usage: null, unmetered: 0, nearQuota: 0, expiringWeek: 0, expired: 0,
   };
   for (const row of rows) {
+    if ((row.lifecycle === 'active' || row.lifecycle === 'expired')
+        && row.expiresAt !== null && row.expiresAt < now) out.expired += 1;
     if (row.lifecycle !== 'active') continue;
     out.active += 1;
     if (row.connected.asOfSec !== null) {
@@ -48,8 +50,7 @@ export function listStats(rows: readonly CustomerSummaryDto[], now: number): Lis
       if (row.quotaBytes !== null && row.quotaBytes > 0 && used / row.quotaBytes >= NEAR_QUOTA) out.nearQuota += 1;
     }
     if (row.expiresAt !== null) {
-      if (row.expiresAt < now) out.expired += 1;
-      else if (row.expiresAt < now + WEEK_SEC) out.expiringWeek += 1;
+      if (row.expiresAt >= now && row.expiresAt < now + WEEK_SEC) out.expiringWeek += 1;
     }
   }
   return out;
@@ -61,18 +62,19 @@ export function meteredBytes(row: CustomerSummaryDto): number | null {
 }
 
 /**
- * Active customers by the week their paid time runs out: one column for the
- * lapsed ones still marked active, then `weeks` columns from today. Anyone
+ * Customers by the week their paid time runs out: one column for expired
+ * customers (including stale active rows), then `weeks` active columns from today. Anyone
  * further out, or with no date, is outside the question this chart answers.
  */
 export function expiryWeeks(rows: readonly CustomerSummaryDto[], now: number, weeks: number): number[] {
   const out = new Array<number>(weeks + 1).fill(0);
   for (const row of rows) {
-    if (row.lifecycle !== 'active' || row.expiresAt === null) continue;
+    if ((row.lifecycle !== 'active' && row.lifecycle !== 'expired') || row.expiresAt === null) continue;
     if (row.expiresAt < now) {
       out[0] = (out[0] ?? 0) + 1;
       continue;
     }
+    if (row.lifecycle !== 'active') continue;
     const week = Math.floor((row.expiresAt - now) / WEEK_SEC);
     const slot = week + 1;
     if (week < weeks) out[slot] = (out[slot] ?? 0) + 1;

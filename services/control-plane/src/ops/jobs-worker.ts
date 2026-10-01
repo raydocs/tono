@@ -112,6 +112,7 @@ async function executeCatalogRetire(
 
 async function executeCatalogRelist(e: Env, job: NodeJob): Promise<{ summary: string; resultJson: unknown }> {
   const block = typeof job.params.block === 'string' ? job.params.block : undefined;
+  const hy2Block = typeof job.params.hy2Block === 'string' ? job.params.hy2Block : undefined;
   const expectedRevision = Number.isSafeInteger(job.params.expectedRevision)
     ? Number(job.params.expectedRevision)
     : undefined;
@@ -120,6 +121,7 @@ async function executeCatalogRelist(e: Env, job: NodeJob): Promise<{ summary: st
   const result = await relistFleetNode(e, job.requestedBy, job.nodeName, {
     ...(expectedRevision != null ? { expectedRevision } : {}),
     ...(block ? { block } : {}),
+    ...(hy2Block ? { hy2Block } : {}),
   });
   if (!result.alreadyListed) {
     await writeChangeReceipt(e.DB, {

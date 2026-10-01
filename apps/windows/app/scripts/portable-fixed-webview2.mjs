@@ -62,6 +62,11 @@ async function resolvePortable() {
     )
   }
   zip.addLocalFile(stableMihomo)
+  const singBox = path.join(releaseDir, 'sing-box.exe')
+  if (!fs.existsSync(singBox)) {
+    throw new Error(`missing pinned sing-box at ${singBox}`)
+  }
+  zip.addLocalFile(singBox)
 
   if (!fs.existsSync(resourcesDir)) {
     throw new Error(`missing resources dir: ${resourcesDir}`)

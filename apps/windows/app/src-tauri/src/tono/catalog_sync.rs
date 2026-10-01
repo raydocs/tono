@@ -744,6 +744,7 @@ mod tests {
             reality_short_id: "0123456789abcdef".to_string(),
             protocol: NodeProtocol::VlessReality,
             tls_fingerprint: None,
+            certificate_public_key_sha256: None,
         }
     }
 
@@ -760,6 +761,7 @@ mod tests {
             reality_short_id: String::new(),
             protocol: NodeProtocol::Hysteria2,
             tls_fingerprint: Some("e3aa4a745aa90539ab1a493d940eeba7b4305b7516ab84167e46c98ad9fed3db".to_string()),
+            certificate_public_key_sha256: None,
         }
     }
 
