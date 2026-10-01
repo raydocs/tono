@@ -404,11 +404,11 @@ final class UpdateTransaction {
         if attempt.receipt.blockedReason == nil { attempt.receipt.blockedReason = .cancelled }
         try UpdateStorage.write(UpdateContractV1.canonical(attempt),
             to: storage.root + "/" + attempt.receipt.attemptId + ".json")
+        // Keep the retry owner until its launchd entry is gone. Otherwise a
+        // later launch can mistake this old loaded job for its own executor.
+        try effects.cleanupCommitted()
         ledger.attempt = nil
         try persist(ledger)
-        // The executor entry has nothing left to recover; retire it exactly
-        // like a committed transaction does.
-        try effects.cleanupCommitted()
     }
 
     func gate(method: String, path: String, peer: TonoAuthenticatedPeer) throws {
