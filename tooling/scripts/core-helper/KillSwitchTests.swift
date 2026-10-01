@@ -773,6 +773,35 @@ extension KillSwitchManager {
             released && releaseSteps == ["placeholder", "flush", "query", "intent", "hosts", "main", "reference"]
         )
 
+        // 11b. A rule file that cannot be rewritten (disk full, directory
+        //      unwritable) must not block the release either: the anchor is
+        //      still flushed and the intent still removed, as for the hosts
+        //      pins above. The displaced-main restore is skipped — a legacy
+        //      /etc/pf.conf would `load anchor from` the stale rules the
+        //      release could not clear — so "main" must not run. Recorded
+        //      effects only; nothing live is touched.
+        var unwritableReleaseSteps: [String] = []
+        let unwritableReleased = (try? releaseSequence(
+            writePlaceholder: {
+                unwritableReleaseSteps.append("placeholder")
+                throw HelperFailure.system("Could not commit a root-owned file.")
+            },
+            flushAnchor: {
+                unwritableReleaseSteps.append("flush")
+                return HelperCommandResult(status: 0, output: Data())
+            },
+            anchorStillActive: { unwritableReleaseSteps.append("query"); return false },
+            removeIntent: { unwritableReleaseSteps.append("intent") },
+            removeHostsPins: { unwritableReleaseSteps.append("hosts") },
+            restoreDisplacedMain: { unwritableReleaseSteps.append("main") },
+            releaseEnableReference: { unwritableReleaseSteps.append("reference") }
+        )) != nil
+        check(
+            "release-survives-unwritable-placeholder",
+            unwritableReleased
+                && unwritableReleaseSteps == ["placeholder", "flush", "query", "intent", "hosts", "reference"]
+        )
+
         // 12. A release puts back the main ruleset the emergency block
         //     displaced, only by reloading /etc/pf.conf and only when that
         //     file declares Tono's anchor (BRICK-M6, BRICK-M9). The on-disk
@@ -1457,6 +1486,44 @@ extension KillSwitchManager {
         } catch {
             return false
         }
+    }
+
+    /// A failed arm or sleep barrier must not flush a ruleset pfctl never
+    /// replaced. Only a load that was accepted, or that never answered, may
+    /// have committed.
+    static func runFailedCommitReleaseSelfTest() -> Bool {
+        !failedCommitReleasesInstalledBlock(load: .notIssued, strictKillSwitchEnabled: false)
+            && !failedCommitReleasesInstalledBlock(load: .rejected, strictKillSwitchEnabled: false)
+            && failedCommitReleasesInstalledBlock(
+                load: .acceptedOrUnknown,
+                strictKillSwitchEnabled: false
+            )
+            && !failedCommitReleasesInstalledBlock(
+                load: .acceptedOrUnknown,
+                strictKillSwitchEnabled: true
+            )
+    }
+
+    /// `/killswitch/health` disconnects the app without a release when `live`
+    /// is false. An unread sample and a down-read that the next read does not
+    /// confirm must not become that false.
+    static func runUnprovenHealthSelfTest() -> Bool {
+        struct Unreadable: Error {}
+        var confirmed = false
+        guard agreedFiltering(first: .success(true), confirmDown: {
+            confirmed = true
+            return false
+        }) == true, !confirmed else { return false }
+        guard agreedFiltering(first: .success(false), confirmDown: { false }) == false else {
+            return false
+        }
+        guard agreedFiltering(first: .success(false), confirmDown: { true }) == true else {
+            return false
+        }
+        guard agreedFiltering(first: .failure(Unreadable()), confirmDown: { false }) == nil else {
+            return false
+        }
+        return agreedFiltering(first: .success(false), confirmDown: { throw Unreadable() }) == nil
     }
 
     static func runNetworkSelfTest() -> Bool {
