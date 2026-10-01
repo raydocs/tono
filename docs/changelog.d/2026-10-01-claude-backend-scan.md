@@ -1,0 +1,11 @@
+## 2026-10-01 · Backend regression scan of the late merges, exit-agent scan, D1 migration audit
+- Scope: ops plan; covers `services/control-plane`, `services/ops-console`, `services/exit-agent`, `services/home-agent` and the D1 migrations.
+- Source: `origin/main` `0676435b`, refreshed at 10:05Z. Branch `docs/claude-backend-scan-20261001`. Report: `docs/agent-reports/2026-10-01-claude-backend-scan.md`.
+- Bug fixes: none in this PR. The one new P2 (CBS-XA-01, an exit-agent listing CLI timeout that skipped revocation) is fixed in #1232. Two P3s are filed as #1233.
+- New/improved: none.
+- Engineering and tests:
+  - Records only: 21 findings fragments and ledger row H17-G-F5, all merged tonight, moved from `in-PR` to `fixed` with links to the merged PRs.
+  - Reviewed 22 backend PRs merged after 04:45Z and found no regressions.
+- Verification: control-plane typecheck and targeted vitest pass. exit-agent (117) and home-agent (25) unittest pass. All 83 migrations apply cleanly to a fresh local D1. 702 source SQL statements compile against the migrated schema.
+- Candidates/release: source records only; no new candidate, deploy or publish.
+- Remaining limits: the migrations README index lacks 0092/0093. The shared-admin home rename concern needs an admin mistake and is not filed.

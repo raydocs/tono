@@ -1,0 +1,5 @@
+| ID | 问题（一句） | 状态 | Issue / PR | 等级 | 剩余限制 |
+|---|---|---|---|---|---|
+| CBS-XA-01 | An Xray client-listing CLI timeout aborts the exit-agent round before any revocation, including a disabled node's withdrawal | in-PR | hunt/claude-be-xa-listing-timeout | 低·已确认（P2） | Needs the listing CLI to hang past the 30 s subprocess limit or fail to start; live Xray acceptance not run |
+
+`installed_clients` (`services/exit-agent/reconcile_and_report.py:1061`) let `subprocess.TimeoutExpired` and `OSError` from the listing call escape. The callers catch only `Refusal`, so `run_once` exited before `reconcile` ran, and `withdraw_disabled_node` exited before removing anything. A client the durable inventory still records stayed authorized every round while the listing kept failing. The listing now reports "unknown" (None) on those exceptions, like a non-zero exit, so removal falls back to the durable inventory as designed. Sibling of EXIT-CLI-EXCEPTION-INVENTORY (#1009), which covered the add/remove calls but not the listing.

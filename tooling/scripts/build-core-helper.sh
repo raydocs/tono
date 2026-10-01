@@ -62,6 +62,19 @@ if [ -f "$contract_file" ]; then
       "change reaches nobody." >&2
     exit 1
   fi
+  # A build always writes the parsed source version next to the hash it just
+  # computed. Identical bytes with a different recorded version therefore is not
+  # a last-built record: the record was edited or merged without the version
+  # source, and the app would keep trusting the old daemon.
+  if [ "$helper_sources_hash" = "$recorded_hash" ] &&
+     [ "$helper_version" != "$recorded_version" ]; then
+    echo "build-core-helper: CONTRACT.sha256 records version" \
+      "$recorded_version for these exact sources but" \
+      "HelperProtocolVersion.current is $helper_version." >&2
+    echo "  Make the two agree (the version source and the record)" \
+      "before building." >&2
+    exit 1
+  fi
 fi
 module_cache_dir=$(mktemp -d /tmp/tono-helper-module-cache.XXXXXX)
 
