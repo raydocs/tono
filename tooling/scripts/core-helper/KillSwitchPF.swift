@@ -1619,7 +1619,11 @@ extension KillSwitchManager {
         }
     }
 
-    static func secureRead(_ path: String, maximumBytes: Int) throws -> Data {
+    static func secureRead(
+        _ path: String,
+        maximumBytes: Int,
+        requireRootOwnership: Bool = true
+    ) throws -> Data {
         // O_NONBLOCK: a FIFO with no writer (say at /etc/hosts) returns here at
         // once and the regular-file check below refuses it, instead of hanging
         // an arm, a start or a release. Regular-file reads are unaffected.
@@ -1631,8 +1635,7 @@ extension KillSwitchManager {
         var metadata = stat()
         guard fstat(fd, &metadata) == 0,
               (metadata.st_mode & mode_t(S_IFMT)) == mode_t(S_IFREG),
-              metadata.st_uid == 0,
-              metadata.st_mode & 0o022 == 0,
+              (!requireRootOwnership || (metadata.st_uid == 0 && metadata.st_mode & 0o022 == 0)),
               metadata.st_size >= 0,
               metadata.st_size <= maximumBytes else {
             throw HelperFailure.invalid("A root-owned file is unsafe.")
@@ -1657,7 +1660,10 @@ extension KillSwitchManager {
     static func atomicWrite(
         path: String,
         data: Data,
-        permissions: mode_t
+        permissions: mode_t,
+        owner: uid_t = 0,
+        group: gid_t = 0,
+        allowForeignExisting: Bool = false
     ) throws {
         let parent = (path as NSString).deletingLastPathComponent
         if parent == "/Library/Application Support/Tono" {
@@ -1666,8 +1672,7 @@ extension KillSwitchManager {
         var existing = stat()
         if lstat(path, &existing) == 0 {
             guard (existing.st_mode & mode_t(S_IFMT)) == mode_t(S_IFREG),
-                  existing.st_uid == 0,
-                  existing.st_mode & 0o022 == 0 else {
+                  (allowForeignExisting || (existing.st_uid == 0 && existing.st_mode & 0o022 == 0)) else {
                 throw HelperFailure.invalid("Refusing to replace an unsafe root-owned file.")
             }
         } else if errno != ENOENT {
@@ -1703,9 +1708,9 @@ extension KillSwitchManager {
                 offset += count
             }
         }
-        guard fsync(fd) == 0,
-              fchown(fd, 0, 0) == 0,
+        guard fchown(fd, owner, group) == 0,
               fchmod(fd, permissions) == 0,
+              fsync(fd) == 0,
               rename(temporary, path) == 0 else {
             throw HelperFailure.system("Could not commit a root-owned file.")
         }
