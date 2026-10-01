@@ -7,3 +7,4 @@
 - 验证：rustfmt --check clean on the new code; cargo not run on the MacBook (AGENTS.md), hosted Windows CI pending.
 - 候选/发布：仅源码，无新候选；未部署、发布。
 - 剩余限制：tray click on a real Windows desktop not exercised.
+- 续记（2026-10-01）：R5-WIN-PARALLEL-QUIT-FLOWS（Codex review of 9cdc5221）. `quit_or_resync()` is now single-flight over the whole Quit → cancelled-resync lifecycle; a second Quit from the tray or window while one is in flight returns without starting a parallel flow. One tokio regression `a_second_quit_while_one_is_in_flight_does_not_run`. Restart and the dev quit entry are not behind this guard.
