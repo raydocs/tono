@@ -500,22 +500,26 @@ fn spawn_startup_release_retry() {
                 drop(running);
                 return;
             }
-            let new_session_wanted = tokio::fs::read(intent_path())
+            let intent = tokio::fs::read(intent_path())
                 .await
                 .ok()
-                .and_then(|bytes| serde_json::from_slice::<IntentRecord>(&bytes).ok())
-                .is_some_and(|intent| intent.wanted);
-            if new_session_wanted {
+                .and_then(|bytes| serde_json::from_slice::<IntentRecord>(&bytes).ok());
+            if intent.as_ref().is_some_and(|intent| intent.wanted) {
                 drop(running);
                 return;
             }
             let release: Result<()> = async {
                 remove_all_filters_unlocked().await?;
                 sweep_legacy_sublayers_unlocked().await;
-                match tokio::fs::remove_file(intent_path()).await {
-                    Ok(()) => {}
-                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-                    Err(error) => return Err(error.into()),
+                if intent.is_some_and(|intent| intent.reconnect_after_release) {
+                    // A retry must retain the same crash-reconnect intent as normal startup.
+                    RECONNECT_AFTER_RELEASE.store(true, Ordering::Release);
+                } else {
+                    match tokio::fs::remove_file(intent_path()).await {
+                        Ok(()) => {}
+                        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                        Err(error) => return Err(error.into()),
+                    }
                 }
                 *armed_guard() = None;
                 TUNNEL_PERMIT_RENDERED.store(false, Ordering::Relaxed);
@@ -1212,8 +1216,6 @@ async fn install_unlocked(armed: &Armed) -> Result<()> {
 /// from *that* read — see [`rule_config_rendering`]. `lock` is the only such caller, and it is
 /// the one where a second, disagreeing read is terminal.
 async fn install_unlocked_for(armed: &Armed, current_core: Option<CoreInstance>) -> Result<()> {
-    // A new arm must not leave crash-time AI names pointed at the sinkhole.
-    crate::core::selective_layer::remove().await;
     let config = rule_config_rendering(armed, current_core);
     let tunnel_permit_expected = config.tun_luid.is_some();
     let expected = wfp_model::expected_filters(&config);
@@ -1231,6 +1233,8 @@ async fn install_unlocked_for(armed: &Armed, current_core: Option<CoreInstance>)
         note_verify(result.is_ok());
         if result.is_ok() {
             RESTORED_BARRIER_UNPROVEN.store(false, Ordering::Release);
+            // Retire the crash-time AI hold only after its replacement is proven.
+            crate::core::selective_layer::remove().await;
         }
         result
     }
@@ -1256,6 +1260,7 @@ async fn install_unlocked_for(armed: &Armed, current_core: Option<CoreInstance>)
         }
         TUNNEL_PERMIT_RENDERED.store(tunnel_permit_expected, Ordering::Relaxed);
         RESTORED_BARRIER_UNPROVEN.store(false, Ordering::Release);
+        crate::core::selective_layer::remove().await;
         Ok(())
     }
 }
@@ -2740,6 +2745,9 @@ async fn release_unproven_wanted_session_unlocked() -> Result<()> {
     *armed_guard() = None;
     TUNNEL_PERMIT_RENDERED.store(false, Ordering::Relaxed);
     RECONNECT_AFTER_RELEASE.store(true, Ordering::Release);
+    // WFP is already gone. Recovery keeps only the existing narrow AI hold;
+    // its best-effort installation cannot refuse or undo the general release.
+    crate::core::selective_layer::finish_release(true).await;
     let tombstone = crash_recovery_tombstone();
     match atomic_write(&intent_path(), &serde_json::to_vec_pretty(&tombstone)?).await {
         Ok(()) => {
@@ -2943,6 +2951,9 @@ async fn release_general_traffic_unlocked(reason: &str) -> Result<()> {
     TUNNEL_PERMIT_RENDERED.store(false, Ordering::Relaxed);
     RESTORED_BARRIER_UNPROVEN.store(false, Ordering::Release);
     note_verify(false);
+    // Crash/corrupt-state recovery must retain the secondary AI floor just like
+    // other non-strict failure releases, after the general block is removed.
+    crate::core::selective_layer::finish_release(true).await;
     Ok(())
 }
 
@@ -3588,6 +3599,17 @@ pub fn spawn_windows_kill_switch_watchdog() {
 /// still present, which the uninstall helper's own sweep (`with_resolver_rule_proof`) checks
 /// again and blocks on with result 3.
 pub async fn emergency_disarm_windows_kill_switch() -> Result<()> {
+    emergency_disarm_with(false).await
+}
+
+/// Automatic failed-update recovery uses the same WFP/DNS proof and reporting,
+/// but retains the secondary AI hold. The caller must first exclude strict mode
+/// and stop the Service while holding the repair and singleton owner gates.
+pub async fn emergency_disarm_windows_kill_switch_applying_narrow() -> Result<()> {
+    emergency_disarm_with(true).await
+}
+
+async fn emergency_disarm_with(apply_narrow: bool) -> Result<()> {
     let _operation = WFP_OPERATION.lock().await;
     // This is still the fail-open escape hatch: WFP objects are removed even if protected DNS
     // cannot be restored. The DNS failure is nevertheless returned *after* WFP and intent
@@ -3677,9 +3699,9 @@ pub async fn emergency_disarm_windows_kill_switch() -> Result<()> {
     // the product promises. On engine failure the reported state therefore stays "armed".
     #[cfg(all(windows, not(feature = "test")))]
     engine_call("emergency disarm", crate::core::wfp::emergency_disarm).await?;
-    // WFP is gone. Drop the secondary hold too. A failure here must not
-    // report the barrier as still up.
-    crate::core::selective_layer::remove().await;
+    // WFP is gone. Explicit Restore removes the secondary hold; automatic
+    // failure recovery applies it. Neither may undo or refuse this release.
+    crate::core::selective_layer::finish_release(apply_narrow).await;
     *armed_guard() = None;
     *last_verify_guard() = None;
     TUNNEL_PERMIT_RENDERED.store(false, Ordering::Relaxed);
@@ -3971,6 +3993,32 @@ mod tests {
 
     #[tokio::test]
     #[serial]
+    async fn a_failed_arm_keeps_the_existing_secondary_ai_hold() -> Result<()> {
+        cleanup().await;
+        crate::core::selective_layer::finish_release(true).await;
+        let failures = SimulatedStateFailures::arm(false, true);
+
+        arm_bootstrap(&test_config(), "/opt/tono/mihomo", "owner-alice")
+            .await
+            .expect_err("the live WFP installation fails");
+        assert!(
+            crate::core::selective_layer::test_hold_active(),
+            "a failed replacement barrier must not remove the existing AI hold"
+        );
+
+        drop(failures);
+        arm_bootstrap(&test_config(), "/opt/tono/mihomo", "owner-alice").await?;
+        assert!(status().await.wanted);
+        assert!(
+            !crate::core::selective_layer::test_hold_active(),
+            "a successful replacement removes the sinkhole so tunnel DNS can work"
+        );
+        cleanup().await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
     async fn arm_inherits_verification_only_for_same_owner() -> Result<()> {
         cleanup().await;
         locked_direct_test_session().await?;
@@ -4058,6 +4106,7 @@ mod tests {
     }
 
     async fn cleanup() {
+        crate::core::selective_layer::remove().await;
         TEST_REMOVE_FAILURE.store(false, Ordering::Relaxed);
         TEST_REMOVE_ATTEMPTS.store(0, Ordering::Relaxed);
         TEST_RESIDUAL_FILTER_KEYS.lock().unwrap().clear();
@@ -4173,6 +4222,10 @@ mod tests {
             "no Core process and no replay releases before the cap"
         );
         assert!(released.reconnect_after_release);
+        assert!(
+            crate::core::selective_layer::test_hold_active(),
+            "an unproven Core must leave AI destinations blocked after general traffic is released"
+        );
         let on_disk: IntentRecord =
             serde_json::from_slice(&tokio::fs::read(intent_path()).await?)?;
         assert!(!on_disk.wanted);
@@ -4620,6 +4673,36 @@ mod tests {
 
     #[tokio::test]
     #[serial]
+    async fn startup_release_retry_preserves_the_crash_reconnect_marker() -> Result<()> {
+        cleanup().await;
+        let intent = crash_recovery_tombstone();
+        atomic_write(&intent_path(), &serde_json::to_vec_pretty(&intent)?).await?;
+        let failures = SimulatedStateFailures::arm_removal();
+
+        restore_on_service_start()
+            .await
+            .expect_err("the initial WFP removal fails");
+        drop(failures);
+        tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            while STARTUP_RELEASE_RETRY_RUNNING.load(Ordering::Acquire) {
+                tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+            }
+        })
+        .await?;
+
+        assert!(
+            status().await.reconnect_after_release,
+            "successful retry must still tell the app to reconnect"
+        );
+        let persisted: IntentRecord = serde_json::from_slice(&tokio::fs::read(intent_path()).await?)?;
+        assert!(persisted.reconnect_after_release);
+        assert!(!persisted.wanted);
+        cleanup().await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
     async fn explicit_release_tombstone_survives_until_replacement_start_consumes_it() -> Result<()>
     {
         cleanup().await;
@@ -4825,6 +4908,12 @@ mod tests {
         );
         assert!(!status().await.wanted);
         assert_eq!(tokio::fs::read(intent_path()).await?, b"{ not json");
+        assert!(
+            crate::core::selective_layer::test_hold_active(),
+            "crash recovery must retain the narrow AI hold after opening general traffic"
+        );
+        release().await?;
+        assert!(!crate::core::selective_layer::test_hold_active());
         cleanup().await;
         Ok(())
     }
@@ -5053,6 +5142,32 @@ mod tests {
         assert!(ARMED.lock().unwrap().is_none());
         assert!(tokio::fs::metadata(dns_snapshot_path()).await.is_err());
         assert_disarmed_tombstone_present().await?;
+        cleanup().await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn failed_update_emergency_release_keeps_the_secondary_ai_hold() -> Result<()> {
+        cleanup().await;
+        arm_bootstrap(&test_config(), "/opt/tono/mihomo", "owner-alice").await?;
+        simulate_machine_still_on_loopback_dns();
+        atomic_write(&dns_snapshot_path(), b"{ corrupt").await?;
+
+        let error = emergency_disarm_windows_kill_switch_applying_narrow()
+            .await
+            .expect_err("DNS restore failure must still be reported after WFP removal");
+        assert!(
+            format!("{error:#}").contains(crate::core::dns::WFP_REMOVED_CONTINUE_PREFIX)
+        );
+        assert!(!status().await.wanted);
+        assert!(
+            crate::core::selective_layer::test_hold_active(),
+            "automatic update failure must retain the narrow AI hold after opening general traffic"
+        );
+
+        emergency_disarm_windows_kill_switch().await.unwrap_err();
+        assert!(!crate::core::selective_layer::test_hold_active());
         cleanup().await;
         Ok(())
     }
@@ -6439,6 +6554,7 @@ mod tests {
     /// "Locked with the permit retracted". `tunnel_permit_rendered` changes only after the exact
     /// install/verify operation succeeds, never while merely constructing an expected model.
     #[tokio::test]
+    #[serial]
     async fn the_status_flag_tracks_what_the_last_exact_install_proved() {
         let running = CoreInstance {
             pid: 90,

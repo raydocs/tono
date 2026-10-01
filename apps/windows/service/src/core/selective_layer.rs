@@ -13,6 +13,14 @@ use super::selective_fail_open;
 
 const STEP_BUDGET: Duration = Duration::from_secs(3);
 
+#[cfg(test)]
+static TEST_HOLD_ACTIVE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+#[cfg(test)]
+pub(super) fn test_hold_active() -> bool {
+    TEST_HOLD_ACTIVE.load(std::sync::atomic::Ordering::SeqCst)
+}
+
 pub async fn remove() {
     let _ = tokio::time::timeout(STEP_BUDGET, tokio::task::spawn_blocking(remove_blocking)).await;
 }
@@ -43,10 +51,16 @@ fn apply_blocking() {
 }
 
 #[cfg(not(all(windows, not(feature = "test"))))]
-fn remove_blocking() {}
+fn remove_blocking() {
+    #[cfg(test)]
+    TEST_HOLD_ACTIVE.store(false, std::sync::atomic::Ordering::SeqCst);
+}
 
 #[cfg(not(all(windows, not(feature = "test"))))]
-fn apply_blocking() {}
+fn apply_blocking() {
+    #[cfg(test)]
+    TEST_HOLD_ACTIVE.store(true, std::sync::atomic::Ordering::SeqCst);
+}
 
 #[cfg(all(windows, not(feature = "test")))]
 fn run_commands(commands: &[Vec<&str>]) {

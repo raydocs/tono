@@ -318,12 +318,15 @@ nonisolated enum HelperProtocolVersion {
     ///   pfctl does not answer, and reports down only when a second read
     ///   agrees. A 4.52.7 daemon still drops a live ruleset on `pfctl -nf`
     ///   failure and treats one unread health sample as "not filtering".
-    /// - 4.52.10 → 4.52.11: update-failure and unreadable-ledger emergency
+    /// - 4.52.10 → 4.52.11: one protected-DNS server-count cap (32) for save,
+    ///   load and write; enable refuses over-cap lists before any change (MAC-
+    ///   DNS-SNAPSHOT-OVER-8).
+    /// - 4.52.11 → 4.52.12: update-failure and unreadable-ledger emergency
     ///   release restore a saved dead-loopback DNS snapshot and apply the
     ///   secondary AI sinkhole after clearing PF intent (same class as a
     ///   crash/hang release). Previously `releaseInstalledBlock` alone left
     ///   DNS on 127.0.0.1 and skipped SelectiveFailOpen.
-    static let current = "4.52.11"
+    static let current = "4.52.12"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS
