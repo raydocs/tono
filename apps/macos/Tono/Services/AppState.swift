@@ -86,6 +86,8 @@ final class AppState {
     var lastConnectionStageDurations: [StageDuration] = []
     var disconnectionStage: DisconnectionStage = .finishingOperation
     var connectionStartedAt: Date?
+    /// When the current session became connected; consumed once at teardown.
+    @ObservationIgnored var connectedSessionStartedAt: Date?
     var connectionStageStartedAt: Date?
     var disconnectionStartedAt: Date?
     var completedConnectionStages: Set<ConnectionStage> = []
