@@ -36,14 +36,49 @@ async fn release_retires_run_intent_when_the_active_owner_record_is_corrupt() ->
     tokio::fs::write(paths.active_owner_path(), b"{interrupted owner record").await?;
     assert!(load_active_owner().await?.is_none());
 
-    super::retire_unrecorded_owner_core(&owner).await?;
+    super::retire_unrecorded_owner_core(&owner)
+        .await
+        .map_err(|failure| anyhow::anyhow!("{failure:#}"))?;
     let still_wanted = load_owner_desired_state(&owner.key).await?.core_should_be_running;
     tokio::fs::remove_file(&desired_path).await?;
     assert!(!still_wanted, "a released Core must not retain runnable desired state");
 
     // An idle release must not manufacture a state file or gain a new disk-write dependency.
-    super::retire_unrecorded_owner_core(&owner).await?;
+    super::retire_unrecorded_owner_core(&owner)
+        .await
+        .map_err(|failure| anyhow::anyhow!("{failure:#}"))?;
     assert!(!desired_path.exists());
+    Ok(())
+}
+
+#[tokio::test]
+#[serial]
+async fn explicit_release_proceeds_when_the_run_intent_cannot_be_retired() -> anyhow::Result<()> {
+    use crate::core::paths::service_paths;
+
+    let _lifecycle = super::OWNER_LIFECYCLE_LOCK.lock().await;
+    let owner = owner(97_014);
+    // A directory where the desired-state file belongs: every read and write of it fails,
+    // like a persistent ProgramData ACL or AV-handle failure.
+    let desired_path = service_paths()
+        .for_owner_key(&owner.key)
+        .desired_state_path();
+    tokio::fs::create_dir_all(&desired_path).await?;
+    clear_active_owner().await?;
+
+    let retired = super::retire_unrecorded_owner_core(&owner).await;
+    let bookkeeping = matches!(retired, Err(super::OwnerRollbackFailure::Bookkeeping(_)));
+    let released = super::release_despite_bookkeeping(retired);
+    tokio::fs::remove_dir_all(&desired_path).await?;
+
+    assert!(
+        bookkeeping,
+        "a confirmed stop with a failed run-intent read is bookkeeping, not an unconfirmed stop"
+    );
+    assert!(
+        released.is_ok(),
+        "Restore must not stay refused after the Core stop is confirmed"
+    );
     Ok(())
 }
 
