@@ -30,6 +30,7 @@ export function LinesBand({ rows }: { rows: readonly HomeLineDto[] | null }) {
 
   const rents = rentByCurrency(all);
   const rentText = rents.map((row) => formatMoney(row.amount, row.currency)).filter((text): text is string => text !== null);
+  const primaryRent = rentText[0];
 
   const used = active.map(usedBytes);
   const metered = used.filter((value): value is number => value !== null);
@@ -53,7 +54,7 @@ export function LinesBand({ rows }: { rows: readonly HomeLineDto[] | null }) {
       />
       <StatTile
         label={words.stat.rent}
-        value={rentText.length === 0 ? null : privacy.money(rentText[0])}
+        value={primaryRent === undefined ? null : privacy.money(primaryRent)}
         sub={ready
           ? rentText.length === 0 ? words.rentNone
             : rentText.length === 1 ? words.rentOnly : words.rentSub(privacy.money(rentText.slice(1).join(' · ')))

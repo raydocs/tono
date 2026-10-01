@@ -318,10 +318,15 @@ function parseLine(raw: string): ParsedLine | null {
   } else {
     const parts = line.split(':');
     if (parts.length !== 4 && parts.length !== 5) return null;
-    host = parts[0];
-    port = Number(parts[1]);
-    username = parts[2];
-    password = parts[3];
+    const hostPart = parts[0];
+    const portPart = parts[1];
+    const userPart = parts[2];
+    const passPart = parts[3];
+    if (hostPart === undefined || portPart === undefined || userPart === undefined || passPart === undefined) return null;
+    host = hostPart;
+    port = Number(portPart);
+    username = userPart;
+    password = passPart;
     notes = parts[4] || null;
   }
   if (!host || !username || !password) return null;
@@ -539,6 +544,10 @@ function homeExitRoutes(request: PublishRequest): boolean {
     return true;
   }
   const row = store.homeExits[index];
+  if (row === undefined) {
+    sendEmpty(res, 404);
+    return true;
+  }
 
   if (req.method === 'PATCH') {
     void readBody(req).then((body) => {

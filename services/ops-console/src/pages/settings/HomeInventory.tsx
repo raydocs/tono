@@ -339,8 +339,9 @@ function ProbeCell({ row }: { row: HomeExit }) {
 function BoundCell({ count, who }: { count: number | null; who: readonly string[] }) {
   if (count === null) return <Value value={null} source={copy.sourceWord.engine} mono />;
   if (count === 0) return <span className="text-[var(--muted-foreground)]">{words.idle}</span>;
-  if (who.length === 0) return <span className="font-mono">{words.boundUnit(count)}</span>;
-  const text = who.length === 1 && count === 1 ? who[0] : board.whoMore(who[0], count - 1);
+  const first = who[0];
+  if (first === undefined) return <span className="font-mono">{words.boundUnit(count)}</span>;
+  const text = who.length === 1 && count === 1 ? first : board.whoMore(first, count - 1);
   return (
     <span className="flex min-w-0 flex-col items-end leading-tight" title={who.join('\n')}>
       <span className="font-mono">{words.boundUnit(count)}</span>
