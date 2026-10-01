@@ -1,6 +1,16 @@
 // Traffic-quota cycles on cumulative interface counters. Production callers
 // inject them; the rollup columns are net_in_last / net_out_last (300s, 3600s).
 
+import {
+  closeOpenCycle,
+  insertOpenCycle,
+  newId,
+  openCycleRow,
+  replaceExpiredOpenCycle,
+} from './quota-cycle';
+
+export { closeOpenCycle, newId, openCycleRow };
+
 type Row = Record<string, any>;
 
 const DAY = 86400;
@@ -218,10 +228,6 @@ function utcDay(unix: number): number {
   return Math.floor(unix / DAY) * DAY;
 }
 
-export function newId(): string {
-  return crypto.randomUUID();
-}
-
 function missingTable(error: unknown): boolean {
   return String(error).includes('no such table');
 }
@@ -236,41 +242,6 @@ function asKind(value: unknown): CycleKind {
 function asCounts(value: unknown): QuotaCounts {
   if (value === 'in' || value === 'out' || value === 'in_out') return value;
   return 'in_out';
-}
-
-export async function openCycleRow(db: D1Database, nodeName: string): Promise<Row | null> {
-  return db.prepare(
-    "SELECT * FROM node_traffic_cycles WHERE node_name = ? AND status = 'open'",
-  ).bind(nodeName).first<Row>();
-}
-
-export async function closeOpenCycle(db: D1Database, nodeName: string, nowSec: number): Promise<void> {
-  const open = await openCycleRow(db, nodeName);
-  if (!open) return;
-  await db.prepare("UPDATE node_traffic_cycles SET status = 'closed', updated_at = ? WHERE id = ?")
-    .bind(nowSec, open.id).run();
-}
-
-async function insertOpenCycle(
-  db: D1Database,
-  nodeName: string,
-  bounds: CycleBounds,
-  quota: number | null,
-  counters: NetCounters,
-  nowSec: number, previous: Row | null = null, // expired cycle: carry its last counters over the gap
-): Promise<Row> {
-  const cycleId = newId();
-  await db.prepare(
-    `INSERT INTO node_traffic_cycles(
-       id, node_name, cycle_start, cycle_end, quota_bytes, used_bytes,
-       counter_in_start, counter_out_start, counter_in_last, counter_out_last,
-       resets_detected, status, updated_at
-     ) VALUES(?, ?, ?, ?, ?, 0, ?, ?, ?, ?, 0, 'open', ?)`,
-  ).bind(
-    cycleId, nodeName, bounds.start, bounds.end, quota,
-    counters.in, counters.out, previous?.counter_in_last ?? counters.in, previous?.counter_out_last ?? counters.out, nowSec,
-  ).run();
-  return (await db.prepare('SELECT * FROM node_traffic_cycles WHERE id = ?').bind(cycleId).first<Row>())!;
 }
 
 export function boundsFor(profile: QuotaProfile, nowSec: number): CycleBounds | null {
@@ -306,10 +277,8 @@ export async function rollNodeCycle(
 
   const expired = open && Number(open.cycle_end) <= nowSec && kind !== 'manual' ? open : null;
   if (expired) {
-    await db.prepare(
-      "UPDATE node_traffic_cycles SET status = 'closed', updated_at = ? WHERE id = ?",
-    ).bind(nowSec, expired.id).run();
-    open = null;
+    open = await replaceExpiredOpenCycle(db, name, expected, quota, counters, nowSec, expired);
+    if (!open && !expected) return null;
   }
   if (!open) {
     if (!expected) return null;

@@ -4,7 +4,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { spawnSync } from 'node:child_process'
 import test from 'node:test'
-import { countTypeScriptErrors, readBaseline, ratchetResult } from './unchecked-index-ratchet.mjs'
+import { fileURLToPath } from 'node:url'
+import { countTypeScriptErrors, readBaseline, ratchetResult, resolveCommand } from './unchecked-index-ratchet.mjs'
 
 test('counts tsc diagnostic lines and ignores other text', () => {
   const output = [
@@ -40,4 +41,34 @@ test('the command fails closed when the compiler reports one new error', () => {
   ], { encoding: 'utf8' })
   assert.equal(run.status, 1)
   assert.match(run.stdout, /rose from 0 to 1/)
+})
+
+test('a Windows node_modules shim uses the .cmd file when the package cannot be resolved', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'unchecked-index-shim-'))
+  writeFileSync(join(dir, 'package.json'), '{"name":"empty","private":true}\n')
+  const tsc = resolveCommand(['./node_modules/.bin/tsc', '--noEmit'], { platform: 'win32', cwd: dir })
+  assert.equal(tsc.file, './node_modules/.bin/tsc.cmd')
+  assert.equal(tsc.shell, true)
+  assert.deepEqual(tsc.args, ['--noEmit'])
+  const vite = resolveCommand(['./node_modules/.bin/vite', 'build'], { platform: 'win32', cwd: dir })
+  assert.equal(vite.file, './node_modules/.bin/vite.cmd')
+  assert.equal(vite.shell, true)
+  const linux = resolveCommand(['./node_modules/.bin/tsc', '--noEmit'], { platform: 'linux', cwd: dir })
+  assert.equal(linux.file, './node_modules/.bin/tsc')
+  assert.equal(linux.shell, false)
+  const other = resolveCommand(['git', 'status'], { platform: 'win32', cwd: dir })
+  assert.equal(other.file, 'git')
+  assert.equal(other.shell, false)
+})
+
+test('the tsc shim runs typescript/bin/tsc with this node', () => {
+  const cwd = fileURLToPath(new URL('./control-plane/', import.meta.url))
+  const planned = resolveCommand(['./node_modules/.bin/tsc', '--version'], { platform: 'win32', cwd })
+  assert.equal(planned.file, process.execPath)
+  assert.equal(planned.shell, false)
+  assert.match(planned.args[0], /[/\\]typescript[/\\]bin[/\\]tsc$/)
+  assert.deepEqual(planned.args.slice(1), ['--version'])
+  const run = spawnSync(planned.file, planned.args, { cwd, encoding: 'utf8' })
+  assert.equal(run.status, 0, run.stderr)
+  assert.match(run.stdout, /Version/)
 })

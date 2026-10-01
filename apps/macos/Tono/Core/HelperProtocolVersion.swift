@@ -321,11 +321,28 @@ nonisolated enum HelperProtocolVersion {
     /// - 4.52.10 → 4.52.11: one protected-DNS server-count cap (32) for save,
     ///   load and write; enable refuses over-cap lists before any change (MAC-
     ///   DNS-SNAPSHOT-OVER-8).
-    /// - 4.52.11 → 4.52.12: a Protected Offline update recovers fail-open. The
+    /// - 4.52.11 → 4.52.12: the watchdog releases a bootstrap-only block whose
+    ///   recorded app owner died before committing the tunnel (MAC-ORPHAN-
+    ///   BOOTSTRAP-PF).
+    /// - 4.52.12 → 4.52.13: update-failure and unreadable-ledger emergency
+    ///   release restore a saved dead-loopback DNS snapshot and apply the
+    ///   secondary AI sinkhole after clearing PF intent (same class as a
+    ///   crash/hang release). Previously `releaseInstalledBlock` alone left
+    ///   DNS on 127.0.0.1 and skipped SelectiveFailOpen.
+    /// - 4.52.13 → 4.52.14: DNS writes refuse another preferences
+    ///   writer's lock promptly so helper requests and recovery can continue.
+    /// - 4.52.14 → 4.52.15: DNS restore and service handoff retry
+    ///   Apply before retiring originals already committed to disk.
+    /// - 4.52.15 → 4.52.16: Automatic failed commits and orphaned bootstrap releases preserve the secondary AI hold after opening general traffic.
+    /// - 4.52.16 → 4.52.17: exhausted App recovery has an AI-preserving release intent.
+    /// - 4.52.17 → 4.52.18: resolved update retirement keeps its active
+    ///   receipt until executor-job cleanup succeeds, preserving retry ownership.
+    /// - 4.52.18 → 4.52.19: a Protected Offline update recovers fail-open. The
     ///   successor helper releases PF at launch with the Core stopped, so an
     ///   observed Unprotected state now satisfies a Protected Offline
-    ///   recovery and commit; Connected still requires Connected.
-    static let current = "4.52.12"
+    ///   recovery and commit; Connected still requires Connected. The
+    ///   secondary AI hold on that standard release is unchanged.
+    static let current = "4.52.19"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS

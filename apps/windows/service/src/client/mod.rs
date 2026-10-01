@@ -238,7 +238,8 @@ pub async fn update_transaction(
 ) -> Result<Response<crate::update_wire::UpdateStatus>> {
     let seconds = match request {
         crate::update_wire::UpdateRequest::Prepare { .. } => 240,
-        crate::update_wire::UpdateRequest::Disconnect => 65,
+        crate::update_wire::UpdateRequest::Disconnect
+            | crate::update_wire::UpdateRequest::DisconnectApplyingNarrow => 65,
         _ => 20,
     };
     protected_call(Verb::Post, IpcCommand::UpdateTransaction, credentials, None,

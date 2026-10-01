@@ -19,6 +19,9 @@ import XCTest
 /// This test cannot be run against that code (it has no `observe:` seam and
 /// the old path shelled out), so the red state is that reasoning plus a
 /// compile failure, not a recorded failing run.
+///
+/// Also holds the SystemProxy bounded-wait regression
+/// (MAC-PROXY-PROMPT-UNBOUNDED), the only other test of SystemProxy helpers.
 final class ProtectedDNSServiceSelectionTests: XCTestCase {
 
     func testWiredIPv4PrimaryIsSelectedWhileWiFiIsAlsoUp() {
@@ -35,6 +38,28 @@ final class ProtectedDNSServiceSelectionTests: XCTestCase {
         XCTAssertEqual(
             SystemProxy.primaryNetworkService(observe: { observation }),
             "Ethernet"
+        )
+    }
+
+    /// MAC-PROXY-PROMPT-UNBOUNDED regression: the administrator prompt behind
+    /// `networksetup` used to be waited on forever, wedging every privileged
+    /// coordinator caller. The bounded wait must kill a subprocess that
+    /// outlives its deadline and report the timeout.
+    func testBoundedWaitKillsSubprocessPastItsDeadline() throws {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/sleep")
+        process.arguments = ["5"]
+        try process.run()
+
+        let started = Date()
+        let timedOut = SystemProxy.waitForExit(process, timeout: 0.5)
+
+        XCTAssertTrue(timedOut)
+        XCTAssertFalse(process.isRunning)
+        XCTAssertLessThan(
+            Date().timeIntervalSince(started),
+            5,
+            "the wait must give up well before sleep exits on its own"
         )
     }
 }

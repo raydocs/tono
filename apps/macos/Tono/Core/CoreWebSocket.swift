@@ -31,8 +31,6 @@ final class CoreWebSocket {
     private var watchdogTask: Task<Void, Never>?
     private var lastTrafficMessageAt: Date?
     private var lastConnectionsMessageAt: Date?
-    private var logsPingStartedAt: Date?
-    private var lastLogsPingAt: Date?
     private var stalledStreams = Set<String>()
 
     var onTraffic: ((TrafficData) -> Void)?
@@ -217,8 +215,6 @@ final class CoreWebSocket {
         components.queryItems = [URLQueryItem(name: "level", value: level)]
         let task = createTask(url: components.url!)
         logsTask = task
-        logsPingStartedAt = nil
-        lastLogsPingAt = nil
         task.resume()
         receiveLogs(from: task)
         ensureWatchdog()
@@ -226,6 +222,17 @@ final class CoreWebSocket {
 
     func stopLogsStream() {
         stopLogsTask(keepEnabled: false)
+    }
+
+    /// Discard buffered lines and the receive already in flight under the
+    /// previous runtime. The task-identity guard in receiveLogs rejects its
+    /// callback, and the coalescing buffer no longer holds lines that a
+    /// post-commit flush would classify against the new route context.
+    func restartLogsStreamAfterRuntimeChange() {
+        guard logsEnabled, !isStopped else { return }
+        let level = logLevel
+        stopLogsStream()
+        startLogsStream(level: level)
     }
 
     private func stopLogsTask(keepEnabled: Bool) {
@@ -237,8 +244,6 @@ final class CoreWebSocket {
         logsReconnectTask = nil
         logsTask?.cancel(with: .goingAway, reason: nil)
         logsTask = nil
-        logsPingStartedAt = nil
-        lastLogsPingAt = nil
         if !keepEnabled { stalledStreams.remove("logs") }
         stopWatchdogIfIdle()
     }
@@ -256,13 +261,6 @@ final class CoreWebSocket {
                 guard let self, !self.isStopped, self.logsTask === task else { return }
                 switch result {
                 case .success:
-                    // Any inbound frame proves the observation path is alive.
-                    // Foundation can delay sendPing's completion while Mihomo
-                    // continues delivering logs; leaving that ping marked as
-                    // outstanding made the watchdog cancel a healthy socket
-                    // every ~10 seconds. Clearing the marker also invalidates
-                    // the late callback through the identity check below.
-                    self.logsPingStartedAt = nil
                     self.markStreamRecovered("logs")
                     if let entry {
                         self.enqueueLog(level: entry.0, message: entry.1)
@@ -278,8 +276,8 @@ final class CoreWebSocket {
 
     /// Mihomo can emit dozens of messages in one UI frame. Coalesce them into
     /// one observation mutation so the Logs page lays out at most four times per
-    /// second instead of once per line.
-    private func enqueueLog(level: String, message: String) {
+    /// second instead of once per line. Tests enqueue through here directly.
+    func enqueueLog(level: String, message: String) {
         pendingLogs.append((level, message))
         if pendingLogs.count > 500 {
             pendingLogs.removeFirst(pendingLogs.count - 500)
@@ -331,7 +329,8 @@ final class CoreWebSocket {
         watchdogTask = nil
     }
 
-    private func checkStreamLiveness(now: Date = Date()) {
+    // Internal clock seam for the watchdog regression; production uses Date().
+    func checkStreamLiveness(now: Date = Date()) {
         if let task = trafficTask,
            let lastTrafficMessageAt,
            now.timeIntervalSince(lastTrafficMessageAt) > 15 {
@@ -356,53 +355,11 @@ final class CoreWebSocket {
             reconnectConnections()
         }
 
-        guard let task = logsTask else {
-            logsPingStartedAt = nil
-            lastLogsPingAt = nil
-            return
-        }
-        if let logsPingStartedAt {
-            // The inbound-frame clearing below rescues this only while Mihomo
-            // is emitting logs. At the levels this app actually runs, the logs
-            // stream is legitimately silent for minutes — measured at zero
-            // frames in 95 seconds — so nothing cancels the outstanding marker
-            // and Foundation's delayed sendPing completion tripped this every
-            // ping cycle: 11 stall/reconnect rounds in 8 connected minutes on a
-            // socket that was never actually broken. The deadline has to exceed
-            // the 15s ping interval, not undercut it. A genuinely dead socket
-            // is still caught within one further cycle.
-            guard now.timeIntervalSince(logsPingStartedAt) > 20 else { return }
-            markStreamStalled("logs")
-            task.cancel(with: .goingAway, reason: nil)
-            logsTask = nil
-            self.logsPingStartedAt = nil
-            reconnectLogs()
-            return
-        }
-
-        if let lastLogsPingAt,
-           now.timeIntervalSince(lastLogsPingAt) < 15 {
-            return
-        }
-        let pingStartedAt = now
-        logsPingStartedAt = pingStartedAt
-        lastLogsPingAt = now
-        task.sendPing { [weak self, weak task] error in
-            Task { @MainActor [weak self, weak task] in
-                guard let self, let task,
-                      !self.isStopped, self.logsTask === task,
-                      self.logsPingStartedAt == pingStartedAt else { return }
-                self.logsPingStartedAt = nil
-                guard error != nil else {
-                    self.markStreamRecovered("logs")
-                    return
-                }
-                self.markStreamStalled("logs")
-                task.cancel(with: .goingAway, reason: nil)
-                self.logsTask = nil
-                self.reconnectLogs()
-            }
-        }
+        // Pinned sing-box's /logs handler only writes to its hijacked socket;
+        // it never reads Ping frames or sends Pong. Quiet log levels are normal,
+        // so a Pong deadline repeatedly reconnects a healthy stream and leaves
+        // server subscriptions waiting for the next log. Receive errors and
+        // explicit runtime restarts still reconnect this observation-only feed.
     }
 
     private func markStreamStalled(_ stream: String) {
@@ -434,8 +391,6 @@ final class CoreWebSocket {
         watchdogTask = nil
         lastTrafficMessageAt = nil
         lastConnectionsMessageAt = nil
-        logsPingStartedAt = nil
-        lastLogsPingAt = nil
         stalledStreams.removeAll(keepingCapacity: false)
         pendingLogs.removeAll(keepingCapacity: false)
         trafficTask?.cancel(with: .goingAway, reason: nil)
