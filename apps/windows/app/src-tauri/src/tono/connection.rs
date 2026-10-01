@@ -3,11 +3,14 @@
 //! Every privileged step goes through the Service IPC wrappers in
 //! `core::service` — the owner/session machinery is never bypassed. The
 //! fail-closed invariant: once the WFP policy exists, only Disconnect,
-//! Sign Out, Quit, or one ordinary self-heal exhaustion release it. That
-//! exhaustion uses the explicit release and does not build another tunnel.
+//! Sign Out, Quit, ordinary self-heal exhaustion, or non-strict catalog
+//! removal release it. Both automatic paths use the explicit release and
+//! do not build another tunnel.
 //! Windows has no strict kill switch, so a verified connect failure restores
-//! the original network instead of sitting in Protected Offline. Self-heal
-//! does not rewrite routes while a hop is still unproven.
+//! the original network instead of sitting in Protected Offline. After that
+//! release, TCP probes run while the original network stays up. A tunnel
+//! starts only after one proof. Self-heal does not rewrite routes while a
+//! hop is still unproven. An explicit strict kill switch keeps the block.
 //!
 //! Concurrency: `connect_generation` (in `TonoInner`) is bumped by
 //! disconnect, sign-out, node switches, and catalog-driven teardowns. An
@@ -26,10 +29,12 @@ mod probes;
 mod status;
 mod disconnect;
 mod reconnect;
+pub(crate) use reconnect::crash_recovery_reconnect_allowed;
 mod switch;
 mod direct;
 mod heal;
 mod platform;
+mod unarmed_probe;
 
 // Compatibility surface for existing command and test callers. The transaction
 // and error modules do not import this orchestration facade.
@@ -127,6 +132,7 @@ use probes::{fake_ip_race_state, tun_dns_proves_fake_ip};
 pub use probes::{is_fake_ip, test_current_server, verify_lock_retry_window};
 
 pub use disconnect::{disconnect, release_explicit};
+pub(crate) use disconnect::disconnect_for_generation;
 pub(crate) use disconnect::release_for_account;
 #[cfg(test)]
 pub(crate) use disconnect::{complete_account_release, coordinate_release};
@@ -135,6 +141,7 @@ use disconnect::{EXPLICIT_RELEASE_TIMEOUT, SERVICE_LIFECYCLE_TIMEOUT};
 pub use reconnect::{retry_reconnect_now, schedule_reconnect, schedule_startup_resume_if_proven};
 use reconnect::active_runtime_resume_status;
 pub use switch::{selected_node_vanished, switch_selected_node};
+pub(crate) use switch::rebuild_for_catalog_routing_change;
 pub use direct::{build_direct_plan, collect_ipv4_literals};
 use direct::{
     WINDOWS_OPTIONAL_DIRECT_ENABLED, CapturedTrafficPolicy, ControllerDirectRuleProof, MAX_DIRECT_ENDPOINTS,
@@ -265,6 +272,11 @@ pub(crate) async fn connect_for_generation(
                             Type::Service,
                             "Tono: self-heal stopped; restoring the original network without another tunnel"
                         );
+                        // `fail_connect` already ran `release_explicit_applying_narrow_with_guard`
+                        // for this FailOpen plan. A second release can tear down a successor
+                        // admitted after it returned. The unarmed probe still belongs to that
+                        // release: general traffic is back, and it must not open another tunnel.
+                        unarmed_probe::spawn_after_release(&state, &app, generation);
                     }
                     tono_core::heal::NetworkEffect::SelectiveAiHold { .. } => {
                         logging!(
@@ -289,6 +301,16 @@ pub(crate) async fn connect_for_generation(
 /// before.
 fn attempt_for_generation<'a>(state: &'a Arc<TonoState>, app: &'a AppHandle, expected_generation: Option<u64>) -> BoxedAttempt<'a> {
     Box::pin(attempt_inner(state, app, expected_generation))
+}
+
+/// A new attempt has not committed an overlay. `applied_wechat_path_regexes == None`
+/// is the inactive latch: the two-minute path refresh must not reconnect a full tunnel.
+fn clear_uncommitted_direct_overlay(inner: &mut TonoInner) {
+    inner.optional_direct_active = false;
+    inner.applied_direct_interface = None;
+    inner.optional_direct_skip = None;
+    inner.direct_reload_until = None;
+    inner.applied_wechat_path_regexes = None;
 }
 
 /// The caller holds lifecycle admission and the state mutex. Idle is not an ownership token:
@@ -367,10 +389,7 @@ async fn attempt_inner(state: &Arc<TonoState>, app: &AppHandle, expected_generat
         inner.connect_error = None;
         inner.connect_error_at_ms = None;
         inner.next_retry_at_ms = None;
-        inner.optional_direct_active = false;
-        inner.applied_direct_interface = None;
-        inner.optional_direct_skip = None;
-        inner.direct_reload_until = None;
+        clear_uncommitted_direct_overlay(&mut inner);
         commands::emit_status(app, &commands::status_of(&inner));
         let revision = inner.catalog_tracker.current_revision();
         let name = crate::tono::diagnostics::scrub_text_with(
@@ -427,10 +446,10 @@ async fn attempt_inner(state: &Arc<TonoState>, app: &AppHandle, expected_generat
             }
         }
 
-        match transaction
-            .wait("service readiness", ensure_service_ready())
-            .await
-        {
+        let proof = unarmed_probe::tcp_proof_before_tunnel(state, &node);
+        let service = transaction.wait("service readiness", ensure_service_ready());
+        let (proof, service) = tokio::join!(proof, service);
+        match service {
             Ok(Ok(())) => {}
             Ok(Err(err)) => {
                 // The kill switch may already be armed from a previous session, so this is a
@@ -442,6 +461,9 @@ async fn attempt_inner(state: &Arc<TonoState>, app: &AppHandle, expected_generat
                 return attempt_from_stage_failure(state, generation, &attempt_record, failure, account_owner)
                     .await;
             }
+        }
+        if let Err(error) = proof {
+            return Attempt::Failed { generation, error, account_owner };
         }
 
         match run_stages(
@@ -484,6 +506,8 @@ async fn retain_attempt_failure(
     attempt_record: &crate::tono::local_evidence::ConnectionAttempt,
     error: &str,
 ) {
+    let annotated = tono_core::hy2_idle::annotate(error);
+    let error = annotated.as_ref();
     let mut inner = state.lock().await;
     // Timeouts capture before retiring their generation. Superseded attempts must
     // not read another transition's steps or overwrite its evidence.
@@ -664,7 +688,7 @@ async fn fail_connect_observed(
     } else if plan.stop_core == Some(true) && armed {
         // Register the real release before transferring this writer. If Disconnect already
         // registered its worker, the coordinator drops our writer and joins that actual result.
-        Some(disconnect::release_explicit_with_guard(state, app, guard.take()).await)
+        Some(disconnect::release_explicit_applying_narrow_with_guard(state, app, guard.take()).await)
     } else {
         if let Some(release) = plan.stop_core {
             let _ = service::tono_stop_core(release).await;
@@ -709,6 +733,8 @@ async fn record_connect_failure(
     state: &Arc<TonoState>, generation: u64, err: &str, observed: Option<KillSwitchStatus>,
     account_owner: (u64, u64),
 ) -> Option<RecordedFailure> {
+    let annotated = tono_core::hy2_idle::annotate(err);
+    let err = annotated.as_ref();
     logging!(error, Type::Service, "Tono: 连接事务失败: {err}");
     let (plan, armed, report) = {
         let mut inner = state.lock().await;
@@ -1475,6 +1501,7 @@ mod tests {
             last_error: Some(
                 "Windows kill-switch reconciliation failed: FwpmTransactionCommit0 returned 0x80320017".into(),
             ),
+            reconnect_after_release: false,
         };
         let data_plane = lock_unverified_error(&kill_switch_not_locked(&status));
         let last = classify_exhausted_data_plane(Ok(()), data_plane, Ok(()));
@@ -1625,7 +1652,7 @@ mod tests {
     #[test]
     fn connect_budget_covers_a_cold_first_connect() {
         let accounted: u64 = CONNECT_BUDGET_LEGS.iter().map(|(_, secs)| secs).sum();
-        assert_eq!(accounted, 208, "the table in the doc comment must stay in sync");
+        assert_eq!(accounted, 278, "the table in the doc comment must stay in sync");
         assert!(
             Duration::from_secs(accounted) <= CONNECT_TRANSACTION_TIMEOUT,
             "the accounted cold-connect worst case ({accounted} s) must fit the budget"
@@ -1638,6 +1665,8 @@ mod tests {
                 .map(|(_, secs)| Duration::from_secs(*secs))
                 .unwrap_or_default()
         };
+        assert!(leg("preparing Tono Core ownership") >= SERVICE_LIFECYCLE_TIMEOUT);
+        assert!(leg("browser Secure DNS preflight") >= Duration::from_secs(5));
         assert!(leg("controller readiness") >= CONTROLLER_READY_TIMEOUT);
         assert!(leg("lock ladder") >= LOCK_RETRY_INTERVAL * LOCK_ATTEMPTS);
         assert!(leg("checkingExit") >= EXIT_PROBE_ADVISORY_BUDGET);
@@ -1670,6 +1699,23 @@ mod tests {
             EXPLICIT_RELEASE_TIMEOUT < SERVICE_LIFECYCLE_TIMEOUT,
             "the IPC client must be the one that reports a genuine hang"
         );
+    }
+
+    #[tokio::test]
+    async fn a_new_attempt_drops_signed_app_paths_so_a_full_tunnel_does_not_reconnect() {
+        let state = std::sync::Arc::new(crate::tono::state::TonoState::for_test());
+        let mut inner = state.lock().await;
+        inner.applied_wechat_path_regexes = Some(vec![r"C:\old\Weixin.exe".into()]);
+        inner.optional_direct_active = true;
+        inner.applied_direct_interface = Some("Ethernet".into());
+        super::clear_uncommitted_direct_overlay(&mut inner);
+        assert!(inner.applied_wechat_path_regexes.is_none());
+        assert!(!inner.optional_direct_active);
+        assert!(inner.applied_direct_interface.is_none());
+        assert!(!wechat_paths_changed(
+            inner.applied_wechat_path_regexes.as_deref(),
+            &[r"C:\new\Weixin.exe".into()],
+        ));
     }
 
     #[test]
@@ -1892,6 +1938,7 @@ mod tests {
                     tunnel_permit_rendered: true,
                     direct_endpoint_digest: tono_service_protocol::direct_endpoint_digest(&[]).unwrap(),
                     last_error: None,
+                    reconnect_after_release: false,
                 }),
                 network_events: Default::default(),
             },
@@ -2427,6 +2474,7 @@ mod tests {
             tunnel_permit_rendered: true,
             direct_endpoint_digest: tono_service_protocol::direct_endpoint_digest(&[]).unwrap(),
             last_error: None,
+            reconnect_after_release: false,
         };
         assert!(!kill_switch_unhealthy(Some(&healthy)));
         assert!(kill_switch_unhealthy(None));
@@ -2445,6 +2493,7 @@ mod tests {
                 tunnel_permit_rendered: true,
                 direct_endpoint_digest: tono_service_protocol::direct_endpoint_digest(&[]).unwrap(),
                 last_error: None,
+                reconnect_after_release: false,
             };
             assert!(kill_switch_unhealthy(Some(&status)), "{wanted} {live} {mode:?}");
         }
@@ -2704,6 +2753,35 @@ mod tests {
     }
 
     #[test]
+    fn direct_lease_renewal_survives_revision_only_republish_but_stops_on_behavior_change() {
+        use tono_core::catalog::catalog_digest;
+        use tono_core::policy::{TonoTrafficPolicyResponse, validate_policy};
+
+        let response = |revision| {
+            let json = format!(
+                r#"{{"version":1,"revision":{revision},"domains":[{{"host":"wxs.qq.com","ports":[443]}}]}}"#
+            );
+            TonoTrafficPolicyResponse {
+                revision,
+                sha256: catalog_digest(&json),
+                json,
+                updated_at: None,
+                signature: None,
+            }
+        };
+        let original = response(3);
+        let republished = response(4);
+        let committed = validate_policy(&original, &BTreeSet::new()).unwrap();
+        let mut current = validate_policy(&republished, &BTreeSet::new()).unwrap();
+        assert_ne!(original.sha256, republished.sha256);
+        assert!(super::direct::direct_lease_policy_is_current(Some(&current), &committed));
+
+        current.domains[0].ports = vec![80];
+        assert!(!super::direct::direct_lease_policy_is_current(Some(&current), &committed));
+        assert!(!super::direct::direct_lease_policy_is_current(None, &committed));
+    }
+
+    #[test]
     fn direct_reload_receipts_bind_generation_reload_identity_and_exact_digest() {
         let session = OwnerSessionProof {
             generation: 42,
@@ -2767,6 +2845,7 @@ mod tests {
             tunnel_permit_rendered: true,
             direct_endpoint_digest: digest.clone(),
             last_error: None,
+            reconnect_after_release: false,
         };
         prove_service_endpoint_digest(&status, &digest).unwrap();
 
@@ -2907,6 +2986,20 @@ mod tests {
                 rules.push(rule);
             }
         }
+        rules.extend(extra);
+        rules.push(serde_json::json!({"type": "AND", "payload": "((Network,udp))", "proxy": "REJECT"}));
+        rules.push(serde_json::json!({"type": "Match", "payload": "", "proxy": "Tono-Exit"}));
+        serde_json::json!({ "rules": rules })
+    }
+
+    /// TCP assistant rows, then process pins, then DIRECT. No UDP doubling:
+    /// that block exists only for the residential hop.
+    fn controller_rules_with_assistant_shield(extra: Vec<serde_json::Value>) -> serde_json::Value {
+        let mut rules = vec![
+            serde_json::json!({"type": "IPCIDR", "payload": "127.0.0.0/8", "proxy": "DIRECT"}),
+            serde_json::json!({"type": "IPCIDR", "payload": "::1/128", "proxy": "DIRECT"}),
+        ];
+        rules.extend(home_controller_rules("Tono-Exit", true));
         rules.extend(extra);
         rules.push(serde_json::json!({"type": "AND", "payload": "((Network,udp))", "proxy": "REJECT"}));
         rules.push(serde_json::json!({"type": "Match", "payload": "", "proxy": "Tono-Exit"}));
@@ -3111,6 +3204,49 @@ mod tests {
     }
 
     #[test]
+    fn signed_app_direct_readback_requires_assistant_hosts_on_the_exit() {
+        let path = "((Network,tcp) && (DstPort,443) && (ProcessPathRegex,^C:\\\\WeChat\\\\))";
+        let expected = vec![ControllerDirectRuleProof {
+            proxy: "Tono-China-Direct".to_owned(),
+            payload: path.to_owned(),
+        }];
+        let proxies = serde_json::json!({
+            "proxies": {
+                "Tono-Exit": {},
+                "Tono-China-Direct": {"type": "Direct", "interface": "Ethernet 2"}
+            }
+        });
+        let extra = vec![serde_json::json!({
+            "type": "AND",
+            "payload": path,
+            "proxy": "Tono-China-Direct"
+        })];
+        controller_direct_graph_is_active(
+            &controller_rules_with_assistant_shield(extra.clone()),
+            &proxies,
+            &expected,
+            "Ethernet 2",
+            true,
+            false,
+            false,
+        )
+        .expect("assistant hosts must be accepted ahead of the signed-app DIRECT rule");
+        assert!(
+            controller_direct_graph_is_active(
+                &controller_rules_graph("Tono-Exit", false, extra),
+                &proxies,
+                &expected,
+                "Ethernet 2",
+                true,
+                false,
+                false,
+            )
+            .is_err(),
+            "a signed-app DIRECT graph without the assistant rows must fail"
+        );
+    }
+
+    #[test]
     fn direct_plan_builds_deduped_rules_and_matching_endpoints() {
         use tono_core::policy::PolicyMedia;
         let node = node();
@@ -3256,6 +3392,54 @@ mod tests {
                 .all(|rule| { !rule.payload.contains("Network,TCP") && !rule.payload.contains("Network,UDP") })
         );
         assert!(plan.wechat_process_path_regexes.is_empty());
+    }
+
+    #[tokio::test]
+    async fn suffix_only_direct_policy_skips_before_runtime_staging() {
+        let node = node();
+        let document = tono_core::policy::TonoTrafficPolicy {
+            version: 3,
+            domains: Vec::new(),
+            media_endpoints: Vec::new(),
+            web_domains: Vec::new(),
+            direct_suffixes: vec![tono_core::policy::PolicyDomain {
+                host: "bilibili.com".to_string(),
+                ports: vec![443],
+            }],
+        };
+        let (plan, _) = build_direct_plan(
+            "Ethernet 2".to_string(), &[], &[], &[], &document.direct_suffixes, &node, Vec::new(),
+        )
+        .unwrap();
+        assert!(!plan.web_suffix_rules.is_empty());
+        assert!(expected_controller_direct_rules(&plan).is_empty());
+
+        let state = std::sync::Arc::new(crate::tono::state::TonoState::for_test());
+        // A stale generation makes reaching runtime staging fail before any Service call.
+        // An empty controller graph must skip even before that freshness check.
+        let generation = state.lock().await.connect_generation + 1;
+        let result = super::direct::apply_cloud_policy(
+            &state,
+            &node,
+            std::slice::from_ref(&node),
+            None,
+            None,
+            generation,
+            "fixture-controller-secret",
+            9097,
+            7897,
+            Some(super::CapturedTrafficPolicy {
+                revision: 3,
+                digest: "fixture-policy-digest".to_string(),
+                document,
+            }),
+            Some("Ethernet 2".to_string()),
+            &OwnerSessionProof { generation: 7, token: "fixture-session-token".to_string() },
+        )
+        .await
+        .expect("an empty DIRECT graph must skip before runtime staging or the Service bracket");
+        assert!(result.is_none());
+        assert!(state.lock().await.direct_reload_until.is_none());
     }
 
     #[test]

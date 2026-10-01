@@ -80,10 +80,9 @@ pub(super) fn process_identity(pid: u32) -> Result<Option<ProcessIdentity>> {
 
     #[cfg(windows)]
     {
-        use windows_sys::Win32::Foundation::{CloseHandle, FILETIME};
+        use windows_sys::Win32::Foundation::CloseHandle;
         use windows_sys::Win32::System::Threading::{
-            GetProcessTimes, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
-            QueryFullProcessImageNameW,
+            OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
         };
 
         let handle = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
@@ -97,32 +96,7 @@ pub(super) fn process_identity(pid: u32) -> Result<Option<ProcessIdentity>> {
             }
         }
         let handle = ProcessHandle(handle);
-        let mut path = vec![0u16; 32_768];
-        let mut path_len = path.len() as u32;
-        if unsafe { QueryFullProcessImageNameW(handle.0, 0, path.as_mut_ptr(), &mut path_len) } == 0
-        {
-            return Err(std::io::Error::last_os_error().into());
-        }
-        path.truncate(path_len as usize);
-        let executable = std::path::PathBuf::from(String::from_utf16(&path)?)
-            .canonicalize()?
-            .to_string_lossy()
-            .into_owned();
-        let mut creation = FILETIME::default();
-        let mut exit = FILETIME::default();
-        let mut kernel = FILETIME::default();
-        let mut user = FILETIME::default();
-        if unsafe { GetProcessTimes(handle.0, &mut creation, &mut exit, &mut kernel, &mut user) }
-            == 0
-        {
-            return Err(std::io::Error::last_os_error().into());
-        }
-        let started_at =
-            (u64::from(creation.dwHighDateTime) << 32) | u64::from(creation.dwLowDateTime);
-        Ok(Some(ProcessIdentity {
-            executable,
-            started_at,
-        }))
+        Ok(Some(windows_process_identity(handle.0)?))
     }
 
     #[cfg(all(unix, not(any(target_os = "linux", target_os = "macos"))))]
@@ -139,6 +113,39 @@ pub(super) fn process_identity(pid: u32) -> Result<Option<ProcessIdentity>> {
             started_at: 0,
         }))
     }
+}
+
+/// Query one already-open process object. A caller that also terminates this object must keep
+/// the same handle through both operations, so PID reuse cannot retarget the termination.
+#[cfg(windows)]
+fn windows_process_identity(
+    handle: windows_sys::Win32::Foundation::HANDLE,
+) -> Result<ProcessIdentity> {
+    use windows_sys::Win32::Foundation::FILETIME;
+    use windows_sys::Win32::System::Threading::{GetProcessTimes, QueryFullProcessImageNameW};
+
+    let mut path = vec![0u16; 32_768];
+    let mut path_len = path.len() as u32;
+    if unsafe { QueryFullProcessImageNameW(handle, 0, path.as_mut_ptr(), &mut path_len) } == 0 {
+        return Err(std::io::Error::last_os_error().into());
+    }
+    path.truncate(path_len as usize);
+    let executable = std::path::PathBuf::from(String::from_utf16(&path)?)
+        .canonicalize()?
+        .to_string_lossy()
+        .into_owned();
+    let mut creation = FILETIME::default();
+    let mut exit = FILETIME::default();
+    let mut kernel = FILETIME::default();
+    let mut user = FILETIME::default();
+    if unsafe { GetProcessTimes(handle, &mut creation, &mut exit, &mut kernel, &mut user) } == 0 {
+        return Err(std::io::Error::last_os_error().into());
+    }
+    let started_at = (u64::from(creation.dwHighDateTime) << 32) | u64::from(creation.dwLowDateTime);
+    Ok(ProcessIdentity {
+        executable,
+        started_at,
+    })
 }
 
 pub(super) fn is_process_alive(pid: u32) -> bool {
@@ -245,25 +252,65 @@ pub(super) async fn terminate_process(pid: u32) -> Result<()> {
     }
 }
 
+/// Recovery may only terminate the process instance it previously inspected. On Windows the
+/// final identity check and termination use one handle; a reused PID is left untouched.
+pub(super) async fn terminate_process_if_identity_matches(
+    pid: u32,
+    expected: &ProcessIdentity,
+) -> Result<bool> {
+    #[cfg(unix)]
+    {
+        if process_identity(pid)?.as_ref() != Some(expected) {
+            return Ok(false);
+        }
+        terminate_process(pid).await?;
+        Ok(true)
+    }
+
+    #[cfg(windows)]
+    {
+        let expected = expected.clone();
+        tokio::task::spawn_blocking(move || {
+            terminate_process_windows_matching(pid, Some(&expected))
+        })
+        .await
+        .context("Windows verified process termination worker failed")?
+    }
+}
+
 /// Native, locale-independent Windows process termination with a hard wait bound. This is the
 /// recovery path for a core left by an older Service; cores started by this build additionally
 /// live in a kill-on-close Job Object (see `manager.rs`).
 #[cfg(windows)]
 fn terminate_process_windows(pid: u32) -> Result<()> {
+    terminate_process_windows_matching(pid, None).map(|_| ())
+}
+
+#[cfg(windows)]
+fn terminate_process_windows_matching(
+    pid: u32,
+    expected: Option<&ProcessIdentity>,
+) -> Result<bool> {
     use std::os::windows::io::{AsRawHandle as _, FromRawHandle as _, OwnedHandle};
     use windows_sys::Win32::Foundation::{
         ERROR_INVALID_PARAMETER, HANDLE, WAIT_OBJECT_0, WAIT_TIMEOUT,
     };
     use windows_sys::Win32::System::Threading::{
-        OpenProcess, PROCESS_TERMINATE, TerminateProcess, WaitForSingleObject,
+        OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_TERMINATE, TerminateProcess,
+        WaitForSingleObject,
     };
 
     if pid == 0 {
-        return Ok(());
+        return Ok(false);
     }
+    let query_access = if expected.is_some() {
+        PROCESS_QUERY_LIMITED_INFORMATION
+    } else {
+        0
+    };
     let raw = unsafe {
         OpenProcess(
-            PROCESS_TERMINATE | windows_sys::Win32::Storage::FileSystem::SYNCHRONIZE,
+            PROCESS_TERMINATE | windows_sys::Win32::Storage::FileSystem::SYNCHRONIZE | query_access,
             0,
             pid,
         )
@@ -271,13 +318,29 @@ fn terminate_process_windows(pid: u32) -> Result<()> {
     if raw.is_null() {
         let error = std::io::Error::last_os_error();
         if error.raw_os_error() == Some(ERROR_INVALID_PARAMETER as i32) {
-            return Ok(());
+            return Ok(false);
         }
         return Err(error).with_context(|| format!("failed to open process {pid} for termination"));
     }
     // SAFETY: `OpenProcess` returned an owned process handle.
     let handle = unsafe { OwnedHandle::from_raw_handle(raw.cast()) };
     let raw = handle.as_raw_handle() as HANDLE;
+
+    if let Some(expected) = expected {
+        match unsafe { WaitForSingleObject(raw, 0) } {
+            WAIT_OBJECT_0 => return Ok(false),
+            WAIT_TIMEOUT => {}
+            _ => {
+                return Err(std::io::Error::last_os_error())
+                    .context("failed to inspect process state");
+            }
+        }
+        let current = windows_process_identity(raw)?;
+        if &current != expected {
+            warn!("Process {pid} no longer matches the inspected identity; leaving it untouched");
+            return Ok(false);
+        }
+    }
 
     if unsafe { TerminateProcess(raw, 1) } == 0 {
         // The process may have exited between OpenProcess and TerminateProcess.
@@ -287,7 +350,7 @@ fn terminate_process_windows(pid: u32) -> Result<()> {
         }
     }
     match unsafe { WaitForSingleObject(raw, 2_000) } {
-        WAIT_OBJECT_0 => Ok(()),
+        WAIT_OBJECT_0 => Ok(true),
         WAIT_TIMEOUT => bail!("process {pid} did not terminate within 2 seconds"),
         _ => Err(std::io::Error::last_os_error())
             .with_context(|| format!("failed while waiting for process {pid} to terminate")),
@@ -557,13 +620,24 @@ pub(super) async fn sweep_orphan_core_processes(
         None
     };
     let exempt = orphan_core_exemptions(exempt_pids, runtime_record_pid, preserve_runtime_record);
-    let orphans = select_orphan_core_pids(&core_image_candidates()?, &exempt, |path| {
+    let candidates = core_image_candidates()?;
+    let paths = candidates
+        .iter()
+        .map(|(pid, identity)| (*pid, identity.executable.clone()))
+        .collect::<Vec<_>>();
+    let orphans = select_orphan_core_pids(&paths, &exempt, |path| {
         crate::core::runtime_generation::is_installed_core_image_path(std::path::Path::new(path))
     });
     let mut terminated = 0_u32;
     for pid in orphans {
-        match terminate_process(pid).await {
-            Ok(()) => terminated += 1,
+        let expected = &candidates
+            .iter()
+            .find(|(candidate, _)| *candidate == pid)
+            .expect("a selected orphan came from the inspected candidates")
+            .1;
+        match terminate_process_if_identity_matches(pid, expected).await {
+            Ok(true) => terminated += 1,
+            Ok(false) => {}
             Err(error) => warn!("Failed to terminate orphaned core process {pid}: {error:#}"),
         }
     }
@@ -586,11 +660,11 @@ pub(super) async fn sweep_orphan_core_processes(
     Ok(0)
 }
 
-/// Every running process whose image file name is the core's, as `(pid, canonical executable)`.
+/// Every running process whose image file name is the core's, as `(pid, process identity)`.
 /// The name is only a pre-filter that keeps the per-process path query bounded; identity is
 /// decided on the canonicalized path by the caller.
 #[cfg(windows)]
-fn core_image_candidates() -> Result<Vec<(u32, String)>> {
+fn core_image_candidates() -> Result<Vec<(u32, ProcessIdentity)>> {
     use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
     use windows_sys::Win32::System::Diagnostics::ToolHelp::{
         CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW,
@@ -635,7 +709,7 @@ fn core_image_candidates() -> Result<Vec<(u32, String)>> {
             // `process_identity` re-derives and canonicalizes the full image path; a process
             // that exited mid-sweep or refuses inspection is skipped, never guessed at.
             if let Ok(Some(identity)) = process_identity(entry.th32ProcessID) {
-                candidates.push((entry.th32ProcessID, identity.executable));
+                candidates.push((entry.th32ProcessID, identity));
             }
         }
         // SAFETY: same contract as the first call.
@@ -648,6 +722,42 @@ fn core_image_candidates() -> Result<Vec<(u32, String)>> {
 mod tests {
     use super::{orphan_core_exemptions, select_orphan_core_pids};
     use std::collections::BTreeSet;
+
+    #[tokio::test]
+    async fn stale_creation_identity_does_not_terminate_the_live_process() -> anyhow::Result<()> {
+        #[cfg(unix)]
+        let mut command = tokio::process::Command::new("/bin/sleep");
+        #[cfg(unix)]
+        command.arg("30");
+        #[cfg(windows)]
+        let mut command = tokio::process::Command::new("ping.exe");
+        #[cfg(windows)]
+        command.args(["-n", "30", "127.0.0.1"]);
+        let mut child = command
+            .kill_on_drop(true)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()?;
+        let pid = child.id().expect("the live child exposes a PID");
+        let mut stale = super::process_identity(pid)?.expect("the child has an identity");
+        stale.started_at = stale.started_at.wrapping_add(1);
+
+        let terminated = super::terminate_process_if_identity_matches(pid, &stale).await?;
+        let survived = child.try_wait()?.is_none();
+        if survived {
+            child.kill().await?;
+        }
+        assert!(
+            !terminated,
+            "a stale creation time must not authorize termination"
+        );
+        assert!(
+            survived,
+            "a live process with a different creation identity must survive"
+        );
+        Ok(())
+    }
 
     #[test]
     fn orphan_selection_keeps_only_unvouched_installed_core_images() {

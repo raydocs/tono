@@ -1,0 +1,7 @@
+| ID | 问题（一句） | 状态 | Issue / PR | 等级 | 剩余限制 |
+|---|---|---|---|---|---|
+| MAC-DNS-APPLY-RETRY | DNS restore/handoff retries discard recovery after a successful disk commit but failed Apply, leaving the active dead-loopback resolver | in-PR | hunt/sol-r3helper-dns-apply-retry | 中·已确认（P1，源码/API 路径） | Two injected production-transaction regressions authored before the fix; Swift and native configd notification failure cannot run locally. A successful Apply remains asynchronous; existing update active-state checks are unchanged. |
+
+SHIP_PLAN §2 item 10. Baseline `857b9e73`: `scSetDNS` can commit saved originals then fail `SCPreferencesApplyChanges`. First restore/handoff throws and retains the snapshot, but retry sees persisted DNS equal to the originals, skips the writer/Apply and deletes the snapshot. Ordinary Disconnect has already stopped Core, so the active `127.0.0.1` resolver can stay dead with no recovery evidence. Both paths now reapply originals before snapshot removal when persisted settings equal either Tono's override or the saved originals; newer external DNS remains untouched.
+
+Apple's [Apply implementation](https://github.com/apple-oss-distributions/configd/blob/main/SystemConfiguration.fproj/SCPApply.c#L111) can fail its notification after Commit; [PreferencesMonitor](https://github.com/apple-oss-distributions/configd/blob/main/Plugins/PreferencesMonitor/prefsmon.c#L1499) does not update active Setup state for a Commit-only notification. The native fault is inferred from these API failure contracts, not a device incident.

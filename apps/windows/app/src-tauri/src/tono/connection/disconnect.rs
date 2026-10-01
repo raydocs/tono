@@ -41,9 +41,40 @@ pub async fn release_explicit(state: &Arc<TonoState>, app: &AppHandle) -> Result
     release_explicit_with_guard(state, app, None).await
 }
 
+/// Full release, then the secondary AI hold. Restore and disconnect stay on
+/// [`release_explicit`], which removes that hold.
+pub async fn release_explicit_applying_narrow(
+    state: &Arc<TonoState>,
+    app: &AppHandle,
+) -> Result<(), String> {
+    release_explicit_applying_narrow_with_guard(state, app, None).await
+}
+
+/// Automatic failure cleanup already owns the writer. Transfer it to the same
+/// coordinated release while retaining the secondary AI hold.
+pub(super) async fn release_explicit_applying_narrow_with_guard(
+    state: &Arc<TonoState>, app: &AppHandle,
+    guard: Option<tokio::sync::OwnedRwLockWriteGuard<()>>,
+) -> Result<(), String> {
+    let operation = start_narrow_release_with_guard(guard, |guard, apply_narrow| {
+        start_explicit_release(state, app, guard, false, apply_narrow)
+    }).await;
+    wait_explicit_release(&operation).await
+}
+
+async fn start_narrow_release_with_guard<G, F>(
+    guard: Option<G>,
+    start: impl FnOnce(Option<G>, bool) -> F,
+) -> F::Output
+where
+    F: std::future::Future,
+{
+    start(guard, true).await
+}
+
 /// Account teardown must own the release, not just the UI's wait for it.
 pub(crate) async fn release_for_account(state: &Arc<TonoState>, app: &AppHandle) -> Result<(), String> {
-    let operation = start_explicit_release(state, app, None, false).await;
+    let operation = start_explicit_release(state, app, None, false, false).await;
     complete_account_release(&operation).await
 }
 
@@ -56,7 +87,7 @@ pub(super) async fn release_explicit_with_guard(
     state: &Arc<TonoState>, app: &AppHandle,
     guard: Option<tokio::sync::OwnedRwLockWriteGuard<()>>,
 ) -> Result<(), String> {
-    let operation = start_explicit_release(state, app, guard, false).await;
+    let operation = start_explicit_release(state, app, guard, false, false).await;
     wait_explicit_release(&operation).await
 }
 
@@ -64,6 +95,7 @@ async fn start_explicit_release(
     state: &Arc<TonoState>, app: &AppHandle,
     guard: Option<tokio::sync::OwnedRwLockWriteGuard<()>>,
     explicit_disconnect: bool,
+    apply_narrow: bool,
 ) -> Arc<LifecycleOperation> {
     let worker_state = Arc::clone(state);
     let worker_app = app.clone();
@@ -71,7 +103,7 @@ async fn start_explicit_release(
     let task_app = app.clone();
     coordinate_release(state, guard,
         move |guard| async move {
-            run_release_sequence(&worker_state, &worker_app, guard, explicit_disconnect).await
+            run_release_sequence(&worker_state, &worker_app, guard, explicit_disconnect, apply_narrow).await
         },
         move || async move {
             let mut inner = task_state.lock().await;
@@ -204,13 +236,14 @@ pub(super) async fn run_explicit_release_sequence(
     state: &Arc<TonoState>, app: &AppHandle,
     release_guard: tokio::sync::OwnedRwLockWriteGuard<()>,
 ) -> Result<(), String> {
-    run_release_sequence(state, app, release_guard, false).await
+    run_release_sequence(state, app, release_guard, false, false).await
 }
 
 async fn run_release_sequence(
     state: &Arc<TonoState>, _app: &AppHandle,
     _release_guard: tokio::sync::OwnedRwLockWriteGuard<()>,
     _explicit_disconnect: bool,
+    apply_narrow: bool,
 ) -> Result<(), String> {
     // Wait for detached StartClash/DNS commits that began before the release generation bump.
     // Keeping this guard through the Service call also prevents a stale mutation from starting
@@ -228,14 +261,18 @@ async fn run_release_sequence(
 
     #[cfg(windows)]
     let status = {
-        // Only the user Disconnect command requests this durable release. Quit,
-        // sign-out and automatic failure cleanup keep the pending-update fence.
+        // User Disconnect and failed-Prepare recovery request this durable release.
+        // Quit, sign-out and ordinary failure cleanup keep the pending-update fence.
         let update_release = if _explicit_disconnect {
-            pending_update_release_result(state, commands::update::disconnect_if_pending().await).await?
+            pending_update_release_result(state, commands::update::disconnect_if_pending(apply_narrow).await).await?
         } else { None };
         match update_release {
             Some(status) => status,
-            None => match service::tono_release_kill_switch().await {
+            None => match if apply_narrow {
+                service::tono_release_kill_switch_applying_narrow().await
+            } else {
+                service::tono_release_kill_switch().await
+            } {
                 Ok(status) => status,
                 Err(error) => return Err(release_failed(state, &error).await),
             },
@@ -329,11 +366,23 @@ async fn release_failed(state: &TonoState, error: &anyhow::Error) -> String {
 /// sequence (DNS restore → core stop → owner-gated release, §6/C1).
 /// Idempotent while a disconnect is already in flight (L6).
 pub async fn disconnect(state: Arc<TonoState>, app: AppHandle) -> Result<(), String> {
+    disconnect_for_generation(state, app, None).await
+}
+
+/// Failed Prepare recovery must not release a successor admitted after its status read.
+pub(crate) async fn disconnect_for_generation(
+    state: Arc<TonoState>, app: AppHandle, expected_generation: Option<u64>,
+) -> Result<(), String> {
     let operation = {
         let mut inner = state.lock().await;
+        if expected_generation.is_some_and(|generation| inner.connect_generation != generation) {
+            return Ok(());
+        }
         inner.client.transport().set_auth_tunnel_port(0);
         if inner.fsm.status().is_disconnecting {
-            let operation = start_explicit_release(&state, &app, None, true).await;
+            let operation = start_explicit_release(
+                &state, &app, None, true, expected_generation.is_some(),
+            ).await;
             drop(inner);
             return wait_explicit_release(&operation).await;
         }
@@ -348,9 +397,11 @@ pub async fn disconnect(state: Arc<TonoState>, app: AppHandle) -> Result<(), Str
         // Register while the FSM lock still excludes admission. Sampling before registration
         // allowed a joining Disconnect/failure to finish release, admit B, then this caller's
         // delayed sample would dispatch another owner-wide release against B.
-        start_explicit_release(&state, &app, None, true).await
+        start_explicit_release(&state, &app, None, true, expected_generation.is_some()).await
     };
-    state.audit().log(AuditEvent::DisconnectBegin { cause: "user" });
+    state.audit().log(AuditEvent::DisconnectBegin {
+        cause: if expected_generation.is_some() { "updatePreparationFailed" } else { "user" },
+    });
     wait_explicit_release(&operation).await
 }
 
@@ -373,6 +424,21 @@ pub(super) async fn stay_armed_after_failed_release(state: &Arc<TonoState>, app:
 mod tests {
     use super::*;
     use tokio::sync::oneshot;
+
+    #[tokio::test]
+    async fn automatic_failure_release_transfers_its_writer_and_keeps_the_ai_hold() {
+        let lifecycle = Arc::new(tokio::sync::RwLock::new(()));
+        let guard = Arc::clone(&lifecycle).write_owned().await;
+        let release_lifecycle = Arc::clone(&lifecycle);
+        let result = start_narrow_release_with_guard(Some(guard), move |guard, apply_narrow| async move {
+            assert!(guard.is_some(), "release must retain failure's existing writer");
+            assert!(release_lifecycle.try_read().is_err(), "replacement admission stays excluded");
+            assert!(apply_narrow, "automatic failure release must retain the secondary AI hold");
+            Err::<(), _>("injected release refusal".to_string())
+        }).await;
+        assert_eq!(result, Err("injected release refusal".to_string()));
+        assert!(lifecycle.try_read().is_ok(), "the settled request relinquishes ownership");
+    }
 
     #[tokio::test]
     async fn release_owner_finishes_session_metadata_after_the_ui_waiter_is_cancelled() {

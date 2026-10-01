@@ -113,9 +113,24 @@ extension AppState {
 
         let previousSelection = currentProxySelectionTarget()
         let previousRoutingToken = managedCatalogRoutingToken
+        let previousHomeName = managedCatalogRouting?.homeProxy
         let previousCloudNodes = proxyRegions
             .filter { $0.id != "custom" }
             .flatMap(\.nodes)
+        let previousSwitchTarget = switchingNodeId.flatMap { target in
+            previousCloudNodes.first {
+                proxyTarget($0.id, matches: target) || proxyTarget($0.name, matches: target)
+            }
+        }
+        let switchTargetChanged: Bool = if let previousSwitchTarget {
+            CatalogLiveSession.shouldReload(
+                previousSelected: previousSwitchTarget,
+                nextSelected: nodes.first { proxyTarget($0.name, matches: previousSwitchTarget.name) },
+                routingChanged: false
+            )
+        } else {
+            false
+        }
         let selectedCloudNodeWasRemoved: Bool = if let previousSelection,
                                                    previousSelection != ConfigPipeline.homeNodeName {
             previousCloudNodes.contains { proxyTarget($0.name, matches: previousSelection) }
@@ -143,6 +158,12 @@ extension AppState {
                 nodes: nodes
             )]
         proxyRegions = managedRegions + customRegions
+        if switchingNodeId != nil, let previousSwitchTarget,
+           let id = nodes.first(where: { proxyTarget($0.name, matches: previousSwitchTarget.name) })?.id {
+            // Parsing assigns fresh IDs even when an unrelated city changes.
+            // Keep the in-flight target identifiable for the next install.
+            switchingNodeId = id
+        }
         managedCatalogRevision = catalog.revision
         managedCatalogDigest = catalog.sha256
         managedCatalogRoutingToken = routingToken
@@ -205,12 +226,27 @@ extension AppState {
             let nextSelected = nodes.first {
                 proxyTarget($0.name, matches: previousSelection ?? "")
             }
+            let previousHome = previousHomeName.flatMap { homeName in
+                previousCloudNodes.first { proxyTarget($0.name, matches: homeName) }
+            }
+            let nextHome = (validatedRouting?.homeProxy).flatMap { homeName in
+                nodes.first { proxyTarget($0.name, matches: homeName) }
+            }
             let routingChanged = previousRoutingToken != routingToken
             if CatalogLiveSession.shouldReload(
                 previousSelected: previousSelected,
                 nextSelected: nextSelected,
-                routingChanged: routingChanged
+                previousHome: previousHome,
+                nextHome: nextHome,
+                routingChanged: routingChanged,
+                switchTargetChanged: switchTargetChanged
             ) {
+                if switchTargetChanged {
+                    LocalTrafficAudit.shared.recordEvent(
+                        "managed_catalog_switch_target_changed",
+                        details: ["revision": String(catalog.revision)]
+                    )
+                }
                 applyManagedCatalogToRuntime()
             } else {
                 LocalTrafficAudit.shared.recordEvent(

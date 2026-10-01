@@ -63,6 +63,38 @@ final class NativeUpdateCallerTests: XCTestCase {
         XCTAssertEqual(result.execution, "consumed")
     }
 
+    func testUpdateSuspensionRetiresACancelledReloadBeforeTheNextSession() async {
+        let app = AppState()
+        app.nativeUpdatePending = true
+        app.isConnected = true
+        app.pendingFullConfigReload = true
+        let requestID = app.connectionCoordinator.configReloadRequestID
+        var drained = false
+        app.connectionCoordinator.configReloadTask = Task {
+            // A reload cancelled before committing pins returns without calling
+            // finishConfigReloadRequest, just like the production cancellation path.
+            do { try await Task.sleep(for: .seconds(60)) }
+            catch {
+                XCTAssertNotNil(app.connectionCoordinator.configReloadTask,
+                                "retain serialization until the mutation drains")
+                drained = true
+            }
+        }
+
+        await app.suspendForNativeUpdate()
+        XCTAssertTrue(drained)
+        XCTAssertNil(app.connectionCoordinator.configReloadTask)
+        XCTAssertFalse(app.pendingFullConfigReload)
+        XCTAssertGreaterThan(app.connectionCoordinator.configReloadRequestID, requestID,
+                             "a retired completion cannot start queued reloads")
+
+        // Once the failed update is retired, an idle selection must reach its
+        // normal validation rather than being rejected as a still-running reload.
+        app.nativeUpdatePending = false
+        app.selectNode("missing-fixture-node")
+        XCTAssertEqual(app.errorMessage, String(localized: "The selected node is unavailable."))
+    }
+
     func testDownloadedTemporaryPathContainsNoLinkedAncestors() throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("tono-update-path-" + UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)

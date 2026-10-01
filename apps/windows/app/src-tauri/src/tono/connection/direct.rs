@@ -59,7 +59,7 @@ pub(super) async fn direct_lease_heartbeat_loop(state: Arc<TonoState>, generatio
             if inner.connect_generation != generation || !inner.fsm.status().is_connected {
                 return;
             }
-            if inner.policy_tracker.current_digest() != Some(heartbeat.policy_digest.as_str()) {
+            if !direct_lease_policy_is_current(inner.traffic_policy.as_ref(), &heartbeat.policy) {
                 return;
             }
         }
@@ -199,7 +199,16 @@ pub(super) struct DirectLeaseHeartbeat {
     session: OwnerSessionProof,
     reload_id: u64,
     endpoint_digest: String,
-    policy_digest: String,
+    policy: tono_core::policy::TonoTrafficPolicy,
+}
+
+pub(super) fn direct_lease_policy_is_current(
+    current: Option<&tono_core::policy::TonoTrafficPolicy>,
+    committed: &tono_core::policy::TonoTrafficPolicy,
+) -> bool {
+    // Revision-only republishes change the signed JSON digest without changing routes.
+    // Keep renewing unless validated behavior changed, matching policy_sync's reconnect decision.
+    current == Some(committed)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -501,6 +510,11 @@ pub(super) async fn apply_cloud_policy(
         return Ok(None);
     }
     let expected_controller_rules = expected_controller_direct_rules(&plan);
+    // A suffix-only plan emits no rules without native-app pins. Opening the reload bracket
+    // for an empty graph would retract the healthy TUN permit and then fail controller read-back.
+    if expected_controller_rules.is_empty() {
+        return Ok(None);
+    }
     // Declared to the Service exactly when `runtime_value` emits process-scoped rules, and with
     // the same condition it uses. A pin existing is not the same as process routing existing:
     // `direct_endpoints` is the union of the WeChat, web and media pins and the Service cannot
@@ -776,6 +790,20 @@ pub(super) async fn controller_json(
         .map_err(|error| format!("controller {path} returned invalid JSON: {error}"))
 }
 
+/// Controller waits may end when this connection is retired, while their detached owner still
+/// retracts the captured Service session before dropping lifecycle admission. Never wrap a
+/// mutating Service IPC here: its completion must remain owned through reconciliation.
+async fn wait_direct_controller<T>(
+    cancellation: &tokio_util::sync::CancellationToken,
+    future: impl std::future::Future<Output = Result<T, String>>,
+) -> Result<T, StageFailure> {
+    tokio::select! {
+        biased;
+        _ = cancellation.cancelled() => Err(StageFailure::Stale),
+        result = future => result.map_err(StageFailure::error),
+    }
+}
+
 pub(super) async fn reload_controller_config(secret: &str, controller_port: u16, config_path: &str) -> Result<(), String> {
     let client = controller_client(DIRECT_CONFIG_RELOAD_TIMEOUT)?;
     let mut last = String::from("no response");
@@ -925,6 +953,8 @@ pub(super) fn controller_direct_graph_is_active(
     // selectors. With home-broadband split routing the home block also carries
     // CLAUDE_HOME_DOMAINS pointing at Tono-Claude-Home, followed by the same
     // assistant matchers rejecting UDP even when the selected exit is HY2.
+    // Without that hop, a signed-app address-free TCP rule is preceded by the
+    // same domains and the Anthropic range aimed at Tono-Exit.
     let claude_target = if claude_home {
         config::CLAUDE_HOME_GROUP_NAME
     } else {
@@ -937,10 +967,21 @@ pub(super) fn controller_direct_graph_is_active(
         ));
     }
     let home_path_regexes = config::home_process_path_regexes();
+    // Address-free TCP path rules send every reviewed port from a signed
+    // WeChat/DingTalk/Feishu tree to the physical NIC. The runtime then emits
+    // the assistant domain and Anthropic rows first, aimed at Tono-Exit.
+    let assistant_shield = !claude_home
+        && expected_direct_rules.iter().any(|rule| {
+            rule.proxy == config::DIRECT_GROUP_NAME
+                && rule.payload.contains("(Network,tcp)")
+                && rule.payload.contains("ProcessPathRegex")
+        });
     let mut home_rows = config::HOME_PROCESS_NAMES.len() + home_path_regexes.len();
     if claude_home {
         home_rows += config::CLAUDE_HOME_DOMAINS.len() + config::CLAUDE_HOME_IPV4_CIDRS.len();
         home_rows *= 2;
+    } else if assistant_shield {
+        home_rows += config::CLAUDE_HOME_DOMAINS.len() + config::CLAUDE_HOME_IPV4_CIDRS.len();
     }
     // + 4 = two loopback rows, the UDP REJECT row, and the final MATCH.
     let expected_len = expected_direct_rules.len() + 3 + home_rows + 1;
@@ -955,14 +996,19 @@ pub(super) fn controller_direct_graph_is_active(
     // Home pins are TCP-scoped ANDs so assistant UDP falls through to the REJECT
     // row instead of matching a group that cannot carry it and leaking DIRECT.
     let mut index = 2;
-    if claude_home {
+    if claude_home || assistant_shield {
+        let domain_proxy = if claude_home {
+            config::CLAUDE_HOME_GROUP_NAME
+        } else {
+            EXIT_GROUP_NAME
+        };
         for domain in config::CLAUDE_HOME_DOMAINS {
             expect_rule(
                 rules.get(index),
                 index,
                 "AND",
                 &format!("((Network,tcp) && (DomainSuffix,{domain}))"),
-                config::CLAUDE_HOME_GROUP_NAME,
+                domain_proxy,
             )?;
             index += 1;
         }
@@ -972,7 +1018,7 @@ pub(super) fn controller_direct_graph_is_active(
                 index,
                 "AND",
                 &format!("((Network,tcp) && (IPCIDR,{cidr}))"),
-                config::CLAUDE_HOME_GROUP_NAME,
+                domain_proxy,
             )?;
             index += 1;
         }
@@ -1141,6 +1187,13 @@ pub(super) async fn activate_direct_runtime_cancellation_safe(
         drop(mutation_guard);
         return Err(StageFailure::Stale);
     }
+    let cancellation = {
+        let inner = state.lock().await;
+        if inner.connect_generation != generation {
+            return Err(StageFailure::Stale);
+        }
+        inner.connect_cancellation.clone()
+    };
     let task_state = Arc::clone(state);
     let task = tokio::spawn(async move {
         let _mutation_guard = mutation_guard;
@@ -1208,31 +1261,31 @@ pub(super) async fn activate_direct_runtime_cancellation_safe(
                 }
             };
             ensure_fresh(&task_state, generation).await?;
-            reload_controller_config(&controller_secret, controller_port, &config_path)
-                .await
-                .map_err(StageFailure::error)?;
-            wait_controller(&controller_secret, controller_port)
-                .await
-                .map_err(StageFailure::error)?;
-            verify_controller_direct_runtime(
-                &controller_secret,
-                controller_port,
-                &expected_controller_rules,
-                &direct_interface,
-                require_wechat_direct,
-                require_web_direct,
-                claude_home,
-            )
-            .await
-            .map_err(StageFailure::error)?;
+            wait_direct_controller(&cancellation,
+                reload_controller_config(&controller_secret, controller_port, &config_path),
+            ).await?;
+            wait_direct_controller(&cancellation,
+                wait_controller(&controller_secret, controller_port),
+            ).await?;
+            wait_direct_controller(&cancellation,
+                verify_controller_direct_runtime(
+                    &controller_secret,
+                    controller_port,
+                    &expected_controller_rules,
+                    &direct_interface,
+                    require_wechat_direct,
+                    require_web_direct,
+                    claude_home,
+                ),
+            ).await?;
             ensure_fresh(&task_state, generation).await?;
 
             lock_kill_switch_with_retries(&session)
                 .await
                 .map_err(StageFailure::error)?;
-            wait_controller(&controller_secret, controller_port)
-                .await
-                .map_err(StageFailure::error)?;
+            wait_direct_controller(&cancellation,
+                wait_controller(&controller_secret, controller_port),
+            ).await?;
             let locked = service::tono_service_status_snapshot()
                 .await
                 .map_err(StageFailure::error)?;
@@ -1416,7 +1469,7 @@ pub(super) async fn commit_direct_policy_cancellation_safe(
                     session: pending.session.clone(),
                     reload_id: pending.reload_id,
                     endpoint_digest: pending.endpoint_digest.clone(),
-                    policy_digest: pending.policy.digest.clone(),
+                    policy: pending.policy.document.clone(),
                 },
             ))
         }
@@ -1733,4 +1786,62 @@ pub fn build_direct_plan(
         reviewed_direct_ports: tono_service_protocol::REVIEWED_DIRECT_PORTS.to_vec(),
     };
     Ok((plan, endpoints))
+}
+
+#[cfg(test)]
+mod cancellation_tests {
+    use super::*;
+    use tokio::io::AsyncReadExt as _;
+    use tokio::sync::oneshot;
+
+    #[tokio::test]
+    async fn disconnect_cancels_a_stalled_direct_reload_before_release_writer_admission() {
+        let state = Arc::new(TonoState::for_test());
+        let cancellation = state.lock().await.connect_cancellation.clone();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let (requested, request_seen) = oneshot::channel();
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut request = Vec::new();
+            let mut bytes = [0; 1024];
+            while !request.windows(4).any(|part| part == b"\r\n\r\n") {
+                let count = socket.read(&mut bytes).await.unwrap();
+                assert!(count > 0 && request.len() < 4096);
+                request.extend_from_slice(&bytes[..count]);
+            }
+            assert!(request.starts_with(b"PUT /configs?force=true "));
+            requested.send(()).unwrap();
+            // One stalled Core handler: it accepts the actual reload but never answers.
+            std::future::pending::<()>().await;
+        });
+        let mutation = state.begin_connect_mutation().await;
+        let (reconciling, reconciliation_started) = oneshot::channel();
+        let (reconciled, reconciliation_done) = oneshot::channel();
+        let worker = tokio::spawn(async move {
+            let _mutation = mutation;
+            let result = wait_direct_controller(&cancellation,
+                reload_controller_config("fixture-secret", port, "fixture.yaml"),
+            ).await;
+            reconciling.send(matches!(result, Err(StageFailure::Stale))).unwrap();
+            // Inject only the Service retraction boundary. The real owner retains its reader
+            // until this non-cancellable step has finished.
+            reconciliation_done.await.unwrap();
+        });
+        tokio::time::timeout(Duration::from_secs(5), request_seen).await.unwrap().unwrap();
+        state.lock().await.invalidate_connection(true);
+        let cancelled = tokio::time::timeout(Duration::from_secs(5), reconciliation_started).await;
+        if cancelled.is_err() {
+            worker.abort();
+            server.abort();
+        }
+        assert!(cancelled.expect("Restore must not wait for both 60-second reload attempts").unwrap());
+        let writer = state.begin_privileged_release();
+        tokio::pin!(writer);
+        assert!(futures::poll!(&mut writer).is_pending(), "retraction still owns the reader");
+        reconciled.send(()).unwrap();
+        drop(tokio::time::timeout(Duration::from_secs(5), writer).await.unwrap());
+        worker.await.unwrap();
+        server.abort();
+    }
 }
