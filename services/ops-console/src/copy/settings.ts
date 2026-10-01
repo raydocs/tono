@@ -201,7 +201,7 @@ export const settingsCopy = {
       expires: '到期',
       usage: '本期用量',
       probe: '探测',
-      action: '',
+      action: '操作',
     } as const,
     status: {
       active: '在用',

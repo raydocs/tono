@@ -1,0 +1,16 @@
+| ID | Area | Severity | File:line | Description | Verdict |
+|---|---|---|---|---|---|
+| MAC-APP-FAILURE-AI-HOLD | macOS app/helper | P1 | apps/macos/Tono/Services/AppState+Connect.swift:2270 (baseline :2259) | Exhausted automatic recovery used explicit disarm and deleted the AI floor | Fixed in #1048; merged after green ci-gate |
+| MAC-DASHSCOPE-DIRECT-COVERAGE | macOS/shared policy | P1 | apps/macos/Tono/Core/ConfigPipeline.swift:114 | Dedicated model APIs match Alibaba DIRECT and lack recovery coverage | Real-unfixed: coordinated signed-policy migration and both recovery lists required; helper edits forbidden for this finding. Existing #1016 records it |
+| MAC-AI-HOLD-DELIBERATE-RELEASE | macOS decisions | — | docs/decisions/031-2026-09-30-fail-open-keeps-ai-block.md:4 | Automatic full AI release might be deliberate | False positive: owner decisions require selective recovery |
+| MAC-AI-HOLD-WATCHDOG-REPAIR | macOS helper | — | tooling/scripts/core-helper/KillSwitchManager.swift:579 | Watchdog might reapply the AI hold after explicit disarm | False positive: disarm deletes the saved intent the watchdog requires |
+| MAC-AI-HOLD-1043-DUPLICATE | macOS app | — | apps/macos/Tono/Services/AppState+Connect.swift:2266 | Retry owner PR might cover this release defect | False positive: #1043 only cancels and fences retry; its merged changes are preserved |
+| MAC-DASHSCOPE-ALL-TUN-DIRECT | macOS routing | — | apps/macos/Tono/Core/Configuration/ConfigPipeline+SingBoxProduct.swift:224 | Every default-TUN model API request might be DIRECT | False positive: hostname-bearing proxy path proved; general TUN claim not proved |
+
+PR: https://github.com/raydocs/tono/pull/1048 — non-draft, needs-hardware applied, MERGE auto-merge enabled and completed; merged. Own branch hunt/sol-r3p1m-ai-failure-hold. No local-only commit and no failed delivery.
+
+Local: git diff --check, findings parser and exact 19-source helper contract verification passed. Helper version 4.52.17 was main +0.0.1 at push. Linux cannot execute Swift/XCTest; hosted CI compilation, policy tests and privileged helper checks passed, XCTest passed: 530 tests, zero failures, one existing opt-in script-emission skip; the new regression and both #1043 owner regressions explicitly passed. PR merged at 22:51 MT as 7d9e8bad. No native installed-device acceptance claimed. No deploy or publication.
+
+False positives: 4. Total hypotheses examined: 6 (2 assigned verified findings and 4 rejected alternatives). Both assigned findings reverified. Unfinished repair: coordinated DashScope normal-routing/admission/recovery coverage across macOS, Windows and control plane. No broad hunt outside assigned scope.
+
+DashScope source evidence: dashscope-source-evidence.txt. Eight dedicated documented host shapes all show assistant=False, recovery=False, Alibaba-DIRECT=True. Official classification: https://www.alibabacloud.com/help/en/model-studio/base-url. Adding a protected child alone rejects legacy broad aliyuncs.com policy and can cause control-plane publicTrafficPolicy canonical validation to return 503; intentional overlap rejection must not be weakened. Both no-residential-hop route emitters and both recovery lists need coordinated coverage.

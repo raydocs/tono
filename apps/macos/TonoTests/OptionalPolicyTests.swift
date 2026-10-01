@@ -17,6 +17,23 @@ import XCTest
 /// `NetworkProtectionOperations`.
 final class OptionalPolicyTests: XCTestCase {
 
+    /// MAC-OPTIONAL-POLICY-FAIL-CLOSED: a failure before /core/sync (resolver
+    /// arm, writeRuntimeConfig on a full disk) has not touched the running
+    /// Core, so the optional overlay must not tear the working session down.
+    /// The runtime-mutation seam replaces the whole operation (it models a
+    /// failure after replacement started), so check the production decision
+    /// at the writeRuntimeConfig → /core/sync boundary directly.
+    func testOptionalPolicyFailureBeforeReplacementKeepsSession() {
+        XCTAssertEqual(
+            AppState.optionalPolicyFailureAction(replacementStarted: false),
+            .keepSession
+        )
+        XCTAssertEqual(
+            AppState.optionalPolicyFailureAction(replacementStarted: true),
+            .teardown
+        )
+    }
+
     func testBackgroundPolicyFailureSchedulesProtectedReconnect() async {
         let app = AppState()
         // Post-connect: onCoreStarted has already published connected and the

@@ -18,7 +18,7 @@ import {
 } from '../src/ops/jobs';
 import { redactJobResult } from '../src/ops/job-redaction';
 import { runWorkerJobs } from '../src/ops/jobs-worker';
-import { relistFleetNode } from '../src/ops/reads/fleet';
+import { relistFleetNode, retireFleetNode } from '../src/ops/reads/fleet';
 import { retirePendingDedupeKey } from '../src/ops/retire-dependencies';
 import { runVerdictPass } from '../src/ops/verdict-run';
 
@@ -393,6 +393,71 @@ describe('ops node jobs', () => {
     }>();
   }
 
+  function relistBeforeRevoke(e: Env, name: string): Env {
+    let relisted = false;
+    const raced = new Proxy(e.DB, {
+      get(target, key) {
+        const value = Reflect.get(target, key, target);
+        if (key !== 'prepare') return typeof value === 'function' ? value.bind(target) : value;
+        return (sql: string) => {
+          const statement = target.prepare(sql);
+          if (!sql.includes('SET revoked_token_hash = token_hash')) return statement;
+          return {
+            bind: (...values: unknown[]) => ({
+              run: async () => {
+                if (!relisted) {
+                  relisted = true;
+                  await relistFleetNode(e, 'ops@example.com', name, {
+                    block: realityBlock(name, '203.0.113.9'),
+                  });
+                }
+                return statement.bind(...values).run();
+              },
+            }),
+          };
+        };
+      },
+    });
+    return { ...e, DB: raced };
+  }
+
+  it('keeps an exit token when relist commits before direct retirement revocation', async () => {
+    const e = env as unknown as Env;
+    const t = 1_800_000_800;
+    const kite = 'Tokyo · Kite';
+    await seedTwoNodeCatalog(e, t, kite, 'Tokyo · Fuji');
+    const hash = await seedExitToken(kite, t);
+
+    await retireFleetNode(relistBeforeRevoke(e, kite), 'ops@example.com', kite, {
+      expectedRevision: 1, confirmation: kite, reason: 'retire',
+    }, undefined, t);
+
+    expect(await listedNames(e)).toContain(kite);
+    expect(await exitStatus(kite)).toEqual({ status: 'active', token_hash: hash });
+  });
+
+  it('keeps an exit token when relist commits before a retirement job revokes it', async () => {
+    const e = env as unknown as Env;
+    const t = 1_800_000_800;
+    const kite = 'Tokyo · Kite';
+    await seedTwoNodeCatalog(e, t, kite, 'Tokyo · Fuji');
+    await retireFleetNode(e, 'ops@example.com', kite, {
+      expectedRevision: 1, confirmation: kite, reason: 'retire before reenabling',
+    }, undefined, t);
+    const hash = await seedExitToken(kite, t);
+    const { job } = await enqueue('catalog_retire', t + 1, {
+      nodeName: kite, idempotencyKey: 'retire-relist-race',
+    });
+
+    expect(await runWorkerJobs(relistBeforeRevoke(e, kite), t + 1, 5)).toBe(1);
+
+    const row = await db().prepare('SELECT status FROM ops_node_jobs WHERE id = ?')
+      .bind(job.id).first<{ status: string }>();
+    expect(row?.status).toBe('succeeded');
+    expect(await listedNames(e)).toContain(kite);
+    expect(await exitStatus(kite)).toEqual({ status: 'active', token_hash: hash });
+  });
+
   it('retires an empty node: catalog gone, token revoked, no incident', async () => {
     const e = env as unknown as Env;
     const t = 1_800_000_800;
@@ -493,6 +558,58 @@ describe('ops node jobs', () => {
       `SELECT COUNT(*) AS n FROM ops_incidents WHERE dedupe_key = ? AND status <> 'resolved'`,
     ).bind(retirePendingDedupeKey(kite)).first<{ n: number }>();
     expect(Number(afterRelist?.n)).toBe(0);
+  });
+
+  it('keeps a retiring node available while recent customers use its hy2 transport', async () => {
+    const e = env as unknown as Env;
+    const t = 1_800_000_950;
+    const kite = 'Tokyo · Kite';
+    const fuji = 'Tokyo · Fuji';
+    const yaml = (await seedTwoNodeCatalog(e, t, kite, fuji)).replace('proxy-groups:', [
+      `  - name: ${kite} · hy2`,
+      '    type: hysteria2',
+      '    server: 203.0.113.9',
+      '    port: 443',
+      '    password: {{TONO_CLIENT_UUID}}',
+      `    fingerprint: ${'a'.repeat(64)}`,
+      'proxy-groups:',
+    ].join('\n'));
+    const encrypted = await encryptCatalog(yaml, e.CATALOG_ENCRYPTION_KEY!);
+    await db().prepare(
+      'UPDATE managed_exit_catalog SET ciphertext = ?, nonce = ?, content_sha256 = ?',
+    ).bind(encrypted.ciphertext, encrypted.nonce, await sha256(yaml)).run();
+    const hash = await seedExitToken(kite, t);
+    await db().prepare(
+      `INSERT INTO users(id, email, password_hash, password_salt, created_at, updated_at)
+       VALUES('u-device', 'device@example.com', 'x', 'y', ?, ?),
+             ('u-customer', 'customer@example.com', 'x', 'y', ?, ?)`,
+    ).bind(t, t, t, t).run();
+    await db().prepare(
+      `INSERT INTO ops_device_status(user_id, device_id, connected, selected_server, last_seen_at, updated_at)
+       VALUES('u-device', 'device-hy2', 1, ?, ?, ?)`,
+    ).bind(`${kite} · hy2`, t - 60, t).run();
+    await db().prepare(
+      `INSERT INTO ops_customer_status(user_id, connected, selected_server, last_seen_at, updated_at)
+       VALUES('u-customer', 1, ?, ?, ?)`,
+    ).bind(`${kite} · hy2`, t - 60, t).run();
+
+    const { job } = await enqueue('catalog_retire', t, { nodeName: kite, idempotencyKey: 'retire-hy2' });
+    expect(await runWorkerJobs(e, t, 5)).toBe(1);
+    const row = await db().prepare('SELECT status, result_json FROM ops_node_jobs WHERE id = ?')
+      .bind(job.id).first<{ status: string; result_json: string }>();
+    expect(row?.status).toBe('succeeded');
+    const result = JSON.parse(String(row?.result_json)) as {
+      customersOnNode: Array<{ userId: string }>; exitTokenActive: boolean;
+    };
+    expect(result.customersOnNode.map((customer) => customer.userId).sort())
+      .toEqual(['u-customer', 'u-device']);
+    expect(result.exitTokenActive).toBe(true);
+    expect(await listedNames(e)).not.toContain(`${kite} · hy2`);
+    expect(await exitStatus(kite)).toEqual({ status: 'active', token_hash: hash });
+    expect((await retireIncident(kite))?.status).toBe('open');
+    await runVerdictPass(e, t + 1);
+    expect((await retireIncident(kite))?.status).toBe('open');
+    expect(await exitStatus(kite)).toEqual({ status: 'active', token_hash: hash });
   });
 
   it('relist refuses to publish an entry without the Reality settings clients require', async () => {

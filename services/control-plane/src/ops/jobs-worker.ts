@@ -105,7 +105,7 @@ async function executeCatalogRetire(
       resultJson: { revision, ...deps },
     };
   }
-  await revokeExitToken(e, job.nodeName, job.requestedBy, nowSec);
+  await revokeExitToken(e, job.nodeName, job.requestedBy, nowSec, revision);
   deps = await retireDependencies(e, job.nodeName, nowSec);
   return { summary: `retired ${job.nodeName}`, resultJson: { revision, ...deps } };
 }

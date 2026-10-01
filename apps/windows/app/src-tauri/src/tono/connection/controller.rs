@@ -46,31 +46,12 @@ pub(super) const CONTROLLER_HTTP_TIMEOUT: Duration = Duration::from_secs(6);
 /// Fail fast when BFE is known stopped. A query failure is not a refusal —
 /// StartClash still diagnoses a wedged or missing engine. StartPending is
 /// allowed through so a machine that is bringing BFE up is not rejected.
-/// BFE's verdict for the service-readiness failure path, in the shape `map_wfp_engine_error`
-/// already translates. `Ok(())` on any platform or condition where BFE is not the answer, so
-/// the caller falls through to its own classification.
-pub(super) fn blocking_bfe_verdict() -> Result<(), String> {
-    #[cfg(windows)]
-    {
-        match query_bfe_state() {
-            Ok((running, state)) if !running && !state.eq_ignore_ascii_case("StartPending") => {
-                Err(format!("{BFE_NOT_RUNNING_PREFIX}: state {state}"))
-            }
-            _ => Ok(()),
-        }
-    }
-    #[cfg(not(windows))]
-    {
-        Ok(())
-    }
-}
-
 pub(super) async fn preflight_bfe() -> Result<(), String> {
     #[cfg(windows)]
     {
-        match tokio::task::spawn_blocking(query_bfe_state).await {
-            Ok(Ok((running, state))) => classify_bfe_state(running, &state),
-            Ok(Err(_)) | Err(_) => Ok(()),
+        match service::probe_service_state(|| query_bfe_state().map_err(anyhow::Error::msg)).await {
+            Ok((running, state)) => classify_bfe_state(running, &state),
+            Err(_) => Ok(()),
         }
     }
     #[cfg(not(windows))]
@@ -109,19 +90,13 @@ pub(super) fn query_bfe_state() -> Result<(bool, String), String> {
 pub(super) async fn ensure_service_ready() -> Result<(), String> {
     // `tono_service_ready_or_repair`: an unprotected App quit stops the SCM service, so the
     // first connect afterwards revives it through the established install/repair entry.
-    service::tono_service_ready_or_repair()
-        .await
-        .map_err(|err| {
-            // Ask BFE before answering. TonoService is AutoStart with a hard BFE dependency, so
-            // when BFE is off the SCM refuses to start it and does not retry — a reboot does not
-            // help either. `preflight_bfe` already knows how to say that, but it runs later in
-            // the connect flow and this failure returns before it, so the customer used to get
-            // "the Service is not ready" plus an internal error and no way forward.
-            if let Err(bfe) = blocking_bfe_verdict() {
-                return bfe;
-            }
-            map_service_ready_error(&err)
-        })?;
+    if let Err(err) = service::tono_service_ready_or_repair().await {
+        // Ask BFE before answering. The Service has a hard BFE dependency, and a stopped
+        // engine needs its existing specific diagnosis. An unproven or stalled read retains
+        // the original readiness error without blocking the runtime's cancellation checks.
+        preflight_bfe().await?;
+        return Err(map_service_ready_error(&err));
+    }
     match service::tono_probe_kill_switch_release_support().await {
         Ok(None) => Ok(()),
         // The detail carries both sides' epoch/revision. The old wording asserted "too old",

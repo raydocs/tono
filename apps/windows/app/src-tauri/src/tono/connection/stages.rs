@@ -322,10 +322,12 @@ pub(super) async fn run_stages(
     // from observing a half-configured HTTP context.
     // §6.10: only now Connected; monitors start.
     let mut deferred_policy_change = false;
+    let deferred_catalog_rebuild;
     {
-        let mut inner = controller_commit_guard(state, generation, || {
+        let (mut inner, catalog_changed) = controller_commit_guard(state, generation, nodes, routing, || {
             configure_owned_controller_for_ui(state, app, &secret, controller_port);
         }).await?;
+        deferred_catalog_rebuild = catalog_changed;
         inner.kill_switch = Some(kill_status);
         inner.controller_generation = inner.controller_generation.wrapping_add(1);
         inner.fsm.mark_session_verified();
@@ -395,6 +397,10 @@ pub(super) async fn run_stages(
         transport: node.catalog_transport(),
     });
     spawn_network_monitor(state, app).await;
+    if deferred_catalog_rebuild {
+        super::switch::spawn_deferred_catalog_rebuild(state, app, generation);
+        return Ok(());
+    }
     spawn_exit_identity_lookup(state, app, generation);
     let residential_target = if home_socks5.is_some() {
         Some(config::HOME_SOCKS5_OUTBOUND_NAME.to_owned())
@@ -438,16 +444,21 @@ pub(super) async fn run_stages(
     Ok(())
 }
 
-/// Bind controller publication to the state commit which follows it.
+/// Bind controller publication and catalog comparison to the state commit which follows it.
 async fn controller_commit_guard<'a>(
-    state: &'a Arc<TonoState>, generation: u64, publish: impl FnOnce() + Send,
-) -> Result<tokio::sync::MutexGuard<'a, crate::tono::state::TonoInner>, StageFailure> {
+    state: &'a Arc<TonoState>, generation: u64,
+    startup_nodes: &[ValidatedNode], startup_routing: Option<&tono_core::CatalogRouting>,
+    publish: impl FnOnce() + Send,
+) -> Result<(tokio::sync::MutexGuard<'a, crate::tono::state::TonoInner>, bool), StageFailure> {
     let inner = state.lock().await;
     if inner.connect_generation != generation {
         return Err(StageFailure::Stale);
     }
+    let rebuild = crate::tono::catalog_sync::residential_routing_changed(
+        startup_routing, startup_nodes, inner.routing.as_ref(), &inner.nodes,
+    );
     publish();
-    Ok(inner)
+    Ok((inner, rebuild))
 }
 
 #[cfg(test)]
@@ -471,12 +482,40 @@ mod tests {
             retired
         };
         let published = AtomicBool::new(false);
-        let late = controller_commit_guard(&state, retired, || published.store(true, Ordering::SeqCst)).await;
+        let late = controller_commit_guard(&state, retired, &[], None, || published.store(true, Ordering::SeqCst)).await;
         assert!(matches!(late, Err(StageFailure::Stale)));
         assert!(!published.load(Ordering::SeqCst), "stale completion must not repoint the live UI controller");
         let inner = state.lock().await;
         assert!(inner.fsm.status().is_connected && inner.fsm.kill_switch_armed());
         assert_eq!(inner.controller_secret.as_deref(), Some("replacement-controller"));
         assert_eq!(inner.controller_port, Some(19991));
+    }
+
+    #[tokio::test]
+    async fn connected_commit_detects_residential_credentials_rotated_during_startup() {
+        let state = Arc::new(TonoState::for_test());
+        let startup_routing = tono_core::CatalogRouting {
+            home_socks5: Some(tono_core::CatalogHomeSocks5 {
+                host: "home.example.com".into(),
+                port: 1080,
+                username: "fixture".into(),
+                password: "old-password".into(),
+            }),
+            ..Default::default()
+        };
+        let generation = {
+            let mut inner = state.lock().await;
+            inner.fsm.begin_connect();
+            inner.routing = Some(startup_routing.clone());
+            // A catalog install can commit while service startup is awaiting readiness.
+            inner.routing.as_mut().unwrap().home_socks5.as_mut().unwrap().password = "rotated-password".into();
+            inner.connect_generation
+        };
+        let (inner, rebuild) = controller_commit_guard(
+            &state, generation, &[], Some(&startup_routing), || {},
+        ).await.unwrap();
+        assert!(rebuild, "the runtime built with old residential credentials must be rebuilt before DIRECT can apply");
+        assert!(inner.fsm.status().is_connecting, "the comparison belongs to the atomic Connected commit");
+        assert_eq!(inner.routing.as_ref().unwrap().home_socks5.as_ref().unwrap().password, "rotated-password");
     }
 }

@@ -1596,6 +1596,7 @@ if CommandLine.arguments.dropFirst() == ["--staging-self-test"] {
 if CommandLine.arguments.dropFirst() == ["--lifecycle-self-test"] {
     let pfPassed = KillSwitchManager.runLifecycleSelfTests()
     let dnsPassed = ProtectedDNSManager.runRestoreReadFailureSelfTest()
+        && ProtectedDNSManager.runPreferencesContentionSelfTest()
         && ProtectedDNSManager.runStatusUnreadableServiceSelfTest()
         && ProtectedDNSManager.runCorruptSnapshotSelfTest()
         && ProtectedDNSManager.runRenamedServiceRestoreSelfTest()
@@ -1614,10 +1615,16 @@ if CommandLine.arguments.dropFirst() == ["--self-test"] {
             && PowerTransitionGate.runSelfTests()
             && runStartupOrderSelfTest()
             && runStartupDNSRecoverySelfTest()
+            && KillSwitchManager.runFailedCommitReleaseSelfTest()
+            && KillSwitchManager.runFailedBarrierSelectiveReleaseSelfTest()
+            && KillSwitchManager.runFailedBarrierUnreleasedSelfTest()
+            && SocketServer.runOrphanedBootstrapSelectiveReleaseSelfTest()
+            && KillSwitchManager.runUnprovenHealthSelfTest()
             && emergencyReleaseDespiteUnreadableLedger(strictKillSwitchEnabled: false)
             && !emergencyReleaseDespiteUnreadableLedger(strictKillSwitchEnabled: true)
             && emergencyReleaseDespiteStaleCore(strictKillSwitchEnabled: false)
             && !emergencyReleaseDespiteStaleCore(strictKillSwitchEnabled: true)
+            && SelectiveFailOpen.runSelfTests()
             ? 0 : 1
     )
 }
