@@ -1,5 +1,5 @@
 | ID | 问题（一句） | 状态 | Issue / PR | 等级 | 剩余限制 |
 |---|---|---|---|---|---|
-| TCP-TUNE-FALSE-SUCCESS | TCP 调优脚本在 drop-in 文本已一致时直接报成功，即使内核仍是旧值 | in-PR | 待开 | 低·推导 | 只影响退出节点的缓冲区调优，不改谁能连。需要 root。未在实机跑 sysctl。 |
+| TCP-TUNE-FALSE-SUCCESS | TCP 调优脚本在 drop-in 文本已一致时直接报成功，即使内核仍是旧值 | in-PR | [#910](https://github.com/raydocs/tono/pull/910) | 低·推导 | 只影响退出节点的缓冲区调优，不改谁能连。需要 root。未在实机跑 sysctl。 |
 
 `sysctl -p` 失败后文件已经写上。下次再跑看到文本一致就退出 0，读回检查被跳过。现在文本一致还要读回五个键，不一致就重新应用，应用后仍不一致则失败。
