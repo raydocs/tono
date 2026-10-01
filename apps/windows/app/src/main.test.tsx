@@ -57,7 +57,9 @@ it('starting a tray WebView preserves the main window controller feeds', async (
   await Promise.resolve()
 
   expect(liveFeeds).toEqual(new Set(['main:traffic', 'main:connections']))
-  expect(invoke).not.toHaveBeenCalledWith(
-    'plugin:tono-plugin-core|clear_all_ws_connections',
-  )
+  expect(
+    invoke.mock.calls.some(
+      ([command]) => command === 'plugin:tono-plugin-core|clear_all_ws_connections',
+    ),
+  ).toBe(false)
 })
