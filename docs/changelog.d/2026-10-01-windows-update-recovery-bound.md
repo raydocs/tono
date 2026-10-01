@@ -1,0 +1,52 @@
+## 2026-10-01 · Bound the Windows failed-update recovery relaunch loop
+- Ownership: SHIP_PLAN §2 item 10; Windows failed-update recovery (`R4-WIN-UPDATE-RECOVERY-LOOP`, #1292).
+- Source: baseline `4bb0ba4a`; branch `fix/win-update-recovery-bound-1292`, [#1297](https://github.com/raydocs/tono/pull/1297); not yet merged.
+- Defect fix: when a failed update's rollback also kept failing, every Service start relaunched the recovery executor, which stopped the Service, failed again and restarted it, without end. Now the recovery run records its own image before stopping the Service, so the Service it restarts does not launch a second recovery. Each failed run is counted in a private `recovery-runs` sidecar in the attempt directory, but only after its network settled (released with the AI hold, or strict). After 3 counted runs, startup stops relaunching the executor and the Service starts normally. The record stays pending and update status sets `needs_attention`.
+- New/optimization: none. The `state.json` schema is unchanged. In the exhausted state no binary is executed and nothing is replaced.
+- Engineering/tests: one real-Store test, `update_recovery_stops_relaunching_after_bounded_failed_runs`.
+- Verification: `rustfmt --edition 2024` shows no diffs on the changed lines. Windows CI runs the test. No local cargo on the MacBook.
+- Candidate/publication: source only; no new candidate.
+- Limits: needs-hardware (fault-injected rollback on Windows). The App only logs `needs_attention`. The manual installer still refuses a pending record, so the repair path for an exhausted record needs an owner decision.
+- 2026-10-01 continuation (Codex gpt-6.1-sol high review at `663308e6`, two majors):
+  - Failed-release retry: Service startup with an `Uncertain` record now expires the core window for a non-strict barrier. Replay-finished, then every watchdog tick, releases general traffic with the AI hold until WFP is gone. Strict keeps the block. Before this, a failed executor release could be left with no retry once the restarted Service saw the live recorded executor.
+  - Repair exit: an exhausted recovery admits the manual installer. `begin_manual` skips the pending refusal and the lease may coexist with an `Uncertain` record. `finish_manual` archives the record only when the installed identity is proven to be the original (every plan member old) or the target (every member new; rollback copies freed; version recorded). Otherwise the record stays pending. The consumed high-water, generation and archive are kept.
+  - Tests: `failed_update_startup_releases_a_non_strict_barrier_with_the_ai_hold`, `update_exhausted_recovery_is_retired_by_the_manual_installer` (Windows CI).
+  - Still open: a newer signed update cannot repair an exhausted record (Check/Prepare still refuse while it is pending). A reinstall of any version other than the original or the target leaves it pending. If the AI-hold filters count as residual filters, the manual install gate may still refuse.
+- 2026-10-01 continuation (Codex re-review at `dc1bead3`; scope narrowed to the loop bound plus a guaranteed non-strict release):
+  - The repair exit above was reverted: the `begin_manual` relaxation, `retire_repaired_installation`, the lease next to `Uncertain`, and their test. The rest of the install chain still refused, and `finish_manual` could self-deadlock (exit 76). It moved to [#1307](https://github.com/raydocs/tono/issues/1307).
+  - The release is now owed on every startup exit, not only the `Ok(true)` one:
+    - pending evidence that is `Uncertain`, or that cannot be read (lock-free read, no write);
+    - every `reconcile_before_desired` error;
+    - the Core startup reconciliation error with update evidence pending.
+  - Non-strict only, AI hold kept, strict unchanged.
+  - Tests: `update_recovery_stops_relaunching_after_bounded_failed_runs` and `failed_update_startup_releases_a_non_strict_barrier_with_the_ai_hold`. The startup error branches in `bin/service.rs` have no unit test.
+- 2026-10-01 continuation (Codex review at `231b5a3b`: F2 introduced here, F1 partly pre-existing):
+  - F2: round 3 owed the release on every `reconcile_before_desired` error. That includes `StoreBusy`, which a live, healthy update holds, so a ProtectedOffline obligation could later commit as Unprotected. The startup owe calls in `bin/service.rs` are reverted.
+  - F1: one watchdog mechanism replaces them. `restore_on_service_start` marks the unverified barrier it restored. Once replay has finished, both replay-finished and every watchdog tick ask `update::startup_barrier_release_owed()`. That is a lock-free read with no write, so another holder's lock is never read as a failure. The release is owed when:
+    - the record is unreadable;
+    - the attempt is `Uncertain`/`Reserved`/`Extracting`/`Staged`/`Launching` and its recorded executor is not live (this covers a dead `Launching` demoted to `Staged`, and `Uncertain` written by recovery after startup);
+    - the attempt is `Consumed`/`Replaced` with no live executor and recovery exhausted.
+  - When owed, the core window expires and general traffic is released with the AI hold, retried each tick until WFP is gone. Non-strict only; a fresh arm clears the mark; strict unchanged.
+  - Pre-existing and not closed here: a recovery executor that cannot start below the bound, an unfinished rollback finalizer, and `Replaced` with no successor still hold the barrier with no timeout ([#1308](https://github.com/raydocs/tono/issues/1308), P1).
+  - Tests: `update_startup_barrier_release_waits_only_for_a_live_executor`, `update_held_startup_barrier_releases_with_the_ai_hold` (Windows CI).
+- 2026-10-01 continuation (Codex review at `04db1a08`, F3/F4):
+  - F3: the recovery executor now records itself as `attempt.executor` before classifying, forward recovery included. Previously it did so only after classification, and never on the TargetVerified branch. Startup keeps the recovery child it spawns, and `startup_barrier_release_owed` owes nothing while that child runs. This covers the gap before the child registers.
+  - F3: a latched update-held expiry is re-checked before each WFP removal attempt and withdrawn once a live owner appears.
+  - F4: an executor counts as dead only when the process is gone or the PID names another incarnation (`holder_conclusively_dead`). A probe that cannot tell (pinning, ACL or digest read) counts as live: no release that tick, and the next tick asks again.
+  - Tests: `update_startup_barrier_release_waits_only_for_a_live_executor` (inconclusive probe) and `update_held_startup_barrier_releases_with_the_ai_hold` (withdrawn expiry), on Windows CI.
+- 2026-10-01 continuation (Codex review at `5019a2bd`, F3/F4/F5):
+  - F3, cross-process fence:
+    - When the update-held release fires, the Service first takes the update store lock without blocking (`Store::lock_only`, no write), then re-checks that the release is still owed. It holds the lock until WFP removal commits.
+    - If another holder has the lock (`StoreBusy`), that holder is a live owner: the attempt aborts with nothing changed, and the next tick asks again. The same happens if the re-check no longer owes the release.
+    - Nothing in the release path opens the store.
+    - A recovery that meets the held lock waits up to 15 s in `open_waiting`. If it gives up, it exits uncounted and does not loop.
+  - F4: the startup `Launching → Staged` demotion now also requires conclusive death; an inconclusive probe leaves the record unchanged.
+  - F5: the death probe no longer reads the image path. `process_started_at` uses `OpenProcess` + `GetProcessTimes`:
+    - an unknown PID or an exited process means gone;
+    - a different creation time means another incarnation;
+    - only a refused open is inconclusive.
+  - Tests: `update_release_fence_yields_to_a_store_holder`, `update_inconclusive_probe_does_not_demote_a_launching_executor`, `process_started_at_proves_exit_without_the_image_path`, and the fence abort in `update_held_startup_barrier_releases_with_the_ai_hold`, all on Windows CI.
+- 2026-10-01 continuation (Codex review at `5db589ec`, F3 residual and F6):
+  - F3 residual: the store-lock fence now moves into the blocking WFP removal call (`remove_all_filters_holding`). The lock is released only when the removal itself returns (commit or abort). Before, it was released when the 25 s bounded wait gave up while the kernel call could still commit.
+  - F6: every lock failure aborts the tick, not only `StoreBusy`. No teardown runs without the fence.
+  - Tests: `update_release_fence_yields_to_a_store_holder` now also asserts that a lock that was not taken aborts. The lock moving into the native removal closure has no unit seam: `engine_call` runs only in the non-`test` Windows build. Hardware verification remains (`needs-hardware`).

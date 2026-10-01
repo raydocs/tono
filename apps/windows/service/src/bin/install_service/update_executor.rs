@@ -378,6 +378,17 @@ fn execute(recovery: bool) -> Result<(), Error> {
         {
             return Ok(()); // Live original executor, not an interrupted install.
         }
+        // Register as the live recovery owner before classifying anything, forward recovery
+        // included: Service startup then sees this run, not the dead previous executor, and
+        // neither relaunches a second recovery nor owes the barrier release under it (#1292).
+        if store.independent_recovery_pending()? {
+            let mut next = store.state.clone();
+            next.attempt
+                .as_mut()
+                .context("attempt checked above")?
+                .executor = Some(self_image.clone());
+            store.save(next)?;
+        }
         if a.execution == tx::Execution::RolledBack {
             if !store.independent_recovery_pending()? {
                 return Ok(());
@@ -389,13 +400,6 @@ fn execute(recovery: bool) -> Result<(), Error> {
                 native::components(&a.install_root, &service_path)? == a.old_components,
                 "resolved rollback no longer has its retained original identity"
             );
-            // Service startup must see this live replay owner while readiness drops our locks.
-            let mut next = store.state.clone();
-            next.attempt
-                .as_mut()
-                .context("attempt checked above")?
-                .executor = Some(self_image.clone());
-            store.save(next)?;
             let finalizer = store.rollback_finalizer()?;
             let manager =
                 ServiceManager::local_computer(None::<&str>, ServiceManagerAccess::CONNECT)?;
@@ -645,10 +649,11 @@ fn execute(recovery: bool) -> Result<(), Error> {
     } else {
         None
     };
+    let released = std::cell::Cell::new(false);
     let release = || {
         // The original repair/store guards still fence lifecycle writers. The
         // publication outcome has released its owner, and SCM remains stopped.
-        shared::block_on_abandoning(async {
+        let result = shared::block_on_abandoning(async {
             let _owner = tono_service_protocol::acquire_service_owner()
                 .await?
                 .context("Service still owns rolled-back update recovery")?;
@@ -656,9 +661,21 @@ fn execute(recovery: bool) -> Result<(), Error> {
                 return Ok(());
             }
             tono_service_protocol::emergency_disarm_windows_kill_switch_applying_narrow().await
-        })?
+        })
+        .and_then(|settled| settled);
+        released.set(result.is_ok());
+        result
     };
+    let failed_recovery = recovery && outcome.is_err();
     let restart = || {
+        // Count a failed recovery only once its network settled: released with the AI
+        // hold, or strict. A failed release keeps being retried, never abandoned (#1292).
+        if failed_recovery
+            && (released.get() || native::strict_kill_switch_intent_on_disk())
+            && let Err(error) = store.note_recovery_run()
+        {
+            eprintln!("failed update recovery could not be counted: {error:#}");
+        }
         // Even a failed plan/rollback must leave the IPC recovery Service available.
         configure_windows_service_recovery(&service)?;
         drop(store);

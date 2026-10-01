@@ -1051,7 +1051,13 @@ fn status(store: &Store) -> Result<UpdateStatus> {
             .map(|a| format!("{:?}", a.execution))
             .unwrap_or_else(|| "none".into()),
         offer: None,
-        needs_attention: None,
+        // An exhausted recovery is no longer relaunched (#1292); the App must ask for repair.
+        needs_attention: store.recovery_exhausted().unwrap_or(false).then(|| {
+            format!(
+                "automatic update recovery failed {MAX_RECOVERY_RUNS} times and stopped; \
+                 the installation needs manual repair"
+            )
+        }),
         successor_relaunched: false,
     })
 }
@@ -1651,13 +1657,7 @@ pub fn reconcile_before_desired() -> Result<bool> {
     // and the durable high-water proves none was. Return it to Staged: the
     // same initiating App may launch again, and a Disconnect can retire it.
     // This is not a second execution grant — nothing was executed.
-    if store.state.attempt.as_ref().is_some_and(|a| {
-        a.execution == Execution::Launching
-            && store.state.consumed_sequence < a.manifest.release_sequence
-            && a.executor
-                .as_ref()
-                .is_none_or(|e| image(e.pid).ok().as_ref() != Some(e))
-    }) {
+    if dead_launching_attempt(&store.state, super::process::process_started_at) {
         let mut next = store.state.clone();
         let attempt = next.attempt.as_mut().context("attempt checked above")?;
         attempt.execution = Execution::Staged;
@@ -1679,17 +1679,213 @@ pub fn reconcile_before_desired() -> Result<bool> {
             .as_ref()
             .is_none_or(|e| image(e.pid).ok().as_ref() != Some(e))
         {
-            std::process::Command::new(store.attempt_dir()?.join("executor.exe"))
+            let child = std::process::Command::new(store.attempt_dir()?.join("executor.exe"))
                 .arg("--update-recover")
                 .spawn()?;
+            *SPAWNED_RECOVERY
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(child);
         }
+    } else if store.recovery_exhausted()? {
+        // Each counted run already left the network released with the AI hold (or strict).
+        tracing::warn!(
+            "update recovery failed {MAX_RECOVERY_RUNS} times; not relaunching it (manual repair required)"
+        );
     }
     Ok(true)
+}
+
+/// Decision 031 for the unverified barrier restored at Service start (#1292): pending update
+/// evidence makes ordinary startup retirement skip it, so it must be released once no live
+/// process still owns the update. Read without the lock or a write: another holder's lock is not
+/// evidence of failure, and evidence that cannot be read owes the release.
+pub fn startup_barrier_release_owed() -> bool {
+    !spawned_recovery_running()
+        && startup_barrier_release_owed_by(
+            read_store_state(),
+            super::process::process_started_at,
+            recovery_exhausted_unlocked,
+        )
+}
+
+/// Cross-process fence for the update-held release (#1292): every update writer takes the
+/// store's lock, so the Service holds it from the final re-check until WFP removal commits.
+/// Another holder is a live owner, and so is a re-check that no longer owes the release: this
+/// attempt aborts and the next watchdog tick asks again. So does any other lock failure: no
+/// teardown runs without the fence.
+pub fn startup_release_fence() -> Result<Option<std::fs::File>> {
+    let root = crate::service_paths()
+        .persistent_state_dir()
+        .join("updates-v1");
+    release_fence_at(&root, startup_barrier_release_owed)
+}
+
+fn release_fence_at(root: &Path, owed: impl FnOnce() -> bool) -> Result<Option<std::fs::File>> {
+    let lock = Store::lock_only(root).context("update release fence")?;
+    ensure!(owed(), "the update-held barrier release is no longer owed");
+    Ok(Some(lock))
+}
+
+/// Conclusive death of a recorded incarnation: no live process has its PID, or the PID now
+/// names a process created at another time. A probe that cannot tell counts as alive.
+fn incarnation_dead(recorded: &Image, started_at: Result<Option<u64>>) -> bool {
+    match started_at {
+        Ok(None) => true,
+        Ok(Some(started_at)) => started_at != recorded.started_at,
+        Err(_) => false,
+    }
+}
+
+/// A Launching attempt whose recorded executor incarnation is conclusively gone and whose
+/// high-water proves nothing was consumed.
+fn dead_launching_attempt(state: &State, probe: impl Fn(u32) -> Result<Option<u64>>) -> bool {
+    state.attempt.as_ref().is_some_and(|a| {
+        a.execution == Execution::Launching
+            && state.consumed_sequence < a.manifest.release_sequence
+            && a.executor
+                .as_ref()
+                .is_none_or(|e| incarnation_dead(e, probe(e.pid)))
+    })
+}
+
+/// The recovery executor startup spawned last. Until it registers as `attempt.executor` the
+/// record still names the previous, dead executor, so while it runs it owns the update (#1292).
+static SPAWNED_RECOVERY: std::sync::Mutex<Option<std::process::Child>> =
+    std::sync::Mutex::new(None);
+
+fn spawned_recovery_running() -> bool {
+    let mut child = SPAWNED_RECOVERY
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    match child.as_mut().map(std::process::Child::try_wait) {
+        None => false,
+        Some(Ok(Some(_))) => {
+            *child = None;
+            false
+        }
+        // Running, or a wait that cannot tell: not proof that the owner is gone.
+        Some(Ok(None) | Err(_)) => true,
+    }
+}
+
+fn startup_barrier_release_owed_by(
+    state: Result<State>,
+    probe: impl Fn(u32) -> Result<Option<u64>>,
+    exhausted: impl Fn(&Attempt) -> bool,
+) -> bool {
+    let Ok(state) = state else {
+        return true;
+    };
+    let Some(a) = state.attempt.as_ref().filter(|_| state.pending()) else {
+        return false;
+    };
+    // Only conclusive death frees the update; a probe that cannot tell keeps the barrier and
+    // the next watchdog tick asks again.
+    let dead = a
+        .executor
+        .as_ref()
+        .is_none_or(|e| incarnation_dead(e, probe(e.pid)));
+    match a.execution {
+        // A settled failure, or a record nothing will run any more once its executor is gone.
+        Execution::Uncertain
+        | Execution::Reserved
+        | Execution::Extracting
+        | Execution::Staged
+        | Execution::Launching => dead,
+        // Startup relaunches recovery for these until the bound; then nothing settles them.
+        Execution::Consumed | Execution::Replaced => dead && exhausted(a),
+        // The rollback finalizer settles the barrier itself.
+        Execution::RolledBack => false,
+    }
+}
+
+/// [`Store::recovery_exhausted`] without the lock: a count that cannot be read also stops
+/// startup from relaunching recovery, so it reads as exhausted.
+fn recovery_exhausted_unlocked(a: &Attempt) -> bool {
+    let path = crate::service_paths()
+        .persistent_state_dir()
+        .join("updates-v1")
+        .join(&a.receipt.attempt_id)
+        .join("recovery-runs");
+    match std::fs::read_to_string(path) {
+        Ok(text) => text
+            .trim()
+            .parse::<u32>()
+            .ok()
+            .is_none_or(|runs| runs >= MAX_RECOVERY_RUNS),
+        Err(error) => error.kind() != std::io::ErrorKind::NotFound,
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn update_startup_barrier_release_waits_only_for_a_live_executor() {
+        let (root, mut store, peer, executor) = crate::update_transaction::tests::reserved();
+        crate::update_transaction::tests::authorize(&mut store, &peer);
+        // A dead Launching that startup demoted to Staged (#1292): nothing will run it.
+        store.execution(Execution::Staged).unwrap();
+        let state = || Ok(store.state.clone());
+        let gone = |_: u32| -> Result<Option<u64>> { Ok(None) };
+        let running = |_: u32| -> Result<Option<u64>> { Ok(Some(executor.started_at)) };
+        let inconclusive = |_: u32| -> Result<Option<u64>> { Err(anyhow::anyhow!("denied")) };
+        assert!(startup_barrier_release_owed_by(state(), gone, |_| false));
+        assert!(
+            !startup_barrier_release_owed_by(state(), running, |_| true),
+            "a live executor still owns the update; its lock or record is not a failure"
+        );
+        assert!(
+            !startup_barrier_release_owed_by(state(), inconclusive, |_| true),
+            "only conclusive death frees the update"
+        );
+        assert!(startup_barrier_release_owed_by(
+            Err(anyhow::anyhow!("unreadable")),
+            running,
+            |_| false
+        ));
+        // A dead consumed executor waits for relaunched recovery, until the bound stops it.
+        let mut consumed = store.state.clone();
+        consumed.attempt.as_mut().unwrap().execution = Execution::Consumed;
+        let state = || Ok(consumed.clone());
+        assert!(!startup_barrier_release_owed_by(state(), gone, |_| false));
+        assert!(startup_barrier_release_owed_by(state(), gone, |_| true));
+        drop(store);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn update_inconclusive_probe_does_not_demote_a_launching_executor() {
+        let (root, mut store, peer, _) = crate::update_transaction::tests::reserved();
+        crate::update_transaction::tests::authorize(&mut store, &peer);
+        assert!(!dead_launching_attempt(&store.state, |_| Err(
+            anyhow::anyhow!("denied")
+        )));
+        assert!(dead_launching_attempt(&store.state, |_| Ok(None)));
+        drop(store);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn update_release_fence_yields_to_a_store_holder() {
+        let (root, store, _, _) = crate::update_transaction::tests::reserved();
+        let busy = release_fence_at(&root, || true).unwrap_err();
+        assert!(busy.is::<StoreBusy>(), "{busy:#}");
+        drop(store);
+        let fence = release_fence_at(&root, || true).unwrap();
+        assert!(
+            Store::open(&root).is_err_and(|e| e.is::<StoreBusy>()),
+            "no update writer starts while the release fence is held"
+        );
+        drop(fence);
+        assert!(release_fence_at(&root, || false).is_err());
+        assert!(
+            release_fence_at(&root.join("missing"), || true).is_err(),
+            "a lock that was not taken is no fence"
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn prepare_refuses_a_payload_member_the_executor_cannot_publish() {
