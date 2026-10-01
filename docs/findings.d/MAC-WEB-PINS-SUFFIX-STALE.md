@@ -1,6 +1,6 @@
 | ID | 问题（一句） | 状态 | Issue / PR | 等级 | 剩余限制 |
 |---|---|---|---|---|---|
-| MAC-WEB-PINS-SUFFIX-STALE | macOS 策略包含任一显式网页后缀时停止刷新网页钉选，但生成运行时仍用旧钉选解析和拨号，CDN 退役旧地址后对应网站持续失败直到重连 | open | 待开记录 PR | 中·推导 | P2；只影响相关网站，不声称全机断网。修复需区分仍负载拨号的钉选与可由后缀实时解析的主机，不能简单恢复会中全量重载；#958 的 DNS 发出器修改也在进行。未编译 Swift、未实机验证。 |
+| MAC-WEB-PINS-SUFFIX-STALE | macOS 策略包含任一显式网页后缀时停止刷新网页钉选，但生成运行时仍用旧钉选解析和拨号，CDN 退役旧地址后对应网站持续失败直到重连 | open | [#1016](https://github.com/raydocs/tono/pull/1016)（仅记录） | 中·推导 | P2；只影响相关网站，不声称全机断网。修复需区分仍负载拨号的钉选与可由后缀实时解析的主机，不能简单恢复会中全量重载；#958 的 DNS 发出器修改也在进行。未编译 Swift、未实机验证。 |
 
 基线 `1fb29265`：`AppState+Connect.swift:1726–1729` 仅根据 `webDomainSuffixes.isEmpty` 调度刷新；`AppState+Catalog.swift:853` 用同一条件拒绝刷新。但产品发出器 `ConfigPipeline+SingBoxProduct.swift:169–173` 仍创建 `Tono-Hosts`，`:200–205` 在后缀直连之前为网页钉选执行 `resolve` 到 `Tono-Hosts` 并要求钉选 IP。
 

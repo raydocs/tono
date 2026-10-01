@@ -1,6 +1,6 @@
 ## 2026-09-30 · macOS 配置深审的两个未修复交叉状态问题
 - 归属：SHIP_PLAN §2 item 10；M9 配置、托管策略与助手服务保护。
-- 来源：main `1fb29265`；分支 `hunt/sol-r3cfg-unresolved-config-findings`；只新增发现记录，未修改产品。
+- 来源：main `1fb29265`；分支 `hunt/sol-r3cfg-unresolved-config-findings`；PR [#1016](https://github.com/raydocs/tono/pull/1016)；只新增发现记录，未修改产品。
 - 缺陷修复：无。记录网页钉选刷新被后缀存在性误关闭（P2）及专属模型 API 的 DIRECT 排除遗漏（P1）。
 - 新增/优化：无。两项都需要协调方案，不能把局部网站故障换成已记录的全会话重载中断，也不能为兼容旧签名后缀放松受保护域名拒绝。
 - 工程与测试：无产品或测试改动；保留两个独立只读审查的调用链、核心拨号语义及官方模型 API 文档证据。
