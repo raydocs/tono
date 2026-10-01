@@ -335,7 +335,23 @@ nonisolated enum HelperProtocolVersion {
     ///   Apply before retiring originals already committed to disk.
     /// - 4.52.15 → 4.52.16: Automatic failed commits and orphaned bootstrap releases preserve the secondary AI hold after opening general traffic.
     /// - 4.52.16 → 4.52.17: exhausted App recovery has an AI-preserving release intent.
-    static let current = "4.52.17"
+    /// - 4.52.17 → 4.52.18: resolved update retirement keeps its active
+    ///   receipt until executor-job cleanup succeeds, preserving retry ownership.
+    /// - 4.52.18 → 4.52.19: silent upgrade copies a regular file from a
+    ///   non-blocking fd and does not hold the update lock across that copy.
+    ///   Stale-core signals re-check path and uid. The installed update floor
+    ///   is the bytes read before and after the signature check. A `pfctl -X`
+    ///   that leaves the token listed keeps the record. A new physical NIC
+    ///   reloads the LAN DNS block without flushing states. Protected DNS
+    ///   status follows `serviceID`.
+    /// - 4.52.19 → 4.52.20: selective recovery holds dedicated DashScope/Qwen
+    ///   model API namespaces while general Alibaba Cloud remains available.
+    /// - 4.52.20 → 4.52.21: selective AI blackhole routes include Darwin
+    ///   required loopback gateways; native dry-run regression checks routing messages.
+    /// - 4.52.22 → 4.52.23: pending-update automatic failure release retains the AI hold.
+    /// - 4.52.27 → 4.52.28: the desktop update contract may name an optional
+    ///   sing-box digest. The helper must be rebuilt to accept that field.
+    static let current = "4.52.28"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS

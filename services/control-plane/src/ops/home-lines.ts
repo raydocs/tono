@@ -196,6 +196,7 @@ async function usedInCycle(
 
 export async function patchHomeLine(
   db: D1Database, id: string, patch: HomeLinePatch, nowSec: number,
+  lifecycle: { notes?: string | null; displayName?: string | null; status?: string } = {},
 ): Promise<HomeLineRecord> {
   if (!patch || typeof patch !== 'object' || Array.isArray(patch)) {
     throw new ApiError(400, 'VALIDATION_ERROR', 'Expected an object');
@@ -218,17 +219,30 @@ export async function patchHomeLine(
     meterSource: keep(patch.meterSource, existing.meterSource, (v) => enumField(v, 'meterSource', isMeterSource)),
   };
   assertBundleCycle(next);
-  await db.prepare(
+  const updated = await db.prepare(
     `UPDATE home_exits
      SET provider_account_id = ?, isp = ?, region = ?, price = ?, currency = ?,
          billing_kind = ?, bundle_bytes = ?, cycle_start = ?, cycle_end = ?,
-         expires_at = ?, meter_source = ?, updated_at = ?
-     WHERE id = ?`,
+         expires_at = ?, meter_source = ?, updated_at = ?,
+         notes = CASE WHEN ? THEN ? ELSE notes END,
+         display_name = CASE WHEN ? THEN ? ELSE display_name END,
+         status = CASE WHEN ? THEN ? ELSE status END
+     WHERE id = ? AND (? != 'retired' OR NOT EXISTS (
+       SELECT 1 FROM user_home_bindings WHERE home_exit_id = home_exits.id
+     ))`,
   ).bind(
     next.providerAccountId, next.isp, next.region, next.price, next.currency,
     next.billingKind, next.bundleBytes, next.cycleStart, next.cycleEnd,
-    next.expiresAt, next.meterSource, nowSec, id,
+    next.expiresAt, next.meterSource, nowSec,
+    lifecycle.notes !== undefined, lifecycle.notes ?? null,
+    lifecycle.displayName !== undefined, lifecycle.displayName ?? null,
+    lifecycle.status !== undefined, lifecycle.status ?? null,
+    id, lifecycle.status ?? '',
   ).run();
+  if (!updated.meta.changes) {
+    if (lifecycle.status === 'retired') throw new ApiError(409, 'HOME_EXIT_IN_USE', 'Unbind all users before retiring this home exit');
+    throw new ApiError(404, 'NOT_FOUND', 'Home exit not found');
+  }
   return { id, ...next, updatedAt: nowSec };
 }
 

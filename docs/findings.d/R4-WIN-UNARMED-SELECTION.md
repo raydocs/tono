@@ -1,0 +1,5 @@
+| ID | 问题（一句） | 状态 | Issue / PR | 等级 | 剩余限制 |
+|---|---|---|---|---|---|
+| R4-WIN-UNARMED-SELECTION | Windows 后台 TCP 证明覆盖证明期间用户新选的空闲节点，并连接旧节点 | in-PR | #1098 | 中·已确认 | P2; seconds-long user/proof overlap; native Windows and needs-hardware pending |
+
+Merged #714 captures the preferred node before its bounded TCP proof. An idle `tono_select_server` changes and persists selection without changing connection generation. The old post-proof admission checked generation/protection but then overwrote that newer selection. The subsequent connect transaction captures the overwritten node, so #798's connect-selection guard cannot detect this sibling. Under the existing final state lock, require selection to still match the proof's captured preferred authority before applying the proven node. A mismatch retires only that proof and starts a fresh schedule for the new choice. Normal AI-held fallback and strict-mode barriers remain intact. One real-state regression changes A to B without a generation change and invokes the actual production admission helper, requiring B to survive.

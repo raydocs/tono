@@ -35,7 +35,7 @@ use tono_service_protocol::{
     DirectRuntimeReloadResult, DnsProtectionStatus, FinalizeDirectRuntimeReloadRequest, KillSwitchConfig,
     KillSwitchLockRequest, KillSwitchStatus, KillSwitchStatusMode, MacosProxyConfig, OwnerCredentials,
     OwnerSessionProof, ProxyApplyOutcome, RenewDirectRuntimeReloadRequest, ReplaceDirectEndpointsRequest,
-    ReplaceProxyEndpointsRequest,
+    ReplaceProxyEndpointsRequest, ReplaceSingBoxRuntimeRequest, CommitSingBoxDirectRequest,
     RuntimeBundle, ServiceStatusSnapshot, StageRuntimeOutcome, StartClashRequest, StopClashOptions, WriterConfig,
 };
 use once_cell::sync::Lazy;
@@ -951,6 +951,56 @@ pub(crate) async fn tono_kill_switch_status() -> Result<KillSwitchStatus> {
         bail!(response.message);
     }
     response.data.context("Tono Service 未返回 Kill Switch 状态")
+}
+
+/// Revision 19. Replace the running sing-box document and re-lock the full tunnel.
+pub(crate) async fn tono_replace_sing_box_runtime(
+    session: &OwnerSessionProof,
+    runtime_json: String,
+    restore_previous: bool,
+) -> Result<()> {
+    let credentials = current_owner_credentials()?;
+    let response = tono_service_protocol::replace_sing_box_runtime(
+        &credentials,
+        session,
+        ReplaceSingBoxRuntimeRequest {
+            runtime_json,
+            restore_previous,
+        },
+    )
+    .await
+    .context("无法连接到Tono Service")?;
+    if response.code > 0 {
+        bail!(response.message);
+    }
+    Ok(())
+}
+
+/// Revision 19. Install reviewed-app permits on the locked tunnel. The Service
+/// does not enter Blocked; a failure leaves the full tunnel or releases general
+/// traffic while AI destinations stay blocked.
+pub(crate) async fn tono_commit_sing_box_direct(
+    session: &OwnerSessionProof,
+    direct_endpoints: Vec<tono_service_protocol::ProxyEndpoint>,
+    reviewed_direct_ports: Vec<u16>,
+) -> Result<DirectRuntimeReloadResult> {
+    let credentials = current_owner_credentials()?;
+    let response = tono_service_protocol::commit_sing_box_direct(
+        &credentials,
+        session,
+        CommitSingBoxDirectRequest {
+            direct_endpoints,
+            reviewed_direct_ports,
+        },
+    )
+    .await
+    .context("无法连接到Tono Service")?;
+    if response.code > 0 {
+        bail!(response.message);
+    }
+    response
+        .data
+        .context("Tono Service omitted the sing-box DIRECT permit proof")
 }
 
 /// Enter the fail-closed half of the rev-10 reload bracket with one captured owner session.

@@ -1,0 +1,5 @@
+| ID | 问题（一句） | 状态 | Issue / PR | 等级 | 剩余限制 |
+|---|---|---|---|---|---|
+| R4FMA-DUPLICATE-DNS-RESTORE | The second normal macOS Disconnect DNS restore clears another product's loopback resolver | in-PR | [#1097](https://github.com/raydocs/tono/issues/1097) | 中·已确认 | P2 custom local-DNS prerequisite. Durable owned-retirement evidence makes repeated cleanup preserve foreign services; new transitions invalidate proof and independent corrupt/missing-state recovery remains. Native CI/hardware pending. |
+
+Baseline `64e8b593`: AppState first calls restoreDNS at `AppState+Connect.swift:929`; final disarm calls it again through `KillSwitchService.swift:333` / `HelperManager.swift:1004`. The first owner-only restore deletes its snapshot; the second snapshotless pass clears foreign exact-loopback DNS. New root-0600/versioned completion proof survives helper restart and is recorded before deletion/archive. Receipt persistence failure plus helper restart can lose this evidence; it never blocks an otherwise completed restore. Superseded same-owner re-enable followed by failed snapshot save remains a separate fault-path limitation.

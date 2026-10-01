@@ -232,6 +232,42 @@ func runUpdateSelfTests() -> Bool {
         try refuses { try engine.gate(method: "POST", path: "/core/start", peer: successor) }
     }
 
+    test("automatic-update-release-preserves-ai-and-consumed-obligation") { directory in
+        let store = try UpdateStorage(root: directory)
+        var observed: UpdateContractV1.Protection = .connected
+        var explicitReleases = 0
+        var selectiveReleases = 0
+        var io = effects()
+        io.observe = { observed }
+        io.disconnect = { explicitReleases += 1 }
+        io.disconnectPreservingAIHold = {
+            try check(store.load().attempt?.disconnectRequested == true,
+                      "Automatic release preceded its durable stop intent")
+            selectiveReleases += 1
+        }
+        let engine = UpdateTransaction(storage: store, effects: io)
+        try reserved(store, engine)
+        observed = .protectedOffline
+        try engine.execute(peer: owner)
+        try UpdateExecutor.perform(storage: store, validate: { _ in }, replace: { _ in }, rollback: { _ in })
+        try engine.reconcile(peer: successor)
+        let before = try store.load()
+        let wrongOwner = TonoAuthenticatedPeer(uid: 502, auditToken: successor.auditToken, bundleURL: owner.bundleURL)
+        try refuses { try engine.disconnect(peer: wrongOwner, preserveAIHold: true) }
+        try engine.disconnect(peer: successor, preserveAIHold: true)
+        let result = try store.load()
+        try check(selectiveReleases == 1 && explicitReleases == 0,
+                  "Automatic update cleanup used explicit release")
+        try check(result.attempt?.disconnectVerified == true,
+                  "Automatic cleanup was not recorded")
+        try check(result.highWater == before.highWater && result.generation == before.generation
+                  && result.attempt?.execution == .replaced
+                  && result.attempt?.receipt.phase == .installedIdentityVerified
+                  && result.attempt?.receipt.requiredRecovery == .connected
+                  && result.attempt?.successorToken == before.attempt?.successorToken,
+                  "Automatic release rewrote the update obligation or incarnation")
+    }
+
     test("unconsumed-retirement-archives-before-new-admission") { directory in
         let store = try UpdateStorage(root: directory)
         var baseline = UpdateStorage.Ledger()
@@ -373,6 +409,46 @@ func runUpdateSelfTests() -> Bool {
                   && retained.disconnectVerified && retained.receipt.phase == .installationAuthorized,
                   "Resolved retirement erased failure evidence or fabricated a proof phase")
         try engine.gate(method: "POST", path: "/core/start", peer: successor)
+    }
+    test("resolved-retirement-keeps-cleanup-retry-before-new-admission") { directory in
+        let store = try UpdateStorage(root: directory)
+        var observed: UpdateContractV1.Protection = .protectedOffline
+        var failCleanup = true
+        var cleanups = 0
+        var io = effects()
+        io.observe = { observed }
+        io.cleanupCommitted = {
+            cleanups += 1
+            if failCleanup { throw HelperFailure.system("injected executor retirement failure") }
+        }
+        let engine = UpdateTransaction(storage: store, effects: io)
+        try reserved(store, engine)
+        try engine.execute(peer: owner)
+        try UpdateExecutor.perform(storage: store, validate: { _ in }, replace: { _ in
+            throw HelperFailure.system("injected replacement failure")
+        }, rollback: { _ in })
+        try engine.disconnect(peer: owner)
+        observed = .unprotected
+        let before = try store.load()
+        let nextManifest = UpdateContractV1.ReleaseManifest(appVersion: manifest.appVersion,
+            buildCommit: manifest.buildCommit, kind: manifest.kind, protocolVersion: manifest.protocolVersion,
+            releaseId: "next-native-test", releaseSequence: 15, targets: manifest.targets)
+        try refuses { try engine.retire(peer: owner) }
+        let retained = try store.load()
+        try check(retained.attempt?.receipt.attemptId == before.attempt?.receipt.attemptId
+                  && retained.highWater == before.highWater && retained.generation == before.generation,
+                  "Failed executor cleanup lost its durable retry owner")
+        try refuses { try engine.reserve(peer: owner, manifest: nextManifest,
+            manifestBytes: UpdateContractV1.canonical(nextManifest), signature: Data()) }
+        failCleanup = false
+        try engine.retire(peer: owner)
+        try check(cleanups == 2 && store.load().attempt == nil,
+                  "Retirement did not retry executor cleanup before clearing the slot")
+        try engine.reserve(peer: owner, manifest: nextManifest,
+            manifestBytes: UpdateContractV1.canonical(nextManifest), signature: Data())
+        try check(store.load().attempt?.receipt.attemptId != before.attempt?.receipt.attemptId
+                  && store.load().highWater == 14 && store.load().generation == before.generation + 1,
+                  "Successful cleanup did not admit a fresh update without lowering ordering evidence")
     }
     test("successor-relaunch-after-adoption-can-be-readopted-and-commit") { directory in
         let store = try UpdateStorage(root: directory)

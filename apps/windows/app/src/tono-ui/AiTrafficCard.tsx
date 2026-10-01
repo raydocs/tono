@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { useConnectionData } from '@/hooks/use-connection-data'
-import { tonoAccountQueryKey } from '@/hooks/use-tono'
+import { tonoAccountQueryKey, useTonoStatus } from '@/hooks/use-tono'
 import { useQuery } from '@/services/query-client'
 import { tonoAccount } from '@/services/tono'
 import parseTraffic from '@/utils/parse-traffic'
@@ -22,8 +22,7 @@ import { GlassCard } from './GlassCard'
 
 const DAY_FORMAT = 'YYYY-MM-DD'
 
-// Mihomo connection ids are unique per core run; remounting the overview in
-// the same run must not count a connection's bytes twice.
+// Keep the bounded receipt window across overview remounts in the same core run.
 let seenGeneration: number | undefined
 let seenBytes = new Map<string, number>()
 const seenFor = (generation?: number) => {
@@ -44,11 +43,14 @@ export const AiTrafficCard = ({
   generation?: number
 }) => {
   const { t } = useTranslation()
+  const { status } = useTonoStatus()
+  const accountScope = status?.routePreferenceScope
   const { data: account } = useQuery({
-    queryKey: tonoAccountQueryKey,
+    queryKey: [...tonoAccountQueryKey, accountScope],
     queryFn: tonoAccount,
+    enabled: Boolean(accountScope),
   })
-  const email = account?.email
+  const email = accountScope ? account?.email : undefined
 
   const [keyed, setKeyed] = useState<{ email: string; key: string } | null>(
     null,

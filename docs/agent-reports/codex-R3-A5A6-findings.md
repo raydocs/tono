@@ -1,6 +1,6 @@
 # R3-A5A6: Codex (GPT-6.1 Sol) findings
 
-Generated 2026-09-30 22:47 MT from the run's findings.tsv / prs.tsv.
+Generated 2026-10-01 02:55 MT from the run's findings.tsv / prs.tsv.
 
 ## PRs
 
@@ -24,8 +24,8 @@ Generated 2026-09-30 22:47 MT from the run's findings.tsv / prs.tsv.
 | R3-A5-POLICY-ACCOUNT | A5 | — | apps/windows/app/src-tauri/src/tono/policy_sync.rs:40 | Traffic policy leaks across account replacement | false-positive signed traffic policy is global; issue #317 differs |
 | R3-A5-ACCOUNT-CANCEL | A5 | — | apps/windows/app/src-tauri/src/tono/commands/account.rs:575 | Cancelled sign-out leaves orphan account teardown | false-positive detached close slot and release coordinator preserve ownership |
 | R3-A5-STALE-CACHE | A5 | — | apps/windows/app/src-tauri/src/tono/catalog_sync.rs:146 | New sign-in uses previous account cache after delete failure | false-positive needs delete plus offline sync failure; token-bound grant refuses |
-| WIN-REPLACEMENT-HEAL-STATE | A5 | P2 | apps/windows/app/src-tauri/src/tono/commands/account.rs:354 | Replacement sign-in retains previous account healer dial state | real-fixed #1047 |
-| WIN-GRANT-FLUSH-QUEUE | A5 | P2 | apps/windows/app/src-tauri/src/tono/offline_grant.rs:512 | Timed-out grant flushes fill vault queue after a prolonged stall | real-unfixed lower priority; native reproduction pending |
+| WIN-REPLACEMENT-HEAL-STATE | A5 | P2 | apps/windows/app/src-tauri/src/tono/commands/account.rs:359 | Replacement sign-in retains previous account healer dial state | real-fixed #1047 |
+| WIN-GRANT-FLUSH-QUEUE | A5 | P2 | apps/windows/app/src-tauri/src/tono/offline_grant.rs:512 | Timed-out grant flushes fill vault queue after a prolonged stall | real-unfixed P2 prolonged vault stall; rejected token rotation can outlast recovery |
 | R3-A5-CONNECTING-ROUTING | A5 | P2 | apps/windows/app/src-tauri/src/tono/catalog_sync.rs:346 | Residential catalog rotation during Connecting leaves stale runtime | duplicate known #787 limitation |
 | WIN-IDLE-QUIT-IPC-DELAY | A6 | P1 | apps/windows/app/src-tauri/src/feat/window.rs:538 | Optional idle-Service shutdown can silently delay Quit up to 127 seconds | real-fixed #1038 |
 | WIN-STARTUP-AUTH-SUPERSESSION | A6 | P2 | apps/windows/app/src-tauri/src/tono/commands/restore.rs:128 | Boot preflight can supersede a newer interactive sign-in | real-fixed #1045 |
@@ -45,5 +45,5 @@ Generated 2026-09-30 22:47 MT from the run's findings.tsv / prs.tsv.
 | R3-A6-QUIT-POLLING | A6 | P2 | apps/windows/app/src-tauri/src/tono/commands/quit.rs:452 | Cancelled Quit loses catalog sync | duplicate fixed #784 |
 | R3-A6-UPDATE-OFFER | A6 | — | apps/windows/app/src-tauri/src/tono/commands/update.rs:107 | Older update Check overwrites newer offer and installs downgrade | false-positive selected hash and Service release-sequence floor guard install |
 | R3-A6-STALE-COMPENSATION | A6 | — | apps/windows/app/src-tauri/src/tono/commands/update.rs:183 | Stale connection cleanup releases update-owned barrier | false-positive invalidation retains release_on_stale=false |
-| WIN-UPDATE-CONNECTING-CLEANUP | A6 | P2 | apps/windows/app/src-tauri/src/tono/commands/update.rs:277 | Failed update while Connecting omits immediate recovery | real-unfixed lower priority concurrency; watchdog eventually releases |
+| WIN-UPDATE-CONNECTING-CLEANUP | A6 | P2 | apps/windows/app/src-tauri/src/tono/commands/update.rs:277 | Failed update while Connecting omits immediate recovery | real-unfixed P2 ordinary operation overlap; watchdog caps recovery at seven minutes |
 | WIN-UPDATE-TOKEN-FLUSH | A6 | P2 | apps/windows/app/src-tauri/src/tono/commands/update.rs:202 | Executor hard termination bypasses failed rotated-token exit flush | real-unfixed P2 two failures (vault write and update publication); late reopen beyond replay grace |

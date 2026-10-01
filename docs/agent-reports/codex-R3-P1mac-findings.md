@@ -1,6 +1,6 @@
 # R3-P1mac: Codex (GPT-6.1 Sol) findings
 
-Generated 2026-09-30 22:47 MT from the run's findings.tsv / prs.tsv.
+Generated 2026-10-01 02:55 MT from the run's findings.tsv / prs.tsv.
 
 ## PRs
 
@@ -12,7 +12,7 @@ Generated 2026-09-30 22:47 MT from the run's findings.tsv / prs.tsv.
 
 | ID | Area | Sev | Location | Description | Verdict |
 |---|---|---|---|---|---|
-| MAC-APP-FAILURE-AI-HOLD | macOS app/helper | P1 | apps/macos/Tono/Services/AppState+Connect.swift:2259 | Exhausted automatic failure uses explicit disarm and deletes AI hold | real-fixed #1048 (PR pending CI/merge) |
+| MAC-APP-FAILURE-AI-HOLD | macOS app/helper | P1 | apps/macos/Tono/Services/AppState+Connect.swift:2259 | Exhausted automatic failure uses explicit disarm and deletes AI hold | real-fixed #1048 merged; ci-gate green; needs-hardware |
 | MAC-DASHSCOPE-DIRECT-COVERAGE | macOS/shared policy | P1 | apps/macos/Tono/Core/ConfigPipeline.swift:114 | Dedicated model API hosts match Alibaba DIRECT suffix and lack recovery hold | real-unfixed coordinated policy migration and recovery helper edits required; helper edits forbidden for this finding |
 | MAC-AI-HOLD-DELIBERATE-RELEASE | macOS decisions | — | docs/decisions/031-2026-09-30-fail-open-keeps-ai-block.md:4 | Automatic full AI release might be deliberate | false-positive owner decisions require selective hold |
 | MAC-AI-HOLD-WATCHDOG-REPAIR | macOS helper | — | tooling/scripts/core-helper/KillSwitchManager.swift:579 | Watchdog might reapply AI hold after explicit disarm | false-positive disarm deletes intent so watchdog cannot restore it |

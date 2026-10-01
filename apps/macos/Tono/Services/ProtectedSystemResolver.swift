@@ -87,6 +87,9 @@ nonisolated enum ProtectedSystemResolver {
         private var timer: DispatchSourceTimer?
         private var continuation: CheckedContinuation<[String], Never>?
         private var terminal: [String]?
+        // Lock-protected copy of `answers` so the deadline can publish without
+        // hopping onto ownershipQueue. That queue may be inside GetAddrInfo.
+        private var collected: [String] = []
         // Owner-queue-only state. Never read these under the waiter lock.
         private var service: DNSServiceRef?
         private var answers: [String] = []
@@ -108,7 +111,18 @@ nonisolated enum ProtectedSystemResolver {
             // work. Neither the timer nor onCancel waits for ownershipQueue.
             let timer = DispatchSource.makeTimerSource(queue: .global(qos: .userInitiated))
             self.timer = timer
-            timer.setEventHandler { self.finish([]) }
+            // Resume the waiter on this timer queue. Hopping to ownershipQueue
+            // waits behind DNSServiceGetAddrInfo, so a blocked C setup holds
+            // the caller past the deadline. Deallocation stays in finish()'s
+            // async dispose, which cannot run until that C call returns.
+            // A fake-IP that arrives only as the clock expires is dropped in
+            // finish(); a public-only snapshot is kept so the failure message
+            // can name it.
+            timer.setEventHandler { [weak self] in
+                guard let self else { return }
+                let snapshot = self.lock.withLock { self.collected }
+                self.finish(snapshot)
+            }
             timer.schedule(deadline: deadline)
             timer.resume()
             ownershipQueue.async { self.start(name: name) }
@@ -156,6 +170,9 @@ nonisolated enum ProtectedSystemResolver {
             // Preserve the initial IPv4 batch so a fake-IP is not hidden by an
             // earlier public answer. A removal in that batch must also withdraw
             // its evidence, never leave a stale fake-IP granting DNS readiness.
+            // MoreComing clear ends that burst only. mDNSResponder delivers a
+            // cached public A that way, then the fresh answer in a later
+            // callback. Finishing here used to deallocate before the fake-IP.
             guard let address, address.pointee.sa_family == sa_family_t(AF_INET) else { return }
             var ipv4 = address.withMemoryRebound(to: sockaddr_in.self, capacity: 1) { $0.pointee }
             var buffer = [CChar](repeating: 0, count: Int(INET_ADDRSTRLEN))
@@ -166,8 +183,10 @@ nonisolated enum ProtectedSystemResolver {
                 } else {
                     answers.removeAll { $0 == answer }
                 }
+                lock.withLock { collected = answers }
             }
-            if flags & DNSServiceFlags(kDNSServiceFlagsMoreComing) == 0, !answers.isEmpty {
+            if flags & DNSServiceFlags(kDNSServiceFlagsMoreComing) == 0,
+               ProtectedDNSProbe.containsFakeIP(answers) {
                 finishOnOwner(answers)
             }
         }
@@ -194,9 +213,18 @@ nonisolated enum ProtectedSystemResolver {
         func finish(_ result: [String]) {
             lock.lock()
             guard terminal == nil else { lock.unlock(); return }
-            // Also enforce the clock at publication if the timer was delayed.
-            let result = DispatchTime.now() < deadline ? result : []
-            terminal = result
+            // A delayed timer or a late callback must not grant readiness from
+            // a fake-IP. Public answers collected before the deadline still
+            // publish, so a bypass can be told apart from silence.
+            let publish: [String]
+            if DispatchTime.now() < deadline {
+                publish = result
+            } else if ProtectedDNSProbe.containsFakeIP(result) {
+                publish = []
+            } else {
+                publish = result
+            }
+            terminal = publish
             let timer = self.timer
             self.timer = nil
             let continuation = self.continuation
@@ -205,7 +233,7 @@ nonisolated enum ProtectedSystemResolver {
             timer?.setEventHandler {}
             timer?.cancel()
             ownershipQueue.async { self.dispose() }
-            continuation?.resume(returning: result)
+            continuation?.resume(returning: publish)
         }
     }
 }
