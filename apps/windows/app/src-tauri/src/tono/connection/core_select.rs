@@ -43,7 +43,8 @@ pub(super) async fn prepare_owned_core(
     let binary = sing_box_binary(mihomo_path);
     let pin = sing_box_pin_from_env_or_file(&binary.with_file_name("sing-box-sha256.txt"));
     let proof = prove_sing_box_binary(&binary, pin.as_deref());
-    let service_can_run = service_can_run_sing_box().await;
+    let service_probe = probe_service_sing_box().await;
+    let service_can_run = matches!(service_probe, ServiceSingBoxProbe::Supported);
     let home_proxy = routing.and_then(|routing| routing.home_proxy.as_deref());
     let home_socks5 = routing.and_then(|routing| routing.home_socks5.as_ref());
     match resolve(preferred, proof, protection_armed, service_can_run) {
@@ -71,9 +72,9 @@ pub(super) async fn prepare_owned_core(
         CoreSelection::ArmedRefusesFallback => Err(StageFailure::error(
             "sing-box image is missing or unauthenticated and protection is already armed",
         )),
-        CoreSelection::ServiceRefusesSingBox => Err(StageFailure::error(
-            "this Tono Service cannot run sing-box; install the current service before connecting",
-        )),
+        CoreSelection::ServiceRefusesSingBox => {
+            Err(StageFailure::error(service_refusal_message(&service_probe)))
+        }
     }
 }
 
@@ -170,12 +171,57 @@ fn sing_box_binary(mihomo: &Path) -> PathBuf {
     mihomo.with_file_name(format!("sing-box{extension}"))
 }
 
-async fn service_can_run_sing_box() -> bool {
+/// What the version probe proved about running sing-box. Only an answered,
+/// parsed protocol below the sing-box revision is an old Service; a failed or
+/// unparsed probe proves nothing and must not send the user to reinstall.
+#[derive(Debug)]
+enum ServiceSingBoxProbe {
+    Supported,
+    TooOld,
+    Unconfirmed(String),
+}
+
+async fn probe_service_sing_box() -> ServiceSingBoxProbe {
     match tono_service_protocol::get_version().await {
-        Ok(response) if response.code == 0 => response
-            .data
-            .as_ref()
-            .is_some_and(ProtocolInfo::supports_sing_box_core),
-        _ => false,
+        Ok(response) if response.code == 0 => match response.data.as_ref() {
+            Some(info) if info.supports_sing_box_core() => ServiceSingBoxProbe::Supported,
+            Some(_) => ServiceSingBoxProbe::TooOld,
+            None => ServiceSingBoxProbe::Unconfirmed("version probe returned no protocol".into()),
+        },
+        Ok(response) => ServiceSingBoxProbe::Unconfirmed(format!(
+            "version probe returned {}: {}",
+            response.code, response.message
+        )),
+        Err(error) => ServiceSingBoxProbe::Unconfirmed(format!("{error:#}")),
+    }
+}
+
+/// Both refusals fail before StartClash, so neither arms or swaps anything.
+fn service_refusal_message(probe: &ServiceSingBoxProbe) -> String {
+    match probe {
+        ServiceSingBoxProbe::Unconfirmed(detail) => format!(
+            "could not confirm that the Tono Service can run sing-box ({detail}); try connecting again"
+        ),
+        ServiceSingBoxProbe::Supported | ServiceSingBoxProbe::TooOld => {
+            "this Tono Service cannot run sing-box; install the current service before connecting"
+                .to_string()
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ServiceSingBoxProbe, service_refusal_message};
+
+    #[test]
+    fn a_failed_version_probe_is_retryable_not_an_old_service() {
+        let transient =
+            service_refusal_message(&ServiceSingBoxProbe::Unconfirmed("pipe busy".to_string()));
+        assert!(transient.contains("try connecting again"));
+        assert!(!transient.contains("install the current service"));
+        assert!(
+            service_refusal_message(&ServiceSingBoxProbe::TooOld)
+                .contains("install the current service")
+        );
     }
 }
