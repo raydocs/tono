@@ -265,6 +265,11 @@ jobs:
         run: tooling/scripts/test-subscription-url-policy.sh
 
       - name: Helper peer authorization
+        # A release must not ship while this matrix was skipped. Hosted runners
+        # do not have the Apple Development identity; this step fails until it
+        # is present. macos-ci keeps going and records the skip.
+        env:
+          TONO_PEER_AUTH_MODE: release
         run: tooling/scripts/test-helper-peer-authorization.sh
 
       - name: Multi-exit policy
