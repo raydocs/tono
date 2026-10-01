@@ -1,18 +1,11 @@
-# R3-M10gap: Codex (GPT-6.1 Sol) findings
+PR #993 optional body status correction failed twice: gh pr edit deprecated Projects classic GraphQL field. Source already pushed/open. Branch hunt/sol-r3mac-update-metadata-deadline; title fix(macos): bound native update metadata transfer duration; corrected body /workspace/w1-codex/out/R3-M10gap/metadata-pr-body.md.
 
-Generated 2026-09-30 21:05 MT from the run's findings.tsv / prs.tsv.
+Two verified P2 bugs fixed in open PRs. No new P0/P1 verified.
 
-## PRs
-
-| PR | Branch | Labels | Auto-merge requested | Title |
-|---|---|---|---|---|
-| 991 | hunt/sol-r3mac-update-reload-retirement | needs-hardware | yes | fix(macos): retire cancelled config reloads during update suspension |
-| 993 | hunt/sol-r3mac-update-metadata-deadline | needs-hardware | yes | fix(macos): bound native update metadata transfer duration |
-
-## Hypotheses
-
-| ID | Area | Sev | Location | Description | Verdict |
+| ID | Area | Severity | File:line | Description | Verdict |
 |---|---|---|---|---|---|
+| MAC-UPDATE-CANCELLED-RELOAD | macOS native update | P2 | AppState+NativeUpdate.swift:34 | Cancelled reload handle survives failed update retirement | real-fixed #991 |
+| MAC-UPDATE-METADATA-DEADLINE | macOS update download | P2 | NativeUpdateDownload.swift:23 | Trickling metadata holds the update-check gate for days | real-fixed #993 |
 | M10-H01 | macOS legacy update | — | UpdatePreparation.swift:21 | Crash after creating app journal strands PF | false-positive dormant legacy preparation has no production caller |
 | M10-H02 | macOS legacy update | — | UpdateHandoffJournal.swift:234 | Expired or corrupt journal blocks launch/update forever | false-positive journal controls warning only; helper receipt gates native updates |
 | M10-H03 | macOS legacy update | — | UpdateHandoffJournal.swift:206 | Illegal migration transition poisons recovery | false-positive refused transitions preserve phase; migration test-only |
@@ -32,11 +25,17 @@ Generated 2026-09-30 21:05 MT from the run's findings.tsv / prs.tsv.
 | M10-H17 | macOS subscription URL | — | SubscriptionManager.swift:180 | Private or abbreviated IP evades URL policy | false-positive literals blocked and DNS answers classified then curl address pinned; developer-only path |
 | M10-H18 | macOS subscription | — | SubscriptionManager.swift:291 | Partial or oversized download accepted | false-positive body capped at 5MiB and successful curl exit required |
 | M10-H19 | macOS subscription | — | AppState+Persistence.swift:74 | Old subscription files influence production runtime | false-positive customer launch never loads subscriptions and clears state |
-| MAC-UPDATE-CANCELLED-RELOAD | macOS native update | P2 | AppState+NativeUpdate.swift:34 | Cancelled reload handle survives failed update retirement | real-fixed #991 |
 | M10-H20 | macOS update download | — | NativeUpdateDownload.swift:16 | Truncated metadata authorizes installation | false-positive canonical decode and signed-offer verification reject it |
 | M10-H21 | macOS update download | — | NativeUpdateDownload.swift:62 | Completion callback races unregistered continuation | false-positive continuation registration precedes task start and default delegate queue serializes callbacks |
 | M10-H22 | macOS update download | — | NativeUpdateDownload.swift:64 | Cancelled download waits indefinitely | false-positive current callers expose no cancellation source; package resource deadline is 900 seconds |
 | M10-H23 | macOS native update | — | App/AppDelegate.swift:315 | Quit during download leaves persistent network loss | false-positive no single-failure path proved; helper watchdog releases dead-core state and applies selective AI layer |
 | M10-H24 | macOS update download | — | NativeUpdateDownload.swift:88 | Crash leaves temporary package reused as complete | false-positive orphan temporary path is never reused; no immediate reliability failure proved |
-| MAC-UPDATE-METADATA-DEADLINE | macOS update download | P2 | NativeUpdateDownload.swift:23 | Trickling metadata holds the update-check gate for days | real-fixed #993 |
 | M10-H25 | macOS native update | — | AppState+NativeUpdate.swift:17 | Preparation failure leaves ordinary internet blocked indefinitely | false-positive helper stopped-core watchdog disarms and applies selective AI layer after threshold |
+
+- #991: OPEN, labels needs-hardware, merge-commit auto-merge enabled; head 1ca25c8a679512eb0181a7839c5d8ae7e6ce2de9.
+  Checks observed: [('changes', 'COMPLETED', 'SUCCESS'), ('macos / sing-box-input', 'COMPLETED', 'SUCCESS'), ('macos / build', 'QUEUED', ''), ('macos / policy-tests', 'COMPLETED', 'SUCCESS'), ('macos / privileged-tests', 'QUEUED', '')]
+- #993: OPEN, labels needs-hardware, merge-commit auto-merge enabled; head 68903cbe3ed5e24a7e584a26f2c459ff3ba22821.
+  Checks observed: [('changes', 'COMPLETED', 'SUCCESS'), ('macos / sing-box-input', 'COMPLETED', 'SUCCESS'), ('macos / build', 'QUEUED', ''), ('macos / policy-tests', 'QUEUED', ''), ('macos / privileged-tests', 'QUEUED', '')]
+
+27 hypotheses: 22 false positives, 3 duplicates, 2 verified/fixed in PRs.
+Assigned source audit complete. Swift/XCTest and real-device validation unavailable locally; hosted CI pending. No helper edits, deployment or publication.
