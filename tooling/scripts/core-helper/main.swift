@@ -1627,7 +1627,8 @@ if CommandLine.arguments.dropFirst() == ["--lifecycle-self-test"] {
         && ProtectedDNSManager.runCorruptSnapshotSelfTest()
         && ProtectedDNSManager.runRenamedServiceRestoreSelfTest()
         && ProtectedDNSManager.runDeferredOriginalLossSelfTest()
-    exit(pfPassed && dnsPassed ? 0 : 1)
+    let selectiveRoutesPassed = SelectiveFailOpen.runRouteGatewaySelfTest()
+    exit(pfPassed && dnsPassed && selectiveRoutesPassed ? 0 : 1)
 }
 if CommandLine.arguments.dropFirst() == ["--self-test"] {
     exit(

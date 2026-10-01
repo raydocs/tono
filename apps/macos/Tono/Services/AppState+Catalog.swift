@@ -1075,10 +1075,21 @@ extension AppState {
         )
     }
 
+    nonisolated static func budgetManagedDirectWebPins(
+        _ pins: [ConfigPipeline.DirectDomainPin],
+        seed: ConfigPipeline.ManagedDirectRuntimePolicy,
+        preservingSessionEndpoints: [ConfigPipeline.DirectEndpoint]
+    ) -> (kept: [ConfigPipeline.DirectDomainPin], dropped: [String]) {
+        ConfigPipeline.pinsWithinSessionEndpointBudget(
+            pins, seededBy: preservingSessionEndpoints + seed.sessionEndpoints
+        )
+    }
+
     func resolveManagedDirectDomains(
         policy: TonoTrafficPolicy,
         base: ConfigPipeline.ManagedDirectRuntimePolicy?,
-        api: CoreControllerClient
+        api: CoreControllerClient,
+        preservingSessionEndpoints: [ConfigPipeline.DirectEndpoint] = []
     ) async -> ConfigPipeline.ManagedDirectRuntimePolicy? {
         guard !policy.webDomains.isEmpty,
               let physicalInterface = base?.physicalInterface else {
@@ -1139,9 +1150,9 @@ extension AppState {
         // reviewed host to keep the ones that did not fit. The control plane
         // can reach that on its own: 32 `webDomains` is its published maximum
         // and resolves to as many as 258 session endpoints.
-        let budgeted = ConfigPipeline.pinsWithinSessionEndpointBudget(
-            webPins,
-            seededBy: withoutWebPins.sessionEndpoints
+        let budgeted = Self.budgetManagedDirectWebPins(
+            webPins, seed: withoutWebPins,
+            preservingSessionEndpoints: preservingSessionEndpoints
         )
         if !budgeted.dropped.isEmpty {
             // Named, because the alternative reading of a short pin list is

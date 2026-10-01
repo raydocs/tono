@@ -118,6 +118,85 @@ pub(super) async fn usable_physical_uplinks() -> Result<Vec<String>, String> {
     }
 }
 
+/// Read-only recovery identity: physical LUID, source, gateway
+/// and effective default-route metric. Values are never persisted or logged.
+/// DNS writes and Tono's own TUN routes must not reset a failed-connect cooldown.
+pub(super) type PhysicalNetworkSnapshot = Vec<(u64, u32, u32, u64)>;
+
+#[cfg(windows)]
+pub(super) fn physical_network_snapshot_windows() -> Result<PhysicalNetworkSnapshot, String> {
+    use windows_sys::Win32::NetworkManagement::IpHelper::{
+        GetBestRoute2, GetIfEntry2, GetIpInterfaceEntry, IF_TYPE_ETHERNET_CSMACD, IF_TYPE_IEEE80211,
+        IF_TYPE_PROP_VIRTUAL, IF_TYPE_TUNNEL, MIB_IF_ROW2, MIB_IPFORWARD_ROW2,
+        MIB_IF_TYPE_LOOPBACK, MIB_IPINTERFACE_ROW,
+    };
+    use windows_sys::Win32::NetworkManagement::Ndis::{IfOperStatusUp, NET_LUID_LH};
+    use windows_sys::Win32::Networking::WinSock::{AF_INET, SOCKADDR_INET};
+
+    let mut destination = SOCKADDR_INET::default();
+    destination.Ipv4.sin_family = AF_INET;
+    destination.Ipv4.sin_addr.S_un.S_addr = 0x0808_0808;
+    let mut snapshot = Vec::new();
+    for luid in default_route_interface_luids()? {
+        let mut interface = MIB_IF_ROW2 {
+            InterfaceLuid: NET_LUID_LH { Value: luid },
+            ..Default::default()
+        };
+        // SAFETY: initialized row; LUID comes from the OS route table.
+        let status = unsafe { GetIfEntry2(&mut interface) };
+        if status != 0 {
+            return Err(format!("GetIfEntry2 failed: {status}"));
+        }
+        let hardware = interface.InterfaceAndOperStatusFlags._bitfield & 0x01 != 0;
+        let known_hardware = matches!(interface.Type, IF_TYPE_ETHERNET_CSMACD | IF_TYPE_IEEE80211);
+        if interface.OperStatus != IfOperStatusUp
+            || matches!(interface.Type, MIB_IF_TYPE_LOOPBACK | IF_TYPE_PROP_VIRTUAL | IF_TYPE_TUNNEL)
+            || (!hardware && !known_hardware)
+            || is_virtual_uplink_description(&utf16_field(&interface.Description))
+        {
+            continue;
+        }
+        let mut route = MIB_IPFORWARD_ROW2::default();
+        let mut source = SOCKADDR_INET::default();
+        // SAFETY: initialized IPv4 destination and outputs. Constrain lookup to
+        // the physical interface even if a TUN is concurrently being retired.
+        let status = unsafe {
+            GetBestRoute2(
+                &interface.InterfaceLuid, 0, std::ptr::null(), &destination, 0,
+                &mut route, &mut source,
+            )
+        };
+        if status != 0 {
+            return Err(format!("GetBestRoute2 failed: {status}"));
+        }
+        // SAFETY: validate both sockaddr unions before reading their IPv4 fields.
+        if unsafe { source.si_family != AF_INET || route.NextHop.si_family != AF_INET } {
+            return Err("physical route did not return IPv4 addresses".to_string());
+        }
+        let mut ip_interface = MIB_IPINTERFACE_ROW {
+            Family: AF_INET,
+            InterfaceLuid: interface.InterfaceLuid,
+            ..Default::default()
+        };
+        // SAFETY: initialized IPv4 row identifies the same physical interface.
+        let status = unsafe { GetIpInterfaceEntry(&mut ip_interface) };
+        if status != 0 {
+            return Err(format!("GetIpInterfaceEntry failed: {status}"));
+        }
+        snapshot.push((
+            luid,
+            unsafe { source.Ipv4.sin_addr.S_un.S_addr },
+            unsafe { route.NextHop.Ipv4.sin_addr.S_un.S_addr },
+            u64::from(route.Metric) + u64::from(ip_interface.Metric),
+        ));
+    }
+    snapshot.sort_unstable();
+    snapshot.dedup();
+    // Empty is a successful observation: loss and restoration of the same
+    // uplink are changes. Native read errors leave the old baseline intact.
+    Ok(snapshot)
+}
+
 /// One default-route candidate: its alias and whether it is operationally up, or why it is not
 /// an acceptable hardware uplink for DIRECT.
 #[cfg(windows)]

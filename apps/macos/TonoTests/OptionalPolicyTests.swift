@@ -92,6 +92,74 @@ final class OptionalPolicyTests: XCTestCase {
         app.connectionCoordinator.cancelReconnectTasks()
     }
 
+    func testAcceptedEmptyPolicyClearsTheLiveDirectPlanWithoutDisconnect() async throws {
+        let storage = ConfigStorage.shared
+        let url = storage.appSupportDirectory.appendingPathComponent("managed-traffic-policy.json")
+        let saved = try? Data(contentsOf: url)
+        defer {
+            if let saved { try? storage.writeSensitive(saved, to: url) }
+            else { try? FileManager.default.removeItem(at: url) }
+        }
+        try? FileManager.default.removeItem(at: url)
+        let app = AppState()
+        app.isConnected = true
+        app.coreController = CoreControllerClient()
+        app.activeDirectPolicy = try app.initialDirectPolicy(
+            physicalInterface: "en0",
+            policy: TonoTrafficPolicy(version: 3, domains: [], mediaEndpoints: [],
+                directSuffixes: [.init(host: "example.net", ports: [443])], trusted: true)
+        )
+        XCTAssertNotNil(app.activeDirectPolicy)
+        var replacements = 0
+        app.optionalPolicyPreparedRuntimeMutation = { desired in
+            replacements += 1
+            XCTAssertNil(desired, "an empty accepted policy must replace the old plan with no DIRECT grants")
+        }
+        let json = #"{"version":3,"domains":[],"mediaEndpoints":[]}"#
+        let digest = Data(SHA256.hash(data: Data(json.utf8))).base64EncodedString()
+            .replacingOccurrences(of: "=", with: "")
+            .replacingOccurrences(of: "+", with: "-")
+            .replacingOccurrences(of: "/", with: "_")
+        try await app.installManagedTrafficPolicy(
+            ManagedTrafficPolicyCache(revision: 3, json: json, sha256: digest, updatedAt: nil),
+            persistCache: false, allowRuntimeTransition: true
+        )
+        await app.connectionCoordinator.configReloadTask?.value
+        XCTAssertEqual(replacements, 1)
+        XCTAssertNil(app.activeDirectPolicy)
+        XCTAssertTrue(app.isConnected)
+        XCTAssertNil(app.connectionCoordinator.disconnectSequence)
+    }
+
+    func testOptionalPolicyPreparationReplacesSuffixAndNativeAuthority() async throws {
+        let app = AppState()
+        let old = try XCTUnwrap(app.initialDirectPolicy(
+            physicalInterface: "en0",
+            policy: TonoTrafficPolicy(version: 3,
+                domains: [.init(host: "example.com", ports: [443])], mediaEndpoints: [],
+                directSuffixes: [.init(host: "example.net", ports: [443])], trusted: true)
+        ))
+        let next = TonoTrafficPolicy(version: 3, domains: [], mediaEndpoints: [],
+            directSuffixes: [.init(host: "example.org", ports: [443])], trusted: true)
+        let prepared = try await app.prepareOptionalDirectPolicy(
+            policy: next, base: old, api: CoreControllerClient()
+        )
+        let desired = try XCTUnwrap(prepared)
+        XCTAssertEqual(desired.physicalInterface, "en0")
+        XCTAssertEqual(desired.webDomainSuffixes.map(\.host), ["example.org"])
+        XCTAssertFalse(desired.nativeAppDirect)
+        let node = Fixture.realityNode()
+        var overlay = Fixture.overlay(selectedNodeName: node.name, tunEnabled: true,
+            externalController: "127.0.0.1:29191")
+        overlay.secret = String(repeating: "a", count: 64)
+        let runtime = try ConfigPipeline.buildSingBoxRuntime(overlay: overlay, nodes: [node], directPlan: desired)
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: runtime.runtimeJSON) as? [String: Any])
+        let rules = try XCTUnwrap((json["route"] as? [String: Any])?["rules"] as? [[String: Any]])
+        XCTAssertFalse(rules.contains { ($0["domain_suffix"] as? [String])?.contains("example.net") == true })
+        XCTAssertFalse(rules.contains { $0["outbound"] as? String == ConfigPipeline.appDirectGroupName })
+        XCTAssertTrue(rules.contains { ($0["domain_suffix"] as? [String])?.contains("example.org") == true })
+    }
+
     func testConnectedPolicyUpdateKeepsTheSession() async throws {
         let storage = ConfigStorage.shared
         let url = storage.appSupportDirectory.appendingPathComponent(
