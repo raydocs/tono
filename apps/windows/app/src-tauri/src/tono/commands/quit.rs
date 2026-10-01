@@ -17,7 +17,7 @@ use crate::{
     tono::{
         audit::AuditEvent,
         catalog_sync, connection,
-        credentials::TonoCredentialStore,
+        credentials::{SessionCredentialStore, TonoCredentialStore},
         state::{AccountState, TonoInner, TonoState},
     },
 };
@@ -341,16 +341,79 @@ pub async fn quit_release(app: AppHandle) -> Result<(), String> {
     result
 }
 
-/// M3: exit is *committed* (RunEvent::Exit) — close the audit channel so
-/// the writer drains, then wait for it (bounded). Kept strictly apart from
-/// `quit_release`: a cancelled quit must not kill the audit trail.
+async fn flush_session_for_exit(
+    credentials: impl std::future::Future<Output = Arc<SessionCredentialStore>>,
+) -> bool {
+    matches!(tokio::time::timeout(AUDIT_FLUSH_BUDGET, async {
+        credentials.await.flush().await
+    }).await, Ok(Ok(())))
+}
+
+#[cfg(test)]
+mod credential_exit_tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use tono_core::credentials::{CredentialError, CredentialStore, MemoryCredentialStore};
+
+    #[tokio::test]
+    async fn committed_exit_retries_a_failed_refresh_write_before_relaunch() {
+        struct Vault {
+            durable: MemoryCredentialStore,
+            attempts: AtomicUsize,
+            failed: tokio::sync::Notify,
+        }
+        impl CredentialStore for Vault {
+            fn get(&self, key: CredentialKey) -> Result<Option<String>, CredentialError> {
+                self.durable.get(key)
+            }
+            fn set(&self, key: CredentialKey, value: &str) -> Result<(), CredentialError> {
+                if self.attempts.fetch_add(1, Ordering::SeqCst) == 0 {
+                    self.failed.notify_one();
+                    return Err(CredentialError::Store("temporary vault write failure".into()));
+                }
+                self.durable.set(key, value)
+            }
+            fn delete(&self, key: CredentialKey) -> Result<(), CredentialError> {
+                self.durable.delete(key)
+            }
+        }
+        let vault = Arc::new(Vault {
+            durable: MemoryCredentialStore::new(),
+            attempts: AtomicUsize::new(0),
+            failed: tokio::sync::Notify::new(),
+        });
+        vault.durable.set_refresh_token("previous-session").unwrap();
+        let credentials = Arc::new(SessionCredentialStore::with_test_vault(vault.clone()));
+        credentials.set_local(CredentialKey::RefreshToken, "previous-session").unwrap();
+        credentials.set_refresh_token("rotated-session").unwrap();
+        tokio::time::timeout(AUDIT_FLUSH_BUDGET, vault.failed.notified()).await.unwrap();
+
+        assert!(flush_session_for_exit(async { credentials.clone() }).await);
+        assert_eq!(vault.durable.refresh_token().unwrap().as_deref(), Some("rotated-session"));
+        assert_eq!(vault.attempts.load(Ordering::SeqCst), 2);
+    }
+}
+
+/// M3: exit is *committed* (RunEvent::Exit) — drain the audit and session
+/// writers in parallel within the existing exit budget. Kept strictly apart
+/// from `quit_release`: a cancelled quit must not kill the audit trail.
 pub async fn flush_audit_for_exit(app: &AppHandle) {
     let Some(state) = app.try_state::<Arc<TonoState>>().map(|state| state.inner().clone()) else {
         return;
     };
     state.audit().close_sender();
-    if let Some(writer) = state.audit().take_writer() {
-        let _ = tokio::time::timeout(AUDIT_FLUSH_BUDGET, writer).await;
+    let session = flush_session_for_exit(async {
+        Arc::clone(&state.lock().await.credentials)
+    });
+    let audit = async {
+        if let Some(writer) = state.audit().take_writer() {
+            let _ = tokio::time::timeout(AUDIT_FLUSH_BUDGET, writer).await;
+        }
+    };
+    let (session_saved, ()) = tokio::join!(session, audit);
+    if !session_saved {
+        logging!(warn, Type::Service,
+            "Tono: the session credential writer did not acknowledge before exit");
     }
 }
 
