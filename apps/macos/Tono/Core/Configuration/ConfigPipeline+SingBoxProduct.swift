@@ -161,11 +161,31 @@ nonisolated extension ConfigPipeline {
         rules.append(["network": "tcp", "process_name": assistantHomeProcessNames, "action": "route", "outbound": assistant])
         rules.append(["network": "tcp", "process_path_regex": assistantHomeProcessPathRegexes, "action": "route", "outbound": assistant])
         if let plan {
+            // sing-box 1.15.0-alpha.3 (93fff595) walks DNS rules in order and
+            // restores a domain only from the fake-ip store. reverse_mapping
+            // stays off: that tree documents it as unreliable where macOS
+            // caches DNS, and a shared real address could be labeled as a
+            // web-direct name. Client A queries for web-direct names therefore
+            // get a fake IP before hosts or China DNS. The pin `resolve`
+            // action and the direct outbound's domain_resolver name their
+            // transport, so those lookups skip this table and still return
+            // the pinned or China answer at dial time.
+            let clientListeners = ["Tono-DNS", "Tono-TUN", "Tono-Mixed"]
+            let webPinHosts = plan.webDomainPins.map(\.host).sorted()
+            if !webPinHosts.isEmpty {
+                dnsRules.append(["inbound": clientListeners, "query_type": ["A"], "domain": webPinHosts,
+                    "action": "route", "server": "Tono-FakeIP"])
+            }
+            let webSuffixHosts = plan.effectiveWebDomainSuffixes.map(\.host).sorted()
+            if !webSuffixHosts.isEmpty {
+                dnsRules.append(["inbound": clientListeners, "query_type": ["A"], "domain_suffix": webSuffixHosts,
+                    "action": "route", "server": "Tono-FakeIP"])
+            }
             var hosts: [String: [String]] = [:]
             for pin in plan.domainPins + plan.webDomainPins { hosts[pin.host] = pin.addresses }
             if !hosts.isEmpty {
                 dnsServers.append(["type": "hosts", "tag": "Tono-Hosts", "predefined": hosts])
-                dnsRules.append(["inbound": ["Tono-DNS", "Tono-TUN", "Tono-Mixed"],
+                dnsRules.append(["inbound": clientListeners,
                     "domain": hosts.keys.sorted(), "action": "route", "server": "Tono-Hosts"])
             }
             dnsServers.append(["type": "https", "tag": "Tono-China-DNS", "server": "223.5.5.5", "server_port": 443,
