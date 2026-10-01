@@ -126,7 +126,7 @@ export const settingsPublishCopy = {
       status: '状态',
       probe: '探测',
       bound: '绑了几个客户',
-      action: '',
+      action: '操作',
     } as const,
     status: {
       active: '在用',
