@@ -301,7 +301,7 @@ export function gbToBytes(value: string): number | null {
 
 export function bytesToGb(value: number | null): string {
   if (value === null) return '';
-  return String(Math.round(value / GB));
+  return String(value / GB);
 }
 
 /**
