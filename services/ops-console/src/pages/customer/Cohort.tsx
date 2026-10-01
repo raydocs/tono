@@ -40,7 +40,8 @@ export function useCohort(rows: readonly CustomerSummaryDto[], onChanged: () => 
 
   const column: DataColumn<CustomerSummaryDto> = {
     id: 'pick',
-    header: '',
+    header: copy.selectRow,
+    headerHidden: true,
     // Narrower padding than the rest: this column is one 14 px control, and
     // every pixel it takes comes out of the address beside it.
     width: '30px',

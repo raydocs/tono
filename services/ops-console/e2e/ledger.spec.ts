@@ -41,10 +41,15 @@ test.describe('账目', () => {
   test('毛利算不出来的，写着待核对', async ({ page }) => {
     await open(page, LEDGER);
     await expect(page.getByText('3 项还没对上')).toBeVisible();
-    const pending = page.getByRole('link', { name: 'zhao.lei@example.com' });
+    // The SLO table links every node once per day row, so the node is looked
+    // for inside the 待核对 block, where it must appear exactly once.
+    const block = page.getByRole('heading', { name: '待核对', exact: true }).locator('xpath=ancestor::section[1]');
+    const pending = block.getByRole('link', { name: 'zhao.lei@example.com', exact: true });
     await expect(pending).toHaveAttribute('href', '#/customers/u-05');
-    await expect(page.getByRole('link', { name: 'Seoul · Han' })).toBeVisible();
-    await expect(page.getByText('待核对').first()).toBeVisible();
+    const node = block.getByRole('link', { name: 'Seoul · Han', exact: true });
+    await expect(node).toBeVisible();
+    await expect(node).toHaveAttribute('href', `#/nodes/${encodeURIComponent('Seoul · Han')}`);
+    await expect(block.getByRole('listitem').filter({ has: page.getByRole('link', { name: 'Seoul · Han', exact: true }) })).toContainText('待核对');
   });
 
   test('导出是一个能点开的链接', async ({ page }) => {
@@ -64,9 +69,10 @@ test.describe('账目', () => {
     await drawer.getByLabel('对象').selectOption({ value: 'Tokyo · Fuji' });
     await drawer.getByLabel('金额').fill('12.00');
     await drawer.getByLabel('币种').selectOption({ value: 'USD' });
+    await drawer.getByLabel('付款日').fill('2025-01-01');
     await drawer.getByLabel('备注').fill('续了一个月');
 
-    await expect(drawer.getByText('按 2026-09-09 汇率 7.1342 ≈ ¥85.61')).toBeVisible();
+    await expect(drawer.getByText('按 2026-09-08 汇率 7.1342 ≈ ¥85.61')).toBeVisible();
     await settle(page);
     await expect(page).toHaveScreenshot('ledger-drawer.png');
 
@@ -132,14 +138,18 @@ test.describe('账目', () => {
   });
 
   test('汇率还没拉到的那天，直接说出来', async ({ page }, testInfo) => {
+    await page.route('**/api/v1/ops/fx?**', (route) => route.fulfill({
+      status: 409,
+      contentType: 'application/json',
+      body: JSON.stringify({ error: { code: 'FX_RATE_MISSING', message: 'missing rate' } }),
+    }));
     await open(page, LEDGER, 'default', `ledger-fx-${testInfo.project.name}`);
     await page.getByRole('button', { name: '记一笔' }).click();
 
     const drawer = page.getByRole('dialog');
     await drawer.getByLabel('类型').selectOption({ value: 'cost' });
     await drawer.getByLabel('币种').selectOption({ value: 'USD' });
-    await drawer.getByLabel('付款日').fill('2025-01-01');
-    await expect(drawer.getByText('2025-01-01 的汇率还没拉到，等今天的汇率进来再记，或者换一个付款日。')).toBeVisible();
+    await expect(drawer.getByText('2026-09-08 的汇率还没拉到，等入账日的汇率进来再记。')).toBeVisible();
   });
 
   test('冲正之后两笔都标上，说清楚落在哪个月', async ({ page }, testInfo) => {
@@ -176,13 +186,13 @@ test.describe('账目', () => {
   test('节点详情上写着这台机器每 GB 花了多少', async ({ page }) => {
     await open(page, `/nodes/${encodeURIComponent('Tokyo · Fuji')}`);
     await expect(page.getByText('每 GB 成本')).toBeVisible();
-    await expect(page.getByText('¥0.11')).toBeVisible();
+    await expect(page.getByText('¥0.11', { exact: true })).toBeVisible();
   });
 
   test('计量还没对上的机器，每 GB 成本写着待核对', async ({ page }) => {
     await open(page, `/nodes/${encodeURIComponent('Seoul · Han')}`);
     await expect(page.getByText('每 GB 成本')).toBeVisible();
-    await expect(page.getByText('待核对')).toBeVisible();
+    await expect(page.getByText('待核对', { exact: true })).toBeVisible();
   });
 
   test('改到期的时候可以顺手把这笔收入记上', async ({ page }, testInfo) => {

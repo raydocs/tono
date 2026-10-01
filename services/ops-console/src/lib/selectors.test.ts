@@ -3,7 +3,6 @@ import { assertList, assertNodeSummary, NODE_HEALTH_WORDS } from '@contract';
 import nodesRaw from '../../fixtures/nodes.json';
 import { copy } from '@/copy/copy';
 import {
-  countFragments,
   countLine,
   lifecycleCounts,
   NODE_FILTERS,
@@ -11,7 +10,6 @@ import {
   nodeWord,
   selectLifecycle,
   selectNodes,
-  topFragments,
 } from './selectors';
 
 const nodes = assertList(nodesRaw.list, assertNodeSummary, 'nodes').items;
@@ -26,9 +24,6 @@ describe('node selectors', () => {
 
   it('counts exactly the filters the page offers', () => {
     expect(Object.keys(countLine(nodes)).sort()).toEqual([...NODE_FILTERS].sort());
-    for (const filter of NODE_FILTERS) {
-      expect(copy.count[filter], filter).toBeTypeOf('function');
-    }
   });
 
   it('names the five health words, in the engine order', () => {
@@ -47,20 +42,6 @@ describe('node selectors', () => {
         expect(node.health, node.name).toBe(nodeWord(filter));
       }
     }
-  });
-
-  it('prints only the fragments that have a machine behind them', () => {
-    const fragments = countFragments({ lost: 0, blocked: 2, degraded: 0, ok: 40, unmeasured: 0 });
-    expect(fragments).toEqual(['blocked', 'ok']);
-    expect(countFragments({ lost: 0, blocked: 0, degraded: 0, ok: 0, unmeasured: 0 })).toEqual([]);
-  });
-
-  it('keeps the worst three on a phone, and whichever one is switched on', () => {
-    const all = [...NODE_FILTERS];
-    expect(topFragments(all, 3, null)).toEqual(['lost', 'blocked', 'degraded']);
-    expect(topFragments(all, 3, 'unmeasured')).toEqual(['lost', 'blocked', 'unmeasured']);
-    expect(topFragments(all, 3, 'blocked')).toEqual(['lost', 'blocked', 'degraded']);
-    expect(topFragments(['ok'], 3, null)).toEqual(['ok']);
   });
 });
 

@@ -1,7 +1,7 @@
 {
   "measured": "2026-09-30",
   "camo_delay_ms": 40,
-  "note": "Ceilings sit above one loopback Reality handshake and below a fingerprint retry storm. Handshake counts are the stable signal; absolute milliseconds include the fixed camouflage delay. dns_reuse_ms allows one tunnel round trip on the kept DoH connection and rejects a second handshake.",
+  "note": "Ceilings sit above one loopback Reality handshake and below a fingerprint retry storm. Handshake counts are the stable signal: a ceiling above zero still rejects a count of zero, and a count of one stays inside a ceiling of two. Absolute milliseconds include the fixed camouflage delay. dns_reuse_ms allows one tunnel round trip on the kept DoH connection and rejects a second handshake.",
   "limits": {
     "vless/tono-fixed/cold_ms": 120,
     "vless/clash/cold_ms": 120,
@@ -25,6 +25,22 @@
     "hysteria2/tono-fixed/dns_cached_ms": 20,
     "hysteria2/tono-fixed/dns_cached_handshakes": 0,
     "hysteria2/tono-fixed/dns_reuse_ms": 70,
-    "hysteria2/tono-fixed/dns_reuse_handshakes": 0
+    "hysteria2/tono-fixed/dns_reuse_handshakes": 0,
+    "vless/sing-box/cold_ms": 120,
+    "vless/sing-box/handshakes": 1,
+    "vless/sing-box/fake_ip_ms": 15,
+    "vless/sing-box/fake_ip_handshakes": 0,
+    "vless/sing-box/dns_ms": 180,
+    "vless/sing-box/dns_handshakes": 2,
+    "vless/sing-box/dns_cached_ms": 20,
+    "vless/sing-box/dns_cached_handshakes": 0,
+    "vless/sing-box/dns_reuse_ms": 70,
+    "vless/sing-box/dns_reuse_handshakes": 0,
+    "hysteria2/sing-box/cold_ms": 40,
+    "hysteria2/sing-box/fake_ip_ms": 15,
+    "hysteria2/sing-box/fake_ip_handshakes": 0,
+    "hysteria2/sing-box/dns_cached_ms": 20,
+    "hysteria2/sing-box/dns_cached_handshakes": 0,
+    "hysteria2/sing-box/dns_reuse_handshakes": 0
   }
 }

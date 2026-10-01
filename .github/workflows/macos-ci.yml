@@ -177,6 +177,12 @@ jobs:
         run: tooling/scripts/test-subscription-url-policy.sh
 
       - name: Helper peer authorization
+        # Hosted runners have no Apple Development identity. The allow case
+        # cannot pass `anchor apple generic` with a self-signed certificate, so
+        # this step runs the reject cases and writes a warning plus a job summary.
+        # macos-release runs the allow case later, against the imported Developer ID.
+        env:
+          TONO_PEER_AUTH_MODE: ci
         run: tooling/scripts/test-helper-peer-authorization.sh
 
       - name: Multi-exit policy
@@ -199,6 +205,9 @@ jobs:
 
       - name: Install lifecycle recovery safety (no root)
         run: python3 tooling/scripts/tests/test_helper_install_recovery.py
+
+      - name: Install lifecycle argument refusal (no root)
+        run: python3 tooling/scripts/tests/test_helper_install_arguments.py
 
       - name: Release archive installs as Tono.app
         run: python3 tooling/scripts/tests/test_macos_archive_layout.py

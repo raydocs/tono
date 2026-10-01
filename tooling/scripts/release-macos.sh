@@ -237,11 +237,12 @@ if [[ -n $lifecycle_token ]]; then
 fi
 
 step "verifying the release gate"
-gate_ok=$("$repo_root/tooling/scripts/verify-release-gate.sh" "$app" 2>&1 | /usr/bin/grep -cE '^  ok:')
-(( gate_ok >= 6 )) || fail "the release gate reported only $gate_ok checks"
+# The gate's own exit status is the result. Counting `ok:` lines and ignoring
+# the status stays green when the script prints six passes and then exits 1.
+"$repo_root/tooling/scripts/verify-release-gate.sh" "$app" || fail "the release gate failed"
 /usr/bin/xcrun stapler validate "$app" >/dev/null 2>&1 || fail "the notarisation ticket is not stapled"
 /usr/sbin/spctl -a -t exec "$app" >/dev/null 2>&1 || fail "Gatekeeper does not accept the app"
-print "  gate $gate_ok/6, stapled, accepted by Gatekeeper"
+print "  release gate passed, stapled, accepted by Gatekeeper"
 
 step "confirming the app carries the contract the tree declares"
 declared_contract=$(/usr/bin/sed -n 's/.*static let current = "\([^"]*\)".*/\1/p' \
@@ -252,31 +253,34 @@ shipped_contract=$("$app/Contents/Resources/tono-core-helper" --version 2>/dev/n
 print "  helper contract $shipped_contract"
 
 step "signing the archive for the update feed"
-# The signing tool comes from the Sparkle the app embeds, resolved here from the
-# pin the project declares — the same thing `macos-release.yml` does before it
-# signs. Picking the first `sign_update` any past build left under DerivedData
-# signs with whichever copy happens to be lying around, and the key that copy
-# reaches for decides whether a customer can install the update at all.
+# Only the offline signer is used: the App no longer embeds Sparkle, so its
+# empty package graph cannot supply this tool. Use the same archive/checksum
+# pin as macos-release.yml instead of a stale DerivedData artifact.
 sparkle_version=2.9.6
-sparkle_pin_pattern="\"version\"[[:space:]]*:[[:space:]]*\"${sparkle_version//./\\.}\""
-resolved="$repo_root/apps/macos/Tono.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved"
-# Read out of Sparkle's own pin entry. Matched against the whole file, any other
-# dependency sitting at this version would satisfy it while Sparkle moved, which
-# is the substitution this check exists to refuse.
-sparkle_pin=$(/usr/bin/grep -A6 '"identity" : "sparkle"' "$resolved" 2>/dev/null)
-[[ $sparkle_pin =~ $sparkle_pin_pattern ]] \
-  || fail "$resolved no longer pins Sparkle $sparkle_version; the signing tool must come from the Sparkle version the app embeds"
 sparkle_tools="$out/.sparkle-$sparkle_version"
 [[ -L $sparkle_tools ]] && fail "refusing to use $sparkle_tools: it is a symlink"
-/usr/bin/xcodebuild -project "$repo_root/apps/macos/Tono.xcodeproj" \
-  -scheme Tono -resolvePackageDependencies \
-  -derivedDataPath "$sparkle_tools" >/dev/null \
-  || fail "could not resolve the Sparkle $sparkle_version package artifacts"
+/bin/mkdir -p "$sparkle_tools" || fail "could not stage the Sparkle signer"
+sparkle_archive="$sparkle_tools/Sparkle-for-Swift-Package-Manager.zip"
+[[ -L $sparkle_archive ]] && fail "refusing to use $sparkle_archive: it is a symlink"
+/usr/bin/curl --fail --location --proto '=https' --proto-redir '=https' \
+  "https://github.com/sparkle-project/Sparkle/releases/download/$sparkle_version/Sparkle-for-Swift-Package-Manager.zip" \
+  --output "$sparkle_archive" || fail "could not download the pinned Sparkle signer"
+printf '%s  %s\n' \
+  '8d5fb41d960b43f4a68aa14126bf62b098544ec8d191cdcc73eb14e63a8e7606' "$sparkle_archive" \
+  | /usr/bin/shasum -a 256 -c - || fail "the Sparkle signer archive checksum did not match"
+# A fresh extraction prevents a past DerivedData cache from supplying a second
+# signer or an obsolete tool. The archive is public and contains no key material.
+sparkle_distribution=$(/usr/bin/mktemp -d "$sparkle_tools/distribution.XXXXXX") \
+  || fail "could not create a fresh Sparkle signer directory"
+/usr/bin/ditto -x -k "$sparkle_archive" "$sparkle_distribution" \
+  || fail "could not extract the pinned Sparkle signer"
 # -u+x, not -111: an artifact bundle extracted under a restrictive umask leaves
 # the tool executable only by its owner, and -111 would report no sign_update at
 # all in a directory that holds one.
 sign_update=$(python3 "$repo_root/tooling/scripts/find-sparkle-sign-update.py" \
-  "$sparkle_tools/SourcePackages/artifacts")
+  "$sparkle_distribution") || fail "could not find the modern Sparkle signer"
+/usr/bin/codesign --verify --strict "$sign_update" \
+  || fail "the Sparkle signer signature is invalid"
 print "  signing with sign_update from Sparkle $sparkle_version"
 named="$out/$archive_name"
 # Repackaged, not copied. `package-macos-test.sh` renames the bundle to the
@@ -314,6 +318,7 @@ archive_entries=$(/usr/bin/unzip -Z1 "$named") \
 signature=$("$sign_update" "$named" 2>/dev/null \
   | /usr/bin/sed -n 's/.*sparkle:edSignature="\([^"]*\)".*/\1/p')
 [[ -n $signature ]] || fail "signing the archive produced no signature"
+/bin/rm -rf -- "$sparkle_distribution"
 print "  signed as $archive_name"
 
 step "validating the feed entry"

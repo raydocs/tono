@@ -5,9 +5,12 @@ extension KillSwitchManager {
     @discardableResult
     static func writeRules(
         state: KillSwitchState,
-        allowedUID: uid_t
+        allowedUID: uid_t,
+        physicalInterfaces: [String]? = nil
     ) throws -> String {
-        let rules = renderRules(state: state, allowedUID: allowedUID)
+        let rules = physicalInterfaces.map {
+            renderRules(state: state, allowedUID: allowedUID, physicalInterfaces: $0)
+        } ?? renderRules(state: state, allowedUID: allowedUID)
         // Detach the boot load before the rule file holds a block. A throw
         // leaves the previous file in place.
         _ = try ensureMainHook()
@@ -71,6 +74,68 @@ extension KillSwitchManager {
             names.insert(name)
         }
         return names.sorted()
+    }
+
+    /// Interfaces named on the LAN DNS block. `nil` means that block is not in
+    /// the rules (no tunnel). `[]` means the block is unscoped, which stays
+    /// fail-closed and must not be narrowed onto a NIC list.
+    static func lanDNSInterfaces(in rules: String) -> [String]? {
+        let lines = rules.split(separator: "\n")
+            .filter { $0.contains("\"tono-lan-dns\"") }
+        guard !lines.isEmpty else { return nil }
+        var interfaces = Set<String>()
+        for line in lines {
+            guard let start = line.range(of: " on ") else { return [] }
+            let scope = line[start.upperBound...]
+            let names: [String]
+            if scope.hasPrefix("{") {
+                guard let end = scope.firstIndex(of: "}") else { return [] }
+                names = scope[scope.index(after: scope.startIndex)..<end]
+                    .split(whereSeparator: { $0 == "," || $0.isWhitespace }).map(String.init)
+            } else {
+                names = scope.split(whereSeparator: \.isWhitespace).prefix(1).map(String.init)
+            }
+            guard !names.isEmpty, names.allSatisfy(isPhysicalInterfaceName) else { return [] }
+            interfaces.formUnion(names)
+        }
+        return interfaces.sorted()
+    }
+
+    private static func isPhysicalInterfaceName(_ name: String) -> Bool {
+        name.hasPrefix("en") && name.count > 2
+            && name.dropFirst(2).allSatisfy { $0.isASCII && $0.isNumber }
+    }
+
+    /// Widen only the managed DNS blocks. The persisted recovery state omits
+    /// live DIRECT exceptions, so re-rendering it here would revoke traffic.
+    /// A withheld or unconfirmed source is left for the next committed arm.
+    static func widenLANScope(
+        in source: String,
+        current: [String],
+        baseline: Set<String>?
+    ) -> String? {
+        guard let baseline, passRules(in: source) == baseline,
+              !current.isEmpty, current.allSatisfy(isPhysicalInterfaceName),
+              let loaded = lanDNSInterfaces(in: source), !loaded.isEmpty else { return nil }
+        let interfaces = Set(loaded).union(current).sorted().joined(separator: ", ")
+        var lines = source.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        for index in lines.indices where lines[index].contains("\"tono-lan-dns\"") {
+            guard lines[index].hasPrefix("block drop out quick on { "),
+                  let start = lines[index].range(of: "on { "),
+                  let end = lines[index][start.upperBound...].range(of: " }") else { return nil }
+            lines[index].replaceSubrange(start.lowerBound..<end.upperBound, with: "on { \(interfaces) }")
+        }
+        let widened = lines.joined(separator: "\n")
+        guard passRules(in: widened) == baseline else { return nil }
+        return widened
+    }
+
+    /// Reload only to add a physical NIC. An empty current set must not turn
+    /// the scoped block into a global one (that would catch DNS on a company
+    /// VPN's utun). An already-unscoped block is left alone.
+    static func lanDNSScopeNeedsReload(loaded: [String]?, current: [String]) -> Bool {
+        guard let loaded, !loaded.isEmpty, !current.isEmpty else { return false }
+        return !Set(current).isSubset(of: Set(loaded))
     }
 
     static func renderRules(
@@ -475,7 +540,10 @@ extension KillSwitchManager {
     /// Load `/etc/pf.conf` into the kernel without writing the `load anchor`
     /// line onto that file. The ephemeral copy is root-only and removed
     /// before this returns.
-    static func loadHookedMainRuleset(childPath: String = killSwitchPFPath) throws -> HelperCommandResult {
+    static func loadHookedMainRuleset(
+        childPath: String = killSwitchPFPath,
+        loadOutcome: inout KernelLoadOutcome
+    ) throws -> HelperCommandResult {
         let kernel = try kernelMainConfiguration(disk: try diskMainPFText(), childPath: childPath)
         let ephemeral = "/etc/.tono-pf-load-\(UUID().uuidString)"
         defer { unlink(ephemeral) }
@@ -486,6 +554,8 @@ extension KillSwitchManager {
                 checked.message.isEmpty ? "Main PF validation failed." : checked.message
             )
         }
+        // `-nf` does not change the kernel. Only `-f` can.
+        loadOutcome = .acceptedOrUnknown
         return try run("/sbin/pfctl", ["-f", ephemeral])
     }
 
@@ -623,6 +693,13 @@ extension KillSwitchManager {
         try ensureAnchorLoaded(disposal: flushStates ? .full : .keep)
     }
 
+    static func ensureAnchorLoaded(flushStates: Bool, loadOutcome: inout KernelLoadOutcome) throws {
+        try ensureAnchorLoaded(
+            disposal: flushStates ? .full : .keep,
+            loadOutcome: &loadOutcome
+        )
+    }
+
     /// `standaloneMain` loads a Tono-owned main ruleset that references only
     /// the Tono anchor instead of hooking `/etc/pf.conf`. Only the emergency
     /// block uses it, and only after the normal path failed: that file can be
@@ -634,6 +711,19 @@ extension KillSwitchManager {
     static func ensureAnchorLoaded(
         disposal: StateDisposal,
         standaloneMain: Bool = false
+    ) throws {
+        var outcome = KernelLoadOutcome.notIssued
+        try ensureAnchorLoaded(
+            disposal: disposal,
+            standaloneMain: standaloneMain,
+            loadOutcome: &outcome
+        )
+    }
+
+    static func ensureAnchorLoaded(
+        disposal: StateDisposal,
+        standaloneMain: Bool = false,
+        loadOutcome: inout KernelLoadOutcome
     ) throws {
         let mainChanged = try standaloneMain ? false : ensureMainHook()
         // Read only where it decides the load, as before. No answer fails the
@@ -647,6 +737,7 @@ extension KillSwitchManager {
                 data: Data(renderStandaloneMain(childPath: killSwitchPFPath).utf8),
                 permissions: 0o600
             )
+            loadOutcome = .acceptedOrUnknown
             loaded = try run("/sbin/pfctl", ["-f", killSwitchStandaloneMainPath])
         } else if mainChanged || mainAnchorMissing
                     || FileManager.default.fileExists(atPath: killSwitchStandaloneMainPath) {
@@ -657,15 +748,17 @@ extension KillSwitchManager {
             // it left out come back.
             // Disk `/etc/pf.conf` has no `load anchor from`. Loading it
             // directly would flush the child while PF may already be enabled.
-            loaded = try loadHookedMainRuleset()
+            loaded = try loadHookedMainRuleset(loadOutcome: &loadOutcome)
             if loaded.status == 0 { unlink(killSwitchStandaloneMainPath) }
         } else {
+            loadOutcome = .acceptedOrUnknown
             loaded = try run(
                 "/sbin/pfctl",
                 ["-a", killSwitchAnchor, "-f", killSwitchPFPath]
             )
         }
         guard loaded.status == 0 else {
+            loadOutcome = .rejected
             throw HelperFailure.system(
                 loaded.message.isEmpty ? "Main PF load failed." : loaded.message
             )
@@ -804,8 +897,10 @@ extension KillSwitchManager {
         }
         // The on-disk hook is an anchor declaration. Older files also have
         // `load anchor from`; both still name this anchor inside the marker.
-        // A release has already written the placeholder rule file, so a
-        // reload cannot install a block from either shape.
+        // The reload runs only after the release wrote the placeholder rule
+        // file — `releaseSequence` skips this restore when that write failed,
+        // because a legacy `load anchor from` would load the just-flushed
+        // block rules straight back from the file it could not clear.
         guard lines.contains(killSwitchBeginMarker),
               lines.contains("anchor \"\(killSwitchAnchor)\"") else {
             return kept("The main PF configuration does not attach Tono's anchor.")
@@ -985,7 +1080,7 @@ extension KillSwitchManager {
     static func holdPFEnableReference(
         recordPath: String = killSwitchPFReferencePath,
         releaseToken: (String) throws -> Void = {
-            _ = try KillSwitchManager.run("/sbin/pfctl", ["-X", $0])
+            try KillSwitchManager.releasePFEnableTokenOrThrow($0)
         },
         heldReference: (String) throws -> PFEnableReference? = {
             try KillSwitchManager.heldPFEnableReference(recordPath: $0)
@@ -1157,7 +1252,7 @@ extension KillSwitchManager {
         keeping: String?,
         queryDeadline: TimeInterval = KillSwitchManager.pfctlQueryDeadline,
         releaseToken: (String) throws -> Void = {
-            _ = try KillSwitchManager.run("/sbin/pfctl", ["-X", $0])
+            try KillSwitchManager.releasePFEnableTokenOrThrow($0)
         },
         listReferences: (TimeInterval) throws -> HelperCommandResult = {
             try KillSwitchManager.listPFEnableReferences(deadline: $0)
@@ -1218,6 +1313,30 @@ extension KillSwitchManager {
         return (try? pfEnabled()) == true
     }
 
+    /// A non-zero `-X` forgets the token only when a later full listing no
+    /// longer contains it. "Already released" and "still held" are the same
+    /// exit; the listing tells them apart. A `-X` or listing that never
+    /// answers throws from `run` / `pfEnableReferenceListing` and keeps the
+    /// record.
+    static func shouldKeepPFEnableRecord(releaseStatus: Int32, stillListed: Bool) -> Bool {
+        releaseStatus != 0 && stillListed
+    }
+
+    static func releasePFEnableTokenOrThrow(_ token: String) throws {
+        let released = try run("/sbin/pfctl", ["-X", token])
+        if released.status == 0 { return }
+        let listing = try pfEnableReferenceListing(
+            deadline: pfctlQueryDeadline,
+            listReferences: { try listPFEnableReferences(deadline: $0) }
+        )
+        if shouldKeepPFEnableRecord(
+            releaseStatus: released.status,
+            stillListed: listing.split(whereSeparator: \.isWhitespace).contains(where: { $0 == token })
+        ) {
+            throw HelperFailure.system("PF enable reference survived -X; record kept.")
+        }
+    }
+
     /// Releases the reference this helper recorded, if the kernel still holds
     /// it in this boot, and then forgets it. PF stops only if no other program
     /// holds a reference, which is exactly the correct outcome.
@@ -1247,13 +1366,13 @@ extension KillSwitchManager {
         if let held = readPFEnableReference(recordPath), held.boot == boot,
            try pfEnableReferenceListing(deadline: queryDeadline, listReferences: listReferences)
             .split(whereSeparator: \.isWhitespace).contains(where: { $0 == held.token }) {
-            _ = try run("/sbin/pfctl", ["-X", held.token])
+            try releasePFEnableTokenOrThrow(held.token)
         }
         unlink(recordPath)
         if let pending = unrecordedPFEnableReference, pending.boot == boot,
            try pfEnableReferenceListing(deadline: queryDeadline, listReferences: listReferences)
             .split(whereSeparator: \.isWhitespace).contains(where: { $0 == pending.token }) {
-            _ = try run("/sbin/pfctl", ["-X", pending.token])
+            try releasePFEnableTokenOrThrow(pending.token)
         }
         unrecordedPFEnableReference = nil
         try releaseSupersededPFEnableReferences(
@@ -1536,7 +1655,11 @@ extension KillSwitchManager {
         }
     }
 
-    static func secureRead(_ path: String, maximumBytes: Int) throws -> Data {
+    static func secureRead(
+        _ path: String,
+        maximumBytes: Int,
+        requireRootOwnership: Bool = true
+    ) throws -> Data {
         // O_NONBLOCK: a FIFO with no writer (say at /etc/hosts) returns here at
         // once and the regular-file check below refuses it, instead of hanging
         // an arm, a start or a release. Regular-file reads are unaffected.
@@ -1548,8 +1671,7 @@ extension KillSwitchManager {
         var metadata = stat()
         guard fstat(fd, &metadata) == 0,
               (metadata.st_mode & mode_t(S_IFMT)) == mode_t(S_IFREG),
-              metadata.st_uid == 0,
-              metadata.st_mode & 0o022 == 0,
+              (!requireRootOwnership || (metadata.st_uid == 0 && metadata.st_mode & 0o022 == 0)),
               metadata.st_size >= 0,
               metadata.st_size <= maximumBytes else {
             throw HelperFailure.invalid("A root-owned file is unsafe.")
@@ -1574,7 +1696,10 @@ extension KillSwitchManager {
     static func atomicWrite(
         path: String,
         data: Data,
-        permissions: mode_t
+        permissions: mode_t,
+        owner: uid_t = 0,
+        group: gid_t = 0,
+        allowForeignExisting: Bool = false
     ) throws {
         let parent = (path as NSString).deletingLastPathComponent
         if parent == "/Library/Application Support/Tono" {
@@ -1583,8 +1708,7 @@ extension KillSwitchManager {
         var existing = stat()
         if lstat(path, &existing) == 0 {
             guard (existing.st_mode & mode_t(S_IFMT)) == mode_t(S_IFREG),
-                  existing.st_uid == 0,
-                  existing.st_mode & 0o022 == 0 else {
+                  (allowForeignExisting || (existing.st_uid == 0 && existing.st_mode & 0o022 == 0)) else {
                 throw HelperFailure.invalid("Refusing to replace an unsafe root-owned file.")
             }
         } else if errno != ENOENT {
@@ -1620,9 +1744,9 @@ extension KillSwitchManager {
                 offset += count
             }
         }
-        guard fsync(fd) == 0,
-              fchown(fd, 0, 0) == 0,
+        guard fchown(fd, owner, group) == 0,
               fchmod(fd, permissions) == 0,
+              fsync(fd) == 0,
               rename(temporary, path) == 0 else {
             throw HelperFailure.system("Could not commit a root-owned file.")
         }

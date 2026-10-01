@@ -11,7 +11,7 @@ remote-change list below (conditions in the repository `AGENTS.md`).
 | --- | --- | --- |
 | API Worker | `tono-control-plane-ops-preview`, `workers_dev: false`, no route | Not publicly reachable; only the preview admin service binding can invoke it. |
 | Admin Worker | `tono-admin-ops-preview`, one new hostname selected in `.preview.env` | The renderer rejects existing production hosts and every `*.afk.ccwu.cc` hostname except a unique `ops-preview-<commit>.afk.ccwu.cc` name. |
-| D1 | `tono-control-plane-ops-preview` | A new database ID is required; the renderer accepts only a UUID supplied from the ignored local file. |
+| D1 | `tono-control-plane-ops-preview` | A new database ID is required; the renderer accepts only a UUID supplied from the ignored local file, and refuses the production database id. |
 | Service binding | `API -> tono-control-plane-ops-preview` | It cannot point at the production API name. |
 | R2 | Two empty buckets under `tono-ops-preview-*` | The renderer refuses non-preview bucket names; do not copy production objects. |
 | Access | One new self-hosted application for the new admin hostname | Separate audience, explicit preview-only Allow policy, no production-policy edit. |

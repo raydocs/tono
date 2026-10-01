@@ -295,6 +295,10 @@ nonisolated extension ConfigPipeline {
             yaml += "    \(key): \"\(yamlScalar(scalar))\"\n"
         }
         if value.type == .hysteria2 {
+            // Pinned mihomo v1.19.30 has no keepalive field. sing-quic
+            // already sends a 10s QUIC keepalive and uses a 30s idle timeout.
+            // An unknown key would be ignored. Do not emit handshake-timeout
+            // or skip-cert-verify.
             append("password", value.password)
             append("sni", value.sni)
             append("fingerprint", value.tlsFingerprint)

@@ -252,6 +252,38 @@ class LifetimeTotals(unittest.TestCase):
         with self.assertRaises(agent.Refusal):
             agent.lifetime_totals(state, {"u1": 1})
 
+    def test_a_missing_ledger_adopts_a_higher_server_watermark(self) -> None:
+        state = fresh_state()
+        folded = agent.lifetime_totals(state, {"u:usr_1": 80})
+        adopted = agent.adopt_source_watermarks(
+            folded, {"usr_1": 1050}, ledger_missing=True,
+        )
+        # The raw 80 is the baseline for the next delta, not a second lifetime.
+        self.assertEqual(adopted, {"u:usr_1": 1050})
+        self.assertEqual(state["counterBaseline"], {"u:usr_1": 80})
+
+    def test_a_missing_ledger_without_a_watermark_publishes_nothing(self) -> None:
+        adopted = agent.adopt_source_watermarks(
+            {"u:usr_1": 80}, None, ledger_missing=False,
+        )
+        self.assertEqual(adopted, {"u:usr_1": 80})
+        adopted = agent.adopt_source_watermarks(
+            {"u:usr_1": 80}, None, ledger_missing=True,
+        )
+        self.assertEqual(adopted, {"u:usr_1": 0})
+
+    def test_a_zero_watermark_keeps_the_first_raw_reading(self) -> None:
+        adopted = agent.adopt_source_watermarks(
+            {"u:usr_1": 80}, {"usr_1": 0}, ledger_missing=True,
+        )
+        self.assertEqual(adopted, {"u:usr_1": 80})
+
+    def test_a_local_total_ahead_of_the_watermark_is_left_alone(self) -> None:
+        adopted = agent.adopt_source_watermarks(
+            {"u:usr_1": 1130}, {"usr_1": 1050}, ledger_missing=False,
+        )
+        self.assertEqual(adopted, {"u:usr_1": 1130})
+
 
 class RestartMarker(unittest.TestCase):
     """The out-of-band restart signal, read off /proc rather than asked of xray.
@@ -377,7 +409,7 @@ class RestartMarkerRound(unittest.TestCase):
              patch.object(
                  agent,
                  "fetch_roster",
-                 return_value=("node-under-test", 1_700_000_000, [], False),
+                 return_value=("node-under-test", 1_700_000_000, [], False, None),
              ), \
              patch.object(agent, "installed_clients", return_value={"u:alice"}), \
              patch.object(agent, "reconcile", return_value=(0, 0, {"u:alice"})), \
@@ -475,11 +507,52 @@ class RosterValidation(unittest.TestCase):
                 {"userId": "b", "clientUUID": "22222222-2222-4222-8222-222222222222"},
             ],
         }
-        node_id, observed_at, roster, retire_shared_legacy = self._parse(payload)
+        node_id, observed_at, roster, retire_shared_legacy, watermarks = self._parse(payload)
         self.assertEqual(node_id, "exit-node-a")
         self.assertEqual(observed_at, 7)
         self.assertEqual([entry["userId"] for entry in roster], ["a", "b"])
         self.assertFalse(retire_shared_legacy)
+
+    def test_a_source_watermark_that_is_not_a_count_is_refused(self) -> None:
+        payload = {
+            "nodeId": "exit-node-a",
+            "observedAt": 7,
+            "identities": [{
+                "userId": "a",
+                "clientUUID": "11111111-1111-4111-8111-111111111111",
+                "sourceUsageBytes": True,
+            }],
+        }
+        with self.assertRaisesRegex(agent.Refusal, "sourceUsageBytes"):
+            self._parse(payload)
+
+    def test_an_independent_recovery_watermark_must_be_an_integer_count(self) -> None:
+        with self.assertRaisesRegex(agent.Refusal, "sourceUsageWatermarks"):
+            self._parse({
+                "nodeId": "exit-node-a", "observedAt": 7, "identities": [],
+                "sourceUsageWatermarks": [{"userId": "expired", "sourceUsageBytes": True}],
+            })
+
+    def test_independent_recovery_watermarks_cannot_repeat_an_account(self) -> None:
+        with self.assertRaisesRegex(agent.Refusal, "repeats an account"):
+            self._parse({
+                "nodeId": "exit-node-a", "observedAt": 7, "identities": [],
+                "sourceUsageWatermarks": [
+                    {"userId": "expired", "sourceUsageBytes": 1050},
+                    {"userId": "expired", "sourceUsageBytes": 80},
+                ],
+            })
+
+    def test_independent_recovery_watermarks_must_agree_with_identity_watermarks(self) -> None:
+        with self.assertRaisesRegex(agent.Refusal, "disagrees with an identity"):
+            self._parse({
+                "nodeId": "exit-node-a", "observedAt": 7,
+                "identities": [{
+                    "userId": "active", "clientUUID": "11111111-1111-4111-8111-111111111111",
+                    "sourceUsageBytes": 1050,
+                }],
+                "sourceUsageWatermarks": [{"userId": "active", "sourceUsageBytes": 80}],
+            })
 
     def test_a_roster_without_an_authenticated_node_id_is_refused(self) -> None:
         with self.assertRaises(agent.Refusal):
@@ -493,7 +566,7 @@ class RosterValidation(unittest.TestCase):
                 "retireSharedLegacy": True,
                 "identities": [],
             }),
-            ("exit-node-a", 7, [], True),
+            ("exit-node-a", 7, [], True, None),
         )
 
     def _parse(self, payload: dict):
@@ -514,6 +587,149 @@ class RosterValidation(unittest.TestCase):
 
 
 class RosterControlSignals(unittest.TestCase):
+    def test_missing_ledger_preserves_accounting_carry_before_a_new_device_counter_appears(self) -> None:
+        import io
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        path = Path(directory.name) / "state.json"
+        posted: list[dict] = []
+        old = {
+            "userId": "usr_saved", "deviceId": "dev_old",
+            "clientUUID": "11111111-1111-4111-8111-111111111111", "sourceUsageBytes": 1050,
+        }
+        new = {
+            "userId": "usr_saved", "deviceId": "dev_new",
+            "clientUUID": "22222222-2222-4222-8222-222222222222", "sourceUsageBytes": 1050,
+        }
+        old_label = agent.client_label(old["userId"], old["deviceId"], old["clientUUID"])
+        new_label = agent.client_label(new["userId"], new["deviceId"], new["clientUUID"])
+        carry_label = agent.client_label("usr_saved")
+        payloads = [{
+            "nodeId": "exit-node-a", "observedAt": 200 + index, "identities": [identity],
+            "sourceUsageWatermarks": [{"userId": "usr_saved", "sourceUsageBytes": 1050}],
+        } for index, identity in enumerate([old, new])]
+        installed: set[str] = set()
+        counter_samples = iter([{}, {new_label: 80}])
+        mutations: list[tuple[str, str]] = []
+
+        def fake_xray(_binary, arguments):
+            command = arguments[1]
+            if command == "inbounduser":
+                output = json.dumps({"users": [{"email": label} for label in sorted(installed)]})
+            elif command == "adu":
+                client = json.loads(Path(arguments[-1]).read_text())["inbounds"][0]["settings"]["clients"][0]
+                installed.add(client["email"])
+                mutations.append(("add", client["email"]))
+                output = "Added 1 user(s) in total."
+            elif command == "rmu":
+                installed.discard(arguments[-1])
+                mutations.append(("remove", arguments[-1]))
+                output = "Removed 1 user(s) in total."
+            elif command == "statsquery":
+                output = json.dumps({"stat": [{
+                    "name": f"user>>>{label}>>>traffic>>>uplink", "value": count,
+                } for label, count in next(counter_samples).items()]})
+            else:
+                raise AssertionError(arguments)
+            return agent.subprocess.CompletedProcess([], 0, output, "")
+
+        def capture_deliver(_base, _token, state_path, state):
+            posted.extend(state["pendingReports"])
+            count = len(state["pendingReports"])
+            state["pendingReports"] = []
+            agent.save_state(state_path, state)
+            return count, 0
+
+        with patch.dict(agent.os.environ, {
+                 "TONO_HOME_AGENT_TOKEN": "node-token", "TONO_SOURCE_ID": "exit-node-a",
+             }, clear=True), \
+             patch.object(agent, "api_base", return_value="https://control.example"), \
+             patch.object(agent, "xray_binary", return_value=Path("/unused/xray")), \
+             patch.object(agent, "require_commands", return_value={
+                 "add_user": "adu", "remove_user": "rmu", "stats_query": "statsquery", "list_users": "inbounduser",
+             }), \
+             patch.object(agent, "open_control_plane", side_effect=[
+                 io.BytesIO(json.dumps(payload).encode()) for payload in payloads
+             ]), \
+             patch.object(agent, "run_xray", side_effect=fake_xray), \
+             patch.object(agent, "xray_start_marker", return_value="boot:100"), \
+             patch.object(agent, "sync_hy2_roster") as hy2, \
+             patch.object(agent, "acknowledge_roster"), \
+             patch.object(agent, "acknowledge_metering"), \
+             patch.object(agent, "deliver_queue", side_effect=capture_deliver):
+            agent.run_once(path)
+            first = json.loads(path.read_text())
+            self.assertEqual(first["totals"], {carry_label: 1050})
+            self.assertEqual(first["installedClients"], [old_label])
+            self.assertEqual(first["startMarker"], "boot:100")
+            self.assertEqual([report["totalBytes"] for report in posted], [1050])
+            agent.run_once(path)
+
+        saved = json.loads(path.read_text())
+        self.assertEqual([report["totalBytes"] for report in posted], [1050, 1130])
+        self.assertEqual(saved["totals"], {carry_label: 1050, new_label: 80})
+        self.assertEqual(saved["counterBaseline"], {carry_label: 0, new_label: 80})
+        self.assertEqual(saved["installedClients"], [new_label])
+        self.assertEqual(saved["startMarker"], "boot:100")
+        self.assertEqual(mutations, [("add", old_label), ("remove", old_label), ("add", new_label)])
+        self.assertEqual(hy2.call_args_list[0].args[0], [old])
+        self.assertEqual(hy2.call_args_list[1].args[0], [new])
+
+    def test_missing_ledger_recovers_inactive_counters_without_reauthorizing_or_rebilling(self) -> None:
+        import io
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        path = Path(directory.name) / "state.json"
+        posted: list[dict] = []
+        identity = {"userId": "usr_expired", "clientUUID": "11111111-1111-4111-8111-111111111111"}
+        payloads = [{
+            "nodeId": "exit-node-a", "observedAt": 200 + index, "identities": identities,
+            "sourceUsageWatermarks": [{"userId": "usr_expired", "sourceUsageBytes": 1050}],
+        } for index, identities in enumerate([[], [], [identity]])]
+
+        def capture_deliver(_base, _token, state_path, state):
+            posted.extend(state["pendingReports"])
+            count = len(state["pendingReports"])
+            state["pendingReports"] = []
+            agent.save_state(state_path, state)
+            return count, 0
+
+        with patch.dict(agent.os.environ, {
+                 "TONO_HOME_AGENT_TOKEN": "node-token", "TONO_SOURCE_ID": "exit-node-a",
+             }, clear=True), \
+             patch.object(agent, "api_base", return_value="https://control.example"), \
+             patch.object(agent, "xray_binary", return_value=Path("/unused/xray")), \
+             patch.object(agent, "require_commands", return_value={"stats_query": "statsquery"}), \
+             patch.object(agent, "open_control_plane", side_effect=[
+                 io.BytesIO(json.dumps(payload).encode()) for payload in payloads
+             ]), \
+             patch.object(agent, "reconcile_and_read_stable", side_effect=[
+                 (0, 0, set(), {"u:usr_expired": 80}, None),
+                 (0, 0, set(), {"u:usr_expired": 80}, None),
+                 (1, 0, {"u:usr_expired"}, {"u:usr_expired": 90}, None),
+             ]) as reconcile, \
+             patch.object(agent, "sync_hy2_roster") as hy2, \
+             patch.object(agent, "acknowledge_roster"), \
+             patch.object(agent, "acknowledge_metering"), \
+             patch.object(agent, "deliver_queue", side_effect=capture_deliver):
+            agent.run_once(path)
+            self.assertEqual([report["totalBytes"] for report in posted], [1050])
+            self.assertEqual(json.loads(path.read_text())["installedClients"], [])
+            agent.run_once(path)
+            self.assertEqual([report["totalBytes"] for report in posted], [1050])
+            agent.run_once(path)
+
+        self.assertEqual([report["totalBytes"] for report in posted], [1050, 1060])
+        self.assertEqual(reconcile.call_args_list[0].args[4], [])
+        self.assertEqual(reconcile.call_args_list[1].args[4], [])
+        self.assertEqual(hy2.call_args_list[0].args[0], [])
+        self.assertEqual(hy2.call_args_list[1].args[0], [])
+        saved = json.loads(path.read_text())
+        self.assertEqual(saved["totals"]["u:usr_expired"], 1060)
+        self.assertEqual(saved["counterBaseline"]["u:usr_expired"], 90)
+        cached = json.loads(agent.roster_cache_path(path).read_text())
+        self.assertEqual(cached["sourceUsageWatermarks"], payloads[-1]["sourceUsageWatermarks"])
+
     def run_round(
         self,
         *,
@@ -546,7 +762,7 @@ class RosterControlSignals(unittest.TestCase):
              patch.object(
                  agent,
                  "fetch_roster",
-                 return_value=("exit-node-a", 1_700_000_000, [], server_retire),
+                 return_value=("exit-node-a", 1_700_000_000, [], server_retire, None),
              ), \
              patch.object(
                  agent,
@@ -564,6 +780,52 @@ class RosterControlSignals(unittest.TestCase):
             else:
                 agent.run_once(path)
         return path, reconcile, acknowledge
+
+    def test_a_missing_state_file_reports_the_server_watermark_not_the_raw_counter(self) -> None:
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        path = Path(directory.name) / "state.json"
+        posted: list[dict] = []
+
+        def capture_deliver(_base, _token, state_path, state):
+            posted.extend(state["pendingReports"])
+            state["pendingReports"] = []
+            agent.save_state(state_path, state)
+            return (1, 0)
+
+        roster = [{
+            "userId": "usr_1",
+            "clientUUID": "11111111-1111-4111-8111-111111111111",
+            "deviceId": None,
+            "sourceUsageBytes": 1050,
+        }]
+        with patch.dict(agent.os.environ, {
+                 "TONO_HOME_AGENT_TOKEN": "node-token",
+                 "TONO_SOURCE_ID": "exit-node-a",
+             }, clear=True), \
+             patch.object(agent, "api_base", return_value="https://control.example"), \
+             patch.object(agent, "xray_binary", return_value=Path("/unused/xray")), \
+             patch.object(agent, "api_address", return_value="127.0.0.1:10085"), \
+             patch.object(agent, "inbound_tag", return_value="vless-in"), \
+             patch.object(agent, "require_commands", return_value={"stats_query": "statsquery"}), \
+             patch.object(agent, "fetch_roster", return_value=(
+                 "exit-node-a", 1_700_000_000, roster, False, None,
+             )), \
+             patch.object(agent, "reconcile_and_read_stable", return_value=(
+                 0, 0, {"u:usr_1"}, {"u:usr_1": 80}, None,
+             )), \
+             patch.object(agent, "sync_hy2_roster"), \
+             patch.object(agent, "acknowledge_roster"), \
+             patch.object(agent, "acknowledge_metering"), \
+             patch.object(agent, "deliver_queue", side_effect=capture_deliver):
+            agent.run_once(path)
+
+        self.assertEqual([report["totalBytes"] for report in posted], [1050])
+        self.assertEqual(posted[0]["userId"], "usr_1")
+        saved = json.loads(path.read_text(encoding="utf-8"))
+        self.assertNotIn("_ledgerMissing", saved)
+        self.assertEqual(saved["totals"]["u:usr_1"], 1050)
+        self.assertEqual(saved["counterBaseline"]["u:usr_1"], 80)
 
     def test_an_unset_override_follows_the_server_retirement_signal(self) -> None:
         _, reconcile, acknowledge = self.run_round(server_retire=True)
@@ -589,6 +851,69 @@ class RosterControlSignals(unittest.TestCase):
         acknowledge.assert_called_once()
         self.acknowledge_metering.assert_called_once()
         self.assertTrue(path.exists())
+
+    def test_a_static_validation_timeout_keeps_new_clients_removable(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "state.json"
+            config = Path(directory) / "config.json"
+            path.write_text(json.dumps({**fresh_state(), "installedClients": ["u:stay"]}))
+            original_config = json.dumps({"inbounds": [{
+                "protocol": "vless", "settings": {"clients": [{"email": "shared-legacy"}]},
+            }]})
+            config.write_text(original_config)
+            live = {"u:stay"}
+            posted: list[dict] = []
+
+            def invoke(_binary, arguments):
+                if arguments[0] == "run":
+                    raise agent.subprocess.TimeoutExpired("xray -test", 30)
+                if "adu" in arguments:
+                    snippet = json.loads(Path(arguments[-1]).read_text())
+                    live.add(snippet["inbounds"][0]["settings"]["clients"][0]["email"])
+                    stdout = "Added 1 user(s) in total."
+                else:
+                    live.discard(arguments[-1])
+                    stdout = "Removed 1 user(s) in total."
+                return agent.subprocess.CompletedProcess(arguments, 0, stdout, "")
+
+            def deliver(_base, _token, state_path, state):
+                posted.extend(state["pendingReports"])
+                state["pendingReports"] = []
+                agent.save_state(state_path, state)
+                return len(posted), 0
+
+            with patch.dict(agent.os.environ, {
+                     "TONO_HOME_AGENT_TOKEN": "node-token", "TONO_SOURCE_ID": "exit-node-a",
+                 }, clear=True), \
+                 patch.object(agent, "api_base", return_value="https://control.example"), \
+                 patch.object(agent, "xray_binary", return_value=Path("/unused/xray")), \
+                 patch.object(agent, "xray_config_path", return_value=config), \
+                 patch.object(agent, "xray_start_marker", return_value="boot:1"), \
+                 patch.object(agent, "require_commands", return_value={
+                     "add_user": "adu", "remove_user": "rmu", "stats_query": "statsquery",
+                 }), \
+                 patch.object(agent, "fetch_roster", side_effect=[
+                     ("exit-node-a", 200, [
+                         {"userId": "new", "clientUUID": "11111111-1111-4111-8111-111111111111"},
+                         {"userId": "stay", "clientUUID": "22222222-2222-4222-8222-222222222222"},
+                     ], True, None),
+                     ("exit-node-a", 260, [], False, None),
+                 ]), \
+                 patch.object(agent, "run_xray", side_effect=invoke), \
+                 patch.object(agent, "read_counters", return_value={"u:new": 50}), \
+                 patch.object(agent, "acknowledge_roster") as acknowledge, \
+                 patch.object(agent, "acknowledge_metering"), \
+                 patch.object(agent, "deliver_queue", side_effect=deliver):
+                with self.assertRaisesRegex(agent.Refusal, "cannot persist.*retirement"):
+                    agent.run_once(path)
+                saved = json.loads(path.read_text())
+                self.assertEqual(saved["installedClients"], ["u:new", "u:stay"])
+                self.assertEqual([report["totalBytes"] for report in posted], [50])
+                self.assertEqual(config.read_text(), original_config)
+                self.assertEqual(list(config.parent.glob(".config-*.json")), [])
+                acknowledge.assert_called_once()
+                agent.run_once(path)
+                self.assertEqual(live, set())
 
     def test_an_ack_failure_does_not_persist_the_round(self) -> None:
         path, _, _ = self.run_round(
@@ -634,7 +959,7 @@ class RosterControlSignals(unittest.TestCase):
              patch.object(agent, "fetch_roster", return_value=("exit-node-a", 200, [
                  {"userId": "usr_a", "clientUUID": "11111111-1111-4111-8111-111111111111"},
                  {"userId": "usr_b", "clientUUID": "22222222-2222-4222-8222-222222222222"},
-             ], False)), \
+             ], False, None)), \
              patch.object(agent, "installed_clients", return_value=None), \
              patch.object(agent, "run_xray", fake_xray), \
              patch.object(agent, "read_counters", return_value={"u:usr_a": 1200}), \
@@ -689,8 +1014,8 @@ class RosterControlSignals(unittest.TestCase):
                  ("exit-node-a", 200, [
                      {"userId": "usr_a", "clientUUID": "11111111-1111-4111-8111-111111111111"},
                      {"userId": "usr_b", "clientUUID": "22222222-2222-4222-8222-222222222222"},
-                 ], False),
-                 ("exit-node-a", 260, [], False),
+                 ], False, None),
+                 ("exit-node-a", 260, [], False, None),
              ]), \
              patch.object(agent, "run_xray", fake_xray), \
              patch.object(agent, "read_counters", side_effect=counters), \
@@ -741,7 +1066,7 @@ class RosterControlSignals(unittest.TestCase):
                  {"userId": "stay", "clientUUID": "11111111-1111-4111-8111-111111111111"},
                  {"userId": "aaa_ok", "clientUUID": "22222222-2222-4222-8222-222222222222"},
                  {"userId": "zzz_fail", "clientUUID": "33333333-3333-4333-8333-333333333333"},
-             ], False)), \
+             ], False, None)), \
              patch.object(agent, "run_xray", fake_xray), \
              patch.object(agent, "read_counters", return_value={}), \
              patch.object(agent, "acknowledge_roster") as acknowledge:
@@ -759,6 +1084,67 @@ class RosterControlSignals(unittest.TestCase):
             reconcile_error=agent.Refusal("xray reconcile failed"),
         )
         acknowledge.assert_not_called()
+
+    def test_a_cli_timeout_keeps_accepted_and_uncertain_clients_removable(self) -> None:
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        path = Path(directory.name) / "state.json"
+        initial = {
+            **fresh_state(), "installedClients": ["u:stay"],
+            "totals": {"u:stay": 40}, "counterBaseline": {"u:stay": 40},
+        }
+        path.write_text(json.dumps(initial), encoding="utf-8")
+        live = {"u:stay"}
+
+        def invoke(arguments, **_kwargs):
+            if "adu" in arguments:
+                label = json.loads(Path(arguments[-1]).read_text(encoding="utf-8"))[
+                    "inbounds"][0]["settings"]["clients"][0]["email"]
+                live.add(label)
+                if label == "u:bbb_timeout":
+                    # The RPC applied, but its CLI never delivered the result.
+                    raise agent.subprocess.TimeoutExpired(arguments, 30)
+                stdout = "Added 1 user(s) in total."
+            elif "rmu" in arguments:
+                live.discard(arguments[-1])
+                stdout = "Removed 1 user(s) in total."
+            else:
+                stdout = "{}"
+            return agent.subprocess.CompletedProcess(arguments, 0, stdout, "")
+
+        with patch.dict(agent.os.environ, {
+                 "TONO_HOME_AGENT_TOKEN": "node-token", "TONO_SOURCE_ID": "exit-node-a",
+             }, clear=True), \
+             patch.object(agent, "api_base", return_value="https://control.example"), \
+             patch.object(agent, "xray_binary", return_value=Path("/unused/xray")), \
+             patch.object(agent, "xray_start_marker", return_value="boot:1"), \
+             patch.object(agent, "require_commands", return_value={
+                 "add_user": "adu", "remove_user": "rmu", "stats_query": "statsquery",
+             }), \
+             patch.object(agent, "fetch_roster", side_effect=[
+                 ("exit-node-a", 200, [
+                     {"userId": "aaa_ok", "clientUUID": "11111111-1111-4111-8111-111111111111"},
+                     {"userId": "bbb_timeout", "clientUUID": "22222222-2222-4222-8222-222222222222"},
+                     {"userId": "stay", "clientUUID": "33333333-3333-4333-8333-333333333333"},
+                 ], False, None),
+                 ("exit-node-a", 260, [], False, None),
+             ]), \
+             patch.object(agent.subprocess, "run", side_effect=invoke), \
+             patch.object(agent, "acknowledge_roster") as acknowledge, \
+             patch.object(agent, "acknowledge_metering") as metering:
+            with self.assertRaises((agent.Refusal, agent.subprocess.TimeoutExpired)) as refused:
+                agent.run_once(path)
+            self.assertEqual(json.loads(path.read_text(encoding="utf-8")), {
+                **initial, "installedClients": ["u:aaa_ok", "u:bbb_timeout", "u:stay"],
+            })
+            self.assertIsInstance(refused.exception, agent.Refusal)
+            acknowledge.assert_not_called()
+            metering.assert_not_called()
+            agent.run_once(path)
+
+        self.assertEqual(live, set())
+        acknowledge.assert_called_once()
+        metering.assert_called_once()
 
     def test_a_failed_hy2_publish_still_revokes_xray_and_keeps_usage_but_is_never_acknowledged(self) -> None:
         # TF-opus-8: a hy2 error used to end the round before the Xray
@@ -801,7 +1187,7 @@ class RosterControlSignals(unittest.TestCase):
              patch.object(
                  agent,
                  "fetch_roster",
-                 return_value=("exit-node-b", 1_700_000_000, [], False),
+                 return_value=("exit-node-b", 1_700_000_000, [], False, None),
              ), \
              patch.object(agent, "reconcile_and_read_stable") as reconcile:
             with self.assertRaises(agent.Refusal):
@@ -842,7 +1228,7 @@ class RosterControlSignals(unittest.TestCase):
                  "add_user": "adu", "remove_user": "rmu", "stats_query": "statsquery",
              }), \
              patch.object(agent, "fetch_roster",
-                          return_value=("exit-node-a", 1_700_000_000, [], False)), \
+                          return_value=("exit-node-a", 1_700_000_000, [], False, None)), \
              patch.object(agent, "run_xray", fake_xray), \
              patch.object(agent, "sync_hy2_roster") as hy2, \
              patch.object(agent, "acknowledge_roster") as acknowledge:
@@ -879,7 +1265,7 @@ class RosterControlSignals(unittest.TestCase):
                  "add_user": "adu", "remove_user": "rmu", "stats_query": "statsquery",
              }), \
              patch.object(agent, "fetch_roster",
-                          return_value=("exit-node-a", 1_700_000_000, [], False)), \
+                          return_value=("exit-node-a", 1_700_000_000, [], False, None)), \
              patch.object(agent, "installed_clients", return_value={"u:gone"}), \
              patch.object(agent, "run_xray", fake_xray), \
              patch.object(agent, "sync_hy2_roster"), \
@@ -1007,7 +1393,7 @@ class RosterControlSignals(unittest.TestCase):
              patch.object(agent, "fetch_roster", return_value=("exit-node-a", 1_700_000_000, [
                  {"userId": "usr_1", "clientUUID": "33333333-3333-4333-8333-333333333333",
                   "deviceId": None},
-             ], False)), \
+             ], False, None)), \
              patch.object(agent, "run_xray", fake_xray), \
              patch.object(agent, "acknowledge_roster"), \
              patch.object(agent, "acknowledge_metering"):
@@ -1074,7 +1460,7 @@ class Hy2RosterAuthorization(unittest.TestCase):
             "TONO_SOURCE_ID": "los-angeles-marina",
             "TONO_AGENT_STATE": str(state_path),
         }), patch.object(agent, "fetch_roster", return_value=(
-            "los-angeles-marina", 1700000000, [{"clientUUID": identity}], False,
+            "los-angeles-marina", 1700000000, [{"clientUUID": identity}], False, None,
         )), patch.object(agent, "run_once") as full_cycle, \
                 patch.object(agent, "run_xray") as xray, \
                 patch.object(agent, "acknowledge_roster") as roster_ack, \
@@ -1094,7 +1480,7 @@ class Hy2RosterAuthorization(unittest.TestCase):
             "TONO_HOME_AGENT_TOKEN": "test-node-token",
             "TONO_SOURCE_ID": "los-angeles-marina",
         }), patch.object(agent, "fetch_roster", return_value=(
-            "another-node", 1700000000, [], False,
+            "another-node", 1700000000, [], False, None,
         )):
             with self.assertRaisesRegex(agent.Refusal, "node identity"):
                 agent.run_hy2_roster_once()
@@ -1307,7 +1693,7 @@ class MultipleExits(unittest.TestCase):
              patch.object(
                  agent,
                  "fetch_roster",
-                 return_value=("node-token", 500, [], False),
+                 return_value=("node-token", 500, [], False, None),
              ), \
              patch.object(agent, "reconcile_and_read_stable", side_effect=stable_rounds), \
              patch.object(agent, "acknowledge_roster"), \
@@ -1342,7 +1728,7 @@ class MultipleExits(unittest.TestCase):
              patch.object(
                  agent,
                  "fetch_roster",
-                 return_value=("node-under-test", 100, [], False),
+                 return_value=("node-under-test", 100, [], False, None),
              ), \
              patch.object(
                  agent,
@@ -1385,7 +1771,7 @@ class MultipleExits(unittest.TestCase):
              patch.object(
                  agent,
                  "fetch_roster",
-                 return_value=("node-under-test", 100, [], False),
+                 return_value=("node-under-test", 100, [], False, None),
              ), \
              patch.object(
                  agent,
@@ -1482,6 +1868,22 @@ class ReconcileSafety(unittest.TestCase):
         self.assertEqual((added, removed), (0, 1))
         self.assertEqual(installed, set())
         self.assertIn("u:usr_1", self.calls[0])
+
+    def test_a_removal_timeout_does_not_skip_later_revocations(self) -> None:
+        attempted = []
+
+        def remove(_binary, _command, _address, _tag, label):
+            attempted.append(label)
+            if label == "u:aaa_timeout":
+                raise agent.subprocess.TimeoutExpired("xray", 30)
+            return agent.subprocess.CompletedProcess([], 0, "Removed 1 user(s) in total.", "")
+
+        with patch.object(agent, "remove_inbound_user", side_effect=remove):
+            with self.assertRaisesRegex(agent.Refusal, "TimeoutExpired") as refused:
+                self.reconcile([], None, {"u:aaa_timeout", "u:zzz_revoked"})
+
+        self.assertEqual(attempted, ["u:aaa_timeout", "u:zzz_revoked"])
+        self.assertEqual(agent.refusal_installed(refused.exception), {"u:aaa_timeout"})
 
     def test_nothing_is_removed_when_the_installed_set_is_unknown(self) -> None:
         # Counters used to stand in for this. They are created on first connect
@@ -1740,6 +2142,20 @@ class RunLock(unittest.TestCase):
 
 
 class StableXrayRead(unittest.TestCase):
+    def test_a_counter_cli_timeout_preserves_the_reconciled_inventory(self) -> None:
+        with patch.object(agent, "xray_start_marker", return_value="boot:1"), \
+             patch.object(agent, "installed_clients", return_value=None), \
+             patch.object(agent, "reconcile", return_value=(1, 0, {"u:new"})), \
+             patch.object(agent.subprocess, "run", side_effect=agent.subprocess.TimeoutExpired(
+                 "xray", 30,
+             )):
+            with self.assertRaisesRegex(agent.Refusal, "reading counters failed") as refused:
+                agent.reconcile_and_read_stable(
+                    Path("/unused"), {"stats_query": "statsquery"}, "127.0.0.1:10085",
+                    "tono-vless", [], set(),
+                )
+        self.assertEqual(agent.refusal_installed(refused.exception), {"u:new"})
+
     def test_a_restart_during_the_read_reconciles_and_reads_the_new_process_again(self) -> None:
         with patch.object(agent, "xray_start_marker", side_effect=["old", "new", "new", "new"]), \
              patch.object(agent, "installed_clients", side_effect=[set(), set()]), \
@@ -1774,7 +2190,7 @@ class ControlPlaneOutage(unittest.TestCase):
         client_uuid = "11111111-2222-4333-8444-555555555555"
         label = agent.client_label("usr_a", "dev_a", client_uuid)
         roster = [{"userId": "usr_a", "clientUUID": client_uuid, "deviceId": "dev_a"}]
-        online = ("node-under-test", 1_700_000_000_000, roster, False)
+        online = ("node-under-test", 1_700_000_000_000, roster, False, None)
         down = urllib.error.URLError("control plane unreachable")
         real_fetch = agent.fetch_roster
         disabled_body = json.dumps({"error": {"code": "EXIT_NODE_DISABLED"}}).encode()

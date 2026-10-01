@@ -53,7 +53,7 @@ is a label, **not** a downgrade comparator or installed-identity proof.
 | `targets` | Exactly one `macos-arm64` and one `windows-x86_64` target |
 | target `id` | One of those two identifiers; not the native updater's feed key |
 | target `artifactSha256`, `artifactSizeBytes` | Expected archive digest and 1–4,294,967,296 bytes |
-| target `components` | Required `appSha256`, `coreSha256`, `privilegedSha256` |
+| target `components` | Required `appSha256`, `coreSha256`, `privilegedSha256`. Optional `singBoxSha256` (64 lowercase hex) when the Windows package includes `sing-box.exe`; omitted on older manifests |
 
 One release/build binds both targets, but their bytes, native signing identities,
 installers and OS verification remain distinct. There are no URLs, arbitrary
@@ -211,7 +211,11 @@ its recorded incarnations died.
   successor) and `Uncertain` keep their marker (2026-09-25, #602). A complete,
   verified publication stays installed; a successor that was never durably
   registered is replaced by measured-target evidence and the first
-  authenticated target-identity App adopts it.
+  authenticated target-identity App adopts it. That App's process-start
+  clock must be later than the publication clock sampled once the new bytes
+  were durable (the same clock as `Image.started_at`, not the receipt's Unix
+  time). Records written before that clock existed still adopt, because the
+  field is absent.
 - **Terminal archives after verified Disconnect.** An unconsumed attempt
   whose recorded executor incarnation is provably gone, and a rolled-back or
   uncertain attempt whose installed components equal the retained originals

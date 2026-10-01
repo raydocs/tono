@@ -1,6 +1,8 @@
 use crate::core::ClashConfig;
 use crate::core::logger::{get_writer, set_or_update_writer};
-use crate::core::process::{process_identity, terminate_process};
+use crate::core::process::{
+    ProcessIdentity, process_identity, terminate_process_if_identity_matches,
+};
 use crate::core::reconcile::ensure_startup_reconciled;
 use crate::core::runtime::{
     CoreRuntimeRecord, remove_core_runtime_record, write_core_runtime_record,
@@ -305,18 +307,12 @@ fn backoff_delay(attempt: u32, max: Duration) -> Duration {
 }
 
 fn core_args(config: &ClashConfig) -> Vec<String> {
-    vec![
-        "-d".to_string(),
-        config.core_config.config_dir.clone(),
-        "-f".to_string(),
-        config.core_config.config_path.clone(),
-        if cfg!(windows) {
-            "-ext-ctl-pipe".to_string()
-        } else {
-            "-ext-ctl-unix".to_string()
-        },
-        config.core_config.core_ipc_path.clone(),
-    ]
+    crate::core::structure::core_launch_args(
+        &config.core_config.core_path,
+        &config.core_config.config_dir,
+        &config.core_config.config_path,
+        &config.core_config.core_ipc_path,
+    )
 }
 
 fn log_core_exit(status: &std::process::ExitStatus, uptime: Duration) -> String {
@@ -363,11 +359,16 @@ fn non_zero_u64(value: u64) -> Option<u64> {
 async fn write_runtime_record_for_config(
     pid: Option<u32>,
     config: &ClashConfig,
+    identity_cache: &RwLock<Option<(u32, ProcessIdentity)>>,
     context: &'static str,
 ) -> Result<()> {
+    // Every caller still owns the original, unreaped Child handle. Reuse is impossible during
+    // this existing query. Cache before disk IO so a failed record write cannot lose identity.
+    *identity_cache.write().unwrap() = None;
     let pid = pid.context("spawned core did not expose a process ID")?;
     let identity = process_identity(pid)?
         .with_context(|| format!("core process {pid} exited before runtime record {context}"))?;
+    *identity_cache.write().unwrap() = Some((pid, identity.clone()));
     write_core_runtime_record(&CoreRuntimeRecord {
         pid,
         ipc_path: config.core_config.core_ipc_path.clone(),
@@ -399,6 +400,7 @@ const fn prepare_start_core_action(
 
 pub struct CoreManager {
     running_pid: Arc<AtomicU32>,
+    running_process_identity: Arc<RwLock<Option<(u32, ProcessIdentity)>>>,
     running_config: Mutex<Option<ClashConfig>>,
     core_start_time: Arc<Mutex<Option<Instant>>>,
     core_started_at: Arc<AtomicU64>,
@@ -520,6 +522,7 @@ impl CoreManager {
     fn new() -> Self {
         CoreManager {
             running_pid: Arc::new(AtomicU32::new(0)),
+            running_process_identity: Arc::new(RwLock::new(None)),
             running_config: Mutex::new(None),
             core_start_time: Arc::new(Mutex::new(None)),
             core_started_at: Arc::new(AtomicU64::new(0)),
@@ -657,13 +660,7 @@ impl CoreManager {
         };
         let child_pid = child_guard.id();
 
-        if let Err(error) = secure_core_ipc_socket(
-            config.core_config.core_ipc_path.clone(),
-            owner.clone(),
-            child_pid,
-        )
-        .await
-        {
+        if let Err(error) = secure_core_ipc_for(&config, &owner, child_pid).await {
             if let Err(kill_error) = child_guard.kill_now().await {
                 let now_secs = unix_timestamp_secs();
                 *self.running_config.lock().await = Some(config.clone());
@@ -672,6 +669,7 @@ impl CoreManager {
                 if let Err(record_error) = write_runtime_record_for_config(
                     child_pid,
                     &config,
+                    &self.running_process_identity,
                     "after failed initial cleanup",
                 )
                 .await
@@ -691,8 +689,13 @@ impl CoreManager {
             return Err(error);
         }
 
-        if let Err(record_error) =
-            write_runtime_record_for_config(child_pid, &config, "after start").await
+        if let Err(record_error) = write_runtime_record_for_config(
+            child_pid,
+            &config,
+            &self.running_process_identity,
+            "after start",
+        )
+        .await
         {
             if let Err(kill_error) = child_guard.kill_now().await {
                 let now_secs = unix_timestamp_secs();
@@ -798,6 +801,7 @@ impl CoreManager {
         owner: OwnerIdentity,
     ) {
         let running_pid_arc = Arc::clone(&self.running_pid);
+        let process_identity_arc = Arc::clone(&self.running_process_identity);
         let start_time_arc = Arc::clone(&self.core_start_time);
         let started_at_arc = Arc::clone(&self.core_started_at);
         let last_exit_reason_arc = Arc::clone(&self.last_core_exit_reason);
@@ -806,6 +810,7 @@ impl CoreManager {
         let failed_child_arc = Arc::clone(&self.failed_child);
         let (shutdown_tx, shutdown_rx) = oneshot::channel();
         let watchdog_config = watchdog_config();
+        let arm_epoch = crate::core::windows_kill_switch::core_arm_epoch();
 
         let handle = tokio::spawn(async move {
             let mut recovery_exhausted = false;
@@ -834,6 +839,9 @@ impl CoreManager {
                                     "failed to terminate core during watchdog shutdown",
                                 ));
                             }
+                            // Death is confirmed. Retire the PID before final WFP cleanup can
+                            // stall and the join timeout can reopen this recycled number.
+                            running_pid_arc.store(0, Ordering::Release);
                             break 'watchdog;
                         }
                         wait_result = child.wait() => wait_result,
@@ -841,9 +849,22 @@ impl CoreManager {
                 };
 
                 let status = match wait_result {
-                    Ok(status) => status,
+                    Ok(status) => {
+                        // wait() has reaped the child and released its process handle. Process
+                        // bookkeeping must stop naming it before any metadata or WFP await.
+                        // Packed security identity is still revoked under the WFP barrier below.
+                        running_pid_arc.store(0, Ordering::Release);
+                        status
+                    }
                     Err(error) => {
                         warn!("Failed to wait for core process: {}", error);
+                        if let Err(kill_error) = current_guard.kill_now().await {
+                            *failed_child_arc.lock().await = Some(current_guard);
+                            set_core_lifecycle_state(ServiceLifecycleState::Fatal);
+                            return Err(kill_error
+                                .context("failed to terminate core after its wait failed"));
+                        }
+                        running_pid_arc.store(0, Ordering::Release);
                         recovery_exhausted = true;
                         break;
                     }
@@ -951,12 +972,7 @@ impl CoreManager {
                     {
                         Ok(mut new_guard) => {
                             let new_pid = new_guard.id();
-                            if let Err(error) = secure_core_ipc_socket(
-                                config.core_config.core_ipc_path.clone(),
-                                owner.clone(),
-                                new_pid,
-                            )
-                            .await
+                            if let Err(error) = secure_core_ipc_for(&config, &owner, new_pid).await
                             {
                                 error!("Failed to secure restarted core IPC: {error:#}");
                                 if let Err(kill_error) = new_guard.kill_now().await {
@@ -969,6 +985,7 @@ impl CoreManager {
                                     if let Err(record_error) = write_runtime_record_for_config(
                                         new_pid,
                                         &config,
+                                        &process_identity_arc,
                                         "after failed restart cleanup",
                                     )
                                     .await
@@ -994,9 +1011,13 @@ impl CoreManager {
                                 restart_timestamps.push(now);
                                 continue;
                             }
-                            if let Err(record_error) =
-                                write_runtime_record_for_config(new_pid, &config, "after restart")
-                                    .await
+                            if let Err(record_error) = write_runtime_record_for_config(
+                                new_pid,
+                                &config,
+                                &process_identity_arc,
+                                "after restart",
+                            )
+                            .await
                             {
                                 error!("Failed to commit restarted core runtime: {record_error:#}");
                                 if let Err(kill_error) = new_guard.kill_now().await {
@@ -1068,6 +1089,7 @@ impl CoreManager {
             remove_core_runtime_record().await;
             if recovery_exhausted {
                 set_core_lifecycle_state(ServiceLifecycleState::Fatal);
+                crate::core::windows_kill_switch::note_core_recovery_exhausted(arm_epoch).await;
             }
             Ok(())
         });
@@ -1102,9 +1124,22 @@ impl CoreManager {
                     let _ = handle.await;
                     let pid = self.running_pid.load(Ordering::Acquire);
                     if pid != 0 {
-                        terminate_process(pid).await.with_context(|| {
-                            format!("failed to terminate core {pid} after watchdog timeout")
-                        })?;
+                        // The original Job/Child handles may have closed during abort. Do not
+                        // authorize the reopened PID using a fresh query or a disk record.
+                        let (cached_pid, expected) = self
+                            .running_process_identity
+                            .read()
+                            .unwrap()
+                            .clone()
+                            .context("core identity is unavailable after watchdog timeout")?;
+                        if cached_pid != pid {
+                            anyhow::bail!("core identity changed before watchdog timeout cleanup");
+                        }
+                        terminate_process_if_identity_matches(pid, &expected)
+                            .await
+                            .with_context(|| {
+                                format!("failed to terminate core {pid} after watchdog timeout")
+                            })?;
                     }
                     info!("Watchdog aborted and core process reconciled");
                 }
@@ -1382,6 +1417,29 @@ fn grant_core_ipc_directory_to_owner(target: &std::path::Path, uid: u32, gid: u3
     result
 }
 
+/// Only Mihomo serves the owner-scoped controller pipe (`-ext-ctl-pipe`). sing-box is launched
+/// with `run -c` and its controller is the loopback `clash_api` behind a 32-byte compiler secret,
+/// so it never creates that pipe. Waiting for it refused every sing-box start after two seconds.
+fn core_serves_ipc_pipe(core_path: &str) -> bool {
+    !crate::core::structure::is_sing_box_core_path(core_path)
+}
+
+async fn secure_core_ipc_for(
+    config: &ClashConfig,
+    owner: &OwnerIdentity,
+    expected_pid: Option<u32>,
+) -> Result<()> {
+    if !core_serves_ipc_pipe(&config.core_config.core_path) {
+        return Ok(());
+    }
+    secure_core_ipc_socket(
+        config.core_config.core_ipc_path.clone(),
+        owner.clone(),
+        expected_pid,
+    )
+    .await
+}
+
 async fn secure_core_ipc_socket(
     core_ipc_path: String,
     owner: OwnerIdentity,
@@ -1618,6 +1676,60 @@ mod prepare_start_action_tests {
     }
 }
 
+#[cfg(test)]
+mod sing_box_ipc_tests {
+    use super::secure_core_ipc_for;
+    use crate::core::structure::{ClashConfig, CoreConfig};
+    use crate::{OwnerIdentity, WriterConfig};
+
+    fn config(core_path: &str) -> ClashConfig {
+        ClashConfig {
+            core_config: CoreConfig {
+                core_path: core_path.into(),
+                core_ipc_path: if cfg!(windows) {
+                    r"\\.\pipe\tono-core-absent-test".into()
+                } else {
+                    "/tmp/tono-core-absent-test.sock".into()
+                },
+                config_path: "unused-config".into(),
+                config_dir: "unused-runtime".into(),
+            },
+            log_config: WriterConfig {
+                directory: "unused-logs".into(),
+                max_log_size: 1,
+                max_log_files: 1,
+            },
+        }
+    }
+
+    fn owner() -> OwnerIdentity {
+        #[cfg(windows)]
+        {
+            OwnerIdentity::Windows {
+                sid: "S-1-5-21-1-2-3-1001".into(),
+            }
+        }
+        #[cfg(not(windows))]
+        {
+            OwnerIdentity::Unix { uid: 501, gid: 20 }
+        }
+    }
+
+    #[tokio::test]
+    async fn a_sing_box_start_does_not_wait_for_the_mihomo_controller_pipe() {
+        assert!(
+            secure_core_ipc_for(&config("sing-box.exe"), &owner(), Some(4242))
+                .await
+                .is_ok()
+        );
+        assert!(
+            secure_core_ipc_for(&config("tono-core.exe"), &owner(), Some(4242))
+                .await
+                .is_err()
+        );
+    }
+}
+
 #[cfg(all(test, unix))]
 mod tests {
     use super::{ChildGuard, CoreManager, prepare_core_ipc_socket, secure_core_ipc_socket};
@@ -1670,6 +1782,108 @@ mod tests {
             child: Some(child),
             readers: Vec::new(),
         })
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn an_exited_core_pid_is_retired_before_watchdog_cleanup_waits() -> anyhow::Result<()> {
+        let manager = CoreManager::new();
+        let child = tokio::process::Command::new("/bin/sh")
+            .args(["-c", "exit 0"])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()?;
+        let pid = child.id().expect("the unreaped child exposes its PID");
+        manager
+            .running_pid
+            .store(pid, std::sync::atomic::Ordering::Release);
+        // The actual watchdog must process the exit, then wait here before final teardown.
+        let reason_guard = manager.last_core_exit_reason.lock().await;
+        manager
+            .start_watchdog(
+                ChildGuard {
+                    child: Some(child),
+                    readers: Vec::new(),
+                },
+                ClashConfig {
+                    core_config: CoreConfig {
+                        core_path: "unused-core".into(),
+                        core_ipc_path: "unused-controller".into(),
+                        config_path: "unused-config".into(),
+                        config_dir: "unused-runtime".into(),
+                    },
+                    log_config: WriterConfig {
+                        directory: "unused-logs".into(),
+                        max_log_size: 1,
+                        max_log_files: 1,
+                    },
+                },
+                OwnerIdentity::Unix {
+                    uid: unsafe { platform_lib::geteuid() },
+                    gid: unsafe { platform_lib::getegid() },
+                },
+            )
+            .await;
+        let retired = tokio::time::timeout(Duration::from_secs(2), async {
+            while manager
+                .running_pid
+                .load(std::sync::atomic::Ordering::Acquire)
+                != 0
+            {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .is_ok();
+        // Abort directly: the baseline's PID fallback is the behavior under review and must
+        // never be allowed to signal an unrelated process in a failing test.
+        let handle = manager
+            .watchdog_handle
+            .lock()
+            .await
+            .take()
+            .expect("watchdog is installed");
+        handle.abort();
+        let _ = handle.await;
+        drop(reason_guard);
+        assert!(
+            retired,
+            "confirmed exit must retire the PID before cleanup can block"
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn watchdog_timeout_does_not_kill_a_reused_pid() -> anyhow::Result<()> {
+        let manager = CoreManager::new();
+        let mut child = tokio::process::Command::new("/bin/sleep")
+            .arg("30")
+            .kill_on_drop(true)
+            .spawn()?;
+        let pid = child.id().expect("the child exposes its PID");
+        let mut expected = super::process_identity(pid)?.expect("the child has an identity");
+        expected.started_at += 1;
+        manager
+            .running_pid
+            .store(pid, std::sync::atomic::Ordering::Release);
+        *manager.running_process_identity.write().unwrap() = Some((pid, expected));
+        // Represent the stalled watchdog after its original guard has been dropped. The live
+        // child models another process now using the recorded PID; only creation time differs.
+        *manager.watchdog_handle.lock().await = Some(tokio::spawn(async {
+            std::future::pending::<anyhow::Result<()>>().await
+        }));
+        let result = manager.stop_watchdog().await;
+        let survived = child.try_wait()?.is_none();
+        // Clean up before assertions, including when the original fallback killed the fixture.
+        let _ = child.kill().await;
+        let _ = child.wait().await;
+        result?;
+        assert!(
+            survived,
+            "watchdog timeout must not terminate a different process incarnation"
+        );
+        Ok(())
     }
 
     #[tokio::test]
@@ -1796,5 +2010,108 @@ mod windows_pipe_tests {
         assert!(sddl.contains(";;;BA)"));
         assert!(!sddl.contains(";;;WD)"));
         assert!(!sddl.contains(";;;AU)"));
+    }
+}
+
+#[cfg(all(test, unix))]
+mod exhaustion_tests {
+    use super::*;
+    use serial_test::serial;
+    #[tokio::test]
+    #[serial]
+    async fn exhausted_core_recovery_releases_non_strict_general_traffic() -> Result<()> {
+        let manager = CoreManager::new();
+        set_core_watchdog_config_for_tests(Some(CoreWatchdogTestConfig {
+            max_restarts: 0,
+            restart_window: Duration::from_secs(10),
+            max_backoff: Duration::ZERO,
+        }));
+        struct Reset;
+        impl Drop for Reset {
+            fn drop(&mut self) {
+                set_core_watchdog_config_for_tests(None);
+            }
+        }
+        let _reset = Reset;
+        let child = Command::new("/bin/sh")
+            .args(["-c", "exit 1"])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()?;
+        let pid = child.id().unwrap();
+        publish_core_identity(&manager.running_pid, pid);
+        let owner = OwnerIdentity::Unix {
+            uid: unsafe { platform_lib::geteuid() },
+            gid: unsafe { platform_lib::getegid() },
+        };
+        let kill_switch = crate::core::structure::KillSwitchConfig {
+            tunnel_interface: "Tono".into(),
+            proxy_endpoints: vec![crate::ProxyEndpoint {
+                ip: "11.22.33.44".into(),
+                port: 443,
+                protocol: crate::ProxyProtocol::Tcp,
+            }],
+            bootstrap_api_hosts: vec!["1.1.1.1".into()],
+            direct_endpoints: vec![],
+        };
+        crate::core::windows_kill_switch::arm_bootstrap(
+            &kill_switch,
+            "/opt/tono/mihomo",
+            "owner-alice",
+        )
+        .await?;
+        crate::core::windows_kill_switch::lock(None).await?;
+        crate::core::windows_kill_switch::mark_verified("owner-alice").await?;
+        let config = ClashConfig {
+            core_config: crate::CoreConfig {
+                core_path: "unused".into(),
+                core_ipc_path: "unused".into(),
+                config_path: "unused".into(),
+                config_dir: "unused".into(),
+            },
+            log_config: WriterConfig {
+                directory: "unused".into(),
+                max_log_size: 1,
+                max_log_files: 1,
+            },
+        };
+        manager
+            .start_watchdog(
+                ChildGuard {
+                    child: Some(child),
+                    readers: vec![],
+                },
+                config,
+                owner,
+            )
+            .await;
+        let handle = manager.watchdog_handle.lock().await.take().unwrap();
+        tokio::time::timeout(Duration::from_secs(3), handle).await???;
+        crate::core::windows_kill_switch::spawn_windows_kill_switch_watchdog();
+        let released = tokio::time::timeout(Duration::from_secs(3), async {
+            while crate::core::windows_kill_switch::status().await.wanted {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .is_ok();
+        let status = crate::core::windows_kill_switch::status().await;
+        let ai_hold = crate::core::selective_layer::test_hold_active();
+        let core_missing = security_core_instance_snapshot().is_none();
+        eprintln!(
+            "exhausted Core: missing={core_missing}, wanted={}, verified={}, mode={:?}, tun={}",
+            status.wanted, status.verified, status.mode, status.tunnel_permit_rendered
+        );
+        crate::core::windows_kill_switch::release().await?;
+        assert!(core_missing);
+        assert!(
+            released && !status.wanted,
+            "exhausted non-strict recovery must release ordinary internet even when the App monitor is absent"
+        );
+        assert!(
+            ai_hold,
+            "automatic exhaustion release must retain the secondary AI hold"
+        );
+        Ok(())
     }
 }

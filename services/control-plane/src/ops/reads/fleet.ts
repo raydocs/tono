@@ -5,13 +5,13 @@ import {
 } from '../../crypto';
 import { ApiError } from '../../errors';
 import {
-  CLIENT_UUID_PLACEHOLDER,
   relistCatalogPlan,
   retirementCatalogPlan,
   splitManagedCatalogProxies,
   catalogBaseName,
   catalogHy2Name,
   catalogEntryMissingClientFields,
+  catalogHy2RelistBlockIsComplete,
 } from '../../catalog-yaml';
 import {
   type Env,
@@ -32,7 +32,7 @@ import {
   operationsActivity,
   operationsNodeSelections,
 } from './activity';
-import { retireDependencies, revokeExitToken } from '../retire-dependencies';
+import { assertCatalogHomeUnbound, catalogHomeUnboundSql, retireDependencies, revokeExitToken } from '../retire-dependencies';
 
 export async function managedCatalogTemplate(e: Env) {
   const row = await e.DB.prepare(
@@ -163,6 +163,7 @@ export async function operationsRetirePreview(e: Env, name: string, cache?: OpsR
   ]);
   const node = fleet.nodes.find((candidate) => candidate.name === name);
   if (!node) throw new ApiError(404, 'NOT_FOUND', 'Fleet node not found');
+  await assertCatalogHomeUnbound(e, name);
   const catalogPlan = retirementCatalogPlan(catalog.yaml, name);
   const listedCount = splitManagedCatalogProxies(catalog.yaml).items.length;
   if (catalogPlan.changes.catalogEntryRemoved && listedCount <= 1) {
@@ -231,8 +232,8 @@ export async function retireFleetNode(
     e.DB.prepare(
       `UPDATE managed_exit_catalog
        SET revision = ?, ciphertext = ?, nonce = ?, content_sha256 = ?, updated_at = ?
-       WHERE singleton_id = 1 AND revision = ?`,
-    ).bind(revision, encrypted.ciphertext, encrypted.nonce, digest, changedAt, preview.currentRevision),
+       WHERE singleton_id = 1 AND revision = ? AND ${catalogHomeUnboundSql}`,
+    ).bind(revision, encrypted.ciphertext, encrypted.nonce, digest, changedAt, preview.currentRevision, catalogBaseName(name), catalogHy2Name(name)),
     e.DB.prepare(
       `INSERT INTO ops_node_profiles(id, catalog_name, status, created_at, updated_at)
        SELECT ?, ?, 'retired', ?, ?
@@ -266,7 +267,7 @@ export async function retireFleetNode(
     throw new ApiError(409, 'CATALOG_CONFLICT', 'Managed catalog changed; preview retirement again');
   }
   if (dependencies.customersOnNode.length === 0) {
-    await revokeExitToken(e, name, actorEmail, nowSec);
+    await revokeExitToken(e, name, actorEmail, nowSec, revision);
   }
   const refreshed = await operationsFleetNodes(e, cache);
   return {
@@ -284,21 +285,6 @@ export async function retireFleetNode(
 function hy2FingerprintHex(raw: unknown): string | null {
   const hex = String(raw ?? '').replace(/:/g, '').trim().toLowerCase();
   return /^[0-9a-f]{64}$/.test(hex) ? hex : null;
-}
-
-/** Same-node hy2 block. SNI matches the provisioner default (`www.microsoft.com`). */
-function hy2BlockFromProfile(base: string, publicIp: string, fingerprint: string, port: number): string {
-  return [
-    `  - name: ${catalogHy2Name(base)}`,
-    '    type: hysteria2',
-    `    server: ${publicIp}`,
-    `    port: ${port}`,
-    `    password: ${CLIENT_UUID_PLACEHOLDER}`,
-    '    sni: www.microsoft.com',
-    `    fingerprint: ${fingerprint}`,
-    '    skip-cert-verify: false',
-    '',
-  ].join('\n');
 }
 
 /**
@@ -365,13 +351,13 @@ export async function relistFleetNode(
   }
   const fingerprint = hy2FingerprintHex(profile?.hy2_fingerprint);
   if (fingerprint && ip) {
-    const hy2Port = Number(profile?.hy2_port);
-    const port = Number.isSafeInteger(hy2Port) && hy2Port > 0 && hy2Port <= 65535 ? hy2Port : 443;
-    const hy2Plan = relistCatalogPlan(
-      plan.yaml,
-      catalogHy2Name(name),
-      hy2BlockFromProfile(name, ip, fingerprint, port),
-    );
+    const hy2Name = catalogHy2Name(name);
+    const alreadyListed = splitManagedCatalogProxies(plan.yaml).items.some((item) => item.name === hy2Name);
+    const hy2Block = typeof requestBody.hy2Block === 'string' ? requestBody.hy2Block : '';
+    if (!alreadyListed && !catalogHy2RelistBlockIsComplete(hy2Block)) {
+      throw new ApiError(422, 'RELIST_NO_HY2_TEMPLATE', 'Relist requires the full HY2 entry with its DER and SPKI pins; publish the operator-issued entry');
+    }
+    const hy2Plan = relistCatalogPlan(plan.yaml, hy2Name, hy2Block);
     if (!hy2Plan.safe) {
       throw new ApiError(422, 'RELIST_UNSAFE', hy2Plan.warnings[0] ?? 'Node cannot be relisted');
     }

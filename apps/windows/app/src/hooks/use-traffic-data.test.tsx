@@ -49,3 +49,20 @@ it('resets live on controller or enabled changes and waits for a new frame', () 
   receive()
   expect(result.current.live).toBe(true)
 })
+
+it('marks a failed traffic feed unavailable until a new frame arrives', () => {
+  const { result } = renderHook(() =>
+    useTrafficData({ enabled: true, generation: 3 }),
+  )
+  const frame = '{"up":1,"down":2,"upTotal":3,"downTotal":4}'
+  act(() => handlers.message(frame))
+  expect(result.current.live).toBe(true)
+  act(() =>
+    handlers.message(
+      'Websocket error: connection reset without closing handshake',
+    ),
+  )
+  expect(result.current.live).toBe(false)
+  act(() => handlers.message(frame))
+  expect(result.current.live).toBe(true)
+})

@@ -13,6 +13,8 @@ import {
   partitionReleaseResources,
   validateExternalBin,
   validateEmbeddedCoreDigestPin,
+  validateSingBoxDigest,
+  WINDOWS_SING_BOX_SHA256,
   validateNsisAutomaticUpgradeFlow,
   validateNsisLegacyCleanup,
   validatePayloadEntries,
@@ -1043,6 +1045,8 @@ test('Windows release stops when a native preflight command fails', () => {
     'Service build must hash Mihomo first',
   )
   assert.match(serviceBlock, /\$env:TONO_CORE_SHA256 = \$coreSha256/)
+  assert.match(serviceBlock, /\$env:TONO_SING_BOX_SHA256 = \$singBoxSha256/)
+  assert.match(serviceBlock, /b2e6902ee75d9c4af79df28a61ded67afc4283fc83a44dee8896f3737a4ed027/)
   assert.match(serviceBlock, /GITHUB_ENV/)
   assert.match(serviceBlock, /core-sha256\.txt/)
   assert.match(serviceBlock, /tono-service\.exe/)
@@ -1055,6 +1059,10 @@ test('local Windows release scripts write core-sha256.txt from the hashed sideca
   assert.match(windowsReleaseShSource, /TONO_CORE_SHA256=/)
   assert.match(windowsReleasePs1Source, /core-sha256\.txt/)
   assert.match(windowsReleasePs1Source, /\$env:TONO_CORE_SHA256 = \$coreSha256/)
+  assert.match(windowsReleaseShSource, /TONO_SING_BOX_SHA256=/)
+  assert.match(windowsReleaseShSource, /sing-box-sha256\.txt/)
+  assert.match(windowsReleasePs1Source, /\$env:TONO_SING_BOX_SHA256 = \$singBoxSha256/)
+  assert.match(windowsReleasePs1Source, /sing-box-sha256\.txt/)
 })
 
 test('packaging rejects a Service that lacks the exact packaged Core pin', () => {
@@ -1120,14 +1128,24 @@ test('leftover Verge sidecar names are refused', () => {
   )
 })
 
-test('externalBin accepts only the stable sidecar', () => {
-  assert.equal(validateExternalBin([STABLE_EXTERNAL_BIN]), null)
+test('sing-box digest accepts only the pinned alpha.9 bytes', () => {
+  assert.equal(validateSingBoxDigest(WINDOWS_SING_BOX_SHA256), null)
+  assert.match(validateSingBoxDigest('ab'.repeat(32)), /not the pinned alpha\.9/)
+  assert.match(validateSingBoxDigest(''), /not the pinned alpha\.9/)
+})
+
+test('externalBin accepts only the stable sidecar and pinned sing-box', () => {
+  assert.equal(
+    validateExternalBin([STABLE_EXTERNAL_BIN, 'sidecar/sing-box']),
+    null,
+  )
   assert.match(validateExternalBin(['sidecar/verge-mihomo-alpha']), /alpha/)
   assert.match(
     validateExternalBin(['sidecar/tono-core', 'sidecar/verge-mihomo-alpha']),
-    /exactly one/,
+    /alpha/,
   )
-  assert.match(validateExternalBin([]), /exactly one/)
+  assert.match(validateExternalBin([STABLE_EXTERNAL_BIN]), /exactly the stable Mihomo/)
+  assert.match(validateExternalBin([]), /exactly the stable Mihomo/)
 })
 
 test('tauri.conf.json resources match the Windows allowlist', () => {
@@ -1178,6 +1196,8 @@ test('payload validator requires staged executables and rejects legacy junk', ()
     { name: 'resources/tono-service-uninstall.exe' },
     { name: 'resources/core-sha256.txt' },
     { name: 'resources/core-identity.json' },
+    { name: 'sing-box.exe.next' },
+    { name: 'resources/sing-box-sha256.txt' },
   ]
   assert.equal(validatePayloadEntries(good), null)
 
@@ -1201,6 +1221,18 @@ test('payload validator requires staged executables and rejects legacy junk', ()
       good.filter((entry) => entry.name !== 'tono-core.exe.next'),
     ),
     /missing stable Tono Core/,
+  )
+  assert.match(
+    validatePayloadEntries(
+      good.filter((entry) => entry.name !== 'sing-box.exe.next'),
+    ),
+    /missing pinned sing-box/,
+  )
+  assert.match(
+    validatePayloadEntries(
+      good.filter((entry) => entry.name !== 'resources/sing-box-sha256.txt'),
+    ),
+    /sing-box-sha256\.txt/,
   )
   assert.match(
     validatePayloadEntries(

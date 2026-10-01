@@ -96,7 +96,8 @@ async fn bind_primary_listener(preferred: Option<u16>) -> Result<tokio::net::Tcp
 }
 
 async fn notify_existing_instance(record: &InstanceRecord) -> bool {
-    let client = match ClientBuilder::new().timeout(Duration::from_millis(500)).build() {
+    // This authenticated command must reach the local instance even when the launcher has a proxy.
+    let client = match ClientBuilder::new().no_proxy().timeout(Duration::from_millis(500)).build() {
         Ok(client) => client,
         Err(_) => return false,
     };
@@ -454,6 +455,60 @@ mod tests {
     };
     #[cfg(unix)]
     use super::{open_instance_lock, try_lock_instance};
+
+    #[tokio::test]
+    async fn existing_instance_notification_bypasses_inherited_proxy() {
+        const CHILD_RECORD: &str = "TONO_SINGLETON_PROXY_TEST_RECORD";
+        if let Ok(encoded) = std::env::var(CHILD_RECORD) {
+            let record = serde_json::from_str(&encoded).unwrap();
+            assert!(super::notify_existing_instance(&record).await,
+                "the existing instance must be notified directly despite inherited proxy settings");
+            return;
+        }
+
+        use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let record = InstanceRecord {
+            port: listener.local_addr().unwrap().port(),
+            token: "fixture-instance-token".into(),
+        };
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut request = Vec::new();
+            let mut bytes = [0; 1024];
+            while !request.windows(4).any(|part| part == b"\r\n\r\n") {
+                let count = socket.read(&mut bytes).await.unwrap();
+                assert!(count > 0 && request.len() < 4096);
+                request.extend_from_slice(&bytes[..count]);
+            }
+            let request = String::from_utf8(request).unwrap();
+            assert!(request.starts_with("GET /commands/visible "));
+            assert!(request.to_ascii_lowercase().contains("x-instance-token: fixture-instance-token\r\n"));
+            socket.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok").await.unwrap();
+        });
+        // Set the proxy only in a child test process; parallel tests keep their real environment.
+        let test_name = format!("{}::existing_instance_notification_bypasses_inherited_proxy",
+            module_path!().split_once("::").unwrap().1);
+        let mut child = tokio::process::Command::new(std::env::current_exe().unwrap());
+        child.args(["--exact", &test_name, "--nocapture"])
+            .env(CHILD_RECORD, serde_json::to_string(&record).unwrap())
+            .env("HTTP_PROXY", "http://127.0.0.1:1")
+            .env("http_proxy", "http://127.0.0.1:1")
+            .env("ALL_PROXY", "http://127.0.0.1:1")
+            .env("all_proxy", "http://127.0.0.1:1")
+            .env("NO_PROXY", "nonmatching.invalid")
+            .env("no_proxy", "nonmatching.invalid")
+            .env_remove("REQUEST_METHOD")
+            .kill_on_drop(true);
+        let result = tokio::time::timeout(std::time::Duration::from_secs(10), child.output()).await;
+        if !result.as_ref().is_ok_and(|result| result.as_ref().is_ok_and(|output| output.status.success())) {
+            server.abort();
+        }
+        let output = result.unwrap().unwrap();
+        assert!(output.status.success(), "{}{}",
+            String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
+        tokio::time::timeout(std::time::Duration::from_secs(5), server).await.unwrap().unwrap();
+    }
 
     #[cfg(feature = "verge-dev")]
     use super::{INSTANCE_TOKEN_HEADER, dev_quit_route, release_dev_quit_latch};

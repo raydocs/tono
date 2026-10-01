@@ -235,3 +235,12 @@ describe('region labels', () => {
     }
   })
 })
+
+it('keeps undeclared prototype-key node names as ordinary unknown metadata', () => {
+  const name = '__proto__'
+  expect(nodeCityParts(name)).toEqual({ city: name, codename: null })
+  expect(nodeCode(name)).toBe('GL')
+  expect(nodeRegion(name)).toBe('other')
+  expect(nodeCityTitleKey(name)).toBeNull()
+  expect(nodeCityLabel(name, (key) => `t:${key}`)).toBe(name)
+})

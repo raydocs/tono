@@ -21,6 +21,38 @@ private actor RuntimeConfigWriter {
     }
 }
 
+// MARK: - Delay gate
+
+/// sing-box `/delay` stays quiet until a TUN/data-plane proof exists.
+///
+/// A probe started beside the first Reality handshake costs a second
+/// handshake. Closing this gate makes `testProxyDelay` return without an
+/// HTTP call. Opening it does not by itself send a probe.
+enum SingBoxDelayGate {
+    static let deferredMessage = "delay deferred until data plane"
+
+    private static let lock = NSLock()
+    private static var proven = false
+
+    static func suspend() {
+        lock.lock()
+        proven = false
+        lock.unlock()
+    }
+
+    static func prove() {
+        lock.lock()
+        proven = true
+        lock.unlock()
+    }
+
+    static var isProven: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return proven
+    }
+}
+
 // MARK: - Core Runtime Manager
 
 @Observable
@@ -78,6 +110,7 @@ final class CoreRuntimeManager {
         helperPrepared: Bool = false,
         precomputedDigest: String? = nil
     ) async throws {
+        SingBoxDelayGate.suspend()
         let helperStatus = await PrivilegedRuntimeCoordinator.shared.coreStatus()
         if isRunning || (helperStatus.verified && helperStatus.running) {
             let stopped = await stopAsync()
@@ -144,30 +177,51 @@ final class CoreRuntimeManager {
 
     @discardableResult
     func stop() -> Bool {
+        SingBoxDelayGate.suspend()
+        let stopped: Bool
         do {
             try HelperManager.stopCore()
+            isRunning = false
+            stopped = true
         } catch {
             print("[CoreRuntimeManager] stop failed: \(error)")
             let status = HelperManager.coreStatus()
             isRunning = status.running || !status.verified
-            return !isRunning
+            stopped = !isRunning
         }
-        isRunning = false
-        return true
+        Self.flushSystemDNSCacheBestEffort()
+        return stopped
     }
 
     @discardableResult
     func stopAsync() async -> Bool {
+        SingBoxDelayGate.suspend()
+        let stopped: Bool
         do {
             try await PrivilegedRuntimeCoordinator.shared.stopCore()
+            isRunning = false
+            stopped = true
         } catch {
             print("[CoreRuntimeManager] stop failed: \(error)")
             let status = await PrivilegedRuntimeCoordinator.shared.coreStatus()
             isRunning = status.running || !status.verified
-            return !isRunning
+            stopped = !isRunning
         }
-        isRunning = false
-        return true
+        Self.flushSystemDNSCacheBestEffort()
+        return stopped
+    }
+
+    /// Unprivileged and non-blocking. A hung or missing flush must not stall
+    /// stop, and it must not change the stop result. This does not ask the
+    /// helper to signal mDNSResponder. Whether the system resolver actually
+    /// drops a fake-IP answer has to be checked on a Mac.
+    private static func flushSystemDNSCacheBestEffort() {
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/usr/bin/dscacheutil")
+        task.arguments = ["-flushcache"]
+        task.standardOutput = FileHandle.nullDevice
+        task.standardError = FileHandle.nullDevice
+        try? task.run()
     }
 
     // MARK: - Rewrite Config (for hot reload without restarting process)

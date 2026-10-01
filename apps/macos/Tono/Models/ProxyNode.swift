@@ -249,16 +249,62 @@ nonisolated struct ProxyNode: Identifiable, Codable, Hashable, Sendable {
 
 /// Whether a connected session must reload Mihomo after a catalog install.
 enum CatalogLiveSession {
-    /// Skip the reload when the selected exit's dial identity is unchanged
-    /// and residential routing did not move. Adding or renaming other cities
-    /// is not a reason to close every connection.
+    /// Skip the reload when the selected exit's dial identity is unchanged,
+    /// the residential exit did not rotate, and residential routing did not
+    /// move. Adding or renaming other cities is not a reason to close every
+    /// connection.
+    /// A target rotation during A→B needs the queued reload after the switch
+    /// commits, even when the still-selected A did not move.
     static func shouldReload(
         previousSelected: ProxyNode?,
         nextSelected: ProxyNode?,
-        routingChanged: Bool
+        previousHome: ProxyNode? = nil,
+        nextHome: ProxyNode? = nil,
+        routingChanged: Bool,
+        switchTargetChanged: Bool = false
     ) -> Bool {
-        if routingChanged { return true }
+        if routingChanged || switchTargetChanged { return true }
         guard let previousSelected, let nextSelected else { return true }
-        return !previousSelected.liveSessionIdentity(matches: nextSelected)
+        if !previousSelected.liveSessionIdentity(matches: nextSelected) { return true }
+        // A same-name residential rotation must replace the live dial identity.
+        guard let previousHome, let nextHome else {
+            return previousHome != nil || nextHome != nil
+        }
+        return !previousHome.liveSessionIdentity(matches: nextHome)
+    }
+}
+
+/// A live session whose selected catalog exit disappeared.
+///
+/// Keeping that session on another catalog exit comes first. A whole-machine
+/// block remains only for an explicit strict kill switch. macOS does not
+/// store `permanent`, and the selective AI-floor hook is not registered, so
+/// the non-strict fallback restores the original network instead of inventing
+/// PF rules or holding bootstrap.
+enum CatalogRemovedExitAction: Equatable {
+    case keepSession(switchTo: String)
+    case keepStrictBlock
+    case selectiveRelease
+    case releaseOriginalNetwork
+
+    static func decide(
+        replacementName: String?,
+        strictKillSwitchExplicit: Bool,
+        selectiveAiBlockReady: Bool
+    ) -> CatalogRemovedExitAction {
+        if let replacementName, !replacementName.isEmpty {
+            return .keepSession(switchTo: replacementName)
+        }
+        switch ExhaustedFailureNetwork.afterFailure(
+            strictKillSwitchExplicit: strictKillSwitchExplicit,
+            selectiveAiBlockReady: selectiveAiBlockReady
+        ) {
+        case .keepStrictBlock:
+            return .keepStrictBlock
+        case .selectiveFailOpen:
+            return .selectiveRelease
+        case .failOpen:
+            return .releaseOriginalNetwork
+        }
     }
 }

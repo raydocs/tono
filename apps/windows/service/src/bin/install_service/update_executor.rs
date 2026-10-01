@@ -1,7 +1,7 @@
 //! Independent SYSTEM executor copied before quiescence. It never trusts an
 //! App journal, an installer-supplied path, or version-string adoption.
 use super::*;
-use anyhow::ensure;
+use anyhow::{bail, ensure};
 use tono_service_protocol::update_contract::{Components, Phase};
 use tono_service_protocol::{update_native as native, update_transaction as tx};
 
@@ -116,6 +116,53 @@ fn classify_before_stop(
     Err(error)
 }
 
+/// The executor can die during Service readiness with its recorded successor
+/// still CREATE_SUSPENDED. Liveness alone is not completed forward recovery.
+fn recover_live_successor(
+    successor: Option<&tx::Image>,
+    resume: impl FnOnce(&tx::Image) -> Result<(), Error>,
+) -> Result<bool, Error> {
+    let Some(successor) = successor else {
+        return Ok(false);
+    };
+    resume(successor)?;
+    Ok(true)
+}
+
+/// A failed Service restart leaves no IPC path to release the retained update
+/// block. Non-strict recovery tries the standard release without hiding that error.
+fn release_after_failed_restart(
+    restart: Result<(), Error>,
+    strict: bool,
+    release: impl FnOnce() -> Result<(), Error>,
+) -> Result<(), Error> {
+    if restart.is_err() && !strict {
+        if let Err(error) = release() {
+            eprintln!("update restart failed; network release also failed: {error:#}");
+        }
+    }
+    restart
+}
+
+/// A rollback or failed executor outcome has no successful successor recovery.
+/// Release ordinary traffic with the AI hold while the Service is still stopped,
+/// then restart even if cleanup failed. Strict and successful updates retain protection.
+fn restart_after_publication<T>(
+    rolled_back: bool,
+    publication: &Result<T, Error>,
+    strict: bool,
+    release: impl FnOnce() -> Result<(), Error>,
+    restart: impl FnOnce() -> Result<(), Error>,
+) -> (Result<(), Error>, Result<(), Error>) {
+    let released = if (rolled_back || publication.is_err()) && !strict {
+        release()
+    } else {
+        Ok(())
+    };
+    let restarted = restart();
+    (released, restarted)
+}
+
 /// `--manual-update-gate`: every refusal in `begin_manual` starts with a WFP read, an RPC to BFE,
 /// so BFE comes up first. Reading first refused a merely stopped BFE as an unconfirmable network
 /// state, before the install could ever repair it (H22-O-F1).
@@ -217,7 +264,7 @@ pub(super) fn dispatch() -> Result<bool, Error> {
         report_gate_panics(&mode, reason_file.clone());
         let outcome = match mode.as_str() {
             "--manual-update-gate" => manual_update_gate(bring_scm_bfe_up, || {
-                tokio::runtime::Runtime::new()?.block_on(native::begin_manual())
+                super::shared::block_on_abandoning(native::begin_manual())?
             }),
             "--manual-orphan-gate" => native::begin_manual_orphan().map(|()| None),
             _ => native::begin_manual_uninstall().map(|()| None),
@@ -231,7 +278,7 @@ pub(super) fn dispatch() -> Result<bool, Error> {
             Ok(true)
         }
         [mode] if mode == "--retire-orphaned-owner" => {
-            tokio::runtime::Runtime::new()?.block_on(native::retire_orphaned_owner())?;
+            super::shared::block_on_abandoning(native::retire_orphaned_owner())??;
             Ok(true)
         }
         [mode] if mode == "--manual-update-finish" => {
@@ -257,6 +304,13 @@ fn open_waiting() -> Result<tx::Store, Error> {
     }
 }
 
+fn new_member_is_sing_box(target: &Path) -> bool {
+    target.file_name().is_some_and(|name| {
+        name.eq_ignore_ascii_case("sing-box.exe")
+            || name.eq_ignore_ascii_case("sing-box-sha256.txt")
+    })
+}
+
 fn collect_candidates(
     source: &Path,
     target: &Path,
@@ -272,16 +326,22 @@ fn collect_candidates(
             let entry = entry?;
             collect_candidates(&entry.path(), &target.join(entry.file_name()), members)?;
         }
-    } else {
-        ensure!(
-            target.is_file(),
-            "new installation member requires a separate bootstrap install"
-        );
+    } else if target.is_file() {
         members.push(CoordinatedBinaryReplacement::prepare(
             source,
             target,
             sha256(source)?,
         )?);
+    } else if new_member_is_sing_box(target) {
+        // The first package that carries sing-box.exe has no previous file to
+        // restore. Rollback deletes the introduction; it does not invent bytes.
+        members.push(CoordinatedBinaryReplacement::prepare_introduced(
+            source,
+            target,
+            sha256(source)?,
+        )?);
+    } else {
+        bail!("new installation member requires a separate bootstrap install");
     }
     Ok(())
 }
@@ -325,28 +385,79 @@ fn execute(recovery: bool) -> Result<(), Error> {
         {
             return Ok(()); // Live original executor, not an interrupted install.
         }
+        if a.execution == tx::Execution::RolledBack {
+            if !store.independent_recovery_pending()? {
+                return Ok(());
+            }
+            let service_path = tono_service_protocol::service_paths()
+                .install_dir()
+                .join("tono-service.exe");
+            ensure!(
+                native::components(&a.install_root, &service_path)? == a.old_components,
+                "resolved rollback no longer has its retained original identity"
+            );
+            // Service startup must see this live replay owner while readiness drops our locks.
+            let mut next = store.state.clone();
+            next.attempt
+                .as_mut()
+                .context("attempt checked above")?
+                .executor = Some(self_image.clone());
+            store.save(next)?;
+            let finalizer = store.rollback_finalizer()?;
+            let manager =
+                ServiceManager::local_computer(None::<&str>, ServiceManagerAccess::CONNECT)?;
+            let service = manager.open_service(
+                tono_service_protocol::WINDOWS_SERVICE_NAME,
+                ServiceAccess::ALL_ACCESS,
+            )?;
+            let (settled, restored) = finalizer.finish(
+                false,
+                || {
+                    suppress_windows_service_recovery(&service)?;
+                    stop_windows_service(&service)?;
+                    shared::block_on_abandoning(async {
+                        let _owner = tono_service_protocol::acquire_service_owner()
+                            .await?
+                            .context("Service still owns rollback finalization")?;
+                        if native::strict_kill_switch_intent_on_disk() {
+                            return Ok(());
+                        }
+                        tono_service_protocol::emergency_disarm_windows_kill_switch_applying_narrow(
+                        )
+                        .await
+                    })?
+                },
+                || {
+                    configure_windows_service_recovery(&service)?;
+                    drop(store);
+                    drop(repair);
+                    start_service_if_stopped(&service)?;
+                    wait_for_service_ready()
+                },
+            );
+            restored?;
+            settled?;
+            return Ok(());
+        }
         // A dead executor must not re-execute a live publication below. The
         // installed identity — not successor liveness — then classifies the
         // interruption: only an incomplete publication rolls back.
-        if a.successor_image
-            .as_ref()
-            .is_some_and(|e| native::image(e.pid).ok().as_ref() == Some(e))
-        {
+        if recover_live_successor(
+            a.successor_image
+                .as_ref()
+                .filter(|e| native::image(e.pid).ok().as_ref() == Some(*e)),
+            native::resume_successor,
+        )? {
             return Ok(()); // Only the specifically launched successor can recover forward.
         }
-        if !matches!(
-            a.execution,
-            tx::Execution::Consumed | tx::Execution::Replaced | tx::Execution::Uncertain
-        ) {
+        if !store.independent_recovery_pending()? {
             return Ok(());
         }
-        // Classify before touching the Service: a complete publication keeps
-        // the running Service and only records the Replaced marker.
+        // Classify before touching Service: complete publication keeps it running and
+        // records the publication floor before its Replaced marker.
         let publication = classify_before_stop(&mut store, || classify_installed(&a, &plan_path))?;
         if !publication.requires_service_stop() {
-            if a.execution != tx::Execution::Replaced {
-                store.execution(tx::Execution::Replaced)?;
-            }
+            store.record_complete_publication_recovery(native::process_clock_now())?;
             return Ok(());
         }
     } else {
@@ -363,15 +474,17 @@ fn execute(recovery: bool) -> Result<(), Error> {
         );
     }
     let launch = if recovery {
-        None
+        Ok(None)
     } else {
-        Some(native::UserLaunch::capture(&a.initiating_image)?)
+        store.capture_before_consuming(&self_image, tx::now, || {
+            native::UserLaunch::capture(&a.initiating_image).map(Some)
+        })?
     };
-    if !recovery {
-        store.consume(&self_image, tx::now()?)?;
-    }
-    // From here every live/repair mutation has a durable consumed high-water.
-    if recovery {
+    // Capture or consume-write refusal has no proven consumed authority. Skip repair
+    // registration and defer its error until the stopped-Service finalizer restores the network.
+    let registration = if launch.is_err() {
+        Ok(())
+    } else if recovery {
         // Classification and rollback do not run through the ONSTART task; it only re-arms the
         // net for this run. An unavailable Task Scheduler must not strand the attempt (#484).
         if let Err(error) = native::register_consumed_recovery(&store) {
@@ -379,6 +492,7 @@ fn execute(recovery: bool) -> Result<(), Error> {
                 "update recovery task could not be registered; recovering without it: {error:#}"
             );
         }
+        Ok(())
     } else {
         // No publication without the net: nothing is replaced yet, so the attempt ends
         // RolledBack against the retained original identity instead of staying Consumed.
@@ -389,8 +503,8 @@ fn execute(recovery: bool) -> Result<(), Error> {
                     .install_dir()
                     .join("tono-service.exe"),
             )
-        })?;
-    }
+        })
+    };
     let manager = ServiceManager::local_computer(None::<&str>, ServiceManagerAccess::CONNECT)?;
     let service = manager.open_service(
         tono_service_protocol::WINDOWS_SERVICE_NAME,
@@ -400,6 +514,10 @@ fn execute(recovery: bool) -> Result<(), Error> {
     stop_windows_service(&service)?;
     let runtime = tokio::runtime::Runtime::new()?;
     let outcome = (|| -> Result<_, Error> {
+        let launch = launch?;
+        // Registration still precedes Service stop and every publication. Its
+        // refusal must reach the same selective failure finalizer as rollback.
+        registration?;
         let _owner = runtime
             .block_on(tono_service_protocol::acquire_service_owner())?
             .context("Service replacement ownership unavailable")?;
@@ -432,9 +550,9 @@ fn execute(recovery: bool) -> Result<(), Error> {
                     // first authenticated target-identity App adopts on next
                     // start. An already registered successor is re-proved the
                     // same way after its recorded incarnation exited.
-                    if a.execution != tx::Execution::Replaced {
-                        store.execution(tx::Execution::Replaced)?;
-                    }
+                    // Sample only when the publishing run did not. Do not move
+                    // a floor that was saved before the successor could start.
+                    store.record_complete_publication_recovery(native::process_clock_now())?;
                     return Ok(None);
                 }
                 RecoveryPublication::Interrupted => {}
@@ -492,6 +610,10 @@ fn execute(recovery: bool) -> Result<(), Error> {
             store.execution(tx::Execution::RolledBack)?;
             return Ok(None);
         }
+        // The new bytes are durable. Record the process-start clock before
+        // creating a successor, so an App that was already mapped to the old
+        // file cannot adopt by hashing the new bytes on disk.
+        store.note_publication_clock(native::process_clock_now())?;
         // Create after every replacement, while target handles deny write/delete.
         // Persist PID + kernel creation time + image digest before running any
         // user code. An old App mapped at the same path can never satisfy this.
@@ -511,22 +633,84 @@ fn execute(recovery: bool) -> Result<(), Error> {
         store.save(next)?;
         Ok(Some(child))
     })();
-    if outcome.is_err() {
+    if outcome.is_err()
+        && matches!(
+            store.attempt()?.execution,
+            tx::Execution::Consumed | tx::Execution::Replaced | tx::Execution::Uncertain
+        )
+    {
         // This marker cannot turn uncertain execution into another install grant.
         let _ = store.execution(tx::Execution::Uncertain);
     }
-    // Even a failed plan/rollback must leave the IPC recovery Service available.
-    configure_windows_service_recovery(&service)?;
-    drop(store);
-    drop(repair);
     // Resume the durable successor even when the restarted Service is slow or
     // failed to become ready: a suspended child dropped at this point would
     // terminate the registered successor of a complete, verified installation
     // and leave the next recovery a state it would otherwise roll back.
-    let restart = (|| -> Result<(), Error> {
+    let rolled_back = store.attempt()?.execution == tx::Execution::RolledBack;
+    let finalizer = if rolled_back {
+        Some(store.rollback_finalizer()?)
+    } else {
+        None
+    };
+    let release = || {
+        // The original repair/store guards still fence lifecycle writers. The
+        // publication outcome has released its owner, and SCM remains stopped.
+        shared::block_on_abandoning(async {
+            let _owner = tono_service_protocol::acquire_service_owner()
+                .await?
+                .context("Service still owns rolled-back update recovery")?;
+            if native::strict_kill_switch_intent_on_disk() {
+                return Ok(());
+            }
+            tono_service_protocol::emergency_disarm_windows_kill_switch_applying_narrow().await
+        })?
+    };
+    let restart = || {
+        // Even a failed plan/rollback must leave the IPC recovery Service available.
+        configure_windows_service_recovery(&service)?;
+        drop(store);
+        drop(repair);
         service.start(&Vec::<&std::ffi::OsStr>::new())?;
         wait_for_service_ready()
-    })();
+    };
+    let (rollback_release, restart) = match finalizer {
+        Some(finalizer) => finalizer.finish(false, release, restart),
+        None => restart_after_publication(
+            false,
+            &outcome,
+            native::strict_kill_switch_intent_on_disk(),
+            release,
+            restart,
+        ),
+    };
+
+    let strict = restart.is_err() && native::strict_kill_switch_intent_on_disk();
+    let restart = release_after_failed_restart(restart, strict, || {
+        let _repair = tono_service_protocol::acquire_service_repair_gate()?
+            .context("repair already running during failed restart release")?;
+        // A readiness timeout can leave a live DNS watchdog. Stop it and
+        // SCM retries before restoring DNS so they cannot reapply the block.
+        let release = (|| -> Result<(), Error> {
+            suppress_windows_service_recovery(&service)?;
+            stop_windows_service(&service)?;
+            shared::block_on_abandoning(async {
+                let _owner = tono_service_protocol::acquire_service_owner()
+                    .await?
+                    .context("Service still owns failed restart recovery")?;
+                // Recheck after the stopped daemon's final intent write.
+                if native::strict_kill_switch_intent_on_disk() {
+                    return Ok(());
+                }
+                tono_service_protocol::emergency_disarm_windows_kill_switch_applying_narrow().await
+            })?
+        })();
+        // Restore supervision even if stop or release failed; configuring
+        // actions does not itself start the Service.
+        if let Err(error) = configure_windows_service_recovery(&service) {
+            eprintln!("failed to restore Service recovery after network release: {error}");
+        }
+        release
+    });
     let successor = match outcome {
         Ok(child) => child,
         Err(error) => {
@@ -534,10 +718,18 @@ fn execute(recovery: bool) -> Result<(), Error> {
             return Err(error);
         }
     };
-    if let Some(child) = successor {
-        child.resume()?;
-    }
+    let resume = match successor {
+        Some(child) => child.resume(),
+        None => Ok(()),
+    };
     restart?;
+    resume?;
+    rollback_release?;
+    if rolled_back {
+        // Retain receipt/high-water/backups for verified retirement. No successor
+        // exists to commit this failed publication, so do not wait for one.
+        return Ok(());
+    }
     // Backups are not freed on IPC readiness. Only durable recovery commit
     // permits cleanup; the boot task handles a later commit after this wait.
     for _ in 0..120 {
@@ -550,6 +742,26 @@ fn execute(recovery: bool) -> Result<(), Error> {
                 native::retire_recovery_task,
             )?;
             return Ok(());
+        }
+    }
+    Ok(())
+}
+
+fn start_service_if_stopped(service: &platform_lib::service::Service) -> Result<(), Error> {
+    use platform_lib::{Error as ServiceError, service::ServiceState};
+    let deadline = std::time::Instant::now() + Duration::from_secs(20);
+    while service.query_status()?.current_state == ServiceState::StopPending {
+        ensure!(
+            std::time::Instant::now() < deadline,
+            "Service stop did not settle for rollback recovery"
+        );
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    if service.query_status()?.current_state == ServiceState::Stopped {
+        match service.start(&Vec::<&std::ffi::OsStr>::new()) {
+            Ok(()) => {}
+            Err(ServiceError::Winapi(error)) if error.raw_os_error() == Some(1056) => {} // SCM beat us.
+            Err(error) => return Err(error.into()),
         }
     }
     Ok(())
@@ -629,9 +841,17 @@ fn clear_retired_publish_scratch(store_root: &Path) -> Result<(), Error> {
                     .components()
                     .all(|c| !matches!(c, std::path::Component::ParentDir))
                 && m.publish_scratch == path_with_suffix(&m.target, PUBLISH_SUFFIX);
+            let target_is_previous = if m.introduced {
+                matches!(
+                    std::fs::symlink_metadata(&m.target),
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound
+                )
+            } else {
+                sha256(&m.target).ok() == Some(m.old_digest)
+            };
             if bound
                 && sha256(&m.publish_scratch).ok() == Some(m.new_digest)
-                && sha256(&m.target).ok() == Some(m.old_digest)
+                && target_is_previous
             {
                 remove_ordinary_file_if_exists(&m.publish_scratch)?;
             }
@@ -697,7 +917,15 @@ fn record_committed_version(a: &tx::Attempt) -> Result<(), Error> {
 fn cleanup_committed(plan_path: &Path) -> Result<(), Error> {
     let plan: Plan = serde_json::from_slice(&std::fs::read(plan_path)?)?;
     for member in plan.members {
-        member.cleanup();
+        // A sharing violation must leave the boot task available to retry.
+        for path in [
+            &member.staged,
+            &member.backup,
+            &member.restore,
+            &member.publish_scratch,
+        ] {
+            remove_ordinary_file_if_exists(path)?;
+        }
     }
     // Keep state.json, manifest, consumed sequence, plan and executor as evidence.
     Ok(())
@@ -709,6 +937,174 @@ mod tests {
     use tono_service_protocol::update_contract::{
         Observation, Protection, Receipt, ReleaseManifest,
     };
+
+    #[test]
+    fn update_rollback_releases_non_strict_protection_before_restarting_the_service() {
+        let events = std::cell::RefCell::new(Vec::new());
+        let (released, restarted) = restart_after_publication(
+            true,
+            &Ok::<_, Error>(()),
+            false,
+            || {
+                events.borrow_mut().push("release with AI hold");
+                Ok(())
+            },
+            || {
+                events.borrow_mut().push("restart");
+                Ok(())
+            },
+        );
+        released.unwrap();
+        restarted.unwrap();
+        assert_eq!(*events.borrow(), ["release with AI hold", "restart"]);
+        let (released, restarted) = restart_after_publication(
+            true,
+            &Ok::<_, Error>(()),
+            true,
+            || panic!("strict rollback releases"),
+            || Ok(()),
+        );
+        released.unwrap();
+        restarted.unwrap();
+        let (released, restarted) = restart_after_publication(
+            false,
+            &Ok::<_, Error>(()),
+            false,
+            || panic!("successful update releases"),
+            || Ok(()),
+        );
+        released.unwrap();
+        restarted.unwrap();
+
+        let restarted = std::cell::Cell::new(false);
+        let (released, restart) = restart_after_publication(
+            true,
+            &Ok::<_, Error>(()),
+            false,
+            || Err(anyhow::anyhow!("release failed")),
+            || {
+                restarted.set(true);
+                Ok(())
+            },
+        );
+        let error = released.unwrap_err();
+        assert!(restart.is_ok(), "release error is not a restart failure");
+        assert!(restarted.get(), "release failure must still restart the Service");
+        assert_eq!(error.to_string(), "release failed");
+    }
+
+    #[test]
+    fn update_executor_error_releases_non_strict_protection_before_service_restart() {
+        let publication = Err::<(), _>(anyhow::anyhow!("successor creation failed"));
+        let events = std::cell::RefCell::new(Vec::new());
+        let (released, restarted) = restart_after_publication(
+            false,
+            &publication,
+            false,
+            || {
+                events.borrow_mut().push("release with AI hold");
+                Ok(())
+            },
+            || {
+                events.borrow_mut().push("restart");
+                Ok(())
+            },
+        );
+        released.unwrap();
+        restarted.unwrap();
+        assert_eq!(*events.borrow(), ["release with AI hold", "restart"]);
+        assert_eq!(
+            publication.unwrap_err().to_string(),
+            "successor creation failed"
+        );
+        let failed = Err::<(), _>(anyhow::anyhow!("recovery task registration failed"));
+        let (released, restarted) = restart_after_publication(
+            false,
+            &failed,
+            true,
+            || panic!("strict failed update releases"),
+            || Ok(()),
+        );
+        released.unwrap();
+        restarted.unwrap();
+    }
+
+    #[test]
+    fn update_commit_keeps_the_recovery_task_until_locked_artifacts_are_removed() {
+        use std::os::windows::fs::OpenOptionsExt as _;
+        use windows_sys::Win32::Storage::FileSystem::FILE_SHARE_READ;
+
+        let root = std::env::temp_dir().join(format!(
+            "tono-update-commit-locked-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir(&root).unwrap();
+        let target = root.join("Tono.exe");
+        let staged = root.join("Tono.exe.next");
+        std::fs::write(&target, b"old-app").unwrap();
+        std::fs::write(&staged, b"new-app").unwrap();
+        let mut member =
+            CoordinatedBinaryReplacement::prepare(&staged, &target, sha256(&staged).unwrap())
+                .unwrap();
+        member.publish().unwrap();
+        let backup = member.backup.clone();
+        let plan_path = root.join("replacement.json");
+        tx::atomic_write(
+            &plan_path,
+            &serde_json::to_vec(&Plan {
+                attempt_id: "attempt".into(),
+                members: vec![member],
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        // AV and other readers can temporarily hold a completed rollback
+        // copy without granting delete sharing.
+        let held = OpenOptions::new()
+            .read(true)
+            .share_mode(FILE_SHARE_READ)
+            .open(&backup)
+            .unwrap();
+        let mut recorded_while_locked = false;
+        let mut retired_while_locked = false;
+        let locked_result = finish_committed(
+            &plan_path,
+            || {
+                recorded_while_locked = true;
+                Ok(())
+            },
+            || {
+                retired_while_locked = true;
+                Ok(())
+            },
+        );
+        let backup_remained = backup.exists();
+        drop(held);
+
+        // Retry also tolerates artifacts removed before the first failure.
+        let mut retired_on_retry = false;
+        let retry = finish_committed(
+            &plan_path,
+            || Ok(()),
+            || {
+                retired_on_retry = true;
+                Ok(())
+            },
+        );
+        let backup_removed = !backup.exists();
+        let installed = std::fs::read(&target).unwrap();
+        std::fs::remove_dir_all(root).unwrap();
+
+        assert!(locked_result.is_err(), "locked cleanup must remain retryable");
+        assert!(!recorded_while_locked && !retired_while_locked);
+        assert!(backup_remained);
+        assert!(retry.is_ok() && retired_on_retry && backup_removed);
+        assert_eq!(installed, b"new-app");
+    }
 
     #[test]
     fn update_commit_retires_the_recovery_task_after_cleanup() {
@@ -860,6 +1256,7 @@ mod tests {
                     execution: tx::Execution::Staged,
                     executor: Some(executor.clone()),
                     disconnect: None,
+                    publication_clock: None,
                 }),
             })
             .unwrap();
@@ -943,6 +1340,7 @@ mod tests {
                     execution: tx::Execution::Staged,
                     executor: Some(executor.clone()),
                     disconnect: None,
+                    publication_clock: None,
                 }),
             })
             .unwrap();
@@ -1096,6 +1494,7 @@ mod tests {
                     execution: tx::Execution::Staged,
                     executor: Some(executor.clone()),
                     disconnect: None,
+                    publication_clock: None,
                 }),
             })
             .unwrap();
@@ -1232,6 +1631,7 @@ mod tests {
                     execution: tx::Execution::Staged,
                     executor: Some(executor.clone()),
                     disconnect: None,
+                    publication_clock: None,
                 }),
             })
             .unwrap();
@@ -1329,17 +1729,85 @@ mod tests {
         std::fs::remove_dir_all(root).unwrap();
     }
 
+    /// WIN-UPDATE-SUSPENDED-SUCCESSOR: abrupt executor death skips SuspendedApp's
+    /// destructor, so recovery must resume the exact live successor before returning.
+    #[test]
+    fn update_recovery_resumes_a_live_successor_before_returning() {
+        let successor = tx::Image {
+            pid: 42,
+            started_at: 7,
+            path: PathBuf::from(r"C:\Program Files\Tono\Tono.exe"),
+            sha256: "target".into(),
+        };
+        let mut resumed = false;
+        let recovered = recover_live_successor(Some(&successor), |peer| {
+            assert_eq!(peer, &successor);
+            resumed = true;
+            Ok(())
+        })
+        .unwrap();
+        assert!(
+            recovered && resumed,
+            "a live successor must run before recovery returns"
+        );
+        assert!(
+            recover_live_successor(Some(&successor), |_| {
+                Err(anyhow::anyhow!("successor resume failed"))
+            })
+            .is_err(),
+            "failed resume must not count as completed recovery"
+        );
+        assert!(
+            !recover_live_successor(None, |_| panic!("no matched successor to resume")).unwrap()
+        );
+    }
+
+    /// WIN-UPDATE-RESTART-FAIL-OPEN: without a ready Service the App cannot release
+    /// the update block; only non-strict failure releases, preserving the restart error.
+    #[test]
+    fn update_restart_failure_releases_only_non_strict_protection_and_keeps_the_error() {
+        assert!(
+            release_after_failed_restart(Ok(()), false, || panic!("healthy restart releases"))
+                .is_ok()
+        );
+        let strict = release_after_failed_restart(
+            Err(anyhow::anyhow!("Service start failed")),
+            true,
+            || panic!("strict protection releases"),
+        );
+        assert_eq!(strict.unwrap_err().to_string(), "Service start failed");
+        let mut released = false;
+        let failed = release_after_failed_restart(
+            Err(std::io::Error::new(std::io::ErrorKind::TimedOut, "IPC not ready").into()),
+            false,
+            || {
+                released = true;
+                Err(anyhow::anyhow!("DNS/WFP release failed"))
+            },
+        );
+        assert!(released, "non-strict restart failure must attempt release");
+        let error = failed.unwrap_err();
+        assert_eq!(error.to_string(), "IPC not ready");
+        assert_eq!(
+            error.downcast_ref::<std::io::Error>().unwrap().kind(),
+            std::io::ErrorKind::TimedOut,
+            "cleanup failure must preserve the original restart error"
+        );
+    }
+
     #[test]
     fn update_recovery_classifies_publication_by_installed_identity_not_successor_liveness() {
         let target = Components {
             app_sha256: "t".into(),
             core_sha256: "tc".into(),
             privileged_sha256: "tp".into(),
+            sing_box_sha256: String::new(),
         };
         let old = Components {
             app_sha256: "o".into(),
             core_sha256: "oc".into(),
             privileged_sha256: "op".into(),
+            sing_box_sha256: String::new(),
         };
         // A complete verified installation survives its successor exiting first.
         assert_eq!(
@@ -1351,6 +1819,7 @@ mod tests {
             app_sha256: "t".into(),
             core_sha256: "oc".into(),
             privileged_sha256: "op".into(),
+            sing_box_sha256: String::new(),
         };
         assert_eq!(
             classify_recovery(true, false, &mixed, &target),
@@ -1374,11 +1843,13 @@ mod tests {
             app_sha256: "t".into(),
             core_sha256: "tc".into(),
             privileged_sha256: "tp".into(),
+            sing_box_sha256: String::new(),
         };
         let old = Components {
             app_sha256: "o".into(),
             core_sha256: "oc".into(),
             privileged_sha256: "op".into(),
+            sing_box_sha256: String::new(),
         };
         // Replaced, successor closed before commit: nothing to restore, so the
         // Service is not stopped (a stop/start would spawn recovery again).
