@@ -1,7 +1,7 @@
 ## 2026-10-01 · 迁移时不要把测试期间更新的配置留在备份里
 
 - 归属：ops 计划，退出节点发布布局迁移。不改客户目录。
-- 来源：`origin/main`；分支 `cursor/migrate-config-restage-2c38`。仅源码，未合 main。
+- 来源：`origin/main`；分支 `cursor/migrate-config-restage-2c38`；PR #913。仅源码，未合 main。
 - 缺陷修复：`xray run -test` 期间 hub 改写的 `config.json` 会再拷贝并再测，通过后才切换 `current`。一直对不上就失败，原来的目录不动。关联 MIGRATE-STALE-CONFIG。
 - 新增/优化：无。
 - 工程与测试：`test_a_config_written_during_the_binary_test_is_published`。修复前迁移成功但发布的配置没有测试期间写入的账号。
