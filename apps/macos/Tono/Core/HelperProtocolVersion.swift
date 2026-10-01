@@ -297,10 +297,13 @@ nonisolated enum HelperProtocolVersion {
     ///   Update disconnect still releases PF when prepare cannot prove a
     ///   foreign loopback proxy or resolver is Tono's. The lifecycle
     ///   read-failure self-test expects that owner-only restore.
-    /// - 4.52.6 → 4.52.7: the watchdog releases a bootstrap-only block whose
+    /// - 4.52.6 → 4.52.7: an update ledger whose receipt contains a key this
+    ///   build does not know is refused and kept on disk. Additive keys
+    ///   outside the receipt are still tolerated.
+    /// - 4.52.7 → 4.52.8: the watchdog releases a bootstrap-only block whose
     ///   recorded app owner died before committing the tunnel (MAC-ORPHAN-
     ///   BOOTSTRAP-PF).
-    static let current = "4.52.7"
+    static let current = "4.52.8"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS
