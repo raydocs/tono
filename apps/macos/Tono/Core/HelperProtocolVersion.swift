@@ -324,9 +324,14 @@ nonisolated enum HelperProtocolVersion {
     /// - 4.52.11 → 4.52.12: the watchdog releases a bootstrap-only block whose
     ///   recorded app owner died before committing the tunnel (MAC-ORPHAN-
     ///   BOOTSTRAP-PF).
-    /// - 4.52.12 → 4.52.13: DNS restore and service handoff retry
+    /// - 4.52.12 → 4.52.13: update-failure and unreadable-ledger emergency
+    ///   release restore a saved dead-loopback DNS snapshot and apply the
+    ///   secondary AI sinkhole after clearing PF intent (same class as a
+    ///   crash/hang release). Previously `releaseInstalledBlock` alone left
+    ///   DNS on 127.0.0.1 and skipped SelectiveFailOpen.
+    /// - 4.52.13 → 4.52.14: DNS restore and service handoff retry
     ///   Apply before retiring originals already committed to disk.
-    static let current = "4.52.13"
+    static let current = "4.52.14"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS
