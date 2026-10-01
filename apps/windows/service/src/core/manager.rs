@@ -307,18 +307,12 @@ fn backoff_delay(attempt: u32, max: Duration) -> Duration {
 }
 
 fn core_args(config: &ClashConfig) -> Vec<String> {
-    vec![
-        "-d".to_string(),
-        config.core_config.config_dir.clone(),
-        "-f".to_string(),
-        config.core_config.config_path.clone(),
-        if cfg!(windows) {
-            "-ext-ctl-pipe".to_string()
-        } else {
-            "-ext-ctl-unix".to_string()
-        },
-        config.core_config.core_ipc_path.clone(),
-    ]
+    crate::core::structure::core_launch_args(
+        &config.core_config.core_path,
+        &config.core_config.config_dir,
+        &config.core_config.config_path,
+        &config.core_config.core_ipc_path,
+    )
 }
 
 fn log_core_exit(status: &std::process::ExitStatus, uptime: Duration) -> String {

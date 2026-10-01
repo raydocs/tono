@@ -348,6 +348,7 @@ nonisolated enum HelperProtocolVersion {
     ///   model API namespaces while general Alibaba Cloud remains available.
     /// - 4.52.20 → 4.52.21: selective AI blackhole routes include Darwin
     ///   required loopback gateways; native dry-run regression checks routing messages.
+    /// - 4.52.22 → 4.52.23: pending-update automatic failure release retains the AI hold.
     static let current = "4.52.23"
 }
 

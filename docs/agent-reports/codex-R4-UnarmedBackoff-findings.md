@@ -1,6 +1,6 @@
 # R4-UnarmedBackoff: Codex (GPT-6.1 Sol) findings
 
-Generated 2026-10-01 00:15 MT from the run's findings.tsv / prs.tsv.
+Generated 2026-10-01 00:54 MT from the run's findings.tsv / prs.tsv.
 
 ## PRs
 
@@ -12,7 +12,7 @@ Generated 2026-10-01 00:15 MT from the run's findings.tsv / prs.tsv.
 
 | ID | Area | Sev | Location | Description | Verdict |
 |---|---|---|---|---|---|
-| R4UB-WIN-FAILED-CONNECT-BACKOFF | Windows unarmed probe | P1 | apps/windows/app/src-tauri/src/tono/connection/unarmed_probe.rs:157 | Reachable TCP plus failed full connect resets backoff and repeatedly arms/releases WFP | real-fixed #1106; needs-hardware; merge-commit auto-merge enabled |
+| R4UB-WIN-FAILED-CONNECT-BACKOFF | Windows unarmed probe | P1 | apps/windows/app/src-tauri/src/tono/connection/unarmed_probe.rs:157 | Reachable TCP plus failed full connect resets backoff and repeatedly arms/releases WFP | real-fixed #1106; merged 520294ad; needs-hardware; merge-commit auto-merge completed; CI green |
 | R4UB-WIN-UNARMED-SELECTION | Windows unarmed probe | P2 | apps/windows/app/src-tauri/src/tono/connection/unarmed_probe.rs:132 | A late TCP proof overwrites a newer idle user selection | duplicate of #1098; overlapping guard/test removed |
 | WIN-UNARMED-TIMEOUT-OWNER | Windows unarmed probe | P2 | apps/windows/app/src-tauri/src/tono/connection/unarmed_probe.rs:155 | Overall connection timeout retires generation twice and ends the sole automatic retry owner | real-unfixed #1101; timeout ownership is separate; native sleep regression needed |
 | R4UB-FP-HEALTH-SUCCESSOR-RELEASE | Windows health monitor | — | apps/windows/app/src-tauri/src/tono/connection/monitor.rs:1397 | Old health release could tear down a successor after Disconnect/cold switch | false-positive: Disconnect/switch abort registered tasks; policy callers use guarded protected path |
@@ -32,3 +32,4 @@ Generated 2026-10-01 00:15 MT from the run's findings.tsv / prs.tsv.
 | R4UB-FP-STRICT-UNARMED | Windows unarmed probe | — | apps/windows/app/src-tauri/src/tono/connection/unarmed_probe.rs:201 | Strict barrier could enter ordinary unarmed recovery | false-positive: fail-open dispatch and barrier guards forbid armed admission |
 | R4UB-DUP-STALE-HOTSWITCH-HEALTH | Windows health monitor | P2 | apps/windows/app/src-tauri/src/tono/connection/monitor.rs:1397 | Old exit health proof can release a successfully hot-switched replacement | duplicate of #1095; same-generation switch differs from cold-switch false positive |
 | R4UB-DUP-WINDOWS-CHECKOUT | Windows CI | P2 engineering | docs/agent-reports/2026-10-01-orchestration/scripts/merge-manager/aux.sh:1 | Reserved AUX basename prevents native Windows checkout before compilation | duplicate of #1100; main ca5df8fc removed path; latest native checkout passed; gates intact |
+| R4UB-FP-SAMPLER-SHUTDOWN | Windows unarmed probe | — | apps/windows/app/src-tauri/src/main.rs:13 | A hung native sampler could make Tokio runtime shutdown wait forever | false-positive: committed App::run exit calls Tao Windows process::exit; runtime Drop is not reached after sampler starts |

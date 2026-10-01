@@ -765,6 +765,14 @@ pub(super) fn describe_reqwest_error(error: &reqwest::Error) -> String {
     controller_error_detail(&joined).unwrap_or_else(|| category.to_string())
 }
 
+#[cfg(test)]
+mod advisory_delay_tests {
+    #[test]
+    fn advisory_exit_probe_waits_until_the_first_page_can_start() {
+        assert_eq!(super::ADVISORY_EXIT_PROBE_DEFER.as_millis(), 1500);
+    }
+}
+
 pub(super) fn format_tun_probe_failures(failures: &[String]) -> String {
     format!(
         "all {} independent real TUN data-plane probes failed: {}",
