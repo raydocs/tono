@@ -16,6 +16,13 @@ may reverse), `reversed` (keep the line; say what replaced it).
 - Applied in: PR / commit / command
 ```
 
+## 2026-09-30 · How long may a fake-ip answer live, and may DoH try HTTP/3?
+
+- Status: provisional
+- Chosen: `fake-ip-ttl: 30`, `prefer-h3: false`, `cache-algorithm: lru`, both DoH servers kept. Rejected: plaintext DNS, a 600s fake-ip TTL, `prefer-h3: true`, `cache-algorithm: arc`, and collapsing to one DoH server.
+- Why stricter: lookups stay on the exit. 30s is the recovery bound so a missed OS flush cannot leave apps on 198.18.0.0/16. HTTP/3 would race a UDP probe the VLESS exit cannot carry and drop the HTTP client. LRU keeps stale answers; one dead DoH server still falls through to the other. A pre-warm miss does not block the first request.
+- Applied in: [#741](https://github.com/raydocs/tono/pull/741).
+
 ## 2026-09-30 · macOS 已连接时，哪些网络变化可以拆掉隧道？
 
 - Status: provisional
