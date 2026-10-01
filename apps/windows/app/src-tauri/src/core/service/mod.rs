@@ -1309,18 +1309,52 @@ pub(crate) async fn tono_release_kill_switch() -> Result<KillSwitchStatus> {
 /// Full release, then the secondary AI hold. Used only after a non-strict
 /// fail-open. Restore and disconnect call [`tono_release_kill_switch`].
 pub(crate) async fn tono_release_kill_switch_applying_narrow() -> Result<KillSwitchStatus> {
-    match tono_release_kill_switch_inner(true).await {
+    release_applying_narrow_with(tono_release_kill_switch_inner).await
+}
+
+#[derive(Debug)]
+struct LegacyReleasePayload;
+
+impl std::fmt::Display for LegacyReleasePayload {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Service rejected the selective release payload")
+    }
+}
+
+impl std::error::Error for LegacyReleasePayload {}
+
+fn release_refusal(code: u16, message: String) -> anyhow::Error {
+    // Pre-narrow Services deserialize this route's payload as `()`. Their explicit parse
+    // refusal proves the request never reached DNS/Core/WFP cleanup. Keep their null-body
+    // compatibility path; transport and lifecycle failures do not prove that limitation.
+    let legacy_payload = code == 400 && message.starts_with("Invalid JSON:");
+    let error = anyhow::anyhow!(message);
+    if legacy_payload {
+        error.context(LegacyReleasePayload)
+    } else {
+        error
+    }
+}
+
+async fn release_applying_narrow_with<T, Release, ReleaseFuture>(mut release: Release) -> Result<T>
+where
+    Release: FnMut(bool) -> ReleaseFuture,
+    ReleaseFuture: Future<Output = Result<T>>,
+{
+    match release(true).await {
         Ok(status) => Ok(status),
         Err(error) => {
-            // The secondary hold is optional. A service that rejects the extra
-            // payload, or a hold that fails after the barrier is still up, must
-            // still open the original network.
+            // Both flavors perform identical DNS/Core/WFP release steps; the Service's
+            // secondary hold is already best-effort. Retrying an operational failure as
+            // a plain release can remove a committed hold after an ambiguous response.
+            // Only an explicit legacy payload refusal needs the null-body fallback.
+            let apply_narrow = !error.is::<LegacyReleasePayload>();
             logging!(
                 warn,
                 Type::Service,
-                "Tono: secondary AI hold was not applied; releasing the original network without it: {error:#}"
+                "Tono: retrying kill-switch release (secondary AI hold: {apply_narrow}): {error:#}"
             );
-            tono_release_kill_switch_inner(false).await
+            release(apply_narrow).await
         }
     }
 }
@@ -1354,7 +1388,7 @@ async fn tono_release_kill_switch_inner(apply_narrow: bool) -> Result<KillSwitch
         }
     };
     if response.code > 0 {
-        bail!(response.message);
+        return Err(release_refusal(response.code, response.message));
     }
     let status = response.data.context("Tono Service 未返回 Kill Switch 状态")?;
     record_verified_release(&status);
