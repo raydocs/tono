@@ -1,17 +1,6 @@
-# R4-MacAppDeep: Codex (GPT-6.1 Sol) findings
+Audit baseline: initial current main cf5ee0d7; fix branches from fresh 64e8b593/ad8ab2cd. Source anchors refer to audited baseline and may shift after merges. No deploy/publish or helper contract changes. All assigned files read end to end; callers and callees followed. Native Swift/PF/DNS execution unavailable on Linux.
 
-Generated 2026-10-01 01:50 MT from the run's findings.tsv / prs.tsv.
-
-## PRs
-
-| PR | Branch | Labels | Auto-merge requested | Title |
-|---|---|---|---|---|
-| 1146 | hunt/sol-r4ma-reload-failure-release | needs-hardware | yes | fix(macos): restore internet after full config reload failure |
-| 1153 | hunt/sol-r4ma-pin-refresh-freshness | needs-hardware | yes | fix(macos): prevent stale pins restoring revoked DIRECT grants |
-
-## Hypotheses
-
-| ID | Area | Sev | Location | Description | Verdict |
+| ID | area | severity | file:line | one-line description | verdict |
 |---|---|---|---|---|---|
 | R4MA-RELOAD-FAILURE-BLOCK | macOS config reload | P1 | apps/macos/Tono/Services/AppState+Proxy.swift:718 | A single full reload failure stops the core but retains bootstrap PF and dead-loopback DNS through protected retries | real-fixed #1146 merged b5412bf4; native CI passed |
 | R4MA-PIN-REFRESH-REVOKE | macOS DIRECT policy | P2 | apps/macos/Tono/Services/AppState+Catalog.swift:907 | Old DNS pin resolution can reinstall withdrawn DIRECT authority after a newer policy applies successfully | real-fixed #1153 merged e018c115; native CI passed |
@@ -53,3 +42,15 @@ Generated 2026-10-01 01:50 MT from the run's findings.tsv / prs.tsv.
 | R4MA-SIGNEDOUT-AI-HOLD | macOS launch | P2 | apps/macos/Tono/Core/RuntimeCleanup.swift:354 | Signed-out cold launch removes recovery AI hold | duplicate issue #1117 |
 | R3CONN-DEC01 | macOS DNS health | P2 | apps/macos/Tono/Services/AppState+Connect.swift:2568 | Supplemental DNS conflict intentionally stops Core and holds bootstrap protection | duplicate decision item #1057; helper later releases selectively |
 | R4MA-PINS-POSTCOMMIT-HOLD | macOS pin reload | P2 | apps/macos/Tono/Services/AppState+Proxy.swift:697 | Committed-pin convergence failure retains preserved teardown and retry | duplicate documented MAC-PIN-REFRESH-TEARDOWN / #950 residual path; unchanged |
+
+40 unique hypotheses: 19 false positives, 18 duplicates/documented gaps, 3 verified new findings. Two fixes shipped as PRs; one lifecycle race filed as #1151.
+
+Both PRs merged through CI with merge-commit auto-merge; both retain needs-hardware. Exact receipts follow.
+
+Unfinished: native execution and hardware acceptance; exhaustive audit of callees outside assigned scope. The #1151 native Commit/Restore race remains unfixed pending native lifecycle qualification.
+
+PR #1146 merged as b5412bf4407f54efca32f528f1d2fcf25ae081ec. Merge-commit auto-merge enabled; needs-hardware retained. Exact source b15834739c6256c84237ff55f559c4661b802841; native CI checkout 35549aeb9746b4ea37a52962b2e7000c6b4b8ecd; ci-gate run 36828130533 SUCCESS, full 554 XCTest tests / 0 failures / 1 existing emitter skip. New full-reload regression passed. Local Swift execution unavailable; hosted evidence is separate from installed acceptance.
+
+PR #1153 merged as e018c115860eec8951549351a1b492680a928577. Merge-commit auto-merge enabled; needs-hardware retained. Exact source a0bd191185045f53feb7f72812dff168163bd907; native CI checkout b888b0d462dabd72a9913e5db8f84f1c556ab83c; ci-gate run 36828821563 SUCCESS, full 554 XCTest tests / 0 failures / 1 existing emitter skip. New stale-pin regression passed.
+
+Local verification: git diff --check and records parsers passed. Native tests ran on hosted macOS, not on this Linux VM. No deploy/publish, helper contract changes, source refactors, empty commits or gate changes.

@@ -1,17 +1,19 @@
-# R4-CoreLib: Codex (GPT-6.1 Sol) findings
+Both verified fixes merged through green CI with merge commits. Each has a needs-hardware label; merge auto-merge was enabled. Neither changes AI-service routing/blocking, TLS verification or strict-mode behavior.
 
-Generated 2026-10-01 01:50 MT from the run's findings.tsv / prs.tsv.
-
-## PRs
-
-| PR | Branch | Labels | Auto-merge requested | Title |
+| PR | Branch | CI / merge | Labels | Auto-merge |
 |---|---|---|---|---|
-| 1148 | hunt/sol-r4core-yaml-sequence-maps | needs-hardware | yes | fix(windows): preserve proxy mappings with bracketed node names |
-| 1157 | hunt/sol-r4core-singbox-fingerprint | needs-hardware | yes | fix(windows): accept omitted sing-box client fingerprints |
+| [#1148](https://github.com/raydocs/tono/pull/1148) | hunt/sol-r4core-yaml-sequence-maps | ci-gate success; merged 2026-10-01T07:21:39Z | needs-hardware | yes, MERGE |
+| [#1157](https://github.com/raydocs/tono/pull/1157) | hunt/sol-r4core-singbox-fingerprint | ci-gate success; merged 2026-10-01T07:30:09Z | needs-hardware | yes, MERGE |
 
-## Hypotheses
+65 unique hypotheses: 2 verified/fixed, 8 duplicates, 55 rejected/false positives. Lower-confidence rejected rows explicitly state when no harmful current product path was proved. No verified unfixed findings and no new issues.
 
-| ID | Area | Sev | Location | Description | Verdict |
+Each fix has one failing-then-passing narrow regression. Each branch passed 337 unit + 15 integration tests locally. The combined current-main checkout at 28d9c26e72ae612911bacb52d9acb2328367a832 passed 338 unit + 15 integration tests (353 total), zero failures. Existing unused-constant warning remains. Retained local logs: combined-main-tests.log and fingerprint-tests.log. The initial YAML regression failure/pass is recorded in the tool transcript and PR body. Hosted Windows app/service checks passed for both PRs; real TUN/WFP/core acceptance cannot run in this Linux VM.
+
+All assigned production files were read end to end across root and three read-only subagents. Caller/callee and recent-fix interaction review included the 12 relevant merged PRs in reviewed-merged-scope.json, especially #1140 default sing-box, #1106 unarmed scheduling, #1084/#871/#797 AI routing guards, #990 token replay, #828/#834/#807 callback/WebSocket lifetime fixes, #916 redaction, #857 parser bounds and #749 HY2 keepalive. Initial/final open PR snapshots and known findings were checked for duplicates. The two source fixes are separate commits/PRs based on fresh main.
+
+Unfinished areas: native Windows device testing of DNS/TUN/WFP and installed sing-box/Mihomo startup. No assigned source subtree remains unread. Explicit non-Chrome availability filtering and inactive sing-box DIRECT behavior were not changed: no active producer/caller harm was proved, and unsupported filtering needs a product-contract decision. No deployment or publication performed.
+
+| ID | area | severity | file:line | one-line description | verdict |
 |---|---|---|---|---|---|
 | R4CORE-H01 | policy | — | apps/windows/crates/tono-core/src/policy.rs:768 | Forged legacy revision permanently pins signed policy | duplicate H3-F5: signed embedded revision replaces unauthenticated ratchet (#342) |
 | R4CORE-H02 | catalog | — | apps/windows/crates/tono-core/src/catalog.rs:365 | New account catalog body rejected at unchanged fleet revision | false-positive: equal revision/different digest installs fully validated per-account body |
@@ -78,3 +80,5 @@ Generated 2026-10-01 01:50 MT from the run's findings.tsv / prs.tsv.
 | R4CORE-STATE11 | core selection | - | apps/windows/app/src-tauri/src/tono/connection/stages.rs:205 | Resume availability used instead of barrier truth | false-positive current evidence: existing-barrier cold fallback possible but no harmful routing/trust/outage path proved |
 | R4CORE-STATE12 | core selection | - | apps/windows/app/src-tauri/src/tono/connection/core_select.rs:44 | App and Service digest file paths differ | false-positive current evidence: manually provisioned uncompiled-pin setup only; no supported-install harmful path proved |
 | R4CORE-STATE13 | sing-box compiler | - | apps/windows/crates/tono-core/src/sing_box/runtime.rs:212 | Unselected DER-only HY2 bricks VLESS connection | false-positive: omitted/unavailable and excluded from selector; existing regression passed; selected/home refusal intentional |
+
+Hunter: GPT-6.1 Sol (Codex CLI)
