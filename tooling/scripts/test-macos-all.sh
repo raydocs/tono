@@ -53,6 +53,7 @@ run "multi-exit policy (mihomo validates)" \
 run "policy signing contract" tooling/scripts/test-policy-signing-contract.sh
 run "mixed proxy verifies origin HTTPS" python3 tooling/scripts/tests/test_macos_mixed_probe.py
 run "macos incident regressions" tooling/scripts/test-macos-incident-regressions.sh
+run "helper install argument refusal" python3 tooling/scripts/tests/test_helper_install_arguments.py
 run "reload preserves connections" tooling/scripts/test-reload-preserves-connections.sh
 run "app traffic ledger" tooling/scripts/test-app-traffic-ledger.sh
 run "diagnostics log upload cursor" tooling/scripts/test-diagnostics-log-upload.sh

@@ -98,7 +98,15 @@ jobs:
         run: node --test services/unchecked-index-ratchet.test.mjs
 
       - name: Test
-        run: npm test
+        run: |
+          npm test
+          node --input-type=module -e '
+            import { readFileSync, appendFileSync } from "node:fs"
+            const total = JSON.parse(readFileSync("./coverage/coverage-summary.json", "utf8")).total
+            const line = `coverage floor auth/sessions/quota/ledger: lines ${total.lines.pct}% branches ${total.branches.pct}% functions ${total.functions.pct}% statements ${total.statements.pct}%`
+            console.log(line)
+            if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, line + "\n")
+          '
 
       - name: Download page guards can still fail
         # The reachability guard is the one check standing between "the manifest

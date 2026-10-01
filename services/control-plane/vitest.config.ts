@@ -65,5 +65,30 @@ export default defineConfig({
       // Workers pool cannot provide. Run it via `vitest.admin.config.ts`.
       'admin/src/pages/ControlPage.test.tsx',
     ],
+    coverage: {
+      // Off unless `vitest run --coverage` (npm test). The ops-contract job
+      // runs one file through the same config; a floor there fails on files
+      // that single file never executes.
+      provider: 'istanbul',
+      reporter: ['text', 'json-summary'],
+      reportsDirectory: './coverage',
+      include: [
+        'src/auth.ts',
+        'src/sessions.ts',
+        'src/ops/quota.ts',
+        'src/ops/ledger.ts',
+      ],
+      thresholds: {
+        // Measured on the full suite: auth 93.93/87.8, sessions 96.42/87.09,
+        // ledger 97.26/81.68, quota 87.72/78.21 lines/branches. The floor sits
+        // about five points under the lowest file so one missed branch does
+        // not flap, and a real drop does.
+        perFile: true,
+        lines: 82,
+        branches: 73,
+        functions: 81,
+        statements: 77,
+      },
+    },
   },
 });

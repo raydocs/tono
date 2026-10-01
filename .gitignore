@@ -63,6 +63,10 @@ artifacts/
 # Also ignore local dependency-cache symlinks used by isolated worktrees.
 node_modules
 
+# Istanbul output from the control-plane coverage floor. The numbers are enforced
+# by vitest thresholds; the directory is a local report.
+services/control-plane/coverage/
+
 # Local development environments
 .venv/
 

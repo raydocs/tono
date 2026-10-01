@@ -752,11 +752,7 @@ export const operationsApi = {
   setUserExpiry: async (userId: string, expiresAt: number | null) => (
     await patch<{ ok: boolean }>(`users/${userId}`, { expiresAt })
   ),
-  replaceCatalog: async (yaml: string, expectedRevision: number) =>
-    put<{ revision: number; sha256: string; updatedAt: number }>('exit-catalog', { yaml, expectedRevision }),
   trafficPolicy: async () => get<TrafficPolicyDto>('traffic-policy'),
-  replaceTrafficPolicy: async (policy: unknown, expectedRevision: number) =>
-    put<TrafficPolicyDto>('traffic-policy', { policy, expectedRevision }),
   enqueueDeviceAction: async (deviceId: string, action: string) =>
     post<{ action: DeviceActionDto }>('device-actions', { deviceId, action }),
   deviceActions: async (deviceId?: string) => (
