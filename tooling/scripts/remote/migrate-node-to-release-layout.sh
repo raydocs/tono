@@ -60,8 +60,19 @@ install -m 0640 -o root -g tono-xray "$INSTALL/current/config.json" "$REL/config
 
 BACKUP="$INSTALL/current.pre-$ID"
 mv "$INSTALL/current" "$BACKUP"
-ln -s "$REL" "$INSTALL/current.new"
-mv -T "$INSTALL/current.new" "$INSTALL/current"
+# set -e would exit here with current already moved aside. Put the directory
+# back before failing, or this node has no binary until an operator does.
+if ! ln -s "$REL" "$INSTALL/current.new"; then
+  mv "$BACKUP" "$INSTALL/current"
+  fail "could not stage the new current link; restored the previous directory"
+fi
+if ! mv -T "$INSTALL/current.new" "$INSTALL/current"; then
+  rm -f "$INSTALL/current.new"
+  if [ ! -e "$INSTALL/current" ]; then
+    mv "$BACKUP" "$INSTALL/current"
+  fi
+  fail "could not publish the new current link; restored the previous directory"
+fi
 
 restore() {
   rm -f "$INSTALL/current"

@@ -10,6 +10,7 @@ import {
 } from '../src/ops/contract';
 import { runOpsCron } from '../src/ops/cron';
 import { ledgerCsv } from '../src/ops/ledger';
+import { postLedgerReverse, postMonthClose } from '../src/ops/handlers/ledger';
 
 const ACCESS_TEAM_DOMAIN = 'test-team.cloudflareaccess.com';
 const ACCESS_AUDIENCE = 'test-access-audience-0001';
@@ -407,6 +408,36 @@ describe('ops ledger, month close, live FX', () => {
     expect((await reversed.json() as { error: { code: string } }).error.code).toBe('MONTH_CLOSED');
   });
 
+  it('does not stamp a reversal when month close wins after its preflight', async () => {
+    const created = await ops('ledger', json({
+      kind: 'revenue', category: 'plan', subjectType: 'user', subjectId: 'u-1',
+      amountMinor: 800, currency: 'CNY', month: MONTH(),
+    }));
+    expect(created.status).toBe(201);
+    const entry = assertLedgerEntry(await created.json());
+    const real = db();
+    const racingDb = new Proxy(real, {
+      get(target, key) {
+        const value = Reflect.get(target, key, target);
+        if (key !== 'batch') return typeof value === 'function' ? value.bind(target) : value;
+        return async (statements: D1PreparedStatement[]) => {
+          expect((await ops(`months/${MONTH()}/close`, json({ notes: 'won the race' }))).status).toBe(200);
+          return target.batch(statements);
+        };
+      },
+    });
+    await expect(postLedgerReverse(
+      new Request(`https://test/api/v1/ops/ledger/${entry.id}/reverse`, json({ note: 'undo' })),
+      { ...(env as unknown as Env), DB: racingDb }, entry.id, { email: ACCESS_ADMIN_EMAIL },
+    )).rejects.toMatchObject({ status: 409, code: 'MONTH_CLOSED' });
+
+    const original = await real.prepare('SELECT reversed_by FROM ops_ledger_entries WHERE id = ?')
+      .bind(entry.id).first<{ reversed_by: string | null }>();
+    expect(original?.reversed_by).toBeNull();
+    expect(await real.prepare('SELECT id FROM ops_ledger_entries WHERE reverses = ?')
+      .bind(entry.id).first()).toBeNull();
+  });
+
   it('rejects a concurrent second reverse', async () => {
     const created = await ops('ledger', json({
       kind: 'revenue', category: 'plan', subjectType: 'user', subjectId: 'u-1',
@@ -438,6 +469,43 @@ describe('ops ledger, month close, live FX', () => {
     expect(statuses).toEqual([200, 409]);
     const loser = a.status === 409 ? a : b;
     expect((await loser.json() as { error: { code: string } }).error.code).toBe('MONTH_CLOSED');
+  });
+
+  it('refuses a stale month-close snapshot when a ledger write commits before the lock', async () => {
+    const month = MONTH();
+    expect((await ops('ledger', json({
+      kind: 'revenue', category: 'plan', subjectType: 'user', subjectId: 'u-1',
+      amountMinor: 1000, currency: 'CNY', month,
+    }))).status).toBe(201);
+    const real = db();
+    const racingDb = new Proxy(real, {
+      get(target, key) {
+        const value = Reflect.get(target, key, target);
+        if (key !== 'prepare') return typeof value === 'function' ? value.bind(target) : value;
+        return (sql: string) => {
+          const statement = target.prepare(sql);
+          if (!sql.includes('INSERT OR IGNORE INTO ops_month_close')) return statement;
+          return {
+            bind: (...values: unknown[]) => ({
+              run: async () => {
+                expect((await ops('ledger', json({
+                  kind: 'revenue', category: 'plan', subjectType: 'user', subjectId: 'u-1',
+                  amountMinor: 2000, currency: 'CNY', month,
+                }))).status).toBe(201);
+                return statement.bind(...values).run();
+              },
+            }),
+          };
+        };
+      },
+    });
+    await expect(postMonthClose(
+      new Request(`https://test/api/v1/ops/months/${month}/close`, json({ notes: 'lock' })),
+      { ...(env as unknown as Env), DB: racingDb }, month, { email: ACCESS_ADMIN_EMAIL },
+    )).rejects.toMatchObject({ status: 409, code: 'LEDGER_CHANGED' });
+    expect(await real.prepare('SELECT month FROM ops_month_close WHERE month = ?').bind(month).first()).toBeNull();
+    const summary = assertMonthSummary(await (await ops(`months/${month}`)).json());
+    expect(summary.revenueCnyMinor).toBe(3000);
   });
 
   it('serves frozen totals for a closed month after later metering arrives', async () => {
@@ -473,6 +541,25 @@ describe('ops ledger, month close, live FX', () => {
     expect(after.customers[0].marginCnyMinor).toBe(before.customers[0].marginCnyMinor);
     expect(after.customers[0].marginCnyMinor).toBe(16000);
     expect(after.frozenPartial).toBeUndefined();
+  });
+
+  it('keeps closed-month reconciliation unchanged when a priced node is later retired', async () => {
+    const month = MONTH();
+    const t = tnow();
+    await db().prepare(
+      `INSERT INTO ops_node_profiles(id, catalog_name, status, price, currency, created_at, updated_at)
+       VALUES('frozen-recon-node', ?, 'active', 80, 'USD', ?, ?)`,
+    ).bind(NODE, t, t).run();
+    const closed = await ops(`months/${month}/close`, json({ notes: 'lock reconciliation' }));
+    expect(closed.status).toBe(200);
+    const before = assertMonthSummary(await closed.json());
+    expect(before.unreconciledBills).toBe(1);
+    await db().prepare("UPDATE ops_node_profiles SET status = 'retired' WHERE id = 'frozen-recon-node'").run();
+
+    const after = assertMonthSummary(await (await ops(`months/${month}`)).json());
+    expect(after.frozen).toBe(true);
+    expect(after.reconciliation).toEqual(before.reconciliation);
+    expect(after.unreconciledBills).toBe(1);
   });
 
   it('paginates GET ledger in SQL and reports COUNT(*) as total', async () => {
