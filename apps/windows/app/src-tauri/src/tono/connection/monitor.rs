@@ -9,6 +9,11 @@ use tono_plugin_core::{MihomoExt as _, models::Protocol};
 
 use crate::core::service;
 use crate::process::AsyncHandler;
+
+tokio::task_local! {
+    /// Policy rebuilds keep the existing protected reconnect. Health failures do not.
+    static POLICY_REBUILD: ();
+}
 use crate::tono::{
     audit::{self, AuditEvent},
     bootstrap, commands, signed_apps,
@@ -115,6 +120,36 @@ fn sample_commit_is_current(expected: (u64, u64), current: (u64, u64), connected
     connected && expected == current
 }
 
+/// Which kill-switch reading the health monitor may publish after it has awaited DNS and the
+/// data-plane probe. The captured aggregate is already stale if a lifecycle operation started
+/// or finished in that gap (`snapshot_generation` moves), or if this connect generation ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CapturedKillSwitchPublish {
+    /// The Service aggregate did not move. The captured reading is still current.
+    Captured,
+    /// A newer aggregate exists. Publish that one.
+    Fresh,
+    /// The session ended, or the second read failed. Leave the app's last reading in place.
+    Skip,
+}
+
+fn captured_kill_switch_publish(
+    captured_snapshot_generation: u64,
+    fresh_snapshot_generation: Option<u64>,
+    captured_connect_generation: u64,
+    connect_generation_now: u64,
+    still_connected: bool,
+) -> CapturedKillSwitchPublish {
+    if !still_connected || connect_generation_now != captured_connect_generation {
+        return CapturedKillSwitchPublish::Skip;
+    }
+    match fresh_snapshot_generation {
+        Some(fresh) if fresh == captured_snapshot_generation => CapturedKillSwitchPublish::Captured,
+        Some(_) => CapturedKillSwitchPublish::Fresh,
+        None => CapturedKillSwitchPublish::Skip,
+    }
+}
+
 #[cfg(test)]
 mod sample_commit_tests {
     #[test]
@@ -123,6 +158,32 @@ mod sample_commit_tests {
         assert!(super::sample_commit_is_current(started, started, true));
         // In-place controller replacement need not change the connect generation.
         assert!(!super::sample_commit_is_current(started, (7, 13), true));
+    }
+
+    #[test]
+    fn a_stale_kill_switch_aggregate_is_not_published_after_the_service_moves() {
+        use super::CapturedKillSwitchPublish;
+        assert_eq!(
+            super::captured_kill_switch_publish(4, Some(4), 7, 7, true),
+            CapturedKillSwitchPublish::Captured
+        );
+        assert_eq!(
+            super::captured_kill_switch_publish(4, Some(5), 7, 7, true),
+            CapturedKillSwitchPublish::Fresh,
+            "a DIRECT reload that finishes during the probe must win over the earlier Locked reading"
+        );
+        assert_eq!(
+            super::captured_kill_switch_publish(4, None, 7, 7, true),
+            CapturedKillSwitchPublish::Skip
+        );
+        assert_eq!(
+            super::captured_kill_switch_publish(4, Some(4), 7, 8, true),
+            CapturedKillSwitchPublish::Skip
+        );
+        assert_eq!(
+            super::captured_kill_switch_publish(4, Some(5), 7, 7, false),
+            CapturedKillSwitchPublish::Skip
+        );
     }
 }
 
@@ -453,6 +514,16 @@ pub(super) fn spawn_exit_identity_lookup(state: &Arc<TonoState>, app: &AppHandle
     let state = Arc::clone(state);
     let app = app.clone();
     AsyncHandler::spawn(move || async move {
+        let measured_node = {
+            let inner = state.lock().await;
+            if inner.connect_generation != generation || !inner.fsm.status().is_connected {
+                return;
+            }
+            let Some(node) = inner.selected_node.clone() else {
+                return;
+            };
+            node
+        };
         let Ok(client) = reqwest::Client::builder()
             .no_proxy()
             .redirect(reqwest::redirect::Policy::none())
@@ -504,9 +575,14 @@ pub(super) fn spawn_exit_identity_lookup(state: &Arc<TonoState>, app: &AppHandle
         if inner.connect_generation != generation || !inner.fsm.status().is_connected {
             return;
         }
-        inner.exit_ip = Some(ip.to_string());
-        inner.exit_org = (!org.is_empty()).then(|| org.to_string());
-        inner.exit_location = location;
+        if !inner.commit_exit_identity(
+            &measured_node,
+            ip.to_string(),
+            (!org.is_empty()).then(|| org.to_string()),
+            location,
+        ) {
+            return;
+        }
         commands::emit_status(&app, &commands::status_of(&inner));
     });
 }
@@ -631,6 +707,10 @@ async fn protection_resync_loop(state: Arc<TonoState>, app: AppHandle) {
         let previous_kill_switch = inner.kill_switch.clone();
         let previous_status = inner.fsm.status().clone();
         let service_disarmed = matches!(&kill_switch, Some(status) if !status.wanted);
+        let reconnect_after_release = kill_switch
+            .as_ref()
+            .is_some_and(|status| status.reconnect_after_release);
+        let disconnecting = inner.fsm.status().is_disconnecting;
         commands::quit::apply_service_kill_switch(&mut inner, kill_switch);
         if service_disarmed {
             logging!(
@@ -642,7 +722,31 @@ async fn protection_resync_loop(state: Arc<TonoState>, app: AppHandle) {
         if inner.kill_switch != previous_kill_switch || inner.fsm.status() != &previous_status {
             commands::emit_status(&app, &commands::status_of(&inner));
         }
+        let reconnect = service_disarmed
+            && super::reconnect::crash_recovery_reconnect_allowed(
+                reconnect_after_release,
+                matches!(inner.account_state, crate::tono::state::AccountState::Ready),
+                inner.selected_node.is_some(),
+                inner.catalog_requires_choice,
+                disconnecting,
+            );
         if service_disarmed {
+            drop(inner);
+            if reconnect {
+                let state = state.clone();
+                let app = app.clone();
+                AsyncHandler::spawn(move || async move {
+                    if let Err(error) =
+                        super::connect_for_generation(state, app, Some(generation)).await
+                    {
+                        logging!(
+                            warn,
+                            Type::Service,
+                            "Tono: 崩溃恢复放行后的后台重连未完成: {error}"
+                        );
+                    }
+                });
+            }
             return;
         }
     }
@@ -697,6 +801,7 @@ mod protection_resync_tests {
             endpoints: Vec::new(),
             direct_endpoint_digest: String::new(),
             last_error: None,
+            reconnect_after_release: false,
         };
         let mut inner = state.lock().await;
         crate::tono::commands::quit::apply_service_kill_switch(&mut inner, Some(service_disarmed));
@@ -765,15 +870,18 @@ pub(super) async fn network_monitor_loop(state: Arc<TonoState>, app: AppHandle) 
     let mut last_in_place_recovery: Option<std::time::Instant> = None;
     loop {
         interval.tick().await;
-        let owned_direct_reload = {
+        let (owned_direct_reload, captured_connect_generation) = {
             let inner = state.lock().await;
             if !inner.fsm.status().is_connected {
                 return;
             }
-            owned_direct_reload_in_flight(
-                inner.direct_reload_until,
+            (
+                owned_direct_reload_in_flight(
+                    inner.direct_reload_until,
+                    inner.connect_generation,
+                    std::time::Instant::now(),
+                ),
                 inner.connect_generation,
-                std::time::Instant::now(),
             )
         };
         let snapshot = match service::tono_service_status_snapshot().await {
@@ -848,13 +956,38 @@ pub(super) async fn network_monitor_loop(state: Arc<TonoState>, app: AppHandle) 
         let health_invalid = legs.invalid();
         let protection_invalid = legs.protection_invalid();
 
+        // The health legs above already consumed the snapshot from the start of this tick.
+        // Publishing that same aggregate after the DNS read and the data-plane probe would
+        // overwrite a kill switch the Service has since replaced (a DIRECT reload moves to
+        // Blocked while this task is still in the probe). Read the generation again and
+        // publish only a reading that is still current.
+        let fresh_kill_switch = match service::tono_service_status_snapshot().await {
+            Ok(fresh) => Some((fresh.snapshot_generation, fresh.kill_switch)),
+            Err(_) => None,
+        };
+
         let (invalidate, network_changed, core_changed, service_events) = {
             let mut inner = state.lock().await;
 
-            // L3: surface kill switch changes as they are observed.
-            let kill_switch_changed = snapshot.kill_switch.is_some() && inner.kill_switch != snapshot.kill_switch;
-            if let Some(kill_switch) = &snapshot.kill_switch {
-                inner.kill_switch = Some(kill_switch.clone());
+            let publish = captured_kill_switch_publish(
+                snapshot.snapshot_generation,
+                fresh_kill_switch.as_ref().map(|(generation, _)| *generation),
+                captured_connect_generation,
+                inner.connect_generation,
+                inner.fsm.status().is_connected,
+            );
+            let published = match publish {
+                CapturedKillSwitchPublish::Captured => snapshot.kill_switch.clone(),
+                CapturedKillSwitchPublish::Fresh => {
+                    fresh_kill_switch.as_ref().and_then(|(_, status)| status.clone())
+                }
+                CapturedKillSwitchPublish::Skip => None,
+            };
+            // L3: surface kill switch changes as they are observed. A skipped publish leaves
+            // the previous reading; it does not clear a barrier the Service still holds.
+            let kill_switch_changed = published.is_some() && inner.kill_switch != published;
+            if let Some(kill_switch) = published {
+                inner.kill_switch = Some(kill_switch);
             }
 
             // The first sample seeds every leg without firing (unchanged
@@ -915,7 +1048,7 @@ pub(super) async fn network_monitor_loop(state: Arc<TonoState>, app: AppHandle) 
                 commands::emit_status(&app, &commands::status_of(&inner));
             }
             let mut events: Vec<AuditEvent> = Vec::new();
-            if kill_switch_changed && let Some(kill_switch) = &snapshot.kill_switch {
+            if kill_switch_changed && let Some(kill_switch) = inner.kill_switch.as_ref() {
                 events.push(AuditEvent::KillSwitchSnapshot {
                     wanted: kill_switch.wanted,
                     live: kill_switch.live,
@@ -1094,7 +1227,12 @@ pub(crate) async fn handle_policy_behavior_change(
             PolicyChangeDisposition::Ignore => return NetworkChangeOutcome::Handled,
         }
     }
-    handle_network_change_inner(state, app, policy_behavior_change_allows_in_place_recovery()).await
+    POLICY_REBUILD
+        .scope(
+            (),
+            handle_network_change_inner(state, app, policy_behavior_change_allows_in_place_recovery()),
+        )
+        .await
 }
 
 /// What a traffic-policy behavior change should do when it arrives, given the
@@ -1234,6 +1372,36 @@ pub(super) async fn handle_network_change_inner(
             "Tono: network change recovered in place; core was not restarted"
         );
         return NetworkChangeOutcome::RecoveredInPlace;
+    }
+    // In-place proof failed. Ordinary health loss uses the shared disposition:
+    // release the barrier and probe without a tunnel. A policy rebuild and an
+    // explicit strict kill switch keep the protected reconnect below.
+    let policy_rebuild = POLICY_REBUILD.try_with(|_| ()).is_ok();
+    let strict = tono_core::strict_kill_switch_explicit(None);
+    if tono_core::unarmed_probe::health_monitor_releases(strict, policy_rebuild) {
+        {
+            let mut inner = state.lock().await;
+            inner.tasks.abort_reconnect();
+        }
+        logging!(
+            warn,
+            Type::Service,
+            "Tono: health failure is releasing protection so the original network stays up"
+        );
+        match super::disconnect::release_explicit(state, app).await {
+            Ok(()) => {
+                let generation = state.lock().await.connect_generation;
+                super::unarmed_probe::spawn_after_release(state, app, generation);
+            }
+            Err(error) => {
+                logging!(
+                    error,
+                    Type::Service,
+                    "Tono: health-failure release failed; not starting a tunnel: {error}"
+                );
+            }
+        }
+        return NetworkChangeOutcome::Handled;
     }
     // The exclusive release guard also excludes StartClash/DNS readers, including Retry now.
     // Keep it inside a detached worker: aborting netmon must not expose a still-running stop.

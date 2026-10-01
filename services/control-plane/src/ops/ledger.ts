@@ -105,9 +105,11 @@ type AccountRow = { id: string; user_id: string | null };
 type UserRow = { id: string; email: string };
 type CycleRow = { node_name: string };
 
-export async function loadMonthSummary(db: D1Database, month: string, nowSec: number): Promise<MonthSummaryDto> {
+export async function loadMonthSummary(
+  db: D1Database, month: string, nowSec: number, snapshotEntries?: Row[],
+): Promise<MonthSummaryDto> {
   const { start, end } = monthBounds(month);
-  const entries = (await db.prepare(
+  const entries = snapshotEntries ?? (await db.prepare(
     'SELECT * FROM ops_ledger_entries WHERE month = ?',
   ).bind(month).all<Row>()).results ?? [];
   const closed = await db.prepare(

@@ -51,7 +51,7 @@ The first customer publication after 0.0.67 / 0.0.34 is gated by
 connect failure, a proven protected update journal, then feed promotion
 as **0.0.74**. Sparkle and `windows-updates` advance only after the owner
 has recorded G1–G3 evidence (for 0.0.74: G1 and G2; G3 moves to 0.0.75, see
-[DECISIONS.md](DECISIONS.md)) in SHIP_PLAN §6; agents then run G4 per
+[0.0.74 defers G3](decisions/019-2026-09-26-release-0074-defers-g3.md)) in SHIP_PLAN §6; agents then run G4 per
 [AGENTS.md](../AGENTS.md). GitHub `v0.0.72` / `tono-macos-0.0.72-build72`
 tags are not those feeds.
 
@@ -175,7 +175,7 @@ so an agent approving them removes the only human check there. Whether that toke
 can approve its own deployment was confirmed on 2026-09-26 for `windows-release` only (kit
 runs recorded in `docs/changelog.d/2026-09-26-kit-0-0-74.md`); `windows-update-channel` is
 configured separately and is still untested. By owner decision of 2026-09-28
-([DECISIONS.md](DECISIONS.md)), agents approve GitHub Actions environment approvals
+([agents approve GHA environments](decisions/023-2026-09-28-agents-approve-gha-environments.md)), agents approve GitHub Actions environment approvals
 themselves (`windows-release` for any candidate, `windows-update-channel` at G4); none waits
 for the owner. Record each approval (run URL, environment, candidate SHA and release
 sequence) in the changelog. The customer-publish precondition is unchanged: the owner's
