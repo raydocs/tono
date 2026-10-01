@@ -9,6 +9,7 @@ Collected 2026-09-30 (MDT) from the box; credential values, auth paths, and emai
 - [orchestrator-common-prompt.md](orchestrator-common-prompt.md) — shared hunter/fixer operating rules; 2026-09-30; source model: orchestrator.
 - [sol2-report.md](sol2-report.md) — GPT-6.1 Sol account-2 bug-hunt report, findings, fixes, and validation; 2026-09-30; source model: GPT-6.1 Sol.
 - [sol2-findings.md](sol2-findings.md) — compact GPT-6.1 Sol findings table; 2026-09-30; source model: GPT-6.1 Sol.
+- [R3-A1A7-grok.md](R3-A1A7-grok.md) — wave-3 Grok pass on the Windows connect orchestrator and service/owner/proxy/tray path; 2026-10-01; source model: Grok 4.7.
 - [sol2-issue-n05-1.md](sol2-issue-n05-1.md) — latent OIDC account-linking finding and suggested fix; 2026-09-30; source model: GPT-6.1 Sol.
 - [fix-bakeoff-report.md](fix-bakeoff-report.md) — Codex versus GLM versus Cursor fix comparison; 2026-09-30; source model: GPT-6.1 Sol/local CLI with GLM-5.3 and Cursor data.
 - [glm-fix-readme.md](glm-fix-readme.md) — GLM-5.3 fix/hunt harness description and workflow; 2026-09-30; source model: GLM-5.3 harness documentation.
