@@ -2432,7 +2432,7 @@ async fn commit_sing_box_direct_unlocked(
         return restore_sing_box_full_tunnel(
             previous,
             core,
-            anyhow!("core changed during sing-box DIRECT permit install"),
+            anyhow::anyhow!("core changed during sing-box DIRECT permit install"),
         )
         .await;
     }
