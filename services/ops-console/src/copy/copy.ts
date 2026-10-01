@@ -16,6 +16,7 @@ import { panelCopy } from './panel';
 import { settingsCopy } from './settings';
 import { settingsPublishCopy } from './settings-publish';
 import { customerCopy } from './customers';
+import { diagnosticsCopy } from './diagnostics';
 import { shellCopy } from './shell';
 import { todayCopy } from './today';
 import { worthwhileCopy } from './worthwhile';
@@ -30,6 +31,7 @@ export const copy = {
   ...nodeDetailCopy,
   ...worthwhileCopy,
   ...panelCopy,
+  ...diagnosticsCopy,
 } as const;
 
 
