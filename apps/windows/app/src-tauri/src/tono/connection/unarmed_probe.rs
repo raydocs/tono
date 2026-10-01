@@ -233,11 +233,12 @@ static NATIVE_OBSERVATION_SLOT: tokio::sync::Semaphore = tokio::sync::Semaphore:
 
 #[cfg(any(windows, test))]
 fn start_native_observation(
+    slot: &'static tokio::sync::Semaphore,
     observe: impl FnOnce() -> Result<PhysicalNetworkSnapshot, String> + Send + 'static,
 ) -> Option<tokio::task::JoinHandle<Result<PhysicalNetworkSnapshot, String>>> {
     // A dropped owner detaches a started blocking worker. Keep the permit in
     // that worker, so replacement owners cannot accumulate hung native reads.
-    let permit = NATIVE_OBSERVATION_SLOT.try_acquire().ok()?;
+    let permit = slot.try_acquire().ok()?;
     Some(tokio::task::spawn_blocking(move || {
         let _permit = permit;
         observe()
@@ -270,6 +271,7 @@ impl NetworkWatch {
         #[cfg(windows)]
         if self.pending.is_none() {
             self.pending = start_native_observation(
+                &NATIVE_OBSERVATION_SLOT,
                 super::platform::physical_network_snapshot_windows,
             );
         }
@@ -346,21 +348,22 @@ mod tests {
 
     #[tokio::test]
     async fn replacing_an_observer_cannot_accumulate_hung_native_reads() {
+        static SLOT: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(1);
         let (entered, entry) = tokio::sync::oneshot::channel();
         let (resume, resumed) = std::sync::mpsc::channel();
-        let worker = start_native_observation(move || {
+        let worker = start_native_observation(&SLOT, move || {
             entered.send(()).unwrap();
             resumed.recv().unwrap();
             Ok(vec![])
         }).unwrap();
         entry.await.unwrap();
         drop(worker); // Dropping the retired owner cannot cancel a started native read.
-        assert!(start_native_observation(|| Ok(vec![])).is_none(),
+        assert!(start_native_observation(&SLOT, || Ok(vec![])).is_none(),
             "the old native read must exclude every replacement owner");
         resume.send(()).unwrap();
         let replacement = tokio::time::timeout(Duration::from_secs(5), async {
             loop {
-                if let Some(worker) = start_native_observation(|| Ok(vec![])) {
+                if let Some(worker) = start_native_observation(&SLOT, || Ok(vec![])) {
                     break worker;
                 }
                 tokio::task::yield_now().await;
