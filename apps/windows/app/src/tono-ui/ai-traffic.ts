@@ -32,8 +32,8 @@ type AiConnection = Pick<
   'id' | 'chains' | 'rule' | 'upload' | 'download' | 'metadata'
 >
 
-const isAiFamily = (family: string): family is AiTrafficFamily =>
-  (AI_TRAFFIC_FAMILIES as readonly string[]).includes(family)
+const isAiFamily = (family: string | undefined): family is AiTrafficFamily =>
+  family !== undefined && (AI_TRAFFIC_FAMILIES as readonly string[]).includes(family)
 
 /**
  * Adds the bytes each home-routed AI connection moved since it was last seen.
@@ -73,7 +73,7 @@ export const pruneAiTrafficDays = (days: AiTrafficDays): AiTrafficDays =>
     Object.keys(days)
       .sort()
       .slice(-AI_TRAFFIC_DAYS)
-      .map((key) => [key, days[key]]),
+      .map((key) => [key, days[key] ?? {}]),
   )
 
 export const aiTrafficDayTotal = (

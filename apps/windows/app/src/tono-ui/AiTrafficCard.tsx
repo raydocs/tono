@@ -106,7 +106,7 @@ export const AiTrafficCard = ({
   const weekMax = Math.max(...week.map((entry) => entry.total))
   if (!storageKey || (!connected && weekMax === 0)) return null
 
-  const today = days[week[week.length - 1].day] ?? {}
+  const today = days[week[week.length - 1]?.day ?? ''] ?? {}
   const rows = AI_TRAFFIC_FAMILIES.filter((family) => (today[family] ?? 0) > 0)
 
   return (
