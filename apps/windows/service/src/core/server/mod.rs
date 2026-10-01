@@ -304,25 +304,51 @@ async fn clear_proxy_with_direct_compensation() -> std::result::Result<(), Servi
     Err(ServiceError::proxy_clear_failed(message))
 }
 
-async fn rollback_started_owner(owner: &AuthenticatedOwner) -> AnyResult<()> {
+async fn rollback_started_owner(owner: &AuthenticatedOwner) -> Result<(), OwnerRollbackFailure> {
     if let Err(stop_error) = CORE_MANAGER.lock().await.stop_core().await {
         set_core_lifecycle_state(ServiceLifecycleState::Fatal);
-        return Err(anyhow!(
+        return Err(OwnerRollbackFailure::CoreStopUnconfirmed(anyhow!(
             "failed to terminate owner core during rollback: {stop_error:#}"
-        ));
+        )));
     }
 
     let desired_result = persist_owner_core_stopped(owner).await;
     let active_result = clear_active_owner().await;
     match (desired_result, active_result) {
         (Ok(_), Ok(())) => Ok(()),
-        (Err(desired_error), Ok(())) => Err(desired_error),
-        (Ok(_), Err(active_error)) => Err(active_error),
+        (Err(desired_error), Ok(())) => Err(OwnerRollbackFailure::Bookkeeping(desired_error)),
+        (Ok(_), Err(active_error)) => Err(OwnerRollbackFailure::Bookkeeping(active_error)),
         (Err(desired_error), Err(active_error)) => {
             set_core_lifecycle_state(ServiceLifecycleState::Fatal);
-            Err(anyhow!(
+            Err(OwnerRollbackFailure::Bookkeeping(anyhow!(
                 "failed to persist stopped owner state: {desired_error:#}; failed to clear active owner: {active_error:#}"
-            ))
+            )))
+        }
+    }
+}
+
+/// Release already restored public DNS and is about to keep WFP armed. A core stop that did
+/// not finish may have left that core alive, so tunnel DNS has to come back. A stop that
+/// finished left nothing listening on the tunnel resolver; putting it back would black-hole
+/// names, and this function does not open the barrier.
+pub(super) fn release_puts_protected_dns_back(failure: &OwnerRollbackFailure) -> bool {
+    matches!(failure, OwnerRollbackFailure::CoreStopUnconfirmed(_))
+}
+
+pub(super) enum OwnerRollbackFailure {
+    CoreStopUnconfirmed(anyhow::Error),
+    Bookkeeping(anyhow::Error),
+}
+
+impl std::fmt::Display for OwnerRollbackFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let error = match self {
+            Self::CoreStopUnconfirmed(error) | Self::Bookkeeping(error) => error,
+        };
+        if f.alternate() {
+            write!(f, "{error:#}")
+        } else {
+            write!(f, "{error}")
         }
     }
 }
@@ -1123,6 +1149,22 @@ fn test_proxy_barrier_reset() {
 
 mod handlers;
 use handlers::create_ipc_router;
+
+#[cfg(test)]
+mod release_dns_compensation_tests {
+    use super::{OwnerRollbackFailure, release_puts_protected_dns_back};
+
+    #[test]
+    fn a_failed_core_stop_puts_protected_dns_back_and_bookkeeping_does_not() {
+        let stop = OwnerRollbackFailure::CoreStopUnconfirmed(anyhow::anyhow!("stop"));
+        let bookkeeping = OwnerRollbackFailure::Bookkeeping(anyhow::anyhow!("book"));
+        assert!(release_puts_protected_dns_back(&stop));
+        assert!(
+            !release_puts_protected_dns_back(&bookkeeping),
+            "a stopped core must not be pointed back at the tunnel resolver"
+        );
+    }
+}
 
 #[cfg(test)]
 mod owner_lifecycle_tests;
