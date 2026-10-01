@@ -155,6 +155,9 @@ jobs:
       - name: Home usage reporter
         run: python3 services/home-agent/test_report_example.py
 
+      - name: Node restart verification fixtures
+        run: python3 tooling/scripts/remote/test_node_verification.py
+
       - name: Operator SSH collector jobs
         run: python3 -m unittest discover -s ops-panel/tests -p 'test_*.py'
 
