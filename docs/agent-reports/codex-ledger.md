@@ -156,3 +156,32 @@
 | R3CONN-DUP05 | M6 | Sol (Codex acct 2, R3-M6M8) | P2 | duplicate #720 replaces this branch with unarmed recovery | Missing-TUN release retires its own reconnect intent [AppState+Connect.swift:1494] |
 | R3CONN-DEC01 | M6 | Sol (Codex acct 2, R3-M6M8) | P2 design | real-unfixed decision item; deliberate teardown, helper watchdog releases with merged #738 selective layer; preserving the live session needs a product decision | Supplemental DNS conflict deliberately stops core and holds general traffic [AppState+Connect.swift:2385] |
 | R3CONN-DUP06 | M8 | Sol (Codex acct 2, R3-M6M8) | P2 design | duplicate documented behavior in #854; helper fallback already tracked | Quit metadata-query error or deadline leaves protection held [AppDelegate.swift:326] |
+
+### R3-A2A4 (finished 21:33 MT; 40 hypotheses, 25 FP, PRs: #1003 #1010)
+| ID | Area | Model | Sev | Verdict | Description [location] |
+|---|---|---|---|---|---|
+| WIN-MONITOR-AI-HOLD-OMISSION | A3 | Sol (Codex acct 2, R3-A2A4) | P1 | real-fixed #1003 (CI pending) | Automatic health release removes the secondary AI hold [connection/monitor.rs:1391] |
+| R3-A2-06 | A2 | Sol (Codex acct 2, R3-A2A4) | — | duplicate WIN-HEAL-SIGNOUT-DIAL #874 | Heal retains another account dial [connection/heal.rs:29] |
+| R3-A2-07 | A2 | Sol (Codex acct 2, R3-A2A4) | — | duplicate #798 | Recovery preflight connects deselected node [connection/heal.rs:78] |
+| R3-A2-08 | A2 | Sol (Codex acct 2, R3-A2A4) | — | duplicate #798 | Self-heal double release [connection.rs:263] |
+| R3-A2-09 | A2 | Sol (Codex acct 2, R3-A2A4) | P2? | unverified narrow race; no ordinary trigger proved | Stale failure clears successor auth tunnel port [connection.rs:639] |
+| R3-A4-01 | A4 | Sol (Codex acct 2, R3-A2A4) | — | duplicate acknowledged follow-up WIN-HY2-HOME-UDP-LEAK #783 | HY2 DIRECT graph expects absent generic UDP reject [connection/direct.rs:973] |
+| R3-A4-02 | A4 | Sol (Codex acct 2, R3-A2A4) | — | duplicate #786 | Policy revision stops heartbeat [connection/direct.rs:62] |
+| R3-A4-03 | A4 | Sol (Codex acct 2, R3-A2A4) | — | duplicate #786 | Suffix-only activates empty DIRECT graph [connection/direct.rs:495] |
+| R3-A4-04 | A4 | Sol (Codex acct 2, R3-A2A4) | — | duplicate #926 | Failed DIRECT renewal blocks general network [connection/direct.rs:82] |
+| R3-A4-05 | A4 | Sol (Codex acct 2, R3-A2A4) | — | duplicate #898 | Activation reload stalls Restore [connection/direct.rs:1250] |
+| R3-A4-06 | A4 | Sol (Codex acct 2, R3-A2A4) | — | duplicate #787 | Routing changes leave stale runtime permits [catalog_sync.rs:197] |
+| R3-A4-07 | A4 | Sol (Codex acct 2, R3-A2A4) | — | duplicate #900 | Signed paths survive fresh full tunnel [connection.rs:308] |
+| R3-A4-15 | A4 | Sol (Codex acct 2, R3-A2A4) | P2? | unverified ordinary old request ends on Core stop; successor overlap not proved | Stale optional skip overwrites replacement metadata [connection/direct.rs:1497] |
+| R3-A4-16 | A4 | Sol (Codex acct 2, R3-A2A4) | P3? | unverified route is unknown; attribution semantics need decision | Empty chains attribution disagrees with frontend [route_ledger.rs:46] |
+| WIN-CONNECT-FAILURE-AI-HOLD-OMISSION | A2/A3 | Sol (Codex acct 2, R3-A2A4) | P1 | real-fixed #1010 (CI pending) | Failed protected connect/cold switch performs one plain release without AI hold [connection.rs:680] |
+
+### R3-C4E1 (finished 21:33 MT; 41 hypotheses, 35 FP, PRs: #1009 #1015)
+| ID | Area | Model | Sev | Verdict | Description [location] |
+|---|---|---|---|---|---|
+| EXIT-CLI-EXCEPTION-INVENTORY | E1 | Sol (Codex acct 2, R3-C4E1) | P1 | real-fixed #1009 | CLI timeout or filesystem exception drops partial client inventory; later revocation misses clients [services/exit-agent/reconcile_and_report.py:1153] |
+| MAC-ASSISTANT-DIRECT-GAP | C4 caller | Sol (Codex acct 2, R3-C4E1) | P1 | duplicate of #867 | Native DIRECT can capture AI without residential hop [apps/macos/Tono/Core/ConfigPipeline+Runtime.swift] |
+| E1-HY2-LEDGER-MISSING | E1 | Sol (Codex acct 2, R3-C4E1) | P2 | duplicate of #914 recovery boundary plus second independent failure | Ledger loss plus HY2 failure can retain raw lifetime [services/exit-agent/reconcile_and_report.py:1873] |
+| SOL-C4-QUOTA-RETENTION-REWIND | C4 | Sol (Codex acct 2, R3-C4E1) | P2 | real-fixed #1015; ops display only; no production incident claim | Null final metric samples discard last valid counter at retention; fallback rebills older cumulative bytes [services/control-plane/src/ops/quota.ts:438] |
+| SOL-C4-ACTIVITY-OVERLAP | C4 | Sol (Codex acct 2, R3-C4E1) | P3 | real-unfixed: interval/aggregation decision related O1-ACTIVITY-HOUR-COLLISION; source trace only; ops only | 22-minute windows every20 minutes sum beyond60 minutes for one device [services/control-plane/src/ops/customers.ts:178] |
+| SOL-C4-CYCLE-INSERT-GAP | C4 | Sol (Codex acct 2, R3-C4E1) | — | duplicate: fixed #852, successor insert and old close atomic batch | A failed successor insert could leave an expired cycle closed without successor [services/control-plane/src/ops/quota-cycle.ts:86] |

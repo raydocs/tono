@@ -1,12 +1,14 @@
 # R3-M9M11: Codex (GPT-6.1 Sol) findings
 
-Generated 2026-09-30 21:19 MT from the run's findings.tsv / prs.tsv.
+Generated 2026-09-30 21:33 MT from the run's findings.tsv / prs.tsv.
 
 ## PRs
 
 | PR | Branch | Labels | Auto-merge requested | Title |
 |---|---|---|---|---|
-| 1008 | hunt/sol-r3cfg-refresh-token-durability | needs-hardware | yes | fix(macos): recover rotated refresh-token durability before exit |
+| 1008 | hunt/sol-r3cfg-refresh-token-durability | none | yes | fix(macos): recover rotated refresh-token durability before exit |
+| 1016 | hunt/sol-r3cfg-unresolved-config-findings | none | yes | docs: record unresolved macOS pin and AI API routing findings |
+| 1019 | hunt/sol-r3cfg-findings-source-anchors | none | yes | docs: correct macOS configuration finding source evidence |
 
 ## Hypotheses
 

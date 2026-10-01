@@ -1,17 +1,6 @@
-# R3-C4E1: Codex (GPT-6.1 Sol) findings
+Examined 41 hypotheses: 2 verified fixes, 1 decision item, 35 rejected/false-positive hypotheses, 3 duplicates.
 
-Generated 2026-09-30 21:33 MT from the run's findings.tsv / prs.tsv.
-
-## PRs
-
-| PR | Branch | Labels | Auto-merge requested | Title |
-|---|---|---|---|---|
-| 1009 | hunt/sol-r3ingest-cli-inventory | needs-hardware | yes | fix(exit-agent): retain revocation inventory on CLI exceptions |
-| 1015 | hunt/sol-r3ingest-quota-rollup-counters | none | yes | fix(control-plane): preserve complete quota counters in retention |
-
-## Hypotheses
-
-| ID | Area | Sev | Location | Description | Verdict |
+| ID | Area | Severity | File:line | Description | Verdict |
 |---|---|---|---|---|---|
 | EXIT-CLI-EXCEPTION-INVENTORY | E1 | P1 | services/exit-agent/reconcile_and_report.py:1153 | CLI timeout or filesystem exception drops partial client inventory; later revocation misses clients | real-fixed #1009 |
 | CP-POLICY-SUFFIX-OVERLAP | C4 | — | services/control-plane/src/traffic-policy.ts:329 | Signed DIRECT suffix overlaps AI-service domains | false-positive exact, child and ancestor overlaps are rejected |
@@ -54,3 +43,14 @@ Generated 2026-09-30 21:33 MT from the run's findings.tsv / prs.tsv.
 | CP-INGEST-ACCOUNT-RESET | C4 | — | services/control-plane/src/index.ts:3644 | Next report undoes a customer billing-cycle reset | false-positive billing baseline is separate from monotonic lifetime source authority |
 | CP-INGEST-REVOCATION-RETRY | C4 | — | services/control-plane/src/index.ts:3679 | Enforcement failure after committed usage makes retries double bill | false-positive transaction commits cumulative source first; v2 replay is idempotent and cron retries enforcement |
 | CP-INGEST-UNKNOWN-USERS | C4 | — | services/control-plane/src/index.ts:3419 | One unknown account permanently loses an otherwise valid meter batch | false-positive validation precedes transaction; exit-agent bisects400 responses and retains valid cumulative reports |
+
+PRs:
+
+- [#1009](https://github.com/raydocs/tono/pull/1009): merged through green ci-gate; merge-commit auto-merge was enabled; needs-hardware retained. 110 Python tests passed locally.
+- [#1015](https://github.com/raydocs/tono/pull/1015): merged through green ci-gate; merge-commit auto-merge was enabled; no hardware/UI label (ops projections only). 28 quota/timeseries tests and typecheck passed locally.
+
+Coverage: all assigned primary C4/E1 files and metering index paths reviewed with cross-file callers/callees. Native Xray/VPS, macOS/Windows network acceptance and deployed producer transitions were not exercised. No production operation, deployment or publication.
+
+Decision item: overlapping telemetry-window activity accumulation needs a defined interval-union and device-minute/user-hour contract; related existing O1-ACTIVITY-HOUR-COLLISION. No patch weakens policy or modifies that product contract.
+
+Source locations identify the audited baseline/fix site. No production incidence is claimed.

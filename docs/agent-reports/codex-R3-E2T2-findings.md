@@ -1,6 +1,6 @@
 # R3-E2T2: Codex (GPT-6.1 Sol) findings
 
-Generated 2026-09-30 21:19 MT from the run's findings.tsv / prs.tsv.
+Generated 2026-09-30 21:33 MT from the run's findings.tsv / prs.tsv.
 
 ## PRs
 
@@ -13,6 +13,7 @@ Generated 2026-09-30 21:19 MT from the run's findings.tsv / prs.tsv.
 | 1000 | hunt/sol-r3ops-bench-startup-cleanup | none | yes | fix(connect-bench): stop core children after failed startup |
 | 1002 | hunt/sol-r3ops-provision-pending-recovery | none | yes | fix(provision): persist recovered pending transaction completion |
 | 1011 | hunt/sol-r3ops-audit-report | none | yes | docs(audit): record E2/T2 findings and peer history limit |
+| 1018 | hunt/sol-r3ops-audit-receipts | none | yes | docs(audit): record hosted E2/T2 receipts and merged fixes |
 
 ## Hypotheses
 
@@ -31,7 +32,7 @@ Generated 2026-09-30 21:19 MT from the run's findings.tsv / prs.tsv.
 | HA-OVERLAP | E2 | — | services/home-agent/report_example.py:278 | Overlapping timers can mutate accounting concurrently | false-positive; nonblocking flock covers the whole invocation |
 | HA-CROSS-USER | E2 | — | services/home-agent/report_example.py:493 | Stable node identity could charge a different account | false-positive; explicit persisted-user identity guard and existing regression |
 | HA-REPLAY-ACK | E2 | — | services/home-agent/report_example.py:657 | Pending replay omits a metering ACK | false-positive; replay is not a new observation and must not acknowledge one |
-| HA-RETRY-WEDGE | E2 | — | services/home-agent/report_example.py:621 | Retrying a rejected report blocks all later accounts | false-positive; current main bounds I/O and isolates permanent refusals |
+| HA-UNBOUNDED-DELIVERY | E2 | — | services/home-agent/report_example.py:621 | Bad networks keep the delivery loop retrying indefinitely | false-positive; 20s request timeout, network errors propagate, permanent-refusal batches shrink and isolate |
 | HA-GENERATION | E2 | — | services/home-agent/report_example.py:497 | Counter reset above the prior watermark can lose usage | duplicate; open issue #5 counter-generation design |
 | HA-REPORT-400 | E2 | — | services/home-agent/report_example.py:604 | A permanently refused report wedges the queue | duplicate; #899 refusal isolation is already on main |
 | T2-PIN-DRIFT | T2 | — | tooling/scripts/prepare-macos-sing-box.sh:42 | Prepared binary may not match the committed product pin | false-positive; manifest, binary, source and toolchain pins agree |

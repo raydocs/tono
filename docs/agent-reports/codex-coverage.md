@@ -11,3 +11,5 @@
 | R3-W5gap | W5 dns/mod.rs 2022+, engine.rs, native_apply.rs | Sol (Codex acct 2) | finished 21:05 MT | unfinished: 3 unverified candidates | PRs: #982 #985 #987 #989 |
 | R3-M10gap | M10 SubscriptionManager, UpdateHandoffJournal, NativeUpdateDownload, SubscriptionURLPolicy | Sol (Codex acct 2) | finished 21:05 MT | unfinished: none | PRs: #991 #993 |
 | R3-M6M8 | M6 AppState+Connect, M8 lifecycle/reachability | Sol (Codex acct 2) | finished 21:19 MT | unfinished: none (Swift not runnable; 1 decision item R3CONN-DEC01) | PRs: #1001 |
+| R3-A2A4 | A2, A3, A4 (Windows connection flow) | Sol (Codex acct 2) | finished 21:33 MT | unfinished: 3 unverified candidates; native/real-device checks | PRs: #1003 #1010 |
+| R3-C4E1 | C4 ingest/quota/policy, E1 exit-agent | Sol (Codex acct 2) | finished 21:33 MT | unfinished: 1 decision item | PRs: #1009 #1015 |

@@ -1,17 +1,10 @@
-# R3-A2A4: Codex (GPT-6.1 Sol) findings
+40 hypotheses: 25 false positives, 10 duplicates, 3 unverified candidates, 2 verified P1 fixes.
 
-Generated 2026-09-30 21:33 MT from the run's findings.tsv / prs.tsv.
+PR #1003 (hunt/sol-r3wconn-monitor-ai-hold) and #1010 (hunt/sol-r3wconn-failed-connect-ai-hold): needs-hardware; MERGE auto-merge enabled. Both branches are pushed; native CI/merge queue pending at final audit.
 
-## PRs
+Metadata correction: #1003 body edit failed twice with deprecated projectCards GraphQL; corrected body saved in monitor-ai-hold-pr-body.md. No workaround attempted.
 
-| PR | Branch | Labels | Auto-merge requested | Title |
-|---|---|---|---|---|
-| 1003 | hunt/sol-r3wconn-monitor-ai-hold | needs-hardware | yes | fix(windows): preserve AI hold after automatic health release |
-| 1010 | hunt/sol-r3wconn-failed-connect-ai-hold | needs-hardware | yes | fix(windows): keep AI hold during guarded connect-failure release |
-
-## Hypotheses
-
-| ID | Area | Sev | Location | Description | Verdict |
+| ID | area | severity | file:line | description | verdict |
 |---|---|---|---|---|---|
 | WIN-MONITOR-AI-HOLD-OMISSION | A3 | P1 | connection/monitor.rs:1391 | Automatic health release removes the secondary AI hold | real-fixed #1003 (CI pending) |
 | R3-A2-01 | A2 | — | connection/reconnect.rs:139 | Reconnect budget leaves ordinary users blocked | false-positive ordinary failure releases; persistent hold needs another release failure |
@@ -53,3 +46,5 @@ Generated 2026-09-30 21:33 MT from the run's findings.tsv / prs.tsv.
 | R3-A2-11 | A2 | — | connection/monitor.rs:616 | Old stage tail monitor registration adopts new session | false-positive monitor independently checks live status and generations; harmful overlap unproved |
 | R3-A2-12 | A2 | — | connection/switch.rs:238 | Hot switch stops committed DIRECT heartbeat | false-positive hot switch preserves generation; heartbeat policy identity unchanged |
 | WIN-CONNECT-FAILURE-AI-HOLD-OMISSION | A2/A3 | P1 | connection.rs:680 | Failed protected connect/cold switch performs one plain release without AI hold | real-fixed #1010 (CI pending) |
+
+All assigned A2–A4 source files read end to end. Local exact extracted Rust regressions: one failed-before/passed-after test for each fix; portable unarmed-probe tests 3 passed. Native Windows/Tauri/WFP/NRPT/hardware checks unavailable locally. No deploy/publish.
