@@ -260,11 +260,14 @@ export function boundsFor(profile: QuotaProfile, nowSec: number): CycleBounds | 
   return cycleBounds(kind, anchor, nowSec);
 }
 
+// Callers that read counters pass a reader, which runs after the cycle read:
+// a reading taken before another roll committed would otherwise be compared
+// with that newer counter and counted as a reset (#1181).
 export async function rollNodeCycle(
   db: D1Database,
   nodeName: string,
   profile: QuotaProfile,
-  counters: NetCounters,
+  readCounters: NetCounters | (() => Promise<NetCounters | null>),
   nowSec: number,
 ): Promise<Row | null> {
   const name = nodeName.slice(0, NAME_LIMIT);
@@ -273,6 +276,8 @@ export async function rollNodeCycle(
   const counts = asCounts(field(profile, 'quota_counts', 'quotaCounts'));
   const kind = asKind(field(profile, 'cycle_kind', 'cycleKind'));
   let open = await openCycleRow(db, name);
+  const counters = typeof readCounters === 'function' ? await readCounters() : readCounters;
+  if (!counters) return null;
   const expected = boundsFor(profile, nowSec);
 
   const expired = open && Number(open.cycle_end) <= nowSec && kind !== 'manual' ? open : null;
@@ -302,6 +307,25 @@ export async function rollNodeCycle(
     peakBytes = todayBytes;
   }
 
+  // Compare-and-set on the row read above: if another roll committed since,
+  // drop this reading; the next cumulative reading counts its traffic.
+  const admitted = await db.prepare(
+    `UPDATE node_traffic_cycles SET
+       used_bytes = ?, counter_in_last = ?, counter_out_last = ?,
+       resets_detected = ?, peak_day_at = ?, peak_day_bytes = ?,
+       quota_bytes = COALESCE(?, quota_bytes), updated_at = ?
+     WHERE id = ? AND status = 'open' AND used_bytes IS ? AND counter_in_last IS ?
+       AND counter_out_last IS ? AND resets_detected IS ?`,
+  ).bind(
+    used, counters.in, counters.out, resets, peakAt, peakBytes, quota, nowSec, open.id,
+    open.used_bytes, open.counter_in_last, open.counter_out_last, open.resets_detected,
+  ).run();
+  if (!Number(admitted.meta.changes ?? 0)) {
+    await db.prepare('UPDATE node_traffic_cycles SET quota_bytes = COALESCE(?, quota_bytes) WHERE id = ?')
+      .bind(quota, open.id).run();
+    return db.prepare('SELECT * FROM node_traffic_cycles WHERE id = ?').bind(open.id).first<Row>();
+  }
+
   await db.prepare(
     `INSERT INTO node_traffic_cycle_samples(cycle_id, at, used_bytes)
      VALUES(?, ?, ?)
@@ -319,15 +343,8 @@ export async function rollNodeCycle(
       Number(open.cycle_end),
     );
 
-  await db.prepare(
-    `UPDATE node_traffic_cycles SET
-       used_bytes = ?, counter_in_last = ?, counter_out_last = ?,
-       resets_detected = ?, peak_day_at = ?, peak_day_bytes = ?,
-       projected_exhaust_at = ?, quota_bytes = COALESCE(?, quota_bytes), updated_at = ?
-     WHERE id = ?`,
-  ).bind(
-    used, counters.in, counters.out, resets, peakAt, peakBytes, projected, quota, nowSec, open.id,
-  ).run();
+  await db.prepare('UPDATE node_traffic_cycles SET projected_exhaust_at = ? WHERE id = ?')
+    .bind(projected, open.id).run();
   await db.prepare('DELETE FROM node_traffic_cycle_samples WHERE at < ?')
     .bind(nowSec - SAMPLE_RETENTION).run();
 
@@ -460,10 +477,14 @@ export async function rollAllNodeCycles(
   let skipped = 0;
   for (const profile of profiles.results) {
     const node = String(profile.catalog_name);
-    const counters = await readCounters(node);
-    if (!counters) { skipped += 1; continue; }
-    await rollNodeCycle(db, node, profile, counters, nowSec);
-    rolled += 1;
+    let sampled = false;
+    await rollNodeCycle(db, node, profile, async () => {
+      const counters = await readCounters(node);
+      sampled = counters != null;
+      return counters;
+    }, nowSec);
+    if (sampled) rolled += 1;
+    else skipped += 1;
   }
   return { rolled, skipped };
 }

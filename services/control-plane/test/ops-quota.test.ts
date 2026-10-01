@@ -271,6 +271,28 @@ describe('rollNodeCycle', () => {
     expect(await openCount('A')).toBe(1);
     expect(await openCount('B')).toBe(0);
   });
+
+  it('drops a reading overtaken by a newer roll instead of counting a reset (#1181)', async () => {
+    const profile = { cycle_kind: 'calendar_day', cycle_anchor_day: 1, traffic_quota_bytes: 1_000, quota_counts: 'in_out' };
+    const now = utc(2025, 6, 10, 4);
+    await rollNodeCycle(db(), 'Stale', profile, { in: 100, out: 0, at: now }, now);
+    let entered!: () => void;
+    let release!: () => void;
+    const readerEntered = new Promise<void>((resolve) => { entered = resolve; });
+    const released = new Promise<void>((resolve) => { release = resolve; });
+    const stale = rollNodeCycle(db(), 'Stale', profile, async () => {
+      entered();
+      await released;
+      return { in: 150, out: 0, at: now + 60 };
+    }, now + 60);
+    await readerEntered;
+    await rollNodeCycle(db(), 'Stale', profile, { in: 200, out: 0, at: now + 120 }, now + 120);
+    release();
+    const after = await stale;
+    expect(Number(after?.used_bytes)).toBe(100);
+    expect(Number(after?.counter_in_last)).toBe(200);
+    expect(Number(after?.resets_detected)).toBe(0);
+  });
 });
 
 async function openCount(name: string) {
