@@ -3,6 +3,7 @@ import { type Row, str } from './env';
 import { DIAGNOSTICS_MAX_REPORTED_AT_MS } from './diagnostics-limits';
 import { diagnosticsInt, rejectUnexpectedKeys } from './request';
 import { isPlatform } from './ops/platform';
+import { redactJobResult } from './ops/job-redaction';
 
 export const TELEMETRY_MAX_EVENTS = 200;
 const TELEMETRY_PAYLOAD_MAX_BYTES = 64 * 1024;
@@ -27,6 +28,13 @@ const telemetryEventStringKeys = [
   'from', 'to', 'mode', 'reference', 'outcome', 'code',
   'attemptId', 'transport',
 ];
+/**
+ * Free text a client may fill from raw errors or probe output. Clients only
+ * strip credentials here, so exit addresses, UUIDs and emails are redacted
+ * before the window is stored or flattened into `connection_events`.
+ */
+const telemetryEventFreeTextKeys = new Set(['error', 'reason', 'probe', 'from', 'to']);
+const TELEMETRY_EVENT_TEXT_MAX = 500;
 const telemetryEventNumberKeys = [
   'ts', 'elapsedMs', 'delayMs', 'counter', 'restartCount', 'oldPid', 'newPid',
   'revision', 'domains', 'media', 'webDomains', 'wechatTcp', 'webTcp', 'udp',
@@ -101,7 +109,10 @@ export function canonicalTelemetryWindow(value: unknown) {
     for (const key of telemetryEventStringKeys) {
       if (key === 'kind') continue;
       if (entry[key] === undefined || entry[key] === null) continue;
-      event[key] = str(entry[key], key, 0, key === 'attemptId' ? 64 : 500);
+      const value = str(entry[key], key, 0, key === 'attemptId' ? 64 : TELEMETRY_EVENT_TEXT_MAX);
+      event[key] = telemetryEventFreeTextKeys.has(key)
+        ? redactJobResult(value).slice(0, TELEMETRY_EVENT_TEXT_MAX)
+        : value;
     }
     for (const key of telemetryEventNumberKeys) {
       if (key === 'ts') continue;

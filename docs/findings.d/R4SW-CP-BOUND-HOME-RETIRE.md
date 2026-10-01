@@ -1,5 +1,5 @@
 | ID | 问题（一句） | 状态 | Issue / PR | 等级 | 剩余限制 |
 |---|---|---|---|---|---|
-| R4SW-CP-BOUND-HOME-RETIRE | Fleet retirement 忽略通过 homeProxy 使用节点的住宅绑定，可删除并吊销仍被客户使用的住宅出口 | in-PR | #1083 | 中·已确认 | P1; local Worker/D1 regression passed; no deployment or device testing |
+| R4SW-CP-BOUND-HOME-RETIRE | Fleet retirement 忽略通过 homeProxy 使用节点的住宅绑定，可删除并吊销仍被客户使用的住宅出口 | fixed | [#1083](https://github.com/raydocs/tono/pull/1083) | 中·已确认 | P1; local Worker/D1 regression passed; no deployment or device testing |
 
 Follow-up to #832. A customer connected through cloud Fuji and bound to catalog home Kite is absent from retirement's selected-server/defaultProxy dependency counts. Retiring Kite therefore removes its catalog entry and immediately disables its exit token while retaining the binding; subsequent per-user catalog assembly fails because homeProxy no longer exists. This bypasses the explicit `home.ts` invariant requiring all users to be unbound before retiring a home. Fleet retirement preview now resolves base and legacy HY2 catalog-home rows and calls the existing `assertHomeExitUnbound`. Both fresh retirement and queued-job replay pass this guard before catalog/token mutation. One real Worker regression failed before the guard (`succeeded` instead of `failed`) and passed afterward, preserving catalog, active token and binding.

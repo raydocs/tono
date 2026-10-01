@@ -351,11 +351,16 @@ nonisolated enum HelperProtocolVersion {
     /// - 4.52.22 → 4.52.23: pending-update automatic failure release retains the AI hold.
     /// - 4.52.27 → 4.52.28: the desktop update contract may name an optional
     ///   sing-box digest. The helper must be rebuilt to accept that field.
-    /// - 4.52.28 → 4.52.29: removal and `--emergency-reset` keep the helper
+    /// - 4.52.28 → 4.52.29: a Protected Offline update recovers fail-open. The
+    ///   successor helper releases PF at launch with the Core stopped, so an
+    ///   observed Unprotected state now satisfies a Protected Offline
+    ///   recovery and commit; Connected still requires Connected. The
+    ///   secondary AI hold on that standard release is unchanged.
+    /// - 4.52.29 → 4.52.30: removal and `--emergency-reset` keep the helper
     ///   (PF still released) when owned DNS was not restored, so its DNS
     ///   recovery retries. An explicit selective-layer removal is recorded as
     ///   pending until it finishes and a restarted helper finishes it.
-    static let current = "4.52.29"
+    static let current = "4.52.30"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS

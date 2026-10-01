@@ -53,7 +53,7 @@ pub(super) async fn retire_timed_out_generation(state: &Arc<TonoState>, generati
     // The abort-free variant: this handler frequently runs *inside* a registered connection
     // task (reconnect loop / monitor re-entry / switch), and aborting the registry here would
     // kill the caller before `fail_connect` + `schedule_reconnect` run, stranding Connecting.
-    inner.retire_connection_generation(release_late_commit);
+    inner.retire_timed_out_connection_generation(release_late_commit);
     Some(inner.connect_generation)
 }
 
@@ -127,10 +127,8 @@ async fn stale_after_arm(
     state: &Arc<TonoState>, generation: u64,
     _guard: &tokio::sync::OwnedRwLockReadGuard<()>,
 ) -> StageFailure {
-    // Asks for the intent of the bump that retired *this* generation, not the latest one: a
-    // later non-releasing bump must not downgrade a pending release into "keep blocking".
-    let release_intent = { state.lock().await.release_intent_for(generation) };
-    if stale_exit_needs_release(true, release_intent) {
+    let release = stale_arm_release(&*state.lock().await, generation);
+    if let Some(apply_narrow) = release {
         logging!(
             warn,
             Type::Service,
@@ -141,9 +139,24 @@ async fn stale_after_arm(
         // Stop is best-effort, matching `release_explicit`; release remains owner-gated and
         // idempotent even if the session was already cleared.
         let _ = service::tono_stop_core(false).await;
-        let _ = service::tono_release_kill_switch().await;
+        let _ = if apply_narrow {
+            service::tono_release_kill_switch_applying_narrow().await
+        } else {
+            service::tono_release_kill_switch().await
+        };
     }
     StageFailure::Stale
+}
+
+/// How a committed StartClash of retired `generation` is compensated: `None` keeps the barrier,
+/// `Some(apply_narrow)` releases. Asks for the intent of the bump that retired *this*
+/// generation, not the latest one: a later non-releasing bump must not downgrade a pending
+/// release into "keep blocking". An automatic timeout keeps the secondary AI hold: its failure
+/// owner reads the disarm afterwards and no longer applies it (#1134). Explicit causes
+/// (Disconnect, sign-out, Restore, quit) keep the plain release.
+fn stale_arm_release(inner: &crate::tono::state::TonoInner, generation: u64) -> Option<bool> {
+    stale_exit_needs_release(true, inner.release_intent_for(generation))
+        .then(|| inner.automatic_retirement_for(generation))
 }
 
 /// A stale DNS enable needs one extra rollback before WFP may be released. A disconnect can
@@ -343,6 +356,25 @@ mod tests {
         assert_eq!(inner.controller_secret.as_deref(), Some("new-owner"));
         assert!(inner.connect_error.is_none());
         assert!(inner.next_retry_at_ms.is_none());
+    }
+
+    #[tokio::test]
+    async fn late_arm_after_automatic_timeout_keeps_the_ai_hold_and_explicit_release_does_not() {
+        let state = Arc::new(TonoState::for_test());
+        {
+            let mut inner = state.lock().await;
+            inner.connect_generation = 41;
+            inner.fsm.begin_connect();
+        }
+        // An unverified first attempt times out while its StartClash is still in flight.
+        assert_eq!(retire_timed_out_generation(&state, 41).await, Some(42));
+        // Its replacement is then retired by an explicit Disconnect.
+        state.lock().await.invalidate_connection(true);
+        let inner = state.lock().await;
+        assert_eq!(stale_arm_release(&inner, 41), Some(true),
+            "a late arm of the timed-out attempt must be released keeping the AI hold");
+        assert_eq!(stale_arm_release(&inner, 42), Some(false),
+            "an explicit Disconnect keeps its plain release");
     }
 
     #[tokio::test]

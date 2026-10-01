@@ -49,6 +49,7 @@ final class DiagnosticsLogOwnershipTests: XCTestCase {
         let expected = try XCTUnwrap(DiagnosticsLogUploader.gzip(Data(owned.utf8)))
         let uploader = DiagnosticsLogUploader(auditLogURL: log, scopeID: "new", isEnabled: { true }) {
             data, _, _, lines, _, _ in
+            guard lines > 0 else { return } // the empty probe is stored
             XCTAssertEqual(lines, 1)
             XCTAssertEqual(data, expected)
         }
@@ -76,6 +77,7 @@ final class DiagnosticsLogOwnershipTests: XCTestCase {
         let expected = try XCTUnwrap(DiagnosticsLogUploader.gzip(Data(ownedLine.utf8)))
         let uploader = DiagnosticsLogUploader(auditLogURL: log, scopeID: "new", isEnabled: { true }) {
             data, _, _, lines, _, _ in
+            guard lines > 0 else { return } // the empty probe is stored
             XCTAssertEqual(lines, 1)
             XCTAssertEqual(data, expected)
         }

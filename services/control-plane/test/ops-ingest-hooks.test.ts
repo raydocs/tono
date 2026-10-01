@@ -171,6 +171,33 @@ describe('ops ingest hooks', () => {
     expect((await api('telemetry/windows', json(negative, account.token))).status).toBe(400);
   });
 
+  it('redacts addresses and identifiers from telemetry free text before storing or flattening', async () => {
+    const account = await seedAccount('scrub');
+    const body = telemetryWindow();
+    const nowMs = Date.now();
+    body.window.eventCount = 3;
+    (body.window.events as Record<string, unknown>[]).push({
+      ts: nowMs - 10_000, kind: 'connectFail', node: 'Salt Lake City · Summit',
+      error: 'dial 203.0.113.7:443 for 1b4e28ba-2fa1-11d2-883f-0016d3cca427 (owner@example.com)',
+      reason: 'probe 198.51.100.4 timed out', probe: 'tcp 198.51.100.4:443',
+      from: 'Salt Lake City · Summit', to: '192.0.2.9',
+    });
+    const response = await api('telemetry/windows', json(body, account.token));
+    expect(response.status).toBe(201);
+    const { id } = await response.json() as { id: string };
+    const stored = await db().prepare('SELECT payload_json FROM telemetry_windows WHERE id = ?')
+      .bind(id).first<{ payload_json: string }>();
+    const flattened = await db().prepare(
+      "SELECT error, reason, from_node, to_node FROM connection_events WHERE window_id = ? AND kind = 'connectFail'",
+    ).bind(id).first<Record<string, string>>();
+    const text = `${stored?.payload_json} ${JSON.stringify(flattened)}`;
+    for (const secret of ['203.0.113.7', '198.51.100.4', '192.0.2.9', '1b4e28ba', 'owner@example.com']) {
+      expect(text).not.toContain(secret);
+    }
+    expect(flattened?.error).toBe('dial [redacted]:443 for [redacted] ([redacted])');
+    expect(flattened?.from_node).toBe('Salt Lake City · Summit');
+  });
+
   it('keeps a retried route-byte interval separate from the heartbeat window and advertises support', async () => {
     const account = await seedAccount('route-interval');
     const body = telemetryWindow();

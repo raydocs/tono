@@ -388,6 +388,7 @@ pub(crate) async fn adopt_sign_in_response(
     // it (#594), so clear it as sign-out does, or this account's report carries that account's
     // failure.
     inner.attempt_history = Default::default();
+    inner.clear_live_connect_attempt();
     // Keep the Tono state lock through adoption: a resend/sign-out cannot invalidate this
     // generation between the last check and the token write.
     // The refresh token is in memory and its vault write is only queued: the marker commits once
@@ -626,6 +627,7 @@ where
             inner.account = None;
             inner.account_state = AccountState::SignedOut;
             inner.attempt_history = Default::default();
+            inner.clear_live_connect_attempt();
             inner.challenge_id = None;
             inner.controller_secret = None;
             inner.controller_port = None;
@@ -1076,6 +1078,35 @@ mod lifecycle_tests {
         assert_eq!(inner.heal.dial, "Los Angeles", "a new account starts from its selected server");
         assert!(inner.heal.pending_dial.is_none());
         assert!(inner.heal.tried.is_empty());
+    }
+
+    #[tokio::test]
+    async fn replacement_sign_in_drops_the_previous_accounts_live_connect_failure() {
+        let state = Arc::new(TonoState::for_test());
+        {
+            let mut inner = state.lock().await;
+            // Account A's last Connect failed; A never started another one.
+            inner.connect_steps = crate::tono::steps::initial_steps();
+            crate::tono::steps::fail_current(&mut inner.connect_steps, 1200);
+            inner.step_started_at = Some(std::time::Instant::now());
+            inner.failed_stage = Some("preparing");
+            inner.connect_error = Some("account A's connect failure".into());
+            inner.connect_error_at_ms = Some(1);
+        }
+        let (client, _, generation) = begin_sign_in(&state).await.unwrap();
+        state.lock().await.challenge_id = Some("challenge-b".into());
+        let auth: tono_core::auth::AuthResponse = serde_json::from_value(serde_json::json!({
+            "accessToken": "fixture-access-b",
+            "user": { "id": "account-b", "email": "b@example.test" },
+        })).unwrap();
+        adopt_sign_in_response(&state, &client, generation, "challenge-b", &auth, |_| {}).await.unwrap();
+        let inner = state.lock().await;
+        // B's progress and diagnostics read these fields before B's first Connect.
+        assert!(inner.connect_error.is_none(), "B must not report A's connect failure");
+        assert!(inner.failed_stage.is_none());
+        assert!(inner.connect_error_at_ms.is_none());
+        assert!(inner.step_started_at.is_none());
+        assert!(inner.connect_steps.iter().all(|step| step.state == crate::tono::steps::StepState::Pending));
     }
 
     #[tokio::test]
