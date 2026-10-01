@@ -13,6 +13,7 @@ import { clientCopy } from './clients';
 import { ledgerCopy } from './ledger';
 import { nodeDetailCopy } from './node-detail';
 import { panelCopy } from './panel';
+import { qualityCopy } from './quality';
 import { settingsCopy } from './settings';
 import { settingsPublishCopy } from './settings-publish';
 import { customerCopy } from './customers';
@@ -32,6 +33,7 @@ export const copy = {
   ...worthwhileCopy,
   ...panelCopy,
   ...diagnosticsCopy,
+  ...qualityCopy,
 } as const;
 
 
