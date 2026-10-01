@@ -92,6 +92,7 @@ final class AppState {
     var lastConnectionFailure: ConnectionFailure?
     /// Next dial chosen by ExitHeal while PF is down. Nil keeps the selected node.
     var unarmedDialName: String?
+    var unarmedReconnectAttempt = 0
     /// Test seam. Nil uses a TCP connect that does not install PF.
     /// Not observed: an optional MainActor closure cannot be yielded by Observation.
     @ObservationIgnored
@@ -105,6 +106,9 @@ final class AppState {
     /// Helper transport only; pending-update release ownership stays in AppState.
     var nativeUpdateDisconnect: () async throws -> HelperManager.UpdateStatus = {
         try await PrivilegedRuntimeCoordinator.shared.nativeUpdate("disconnect")
+    }
+    var nativeUpdateReleaseAfterFailure: () async throws -> HelperManager.UpdateStatus = {
+        try await PrivilegedRuntimeCoordinator.shared.nativeUpdate("release")
     }
     var isProtectedReconnectScheduled = false
     var protectedReconnectAttempt = 0
@@ -411,6 +415,9 @@ final class AppState {
     /// the helper, or sing-box — the same pattern as `networkProtection` and
     /// `tunInterfaceExists`.
     var optionalPolicyRuntimeMutation: (() async throws -> Void)?
+    /// Tests replace privileged replacement after the real desired-policy preparation.
+    @ObservationIgnored
+    var optionalPolicyPreparedRuntimeMutation: ((ConfigPipeline.ManagedDirectRuntimePolicy?) async throws -> Void)?
     let subscriptionManager = SubscriptionManager()
     let proxyService = ProxyService()
     private let providerRuleLoader = ProviderRuleLoader()
@@ -1757,10 +1764,24 @@ final class AppState {
             let controllerResult: ProbeCheck
             if case .ok = tun {
                 controllerResult = controller ?? .ok
-                // The tunnel is already proved. A delay sample after that
-                // does not sit on the handshake the probe just paid for.
+                // The tunnel is already proved. Wait so the first page does not
+                // share that tunnel with the advisory /delay handshake.
                 if controllerTask == nil, let advisoryProbe {
-                    _ = advisoryProbe()
+                    let capturedGeneration = generation
+                    Task { @MainActor in
+                        do {
+                            try await Task.sleep(for: .milliseconds(
+                                ProtectedConnectivity.advisoryDelayDeferralMilliseconds
+                            ))
+                        } catch {
+                            return
+                        }
+                        guard !Task.isCancelled else { return }
+                        guard capturedGeneration == self.connectionCoordinator.protectionOperationGeneration else {
+                            return
+                        }
+                        _ = advisoryProbe()
+                    }
                 }
             } else if includeMixed {
                 if let controller {
@@ -1836,7 +1857,9 @@ final class AppState {
 
     func scheduleBackgroundOptionalPolicy() {
         let policy = managedTrafficPolicy
-        guard !policy.domains.isEmpty || !policy.webDomains.isEmpty else { return }
+        guard activeDirectPolicy != nil || !policy.domains.isEmpty || !policy.webDomains.isEmpty
+            || !policy.directSuffixes.isEmpty || !policy.mediaEndpoints.isEmpty
+            || !policy.tcpEndpoints.isEmpty else { return }
         // Arming PF, rewriting config.yaml, syncing it to the helper and
         // reloading the controller is the same runtime mutation the reload and
         // node-switch paths perform, and the helper hard-enforces the synced
@@ -1874,6 +1897,31 @@ final class AppState {
         replacementStarted ? .teardown : .keepSession
     }
 
+    /// Rebuild authorization from the accepted document before filling its current DNS pins.
+    func prepareOptionalDirectPolicy(
+        policy: TonoTrafficPolicy,
+        base: ConfigPipeline.ManagedDirectRuntimePolicy?,
+        api: CoreControllerClient
+    ) async throws -> ConfigPipeline.ManagedDirectRuntimePolicy? {
+        guard !policy.domains.isEmpty || !policy.webDomains.isEmpty || !policy.directSuffixes.isEmpty
+            || !policy.mediaEndpoints.isEmpty || !policy.tcpEndpoints.isEmpty else { return nil }
+        let physicalInterface: String?
+        if let existing = base?.physicalInterface {
+            physicalInterface = existing
+        } else {
+            physicalInterface = await PrivilegedRuntimeCoordinator.shared.primaryNetworkInterface()
+        }
+        guard let physicalInterface else { throw ConfigPipeline.TonoInjectionError.unsafeOverlay }
+        let seed = try initialDirectPolicy(physicalInterface: physicalInterface, policy: policy)
+        guard let resolved = await resolveManagedDirectDomains(
+            policy: policy, base: seed, api: api,
+            preservingSessionEndpoints: base?.sessionEndpoints ?? []
+        ) else {
+            throw ConfigPipeline.TonoInjectionError.unsafeOverlay
+        }
+        return resolved
+    }
+
     private func applyOptionalDirectPolicyInBackground(policy: TonoTrafficPolicy) async {
         guard isConnected, !isDisconnecting, !Task.isCancelled,
               let api = coreController else { return }
@@ -1895,14 +1943,10 @@ final class AppState {
                 try await runtimeMutation()
                 return
             }
-            let resolved = await resolveManagedDirectDomains(
-                policy: policy,
-                base: base,
-                api: api
-            )
+            let resolved = try await prepareOptionalDirectPolicy(policy: policy, base: base, api: api)
             guard generation == connectionCoordinator.protectionOperationGeneration, isConnected,
                   !Task.isCancelled else { return }
-            guard let resolved, resolved != base else {
+            guard resolved != base else {
                 ConnectionTelemetryBuffer.shared.record(
                     "optionalPolicyRollback",
                     reason: "unchanged_or_unresolved",
@@ -1910,14 +1954,26 @@ final class AppState {
                 )
                 return
             }
+            if let runtimeMutation = optionalPolicyPreparedRuntimeMutation {
+                replacementStarted = true
+                try await runtimeMutation(resolved)
+                guard generation == connectionCoordinator.protectionOperationGeneration,
+                      isConnected, !Task.isCancelled else { return }
+                activeDirectPolicy = resolved
+                return
+            }
+            // Retain the old runtime's grants until its replacement is installed.
+            let transitionEndpoints = Array(Set((base?.sessionEndpoints ?? []) + (resolved?.sessionEndpoints ?? [])))
+            let transitionReviewedPermit = base?.requiresAddressFreeDirectPermit == true
+                || resolved?.requiresAddressFreeDirectPermit == true
             try await PrivilegedRuntimeCoordinator.shared.armKillSwitch(
                 apiHosts: [],
                 tunnelInterfaces: [ConfigPipeline.tonoTunInterface],
                 proxyEndpoints: currentProxyEndpoints(),
-                sessionDirectEndpoints: resolved.sessionEndpoints,
+                sessionDirectEndpoints: transitionEndpoints,
                 tailscaleBootstrapEnabled: AppProfile.homeExitEnabled && tonoTransport != nil,
                 helperPrepared: true,
-                reviewedBundleDirect: resolved.requiresAddressFreeDirectPermit
+                reviewedBundleDirect: transitionReviewedPermit
             )
             guard generation == connectionCoordinator.protectionOperationGeneration,
                   !Task.isCancelled else { return }
@@ -1951,7 +2007,7 @@ final class AppState {
             // /core/sync withheld the reviewed-bundle permit while the Core
             // restarted without its utun (#608). It returns only through an
             // arm with the flag once the new tunnel exists.
-            if resolved.requiresAddressFreeDirectPermit {
+            if transitionReviewedPermit || Set(transitionEndpoints) != Set(resolved?.sessionEndpoints ?? []) {
                 guard await Self.waitForOwnedTunnelInterface() else {
                     throw KillSwitchService.Error.commandFailed(
                         "Mihomo did not recreate the owned \(ConfigPipeline.tonoTunInterface) interface."
@@ -1961,10 +2017,10 @@ final class AppState {
                     apiHosts: [],
                     tunnelInterfaces: [ConfigPipeline.tonoTunInterface],
                     proxyEndpoints: currentProxyEndpoints(),
-                    sessionDirectEndpoints: resolved.sessionEndpoints,
+                    sessionDirectEndpoints: resolved?.sessionEndpoints ?? [],
                     tailscaleBootstrapEnabled: AppProfile.homeExitEnabled && tonoTransport != nil,
                     helperPrepared: true,
-                    reviewedBundleDirect: true
+                    reviewedBundleDirect: resolved?.requiresAddressFreeDirectPermit == true
                 )
                 guard generation == connectionCoordinator.protectionOperationGeneration,
                       !Task.isCancelled else { return }
@@ -2019,8 +2075,8 @@ final class AppState {
                   generation == connectionCoordinator.protectionOperationGeneration else { return }
             // Replacement already touched Core, or restoring the previous PF
             // arm failed. macOS stores no `permanent` strict switch. The
-            // selective AI hook is not registered, so this restores the
-            // original network instead of holding bootstrap. A ready hook
+            // existing automatic release restores ordinary traffic and keeps
+            // the secondary AI hold instead of holding bootstrap. A ready hook
             // must not be disarmed. Strict still holds and retries.
             let disposition = ExhaustedFailureNetwork.afterFailure(
                 strictKillSwitchExplicit: false,
@@ -2028,7 +2084,7 @@ final class AppState {
             )
             switch disposition {
             case .failOpen:
-                disconnect(releaseKillSwitch: true)
+                disconnect(releaseKillSwitch: true, automaticFailureRelease: true)
                 errorMessage = String(
                     localized: "Secure app routing could not be applied. This Mac is back on its normal internet."
                 )

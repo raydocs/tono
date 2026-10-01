@@ -94,6 +94,16 @@ impl OwnedSingBoxRuntime {
     }
 }
 
+fn canonical_spki(value: &str) -> Result<String, SingBoxError> {
+    let raw = STANDARD
+        .decode(value)
+        .map_err(|_| SingBoxError::UnsupportedCertificatePin)?;
+    if raw.len() != 32 {
+        return Err(SingBoxError::UnsupportedCertificatePin);
+    }
+    Ok(STANDARD.encode(raw))
+}
+
 fn certificate_sha256(hex_pin: &str) -> Result<String, SingBoxError> {
     if hex_pin.len() != 64 || !hex_pin.bytes().all(|byte| byte.is_ascii_hexdigit()) {
         return Err(SingBoxError::UnsupportedCertificatePin);
@@ -175,8 +185,8 @@ pub fn build_runtime(input: RuntimeInput<'_>) -> Result<OwnedSingBoxRuntime, Sin
             .and_then(|name| input.nodes.iter().find(|n| &n.name == name))
     };
     let mut outbounds = Vec::new();
-    let unavailable_nodes = Vec::new();
-    for node in input.nodes {
+    let mut unavailable_nodes = Vec::new();
+    for (index, node) in input.nodes.iter().enumerate() {
         let checked = node::admit_node(&serde_yaml_ng::Value::Mapping(node.to_runtime_mapping()))
             .map_err(|_| InvalidNode)?;
         if checked != *node
@@ -195,18 +205,29 @@ pub fn build_runtime(input: RuntimeInput<'_>) -> Result<OwnedSingBoxRuntime, Sin
         }
         let outbound = match node.protocol {
             NodeProtocol::Hysteria2 => {
-                // Admission already requires a DER pin. Emit it as sing-box
-                // certificate_sha256. A pin that is not 32 raw bytes refuses
-                // the whole runtime; it is never dropped, never `insecure`,
-                // and never rewritten as an SPKI pin.
-                let pin = node
-                    .tls_fingerprint
-                    .as_deref()
-                    .ok_or(UnsupportedCertificatePin)?;
-                let encoded = certificate_sha256(pin)?;
+                // Decision 020: sing-box needs the published SPKI pin. A DER
+                // fingerprint is never copied into certificate_public_key_sha256.
+                // A selected block without SPKI refuses the runtime. An
+                // unselected block is recorded unavailable and omitted.
+                let Some(spki) = node.certificate_public_key_sha256.as_deref() else {
+                    if node.name == input.selected {
+                        return Err(UnsupportedCertificatePin);
+                    }
+                    unavailable_nodes.push(index);
+                    continue;
+                };
+                let encoded_spki = canonical_spki(spki)?;
+                let mut tls = json!({"enabled":true,"server_name":node.servername,
+                    "certificate_public_key_sha256":[encoded_spki]});
+                if let Some(pin) = node.tls_fingerprint.as_deref() {
+                    let encoded_der = certificate_sha256(pin)?;
+                    if encoded_der == encoded_spki {
+                        return Err(UnsupportedCertificatePin);
+                    }
+                    tls["certificate_sha256"] = json!([encoded_der]);
+                }
                 json!({"type":"hysteria2","tag":node.name,"server":node.server,"server_port":node.port,
-                    "password":node.uuid,
-                    "tls":{"enabled":true,"server_name":node.servername,"certificate_sha256":[encoded]}})
+                    "password":node.uuid, "tls":tls})
             }
             NodeProtocol::VlessReality => {
                 if node.client_fingerprint.as_deref() != Some("chrome") {
@@ -264,6 +285,13 @@ pub fn build_runtime(input: RuntimeInput<'_>) -> Result<OwnedSingBoxRuntime, Sin
         json!(format!("127.0.0.1:{}", ports.controller_port));
     runtime["experimental"]["clash_api"]["secret"] = json!(input.controller_secret);
     let rules = runtime["route"]["rules"].as_array_mut().unwrap();
+    if let Some(home) = home
+        && unavailable_nodes
+            .iter()
+            .any(|index| input.nodes[*index].name == home.name)
+    {
+        return Err(UnsupportedCertificatePin);
+    }
     let home_target = if let Some(socks) = &input.routing.home_socks5 {
         outbounds.push(json!({"type":"socks","tag":config::HOME_SOCKS5_OUTBOUND_NAME,"server":socks.host,"server_port":socks.port,
             "version":"5","username":socks.username,"password":socks.password,"detour":"Tono-Exit"}));
@@ -274,6 +302,10 @@ pub fn build_runtime(input: RuntimeInput<'_>) -> Result<OwnedSingBoxRuntime, Sin
     if let Some(target) = home_target {
         rules.push(json!({"network":"tcp","domain_suffix":config::CLAUDE_HOME_DOMAINS.to_vec(),"action":"route","outbound":target}));
         rules.push(json!({"network":"tcp","ip_cidr":config::CLAUDE_HOME_IPV4_CIDRS.to_vec(),"action":"route","outbound":target}));
+    } else if input.direct_plan.is_some() {
+        // Dedicated API children must never fall through to Alibaba DIRECT,
+        // including browser/curl requests without a residential hop.
+        rules.push(json!({"network":"tcp","domain_suffix":config::DEDICATED_MODEL_API_SUFFIXES.to_vec(),"action":"route","outbound":"Tono-Exit"}));
     }
     if home_target.is_some() || input.direct_plan.is_some() {
         for (field, values) in [
@@ -535,8 +567,9 @@ mod tests {
         let runtime = build_runtime(request).unwrap();
         let value: Value = serde_json::from_str(runtime.runtime_json()).unwrap();
         assert_eq!(
-            value["route"]["rules"][3],
-            json!({"type":"logical","mode":"and","rules":[
+            value["route"]["rules"].as_array().unwrap().iter()
+                .find(|rule| rule["type"] == "logical").unwrap(),
+            &json!({"type":"logical","mode":"and","rules":[
             {"network":"tcp","port":443,"domain":["qq.com"]},{"ip_cidr":["101.1.2.3/32"]}],
             "action":"route","outbound":"Tono-China-Direct"})
         );
@@ -556,6 +589,41 @@ mod tests {
             build_runtime(request).unwrap_err(),
             SingBoxError::UnsupportedPolicy
         );
+    }
+
+    #[test]
+    fn dashscope_routes_precede_alibaba_direct_with_and_without_a_home_hop() {
+        let nodes = nodes();
+        let plan = DirectPlan {
+            physical_interface: "Ethernet".into(),
+            hosts: vec![("qq.com".into(), "101.1.2.3".into())],
+            tcp_wechat_rules: vec![("qq.com".into(), "101.1.2.3".parse().unwrap(), 443)],
+            tcp_web_rules: vec![], web_suffix_rules: vec![("aliyuncs.com".into(), 443)],
+            udp_wechat_rules: vec![], wechat_process_path_regexes: vec![r"^C:\\WeChat\\.*$".into()],
+            reviewed_direct_ports: vec![443],
+        };
+        let check = |routing: CatalogRouting, target: &str| {
+            let mut request = input(&nodes, &routing);
+            request.direct_plan = Some(&plan);
+            let runtime = build_runtime(request).unwrap();
+            let value: Value = serde_json::from_str(runtime.runtime_json()).unwrap();
+            let rules = value["route"]["rules"].as_array().unwrap();
+            let direct = rules.iter().position(|rule| rule["outbound"] == config::DIRECT_GROUP_NAME).unwrap();
+            assert!(rules.iter().any(|rule| rule["domain_suffix"] == json!(["aliyuncs.com"])
+                && rule["outbound"] == config::DIRECT_GROUP_NAME));
+            for suffix in ["dashscope.aliyuncs.com", "dashscope-intl.aliyuncs.com", "dashscope-us.aliyuncs.com", "maas.aliyuncs.com"] {
+                let protected = rules.iter().position(|rule| rule["network"] == "tcp"
+                    && rule["domain_suffix"].as_array().is_some_and(|hosts| hosts.contains(&json!(suffix)))
+                    && rule["outbound"] == target).expect(suffix);
+                assert!(protected < direct, "{suffix}");
+            }
+            assert_eq!(value["dns"]["final"], "Tono-DoH");
+        };
+        check(CatalogRouting::default(), "Tono-Exit");
+        check(CatalogRouting { home_proxy: Some("Fixture Alpha".into()), ..Default::default() }, "Fixture Alpha");
+        check(CatalogRouting { home_socks5: Some(crate::catalog::CatalogHomeSocks5 {
+            host: "home.example.com".into(), port: 1080, username: "u".into(), password: "p".into(),
+        }), ..Default::default() }, config::HOME_SOCKS5_OUTBOUND_NAME);
     }
 
     #[test]
@@ -611,32 +679,37 @@ mod tests {
         let routing = CatalogRouting::default();
         let mut request = input(&nodes, &routing);
         request.selected = "Fixture Alpha · hy2";
-        let selected = build_runtime(request).unwrap();
+        assert_eq!(
+            build_runtime(request).unwrap_err(),
+            SingBoxError::UnsupportedCertificatePin
+        );
+        let unselected = build_runtime(input(&nodes, &routing)).unwrap();
         let encoded = "q6urq6urq6urq6urq6urq6urq6urq6urq6urq6urq6s=";
-        assert!(selected.runtime_json().contains(encoded));
+        assert!(!unselected.runtime_json().contains("Fixture Alpha · hy2"));
+        assert!(!unselected.runtime_json().contains(encoded));
+        assert!(
+            !unselected
+                .runtime_json()
+                .contains("certificate_public_key_sha256")
+        );
+        assert_eq!(unselected.unavailable_nodes(), &[2]);
+        use base64::Engine as _;
+        let spki = base64::engine::general_purpose::STANDARD.encode([0x11u8; 32]);
+        let pinned = node::admit_node(&serde_yaml_ng::to_value(json!({"name":"Fixture Gamma · hy2","type":"hysteria2",
+            "server":"1.0.0.1","port":8445,"password":"22222222-2222-4222-8222-222222222222","sni":"hy2.example",
+            "fingerprint":pin,"certificate-public-key-sha256":spki})).unwrap()).unwrap();
+        nodes.push(pinned);
+        let mut request = input(&nodes, &routing);
+        request.selected = "Fixture Gamma · hy2";
+        let selected = build_runtime(request).unwrap();
+        assert!(selected.runtime_json().contains(&spki));
+        assert!(selected.runtime_json().contains("certificate_public_key_sha256"));
+        assert!(selected.runtime_json().contains(&encoded));
         assert!(selected.runtime_json().contains("\"keep_alive_period\":\"5s\""));
         assert!(!selected.runtime_json().contains("idle_timeout"));
         assert!(!selected.runtime_json().contains("disable_chrome_parrot"));
         assert!(!selected.runtime_json().contains("insecure"));
-        assert!(
-            !selected
-                .runtime_json()
-                .contains("certificate_public_key_sha256")
-        );
-        assert!(selected.unavailable_nodes().is_empty());
-        let unselected = build_runtime(input(&nodes, &routing)).unwrap();
-        assert!(unselected.runtime_json().contains("Fixture Alpha · hy2"));
-        assert!(unselected.runtime_json().contains(encoded));
-        assert!(unselected.unavailable_nodes().is_empty());
-        let required = ["hy2".into()];
-        let mut request = input(&nodes, &routing);
-        request.required_capabilities = &required;
-        assert!(
-            build_runtime(request)
-                .unwrap()
-                .runtime_json()
-                .contains(encoded)
-        );
+        assert_eq!(selected.unavailable_nodes(), &[2]);
         nodes[2].tls_fingerprint = None;
         assert_eq!(
             build_runtime(input(&nodes, &routing)).unwrap_err(),
@@ -665,6 +738,11 @@ mod tests {
         );
         assert_eq!(value["inbounds"][0]["address"][0], "198.18.0.1/30");
         assert_eq!(value["inbounds"][0]["dns_address"][0], "198.18.0.2");
+        // alpha.9 sing-tun (stack omitted) caps send at 2 MiB and receive at
+        // 4 MiB. Those limits are compiled into the pinned binary. Emitting
+        // `stack` would select the deprecated gVisor path.
+        assert!(value["inbounds"][0].get("stack").is_none());
+        assert!(value["inbounds"][0].get("tcp_fast_open").is_none());
         assert!(probe_sees_fake([198, 18, 16, 0]));
         assert!(probe_sees_fake([198, 18, 31, 255]));
         assert!(!sing_box_pool([198, 18, 0, 1]));
@@ -704,8 +782,23 @@ mod tests {
         assert_eq!(rules[3]["response_rcode"], "NOERROR");
         assert_eq!(rules[3]["action"], "respond");
         assert_eq!(rules[4]["server"], "Tono-DoH-Backup");
+        assert_eq!(rules[4]["action"], "evaluate");
         assert_eq!(rules[5]["match_response"], "backup");
         assert_eq!(rules[5]["action"], "respond");
+        assert!(rules.iter().all(|rule| rule.get("race").is_none()));
+        let primary = rules
+            .iter()
+            .position(|rule| rule["tag"] == "primary")
+            .unwrap();
+        let respond = rules
+            .iter()
+            .position(|rule| rule["match_response"] == "primary")
+            .unwrap();
+        let backup = rules
+            .iter()
+            .position(|rule| rule["tag"] == "backup")
+            .unwrap();
+        assert!(primary < respond && respond < backup);
         assert_eq!(value["dns"]["final"], "Tono-DoH");
         assert_eq!(value["route"]["default_domain_resolver"], "Tono-DoH");
         let mut stolen = nodes.clone();

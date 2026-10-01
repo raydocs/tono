@@ -310,6 +310,13 @@ const scheduleReconnect = () => {
 
 async function reconnectConnectionSocket() {
   if (!hasConnectionSubscribers()) return
+  connectionFeedLive = false
+  pendingMessageData = null
+  if (flushTimer) {
+    window.clearTimeout(flushTimer)
+    flushTimer = null
+  }
+  notifyConnectionListeners()
   await closeConnectionSocket()
   scheduleReconnect()
 }

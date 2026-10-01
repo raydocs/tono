@@ -1,6 +1,6 @@
 # R4-KSdeep: Codex (GPT-6.1 Sol) findings
 
-Generated 2026-09-30 23:23 MT from the run's findings.tsv / prs.tsv.
+Generated 2026-10-01 00:54 MT from the run's findings.tsv / prs.tsv.
 
 ## PRs
 
@@ -39,3 +39,6 @@ Generated 2026-09-30 23:23 MT from the run's findings.tsv / prs.tsv.
 | WIN-SELECTIVE-REAPPLY-GAP | Windows AI hold | P2 | selective_layer.rs:82 | Repeated apply deletes existing AI hold before reapplying | real-fixed #1087 |
 | R4KS-GENERIC-LIVE-CORE | Windows recovery | P2 | windows_kill_switch.rs:3127 | Generic WFP-only fallback may retain Core routes and DNS hijack | duplicate W1-LIVE-CORE-RELEASE; safe teardown without a new install dependency remains unresolved |
 | R4KS-DURABLE-AI-INTENT | Windows AI hold | P2 | windows_kill_switch.rs:2799 | Automatic release can lose AI disposition across Service death | duplicate issue #1077; another hunter verified and owns reporting |
+| R4KS-LATE-DIRECT-BEGIN | Windows recovery | — | windows_kill_switch.rs:2309 | Late reload Begin cancels queued DIRECT retirement | false-positive Bracket preserves pending/deadline; retirement checked before lease and Lock is denied |
+| R4KS-OWNER-STARTUP-SPLIT | Windows startup | P2 | windows_kill_switch.rs:3534 | Interrupted user takeover leaves unverified owner B paired with active owner A and healthy Blocked | duplicate W1-UNVERIFIED-OWNER-RETIRE; intentional ambiguity guard needs a decision |
+| R4KS-NETSH-SYSTEMROOT | Windows AI hold | P2 | selective_fail_open.rs:106 | Hard-coded C Windows netsh path fails on another system drive | duplicate issue #1085 R3REGW-SELECTIVE-NETSH-PATH |

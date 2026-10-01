@@ -318,9 +318,8 @@ extension AppState {
     /// The selected exit is gone and a session was up or still connecting.
     /// Another catalog exit keeps the session. No survivor restores the
     /// original network unless a strict kill switch was explicitly enabled.
-    /// macOS has no `permanent` toggle, and the selective AI hook is not
-    /// registered, so the non-strict result is a full release. This does not
-    /// install a new filter.
+    /// The existing automatic release restores ordinary traffic and retains
+    /// the secondary AI hold. Explicit strict protection keeps its own branch.
     private func settleRemovedCatalogExit(wasConnected: Bool) {
         let replacement = defaultCloudExitNode()
         let action = CatalogRemovedExitAction.decide(
@@ -350,7 +349,7 @@ extension AppState {
                     // The in-flight attempt is still aimed at the removed exit.
                     // Release it, then connect the survivor. Bootstrap would
                     // cut the machine for the whole reconnect.
-                    disconnect(releaseKillSwitch: true)
+                    disconnect(releaseKillSwitch: true, automaticFailureRelease: true)
                     autoConnectRequested = true
                     attemptAutomaticConnect()
                 }
@@ -376,7 +375,7 @@ extension AppState {
             catalogSelectionRequiresChoice = true
             autoConnectRequested = false
             applyDefaultProxySelection(persist: true)
-            disconnect(releaseKillSwitch: true)
+            disconnect(releaseKillSwitch: true, automaticFailureRelease: true)
             errorMessage = String(
                 localized: "The selected cloud server was removed. This Mac is back on its normal internet. Choose another cloud server."
             )
@@ -1076,10 +1075,21 @@ extension AppState {
         )
     }
 
+    nonisolated static func budgetManagedDirectWebPins(
+        _ pins: [ConfigPipeline.DirectDomainPin],
+        seed: ConfigPipeline.ManagedDirectRuntimePolicy,
+        preservingSessionEndpoints: [ConfigPipeline.DirectEndpoint]
+    ) -> (kept: [ConfigPipeline.DirectDomainPin], dropped: [String]) {
+        ConfigPipeline.pinsWithinSessionEndpointBudget(
+            pins, seededBy: preservingSessionEndpoints + seed.sessionEndpoints
+        )
+    }
+
     func resolveManagedDirectDomains(
         policy: TonoTrafficPolicy,
         base: ConfigPipeline.ManagedDirectRuntimePolicy?,
-        api: CoreControllerClient
+        api: CoreControllerClient,
+        preservingSessionEndpoints: [ConfigPipeline.DirectEndpoint] = []
     ) async -> ConfigPipeline.ManagedDirectRuntimePolicy? {
         guard !policy.webDomains.isEmpty,
               let physicalInterface = base?.physicalInterface else {
@@ -1140,9 +1150,9 @@ extension AppState {
         // reviewed host to keep the ones that did not fit. The control plane
         // can reach that on its own: 32 `webDomains` is its published maximum
         // and resolves to as many as 258 session endpoints.
-        let budgeted = ConfigPipeline.pinsWithinSessionEndpointBudget(
-            webPins,
-            seededBy: withoutWebPins.sessionEndpoints
+        let budgeted = Self.budgetManagedDirectWebPins(
+            webPins, seed: withoutWebPins,
+            preservingSessionEndpoints: preservingSessionEndpoints
         )
         if !budgeted.dropped.isEmpty {
             // Named, because the alternative reading of a short pin list is

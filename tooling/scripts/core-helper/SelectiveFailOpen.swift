@@ -44,6 +44,11 @@ enum SelectiveFailOpen {
         "perplexity.ai",
         "perplexity.com",
         "pplx.ai",
+        // Model API namespaces only; general Alibaba Cloud stays available.
+        "dashscope.aliyuncs.com",
+        "dashscope-intl.aliyuncs.com",
+        "dashscope-us.aliyuncs.com",
+        "maas.aliyuncs.com",
     ]
 
     enum ReleaseKind {
@@ -83,9 +88,12 @@ enum SelectiveFailOpen {
     }
 
     static func routeAddArguments() -> [[String]] {
+        // Darwin requires a gateway sockaddr for RTM_ADD, including blackhole
+        // routes. Loopback supplies an always-local, same-family next hop;
+        // RTF_BLACKHOLE discards the packet before loopback delivery.
         [
-            ["/sbin/route", "-n", "add", "-inet", "-net", ipv4Prefix, "-blackhole"],
-            ["/sbin/route", "-n", "add", "-inet6", "-net", ipv6Prefix, "-blackhole"],
+            ["/sbin/route", "-n", "add", "-inet", "-net", ipv4Prefix, "127.0.0.1", "-blackhole"],
+            ["/sbin/route", "-n", "add", "-inet6", "-net", ipv6Prefix, "::1", "-blackhole"],
         ]
     }
 
@@ -108,6 +116,30 @@ enum SelectiveFailOpen {
         return hasV4 != hasV6
     }
 
+    /// Exercise Darwin's actual argument parser and routing-message encoder.
+    /// `-d` returns before the routing-socket write, so no routes are changed.
+    /// A zero exit status alone is insufficient: route can exit zero after a
+    /// rejected add. XNU requires a gateway sockaddr even for a blackhole.
+    static func runRouteGatewaySelfTest() -> Bool {
+        guard geteuid() == 0 else { return false }
+        let commands = routeAddArguments()
+        guard commands.count == 2 else { return false }
+        for (command, gateway) in zip(commands, ["127.0.0.1", "::1"]) {
+            guard let parsed = try? KillSwitchManager.run(
+                "/sbin/route", ["-d", "-v"] + Array(command.dropFirst()), deadline: 3
+            ), parsed.status == 0 else { return false }
+            let message = String(decoding: parsed.output, as: UTF8.self)
+            guard message.contains("BLACKHOLE"), message.contains(gateway),
+                  message.split(separator: "\n").contains(where: {
+                      $0.hasPrefix("sockaddrs:") && $0.contains("GATEWAY")
+                  }) else {
+                fputs("selective fail-open: blackhole routing message has no loopback gateway\n", stderr)
+                return false
+            }
+        }
+        return true
+    }
+
     static func runSelfTests() -> Bool {
         if followUp(.crashOrHang) != .apply
             || followUp(.restoreOrDisconnect) != .remove
@@ -128,6 +160,17 @@ enum SelectiveFailOpen {
             || resolverPath(for: ".") != nil
             || resolverPath(for: "") != nil {
             fputs("selective fail-open: resolver path admitted a shared or empty name\n", stderr)
+            return false
+        }
+        for suffix in ["dashscope.aliyuncs.com", "dashscope-intl.aliyuncs.com", "dashscope-us.aliyuncs.com", "maas.aliyuncs.com"] {
+            if resolverPath(for: suffix) != "/etc/resolver/\(suffix)" {
+                fputs("selective fail-open: dedicated model API is missing\n", stderr)
+                return false
+            }
+        }
+        if resolverPath(for: "aliyuncs.com") != nil
+            || resolverPath(for: "oss-cn-hangzhou.aliyuncs.com") != nil {
+            fputs("selective fail-open: general Alibaba Cloud must remain open\n", stderr)
             return false
         }
         let body = resolverBody()

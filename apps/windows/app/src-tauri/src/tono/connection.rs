@@ -35,6 +35,7 @@ mod direct;
 mod heal;
 mod platform;
 mod unarmed_probe;
+mod core_select;
 
 // Compatibility surface for existing command and test callers. The transaction
 // and error modules do not import this orchestration facade.
@@ -222,21 +223,35 @@ pub async fn connect(state: Arc<TonoState>, app: AppHandle) -> Result<(), String
 pub(crate) async fn connect_for_generation(
     state: Arc<TonoState>, app: AppHandle, expected_generation: Option<u64>,
 ) -> Result<(), String> {
+    connect_for_generation_tracked(state, app, expected_generation).await.map_err(|failure| failure.error)
+}
+
+/// The reconciled failure owner, including timeout's extra retirement. An unarmed recovery
+/// caller must not infer ownership from a numeric generation delta.
+struct ConnectFailure {
+    error: String,
+    retry_generation: Option<u64>,
+}
+
+async fn connect_for_generation_tracked(
+    state: Arc<TonoState>, app: AppHandle, expected_generation: Option<u64>,
+) -> Result<(), ConnectFailure> {
+    let refused = |error: String| ConnectFailure { error, retry_generation: expected_generation };
     {
         let mut inner = state.lock().await;
         match &inner.account_state {
             AccountState::Ready => {}
-            AccountState::Suspended => return Err("account is suspended".to_string()),
-            _ => return Err("not signed in".to_string()),
+            AccountState::Suspended => return Err(refused("account is suspended".to_string())),
+            _ => return Err(refused("not signed in".to_string())),
         }
         if let Some(refusal) = crate::tono::offline_grant::connect_refusal(&inner) {
-            return Err(refusal.to_string());
+            return Err(refused(refusal.to_string()));
         }
         if inner.fsm.status().is_connected {
-            return Err("already connected".to_string());
+            return Err(refused("already connected".to_string()));
         }
         if inner.fsm.status().is_connecting {
-            return Err("already connecting".to_string());
+            return Err(refused("already connecting".to_string()));
         }
         if let Some(replacement) = catalog_sync::ensure_usable_selection(&mut inner) {
             logging!(
@@ -255,14 +270,17 @@ pub(crate) async fn connect_for_generation(
             seed_autostart_after_connect();
             Ok(())
         }
-        Attempt::GuardRejected(err) => Err(err),
-        Attempt::Stale => Err("connection superseded by a newer transition".to_string()),
+        Attempt::GuardRejected(err) => Err(refused(err)),
+        Attempt::Stale => Err(ConnectFailure {
+            error: "connection superseded by a newer transition".to_string(), retry_generation: None,
+        }),
         Attempt::Failed { generation, error, account_owner } => {
             let effect = {
                 let mut inner = state.lock().await;
                 heal::on_failure(&mut inner, &error)
             };
-            if fail_connect(&state, &app, generation, error.clone(), account_owner).await {
+            let current = fail_connect(&state, &app, generation, error.clone(), account_owner).await;
+            if current {
                 match effect {
                     tono_core::heal::NetworkEffect::FailOpen { .. } => {
                         // `fail_connect` already owns the ordinary release. Releasing again
@@ -291,7 +309,7 @@ pub(crate) async fn connect_for_generation(
                     _ => {}
                 }
             }
-            Err(error)
+            Err(ConnectFailure { error, retry_generation: current.then_some(generation) })
         }
     }
 }
@@ -1768,6 +1786,7 @@ mod tests {
             reality_short_id: "0123456789abcdef".to_string(),
             protocol: NodeProtocol::VlessReality,
             tls_fingerprint: None,
+            certificate_public_key_sha256: None,
         }
     }
 
@@ -1786,6 +1805,7 @@ mod tests {
             tls_fingerprint: Some(
                 "e3aa4a745aa90539ab1a493d940eeba7b4305b7516ab84167e46c98ad9fed3db".to_string(),
             ),
+            certificate_public_key_sha256: None,
         }
     }
 

@@ -5,6 +5,81 @@ import IOKit
 import IOKit.pwr_mgt
 import Security
 
+func upgradeSourceIsRegular(_ mode: mode_t) -> Bool {
+    (mode & S_IFMT) == S_IFREG
+}
+
+/// `lstat` rejects a FIFO or symlink before `open`. `O_NONBLOCK` covers the
+/// replacement that lands between the two. The fd is the inode that was
+/// checked, so a later copy does not reopen the user path.
+func openUpgradeSource(_ path: String) throws -> Int32 {
+    var metadata = stat()
+    guard lstat(path, &metadata) == 0 else {
+        throw HelperFailure.invalid("Cannot inspect upgrade source.")
+    }
+    guard upgradeSourceIsRegular(metadata.st_mode) else {
+        throw HelperFailure.invalid("Upgrade source is not a regular file.")
+    }
+    let fd = open(path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK)
+    guard fd >= 0 else {
+        throw HelperFailure.invalid("Cannot safely open upgrade source.")
+    }
+    var opened = stat()
+    guard fstat(fd, &opened) == 0,
+          upgradeSourceIsRegular(opened.st_mode),
+          opened.st_dev == metadata.st_dev,
+          opened.st_ino == metadata.st_ino else {
+        close(fd)
+        throw HelperFailure.invalid("Upgrade source changed before it was opened.")
+    }
+    return fd
+}
+
+func copyUpgradeSource(
+    from source: Int32,
+    to destination: String,
+    shouldContinue: () -> Bool
+) throws {
+    guard shouldContinue() else {
+        throw HelperFailure.stopping("Helper is stopping.")
+    }
+    unlink(destination)
+    let output = open(destination, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0o755)
+    guard output >= 0 else {
+        throw HelperFailure.system("Could not create upgrade copy.")
+    }
+    var committed = false
+    defer {
+        close(output)
+        if !committed { unlink(destination) }
+    }
+    var buffer = [UInt8](repeating: 0, count: 65_536)
+    while true {
+        guard shouldContinue() else {
+            throw HelperFailure.stopping("Helper is stopping.")
+        }
+        let count = Darwin.read(source, &buffer, buffer.count)
+        if count == 0 { break }
+        if count < 0 {
+            if errno == EINTR { continue }
+            throw HelperFailure.system("Could not read upgrade source.")
+        }
+        try buffer.withUnsafeBytes { raw in
+            guard let base = raw.baseAddress else {
+                throw HelperFailure.system("Could not read upgrade source.")
+            }
+            try writeAll(output, bytes: base, count: count)
+        }
+    }
+    let owner = geteuid()
+    guard fchown(output, owner, getegid()) == 0,
+          fchmod(output, 0o755) == 0,
+          fsync(output) == 0 else {
+        throw HelperFailure.system("Could not finish upgrade copy.")
+    }
+    committed = true
+}
+
 final class SocketServer {
     private let allowedUID: uid_t
     private let allowedGID: gid_t
@@ -206,12 +281,13 @@ final class SocketServer {
     /// Immediate release at start. Idempotent: no state file means no pfctl.
     /// A running Core is not disarmed and is not reinstalled from the file.
     private func releaseLeftoverBlockIfCoreStopped() {
-        guard KillSwitchManager.shouldReleaseLeftoverAtLaunch(
-            coreRunning: core.status().running,
-            stateFilePresent: KillSwitchManager.stateFileExists()
-        ) else { return }
+        guard !core.status().running else { return }
+        guard KillSwitchManager.stateFileExists() else {
+            killSwitch.reconcileSelectiveRecoveryIfReleased()
+            return
+        }
         do {
-            _ = try killSwitch.disarm()
+            _ = try killSwitch.disarm(preserveAIHold: KillSwitchManager.automaticReleasePreservesAIHold())
         } catch {
             let detail = (error as? HelperFailure)?.message ?? String(describing: error)
             FileHandle.standardError.write(Data(
@@ -219,9 +295,6 @@ final class SocketServer {
             ))
             return
         }
-        // The general block is already gone. Skip the secondary layer if an
-        // arm committed while this release held the lock.
-        killSwitch.applySelectiveLayerIfReleased()
     }
 
     /// While the Core is running, keep the in-session block (a live connect
@@ -255,7 +328,7 @@ final class SocketServer {
                 consecutiveCoreDownChecks: consecutiveCoreDownChecks
             ) else { return }
             do {
-                _ = try killSwitch.disarm()
+                _ = try killSwitch.disarm(preserveAIHold: KillSwitchManager.automaticReleasePreservesAIHold())
             } catch {
                 let detail = (error as? HelperFailure)?.message ?? String(describing: error)
                 FileHandle.standardError.write(Data(
@@ -263,9 +336,9 @@ final class SocketServer {
                 ))
                 return
             }
-            killSwitch.applySelectiveLayerIfReleased()
         } else {
             consecutiveCoreDownChecks = 0
+            killSwitch.reconcileSelectiveRecoveryIfReleased()
         }
         recoverDNSAfterStoppedCore()
     }
@@ -326,8 +399,8 @@ final class SocketServer {
         }
         do {
             try Self.releaseOrphanedBootstrapProtection(
-                disarm: { _ = try killSwitch.disarm() },
-                applySelectiveLayer: killSwitch.applySelectiveLayerIfReleased
+                disarm: { _ = try killSwitch.disarm(preserveAIHold: KillSwitchManager.automaticReleasePreservesAIHold()) },
+                applySelectiveLayer: {}
             )
         } catch {
             let detail = (error as? HelperFailure)?.message ?? String(describing: error)
@@ -426,17 +499,24 @@ final class SocketServer {
 
         do {
             let request = try readRequest(client)
-            try updates.storage.locked {
-                // Keep the existing authorizer for ordinary networking. A
-                // pending update additionally requires the registered bundle.
-                let peer = authorizer.peerIdentity(socket: client)
-                if let peer { try updates.gate(method: request.method, path: request.path, peer: peer) }
-                else if request.method != "GET" { throw HelperFailure.invalid("Cannot bind helper mutation to a peer bundle.") }
-                if request.path.hasPrefix("/update/") {
-                    guard let peer else { throw HelperFailure.invalid("Cannot authenticate update peer.") }
-                    try handleUpdate(request, peer: peer, client: client)
-                } else {
-                    try handleRuntime(request, client: client)
+            if request.method == "POST", request.path == "/helper/upgrade" {
+                // The copy must not hold the update lock. A FIFO used to block
+                // inside this lock, so SIGTERM was never observed and
+                // `--emergency-disarm` spun until the open returned.
+                try handleSilentUpgrade(request, client: client)
+            } else {
+                try updates.storage.locked {
+                    // Keep the existing authorizer for ordinary networking. A
+                    // pending update additionally requires the registered bundle.
+                    let peer = authorizer.peerIdentity(socket: client)
+                    if let peer { try updates.gate(method: request.method, path: request.path, peer: peer) }
+                    else if request.method != "GET" { throw HelperFailure.invalid("Cannot bind helper mutation to a peer bundle.") }
+                    if request.path.hasPrefix("/update/") {
+                        guard let peer else { throw HelperFailure.invalid("Cannot authenticate update peer.") }
+                        try handleUpdate(request, peer: peer, client: client)
+                    } else {
+                        try handleRuntime(request, client: client)
+                    }
                 }
             }
         } catch let failure as HelperFailure {
@@ -549,22 +629,6 @@ final class SocketServer {
             case ("POST", "/dns/restore"):
                 guard request.body.isEmpty else { throw HelperFailure.invalid("Unexpected request body.") }
                 sendResponse(client, status: 200, object: try protectedDNS.restore())
-            case ("POST", "/helper/upgrade"):
-                let object = try jsonObject(request.body)
-                guard let helperSrc = object["helperSource"] as? String,
-                      let mihomoSrc = object["mihomoSource"] as? String else {
-                    throw HelperFailure.invalid("Invalid helper upgrade request.")
-                }
-                guard let peerBundle = authorizer.peerBundleURL(socket: client) else {
-                    throw HelperFailure.invalid("Upgrade requires an authenticated peer bundle.")
-                }
-                try stageAndUpgrade(
-                    helperSource: helperSrc,
-                    mihomoSource: mihomoSrc,
-                    peerBundlePath: peerBundle.path
-                )
-                sendResponse(client, status: 200, object: ["ok": true, "restarting": true])
-                helperShutdownRequested = 1
             default:
                 sendResponse(client, status: 404, object: ["ok": false, "error": "Not found."])
             }
@@ -600,6 +664,7 @@ final class SocketServer {
             case ("POST", "/update/commit"): try transitionGate.whileAwake { try updates.commit(peer: peer) }
             case ("POST", "/update/cancel"): try updates.cancel(peer: peer)
             case ("POST", "/update/disconnect"): try updates.disconnect(peer: peer)
+            case ("POST", "/update/release"): try updates.disconnect(peer: peer, preserveAIHold: true)
             case ("POST", "/update/retire"): try transitionGate.whileAwake { try updates.retire(peer: peer) }
             default: throw HelperFailure.invalid("Unknown update operation.")
             }
@@ -607,10 +672,48 @@ final class SocketServer {
         sendResponse(client, status: 200, object: try updates.status())
     }
 
+    /// Auth and the pending-update gate take the lock only for the ledger
+    /// read. The file copy runs outside it, and the rename takes the lock
+    /// again so a shutdown or a new pending update can still win.
+    private func handleSilentUpgrade(_ request: HTTPRequest, client: Int32) throws {
+        let object = try jsonObject(request.body)
+        guard let helperSrc = object["helperSource"] as? String,
+              let mihomoSrc = object["mihomoSource"] as? String else {
+            throw HelperFailure.invalid("Invalid helper upgrade request.")
+        }
+        guard let peerBundle = authorizer.peerBundleURL(socket: client) else {
+            throw HelperFailure.invalid("Upgrade requires an authenticated peer bundle.")
+        }
+        try updates.storage.locked {
+            guard let peer = authorizer.peerIdentity(socket: client) else {
+                throw HelperFailure.invalid("Cannot bind helper mutation to a peer bundle.")
+            }
+            try updates.gate(method: request.method, path: request.path, peer: peer)
+        }
+        try stageAndUpgrade(
+            helperSource: helperSrc,
+            mihomoSource: mihomoSrc,
+            peerBundlePath: peerBundle.path
+        ) {
+            try updates.storage.locked {
+                guard helperShutdownRequested == 0 else {
+                    throw HelperFailure.stopping("Helper is stopping.")
+                }
+                guard let peer = authorizer.peerIdentity(socket: client) else {
+                    throw HelperFailure.invalid("Cannot bind helper mutation to a peer bundle.")
+                }
+                try updates.gate(method: request.method, path: request.path, peer: peer)
+            }
+        }
+        sendResponse(client, status: 200, object: ["ok": true, "restarting": true])
+        helperShutdownRequested = 1
+    }
+
     private func stageAndUpgrade(
         helperSource: String,
         mihomoSource: String,
-        peerBundlePath: String
+        peerBundlePath: String,
+        beforeCommit: () throws -> Void
     ) throws {
         let allowedPrefix = peerBundlePath.hasSuffix("/") ? peerBundlePath + "Contents/" : peerBundlePath + "/Contents/"
         guard helperSource.hasPrefix(allowedPrefix),
@@ -648,46 +751,23 @@ final class SocketServer {
         }
         _ = try UpdatePackage.verifyCode(bundlePath, identifier: "com.raydocs.tono")
 
-        let helperFD = open(realHelperPath, O_RDONLY | O_CLOEXEC | O_NOFOLLOW)
-        guard helperFD >= 0 else {
-            throw HelperFailure.invalid("Cannot safely open helper source.")
-        }
-        close(helperFD)
-
-        let mihomoFD = open(realMihomoPath, O_RDONLY | O_CLOEXEC | O_NOFOLLOW)
-        guard mihomoFD >= 0 else {
-            throw HelperFailure.invalid("Cannot safely open core source.")
-        }
-        close(mihomoFD)
-
-        try UpdatePackage.verifyCode(realHelperPath, identifier: "com.raydocs.tono.helper")
-        try UpdatePackage.verifyCode(realMihomoPath, identifier: "sing-box")
+        let helperFD = try openUpgradeSource(realHelperPath)
+        defer { close(helperFD) }
+        let mihomoFD = try openUpgradeSource(realMihomoPath)
+        defer { close(mihomoFD) }
 
         let helperTemp = "/Library/PrivilegedHelperTools/tono-core-helper.new"
         let mihomoTemp = "/Library/PrivilegedHelperTools/tono-sing-box.new"
         let helperDest = "/Library/PrivilegedHelperTools/tono-core-helper"
         let mihomoDest = "/Library/PrivilegedHelperTools/tono-sing-box"
 
-        unlink(helperTemp)
-        unlink(mihomoTemp)
-
-        let p1 = Process()
-        p1.executableURL = URL(fileURLWithPath: "/usr/bin/install")
-        p1.arguments = ["-o", "root", "-g", "wheel", "-m", "0755", realHelperPath, helperTemp]
-        try p1.run()
-        p1.waitUntilExit()
-        guard p1.terminationStatus == 0 else {
-            throw HelperFailure.system("Could not copy helper binary.")
-        }
-
-        let p2 = Process()
-        p2.executableURL = URL(fileURLWithPath: "/usr/bin/install")
-        p2.arguments = ["-o", "root", "-g", "wheel", "-m", "0755", realMihomoPath, mihomoTemp]
-        try p2.run()
-        p2.waitUntilExit()
-        guard p2.terminationStatus == 0 else {
+        let continueCopy = { helperShutdownRequested == 0 }
+        try copyUpgradeSource(from: helperFD, to: helperTemp, shouldContinue: continueCopy)
+        do {
+            try copyUpgradeSource(from: mihomoFD, to: mihomoTemp, shouldContinue: continueCopy)
+        } catch {
             unlink(helperTemp)
-            throw HelperFailure.system("Could not copy core binary.")
+            throw error
         }
 
         do {
@@ -714,6 +794,10 @@ final class SocketServer {
                   helperUpgradeAdmissible(running: helperVersion, candidate: candidate) else {
                 throw HelperFailure.invalid("Silent helper upgrade requires a newer helper version.")
             }
+            guard helperShutdownRequested == 0 else {
+                throw HelperFailure.stopping("Helper is stopping.")
+            }
+            try beforeCommit()
         } catch {
             unlink(helperTemp)
             unlink(mihomoTemp)

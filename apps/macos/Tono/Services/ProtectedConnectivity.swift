@@ -216,6 +216,10 @@ nonisolated enum ProtectedConnectivity {
     /// through a cold Reality/gVisor path made the first round lose to
     /// self-congestion even when the node was fine.
     static let probeStaggerMs = 100
+    /// After the data plane has won, wait before the advisory Clash `/delay`.
+    /// The Connected verdict does not wait. Failure diagnostics and the health
+    /// monitor call the probe immediately.
+    static let advisoryDelayDeferralMilliseconds: UInt64 = 1_500
 
     /// `networkOffline` has to come from a real physical-link observation —
     /// `PhysicalNetworkReachability` on macOS. The primary-network-service
