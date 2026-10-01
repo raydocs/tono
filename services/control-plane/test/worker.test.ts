@@ -732,6 +732,44 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     expect((await unavailable.json() as any).error.code).toBe('ACCESS_UNAVAILABLE');
   });
 
+  it('reports unavailable when an Access key response body fails without rejecting the session', async () => {
+    const team = 'body-failure.cloudflareaccess.com';
+    const e = env as unknown as Env;
+    const originalTeam = e.ACCESS_TEAM_DOMAIN;
+    e.ACCESS_TEAM_DOMAIN = team;
+    const originalFetch = vi.mocked(globalThis.fetch).getMockImplementation()!;
+    let failBody = true;
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const url = input instanceof Request ? input.url : String(input);
+      if (url === `https://${team}/cdn-cgi/access/certs`) {
+        if (failBody) {
+          return new Response(new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.enqueue(new TextEncoder().encode('{"keys":['));
+              controller.error(new TypeError('Access key connection reset'));
+            },
+          }));
+        }
+        return Response.json({ keys: [oidcPublicKey] });
+      }
+      return originalFetch(input, init);
+    });
+    try {
+      const assertion = await accessAssertion(ACCESS_ADMIN_EMAIL, { iss: `https://${team}` });
+      const read = () => api('ops/dashboard', {
+        headers: { 'cf-access-jwt-assertion': assertion },
+      });
+      const unavailable = await read();
+      expect(unavailable.status).toBe(503);
+      expect((await unavailable.json() as any).error.code).toBe('ACCESS_UNAVAILABLE');
+      failBody = false;
+      expect((await read()).status).toBe(200);
+    } finally {
+      fetchSpy.mockImplementation(originalFetch);
+      e.ACCESS_TEAM_DOMAIN = originalTeam;
+    }
+  });
+
   it('reports an empty live state to Access admins without fetching an absorbed host', async () => {
     const unauthorized = await api('ops/live', {
       headers: { authorization: `Bearer ${ADMIN_TOKEN}` },
