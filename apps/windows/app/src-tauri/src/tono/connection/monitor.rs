@@ -9,6 +9,11 @@ use tono_plugin_core::{MihomoExt as _, models::Protocol};
 
 use crate::core::service;
 use crate::process::AsyncHandler;
+
+tokio::task_local! {
+    /// Policy rebuilds keep the existing protected reconnect. Health failures do not.
+    static POLICY_REBUILD: ();
+}
 use crate::tono::{
     audit::{self, AuditEvent},
     bootstrap, commands, signed_apps,
@@ -1094,7 +1099,12 @@ pub(crate) async fn handle_policy_behavior_change(
             PolicyChangeDisposition::Ignore => return NetworkChangeOutcome::Handled,
         }
     }
-    handle_network_change_inner(state, app, policy_behavior_change_allows_in_place_recovery()).await
+    POLICY_REBUILD
+        .scope(
+            (),
+            handle_network_change_inner(state, app, policy_behavior_change_allows_in_place_recovery()),
+        )
+        .await
 }
 
 /// What a traffic-policy behavior change should do when it arrives, given the
@@ -1234,6 +1244,36 @@ pub(super) async fn handle_network_change_inner(
             "Tono: network change recovered in place; core was not restarted"
         );
         return NetworkChangeOutcome::RecoveredInPlace;
+    }
+    // In-place proof failed. Ordinary health loss uses the shared disposition:
+    // release the barrier and probe without a tunnel. A policy rebuild and an
+    // explicit strict kill switch keep the protected reconnect below.
+    let policy_rebuild = POLICY_REBUILD.try_with(|_| ()).is_ok();
+    let strict = tono_core::strict_kill_switch_explicit(None);
+    if tono_core::unarmed_probe::health_monitor_releases(strict, policy_rebuild) {
+        {
+            let mut inner = state.lock().await;
+            inner.tasks.abort_reconnect();
+        }
+        logging!(
+            warn,
+            Type::Service,
+            "Tono: health failure is releasing protection so the original network stays up"
+        );
+        match super::disconnect::release_explicit(state, app).await {
+            Ok(()) => {
+                let generation = state.lock().await.connect_generation;
+                super::unarmed_probe::spawn_after_release(state, app, generation);
+            }
+            Err(error) => {
+                logging!(
+                    error,
+                    Type::Service,
+                    "Tono: health-failure release failed; not starting a tunnel: {error}"
+                );
+            }
+        }
+        return NetworkChangeOutcome::Handled;
     }
     // The exclusive release guard also excludes StartClash/DNS readers, including Retry now.
     // Keep it inside a detached worker: aborting netmon must not expose a still-running stop.
