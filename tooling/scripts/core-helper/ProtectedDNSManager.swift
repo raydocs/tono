@@ -511,7 +511,8 @@ final class ProtectedDNSManager {
         defer { lock.unlock() }
         return Self.statusResponse(
             snapshotResult: Result(catching: loadSnapshot),
-            read: Self.currentDNS
+            read: Self.currentDNS,
+            readByID: { try Self.scCurrentDNS(.id($0)) }
         )
     }
 
@@ -535,7 +536,8 @@ final class ProtectedDNSManager {
     /// snapshotPresent:false.
     private static func statusResponse(
         snapshotResult: Result<Snapshot?, Error>,
-        read: (String) throws -> [String]
+        read: (String) throws -> [String],
+        readByID: ((String) throws -> [String])? = nil
     ) -> [String: Any] {
         let snapshot: Snapshot?
         switch snapshotResult {
@@ -565,8 +567,13 @@ final class ProtectedDNSManager {
             )
         }
         do {
-            let configured =
-                try read(snapshot.service) == [Self.protectedDNSServer]
+            let servers: [String]
+            if let id = snapshot.serviceID, let readByID {
+                servers = try readByID(id)
+            } else {
+                servers = try read(snapshot.service)
+            }
+            let configured = servers == [Self.protectedDNSServer]
             return Self.response(
                 configured: configured,
                 snapshotPresent: true,
@@ -1664,6 +1671,27 @@ final class ProtectedDNSManager {
         return true
     }
 
+    /// A renamed service still answers by `serviceID`. The display name in
+    /// the snapshot is stale and must not be the status key.
+    static func runRenamedServiceStatusSelfTest() -> Bool {
+        let snapshot = Snapshot(service: "Wi-Fi", serviceID: "S1", servers: ["9.9.9.9"])
+        let status = statusResponse(snapshotResult: .success(snapshot), read: { _ in
+            ["1.1.1.1"]
+        }, readByID: { id in
+            guard id == "S1" else {
+                throw HelperFailure.invalid("Unexpected service id.")
+            }
+            return [protectedDNSServer]
+        })
+        guard (status["configured"] as? Bool) == true,
+              (status["snapshotPresent"] as? Bool) == true else {
+            print("DNS renamed-service status regression FAILED")
+            return false
+        }
+        print("DNS renamed-service status regression passed: status follows serviceID")
+        return true
+    }
+
     static func runRestoreApplyRetrySelfTest() -> Bool {
         enum ApplyFailure: Error { case injected }
         let snapshot = Snapshot(service: "Wi-Fi", serviceID: "S1", servers: ["9.9.9.9"])
@@ -1779,6 +1807,7 @@ final class ProtectedDNSManager {
                 && runSameOwnerReenableSelfTest()
                 && runEnableIdentityFailureSelfTest()
                 && runBootDNSRecoveryDecisionSelfTest()
+                && runRenamedServiceStatusSelfTest()
                 && runServerCountCapSelfTest()
         } catch {
             return false
