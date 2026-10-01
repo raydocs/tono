@@ -62,6 +62,31 @@ final class HelperSilentUpgradeTimeoutTests: XCTestCase {
         )
     }
 
+    func testUpgradeRequestThatNeverReachedHelperSkipsSilentUpgradePoll() {
+        XCTAssertFalse(
+            HelperManager.upgradeRequestMayHaveBeenDelivered(HelperIPCError.socketFailed),
+            "a socket or send failure means the helper never received the upgrade request; polling would stall the caller 45s"
+        )
+        XCTAssertFalse(
+            HelperManager.upgradeRequestMayHaveBeenDelivered(HelperIPCError.connectFailed),
+            "a failed connect means the helper never received the upgrade request"
+        )
+        XCTAssertFalse(
+            HelperManager.upgradeRequestMayHaveBeenDelivered(
+                HelperIPCError.boundToAnotherUser("other-account")
+            ),
+            "a socket bound to another account means the helper never received the upgrade request"
+        )
+        XCTAssertTrue(
+            HelperManager.upgradeRequestMayHaveBeenDelivered(HelperIPCError.emptyResponse),
+            "a reply lost after the whole request was written may still leave an upgrade under way, so the poll stays"
+        )
+        XCTAssertTrue(
+            HelperManager.upgradeRequestMayHaveBeenDelivered(HelperIPCError.invalidResponse),
+            "an unparseable reply still proves the helper received the request, so the poll stays"
+        )
+    }
+
     /// Cancelling or failing a replacement after Core stopped must release
     /// the old helper's PF; success and a never-stopped Core keep protection.
     func testAbandonedUpgradeReleasesOnlyAfterPreviousCoreStopped() {

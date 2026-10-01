@@ -1,0 +1,110 @@
+/* The chart and panel vocabulary, in both palettes.
+   Series colours are categorical and deliberately avoid the tone hues: red,
+   amber and green already mean "act", "watch" and "fine" on these pages, and
+   a series drawn in one of them reads as a verdict nobody gave. Every series
+   colour clears 3:1 against its surface, the WCAG floor for a graphic. */
+:root {
+  --series-1: #5b4cf5;
+  --series-2: #0e7c86;
+  --series-3: #c0367a;
+  --series-4: #6b7f1a;
+  --series-5: #9a5b1e;
+  --series-6: #6b6b7b;
+
+  --chart-grid: var(--hairline);
+  --chart-axis: rgb(20 20 19 / 0.18);
+  --chart-cursor: rgb(20 20 19 / 0.3);
+  --hover-wash: rgb(20 20 19 / 0.04);
+  --focus-ring: var(--accent);
+  --shadow-pop: 0 1px 2px rgb(20 20 19 / 0.06), 0 8px 24px rgb(20 20 19 / 0.1);
+}
+
+.dark {
+  --series-1: #8f84ff;
+  --series-2: #3cc4cf;
+  --series-3: #f06aa8;
+  --series-4: #a8c33a;
+  --series-5: #e0a15a;
+  --series-6: #a3a3b3;
+
+  --chart-axis: rgb(255 255 255 / 0.18);
+  --chart-cursor: rgb(255 255 255 / 0.34);
+  --hover-wash: rgb(255 255 255 / 0.05);
+  --focus-ring: #8f84ff;
+  --shadow-pop: 0 1px 0 rgb(255 255 255 / 0.06), 0 12px 32px rgb(0 0 0 / 0.55);
+}
+
+@layer components {
+  .chart-frame { position: relative; width: 100%; border-radius: 6px; }
+  .chart-frame:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 4px; }
+
+  .chart-tip {
+    position: absolute;
+    z-index: 10;
+    pointer-events: none;
+    min-width: 132px;
+    padding: 8px 10px;
+    border: 1px solid var(--hairline);
+    border-radius: 8px;
+    background: var(--surface);
+    box-shadow: var(--shadow-pop);
+    font-size: 12px;
+    line-height: 1.45;
+  }
+
+  /* The halo keeps the label legible where a series crosses the threshold. */
+  .chart-guide-label {
+    fill: hsl(var(--tone-fg));
+    font-weight: 500;
+    paint-order: stroke;
+    stroke: var(--surface);
+    stroke-width: 4px;
+    stroke-linejoin: round;
+  }
+
+  .chart-swatch { display: inline-block; width: 8px; height: 8px; border-radius: 2px; flex-shrink: 0; }
+
+  /* Not probed is hatched, never blank and never red: an empty tick reads as
+     "dead" and a coloured one reads as a result. */
+  .probe-gap {
+    background: repeating-linear-gradient(
+      135deg,
+      var(--chart-axis) 0 1px,
+      transparent 1px 3px
+    );
+  }
+
+  .panel-skeleton {
+    border-radius: 6px;
+    background: linear-gradient(90deg, var(--hover-wash) 0%, var(--chart-grid) 50%, var(--hover-wash) 100%);
+    background-size: 200% 100%;
+    animation: panel-shimmer 1.4s ease-in-out infinite;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .panel-skeleton { animation: none; }
+  }
+
+  /* The headline number on a dashboard tile (`StatTile`). */
+  .stat-dot {
+    flex: none;
+    width: 7px;
+    height: 7px;
+    border-radius: 999px;
+    background: var(--tone-ink);
+  }
+
+  .stat-value {
+    font-size: 26px;
+    font-weight: 550;
+    letter-spacing: -0.02em;
+    line-height: 1.15;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .panel-action:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+}
+
+@keyframes panel-shimmer {
+  from { background-position: 100% 0; }
+  to { background-position: -100% 0; }
+}

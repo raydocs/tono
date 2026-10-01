@@ -539,6 +539,21 @@
     }
 
     #[test]
+    fn space_delimited_originals_restore_as_separate_servers() {
+        // Mobile broadband drivers write this documented NameServer representation.
+        let mut saved = adapter("{A}", Some("10.20.30.41 10.20.30.40"));
+        saved.ipv6_name_server = Some("2001:db8::53 2001:db8::54".to_owned());
+        assert_eq!(
+            restored_live_servers_v4(&saved),
+            Some(vec!["10.20.30.41".to_owned(), "10.20.30.40".to_owned()]),
+        );
+        assert_eq!(
+            restored_live_servers_v6(&saved),
+            Some(vec!["2001:db8::53".to_owned(), "2001:db8::54".to_owned()]),
+        );
+    }
+
+    #[test]
     fn restore_proof_covers_v6_only_adapters() {
         let v6_only = AdapterDnsSnapshot {
             interface_guid: "{V6}".to_owned(),
@@ -1211,6 +1226,7 @@
         test_hooks::set_live_apply_fails(false);
         test_hooks::set_apply_batch_unavailable(false);
         test_hooks::set_encrypted_restore_fails(false);
+        test_hooks::set_snapshot_delete_fails(false);
         test_hooks::take_automatic_resets();
         test_hooks::take_encrypted_restores();
         test_hooks::set_collected_adapters(Vec::new());
@@ -1564,6 +1580,48 @@
         let status = proven.expect("bookkeeping must not refuse a proven DNS restore");
         assert!(!status.snapshot_present, "a proven restore opens the DNS disarm gate");
         assert_eq!(policy_restores, 1, "the NRPT/DoH restore must still run");
+        Ok(())
+    }
+
+    /// WIN-DNS-SNAPSHOT-DELETE-BLOCKS: with the restore proven and the resolver policy back,
+    /// a snapshot delete that keeps failing (an AV or backup handle on the file) is
+    /// housekeeping — it must not refuse the release. The restore succeeds, the leftover is
+    /// surfaced as a warning-grade note, and the next restore retries the deletion.
+    #[tokio::test]
+    #[serial]
+    async fn a_snapshot_delete_failure_after_a_proven_restore_still_releases() -> Result<()> {
+        reset_dns_state().await;
+        seed_snapshot(vec![adapter("{A}", Some("1.1.1.1"))]).await?;
+        test_hooks::set_snapshot_delete_fails(true);
+
+        let status = restore_protected().await?;
+
+        assert!(
+            status.snapshot_present,
+            "the leftover snapshot stays on disk instead of failing the restore"
+        );
+        let note = status
+            .last_error
+            .expect("the undeletable leftover must be surfaced as a note");
+        assert!(
+            note.contains(DNS_RESTORE_DEGRADED_PREFIX),
+            "the App must read it as a warning, not a failed restore: {note}"
+        );
+        assert!(
+            note.contains("could not be deleted"),
+            "unexpected note: {note}"
+        );
+        // The disarm gate runs a second restore on the same leftover: it must pass too.
+        ensure_restored().await?;
+
+        // The leftover is inert housekeeping, not a life sentence: once the handle is gone
+        // the next restore deletes the file and reports a clean status.
+        test_hooks::set_snapshot_delete_fails(false);
+        let cleaned = restore_protected().await?;
+        assert!(!cleaned.snapshot_present);
+        assert_eq!(cleaned.last_error, None);
+
+        reset_dns_state().await;
         Ok(())
     }
 

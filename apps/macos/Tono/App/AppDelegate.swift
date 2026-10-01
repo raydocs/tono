@@ -235,7 +235,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        guard !runtimeStopped else { return .terminateNow }
+        guard !terminationCompletionSent else { return .terminateNow }
         beginTerminationCleanup {
             sender.reply(toApplicationShouldTerminate: true)
         }
@@ -245,7 +245,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     /// Quit for a language change, which reopens Tono afterwards. Termination
     /// cleanup stops the core, restores DNS and disarms PF over helper IPC and
     /// can spend minutes on an administrator prompt, so a runtime that owns no
-    /// network state takes the immediate exit instead of that budget.
+    /// network state skips network cleanup, while still saving account credentials.
     ///
     /// The tests below are what decide that, not the launch phase: `didStartCore`
     /// is also cleared by a clean release, so a switch made after a normal
@@ -313,6 +313,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func finishTerminationCleanup() async {
+        if !runtimeStopped {
+            await finishNetworkTerminationCleanup()
+        }
+        await accountSession?.api.finishCredentialPersistence()
+    }
+
+    private func finishNetworkTerminationCleanup() async {
         do {
             if let update = try await PrivilegedRuntimeCoordinator.shared.pendingNativeUpdate(), update.pending {
                 await appState?.finishPendingPersistence()

@@ -1,5 +1,5 @@
 use crate::core::paths::{ServicePaths, service_paths};
-use crate::core::process::{is_process_alive, terminate_process};
+use crate::core::process::{process_identity, terminate_process_if_identity_matches};
 use crate::{IPC_AUTH_EXPECT, IpcCommand};
 use anyhow::{Context, Result, anyhow};
 use kode_bridge::{ClientConfig, IpcHttpClient};
@@ -55,6 +55,12 @@ pub async fn acquire_service_owner() -> Result<Option<ServiceOwnerGuard>> {
     }
 
     let old_pid = read_owner_pid(&paths);
+    // Capture the incarnation before health probes can outlive the predecessor. A healthy
+    // owner still wins even when this inspection fails; only unsafe takeover needs the proof.
+    let old_identity = match old_pid {
+        Some(pid) => process_identity(pid),
+        None => Ok(None),
+    };
     warn!(
         "Service owner lock is already held; inspecting old owner: {:?}",
         old_pid
@@ -65,27 +71,48 @@ pub async fn acquire_service_owner() -> Result<Option<ServiceOwnerGuard>> {
         return Ok(None);
     }
 
+    if let Some(guard) = try_acquire_owner_once(&paths)? {
+        cleanup_runtime_artifacts(&paths);
+        info!("Acquired service owner lock after predecessor exited during health probes");
+        return Ok(Some(guard));
+    }
+
     let old_pid = old_pid.context(
         "service owner lock is held but its PID is unavailable; refusing unsafe lock takeover",
     )?;
+    if read_owner_pid(&paths) != Some(old_pid) {
+        return Err(anyhow!(
+            "service owner changed during health probes; refusing stale lock takeover"
+        ));
+    }
     if old_pid == std::process::id() {
         return Err(anyhow!(
             "current process already holds the service owner lock"
         ));
     }
+    let old_identity = old_identity?
+        .context("service owner identity is unavailable; refusing unsafe lock takeover")?;
+    #[cfg(windows)]
+    {
+        let expected_image = paths.install_dir().join("tono-service.exe");
+        let expected_image = expected_image.canonicalize().with_context(|| {
+            format!("failed to inspect installed Service image {expected_image:?}")
+        })?;
+        if !old_identity
+            .executable
+            .eq_ignore_ascii_case(&expected_image.to_string_lossy())
+        {
+            return Err(anyhow!(
+                "service owner process {old_pid} is not the installed Service; refusing termination"
+            ));
+        }
+    }
     warn!("Existing service owner is not reachable; stopping old owner before lock takeover");
-    if is_process_alive(old_pid) {
-        terminate_process(old_pid).await?;
-    }
-    if is_process_alive(old_pid) {
-        return Err(anyhow!(
-            "old service owner process {old_pid} is still alive; refusing lock takeover"
-        ));
-    }
-    cleanup_runtime_artifacts(&paths);
+    terminate_process_if_identity_matches(old_pid, &old_identity).await?;
 
     for attempt in 1..=OWNER_REACQUIRE_ATTEMPTS {
         if let Some(guard) = try_acquire_owner_once(&paths)? {
+            cleanup_runtime_artifacts(&paths);
             info!(
                 "Acquired service owner lock after cleanup on attempt {}",
                 attempt
@@ -242,8 +269,8 @@ async fn is_ipc_healthy(paths: &ServicePaths) -> bool {
 }
 
 fn cleanup_runtime_artifacts(paths: &ServicePaths) {
-    let _ = std::fs::remove_file(paths.pid_file_path());
-
+    // The acquired guard has already overwritten PID metadata. Never delete another owner's
+    // evidence before acquiring the lock, or our own new PID after acquiring it.
     #[cfg(unix)]
     {
         let _ = std::fs::remove_file(paths.ipc_path());

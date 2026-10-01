@@ -27,8 +27,12 @@ import {
   type TonoDevice,
 } from '@/services/tono'
 import { TONO_COLORS, tonoText } from '@/tono-ui/theme'
+import parseTraffic from '@/utils/parse-traffic'
 
 import { GlassCard } from './GlassCard'
+
+const formatBytes = (bytes: number) =>
+  parseTraffic(Math.max(0, bytes)).join(' ')
 
 const blurDeviceName = (name: string) => {
   const stem = (name.split('.')[0] || name).trim()
@@ -218,6 +222,34 @@ export const TonoAccountCard = () => {
           </span>
         </span>
       </div>
+
+      {account && (
+        <dl className="tono-account-facts">
+          <div>
+            <dt>{t('tono.account.plan')}</dt>
+            <dd>{account.plan || 'Tono'}</dd>
+          </div>
+          <div>
+            <dt>{t('tono.account.expires')}</dt>
+            <dd>
+              {account.expiresAt != null
+                ? dayjs(account.expiresAt * 1000).format('YYYY-MM-DD')
+                : t('tono.account.noExpiry')}
+            </dd>
+          </div>
+          {account.quotaBytes != null && account.usageBytes != null && (
+            <div>
+              <dt>{t('tono.account.usage')}</dt>
+              <dd>
+                {t('tono.account.usageOf', {
+                  used: formatBytes(account.usageBytes),
+                  quota: formatBytes(account.quotaBytes),
+                })}
+              </dd>
+            </div>
+          )}
+        </dl>
+      )}
 
       {currentDevices.map(renderDeviceRow)}
       {otherDevices.length > 0 && (

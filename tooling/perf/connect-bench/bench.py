@@ -123,30 +123,36 @@ def ensure_bins() -> tuple[Path, Path]:
     download(SINGBOX_URL, CACHE / "sing-box.tar.gz", SINGBOX_SHA)
     mihomo = CACHE / "mihomo"
     sing = CACHE / "sing-box"
-    if not mihomo.exists():
-        subprocess.run(["gzip", "-dc", str(CACHE / "mihomo.gz")], check=True, stdout=mihomo.open("wb"))
-        mihomo.chmod(0o755)
-    if not sing.exists():
-        subprocess.run(["tar", "-xzf", str(CACHE / "sing-box.tar.gz"), "-C", str(CACHE)], check=True)
-        unpacked = CACHE / "sing-box-1.14.2-linux-amd64" / "sing-box"
-        shutil.copy(unpacked, sing)
-        sing.chmod(0o755)
+    unpack_binary(CACHE / "mihomo.gz", mihomo)
+    unpack_binary(CACHE / "sing-box.tar.gz", sing, "sing-box-1.14.2-linux-amd64/sing-box")
     return mihomo, sing
+
+
+def unpack_binary(archive: Path, dest: Path, member: str | None = None) -> None:
+    # Derive every executable from the archive just checked by download(), even
+    # when a previous extraction/pin left an existing output in this cache.
+    temporary = dest.with_name(dest.name + ".part")
+    command = ["tar", "-xOzf", str(archive), member] if member else ["gzip", "-dc", str(archive)]
+    try:
+        with temporary.open("wb") as output:
+            subprocess.run(command, check=True, stdout=output)
+        temporary.chmod(0o755)
+        temporary.replace(dest)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def ensure_singbox_client() -> Path:
     archive = CACHE / "sing-box-1.15.0-alpha.9.tar.gz"
     download(SINGBOX_CLIENT_URL, archive, SINGBOX_CLIENT_SHA)
     dest = CACHE / "sing-box-1.15.0-alpha.9"
-    if not dest.exists():
-        subprocess.run(["tar", "-xzf", str(archive), "-C", str(CACHE)], check=True)
-        unpacked = CACHE / "sing-box-1.15.0-alpha.9-linux-amd64" / "sing-box"
-        shutil.copy(unpacked, dest)
-        dest.chmod(0o755)
+    unpack_binary(archive, dest, "sing-box-1.15.0-alpha.9-linux-amd64/sing-box")
     return dest
 
 
 def dns_reply(query: bytes) -> bytes:
+    if len(query) < 12:
+        raise ValueError("short dns query")
     index = 12
     while index < len(query) and query[index] != 0:
         index += 1 + query[index]
@@ -247,6 +253,12 @@ class Camo:
             accepted = time.perf_counter()
             time.sleep(CAMO_DELAY_S)
             try:
+                # One stalled ClientHello must not pin this thread. Later VLESS
+                # samples share the listener; a blocked accept turns their
+                # curls and DoH into timeouts and a None median. A failed
+                # attempt still counts, so a fingerprint retry storm stays
+                # above the handshake ceiling.
+                raw.settimeout(1.0)
                 tls = self._ctx.wrap_socket(raw, server_side=True)
                 tls.recv(8)
                 tls.close()
@@ -266,11 +278,29 @@ class Camo:
 
 
 def udp_dns() -> None:
+    # Linux reports ICMP port-unreachable on the next UDP recv, including for a
+    # reply we already sent to a client that has closed. An uncaught OSError
+    # ends this thread and unbinds 15353; the next /dns/query is then a ~1ms
+    # "connection refused" and the sample median becomes None.
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.settimeout(0.5)
     sock.bind(("127.0.0.2", 15353))
     while True:
-        data, addr = sock.recvfrom(2048)
-        sock.sendto(dns_reply(data), addr)
+        try:
+            data, addr = sock.recvfrom(2048)
+        except socket.timeout:
+            continue
+        except OSError:
+            time.sleep(0.001)
+            continue
+        try:
+            reply = dns_reply(data)
+        except Exception:
+            continue
+        try:
+            sock.sendto(reply, addr)
+        except OSError:
+            continue
 
 
 def wait_port(port: int, timeout: float = 3) -> None:
@@ -319,7 +349,13 @@ def parse_a(packet: bytes) -> list[str]:
     return found
 
 
-def dns_query(controller: int, name: str) -> tuple[bool, float]:
+# A miss faster than this is a refused or empty read, not the lookup itself.
+# Slower misses are final so a timeout is not retried into a passing sample.
+FAST_DNS_MISS_MS = 100
+DNS_MISS_BUDGET_S = 1.0
+
+
+def dns_query_once(controller: int, name: str) -> tuple[bool, float, str]:
     """Real resolve through `/dns/query`. This is not the fake-ip listener."""
     quoted = urllib.parse.quote(name)
     url = f"http://127.0.0.1:{controller}/dns/query?name={quoted}&type=A"
@@ -329,9 +365,119 @@ def dns_query(controller: int, name: str) -> tuple[bool, float]:
         with urllib.request.urlopen(req, timeout=4) as resp:
             body = resp.read()
             ok = resp.status == 200 and b"127.0.0.2" in body
-    except Exception:
-        return False, (time.perf_counter() - started) * 1000
-    return ok, (time.perf_counter() - started) * 1000
+            detail = "" if ok else f"status {resp.status}"
+    except Exception as exc:
+        detail = str(exc)
+        if hasattr(exc, "read"):
+            try:
+                body = exc.read().decode("utf-8", "replace")
+                detail = body if len(body) <= 240 else body[-240:]
+            except Exception:
+                pass
+        return False, (time.perf_counter() - started) * 1000, detail
+    return ok, (time.perf_counter() - started) * 1000, detail
+
+
+def retryable_direct_udp_miss(detail: str, elapsed_ms: float) -> bool:
+    """Only a fast ICMP refusal from the direct UDP resolver is retried.
+
+    A DoH miss (`https://…/dns-query`) is final. Retrying it re-dials Reality
+    on the fingerprint-less profile and stalls the shared camouflage, so the
+    next VLESS samples time out and the median becomes None.
+    """
+    if elapsed_ms >= FAST_DNS_MISS_MS:
+        return False
+    if "dns-query" in detail or "https://" in detail:
+        return False
+    return "connection refused" in detail and "15353" in detail
+
+
+def accept_dns_sample(pull, now, sleep) -> tuple[bool, float]:
+    """Score one DNS sample.
+
+    `pull` returns `(ok, elapsed_ms, retry)`. A retryable fast miss is repeated
+    until `DNS_MISS_BUDGET_S`. The number kept on success is that attempt's own
+    elapsed time, so a 0.8ms answer stays 0.8ms. Any other miss is final.
+    Never-recovered misses stay failures; callers must not treat that as a
+    passing median.
+    """
+    deadline = now() + DNS_MISS_BUDGET_S
+    elapsed = 0.0
+    while True:
+        ok, elapsed, retry = pull()
+        if ok:
+            return True, elapsed
+        if not retry or elapsed >= FAST_DNS_MISS_MS or now() >= deadline:
+            return False, elapsed
+        sleep(0.02)
+
+
+def exceeds_limit(got: float | None, limit: float) -> bool:
+    return got is None or got > limit
+
+
+def _assert_dns_sample_policy() -> None:
+    clock = {"t": 0.0}
+
+    def now() -> float:
+        return clock["t"]
+
+    def sleep(seconds: float) -> None:
+        clock["t"] += seconds
+
+    def scripted(pairs):
+        seq = iter(pairs)
+
+        def pull():
+            return next(seq)
+
+        return pull
+
+    ok, elapsed = accept_dns_sample(scripted([(False, 0.4, True), (True, 0.8, False)]), now, sleep)
+    if not ok or elapsed != 0.8:
+        raise SystemExit("dns sample policy dropped a recovered answer")
+    clock["t"] = 0.0
+    ok, elapsed = accept_dns_sample(scripted([(True, 250.0, False)]), now, sleep)
+    if not ok or elapsed != 250.0:
+        raise SystemExit("dns sample policy hid a slow answer")
+    clock["t"] = 0.0
+    ok, _elapsed = accept_dns_sample(scripted([(False, 0.5, True)] * 80), now, sleep)
+    if ok:
+        raise SystemExit("dns sample policy treated a miss as success")
+    clock["t"] = 0.0
+    ok, _elapsed = accept_dns_sample(scripted([(False, 150.0, True), (True, 0.8, False)]), now, sleep)
+    if ok:
+        raise SystemExit("dns sample policy retried a slow miss")
+    clock["t"] = 0.0
+    ok, _elapsed = accept_dns_sample(
+        scripted([(False, 0.8, False), (True, 0.8, False)]), now, sleep
+    )
+    if ok:
+        raise SystemExit("dns sample policy retried a DoH miss")
+    if retryable_direct_udp_miss(
+        'Get "https://127.0.0.2:18443/dns-query?dns=abc": EOF', 0.8
+    ):
+        raise SystemExit("dns sample policy would re-dial DoH")
+    if not retryable_direct_udp_miss(
+        "read udp 127.0.0.1:1->127.0.0.2:15353: read: connection refused", 0.8
+    ):
+        raise SystemExit("dns sample policy dropped a direct UDP refusal")
+    if not exceeds_limit(None, 30) or exceeds_limit(0.8, 30) or exceeds_limit(30, 30):
+        raise SystemExit("dns ceiling treats a miss as success or moves the limit")
+
+
+def dns_query(controller: int, name: str) -> tuple[bool, float]:
+    detail = {"text": ""}
+
+    def pull():
+        ok, elapsed, text = dns_query_once(controller, name)
+        detail["text"] = text
+        return ok, elapsed, retryable_direct_udp_miss(text, elapsed)
+
+    ok, elapsed = accept_dns_sample(pull, time.perf_counter, time.sleep)
+    if not ok:
+        print(f"dns miss {controller} {elapsed:.1f}ms {detail['text']}", file=sys.stderr)
+    return ok, elapsed
 
 
 def fake_ip_exchange(port: int, timeout: float, name: str = ORIGIN_HOST) -> tuple[bool, float]:
@@ -419,14 +565,18 @@ class Core:
         )
         self.mixed = mixed
         self.controller = controller
-        deadline = time.perf_counter() + 5
-        while time.perf_counter() < deadline:
-            if controller_ready(controller):
-                return
-            if self.proc.poll() is not None:
-                raise SystemExit(f"mihomo exited for {config}")
-            time.sleep(0.02)
-        raise SystemExit(f"mihomo controller {controller} did not answer")
+        try:
+            deadline = time.perf_counter() + 5
+            while time.perf_counter() < deadline:
+                if controller_ready(controller):
+                    return
+                if self.proc.poll() is not None:
+                    raise SystemExit(f"mihomo exited for {config}")
+                time.sleep(0.02)
+            raise SystemExit(f"mihomo controller {controller} did not answer")
+        except BaseException:
+            self.close()
+            raise
 
     def close(self) -> None:
         self.proc.terminate()
@@ -434,6 +584,7 @@ class Core:
             self.proc.wait(timeout=2)
         except subprocess.TimeoutExpired:
             self.proc.kill()
+            self.proc.wait(timeout=2)
 
 
 def yaml_for(profile: str, protocol: str, material: dict, mixed: int, controller: int) -> str:
@@ -859,31 +1010,42 @@ class SingBox:
         directory.mkdir(parents=True, exist_ok=True)
         log_path = work / f"singbox-{mixed}.log"
         self._log = log_path.open("w")
-        self.proc = subprocess.Popen(
-            [str(binary), "run", "-c", str(path), "-D", str(directory)],
-            stdout=self._log,
-            stderr=subprocess.STDOUT,
-        )
+        try:
+            self.proc = subprocess.Popen(
+                [str(binary), "run", "-c", str(path), "-D", str(directory)],
+                stdout=self._log,
+                stderr=subprocess.STDOUT,
+            )
+        except BaseException:
+            self._log.close()
+            raise
         self.mixed = mixed
         self.controller = controller
-        deadline = time.perf_counter() + 5
-        while time.perf_counter() < deadline:
-            if controller_ready(controller):
-                return
-            if self.proc.poll() is not None:
-                self._log.flush()
-                tail = log_path.read_text(errors="replace")[-400:]
-                raise SystemExit(f"sing-box exited for {path}: {tail}")
-            time.sleep(0.02)
-        raise SystemExit(f"sing-box controller {controller} did not answer")
+        try:
+            deadline = time.perf_counter() + 5
+            while time.perf_counter() < deadline:
+                if controller_ready(controller):
+                    return
+                if self.proc.poll() is not None:
+                    self._log.flush()
+                    tail = log_path.read_text(errors="replace")[-400:]
+                    raise SystemExit(f"sing-box exited for {path}: {tail}")
+                time.sleep(0.02)
+            raise SystemExit(f"sing-box controller {controller} did not answer")
+        except BaseException:
+            self.close()
+            raise
 
     def close(self) -> None:
-        self.proc.terminate()
         try:
-            self.proc.wait(timeout=2)
-        except subprocess.TimeoutExpired:
-            self.proc.kill()
-        self._log.close()
+            self.proc.terminate()
+            try:
+                self.proc.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                self.proc.kill()
+                self.proc.wait(timeout=2)
+        finally:
+            self._log.close()
 
 
 def measure_singbox(binary: Path, work: Path, camo: Camo, protocol: str, material: dict, slot: int) -> dict:
@@ -959,6 +1121,7 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--check", action="store_true")
     args = parser.parse_args()
+    _assert_dns_sample_policy()
     mihomo, sing = ensure_bins()
     sing_client = ensure_singbox_client()
     work = Path("/tmp/tono-connect-bench")

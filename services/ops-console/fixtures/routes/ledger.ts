@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { nowSec } from '../../src/lib/clock';
+import { sloBody } from './slo';
 import type {
   FxRateDto,
   LedgerCategory,
@@ -433,63 +434,7 @@ export function createLedgerFixtures(rootDir: string) {
     }
 
     if (parts[0] === 'slo' && method === 'GET') {
-      const now = nowSec();
-      const today = Math.floor(now / 86_400) * 86_400;
-      const sampleItems = [
-        {
-          dayAt: today - 86_400,
-          platform: 'macos',
-          carrier: 'telecom',
-          node: 'Tokyo · Fuji',
-          attempts: 240,
-          successes: 238,
-          p50Ms: 42,
-          verifiedOutageMin: 0,
-          unmeasuredMin: 0,
-          rulesVersion: 2,
-        },
-        {
-          dayAt: today - 86_400,
-          platform: 'windows',
-          carrier: 'unicom',
-          node: 'Tokyo · Fuji',
-          attempts: 180,
-          successes: 176,
-          p50Ms: 55,
-          verifiedOutageMin: 0,
-          unmeasuredMin: 0,
-          rulesVersion: 2,
-        },
-        {
-          dayAt: today - 2 * 86_400,
-          platform: 'macos',
-          carrier: 'mobile',
-          node: 'Tokyo · Fuji',
-          attempts: 150,
-          successes: 145,
-          p50Ms: 68,
-          verifiedOutageMin: 15,
-          unmeasuredMin: 60,
-          rulesVersion: 2,
-        },
-      ];
-      const items = options.empty ? [] : sampleItems;
-      const totalAttempts = items.reduce((s, r) => s + r.attempts, 0);
-      const totalSuccesses = items.reduce((s, r) => s + r.successes, 0);
-      const summary = {
-        successRate: totalAttempts > 0 ? Number((totalSuccesses / totalAttempts).toFixed(4)) : null,
-        p50Ms: items.length > 0 ? 50 : null,
-        verifiedOutageMin: items.length > 0 ? 15 : 0,
-        unmeasuredMin: items.length > 0 ? 60 : 0,
-        coverage: items.length > 0 ? 0.98 : 1,
-      };
-      sendJson(res, {
-        items,
-        summary,
-        nextCursor: null,
-        total: items.length,
-        updatedAt: now,
-      });
+      sendJson(res, sloBody(query, options.empty));
       return true;
     }
 
