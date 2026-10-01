@@ -12,3 +12,8 @@
 - 合入当时的 `origin/main`。mihomo 的 `PROCESS-PATH-REGEX` 会把 `/` 和 `.` 写成 `\x` 转义（`rulePathRegex`），测试仍在找未转义的 `^/Applications/WeChat`，所以 `macos / build` 在 `XCTUnwrap` 失败。断言改为用 `rulePathRegex` 的实际载荷。
 - `MultiExitPolicyTests` 里「无住宅跳就不写助手域名」与这次修复相反，已改为要求这些 TCP 行指向 `Tono-Exit`、UDP 行 `REJECT`，并且都排在审核包直连规则之前。
 - 验证：本环境无 Xcode，`xcodebuild` 未跑。
+
+## 2026-10-01 · 续记（策略测试）
+- 再合入当时的 `origin/main`。`macos / policy-tests` 的 `assistant-destinations-precede-bundle-direct-without-home` 只报检查名。断言改为 `.literal` 搜索：每个助手域名和 `160.79.104.0/21` 的 TCP 必须指向 `Tono-Exit`、UDP 必须 `REJECT`，并且都在审核包直连之前；同一条字面规则不得指向 `Tono-China-App`、`Tono-China-Web`、`Tono-China-Direct`、`Tono-China-Web-Direct` 或 `DIRECT`。失败时带上后缀和那一行。
+- 生成规则没有改。没有住宅跳时这些目的地仍然先于物理网卡直连。
+- 验证：本环境无 Swift，`policy-tests` 未在本地执行。
