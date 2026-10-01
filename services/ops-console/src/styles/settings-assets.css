@@ -7,15 +7,15 @@
  * column, never copied from another page's number. No loads, writes,
  * filters, drawers or copy move. */
 
-/* Stock: address 176 + status 72 + probe 96 + bound 112 + actions 148 =
-   604 fixed; the line name keeps 180 of its own. */
+/* Stock: address 196 + status 84 + probe 132 + bound 188 + actions 148 =
+   748 fixed; the line name keeps 180 of its own. */
 .settings-page .settings-homeinventory .settings-inventory-table table {
-  min-width: 784px;
+  min-width: 928px;
 }
 
-/* Assets: 64 + 132 + 124 + 100 + 110 + 92 = 622 fixed; the line keeps 180. */
+/* Assets: 64 + 132 + 124 + 112 + 188 + 92 = 712 fixed; the line keeps 180. */
 .settings-page .settings-homelines .settings-homelines-table table {
-  min-width: 802px;
+  min-width: 892px;
 }
 
 /* Vendors: 132 + 96 + 168 + 92 + 76 = 564 fixed; the label keeps 160. */

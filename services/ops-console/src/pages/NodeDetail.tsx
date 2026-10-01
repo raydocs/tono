@@ -1,15 +1,21 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { ArrowLeft } from 'lucide-react';
 import { Empty } from '@/components/ops/Empty';
 import { copy } from '@/copy/copy';
 import type { CustomerSummaryDto } from '@contract';
+import { ledgerApi } from '@/lib/api-ledger';
 import { nodeApi } from '@/lib/api-node';
+import { sloApi } from '@/lib/api-slo';
+import { nowSec } from '@/lib/clock';
 import { closeNodePage } from '@/lib/hash-route';
+import { monthOf } from '@/lib/ledger';
 import { usePrivacy } from '@/lib/privacy';
+import type { FleetState } from '@/lib/use-fleet';
 import { useResource } from '@/lib/use-resource';
 import '@/styles/node-detail.css';
 import { Timeline } from './customer/Timeline';
 import { NodeAcceptance } from './node/Acceptance';
+import { NodeBand } from './node/Band';
 import { NodeBindings, NodeFacts, NodeQuota } from './node/Facts';
 import { NodeErrors } from './node/Errors';
 import { NodeHeader } from './node/Header';
@@ -19,34 +25,47 @@ import { NodeLoad } from './node/Load';
 import { NodeOccupants } from './node/Occupants';
 import { NodePaths } from './node/Paths';
 import { NodeProfileDrawer } from './node/ProfileDrawer';
+import { NodeQualityBand, type QualityRange } from './node/Quality';
 import { NodeQualityText } from './node/QualityText';
 
 /**
- * The node detail page, behind the fleet drawer.
+ * The node detail page: is this machine healthy, busy and worth keeping.
  *
- * The order is the order the questions get asked: what is this machine and is
- * it being sold, what has been written down about it, how much of the month is
- * left, how hard the box itself is working, can customers reach it and can it
- * reach home — and, when the summary of that stops making sense, the sweep's
- * own words — who is on it right now, what it is complaining about, and only
- * then what has been done to it.
+ * Identity and the actions first, then six headline numbers, then the
+ * machine's own load, whether customers got through to it, and both
+ * directions of the path — the questions in the order they get asked. Under
+ * that sit who is on it, what it is complaining about and what has been done
+ * to it, with the typed-in reference facts aside.
  *
- * The two folded blocks are folded requests: the load charts and the raw
- * sweep mount their bodies when opened, so neither the metrics window nor the
- * kilobytes of scan text are fetched by a visit that did not ask for them.
- *
- * Four requests rather than one: the detail carries the facts and this week's
- * errors, while connections, jobs and history are their own endpoints and are
- * allowed to fail on their own. A jobs table that could not load must not take
- * the quota gauge down with it.
+ * Every block reads its own source and fails on its own: the detail carries
+ * the facts and this week's errors, while load, quality, the ledger,
+ * connections, jobs and history are their own requests. A jobs table that
+ * could not load must not take the quota gauge down with it. The raw sweep
+ * stays folded, so its kilobytes are fetched only when asked for.
  */
-export default function NodeDetailPage({ name, customers }: {
+export default function NodeDetailPage({ name, customers, fleet }: {
   name: string;
   /** The shell's list, so a person who left this node is still named on its timeline. */
   customers: readonly CustomerSummaryDto[];
+  /** The legacy read, for the hub's recent probe rounds only. */
+  fleet: FleetState;
 }) {
   const privacy = usePrivacy();
   const [editing, setEditing] = useState(false);
+  const [range, setRange] = useState<QualityRange>('7d');
+  // The week feeds the headline tiles whatever the chart shows; the month is
+  // only fetched once somebody asks for it.
+  const week = useResource(`node-slo-7d-${name}`, (signal) => sloApi.get({ node: name, range: '7d' }, signal));
+  const month30 = useResource(
+    range === '30d' ? `node-slo-30d-${name}` : null,
+    (signal) => sloApi.get({ node: name, range: '30d' }, signal),
+  );
+  const ledgerMonth = monthOf(nowSec());
+  const ledger = useResource(`ledger-month-${ledgerMonth}`, (signal) => ledgerApi.month(ledgerMonth, signal));
+  const pings = useMemo(
+    () => (fleet.status === 'ready' ? fleet.fleet.nodes.find((row) => row.name === name)?.agent?.carriers ?? null : null),
+    [fleet, name],
+  );
   const detail = useResource(name, (signal) => nodeApi.detail(name, signal));
   const acceptance = useResource(name, (signal) => nodeApi.acceptance(name, signal));
   const connections = useResource(name, (signal) => nodeApi.connections(name, signal));
@@ -69,7 +88,7 @@ export default function NodeDetailPage({ name, customers }: {
     <div className="page-wrap node-detail-page">
       <BackLink />
 
-      <section className="node-hero-card" aria-label={node.name}>
+      <section className="node-hero-card raised" aria-label={node.name}>
         <NodeHeader
           node={node}
           sheet={acceptance}
@@ -85,20 +104,22 @@ export default function NodeDetailPage({ name, customers }: {
 
       <NodeAcceptance sheet={acceptance} lifecycle={node.lifecycle} />
 
+      <NodeBand node={node} slo={week} month={ledger} />
+      <NodeLoad name={name} />
+      <NodeQualityBand slo={range === '7d' ? week : month30} range={range} onRange={setRange} />
+      <NodePaths forward={node.forwardPath} back={node.returnPath} pings={pings} />
+
       {/* Evidence reads down the main column; the narrow reference sections
           sit aside. DOM order is unchanged, so the phone keeps the question
           order and the desktop grid places explicitly. */}
       <div className="node-detail-grid">
-        <div className="node-aux-card">
+        <div className="node-aux-card raised">
           <NodeFacts facts={node.facts} onEdit={() => setEditing(true)} />
           <NodeBindings bindings={node.bindings} />
           <NodeQuota quota={node.quota} name={name} />
         </div>
 
-        <div className="node-detail-main">
-          <NodePaths forward={node.forwardPath} back={node.returnPath} />
-          <NodeLoad name={name} />
-          <NodeQualityText name={name} />
+        <div className="node-detail-main raised">
           <NodeOccupants occupancy={node.occupancy} />
           <NodeErrors name={name} recent={node.recentErrors} />
 
@@ -132,6 +153,7 @@ export default function NodeDetailPage({ name, customers }: {
             state={receipts.status}
             message={receipts.status === 'error' ? receipts.message : undefined}
           />
+          <NodeQualityText name={name} />
         </div>
       </div>
 

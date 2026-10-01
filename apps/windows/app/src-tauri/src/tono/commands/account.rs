@@ -358,6 +358,9 @@ pub(crate) async fn adopt_sign_in_response(
     // first sync installs them.
     catalog_sync::discard_account_catalog(&mut inner);
     connection::remove_legacy_runtime_copy(&inner.catalog_dir);
+    // Failover belongs to the previous account even when both catalogs have
+    // the same preferred name and residential endpoint (as on sign-out).
+    inner.heal = tono_core::heal::Session::for_preferred("", "none");
     // The retained connect failure belongs to the previous account too: diagnostics fall back to
     // it (#594), so clear it as sign-out does, or this account's report carries that account's
     // failure.
@@ -707,6 +710,7 @@ mod lifecycle_tests {
             durable: MemoryCredentialStore,
             entered: tokio::sync::Notify,
             first: AtomicBool,
+            refuse: AtomicBool,
             gate: Mutex<std::sync::mpsc::Receiver<()>>,
         }
         impl CredentialStore for Vault {
@@ -716,6 +720,8 @@ mod lifecycle_tests {
                 if self.first.swap(false, Ordering::SeqCst) {
                     self.entered.notify_one();
                     self.gate.lock().unwrap().recv_timeout(Duration::from_secs(5)).unwrap();
+                }
+                if self.refuse.load(Ordering::SeqCst) {
                     return Err(CredentialError::Store("injected delete refusal".into()));
                 }
                 self.durable.delete(key)
@@ -724,7 +730,7 @@ mod lifecycle_tests {
         let (release, gate) = std::sync::mpsc::channel();
         let vault = Arc::new(Vault {
             durable: MemoryCredentialStore::new(), entered: Default::default(),
-            first: AtomicBool::new(true), gate: Mutex::new(gate),
+            first: AtomicBool::new(true), refuse: AtomicBool::new(true), gate: Mutex::new(gate),
         });
         vault.durable.set_refresh_token("persisted-old-session").unwrap();
         let state = Arc::new(TonoState::for_test());
@@ -751,6 +757,7 @@ mod lifecycle_tests {
         assert!(tokio::time::timeout(Duration::from_secs(2), close.wait()).await.unwrap().is_err());
         assert!(matches!(state.lock().await.account_state, AccountState::Error(_)));
         assert_eq!(vault.durable.refresh_token().unwrap().as_deref(), Some("persisted-old-session"));
+        vault.refuse.store(false, Ordering::SeqCst);
         close_account_with(Arc::clone(&state), AccountCloseReason::User,
             |_| async { Ok(()) },
             |client| async move { client.logout().await.map_err(|error| error.to_string()) },
@@ -950,6 +957,35 @@ mod lifecycle_tests {
         assert_eq!(inner.account_state, AccountState::SignedOut);
         assert!(!copy.exists(), "the signed-out account's residential credentials must not stay on disk");
         let _ = std::fs::remove_dir_all(&inner.catalog_dir);
+    }
+
+    #[tokio::test]
+    async fn replacement_sign_in_drops_the_previous_accounts_failover() {
+        let state = Arc::new(TonoState::for_test());
+        {
+            let mut inner = state.lock().await;
+            // The previous account failed over before protection was armed. Both
+            // accounts have the same selected name and residential identity.
+            inner.selected_node = Some("Los Angeles".into());
+            inner.heal = tono_core::heal::Session::for_preferred("Los Angeles", "socks5:203.0.113.9:1080");
+            inner.heal.dial = "San Jose".into();
+            inner.heal.pending_dial = Some("San Jose".into());
+            inner.heal.tried.insert("Los Angeles".into());
+        }
+        let (client, _, generation) = begin_sign_in(&state).await.unwrap();
+        state.lock().await.challenge_id = Some("challenge-b".into());
+        let auth: tono_core::auth::AuthResponse = serde_json::from_value(serde_json::json!({
+            "accessToken": "fixture-access-b",
+            "user": { "id": "account-b", "email": "b@example.test" },
+        })).unwrap();
+        adopt_sign_in_response(&state, &client, generation, "challenge-b", &auth, |_| {}).await.unwrap();
+        let mut inner = state.lock().await;
+        // Connect prepares the same preferred name/residential identity from
+        // B's catalog through this production Session method.
+        inner.heal.stick_to_preferred("Los Angeles", "socks5:203.0.113.9:1080");
+        assert_eq!(inner.heal.dial, "Los Angeles", "a new account starts from its selected server");
+        assert!(inner.heal.pending_dial.is_none());
+        assert!(inner.heal.tried.is_empty());
     }
 
     #[tokio::test]

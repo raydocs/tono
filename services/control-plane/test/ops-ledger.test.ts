@@ -10,7 +10,7 @@ import {
 } from '../src/ops/contract';
 import { runOpsCron } from '../src/ops/cron';
 import { ledgerCsv } from '../src/ops/ledger';
-import { postLedgerReverse } from '../src/ops/handlers/ledger';
+import { postLedgerReverse, postMonthClose } from '../src/ops/handlers/ledger';
 
 const ACCESS_TEAM_DOMAIN = 'test-team.cloudflareaccess.com';
 const ACCESS_AUDIENCE = 'test-access-audience-0001';
@@ -469,6 +469,43 @@ describe('ops ledger, month close, live FX', () => {
     expect(statuses).toEqual([200, 409]);
     const loser = a.status === 409 ? a : b;
     expect((await loser.json() as { error: { code: string } }).error.code).toBe('MONTH_CLOSED');
+  });
+
+  it('refuses a stale month-close snapshot when a ledger write commits before the lock', async () => {
+    const month = MONTH();
+    expect((await ops('ledger', json({
+      kind: 'revenue', category: 'plan', subjectType: 'user', subjectId: 'u-1',
+      amountMinor: 1000, currency: 'CNY', month,
+    }))).status).toBe(201);
+    const real = db();
+    const racingDb = new Proxy(real, {
+      get(target, key) {
+        const value = Reflect.get(target, key, target);
+        if (key !== 'prepare') return typeof value === 'function' ? value.bind(target) : value;
+        return (sql: string) => {
+          const statement = target.prepare(sql);
+          if (!sql.includes('INSERT OR IGNORE INTO ops_month_close')) return statement;
+          return {
+            bind: (...values: unknown[]) => ({
+              run: async () => {
+                expect((await ops('ledger', json({
+                  kind: 'revenue', category: 'plan', subjectType: 'user', subjectId: 'u-1',
+                  amountMinor: 2000, currency: 'CNY', month,
+                }))).status).toBe(201);
+                return statement.bind(...values).run();
+              },
+            }),
+          };
+        };
+      },
+    });
+    await expect(postMonthClose(
+      new Request(`https://test/api/v1/ops/months/${month}/close`, json({ notes: 'lock' })),
+      { ...(env as unknown as Env), DB: racingDb }, month, { email: ACCESS_ADMIN_EMAIL },
+    )).rejects.toMatchObject({ status: 409, code: 'LEDGER_CHANGED' });
+    expect(await real.prepare('SELECT month FROM ops_month_close WHERE month = ?').bind(month).first()).toBeNull();
+    const summary = assertMonthSummary(await (await ops(`months/${month}`)).json());
+    expect(summary.revenueCnyMinor).toBe(3000);
   });
 
   it('serves frozen totals for a closed month after later metering arrives', async () => {

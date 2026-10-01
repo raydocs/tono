@@ -26,17 +26,18 @@ final class DataUsageSummaryViewTests: XCTestCase {
     }
 
     func testConvenienceInitializer() {
-        let view = DataUsageSummaryView(
-            todayUpload: 100,
-            todayDownload: 200,
-            monthUpload: 300,
-            monthDownload: 400
-        )
-        XCTAssertEqual(view.today.upload, 100)
-        XCTAssertEqual(view.today.download, 200)
-        XCTAssertEqual(view.today.total, 300)
-        XCTAssertEqual(view.month.upload, 300)
-        XCTAssertEqual(view.month.download, 400)
-        XCTAssertEqual(view.month.total, 700)
+        let view = DataUsageSummaryView(upload: 100, download: 200)
+        XCTAssertEqual(view.session.upload, 100)
+        XCTAssertEqual(view.session.download, 200)
+        XCTAssertEqual(view.session.total, 300)
+    }
+
+    @MainActor
+    func testPopoverShowsOnlyThisConnectionsCoreTotals() {
+        let app = AppState()
+        app.trafficStats.totalUpload = 1_000
+        app.trafficStats.totalDownload = 4_000
+        let view = DataUsageSummaryView(appState: app, isCard: false)
+        XCTAssertEqual(view.session, .init(upload: 1_000, download: 4_000))
     }
 }

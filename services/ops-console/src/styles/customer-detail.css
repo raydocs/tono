@@ -6,6 +6,9 @@
  * is the reading order, so the phone keeps it and the desktop grid places
  * explicitly. No section is reworded, refetched or reordered. */
 
+/* The dashboard width, so the eight-column timeline fits beside the aside. */
+.page-wrap.customer-detail-page { max-width: 1280px; }
+
 .customer-detail-page .customer-hero-card {
   background: var(--surface);
   border: 1px solid var(--hairline);
