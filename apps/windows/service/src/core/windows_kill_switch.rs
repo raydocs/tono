@@ -4069,7 +4069,9 @@ pub(crate) async fn status() -> KillSwitchStatus {
     };
     KillSwitchStatus {
         wanted: armed.intent.wanted,
-        verified: armed.intent.is_verified(),
+        // Durable predecessor proof permits crash recovery, but cannot acknowledge this
+        // arm's MarkVerified request while its independent Connect deadline is pending.
+        verified: armed.intent.is_verified() && !FRESH_ARM_PROOF_PENDING.load(Ordering::Acquire),
         live,
         mode: armed.intent.mode,
         // What the last render decided, not what a render right now would decide: this is a
@@ -4344,6 +4346,34 @@ mod tests {
         mark_verified("owner-alice").await?;
         assert!(WANTED_CORE_DEADLINE.lock().unwrap_or_else(std::sync::PoisonError::into_inner).is_none());
         assert!(status().await.wanted);
+        cleanup().await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn inherited_verification_cannot_acknowledge_a_fresh_arm() -> Result<()> {
+        cleanup().await;
+        arm_bootstrap(&test_config(), "/opt/tono/mihomo", "owner-alice").await?;
+        crate::core::manager::set_running_core_identity_for_kill_switch_tests(Some((4242, 1)))
+            .await;
+        lock(None).await?;
+        mark_verified("owner-alice").await?;
+        assert!(status().await.verified);
+
+        // The new arm retains durable reconnect evidence, but no new MarkVerified arrived.
+        arm_bootstrap(&test_config(), "/opt/tono/mihomo", "owner-alice").await?;
+        lock(None).await?;
+        assert!(armed_guard().as_ref().unwrap().intent.is_verified());
+        let readback = status().await;
+        assert!(readback.wanted && readback.tunnel_permit_rendered);
+        assert_eq!(readback.mode, KillSwitchStatusMode::Locked);
+        assert!(!readback.verified, "a lost request cannot be acknowledged by its predecessor's proof");
+        assert!(FRESH_ARM_PROOF_PENDING.load(Ordering::Acquire));
+
+        mark_verified("owner-alice").await?;
+        assert!(status().await.verified, "a lost reply can still be acknowledged by fresh proof");
+        assert!(!FRESH_ARM_PROOF_PENDING.load(Ordering::Acquire));
         cleanup().await;
         Ok(())
     }
