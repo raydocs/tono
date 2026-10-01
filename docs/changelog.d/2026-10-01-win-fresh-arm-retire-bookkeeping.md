@@ -7,3 +7,4 @@
 - 验证：cargo test not run locally (MacBook rule); hosted CI runs it. The new test was not run against the old code.
 - 候选/发布：仅源码，无新候选；未部署、发布。
 - 剩余限制：needs-hardware. The explicit Release route still refuses on the same bookkeeping failure (#1274).
+- 续记（2026-10-01，review fix round）：Codex gpt-6.1-sol high at 6bc359cb found no blocker/major and one minor (replay fencing relied on the tombstone). Now the active owner is cleared independently of the run-intent write, and a failed crash tombstone write removes the stale wanted intent. The same test covers a same-boot restart after the fault clears. cargo test not run locally; hosted CI.
