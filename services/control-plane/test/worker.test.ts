@@ -6678,6 +6678,41 @@ ${nameLine}
     expect(identities.find((entry) => entry.userId === quiet.user.id)?.sourceUsageBytes).toBe(0);
   });
 
+  it('returns inactive-user recovery watermarks without authorizing them and scopes them to this exit', async () => {
+    const billed = await createAccount('inactive-roster-watermark');
+    const observedAt = Math.floor(Date.now() / 1000);
+    expect((await api('home/usage', json({ reports: [{
+      reportId: 'inactive-watermark-default', userId: billed.user.id, sourceId: 'exit-default',
+      protocolVersion: 2, totalBytes: 1050, observedAt,
+    }] }, EXIT_NODE_TOKENS['exit-default']))).status).toBe(200);
+    expect((await api('home/usage', json({ reports: [{
+      reportId: 'inactive-watermark-other', userId: billed.user.id, sourceId: 'exit-a',
+      protocolVersion: 2, totalBytes: 630, observedAt,
+    }] }, EXIT_NODE_TOKENS['exit-a']))).status).toBe(200);
+    await env.DB.prepare('UPDATE users SET expires_at = ? WHERE id = ?')
+      .bind(observedAt - 1, billed.user.id).run();
+
+    const listed = await api('home/exit-identities', {
+      headers: { authorization: `Bearer ${EXIT_NODE_TOKENS['exit-default']}` },
+    });
+    expect(listed.status).toBe(200);
+    expect(await listed.json()).toMatchObject({
+      identities: [], sourceUsageWatermarks: [{ userId: billed.user.id, sourceUsageBytes: 1050 }],
+    });
+    const other = await api('home/exit-identities', {
+      headers: { authorization: `Bearer ${EXIT_NODE_TOKENS['exit-a']}` },
+    });
+    expect(await other.json()).toMatchObject({
+      identities: [], sourceUsageWatermarks: [{ userId: billed.user.id, sourceUsageBytes: 630 }],
+    });
+    expect((await api('home/usage', json({ reports: [{
+      reportId: 'inactive-watermark-recovery', userId: billed.user.id, sourceId: 'exit-default',
+      protocolVersion: 2, totalBytes: 1050, observedAt: observedAt + 1,
+    }] }, EXIT_NODE_TOKENS['exit-default']))).status).toBe(200);
+    expect(await env.DB.prepare('SELECT usage_bytes FROM users WHERE id = ?').bind(billed.user.id)
+      .first()).toEqual({ usage_bytes: 1680 });
+  });
+
   it('revokes sessions and devices as soon as a usage report reaches quota', async () => {
     const account = await createAccount('quota');
     resetMockInventory(account.device.id, account.enrollment.hostname);

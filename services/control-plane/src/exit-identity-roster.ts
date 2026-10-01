@@ -33,6 +33,11 @@ export async function exitIdentityRosterResponse(
     // every account at once.
     observedAt,
     retireSharedLegacy: roster.retireSharedLegacy,
+    // Removed identities can still have retained Xray counters. Their billing
+    // recovery history must not depend on current traffic authorization.
+    sourceUsageWatermarks: nodeId ? [...watermarks].map(([userId, sourceUsageBytes]) => ({
+      userId, sourceUsageBytes,
+    })) : undefined,
     identities: roster.rows.map((row) => {
       const userId = String(row.user_id);
       return {
