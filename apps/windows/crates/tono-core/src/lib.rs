@@ -15,6 +15,7 @@ pub mod connect_timing;
 pub mod connection;
 pub mod credentials;
 pub mod customer_failure;
+pub mod direct_domains;
 pub mod heal;
 pub mod network_disposition;
 pub mod node;

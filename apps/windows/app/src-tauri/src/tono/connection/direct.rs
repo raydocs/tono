@@ -2160,6 +2160,97 @@ mod tests {
             DirectRenewalFollowUp::StrictKeepBlocked
         );
     }
+
+    /// The Service admits DIRECT rules only in compiler shapes. Every rule the real
+    /// compilers emit for a full plan (exact pins, signed-app paths, reviewed process
+    /// media, China suffixes) must still pass, or DIRECT would never apply.
+    #[test]
+    fn the_service_admits_what_both_compilers_emit_for_direct() {
+        let reference: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../../../../docs/reports/sing-box-evaluation/migration-m0/reference.json"
+        ))
+        .unwrap();
+        let nodes: Vec<tono_core::node::ValidatedNode> = reference["input"]["nodes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|node| tono_core::node::admit_node(&serde_yaml_ng::to_value(node).unwrap()).unwrap())
+            .collect();
+        let plan = tono_core::config::DirectPlan {
+            physical_interface: "Ethernet".into(),
+            hosts: vec![("qq.com".into(), "101.1.2.3".into())],
+            tcp_wechat_rules: vec![("qq.com".into(), "101.1.2.3".parse().unwrap(), 443)],
+            tcp_web_rules: vec![],
+            web_suffix_rules: vec![("aliyuncs.com".into(), 443), ("bilibili.com".into(), 80)],
+            udp_wechat_rules: vec![("101.1.2.4".parse().unwrap(), 8000)],
+            wechat_process_path_regexes: vec![r"^C:\\Program Files\\Tencent\\WeChat\\".into()],
+            reviewed_direct_ports: vec![80, 443, 8080],
+        };
+        let secret = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=";
+        let ports = tono_core::config::RuntimePorts {
+            mixed_port: 29190,
+            controller_port: 29191,
+        };
+        let routing = tono_core::CatalogRouting::default();
+        let sing_box = super::super::core_select::sing_box_runtime_document(
+            &nodes,
+            "Fixture Beta",
+            &routing,
+            secret,
+            ports,
+            Some(&plan),
+        )
+        .unwrap();
+        assert!(sing_box.contains("process_path_regex"));
+        assert_eq!(tono_service_protocol::admit_sing_box_runtime(&sing_box), Ok(()));
+
+        let mihomo = tono_core::config::build_owned_runtime_with_ports(
+            &nodes,
+            "Fixture Beta",
+            secret,
+            Some(&plan),
+            None,
+            None,
+            ports,
+        )
+        .unwrap();
+        let yaml: serde_yaml_ng::Value = serde_yaml_ng::from_str(mihomo.yaml()).unwrap();
+        let text = |value: &serde_yaml_ng::Value| value.as_str().unwrap_or("").to_string();
+        let rules: Vec<String> = yaml["rules"].as_sequence().unwrap().iter().map(text).collect();
+        assert!(
+            rules
+                .iter()
+                .any(|rule| rule.contains("PROCESS-PATH-REGEX") && rule.ends_with("Tono-China-Direct"))
+        );
+        let proxies: Vec<(String, String)> = yaml["proxies"]
+            .as_sequence()
+            .unwrap()
+            .iter()
+            .map(|proxy| (text(&proxy["name"]), text(&proxy["type"])))
+            .collect();
+        let groups: Vec<(String, Vec<String>)> = yaml["proxy-groups"]
+            .as_sequence()
+            .unwrap()
+            .iter()
+            .map(|group| {
+                let members = group["proxies"].as_sequence().unwrap().iter().map(text).collect();
+                (text(&group["name"]), members)
+            })
+            .collect();
+        let rules: Vec<&str> = rules.iter().map(String::as_str).collect();
+        let proxies: Vec<(&str, &str)> = proxies
+            .iter()
+            .map(|(name, kind)| (name.as_str(), kind.as_str()))
+            .collect();
+        let groups: Vec<(&str, Vec<&str>)> = groups
+            .iter()
+            .map(|(name, members)| (name.as_str(), members.iter().map(String::as_str).collect()))
+            .collect();
+        assert_eq!(
+            tono_service_protocol::admit_mihomo_direct_rules(&rules, &proxies, &groups),
+            Ok(())
+        );
+    }
 }
 
 #[cfg(test)]

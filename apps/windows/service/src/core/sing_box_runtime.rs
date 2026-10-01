@@ -4,8 +4,9 @@
 //! port of the macOS helper's `ownedRuntimeConfigIsSafe`. It does not compile a
 //! runtime. It admits only the shape the product compiler emits: the six
 //! top-level sections, loopback-only inbounds, the `Tono` TUN, encrypted DNS,
-//! `route.final` on `Tono-Exit`, and no file paths, remote rule sets, socket
-//! marks or `insecure` TLS. Keys are compared as sing-box's Go decoder folds
+//! `route.final` on `Tono-Exit`, DIRECT rules only in compiler shapes
+//! (`direct_admission`), and no file paths, remote rule sets, socket marks or
+//! `insecure` TLS. Keys are compared as sing-box's Go decoder folds
 //! them, and a document whose keys collide after folding is refused.
 
 use serde::de::{self, Deserialize, Deserializer, MapAccess, SeqAccess, Visitor};
@@ -40,7 +41,7 @@ const FORBIDDEN_KEYS: &[&str] = &[
 const TUN_INTERFACE_NAME: &str = "Tono";
 const TUN_ADDRESS: &str = "198.18.0.1/30";
 
-pub(crate) fn admit_owned_runtime(text: &str) -> Result<(), String> {
+pub fn admit_owned_runtime(text: &str) -> Result<(), String> {
     let FoldedJson(value) = serde_json::from_str(text)
         .map_err(|_| "runtime is not JSON with unambiguous keys".to_string())?;
     let root = value
@@ -92,6 +93,14 @@ pub(crate) fn admit_owned_runtime(text: &str) -> Result<(), String> {
     if route.get("final").and_then(Value::as_str) != Some("Tono-Exit") {
         return Err("route.final must be Tono-Exit".to_string());
     }
+    let rules = match route.get("rules") {
+        None => &[][..],
+        Some(rules) => rules
+            .as_array()
+            .ok_or_else(|| "route.rules is not a list".to_string())?
+            .as_slice(),
+    };
+    crate::core::direct_admission::admit_sing_box_direct_rules(outbounds, rules)?;
 
     let dns = root
         .get("dns")
@@ -513,5 +522,30 @@ mod tests {
         let mut doh = compiled();
         doh["dns"]["servers"][1]["detour"] = json!("Tono-China-Direct");
         assert!(admit_owned_runtime(&doh.to_string()).is_err());
+    }
+
+    /// While a DIRECT plan is live, WFP does not bound the destination, so a rule to
+    /// `Tono-China-Direct` is admitted only as the compiler writes it, never for an
+    /// assistant host or with no destination ahead of the assistant pins.
+    #[test]
+    fn direct_rules_outside_compiler_shapes_are_refused() {
+        let with_rule = |rule: Value| {
+            let mut runtime = compiled();
+            runtime["outbounds"].as_array_mut().unwrap().push(
+                json!({"type":"direct","tag":"Tono-China-Direct","bind_interface":"Ethernet"}),
+            );
+            runtime["route"]["rules"].as_array_mut().unwrap().push(rule);
+            admit_owned_runtime(&runtime.to_string())
+        };
+        let exact = json!({"type":"logical","mode":"and","rules":[
+            {"network":"tcp","port":443,"domain":["qq.com"]},{"ip_cidr":["101.1.2.3/32"]}],
+            "action":"route","outbound":"Tono-China-Direct"});
+        assert_eq!(with_rule(exact), Ok(()));
+        let assistant = json!({"network":"tcp","port":443,"domain_suffix":["claude.ai"],
+            "action":"route","outbound":"Tono-China-Direct"});
+        assert!(with_rule(assistant).is_err());
+        let unpinned_process = json!({"network":"tcp","port":[443],"process_path_regex":["^"],
+            "action":"route","outbound":"Tono-China-Direct"});
+        assert!(with_rule(unpinned_process).is_err());
     }
 }

@@ -305,9 +305,12 @@ pub fn build_runtime(input: RuntimeInput<'_>) -> Result<OwnedSingBoxRuntime, Sin
         rules.push(json!({"network":"tcp","domain_suffix":config::CLAUDE_HOME_DOMAINS.to_vec(),"action":"route","outbound":target}));
         rules.push(json!({"network":"tcp","ip_cidr":config::CLAUDE_HOME_IPV4_CIDRS.to_vec(),"action":"route","outbound":target}));
     } else if input.direct_plan.is_some() {
-        // Dedicated API children must never fall through to Alibaba DIRECT,
-        // including browser/curl requests without a residential hop.
-        rules.push(json!({"network":"tcp","domain_suffix":config::DEDICATED_MODEL_API_SUFFIXES.to_vec(),"action":"route","outbound":"Tono-Exit"}));
+        // Assistant hosts, the dedicated API children of the Alibaba DIRECT
+        // suffix among them, never fall through to DIRECT. The signed-app
+        // process rule has no destination bound, so an assistant site opened
+        // in WeChat needs this pin too (mihomo emits the same pins).
+        rules.push(json!({"network":"tcp","domain_suffix":config::CLAUDE_HOME_DOMAINS.to_vec(),"action":"route","outbound":"Tono-Exit"}));
+        rules.push(json!({"network":"tcp","ip_cidr":config::CLAUDE_HOME_IPV4_CIDRS.to_vec(),"action":"route","outbound":"Tono-Exit"}));
     }
     if home_target.is_some() || input.direct_plan.is_some() {
         for (field, values) in [
