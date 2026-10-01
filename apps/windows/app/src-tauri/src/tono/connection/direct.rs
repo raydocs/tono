@@ -59,7 +59,7 @@ pub(super) async fn direct_lease_heartbeat_loop(state: Arc<TonoState>, generatio
             if inner.connect_generation != generation || !inner.fsm.status().is_connected {
                 return;
             }
-            if inner.policy_tracker.current_digest() != Some(heartbeat.policy_digest.as_str()) {
+            if !direct_lease_policy_is_current(inner.traffic_policy.as_ref(), &heartbeat.policy) {
                 return;
             }
         }
@@ -199,7 +199,16 @@ pub(super) struct DirectLeaseHeartbeat {
     session: OwnerSessionProof,
     reload_id: u64,
     endpoint_digest: String,
-    policy_digest: String,
+    policy: tono_core::policy::TonoTrafficPolicy,
+}
+
+pub(super) fn direct_lease_policy_is_current(
+    current: Option<&tono_core::policy::TonoTrafficPolicy>,
+    committed: &tono_core::policy::TonoTrafficPolicy,
+) -> bool {
+    // Revision-only republishes change the signed JSON digest without changing routes.
+    // Keep renewing unless validated behavior changed, matching policy_sync's reconnect decision.
+    current == Some(committed)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -501,6 +510,11 @@ pub(super) async fn apply_cloud_policy(
         return Ok(None);
     }
     let expected_controller_rules = expected_controller_direct_rules(&plan);
+    // A suffix-only plan emits no rules without native-app pins. Opening the reload bracket
+    // for an empty graph would retract the healthy TUN permit and then fail controller read-back.
+    if expected_controller_rules.is_empty() {
+        return Ok(None);
+    }
     // Declared to the Service exactly when `runtime_value` emits process-scoped rules, and with
     // the same condition it uses. A pin existing is not the same as process routing existing:
     // `direct_endpoints` is the union of the WeChat, web and media pins and the Service cannot
@@ -939,6 +953,8 @@ pub(super) fn controller_direct_graph_is_active(
     // selectors. With home-broadband split routing the home block also carries
     // CLAUDE_HOME_DOMAINS pointing at Tono-Claude-Home, followed by the same
     // assistant matchers rejecting UDP even when the selected exit is HY2.
+    // Without that hop, a signed-app address-free TCP rule is preceded by the
+    // same domains and the Anthropic range aimed at Tono-Exit.
     let claude_target = if claude_home {
         config::CLAUDE_HOME_GROUP_NAME
     } else {
@@ -951,10 +967,21 @@ pub(super) fn controller_direct_graph_is_active(
         ));
     }
     let home_path_regexes = config::home_process_path_regexes();
+    // Address-free TCP path rules send every reviewed port from a signed
+    // WeChat/DingTalk/Feishu tree to the physical NIC. The runtime then emits
+    // the assistant domain and Anthropic rows first, aimed at Tono-Exit.
+    let assistant_shield = !claude_home
+        && expected_direct_rules.iter().any(|rule| {
+            rule.proxy == config::DIRECT_GROUP_NAME
+                && rule.payload.contains("(Network,tcp)")
+                && rule.payload.contains("ProcessPathRegex")
+        });
     let mut home_rows = config::HOME_PROCESS_NAMES.len() + home_path_regexes.len();
     if claude_home {
         home_rows += config::CLAUDE_HOME_DOMAINS.len() + config::CLAUDE_HOME_IPV4_CIDRS.len();
         home_rows *= 2;
+    } else if assistant_shield {
+        home_rows += config::CLAUDE_HOME_DOMAINS.len() + config::CLAUDE_HOME_IPV4_CIDRS.len();
     }
     // + 4 = two loopback rows, the UDP REJECT row, and the final MATCH.
     let expected_len = expected_direct_rules.len() + 3 + home_rows + 1;
@@ -969,14 +996,19 @@ pub(super) fn controller_direct_graph_is_active(
     // Home pins are TCP-scoped ANDs so assistant UDP falls through to the REJECT
     // row instead of matching a group that cannot carry it and leaking DIRECT.
     let mut index = 2;
-    if claude_home {
+    if claude_home || assistant_shield {
+        let domain_proxy = if claude_home {
+            config::CLAUDE_HOME_GROUP_NAME
+        } else {
+            EXIT_GROUP_NAME
+        };
         for domain in config::CLAUDE_HOME_DOMAINS {
             expect_rule(
                 rules.get(index),
                 index,
                 "AND",
                 &format!("((Network,tcp) && (DomainSuffix,{domain}))"),
-                config::CLAUDE_HOME_GROUP_NAME,
+                domain_proxy,
             )?;
             index += 1;
         }
@@ -986,7 +1018,7 @@ pub(super) fn controller_direct_graph_is_active(
                 index,
                 "AND",
                 &format!("((Network,tcp) && (IPCIDR,{cidr}))"),
-                config::CLAUDE_HOME_GROUP_NAME,
+                domain_proxy,
             )?;
             index += 1;
         }
@@ -1437,7 +1469,7 @@ pub(super) async fn commit_direct_policy_cancellation_safe(
                     session: pending.session.clone(),
                     reload_id: pending.reload_id,
                     endpoint_digest: pending.endpoint_digest.clone(),
-                    policy_digest: pending.policy.digest.clone(),
+                    policy: pending.policy.document.clone(),
                 },
             ))
         }

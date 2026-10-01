@@ -24,6 +24,7 @@ final class ConnectionCoordinator {
     private var disconnectQueueReleaseIntent = false
     var nodeSwitchTask: Task<Void, Never>?
     var protectedReconnectTask: Task<Void, Never>?
+    var unarmedReconnectTask: Task<Void, Never>?
     var protectedReconnectID: UUID?
     var lastProtectedReconnectKick: Date?
     var coreMonitorTask: Task<Void, Never>?
@@ -160,6 +161,8 @@ final class ConnectionCoordinator {
     func cancelReconnectTasks() {
         protectedReconnectTask?.cancel()
         protectedReconnectTask = nil
+        unarmedReconnectTask?.cancel()
+        unarmedReconnectTask = nil
         protectedReconnectID = nil
         lastProtectedReconnectKick = nil
         wakeRecoveryTask?.cancel()

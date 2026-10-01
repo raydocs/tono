@@ -1,5 +1,7 @@
 import { useMemo, useState } from 'react';
+import { ChevronRight } from 'lucide-react';
 import type { ConnectionEventDto, CustomerDeviceDto } from '@contract';
+import { Bars } from '@/components/ops/Bars';
 import { Chip } from '@/components/ops/Chip';
 import { EmptyLine } from '@/components/ops/Empty';
 import { Section } from '@/components/ops/Section';
@@ -7,12 +9,16 @@ import { Value } from '@/components/ops/Value';
 import { copy } from '@/copy/copy';
 import { nowMs } from '@/lib/clock';
 import { eventTone, eventWord, explainCode, isFailure, isSuccess, isSwitch, stageWord } from '@/lib/codes';
-import { formatClock, formatDate, formatLatency } from '@/lib/display';
+import { formatClock, formatDate, formatDay, formatLatency, formatTally } from '@/lib/display';
 import { cn } from '@/lib/utils';
 
 /** time · outcome · node · stage · code+explanation · elapsed · client · carrier */
 const GRID = 'grid grid-cols-[62px_62px_146px_52px_minmax(140px,1fr)_74px_124px_140px] gap-x-3 items-baseline';
 const WEEK_MS = 7 * 24 * 60 * 60 * 1_000;
+/** A week of rows is thousands of pixels; the newest days are what an operator came for. */
+const OPEN_DAYS = 2;
+const CHART_HEIGHT = 120;
+const board = copy.customerBoard;
 
 type Day = { key: number; label: string; rows: ConnectionEventDto[] };
 
@@ -53,6 +59,7 @@ export function Timeline({
   }, [events, failedOnly, week, device]);
 
   const days = useMemo(() => toDays(rows), [rows]);
+  const narrowed = failedOnly || device !== '';
 
   return (
     <Section
@@ -91,27 +98,33 @@ export function Timeline({
         : state === 'error' ? <EmptyLine message={message || copy.loadError} />
           : days.length === 0 ? <EmptyLine message={emptyMessage} />
             : (
-              <div className="overflow-x-auto">
-                <div className="min-w-[860px]">
-                  <div className={cn(GRID, 'pb-1 text-micro text-[var(--muted-foreground)]')}>
-                    <span>{copy.timelineColumns.at}</span>
-                    <span>{copy.timelineColumns.outcome}</span>
-                    <span>{who ? copy.timelineColumns.who : copy.timelineColumns.node}</span>
-                    <span>{copy.timelineColumns.stage}</span>
-                    <span>{copy.timelineColumns.code}</span>
-                    <span className="text-right">{copy.timelineColumns.elapsed}</span>
-                    <span>{copy.timelineColumns.client}</span>
-                    <span>{copy.timelineColumns.carrier}</span>
-                  </div>
-                  {days.map((day) => (
-                    <div key={day.key}>
-                      <div className="day-head">
-                        <span className="font-mono text-row">{day.label}</span>
-                        <span className="text-micro text-[var(--muted-foreground)]">{summaryOf(day.rows)}</span>
-                      </div>
-                      {day.rows.map((row) => <Row key={row.id} row={row} who={who} />)}
+              <div className="timeline-body">
+                {days.length < 2 ? null : <DayBars days={days} />}
+                {/* Wider than a phone on purpose; the region takes focus so the
+                    rows past the edge can be scrolled from the keyboard. */}
+                <div className="overflow-x-auto" role="region" aria-label={title} tabIndex={0}>
+                  <div className="min-w-[860px]">
+                    <div className={cn(GRID, 'pb-1 text-micro text-[var(--muted-foreground)]')}>
+                      <span>{copy.timelineColumns.at}</span>
+                      <span>{copy.timelineColumns.outcome}</span>
+                      <span>{who ? copy.timelineColumns.who : copy.timelineColumns.node}</span>
+                      <span>{copy.timelineColumns.stage}</span>
+                      <span>{copy.timelineColumns.code}</span>
+                      <span className="text-right">{copy.timelineColumns.elapsed}</span>
+                      <span>{copy.timelineColumns.client}</span>
+                      <span>{copy.timelineColumns.carrier}</span>
                     </div>
-                  ))}
+                    {days.map((day, index) => (
+                      <details key={day.key} className="timeline-day" open={narrowed || index < OPEN_DAYS}>
+                        <summary className="day-head">
+                          <ChevronRight aria-hidden size={12} strokeWidth={1.75} className="day-caret" />
+                          <span className="font-mono text-row">{day.label}</span>
+                          <span className="text-micro text-[var(--muted-foreground)]">{summaryOf(day.rows)}</span>
+                        </summary>
+                        {day.rows.map((row) => <Row key={row.id} row={row} who={who} />)}
+                      </details>
+                    ))}
+                  </div>
                 </div>
               </div>
             )}
@@ -175,6 +188,29 @@ function Carrier({ row }: { row: ConnectionEventDto }) {
     <span className="truncate text-body text-[var(--muted-foreground)]" title={text || undefined}>
       {text || copy.missing}
     </span>
+  );
+}
+
+/** Successes and failures per day, oldest on the left, so a bad day is visible before its rows are. */
+function DayBars({ days }: { days: readonly Day[] }) {
+  const columns = [...days].reverse().map((day) => {
+    let ok = 0;
+    let fail = 0;
+    for (const row of day.rows) {
+      if (isSuccess(row.kind)) ok += 1;
+      else if (isFailure(row.kind)) fail += 1;
+    }
+    return { key: String(day.key), label: formatDay(Math.floor(day.key / 1_000)), values: [ok, fail] };
+  });
+  return (
+    <Bars
+      columns={columns}
+      stacks={[{ key: 'ok', name: board.daysOk, tone: 'ok' }, { key: 'fail', name: board.daysFail, tone: 'sev' }]}
+      format={formatTally}
+      label={board.daysLabel}
+      height={CHART_HEIGHT}
+      className="timeline-bars"
+    />
   );
 }
 

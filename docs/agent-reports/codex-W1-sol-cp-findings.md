@@ -1,6 +1,6 @@
 # W1-sol-cp: Codex (GPT-6.1 Sol) findings
 
-Generated 2026-09-30 19:37 MT from the run's findings.tsv / prs.tsv.
+Generated 2026-09-30 22:59 MT from the run's findings.tsv / prs.tsv.
 
 ## PRs
 
@@ -35,7 +35,7 @@ Generated 2026-09-30 19:37 MT from the run's findings.tsv / prs.tsv.
 | SOL-CP-CATALOG-LOST-WRITE | C7a | — | services/control-plane/src/ops/shared-admin/catalog.ts:147 | Concurrent catalog/policy publish might overwrite newer revision | false-positive conditional revision UPDATE and checked changes |
 | SOL-CP-PRODUCT-DOUBLE-ASSIGN | C7a | — | services/control-plane/src/product-account.ts:330 | Concurrent pooled product assignment might double-apply entitlement | false-positive atomic conditional D1batch and unique assigned-user index |
 | SOL-CP-CURSOR-LONG-EMAIL | C7a/C7b | P2 | services/control-plane/src/ops/http.ts:23 | Cursor sort key rejects valid long customer email at page boundary | duplicate of #770 merged cursor bound expansion |
-| SOL-CP-HOME-PASTE-PASSWORD | C7a/C5 | P2 | services/control-plane/src/ops/shared-admin/home-exits.ts:178 | Pasting same home tuple with new password keeps old password unless flagged | real-unfixed decision item: shared credential authority/rotation semantics; automatic replacement could overwrite a newer shared secret |
+| SOL-CP-HOME-PASTE-PASSWORD | C7a/C5 | P2 | services/control-plane/src/ops/shared-admin/home-exits.ts:178 | Pasting same home tuple with different pasted password keeps old password unless flagged | real-unfixed decision item: shared credential authority/rotation semantics; automatic replacement could overwrite a newer shared secret |
 | SOL-CP-LOG-RENEW-SWEEP | C7a | P2 | services/control-plane/src/ops/shared-admin/diagnostics-logs.ts:96 | Expired-window sweep can delete a renewed grant | real-fixed #947 |
 | SOL-CP-ONBOARD-ROLE | C7a | P2 | services/control-plane/src/ops/legacy-handlers/users.ts:267 | Operator onboarding internally edits inventory owner-gated by #716 | real-unfixed decision item: onboarding inventory rights overlap #716 policy |
 | SOL-C5-RELEASE-RANGE-BUFFER | C5 | P2 | services/control-plane/src/releases/host.ts:118 | Legacy ranged installer GET buffers and copies selected body | real-fixed #821 |
@@ -69,9 +69,9 @@ Generated 2026-09-30 19:37 MT from the run's findings.tsv / prs.tsv.
 | SOL-CP-FP-HY2-MARGIN | C7b | — | services/control-plane/src/ops/ledger.ts:223 | HY2 alias might yield confidently wrong customer margin | false-positive missing cost marks pending and null margin |
 | SOL-CP-FP-PRODUCT-FK | C8 | — | services/control-plane/migrations/0023_ops_management.sql:30 | User deletion SET NULL might conflict with assigned-account CHECK | false-positive no runtime user DELETE; close disables |
 | SOL-CP-REVERSE-CLOSE-RACE | C7b | P2 | services/control-plane/src/ops/handlers/ledger.ts:273 | Close racing reversal leaves dangling reversed_by despite rejected INSERT | real-fixed #865 |
-| SOL-CP-ADMIN-REFRESH-DEFAULT | C9 | P2 | services/control-plane/admin/src/hooks.tsx:213 | Absent localStorage key disables default auto-refresh | real-unfixed user prohibits UI work except crash; runtime proved |
-| SOL-CP-ADMIN-HY2-IDENTITY | C9 | P2 | services/control-plane/admin/src/lib/catalog.ts:31 | Legacy console creates second machine identity for hy2 block | real-unfixed user prohibits UI work except crash; runtime proved |
-| SOL-CP-ADMIN-USERS-PAGE | C9 | P3 | services/control-plane/admin/src/api.ts:685 | Legacy user client ignores pagination beyond 2000 customers | real-unfixed user prohibits UI work except crash; scaling-only |
+| SOL-CP-ADMIN-REFRESH-DEFAULT | C9 | P2 | services/control-plane/admin/src/hooks.tsx:213 | Absent localStorage key disables default auto-refresh | real-unfixed deferred under requested UI restriction; runtime proved |
+| SOL-CP-ADMIN-HY2-IDENTITY | C9 | P2 | services/control-plane/admin/src/lib/catalog.ts:31 | Legacy console creates second machine identity for hy2 block | real-unfixed deferred under requested UI restriction; runtime proved |
+| SOL-CP-ADMIN-USERS-PAGE | C9 | P3 | services/control-plane/admin/src/api.ts:685 | Legacy user client ignores pagination beyond 2000 customers | real-unfixed deferred under requested UI restriction; scaling-only |
 | SOL-CP-ADMIN-DETAIL-RACE | C9 | — | services/control-plane/admin/src/pages/users/CustomerDrawer.tsx:160 | Late previous-customer detail might replace drawer | false-positive response binding/keyed account fence |
 | SOL-CP-ADMIN-DOUBLE-MUTATION | C9 | — | services/control-plane/admin/src/pages/users/ask.tsx:29 | Double confirmation might repeat destructive actions | false-positive exclusive gate and server guards |
 | SOL-CP-ADMIN-DEV-FALLBACK | C9 | — | services/control-plane/admin/src/api.ts:527 | Fixture might pretend production write succeeded | false-positive development-only fallback |

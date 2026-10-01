@@ -318,14 +318,33 @@ nonisolated enum HelperProtocolVersion {
     ///   pfctl does not answer, and reports down only when a second read
     ///   agrees. A 4.52.7 daemon still drops a live ruleset on `pfctl -nf`
     ///   failure and treats one unread health sample as "not filtering".
-    /// - 4.52.10 → 4.52.11: silent upgrade copies a regular file from a
+    /// - 4.52.10 → 4.52.11: one protected-DNS server-count cap (32) for save,
+    ///   load and write; enable refuses over-cap lists before any change (MAC-
+    ///   DNS-SNAPSHOT-OVER-8).
+    /// - 4.52.11 → 4.52.12: the watchdog releases a bootstrap-only block whose
+    ///   recorded app owner died before committing the tunnel (MAC-ORPHAN-
+    ///   BOOTSTRAP-PF).
+    /// - 4.52.12 → 4.52.13: update-failure and unreadable-ledger emergency
+    ///   release restore a saved dead-loopback DNS snapshot and apply the
+    ///   secondary AI sinkhole after clearing PF intent (same class as a
+    ///   crash/hang release). Previously `releaseInstalledBlock` alone left
+    ///   DNS on 127.0.0.1 and skipped SelectiveFailOpen.
+    /// - 4.52.13 → 4.52.14: DNS writes refuse another preferences
+    ///   writer's lock promptly so helper requests and recovery can continue.
+    /// - 4.52.14 → 4.52.15: DNS restore and service handoff retry
+    ///   Apply before retiring originals already committed to disk.
+    /// - 4.52.15 → 4.52.16: Automatic failed commits and orphaned bootstrap releases preserve the secondary AI hold after opening general traffic.
+    /// - 4.52.16 → 4.52.17: exhausted App recovery has an AI-preserving release intent.
+    /// - 4.52.17 → 4.52.18: resolved update retirement keeps its active
+    ///   receipt until executor-job cleanup succeeds, preserving retry ownership.
+    /// - 4.52.18 → 4.52.19: silent upgrade copies a regular file from a
     ///   non-blocking fd and does not hold the update lock across that copy.
     ///   Stale-core signals re-check path and uid. The installed update floor
     ///   is the bytes read before and after the signature check. A `pfctl -X`
     ///   that leaves the token listed keeps the record. A new physical NIC
     ///   reloads the LAN DNS block without flushing states. Protected DNS
     ///   status follows `serviceID`.
-    static let current = "4.52.11"
+    static let current = "4.52.19"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS

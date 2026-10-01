@@ -1,6 +1,6 @@
 # W1-sol-win-app: Codex (GPT-6.1 Sol) findings
 
-Generated 2026-09-30 19:37 MT from the run's findings.tsv / prs.tsv.
+Generated 2026-09-30 22:59 MT from the run's findings.tsv / prs.tsv.
 
 ## PRs
 
@@ -12,6 +12,8 @@ Generated 2026-09-30 19:37 MT from the run's findings.tsv / prs.tsv.
 | 916 | hunt/sol-winapp-upload-identifier-redaction | none | yes | fix(windows): redact account identifiers from uploaded audit segments |
 | 932 | hunt/sol-winapp-account-cache-scope | none | yes | fix(windows): isolate account card caches by sign-in generation |
 | 951 | hunt/sol-winapp-activity-process-key | none | yes | fix(windows): keep Activity process families limited to declared keys |
+| 980 | hunt/sol-winapp-quit-vault-flush | none | yes | fix(windows): flush rotated session credentials on committed exit |
+| 984 | hunt/sol-winapp-singleton-proxy | none | yes | fix(windows): bypass inherited proxies for singleton notification |
 
 ## Hypotheses
 
@@ -93,3 +95,34 @@ Generated 2026-09-30 19:37 MT from the run's findings.tsv / prs.tsv.
 | W1-TRAFFIC-SAMPLER-GROWTH | A10 | — | apps/windows/app/src/utils/traffic-sampler.ts:1 | Invalid retention/ratio grows sampler without bound | false-positive fixed internal configs and bounded moving heads |
 | W1-SEARCH-REGEX-HANG | A10 | — | apps/windows/app/src/utils/search-matcher.ts:24 | User regex freezes renderer | false-positive compileStringMatcher has no runtime caller |
 | W1-LEGACY-POLYFILLS | A10 | — | apps/windows/app/src/polyfills/matchMedia.js:1 | Old compatibility fallback crashes current WebView | false-positive Edge109 minimum and native feature guards avoid fallback |
+| WIN-QUIT-ROTATED-TOKEN-DURABILITY | A5/A9 | P1 | apps/windows/app/src-tauri/src/tono/commands/quit.rs:358 | Committed Quit skips the retry flush for a transiently failed rotated-token vault write | real-fixed #980 |
+| W1-BOOTSTRAP-IPC-HANG | A10 | — | apps/windows/app/src/main.tsx:109 | Hung preload blocks the app indefinitely | false-positive explicit 2-second deadline renders the app; late preload detached |
+| W1-OVERLAY-STRICT-REMOUNT | A10 | — | apps/windows/app/src/pages/_layout/hooks/use-loading-overlay.ts:14 | StrictMode cancels loading removal and blocks app access | false-positive data-hidden immediately disables pointer events and hides overlay |
+| W1-TRAFFIC-WORKER-BACKLOG | A10 | — | apps/windows/app/src/hooks/use-traffic-monitor.ts:270 | Worker startup failures build an unbounded queue | false-positive construction failure switches inline; no production queue-growth trigger proved |
+| W1-TRAFFIC-ACTIVE-OWNER | A10 | — | apps/windows/app/src/hooks/use-mihomo-ws-subscription.ts:179 | Shared owner starves another consumer live status | false-positive Dashboard and Tray run in separate WebViews with independent modules |
+| W1-ACCOUNT-MODAL-SCOPE | A10 | — | apps/windows/app/src/tono-ui/TonoAccountCard.tsx:65 | Revoke modal retains previous account device | false-positive actual replacement sign-in unmounts Account; #932 regression covers navigation |
+| W1-TRAY-SIGNEDOUT-CONNECT | A10 | — | apps/windows/app/src/tono-ui/TrayPanel.tsx:121 | Signed-out Tray arms protection | false-positive backend checks Ready before connection admission |
+| W1-SERVER-UNMOUNT-CANCEL | A10 | — | apps/windows/app/src/pages/tono/servers.tsx:159 | Server page cleanup cancels another window tests | false-positive no second production test window or realistic conflicting caller |
+| W1-WS-CLEAN-CLOSE | A10 | — | apps/windows/crates/tono-plugin-core/src/mihomo.rs:50 | Clean native socket close leaves frontend subscription stale | false-positive core restart changes generation; no realistic same-generation clean close proved; deferred lead |
+| W1-POLICY-LOCK-INVERSION | A5 | — | apps/windows/app/src-tauri/src/tono/state.rs:779 | Publication and selection locks deadlock reconnect | false-positive publication locks precede state locks and release before reconnect |
+| W1-SELECTION-TRUNCATION | A5 | — | apps/windows/app/src-tauri/src/tono/state.rs:857 | Interrupted selection hint write loses internet | false-positive corrupt optional hint becomes absent; validated catalog supplies fallback |
+| W1-TRANSPORT-WALK-HANG | A5 | — | apps/windows/app/src-tauri/src/tono/transport.rs:550 | Alternate transport walk can hang indefinitely | false-positive nominal budget can overrun one bounded attempt; outer operation deadlines also bound it |
+| W1-VAULT-QUEUE-OVERFLOW | A5 | — | apps/windows/app/src-tauri/src/tono/credentials.rs:732 | Single stalled vault overflows token mutation queue | false-positive no realistic 64 distinct queued-mutation trigger; rejection before memory commit |
+| W1-PORT-EXHAUSTION | A9 | — | apps/windows/app/src-tauri/src/utils/port.rs:11 | Fallback port wrap loops forever | false-positive fixed 64511-iteration bound and explicit None fallback |
+| W1-LOG-FILENAME-UTF8 | A9 | — | apps/windows/app/src-tauri/src/utils/init.rs:107 | Non-ASCII log filename tail slicing panics | false-positive ASCII .log suffix guarantees the sliced end boundary |
+| W1-KEY-LENGTH-PANIC | A9 | — | apps/windows/app/src-tauri/src/utils/dirs.rs:243 | Corrupt encryption key crashes startup | false-positive cipher length failure returns Result; stored fields have fallback parser |
+| WIN-DIRECT-RESTORE-WRITER-DELAY-AUTO | A1 | P1 | apps/windows/app/src-tauri/src/tono/connection/monitor.rs:1384 | Automatic health release never cancels the stalled DIRECT reader and normal internet remains Blocked about two minutes | real-unfixed follow-up to #898; cancellation-only opens AI sooner and existing best-effort AI fallback cannot guarantee top rule |
+| W1-AUTO-HEALTH-AI-HOLD | A1 | — | apps/windows/app/src-tauri/src/tono/connection/monitor.rs:1391 | Automatic health release omits guaranteed secondary AI blocking | duplicate SFO-1/#738 and ZC-F1/#706; needs existing guaranteed-fallback decision/implementation |
+| WIN-SINGLETON-INHERITED-PROXY | A9 | P3 | apps/windows/app/src-tauri/src/utils/server.rs:100 | Inherited HTTP proxy intercepts authenticated localhost notification and second launch fails after twenty seconds | real-fixed #984 |
+| W1-SWITCH-HEARTBEAT | A1 | — | apps/windows/app/src-tauri/src/tono/commands/catalog.rs:286 | Hot switch aborts DIRECT heartbeat | false-positive only Reconnect invalidates generation; Switch preserves supervisors |
+| W1-VIRTUAL-UPLINK | A1 | — | apps/windows/app/src-tauri/src/tono/connection/platform.rs:154 | Physical discovery selects Tono virtual adapter | false-positive hardware/type/description filters exclude virtual adapters |
+| W1-STALE-PREPARE-CORE | A1 | — | apps/windows/service/src/core/server/handlers.rs:576 | Stale Prepare stops a successor Core | false-positive captured release epoch checked under lifecycle ownership |
+| W1-LOST-START-OWNER | A1 | — | apps/windows/app/src-tauri/src/core/service/mod.rs:759 | Lost Start response leaves an unowned Core | false-positive proved generation advance adopts proposed session token; owner release handles absent local proof |
+| W1-API-IDENTITY-LOCK | A1 | — | apps/windows/app/src-tauri/src/tono/connection.rs:322 | API identity and app state lock order deadlocks | false-positive memory-only epoch read and no reverse callback or await cycle |
+| W1-STALE-MONITOR-RELEASE | A1 | — | apps/windows/app/src-tauri/src/tono/connection/monitor.rs:1331 | Stale monitor releases replacement session | false-positive registered task retirement and generation checks protect normal path; remaining lead requires narrow race |
+| W1-CATALOG-IDENTITY-OUTAGE | A1 | — | apps/windows/app/src-tauri/src/tono/connection/switch.rs:269 | Catalog identity rotation sustains an outage | false-positive protected probe rollback and cold reconstruction; no sustained single-failure P1 proved |
+| W1-CONTROLLER-RESPONSE-GROWTH | A1 | — | apps/windows/app/src-tauri/src/tono/connection/controller.rs:156 | Controller JSON response exhausts memory | false-positive trusted local Core and no realistic customer workload proving exhaustion |
+| W1-SIGNER-SUPERVISION | A1 | — | apps/windows/app/src-tauri/src/tono/connection/monitor.rs:492 | Stalled signer discovery removes all supervision | false-positive separate network monitor and DIRECT heartbeat remain active |
+| W1-SHORTCUT-FIND-GATE | A10 | — | apps/windows/app/src/utils/disable-webview-shortcuts.ts:12 | Keyboard shortcut suppression blocks Ctrl+F search | false-positive preventDefault does not stop event bubbling; layout still handles Ctrl+F |
+| W1-TRAFFIC-FORMAT-PANIC | A10 | — | apps/windows/app/src/utils/parse-traffic.ts:8 | Invalid rate values throw and crash renderer | false-positive NaN infinity and negative inputs return strings; no throw verified in Node |
+| W1-UPDATE-LATE-CALLBACK | A10 | — | apps/windows/app/src/components/setting/mods/update-viewer.tsx:213 | Late progress callback after route unmount corrupts update ownership | false-positive only retired React state changes; Service retains staging/install/recovery ownership |

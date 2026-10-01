@@ -188,7 +188,7 @@ export const nodeDetailCopy = {
     who: '发起人',
     created: '创建',
     result: '结果',
-    action: '',
+    action: '操作',
   } as const,
   nodeJobType: {
     xray_dial_errors: '拉取报错',
@@ -316,26 +316,7 @@ export const nodeDetailCopy = {
     '24h': '24 小时',
     '7d': '7 天',
   } as const,
-  nodeLoadCharts: {
-    cpu: 'CPU',
-    memory: '内存',
-    netIn: '下行',
-    netOut: '上行',
-  } as const,
-  nodeLoadPeak: (value: string) => `峰值 ${value}`,
-  /** 95 分位 is how transit is billed; 并发峰值 is what the box was holding. */
-  nodeLoadBandwidth: '95 分位带宽',
-  nodeLoadConnections: '并发峰值',
   nodeLoadRate: (bytes: string) => `${bytes}/s`,
-  nodeLoadConnCount: (count: string) => `${count} 条`,
-  nodeLoadPoint: (when: string, value: string) => `${when} · ${value}`,
-  /**
-   * The one thing about these charts that is not obvious from looking at
-   * them: the machine reports totals since it booted, so a restart leaves a
-   * hole rather than a cliff, and the hole is the honest drawing.
-   */
-  nodeLoadNote: '上下行按两次上报之间的增量算，机器重启过的那一段不画',
-  nodeNoLoad: '这台机器最近没有报过负载',
 
   /* ----------------------------------------------------------- 线路原文 */
 

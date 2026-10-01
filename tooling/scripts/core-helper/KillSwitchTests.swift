@@ -1,6 +1,25 @@
 import Foundation
 import Darwin
 
+extension SocketServer {
+    static func runOrphanedBootstrapSelectiveReleaseSelfTest() -> Bool {
+        var intentPresent = true
+        var events: [String] = []
+        do {
+            try releaseOrphanedBootstrapProtection(
+                disarm: {
+                    events.append("disarm")
+                    intentPresent = false
+                },
+                applySelectiveLayer: {
+                    events.append(intentPresent ? "applied-before-disarm" : "apply-ai-hold")
+                }
+            )
+        } catch { return false }
+        return events == ["disarm", "apply-ai-hold"]
+    }
+}
+
 extension KillSwitchManager {
     static func runLifecycleSelfTests() -> Bool {
         let testAnchor = "tono.lifecycle-test"
@@ -1451,6 +1470,37 @@ extension KillSwitchManager {
             ) && watchdogShouldRestoreNetwork(
                 consecutiveCoreDownChecks: coreDownRestoreThreshold
             )
+            // MAC-ORPHAN-BOOTSTRAP-PF: a bootstrap-only block (empty
+            // tunnelInterfaces) outlives the app only when the recorded
+            // owner stayed dead past the threshold. A committed session, a
+            // helper that restarted mid-session (no owner), and a live
+            // owner are all untouched however long the loop runs.
+            let orphanedBootstrapUntouched = SocketServer.orphanedBootstrapAction(
+                stateFilePresent: true, bootstrapOnly: false, ownerRecorded: true,
+                ownerAlive: false, consecutiveChecks: 99
+            ) == .reset
+                && SocketServer.orphanedBootstrapAction(
+                    stateFilePresent: true, bootstrapOnly: true, ownerRecorded: false,
+                    ownerAlive: false, consecutiveChecks: 99
+                ) == .reset
+                && SocketServer.orphanedBootstrapAction(
+                    stateFilePresent: true, bootstrapOnly: true, ownerRecorded: true,
+                    ownerAlive: true, consecutiveChecks: 99
+                ) == .reset
+                && SocketServer.orphanedBootstrapAction(
+                    stateFilePresent: false, bootstrapOnly: true, ownerRecorded: true,
+                    ownerAlive: false, consecutiveChecks: 99
+                ) == .reset
+            let orphanedBootstrapReleases = SocketServer.orphanedBootstrapAction(
+                stateFilePresent: true, bootstrapOnly: true, ownerRecorded: true,
+                ownerAlive: false,
+                consecutiveChecks: SocketServer.orphanedBootstrapReleaseThreshold - 1
+            ) == .count
+                && SocketServer.orphanedBootstrapAction(
+                    stateFilePresent: true, bootstrapOnly: true, ownerRecorded: true,
+                    ownerAlive: false,
+                    consecutiveChecks: SocketServer.orphanedBootstrapReleaseThreshold
+                ) == .release
             return ruleShapesHold
                 && bundleShapesHold
                 && bundleOffWithoutTunnel
@@ -1473,6 +1523,8 @@ extension KillSwitchManager {
                 && unansweredListingKeepsUnrecordedToken
                 && bootAnchorHolds
                 && watchdogReleases
+                && orphanedBootstrapUntouched
+                && orphanedBootstrapReleases
                 && failureRecoveryReleasesNetwork(strictKillSwitchEnabled: false)
                 && !failureRecoveryReleasesNetwork(strictKillSwitchEnabled: true)
                 && shouldReinstallKillSwitch(coreRunning: true)
@@ -1502,6 +1554,31 @@ extension KillSwitchManager {
                 load: .acceptedOrUnknown,
                 strictKillSwitchEnabled: true
             )
+    }
+
+    static func runFailedBarrierSelectiveReleaseSelfTest() -> Bool {
+        var intentPresent = true
+        var events: [String] = []
+        releaseInstalledBlock(
+            release: {
+                events.append("release")
+                intentPresent = false
+            },
+            applySelectiveLayer: {
+                events.append(intentPresent ? "applied-before-release" : "apply-ai-hold")
+            }
+        )
+        return events == ["release", "apply-ai-hold"]
+    }
+
+    static func runFailedBarrierUnreleasedSelfTest() -> Bool {
+        struct ReleaseFailed: Error {}
+        var applied = false
+        releaseInstalledBlock(
+            release: { throw ReleaseFailed() },
+            applySelectiveLayer: { applied = true }
+        )
+        return !applied
     }
 
     /// `/killswitch/health` disconnects the app without a release when `live`

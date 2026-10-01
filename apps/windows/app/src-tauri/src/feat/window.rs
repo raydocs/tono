@@ -141,6 +141,7 @@ pub async fn restart_app() {
             handle::Handle::global().clear_is_exiting();
             surface_cancelled_quit().await;
             handle::Handle::notice_message("app_restart::core_stop_failed", "");
+            crate::tono::commands::resync_after_cancelled_quit(handle::Handle::app_handle().clone()).await;
             return;
         }
         confirmed_protected_exit = true;
@@ -167,6 +168,7 @@ pub async fn restart_app() {
         handle::Handle::global().clear_is_exiting();
         refresh_tray_after_cancelled_exit().await;
         handle::Handle::notice_message("app_restart::core_stop_failed", "");
+        crate::tono::commands::resync_after_cancelled_quit(handle::Handle::app_handle().clone()).await;
         return;
     }
 
@@ -218,6 +220,14 @@ async fn refresh_tray_after_cancelled_exit() {
 /// is about. Restart Tono uses the same bound: `set_is_exiting` suppresses frontend events, so
 /// an unbounded wait is a silent freeze on the RestoringSessionScreen.
 const INTERACTIVE_QUIT_RELEASE_BUDGET: Duration = Duration::from_secs(8);
+
+/// Idle-Service shutdown is optional after release/Core cleanup. Its IPC budgets
+/// must not hold an already-approved Quit open while the Service is unresponsive.
+const OPTIONAL_SERVICE_STOP_BUDGET: Duration = Duration::from_secs(2);
+
+async fn wait_for_optional_service_stop(stop: impl std::future::Future<Output = ()>) -> bool {
+    tokio::time::timeout(OPTIONAL_SERVICE_STOP_BUDGET, stop).await.is_ok()
+}
 
 /// Map a bounded `quit_release` wait into an optional error. A timeout is unproven, never success:
 /// abandoning the wait does not abandon the release (single-flight), but the click must not hang.
@@ -533,7 +543,12 @@ pub async fn quit() -> tono_signal::ShutdownOutcome {
     // (protection semantics win). Best-effort: never blocks or cancels the exit.
     #[cfg(windows)]
     if !tono_protected_at_quit {
-        crate::tono::commands::stop_service_on_unprotected_quit().await;
+        if !wait_for_optional_service_stop(
+            crate::tono::commands::stop_service_on_unprotected_quit(),
+        ).await {
+            logging!(warn, Type::Service,
+                "Tono: optional idle-Service shutdown exceeded {OPTIONAL_SERVICE_STOP_BUDGET:?}; continuing Quit");
+        }
     }
 
     utils::server::shutdown_embedded_server();
@@ -645,6 +660,18 @@ pub async fn hide() {
 
 #[cfg(test)]
 mod tests {
+    #[tokio::test(start_paused = true)]
+    async fn optional_idle_service_shutdown_cannot_delay_quit_past_its_budget() {
+        let started = tokio::time::Instant::now();
+        let completed = tokio::time::timeout(
+            super::OPTIONAL_SERVICE_STOP_BUDGET + Duration::from_secs(1),
+            super::wait_for_optional_service_stop(std::future::pending()),
+        ).await.expect("optional Service IPC must not retain Quit until its own lifecycle timeout");
+        assert!(!completed, "an unanswered optional shutdown must report its timeout");
+        assert_eq!(started.elapsed(), super::OPTIONAL_SERVICE_STOP_BUDGET);
+        assert!(super::wait_for_optional_service_stop(async {}).await);
+    }
+
     use super::{
         classify_refusal, classify_service_refusal, classify_service_refusal_pair, interactive_release_wait_error,
         run_interactive_cleanup_transition, run_session_ending_cleanup_transition,

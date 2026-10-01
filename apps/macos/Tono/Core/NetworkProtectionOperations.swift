@@ -23,6 +23,10 @@ struct NetworkProtectionOperations {
     var disarm: () async throws -> Void = {
         try await PrivilegedRuntimeCoordinator.shared.disarmKillSwitch()
     }
+    /// Automatic recovery releases ordinary traffic while retaining the AI floor.
+    var releaseAfterFailure: () async throws -> Void = {
+        try await PrivilegedRuntimeCoordinator.shared.disarmKillSwitch(preserveAIHold: true)
+    }
     var restrictToBootstrap: () async throws -> Void = {
         try await PrivilegedRuntimeCoordinator.shared.restrictKillSwitchToBootstrap()
     }
