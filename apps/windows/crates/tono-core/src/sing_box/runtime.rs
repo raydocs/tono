@@ -343,11 +343,20 @@ pub fn build_runtime(input: RuntimeInput<'_>) -> Result<OwnedSingBoxRuntime, Sin
             if !node::is_public_ipv4(ip) || !valid_domain(host) {
                 return Err(UnsupportedPolicy);
             }
-            hosts.entry(host.clone()).or_default().insert(ip);
+            // DNS names are case-insensitive and Service admission folds object keys like Go,
+            // so `qq.com` and `QQ.com` must become one `predefined` key, never two.
+            hosts
+                .entry(host.to_ascii_lowercase())
+                .or_default()
+                .insert(ip);
         }
         outbounds.push(json!({"type":"direct","tag":config::DIRECT_GROUP_NAME,"bind_interface":plan.physical_interface}));
         for (host, ip, port) in plan.tcp_wechat_rules.iter().chain(&plan.tcp_web_rules) {
-            if !valid_domain(host) || !hosts.get(host).is_some_and(|ips| ips.contains(ip)) {
+            if !valid_domain(host)
+                || !hosts
+                    .get(&host.to_ascii_lowercase())
+                    .is_some_and(|ips| ips.contains(ip))
+            {
                 return Err(UnsupportedPolicy);
             }
             validate_direct(*ip, *port, &dial_endpoints)?;
@@ -609,6 +618,34 @@ mod tests {
         assert_eq!(
             build_runtime(request).unwrap_err(),
             SingBoxError::UnsupportedPolicy
+        );
+    }
+
+    #[test]
+    fn mixed_case_direct_hosts_emit_one_lowercase_predefined_key() {
+        // #1260: Service admission folds object keys like Go and refuses collisions.
+        let nodes = nodes();
+        let routing = CatalogRouting::default();
+        let plan = DirectPlan {
+            physical_interface: "Ethernet".into(),
+            hosts: vec![
+                ("qq.com".into(), "101.1.2.3".into()),
+                ("QQ.com".into(), "101.1.2.4".into()),
+            ],
+            tcp_wechat_rules: vec![("QQ.com".into(), "101.1.2.4".parse().unwrap(), 443)],
+            tcp_web_rules: vec![],
+            web_suffix_rules: vec![],
+            udp_wechat_rules: vec![],
+            wechat_process_path_regexes: vec![],
+            reviewed_direct_ports: vec![],
+        };
+        let mut request = input(&nodes, &routing);
+        request.direct_plan = Some(&plan);
+        let runtime = build_runtime(request).unwrap();
+        let value: Value = serde_json::from_str(runtime.runtime_json()).unwrap();
+        assert_eq!(
+            value["dns"]["servers"][3]["predefined"],
+            json!({"qq.com": ["101.1.2.3", "101.1.2.4"]})
         );
     }
 
