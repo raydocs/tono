@@ -1,6 +1,6 @@
 ## 2026-09-30 · Windows failed updates keep the AI hold
 - 归属：SHIP_PLAN §2 item 10；Windows native update recovery and emergency WFP release.
-- 来源：origin/main `f8e32e00` → `hunt/sol-r3ks-update-ai-hold`; awaiting CI/merge.
+- 来源：origin/main `f8e32e00` → `f02df022`, `hunt/sol-r3ks-update-ai-hold`, [#978](https://github.com/raydocs/tono/pull/978); awaiting CI/merge.
 - 缺陷修复：the automatic non-strict failed-restart cleanup added by #858 used explicit Restore semantics and removed the AI layer. It now selects a shared emergency-release variant that applies the existing narrow hold after successful WFP removal. Finding: WIN-UPDATE-FAILURE-AI-HOLD.
 - 新增/优化：no destination/filter changes; explicit Restore/uninstall and strict-mode checks are preserved.
 - 工程与测试：one failed-update emergency regression; test-only state backend and serialization match #974/#976.
