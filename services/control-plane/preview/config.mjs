@@ -10,6 +10,11 @@ const productionHostnames = new Set([
   'quality.afk.ccwu.cc',
   'releases.afk.ccwu.cc',
 ]);
+// Same isolation class as the hostname list: the committed production configs
+// name this id. A rotated production database needs this set updated too.
+const productionDatabaseIds = new Set([
+  'caf9b9fb-b4d5-498d-a1ad-7d5cdbb4237c',
+]);
 const productionDomainSuffixes = ['afk.ccwu.cc'];
 const dedicatedPreviewHostname = /^ops-preview-[a-f0-9]{8,40}\.afk\.ccwu\.cc$/;
 
@@ -129,6 +134,9 @@ function previewDatabaseId(value) {
   const id = requiredText(value, 'PREVIEW_D1_DATABASE_ID').toLowerCase();
   if (!/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(id) || /^0{8}-0{4}-0{4}-0{4}-0{12}$/.test(id)) {
     throw new Error('PREVIEW_D1_DATABASE_ID must be a non-placeholder D1 UUID');
+  }
+  if (productionDatabaseIds.has(id)) {
+    throw new Error('PREVIEW_D1_DATABASE_ID must not be the production D1 database');
   }
   return id;
 }

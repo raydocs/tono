@@ -14,7 +14,7 @@ import { Section } from '@/components/ops/Section';
 import { copy } from '@/copy/copy';
 import { opsApi } from '@/lib/api';
 import { releasedPlatformSet } from '@/lib/releases';
-import { newestFetch, useResource, type Resource } from '@/lib/use-resource';
+import { oldestFetch, useResource, type Resource } from '@/lib/use-resource';
 import '@/styles/clients.css';
 import { AdoptionMatrix } from './clients/AdoptionMatrix';
 import { ReleaseTable } from './clients/ReleaseTable';
@@ -82,7 +82,7 @@ export default function ClientsPage({
           </p>
         )}
         <PageNote
-          fetchedAt={newestFetch(releases, adoption, channels, health)}
+          fetchedAt={oldestFetch(releases, adoption, channels, health)}
           backfill={health.status === 'ready' ? health.data.backfill : null}
         />
       </div>

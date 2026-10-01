@@ -414,8 +414,19 @@ export function validateEnclosureUrl(value, options = {}) {
   const raw = requireString(value, '--url')
   const version = requireString(options.version, 'version')
   const shortVersionString = requireString(options.shortVersionString, 'shortVersionString')
-  const expectedHost = options.expectedHost ?? DEFAULT_ENCLOSURE_HOST
-  const expectedPathPrefix = options.expectedPathPrefix ?? DEFAULT_ENCLOSURE_PATH_PREFIX
+  // The download host and path are the release bucket. A caller-supplied
+  // expected host used to replace that pin, so the feed could name any origin.
+  if (options.expectedHost !== undefined && options.expectedHost !== DEFAULT_ENCLOSURE_HOST) {
+    refuse(`enclosure host is fixed at ${DEFAULT_ENCLOSURE_HOST}`)
+  }
+  if (
+    options.expectedPathPrefix !== undefined &&
+    options.expectedPathPrefix !== DEFAULT_ENCLOSURE_PATH_PREFIX
+  ) {
+    refuse(`enclosure path prefix is fixed at ${DEFAULT_ENCLOSURE_PATH_PREFIX}`)
+  }
+  const expectedHost = DEFAULT_ENCLOSURE_HOST
+  const expectedPathPrefix = DEFAULT_ENCLOSURE_PATH_PREFIX
 
   let url
   try {
@@ -480,7 +491,13 @@ export function validateEnclosureUrl(value, options = {}) {
 export function validateReleaseLink(value, options = {}) {
   const raw = requireString(value, '--link')
   const version = requireString(options.version, 'version')
-  const expectedHost = options.expectedHost ?? DEFAULT_RELEASE_LINK_HOST
+  // The enclosure pin and the release-page pin are different hosts. Applying
+  // the download override here forced the GitHub link onto the bucket, or let
+  // one flag move both.
+  if (options.expectedHost !== undefined && options.expectedHost !== DEFAULT_RELEASE_LINK_HOST) {
+    refuse(`release link host is fixed at ${DEFAULT_RELEASE_LINK_HOST}`)
+  }
+  const expectedHost = DEFAULT_RELEASE_LINK_HOST
   let url
   try {
     url = new URL(raw)
@@ -726,7 +743,6 @@ export function buildAppcastUpdate(input) {
   }
   const link = validateReleaseLink(input.link, {
     version: versions.version,
-    expectedHost: input.expectedHost,
   })
   const enclosure = inspectEnclosure(input.enclosureBytes, {
     fileName: input.enclosureFileName ?? decodeURIComponent(new URL(enclosureUrl).pathname.split('/').pop()),

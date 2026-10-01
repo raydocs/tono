@@ -69,7 +69,7 @@ export function useResource<T>(
   return { ...state, reload: () => setTick((n) => n + 1) };
 }
 
-/** When each of a page's reads last landed, or null while none has. */
+/** The last successful console read, or null while none has landed. */
 export function newestFetch(...resources: Array<{ status: string; fetchedAt?: number }>): number | null {
   let newest: number | null = null;
   for (const resource of resources) {
@@ -78,4 +78,15 @@ export function newestFetch(...resources: Array<{ status: string; fetchedAt?: nu
     if (newest === null || at > newest) newest = at;
   }
   return newest;
+}
+
+/** A page is only as fresh as its oldest displayed read. */
+export function oldestFetch(...resources: Array<{ status: string; fetchedAt?: number }>): number | null {
+  let oldest: number | null = null;
+  for (const resource of resources) {
+    const at = resource.fetchedAt;
+    if (at === undefined) continue;
+    if (oldest === null || at < oldest) oldest = at;
+  }
+  return oldest;
 }

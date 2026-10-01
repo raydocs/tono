@@ -24,14 +24,19 @@ nonisolated extension ConfigPipeline {
         "tono.app", "tono.com",
     ]
 
+    // The explicit list above is a cross-platform contract; also guard the
+    // residential route list so a signed direct policy cannot bypass OpenAI or
+    // another assistant when that list grows.
+    static let managedDirectGuardSuffixes = managedDirectProtectedSuffixes + assistantHomeDomainSuffixes
+
     static func isProtectedFromDirect(_ host: String) -> Bool {
-        managedDirectProtectedSuffixes.contains {
+        managedDirectGuardSuffixes.contains {
             host == $0 || host.hasSuffix(".\($0)")
         }
     }
 
     static func directSuffixOverlapsProtected(_ host: String) -> Bool {
-        isProtectedFromDirect(host) || managedDirectProtectedSuffixes.contains {
+        isProtectedFromDirect(host) || managedDirectGuardSuffixes.contains {
             $0.hasSuffix(".\(host)")
         }
     }

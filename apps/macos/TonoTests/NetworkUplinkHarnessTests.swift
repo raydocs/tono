@@ -87,6 +87,25 @@ final class NetworkUplinkHarnessTests: XCTestCase {
         )
     }
 
+    /// A DHCP failure often publishes the link-local router itself, not
+    /// 0.0.0.0. That concrete value must not look like a roam.
+    func testLinkLocalGatewayDuringRenewalIsNotANewNetwork() {
+        var apipa = homeWiFi
+        apipa.ipv4Address = "169.254.12.8"
+        apipa.ipv4Gateway = "169.254.1.1"
+        XCTAssertEqual(
+            NetworkUplinkSnapshot.classify(from: homeWiFi, to: apipa),
+            .inconclusive
+        )
+        var gatewayOnly = homeWiFi
+        gatewayOnly.ipv4Gateway = "169.254.1.1"
+        XCTAssertEqual(
+            NetworkUplinkSnapshot.classify(from: homeWiFi, to: gatewayOnly),
+            .inconclusive,
+            "a link-local router replacing the real one is a gap, not a new uplink"
+        )
+    }
+
     func testSameSubnetRoamStays() {
         XCTAssertEqual(
             NetworkUplinkSnapshot.classify(from: homeWiFi, to: homeWiFi),
