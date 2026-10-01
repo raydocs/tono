@@ -250,6 +250,38 @@ pub fn components(root: &Path, service: &Path) -> Result<Components> {
     })
 }
 
+/// The one member a payload may introduce: the first package that carries sing-box has no
+/// previous file to restore, and rollback deletes the introduction.
+pub fn new_member_is_sing_box(target: &Path) -> bool {
+    target.file_name().is_some_and(|name| {
+        name.eq_ignore_ascii_case("sing-box.exe")
+            || name.eq_ignore_ascii_case("sing-box-sha256.txt")
+    })
+}
+
+/// The executor publishes only over members the installation already has, plus a first
+/// sing-box. It meets any other new file or directory only after the Service is stopped, the
+/// App is closed and the release sequence is consumed, so a native retry of that same release
+/// is then refused as a replay. Prepare applies the same rule before any of that happens.
+pub fn ensure_payload_publishable(source: &Path, target: &Path) -> Result<()> {
+    if source.is_dir() {
+        ensure!(
+            target.is_dir(),
+            "new installation directory requires a separate bootstrap install"
+        );
+        for entry in std::fs::read_dir(source)? {
+            let entry = entry?;
+            ensure_payload_publishable(&entry.path(), &target.join(entry.file_name()))?;
+        }
+    } else {
+        ensure!(
+            target.is_file() || new_member_is_sing_box(target),
+            "new installation member requires a separate bootstrap install"
+        );
+    }
+    Ok(())
+}
+
 fn installed_components(root: &Path) -> Result<Components> {
     components(
         root,
@@ -533,6 +565,7 @@ pub(crate) async fn request(
                 )? == target.components,
                 "package components do not match signed target"
             );
+            ensure_payload_publishable(&dir.join("payload"), &root)?;
             store.execution(Execution::Staged)?;
             let strict = wfp::strict_kill_switch_enabled();
             let mut core_stop_attempted = false;
@@ -1657,6 +1690,30 @@ pub fn reconcile_before_desired() -> Result<bool> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn prepare_refuses_a_payload_member_the_executor_cannot_publish() {
+        let base = std::env::temp_dir().join(format!(
+            "tono-publishable-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let (payload, installed) = (base.join("payload"), base.join("installed"));
+        for dir in [&payload, &installed] {
+            std::fs::create_dir_all(dir.join("resources")).unwrap();
+            std::fs::write(dir.join("Tono.exe"), b"app").unwrap();
+        }
+        std::fs::write(payload.join("sing-box.exe"), b"sing-box").unwrap();
+        ensure_payload_publishable(&payload, &installed).unwrap();
+
+        std::fs::write(payload.join("resources/new.dll"), b"new").unwrap();
+        let refused = ensure_payload_publishable(&payload, &installed).unwrap_err();
+        assert!(refused.to_string().contains("separate bootstrap install"));
+        let _ = std::fs::remove_dir_all(&base);
+    }
 
     fn committed_with_backup() -> (PathBuf, Store, State, PathBuf) {
         use sha2::{Digest, Sha256};
