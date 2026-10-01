@@ -347,7 +347,7 @@ final class AppState {
     /// replacement. Production (nil) resolves the managed web-domain pins and
     /// performs the privileged arm → writeRuntimeConfig → /core/sync → reload
     /// → TUN-verify sequence inline; tests substitute a closure (typically one
-    /// that throws) to drive the failure branch deterministically without DNS,
+    /// that throws) to model a failure after replacement starts without DNS,
     /// the helper, or sing-box — the same pattern as `networkProtection` and
     /// `tunInterfaceExists`.
     var optionalPolicyRuntimeMutation: (() async throws -> Void)?
@@ -1799,10 +1799,21 @@ final class AppState {
         }
     }
 
+    enum OptionalPolicyFailureAction: Equatable {
+        case keepSession
+        case teardown
+    }
+
+    static func optionalPolicyFailureAction(replacementStarted: Bool) -> OptionalPolicyFailureAction {
+        replacementStarted ? .teardown : .keepSession
+    }
+
     private func applyOptionalDirectPolicyInBackground(policy: TonoTrafficPolicy) async {
         guard isConnected, !isDisconnecting, !Task.isCancelled,
               let api = coreController else { return }
         let generation = connectionCoordinator.protectionOperationGeneration
+        let base = activeDirectPolicy
+        var replacementStarted = false
         ConnectionTelemetryBuffer.shared.record(
             "optionalPolicyBegin",
             action: "resolve",
@@ -1812,12 +1823,12 @@ final class AppState {
         do {
             // Test seam: `optionalPolicyRuntimeMutation` stands in for the
             // resolver pass plus the privileged runtime replacement so the
-            // failure branch below can be driven deterministically.
+            // failure after replacement starts can be driven deterministically.
             if let runtimeMutation = optionalPolicyRuntimeMutation {
+                replacementStarted = true
                 try await runtimeMutation()
                 return
             }
-            let base = activeDirectPolicy
             let resolved = await resolveManagedDirectDomains(
                 policy: policy,
                 base: base,
@@ -1851,6 +1862,7 @@ final class AppState {
                 customNodes: runtimeNodes,
                 directPolicy: resolved
             )
+            replacementStarted = true
             let runtimeConfigPath = try await PrivilegedRuntimeCoordinator.shared
                 .syncCoreConfig(
                     configDirectory: coreRuntime.configDirectory.path,
@@ -1910,6 +1922,37 @@ final class AppState {
             )
             guard !Task.isCancelled, !isDisconnecting,
                   generation == connectionCoordinator.protectionOperationGeneration else { return }
+            if Self.optionalPolicyFailureAction(replacementStarted: replacementStarted) == .keepSession {
+                do {
+                    // A full disk or failed arm before /core/sync left Core
+                    // untouched. Restore its original PF exceptions rather
+                    // than stopping the working tunnel for an optional overlay.
+                    try await PrivilegedRuntimeCoordinator.shared.armKillSwitch(
+                        apiHosts: [],
+                        tunnelInterfaces: [ConfigPipeline.tonoTunInterface],
+                        proxyEndpoints: currentProxyEndpoints(),
+                        sessionDirectEndpoints: base?.sessionEndpoints ?? [],
+                        tailscaleBootstrapEnabled: AppProfile.homeExitEnabled && tonoTransport != nil,
+                        helperPrepared: true,
+                        reviewedBundleDirect: base?.requiresAddressFreeDirectPermit == true
+                    )
+                    guard !Task.isCancelled, !isDisconnecting,
+                          generation == connectionCoordinator.protectionOperationGeneration else { return }
+                    errorMessage = error.localizedDescription
+                    return
+                } catch {
+                    ConnectionTelemetryBuffer.shared.record(
+                        "optionalPolicyRollback",
+                        reason: "session_restore_failed",
+                        error: error.localizedDescription,
+                        generation: Int(generation)
+                    )
+                }
+            }
+            guard !Task.isCancelled, !isDisconnecting,
+                  generation == connectionCoordinator.protectionOperationGeneration else { return }
+            // Replacement already touched Core (or the PF rollback above
+            // failed): keep the existing sibling-branch contract unchanged.
             disconnect(releaseKillSwitch: false)
             errorMessage = error.localizedDescription
             // The preserve teardown above parks the host fail-closed (PF
