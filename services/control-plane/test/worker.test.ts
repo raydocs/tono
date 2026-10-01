@@ -5449,6 +5449,54 @@ ${nameLine}
     expect(identity.email).toBe(email);
   });
 
+  it('keeps a sign-in challenge retryable when the provider key response body fails', async () => {
+    // Expire any keys cached by earlier sign-ins, then fail after HTTP headers
+    // arrived: this is a transport outage while reading the key response.
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(Date.now() + 3_601_000);
+    const originalFetch = vi.mocked(globalThis.fetch).getMockImplementation()!;
+    let failBody = true;
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const url = input instanceof Request ? input.url : String(input);
+      if (url === 'https://appleid.apple.com/auth/keys' && failBody) {
+        return new Response(new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode('{"keys":['));
+            controller.error(new TypeError('Provider connection reset'));
+          },
+        }));
+      }
+      return originalFetch(input, init);
+    });
+    try {
+      const challengeResponse = await api('auth/oidc/challenge', json({
+        provider: 'apple',
+        deviceName: 'Apple Mac',
+        installationId: 'apple-body-failure-installation',
+      }));
+      expect(challengeResponse.status).toBe(200);
+      const challenge = await challengeResponse.json() as any;
+      const idToken = await oidcToken('apple', challenge.nonce, {
+        subject: 'apple-body-failure-subject',
+        email: `apple-body-failure-${++sequence}@example.com`,
+      });
+      const verify = () => api('auth/oidc/verify', json({
+        provider: 'apple', challengeId: challenge.challengeId, idToken,
+      }));
+      const unavailable = await verify();
+      expect(unavailable.status).toBe(503);
+      expect((await unavailable.json() as any).error.code).toBe('IDENTITY_PROVIDER_UNAVAILABLE');
+      expect(await env.DB.prepare(
+        'SELECT consumed_at FROM auth_challenges WHERE id = ?',
+      ).bind(challenge.challengeId).first()).toMatchObject({ consumed_at: null });
+
+      failBody = false;
+      expect((await verify()).status).toBe(200);
+    } finally {
+      fetchSpy.mockImplementation(originalFetch);
+      clock.mockRestore();
+    }
+  });
+
   it('links a verified Apple identity to the matching existing account', async () => {
     const account = await createAccount('apple-link');
     const challengeResponse = await api('auth/oidc/challenge', json({
