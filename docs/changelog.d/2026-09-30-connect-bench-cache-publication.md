@@ -7,3 +7,5 @@
 - Verification: Linux fixture suite failed before (2/3 failures), passed after (3/3); diff check passed. Independent read-only review verified output paths, mandatory hashes and failure cleanup.
 - Candidate/publication: source only, no new candidate, deployment or publication.
 - Remaining limits: full loopback performance benchmark not run locally; hosted Connect bench CI runs it. The benchmark's fixed ports/work directory still do not support concurrent runs.
+
+2026-09-30 continuation: source merged in [#998](https://github.com/raydocs/tono/pull/998), main merge `7e5c333a22bcae174b0ded31d97c47bd92dc30e4`, with ci-gate success. Original fixture evidence above remains tied to the original tested source; no new package, device acceptance, deployment or publication.
