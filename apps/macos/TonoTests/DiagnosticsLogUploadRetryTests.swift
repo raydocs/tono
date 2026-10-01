@@ -4,7 +4,8 @@ import XCTest
 final class DiagnosticsLogUploadRetryTests: XCTestCase {
     private actor StoredButResponseLost {
         var requests: [(Data, String, Int)] = []
-        func upload(_ data: Data, _ session: String, _ sequence: Int) throws {
+        func upload(_ data: Data, _ session: String, _ sequence: Int, _ lines: Int) throws {
+            guard lines > 0 else { return } // the empty probe is stored
             requests.append((data, session, sequence))
             if requests.count == 1 { throw URLError(.networkConnectionLost) }
         }
@@ -19,7 +20,7 @@ final class DiagnosticsLogUploadRetryTests: XCTestCase {
         try Data("{\"first\":1}\n".utf8).write(to: log)
         let server = StoredButResponseLost()
         let uploader = DiagnosticsLogUploader(auditLogURL: log, isEnabled: { true }) {
-            data, session, sequence, _, _, _ in try await server.upload(data, session, sequence)
+            data, session, sequence, lines, _, _ in try await server.upload(data, session, sequence, lines)
         }
         guard case .failed = await uploader.sweep() else { return XCTFail("receipt was lost") }
         let handle = try FileHandle(forWritingTo: log)
@@ -33,7 +34,7 @@ final class DiagnosticsLogUploadRetryTests: XCTestCase {
         guard requests.count == 3 else { return }
         XCTAssertEqual(requests[0].0, requests[1].0)
         XCTAssertEqual(requests[0].1, requests[1].1)
-        XCTAssertEqual(requests.map(\.2), [0, 0, 1])
+        XCTAssertEqual(requests.map(\.2), [1, 1, 2])
         XCTAssertNotEqual(requests[1].0, requests[2].0)
     }
 }

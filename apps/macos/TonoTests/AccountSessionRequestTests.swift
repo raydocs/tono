@@ -577,13 +577,18 @@ final class AccountSessionRequestTests: XCTestCase {
         let first = Task { await uploader.sweep() }
         let declined = try await nextRequest(requests)
         XCTAssertEqual(declined.request.url?.path, "/api/v1/diagnostics/logs")
+        XCTAssertEqual(declined.request.value(forHTTPHeaderField: "X-Tono-Log-Lines"), "0", "no line before a store")
         declined.respond(status: 200, body: #"{"segment":{"id":"not-stored","receivedAt":1},"stored":false,"reason":"not_enabled"}"#)
         guard case .failed = await first.value else {
             return XCTFail("HTTP success without storage must not be shown as uploaded")
         }
         let retry = Task { await uploader.sweep() }
+        let probe = try await nextRequest(requests)
+        XCTAssertEqual(probe.request.value(forHTTPHeaderField: "X-Tono-Log-Sequence"), declined.request.value(forHTTPHeaderField: "X-Tono-Log-Sequence"))
+        XCTAssertEqual(probe.request.value(forHTTPHeaderField: "X-Tono-Log-Lines"), "0")
+        probe.respond(status: 201, body: #"{"segment":{"id":"stored-probe","receivedAt":2},"stored":true}"#)
         let accepted = try await nextRequest(requests)
-        XCTAssertEqual(accepted.request.value(forHTTPHeaderField: "X-Tono-Log-Sequence"), declined.request.value(forHTTPHeaderField: "X-Tono-Log-Sequence"))
+        XCTAssertEqual(accepted.request.value(forHTTPHeaderField: "X-Tono-Log-Sequence"), "1", "the stored probe's key is not reused")
         XCTAssertEqual(accepted.request.value(forHTTPHeaderField: "X-Tono-Log-Lines"), "1")
         // Stored receipts from older deployments have no `stored` field.
         accepted.respond(status: 201, body: #"{"segment":{"id":"stored-segment","receivedAt":2}}"#)
