@@ -39,3 +39,7 @@ Fixer: Grok 4.7。范围：`CrashReporter.swift`、`DiagnosticsLogUploader.swift
 ## 验证
 
 读了清单里的源文件，以及同意、scope、上传闭环（`AccountSession+Telemetry`、`TonoAPIClient` 的代际检查）。未跑 XCTest：本机没有 Xcode。没有产品补丁。
+
+## 合并
+
+本报告 [#973](https://github.com/raydocs/tono/pull/973) 不开 auto-merge。
