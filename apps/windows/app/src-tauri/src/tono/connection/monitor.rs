@@ -1304,6 +1304,22 @@ pub(crate) const fn policy_behavior_change_allows_in_place_recovery() -> bool {
     false
 }
 
+/// Automatic health recovery releases general traffic with the secondary AI hold.
+/// Strict protection and policy rebuilds keep their existing protected recovery path.
+async fn release_after_health_failure<F>(
+    strict: bool,
+    policy_rebuild: bool,
+    release: impl FnOnce(bool) -> F,
+) -> Option<Result<(), String>>
+where
+    F: std::future::Future<Output = Result<(), String>>,
+{
+    if !tono_core::unarmed_probe::health_monitor_releases(strict, policy_rebuild) {
+        return None;
+    }
+    Some(release(true).await)
+}
+
 /// X2-1: apply [`may_recover_in_place`] to the live session. The uplinks are read only when a
 /// DIRECT overlay is committed, so a full-tunnel session pays nothing for it.
 async fn may_keep_session_in_place(state: &Arc<TonoState>, tunnel_proven: bool) -> bool {
@@ -1378,7 +1394,7 @@ pub(super) async fn handle_network_change_inner(
     // explicit strict kill switch keep the protected reconnect below.
     let policy_rebuild = POLICY_REBUILD.try_with(|_| ()).is_ok();
     let strict = tono_core::strict_kill_switch_explicit(None);
-    if tono_core::unarmed_probe::health_monitor_releases(strict, policy_rebuild) {
+    let health_release = release_after_health_failure(strict, policy_rebuild, |apply_narrow| async move {
         {
             let mut inner = state.lock().await;
             inner.tasks.abort_reconnect();
@@ -1386,9 +1402,16 @@ pub(super) async fn handle_network_change_inner(
         logging!(
             warn,
             Type::Service,
-            "Tono: health failure is releasing protection so the original network stays up"
+            "Tono: health failure is restoring the original network with the secondary AI hold"
         );
-        match super::disconnect::release_explicit(state, app).await {
+        if apply_narrow {
+            super::disconnect::release_explicit_applying_narrow(state, app).await
+        } else {
+            super::disconnect::release_explicit(state, app).await
+        }
+    }).await;
+    if let Some(result) = health_release {
+        match result {
             Ok(()) => {
                 let generation = state.lock().await.connect_generation;
                 super::unarmed_probe::spawn_after_release(state, app, generation);
@@ -1498,6 +1521,36 @@ mod tests {
     use super::{PolicyChangeDisposition, apply_policy_change_disposition};
     use crate::tono::state::TonoState;
     use std::sync::Arc;
+
+    #[tokio::test]
+    async fn automatic_health_release_keeps_ai_blocked_and_preserves_protected_recovery() {
+        let mut general_blocked = true;
+        let mut ai_blocked = true;
+        let general = &mut general_blocked;
+        let ai = &mut ai_blocked;
+        let result = super::release_after_health_failure(false, false, |apply_narrow| async move {
+            *general = false;
+            *ai = apply_narrow;
+            Ok(())
+        }).await;
+        assert_eq!(result, Some(Ok(())));
+        assert!(!general_blocked, "ordinary health loss must restore general internet");
+        assert!(ai_blocked, "automatic recovery must retain the secondary AI hold");
+
+        let strict = super::release_after_health_failure(true, false, |_| async {
+            panic!("strict protection must not dispatch a release")
+        }).await;
+        assert_eq!(strict, None);
+        let rebuild = super::release_after_health_failure(false, true, |_| async {
+            panic!("policy rebuild must stay on protected recovery")
+        }).await;
+        assert_eq!(rebuild, None);
+        let refused = super::release_after_health_failure(false, false, |apply_narrow| async move {
+            assert!(apply_narrow, "release refusal must not downgrade the AI hold");
+            Err("injected release refusal".to_string())
+        }).await;
+        assert_eq!(refused, Some(Err("injected release refusal".to_string())));
+    }
 
     /// F5: a policy behavior change that lands while Connecting is deferred to
     /// that attempt's commit, and only that attempt's. A deferral left behind by
