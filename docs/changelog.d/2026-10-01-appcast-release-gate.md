@@ -1,6 +1,6 @@
 ## 2026-10-01 · Sparkle 发布先过 macOS 发布门
 - 归属：SHIP_PLAN §2 第 10 项。发布工具。
-- 来源：main `4453e258`。分支 `cursor/appcast-require-release-gate-d3c7`。未合 main。
+- 来源：main `4453e258`。分支 `cursor/appcast-require-release-gate-d3c7`。[#939](https://github.com/raydocs/tono/pull/939)。未合 main。
 - 缺陷修复：`publish-macos-appcast.mjs` 在 dry-run 和真正写 feed 之前都跑 `verify-release-gate.sh`。`macos-release.yml` 的构建作业同样跑这道门。`release-macos.sh` 改为使用门脚本的退出码，不再只数 `ok:` 行。关联 REL-APPCAST-GATE。
 - 新增/优化：无。
 - 工程与测试：`sparkle publish refuses an app the release gate does not accept`。
