@@ -890,7 +890,10 @@ extension AppState {
             >= Self.pinRefreshStreamGraceSeconds
     }
 
-    func refreshManagedDirectPins() async {
+    func refreshManagedDirectPins(
+        resolver: ((TonoTrafficPolicy, ConfigPipeline.ManagedDirectRuntimePolicy, CoreControllerClient)
+            async -> ConfigPipeline.ManagedDirectRuntimePolicy?)? = nil
+    ) async {
         guard isConnected, isOwnedTonoMode,
               switchingNodeId == nil,
               connectionCoordinator.configReloadTask == nil,
@@ -899,12 +902,20 @@ extension AppState {
               !managedTrafficPolicy.domains.isEmpty
                 || !managedTrafficPolicy.webDomains.isEmpty
         else { return }
-        let resolved = await resolveManagedDirectDomains(
-            policy: managedTrafficPolicy,
-            base: base,
-            api: api
-        )
+        let policy = managedTrafficPolicy
+        let generation = connectionCoordinator.protectionOperationGeneration
+        let resolved: ConfigPipeline.ManagedDirectRuntimePolicy?
+        if let resolver {
+            resolved = await resolver(policy, base, api)
+        } else {
+            resolved = await resolveManagedDirectDomains(policy: policy, base: base, api: api)
+        }
+        // Resolution owns no runtime mutation handle. A newer accepted policy
+        // or session can finish while DNS is pending; its DIRECT authority must
+        // not be replaced by a merge carrying the captured plan's old grants.
         guard !Task.isCancelled, isConnected,
+              connectionCoordinator.protectionOperationGeneration == generation,
+              managedTrafficPolicy == policy, activeDirectPolicy == base,
               switchingNodeId == nil, connectionCoordinator.configReloadTask == nil,
               let resolved else { return }
         guard let merged = Self.mergedManagedDirectPolicy(
