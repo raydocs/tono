@@ -412,15 +412,17 @@ fn execute(recovery: bool) -> Result<(), Error> {
         );
     }
     let launch = if recovery {
-        None
+        Ok(None)
     } else {
-        Some(native::UserLaunch::capture(&a.initiating_image)?)
+        store.capture_before_consuming(&self_image, tx::now, || {
+            native::UserLaunch::capture(&a.initiating_image).map(Some)
+        })?
     };
-    if !recovery {
-        store.consume(&self_image, tx::now()?)?;
-    }
-    // From here every live/repair mutation has a durable consumed high-water.
-    let registration = if recovery {
+    // A capture refusal has no consumed authority: skip repair registration and defer its
+    // error until the stopped-Service failure finalizer can restore the network.
+    let registration = if launch.is_err() {
+        Ok(())
+    } else if recovery {
         // Classification and rollback do not run through the ONSTART task; it only re-arms the
         // net for this run. An unavailable Task Scheduler must not strand the attempt (#484).
         if let Err(error) = native::register_consumed_recovery(&store) {
@@ -450,6 +452,7 @@ fn execute(recovery: bool) -> Result<(), Error> {
     stop_windows_service(&service)?;
     let runtime = tokio::runtime::Runtime::new()?;
     let outcome = (|| -> Result<_, Error> {
+        let launch = launch?;
         // Registration still precedes Service stop and every publication. Its
         // refusal must reach the same selective failure finalizer as rollback.
         registration?;
@@ -573,7 +576,12 @@ fn execute(recovery: bool) -> Result<(), Error> {
         store.save(next)?;
         Ok(Some(child))
     })();
-    if outcome.is_err() && store.attempt()?.execution != tx::Execution::RolledBack {
+    if outcome.is_err()
+        && matches!(
+            store.attempt()?.execution,
+            tx::Execution::Consumed | tx::Execution::Replaced | tx::Execution::Uncertain
+        )
+    {
         // This marker cannot turn uncertain execution into another install grant.
         let _ = store.execution(tx::Execution::Uncertain);
     }
