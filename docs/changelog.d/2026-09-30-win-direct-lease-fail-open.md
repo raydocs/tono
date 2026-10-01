@@ -1,7 +1,7 @@
 ## 2026-09-30 · Windows DIRECT 租约失活放行与 Core 停止屏障
 
 - 归属：SHIP_PLAN §2 第 10 项（装上会坏）；影响 Windows Service 的 WFP（`apps/windows/service/src/core/windows_kill_switch.rs`）。
-- 来源：main `64af499a` → 分支 `codex2/win-direct-fail-open`；PR #777；已并入 `origin/main` `e504f6f4`。非严格租约过期释放后调用 `selective_layer::finish_release(true)`，普通网络打开且 AI 拦截装回；严格模式仍停在 Blocked。
+- 来源：main `64af499a` → 分支 `codex2/win-direct-fail-open`；PR #777；已并入 `origin/main` `b1825a3a`。非严格租约过期释放后调用 `selective_layer::finish_release(true)`，普通网络打开且 AI 拦截装回；严格模式仍停在 Blocked。
 - 缺陷修复：App 崩溃、被杀或挂起超过已提交 DIRECT 心跳租约后，看门狗原先撤回 DIRECT 并永久停在健康的 Blocked，非严格用户失去普通网络（`WIN-DIRECT-LEASE-EXPIRY-BLOCK`）。现在先证明 live 精确撤回成功，再复用不健康看门狗的释放路径，删除 WFP、恢复 DNS 并写 disarmed 墓碑；仅 Blocked 意图写盘失败时记警告并继续释放，释放未成功时保留过期的内存租约回执供下一拍重试。显式严格模式及 Pending、Bracket、所有权变化仍保留 Blocked；看门狗对不走释放的已提交租约撤回使用内存 `Retracting` 阶段，避免撤回重试期限被误判为 App 失活。
 - 缺陷修复：停止或替换 Core 时，live WFP 已成功装成精确 Blocked，后续意图写盘失败却让 `stop_core` 提前退出，Disconnect 和 owner-gated ReleaseKillSwitch 每次重试都被同一错误拒绝（`WIN-STOPCORE-INTENT-WRITE-BLOCK`）。现在仅此 Core 替换屏障把类型化的持久化失败记为警告后继续，`last_error` 仍保留；live 安装失败及其他 DIRECT 撤回调用方仍返回错误。
 - 新增/优化：无。
