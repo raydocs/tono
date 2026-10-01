@@ -102,3 +102,32 @@ export async function refreshSession(e: Env, req: Request, raw: string) {
   await recordClient(e, req, String(s.device_id));
   return issued;
 }
+
+export async function revokeOnLogout(
+  e: Env,
+  userId: string,
+  sessionId: string,
+  refreshRaw: string | undefined,
+) {
+  const t = now();
+  const statements = [
+    e.DB.prepare('UPDATE sessions SET revoked_at = ? WHERE id = ? AND user_id = ?').bind(t, sessionId, userId),
+  ];
+  if (refreshRaw !== undefined) {
+    statements.push(
+      e.DB.prepare(
+        'UPDATE sessions SET revoked_at = ? WHERE user_id = ? AND refresh_hash = ? AND revoked_at IS NULL',
+      ).bind(t, userId, await sha256(refreshRaw)),
+    );
+  }
+  // Refresh may already have committed a successor for this session. Revoke
+  // that row in the same batch. The refresh CAS stays `revoked_at IS NULL`.
+  statements.push(
+    e.DB.prepare(
+      `UPDATE sessions SET revoked_at = ?
+       WHERE user_id = ? AND revoked_at IS NULL
+         AND id IN (SELECT successor_id FROM sessions WHERE id = ? AND user_id = ?)`,
+    ).bind(t, userId, sessionId, userId),
+  );
+  await e.DB.batch(statements);
+}
