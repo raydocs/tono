@@ -21,9 +21,9 @@ final class SocketServer {
     private var openNetworkEpoch: UInt64 = 0
     private var consecutiveCoreDownChecks = 0
 
-    /// `killSwitch` has migrated the on-disk PF hook and has not re-armed.
-    /// Release of a leftover block happens in `run`, after this init has
-    /// stopped a stale Core.
+    /// Launch does not install PF. `run()` releases a leftover after this
+    /// init has stopped a stale Core. A Core that is still running is left
+    /// alone.
     init(allowedUID: uid_t, killSwitch: KillSwitchManager) throws {
         self.allowedUID = allowedUID
         self.killSwitch = killSwitch
@@ -98,12 +98,19 @@ final class SocketServer {
         }
     }
 
+    /// A saved DNS snapshot with the Core stopped still points the resolver
+    /// at a listener that is gone. Restore it at launch. Do not touch DNS
+    /// while the Core is running.
+    static func shouldRestoreSavedDNSAtLaunch(coreRunning: Bool, snapshotPresent: Bool) -> Bool {
+        !coreRunning && snapshotPresent
+    }
+
     func run() {
         // After listen, before any client. The stale Core is already gone.
-        // A saved kill switch is not kept across this start: macOS has no
-        // strict kill-switch opt-in, so boot, crash and helper restart open
-        // the original network. DNS restore uses the same SCPreferences path
-        // as disconnect and has no extra deadline.
+        // macOS has no strict kill-switch opt-in, so a helper start with the
+        // Core down opens the original network. A Core that is still running
+        // keeps the block it already has. DNS restore uses the same
+        // SCPreferences path as disconnect and has no extra deadline.
         releaseLeftoverBlockIfCoreStopped()
         recoverDNSAfterStoppedCore()
         var lastProtectionCheck = Date()
@@ -113,6 +120,13 @@ final class SocketServer {
             // or an out-of-process emergency disarm.
             if Date().timeIntervalSince(lastProtectionCheck) >= 10 {
                 lastProtectionCheck = Date()
+                // BRICK-M11: deleting the app while this daemon stays up used
+                // to leave PF in place until the next start. This takes the
+                // update lock itself; do not call it from inside locked.
+                if releaseIfTonoWasRemoved() { return }
+                // Supervise only while the Core is running. While it is down,
+                // withhold the bundle permit at once and release the saved
+                // block after the watchdog threshold.
                 try? updates.storage.locked {
                     observeCoreForWatchdog()
                 }
@@ -148,9 +162,12 @@ final class SocketServer {
     }
 
     /// Immediate release at start. Idempotent: no state file means no pfctl.
+    /// A running Core is not disarmed and is not reinstalled from the file.
     private func releaseLeftoverBlockIfCoreStopped() {
-        guard !core.status().running else { return }
-        guard KillSwitchManager.stateFileExists() else { return }
+        guard KillSwitchManager.shouldReleaseLeftoverAtLaunch(
+            coreRunning: core.status().running,
+            stateFilePresent: KillSwitchManager.stateFileExists()
+        ) else { return }
         do {
             _ = try killSwitch.disarm()
         } catch {
@@ -158,7 +175,11 @@ final class SocketServer {
             FileHandle.standardError.write(Data(
                 "tono: startup release could not clear the kill switch: \(detail)\n".utf8
             ))
+            return
         }
+        // The general block is already gone. Skip the secondary layer if an
+        // arm committed while this release held the lock.
+        killSwitch.applySelectiveLayerIfReleased()
     }
 
     /// While the Core is running, keep the in-session block (a live connect
@@ -171,7 +192,7 @@ final class SocketServer {
             openNetworkEpoch = epoch
             consecutiveCoreDownChecks = 0
         }
-        if core.status().running {
+        if KillSwitchManager.shouldReinstallKillSwitch(coreRunning: core.status().running) {
             consecutiveCoreDownChecks = 0
             killSwitch.superviseProtection()
             return
@@ -196,6 +217,7 @@ final class SocketServer {
                 ))
                 return
             }
+            killSwitch.applySelectiveLayerIfReleased()
         } else {
             consecutiveCoreDownChecks = 0
         }

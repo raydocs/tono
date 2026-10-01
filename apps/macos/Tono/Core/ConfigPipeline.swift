@@ -216,6 +216,27 @@ nonisolated struct ConfigPipeline {
       - AND,((NETWORK,UDP),(DST-PORT,5353)),DIRECT
 
     """
+    /// Prefixes Darwin `auto_route` must not install via utun. sing-tun's
+    /// Darwin table is `1.0.0.0/8` … `128.0.0.0/1`; anything in that span that
+    /// is missing here is delivered to the TUN. A later DIRECT rule cannot
+    /// turn a captured limited broadcast or multicast packet back into a
+    /// link transmission. Loopback is not listed: `lo0`'s connected route is
+    /// more specific than those aggregates. Carrier NAT (`100.64.0.0/10`) is
+    /// not listed: excluding the whole block would send off-link carrier
+    /// addresses out the physical interface. This list is static. PF is not
+    /// taught new prefixes here; a dynamic on-link allow is a ruleset change
+    /// that has to be proven on a Mac before it may arm.
+    static let tunRouteExcludeCIDRs = [
+        "10.0.0.0/8",
+        "172.16.0.0/12",
+        "192.168.0.0/16",
+        "169.254.0.0/16",
+        "224.0.0.0/4",
+        "255.255.255.255/32",
+        "fe80::/10",
+        "fc00::/7",
+        "ff00::/8",
+    ]
     static let claudeHomeGroupName = "Tono-Claude-Home"
     static let homeResidentialProxyName = "Tono-Home-Residential"
     static let directProxyName = "Tono-China-Direct"

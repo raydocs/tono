@@ -18,11 +18,12 @@ export interface Cursor {
   id: string;
 }
 
-const CURSOR_TOKEN = /^[A-Za-z0-9_-]{1,512}$/;
-// The sort key is ours (a timestamp, a name, a score) and must not contain the
-// separator; the id is a UUID or a node name (Chinese names included), so it
-// may be any non-control text, colons and all, after the first one.
-const CURSOR_BODY = /^([^:\u0000-\u001f]{1,120}):([^\u0000-\u001f]{1,200})$/;
+const CURSOR_TOKEN = /^[A-Za-z0-9_-]{1,4802}$/;
+// Parts are percent-encoded before the colon join, so a customer email that
+// contains ':' cannot be read as the separator. The id may still contain
+// colons after decoding. A supported 200-character name can expand to 1800
+// percent-encoded characters; two such parts yield 4802 base64url characters.
+const CURSOR_BODY = /^([^:\u0000-\u001f]{1,1800}):([^\u0000-\u001f]{1,1800})$/;
 
 const invalidCursor = () => new ApiError(400, 'VALIDATION_ERROR', 'Invalid cursor');
 
@@ -48,17 +49,21 @@ export function parseCursor(raw: string | null | undefined): Cursor | null {
   }
   const match = CURSOR_BODY.exec(decoded);
   if (!match) throw invalidCursor();
-  return { sortKey: match[1], id: match[2] };
+  try {
+    return { sortKey: decodeURIComponent(match[1]), id: decodeURIComponent(match[2]) };
+  } catch {
+    throw invalidCursor();
+  }
 }
 
 export function encodeCursor(sortKey: string | number, id: string): string {
-  const key = String(sortKey);
-  if (key.includes(':') || !CURSOR_BODY.test(`${key}:${id}`)) {
-    // Our own bug, not the caller's: a sort key carrying the separator would
-    // decode into a different row than it encoded.
+  const key = encodeURIComponent(String(sortKey));
+  const encodedId = encodeURIComponent(id);
+  const payload = `${key}:${encodedId}`;
+  if (key.length === 0 || encodedId.length === 0 || !CURSOR_BODY.test(payload)) {
     throw new ApiError(500, 'INTERNAL_ERROR', 'Invalid cursor parts');
   }
-  const bytes = new TextEncoder().encode(`${key}:${id}`);
+  const bytes = new TextEncoder().encode(payload);
   let binary = '';
   for (const byte of bytes) binary += String.fromCharCode(byte);
   return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');

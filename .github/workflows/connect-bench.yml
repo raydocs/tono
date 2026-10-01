@@ -2,17 +2,13 @@ name: Connect bench
 
 # Loopback only. Compares Tono's mihomo dial shape with a direct-DNS Clash
 # profile against local protocol servers. Fails when a pinned stage exceeds
-# tooling/perf/connect-bench/baseline.json. Does not touch TUN, routes or DNS.
+# tooling/perf/connect-bench/baseline.json, and when a handshake ceiling above
+# zero is met by zero handshakes. Does not touch TUN, routes or DNS.
 
 on:
-  pull_request:
-    paths:
-      - tooling/perf/connect-bench/**
-      - apps/windows/crates/tono-core/src/config.rs
-      - apps/windows/service/src/core/runtime_generation/owned_config.rs
-      - apps/macos/Tono/Core/Configuration/ConfigPipeline+Runtime.swift
-      - apps/macos/Tono/Core/Configuration/ConfigPipeline+Nodes.swift
-      - .github/workflows/connect-bench.yml
+  # Path list: CONNECT_BENCH_PATHS in tooling/scripts/ci-gate-changes.mjs
+  # (the former pull_request filter). ci-gate calls this workflow.
+  workflow_call:
   workflow_dispatch:
 
 permissions:
@@ -24,6 +20,9 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v5
+
+      - name: Handshake floor
+        run: python3 tooling/perf/connect-bench/test_check.py
 
       - name: Connect bench
         run: python3 tooling/perf/connect-bench/bench.py --check

@@ -62,8 +62,11 @@ describe('cursors', () => {
     }
   });
 
-  it('refuses to encode a sort key carrying the separator', () => {
-    expect(() => encodeCursor('a:b', 'id')).toThrow(ApiError);
+  it('round-trips a customer email that contains a colon', () => {
+    const cursor = encodeCursor('a:b@example.com', 'user-1');
+    expect(parseCursor(cursor)).toEqual({ sortKey: 'a:b@example.com', id: 'user-1' });
+    const legacy = btoa('user@example.com:user-1').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    expect(parseCursor(legacy)).toEqual({ sortKey: 'user@example.com', id: 'user-1' });
   });
 });
 

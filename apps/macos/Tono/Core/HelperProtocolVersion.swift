@@ -278,7 +278,47 @@ nonisolated enum HelperProtocolVersion {
     ///   is running. Startup, a corrupt update ledger, and a Core that stays
     ///   down release a leftover kill switch and restore a saved DNS snapshot.
     ///   They do not install a block.
-    static let current = "4.52.2"
+    /// - 4.52.2 → 4.52.3: a failed arm commit and a failed sleep barrier
+    ///   release the kill switch instead of installing an all-block. Startup
+    ///   failure and a failed update rollback do the same, without needing
+    ///   the allowed uid.
+    /// - 4.52.3 → 4.52.4: `/killswitch/status` no longer loads PF rules.
+    ///   The idle supervisor reinstalls only while the Core is running.
+    ///   If the app is removed while the helper stays up, the existing
+    ///   removal release runs without waiting for the next start. Launch
+    ///   does not reinstall from the state file; a Core that is not running
+    ///   is released immediately and a saved DNS snapshot is restored.
+    /// - 4.52.4 → 4.52.5: `--emergency-disarm` and `--emergency-reset`
+    ///   release PF when the update ledger cannot be read. They keep the
+    ///   ledger bytes and do not remove the install in that case. A DNS
+    ///   restore failure no longer skips the PF release.
+    /// - 4.52.5 → 4.52.6: a DNS snapshot restores only its own service.
+    ///   Another service left on exactly 127.0.0.1 is not cleared.
+    ///   Update disconnect still releases PF when prepare cannot prove a
+    ///   foreign loopback proxy or resolver is Tono's. The lifecycle
+    ///   read-failure self-test expects that owner-only restore.
+    /// - 4.52.6 → 4.52.7: an update ledger whose receipt contains a key this
+    ///   build does not know is refused and kept on disk. Additive keys
+    ///   outside the receipt are still tolerated.
+    /// - 4.52.7 → 4.52.8: after that full release, a crash or hang may add a
+    ///   secondary blackhole route for Anthropic's inbound prefixes and
+    ///   `/etc/resolver` files for first-party AI suffixes. Arm, disarm, and
+    ///   emergency recovery remove them. The commands cannot name a default
+    ///   route. A failure leaves the original network open.
+    /// - 4.52.8 → 4.52.9: a release whose placeholder rule file cannot be
+    ///   written still flushes the anchor and removes the intent, and then
+    ///   keeps the standalone emergency main instead of reloading a legacy
+    ///   pf.conf that would load the stale rules back. A PF repair records
+    ///   repairedSinceArm before it can replace kernel rules, so a repair that
+    ///   throws after loading still makes the app re-arm.
+    /// - 4.52.9 → 4.52.10: a failed arm or sleep barrier flushes the installed
+    ///   anchor only after a `pfctl` load that was accepted or never answered.
+    ///   A failure before that load, or a load pfctl rejected, leaves the
+    ///   previous rules in the kernel. `/killswitch/health` omits `live` when
+    ///   pfctl does not answer, and reports down only when a second read
+    ///   agrees. A 4.52.7 daemon still drops a live ruleset on `pfctl -nf`
+    ///   failure and treats one unread health sample as "not filtering".
+    static let current = "4.52.10"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS

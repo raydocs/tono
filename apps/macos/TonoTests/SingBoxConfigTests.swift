@@ -323,6 +323,17 @@ final class SingBoxConfigTests: XCTestCase {
         let local = Set(try XCTUnwrap(rules[localIndex]["ip_cidr"] as? [String]))
         XCTAssertTrue(Set(["169.254.0.0/16", "fe80::/10", "fc00::/7", "224.0.0.0/4", "ff00::/8"])
             .isSubset(of: local), "AWDL/link-local and multicast remain direct")
+        let inbounds = try XCTUnwrap(json["inbounds"] as? [[String: Any]])
+        let tun = try XCTUnwrap(inbounds.first { $0["type"] as? String == "tun" })
+        let excluded = Set(try XCTUnwrap(tun["route_exclude_address"] as? [String]))
+        let capturedUnlessExcluded: Set<String> = [
+            "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16",
+            "224.0.0.0/4", "255.255.255.255/32", "fe80::/10", "fc00::/7", "ff00::/8",
+        ]
+        XCTAssertTrue(capturedUnlessExcluded.isSubset(of: excluded),
+            "Darwin auto-route must not deliver link broadcast or multicast to utun")
+        XCTAssertFalse(excluded.contains { $0.hasSuffix("/0") },
+            "route exclusion must not punch out a default route")
         let ipv6RejectIndex = try XCTUnwrap(rules.firstIndex { $0["ip_version"] as? Int == 6 })
         XCTAssertLessThan(localIndex, ipv6RejectIndex, "local IPv6 must bypass the public IPv6 reject")
         XCTAssertFalse(rules.contains {

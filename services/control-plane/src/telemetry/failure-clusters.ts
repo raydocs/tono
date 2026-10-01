@@ -203,21 +203,38 @@ export async function recordFailureCluster(
   let clusterId: string;
   if (decision.action === 'open' || !decisionRow) {
     clusterId = crypto.randomUUID();
-    await db.prepare(
-      `INSERT INTO failure_clusters(
-         id, group_key, code, stage, app_version, platform, node, severity,
-         event_count, user_count, device_count, first_seen_ms, last_seen_ms,
-         sample_json, opened_at, updated_at, alert_count, count_at_alert, status
-       ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, 1, 1, 1, ?, ?, ?, ?, ?, 0, 0, 'open')`,
-    ).bind(
-      clusterId, groupKey, input.code, input.stage, input.appVersion, input.platform, input.node,
-      severity, nowMs, nowMs, sample, nowSec, nowSec,
-    ).run();
+    try {
+      await db.prepare(
+        `INSERT INTO failure_clusters(
+           id, group_key, code, stage, app_version, platform, node, severity,
+           event_count, user_count, device_count, first_seen_ms, last_seen_ms,
+           sample_json, opened_at, updated_at, alert_count, count_at_alert, status
+         ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, 1, 1, 1, ?, ?, ?, ?, ?, 0, 0, 'open')`,
+      ).bind(
+        clusterId, groupKey, input.code, input.stage, input.appVersion, input.platform, input.node,
+        severity, nowMs, nowMs, sample, nowSec, nowSec,
+      ).run();
+    } catch (error) {
+      // Two uploads can both observe "no open cluster" and then insert. The
+      // partial unique index keeps a single open row; the loser must join it.
+      // A 500 here fails the diagnostics POST after earlier events were stored.
+      if (!String(error).includes('UNIQUE constraint failed')) throw error;
+      const winner = await db.prepare(
+        `SELECT id FROM failure_clusters WHERE group_key = ? AND status = 'open'`,
+      ).bind(groupKey).first<{ id: string }>();
+      if (!winner) throw error;
+      clusterId = String(winner.id);
+      await db.prepare(
+        `UPDATE failure_clusters
+         SET event_count = event_count + 1, last_seen_ms = MAX(last_seen_ms, ?), sample_json = ?, updated_at = ?
+         WHERE id = ? AND status = 'open'`,
+      ).bind(nowMs, sample, nowSec, clusterId).run();
+    }
   } else {
     clusterId = decisionRow.id;
     await db.prepare(
       `UPDATE failure_clusters
-       SET event_count = event_count + 1, last_seen_ms = ?, sample_json = ?, updated_at = ?
+       SET event_count = event_count + 1, last_seen_ms = MAX(last_seen_ms, ?), sample_json = ?, updated_at = ?
        WHERE id = ?`,
     ).bind(nowMs, sample, nowSec, clusterId).run();
   }

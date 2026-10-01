@@ -9,8 +9,8 @@ import { cn } from '@/lib/utils';
  * numbers on it are still filling in.
  *
  * Both facts are about the reading rather than the fleet, so they share one
- * line and the page's smallest type. The stamp turns warn when the shell has
- * stopped hearing back — a console that keeps presenting an hour-old world in
+ * line and the page's smallest type. The stamp turns warn when a displayed
+ * read has aged — a console that keeps presenting an hour-old world in
  * the present tense is worse than one that admits it is behind.
  *
  * The backfill half is the answer to "why is everyone silent since the
@@ -33,7 +33,7 @@ export function PageNote({
     <p className={cn('flex flex-wrap items-baseline gap-x-2 text-micro text-[var(--muted-foreground)]', className)}>
       {fetchedAt === null ? null : (
         <span className={cn('normal-case tracking-normal', behind && 'stamp-late')}>
-          {behind ? copy.consoleStale : copy.pageAsOf(formatWhenAgo(fetchedAt))}
+          {behind ? copy.pageStale : copy.pageAsOf(formatWhenAgo(fetchedAt))}
         </span>
       )}
       {filling === null ? null : (

@@ -55,8 +55,11 @@ macOS app currently needs the macOS 26 SDK.
 1. Record the exact source SHA; remote main cannot verify uncommitted edits.
 2. Push intended changes on a review branch only when authorized; do not add
    another agent's dirty files or broaden artifact scope.
-3. Use current path-filtered CI. macOS and Windows CI also support manual
-   dispatch on an authorized remote ref when the required check is missing.
+3. The required status check is `ci-gate`. It runs on every pull request and
+   on `merge_group`, and calls the path-filtered workflows. Dispatch `ci-gate`
+   when that check is missing. macOS and Windows CI still support manual
+   dispatch on an authorized remote ref; dispatching them on a pull request as
+   well as `ci-gate` runs the heavy jobs twice.
 4. Verify each run's head SHA, event, workflow and jobs. A branch can advance
    while queued; distinguish a PR merge SHA from its source head.
 5. Download only needed artifacts/logs. Ordinary CI does not necessarily
@@ -78,19 +81,27 @@ GitHub-hosted resource is free.
 
 ### Which workflow must be green for a PR
 
-A PR needs a successful run on its exact head SHA (`gh pr view N --json headRefOid,statusCheckRollup`)
-of every workflow whose `paths:` filter matches a touched path. The filters are authoritative; in short:
+The required status check is `ci-gate` (`.github/workflows/ci-gate.yml`), green on the exact head SHA
+(`gh pr view N --json headRefOid,statusCheckRollup`). It is the only required check. `ci-gate` calls a
+workflow below when a touched path matches that workflow's list, and passes when each such job succeeded
+or was skipped because its paths were not touched. A missing `ci-gate` run is not green. The lists are
+the workflows' `push` path filters (connect-bench keeps its list in `tooling/scripts/ci-gate-changes.mjs`).
+Those `push` triggers run on `main`, `release/macos`, and `release/windows` only, so a pull-request
+branch does not start the same jobs a second time. In short:
 
-| Touched paths | Workflow |
+| Touched paths | Called workflow |
 |---|---|
 | `apps/macos/**`, `tooling/scripts/**` | `macos-ci.yml` |
 | `apps/windows/**` (and the update-contract fixtures it lists) | `windows-ci.yml` |
 | `services/**`, `ops-panel/**` (and the tooling scripts it lists) | `services-ci.yml` |
+| `tooling/scripts/sing-box/**`, `tooling/scripts/build-sing-box.sh` | `sing-box-alpha9-check.yml` |
+| `tooling/perf/connect-bench/**` (and the dial files it lists) | `connect-bench.yml` |
 
 Docs-only means every touched path is `*.md` or under `docs/`, none is under `.agents/` or `.claude/`,
-and no filter above matches it; it needs no run. A `*.md` that a filter matches (for example under
+and no filter above matches it. `ci-gate` still runs and passes with those jobs skipped; that skip is
+not qualification of a tree the PR did not touch. A `*.md` that a filter matches (for example under
 `apps/` or `services/`) needs that workflow. Non-docs paths no filter covers (for example
-`.jev-route.json`, `.agents/`, `.claude/`, release or promote workflows) need no CI run but need a
+`.jev-route.json`, `.agents/`, `.claude/`, release or promote workflows) need no called workflow but need a
 dual_cross_family review. Dispatching a promote workflow to "get a check"
 publishes; never do it for that.
 

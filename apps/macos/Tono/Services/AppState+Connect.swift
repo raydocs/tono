@@ -716,20 +716,28 @@ extension AppState {
         lastConnectionFailure = nil
     }
 
-    /// Stops Mihomo/TUN. Kill switch is NOT disarmed here — that only happens on
-    /// intentional logout / user "turn off protection" so a crash or health failure
-    /// leaves the host fail-closed via Kill Switch.
+    /// Stops Mihomo/TUN. The default leaves the kill switch armed. An exhausted
+    /// failure passes `releaseKillSwitch: true` unless the user explicitly
+    /// enabled a strict kill switch, so the original network comes back.
+    /// A crash mid-attempt still does not disarm by itself.
     ///
     /// `afterUnarmedConnectFailure` marks the automatic cleanup of a connect
     /// attempt that failed before its first arm. It is a release, but not the
     /// user's explicit one: see the operation below.
+    ///
+    /// `exhaustedTunnelLoss` is only the core monitor's missing-TUN verdict.
+    /// That path must not run the pending-update disconnect: doing so releases
+    /// PF and sets `nativeUpdateBlocksConnect`, so assistant traffic goes
+    /// direct and a later connect will not restore protection. Restore
+    /// internet leaves this flag false and still releases.
     func disconnect(
         releaseKillSwitch: Bool = false,
-        afterUnarmedConnectFailure: Bool = false
+        afterUnarmedConnectFailure: Bool = false,
+        exhaustedTunnelLoss: Bool = false
     ) {
         if nativeUpdatePending || RuntimeCleanup.nativeUpdateBlocksConnect
             || (releaseKillSwitch && RuntimeCleanup.nativeUpdatePending) {
-            if releaseKillSwitch { disconnectPendingNativeUpdate() }
+            if releaseKillSwitch, !exhaustedTunnelLoss { disconnectPendingNativeUpdate() }
             return
         }
         let pendingConnect = self.connectionCoordinator.connectTask
@@ -838,7 +846,7 @@ extension AppState {
 
                 // Reset state
                 self.isConnected = false
-                self.lastPhysicalFingerprint = nil
+                self.lastUplinkSnapshot = nil
                 self.isProxyDegraded = false
                 // In-place recovery belongs to the session being torn down.
                 // Left set, it outranked Protected Offline and Not Connected on
@@ -905,9 +913,11 @@ extension AppState {
                 ? (shouldStopCore ? await networkProtection.stopCore(coreRuntime) : true)
                 : false
             let coreStillRunning: Bool
+            var coreVerifiedStillRunning = false
             if helperReadyForRelease && shouldStopCore {
                 let status = await networkProtection.coreStatus()
                 coreStillRunning = status.running || !status.verified
+                coreVerifiedStillRunning = status.verified && status.running
             } else {
                 coreStillRunning = false
             }
@@ -958,9 +968,11 @@ extension AppState {
                     ? "The protected core could not be stopped. Kill Switch remains active; retry disconnecting."
                     : "The protected core could not be stopped; retry disconnecting."
             }
+            var systemProxyDisableFailed = false
             do {
                 try await networkProtection.disableSystemProxy()
             } catch {
+                systemProxyDisableFailed = true
                 transitionError = String(
                     localized: "System proxy could not be turned off. Disable the proxy manually in System Settings > Network."
                 )
@@ -1022,9 +1034,21 @@ extension AppState {
                 // A failed DNS restore is real, though: an earlier session's
                 // loopback DNS may still be applied with no PF behind it.
                 transitionLeavesProtectionBlocked = false
-                transitionError = dnsRestoreFailure.map {
-                    "Protected DNS restore failed, so this Mac may be unable to resolve names. The Support page has a recovery command. \($0)"
+                var cleanupErrors: [String] = []
+                if systemProxyDisableFailed {
+                    cleanupErrors.append(String(
+                        localized: "System proxy could not be turned off. Disable the proxy manually in System Settings > Network."
+                    ))
                 }
+                if coreVerifiedStillRunning {
+                    cleanupErrors.append("The protected core could not be stopped; retry disconnecting.")
+                }
+                if let dnsRestoreFailure {
+                    cleanupErrors.append(
+                        "Protected DNS restore failed, so this Mac may be unable to resolve names. The Support page has a recovery command. \(dnsRestoreFailure)"
+                    )
+                }
+                transitionError = cleanupErrors.isEmpty ? nil : cleanupErrors.joined(separator: " ")
             }
 
             await MainActor.run {
@@ -1105,7 +1129,8 @@ extension AppState {
         // resurrect the UI as connected while that teardown is queued.
         guard isConnecting, !Task.isCancelled else { return false }
         isConnected = true
-        lastPhysicalFingerprint = PhysicalInterfaceFingerprint.current()
+        let capturedUplink = NetworkUplinkSnapshot.current()
+        lastUplinkSnapshot = capturedUplink.isConcrete ? capturedUplink : nil
         isProtectionBlocked = false
         isRecoveringProtectedConnection = false
         isProxyDegraded = proxyFailed
@@ -1367,12 +1392,16 @@ extension AppState {
     /// confirmation tick, it is never skipped.
     private static let tunMissingVerdictTicks = 2
 
+    /// Forgive earlier repairs after about 30 minutes of healthy one-minute audits.
+    private static let protectionRepairForgivenessAudits = 30
+
     /// Mutable state the core monitor carries across ticks. Production holds
     /// one instance inside the monitor task; tests hold one to drive
     /// `runCoreMonitorTick(state:)` directly.
     struct CoreMonitorState {
         var healthCycle = 0
         var consecutiveHealthFailures = 0
+        var consecutiveHealthyProtectionAudits = 0
         var tunRouteRearmAttempts = 0
         /// Consecutive ticks that observed the owned TUN absent. Any tick that
         /// sees the interface resets it.
@@ -1406,6 +1435,17 @@ extension AppState {
         }
     }
 
+    /// True when `message` is the recovery line or the classified failure this
+    /// monitor is still showing. Other notices, including a rejected catalog
+    /// update, are not owned here.
+    private func healthMonitorOwns(_ message: String?) -> Bool {
+        guard let message else { return false }
+        if message == String(localized: "Recovering protected connection…") {
+            return true
+        }
+        return message == lastClassifiedFailure?.userMessage
+    }
+
     /// One iteration of the core monitor. Extracted from the loop above so the
     /// owned-TUN verdict is drivable in tests through the `tunInterfaceExists`
     /// seam; the loop itself only owns sleeping and exit. Every `continue` the
@@ -1428,20 +1468,31 @@ extension AppState {
                 // TUN and tears down a healthy session.
                 guard self.switchingNodeId == nil,
                       self.connectionCoordinator.configReloadTask == nil else {
+                    // Replacement ticks must not count toward a later missing-TUN verdict.
+                    state.consecutiveMissingTUNTicks = 0
                     return .continueMonitoring
                 }
                 // A replacement that just finished can still leave the new
                 // process a fraction of a second from recreating the
                 // interface, so one missing sighting without a task in flight
                 // is not a verdict either. Require the absence to persist
-                // across consecutive ticks; a real TUN death fails closed on
+                // across consecutive ticks; a real TUN death disconnects on
                 // the next one.
                 guard state.consecutiveMissingTUNTicks >= Self.tunMissingVerdictTicks else {
                     return .continueMonitoring
                 }
-                self.disconnect(releaseKillSwitch: false)
+                // Exhausted tunnel loss. Fail open unless a strict kill switch
+                // was explicitly enabled. This call does not install a new filter.
+                // No user preference on this path is treated as not strict.
+                // A pending native update keeps its barrier: this monitor must
+                // not take the Restore-internet release.
+                let disposition = ExhaustedFailureNetwork.afterFailure(strictKillSwitchExplicit: false)
+                self.disconnect(
+                    releaseKillSwitch: disposition.releasesSystemNetwork,
+                    exhaustedTunnelLoss: true
+                )
                 self.errorMessage = String(
-                    localized: "Protected TUN stopped; Kill Switch is blocking traffic while Tono retries."
+                    localized: "The connection didn't complete. Support code TONO_CONNECT_TUN."
                 )
                 self.scheduleProtectedReconnect()
                 return .stopMonitoring
@@ -1461,12 +1512,16 @@ extension AppState {
                 // Cancelling self.connectionCoordinator.coreMonitorTask cannot help: a task
                 // suspended on an actor call still resumes.
                 let observedGeneration = self.connectionCoordinator.protectionOperationGeneration
-                let primaryService =
-                    await self.protectionAudits.primaryNetworkService()
+                let uplink = await self.protectionAudits.uplinkSnapshot()
                 guard !Task.isCancelled, self.isConnected,
                   self.connectionCoordinator.protectionOperationGeneration == observedGeneration
                 else { return .stopMonitoring }
-                guard primaryService == service else {
+                switch NetworkUplinkSnapshot.classify(
+                    from: self.lastUplinkSnapshot,
+                    to: uplink,
+                    protectedService: service
+                ) {
+                case .moved:
                     self.recoveryCause = .networkChange
                     self.disconnect(releaseKillSwitch: false)
                     self.errorMessage = String(
@@ -1474,6 +1529,12 @@ extension AppState {
                     )
                     self.scheduleProtectedReconnect()
                     return .stopMonitoring
+                case .stay, .adopt:
+                    if self.lastUplinkSnapshot != uplink {
+                        self.lastUplinkSnapshot = uplink
+                    }
+                case .inconclusive:
+                    break
                 }
                 let dnsIntegrity =
                     await self.protectedDNSIntegrityConfirmingBroken(service: service)
@@ -1522,6 +1583,14 @@ extension AppState {
             guard !Task.isCancelled, self.isConnected,
                   self.connectionCoordinator.protectionOperationGeneration == observedGeneration
             else { return .stopMonitoring }
+            if let health, health.wanted, health.live, !health.repairedSinceArm {
+                state.consecutiveHealthyProtectionAudits += 1
+                if state.consecutiveHealthyProtectionAudits >= Self.protectionRepairForgivenessAudits {
+                    self.consecutiveProtectionRepairCount = 0
+                }
+            } else {
+                state.consecutiveHealthyProtectionAudits = 0
+            }
             if let health, health.wanted, health.repairedSinceArm || !health.live {
                 LocalTrafficAudit.shared.recordEvent(
                     "killswitch_supervisor_repaired",
@@ -1673,9 +1742,9 @@ extension AppState {
                 selectedExit: self.selectedExitNode()
             )
         }
-        let tun = await ProtectedConnectivityVerifier.raceSystemTUNProbes(
-            timeoutSeconds: 6,
-            preferredLabel: self.lastSuccessfulProbeOrigin
+        let tun = await self.raceHealthTrafficProbes(
+            6,
+            self.lastSuccessfulProbeOrigin
         )
         if case .won(let label) = tun {
             self.lastSuccessfulProbeOrigin = label
@@ -1725,11 +1794,12 @@ extension AppState {
             }
             self.isProxyDegraded = advisory != nil
             self.isRecoveringProtectedConnection = false
-            // The connection healed on its own. Leaving the retry-loop
-            // message in place kept "last error" showing a failure that
-            // had already resolved, which sends support down the wrong
-            // path.
-            if advisory == nil { self.errorMessage = nil }
+            // The connection healed on its own. Clear the retry-loop message
+            // this monitor posted. A catalog rejection or any other notice
+            // shares errorMessage and must stay up.
+            if advisory == nil, self.healthMonitorOwns(self.errorMessage) {
+                self.errorMessage = nil
+            }
             return .continueMonitoring
         case .retry(let failure):
             self.lastClassifiedFailure = failure
@@ -1934,7 +2004,11 @@ extension AppState {
         guard isProtectionBlocked, !isConnected, !isConnecting,
               !isDisconnecting else { return }
         Task { [weak self] in
-            _ = await self?.reconcileConfirmedExternalProtectionRelease()
+            // Never-armed teardown also leaves Protected Offline set; only an
+            // armed intent can be released externally (as the reconnect loop does).
+            _ = await self?.reconcileConfirmedExternalProtectionRelease(
+                protectionWasArmed: KillSwitchService.isArmed
+            )
         }
     }
 

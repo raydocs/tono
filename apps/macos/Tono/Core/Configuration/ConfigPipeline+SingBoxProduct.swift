@@ -237,8 +237,7 @@ nonisolated extension ConfigPipeline {
         rules.append(["network": "udp", "port": [5353], "action": "route", "outbound": "DIRECT"])
         rules.append(["ip_version": 6, "action": "reject"])
         rules.append(["network": ["udp", "icmp"], "action": "reject"])
-        let localSubnets = ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16", "fe80::/10", "fc00::/7", "224.0.0.0/4"]
-        let exclusions = Array(Set(usable.map(\.server))).sorted().map { "\($0)/32" } + localSubnets
+        let exclusions = Array(Set(usable.map(\.server))).sorted().map { "\($0)/32" } + tunRouteExcludeCIDRs
         let runtime: [String: Any] = [
             "log": ["level": overlay.logLevel == "warning" ? "warn" : overlay.logLevel],
             "dns": ["servers": dnsServers, "rules": dnsRules, "final": "Tono-DoH", "strategy": "ipv4_only"],

@@ -12,7 +12,7 @@ Start here. Dated handoffs and one-off reviews live in [archive/](archive/).
 | [BUILD_AND_TEST.md](BUILD_AND_TEST.md) | GitHub-hosted CI, MacBook lightweight work, native-device acceptance and cache retention |
 | [../CONTRIBUTING.md](../CONTRIBUTING.md) | Contributor workflow and verification evidence |
 | [../AGENTS.md](../AGENTS.md) | Agent rules: merge/deploy/publish conditions, invariants, verification hosts |
-| [DECISIONS.md](DECISIONS.md) | Owner and provisional product decisions (stricter option, recorded) |
+| [DECISIONS.md](DECISIONS.md) | Index of owner and provisional product decisions. One file each under [decisions/](decisions/README.md); add a file, do not append to the index |
 
 Mac Studio no longer serves as a residential exit (owner confirmed 2026-09-14).
 Routine builds use GitHub-hosted runners; native-device acceptance remains separate.
@@ -29,6 +29,7 @@ Use the execution guide's dated status, not old handoff machine assignments.
 | [UPDATE_PROTOCOL_V1.md](UPDATE_PROTOCOL_V1.md) | Shared macOS/Windows update wire values and conformance, not installation acceptance |
 | [UPDATE_INTEGRATION_V1.md](UPDATE_INTEGRATION_V1.md) | Native protected-update ownership, detached transport, paired packaging and G3 evidence boundaries |
 | [RELEASE_LINES.md](RELEASE_LINES.md) | `release/macos`, `release/windows`, `main`; tag formats |
+| [RELEASE_READINESS.md](RELEASE_READINESS.md) | Launch gaps: done / in-PR / needs-real-hardware; not a ship gate |
 | [ui-design-system.md](ui-design-system.md) | Shared visual tokens for both clients |
 | [desktop-clarity.md](desktop-clarity.md) | Welcome / login / content-layer clarity |
 | [welcome-v2.md](welcome-v2.md) | Welcome flow copy and layout |

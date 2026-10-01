@@ -6,6 +6,7 @@ import {
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { jwtSign } from '../src/crypto';
 import worker, { type Env } from '../src/index';
+import { storeDiagnosticsBundle } from '../src/telemetry/diagnostics';
 import {
   ALERT_HOUR_CAP,
   clusterAlertDecision,
@@ -205,6 +206,23 @@ describe('failure cluster webhook', () => {
     vi.restoreAllMocks();
   });
 
+  it('keeps a live outage together when a delayed report arrives out of order', async () => {
+    const atMs = 1_800_000_000_000;
+    const first = await recordFailureCluster(db(), failureInput('delayed', atMs), clusterEnv(), atMs / 1000);
+    const delayed = await recordFailureCluster(
+      db(), failureInput('delayed', atMs - 3_600_000), clusterEnv(), atMs / 1000 + 30,
+    );
+    const latest = await recordFailureCluster(
+      db(), failureInput('delayed', atMs + 60_000), clusterEnv(), atMs / 1000 + 60,
+    );
+    expect(delayed.clusterId).toBe(first.clusterId);
+    expect(latest.clusterId).toBe(first.clusterId);
+    const cluster = await db().prepare(
+      'SELECT last_seen_ms, event_count, status FROM failure_clusters WHERE id = ?',
+    ).bind(first.clusterId).first();
+    expect(cluster).toMatchObject({ last_seen_ms: atMs + 60_000, event_count: 3, status: 'open' });
+  });
+
   it('sends one signed alert for an outage and a second only after a spike', async () => {
     (env as unknown as Env).FAILURE_ALERT_WEBHOOK_URL = HOOK;
     (env as unknown as Env).FAILURE_ALERT_WEBHOOK_SECRET = SECRET;
@@ -339,6 +357,46 @@ describe('diagnostics read API', () => {
     (env as unknown as Env).DIAGNOSTICS_READ_TOKEN = undefined;
   });
 
+  it('stores no partial bundle when a later hop is invalid', async () => {
+    const account = await seedAccount();
+    const payload = bundle();
+    const hop = payload.hops[1];
+    if (!hop) throw new Error('Missing second hop in bundle fixture');
+    hop.role = 'invalid';
+    const response = await api('telemetry/diagnostics', json(payload, account.token));
+    expect(response.status).toBe(400);
+    const session = await db().prepare(
+      'SELECT COUNT(*) AS count FROM client_sessions WHERE user_id = ?',
+    ).bind(account.userId).first();
+    const hops = await db().prepare(
+      'SELECT COUNT(*) AS count FROM chain_hops WHERE user_id = ?',
+    ).bind(account.userId).first();
+    expect(session?.count).toBe(0);
+    expect(hops?.count).toBe(0);
+  });
+
+  it('acknowledges committed diagnostic facts when derived clustering fails', async () => {
+    const account = await seedAccount();
+    const real = db();
+    const unavailable = new Proxy(real, {
+      get(target, prop) {
+        if (prop === 'prepare') return (sql: string) => {
+          if (sql.includes('failure_clusters')) throw new Error('cluster storage unavailable');
+          return target.prepare(sql);
+        };
+        const value = Reflect.get(target, prop);
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+    await expect(storeDiagnosticsBundle(
+      unavailable, account.userId, account.deviceId, bundle(), clusterEnv(),
+    )).resolves.toMatchObject({ events: 1 });
+    const event = await real.prepare(
+      'SELECT COUNT(*) AS count FROM connection_events WHERE user_id = ?',
+    ).bind(account.userId).first();
+    expect(event?.count).toBe(1);
+  });
+
   it('stores a privacy-safe bundle and rejects a full IP or an AI route without consent', async () => {
     const account = await seedAccount();
     const accepted = await api('telemetry/diagnostics', json(bundle(), account.token));
@@ -372,6 +430,20 @@ describe('diagnostics read API', () => {
       'SELECT COUNT(*) AS n FROM ai_service_routes WHERE user_id = ?',
     ).bind(account.userId).first<{ n: number }>();
     expect(Number(ai?.n)).toBe(0);
+  });
+
+  it('keeps a completed session when its delayed start report arrives', async () => {
+    const account = await seedAccount();
+    const atMs = Date.now();
+    const payload = bundle(atMs);
+    const completed = { ...payload, session: { ...payload.session, endedAtMs: atMs, outcome: 'ok' } };
+    expect((await api('telemetry/diagnostics', json(completed, account.token))).status).toBe(202);
+    const { bytesUp: _up, bytesDown: _down, outcome: _outcome, ...started } = payload.session;
+    expect((await api('telemetry/diagnostics', json({ ...payload, session: started }, account.token))).status).toBe(202);
+    const session = await db().prepare(
+      'SELECT ended_at_ms, bytes_up, bytes_down, outcome FROM client_sessions WHERE user_id = ?',
+    ).bind(account.userId).first();
+    expect(session).toMatchObject({ ended_at_ms: atMs, bytes_up: 100, bytes_down: 400, outcome: 'ok' });
   });
 
   it('lists a window and returns the cluster timeline only to the read token', async () => {
@@ -412,5 +484,80 @@ describe('diagnostics read API', () => {
     expect(body.hops.map((hop) => hop.role).sort()).toEqual(['entry', 'residential']);
     expect(body.dnsChecks[0]).toMatchObject({ resolver: 'tunnel', leakOutside: false });
     expect(body.exits[0].ipPrefix).toBe('203.0.113.0/24');
+  });
+});
+
+// Both callers finish the "is there an open cluster?" read before either
+// insert. That is the window where the partial unique index rejects the
+// second INSERT and the diagnostics upload 500s.
+function holdOpenSelectsUntilBoth(real: D1Database): D1Database {
+  let openSelects = 0;
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  return {
+    prepare(sql: string) {
+      const statement = real.prepare(sql);
+      const holds = sql.includes('FROM failure_clusters')
+        && sql.includes("status = 'open'")
+        && sql.trimStart().startsWith('SELECT');
+      return {
+        bind(...values: unknown[]) {
+          const bound = statement.bind(...values);
+          if (!holds) return bound;
+          return new Proxy(bound, {
+            get(target, property, receiver) {
+              if (property !== 'first') {
+                const value = Reflect.get(target, property, receiver);
+                return typeof value === 'function' ? value.bind(target) : value;
+              }
+              return async () => {
+                const row = await target.first();
+                openSelects += 1;
+                if (openSelects === 2) release();
+                if (openSelects <= 2) await gate;
+                return row;
+              };
+            },
+          });
+        },
+      };
+    },
+  } as unknown as D1Database;
+}
+
+describe('failure cluster open race', () => {
+  it('counts both events when two opens pass the empty read together', async () => {
+    (env as unknown as Env).FAILURE_ALERT_WEBHOOK_URL = undefined;
+    (env as unknown as Env).FAILURE_ALERT_WEBHOOK_SECRET = undefined;
+    const atMs = 1_800_100_000_000;
+    const raced = holdOpenSelectsUntilBoth(db());
+    const [left, right] = await Promise.all([
+      recordFailureCluster(raced, failureInput('race-open', atMs), clusterEnv(), 1_800_100_000),
+      recordFailureCluster(raced, failureInput('race-open', atMs + 1), clusterEnv(), 1_800_100_000),
+    ]);
+    expect(left.clusterId).toBe(right.clusterId);
+    const row = await db().prepare(
+      `SELECT COUNT(*) AS clusters, SUM(event_count) AS events
+       FROM failure_clusters WHERE code = 'race-open' AND status = 'open'`,
+    ).first<{ clusters: number; events: number }>();
+    expect(Number(row?.clusters)).toBe(1);
+    expect(Number(row?.events)).toBe(2);
+  });
+});
+
+describe('automatic diagnostic excerpt privacy', () => {
+  it('stores structured facts without an arbitrary IPv6 and token log excerpt', async () => {
+    const account = await seedAccount();
+    const payload = {
+      ...bundle(),
+      logExcerpt: 'dial tcp [2001:db8:1234::9]:443 failed token=private-token',
+    };
+    expect((await api('telemetry/diagnostics', json(payload, account.token))).status).toBe(202);
+    const session = await db().prepare(
+      'SELECT log_excerpt, bytes_down, outcome FROM client_sessions WHERE user_id = ?',
+    ).bind(account.userId).first();
+    expect(session).toMatchObject({ log_excerpt: null, bytes_down: 400, outcome: 'fail' });
   });
 });
