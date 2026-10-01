@@ -137,7 +137,12 @@ async fn run(state: Arc<TonoState>, app: AppHandle, ticket: u64, mut generation:
                     if inner.connect_generation != generation || inner.fsm.kill_switch_armed() {
                         return;
                     }
-                    inner.selected_node = Some(name);
+                    if !apply_proven_selection(&mut inner, &preferred, name) {
+                        // An idle user selection does not change the connection generation.
+                        // Retire this proof and start a fresh round for the new choice.
+                        schedule = Schedule::begin(elapsed_ms(clock));
+                        continue;
+                    }
                 }
                 logging!(
                     info,
@@ -171,6 +176,19 @@ async fn run(state: Arc<TonoState>, app: AppHandle, ticket: u64, mut generation:
             }
         }
     }
+}
+
+/// Called under the post-proof state lock: a proof cannot replace newer selection intent.
+fn apply_proven_selection(
+    inner: &mut crate::tono::state::TonoInner,
+    preferred: &str,
+    proven: String,
+) -> bool {
+    if inner.selected_node.as_deref() != Some(preferred) {
+        return false;
+    }
+    inner.selected_node = Some(proven);
+    true
 }
 
 fn probe_targets(nodes: &[ValidatedNode]) -> Vec<ProbeTarget> {
@@ -370,6 +388,21 @@ mod tests {
             }
         }).await.unwrap();
         assert!(replacement.await.unwrap().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn late_unarmed_proof_preserves_a_newer_idle_selection() {
+        let state = TonoState::for_test();
+        let mut inner = state.lock().await;
+        inner.account_state = AccountState::Ready;
+        inner.selected_node = Some("Tokyo · Kite".into());
+        let preferred = inner.selected_node.clone().unwrap();
+        let generation = inner.connect_generation;
+        // Model the real idle selection command while A's TCP proof is outstanding.
+        inner.selected_node = Some("Tokyo · Fuji".into());
+        assert_eq!(inner.connect_generation, generation);
+        assert!(!apply_proven_selection(&mut inner, &preferred, preferred.clone()));
+        assert_eq!(inner.selected_node.as_deref(), Some("Tokyo · Fuji"));
     }
 
     #[tokio::test]
