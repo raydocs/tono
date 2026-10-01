@@ -77,12 +77,24 @@ final class UnexpectedRestartResumeTests: XCTestCase {
             app.automaticResumeHeldAfterRestart = true
             KillSwitchService.isArmed = true
             app.isProtectionBlocked = true
+            // A confirmed barrier now takes the automatic release; keep it
+            // off the real helper.
+            var runtime = NetworkProtectionOperations()
+            runtime.repairForRelease = {}
+            runtime.stopCore = { _ in true }
+            runtime.coreStatus = { (false, true) }
+            runtime.restoreDNS = { true }
+            runtime.disableSystemProxy = {}
+            runtime.disarm = { KillSwitchService.isArmed = false }
+            runtime.releaseAfterFailure = { KillSwitchService.isArmed = false }
+            runtime.restrictToBootstrap = {}
+            app.networkProtection = runtime
             return app
         }
 
         let armed = heldLaunch()
         try armed.acceptCloudOnlyTransport(resumeProtection: true)
-        XCTAssertTrue(armed.protectedReconnectPausedForUserAction)
+        XCTAssertFalse(armed.protectedReconnectPausedForUserAction)
         XCTAssertNotNil(armed.errorMessage, "a confirmed barrier says why Tono did not reconnect")
 
         let released = heldLaunch()

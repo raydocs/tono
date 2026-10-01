@@ -44,7 +44,7 @@ final class ProtectedDNSPauseReleaseTests: XCTestCase {
             "the release is only queued; PF may still hold the host"
         )
         await app.connectionCoordinator.disconnectSequence?.value
-        await app.dnsFailureReleaseNoticeTask?.value
+        await app.failureReleaseNoticeTask?.value
 
         XCTAssertEqual(operations, ["releaseAfterFailure"])
         XCTAssertFalse(app.isProtectionBlocked)
@@ -65,7 +65,7 @@ final class ProtectedDNSPauseReleaseTests: XCTestCase {
         ])
         XCTAssertTrue(app.errorMessage?.hasPrefix(String(localized: "DNS conflict: a corporate VPN, profile or /etc/resolver rule sends some domains to a DNS server outside Tono's protection. Tono is restoring this Mac's normal internet; AI services stay blocked. Turn that rule off, then connect again.")) ?? false)
         await app.connectionCoordinator.disconnectSequence?.value
-        await app.dnsFailureReleaseNoticeTask?.value
+        await app.failureReleaseNoticeTask?.value
 
         XCTAssertEqual(operations, ["releaseAfterFailure"])
         XCTAssertFalse(app.isProtectionBlocked)
