@@ -36,7 +36,9 @@ pub mod catalog;
 pub mod connection_cmd;
 pub mod restore;
 pub mod diagnostics;
+pub mod support;
 pub mod quit;
+pub mod update;
 pub use account::{
     load_credentials, tono_account, tono_devices, tono_repair_service, tono_revoke_device,
     tono_service_prerequisites, tono_sign_in_start, tono_sign_in_verify, tono_sign_out,
@@ -49,6 +51,7 @@ pub use connection_cmd::{
     retry_now, tono_close_all_connections, tono_close_connection, tono_connect, tono_connect_progress,
     tono_disconnect, tono_retry_now, tono_status,
 };
+pub use crate::tono::route_preferences::{tono_route_preferences, tono_update_route_preferences};
 pub use restore::{restore_session, restore_session_guarded, tono_retry_restore};
 pub use diagnostics::{
     tono_audit_enabled, tono_audit_log_path, tono_diagnostics_report, tono_network_log_upload_enabled,
@@ -57,7 +60,7 @@ pub use diagnostics::{
 };
 pub use quit::{
     flush_audit_for_exit, quit_protection_active, quit_release, resync_after_cancelled_quit,
-    stop_service_on_unprotected_quit, tono_prepare_update,
+    stop_service_on_unprotected_quit,
 };
 
 
@@ -70,7 +73,7 @@ pub(crate) const AUDIT_FLUSH_BUDGET: std::time::Duration = std::time::Duration::
 /// Absolute budget for startup authentication restore and its two cloud refreshes. Credential
 /// hydration has its own three-second budget before this function starts. Read-only API work can
 /// be cancelled safely; protection release keeps its separate reconciliation semantics.
-const RESTORE_TRANSACTION_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+pub(crate) const RESTORE_TRANSACTION_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
 /// Emitted on `tono://status` after every state change.
 ///
@@ -91,6 +94,8 @@ pub struct TonoStatus {
     pub kill_switch: Option<KillSwitchStatus>,
     pub catalog_revision: Option<i64>,
     pub catalog_requires_choice: bool,
+    /// Opaque process-local auth scope; never the persisted account ID.
+    pub route_preference_scope: Option<String>,
     /// Monotonic owner token for controller/WebSocket data. Never expose the controller secret.
     pub controller_generation: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -120,6 +125,10 @@ pub struct TonoStatus {
     /// disconnect and reinstall; a later connect must not hide this.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub update_incomplete: bool,
+    /// Ready on an offline grant (#582): when the server last verified this session and its
+    /// catalog. Absent once any server answer arrives.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub offline_verified_at_ms: Option<i64>,
 }
 
 /// Last published immutable UI snapshot. The status command reads this without joining the large
@@ -165,13 +174,19 @@ pub struct TonoSignInChallenge {
     pub message: String,
 }
 
-/// TS: `interface TonoAccountInfo { email: string; suspended: boolean; deviceLimit: number }`
+/// TS: `interface TonoAccount { email; suspended; deviceLimit; plan; quotaBytes; usageBytes; expiresAt }`
+/// The last four are display-only and `null` when the server did not send them (or offline);
+/// `expiresAt` is epoch seconds.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TonoAccountInfo {
     pub email: String,
     pub suspended: bool,
     pub device_limit: i64,
+    pub plan: Option<String>,
+    pub quota_bytes: Option<i64>,
+    pub usage_bytes: Option<i64>,
+    pub expires_at: Option<i64>,
 }
 
 /// TS: `interface TonoDevice { id: string; name: string; createdAt: number | null; current: boolean }`
@@ -219,17 +234,7 @@ const SERVER_TEST_TIMEOUT: Duration = Duration::from_secs(4);
 
 /// Stable wire key for a connect stage (`TonoStatus.stage`).
 pub fn stage_key(stage: ConnectStage) -> &'static str {
-    match stage {
-        ConnectStage::Preparing => "preparing",
-        ConnectStage::PreparingService => "preparingService",
-        ConnectStage::StartingKillSwitch => "startingKillSwitch",
-        ConnectStage::StartingTunnel => "startingTunnel",
-        ConnectStage::LockingTraffic => "lockingTraffic",
-        ConnectStage::ApplyingCloudPolicy => "applyingCloudPolicy",
-        ConnectStage::SecuringDns => "securingDNS",
-        ConnectStage::CheckingExit => "checkingExit",
-        ConnectStage::VerifyingTraffic => "verifyingTraffic",
-    }
+    tono_core::connect_timing::wire_key(stage)
 }
 
 /// Stable wire key for the top-level UI state (`TonoStatus.uiState`).
@@ -258,6 +263,7 @@ pub(crate) fn status_of(inner: &TonoInner) -> TonoStatus {
         kill_switch: inner.kill_switch.clone(),
         catalog_revision: (revision >= 0).then_some(revision),
         catalog_requires_choice: inner.catalog_requires_choice,
+        route_preference_scope: crate::tono::route_preferences::scope_of(inner),
         controller_generation: inner.controller_generation,
         exit_ip: inner.exit_ip.clone(),
         exit_org: inner.exit_org.clone(),
@@ -286,7 +292,8 @@ pub(crate) fn status_of(inner: &TonoInner) -> TonoStatus {
         } else {
             None
         },
-        update_incomplete: crate::tono::update_handoff::incomplete(),
+        update_incomplete: update::incomplete() || crate::tono::update_handoff::incomplete(),
+        offline_verified_at_ms: inner.offline.offline_verified_at_ms(),
     }
 }
 
@@ -298,12 +305,10 @@ pub(crate) fn emit_status(app: &AppHandle, status: &TonoStatus) {
     // The tray is another projection of this same product state. Rebuild it asynchronously so
     // callers may continue publishing while holding the state mutex; the tray snapshot will run
     // after that guard is released and therefore cannot deadlock the connection transaction.
+    // Menu, icon and tooltip are one projection: the icon was only sampled at startup.
     AsyncHandler::spawn(|| async {
-        if let Err(err) = crate::core::tray::Tray::global().update_menu().await {
+        if let Err(err) = crate::core::tray::Tray::global().refresh_status().await {
             logging!(warn, Type::Tray, "Tono: failed to refresh tray status: {err:#}");
-        }
-        if let Err(err) = crate::core::tray::Tray::global().update_tooltip().await {
-            logging!(warn, Type::Tray, "Tono: failed to refresh tray tooltip: {err:#}");
         }
     });
 }
@@ -321,6 +326,10 @@ fn account_info_of(user: &User) -> TonoAccountInfo {
         email: user.email.clone(),
         suspended: user.suspended.unwrap_or(false),
         device_limit: user.device_limit.unwrap_or(i64::from(DEFAULT_DEVICE_LIMIT)),
+        plan: user.plan.clone().filter(|plan| !plan.trim().is_empty()),
+        quota_bytes: user.quota_bytes,
+        usage_bytes: user.usage_bytes,
+        expires_at: user.expires_at,
     }
 }
 
@@ -363,9 +372,30 @@ mod tests {
         append_proxy_entries, command_output_with_timeout, file_uri_path, proxy_assignments_in_json,
         proxy_assignments_in_text, scan_json_proxy_directory, scan_json_proxy_file,
         scan_powershell_profile_directories, scan_text_proxy_directory, vscode_profile_setting_paths,
-        vscode_workspace_discovery,
+        vscode_workspace_discovery, powershell_profile_roots,
     };
     use tono_core::connection::{ConnectStage, UiState};
+
+    #[test]
+    fn account_info_carries_plan_usage_and_expiry_for_display() {
+        let user = tono_core::auth::User {
+            id: "u1".into(),
+            email: "a@example.test".into(),
+            name: None,
+            plan: Some("Pro".into()),
+            device_limit: Some(3),
+            quota_bytes: Some(100 * 1024 * 1024 * 1024),
+            usage_bytes: Some(12 * 1024 * 1024 * 1024),
+            expires_at: Some(1_798_675_200),
+            suspended: Some(false),
+        };
+        let json = serde_json::to_value(super::account_info_of(&user)).unwrap();
+        assert_eq!(json["plan"], "Pro");
+        assert_eq!(json["quotaBytes"], 100_i64 * 1024 * 1024 * 1024);
+        assert_eq!(json["usageBytes"], 12_i64 * 1024 * 1024 * 1024);
+        assert_eq!(json["expiresAt"], 1_798_675_200_i64);
+        assert_eq!(json["deviceLimit"], 3);
+    }
 
     #[cfg(unix)]
     #[test]
@@ -543,6 +573,55 @@ mod tests {
         assert_eq!(entries[0].value, "<configured>");
         assert!(!entries[0].auto_clearable);
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn terminal_proxy_scanner_reads_byte_order_marked_powershell_profiles() {
+        let root = std::env::temp_dir().join(format!(
+            "tono-powershell-bom-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let mut utf8 = vec![0xEF, 0xBB, 0xBF];
+        utf8.extend_from_slice(b"$env:HTTPS_PROXY = 'http://127.0.0.1:7890'\r\n");
+        std::fs::write(root.join("profile.ps1"), utf8).unwrap();
+        let mut utf16_le = vec![0xFF, 0xFE];
+        let mut utf16_be = vec![0xFE, 0xFF];
+        for unit in "$env:HTTP_PROXY = 'http://127.0.0.1:7890'\r\n".encode_utf16() {
+            utf16_le.extend_from_slice(&unit.to_le_bytes());
+        }
+        for unit in "$env:ALL_PROXY = 'socks5://127.0.0.1:7890'\r\n".encode_utf16() {
+            utf16_be.extend_from_slice(&unit.to_be_bytes());
+        }
+        std::fs::write(root.join("Microsoft.PowerShell_profile.ps1"), utf16_le).unwrap();
+        std::fs::write(root.join("Microsoft.VSCode_profile.ps1"), utf16_be).unwrap();
+        let mut entries = Vec::new();
+        scan_powershell_profile_directories(
+            &mut entries,
+            [root.clone()],
+            "PowerShell profile",
+            "manual cleanup",
+        )
+        .unwrap();
+
+        let mut keys: Vec<_> = entries.iter().map(|entry| entry.key.as_str()).collect();
+        keys.sort_unstable();
+        assert_eq!(keys, ["ALL_PROXY", "HTTPS_PROXY", "HTTP_PROXY"]);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn terminal_proxy_scanner_uses_the_documents_known_folder_or_fails() {
+        let home = std::path::Path::new(r"C:\Users\张三");
+        let redirected = std::path::PathBuf::from(r"D:\工作资料\文档");
+
+        let roots = powershell_profile_roots(home, Some(redirected.clone())).unwrap();
+        assert!(roots.contains(&redirected));
+        assert!(powershell_profile_roots(home, None).is_err());
     }
 
     #[test]

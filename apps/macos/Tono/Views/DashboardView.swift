@@ -7,6 +7,7 @@ struct DashboardView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Namespace private var dashboardNS
     @State private var trafficHistory = TrafficHistory()
+    @State private var showsDataUsagePopover = false
     /// When the pill last flipped into connecting. A click that lands within
     /// `cancelGraceInterval` of that moment is ignored: the pill is now the
     /// Cancel control while connecting, so without this a double-click on
@@ -34,6 +35,8 @@ struct DashboardView: View {
                 Spacer(minLength: 12)
 
                 VStack(spacing: 24) {
+                    RecoveryNotice(appState: appState)
+                        .frame(maxWidth: 520, alignment: .leading)
                     ConnectPill(isConnected: Binding(
                         get: { appState.isConnected },
                         set: { newValue in
@@ -48,7 +51,8 @@ struct DashboardView: View {
                                     return
                                 }
                                 appState.disconnect(releaseKillSwitch: true)
-                            } else if appState.isProtectionBlocked {
+                            } else if appState.isProtectionBlocked
+                                        || appState.isProtectionUnconfirmed {
                                 appState.disconnect(releaseKillSwitch: true)
                             } else if newValue {
                                 appState.connect()
@@ -59,6 +63,7 @@ struct DashboardView: View {
                     ), isConnecting: appState.isConnecting,
                        isDisconnecting: appState.isDisconnecting,
                        isProtectionBlocked: appState.isProtectionBlocked,
+                       isProtectionUnconfirmed: appState.isProtectionUnconfirmed,
                        isRecovering: appState.isRecoveringProtectedConnection,
                        connectionStage: appState.connectionStage,
                        disconnectionStage: appState.disconnectionStage,
@@ -89,6 +94,9 @@ struct DashboardView: View {
                             .transition(TonoMotion.surfaceTransition)
                     }
 
+                    if !showsConnectionDetails {
+                        RouteChoicesView()
+                    }
                 }
 
                 Spacer(minLength: 12)
@@ -174,13 +182,24 @@ struct DashboardView: View {
                 tint: Color(hex: "32ADE6")
             )
 
-            DashboardStatCard(
-                title: "Live traffic",
-                value: trafficSummaryValue,
-                detail: trafficSummaryDetail,
-                systemImage: "waveform.path.ecg",
-                tint: Color(hex: "5856D6")
-            )
+            Button {
+                showsDataUsagePopover.toggle()
+            } label: {
+                DashboardStatCard(
+                    title: "Live traffic",
+                    value: trafficSummaryValue,
+                    detail: trafficSummaryDetail,
+                    systemImage: "waveform.path.ecg",
+                    tint: Color(hex: "5856D6")
+                )
+            }
+            .buttonStyle(.plain)
+            .popover(isPresented: $showsDataUsagePopover, arrowEdge: .top) {
+                DataUsageSummaryView(appState: appState, isCard: false)
+                    .padding(16)
+                    .frame(width: 320)
+            }
+            .help("View data usage summary")
         }
     }
 
@@ -188,13 +207,16 @@ struct DashboardView: View {
         if appState.isConnecting { return "Connecting" }
         if appState.isDisconnecting { return "Disconnecting" }
         if appState.isProtectionBlocked { return "Protected offline" }
+        if appState.isProtectionUnconfirmed { return "Protection unknown" }
         if isDegradedWhileConnected { return "Protected — exit degraded" }
         return appState.isConnected ? "Protected" : "Standby"
     }
 
     private var statusBadgeColor: Color {
         if appState.isConnecting || appState.isDisconnecting { return TonoBrand.accent }
-        if appState.isProtectionBlocked { return TonoStatus.blocked }
+        if appState.isProtectionBlocked || appState.isProtectionUnconfirmed {
+            return TonoStatus.blocked
+        }
         if isDegradedWhileConnected { return TonoStatus.blocked }
         return appState.isConnected ? TonoStatus.positive : TonoStatus.neutral
     }
@@ -213,6 +235,7 @@ struct DashboardView: View {
         if appState.isConnecting { return String(localized: "Connecting") }
         if appState.isDisconnecting { return String(localized: "Finishing") }
         if appState.isProtectionBlocked { return String(localized: "Offline") }
+        if appState.isProtectionUnconfirmed { return String(localized: "Unknown") }
         if isDegradedWhileConnected { return String(localized: "Degraded") }
         return appState.isConnected
             ? String(localized: "Protected")
@@ -222,6 +245,9 @@ struct DashboardView: View {
     private var protectionDetail: String {
         if appState.isProtectionBlocked {
             return String(localized: "Direct traffic blocked")
+        }
+        if appState.isProtectionUnconfirmed {
+            return String(localized: "Direct traffic may be blocked")
         }
         if isDegradedWhileConnected {
             return String(localized: "Exit not responding — checking")
@@ -274,7 +300,7 @@ struct DashboardView: View {
         HStack(spacing: 14) {
             infoItem(label: "IP", value: appState.networkInfo.ip)
             infoItem(label: "Network", value: appState.networkInfo.org)
-            infoItem(label: "Location", value: appState.networkInfo.location)
+            infoItem(label: "Location", value: locationDisplayValue)
             infoItem(label: "DNS", value: ProtectedDNSContract.server)
                 .help(
                     "System DNS: \(ProtectedDNSContract.server) · "
@@ -351,6 +377,17 @@ struct DashboardView: View {
                 try? await Task.sleep(for: .seconds(1))
             }
         }
+    }
+
+    private var locationDisplayValue: String {
+        let loc = appState.networkInfo.location
+        guard loc != "--" && !loc.isEmpty else { return "--" }
+        let candidate = loc.split(separator: ",").last?
+            .trimmingCharacters(in: .whitespaces) ?? loc
+        if let flag = UnicodeCountryFlag.emoji(for: candidate) {
+            return "\(flag) \(loc)"
+        }
+        return loc
     }
 
     private func infoItem(label: LocalizedStringKey, value: String) -> some View {
@@ -523,7 +560,7 @@ private struct ConnectionProgressCard: View {
                         .font(.system(size: 12))
                         .foregroundStyle(.secondary)
                         if !appState.isProtectionBlocked {
-                            Text("Direct internet is available. Retry or choose another route.")
+                            Text("Direct internet is available. Support code TONO_CONNECT_RELEASED.")
                                 .font(.system(size: 12))
                                 .foregroundStyle(.secondary)
                                 .fixedSize(horizontal: false, vertical: true)

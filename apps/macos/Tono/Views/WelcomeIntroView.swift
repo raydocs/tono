@@ -4,12 +4,15 @@ import SwiftUI
 enum WelcomeLaunchGate {
     /// Unseen + no session → intro. Seen → gate. Signed-in (or still restoring)
     /// → never, so a returning user does not flash the intro while restore runs.
+    /// Kill switch still holding → gate: only it says why the Mac is offline
+    /// and offers Restore internet (a launch whose session was refused).
     @MainActor
     static func showsIntro(
         introSeen: Bool,
-        sessionState: AccountSession.State
+        sessionState: AccountSession.State,
+        protectionHeld: Bool = false
     ) -> Bool {
-        guard !introSeen else { return false }
+        guard !introSeen, !protectionHeld else { return false }
         switch sessionState {
         case .signedOut, .error:
             return true
@@ -19,22 +22,11 @@ enum WelcomeLaunchGate {
     }
 }
 
-/// Four-step Welcome v2 intro. Skip or Get started sets `introSeen` and the
-/// parent swaps in the account gate.
+/// One-screen intro: three promises and one primary action. Get started (or
+/// Esc) sets `introSeen` and the parent swaps in the account gate.
+/// Windows twin: `pages/tono/intro.tsx`.
 struct WelcomeIntroView: View {
     @AppStorage(SettingsKey.introSeen, store: AppProfile.defaults) private var introSeen = false
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.colorScheme) private var colorScheme
-    @State private var step = 0
-
-    private var isLast: Bool { step >= 3 }
-    private var isDark: Bool { colorScheme == .dark }
-    private var controlIdle: Color {
-        isDark ? Color(hex: "8E90A8") : Color(hex: "7A7C90")
-    }
-    private var controlActive: Color {
-        isDark ? Color(hex: "FFB07A") : Color(hex: "2B2FB8")
-    }
 
     var body: some View {
         GeometryReader { geo in
@@ -48,40 +40,12 @@ struct WelcomeIntroView: View {
                 } else {
                     wideLayout(size: geo.size)
                 }
-
-                VStack(spacing: 0) {
-                    HStack {
-                        Spacer()
-                        Button("Skip", action: finish)
-                            .buttonStyle(.plain)
-                            .font(.system(size: 13, weight: .medium))
-                            .foregroundStyle(controlIdle)
-                            .keyboardShortcut(.cancelAction)
-                    }
-                    .padding(.top, 28)
-                    .padding(.horizontal, 32)
-
-                    Spacer(minLength: 0)
-
-                    VStack(alignment: .leading, spacing: 16) {
-                        if isLast {
-                            getStartedButton
-                        }
-                        HStack {
-                            progressDots
-                            Spacer()
-                            if !isLast { continueButton }
-                        }
-                    }
-                    .padding(.bottom, 32)
-                    .padding(.horizontal, narrow ? 32 : 48)
-                }
             }
             .frame(width: geo.size.width, height: geo.size.height)
         }
         .background {
-            Button(action: advance) { EmptyView() }
-                .keyboardShortcut(.rightArrow, modifiers: [])
+            Button(action: finish) { EmptyView() }
+                .keyboardShortcut(.cancelAction)
                 .frame(width: 0, height: 0)
                 .opacity(0)
                 .accessibilityHidden(true)
@@ -91,132 +55,98 @@ struct WelcomeIntroView: View {
     @ViewBuilder
     private func wideLayout(size: CGSize) -> some View {
         let tile = min(size.width * 0.34, 320)
-        HStack(alignment: .center, spacing: 24) {
-            stepCopy
-                .offset(y: size.height * -0.12)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-                .padding(.leading, 48)
+        HStack(alignment: .center, spacing: 48) {
+            copy
+                .frame(maxWidth: .infinity, alignment: .leading)
 
             WelcomeHeroTile()
                 .frame(width: tile, height: tile)
-                .padding(.trailing, 32)
         }
+        .padding(.horizontal, 56)
+        .padding(.vertical, 48)
         .frame(width: size.width, height: size.height)
     }
 
     @ViewBuilder
     private func narrowLayout(size: CGSize) -> some View {
-        let tile = min(size.width * 0.46, 260)
-        VStack(spacing: 28) {
+        let tile = min(size.width * 0.32, 180)
+        VStack(alignment: .leading, spacing: 28) {
             WelcomeHeroTile()
                 .frame(width: tile, height: tile)
-            stepCopy
+                .frame(maxWidth: .infinity)
+            copy
                 .frame(maxWidth: .infinity, alignment: .leading)
-            Spacer(minLength: 0)
         }
-        .padding(.top, 72)
         .padding(.horizontal, 32)
-        .padding(.bottom, 88)
+        .padding(.vertical, 40)
         .frame(width: size.width, height: size.height)
     }
 
-    @ViewBuilder
-    private var stepCopy: some View {
-        ZStack(alignment: .topLeading) {
-            VStack(alignment: .leading, spacing: 12) {
-                if !isLast {
-                    Text(Self.steps[step].headline)
-                        .font(.system(size: 34, weight: .semibold))
-                        .tracking(-0.6)
-                        .foregroundStyle(TonoBrand.welcomeInk)
-                    Text(Self.steps[step].body)
-                        .font(.system(size: 15))
-                        .foregroundStyle(TonoBrand.welcomeMuted)
-                        .fixedSize(horizontal: false, vertical: true)
+    private var copy: some View {
+        VStack(alignment: .leading, spacing: 28) {
+            Text("Welcome to Tono")
+                .font(.system(size: 34, weight: .semibold))
+                .tracking(-0.6)
+                .foregroundStyle(TonoBrand.welcomeInk)
+                .accessibilityAddTraits(.isHeader)
+
+            VStack(alignment: .leading, spacing: 18) {
+                ForEach(Self.points.indices, id: \.self) { index in
+                    pointRow(Self.points[index])
                 }
             }
-            .id(step)
-            .transition(.opacity)
+
+            Button(action: finish) {
+                Text("Get started →")
+            }
+            .buttonStyle(GateProminentButtonStyle())
+            .keyboardShortcut(.defaultAction)
+            .frame(maxWidth: 320)
         }
-        .animation(TonoMotion.easeOut(0.2, reduceMotion: reduceMotion), value: step)
-        .frame(maxWidth: 520, alignment: .leading)
+        .frame(maxWidth: 460, alignment: .leading)
     }
 
-    private var progressDots: some View {
-        HStack(spacing: 8) {
-            ForEach(0..<4, id: \.self) { index in
-                Circle()
-                    .fill(index == step ? controlActive : controlIdle)
-                    .frame(width: index == step ? 8 : 6, height: index == step ? 8 : 6)
+    private func pointRow(_ point: Point) -> some View {
+        HStack(alignment: .top, spacing: 14) {
+            RoundedRectangle(cornerRadius: 1, style: .continuous)
+                .fill(TonoBrand.accentSoft.opacity(0.35))
+                .frame(width: 2)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(point.headline)
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(TonoBrand.welcomeInk)
+                Text(point.body)
+                    .font(.system(size: 14))
+                    .foregroundStyle(TonoBrand.welcomeMuted)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
-        .accessibilityHidden(true)
-    }
-
-    private var continueButton: some View {
-        Button(action: advance) {
-            Text("Continue")
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(controlIdle)
-        }
-        .buttonStyle(.plain)
-        .keyboardShortcut(.defaultAction)
-    }
-
-    private var getStartedButton: some View {
-        Button(action: finish) {
-            Text("Get started →")
-                .font(.system(size: 48, weight: .semibold))
-                .tracking(-1.5)
-                .foregroundStyle(
-                    LinearGradient(
-                        stops: [
-                            .init(color: Color(hex: "2B2FB8"), location: 0),
-                            .init(color: TonoBrand.accentSoft, location: 0.55),
-                            .init(color: TonoBrand.accentWarm, location: 1),
-                        ],
-                        startPoint: .leading,
-                        endPoint: .trailing
-                    )
-                )
-        }
-        .buttonStyle(.plain)
-        .keyboardShortcut(.defaultAction)
-    }
-
-    private func advance() {
-        if isLast {
-            finish()
-        } else {
-            withAnimation(TonoMotion.easeOut(0.2, reduceMotion: reduceMotion)) {
-                step += 1
-            }
-        }
+        .fixedSize(horizontal: false, vertical: true)
+        .accessibilityElement(children: .combine)
     }
 
     private func finish() {
         introSeen = true
     }
 
-    private struct StepCopy {
+    private struct Point {
         var headline: LocalizedStringKey
         var body: LocalizedStringKey
     }
 
-    private static let steps: [StepCopy] = [
-        StepCopy(
+    private static let points: [Point] = [
+        Point(
             headline: "Connected means protected.",
             body: "Open Tono, click once, and all your traffic takes the protected route."
         ),
-        StepCopy(
+        Point(
             headline: "Offline, never exposed.",
             body: "If the route fails, Tono cuts off first so nothing leaks out."
         ),
-        StepCopy(
+        Point(
             headline: "Routes are Tono's job.",
             body: "Nothing to configure. To change region, pick a node."
         ),
-        StepCopy(headline: "Get started →", body: ""),
     ]
 }
 

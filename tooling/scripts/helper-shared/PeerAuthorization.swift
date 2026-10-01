@@ -6,6 +6,21 @@ enum PeerAuthorizationError: Error {
     case requirement
 }
 
+struct TonoAuthenticatedPeer {
+    let uid: uid_t
+    let auditToken: Data
+    let bundleURL: URL
+
+    /// Audit-token PID versions are only unique within one kernel boot.
+    static func bootSession() throws -> String {
+        var buffer = [CChar](repeating: 0, count: 128)
+        var size = buffer.count
+        guard sysctlbyname("kern.bootsessionuuid", &buffer, &size, nil, 0) == 0,
+              size > 1, size <= buffer.count else { throw PeerAuthorizationError.requirement }
+        return String(cString: buffer)
+    }
+}
+
 /// Authenticates the process at the other end of a connected Unix-domain
 /// socket. UID checks alone are not an application identity boundary: every
 /// process owned by the interactive user shares that UID. LOCAL_PEERTOKEN is
@@ -76,6 +91,62 @@ struct TonoPeerAuthorizer {
             SecCSFlags(rawValue: 0),
             requirement
         ) == errSecSuccess
+    }
+
+    /// Derives the validated application bundle of the connected peer process
+    /// using the kernel LOCAL_PEERTOKEN audit token.
+    func peerBundleURL(socket fd: Int32) -> URL? {
+        peerIdentity(socket: fd)?.bundleURL
+    }
+
+    /// Retain the kernel token, not a PID supplied by the App. The updater
+    /// revalidates this incarnation against the registered on-disk code.
+    func peerIdentity(socket fd: Int32) -> TonoAuthenticatedPeer? {
+        var peerUID: uid_t = 0
+        var peerGID: gid_t = 0
+        var token = audit_token_t()
+        var length = socklen_t(MemoryLayout<audit_token_t>.size)
+        guard getpeereid(fd, &peerUID, &peerGID) == 0,
+              peerUID == allowedUID,
+              withUnsafeMutablePointer(to: &token, {
+            getsockopt(fd, SOL_LOCAL, LOCAL_PEERTOKEN, $0, &length)
+        }) == 0, length == MemoryLayout<audit_token_t>.size else {
+            return nil
+        }
+
+        let tokenData = withUnsafeBytes(of: &token) { Data($0) }
+        let attributes = [kSecGuestAttributeAudit: tokenData] as CFDictionary
+        var code: SecCode?
+        guard SecCodeCopyGuestWithAttributes(
+            nil,
+            attributes,
+            SecCSFlags(rawValue: 0),
+            &code
+        ) == errSecSuccess, let code,
+        SecCodeCheckValidity(code, SecCSFlags(rawValue: 0), requirement) == errSecSuccess else {
+            return nil
+        }
+
+        var staticCode: SecStaticCode?
+        guard SecCodeCopyStaticCode(code, SecCSFlags(rawValue: 0), &staticCode) == errSecSuccess,
+              let staticCode else {
+            return nil
+        }
+
+        var pathURL: CFURL?
+        guard SecCodeCopyPath(staticCode, SecCSFlags(rawValue: 0), &pathURL) == errSecSuccess,
+              let url = pathURL as URL? else {
+            return nil
+        }
+
+        var current = url.standardizedFileURL
+        while current.path != "/" {
+            if current.pathExtension == "app" {
+                return TonoAuthenticatedPeer(uid: peerUID, auditToken: tokenData, bundleURL: current)
+            }
+            current = current.deletingLastPathComponent()
+        }
+        return nil
     }
 
     /// A malformed requirement string makes `init` throw, which stops the helper

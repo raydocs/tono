@@ -36,7 +36,7 @@ import { closeInvite, openCustomer, openInvite, setCustomerFilter } from '@/lib/
 import { usePrivacy } from '@/lib/privacy';
 import { publishedVersions } from '@/lib/releases';
 import { cn } from '@/lib/utils';
-import { newestFetch, useResource, type Resource } from '@/lib/use-resource';
+import { oldestFetch, useResource, type Resource } from '@/lib/use-resource';
 import '@/styles/customers.css';
 import type { Tone } from '@/components/ops/StatusWord';
 import { useCohort } from './customer/Cohort';
@@ -45,6 +45,8 @@ import { BatchResults } from './customer/BatchResults';
 import { customerColumns } from './customer/columns';
 import { FunnelBar } from './customer/Funnel';
 import { InviteDrawer } from './customer/InviteDrawer';
+import { ListBand } from './customer/ListBand';
+import { ListCharts } from './customer/ListCharts';
 import { withInvites } from './customer/invite-row';
 import { OnboardDrawer } from './customer/OnboardDrawer';
 
@@ -187,7 +189,7 @@ export default function CustomersPage({
         : 'ready';
 
   return (
-    <div ref={context.container} className="page-wrap customers-page">
+    <div ref={context.container} className="page-wrap customers-page customers-wide">
       <div className="page-head">
         <section className="customers-hero" aria-label={copy.pages.customers}>
           {/* The sentence the page is built around, and the one button that
@@ -204,7 +206,7 @@ export default function CustomersPage({
                       className={cn('count-bit', `tone-${FRAGMENT_TONE[id]}`)}
                       onClick={() => context.change({ filter: filter === id ? null : id, top: 0, left: 0 })}
                     >
-                      <CountText values={[counts[id]]} render={(values) => copy.customerCount[id](values[0])} />
+                      <CountText values={[counts[id] ?? 0]} render={(values) => copy.customerCount[id](values[0] ?? 0)} />
                     </button>
                   </span>
                 ))}
@@ -221,7 +223,7 @@ export default function CustomersPage({
 
           <PageNote
             className="customers-hero-note"
-            fetchedAt={newestFetch(customers, health)}
+            fetchedAt={oldestFetch(customers, health)}
             backfill={health.status === 'ready' ? health.data.backfill : null}
           />
 
@@ -268,6 +270,17 @@ export default function CustomersPage({
             ))}
           </div>
         )}
+      </div>
+
+      <div className="customers-board">
+        <ListBand rows={customers.status === 'ready' ? all : null} />
+        <ListCharts
+          rows={all}
+          state={customers.status === 'ready' ? 'ready' : customers.status}
+          asOfSec={customers.status === 'ready' ? customers.fetchedAt : null}
+          mask={privacy.email}
+          onRetry={customers.reload}
+        />
       </div>
 
       {/* Between the filters and the table, because it is the second question

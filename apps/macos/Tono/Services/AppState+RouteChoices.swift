@@ -1,0 +1,86 @@
+import Foundation
+
+extension AppState {
+    var routePreferenceRegions: [String] {
+        Set(managedCatalogNodes.compactMap { catalogNodeRegionCode(flag: $0.flag, name: $0.name) }).sorted()
+    }
+
+    func setPreferredRouteRegion(_ region: String?, owner: String) {
+        guard owner == ManagedExitCatalogOwnership.currentAccount else { return }
+        routePreferences.setPreferredRegion(region, owner: owner, catalog: managedCatalogNodes)
+    }
+
+    func routeRecommendationNodes(owner: String) -> [ProxyNode] {
+        guard owner == ManagedExitCatalogOwnership.currentAccount else { return [] }
+        let region = routePreferences.preferredRegion(owner: owner)
+        return managedCatalogNodes.filter {
+            ConfigPipeline.singBoxUnavailableReason($0) == nil && !ProxyNode.hy2UdpIsVendorBlocked($0.name)
+                && (region == nil || catalogNodeRegionCode(flag: $0.flag, name: $0.name) == region)
+        }
+    }
+
+    func routeRecommendation(owner: String, now: Date = Date()) -> RouteRecommendation? {
+        guard owner == ManagedExitCatalogOwnership.currentAccount,
+              !isConnected, !isConnecting, !isDisconnecting, switchingNodeId == nil,
+              connectionCoordinator.configReloadTask == nil,
+              let digest = managedCatalogDigest else { return nil }
+        let available = routeRecommendationNodes(owner: owner)
+        let favorites = routePreferences.favorites(owner: owner, catalog: available)
+        let proven = routePreferences.recentSuccesses(owner: owner, catalog: available, now: now)
+            .filter { $0.catalogDigest == digest }
+        // Favorite is a preference, not a health result. It only wins among
+        // recent verified successes in this exact account catalog.
+        let recent = proven.first { favorites.contains(ProxyNode.catalogBaseName(for: $0.name)) } ?? proven.first
+        let fallback = available.first { $0.name == managedCatalogRouting?.defaultProxy }
+            ?? available.first { $0.name == currentProxySelectionTarget() }
+            ?? available.first
+        guard let name = recent?.name ?? fallback?.name else { return nil }
+        return RouteRecommendation(owner: owner, generation: connectionCoordinator.protectionOperationGeneration,
+                                   catalogDigest: digest, preferredRegion: routePreferences.preferredRegion(owner: owner),
+                                   name: name, successfulAt: recent?.at)
+    }
+
+    /// Revalidate immediately before the existing selection/connect owner runs.
+    /// A confirmation left open while a healthy connection starts cannot switch it.
+    @discardableResult
+    func confirmRouteRecommendation(_ proposal: RouteRecommendation, now: Date = Date()) -> Bool {
+        guard !isConnected, !isConnecting, !isDisconnecting, switchingNodeId == nil,
+              proposal.owner == ManagedExitCatalogOwnership.currentAccount,
+              proposal.generation == connectionCoordinator.protectionOperationGeneration,
+              proposal.catalogDigest == managedCatalogDigest,
+              let current = routeRecommendation(owner: proposal.owner, now: now),
+              current.preferredRegion == proposal.preferredRegion,
+              current.name == proposal.name, current.successfulAt == proposal.successfulAt else { return false }
+        selectNode(proposal.name)
+        return true
+    }
+
+    func toggleRouteFavorite(_ name: String, owner: String) {
+        guard owner == ManagedExitCatalogOwnership.currentAccount else { return }
+        routePreferences.toggleFavorite(name, owner: owner, catalog: managedCatalogNodes)
+    }
+
+    /// Call only after data-plane verification and final protection convergence,
+    /// never from selection/persistence or a failed switch's recovery intent.
+    /// Catalog identity is admitted before the operation suspends. A same-name
+    /// replacement may publish without retiring this generation; it has not
+    /// earned the old operation's proof, so omit history rather than relabel it.
+    func recordVerifiedRouteSuccess(
+        _ name: String, owner: String?, generation: UInt64, catalogDigest: String?, now: Date = Date()
+    ) {
+        guard let owner, owner == ManagedExitCatalogOwnership.currentAccount,
+              generation == connectionCoordinator.protectionOperationGeneration,
+              isConnected, !isDisconnecting, !isProxyDegraded,
+              currentProxySelectionTarget() == name,
+              let catalogDigest, catalogDigest == managedCatalogDigest else { return }
+        routePreferences.recordSuccess(name, owner: owner, catalog: managedCatalogNodes, digest: catalogDigest, now: now)
+    }
+
+    /// A newer failed attempt retires that route's successful evidence; do not
+    /// guess the failed route from a selection that may already have changed.
+    func retireFailedRouteSuccess(_ name: String, owner: String?, generation: UInt64) {
+        guard let owner, owner == ManagedExitCatalogOwnership.currentAccount,
+              generation == connectionCoordinator.protectionOperationGeneration else { return }
+        routePreferences.retireSuccess(name, owner: owner)
+    }
+}

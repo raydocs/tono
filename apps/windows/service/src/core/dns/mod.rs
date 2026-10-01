@@ -32,9 +32,9 @@
 //! **The enable-time read-back is evidence, not a gate.** Applying protected DNS is a *write*;
 //! proving it from Windows is not reliably possible. The registry stores "static, no servers"
 //! and "use DHCP" identically (which is why the IPv6 leg of the read-back was already removed),
-//! and the live apply runs through PowerShell/CIM/netsh, which fails on real machines for
-//! reasons that have nothing to do with whether DNS works: pseudo-adapters, constrained language
-//! mode, EDR hooks, a damaged WMI repository. Gating `enable` on that weak proof killed connects
+//! and native effective read-back or the PowerShell/CIM/netsh compatibility path can fail
+//! independently of whether DNS works: pseudo-adapters, constrained language mode, EDR hooks,
+//! a damaged WMI repository. Gating `enable` on that weak proof killed connects
 //! on machines whose DNS was fine — the last one bailed with "protected DNS could not be verified
 //! on every active adapter" at 1.1 s, *before* the strong proof ever ran. So `enable` now
 //! **records** what it could not verify (per-adapter live-apply failures in the snapshot and in
@@ -48,8 +48,10 @@
 //! fake-ip probe catches, with the recorded note in the status payload to say why. What stays a
 //! hard failure of `enable` is the case where **no per-adapter
 //! outcome exists at all** (the adapter enumeration or the apply batch itself errored, or the
-//! record of the round could not be persisted): then there is nothing to restore, nothing to
-//! reconcile, and nothing truthful to report.
+//! record of the round could not be persisted). Such an error can follow partial mutation:
+//! original values AND the unfinished per-adapter obligation are persisted before applying.
+//! Only effective verification retires that obligation; an absent adapter keeps it until
+//! reappearance, but does not drive repair while absent.
 //!
 //! **Encrypted DNS is pinned off for the session.** Win10/11 Encrypted DNS and per-adapter
 //! DoH templates send lookups over HTTPS to a public resolver. WFP then default-denies that
@@ -85,11 +87,13 @@
 //! that cannot be obtained is *unproven*, never proven — fail-closed for the normal disarm,
 //! while the emergency path stays the documented escape hatch (it logs and proceeds).
 //!
-//! **The live apply is per address family.** IPv4 goes through CIM
-//! (`SetDNSServerSearchOrder`, an IPv4-only method), IPv6 through `netsh interface ipv6 set
-//! dnsservers`, and each family is proven by its own live read-back. Merging both families into
-//! one CIM call either fails on every adapter or silently drops the IPv6 address, which leaves
-//! an IPv6 resolver leaking while the registry still reads "protected".
+//! **The live apply is per address family.** Protected apply prefers the dynamically resolved
+//! `SetInterfaceDnsSettings` and confirms both families with `GetAdaptersAddresses`. Native
+//! success without effective read-back (including zero IPv6 resolvers) is not a proven apply.
+//! Missing API, completed failure or contradictory read-back gets one bounded compatibility
+//! batch, still inside the same single-writer claim. Compatibility and restore use CIM
+//! (`SetDNSServerSearchOrder`, an IPv4-only method) and `netsh interface ipv6 set dnsservers`.
+//! Restore/DHCP never uses the native empty string: the exact saved snapshot remains authority.
 //!
 //! **Degraded exit:** a registry-only match is not accepted as a
 //! normal restore — but it *is* accepted, once, after the live apply has failed
@@ -112,10 +116,14 @@
 //! the disarm gate into a permanent lockout — but only when nothing on the machine still
 //! resolves through a Tono-owned target. A *missing* snapshot is also evidence-checked: if an
 //! adapter still contains `198.18.0.2`, neither a new enable nor disarm may reinterpret it as
-//! the user's original DNS (`DNS_SNAPSHOT_MISSING_PREFIX`).
+//! the user's original DNS (`DNS_SNAPSHOT_MISSING_PREFIX`). The two Encrypted-DNS sidecars get
+//! the same discipline: they are written atomically like the snapshot, and an unreadable
+//! capture is quarantined while the in-place values stand as the restore result — surfaced
+//! through `DNS_CAPTURE_QUARANTINED_PREFIX`, never as a permanent refusal of Disconnect and
+//! never as positive evidence that the user's encrypted-DNS choice was restored.
 //!
 //! The pure snapshot/merge/restore-decision logic in this file is platform-independent and
-//! unit-tested on any host; the registry/CIM/netsh engine is compiled only on Windows.
+//! unit-tested on any host; the native/registry/CIM/netsh engine is compiled only on Windows.
 
 use crate::core::structure::DnsProtectionStatus;
 use anyhow::{Context as _, Result, bail};
@@ -151,7 +159,7 @@ pub(crate) const NO_NAME_SERVERS: &str = "";
 /// Connection name of Tono's WinTUN adapter. Mirrors `tono_core::config::TUN_DEVICE_NAME`
 /// (`apps/windows/crates/tono-core/src/config.rs`); this crate is self-contained and cannot
 /// import it, so the two spellings are kept in sync by hand.
-const TUN_ADAPTER_NAME: &str = "Tono";
+pub(crate) const TUN_ADAPTER_NAME: &str = "Tono";
 const SNAPSHOT_VERSION: u32 = 1;
 /// Sidecar next to `protected-dns.json`. Written *before* Encrypted DNS is
 /// mutated so a crash still has the user's `EnableAutoDoh` value to put back.
@@ -178,6 +186,11 @@ const ENABLE_AUTO_DOH_OFF: u32 = 0;
 
 #[cfg_attr(not(windows), allow(dead_code))]
 fn encrypted_dns_capture_path() -> PathBuf {
+    #[cfg(all(windows, test, not(feature = "test")))]
+    if let Some(path) = engine::test_io::with(|io| io.capture_dir.join(ENCRYPTED_DNS_CAPTURE_FILE))
+    {
+        return path;
+    }
     crate::service_paths()
         .persistent_state_dir()
         .join(ENCRYPTED_DNS_CAPTURE_FILE)
@@ -232,6 +245,11 @@ struct InterfaceDohEntry {
 
 #[cfg_attr(not(windows), allow(dead_code))]
 fn interface_doh_capture_path() -> PathBuf {
+    #[cfg(all(windows, test, not(feature = "test")))]
+    if let Some(path) = engine::test_io::with(|io| io.capture_dir.join(INTERFACE_DOH_CAPTURE_FILE))
+    {
+        return path;
+    }
     crate::service_paths()
         .persistent_state_dir()
         .join(INTERFACE_DOH_CAPTURE_FILE)
@@ -292,10 +310,11 @@ pub(crate) struct AdapterDnsSnapshot {
     pub ipv4_profile_name_server: Option<String>,
     pub ipv6_name_server: Option<String>,
     pub ipv6_profile_name_server: Option<String>,
-    /// The last CIM live-apply for this adapter failed, so the running resolver cannot be
-    /// trusted to match the registry until a retry succeeds. Recorded in memory and in the
-    /// snapshot file. It forces the protected-DNS write to be replayed on the next enable
-    /// ([`needs_loopback_replay`]) and it is why the restore proof insists on live evidence —
+    /// An apply is unfinished or failed, so the running resolver cannot be trusted to match
+    /// the registry until effective verification succeeds. Set before mutation in memory and
+    /// the snapshot, including rounds that return Err without per-adapter results. It forces
+    /// replay while this adapter is active, not while absent, and survives reappearance.
+    /// It is also why the restore proof insists on live evidence —
     /// but it does **not** by itself refuse a restore whose live state is verifiably correct
     /// (see [`restore_is_proven`] and the module docs).
     #[serde(default)]
@@ -310,9 +329,43 @@ pub(crate) struct DnsSnapshot {
 }
 
 fn snapshot_path() -> PathBuf {
+    #[cfg(all(windows, test, not(feature = "test")))]
+    if let Some(path) = engine::test_io::with(|io| io.snapshot_path.clone()) {
+        return path;
+    }
     crate::service_paths()
         .persistent_state_dir()
         .join("protected-dns.json")
+}
+
+fn snapshot_retirement_path() -> PathBuf {
+    snapshot_path().with_extension("restored.sha256")
+}
+
+fn snapshot_fingerprint(bytes: &[u8]) -> Vec<u8> {
+    use sha2::Digest;
+    sha2::Sha256::digest(bytes).to_vec()
+}
+
+/// A retained file is housekeeping only after this exact snapshot's restore committed.
+/// Binding the record to its bytes keeps a stale/late record from retiring a newer session.
+async fn snapshot_was_restored(bytes: &[u8]) -> bool {
+    match tokio::fs::read(snapshot_retirement_path()).await {
+        Ok(record) => record == snapshot_fingerprint(bytes),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
+        Err(error) => {
+            tracing::warn!("dns: snapshot retirement record could not be read; using full restore proof: {error}");
+            false
+        }
+    }
+}
+
+async fn clear_snapshot_retirement() -> Result<()> {
+    match tokio::fs::remove_file(snapshot_retirement_path()).await {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error).context("failed to clear DNS snapshot retirement record"),
+    }
 }
 
 static DNS_OPERATION: Lazy<tokio::sync::Mutex<()>> = Lazy::new(|| tokio::sync::Mutex::new(()));
@@ -342,9 +395,11 @@ static DNS_LAST_ERROR: Lazy<Mutex<Option<String>>> = Lazy::new(|| Mutex::new(Non
 // decision function, and every race in it resolves toward *publishing* — never toward silence.
 //
 // **The window cannot stick on.** It is opened by an RAII guard whose `Drop` is the only writer
-// that lowers the depth, so a panic, an early `?`, a timed-out `bounded_dns_call` or a dropped
-// (cancelled) future all close it. `SELF_WRITE_MAX_WINDOW` is the belt-and-braces half: past
-// that age an open window stops suppressing even if the depth were somehow leaked.
+// that lowers the depth, so a panic or an early `?` closes the guard that the async caller
+// holds. A timed-out `bounded_dns_call` or a dropped future does **not** finish the registry
+// write: `spawn_blocking` keeps running. That write holds its own guard until it returns, so
+// the notification it raises is still ours. `SELF_WRITE_MAX_WINDOW` is the belt-and-braces
+// half: past that age an open window stops suppressing even if a depth were leaked.
 //
 // **It is harmless if DNS writes never raise the notification at all** (the one link in the
 // audit that only a Windows machine can settle): with no notification there is nothing to
@@ -370,7 +425,7 @@ static SELF_WRITE_DEPTH: AtomicU32 = AtomicU32::new(0);
 static SELF_WRITE_OPENED_AT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 /// Monotonic millis until which the tail of the last closed window runs.
 static SELF_WRITE_TAIL_UNTIL: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-/// Raw notifications `netmon` attributed to a window and did not publish. Diagnostic only.
+/// Raw notifications deferred for topology reconciliation during a write window. Diagnostic only.
 #[cfg_attr(any(not(windows), feature = "test"), allow(dead_code))]
 static SELF_WRITE_SUPPRESSED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
@@ -416,7 +471,7 @@ pub(crate) fn in_self_write_window() -> bool {
     )
 }
 
-/// Count a notification `netmon` attributed to a window and dropped. Returns the running total
+/// Count a notification `netmon` deferred during a window. Returns the running total
 /// so the caller can put it in one log line.
 #[cfg_attr(any(not(windows), feature = "test"), allow(dead_code))]
 pub(crate) fn note_suppressed_self_write() -> u64 {
@@ -444,9 +499,12 @@ pub(crate) fn self_write_depth_for_tests() -> u32 {
 
 /// RAII marker for "this service is writing adapter DNS right now".
 ///
-/// Deliberately a guard and not a flag: the apply it wraps can fail, panic, time out inside
-/// `bounded_dns_call`, or have its future dropped, and every one of those must close the
-/// window. Nothing else in this module may set the state directly.
+/// Deliberately a guard and not a flag: the apply it wraps can fail or panic, and unwinding
+/// closes the window. Nothing else in this module may set the state directly.
+///
+/// The guard the async function holds dies when `bounded_dns_call` times out or the future is
+/// dropped. The registry write does not: it runs on a blocking thread. [`hold_self_write_across_the_write`]
+/// is that thread's guard, and it is the one that must stay up until the write returns.
 #[must_use = "the suppression window closes the moment the guard is dropped"]
 pub(crate) struct SelfWriteWindow(());
 
@@ -462,6 +520,17 @@ impl SelfWriteWindow {
         SELF_WRITE_DEPTH.fetch_add(1, Ordering::AcqRel);
         SelfWriteWindow(())
     }
+}
+
+/// Hold the self-write window for the whole registry write, including after the async
+/// caller has given up and dropped its own guard.
+#[cfg_attr(
+    not(any(test, all(windows, not(feature = "test")))),
+    allow(dead_code)
+)]
+fn hold_self_write_across_the_write<T>(work: impl FnOnce() -> T) -> T {
+    let _window = SelfWriteWindow::open();
+    work()
 }
 
 impl Drop for SelfWriteWindow {
@@ -509,9 +578,19 @@ fn parse_name_server_list(value: &str) -> Vec<String> {
 /// (`engine::apply_snapshot`), which is what the restore proof compares.
 #[cfg_attr(any(not(windows), feature = "test"), allow(dead_code))]
 fn restored_family_servers(profile: Option<&str>, base: Option<&str>) -> Option<Vec<String>> {
-    let profile = profile.map(parse_name_server_list).unwrap_or_default();
+    // Windows also accepts space-separated servers, used by mobile broadband drivers.
+    // Normalize at the restore boundary; ownership/protection predicates keep their contract.
+    let parse_servers = |value: &str| {
+        value
+            .split(|separator: char| separator == ',' || separator.is_ascii_whitespace())
+            .map(str::trim)
+            .filter(|server| !server.is_empty())
+            .map(ToOwned::to_owned)
+            .collect::<Vec<_>>()
+    };
+    let profile = profile.map(parse_servers).unwrap_or_default();
     let effective = if profile.is_empty() {
-        base.map(parse_name_server_list).unwrap_or_default()
+        base.map(parse_servers).unwrap_or_default()
     } else {
         profile
     };
@@ -606,9 +685,13 @@ fn adapter_contains_current_protected_dns(adapter: &AdapterDnsSnapshot) -> bool 
 /// asking [`is_loopback_value`], which deliberately excludes `198.18.0.2`, so on every machine
 /// protected by a current build it selected nothing — and an empty selection proved itself
 /// trivially. Asking one question in one place is what stops that from recurring.
+/// A mixed IPv4 list is not fully protected, but still contains a Tono-only resolver that
+/// will stop answering with the core. Reuse the missing-snapshot containment check rather
+/// than mistaking a public fallback for evidence that the redirect has been removed.
 #[cfg_attr(any(not(windows), feature = "test"), allow(dead_code))]
 fn adapter_reads_as_tono_dns(adapter: &AdapterDnsSnapshot) -> bool {
-    is_tono_dns_value(adapter.ipv4_name_server.as_deref())
+    adapter_contains_current_protected_dns(adapter)
+        || is_tono_dns_value(adapter.ipv4_name_server.as_deref())
         || is_tono_dns_value(adapter.ipv4_profile_name_server.as_deref())
         || is_tono_dns_value(adapter.ipv6_name_server.as_deref())
         || is_tono_dns_value(adapter.ipv6_profile_name_server.as_deref())
@@ -662,12 +745,70 @@ fn ensure_snapshotless_adapters_are_safe(adapters: &[AdapterDnsSnapshot]) -> Res
     Ok(())
 }
 
+/// The merge-time face of the same rule: a snapshot may exist and still meet an adapter whose
+/// original has never been recorded — one that appeared (or reappeared) while its registry key
+/// already carried a leftover protected endpoint, exactly the state a corrupt-snapshot recovery
+/// misses when the adapter is inactive while it runs. Recording that endpoint as the "original"
+/// would make every later disconnect write it back and be refused for proving against it, so
+/// the adapter is refused (or healed first) instead. Saved originals are not at stake here.
+fn ensure_unrecorded_adapters_are_safe(adapters: &[AdapterDnsSnapshot]) -> Result<()> {
+    if adapters.iter().any(adapter_contains_current_protected_dns) {
+        bail!(
+            "{DNS_ORPHANED_ADAPTER_PREFIX}: a newly seen adapter still contains Tono's protected \
+             DNS target ({PROTECTED_DNS_V4}), so enable refuses to append it to protected-dns.json \
+             with that target recorded as its original DNS. In Windows set the affected adapter's \
+             DNS server assignment back to Automatic (DHCP) — or to the servers you use — and \
+             retry; the saved originals of the already recorded adapters are kept."
+        );
+    }
+    Ok(())
+}
+
+/// The adapters `fresh` would contribute anew this round: those not already recorded in
+/// `existing`. GUID comparison is case-insensitive like everywhere else that matches adapter
+/// identity; an exact match here used to append a duplicate record that carried the live
+/// protected values as an "original".
+fn unrecorded_adapters(
+    existing: Option<&DnsSnapshot>,
+    fresh: &[AdapterDnsSnapshot],
+) -> Vec<AdapterDnsSnapshot> {
+    fresh
+        .iter()
+        .filter(|adapter| {
+            existing.is_none_or(|snapshot| {
+                !snapshot
+                    .adapters
+                    .iter()
+                    .any(|saved| same_adapter_guid(&saved.interface_guid, &adapter.interface_guid))
+            })
+        })
+        .cloned()
+        .collect()
+}
+
+/// What an orphan heal may touch beyond the adapters it is handed.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum OrphanHealScope {
+    /// No snapshot, so no protected session is in force: the machine-wide encrypted-DNS policy
+    /// a failed connect left behind (the Tono NRPT catch-all, suppressed DoH) is a leftover too
+    /// and is restored with the adapters.
+    NoSession,
+    /// A snapshot is in force, so that policy is live protection, not a leftover. Only the
+    /// handed adapters are reset; NRPT and DoH are never touched, whatever the heal's outcome,
+    /// so a heal that cannot be proven leaves the session exactly as armed as it found it.
+    InSession,
+}
+
 /// After a failed connect, release can leave adapters on `198.18.0.2` while deleting
 /// `protected-dns.json`. The next Connect then hits [`ensure_snapshotless_adapters_are_safe`] and
 /// hard-fails. Heal by resetting those adapters to automatic (DHCP) — we have no better original
-/// to restore — then re-collect so enable can take a clean snapshot.
+/// to restore — then re-collect so enable can take a clean snapshot. The same heal serves a
+/// snapshot-present enable whose fresh (unrecorded) adapter carries a leftover endpoint, with
+/// [`OrphanHealScope::InSession`]: adapter writes only ever reach adapters from the slice it is
+/// handed, and only the no-session scope restores machine-wide resolver policy.
 async fn heal_orphaned_protected_dns_without_snapshot(
     adapters: &[AdapterDnsSnapshot],
+    scope: OrphanHealScope,
 ) -> Result<Vec<AdapterDnsSnapshot>> {
     let orphaned: Vec<_> = adapters
         .iter()
@@ -678,7 +819,7 @@ async fn heal_orphaned_protected_dns_without_snapshot(
         return Ok(adapters.to_vec());
     }
     tracing::warn!(
-        "dns: protected-dns.json is missing but {} adapter(s) still list {PROTECTED_DNS_V4}; \
+        "dns: {} adapter(s) with no recorded original still list {PROTECTED_DNS_V4}; \
          resetting them to automatic (DHCP) so Connect can proceed",
         orphaned.len()
     );
@@ -708,8 +849,10 @@ async fn heal_orphaned_protected_dns_without_snapshot(
             );
         }
     }
-    if let Err(error) = engine_restore_encrypted_dns().await {
-        tracing::warn!("dns: encrypted DNS restore after orphaned-DNS heal failed: {error:#}");
+    if scope == OrphanHealScope::NoSession {
+        if let Err(error) = engine_restore_encrypted_dns().await {
+            tracing::warn!("dns: encrypted DNS restore after orphaned-DNS heal failed: {error:#}");
+        }
     }
     if let Err(error) = engine_flush_cache().await {
         tracing::warn!("dns: cache flush after orphaned-DNS heal failed: {error:#}");
@@ -722,7 +865,8 @@ async fn ensure_snapshotless_dns_is_safe() -> Result<()> {
     if ensure_snapshotless_adapters_are_safe(&current).is_ok() {
         return Ok(());
     }
-    let healed = heal_orphaned_protected_dns_without_snapshot(&current).await?;
+    let healed =
+        heal_orphaned_protected_dns_without_snapshot(&current, OrphanHealScope::NoSession).await?;
     ensure_snapshotless_adapters_are_safe(&healed)
 }
 
@@ -769,6 +913,9 @@ fn is_protected_v6_value(value: Option<&str>) -> bool {
 /// Idempotent enable: preserve every original already recorded, but append adapters that appeared
 /// after protection started. Replacing an existing record would snapshot our loopback values and
 /// destroy the way back; ignoring fresh GUIDs would leave a hot-plugged adapter unprotected.
+/// GUID identity is compared case-insensitively, like [`active_snapshot_adapters`] and the engine:
+/// GetAdaptersAddresses spelling is not guaranteed to repeat, and an exact match here used to
+/// append a duplicate record carrying the live protected values as the "original".
 fn merge_snapshot(existing: Option<DnsSnapshot>, fresh: DnsSnapshot) -> DnsSnapshot {
     let Some(mut existing) = existing else {
         return fresh;
@@ -777,7 +924,7 @@ fn merge_snapshot(existing: Option<DnsSnapshot>, fresh: DnsSnapshot) -> DnsSnaps
         if !existing
             .adapters
             .iter()
-            .any(|saved| saved.interface_guid == adapter.interface_guid)
+            .any(|saved| same_adapter_guid(&saved.interface_guid, &adapter.interface_guid))
         {
             existing.adapters.push(adapter);
         }
@@ -785,8 +932,26 @@ fn merge_snapshot(existing: Option<DnsSnapshot>, fresh: DnsSnapshot) -> DnsSnaps
     existing
 }
 
+/// Use the original records (including their GUID spelling), but only for adapters observed
+/// active this round. Historical originals and pending bits remain in the full snapshot.
+fn active_snapshot_adapters(
+    snapshot: &DnsSnapshot,
+    current: &[AdapterDnsSnapshot],
+) -> Vec<AdapterDnsSnapshot> {
+    snapshot
+        .adapters
+        .iter()
+        .filter(|saved| {
+            current
+                .iter()
+                .any(|adapter| same_adapter_guid(&adapter.interface_guid, &saved.interface_guid))
+        })
+        .cloned()
+        .collect()
+}
+
 /// Short-circuiting `enable` is only safe when a snapshot exists, the adapters are actually on
-/// loopback, AND no live-apply failure is recorded (memory or snapshot). With no snapshot this is
+/// loopback, AND no active apply is pending (memory or snapshot). With no snapshot this is
 /// the initial enable, so it must capture the originals and apply loopback. Anything else replays
 /// the write — which also retries the live-apply — against the *original* snapshot.
 fn needs_loopback_replay(
@@ -858,8 +1023,8 @@ fn unverified_note(failed: &[String], total: usize, read_back: LoopbackReadBack)
         _ => named,
     };
     Some(format!(
-        "{DNS_PROTECTION_UNVERIFIED_PREFIX}: protected DNS ({PROTECTED_DNS_V4}) was applied but could not be verified \
-         on {} of {total} adapter(s) — live apply failed on: {adapters}; read-back={}. \
+        "{DNS_PROTECTION_UNVERIFIED_PREFIX}: protected DNS ({PROTECTED_DNS_V4}) application is unfinished or unverified \
+         on {} of {total} adapter(s) — pending live apply: {adapters}; read-back={}. \
          Protection was NOT abandoned and this is not a leak: WFP default-denies physical DNS \
          on both address families and permits the verified TUN interface, so an adapter whose \
          configuration cannot be verified can only fail to resolve, never bypass the tunnel. The connect \
@@ -914,10 +1079,14 @@ fn needs_reconcile(
     protection_wanted && snapshot_present && (!enabled || unverified)
 }
 
+fn same_adapter_guid(a: &str, b: &str) -> bool {
+    a.eq_ignore_ascii_case(b)
+}
+
 /// Registry-only comparison of one adapter: the four saved values against the read-back
 /// (deliberately excluding the `live_apply_failed` bookkeeping flag).
 fn registry_values_match(saved: &AdapterDnsSnapshot, current: &AdapterDnsSnapshot) -> bool {
-    saved.interface_guid == current.interface_guid
+    same_adapter_guid(&saved.interface_guid, &current.interface_guid)
         && saved.ipv4_name_server == current.ipv4_name_server
         && saved.ipv4_profile_name_server == current.ipv4_profile_name_server
         && saved.ipv6_name_server == current.ipv6_name_server
@@ -930,7 +1099,7 @@ fn registry_restore_matches(snapshot: &DnsSnapshot, current: &[AdapterDnsSnapsho
     snapshot.adapters.iter().all(|saved| {
         current
             .iter()
-            .find(|adapter| adapter.interface_guid == saved.interface_guid)
+            .find(|adapter| same_adapter_guid(&adapter.interface_guid, &saved.interface_guid))
             .is_none_or(|adapter| registry_values_match(saved, adapter))
     })
 }
@@ -972,7 +1141,7 @@ fn restore_is_proven(
     snapshot.adapters.iter().all(|saved| {
         current
             .iter()
-            .find(|adapter| adapter.interface_guid == saved.interface_guid)
+            .find(|adapter| same_adapter_guid(&adapter.interface_guid, &saved.interface_guid))
             .is_none_or(|adapter| registry_values_match(saved, adapter))
     })
 }
@@ -1002,7 +1171,8 @@ fn adapters_owing_live_proof(
         .iter()
         .filter(|adapter| {
             !snapshot.adapters.iter().any(|saved| {
-                saved.interface_guid == adapter.interface_guid && saved_dns_was_loopback(saved)
+                same_adapter_guid(&saved.interface_guid, &adapter.interface_guid)
+                    && saved_dns_was_loopback(saved)
             })
         })
         .cloned()
@@ -1094,6 +1264,15 @@ pub(crate) const DNS_UNINSTALL_STILL_ON_LOOPBACK_PREFIX: &str = "TONO_DNS_STILL_
 /// emergency-disarm path attaches this to every post-removal DNS error so the uninstaller can
 /// never re-classify "filters removed, DNS messy" as "machine still blocked" (result 3).
 pub(crate) const WFP_REMOVED_CONTINUE_PREFIX: &str = "TONO_WFP_REMOVED";
+
+/// Stable marker that Tono's NRPT catch-all could not be proven removed
+/// ([`remove_tono_resolver_rule_within`]). Every lookup still goes to 198.18.0.2 while it stays.
+/// It leads the message, and the DNS outcome follows it unchanged, so it can travel with
+/// [`WFP_REMOVED_CONTINUE_PREFIX`] or another continue marker. The recovery CLI checks it first
+/// and blocks. `uninstall_service.rs` classifies by the DNS outcome after it; what blocks the
+/// uninstall is its `with_resolver_rule_proof` sweep, which exits 3 while the rule remains. Both
+/// match this literal.
+pub(crate) const DNS_RESOLVER_POLICY_REMAINS_PREFIX: &str = "TONO_DNS_POLICY_REMAINS";
 
 /// Which rung of the uninstall ladder the evidence lands on. Pure, so the whole decision table
 /// is unit-tested off Windows.
@@ -1262,7 +1441,14 @@ fn now_unix() -> u64 {
 }
 
 async fn atomic_write(path: &std::path::Path, bytes: &[u8]) -> Result<()> {
-    crate::core::paths::ensure_persistent_state_layout()?;
+    // Native facade tests use a private temporary directory, not the installed Service root.
+    #[cfg(all(windows, test, not(feature = "test")))]
+    let isolated = engine::test_io::active();
+    #[cfg(not(all(windows, test, not(feature = "test"))))]
+    let isolated = false;
+    if !isolated {
+        crate::core::paths::ensure_persistent_state_layout()?;
+    }
     crate::core::platform_security::secure_private_service_file_if_exists(path)?;
     let temporary = path.with_extension("tmp");
     if std::fs::symlink_metadata(&temporary).is_ok() {
@@ -1293,6 +1479,11 @@ pub(crate) const DNS_SNAPSHOT_UNREADABLE_PREFIX: &str = "TONO_DNS_SNAPSHOT_UNREA
 /// Stable marker for a deleted recovery snapshot while an adapter still carries the current
 /// Tono-only DNS endpoint. The disarm gate must stay closed until Windows DNS is repaired.
 pub(crate) const DNS_SNAPSHOT_MISSING_PREFIX: &str = "TONO_DNS_SNAPSHOT_MISSING";
+/// Stable marker for an adapter that Tono has never recorded meeting the current Tono-only DNS
+/// endpoint — the merge-time face of the same orphaned state [`DNS_SNAPSHOT_MISSING_PREFIX`]
+/// guards when there is no snapshot at all. The enable that hits it keeps the durable snapshot
+/// and its saved originals untouched.
+pub(crate) const DNS_ORPHANED_ADAPTER_PREFIX: &str = "TONO_DNS_ORPHANED_ADAPTER";
 
 /// Stable, App-mappable marker for "the restore was accepted on registry evidence alone after a
 /// sustained live-apply failure" (see [`accepts_degraded_restore`]). It rides in `last_error` on
@@ -1300,12 +1491,127 @@ pub(crate) const DNS_SNAPSHOT_MISSING_PREFIX: &str = "TONO_DNS_SNAPSHOT_MISSING"
 /// failed operation.
 pub(crate) const DNS_RESTORE_DEGRADED_PREFIX: &str = "TONO_DNS_RESTORE_DEGRADED";
 
+/// Stable, App-mappable marker for "a resolver-policy capture file (`protected-secure-dns.json`
+/// / `protected-interface-doh.json`) was unreadable, was quarantined for diagnosis, and the
+/// in-place values stood as the restore result because the saved originals were unrecoverable".
+/// Like [`DNS_RESTORE_DEGRADED_PREFIX`] it rides in `last_error` on an otherwise *successful*
+/// restore — a warning to surface, never a failed operation, and never positive evidence that
+/// encrypted DNS was restored to the user's chosen setting.
+pub(crate) const DNS_CAPTURE_QUARANTINED_PREFIX: &str = "TONO_DNS_CAPTURE_QUARANTINED";
+
 /// Stable, App-mappable marker for "protected DNS was applied, but the apply or its read-back
 /// could not be verified on every adapter". Like [`DNS_RESTORE_DEGRADED_PREFIX`] it rides in
 /// `last_error` on an otherwise **successful** operation, so the App must treat it as a warning
 /// to surface (and to put in the diagnostics report), never as a failed enable. It is the
 /// explanation the user gets when the connect subsequently fails in the fake-ip probe.
 pub(crate) const DNS_PROTECTION_UNVERIFIED_PREFIX: &str = "TONO_DNS_UNVERIFIED";
+
+/// Stable marker for "protected DNS is applied, but the resolver policy Windows actually applies
+/// disagrees with it" (X2-2): another NRPT rule sends names to a non-Tono resolver, Tono's
+/// catch-all is not the rule in force, or a cache-bypassing system lookup did not come back from
+/// Tono DNS. Adapter registry health cannot see any of these, so the status carries the verdict
+/// in its advisory `resolver_policy_warning`, never in `last_error`: the adapters are still
+/// protected, and every gate that reads `last_error` (update admission, startup takeover, the
+/// App's lost-response read-back) must not close over a policy Tono cannot change.
+/// It is deliberately not repair work for the watchdog: `enable` rewrites only Tono's own rule and
+/// cannot change group policy or a VPN profile, so re-running it would only spin.
+pub(crate) const DNS_RESOLVER_POLICY_CONFLICT_PREFIX: &str = "TONO_DNS_POLICY_CONFLICT";
+
+/// One NRPT rule from the store the DNS Client applies (X2-2).
+#[cfg_attr(any(not(windows), feature = "test"), allow(dead_code))]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct EffectiveNrptRule {
+    /// `Name` namespaces; `"."` is the catch-all.
+    pub(crate) namespaces: Vec<String>,
+    /// `GenericDNSServers` of a rule whose options select them; empty otherwise.
+    pub(crate) generic_dns_servers: Vec<String>,
+    /// Tono's own catch-all key in the local store.
+    pub(crate) tono_owned: bool,
+}
+
+/// The name of the cache-bypassing system lookup: the same name the App's connect-time fake-ip
+/// proof uses, so a healthy answer is a Tono fake-ip.
+#[cfg_attr(any(not(windows), feature = "test"), allow(dead_code))]
+const RESOLVER_POLICY_PROBE_HOST: &str = "www.google.com";
+/// How often the watchdog re-reads the effective policy and repeats the system lookup.
+const RESOLVER_POLICY_CHECK_INTERVAL: std::time::Duration = std::time::Duration::from_secs(30);
+/// The last policy verdict, written by [`refresh_resolver_policy_observation`] and folded into
+/// every status observation while protection is wanted.
+static RESOLVER_POLICY_CONFLICT: Lazy<Mutex<Option<String>>> = Lazy::new(|| Mutex::new(None));
+
+/// Pure X2-2 verdict over the effective NRPT and one cache-bypassing system lookup. Only an
+/// observation that succeeded and contradicts protected DNS is a conflict. A read or lookup that
+/// failed proves nothing either way: during a protected reconnect Core restarts and every lookup
+/// fails for a few seconds, and a Core that stays down is not another owner's resolver policy.
+#[cfg_attr(any(not(windows), feature = "test"), allow(dead_code))]
+fn resolver_policy_conflict(
+    rules: std::result::Result<&[EffectiveNrptRule], &str>,
+    system_lookup: std::result::Result<&[std::net::Ipv4Addr], &str>,
+) -> Option<String> {
+    let mut reasons = Vec::new();
+    // An NRPT read that failed is undecidable, not a conflict.
+    if let Ok(rules) = rules {
+        let catch_all_in_force = rules.iter().any(|rule| {
+            rule.tono_owned
+                && rule.namespaces.iter().any(|name| name == ".")
+                && !rule.generic_dns_servers.is_empty()
+                && rule.generic_dns_servers.iter().all(|server| server == PROTECTED_DNS_V4)
+        });
+        if !catch_all_in_force {
+            reasons.push("Tono's NRPT catch-all is not the rule in force".to_owned());
+        }
+        let foreign = rules
+            .iter()
+            .filter(|rule| {
+                !rule.tono_owned
+                    && rule.generic_dns_servers.iter().any(|server| server != PROTECTED_DNS_V4)
+            })
+            .count();
+        if foreign > 0 {
+            reasons.push(format!(
+                "{foreign} other NRPT rule(s) send matching names to a non-Tono resolver"
+            ));
+        }
+    }
+    // Likewise a failed lookup: only an answer that did not come from Tono DNS is a conflict.
+    if system_lookup
+        .is_ok_and(|addresses| !addresses.iter().any(|address| address.octets()[..2] == [198, 18]))
+    {
+        reasons.push("a cache-bypassing system lookup was not answered by Tono DNS".to_owned());
+    }
+    (!reasons.is_empty())
+        .then(|| format!("{DNS_RESOLVER_POLICY_CONFLICT_PREFIX}: {}", reasons.join("; ")))
+}
+
+/// Re-read the effective resolver policy and repeat one cache-bypassing system lookup. Runs
+/// outside `DNS_OPERATION`: a lookup that policy sends to a resolver WFP drops waits out the DNS
+/// Client's own timeout, and no restore or repair may queue behind it.
+async fn refresh_resolver_policy_observation() {
+    let verdict = if PROTECTION_WANTED.load(Ordering::Acquire) {
+        observe_resolver_policy().await
+    } else {
+        None
+    };
+    *RESOLVER_POLICY_CONFLICT
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = verdict;
+}
+
+async fn observe_resolver_policy() -> Option<String> {
+    #[cfg(all(windows, not(feature = "test")))]
+    {
+        let rules = engine::effective_nrpt_rules().await;
+        let lookup = engine::system_lookup_a(RESOLVER_POLICY_PROBE_HOST).await;
+        return resolver_policy_conflict(
+            rules.as_deref().map_err(String::as_str),
+            lookup.as_deref().map_err(String::as_str),
+        );
+    }
+    #[cfg(not(all(windows, not(feature = "test"))))]
+    {
+        None
+    }
+}
 
 /// Budget for one *reading* DNS engine call (registry sweep + `GetAdaptersAddresses`). A
 /// healthy enumeration is milliseconds; 25 s is the same clock `WFP_CALL_TIMEOUT` uses, so the
@@ -1336,6 +1642,12 @@ const DNS_FLUSH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15
 /// "busy".
 #[cfg(any(all(windows, not(feature = "test")), test))]
 const DNS_SLOW_CALL: std::time::Duration = std::time::Duration::from_secs(5);
+/// Retries for the snapshot delete after a proven restore: an AV or backup handle on the
+/// file is typically transient, and the delete is housekeeping — it must never outvote the
+/// proof above it.
+const SNAPSHOT_DELETE_ATTEMPTS: usize = 3;
+const SNAPSHOT_DELETE_RETRY_DELAY: std::time::Duration = std::time::Duration::from_millis(100);
+const SNAPSHOT_RETIREMENT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(1);
 
 /// A DNS engine call that was handed to a blocking thread and has not come back yet.
 ///
@@ -1555,6 +1867,89 @@ async fn collect_dns_adapters() -> Result<Vec<AdapterDnsSnapshot>> {
     Ok(without_current_tunnel(adapters, current_tunnel_luid))
 }
 
+async fn engine_collect_interface_keys() -> Result<Vec<AdapterDnsSnapshot>> {
+    #[cfg(all(windows, not(feature = "test")))]
+    {
+        bounded_dns_call(
+            DNS_CALL_TIMEOUT,
+            "collect registry interfaces",
+            engine::collect_interface_key_adapters,
+        )
+        .await
+    }
+    #[cfg(not(all(windows, not(feature = "test"))))]
+    {
+        Ok(test_hooks::collected_adapters())
+    }
+}
+
+/// Every interface the registry knows about, active or not: the `Parameters\Interfaces` key
+/// spaces outlive the active set (disabled, unplugged and removed adapters keep their last
+/// written DNS values), and a TUN endpoint parked on an inactive adapter is invisible to
+/// [`collect_dns_adapters`]. Excludes the tunnel adapter exactly like it, by connection name
+/// when the core is gone — the registry view carries no LUID — and additionally drops
+/// [`is_inactive_tunnel_interface_key`] keys, which the name cannot cover once the WinTUN
+/// device (and with it, possibly, its `Connection` key) is gone.
+async fn collect_registry_interface_adapters() -> Result<Vec<AdapterDnsSnapshot>> {
+    let adapters = engine_collect_interface_keys().await?;
+    let current_tunnel_luid = crate::core::windows_kill_switch::protected_tunnel_luid().await;
+    let active = collect_dns_adapters().await?;
+    Ok(without_current_tunnel(adapters, current_tunnel_luid)
+        .into_iter()
+        .filter(|adapter| !is_inactive_tunnel_interface_key(adapter, &active))
+        .collect())
+}
+
+/// A name-independent tunnel exclusion for the registry view. The WinTUN interface key gets its
+/// `NameServer` from the TUN inbound's `dns_address` (sing-box sets it through the interface DNS
+/// API, which writes `NameServer` only), and that key can outlive the device it belonged to.
+/// Tono's own protected apply (`engine::apply_protected`) always writes IPv4 `NameServer`
+/// *and* `ProfileNameServer` — `ProfileNameServer` first, so even an apply stopped between the
+/// two writes cannot leave this shape behind. A key that is not active, holds exactly the TUN
+/// DNS address in IPv4 `NameServer` and nothing in any other value is the tunnel's shape, not
+/// a real adapter Tono redirected. Anything else — a profile value, a mixed list (#293), a legacy
+/// loopback, an IPv6 server, or an active adapter — stays in the evidence. A real adapter
+/// misread here is not recorded as an original either: if it comes back, enable meets it as
+/// unrecorded and [`ensure_unrecorded_adapters_are_safe`] heals or refuses it.
+fn is_inactive_tunnel_interface_key(
+    adapter: &AdapterDnsSnapshot,
+    active: &[AdapterDnsSnapshot],
+) -> bool {
+    let empty =
+        |value: Option<&str>| value.is_none_or(|value| parse_name_server_list(value).is_empty());
+    let is_active = active
+        .iter()
+        .any(|live| live.interface_guid.eq_ignore_ascii_case(&adapter.interface_guid));
+    let tun_dns_only = adapter
+        .ipv4_name_server
+        .as_deref()
+        .is_some_and(|value| parse_name_server_list(value) == [PROTECTED_DNS_V4]);
+    !is_active
+        && tun_dns_only
+        && empty(adapter.ipv4_profile_name_server.as_deref())
+        && empty(adapter.ipv6_name_server.as_deref())
+        && empty(adapter.ipv6_profile_name_server.as_deref())
+}
+
+/// The corrupt-snapshot recovery's live question — does any interface the registry knows
+/// about still read as pointed at a Tono resolver — answered from that registry view itself.
+/// Test-feature builds additionally keep the contract [`engine_any_loopback`] established
+/// while this evidence still flowed through it: there `set_live_dns_on_loopback` is the
+/// stand-in for the whole machine state, and a recovery that ignored it would only ever see
+/// the empty default of `test_hooks::collected_adapters` — the fail-closed half of the
+/// corrupt-snapshot contract would be unreachable in every lifecycle test. The two answers
+/// are OR-ed, never AND-ed, so a registry view a fixture does populate stays authoritative
+/// and the combined answer can only lean further closed.
+fn registry_interfaces_read_as_tono_dns(adapters: &[AdapterDnsSnapshot]) -> bool {
+    #[cfg(not(all(windows, not(feature = "test"))))]
+    {
+        if test_hooks::live_dns_is_on_loopback() {
+            return true;
+        }
+    }
+    adapters.iter().any(adapter_reads_as_tono_dns)
+}
+
 async fn engine_apply_protected(adapters: &[AdapterDnsSnapshot]) -> Result<Vec<(String, bool)>> {
     // The only two writers of adapter DNS are this and `engine_apply_snapshot`; both mark the
     // window so `netmon` does not report our own writes as the machine's network changing.
@@ -1566,7 +1961,7 @@ async fn engine_apply_protected(adapters: &[AdapterDnsSnapshot]) -> Result<Vec<(
             .map(|adapter| adapter.interface_guid.clone())
             .collect::<Vec<_>>();
         return bounded_dns_call(DNS_APPLY_TIMEOUT, "apply protected DNS", move || {
-            engine::apply_protected_set(&guids)
+            hold_self_write_across_the_write(|| engine::apply_protected_set(&guids))
         })
         .await;
     }
@@ -1589,14 +1984,14 @@ async fn engine_apply_protected(adapters: &[AdapterDnsSnapshot]) -> Result<Vec<(
 }
 
 async fn engine_apply_snapshot(snapshot: &DnsSnapshot) -> Result<Vec<(String, bool)>> {
-    // Restore writes the same per-adapter registry values and runs the same CIM/netsh batch as
-    // the loopback apply, so it raises the same notifications and gets the same window.
+    // Restore writes the same per-adapter registry values and runs the legacy CIM/netsh
+    // batch, so it raises the same notifications and gets the same self-write window.
     let _self_write = SelfWriteWindow::open();
     #[cfg(all(windows, not(feature = "test")))]
     {
         let snapshot = snapshot.clone();
         return bounded_dns_call(DNS_APPLY_TIMEOUT, "restore snapshot", move || {
-            engine::apply_snapshot(&snapshot)
+            hold_self_write_across_the_write(|| engine::apply_snapshot(&snapshot))
         })
         .await;
     }
@@ -1614,6 +2009,8 @@ async fn engine_apply_snapshot(snapshot: &DnsSnapshot) -> Result<Vec<(String, bo
         // the PowerShell batch, which is precisely why rung 2 verifies on the reported machine
         // even though its live apply keeps failing.
         if ok && is_automatic_reset(snapshot) {
+            #[cfg(test)]
+            test_hooks::note_automatic_reset();
             test_hooks::set_live_dns_on_loopback(false);
         }
         Ok(snapshot
@@ -1752,6 +2149,73 @@ pub(crate) mod test_hooks {
     pub(crate) fn set_apply_batch_unavailable(unavailable: bool) {
         APPLY_BATCH_UNAVAILABLE.store(unavailable, Ordering::Relaxed);
     }
+
+    static ENCRYPTED_RESTORE_FAILS: AtomicBool = AtomicBool::new(false);
+
+    pub(crate) fn encrypted_restore_fails() -> bool {
+        ENCRYPTED_RESTORE_FAILS.load(Ordering::Relaxed)
+    }
+
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn set_encrypted_restore_fails(fails: bool) {
+        ENCRYPTED_RESTORE_FAILS.store(fails, Ordering::Relaxed);
+    }
+
+    static NRPT_SWEEP_HANGS: AtomicBool = AtomicBool::new(false);
+
+    /// While set, the stubbed NRPT removal does not return: a registry call behind a filter
+    /// driver or a wedged Dnscache.
+    pub(crate) fn nrpt_sweep_hangs() -> bool {
+        NRPT_SWEEP_HANGS.load(Ordering::Relaxed)
+    }
+
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn set_nrpt_sweep_hangs(hangs: bool) {
+        NRPT_SWEEP_HANGS.store(hangs, Ordering::Relaxed);
+    }
+
+    static SNAPSHOT_DELETE_FAILS: AtomicBool = AtomicBool::new(false);
+
+    /// While set, the snapshot delete after a proven restore fails every round: an antivirus
+    /// or backup handle on the file that outlives the retry budget.
+    #[cfg(any(not(windows), feature = "test"))]
+    pub(crate) fn snapshot_delete_fails() -> bool {
+        SNAPSHOT_DELETE_FAILS.load(Ordering::Relaxed)
+    }
+
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn set_snapshot_delete_fails(fails: bool) {
+        SNAPSHOT_DELETE_FAILS.store(fails, Ordering::Relaxed);
+    }
+
+    #[cfg(test)]
+    static AUTOMATIC_RESETS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+    #[cfg(test)]
+    pub(crate) fn note_automatic_reset() {
+        AUTOMATIC_RESETS.fetch_add(1, Ordering::Relaxed);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn take_automatic_resets() -> usize {
+        AUTOMATIC_RESETS.swap(0, Ordering::Relaxed)
+    }
+
+    /// Machine-wide resolver-policy restores (NRPT removal, DoH re-enable) the stub was asked
+    /// for, so a test can prove a path left that policy armed rather than merely logged it.
+    #[cfg(test)]
+    static ENCRYPTED_RESTORES: std::sync::atomic::AtomicUsize =
+        std::sync::atomic::AtomicUsize::new(0);
+
+    #[cfg(test)]
+    pub(crate) fn note_encrypted_restore() {
+        ENCRYPTED_RESTORES.fetch_add(1, Ordering::Relaxed);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn take_encrypted_restores() -> usize {
+        ENCRYPTED_RESTORES.swap(0, Ordering::Relaxed)
+    }
 }
 
 async fn engine_flush_cache() -> Result<()> {
@@ -1772,7 +2236,7 @@ async fn engine_suppress_encrypted_dns() -> Result<()> {
         return bounded_dns_call(
             DNS_APPLY_TIMEOUT,
             "suppress encrypted DNS",
-            engine::suppress_encrypted_dns,
+            || hold_self_write_across_the_write(engine::suppress_encrypted_dns),
         )
         .await;
     }
@@ -1782,14 +2246,37 @@ async fn engine_suppress_encrypted_dns() -> Result<()> {
     }
 }
 
-async fn engine_restore_encrypted_dns() -> Result<()> {
+async fn engine_restore_encrypted_dns() -> Result<bool> {
     let _self_write = SelfWriteWindow::open();
     #[cfg(all(windows, not(feature = "test")))]
     {
         return bounded_dns_call(
             DNS_APPLY_TIMEOUT,
             "restore encrypted DNS",
-            engine::restore_encrypted_dns,
+            || hold_self_write_across_the_write(engine::restore_encrypted_dns),
+        )
+        .await;
+    }
+    #[cfg(not(all(windows, not(feature = "test"))))]
+    {
+        #[cfg(test)]
+        test_hooks::note_encrypted_restore();
+        if test_hooks::encrypted_restore_fails() {
+            bail!("injected Tono NRPT removal failure");
+        }
+        Ok(false)
+    }
+}
+
+/// Retire capture-loss evidence after a committed restore surfaced it (see
+/// [`settle_capture_loss`]). File moves only; no resolver policy is touched.
+async fn engine_retire_lost_captures() -> Result<()> {
+    #[cfg(all(windows, not(feature = "test")))]
+    {
+        return bounded_dns_call(
+            DNS_CALL_TIMEOUT,
+            "retire lost encrypted-DNS captures",
+            engine::retire_lost_captures,
         )
         .await;
     }
@@ -1842,7 +2329,66 @@ fn record_outcome<T>(result: Result<T>) -> Result<T> {
     }
 }
 
-/// Record per-adapter live-apply results in memory and into the snapshot's per-adapter flags.
+/// Put a warning-grade note back into `DNS_LAST_ERROR` after a successful `record_outcome`
+/// cleared it: a success-with-a-note (degraded restore, quarantined capture) must reach the
+/// status payload — `status_unlocked` reads `DNS_LAST_ERROR` — and the service log, never
+/// silently.
+fn surface_success_note(note: &str) {
+    tracing::error!("dns: {note}");
+    *DNS_LAST_ERROR
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(note.to_owned());
+}
+
+/// A capture-loss note a committed restore surfaced after retiring its on-disk evidence. Every
+/// Disconnect runs two restores — the release handler's, then the disarm gate's (snapshot-less)
+/// one — and the second, finding the evidence already retired, would otherwise clear
+/// `last_error` and publish a clean result over the loss. The note is handed to exactly one
+/// following restore that has no loss of its own; after that it follows the other success notes
+/// (degraded restore): the next successful DNS operation clears it. The next explicit `enable`
+/// drops it.
+static CAPTURE_LOSS_NOTE: Lazy<Mutex<Option<String>>> = Lazy::new(|| Mutex::new(None));
+
+/// Settle a *committed* restore's capture-loss note: remember it, then retire the on-disk
+/// evidence (quarantine the unreadable capture, drop the lost-originals records). Call it only
+/// after every step that can still fail the restore, so a failed or abandoned attempt keeps the
+/// evidence for its retry. With no note of its own, a restore takes over the one the previous
+/// restore surfaced (see [`CAPTURE_LOSS_NOTE`]). Returns the note to surface.
+async fn settle_capture_loss(note: Option<String>) -> Option<String> {
+    let Some(note) = note else {
+        return CAPTURE_LOSS_NOTE
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take();
+    };
+    // Remember first: once the evidence is retired, this is what keeps the loss visible.
+    *CAPTURE_LOSS_NOTE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(note.clone());
+    if let Err(error) = engine_retire_lost_captures().await {
+        tracing::warn!(
+            "dns: the capture-loss evidence could not be retired ({error:#}); the next restore \
+             reports the loss again"
+        );
+    }
+    Some(note)
+}
+
+/// Join the notes of one successful restore: each names a different loss (the degraded-restore
+/// trade on adapter DNS, the unrecoverable Encrypted DNS setting), so neither may hide the other.
+fn join_notes(first: Option<String>, second: Option<String>) -> Option<String> {
+    match (first, second) {
+        (Some(mut first), Some(second)) => {
+            first.push(' ');
+            first.push_str(&second);
+            Some(first)
+        }
+        (first, second) => first.or(second),
+    }
+}
+
+/// Record per-adapter outcomes or reserve an unfinished apply before mutation. Omitted adapters
+/// keep their evidence; in particular the protect engine must not report absence as success.
 fn note_live_results(snapshot: &mut DnsSnapshot, results: &[(String, bool)]) {
     let mut failures = LIVE_APPLY_FAILURES.lock().unwrap();
     for (guid, ok) in results {
@@ -1894,19 +2440,29 @@ async fn quarantine_snapshot(label: &str, reason: &str) -> Result<()> {
 /// refused, and because the file is only deleted *after* a proven restore it stays unreadable
 /// across every retry and every reboot — a permanently blocked machine with no in-app way out.
 ///
-/// The way out is evidence, not trust: read the live adapters and demand that *nothing* still
+/// The way out is evidence, not trust: read the machine and demand that *nothing* still
 /// points at either Tono's current TUN DNS endpoint or a legacy protected loopback value (and
 /// that no live-apply failure is on record). That establishes
 /// the property the disarm gate actually protects — the machine is not left resolving through a
 /// core that is no longer running — without knowing what the servers used to be. Only then is
 /// the file quarantined.
 ///
+/// The evidence comes from the registry's own interface list, not the active set: an adapter
+/// that was unplugged, disabled or removed when the file went unreadable keeps its last DNS
+/// values in `Parameters\Interfaces`, and a leftover TUN endpoint parked there would ride the
+/// adapter's return straight into the next merge as a poisoned "original" — so inactive
+/// leftovers must refuse this recovery exactly like active ones.
+///
 /// Every other outcome (still on a Tono DNS target, a recorded live failure, or an engine call that
 /// times out on the way to finding out) returns an error: nothing is deleted, nothing is
 /// disarmed, and the message names the two documented ways forward.
-async fn recover_unreadable_snapshot(reason: &str) -> Result<()> {
-    let current = collect_dns_adapters().await?;
-    let any_loopback = engine_any_loopback(&current).await?;
+///
+/// On success, `Some(note)` propagates the capture-quarantine note from
+/// [`restore_resolver_policy`] so the caller can surface it; the adapter recovery itself is
+/// complete either way.
+async fn recover_unreadable_snapshot(reason: &str) -> Result<Option<String>> {
+    let interfaces = collect_registry_interface_adapters().await?;
+    let any_loopback = registry_interfaces_read_as_tono_dns(&interfaces);
     let live_apply_failed = !LIVE_APPLY_FAILURES
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -1922,6 +2478,9 @@ async fn recover_unreadable_snapshot(reason: &str) -> Result<()> {
              escape hatch. The unreadable file is kept for diagnosis."
         );
     }
+    // Adapter evidence alone does not prove the resolver is restored: NRPT can still
+    // route every namespace to the stopped TUN resolver. Keep the file on failure.
+    let capture_note = restore_resolver_policy().await?;
     quarantine_snapshot(
         "corrupt",
         &format!(
@@ -1931,10 +2490,7 @@ async fn recover_unreadable_snapshot(reason: &str) -> Result<()> {
         ),
     )
     .await?;
-    if let Err(error) = engine_restore_encrypted_dns().await {
-        tracing::warn!("dns: encrypted DNS restore after unreadable snapshot failed: {error:#}");
-    }
-    Ok(())
+    Ok(capture_note)
 }
 
 /// Snapshot → set protected DNS → verify. Idempotent: a second call while protected keeps the
@@ -1955,8 +2511,13 @@ async fn enable_unlocked(trigger: EnableTrigger) -> Result<DnsProtectionStatus> 
         // From here until an explicit restore, drift is worth repairing. Set before any work so
         // that a half-applied enable is still repaired by the watchdog.
         PROTECTION_WANTED.store(true, Ordering::Release);
+        // A new session: the previous disconnected period's capture-loss note has been shown.
+        *CAPTURE_LOSS_NOTE
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
     }
     let existing = match tokio::fs::read(snapshot_path()).await {
+        Ok(bytes) if snapshot_was_restored(&bytes).await => None,
         Ok(bytes) => match parse_snapshot(&bytes) {
             Ok(snapshot) => Some(snapshot),
             // Quarantining an unreadable snapshot is a decision for an explicit request, never
@@ -1973,7 +2534,12 @@ async fn enable_unlocked(trigger: EnableTrigger) -> Result<DnsProtectionStatus> 
             // an unreadable snapshot without that proof would record our own loopback values as
             // the originals and destroy the way back.
             Err(reason) => {
-                record_outcome(recover_unreadable_snapshot(&reason).await)?;
+                // A capture-loss note cannot survive the rest of `enable` (every later
+                // successful `record_outcome` clears `last_error`), so it is deliberately not
+                // settled here: the evidence is only read by this recovery and stays on disk —
+                // the suppress below turns an unreadable capture into a lost-originals record
+                // before moving it aside — and the next restore reports it under the marker.
+                let _ = record_outcome(recover_unreadable_snapshot(&reason).await)?;
                 None
             }
         },
@@ -2001,32 +2567,60 @@ async fn enable_unlocked(trigger: EnableTrigger) -> Result<DnsProtectionStatus> 
         taken_at: now_unix(),
         adapters: collect_dns_adapters().await?,
     };
-    if !snapshot_present {
-        // A recovery file can be deleted independently of the registry (AV quarantine, manual
-        // cleanup, disk corruption, failed-connect release). Never turn the TUN endpoint left
-        // behind into the new "original". If adapters still list 198.18.0.2 with no snapshot,
-        // heal them to DHCP first so Connect is not permanently bricked after a prior failure.
-        if ensure_snapshotless_adapters_are_safe(&fresh.adapters).is_err() {
-            fresh.adapters = heal_orphaned_protected_dns_without_snapshot(&fresh.adapters).await?;
-        }
-        record_outcome(ensure_snapshotless_adapters_are_safe(&fresh.adapters))?;
+    // A recovery file can be deleted independently of the registry (AV quarantine, manual
+    // cleanup, disk corruption, failed-connect release). Never turn the TUN endpoint left
+    // behind into the new "original". The same applies with a snapshot present to an adapter
+    // whose original is not recorded yet — typically one that reappears carrying the endpoint a
+    // corrupt-snapshot recovery could not see while it was inactive. Adapters already recorded
+    // keep their saved originals, so the live protected values on them do not trip this guard.
+    // If an unrecorded adapter still lists 198.18.0.2, heal it to DHCP first so Connect is not
+    // permanently bricked after a prior failure; refuse only when the heal cannot be proven.
+    // With a snapshot present the session's NRPT/DoH policy is protection in force, so that heal
+    // resets the adapter only and a refusal below leaves the policy exactly as armed as before.
+    let safety_check: fn(&[AdapterDnsSnapshot]) -> Result<()> = if snapshot_present {
+        ensure_unrecorded_adapters_are_safe
+    } else {
+        ensure_snapshotless_adapters_are_safe
+    };
+    let heal_scope = if snapshot_present {
+        OrphanHealScope::InSession
+    } else {
+        OrphanHealScope::NoSession
+    };
+    let mut unrecorded = unrecorded_adapters(existing.as_ref(), &fresh.adapters);
+    if safety_check(&unrecorded).is_err() {
+        fresh.adapters =
+            heal_orphaned_protected_dns_without_snapshot(&unrecorded, heal_scope).await?;
+        unrecorded = unrecorded_adapters(existing.as_ref(), &fresh.adapters);
     }
+    record_outcome(safety_check(&unrecorded))?;
     // Health and replay decisions cover adapters that are live now, not historical snapshot
     // entries that have since been disabled or unplugged. Their originals remain in `snapshot`
     // and are still restored in the registry on disconnect.
     let active_adapters = fresh.adapters.clone();
     let mut snapshot = merge_snapshot(existing, fresh);
+    let applying = active_snapshot_adapters(&snapshot, &active_adapters);
     let all_loopback = snapshot_present && engine_all_loopback(&active_adapters).await?;
-    let live_apply_failed = snapshot
-        .adapters
-        .iter()
-        .any(|adapter| adapter.live_apply_failed);
+    let live_apply_failed = applying.iter().any(|adapter| adapter.live_apply_failed);
+    let replay = needs_loopback_replay(snapshot_present, all_loopback, live_apply_failed);
+    if replay {
+        // Registry writes can land before entry construction returns Err, and a bounded call
+        // can outlive its waiter. Persist the obligation before either can mutate anything.
+        let pending = applying
+            .iter()
+            .map(|adapter| (adapter.interface_guid.clone(), false))
+            .collect::<Vec<_>>();
+        note_live_results(&mut snapshot, &pending);
+    }
     // Snapshot first, even on an otherwise idempotent replay: `snapshot` may now include adapters
-    // that appeared after the first enable, and any later failure must retain their originals.
+    // that appeared after the first enable. Any error retains originals AND unfinished work.
     atomic_write(&snapshot_path(), &serde_json::to_vec_pretty(&snapshot)?).await?;
-    if !needs_loopback_replay(snapshot_present, all_loopback, live_apply_failed) {
-        // Protection is complete and nothing is outstanding: retire any note from an earlier
-        // round so the reconciler is not kept awake by evidence that no longer holds.
+    // New originals are durable before retiring the old marker. Refuse before any protected
+    // mutation if it cannot be cleared, including the otherwise-idempotent policy pin below.
+    clear_snapshot_retirement().await?;
+    if !replay {
+        // No active adapter owes work. Do not let an absent historical adapter's note keep
+        // the reconciler writing; its saved pending bit still applies when it returns.
         clear_unverified_note();
         // Adapters may already be on 198.18.0.2 from an older build that did not pin
         // Encrypted DNS off. Do that here or Win10/11 DoH still times out fake-ip.
@@ -2039,11 +2633,10 @@ async fn enable_unlocked(trigger: EnableTrigger) -> Result<DnsProtectionStatus> 
     // must be recorded, not a failure (see the module docs). `Err` is reserved for the round
     // that produced no per-adapter outcome at all.
     let outcome: Result<Option<String>> = async {
-        // Hard failure #1: the batch could not be run, so not one adapter was touched and there
-        // is no result to record. `?` on purpose — with nothing applied there is nothing to
-        // restore and nothing for the watchdog to reconcile, and a status that claimed
-        // "protected" would be a lie. A wedged engine (`DNS_ENGINE_WEDGED_PREFIX`) surfaces here.
-        let live = engine_apply_protected(&snapshot.adapters).await?;
+        // Err is not proof of zero writes. Keep the pre-written pending flags on error or
+        // timeout. Only the observed active set was reserved: never send historical adapters
+        // that could reappear between collection and apply without a pending record.
+        let live = engine_apply_protected(&applying).await?;
         note_apply_round(live.iter().any(|(_, ok)| !ok));
         note_live_results(&mut snapshot, &live);
         // Hard failure #2: the record of the round could not be persisted. Persist both failures
@@ -2108,9 +2701,49 @@ async fn enable_unlocked(trigger: EnableTrigger) -> Result<DnsProtectionStatus> 
     status_unlocked().await
 }
 
-/// Restore every adapter from the snapshot, prove it by registry read-back *and* by a live read
-/// that finds nothing left on the loopback core, then drop the snapshot. Failing any of that
-/// keeps the snapshot — and, via the disarm invariant, the block armed.
+#[derive(Debug)]
+struct ResolverPolicyRestoreFailed;
+
+impl std::fmt::Display for ResolverPolicyRestoreFailed {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("resolver policy restoration failed; adapter DHCP fallback cannot repair NRPT/DoH")
+    }
+}
+
+// Typed context preserves the cause and phase without matching diagnostic strings. A policy
+// failure must not reset already-restored static adapter DNS to DHCP during uninstall.
+//
+// `Some(note)` on success = a capture was unreadable (or recorded lost by an earlier suppress)
+// and the in-place values stand as the restore result; the note rides in `last_error` exactly
+// like the degraded-restore note. The evidence stays on disk until the caller has committed the
+// whole restore and hands the note to `settle_capture_loss`.
+async fn restore_resolver_policy() -> Result<Option<String>> {
+    let quarantined = engine_restore_encrypted_dns().await.context(ResolverPolicyRestoreFailed)?;
+    Ok(quarantined.then(|| {
+        format!(
+            "{DNS_CAPTURE_QUARANTINED_PREFIX}: a resolver-policy capture file \
+             (protected-secure-dns.json / protected-interface-doh.json) was unreadable and was \
+             quarantined for diagnosis; the user's previous Encrypted DNS setting could not be \
+             recovered from it, so the current in-place values are the restore result. The \
+             restore succeeded and protection is released, but the Windows Encrypted DNS \
+             setting may need to be re-enabled by hand in Settings."
+        )
+    }))
+}
+
+/// The committed restore's last housekeeping step: delete the snapshot. Test builds can
+/// inject a persistent failure here (the AV/backup-handle scenario), so the retry-and-note
+/// behavior in [`restore_protected`] stays exercisable off Windows.
+async fn remove_restored_snapshot() -> std::io::Result<()> {
+    #[cfg(any(not(windows), feature = "test"))]
+    if test_hooks::snapshot_delete_fails() {
+        return Err(std::io::Error::other("simulated snapshot delete failure"));
+    }
+    tokio::fs::remove_file(snapshot_path()).await
+}
+
+/// Restore adapters and resolver policies before dropping their recovery snapshot. A failed
+/// proof keeps the snapshot and, via the disarm invariant, the block armed.
 pub(crate) async fn restore_protected() -> Result<DnsProtectionStatus> {
     if !SUPPORTED {
         return status_unlocked().await;
@@ -2128,6 +2761,15 @@ pub(crate) async fn restore_protected() -> Result<DnsProtectionStatus> {
             // separate writes. Refuse to stop the core/disarm if the current TUN DNS endpoint
             // survived while its recovery record did not.
             record_outcome(ensure_snapshotless_dns_is_safe().await)?;
+            // Older builds could delete this snapshot before NRPT cleanup succeeded.
+            // Reconcile the independently owned rule and DoH captures on every retry.
+            let capture_note = record_outcome(restore_resolver_policy().await)?;
+            if let Some(note) = settle_capture_loss(capture_note).await {
+                surface_success_note(&note);
+            }
+            if let Err(error) = engine_flush_cache().await {
+                tracing::warn!("DNS cache flush after snapshotless restore failed: {error:#}");
+            }
             return status_unlocked().await;
         }
         Err(error) => return Err(error.into()),
@@ -2139,7 +2781,10 @@ pub(crate) async fn restore_protected() -> Result<DnsProtectionStatus> {
         // that nothing resolves through loopback any more (and quarantines the file), or fails
         // closed with the marker and the two documented ways forward.
         Err(reason) => {
-            record_outcome(recover_unreadable_snapshot(&reason).await)?;
+            let capture_note = record_outcome(recover_unreadable_snapshot(&reason).await)?;
+            if let Some(note) = settle_capture_loss(capture_note).await {
+                surface_success_note(&note);
+            }
             // Same reasoning as the proven path below: answers collected while DNS pointed at
             // the loopback core must not outlive the disconnect.
             if let Err(error) = engine_flush_cache().await {
@@ -2148,17 +2793,25 @@ pub(crate) async fn restore_protected() -> Result<DnsProtectionStatus> {
             return status_unlocked().await;
         }
     };
+    let already_restored = snapshot_was_restored(&bytes).await;
     let mut snapshot = with_live_failures(&snapshot, &LIVE_APPLY_FAILURES.lock().unwrap());
     // `Some(note)` = the restore was accepted on the documented degraded path and the note must
     // reach `last_error`; `None` = fully proven.
     let outcome: Result<Option<String>> = async {
+        if already_restored {
+            // Do not overwrite DNS the user changed after the previous successful restore.
+            // Tono-owned residue still needs the existing snapshotless safety proof/repair.
+            ensure_snapshotless_dns_is_safe().await?;
+            return Ok(None);
+        }
         // The engine applies all adapters in one PowerShell batch and retries the failures
         // once in a second batch, reporting final per-adapter results.
         let live = engine_apply_snapshot(&snapshot).await?;
         let streak = note_apply_round(live.iter().any(|(_, ok)| !ok));
         note_live_results(&mut snapshot, &live);
-        // Persist the refreshed flags either way; a refused disarm must keep accurate records.
-        atomic_write(&snapshot_path(), &serde_json::to_vec_pretty(&snapshot)?).await?;
+        // Prove restoration before refreshing bookkeeping. A successful restore retires
+        // the snapshot, so rewriting it would only add a fallible write and a possible late
+        // replacement racing that retirement. Failed proofs save their flags below.
         // The registry half of the proof, read back off the machine. The stub engine reports no
         // adapters at all, which would make the comparison vacuous, so off Windows the
         // snapshot's own entries stand in and the live evidence below is what decides.
@@ -2235,27 +2888,82 @@ pub(crate) async fn restore_protected() -> Result<DnsProtectionStatus> {
         Ok(None)
     }
     .await;
+    if outcome.is_err() {
+        // The originals have not changed. Keep current failure flags in memory and refresh
+        // their durable record when possible, without replacing the machine-proof error.
+        if let Err(error) = atomic_write(&snapshot_path(), &serde_json::to_vec_pretty(&snapshot)?).await {
+            tracing::warn!("dns: failed restore outcome could not be saved: {error:#}");
+        }
+    }
     let degraded = record_outcome(outcome)?;
-    match tokio::fs::remove_file(snapshot_path()).await {
-        Ok(()) => {}
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-        Err(error) => return Err(error.into()),
+    // Required resolver cleanup belongs to the disarm proof, not best-effort housekeeping.
+    // A failed NRPT/DoH restore retains the adapter snapshot and its independent captures.
+    let capture_note = record_outcome(restore_resolver_policy().await)?;
+    // The restore is proven by here; deleting the snapshot is housekeeping. A delete that
+    // fails on something other than absence (typically a transient AV sharing violation)
+    // used to fail the whole restore and, through the disarm gate, refuse the WFP release —
+    // the machine stayed blocked over a file that no longer describes a redirect. Retry
+    // briefly, then record its retirement so later restores do not replay it and the next
+    // enable captures the user's current originals. Failure to record is a second I/O fault;
+    // it must still not undo a proven restore or re-block the machine.
+    let mut leftover: Option<std::io::Error> = None;
+    for attempt in 0..SNAPSHOT_DELETE_ATTEMPTS {
+        match remove_restored_snapshot().await {
+            Ok(()) => {
+                leftover = None;
+                break;
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                leftover = None;
+                break;
+            }
+            Err(error) => {
+                if attempt + 1 < SNAPSHOT_DELETE_ATTEMPTS {
+                    tokio::time::sleep(SNAPSHOT_DELETE_RETRY_DELAY).await;
+                }
+                leftover = Some(error);
+            }
+        }
     }
-    if let Some(note) = degraded {
-        // `record_outcome` cleared `last_error` on the way through: a degraded acceptance is a
-        // success for the caller, but it must never be silent — put it back so it reaches the
-        // status payload (`status_unlocked` reads `DNS_LAST_ERROR`) and the service log.
-        tracing::error!("dns: {note}");
-        *DNS_LAST_ERROR
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(note);
-    }
-    // The restore is proven (or degraded-accepted on registry evidence): put Encrypted DNS
-    // back, drop our NRPT rule, then flush. NRPT left pointing at a stopped core is as
-    // dead as adapter DNS left on 198.18.0.2; a failure here is logged and retried next
-    // disconnect rather than undeleting the adapter snapshot.
-    if let Err(error) = engine_restore_encrypted_dns().await {
-        tracing::error!("dns: encrypted DNS restore after adapter restore failed: {error:#}");
+    let retirement_error = if leftover.is_some() {
+        let record = async {
+            // Apply bookkeeping may have rewritten flags since entry; hash the retained bytes.
+            let retained = tokio::fs::read(snapshot_path()).await?;
+            atomic_write(&snapshot_retirement_path(), &snapshot_fingerprint(&retained)).await
+        };
+        match tokio::time::timeout(SNAPSHOT_RETIREMENT_TIMEOUT, record).await {
+            Ok(recorded) => recorded.err(),
+            Err(_) => Some(anyhow::anyhow!("DNS snapshot retirement record timed out")),
+        }
+    } else {
+        if let Err(error) = clear_snapshot_retirement().await {
+            tracing::warn!("dns: obsolete snapshot retirement record could not be removed: {error:#}");
+        }
+        None
+    };
+    let leftover_note = leftover.map(|error| {
+        tracing::warn!(
+            "dns: the restored protected-dns snapshot could not be deleted ({error}); it will \
+             be retried on the next restore"
+        );
+        let disposition = match retirement_error {
+            Some(error) => format!("its retirement could not be recorded ({error:#}); a later retry may replay the saved originals"),
+            None => "its retirement was recorded; later sessions capture fresh originals".to_owned(),
+        };
+        format!(
+            "{DNS_RESTORE_DEGRADED_PREFIX}: the original DNS servers were restored and \
+             verified, but the recovery snapshot file could not be deleted ({error}); the \
+             next disconnect retries the deletion; {disposition}"
+        )
+    });
+    // Committed as far as the machine is concerned. The degraded-restore note (adapter
+    // DNS), the leftover-snapshot note and the capture note (Encrypted DNS) describe
+    // different losses, so all reach `last_error`.
+    if let Some(note) = join_notes(
+        degraded,
+        join_notes(leftover_note, settle_capture_loss(capture_note).await),
+    ) {
+        surface_success_note(&note);
     }
     if let Err(error) = engine_flush_cache().await {
         tracing::warn!("DNS cache flush after restore failed: {error:#}");
@@ -2322,6 +3030,7 @@ pub(crate) async fn restore_for_uninstall() -> Result<UninstallDnsRestore> {
     // handles the unreadable-snapshot recovery, so nothing below has to repeat any of it.
     let exact_error = match restore_protected().await {
         Ok(_) => return Ok(UninstallDnsRestore::Exact),
+        Err(error) if error.downcast_ref::<ResolverPolicyRestoreFailed>().is_some() => return Err(error),
         Err(error) => error,
     };
     tracing::error!(
@@ -2407,7 +3116,14 @@ pub(crate) async fn restore_for_uninstall() -> Result<UninstallDnsRestore> {
         // because an uninstaller is the last place to turn a logic slip into a crash.
         UninstallRung::Exact => Ok(UninstallDnsRestore::Exact),
         UninstallRung::Automatic => {
-            let note = format!(
+            // DHCP does not restore NRPT/DoH. Retain recovery evidence and report the cause
+            // instead of publishing success or quarantining the snapshot on policy failure.
+            // A capture-quarantine note is folded into the rung note below rather than dropped:
+            // this arm always reports a trade, so the note that is always written wins. Nothing
+            // after the policy restore can fail this rung, so its loss is settled right away.
+            let capture_note =
+                settle_capture_loss(record_outcome(restore_resolver_policy().await)?).await;
+            let mut note = format!(
                 "{DNS_RESTORED_AUTOMATIC_PREFIX}: the saved DNS servers could not be proven \
                  restored ({exact_error:#}), so {} adapter(s) were set back to automatic (DHCP) \
                  for both IPv4 and IPv6 and verified off Tono's protected DNS target \
@@ -2417,6 +3133,10 @@ pub(crate) async fn restore_for_uninstall() -> Result<UninstallDnsRestore> {
                 automatic.adapters.len(),
                 live_loopback_label(live_loopback),
             );
+            if let Some(captured) = capture_note {
+                note.push(' ');
+                note.push_str(&captured);
+            }
             tracing::error!("dns: {note}");
             *DNS_LAST_ERROR
                 .lock()
@@ -2434,15 +3154,23 @@ pub(crate) async fn restore_for_uninstall() -> Result<UninstallDnsRestore> {
             {
                 tracing::warn!("dns: the superseded snapshot could not be set aside: {error:#}");
             }
-            if let Err(error) = engine_restore_encrypted_dns().await {
-                tracing::warn!("dns: encrypted DNS restore after the DHCP fallback failed: {error:#}");
-            }
             if let Err(error) = engine_flush_cache().await {
                 tracing::warn!("DNS cache flush after the DHCP fallback failed: {error:#}");
             }
             Ok(UninstallDnsRestore::Automatic { adapters: targets })
         }
         UninstallRung::StillOnLoopback => {
+            // The resolver policy (the NRPT catch-all and the Encrypted DNS pin) does not depend
+            // on the adapters, so it is restored here too rather than left behind (BRICK-W4). Its
+            // outcome joins the message and the rung still refuses. Capture-loss evidence stays
+            // on disk: nothing here commits a restore.
+            let policy = match record_outcome(restore_resolver_policy().await) {
+                Ok(None) => {
+                    " Tono's resolver policy was restored and its NRPT rule removed.".to_owned()
+                }
+                Ok(Some(note)) => format!(" Tono's resolver policy was restored. {note}"),
+                Err(error) => format!(" Tono's resolver policy could not be restored: {error:#}"),
+            };
             // The last rung, and the only one that still refuses. Everything the user needs to
             // get out of it is in the message: the barrier is already gone, so they are online,
             // and one change in Windows' own network settings makes the next run take rung 2.
@@ -2455,11 +3183,74 @@ pub(crate) async fn restore_for_uninstall() -> Result<UninstallDnsRestore> {
                  resolution is still pointed at Tono. Fix it in Windows: Settings → Network & \
                  Internet → your adapter → DNS server assignment → Edit → Automatic (DHCP), for \
                  both IPv4 and IPv6; a reboot also clears a wedged DNS Client service. Then run \
-                 the uninstaller again and it will complete.",
+                 the uninstaller again and it will complete.{policy}",
                 live_loopback_label(live_loopback),
             )
         }
     }
+}
+
+/// Delete Tono's NRPT catch-all and prove it gone, giving up after `budget` (BRICK-W4).
+///
+/// The rule sends every lookup to 198.18.0.2, which nothing answers once the Core is gone, and a
+/// restart does not remove it. The ladder deletes it only on its proven rungs, so an uninstall
+/// could finish with it still installed. This is the proof the uninstall helper and the elevated
+/// recovery CLI take before they report a machine safe; the Service never calls it.
+///
+/// Synchronous on purpose, for callers that must return after the budget whatever the registry
+/// does: the removal runs on its own named thread, and a call that has not answered by then is
+/// abandoned. Neither `spawn_blocking` (a runtime drop waits for it) nor the engine's wedge latch
+/// (a wedged ladder call would refuse this sweep too) is used. A DNS operation still in progress
+/// is an error, not a wait.
+pub fn remove_tono_resolver_rule_within(budget: std::time::Duration) -> Result<()> {
+    let Ok(_operation) = DNS_OPERATION.try_lock() else {
+        bail!("another DNS operation is still running, so Tono's NRPT rule was not touched");
+    };
+    let _self_write = SelfWriteWindow::open();
+    run_on_detached_thread("tono-nrpt-sweep", budget, sweep_tono_resolver_rule)
+}
+
+/// Run `work` on a detached named thread and wait for its answer at most `budget`. On timeout the
+/// thread keeps running and its answer is dropped.
+fn run_on_detached_thread<T: Send + 'static>(
+    name: &str,
+    budget: std::time::Duration,
+    work: impl FnOnce() -> Result<T> + Send + 'static,
+) -> Result<T> {
+    let (answer, answered) = std::sync::mpsc::channel();
+    std::thread::Builder::new()
+        .name(name.to_owned())
+        .spawn(move || {
+            let _ = answer.send(work());
+        })
+        .with_context(|| format!("{name} could not be started"))?;
+    match answered.recv_timeout(budget) {
+        Ok(result) => result,
+        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+            bail!("{name} did not answer within {budget:?}; the registry call was abandoned")
+        }
+        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+            bail!("{name} ended without an answer")
+        }
+    }
+}
+
+/// The removal itself: Tono's key only, an absent key is success, and the result is read back.
+#[cfg(all(windows, not(feature = "test")))]
+fn sweep_tono_resolver_rule() -> Result<()> {
+    hold_self_write_across_the_write(engine::remove_nrpt_rule)
+}
+
+/// The stub stands in for a registry call that never returns, or one that fails.
+#[cfg(not(all(windows, not(feature = "test"))))]
+fn sweep_tono_resolver_rule() -> Result<()> {
+    while test_hooks::nrpt_sweep_hangs() {
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    if test_hooks::encrypted_restore_fails() {
+        bail!("injected Tono NRPT removal failure");
+    }
+    Ok(())
 }
 
 /// The disarm gate: succeed when no protection is active, or after a proven restore. An
@@ -2480,6 +3271,27 @@ pub(crate) async fn status() -> DnsProtectionStatus {
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
         .clone()
+}
+
+/// Transaction proof reads actual adapter state under the DNS writer lock.
+/// The diagnostic cache is deliberately not proof of update recovery.
+///
+/// A missing snapshot is healed only when the barrier is already down. Healing
+/// while it is wanted resets adapters to DHCP and, on the no-session path,
+/// removes the NRPT catch-all, while WFP is still denying physical DNS.
+#[cfg(windows)]
+pub(crate) async fn observe_for_update() -> Result<DnsProtectionStatus> {
+    let barrier_wanted = crate::core::windows_kill_switch::status().await.wanted;
+    observe_for_update_with(barrier_wanted).await
+}
+
+#[cfg(any(windows, test))]
+async fn observe_for_update_with(barrier_wanted: bool) -> Result<DnsProtectionStatus> {
+    let _operation = DNS_OPERATION.lock().await;
+    if !snapshot_path().exists() && !barrier_wanted {
+        ensure_snapshotless_dns_is_safe().await?;
+    }
+    status_unlocked().await
 }
 
 fn publish_status(status: &DnsProtectionStatus) {
@@ -2519,8 +3331,12 @@ pub async fn initialize_status_cache() {
             // clone of an in-memory value: no IO, no queue, nothing that can deadlock under
             // `DNS_OPERATION`.
             let barrier_wanted = crate::core::windows_kill_switch::status().await.wanted;
-            let protection_wanted = status.snapshot_present && barrier_wanted;
-            if status.snapshot_present && !barrier_wanted {
+            let retired = match tokio::fs::read(snapshot_path()).await {
+                Ok(bytes) => snapshot_was_restored(&bytes).await,
+                Err(_) => false,
+            };
+            let protection_wanted = status.snapshot_present && barrier_wanted && !retired;
+            if status.snapshot_present && (!barrier_wanted || retired) {
                 tracing::warn!(
                     "dns: a protected-DNS snapshot survived a disarm; leaving reconciliation off \
                      rather than re-pointing adapters at a resolver with no barrier behind it"
@@ -2557,8 +3373,17 @@ pub fn spawn_status_watchdog() {
         // When the next repair may run. Backoff is expressed as a deadline rather than a sleep
         // so that no delay is ever awaited while holding `DNS_OPERATION`.
         let mut next_attempt = std::time::Instant::now();
+        let mut last_policy_check: Option<std::time::Instant> = None;
         loop {
             tokio::time::sleep(DNS_WATCHDOG_INTERVAL).await;
+            // X2-2: before taking the operation lock, never under it.
+            if !PROTECTION_WANTED.load(Ordering::Acquire) {
+                last_policy_check = None;
+                refresh_resolver_policy_observation().await;
+            } else if last_policy_check.is_none_or(|at| at.elapsed() >= RESOLVER_POLICY_CHECK_INTERVAL) {
+                last_policy_check = Some(std::time::Instant::now());
+                refresh_resolver_policy_observation().await;
+            }
             // One acquisition covers the observation *and* the repair. Reading the state, then
             // dropping the lock, then acting on what was read is how a concurrent release used
             // to turn a repair into an initial enable: the snapshot could be deleted in between,
@@ -2566,8 +3391,8 @@ pub fn spawn_status_watchdog() {
             // and point the machine at a loopback core that is no longer running. This mirrors
             // the WFP watchdog, which reads `armed_guard()` while holding `WFP_OPERATION`.
             let _operation = DNS_OPERATION.lock().await;
-            let status = match status_unlocked().await {
-                Ok(status) => status,
+            let (status, active_pending) = match observe_status_unlocked().await {
+                Ok(observation) => observation,
                 Err(error) => {
                     publish_status_error(&error);
                     continue;
@@ -2583,7 +3408,7 @@ pub fn spawn_status_watchdog() {
                 PROTECTION_WANTED.load(Ordering::Acquire),
                 status.snapshot_present,
                 status.enabled,
-                status_is_unverified(&status),
+                active_pending || status_is_unverified(&status),
             );
             if !repair {
                 if failures > 0 {
@@ -2648,6 +3473,12 @@ pub fn spawn_status_watchdog() {
 }
 
 async fn status_unlocked() -> Result<DnsProtectionStatus> {
+    observe_status_unlocked().await.map(|(status, _)| status)
+}
+
+/// The wire status retains its configuration/advisory semantics. The watchdog also needs the
+/// active durable obligation: neither an ordinary error string nor a restart may hide it.
+async fn observe_status_unlocked() -> Result<(DnsProtectionStatus, bool)> {
     let snapshot = match tokio::fs::read(snapshot_path()).await {
         // Status only reports; the recovery itself belongs to `enable`/`restore_protected`,
         // which hold the operation lock and may change the machine. Reporting the reason (with
@@ -2658,15 +3489,57 @@ async fn status_unlocked() -> Result<DnsProtectionStatus> {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
         Err(error) => return Err(error.into()),
     };
-    let enabled = match snapshot.as_ref() {
-        Some(_snapshot) if ENGINE_LIVE => {
+    let snapshot = snapshot
+        .map(|snapshot| with_live_failures(&snapshot, &LIVE_APPLY_FAILURES.lock().unwrap()));
+    let (enabled, active_pending, active_count) = match snapshot.as_ref() {
+        Some(snapshot) if ENGINE_LIVE => {
             // Include adapters that appeared since the last enable. Checking only saved GUIDs can
             // report a false healthy state while a fresh adapter still uses an external resolver.
             let current = collect_dns_adapters().await?;
-            engine_all_loopback(&current).await?
+            let pending = active_snapshot_adapters(snapshot, &current)
+                .into_iter()
+                .filter(|adapter| adapter.live_apply_failed)
+                .map(|adapter| adapter.interface_guid)
+                .collect::<Vec<_>>();
+            (engine_all_loopback(&current).await?, pending, current.len())
         }
-        Some(snapshot) => engine_all_loopback(&snapshot.adapters).await?,
-        None => false,
+        Some(snapshot) => (
+            engine_all_loopback(&snapshot.adapters).await?,
+            Vec::new(),
+            snapshot.adapters.len(),
+        ),
+        None => (false, Vec::new(), 0),
+    };
+    let mut last_error = DNS_LAST_ERROR.lock().unwrap().clone();
+    if !active_pending.is_empty() {
+        let read_back = if enabled {
+            LoopbackReadBack::Verified
+        } else {
+            LoopbackReadBack::Contradicted
+        };
+        if let Some(note) = unverified_note(&active_pending, active_count, read_back) {
+            // Keep hard errors hard for the App. Adding an advisory marker to a registry error
+            // would make its existing health predicate classify that error as a warning.
+            if last_error.as_deref().is_none_or(|error| error.contains(DNS_PROTECTION_UNVERIFIED_PREFIX)) {
+                last_error = Some(note);
+            }
+        }
+    } else if enabled
+        && last_error.as_deref().is_some_and(|error| error.contains(DNS_PROTECTION_UNVERIFIED_PREFIX))
+    {
+        // Absence does not erase pending bits, but a note about inactive adapters must not
+        // keep a healthy active set in a perpetual repair loop.
+        last_error = None;
+    }
+    // X2-2: adapter registry health is not the resolver policy Windows applies. Report the
+    // watchdog's last policy verdict as an advisory beside `last_error`, never inside it.
+    let resolver_policy_warning = if enabled && snapshot.is_some() && PROTECTION_WANTED.load(Ordering::Acquire) {
+        RESOLVER_POLICY_CONFLICT
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    } else {
+        None
     };
     let status = DnsProtectionStatus {
         enabled,
@@ -2674,10 +3547,11 @@ async fn status_unlocked() -> Result<DnsProtectionStatus> {
         adapters: snapshot
             .as_ref()
             .map_or(0, |snapshot| snapshot.adapters.len() as u32),
-        last_error: DNS_LAST_ERROR.lock().unwrap().clone(),
+        last_error,
+        resolver_policy_warning,
     };
     publish_status(&status);
-    Ok(status)
+    Ok((status, !active_pending.is_empty()))
 }
 
 /// Only an operational adapter with a **bound IP stack** has a live resolver that can leak DNS.
@@ -2701,7 +3575,17 @@ fn is_active_dns_adapter(oper_status: i32, if_type: u32, has_bound_ip: bool) -> 
     oper_status == IF_OPER_STATUS_UP && if_type != IF_TYPE_SOFTWARE_LOOPBACK && has_bound_ip
 }
 
-// --- Windows engine: registry snapshot/set + best-effort CIM live-apply ---
+// --- Windows engine: registry snapshot/set + native apply, legacy compatibility/restore ---
+
+#[cfg(all(windows, not(feature = "test")))]
+pub(crate) fn install_selective_nrpt() -> Result<()> {
+    engine::install_selective_nrpt()
+}
+
+#[cfg(all(windows, not(feature = "test")))]
+pub(crate) fn remove_selective_nrpt() -> Result<()> {
+    engine::remove_selective_nrpt()
+}
 
 #[cfg(all(windows, not(feature = "test")))]
 mod engine;

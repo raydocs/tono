@@ -12,6 +12,7 @@ import {
   type ReconReason,
   type ReconSubjectType,
 } from './contract';
+import { currencyDecimals } from './fx';
 
 type Asset = {
   subjectType: ReconSubjectType;
@@ -32,18 +33,12 @@ type CostGroup = {
   category: LedgerCategory;
 };
 
-const ZERO_DECIMALS = new Set(['JPY', 'KRW']);
-
 function keyOf(type: string, id: string): string {
   return `${type}\0${id}`;
 }
 
-function decimalsOf(currency: string | null): number {
-  return ZERO_DECIMALS.has((currency ?? '').toUpperCase()) ? 0 : 2;
-}
-
 function priceToMinor(price: number, currency: string | null): number {
-  return Math.round(price * 10 ** decimalsOf(currency));
+  return Math.round(price * 10 ** currencyDecimals(currency));
 }
 
 function currencyOf(value: unknown): string | null {

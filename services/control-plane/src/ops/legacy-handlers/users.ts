@@ -4,11 +4,13 @@ import {
   type Row,
   now,
   str,
+  tailscaleEnrollmentEnabled,
 } from '../../env';
 import {
   bumpCatalogRevision,
   enqueueRefreshCatalogForUser,
   exitClientUUID,
+  legacyExitCredentialRetired,
 } from '../../catalog';
 import {
   publicHomeBinding,
@@ -16,6 +18,7 @@ import {
   upsertHomeBinding,
   parseHomeLine,
   findSocks5Home,
+  assertHomeExitBindable,
 } from '../../home';
 import {
   PRODUCT_CLAUDE,
@@ -28,6 +31,7 @@ import {
   assignedProductForUser,
   replaceCountForUser,
   createAssignedProductAccount,
+  assertProductAssignable,
 } from '../../product-account';
 import {
   rejectUnexpectedKeys,
@@ -38,6 +42,7 @@ import {
   sharedAdministrativeResource,
   type SharedAdminDeps,
 } from '../shared-admin';
+import { accountProfileWrite, onboardAllocationRef, onboardEntitlement, pendingProfileWrites } from './onboard-profile';
 import {
   liveQualityNodeNamed,
   nodeHealthFromQuality,
@@ -79,32 +84,6 @@ export async function getOpsUsers(req: Request, e: Env): Promise<Response> {
     cursor = { createdAt: Number(parsed[1]), id: parsed[2] };
   }
   return Response.json(await operationsUsers(e, { cursor, limit }));
-}
-
-export async function getOpsUserHomeBinding(e: Env, mt: RegExpMatchArray): Promise<Response> {
-  const user = await e.DB.prepare('SELECT id FROM users WHERE id = ?').bind(mt[1]).first<Row>();
-  if (!user) throw new ApiError(404, 'NOT_FOUND', 'User not found');
-  const row = await e.DB.prepare(
-    `SELECT
-       user_home_bindings.user_id,
-       users.email,
-       user_home_bindings.home_exit_id,
-       user_home_bindings.default_proxy_name,
-       home_exits.proxy_name,
-       home_exits.display_name,
-       home_exits.kind,
-       home_exits.socks5_host,
-       home_exits.socks5_port,
-       home_exits.egress_ipv4,
-       home_exits.status AS home_status,
-       user_home_bindings.created_at,
-       user_home_bindings.updated_at
-     FROM user_home_bindings
-     JOIN users ON users.id = user_home_bindings.user_id
-     JOIN home_exits ON home_exits.id = user_home_bindings.home_exit_id
-     WHERE user_home_bindings.user_id = ?`,
-  ).bind(mt[1]).first<Row>();
-  return Response.json({ binding: row ? publicHomeBinding(row) : null });
 }
 
 export async function getOpsUserDetail(e: Env, mt: RegExpMatchArray, deps: { freshestProtectedRouteProof: (action: Row | null | undefined, telemetry: Row | null | undefined) => unknown }): Promise<Response> {
@@ -199,31 +178,27 @@ export async function postOpsUserOnboard(req: Request, e: Env, actor: { email: s
   const b = await body(req, 16 * 1024);
   rejectUnexpectedKeys(b, [
     'email', 'line', 'homeExitId', 'accountRef', 'productAccountId', 'openedAt', 'notes', 'contact',
-    'wechatId',
+    'wechatId', 'expiresAt', 'plan',
   ]);
   const address = email(b.email);
   const wechatId = b.wechatId !== undefined ? optionalWechatId(b.wechatId) : undefined;
   const notes = b.notes !== undefined ? optionalNotes(b.notes) : undefined;
   const contact = b.contact !== undefined ? optionalNotes(b.contact, 'contact', 200) : undefined;
   const openedAt = b.openedAt !== undefined ? optionalUnix(b.openedAt, 'openedAt') : undefined;
-  if (b.accountRef !== undefined && b.accountRef !== null && b.accountRef !== '') {
-    accountRefField(b.accountRef);
-  }
-  if (b.productAccountId !== undefined && b.productAccountId !== null && b.productAccountId !== '') {
-    const productAccountId = str(b.productAccountId, 'productAccountId', 1, 100);
-    const pooled = await e.DB.prepare(
-      'SELECT id FROM product_accounts WHERE id = ?',
-    ).bind(productAccountId).first<Row>();
-    if (!pooled) throw new ApiError(404, 'NOT_FOUND', 'Product account not found');
-  }
+  // For a customer who has not registered yet these wait on the allowlist row
+  // and are copied at first sign-in, so the account keeps the operator's expiry.
+  const { expiresAt, plan } = onboardEntitlement(b);
+  const allocationRef = await onboardAllocationRef(e, b);
+  let homeExitActive = true;
   if (b.homeExitId !== undefined && b.homeExitId !== null && b.homeExitId !== '') {
     const homeExitId = str(b.homeExitId, 'homeExitId', 1, 100);
     const home = await e.DB.prepare(
-      'SELECT id FROM home_exits WHERE id = ?',
+      'SELECT id, status FROM home_exits WHERE id = ?',
     ).bind(homeExitId).first<Row>();
     if (!home) {
       throw new ApiError(400, 'HOME_ASSIGN_FAILED', 'Could not assign the pasted home line');
     }
+    homeExitActive = String(home.status) === 'active';
   }
   const parsedLine = b.line !== undefined && b.line !== null && b.line !== ''
     ? parseHomeLine(b.line)
@@ -238,37 +213,56 @@ export async function postOpsUserOnboard(req: Request, e: Env, actor: { email: s
       if (owner && (!user || String(owner.user_id) !== String(user.id))) {
         throw new ApiError(400, 'HOME_ASSIGN_FAILED', 'Could not assign the pasted home line');
       }
+      // home-exits/assign clears a rotation flag only for a new password, then
+      // refuses a flagged line; refuse the reused password here, before any write.
+      if (user && parsedLine.password === String(home.socks5_password)) {
+        await assertHomeExitBindable(e, String(user.id), String(home.id));
+      }
     }
   }
+  if (user && !parsedLine && b.homeExitId) {
+    // Same rule as PUT users/{id}/home-binding: binding a non-active line
+    // would fail the user's whole catalog closed. Only a registered customer
+    // is bound, so an unregistered email still gets the grant and profile.
+    if (!homeExitActive) {
+      throw new ApiError(409, 'HOME_EXIT_INACTIVE', 'Home exit must be active before binding');
+    }
+    // upsertHomeBinding below refuses a line awaiting rotation; refuse it
+    // here instead, before the allowlist and profile writes.
+    await assertHomeExitBindable(e, String(user.id), String(b.homeExitId));
+  }
+  if (user && allocationRef !== null) {
+    // The allocation's 409s, before the exit identity and the home binding
+    // below commit, so a request that will be refused changes nothing.
+    await assertProductAssignable(e, String(user.id), allocationRef);
+  }
   const createdAt = now();
-  await e.DB.prepare(
-    'INSERT OR IGNORE INTO signup_allowlist(email, created_at) VALUES(?, ?)',
-  ).bind(address, createdAt).run();
-  const incomplete: string[] = [];
-  if (!user) incomplete.push('user_not_registered');
-  const storeProfile = b.notes !== undefined || b.contact !== undefined || b.wechatId !== undefined;
+  const storeProfile = b.notes !== undefined || b.contact !== undefined || b.wechatId !== undefined
+    || expiresAt !== undefined || b.plan !== undefined;
   const pendingProfile = !user && storeProfile;
+  // (sent, value) pairs for wechat_id, contact, notes, expires_at and plan.
+  const profile = [
+    b.wechatId !== undefined, wechatId ?? null,
+    b.contact !== undefined, contact ?? null,
+    b.notes !== undefined, notes ?? null,
+    expiresAt !== undefined, expiresAt ?? null,
+    b.plan !== undefined, plan,
+  ];
   let binding = null;
   let account = null;
   let exitIdentityIssued = false;
+  const incomplete: string[] = [];
   if (user) {
-    await exitClientUUID(e, String(user.id));
-    exitIdentityIssued = true;
-    if (b.notes !== undefined || b.contact !== undefined || b.wechatId !== undefined) {
-      await e.DB.prepare(
-        `UPDATE users SET
-           notes = CASE WHEN ? THEN ? ELSE notes END,
-           contact = CASE WHEN ? THEN ? ELSE contact END,
-           wechat_id = CASE WHEN ? THEN ? ELSE wechat_id END,
-           updated_at = ?
-         WHERE id = ?`,
-      ).bind(
-        b.notes !== undefined, notes ?? null,
-        b.contact !== undefined, contact ?? null,
-        b.wechatId !== undefined, wechatId ?? null,
-        now(), user.id,
-      ).run();
+    // Before the first write, so a refusal leaves nothing behind. An account
+    // whose shared credential was retired by a device revocation (0077) is
+    // served per-device credentials only; asking for the shared one would 409.
+    if (!(await legacyExitCredentialRetired(e, String(user.id)))) {
+      await exitClientUUID(e, String(user.id));
     }
+    exitIdentityIssued = true;
+    // Bind before the allowlist and profile writes: the check above can go
+    // stale (a concurrent unbind flags the line for rotation), and the bind
+    // re-checks; its refusal must leave nothing else written.
     if (b.line !== undefined && b.line !== null && b.line !== '') {
       const assigned = await sharedAdministrativeResource(
         new Request(req.url, {
@@ -294,6 +288,10 @@ export async function postOpsUserOnboard(req: Request, e: Env, actor: { email: s
       );
       await bumpCatalogRevision(e);
       await enqueueRefreshCatalogForUser(e, String(user.id));
+      // Audited here, not only by the closing user.onboard row: an assignment
+      // that races past the check above and 409s would otherwise leave this
+      // binding unrecorded.
+      await writeOpsAudit(e, actor.email, 'home.assign', 'user', String(user.id), `onboard bound home for ${address}`);
     }
     binding = await loadHomeBinding(e, String(user.id));
     if (b.accountRef) {
@@ -316,24 +314,46 @@ export async function postOpsUserOnboard(req: Request, e: Env, actor: { email: s
       account = await assignedProductForUser(e, String(user.id));
     }
     if (!account) incomplete.push('claude');
-  } else if (pendingProfile) {
-    await e.DB.prepare(
-      `UPDATE signup_allowlist SET
-         wechat_id = CASE WHEN ? THEN ? ELSE wechat_id END,
-         contact = CASE WHEN ? THEN ? ELSE contact END,
-         notes = CASE WHEN ? THEN ? ELSE notes END
-       WHERE email = ?`,
-    ).bind(
-      b.wechatId !== undefined, wechatId ?? null,
-      b.contact !== undefined, contact ?? null,
-      b.notes !== undefined, notes ?? null,
-      address,
-    ).run();
   }
-  await writeOpsAudit(e, actor.email, 'user.onboard', 'user', user ? String(user.id) : null, address);
+  // Written only after the home line and Claude account went through, so a
+  // failed onboard leaves the allowlist, profile, expiry and plan as they
+  // were, and the audit and enforceUser below always follow this batch. With
+  // no account at lookup, the sign-up grant, the pending profile and the same
+  // values on any account created since commit together: a racing first
+  // sign-in either created the account (the users UPDATE covers it) or copies
+  // the finished allowlist row, so the expiry cannot be lost.
+  const allowlistWrites: D1PreparedStatement[] = [
+    e.DB.prepare(
+      'INSERT OR IGNORE INTO signup_allowlist(email, created_at) VALUES(?, ?)',
+    ).bind(address, createdAt),
+  ];
+  if (pendingProfile) {
+    allowlistWrites.push(...pendingProfileWrites(e, address, profile, createdAt));
+  } else if (user && storeProfile) {
+    allowlistWrites.push(accountProfileWrite(e, String(user.id), profile, now()));
+  }
+  const written = await e.DB.batch(allowlistWrites);
+  // A first sign-in between the lookup and the batch: the profile landed on
+  // that account, so the audit, enforceUser and the answer name it.
+  const raced = pendingProfile && Number(written[2]?.meta.changes ?? 0) > 0
+    ? await e.DB.prepare('SELECT id FROM users WHERE email = ?').bind(address).first<Row>()
+    : null;
+  const userId = user ? String(user.id) : raced ? String(raced.id) : null;
+  if (!userId) incomplete.push('user_not_registered');
+  else if (!user) incomplete.push('registered_during_onboard');
+  const entitlement = [
+    expiresAt !== undefined ? 'expiresAt' : null,
+    b.plan !== undefined ? 'plan' : null,
+  ].filter((name): name is string => name !== null);
+  await writeOpsAudit(
+    e, actor.email, 'user.onboard', 'user', userId,
+    entitlement.length ? `${address} (set ${entitlement.join(', ')})` : address,
+  );
+  // A past expiry set on a registered customer takes effect now, as PATCH does.
+  if (expiresAt !== undefined && userId) await deps.sharedAdminDeps.enforceUser(e, userId);
   return Response.json({
     email: address,
-    userId: user ? String(user.id) : null,
+    userId,
     allowlisted: true,
     exitIdentityIssued,
     binding: binding ? publicHomeBinding(binding) : null,
@@ -384,6 +404,11 @@ export async function patchOpsUser(req: Request, e: Env, actor: { email: string 
   ) {
     throw new ApiError(400, 'VALIDATION_ERROR', 'status, expiresAt, notes, contact, plan, wechatId or resetUsage is required');
   }
+  // Tailnet revocation jobs only run while enrollment is on. With it paused
+  // they stay queued (the node really is still on the tailnet), so waiting on
+  // them would refuse the re-enable forever; they are recorded on the audit
+  // line instead, and the per-device enrollment fence still holds them.
+  let queuedTailnetRevocations = 0;
   if (status === 'active') {
     const residual = await e.DB.prepare(
       `SELECT
@@ -396,11 +421,15 @@ export async function patchOpsUser(req: Request, e: Env, actor: { email: string 
        FROM users WHERE users.id = ?`,
     ).bind(mt[1], mt[1], mt[1]).first<Row>();
     if (!residual) throw new ApiError(404, 'NOT_FOUND', 'User not found');
+    const enrollmentEnabled = tailscaleEnrollmentEnabled(e);
     if (
       residual.current_status !== 'active' &&
-      ((residual.live_devices ?? 0) > 0 || (residual.pending_jobs ?? 0) > 0)
+      ((residual.live_devices ?? 0) > 0 || (enrollmentEnabled && (residual.pending_jobs ?? 0) > 0))
     ) {
       throw new ApiError(409, 'REVOCATION_PENDING', 'Wait for tailnet device revocation before re-enabling this user');
+    }
+    if (residual.current_status !== 'active' && !enrollmentEnabled) {
+      queuedTailnetRevocations = Number(residual.pending_jobs ?? 0);
     }
   }
   if (b.plan !== undefined && b.plan !== null && b.plan !== '' && b.plan !== PRODUCT_CLAUDE) {
@@ -455,6 +484,13 @@ export async function patchOpsUser(req: Request, e: Env, actor: { email: string 
   ].filter((name): name is string => name !== null);
   if (changedFields.length) {
     await writeOpsAudit(e, actor.email, 'user.update', 'user', mt[1], `changed ${changedFields.join(', ')}`);
+  }
+  if (queuedTailnetRevocations > 0) {
+    await writeOpsAudit(
+      e, actor.email, 'user.tailnet-revocation-queued', 'user', mt[1],
+      `re-enabled with ${queuedTailnetRevocations} tailnet node revocation(s) still queued; `
+        + 'they run when Tailscale enrollment is turned back on',
+    );
   }
   await deps.enforceUser(e, mt[1]);
   return Response.json({ ok: true });

@@ -32,7 +32,10 @@ extension ProxiesView {
                             .padding(.top, regionCodes.first == code ? 0 : 8)
                         LazyVGrid(columns: columns, spacing: 12) {
                             ForEach(grouped[code] ?? []) { node in
-                                localNodeCard(node)
+                                VStack(alignment: .leading, spacing: 6) {
+                                    localNodeCard(node)
+                                    routePreferenceControls(node)
+                                }
                             }
                         }
                     }
@@ -49,6 +52,32 @@ extension ProxiesView {
                 )
                 .frame(maxWidth: .infinity, minHeight: 260)
             }
+        }
+    }
+
+    @ViewBuilder
+    func routePreferenceControls(_ node: ProxyNode) -> some View {
+        if let owner = accountSession.user?.id, owner == ManagedExitCatalogOwnership.currentAccount {
+            let favorite = appState.routePreferences.favorites(owner: owner, catalog: appState.managedCatalogNodes)
+                .contains(ProxyNode.catalogBaseName(for: node.name))
+            HStack {
+                Button {
+                    appState.toggleRouteFavorite(node.name, owner: owner)
+                } label: {
+                    Label(favorite ? String(localized: "Remove favorite") : String(localized: "Favorite"),
+                          systemImage: favorite ? "star.fill" : "star")
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("routeFavorite-\(ProxyNode.catalogBaseName(for: node.name))")
+                if let recent = appState.routePreferences.recentSuccesses(owner: owner, catalog: appState.managedCatalogNodes)
+                    .first(where: { $0.name == node.name }) {
+                    Spacer()
+                    Text("Last successful connection")
+                    Text(recent.at, format: .dateTime.hour().minute())
+                }
+            }
+            .font(.system(size: 10)).foregroundStyle(.secondary)
+            .padding(.horizontal, 8)
         }
     }
 
@@ -118,12 +147,7 @@ extension ProxiesView {
 
                         HStack(spacing: 6) {
                             nodeMetaChip(node.protocolType.uppercased(), systemImage: "lock.fill")
-                            Label(
-                                nodeRegionCode(flag: node.flag, name: node.name),
-                                systemImage: "globe"
-                            )
-                            .font(.system(size: 10, weight: .semibold, design: .rounded))
-                            .foregroundStyle(.secondary)
+                            nodeRegionChip(flag: node.flag, name: node.name)
                             if !node.relay.isEmpty {
                                 Text(node.relay)
                                     .font(.system(size: 10, weight: .medium))
@@ -216,6 +240,24 @@ extension ProxiesView {
             .background(.white.opacity(colorScheme == .dark ? 0.08 : 0.42), in: Capsule())
     }
 
+    @ViewBuilder
+    func nodeRegionChip(flag: String, name: String) -> some View {
+        let region = nodeRegionCode(flag: flag, name: name)
+        if let flagEmoji = UnicodeCountryFlag.emoji(for: region) {
+            HStack(spacing: 4) {
+                Text(flagEmoji)
+                    .font(.system(size: 10))
+                Text(region)
+                    .font(.system(size: 10, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.secondary)
+            }
+        } else {
+            Label(region, systemImage: "globe")
+                .font(.system(size: 10, weight: .semibold, design: .rounded))
+                .foregroundStyle(.secondary)
+        }
+    }
+
     func nodeCard(_ node: ProxyService.MihomoNode) -> some View {
         let isActive = appState.proxyService.activeNodeName == node.name
         return Button {
@@ -272,10 +314,19 @@ extension ProxiesView {
 
     func regionHeader(_ code: String, count: Int) -> some View {
         HStack(spacing: 6) {
-            Label(nodeListRegionLabel(code), systemImage: "globe")
-                .font(.system(size: 10, weight: .semibold, design: .rounded))
-                .kerning(0.8)
-                .foregroundStyle(.secondary)
+            if let emoji = UnicodeCountryFlag.emoji(for: code) {
+                Text(emoji)
+                    .font(.system(size: 11))
+                Text(nodeListRegionLabel(code))
+                    .font(.system(size: 10, weight: .semibold, design: .rounded))
+                    .kerning(0.8)
+                    .foregroundStyle(.secondary)
+            } else {
+                Label(nodeListRegionLabel(code), systemImage: "globe")
+                    .font(.system(size: 10, weight: .semibold, design: .rounded))
+                    .kerning(0.8)
+                    .foregroundStyle(.secondary)
+            }
             Text("\(count)")
                 .font(.system(size: 10, weight: .medium))
                 .foregroundStyle(.tertiary)

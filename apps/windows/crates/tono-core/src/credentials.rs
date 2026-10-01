@@ -1,7 +1,7 @@
 //! Credential storage abstraction.
 //!
 //! The Windows production implementation is a Windows Credential Manager
-//! generic credential (DPAPI-scoped, target `tono/refresh-token`) and lives
+//! generic credential (DPAPI-scoped, target `refresh-token.tono`) and lives
 //! in the Windows app crate, not here. This crate ships the trait, an
 //! in-memory implementation for tests, and a 0600 file implementation for
 //! development.
@@ -13,8 +13,10 @@ use std::sync::Mutex;
 use thiserror::Error;
 
 /// Windows Credential Manager target for the refresh token (§2). The
-/// Windows-side `CredentialStore` implementation uses this name.
-pub const WINDOWS_CRED_TARGET_REFRESH_TOKEN: &str = "tono/refresh-token";
+/// Windows-side `CredentialStore` implementation uses this name: keyring names
+/// a generic credential `<user>.<service>`, here account `refresh-token` under
+/// service `tono`. The uninstaller deletes it by this name.
+pub const WINDOWS_CRED_TARGET_REFRESH_TOKEN: &str = "refresh-token.tono";
 
 /// The two secrets the account session persists (§2).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

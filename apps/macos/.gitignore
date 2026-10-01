@@ -1,2 +1,4 @@
 # Generated from fixed upstream inputs; never commit a signed/rebuilt binary.
 Tono/Resources/sing-box
+# Synthetic native XCTest review captures and result bundles.
+/test-results/

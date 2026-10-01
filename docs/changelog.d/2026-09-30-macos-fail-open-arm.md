@@ -1,0 +1,13 @@
+## 2026-09-30 · arm 与睡眠屏障失败改为放行
+- 归属：SHIP_PLAN §2 第 10 条（装上会坏）。macOS helper。
+- 来源：基线 main `d2363002`；分支 `cursor/macos-fail-open-arm-581a`；[#708](https://github.com/raydocs/tono/pull/708)。尚未合 main。不包含 #701。
+- 缺陷修复：
+  - `arm` 在写入规则或状态之后失败时，立刻释放锚点和状态文件，不再把阻断留到下次 helper 启动。
+  - 睡眠屏障提交失败时同样释放，不再调用 `installEmergencyBlock`。
+  - BRICK-M13：启动失败的默认动作改为释放，不需要 `tono.allowed-uid`，不装全阻断。
+  - BRICK-M8：更新回滚失败时先释放 PF 并尽量恢复 DNS，账本保留，不把回滚记成成功。
+- 新增/优化：无。成功的睡眠屏障仍会装上全阻断，直到 App 在唤醒后重新 arm。
+- 工程与测试：helper `4.52.2` → `4.52.3`（接在 #701 的 4.52.2 之后）。`--self-test` 断言没有严格杀开关时失败路径要释放，有则不释放。`CONTRACT.sha256` 重算。
+- 验证：Linux 无 Swift、无 PF。未编译、未跑 self-test。
+- 候选/发布：仅源码，无新候选。
+- 剩余限制：成功的睡眠全阻断仍会留到 App 重新 arm 或下次启动。与 #701、#695 的 helper 版本行会冲突，后合的需要再升一号。未实机。

@@ -1,155 +1,117 @@
-import { useMemo, useState } from 'react';
-import { Chip } from '@/components/ops/Chip';
-import { Fact } from '@/components/ops/DetailDrawer';
-import { EmptyLine } from '@/components/ops/Empty';
-import { FoldedSection } from '@/components/ops/Section';
-import { TimeSeries, type SeriesPoint } from '@/components/ops/TimeSeries';
-import { absent, measured, type Measured } from '@/components/ops/measured';
+import { useId, useMemo, useState } from 'react';
+import { LineChart, type LineSeries } from '@/components/ops/LineChart';
+import { Panel, type PanelState } from '@/components/ops/Panel';
+import { Segmented } from '@/components/ops/Segmented';
 import { copy } from '@/copy/copy';
-import { formatBytesMeasured, formatClock, formatCount, formatDate, formatPercent, formatWhenAgo } from '@/lib/display';
-import {
-  foldLoad,
-  hasLoad,
-  nodeLegacyApi,
-  NODE_LOAD_RANGES,
-  type LoadCharts,
-  type NodeLoadRange,
-} from '@/lib/node-legacy';
-import { sourceWord } from '@/lib/sources';
+import { formatBytesMeasured, formatClock, formatCount, formatDate, formatDay, formatPercent } from '@/lib/display';
+import { foldLoad, hasLoad, nodeLegacyApi, NODE_LOAD_RANGES, type NodeLoadRange } from '@/lib/node-legacy';
 import { useResource } from '@/lib/use-resource';
 
-const DAY: NodeLoadRange = '24h';
+const words = copy.nodeBoard.load;
+/** The agent reports every few minutes; a quarter of an hour without a sample is late. */
+const STALE_AFTER_SEC = 15 * 60;
+const HEIGHT = 150;
+
+const share = (value: number) => formatPercent(value / 100);
+const rate = (value: number) => copy.nodeLoadRate(formatBytesMeasured(value));
+const count = (value: number) => words.count(formatCount(Math.round(value)));
 
 /**
- * The machine's own load, folded shut.
- *
- * Folded because it is the block an operator opens when they already suspect
- * the machine rather than the path — the page's first four blocks answer
- * "should I care about this node at all", and four charts under them would
- * make every visit scroll past a shape nobody asked for. Folded also means
- * the request is not made: the body below is only mounted once the fold is
- * open, so a page load costs the same as it did before this section existed.
+ * How hard the box itself is working: four panels over one read of the
+ * agent's samples, so the four charts always cover the same window. Drawn
+ * open, because a node page is opened when something about the node is in
+ * question and the machine's own load is the first thing ruled in or out.
  */
 export function NodeLoad({ name }: { name: string }) {
-  return (
-    <FoldedSection title={copy.nodeSections.load}>
-      <LoadBody name={name} />
-    </FoldedSection>
-  );
-}
-
-function LoadBody({ name }: { name: string }) {
-  const [range, setRange] = useState<NodeLoadRange>(DAY);
+  const headingId = useId();
+  const [range, setRange] = useState<NodeLoadRange>('24h');
   const taken = useResource(`${name}#${range}`, (signal) => nodeLegacyApi.load(name, range, signal));
-  const ready = taken.status === 'ready' ? taken.data : null;
-  const charts = useMemo(() => (ready === null ? null : foldLoad(ready)), [ready]);
+  const charts = useMemo(() => (taken.status === 'ready' ? foldLoad(taken.data) : null), [taken]);
+  const state: PanelState = taken.status === 'loading'
+    ? 'loading'
+    : taken.status === 'error' ? 'error' : charts && hasLoad(charts) ? 'ready' : 'empty';
+  const rangeWord = copy.nodeLoadRange[range];
+  const tick = range === '24h' ? formatClock : formatDay;
+  const when = (at: number) => copy.nodeWhenBoth(formatDate(at), formatClock(at));
+  const panel = {
+    state,
+    source: copy.nodesBoard.load.source,
+    asOfSec: charts?.asOfSec ?? null,
+    staleAfterSec: STALE_AFTER_SEC,
+    emptyText: words.empty,
+    onRetry: taken.reload,
+    bodyHeight: HEIGHT,
+  };
+  const chart = { when, tick, height: HEIGHT };
+  const line = (key: string, name: string, points: LineSeries['points']): LineSeries[] => [{ key, name, points }];
 
   return (
-    <div className="flex flex-col gap-4">
-      <div className="flex flex-wrap items-center gap-2">
-        {NODE_LOAD_RANGES.map((option) => (
-          <Chip key={option} active={range === option} onClick={() => setRange(option)}>
-            {copy.nodeLoadRange[option]}
-          </Chip>
-        ))}
-        {charts?.asOfSec ? (
-          <span className="ml-auto text-micro text-[var(--muted-foreground)]">
-            {formatWhenAgo(charts.asOfSec)}
-          </span>
-        ) : null}
-      </div>
-
-      {charts === null ? (
-        <EmptyLine message={taken.status === 'error' ? taken.message : copy.loading} />
-      ) : !hasLoad(charts) ? (
-        <EmptyLine message={copy.nodeNoLoad} />
-      ) : (
-        <Charts charts={charts} range={range} />
-      )}
-    </div>
-  );
-}
-
-/**
- * Two measured facts and four charts.
- *
- * The facts go above the shapes rather than beside them because they are the
- * two numbers a person came here for — what the transit bill will say, and
- * how many connections the box was actually holding — and everything below is
- * the context for those two.
- */
-function Charts({ charts, range }: { charts: LoadCharts; range: NodeLoadRange }) {
-  const at = charts.asOfSec;
-  const clock = (point: number) => (
-    range === DAY ? formatClock(point) : copy.nodeWhenBoth(formatDate(point), formatClock(point))
-  );
-  const share = (value: number) => formatPercent(value / 100);
-  const rate = (value: number) => copy.nodeLoadRate(formatBytesMeasured(value));
-
-  return (
-    <div className="flex flex-col gap-5">
-      <div className="grid gap-x-8 sm:grid-cols-2">
-        <Fact
-          label={copy.nodeLoadBandwidth}
-          measured={fact(charts.bandwidth95 === null ? null : rate(charts.bandwidth95), at)}
+    <section className="quality-band" aria-labelledby={headingId}>
+      <header className="quality-head">
+        <div className="min-w-0">
+          <h2 id={headingId} className="text-section">{copy.nodeSections.load}</h2>
+          <p className="text-fine">{words.lead}</p>
+        </div>
+        <Segmented
+          label={words.rangeLabel}
+          value={range}
+          options={NODE_LOAD_RANGES.map((key) => ({ value: key, label: copy.nodeLoadRange[key] }))}
+          onChange={setRange}
         />
-        <Fact
-          label={copy.nodeLoadConnections}
-          measured={fact(
-            charts.peakConnections === null
-              ? null
-              : copy.nodeLoadConnCount(formatCount(charts.peakConnections)),
-            at,
-          )}
-        />
-      </div>
+      </header>
 
-      <div className="grid gap-x-8 gap-y-5 sm:grid-cols-2">
-        <Chart title={copy.nodeLoadCharts.cpu} points={charts.cpu} format={share} when={clock} />
-        <Chart title={copy.nodeLoadCharts.memory} points={charts.memory} format={share} when={clock} />
-        <Chart title={copy.nodeLoadCharts.netIn} points={charts.netIn} format={rate} when={clock} />
-        <Chart title={copy.nodeLoadCharts.netOut} points={charts.netOut} format={rate} when={clock} />
-      </div>
-
-      <p className="text-micro text-[var(--muted-foreground)]">{copy.nodeLoadNote}</p>
-    </div>
-  );
-}
-
-/** A chart, its name, and its peak — the one value that is never hidden. */
-function Chart({
-  title,
-  points,
-  format,
-  when,
-}: {
-  title: string;
-  points: readonly SeriesPoint[];
-  format: (value: number) => string;
-  when: (at: number) => string;
-}) {
-  const known = points.filter((point): point is { t: number; v: number } => point.v !== null);
-  const top = known.length === 0 ? null : Math.max(...known.map((point) => point.v));
-
-  return (
-    <div className="flex min-w-0 flex-col gap-1.5">
-      <div className="flex items-baseline gap-3">
-        <span className="text-micro text-[var(--muted-foreground)]">{title}</span>
-        <span className="ml-auto font-mono text-micro text-[var(--muted-foreground)]">
-          {top === null ? copy.missing : copy.nodeLoadPeak(format(top))}
-        </span>
-      </div>
-      {known.length < 2 ? (
-        <EmptyLine message={copy.nodeNoLoad} />
+      {state === 'ready' && charts ? (
+        <div className="node-load-grid">
+          <Panel title={words.cpu} description={words.cpuLead} {...panel}>
+            <LineChart
+              series={line('cpu', words.used, charts.cpu)}
+              domain={[0, 100]}
+              format={share}
+              label={words.chartLabel(words.cpu, rangeWord)}
+              {...chart}
+            />
+          </Panel>
+          <Panel title={words.memory} description={words.memoryLead} {...panel}>
+            <LineChart
+              series={line('memory', words.used, charts.memory)}
+              domain={[0, 100]}
+              format={share}
+              label={words.chartLabel(words.memory, rangeWord)}
+              {...chart}
+            />
+          </Panel>
+          <Panel
+            title={words.traffic}
+            description={words.trafficLead(charts.bandwidth95 === null ? copy.missing : rate(charts.bandwidth95))}
+            {...panel}
+          >
+            <LineChart
+              series={[
+                { key: 'in', name: words.in, points: charts.netIn },
+                { key: 'out', name: words.out, points: charts.netOut },
+              ]}
+              format={rate}
+              scale="bytes"
+              label={words.chartLabel(words.traffic, rangeWord)}
+              {...chart}
+            />
+          </Panel>
+          <Panel
+            title={words.connections}
+            description={words.connectionsLead(charts.peakConnections === null ? copy.missing : count(charts.peakConnections))}
+            {...panel}
+          >
+            <LineChart
+              series={line('connections', words.open, charts.connections)}
+              format={count}
+              label={words.chartLabel(words.connections, rangeWord)}
+              {...chart}
+            />
+          </Panel>
+        </div>
       ) : (
-        <TimeSeries points={points} format={format} when={when} label={title} />
+        <Panel title={copy.nodeSections.load} {...panel} />
       )}
-    </div>
+    </section>
   );
-}
-
-/** Everything in this block was measured by the agent, or was not measured. */
-function fact(value: string | null, at: number | null): Measured<string | null> {
-  const who = sourceWord('komari');
-  return value === null ? absent(who) : measured(value, at, who);
 }

@@ -1,0 +1,242 @@
+import Foundation
+import Darwin
+import SystemConfiguration
+
+/// Native observations only. The App may restore its legacy proxy snapshot,
+/// but an App Boolean never attests DNS, the TUN, Core or PF for an update.
+final class UpdateRuntime {
+    let core: CoreManager
+    let firewall: KillSwitchManager
+    let dns: ProtectedDNSManager
+    let power: PowerTransitionGate
+
+    init(core: CoreManager, firewall: KillSwitchManager, dns: ProtectedDNSManager, power: PowerTransitionGate) {
+        self.core = core
+        self.firewall = firewall
+        self.dns = dns
+        self.power = power
+    }
+
+    func observe() throws -> UpdateContractV1.Protection {
+        let pf = firewall.status()
+        let resolver = dns.status()
+        guard power.isAwake(), pf["ok"] as? Bool == true, resolver["ok"] as? Bool == true,
+              let live = pf["live"] as? Bool, let wanted = pf["wantArmed"] as? Bool,
+              let armed = pf["armed"] as? Bool else { return .unknown }
+        let running = core.status().running
+        if live && wanted && armed {
+            if running && resolver["configured"] as? Bool == true { return .connected }
+            if !running && resolver["snapshotPresent"] as? Bool == false && if_nametoindex("utun199") == 0 {
+                try dns.verifyRestored()
+                try verifyProxyRestored()
+                return .protectedOffline
+            }
+        } else if !live && !wanted && !armed && !running && resolver["snapshotPresent"] as? Bool == false
+                    && if_nametoindex("utun199") == 0 {
+            try dns.verifyRestored()
+            try verifyProxyRestored()
+            return .unprotected
+        }
+        return .unknown
+    }
+
+    func prepare(_ obligation: UpdateContractV1.Protection) throws -> UpdateContractV1.Protection {
+        if obligation == .connected || obligation == .protectedOffline { try retainBootstrap() }
+        try core.stop()
+        guard !core.status().running else { throw HelperFailure.invalid("Update Core stop was not observed.") }
+        for _ in 0..<50 where if_nametoindex("utun199") != 0 { usleep(100_000) }
+        guard if_nametoindex("utun199") == 0 else { throw HelperFailure.invalid("Update TUN stop was not observed.") }
+        // Includes per-service readback; failure retains snapshot. No app reply
+        // carries this restore, so a lost original is recorded for the next one.
+        _ = try dns.restore(deferringLossNotice: true)
+        try verifyProxyRestored()
+        // configd's active store converges asynchronously after commit/apply.
+        for _ in 0..<30 {
+            if (try? dns.verifyRestored()) != nil { break }
+            usleep(100_000)
+        }
+        return try observe()
+    }
+
+    func retainBootstrap() throws {
+        guard let previous = try firewall.loadState(), previous.armed else {
+            throw HelperFailure.invalid("Cannot recover unknown update protection.")
+        }
+        _ = try firewall.arm([
+            "apiHosts": previous.apiHosts,
+            "exitHints": [], "tunnelInterfaces": [], "proxyEndpoints": [],
+            "sessionDirectEndpoints": [], "tailscaleBootstrapEnabled": false,
+            "allowSystemResolution": false, "reviewedBundleDirect": false,
+            "bootstrapPins": previous.pinnedHosts.filter { previous.apiHosts.contains($0.key) },
+        ], commitAllowed: { self.power.isAwake() })
+    }
+
+    /// Prepare can refuse because another product's loopback proxy or DNS
+    /// cannot be proved to be Tono's (BRICK-M4). That must not keep PF up.
+    static func disconnectReleasesWhenPrepareFails(strictKillSwitchEnabled: Bool) -> Bool {
+        !strictKillSwitchEnabled
+    }
+
+    func disconnect() throws {
+        try disconnect(preserveAIHold: false)
+    }
+
+    func disconnectPreservingAIHold() throws {
+        try disconnect(preserveAIHold: true)
+    }
+
+    private func disconnect(preserveAIHold: Bool) throws {
+        let wanted = (firewall.status()["wantArmed"] as? Bool) == true
+        do {
+            _ = try prepare(wanted ? .protectedOffline : .unprotected)
+        } catch {
+            guard Self.disconnectReleasesWhenPrepareFails(strictKillSwitchEnabled: false) else {
+                throw error
+            }
+            let detail = (error as? HelperFailure)?.message ?? String(describing: error)
+            FileHandle.standardError.write(Data(
+                "tono: update disconnect continued after prepare failed: \(detail)\n".utf8
+            ))
+            try? core.stop()
+            try? dns.restore(deferringLossNotice: true)
+        }
+        _ = try power.whileAwake { try firewall.disarm(preserveAIHold: preserveAIHold) }
+        if (try? observe()) != .unprotected {
+            FileHandle.standardError.write(Data(
+                "tono: update disconnect released PF; observe is not unprotected\n".utf8
+            ))
+        }
+    }
+
+    func verifyRecovery(requiresTUN: Bool) throws -> UpdateContractV1.Protection {
+        let protection = try observe()
+        if protection == .connected {
+            guard !requiresTUN || if_nametoindex("utun199") != 0 else {
+                throw HelperFailure.invalid("Successor TUN is not present.")
+            }
+            // Probe through the actual owned runtime's selected exit, not an
+            // App claim or an unauthenticated localhost listener. The root
+            // config secret never appears in command arguments or diagnostics.
+            let bytes = try UpdateStorage.read(runtimeConfigPath, maximum: 8 * 1024 * 1024)
+            guard let config = try JSONSerialization.jsonObject(with: bytes) as? [String: Any],
+                  let experimental = config["experimental"] as? [String: Any],
+                  let controller = experimental["clash_api"] as? [String: Any],
+                  let address = controller["external_controller"] as? String, address.hasPrefix("127.0.0.1:"),
+                  let secret = controller["secret"] as? String,
+                  let url = URL(string: "http://\(address)/proxies/Tono-Exit/delay?url=https%3A%2F%2Fwww.gstatic.com%2Fgenerate_204&timeout=5000") else {
+                throw HelperFailure.invalid("Cannot inspect successor runtime configuration.")
+            }
+            var request = URLRequest(url: url, timeoutInterval: 7)
+            request.setValue("Bearer \(secret)", forHTTPHeaderField: "Authorization")
+            let result = UpdateProbeResult()
+            let session = URLSession(configuration: .ephemeral)
+            defer { session.invalidateAndCancel() }
+            let task = session.dataTask(with: request) { data, response, error in
+                result.finish(data: data, response: response, error: error)
+            }
+            task.resume()
+            guard result.wait() else { throw HelperFailure.invalid("Successor exit traffic was not verified.") }
+        }
+        return protection
+    }
+
+    /// Read persisted AND active settings for every network service. No
+    /// loopback HTTP/HTTPS/SOCKS proxy may remain pointed at the stopped Core.
+    /// Only a proxy that can be Tono's refuses (BRICK-M4): another product's
+    /// loopback proxy, or a VPN service with no Proxies entity at all, blocked
+    /// every native update. Tono sets a system proxy only as `127.0.0.1` on the
+    /// Core's mixed port; while that port cannot be read, any loopback proxy
+    /// still refuses.
+    func verifyProxyRestored() throws {
+        guard let prefs = SCPreferencesCreate(nil, "Tono update proxy readback" as CFString, nil),
+              let services = SCNetworkServiceCopyAll(prefs) as? [SCNetworkService],
+              let store = SCDynamicStoreCreate(nil, "Tono update proxy readback" as CFString, nil, nil) else {
+            throw HelperFailure.invalid("Cannot read system proxy state for update.")
+        }
+        var loopbackPorts: [Int?] = []
+        for service in services {
+            guard let serviceID = SCNetworkServiceGetServiceID(service) else {
+                throw HelperFailure.invalid("Cannot read a network service proxy configuration.")
+            }
+            // No Proxies protocol, or one with no configuration, is no persisted
+            // proxy; the live key is still read.
+            if let proto = SCNetworkServiceCopyProtocol(service, kSCNetworkProtocolTypeProxies),
+               let config = SCNetworkProtocolGetConfiguration(proto) as? [String: Any] {
+                loopbackPorts += Self.loopbackProxyPorts(config)
+            }
+            let key = "State:/Network/Service/\(serviceID as String)/Proxies"
+            if let live = SCDynamicStoreCopyValue(store, key as CFString) as? [String: Any] {
+                loopbackPorts += Self.loopbackProxyPorts(live)
+            }
+        }
+        guard !loopbackPorts.isEmpty else { return }
+        if Self.mayBeTonoProxy(loopbackPorts: loopbackPorts, corePorts: Self.coreProxyPorts()) {
+            throw HelperFailure.invalid("A loopback system proxy remains active; restore it before updating.")
+        }
+    }
+
+    /// The listen ports of the Core's mixed inbounds in the runtime config the
+    /// helper copied, or nil when they cannot be known: the file is missing
+    /// (after a reboot), unreadable or unparseable, or a mixed inbound has no
+    /// integer port.
+    static func coreProxyPorts(runtimeConfig: String = runtimeConfigPath) -> Set<Int>? {
+        guard let bytes = try? UpdateStorage.read(runtimeConfig, maximum: 8 * 1024 * 1024),
+              let parsed = try? JSONSerialization.jsonObject(with: bytes),
+              let object = goFoldedJSONKeys(parsed) as? [String: Any],
+              let inbounds = object["inbounds"] as? [[String: Any]] else { return nil }
+        var ports = Set<Int>()
+        for inbound in inbounds where inbound["type"] as? String == "mixed" {
+            guard let port = inbound["listen_port"] as? Int else { return nil }
+            ports.insert(port)
+        }
+        return ports
+    }
+
+    /// Whether any enabled loopback proxy entry may point at Tono's Core. Any
+    /// doubt counts: unknown Core ports, or an entry without a port.
+    static func mayBeTonoProxy(loopbackPorts: [Int?], corePorts: Set<Int>?) -> Bool {
+        guard !loopbackPorts.isEmpty else { return false }
+        guard let corePorts else { return true }
+        return loopbackPorts.contains { port in
+            guard let port else { return true }
+            return corePorts.contains(port)
+        }
+    }
+
+    /// The `<Name>Port` of every enabled loopback HTTP/HTTPS/SOCKS entry; nil
+    /// when the port is missing or not an integer.
+    private static func loopbackProxyPorts(_ config: [String: Any]) -> [Int?] {
+        var ports: [Int?] = []
+        for name in ["HTTP", "HTTPS", "SOCKS"] {
+            if (config[name + "Enable"] as? NSNumber)?.boolValue == true,
+               let host = config[name + "Proxy"] as? String,
+               ["127.0.0.1", "localhost", "::1"].contains(host.lowercased()) {
+                ports.append(config[name + "Port"] as? Int)
+            }
+        }
+        return ports
+    }
+}
+
+private final class UpdateProbeResult: @unchecked Sendable {
+    private let lock = NSLock()
+    private let done = DispatchSemaphore(value: 0)
+    private var verified = false
+
+    func finish(data: Data?, response: URLResponse?, error: Error?) {
+        lock.lock()
+        if error == nil, (response as? HTTPURLResponse)?.statusCode == 200,
+           let data, data.count < 4096,
+           let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let delay = object["delay"] as? Int, delay >= 0 { verified = true }
+        lock.unlock()
+        done.signal()
+    }
+
+    func wait() -> Bool {
+        guard done.wait(timeout: .now() + 8) == .success else { return false }
+        lock.lock()
+        defer { lock.unlock() }
+        return verified
+    }
+}

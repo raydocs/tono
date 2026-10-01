@@ -359,12 +359,14 @@ export async function bindingsOf(e: Env, name: string, listed: boolean | null, a
   const t = now();
   let exit: Row | null = null;
   try {
-    exit = await e.DB.prepare('SELECT last_roster_at, metering_last_seen_at FROM exit_nodes WHERE name = ?')
+    exit = await e.DB.prepare('SELECT status, last_roster_at, metering_last_seen_at FROM exit_nodes WHERE name = ?')
       .bind(name).first<Row>();
   } catch (error) {
     if (!missingTable(error)) throw error;
   }
-  const roster = nullInt(exit?.last_roster_at);
+  // A disabled node's token was rotated away (retire revokes it). Its last
+  // roster fetch is history, not proof the node can still pull one.
+  const roster = String(exit?.status ?? '') === 'active' ? nullInt(exit?.last_roster_at) : null;
   const metering = nullInt(exit?.metering_last_seen_at);
   const asOf = Math.max(roster ?? 0, metering ?? 0, nullInt(agent?.observedAt) ?? 0) || null;
   return {

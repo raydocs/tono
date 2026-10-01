@@ -4,7 +4,8 @@ extension AppState {
     // MARK: - Proxy Management
 
     /// Select a node/group by name or id.
-    func selectNode(_ nameOrId: String) {
+    func selectNode(_ nameOrId: String, releaseNetworkIfSwitchFails: Bool = false,
+                    forceRuntimeReplacement: Bool = false) {
         guard !isDisconnecting, switchingNodeId == nil else { return }
         guard connectionCoordinator.configReloadTask == nil else {
             errorMessage = String(
@@ -30,7 +31,7 @@ extension AppState {
             return
         }
 
-        if isConnected,
+        if isConnected, !forceRuntimeReplacement,
            let current = proxyService.activeNodeName,
            proxyTarget(current, matches: nodeName) {
             selectedNodeId = desiredNode?.id ?? ConfigPipeline.homeNodeName
@@ -81,12 +82,26 @@ extension AppState {
             ]
         )
         let switchGeneration = connectionCoordinator.protectionOperationGeneration
+        let routeOwner = ManagedExitCatalogOwnership.currentAccount
+        let routeCatalogDigest = managedCatalogDigest
         connectionCoordinator.nodeSwitchTask = Task { [weak self] in
             guard let self else { return }
             defer {
                 self.switchingNodeId = nil
                 if self.connectionCoordinator.protectionOperationGeneration == switchGeneration {
                     self.startPendingConfigReloadIfPossible()
+                } else if !self.isConnected,
+                          !self.connectionCoordinator.disconnectQueueRequestsRelease {
+                    // A preserve teardown (sleep, network change, policy
+                    // update) retired this switch. Its reconnect must go where
+                    // the switch was going, not back to the exit it was
+                    // leaving (X1-5). The session is already down, so this is
+                    // the next connect target, not a claim about the runtime.
+                    if nodeName == ConfigPipeline.homeNodeName {
+                        self.rememberSwitchedNode(nil, name: nodeName)
+                    } else if let current = self.localProxyNode(matching: nodeName) {
+                        self.rememberSwitchedNode(current, name: current.name)
+                    }
                 }
             }
             guard let api else { return }
@@ -99,6 +114,10 @@ extension AppState {
             // Until a verified selector has an exact endpoint set, a failed arm/rollback
             // cannot be treated as an ordinary UI error over a still-Connected session.
             var protectionTransitionInFlight = false
+            SingBoxDelayGate.suspend()
+            defer {
+                if self.isConnected { SingBoxDelayGate.prove() }
+            }
             do {
                 try checkSwitchCurrent()
                 let previousName = self.proxyService.activeNodeName
@@ -137,11 +156,13 @@ extension AppState {
                 // previous destination. Closing everything first dumped the
                 // session onto an unverified node.
                 let switchVerdict = await self.verifyProtectedConnection(
-                    controllerTask: Task {
-                        await self.advisoryControllerExitProbe(
-                            api: api,
-                            selectedExit: desiredNode
-                        )
+                    advisoryProbe: {
+                        Task {
+                            await self.advisoryControllerExitProbe(
+                                api: api,
+                                selectedExit: desiredNode
+                            )
+                        }
                     },
                     mixedPort: self.config.mixedPort,
                     generation: switchGeneration,
@@ -152,16 +173,21 @@ extension AppState {
                     self.lastClassifiedFailure = failure
                     throw CoreControllerError.protectionFailed(failure.userMessage)
                 }
+                SingBoxDelayGate.prove()
                 await self.closeConnectionsBoundToExit(previousName, using: api)
                 guard await self.connectionCoordinator.finishNodeSwitch(
                     generation: switchGeneration,
                     converge: { try await self.armSwitchKillSwitch(proxyEndpoints: nextEndpoints) },
                     commit: { self.rememberSwitchedNode(desiredNode, name: nodeName) },
                     recover: { error in
-                        self.recoverFailedNodeSwitch(desiredNode, name: nodeName, error: error)
+                        self.retireFailedRouteSuccess(nodeName, owner: routeOwner, generation: switchGeneration)
+                        self.recoverFailedNodeSwitch(desiredNode, name: nodeName, error: error,
+                                                     releaseNetwork: releaseNetworkIfSwitchFails)
                     }
                 ) else { return }
                 protectionTransitionInFlight = false
+                self.recordVerifiedRouteSuccess(nodeName, owner: routeOwner, generation: switchGeneration,
+                                                catalogDigest: routeCatalogDigest)
                 await proxyService.refresh()
                 try checkSwitchCurrent()
                 ConnectionTelemetryBuffer.shared.record(
@@ -197,6 +223,7 @@ extension AppState {
                 // be converted into an automatic protected reconnect.
                 guard !Task.isCancelled, !isDisconnecting,
                       self.connectionCoordinator.protectionOperationGeneration == switchGeneration else { return }
+                self.retireFailedRouteSuccess(nodeName, owner: routeOwner, generation: switchGeneration)
                 LocalTrafficAudit.shared.recordEvent(
                     "node_switch_failed",
                     details: [
@@ -208,7 +235,12 @@ extension AppState {
                     ]
                 )
                 if protectionTransitionInFlight || isRecoveringProtectedConnection {
-                    recoverFailedNodeSwitch(desiredNode, name: nodeName, error: error)
+                    recoverFailedNodeSwitch(
+                        desiredNode,
+                        name: nodeName,
+                        error: error,
+                        releaseNetwork: releaseNetworkIfSwitchFails
+                    )
                 } else {
                     errorMessage = error.localizedDescription
                 }
@@ -216,18 +248,40 @@ extension AppState {
         }
     }
 
-    private func recoverFailedNodeSwitch(_ node: ProxyNode?, name: String, error: Error) {
+    private func recoverFailedNodeSwitch(
+        _ node: ProxyNode?,
+        name: String,
+        error: Error,
+        releaseNetwork: Bool
+    ) {
         // Preserve the requested intent, but never claim the transition completed. The existing
         // disconnect owner withdraws Connected synchronously and drains this switch task before
-        // touching Core/PF. The reconnect loop waits for that teardown and never disarms.
-        rememberSwitchedNode(node, name: name)
-        disconnect(releaseKillSwitch: false)
-        errorMessage = error.localizedDescription
+        // touching Core/PF. A user switch still holds PF and retries. A catalog
+        // removal switch must not: the session could not move, and a non-strict
+        // host goes back to its original network instead of bootstrap.
+        let catalogRemovalPending = pendingRemovedCatalogExit
+        if catalogRemovalPending {
+            applyDefaultProxySelection(persist: true)
+        } else {
+            rememberSwitchedNode(node, name: name)
+        }
+        let release = (releaseNetwork || catalogRemovalPending) && ExhaustedFailureNetwork.afterFailure(
+            strictKillSwitchExplicit: false,
+            selectiveAiBlockReady: false
+        ).releasesSystemNetwork
+        disconnect(releaseKillSwitch: release, automaticFailureRelease: release)
         LocalTrafficAudit.shared.recordEvent(
             "node_switch_protection_convergence_failed",
-            details: ["error": error.localizedDescription]
+            details: ["error": error.localizedDescription, "released": String(release)]
         )
-        scheduleProtectedReconnect()
+        if release {
+            errorMessage = String(
+                localized: "The cloud server switch failed. This Mac is back on its normal internet."
+            )
+        } else {
+            errorMessage = error.localizedDescription
+            scheduleProtectedReconnect()
+        }
     }
 
     private func rememberSwitchedNode(_ node: ProxyNode?, name: String) {
@@ -382,17 +436,41 @@ extension AppState {
         if isConnected { reloadCoreConfig() }
     }
 
+    /// I/O boundaries for the config-reload transaction. Tests can model a
+    /// successful helper replacement followed by a controller-readiness error
+    /// without changing the host's Core, tunnel, or PF state.
+    struct ConfigReloadOperations {
+        var sync: (String, String) async throws -> String = { directory, digest in
+            try await PrivilegedRuntimeCoordinator.shared.syncCoreConfig(
+                configDirectory: directory, configSHA256: digest
+            )
+        }
+        var reload: (CoreControllerClient, String) async throws -> Void = { api, path in
+            try await api.reloadConfig(path: path)
+        }
+        var waitUntilReady: (CoreControllerClient) async throws -> Void = { api in
+            try await api.waitUntilReady()
+        }
+        var waitForTunnel: () async -> Bool = {
+            await AppState.waitForOwnedTunnelInterface()
+        }
+    }
+
     /// Rewrite config on disk and tell mihomo to reload it.
     ///
     /// `applyingDirectPolicy` switches the transaction into a lightweight
     /// pins-only refresh: the pending policy is armed and written instead of
     /// `activeDirectPolicy`, established connections are left alone (no
-    /// close-all, no exit health gate), the pending policy is committed only
-    /// after a successful reload, and a failure keeps the session up instead
-    /// of tearing it down fail-closed.
+    /// close-all, no exit health gate), and the pending policy is committed
+    /// only after the helper installs the new runtime. Controller readiness
+    /// is advisory for this refresh: the owned tunnel and exact PF convergence
+    /// must restore the DIRECT permit withheld during the replacement even
+    /// when the controller cannot answer. Earlier preparation failures keep
+    /// the session up for the next monitor retry.
     func reloadCoreConfig(
         applyingDirectPolicy pendingDirectPolicy:
-            ConfigPipeline.ManagedDirectRuntimePolicy? = nil
+            ConfigPipeline.ManagedDirectRuntimePolicy? = nil,
+        operations: ConfigReloadOperations = ConfigReloadOperations()
     ) {
         // Do not cancel a mutation after PF or Mihomo may already have accepted
         // part of it. Coalesce behind the active transaction instead; the most
@@ -451,8 +529,9 @@ extension AppState {
                 } else {
                     sessionEndpoints = effectiveDirectPolicy?.sessionEndpoints ?? []
                 }
+                let tunnelArmed = KillSwitchService.interfaceExists(ConfigPipeline.tonoTunInterface)
                 try await PrivilegedRuntimeCoordinator.shared.armKillSwitch(
-                    tunnelInterfaces: KillSwitchService.interfaceExists(ConfigPipeline.tonoTunInterface)
+                    tunnelInterfaces: tunnelArmed
                         ? [ConfigPipeline.tonoTunInterface]
                         : [],
                     proxyEndpoints: (try ConfigPipeline.dialEndpoints(for: selectedExit))
@@ -486,26 +565,61 @@ extension AppState {
                     finishConfigReloadRequest(requestID)
                     return
                 }
-                let runtimeConfigPath = try await PrivilegedRuntimeCoordinator.shared.syncCoreConfig(
-                    configDirectory: coreRuntime.configDirectory.path,
-                    configSHA256: digest
+                let runtimeConfigPath = try await operations.sync(
+                    coreRuntime.configDirectory.path, digest
                 )
                 try Task.checkCancellation()
-                try await api.reloadConfig(path: runtimeConfigPath)
+                if !pinsOnlyRefresh {
+                    try await operations.reload(api, runtimeConfigPath)
+                }
                 self.loadedRuntimeConfigDigest = digest
                 self.commitResidentialRouteAuditContext(
                     overlay: overlay,
                     nodes: runtimeNodes,
                     digest: digest
                 )
+                // /core/sync withheld the reviewed-bundle permit while the
+                // Core restarted without its utun (#608). It returns only
+                // through an arm with the flag once the new tunnel exists.
+                // The pins-only branch below already sends that arm.
+                if !pinsOnlyRefresh, tunnelArmed,
+                   effectiveDirectPolicy?.requiresAddressFreeDirectPermit == true {
+                    try Task.checkCancellation()
+                    guard await Self.waitForOwnedTunnelInterface() else {
+                        throw KillSwitchService.Error.commandFailed(
+                            "Mihomo did not recreate the owned \(ConfigPipeline.tonoTunInterface) interface."
+                        )
+                    }
+                    try await PrivilegedRuntimeCoordinator.shared.armKillSwitch(
+                        tunnelInterfaces: [ConfigPipeline.tonoTunInterface],
+                        proxyEndpoints: (try ConfigPipeline.dialEndpoints(for: selectedExit))
+                            + self.claudeHomeDialEndpoints(excluding: selectedExit),
+                        sessionDirectEndpoints: sessionEndpoints,
+                        tailscaleBootstrapEnabled: AppProfile.homeExitEnabled && transport != nil,
+                        reviewedBundleDirect: true
+                    )
+                }
 
                 if let pendingDirectPolicy {
-                    // Mihomo has accepted the new pins, so they are now the
+                    // /core/sync has installed the new pins, so they are now the
                     // authoritative in-memory policy even if a later PF call
                     // fails. Do not honor cancellation between this commit and
                     // exact PF convergence: disconnect is the only safe exit.
                     self.activeDirectPolicy = pendingDirectPolicy
                     pinsRuntimeCommitted = true
+                    // /core/sync above restarted the Core; like the full
+                    // reload (#608) the controller answers before the new
+                    // process recreates the owned utun. Wait for it before
+                    // the convergence arm names it, or a routine pins refresh
+                    // fails validateTunnels and lands in the fatal catch.
+                    // An unstructured Task does not inherit cancellation, so a
+                    // cancelled refresh still waits instead of returning false
+                    // at once (this window must not honor cancellation).
+                    guard await Task(operation: { await operations.waitForTunnel() }).value else {
+                        throw KillSwitchService.Error.commandFailed(
+                            "Mihomo did not recreate the owned \(ConfigPipeline.tonoTunInterface) interface."
+                        )
+                    }
                     // The pre-reload arm intentionally allowed old ∪ new so
                     // the old runtime could keep dialing during the swap. Once
                     // Mihomo commits the new config, immediately remove the old
@@ -529,7 +643,7 @@ extension AppState {
                     )
                     // Let the controller answer before the connection
                     // close below asks it anything.
-                    try? await api.waitUntilReady()
+                    try? await operations.waitUntilReady(api)
                     LocalTrafficAudit.shared.recordEvent(
                         "managed_direct_pins_refreshed",
                         details: [
@@ -566,46 +680,74 @@ extension AppState {
                 }
                 finishConfigReloadRequest(requestID)
             } catch is CancellationError {
-                guard pinsRuntimeCommitted, !isDisconnecting else { return }
+                guard pinsRuntimeCommitted, !isDisconnecting,
+                      connectionCoordinator.configReloadRequestID == requestID else { return }
                 LocalTrafficAudit.shared.recordEvent(
                     "managed_direct_pf_convergence_cancelled"
                 )
-                disconnect(releaseKillSwitch: false)
-                errorMessage = String(
-                    localized: "Secure WeChat routing was interrupted while updating; Kill Switch is blocking traffic while Tono retries."
+                finishConfigReloadRequest(requestID, startPending: false)
+                await applyExhaustedArmedFailure(
+                    message: ConnectionFailurePresentation.userFacingMessage(
+                        classified: lastClassifiedFailure
+                    ),
+                    resumeWhenReachable: true
                 )
-                scheduleProtectedReconnect(immediate: true)
             } catch {
-                // Once Mihomo accepted new pins, neither cancellation nor a
-                // superseding reload may leave PF at the temporary union. This
-                // branch must win over the ordinary stale-request guards.
+                if pendingRemovedCatalogExit, !Task.isCancelled, !isDisconnecting,
+                   connectionCoordinator.configReloadRequestID == requestID {
+                    // A failed old owner cannot retry its retired exit or keep
+                    // bootstrap PF while the catalog replacement is pending.
+                    applyDefaultProxySelection(persist: true)
+                    finishConfigReloadRequest(requestID, startPending: false)
+                    disconnect(releaseKillSwitch: true, automaticFailureRelease: true)
+                    return
+                }
+                // A current owner that installed new pins must retire the
+                // temporary PF union even when cancelled. A newer disconnect
+                // or update owner already owns that cleanup.
                 if pinsOnlyRefresh, pinsRuntimeCommitted {
-                    guard !isDisconnecting else { return }
+                    guard !isDisconnecting,
+                          connectionCoordinator.configReloadRequestID == requestID else { return }
                     // The core is already using the new exact pins but PF could
-                    // not converge from old ∪ new to the new set. Stop the core
-                    // and return to bootstrap-only protection; treating this as
-                    // a harmless background failure would retain stale direct
-                    // permissions indefinitely.
+                    // not converge from old ∪ new to the new set. Retire this
+                    // owner and stop the core before selectively releasing PF;
+                    // neither stale DIRECT permits nor bootstrap protection
+                    // may remain while ordinary internet waits for recovery.
                     LocalTrafficAudit.shared.recordEvent(
                         "managed_direct_pf_convergence_failed",
                         details: ["error": String(describing: error)]
                     )
-                    disconnect(releaseKillSwitch: false)
-                    errorMessage = String(
-                        localized: "Secure WeChat routing could not finish updating; Kill Switch is blocking traffic while Tono retries."
+                    finishConfigReloadRequest(requestID, startPending: false)
+                    await applyExhaustedArmedFailure(
+                        message: ConnectionFailurePresentation.userFacingMessage(
+                            classified: lastClassifiedFailure
+                        ),
+                        resumeWhenReachable: true
                     )
-                    scheduleProtectedReconnect(immediate: true)
                     return
                 }
                 guard !Task.isCancelled, !isDisconnecting else { return }
                 guard connectionCoordinator.configReloadRequestID == requestID else { return }
-                if ownedRuntime || pinsOnlyRefresh {
-                    finishConfigReloadRequest(requestID, startPending: false)
-                    disconnect(releaseKillSwitch: false)
-                    errorMessage = String(
-                        localized: "Updated cloud route failed; Kill Switch is blocking traffic while Tono retries. \(error.localizedDescription)"
+                if pinsOnlyRefresh {
+                    // A background pin refresh must never take the session
+                    // down. The armed endpoint set is a superset of the
+                    // active one, the old config is still in force, and the
+                    // next monitor cycle will retry. This is not an explicit
+                    // strict kill switch: disconnecting here holds PF in
+                    // bootstrap and cuts ordinary internet.
+                    LocalTrafficAudit.shared.recordEvent(
+                        "managed_direct_refresh_failed",
+                        details: ["error": String(describing: error)]
                     )
-                    scheduleProtectedReconnect()
+                    finishConfigReloadRequest(requestID)
+                } else if ownedRuntime {
+                    finishConfigReloadRequest(requestID, startPending: false)
+                    await applyExhaustedArmedFailure(
+                        message: ConnectionFailurePresentation.userFacingMessage(
+                            classified: lastClassifiedFailure
+                        ),
+                        resumeWhenReachable: true
+                    )
                 } else {
                     finishConfigReloadRequest(requestID)
                     errorMessage = String(
@@ -617,8 +759,8 @@ extension AppState {
     }
 
     /// Completes one serialized runtime mutation and starts the newest queued
-    /// request. Pin changes take precedence because a full rewrite will then
-    /// naturally include the newly committed exact direct policy.
+    /// request. Accepted authorization takes precedence over pin snapshots;
+    /// a full rewrite then includes the newly committed exact direct policy.
     func finishConfigReloadRequest(
         _ requestID: Int,
         startPending: Bool = true
@@ -627,6 +769,8 @@ extension AppState {
         connectionCoordinator.configReloadTask = nil
         guard startPending, isConnected, !isDisconnecting else {
             if !startPending {
+                pendingOptionalPolicyReload = false
+                pendingRemovedCatalogExit = false
                 pendingDirectPolicyReload = nil
                 pendingFullConfigReload = false
             }
@@ -638,7 +782,23 @@ extension AppState {
     private func startPendingConfigReloadIfPossible() {
         guard connectionCoordinator.configReloadTask == nil, switchingNodeId == nil,
               isConnected, !isDisconnecting else { return }
-        if let policy = pendingDirectPolicyReload {
+        if pendingRemovedCatalogExit {
+            pendingRemovedCatalogExit = false
+            // The catalog switch writes the complete latest configuration,
+            // including full rewrites queued while the old owner was busy.
+            pendingFullConfigReload = false
+            settleRemovedCatalogExit(wasConnected: true)
+            if connectionCoordinator.configReloadTask == nil, switchingNodeId == nil {
+                startPendingConfigReloadIfPossible()
+            }
+        } else if pendingOptionalPolicyReload {
+            scheduleBackgroundOptionalPolicy()
+            // An empty document with no active grants needs no replacement,
+            // but any queued full rewrite must still drain.
+            if connectionCoordinator.configReloadTask == nil {
+                startPendingConfigReloadIfPossible()
+            }
+        } else if let policy = pendingDirectPolicyReload {
             pendingDirectPolicyReload = nil
             reloadCoreConfig(applyingDirectPolicy: policy)
         } else if pendingFullConfigReload {

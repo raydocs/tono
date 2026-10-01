@@ -1,5 +1,5 @@
 {
-  "version": "0.0.73",
+  "version": "0.0.74",
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "bundle": {
     "active": true,
@@ -12,16 +12,17 @@
       "icons/icon.ico"
     ],
     "resources": [
-      "resources/enableLoopback.exe",
       "resources/core-identity.json",
       "resources/tono-service.exe",
       "resources/tono-service-install.exe",
       "resources/tono-service-uninstall.exe",
-      "resources/core-sha256.txt"
+      "resources/core-sha256.txt",
+      "resources/sing-box-sha256.txt"
     ],
     "publisher": "Raydocs",
     "externalBin": [
-      "sidecar/tono-core"
+      "sidecar/tono-core",
+      "sidecar/sing-box"
     ],
     "copyright": "GNU General Public License v3.0",
     "category": "DeveloperTool",
@@ -55,6 +56,9 @@
     }
   },
   "plugins": {
+    "shell": {
+      "open": "https://ip\\.cx/webrtc"
+    },
     "updater": {
       "endpoints": [],
       "pubkey": ""

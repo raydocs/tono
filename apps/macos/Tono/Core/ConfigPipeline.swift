@@ -216,6 +216,27 @@ nonisolated struct ConfigPipeline {
       - AND,((NETWORK,UDP),(DST-PORT,5353)),DIRECT
 
     """
+    /// Prefixes Darwin `auto_route` must not install via utun. sing-tun's
+    /// Darwin table is `1.0.0.0/8` … `128.0.0.0/1`; anything in that span that
+    /// is missing here is delivered to the TUN. A later DIRECT rule cannot
+    /// turn a captured limited broadcast or multicast packet back into a
+    /// link transmission. Loopback is not listed: `lo0`'s connected route is
+    /// more specific than those aggregates. Carrier NAT (`100.64.0.0/10`) is
+    /// not listed: excluding the whole block would send off-link carrier
+    /// addresses out the physical interface. This list is static. PF is not
+    /// taught new prefixes here; a dynamic on-link allow is a ruleset change
+    /// that has to be proven on a Mac before it may arm.
+    static let tunRouteExcludeCIDRs = [
+        "10.0.0.0/8",
+        "172.16.0.0/12",
+        "192.168.0.0/16",
+        "169.254.0.0/16",
+        "224.0.0.0/4",
+        "255.255.255.255/32",
+        "fe80::/10",
+        "fc00::/7",
+        "ff00::/8",
+    ]
     static let claudeHomeGroupName = "Tono-Claude-Home"
     static let homeResidentialProxyName = "Tono-Home-Residential"
     static let directProxyName = "Tono-China-Direct"
@@ -265,6 +286,13 @@ nonisolated struct ConfigPipeline {
     /// generic 204 already distinguishes a stalled hop from a healthy one.
     static let claudeHomeHealthURL = "https://www.gstatic.com/generate_204"
 
+    /// Dedicated Model Studio APIs within the otherwise DIRECT Alibaba tree.
+    /// Regional, coding, workspace, trial and token-plan hosts are descendants.
+    static let dedicatedModelAPISuffixes = [
+        "dashscope.aliyuncs.com", "dashscope-intl.aliyuncs.com",
+        "dashscope-us.aliyuncs.com", "maas.aliyuncs.com",
+    ]
+
     /// Assistant providers that must egress through the residential hop. They
     /// score datacenter ranges as abuse, so a shared cloud exit invites
     /// challenges and blocks that a residential identity avoids.
@@ -285,7 +313,7 @@ nonisolated struct ConfigPipeline {
     /// traffic onto a consumer uplink. `gstatic.com` would be actively harmful:
     /// it is this group's own liveness probe, and sending the probe through the
     /// hop it is meant to test would mask exactly the stalls we check for.
-    static let assistantHomeDomainSuffixes = [
+    static let assistantHomeDomainSuffixes = dedicatedModelAPISuffixes + [
         // Anthropic
         "anthropic.com",
         "claude.ai",

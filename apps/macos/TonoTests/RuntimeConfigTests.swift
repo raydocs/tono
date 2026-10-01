@@ -14,4 +14,48 @@ final class RuntimeConfigTests: XCTestCase {
         XCTAssertEqual(object["allow-lan"] as? Bool, false)
         XCTAssertNil(object["socksPort"])
     }
+
+    func testLaunchRemovesThe0072MihomoRuntimeWithItsCredentials() throws {
+        let support = FileManager.default.temporaryDirectory
+            .appendingPathComponent("tono-legacy-runtime-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: support) }
+        let config = support.appendingPathComponent("config", isDirectory: true)
+        try FileManager.default.createDirectory(at: config, withIntermediateDirectories: true)
+        let legacy = config.appendingPathComponent("config.yaml")
+        try Data("secret: \"controller\"\nproxies:\n  - password: \"account-a-socks5\"\n".utf8).write(to: legacy)
+        let current = config.appendingPathComponent("config.json")
+        try Data("{}".utf8).write(to: current)
+
+        ConfigStorage.removeLegacyRuntimeConfig(in: support)
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: legacy.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: current.path), "the sing-box runtime is not legacy")
+    }
+
+    @MainActor
+    func testCloudOnlyStartupDiscardsLegacyPIDReusedByAnotherProcess() async throws {
+        let support = FileManager.default.temporaryDirectory
+            .appendingPathComponent("tono-stale-sidecar-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: support) }
+        let root = support.appendingPathComponent("Tono/Sidecar", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let pidFile = root.appendingPathComponent("tailscaled.pid")
+
+        // A live process from this account stands in for a reused legacy PID.
+        let unrelated = Process()
+        unrelated.executableURL = URL(fileURLWithPath: "/bin/sleep")
+        unrelated.arguments = ["60"]
+        try unrelated.run()
+        defer {
+            if unrelated.isRunning { unrelated.terminate() }
+            unrelated.waitUntilExit()
+        }
+        try String(unrelated.processIdentifier).write(to: pidFile, atomically: true, encoding: .utf8)
+        let sidecar = TonoSidecarService(applicationSupport: support)
+
+        try await sidecar.prepareCloudOnly()
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: pidFile.path))
+        XCTAssertTrue(unrelated.isRunning, "a reused PID must not be signaled")
+    }
 }

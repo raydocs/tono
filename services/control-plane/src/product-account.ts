@@ -188,14 +188,30 @@ export async function writeOpsAudit(
   }
 }
 
-export async function markFirstEntitled(e: Env, userId: string, at: number) {
-  await e.DB.prepare(
+function markFirstEntitledStatement(e: Env, userId: string, at: number, onlyIfPreviousStatementChanged: boolean) {
+  return e.DB.prepare(
     `UPDATE users
      SET first_entitled_at = COALESCE(first_entitled_at, ?),
          plan = COALESCE(plan, ?),
          updated_at = ?
-     WHERE id = ?`,
-  ).bind(at, PRODUCT_CLAUDE, at, userId).run();
+     WHERE id = ?${onlyIfPreviousStatementChanged ? ' AND changes() > 0' : ''}`,
+  ).bind(at, PRODUCT_CLAUDE, at, userId);
+}
+
+function productEventStatement(
+  e: Env,
+  accountId: string,
+  userId: string | null,
+  type: string,
+  detail: string | null,
+  replacedBy: string | null = null,
+  onlyIfPreviousStatementChanged = false,
+) {
+  return e.DB.prepare(
+    `INSERT INTO product_account_events(
+       id, account_id, user_id, type, at, detail, replaced_by_account_id
+     ) SELECT ?, ?, ?, ?, ?, ?, ?${onlyIfPreviousStatementChanged ? ' WHERE changes() > 0' : ''}`,
+  ).bind(id(), accountId, userId, type, now(), detail, replacedBy);
 }
 
 export async function recordProductEvent(
@@ -206,11 +222,7 @@ export async function recordProductEvent(
   detail: string | null,
   replacedBy: string | null = null,
 ) {
-  await e.DB.prepare(
-    `INSERT INTO product_account_events(
-       id, account_id, user_id, type, at, detail, replaced_by_account_id
-     ) VALUES(?, ?, ?, ?, ?, ?, ?)`,
-  ).bind(id(), accountId, userId, type, now(), detail, replacedBy).run();
+  await productEventStatement(e, accountId, userId, type, detail, replacedBy).run();
 }
 
 export async function assignedProductForUser(e: Env, userId: string) {
@@ -226,6 +238,81 @@ export async function replaceCountForUser(e: Env, userId: string) {
   return Number(row?.total ?? 0);
 }
 
+type ProductAssignment = {
+  accountId: string;
+  // The statement that takes the account (pooled → assigned, or the new row).
+  // Every later statement runs only if the one before it changed a row, so a
+  // lost race leaves no event, entitlement or audit behind.
+  statements: D1PreparedStatement[];
+};
+
+function productAssignment(
+  e: Env,
+  userId: string,
+  accountRef: string,
+  pooledId: string | null,
+  openedAt: number,
+  notes: string | null,
+  actorEmail: string | undefined,
+  t: number,
+  afterPreviousChange: boolean,
+): ProductAssignment {
+  const guard = afterPreviousChange ? ' AND changes() > 0' : '';
+  if (pooledId) {
+    return {
+      accountId: pooledId,
+      statements: [
+        e.DB.prepare(
+          `UPDATE product_accounts
+           SET user_id = ?, status = 'assigned', opened_at = COALESCE(opened_at, ?), notes = COALESCE(?, notes), updated_at = ?
+           WHERE id = ? AND status = 'pooled'${guard}`,
+        ).bind(userId, openedAt, notes, t, pooledId),
+        productEventStatement(e, pooledId, userId, 'assigned', null, null, true),
+        markFirstEntitledStatement(e, userId, openedAt, true),
+        opsAuditStatement(e, actorEmail, 'product.assign', 'product_account', pooledId, `assigned ${accountRef}`, true),
+      ],
+    };
+  }
+  const accountId = id();
+  return {
+    accountId,
+    statements: [
+      e.DB.prepare(
+        `INSERT INTO product_accounts(
+           id, user_id, product, account_ref, status, opened_at, closed_at, close_reason, notes, created_at, updated_at
+         ) SELECT ?, ?, ?, ?, 'assigned', ?, NULL, NULL, ?, ?, ?${afterPreviousChange ? ' WHERE changes() > 0' : ''}`,
+      ).bind(accountId, userId, PRODUCT_CLAUDE, accountRef, openedAt, notes, t, t),
+      productEventStatement(e, accountId, userId, 'opened', null, null, true),
+      productEventStatement(e, accountId, userId, 'assigned', null, null, true),
+      markFirstEntitledStatement(e, userId, openedAt, true),
+      opsAuditStatement(e, actorEmail, 'product.open', 'product_account', accountId, `opened ${accountRef}`, true),
+    ],
+  };
+}
+
+function assignmentConflict(error: unknown): ApiError {
+  if (String(error).includes('product_accounts.user_id')) {
+    return new ApiError(409, 'PRODUCT_ALREADY_ASSIGNED', 'User already has an assigned Claude account; replace it instead');
+  }
+  return new ApiError(409, 'ACCOUNT_REF_IN_USE', 'This Claude account is already registered');
+}
+
+// The read-only refusals of createAssignedProductAccount. Onboarding runs them
+// before its first write, so a request that will 409 changes nothing.
+export async function assertProductAssignable(e: Env, userId: string, accountRef: string) {
+  const current = await assignedProductForUser(e, userId);
+  if (current) {
+    throw new ApiError(409, 'PRODUCT_ALREADY_ASSIGNED', 'User already has an assigned Claude account; replace it instead');
+  }
+  const clash = await e.DB.prepare(
+    'SELECT id, status FROM product_accounts WHERE account_ref = ?',
+  ).bind(accountRef).first<Row>();
+  if (clash && String(clash.status) !== 'pooled') {
+    throw new ApiError(409, 'ACCOUNT_REF_IN_USE', 'This Claude account is already registered');
+  }
+  return clash;
+}
+
 export async function createAssignedProductAccount(
   e: Env,
   userId: string,
@@ -234,44 +321,21 @@ export async function createAssignedProductAccount(
   notes: string | null,
   actorEmail: string | undefined,
 ) {
-  const current = await assignedProductForUser(e, userId);
-  if (current) {
-    throw new ApiError(409, 'PRODUCT_ALREADY_ASSIGNED', 'User already has an assigned Claude account; replace it instead');
-  }
-  const clash = await e.DB.prepare(
-    'SELECT id, status FROM product_accounts WHERE account_ref = ?',
-  ).bind(accountRef).first<Row>();
-  const t = now();
-  if (clash) {
-    if (String(clash.status) !== 'pooled') {
-      throw new ApiError(409, 'ACCOUNT_REF_IN_USE', 'This Claude account is already registered');
-    }
-    await e.DB.prepare(
-      `UPDATE product_accounts
-       SET user_id = ?, status = 'assigned', opened_at = COALESCE(opened_at, ?), notes = COALESCE(?, notes), updated_at = ?
-       WHERE id = ? AND status = 'pooled'`,
-    ).bind(userId, openedAt, notes, t, clash.id).run();
-    await recordProductEvent(e, String(clash.id), userId, 'assigned', null);
-    await markFirstEntitled(e, userId, openedAt);
-    await writeOpsAudit(e, actorEmail, 'product.assign', 'product_account', String(clash.id), `assigned ${accountRef}`);
-    const row = await e.DB.prepare('SELECT * FROM product_accounts WHERE id = ?').bind(clash.id).first<Row>();
-    return row!;
-  }
-  const accountId = id();
+  const clash = await assertProductAssignable(e, userId, accountRef);
+  const assignment = productAssignment(
+    e, userId, accountRef, clash ? String(clash.id) : null, openedAt, notes, actorEmail, now(), false,
+  );
+  let results: D1Result[];
   try {
-    await e.DB.prepare(
-      `INSERT INTO product_accounts(
-         id, user_id, product, account_ref, status, opened_at, closed_at, close_reason, notes, created_at, updated_at
-       ) VALUES(?, ?, ?, ?, 'assigned', ?, NULL, NULL, ?, ?, ?)`,
-    ).bind(accountId, userId, PRODUCT_CLAUDE, accountRef, openedAt, notes, t, t).run();
-  } catch {
+    results = await e.DB.batch(assignment.statements);
+  } catch (error) {
+    throw assignmentConflict(error);
+  }
+  // A concurrent assignment took the pooled row first; nothing else was written.
+  if (!results[0].meta.changes) {
     throw new ApiError(409, 'ACCOUNT_REF_IN_USE', 'This Claude account is already registered');
   }
-  await recordProductEvent(e, accountId, userId, 'opened', null);
-  await recordProductEvent(e, accountId, userId, 'assigned', null);
-  await markFirstEntitled(e, userId, openedAt);
-  await writeOpsAudit(e, actorEmail, 'product.open', 'product_account', accountId, `opened ${accountRef}`);
-  const row = await e.DB.prepare('SELECT * FROM product_accounts WHERE id = ?').bind(accountId).first<Row>();
+  const row = await e.DB.prepare('SELECT * FROM product_accounts WHERE id = ?').bind(assignment.accountId).first<Row>();
   return row!;
 }
 
@@ -315,16 +379,40 @@ export async function replaceProductAccount(
     throw new ApiError(409, 'ACCOUNT_REF_IN_USE', 'This Claude account is already registered');
   }
   const t = now();
-  await e.DB.prepare(
+  const pooledId = clash ? String(clash.id) : null;
+  // Retire and reassign in one batch. The retire only runs while the target
+  // ref is still free (pooled, or unregistered), and everything after it is
+  // chained on changes(), so a lost race or failure leaves the current account
+  // assigned instead of leaving the user with none.
+  const retire = e.DB.prepare(
     `UPDATE product_accounts
      SET status = 'retired', closed_at = ?, close_reason = 'rotated', updated_at = ?
-     WHERE id = ?`,
-  ).bind(t, t, accountId).run();
-  const next = await createAssignedProductAccount(e, userId, nextRef, t, notes, actorEmail);
-  await recordProductEvent(e, accountId, userId, 'replaced', null, String(next.id));
-  await writeOpsAudit(
-    e, actorEmail, 'product.replace', 'product_account', String(next.id),
-    `replaced ${current.account_ref}`,
-  );
+     WHERE id = ? AND status = 'assigned' AND ${pooledId
+    ? "EXISTS (SELECT 1 FROM product_accounts WHERE id = ? AND status = 'pooled')"
+    : 'NOT EXISTS (SELECT 1 FROM product_accounts WHERE account_ref = ?)'}`,
+  ).bind(t, t, accountId, pooledId ?? nextRef);
+  const assignment = productAssignment(e, userId, nextRef, pooledId, t, notes, actorEmail, t, true);
+  let results: D1Result[];
+  try {
+    results = await e.DB.batch([
+      retire,
+      ...assignment.statements,
+      productEventStatement(e, accountId, userId, 'replaced', null, assignment.accountId, true),
+      opsAuditStatement(
+        e, actorEmail, 'product.replace', 'product_account', assignment.accountId,
+        `replaced ${current.account_ref}`, true,
+      ),
+    ]);
+  } catch (error) {
+    throw assignmentConflict(error);
+  }
+  if (!results[0].meta.changes) {
+    const still = await e.DB.prepare('SELECT status FROM product_accounts WHERE id = ?').bind(accountId).first<Row>();
+    if (String(still?.status) !== 'assigned') {
+      throw new ApiError(409, 'ACCOUNT_NOT_ASSIGNED', 'Only an assigned account can be replaced');
+    }
+    throw new ApiError(409, 'ACCOUNT_REF_IN_USE', 'This Claude account is already registered');
+  }
+  const next = (await e.DB.prepare('SELECT * FROM product_accounts WHERE id = ?').bind(assignment.accountId).first<Row>())!;
   return { previous: (await e.DB.prepare('SELECT * FROM product_accounts WHERE id = ?').bind(accountId).first<Row>())!, current: next };
 }

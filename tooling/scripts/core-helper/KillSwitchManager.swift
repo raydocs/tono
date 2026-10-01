@@ -1,10 +1,16 @@
 import Foundation
 import Darwin
 
+let selectiveRecoveryStatePath = "/Library/Application Support/Tono/selective-recovery.state"
 let killSwitchStatePath = "/Library/Application Support/Tono/killswitch.state"
 let killSwitchPFPath = "/Library/Application Support/Tono/pf.tono.conf"
+/// The `pfctl -E` token this helper holds, bound to its boot session.
+let killSwitchPFReferencePath = "/Library/Application Support/Tono/pf.reference"
 let killSwitchMainPFPath = "/etc/pf.conf"
 let killSwitchMainBackupPath = "/etc/pf.conf.tono-backup"
+/// Main ruleset loaded instead of /etc/pf.conf when the emergency block cannot
+/// be installed through it. Present only while that fallback is active.
+let killSwitchStandaloneMainPath = "/Library/Application Support/Tono/pf.tono-main.conf"
 let killSwitchHostsPath = "/etc/hosts"
 let killSwitchHostsBackupPath = "/etc/hosts.tono-backup"
 let killSwitchAnchor = "tono.killswitch"
@@ -79,6 +85,22 @@ struct HelperCommandResult {
     }
 }
 
+/// A command's output, read on the drain thread. `data` is read only after
+/// `wait` succeeds, and the semaphore orders the write before that read.
+final class HelperCommandOutput: @unchecked Sendable {
+    private let drained = DispatchSemaphore(value: 0)
+    private(set) var data = Data()
+
+    func finish(_ data: Data) {
+        self.data = data
+        drained.signal()
+    }
+
+    func wait(until end: DispatchTime) -> Bool {
+        drained.wait(timeout: end) == .success
+    }
+}
+
 final class KillSwitchManager {
     /// Ceiling for the persisted recovery pin set of a single host. Well under
     /// the 128-address limit `validateAddresses` enforces when those pins are
@@ -99,11 +121,49 @@ final class KillSwitchManager {
     /// skip the machine-wide state flush that would otherwise sever every
     /// established flow on the host. nil always forces the safe full flush.
     var lastLoadedPassRules: Set<String>?
+    /// Set when the liveness supervisor had to reinstall PF because it was no
+    /// longer filtering (disabled, or the Tono anchor was gone) while armed.
+    /// Cleared only by the next committed arm or a disarm, so the app can read
+    /// it without mutating anything and must re-arm to clear it.
+    var repairedSinceArm = false
+    /// Set when a failed reviewed-bundle withhold could not put the rule file
+    /// back either: the file may read as already withheld while the kernel
+    /// still holds the permit. Cleared only by the next committed arm, which
+    /// loads a ruleset it rendered in full; until then every withhold fails.
+    var reviewedBundleFileUnconfirmed = false
+    /// Bumped when an arm or a release commits. The helper's idle loop resets
+    /// its core-down counter from this, so a connect that has just armed is
+    /// not released by a counter that already reached the threshold.
+    private(set) var openNetworkEpoch: UInt64 = 0
+    private var selectiveRecoveryReconciled = false
+    /// Idle-loop checks, 10s apart, with the Core continuously down before a
+    /// leftover kill switch is released. Three checks is about 30s: long
+    /// enough for a connect to start the Core, short enough that a dead Core
+    /// does not keep the host offline.
+    static let coreDownRestoreThreshold = 3
 
     init(allowedUID: uid_t) throws {
         self.allowedUID = allowedUID
         try Self.ensureRootDirectory("/Library/Application Support/Tono", permissions: 0o700)
+        // Before any rule write. A leftover block file must not stay attached
+        // to the boot load. This does not re-arm: a saved state file is not a
+        // strict kill switch, and the previous Core is still alive until
+        // SocketServer constructs CoreManager.
+        do {
+            _ = try Self.ensureMainHook()
+        } catch {
+            let detail = (error as? HelperFailure)?.message ?? String(describing: error)
+            FileHandle.standardError.write(Data(
+                "tono: /etc/pf.conf hook not migrated: \(detail)\n".utf8
+            ))
+        }
         try restoreAtLaunch()
+    }
+
+    /// Whether the idle loop should release a leftover kill switch. The Core
+    /// has already been observed down for `consecutiveCoreDownChecks` periods.
+    static func watchdogShouldRestoreNetwork(consecutiveCoreDownChecks: Int) -> Bool {
+        consecutiveCoreDownChecks >= coreDownRestoreThreshold
     }
 
     func arm(
@@ -276,10 +336,15 @@ final class KillSwitchManager {
                 + "protection remains fail-closed."
             )
         }
+        var load = KernelLoadOutcome.notIssued
+        do {
+        // Retire an earlier explicit release before saving a new armed intent.
+        // If this arm is interrupted, its fallback remains selective.
+        try Self.saveSelectiveRecoveryDisposition(true)
         let renderedRules = try Self.writeRules(state: state, allowedUID: allowedUID)
         // Persist fail-closed intent before activating the new rules.
         try saveState(state)
-        try Self.ensureHostsMappings(state: state)
+        Self.pinHostsIfUsable(state: state)
         // A machine-wide state flush is a security requirement only when the
         // new rule set revokes a previously granted permission. Node switches
         // and config reloads re-arm with identical or wider rules; flushing
@@ -295,9 +360,17 @@ final class KillSwitchManager {
         // measuring against a ruleset that was never fully live — which would
         // hide a withdrawn permit and leave its states passing.
         lastLoadedPassRules = nil
-        try Self.ensureAnchorLoaded(disposal: disposal)
+        try Self.ensureAnchorLoaded(disposal: disposal, loadOutcome: &load)
         lastLoadedPassRules = passRules
         stateGeneration &+= 1
+        openNetworkEpoch &+= 1
+        repairedSinceArm = false
+        reviewedBundleFileUnconfirmed = false
+        // The tunnel is up. Drop the crash-time sinkhole so AI names resolve
+        // through it. Failure here does not roll back the block.
+        try? Self.clearSelectiveRecoveryDisposition()
+        selectiveRecoveryReconciled = false
+        SelectiveFailOpenInstaller.removeBestEffort()
         return response(
             armed: true,
             wanted: true,
@@ -308,6 +381,50 @@ final class KillSwitchManager {
                 return 0
             }()
         )
+        } catch {
+            // A load that pfctl accepted, or that never answered, may already
+            // be in the kernel. macOS has no strict kill switch, so that
+            // partial commit must not stay until the next helper start.
+            // A failure before the load, or a load pfctl rejected, left the
+            // previous rules in place: flushing them opens the physical NIC
+            // under a Core that is still running.
+            if Self.failedCommitReleasesInstalledBlock(
+                load: load,
+                strictKillSwitchEnabled: false
+            ) {
+                Self.releaseInstalledBlock()
+            }
+            throw error
+        }
+    }
+
+    /// True unless the user explicitly enabled a strict kill switch. macOS
+    /// has no such control; the flag exists so a future opt-in can keep a
+    /// block without another edit to every failure path.
+    static func failureRecoveryReleasesNetwork(strictKillSwitchEnabled: Bool) -> Bool {
+        !strictKillSwitchEnabled
+    }
+
+    /// How far a commit got before it threw. `pfctl -f` / `-a -f` is the
+    /// first command that can replace the kernel ruleset.
+    enum KernelLoadOutcome: Equatable {
+        case notIssued
+        case rejected
+        case acceptedOrUnknown
+    }
+
+    /// Release the installed anchor only after a load that may have
+    /// committed. A rejected load and a failure that never reached `pfctl -f`
+    /// leave the previous ruleset enforcing; flushing it drops AI blocking
+    /// while the Core is still up. A strict kill switch keeps the block.
+    static func failedCommitReleasesInstalledBlock(
+        load: KernelLoadOutcome,
+        strictKillSwitchEnabled: Bool
+    ) -> Bool {
+        guard failureRecoveryReleasesNetwork(strictKillSwitchEnabled: strictKillSwitchEnabled) else {
+            return false
+        }
+        return load == .acceptedOrUnknown
     }
 
     static func passRules(in rules: String) -> Set<String> {
@@ -341,6 +458,80 @@ final class KillSwitchManager {
         return withdrawnHosts(withdrawn).map { StateDisposal.targeted($0) } ?? .full
     }
 
+    /// Takes the reviewed-bundle permit out of the loaded anchor while the
+    /// Core has no tunnel (#608): from /core/sync after the new config passed
+    /// its check and before the old Core stops, from /core/stop before it
+    /// stops, and from the idle loop once the Core has exited. With the Core
+    /// goes its utun, and the address-free permit is then root web-port egress
+    /// on the physical interface. It returns only through the app's next arm
+    /// with the flag, which renders it only while a tunnel exists.
+    ///
+    /// Throws while the permit may still be loaded, so /core/sync keeps the
+    /// old Core and its tunnel running instead of stopping it; /core/stop
+    /// logs and stops anyway. A failure never loosens the ruleset.
+    func withholdReviewedBundlePermit() throws {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !reviewedBundleFileUnconfirmed else {
+            throw Self.withholdFailure(
+                HelperFailure.system("An earlier withhold could not restore the PF rule file.")
+            )
+        }
+        guard let baseline = lastLoadedPassRules,
+              baseline.contains(where: { $0.contains(Self.reviewedBundleLabel) }) else {
+            return
+        }
+        let loaded: String
+        do {
+            loaded = String(
+                decoding: try Self.secureRead(killSwitchPFPath, maximumBytes: 4 * 1024 * 1024),
+                as: UTF8.self
+            )
+        } catch {
+            throw Self.withholdFailure(error)
+        }
+        switch Self.reviewedBundleWithholding(loaded: loaded, baseline: baseline) {
+        case .notLoaded:
+            return
+        case .unknown:
+            throw Self.withholdFailure(
+                HelperFailure.system("The PF rule file does not match the loaded ruleset.")
+            )
+        case .withhold(let rules, let disposal, let rollback):
+            // An arm prepared against the ruleset being narrowed must not
+            // commit it back while the tunnel is gone.
+            stateGeneration &+= 1
+            do {
+                try Self.writeRuleText(rules)
+                try Self.ensureAnchorLoaded(disposal: disposal)
+            } catch {
+                // The narrowed file must not outlive a load the kernel may
+                // not have taken: it reads as already withheld and no later
+                // call would retry.
+                do {
+                    try Self.atomicWrite(
+                        path: killSwitchPFPath,
+                        data: Data(rollback.utf8),
+                        permissions: 0o600
+                    )
+                } catch {
+                    // Nothing on disk describes the kernel now. The next arm
+                    // takes the full flush, and nothing trusts the file first.
+                    lastLoadedPassRules = nil
+                    reviewedBundleFileUnconfirmed = true
+                }
+                throw Self.withholdFailure(error)
+            }
+        }
+    }
+
+    static func withholdFailure(_ error: Error) -> HelperFailure {
+        let detail = (error as? HelperFailure)?.message ?? String(describing: error)
+        return .system(
+            "The reviewed-bundle permit could not be withheld: " + detail.prefixString(512)
+        )
+    }
+
     /// Power transitions are secured inside the root helper rather than
     /// relying on a SwiftUI/NSWorkspace callback arriving before applications
     /// resume. Replace every tunnel, proxy, DNS-bootstrap, and control-plane
@@ -351,6 +542,7 @@ final class KillSwitchManager {
         lock.lock()
         defer { lock.unlock() }
 
+        var load = KernelLoadOutcome.notIssued
         do {
             guard let previous = try loadState(), previous.armed else {
                 return false
@@ -362,22 +554,104 @@ final class KillSwitchManager {
             let state = Self.emergencyState(preserving: previous)
             try Self.writeRules(state: state, allowedUID: allowedUID)
             try saveState(state)
-            try Self.ensureAnchorLoaded(flushStates: true)
+            try Self.ensureAnchorLoaded(flushStates: true, loadOutcome: &load)
             // Stale /etc/hosts pins do not permit traffic through the all-block
             // PF state. Clean them best-effort after the kernel barrier commits.
             try? Self.ensureHostsMappings(state: state)
             return true
         } catch {
-            if Self.stateFileExists() {
-                stateGeneration &+= 1
-                try? Self.installEmergencyBlock(allowedUID: allowedUID)
-                return true
+            stateGeneration &+= 1
+            if Self.failedCommitReleasesInstalledBlock(
+                load: load,
+                strictKillSwitchEnabled: false
+            ) {
+                Self.releaseInstalledBlock()
             }
             return false
         }
     }
 
-    func disarm() throws -> [String: Any] {
+    static func saveSelectiveRecoveryDisposition(
+        _ preserveAIHold: Bool,
+        path: String = selectiveRecoveryStatePath
+    ) throws {
+        try atomicWrite(
+            path: path,
+            data: Data((preserveAIHold ? "retain-ai\n" : "released\n").utf8),
+            permissions: 0o600
+        )
+    }
+
+    static func selectiveRecoveryDisposition(path: String = selectiveRecoveryStatePath) throws -> Bool? {
+        var metadata = stat()
+        guard lstat(path, &metadata) == 0 else {
+            if errno == ENOENT { return nil }
+            throw HelperFailure.system("Could not inspect selective recovery intent.")
+        }
+        let data = try secureRead(path, maximumBytes: 32)
+        if data == Data("retain-ai\n".utf8) { return true }
+        if data == Data("released\n".utf8) { return false }
+        throw HelperFailure.invalid("Selective recovery intent is invalid.")
+    }
+
+    static func clearSelectiveRecoveryDisposition(path: String = selectiveRecoveryStatePath) throws {
+        // Validate ownership/type before deleting the record.
+        guard try selectiveRecoveryDisposition(path: path) != nil else { return }
+        guard unlink(path) == 0 else {
+            throw HelperFailure.system("Could not retire selective recovery intent.")
+        }
+        try fsyncParent(path)
+    }
+
+    /// Saving the narrow disposition must never prevent ordinary Internet
+    /// release. Keep it before every effect that can discard broad intent.
+    static func releaseWithAIHold(
+        preserveAIHold: Bool,
+        recordDisposition: (Bool) throws -> Void = { try saveSelectiveRecoveryDisposition($0) },
+        clearDisposition: () throws -> Void = { try clearSelectiveRecoveryDisposition() },
+        release: () throws -> Void = { try releasePersistedBlockUnlocked() },
+        applySelectiveLayer: () -> Void = SelectiveFailOpenInstaller.applyBestEffort,
+        removeSelectiveLayer: () -> Void = SelectiveFailOpenInstaller.removeBestEffort
+    ) throws {
+        do { try recordDisposition(preserveAIHold) } catch {
+            // A full disk can refuse a tombstone but still permit unlink.
+            // Do not replay an old automatic intent after explicit Restore.
+            if !preserveAIHold { try? clearDisposition() }
+            FileHandle.standardError.write(Data(
+                "tono: selective recovery intent was not saved: \(error)\n".utf8
+            ))
+        }
+        try release()
+        if preserveAIHold { applySelectiveLayer() } else { removeSelectiveLayer() }
+    }
+
+    static func reconcileSelectiveRecovery(
+        generalIntentPresent: Bool,
+        disposition: Bool?,
+        applySelectiveLayer: () -> Void = SelectiveFailOpenInstaller.applyBestEffort
+    ) {
+        guard !generalIntentPresent, disposition == true else { return }
+        applySelectiveLayer()
+    }
+
+    /// Called only with the Core stopped. A retained record alone is enough
+    /// to finish an interrupted release; it never re-arms general PF.
+    func reconcileSelectiveRecoveryIfReleased() {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !selectiveRecoveryReconciled, !Self.stateFileExists() else { return }
+        Self.reconcileSelectiveRecovery(
+            generalIntentPresent: false,
+            disposition: try? Self.selectiveRecoveryDisposition()
+        )
+        selectiveRecoveryReconciled = true
+    }
+
+    static func automaticReleasePreservesAIHold() -> Bool {
+        (try? selectiveRecoveryDisposition()) ?? true
+    }
+
+    func disarm(preserveAIHold: Bool = false) throws -> [String: Any] {
         lock.lock()
         defer { lock.unlock() }
 
@@ -387,27 +661,161 @@ final class KillSwitchManager {
         // window must never survive into a re-armed kill switch.
         lastLoadedPassRules = nil
 
-        try Self.atomicWrite(
-            path: killSwitchPFPath,
-            data: Data("# Managed by Tono Kill Switch — intentionally disarmed\n".utf8),
-            permissions: 0o600
+        try Self.releaseWithAIHold(preserveAIHold: preserveAIHold)
+        selectiveRecoveryReconciled = true
+        stateGeneration &+= 1
+        openNetworkEpoch &+= 1
+        lastLoadedPassRules = nil
+        repairedSinceArm = false
+        return response(armed: false, wanted: false, live: false)
+    }
+
+    /// Best-effort release used when the daemon cannot finish starting.
+    /// Also resumes a previously requested narrow layer after broad intent
+    /// has already been removed. It never installs a general block.
+    static func releasePersistedBlock() {
+        guard stateFileExists() else {
+            reconcileSelectiveRecovery(
+                generalIntentPresent: false,
+                disposition: try? selectiveRecoveryDisposition()
+            )
+            return
+        }
+        do {
+            try releaseWithAIHold(preserveAIHold: automaticReleasePreservesAIHold())
+        } catch {
+            let detail = (error as? HelperFailure)?.message ?? String(describing: error)
+            FileHandle.standardError.write(Data(
+                "tono: startup release could not clear the kill switch: \(detail)\n".utf8
+            ))
+        }
+    }
+
+    /// The steps of `disarm()` without taking `lock`. Callers that already
+    /// hold the lock (`disarm`) must use this; `NSLock` is not recursive.
+    static func releasePersistedBlockUnlocked() throws {
+        try releaseSequence(
+            writePlaceholder: {
+                try atomicWrite(
+                    path: killSwitchPFPath,
+                    data: Data("# Managed by Tono Kill Switch — intentionally disarmed\n".utf8),
+                    permissions: 0o600
+                )
+            },
+            flushAnchor: { try run("/sbin/pfctl", ["-a", killSwitchAnchor, "-F", "all"]) },
+            anchorStillActive: { try childAnchorActive() },
+            removeIntent: { try removeStateIfPresent() },
+            removeHostsPins: { try removeHostsMappings() },
+            restoreDisplacedMain: { _ = restoreDisplacedMainRuleset() },
+            releaseEnableReference: { try releasePFEnableReference() }
         )
-        // Remove pinned bootstrap names before opening egress. If this fails,
-        // the existing live PF block remains in place.
-        try Self.removeHostsMappings()
-        let cleared = try Self.run("/sbin/pfctl", ["-a", killSwitchAnchor, "-F", "all"])
+    }
+
+    /// Flush the anchor and drop saved intent. Does not take `lock`. Never
+    /// re-arms PF or blocks general traffic. Restores the secondary AI hold
+    /// after a successful release.
+    static func releaseInstalledBlock(
+        recordDisposition: (Bool) throws -> Void = { try saveSelectiveRecoveryDisposition($0) },
+        release: () throws -> Void = { try KillSwitchManager.releasePersistedBlockUnlocked() },
+        applySelectiveLayer: () -> Void = SelectiveFailOpenInstaller.applyBestEffort
+    ) {
+        do {
+            try releaseWithAIHold(
+                preserveAIHold: true,
+                recordDisposition: recordDisposition,
+                release: release,
+                applySelectiveLayer: applySelectiveLayer
+            )
+        } catch {
+            let detail = (error as? HelperFailure)?.message ?? String(describing: error)
+            FileHandle.standardError.write(Data(
+                "tono: failure release could not clear the kill switch: \(detail)\n".utf8
+            ))
+        }
+    }
+
+    /// The steps of `disarm()`, in order, with each effect passed in so the
+    /// lifecycle self-test can check the order without touching the live
+    /// /etc/hosts, anchor or state. Nothing after the intent removal throws.
+    static func releaseSequence(
+        writePlaceholder: () throws -> Void,
+        flushAnchor: () throws -> HelperCommandResult,
+        anchorStillActive: () throws -> Bool,
+        removeIntent: () throws -> Void,
+        removeHostsPins: () throws -> Void,
+        restoreDisplacedMain: () -> Void,
+        releaseEnableReference: () throws -> Void
+    ) throws {
+        // The placeholder is housekeeping: it stops a later main-ruleset load
+        // from re-reading stale block rules out of the anchor file. A disk
+        // that cannot take it (full, directory unwritable) must not keep the
+        // machine blocked — the same class as the hosts pins below
+        // (BRICK-M2), so the same treatment: attempted first, and a failure
+        // is logged, not thrown. One reader of that file remains, and it is
+        // why a failed write also skips the displaced-main restore below: a
+        // legacy main ruleset still carries `load anchor from` for it.
+        var placeholderWritten = true
+        do {
+            try writePlaceholder()
+        } catch {
+            placeholderWritten = false
+            let detail = (error as? HelperFailure)?.message ?? String(describing: error)
+            FileHandle.standardError.write(Data(
+                "tono: disarm placeholder not written: \(detail)\n".utf8
+            ))
+        }
+        let cleared = try flushAnchor()
         guard cleared.status == 0 else {
             throw HelperFailure.system(
                 cleared.message.isEmpty ? "PF disarm failed." : cleared.message
             )
         }
-        guard !Self.childAnchorActive() else {
+        // A query with no answer throws here, before the intent or the PF
+        // reference goes: it is no evidence that the anchor is empty
+        // (#639 review, codex:F1).
+        guard try !anchorStillActive() else {
             throw HelperFailure.system("PF child anchor remained active.")
         }
-        try Self.removeStateIfPresent()
-        stateGeneration &+= 1
-        lastLoadedPassRules = nil
-        return response(armed: false, wanted: false, live: false)
+        try removeIntent()
+        // Pins are /etc/hosts lines, never PF permits. Removed before the
+        // flush, an /etc/hosts this helper cannot use failed every release
+        // with PF intact, the emergency commands included (BRICK-M2). Now
+        // they go after the release, best-effort; an unsafe file is refused
+        // before any write, and its pins stay until a later disarm.
+        do {
+            try removeHostsPins()
+        } catch {
+            let detail = (error as? HelperFailure)?.message ?? String(describing: error)
+            FileHandle.standardError.write(Data(
+                "tono: hosts pins kept after release: \(detail)\n".utf8
+            ))
+        }
+        if placeholderWritten {
+            restoreDisplacedMain()
+        } else {
+            // The rule file still holds the block rules just flushed. A
+            // legacy /etc/pf.conf would `load anchor from` them straight
+            // back with the intent already gone, so the reload waits for a
+            // release that can write the placeholder. Keeping the standalone
+            // main is the same "kept" outcome `restoreDisplacedMainRuleset`
+            // returns for its other refusals, and after the flush it blocks
+            // nothing.
+            FileHandle.standardError.write(Data(
+                "tono: emergency main ruleset kept: the rule file still holds old rules\n".utf8
+            ))
+        }
+        // Only after the anchor is empty and the intent is gone. If no other
+        // program holds a reference, PF stops, which is the pre-arm state.
+        // The kill switch is off either way; a release pfctl did not confirm
+        // keeps its record for the next arm to reuse or disarm to release.
+        do {
+            try releaseEnableReference()
+        } catch {
+            let detail = (error as? HelperFailure)?.message ?? String(describing: error)
+            FileHandle.standardError.write(Data(
+                "tono: PF enable reference kept, release unconfirmed: \(detail)\n".utf8
+            ))
+        }
     }
 
     func status() -> [String: Any] {
@@ -415,42 +823,209 @@ final class KillSwitchManager {
         defer { lock.unlock() }
 
         var wanted = false
-        var healed = false
-        var live = Self.effectiveStatus()
+        var live = (try? Self.effectiveStatus()) ?? false
         do {
             if let state = try loadState() {
                 wanted = state.armed
-                if wanted {
-                    try Self.ensureHostsMappings(state: state)
-                    if !live {
-                        try Self.writeRules(state: state, allowedUID: allowedUID)
-                        try Self.ensureAnchorLoaded(flushStates: true)
-                        lastLoadedPassRules = nil
-                        live = Self.effectiveStatus()
-                        // Persisted state deliberately omits session direct
-                        // endpoints, so this heal reinstalled PF without them.
-                        // The GUI must see that and re-arm with the live
-                        // session's exceptions.
-                        healed = true
-                    }
+                if wanted && live {
+                    Self.pinHostsIfUsable(state: state)
                 }
+                // Do not load rules from a status read. Update preparation
+                // calls this after the Core has stopped; rewriting PF would
+                // put the block back on a machine whose Core is gone.
             }
-            return response(armed: live, wanted: wanted, live: live, healed: healed)
+            return response(armed: live, wanted: wanted, live: live, healed: false)
         } catch {
-            // A corrupt persisted armed state can never turn into direct egress.
-            if Self.stateFileExists() {
-                wanted = true
-                if !live {
-                    try? Self.installEmergencyBlock(allowedUID: allowedUID)
-                    lastLoadedPassRules = nil
-                    live = Self.effectiveStatus()
-                    healed = true
-                }
-            }
-            var result = response(armed: live, wanted: wanted, live: live, healed: healed)
+            // Unreadable state is not a strict kill switch. Report it.
+            // Do not install a block; the startup release and the core-down
+            // watchdog clear a leftover ruleset. `live` still reports
+            // whatever PF is doing.
+            var result = response(armed: live, wanted: wanted, live: live, healed: false)
             result["ok"] = false
             result["error"] = String(describing: error).prefixString(1024)
             return result
+        }
+    }
+
+    /// Whether the idle loop may reinstall a saved kill switch. Update
+    /// preparation stops the Core and then reads status; reinstalling while
+    /// the Core is down puts the block back on a machine that should fail open.
+    static func shouldReinstallKillSwitch(coreRunning: Bool) -> Bool {
+        coreRunning
+    }
+
+    /// Launch never installs a block. A leftover state file is released only
+    /// when the Core is not running. A running Core keeps the kernel rules
+    /// already in place; this start does not tear them down either.
+    static func shouldReleaseLeftoverAtLaunch(coreRunning: Bool, stateFilePresent: Bool) -> Bool {
+        !coreRunning && stateFilePresent
+    }
+
+    /// Periodic check from the helper's idle loop, and only while the Core is
+    /// running. `status()` does not load rules. Another program releasing its
+    /// PF reference, a `pfctl -d`, or a main-ruleset reload without the Tono
+    /// anchor left the kill switch off until the next arm.
+    func superviseProtection() {
+        guard Self.stateFileExists() else { return }
+        lock.lock()
+        defer { lock.unlock() }
+        let live: Bool
+        let referenced: Bool
+        let held: PFEnableReference?
+        do {
+            var filtering = try Self.effectiveStatus()
+            if !filtering {
+                // effectiveStatus() is three pfctl reads; any one failing once
+                // reads as "not filtering". A repair flushes every state on the
+                // machine and makes the app reconnect, so require a second
+                // read to agree first.
+                usleep(200_000)
+                filtering = try Self.effectiveStatus()
+            }
+            live = filtering
+            held = try Self.heldPFEnableReference()
+            referenced = held != nil
+        } catch {
+            // No answer says nothing about PF, and every further pfctl here
+            // would wait out its own deadline behind the same /dev/pf. Leave
+            // PF as it is and ask again at the next pass (#639 review).
+            let detail = (error as? HelperFailure)?.message ?? String(describing: error)
+            FileHandle.standardError.write(Data("tono: PF check skipped: \(detail)\n".utf8))
+            return
+        }
+        guard !live || !referenced else {
+            // Protection holds on the recorded token, so a token it replaced
+            // whose release got no answer is retried here, not left until
+            // the next arm or disarm (#643 review, opus:F1 = codex:F3).
+            if let held, !Self.supersededPFEnableReferences.isEmpty {
+                try? Self.releaseSupersededPFEnableReferences(
+                    boot: held.boot,
+                    keeping: held.token
+                )
+            }
+            widenLANScopeIfNeeded()
+            return
+        }
+        do {
+            guard let state = try loadState(), state.armed else { return }
+            if live {
+                // Still filtering, but on someone else's reference (PF was
+                // stopped and re-enabled by another program). Take ours back
+                // before that program releases its own.
+                try Self.holdPFEnableReference()
+                return
+            }
+            // The persisted state omits the session's direct exceptions, so
+            // the app has to re-arm; the flag is how it finds out. Recorded
+            // before any step that can replace kernel rules:
+            // `ensureAnchorLoaded` can throw after the persisted rules are
+            // already live (the enable reference, the state flush, the
+            // verification probe), and the next pass would then see
+            // live+referenced and return — the session's direct traffic
+            // stayed dropped with nothing telling the app to re-arm. A repair
+            // that fails earlier sets it too: PF was not filtering while
+            // armed, so a re-arm is right either way. Only a committed arm or
+            // disarm clears it.
+            lastLoadedPassRules = nil
+            repairedSinceArm = true
+            try Self.writeRules(state: Self.restorableState(state), allowedUID: allowedUID)
+            Self.pinHostsIfUsable(state: state)
+            try Self.ensureAnchorLoaded(flushStates: true)
+        } catch {
+            // A failed repair must not fall through to an all-block. The next
+            // pass retries the saved rules while the Core is running. When the
+            // Core is down, the idle loop releases instead.
+            let detail = (error as? HelperFailure)?.message ?? String(describing: error)
+            FileHandle.standardError.write(Data(
+                "tono: kill switch repair skipped: \(detail)\n".utf8
+            ))
+            return
+        }
+        let liveAfter = (try? Self.effectiveStatus()).map { String($0) } ?? "unknown"
+        let message = "tono: kill switch was not filtering while armed; reinstalled "
+            + "(live: \(liveAfter))\n"
+        FileHandle.standardError.write(Data(message.utf8))
+    }
+
+    /// A NIC that appeared after arm is outside the interface-scoped LAN DNS
+    /// block and falls through to the unscoped `tono-lan` pass. Reload the
+    /// anchor with the wider set. Do not flush states, and do not release the
+    /// anchor if the load fails: the previous rules stay.
+    private func widenLANScopeIfNeeded() {
+        let shown: HelperCommandResult
+        do {
+            shown = try Self.run("/sbin/pfctl", ["-a", killSwitchAnchor, "-sr"])
+        } catch {
+            return
+        }
+        guard shown.status == 0,
+              let text = String(data: shown.output, encoding: .utf8) else { return }
+        let current = Self.physicalEgressInterfaces()
+        guard Self.lanDNSScopeNeedsReload(
+            loaded: Self.lanDNSInterfaces(in: text),
+            current: current
+        ) else { return }
+        do {
+            guard !reviewedBundleFileUnconfirmed,
+                  let source = String(
+                    data: try Self.secureRead(killSwitchPFPath, maximumBytes: 4 * 1024 * 1024),
+                    encoding: .utf8
+                  ),
+                  let widened = Self.widenLANScope(
+                    in: source, current: current, baseline: lastLoadedPassRules
+                  ) else { return }
+            try Self.writeRuleText(widened)
+            var outcome = KernelLoadOutcome.notIssued
+            try Self.ensureAnchorLoaded(flushStates: false, loadOutcome: &outcome)
+        } catch {
+            let detail = (error as? HelperFailure)?.message ?? String(describing: error)
+            FileHandle.standardError.write(Data(
+                "tono: LAN DNS scope reload skipped: \(detail)\n".utf8
+            ))
+        }
+    }
+
+    /// Read-only view for the connected app. Unlike `status()`, this never
+    /// loads rules or flushes states.
+    func health() -> [String: Any] {
+        lock.lock()
+        defer { lock.unlock() }
+        var object: [String: Any] = [
+            "ok": true,
+            "wantArmed": Self.stateFileExists(),
+            "repairedSinceArm": repairedSinceArm,
+            "version": helperVersion,
+        ]
+        // One failed pfctl read is not "PF is down". The app disconnects
+        // without releasing when `live` is false, so an unreadable sample
+        // must omit `live` and a single down-read must be confirmed.
+        let live = Self.agreedFiltering(
+            first: Result { try Self.effectiveStatus() },
+            confirmDown: {
+                usleep(200_000)
+                return try Self.effectiveStatus()
+            }
+        )
+        if let live { object["live"] = live }
+        return object
+    }
+
+    /// Health may report the anchor down only when a read succeeded and a
+    /// second read agrees. A throw (no answer) is not evidence: callers that
+    /// require `live` treat a missing value as no sample. A first `false`
+    /// confirmed as `true` stays up. Confirm is not called when the first
+    /// read is already up or already threw.
+    static func agreedFiltering(
+        first: Result<Bool, Error>,
+        confirmDown: () throws -> Bool
+    ) -> Bool? {
+        switch first {
+        case .failure:
+            return nil
+        case .success(true):
+            return true
+        case .success(false):
+            do { return try confirmDown() } catch { return nil }
         }
     }
 
@@ -486,25 +1061,73 @@ final class KillSwitchManager {
         ]
     }
 
+    /// Does not re-arm. macOS has no user-facing strict kill switch, so a
+    /// state file left by the last session must not block the machine at
+    /// boot, after a crash, or after this daemon is restarted. The hook
+    /// migration already ran in `init`. `SocketServer.run` releases the
+    /// leftover block once the stale Core has been stopped.
     func restoreAtLaunch() throws {
-        do {
-            guard let state = try loadState(), state.armed else { return }
-            try Self.writeRules(state: state, allowedUID: allowedUID)
-            try Self.ensureHostsMappings(state: state)
-            try Self.ensureAnchorLoaded(flushStates: true)
-        } catch {
-            if Self.stateFileExists() {
-                try Self.installEmergencyBlock(allowedUID: allowedUID)
-            } else {
-                throw error
-            }
+        // No block at launch. The Core is constructed after this init, so
+        // SocketServer.run decides: release a leftover when the Core is not
+        // running, and leave a live session's rules alone.
+    }
+
+    /// What PF renders when the supervisor reinstalls saved state while the
+    /// Core is running. Launch does not. The saved tunnel
+    /// is the last arm's intent, not a fact: at boot (before login, before any
+    /// TUN) and after a Core that is gone, that utun does not exist. Rendering
+    /// it anyway loads the Continuity, mDNS, LAN and link-local passes, which
+    /// exist only while a TUN is up (see `renderRules`). Keep only interfaces
+    /// present now, so a reinstall without a tunnel renders the no-tunnel form.
+    /// This only removes passes. The file is not rewritten: disk keeps the
+    /// intent, the app's connect arms with the live interface, and an arm that
+    /// omits the field falls back to exactly what it did before.
+    static func restorableState(
+        _ state: KillSwitchState,
+        interfaceExists: (String) -> Bool = { name in
+            name.withCString { if_nametoindex($0) } != 0
         }
+    ) -> KillSwitchState {
+        KillSwitchState(
+            armed: state.armed,
+            tailscaleBootstrapEnabled: state.tailscaleBootstrapEnabled,
+            apiHosts: state.apiHosts,
+            exitHints: state.exitHints,
+            tunnelInterfaces: state.tunnelInterfaces.filter(interfaceExists),
+            resolvedHosts: state.resolvedHosts,
+            pinnedHosts: state.pinnedHosts,
+            derpEndpoints: state.derpEndpoints,
+            cachedDERPEndpoints: state.cachedDERPEndpoints,
+            proxyTargets: state.proxyTargets,
+            sessionDirectEndpoints: state.sessionDirectEndpoints,
+            reviewedBundleDirectEnabled: state.reviewedBundleDirectEnabled
+        )
     }
 
     static func installEmergencyBlock(allowedUID: uid_t) throws {
         let state = emergencyState(preserving: nil)
-        try writeRules(state: state, allowedUID: allowedUID)
-        try ensureAnchorLoaded(flushStates: true)
+        let rules = renderRules(state: state, allowedUID: allowedUID)
+        do {
+            try writeRules(state: state, allowedUID: allowedUID)
+            try ensureAnchorLoaded(flushStates: true)
+        } catch {
+            // A boot hook that still loads the rule file must not receive a
+            // new block file: the next boot, Safe Mode included, would
+            // install it. The in-memory ruleset does not update that file.
+            if diskLoadsKillSwitchRules() {
+                try loadInMemoryEmergencyBlock(rules)
+            } else {
+                try writeRuleText(rules)
+                try ensureAnchorLoaded(disposal: .full, standaloneMain: true)
+            }
+        }
+    }
+
+    /// The daemon failed before it could accept a client. launchd will retry.
+    /// Clear a saved kill switch so the retry, and the time until it, leave
+    /// the original network in place. Never installs a block.
+    static func secureFailedStartup() {
+        releasePersistedBlock()
     }
 
     static func emergencyState(
@@ -1253,6 +1876,25 @@ final class KillSwitchManager {
         }
         lines.append(killSwitchHostsEndMarker)
         return lines.joined(separator: "\n") + "\n"
+    }
+
+    /// Pins are best-effort (BRICK-M2): an /etc/hosts this helper cannot
+    /// safely rewrite (not a root-owned regular file, group or world
+    /// writable, over 1 MiB, a symlink, not UTF-8, a lone marker) failed the
+    /// arm after its intent was saved, and sent the heal, the supervisor
+    /// repair and every daemon start to the emergency ruleset. No permit
+    /// depends on a pin. The file is refused before any write or backup, as
+    /// before; this only stops that refusal from failing the caller.
+    @discardableResult
+    static func pinHostsIfUsable(state: KillSwitchState) -> Bool {
+        do {
+            try ensureHostsMappings(state: state)
+            return true
+        } catch {
+            let detail = (error as? HelperFailure)?.message ?? String(describing: error)
+            FileHandle.standardError.write(Data("tono: hosts pins skipped: \(detail)\n".utf8))
+            return false
+        }
     }
 
     static func ensureHostsMappings(state: KillSwitchState) throws {

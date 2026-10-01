@@ -1,6 +1,12 @@
 import { useLockFn } from 'ahooks'
 import dayjs from 'dayjs'
-import { useEffect, useEffectEvent, useRef, useState } from 'react'
+import {
+  useEffect,
+  useEffectEvent,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react'
 import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router'
 
@@ -21,8 +27,12 @@ import {
   type TonoDevice,
 } from '@/services/tono'
 import { TONO_COLORS, tonoText } from '@/tono-ui/theme'
+import parseTraffic from '@/utils/parse-traffic'
 
 import { GlassCard } from './GlassCard'
+
+const formatBytes = (bytes: number) =>
+  parseTraffic(Math.max(0, bytes)).join(' ')
 
 const blurDeviceName = (name: string) => {
   const stem = (name.split('.')[0] || name).trim()
@@ -40,15 +50,20 @@ export const TonoAccountCard = () => {
   const dark = useThemeMode() !== 'light'
   const text = tonoText(dark)
   const navigate = useNavigate()
-  const { mutateTonoStatus } = useTonoStatus()
+  const { status, mutateTonoStatus } = useTonoStatus()
+  const accountScope = status?.routePreferenceScope
+  const accountQueryKey = [...tonoAccountQueryKey, accountScope]
+  const devicesQueryKey = [...tonoDevicesQueryKey, accountScope]
 
   const { data: account } = useQuery({
-    queryKey: tonoAccountQueryKey,
+    queryKey: accountQueryKey,
     queryFn: tonoAccount,
+    enabled: Boolean(accountScope),
   })
   const { data: devices, refetch: mutateDevices } = useQuery({
-    queryKey: tonoDevicesQueryKey,
+    queryKey: devicesQueryKey,
     queryFn: tonoDevices,
+    enabled: Boolean(accountScope),
   })
 
   const [revokeTarget, setRevokeTarget] = useState<TonoDevice | null>(null)
@@ -82,8 +97,8 @@ export const TonoAccountCard = () => {
     setSignOutOpen(false)
     // Drop account-scoped caches so the next sign-in never flashes the
     // previous account's email/devices/servers.
-    removeCacheData(tonoAccountQueryKey)
-    removeCacheData(tonoDevicesQueryKey)
+    removeCacheData(accountQueryKey)
+    removeCacheData(devicesQueryKey)
     removeCacheData(tonoServersQueryKey)
     await mutateTonoStatus()
     navigate('/login', { replace: true })
@@ -208,6 +223,34 @@ export const TonoAccountCard = () => {
         </span>
       </div>
 
+      {account && (
+        <dl className="tono-account-facts">
+          <div>
+            <dt>{t('tono.account.plan')}</dt>
+            <dd>{account.plan || 'Tono'}</dd>
+          </div>
+          <div>
+            <dt>{t('tono.account.expires')}</dt>
+            <dd>
+              {account.expiresAt != null
+                ? dayjs(account.expiresAt * 1000).format('YYYY-MM-DD')
+                : t('tono.account.noExpiry')}
+            </dd>
+          </div>
+          {account.quotaBytes != null && account.usageBytes != null && (
+            <div>
+              <dt>{t('tono.account.usage')}</dt>
+              <dd>
+                {t('tono.account.usageOf', {
+                  used: formatBytes(account.usageBytes),
+                  quota: formatBytes(account.quotaBytes),
+                })}
+              </dd>
+            </div>
+          )}
+        </dl>
+      )}
+
       {currentDevices.map(renderDeviceRow)}
       {otherDevices.length > 0 && (
         <div
@@ -282,6 +325,8 @@ interface ConfirmDialogProps {
   title: string
   message: string
   error?: string | null
+  children?: ReactNode
+  busy?: boolean
   confirmLabel: string
   cancelLabel: string
   onConfirm: () => void
@@ -293,6 +338,8 @@ export const TonoConfirmDialog = ({
   title,
   message,
   error,
+  children,
+  busy = false,
   confirmLabel,
   cancelLabel,
   onConfirm,
@@ -313,8 +360,8 @@ export const TonoConfirmDialog = ({
         cancelFromKeyboard()
       }
       if (event.key !== 'Tab') return
-      const buttons = panel?.querySelectorAll<HTMLButtonElement>(
-        'button:not(:disabled)',
+      const buttons = panel?.querySelectorAll<HTMLElement>(
+        'button:not(:disabled), [tabindex="0"], a[href], input:not(:disabled)',
       )
       const first = buttons?.[0]
       const last = buttons?.[buttons.length - 1]
@@ -340,6 +387,7 @@ export const TonoConfirmDialog = ({
     <div
       role="dialog"
       aria-modal="true"
+      aria-busy={busy}
       aria-labelledby="tono-confirm-title"
       style={{
         position: 'fixed',
@@ -355,7 +403,10 @@ export const TonoConfirmDialog = ({
       <div
         ref={panelRef}
         style={{
-          width: 340,
+          width: children ? 560 : 340,
+          maxWidth: 'calc(100vw - 32px)',
+          maxHeight: 'calc(100vh - 32px)',
+          overflowY: 'auto',
           borderRadius: 'var(--tono-radius-card-sm)',
           padding: 20,
           background: 'var(--tono-surface-dialog)',
@@ -377,6 +428,7 @@ export const TonoConfirmDialog = ({
         <div style={{ fontSize: 13, color: text.secondary, marginBottom: 12 }}>
           {message}
         </div>
+        {children}
         {error && (
           <div
             role="alert"
@@ -395,6 +447,7 @@ export const TonoConfirmDialog = ({
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
           <button
             type="button"
+            disabled={busy}
             className="tono-button"
             style={{
               padding: '7px 14px',
@@ -410,6 +463,7 @@ export const TonoConfirmDialog = ({
           </button>
           <button
             type="button"
+            disabled={busy}
             className="tono-button"
             style={{
               padding: '7px 14px',

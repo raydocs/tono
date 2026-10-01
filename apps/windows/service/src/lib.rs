@@ -1,6 +1,19 @@
 mod channel;
 mod core;
 
+// Compile the one shared value model, not a local mirror. Pulling the complete
+// portable product crate into this independent Service workspace would also pull
+// catalog/session/async runtime dependencies into every installer binary.
+#[cfg(any(feature = "client", feature = "standalone"))]
+#[path = "../../crates/tono-core/src/update_contract.rs"]
+pub mod update_contract;
+#[cfg(any(feature = "client", feature = "standalone"))]
+pub mod update_wire;
+#[cfg(feature = "standalone")]
+pub mod update_transaction;
+#[cfg(all(feature = "standalone", windows))]
+pub use core::update as update_native;
+
 #[cfg(feature = "client")]
 mod client;
 
@@ -16,8 +29,10 @@ pub use core::{
     MacosKillSwitchConfig, MacosKillSwitchMode, MacosProxyConfig, LEGACY_OWNER_TOKEN_FILE_NAME,
     OWNER_TOKEN_FILE_NAME,
     OwnerCredentials, OwnerIdentity, OwnerSessionHandle, OwnerSessionProof, ProtocolInfo,
-    ProtocolVersion, ProxyApplyOutcome, ProxyEndpoint, ProxyProtocol, RemoteProvider,
+    ProtocolVersion, ProxyApplyOutcome, ProxyEndpoint, ProxyProtocol, PrepareCoreStartFreshness,
+    PrepareCoreStartPayload, RemoteProvider,
     RenewDirectRuntimeReloadRequest, ReplaceDirectEndpointsRequest, ReplaceProxyEndpointsRequest,
+    ReplaceSingBoxRuntimeRequest, CommitSingBoxDirectRequest,
     RuntimeAsset, RuntimeBundle,
     LEGACY_SERVICE_PROTOCOL_HEADER, SERVICE_PROTOCOL_HEADER, SESSION_TOKEN_HEX_LEN,
     ServiceErrorCode, ServiceLifecycleState,
@@ -33,14 +48,16 @@ pub use core::{
     ActiveOwnerState, DesiredState, REPAIR_IN_PROGRESS_EXIT_CODE, ServiceOwnerGuard,
     ServiceRepairGate, acquire_service_owner, acquire_service_repair_gate,
     add_restored_kill_switch_tunnel, cleanup_stale_owner_state, emergency_disarm_kill_switch,
-    emergency_disarm_windows_kill_switch, initialize_protected_dns_status, load_active_owner,
-    load_owner_desired_state, owner_goodbye_requested, prepare_for_service_replacement,
-    prepare_service_install_directory, reconcile_service_startup, relock_restored_tunnel,
+    emergency_disarm_windows_kill_switch, emergency_disarm_windows_kill_switch_applying_narrow,
+    initialize_protected_dns_status, load_active_owner,
+    load_owner_desired_state, note_core_replay_finished, owner_goodbye_requested,
+    prepare_for_service_replacement, prepare_service_install_directory,
+    reconcile_service_startup, relock_restored_tunnel, remove_tono_resolver_rule_within,
     residual_filters_present, restore_desired_state, restore_kill_switch,
     restore_windows_kill_switch, retire_unverified_windows_kill_switch, run_ipc_server,
     run_ipc_supervisor_until_shutdown, service_lifecycle_state, set_service_lifecycle_state,
     spawn_kill_switch_watchdog, spawn_protected_dns_watchdog, spawn_windows_kill_switch_watchdog,
-    stop_ipc_server,
+    stop_ipc_server, SCM_STOP_WAIT_HINT, stop_pending_refresh_due,
 };
 #[cfg(all(feature = "standalone", windows))]
 pub use core::{note_power_event, start_network_monitor};
@@ -126,7 +143,37 @@ pub const PROTOCOL_EPOCH: u16 = 2;
 /// Revision 15 adds `/kill-switch/proxy-endpoints` so a live node switch can widen or
 /// shrink the Reality destination permit without restarting the core. MIN_REQUIRED stays 14:
 /// an older Service is still fail-closed; the App falls back to a cold switch.
-pub const PROTOCOL_REVISION: u16 = 15;
+/// Revision 16 adds the Service-owned, detached-manifest update transaction.
+/// Revision 17 binds `POST /clash/prepare-start` to the explicit-release epoch: the request
+/// carries the client's `GET /version` snapshot of that epoch, and the Service refuses it —
+/// touching no Core — once an explicit release has superseded the snapshot. This is the
+/// freshness gate the session-gated routes get from `OwnerSessionProof`; a first connection
+/// has no session yet, so the release epoch is the freshness token instead. MIN_SUPPORTED
+/// stays 12 because an older App beside a newer Service must still be able to release WFP
+/// and restore DNS, and the probe gates those routes too. Its epoch-less prepare request is
+/// therefore accepted. The Service snapshots the epoch when the request arrives (the pre-17
+/// behaviour) rather than passing the probe and then refusing every connection at this route.
+/// Revision 18 is the sing-box image: `StartClash` accepts `sing-box.exe`, writes `config.json`,
+/// launches `run -c`, and checks `TONO_SING_BOX_SHA256` instead of the mihomo pin. An older
+/// Service would treat that image as mihomo (`-f` YAML, the mihomo digest) and refuse it.
+/// MIN_REQUIRED stays 14 so an older App can still release WFP on a revision-18 Service, and a
+/// new App falls back to mihomo only when the sing-box binary is missing or unauthenticated
+/// before WFP is armed. A good binary beside a Service older than 18 is a refusal, not a swap.
+/// Revision 19 replaces a running sing-box process for reviewed-app DIRECT and installs the
+/// physical permits while the tunnel stays Locked. It does not use the mihomo reload bracket.
+/// A revision-18 Service keeps the proven full tunnel. MIN_REQUIRED stays 14.
+pub const PROTOCOL_REVISION: u16 = 19;
+/// Revision that introduced the Service-owned, detached-manifest update transaction.
+pub const MIN_SERVICE_REVISION_FOR_UPDATE_TRANSACTION: u16 = 16;
+/// Revision whose `POST /clash/prepare-start` compares the request's client-snapshotted
+/// release epoch under the lifecycle lock and refuses a superseded request before touching
+/// any Core. An epoch-less legacy request uses the Service's arrival-time snapshot instead.
+pub const MIN_SERVICE_REVISION_FOR_PREPARE_START_EPOCH: u16 = 17;
+/// Revision whose `StartClash` runs a sing-box image (`config.json`, `run -c`, separate digest).
+pub const MIN_SERVICE_REVISION_FOR_SING_BOX: u16 = 18;
+/// Revision that restarts sing-box for reviewed-app DIRECT and reads the rules back.
+/// Older Services keep the full tunnel; they do not enter the mihomo reload bracket.
+pub const MIN_SERVICE_REVISION_FOR_SING_BOX_DIRECT: u16 = 19;
 /// Revisions 7 through 12 are wire/behaviour incompatible with older peers. Reject a mismatch at
 /// the protocol probe rather than failing later during a required mutation. Revision 13 is
 /// additive: a revision-12 client may still pair.

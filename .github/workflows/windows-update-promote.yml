@@ -8,8 +8,9 @@ on:
         required: true
         type: string
 
+# Read-only by default; only the promote job, which runs no dependency code, writes.
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: windows-update-channel
@@ -42,6 +43,8 @@ jobs:
     needs: branch
     environment: windows-update-channel
     runs-on: ubuntu-24.04
+    permissions:
+      contents: write
     env:
       RELEASE_VERSION: ${{ inputs.version }}
       TONO_UPDATER_PUBLIC_KEY: ${{ vars.TONO_UPDATER_PUBLIC_KEY }}
@@ -50,6 +53,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           fetch-depth: 0
+          # The token is handed to the two pushes below only, not left in .git/config
+          # for every later process in this job.
+          persist-credentials: false
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
@@ -91,9 +97,17 @@ jobs:
             "$RUNNER_TEMP/windows-latest.json"
 
       - name: Atomically advance the audited Windows channel branch
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          if git fetch origin refs/heads/windows-updates:refs/remotes/origin/windows-updates; then
+          git_auth() {
+            GIT_CONFIG_COUNT=1 \
+            GIT_CONFIG_KEY_0=http.https://github.com/.extraheader \
+            GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)" \
+              git "$@"
+          }
+          if git_auth fetch origin refs/heads/windows-updates:refs/remotes/origin/windows-updates; then
             git switch --detach refs/remotes/origin/windows-updates
           else
             git switch --orphan windows-updates
@@ -110,7 +124,7 @@ jobs:
           git commit -m "release(windows): promote v${RELEASE_VERSION}"
           # A fast-forward ref update is the only publication point. Validation, download,
           # commit, or push failure leaves the previous branch tip and latest.json untouched.
-          git push origin HEAD:refs/heads/windows-updates
+          git_auth push origin HEAD:refs/heads/windows-updates
 
       # The channel and the download page answer the same question — what should a
       # customer install — and only one of them used to move. The page named the
@@ -120,8 +134,14 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
+          git_auth() {
+            GIT_CONFIG_COUNT=1 \
+            GIT_CONFIG_KEY_0=http.https://github.com/.extraheader \
+            GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)" \
+              git "$@"
+          }
           git switch --force main
-          git pull --ff-only origin main
+          git_auth pull --ff-only origin main
           # Two populations ask two different places for the same answer: builds
           # before 0.0.33 ask the orphan branch, later ones ask the control
           # plane. Both are advanced here, in one commit, so neither can lag.
@@ -135,7 +155,7 @@ jobs:
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git add services/control-plane/public
           git commit -m "release(center): serve v${RELEASE_VERSION} from the control plane too"
-          git push origin HEAD:refs/heads/main
+          git_auth push origin HEAD:refs/heads/main
           # Committing is not publishing: the page is a static asset of the Worker
           # and reaches nobody until the control plane is deployed from main.
           echo "::notice::The download page now offers v${RELEASE_VERSION} on main. Deploy the control plane to publish it."

@@ -5,7 +5,7 @@
 use std::sync::Arc;
 use tauri::AppHandle;
 use tono_core::{
-    config::{self, build_owned_runtime_with_ports, generate_controller_secret},
+    config::{self, generate_controller_secret},
     connection::ConnectStage,
     node::ValidatedNode,
 };
@@ -13,22 +13,23 @@ use tono_logging::{Type, logging};
 use tono_service_protocol::{KillSwitchConfig, RuntimeBundle};
 
 use super::cleanup::{
-    enable_dns_cancellation_safe, ensure_fresh, stale_after_arm, stale_after_dns, start_core_cancellation_safe,
+    enable_dns_cancellation_safe, ensure_fresh, start_core_cancellation_safe,
 };
+use super::core_select::prepare_owned_core;
 use super::controller::{
     allocate_runtime_ports, configure_owned_controller_for_ui, lock_kill_switch_with_retries, preflight_bfe,
     preflight_dns_listener, wait_controller,
 };
-use super::direct::{CapturedTrafficPolicy, WINDOWS_OPTIONAL_DIRECT_ENABLED, spawn_optional_direct_after_connected};
-use super::endpoints::proxy_endpoint_of;
+use super::endpoints::proxy_endpoints_for;
 use super::monitor::{
     bootstrap_hosts, refresh_control_plane_pins_from_service, spawn_control_plane_pin_refresh,
-    spawn_exit_identity_lookup, spawn_network_monitor,
+    spawn_deferred_policy_reconnect, spawn_exit_identity_lookup, spawn_network_monitor,
 };
-use super::platform::{detect_physical_interface, wait_for_tun_route_ready, write_redacted_copy};
 use super::probes::{verify_fake_ip, verify_post_lock};
-use super::reconnect::active_runtime_resume_status;
 use super::status::set_stage;
+use super::direct::{CapturedTrafficPolicy, WINDOWS_OPTIONAL_DIRECT_ENABLED, spawn_optional_direct_after_connected};
+use super::platform::{detect_physical_interface, wait_for_tun_route_ready};
+use super::reconnect::active_runtime_resume_status;
 use super::{failure::StageFailure, transaction::ConnectTransaction};
 use crate::{
     core::service,
@@ -47,6 +48,7 @@ pub(super) async fn run_stages(
     generation: u64,
     started: std::time::Instant,
     transaction: &ConnectTransaction,
+    route_owner: Option<&crate::tono::route_preferences::PreferenceContext>,
 ) -> Result<(), StageFailure> {
     // §6.2: proxy endpoints (public IPv4/port/TCP) from the selected node;
     // the bootstrap API hosts are the only control-plane recovery channel.
@@ -63,15 +65,10 @@ pub(super) async fn run_stages(
             .and_then(|routing| routing.home_proxy.as_deref())
             .and_then(|name| nodes.iter().find(|entry| entry.name == name))
     };
-    let mut proxy_endpoints = vec![proxy_endpoint_of(node)];
-    if let Some(home) = home_node
-        && (home.server != node.server || home.port != node.port)
-    {
-        proxy_endpoints.push(proxy_endpoint_of(home));
-    }
+    let proxy_endpoints = proxy_endpoints_for(node, nodes, routing);
 
     transaction.check("preparing service")?;
-    set_stage(state, app, ConnectStage::PreparingService, generation, false, started).await?;
+    set_stage(state, app, ConnectStage::PreparingService, generation, started).await?;
 
     // Revision 12 closes both DNS-owner ordering holes. Reconcile under the authenticated Service
     // lifecycle lock before the App's loopback:53 availability test: orphaned installed cores and
@@ -92,8 +89,11 @@ pub(super) async fn run_stages(
 
     // Capture both the policy and its physical egress before WinTUN changes the default route.
     // Re-reading either after the first Core start can select the Tono adapter itself and makes
-    // the runtime plan disagree with the WFP preflight that was actually performed.
-    let traffic_policy = {
+    // the runtime plan disagree with the WFP preflight that was actually performed. The policy
+    // half may be replaced once more, under the commit below, when a policy behavior change that
+    // arrived mid-connect is consumed (F5); the interface half never is — it is only ever
+    // captured here, before the first Core start.
+    let mut traffic_policy = {
         let inner = state.lock().await;
         inner.traffic_policy.clone().map(|document| CapturedTrafficPolicy {
             revision: inner.policy_tracker.current_revision(),
@@ -102,12 +102,7 @@ pub(super) async fn run_stages(
         })
     };
     let needs_physical_interface = WINDOWS_OPTIONAL_DIRECT_ENABLED
-        && traffic_policy.as_ref().is_some_and(|policy| {
-            !policy.document.domains.is_empty()
-                || !policy.document.media_endpoints.is_empty()
-                || !policy.document.web_domains.is_empty()
-                || !policy.document.direct_suffixes.is_empty()
-        });
+        && traffic_policy.as_ref().is_some_and(|policy| policy.has_direct_content());
 
     // The preparation probes are independent of each other and all read-only /
     // cancellation-safe (the two port binds are released immediately; the core-path query is a
@@ -157,6 +152,11 @@ pub(super) async fn run_stages(
     bfe_preflight.map_err(StageFailure::error)?;
     let controller_port = runtime_ports.controller_port;
     let mixed_port = runtime_ports.mixed_port;
+    // Auth may use this loopback port last. It does not install a route or a filter.
+    {
+        let inner = state.lock().await;
+        inner.client.transport().set_auth_tunnel_port(mixed_port);
+    }
     if let Err(error) = dns_preflight {
         if active_runtime_resume.is_some() {
             // The old, strongly proven same-owner Core is expected to own TCP/UDP loopback:53.
@@ -196,36 +196,30 @@ pub(super) async fn run_stages(
         }
         None => None,
     };
-    // §5: the owned runtime carries a fresh random controller secret; only
-    // the redacted copy may touch disk.
+    // §5: the owned runtime carries a fresh random controller secret and the
+    // account's exit credentials. The App never writes it to the user profile;
+    // it reaches the Service over IPC.
     let secret = generate_controller_secret();
-    let runtime = build_owned_runtime_with_ports(
+    let prepared = prepare_owned_core(
+        state,
+        active_runtime_resume.is_some(),
         nodes,
         &node.name,
+        routing,
         &secret,
-        None,
-        home_node.map(|home| home.name.as_str()),
-        home_socks5,
         runtime_ports,
+        &core_path,
     )
-    .map_err(StageFailure::error)?;
-    // Under the transaction like every other stage on this path. `apply_cloud_policy`'s copy is
-    // already covered because that whole stage runs inside a `wait`; this one was the only
-    // uncovered await in `run_stages`, and an %APPDATA% redirected to an offline share parks it
-    // where the `CONNECT_TRANSACTION_TIMEOUT` budget cannot reach — Connecting forever, every retry then rejected as
-    // "already connecting". The write itself never fails the connect (see `write_redacted_copy`),
-    // so this wait only trips when the budget was already spent.
-    transaction
-        .wait(
-            "writing redacted runtime copy",
-            write_redacted_copy(state, &runtime.redacted_yaml()),
-        )
-        .await?;
+    .await?;
+    {
+        let mut inner = state.lock().await;
+        inner.sing_box_core = prepared.sing_box;
+    }
     let bundle = RuntimeBundle {
-        yaml: runtime.yaml().to_string(),
+        yaml: prepared.document,
         assets: Vec::new(),
         remote_providers: Vec::new(),
-        core_path: core_path.to_string_lossy().into_owned(),
+        core_path: prepared.core_path.to_string_lossy().into_owned(),
     };
     let kill_switch = KillSwitchConfig {
         tunnel_interface: config::TUN_DEVICE_NAME.to_string(),
@@ -239,7 +233,7 @@ pub(super) async fn run_stages(
     // §6.3: startingKillSwitch — the Service persists intent, installs the
     // bootstrap WFP policy, writes the runtime copy, and starts the core;
     // a failure inside is fail-closed on the Service side.
-    set_stage(state, app, ConnectStage::StartingKillSwitch, generation, false, started).await?;
+    set_stage(state, app, ConnectStage::StartingKillSwitch, generation, started).await?;
     ensure_fresh(state, generation).await?;
     transaction
         .wait(
@@ -252,10 +246,9 @@ pub(super) async fn run_stages(
     {
         let mut inner = state.lock().await;
         if inner.connect_generation != generation {
-            // A disconnect/switch bumped us while the StartClash IPC was in
-            // flight; it cannot be retracted. Patch the late arm (H-1).
-            drop(inner);
-            return Err(stale_after_arm(state, generation).await);
+            // The detached mutation already reconciled under lifecycle ownership. This outer
+            // waiter owns no resource: another generation may have finished release/reconnect.
+            return Err(StageFailure::Stale);
         }
         inner.fsm.mark_kill_switch_armed();
         inner.controller_secret = Some(secret.clone());
@@ -270,8 +263,8 @@ pub(super) async fn run_stages(
     // §6.4 + §6.5: the controller bind and the WinTUN LUID appear independently
     // after StartClash. Waiting for them in series paid the lock ladder on
     // every connect even when `/version` was already answering.
-    set_stage(state, app, ConnectStage::StartingTunnel, generation, true, started).await?;
-    set_stage(state, app, ConnectStage::LockingTraffic, generation, true, started).await?;
+    set_stage(state, app, ConnectStage::StartingTunnel, generation, started).await?;
+    set_stage(state, app, ConnectStage::LockingTraffic, generation, started).await?;
     let (controller_ready, lock_ready) = transaction
         .wait("controller readiness and lock", async {
             tokio::join!(
@@ -284,8 +277,8 @@ pub(super) async fn run_stages(
     lock_ready.map_err(StageFailure::error)?;
 
     // The Service can resolve and permit the virtual adapter as soon as its alias exists, while
-    // Windows is still bringing it up and Mihomo has not installed the protected routes. Keep the
-    // DNS snapshot unchanged until the effective routes select the active Tono interface.
+    // Windows is still bringing it up and the core has not installed the protected routes. Keep
+    // the DNS snapshot unchanged until the effective routes select the active Tono interface.
     transaction
         .wait("waiting for protected TUN route", wait_for_tun_route_ready())
         .await?
@@ -295,16 +288,14 @@ pub(super) async fn run_stages(
 
     // §6.7: securingDNS — snapshot + point resolvers at the protected TUN endpoint, then prove
     // an ordinary lookup returns a fake-ip address.
-    set_stage(state, app, ConnectStage::SecuringDns, generation, true, started).await?;
+    set_stage(state, app, ConnectStage::SecuringDns, generation, started).await?;
     transaction
         .wait(
             "enabling protected DNS",
             enable_dns_cancellation_safe(state, generation, service_session.clone()),
         )
         .await??;
-    if state.lock().await.connect_generation != generation {
-        return Err(stale_after_dns(state, generation).await);
-    }
+    ensure_fresh(state, generation).await?;
     transaction
         .wait("fake-IP verification", verify_fake_ip())
         .await?
@@ -335,23 +326,49 @@ pub(super) async fn run_stages(
         .map_err(StageFailure::error)?;
     kill_status.verified = true;
 
+    if let Err(error) = commands::update::commit_if_pending().await {
+        logging!(warn, Type::Service, "Update recovery commit remains unproven: {error:#}");
+    }
+
     // The Tono runtime owns a fresh HTTP controller port and secret on every connection. The
     // dashboard reuses the Mihomo plugin's traffic WebSocket, so point that plugin at this
     // generation before publishing Connected. Updating the protocol last prevents a subscriber
     // from observing a half-configured HTTP context.
-    configure_owned_controller_for_ui(state, app, &secret, controller_port);
-
     // §6.10: only now Connected; monitors start.
+    let mut deferred_policy_change = false;
+    let deferred_catalog_rebuild;
     {
-        let mut inner = state.lock().await;
-        if inner.connect_generation != generation {
-            drop(inner);
-            return Err(stale_after_arm(state, generation).await);
-        }
+        let (mut inner, catalog_changed) = controller_commit_guard(state, generation, nodes, routing, || {
+            configure_owned_controller_for_ui(state, app, &secret, controller_port);
+        }).await?;
+        deferred_catalog_rebuild = catalog_changed;
         inner.kill_switch = Some(kill_status);
         inner.controller_generation = inner.controller_generation.wrapping_add(1);
         inner.fsm.mark_session_verified();
         inner.fsm.connect_succeeded().map_err(StageFailure::error)?;
+        // F5: a policy behavior change that arrived while this attempt was still
+        // Connecting was deferred (`handle_network_change_inner` has nothing to
+        // tear down mid-connect). Consume the deferral now and re-capture the
+        // policy half of the snapshot from the latest installed document, so
+        // this session's optional-DIRECT decision runs against the new policy
+        // instead of the copy taken before the first Core start — which
+        // `direct_context_is_current` would correctly reject, deferring the
+        // change to the next manual reconnect.
+        let deferred = inner.take_pending_policy_change(generation);
+        if deferred {
+            logging!(
+                info,
+                Type::Service,
+                "Tono: consuming the policy behavior change deferred during this connect"
+            );
+            traffic_policy = inner.traffic_policy.clone().map(|document| CapturedTrafficPolicy {
+                revision: inner.policy_tracker.current_revision(),
+                digest: inner.policy_tracker.current_digest().unwrap_or_default().to_owned(),
+                document,
+            });
+        }
+        deferred_policy_change = deferred;
+        crate::tono::route_preferences::record_verified(&inner, route_owner, &node.name);
         if let Err(error) = crate::tono::state::save_successful_selection(
             &inner.catalog_dir, &node.name,
             inner.attempt_history.current.as_ref().and_then(|attempt| attempt.catalog_revision).unwrap_or(-1),
@@ -359,7 +376,6 @@ pub(super) async fn run_stages(
         ) {
             logging!(warn, Type::Service, "Tono: could not retain successful selection: {error}");
         }
-        crate::tono::update_handoff::commit_if_verified(env!("CARGO_PKG_VERSION"));
         inner.exit_ip = None;
         inner.exit_org = None;
         inner.exit_location = None;
@@ -386,15 +402,19 @@ pub(super) async fn run_stages(
         inner.retry_attempt = 0;
         inner.next_retry_at_ms = None;
         inner.connected_at = Some(std::time::Instant::now());
+        state.route_ledger().lock().clear_connection_counters();
         commands::emit_status(app, &commands::status_of(&inner));
     }
-    state.route_ledger().lock().clear_connection_counters();
     state.audit().log(AuditEvent::ConnectOk {
         node: node.name.clone(),
         elapsed_ms: started.elapsed().as_millis() as u64,
         transport: node.catalog_transport(),
     });
     spawn_network_monitor(state, app).await;
+    if deferred_catalog_rebuild {
+        super::switch::spawn_deferred_catalog_rebuild(state, app, generation);
+        return Ok(());
+    }
     spawn_exit_identity_lookup(state, app, generation);
     let residential_target = if home_socks5.is_some() {
         Some(config::HOME_SOCKS5_OUTBOUND_NAME.to_owned())
@@ -402,6 +422,24 @@ pub(super) async fn run_stages(
         home_node.map(|home| home.name.clone())
     };
     spawn_control_plane_pin_refresh(state, app, generation, residential_target).await;
+    // F5 fallback: a deferred change whose refreshed policy needs a physical egress
+    // snapshot this attempt never captured (the change went from no DIRECT content to
+    // some, so `needs_physical_interface` was false when this attempt began) cannot be
+    // applied in place — the interface must be discovered before the first Core start.
+    // Rerun the same protected teardown + reconnect a connected-session change would
+    // schedule; the fresh transaction rediscovers the interface and installs the new
+    // policy. Skip this session's overlay spawn: without the snapshot it would only
+    // record a deterministic skip. Keyed on "discovery never attempted", not on a missing
+    // interface: a discovery that ran and failed (virtual-only default route) would fail
+    // again after the teardown, so that case keeps the ordinary full-tunnel skip below.
+    if deferred_policy_change
+        && WINDOWS_OPTIONAL_DIRECT_ENABLED
+        && !needs_physical_interface
+        && traffic_policy.as_ref().is_some_and(|policy| policy.has_direct_content())
+    {
+        spawn_deferred_policy_reconnect(state, app, generation);
+        return Ok(());
+    }
     spawn_optional_direct_after_connected(
         state,
         app,
@@ -418,4 +456,80 @@ pub(super) async fn run_stages(
         service_session,
     );
     Ok(())
+}
+
+/// Bind controller publication and catalog comparison to the state commit which follows it.
+async fn controller_commit_guard<'a>(
+    state: &'a Arc<TonoState>, generation: u64,
+    startup_nodes: &[ValidatedNode], startup_routing: Option<&tono_core::CatalogRouting>,
+    publish: impl FnOnce() + Send,
+) -> Result<(tokio::sync::MutexGuard<'a, crate::tono::state::TonoInner>, bool), StageFailure> {
+    let inner = state.lock().await;
+    if inner.connect_generation != generation {
+        return Err(StageFailure::Stale);
+    }
+    let rebuild = crate::tono::catalog_sync::residential_routing_changed(
+        startup_routing, startup_nodes, inner.routing.as_ref(), &inner.nodes,
+    );
+    publish();
+    Ok((inner, rebuild))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    #[tokio::test]
+    async fn retired_verification_cannot_publish_a_controller_over_the_replacement() {
+        let state = Arc::new(TonoState::for_test());
+        let retired = {
+            let mut inner = state.lock().await;
+            let retired = inner.connect_generation;
+            inner.invalidate_connection(true);
+            inner.fsm.begin_connect();
+            inner.fsm.mark_kill_switch_armed();
+            inner.fsm.mark_session_verified();
+            inner.fsm.connect_succeeded().unwrap();
+            inner.controller_secret = Some("replacement-controller".into());
+            inner.controller_port = Some(19991);
+            retired
+        };
+        let published = AtomicBool::new(false);
+        let late = controller_commit_guard(&state, retired, &[], None, || published.store(true, Ordering::SeqCst)).await;
+        assert!(matches!(late, Err(StageFailure::Stale)));
+        assert!(!published.load(Ordering::SeqCst), "stale completion must not repoint the live UI controller");
+        let inner = state.lock().await;
+        assert!(inner.fsm.status().is_connected && inner.fsm.kill_switch_armed());
+        assert_eq!(inner.controller_secret.as_deref(), Some("replacement-controller"));
+        assert_eq!(inner.controller_port, Some(19991));
+    }
+
+    #[tokio::test]
+    async fn connected_commit_detects_residential_credentials_rotated_during_startup() {
+        let state = Arc::new(TonoState::for_test());
+        let startup_routing = tono_core::CatalogRouting {
+            home_socks5: Some(tono_core::CatalogHomeSocks5 {
+                host: "home.example.com".into(),
+                port: 1080,
+                username: "fixture".into(),
+                password: "old-password".into(),
+            }),
+            ..Default::default()
+        };
+        let generation = {
+            let mut inner = state.lock().await;
+            inner.fsm.begin_connect();
+            inner.routing = Some(startup_routing.clone());
+            // A catalog install can commit while service startup is awaiting readiness.
+            inner.routing.as_mut().unwrap().home_socks5.as_mut().unwrap().password = "rotated-password".into();
+            inner.connect_generation
+        };
+        let (inner, rebuild) = controller_commit_guard(
+            &state, generation, &[], Some(&startup_routing), || {},
+        ).await.unwrap();
+        assert!(rebuild, "the runtime built with old residential credentials must be rebuilt before DIRECT can apply");
+        assert!(inner.fsm.status().is_connecting, "the comparison belongs to the atomic Connected commit");
+        assert_eq!(inner.routing.as_ref().unwrap().home_socks5.as_ref().unwrap().password, "rotated-password");
+    }
 }

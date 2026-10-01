@@ -16,6 +16,8 @@ extension AccountSession {
         appRoutingResearchTask = nil
         periodicTelemetryTask?.cancel()
         periodicTelemetryTask = nil
+        offlineVerificationTask?.cancel()
+        offlineVerificationTask = nil
         await cancelManagedCatalogRefresh()
         await cancelRuntimeMonitor()
         if logOutIdentity {
@@ -43,12 +45,20 @@ extension AccountSession {
     /// it the sign-in gate and menu bar offered no way to restore internet.
     func restoreDirectInternet() async {
         invalidateAccountReads()
+        // Cancelling the account work does not reach a detached catalog
+        // request, and the release would wait out its network timeout. The
+        // slot is kept for the cleanup to drain before it releases.
+        catalogRefreshTask?.task.cancel()
         await accountLifecycle.enqueueCleanup(kind: .releaseProtection) {
+            await self.cancelManagedCatalogRefresh()
             await self.cancelRuntimeMonitor()
             await self.releaseNetworkProtection()
             self.shouldResumeProtection = false
             self.finishInterruptedAccountWorkAfterProtectionRelease()
         }.value
+        // The release retired any sign-in-methods read still in flight, and
+        // the sign-in screen loads them only when it first appears.
+        if user == nil, authMethods == nil { await loadAuthMethods() }
     }
 
     func finishInterruptedAccountWorkAfterProtectionRelease() {
@@ -74,18 +84,10 @@ extension AccountSession {
     }
 
     func releaseNetworkProtection() async {
+        // AppState owns Core stop, DNS restore, PF release and their readbacks.
+        // Completion can mean it retained protection and presented a recovery
+        // error. A second disarm here would override that fail-closed decision.
         await killSwitchDisarmConsumer()
-        // The app-state consumer performs the same ordered transaction and
-        // surfaces any UI error. Keep an idempotent fallback here for
-        // launch/termination paths where that consumer is unavailable:
-        // DNS must be restored before PF is opened.
-        do {
-            _ = try await PrivilegedRuntimeCoordinator.shared
-                .restoreProtectedDNSIfConfigured()
-            try await PrivilegedRuntimeCoordinator.shared.disarmKillSwitch()
-        } catch {
-            // Retain fail-closed protection when recovery cannot be proven.
-        }
     }
 
     func startSidecar(
@@ -181,19 +183,36 @@ extension AccountSession {
     }
 
     func startCloudOnlyRuntimeThrowing() async throws {
-        await cancelRuntimeMonitor()
-        await descriptorConsumer(nil)
+        // 535R-C-F3: a refusal heard while this start awaits has suspended the
+        // account. The start is stale from then on: it neither marks the
+        // account ready nor lets its own failure (`fail` sets `.error`)
+        // replace `.suspended`. Cancellation is what `fail` ignores.
+        let refusals = entitlementRefusals
+        func requireNoNewRefusal() throws {
+            guard entitlementRefusals == refusals else { throw CancellationError() }
+        }
+        do {
+            await cancelRuntimeMonitor()
+            try requireNoNewRefusal()
+            await descriptorConsumer(nil)
+            try requireNoNewRefusal()
 
-        // Terminate a verified legacy Tono sidecar, including one left by an
-        // older app process. This starts no daemon and performs no Tailscale
-        // CLI, API, enrollment, or network operation.
-        try await sidecar.prepareCloudOnly()
+            // Terminate a verified legacy Tono sidecar, including one left by an
+            // older app process. This starts no daemon and performs no Tailscale
+            // CLI, API, enrollment, or network operation.
+            try await sidecar.prepareCloudOnly()
+            try requireNoNewRefusal()
 
-        // A normal signed-in-but-disconnected launch must leave the host's
-        // network usable. The last authenticated mode-0600 catalog cache is
-        // sufficient to paint the first usable screen; refreshing it is not a
-        // launch gate and happens immediately in the background below.
-        try await activateCloudFallback()
+            // A normal signed-in-but-disconnected launch must leave the host's
+            // network usable. The last authenticated mode-0600 catalog cache is
+            // sufficient to paint the first usable screen; refreshing it is not a
+            // launch gate and happens immediately in the background below.
+            try await activateCloudFallback()
+            try requireNoNewRefusal()
+        } catch {
+            try requireNoNewRefusal()
+            throw error
+        }
         state = .ready
         startCatalogSync(refreshImmediately: true)
     }
@@ -241,6 +260,7 @@ extension AccountSession {
         try Task.checkCancellation()
         guard user != nil else { throw CancellationError() }
         let revision = accountReadRevision
+        let refusals = entitlementRefusals
         let resume = resumeProtection ?? shouldResumeProtection
         do {
             try cloudFallbackConsumer(resume)
@@ -250,7 +270,11 @@ extension AccountSession {
             try Task.checkCancellation()
             let refreshed = await refreshManagedCatalog(attempts: 2)
             try Task.checkCancellation()
-            guard accountReadRevision == revision else { throw CancellationError() }
+            // 535R-C-F3: a refusal during the catalog read withdrew the exits;
+            // do not select one for the refused session.
+            guard accountReadRevision == revision, entitlementRefusals == refusals else {
+                throw CancellationError()
+            }
             guard refreshed else {
                 let detail = lastCatalogFailureMessage.map { " \($0)" } ?? ""
                 throw TonoSidecarService.Error.commandFailed(
@@ -289,6 +313,10 @@ extension AccountSession {
                 async let catalog: Bool = refreshManagedCatalog()
                 async let policy: Bool = refreshManagedTrafficPolicy()
                 _ = await (catalog, policy)
+                // A refusal while those were in flight suspended the account;
+                // re-reading it from here would start a re-acceptance nobody
+                // asked for.
+                guard !Task.isCancelled, state == .ready else { return }
                 await refreshAccount()
             }
         }

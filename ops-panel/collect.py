@@ -22,9 +22,11 @@ import argparse
 import concurrent.futures
 import fcntl
 import http.cookiejar
+import ipaddress
 import json
 import os
 import re
+import shlex
 import socket
 import subprocess
 import sys
@@ -45,11 +47,21 @@ TOKEN_FILE = Path("/opt/tono-ops/collector.token")
 LOCK_FULL = BASE / "collect.lock"
 LOCK_AGENTS = BASE / "collect-agents.lock"
 API_BASE = os.environ.get("TONO_API_BASE", "https://api.afk.ccwu.cc").rstrip("/")
+# The hub's pinned host keys, the same file tooling/scripts/check-node-in-fleet.py
+# verifies against. A root password is only ever offered to a host whose key is
+# already in it: an unknown or changed key fails the connection, never gets added.
+KNOWN_HOSTS = BASE / "tono-collector-known-hosts"
+HOST_KEY_FAILED = "Host key verification failed"
 
+# The quality sweep runs these two upstream tools as root on every exit node,
+# so each is pinned to one reviewed build by sha256. A digest mismatch leaves
+# the tool missing for that sweep instead of running an unknown binary; bump
+# the URL and digest together after reviewing a new upstream build.
+# securityCheck publishes only the moving "output" tag, so its digest is the pin.
 SC_URL = "https://github.com/oneclickvirt/securityCheck/releases/download/output/securityCheck-linux-amd64"
-BT_URL = "https://github.com/oneclickvirt/backtrace/releases/download/output/backtrace-linux-amd64"
-SC_CDN = "https://cdn.spiritlhl.net/https://github.com/oneclickvirt/securityCheck/releases/download/output/securityCheck-linux-amd64"
-BT_CDN = "https://cdn.spiritlhl.net/https://github.com/oneclickvirt/backtrace/releases/download/output/backtrace-linux-amd64"
+SC_SHA256 = "d0167485cbc858ce5f28f32123c4e89632fc589754e9abbfeb1d695eaf913725"
+BT_URL = "https://github.com/oneclickvirt/backtrace/releases/download/v0.0.21/backtrace-linux-amd64"
+BT_SHA256 = "cda36fa9bd5e0bda58d02113ac07c30a5ac3ed06a8fd44988a6b6930fb73ea82"
 
 # Public check-host nodes (no mainland China nodes available on this network).
 ASIA_EDGE_NODES = [
@@ -183,9 +195,52 @@ def check_host_tcp_nodes(ip: str, nodes: list[str], port: int = 443, waits: int 
     }
 
 
+def ssh_password_argv(host: str, port: int, connect_timeout: int) -> list[str]:
+    return [
+        "sshpass",
+        "-e",
+        "ssh",
+        "-o",
+        "StrictHostKeyChecking=yes",
+        "-o",
+        f"UserKnownHostsFile={KNOWN_HOSTS}",
+        "-o",
+        "GlobalKnownHostsFile=/dev/null",
+        "-o",
+        f"ConnectTimeout={connect_timeout}",
+        "-p",
+        str(port),
+        f"root@{host}",
+    ]
+
+
+def public_ip(value: object) -> str | None:
+    """A globally routable IPv4/IPv6 literal, else None.
+
+    `public_ip` is printed by the node itself, so it is untrusted input that
+    ends up in a root command on every mainland probe host.
+    """
+    try:
+        addr = ipaddress.ip_address(str(value or "").strip())
+    except ValueError:
+        return None
+    if not addr.is_global or addr.is_multicast:
+        return None
+    return str(addr)
+
+
+def probe_target(quality: dict, node: dict) -> str | None:
+    """The address block probes dial: the node's reported IP, else its registered host."""
+    return public_ip(quality.get("public_ip")) or public_ip(node.get("host"))
+
+
 def probe_cn_agents(ip: str, agents: list[dict], port: int = 443) -> dict | None:
     """Authoritative mainland probe: SSH to CT/CU/CM hosts and TCP-connect to target:port."""
     if not agents:
+        return None
+    target = public_ip(ip)
+    if target is None:
+        log(f"  mainland probe skipped: {ip!r} is not a public IP")
         return None
     detail = {}
     ok_n = fail_n = 0
@@ -197,26 +252,14 @@ def probe_cn_agents(ip: str, agents: list[dict], port: int = 443) -> dict | None
         if not host or not password:
             continue
         # Bash /dev/tcp is enough; no extra packages on agent.
+        # Target and port are positional arguments to bash -c, not script text.
         remote = (
-            f"timeout 5 bash -c 'echo >/dev/tcp/{ip}/{port}' >/dev/null 2>&1; echo EXIT:$?"
+            "timeout 5 bash -c 'echo >/dev/tcp/$0/$1' "
+            f"{shlex.quote(target)} {int(port)} >/dev/null 2>&1; echo EXIT:$?"
         )
         env = os.environ.copy()
         env["SSHPASS"] = password
-        cmd = [
-            "sshpass",
-            "-e",
-            "ssh",
-            "-o",
-            "StrictHostKeyChecking=no",
-            "-o",
-            "UserKnownHostsFile=/dev/null",
-            "-o",
-            "ConnectTimeout=12",
-            "-p",
-            str(ssh_port),
-            f"root@{host}",
-            remote,
-        ]
+        cmd = [*ssh_password_argv(host, ssh_port, 12), remote]
         try:
             p = subprocess.run(cmd, capture_output=True, text=True, timeout=25, env=env)
             text = (p.stdout or "") + (p.stderr or "")
@@ -227,6 +270,11 @@ def probe_cn_agents(ip: str, agents: list[dict], port: int = 443) -> dict | None
             success = False
             code = -1
             text = type(e).__name__
+        if HOST_KEY_FAILED in text and "EXIT:" not in text:
+            # The probe never ran, so this is not evidence the target is blocked.
+            log(f"  mainland probe {name}: host key not pinned in {KNOWN_HOSTS}")
+            detail[name] = {"ok": False, "code": code, "host": host, "error": "host_key_unverified"}
+            continue
         detail[name] = {"ok": success, "code": code, "host": host}
         if success:
             ok_n += 1
@@ -326,7 +374,9 @@ def parse_quality(sc: str, bt: str) -> dict:
 
     risks = []
     if not sc or "missing" in sc:
-        return {"quality": "ok", "risk_keywords": [], "route_keywords": routes[:12]}
+        # No securityCheck output (download failed or the pinned digest no
+        # longer matches upstream) is not evidence of a clean IP.
+        return {"quality": "unknown", "risk_keywords": [], "route_keywords": routes[:12]}
 
     severe = 0
     for pat, tag in (
@@ -367,13 +417,17 @@ DIR=/opt/tono-quality
 mkdir -p "$DIR"
 cd "$DIR"
 dl() {{
-  f="$1"; u="$2"; c="$3"
-  if [ -x "$f" ] && [ -s "$f" ]; then return 0; fi
-  curl -fsSL --retry 2 -o "$f.tmp" "$u" || curl -fsSL --retry 2 -o "$f.tmp" "$c" || return 1
-  mv "$f.tmp" "$f"; chmod 700 "$f"
+  f="$1"; u="$2"; h="$3"
+  if [ -f "$f" ] && echo "$h  $f" | sha256sum -c --status; then chmod 700 "$f"; return 0; fi
+  rm -f "$f" "$f.tmp"
+  curl -fsSL --proto '=https' --retry 2 -o "$f.tmp" "$u" || {{ rm -f "$f.tmp"; return 1; }}
+  if ! echo "$h  $f.tmp" | sha256sum -c --status; then
+    rm -f "$f.tmp"; echo "digest mismatch: $f" >&2; return 1
+  fi
+  chmod 700 "$f.tmp"; mv "$f.tmp" "$f"
 }}
-dl securityCheck "{SC_URL}" "{SC_CDN}" || true
-dl backtrace "{BT_URL}" "{BT_CDN}" || true
+dl securityCheck "{SC_URL}" "{SC_SHA256}" || true
+dl backtrace "{BT_URL}" "{BT_SHA256}" || true
 PUB=$(curl -4 -fsS --max-time 8 https://api.ipify.org 2>/dev/null || echo unknown)
 echo "===META==="
 echo "public_ip=$PUB"
@@ -386,22 +440,7 @@ echo "===END==="
 """
     env = os.environ.copy()
     env["SSHPASS"] = password
-    cmd = [
-        "sshpass",
-        "-e",
-        "ssh",
-        "-o",
-        "StrictHostKeyChecking=no",
-        "-o",
-        "UserKnownHostsFile=/dev/null",
-        "-o",
-        "ConnectTimeout=15",
-        "-p",
-        str(port),
-        f"root@{host}",
-        "bash",
-        "-s",
-    ]
+    cmd = [*ssh_password_argv(host, port, 15), "bash", "-s"]
     try:
         p = subprocess.run(cmd, input=remote, capture_output=True, text=True, timeout=420, env=env)
         text = (p.stdout or "") + "\n" + (p.stderr or "")
@@ -419,7 +458,7 @@ echo "===END==="
     pub = ""
     for line in meta.splitlines():
         if line.startswith("public_ip="):
-            pub = line.split("=", 1)[1].strip()
+            pub = public_ip(line.split("=", 1)[1]) or ""
     q = parse_quality(sc, bt)
     return {
         "name": name,
@@ -688,13 +727,18 @@ def main() -> None:
     for node in nodes_cfg:
         log(f"collect {node['name']}")
         q = run_on_node_via_ssh(node)
-        ip = str(q.get("public_ip") or node["host"])
-        time.sleep(0.5)
-        overseas = check_host_tcp_nodes(ip, OVERSEAS_NODES, port=443)
-        time.sleep(1.0)
-        asia = check_host_tcp_nodes(ip, ASIA_EDGE_NODES, port=443)
-        time.sleep(0.5)
-        cn = probe_cn_agents(ip, cn_agents, port=443)
+        ip = probe_target(q, node)
+        if ip is None:
+            log("  no public IP to probe; block probes skipped")
+            overseas = asia = {"ok": False, "error": "no_public_ip"}
+            cn = None
+        else:
+            time.sleep(0.5)
+            overseas = check_host_tcp_nodes(ip, OVERSEAS_NODES, port=443)
+            time.sleep(1.0)
+            asia = check_host_tcp_nodes(ip, ASIA_EDGE_NODES, port=443)
+            time.sleep(0.5)
+            cn = probe_cn_agents(ip, cn_agents, port=443)
         block = classify_block(cn, asia, overseas)
         q["block"] = block
         # Keep legacy field for older UI: status is still the machine-readable code.

@@ -246,6 +246,7 @@ function SuspendDialog({
 }) {
   const ask = useAsk(onChanged);
   const [reason, setReason] = useState('');
+  const [refund, setRefund] = useState(false);
 
   if (!open) return null;
   return (
@@ -257,19 +258,37 @@ function SuspendDialog({
       pending={ask.pending}
       failure={ask.error}
       onConfirm={() => {
-        void ask.run(() => customerApi.closeUser(userId, reason.trim())).then((done) => {
+        void ask.run(() => customerApi.closeUser(userId, reason.trim(), refund)).then((done) => {
           if (done) {
             setReason('');
+            setRefund(false);
             onClose();
           }
         });
       }}
       onCancel={() => {
         ask.clearError();
+        // The dialog stays mounted while closed, so a refund ticked and then
+        // cancelled would otherwise still be ticked the next time it opens.
+        setRefund(false);
         onClose();
       }}
     >
       <TextField label={copy.suspendReason} value={reason} onChange={setReason} />
+      <label className="flex items-baseline gap-2">
+        <input
+          type="checkbox"
+          className="translate-y-[2px]"
+          checked={refund}
+          onChange={(event) => setRefund(event.target.checked)}
+        />
+        <span className="flex flex-col gap-0.5">
+          <span className="text-body">{copy.suspendRefund}</span>
+          <span className="text-micro normal-case tracking-normal text-[var(--muted-foreground)]">
+            {copy.suspendRefundHint}
+          </span>
+        </span>
+      </label>
     </ConfirmDialog>
   );
 }

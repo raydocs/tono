@@ -1,0 +1,15 @@
+[package]
+name = "tono-service-client"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+tono-service-protocol = { path = "../../../service", version = "2.6.7", features = ["client"] }
+tono-logging = { workspace = true }
+anyhow = { workspace = true }
+tokio = { workspace = true }
+parking_lot = { workspace = true }
+log = { workspace = true }
+
+[lints]
+workspace = true

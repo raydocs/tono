@@ -1,0 +1,749 @@
+//! Windows-native image and filesystem proofs. No Authenticode provisioning;
+//! unsigned installed images are permitted only inside the protected registered
+//! installation. Update bytes additionally require the pinned manifest signature.
+use crate::update_transaction::{Image, file_digest};
+use anyhow::{Context, Result, ensure};
+use std::os::windows::{
+    ffi::OsStrExt,
+    fs::{MetadataExt, OpenOptionsExt},
+    io::AsRawHandle,
+};
+use std::{
+    fs::{File, OpenOptions},
+    path::{Path, PathBuf},
+};
+use windows_sys::Win32::{
+    Foundation::*,
+    Security::{Authorization::*, *},
+    Storage::FileSystem::*,
+    System::Registry::*,
+};
+
+pub fn wide(value: &str) -> Vec<u16> {
+    value.encode_utf16().chain(Some(0)).collect()
+}
+
+/// Pin every ancestor against rename and reject all reparse components. The
+/// final file denies concurrent write/delete for the whole private-copy read.
+pub fn pin_path(path: &Path, protected: bool) -> Result<Vec<File>> {
+    ensure!(path.is_absolute(), "update path must be absolute");
+    let mut held = Vec::new();
+    let mut parts = path.ancestors().collect::<Vec<_>>();
+    parts.reverse();
+    for part in parts {
+        let meta = std::fs::symlink_metadata(part)?;
+        ensure!(
+            meta.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT == 0,
+            "reparse update path refused"
+        );
+        let file = OpenOptions::new()
+            .read(true)
+            .access_mode(
+                READ_CONTROL
+                    | FILE_READ_ATTRIBUTES
+                    | if meta.is_file() { FILE_READ_DATA } else { 0 },
+            )
+            .share_mode(if meta.is_dir() {
+                FILE_SHARE_READ | FILE_SHARE_WRITE
+            } else {
+                FILE_SHARE_READ
+            })
+            .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS)
+            .open(part)?;
+        ensure!(
+            file.metadata()?.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT == 0,
+            "update path changed to reparse point"
+        );
+        // Ancestors such as C:\ may grant create-child; the protected root and
+        // every descendant must deny replacement by ordinary users.
+        if protected && part == path {
+            verify_acl(&file)?;
+        }
+        held.push(file);
+    }
+    Ok(held)
+}
+
+fn verify_acl(file: &File) -> Result<()> {
+    let mut owner = std::ptr::null_mut();
+    let mut dacl = std::ptr::null_mut();
+    let mut descriptor = std::ptr::null_mut();
+    let status = unsafe {
+        GetSecurityInfo(
+            file.as_raw_handle(),
+            SE_FILE_OBJECT,
+            OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION,
+            &mut owner,
+            std::ptr::null_mut(),
+            &mut dacl,
+            std::ptr::null_mut(),
+            &mut descriptor,
+        )
+    };
+    ensure!(
+        status == 0 && !descriptor.is_null(),
+        "cannot inspect image security"
+    );
+    struct Descriptor(*mut std::ffi::c_void);
+    impl Drop for Descriptor {
+        fn drop(&mut self) {
+            unsafe { LocalFree(self.0) };
+        }
+    }
+    let _descriptor = Descriptor(descriptor);
+    let trusted = |sid| -> Result<bool> {
+        for kind in [WinLocalSystemSid, WinBuiltinAdministratorsSid] {
+            let mut bytes = [0_u64; 9];
+            let mut length = std::mem::size_of_val(&bytes) as u32;
+            ensure!(
+                unsafe {
+                    CreateWellKnownSid(
+                        kind,
+                        std::ptr::null_mut(),
+                        bytes.as_mut_ptr().cast(),
+                        &mut length,
+                    )
+                } != 0,
+                "SID creation failed"
+            );
+            if unsafe { EqualSid(sid, bytes.as_mut_ptr().cast()) } != 0 {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    };
+    ensure!(
+        !owner.is_null() && trusted(owner)? && !dacl.is_null(),
+        "image has untrusted owner or null DACL"
+    );
+    for i in 0..unsafe { (*dacl).AceCount } {
+        let mut ace = std::ptr::null_mut();
+        ensure!(
+            unsafe { GetAce(dacl, i.into(), &mut ace) } != 0,
+            "image DACL unreadable"
+        );
+        let header = unsafe { &*(ace as *const ACE_HEADER) };
+        if u32::from(header.AceFlags) & INHERIT_ONLY_ACE != 0 {
+            continue;
+        }
+        if header.AceType == 1 {
+            continue;
+        } // ACCESS_DENIED_ACE only narrows.
+        ensure!(header.AceType == 0, "unsupported image allow ACE");
+        let allowed = unsafe { &*(ace as *const ACCESS_ALLOWED_ACE) };
+        let writes = FILE_WRITE_DATA
+            | FILE_APPEND_DATA
+            | FILE_WRITE_EA
+            | FILE_WRITE_ATTRIBUTES
+            | FILE_DELETE_CHILD
+            | DELETE
+            | WRITE_DAC
+            | WRITE_OWNER
+            | GENERIC_WRITE
+            | GENERIC_ALL;
+        if allowed.Mask & writes != 0 {
+            let sid = (&allowed.SidStart as *const u32).cast_mut().cast();
+            ensure!(
+                trusted(sid)?,
+                "ordinary users can modify installed image/dependency"
+            );
+        }
+    }
+    Ok(())
+}
+
+pub fn program_files() -> Result<PathBuf> {
+    use windows_sys::Win32::{
+        System::Com::CoTaskMemFree,
+        UI::Shell::{FOLDERID_ProgramFiles, SHGetKnownFolderPath},
+    };
+    let mut raw = std::ptr::null_mut();
+    ensure!(
+        unsafe { SHGetKnownFolderPath(&FOLDERID_ProgramFiles, 0, std::ptr::null_mut(), &mut raw) }
+            >= 0
+            && !raw.is_null(),
+        "Program Files unavailable"
+    );
+    let mut n = 0;
+    while unsafe { *raw.add(n) } != 0 {
+        n += 1;
+    }
+    let path = PathBuf::from(String::from_utf16(unsafe {
+        std::slice::from_raw_parts(raw, n)
+    })?);
+    unsafe { CoTaskMemFree(raw.cast()) };
+    Ok(path)
+}
+
+/// The Windows system directory as the OS reports it (`GetSystemDirectoryW`).
+/// Never a fixed drive letter: Windows may be installed on any volume.
+pub fn system_directory() -> Result<PathBuf> {
+    use std::os::windows::ffi::OsStringExt;
+    use windows_sys::Win32::System::SystemInformation::GetSystemDirectoryW;
+    let mut buffer = [0_u16; windows_sys::Win32::Foundation::MAX_PATH as usize];
+    let len = unsafe { GetSystemDirectoryW(buffer.as_mut_ptr(), buffer.len() as u32) } as usize;
+    ensure!(
+        len > 0 && len < buffer.len(),
+        "system directory unavailable"
+    );
+    let path = PathBuf::from(std::ffi::OsString::from_wide(&buffer[..len]));
+    ensure!(path.is_absolute(), "system directory is not absolute");
+    Ok(path)
+}
+
+pub fn registry_string(root: HKEY, key: &str, name: &str) -> Result<Option<String>> {
+    let (key, name) = (wide(key), wide(name));
+    let mut bytes = [0_u16; 16_384];
+    let mut size = std::mem::size_of_val(&bytes) as u32;
+    let status = unsafe {
+        RegGetValueW(
+            root,
+            key.as_ptr(),
+            name.as_ptr(),
+            RRF_RT_REG_SZ | RRF_SUBKEY_WOW6464KEY,
+            std::ptr::null_mut(),
+            bytes.as_mut_ptr().cast(),
+            &mut size,
+        )
+    };
+    if status == ERROR_FILE_NOT_FOUND {
+        return Ok(None);
+    }
+    ensure!(status == 0, "registry identity unavailable ({status})");
+    Ok(Some(String::from_utf16(
+        &bytes[..(size as usize / 2).saturating_sub(1)],
+    )?))
+}
+
+/// Name `version` as the installed version in Tono's Add/Remove Programs
+/// record, which the manual installer's downgrade check reads. A native update
+/// runs no NSIS section, so the settled update writes it. Only an existing
+/// record is updated; a missing one is not created.
+pub fn record_installed_version(version: &str) -> Result<()> {
+    let key = wide("Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\Tono");
+    let (name, data) = (wide("DisplayVersion"), wide(version));
+    let mut handle = std::ptr::null_mut();
+    // SAFETY: NUL-terminated key path and a valid out-pointer.
+    let status = unsafe {
+        RegOpenKeyExW(
+            HKEY_LOCAL_MACHINE,
+            key.as_ptr(),
+            0,
+            KEY_SET_VALUE | KEY_WOW64_64KEY,
+            &mut handle,
+        )
+    };
+    ensure!(
+        status == 0,
+        "Tono Add/Remove Programs record unavailable ({status})"
+    );
+    // SAFETY: `handle` is open; `data` is a NUL-terminated UTF-16 buffer of `len * 2` bytes.
+    let status = unsafe {
+        RegSetValueExW(
+            handle,
+            name.as_ptr(),
+            0,
+            REG_SZ,
+            data.as_ptr().cast(),
+            (data.len() * 2) as u32,
+        )
+    };
+    // SAFETY: the handle opened above, closed exactly once.
+    unsafe { RegCloseKey(handle) };
+    ensure!(status == 0, "installed version was not recorded ({status})");
+    Ok(())
+}
+
+pub fn install_root() -> Result<PathBuf> {
+    let expected = program_files()?.join("Tono");
+    let registered = registry_string(
+        HKEY_LOCAL_MACHINE,
+        "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\Tono",
+        "InstallLocation",
+    )?
+    .context("Tono has no registered installation")?;
+    ensure!(
+        Path::new(registered.trim_matches('"')).canonicalize()? == expected.canonicalize()?,
+        "registered installation mismatch"
+    );
+    let _pin = pin_path(&expected, true)?;
+    Ok(expected.canonicalize()?)
+}
+
+/// Current time on the same clock as [`Image::started_at`] (`GetProcessTimes`
+/// creation FILETIME). Not Unix time.
+pub fn process_clock_now() -> u64 {
+    use windows_sys::Win32::Foundation::FILETIME;
+    use windows_sys::Win32::System::SystemInformation::GetSystemTimeAsFileTime;
+
+    let mut now = FILETIME::default();
+    unsafe { GetSystemTimeAsFileTime(&mut now) };
+    (u64::from(now.dwHighDateTime) << 32) | u64::from(now.dwLowDateTime)
+}
+
+pub fn image(pid: u32) -> Result<Image> {
+    let identity = super::super::process::process_identity(pid)?.context("peer exited")?;
+    let path = PathBuf::from(&identity.executable);
+    let _pins = pin_path(&path, true)?;
+    let sha256 = file_digest(&path)?;
+    ensure!(
+        super::super::process::process_identity(pid)?.as_ref() == Some(&identity),
+        "peer incarnation changed"
+    );
+    Ok(Image {
+        pid,
+        started_at: identity.started_at,
+        path,
+        sha256,
+    })
+}
+
+pub fn app_image(pid: u32) -> Result<Image> {
+    let root = install_root()?;
+    verify_tree(&root, 0)?;
+    let image = image(pid)?;
+    ensure!(
+        image.path == root.join("Tono.exe"),
+        "peer is not the registered App image"
+    );
+    Ok(image)
+}
+
+pub fn verify_tree(root: &Path, depth: usize) -> Result<()> {
+    ensure!(depth < 12, "installation tree too deep");
+    let _held = pin_path(root, true)?;
+    if root.is_dir() {
+        for (i, entry) in std::fs::read_dir(root)?.enumerate() {
+            ensure!(i < 512, "installation tree too large");
+            verify_tree(&entry?.path(), depth + 1)?;
+        }
+    }
+    Ok(())
+}
+
+pub fn no_proxy(sid: &str) -> Result<()> {
+    let key = format!("{sid}\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings");
+    let mut enabled: u32 = 0;
+    let mut size = 4;
+    let status = unsafe {
+        RegGetValueW(
+            HKEY_USERS,
+            wide(&key).as_ptr(),
+            wide("ProxyEnable").as_ptr(),
+            RRF_RT_REG_DWORD,
+            std::ptr::null_mut(),
+            (&mut enabled as *mut u32).cast(),
+            &mut size,
+        )
+    };
+    ensure!(
+        status == 0 || status == ERROR_FILE_NOT_FOUND,
+        "proxy state unknown"
+    );
+    ensure!(
+        enabled == 0
+            && registry_string(HKEY_USERS, &key, "AutoConfigURL")?.is_none_or(|s| s.is_empty()),
+        "active user proxy must be cleared before update"
+    );
+    Ok(())
+}
+
+/// Enumerate successfully before claiming absence. A failed alias lookup can
+/// also mean API/access failure or a same-named non-TUN adapter, not removal.
+pub fn tunnel_absent(name: &str) -> Result<()> {
+    ensure!(!tunnel_present(name)?, "TUN adapter is still present");
+    Ok(())
+}
+
+/// One interface row whose alias matches the tunnel name. These facts, and only for rows with
+/// that name, are what a gate refusal or note may log.
+#[derive(Debug, Default)]
+pub(crate) struct TunnelRow {
+    pub(crate) alias: String,
+    pub(crate) luid: u64,
+    pub(crate) if_index: u32,
+    pub(crate) guid: String,
+    pub(crate) oper_status: i32,
+    pub(crate) admin_status: i32,
+    pub(crate) media_connect_state: i32,
+    pub(crate) if_type: u32,
+    pub(crate) description: String,
+}
+
+impl std::fmt::Display for TunnelRow {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "alias={:?} luid={} ifIndex={} guid={} operStatus={} adminStatus={} mediaConnectState={} type={} description={:?}",
+            self.alias,
+            self.luid,
+            self.if_index,
+            self.guid,
+            self.oper_status,
+            self.admin_status,
+            self.media_connect_state,
+            self.if_type,
+            self.description
+        )
+    }
+}
+
+/// `(present, not_present)` among the rows named `name` (exact, ASCII case-insensitive). A row
+/// is present unless Windows reports it `IfOperStatusNotPresent`: a killed Core leaves its
+/// WinTUN device not present while its interface row stays registered.
+pub(crate) fn split_tunnel_rows(
+    rows: Vec<TunnelRow>,
+    name: &str,
+) -> (Vec<TunnelRow>, Vec<TunnelRow>) {
+    use windows_sys::Win32::NetworkManagement::Ndis::IfOperStatusNotPresent;
+    rows.into_iter()
+        .filter(|row| row.alias.eq_ignore_ascii_case(name))
+        .partition(|row| row.oper_status != IfOperStatusNotPresent)
+}
+
+/// Whether an interface with this alias is present (any status but NotPresent). An enumeration
+/// failure is an error, never absence.
+pub fn tunnel_present(name: &str) -> Result<bool> {
+    Ok(!tunnel_rows(name)?.0.is_empty())
+}
+
+/// Every interface named `name`, as [`split_tunnel_rows`] divides them. An enumeration failure,
+/// an oversized table or an alias that is not valid UTF-16 is an error, never absence.
+pub fn tunnel_rows(name: &str) -> Result<(Vec<TunnelRow>, Vec<TunnelRow>)> {
+    use windows_sys::Win32::NetworkManagement::IpHelper::{FreeMibTable, GetIfTable2};
+    fn text(units: &[u16]) -> &[u16] {
+        &units[..units.iter().position(|c| *c == 0).unwrap_or(units.len())]
+    }
+    let mut table = std::ptr::null_mut();
+    let status = unsafe { GetIfTable2(&mut table) };
+    ensure!(
+        status == 0 && !table.is_null(),
+        "adapter enumeration failed ({status})"
+    );
+    struct Table(*mut std::ffi::c_void);
+    impl Drop for Table {
+        fn drop(&mut self) {
+            unsafe { FreeMibTable(self.0) };
+        }
+    }
+    let _table = Table(table.cast());
+    let count = unsafe { (*table).NumEntries } as usize;
+    ensure!(count <= 4096, "adapter enumeration exceeds limit");
+    let mut rows = Vec::new();
+    for row in unsafe { std::slice::from_raw_parts((*table).Table.as_ptr(), count) } {
+        let alias = String::from_utf16(text(&row.Alias))?;
+        if !alias.eq_ignore_ascii_case(name) {
+            continue;
+        }
+        let g = &row.InterfaceGuid;
+        rows.push(TunnelRow {
+            alias,
+            // SAFETY: `Value` is the plain u64 view of the union.
+            luid: unsafe { row.InterfaceLuid.Value },
+            if_index: row.InterfaceIndex,
+            guid: format!(
+                "{{{:08X}-{:04X}-{:04X}-{:02X}{:02X}-{:02X}{:02X}{:02X}{:02X}{:02X}{:02X}}}",
+                g.data1,
+                g.data2,
+                g.data3,
+                g.data4[0],
+                g.data4[1],
+                g.data4[2],
+                g.data4[3],
+                g.data4[4],
+                g.data4[5],
+                g.data4[6],
+                g.data4[7]
+            ),
+            oper_status: row.OperStatus,
+            admin_status: row.AdminStatus,
+            media_connect_state: row.MediaConnectState,
+            if_type: row.Type,
+            description: String::from_utf16_lossy(text(&row.Description)),
+        });
+    }
+    Ok(split_tunnel_rows(rows, name))
+}
+
+pub fn decode_base64(value: &str) -> Result<String> {
+    use windows_sys::Win32::Security::Cryptography::{
+        CRYPT_STRING_BASE64, CRYPT_STRING_STRICT, CryptStringToBinaryW,
+    };
+    ensure!(
+        value.len() <= 4096 && value.is_ascii(),
+        "signature box exceeds limit"
+    );
+    let value = wide(value.trim());
+    let mut size = 4096;
+    let mut bytes = vec![0_u8; size as usize];
+    ensure!(
+        unsafe {
+            CryptStringToBinaryW(
+                value.as_ptr(),
+                (value.len() - 1) as u32,
+                CRYPT_STRING_BASE64 | CRYPT_STRING_STRICT,
+                bytes.as_mut_ptr(),
+                &mut size,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+            )
+        } != 0,
+        "invalid signature base64"
+    );
+    bytes.truncate(size as usize);
+    Ok(String::from_utf8(bytes)?)
+}
+
+pub fn random_id() -> Result<String> {
+    use windows_sys::Win32::Security::Cryptography::{
+        BCRYPT_USE_SYSTEM_PREFERRED_RNG, BCryptGenRandom,
+    };
+    let mut bytes = [0_u8; 32];
+    ensure!(
+        unsafe {
+            BCryptGenRandom(
+                std::ptr::null_mut(),
+                bytes.as_mut_ptr(),
+                32,
+                BCRYPT_USE_SYSTEM_PREFERRED_RNG,
+            )
+        } >= 0,
+        "random attempt identity failed"
+    );
+    Ok(bytes.iter().map(|b| format!("{b:02x}")).collect())
+}
+
+struct Handle(HANDLE);
+impl Drop for Handle {
+    fn drop(&mut self) {
+        unsafe { CloseHandle(self.0) };
+    }
+}
+
+pub fn process_matches(expected: &Image) -> Result<()> {
+    let actual =
+        super::super::process::process_identity(expected.pid)?.context("process exited")?;
+    ensure!(
+        actual.started_at == expected.started_at && Path::new(&actual.executable) == expected.path,
+        "process incarnation changed"
+    );
+    Ok(())
+}
+
+/// The image file name Windows lists for `pid` (Toolhelp's `szExeFile`). Listing needs no
+/// handle to the process, so it answers where `OpenProcess` or the image path is refused.
+/// `None` when the snapshot fails or the pid is not listed.
+pub fn process_image_name(pid: u32) -> Option<String> {
+    use windows_sys::Win32::System::Diagnostics::ToolHelp::*;
+    let snapshot = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) };
+    if snapshot == INVALID_HANDLE_VALUE {
+        return None;
+    }
+    let snapshot = Handle(snapshot);
+    let mut entry = PROCESSENTRY32W::default();
+    entry.dwSize = std::mem::size_of_val(&entry) as u32;
+    let mut found = unsafe { Process32FirstW(snapshot.0, &mut entry) };
+    while found != 0 {
+        if entry.th32ProcessID == pid {
+            let end = entry
+                .szExeFile
+                .iter()
+                .position(|c| *c == 0)
+                .unwrap_or(entry.szExeFile.len());
+            return String::from_utf16(&entry.szExeFile[..end]).ok();
+        }
+        found = unsafe { Process32NextW(snapshot.0, &mut entry) };
+    }
+    None
+}
+
+/// Manual installers may live in Downloads; this is an incarnation binding,
+/// not an updater image trust proof. UAC + verified Disconnect remain required.
+pub fn parent_image() -> Result<Image> {
+    use windows_sys::Win32::System::Diagnostics::ToolHelp::*;
+    let snapshot = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) };
+    ensure!(snapshot != INVALID_HANDLE_VALUE, "process snapshot failed");
+    let snapshot = Handle(snapshot);
+    let mut entry = PROCESSENTRY32W::default();
+    entry.dwSize = std::mem::size_of_val(&entry) as u32;
+    let mut found = unsafe { Process32FirstW(snapshot.0, &mut entry) };
+    while found != 0 {
+        if entry.th32ProcessID == std::process::id() {
+            let pid = entry.th32ParentProcessID;
+            let identity =
+                super::super::process::process_identity(pid)?.context("installer parent exited")?;
+            let path = PathBuf::from(identity.executable);
+            return Ok(Image {
+                pid,
+                started_at: identity.started_at,
+                sha256: file_digest(&path)?,
+                path,
+            });
+        }
+        found = unsafe { Process32NextW(snapshot.0, &mut entry) };
+    }
+    anyhow::bail!("installer parent unavailable")
+}
+
+/// Capture the authenticated initiating user's token *before* stopping the App.
+/// The executor never launches a user GUI with its own SYSTEM identity.
+pub struct UserLaunch {
+    token: Handle,
+}
+impl UserLaunch {
+    pub fn capture(peer: &Image) -> Result<Self> {
+        use windows_sys::Win32::System::Threading::*;
+        process_matches(peer)?;
+        let process = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, peer.pid) };
+        ensure!(!process.is_null(), "cannot capture initiating process");
+        let process = Handle(process);
+        let mut raw = std::ptr::null_mut();
+        ensure!(
+            unsafe { OpenProcessToken(process.0, TOKEN_DUPLICATE | TOKEN_QUERY, &mut raw) } != 0,
+            "cannot capture user token"
+        );
+        let token = Handle(raw);
+        let mut primary = std::ptr::null_mut();
+        ensure!(
+            unsafe {
+                DuplicateTokenEx(
+                    token.0,
+                    TOKEN_ALL_ACCESS,
+                    std::ptr::null(),
+                    SecurityImpersonation,
+                    TokenPrimary,
+                    &mut primary,
+                )
+            } != 0,
+            "cannot duplicate user token"
+        );
+        process_matches(peer)?;
+        Ok(Self {
+            token: Handle(primary),
+        })
+    }
+
+    pub fn suspended(&self, path: &Path) -> Result<SuspendedApp> {
+        use windows_sys::Win32::System::{Environment::*, Threading::*};
+        let pins = pin_path(path, true)?;
+        let path_wide: Vec<_> = path.as_os_str().encode_wide().chain(Some(0)).collect();
+        let mut command = wide(&format!("\"{}\"", path.display()));
+        let mut desktop = wide("winsta0\\default");
+        let mut startup = STARTUPINFOW::default();
+        startup.cb = std::mem::size_of_val(&startup) as u32;
+        startup.lpDesktop = desktop.as_mut_ptr();
+        let mut environment = std::ptr::null_mut();
+        ensure!(
+            unsafe { CreateEnvironmentBlock(&mut environment, self.token.0, 0) } != 0,
+            "cannot create user environment"
+        );
+        let mut process = PROCESS_INFORMATION::default();
+        let created = unsafe {
+            CreateProcessAsUserW(
+                self.token.0,
+                path_wide.as_ptr(),
+                command.as_mut_ptr(),
+                std::ptr::null(),
+                std::ptr::null(),
+                0,
+                CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT,
+                environment,
+                std::ptr::null(),
+                &startup,
+                &mut process,
+            )
+        };
+        unsafe { DestroyEnvironmentBlock(environment) };
+        ensure!(
+            created != 0,
+            "successor launch failed: {}",
+            std::io::Error::last_os_error()
+        );
+        let child = SuspendedApp {
+            process: Handle(process.hProcess),
+            thread: Handle(process.hThread),
+            pid: process.dwProcessId,
+            resumed: false,
+            _pins: pins,
+        };
+        Ok(child)
+    }
+}
+
+pub struct SuspendedApp {
+    process: Handle,
+    thread: Handle,
+    pub pid: u32,
+    resumed: bool,
+    _pins: Vec<File>,
+}
+impl SuspendedApp {
+    pub fn resume(mut self) -> Result<()> {
+        use windows_sys::Win32::System::Threading::ResumeThread;
+        ensure!(
+            unsafe { ResumeThread(self.thread.0) } != u32::MAX,
+            "successor resume failed"
+        );
+        self.resumed = true;
+        Ok(())
+    }
+}
+impl Drop for SuspendedApp {
+    fn drop(&mut self) {
+        if !self.resumed {
+            unsafe { windows_sys::Win32::System::Threading::TerminateProcess(self.process.0, 1) };
+        }
+    }
+}
+
+/// Recover a durably recorded successor after its executor died before resume.
+/// Pin the process against PID reuse and recheck the full image identity; opened
+/// thread handles are checked too because snapshot thread IDs can be reused.
+pub fn resume_successor(expected: &Image) -> Result<()> {
+    use windows_sys::Win32::System::{Diagnostics::ToolHelp::*, Threading::*};
+    let process = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, expected.pid) };
+    ensure!(!process.is_null(), "cannot open recorded successor");
+    let _process = Handle(process);
+    ensure!(
+        image(expected.pid)? == *expected,
+        "successor incarnation changed"
+    );
+    let snapshot = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0) };
+    ensure!(
+        snapshot != INVALID_HANDLE_VALUE,
+        "successor thread snapshot failed"
+    );
+    let snapshot = Handle(snapshot);
+    let mut entry = THREADENTRY32::default();
+    entry.dwSize = std::mem::size_of_val(&entry) as u32;
+    let mut matched = false;
+    let mut found = unsafe { Thread32First(snapshot.0, &mut entry) };
+    while found != 0 {
+        if entry.th32OwnerProcessID == expected.pid {
+            let thread = unsafe {
+                OpenThread(
+                    THREAD_SUSPEND_RESUME | THREAD_QUERY_LIMITED_INFORMATION,
+                    0,
+                    entry.th32ThreadID,
+                )
+            };
+            ensure!(!thread.is_null(), "cannot open successor thread");
+            let thread = Handle(thread);
+            if unsafe { GetProcessIdOfThread(thread.0) } == expected.pid {
+                // CREATE_SUSPENDED adds one count. Resume once, never drain an
+                // unrelated suspension; zero already means running (idempotent).
+                let previous = unsafe { ResumeThread(thread.0) };
+                ensure!(previous != u32::MAX, "successor resume failed");
+                ensure!(previous <= 1, "successor thread remains suspended");
+                matched = true;
+            }
+        }
+        found = unsafe { Thread32Next(snapshot.0, &mut entry) };
+    }
+    ensure!(
+        unsafe { GetLastError() } == ERROR_NO_MORE_FILES,
+        "successor thread enumeration failed"
+    );
+    ensure!(matched, "recorded successor has no live thread");
+    Ok(())
+}

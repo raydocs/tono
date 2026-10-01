@@ -1,0 +1,225 @@
+import XCTest
+@testable import Tono
+
+/// R1-F2 regression: an explicit Restore internet whose privileged release
+/// was still draining — parked on the administrator repair prompt for up to
+/// 180 s — when the lid closed. The sleep path judged only aggregate state,
+/// so it armed `resumeProtectionAfterWake`, enqueued a preserve teardown
+/// behind the release, and wake recovery enqueued another; the release's own
+/// completion was then dropped as a stale request (its
+/// `isProtectionBlocked = false` never published) while the preserve
+/// teardown's idle `restrictToBootstrap` success published Protected Offline
+/// over the disarmed host and wake recovery reconnected. Sleep must keep the
+/// user's release intent across the sleep: no resume flag, no preserve
+/// teardown, no wake recovery, and the release alone settles the state.
+/// XCTest cannot drive NSWorkspace sleep notifications or the privileged
+/// helper; `prepareForSystemSleep` / `resumeAfterSystemWake` are driven
+/// directly and every disconnect-path privileged call runs through the
+/// `networkProtection` seam, exactly as the disconnect-owner tests do.
+final class AppStateSleepTests: XCTestCase {
+
+    /// Explicit suspension instead of sleeps, mirroring the coordinator test
+    /// gates: the release teardown is genuinely in flight at the prompt, not
+    /// a stubbed flag.
+    private final class ReleaseGate: @unchecked Sendable {
+        private let lock = NSLock()
+        private var isOpen = false
+        private var waiter: CheckedContinuation<Void, Never>?
+
+        func wait() async {
+            lock.lock()
+            if isOpen {
+                lock.unlock()
+                return
+            }
+            await withCheckedContinuation { continuation in
+                waiter = continuation
+                lock.unlock()
+            }
+        }
+
+        func open() {
+            lock.lock()
+            isOpen = true
+            let pending = waiter
+            waiter = nil
+            lock.unlock()
+            pending?.resume()
+        }
+    }
+
+    /// H18-G-F1: the same failure three times paused automatic retries, and
+    /// the lid closed on Protected Offline. The strike count survived the
+    /// sleep, so the first identical failure after wake paused again with
+    /// nothing scheduled. Sleep ends the network those strikes were earned
+    /// on, so wake's connect gets a fresh budget, as a network change would.
+    func testSleepGivesWakeAFreshRepeatedFailureBudget() async {
+        let app = AppState()
+        app.isProtectionBlocked = true
+        app.lastProtectedFailureSignature = "handshake|The exit did not answer."
+        app.consecutiveProtectedFailureCount = 3
+        app.protectedReconnectPausedForUserAction = true
+        app.protectedReconnectPauseLiftsOnNetworkChange = true
+        // Unarmed, so the bootstrap restriction that sleep schedules for a
+        // blocked host returns before it reaches the privileged helper.
+        KillSwitchService.isArmed = false
+
+        app.prepareForSystemSleep()
+        _ = await app.connectionCoordinator.sleepRestrictTask?.value
+
+        XCTAssertTrue(app.resumeProtectionAfterWake)
+        XCTAssertEqual(app.consecutiveProtectedFailureCount, 0)
+        XCTAssertNil(app.lastProtectedFailureSignature)
+        XCTAssertFalse(app.protectedReconnectPausedForUserAction)
+        XCTAssertFalse(app.protectedReconnectPauseLiftsOnNetworkChange)
+    }
+
+    func testSleepDuringExplicitReleaseDoesNotConvertItIntoWakeReconnect() async {
+        let app = AppState()
+        // Connected through an armed session, so Restore internet has real
+        // privileged work to undo: core stop, DNS restore, PF disarm.
+        app.isConnected = true
+        app.coreRuntime.isRunning = true
+        KillSwitchService.isArmed = true
+        let prompt = ReleaseGate()
+        let promptShown = ReleaseGate()
+        var runtime = NetworkProtectionOperations()
+        // The administrator repair prompt: the release teardown parks here
+        // while the machine sleeps and only continues once answered.
+        runtime.repairForRelease = {
+            promptShown.open()
+            await prompt.wait()
+        }
+        runtime.stopCore = { coreRuntime in
+            coreRuntime.isRunning = false
+            return true
+        }
+        runtime.coreStatus = { (false, true) }
+        runtime.restoreDNS = { true }
+        runtime.disableSystemProxy = {}
+        runtime.disarm = { KillSwitchService.isArmed = false }
+        runtime.restrictToBootstrap = {
+            // The release must finish as a disarm, never degrade into a
+            // preserve that re-arms PF over the user's open-host request.
+            guard KillSwitchService.isArmed else { return }
+            XCTFail("a preserved PF must not be re-armed over the explicit release")
+        }
+        app.networkProtection = runtime
+        // isArmed is UserDefaults-backed; never leak the fixture's armed
+        // state into other tests, and never leave the teardown parked.
+        defer {
+            KillSwitchService.isArmed = false
+            prompt.open()
+        }
+
+        // The user chooses Restore internet; teardown A blocks at the prompt.
+        app.disconnect(releaseKillSwitch: true)
+        await promptShown.wait()
+        XCTAssertTrue(app.isDisconnecting)
+        XCTAssertTrue(
+            app.isProtectionBlocked,
+            "the release keeps the UI protected until it commits"
+        )
+
+        // Lid closed, then opened again, while the prompt is still unanswered
+        // (it could only be answered after wake). Pre-fix this armed
+        // resumeProtectionAfterWake, enqueued a preserve teardown behind A,
+        // and started wake recovery.
+        app.prepareForSystemSleep()
+        app.resumeAfterSystemWake()
+        XCTAssertFalse(
+            app.resumeProtectionAfterWake,
+            "sleep must not arm wake recovery over an in-flight explicit release"
+        )
+        XCTAssertNil(
+            app.connectionCoordinator.wakeRecoveryTask,
+            "wake must not start recovery while the release still owns the teardown queue"
+        )
+
+        // The prompt is answered after wake: the release finishes alone and
+        // its own completion publishes the released state — nothing superseded
+        // it, so the request is not stale.
+        prompt.open()
+        await app.connectionCoordinator.disconnectSequence?.value
+
+        XCTAssertFalse(
+            app.isProtectionBlocked,
+            "a completed explicit release must not leave the UI claiming Kill Switch protection"
+        )
+        XCTAssertFalse(
+            KillSwitchService.isArmed,
+            "the release must complete its disarm across the sleep"
+        )
+        XCTAssertFalse(app.isDisconnecting)
+    }
+
+    /// X1-2: the lid closes before the release reaches its disarm, and the
+    /// helper's sleep gate refuses it. The release ends with PF still armed
+    /// and Protected Offline — before wake. Wake must not read that armed PF
+    /// as a session to recover and reconnect over the user's Restore internet.
+    func testSleepGateRefusedReleaseDoesNotReconnectOnWake() async {
+        let app = AppState()
+        app.isConnected = true
+        app.coreRuntime.isRunning = true
+        KillSwitchService.isArmed = true
+        // A ready catalog, so the network-change branch below reaches its
+        // reconnect decision instead of stopping at readiness.
+        app.proxyRegions = [
+            ProxyRegion(
+                id: AppState.managedCatalogRegionID,
+                name: "TONO CLOUD",
+                nodes: [Fixture.realityNode()]
+            )
+        ]
+        let lidClosed = ReleaseGate()
+        let dnsReached = ReleaseGate()
+        var runtime = NetworkProtectionOperations()
+        runtime.repairForRelease = {}
+        runtime.stopCore = { coreRuntime in
+            coreRuntime.isRunning = false
+            return true
+        }
+        runtime.coreStatus = { (false, true) }
+        runtime.restoreDNS = {
+            dnsReached.open()
+            await lidClosed.wait()
+            return true
+        }
+        runtime.disableSystemProxy = {}
+        runtime.disarm = {
+            throw HelperIPCError.commandFailed(
+                "The system is entering sleep; network protection remains fail-closed."
+            )
+        }
+        runtime.restrictToBootstrap = {}
+        runtime.refreshKillSwitchStatus = {
+            .confirmed(requiresProtectionRecovery: true)
+        }
+        app.networkProtection = runtime
+        defer {
+            app.connectionCoordinator.cancelReconnectTasks()
+            KillSwitchService.isArmed = false
+            lidClosed.open()
+        }
+
+        app.disconnect(releaseKillSwitch: true)
+        await dnsReached.wait()
+        app.prepareForSystemSleep()
+        lidClosed.open()
+        await app.connectionCoordinator.disconnectSequence?.value
+        XCTAssertTrue(KillSwitchService.isArmed)
+        XCTAssertTrue(app.isProtectionBlocked)
+
+        app.resumeAfterSystemWake()
+        XCTAssertNil(
+            app.connectionCoordinator.wakeRecoveryTask,
+            "a release the sleep gate refused must not become a wake reconnect"
+        )
+        // Nor may the network change that follows every wake.
+        app.handleSystemNetworkChange()
+        XCTAssertNil(
+            app.connectionCoordinator.protectedReconnectTask,
+            "a network change must not reconnect over the refused release"
+        )
+    }
+}

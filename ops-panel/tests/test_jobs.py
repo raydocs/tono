@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import io
 import json
+import subprocess
 import sys
 import time
 import unittest
 import urllib.error
 import urllib.parse
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -185,21 +187,23 @@ class DispatchTests(unittest.TestCase):
 
 
 class RedactionTests(unittest.TestCase):
-    def test_redacts_uuid_email_foreign_ipv4_and_password_word(self):
+    def test_redacts_uuid_email_foreign_ipv4_and_password_assignment(self):
         uuid = "123e4567-e89b-12d3-a456-426614174000"
         raw = f"user ops@example.com uuid={uuid} ip=203.0.113.9 node=198.51.100.4 password=hunter2"
         self.assertEqual(
             jobs.redact_text(raw, "198.51.100.4"),
-            "user [redacted] uuid=[redacted] ip=[redacted] node=198.51.100.4 [redacted]=hunter2",
+            "user [redacted] uuid=[redacted] ip=[redacted] node=198.51.100.4 [redacted]",
         )
 
     def test_nested_values_are_redacted(self):
         out = jobs.redact_value(
-            {"lines": ["reach 8.8.8.8 as admin@x.test"], "n": 1},
+            {"lines": ["reach 8.8.8.8 as admin@x.test"], "n": 1,
+             "credentials": {"Password": "synthetic-assignment-value"}},
             allow_ip="198.51.100.4",
         )
         self.assertEqual(out["lines"], ["reach [redacted] as [redacted]"])
         self.assertEqual(out["n"], 1)
+        self.assertEqual(out["credentials"], {"Password": "[redacted]"})
 
     def test_finalize_truncates_summary_to_500(self):
         status, summary, result = jobs.finalize_result("ok", "x" * 600, {})
@@ -446,6 +450,41 @@ class RunJobsExitTests(unittest.TestCase):
         )
         self.assertEqual(code, 0)
 
+    def test_a_leased_job_whose_lease_was_lost_before_its_turn_never_runs(self):
+        # The hub leases a batch and runs it in order. While the first job ran,
+        # the second job's short xray_restart lease expired and the Worker put it
+        # back in the queue, so its heartbeat now answers 409. Running it anyway
+        # would restart the node now and again when the next pass leases it.
+        class LostSecond(FakeIngest):
+            def heartbeat(self, job_id: str, lease_id: str) -> str:
+                super().heartbeat(job_id, lease_id)
+                return "conflict" if job_id == "job-restart" else "ok"
+
+        ingest = LostSecond([
+            {"id": "job-digest", "nodeName": "A", "type": "xray_dial_errors", "params": {}},
+            {"id": "job-restart", "nodeName": "B", "type": "xray_restart", "params": {}},
+        ])
+        ssh_nodes = []
+
+        def ssh(node, _remote, timeout=60):
+            ssh_nodes.append(node["name"])
+            return 0, "===RC===\n0\n===SS===\nLISTEN 0 0 *:443 \n===END===\n"
+
+        code = jobs.run_jobs(
+            max_jobs=5,
+            collector=FakeCollector(),
+            client=ingest,
+            token="tok",
+            nodes=[{"name": "A", "host": "198.51.100.4"}, {"name": "B", "host": "198.51.100.5"}],
+            cn_agents=[],
+            heartbeat_interval=0.01,
+            ssh_fn=ssh,
+            acquire_lock=False,
+        )
+        self.assertEqual(code, 0)
+        self.assertEqual(ssh_nodes, ["A"])
+        self.assertEqual([result["id"] for result in ingest.results], ["job-digest"])
+
     def test_result_unreachable_is_nonzero(self):
         ingest = FakeIngest([{
             "id": "job-reinstall",
@@ -466,12 +505,15 @@ class RunJobsExitTests(unittest.TestCase):
 
     def test_dial_errors_handler_filters_and_redacts(self):
         def ssh(_node, remote, timeout=60):
-            self.assertIn("journalctl -u xray", remote)
+            # The node record names its own unit (provision-tono-node.py serviceName).
+            self.assertIn("LoadState --value xray.service)", remote)
+            self.assertIn("journalctl -u xray.service", remote)
             self.assertIn('--since "-15min"', remote)
             self.assertIn("-n 20", remote)
             return 0, "\n".join([
                 "unrelated info",
-                "dial tcp 203.0.113.9:443: i/o timeout",
+                "dial tcp 203.0.113.9:443: i/o timeout password=diagnostic-test-value; "
+                "Password: 'two word diagnostic'; handshake EOF",
                 "accepted connection",
             ])
 
@@ -485,7 +527,8 @@ class RunJobsExitTests(unittest.TestCase):
             collector=FakeCollector(),
             client=ingest,
             token="tok",
-            nodes=[{"name": "Tokyo · Kite", "host": "198.51.100.4", "password": "x"}],
+            nodes=[{"name": "Tokyo · Kite", "host": "198.51.100.4", "password": "x",
+                    "serviceName": "xray.service"}],
             cn_agents=[],
             ssh_fn=ssh,
             acquire_lock=False,
@@ -495,7 +538,58 @@ class RunJobsExitTests(unittest.TestCase):
         self.assertEqual(posted["status"], "ok")
         self.assertEqual(posted["resultJson"]["matched"], 1)
         self.assertEqual(posted["resultJson"]["scanned"], 3)
-        self.assertNotIn("203.0.113.9", posted["resultJson"]["lines"][0])
+        self.assertEqual(posted["resultJson"]["lines"], [
+            "dial tcp [redacted]:443: i/o timeout [redacted]; [redacted]; handshake EOF",
+        ])
+
+    def test_journal_failures_are_not_reported_as_clean_evidence(self):
+        replies = iter([
+            (255, "Permission denied"),
+            (1, "handshake EOF\njournal read failed"),
+            (0, ""),
+        ])
+        ingest = FakeIngest([
+            {"id": "dial-ssh-failed", "nodeName": "Tokyo · Kite", "type": "xray_dial_errors"},
+            {"id": "digest-read-failed", "nodeName": "Tokyo · Kite", "type": "xray_error_digest"},
+            {"id": "digest-empty", "nodeName": "Tokyo · Kite", "type": "xray_error_digest"},
+        ])
+        code = jobs.run_jobs(
+            collector=FakeCollector(),
+            client=ingest,
+            token="tok",
+            nodes=[{"name": "Tokyo · Kite", "host": "198.51.100.4", "password": "x"}],
+            cn_agents=[],
+            ssh_fn=lambda *_args: next(replies),
+            acquire_lock=False,
+        )
+        self.assertEqual(code, 0)  # Posting a handler failure still completed the pass.
+        self.assertEqual([result["status"] for result in ingest.results], ["error", "error", "ok"])
+        self.assertEqual(ingest.results[0]["summary"], "xray journal read failed rc=255")
+        self.assertEqual(ingest.results[1]["summary"], "xray journal read failed rc=1")
+        self.assertEqual(ingest.results[0]["resultJson"], {})
+        self.assertEqual(ingest.results[1]["resultJson"], {})
+        self.assertEqual(ingest.results[2]["resultJson"], {
+            "counts": {"dial_timeout": 0, "handshake_fail": 0, "auth_reject": 0,
+                       "upstream_reject": 0, "other": 0},
+            "samples": {},
+        })
+
+
+class SshHostKeyTests(unittest.TestCase):
+    def test_node_ssh_pins_the_hub_known_hosts_file(self):
+        seen: list[list[str]] = []
+
+        def fake_run(cmd, **_kwargs):
+            seen.append(list(cmd))
+            return subprocess.CompletedProcess(cmd, 0, "", "")
+
+        with mock.patch("subprocess.run", fake_run):
+            jobs.ssh_exec({"host": "198.51.100.4", "password": "x"}, "true")
+        argv = seen[0]
+        self.assertIn("StrictHostKeyChecking=yes", argv)
+        self.assertIn("UserKnownHostsFile=/opt/tono-ops/tono-collector-known-hosts", argv)
+        self.assertNotIn("StrictHostKeyChecking=no", argv)
+        self.assertNotIn("UserKnownHostsFile=/dev/null", argv)
 
 
 if __name__ == "__main__":

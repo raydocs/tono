@@ -6,8 +6,88 @@ use crate::core::windows_kill_switch;
 use crate::core::structure::is_protected_startup_replacement_candidate;
 use tracing::{info, trace, warn};
 
+/// Release restored public resolvers and then failed to stop Core. WFP is still armed.
+/// Put tunnel DNS back only when the stop itself did not finish. A finished stop with
+/// failed bookkeeping has nothing answering the tunnel resolver; this does not disarm.
+#[cfg(windows)]
+async fn refuse_release_after_failed_core_stop(
+    failure: OwnerRollbackFailure,
+) -> Result<HttpResponse> {
+    if release_puts_protected_dns_back(&failure) {
+        if let Err(dns_error) = dns::enable().await {
+            return service_unavailable(format!(
+                "Kill switch release refused; the active Core could not be safely stopped and retired: {failure:#}. Putting protected DNS back also failed: {dns_error:#}"
+            ));
+        }
+        return service_unavailable(format!(
+            "Kill switch release refused; the active Core could not be safely stopped and retired: {failure:#}. Protected DNS was put back because the barrier stays armed."
+        ));
+    }
+    service_unavailable(format!(
+        "Kill switch release refused; the active Core could not be safely stopped and retired: {failure:#}"
+    ))
+}
+
+/// The operation marker an update transaction publishes in `/status` while it runs. A Disconnect
+/// stops the Core and calls `wfp::release()` inside `update::request`; a failed non-strict Prepare
+/// can now do the same. Both are published as kill-switch releases: readers see them running,
+/// and their start and end advance `snapshot_generation` (F520-1). A Disconnect with nothing
+/// pending releases nothing; showing it as a release for that moment only weakens what the App
+/// may promise.
+fn update_operation(request: &crate::update_wire::UpdateRequest) -> Option<OperationGuard> {
+    matches!(
+        request,
+        crate::update_wire::UpdateRequest::Disconnect
+            | crate::update_wire::UpdateRequest::DisconnectApplyingNarrow
+            | crate::update_wire::UpdateRequest::Prepare { .. }
+    )
+    .then(|| OperationGuard::begin(ServiceOperationKind::ReleaseKillSwitch, IPC_HANDLER_TIMEOUT))
+}
+
+/// How a StartClash whose owner-proxy transition failed reports the error after this request
+/// armed the Windows kill switch: the transition's refusal stays the verdict, and a failed arm
+/// rollback is appended to it — the machine may still be blocked, so the message must say so.
+fn windows_arm_rollback_error(
+    transition_error: ServiceError,
+    release_error: Option<&anyhow::Error>,
+) -> ServiceError {
+    match release_error {
+        None => transition_error,
+        Some(release_error) => ServiceError::new(
+            transition_error.code,
+            format!(
+                "{transition_error}; the Windows kill switch armed for this start could not be \
+                 released: {release_error:#}"
+            ),
+        ),
+    }
+}
+
 pub(super) fn create_ipc_router() -> Result<Router> {
     let router = Router::new()
+        .post(IpcCommand::UpdateTransaction.as_ref(), |ctx| async move {
+            let (request, owner) = match authenticate_request::<AuthenticatedRequest<crate::update_wire::UpdateRequest>>(&ctx).await {
+                ControlFlow::Continue(value) => value,
+                ControlFlow::Break(response) => return response,
+            };
+            // A Prepare supersedes in-flight connect attempts only once `update::request` has
+            // admitted it, still under this lock (TW-anthropic-4).
+            let _lifecycle = OWNER_LIFECYCLE_LOCK.lock().await;
+            #[cfg(windows)]
+            if lifecycle_is_stopping() {
+                return service_unavailable("service is stopping");
+            }
+            let _operation_guard = update_operation(&request.payload);
+            #[cfg(windows)]
+            return match crate::core::update::request(&owner, request.payload).await {
+                Ok(status) => ok_json(status),
+                Err(error) => service_unavailable(format!("Update refused; evidence retained: {error:#}")),
+            };
+            #[cfg(not(windows))] {
+                let _ = (request, owner);
+                service_unavailable("Windows update transaction is unsupported here")
+            }
+        })
         .get(IpcCommand::Magic.as_ref(), |ctx| async move {
             trace!("Received Magic command");
             ipc_request_context_to_auth_context(&ctx)?;
@@ -15,7 +95,12 @@ pub(super) fn create_ipc_router() -> Result<Router> {
         })
         .get(IpcCommand::GetVersion.as_ref(), |ctx| async move {
             ipc_request_context_to_auth_context(&ctx)?;
-            ok_json(ProtocolInfo::current())
+            let mut info = ProtocolInfo::current();
+            // The freshness snapshot clients copy into destructive owner-gated requests
+            // (`PrepareCoreStart`). Filled only here, on the serving side of the pipe, so
+            // `ProtocolInfo::current()` stays a pure protocol statement everywhere else.
+            info.release_epoch = windows_kill_switch::attempt_epoch();
+            ok_json(info)
         })
         .get(IpcCommand::Status.as_ref(), |ctx| async move {
             trace!("Received Status command");
@@ -121,6 +206,81 @@ pub(super) fn create_ipc_router() -> Result<Router> {
                 Ok(result) => ok_json(result),
                 Err(error) => service_unavailable(format!(
                     "Failed to begin DIRECT runtime reload: {error:#}"
+                )),
+            }
+        })
+        .post(IpcCommand::ReplaceSingBoxRuntime.as_ref(), |ctx| async move {
+            let (request, owner) = match authenticate_request::<
+                AuthenticatedSessionRequest<crate::ReplaceSingBoxRuntimeRequest>,
+            >(&ctx)
+            .await
+            {
+                ControlFlow::Continue(authenticated) => authenticated,
+                ControlFlow::Break(response) => return response,
+            };
+            let _lifecycle_guard = match enter_owner_lifecycle(
+                &owner,
+                OwnerLifecycleGate::ActiveSession(&request.session),
+            )
+            .await
+            {
+                ControlFlow::Continue(guard) => guard,
+                ControlFlow::Break(response) => return response,
+            };
+            if let Err(error) = require_active_session(&owner, &request.session).await {
+                return service_error(error);
+            }
+            let _operation_guard =
+                OperationGuard::begin(ServiceOperationKind::StartCore, IPC_HANDLER_TIMEOUT);
+            match crate::core::sing_box_direct::replace_running_sing_box_document(
+                &owner.identity,
+                &request.payload.runtime_json,
+                request.payload.restore_previous,
+            )
+            .await
+            {
+                Ok(()) => ok_empty("sing-box runtime replaced and the full tunnel was locked"),
+                Err(error) => service_unavailable(format!(
+                    "Failed to replace sing-box runtime: {error:#}"
+                )),
+            }
+        })
+        .post(IpcCommand::CommitSingBoxDirect.as_ref(), |ctx| async move {
+            let (request, owner) = match authenticate_request::<
+                AuthenticatedSessionRequest<crate::CommitSingBoxDirectRequest>,
+            >(&ctx)
+            .await
+            {
+                ControlFlow::Continue(authenticated) => authenticated,
+                ControlFlow::Break(response) => return response,
+            };
+            let _lifecycle_guard = match enter_owner_lifecycle(
+                &owner,
+                OwnerLifecycleGate::ActiveSession(&request.session),
+            )
+            .await
+            {
+                ControlFlow::Continue(guard) => guard,
+                ControlFlow::Break(response) => return response,
+            };
+            let active = match require_active_session(&owner, &request.session).await {
+                Ok(active) => active,
+                Err(error) => return service_error(error),
+            };
+            let _operation_guard = OperationGuard::begin(
+                ServiceOperationKind::ReplaceDirectEndpoints,
+                IPC_HANDLER_TIMEOUT,
+            );
+            match windows_kill_switch::commit_sing_box_direct_while_locked(
+                &request.payload.direct_endpoints,
+                &request.payload.reviewed_direct_ports,
+                active.generation,
+            )
+            .await
+            {
+                Ok(result) => ok_json(result),
+                Err(error) => service_unavailable(format!(
+                    "Failed to commit sing-box DIRECT permits: {error:#}"
                 )),
             }
         })
@@ -334,8 +494,8 @@ pub(super) fn create_ipc_router() -> Result<Router> {
         })
         .post(IpcCommand::ReleaseKillSwitch.as_ref(), |ctx| async move {
             trace!("Received ReleaseKillSwitch command");
-            let (_request, owner) =
-                match authenticate_request::<AuthenticatedRequest<()>>(&ctx).await {
+            let (request, owner) =
+                match authenticate_request::<AuthenticatedRequest<crate::core::structure::ReleaseKillSwitchBody>>(&ctx).await {
                     ControlFlow::Continue(authenticated) => authenticated,
                     ControlFlow::Break(response) => return response,
                 };
@@ -344,7 +504,7 @@ pub(super) fn create_ipc_router() -> Result<Router> {
             // Sign-Out unreachable from Protected Offline. The separate armed-policy owner
             // gate runs under the lifecycle lock so it cannot go stale while queued.
             let _lifecycle_guard =
-                match enter_owner_lifecycle(&owner, OwnerLifecycleGate::ArmedPolicyOwner).await {
+                match enter_owner_lifecycle(&owner, OwnerLifecycleGate::ArmedPolicyRelease).await {
                     ControlFlow::Continue(guard) => guard,
                     ControlFlow::Break(response) => return response,
                 };
@@ -367,10 +527,8 @@ pub(super) fn create_ipc_router() -> Result<Router> {
                 }
                 match load_active_owner().await {
                     Ok(Some(active)) if active.owner_key == owner.key => {
-                        if let Err(error) = rollback_started_owner(&owner).await {
-                            return service_unavailable(format!(
-                                "Kill switch release refused; the active Core could not be safely stopped and retired: {error:#}"
-                            ));
+                        if let Err(failure) = rollback_started_owner(&owner).await {
+                            return refuse_release_after_failed_core_stop(failure).await;
                         }
                     }
                     Ok(Some(_)) => {
@@ -378,7 +536,13 @@ pub(super) fn create_ipc_router() -> Result<Router> {
                             "Kill switch release refused; active Core ownership does not match the protection owner",
                         );
                     }
-                    Ok(None) => {}
+                    Ok(None) => {
+                        if let Err(error) = retire_unrecorded_owner_core(&owner).await {
+                            return service_unavailable(format!(
+                                "Kill switch release refused; the unrecorded Core could not be safely stopped and retired: {error:#}"
+                            ));
+                        }
+                    }
                     Err(error) => {
                         // An unreadable ownership record proves nothing either way, and refusing
                         // on it is what leaves an armed machine with no way back: every retry
@@ -389,15 +553,13 @@ pub(super) fn create_ipc_router() -> Result<Router> {
                         warn!(
                             "Active Core ownership is unreadable; stopping and retiring the running Core before release: {error:#}"
                         );
-                        if let Err(error) = rollback_started_owner(&owner).await {
-                            return service_unavailable(format!(
-                                "Kill switch release refused; the active Core could not be safely stopped and retired: {error:#}"
-                            ));
+                        if let Err(failure) = rollback_started_owner(&owner).await {
+                            return refuse_release_after_failed_core_stop(failure).await;
                         }
                     }
                 }
             }
-            release_kill_switch_for_platform().await
+            release_kill_switch_for_platform(request.payload.apply_narrow_layer()).await
         })
         .post(IpcCommand::EnableProtectedDns.as_ref(), |ctx| async move {
             trace!("Received EnableProtectedDns command");
@@ -486,24 +648,56 @@ pub(super) fn create_ipc_router() -> Result<Router> {
         })
         .post(IpcCommand::PrepareCoreStart.as_ref(), |ctx| async move {
             trace!("Received PrepareCoreStart command");
-            let (_request, owner) =
-                match authenticate_request::<AuthenticatedRequest<()>>(&ctx).await {
+            let (request, owner) =
+                match authenticate_request::<AuthenticatedRequest<PrepareCoreStartPayload>>(&ctx)
+                    .await
+                {
                     ControlFlow::Continue(authenticated) => authenticated,
                     ControlFlow::Break(response) => return response,
                 };
             // No active session exists on a first connection, so this uses the same authenticated
-            // owner gate as StartClash. The lifecycle lock prevents reconciliation from racing a
-            // start/stop. CoreManager preserves a supervised process only with complete protected
-            // runtime proof; the fallback sweep admits only Tono's canonical installed image.
+            // owner gate as StartClash — but a destructive reconcile must also prove it is fresh.
+            // The request carries the client's snapshot of this Service's attempt epoch (bumped
+            // by every explicit release, like the RELEASE_EPOCH StartClash snapshots for itself
+            // further down, and also by an update takeover's Prepare). A cancelled
+            // attempt's request can arrive seconds late, after the user's Disconnect released and
+            // a successor connection already started its own unverified Core; without this gate
+            // the late request is the one destructive route with no freshness token, and it would
+            // stop that successor Core (R2-F6).
+            //
+            // A revision 12–16 client (an older App beside this Service) cannot send a snapshot.
+            // It passes the protocol probe (MIN_SUPPORTED_CLIENT_REVISION stays 12, because that
+            // same App still needs ReleaseKillSwitch/StopClash/RestoreProtectedDns, which the
+            // probe also gates). Refusing it here would fail every connection *after* the probe
+            // said the pair works. Instead, take the snapshot when the request arrives, the same
+            // in-Service freshness StartClash uses: a release that wins the lifecycle lock while
+            // the request waits still supersedes it. Only the window before arrival stays open
+            // for such a client, and that client had this gap before revision 17 too.
+            let requested_release_epoch = match request.payload {
+                PrepareCoreStartPayload::Freshness(snapshot) => snapshot.release_epoch,
+                PrepareCoreStartPayload::Legacy(()) => windows_kill_switch::attempt_epoch(),
+            };
             let _lifecycle_guard =
-                match enter_owner_lifecycle(&owner, OwnerLifecycleGate::Unchecked).await {
+                match enter_owner_lifecycle(&owner, OwnerLifecycleGate::ArmedPolicyTakeover).await {
                     ControlFlow::Continue(guard) => guard,
                     ControlFlow::Break(response) => return response,
                 };
+            // Compare under the lifecycle lock, before anything is touched: a release that won
+            // the lock while this request waited invalidates it exactly like one that completed
+            // before it arrived. The refusal is side-effect free — no snapshot, no operation
+            // publication, no Core stop — so the successor's runtime stays exactly as it is.
+            if windows_kill_switch::attempt_superseded(requested_release_epoch) {
+                return service_error(ServiceError::stale_release_epoch(
+                    "PrepareCoreStart refused: an explicit release or update takeover superseded this attempt",
+                ));
+            }
             // Decide under the lifecycle lock but before publishing this route's own operation:
-            // the shared proof requires a quiescent snapshot. A fully verified active runtime may
-            // keep serving DNS until StartClash replaces it; every weaker supervised runtime must
-            // be stopped now or it blocks the App's fixed-port bind before StartClash is reached.
+            // the shared proof requires a quiescent snapshot. The lifecycle lock prevents
+            // reconciliation from racing a start/stop; CoreManager preserves a supervised process
+            // only with complete protected runtime proof, and the fallback sweep admits only
+            // Tono's canonical installed image. A fully verified active runtime may keep serving
+            // DNS until StartClash replaces it; every weaker supervised runtime must be stopped
+            // now or it blocks the App's fixed-port bind before StartClash is reached.
             let snapshot = match service_status_snapshot(&owner).await {
                 Ok(snapshot) => snapshot,
                 Err(error) => {
@@ -547,6 +741,24 @@ pub(super) fn create_ipc_router() -> Result<Router> {
             {
                 return service_error(ServiceError::invalid_proxy_config(error.to_string()));
             }
+            #[cfg(all(windows, not(feature = "test")))]
+            {
+                let admitted = if crate::core::structure::is_sing_box_core_path(
+                    &start_request.runtime.core_path,
+                ) {
+                    crate::core::sing_box_runtime::admit_owned_runtime(&start_request.runtime.yaml)
+                } else {
+                    crate::core::runtime_generation::ensure_owned_runtime_config_is_safe(
+                        &start_request.runtime.yaml,
+                    )
+                };
+                if let Err(error) = admitted {
+                    return service_error(ServiceError::new(
+                        crate::ServiceErrorCode::InvalidRuntimeAsset,
+                        format!("Runtime config refused: {error}"),
+                    ));
+                }
+            }
             if let Some(message) = start_clash_kill_switch_rejection(
                 std::env::consts::OS,
                 start_request
@@ -564,7 +776,7 @@ pub(super) fn create_ipc_router() -> Result<Router> {
             #[cfg(feature = "test")]
             test_proxy_barrier_note_start_waiting();
             let _lifecycle_guard =
-                match enter_owner_lifecycle(&owner, OwnerLifecycleGate::Unchecked).await {
+                match enter_owner_lifecycle(&owner, OwnerLifecycleGate::ArmedPolicyTakeover).await {
                     ControlFlow::Continue(guard) => guard,
                     ControlFlow::Break(response) => return response,
                 };
@@ -598,6 +810,9 @@ pub(super) fn create_ipc_router() -> Result<Router> {
                 if let Err(error) =
                     windows_kill_switch::arm_bootstrap(kill_switch, &core_path, &owner.key).await
                 {
+                    if let Some(refusal) = error.downcast_ref::<ServiceError>() {
+                        return service_error(refusal.clone());
+                    }
                     return service_unavailable(format!(
                         "Failed to arm Windows kill switch: {error:#}"
                     ));
@@ -622,7 +837,22 @@ pub(super) fn create_ipc_router() -> Result<Router> {
             };
             let (active, proxy_outcome) = match owner_proxy_transition(&mut transition).await {
                 Ok(result) => result,
-                Err(error) => return service_error(error),
+                Err(error) => {
+                    // The bootstrap arm must not outlive the start it was made for: this
+                    // request returns no session handle, so the App cannot stop a core it
+                    // never learned about, and when its follow-up status read also fails its
+                    // failure path falls back to the unarmed FSM latch — the machine would
+                    // stay WFP-blocked while the UI shows Not Connected. Open general traffic
+                    // and put the secondary AI hold back. An explicit Disconnect above still
+                    // uses `release()` and drops that hold; a start that never began is a
+                    // crash-style rollback, not that disconnect.
+                    let release_error = if start_request.windows_kill_switch.is_some() {
+                        windows_kill_switch::release_applying_narrow().await.err()
+                    } else {
+                        None
+                    };
+                    return service_error(windows_arm_rollback_error(error, release_error.as_ref()));
+                }
             };
             if disable_kill_switch
                 && let Err(error) = macos_kill_switch::release().await
@@ -733,6 +963,12 @@ pub(super) fn create_ipc_router() -> Result<Router> {
             };
             let _operation_guard =
                 OperationGuard::begin(ServiceOperationKind::StopCore, IPC_HANDLER_TIMEOUT);
+            #[cfg(windows)]
+            if request.payload.release_kill_switch() {
+                if let Err(error) = crate::core::update::release_allowed() {
+                    return service_unavailable(error.to_string());
+                }
+            }
             if let Err(error) = clear_proxy_with_direct_compensation().await {
                 return service_error(error);
             }
@@ -743,10 +979,26 @@ pub(super) fn create_ipc_router() -> Result<Router> {
                 }
             }
             // Persist the stopped intent before changing PF. If the daemon dies after this point,
-            // startup must never restore a core into an opened network.
+            // startup must never restore a core into an opened network. A failed write does not
+            // skip recovery: the core is already confirmed stopped, so protected DNS must not
+            // stay aimed at a resolver nothing answers.
             if let Err(e) = persist_owner_core_stopped(&owner).await {
-                set_core_lifecycle_state(ServiceLifecycleState::Fatal);
-                return service_unavailable(format!("Failed to persist desired state: {}", e));
+                match super::recover_after_unrecorded_stop(
+                    &owner,
+                    request.payload.release_kill_switch(),
+                )
+                .await
+                {
+                    Ok(()) => {
+                        return service_unavailable(format!("Failed to persist desired state: {e:#}"));
+                    }
+                    Err(recovery) => {
+                        set_core_lifecycle_state(ServiceLifecycleState::Fatal);
+                        return service_unavailable(format!(
+                            "Failed to persist desired state: {e:#}; stop recovery failed: {recovery:#}"
+                        ));
+                    }
+                }
             }
             if let Err(error) =
                 macos_kill_switch::transition_after_stop(request.payload.release_kill_switch()).await
@@ -779,6 +1031,24 @@ pub(super) fn create_ipc_router() -> Result<Router> {
                     ControlFlow::Continue(authenticated) => authenticated,
                     ControlFlow::Break(response) => return response,
                 };
+            #[cfg(all(windows, not(feature = "test")))]
+            {
+                let admitted = if crate::core::structure::is_sing_box_core_path(
+                    &request.payload.core_path,
+                ) {
+                    crate::core::sing_box_runtime::admit_owned_runtime(&request.payload.yaml)
+                } else {
+                    crate::core::runtime_generation::ensure_owned_runtime_config_is_safe(
+                        &request.payload.yaml,
+                    )
+                };
+                if let Err(error) = admitted {
+                    return service_error(ServiceError::new(
+                        crate::ServiceErrorCode::InvalidRuntimeAsset,
+                        format!("Runtime config refused: {error}"),
+                    ));
+                }
+            }
             // The guard is held for the whole operation, and for the same reason `StartClash`
             // holds it: a core must not be stopped, started, or handed to another owner while its
             // generation is being rewritten underneath it. Staging writes into the directory the
@@ -903,6 +1173,10 @@ pub(super) fn create_ipc_router() -> Result<Router> {
                     ControlFlow::Continue(guard) => guard,
                     ControlFlow::Break(response) => return response,
                 };
+            #[cfg(windows)]
+            if let Err(error) = crate::core::update::release_allowed() {
+                return service_unavailable(error.to_string());
+            }
             let verdict = owner_goodbye_verdict(
                 windows_kill_switch::status().await.wanted,
                 load_owner_desired_state(&owner.key)
@@ -942,4 +1216,88 @@ pub(super) fn create_ipc_router() -> Result<Router> {
             ok_empty("Proxy barrier reset")
         });
     Ok(router)
+}
+
+#[cfg(test)]
+mod update_operation_tests {
+    use super::update_operation;
+    use crate::ServiceOperationKind;
+    use crate::core::operation::snapshot;
+    use crate::update_wire::UpdateRequest;
+    use serial_test::serial;
+
+    /// F520-1: a native-update Disconnect or failed non-strict Prepare releases WFP. `/status`
+    /// must show it as a release and advance `snapshot_generation`, or the App's two-reading
+    /// check can still say "stays protected" after it.
+    #[test]
+    #[serial]
+    fn automatic_update_disconnect_is_published_as_a_kill_switch_release() {
+        let before = snapshot().0;
+        let guard = update_operation(&UpdateRequest::disconnect(true));
+        let (during, active) = snapshot();
+        assert_eq!(active.unwrap().kind, ServiceOperationKind::ReleaseKillSwitch);
+        assert!(during > before);
+        drop(guard);
+        assert!(snapshot().0 > during);
+    }
+
+    #[test]
+    #[serial]
+    fn update_disconnect_is_published_as_a_kill_switch_release() {
+        let before = snapshot().0;
+        let guard = update_operation(&UpdateRequest::Disconnect);
+        let (during, active) = snapshot();
+        assert_eq!(
+            active.map(|operation| operation.kind),
+            Some(ServiceOperationKind::ReleaseKillSwitch)
+        );
+        assert!(during > before);
+        drop(guard);
+
+        let before_prepare = snapshot().0;
+        let guard = update_operation(&UpdateRequest::Prepare {
+            manifest: String::new(),
+            signature: String::new(),
+            package_path: String::new(),
+        });
+        let (during_prepare, active) = snapshot();
+        assert_eq!(
+            active.map(|operation| operation.kind),
+            Some(ServiceOperationKind::ReleaseKillSwitch)
+        );
+        assert!(during_prepare > before_prepare);
+        drop(guard);
+    }
+}
+
+#[cfg(test)]
+mod start_clash_arm_rollback_tests {
+    use super::windows_arm_rollback_error;
+    use crate::ServiceErrorCode;
+    use crate::core::auth::ServiceError;
+
+    /// WIN-STARTCLASH-FAIL-WFP: a failed owner-proxy transition must return its own refusal
+    /// while the handler rolls the Windows bootstrap arm back. This is the reporting half of
+    /// that fix: a successful rollback keeps the original error verbatim, a failed one keeps
+    /// the original code and appends the release failure (the block may still be installed).
+    #[test]
+    fn a_failed_transition_keeps_its_error_and_appends_a_failed_arm_release() {
+        let original = ServiceError::owner_switch_failed("Failed to start owner core: boom");
+        let rolled_back = windows_arm_rollback_error(original.clone(), None);
+        assert_eq!(rolled_back, original);
+
+        let release_failure = anyhow::anyhow!("simulated release failure");
+        let appended = windows_arm_rollback_error(original.clone(), Some(&release_failure));
+        assert_eq!(appended.code, ServiceErrorCode::OwnerSwitchFailed);
+        assert!(
+            appended.message.contains("Failed to start owner core"),
+            "the original refusal stays the verdict: {}",
+            appended.message
+        );
+        assert!(
+            appended.message.contains("could not be released"),
+            "a failed rollback must be visible in the message: {}",
+            appended.message
+        );
+    }
 }

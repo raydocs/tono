@@ -8,6 +8,17 @@ import XCTest
 /// list, so its name was resolved through the exit and the direct dial waited
 /// on a lookup that crossed the Pacific first.
 final class WeChatResolverPolicyTests: XCTestCase {
+    // Hosted CI has no WeChat installed; supply the discovered bundle path.
+    override func setUp() {
+        super.setUp()
+        ConfigPipeline.managedDirectBundlePathsOverride = ["/Applications/WeChat.app/"]
+    }
+
+    override func tearDown() {
+        ConfigPipeline.managedDirectBundlePathsOverride = nil
+        super.tearDown()
+    }
+
     private func runtime(
         directPolicy: ConfigPipeline.ManagedDirectRuntimePolicy?
     ) throws -> String {
@@ -27,6 +38,32 @@ final class WeChatResolverPolicyTests: XCTestCase {
             keys.append(String(line[line.index(line.startIndex, offsetBy: 5)..<close]))
         }
         return keys
+    }
+
+    func testDashScopeUsesProtectedRoutingAndDNSBeforeAlibabaDirect() throws {
+        let node = Fixture.realityNode()
+        let check: (String?) throws -> Void = { home in
+            let yaml = try Fixture.ownedRuntime(
+                overlay: Fixture.overlay(selectedNodeName: node.name, claudeHomeNodeName: home),
+                nodes: [node], directPolicy: Fixture.directPolicy()
+            )
+            let target = home == nil ? ConfigPipeline.exitGroupName : ConfigPipeline.claudeHomeGroupName
+            let direct = try XCTUnwrap(yaml.range(of: "AND,((NETWORK,TCP),(DST-PORT,443),(DOMAIN-SUFFIX,aliyuncs.com)),\(ConfigPipeline.webDirectGroupName)"))
+            for suffix in ["dashscope.aliyuncs.com", "dashscope-intl.aliyuncs.com", "dashscope-us.aliyuncs.com", "maas.aliyuncs.com"] {
+                let tcp = try XCTUnwrap(yaml.range(of: "AND,((NETWORK,TCP),(DOMAIN-SUFFIX,\(suffix))),\(target)"), suffix)
+                let udp = try XCTUnwrap(yaml.range(of: "AND,((NETWORK,UDP),(DOMAIN-SUFFIX,\(suffix))),REJECT"), suffix)
+                XCTAssertLessThan(tcp.lowerBound, direct.lowerBound, suffix)
+                XCTAssertLessThan(udp.lowerBound, direct.lowerBound, suffix)
+                for key in [suffix, "+.\(suffix)"] {
+                    let line = try XCTUnwrap(yaml.components(separatedBy: "\n").first { $0.hasPrefix("    \"\(key)\":") }, key)
+                    XCTAssertTrue(line.contains("#Tono-Exit"), line)
+                    XCTAssertFalse(line.contains("#\(ConfigPipeline.directProxyName)"), line)
+                }
+            }
+            XCTAssertTrue(yaml.contains("\"+.aliyuncs.com\": [\"https://223.5.5.5/dns-query#\(ConfigPipeline.directProxyName)\""))
+        }
+        try check(nil)
+        try check(node.name)
     }
 
     func testWeChatFamiliesResolveThroughChinaDoHWithNoPolicyHostsAtAll() throws {

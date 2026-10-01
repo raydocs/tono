@@ -154,6 +154,31 @@ pub fn network_event_fires(changed: bool, since_last_event: Option<Duration>) ->
     changed && since_last_event.is_none_or(|elapsed| elapsed >= NETWORK_EVENT_DEBOUNCE)
 }
 
+/// Keep a counter the debounce did not accept. Advancing it anyway makes the
+/// next tick look quiet, so the change is lost instead of retried when
+/// [`NETWORK_EVENT_DEBOUNCE`] elapses. That is the loss H5 already named for
+/// the post-connect seed.
+pub fn next_network_events_counter(
+    stored: Option<u64>,
+    observed: u64,
+    first_sample: bool,
+    invalidated: bool,
+) -> Option<u64> {
+    let changed = !first_sample && stored != Some(observed);
+    if first_sample || !changed || invalidated {
+        Some(observed)
+    } else {
+        stored
+    }
+}
+
+/// A core-identity change inside the debounce window must stay visible.
+/// Committing the new pid while the event is suppressed makes the next
+/// sample look unchanged.
+pub const fn commit_core_baseline(first_sample: bool, core_changed: bool, invalidated: bool) -> bool {
+    first_sample || !core_changed || invalidated
+}
+
 /// A Windows route/interface notification is only a hint: WinTUN creation, protected-DNS
 /// reconciliation, and their delayed IP Helper callbacks can all arrive after Connect has
 /// already committed. Keep the fail-closed response for a changed Core identity or a failed
@@ -167,6 +192,26 @@ pub fn monitor_requires_reconnect(
     owned_direct_reload: bool,
 ) -> bool {
     health_invalid || (event_invalidated && (core_changed || (event_probe_failed && !owned_direct_reload)))
+}
+
+/// X2-1: whether a session whose network changed may stay in place.
+///
+/// The TUN proof covers only the tunnel: Mihomo re-detects the tunnel's own uplink, but the
+/// optional DIRECT outbound is bound by name (`interface-name`) to the adapter captured before
+/// the first Core start, and nothing re-binds it afterwards. A proven tunnel therefore keeps the
+/// session only while that adapter is still one of the usable hardware uplinks. Otherwise — the
+/// adapter is gone, or the uplinks could not be read (`None`) — the caller must run the same
+/// protected teardown + reconnect as any other invalidation, which rediscovers the adapter before
+/// the next Core start. A session without a committed DIRECT overlay has no such binding.
+pub fn may_recover_in_place(
+    tunnel_proven: bool,
+    committed_direct_interface: Option<&str>,
+    usable_uplinks: Option<&[String]>,
+) -> bool {
+    tunnel_proven
+        && committed_direct_interface.is_none_or(|committed| {
+            usable_uplinks.is_some_and(|uplinks| uplinks.iter().any(|uplink| uplink == committed))
+        })
 }
 
 /// What one [`handle_network_change`] call did to the session.
@@ -249,10 +294,16 @@ pub fn kill_switch_unhealthy_for_monitor(
 ///
 /// `TONO_DNS_UNVERIFIED`: DNS was applied but the read-back could not confirm every adapter.
 /// `TONO_DNS_RESTORE_DEGRADED`: a restore was accepted on registry evidence alone.
+/// `TONO_DNS_CAPTURE_QUARANTINED`: a restore succeeded, but an unreadable Encrypted DNS capture
+/// was quarantined, so the user's previous Encrypted DNS setting could not be put back.
 ///
 /// Treating these as unhealthy is not a cosmetic mistake: two consecutive samples invalidate
 /// Connected, and a machine that can never verify would then reconnect forever.
-const DNS_WARNING_MARKERS: [&str; 2] = ["TONO_DNS_UNVERIFIED", "TONO_DNS_RESTORE_DEGRADED"];
+const DNS_WARNING_MARKERS: [&str; 3] = [
+    "TONO_DNS_UNVERIFIED",
+    "TONO_DNS_RESTORE_DEGRADED",
+    "TONO_DNS_CAPTURE_QUARANTINED",
+];
 
 /// Whether a `last_error` string reports an actual failure rather than an unproven-but-applied
 /// state. Substring, not prefix: the Service nests these markers inside its own context.
@@ -310,4 +361,185 @@ pub const fn startup_resume_guards_hold(
 /// F2: threshold test shared by the kill-switch and exit-probe legs.
 pub const fn health_threshold_reached(consecutive_failures: u32) -> bool {
     consecutive_failures >= HEALTH_FAILURE_THRESHOLD
+}
+
+/// Consecutive failed network-event proofs before the tunnel is rebuilt.
+///
+/// One failure is a blip: packet loss, a DHCP flicker, a route notification
+/// while the exit is still carrying traffic. Stopping the core there opens a
+/// kill-switch window longer than the blip. The next monitor tick probes
+/// again without waiting for another OS notification. Core identity and the
+/// protection legs are not debounced by this count.
+pub const EVENT_PROBE_REBUILD_AFTER: u32 = 2;
+
+pub const fn event_probe_failure_rebuilds(consecutive_failures: u32) -> bool {
+    consecutive_failures >= EVENT_PROBE_REBUILD_AFTER
+}
+
+/// Whether this monitor tick should ask the tunnel about a network event.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NetworkEventProbePlan {
+    /// Nothing to prove. Core identity, a broken barrier, and our own DIRECT
+    /// reload are handled by their own legs.
+    Idle,
+    /// A success inside the cooldown still covers this notification.
+    ReuseRecentProof,
+    /// Run one data-plane proof. A pending failure from the previous tick
+    /// must run even when this tick has no new OS notification.
+    Probe,
+}
+
+/// What that proof did to the session. `Hold` keeps the core and the barrier.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NetworkEventProbeEffect {
+    Unchanged,
+    Proven,
+    Hold,
+    Rebuild,
+}
+
+pub const fn plan_network_event_probe(
+    event_invalidated: bool,
+    network_changed: bool,
+    core_changed: bool,
+    health_invalid: bool,
+    owned_direct_reload: bool,
+    pending_failures: u32,
+    recent_proof: bool,
+) -> NetworkEventProbePlan {
+    if core_changed || health_invalid || owned_direct_reload {
+        return NetworkEventProbePlan::Idle;
+    }
+    let corroboration_due = event_invalidated && network_changed;
+    let reconfirm = pending_failures > 0;
+    if !corroboration_due && !reconfirm {
+        return NetworkEventProbePlan::Idle;
+    }
+    if corroboration_due && pending_failures == 0 && recent_proof {
+        return NetworkEventProbePlan::ReuseRecentProof;
+    }
+    NetworkEventProbePlan::Probe
+}
+
+pub const fn apply_network_event_probe(
+    plan: NetworkEventProbePlan,
+    probe_failed: bool,
+    pending_failures: u32,
+) -> (NetworkEventProbeEffect, u32) {
+    match plan {
+        NetworkEventProbePlan::Idle => (NetworkEventProbeEffect::Unchanged, pending_failures),
+        NetworkEventProbePlan::ReuseRecentProof => (NetworkEventProbeEffect::Proven, 0),
+        NetworkEventProbePlan::Probe => {
+            if !probe_failed {
+                (NetworkEventProbeEffect::Proven, 0)
+            } else {
+                let next = pending_failures.saturating_add(1);
+                if event_probe_failure_rebuilds(next) {
+                    (NetworkEventProbeEffect::Rebuild, 0)
+                } else {
+                    (NetworkEventProbeEffect::Hold, next)
+                }
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        NetworkEventProbeEffect, NetworkEventProbePlan, apply_network_event_probe, may_recover_in_place,
+        plan_network_event_probe,
+    };
+
+    #[test]
+    fn a_debounced_sample_stays_visible_until_the_window_elapses() {
+        use super::{commit_core_baseline, next_network_events_counter};
+        let pending = next_network_events_counter(Some(4), 5, false, false);
+        assert_eq!(pending, Some(4), "a suppressed tick must keep the old counter");
+        assert_eq!(next_network_events_counter(pending, 5, false, true), Some(5));
+        assert!(!commit_core_baseline(false, true, false));
+        assert!(commit_core_baseline(false, true, true));
+    }
+
+    #[test]
+    fn a_direct_overlay_bound_to_a_lost_adapter_cannot_recover_in_place() {
+        let uplinks = vec!["Wi-Fi".to_string()];
+        assert!(
+            !may_recover_in_place(true, Some("Ethernet"), Some(&uplinks)),
+            "DIRECT bound to Ethernet while only Wi-Fi carries a default route must be rebuilt, even though the tunnel probe succeeded"
+        );
+    }
+
+    /// Simulated network-change harness. The monitor tick is not run; these
+    /// are the decisions it asks before it is allowed to stop the core.
+
+    #[test]
+    fn one_failed_network_event_probe_holds_the_tunnel() {
+        let plan = plan_network_event_probe(true, true, false, false, false, 0, false);
+        assert_eq!(plan, NetworkEventProbePlan::Probe);
+        assert_eq!(
+            apply_network_event_probe(plan, true, 0),
+            (NetworkEventProbeEffect::Hold, 1)
+        );
+    }
+
+    #[test]
+    fn a_second_failed_network_event_probe_rebuilds() {
+        let plan = plan_network_event_probe(false, false, false, false, false, 1, false);
+        assert_eq!(
+            plan,
+            NetworkEventProbePlan::Probe,
+            "the confirmation tick must probe without waiting for another OS event"
+        );
+        assert_eq!(
+            apply_network_event_probe(plan, true, 1),
+            (NetworkEventProbeEffect::Rebuild, 0)
+        );
+    }
+
+    #[test]
+    fn a_probe_that_recovers_clears_the_pending_failure() {
+        let plan = plan_network_event_probe(false, false, false, false, false, 1, false);
+        assert_eq!(
+            apply_network_event_probe(plan, false, 1),
+            (NetworkEventProbeEffect::Proven, 0)
+        );
+    }
+
+    #[test]
+    fn a_recent_proof_is_reused_instead_of_probing_again() {
+        assert_eq!(
+            plan_network_event_probe(true, true, false, false, false, 0, true),
+            NetworkEventProbePlan::ReuseRecentProof
+        );
+        assert_eq!(
+            apply_network_event_probe(NetworkEventProbePlan::ReuseRecentProof, true, 0),
+            (NetworkEventProbeEffect::Proven, 0),
+            "reuse does not consult the probe_failed flag"
+        );
+    }
+
+    #[test]
+    fn a_core_change_is_not_deferred_as_a_network_blip() {
+        assert_eq!(
+            plan_network_event_probe(true, true, true, false, false, 1, false),
+            NetworkEventProbePlan::Idle
+        );
+    }
+
+    #[test]
+    fn a_protection_failure_is_not_deferred_as_a_network_blip() {
+        assert_eq!(
+            plan_network_event_probe(true, true, false, true, false, 0, false),
+            NetworkEventProbePlan::Idle
+        );
+    }
+
+    #[test]
+    fn an_owned_direct_reload_does_not_probe() {
+        assert_eq!(
+            plan_network_event_probe(true, true, false, false, true, 0, false),
+            NetworkEventProbePlan::Idle
+        );
+    }
 }

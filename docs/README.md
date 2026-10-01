@@ -6,9 +6,13 @@ Start here. Dated handoffs and one-off reviews live in [archive/](archive/).
 
 | Doc | What it owns |
 |---|---|
+| [changelog.d/](changelog.d/README.md) | Internal fixes/features, source and candidate inclusion, verification limits; one new entry file per delivery PR ([INTERNAL_CHANGELOG.md](INTERNAL_CHANGELOG.md) is the frozen history before 2026-09-25) |
+| [FINDINGS_LEDGER.md](FINDINGS_LEDGER.md) + [findings.d/](findings.d/README.md) | The single ledger of known findings (open / in-PR / fixed / refuted / accepted-design); new findings are one fragment file each; read before a review or bug fix (`node tooling/scripts/records.mjs findings`), update in the same PR |
+| [reports/REVIEW_ROUNDS_2026-09-23.md](reports/REVIEW_ROUNDS_2026-09-23.md) | Review → verify → fix → diff-review → merge method, coverage and gaps of the 2026-09-22/23 rounds, reusable review constraints |
 | [BUILD_AND_TEST.md](BUILD_AND_TEST.md) | GitHub-hosted CI, MacBook lightweight work, native-device acceptance and cache retention |
 | [../CONTRIBUTING.md](../CONTRIBUTING.md) | Contributor workflow and verification evidence |
-| [../AGENTS.md](../AGENTS.md) | Coding-agent rules; choose an execution host before compiling |
+| [../AGENTS.md](../AGENTS.md) | Agent rules: merge/deploy/publish conditions, invariants, verification hosts |
+| [DECISIONS.md](DECISIONS.md) | Index of owner and provisional product decisions. One file each under [decisions/](decisions/README.md); add a file, do not append to the index |
 
 Mac Studio no longer serves as a residential exit (owner confirmed 2026-09-14).
 Routine builds use GitHub-hosted runners; native-device acceptance remains separate.
@@ -19,8 +23,13 @@ Use the execution guide's dated status, not old handoff machine assignments.
 | Doc | What it is |
 |---|---|
 | [architecture.md](architecture.md) | System map, deployables, macOS / Windows code map |
-| [SHIP_PLAN.md](SHIP_PLAN.md) | Customer 0.0.73 — four gates before any update-channel publish |
+| [selective-fail-open.md](selective-fail-open.md) | Crash / captive-portal selective fail-open study; not implemented |
+| [SHIP_PLAN.md](SHIP_PLAN.md) | Customer 0.0.74 — gates G1–G4; update-channel publish (G4) after owner-recorded G1–G3 evidence |
+| [CONNECTION_BETA_2026-09-22.md](CONNECTION_BETA_2026-09-22.md) | G1/G2 native DNS/cancellation optimization and same-route connection measurement, not a speedup claim |
+| [UPDATE_PROTOCOL_V1.md](UPDATE_PROTOCOL_V1.md) | Shared macOS/Windows update wire values and conformance, not installation acceptance |
+| [UPDATE_INTEGRATION_V1.md](UPDATE_INTEGRATION_V1.md) | Native protected-update ownership, detached transport, paired packaging and G3 evidence boundaries |
 | [RELEASE_LINES.md](RELEASE_LINES.md) | `release/macos`, `release/windows`, `main`; tag formats |
+| [RELEASE_READINESS.md](RELEASE_READINESS.md) | Launch gaps: done / in-PR / needs-real-hardware; not a ship gate |
 | [ui-design-system.md](ui-design-system.md) | Shared visual tokens for both clients |
 | [desktop-clarity.md](desktop-clarity.md) | Welcome / login / content-layer clarity |
 | [welcome-v2.md](welcome-v2.md) | Welcome flow copy and layout |
@@ -42,6 +51,7 @@ Living operator docs. The current ops backlog is
 | [ops/d1-backups.md](ops/d1-backups.md) | D1 backup |
 | [ops/restore-production.md](ops/restore-production.md) | Production restore |
 | [ops/ingest-limits.md](ops/ingest-limits.md) | Ingest budgets |
+| [diagnostics-privacy.md](diagnostics-privacy.md) | Automatic diagnostics tables, privacy boundaries, failure-cluster webhook |
 | [ops/parity-audit.md](ops/parity-audit.md) | Client/ops parity |
 | [ops/rollout-ops2.md](ops/rollout-ops2.md) | `/ops2/` rollout runbook |
 | [ops/transport-hy2.md](ops/transport-hy2.md) | hy2 transport |
@@ -53,5 +63,5 @@ Living operator docs. The current ops backlog is
 
 ## Archive
 
-[archive/](archive/) — session handoffs, dated reviews, Windows test reports,
+[archive/](archive/) — dated ops reviews, a few retained technical write-ups and the
 Clash Verge leftover inventory. Do not treat these as current instructions.

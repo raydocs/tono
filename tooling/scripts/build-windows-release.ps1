@@ -56,7 +56,6 @@ if (-not (Test-Path -LiteralPath $mihomoPath -PathType Leaf)) {
 }
 
 Invoke-Checked -FilePath 'pnpm' -ArgumentList @('release-version', $Version) -WorkingDirectory $appRoot
-Invoke-Checked -FilePath 'pnpm' -ArgumentList @('release:preflight', '--config-only') -WorkingDirectory $appRoot
 
 $coreSha256 = (Get-FileHash -LiteralPath $mihomoPath -Algorithm SHA256).Hash.ToLowerInvariant()
 if ($coreSha256 -notmatch '^[0-9a-f]{64}$') {
@@ -65,6 +64,18 @@ if ($coreSha256 -notmatch '^[0-9a-f]{64}$') {
 $env:TONO_CORE_SHA256 = $coreSha256
 New-Item -ItemType Directory -Force $resourceRoot | Out-Null
 Set-Content -LiteralPath (Join-Path $resourceRoot 'core-sha256.txt') -Value $coreSha256 -Encoding ascii
+
+$singBoxPath = Join-Path $appRoot 'src-tauri/sidecar/sing-box-x86_64-pc-windows-msvc.exe'
+if (-not (Test-Path -LiteralPath $singBoxPath -PathType Leaf)) {
+    throw "Pinned sing-box sidecar is missing: $singBoxPath"
+}
+$singBoxSha256 = (Get-FileHash -LiteralPath $singBoxPath -Algorithm SHA256).Hash.ToLowerInvariant()
+$expectedSingBox = 'b2e6902ee75d9c4af79df28a61ded67afc4283fc83a44dee8896f3737a4ed027'
+if ($singBoxSha256 -ne $expectedSingBox) {
+    throw "sing-box sidecar $singBoxSha256 is not the pinned alpha.9 digest $expectedSingBox"
+}
+$env:TONO_SING_BOX_SHA256 = $singBoxSha256
+Set-Content -LiteralPath (Join-Path $resourceRoot 'sing-box-sha256.txt') -Value $singBoxSha256 -Encoding ascii
 
 $serviceBins = @('tono-service', 'tono-service-install', 'tono-service-uninstall')
 $cargoArguments = @(
@@ -76,7 +87,8 @@ $cargoArguments = @(
 foreach ($serviceBin in $serviceBins) {
     $cargoArguments += @('--bin', $serviceBin)
 }
-Invoke-Checked -FilePath 'cargo' -ArgumentList $cargoArguments -WorkingDirectory $repositoryRoot
+# From the service directory: its .cargo/config.toml links the CRT statically (H22-O-F2).
+Invoke-Checked -FilePath 'cargo' -ArgumentList $cargoArguments -WorkingDirectory (Split-Path -Parent $serviceManifest)
 
 foreach ($serviceBin in $serviceBins) {
     $source = Join-Path $serviceTarget "$serviceBin.exe"
@@ -86,6 +98,7 @@ foreach ($serviceBin in $serviceBins) {
     }
     Copy-Item -LiteralPath $source -Destination $destination -Force
 }
+Copy-Item -LiteralPath (Join-Path $appRoot 'src-tauri/core-identity.json') -Destination (Join-Path $resourceRoot 'core-identity.json') -Force
 
 # `option_env!("TONO_CORE_SHA256")` must survive into both executables that trust or publish the
 # core. A missing pin is deliberately fatal, so prove the exact digest is embedded before packaging.
@@ -95,8 +108,13 @@ foreach ($pinnedBinary in @($servicePath, (Join-Path $resourceRoot 'tono-service
     if (-not $binaryAscii.Contains($coreSha256)) {
         throw "The built $(Split-Path -Leaf $pinnedBinary) does not contain the injected Mihomo SHA-256 pin."
     }
+    if (-not $binaryAscii.Contains($singBoxSha256)) {
+        throw "The built $(Split-Path -Leaf $pinnedBinary) does not contain the pinned sing-box SHA-256."
+    }
 }
 
+# The complete config gate also requires generated resources on disk.
+Invoke-Checked -FilePath 'pnpm' -ArgumentList @('release:preflight', '--config-only') -WorkingDirectory $appRoot
 Invoke-Checked -FilePath 'pnpm' -ArgumentList @('build') -WorkingDirectory $appRoot
 if (-not (Test-Path -LiteralPath $installerPath -PathType Leaf)) {
     throw "NSIS installer was not produced: $installerPath"

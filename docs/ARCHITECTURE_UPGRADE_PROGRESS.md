@@ -61,14 +61,14 @@ P0 recovery -> P1 compiling/tested baseline -> P2 upstream/release integration
 | P0 | Complete: independently recoverable backup and verified isolated restoration |
 | P1 | Local baseline passes; Windows-native and privileged Mac qualification remain outstanding |
 | P2 | Upstream feature-branch merge complete; release-line preparation/promotion not performed |
-| M1 | Partial: ConnectionCoordinator owns tasks/generation; ConfigPipeline, AccountSession and LocalTrafficAudit have domain files. AccountGateView/LoginView/AccountGateSupport and ProxiesView+Nodes/+Chrome extracted. connect/disconnect method bodies still live on AppState+Connect (a body-move was reverted after implicit-self breakage) |
+| M1 | Advanced: ConnectionCoordinator owns tasks/generation, connect/disconnect/reconnect lifecycle and gate serialization; AccountGate, ProxiesView, UnicodeCountryFlag (NetFluss pure Unicode flags) and DataUsageSummaryView (live/monthly usage) integrated and verified |
 | M2 | Helper PF, lifecycle tests, CoreManager, HTTP, power gate, and SocketServer are separate sources. Protocol is 3.15.0; compile and CONTRACT hash share one source-file manifest in `build-core-helper.sh`. Helper rebuilt. |
-| W1 | Partial: connection.rs is a facade over domain modules; commands split by domain; `core/service/` is install/owner/IPC/tests. `tono-service-client` crate not extracted (W3) |
+| W1 | Partial: connection.rs is a facade over domain modules; commands split by domain; `core/service/` is install/owner/IPC/tests |
 | W2 | Partial: Service DNS engine is `dns/engine.rs`; WFP tests/real-engine tests are siblings; IPC `server/handlers.rs` holds `create_ipc_router`. Remaining DNS restore/enable and WFP engine/filter bodies still large |
-| W3 | Not started: tono-client/service-client crate extraction and CVR runtime-path retirement |
+| W3 | Advanced: tono-client and tono-service-client crate extraction complete with tests passing; sidecar allowance/PAC/draft writes audit complete with protected code paths verified |
 | W4 | Monaco removed from package.json, lockfile, and theme CSS; locale loading constrained to en/zh with fallback tests. Unused leftover locale JSON files remain on disk but are not loaded |
 | D | Not accepted: desktop structure and native/privileged qualification incomplete |
-| C1/C2 | Partial: Env/auth/catalog/home/product-account/traffic-policy extracted from `index.ts`. Router still in `index.ts`. Worker typecheck + 328 tests pass. Not a deployment acceptance |
+| C1/C2 | Advanced: Slices 1 & 2 complete. Extracted releases/download host (`src/releases/host.ts`) and telemetry/diagnostics routes (`src/telemetry/routes.ts`). `index-size.txt` ratcheted from 4657 to 4014 lines. Worker typecheck + 890 tests across 43 files pass |
 | L1–L4 | Deferred; Linux remains fail-closed and is not a usable/shipped VPN product |
 
 Locked decisions:
@@ -124,7 +124,7 @@ than the workspace floor.
 | New macOS tests | Provider ordering/target preservation; traversal/symlink refusal; process cancellation registration; reconnect delays 2/5/10/20/30; coordinator generation ownership |
 | App Rust (`--features clippy --lib`) | 421 passed after cleanup/controller/probes/monitor extraction, including six paused-clock tests |
 | Service (`--features standalone,client,test --lib`) | 305 passed on Mac; platform/model coverage, not real Windows WFP |
-| Worker typecheck/full Vitest | Passed; 328 tests across eight files |
+| Worker typecheck/full Vitest | Passed; 890 tests across 43 files |
 | Windows frontend | Typecheck, full Vitest, and 84 dev-control/packaging tests passed after upstream merge |
 | Policy signing contract | 4/4 passed; trust key, context and protected host set unchanged |
 | Multi-exit fixture | Both selected exits validated by bundled Mihomo |

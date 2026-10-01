@@ -12,8 +12,8 @@
 //! rule lives in a *single* sublayer (Mullvad-style): "weighted permits over a low block-all"
 //! only holds when filter weight is the sole ordering axis. A second, higher-weight sublayer
 //! carrying a match-all block would decide every packet before any permit here is consulted.
-//! Persistence is still reserved for the condition-free block-all filters, which are what
-//! survive a reboot; everything else is rebuilt on service start. Enforcement stays entirely at
+//! The entire intent floor persists across reboot, including loopback, DHCP and NDP permits;
+//! session rules are rebuilt on service start. Enforcement stays entirely at
 //! ALE authorization layers so identity (`ALE_APP_ID`) and endpoint tuple are evaluated in the
 //! same filter. Adding or removing an ALE filter triggers policy-change reauthorization on the
 //! affected flow's next packet, which blocks stale TCP/UDP (including QUIC) flows without an
@@ -76,8 +76,12 @@ pub const MAX_API_HOST_IPS: usize = 8;
 /// port-53 block over the default-deny floor; v7: `…9e06…` per-packet outbound-transport
 /// enforcement; v8: `…9e07…` Mihomo-app-scoped ALE plus exact transport tuples for
 /// lease-backed DIRECT; v9: `…9e08…` ALE-only stateful enforcement, keeping app identity and
-/// tuple in one filter and relying on documented policy-change reauthorization for stale flows.)
-const FILTER_NAMESPACE: u128 = 0x2f7c_9e08_0000_4a6c_0000_0000_0000_0000;
+/// tuple in one filter and relying on documented policy-change reauthorization for stale flows;
+/// v10: `…9e09…` inbound `ALE_AUTH_RECV_ACCEPT` default-deny with loopback, tunnel and
+/// DHCP/NDP permits (#343); v11: `…9e0a…` DHCP client permits bounded to broadcast/multicast
+/// and non-public servers (#345); v12: `…9e0b…` intent-floor loopback/DHCP/NDP permits
+/// persistent alongside the block-alls.)
+const FILTER_NAMESPACE: u128 = 0x2f7c_9e0b_0000_4a6c_0000_0000_0000_0000;
 
 const fn fnv1a64(bytes: &[u8]) -> u64 {
     let mut hash = 0xcbf2_9ce4_8422_2325_u64;
@@ -98,6 +102,7 @@ pub(crate) fn key_for(tag: &str) -> Guid {
 pub enum LayerKind {
     AleAuthConnectV4,
     AleAuthConnectV6,
+    AleAuthRecvAcceptV4,
     AleAuthRecvAcceptV6,
 }
 
@@ -150,6 +155,9 @@ pub enum Condition {
     AleLoopback,
     /// `FwpmGetAppIdFromFileName` blob of the staged core binary; resolved by the engine.
     AleAppId,
+    /// `FwpmGetAppIdFromFileName` blob of the installed Tono app (`RuleConfig::tono_app_path`),
+    /// the only process that talks to the control plane; resolved by the engine.
+    AleAppIdTonoApp,
     /// WinTUN adapter LUID, matched at ALE authorization.
     LocalInterface(u64),
 }
@@ -166,8 +174,7 @@ pub struct FilterSpec {
     /// needs a hard permit so a later filtering provider cannot veto local control traffic;
     /// Internet endpoint and tunnel permits intentionally remain soft.
     pub hard_permit: bool,
-    /// Only the intent floor's condition-free block-all set is persistent — Proton's rule
-    /// that persistence is reserved for condition-free blocking.
+    /// The entire intent floor is persistent; all session rules are non-persistent.
     pub persistent: bool,
 }
 
@@ -185,6 +192,9 @@ pub struct RuleConfig {
     /// binary must rekey the permit (Proton's upgrade lesson — app-path filters silently die
     /// when the exe moves), which the add-before-remove plan then swaps atomically.
     pub app_path: String,
+    /// The installed Tono app image under Program Files. Scopes the bootstrap API channel (rule
+    /// C) and is folded into its key; empty means that channel is not rendered at all.
+    pub tono_app_path: String,
     /// Cloud-approved DIRECT endpoints (WeChat acceleration): exact `IP:port` tuples the staged
     /// core may reach on the physical NIC. Rendered **only in `Locked`** (see rule G);
     /// never persisted, never restored, never inherited by the next arm — omission = clear.
@@ -224,14 +234,62 @@ fn hard_permit(mut filter: FilterSpec) -> FilterSpec {
     filter
 }
 
+/// Where a DHCPv4 client may send: the limited broadcast, and the non-public ranges a LAN or
+/// carrier-side DHCP server answers unicast renewals from.
+const DHCP_V4_SERVER_PREFIXES: [([u8; 4], u8); 6] = [
+    ([255, 255, 255, 255], 32),
+    ([10, 0, 0, 0], 8),
+    ([100, 64, 0, 0], 10),
+    ([169, 254, 0, 0], 16),
+    ([172, 16, 0, 0], 12),
+    ([192, 168, 0, 0], 16),
+];
+
 /// The persistent fail-closed floor: address-or-ALE loopback, DHCP, and NDP permits over
 /// persistent ALE block-alls. The independent loopback paths are deliberate: real Windows has
 /// exposed controller connections through address matching and DNS through ALE classification.
+///
+/// Both directions are covered. A flow a remote peer initiates is authorized once, at
+/// `ALE_AUTH_RECV_ACCEPT`, and its outbound packets never reach `ALE_AUTH_CONNECT`; a
+/// connect-only floor therefore let any listener on the physical adapter (a global IPv6
+/// address is the common case) accept a connection and carry the whole flow off-tunnel. The
+/// inbound layers get the same shape: loopback, DHCP replies and NDP over a block-all.
 pub fn intent_floor() -> Vec<FilterSpec> {
     use Condition as C;
     use FilterAction as A;
     use LayerKind as L;
-    vec![
+    // DHCP is identified by ports alone, and nothing stops another process from sending from
+    // the client port. Bound the destination as well, so the permit reaches only where a DHCP
+    // client legitimately sends: the limited broadcast, or a server in non-public space for
+    // unicast renewal. A server on a public address loses unicast renewal only; the client's
+    // broadcast rebind still renews the lease. WFP ORs repeated address conditions, so each
+    // list below is one "destination is one of" condition.
+    let mut dhcp_v4 = vec![
+        C::Protocol(IpProtocol::Udp),
+        C::LocalPort(68),
+        C::RemotePort(67),
+    ];
+    dhcp_v4.extend(DHCP_V4_SERVER_PREFIXES.iter().map(|(addr, prefix)| {
+        C::RemoteAddressV4 {
+            addr: *addr,
+            prefix: *prefix,
+        }
+    }));
+    let dhcp_v6 = vec![
+        C::Protocol(IpProtocol::Udp),
+        C::LocalPort(546),
+        C::RemotePort(547),
+        // All_DHCP_Relay_Agents_and_Servers (RFC 8415) and link-local servers.
+        C::RemoteAddressV6 {
+            addr: [0xff, 0x02, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 2],
+            prefix: 128,
+        },
+        C::RemoteAddressV6 {
+            addr: [0xfe, 0x80, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            prefix: 10,
+        },
+    ];
+    let mut filters = vec![
         hard_permit(spec(
             "intent/permit-loopback-address-v4".into(),
             "intent permit loopback address v4",
@@ -242,7 +300,7 @@ pub fn intent_floor() -> Vec<FilterSpec> {
                 addr: [127, 0, 0, 0],
                 prefix: 8,
             }],
-            false,
+            true,
         )),
         hard_permit(spec(
             "intent/permit-loopback-address-v6".into(),
@@ -254,7 +312,7 @@ pub fn intent_floor() -> Vec<FilterSpec> {
                 addr: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
                 prefix: 128,
             }],
-            false,
+            true,
         )),
         hard_permit(spec(
             "intent/permit-loopback-ale-v4".into(),
@@ -263,7 +321,7 @@ pub fn intent_floor() -> Vec<FilterSpec> {
             WEIGHT_HARD_PERMIT,
             A::Permit,
             vec![C::AleLoopback],
-            false,
+            true,
         )),
         hard_permit(spec(
             "intent/permit-loopback-ale-v6".into(),
@@ -272,7 +330,7 @@ pub fn intent_floor() -> Vec<FilterSpec> {
             WEIGHT_HARD_PERMIT,
             A::Permit,
             vec![C::AleLoopback],
-            false,
+            true,
         )),
         spec(
             "intent/permit-dhcp-v4".into(),
@@ -280,12 +338,8 @@ pub fn intent_floor() -> Vec<FilterSpec> {
             L::AleAuthConnectV4,
             WEIGHT_INFRA_PERMIT,
             A::Permit,
-            vec![
-                C::Protocol(IpProtocol::Udp),
-                C::LocalPort(68),
-                C::RemotePort(67),
-            ],
-            false,
+            dhcp_v4,
+            true,
         ),
         spec(
             "intent/permit-dhcp-v6".into(),
@@ -293,12 +347,8 @@ pub fn intent_floor() -> Vec<FilterSpec> {
             L::AleAuthConnectV6,
             WEIGHT_INFRA_PERMIT,
             A::Permit,
-            vec![
-                C::Protocol(IpProtocol::Udp),
-                C::LocalPort(546),
-                C::RemotePort(547),
-            ],
-            false,
+            dhcp_v6,
+            true,
         ),
         spec(
             "intent/permit-ndp-out".into(),
@@ -310,7 +360,7 @@ pub fn intent_floor() -> Vec<FilterSpec> {
                 C::Protocol(IpProtocol::IcmpV6),
                 C::IcmpV6TypeRange { min: 133, max: 137 },
             ],
-            false,
+            true,
         ),
         spec(
             "intent/permit-ndp-in".into(),
@@ -322,7 +372,7 @@ pub fn intent_floor() -> Vec<FilterSpec> {
                 C::Protocol(IpProtocol::IcmpV6),
                 C::IcmpV6TypeRange { min: 133, max: 137 },
             ],
-            false,
+            true,
         ),
         spec(
             "intent/block-all-v4".into(),
@@ -342,7 +392,97 @@ pub fn intent_floor() -> Vec<FilterSpec> {
             vec![],
             true,
         ),
-    ]
+    ];
+
+    // Inbound: local listeners (the core's controller and DNS) accept loopback peers only.
+    for (tag, layer, address) in [
+        (
+            "v4",
+            L::AleAuthRecvAcceptV4,
+            C::RemoteAddressV4 {
+                addr: [127, 0, 0, 0],
+                prefix: 8,
+            },
+        ),
+        (
+            "v6",
+            L::AleAuthRecvAcceptV6,
+            C::RemoteAddressV6 {
+                addr: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+                prefix: 128,
+            },
+        ),
+    ] {
+        filters.push(hard_permit(spec(
+            format!("intent/permit-inbound-loopback-address-{tag}"),
+            &format!("intent permit inbound loopback address {tag}"),
+            layer,
+            WEIGHT_HARD_PERMIT,
+            A::Permit,
+            vec![address],
+            true,
+        )));
+        filters.push(hard_permit(spec(
+            format!("intent/permit-inbound-loopback-ale-{tag}"),
+            &format!("intent permit inbound loopback ALE {tag}"),
+            layer,
+            WEIGHT_HARD_PERMIT,
+            A::Permit,
+            vec![C::AleLoopback],
+            true,
+        )));
+    }
+    // DHCP server replies arrive from the server's address, which is not the broadcast or
+    // multicast address the request went to, so they are authorized as inbound traffic.
+    // DHCPv4 stays port-only: a server or relay on a public address answers from that address,
+    // and bounding it would leave those clients with no lease at all while protected. DHCPv6
+    // servers and relays answer clients from a link-local address (RFC 8415), so the v6
+    // reply is bounded to fe80::/10 and a global peer cannot open a flow on port 546.
+    filters.push(spec(
+        "intent/permit-dhcp-v4-in".into(),
+        "intent permit DHCP v4 server to client",
+        L::AleAuthRecvAcceptV4,
+        WEIGHT_INFRA_PERMIT,
+        A::Permit,
+        vec![
+            C::Protocol(IpProtocol::Udp),
+            C::LocalPort(68),
+            C::RemotePort(67),
+        ],
+        true,
+    ));
+    filters.push(spec(
+        "intent/permit-dhcp-v6-in".into(),
+        "intent permit DHCPv6 server to client",
+        L::AleAuthRecvAcceptV6,
+        WEIGHT_INFRA_PERMIT,
+        A::Permit,
+        vec![
+            C::Protocol(IpProtocol::Udp),
+            C::LocalPort(546),
+            C::RemotePort(547),
+            C::RemoteAddressV6 {
+                addr: [0xfe, 0x80, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+                prefix: 10,
+            },
+        ],
+        true,
+    ));
+    for (tag, layer) in [
+        ("v4", L::AleAuthRecvAcceptV4),
+        ("v6", L::AleAuthRecvAcceptV6),
+    ] {
+        filters.push(spec(
+            format!("intent/block-all-inbound-{tag}"),
+            &format!("intent block all inbound {tag}"),
+            layer,
+            WEIGHT_BLOCK_ALL,
+            A::Block,
+            vec![],
+            true,
+        ));
+    }
+    filters
 }
 
 /// Parse and classify an endpoint for rule rendering. Invalid *or non-public* IPs render no
@@ -497,7 +637,12 @@ pub fn session_rules(config: &RuleConfig) -> Vec<FilterSpec> {
     if config.mode == KillSwitchStatusMode::Locked
         && let Some(luid) = config.tun_luid
     {
-        for layer in [L::AleAuthConnectV4, L::AleAuthConnectV6] {
+        for layer in [
+            L::AleAuthConnectV4,
+            L::AleAuthConnectV6,
+            L::AleAuthRecvAcceptV4,
+            L::AleAuthRecvAcceptV6,
+        ] {
             filters.push(spec(
                 format!("session/permit-tunnel/{layer:?}/{luid}"),
                 "session permit tunnel interface",
@@ -512,21 +657,29 @@ pub fn session_rules(config: &RuleConfig) -> Vec<FilterSpec> {
 
     // C: the bounded bootstrap API channel. Open in bootstrap, retracted at lock, and open
     // again in blocked mode as the recovery channel.
-    if config.mode != KillSwitchStatusMode::Locked {
-        // One permit per pinned address per reachable port. The address set is what bounds
-        // this channel; the port was never doing security work, and pinning it to 443 alone
+    //
+    // Scoped to the installed Tono app. The pinned addresses are shared Cloudflare anycast, so
+    // an address-only permit let any local process reach any origin behind them from the
+    // physical NIC while the user was told nothing gets out. No app path, no channel.
+    if config.mode != KillSwitchStatusMode::Locked && !config.tono_app_path.is_empty() {
+        // One permit per pinned address per reachable port. The app id and the address set
+        // are what bound this channel; the port was never doing security work, and pinning it to 443 alone
         // meant the client could not use the alternate HTTPS ports the same Cloudflare zone
         // answers on — the one route around an SNI blocklist keyed on 443, and the difference
         // between a user stuck in Protected Offline being able to re-authenticate or not.
         for ip in &config.api_host_ips {
             for port in crate::CONTROL_PLANE_PORTS {
                 filters.push(spec(
-                    format!("session/permit-api/ale/{ip}/{port}"),
+                    format!(
+                        "session/permit-api/ale/{}/{ip}/{port}",
+                        config.tono_app_path
+                    ),
                     "session permit bootstrap API",
                     ale_layer_for(*ip),
                     WEIGHT_INFRA_PERMIT,
                     A::Permit,
                     vec![
+                        C::AleAppIdTonoApp,
                         remote_address_condition(*ip),
                         C::Protocol(IpProtocol::Tcp),
                         C::RemotePort(port),
@@ -668,12 +821,14 @@ pub fn session_rules(config: &RuleConfig) -> Vec<FilterSpec> {
     // Windows resolver traffic starts at 127.0.0.1 and can transition to the TUN address, and a
     // terminating block action overrides the legitimate loopback/TUN path on real machines.
     // Never persistent — persistence is
-    // reserved for the condition-free floor set. Note non-persistent filters still outlive
+    // reserved for the intent floor. Note non-persistent filters still outlive
     // the process in BFE's runtime store (until BFE restarts); only the PERSISTENT floor
     // survives a BFE restart or reboot, and service start reconciles the rest by key.
     for layer in [
         L::AleAuthConnectV4,
         L::AleAuthConnectV6,
+        L::AleAuthRecvAcceptV4,
+        L::AleAuthRecvAcceptV6,
     ] {
         filters.push(spec(
             format!("session/block-all/{layer:?}"),
@@ -775,6 +930,34 @@ pub fn diff(current_keys: &[Guid], desired: &[FilterSpec]) -> ChangePlan {
     ChangePlan { install, remove }
 }
 
+/// `IfOperStatusNotPresent` (ifdef.h).
+#[cfg_attr(any(not(windows), feature = "test"), allow(dead_code))]
+pub const IF_OPER_STATUS_NOT_PRESENT: i32 = 6;
+
+/// `ERROR_FILE_NOT_FOUND` (winerror.h), returned by `GetIfEntry2` for an unknown LUID.
+#[cfg_attr(any(not(windows), feature = "test"), allow(dead_code))]
+pub const ERROR_FILE_NOT_FOUND: u32 = 2;
+
+/// Whether the interface row the tunnel alias resolved to is not ready yet, rather than wrong.
+/// Only two cases qualify: the row read failed with `ERROR_FILE_NOT_FOUND` after the alias had
+/// resolved (the leftover was swept away in between), or the row reads as not present. Both
+/// carry "did not resolve to a LUID", which the App retries. Every other status is `None`, so
+/// the caller's permanent refusal still applies; `oper_status` is ignored when the read failed.
+#[cfg_attr(any(not(windows), feature = "test"), allow(dead_code))]
+pub fn tunnel_row_not_ready(luid: u64, lookup_status: u32, oper_status: i32) -> Option<String> {
+    if lookup_status == ERROR_FILE_NOT_FOUND {
+        Some(format!(
+            "interface LUID {luid} was not found after the tunnel alias resolved to it, so the tunnel alias did not resolve to a LUID of a present adapter; refusing to lock"
+        ))
+    } else if lookup_status == 0 && oper_status == IF_OPER_STATUS_NOT_PRESENT {
+        Some(format!(
+            "interface LUID {luid} is reported as not present, so the tunnel alias did not resolve to a LUID of a present adapter; refusing to lock"
+        ))
+    } else {
+        None
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -795,6 +978,7 @@ mod tests {
             api_host_ips: vec!["1.1.1.1".parse().unwrap()],
             tun_luid: Some(0x1234_5678),
             app_path: r"C:\ProgramData\Tono\bin\mihomo.exe".to_owned(),
+            tono_app_path: r"C:\Program Files\Tono\Tono.exe".to_owned(),
             direct_endpoints: Vec::new(),
             reviewed_direct_ports: Vec::new(),
         }
@@ -835,19 +1019,28 @@ mod tests {
     }
 
     #[test]
-    fn only_floor_blocks_are_persistent() {
-        let filters = expected_filters(&config(KillSwitchStatusMode::Locked));
-        let persistent = filters
-            .iter()
-            .filter(|filter| filter.persistent)
-            .collect::<Vec<_>>();
-        assert_eq!(persistent.len(), 2);
-        assert!(
-            persistent.iter().all(|filter| {
-                filter.action == FilterAction::Block && filter.conditions.is_empty()
-            }),
-            "persistence is reserved for the condition-free floor block"
-        );
+    fn exactly_the_intent_floor_is_persistent_in_every_mode() {
+        let floor = intent_floor();
+        assert!(floor.iter().all(|filter| filter.persistent));
+        for mode in [
+            KillSwitchStatusMode::Bootstrap,
+            KillSwitchStatusMode::Locked,
+            KillSwitchStatusMode::Blocked,
+        ] {
+            let filters = expected_filters(&config(mode));
+            let persistent = filters
+                .iter()
+                .filter(|filter| filter.persistent)
+                .collect::<Vec<_>>();
+            assert_eq!(persistent.len(), floor.len(), "{mode:?}");
+            assert_eq!(persistent, floor.iter().collect::<Vec<_>>(), "{mode:?}");
+            for filter in filters
+                .iter()
+                .filter(|filter| !floor.iter().any(|floor| floor.key == filter.key))
+            {
+                assert!(!filter.persistent, "{mode:?}: {}", filter.name);
+            }
+        }
     }
 
     #[test]
@@ -886,8 +1079,8 @@ mod tests {
             })
             .count();
         assert_eq!(
-            tun_permits, 2,
-            "tunnel permit on v4/v6 ALE authorization layers"
+            tun_permits, 4,
+            "tunnel permit on v4/v6 ALE connect and receive-accept layers"
         );
         assert!(
             !filters.iter().any(|filter| {
@@ -958,7 +1151,7 @@ mod tests {
         // Upgrade safety: the key-only diff adopts anything with a matching key, so the
         // namespace must change whenever the rule tables do. Pin the current marker (see the
         // constant's doc comment); any rule-table change must bump it and this pin.
-        assert_eq!(FILTER_NAMESPACE >> 64, 0x2f7c_9e08_0000_4a6c);
+        assert_eq!(FILTER_NAMESPACE >> 64, 0x2f7c_9e0b_0000_4a6c);
     }
 
     #[test]
@@ -1218,6 +1411,7 @@ mod tests {
         remote_port: u16,
         icmp_type: Option<u16>,
         app_id_matches: bool,
+        tono_app_id_matches: bool,
         local_interface: Option<u64>,
     }
 
@@ -1232,6 +1426,7 @@ mod tests {
             remote_port: port,
             icmp_type: None,
             app_id_matches: false,
+            tono_app_id_matches: false,
             local_interface: None,
         }
     }
@@ -1272,6 +1467,7 @@ mod tests {
                 .is_some_and(|ty| (*min..=*max).contains(&ty)),
             Condition::AleLoopback => packet.ale_loopback,
             Condition::AleAppId => packet.app_id_matches,
+            Condition::AleAppIdTonoApp => packet.tono_app_id_matches,
             Condition::LocalInterface(luid) => packet.local_interface == Some(*luid),
         }
     }
@@ -1297,7 +1493,8 @@ mod tests {
             Condition::RemotePort(_) => 4,
             Condition::IcmpV6TypeRange { .. } => 5,
             Condition::AleLoopback => 6,
-            Condition::AleAppId => 7,
+            // Same WFP field (`ALE_APP_ID`) as the core's app id.
+            Condition::AleAppId | Condition::AleAppIdTonoApp => 7,
             Condition::LocalInterface(_) => 8,
         }
     }
@@ -1517,6 +1714,100 @@ mod tests {
     }
 
     #[test]
+    fn inbound_accept_on_the_physical_adapter_is_blocked_in_every_mode() {
+        for mode in [
+            KillSwitchStatusMode::Bootstrap,
+            KillSwitchStatusMode::Locked,
+            KillSwitchStatusMode::Blocked,
+        ] {
+            let filters = expected_filters(&config(mode));
+            for (layer, peer) in [
+                (LayerKind::AleAuthRecvAcceptV4, "203.0.113.9"),
+                (LayerKind::AleAuthRecvAcceptV6, "2001:db8::9"),
+            ] {
+                let mut physical = packet(layer, IpProtocol::Tcp, peer, 51_413);
+                physical.local_port = Some(6881);
+                assert_eq!(
+                    arbitrate(&filters, &physical),
+                    FilterAction::Block,
+                    "{mode:?}: a peer-initiated flow on the physical adapter must not be accepted ({layer:?})"
+                );
+
+                let loopback = if layer == LayerKind::AleAuthRecvAcceptV4 {
+                    "127.0.0.1"
+                } else {
+                    "::1"
+                };
+                assert_eq!(
+                    arbitrate(&filters, &packet(layer, IpProtocol::Tcp, loopback, 50_000)),
+                    FilterAction::Permit,
+                    "{mode:?}: local listeners keep accepting loopback peers ({layer:?})"
+                );
+
+                let (dhcp_server, dhcp_rogue, client, server) =
+                    if layer == LayerKind::AleAuthRecvAcceptV4 {
+                        ("192.168.1.1", None, 68, 67)
+                    } else {
+                        ("fe80::1", Some("2001:db8::67"), 546, 547)
+                    };
+                let mut reply = packet(layer, IpProtocol::Udp, dhcp_server, server);
+                reply.local_port = Some(client);
+                assert_eq!(
+                    arbitrate(&filters, &reply),
+                    FilterAction::Permit,
+                    "{mode:?}: DHCP server replies keep reaching the client ({layer:?})"
+                );
+                if let Some(rogue) = dhcp_rogue {
+                    let mut rogue = packet(layer, IpProtocol::Udp, rogue, server);
+                    rogue.local_port = Some(client);
+                    assert_eq!(
+                        arbitrate(&filters, &rogue),
+                        FilterAction::Block,
+                        "{mode:?}: a global peer cannot open a flow on the DHCPv6 client port"
+                    );
+                }
+
+                physical.local_interface = Some(0x1234_5678);
+                let expected = if mode == KillSwitchStatusMode::Locked {
+                    FilterAction::Permit
+                } else {
+                    FilterAction::Block
+                };
+                assert_eq!(
+                    arbitrate(&filters, &physical),
+                    expected,
+                    "{mode:?}: tunnel-interface accept follows the tunnel permit ({layer:?})"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn dhcp_client_permits_do_not_reach_public_destinations() {
+        for mode in [
+            KillSwitchStatusMode::Bootstrap,
+            KillSwitchStatusMode::Locked,
+            KillSwitchStatusMode::Blocked,
+        ] {
+            let filters = expected_filters(&config(mode));
+            for (layer, local, remote, ip, expected) in [
+                (LayerKind::AleAuthConnectV4, 68, 67, "203.0.113.8", FilterAction::Block),
+                (LayerKind::AleAuthConnectV4, 68, 67, "255.255.255.255", FilterAction::Permit),
+                (LayerKind::AleAuthConnectV6, 546, 547, "2001:db8::1", FilterAction::Block),
+                (LayerKind::AleAuthConnectV6, 546, 547, "ff02::1:2", FilterAction::Permit),
+            ] {
+                let mut probe = packet(layer, IpProtocol::Udp, ip, remote);
+                probe.local_port = Some(local);
+                assert_eq!(
+                    arbitrate(&filters, &probe),
+                    expected,
+                    "{mode:?}: DHCP client port to {ip}"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn loopback_permits_cover_address_and_ale_paths_as_hard_actions() {
         let filters = intent_floor();
         let loopback_permits = filters
@@ -1639,21 +1930,25 @@ mod tests {
 
     #[test]
     fn arbitration_api_channel_open_in_bootstrap_and_blocked_retracted_in_locked() {
-        let packet = packet(LayerKind::AleAuthConnectV4, IpProtocol::Tcp, "1.1.1.1", 443);
-        assert_eq!(
-            arbitrate(
-                &expected_filters(&config(KillSwitchStatusMode::Bootstrap)),
-                &packet
-            ),
-            FilterAction::Permit
-        );
-        assert_eq!(
-            arbitrate(
-                &expected_filters(&config(KillSwitchStatusMode::Blocked)),
-                &packet
-            ),
-            FilterAction::Permit
-        );
+        let other_process = packet(LayerKind::AleAuthConnectV4, IpProtocol::Tcp, "1.1.1.1", 443);
+        let mut packet = other_process.clone();
+        packet.tono_app_id_matches = true;
+        for mode in [
+            KillSwitchStatusMode::Bootstrap,
+            KillSwitchStatusMode::Blocked,
+        ] {
+            let filters = expected_filters(&config(mode));
+            assert_eq!(
+                arbitrate(&filters, &packet),
+                FilterAction::Permit,
+                "{mode:?}"
+            );
+            assert_eq!(
+                arbitrate(&filters, &other_process),
+                FilterAction::Block,
+                "{mode:?}: another process cannot use the shared API addresses"
+            );
+        }
         assert_eq!(
             arbitrate(
                 &expected_filters(&config(KillSwitchStatusMode::Locked)),
@@ -2132,5 +2427,30 @@ mod tests {
             direct_keys.iter().all(|key| plan.remove.contains(key)),
             "a mode change must never leave a stale DIRECT permit installed"
         );
+    }
+
+    /// WIN-GATE-GHOST-TUN: a killed Core leaves its `Tono` interface registered but not present.
+    /// While the new Core's adapter takes over the name, the alias can still resolve to that
+    /// leftover, and the leftover can be swept away between the alias lookup and the row read.
+    /// Neither may key the tunnel permit or end the lock: both are "not resolved yet", which the
+    /// App already retries, until the alias names the new, present adapter. Any other row-read
+    /// failure stays a permanent refusal.
+    #[test]
+    fn a_gone_or_not_present_tunnel_row_waits_for_the_new_adapter() {
+        let not_present = tunnel_row_not_ready(1111, 0, IF_OPER_STATUS_NOT_PRESENT)
+            .expect("a not-present leftover row keyed the tunnel permit");
+        assert!(
+            not_present.contains("did not resolve to a LUID") && not_present.contains("1111"),
+            "{not_present}"
+        );
+        let gone = tunnel_row_not_ready(1111, ERROR_FILE_NOT_FOUND, 0)
+            .expect("a row that vanished after the alias lookup refused the lock for good");
+        assert!(gone.contains("did not resolve to a LUID"), "{gone}");
+        // Down and Up are present adapters: the existing description and type checks decide.
+        assert_eq!(tunnel_row_not_ready(2222, 0, 2), None);
+        assert_eq!(tunnel_row_not_ready(2222, 0, 1), None);
+        // Access denied and invalid parameter have no known transient cause.
+        assert_eq!(tunnel_row_not_ready(3333, 5, 0), None);
+        assert_eq!(tunnel_row_not_ready(3333, 87, 0), None);
     }
 }

@@ -1,4 +1,111 @@
 {
+  "routes": {
+    "title": "Your routes",
+    "fixedRegion": "Recommendation region",
+    "anyRegion": "Any region",
+    "preferenceHint": "Saved on this device for this account. Region limits recommendations, not routing policy. Favorites include both transports of a node. Nothing changes your active route automatically.",
+    "favorites": "Favorites",
+    "recent": "Successful in the last 24 hours",
+    "noFavorites": "Save a node below to find it here.",
+    "noRecent": "No verified successful connections yet.",
+    "loading": "Waiting for this account’s route preferences…",
+    "save": "Save favorite",
+    "saved": "Saved favorite",
+    "addFavorite": "Save {{name}} as a favorite",
+    "removeFavorite": "Remove {{name}} from favorites",
+    "verifiedAt": "Tunnel verification completed at {{time}} · catalog {{revision}}. Historical evidence, not current health.",
+    "recommended": "Suggested route: {{name}}",
+    "reason": {
+      "recent": "Tunnel verification completed at {{time}} on this catalog. Recent verified success is preferred over TCP speed; it does not guarantee this connection will work.",
+      "tcp": "TCP responded in the test started at {{time}} (valid for two minutes from test start). This is not verified tunnel HTTPS. Favorites break ties before latency."
+    },
+    "useRecommendation": "Select suggested route",
+    "selectOnly": "Selects only. Use Connect when ready.",
+    "selectedRecommendation": "Route selected. Use Connect when ready.",
+    "noRecommendation": "No fresh evidence for this region. Run Test All or choose a node yourself; TCP results are not tunnel verification.",
+    "keepsConnection": "Recommendations are available before connecting. Your active route stays unchanged.",
+    "loadFailed": "Route preferences could not be read.",
+    "saveFailed": "Could not save these preferences. The account or catalog may have changed; retry after refreshing.",
+    "changed": "The account, catalog or connection changed. Review the route before selecting again."
+  },
+  "routeExplanation": {
+    "title": "Why this route · {{name}}",
+    "openApp": "Explain routes for {{name}}",
+    "openConnection": "Explain route to {{target}}",
+    "close": "Close explanation",
+    "observationHint": "Live, sanitized Core observations, not packet-level attestation. Each connection can match a different managed rule. This view does not edit routing policy.",
+    "observedRoute": "Observed route",
+    "matchedRule": "Matched rule",
+    "chain": "Runtime chain",
+    "chainHint": "The terminal outbound is on the left; selector groups follow. The route label comes from this chain, not from the app name or your selected node.",
+    "unknown": "Not verified",
+    "notReported": "Not reported",
+    "insufficient": "The runtime did not report a recognized terminal. A selector or legacy list badge is not evidence of a DIRECT rule or of the actual egress.",
+    "gone": "These connections are no longer in the live feed.",
+    "limit": "Showing the first 20 connections for this app."
+  },
+  "experience": {
+    "healthTitle": "Network health check",
+    "healthDescription": "Read local account, service and connection evidence. This does not change your network, upload logs or prove every website works.",
+    "summaryHint": "This summary may include cached state. It is not a live protection check; use the health check above.",
+    "runHealth": "Run health check",
+    "checking": "Checking…",
+    "checkedAt": "Checked {{time}}",
+    "checkFailed": "The check could not finish. Nothing was repaired or released.",
+    "retryHealth": "Run the check again",
+    "stale": "Connection or account changed. Run the check again.",
+    "state": {
+      "observed": "Observed",
+      "attention": "Needs attention",
+      "unknown": "Not verified"
+    },
+    "check": {
+      "account": "Account",
+      "catalog": "Managed catalog",
+      "service": "Background service",
+      "core": "Core identity",
+      "dns": "Protected DNS",
+      "tunnel": "Network protection",
+      "exit": "Tunnel HTTPS"
+    },
+    "hint": {
+      "account": "Sign in again if the current account is not ready.",
+      "catalog": "Refresh the Tono-issued server list before choosing a route.",
+      "service": "If the service is unavailable, check installation and administrator permission. No repair runs automatically.",
+      "core": "Version responses are not a running-binary hash attestation. A mismatch needs an installation check.",
+      "dns": "Check protected DNS during a connection. A disconnected device is not expected to use Tono DNS.",
+      "tunnel": "Protection is only confirmed by a live service response, never by intent alone.",
+      "exit": "Only completed tunnel traffic verification is connection evidence. TCP delay or EOF alone cannot identify the cause."
+    },
+    "identityTitle": "Installed build identity",
+    "source": "App build source",
+    "channel": "Build provenance",
+    "channelCandidate": "Test candidate",
+    "channelRelease": "Release-workflow build (publication not verified)",
+    "channelDevelopment": "Development build",
+    "channelUnknown": "Unknown build provenance",
+    "service": "Service protocol / build",
+    "coreExpected": "Packaged Core version",
+    "coreReported": "Reported Core version",
+    "catalog": "Catalog revision",
+    "identityHint": "These are reported identities, not proof of signing or of the running binaries. Unknown stays unknown.",
+    "preview": "Review the exact report",
+    "previewHint": "Only this frozen, redacted report is uploaded. Local Core observations and build details remain on this device.",
+    "preparing": "Preparing preview…",
+    "prepareFailed": "Could not prepare the report. Retry the preview; nothing was uploaded.",
+    "receiptTime": "Server received {{time}}",
+    "receiptContext": "Report captured {{time}} · Tono {{version}} · catalog {{revision}}",
+    "retryPreview": "Review a new report",
+    "recoveryTitle": "Restoring your connection",
+    "recoveryActive": "Tono is retrying through its existing recovery process. It will not silently change your selected exit.",
+    "recoveryWaiting": "A retry is scheduled. You can retry now or explicitly restore normal internet.",
+    "recoveryStopped": "No automatic retry is scheduled. Choose Retry or review the health check.",
+    "repairTitle": "Repair the background service?",
+    "repairDescription": "Windows may request administrator permission to restart TonoService and its prerequisites. This is not a network reset and does not release protection.",
+    "repair": "Repair service",
+    "repairing": "Repairing…",
+    "installHint": "If TonoService is not installed, reinstall the verified candidate instead of repeatedly reconnecting."
+  },
   "nav": {
     "dashboard": "Dashboard",
     "activity": "Activity",
@@ -140,9 +247,18 @@
     "changeEmail": "Use another email",
     "invalidEmail": "Enter a valid email",
     "invalidCode": "Enter the 6-digit code",
+    "noEmail": {
+      "title": "No email yet?",
+      "description": "Check spam and the address above, or send again. If it still doesn't arrive, copy the details below for support."
+    },
     "suspended": {
       "title": "Account paused",
       "description": "Contact support."
+    },
+    "sessionEnded": {
+      "title": "Session ended",
+      "description": "Tono no longer accepts this session. It may have been signed out elsewhere, or the plan may be paused. Sign in again.",
+      "signIn": "Sign in again"
     },
     "restoreFailed": {
       "title": "Session expired",
@@ -153,14 +269,20 @@
       "title": "Internet is blocked",
       "description": "Leak protection from the last session is still on. Restore the network, then sign in.",
       "restore": "Restore network",
-      "restoring": "Restoring…"
+      "restoring": "Restoring…",
+      "unverifiedDescription": "Tono cannot confirm whether leak protection from the last session is still on. Choose Restore network, then sign in.",
+      "stillRunningTitle": "Previous connection still running",
+      "stillRunningDescription": "The last session's tunnel is still carrying traffic. Restore network stops it."
     },
     "errors": {
-      "unreachable": "Can't reach the sign-in server. Use a working network (hotspot, or another VPN) once.",
+      "unreachable": "Sign-in didn't complete.",
       "rateLimited": "Too many tries. Wait a few minutes.",
-      "deviceLimit": "Device limit reached. Remove one from a signed-in device.",
-      "sessionExpired": "That code expired. Request a new one.",
-      "serverError": "Sign-in service is temporarily busy or unavailable. Please try again later or contact support."
+      "deviceLimit": "Sign-in didn't complete.",
+      "sessionExpired": "Sign-in didn't complete.",
+      "codeRejected": "That code was not accepted.",
+      "signInNotSaved": "Sign-in didn't complete.",
+      "clockSkew": "Sign-in didn't complete.",
+      "serverError": "Sign-in didn't complete."
     }
   },
   "pill": {
@@ -191,7 +313,7 @@
     "connected": "Connected",
     "disconnecting": "Disconnecting…",
     "protectedOffline": "Protected, not connected",
-    "protectedOfflineDescription": "Direct traffic is blocked. Switching routes and retrying.",
+    "protectedOfflineDescription": "Direct traffic is blocked. A retry is scheduled.",
     "server": "Node",
     "noServer": "No server selected",
     "killSwitchMode": "Leak protection: {{mode}}",
@@ -213,7 +335,7 @@
     "rulesTitle": "Claude / AI Residential Protection Scope",
     "rulesDescription": "The following traffic is transparently captured via TUN virtual adapter and forwarded through high-reputation residential broadband exits to prevent IP flagging:\n\n• Anthropic Core Services: *.anthropic.com, *.claude.ai\n• Cloudflare Turnstile Verification: challenges.cloudflare.com, cf-assets.www.cloudflare.com\n• Telemetry & Feature Flags: *.datadoghq.com, *.statsigapi.net, *.stripe.network\n• Local Developer Apps: Claude Code CLI, Claude Desktop\n\nZero terminal configuration required.",
     "secureDnsHint": "Claude Web requires Chrome and Edge Secure DNS to be Off or Automatic without a custom provider. Fully restart the browser, then reconnect Tono after changing it.",
-    "encryptedDnsHint": "Pages failing? Settings → Network & internet → DNS: turn Encrypted DNS off, then reconnect.",
+    "encryptedDnsHint": "The connection didn't complete.",
     "checklist": {
       "title": "First connect",
       "dismiss": "Got it",
@@ -229,7 +351,7 @@
     "whatFailed": "What failed",
     "copyDetails": "Copy details",
     "catalogRequiresChoice": "That node is gone — pick another",
-    "updateIncomplete": "The update did not finish. Disconnect, then reinstall Tono.",
+    "updateIncomplete": "Update recovery is incomplete. Keep Tono open. If recovery does not finish, contact support before reinstalling; Disconnect does not cancel a protected update.",
     "killSwitchError": "Leak protection: {{message}}",
     "killSwitchErrorNote": "Last error — it may already be clear.",
     "errors": {
@@ -237,18 +359,22 @@
       "serviceNotRunning": "The Tono service is not running. The usual cause is Windows Base Filtering Engine (BFE) being turned off — TonoService depends on it to start. In an administrator PowerShell run sc.exe config BFE start= auto, then sc.exe start BFE, then sc.exe start TonoService, and connect again.",
       "bfeNotRunning": "Windows Base Filtering Engine (BFE) is not running, so protection cannot be installed. Run sc start BFE as administrator, then retry.",
       "wfpEngineWedged": "The Windows firewall engine is not responding, usually because security software is hooking it. Restart the PC; if it persists, quit your antivirus or firewall and retry.",
+      "wfpLockUnverified": "Tono could not confirm that Windows protection is locked, so this connection was stopped. Connect again; if it keeps happening, send diagnostics.",
       "releaseReconciling": "Protection is still releasing. Wait, then connect.",
       "serviceTooOld": "Service is too old. Reinstall from the latest package.",
+      "protectionHeldByAnotherUser": "Another user on this PC is using Tono's protection, even if their session is only disconnected. They need to choose Disconnect in Tono at this PC, or sign out. If they cannot, a local administrator can stop the Tono service (sc.exe stop TonoService in an administrator PowerShell), then run the Start-menu shortcut \"Tono — 恢复网络 (Restore Network)\" as administrator.",
+      "remoteSessionConnectRefused": "Connect is not allowed from a Remote Desktop session: Tono's protection would block this remote connection, and it could not be undone remotely. Connect from this PC's own screen and keyboard instead.",
       "browserDnsPreflight": "Claude residential protection cannot connect because Chrome or Edge Secure DNS could not be proven safe. Tono routes all Chrome and Edge profiles together; profile-level routing is unavailable. Set Secure DNS to Off or Automatic without a custom provider, fully restart the browser, then reconnect Tono.",
-      "nodeUnreachable": "This node is unreachable. Retry or switch.",
-      "tunDataPlaneBroken": "The node answered, but Windows is not carrying the tunnel's traffic. Switching cities will not help — restart the PC and connect again, then send diagnostics to support if it persists.",
-      "tunIngressBroken": "The node answered, but no traffic on this PC could enter the tunnel. Another VPN or security tool is usually holding the network — close it, then connect again.",
-      "protectedHttpsFailed": "This city could not complete a protected connection. Retry, choose another route, or try the backup channel if one is shown. If every city fails the same way, send diagnostics.",
+      "hy2Idle": "The UDP backup path went idle and the home router likely dropped it. Tono stays on this same route and retries. Support code TONO_CONNECT_HY2_IDLE. Send diagnostics if it keeps happening.",
+      "nodeUnreachable": "The connection didn't complete.",
+      "tunDataPlaneBroken": "The connection didn't complete.",
+      "tunIngressBroken": "The connection didn't complete.",
+      "protectedHttpsFailed": "The connection didn't complete.",
       "coreUnpinned": "This copy of Tono is missing its integrity check. Install the latest Tono — reinstalling the same copy will not help.",
       "coreMismatch": "This copy of Tono does not match its core. Install the latest Tono.",
-      "dnsPortBusy": "Another proxy (e.g. Clash Verge, CFW) is running and occupying the network. Please exit it completely from the system tray and try again.",
+      "dnsPortBusy": "The connection didn't complete.",
       "protectionReleaseFailed": "Leak protection is still on, so this PC stays blocked. Try Restore normal internet again.",
-      "encryptedDns": "Windows Encrypted DNS is still on. Open Settings below, turn it off, then reconnect.",
+      "encryptedDns": "The connection didn't complete.",
       "sendDiagnostics": "Send to support"
     },
     "status": {
@@ -257,6 +383,13 @@
       "offline": "Protected offline",
       "protected": "Protected",
       "standby": "Standby"
+    },
+    "aiTraffic": {
+      "title": "Today's AI traffic",
+      "subtitle": "Home broadband traffic, not remaining quota.",
+      "empty": "Nothing yet today.",
+      "week": "Last 7 days",
+      "note": "Counted while the overview is open. Stays on this PC."
     },
     "overview": {
       "protection": "Protection",
@@ -270,7 +403,8 @@
       "idle": "Idle",
       "noActiveRoute": "No active route",
       "reading": "Reading traffic…",
-      "telemetryFailed": "Dashboard has not reached the core yet — retrying"
+      "telemetryFailed": "Dashboard has not reached the core yet — retrying",
+      "sessionTotal": "This connection {{total}}"
     },
     "info": {
       "protection": "Traffic protection",
@@ -296,10 +430,10 @@
     "failedAt": "Failed at {{stage}}",
     "unknownStage": "Unknown stage",
     "statusTitle": "This route did not pass the connection check",
-    "statusBody": "Direct traffic is blocked while this connection is unavailable. Retry or restore normal Internet.",
+    "statusBody": "The connection didn't complete.",
     "encryptedDnsTitle": "Windows Encrypted DNS is blocking the connection",
-    "encryptedDnsBody": "Switching cities will not help. Open Windows DNS settings, turn Encrypted DNS off, then reconnect. You can also restore normal Internet first.",
-    "releasedFailureBody": "This city did not connect. Direct internet is available. Retry, choose another route, or try the backup channel if one is shown.",
+    "encryptedDnsBody": "Encrypted DNS blocked this connection.",
+    "releasedFailureBody": "The connection didn't complete. The original network stays available.",
     "protectionUnknownBody": "Tono cannot confirm network protection. Repair the service if prompted, or choose Restore Normal Internet.",
     "completedCount": "{{count}} completed",
     "technicalDetails": "Technical details",
@@ -400,6 +534,11 @@
     "title": "Account",
     "subtitle": "The signed-in mailbox and devices on this account.",
     "email": "Email",
+    "plan": "Plan",
+    "expires": "Expires",
+    "noExpiry": "No expiration",
+    "usage": "Data used",
+    "usageOf": "{{used}} of {{quota}}",
     "devices": "Devices",
     "deviceLimit": "{{count}} / {{limit}} devices",
     "currentDevice": "This device",
@@ -475,6 +614,7 @@
       "title": "WebRTC leak check",
       "description": "Open this page after Tono is connected. STUN should time out, and your home public IP should not appear.",
       "open": "Open ip.cx/webrtc",
+      "openFailed": "Could not open the browser. Visit https://ip.cx/webrtc manually.",
       "copyVersion": "Copy version"
     }
   },
@@ -512,6 +652,7 @@
       "description": "Signed cloud route. A drop will not leak.",
       "checkUpdates": "Check for updates",
       "latestVersion": "You're on the latest version",
+      "checkFailed": "Couldn't check for updates. Check your internet connection, then try again.",
       "updatesUnavailable": "This test build does not auto-update. Install the new package manually.",
       "unsigned": "This installer is unsigned. Windows SmartScreen may warn; continue to install."
     }
@@ -539,6 +680,6 @@
     "generic": "The Tono service has not started, so connecting is not possible. Repair asks for administrator rights and starts it again.",
     "repair": "Repair",
     "repairing": "Repairing…",
-    "repairFailed": "The repair did not succeed. In an administrator PowerShell run sc.exe start BFE, then sc.exe start TonoService."
+    "repairFailed": "The repair did not succeed. In an administrator PowerShell run sc.exe config BFE start= auto, then sc.exe start BFE, then sc.exe start TonoService."
   }
 }

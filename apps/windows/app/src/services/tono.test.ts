@@ -25,9 +25,14 @@ import {
   tonoCatalogStatus,
   tonoCloseAllConnections,
   tonoCloseConnection,
+  tonoPrepareSupportReport,
   tonoRefreshCatalog,
+  tonoRoutePreferences,
+  tonoSelectServer,
   tonoSetAuditEnabled,
   tonoTestAvailableServers,
+  tonoUpdateRoutePreferences,
+  tonoUploadDiagnostics,
   type TonoDiagnosticsReport,
   type TonoStatus,
 } from './tono'
@@ -88,6 +93,55 @@ describe('tono server management wrappers', () => {
       ['tono_cancel_server_tests', undefined],
     ])
   })
+
+  it('passes recommendation ownership to atomic admission without changing manual selection', async () => {
+    invokeMock.mockResolvedValue(undefined)
+    await tonoSelectServer('Tokyo')
+    await tonoSelectServer('Buffalo', {
+      scope: 'opaque:9',
+      catalogRevision: 54,
+    })
+    await tonoRoutePreferences()
+    await tonoUpdateRoutePreferences('opaque:9', 54, ['Buffalo'], 'US')
+    expect(invokeMock.mock.calls).toEqual([
+      ['tono_select_server', { name: 'Tokyo' }],
+      [
+        'tono_select_server',
+        {
+          name: 'Buffalo',
+          expectedScope: 'opaque:9',
+          expectedCatalogRevision: 54,
+        },
+      ],
+      ['tono_route_preferences', undefined],
+      [
+        'tono_update_route_preferences',
+        {
+          scope: 'opaque:9',
+          catalogRevision: 54,
+          favorites: ['Buffalo'],
+          fixedRegion: 'US',
+        },
+      ],
+    ])
+  })
+})
+
+describe('manual support preview IPC', () => {
+  it('requests a local preview and uploads only its identifier, never a renderer payload', async () => {
+    invokeMock.mockResolvedValue({
+      previewId: 'frozen-9',
+      report: { schemaVersion: 1 },
+    })
+    const preview = await tonoPrepareSupportReport()
+    expect(invokeMock.mock.calls).toEqual([
+      ['tono_prepare_support_report', undefined],
+    ])
+    await tonoUploadDiagnostics(preview.previewId)
+    expect(invokeMock).toHaveBeenLastCalledWith('tono_upload_diagnostics', {
+      previewId: 'frozen-9',
+    })
+  })
 })
 
 describe('tono activity wrappers', () => {
@@ -110,7 +164,7 @@ describe('tono activity wrappers', () => {
 describe('subscribeTonoStatus', () => {
   const payload = { accountState: 'ready' } as TonoStatus
 
-  it('shares one backend listener across subscribers and reference-counts the teardown', async () => {
+  it('reuses a live backend listener when a later subscriber mounts', async () => {
     const unlisten = vi.fn()
     let emit: ((event: { payload: TonoStatus }) => void) | undefined
     listenMock.mockImplementation((_name: string, callback: unknown) => {
@@ -119,30 +173,34 @@ describe('subscribeTonoStatus', () => {
     })
 
     const first = vi.fn()
+    const firstLive = vi.fn()
     const second = vi.fn()
     const secondLive = vi.fn()
-    const unsubFirst = subscribeTonoStatus(first)
+    const unsubFirst = subscribeTonoStatus(first, firstLive)
+    await vi.waitFor(() => expect(firstLive).toHaveBeenCalledTimes(1))
+    // A page mounts after the layout's asynchronous registration has settled.
+    await Promise.resolve()
     const unsubSecond = subscribeTonoStatus(second, secondLive)
 
-    // Registration starts once, synchronously, no matter how many subscribers.
-    expect(listenMock).toHaveBeenCalledTimes(1)
-    expect(listenMock).toHaveBeenCalledWith('tono://status', expect.anything())
-    // `secondLive` runs once the shared listener is live.
-    await vi.waitFor(() => expect(secondLive).toHaveBeenCalledTimes(1))
+    try {
+      expect(listenMock).toHaveBeenCalledTimes(1)
+      expect(listenMock).toHaveBeenCalledWith('tono://status', expect.anything())
+      expect(secondLive).toHaveBeenCalledTimes(1)
+      emit?.({ payload })
+      expect(first).toHaveBeenCalledTimes(1)
+      expect(second).toHaveBeenCalledTimes(1)
+      expect(first).toHaveBeenCalledWith(payload)
+      expect(second).toHaveBeenCalledWith(payload)
 
-    emit?.({ payload })
-    expect(first).toHaveBeenCalledWith(payload)
-    expect(second).toHaveBeenCalledWith(payload)
-
-    // One subscriber leaving keeps the listener alive for the rest.
-    unsubFirst()
-    expect(unlisten).not.toHaveBeenCalled()
-    emit?.({ payload })
-    expect(first).toHaveBeenCalledTimes(1)
-    expect(second).toHaveBeenCalledTimes(2)
-
-    // The last teardown unlistens.
-    unsubSecond()
+      unsubFirst()
+      expect(unlisten).not.toHaveBeenCalled()
+      emit?.({ payload })
+      expect(first).toHaveBeenCalledTimes(1)
+      expect(second).toHaveBeenCalledTimes(2)
+    } finally {
+      unsubFirst()
+      unsubSecond()
+    }
     expect(unlisten).toHaveBeenCalledTimes(1)
   })
 })
@@ -215,33 +273,51 @@ describe('connectErrorSuggestsServerSwitch', () => {
     }
   })
 
+  it('maps an auth DNS failure to a short message plus its support code', () => {
+    expect(
+      formatTonoActionError(
+        new Error('TONO_AUTH_DNS: could not reach Tono: dns: no such host'),
+        (key) => `translated:${key}`,
+      ),
+    ).toBe('translated:tono.login.errors.unreachable (TONO_AUTH_DNS)')
+  })
+
   it('maps the stable unreachable prefix to the actionable locale key', () => {
     expect(
       formatTonoActionError(
         new Error('TONO_NODE_OR_CORE_UNREACHABLE: all probes failed'),
         (key) => `translated:${key}`,
       ),
-    ).toBe('translated:tono.dashboard.errors.nodeUnreachable')
+    ).toBe(
+      'translated:tono.dashboard.errors.nodeUnreachable (TONO_NODE_OR_CORE_UNREACHABLE)',
+    )
   })
 
-  it('does not tell the user to switch cities when every probe dies at TLS', () => {
+  it('shows a support code and not a switch instruction when every probe dies at TLS', () => {
     const error = new Error(
       'TONO_NODE_OR_CORE_UNREACHABLE: tls handshake eof [CORE_EXIT_UNREACHABLE]',
     )
     expect(connectErrorSuggestsServerSwitch(error)).toBe(false)
     expect(formatTonoActionError(error, (key) => `translated:${key}`)).toBe(
-      'translated:tono.dashboard.errors.protectedHttpsFailed',
+      'translated:tono.dashboard.errors.protectedHttpsFailed (TONO_NODE_OR_CORE_UNREACHABLE)',
     )
   })
 
   it('maps a bare CORE_EXIT_UNREACHABLE token without leaking handshake debug', () => {
     const error = new Error('CORE_EXIT_UNREACHABLE: dial timeout')
+    expect(formatTonoActionError(error, (key) => `translated:${key}`)).toBe(
+      'translated:tono.dashboard.errors.nodeUnreachable (CORE_EXIT_UNREACHABLE)',
+    )
     expect(
       formatTonoActionError(error, (key) => `translated:${key}`),
-    ).toBe('translated:tono.dashboard.errors.nodeUnreachable')
-    expect(formatTonoActionError(error, (key) => `translated:${key}`)).not.toContain(
-      'dial timeout',
+    ).not.toContain('dial timeout')
+  })
+
+  it('reports an unreachable Service on Restore internet as unconfirmed protection', () => {
+    const error = new Error(
+      'TONO_PROTECTION_UNCONFIRMED: the Tono Service is not ready: failed to start the registered service: the helper exited with 1',
     )
+    expect(formatTonoActionError(error, (key) => `translated:${key}`)    ).toBe('translated:tono.progress.protectionUnknownBody')
   })
 
   it('maps kernel pin and DNS-port failures to user-facing keys', () => {
@@ -266,7 +342,7 @@ describe('connectErrorSuggestsServerSwitch', () => {
         ),
         (key) => `translated:${key}`,
       ),
-    ).toBe('translated:tono.login.errors.deviceLimit')
+    ).toBe('translated:tono.login.errors.deviceLimit (TONO_AUTH_DEVICE_LIMIT)')
     expect(
       formatTonoActionError(
         new Error(
@@ -313,6 +389,17 @@ describe('connectErrorSuggestsServerSwitch', () => {
 })
 
 describe('connectErrorSuggestsBackupChannel', () => {
+  it('does not offer another route when the UDP hop only went idle', () => {
+    const error = new Error(
+      'TONO_CONNECT_HY2_IDLE: timeout: no recent network activity',
+    )
+    expect(connectErrorSuggestsServerSwitch(error)).toBe(false)
+    expect(connectErrorSuggestsBackupChannel(error)).toBe(false)
+    expect(formatTonoActionError(error, (key) => `translated:${key}`)).toBe(
+      'translated:tono.dashboard.errors.hy2Idle (TONO_CONNECT_HY2_IDLE)',
+    )
+  })
+
   it('offers the backup channel for handshake eof and unreachable exits', () => {
     for (const error of [
       new Error(
@@ -405,13 +492,18 @@ describe('stable diagnostic copy', () => {
     ...overrides,
   })
 
-  it('extracts the stable code for Copy details without using it as the UI sentence', () => {
+  it('shows the support code on the sentence and keeps the handshake out of it', () => {
     const error =
       'TONO_NODE_OR_CORE_UNREACHABLE: tls handshake eof [CORE_EXIT_UNREACHABLE]'
     expect(stableTonoErrorCode(error)).toBe('TONO_NODE_OR_CORE_UNREACHABLE')
     expect(
       formatTonoActionError(new Error(error), (key) => `translated:${key}`),
-    ).toBe('translated:tono.dashboard.errors.protectedHttpsFailed')
+    ).toBe(
+      'translated:tono.dashboard.errors.protectedHttpsFailed (TONO_NODE_OR_CORE_UNREACHABLE)',
+    )
+    expect(
+      formatTonoActionError(new Error(error), (key) => `translated:${key}`),
+    ).not.toContain('handshake')
 
     const copied = formatTonoDiagnostics(report())
     expect(copied).toContain('Failed stage: checkingExit')
@@ -449,7 +541,9 @@ describe('stable diagnostic copy', () => {
     })
     expect(copied).toContain('Reported at (UTC): 2024-04-05T19:34:38.901Z')
     expect(copied).toContain('Catalog revision: 54')
-    expect(copied).toContain('App build: abcdef0123456789abcdef0123456789abcdef0123')
+    expect(copied).toContain(
+      'App build: abcdef0123456789abcdef0123456789abcdef0123',
+    )
     expect(copied).toContain('Bundled Core expectation: expected-core')
     expect(copied).toContain('Controller-reported Core version: running-core')
     expect(copied).toContain('Controller-selected exit protocol: hysteria2')
@@ -457,40 +551,94 @@ describe('stable diagnostic copy', () => {
     expect(copied).toContain('Connection generation (process-local): 7')
     expect(copied).toContain('Failure at (UTC): 2024-04-05T19:34:38.000Z')
     expect(copied).toContain('tls_handshake_eof: 2')
-    expect(copied).toContain('not correlated to this attempt; not a root-cause diagnosis')
+    expect(copied).toContain(
+      'not correlated to this attempt; not a root-cause diagnosis',
+    )
     expect(copied).toContain('truncated=true')
-    expect(formatTonoDiagnostics(report({ catalogRevision: null }))).toContain('Catalog revision: (unknown)')
+    expect(formatTonoDiagnostics(report({ catalogRevision: null }))).toContain(
+      'Catalog revision: (unknown)',
+    )
     expect(formatTonoDiagnostics(report())).not.toContain('Recent Core log')
   })
 
   it('keeps a previous failed attempt distinct from the current retry and recent logs', () => {
     const copied = formatTonoDiagnostics({
-      ...report({ selectedServer: 'Tokyo retry', catalogRevision: 55, error: null }),
+      ...report({
+        selectedServer: 'Tokyo retry',
+        catalogRevision: 55,
+        error: null,
+      }),
       localEvidence: {
-        status: 'collected', connectionGeneration: 8, controllerGeneration: 13,
+        status: 'collected',
+        connectionGeneration: 8,
+        controllerGeneration: 13,
         failureAtMs: null,
-        coreLog: { status: 'unavailable', inspectedLines: 0, truncated: false, observations: [] },
+        coreLog: {
+          status: 'unavailable',
+          inspectedLines: 0,
+          truncated: false,
+          observations: [],
+        },
         lastFailedAttempt: {
-          id: 'attempt-A', startedAtMs: 1712345670000, failedAtMs: 1712345678000,
-          selectedServer: 'Buffalo original', transport: 'tcp', catalogRevision: 54,
-          failedStage: 'verifyingTraffic', errorCode: 'TONO_NODE_OR_CORE_UNREACHABLE',
-          steps: [{ key: 'verifyingTraffic', state: 'failed', elapsedMs: 2600 }],
+          id: 'attempt-A',
+          startedAtMs: 1712345670000,
+          failedAtMs: 1712345678000,
+          selectedServer: 'Buffalo original',
+          transport: 'tcp',
+          catalogRevision: 54,
+          failedStage: 'verifyingTraffic',
+          errorCode: 'TONO_NODE_OR_CORE_UNREACHABLE',
+          connectionGeneration: 7,
+          errorDetail: 'tls handshake eof <- dial <ip>:443',
+          steps: [
+            { key: 'verifyingTraffic', state: 'failed', elapsedMs: 2600 },
+          ],
           probeOutcomes: [
-            { round: 1, path: 'tun', origin: 'Google', passed: false, category: 'dns', actualStatus: null, elapsedMs: 173 },
-            { round: 2, path: 'loopback', origin: 'Apple', passed: false, category: 'tls', actualStatus: null, elapsedMs: 891 },
+            {
+              round: 1,
+              path: 'tun',
+              origin: 'Google',
+              passed: false,
+              category: 'dns',
+              actualStatus: null,
+              elapsedMs: 173,
+            },
+            {
+              round: 2,
+              path: 'loopback',
+              origin: 'Apple',
+              passed: false,
+              category: 'tls',
+              actualStatus: null,
+              elapsedMs: 891,
+            },
           ],
         },
       },
     })
     expect(copied).toContain('Server: Tokyo retry')
     expect(copied).toContain('Retained failed attempt (memory only): attempt-A')
-    expect(copied).toContain('Attempt server: Buffalo original; transport=tcp; catalog=54')
+    expect(copied).toContain(
+      'Attempt server: Buffalo original; transport=tcp; catalog=54',
+    )
     expect(copied).toContain('Attempt started (UTC): 2024-04-05T19:34:30.000Z')
-    expect(copied).toContain('Attempt failure: verifyingTraffic; code=TONO_NODE_OR_CORE_UNREACHABLE')
+    expect(copied).toContain(
+      'Attempt failure: verifyingTraffic; code=TONO_NODE_OR_CORE_UNREACHABLE',
+    )
+    expect(copied).toContain('Attempt generation (process-local): 7')
+    expect(copied).toContain(
+      'Attempt cause (scrubbed): tls handshake eof <- dial <ip>:443',
+    )
     expect(copied).toContain('verifyingTraffic: failed (2.6s)')
-    expect(copied).toContain('round=1 path=tun origin=Google result=failed category=dns status=unknown elapsed=173ms')
-    expect(copied).toContain('round=2 path=loopback origin=Apple result=failed category=tls status=unknown elapsed=891ms')
-    expect(copied).toContain('App observations, not proof of exit transport handshake failure')
+    expect(copied).toContain(
+      'round=1 path=tun origin=Google result=failed category=dns status=unknown elapsed=173ms',
+    )
+    expect(copied).toContain(
+      'round=2 path=loopback origin=Apple result=failed category=tls status=unknown elapsed=891ms',
+    )
+    expect(copied).toContain(
+      'App observations, not proof of exit transport handshake failure',
+    )
     expect(copied).toContain('Recent Core log: not correlated to this attempt')
   })
 })

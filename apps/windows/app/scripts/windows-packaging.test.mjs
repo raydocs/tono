@@ -13,6 +13,8 @@ import {
   partitionReleaseResources,
   validateExternalBin,
   validateEmbeddedCoreDigestPin,
+  validateSingBoxDigest,
+  WINDOWS_SING_BOX_SHA256,
   validateNsisAutomaticUpgradeFlow,
   validateNsisLegacyCleanup,
   validatePayloadEntries,
@@ -43,6 +45,21 @@ const windowsServiceInstallerSource = readFileSync(
   new URL('../../service/src/bin/install_service.rs', import.meta.url),
   'utf8',
 )
+const windowsServiceUpdateSource = readFileSync(
+  new URL('../../service/src/core/update.rs', import.meta.url),
+  'utf8',
+)
+const windowsGateReasonSource = readFileSync(
+  new URL('../../service/src/core/update/gate.rs', import.meta.url),
+  'utf8',
+)
+const windowsServiceUpdateExecutorSource = readFileSync(
+  new URL(
+    '../../service/src/bin/install_service/update_executor.rs',
+    import.meta.url,
+  ),
+  'utf8',
+)
 const windowsReleaseShSource = readFileSync(
   new URL(
     '../../../../tooling/scripts/build-windows-release.sh',
@@ -59,6 +76,67 @@ const windowsReleasePs1Source = readFileSync(
 )
 const canonicalGuiLaunchLine =
   '  nsis_tauri_utils::RunAsUser "$INSTDIR\\${MAINBINARYNAME}.exe" "$MainBinaryArgs"'
+// The private-extraction branch stages the same `.next` members first; mutate the live path only.
+const replaceInLiveInstall = (from, to) => {
+  const liveAt = installerSource.indexOf('!ifmacrodef NSIS_HOOK_PREINSTALL')
+  return (
+    installerSource.slice(0, liveAt) +
+    installerSource.slice(liveAt).replace(from, to)
+  )
+}
+
+test('NSIS private extraction cannot bypass native admission or mutate the live installation', () => {
+  assert.match(
+    validateNsisAutomaticUpgradeFlow(
+      installerSource.replace('--update-unpack-gate', '--unchecked'),
+    ),
+    /separate native gates/,
+  )
+  assert.match(
+    validateNsisAutomaticUpgradeFlow(
+      installerSource.replace('--manual-update-gate', '--unchecked'),
+    ),
+    /separate native gates/,
+  )
+  assert.match(
+    validateNsisAutomaticUpgradeFlow(
+      installerSource.replace(
+        'StrCpy $INSTDIR "$EXEDIR\\payload"',
+        'StrCpy $INSTDIR "$PROGRAMFILES64\\Tono"',
+      ),
+    ),
+    /separate native gates/,
+  )
+  assert.match(
+    validateNsisAutomaticUpgradeFlow(
+      installerSource.replace(
+        '; No installed path, SCM, ARP, shortcut, redist, hook or cleanup mutation.',
+        'WriteRegStr HKLM "Software\\Tono" "unsafe" "1"',
+      ),
+    ),
+    /only private payload files/,
+  )
+})
+
+test('NSIS private extraction never extracts a live GUI member', () => {
+  // A live `Tono.exe` member from this branch failed the candidate payload gate (run 36095249694).
+  const privateGui =
+    /(\$\{If\} \$TonoPrivateUnpack = 1\s+SetOutPath \$INSTDIR\s+(?:;[^\n]*\s+)*File \/a "\/oname=\$\{MAINBINARYNAME\}\.exe)\.next"/
+  assert.match(installerSource, privateGui)
+  assert.match(
+    validateNsisAutomaticUpgradeFlow(installerSource.replace(privateGui, '$1"')),
+    /private extraction must stage the GUI and Mihomo under \.next names/,
+  )
+})
+
+test('elevated setup never runs a Microsoft installer from the user temp directory', () => {
+  const code = installerSource
+    .split(/\r?\n/)
+    .filter((line) => !/^\s*;/.test(line))
+    .join('\n')
+  assert.doesNotMatch(code, /(?:download\s+\S+|\/oname=)\s*"?\$TEMP\\/i)
+  assert.doesNotMatch(code, /ExecWait\s+['"`]"?\$TEMP\\/i)
+})
 
 test('NSIS automatically upgrades without reinstall/uninstall choices', () => {
   assert.equal(validateNsisAutomaticUpgradeFlow(installerSource), null)
@@ -137,7 +215,7 @@ test('NSIS automatically upgrades without reinstall/uninstall choices', () => {
   )
   assert.match(
     validateNsisAutomaticUpgradeFlow(
-      installerSource.replace(
+      replaceInLiveInstall(
         '  File /a "/oname=${MAINBINARYNAME}.exe.next" "${MAINBINARYSRCPATH}"',
         '  Delete "$APPDATA\\com.raydocs.tono\\owner-token"\n  File /a "/oname=${MAINBINARYNAME}.exe.next" "${MAINBINARYSRCPATH}"',
       ),
@@ -191,7 +269,7 @@ test('NSIS automatically upgrades without reinstall/uninstall choices', () => {
   )
   assert.match(
     validateNsisAutomaticUpgradeFlow(
-      installerSource.replace(
+      replaceInLiveInstall(
         'File /a "/oname=${MAINBINARYNAME}.exe.next" "${MAINBINARYSRCPATH}"',
         'File "${MAINBINARYSRCPATH}"',
       ),
@@ -209,7 +287,7 @@ test('NSIS automatically upgrades without reinstall/uninstall choices', () => {
   )
   assert.match(
     validateNsisAutomaticUpgradeFlow(
-      installerSource.replace(
+      replaceInLiveInstall(
         'File /a "/oname={{this}}.next"',
         'File /a "/oname={{this}}"',
       ),
@@ -270,8 +348,10 @@ test('NSIS automatically upgrades without reinstall/uninstall choices', () => {
   assert.match(
     validateNsisAutomaticUpgradeFlow(
       installerSource.replace(
-        'Section Install',
-        'Section Install\n  nsis_tauri_utils::RunAsUser "$INSTDIR\\${MAINBINARYNAME}.exe" ""',
+        // Mutate the live install branch without invalidating the earlier
+        // private-extraction gate: this regression targets GUI launch policy.
+        /  SetOutPath \$INSTDIR\r?\n\r?\n  !ifmacrodef NSIS_HOOK_PREINSTALL/,
+        '  SetOutPath $INSTDIR\n  nsis_tauri_utils::RunAsUser "$INSTDIR\\${MAINBINARYNAME}.exe" ""\n\n  !ifmacrodef NSIS_HOOK_PREINSTALL',
       ),
     ),
     /single canonical RunMainBinary launcher/,
@@ -311,8 +391,8 @@ test('NSIS automatically upgrades without reinstall/uninstall choices', () => {
           `  ;${canonicalGuiLaunchLine.trimStart()}`,
         )
         .replace(
-          'Section Install',
-          `Section Install\n${canonicalGuiLaunchLine}`,
+          /  SetOutPath \$INSTDIR\r?\n\r?\n  !ifmacrodef NSIS_HOOK_PREINSTALL/,
+          `  SetOutPath $INSTDIR\n${canonicalGuiLaunchLine}\n\n  !ifmacrodef NSIS_HOOK_PREINSTALL`,
         ),
     ),
     /RunMainBinary must be reboot-gated/,
@@ -390,6 +470,341 @@ test('privileged upgrade helper coordinates Service, Mihomo, and GUI publication
   )
 })
 
+test('NSIS names every gate refusal with its own dialog, code, first error line and log', () => {
+  // WIN-GATE-OPAQUE: every refusal the helper does not type fell back to one catch-all dialog,
+  // and the cause went only to a stderr nobody sees from .onInit.
+  const reasonFile = String.raw`"$PLUGINSDIR\tono-gate-reason.txt"`
+  const escape = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const freshReason = String.raw`Delete ` + escape(reasonFile) + String.raw`\s+`
+  const onInit =
+    installerSource.match(/Function \.onInit\b([\s\S]*?)FunctionEnd/)?.[1] ?? ''
+  assert.match(
+    onInit,
+    new RegExp(
+      freshReason +
+        String.raw`nsExec::ExecToLog '"\$PLUGINSDIR\\tono-gate\\resources\\tono-service-install\.exe" --manual-update-gate --reason-file ` +
+        escape(reasonFile) +
+        `'`,
+    ),
+  )
+  const gate = onInit.slice(onInit.indexOf('--manual-update-gate'))
+  // 78: filters with no Tono Service left. Before any refusal, a non-silent install offers the
+  // confirmed path into its own proven-removal ladder; No keeps the block and changes nothing.
+  const refusalAt = gate.indexOf('${If} $0 != "0"')
+  assert.match(
+    gate.slice(0, refusalAt),
+    new RegExp(
+      String.raw`\$\{If\} \$0 == "78"\s+\$\{AndIfNot\} \$\{Silent\}\s+MessageBox [^\n]*MB_YESNO "\$\(installClearsOrphanedBlock\)" IDYES (\w+)\s+SetErrorLevel 76\s+Abort [^\n]*\s+\1:\s+` +
+        freshReason +
+        String.raw`nsExec::ExecToLog [^\n]*--manual-orphan-gate --reason-file ` +
+        escape(reasonFile) +
+        String.raw`'\s+Pop \$0`,
+    ),
+  )
+  const refusal = gate.slice(refusalAt, gate.indexOf('SetErrorLevel 76', refusalAt))
+  // .onInit never shows Abort text; a refusal without a dialog is a silent exit. Each dialog
+  // ends with the code, the helper's first error line and the log path.
+  const footer = String.raw`\$\\r\$\\n\$\\r\$\\n\$\(gateRefusalFooter\)"`
+  assert.match(
+    refusal,
+    new RegExp(
+      String.raw`\$\{IfNot\} \$\{Silent\}\s+Call TonoGateExplain\s+\$\{If\} \$0 == "77"\s+MessageBox [^\n]*"\$\(manualInstallNeedsDisconnect\)` +
+        footer +
+        String.raw`\s+\$\{ElseIf\} \$0 == "79"\s+MessageBox [^\n]*"\$\(manualInstallNeedsBfe\)` +
+        footer +
+        String.raw`\s+\$\{Else\}\s+MessageBox [^\n]*"\$\(gateInstallRefused\)\$\\r\$\\n\$\\r\$\\n\$R1` +
+        footer,
+    ),
+  )
+  assert.doesNotMatch(refusal, /--emergency-disarm|--manual-uninstall-gate/)
+  // No refusal falls back to the old catch-all wording.
+  assert.doesNotMatch(installerSource, /manualInstallRefused|manualUninstallRefused/)
+
+  const unInit =
+    installerSource.match(/Function un\.onInit\b([\s\S]*?)FunctionEnd/)?.[1] ?? ''
+  const pluginsAt = unInit.indexOf('InitPluginsDir')
+  const gateAt = unInit.search(
+    new RegExp(freshReason + String.raw`nsExec::ExecToLog [^\n]*--manual-update-gate --reason-file`),
+  )
+  const confirmAt = unInit.indexOf('"$(uninstallReleasesProtection)"')
+  const leaseAt = unInit.search(
+    new RegExp(freshReason + String.raw`nsExec::ExecToLog [^\n]*--manual-uninstall-gate --reason-file`),
+  )
+  assert.ok(pluginsAt >= 0 && pluginsAt < gateAt && gateAt < confirmAt && confirmAt < leaseAt)
+  // Like .onInit, the uninstaller resolves its language before the gate, so the gate's dialogs
+  // are in the user's language rather than the script's first one.
+  const unLanguageAt = unInit.indexOf('!insertmacro MUI_UNGETLANGUAGE')
+  assert.ok(
+    unLanguageAt >= 0 && unLanguageAt < gateAt,
+    'the uninstaller language must be resolved before the gate',
+  )
+  // An orphaned barrier gets the same confirmed release on uninstall.
+  assert.match(unInit.slice(gateAt, confirmAt), /\$\{If\} \$0 == "78"\s+StrCpy \$0 "77"/)
+  assert.match(
+    unInit.slice(gateAt, confirmAt),
+    /\$\{If\} \$0 == "77"\s+\$\{AndIfNot\} \$\{Silent\}\s+MessageBox [^\n]*MB_YESNO\b/,
+  )
+  assert.match(
+    unInit.slice(leaseAt),
+    new RegExp(
+      String.raw`\$\{IfNot\} \$\{Silent\}\s+Call un\.TonoGateExplain\s+MessageBox [^\n]*"\$\(gateUninstallRefused\)\$\\r\$\\n\$\\r\$\\n\$R1` +
+        footer,
+    ),
+  )
+
+  // One explanation per helper exit code, installer and uninstaller alike.
+  assert.match(
+    installerSource,
+    /!insertmacro TONO_GATE_EXPLAIN ""\s+!insertmacro TONO_GATE_EXPLAIN "un\."/,
+  )
+  const explain =
+    installerSource.match(/!macro TONO_GATE_EXPLAIN\b([\s\S]*?)!macroend/)?.[1] ?? ''
+  assert.match(
+    explain,
+    new RegExp(
+      String.raw`FileOpen \$R4 ` +
+        escape(reasonFile) +
+        String.raw` r\s+\$\{IfNot\} \$\{Errors\}\s+FileReadUTF16LE \$R4 \$R2\s+FileReadUTF16LE \$R4 \$R3\s+FileClose \$R4`,
+    ),
+  )
+  const branch = (exit, code) =>
+    new RegExp(
+      String.raw`\$\{(?:Else)?If\} \$0 == "${exit}"\s+StrCpy \$R0 "${code}"\s+StrCpy \$R1 "\$\((\w+)\)"`,
+    )
+  const codes = [...windowsGateReasonSource.matchAll(/Self::(\w+) => "(TONO_INSTALL_\w+)"/g)]
+  const exits = new Map(
+    [...windowsGateReasonSource.matchAll(/Self::(\w+) => (\d+),/g)].map((m) => [m[1], m[2]]),
+  )
+  assert.equal(codes.length, 12)
+  assert.equal(new Set(exits.values()).size, codes.length)
+  for (const [, variant, code] of codes) {
+    assert.match(explain, branch(exits.get(variant), code), `${code} has no dialog of its own`)
+  }
+  assert.match(explain, branch(77, 'TONO_INSTALL_PROTECTION_ACTIVE'))
+  assert.match(explain, branch(78, 'TONO_INSTALL_ORPHANED_PROTECTION'))
+  assert.match(explain, branch(79, 'TONO_BFE_NOT_RUNNING'))
+  // nsExec reports a helper that could not be started as "error", not as an exit code.
+  assert.match(explain, branch('error', 'TONO_INSTALL_HELPER_BLOCKED'))
+  assert.match(
+    explain,
+    /\$\{Else\}\s+StrCpy \$R0 "TONO_INSTALL_UNEXPECTED"\s+StrCpy \$R1 "\$\(gateReasonUnexpected\)"\s+\$\{EndIf\}/,
+  )
+
+  // Chinese and English; Russian is still a selectable language, so each new string repeats the
+  // English text there instead of being missing.
+  const strings = new Set([
+    ...[...explain.matchAll(/\$\((\w+)\)/g)].map((m) => m[1]),
+    'gateInstallRefused',
+    'gateUninstallRefused',
+    'gateRefusalFooter',
+    'uninstallReleasesProtection',
+    'installClearsOrphanedBlock',
+  ])
+  for (const name of strings) {
+    const text = (language) =>
+      installerSource.match(new RegExp(`LangString ${name} \\$\\{LANG_${language}\\} (".*")`))?.[1]
+    for (const language of ['SIMPCHINESE', 'ENGLISH', 'RUSSIAN']) {
+      assert.ok(text(language), `${name} is missing for ${language}`)
+      if (name.startsWith('gate')) {
+        assert.doesNotMatch(text(language), /Device Manager|设备管理器/, `${name} (${language})`)
+      }
+    }
+    if (name.startsWith('gate')) {
+      assert.equal(text('RUSSIAN'), text('ENGLISH'), `${name}: Russian repeats the English text`)
+    }
+  }
+  assert.match(
+    windowsServiceUpdateSource,
+    /pub const MANUAL_GATE_PROTECTION_ACTIVE_EXIT: i32 = 77;/,
+  )
+  assert.match(
+    windowsServiceUpdateSource,
+    /pub const MANUAL_GATE_ORPHANED_PROTECTION_EXIT: i32 = 78;/,
+  )
+  assert.match(
+    windowsServiceInstallerSource,
+    /const MANUAL_GATE_BFE_UNAVAILABLE_EXIT: i32 = 79;/,
+  )
+})
+
+test('an uninstaller hands the lease back when its work is done, not when its window closes', () => {
+  // WIN-GATE-OPAQUE: un.onUninstSuccess runs only once the Completed page is closed. A customer
+  // who started the new installer with that page still open was refused as another installer.
+  const uninstall =
+    installerSource.match(/Section Uninstall\b([\s\S]*?)SectionEnd/)?.[1] ?? ''
+  const finishAt = uninstall.indexOf('--manual-update-finish')
+  assert.equal(finishAt, uninstall.lastIndexOf('--manual-update-finish'))
+  for (const helper of [
+    '--delete-app-data-all-profiles',
+    'schtasks.exe',
+    'cmdkey.exe',
+    'NSIS_HOOK_POSTUNINSTALL',
+  ]) {
+    assert.ok(finishAt > uninstall.lastIndexOf(helper), `the lease is released before ${helper}`)
+  }
+  assert.match(
+    uninstall.slice(finishAt),
+    /--manual-update-finish'\s+Pop \$0\s+\$\{If\} \$0 == "0"\s+StrCpy \$TonoLeaseReleased 1\s+\$\{EndIf\}/,
+  )
+  const success =
+    installerSource.match(/Function un\.onUninstSuccess\b([\s\S]*?)FunctionEnd/)?.[1] ?? ''
+  assert.match(
+    success,
+    /^\s*\$\{If\} \$TonoLeaseReleased != 1\s+nsExec::ExecToLog '"\$PLUGINSDIR\\tono-gate\.exe" --manual-update-finish'/,
+  )
+})
+
+test('every uninstaller abort hands the manual lease back first', () => {
+  // BRICK-W2: an uninstall that stopped early (Cancel at "Tono is running", a failed App kill,
+  // the helper missing, unproven cleanup) kept the lease, and the Service then refused release,
+  // update Disconnect and repair until another installer ran.
+  const handBack =
+    installerSource.match(/Function un\.HandBackManualLease\b([\s\S]*?)FunctionEnd/)?.[1] ?? ''
+  assert.match(handBack, /^\s*Push \$0\s+Push \$1\s/, 'the hand-back preserves $0 and $1')
+  assert.match(handBack, /Pop \$1\s+Pop \$0\s*$/, 'the hand-back restores $1 and $0')
+  assert.match(
+    handBack,
+    /\$\{If\} \$TonoLeaseReleased != 1[\s\S]*?nsExec::ExecToLog '"\$PLUGINSDIR\\tono-gate\.exe" --manual-update-finish'\s+Pop \$0\s+\$\{If\} \$0 == "0"\s+StrCpy \$TonoLeaseReleased 1/,
+    'the finish call runs only while the lease is held, and only exit 0 counts',
+  )
+
+  const failed =
+    installerSource.match(/Function un\.onUninstFailed\b([\s\S]*?)FunctionEnd/)?.[1] ?? ''
+  assert.match(failed, /Call un\.HandBackManualLease/, 'un.onUninstFailed hands the lease back')
+
+  const removeService =
+    installerSource.match(/!macro RemoveVergeService\b([\s\S]*?)!macroend/)?.[1] ?? ''
+  const aborts = [...removeService.matchAll(/^[ \t]*Abort\b/gm)]
+  assert.equal(aborts.length, 2, 'RemoveVergeService has two Aborts')
+  for (const abort of aborts) {
+    assert.match(
+      removeService.slice(0, abort.index),
+      /!ifdef __UNINSTALL__\s+Call un\.HandBackManualLease\s+!endif\s*$/,
+      'an uninstaller Abort in RemoveVergeService hands the lease back first',
+    )
+  }
+
+  const uninstall =
+    installerSource.match(/Section Uninstall\b([\s\S]*?)SectionEnd/)?.[1] ?? ''
+  const mutatedAt = uninstall.indexOf('StrCpy $TonoManualMutated 1')
+  assert.ok(
+    mutatedAt > uninstall.indexOf('!insertmacro CheckIfAppIsRunning'),
+    'a Cancel at "Tono is running" is not a mutation',
+  )
+  assert.ok(
+    mutatedAt < uninstall.indexOf('!insertmacro RemoveVergeService'),
+    'the uninstall is marked mutated before its first change',
+  )
+})
+
+test('a confirmed orphaned-block clear reinstalls through the fresh path, not the upgrade path', () => {
+  // An upgrade skips RemoveVergeService and hands the runtime to --replace-runtime, whose gate
+  // refuses while the filters remain and which cannot replace a Service that is gone. Once the
+  // user confirmed 78, an existing ARP record must not turn the install into that upgrade.
+  const onInit =
+    installerSource.match(/Function \.onInit\b([\s\S]*?)FunctionEnd/)?.[1] ?? ''
+  assert.match(
+    onInit.slice(0, onInit.indexOf('Call DetectExistingInstall')),
+    /--manual-orphan-gate --reason-file [^\n]*'\s+Pop \$0\s+\$\{If\} \$0 == "0"\s+StrCpy \$ClearingOrphanedBlock 1\s+\$\{EndIf\}/,
+  )
+  const detector =
+    installerSource.match(
+      /Function DetectExistingInstall\b([\s\S]*?)FunctionEnd/,
+    )?.[1] ?? ''
+  const automatic =
+    detector.match(/automatic_update:([\s\S]*?)downgrade_blocked:/)?.[1] ?? ''
+  assert.match(
+    automatic,
+    /^(?:\s*;[^\n]*)*\s*\$\{If\} \$ClearingOrphanedBlock = 1\s+(?:DetailPrint [^\n]*\s+)?Return\s+\$\{EndIf\}\s+StrCpy \$UpdateMode 1/,
+  )
+  // The fresh path publishes with Rename, which never overwrites the previous install's files.
+  const installSection =
+    installerSource.match(/Section Install\b([\s\S]*?)SectionEnd/)?.[1] ?? ''
+  const escape = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  for (const live of ['$INSTDIR\\${MAINBINARYNAME}.exe', '$INSTDIR\\\\{{this}}']) {
+    assert.match(
+      installSection,
+      new RegExp(
+        `\\$\\{If\\} \\$ClearingOrphanedBlock = 1\\s+Delete "${escape(live)}"\\s+\\$\\{EndIf\\}\\s+ClearErrors\\s+Rename "${escape(live)}\\.next" "${escape(live)}"`,
+      ),
+    )
+  }
+})
+
+test('a confirmed orphan clear retires the stale connected owner only after the barrier is gone', () => {
+  // The owner that was connected when its Service went away still says "core should run", and
+  // the Service installer's manual gate refuses on that with Disconnect advice nobody can follow.
+  const installSection =
+    installerSource.match(/Section Install\b([\s\S]*?)SectionEnd/)?.[1] ?? ''
+  const removeAt = installSection.indexOf('!insertmacro RemoveVergeService')
+  const startAt = installSection.indexOf('!insertmacro StartVergeService')
+  // RemoveVergeService aborts unless WFP removal is proven, so this runs on a proven-open machine.
+  assert.match(
+    installSection.slice(removeAt, startAt),
+    /\$\{If\} \$ClearingOrphanedBlock = 1\s+nsExec::ExecToLog [^\n]*tono-service-install\.exe" --retire-orphaned-owner'\s+Pop \$0\s+\$\{If\} \$0 != "0"\s+Abort /,
+  )
+  assert.match(
+    windowsServiceUpdateExecutorSource,
+    /\[mode\] if mode == "--retire-orphaned-owner" => \{[^}]*native::retire_orphaned_owner\(\)/,
+  )
+  // The helper re-proves it: no Service, no filter, then retire, never the other way round.
+  const retire =
+    windowsServiceUpdateSource.match(
+      /pub async fn retire_orphaned_owner\(\)[\s\S]*?\n\}/,
+    )?.[0] ?? ''
+  const serviceAt = retire.indexOf('barrier_service_present()')
+  const filtersAt = retire.indexOf('residual_filters_present()')
+  const retireAt = retire.indexOf('retire_legacy_active_owner()')
+  assert.ok(serviceAt > 0 && filtersAt > serviceAt && retireAt > filtersAt)
+})
+
+test('Windows installers refuse to downgrade and hand back the manual lease on that exit', () => {
+  const windowsConfig = JSON.parse(
+    readFileSync(
+      new URL('../src-tauri/tauri.windows.conf.json', import.meta.url),
+      'utf8',
+    ),
+  )
+  // Tauri defaults this to true; an older build cannot undo a newer build's DNS changes.
+  assert.equal(windowsConfig.bundle.windows.allowDowngrades, false)
+  const blocked =
+    installerSource.match(/downgrade_blocked:([\s\S]*?)invalid_existing_version:/)?.[1] ?? ''
+  const releaseAt = blocked.indexOf('Call ReleaseManualLease')
+  assert.ok(releaseAt >= 0 && releaseAt < blocked.indexOf('Quit'))
+  const release =
+    installerSource.match(/Function ReleaseManualLease\b([\s\S]*?)FunctionEnd/)?.[1] ?? ''
+  assert.match(
+    release,
+    /nsExec::ExecToLog '"\$PLUGINSDIR\\tono-gate\\resources\\tono-service-install\.exe" --manual-update-finish'/,
+  )
+})
+
+test('every installer init exit after the manual gate hands the lease back', () => {
+  // TW-anthropic-6: a Quit or Abort from .onInit never reaches .onGUIEnd, and a lease left
+  // behind keeps the Service refusing Connect and skipping recovery until another installer runs.
+  const onInit =
+    installerSource.match(/Function \.onInit\b([\s\S]*?)FunctionEnd/)?.[1] ?? ''
+  const gateAt = onInit.indexOf('--manual-update-gate')
+  // The language dialog's Cancel Aborts inside MUI_LANGDLL_DISPLAY, where nothing can hand the
+  // lease back, so the dialog has to run before the gate takes it.
+  const languageAt = onInit.indexOf('!insertmacro MUI_LANGDLL_DISPLAY')
+  assert.ok(languageAt >= 0 && gateAt > languageAt, 'the language dialog must precede the gate')
+  const legacyLocation =
+    onInit.slice(gateAt).match(/"\$\(legacyLocationAbort\)"([\s\S]*?)\bAbort\b/)?.[1] ?? ''
+  assert.match(legacyLocation, /Call ReleaseManualLease/)
+  const detector =
+    installerSource.match(/Function DetectExistingInstall\b([\s\S]*?)FunctionEnd/)?.[1] ?? ''
+  for (const [label, next] of [
+    ['downgrade_blocked', 'invalid_existing_version'],
+    ['invalid_existing_version', 'legacy_wix_blocked'],
+    ['legacy_wix_blocked', 'no_existing_install'],
+  ]) {
+    const block = detector.match(new RegExp(`\\n  ${label}:([\\s\\S]*?)\\n  ${next}:`))?.[1] ?? ''
+    const releaseAt = block.indexOf('Call ReleaseManualLease')
+    assert.ok(releaseAt >= 0 && releaseAt < block.indexOf('Quit'), `${label} keeps the lease`)
+  }
+})
+
 test('NSIS uninstall removes leftover user control-plane pins', () => {
   assert.match(
     installerSource,
@@ -399,6 +814,55 @@ test('NSIS uninstall removes leftover user control-plane pins', () => {
     installerSource,
     /Delete \/REBOOTOK "\$LOCALAPPDATA\\\$\{BUNDLEID\}\\tono\\control-plane-pins\.json"/,
   )
+})
+
+test('NSIS uninstall deletes in the approving account AppData only after the link check', () => {
+  const uninstall =
+    installerSource.match(/Section Uninstall\b([\s\S]*?)SectionEnd/)?.[1] ?? ''
+  // No recursive NSIS delete of app data: the helper removes it from every profile, this one
+  // included, and never walks through a link or reparse point on the way.
+  assert.doesNotMatch(uninstall, /RmDir\s+\/r\s+"\$(?:LOCAL)?APPDATA/i)
+  const checkAt = uninstall.search(
+    /tono-service-uninstall\.exe" --check-current-app-data'\s+Pop \$AppDataPathPlain/,
+  )
+  assert.ok(checkAt >= 0, 'the helper must check this account AppData before any delete there')
+  const gated = [
+    ...uninstall.matchAll(
+      /\$\{(?:If|AndIf)\} \$AppDataPathPlain == "0"[\s\S]*?\$\{EndIf\}/g,
+    ),
+  ].map((block) => [block.index, block.index + block[0].length])
+  const deletes = [
+    ...uninstall.matchAll(/^\s*(?:Delete|RmDir)\b[^\n]*\$(?:LOCAL)?APPDATA[^\n]*/gim),
+  ]
+  assert.ok(deletes.length > 0)
+  for (const line of deletes) {
+    assert.ok(
+      gated.some(([start, end]) => checkAt < start && start < line.index && line.index < end),
+      `AppData delete outside the checked block: ${line[0].trim()}`,
+    )
+  }
+})
+
+test('all-profile app data is deleted only inside the repair gate, under the uninstaller lease', () => {
+  const helperSource = readFileSync(
+    new URL('../../service/src/bin/uninstall_service.rs', import.meta.url),
+    'utf8',
+  )
+  const main =
+    helperSource.match(/#\[cfg\(windows\)\]\r?\nfn main\(\)([\s\S]*?)\r?\n\}\r?\n/)?.[1] ?? ''
+  const gateAt = main.indexOf('enter_repair_gate()?')
+  const deleteAt = main.indexOf('remove_app_data_in_profiles(')
+  // Same pending-update check and repair lock as every other cleanup mode of this helper.
+  assert.ok(gateAt >= 0 && deleteAt > gateAt, 'the app data delete must run after the repair gate')
+
+  const uninstall =
+    installerSource.match(/Section Uninstall\b([\s\S]*?)SectionEnd/)?.[1] ?? ''
+  const ladderAt = uninstall.indexOf('!insertmacro RemoveVergeService')
+  const callAt = uninstall.indexOf('--delete-app-data-all-profiles')
+  // The gate admits the helper on the uninstaller's own lease, which is released only after
+  // the helper ran (at the end of this section, or in un.onGUIEnd for an unchanged machine).
+  assert.ok(ladderAt >= 0 && callAt > ladderAt)
+  assert.ok(uninstall.indexOf('--manual-update-finish') > callAt)
 })
 
 test('NSIS removes every known old payload on upgrade and uninstall', () => {
@@ -437,7 +901,7 @@ test('NSIS removes every known old payload on upgrade and uninstall', () => {
   assert.match(
     validateNsisLegacyCleanup(
       template.replace(
-        '!insertmacro RemoveVergeService\n!insertmacro StartVergeService',
+        /!insertmacro RemoveVergeService\r?\n!insertmacro StartVergeService/,
         '!insertmacro StartVergeService',
       ),
     ),
@@ -581,6 +1045,8 @@ test('Windows release stops when a native preflight command fails', () => {
     'Service build must hash Mihomo first',
   )
   assert.match(serviceBlock, /\$env:TONO_CORE_SHA256 = \$coreSha256/)
+  assert.match(serviceBlock, /\$env:TONO_SING_BOX_SHA256 = \$singBoxSha256/)
+  assert.match(serviceBlock, /b2e6902ee75d9c4af79df28a61ded67afc4283fc83a44dee8896f3737a4ed027/)
   assert.match(serviceBlock, /GITHUB_ENV/)
   assert.match(serviceBlock, /core-sha256\.txt/)
   assert.match(serviceBlock, /tono-service\.exe/)
@@ -593,6 +1059,10 @@ test('local Windows release scripts write core-sha256.txt from the hashed sideca
   assert.match(windowsReleaseShSource, /TONO_CORE_SHA256=/)
   assert.match(windowsReleasePs1Source, /core-sha256\.txt/)
   assert.match(windowsReleasePs1Source, /\$env:TONO_CORE_SHA256 = \$coreSha256/)
+  assert.match(windowsReleaseShSource, /TONO_SING_BOX_SHA256=/)
+  assert.match(windowsReleaseShSource, /sing-box-sha256\.txt/)
+  assert.match(windowsReleasePs1Source, /\$env:TONO_SING_BOX_SHA256 = \$singBoxSha256/)
+  assert.match(windowsReleasePs1Source, /sing-box-sha256\.txt/)
 })
 
 test('packaging rejects a Service that lacks the exact packaged Core pin', () => {
@@ -658,14 +1128,24 @@ test('leftover Verge sidecar names are refused', () => {
   )
 })
 
-test('externalBin accepts only the stable sidecar', () => {
-  assert.equal(validateExternalBin([STABLE_EXTERNAL_BIN]), null)
+test('sing-box digest accepts only the pinned alpha.9 bytes', () => {
+  assert.equal(validateSingBoxDigest(WINDOWS_SING_BOX_SHA256), null)
+  assert.match(validateSingBoxDigest('ab'.repeat(32)), /not the pinned alpha\.9/)
+  assert.match(validateSingBoxDigest(''), /not the pinned alpha\.9/)
+})
+
+test('externalBin accepts only the stable sidecar and pinned sing-box', () => {
+  assert.equal(
+    validateExternalBin([STABLE_EXTERNAL_BIN, 'sidecar/sing-box']),
+    null,
+  )
   assert.match(validateExternalBin(['sidecar/verge-mihomo-alpha']), /alpha/)
   assert.match(
     validateExternalBin(['sidecar/tono-core', 'sidecar/verge-mihomo-alpha']),
-    /exactly one/,
+    /alpha/,
   )
-  assert.match(validateExternalBin([]), /exactly one/)
+  assert.match(validateExternalBin([STABLE_EXTERNAL_BIN]), /exactly the stable Mihomo/)
+  assert.match(validateExternalBin([]), /exactly the stable Mihomo/)
 })
 
 test('tauri.conf.json resources match the Windows allowlist', () => {
@@ -698,6 +1178,15 @@ test('resources whitelist rejects whole-directory packaging', () => {
   )
 })
 
+test('bundled resource executables are built from this repository', () => {
+  const executables = WINDOWS_RESOURCE_ALLOWLIST.filter((name) =>
+    /\.exe$/i.test(name),
+  )
+  for (const name of executables) {
+    assert.match(name, /^tono-service(?:-install|-uninstall)?\.exe$/)
+  }
+})
+
 test('payload validator requires staged executables and rejects legacy junk', () => {
   const good = [
     { name: 'Tono.exe.next' },
@@ -707,6 +1196,8 @@ test('payload validator requires staged executables and rejects legacy junk', ()
     { name: 'resources/tono-service-uninstall.exe' },
     { name: 'resources/core-sha256.txt' },
     { name: 'resources/core-identity.json' },
+    { name: 'sing-box.exe.next' },
+    { name: 'resources/sing-box-sha256.txt' },
   ]
   assert.equal(validatePayloadEntries(good), null)
 
@@ -730,6 +1221,18 @@ test('payload validator requires staged executables and rejects legacy junk', ()
       good.filter((entry) => entry.name !== 'tono-core.exe.next'),
     ),
     /missing stable Tono Core/,
+  )
+  assert.match(
+    validatePayloadEntries(
+      good.filter((entry) => entry.name !== 'sing-box.exe.next'),
+    ),
+    /missing pinned sing-box/,
+  )
+  assert.match(
+    validatePayloadEntries(
+      good.filter((entry) => entry.name !== 'resources/sing-box-sha256.txt'),
+    ),
+    /sing-box-sha256\.txt/,
   )
   assert.match(
     validatePayloadEntries(
@@ -808,26 +1311,73 @@ test('portable partition keeps only the allowlist', () => {
 // Tauri derives the ACL namespace from the plugin's Cargo `links` metadata,
 // NOT PluginBuilder::new. Renaming the crate while keeping the old runtime
 // name compiles and installs, but every renderer IPC is denied at runtime.
-const corePluginRoot = new URL('../../crates/tono-plugin-core/', import.meta.url)
-const corePluginManifest = readFileSync(new URL('Cargo.toml', corePluginRoot), 'utf8')
-const corePluginAclName = corePluginManifest.match(/^links = "([^"]+)"/m)[1]
+const corePluginRoot = new URL(
+  '../../crates/tono-plugin-core/',
+  import.meta.url,
+)
+const corePluginManifest = readFileSync(
+  new URL('Cargo.toml', corePluginRoot),
+  'utf8',
+)
+const corePluginAclName = corePluginManifest
+  .match(/^links = "([^"]+)"/m)[1]
   .replace(/^tauri-plugin-/, '')
 
 test('Core plugin runtime registration matches its generated ACL namespace', () => {
   const source = readFileSync(new URL('src/lib.rs', corePluginRoot), 'utf8')
   const runtimeName = source.match(/PluginBuilder::new\("([^"]+)"\)/)[1]
   assert.equal(runtimeName, corePluginAclName)
-  const capability = JSON.parse(readFileSync(
-    new URL('../src-tauri/capabilities/desktop.json', import.meta.url), 'utf8',
-  ))
-  assert.ok(capability.permissions.includes(`${runtimeName}:default`))
+  const capability = JSON.parse(
+    readFileSync(
+      new URL('../src-tauri/capabilities/desktop.json', import.meta.url),
+      'utf8',
+    ),
+  )
+  assert.ok(
+    capability.permissions.some((p) => p.startsWith(`${runtimeName}:allow-`)),
+  )
 })
 
-for (const entrypoint of ['guest-js/index.ts', 'dist-js/index.js', 'dist-js/index.cjs']) {
+for (const entrypoint of [
+  'guest-js/index.ts',
+  'dist-js/index.js',
+  'dist-js/index.cjs',
+]) {
   test(`Core plugin ${entrypoint} invokes the namespace granted by desktop ACL`, () => {
     const source = readFileSync(new URL(entrypoint, corePluginRoot), 'utf8')
-    const namespaces = [...source.matchAll(/plugin:([^|\s]+)\|/g)].map((m) => m[1])
-    assert.ok(namespaces.length >= 30, 'must inspect the full renderer command surface')
+    const namespaces = [...source.matchAll(/plugin:([^|\s]+)\|/g)].map(
+      (m) => m[1],
+    )
+    assert.ok(
+      namespaces.length >= 30,
+      'must inspect the full renderer command surface',
+    )
     assert.deepEqual([...new Set(namespaces)], [corePluginAclName])
   })
 }
+
+test('Support WebRTC check link is granted to the webview opener and nothing wider', () => {
+  const support = readFileSync(
+    new URL('../src/pages/tono/support.tsx', import.meta.url),
+    'utf8',
+  )
+  const urls = [...support.matchAll(/openUrl\('([^']+)'\)/g)].map((m) => m[1])
+  assert.deepEqual(urls, ['https://ip.cx/webrtc'])
+  const capability = JSON.parse(
+    readFileSync(
+      new URL('../src-tauri/capabilities/desktop.json', import.meta.url),
+      'utf8',
+    ),
+  )
+  assert.ok(capability.permissions.includes('shell:allow-open'))
+  const config = JSON.parse(
+    readFileSync(
+      new URL('../src-tauri/tauri.conf.json', import.meta.url),
+      'utf8',
+    ),
+  )
+  // tauri-plugin-shell anchors the configured regex as ^...$.
+  const scope = new RegExp(`^${config.plugins?.shell?.open}$`)
+  assert.ok(scope.test(urls[0]))
+  assert.equal(scope.test('https://example.com/'), false)
+})

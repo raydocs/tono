@@ -19,11 +19,12 @@ mod windows_identity;
 use crate::{
     AuthenticatedRequest, AuthenticatedSessionRequest, BootstrapPins, DirectRuntimeReloadResult,
     DnsProtectionStatus, FinalizeDirectRuntimeReloadRequest, IPC_AUTH_EXPECT, IPC_PATH, IpcCommand,
-    KillSwitchLockRequest, KillSwitchStatus, MacosProxyConfig,
-    OwnerCredentials, OwnerSessionProof, ProtocolInfo, ProtocolVersion, ProxyApplyOutcome,
-    RenewDirectRuntimeReloadRequest, ReplaceDirectEndpointsRequest, ReplaceProxyEndpointsRequest,
-    RuntimeBundle,
-    ServiceStatusSnapshot, StageRuntimeOutcome, StartClashRequest, StartClashResult, WriterConfig,
+    KillSwitchLockRequest, KillSwitchStatus, MacosProxyConfig, OwnerCredentials, OwnerSessionProof,
+    PrepareCoreStartFreshness, PrepareCoreStartPayload, ProtocolInfo, ProtocolVersion,
+    ProxyApplyOutcome, RenewDirectRuntimeReloadRequest, ReplaceDirectEndpointsRequest,
+    ReplaceProxyEndpointsRequest, ReplaceSingBoxRuntimeRequest, CommitSingBoxDirectRequest,
+    RuntimeBundle, ServiceStatusSnapshot, StageRuntimeOutcome,
+    StartClashRequest, StartClashResult, WriterConfig,
     core::structure::{JsonConvert, Response},
 };
 
@@ -153,18 +154,37 @@ where
 /// Returns `None` when the work has not answered in time; the caller decides what that means
 /// (for server verification it means *refuse*, never *accept*). The thread is deliberately not
 /// joined: a Service Control Manager RPC parked in the kernel cannot be cancelled, and joining
-/// it would reintroduce exactly the unbounded wait this exists to bound. The leak is bounded by
-/// the caller — connect attempts are capped, and nothing retries a verification on its own.
+/// it would reintroduce exactly the unbounded wait this exists to bound. Keep a worker permit
+/// until the OS call actually finishes: per-request retries do not bound surviving threads
+/// across the application's recurring status polls. A full budget remains an unproven answer.
 #[cfg(any(all(windows, not(feature = "test")), test))]
 pub(crate) fn run_with_deadline<T, F>(deadline: Duration, work: F) -> Option<T>
 where
     F: FnOnce() -> T + Send + 'static,
     T: Send + 'static,
 {
+    // Match the transport's eight concurrent blocking connects, including abandoned OS work.
+    static SLOTS: Lazy<Arc<tokio::sync::Semaphore>> =
+        Lazy::new(|| Arc::new(tokio::sync::Semaphore::new(8)));
+    run_with_deadline_in_slots(deadline, &SLOTS, work)
+}
+
+#[cfg(any(all(windows, not(feature = "test")), test))]
+fn run_with_deadline_in_slots<T, F>(
+    deadline: Duration,
+    slots: &Arc<tokio::sync::Semaphore>,
+    work: F,
+) -> Option<T>
+where
+    F: FnOnce() -> T + Send + 'static,
+    T: Send + 'static,
+{
+    let slot = Arc::clone(slots).try_acquire_owned().ok()?;
     let (sender, receiver) = std::sync::mpsc::sync_channel(1);
     std::thread::Builder::new()
         .name("tono-service-ipc-verify".to_string())
         .spawn(move || {
+            let _slot = slot;
             // A closed channel means the caller already gave up; dropping the answer is right.
             let _ = sender.send(work());
         })
@@ -213,6 +233,20 @@ impl Verb {
 ///
 /// `session` chooses the envelope: routes that need only an authenticated owner pass `None`,
 /// routes that need proof of the current session pass `Some`.
+pub async fn update_transaction(
+    credentials: &OwnerCredentials,
+    request: crate::update_wire::UpdateRequest,
+) -> Result<Response<crate::update_wire::UpdateStatus>> {
+    let seconds = match request {
+        crate::update_wire::UpdateRequest::Prepare { .. } => 240,
+        crate::update_wire::UpdateRequest::Disconnect
+            | crate::update_wire::UpdateRequest::DisconnectApplyingNarrow => 65,
+        _ => 20,
+    };
+    protected_call(Verb::Post, IpcCommand::UpdateTransaction, credentials, None,
+        request, Some(Duration::from_secs(seconds))).await
+}
+
 async fn protected_call<P, R>(
     verb: Verb,
     command: IpcCommand,
@@ -481,6 +515,38 @@ pub async fn lock_kill_switch(
     .await
 }
 
+pub async fn replace_sing_box_runtime(
+    credentials: &OwnerCredentials,
+    session: &OwnerSessionProof,
+    body: ReplaceSingBoxRuntimeRequest,
+) -> Result<Response<()>> {
+    protected_call(
+        Verb::Post,
+        IpcCommand::ReplaceSingBoxRuntime,
+        credentials,
+        Some(session),
+        body,
+        Some(LIFECYCLE_TIMEOUT),
+    )
+    .await
+}
+
+pub async fn commit_sing_box_direct(
+    credentials: &OwnerCredentials,
+    session: &OwnerSessionProof,
+    body: CommitSingBoxDirectRequest,
+) -> Result<Response<DirectRuntimeReloadResult>> {
+    protected_call(
+        Verb::Post,
+        IpcCommand::CommitSingBoxDirect,
+        credentials,
+        Some(session),
+        body,
+        Some(LIFECYCLE_TIMEOUT),
+    )
+    .await
+}
+
 pub async fn begin_direct_runtime_reload(
     credentials: &OwnerCredentials,
     session: &OwnerSessionProof,
@@ -636,12 +702,31 @@ pub async fn restore_protected_dns(
 pub async fn release_kill_switch(
     credentials: &OwnerCredentials,
 ) -> Result<Response<KillSwitchStatus>> {
+    // `null` is the pre-narrow body. Restore and disconnect keep sending it so
+    // a service that has not learned the optional object still opens the network.
     protected_call(
         Verb::Post,
         IpcCommand::ReleaseKillSwitch,
         credentials,
         None,
         (),
+        Some(LIFECYCLE_TIMEOUT),
+    )
+    .await
+}
+
+/// Full release, then the secondary AI hold. Restore and disconnect do not use this.
+pub async fn release_kill_switch_applying_narrow(
+    credentials: &OwnerCredentials,
+) -> Result<Response<KillSwitchStatus>> {
+    protected_call(
+        Verb::Post,
+        IpcCommand::ReleaseKillSwitch,
+        credentials,
+        None,
+        crate::core::structure::ReleaseKillSwitchPayload {
+            apply_narrow_layer: true,
+        },
         Some(LIFECYCLE_TIMEOUT),
     )
     .await
@@ -696,16 +781,58 @@ pub async fn remember_bootstrap_pins(
 /// the fixed DNS listener. A completely verified protected runtime is preserved for fail-closed
 /// replacement; stale supervised, recorded, and orphaned Tono cores are stopped. The returned
 /// count is diagnostic, and a third-party listener is never touched.
+///
+/// The request is destructive, so it carries a freshness proof: this function snapshots the
+/// Service's explicit-release epoch (`GET /version`) immediately before the mutating POST and
+/// sends that snapshot along. A Service at protocol revision 17 or newer compares the snapshot
+/// under its lifecycle lock and refuses the reconcile once an explicit release has superseded
+/// it — which is what stops a cancelled attempt's late request from killing a successor
+/// connection's not-yet-verified Core. An older Service has no such gate and still receives
+/// the legacy payload, so a mixed App/Service pair degrades to the old behaviour rather than
+/// failing to parse.
 pub async fn prepare_core_start(credentials: &OwnerCredentials) -> Result<Response<u32>> {
+    let payload = prepare_core_start_payload().await?;
     protected_call(
         Verb::Post,
         IpcCommand::PrepareCoreStart,
         credentials,
         None,
-        (),
+        payload,
         Some(LIFECYCLE_TIMEOUT),
     )
     .await
+}
+
+/// Build the `PrepareCoreStart` payload for the Service we just probed.
+///
+/// The probe is part of the freshness contract, so a probe failure is an error rather than a
+/// silent downgrade: sending the epoch-less legacy payload to a revision-17 Service would
+/// throw away the client-side snapshot (the Service would fall back to an arrival-time one,
+/// which misses a request already in flight), and the connect stage deserves the probe's
+/// clearer message. In the real
+/// connect flow `ensure_service_ready` has just required the same probe to succeed, so this
+/// only fails when the Service dropped between the two calls — where the mutation itself
+/// would not have been answerable either.
+async fn prepare_core_start_payload() -> Result<PrepareCoreStartPayload> {
+    let probe = get_version().await?;
+    if probe.code > 0 {
+        anyhow::bail!(
+            "the Tono Service refused its protocol probe: {}",
+            probe.message
+        );
+    }
+    let Some(info) = probe.data else {
+        anyhow::bail!("the Tono Service omitted its protocol info");
+    };
+    if info.supports_prepare_start_epoch() {
+        Ok(PrepareCoreStartPayload::Freshness(
+            PrepareCoreStartFreshness {
+                release_epoch: info.release_epoch,
+            },
+        ))
+    } else {
+        Ok(PrepareCoreStartPayload::Legacy(()))
+    }
 }
 
 pub async fn start_clash(
@@ -1027,6 +1154,37 @@ mod retry_safety_tests {
             started.elapsed() < Duration::from_secs(2),
             "the deadline did not bound the wait: {:?}",
             started.elapsed()
+        );
+    }
+
+    #[tokio::test]
+    async fn timed_out_os_work_retains_its_slot_until_the_thread_finishes() {
+        let slots = Arc::new(tokio::sync::Semaphore::new(1));
+        let (release, gate) = std::sync::mpsc::channel();
+        let first = super::run_with_deadline_in_slots(Duration::from_millis(10), &slots, move || {
+            gate.recv().unwrap();
+            7_u32
+        });
+        let started = Arc::new(AtomicBool::new(false));
+        let second_started = Arc::clone(&started);
+        let second = super::run_with_deadline_in_slots(Duration::from_secs(1), &slots, move || {
+            second_started.store(true, Ordering::SeqCst);
+            9_u32
+        });
+        // Always release the injected stall before checking assertions.
+        release.send(()).unwrap();
+        let returned = tokio::time::timeout(Duration::from_secs(2), Arc::clone(&slots).acquire_owned())
+            .await
+            .expect("completed OS work must return its capacity")
+            .unwrap();
+        drop(returned);
+        assert_eq!(first, None, "the stalled query must time out");
+        assert_eq!(second, None, "a timed-out query still owns its OS thread");
+        assert!(!started.load(Ordering::SeqCst), "capacity refusal must not start work");
+        assert_eq!(
+            super::run_with_deadline_in_slots(Duration::from_secs(1), &slots, || 11_u32),
+            Some(11),
+            "real completion must admit the next query"
         );
     }
 }

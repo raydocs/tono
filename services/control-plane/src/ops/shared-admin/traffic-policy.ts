@@ -43,7 +43,26 @@ export async function trafficPolicyResource(
     const signature = b.signature as string | undefined;
     const dryRun = b.dryRun === true;
     const policy = canonicalTrafficPolicy(b.policy, dryRun || Boolean(signature));
-    const json = JSON.stringify(policy);
+    // The envelope revision is outside the signature, so a replayed signed
+    // document could claim any revision (#317). Once enabled, the revision
+    // this write will be assigned is written into the document, and a
+    // signature has to cover it. A dry run binds `expectedRevision + 1`, or the
+    // next revision after the stored one when none is given.
+    let boundRevision: number | undefined;
+    if (e.TRAFFIC_POLICY_EMBED_REVISION === 'true') {
+      let base = b.expectedRevision;
+      if (dryRun && base === undefined) {
+        const stored = await e.DB.prepare(
+          'SELECT revision FROM managed_traffic_policy WHERE singleton_id = 1',
+        ).first<Row>();
+        base = Number(stored?.revision ?? 0);
+      }
+      if (!Number.isSafeInteger(base) || base < 0) {
+        throw new ApiError(400, 'VALIDATION_ERROR', 'expectedRevision is required and must be a non-negative integer');
+      }
+      boundRevision = base + 1;
+    }
+    const json = JSON.stringify(boundRevision === undefined ? policy : { ...policy, revision: boundRevision });
     if (signature) {
       const publicKey = e.TRAFFIC_POLICY_PUBLIC_KEY;
       if (!publicKey) {
@@ -80,6 +99,9 @@ export async function trafficPolicyResource(
       throw new ApiError(409, 'TRAFFIC_POLICY_CONFLICT', 'Managed traffic policy changed; reload before replacing it');
     }
     const revision = currentRevision + 1;
+    if (boundRevision !== undefined && boundRevision !== revision) {
+      throw new ApiError(409, 'TRAFFIC_POLICY_CONFLICT', 'Managed traffic policy changed; reload before replacing it');
+    }
     const encrypted = await encryptTrafficPolicy(json, requiredCatalogKey(e));
     const digest = await sha256(json);
     const t = now();

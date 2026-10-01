@@ -9,8 +9,10 @@ pub use structure::{
     MacosKillSwitchConfig, MacosKillSwitchMode, MacosProxyConfig, LEGACY_OWNER_TOKEN_FILE_NAME,
     OWNER_TOKEN_FILE_NAME,
     OwnerCredentials, OwnerIdentity, OwnerSessionHandle, OwnerSessionProof, ProtocolInfo,
-    ProtocolVersion, ProxyApplyOutcome, ProxyEndpoint, ProxyProtocol, RemoteProvider,
+    ProtocolVersion, ProxyApplyOutcome, ProxyEndpoint, ProxyProtocol, PrepareCoreStartFreshness,
+    PrepareCoreStartPayload, RemoteProvider,
     RenewDirectRuntimeReloadRequest, ReplaceDirectEndpointsRequest, ReplaceProxyEndpointsRequest,
+    ReplaceSingBoxRuntimeRequest, CommitSingBoxDirectRequest,
     RuntimeAsset, RuntimeBundle,
     LEGACY_SERVICE_PROTOCOL_HEADER, SERVICE_PROTOCOL_HEADER, SESSION_TOKEN_HEX_LEN,
     ServiceErrorCode, ServiceLifecycleState,
@@ -21,6 +23,7 @@ pub use structure::{
 };
 
 pub mod paths;
+mod selective_fail_open;
 #[cfg(feature = "standalone")]
 pub use paths::prepare_service_install_directory;
 pub use paths::{OwnerPaths, ServicePaths, mihomo_ipc_path, service_paths};
@@ -31,6 +34,8 @@ mod atomic_file;
 mod bootstrap_pins;
 #[cfg(feature = "standalone")]
 mod auth;
+#[cfg(feature = "standalone")]
+mod boot_session;
 #[cfg(feature = "standalone")]
 mod desired;
 #[cfg(feature = "standalone")]
@@ -64,11 +69,19 @@ mod runtime;
 #[cfg(feature = "standalone")]
 mod runtime_generation;
 #[cfg(feature = "standalone")]
+mod selective_layer;
+#[cfg(feature = "standalone")]
 mod server;
+#[cfg(feature = "standalone")]
+mod sing_box_direct;
+#[cfg(feature = "standalone")]
+mod sing_box_runtime;
 #[cfg(feature = "standalone")]
 mod state;
 #[cfg(feature = "standalone")]
 mod status;
+#[cfg(all(feature = "standalone", windows))]
+pub mod update;
 #[cfg(feature = "test")]
 mod test_credentials;
 #[cfg(all(feature = "standalone", unix))]
@@ -100,7 +113,7 @@ pub use desired::{
 };
 #[cfg(feature = "standalone")]
 pub use dns::{
-    initialize_status_cache as initialize_protected_dns_status,
+    initialize_status_cache as initialize_protected_dns_status, remove_tono_resolver_rule_within,
     spawn_status_watchdog as spawn_protected_dns_watchdog,
 };
 #[cfg(feature = "standalone")]
@@ -136,8 +149,10 @@ pub use test_credentials::test_owner_credentials;
 pub use test_credentials::test_owner_credentials_for_uid;
 #[cfg(feature = "standalone")]
 pub use windows_kill_switch::{
-    emergency_disarm_windows_kill_switch, prepare_for_service_replacement, relock_restored_tunnel,
-    residual_filters_present, restore_on_service_start as restore_windows_kill_switch,
+    emergency_disarm_windows_kill_switch, emergency_disarm_windows_kill_switch_applying_narrow,
+    note_core_replay_finished,
+    prepare_for_service_replacement, relock_restored_tunnel, residual_filters_present,
+    restore_on_service_start as restore_windows_kill_switch,
     retire_unverified_on_service_start as retire_unverified_windows_kill_switch,
-    spawn_windows_kill_switch_watchdog,
+    SCM_STOP_WAIT_HINT, spawn_windows_kill_switch_watchdog, stop_pending_refresh_due,
 };

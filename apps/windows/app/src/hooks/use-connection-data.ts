@@ -239,7 +239,7 @@ const flushPendingMessage = () => {
     return
   }
 
-  lastFlushAt = Date.now()
+  lastFlushAt = performance.now()
   connectionFeedLive = true
   connectionSummary = mergeConnectionSummary(payload)
   notifySummaryListeners()
@@ -254,7 +254,9 @@ const enqueueConnectionMessage = (messageData: string) => {
   pendingMessageData = messageData
   if (flushTimer) return
 
-  const elapsed = Date.now() - lastFlushAt
+  // Monotonic: a wall-clock step back made `elapsed` negative and the 500 ms throttle a
+  // wait as long as the step, while the feed still reported live.
+  const elapsed = performance.now() - lastFlushAt
   if (elapsed >= CONNECTION_UPDATE_THROTTLE_MS) {
     flushPendingMessage()
     return
@@ -308,6 +310,13 @@ const scheduleReconnect = () => {
 
 async function reconnectConnectionSocket() {
   if (!hasConnectionSubscribers()) return
+  connectionFeedLive = false
+  pendingMessageData = null
+  if (flushTimer) {
+    window.clearTimeout(flushTimer)
+    flushTimer = null
+  }
+  notifyConnectionListeners()
   await closeConnectionSocket()
   scheduleReconnect()
 }

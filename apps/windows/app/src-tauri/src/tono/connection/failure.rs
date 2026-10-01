@@ -30,12 +30,30 @@ pub const BFE_NOT_RUNNING_PREFIX: &str = "TONO_BFE_NOT_RUNNING";
 /// this marker the App showed only "protected, not connected" with every diagnostic field
 /// reading `(unknown)`, which is unactionable for the customer and for support.
 pub const SERVICE_NOT_RUNNING_PREFIX: &str = "TONO_SERVICE_NOT_RUNNING";
+/// An explicit release could not get a ready Service (a start helper older than
+/// `--start-registered`, a declined prompt, a start or repair that failed), so no release ran, or
+/// the release got no reading (no owner credentials, or the IPC and its read-back both failed).
+/// Either way the Service gave no reading of protection. The UI shows protection as unconfirmed,
+/// never as still on.
+pub const PROTECTION_UNCONFIRMED_PREFIX: &str = "TONO_PROTECTION_UNCONFIRMED";
 /// Stable post-lock classifications. The loopback-proxy cross-check distinguishes a selected
 /// node/Core path that works without WinTUN from a failure shared by every Mihomo ingress path.
 /// None of these markers relaxes the real TUN proof required for Connected.
 pub const TUN_DATA_PLANE_BROKEN_PREFIX: &str = "TONO_TUN_DATA_PLANE_BROKEN";
 pub const TUN_INGRESS_BROKEN_PREFIX: &str = "TONO_TUN_INGRESS_BROKEN";
 pub const NODE_OR_CORE_UNREACHABLE_PREFIX: &str = "TONO_NODE_OR_CORE_UNREACHABLE";
+/// Post-lock verification could not confirm the Service's WFP lock (`wanted && live && Locked`),
+/// so no TUN probe ran. Carries the Service's own answer and `last_error`; it must not be read as
+/// a TUN data-plane verdict.
+pub const WFP_LOCK_UNVERIFIED_PREFIX: &str = "TONO_WFP_LOCK_UNVERIFIED";
+/// The Service refused PrepareCoreStart / StartClash with `ProtectionHeldByAnotherUser` (1014):
+/// another local Windows user who is still signed in holds the armed protection. Not a failed
+/// attempt the user can retry; they must wait for that user to disconnect or sign out.
+pub const PROTECTION_HELD_BY_ANOTHER_USER_PREFIX: &str = "TONO_PROTECTION_HELD_BY_ANOTHER_USER";
+/// The Service refused PrepareCoreStart / StartClash with `RemoteSessionConnectRefused` (1015):
+/// this App runs in a Remote Desktop session (or one not confirmed as the console), and arming
+/// protection would cut that remote connection. Not retryable from here; connect at the console.
+pub const REMOTE_SESSION_CONNECT_REFUSED_PREFIX: &str = "TONO_REMOTE_SESSION_CONNECT_REFUSED";
 
 /// Translate the Service's stable WFP markers into an actionable message. Returns `None` for
 /// every other error so callers keep the original diagnostic text.
@@ -109,7 +127,8 @@ impl StageFailure {
     /// translated once — whichever stage (arm, lock, release) surfaced them.
     pub(super) fn error(err: impl std::fmt::Display) -> Self {
         let text = err.to_string();
-        StageFailure::Error(map_wfp_engine_error(&text).unwrap_or(text))
+        let text = map_wfp_engine_error(&text).unwrap_or(text);
+        StageFailure::Error(tono_core::stamp_connect_failure(&text))
     }
 }
 

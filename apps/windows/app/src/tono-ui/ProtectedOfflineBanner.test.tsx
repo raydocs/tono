@@ -4,7 +4,14 @@ import { MemoryRouter } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
-  status: { uiState: 'protectedOffline' as string, selectedServer: null as string | null },
+  status: {
+    uiState: 'protectedOffline' as string,
+    selectedServer: null as string | null,
+    killSwitch: { wanted: true, live: true } as {
+      wanted: boolean
+      live: boolean
+    } | null,
+  },
   mutateTonoStatus: vi.fn(),
   tonoRetryNow: vi.fn(),
   tonoDisconnect: vi.fn(),
@@ -49,7 +56,11 @@ afterEach(cleanup)
 
 describe('ProtectedOfflineBanner', () => {
   beforeEach(() => {
-    mocks.status = { uiState: 'protectedOffline', selectedServer: null }
+    mocks.status = {
+      uiState: 'protectedOffline',
+      selectedServer: null,
+      killSwitch: { wanted: true, live: true },
+    }
     mocks.tonoServers.mockReset().mockResolvedValue([])
     mocks.tonoConnectProgress.mockReset().mockResolvedValue({
       steps: [],
@@ -75,13 +86,26 @@ describe('ProtectedOfflineBanner', () => {
     expect(screen.getByText('tono.dashboard.status.offline')).toBeDefined()
   })
 
+  it('does not claim a block the Service has not confirmed', () => {
+    mocks.status = {
+      uiState: 'protectedOffline',
+      selectedServer: null,
+      killSwitch: null,
+    }
+    renderAt('/servers')
+    expect(screen.getByText('tono.pill.title.protectionUnknown')).toBeDefined()
+    expect(
+      screen.queryByText('tono.dashboard.protectedOfflineDescription'),
+    ).toBeNull()
+  })
+
   it('is shown on activity', () => {
     renderAt('/activity')
     expect(screen.getByRole('alert')).toBeDefined()
   })
 
   it('says nothing when not protectedOffline', () => {
-    mocks.status = { uiState: 'connected', selectedServer: null }
+    mocks.status = { uiState: 'connected', selectedServer: null, killSwitch: null }
     renderAt('/servers')
     expect(screen.queryByRole('alert')).toBeNull()
   })

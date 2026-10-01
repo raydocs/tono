@@ -18,6 +18,13 @@ use windows_sys::Win32::System::Registry::{
     RegOpenKeyExW, RegQueryValueExW, RegSetValueExW,
 };
 
+#[path = "native_apply.rs"]
+mod native_apply;
+
+#[cfg(test)]
+#[path = "apply_test_io.rs"]
+pub(super) mod test_io;
+
 const TCPIP4_INTERFACES: &str =
     r"SYSTEM\CurrentControlSet\Services\Tcpip\Parameters\Interfaces";
 const TCPIP6_INTERFACES: &str =
@@ -67,6 +74,10 @@ fn super_wide(value: &str) -> Vec<u16> {
 }
 
 fn read_sz(subkey: &str, value: &str) -> Result<Option<String>> {
+    #[cfg(test)]
+    if let Some(value) = test_io::with(|io| io.read(subkey, value)) {
+        return Ok(value);
+    }
     let Some(key) = RegKey::open(subkey, false)? else {
         return Ok(None);
     };
@@ -121,6 +132,10 @@ fn read_sz(subkey: &str, value: &str) -> Result<Option<String>> {
 }
 
 fn write_sz(subkey: &str, value: &str, data: &str) -> Result<()> {
+    #[cfg(test)]
+    if let Some(result) = test_io::with(|io| io.write(subkey, value, data)) {
+        return result;
+    }
     let Some(key) = RegKey::open(subkey, true)? else {
         bail!("registry key {subkey} does not exist");
     };
@@ -145,6 +160,10 @@ fn write_sz(subkey: &str, value: &str, data: &str) -> Result<()> {
 }
 
 fn delete_value(subkey: &str, value: &str) -> Result<()> {
+    #[cfg(test)]
+    if test_io::with(|io| io.delete_value(subkey, value)).is_some() {
+        return Ok(()); // The fixture registry has no policy state to delete.
+    }
     let Some(key) = RegKey::open(subkey, true)? else {
         return Ok(());
     };
@@ -159,11 +178,18 @@ fn delete_value(subkey: &str, value: &str) -> Result<()> {
 }
 
 fn enum_subkeys(subkey: &str) -> Result<Vec<String>> {
+    #[cfg(test)]
+    if let Some(names) = test_io::with(|io| io.subkeys(subkey)) {
+        return Ok(names);
+    }
     let Some(key) = RegKey::open(subkey, false)? else {
         return Ok(Vec::new());
     };
     let mut names = Vec::new();
-    for index in 0_u32..64 {
+    // No upper bound: `Parameters\Interfaces` routinely holds more than 64 GUIDs on Hyper-V /
+    // WSL / Docker machines, and the corrupt-snapshot recovery treats this list as the complete
+    // registry record. The loop ends on ERROR_NO_MORE_ITEMS or fails on any other status.
+    for index in 0_u32.. {
         let mut buf = [0_u16; 256];
         let mut len = buf.len() as u32;
         // SAFETY: `buf` is the name out-buffer; `len` is its capacity in characters.
@@ -194,6 +220,10 @@ fn enum_subkeys(subkey: &str) -> Result<Vec<String>> {
 }
 
 fn read_flags(subkey: &str, value: &str) -> Result<Option<u64>> {
+    #[cfg(test)]
+    if let Some(value) = test_io::with(|io| io.read(subkey, value)) {
+        return value.map(|value| value.parse::<u64>().context("invalid fixture flags")).transpose();
+    }
     let Some(key) = RegKey::open(subkey, false)? else {
         return Ok(None);
     };
@@ -227,6 +257,10 @@ fn read_flags(subkey: &str, value: &str) -> Result<Option<u64>> {
 }
 
 fn write_qword(subkey: &str, value: &str, data: u64) -> Result<()> {
+    #[cfg(test)]
+    if let Some(result) = test_io::with(|io| io.write(subkey, value, &data.to_string())) {
+        return result;
+    }
     let Some(key) = RegKey::open(subkey, true)? else {
         return Ok(());
     };
@@ -280,21 +314,196 @@ fn collect_interface_doh() -> Result<Vec<super::InterfaceDohEntry>> {
     Ok(entries)
 }
 
-fn write_interface_doh_capture(entries: &[super::InterfaceDohEntry]) -> Result<()> {
-    let path = super::interface_doh_capture_path();
-    if path.exists() {
-        return Ok(());
-    }
+/// Persist a resolver-policy capture with the same discipline as `protected-dns.json`: write
+/// the body to a temp file, flush the data, then rename with `MOVEFILE_WRITE_THROUGH`
+/// (`core::atomic_file`). The previous `std::fs::write` + plain `rename` committed neither
+/// the data nor the directory entry, so a crash or power loss could leave a zero-length
+/// capture that every later restore then failed to parse — for ever, because nothing ever
+/// rewrote or removed it (R3-F2).
+fn write_capture_atomically(path: &std::path::Path, body: &str) -> Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)
             .with_context(|| format!("failed to create {}", parent.display()))?;
     }
-    let body = super::format_interface_doh_capture(entries).map_err(|error| anyhow::anyhow!(error))?;
-    let tmp = path.with_extension("tmp");
-    std::fs::write(&tmp, body).with_context(|| format!("failed to write {}", tmp.display()))?;
-    std::fs::rename(&tmp, &path)
+    let temporary = path.with_extension("tmp");
+    if std::fs::symlink_metadata(&temporary).is_ok() {
+        std::fs::remove_file(&temporary)
+            .with_context(|| format!("failed to replace {}", temporary.display()))?;
+    }
+    let mut file = std::fs::File::create(&temporary)
+        .with_context(|| format!("failed to open {}", temporary.display()))?;
+    std::io::Write::write_all(&mut file, body.as_bytes())
+        .with_context(|| format!("failed to write {}", temporary.display()))?;
+    file.sync_all()
+        .with_context(|| format!("failed to flush {}", temporary.display()))?;
+    drop(file);
+    crate::core::atomic_file::replace_blocking(&temporary, path)
         .with_context(|| format!("failed to persist {}", path.display()))?;
+    crate::core::platform_security::secure_private_service_file_if_exists(path)?;
     Ok(())
+}
+
+/// Move an unreadable capture aside instead of deleting it — the same retention discipline
+/// as the snapshot's `quarantine_snapshot`: the corrupt bytes may still be decodable by hand
+/// in a support case, and renaming keeps them out of every later read. Best-effort by
+/// design: a quarantine that itself fails (permissions, a locked file) is logged while the
+/// caller proceeds, because a capture's unreadability must never become a permanent refusal
+/// of Disconnect or uninstall.
+fn quarantine_capture(path: &std::path::Path, reason: &str) {
+    let retained = path.with_extension(format!("corrupt-{}", super::now_unix()));
+    match std::fs::rename(path, &retained) {
+        Ok(()) => {
+            if let Err(error) =
+                crate::core::platform_security::secure_private_service_file_if_exists(&retained)
+            {
+                tracing::warn!(
+                    "dns: the quarantined capture {} could not be restricted: {error:#}",
+                    retained.display()
+                );
+            }
+            tracing::error!(
+                "dns: {reason} — the unreadable capture was kept as {}",
+                retained.display()
+            );
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => {
+            tracing::warn!(
+                "dns: an unreadable capture could not be set aside for diagnosis ({error:#}); \
+                 continuing without it"
+            );
+        }
+    }
+}
+
+/// The durable "originals lost" record kept next to a capture. Suppress writes it when it had
+/// to quarantine an unreadable capture and could not re-read the originals because the live
+/// values were already Tono's own (`EnableAutoDoh=0`, zeroed `DohFlags`); restore reports the
+/// loss while the record exists, and [`retire_lost_captures`] removes it after a committed
+/// restore surfaced it. Without it the loss lived only in the Connect that found it, and the
+/// following restore — seeing no capture at all — reported a clean result.
+fn lost_capture_marker(capture: &std::path::Path) -> std::path::PathBuf {
+    capture.with_extension("lost.json")
+}
+
+// A retained capture whose OS values were already restored must not replay stale originals
+// on another restore or after the user changes settings while disconnected. This marker is
+// written only when deletion fails, and is removed before a new suppression can mutate DNS.
+fn restored_capture_marker(capture: &std::path::Path) -> std::path::PathBuf {
+    capture.with_extension("restored.json")
+}
+
+fn restored_capture_recorded(capture: &std::path::Path) -> Result<bool> {
+    match std::fs::symlink_metadata(restored_capture_marker(capture)) {
+        Ok(_) => Ok(true),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(error).context("failed to check restored DNS capture record"),
+    }
+}
+
+fn clear_restored_capture_record(capture: &std::path::Path) -> Result<()> {
+    match std::fs::remove_file(restored_capture_marker(capture)) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error).context("failed to remove restored DNS capture record"),
+    }
+}
+
+fn retire_restored_capture(capture: &std::path::Path) -> Result<()> {
+    match std::fs::remove_file(capture) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => {
+            if !restored_capture_recorded(capture)? {
+                write_capture_atomically(&restored_capture_marker(capture), "restored\n")?;
+            }
+            tracing::warn!(
+                "dns: restored capture {} could not be deleted ({error}); its retirement was recorded",
+                capture.display()
+            );
+            return Ok(());
+        }
+    }
+    // Without the capture there is no stale original left to replay. A leftover marker only
+    // asks the next suppression to capture current settings again, so it cannot fail release.
+    if let Err(error) = clear_restored_capture_record(capture) {
+        tracing::warn!("dns: restored capture record could not be removed: {error:#}");
+    }
+    Ok(())
+}
+
+fn record_lost_capture(capture: &std::path::Path) -> Result<()> {
+    write_capture_atomically(
+        &lost_capture_marker(capture),
+        &format!("{{\"lost_at\":{}}}\n", super::now_unix()),
+    )
+}
+
+/// Whether a lost-originals record exists. Read-only: restore reports it on every attempt until
+/// it is retired. A marker whose presence cannot be determined counts as present — the loss is
+/// over-reported, never silently dropped.
+fn lost_capture_recorded(capture: &std::path::Path) -> bool {
+    let marker = lost_capture_marker(capture);
+    match std::fs::symlink_metadata(&marker) {
+        Ok(_) => true,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
+        Err(error) => {
+            tracing::warn!(
+                "dns: the lost-capture record {} could not be checked: {error:#}",
+                marker.display()
+            );
+            true
+        }
+    }
+}
+
+/// Remove the lost-originals record, if any. A marker that cannot be deleted stays present: it
+/// is reported again on the next restore, never silently dropped, and never a refusal of the
+/// release itself.
+fn take_lost_capture(capture: &std::path::Path) -> bool {
+    let marker = lost_capture_marker(capture);
+    match std::fs::remove_file(&marker) {
+        Ok(()) => true,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
+        Err(error) => {
+            tracing::warn!(
+                "dns: the lost-capture record {} could not be removed: {error:#}",
+                marker.display()
+            );
+            true
+        }
+    }
+}
+
+/// Retire the capture-loss evidence a committed restore has just surfaced: move a capture that
+/// still cannot be read aside for diagnosis and remove the lost-originals records. The facade
+/// calls this only after the whole restore succeeded and its note reached `last_error`;
+/// [`restore_encrypted_dns`] itself only reads the evidence. Best-effort: anything left behind
+/// is reported again by the next restore, which is the safe direction.
+pub(super) fn retire_lost_captures() -> Result<()> {
+    let global = super::encrypted_dns_capture_path();
+    if let Err(error) = read_capture_file() {
+        quarantine_capture(
+            &global,
+            &format!("encrypted DNS capture could not be read ({error:#})"),
+        );
+    }
+    take_lost_capture(&global);
+    let interface = super::interface_doh_capture_path();
+    if let Err(error) = read_interface_doh_capture() {
+        quarantine_capture(
+            &interface,
+            &format!("interface DoH capture could not be read ({error:#})"),
+        );
+    }
+    take_lost_capture(&interface);
+    Ok(())
+}
+
+fn write_interface_doh_capture(entries: &[super::InterfaceDohEntry]) -> Result<()> {
+    let body =
+        super::format_interface_doh_capture(entries).map_err(|error| anyhow::anyhow!(error))?;
+    write_capture_atomically(&super::interface_doh_capture_path(), &body)
 }
 
 fn read_interface_doh_capture() -> Result<Option<Vec<super::InterfaceDohEntry>>> {
@@ -309,18 +518,57 @@ fn read_interface_doh_capture() -> Result<Option<Vec<super::InterfaceDohEntry>>>
 }
 
 fn delete_interface_doh_capture() -> Result<()> {
-    let path = super::interface_doh_capture_path();
-    match std::fs::remove_file(&path) {
-        Ok(()) => Ok(()),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(error).with_context(|| format!("failed to delete {}", path.display())),
-    }
+    retire_restored_capture(&super::interface_doh_capture_path())
 }
 
 fn suppress_interface_doh() -> Result<()> {
     let current = collect_interface_doh()?;
-    if read_interface_doh_capture()?.is_none() {
-        write_interface_doh_capture(&current)?;
+    let path = super::interface_doh_capture_path();
+    match read_interface_doh_capture() {
+        _ if restored_capture_recorded(&path)? => {
+            // Even an empty set is now the user's configuration, not suppressed originals.
+            write_interface_doh_capture(&current)?;
+            clear_restored_capture_record(&path)?;
+        }
+        // A capture this build can read stays in force: it may have been written by an older
+        // build mid-session (its cross-upgrade role), and the flags below may already be
+        // zeroed by that session.
+        Ok(Some(mut saved)) => {
+            let before = saved.len();
+            for entry in &current {
+                if !saved.iter().any(|original| {
+                    original.guid.eq_ignore_ascii_case(&entry.guid)
+                        && original.family.eq_ignore_ascii_case(&entry.family)
+                        && original.server.eq_ignore_ascii_case(&entry.server)
+                }) {
+                    saved.push(entry.clone());
+                }
+            }
+            if saved.len() != before {
+                write_interface_doh_capture(&saved)?;
+            }
+        }
+        unreadable => {
+            if let Err(error) = unreadable {
+                let path = super::interface_doh_capture_path();
+                // Templates an earlier session already zeroed are gone from the live set, so
+                // whatever is captured below can be incomplete: the loss must reach restore.
+                // Record first, rename second: until the record is durable the unreadable file
+                // in place is the only evidence of the loss, and a failed record keeps it there.
+                record_lost_capture(&path)?;
+                quarantine_capture(
+                    &path,
+                    &format!("interface DoH capture could not be read ({error:#})"),
+                );
+            }
+            // Only a non-empty live set is a capture worth writing: this build zeroes
+            // `DohFlags` and `collect_interface_doh` reports only enabled templates, so an
+            // empty set after our own suppress is indistinguishable from "the user had
+            // none" — capturing it would fabricate an empty "original".
+            if !current.is_empty() {
+                write_interface_doh_capture(&current)?;
+            }
+        }
     }
     for entry in current {
         write_qword(
@@ -332,19 +580,42 @@ fn suppress_interface_doh() -> Result<()> {
     Ok(())
 }
 
-fn restore_interface_doh() -> Result<()> {
-    let Some(entries) = read_interface_doh_capture()? else {
-        return Ok(());
-    };
-    for entry in entries {
-        write_qword(
-            &interface_doh_key(&entry.guid, &entry.family, &entry.server),
-            DOH_FLAGS,
-            entry.flags,
-        )?;
+/// Put the captured per-adapter flags back and delete the capture. An unreadable capture is
+/// treated as "no capture": the templates it named are unrecoverable from its bytes, so the
+/// in-place (suppressed) flags stand as the restore result — reported to the caller via the
+/// `true` return, never as a permanent refusal. The loss evidence (the unreadable file, a
+/// lost-originals record) is only read here, never consumed: the facade retires it with
+/// [`retire_lost_captures`] once the whole restore has committed and the loss was surfaced,
+/// so a restore that fails on a later leg, or whose result is dropped, cannot erase it.
+/// Idempotent when no capture exists.
+fn restore_interface_doh() -> Result<bool> {
+    let path = super::interface_doh_capture_path();
+    if restored_capture_recorded(&path)? {
+        delete_interface_doh_capture()?;
+        return Ok(lost_capture_recorded(&path));
     }
-    delete_interface_doh_capture()?;
-    Ok(())
+    let unreadable = match read_interface_doh_capture() {
+        Ok(Some(entries)) => {
+            for entry in entries {
+                write_qword(
+                    &interface_doh_key(&entry.guid, &entry.family, &entry.server),
+                    DOH_FLAGS,
+                    entry.flags,
+                )?;
+            }
+            delete_interface_doh_capture()?;
+            false
+        }
+        Ok(None) => false,
+        Err(error) => {
+            tracing::error!(
+                "dns: interface DoH capture could not be read ({error:#}); the in-place flags \
+                 stand and the loss is reported"
+            );
+            true
+        }
+    };
+    Ok(unreadable | lost_capture_recorded(&path))
 }
 
 /// One adapter that can actually carry a resolver, with the interface indices its live
@@ -360,9 +631,20 @@ pub(super) struct ActiveAdapter {
     pub ipv4_index: u32,
     /// IPv6 interface index, or 0 when IPv6 is not bound.
     pub ipv6_index: u32,
+    /// Effective resolver addresses, only populated when DNS read-back was requested.
+    /// `None` (enumeration skipped DNS) must never count as an empty resolver list.
+    pub dns_servers: Option<Vec<std::net::IpAddr>>,
 }
 
 fn active_adapters() -> Result<Vec<ActiveAdapter>> {
+    active_adapters_read(false)
+}
+
+fn active_adapters_read(include_dns: bool) -> Result<Vec<ActiveAdapter>> {
+    #[cfg(test)]
+    if let Some(adapters) = test_io::with(|io| io.adapters(include_dns)) {
+        return Ok(adapters);
+    }
     // `Parameters\Interfaces` is historical state, not a list of live adapters: it commonly
     // contains disabled, unplugged, removed, and pseudo interfaces. Those either have no
     // Win32_NetworkAdapterConfiguration object or return 84 (IP not enabled), which used to
@@ -375,7 +657,11 @@ fn active_adapters() -> Result<Vec<ActiveAdapter>> {
     // stays a single cheap in-process call.
     let flags = GAA_FLAG_SKIP_ANYCAST
         | GAA_FLAG_SKIP_MULTICAST
-        | GAA_FLAG_SKIP_DNS_SERVER
+        | if include_dns {
+            0
+        } else {
+            GAA_FLAG_SKIP_DNS_SERVER
+        }
         | GAA_FLAG_SKIP_FRIENDLY_NAME;
     let mut bytes = INITIAL_BUFFER_BYTES;
     for _ in 0..MAX_BUFFER_ATTEMPTS {
@@ -431,11 +717,21 @@ fn active_adapters() -> Result<Vec<ActiveAdapter>> {
                     .iter()
                     .any(|saved| saved.guid.eq_ignore_ascii_case(guid))
                 {
+                    let dns_servers = if include_dns {
+                        // SAFETY: the DNS records and socket addresses belong to this
+                        // successful IP Helper buffer and are copied before it is dropped.
+                        Some(unsafe {
+                            native_apply::read_dns_servers(adapter.FirstDnsServerAddress)
+                        }?)
+                    } else {
+                        None
+                    };
                     adapters.push(ActiveAdapter {
                         guid: guid.to_owned(),
                         luid,
                         ipv4_index,
                         ipv6_index,
+                        dns_servers,
                     });
                 }
             }
@@ -500,10 +796,29 @@ pub(super) fn collect_adapters() -> Result<Vec<AdapterDnsSnapshot>> {
         .collect()
 }
 
-/// Live application, **per address family**, in ONE PowerShell process (cold start is the
-/// dominant cost). The registry writes are the authoritative record this module verifies
-/// against; the live apply is what makes the running resolver pick the change up without an
-/// interface bounce.
+/// Every interface subkey in both `Parameters\Interfaces` key spaces — the registry's own
+/// record, which `active_adapters` deliberately narrows to live adapters but which outlives
+/// them: disabled, unplugged and removed interfaces keep their last written DNS values. The
+/// corrupt-snapshot recovery needs exactly this longer memory, because a TUN endpoint left on
+/// an inactive adapter is invisible to [`collect_adapters`] and re-enters the next enable as a
+/// poisoned "original" the moment the adapter comes back. Reads only; healing stays a decision
+/// for the facade.
+pub(super) fn collect_interface_key_adapters() -> Result<Vec<AdapterDnsSnapshot>> {
+    let mut guids: Vec<String> = Vec::new();
+    for root in [TCPIP4_INTERFACES, TCPIP6_INTERFACES] {
+        for guid in enum_subkeys(root)? {
+            if !guids.iter().any(|known| known.eq_ignore_ascii_case(&guid)) {
+                guids.push(guid);
+            }
+        }
+    }
+    guids.iter().map(|guid| read_adapter(guid, None)).collect()
+}
+
+/// Per-family inputs for native protected apply or legacy apply/restore. The latter batches
+/// ONE PowerShell process (cold start is the dominant cost). The exact snapshot, not this
+/// normalized live list, remains restoration authority. Live application makes the running
+/// resolver pick the change up without an interface bounce. The legacy mechanism is:
 ///
 /// * IPv4 goes through CIM
 ///   (`Win32_NetworkAdapterConfiguration.SetDNSServerSearchOrder`, the architecture doc's
@@ -524,8 +839,9 @@ pub(super) fn collect_adapters() -> Result<Vec<AdapterDnsSnapshot>> {
 ///   unsaved Tono-owned DNS address remains" when restoring
 ///   (a restored family's servers may legitimately come back from DHCP in another order).
 ///   A family with no live DNS instance, an interface index of 0, or a CIM `ReturnValue` of
-///   84 ("IP not enabled on adapter") is a non-participant: there is no resolver on it to
-///   leak, and recording it as a failure is what used to pin `live_apply_failed` on forever.
+///   84 ("IP not enabled on adapter") is a non-participant for *that family*: there is no
+///   resolver on it to leak. IPv4 returning 84 must not skip the IPv6 block. Recording the
+///   whole adapter as a failure is what used to pin `live_apply_failed` on forever.
 ///
 /// The script prints `fails|skips`; results are recorded per adapter and required for any
 /// restore proof (see the module docs). An adapter that reports *no* configurable family at
@@ -533,8 +849,11 @@ pub(super) fn collect_adapters() -> Result<Vec<AdapterDnsSnapshot>> {
 /// pseudo adapter and bricking the machine on it.
 ///
 /// 注意:运行时尚未实测 — wrapped so any failure is logged, never fatal.
+#[derive(Clone)]
 struct LiveApplyEntry {
     guid: String,
+    /// Fresh runtime identity used to reject adapter replacement during native read-back.
+    luid: u64,
     /// Live IPv4/IPv6 interface indices; 0 means the family is not bound here.
     ipv4_index: u32,
     ipv6_index: u32,
@@ -598,13 +917,17 @@ fn spawn_before_deadline(
     let spawn_args = args.iter().map(|arg| (*arg).to_owned()).collect::<Vec<_>>();
     let (sender, receiver) = std::sync::mpsc::sync_channel::<Result<std::process::Child>>(0);
     std::thread::spawn(move || {
-        let spawned = std::process::Command::new(&spawn_program)
-            .args(&spawn_args)
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .spawn()
-            .with_context(|| format!("failed to start {spawn_program}"));
+        // Created suspended and in the exit Job before it runs, so a caller that abandons this run
+        // and exits takes the child, and anything it started, with it. A child that cannot join
+        // is terminated unrun and this start fails; it never runs unbound.
+        let spawned = crate::core::process::spawn_bound_to_process_exit(
+            std::process::Command::new(&spawn_program)
+                .args(&spawn_args)
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped()),
+        )
+        .with_context(|| format!("failed to start {spawn_program}"));
         if let Err(std::sync::mpsc::SendError(Ok(mut child))) = sender.send(spawned) {
             let _ = child.kill();
             let _ = child.wait();
@@ -721,9 +1044,9 @@ function Set-AdapterDns($g, $i4, $i6, $v4, $v6, $restoring) {
 $c = Get-CimInstance Win32_NetworkAdapterConfiguration -Filter "SettingID='$g'" -ErrorAction SilentlyContinue
 if ($null -eq $c) { $global:fails += $g; return }
 $r = Invoke-CimMethod -InputObject $c -MethodName SetDNSServerSearchOrder -Arguments @{ DNSServerSearchOrder = $v4 } -ErrorAction SilentlyContinue
-if ($r -and $r.ReturnValue -eq 84) { $global:skips += $g; return }
-if (-not $r -or $r.ReturnValue -ne 0) { $global:fails += $g; return }
-$touched = $true
+if ($r -and $r.ReturnValue -eq 84) { $v4 = $null }
+elseif (-not $r -or $r.ReturnValue -ne 0) { $global:fails += $g; return }
+else { $touched = $true }
   }
   if ($i6 -ne 0) {
 $e = 0
@@ -749,6 +1072,24 @@ $touched = $true
   if (-not (Test-Family $i6 'IPv6' $v6 $restoring)) { $global:fails += $g; return }
 }
 "#;
+
+#[cfg(test)]
+#[test]
+fn ipv4_not_enabled_does_not_skip_the_ipv6_block() {
+    let line = SCRIPT_PRELUDE
+        .lines()
+        .find(|line| line.contains("ReturnValue -eq 84"))
+        .expect("CIM 84 branch");
+    assert!(
+        !line.contains("return"),
+        "IPv4 CIM 84 must not leave Set-AdapterDns before IPv6: {line}"
+    );
+    let at_84 = SCRIPT_PRELUDE
+        .find("ReturnValue -eq 84")
+        .expect("84");
+    let at_v6 = SCRIPT_PRELUDE.find("if ($i6 -ne 0)").expect("ipv6 block");
+    assert!(at_84 < at_v6);
+}
 
 /// The result marker the batch must print. Its presence is what distinguishes "the script
 /// ran and found no failures" from "the script produced nothing useful"; without it the
@@ -779,6 +1120,10 @@ fn parse_guid_list(value: &str) -> std::collections::BTreeSet<String> {
 }
 
 fn live_apply_batch(entries: &[LiveApplyEntry], mode: ApplyMode) -> Vec<(String, bool)> {
+    #[cfg(test)]
+    if let Some(results) = test_io::with(|io| io.legacy(entries, mode)) {
+        return results;
+    }
     let restoring = mode == ApplyMode::Restore;
     let mut script = SCRIPT_PRELUDE.replace(PROTECTED_DNS_V4_TOKEN, super::PROTECTED_DNS_V4);
     let mut rejected: std::collections::BTreeSet<String> = Default::default();
@@ -884,6 +1229,10 @@ fn live_apply_with_retry(entries: Vec<LiveApplyEntry>, mode: ApplyMode) -> Vec<(
 /// cache entries served while DNS pointed at the loopback core are the classic post-
 /// disconnect pollution; without a flush, restored resolvers keep them until TTL expiry.
 pub(super) fn flush_resolver_cache() -> Result<()> {
+    #[cfg(test)]
+    if test_io::active() {
+        return Ok(()); // No host-wide cache mutation in the isolated apply fixture.
+    }
     use windows_sys::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryW};
     // DnsFlushResolverCache (Vista+) is exported by dnsapi.dll but is not in
     // any SDK import library — it must be resolved at runtime (the same
@@ -916,6 +1265,10 @@ pub(super) fn flush_resolver_cache() -> Result<()> {
 /// Whether the adapter's per-family registry subkey exists. Single-stack adapters lack one
 /// family entirely; both apply and verify must skip the absent family instead of failing.
 fn key_exists(subkey: &str) -> Result<bool> {
+    #[cfg(test)]
+    if let Some(exists) = test_io::with(|io| io.keys.contains_key(subkey)) {
+        return Ok(exists);
+    }
     Ok(RegKey::open(subkey, false)?.is_some())
 }
 
@@ -923,8 +1276,13 @@ fn key_exists(subkey: &str) -> Result<bool> {
 /// snapshot by exact string — while `active` only supplies the live interface indices.
 fn apply_protected(guid: &str, active: &ActiveAdapter) -> Result<LiveApplyEntry> {
     if key_exists(&v4_key(guid))? {
-        write_sz(&v4_key(guid), NAME_SERVER, super::PROTECTED_DNS_V4)?;
+        // `ProfileNameServer` first: an apply stopped between these two writes must never leave
+        // the TUN address in IPv4 `NameServer` alone, which is the WinTUN interface key's own
+        // shape and is excluded from the corrupt-snapshot recovery's evidence
+        // (`is_inactive_tunnel_interface_key`). Stopped here, the adapter keeps either its
+        // untouched originals or a `ProfileNameServer` that keeps it in that evidence.
         write_sz(&v4_key(guid), PROFILE_NAME_SERVER, super::PROTECTED_DNS_V4)?;
+        write_sz(&v4_key(guid), NAME_SERVER, super::PROTECTED_DNS_V4)?;
     }
     if key_exists(&v6_key(guid))? {
         // Empty, not `::1`: an adapter pointed at `::1` has a configured IPv6 resolver that
@@ -938,6 +1296,7 @@ fn apply_protected(guid: &str, active: &ActiveAdapter) -> Result<LiveApplyEntry>
     }
     Ok(LiveApplyEntry {
         guid: guid.to_owned(),
+        luid: active.luid,
         ipv4_index: active.ipv4_index,
         ipv6_index: active.ipv6_index,
         // One family per list: the IPv4 mechanism never sees an IPv6 address and the IPv6
@@ -950,12 +1309,8 @@ fn apply_protected(guid: &str, active: &ActiveAdapter) -> Result<LiveApplyEntry>
 
 pub(super) fn apply_protected_set(guids: &[String]) -> Result<Vec<(String, bool)>> {
     let active = active_adapter_map()?;
-    // An adapter that is no longer active has no live resolver to point anywhere.
-    let mut results = guids
-        .iter()
-        .filter(|guid| !active.contains_key(&guid.to_ascii_uppercase()))
-        .map(|guid| (guid.clone(), true))
-        .collect::<Vec<_>>();
+    // Absence is a non-participant, not effective-apply success. Omit it so the facade keeps
+    // its durable pending bit for reappearance without repeatedly writing healthy adapters.
     let entries = guids
         .iter()
         .filter_map(|guid| {
@@ -965,8 +1320,7 @@ pub(super) fn apply_protected_set(guids: &[String]) -> Result<Vec<(String, bool)
         })
         .map(|(guid, adapter)| apply_protected(guid, adapter))
         .collect::<Result<Vec<_>>>()?;
-    results.extend(live_apply_with_retry(entries, ApplyMode::Protect));
-    Ok(results)
+    Ok(native_apply::apply(&entries))
 }
 
 fn restore_value(subkey: &str, value: &str, saved: &Option<String>) -> Result<()> {
@@ -979,6 +1333,7 @@ fn restore_value(subkey: &str, value: &str, saved: &Option<String>) -> Result<()
 fn restore_entry(adapter: &AdapterDnsSnapshot, active: &ActiveAdapter) -> LiveApplyEntry {
     LiveApplyEntry {
         guid: adapter.interface_guid.clone(),
+        luid: active.luid,
         ipv4_index: active.ipv4_index,
         ipv6_index: active.ipv6_index,
         ipv4_servers: super::restored_live_servers_v4(adapter),
@@ -1091,6 +1446,10 @@ const NRPT_CONFIG_DNS: u32 = 0x8;
 const NRPT_VERSION: u32 = 2;
 
 fn read_dword(subkey: &str, value: &str) -> Result<Option<u32>> {
+    #[cfg(test)]
+    if let Some(value) = test_io::with(|io| io.read(subkey, value)) {
+        return value.map(|value| value.parse::<u32>().context("invalid fixture DWORD")).transpose();
+    }
     let Some(key) = RegKey::open(subkey, false)? else {
         return Ok(None);
     };
@@ -1120,6 +1479,10 @@ fn read_dword(subkey: &str, value: &str) -> Result<Option<u32>> {
 }
 
 fn write_dword(subkey: &str, value: &str, data: u32) -> Result<()> {
+    #[cfg(test)]
+    if let Some(result) = test_io::with(|io| io.write(subkey, value, &data.to_string())) {
+        return result;
+    }
     let Some(key) = RegKey::open(subkey, true)? else {
         bail!("registry key {subkey} does not exist");
     };
@@ -1198,6 +1561,10 @@ fn create_key(subkey: &str) -> Result<RegKey> {
 }
 
 fn delete_key(subkey: &str) -> Result<()> {
+    #[cfg(test)]
+    if test_io::with(|io| io.keys.remove(subkey)).is_some() {
+        return Ok(()); // Deleting an absent fixture key is success, as on the host.
+    }
     let wide = super_wide(subkey);
     // SAFETY: NUL-terminated key path under HKLM.
     let status = unsafe { RegDeleteKeyW(HKEY_LOCAL_MACHINE, wide.as_ptr()) };
@@ -1209,20 +1576,10 @@ fn delete_key(subkey: &str) -> Result<()> {
 }
 
 fn write_capture_file(enable_auto_doh: Option<u32>) -> Result<()> {
-    let path = super::encrypted_dns_capture_path();
-    if path.exists() {
-        return Ok(());
-    }
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .with_context(|| format!("failed to create {}", parent.display()))?;
-    }
-    let tmp = path.with_extension("tmp");
-    std::fs::write(&tmp, super::format_encrypted_dns_capture(enable_auto_doh))
-        .with_context(|| format!("failed to write {}", tmp.display()))?;
-    std::fs::rename(&tmp, &path)
-        .with_context(|| format!("failed to persist {}", path.display()))?;
-    Ok(())
+    write_capture_atomically(
+        &super::encrypted_dns_capture_path(),
+        &super::format_encrypted_dns_capture(enable_auto_doh),
+    )
 }
 
 fn read_capture_file() -> Result<Option<Option<u32>>> {
@@ -1237,19 +1594,30 @@ fn read_capture_file() -> Result<Option<Option<u32>>> {
 }
 
 fn delete_capture_file() -> Result<()> {
-    let path = super::encrypted_dns_capture_path();
-    match std::fs::remove_file(&path) {
-        Ok(()) => Ok(()),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(error).with_context(|| format!("failed to delete {}", path.display())),
-    }
+    retire_restored_capture(&super::encrypted_dns_capture_path())
 }
 
 fn nrpt_rule_key() -> String {
     format!(r"{NRPT_ROOT}\{NRPT_RULE_GUID}")
 }
 
+/// Delete Tono's NRPT catch-all and read back that it is gone. Only Tono's key is touched, and
+/// an absent key counts as success.
+pub(super) fn remove_nrpt_rule() -> Result<()> {
+    let key = nrpt_rule_key();
+    delete_key(&key)?;
+    anyhow::ensure!(
+        !key_exists(&key)?,
+        "Tono's NRPT rule {key} is still present after the delete"
+    );
+    Ok(())
+}
+
 fn install_nrpt() -> Result<()> {
+    #[cfg(test)]
+    if test_io::active() {
+        return Ok(()); // Capture tests never create an NRPT rule on the test host.
+    }
     let _root = create_key(NRPT_ROOT)?;
     drop(_root);
     let key = nrpt_rule_key();
@@ -1263,9 +1631,47 @@ fn install_nrpt() -> Result<()> {
 }
 
 /// Snapshot Encrypted DNS, turn DoH off, and force the DNS Client through TUN DNS.
+///
+/// The capture decision is made from what can be *read*, not from bare existence: a readable
+/// capture is kept (cross-upgrade semantics), a missing one is (re)written, and an unreadable
+/// one is quarantined before being rewritten — but only from a value this build did not
+/// write, so our own `EnableAutoDoh=0` can never be re-recorded as the user's "original".
+/// When nothing can be rewritten, a lost-originals record (`lost_capture_marker`) is left
+/// instead, so the next restore reports the loss rather than a clean result.
 pub(super) fn suppress_encrypted_dns() -> Result<()> {
-    if read_capture_file()?.is_none() {
-        write_capture_file(read_dword(DNSCACHE_PARAMETERS, ENABLE_AUTO_DOH)?)?;
+    #[cfg(test)]
+    if test_io::with(|io| !io.apply_resolver_policy).unwrap_or(false) {
+        return Ok(()); // Resolver-policy OS effects are outside this apply regression.
+    }
+    // Both the quarantined-rewrite and the missing-file (re)capture read the live value
+    // before it is zeroed below — after that write it is ours, not the user's.
+    let path = super::encrypted_dns_capture_path();
+    match read_capture_file() {
+        _ if restored_capture_recorded(&path)? => {
+            write_capture_file(read_dword(DNSCACHE_PARAMETERS, ENABLE_AUTO_DOH)?)?;
+            clear_restored_capture_record(&path)?;
+        }
+        Ok(Some(_)) => {}
+        unreadable => {
+            let current = read_dword(DNSCACHE_PARAMETERS, ENABLE_AUTO_DOH)?;
+            let live_is_ours = current == Some(super::ENABLE_AUTO_DOH_OFF);
+            if let Err(error) = unreadable {
+                if live_is_ours {
+                    // The live `0` is ours from an earlier session: the original is gone, and
+                    // the restore that follows must say so instead of finding no capture.
+                    // Record first, rename second: a failed record keeps the unreadable file
+                    // in place as the evidence.
+                    record_lost_capture(&super::encrypted_dns_capture_path())?;
+                }
+                quarantine_capture(
+                    &super::encrypted_dns_capture_path(),
+                    &format!("encrypted DNS capture could not be read ({error:#})"),
+                );
+            }
+            if !live_is_ours {
+                write_capture_file(current)?;
+            }
+        }
     }
     write_dword(DNSCACHE_PARAMETERS, ENABLE_AUTO_DOH, super::ENABLE_AUTO_DOH_OFF)?;
     if let Err(error) = suppress_interface_doh() {
@@ -1276,23 +1682,247 @@ pub(super) fn suppress_encrypted_dns() -> Result<()> {
 }
 
 /// Put `EnableAutoDoh` back, restore per-adapter DoH flags, and delete our NRPT rule.
-/// Idempotent when no capture exists.
-pub(super) fn restore_encrypted_dns() -> Result<()> {
+/// Idempotent when no capture exists. Returns `true` when a capture is unreadable, or an
+/// earlier suppress left a lost-originals record: the in-place (suppressed) values then stand
+/// as the restore result — the saved originals are unrecoverable — and the caller must surface
+/// that loss instead of reporting a clean restore. An unreadable capture must never refuse the
+/// release itself: that refusal was permanent, because the file was neither rewritten nor
+/// removed. The loss evidence is only read here; it stays in place for every retry until the
+/// facade calls [`retire_lost_captures`] after the whole restore committed, so a failure on a
+/// later leg or in the facade, or a timed-out call whose result is dropped, cannot erase it.
+pub(super) fn restore_encrypted_dns() -> Result<bool> {
+    // Fixture-isolated recovery tests still count policy restores. The registry legs below
+    // (NRPT delete, EnableAutoDoh, per-adapter DohFlags) route into the fixture's key map,
+    // so no host policy is touched, while the capture files run for real against the
+    // fixture's redirected capture directory.
+    #[cfg(test)]
+    let _ = test_io::with(|io| io.policy_restores += 1);
     if let Err(error) = delete_key(&nrpt_rule_key()) {
         tracing::error!("dns: Tono NRPT rule could not be removed: {error:#}");
         return Err(error);
     }
-    if let Some(saved) = read_capture_file()? {
-        match saved {
-            Some(value) => write_dword(DNSCACHE_PARAMETERS, ENABLE_AUTO_DOH, value)?,
-            None => delete_value(DNSCACHE_PARAMETERS, ENABLE_AUTO_DOH)?,
+    let mut lost = false;
+    match read_capture_file() {
+        _ if restored_capture_recorded(&super::encrypted_dns_capture_path())? => {
+            delete_capture_file()?;
+        }
+        Ok(Some(saved)) => {
+            match saved {
+                Some(value) => write_dword(DNSCACHE_PARAMETERS, ENABLE_AUTO_DOH, value)?,
+                None => delete_value(DNSCACHE_PARAMETERS, ENABLE_AUTO_DOH)?,
+            }
+            delete_capture_file()?;
+        }
+        Ok(None) => {}
+        Err(error) => {
+            tracing::error!(
+                "dns: encrypted DNS capture could not be read ({error:#}); the in-place value \
+                 stands and the loss is reported"
+            );
+            lost = true;
         }
     }
-    delete_capture_file()?;
-    if let Err(error) = restore_interface_doh() {
-        tracing::error!("dns: per-adapter Encrypted DNS restore failed: {error:#}");
-        return Err(error);
+    lost |= lost_capture_recorded(&super::encrypted_dns_capture_path());
+    match restore_interface_doh() {
+        Err(error) => {
+            tracing::error!("dns: per-adapter Encrypted DNS restore failed: {error:#}");
+            return Err(error);
+        }
+        Ok(interface_lost) => lost |= interface_lost,
+    }
+    Ok(lost)
+}
+
+/// Group Policy's NRPT store. Whenever it holds any rule, the DNS Client applies it alone and
+/// ignores the local store under [`NRPT_ROOT`], where Tono's catch-all lives.
+const NRPT_POLICY_ROOT: &str = r"SOFTWARE\Policies\Microsoft\Windows NT\DNSClient\DnsPolicyConfig";
+const RESOLVER_POLICY_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+const SYSTEM_LOOKUP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+static SYSTEM_LOOKUP_IN_FLIGHT: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+fn read_nrpt_store(root: &str) -> Result<Vec<super::EffectiveNrptRule>> {
+    let mut rules = Vec::new();
+    for name in enum_subkeys(root)? {
+        let key = format!(r"{root}\{name}");
+        let namespaces = read_sz(&key, "Name")?
+            .map(|value| {
+                value
+                    .split('\0')
+                    .filter(|entry| !entry.is_empty())
+                    .map(str::to_owned)
+                    .collect()
+            })
+            .unwrap_or_default();
+        // Only a rule whose options select generic DNS servers redirects resolution; the value
+        // alone (left behind, or on a DNSSEC-only rule) does not.
+        let generic = read_dword(&key, "ConfigOptions")?
+            .is_some_and(|options| options & NRPT_CONFIG_DNS != 0);
+        let generic_dns_servers = if generic {
+            read_sz(&key, "GenericDNSServers")?
+                .map(|value| {
+                    value
+                        .split(|c: char| c == ';' || c == ',' || c == '\0' || c.is_whitespace())
+                        .filter(|entry| !entry.is_empty())
+                        .map(str::to_owned)
+                        .collect()
+                })
+                .unwrap_or_default()
+        } else {
+            Vec::new()
+        };
+        rules.push(super::EffectiveNrptRule {
+            namespaces,
+            generic_dns_servers,
+            tono_owned: root == NRPT_ROOT && name.eq_ignore_ascii_case(NRPT_RULE_GUID),
+        });
+    }
+    Ok(rules)
+}
+
+fn effective_nrpt_rules_blocking() -> Result<Vec<super::EffectiveNrptRule>> {
+    let policy = read_nrpt_store(NRPT_POLICY_ROOT)?;
+    if !policy.is_empty() {
+        return Ok(policy);
+    }
+    read_nrpt_store(NRPT_ROOT)
+}
+
+/// X2-2: the NRPT rules the DNS Client applies now — the Group Policy store when it has any rule,
+/// the local store otherwise. Read-only and bounded; runs outside the DNS operation lock.
+pub(super) async fn effective_nrpt_rules() -> std::result::Result<Vec<super::EffectiveNrptRule>, String> {
+    #[cfg(test)]
+    if let Some(injected) = test_io::with(|io| io.effective_nrpt.clone()) {
+        return injected;
+    }
+    match tokio::time::timeout(
+        RESOLVER_POLICY_READ_TIMEOUT,
+        tokio::task::spawn_blocking(effective_nrpt_rules_blocking),
+    )
+    .await
+    {
+        Ok(Ok(Ok(rules))) => Ok(rules),
+        Ok(Ok(Err(error))) => Err(format!("{error:#}")),
+        Ok(Err(error)) => Err(format!("NRPT read worker failed: {error}")),
+        Err(_) => Err(format!(
+            "NRPT read exceeded {}s",
+            RESOLVER_POLICY_READ_TIMEOUT.as_secs()
+        )),
+    }
+}
+
+/// X2-2: one A lookup through the Windows DNS Client with its cache and hosts file bypassed, so
+/// the answer comes from whichever resolver the effective policy selects right now. At most one
+/// lookup is outstanding: a query sent to a resolver WFP drops can outlive the bound, and the
+/// next observation must not pile another blocked thread behind it.
+pub(super) async fn system_lookup_a(host: &'static str) -> std::result::Result<Vec<std::net::Ipv4Addr>, String> {
+    use std::sync::atomic::Ordering;
+    #[cfg(test)]
+    if let Some(injected) = test_io::with(|io| io.system_lookup.clone()) {
+        return injected;
+    }
+    if SYSTEM_LOOKUP_IN_FLIGHT.swap(true, Ordering::AcqRel) {
+        return Err("the previous system lookup has still not returned".to_owned());
+    }
+    let worker = tokio::task::spawn_blocking(move || {
+        let result = system_lookup_a_blocking(host);
+        SYSTEM_LOOKUP_IN_FLIGHT.store(false, Ordering::Release);
+        result
+    });
+    match tokio::time::timeout(SYSTEM_LOOKUP_TIMEOUT, worker).await {
+        Ok(Ok(result)) => result,
+        Ok(Err(error)) => {
+            SYSTEM_LOOKUP_IN_FLIGHT.store(false, Ordering::Release);
+            Err(format!("system lookup worker failed: {error}"))
+        }
+        Err(_) => Err(format!(
+            "the system lookup exceeded {}s",
+            SYSTEM_LOOKUP_TIMEOUT.as_secs()
+        )),
+    }
+}
+
+fn system_lookup_a_blocking(host: &str) -> std::result::Result<Vec<std::net::Ipv4Addr>, String> {
+    use windows_sys::Win32::NetworkManagement::Dns::{
+        DNS_QUERY_BYPASS_CACHE, DNS_QUERY_NO_HOSTS_FILE, DNS_QUERY_TREAT_AS_FQDN, DNS_RECORDA,
+        DNS_TYPE_A, DnsFree, DnsFreeRecordList, DnsQuery_W,
+    };
+    let name = super_wide(host);
+    let mut records: *mut DNS_RECORDA = std::ptr::null_mut();
+    // SAFETY: `name` is NUL-terminated and alive for the call; `records` is a valid out-pointer
+    // whose list, when returned, is released exactly once below.
+    let status = unsafe {
+        DnsQuery_W(
+            name.as_ptr(),
+            DNS_TYPE_A,
+            DNS_QUERY_BYPASS_CACHE | DNS_QUERY_NO_HOSTS_FILE | DNS_QUERY_TREAT_AS_FQDN,
+            std::ptr::null_mut(),
+            &mut records,
+            std::ptr::null_mut(),
+        )
+    };
+    let mut addresses = Vec::new();
+    let mut cursor = records;
+    while status == 0 && !cursor.is_null() {
+        // SAFETY: DNSAPI returned a well-formed list that stays alive until `DnsFree` below.
+        let record = unsafe { &*cursor };
+        if record.wType == DNS_TYPE_A {
+            // SAFETY: an A record's data is `DNS_A_DATA`; the address is in network order.
+            let raw = unsafe { record.Data.A.IpAddress };
+            addresses.push(std::net::Ipv4Addr::from(raw.to_ne_bytes()));
+        }
+        cursor = record.pNext;
+    }
+    if !records.is_null() {
+        // SAFETY: the list came from `DnsQuery_W` and is freed once.
+        unsafe { DnsFree(records.cast_const().cast(), DnsFreeRecordList) };
+    }
+    if status != 0 {
+        return Err(format!("DnsQuery_W returned {status}"));
+    }
+    Ok(addresses)
+}
+
+/// Per-suffix NRPT rules for the secondary hold. Never writes the catch-all
+/// name `.` and never reuses the catch-all key. A refused name writes nothing.
+pub(super) fn install_selective_nrpt() -> Result<()> {
+    use crate::core::selective_fail_open::{self, CATCH_ALL_NRPT_GUID, SINKHOLE_DNS};
+    let mut prepared = Vec::new();
+    for rule in selective_fail_open::NRPT_RULES {
+        if rule.guid.eq_ignore_ascii_case(CATCH_ALL_NRPT_GUID) {
+            bail!("selective NRPT guid collides with the catch-all");
+        }
+        let names = selective_fail_open::names_for_rule(rule)
+            .context("selective NRPT suffix was refused")?;
+        if names.iter().any(|name| !selective_fail_open::nrpt_name_is_safe(name)) {
+            bail!("selective NRPT name was refused");
+        }
+        prepared.push((rule.guid, names));
+    }
+    let _root = create_key(NRPT_ROOT)?;
+    drop(_root);
+    for (guid, names) in &prepared {
+        let key = format!(r"{NRPT_ROOT}\{guid}");
+        let _rule = create_key(&key)?;
+        drop(_rule);
+        let refs: Vec<&str> = names.iter().map(String::as_str).collect();
+        write_multi_sz(&key, "Name", &refs)?;
+        write_dword(&key, "Version", NRPT_VERSION)?;
+        write_dword(&key, "ConfigOptions", NRPT_CONFIG_DNS)?;
+        write_sz(&key, "GenericDNSServers", SINKHOLE_DNS)?;
     }
     Ok(())
 }
 
+/// Delete only the selective keys. An absent key is success. The catch-all
+/// key is not in this set.
+pub(super) fn remove_selective_nrpt() -> Result<()> {
+    use crate::core::selective_fail_open::{self, CATCH_ALL_NRPT_GUID};
+    for rule in selective_fail_open::NRPT_RULES {
+        if rule.guid.eq_ignore_ascii_case(CATCH_ALL_NRPT_GUID) {
+            bail!("selective NRPT guid collides with the catch-all");
+        }
+        delete_key(&format!(r"{NRPT_ROOT}\{}", rule.guid))?;
+    }
+    Ok(())
+}

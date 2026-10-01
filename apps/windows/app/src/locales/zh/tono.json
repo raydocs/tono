@@ -1,4 +1,111 @@
 {
+  "routes": {
+    "title": "常用线路",
+    "fixedRegion": "推荐地区",
+    "anyRegion": "不限地区",
+    "preferenceHint": "按账号保存在本机。地区仅限制推荐，不修改路由策略；同一节点的两种传输共享收藏。不会自动切换当前线路。",
+    "favorites": "收藏",
+    "recent": "24 小时内成功连接",
+    "noFavorites": "在下方收藏节点，即可在这里快速找到。",
+    "noRecent": "暂无通过隧道验证的成功连接。",
+    "loading": "正在等候此账号的线路偏好…",
+    "save": "收藏节点",
+    "saved": "已收藏",
+    "addFavorite": "收藏 {{name}}",
+    "removeFavorite": "取消收藏 {{name}}",
+    "verifiedAt": "{{time}} 通过隧道验证 · 目录 {{revision}}。仅为历史记录，不代表当前网络健康。",
+    "recommended": "建议线路：{{name}}",
+    "reason": {
+      "recent": "{{time}} 曾在当前目录下通过隧道验证。近期验证成功优先于 TCP 延迟，但不保证本次一定能连上。",
+      "tcp": "在 {{time}} 开始的测试中收到 TCP 响应（自测试开始起两分钟内有效），不代表已验证隧道 HTTPS。先考虑收藏，再比较延迟。"
+    },
+    "useRecommendation": "选择建议线路",
+    "selectOnly": "只选择，不连接；准备好后请点连接。",
+    "selectedRecommendation": "已选择线路，准备好后请点连接。",
+    "noRecommendation": "此地区暂无新鲜证据。可测试全部节点或自行选择；TCP 测试不等于隧道验证。",
+    "keepsConnection": "连接前可查看推荐，当前线路不会自动改变。",
+    "loadFailed": "无法读取线路偏好。",
+    "saveFailed": "未能保存偏好。账号或目录可能已变化，请刷新后重试。",
+    "changed": "账号、目录或连接状态已变化，请重新确认后再选。"
+  },
+  "routeExplanation": {
+    "title": "线路说明 · {{name}}",
+    "openApp": "查看 {{name}} 的线路说明",
+    "openConnection": "查看前往 {{target}} 的线路说明",
+    "close": "关闭说明",
+    "observationHint": "以下为核心实时上报并脱敏的记录，不是逐包流量证明。同一应用的不同连接可能命中不同托管规则；此处不提供路由规则编辑。",
+    "observedRoute": "观测线路",
+    "matchedRule": "命中规则",
+    "chain": "运行时链路",
+    "chainHint": "最左侧为最终出站，其后是选择器组。线路标签根据该链路判断，不根据应用名称或已选节点推测。",
+    "unknown": "未验证",
+    "notReported": "未上报",
+    "insufficient": "核心未上报可识别的最终出站。仅有选择器或列表旧标签，不证明命中了 DIRECT 规则，也不能确定实际出口。",
+    "gone": "这些连接已不在实时数据中。",
+    "limit": "仅展示该应用的前 20 条连接。"
+  },
+  "experience": {
+    "healthTitle": "网络健康检查",
+    "healthDescription": "读取本机账号、服务和连接证据。不修改网络、不上传日志，也不证明所有网站都可访问。",
+    "summaryHint": "以下摘要可能包含缓存状态，不代表实时保护结果；请使用上方健康检查核实。",
+    "runHealth": "开始健康检查",
+    "checking": "正在检查…",
+    "checkedAt": "检查时间 {{time}}",
+    "checkFailed": "检查未完成，没有执行修复或解除保护。",
+    "retryHealth": "重新检查",
+    "stale": "连接或账号已变化，请重新检查。",
+    "state": {
+      "observed": "已观测",
+      "attention": "需要关注",
+      "unknown": "未验证"
+    },
+    "check": {
+      "account": "账号",
+      "catalog": "托管目录",
+      "service": "后台服务",
+      "core": "核心身份",
+      "dns": "受保护 DNS",
+      "tunnel": "网络保护",
+      "exit": "隧道 HTTPS"
+    },
+    "hint": {
+      "account": "当前账号未就绪时，请重新登录。",
+      "catalog": "选择线路前，请刷新 Tono 签发的节点列表。",
+      "service": "服务不可用时，请检查安装和管理员权限。不会自动执行修复。",
+      "core": "版本响应不是运行中二进制的哈希证明。若不一致，请检查安装。",
+      "dns": "请在连接期间检查受保护 DNS；未连接时无需使用 Tono DNS。",
+      "tunnel": "只有服务的实时响应才能确认保护，不能仅凭预期状态判断。",
+      "exit": "只有完成隧道流量验证才算连接证据。仅凭 TCP 延迟或 EOF 无法确定原因。"
+    },
+    "identityTitle": "已安装构建身份",
+    "source": "应用构建源码",
+    "channel": "构建来源",
+    "channelCandidate": "测试候选版",
+    "channelRelease": "发布工作流构建（未验证已发布）",
+    "channelDevelopment": "开发构建",
+    "channelUnknown": "构建来源未知",
+    "service": "服务协议 / 构建",
+    "coreExpected": "打包核心版本",
+    "coreReported": "上报核心版本",
+    "catalog": "目录版本",
+    "identityHint": "这些是上报的身份信息，不证明签名或运行中二进制的真实性；未知项保持未知。",
+    "preview": "查看将要上传的报告",
+    "previewHint": "仅上传这份已冻结并脱敏的报告。本机核心观测和构建详情留在设备上。",
+    "preparing": "正在准备预览…",
+    "prepareFailed": "无法准备报告，请重试预览。没有上传任何内容。",
+    "receiptTime": "服务端接收时间 {{time}}",
+    "receiptContext": "报告采集于 {{time}} · Tono {{version}} · 目录 {{revision}}",
+    "retryPreview": "查看新报告",
+    "recoveryTitle": "正在恢复连接",
+    "recoveryActive": "Tono 正通过现有恢复流程重试，不会悄悄更换已选出口。",
+    "recoveryWaiting": "已安排重试。你可以立即重试，也可以明确选择恢复普通网络。",
+    "recoveryStopped": "当前没有安排自动重试。请选择重试或查看健康检查。",
+    "repairTitle": "修复后台服务？",
+    "repairDescription": "Windows 可能请求管理员权限，以重启 TonoService 及其依赖服务。这不是网络重置，也不会解除保护。",
+    "repair": "修复服务",
+    "repairing": "正在修复…",
+    "installHint": "若未安装 TonoService，请重新安装已验证的候选版，不要反复尝试连接。"
+  },
   "nav": {
     "dashboard": "总览",
     "activity": "活动",
@@ -140,9 +247,18 @@
     "changeEmail": "换邮箱",
     "invalidEmail": "请输入有效邮箱",
     "invalidCode": "请输入 6 位验证码",
+    "noEmail": {
+      "title": "还没收到邮件？",
+      "description": "请查看垃圾箱并核对上面的邮箱地址，或重新发送。仍然收不到的话，复制下面的信息发给客服。"
+    },
     "suspended": {
       "title": "账号已暂停",
       "description": "请联系客服。"
+    },
+    "sessionEnded": {
+      "title": "登录已失效",
+      "description": "Tono 不再接受这次登录：可能已在别处退出，或套餐已暂停。请重新登录。",
+      "signIn": "重新登录"
     },
     "restoreFailed": {
       "title": "登录状态已失效",
@@ -153,13 +269,19 @@
       "title": "网络已被保护拦住",
       "description": "上次连接的防泄漏还在。先恢复网络，再登录。",
       "restore": "恢复网络",
-      "restoring": "正在恢复…"
+      "restoring": "正在恢复…",
+      "unverifiedDescription": "Tono 无法确认上次连接的防泄漏是否还在。先点「恢复网络」，再登录。",
+      "stillRunningTitle": "上次的连接仍在运行",
+      "stillRunningDescription": "上次会话的隧道仍在转发流量。恢复网络会停止它。"
     },
     "errors": {
-      "unreachable": "连不上登录服务器。换可用网络（热点，或先开其他翻墙）登录一次即可。",
+      "unreachable": "登录没有完成。",
       "rateLimited": "尝试过多，请稍后再试。",
-      "deviceLimit": "设备数已满。请先在已登录设备上移除一台。",
+      "deviceLimit": "登录没有完成。",
       "sessionExpired": "验证码已过期，请重新获取。",
+      "codeRejected": "验证码错误或已过期，请重新获取。",
+      "signInNotSaved": "无法在这台电脑上保存登录。请重新获取验证码后再试。",
+      "clockSkew": "登录没有完成。",
       "serverError": "登录服务暂时繁忙或不可用，请稍后重试或联系客服。"
     }
   },
@@ -191,7 +313,7 @@
     "connected": "已连接",
     "disconnecting": "断开中…",
     "protectedOffline": "保护中，未连上",
-    "protectedOfflineDescription": "已拦住直连，正在换线重试。",
+    "protectedOfflineDescription": "已拦住直连，已安排自动重试。",
     "server": "节点",
     "noServer": "未选择节点",
     "killSwitchMode": "断网保护：{{mode}}",
@@ -213,7 +335,7 @@
     "rulesTitle": "Claude / AI 住宅专线保护范围",
     "rulesDescription": "以下流量通过纯 TUN 虚拟网卡透明接管，并通过高信用家庭宽带跳点转发，免除数据中心 IP 风控：\n\n• Anthropic 核心服务：*.anthropic.com, *.claude.ai\n• 人机安全验证：challenges.cloudflare.com, cf-assets.www.cloudflare.com\n• 遥测与灰度：*.datadoghq.com, *.statsigapi.net, *.stripe.network\n• 本地应用进程：Claude Code、Claude Desktop\n\n终端零代理配置，开箱即用。",
     "secureDnsHint": "Claude 网页要求 Chrome / Edge 的「安全 DNS」为关闭，或自动且未指定自定义提供商。修改后请彻底重启浏览器，再重新连接 Tono。",
-    "encryptedDnsHint": "网页打不开：设置 → 网络和 Internet → DNS，关掉「加密 DNS」，再连接。",
+    "encryptedDnsHint": "连接没有完成。",
     "checklist": {
       "title": "第一次连接",
       "dismiss": "知道了",
@@ -229,7 +351,7 @@
     "whatFailed": "失败原因",
     "copyDetails": "复制诊断信息",
     "catalogRequiresChoice": "当前节点已下线，请另选一个",
-    "updateIncomplete": "更新未完成，请手动断开后重装",
+    "updateIncomplete": "更新恢复尚未完成，请保持 Tono 运行。如无法恢复，请先联系支持再重装；断开连接不会取消受保护的更新。",
     "killSwitchError": "断网保护：{{message}}",
     "killSwitchErrorNote": "上次错误，可能已恢复。",
     "errors": {
@@ -237,13 +359,17 @@
       "serviceNotRunning": "Tono 服务没在运行。最常见的原因是 Windows 的基础筛选引擎（BFE）被关掉了——TonoService 依赖它才能启动。请用管理员身份的 PowerShell 依次运行 sc.exe config BFE start= auto、sc.exe start BFE、sc.exe start TonoService，然后重新连接。",
       "bfeNotRunning": "Windows 的基础筛选引擎（BFE）没在运行，装不上网络保护。请以管理员身份运行 sc start BFE，然后重试。",
       "wfpEngineWedged": "Windows 防火墙引擎没有响应，通常是第三方安全软件挂住了它。请重启电脑；若还是这样，先退出杀毒或防火墙软件再重试。",
+      "wfpLockUnverified": "无法确认 Windows 网络保护已锁定，这次连接已停止。请重新连接；若反复出现，请发诊断。",
       "releaseReconciling": "保护还在解除，请稍后再连。",
       "serviceTooOld": "服务版本过旧，请用最新安装包重装。",
+      "protectionHeldByAnotherUser": "本机另一位用户正在使用 Tono 的保护（即使其会话只是已断开）。需对方在这台电脑上点击「断开」或注销。若对方无法操作，本机管理员可先停止 Tono 服务（在管理员 PowerShell 中运行 sc.exe stop TonoService），再以管理员身份运行「开始」菜单中的「Tono — 恢复网络 (Restore Network)」。",
+      "remoteSessionConnectRefused": "不能在远程桌面会话中连接：Tono 的保护会阻断这条远程连接，且无法远程恢复。请在这台电脑本机的屏幕和键盘上连接。",
       "browserDnsPreflight": "无法连接 Claude 住宅专线，因为不能确认 Chrome / Edge 的「安全 DNS」配置安全。Tono 会统一路由 Chrome / Edge 的所有用户资料，不支持按资料单独路由。请将「安全 DNS」设为关闭，或自动且不指定自定义提供商；然后彻底重启浏览器，再重新连接 Tono。",
-      "nodeUnreachable": "连不上这个节点。请重试或换节点。",
-      "tunDataPlaneBroken": "节点是通的，但 Windows 没有转发隧道流量。换节点没用——请重启电脑后再连；若还是这样，请发诊断。",
+      "hy2Idle": "备用 UDP 通道空闲后断了，多半是家里的路由器清掉了闲置连接。Tono 会留在同一条线路上重试。支持码 TONO_CONNECT_HY2_IDLE。如果反复出现，请发诊断。",
+      "nodeUnreachable": "连接没有完成。",
+      "tunDataPlaneBroken": "连接没有完成。",
       "tunIngressBroken": "节点是通的，但本机流量进不了隧道。通常是别的 VPN 或安全软件占住了网络，请先关掉再连。",
-      "protectedHttpsFailed": "这座城市没有完成受保护连接。请重试或换线路；若有备用通道也可以试用。每个节点都一样时再发诊断。",
+      "protectedHttpsFailed": "连接没有完成。",
       "coreUnpinned": "此安装缺少内核校验，请安装最新版。",
       "coreMismatch": "内核与安装不匹配，请安装最新版。",
       "dnsPortBusy": "检测到其他代理软件（如 Clash Verge、CFW 等）正在运行并占用了系统网络。请在系统托盘彻底退出其他代理后再连接。",
@@ -258,6 +384,13 @@
       "protected": "已连接",
       "standby": "待机"
     },
+    "aiTraffic": {
+      "title": "今天的 AI 流量",
+      "subtitle": "家宽上的流量，不是剩余额度。",
+      "empty": "今天还没有。",
+      "week": "近 7 天",
+      "note": "在总览页打开时累计，只存在这台电脑上。"
+    },
     "overview": {
       "protection": "保护",
       "serverPool": "节点池",
@@ -270,7 +403,8 @@
       "idle": "空闲",
       "noActiveRoute": "当前没有活动线路",
       "reading": "正在读取流量…",
-      "telemetryFailed": "仪表盘还没接到核心，正在重试"
+      "telemetryFailed": "仪表盘还没接到核心，正在重试",
+      "sessionTotal": "本次连接 {{total}}"
     },
     "info": {
       "protection": "流量保护",
@@ -298,8 +432,8 @@
     "statusTitle": "当前线路未通过检查",
     "statusBody": "当前连接不可用，直连流量仍被拦截。可以重试，或恢复正常网络。",
     "encryptedDnsTitle": "Windows 加密 DNS 拦住了连接",
-    "encryptedDnsBody": "换线路没用。打开 Windows DNS 设置，关掉「加密 DNS」，再连接。也可以先恢复正常网络。",
-    "releasedFailureBody": "这座城市没有连上。直连网络可用。可以立即重试、选择其他线路；若有备用通道也可以试用。",
+    "encryptedDnsBody": "加密 DNS 拦住了这次连接。",
+    "releasedFailureBody": "连接没有完成。原来的网络仍然可用。",
     "protectionUnknownBody": "Tono 无法确认网络保护状态。如有提示，请修复服务；也可以选择「恢复正常网络」。",
     "completedCount": "已完成 {{count}} 项",
     "technicalDetails": "技术详情",
@@ -326,7 +460,7 @@
       "errors": {
         "signedOut": "你当前未登录，报告无法关联到账号。请登录后重试，或使用“复制诊断信息”把文本发送给支持人员。",
         "rateLimited": "最近上传的报告过多。请几分钟后再试，或使用“复制诊断信息”把文本发送给支持人员。",
-        "unreachable": "无法连接到 Tono。请检查网络；若断网保护正在拦住全部流量，请先点「恢复正常网络」再重试。",
+        "unreachable": "登录没有完成。",
         "unavailable": "该账号暂不支持上传诊断信息。请使用“复制诊断信息”把文本发送给支持人员。",
         "failed": "上传失败。请使用“复制诊断信息”把文本发送给支持人员。"
       }
@@ -400,6 +534,11 @@
     "title": "账号",
     "subtitle": "登录邮箱和设备。",
     "email": "邮箱",
+    "plan": "套餐",
+    "expires": "有效期至",
+    "noExpiry": "长期有效",
+    "usage": "已用流量",
+    "usageOf": "{{used}} / {{quota}}",
     "devices": "设备",
     "deviceLimit": "设备 {{count}} / {{limit}}",
     "currentDevice": "当前设备",
@@ -475,6 +614,7 @@
       "title": "WebRTC 泄漏检测",
       "description": "连上后打开。正常应看不到家里公网 IP。",
       "open": "打开 ip.cx/webrtc",
+      "openFailed": "无法打开浏览器，请手动访问 https://ip.cx/webrtc。",
       "copyVersion": "复制版本号"
     }
   },
@@ -512,6 +652,7 @@
       "description": "认证云线路；断线拦住直连。",
       "checkUpdates": "检查更新",
       "latestVersion": "已是最新版",
+      "checkFailed": "检查更新失败。请检查网络连接后重试。",
       "updatesUnavailable": "测试版需手动安装，应用内更新尚未开放。",
       "unsigned": "安装包未签名，Windows 可能拦截。过 SmartScreen 后即可安装。"
     }
@@ -539,6 +680,6 @@
     "generic": "Tono 服务没有启动，现在无法连接。点「修复」会请求管理员权限重新启动它。",
     "repair": "修复",
     "repairing": "正在修复…",
-    "repairFailed": "修复没成功。请用管理员身份的 PowerShell 运行 sc.exe start BFE，再运行 sc.exe start TonoService。"
+    "repairFailed": "修复没成功。请用管理员身份的 PowerShell 依次运行 sc.exe config BFE start= auto、sc.exe start BFE、sc.exe start TonoService。"
   }
 }

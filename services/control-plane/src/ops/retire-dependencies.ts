@@ -2,7 +2,9 @@
 // existing exit-token revoke (rotate hash + disable) used once they have left.
 
 import { randomToken, sha256 } from '../crypto';
+import { catalogBaseName, catalogHy2Name } from '../catalog-yaml';
 import { type Env, type Row, id, now } from '../env';
+import { assertHomeExitUnbound } from '../home';
 import { writeOpsAudit } from '../product-account';
 import {
   assertRetireDependencies,
@@ -19,6 +21,21 @@ import { catalogNames, requireNode } from './handlers/nodes-data';
 import { RETIRE_DRAIN_SECONDS } from './verdict';
 
 export type { RetireDependenciesDto };
+
+// Recheck at the catalog write: a binding can land after retirement preview.
+export const catalogHomeUnboundSql = `NOT EXISTS (
+  SELECT 1 FROM user_home_bindings b JOIN home_exits h ON h.id = b.home_exit_id
+  WHERE h.kind = 'catalog' AND h.proxy_name IN (?, ?)
+)`;
+
+/** Residential routing uses its home even when the selected cloud exit differs. */
+export async function assertCatalogHomeUnbound(e: Env, name: string): Promise<void> {
+  const base = catalogBaseName(name);
+  const homes = await e.DB.prepare(
+    "SELECT id FROM home_exits WHERE kind = 'catalog' AND proxy_name IN (?, ?)",
+  ).bind(base, catalogHy2Name(base)).all<Row>();
+  for (const home of homes.results) await assertHomeExitUnbound(e, String(home.id));
+}
 
 export function retirePendingDedupeKey(name: string): string {
   return `node:${name}:retire_pending`;
@@ -40,7 +57,7 @@ async function queryCustomers(
   cutoff: number,
 ): Promise<RetireCustomerOnNodeDto[]> {
   try {
-    const rows = await e.DB.prepare(sql).bind(name, cutoff).all<Row>();
+    const rows = await e.DB.prepare(sql).bind(name, catalogHy2Name(name), cutoff).all<Row>();
     return (rows.results ?? []).map((row) => ({
       userId: String(row.user_id),
       email: String(row.email ?? ''),
@@ -63,7 +80,7 @@ export async function retireDependencies(
       e,
       `SELECT s.user_id, u.email, s.last_seen_at
        FROM ops_customer_status s JOIN users u ON u.id = s.user_id
-       WHERE s.selected_server = ? AND s.last_seen_at >= ?`,
+       WHERE s.selected_server IN (?, ?) AND s.last_seen_at >= ?`,
       name,
       cutoff,
     ),
@@ -71,15 +88,15 @@ export async function retireDependencies(
       e,
       `SELECT d.user_id, u.email, d.last_seen_at
        FROM ops_device_status d JOIN users u ON u.id = d.user_id
-       WHERE d.selected_server = ? AND d.last_seen_at >= ?`,
+       WHERE d.selected_server IN (?, ?) AND d.last_seen_at >= ?`,
       name,
       cutoff,
     ),
     (async () => {
       try {
         const row = await e.DB.prepare(
-          'SELECT COUNT(*) AS n FROM user_home_bindings WHERE default_proxy_name = ?',
-        ).bind(name).first<Row>();
+          'SELECT COUNT(*) AS n FROM user_home_bindings WHERE default_proxy_name IN (?, ?)',
+        ).bind(name, catalogHy2Name(name)).first<Row>();
         return Number(row?.n ?? 0) || 0;
       } catch (error) {
         if (!missingTable(error)) throw error;
@@ -106,12 +123,19 @@ export async function retireDependencies(
   };
 }
 
-/** Existing exit_nodes rotate (token_hash) plus disable. Same UPDATEs as POST token / PATCH status. */
+/**
+ * Existing exit_nodes rotate (token_hash) plus disable. Same UPDATEs as POST token / PATCH status.
+ *
+ * `catalogRevision` is the revision at which the caller saw the node out of the
+ * catalog. The revoke only lands if the catalog is still at it, so a relist that
+ * committed after that read is not undone by a drain sweep working from it.
+ */
 export async function revokeExitToken(
   e: Env,
   name: string,
   actorEmail: string,
   nowSec: number,
+  catalogRevision?: number,
 ): Promise<boolean> {
   try {
     const row = await e.DB.prepare(
@@ -121,9 +145,13 @@ export async function revokeExitToken(
     const token = randomToken();
     const updated = await e.DB.prepare(
       `UPDATE exit_nodes
-       SET token_hash = ?, status = 'disabled', updated_at = ?
-       WHERE id = ? AND status = 'active'`,
-    ).bind(await sha256(token), nowSec, String(row.id)).run();
+       SET revoked_token_hash = token_hash, token_hash = ?, status = 'disabled', updated_at = ?
+       WHERE id = ? AND status = 'active'
+         AND (? IS NULL OR COALESCE(
+           (SELECT revision FROM managed_exit_catalog WHERE singleton_id = 1), 0) = ?)`,
+    ).bind(
+      await sha256(token), nowSec, String(row.id), catalogRevision ?? null, catalogRevision ?? null,
+    ).run();
     if (!Number(updated.meta.changes ?? 0)) return false;
     await writeOpsAudit(
       e,
@@ -199,13 +227,19 @@ export async function finishDrainedRetires(e: Env, actorEmail: string, nowSec: n
     return 0;
   }
   if (names.length === 0) return 0;
+  // Read the revision before the names: a relist between the two moves the
+  // revision, so every revoke below misses rather than undoing it.
+  const revisionRow = await e.DB.prepare(
+    'SELECT revision FROM managed_exit_catalog WHERE singleton_id = 1',
+  ).first<Row>();
+  const revision = Number(revisionRow?.revision ?? 0);
   const listed = await catalogNames(e);
   let revoked = 0;
   for (const name of names) {
     if (listed?.has(name)) continue;
     const deps = await retireDependencies(e, name, nowSec);
     if (deps.customersOnNode.length > 0) continue;
-    if (await revokeExitToken(e, name, actorEmail, nowSec)) revoked += 1;
+    if (await revokeExitToken(e, name, actorEmail, nowSec, revision)) revoked += 1;
   }
   return revoked;
 }

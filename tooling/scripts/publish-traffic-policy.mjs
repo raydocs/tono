@@ -41,7 +41,8 @@ const usage = () => {
 
   With --publish: also PUTs the policy together with its signature.
 
-  --api defaults to https://api.afk.ccwu.cc
+  --api must be https://api.afk.ccwu.cc. Any other origin is refused before
+  the admin token is read.
   The admin token is read from the keychain (service tono-admin).
   The signing key is read from the keychain (service ${KEYCHAIN_SERVICE}).
 `);
@@ -64,6 +65,30 @@ const fail = (message) => {
   process.stderr.write(`publish-traffic-policy: ${message}\n`);
   process.exit(1);
 };
+
+// The admin token is a production credential. A caller-supplied origin would
+// receive it on the dry-run GET, before any signature check.
+const PINNED_API_ORIGIN = 'https://api.afk.ccwu.cc';
+const pinned = (() => {
+  let url;
+  try {
+    url = new URL(api);
+  } catch {
+    fail('--api is not a URL');
+  }
+  if (
+    url.origin !== PINNED_API_ORIGIN
+    || url.username
+    || url.password
+    || url.pathname !== '/'
+    || url.search
+    || url.hash
+  ) {
+    fail(`refusing to send the admin token anywhere but ${PINNED_API_ORIGIN}`);
+  }
+  return url.origin;
+})();
+api = pinned;
 
 const keychain = (service) => {
   try {
@@ -101,8 +126,18 @@ const request = async (payload) => {
   return { status: response.status, body };
 };
 
+// Read before the dry run, not after signing. When the deployment embeds the
+// revision in the served document (#317), the signed bytes name the revision
+// this publish will be assigned, so the dry run and the publish have to agree
+// on it; a publish that lands in between is refused as a conflict.
+const current = await fetch(`${api}/api/v1/admin/traffic-policy`, {
+  headers: { authorization: `Bearer ${adminToken}` },
+});
+if (!current.ok) fail(`could not read the current revision (${current.status})`);
+const expectedRevision = Number((await current.json()).revision ?? 0);
+
 process.stdout.write('── asking what would be served\n');
-const preview = await request({ policy, dryRun: true });
+const preview = await request({ policy, dryRun: true, expectedRevision });
 if (preview.status !== 200) {
   fail(`the dry run was refused (${preview.status}): ${JSON.stringify(preview.body)}`);
 }
@@ -121,6 +156,12 @@ const counts = ['domains', 'webDomains', 'directSuffixes', 'tcpEndpoints', 'medi
   .map((field) => `${field} ${parsed[field].length}`)
   .join(', ');
 process.stdout.write(`  version ${parsed.version}: ${counts}\n`);
+if (parsed.revision !== undefined) {
+  if (parsed.revision !== expectedRevision + 1) {
+    fail(`the dry run bound revision ${parsed.revision}, expected ${expectedRevision + 1}`);
+  }
+  process.stdout.write(`  binds revision ${parsed.revision} inside the signed bytes\n`);
+}
 
 // What this policy costs a client in exact PF permits, which is a different
 // budget from any of the counts above and the one that actually runs out.
@@ -209,11 +250,6 @@ if (!publish) {
 }
 
 process.stdout.write('── publishing\n');
-const current = await fetch(`${api}/api/v1/admin/traffic-policy`, {
-  headers: { authorization: `Bearer ${adminToken}` },
-});
-if (!current.ok) fail(`could not read the current revision (${current.status})`);
-const expectedRevision = Number((await current.json()).revision ?? 0);
 const published = await request({
   policy,
   expectedRevision,

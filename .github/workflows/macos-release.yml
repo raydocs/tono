@@ -19,8 +19,14 @@
 #       base64 of the AuthKey_<key-id>.p8 App Store Connect private key.
 #   SPARKLE_ED_PRIVATE_KEY
 #       the Sparkle EdDSA private key exported with `generate_keys -x`, matching
-#       SUPublicEDKey in apps/macos/Tono/Info.plist. Only the gated
-#       macos-appcast environment may read it.
+#       SUPublicEDKey in apps/macos/Tono/Info.plist. It is stored in the
+#       macos-appcast environment and only the validate-appcast job declares that
+#       environment. Whether that job waits for a reviewer or is limited to certain
+#       branches depends on the environment's configuration in the repository
+#       settings, not on this file.
+#
+# Every secret is injected at step level, only into the step that uses it; no job
+# or workflow env carries signing material. Checkouts do not persist the token.
 #
 # The appcast job additionally requires release notes committed at
 # apps/macos/release-notes/build<CFBundleVersion>.md, and it only ever runs
@@ -41,15 +47,25 @@ on:
         required: false
         default: false
         type: boolean
-  push:
-    tags:
-      - tono-macos-*-build*
+      update_release_sequence:
+        description: v1 installed floor, required unless candidate_only; must match the paired Windows build (positive safe integer)
+        required: false
+        type: string
+  # No tag-push trigger: a tag build has no update_release_sequence input, so its bytes
+  # carry no installed floor and every later v1 update would refuse them. Creating the
+  # tono-macos-<version>-build<N> release at publish time must not start a build.
 
 permissions:
   contents: read
 
+# Advance the reviewed candidate contract together; never admit arbitrary PR refs.
+env:
+  CANDIDATE_REF: refs/heads/stability/desktop-0.0.74-20260926
+  CANDIDATE_VERSION: '0.0.74'
+  CANDIDATE_BUILD: '74'
+
 concurrency:
-  group: macos-release-${{ inputs.version || github.ref_name }}
+  group: macos-release-${{ inputs.version }}
   cancel-in-progress: false
 
 jobs:
@@ -68,41 +84,43 @@ jobs:
       - name: Refuse a ref that is not the release line
         env:
           CANDIDATE_ONLY: ${{ github.event_name == 'workflow_dispatch' && inputs.candidate_only }}
+          UPDATE_RELEASE_SEQUENCE: ${{ inputs.update_release_sequence || '' }}
         run: |
           set -euo pipefail
+          # Same contract as write-build-source.sh and the Service's installed_floor():
+          # a decimal integer in 1..=9007199254740991, no sign, no leading zero.
+          sequence_is_valid() {
+            case "$UPDATE_RELEASE_SEQUENCE" in ''|0*|*[!0-9]*) return 1 ;; esac
+            [ "${#UPDATE_RELEASE_SEQUENCE}" -le 16 ] && [ "$UPDATE_RELEASE_SEQUENCE" -le 9007199254740991 ]
+          }
+          if [ -n "$UPDATE_RELEASE_SEQUENCE" ] && ! sequence_is_valid; then
+            echo "::error::update_release_sequence must be a decimal integer in 1..9007199254740991. Nothing was built."
+            exit 1
+          fi
           if [ "$CANDIDATE_ONLY" = true ]; then
-            if [ "$GITHUB_REF" != refs/heads/stability/desktop-0.0.72-20260908 ]; then
-              echo "::error::Candidate signing is restricted to the reviewed 0.0.72 stability branch."
+            if [ "$GITHUB_REF" != "$CANDIDATE_REF" ]; then
+              echo "::error::Candidate signing is restricted to $CANDIDATE_REF ($CANDIDATE_VERSION/build$CANDIDATE_BUILD)."
               exit 1
             fi
             echo "candidate only: no appcast job or release publication"
             exit 0
           fi
-          if [ "$GITHUB_REF_TYPE" != tag ] \
-            && [ "$GITHUB_REF" != refs/heads/release/macos ]; then
-            echo "::error::A macOS release must run from refs/heads/release/macos or a tono-macos-*-build* tag, but this run is on $GITHUB_REF. Nothing was built."
+          if [ "$GITHUB_REF" != refs/heads/release/macos ]; then
+            echo "::error::A macOS release must run from refs/heads/release/macos, but this run is on $GITHUB_REF. Nothing was built."
+            exit 1
+          fi
+          if [ -z "$UPDATE_RELEASE_SEQUENCE" ]; then
+            echo "::error::A macOS release build needs update_release_sequence (the v1 installed floor, same as the paired Windows build). Nothing was built."
             exit 1
           fi
           echo "running from $GITHUB_REF"
 
-  sing-box-input:
-    needs: branch
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-      - run: sh tooling/scripts/prepare-macos-sing-box.sh
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
-        with:
-          name: sing-box-darwin-arm64
-          path: apps/macos/Tono/Resources/sing-box
-          if-no-files-found: error
-          retention-days: 14
-
   build:
-    # Manual releases belong to the macOS release line. A tag is accepted only
-    # after the ancestry check below proves it names a commit on that line.
-    needs: [branch, sing-box-input]
+    # Manual releases belong to the macOS release line; the ancestry check below
+    # proves the dispatched commit is on that line.
+    # branch waits for qualify, which already uploads the verified immutable Core.
+    # Consume those same bytes rather than conflicting with its artifact name.
+    needs: branch
     runs-on: macos-26
     outputs:
       short_version: ${{ steps.release-version.outputs.short_version }}
@@ -112,6 +130,7 @@ jobs:
       release_link: ${{ steps.release-version.outputs.release_link }}
     env:
       TONO_MACOS_NOTARY_PROFILE: tono-macos-release
+      TONO_UPDATE_RELEASE_SEQUENCE: ${{ inputs.update_release_sequence || '' }}
       # Not `${{ runner.temp }}`: the runner context is unavailable in a job-level
       # env, so referencing it there is an invalid expression and the workflow
       # fails at startup — before its own trigger is even evaluated. That is why
@@ -124,6 +143,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
@@ -143,15 +163,20 @@ jobs:
       - name: Require the macOS release line
         env:
           CANDIDATE_ONLY: ${{ github.event_name == 'workflow_dispatch' && inputs.candidate_only }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -eu
           if [ "$CANDIDATE_ONLY" = true ]; then
-            test "$GITHUB_REF" = refs/heads/stability/desktop-0.0.72-20260908
+            test "$GITHUB_REF" = "$CANDIDATE_REF"
             test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
-            python3 tooling/scripts/verify-desktop-version.py --expected 0.0.72
+            python3 tooling/scripts/verify-desktop-version.py --expected "$CANDIDATE_VERSION"
             exit 0
           fi
-          git fetch --no-tags origin release/macos
+          # The checkout does not persist the token; hand it to this one fetch.
+          GIT_CONFIG_COUNT=1 \
+          GIT_CONFIG_KEY_0=http.https://github.com/.extraheader \
+          GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 | tr -d '\n')" \
+            git fetch --no-tags origin release/macos
           if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/release/macos; then
             echo "FATAL: $GITHUB_SHA is not on release/macos; refusing a macOS release from another platform line." >&2
             exit 1
@@ -199,21 +224,7 @@ jobs:
           INPUT_VERSION: ${{ inputs.version }}
         run: |
           set -eu
-          if [ "${GITHUB_EVENT_NAME}" = workflow_dispatch ]; then
-            short_version=$INPUT_VERSION
-            expected_build=
-          else
-            case "$GITHUB_REF_NAME" in
-              tono-macos-*-build*) ;;
-              *)
-                echo "FATAL: tag $GITHUB_REF_NAME is not tono-macos-<short-version>-build<build>." >&2
-                exit 1
-                ;;
-            esac
-            short_version=${GITHUB_REF_NAME#tono-macos-}
-            short_version=${short_version%-build*}
-            expected_build=${GITHUB_REF_NAME##*-build}
-          fi
+          short_version=$INPUT_VERSION
           case "$short_version" in
             *[!0-9.]*|''|.*|*.)
               echo "FATAL: $short_version is not a dotted numeric CFBundleShortVersionString." >&2
@@ -240,10 +251,6 @@ jobs:
               exit 1
               ;;
           esac
-          if [ -n "$expected_build" ] && [ "$expected_build" != "$project_build" ]; then
-            echo "FATAL: tag $GITHUB_REF_NAME claims build $expected_build but the project builds $project_build." >&2
-            exit 1
-          fi
           artifact_name="Tono-$short_version-build$project_build-arm64"
           tag="tono-macos-$short_version-build$project_build"
           {
@@ -256,9 +263,6 @@ jobs:
 
       - name: Subscription URL policy
         run: tooling/scripts/test-subscription-url-policy.sh
-
-      - name: Helper peer authorization
-        run: tooling/scripts/test-helper-peer-authorization.sh
 
       - name: Multi-exit policy
         run: tooling/scripts/test-multi-exit-policy.sh "$GITHUB_WORKSPACE/tooling/scripts/tests/fixtures/multi-vless-reality.yaml"
@@ -325,10 +329,23 @@ jobs:
             --issuer "$APPLE_NOTARY_ISSUER_ID" \
             --keychain "$KEYCHAIN_PATH" > /dev/null
 
+      - name: Helper peer authorization
+        # After the Developer ID import. The helper accepts that identity:
+        # anchor apple generic, identifier com.raydocs.tono, team OU, and no
+        # get-task-allow. The step fails only when this identity is not in
+        # the keychain. macos-ci does not import it and keeps the loud skip.
+        env:
+          TONO_PEER_AUTH_MODE: release
+          TONO_PEER_AUTH_IDENTITY: ${{ secrets.MACOS_DEVELOPER_ID_APPLICATION_IDENTITY }}
+        run: tooling/scripts/test-helper-peer-authorization.sh
+
       - name: Build, sign and notarize the release archive
         env:
           TONO_MACOS_SIGNING_IDENTITY: ${{ secrets.MACOS_DEVELOPER_ID_APPLICATION_IDENTITY }}
           TONO_MACOS_NOTARIZE: '1'
+          # Internal build channel (owner decision 2026-09-24): only a candidate_only
+          # run is internal; a release build stays empty and keeps today's defaults.
+          TONO_BUILD_CHANNEL: ${{ github.event_name == 'workflow_dispatch' && inputs.candidate_only && 'internal' || '' }}
           ARTIFACT_NAME: ${{ steps.release-version.outputs.artifact_name }}
         run: |
           set -eu
@@ -336,6 +353,7 @@ jobs:
           /usr/bin/codesign --verify --deep --strict --all-architectures "$RUNNER_TEMP/release/$ARTIFACT_NAME.app"
           /usr/bin/xcrun stapler validate "$RUNNER_TEMP/release/$ARTIFACT_NAME.app"
           /usr/sbin/spctl -a -t exec -vv "$RUNNER_TEMP/release/$ARTIFACT_NAME.app"
+          sh tooling/scripts/verify-release-gate.sh "$RUNNER_TEMP/release/$ARTIFACT_NAME.app"
 
       - name: Record signed candidate provenance without update authority
         if: github.event_name == 'workflow_dispatch' && inputs.candidate_only
@@ -350,11 +368,12 @@ jobs:
           app = root / (name + ".app")
           with (app / "Contents/Info.plist").open("rb") as stream:
               info = plistlib.load(stream)
-          assert info["CFBundleShortVersionString"] == "0.0.72"
-          assert str(info["CFBundleVersion"]) == "72"
+          version, build = info["CFBundleShortVersionString"], str(info["CFBundleVersion"])
+          assert version == os.environ["CANDIDATE_VERSION"]
+          assert build == os.environ["CANDIDATE_BUILD"]
           files = [root / (name + ".zip"), app / "Contents/MacOS/Tono",
                    app / "Contents/Resources/tono-core-helper", app / "Contents/Resources/sing-box"]
-          report = {"source": os.environ["GITHUB_SHA"], "version": "0.0.72", "build": 72,
+          report = {"source": os.environ["GITHUB_SHA"], "version": version, "build": int(build),
                     "candidateOnly": True, "releaseAccepted": False, "developerIDSigned": True,
                     "notarized": True, "sparkleSigned": False,
                     "files": [{"name": str(path.relative_to(root)),
@@ -362,7 +381,7 @@ jobs:
           (root / "candidate-manifest.json").write_text(json.dumps(report, indent=2) + "\n")
           PYTHON
 
-      - name: Upload the notarized archive for the gated appcast job
+      - name: Upload the notarized archive for the appcast job
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: ${{ steps.release-version.outputs.artifact_name }}
@@ -404,6 +423,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
@@ -439,20 +460,22 @@ jobs:
 
       - name: Locate the pinned Sparkle 2.9.6 sign_update tool
         run: |
-          set -eu
-          resolved=apps/macos/Tono.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
-          if ! grep -qE '"version"[[:space:]]*:[[:space:]]*"2\.9\.6"' "$resolved"; then
-            echo "::error title=Sparkle pin drifted::$resolved no longer pins Sparkle 2.9.6"
-            echo "FATAL: the signing tool must come from the same Sparkle version the app embeds." >&2
-            exit 1
-          fi
-          xcodebuild \
-            -project apps/macos/Tono.xcodeproj \
-            -scheme Tono \
-            -resolvePackageDependencies \
-            -derivedDataPath "$RUNNER_TEMP/DerivedData-sparkle" > /dev/null
+          set -euo pipefail
+          # Only the offline signer is used. Tono.app no longer embeds Sparkle;
+          # resolving the App's package graph therefore cannot obtain this tool.
+          # URL/checksum are Sparkle 2.9.6 Package.swift's binaryTarget pin.
+          archive="$RUNNER_TEMP/Sparkle-for-Swift-Package-Manager.zip"
+          curl --fail --location --proto '=https' --proto-redir '=https' \
+            'https://github.com/sparkle-project/Sparkle/releases/download/2.9.6/Sparkle-for-Swift-Package-Manager.zip' \
+            --output "$archive"
+          printf '%s  %s\n' \
+            '8d5fb41d960b43f4a68aa14126bf62b098544ec8d191cdcc73eb14e63a8e7606' "$archive" \
+            | shasum -a 256 -c -
+          mkdir "$RUNNER_TEMP/sparkle-signing-2.9.6"
+          ditto -x -k "$archive" "$RUNNER_TEMP/sparkle-signing-2.9.6"
           sign_update=$(python3 tooling/scripts/find-sparkle-sign-update.py \
-            "$RUNNER_TEMP/DerivedData-sparkle/SourcePackages/artifacts")
+            "$RUNNER_TEMP/sparkle-signing-2.9.6")
+          codesign --verify --strict "$sign_update"
           echo "SIGN_UPDATE=$sign_update" >> "$GITHUB_ENV"
 
       - name: Sign the enclosure with Sparkle and verify the signature round-trips

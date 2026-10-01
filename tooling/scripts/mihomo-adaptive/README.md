@@ -5,7 +5,7 @@ This experiment keeps Tono on upstream Mihomo `v1.19.30` and its existing
 the gVisor TCP send/receive range:
 
 - stock: fixed `20 KiB`
-- experiment: `4 KiB` minimum, `32 KiB` default, `128 KiB` maximum
+- experiment: `4 KiB` minimum, `32 KiB` default, `2 MiB` maximum
 - gVisor receive-buffer moderation remains enabled
 
 The values follow the bounded adaptive policy evaluated by

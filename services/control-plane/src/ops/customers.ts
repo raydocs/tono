@@ -48,7 +48,6 @@ type Row = Record<string, any>;
 
 const HOUR = 3600;
 const HOUR_MS = HOUR * 1000;
-const BATCH = 50;
 export const PROJECT_BACKLOG_LIMIT = 60;
 export const PROJECT_BACKLOG_BUDGET_MS = 25_000;
 
@@ -65,12 +64,6 @@ function finite(value: unknown): number | null {
 function text(value: unknown): string | null {
   if (typeof value !== 'string') return null;
   return value.length ? value : null;
-}
-
-async function runBatches(db: D1Database, statements: D1PreparedStatement[]): Promise<void> {
-  for (let i = 0; i < statements.length; i += BATCH) {
-    await db.batch(statements.slice(i, i + BATCH));
-  }
 }
 
 function payloadOf(window: TelemetryWindowInput): Row {
@@ -102,6 +95,33 @@ function windowBoundsMs(window: TelemetryWindowInput, payload: Row): { startMs: 
  *   uiState === 'connected', else 0. windows += 1 per overlapped hour.
  *   node / app_version / platform take the latest window (excluded.*).
  */
+/** Directional event bytes win. A route total with no split is stored as download so the sum matches the ledger once. */
+export function windowByteTotals(payload: Row): { up: number; down: number } {
+  const events = Array.isArray(payload.events) ? payload.events as Row[] : [];
+  let up = 0;
+  let down = 0;
+  let directional = false;
+  for (const event of events) {
+    if (Number.isSafeInteger(event.bytesUp) && Number(event.bytesUp) >= 0) {
+      up += Number(event.bytesUp);
+      directional = true;
+    }
+    if (Number.isSafeInteger(event.bytesDown) && Number(event.bytesDown) >= 0) {
+      down += Number(event.bytesDown);
+      directional = true;
+    }
+  }
+  if (directional) return { up, down };
+  const routes = payload.bytesByRoute;
+  if (!routes || typeof routes !== 'object' || Array.isArray(routes)) return { up: 0, down: 0 };
+  let total = 0;
+  for (const key of ['cloud', 'residential', 'direct']) {
+    const value = (routes as Row)[key];
+    if (Number.isSafeInteger(value) && Number(value) >= 0) total += Number(value);
+  }
+  return { up: 0, down: total };
+}
+
 function hourSlices(
   startMs: number,
   endMs: number,
@@ -131,16 +151,29 @@ export async function accrueActivityHours(
   if (!bounds) return 0;
   const slices = hourSlices(bounds.startMs, bounds.endMs);
   if (slices.length === 0) return 0;
+  const totals = windowByteTotals(payload);
   const connected = text(payload.uiState) === 'connected';
   const deviceId = text(window.device_id) ?? '';
   const node = text(payload.selectedServer);
   const appVersion = text(window.client_version);
   const platform = windowPlatform(payload, text(window.os_version));
-  const statements = slices.map((slice) => db.prepare(
+  // The upload hook and the cron projection both hand every window here. The
+  // marker row is claimed in the same batch as the upserts, and each upsert
+  // adds only under this call's claim, so a window is counted once.
+  const claim = crypto.randomUUID();
+  const claimStatement = db.prepare(
+    `INSERT OR IGNORE INTO customer_activity_windows (window_id, claim, received_at)
+     VALUES (?, ?, ?)`,
+  ).bind(window.id, claim, Number(window.received_at) || 0);
+  const statements = slices.map((slice, index) => db.prepare(
     `INSERT INTO customer_activity_hours (
        user_id, device_id, hour_at, online_minutes, connected_minutes,
        bytes_up, bytes_down, node, app_version, platform, windows
-     ) VALUES (?, ?, ?, ?, ?, 0, 0, ?, ?, ?, 1)
+     )
+     SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1
+     WHERE EXISTS (
+       SELECT 1 FROM customer_activity_windows WHERE window_id = ? AND claim = ?
+     )
      ON CONFLICT(user_id, device_id, hour_at) DO UPDATE SET
        online_minutes = customer_activity_hours.online_minutes + excluded.online_minutes,
        connected_minutes = customer_activity_hours.connected_minutes + excluded.connected_minutes,
@@ -156,17 +189,24 @@ export async function accrueActivityHours(
     slice.hourAt,
     slice.minutes,
     connected ? slice.minutes : 0,
+    index === slices.length - 1 ? totals.up : 0,
+    index === slices.length - 1 ? totals.down : 0,
     node,
     appVersion,
     platform,
+    window.id,
+    claim,
   ));
+  let claimed = false;
   try {
-    await runBatches(db, statements);
+    // A window is at most six hours wide, so this stays one atomic batch.
+    const results = await db.batch([claimStatement, ...statements]);
+    claimed = Number(results[0]?.meta.changes ?? 0) === 1;
   } catch (error) {
     if (missingTable(error)) return 0;
     throw error;
   }
-  return slices.length;
+  return claimed ? slices.length : 0;
 }
 
 export type ProjectionCounts = { windows: number; hours: number };

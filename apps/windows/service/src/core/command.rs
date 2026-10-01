@@ -7,6 +7,8 @@ pub enum IpcCommand {
     GetVersion,
     #[strum(serialize = "/status")]
     Status,
+    #[strum(serialize = "/update/transaction")]
+    UpdateTransaction,
     #[strum(serialize = "/macos-kill-switch/preflight")]
     PreflightMacosKillSwitch,
     #[strum(serialize = "/kill-switch/status")]
@@ -64,4 +66,12 @@ pub enum IpcCommand {
     UpdateWriter,
     #[strum(serialize = "/magic")]
     Magic,
+    /// Restart the running sing-box process and re-lock the full tunnel.
+    /// Revision 19. Does not enter the mihomo DIRECT bracket.
+    #[strum(serialize = "/kill-switch/sing-box-runtime/replace")]
+    ReplaceSingBoxRuntime,
+    /// Install reviewed-app DIRECT permits on the locked sing-box tunnel.
+    /// Revision 19. The lease starts Committed. Failure stays off Blocked.
+    #[strum(serialize = "/kill-switch/sing-box-direct/commit")]
+    CommitSingBoxDirect,
 }

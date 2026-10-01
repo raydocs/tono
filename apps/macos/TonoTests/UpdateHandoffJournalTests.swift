@@ -216,6 +216,26 @@ final class UpdateHandoffJournalTests: XCTestCase {
         }
     }
 
+    func testCompletedLegacyUpgradeJournalIsArchivedAndStopsWarning() throws {
+        try withStore { url in
+            // 0.0.72's Sparkle delegate left installStarted; 48 hours later it expired.
+            var journal = fixture(phase: .installStarted)
+            journal.previousAppVersion = "0.0.72"
+            journal.nextAppVersion = "0.0.73"
+            journal.expiresAt = Date().addingTimeInterval(-60)
+            try UpdateHandoffStore.write(journal, at: url)
+            let legacy = try Data(contentsOf: url)
+            XCTAssertFalse(UpdateHandoffStore.retireCompletedLegacyJournal(currentAppVersion: "0.0.72", at: url))
+            XCTAssertTrue(UpdateHandoffStore.showsIncompleteUpdate(at: url))
+
+            XCTAssertTrue(UpdateHandoffStore.retireCompletedLegacyJournal(currentAppVersion: "0.0.73", at: url))
+            XCTAssertFalse(UpdateHandoffStore.showsIncompleteUpdate(at: url))
+            let history = url.deletingPathExtension().appendingPathExtension("history")
+            let archived = try FileManager.default.contentsOfDirectory(at: history, includingPropertiesForKeys: nil)
+            XCTAssertEqual(try archived.map { try Data(contentsOf: $0) }, [legacy])
+        }
+    }
+
     func testExpiredJournalRetainsExactEvidence() throws {
         try withStore { url in
             var journal = fixture(phase: .failed)

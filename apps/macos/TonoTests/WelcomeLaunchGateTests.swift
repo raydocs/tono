@@ -13,6 +13,15 @@ final class WelcomeLaunchGateTests: XCTestCase {
                 sessionState: .error("offline")
             )
         )
+        // Signed out by a refused session with the kill switch still armed:
+        // only the gate explains the block and offers Restore internet.
+        XCTAssertFalse(
+            WelcomeLaunchGate.showsIntro(
+                introSeen: false,
+                sessionState: .signedOut,
+                protectionHeld: true
+            )
+        )
     }
 
     func testGateWhenIntroAlreadySeen() {

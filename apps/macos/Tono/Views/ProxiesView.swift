@@ -29,6 +29,7 @@ struct ProxiesView: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 24) {
+                    RouteChoicesView()
                     if AppProfile.isDev && !proxyGroups.isEmpty {
                         proxyGroupsSection(proxyGroups)
                     }
@@ -291,6 +292,7 @@ struct ProxiesView: View {
     }())
     .environment(AccountSession(
         sidecar: TonoSidecarService(),
-        descriptorConsumer: { _ in }
+        descriptorConsumer: { _ in },
+        killSwitchDisarmConsumer: {}
     ))
 }

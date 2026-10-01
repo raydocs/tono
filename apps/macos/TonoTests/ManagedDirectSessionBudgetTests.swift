@@ -39,6 +39,24 @@ final class ManagedDirectSessionBudgetTests: XCTestCase {
         )
     }
 
+    func testLiveReplacementReservesThePreviousPlansPFEndpoints() throws {
+        let old = policy((0..<31).map { pin($0) })
+        let next = policy((32..<63).map { pin($0) })
+        XCTAssertNoThrow(try ConfigPipeline.validatedManagedDirectPolicy(old))
+        XCTAssertNoThrow(try ConfigPipeline.validatedManagedDirectPolicy(next))
+        XCTAssertGreaterThan(Set(old.sessionEndpoints + next.sessionEndpoints).count,
+            ConfigPipeline.maximumSessionDirectEndpoints)
+        let budgeted = AppState.budgetManagedDirectWebPins(
+            next.webDomainPins, seed: policy([]), preservingSessionEndpoints: old.sessionEndpoints
+        )
+        let replacement = policy(budgeted.kept)
+        XCTAssertNoThrow(try ConfigPipeline.validatedManagedDirectPolicy(replacement))
+        XCTAssertLessThanOrEqual(Set(old.sessionEndpoints + replacement.sessionEndpoints).count,
+            ConfigPipeline.maximumSessionDirectEndpoints)
+        XCTAssertTrue(budgeted.kept.isEmpty, "overflow new web pins must fall through to the protected tunnel")
+        XCTAssertEqual(budgeted.dropped.count, next.webDomainPins.count)
+    }
+
     func testEverythingFitsWhenItFits() {
         let pins = (0..<10).map { pin($0) }
         let budgeted = ConfigPipeline.pinsWithinSessionEndpointBudget(pins, seededBy: [])

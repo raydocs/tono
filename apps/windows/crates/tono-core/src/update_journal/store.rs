@@ -35,25 +35,64 @@ pub(super) fn write_prepared_with(
     journal: &UpdateHandoffJournal,
     write: impl FnOnce(&Path, &UpdateHandoffJournal) -> io::Result<()>,
 ) -> io::Result<()> {
-    match fs::File::open(path) {
-        Ok(mut previous) => {
-            let history = path.with_extension("history");
-            fs::create_dir_all(&history)?;
-            let archive_path = history.join(format!("{}.json", uuid::Uuid::new_v4()));
-            let mut archive = fs::OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(archive_path)?;
-            io::copy(&mut previous, &mut archive)?;
-            archive.sync_all()?;
-            if let Ok(directory) = fs::File::open(&history) {
-                let _ = directory.sync_all();
-            }
-        }
+    match fs::read(path) {
+        Ok(previous) => archive(path, &previous)?,
         Err(error) if error.kind() == io::ErrorKind::NotFound => {}
         Err(error) => return Err(error),
     }
     write(path, journal)
+}
+
+fn archive(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    let history = path.with_extension("history");
+    fs::create_dir_all(&history)?;
+    let archive_path = history.join(format!("{}.json", uuid::Uuid::new_v4()));
+    let mut archive = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(archive_path)?;
+    archive.write_all(bytes)?;
+    archive.sync_all()?;
+    if let Ok(directory) = fs::File::open(&history) {
+        let _ = directory.sync_all();
+    }
+    Ok(())
+}
+
+pub(super) fn retire_completed_legacy(path: &Path, current_app_version: &str) -> io::Result<bool> {
+    let data = match fs::read(path) {
+        Ok(data) => data,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(false),
+        Err(error) => return Err(error),
+    };
+    // Unreadable or unsupported bytes stay as evidence and keep warning.
+    let Ok(journal) = serde_json::from_slice::<UpdateHandoffJournal>(&data) else {
+        return Ok(false);
+    };
+    if journal.schema_version != UpdateHandoffJournal::SCHEMA_VERSION
+        || !version_at_least(current_app_version, &journal.next_app_version)
+    {
+        return Ok(false);
+    }
+    archive(path, &data)?;
+    fs::remove_file(path)?;
+    Ok(true)
+}
+
+/// Numeric dotted comparison of the release part; anything that does not
+/// parse as a version is never proof that an upgrade finished.
+fn version_at_least(current: &str, target: &str) -> bool {
+    fn parse(version: &str) -> Option<Vec<u64>> {
+        let release = version.trim().trim_start_matches('v').split(['-', '+']).next()?;
+        release.split('.').map(|part| part.parse::<u64>().ok()).collect()
+    }
+    let (Some(mut current), Some(mut target)) = (parse(current), parse(target)) else {
+        return false;
+    };
+    let len = current.len().max(target.len());
+    current.resize(len, 0);
+    target.resize(len, 0);
+    current >= target
 }
 
 pub(super) fn write_atomic(path: &Path, journal: &UpdateHandoffJournal) -> io::Result<()> {

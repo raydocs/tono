@@ -19,9 +19,15 @@ mod authenticode;
 /// is checked on every platform's test run.
 #[cfg(any(windows, test))]
 mod core_integrity;
+/// Wired into the StartClash/StageRuntime handlers on Windows; the lifecycle `test` feature
+/// drives those routes with placeholder YAML, so there it is exercised by its own test only.
+#[cfg(any(test, all(windows, not(feature = "test"))))]
+mod owned_config;
 mod staging;
 
 pub(crate) use assets::{PreparedRuntime, prepare_runtime};
 #[cfg(windows)]
 pub(crate) use assets::is_installed_core_image_path;
+#[cfg(all(windows, not(feature = "test")))]
+pub(crate) use owned_config::ensure_owned_runtime_config_is_safe;
 pub(crate) use staging::stage_runtime;

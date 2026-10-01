@@ -63,4 +63,5 @@ nonisolated struct ConnectionEntry: Identifiable, Codable {
     /// runaway download visible at a glance.
     var uploadText: String = ""
     var downloadText: String = ""
+    var routingExplanation: ActivityRouteExplanation? = nil
 }

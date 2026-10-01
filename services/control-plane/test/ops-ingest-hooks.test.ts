@@ -8,6 +8,8 @@ import { jwtSign } from '../src/crypto';
 import worker, { type Env } from '../src/index';
 import { enqueueJob } from '../src/ops/jobs';
 import { afterLogSegment } from '../src/ops/ingest-hooks';
+import { projectBacklog } from '../src/ops/customers';
+import { loadMonthSummary } from '../src/ops/ledger';
 
 const JWT_SECRET = 'test-jwt-secret-with-at-least-32-characters';
 const COLLECTOR = 'collector-test-token-with-at-least-32-chars';
@@ -102,6 +104,22 @@ describe('ops ingest hooks', () => {
     ).bind(account.userId).first<{ selected_server: string; connected: number }>();
     expect(status?.selected_server).toBe('Salt Lake City · Summit');
     expect(Number(status?.connected)).toBe(1);
+  });
+
+  it('counts a window once across ingest and the cron pass, and leaves byte-less usage pending', async () => {
+    const account = await seedAccount('once');
+    expect((await api('telemetry/windows', json(telemetryWindow(), account.token))).status).toBe(201);
+    const minutes = async () => Number((await db().prepare(
+      'SELECT SUM(online_minutes) AS m FROM customer_activity_hours WHERE user_id = ?',
+    ).bind(account.userId).first<{ m: number }>())?.m);
+    const afterIngest = await minutes();
+    expect(afterIngest).toBeGreaterThan(0);
+    const t = Math.floor(Date.now() / 1000);
+    await projectBacklog(db(), t);
+    expect(await minutes()).toBe(afterIngest);
+    const month = new Date(Date.now() - 600_000).toISOString().slice(0, 7);
+    const summary = await loadMonthSummary(db(), month, t);
+    expect(summary.customers.find((row) => row.userId === account.userId)?.pending).toBe(true);
   });
 
   it('PUT ops-ingest/snapshot writes ops_node_status', async () => {
@@ -256,6 +274,26 @@ describe('ops ingest hooks', () => {
     }
   });
 
+  it('accounts that reach the Worker through one exit IP keep separate telemetry budgets', async () => {
+    const accounts = [];
+    for (let i = 0; i < 6; i++) accounts.push(await seedAccount(`shared-exit-${i}`));
+    // Six accounts each spend their full hourly allowance (6) from one exit
+    // node address: 36 windows, more than any single shared-IP budget allowed.
+    for (const account of accounts) {
+      for (let n = 0; n < 6; n++) {
+        const response = await api('telemetry/windows', {
+          ...json(telemetryWindow(), account.token),
+          headers: {
+            'content-type': 'application/json',
+            authorization: `Bearer ${account.token}`,
+            'cf-connecting-ip': '203.0.113.7',
+          },
+        });
+        expect(response.status).toBe(201);
+      }
+    }
+  });
+
   it('a customer incident opened on a heartbeat reaches a user-subject alert rule', async () => {
     const account = await seedAccount('alert');
     const t = Math.floor(Date.now() / 1000);
@@ -328,7 +366,7 @@ describe('ops ingest hooks', () => {
       appVersion: '0.0.72',
       osVersion: 'macOS 14.4',
       osArch: 'arm64',
-      coreErrors: ['dial tcp 203.0.113.9:443: i/o timeout'],
+      coreErrors: ['dial tcp 203.0.113.9:443: i/o timeout Password="two word diagnostic"; handshake EOF'],
     }, account.token));
     expect(ok.status).toBe(202);
     expect(await ok.json()).toEqual({ accepted: true });
@@ -337,7 +375,7 @@ describe('ops ingest hooks', () => {
        WHERE user_id = ? AND source = 'failure'`,
     ).bind(account.userId).first<{ source: string; kind: string; node: string; error: string }>();
     expect(row).toMatchObject({ source: 'failure', kind: 'connectFail', node: 'Tokyo · Kite' });
-    expect(row?.error).toContain('[redacted]');
+    expect(row?.error).toBe('dial tcp [redacted]:443: i/o timeout [redacted]; handshake EOF');
     const status = await db().prepare(
       'SELECT last_fail_code, last_fail_node FROM ops_customer_status WHERE user_id = ?',
     ).bind(account.userId).first<{ last_fail_code: string; last_fail_node: string }>();

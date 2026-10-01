@@ -3,6 +3,7 @@ import Darwin
 import CryptoKit
 import IOKit
 import IOKit.pwr_mgt
+import Security
 
 let helperVersion = HelperProtocolVersion.current
 let socketDirectory = "/var/run/tono-core"
@@ -12,7 +13,7 @@ let runtimeConfigPath = "\(runtimeDirectory)/config.json"
 let pidPath = "\(socketDirectory)/sing-box.pid"
 let allowedUIDPath = "/Library/PrivilegedHelperTools/tono.allowed-uid"
 let mihomoPath = "/Library/PrivilegedHelperTools/tono-sing-box"
-let maximumRequestBytes = 16 * 1024
+let maximumRequestBytes = 48 * 1024
 let maximumHeaderBytes = 8 * 1024
 let maximumDiagnosticBytes = 32 * 1024
 var helperShutdownRequested: sig_atomic_t = 0
@@ -37,6 +38,11 @@ let killSwitchArmFields = Set([
 enum HelperFailure: Error {
     case invalid(String)
     case system(String)
+    /// A shutdown signal for this helper interrupted the operation. Distinct
+    /// from `.system` because startup must not arm fail-closed state for it:
+    /// the request came from this helper's own update executor (bootout), so
+    /// there is nothing wrong with the machine's evidence.
+    case stopping(String)
     /// A refusal the caller can act on programmatically.
     ///
     /// Everything else is prose, which is right for a message a person reads and
@@ -48,7 +54,7 @@ enum HelperFailure: Error {
 
     var message: String {
         switch self {
-        case .invalid(let message), .system(let message): message
+        case .invalid(let message), .system(let message), .stopping(let message): message
         case .coded(_, let message): message
         }
     }
@@ -109,6 +115,13 @@ func staleOwnedCorePIDs(
     }.sorted()
 }
 
+/// A signal is still aimed at the core only when the pid's path and uid are
+/// the ones captured before the wait. `kill(pid, 0)` stays true after the pid
+/// is reused.
+func maySignalOwnedCore(path: String, uid: uid_t, expectedPath: String) -> Bool {
+    uid == 0 && path == expectedPath
+}
+
 func runCoreLifecyclePolicySelfTests() -> Bool {
     staleOwnedCorePIDs(in: [
         .init(pid: 31, executablePath: mihomoPath, uid: 0),
@@ -116,10 +129,157 @@ func runCoreLifecyclePolicySelfTests() -> Bool {
         .init(pid: 33, executablePath: "/tmp/tono-mihomo", uid: 0),
         .init(pid: 34, executablePath: "/Library/PrivilegedHelperTools/tono-mihomo", uid: 0),
     ]) == [31, 34]
+        && maySignalOwnedCore(path: mihomoPath, uid: 0, expectedPath: mihomoPath)
+        && !maySignalOwnedCore(path: "/usr/libexec/rosetta/runtime", uid: 0, expectedPath: mihomoPath)
+        && !maySignalOwnedCore(path: mihomoPath, uid: 501, expectedPath: mihomoPath)
+}
+
+/// Folds an object key the way Go's JSON decoder matches it to a struct field
+/// (`bytes.EqualFold`). Every option name the core knows is ASCII, and the only
+/// non-ASCII letters whose simple fold reaches ASCII are U+017F (s) and U+212A (k).
+func goFoldedJSONKey(_ key: String) -> String {
+    var folded = String.UnicodeScalarView()
+    for scalar in key.unicodeScalars {
+        switch scalar.value {
+        case 0x41...0x5A: folded.append(Unicode.Scalar(UInt8(scalar.value + 0x20)))
+        case 0x017F: folded.append("s")
+        case 0x212A: folded.append("k")
+        default: folded.append(scalar)
+        }
+    }
+    return String(folded)
+}
+
+/// Foundation keeps the first of a repeated object key; the core's Go decoder
+/// keeps the last and also binds case-folded spellings to the same option.
+/// Refuse any object whose decoded keys collide after that folding, so the
+/// allowlist below and the core always read the same value. The input has
+/// already been accepted by `JSONSerialization`, so only strings and container
+/// punctuation need to be tracked here.
+///
+/// Deliberately stricter than Go: this folds the keys of every object,
+/// including map-typed ones (such as a hosts DNS server's `predefined`),
+/// whose keys Go matches exactly and never folds. The app's own config never
+/// has keys that differ only in case (option names are fixed lowercase ASCII,
+/// and the predefined host names are lowercased and deduplicated before
+/// writing), so nothing it generates is refused. A future map with such keys
+/// would be.
+func jsonObjectKeysAreUnambiguous(_ contents: String) -> Bool {
+    let bytes = Array(contents.utf8)
+    func hex4(_ start: Int) -> UInt32? {
+        guard start + 4 <= bytes.count else { return nil }
+        var value: UInt32 = 0
+        for byte in bytes[start..<start + 4] {
+            guard let digit = Character(Unicode.Scalar(byte)).hexDigitValue else { return nil }
+            value = value << 4 | UInt32(digit)
+        }
+        return value
+    }
+    // Decodes the string whose opening quote is at `start`, returning its value
+    // and the index after the closing quote. Lone surrogates decode to U+FFFD,
+    // as they do in Go.
+    func decodeString(_ start: Int) -> (String, Int)? {
+        var decoded: [UInt8] = []
+        var index = start + 1
+        while index < bytes.count {
+            let byte = bytes[index]
+            if byte == UInt8(ascii: "\"") { return (String(decoding: decoded, as: UTF8.self), index + 1) }
+            guard byte == UInt8(ascii: "\\") else {
+                decoded.append(byte)
+                index += 1
+                continue
+            }
+            guard index + 1 < bytes.count else { return nil }
+            let escape = bytes[index + 1]
+            index += 2
+            switch escape {
+            case UInt8(ascii: "\""), UInt8(ascii: "\\"), UInt8(ascii: "/"): decoded.append(escape)
+            case UInt8(ascii: "b"): decoded.append(0x08)
+            case UInt8(ascii: "f"): decoded.append(0x0C)
+            case UInt8(ascii: "n"): decoded.append(0x0A)
+            case UInt8(ascii: "r"): decoded.append(0x0D)
+            case UInt8(ascii: "t"): decoded.append(0x09)
+            case UInt8(ascii: "u"):
+                guard var value = hex4(index) else { return nil }
+                index += 4
+                if (0xD800...0xDBFF).contains(value), index + 6 <= bytes.count,
+                   bytes[index] == UInt8(ascii: "\\"), bytes[index + 1] == UInt8(ascii: "u"),
+                   let low = hex4(index + 2), (0xDC00...0xDFFF).contains(low) {
+                    value = 0x10000 + ((value - 0xD800) << 10) + (low - 0xDC00)
+                    index += 6
+                }
+                let scalar = Unicode.Scalar(value) ?? "\u{FFFD}"
+                decoded.append(contentsOf: String(Character(scalar)).utf8)
+            default: return nil
+            }
+        }
+        return nil
+    }
+    // One frame per open container: nil for an array, the folded keys seen so
+    // far for an object.
+    var frames: [Set<String>?] = []
+    var nextStringIsKey = false
+    var index = 0
+    while index < bytes.count {
+        switch bytes[index] {
+        case UInt8(ascii: "{"):
+            frames.append(Set<String>())
+            nextStringIsKey = true
+            index += 1
+        case UInt8(ascii: "["):
+            frames.append(nil)
+            nextStringIsKey = false
+            index += 1
+        case UInt8(ascii: "}"), UInt8(ascii: "]"):
+            guard frames.popLast() != nil else { return false }
+            nextStringIsKey = false
+            index += 1
+        case UInt8(ascii: ","):
+            nextStringIsKey = frames.last.map { $0 != nil } ?? false
+            index += 1
+        case UInt8(ascii: "\""):
+            guard let string = decodeString(index) else { return false }
+            if nextStringIsKey {
+                guard var keys = frames.last ?? nil,
+                      keys.insert(goFoldedJSONKey(string.0)).inserted else { return false }
+                frames[frames.count - 1] = keys
+                nextStringIsKey = false
+            }
+            index = string.1
+        default:
+            index += 1
+        }
+    }
+    return frames.isEmpty
+}
+
+/// The parsed document with every object key folded as the core folds it.
+/// Returns nil on a collision, which `jsonObjectKeysAreUnambiguous` has
+/// already refused; the helper never traps on its input.
+func goFoldedJSONKeys(_ value: Any) -> Any? {
+    if let dictionary = value as? [String: Any] {
+        var folded: [String: Any] = [:]
+        for (key, child) in dictionary {
+            guard let child = goFoldedJSONKeys(child),
+                  folded.updateValue(child, forKey: goFoldedJSONKey(key)) == nil else { return nil }
+        }
+        return folded
+    }
+    if let array = value as? [Any] {
+        var folded: [Any] = []
+        for child in array {
+            guard let child = goFoldedJSONKeys(child) else { return nil }
+            folded.append(child)
+        }
+        return folded
+    }
+    return value
 }
 
 func ownedRuntimeConfigIsSafe(_ contents: String) -> Bool {
-    guard let object = try? JSONSerialization.jsonObject(with: Data(contents.utf8)) as? [String: Any],
+    guard jsonObjectKeysAreUnambiguous(contents),
+          let parsed = try? JSONSerialization.jsonObject(with: Data(contents.utf8)),
+          let object = goFoldedJSONKeys(parsed) as? [String: Any],
           Set(object.keys).isSubset(of: ["log", "dns", "inbounds", "outbounds", "route", "experimental"]),
           let route = object["route"] as? [String: Any], route["final"] as? String == "Tono-Exit",
           route["rule_set"] == nil,
@@ -290,6 +450,23 @@ func runCoreLifecycleSelfTests() -> Bool {
     func check(_ name: String, _ ok: Bool) { if !ok { failures.append(name) } }
     func refuses(_ name: String, _ body: () throws -> Void) {
         do { try body(); failures.append(name) } catch { }
+    }
+
+    // `--emergency-disarm` and `--emergency-reset` build a CoreManager for the
+    // bound uid only to stop a stale core before PF is released. After that
+    // macOS account is deleted the uid no longer resolves, and recovery must
+    // still get past this step (H19-O-F4). Starting a core for it stays refused.
+    if let missingUID = (uid_t(2_000_000_000)...uid_t(2_000_000_100))
+        .first(where: { getpwuid($0) == nil }) {
+        if let orphaned = try? CoreManager(allowedUID: missingUID) {
+            refuses("deleted-user-start-refused") {
+                try orphaned.start(configDirectory: configDirectory, configSHA256: digest)
+            }
+        } else {
+            failures.append("deleted-user-recovery-constructs-core-manager")
+        }
+    } else {
+        failures.append("no-unresolvable-uid-for-deleted-user-check")
     }
 
     guard let manager = try? CoreManager(allowedUID: allowedUID) else {
@@ -541,6 +718,333 @@ func runOwnedRuntimeContractSelfTests() -> Bool {
                 with: #""listen":"0.0.0.0""#
             )
         )
+        // Foundation keeps the first repeated key and the core keeps the last.
+        && !ownedRuntimeConfigIsSafe(
+            valid.replacingOccurrences(
+                of: #""route":{"final":"Tono-Exit""#,
+                with: #""route":{"final":"Tono-Exit","final":"direct""#
+            )
+        )
+}
+
+/// Daemon startup after executor recovery.
+///
+/// After a boot, macOS loads /etc/pf.conf with PF disabled. That file only
+/// declares the Tono anchor; it does not load the rule file, so Safe Mode
+/// (where this LaunchDaemon does not run) cannot reinstall a block from it.
+/// This daemon does not re-arm on startup. Once the socket is listening, a
+/// Core that is not running releases any leftover kill switch. A failure
+/// before that release clears a saved kill switch instead of installing a
+/// block. A stop request is a clean stop, as in `UpdateExecutor.startup`:
+/// the executor's own bootout must not change PF.
+func startHelperDaemon<KillSwitch, Server>(
+    readUID: () throws -> uid_t = {
+        guard geteuid() == 0 else {
+            throw HelperFailure.invalid("The helper must run as root.")
+        }
+        return try readAllowedUID()
+    },
+    restoreProtection: (uid_t) throws -> KillSwitch,
+    startServer: (uid_t, KillSwitch) throws -> Server,
+    secureFailedStartup: () -> Void,
+    stopRequested: () -> Bool = { helperShutdownRequested != 0 }
+) -> Server? {
+    do {
+        let allowedUID = try readUID()
+        let killSwitch = try restoreProtection(allowedUID)
+        return try startServer(allowedUID, killSwitch)
+    } catch {
+        if !stopRequested() { secureFailedStartup() }
+        return nil
+    }
+}
+
+func runUpgradeSourceSelfTest() -> Bool {
+    let directory = FileManager.default.temporaryDirectory.path
+    let fifo = directory + "/tono-upgrade-fifo-\(getpid())"
+    let file = directory + "/tono-upgrade-file-\(getpid())"
+    let dest = directory + "/tono-upgrade-dest-\(getpid())"
+    let stopped = dest + ".stop"
+    unlink(fifo)
+    unlink(file)
+    unlink(dest)
+    unlink(stopped)
+    defer {
+        unlink(fifo)
+        unlink(file)
+        unlink(dest)
+        unlink(stopped)
+    }
+    guard mkfifo(fifo, 0o644) == 0 else { return false }
+    let started = Date()
+    var rejectedFIFO = false
+    do { close(try openUpgradeSource(fifo)) } catch { rejectedFIFO = true }
+    guard rejectedFIFO, Date().timeIntervalSince(started) < 2 else { return false }
+    let payload = Data("tono-upgrade\n".utf8)
+    do {
+        try payload.write(to: URL(fileURLWithPath: file), options: .atomic)
+        let fd = try openUpgradeSource(file)
+        defer { close(fd) }
+        try copyUpgradeSource(from: fd, to: dest) { true }
+        guard (try? Data(contentsOf: URL(fileURLWithPath: dest))) == payload else { return false }
+        var aborted = false
+        do {
+            try copyUpgradeSource(from: fd, to: stopped) { false }
+        } catch {
+            aborted = true
+        }
+        return aborted && access(stopped, F_OK) != 0
+    } catch {
+        return false
+    }
+}
+
+/// Cancelling a silent copy must leave an administrator installer's staging
+/// files intact, including files it replaces while the copy is in progress.
+func runSilentUpgradeStagingSelfTest() -> Bool {
+    let parent = FileManager.default.temporaryDirectory.path
+        + "/tono-upgrade-isolation-\(UUID().uuidString)"
+    do {
+        try FileManager.default.createDirectory(atPath: parent, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(atPath: parent) }
+        let staging = try SilentUpgradeStaging(parent: parent)
+        defer { staging.remove() }
+        let other = try SilentUpgradeStaging(parent: parent)
+        defer { other.remove() }
+        guard staging.directory != other.directory else { return false }
+        let otherPayload = Data("other-upgrade\n".utf8)
+        try otherPayload.write(to: URL(fileURLWithPath: other.helperPath))
+        let source = parent + "/source"
+        let installerHelper = parent + "/tono-core-helper.new"
+        let installerCore = parent + "/tono-sing-box.new"
+        let sentinel = Data("administrator-install\n".utf8)
+        try Data("silent-upgrade\n".utf8).write(to: URL(fileURLWithPath: source))
+        let fd = try openUpgradeSource(source)
+        defer { close(fd) }
+        var checks = 0
+        var aborted = false
+        do {
+            try copyUpgradeSource(from: fd, to: staging.helperPath) {
+                checks += 1
+                if checks == 2 {
+                    do {
+                        try sentinel.write(to: URL(fileURLWithPath: installerHelper), options: .atomic)
+                        try sentinel.write(to: URL(fileURLWithPath: installerCore), options: .atomic)
+                    } catch { return false }
+                    return false
+                }
+                return true
+            }
+        } catch { aborted = true }
+        staging.remove()
+        return aborted && checks == 2
+            && (try? Data(contentsOf: URL(fileURLWithPath: installerHelper))) == sentinel
+            && (try? Data(contentsOf: URL(fileURLWithPath: installerCore))) == sentinel
+            && (try? Data(contentsOf: URL(fileURLWithPath: other.helperPath))) == otherPayload
+            && access(staging.helperPath, F_OK) != 0
+    } catch { return false }
+}
+
+/// The authorization check and binary replacement share the actual durable
+/// lock; another installer cannot enter between them.
+func runSilentUpgradeCommitSelfTest() -> Bool {
+    guard geteuid() == 0 else { return false }
+    let root = FileManager.default.temporaryDirectory.path
+        + "/tono-upgrade-commit-\(UUID().uuidString)"
+    defer { try? FileManager.default.removeItem(atPath: root) }
+    do {
+        let storage = try UpdateStorage(root: root)
+        let staging = try SilentUpgradeStaging(parent: root)
+        defer { staging.remove() }
+        let helperDestination = root + "/helper"
+        let coreDestination = root + "/core"
+        let helperBytes = Data("new-helper\n".utf8)
+        let coreBytes = Data("new-core\n".utf8)
+        try helperBytes.write(to: URL(fileURLWithPath: staging.helperPath))
+        try coreBytes.write(to: URL(fileURLWithPath: staging.corePath))
+        let contender = open(root + "/lock", O_RDWR | O_CLOEXEC)
+        guard contender >= 0 else { return false }
+        defer { close(contender) }
+        var replaced = false
+        try replaceSilentUpgradeCopies(
+            staging: staging,
+            helperDestination: helperDestination,
+            coreDestination: coreDestination
+        ) { replace in
+            try storage.locked {
+                guard flock(contender, LOCK_EX | LOCK_NB) != 0,
+                      errno == EWOULDBLOCK else {
+                    throw HelperFailure.system("Upgrade replacement did not hold the update lock.")
+                }
+                try replace()
+                guard (try? Data(contentsOf: URL(fileURLWithPath: helperDestination))) == helperBytes,
+                      (try? Data(contentsOf: URL(fileURLWithPath: coreDestination))) == coreBytes else {
+                    throw HelperFailure.system("Upgrade copies were not replaced inside the update lock.")
+                }
+                replaced = true
+            }
+        }
+        guard replaced, flock(contender, LOCK_EX | LOCK_NB) == 0 else { return false }
+        flock(contender, LOCK_UN)
+        return true
+    } catch { return false }
+}
+
+func runBuildSourceSealSelfTest() -> Bool {
+    let json = Data(
+        #"{"commit":"0123456789abcdef0123456789abcdef01234567","releaseSequence":3}"#.utf8
+    )
+    guard (try? UpdatePackage.buildSource(matching: json, and: json))?.releaseSequence == 3 else {
+        return false
+    }
+    do {
+        _ = try UpdatePackage.buildSource(matching: json, and: Data(#"{"commit":"0123456789abcdef0123456789abcdef01234567","releaseSequence":2}"#.utf8))
+        return false
+    } catch {}
+    do {
+        _ = try UpdatePackage.buildSource(from: Data(count: 4096))
+        return false
+    } catch {}
+    let fifo = FileManager.default.temporaryDirectory.path + "/tono-build-source-fifo-\(getpid())"
+    unlink(fifo)
+    defer { unlink(fifo) }
+    guard mkfifo(fifo, 0o644) == 0 else { return false }
+    let started = Date()
+    do {
+        _ = try UpdatePackage.readBoundedRegularFile(fifo, maximum: 4096)
+        return false
+    } catch {
+        return Date().timeIntervalSince(started) < 2
+    }
+}
+
+func runPFTokenForgetSelfTest() -> Bool {
+    !KillSwitchManager.shouldKeepPFEnableRecord(releaseStatus: 0, stillListed: true)
+        && KillSwitchManager.shouldKeepPFEnableRecord(releaseStatus: 1, stillListed: true)
+        && !KillSwitchManager.shouldKeepPFEnableRecord(releaseStatus: 1, stillListed: false)
+}
+
+func runLanDNSScopeSelfTest() -> Bool {
+    let scoped = #"block drop out quick on { en0, en5 } inet proto { tcp, udp } port { 53, 853 } label "tono-lan-dns""#
+    let unscoped = #"block drop out quick inet proto { tcp, udp } port { 53, 853 } label "tono-lan-dns""#
+    // Kernel output expands the renderer's interface/protocol/port lists.
+    let expanded = #"block drop out quick on en5 inet proto udp from any to 10.0.0.0/8 port = 53 label "tono-lan-dns""#
+        + "\n" + #"block drop out quick on en0 inet proto tcp from any to 10.0.0.0/8 port = 853 label "tono-lan-dns""#
+        + "\n" + #"block drop out quick on en0 inet6 proto udp from any to fc00::/7 port = 53 label "tono-lan-dns""#
+    return KillSwitchManager.lanDNSInterfaces(in: scoped) == ["en0", "en5"]
+        && KillSwitchManager.lanDNSInterfaces(in: expanded) == ["en0", "en5"]
+        && KillSwitchManager.lanDNSScopeNeedsReload(
+            loaded: KillSwitchManager.lanDNSInterfaces(in: expanded),
+            current: ["en0", "en5", "en7"]
+        )
+        && KillSwitchManager.lanDNSInterfaces(in: expanded + "\n" + unscoped) == []
+        && KillSwitchManager.lanDNSInterfaces(in: unscoped) == []
+        && KillSwitchManager.lanDNSInterfaces(in: "pass out all\n") == nil
+        && KillSwitchManager.lanDNSScopeNeedsReload(loaded: ["en0"], current: ["en0", "en7"])
+        && !KillSwitchManager.lanDNSScopeNeedsReload(loaded: ["en0", "en7"], current: ["en0"])
+        && !KillSwitchManager.lanDNSScopeNeedsReload(loaded: ["en0"], current: [])
+        && !KillSwitchManager.lanDNSScopeNeedsReload(loaded: [], current: ["en0"])
+        && !KillSwitchManager.lanDNSScopeNeedsReload(loaded: nil, current: ["en0"])
+}
+
+func runLANScopePreservationSelfTest() -> Bool {
+    let state = KillSwitchState(
+        armed: true, tailscaleBootstrapEnabled: false,
+        apiHosts: [], exitHints: [], tunnelInterfaces: ["utun199"],
+        resolvedHosts: [:], pinnedHosts: [:], derpEndpoints: [],
+        cachedDERPEndpoints: [], proxyTargets: [],
+        sessionDirectEndpoints: [.init(address: "203.0.113.50", transport: "tcp", port: 443)],
+        reviewedBundleDirectEnabled: true
+    )
+    let source = KillSwitchManager.renderRules(
+        state: state, allowedUID: 501, physicalInterfaces: ["en0"]
+    )
+    let baseline = KillSwitchManager.passRules(in: source)
+    guard source.contains("203.0.113.50"), source.contains(KillSwitchManager.reviewedBundleLabel),
+          let widened = KillSwitchManager.widenLANScope(
+            in: source, current: ["en5"], baseline: baseline
+          ),
+          KillSwitchManager.lanDNSInterfaces(in: widened) == ["en0", "en5"],
+          KillSwitchManager.passRules(in: widened) == baseline,
+          source.split(separator: "\n").filter({ !$0.contains("\"tono-lan-dns\"") })
+            == widened.split(separator: "\n").filter({ !$0.contains("\"tono-lan-dns\"") }),
+          KillSwitchManager.stateDisposal(replacing: baseline, with: KillSwitchManager.passRules(in: widened)) == .keep,
+          KillSwitchManager.widenLANScope(in: source, current: ["en5"], baseline: nil) == nil,
+          KillSwitchManager.widenLANScope(in: source, current: ["en5"], baseline: []) == nil,
+          case .withhold(let withheld, _, _) = KillSwitchManager.reviewedBundleWithholding(
+            loaded: source, baseline: baseline
+          ) else { return false }
+    // A transient withhold must never be reconstructed from persisted state
+    // or mistaken for the full baseline while the Core is being replaced.
+    return KillSwitchManager.widenLANScope(in: withheld, current: ["en5"], baseline: baseline) == nil
+}
+
+func runReadRequestBoundSelfTest() -> Bool {
+    func withPipe(_ body: (Int32, Int32) throws -> Bool) -> Bool {
+        var ends = [Int32](repeating: -1, count: 2)
+        guard pipe(&ends) == 0 else { return false }
+        defer {
+            if ends[0] >= 0 { close(ends[0]) }
+            if ends[1] >= 0 { close(ends[1]) }
+        }
+        return (try? body(ends[0], ends[1])) == true
+    }
+    let accepted = withPipe { readEnd, writeEnd in
+        let bytes = Data("GET /version HTTP/1.1\r\nContent-Length: 0\r\n\r\n".utf8)
+        let wrote = bytes.withUnsafeBytes { raw -> Int in
+            guard let base = raw.baseAddress else { return -1 }
+            return Darwin.write(writeEnd, base, bytes.count)
+        }
+        guard wrote == bytes.count else { return false }
+        let request = try readRequest(readEnd)
+        return request.method == "GET" && request.path == "/version" && request.body.isEmpty
+    }
+    let rejected = withPipe { readEnd, writeEnd in
+        var header = Data("POST /helper/upgrade HTTP/1.1\r\nX: ".utf8)
+        header.append(Data(repeating: 0x61, count: maximumHeaderBytes))
+        let wrote = header.withUnsafeBytes { raw -> Int in
+            guard let base = raw.baseAddress else { return -1 }
+            return Darwin.write(writeEnd, base, header.count)
+        }
+        guard wrote == header.count else { return false }
+        do {
+            _ = try readRequest(readEnd)
+            return false
+        } catch {
+            return true
+        }
+    }
+    return accepted && rejected
+}
+
+/// The manager is constructed before the server. A server failure runs the
+/// startup release, and a requested stop does not (H12-F2).
+func runStartupOrderSelfTest() -> Bool {
+    struct StartupFailed: Error {}
+    var events: [String] = []
+    func start(stopRequested: Bool) -> Int? {
+        startHelperDaemon(
+            readUID: { 501 },
+            restoreProtection: { (_: uid_t) in events.append("restore") },
+            startServer: { (_: uid_t, _: Void) throws -> Int in
+                events.append("server")
+                throw StartupFailed()
+            },
+            secureFailedStartup: { events.append("secure") },
+            stopRequested: { stopRequested }
+        )
+    }
+    guard start(stopRequested: false) == nil,
+          events == ["restore", "server", "secure"] else {
+        FileHandle.standardError.write(Data("startup order: \(events)\n".utf8))
+        return false
+    }
+    events = []
+    guard start(stopRequested: true) == nil, events == ["restore", "server"] else {
+        FileHandle.standardError.write(Data("startup stop: \(events)\n".utf8))
+        return false
+    }
+    return true
 }
 
 func requestHelperShutdown(_ signal: Int32) {
@@ -548,30 +1052,141 @@ func requestHelperShutdown(_ signal: Int32) {
     helperShutdownRequested = 1
 }
 
+/// A corrupt or unreadable update ledger is not a strict kill switch.
+/// Recovery still releases the network. It does not delete the ledger.
+func emergencyReleaseDespiteUnreadableLedger(strictKillSwitchEnabled: Bool) -> Bool {
+    !strictKillSwitchEnabled
+}
+
+/// PF and DNS release with no ledger access. Used when the store cannot be
+/// opened. Does not remove the installation or rewrite update files.
+func releaseNetworkWithoutLedger() -> Bool {
+    do {
+        let allowedUID = try readAllowedUID()
+        _ = try CoreManager(allowedUID: allowedUID)
+        let dns = try ProtectedDNSManager()
+        let manager = try KillSwitchManager(allowedUID: allowedUID)
+        do {
+            _ = try dns.restore(deferringLossNotice: true)
+        } catch {
+            fputs("Tono emergency recovery could not restore DNS; releasing PF anyway: \(error)\n", stderr)
+        }
+        _ = try manager.disarm()
+        print("Tono network protection is disarmed. Update evidence was not modified.")
+        return true
+    } catch {
+        fputs("Tono emergency recovery could not release PF: \(error)\n", stderr)
+        return false
+    }
+}
+
 /// Last-resort recovery for a machine whose GUI cannot reconnect or quit
 /// normally. This path is intentionally unavailable over the user socket and
 /// requires an administrator to execute the installed, signed helper as root.
-func runEmergencyDisarm() -> Bool {
+/// An unreadable ledger does not refuse the release. This is not #691: it
+/// does not boot out unrelated processes, does not require DNS verification
+/// before opening PF, and does not record a flag that stops later starts.
+func runEmergencyDisarm(underLock suppliedStorage: UpdateStorage? = nil) -> Bool {
     guard geteuid() == 0 else {
         fputs("Tono emergency recovery must be run with sudo.\n", stderr)
         return false
     }
     do {
+        let storage = try suppliedStorage ?? UpdateStorage()
+        let disarm = { () throws -> Bool in
+        var ledger: UpdateStorage.Ledger?
+        var pending = false
+        do {
+            var loaded = try storage.load()
+            pending = loaded.attempt != nil && loaded.attempt?.receipt.phase != .committed
+            if pending {
+                loaded.attempt?.disconnectRequested = true
+                try storage.save(loaded)
+            }
+            ledger = loaded
+        } catch {
+            fputs(
+                "Tono emergency recovery could not read update evidence; releasing the network and keeping the files: \(error)\n",
+                stderr
+            )
+            guard emergencyReleaseDespiteUnreadableLedger(strictKillSwitchEnabled: false) else {
+                throw error
+            }
+            pending = false
+        }
         let allowedUID = try readAllowedUID()
         // Initialization terminates a stale owned Mihomo process before PF is
         // opened, preventing a half-running privileged runtime after recovery.
-        _ = try CoreManager(allowedUID: allowedUID)
-        // Restore the user's DHCP/custom DNS before opening PF. If DNS recovery
-        // fails, retain fail-closed protection instead of returning a machine
-        // with direct egress but a dead resolver.
-        _ = try ProtectedDNSManager().restore()
+        let core = try CoreManager(allowedUID: allowedUID)
+        // Restore DNS, then release PF. A DNS failure must not keep the block:
+        // the host would stay offline with a dead resolver.
+        let dns = try ProtectedDNSManager()
         let manager = try KillSwitchManager(allowedUID: allowedUID)
-        _ = try manager.disarm()
+        if pending, var ledger {
+            let runtime = UpdateRuntime(core: core, firewall: manager, dns: dns, power: PowerTransitionGate())
+            do {
+                try runtime.disconnect()
+            } catch {
+                fputs(
+                    "Tono emergency recovery could not finish the update disconnect; releasing PF anyway: \(error)\n",
+                    stderr
+                )
+                do {
+                    _ = try dns.restore(deferringLossNotice: true)
+                } catch {
+                    fputs("Tono emergency recovery could not restore DNS; releasing PF anyway: \(error)\n", stderr)
+                }
+                _ = try manager.disarm()
+                print("Tono network protection is disarmed. Update evidence was kept.")
+                return true
+            }
+            ledger.attempt?.disconnectVerified = true
+            try storage.save(ledger)
+            // The verified release above is the abandon intent this command
+            // exists to express. An attempt that is provably resolved on disk
+            // — rolled back to (or never moved from) the captured original
+            // components, or a fully replaced installation the user gave up
+            // on — now has a sanctioned terminal archive; take it so this
+            // documented last-resort exit also ends the transaction instead
+            // of leaving a permanently pending ledger that no product
+            // surface can resolve. Unmet predicates change nothing: evidence
+            // is archived, not erased, and the consumed high-water stays.
+            do { try UpdateTransaction.live(storage: storage, runtime: runtime).retire(peer: nil) }
+            catch {
+                fputs("Tono emergency recovery disarmed PF but could not archive the resolved update attempt: \(error)\n", stderr)
+            }
+        } else {
+            do {
+                _ = try dns.restore(deferringLossNotice: true)
+            } catch {
+                fputs(
+                    "Tono emergency recovery could not restore DNS; releasing PF anyway: \(error)\n",
+                    stderr
+                )
+            }
+            _ = try manager.disarm()
+        }
         print("Tono network protection is disarmed.")
+        if ProtectedDNSManager.originalLossRecorded {
+            // Either branch above; the record stays for the app's next restore.
+            print(
+                "Tono did not restore the saved DNS settings because the network service was removed "
+                    + "or its DNS settings changed. Any newer DNS settings were kept. Check "
+                    + "System Settings > Network if DNS needs adjustment."
+            )
+        }
         return true
+        }
+        return try suppliedStorage == nil ? storage.locked(disarm) : disarm()
     } catch {
-        fputs("Tono emergency recovery failed; PF remains fail-closed.\n", stderr)
-        return false
+        fputs(
+            "Tono emergency recovery could not use update evidence (\(error)). Releasing the network.\n",
+            stderr
+        )
+        guard emergencyReleaseDespiteUnreadableLedger(strictKillSwitchEnabled: false) else {
+            return false
+        }
+        return releaseNetworkWithoutLedger()
     }
 }
 
@@ -582,6 +1197,26 @@ func runEmergencyDisarm() -> Bool {
 /// launchd plist, allowed-uid record, and the executables — so the next app
 /// launch performs a clean authenticated reinstall.
 func runEmergencyReset() -> Bool {
+    guard geteuid() == 0 else { return false }
+    do {
+        let storage = try UpdateStorage()
+        return try storage.locked {
+            let attempt = try storage.load().attempt
+            guard attempt == nil || attempt?.receipt.phase == .committed else {
+                throw HelperFailure.invalid("Pending update evidence prevents helper reset. Use explicit emergency-disarm, not removal.")
+            }
+            return runEmergencyResetLocked(storage)
+        }
+    } catch {
+        fputs(
+            "Helper removal refused (\(error)). Update evidence kept. Releasing the network.\n",
+            stderr
+        )
+        return runEmergencyDisarm()
+    }
+}
+
+private func runEmergencyResetLocked(_ storage: UpdateStorage) -> Bool {
     // Stop the daemon FIRST: with KeepAlive it can otherwise service a
     // concurrent GUI arm between this tool's disarm and the removal below,
     // re-writing PF state that then survives with no helper left installed —
@@ -596,7 +1231,7 @@ func runEmergencyReset() -> Bool {
     try? bootout.run()
     bootout.waitUntilExit()
 
-    guard runEmergencyDisarm() else {
+    guard runEmergencyDisarm(underLock: storage) else {
         // Protection could not be released; removing the installation now
         // would strand the machine fail-closed with nothing able to enforce
         // or undo it. Put the daemon registration back and keep everything.
@@ -617,15 +1252,249 @@ func runEmergencyReset() -> Bool {
         )
         return false
     }
+    removeHelperInstallation()
+    print("Tono helper installation removed. Reopen Tono to reinstall it.")
+    return true
+}
+
+/// Removal after a verified release. Callers have released PF first.
+private func removeHelperInstallation() {
+    // PF is released. Take Tono's hook back out of /etc/pf.conf and delete the
+    // backups written before its first edits. A hook left behind only loads the
+    // disarmed placeholder anchor, so a failure is reported, not fatal.
+    do {
+        try KillSwitchManager.removeMainHookAndBackups()
+    } catch {
+        fputs("Tono emergency reset left its /etc/pf.conf hook in place: \(error)\n", stderr)
+    }
+    // The socket goes too: it is still owned by the account this helper
+    // served, and another account's app reads that owner as "bound to them".
     for path in [
         "/Library/LaunchDaemons/com.raydocs.tono.core-helper.plist",
         allowedUIDPath,
         mihomoPath,
         "/Library/PrivilegedHelperTools/tono-core-helper",
+        socketPath,
     ] {
         unlink(path)
     }
-    print("Tono helper installation removed. Reopen Tono to reinstall it.")
+}
+
+/// Whether a Tono app that can use this helper is still on this Mac: a Tono
+/// client process is running (wherever its bundle now is), or a Tono app sits
+/// in /Applications or the bound user's ~/Applications — as Tono.app or as a
+/// renamed copy declaring Tono's bundle identifier. Anything that cannot be
+/// read counts as present, so doubt keeps protection.
+func tonoAppPresent(
+    applicationsDirectory: String = "/Applications",
+    userApplicationsDirectory: String? = boundUserApplicationsDirectory(),
+    clientRunning: () -> Bool = tonoClientProcessRunning
+) -> Bool {
+    if tonoAppIn(applicationsDirectory) { return true }
+    if let userApplicationsDirectory {
+        var metadata = stat()
+        // No ~/Applications folder is no app there; any other failure is doubt.
+        if lstat(userApplicationsDirectory, &metadata) == 0 {
+            if tonoAppIn(userApplicationsDirectory) { return true }
+        } else if errno != ENOENT {
+            return true
+        }
+    }
+    return clientRunning()
+}
+
+private func tonoAppIn(_ applicationsDirectory: String) -> Bool {
+    var metadata = stat()
+    if lstat("\(applicationsDirectory)/Tono.app", &metadata) == 0 { return true }
+    guard errno == ENOENT,
+          let entries = try? FileManager.default.contentsOfDirectory(atPath: applicationsDirectory)
+    else { return true }
+    for entry in entries where entry.hasSuffix(".app") {
+        // An iPhone or iPad app on Apple silicon has no Contents folder
+        // (`WrappedBundle -> Wrapper/<name>.app`) and cannot be a runnable
+        // Tono; counting it as present kept every removed Tono's protection
+        // (BRICK-M3). Only a missing Contents skips; any other doubt below
+        // still counts as present.
+        var contents = stat()
+        if lstat("\(applicationsDirectory)/\(entry)/Contents", &contents) != 0 {
+            let failure = errno
+            if failure == ENOENT || failure == ENOTDIR { continue }
+        }
+        let infoPath = "\(applicationsDirectory)/\(entry)/Contents/Info.plist"
+        // Bounded and regular-file only: this runs as root at every start. A
+        // bundle whose Info.plist is missing or unreadable may be a renamed
+        // Tono mid-copy, so it counts as present too.
+        let fd = open(infoPath, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC)
+        if fd < 0 { return true }
+        let handle = FileHandle(fileDescriptor: fd, closeOnDealloc: true)
+        var info = stat()
+        guard fstat(fd, &info) == 0, fileType(info) == mode_t(S_IFREG),
+              info.st_size <= 1024 * 1024,
+              let data = try? handle.readToEnd(),
+              let plist = try? PropertyListSerialization.propertyList(from: data, format: nil)
+                as? [String: Any]
+        else { return true }
+        if plist["CFBundleIdentifier"] as? String == "com.raydocs.tono" { return true }
+    }
+    return false
+}
+
+/// The bound user's ~/Applications, or nil when no bound user resolves (no
+/// allowed-uid file, or the account was deleted).
+func boundUserApplicationsDirectory() -> String? {
+    guard let uid = try? readAllowedUID(), let account = getpwuid(uid),
+          let home = account.pointee.pw_dir else { return nil }
+    let path = String(cString: home)
+    return path.hasPrefix("/") ? path + "/Applications" : nil
+}
+
+/// Whether any running process is a Tono client this helper would accept: an
+/// executable at `<bundle>.app/Contents/MacOS/Tono` that satisfies
+/// `TonoPeerAuthorizer.clientRequirementText`. The name filter keeps this to a
+/// few Security lookups; renaming the executable breaks the signature anyway.
+/// A pid listing that fails counts as running.
+func tonoClientProcessRunning() -> Bool {
+    var requirement: SecRequirement?
+    guard SecRequirementCreateWithString(
+        TonoPeerAuthorizer.clientRequirementText as CFString, SecCSFlags(rawValue: 0), &requirement
+    ) == errSecSuccess, let requirement else { return true }
+    let capacity = proc_listallpids(nil, 0)
+    guard capacity > 0 else { return true }
+    var pids = [Int32](repeating: 0, count: Int(capacity) + 32)
+    let count = pids.withUnsafeMutableBytes {
+        proc_listallpids($0.baseAddress, Int32($0.count))
+    }
+    guard count > 0 else { return true }
+    return tonoClientAmong(Array(pids.prefix(Int(count))), name: processShortName,
+                           path: processExecutablePath, live: processLiveness) { pid in
+        var code: SecCode?
+        guard SecCodeCopyGuestWithAttributes(
+            nil, [kSecGuestAttributePid: pid] as CFDictionary, SecCSFlags(rawValue: 0), &code
+        ) == errSecSuccess, let code else { return nil }
+        switch SecCodeCheckValidity(code, SecCSFlags(rawValue: 0), requirement) {
+        case errSecSuccess: return true
+        // Only a definite requirement mismatch is "not Tono". Unsigned,
+        // invalidated or unreadable code is unknown, not a mismatch.
+        case errSecCSReqFailed: return false
+        default: return nil
+        }
+    }
+}
+
+/// The decision over one pid listing. Only a candidate — a process whose BSD
+/// short name is Tono's executable name, which exec sets from the file and a
+/// deleted bundle does not change — is looked at further; every other process
+/// is skipped even when its lookups fail, or any Mac with one unreadable
+/// process would keep the helper forever. A name lookup that fails also skips
+/// the pid. `path` and `signed` return nil when the lookup fails; `live`
+/// returns false only for a pid that has definitely exited, and nil when that
+/// cannot be told. A candidate whose lookup failed counts as a Tono client
+/// unless it has definitely exited: doubt keeps protection.
+func tonoClientAmong(
+    _ pids: [Int32],
+    name: (Int32) -> String?,
+    path: (Int32) -> String?,
+    live: (Int32) -> Bool?,
+    signed: (Int32) -> Bool?
+) -> Bool {
+    let executableName = String(UpdatePackage.appExecutable.split(separator: "/").last ?? "")
+    for pid in pids where pid > 0 {
+        guard name(pid) == executableName else { continue }
+        guard let executable = path(pid) else {
+            if live(pid) != false { return true }
+            continue
+        }
+        guard executable.hasSuffix(".app" + UpdatePackage.appExecutable) else { continue }
+        switch signed(pid) {
+        case .some(true): return true
+        case .some(false): continue
+        case .none: if live(pid) != false { return true }
+        }
+    }
+    return false
+}
+
+/// The kernel's short name for `pid` (p_name, else p_comm), or nil.
+private func processShortName(_ pid: Int32) -> String? {
+    var buffer = [CChar](repeating: 0, count: 64)
+    guard proc_name(pid, &buffer, UInt32(buffer.count)) > 0 else { return nil }
+    return String(cString: buffer)
+}
+
+private func processExecutablePath(_ pid: Int32) -> String? {
+    var buffer = [CChar](repeating: 0, count: Int(PATH_MAX) * 4)
+    guard proc_pidpath(pid, &buffer, UInt32(buffer.count)) > 0 else { return nil }
+    return String(cString: buffer)
+}
+
+/// true: live, not a zombie. false: definitely exited (a zombie, or no such
+/// process). nil: the lookup failed some other way.
+private func processLiveness(_ pid: Int32) -> Bool? {
+    var info = proc_bsdinfo()
+    let (size, lookupError) = withUnsafeMutablePointer(to: &info) { pointer -> (Int32, Int32) in
+        let size = proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, pointer, Int32(MemoryLayout<proc_bsdinfo>.size))
+        return (size, errno)
+    }
+    if size == MemoryLayout<proc_bsdinfo>.size { return info.pbi_status != UInt32(SZOMB) }
+    if size <= 0, lookupError == ESRCH { return false }
+    if kill(pid, 0) == -1, errno == ESRCH { return false }
+    return nil
+}
+
+/// At every helper start, after executor recovery (H19-O-F1). Dragging
+/// Tono.app to the Trash is the only way to remove Tono from a Mac, and it
+/// left this KeepAlive daemon re-arming PF at every boot with no app that could
+/// release it and no instructions outside the deleted app. The barrier stays
+/// while a Tono app can still use it (`tonoAppPresent`: running, or in
+/// /Applications or ~/Applications), or an unfinished update attempt may be
+/// putting one back. When a start finds neither, release exactly as
+/// `--emergency-reset` does and remove this installation. Only at a start,
+/// never mid-session.
+func releaseIfTonoWasRemoved(
+    storage suppliedStorage: UpdateStorage? = nil,
+    applicationsDirectory: String = "/Applications",
+    userApplicationsDirectory: String? = boundUserApplicationsDirectory(),
+    clientRunning: () -> Bool = tonoClientProcessRunning,
+    release: (UpdateStorage) -> Bool = releaseRemovedInstallationLocked
+) -> Bool {
+    guard !tonoAppPresent(applicationsDirectory: applicationsDirectory,
+                          userApplicationsDirectory: userApplicationsDirectory,
+                          clientRunning: clientRunning) else { return false }
+    do {
+        let storage = try suppliedStorage ?? UpdateStorage()
+        return try storage.locked {
+            let attempt = try storage.load().attempt
+            guard attempt == nil || attempt?.receipt.phase == .committed,
+                  !tonoAppPresent(applicationsDirectory: applicationsDirectory,
+                                  userApplicationsDirectory: userApplicationsDirectory,
+                                  clientRunning: clientRunning) else { return false }
+            return release(storage)
+        }
+    } catch {
+        return false
+    }
+}
+
+/// Nothing is removed unless the stale core stops, DNS is restored and PF is
+/// disarmed (`runEmergencyDisarm`); otherwise startup continues and
+/// `SocketServer.run` releases a leftover kill switch when the Core is not
+/// running. The daemon has not opened its socket yet, so no GUI arm can
+/// interleave, unlike the `--emergency-reset` tool.
+func releaseRemovedInstallationLocked(_ storage: UpdateStorage) -> Bool {
+    guard runEmergencyDisarm(underLock: storage) else { return false }
+    removeHelperInstallation()
+    // Unload this job last. launchd ends it with SIGTERM, which must now stop
+    // the process instead of setting the shutdown flag. If the bootout does
+    // not happen, the plist and executable are already gone, so nothing loads
+    // it at the next boot.
+    signal(SIGTERM, SIG_DFL)
+    let bootout = Process()
+    bootout.executableURL = URL(fileURLWithPath: "/bin/launchctl")
+    bootout.arguments = ["bootout", "system/com.raydocs.tono.core-helper"]
+    bootout.standardOutput = FileHandle.nullDevice
+    bootout.standardError = FileHandle.nullDevice
+    try? bootout.run()
+    bootout.waitUntilExit()
     return true
 }
 
@@ -830,6 +1699,45 @@ signal(SIGPIPE, SIG_IGN)
 signal(SIGTERM, requestHelperShutdown)
 signal(SIGINT, requestHelperShutdown)
 umask(0o077)
+func updateAllowsOrdinaryInstall() -> Bool {
+    guard geteuid() == 0 else { return false }
+    do {
+        let storage = try UpdateStorage()
+        return try storage.locked {
+            let attempt = try storage.load().attempt
+            return attempt == nil || attempt?.receipt.phase == .committed
+        }
+    } catch { return false }
+}
+
+if CommandLine.arguments.dropFirst() == ["--update-install-allowed"] {
+    exit(updateAllowsOrdinaryInstall() ? 0 : 1)
+}
+if CommandLine.arguments.dropFirst() == ["--update-install-guard"] {
+    guard geteuid() == 0 else { exit(1) }
+    do {
+        let storage = try UpdateStorage()
+        let status = try storage.locked { () throws -> Int32 in
+            let attempt = try storage.load().attempt
+            guard attempt == nil || attempt?.receipt.phase == .committed else {
+                throw HelperFailure.invalid("Pending update prevents helper repair.")
+            }
+            let installer = Process()
+            installer.executableURL = URL(fileURLWithPath: "/bin/sh")
+            installer.standardInput = FileHandle.standardInput
+            try installer.run()
+            installer.waitUntilExit()
+            return installer.terminationStatus
+        }
+        exit(status)
+    } catch { exit(1) }
+}
+if CommandLine.arguments.dropFirst() == ["--update-executor"] {
+    exit(UpdateExecutor.run() ? 0 : 1)
+}
+if CommandLine.arguments.dropFirst() == ["--update-self-test"] {
+    exit(runUpdateSelfTests() ? 0 : 1)
+}
 if CommandLine.arguments.dropFirst() == ["--version"] {
     print(helperVersion)
     exit(0)
@@ -845,7 +1753,19 @@ if CommandLine.arguments.dropFirst() == ["--staging-self-test"] {
     exit(runStagingRefusalSelfTests() ? 0 : 1)
 }
 if CommandLine.arguments.dropFirst() == ["--lifecycle-self-test"] {
-    exit(KillSwitchManager.runLifecycleSelfTests() ? 0 : 1)
+    let pfPassed = KillSwitchManager.runLifecycleSelfTests()
+        && KillSwitchManager.runInterruptedSelectiveReleaseSelfTest()
+        && SelectiveFailOpenInstaller.runResolverOwnershipSelfTest()
+    let dnsPassed = ProtectedDNSManager.runRestoreReadFailureSelfTest()
+        && ProtectedDNSManager.runRepeatedOwnedRestoreSelfTest()
+        && ProtectedDNSManager.runPreferencesContentionSelfTest()
+        && ProtectedDNSManager.runStatusUnreadableServiceSelfTest()
+        && ProtectedDNSManager.runCorruptSnapshotSelfTest()
+        && ProtectedDNSManager.runRenamedServiceRestoreSelfTest()
+        && ProtectedDNSManager.runDeferredOriginalLossSelfTest()
+    let selectiveRoutesPassed = SelectiveFailOpen.runRouteGatewaySelfTest()
+    let upgradeCommitPassed = runSilentUpgradeCommitSelfTest()
+    exit(pfPassed && dnsPassed && selectiveRoutesPassed && upgradeCommitPassed ? 0 : 1)
 }
 if CommandLine.arguments.dropFirst() == ["--self-test"] {
     exit(
@@ -853,9 +1773,26 @@ if CommandLine.arguments.dropFirst() == ["--self-test"] {
             && ProtectedDNSManager.runSelfTests()
             && TonoPeerAuthorizer.runSelfTests()
             && runRequestContractSelfTests()
+            && runHelperUpgradeAdmissionSelfTest()
+            && runUpgradeSourceSelfTest()
+            && runSilentUpgradeStagingSelfTest()
+            && runBuildSourceSealSelfTest()
+            && runPFTokenForgetSelfTest()
+            && runLanDNSScopeSelfTest()
+            && runLANScopePreservationSelfTest()
+            && runReadRequestBoundSelfTest()
             && runCoreLifecyclePolicySelfTests()
             && runOwnedRuntimeContractSelfTests()
             && PowerTransitionGate.runSelfTests()
+            && runStartupOrderSelfTest()
+            && KillSwitchManager.runFailedCommitReleaseSelfTest()
+            && KillSwitchManager.runFailedBarrierSelectiveReleaseSelfTest()
+            && KillSwitchManager.runFailedBarrierUnreleasedSelfTest()
+            && SocketServer.runOrphanedBootstrapSelectiveReleaseSelfTest()
+            && KillSwitchManager.runUnprovenHealthSelfTest()
+            && emergencyReleaseDespiteUnreadableLedger(strictKillSwitchEnabled: false)
+            && !emergencyReleaseDespiteUnreadableLedger(strictKillSwitchEnabled: true)
+            && SelectiveFailOpen.runSelfTests()
             ? 0 : 1
     )
 }
@@ -869,8 +1806,22 @@ if CommandLine.arguments.dropFirst() == ["--emergency-reset"] {
     exit(runEmergencyReset() ? 0 : 1)
 }
 do {
-    let server = try SocketServer()
-    server.run()
+    // Executor recovery must precede CoreManager's stale-child cleanup.
+    // startup() does not install a PF block, including when the ledger is
+    // corrupt (BRICK-M1). It returns a clean stop when the executor's own
+    // bootout interrupts this daemon behind the update lock — in that window
+    // the executor owns the flow and no PF action is ours to take.
+    if try UpdateExecutor.startup() { exit(0) }
+    if releaseIfTonoWasRemoved() { exit(0) }
 } catch {
+    exit(1)
+}
+if let server = startHelperDaemon(
+    restoreProtection: { uid in try KillSwitchManager(allowedUID: uid) },
+    startServer: { uid, killSwitch in try SocketServer(allowedUID: uid, killSwitch: killSwitch) },
+    secureFailedStartup: KillSwitchManager.secureFailedStartup
+) {
+    server.run()
+} else {
     exit(1)
 }

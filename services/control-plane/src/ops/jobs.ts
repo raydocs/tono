@@ -7,6 +7,8 @@ import { type Env, type Row, id, str } from '../env';
 import { ApiError } from '../errors';
 import { opsAuditStatement } from '../product-account';
 import { rejectUnexpectedKeys } from '../request';
+import { redactJobJson, redactJobResult } from './job-redaction';
+import { catalogRelistTemplateUsesManagedIdentity } from '../catalog-yaml';
 
 const DEFAULT_TTL_SECONDS = 900;
 const DEFAULT_LEASE_SECONDS = 120;
@@ -15,10 +17,6 @@ const PARAMS_MAX = 2048;
 const SUMMARY_MAX = 500;
 const RESULT_JSON_MAX = 16384;
 const NAME_MAX = 200;
-const UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;
-const EMAIL_RE = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi;
-const IPV4_RE = /\b(?:\d{1,3}\.){3}\d{1,3}\b/g;
-const PASSWORD_RE = /\bpassword\b/gi;
 const CARRIERS = new Set(['ct', 'cu', 'cm']);
 const EXECUTORS = new Set(['hub', 'exit_agent', 'worker']);
 const STATUSES = new Set(['queued', 'leased', 'succeeded', 'failed', 'cancelled', 'expired']);
@@ -54,6 +52,13 @@ const homeExitIdParam: ParamGuard = (value) => {
   str(value, 'homeExitId', 1, NAME_MAX);
 };
 
+const catalogTemplateParam: ParamGuard = (value) => {
+  str(value, 'catalog template', 1, PARAMS_MAX);
+  if (!catalogRelistTemplateUsesManagedIdentity(value as string)) {
+    throw new ApiError(400, 'VALIDATION_ERROR', 'Catalog templates must use managed identity placeholders');
+  }
+};
+
 const read = (executor: Executor, leaseSeconds: number, schema: JobTypeConfig['paramsSchema'] = {}, required?: readonly string[]): JobTypeConfig => ({
   executor, leaseSeconds, destructive: false, readOnly: true, paramsSchema: schema, requiredParams: required,
 });
@@ -75,7 +80,14 @@ export const JOB_TYPES = {
   identity_sync: write('hub', DEFAULT_LEASE_SECONDS),
   agent_reinstall: write('hub', DEFAULT_LEASE_SECONDS),
   catalog_retire: write('worker', DEFAULT_LEASE_SECONDS),
-  catalog_relist: write('worker', DEFAULT_LEASE_SECONDS),
+  catalog_relist: {
+    ...write('worker', DEFAULT_LEASE_SECONDS),
+    paramsSchema: {
+      block: catalogTemplateParam,
+      hy2Block: catalogTemplateParam,
+      expectedRevision: intAtMost('expectedRevision', Number.MAX_SAFE_INTEGER),
+    },
+  },
   home_line_probe: read('hub', DEFAULT_LEASE_SECONDS, { homeExitId: homeExitIdParam }, ['homeExitId']),
 } as const satisfies Record<string, JobTypeConfig>;
 
@@ -189,16 +201,6 @@ function idsIn(where: string): string {
 
 function truncate(text: string, max: number): string {
   return text.length <= max ? text : text.slice(0, max);
-}
-
-export function redactJobResult(text: string, allowlistedIp?: string | null): string {
-  const allow = typeof allowlistedIp === 'string' && /^(?:\d{1,3}\.){3}\d{1,3}$/.test(allowlistedIp) ? allowlistedIp : null;
-  for (const re of [UUID_RE, EMAIL_RE, IPV4_RE, PASSWORD_RE]) re.lastIndex = 0;
-  return text
-    .replace(UUID_RE, '[redacted]')
-    .replace(EMAIL_RE, '[redacted]')
-    .replace(IPV4_RE, (match) => (allow && match === allow ? match : '[redacted]'))
-    .replace(PASSWORD_RE, '[redacted]');
 }
 
 export function validateJobRequest(type: string, params: unknown): { ok: true } {
@@ -354,7 +356,7 @@ export async function completeJob(
   const resultJson = result.resultJson === undefined || result.resultJson === null
     ? null
     : truncate(
-      redactJobResult(typeof result.resultJson === 'string' ? result.resultJson : JSON.stringify(result.resultJson), allowlistedIp),
+      redactJobJson(result.resultJson, allowlistedIp),
       RESULT_JSON_MAX,
     );
   const status = result.status === 'ok' ? 'succeeded' : 'failed';

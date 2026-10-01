@@ -23,13 +23,14 @@ import {
   tonoDiagnosticsReport,
   tonoDisconnect,
   tonoRetryNow,
-  tonoUploadDiagnostics,
 } from '@/services/tono'
+import { AiTrafficCard } from '@/tono-ui/AiTrafficCard'
 import { ConnectPill } from '@/tono-ui/ConnectPill'
 import { GlassCard } from '@/tono-ui/GlassCard'
 import { OpenDnsSettingsButton } from '@/tono-ui/OpenDnsSettingsButton'
 import { PageHeader } from '@/tono-ui/PageHeader'
 import { hasLiveProtection } from '@/tono-ui/protection-evidence'
+import { SupportReportAction } from '@/tono-ui/SupportReportAction'
 import {
   TONO_COLORS,
   TONO_MONO_STACK,
@@ -48,11 +49,7 @@ import {
   latencyLabelVars,
   readNodeLatency,
 } from './node-latency'
-import {
-  nodeCityLabel,
-  nodeCityParts,
-  nodeCode,
-} from './node-meta'
+import { nodeCityLabel, nodeCityParts, nodeCode } from './node-meta'
 
 const hex = (color: string, alpha: number) =>
   `${color}${Math.round(alpha * 255)
@@ -60,90 +57,34 @@ const hex = (color: string, alpha: number) =>
     .padStart(2, '0')
     .toUpperCase()}`
 
-const CHECKLIST_STORAGE_KEY = 'tono.connectChecklistDismissed'
 const catalogStatusQueryKey = ['tono', 'catalog-status'] as const
 const encryptedDnsQueryKey = ['tono', 'encrypted-dns'] as const
-const ConnectChecklist = ({
+const EncryptedDnsHint = ({
   dark,
-  encryptedDnsOverrides,
+  message,
 }: {
   dark: boolean
-  encryptedDnsOverrides: boolean
+  message: string
 }) => {
-  const { t } = useTranslation()
   const text = tonoText(dark)
-  const [dismissed, setDismissed] = useState(() => {
-    try {
-      return window.localStorage.getItem(CHECKLIST_STORAGE_KEY) === '1'
-    } catch {
-      return false
-    }
-  })
-  if (dismissed) return null
-  const items = [
-    t('tono.dashboard.checklist.admin'),
-    t('tono.dashboard.checklist.encryptedDns'),
-    t('tono.dashboard.checklist.browserDns'),
-    t('tono.dashboard.checklist.leakTest'),
-  ]
   return (
     <GlassCard
       radius="var(--tono-radius-card)"
-      padding={16}
+      padding={14}
       style={{ width: 520, maxWidth: '100%' }}
     >
-      <div
+      <p
+        role="status"
         style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          gap: 8,
-          marginBottom: 8,
-        }}
-      >
-        <span style={{ fontSize: 13, fontWeight: 650, color: text.primary }}>
-          {t('tono.dashboard.checklist.title')}
-        </span>
-        <button
-          type="button"
-          className="tono-link"
-          style={{
-            fontSize: 12,
-            color: 'var(--tono-text-link)',
-            flexShrink: 0,
-          }}
-          onClick={() => {
-            try {
-              window.localStorage.setItem(CHECKLIST_STORAGE_KEY, '1')
-            } catch {
-              /* ignore quota */
-            }
-            setDismissed(true)
-          }}
-        >
-          {t('tono.dashboard.checklist.dismiss')}
-        </button>
-      </div>
-      <ol
-        style={{
-          margin: 0,
-          paddingLeft: 18,
+          margin: '0 0 10px',
           fontSize: 12,
-          lineHeight: 1.55,
+          lineHeight: 1.5,
           color: text.secondary,
         }}
       >
-        {items.map((item) => (
-          <li key={item} style={{ marginBottom: 4 }}>
-            {item}
-          </li>
-        ))}
-      </ol>
-      {encryptedDnsOverrides ? (
-        <div style={{ marginTop: 10 }}>
-          <OpenDnsSettingsButton accent />
-        </div>
-      ) : null}
+        {message}
+      </p>
+      <OpenDnsSettingsButton accent />
     </GlassCard>
   )
 }
@@ -277,12 +218,20 @@ const ActiveNodeCard = ({
             transition: 'background 0.15s ease, border-color 0.15s ease',
           }}
           onMouseEnter={(e) => {
-            e.currentTarget.style.background = dark ? 'rgba(255,255,255,0.09)' : 'rgba(225,232,246,0.85)'
-            e.currentTarget.style.borderColor = dark ? 'rgba(255,255,255,0.16)' : 'rgba(56,72,108,0.18)'
+            e.currentTarget.style.background = dark
+              ? 'rgba(255,255,255,0.09)'
+              : 'rgba(225,232,246,0.85)'
+            e.currentTarget.style.borderColor = dark
+              ? 'rgba(255,255,255,0.16)'
+              : 'rgba(56,72,108,0.18)'
           }}
           onMouseLeave={(e) => {
-            e.currentTarget.style.background = dark ? 'rgba(255,255,255,0.055)' : 'rgba(235,240,250,0.68)'
-            e.currentTarget.style.borderColor = dark ? 'rgba(255,255,255,0.08)' : 'rgba(56,72,108,0.08)'
+            e.currentTarget.style.background = dark
+              ? 'rgba(255,255,255,0.055)'
+              : 'rgba(235,240,250,0.68)'
+            e.currentTarget.style.borderColor = dark
+              ? 'rgba(255,255,255,0.08)'
+              : 'rgba(56,72,108,0.08)'
           }}
         >
           <TonoNodeBadge size={36} city={nodeCityParts(serverName).city} />
@@ -509,12 +458,6 @@ const DashboardPage = () => {
   const [actionError, setActionError] = useState<DashboardActionError | null>(
     null,
   )
-  // Mirrors the Support page's phase machine. `tono_upload_diagnostics` documents itself as
-  // "only ever called from an explicit user confirmation ... by design — this is a VPN", and
-  // Support honours that with a dialog that enumerates what leaves the machine. This button
-  // fired the same command straight from the click.
-  const [sendingDiagnostics, setSendingDiagnostics] = useState(false)
-  const [confirmingDiagnostics, setConfirmingDiagnostics] = useState(false)
 
   const handleCopyDetails = useLockFn(async () => {
     try {
@@ -526,50 +469,9 @@ const DashboardPage = () => {
     }
   })
 
-  const handleSendDiagnostics = useLockFn(async () => {
-    setSendingDiagnostics(true)
-    try {
-      const receipt = await tonoUploadDiagnostics()
-      setActionError((current) =>
-        current
-          ? {
-              ...current,
-              message: `${current.message}\n${receipt.referenceCode}`,
-            }
-          : current,
-      )
-    } catch (error) {
-      // Previously `.catch(() => setSendingDiagnostics(false))`: the label flipped back and
-      // nothing else happened, so TONO_DIAG_UNREACHABLE — the expected outcome when the kill
-      // switch is blocking, which is exactly when this button is on screen — was
-      // indistinguishable from success.
-      setActionError((current) =>
-        current
-          ? {
-              ...current,
-              message: `${current.message}\n${formatTonoActionError(error, t)}`,
-            }
-          : current,
-      )
-    } finally {
-      // Closed on both outcomes: the reference code and the failure both land in the same
-      // error box the user is already reading, and a dialog left open would cover it.
-      setSendingDiagnostics(false)
-      setConfirmingDiagnostics(false)
-    }
-  })
-
   const protectionConfirmed = hasLiveProtection(status)
   const uiState = status?.uiState ?? 'notConnected'
   const connected = uiState === 'connected'
-  useEffect(() => {
-    if (!connected) return
-    try {
-      window.localStorage.setItem(CHECKLIST_STORAGE_KEY, '1')
-    } catch {
-      /* ignore quota */
-    }
-  }, [connected])
   const busy =
     uiState === 'connecting' ||
     uiState === 'disconnecting' ||
@@ -776,7 +678,7 @@ const DashboardPage = () => {
           : connected
             ? status?.directOverlay === 'skipped'
               ? t('tono.dashboard.directSkipped')
-              : t('tono.dashboard.directOn')
+              : t('tono.dashboard.taglineConnected')
             : t('tono.dashboard.taglineIdle')
   const selectedCity = status?.selectedServer
     ? nodeCityLabel(status.selectedServer, t)
@@ -794,10 +696,16 @@ const DashboardPage = () => {
             : 'tono.dashboard.overview.reading',
         )
       : `${down} ${downUnit}/s`
+  const sessionBytes = (traffic?.upTotal ?? 0) + (traffic?.downTotal ?? 0)
+  const [sessionTotal, sessionTotalUnit] = parseTraffic(sessionBytes)
   const trafficDetail = !connected
     ? t('tono.dashboard.overview.noActiveRoute')
     : trafficLive
-      ? `↑ ${up} ${upUnit}/s`
+      ? sessionBytes > 0
+        ? `↑ ${up} ${upUnit}/s · ${t('tono.dashboard.overview.sessionTotal', {
+            total: `${sessionTotal} ${sessionTotalUnit}`,
+          })}`
+        : `↑ ${up} ${upUnit}/s`
       : ''
 
   return (
@@ -843,6 +751,7 @@ const DashboardPage = () => {
           style={{
             display: 'flex',
             justifyContent: 'center',
+            flexShrink: 0,
             marginBottom: 8,
           }}
         >
@@ -856,7 +765,18 @@ const DashboardPage = () => {
               background: hex(TONO_COLORS.protectedOffline, 0.12),
             }}
           >
-            {t('tono.dashboard.updateIncomplete')}
+            <p style={{ margin: '0 0 8px' }}>
+              {t('tono.dashboard.updateIncomplete')}
+            </p>
+            <button
+              type="button"
+              className="tono-button tono-action"
+              onClick={requestRelease}
+              disabled={uiState === 'disconnecting'}
+              style={{ minHeight: 32, padding: '6px 12px', fontSize: 12 }}
+            >
+              {t('tono.tray.disconnect')}
+            </button>
           </div>
         </div>
       )}
@@ -889,7 +809,9 @@ const DashboardPage = () => {
         style={{
           flex: '1 1 auto',
           width: '100%',
-          minHeight: 0,
+          // A retained progress/error card must scroll below the update notice,
+          // not shrink this stack and paint upward over its Disconnect action.
+          minHeight: status?.updateIncomplete ? 'auto' : 0,
           boxSizing: 'border-box',
           display: 'flex',
           flexDirection: 'column',
@@ -926,9 +848,8 @@ const DashboardPage = () => {
             {connectHint}
           </p>
         </div>
-        {/* Failure + backup first. The first-connect checklist is idle-only —
-            after handshake eof it sat above Try backup channel and looked
-            like Encrypted DNS was the next hand. */}
+        {/* Failure + backup first. The idle Encrypted DNS hint hides once a
+            connect fails, so it never sits above Try backup channel. */}
         <ConnectProgressCard
           uiState={uiState}
           protectionConfirmed={protectionConfirmed}
@@ -936,34 +857,18 @@ const DashboardPage = () => {
           onRefreshStatus={mutateTonoStatus}
           onChooseRoute={() => navigate('/servers')}
         />
-        {!connected &&
-          uiState === 'notConnected' &&
-          actionError == null && (
-          <ConnectChecklist
-            dark={dark}
-            encryptedDnsOverrides={encryptedDnsOverrides === true}
-          />
-        )}
-        {connected && encryptedDnsOverrides === true && (
-          <GlassCard
-            radius="var(--tono-radius-card)"
-            padding={14}
-            style={{ width: 520, maxWidth: '100%' }}
-          >
-            <p
-              role="status"
-              style={{
-                margin: '0 0 10px',
-                fontSize: 12,
-                lineHeight: 1.5,
-                color: text.secondary,
-              }}
-            >
-              {t('tono.dashboard.encryptedDnsHint')}
-            </p>
-            <OpenDnsSettingsButton accent />
-          </GlassCard>
-        )}
+        {encryptedDnsOverrides === true &&
+          (connected ||
+            (uiState === 'notConnected' && actionError == null)) && (
+            <EncryptedDnsHint
+              dark={dark}
+              message={t(
+                connected
+                  ? 'tono.dashboard.encryptedDnsHint'
+                  : 'tono.dashboard.checklist.encryptedDns',
+              )}
+            />
+          )}
         {/* Actionable error under the primary control — includes a switch-server
             path when the exit itself is the likely problem. */}
         {showActionError && (
@@ -1069,11 +974,8 @@ const DashboardPage = () => {
               >
                 {t('tono.dashboard.copyDetails')}
               </button>
-              <button
-                type="button"
-                className="tono-button"
-                disabled={sendingDiagnostics}
-                onClick={() => setConfirmingDiagnostics(true)}
+              <SupportReportAction
+                testIdPrefix="tono-dashboard"
                 style={{
                   minHeight: 32,
                   padding: '6px 12px',
@@ -1085,11 +987,7 @@ const DashboardPage = () => {
                   color: 'var(--tono-text-link)',
                   background: hex(TONO_COLORS.accent, dark ? 0.14 : 0.08),
                 }}
-              >
-                {sendingDiagnostics
-                  ? t('tono.progress.upload.uploading')
-                  : t('tono.dashboard.errors.sendDiagnostics')}
-              </button>
+              />
               {actionError.retry !== 'disconnect' &&
                 actionError.suggestsSwitch && (
                   <button
@@ -1126,6 +1024,10 @@ const DashboardPage = () => {
             claudeHomeHost={status.claudeHomeHost}
           />
         )}
+        <AiTrafficCard
+          connected={connected}
+          generation={status?.controllerGeneration}
+        />
         {!status?.selectedServer && !busy && (
           <button
             type="button"
@@ -1211,19 +1113,6 @@ const DashboardPage = () => {
           </div>
         )}
       {releaseDialog}
-      {confirmingDiagnostics && (
-        <TonoConfirmDialog
-          dark={dark}
-          title={t('tono.dashboard.errors.sendDiagnostics')}
-          message={t('tono.progress.upload.confirmMessage')}
-          confirmLabel={t('shared.actions.confirm')}
-          cancelLabel={t('shared.actions.cancel')}
-          onConfirm={handleSendDiagnostics}
-          onCancel={() => {
-            if (!sendingDiagnostics) setConfirmingDiagnostics(false)
-          }}
-        />
-      )}
     </div>
   )
 }

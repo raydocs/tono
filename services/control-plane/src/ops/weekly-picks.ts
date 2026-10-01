@@ -80,7 +80,7 @@ function priceToCny(rawPrice: unknown, rawCurrency: unknown, rates: Map<string, 
   const known = currency === 'CNY' || currency === 'USD';
   const rate = rates.get(currency) ?? null;
   const exact = known && rate !== null;
-  const cnyMinor = exact ? cnyMinorFrom(priceMinor, rate as number) : priceMinor;
+  const cnyMinor = exact ? cnyMinorFrom(priceMinor, currency, rate as number) : priceMinor;
   return { cnyMinor, exact };
 }
 

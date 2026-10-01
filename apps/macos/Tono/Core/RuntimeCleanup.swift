@@ -3,6 +3,28 @@ import Foundation
 // MARK: - Runtime Cleanup
 
 enum RuntimeCleanup {
+    /// Display/automatic-connect hints only; all mutation grants remain root-owned.
+    static var nativeUpdateBlocksConnect = false
+    static var nativeUpdatePending = false
+    static var nativeUpdateRecovery: UpdateContractV1.Protection?
+
+    /// What launch recovery may tell the UI about a barrier an earlier
+    /// session left behind. The stored intent alone is proof of neither.
+    enum LaunchProtection: Equatable {
+        /// An authenticated helper status, or root's update receipt, says
+        /// the barrier is held.
+        case held
+        /// A fail-closed intent is stored, and no authenticated helper
+        /// answer has confirmed or cleared it.
+        case unconfirmed
+        /// An authenticated answer says no barrier is held.
+        case released
+    }
+
+    /// Receives each launch verdict. AppState registers itself on creation,
+    /// before account restoration can start.
+    static var launchProtectionConsumer: @MainActor (LaunchProtection) -> Void = { _ in }
+
     static func markCoreStarted(tunEnabled: Bool) {
         AppProfile.defaults.set(true, forKey: SettingsKey.didStartCore)
         AppProfile.defaults.set(tunEnabled, forKey: SettingsKey.lastTunEnabled)
@@ -13,24 +35,161 @@ enum RuntimeCleanup {
         AppProfile.defaults.removeObject(forKey: SettingsKey.lastTunEnabled)
     }
 
-    /// A post-update first launch carries the handoff journal, and this is the
-    /// step it describes: the recovery below is what resumes protection on the
-    /// new build, or fails to. On any other launch there is no journal and this
-    /// does nothing.
-    private static func recordUpdateHandoff(
-        _ phase: UpdateHandoffPhase,
-        errorCode: ProtectedFailureCode? = nil,
-        errorStage: String? = nil
-    ) {
-        guard let journal = UpdateHandoffStore.load() else { return }
-        // A relaunch still performs live cleanup/recovery below, but must not
-        // downgrade the verifier's durable receipt. Fresh verification owns commit.
-        if phase == .protectionResuming && journal.phase == .verified { return }
-        try? UpdateHandoffStore.write(journal.advancing(
-            to: phase,
-            errorCode: errorCode?.rawValue,
-            errorStage: errorStage
-        ))
+    /// The kernel's boot session. It changes on every restart, a kernel panic
+    /// included. The helper's peer check reads the same sysctl.
+    nonisolated static func currentBootSession() -> String? {
+        var buffer = [CChar](repeating: 0, count: 128)
+        var size = buffer.count
+        guard sysctlbyname("kern.bootsessionuuid", &buffer, &size, nil, 0) == 0,
+              size > 1, size <= buffer.count else { return nil }
+        return String(cString: buffer)
+    }
+
+    /// Stored when the boot session cannot be read at connect start. It never
+    /// equals a real boot session (a UUID) or a failed read (nil), so a later
+    /// launch holds instead of losing the record.
+    nonisolated static let unknownBootSession = "unknown"
+
+    /// What a connect start records for the boot session it read.
+    nonisolated static func bootSessionRecord(current: String?) -> String {
+        current ?? unknownBootSession
+    }
+
+    /// Recorded when a connect starts; cleared by a completed release
+    /// (Restore internet, Quit). A record from another boot therefore means
+    /// the Mac restarted while a session was up, without a clean stop.
+    ///
+    /// cfprefsd writes a preference to disk when it gets to it, so a panic
+    /// seconds after connect could lose a record kept only there, and the next
+    /// boot would reconnect by itself again. The file copy is synced before
+    /// the connect goes on; the preference stays for a build that reads only
+    /// it.
+    static func recordConnectBootSession(
+        in file: URL = connectBootSessionFile,
+        writer: (String, URL) throws -> Void = writeSynced
+    ) throws {
+        let record = bootSessionRecord(current: currentBootSession())
+        do {
+            // A durable pending marker outlives any failure after rename but
+            // before directory sync. Visible current-boot bytes alone cannot
+            // make a failed admission look successful on the next launch.
+            let pending = file.appendingPathExtension("pending")
+            try writer(unknownBootSession, pending)
+            try writer(record, file)
+            guard Darwin.unlink(pending.path) == 0 else {
+                throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+            }
+            // The record and its directory were already synced by writer.
+            // Marker removal is not a new admission grant: if it reappears
+            // after power loss, the next launch only holds more conservatively.
+            AppProfile.defaults.set(record, forKey: SettingsKey.connectBootSession)
+        } catch {
+            // Admission fails. Preserve the prior record or the pending marker
+            // instead of trusting the preference or a visible replacement.
+            LocalTrafficAudit.shared.recordEvent(
+                "connect_boot_session_not_synced",
+                details: ["error": error.localizedDescription]
+            )
+            throw error
+        }
+    }
+
+    static func clearConnectBootSession() {
+        AppProfile.defaults.removeObject(forKey: SettingsKey.connectBootSession)
+        try? FileManager.default.removeItem(at: connectBootSessionFile)
+        try? FileManager.default.removeItem(at: connectBootSessionFile.appendingPathExtension("pending"))
+    }
+
+    static var recordedConnectBootSession: String? {
+        recordedConnectBootSession(in: connectBootSessionFile)
+    }
+
+    /// The file copy, else the preference an earlier build kept. A file that
+    /// exists but cannot be read holds, like an unreadable boot session. So
+    /// does no record where the file cannot be written: a connect there kept
+    /// only the preference, which a panic can lose, so its absence proves
+    /// nothing.
+    static func recordedConnectBootSession(in file: URL) -> String? {
+        var metadata = stat()
+        if Darwin.lstat(file.appendingPathExtension("pending").path, &metadata) == 0
+            || errno != ENOENT {
+            return unknownBootSession
+        }
+        do {
+            let data = try Data(contentsOf: file)
+            guard let record = String(data: data, encoding: .utf8), !record.isEmpty else {
+                return unknownBootSession
+            }
+            return record
+        } catch let error as CocoaError
+            where error.code == .fileReadNoSuchFile || error.code == .fileNoSuchFile {
+            if let record = AppProfile.defaults.string(forKey: SettingsKey.connectBootSession) {
+                return record
+            }
+            let writable = FileManager.default
+                .isWritableFile(atPath: file.deletingLastPathComponent().path)
+            return writable ? nil : unknownBootSession
+        } catch {
+            return unknownBootSession
+        }
+    }
+
+    nonisolated static var connectBootSessionFile: URL {
+        ConfigStorage.shared.appSupportDirectory
+            .appendingPathComponent("connect-boot-session")
+    }
+
+    /// Replace `url` with `record` and sync the file and its directory, so the
+    /// record survives a panic or a power loss right after this returns.
+    nonisolated static func writeSynced(_ record: String, to url: URL) throws {
+        let directory = url.deletingLastPathComponent()
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let temporary = directory
+            .appendingPathComponent(".\(url.lastPathComponent).\(UUID().uuidString)")
+        let file = Darwin.open(temporary.path, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0o600)
+        guard file >= 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
+        var renamed = false
+        defer { if !renamed { Darwin.unlink(temporary.path) } }
+        do {
+            defer { Darwin.close(file) }
+            let bytes = Array(record.utf8)
+            let written = bytes.withUnsafeBytes { Darwin.write(file, $0.baseAddress, $0.count) }
+            guard written == bytes.count else {
+                throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+            }
+            try fullSync(file)
+        }
+        guard Darwin.rename(temporary.path, url.path) == 0 else {
+            throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+        }
+        renamed = true
+        let folder = Darwin.open(directory.path, O_RDONLY | O_CLOEXEC)
+        guard folder >= 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
+        defer { Darwin.close(folder) }
+        try fullSync(folder)
+    }
+
+    /// `F_FULLFSYNC` also flushes the drive's own cache; plain `fsync` where a
+    /// file system does not support it.
+    nonisolated private static func fullSync(_ descriptor: Int32) throws {
+        if fcntl(descriptor, F_FULLFSYNC) == 0 { return }
+        guard fsync(descriptor) == 0 else {
+            throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+        }
+    }
+
+    /// Launch resumes protection by reconnecting on its own. That is right
+    /// after a crash within the same boot, but not after the Mac restarted
+    /// mid-session (a kernel panic, a power loss): if the session triggered
+    /// the restart, reconnecting repeats it at every login. PF stays armed
+    /// either way; only the automatic connect waits for the user. No record
+    /// (nothing started since the last clean release) changes nothing.
+    nonisolated static func holdsAutomaticResume(
+        recordedBootSession: String?,
+        currentBootSession: String?
+    ) -> Bool {
+        guard let recordedBootSession else { return false }
+        return recordedBootSession != currentBootSession
     }
 
     /// Recover a previous process's network mutations transactionally before
@@ -38,19 +197,98 @@ enum RuntimeCleanup {
     /// PF stays armed with only Tono's bounded control-plane recovery exception
     /// until a verified session reconnects or the user explicitly disarms it.
     static func cleanupStaleRuntime() async throws -> Bool {
+        // Until the helper answers, including when a step below throws first,
+        // a stored fail-closed intent must not read as Standby.
+        if KillSwitchService.isArmed { launchProtectionConsumer(.unconfirmed) }
+        let coordinator = PrivilegedRuntimeCoordinator.shared
+        let pendingUpdate = try await queryPendingNativeUpdate(
+            query: { try await coordinator.pendingNativeUpdate() },
+            launchState: { await coordinator.helperLaunchState() },
+            repairHelper: { try await coordinator.prepareHelper() }
+        )
+        if let pending = pendingUpdate, pending.pending {
+            nativeUpdatePending = true
+            nativeUpdateBlocksConnect = true
+            let adopted = try await coordinator.nativeUpdate("reconcile")
+            guard let receipt = adopted.receipt, receipt.blockedReason == nil,
+                  receipt.phase == .installedIdentityVerified || receipt.phase == .recoveryVerified else {
+                throw NativeUpdateDownload.failure(String(localized: "The pending update cannot be resumed by this copy of Tono. Choose Check for Updates, then Disconnect and Retry, to restore Internet access and end this update attempt."))
+            }
+            nativeUpdateRecovery = receipt.requiredRecovery
+            KillSwitchService.isArmed = receipt.requiredRecovery != .unprotected
+            launchProtectionConsumer(KillSwitchService.isArmed ? .held : .released)
+            clearCoreStarted()
+            if receipt.requiredRecovery == .connected {
+                nativeUpdateBlocksConnect = false // Root permits only this adopted incarnation.
+                return true
+            }
+            _ = try await coordinator.nativeUpdate("commit")
+            nativeUpdatePending = false
+            nativeUpdateBlocksConnect = false
+            return false // Protected Offline must not silently become Connected.
+        }
+        return try await recoverStaleRuntime()
+    }
+
+    /// The native-update query is the first helper call at launch. When the
+    /// helper binary is installed but nothing answers its socket (turned off
+    /// under Allow in the Background, not loaded by launchd, crash-looping),
+    /// the query used to throw a generic "helper unavailable" before any
+    /// repair or notice in `recoverStaleRuntime` could run, and Retry repeated
+    /// it forever. A connect that never lands and a read that times out are
+    /// the same fact here: this call is a status read, so a lost reply cannot
+    /// mean the helper committed a mutation. Say that this Mac is not
+    /// protected and repair the helper here instead. The administrator
+    /// install runs root's update-install guard, which refuses while an
+    /// update transaction is unfinished.
+
+    /// No usable reply. A forbidden or malformed body is an answer and stays
+    /// on the caller's error path. A status read has no PF commit to protect,
+    /// unlike an arm whose reply was lost.
+    static func helperGaveNoAnswer(_ error: Error) -> Bool {
+        switch error {
+        case HelperIPCError.connectFailed,
+             HelperIPCError.emptyResponse,
+             HelperIPCError.socketFailed:
+            true
+        default:
+            false
+        }
+    }
+    static func queryPendingNativeUpdate(
+        query: () async throws -> HelperManager.UpdateStatus?,
+        launchState: () async -> HelperManager.LaunchState,
+        repairHelper: () async throws -> Void
+    ) async throws -> HelperManager.UpdateStatus? {
         do {
-            return try await recoverStaleRuntime()
-        } catch {
-            // Every throwing exit of the recovery is a launch that could not
-            // restore the previous runtime. After an update that is exactly
-            // where the recovery failed, so name it before the error surfaces
-            // as a generic start failure.
-            recordUpdateHandoff(
-                .failed,
-                errorCode: .updateRecoveryFailed,
-                errorStage: "cleanupStaleRuntime"
-            )
-            throw error
+            return try await query()
+        } catch let error where helperGaveNoAnswer(error) {
+            let state = await launchState()
+            if state == .loadedOrUnknown {
+                // launchd has the job; give a restarting helper one moment.
+                try? await Task.sleep(for: .seconds(2))
+                do {
+                    return try await query()
+                } catch let error where helperGaveNoAnswer(error) {}
+            }
+            let notice = HelperManager.unprotectedNotice(for: state)
+                ?? String(localized: "Tono's network helper is not responding, so this Mac may not be protected right now. Click Retry and approve the administrator prompt to repair it.")
+            // Nothing the app can run starts a job the user turned off.
+            if state == .backgroundDisabled {
+                throw CoreRuntimeError.startFailed(notice)
+            }
+            do {
+                try await repairHelper()
+            } catch {
+                throw CoreRuntimeError.startFailed(notice + " " + error.localizedDescription)
+            }
+            do {
+                return try await query()
+            } catch let error where helperGaveNoAnswer(error) {
+                // The repair returned and nothing answers yet (a restart loop
+                // it did not catch): say so, with the Retry that repairs it.
+                throw CoreRuntimeError.startFailed(notice)
+            }
         }
     }
 
@@ -74,29 +312,47 @@ enum RuntimeCleanup {
         let localProtectionIntent = KillSwitchService.isArmed
         let helperProtectionObservation =
             await PrivilegedRuntimeCoordinator.shared.refreshKillSwitchStatus()
-        let shouldResumeProtection: Bool
-        switch helperProtectionObservation {
-        case .confirmed(let requiresProtectionRecovery):
-            // An authenticated helper status is authoritative. In particular,
-            // root emergency recovery clears helper-owned PF state but cannot
-            // update this user's defaults; do not let that stale local bit
-            // immediately re-arm the machine on reopen.
-            KillSwitchService.isArmed = requiresProtectionRecovery
-            shouldResumeProtection = requiresProtectionRecovery
-        case .unavailable, .rejected:
-            // Timeout, malformed status, and 403 are never evidence that PF is
-            // open. Preserve the last local fail-closed intent.
-            shouldResumeProtection = localProtectionIntent
+        let shouldResumeProtection = adoptLaunchObservation(
+            helperProtectionObservation,
+            localIntent: localProtectionIntent
+        )
+
+        // An unreachable helper is usually busy or restarting, and its PF
+        // rules stay in the kernel. But after a restart only the helper enables
+        // PF, so a helper launchd never started means this Mac is not protected
+        // at all. Say that instead of a generic repair error.
+        if helperProtectionObservation == .unavailable, localProtectionIntent {
+            let launchState = await PrivilegedRuntimeCoordinator.shared.helperLaunchState()
+            if let notice = HelperManager.unprotectedNotice(for: launchState) {
+                // Nothing the app can run starts a job the user turned off.
+                if launchState == .backgroundDisabled {
+                    throw CoreRuntimeError.startFailed(notice)
+                }
+                do {
+                    try await PrivilegedRuntimeCoordinator.shared.prepareHelper()
+                } catch {
+                    throw CoreRuntimeError.startFailed(
+                        notice + " " + error.localizedDescription
+                    )
+                }
+            }
         }
 
         if shouldResumeProtection {
-            recordUpdateHandoff(.protectionResuming)
             // Remove stale TUN/proxy exceptions and retain the persisted exact
             // control-plane HTTPS addresses before stopping the old core. A
             // failed reassert leaves the previous PF block live, so cleanup can
             // still continue without ever opening unrestricted egress.
-            try? await PrivilegedRuntimeCoordinator.shared
-                .reassertKillSwitchIfNeeded()
+            do {
+                // The arm returns only once the helper reports the barrier
+                // armed, wanted and live; an unconfirmed launch is now held.
+                // An intent retired meanwhile (an activation answer confirmed
+                // a release) arms nothing, and then nothing is held.
+                if try await PrivilegedRuntimeCoordinator.shared
+                    .reassertKillSwitchIfNeeded() {
+                    launchProtectionConsumer(.held)
+                }
+            } catch {}
         }
 
         let didStartCore = AppProfile.defaults.bool(forKey: SettingsKey.didStartCore)
@@ -143,16 +399,17 @@ enum RuntimeCleanup {
             // install path once before declaring the launch failed.
             var repaired = false
             do {
-                try await PrivilegedRuntimeCoordinator.shared.prepareHelper()
-                let recheck = await PrivilegedRuntimeCoordinator.shared
-                    .protectedDNSStatus()
-                if recheck.snapshotPresent {
-                    _ = try await PrivilegedRuntimeCoordinator.shared
-                        .restoreProtectedDNSIfConfigured()
-                    repaired = true
-                } else {
-                    repaired = recheck.available
-                }
+                repaired = try await repairProtectedDNSAtLaunch(
+                    prepareHelper: {
+                        try await PrivilegedRuntimeCoordinator.shared.prepareHelper()
+                    },
+                    status: {
+                        await PrivilegedRuntimeCoordinator.shared.protectedDNSStatus()
+                    },
+                    restoreDNS: {
+                        try await PrivilegedRuntimeCoordinator.shared.restoreProtectedDNSIfConfigured()
+                    }
+                )
             } catch {
                 // Losing the real cause here (most often a cancelled
                 // administrator prompt) would present the unrelated DNS
@@ -176,5 +433,44 @@ enum RuntimeCleanup {
             }
         }
         return shouldResumeProtection
+    }
+
+    static func repairProtectedDNSAtLaunch(
+        prepareHelper: () async throws -> Void,
+        status: () async -> (
+            available: Bool, configured: Bool, snapshotPresent: Bool, service: String?
+        ),
+        restoreDNS: () async throws -> Bool
+    ) async throws -> Bool {
+        try await prepareHelper()
+        let recheck = await status()
+        guard recheck.available else { return false }
+        _ = try await restoreDNS()
+        return true
+    }
+
+    /// Folds launch's helper answer into the stored fail-closed intent,
+    /// publishes what the UI may claim, and returns whether protection
+    /// should resume.
+    static func adoptLaunchObservation(
+        _ observation: KillSwitchService.StatusObservation,
+        localIntent: Bool
+    ) -> Bool {
+        switch observation {
+        case .confirmed(let requiresProtectionRecovery):
+            // An authenticated helper status is authoritative. In particular,
+            // root emergency recovery clears helper-owned PF state but cannot
+            // update this user's defaults; do not let that stale local bit
+            // immediately re-arm the machine on reopen.
+            KillSwitchService.isArmed = requiresProtectionRecovery
+            launchProtectionConsumer(requiresProtectionRecovery ? .held : .released)
+            return requiresProtectionRecovery
+        case .unavailable, .rejected:
+            // Timeout, malformed status, and 403 are never evidence that PF is
+            // open. Preserve the last local fail-closed intent. Nor are they
+            // evidence that PF is blocking: show the barrier as unconfirmed.
+            if localIntent { launchProtectionConsumer(.unconfirmed) }
+            return localIntent
+        }
     }
 }

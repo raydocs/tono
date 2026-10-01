@@ -3,10 +3,16 @@ import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useLocation, useNavigate } from 'react-router'
 
-import { useTonoStatus } from '@/hooks/use-tono'
+import { tonoConnectProgressQueryKey, useTonoStatus } from '@/hooks/use-tono'
 import { useManualBackupChannel } from '@/pages/tono/use-backup-channel'
+import { useQuery } from '@/services/query-client'
 import { useThemeMode } from '@/services/states'
-import { formatTonoActionError, tonoRetryNow } from '@/services/tono'
+import {
+  formatTonoActionError,
+  tonoConnectProgress,
+  tonoRetryNow,
+} from '@/services/tono'
+import { hasLiveProtection } from '@/tono-ui/protection-evidence'
 import { TONO_COLORS, tonoText } from '@/tono-ui/theme'
 import { useReleaseProtection } from '@/tono-ui/useReleaseProtection'
 
@@ -55,6 +61,18 @@ export const ProtectedOfflineBanner = () => {
 
   const shouldShow =
     status?.uiState === 'protectedOffline' && location.pathname !== '/'
+  // Protected Offline is the FSM's fail-closed intent. Say "blocked" only with
+  // the Service's live barrier, like the pill, progress card and tray panel;
+  // say "retrying" only while a retry is actually scheduled. Same 2 s poll as
+  // the dashboard progress card, which this banner stands in for off `/`.
+  const protectionConfirmed = hasLiveProtection(status)
+  const { data: progress } = useQuery({
+    queryKey: tonoConnectProgressQueryKey,
+    queryFn: tonoConnectProgress,
+    enabled: shouldShow,
+    refetchInterval: shouldShow ? 2000 : false,
+  })
+  const retryScheduled = progress?.nextRetryAtMs != null
 
   const button = {
     minHeight: 30,
@@ -105,7 +123,11 @@ export const ProtectedOfflineBanner = () => {
             <span
               style={{ flex: 1, minWidth: 160, fontSize: 13, fontWeight: 650 }}
             >
-              {t('tono.dashboard.status.offline')}
+              {t(
+                protectionConfirmed
+                  ? 'tono.dashboard.status.offline'
+                  : 'tono.pill.title.protectionUnknown',
+              )}
               <span
                 style={{
                   display: 'block',
@@ -115,7 +137,13 @@ export const ProtectedOfflineBanner = () => {
                   color: text.secondary,
                 }}
               >
-                {t('tono.dashboard.protectedOfflineDescription')}
+                {t(
+                  !protectionConfirmed
+                    ? 'tono.progress.protectionUnknownBody'
+                    : retryScheduled
+                      ? 'tono.dashboard.protectedOfflineDescription'
+                      : 'tono.progress.statusBody',
+                )}
               </span>
               {actionError && (
                 <span

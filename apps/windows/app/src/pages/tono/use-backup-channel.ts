@@ -12,6 +12,7 @@ import {
   tonoRetryNow,
   tonoSelectServer,
   tonoServers,
+  tonoStatus,
   type TonoUiState,
 } from '@/services/tono'
 
@@ -61,8 +62,9 @@ export function useManualBackupChannel(
   const selectAndRetry = useLockFn(async () => {
     if (!hy2Sibling) return
     await tonoSelectServer(hy2Sibling)
-    if (offline) await tonoRetryNow()
-    else await tonoConnect()
+    const current = await tonoStatus()
+    if (current.uiState === 'protectedOffline') await tonoRetryNow()
+    else if (current.uiState === 'notConnected') await tonoConnect()
   })
 
   return { available, hy2Sibling, selectAndRetry }

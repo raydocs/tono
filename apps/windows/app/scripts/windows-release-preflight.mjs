@@ -8,16 +8,20 @@ import { fileURLToPath } from 'node:url'
 import {
   FORBIDDEN_PAYLOAD_NAME_PATTERNS,
   STABLE_EXTERNAL_BIN,
+  STATIC_CRT_HELPERS,
   WINDOWS_RESOURCE_ALLOWLIST,
   WINDOWS_RESOURCE_BUNDLE_ENTRIES,
   parseNsisListing,
   validateExternalBin,
   validateEmbeddedCoreDigestPin,
+  validateSingBoxDigest,
+  WINDOWS_SING_BOX_SHA256,
   validateNsisAutomaticUpgradeFlow,
   validateNsisLegacyCleanup,
   validatePayloadEntries,
   validateReleaseFeatureTree,
   validateResourcesWhitelist,
+  validateStaticCrtImports,
   validateTauriRendererCommandSurface,
   validateTlsPolicySources,
   validateWindowsReplacementHelperSource,
@@ -304,6 +308,57 @@ const assertNsisCoreIntegrityPins = (sevenZip, installer, entries) => {
   return coreDigest
 }
 
+const assertNsisSingBoxPin = (sevenZip, installer, entries) => {
+  const entryFor = (base) =>
+    entries.find((entry) => entry.base.toLowerCase() === base.toLowerCase())
+  const staged = entryFor('sing-box.exe.next')
+  if (!staged) fail('NSIS payload has no staged sing-box.exe.next to hash')
+  const digest = sha256Bytes(readNsisEntry(sevenZip, installer, staged.name))
+  const digestError = validateSingBoxDigest(digest)
+  if (digestError) fail(digestError)
+  const pinFile = entryFor('sing-box-sha256.txt')
+  if (!pinFile) fail('NSIS payload has no sing-box-sha256.txt')
+  const shippedPin = Buffer.from(
+    readNsisEntry(sevenZip, installer, pinFile.name),
+  )
+    .toString('utf8')
+    .trim()
+    .toLowerCase()
+  if (shippedPin !== WINDOWS_SING_BOX_SHA256) {
+    fail(
+      `NSIS sing-box-sha256.txt (${shippedPin}) is not the pinned alpha.9 digest`,
+    )
+  }
+  for (const name of ['tono-service.exe', 'tono-service-install.exe']) {
+    const serviceEntry = entryFor(name)
+    if (!serviceEntry) fail(`NSIS payload has no ${name} to inspect for its sing-box pin`)
+    const binary = Buffer.from(
+      readNsisEntry(sevenZip, installer, serviceEntry.name),
+    )
+    if (!binary.includes(Buffer.from(WINDOWS_SING_BOX_SHA256, 'ascii'))) {
+      fail(`${name} does not embed the pinned sing-box SHA-256 ${WINDOWS_SING_BOX_SHA256}`)
+    }
+  }
+}
+
+// Every packaged copy, including the `$PLUGINSDIR/tono-gate` one `.onInit` runs as the gate.
+const assertNsisHelpersStaticCrt = (sevenZip, installer, entries) => {
+  for (const name of STATIC_CRT_HELPERS) {
+    const copies = entries.filter(
+      (entry) => entry.base.toLowerCase() === name.toLowerCase(),
+    )
+    if (!copies.length)
+      fail(`NSIS payload has no ${name} to inspect for its imports`)
+    for (const copy of copies) {
+      const importError = validateStaticCrtImports(
+        readNsisEntry(sevenZip, installer, copy.name),
+        copy.name,
+      )
+      if (importError) fail(importError)
+    }
+  }
+}
+
 const assertNsisPayload = (installer) => {
   const sevenZip = findSevenZip()
   if (!sevenZip) {
@@ -327,6 +382,8 @@ const assertNsisPayload = (installer) => {
   }
 
   const coreSha256 = assertNsisCoreIntegrityPins(sevenZip, installer, entries)
+  assertNsisSingBoxPin(sevenZip, installer, entries)
+  assertNsisHelpersStaticCrt(sevenZip, installer, entries)
 
   return {
     sevenZip,

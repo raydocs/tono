@@ -34,15 +34,30 @@ Do not delete the state file or rename a source to a friendlier node ID during
 this upgrade. Either action loses the only durable counter baseline or creates a
 second cumulative ledger.
 
+The authenticated roster also carries `sourceUsageWatermarks`, separately from
+its active `identities`: every account previously billed by this source keeps
+its `last_total_bytes` recovery watermark even after expiry or quota removal.
+After a missing local ledger, the agent adopts those totals for retained Xray
+counters before reporting; it installs only the active identities. Both the
+control plane and agent must support this additive field to recover inactive
+accounts. Older control planes retain the identity-only fallback. Outage rounds
+never use a saved recovery watermark as a fresh billing observation.
+If a successful counter snapshot contains no label for an account, its watermark
+is retained as an accounting-only carry so later counters add new usage. That
+carry never authorizes a client or enters the installed-client inventory.
+
 The roster cycle is ordered deliberately:
 
 1. Fetch and validate the roster.
 2. If hy2 is installed, atomically replace its HTTP auth allowlist with exactly
    the verified roster, including an empty roster. Then fully reconcile Xray and
    read counters from one stable Xray process. Neither transport can be skipped
-   while claiming a complete roster ACK.
-3. POST the roster's `observedAt` to `/api/v1/home/roster-ack` with the same
-   bearer token.
+   while claiming a complete roster ACK. A hy2 failure (unsafe directory,
+   missing allowlist, failed write) still lets the Xray reconcile and counter
+   read run; the counters are kept in the state file and the round then exits
+   non-zero with no ACK or usage report.
+3. Persist only the reconciled client inventory, then POST the roster's
+   `observedAt` to `/api/v1/home/roster-ack` with the same bearer token.
 4. Persist and deliver usage state.
 5. Only after counters were valid, state was saved, and any usage was delivered,
    POST `{meteringProtocolVersion: 2, observedAt}` to
@@ -50,8 +65,13 @@ The roster cycle is ordered deliberately:
    replaying an old pending queue alone does not prove readiness.
 
 A failed reconciliation is never acknowledged. A failed acknowledgement exits
-non-zero before this round changes the durable state, so the roster and any
-queued usage are retried on the next run.
+non-zero before this round changes the durable usage state, so the roster and
+any queued usage are retried on the next run. The client inventory already
+reflects the installed clients, so the next roster can still revoke them. A
+refusal after a partial reconcile, or after a later check such as a counter
+read or a queued report outside the roster clock, records that same known
+inventory and still does not acknowledge or advance usage totals. An unknown
+inventory is not written.
 
 The state lock covers the entire roster/reconcile/counter/delivery cycle. If a
 timer and an operator start overlap, the second run exits without observing or
@@ -78,7 +98,54 @@ old report IDs safe after a counter reset.
 
 `TONO_RETIRE_SHARED_LEGACY` is optional. When unset, the agent follows the
 control plane's `retireSharedLegacy` signal. Set it to `false` to block automatic
-retirement during rollback, or to `true` to force retirement.
+retirement during rollback, or to `true` to force retirement. Case does not
+matter (`1/true/yes/on`, `0/false/no/off`); any other value is logged and
+leaves `shared-legacy` as it is (no retirement that round).
+
+Retirement removes `shared-legacy` from the running Xray and from the static
+config (`TONO_XRAY_CONFIG`, default `/opt/tono-xray/current/config.json`), so
+a restart cannot bring it back. The file is replaced atomically with its owner
+and mode after `xray run -test` accepts it; the agent must be able to write it.
+Retirement is one-way per node: once persisted, a later `false` does not put
+`shared-legacy` back. Restoring it takes the `config.json.pre-metering.*` backup or a
+reprovision. A failed config write is reported and fails the round, but only
+after the roster ACK and usage report, so metering and quota enforcement keep
+running.
+
+A disabled or retired node gets `403 EXIT_NODE_DISABLED` on the roster. Only
+that answer makes the agent remove every `u:` client and `shared-legacy`,
+empty the hy2 allowlist, take a best-effort final counter sample into the
+state file (reported by the next round that may report) and exit non-zero;
+stop `tono-xray` afterwards and start it again only when the node is
+re-enabled. `shared-legacy` comes back only when Xray restarts and reloads its
+static config, so re-enabling a node whose Xray kept running leaves it removed.
+The node keeps getting this answer after its token is rotated while disabled:
+disabling saves the deployed token's hash, which only ever earns the 403. Any
+other HTTP error or network failure keeps the last roster and retries.
+
+Xray drops every client added over its management API when it restarts. Each
+verified roster is therefore saved beside the state file as `state.json.roster`
+(mode 0600, service-owned, replaced atomically) before it is enforced. When the
+control plane cannot be reached (a network error or a 5xx/408/425/429 answer),
+the round reinstalls that saved roster if it is at most 24 hours old, keeps
+folding Xray counters into the durable totals, and exits non-zero without any
+acknowledgement. The next round that reaches the control plane reports the
+growth. An older, missing or unreadable copy restores nothing, and the round
+refuses with the reason. Any other control-plane answer, including a rejected
+token, an invalid roster or another node's roster, deletes the copy first; the
+403 `EXIT_NODE_DISABLED` answer for a disabled node deletes it before the
+node's clients are withdrawn. The copy is saved before the roster is
+enforced, so it is never older than the newest roster the node has fetched: it
+cannot reinstate an account a fetched roster had already removed. A revocation
+issued while the control plane is unreachable is not seen, so an Xray restart
+within 24 hours of the last successful fetch reinstalls that account (a running
+Xray keeps it in memory just the same). The restore takes effect on the next
+timer run after the Xray restart. hy2's allowlist is a file and survives
+restarts, so it is not touched during an outage.
+
+The copy holds every client UUID in plain text; these are the VLESS
+credentials (hy2's allowlist keeps only hashes). It is mode 0600 and owned by
+the agent's user; keep it out of VPS snapshots and backups.
 
 Run the regression suite with:
 
@@ -145,5 +212,5 @@ Register the existing catalog node name/source ID, not a second ` · hy2`
 node identity. Do not borrow or rotate another node's token. Give the timer
 only write access to `/opt/tono-hy2` and its lock directory; keep its credential
 file root-owned mode 0600. The existing checker-directory binding/restart
-preflight above still applies. Registration and node deployment require the
-operator's explicit approval; neither publishes a catalog or changes a feed.
+preflight above still applies. Register and deploy a node only when the task
+names it (see the repository `AGENTS.md`); neither publishes a catalog or changes a feed.

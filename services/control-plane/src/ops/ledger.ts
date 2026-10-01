@@ -79,7 +79,9 @@ const SNAPSHOT_MAX_BYTES = 65_536;
 const PARTIAL_SNAPSHOT = JSON.stringify({ customers: [], nodes: [], partial: true });
 
 export function encodeMonthSnapshot(summary: MonthSummaryDto): string {
-  const json = JSON.stringify({ customers: summary.customers, nodes: summary.nodes });
+  const json = JSON.stringify({
+    customers: summary.customers, nodes: summary.nodes, reconciliation: summary.reconciliation,
+  });
   return new TextEncoder().encode(json).length > SNAPSHOT_MAX_BYTES ? PARTIAL_SNAPSHOT : json;
 }
 
@@ -98,21 +100,23 @@ function decodeMonthSnapshot(raw: unknown): MonthSnapshot | null {
   return { customers: row.customers as MonthCustomerDto[], nodes: row.nodes as MonthNodeDto[], partial: false };
 }
 
-type BytesRow = { user_id: string; node: string; bytes: number };
+type BytesRow = { user_id: string; node: string; bytes: number; connected: number };
 type AccountRow = { id: string; user_id: string | null };
 type UserRow = { id: string; email: string };
 type CycleRow = { node_name: string };
 
-export async function loadMonthSummary(db: D1Database, month: string, nowSec: number): Promise<MonthSummaryDto> {
+export async function loadMonthSummary(
+  db: D1Database, month: string, nowSec: number, snapshotEntries?: Row[],
+): Promise<MonthSummaryDto> {
   const { start, end } = monthBounds(month);
-  const entries = (await db.prepare(
+  const entries = snapshotEntries ?? (await db.prepare(
     'SELECT * FROM ops_ledger_entries WHERE month = ?',
   ).bind(month).all<Row>()).results ?? [];
   const closed = await db.prepare(
     'SELECT * FROM ops_month_close WHERE month = ?',
   ).bind(month).first<Row>();
   const activity = (await db.prepare(
-    `SELECT user_id, node, SUM(bytes_up + bytes_down) AS bytes
+    `SELECT user_id, node, SUM(bytes_up + bytes_down) AS bytes, SUM(connected_minutes) AS connected
      FROM customer_activity_hours
      WHERE hour_at >= ? AND hour_at < ? AND node IS NOT NULL AND node != ''
      GROUP BY user_id, node`,
@@ -176,10 +180,14 @@ export async function loadMonthSummary(db: D1Database, month: string, nowSec: nu
 
   const nodeBytes = new Map<string, number>();
   const userNodeBytes = new Map<string, Map<string, number>>();
+  // Connected on a node with no bytes recorded: usage exists but cannot be
+  // allocated, so that customer's margin is not a settled number.
+  const unmeteredUsers = new Set<string>();
   for (const row of activity) {
     const userId = String(row.user_id);
     const node = String(row.node);
     const bytes = Number(row.bytes ?? 0);
+    if (bytes <= 0 && Number(row.connected ?? 0) > 0) unmeteredUsers.add(userId);
     nodeBytes.set(node, (nodeBytes.get(node) ?? 0) + bytes);
     let perNode = userNodeBytes.get(userId);
     if (!perNode) {
@@ -212,7 +220,7 @@ export async function loadMonthSummary(db: D1Database, month: string, nowSec: nu
     const revenue = userRevenue.get(userId) ?? 0;
     const cost = userCost.get(userId) ?? 0;
     const used = userNodeBytes.get(userId);
-    let pending = false;
+    let pending = unmeteredUsers.has(userId);
     if (used) {
       for (const [node, bytes] of used) {
         if (bytes <= 0) continue;
@@ -301,13 +309,20 @@ function signedTotal(kind: string, minor: number): number {
   return 0;
 }
 
-export function ledgerCsv(entries: LedgerEntryDto[]): string {
+export function ledgerCsv(
+  entries: LedgerEntryDto[], zeroPolarities: ReadonlyMap<string, number> = new Map(),
+): string {
   const lines = [CSV_HEADERS.join(',')];
   let amount = 0;
   let cny = 0;
   const currencies = new Set<string>();
   for (const entry of entries) {
-    amount += signedTotal(entry.kind, entry.amountMinor);
+    // CNY retains the effect's sign through repeated reversals. When FX
+    // rounded it to zero, the exporter resolves polarity from the ancestors.
+    const polarity = entry.cnyMinor < 0 ? -1 : entry.cnyMinor > 0 ? 1
+      : zeroPolarities.get(entry.id) ?? (entry.reverses ? -1 : 1);
+    const source = signedTotal(entry.kind, entry.amountMinor);
+    amount += polarity * source;
     cny += signedTotal(entry.kind, entry.cnyMinor);
     currencies.add(entry.currency);
     lines.push([

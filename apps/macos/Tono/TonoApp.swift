@@ -17,6 +17,12 @@ struct TonoApp: App {
         // Before any service exists: a fault while constructing AppState or the
         // account session would otherwise leave no local trace at all.
         CrashReporter.shared.install()
+        // Before AppState reads the incomplete-update warning.
+        UpdateHandoffStore.retireCompletedLegacyJournal(
+            currentAppVersion: Bundle.main.object(
+                forInfoDictionaryKey: "CFBundleShortVersionString"
+            ) as? String ?? ""
+        )
         let appState = AppState()
         let sidecar = TonoSidecarService()
 #if DEBUG
@@ -29,7 +35,7 @@ struct TonoApp: App {
         )
         _appState = State(initialValue: appState)
         _sidecar = State(initialValue: sidecar)
-        _accountSession = State(initialValue: AccountSession(
+        let accountSession = AccountSession(
             sidecar: sidecar,
             descriptorConsumer: { descriptor in
                 await appState.acceptTonoTransport(descriptor)
@@ -58,6 +64,9 @@ struct TonoApp: App {
             killSwitchDisarmConsumer: {
                 await appState.disconnectAndWait(releaseKillSwitch: true)
             },
+            protectionReleaseConsumer: {
+                await appState.acceptConfirmedProtectionReleaseBeforeSignIn()
+            },
             diagnosticSnapshotConsumer: {
                 CrashReporter.shared.annotatedRemoteDiagnosticSnapshot(
                     appState.compactRemoteDiagnosticSnapshot()
@@ -67,7 +76,12 @@ struct TonoApp: App {
                 await appState.claudeTrafficResearchSnapshot()
             },
             protectionBlockedConsumer: { appState.isProtectionBlocked },
-            protectedRetryConsumer: { appState.retryProtectedConnectionNow() },
+            protectedReconnectPausedConsumer: {
+                appState.protectedReconnectPausedForUserAction
+            },
+            protectedRetryConsumer: {
+                appState.retryProtectedConnectionNow(repairHelper: false)
+            },
             appRoutingResearchActivationConsumer: {
                 appState.appRoutingResearchActivationChanged()
             },
@@ -84,8 +98,16 @@ struct TonoApp: App {
                     exitDelayAtMs: Int64(sample.at.timeIntervalSince1970 * 1_000)
                 )
             },
-            routeSplitConsumer: { appState.appTrafficLedger.cumulative }
-        ))
+            routeSplitConsumer: { appState.appTrafficLedger.cumulative },
+            installedCatalogConsumer: { appState.installedManagedCatalogDigests },
+            protectionUnconfirmedConsumer: { appState.isProtectionUnconfirmed }
+        )
+        _accountSession = State(initialValue: accountSession)
+        // #582: Connect asks the account session's offline grant gate first.
+        let offlineGate = accountSession.api.offlineGate
+        appState.accountConnectRefusal = { catalogDigest, routingToken in
+            offlineGate.connectRefusal(catalogDigest: catalogDigest, routingToken: routingToken)
+        }
         // CRITICAL: Purge saved window frames BEFORE SwiftUI's scene management
         // reads them. SwiftUI reads NSWindow Frame / NSSplitView Subview Frames
         // during scene initialization (before applicationDidFinishLaunching),
@@ -132,7 +154,8 @@ struct TonoApp: App {
                 if InterfaceLanguagePreference.hasChosen {
                     if WelcomeLaunchGate.showsIntro(
                         introSeen: introSeen,
-                        sessionState: accountSession.state
+                        sessionState: accountSession.state,
+                        protectionHeld: KillSwitchService.isArmed
                     ) {
                         WelcomeIntroView()
                     } else {
@@ -142,6 +165,8 @@ struct TonoApp: App {
                                 .environment(accountSession)
                                 .environmentObject(updater)
                         }
+                        // The gate reads the protection state the menu bar reads.
+                        .environment(appState)
                     }
                 } else {
                     LanguageSetupView()

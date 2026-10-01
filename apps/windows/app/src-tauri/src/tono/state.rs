@@ -37,18 +37,16 @@ use crate::{
 /// Concrete account API client used across the product layer.
 pub type TonoApiClient = ApiClient<TonoTransport, SessionCredentialStore>;
 
-/// One explicit DNS/Core/WFP release shared by Disconnect, Sign Out, Quit, and startup
-/// reconciliation. The result lives outside `TonoInner`, so waiting for it never holds the large
-/// product-state mutex. `Notify` also lets a later caller join an operation whose original UI
-/// waiter already timed out without launching a second, racing release.
-pub struct ReleaseOperation {
+/// Completion of a single owned lifecycle operation (release or account close). Waiting never
+/// holds the product-state mutex, and later callers join even if the original UI waiter left.
+pub struct LifecycleOperation {
     id: u64,
     result: StdMutex<Option<std::result::Result<(), String>>>,
     notify: tokio::sync::Notify,
 }
 
-impl ReleaseOperation {
-    fn new(id: u64) -> Self {
+impl LifecycleOperation {
+    pub(crate) fn new(id: u64) -> Self {
         Self {
             id,
             result: StdMutex::new(None),
@@ -79,6 +77,14 @@ impl ReleaseOperation {
             notified.as_mut().await;
         }
     }
+}
+
+/// Release joiners share completion and a final disposition. Explicit removal dominates the
+/// automatic AI hold; only user Disconnect/failed-Prepare carries pending-update authority.
+struct ReleaseOperation {
+    operation: Arc<LifecycleOperation>,
+    apply_narrow: bool,
+    explicit_disconnect: bool,
 }
 
 /// Account state machine (macOS parity):
@@ -120,6 +126,16 @@ pub struct TaskRegistry {
     pub direct_lease_heartbeat: Option<JoinHandle<()>>,
     pub pin_refresh: Option<JoinHandle<()>>,
     pub switch: Option<JoinHandle<()>>,
+    /// R2-F2: bounded Service-truth poll while the FSM idles in Protected Offline (armed but
+    /// unverified in the defect's original shape). The connected-lifetime monitor only runs
+    /// while `is_connected`, so after a Service restart retired an unverified barrier nothing
+    /// re-read that verdict and the UI kept claiming a block over an open machine. Registered
+    /// on entry to that state, retired on exit; the loop itself also stops once the state is
+    /// gone, so it is never a resident task.
+    pub protection_resync: Option<JoinHandle<()>>,
+    /// TCP proofs after a fail-open release. Disconnect aborts this task.
+    /// It must not be aborted from inside its own connect attempt.
+    pub unarmed_probe: Option<JoinHandle<()>>,
 }
 
 impl TaskRegistry {
@@ -141,6 +157,31 @@ impl TaskRegistry {
         Self::abort(&mut self.network_monitor);
     }
 
+    /// Replace the monitor slot with a freshly spawned monitor loop.
+    ///
+    /// A monitor-driven reconnect runs inline in the old monitor's own task, so by the time
+    /// the connect tail registers the new monitor, this slot can still hold the calling
+    /// task itself. Aborting that handle cancels the caller at its next await — after the
+    /// FSM already committed Connected — dropping the pin-refresh registration and the
+    /// optional DIRECT overlay for this session (`abort_network_monitor` has no way to
+    /// know the handle is the caller; `retire_connection_generation` documents the same
+    /// constraint for the generation bump). When the slot holds the current task, swap the
+    /// slot only: the caller finishes its connect tail and then exits its loop on its own
+    /// (`connection_loop_continues` is false once the reconnect is handed to the new
+    /// session's monitor). Every other replacement — user Connect, reconnect backoff,
+    /// node switch — still aborts the displaced monitor.
+    pub fn register_network_monitor(&mut self, handle: JoinHandle<()>) {
+        let replacing_itself = tokio::task::try_id().is_some_and(|current| {
+            self.network_monitor
+                .as_ref()
+                .is_some_and(|registered| registered.inner().id() == current)
+        });
+        if !replacing_itself {
+            self.abort_network_monitor();
+        }
+        self.network_monitor = Some(handle);
+    }
+
     pub fn abort_direct_lease_heartbeat(&mut self) {
         Self::abort(&mut self.direct_lease_heartbeat);
     }
@@ -153,6 +194,14 @@ impl TaskRegistry {
         Self::abort(&mut self.switch);
     }
 
+    pub fn abort_protection_resync(&mut self) {
+        Self::abort(&mut self.protection_resync);
+    }
+
+    pub fn abort_unarmed_probe(&mut self) {
+        Self::abort(&mut self.unarmed_probe);
+    }
+
     /// Connection-scoped tasks: everything that drives the connect
     /// transaction or reacts to the tunnel. Aborted on disconnect and on a
     /// node switch; the catalog sync is account-scoped and survives both.
@@ -162,6 +211,8 @@ impl TaskRegistry {
         self.abort_direct_lease_heartbeat();
         self.abort_pin_refresh();
         self.abort_switch();
+        self.abort_protection_resync();
+        self.abort_unarmed_probe();
     }
 }
 
@@ -173,10 +224,15 @@ pub struct TonoInner {
     /// Startup credential hydration completed (load task ran, whatever the
     /// outcome). Restore/sign-in wait for it before deciding anything.
     pub credentials_loaded: bool,
+    /// Enrollment may use this ID only after its vault read or first-run write succeeds.
+    pub installation_id_ready: bool,
     /// Vault read failure recorded by the load task (M1: drives the
     /// `error` account state instead of a mistaken signed-out).
     pub credential_error: Option<String>,
     pub account_state: AccountState,
+    /// Admission stays closed through protected release AND server/local logout. The detached
+    /// owner clears this slot only after its final state commit, even if its UI waiter leaves.
+    pub account_close: Option<Arc<LifecycleOperation>>,
     /// Last verified account payload (`GET me` or the sign-in response).
     pub account: Option<User>,
     /// In-flight email sign-in challenge, consumed by `tono_sign_in_verify`.
@@ -184,7 +240,12 @@ pub struct TonoInner {
     /// Generation of the current email-auth transaction. Starting/resending, signing out, or
     /// replacing a challenge invalidates network responses from every older transaction.
     pub sign_in_generation: u64,
+    /// Who in this process answers for a pending session marker: the sign-in in flight, or the
+    /// adopted sign-in whose commit task waits for its session to be durable.
+    pub session_marker: crate::tono::credentials::SessionMarker,
     pub installation_id: String,
+    /// The core this connect armed. DIRECT in-place reload is mihomo-only.
+    pub sing_box_core: bool,
     pub catalog_tracker: CatalogTracker,
     /// Directory holding `managed-exit-catalog.json` (`app_home_dir()/tono`).
     /// The cache itself is built on demand: `CatalogCache` boxes its safety
@@ -222,8 +283,8 @@ pub struct TonoInner {
     /// Monotonic epoch of the controller endpoint adopted by the UI. Unlike the connect
     /// transaction generation, this also advances for automatic recovery within one intent.
     pub controller_generation: u64,
-    /// Connect transaction generation. Disconnect, sign-out, and node
-    /// switches bump it; an in-flight attempt re-checks it at every stage
+    /// Connect transaction generation. Every admitted attempt, Disconnect, sign-out, and node
+    /// switch bumps it; an in-flight attempt re-checks it at every stage
     /// boundary and exits without side effects when it moved.
     pub connect_generation: u64,
     /// Immediate cancellation signal for read-only/current-stage work. Privileged IPC mutations
@@ -284,11 +345,24 @@ pub struct TonoInner {
     /// Catalog exits already tried in this fail-closed connect loop. Reset on
     /// a fresh user connect so a China GFW hit on one city can move on.
     pub catalog_failover_tried: std::collections::BTreeSet<String>,
+    /// In-memory sticky dial. Never persisted and never applied while the
+    /// barrier is up. See `tono_core::heal`.
+    pub heal: tono_core::heal::Session,
     /// Cloud WeChat-DIRECT policy (Build 28): monotonic tracker plus the
     /// latest validated document. The cache shares the catalog's directory
     /// and safety checks (`managed-traffic-policy.json`).
     pub policy_tracker: tono_core::policy::PolicyTracker,
     pub traffic_policy: Option<tono_core::policy::TonoTrafficPolicy>,
+    /// A policy *behavior change* that arrived while the FSM was Connecting
+    /// (F5). `handle_network_change_inner` has nothing to act on mid-connect —
+    /// no session exists to tear down — so the change is recorded here and the
+    /// connect commit consumes it, re-running the optional-DIRECT decision
+    /// against the latest installed policy. Holds the `connect_generation` at
+    /// the time of deferral. Every generation retirement (Disconnect, a failed
+    /// attempt, account close, the next attempt's admission) clears it, and
+    /// the commit consumes it only for its own generation, so a record can
+    /// never reach a later session or another account.
+    pending_policy_change: Option<u64>,
     /// Signed WeChat PROCESS-PATH-REGEX rows last committed with the optional
     /// DIRECT overlay. `None` means the overlay is not active, so a later
     /// discovery must not force a reconnect.
@@ -298,6 +372,10 @@ pub struct TonoInner {
     /// `optional_direct_skip` is the redacted skip reason when the overlay
     /// was not installed on an otherwise successful connect.
     pub optional_direct_active: bool,
+    /// X2-1: the physical adapter alias the committed DIRECT outbound is bound to
+    /// (`interface-name`). `None` whenever no overlay is committed. A network change may keep
+    /// the session in place only while this adapter is still a usable uplink.
+    pub applied_direct_interface: Option<String>,
     pub optional_direct_skip: Option<String>,
     /// Own DIRECT fail-closed bracket: `(connect_generation, deadline)`. While live, Blocked
     /// without a TUN permit is expected and must not tear the session down.
@@ -316,6 +394,9 @@ pub struct TonoInner {
     pub last_tcp_delay_at_ms: Option<i64>,
     pub last_tcp_delay_node: Option<String>,
     pub tasks: TaskRegistry,
+    /// Offline admission and the server's verdicts on this session (#582). Shared with the
+    /// tono-core verdict sink, which cannot take this mutex.
+    pub offline: Arc<crate::tono::offline_grant::OfflineGate>,
 }
 
 fn now_ms() -> i64 {
@@ -337,16 +418,49 @@ fn matching_selected_delay(
 }
 
 impl TonoInner {
-    pub fn record_exit_delay(&mut self, delay_ms: u64) {
-        if delay_ms == 0 {
+    /// Record a delay that was measured while `measured_node` was selected.
+    ///
+    /// A same-generation hot switch updates `selected_node` before the in-flight
+    /// probe returns. Labeling the sample with whatever is selected at commit
+    /// time shows the previous exit's RTT on the new node. A sample whose node
+    /// is no longer selected is dropped, and it does not overwrite a sample
+    /// that still belongs to the current selection.
+    pub fn record_exit_delay(&mut self, measured_node: &str, delay_ms: u64) {
+        if delay_ms == 0 || measured_node.is_empty() {
             return;
         }
-        let Some(node) = self.selected_node.clone() else {
+        if self.selected_node.as_deref() != Some(measured_node) {
             return;
-        };
+        }
         self.last_exit_delay_ms = Some(delay_ms);
         self.last_exit_delay_at_ms = Some(now_ms());
-        self.last_exit_delay_node = Some(node);
+        self.last_exit_delay_node = Some(measured_node.to_string());
+    }
+
+    /// Drop the displayed exit IP. A selection change must not keep showing the
+    /// previous node's address under the new name.
+    pub fn clear_exit_identity(&mut self) {
+        self.exit_ip = None;
+        self.exit_org = None;
+        self.exit_location = None;
+    }
+
+    /// Store an exit-identity sample only when `measured_node` is still selected.
+    /// Returns whether the sample was stored.
+    pub fn commit_exit_identity(
+        &mut self,
+        measured_node: &str,
+        ip: String,
+        org: Option<String>,
+        location: Option<String>,
+    ) -> bool {
+        if measured_node.is_empty() || self.selected_node.as_deref() != Some(measured_node) {
+            return false;
+        }
+        self.exit_ip = Some(ip);
+        self.exit_org = org;
+        self.exit_location = location;
+        true
     }
 
     pub fn record_tcp_delay(&mut self, node: &str, delay_ms: u64) {
@@ -409,6 +523,8 @@ impl TonoInner {
         let retired = self.connect_generation;
         self.connect_generation = self.connect_generation.wrapping_add(1);
         self.release_on_stale = release_on_stale;
+        // A deferred policy change belongs to the attempt being retired (F5).
+        self.pending_policy_change = None;
         if self.retired_intents.len() == RETIRED_INTENT_HISTORY {
             self.retired_intents.pop_front();
         }
@@ -442,6 +558,22 @@ impl TonoInner {
     pub fn policy_cache(&self) -> tono_core::policy::PolicyCache {
         policy_cache_at(&self.catalog_dir)
     }
+
+    /// Record a policy behavior change that landed while Connecting (F5).
+    /// Called under the state lock by the policy-change disposition path.
+    pub fn record_pending_policy_change(&mut self) {
+        self.pending_policy_change = Some(self.connect_generation);
+    }
+
+    /// Consume a deferred policy behavior change (F5). The connect commit
+    /// calls this right after `connect_succeeded` with its own attempt
+    /// generation; only a deferral recorded for that generation counts, and
+    /// then the commit re-runs the optional-DIRECT decision with the latest
+    /// installed policy instead of the snapshot captured before the first
+    /// Core start. A record from any other generation is discarded.
+    pub fn take_pending_policy_change(&mut self, generation: u64) -> bool {
+        self.pending_policy_change.take() == Some(generation)
+    }
 }
 
 /// The `tauri::State` handle. Every access goes through the async mutex;
@@ -450,22 +582,29 @@ impl TonoInner {
 pub struct TonoState {
     inner: tokio::sync::Mutex<TonoInner>,
     audit: Arc<crate::tono::audit::Audit>,
+    /// One frozen, account-owned manual upload preview. Never persisted or sent automatically.
+    pub(crate) support_reports: parking_lot::Mutex<crate::tono::support_reports::SupportReports>,
     /// Per-route byte ledger, locked independently of `inner` so the sampler
     /// and the telemetry uploader never need the product mutex to ingest or
     /// read a delta.
     route_ledger: parking_lot::Mutex<crate::tono::route_ledger::RouteLedger>,
     /// Serializes login, periodic, and user-initiated catalog fetches for one account session.
     catalog_sync_operation: tokio::sync::Mutex<()>,
-    release_operation: tokio::sync::Mutex<Option<Arc<ReleaseOperation>>>,
+    release_operation: tokio::sync::Mutex<Option<ReleaseOperation>>,
     /// A late StartClash or DNS-enable commit must settle before explicit release reaches the
     /// Service. Connect mutations hold a read guard inside their detached reconciliation task;
-    /// the one release worker holds the write guard through the atomic Service release.
+    /// admission also takes a reader. Detached failure/switch cleanup and the one release worker
+    /// hold the writer; a full-release failure transfers its writer into that coordinator.
     privileged_transition: Arc<tokio::sync::RwLock<()>>,
     /// Prevent a validated cloud policy from being revoked/replaced between DIRECT runtime
     /// staging and the final exact WFP endpoint commit. Sync commits take the writer; one
     /// activation transaction retains an owned reader through its final proof.
     policy_activation: Arc<tokio::sync::RwLock<()>>,
     next_release_id: AtomicU64,
+    /// Replaces an older unarmed probe. The probe task exits when this changes.
+    pub(crate) unarmed_probe_ticket: AtomicU64,
+    /// Recent TCP proofs, keyed by `ip:port`. Not a tunnel and not a route.
+    pub(crate) unarmed_proofs: parking_lot::Mutex<tono_core::unarmed_probe::ProofCache>,
 }
 
 impl TonoState {
@@ -473,14 +612,39 @@ impl TonoState {
         let catalog_dir = tono_data_dir()?;
         std::fs::create_dir_all(&catalog_dir)
             .with_context(|| format!("failed to create Tono data dir {}", catalog_dir.display()))?;
+        let audit = crate::tono::audit::Audit::new(&catalog_dir.join("logs"), &catalog_dir);
+        Self::with_catalog_dir(catalog_dir, audit, Arc::new(SessionCredentialStore::new()))
+    }
 
-        let credentials = Arc::new(SessionCredentialStore::new());
+    /// Diskless lifecycle fixture: no Tauri handle, credential vault, Service, or audit writer.
+    #[cfg(test)]
+    pub(crate) fn for_test() -> Self {
+        Self::for_test_in(std::env::temp_dir().join(format!("tono-state-{}", new_installation_id())))
+    }
+
+    /// The same fixture over a caller-owned directory: a second instance is a relaunch that reads
+    /// what the first one left on disk.
+    #[cfg(test)]
+    pub(crate) fn for_test_in(catalog_dir: PathBuf) -> Self {
+        let (sender, _receiver) = tokio::sync::mpsc::channel(1);
+        let audit = crate::tono::audit::Audit::for_test(sender, &catalog_dir, false);
+        let mut state = Self::with_catalog_dir(catalog_dir, audit, Arc::new(SessionCredentialStore::for_test())).unwrap();
+        // The memory-only fixture owns its identity without an OS vault.
+        state.inner.get_mut().installation_id_ready = true;
+        state
+    }
+
+    fn with_catalog_dir(
+        catalog_dir: PathBuf, audit: Arc<crate::tono::audit::Audit>, credentials: Arc<SessionCredentialStore>,
+    ) -> Result<Self> {
         let transport = TonoTransport::new()?;
-        let client = Arc::new(TonoApiClient::new(
-            tono_core::auth::DEFAULT_BASE_URL,
-            transport,
-            credentials.clone(),
-        )?);
+        // The production client is built only here: every server answer on this session reaches
+        // the offline gate (#582).
+        let offline = Arc::new(crate::tono::offline_grant::OfflineGate::new(catalog_dir.clone(), credentials.clone()));
+        let client = Arc::new(
+            TonoApiClient::new(tono_core::auth::DEFAULT_BASE_URL, transport, credentials.clone())?
+                .with_verdict_sink(offline.verdict_sink()),
+        );
 
         // installationId: a fresh in-memory UUID for now — NO vault I/O on
         // the setup thread (a prompting macOS securityd blocked setup
@@ -488,20 +652,21 @@ impl TonoState {
         // persists this one) off-thread with a timeout.
         let installation_id = new_installation_id();
 
-        // §8 audit: JSONL under `tono/logs`, toggle from `tono/settings.json`.
-        let audit = crate::tono::audit::Audit::new(&catalog_dir.join("logs"), &catalog_dir);
-
         Ok(Self {
             inner: tokio::sync::Mutex::new(TonoInner {
                 client,
                 credentials,
                 credentials_loaded: false,
+                installation_id_ready: false,
                 credential_error: None,
                 account_state: AccountState::SignedOut,
+                account_close: None,
                 account: None,
                 challenge_id: None,
                 sign_in_generation: 0,
+                session_marker: Default::default(),
                 installation_id,
+                sing_box_core: false,
                 catalog_tracker: CatalogTracker::new(),
                 catalog_dir,
                 nodes: Vec::new(),
@@ -537,10 +702,13 @@ impl TonoState {
                 retry_attempt: 0,
                 next_retry_at_ms: None,
                 catalog_failover_tried: std::collections::BTreeSet::new(),
+                heal: tono_core::heal::Session::for_preferred("", "none"),
                 policy_tracker: tono_core::policy::PolicyTracker::new(),
                 traffic_policy: None,
+                pending_policy_change: None,
                 applied_wechat_path_regexes: None,
                 optional_direct_active: false,
+                applied_direct_interface: None,
                 optional_direct_skip: None,
                 direct_reload_until: None,
                 exit_ip: None,
@@ -553,14 +721,18 @@ impl TonoState {
                 last_tcp_delay_at_ms: None,
                 last_tcp_delay_node: None,
                 tasks: TaskRegistry::default(),
+                offline,
             }),
             audit,
+            support_reports: parking_lot::Mutex::new(Default::default()),
             route_ledger: parking_lot::Mutex::new(crate::tono::route_ledger::RouteLedger::default()),
             catalog_sync_operation: tokio::sync::Mutex::new(()),
             release_operation: tokio::sync::Mutex::new(None),
             privileged_transition: Arc::new(tokio::sync::RwLock::new(())),
             policy_activation: Arc::new(tokio::sync::RwLock::new(())),
             next_release_id: AtomicU64::new(1),
+            unarmed_probe_ticket: AtomicU64::new(1),
+            unarmed_proofs: parking_lot::Mutex::new(tono_core::unarmed_probe::ProofCache::default()),
         })
     }
 
@@ -576,28 +748,53 @@ impl TonoState {
         self.inner.lock().await
     }
 
+    /// Non-blocking lock. The unarmed probe starter is synchronous: connect
+    /// calls it, and the probe later calls connect, so the starter cannot be
+    /// an async function.
+    pub(crate) fn try_lock(
+        &self,
+    ) -> Result<tokio::sync::MutexGuard<'_, TonoInner>, tokio::sync::TryLockError> {
+        self.inner.try_lock()
+    }
+
     pub async fn lock_catalog_sync(&self) -> tokio::sync::MutexGuard<'_, ()> {
         self.catalog_sync_operation.lock().await
     }
 
     /// Start one release or join the already-running one. The boolean is true only for the caller
     /// responsible for spawning the supervisor.
-    pub async fn begin_release(&self) -> (Arc<ReleaseOperation>, bool) {
+    pub async fn begin_release(
+        &self, explicit_disconnect: bool, apply_narrow: bool,
+    ) -> (Arc<LifecycleOperation>, bool) {
         let mut slot = self.release_operation.lock().await;
-        if let Some(operation) = slot.as_ref() {
-            return (Arc::clone(operation), false);
+        if let Some(release) = slot.as_mut() {
+            release.apply_narrow &= apply_narrow;
+            release.explicit_disconnect |= explicit_disconnect;
+            return (Arc::clone(&release.operation), false);
         }
         let id = self.next_release_id.fetch_add(1, Ordering::Relaxed);
-        let operation = Arc::new(ReleaseOperation::new(id));
-        *slot = Some(Arc::clone(&operation));
+        let operation = Arc::new(LifecycleOperation::new(id));
+        *slot = Some(ReleaseOperation { operation: Arc::clone(&operation), apply_narrow, explicit_disconnect });
         (operation, true)
     }
 
     pub async fn finish_release(&self, id: u64) {
         let mut slot = self.release_operation.lock().await;
-        if slot.as_ref().is_some_and(|operation| operation.id() == id) {
+        if slot.as_ref().is_some_and(|release| release.operation.id() == id) {
             slot.take();
         }
+    }
+
+    /// Atomically seal successful release or retain admission exclusion for its plain follow-up.
+    /// The caller holds inner while sealing, so final metadata cannot race a new admission.
+    pub async fn finish_release_if_applied(&self, id: u64, applied_narrow: bool) -> Option<(bool, bool)> {
+        let mut slot = self.release_operation.lock().await;
+        let release = slot.as_ref().filter(|release| release.operation.id() == id)?;
+        if applied_narrow && !release.apply_narrow {
+            return Some((release.explicit_disconnect, false));
+        }
+        slot.take();
+        None
     }
 
     pub async fn release_in_progress(&self) -> bool {
@@ -1054,7 +1251,7 @@ impl Drop for CurrentUserSid {
 
 #[cfg(test)]
 mod tests {
-    use super::{matching_selected_delay, AccountState, ReleaseOperation};
+    use super::{matching_selected_delay, AccountState, LifecycleOperation};
     use std::{sync::Arc, time::Duration};
 
     #[test]
@@ -1082,7 +1279,7 @@ mod tests {
 
     #[tokio::test]
     async fn release_operation_wakes_every_joiner_and_replays_the_result() {
-        let operation = Arc::new(ReleaseOperation::new(7));
+        let operation = Arc::new(LifecycleOperation::new(7));
         let first = tokio::spawn({
             let operation = Arc::clone(&operation);
             async move { operation.wait().await }
@@ -1118,5 +1315,39 @@ mod tests {
             matching_selected_delay(Some("Tokyo · Fuji"), Some(0), Some("Tokyo · Fuji")),
             None
         );
+    }
+
+    #[tokio::test]
+    async fn a_sample_from_the_previous_exit_is_not_shown_on_the_new_node() {
+        let state = super::TonoState::for_test();
+        let mut inner = state.lock().await;
+        inner.selected_node = Some("Tokyo · Neon".into());
+        inner.record_exit_delay("Tokyo · Neon", 80);
+        inner.exit_ip = Some("203.0.113.8".into());
+        assert_eq!(inner.selected_exit_delay_ms(), Some(80));
+
+        inner.selected_node = Some("Tokyo · Fuji".into());
+        inner.clear_exit_identity();
+        inner.record_exit_delay("Tokyo · Neon", 400);
+        assert_eq!(inner.selected_exit_delay_ms(), None);
+        assert_eq!(inner.last_exit_delay_node.as_deref(), Some("Tokyo · Neon"));
+        assert!(inner.exit_ip.is_none());
+        assert!(!inner.commit_exit_identity(
+            "Tokyo · Neon",
+            "203.0.113.8".into(),
+            None,
+            None,
+        ));
+        assert!(inner.exit_ip.is_none());
+
+        inner.record_exit_delay("Tokyo · Fuji", 120);
+        assert_eq!(inner.selected_exit_delay_ms(), Some(120));
+        assert!(inner.commit_exit_identity(
+            "Tokyo · Fuji",
+            "203.0.113.9".into(),
+            None,
+            Some("JP".into()),
+        ));
+        assert_eq!(inner.exit_ip.as_deref(), Some("203.0.113.9"));
     }
 }

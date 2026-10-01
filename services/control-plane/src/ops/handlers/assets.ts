@@ -1,6 +1,6 @@
 import { ApiError } from '../../errors';
 import { body, rejectUnexpectedKeys } from '../../request';
-import { id as newId } from '../../env';
+import { id as newId, str } from '../../env';
 import {
   CLOUD_KINDS,
   assertHomeLine,
@@ -21,6 +21,8 @@ import {
   updateProviderAccount,
 } from '../assets';
 import { patchHomeLine } from '../home-lines';
+import { bumpCatalogRevision } from '../../catalog';
+import { assertCatalogHomeProxyName, assertHomeExitUnbound, homeExitStatusField, proxyNameField } from '../../home';
 import {
   Actor,
   Env,
@@ -242,23 +244,34 @@ export async function postHomeLine(req: Request, e: Env, actor: Actor): Promise<
     'proxyName', 'displayName', 'isp', 'region', 'providerAccountId', 'price', 'currency',
     'billingKind', 'bundleBytes', 'cycleStart', 'cycleEnd', 'expiresAt', 'meterSource', 'notes',
   ]);
+  // Same name rules as shared-admin home-exits: the name enters the per-user
+  // catalog restriction set, so the served YAML changes and the revision must.
+  const proxyName = proxyNameField(b.proxyName);
+  assertCatalogHomeProxyName('catalog', proxyName);
+  const displayName = str(b.displayName, 'displayName', 1, 200).trim();
   const t = now();
   const idValue = newId();
-  await e.DB.prepare(
-    `INSERT INTO home_exits(
-       id, proxy_name, display_name, status, notes, created_at, updated_at,
-       provider_account_id, isp, region, price, currency, billing_kind,
-       bundle_bytes, cycle_start, cycle_end, expires_at, meter_source
-     ) VALUES(?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-  ).bind(
-    idValue, String(b.proxyName), String(b.displayName),
-    b.notes == null ? null : String(b.notes), t, t,
-    b.providerAccountId ?? null, b.isp ?? null, b.region ?? null,
-    b.price ?? null, b.currency ?? null, b.billingKind ?? null,
-    b.bundleBytes ?? null, b.cycleStart ?? null, b.cycleEnd ?? null,
-    b.expiresAt ?? null, b.meterSource ?? null,
-  ).run();
-  await auditWrite(e, actor.email, 'home-line.create', 'home_exit', idValue, String(b.displayName));
+  try {
+    await e.DB.prepare(
+      `INSERT INTO home_exits(
+         id, proxy_name, display_name, status, notes, created_at, updated_at,
+         provider_account_id, isp, region, price, currency, billing_kind,
+         bundle_bytes, cycle_start, cycle_end, expires_at, meter_source
+       ) VALUES(?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).bind(
+      idValue, proxyName, displayName,
+      b.notes == null ? null : String(b.notes), t, t,
+      b.providerAccountId ?? null, b.isp ?? null, b.region ?? null,
+      b.price ?? null, b.currency ?? null, b.billingKind ?? null,
+      b.bundleBytes ?? null, b.cycleStart ?? null, b.cycleEnd ?? null,
+      b.expiresAt ?? null, b.meterSource ?? null,
+    ).run();
+  } catch (error) {
+    if (!String(error).includes('UNIQUE')) throw error;
+    throw new ApiError(409, 'HOME_EXIT_CONFLICT', 'A home exit with this proxyName already exists');
+  }
+  await bumpCatalogRevision(e);
+  await auditWrite(e, actor.email, 'home-line.create', 'home_exit', idValue, displayName);
   const dto = await homeLineDto(e, await loadHome(e, idValue));
   check(e, () => { assertHomeLine(dto); });
   return jsonNoStore(dto, 201);
@@ -266,12 +279,14 @@ export async function postHomeLine(req: Request, e: Env, actor: Actor): Promise<
 
 export async function patchHomeLineRoute(req: Request, e: Env, rawId: string, actor: Actor): Promise<Response> {
   const idValue = decodeName(rawId, 'id');
-  await loadHome(e, idValue);
+  const existing = await loadHome(e, idValue);
   const b = await body(req, 8 * 1024);
   rejectUnexpectedKeys(b, [
     'providerAccountId', 'isp', 'region', 'price', 'currency', 'billingKind',
     'bundleBytes', 'cycleStart', 'cycleEnd', 'expiresAt', 'meterSource', 'notes', 'displayName', 'status',
   ]);
+  const status = b.status === undefined ? undefined : homeExitStatusField(b.status);
+  if (status === 'retired' && String(existing.status) !== 'retired') await assertHomeExitUnbound(e, idValue);
   await patchHomeLine(e.DB, idValue, {
     providerAccountId: b.providerAccountId as string | null | undefined,
     isp: b.isp as string | null | undefined,
@@ -284,22 +299,12 @@ export async function patchHomeLineRoute(req: Request, e: Env, rawId: string, ac
     cycleEnd: b.cycleEnd as number | null | undefined,
     expiresAt: b.expiresAt as number | null | undefined,
     meterSource: b.meterSource as never,
-  }, now());
-  if (b.notes !== undefined || b.displayName !== undefined || b.status !== undefined) {
-    await e.DB.prepare(
-      `UPDATE home_exits SET
-         notes = CASE WHEN ? THEN ? ELSE notes END,
-         display_name = CASE WHEN ? THEN ? ELSE display_name END,
-         status = CASE WHEN ? THEN ? ELSE status END,
-         updated_at = ?
-       WHERE id = ?`,
-    ).bind(
-      b.notes !== undefined, b.notes == null ? null : String(b.notes),
-      b.displayName !== undefined, b.displayName == null ? null : String(b.displayName),
-      b.status !== undefined, b.status == null ? null : String(b.status),
-      now(), idValue,
-    ).run();
-  }
+  }, now(), {
+    notes: b.notes === undefined ? undefined : b.notes == null ? null : String(b.notes),
+    displayName: b.displayName === undefined ? undefined : b.displayName == null ? null : String(b.displayName),
+    status,
+  });
+  if (status !== undefined && status !== String(existing.status)) await bumpCatalogRevision(e);
   await auditWrite(e, actor.email, 'home-line.update', 'home_exit', idValue, 'patched');
   const dto = await homeLineDto(e, await loadHome(e, idValue));
   check(e, () => { assertHomeLine(dto); });
@@ -309,10 +314,16 @@ export async function patchHomeLineRoute(req: Request, e: Env, rawId: string, ac
 export async function deleteHomeLine(req: Request, e: Env, rawId: string, actor: Actor): Promise<Response> {
   void req;
   const idValue = decodeName(rawId, 'id');
-  await loadHome(e, idValue);
-  await e.DB.prepare(
-    `UPDATE home_exits SET status = 'retired', updated_at = ? WHERE id = ?`,
-  ).bind(now(), idValue).run();
+  const existing = await loadHome(e, idValue);
+  if (String(existing.status) !== 'retired') {
+    await assertHomeExitUnbound(e, idValue);
+    const retired = await e.DB.prepare(
+      `UPDATE home_exits SET status = 'retired', updated_at = ? WHERE id = ?
+       AND NOT EXISTS (SELECT 1 FROM user_home_bindings WHERE home_exit_id = home_exits.id)`,
+    ).bind(now(), idValue).run();
+    if (!retired.meta.changes) throw new ApiError(409, 'HOME_EXIT_IN_USE', 'Unbind all users before retiring this home exit');
+    await bumpCatalogRevision(e);
+  }
   await auditWrite(e, actor.email, 'home-line.retire', 'home_exit', idValue, 'retired');
   const dto = await homeLineDto(e, await loadHome(e, idValue));
   check(e, () => { assertHomeLine(dto); });

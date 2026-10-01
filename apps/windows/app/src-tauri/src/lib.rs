@@ -16,6 +16,9 @@ mod process;
 mod tono;
 pub mod utils;
 
+#[cfg(test)]
+mod ws_handle_ipc_tests;
+
 use crate::constants::files;
 use crate::{
     core::handle,
@@ -83,7 +86,6 @@ mod app_init {
             .plugin(tauri_plugin_dialog::init())
             .plugin(tauri_plugin_shell::init())
             .plugin(tauri_plugin_http::init())
-            .plugin(tauri_plugin_updater::Builder::new().build())
             .plugin(
                 tono_plugin_core::Builder::new()
                     .protocol(tono_plugin_core::models::Protocol::LocalSocket)
@@ -140,7 +142,8 @@ mod app_init {
             cmd::open_windows_dns_settings,
             cmd::tono_encrypted_dns_overrides,
             cmd::restart_app,
-            tono::commands::quit::tono_prepare_update,
+            tono::commands::update::tono_check_update,
+            tono::commands::update::tono_install_update,
             cmd::get_runtime_state,
             cmd::get_tono_preferences,
             cmd::patch_tono_preferences,
@@ -154,6 +157,8 @@ mod app_init {
             tono::commands::catalog::tono_catalog_status,
             tono::commands::catalog::tono_refresh_catalog,
             tono::commands::catalog::tono_select_server,
+            tono::route_preferences::tono_route_preferences,
+            tono::route_preferences::tono_update_route_preferences,
             tono::commands::catalog::tono_test_current_server,
             tono::commands::catalog::tono_test_available_servers,
             tono::commands::catalog::tono_cancel_server_tests,
@@ -167,6 +172,7 @@ mod app_init {
             tono::commands::diagnostics::tono_set_audit_enabled,
             tono::commands::diagnostics::tono_periodic_telemetry_enabled,
             tono::commands::diagnostics::tono_set_periodic_telemetry_enabled,
+            tono::commands::diagnostics::tono_internal_build,
             tono::commands::account::tono_service_prerequisites,
             tono::commands::account::tono_repair_service,
             tono::commands::diagnostics::tono_network_log_upload_enabled,
@@ -176,6 +182,7 @@ mod app_init {
             tono::commands::connection_cmd::tono_retry_now,
             tono::commands::diagnostics::tono_diagnostics_report,
             tono::commands::diagnostics::tono_local_diagnostics_report,
+            tono::commands::support::tono_prepare_support_report,
             tono::commands::diagnostics::tono_upload_diagnostics,
             tono::commands::terminal::tono_check_terminal_env,
             tono::commands::terminal::tono_clear_terminal_proxy_env,

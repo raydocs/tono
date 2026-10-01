@@ -14,40 +14,66 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 
 import enShared from '@/locales/en/shared.json'
 import enTono from '@/locales/en/tono.json'
-import type { TonoServer } from '@/services/tono'
+import type { TonoRoutePreferences, TonoServer } from '@/services/tono'
 
-const { serversMock, selectServerMock, connectMock, mutateTonoStatusMock, toastMock, uiStateMock } = vi.hoisted(
-  () => ({
-    serversMock: vi.fn(),
-    selectServerMock: vi.fn(),
-    connectMock: vi.fn(),
-    mutateTonoStatusMock: vi.fn(),
-    toastMock: vi.fn(),
-    uiStateMock: vi.fn(),
-  }),
-)
+const {
+  serversMock,
+  selectServerMock,
+  connectMock,
+  mutateTonoStatusMock,
+  toastMock,
+  uiStateMock,
+  statusMock,
+  scopeMock,
+  preferencesMock,
+  updatePreferencesMock,
+  catalogStatusMock,
+  refreshCatalogMock,
+  testServersMock,
+} = vi.hoisted(() => ({
+  serversMock: vi.fn(),
+  selectServerMock: vi.fn(),
+  connectMock: vi.fn(),
+  mutateTonoStatusMock: vi.fn(),
+  toastMock: vi.fn(),
+  uiStateMock: vi.fn(),
+  statusMock: vi.fn(),
+  scopeMock: vi.fn(),
+  preferencesMock: vi.fn(),
+  updatePreferencesMock: vi.fn(),
+  catalogStatusMock: vi.fn(),
+  refreshCatalogMock: vi.fn(),
+  testServersMock: vi.fn(),
+}))
 vi.mock('@/services/tono', async (original) => ({
   ...(await original<typeof import('@/services/tono')>()),
   tonoServers: serversMock,
   tonoSelectServer: selectServerMock,
   tonoConnect: connectMock,
-  tonoCatalogStatus: async () => ({
-    revision: null,
-    nodeCount: 0,
-    lastSyncedAtMs: null,
-    error: null,
-  }),
+  tonoStatus: statusMock,
+  tonoRoutePreferences: preferencesMock,
+  tonoUpdateRoutePreferences: updatePreferencesMock,
+  tonoCatalogStatus: catalogStatusMock,
+  tonoRefreshCatalog: refreshCatalogMock,
+  tonoTestAvailableServers: testServersMock,
   tonoCancelServerTests: async () => {},
 }))
 vi.mock('@/services/states', () => ({ useThemeMode: () => 'dark' }))
 vi.mock('@/hooks/use-tono', () => ({
   tonoServersQueryKey: ['tono', 'servers'],
   useTonoStatus: () => ({
-    status: { uiState: uiStateMock(), accountState: 'ready' },
+    status: {
+      uiState: uiStateMock(),
+      accountState: 'ready',
+      routePreferenceScope: scopeMock(),
+      catalogRevision: 54,
+    },
     mutateTonoStatus: mutateTonoStatusMock,
   }),
 }))
-vi.mock('@/tono-ui/tono-toast-context', () => ({ useTonoToast: () => toastMock }))
+vi.mock('@/tono-ui/tono-toast-context', () => ({
+  useTonoToast: () => toastMock,
+}))
 
 import ServersPage from './servers'
 
@@ -62,6 +88,17 @@ beforeEach(() => {
   connectMock.mockResolvedValue(undefined)
   mutateTonoStatusMock.mockResolvedValue(undefined)
   uiStateMock.mockReturnValue('notConnected')
+  statusMock.mockImplementation(async () => ({ uiState: uiStateMock() }))
+  scopeMock.mockReturnValue(undefined)
+  preferencesMock.mockReset()
+  updatePreferencesMock.mockReset()
+  catalogStatusMock.mockResolvedValue({
+    revision: null,
+    nodeCount: 0,
+    lastSyncedAtMs: null,
+    error: null,
+  })
+  testServersMock.mockReset()
 })
 afterEach(cleanup)
 
@@ -77,6 +114,52 @@ it('does not claim the node list is synced before the first catalog sync', async
   renderPage()
   expect(await screen.findByText('No servers available')).toBeDefined()
   expect(screen.queryByText('Node list synced')).toBeNull()
+})
+
+// #590: the catalog refresh failure said "Details are below" while showing none.
+it('shows the recorded cause under a failed catalog refresh', async () => {
+  const cause =
+    'could not reach Tono: connect: error sending request <- connection refused'
+  serversMock.mockResolvedValue([])
+  renderPage()
+  expect(await screen.findByText('No servers available')).toBeDefined()
+  refreshCatalogMock.mockRejectedValue(new Error(cause))
+  catalogStatusMock.mockResolvedValue({
+    revision: null,
+    nodeCount: 0,
+    lastSyncedAtMs: null,
+    error: cause,
+  })
+  fireEvent.click(screen.getByRole('button', { name: 'Refresh' }))
+  expect(await screen.findByText(cause)).toBeDefined()
+})
+
+it('clears the page refresh failure once a later sync moves', async () => {
+  const cause = 'could not reach Tono: connection refused'
+  serversMock.mockResolvedValue([])
+  renderPage()
+  expect(await screen.findByText('No servers available')).toBeDefined()
+  refreshCatalogMock.mockRejectedValue(new Error(cause))
+  catalogStatusMock.mockResolvedValue({
+    revision: null,
+    nodeCount: 0,
+    lastSyncedAtMs: null,
+    error: null,
+  })
+  fireEvent.click(screen.getByRole('button', { name: 'Refresh' }))
+  expect(await screen.findByText(cause)).toBeDefined()
+  // A later successful sync supersedes the page's own failure (#590): the
+  // backend status speaks for the catalog from then on. Adjusted during
+  // render, not in an effect.
+  refreshCatalogMock.mockResolvedValue(undefined)
+  catalogStatusMock.mockResolvedValue({
+    revision: 54,
+    nodeCount: 0,
+    lastSyncedAtMs: 1_750_000_000_000,
+    error: null,
+  })
+  fireEvent.click(screen.getByRole('button', { name: 'Refresh' }))
+  await waitFor(() => expect(screen.queryByText(cause)).toBeNull())
 })
 
 it('does not claim an empty list while the first server read is pending', async () => {
@@ -207,14 +290,118 @@ it('shows an in-flight spinner on the chosen card and disables the others until 
 it('acknowledges a dispatched switch without claiming the new exit is connected', async () => {
   uiStateMock.mockReturnValue('connected')
   serversMock.mockResolvedValue([
-    { name: 'Tokyo · Sakura', server: 'a.test', port: 443, selected: true, available: true },
-    { name: 'Los Angeles · Sunset', server: 'b.test', port: 443, selected: false, available: true },
+    {
+      name: 'Tokyo · Sakura',
+      server: 'a.test',
+      port: 443,
+      selected: true,
+      available: true,
+    },
+    {
+      name: 'Los Angeles · Sunset',
+      server: 'b.test',
+      port: 443,
+      selected: false,
+      available: true,
+    },
   ])
   renderPage()
   fireEvent.click(await screen.findByRole('button', { name: /Los Angeles/ }))
-  await waitFor(() => expect(toastMock).toHaveBeenCalledWith('Switch to Los Angeles requested'))
+  await waitFor(() =>
+    expect(toastMock).toHaveBeenCalledWith('Switch to Los Angeles requested'),
+  )
   expect(selectServerMock).toHaveBeenCalledWith('Los Angeles · Sunset')
   expect(connectMock).not.toHaveBeenCalled()
+})
+
+it('does not turn an accepted switch into a failed connect using a stale idle render', async () => {
+  let resume!: () => void
+  selectServerMock.mockReturnValue(
+    new Promise<void>((done) => {
+      resume = done
+    }),
+  )
+  connectMock.mockRejectedValue(new Error('already connected'))
+  serversMock.mockResolvedValue([
+    {
+      name: 'Tokyo · Sakura',
+      server: 'a.test',
+      port: 443,
+      selected: true,
+      available: true,
+    },
+    {
+      name: 'Los Angeles · Sunset',
+      server: 'b.test',
+      port: 443,
+      selected: false,
+      available: true,
+    },
+  ])
+  renderPage() // The rendered snapshot is idle; a backend transition wins during selection.
+  fireEvent.click(await screen.findByRole('button', { name: /Los Angeles/ }))
+  statusMock.mockResolvedValue({ uiState: 'connected' })
+  await act(async () => resume())
+  await waitFor(() => expect(screen.queryByText('Connecting')).toBeNull())
+  expect(connectMock).not.toHaveBeenCalled()
+  expect(toastMock).toHaveBeenCalledWith('Switch to Los Angeles requested')
+  expect(screen.queryByRole('alert')).toBeNull()
+})
+
+it('refreshes an acknowledged selection when another Connect wins after the status read, without hiding real failures', async () => {
+  serversMock.mockResolvedValue([
+    {
+      name: 'Tokyo · Sakura',
+      server: 'a.test',
+      port: 443,
+      selected: true,
+      available: true,
+    },
+    {
+      name: 'Los Angeles · Sunset',
+      server: 'b.test',
+      port: 443,
+      selected: false,
+      available: true,
+    },
+  ])
+  let rejectConnect!: (error: Error) => void
+  connectMock.mockReturnValueOnce(
+    new Promise<void>((_, reject) => {
+      rejectConnect = reject
+    }),
+  )
+  renderPage()
+  fireEvent.click(await screen.findByRole('button', { name: /Los Angeles/ }))
+  await waitFor(() => expect(connectMock).toHaveBeenCalledTimes(1))
+  // The fresh status was idle, but another entry point finished Connect before
+  // this IPC was admitted. This is later than the stale-render regression above.
+  statusMock.mockResolvedValue({ uiState: 'connected' })
+  await act(async () => rejectConnect(new Error('already connected')))
+  await waitFor(() => expect(mutateTonoStatusMock).toHaveBeenCalledTimes(1))
+  expect(toastMock).toHaveBeenCalledWith('Switch to Los Angeles requested')
+  expect(screen.queryByRole('alert')).toBeNull()
+
+  // The same-city reconnect entry point must also refresh when another attempt
+  // was admitted, rather than leaving the old idle projection behind.
+  statusMock.mockResolvedValue({ uiState: 'notConnected' })
+  connectMock.mockRejectedValueOnce(new Error('already connecting'))
+  fireEvent.click(screen.getByRole('button', { name: /Tokyo/ }))
+  await waitFor(() => expect(mutateTonoStatusMock).toHaveBeenCalledTimes(2))
+  expect(screen.queryByRole('alert')).toBeNull()
+
+  // A genuine failure is not success just because another state read could say
+  // connected. Nor is the same string from Select an accepted Connect command.
+  connectMock.mockRejectedValueOnce(new Error('DNS restoration failed'))
+  fireEvent.click(screen.getByRole('button', { name: /Los Angeles/ }))
+  expect(await screen.findByRole('alert')).toBeDefined()
+  expect(mutateTonoStatusMock).toHaveBeenCalledTimes(2)
+  selectServerMock.mockRejectedValueOnce(new Error('already connected'))
+  fireEvent.click(screen.getByRole('button', { name: /Los Angeles/ }))
+  await waitFor(() => expect(selectServerMock).toHaveBeenCalledTimes(3))
+  expect(await screen.findByRole('alert')).toBeDefined()
+  expect(connectMock).toHaveBeenCalledTimes(3)
+  expect(toastMock).toHaveBeenCalledTimes(1)
 })
 
 it('lets the user pick the hy2 sibling and labels it as the backup channel', async () => {
@@ -288,4 +475,197 @@ it('connects when tapping the already selected city while disconnected', async (
   fireEvent.click(await screen.findByRole('button', { name: /Tokyo/ }))
   await waitFor(() => expect(connectMock).toHaveBeenCalledTimes(1))
   expect(selectServerMock).not.toHaveBeenCalled()
+})
+
+const routeFixture = (): TonoRoutePreferences => ({
+  scope: 'account-a:7',
+  catalogRevision: 54,
+  favorites: [],
+  fixedRegion: null,
+  recent: [],
+})
+const routeServers: TonoServer[] = [
+  {
+    name: 'Buffalo · Niagara',
+    server: 'example.test',
+    port: 443,
+    selected: false,
+    available: true,
+  },
+  {
+    name: 'Buffalo · Niagara · hy2',
+    server: 'example.test',
+    port: 443,
+    selected: false,
+    available: true,
+  },
+]
+
+it('ages batch TCP evidence from admission so a slow test cannot create a fresh recommendation', async () => {
+  let clock = 1_790_000_000_000
+  const time = vi.spyOn(Date, 'now').mockImplementation(() => clock)
+  try {
+    scopeMock.mockReturnValue('account-a:7')
+    serversMock.mockResolvedValue(routeServers)
+    preferencesMock.mockResolvedValue(routeFixture())
+    catalogStatusMock.mockResolvedValue({ revision: 54, nodeCount: 2 })
+    statusMock.mockResolvedValue({
+      uiState: 'notConnected',
+      routePreferenceScope: 'account-a:7',
+      catalogRevision: 54,
+    })
+    let finish!: (results: { name: string; latencyMs: number }[]) => void
+    testServersMock.mockReturnValue(
+      new Promise((resolve) => {
+        finish = resolve
+      }),
+    )
+    renderPage()
+    await screen.findByText('No verified successful connections yet.')
+    fireEvent.click(screen.getByRole('button', { name: 'Test All' }))
+    await waitFor(() => expect(testServersMock).toHaveBeenCalledTimes(1))
+    clock += 120_000
+    await act(async () => finish([{ name: 'Buffalo · Niagara', latencyMs: 5 }]))
+    expect(
+      screen.queryByRole('button', { name: 'Select suggested route' }),
+    ).toBeNull()
+    expect(screen.getByText(/No fresh evidence for this region/)).toBeDefined()
+    expect(connectMock).not.toHaveBeenCalled()
+  } finally {
+    time.mockRestore()
+  }
+})
+
+it('stores a hy2 favorite under its shared node identity without selecting, connecting or inventing success', async () => {
+  scopeMock.mockReturnValue('account-a:7')
+  serversMock.mockResolvedValue(routeServers)
+  let saved = routeFixture()
+  preferencesMock.mockImplementation(async () => saved)
+  updatePreferencesMock.mockImplementation(
+    async (_scope, _revision, favorites, fixedRegion) => {
+      saved = { ...saved, favorites, fixedRegion }
+      return saved
+    },
+  )
+  renderPage()
+  const favorite = await screen.findByRole('button', {
+    name: 'Save Buffalo · Niagara · Backup channel as a favorite',
+  })
+  const card = favorite.parentElement
+  expect(card?.style.border).toContain('1px solid')
+  expect(card?.closest('button')).toBeNull()
+  expect(card?.querySelector('.tono-server-card')?.nextElementSibling).toBe(
+    favorite,
+  )
+  fireEvent.click(favorite)
+  await waitFor(() =>
+    expect(updatePreferencesMock).toHaveBeenCalledWith(
+      'account-a:7',
+      54,
+      ['Buffalo · Niagara'],
+      null,
+    ),
+  )
+  expect(
+    await screen.findByRole('button', {
+      name: 'Remove Buffalo from favorites',
+    }),
+  ).toBeDefined()
+  fireEvent.change(
+    screen.getByRole('combobox', { name: 'Recommendation region' }),
+    { target: { value: 'US' } },
+  )
+  await waitFor(() =>
+    expect(updatePreferencesMock).toHaveBeenLastCalledWith(
+      'account-a:7',
+      54,
+      ['Buffalo · Niagara'],
+      'US',
+    ),
+  )
+  expect(
+    screen.getByText('No verified successful connections yet.'),
+  ).toBeDefined()
+  expect(selectServerMock).not.toHaveBeenCalled()
+  expect(connectMock).not.toHaveBeenCalled()
+})
+
+it('only selects a recommendation on explicit confirmation and never connects or switches from the recommendation path', async () => {
+  scopeMock.mockReturnValue('account-a:7')
+  serversMock.mockResolvedValue(routeServers)
+  preferencesMock.mockResolvedValue({
+    ...routeFixture(),
+    recent: [
+      {
+        name: 'Buffalo · Niagara',
+        revision: 54,
+        verifiedAtMs: Date.now() - 60_000,
+      },
+    ],
+  })
+  renderPage()
+  const confirm = await screen.findByRole('button', {
+    name: 'Select suggested route',
+  })
+  expect(selectServerMock).not.toHaveBeenCalled()
+  fireEvent.click(confirm)
+  await waitFor(() =>
+    expect(selectServerMock).toHaveBeenCalledWith('Buffalo · Niagara', {
+      scope: 'account-a:7',
+      catalogRevision: 54,
+    }),
+  )
+  await waitFor(() =>
+    expect(toastMock).toHaveBeenCalledWith(
+      'Route selected. Use Connect when ready.',
+    ),
+  )
+  expect(connectMock).not.toHaveBeenCalled()
+  // The backend can become connected after render but before admission. A rejected idle fence
+  // is not retried as an ordinary manual switch or Connect.
+  selectServerMock.mockRejectedValueOnce(new Error('connection changed'))
+  fireEvent.click(confirm)
+  expect(await screen.findByRole('alert')).toHaveProperty(
+    'textContent',
+    'The account, catalog or connection changed. Review the route before selecting again.',
+  )
+  expect(connectMock).not.toHaveBeenCalled()
+  expect(selectServerMock).toHaveBeenCalledTimes(2)
+})
+
+it('does not show late account-A preferences as account-B history or recommendations', async () => {
+  scopeMock.mockReturnValue('account-b:8')
+  serversMock.mockResolvedValue(routeServers)
+  let resolve!: (preferences: TonoRoutePreferences) => void
+  preferencesMock.mockReturnValue(
+    new Promise<TonoRoutePreferences>((done) => {
+      resolve = done
+    }),
+  )
+  renderPage()
+  await waitFor(() => expect(preferencesMock).toHaveBeenCalled())
+  await act(async () =>
+    resolve({
+      ...routeFixture(),
+      favorites: ['Buffalo · Niagara'],
+      recent: [
+        {
+          name: 'Buffalo · Niagara',
+          revision: 54,
+          verifiedAtMs: Date.now() - 1000,
+        },
+      ],
+    }),
+  )
+  expect(
+    screen.queryByRole('button', { name: 'Select suggested route' }),
+  ).toBeNull()
+  expect(screen.queryByText('Saved favorite')).toBeNull()
+  expect(screen.getByRole('status').textContent).toContain(
+    'Waiting for this account’s route preferences…',
+  )
+  expect(
+    screen.queryByText('No verified successful connections yet.'),
+  ).toBeNull()
+  expect(connectMock).not.toHaveBeenCalled()
 })

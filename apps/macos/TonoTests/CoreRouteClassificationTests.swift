@@ -318,6 +318,25 @@ final class CoreRouteClassificationTests: XCTestCase {
         }
     }
 
+    func testDashScopeChildrenStayProtectedWhileTheAlibabaDirectParentIsAdmitted() throws {
+        for trusted in [false, true] {
+            XCTAssertEqual(try ConfigPipeline.validatedManagedDirectSuffix("aliyuncs.com", trusted: trusted), "aliyuncs.com")
+            for host in [
+                "dashscope.aliyuncs.com", "cn-hongkong.dashscope.aliyuncs.com",
+                "coding-intl.dashscope.aliyuncs.com", "dashscope-intl.aliyuncs.com",
+                "dashscope-us.aliyuncs.com", "maas.aliyuncs.com",
+                "workspace.cn-beijing.maas.aliyuncs.com", "trial.ap-southeast-1.maas.aliyuncs.com",
+                "token-plan.ap-southeast-1.maas.aliyuncs.com",
+            ] {
+                XCTAssertThrowsError(try ConfigPipeline.validatedManagedDirectDomain(host, trusted: trusted), host)
+                XCTAssertThrowsError(try ConfigPipeline.validatedWebDirectDomain(host, trusted: trusted), host)
+                XCTAssertThrowsError(try ConfigPipeline.validatedManagedDirectSuffix(host, trusted: trusted), host)
+            }
+        }
+        XCTAssertThrowsError(try ConfigPipeline.validatedManagedDirectSuffix("googleapis.com", trusted: true))
+        XCTAssertThrowsError(try ConfigPipeline.validatedManagedDirectSuffix("com", trusted: true))
+    }
+
     func testSignatureDoesNotRelaxProtectedAssistantHosts() {
         for host in [
             "api.anthropic.com", "claude.ai", "claude.com", "claude.app",
@@ -336,6 +355,20 @@ final class CoreRouteClassificationTests: XCTestCase {
             "growthbook.io", "stripe.network", "storage.googleapis.com",
             "registry.npmjs.org", "raw.githubusercontent.com", "formulae.brew.sh",
             "o123.ingest.sentry.io", "tono.app", "tono.com",
+            "chatgpt.com", "openai.com", "chat.com", "ai.com",
+            "oaistatic.com", "oaiusercontent.com", "api.openai.com",
+            "cdn.oaistatic.com", "files.oaiusercontent.com",
+            "grok.com", "grok.x.com", "grokipedia.com", "x.ai",
+            "api.x.ai", "perplexity.ai", "perplexity.com", "pplx.ai",
+            "api.perplexity.ai", "gemini.google.com", "bard.google.com",
+            "aistudio.google.com", "generativelanguage.googleapis.com",
+            "notebooklm.google.com", "muse.ai", "meta.ai", "muse.meta.com",
+            "www.muse.ai", "meta.com", "facebook.com", "fb.com", "fb.me",
+            "fb.watch", "fbcdn.net", "facebook.net", "messenger.com",
+            "instagram.com", "cdninstagram.com", "ig.me", "threads.net",
+            "gmail.com", "mail.google.com", "googlemail.com", "inbox.google.com",
+            "accounts.google.com", "myaccount.google.com", "oauth2.googleapis.com",
+            "mail-pa.clients6.google.com", "gmail.googleapis.com",
         ] {
             XCTAssertThrowsError(
                 try ConfigPipeline.validatedManagedDirectDomain(host, trusted: true),
@@ -355,13 +388,17 @@ final class CoreRouteClassificationTests: XCTestCase {
         // makes every parent suffix unsafe even when the policy is signed.
         for host in [
             "googleapis.com", "githubusercontent.com", "npmjs.org", "brew.sh",
-            "b-cdn.net", "www.cloudflare.com",
+            "b-cdn.net", "www.cloudflare.com", "google.com", "clients6.google.com",
+            "x.com",
         ] {
             XCTAssertThrowsError(
                 try ConfigPipeline.validatedManagedDirectSuffix(host, trusted: true),
                 host
             )
         }
+        XCTAssertNoThrow(
+            try ConfigPipeline.validatedManagedDirectSuffix("example.com", trusted: true)
+        )
     }
 
     func testApplicationSubfolderScanFindsWeChatOneLevelDown() throws {
@@ -384,24 +421,42 @@ final class CoreRouteClassificationTests: XCTestCase {
         )
     }
 
+    func testReviewedDirectPathRequiresSignedBundleAtStandardLocation() throws {
+        // An unsigned bundle carrying a reviewed name and identifier is not
+        // granted, even at the standard location.
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("tono-direct-identity-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        for (name, identifier) in [("WeChat.app", "com.tencent.xinWeChat"), ("DingTalk.app", "com.alibaba.DingTalk")] {
+            let contents = root.appendingPathComponent(name, isDirectory: true)
+                .appendingPathComponent("Contents", isDirectory: true)
+            try FileManager.default.createDirectory(
+                at: contents.appendingPathComponent("MacOS", isDirectory: true),
+                withIntermediateDirectories: true)
+            try PropertyListSerialization.data(fromPropertyList: [
+                "CFBundleIdentifier": identifier, "CFBundleExecutable": "app",
+                "CFBundlePackageType": "APPL",
+            ], format: .xml, options: 0).write(to: contents.appendingPathComponent("Info.plist"))
+            try FileManager.default.copyItem(
+                at: URL(fileURLWithPath: "/usr/bin/true"),
+                to: contents.appendingPathComponent("MacOS/app"))
+        }
+        let rootPath = root.resolvingSymlinksInPath().path
+        XCTAssertFalse(ConfigPipeline.managedDirectProcessBundlePaths(applicationsRoot: root)
+            .contains { $0.hasPrefix(rootPath) })
+
+        // Every path production grants is a bundle on disk with a reviewed
+        // signed identity, never a name taken on trust.
+        for path in ConfigPipeline.managedDirectProcessBundlePaths {
+            let url = URL(fileURLWithPath: path, isDirectory: true)
+            let identifier = Bundle(url: url)?.bundleIdentifier
+            XCTAssertTrue(identifier.map {
+                ConfigPipeline.isSignedReviewedDirectBundle(at: url, identifier: $0)
+            } ?? false, path)
+        }
+    }
+
     func testReviewedChinaOfficeAppsShareTheWeChatDirectBoundary() {
-        let bundlePaths = ConfigPipeline.managedDirectProcessBundlePaths
-        XCTAssertTrue(bundlePaths.contains("/Applications/WeChat.app/"))
-        XCTAssertTrue(bundlePaths.contains("/Applications/DingTalk.app/"))
-        XCTAssertTrue(bundlePaths.contains("/Applications/Feishu.app/"))
-        XCTAssertTrue(bundlePaths.contains("/Applications/Lark.app/"))
-
-        let regexes = ConfigPipeline.managedDirectProcessPathRegexes
-        XCTAssertTrue(regexes.contains(
-            ConfigPipeline.rulePathRegex(for: "/Applications/DingTalk.app/")
-        ))
-        XCTAssertTrue(regexes.contains(
-            ConfigPipeline.rulePathRegex(for: "/Applications/Feishu.app/")
-        ))
-        XCTAssertTrue(regexes.contains(
-            ConfigPipeline.rulePathRegex(for: "/Applications/Lark.app/")
-        ))
-
         XCTAssertNoThrow(try ConfigPipeline.validatedManagedDirectDomain(
             "open.dingtalk.com"
         ))
@@ -491,6 +546,9 @@ final class CoreRouteClassificationTests: XCTestCase {
             mediaEndpoints: [],
             directResolverHosts: ["open.dingtalk.com"]
         )
+        // Hosted CI has no DingTalk installed; supply the discovered path.
+        ConfigPipeline.managedDirectBundlePathsOverride = ["/Applications/DingTalk.app/"]
+        defer { ConfigPipeline.managedDirectBundlePathsOverride = nil }
         let runtime = try! Fixture.ownedRuntime(
             overlay: Fixture.overlay(selectedNodeName: node.name),
             nodes: [node],

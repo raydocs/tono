@@ -12,8 +12,19 @@ final class ConnectionCoordinator {
     var protectionOperationGeneration: UInt64 = 0
     private(set) var disconnectSequence: Task<Void, Never>?
     private var disconnectRequestID = 0
+    /// True while the serialized teardown queue's newest request is an
+    /// explicit release (Restore internet), including while that teardown is
+    /// still in flight — a release can hold the queue for up to 180 s on the
+    /// administrator repair prompt. The sleep/wake paths read it so a sleep
+    /// cannot rewrite the user's pending release into preserve teardowns and
+    /// wake recovery (R1-F2). A release that ends with PF still armed (the
+    /// helper's sleep gate refused its disarm, or any other failure) keeps
+    /// the intent until the user connects again, so wake and network-change
+    /// recovery cannot turn it into a reconnect (X1-2).
+    private var disconnectQueueReleaseIntent = false
     var nodeSwitchTask: Task<Void, Never>?
     var protectedReconnectTask: Task<Void, Never>?
+    var unarmedReconnectTask: Task<Void, Never>?
     var protectedReconnectID: UUID?
     var lastProtectedReconnectKick: Date?
     var coreMonitorTask: Task<Void, Never>?
@@ -25,16 +36,27 @@ final class ConnectionCoordinator {
 
     private var deferredConnect: (id: UUID, task: Task<Void, Never>)?
 
+    /// Whether the pending or in-flight teardown queue's newest request is an
+    /// explicit release, or was one that could not release PF. Newest-wins,
+    /// matching `disconnectRequestID`: a later teardown request replaces the
+    /// intent, completion of the newest request retires it once the release
+    /// is confirmed, and a new Connect retires an unconfirmed one.
+    var disconnectQueueRequestsRelease: Bool {
+        disconnectQueueReleaseIntent
+    }
+
     /// All teardown requests share one queue. Drain cancelled connection work
     /// before executing privileged stop/DNS/PF operations; cancelling a Task
     /// does not mean an in-flight helper request has stopped mutating the host.
     func enqueueDisconnect(
         waitingFor pendingTasks: [Task<Void, Never>] = [],
+        releaseIntent: Bool = false,
         operation: @escaping @MainActor (Int) async -> Void
     ) {
         cancelDeferredConnect()
         disconnectRequestID &+= 1
         let requestID = disconnectRequestID
+        disconnectQueueReleaseIntent = releaseIntent
         let previousDisconnect = disconnectSequence
         disconnectSequence = Task {
             await previousDisconnect?.value
@@ -45,8 +67,15 @@ final class ConnectionCoordinator {
 
     /// Earlier teardown still has to finish its privileged work, but cannot
     /// publish a stale result over a newer disconnect/release request's UI.
-    func completeDisconnect(_ requestID: Int, update: () -> Void) {
+    func completeDisconnect(
+        _ requestID: Int,
+        releaseUnconfirmed: Bool = false,
+        update: () -> Void
+    ) {
         guard requestID == disconnectRequestID else { return }
+        if !releaseUnconfirmed {
+            disconnectQueueReleaseIntent = false
+        }
         update()
     }
 
@@ -98,6 +127,191 @@ final class ConnectionCoordinator {
     func bumpGeneration() {
         protectionOperationGeneration &+= 1
         cancelDeferredConnect()
+    }
+
+    /// Determines whether a reconnect kick should be debounced based on cooldown,
+    /// or if scheduling should proceed. When an immediate kick is accepted,
+    /// the previous reconnect task is safely cancelled.
+    func shouldDebounceReconnectKick(immediate: Bool, now: Date = Date()) -> Bool {
+        if immediate {
+            if let lastKick = lastProtectedReconnectKick,
+               now.timeIntervalSince(lastKick) < ProtectedReconnectSchedule.networkChangeKickCooldown,
+               protectedReconnectTask != nil {
+                return true
+            }
+            lastProtectedReconnectKick = now
+            protectedReconnectTask?.cancel()
+            protectedReconnectTask = nil
+            protectedReconnectID = nil
+            return false
+        } else if protectedReconnectTask != nil {
+            return true
+        }
+        return false
+    }
+
+    func cancelConnectionTasks() {
+        connectTask?.cancel()
+        connectTask = nil
+        connectWatchdogTask?.cancel()
+        connectWatchdogTask = nil
+        connectAttemptID = nil
+    }
+
+    func cancelReconnectTasks() {
+        protectedReconnectTask?.cancel()
+        protectedReconnectTask = nil
+        unarmedReconnectTask?.cancel()
+        unarmedReconnectTask = nil
+        protectedReconnectID = nil
+        lastProtectedReconnectKick = nil
+        wakeRecoveryTask?.cancel()
+        wakeRecoveryTask = nil
+        sleepRestrictTask?.cancel()
+        sleepRestrictTask = nil
+    }
+
+    /// Coordinates initiating a connection: enforces single-flight deferred connect if teardown
+    /// is in progress, manages watchdog and connect tasks, and fences with attemptID and generation.
+    func executeConnect(
+        isDisconnecting: Bool,
+        deferredFallback: @escaping @MainActor () -> Void,
+        prepare: () -> (canProceed: Bool, attemptID: UUID),
+        watchdogSeconds: Double = 240,
+        onWatchdog: @escaping @MainActor (UUID) async -> Void,
+        perform: @escaping @MainActor (UUID, UInt64) async -> Void
+    ) {
+        if isDisconnecting {
+            connectAfterDisconnect {
+                deferredFallback()
+            }
+            return
+        }
+        let (canProceed, attemptID) = prepare()
+        guard canProceed else { return }
+        // Only an admitted attempt retires the previous generation. A connect
+        // refused by `prepare` (already connecting, no ready exit) must not
+        // retire the attempt in flight, whose tail compares the generation.
+        bumpGeneration()
+        // An admitted connect is the user's newer intent; it retires a release
+        // that could not confirm PF was released. A connect refused by
+        // `prepare` is not, so the intent survives it.
+        disconnectQueueReleaseIntent = false
+
+        let currentGeneration = protectionOperationGeneration
+        connectAttemptID = attemptID
+
+        connectWatchdogTask?.cancel()
+        connectWatchdogTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(watchdogSeconds))
+            guard let self, !Task.isCancelled,
+                  self.connectAttemptID == attemptID else { return }
+            await onWatchdog(attemptID)
+        }
+
+        connectTask = Task { [weak self] in
+            guard let self, !Task.isCancelled,
+                  self.protectionOperationGeneration == currentGeneration,
+                  self.connectAttemptID == attemptID else { return }
+            await perform(attemptID, currentGeneration)
+        }
+    }
+
+    /// Coordinates the orderly teardown sequence: cancels active connect & reconnect tasks,
+    /// enqueues teardown on disconnectSequence, ensures serialized execution, and notifies completion.
+    func executeDisconnect(
+        releaseKillSwitch: Bool,
+        pendingTasks: [Task<Void, Never>],
+        prepare: () -> Void,
+        operation: @escaping @MainActor (Int) async -> Void
+    ) {
+        bumpGeneration()
+        cancelConnectionTasks()
+        if releaseKillSwitch {
+            cancelReconnectTasks()
+        }
+        prepare()
+        enqueueDisconnect(
+            waitingFor: pendingTasks,
+            releaseIntent: releaseKillSwitch,
+            operation: operation
+        )
+    }
+
+    /// Coordinates scheduling a protected reconnect attempt with exponential backoff and debouncing.
+    func executeProtectedReconnect(
+        immediate: Bool,
+        now: Date = Date(),
+        attempt: Int,
+        computeDelay: (Int) -> TimeInterval = { attempt in
+            ProtectedReconnectSchedule.backoffSeconds(attempt: attempt)
+        },
+        onScheduled: (TimeInterval) -> Void,
+        perform: @escaping @MainActor (UUID) async -> Void
+    ) {
+        if shouldDebounceReconnectKick(immediate: immediate, now: now) {
+            return
+        }
+        let delay = immediate ? 0 : computeDelay(attempt)
+        let attemptID = UUID()
+        protectedReconnectID = attemptID
+        onScheduled(delay)
+        protectedReconnectTask = Task { [weak self] in
+            if delay > 0 {
+                try? await Task.sleep(for: .seconds(delay))
+            }
+            guard let self, !Task.isCancelled,
+                  self.protectedReconnectID == attemptID else { return }
+            self.protectedReconnectTask = nil
+            self.protectedReconnectID = nil
+            await perform(attemptID)
+        }
+    }
+
+    /// Coordinates running the protected reconnect loop, handling repeated attempts,
+    /// backoff scheduling, and cleanup upon exit or connection success.
+    func scheduleProtectedReconnectLoop(
+        immediate: Bool,
+        now: Date = Date(),
+        onAttemptScheduled: @escaping @MainActor (Int, TimeInterval) -> Bool,
+        onCleanup: @escaping @MainActor () -> Void,
+        performAttempt: @escaping @MainActor () async -> Bool
+    ) {
+        if shouldDebounceReconnectKick(immediate: immediate, now: now) {
+            return
+        }
+
+        let recoveryID = UUID()
+        protectedReconnectID = recoveryID
+        protectedReconnectTask = Task { [weak self] in
+            defer {
+                if let self, self.protectedReconnectID == recoveryID {
+                    self.protectedReconnectTask = nil
+                    self.protectedReconnectID = nil
+                    onCleanup()
+                }
+            }
+
+            let delays = ProtectedReconnectSchedule.delaysSeconds
+            var attempt = 0
+            while !Task.isCancelled {
+                let delay = immediate && attempt == 0
+                    ? 0
+                    : delays[min(attempt, delays.count - 1)]
+                let shouldContinue = onAttemptScheduled(attempt, TimeInterval(delay))
+                guard shouldContinue else { return }
+
+                if delay > 0 {
+                    try? await Task.sleep(for: .seconds(TimeInterval(delay)))
+                }
+                guard !Task.isCancelled else { return }
+                let didConnect = await performAttempt()
+                if didConnect {
+                    return
+                }
+                attempt += 1
+            }
+        }
     }
 
     private func cancelDeferredConnect() {

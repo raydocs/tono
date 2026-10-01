@@ -3,11 +3,14 @@ from __future__ import annotations
 import errno
 import fcntl
 import importlib.util
+import io
 import json
 import os
 import stat
 import tempfile
 import unittest
+import urllib.error
+from email.message import Message
 from pathlib import Path
 from unittest import mock
 
@@ -379,6 +382,79 @@ class ReporterTests(unittest.TestCase):
             self.assertEqual(delivered, 101)
             self.assertEqual([len(batch) for batch in batches], [100, 1])
             self.assertEqual(reporter.load_state(path)["pendingReports"], [])
+
+    def test_a_refused_report_does_not_block_the_next_account(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "state.json"
+            gone = {
+                "reportId": "report-gone",
+                "userId": "user-gone",
+                "sourceId": "home-exit-one",
+                "protocolVersion": 2,
+                "totalBytes": 10,
+                "observedAt": 1_700_000_000,
+            }
+            live = {
+                "reportId": "report-live",
+                "userId": "user-live",
+                "sourceId": "home-exit-one",
+                "protocolVersion": 2,
+                "totalBytes": 20,
+                "observedAt": 1_700_000_000,
+            }
+            state = {
+                "sourceId": "home-exit-one",
+                "totals": {},
+                "pendingReports": [gone, live],
+            }
+            reporter.save_state(path, state)
+            offered: list[list[str]] = []
+
+            def respond(_base: str, _token: str, batch: list[dict]) -> None:
+                offered.append([report["userId"] for report in batch])
+                if any(report["userId"] == "user-gone" for report in batch):
+                    raise urllib.error.HTTPError(
+                        "https://api.example.com/api/v1/home/usage",
+                        400,
+                        "Bad Request",
+                        Message(),
+                        io.BytesIO(b"{}"),
+                    )
+
+            with mock.patch.object(reporter, "post_reports", side_effect=respond):
+                delivered = reporter.deliver_pending(
+                    "https://api.example.com", "test-token", path, state
+                )
+
+            saved = reporter.load_state(path)
+            self.assertEqual(delivered, 1)
+            self.assertEqual(saved["pendingReports"], [])
+            self.assertEqual(saved["totals"], {"user-live": 20})
+            self.assertEqual(offered, [["user-gone", "user-live"], ["user-gone"], ["user-live"]])
+
+            blocked = {
+                "sourceId": "home-exit-one",
+                "totals": {},
+                "pendingReports": [gone.copy(), live.copy()],
+            }
+            reporter.save_state(path, blocked)
+
+            def unavailable(_base: str, _token: str, _batch: list[dict]) -> None:
+                raise urllib.error.HTTPError(
+                    "https://api.example.com/api/v1/home/usage",
+                    503,
+                    "Service Unavailable",
+                    Message(),
+                    io.BytesIO(b"{}"),
+                )
+
+            with mock.patch.object(reporter, "post_reports", side_effect=unavailable):
+                with self.assertRaises(urllib.error.HTTPError) as raised:
+                    reporter.deliver_pending(
+                        "https://api.example.com", "test-token", path, blocked
+                    )
+            self.assertEqual(raised.exception.code, 503)
+            self.assertEqual(reporter.load_state(path)["pendingReports"], [gone, live])
 
     def test_peer_counters_are_attributed_by_verified_key_and_survive_reset(self) -> None:
         state = {

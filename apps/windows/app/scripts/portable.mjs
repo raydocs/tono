@@ -56,6 +56,11 @@ async function resolvePortable() {
     )
   }
   zip.addLocalFile(stableMihomo)
+  const singBox = path.join(releaseDir, 'sing-box.exe')
+  if (!fs.existsSync(singBox)) {
+    throw new Error(`missing pinned sing-box at ${singBox}`)
+  }
+  zip.addLocalFile(singBox)
 
   // Do not addLocalFolder(resources): that reintroduced Unix helpers in Test 5 when the
   // build tree still held source leftovers. Only the Windows allowlist ships.

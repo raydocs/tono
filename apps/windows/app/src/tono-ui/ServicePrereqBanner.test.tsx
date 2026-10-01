@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -30,10 +31,67 @@ import { ServicePrereqBanner } from './ServicePrereqBanner'
 
 describe('ServicePrereqBanner', () => {
   afterEach(cleanup)
+  afterEach(() => vi.useRealTimers())
 
   beforeEach(() => {
     mocks.prerequisites.mockReset()
     mocks.repair.mockReset().mockResolvedValue(undefined)
+  })
+
+  it('coalesces stalled polls across remounts and checks fresh state after repair', async () => {
+    vi.useFakeTimers()
+    const stopped = {
+      serviceRunning: false,
+      serviceRegistered: true,
+      bfeRunning: false,
+    }
+    let release!: (value: typeof stopped) => void
+    mocks.prerequisites
+      .mockResolvedValueOnce(stopped)
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            release = resolve
+          }),
+      )
+      .mockResolvedValue({ ...stopped, serviceRunning: true, bfeRunning: true })
+    const first = render(<ServicePrereqBanner />)
+    await act(async () => {})
+    await act(async () => {
+      vi.advanceTimersByTime(30_000)
+    })
+    first.unmount()
+    render(<ServicePrereqBanner />)
+    await act(async () => {
+      vi.advanceTimersByTime(90_000)
+    })
+    expect(mocks.prerequisites).toHaveBeenCalledTimes(2)
+    await act(async () => {
+      release(stopped)
+    })
+    mocks.prerequisites.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          release = resolve
+        }),
+    )
+    await act(async () => {
+      vi.advanceTimersByTime(30_000)
+    })
+    // Repair control work must remain usable while the query is stalled.
+    await act(async () => {
+      fireEvent.click(
+        screen.getByRole('button', { name: 'tono.servicePrereq.repair' }),
+      )
+    })
+    expect(mocks.repair).toHaveBeenCalledTimes(1)
+    expect(mocks.prerequisites).toHaveBeenCalledTimes(3)
+    expect(screen.getByRole('button').hasAttribute('disabled')).toBe(true)
+    await act(async () => {
+      release(stopped)
+    })
+    expect(mocks.prerequisites).toHaveBeenCalledTimes(4)
+    expect(screen.queryByRole('alert')).toBeNull()
   })
 
   it('says nothing while the service is running', async () => {

@@ -41,6 +41,16 @@ pub struct ProtocolInfo {
     pub build_version: String,
     pub protocol: ProtocolVersion,
     pub min_client_revision: u16,
+    /// The Service's attempt epoch at the moment of this response (filled only by the serving
+    /// side of the pipe; bumped by every explicit release and by an update takeover's Prepare).
+    /// A destructive owner-gated request that carries a snapshot of this value older than the
+    /// live epoch belongs to an attempt one of those already superseded, and the Service
+    /// refuses it. `#[serde(default)]` so a client still parses an
+    /// older Service's answer, which never carries the field — and such a Service also fails
+    /// [`ProtocolInfo::supports_prepare_start_epoch`], so the defaulted zero is never sent as a
+    /// freshness proof.
+    #[serde(default)]
+    pub release_epoch: u64,
 }
 
 impl ProtocolInfo {
@@ -49,6 +59,9 @@ impl ProtocolInfo {
             build_version: crate::VERSION.to_owned(),
             protocol: ProtocolVersion::current(),
             min_client_revision: crate::MIN_SUPPORTED_CLIENT_REVISION,
+            // Only the serving side fills the real epoch (the GetVersion route); everywhere
+            // else this stays the neutral value of the local build's protocol statement.
+            release_epoch: 0,
         }
     }
 
@@ -110,6 +123,66 @@ impl ProtocolInfo {
         self.protocol.epoch == ProtocolVersion::current().epoch
             && self.protocol.revision >= crate::MIN_SERVICE_REVISION_FOR_BOOTSTRAP_PINS
     }
+
+    /// Whether `POST /clash/prepare-start` enforces the release-epoch freshness snapshot the
+    /// client copies from [`ProtocolInfo::release_epoch`] into the request.
+    pub const fn supports_prepare_start_epoch(&self) -> bool {
+        self.protocol.epoch == ProtocolVersion::current().epoch
+            && self.protocol.revision >= crate::MIN_SERVICE_REVISION_FOR_PREPARE_START_EPOCH
+    }
+
+    /// Whether `StartClash` can run `sing-box.exe` instead of treating every core as mihomo.
+    pub const fn supports_sing_box_core(&self) -> bool {
+        self.protocol.epoch == ProtocolVersion::current().epoch
+            && self.protocol.revision >= crate::MIN_SERVICE_REVISION_FOR_SING_BOX
+    }
+
+    /// Whether a connected sing-box session can replace its process for reviewed-app DIRECT.
+    pub const fn supports_sing_box_direct(&self) -> bool {
+        self.protocol.epoch == ProtocolVersion::current().epoch
+            && self.protocol.revision >= crate::MIN_SERVICE_REVISION_FOR_SING_BOX_DIRECT
+    }
+}
+
+/// The image file name selects the engine. Omitted and unknown names stay mihomo,
+/// which is what a revision-17 App sends.
+pub fn is_sing_box_core_path(path: &str) -> bool {
+    std::path::Path::new(path)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| {
+            name.eq_ignore_ascii_case("sing-box.exe") || name.eq_ignore_ascii_case("sing-box")
+        })
+}
+
+/// Arguments for one core start. sing-box ignores the mihomo directory and pipe flags.
+pub fn core_launch_args(
+    core_path: &str,
+    config_dir: &str,
+    config_path: &str,
+    ipc_path: &str,
+) -> Vec<String> {
+    if is_sing_box_core_path(core_path) {
+        vec![
+            "run".to_string(),
+            "-c".to_string(),
+            config_path.to_string(),
+            "--disable-color".to_string(),
+        ]
+    } else {
+        vec![
+            "-d".to_string(),
+            config_dir.to_string(),
+            "-f".to_string(),
+            config_path.to_string(),
+            if cfg!(windows) {
+                "-ext-ctl-pipe".to_string()
+            } else {
+                "-ext-ctl-unix".to_string()
+            },
+            ipc_path.to_string(),
+        ]
+    }
 }
 
 /// Learned control-plane addresses persisted by GET/POST `/bootstrap-pins`.
@@ -132,6 +205,31 @@ pub struct OwnerCredentials {
     pub identity: OwnerIdentity,
     pub app_data_dir: String,
     pub token: Option<String>,
+}
+
+/// Body of `POST /kill-switch/release`. Absent on older clients, which must
+/// keep the full release and must not install the secondary AI hold.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReleaseKillSwitchPayload {
+    #[serde(default)]
+    pub apply_narrow_layer: bool,
+}
+
+/// `null` (older clients) or the payload object.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+pub enum ReleaseKillSwitchBody {
+    Options(ReleaseKillSwitchPayload),
+    Absent(()),
+}
+
+impl ReleaseKillSwitchBody {
+    pub fn apply_narrow_layer(&self) -> bool {
+        match self {
+            Self::Options(options) => options.apply_narrow_layer,
+            Self::Absent(()) => false,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -269,6 +367,30 @@ pub struct ReplaceDirectEndpointsRequest {
     /// not render. The Service still validates every entry against its own
     /// `REVIEWED_DIRECT_PORTS`: the App proposes, the Service decides, and neither side alone
     /// can widen the boundary.
+    #[serde(default)]
+    pub reviewed_direct_ports: Vec<u16>,
+}
+
+fn default_restore_previous() -> bool {
+    true
+}
+
+/// Revision 19. The JSON the compiler produced for the running sing-box process.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReplaceSingBoxRuntimeRequest {
+    pub runtime_json: String,
+    /// The first DIRECT install restores the previous full tunnel. A later
+    /// rollback sets this false so failure cannot write DIRECT rules back.
+    #[serde(default = "default_restore_previous")]
+    pub restore_previous: bool,
+}
+
+/// Revision 19. Permits for the rules the App already read back. No reload id:
+/// the Service creates the Committed lease itself.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CommitSingBoxDirectRequest {
+    #[serde(default)]
+    pub direct_endpoints: Vec<ProxyEndpoint>,
     #[serde(default)]
     pub reviewed_direct_ports: Vec<u16>,
 }
@@ -439,6 +561,10 @@ pub struct KillSwitchStatus {
     pub direct_endpoint_digest: String,
     #[serde(default)]
     pub last_error: Option<String>,
+    /// The Service opened the network because a restored wanted session never proved Core.
+    /// Older payloads omit it and read as false, so a user disconnect does not reconnect.
+    #[serde(default)]
+    pub reconnect_after_release: bool,
 }
 
 /// `POST /kill-switch/lock` payload. `None` locks the interface named at arm time.
@@ -459,6 +585,13 @@ pub struct DnsProtectionStatus {
     pub adapters: u32,
     #[serde(default)]
     pub last_error: Option<String>,
+    /// Advisory only (X2-2, `TONO_DNS_POLICY_CONFLICT: …`): the adapters are protected, but the
+    /// resolver policy Windows applies was observed to disagree. Never an error: update
+    /// admission, startup takeover and the App's lost-response read-back decide on `last_error`
+    /// alone, and a group-policy NRPT Tono cannot change must not close them. Omitted when absent
+    /// so an older App or Service reads this status unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resolver_policy_warning: Option<String>,
 }
 
 /// The service's network-change feed, aggregated into `/status`.
@@ -507,6 +640,31 @@ impl StopClashPayload {
             Self::Options(value) => value.release_kill_switch,
         }
     }
+}
+
+/// `POST /clash/prepare-start` freshness proof: the client's snapshot of the Service's
+/// attempt epoch, read from `GET /version` immediately before the mutating request.
+/// Every explicit release bumps it together with the `RELEASE_EPOCH` StartClash snapshots
+/// itself inside the Service, and an update takeover's Prepare bumps it too (see
+/// `windows_kill_switch::attempt_epoch`); carrying the client's copy is what makes the gate
+/// catch a request that was already in flight when the release completed — the in-Service
+/// snapshot is only taken once the request arrives, which is too late for exactly that case.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PrepareCoreStartFreshness {
+    pub release_epoch: u64,
+}
+
+/// `null` was the payload before revision 17. It stays a distinct untagged variant so the
+/// shape still parses. A revision-17 Service accepts it from an older client, which still
+/// pairs at the probe, and takes the release-epoch snapshot itself when the request arrives
+/// (the pre-17 freshness). It does not refuse the request, because an older App that passes
+/// the probe must not then fail every connection at this route. A client that has probed an
+/// older Service still sends this arm, because that Service has no gate.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum PrepareCoreStartPayload {
+    Legacy(()),
+    Freshness(PrepareCoreStartFreshness),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -588,6 +746,20 @@ pub enum ServiceErrorCode {
     /// `POST /lifecycle/owner-goodbye` refused: the kill switch is armed, or the durable desired
     /// state wants (or cannot prove it does not want) the core running. Mapped to 409 Conflict.
     StillProtected = 1012,
+    /// `POST /clash/prepare-start` refused: the request's client-snapshotted release epoch has
+    /// been superseded by an explicit release (for an epoch-less legacy request, the Service's
+    /// own arrival-time snapshot). The refusal happens before any Core is touched. Mapped to
+    /// 409 Conflict.
+    StaleReleaseEpoch = 1013,
+    /// `StartClash` / `PrepareCoreStart` refused: the armed network protection belongs to a
+    /// different local user whose Windows logon session still exists. Taking it over would stop
+    /// that user's Core and hand their protection to the caller. Mapped to 409 Conflict.
+    ProtectionHeldByAnotherUser = 1014,
+    /// `StartClash` / `PrepareCoreStart` refused: the caller's Windows session is a Remote
+    /// Desktop session (or cannot be confirmed as the console) and the caller holds no armed
+    /// protection yet. Arming would block the physical interface that session arrives on, and the
+    /// block cannot be released from outside the console. Mapped to 409 Conflict.
+    RemoteSessionConnectRefused = 1015,
 }
 
 pub fn owner_key(identity: &OwnerIdentity) -> String {
@@ -810,8 +982,9 @@ impl<T> JsonConvert for T where T: Serialize + for<'de> Deserialize<'de> {}
 #[cfg(test)]
 mod tests {
     use super::{
-        MacosProxyConfig, OwnerIdentity, ProtocolInfo, ProtocolVersion, RuntimeBundle,
-        ServiceErrorCode, StartClashRequest, StopClashPayload, owner_key,
+        MacosProxyConfig, OwnerIdentity, ProtocolInfo, ProtocolVersion, ReleaseKillSwitchBody,
+        RuntimeBundle, ServiceErrorCode, StartClashRequest, StopClashPayload, core_launch_args,
+        is_sing_box_core_path, owner_key,
     };
 
     #[test]
@@ -899,6 +1072,32 @@ mod tests {
             Some(current)
         );
         assert!(ProtocolVersion::parse_header(crate::VERSION).is_none());
+    }
+
+    #[test]
+    fn parse_header_bounded_garbage_does_not_panic() {
+        assert_eq!(
+            ProtocolVersion::parse_header("1.2"),
+            Some(ProtocolVersion {
+                epoch: 1,
+                revision: 2
+            })
+        );
+        assert!(ProtocolVersion::parse_header("").is_none());
+        assert!(ProtocolVersion::parse_header("1").is_none());
+        assert!(ProtocolVersion::parse_header("1.2.3").is_none());
+        assert!(ProtocolVersion::parse_header("a.b").is_none());
+        let mut state: u64 = 7;
+        for _ in 0..32 {
+            state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+            let text: String = (0..12)
+                .map(|shift| {
+                    let byte = b'0' + ((state >> (shift % 8)) & 0x0f) as u8;
+                    byte as char
+                })
+                .collect();
+            let _ = ProtocolVersion::parse_header(&text);
+        }
     }
 
     #[test]
@@ -1060,6 +1259,7 @@ mod tests {
             endpoints: config.proxy_endpoints.clone(),
             direct_endpoint_digest: super::direct_endpoint_digest(&[]).unwrap(),
             last_error: None,
+            reconnect_after_release: false,
         };
         let encoded = serde_json::to_vec(&status).expect("status should serialize");
         assert_eq!(
@@ -1079,6 +1279,7 @@ mod tests {
         let parsed = serde_json::from_value::<KillSwitchStatus>(older)
             .expect("an older payload without the field must still parse");
         assert!(!parsed.tunnel_permit_rendered);
+        assert!(!parsed.reconnect_after_release);
         assert_eq!(parsed.mode, KillSwitchStatusMode::Locked);
         assert_eq!(
             serde_json::from_value::<KillSwitchStatusMode>(serde_json::json!("locked")).unwrap(),
@@ -1153,5 +1354,69 @@ mod tests {
                 .bytes()
                 .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
         );
+    }
+
+    #[cfg(feature = "test")]
+    #[test]
+    fn an_absent_release_body_does_not_apply_the_narrow_layer() {
+        let absent: ReleaseKillSwitchBody = serde_json::from_str("null").unwrap();
+        assert!(!absent.apply_narrow_layer());
+        let present: ReleaseKillSwitchBody =
+            serde_json::from_str(r#"{"apply_narrow_layer":true}"#).unwrap();
+        assert!(present.apply_narrow_layer());
+        let omitted: ReleaseKillSwitchBody = serde_json::from_str("{}").unwrap();
+        assert!(!omitted.apply_narrow_layer());
+    }
+
+    #[test]
+    fn sing_box_launch_args_are_run_c_and_mihomo_keeps_its_flags() {
+        let sing = core_launch_args(
+            r"C:\Program Files\Tono\sing-box.exe",
+            r"C:\runtime",
+            r"C:\runtime\config.json",
+            r"\\.\pipe\tono",
+        );
+        assert_eq!(
+            sing,
+            vec![
+                "run".to_string(),
+                "-c".to_string(),
+                r"C:\runtime\config.json".to_string(),
+                "--disable-color".to_string(),
+            ]
+        );
+        let mihomo = core_launch_args(
+            r"C:\Program Files\Tono\tono-core.exe",
+            r"C:\runtime",
+            r"C:\runtime\config.yaml",
+            r"\\.\pipe\tono",
+        );
+        assert!(
+            mihomo
+                .windows(2)
+                .any(|pair| pair[0] == "-f" && pair[1] == r"C:\runtime\config.yaml")
+        );
+        assert!(!mihomo.iter().any(|arg| arg == "run"));
+        assert!(is_sing_box_core_path("sing-box"));
+        assert!(!is_sing_box_core_path("tono-core.exe"));
+    }
+
+    #[test]
+    fn sing_box_direct_requires_revision_nineteen() {
+        let mut info = ProtocolInfo::current();
+        info.protocol.revision = 18;
+        assert!(info.supports_sing_box_core());
+        assert!(!info.supports_sing_box_direct());
+        info.protocol.revision = 19;
+        assert!(info.supports_sing_box_direct());
+    }
+
+    #[test]
+    fn sing_box_core_requires_revision_eighteen() {
+        let mut info = ProtocolInfo::current();
+        info.protocol.revision = 17;
+        assert!(!info.supports_sing_box_core());
+        info.protocol.revision = 18;
+        assert!(info.supports_sing_box_core());
     }
 }

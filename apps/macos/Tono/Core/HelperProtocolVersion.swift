@@ -93,7 +93,265 @@ nonisolated enum HelperProtocolVersion {
     ///   Universal Clipboard, and local network traffic.
     /// - 4.1.0 → 4.2.0: Root helper adds authenticated self-upgrade endpoint
     ///   `/helper/upgrade` to eliminate administrator password prompts on future updates.
-    static let current = "4.2.0"
+    /// - 4.2.0 → 4.3.0: Enforce strict peer bundle confinement and realpath traversal
+    ///   refusal on `/helper/upgrade`.
+    /// - 4.3.0 → 4.4.0: Protected DNS recovery retains its snapshot and refuses
+    ///   release when any service's DNS cannot be read, instead of treating an
+    ///   unreadable service as clean. Existing IPC and authorization are unchanged.
+    /// - 4.4.0 → 4.5.0: root-owned full-bundle update transaction, detached
+    ///   signatures, durable consumption, independent executor and recovery.
+    /// - 4.5.0 → 4.6.0: `/dns/status` keeps reporting `snapshotPresent: true`
+    ///   (with the snapshot's service) when the snapshot is loadable but its
+    ///   network service's current DNS cannot be read, instead of folding
+    ///   that into `snapshotPresent: false`. A 4.5.0 daemon hides the snapshot
+    ///   and the GUI refuses to call `/dns/restore`, which can otherwise
+    ///   succeed for a renamed or removed service.
+    /// - 4.6.0 → 4.7.0: an unreadable `protected-dns.json` no longer bricks
+    ///   every release outlet. restore()/enable() quarantine a fatally
+    ///   invalid snapshot aside and continue snapshotless (the loopback
+    ///   sweep runs; original values are not fabricated), and `/dns/status`
+    ///   reports such a file as `snapshotPresent: true` so the app calls
+    ///   `/dns/restore` instead of refusing. `--emergency-disarm` still
+    ///   refuses to open PF while DNS restoration fails.
+    /// - 4.7.0 → 4.8.0: startup recovery no longer arms the emergency PF
+    ///   barrier when our own update executor's `launchctl bootout` stops the
+    ///   daemon while it waits behind the update lock (a reboot inside the
+    ///   consumed→replaced window races the two RunAtLoad jobs). That
+    ///   SIGTERM is a clean stop — the executor owns the replacement and
+    ///   bootstraps this daemon back — while every other startup failure,
+    ///   including a corrupt ledger, still installs the fail-closed barrier.
+    /// - 4.8.0 → 4.9.0: consumed update transactions gained reachable
+    ///   terminal states. `/update/retire` now also archives a blocked,
+    ///   rolled-back, expired or abandoned-replacement attempt after the
+    ///   owner's verified Disconnect plus an on-disk component proof
+    ///   (original or signed target), and `--emergency-disarm` evaluates the
+    ///   same predicates after its verified release; the consumed high-water
+    ///   mark is never lowered. `reconcile` re-binds the successor grant to a
+    ///   freshly authenticated relaunch when the recorded successor is
+    ///   provably gone (different boot, or its audit token resolves to no
+    ///   live process), allocating a fresh successor generation without
+    ///   changing the proof phase. A 4.8.0 daemon keeps both dead ends.
+    /// - 4.9.0 → 4.15.0 (merge-train number; 4.10.0–4.14.0 skipped): startup
+    ///   restores PF right after reading the allowed user, before the socket
+    ///   server's other initialisation; any later startup failure installs
+    ///   the emergency block when protection is wanted (a requested stop
+    ///   stays clean); and the emergency block falls back to a Tono-owned
+    ///   main ruleset when /etc/pf.conf cannot be loaded.
+    /// - 4.15.0 → 4.16.0 (merge-train number): the helper
+    ///   holds its own `pfctl -E` enable reference (recorded, released on
+    ///   disarm) instead of enabling PF only when it was off, supervises PF
+    ///   liveness every ten seconds while armed and reinstalls it when it is
+    ///   not filtering, and adds the read-only `GET /killswitch/health`
+    ///   (`repairedSinceArm`) the connected app polls.
+    /// - 4.16.0 → 4.17.0 (merge-train number): the protected DNS snapshot records
+    ///   the network service ID next to its display name, and restore
+    ///   writes the original servers back by ID. A service renamed while
+    ///   protected used to be swept to automatic DNS with its snapshot
+    ///   deleted. When the recorded service no longer exists the snapshot is
+    ///   archived aside and `/dns/restore` adds `originalDNSRestored: false`;
+    ///   an enumeration without IDs keeps the snapshot and refuses release.
+    /// - 4.17.0 → 4.19.0 (merge-train number): PF drops DNS (53/853) to LAN
+    ///   and link-local ranges while a tunnel is up.
+    /// - 4.19.0 → 4.18.0 (merge-train number from the recorded mapping,
+    ///   although it merged after 4.19.0; the app compares helper versions
+    ///   only for equality): the owned sing-box config check refuses any
+    ///   object whose keys repeat after JSON decoding and Go-style case
+    ///   folding, and evaluates its allowlist on the folded keys the core
+    ///   itself binds. An older daemon validates the first of a repeated key
+    ///   while the core runs the last.
+    /// - 4.18.0 → 4.20.0 (merge-train number): PF DHCP permit sends only to the limited broadcast and
+    ///   the inbound reply permit keeps no state. An older daemon keeps the
+    ///   any-destination DHCP permit.
+    /// - 4.20.0 → 4.21.0 (merge-train number): `/helper/upgrade` checks the requesting bundle's seal
+    ///   and the candidate helper and core against the installer's Developer ID
+    ///   requirement. It refuses a helper that is not strictly newer than the
+    ///   running one, so older builds need the administrator install.
+    /// - 4.21.0 → 4.22.0 (merge-train number): the
+    ///   update ledger has a storage major (`schemaVersion`, absent = 1).
+    ///   Additive keys from a newer helper are ignored instead of reading as
+    ///   a corrupt ledger, and a higher major is refused as newer evidence.
+    /// - 4.22.0 → 4.41.0 (merge-train number): `CoreManager` no
+    ///   longer resolves the bound user's home directory when it is
+    ///   constructed, only when a start or sync validates the config
+    ///   directory. `--emergency-disarm` and `--emergency-reset` build one only
+    ///   to stop a stale core before releasing PF, so they now work after the
+    ///   bound macOS account was deleted. A 4.22.0 daemon's recovery commands
+    ///   fail there and leave PF fail-closed.
+    /// - 4.41.0 → 4.42.0 (merge-train number): `--emergency-reset`
+    ///   takes Tono's marked block back out of /etc/pf.conf and deletes
+    ///   /etc/pf.conf.tono-backup and /etc/hosts.tono-backup once PF is
+    ///   released, keeping every line outside the markers. A 4.41.0 reset
+    ///   leaves the hook and both backups behind.
+    /// - 4.42.0 → 4.43.0 (merge-train number): at every start,
+    ///   after executor recovery, the daemon checks whether Tono was removed —
+    ///   no running Tono client (by the client signing requirement), no Tono
+    ///   app in /Applications or the bound user's ~/Applications (by the
+    ///   registered name or by bundle identifier; a bundle whose Info.plist
+    ///   cannot be read counts as Tono) and no unfinished update attempt.
+    ///   Then it performs the `--emergency-reset` release and removal itself
+    ///   and unloads its job, instead of re-arming PF at every boot with no
+    ///   app left to release it.
+    ///   A 4.42.0 daemon keeps a Mac offline after Tono.app is deleted.
+    /// - 4.43.0 → 4.44.0 (merge-train number): `--emergency-reset`
+    ///   (and the start-time release after Tono.app was removed, which shares
+    ///   its removal step) also deletes /var/run/tono-core/service.sock. The
+    ///   socket is owned by the account the helper served, and the app reads
+    ///   that owner to refuse another account by name; a 4.43.0 reset leaves
+    ///   it until reboot.
+    /// - 4.44.0 → 4.45.0: PF renders the reviewed-bundle permit
+    ///   (`tono-bundle`) only while a tunnel interface is armed; a tunnel-less
+    ///   arm that asks for it gets no permit instead of root web-port egress
+    ///   on the physical interface. An older daemon renders it on the
+    ///   connect's first arm, before the TUN exists.
+    /// - 4.45.0 → 4.46.0: `/core/sync`, `/core/stop`, and the idle loop once
+    ///   the Core has exited, take the reviewed-bundle permit out of the loaded anchor
+    ///   without a state flush while the Core has no utun; the app's next arm
+    ///   with the flag restores it once the tunnel exists; if that fails,
+    ///   `/core/sync` fails with the old Core still running. An older daemon
+    ///   keeps the permit loaded through every Core restart.
+    /// - 4.46.0 → 4.47.0: a DNS release no app reply carries (native update
+    ///   preparation, `--emergency-disarm`, `--emergency-reset`) records an
+    ///   original that had no service to go back to; the next `/dns/restore`
+    ///   reply reports `originalDNSRestored: false` once, and the emergency
+    ///   commands print it. When the PF enable-reference record cannot be
+    ///   written, the helper holds PF with the kernel's one anonymous
+    ///   `pfctl -e` reference and releases the new token. A 4.46.0 daemon
+    ///   drops that DNS report and, restarting in a loop, leaks one token per
+    ///   start.
+    /// - 4.47.0 → 4.48.0: every command the helper runs (`pfctl`, the
+    ///   relay-map `curl`) has a 15 s deadline, 3 s for a read-only `pfctl`
+    ///   query; past it the child gets SIGTERM, then SIGKILL, and the call
+    ///   fails like any other command failure. A query with no answer is never
+    ///   read as "no": it stops the chain, and nothing is released, forgotten
+    ///   or disabled on it. A 4.47.0 daemon waits on a wedged `pfctl` forever,
+    ///   holding its single request thread and with it `/core/stop`.
+    /// - 4.48.0 → 4.49.0: a `pfctl -E` killed at its deadline is settled only
+    ///   once that child has exited, and claims a listed token only when the
+    ///   token's age places it inside the child's lifetime, it was not listed
+    ///   before the spawn, and the child's exit was reported promptly. When
+    ///   the reference record cannot be written and the release of the new
+    ///   token gives no answer, the token stays in memory for disarm, as does
+    ///   a token a newer record replaced whose release gives no answer (the
+    ///   periodic check retries that one). A 4.48.0 daemon can
+    ///   claim, and at disarm release, another program's token under a reused
+    ///   PID, and forgets both unanswered tokens.
+    /// - 4.49.0 → 4.50.0: a daemon start (every boot), the `status()` heal
+    ///   and the supervisor repair render only the saved tunnel interfaces
+    ///   that exist at that moment, so a reinstall without a TUN renders the
+    ///   no-tunnel form without the Continuity (awdl0, llw0, bridge100), mDNS,
+    ///   LAN, link-local, DHCP and NDP passes. The saved state is not
+    ///   rewritten. A 4.49.0 daemon loads those passes at every boot, before
+    ///   login, from the last session's utun. The six Continuity passes on
+    ///   awdl0, llw0 and bridge100 keep no state (`no state` instead of
+    ///   `keep state (if-bound)`); the allow set is unchanged.
+    /// - 4.50.0 → 4.51.0: helper brick fixes. A daemon start that fails on
+    ///   the update store installs the emergency barrier only where Kill
+    ///   Switch intent is saved, decided under the update lock when the store
+    ///   opened. `/etc/hosts` pins are best-effort at arm, heal, supervisor
+    ///   repair and start, and are removed after the release instead of
+    ///   before the flush, never failing it; an unsafe hosts file is never
+    ///   rewritten, and a FIFO there no longer hangs a read. A release reloads
+    ///   a `/etc/pf.conf` the emergency block displaced when it carries
+    ///   Tono's hook, without writing it. iPhone/iPad wrapper apps (no
+    ///   `Contents`) are not Tono in the removal check. Update verification
+    ///   refuses only a loopback proxy on the Core's mixed port (any loopback
+    ///   proxy while that port is unknown) and an exact `[127.0.0.1]`
+    ///   resolver. A 4.50.0 daemon blocks a never-connected Mac at every boot
+    ///   when the store cannot open, fails every arm and release on an
+    ///   unusable hosts file, leaves the main ruleset displaced after a
+    ///   release, keeps a removed Tono's protection when any wrapper app is
+    ///   installed, and blocks native updates on other products' loopback
+    ///   proxies, proxy-less VPN services and mixed DNS lists.
+    /// - 4.51.0 → 4.52.0: restore and service handoff inspect the snapshot's
+    ///   stable owner before writing old DNS. A newer external DNS choice is
+    ///   retained and the snapshot archived, not reported as restored. Missing
+    ///   identity or read failure still refuses release.
+    /// - 4.52.0 → 4.52.1: the hold path keeps an unrecorded PF enable token
+    ///   when its listing query gives no answer (only a full listing proves
+    ///   it gone), instead of clearing the only handle to a reference that
+    ///   may still be held; settling a past-deadline `pfctl -E` throws on a
+    ///   non-listing answer instead of claiming the child took none. A 4.52.0
+    ///   daemon can leave a token held past disarm with PF enabled.
+    /// - 4.52.1 → 4.52.2: `/etc/pf.conf` only declares the kill-switch anchor.
+    ///   Boot, including Safe Mode, no longer loads the rule file. The helper
+    ///   loads those rules in one `pfctl -f` of a temporary copy while a Core
+    ///   is running. Startup, a corrupt update ledger, and a Core that stays
+    ///   down release a leftover kill switch and restore a saved DNS snapshot.
+    ///   They do not install a block.
+    /// - 4.52.2 → 4.52.3: a failed arm commit and a failed sleep barrier
+    ///   release the kill switch instead of installing an all-block. Startup
+    ///   failure and a failed update rollback do the same, without needing
+    ///   the allowed uid.
+    /// - 4.52.3 → 4.52.4: `/killswitch/status` no longer loads PF rules.
+    ///   The idle supervisor reinstalls only while the Core is running.
+    ///   If the app is removed while the helper stays up, the existing
+    ///   removal release runs without waiting for the next start. Launch
+    ///   does not reinstall from the state file; a Core that is not running
+    ///   is released immediately and a saved DNS snapshot is restored.
+    /// - 4.52.4 → 4.52.5: `--emergency-disarm` and `--emergency-reset`
+    ///   release PF when the update ledger cannot be read. They keep the
+    ///   ledger bytes and do not remove the install in that case. A DNS
+    ///   restore failure no longer skips the PF release.
+    /// - 4.52.5 → 4.52.6: a DNS snapshot restores only its own service.
+    ///   Another service left on exactly 127.0.0.1 is not cleared.
+    ///   Update disconnect still releases PF when prepare cannot prove a
+    ///   foreign loopback proxy or resolver is Tono's. The lifecycle
+    ///   read-failure self-test expects that owner-only restore.
+    /// - 4.52.6 → 4.52.7: an update ledger whose receipt contains a key this
+    ///   build does not know is refused and kept on disk. Additive keys
+    ///   outside the receipt are still tolerated.
+    /// - 4.52.7 → 4.52.8: after that full release, a crash or hang may add a
+    ///   secondary blackhole route for Anthropic's inbound prefixes and
+    ///   `/etc/resolver` files for first-party AI suffixes. Arm, disarm, and
+    ///   emergency recovery remove them. The commands cannot name a default
+    ///   route. A failure leaves the original network open.
+    /// - 4.52.8 → 4.52.9: a release whose placeholder rule file cannot be
+    ///   written still flushes the anchor and removes the intent, and then
+    ///   keeps the standalone emergency main instead of reloading a legacy
+    ///   pf.conf that would load the stale rules back. A PF repair records
+    ///   repairedSinceArm before it can replace kernel rules, so a repair that
+    ///   throws after loading still makes the app re-arm.
+    /// - 4.52.9 → 4.52.10: a failed arm or sleep barrier flushes the installed
+    ///   anchor only after a `pfctl` load that was accepted or never answered.
+    ///   A failure before that load, or a load pfctl rejected, leaves the
+    ///   previous rules in the kernel. `/killswitch/health` omits `live` when
+    ///   pfctl does not answer, and reports down only when a second read
+    ///   agrees. A 4.52.7 daemon still drops a live ruleset on `pfctl -nf`
+    ///   failure and treats one unread health sample as "not filtering".
+    /// - 4.52.10 → 4.52.11: one protected-DNS server-count cap (32) for save,
+    ///   load and write; enable refuses over-cap lists before any change (MAC-
+    ///   DNS-SNAPSHOT-OVER-8).
+    /// - 4.52.11 → 4.52.12: the watchdog releases a bootstrap-only block whose
+    ///   recorded app owner died before committing the tunnel (MAC-ORPHAN-
+    ///   BOOTSTRAP-PF).
+    /// - 4.52.12 → 4.52.13: update-failure and unreadable-ledger emergency
+    ///   release restore a saved dead-loopback DNS snapshot and apply the
+    ///   secondary AI sinkhole after clearing PF intent (same class as a
+    ///   crash/hang release). Previously `releaseInstalledBlock` alone left
+    ///   DNS on 127.0.0.1 and skipped SelectiveFailOpen.
+    /// - 4.52.13 → 4.52.14: DNS writes refuse another preferences
+    ///   writer's lock promptly so helper requests and recovery can continue.
+    /// - 4.52.14 → 4.52.15: DNS restore and service handoff retry
+    ///   Apply before retiring originals already committed to disk.
+    /// - 4.52.15 → 4.52.16: Automatic failed commits and orphaned bootstrap releases preserve the secondary AI hold after opening general traffic.
+    /// - 4.52.16 → 4.52.17: exhausted App recovery has an AI-preserving release intent.
+    /// - 4.52.17 → 4.52.18: resolved update retirement keeps its active
+    ///   receipt until executor-job cleanup succeeds, preserving retry ownership.
+    /// - 4.52.18 → 4.52.19: silent upgrade copies a regular file from a
+    ///   non-blocking fd and does not hold the update lock across that copy.
+    ///   Stale-core signals re-check path and uid. The installed update floor
+    ///   is the bytes read before and after the signature check. A `pfctl -X`
+    ///   that leaves the token listed keeps the record. A new physical NIC
+    ///   reloads the LAN DNS block without flushing states. Protected DNS
+    ///   status follows `serviceID`.
+    /// - 4.52.19 → 4.52.20: selective recovery holds dedicated DashScope/Qwen
+    ///   model API namespaces while general Alibaba Cloud remains available.
+    /// - 4.52.20 → 4.52.21: selective AI blackhole routes include Darwin
+    ///   required loopback gateways; native dry-run regression checks routing messages.
+    /// - 4.52.22 → 4.52.23: pending-update automatic failure release retains the AI hold.
+    /// - 4.52.27 → 4.52.28: the desktop update contract may name an optional
+    ///   sing-box digest. The helper must be rebuilt to accept that field.
+    static let current = "4.52.28"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS

@@ -53,6 +53,13 @@ pub async fn tono_set_periodic_telemetry_enabled(
     Ok(())
 }
 
+/// Whether this is an internal candidate build, which reports classified
+/// connect failures without the timeline opt-in. The settings page says so.
+#[tauri::command]
+pub async fn tono_internal_build() -> Result<bool, String> {
+    Ok(crate::tono::audit::internal_build())
+}
+
 /// Whether the raw audit log is uploaded.
 #[tauri::command]
 pub async fn tono_network_log_upload_enabled(
@@ -102,6 +109,22 @@ pub async fn tono_audit_log_path(state: tauri::State<'_, Arc<TonoState>>) -> Res
 /// everything else is already broken.
 const DIAGNOSTICS_PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
 
+// A timeout cannot stop a native syscall. Retain the permit inside the blocking worker,
+// so repeated checks never accumulate more OS walks behind a stalled one.
+static SYSTEM_INFO_PROBE: Lazy<Arc<tokio::sync::Semaphore>> =
+    Lazy::new(|| Arc::new(tokio::sync::Semaphore::new(1)));
+
+async fn system_info_probe(
+    gate: Arc<tokio::sync::Semaphore>,
+    provider: impl FnOnce() -> (String, Vec<String>) + Send + 'static,
+) -> Option<(String, Vec<String>)> {
+    let permit = gate.try_acquire_owned().ok()?;
+    tokio::time::timeout(DIAGNOSTICS_PROBE_TIMEOUT, tokio::task::spawn_blocking(move || {
+        let _permit = permit;
+        provider()
+    })).await.ok()?.ok()
+}
+
 /// The receipt the intake returns.
 ///
 /// TS: `interface TonoDiagnosticsReceipt { referenceCode: string; receivedAt: number | null }`
@@ -115,7 +138,7 @@ pub struct TonoDiagnosticsReceipt {
 /// Assemble the whitelisted report (see `tono::diagnostics` for the privacy
 /// contract). Shared by the preview command and the upload command so the
 /// text the user is shown and the payload that is sent cannot drift.
-async fn collect_diagnostics_report(
+pub(super) async fn collect_diagnostics_report(
     state: &Arc<TonoState>,
     app: &AppHandle,
 ) -> crate::tono::diagnostics::DiagnosticsReport {
@@ -131,14 +154,14 @@ async fn collect_diagnostics_report(
         .ok()
         .and_then(Result::ok);
     // sysinfo's adapter walk and OS query are blocking syscalls.
-    let (os_version, adapters) = AsyncHandler::spawn_blocking(|| {
+    let (os_version, adapters) = system_info_probe(Arc::clone(&SYSTEM_INFO_PROBE), || {
         (
             tauri_plugin_tono_sysinfo::os_long_version(),
             tauri_plugin_tono_sysinfo::list_network_interfaces(),
         )
     })
     .await
-    .unwrap_or_else(|_| ("Unknown".to_string(), Vec::new()));
+    .unwrap_or_else(|| ("Unknown".to_string(), Vec::new()));
 
     let audit_log_path = state.audit().log_path().to_path_buf();
     let service_log_path = crate::tono::diagnostics::service_log_path();
@@ -154,19 +177,7 @@ async fn collect_diagnostics_report(
     let revision = inner.catalog_tracker.current_revision();
     // The live secret values, handed to the scrubber to be *subtracted* from
     // free text (never emitted). Structural rules cover what is not here.
-    let mut known_secrets: Vec<String> = Vec::new();
-    if let Some(secret) = &inner.controller_secret {
-        known_secrets.push(secret.clone());
-    }
-    for node in &inner.nodes {
-        known_secrets.push(node.uuid.clone());
-        known_secrets.push(node.reality_public_key.clone());
-        known_secrets.push(node.reality_short_id.clone());
-        known_secrets.push(node.server.to_string());
-    }
-    if let Ok(Some(token)) = inner.credentials.refresh_token() {
-        known_secrets.push(token);
-    }
+    let known_secrets = crate::tono::diagnostics::known_secrets(&inner);
     crate::tono::diagnostics::build_report(&crate::tono::diagnostics::DiagnosticsSources {
         app_version: &app_version,
         os_version: &os_version,
@@ -180,6 +191,7 @@ async fn collect_diagnostics_report(
         dns: dns.as_ref(),
         failed_stage: inner.failed_stage,
         connect_error: inner.connect_error.as_deref(),
+        last_failure: inner.attempt_history.last_failure.as_ref(),
         retry_attempt: inner.retry_attempt,
         steps: &steps,
         adapter_names: &adapters,
@@ -218,6 +230,11 @@ pub struct LocalDiagnosticsReport {
 struct LocalDiagnosticsEvidence {
     status: &'static str,
     app_build: Option<&'static str>,
+    build_provenance: &'static str,
+    account_scope: Option<String>,
+    /// Fresh read of Service's committed watchdog evidence, not App's cached intent.
+    protection_live: Option<bool>,
+    protection_wanted: Option<bool>,
     expected_core_version: Option<String>,
     reported_core_version: Option<String>,
     reported_exit_protocol: Option<&'static str>,
@@ -230,7 +247,7 @@ struct LocalDiagnosticsEvidence {
     core_log: crate::tono::local_evidence::CoreLogEvidence,
 }
 
-/// Explicit Copy details only. Kept separate from the upload contract and normal
+/// Explicit local health check / Copy details. Kept separate from the upload contract and normal
 /// page refresh: raw logs never leave Rust, and no extra cloud disclosure occurs.
 #[tauri::command]
 pub async fn tono_local_diagnostics_report(
@@ -242,12 +259,17 @@ pub async fn tono_local_diagnostics_report(
         inner.connect_error_at_ms, inner.catalog_tracker.current_revision(),
         inner.selected_node.clone(), inner.retry_attempt,
         inner.attempt_history.current.as_ref().map(|attempt| attempt.id.clone()),
+        inner.sign_in_generation,
     );
     let (before, controller) = {
         let inner = state.lock().await;
         (identity(&inner), inner.controller_port.zip(inner.controller_secret.clone()))
     };
     let report = collect_diagnostics_report(state.inner(), &app).await;
+    // Windows status does not heal or mutate WFP. Failure stays unknown; do not fall
+    // back to inner.kill_switch, which may predate a Service restart or stalled watchdog.
+    let protection = tokio::time::timeout(DIAGNOSTICS_PROBE_TIMEOUT, service::tono_kill_switch_status())
+        .await.ok().and_then(Result::ok);
     let core_log = crate::tono::local_evidence::collect_core_log().await;
     // Authenticated owned-controller response, not a measurement of the executable hash.
     // Do not use the UI plugin: its context is not installed until Connected.
@@ -292,6 +314,10 @@ pub async fn tono_local_diagnostics_report(
             status: "collected",
             app_build: option_env!("GITHUB_SHA").filter(|value| value.len() == 40
                 && value.bytes().all(|b| b.is_ascii_hexdigit())),
+            build_provenance: crate::tono::support_reports::build_provenance(option_env!("GITHUB_WORKFLOW"), cfg!(debug_assertions)),
+            account_scope: crate::tono::route_preferences::scope_of(&inner),
+            protection_live: protection.as_ref().map(|value| value.live),
+            protection_wanted: protection.as_ref().map(|value| value.wanted),
             expected_core_version,
             reported_core_version,
             reported_exit_protocol,
@@ -314,21 +340,24 @@ pub async fn tono_local_diagnostics_report(
 /// behind an explicit confirmation in the UI; nothing in the app calls it on
 /// a timer, on a crash, or on a failed connect.
 ///
-/// The report is rebuilt here rather than accepted from the WebView: the
-/// whitelist has to be enforced where the payload is constructed, or a
-/// compromised renderer could post whatever it liked to the account's
-/// diagnostics stream.
+/// The preview body stays in Rust. The WebView sends only its ID, never a payload.
 #[tauri::command]
 pub async fn tono_upload_diagnostics(
     state: tauri::State<'_, Arc<TonoState>>,
-    app: AppHandle,
+    preview_id: String,
 ) -> Result<TonoDiagnosticsReceipt, String> {
-    let client = {
+    let (client, identity, report) = {
         let inner = state.lock().await;
-        inner.client.clone()
+        if inner.account_close.is_some() {
+            return Err("account sign-out is still reconciling".to_string());
+        }
+        let identity = inner.client.diagnostics_log_identity().await;
+        let report = state.support_reports.lock().take(
+            &preview_id, (inner.sign_in_generation, identity), std::time::Instant::now(),
+        )?;
+        (inner.client.clone(), identity, report)
     };
-    let report = collect_diagnostics_report(state.inner(), &app).await;
-    match client.upload_diagnostics_report(&report).await {
+    match client.upload_diagnostics_report_for_identity(&report, identity).await {
         Ok(receipt) => {
             state.audit().log(AuditEvent::DiagnosticsUploaded {
                 reference: receipt.reference_code.clone(),
@@ -363,13 +392,9 @@ pub async fn tono_upload_diagnostics(
 /// and the tunnel provides its own reachability, so one attempt from a working network is
 /// enough. That is what the mapped message says.
 pub(super) fn auth_error(err: &ApiError) -> String {
-    let prefix = match err {
-        ApiError::Transport { .. } => "TONO_AUTH_UNREACHABLE",
-        ApiError::RateLimited => "TONO_AUTH_RATE_LIMITED",
-        ApiError::DeviceLimit => "TONO_AUTH_DEVICE_LIMIT",
-        ApiError::Unauthorized => "TONO_AUTH_UNAUTHORIZED",
-        _ => return err.to_string(),
-    };
+    // The prefix is the support code. Detail stays on the string for telemetry
+    // and Copy-for-support; the screen maps the code to a short sentence.
+    let prefix = tono_core::auth_support_prefix(err);
     format!("{prefix}: {err}")
 }
 
@@ -388,4 +413,54 @@ fn diagnostics_upload_error(err: &ApiError) -> String {
         _ => "TONO_DIAG_FAILED",
     };
     format!("{prefix}: {err}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// #588: a certificate the system clock cannot date is named as the clock, not as an
+    /// unreachable server. The chain is the one hyper-rustls hands reqwest: its
+    /// `io::Error::other` around tokio-rustls's `io::Error` around the rustls error.
+    #[test]
+    fn a_certificate_the_clock_cannot_date_is_named_as_the_clock() {
+        let handshake = std::io::Error::other(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            rustls::Error::InvalidCertificate(rustls::CertificateError::Expired),
+        ));
+        let message = crate::tono::transport::mark_clock_skew(
+            &handshake,
+            "connect: error sending request".to_string(),
+        );
+        let shown = auth_error(&ApiError::Transport {
+            kind: tono_core::auth::TransportKind::Connect,
+            message,
+        });
+        assert!(shown.starts_with("TONO_CLOCK_SKEW: "), "{shown}");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn stalled_system_probe_times_out_without_queueing_another_native_walk() {
+        let gate = Arc::new(tokio::sync::Semaphore::new(1));
+        let (release, held) = std::sync::mpsc::channel();
+        let (started, entered) = tokio::sync::oneshot::channel();
+        let worker_gate = gate.clone();
+        let probe = tokio::spawn(system_info_probe(worker_gate, move || {
+            let _ = started.send(());
+            let _ = held.recv();
+            ("late OS".into(), vec!["late adapter".into()])
+        }));
+        entered.await.unwrap();
+        tokio::time::advance(DIAGNOSTICS_PROBE_TIMEOUT).await;
+        let timed_out = probe.await.unwrap();
+        let repeated = system_info_probe(gate.clone(), || panic!("must not queue a second walk")).await;
+        // Unblock even if an assertion fails, so the test runtime can shut down.
+        release.send(()).unwrap();
+        assert!(timed_out.is_none());
+        assert!(repeated.is_none());
+        let permit = gate.acquire().await.unwrap();
+        drop(permit);
+        tokio::time::resume();
+        assert_eq!(system_info_probe(gate, || ("fresh OS".into(), vec![])).await.unwrap().0, "fresh OS");
+    }
 }

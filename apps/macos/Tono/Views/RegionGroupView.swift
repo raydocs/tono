@@ -13,6 +13,20 @@ struct RegionGroupView: View {
         GridItem(.flexible(), spacing: 12),
     ]
 
+    private var regionFlagEmoji: String? {
+        if let emoji = UnicodeCountryFlag.emoji(for: region.id) {
+            return emoji
+        }
+        if let emoji = UnicodeCountryFlag.emoji(for: region.name) {
+            return emoji
+        }
+        let codes = Set(region.nodes.map { nodeRegionCode(flag: $0.flag, name: $0.name) })
+        if codes.count == 1, let singleCode = codes.first {
+            return UnicodeCountryFlag.emoji(for: singleCode)
+        }
+        return nil
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             // Region header — large hit area
@@ -22,6 +36,11 @@ struct RegionGroupView: View {
                         .font(.system(size: 10, weight: .bold))
                         .foregroundStyle(.secondary)
                         .rotationEffect(.degrees(region.isExpanded ? 90 : 0))
+
+                    if let flagEmoji = regionFlagEmoji {
+                        Text(flagEmoji)
+                            .font(.system(size: 11))
+                    }
 
                     Text(LocalizedStringKey(region.name))
                         .font(.system(size: 11, weight: .semibold))

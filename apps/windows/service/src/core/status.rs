@@ -191,6 +191,8 @@ mod tests {
             key: uid.to_string(),
             identity: OwnerIdentity::Unix { uid, gid: 20 },
             app_data_root: std::env::temp_dir(),
+            peer_pid: None,
+            peer_session_id: None,
         }
     }
 

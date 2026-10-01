@@ -11,12 +11,12 @@
  */
 
 export const WINDOWS_RESOURCE_ALLOWLIST = Object.freeze([
-  'enableLoopback.exe',
   'tono-service.exe',
   'tono-service-install.exe',
   'tono-service-uninstall.exe',
   'core-sha256.txt',
   'core-identity.json',
+  'sing-box-sha256.txt',
 ])
 
 export const WINDOWS_RESOURCE_BUNDLE_ENTRIES = Object.freeze(
@@ -24,6 +24,22 @@ export const WINDOWS_RESOURCE_BUNDLE_ENTRIES = Object.freeze(
 )
 
 export const STABLE_EXTERNAL_BIN = 'sidecar/tono-core'
+
+/** Fourth install member. Tauri names the file `sing-box-<target>.exe`. */
+export const SING_BOX_EXTERNAL_BIN = 'sidecar/sing-box'
+
+export const STABLE_EXTERNAL_BINS = Object.freeze([
+  STABLE_EXTERNAL_BIN,
+  SING_BOX_EXTERNAL_BIN,
+])
+
+/**
+ * Windows sing-box v1.15.0-alpha.9-tono-a9.1. Same pin as
+ * tooling/scripts/sing-box/manifests/alpha9/windows-amd64-v2.json.
+ * A different digest is not this product's core.
+ */
+export const WINDOWS_SING_BOX_SHA256 =
+  'b2e6902ee75d9c4af79df28a61ded67afc4283fc83a44dee8896f3737a4ed027'
 
 export const FORBIDDEN_PAYLOAD_NAME_PATTERNS = Object.freeze([
   /verge-mihomo/i,
@@ -58,6 +74,7 @@ export const KNOWN_LEGACY_WINDOWS_PAYLOAD = Object.freeze([
   'resources/Country.mmdb',
   'resources/geoip.dat',
   'resources/geosite.dat',
+  'resources/enableLoopback.exe',
 ])
 
 export const WINDOWS_RUNTIME_REPAIR_ARTIFACTS = Object.freeze([
@@ -65,6 +82,10 @@ export const WINDOWS_RUNTIME_REPAIR_ARTIFACTS = Object.freeze([
   'tono-core.exe.rollback',
   'tono-core.exe.restore',
   'tono-core.exe.publish',
+  'sing-box.exe.next',
+  'sing-box.exe.rollback',
+  'sing-box.exe.restore',
+  'sing-box.exe.publish',
 ])
 
 // These inherited Clash Verge commands are not used by any route in the Tono
@@ -285,8 +306,79 @@ export function validateNsisAutomaticUpgradeFlow(source) {
     return 'a registry-less existing binary must block instead of being treated as a clean install'
   }
 
-  const installSection =
+  let installSection =
     text.match(/Section Install\b([\s\S]*?)SectionEnd/)?.[1] ?? ''
+  // v1 has a separate *private extraction* branch, not a second live installer.
+  // Validate its bounded entry before excluding it from the legacy/manual .next
+  // assertions below. This source check supplements native permission tests;
+  // it is not evidence that NSIS or WFP has executed.
+  const privateExtraction = installSection.match(
+    /^\s*\$\{If\} \$TonoPrivateUnpack = 1\s+SetOutPath \$INSTDIR([\s\S]*?)\s+Return\s+\$\{EndIf\}/,
+  )
+  const unpackGate = onInit.indexOf('--update-unpack-gate "$EXEPATH"')
+  const privateRoot = onInit.indexOf('StrCpy $INSTDIR "$EXEDIR\\payload"')
+  const manualGate = onInit.indexOf('--manual-update-gate')
+  if (
+    !privateExtraction ||
+    unpackGate < 0 ||
+    privateRoot <= unpackGate ||
+    manualGate <= privateRoot ||
+    !onInit.slice(unpackGate, privateRoot).includes('Abort ') ||
+    !onInit.slice(manualGate).includes('Abort ') ||
+    !onInit.slice(privateRoot, manualGate).includes('Return')
+  ) {
+    return 'v1 private extraction and manual mutation require separate native gates in .onInit'
+  }
+  const privateLines = privateExtraction[1]
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line && !line.startsWith(';'))
+  if (
+    privateLines.some(
+      (line) =>
+        !/^(?:File \/a |CreateDirectory "\$INSTDIR\\|\{\{#each (?:resources_dirs|resources|binaries)\}\}|\{\{\/each\}\}|ClearErrors$|Rename "\$INSTDIR\\(?![^"]*\.\.)[^"]+" "\$INSTDIR\\(?![^"]*\.\.)[^"]+"$|\$\{If\} \$\{Errors\}$|Abort "|\$\{EndIf\}$)/.test(
+          line,
+        ),
+    )
+  ) {
+    return 'v1 private extraction must contain only private payload files, never live mutation'
+  }
+  // The payload gate admits the GUI and Mihomo only as staged `.next` members, so the private
+  // branch must extract those names too and rename them inside the private payload directory.
+  const privateText = privateLines.join('\n')
+  const privateGuiLines = privateLines.filter((line) =>
+    line.includes('MAINBINARYSRCPATH'),
+  )
+  if (
+    /\/oname=(?:\$\{MAINBINARYNAME\}\.exe|\{\{this\}\})"/.test(privateText) ||
+    privateGuiLines.length !== 1 ||
+    privateGuiLines[0] !==
+      'File /a "/oname=${MAINBINARYNAME}.exe.next" "${MAINBINARYSRCPATH}"' ||
+    !/ClearErrors\nRename "\$INSTDIR\\\$\{MAINBINARYNAME\}\.exe\.next" "\$INSTDIR\\\$\{MAINBINARYNAME\}\.exe"\n\$\{If\} \$\{Errors\}\nAbort "/.test(
+      privateText,
+    ) ||
+    // The binaries loop must be exactly the staged extract-and-rename, with no other member.
+    privateText.match(/\{\{#each binaries\}\}\n([\s\S]*?)\n\{\{\/each\}\}/)?.[1]?.replace(/^Abort "[^\n]*$/m, 'Abort') !==
+      [
+        'File /a "/oname={{this}}.next" "{{no-escape @key}}"',
+        'ClearErrors',
+        'Rename "$INSTDIR\\\\{{this}}.next" "$INSTDIR\\\\{{this}}"',
+        '${If} ${Errors}',
+        'Abort',
+        '${EndIf}',
+      ].join('\n')
+  ) {
+    return 'v1 private extraction must stage the GUI and Mihomo under .next names and abort if the private rename fails'
+  }
+  const uninstallInit =
+    text.match(/Function un\.onInit\b([\s\S]*?)FunctionEnd/)?.[1] ?? ''
+  if (
+    !uninstallInit.includes('--manual-update-gate') ||
+    !uninstallInit.includes('Abort ')
+  ) {
+    return 'uninstall must acquire the native gate before hooks or App termination'
+  }
+  installSection = installSection.slice(privateExtraction[0].length)
   if (/\$APPDATA/i.test(installSection)) {
     return 'the install/upgrade section must not delete Tono application data'
   }
@@ -526,8 +618,8 @@ export function validateNsisAutomaticUpgradeFlow(source) {
 
 /**
  * Keep the privileged helper and the NSIS staging contract in lockstep. A protocol-revision
- * upgrade is safe only when the stopped-Service transaction owns all three live executables:
- * Service, Mihomo, and the GUI. This source gate complements the helper's file-level unit tests;
+ * upgrade is safe only when the stopped-Service transaction owns Service, Mihomo,
+ * sing-box (when the alpha.9 pin is present) and the GUI. This source gate complements the helper's file-level unit tests;
  * it cannot replace an elevated failure-injection upgrade test on a Windows VM.
  *
  * @param {string} source service/src/bin/install_service.rs source
@@ -549,10 +641,13 @@ export function validateWindowsReplacementHelperSource(source) {
   }
 
   const dispatch = text.match(
-    /if let Some\(\(runtime_candidate, app_candidate\)\)[\s\S]*?return replace_existing_service_and_runtime\(([\s\S]*?)\);/,
+    /if let Some\(\(runtime_candidate, app_candidate, sing_box_candidates\)\)[\s\S]*?return replace_existing_service_and_runtime\(([\s\S]*?)\);/,
   )?.[1]
-  if (!dispatch || !/runtime_candidate,\s*app_candidate,/.test(dispatch)) {
-    return 'the replace-runtime dispatch must pass both Mihomo and GUI candidates into the transaction'
+  if (
+    !dispatch ||
+    !/runtime_candidate,\s*app_candidate,\s*sing_box_candidates,/.test(dispatch)
+  ) {
+    return 'the replace-runtime dispatch must pass both Mihomo and GUI candidates, and the sing-box candidates, into the transaction'
   }
 
   const transaction = text.match(
@@ -569,6 +664,9 @@ export function validateWindowsReplacementHelperSource(source) {
     'app_replacement.publish()?;',
     'app_replacement.is_old()',
     'app_replacement.is_new()',
+    'sing_box_candidates: Vec<InstalledBinaryCandidate>',
+    'sing_box_replacements.iter().all(|replacement| replacement.is_old())',
+    'sing_box_replacements.iter().all(|replacement| replacement.is_new())',
   ]) {
     if (!transaction.includes(snippet)) {
       return `the coordinated replacement helper omits GUI transaction step: ${snippet}`
@@ -580,13 +678,16 @@ export function validateWindowsReplacementHelperSource(source) {
     return 'both old-generation rollback and new-generation convergence must include the GUI'
   }
   const appCleanupAttempts =
-    transaction.match(/app_replacement\.cleanup\(\);/g)?.length ?? 0
+    transaction.match(/app_replacement\.cleanup(?:\(\)|_with_staged_retained\([^)]*\));/g)?.length ?? 0
   if (appCleanupAttempts < 2) {
     return 'both successful commit and successful rollback must clean GUI transaction artifacts'
   }
 
   const runtimePublishAt = transaction.indexOf(
     'runtime_replacement.publish()?;',
+  )
+  const singBoxPublishAt = transaction.indexOf(
+    'for replacement in &mut sing_box_replacements',
   )
   const servicePublishAt = transaction.indexOf(
     'service_replacement.publish()?;',
@@ -611,6 +712,8 @@ export function validateWindowsReplacementHelperSource(source) {
     recoverySuppressedAt < 0 ||
     runtimePublishAt < 0 ||
     servicePublishAt <= runtimePublishAt ||
+    singBoxPublishAt <= runtimePublishAt ||
+    servicePublishAt <= singBoxPublishAt ||
     recoverySuppressedAt >= runtimePublishAt ||
     serviceStartAt <= servicePublishAt ||
     readinessAt <= serviceStartAt ||
@@ -710,14 +813,28 @@ export function validateTlsPolicySources(sources) {
  * @returns {string | null} error message, or null when valid
  */
 export function validateExternalBin(externalBin) {
-  if (!Array.isArray(externalBin) || externalBin.length !== 1) {
-    return `bundle.externalBin must be exactly one stable sidecar entry, got: ${JSON.stringify(externalBin)}`
+  if (
+    !Array.isArray(externalBin) ||
+    externalBin.length !== STABLE_EXTERNAL_BINS.length
+  ) {
+    return `bundle.externalBin must be exactly the stable Mihomo and pinned sing-box sidecars, got: ${JSON.stringify(externalBin)}`
   }
   if (externalBin.some((entry) => String(entry).includes('alpha'))) {
     return 'release config still bundles the unaudited alpha Mihomo sidecar'
   }
-  if (externalBin[0] !== STABLE_EXTERNAL_BIN) {
-    return `bundle.externalBin[0] must be "${STABLE_EXTERNAL_BIN}", got: ${externalBin[0]}`
+  for (let index = 0; index < STABLE_EXTERNAL_BINS.length; index += 1) {
+    if (externalBin[index] !== STABLE_EXTERNAL_BINS[index]) {
+      return `bundle.externalBin[${index}] must be "${STABLE_EXTERNAL_BINS[index]}", got: ${externalBin[index]}`
+    }
+  }
+  return null
+}
+
+/** @param {unknown} digest @returns {string | null} */
+export function validateSingBoxDigest(digest) {
+  const normalized = String(digest ?? '').trim().toLowerCase()
+  if (normalized !== WINDOWS_SING_BOX_SHA256) {
+    return `sing-box digest ${normalized || '(empty)'} is not the pinned alpha.9 digest ${WINDOWS_SING_BOX_SHA256}`
   }
   return null
 }
@@ -819,6 +936,20 @@ export function validatePayloadEntries(entries) {
   if (stagedMihomo.length !== 1) {
     return `installer payload is missing stable Tono Core staging contract (expected exactly one tono-core.exe.next, found ${stagedMihomo.length})`
   }
+  const stagedSingBox = bases.filter((base) =>
+    /^sing-box\.exe\.next$/i.test(base),
+  )
+  if (stagedSingBox.length !== 1) {
+    return `installer payload is missing pinned sing-box staging contract (expected exactly one sing-box.exe.next, found ${stagedSingBox.length})`
+  }
+  const unexpectedSingBox = bases.filter(
+    (base) =>
+      /^sing-box\.exe(?:\..*)?$/i.test(base) &&
+      !/^sing-box\.exe\.next$/i.test(base),
+  )
+  if (unexpectedSingBox.length) {
+    return `installer payload must not contain a live or repair sing-box basename: ${[...new Set(unexpectedSingBox)].join(', ')}`
+  }
   const unexpectedMihomo = bases.filter(
     (base) =>
       /^(verge-mihomo|tono-core)/i.test(base) &&
@@ -844,6 +975,7 @@ export function validatePayloadEntries(entries) {
     'tono-service-install.exe',
     'tono-service-uninstall.exe',
     'core-sha256.txt',
+    'sing-box-sha256.txt',
   ]) {
     if (!bases.some((base) => base.toLowerCase() === required.toLowerCase())) {
       return `installer payload is missing required file basename: ${required}`
@@ -877,6 +1009,101 @@ export function validateEmbeddedCoreDigestPin(
   const pin = Buffer.from(normalized, 'ascii')
   if (!binary.includes(pin)) {
     return `${label} does not embed the packaged Mihomo SHA-256 pin ${normalized}`
+  }
+  return null
+}
+
+/** The three privileged helpers NSIS runs; all must start on a machine without the VC++ runtime. */
+export const STATIC_CRT_HELPERS = Object.freeze([
+  'tono-service.exe',
+  'tono-service-install.exe',
+  'tono-service-uninstall.exe',
+])
+
+const VC_REDIST_DLL = /^(?:vcruntime|msvcp|vccorlib|concrt|vcomp)\d+.*\.dll$/i
+
+/**
+ * Names of the DLLs a PE image imports, from its import (1) and delay-import (13) directories.
+ * Throws on anything that is not a readable PE image.
+ *
+ * @param {Uint8Array} bytes
+ * @returns {string[]}
+ */
+export function peImportedDlls(bytes) {
+  const pe = Buffer.from(bytes)
+  if (pe.readUInt16LE(0) !== 0x5a4d) throw new Error('no MZ header')
+  const header = pe.readUInt32LE(0x3c)
+  if (pe.readUInt32LE(header) !== 0x4550) throw new Error('no PE signature')
+  const sectionCount = pe.readUInt16LE(header + 6)
+  const optionalSize = pe.readUInt16LE(header + 20)
+  const optional = header + 24
+  const magic = pe.readUInt16LE(optional)
+  if (magic !== 0x10b && magic !== 0x20b) {
+    throw new Error(`unknown optional header magic 0x${magic.toString(16)}`)
+  }
+  const directories = optional + (magic === 0x20b ? 112 : 96)
+  const directoryCount = pe.readUInt32LE(directories - 4)
+  const sections = []
+  for (let index = 0; index < sectionCount; index += 1) {
+    const at = optional + optionalSize + 40 * index
+    sections.push({
+      va: pe.readUInt32LE(at + 12),
+      size: Math.max(pe.readUInt32LE(at + 8), pe.readUInt32LE(at + 16)),
+      raw: pe.readUInt32LE(at + 20),
+    })
+  }
+  const offset = (rva) => {
+    const section = sections.find(
+      (candidate) => rva >= candidate.va && rva < candidate.va + candidate.size,
+    )
+    if (!section) throw new Error(`RVA 0x${rva.toString(16)} is in no section`)
+    return rva - section.va + section.raw
+  }
+  const dlls = []
+  // [data directory, descriptor size, offset of the DLL-name RVA in the descriptor]
+  for (const [directory, stride, nameField] of [
+    [1, 20, 12],
+    [13, 32, 4],
+  ]) {
+    if (directory >= directoryCount) continue
+    const rva = pe.readUInt32LE(directories + 8 * directory)
+    if (!rva) continue
+    for (let at = offset(rva); ; at += stride) {
+      const nameRva = pe.readUInt32LE(at + nameField)
+      if (!nameRva) break
+      const name = offset(nameRva)
+      const end = pe.indexOf(0, name)
+      if (end < 0) throw new Error('unterminated DLL name')
+      dlls.push(pe.toString('latin1', name, end))
+    }
+  }
+  return dlls
+}
+
+/**
+ * H22-O-F2: NSIS runs `tono-service-install.exe --manual-update-gate` from `.onInit`, before
+ * Section CheckAndInstallVSRuntime, so a helper that imports the Visual C++ runtime cannot
+ * start on a machine without it and every install aborts with 76. The helpers link the CRT
+ * statically (`apps/windows/service/.cargo/config.toml`); this proves the packaged bytes do.
+ *
+ * @param {Uint8Array} binaryBytes bytes of one of {@link STATIC_CRT_HELPERS}
+ * @param {string} label binary name used in diagnostics
+ * @returns {string | null}
+ */
+export function validateStaticCrtImports(binaryBytes, label) {
+  let dlls
+  try {
+    dlls = peImportedDlls(binaryBytes)
+  } catch (error) {
+    return `${label} is not a readable PE image: ${error instanceof Error ? error.message : error}`
+  }
+  // Every Windows executable imports KERNEL32; without it the import table was not read.
+  if (!dlls.some((dll) => /^kernel32\.dll$/i.test(dll))) {
+    return `${label} import table was not read (no KERNEL32.dll among ${dlls.length} imports)`
+  }
+  const redist = dlls.filter((dll) => VC_REDIST_DLL.test(dll))
+  if (redist.length) {
+    return `${label} imports the Visual C++ runtime (${redist.join(', ')}); the installer runs it before that runtime is installed, so it must be built with +crt-static`
   }
   return null
 }

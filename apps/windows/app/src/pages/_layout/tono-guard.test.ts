@@ -1,8 +1,12 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import type { TonoStatus } from '@/services/tono'
 
-import { resolveTonoGuard } from './tono-guard'
+import {
+  readTonoIntroSeen,
+  resolveTonoGuard,
+  writeTonoIntroSeen,
+} from './tono-guard'
 
 const status = (accountState: TonoStatus['accountState']): TonoStatus =>
   ({
@@ -58,5 +62,23 @@ describe('resolveTonoGuard', () => {
     )
     expect(resolveTonoGuard(status('suspended'), '/', false)).toBe('toLogin')
     expect(resolveTonoGuard(status('error'), '/intro', false)).toBe('toLogin')
+  })
+})
+
+describe('intro-seen flag', () => {
+  it('remembers intro in memory when localStorage cannot store it', () => {
+    vi.stubGlobal('localStorage', {
+      getItem: () => null,
+      setItem: () => {
+        throw new Error('QuotaExceededError')
+      },
+    })
+    try {
+      writeTonoIntroSeen()
+      // Otherwise the guard sends the user from /login straight back to /intro, forever.
+      expect(readTonoIntroSeen()).toBe(true)
+    } finally {
+      vi.unstubAllGlobals()
+    }
   })
 })

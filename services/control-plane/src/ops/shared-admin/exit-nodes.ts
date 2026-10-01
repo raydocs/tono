@@ -108,16 +108,24 @@ export async function exitNodesResource(
       throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid exit node status');
     }
     const t = now();
+    // Disabling keeps the deployed token's hash as the withdrawal mark, so a
+    // token rotated while disabled still gets EXIT_NODE_DISABLED rather than a
+    // 401 that leaves the agent serving its last roster. It is only consulted
+    // while the node is disabled and authenticates nothing.
     const updated = await e.DB.prepare(
       `UPDATE exit_nodes
        SET last_roster_at = CASE
              WHEN status = 'disabled' AND ? = 'active' THEN 0
              ELSE last_roster_at
            END,
+           revoked_token_hash = CASE
+             WHEN status = 'active' AND ? = 'disabled' THEN token_hash
+             ELSE revoked_token_hash
+           END,
            status = ?,
            updated_at = ?
        WHERE id = ?`,
-    ).bind(status, status, t, mt[1]).run();
+    ).bind(status, status, status, t, mt[1]).run();
     if (!updated.meta.changes) throw new ApiError(404, 'NOT_FOUND', 'Exit node not found');
     await writeOpsAudit(e, actorEmail, 'exit-node.update', 'exit_node', mt[1], `status ${status}`);
     return Response.json({ id: mt[1], status, updatedAt: t });

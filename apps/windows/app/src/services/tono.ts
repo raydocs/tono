@@ -37,6 +37,11 @@ export interface TonoAccount {
   email: string
   suspended: boolean
   deviceLimit: number
+  plan?: string | null
+  quotaBytes?: number | null
+  usageBytes?: number | null
+  /** Epoch seconds. */
+  expiresAt?: number | null
 }
 
 export interface TonoDevice {
@@ -84,6 +89,8 @@ export interface TonoKillSwitch {
   // `KillSwitchStatus` in the service crate carries no serde rename, so this
   // one field stays snake_case on the wire.
   last_error: string | null
+  /** Same snake_case wire name: the last render included the tunnel permit. */
+  tunnel_permit_rendered?: boolean
 }
 
 export interface TonoStatus {
@@ -96,6 +103,8 @@ export interface TonoStatus {
   killSwitch: TonoKillSwitch | null
   catalogRevision: number | null
   catalogRequiresChoice: boolean
+  /** Opaque, process-local account scope for preferences; never an account ID. */
+  routePreferenceScope?: string | null
   /** Monotonic owner token for the current managed controller endpoint. */
   controllerGeneration: number
   exitIp?: string | null
@@ -129,20 +138,54 @@ const toError = (error: unknown): Error => {
 
 /** Stable Rust prefixes → i18n keys for Connect/Disconnect action errors. */
 const STABLE_ERROR_KEYS: Array<{ prefix: string; key: string }> = [
+  // #588: a certificate the PC's clock cannot date. First, so it wins wherever the
+  // transport marked it inside another surface's error (sign-in, diagnostics, catalog).
+  { prefix: 'TONO_CLOCK_SKEW', key: 'tono.login.errors.clockSkew' },
   // Sign-in could not reach the control plane. Both transport paths carry the same
   // hostname and TLS SNI, so when both fail the failure is about reaching the server at
   // all — not the account, the code, or the app. Without this entry the raw Rust error
   // chain reached the login screen verbatim.
+  { prefix: 'TONO_AUTH_DNS', key: 'tono.login.errors.unreachable' },
+  { prefix: 'TONO_AUTH_TCP', key: 'tono.login.errors.unreachable' },
+  { prefix: 'TONO_AUTH_TLS', key: 'tono.login.errors.unreachable' },
+  { prefix: 'TONO_AUTH_QUIC', key: 'tono.login.errors.unreachable' },
+  { prefix: 'TONO_AUTH_TIMEOUT', key: 'tono.login.errors.unreachable' },
+  { prefix: 'TONO_AUTH_CAPTIVE', key: 'tono.login.errors.unreachable' },
+  { prefix: 'TONO_AUTH_LOCAL_CONFLICT', key: 'tono.login.errors.unreachable' },
+  { prefix: 'TONO_AUTH_API', key: 'tono.login.errors.serverError' },
+  { prefix: 'TONO_AUTH_FORBIDDEN', key: 'tono.login.errors.serverError' },
+  { prefix: 'TONO_AUTH_STORE', key: 'tono.login.errors.signInNotSaved' },
+  { prefix: 'TONO_CONNECT_DNS', key: 'tono.dashboard.errors.nodeUnreachable' },
+  { prefix: 'TONO_CONNECT_TCP', key: 'tono.dashboard.errors.nodeUnreachable' },
+  { prefix: 'TONO_CONNECT_TLS', key: 'tono.dashboard.errors.protectedHttpsFailed' },
+  { prefix: 'TONO_CONNECT_QUIC', key: 'tono.dashboard.errors.nodeUnreachable' },
+  { prefix: 'TONO_CONNECT_TIMEOUT', key: 'tono.dashboard.errors.nodeUnreachable' },
+  { prefix: 'TONO_CONNECT_TUN', key: 'tono.dashboard.errors.tunDataPlaneBroken' },
+  { prefix: 'TONO_CONNECT_CAPTIVE', key: 'tono.dashboard.errors.nodeUnreachable' },
+  { prefix: 'TONO_CONNECT_LOCAL_CONFLICT', key: 'tono.dashboard.errors.tunIngressBroken' },
   { prefix: 'TONO_AUTH_UNREACHABLE', key: 'tono.login.errors.unreachable' },
   { prefix: 'TONO_AUTH_RATE_LIMITED', key: 'tono.login.errors.rateLimited' },
   { prefix: 'TONO_AUTH_DEVICE_LIMIT', key: 'tono.login.errors.deviceLimit' },
   { prefix: 'TONO_AUTH_UNAUTHORIZED', key: 'tono.login.errors.sessionExpired' },
+  // The Worker's 401 INVALID_OR_EXPIRED_CODE on verify: a wrong or stale code,
+  // not a session (#595).
+  { prefix: 'TONO_AUTH_INVALID_CODE', key: 'tono.login.errors.codeRejected' },
+  // The code was accepted but this PC could not record the session, so the sign-in
+  // was refused; the code is used up.
+  { prefix: 'TONO_SIGN_IN_NOT_SAVED', key: 'tono.login.errors.signInNotSaved' },
   { prefix: 'TONO_SERVICE_BUSY', key: 'tono.dashboard.errors.serviceBusy' },
   // TonoService itself is down. It is AutoStart and depends on BFE, so this is almost
   // always BFE having been switched off by a third-party "network optimiser".
   {
     prefix: 'TONO_SERVICE_NOT_RUNNING',
     key: 'tono.dashboard.errors.serviceNotRunning',
+  },
+  // Restore internet could not get a ready Service (an older start helper, a
+  // declined prompt, a failed start), so no release ran and nothing about
+  // protection was read: unconfirmed, never "still on".
+  {
+    prefix: 'TONO_PROTECTION_UNCONFIRMED',
+    key: 'tono.progress.protectionUnknownBody',
   },
   // Without these two the Rust side's own Chinese sentence reached the UI
   // verbatim, prefix and all, whatever locale the user had chosen.
@@ -154,6 +197,12 @@ const STABLE_ERROR_KEYS: Array<{ prefix: string; key: string }> = [
     prefix: 'TONO_WFP_ENGINE_WEDGED',
     key: 'tono.dashboard.errors.wfpEngineWedged',
   },
+  // Post-lock verification could not confirm the WFP lock, so no TUN probe ran.
+  // Listed after the two engine markers: a nested BFE/wedged cause wins.
+  {
+    prefix: 'TONO_WFP_LOCK_UNVERIFIED',
+    key: 'tono.dashboard.errors.wfpLockUnverified',
+  },
   {
     prefix: 'TONO_RELEASE_RECONCILING',
     key: 'tono.dashboard.errors.releaseReconciling',
@@ -162,9 +211,25 @@ const STABLE_ERROR_KEYS: Array<{ prefix: string; key: string }> = [
     prefix: 'TONO_SERVICE_TOO_OLD',
     key: 'tono.dashboard.errors.serviceTooOld',
   },
+  // Service code 1014: another signed-in Windows user holds the armed protection.
+  // Retrying cannot help, so it must not read as an ordinary failed connect.
+  {
+    prefix: 'TONO_PROTECTION_HELD_BY_ANOTHER_USER',
+    key: 'tono.dashboard.errors.protectionHeldByAnotherUser',
+  },
+  // Service code 1015: Connect from a Remote Desktop session. Protection would cut
+  // that session, so the user must connect at the PC's own console instead.
+  {
+    prefix: 'TONO_REMOTE_SESSION_CONNECT_REFUSED',
+    key: 'tono.dashboard.errors.remoteSessionConnectRefused',
+  },
   {
     prefix: 'TONO_BROWSER_DNS_PREFLIGHT',
     key: 'tono.dashboard.errors.browserDnsPreflight',
+  },
+  {
+    prefix: 'TONO_CONNECT_HY2_IDLE',
+    key: 'tono.dashboard.errors.hy2Idle',
   },
   {
     prefix: 'TONO_NODE_OR_CORE_UNREACHABLE',
@@ -201,6 +266,7 @@ const STABLE_ERROR_KEYS: Array<{ prefix: string; key: string }> = [
     prefix: 'TONO_DIAG_UNAVAILABLE',
     key: 'tono.progress.upload.errors.unavailable',
   },
+  { prefix: 'TONO_DIAG_PREVIEW_EXPIRED', key: 'tono.experience.prepareFailed' },
   { prefix: 'TONO_DIAG_FAILED', key: 'tono.progress.upload.errors.failed' },
 ]
 
@@ -298,7 +364,12 @@ export const describeTonoActionError = (
   const raw = actionErrorRaw(error)
   const key = mappedTonoActionErrorKey(raw)
   if (key) {
-    return { message: t ? t(key) : raw }
+    const message = t ? t(key) : raw
+    const code = stableTonoErrorCode(raw)
+    if (code && showsSupportCode(code) && !message.includes(code)) {
+      return { message: `${message} (${code})` }
+    }
+    return { message }
   }
   if (t) {
     return {
@@ -313,6 +384,15 @@ export const formatTonoActionError = (
   error: unknown,
   t?: (key: string) => string,
 ): string => describeTonoActionError(error, t).message
+
+/** Login, verification, and connect codes belong on the short sentence. */
+const showsSupportCode = (code: string): boolean =>
+  code.startsWith('TONO_AUTH_') ||
+  code.startsWith('TONO_CONNECT_') ||
+  code === 'TONO_CLOCK_SKEW' ||
+  code === 'TONO_SIGN_IN_NOT_SAVED' ||
+  code === 'TONO_NODE_OR_CORE_UNREACHABLE' ||
+  code.startsWith('CORE_')
 
 /** First stable `TONO_*` / `CORE_*` token in a diagnostic string, for Copy details. */
 export const stableTonoErrorCode = (
@@ -360,6 +440,8 @@ export const connectRejectionNeedsServerChoice = (error: unknown): boolean => {
 /** True when the failure is likely a blocked/dead exit the user should switch. */
 export const connectErrorSuggestsServerSwitch = (error: unknown): boolean => {
   const raw = error instanceof Error ? error.message : String(error ?? '')
+  // A quiet UDP mapping is this same route. Another city will not refill it.
+  if (raw.includes('TONO_CONNECT_HY2_IDLE')) return false
   // Same TLS close on every city is not a "pick another server" problem.
   if (/tls handshake eof/i.test(raw)) {
     return false
@@ -379,6 +461,8 @@ export const connectErrorSuggestsServerSwitch = (error: unknown): boolean => {
 export const connectErrorSuggestsBackupChannel = (error: unknown): boolean => {
   const raw = error instanceof Error ? error.message : String(error ?? '')
   if (!raw) return false
+  // Already on the UDP hop. Offering it again is not a different route.
+  if (raw.includes('TONO_CONNECT_HY2_IDLE')) return false
   if (/tls handshake eof/i.test(raw)) return true
   if (raw.includes('CORE_EXIT_UNREACHABLE')) return true
   if (raw.includes('TONO_NODE_OR_CORE_UNREACHABLE')) return true
@@ -417,8 +501,43 @@ export const tonoCatalogStatus = () =>
 export const tonoRefreshCatalog = () =>
   call<TonoCatalogStatus>('tono_refresh_catalog')
 
-export const tonoSelectServer = (name: string) =>
-  call<void>('tono_select_server', { name })
+export const tonoSelectServer = (
+  name: string,
+  expectation?: { scope: string; catalogRevision: number },
+) =>
+  call<void>('tono_select_server', {
+    name,
+    ...(expectation
+      ? {
+          expectedScope: expectation.scope,
+          expectedCatalogRevision: expectation.catalogRevision,
+        }
+      : {}),
+  })
+
+export interface TonoRoutePreferences {
+  scope: string
+  catalogRevision: number
+  favorites: string[]
+  recent: { name: string; revision: number; verifiedAtMs: number }[]
+  fixedRegion: string | null
+}
+
+export const tonoRoutePreferences = () =>
+  call<TonoRoutePreferences>('tono_route_preferences')
+
+export const tonoUpdateRoutePreferences = (
+  scope: string,
+  catalogRevision: number,
+  favorites: string[],
+  fixedRegion: string | null,
+) =>
+  call<TonoRoutePreferences>('tono_update_route_preferences', {
+    scope,
+    catalogRevision,
+    favorites,
+    fixedRegion,
+  })
 
 export const tonoTestCurrentServer = () =>
   call<number>('tono_test_current_server')
@@ -466,6 +585,8 @@ export const tonoPeriodicTelemetryEnabled = () =>
 
 export const tonoSetPeriodicTelemetryEnabled = (enabled: boolean) =>
   call<void>('tono_set_periodic_telemetry_enabled', { enabled })
+
+export const tonoInternalBuild = () => call<boolean>('tono_internal_build')
 
 export const tonoNetworkLogUploadEnabled = () =>
   call<boolean>('tono_network_log_upload_enabled')
@@ -518,7 +639,7 @@ export const formatTonoElapsed = (ms: number) =>
 // is the single definition of the upload payload — see the wire-shape comment
 // above it. The whole struct is a hand-written whitelist assembled in Rust;
 // the WebView never contributes a field, and it never posts the report itself
-// (`tono_upload_diagnostics` rebuilds it backend-side before sending).
+// (`tono_prepare_support_report` freezes it backend-side before confirmation).
 
 export interface TonoDiagnosticsStep {
   key: string
@@ -562,11 +683,19 @@ export interface TonoDiagnosticsReceipt {
   receivedAt: number | null
 }
 
-/** Local Copy details only. Not part of the cloud diagnostics contract. */
+/** Local health check / Copy details only. Not part of the cloud diagnostics contract. */
 export interface TonoLocalDiagnosticsReport extends TonoDiagnosticsReport {
   localEvidence?: {
     status: 'collected'
     appBuild?: string | null
+    buildProvenance?:
+      | 'candidate'
+      | 'release-workflow'
+      | 'development'
+      | 'unknown'
+    accountScope?: string | null
+    protectionLive?: boolean | null
+    protectionWanted?: boolean | null
     expectedCoreVersion?: string | null
     reportedCoreVersion?: string | null
     reportedExitProtocol?: string | null
@@ -584,6 +713,8 @@ export interface TonoLocalDiagnosticsReport extends TonoDiagnosticsReport {
       catalogRevision: number | null
       failedStage: string | null
       errorCode: string | null
+      connectionGeneration?: number
+      errorDetail?: string
       steps: TonoDiagnosticsStep[]
       probeOutcomes?: {
         round: number
@@ -611,14 +742,23 @@ export const tonoLocalDiagnosticsReport = () =>
 export const tonoDiagnosticsReport = () =>
   call<TonoDiagnosticsReport>('tono_diagnostics_report')
 
+export interface TonoPreparedSupportReport {
+  previewId: string
+  report: TonoDiagnosticsReport
+}
+
+/** Freeze one account-owned schema-v1 body for local review; no upload. */
+export const tonoPrepareSupportReport = () =>
+  call<TonoPreparedSupportReport>('tono_prepare_support_report')
+
 /**
  * Upload one report and return its support reference code.
  *
  * Only ever called from an explicit user confirmation. There is no automatic,
  * silent, or on-crash caller, by design — this is a VPN.
  */
-export const tonoUploadDiagnostics = () =>
-  call<TonoDiagnosticsReceipt>('tono_upload_diagnostics')
+export const tonoUploadDiagnostics = (previewId: string) =>
+  call<TonoDiagnosticsReceipt>('tono_upload_diagnostics', { previewId })
 
 /**
  * Render a report as the plain text "Copy details" puts on the clipboard.
@@ -682,6 +822,7 @@ export const formatTonoDiagnostics = (
       ? [
           'Local evidence (Copy details only; not included in cloud upload):',
           `App build: ${local.appBuild ?? '(unknown)'}`,
+          `Build provenance: ${local.buildProvenance ?? 'unknown'}; not proof of customer-channel publication`,
           `Bundled Core expectation: ${local.expectedCoreVersion ?? '(unknown)'}`,
           `Controller-reported Core version: ${local.reportedCoreVersion ?? '(unavailable; not verified)'}`,
           `Controller-selected exit protocol: ${local.reportedExitProtocol ?? '(unavailable; not verified)'}; not proof of handshake`,
@@ -697,16 +838,24 @@ export const formatTonoDiagnostics = (
                 `Attempt failed (UTC): ${new Date(local.lastFailedAttempt.failedAtMs).toISOString()}`,
                 `Attempt server: ${local.lastFailedAttempt.selectedServer}; transport=${local.lastFailedAttempt.transport}; catalog=${local.lastFailedAttempt.catalogRevision ?? '(unknown)'}`,
                 `Attempt failure: ${local.lastFailedAttempt.failedStage ?? '(unknown)'}; code=${local.lastFailedAttempt.errorCode ?? '(none)'}`,
-                ...local.lastFailedAttempt.steps.map(step =>
-                  `  - ${step.key}: ${step.state}${step.elapsedMs == null ? '' : ` (${formatTonoElapsed(step.elapsedMs)})`}`),
+                `Attempt generation (process-local): ${local.lastFailedAttempt.connectionGeneration ?? '(unknown)'}`,
+                `Attempt cause (scrubbed): ${local.lastFailedAttempt.errorDetail ?? '(not captured)'}`,
+                ...local.lastFailedAttempt.steps.map(
+                  (step) =>
+                    `  - ${step.key}: ${step.state}${step.elapsedMs == null ? '' : ` (${formatTonoElapsed(step.elapsedMs)})`}`,
+                ),
                 'Completed probes: App observations, not proof of exit transport handshake failure. Missing entries may be unstarted, cancelled or unavailable.',
-                ...(local.lastFailedAttempt.probeOutcomes ?? []).map(probe =>
-                  `  - round=${probe.round} path=${probe.path} origin=${probe.origin} result=${probe.passed ? 'passed' : 'failed'} category=${probe.category} status=${probe.actualStatus ?? 'unknown'} elapsed=${probe.elapsedMs}ms`),
+                ...(local.lastFailedAttempt.probeOutcomes ?? []).map(
+                  (probe) =>
+                    `  - round=${probe.round} path=${probe.path} origin=${probe.origin} result=${probe.passed ? 'passed' : 'failed'} category=${probe.category} status=${probe.actualStatus ?? 'unknown'} elapsed=${probe.elapsedMs}ms`,
+                ),
               ]
             : ['Retained failed attempt: (none captured)']),
           'Recent Core log: not correlated to this attempt; not a root-cause diagnosis',
           `Core log status: ${local.coreLog.status}; inspected lines=${local.coreLog.inspectedLines}; truncated=${local.coreLog.truncated}`,
-          ...local.coreLog.observations.map(({ code, count }) => `  - ${code}: ${count}`),
+          ...local.coreLog.observations.map(
+            ({ code, count }) => `  - ${code}: ${count}`,
+          ),
           'No matched observation does not prove a healthy Core. Raw logs, destinations and credentials are omitted.',
         ]
       : []),
@@ -723,7 +872,7 @@ let sharedListenerLive = false
 let sharedRegistration: Promise<void> | null = null
 
 const ensureSharedListener = () => {
-  if (sharedRegistration) return
+  if (sharedListenerLive || sharedRegistration) return
 
   sharedRegistration = listen<TonoStatus>(TONO_STATUS_EVENT, ({ payload }) => {
     statusHandlers.forEach((handler) => handler(payload))

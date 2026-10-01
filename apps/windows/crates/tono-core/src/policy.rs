@@ -301,6 +301,7 @@ const PROTECTED_DIRECT_SUFFIXES: &[&str] = &[
 fn is_protected_from_direct(host: &str) -> bool {
     PROTECTED_DIRECT_SUFFIXES
         .iter()
+        .chain(crate::config::CLAUDE_HOME_DOMAINS.iter())
         .any(|suffix| host == *suffix || host.ends_with(&format!(".{suffix}")))
 }
 
@@ -308,7 +309,12 @@ fn direct_suffix_overlaps_protected(host: &str) -> bool {
     is_protected_from_direct(host)
         || PROTECTED_DIRECT_SUFFIXES
             .iter()
-            .any(|protected| protected.ends_with(&format!(".{host}")))
+            .chain(crate::config::CLAUDE_HOME_DOMAINS.iter())
+            .any(|protected| protected.ends_with(&format!(".{host}"))
+                // Only these reviewed assistant children run ahead of the
+                // Alibaba parent in both emitters. All other overlaps stay denied.
+                && !(host == "aliyuncs.com"
+                    && crate::config::DEDICATED_MODEL_API_SUFFIXES.contains(protected)))
 }
 
 /// Wire shape of `GET traffic-policy` (digest semantics identical to the
@@ -484,6 +490,14 @@ pub fn validate_policy_with_trust(
     if version < POLICY_VERSION_V1 {
         return Err(PolicyError::InvalidResponse);
     }
+    // A revision inside the document is covered by its signature; the
+    // envelope's is not. When both exist they must agree, or the envelope
+    // was relabelled and the whole response is refused (#317).
+    if let Some(embedded) = object.get("revision")
+        && embedded.as_i64() != Some(response.revision)
+    {
+        return Err(PolicyError::InvalidResponse);
+    }
     let document: TonoTrafficPolicy =
         serde_json::from_str(&response.json).map_err(|_| PolicyError::InvalidResponse)?;
     let policy_domains: Vec<PolicyDomain> = document
@@ -586,6 +600,12 @@ pub fn validate_policy_with_trust(
 
     let mut media: Vec<PolicyMedia> = Vec::new();
     for entry in policy_media {
+        // Mac parity (#318): the unsigned media IPv4 allowlist ships empty
+        // (`managedDirectIPv4Allowlist`), so only a signed document may take
+        // an exact IP:port out of the tunnel.
+        if !trusted {
+            continue;
+        }
         let Ok(address) = entry.address.parse::<Ipv4Addr>() else {
             continue;
         };
@@ -634,6 +654,9 @@ pub struct PolicyTracker {
     current_revision: i64,
     current_digest: Option<String>,
     current_signature: Option<String>,
+    /// The current revision number came from inside verified signed bytes,
+    /// not from the unsigned envelope (#317).
+    revision_authenticated: bool,
 }
 
 impl Default for PolicyTracker {
@@ -649,6 +672,7 @@ impl PolicyTracker {
             current_revision: -1,
             current_digest: None,
             current_signature: None,
+            revision_authenticated: false,
         }
     }
 
@@ -667,7 +691,26 @@ impl PolicyTracker {
             current_revision: revision,
             current_digest: Some(digest),
             current_signature: signature,
+            revision_authenticated: false,
         }
+    }
+
+    /// Seed from a cached response, keeping whether its revision was signed
+    /// so the ratchet in `install` survives a restart.
+    pub fn from_cached(response: &TonoTrafficPolicyResponse) -> Self {
+        let mut tracker = Self::from_installed_with_signature(
+            response.revision,
+            response.sha256.clone(),
+            response.signature.clone(),
+        );
+        // The cache was re-validated on load, so an embedded revision
+        // already equals the envelope's.
+        tracker.revision_authenticated = crate::policy_signature::verdict(
+            &response.json,
+            response.signature.as_deref(),
+        ) == crate::policy_signature::SignatureVerdict::Trusted
+            && embeds_revision(&response.json);
+        tracker
     }
 
     pub fn current_revision(&self) -> i64 {
@@ -686,18 +729,54 @@ impl PolicyTracker {
         response: &TonoTrafficPolicyResponse,
         protected: &BTreeSet<Ipv4Addr>,
     ) -> Result<PolicyInstallOutcome, PolicyError> {
-        match crate::policy_signature::verdict(&response.json, response.signature.as_deref()) {
+        self.install_with_key(
+            response,
+            protected,
+            crate::policy_signature::TRAFFIC_POLICY_PUBLIC_KEY,
+        )
+    }
+
+    /// `install` against an explicit verifying key, so the gate can be
+    /// exercised with a throwaway keypair. Production always passes the
+    /// compiled-in key through `install`.
+    fn install_with_key(
+        &mut self,
+        response: &TonoTrafficPolicyResponse,
+        protected: &BTreeSet<Ipv4Addr>,
+        public_key_base64: &str,
+    ) -> Result<PolicyInstallOutcome, PolicyError> {
+        let verdict = crate::policy_signature::verdict_with_key(
+            &response.json,
+            response.signature.as_deref(),
+            public_key_base64,
+        );
+        match verdict {
             crate::policy_signature::SignatureVerdict::Untrustworthy => {
                 return Err(PolicyError::InvalidResponse);
             }
             crate::policy_signature::SignatureVerdict::Unsigned => {}
             crate::policy_signature::SignatureVerdict::Trusted => {}
         }
-        let trusted = crate::policy_signature::verdict(
-            &response.json,
-            response.signature.as_deref(),
-        ) == crate::policy_signature::SignatureVerdict::Trusted;
+        let trusted = verdict == crate::policy_signature::SignatureVerdict::Trusted;
         let policy = validate_policy_with_trust(response, protected, trusted)?;
+        // Only a revision inside the signed bytes is evidence of order. A
+        // signed revision replaces one that nobody signed whatever the two
+        // numbers are — that is how a client pinned by a replayed document
+        // with a forged revision recovers — and once a signed revision is
+        // installed, an unsigned number can no longer move the gate. Host
+        // trust is unaffected: it still comes from the signature verdict
+        // and the compiled allowlists alone (#317).
+        let authenticated = trusted && embeds_revision(&response.json);
+        if authenticated && !self.revision_authenticated {
+            self.current_revision = response.revision;
+            self.current_digest = Some(response.sha256.clone());
+            self.current_signature = response.signature.clone();
+            self.revision_authenticated = true;
+            return Ok(PolicyInstallOutcome::Installed(policy));
+        }
+        if !authenticated && self.revision_authenticated {
+            return Err(PolicyError::StaleRevision);
+        }
         if response.revision < self.current_revision {
             return Err(PolicyError::StaleRevision);
         }
@@ -727,6 +806,15 @@ impl PolicyTracker {
         self.current_signature = response.signature.clone();
         Ok(PolicyInstallOutcome::Installed(policy))
     }
+}
+
+/// The signed document names its own revision. Whether it matches the
+/// envelope is checked by `validate_policy_with_trust`.
+fn embeds_revision(json: &str) -> bool {
+    serde_json::from_str::<serde_json::Value>(json)
+        .ok()
+        .and_then(|value| value.get("revision").cloned())
+        .is_some()
 }
 
 /// A cache entry that survived safety checks and full re-validation.
@@ -961,7 +1049,10 @@ mod tests {
 
     #[test]
     fn accepts_valid_document_and_normalizes() {
-        let policy = validate_policy(&response(3, &good_document()), &no_protected()).unwrap();
+        // Signed: unsigned media endpoints are dropped (#318).
+        let policy =
+            validate_policy_with_trust(&response(3, &good_document()), &no_protected(), true)
+                .unwrap();
         assert_eq!(policy.version, 1);
         // Sorted by host; ports sorted.
         assert_eq!(policy.domains[0].host, "qpic.cn");
@@ -978,6 +1069,15 @@ mod tests {
             policy.direct_suffixes.is_empty(),
             "old v1 decodes with no suffix list"
         );
+    }
+
+    #[test]
+    fn unsigned_policy_cannot_carve_media_endpoints() {
+        // Mac parity: the unsigned media allowlist ships empty, so only a
+        // signed document may take an exact IP:port out of the tunnel.
+        let doc = policy_json("", r#"{"address":"9.0.0.9","ports":[443]}"#);
+        let policy = validate_policy(&response(1, &doc), &no_protected()).unwrap();
+        assert!(policy.media_endpoints.is_empty());
     }
 
     #[test]
@@ -1056,6 +1156,86 @@ mod tests {
     }
 
     #[test]
+    fn dashscope_children_cannot_be_direct_but_the_alibaba_parent_survives() {
+        let document = serde_json::json!({
+            "version": 3, "domains": [], "mediaEndpoints": [], "webDomains": [],
+            "directSuffixes": [{"host": "aliyuncs.com", "ports": [80, 443]}],
+        });
+        for trusted in [false, true] {
+            let policy = validate_policy_with_trust(
+                &response(1, &document.to_string()), &no_protected(), trusted,
+            ).unwrap();
+            assert_eq!(policy.direct_suffixes[0].host, "aliyuncs.com");
+            for host in [
+                "dashscope.aliyuncs.com", "cn-hongkong.dashscope.aliyuncs.com",
+                "coding-intl.dashscope.aliyuncs.com", "dashscope-intl.aliyuncs.com",
+                "dashscope-us.aliyuncs.com", "maas.aliyuncs.com",
+                "workspace.cn-beijing.maas.aliyuncs.com", "trial.ap-southeast-1.maas.aliyuncs.com",
+                "token-plan.ap-southeast-1.maas.aliyuncs.com",
+            ] {
+                for field in ["domains", "webDomains", "directSuffixes"] {
+                    let mut attempt = document.clone();
+                    attempt[field] = serde_json::json!([{"host": host, "ports": [443]}]);
+                    let policy = validate_policy_with_trust(
+                        &response(1, &attempt.to_string()), &no_protected(), trusted,
+                    ).unwrap();
+                    assert!(policy.domains.is_empty(), "{field}/{host}");
+                    assert!(policy.web_domains.is_empty(), "{field}/{host}");
+                    if field == "directSuffixes" {
+                        assert!(policy.direct_suffixes.is_empty(), "{host}");
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn trusted_policy_cannot_direct_other_assistant_suffixes() {
+        for host in [
+            "openai.com",
+            "chatgpt.com",
+            "chat.com",
+            "ai.com",
+            "oaistatic.com",
+            "oaiusercontent.com",
+            "api.openai.com",
+            "grok.com",
+            "grok.x.com",
+            "grokipedia.com",
+            "x.ai",
+            "x.com",
+            "perplexity.ai",
+            "perplexity.com",
+            "pplx.ai",
+            "gemini.google.com",
+            "bard.google.com",
+            "aistudio.google.com",
+            "generativelanguage.googleapis.com",
+            "notebooklm.google.com",
+            "google.com",
+            "googleapis.com",
+            "muse.ai",
+            "meta.ai",
+            "muse.meta.com",
+            "meta.com",
+            "facebook.com",
+            "instagram.com",
+            "threads.net",
+            "gmail.com",
+            "accounts.google.com",
+        ] {
+            let document = format!(
+                r#"{{"version":3,"domains":[],"mediaEndpoints":[],"webDomains":[],"directSuffixes":[{{"host":"{host}","ports":[443]}},{{"host":"example.com","ports":[443]}}]}}"#
+            );
+            let policy =
+                validate_policy_with_trust(&response(1, &document), &no_protected(), true).unwrap();
+
+            assert_eq!(policy.direct_suffixes.len(), 1, "{host}");
+            assert_eq!(policy.direct_suffixes[0].host, "example.com", "{host}");
+        }
+    }
+
+    #[test]
     fn trusted_policy_still_rejects_malformed_hosts() {
         let document = r#"{"version":3,"domains":[{"host":"evil_domain.example","ports":[443]}],"mediaEndpoints":[],"webDomains":[{"host":"evil web.example","ports":[443]}],"directSuffixes":[{"host":"evil),DIRECT.example","ports":[443]}]}"#;
         let policy =
@@ -1125,7 +1305,8 @@ mod tests {
     fn rejects_media_port_and_duplicate_violations() {
         for ports in ["[443,443]", "[80]", "[]"] {
             let doc = policy_json("", &format!(r#"{{"address":"9.0.0.9","ports":{ports}}}"#));
-            let policy = validate_policy(&response(0, &doc), &no_protected()).unwrap();
+            let policy =
+                validate_policy_with_trust(&response(0, &doc), &no_protected(), true).unwrap();
             assert!(policy.media_endpoints.is_empty(), "{ports}");
         }
         let dup_domain = policy_json(
@@ -1140,14 +1321,15 @@ mod tests {
     fn rejects_disallowed_and_protected_addresses() {
         for address in ["10.0.0.1", "198.18.0.1", "1.1.1.1", "8.8.8.8", "not-an-ip"] {
             let doc = policy_json("", &format!(r#"{{"address":"{address}","ports":[443]}}"#));
-            let policy = validate_policy(&response(0, &doc), &no_protected()).unwrap();
+            let policy =
+                validate_policy_with_trust(&response(0, &doc), &no_protected(), true).unwrap();
             assert!(policy.media_endpoints.is_empty(), "{address}");
         }
         // The selected node's IP is protected at sync time.
         let mut protected = BTreeSet::new();
         protected.insert(Ipv4Addr::new(9, 0, 0, 7));
         let doc = policy_json("", r#"{"address":"9.0.0.7","ports":[443]}"#);
-        let policy = validate_policy(&response(0, &doc), &protected).unwrap();
+        let policy = validate_policy_with_trust(&response(0, &doc), &protected, true).unwrap();
         assert!(policy.media_endpoints.is_empty());
     }
 
@@ -1174,6 +1356,52 @@ mod tests {
             validate_policy(&response(1, &big), &no_protected()),
             Err(PolicyError::InvalidResponse)
         );
+    }
+
+    #[test]
+    fn signed_revision_outranks_an_unsigned_revision_pin() {
+        use crate::policy_signature::TRAFFIC_POLICY_SIGNATURE_CONTEXT;
+        use base64::Engine as _;
+        use ed25519_dalek::{Signer, SigningKey};
+
+        let signing = SigningKey::from_bytes(&[7_u8; 32]);
+        let key = base64::engine::general_purpose::STANDARD
+            .encode(signing.verifying_key().as_bytes());
+        let signed = |revision: i64, json: &str| {
+            let mut message = TRAFFIC_POLICY_SIGNATURE_CONTEXT.as_bytes().to_vec();
+            message.extend_from_slice(json.as_bytes());
+            let mut envelope = response(revision, json);
+            envelope.signature = Some(
+                base64::engine::general_purpose::STANDARD
+                    .encode(signing.sign(&message).to_bytes()),
+            );
+            envelope
+        };
+        let installed = |outcome: Result<PolicyInstallOutcome, PolicyError>| matches!(outcome, Ok(PolicyInstallOutcome::Installed(_)));
+
+        // A genuinely signed legacy document replayed under a forged revision
+        // is accepted: nothing signed says which revision it was.
+        let legacy = good_document();
+        let mut tracker = PolicyTracker::new();
+        assert!(installed(tracker.install_with_key(&signed(1 << 53, &legacy), &no_protected(), &key)));
+
+        // The next genuine publish carries its revision inside the signed
+        // bytes, and a number nobody signed must not outrank it.
+        let bound = r#"{"version":1,"revision":4,"domains":[],"mediaEndpoints":[]}"#;
+        assert!(installed(tracker.install_with_key(&signed(4, bound), &no_protected(), &key)));
+        assert_eq!(tracker.current_revision(), 4);
+
+        // From then on an unsigned revision cannot move the gate, and the
+        // envelope cannot relabel a signed one.
+        assert_eq!(
+            tracker.install_with_key(&signed(1 << 53, &legacy), &no_protected(), &key),
+            Err(PolicyError::StaleRevision)
+        );
+        assert_eq!(
+            tracker.install_with_key(&signed(5, bound), &no_protected(), &key),
+            Err(PolicyError::InvalidResponse)
+        );
+        assert_eq!(tracker.current_revision(), 4);
     }
 
     #[test]

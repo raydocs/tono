@@ -337,9 +337,32 @@ fn read_bounded_terminal_settings(path: &std::path::Path) -> Result<Option<Strin
     if metadata.len() > MAX_TERMINAL_SETTINGS_BYTES {
         return Err(format!("Proxy settings file is unexpectedly large: {}", path.display()));
     }
-    std::fs::read_to_string(path)
+    let bytes = std::fs::read(path).map_err(|error| format!("Failed to read {}: {error}", path.display()))?;
+    decode_terminal_settings(bytes)
         .map(Some)
         .map_err(|error| format!("Failed to read {}: {error}", path.display()))
+}
+
+/// PowerShell and Windows editors often save profiles with a UTF-8 or UTF-16
+/// byte-order mark. A BOM left in the text hides a first-line assignment from
+/// every matcher, so decode by BOM; text without one must still be UTF-8.
+fn decode_terminal_settings(bytes: Vec<u8>) -> Result<String, String> {
+    fn utf16(bytes: &[u8], unit: fn([u8; 2]) -> u16) -> Result<String, String> {
+        if bytes.len() % 2 != 0 {
+            return Err("truncated UTF-16 text".to_string());
+        }
+        let units: Vec<u16> = bytes.chunks_exact(2).map(|pair| unit([pair[0], pair[1]])).collect();
+        String::from_utf16(&units).map_err(|error| error.to_string())
+    }
+    if let Some(rest) = bytes.strip_prefix(b"\xEF\xBB\xBF") {
+        String::from_utf8(rest.to_vec()).map_err(|error| error.to_string())
+    } else if let Some(rest) = bytes.strip_prefix(b"\xFF\xFE") {
+        utf16(rest, u16::from_le_bytes)
+    } else if let Some(rest) = bytes.strip_prefix(b"\xFE\xFF") {
+        utf16(rest, u16::from_be_bytes)
+    } else {
+        String::from_utf8(bytes).map_err(|error| error.to_string())
+    }
 }
 
 pub(super) fn file_uri_path(uri: &str) -> Option<std::path::PathBuf> {
@@ -802,8 +825,47 @@ fn scan_wsl_profiles(entries: &mut Vec<ProxyEnvEntry>) -> Result<(), String> {
     Ok(())
 }
 
-fn powershell_profile_roots(home: &std::path::Path) -> Vec<std::path::PathBuf> {
-    let mut roots = vec![home.join("Documents")];
+/// The current user's Documents folder as PowerShell resolves `$PROFILE`.
+/// Location-tab moves and Group Policy redirection only show up here.
+#[cfg(windows)]
+fn known_documents_folder(_home: &std::path::Path) -> Option<std::path::PathBuf> {
+    use std::os::windows::ffi::OsStringExt as _;
+    use windows_sys::Win32::System::Com::CoTaskMemFree;
+    use windows_sys::Win32::UI::Shell::{FOLDERID_Documents, SHGetKnownFolderPath};
+
+    let mut raw = std::ptr::null_mut();
+    let status = unsafe { SHGetKnownFolderPath(&FOLDERID_Documents, 0, std::ptr::null_mut(), &mut raw) };
+    let path = (status >= 0 && !raw.is_null()).then(|| {
+        let length = unsafe {
+            let mut length = 0;
+            while *raw.add(length) != 0 {
+                length += 1;
+            }
+            length
+        };
+        std::path::PathBuf::from(std::ffi::OsString::from_wide(unsafe {
+            std::slice::from_raw_parts(raw, length)
+        }))
+    });
+    // The caller owns the buffer even on failure; freeing null is a no-op.
+    unsafe { CoTaskMemFree(raw.cast()) };
+    path.filter(|path| path.is_absolute())
+}
+
+#[cfg(not(windows))]
+fn known_documents_folder(home: &std::path::Path) -> Option<std::path::PathBuf> {
+    Some(home.join("Documents"))
+}
+
+/// An unresolved Documents folder is an incomplete check, never a clean one.
+pub(super) fn powershell_profile_roots(
+    home: &std::path::Path,
+    known_documents: Option<std::path::PathBuf>,
+) -> Result<Vec<std::path::PathBuf>, String> {
+    let known_documents = known_documents.ok_or_else(|| {
+        "Could not resolve the Windows Documents folder, so PowerShell profiles were not checked.".to_string()
+    })?;
+    let mut roots = vec![known_documents, home.join("Documents")];
     for variable in ["OneDrive", "OneDriveConsumer", "OneDriveCommercial"] {
         if let Some(root) = std::env::var_os(variable).filter(|value| !value.is_empty()) {
             roots.push(std::path::PathBuf::from(root).join("Documents"));
@@ -811,7 +873,7 @@ fn powershell_profile_roots(home: &std::path::Path) -> Vec<std::path::PathBuf> {
     }
     roots.sort();
     roots.dedup();
-    roots
+    Ok(roots)
 }
 
 pub(super) fn scan_powershell_profile_directories(
@@ -904,9 +966,9 @@ fn scan_terminal_proxy_files(entries: &mut Vec<ProxyEnvEntry>) -> Result<(), Str
             "Shell/PowerShell profile",
             shell_guidance,
         )?;
-        // OneDrive commonly redirects Documents, where PowerShell stores its
-        // current-user profiles. Inspect both local and known OneDrive roots.
-        for documents in powershell_profile_roots(home) {
+        // PowerShell stores current-user profiles in the Documents Known
+        // Folder. Also inspect the local and OneDrive defaults.
+        for documents in powershell_profile_roots(home, known_documents_folder(home))? {
             scan_powershell_profile_directories(
                 entries,
                 [documents.join("PowerShell"), documents.join("WindowsPowerShell")],

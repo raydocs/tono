@@ -3,6 +3,8 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import worker, { type Env } from '../src/index';
 import { encryptCatalog, sha256 } from '../src/crypto';
 import { assertNodeAcceptance } from '../src/ops/contract';
+import { relistFleetNode, retireFleetNode } from '../src/ops/reads/fleet';
+import { revokeExitToken } from '../src/ops/retire-dependencies';
 import {
   bindingItems,
   capacityItem,
@@ -438,5 +440,36 @@ describe('nodes/{name}/acceptance and the 上架 gate', () => {
       "SELECT COUNT(*) AS n FROM ops_audit WHERE action = 'node.relist.override'",
     ).first<{ n: number }>();
     expect(audit?.n).toBe(0);
+  });
+
+  it('a node whose exit token retirement revoked cannot be relisted, and a stale drain cannot revoke a relisted one', async () => {
+    await seedSellable();
+    await db().prepare('DELETE FROM connection_events').run();
+    const e = env as unknown as Env;
+    await retireFleetNode(e, ACCESS_ADMIN_EMAIL, NODE, {
+      expectedRevision: 1, confirmation: NODE, reason: 'mistake',
+    });
+    const exitStatus = () => db().prepare('SELECT status FROM exit_nodes WHERE name = ?')
+      .bind(NODE).first<{ status: string }>();
+    expect(await exitStatus()).toEqual({ status: 'disabled' });
+
+    // The last roster fetch is minutes old, but the token behind it is gone.
+    const sheet = assertNodeAcceptance(await (await ops(`nodes/${enc}/acceptance`)).json());
+    expect(sheet.blockers).toEqual(expect.arrayContaining(['binding.exitToken', 'binding.identitySync']));
+    const forced = await ops(`nodes/${enc}/jobs`, post({
+      type: 'catalog_relist', confirmName: NODE, override: true,
+    }));
+    expect(forced.status).toBe(409);
+    expect((await forced.json() as { error: { code: string } }).error.code).toBe('EXIT_TOKEN_REVOKED');
+    await expect(relistFleetNode(e, ACCESS_ADMIN_EMAIL, NODE)).rejects.toMatchObject({ code: 'EXIT_TOKEN_REVOKED' });
+
+    // Re-enabled and relisted after a drain sweep read revision 2: its revoke must miss.
+    await db().prepare("UPDATE exit_nodes SET status = 'active' WHERE name = ?").bind(NODE).run();
+    const block = `  - name: ${NODE}\n    type: vless\n    server: 203.0.113.10\n    port: 443\n    uuid: {{TONO_CLIENT_UUID}}\n`
+      + `    network: tcp\n    tls: true\n    flow: xtls-rprx-vision\n    servername: www.example.com\n`
+      + `    reality-opts:\n      public-key: ${'A'.repeat(43)}\n      short-id: 0123abcd\n`;
+    expect((await relistFleetNode(e, ACCESS_ADMIN_EMAIL, NODE, { block })).revision).toBe(3);
+    expect(await revokeExitToken(e, NODE, 'system', NOW, 2)).toBe(false);
+    expect(await exitStatus()).toEqual({ status: 'active' });
   });
 });

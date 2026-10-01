@@ -62,7 +62,11 @@ fn the_kernel_accepts_a_filter_with_many_same_field_conditions() {
     let condition_count = spec.conditions.len();
     ensure_provider_and_sublayer(&engine).expect("provider and sublayer");
 
-    let result = add_filter(&engine, &spec, std::ptr::null_mut());
+    let no_app_ids = AppIdBlobs {
+        core: std::ptr::null_mut(),
+        tono_app: std::ptr::null_mut(),
+    };
+    let result = add_filter(&engine, &spec, no_app_ids);
     // Always clean up, whatever the outcome: a leftover permit on a developer machine is a
     // real if harmless change to their firewall.
     let removed = delete_filter_if_exists(&engine, spec.key);

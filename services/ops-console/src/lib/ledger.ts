@@ -47,6 +47,24 @@ export function monthOf(seconds: number): string {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}`;
 }
 
+/** Reversals are posted to the Worker's current UTC month, not the local calendar month. */
+export function reversalMonth(seconds: number): string {
+  const date = new Date(seconds * 1_000);
+  return `${date.getUTCFullYear()}-${pad(date.getUTCMonth() + 1)}`;
+}
+
+/**
+ * Whether a reversal may be offered, from the read of the current UTC month.
+ * Only a fresh read that says open allows it; a failed read is told apart
+ * from one still in flight so the page can offer a retry instead of waiting.
+ */
+export type ReversalGate = 'open' | 'locked' | 'waiting' | 'unreadable';
+export function reversalGate(status: 'loading' | 'error' | 'ready', closedAt: number | null | undefined): ReversalGate {
+  if (status === 'error') return 'unreadable';
+  if (status === 'loading' || closedAt === undefined) return 'waiting';
+  return closedAt === null ? 'open' : 'locked';
+}
+
 export function dayOf(seconds: number): string {
   const date = new Date(seconds * 1_000);
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;

@@ -1,6 +1,7 @@
 import Foundation
 import Darwin
 import Security
+import ServiceManagement
 
 /// Installs and talks to the narrowly scoped privileged Mihomo launcher.
 ///
@@ -15,7 +16,7 @@ nonisolated struct HelperManager {
     private static let helperInstallPath = "/Library/PrivilegedHelperTools/tono-core-helper"
     private static let mihomoInstallPath = "/Library/PrivilegedHelperTools/tono-sing-box"
     private static let allowedUIDPath = "/Library/PrivilegedHelperTools/tono.allowed-uid"
-    private static let plistInstallPath = "/Library/LaunchDaemons/com.raydocs.tono.core-helper.plist"
+    static let plistInstallPath = "/Library/LaunchDaemons/com.raydocs.tono.core-helper.plist"
     private static let plistLabel = "com.raydocs.tono.core-helper"
     private static let maximumResponseBytes = 64 * 1024
 
@@ -29,6 +30,9 @@ nonisolated struct HelperManager {
         let wantArmed: Bool?
         let live: Bool?
         let healed: Bool?
+        /// Set by the helper's PF liveness supervisor after it had to reinstall
+        /// the kill switch; cleared by the next arm. Absent before 4.16.0.
+        let repairedSinceArm: Bool?
         let flushedStates: Bool?
         /// Addresses whose states were killed individually instead of flushing
         /// the machine. Absent from a pre-3.11.0 daemon, which only had the
@@ -40,6 +44,11 @@ nonisolated struct HelperManager {
         let configured: Bool?
         let snapshotPresent: Bool?
         let service: String?
+        /// `/dns/restore` only: `false` when the service that owned the
+        /// snapshot no longer exists, so the recorded servers were archived
+        /// instead of written back. A helper without service-ID snapshots
+        /// never sends it.
+        let originalDNSRestored: Bool?
         let lastError: String?
         let error: String?
     }
@@ -73,6 +82,14 @@ nonisolated struct HelperManager {
         return """
         set -e
         /usr/bin/install -d -o root -g wheel -m 0755 /Library/PrivilegedHelperTools
+        guard_dir=$(/usr/bin/mktemp -d /Library/PrivilegedHelperTools/tono-installer.XXXXXX)
+        trap '/bin/rm -f "$guard_dir/guard"; /bin/rmdir "$guard_dir"' EXIT
+        /usr/bin/install -o root -g wheel -m 0700 \(helperSrc) "$guard_dir/guard"
+        /usr/bin/codesign --verify --strict --all-architectures -R='anchor apple generic and identifier "com.raydocs.tono.helper" and certificate leaf[subject.OU] = "YY57758GS7" and certificate 1[field.1.2.840.113635.100.6.2.6] exists and certificate leaf[field.1.2.840.113635.100.6.1.13] exists and entitlement["com.apple.security.get-task-allow"] absent' "$guard_dir/guard"
+        "$guard_dir/guard" --update-install-guard <<'TONO_INSTALL_UNDER_ROOT_UPDATE_LOCK'
+        set -e
+        \(boundAccountGuard(uid: uid, allowedUIDPath: allowedUIDPath))
+        /usr/bin/install -d -o root -g wheel -m 0755 /Library/PrivilegedHelperTools
         /usr/bin/install -d -o root -g wheel -m 0755 /var/run/tono-core
         /bin/rm -f '\(helperTemporaryPath)' '\(mihomoTemporaryPath)' '\(plistTemporaryPath)'
         /usr/bin/install -o root -g wheel -m 0755 \(helperSrc) '\(helperTemporaryPath)'
@@ -96,6 +113,9 @@ nonisolated struct HelperManager {
         /bin/rm -f /Library/PrivilegedHelperTools/tono-killswitch
         /bin/rm -f /var/run/tono-killswitch.sock
         /bin/launchctl bootout system/\(plistLabel) >/dev/null 2>&1 || true
+        # A reset by an older helper left the previous account's socket behind;
+        # the new daemon refuses to replace a socket another uid owns.
+        /bin/rm -f '\(socketPath)'
         /bin/mv -f '\(helperTemporaryPath)' '\(helperInstallPath)'
         /bin/mv -f '\(mihomoTemporaryPath)' '\(mihomoInstallPath)'
         /bin/mv -f '\(plistTemporaryPath)' '\(plistInstallPath)'
@@ -104,10 +124,17 @@ nonisolated struct HelperManager {
         # accepted and started the new job. Treat bootstrap as a request; the
         # authenticated /version poll below is the authoritative result.
         /bin/launchctl bootstrap system '\(plistInstallPath)' || true
+        TONO_INSTALL_UNDER_ROOT_UPDATE_LOCK
         """
     }
 
-    static func installIfNeeded() throws {
+    static func installIfNeeded(administratorPrompt: Bool = true) throws {
+        // A helper serving another account is not broken. Refuse by name
+        // before any probe, prompt or reinstall could rebind it.
+        if let account = helperBoundAccount() {
+            LocalTrafficAudit.shared.recordEvent("helper_bound_to_another_account")
+            throw HelperIPCError.boundToAnotherUser(account)
+        }
         let preparationStartedAt = Date()
         LocalTrafficAudit.shared.recordEvent(
             "helper_preparation_started",
@@ -163,23 +190,32 @@ nonisolated struct HelperManager {
                 // failed during a previous upgrade), no retry of the socket
                 // will ever succeed and this early return would wedge every
                 // connect forever — fall through to the full install instead.
+                // So does a daemon launchd keeps restarting, when this caller
+                // may prompt; a prompt-free caller could not repair it anyway.
                 if daemonRegisteredWithLaunchd() {
+                    if !(administratorPrompt && daemonKeepsRestarting()) {
+                        LocalTrafficAudit.shared.recordEvent(
+                            "helper_artifact_current",
+                            details: [
+                                "version": helperVersion,
+                                "daemon_probe": "temporarily_unavailable",
+                                "duration_ms": Self.durationMilliseconds(
+                                    since: preparationStartedAt
+                                ),
+                            ]
+                        )
+                        return
+                    }
                     LocalTrafficAudit.shared.recordEvent(
-                        "helper_artifact_current",
-                        details: [
-                            "version": helperVersion,
-                            "daemon_probe": "temporarily_unavailable",
-                            "duration_ms": Self.durationMilliseconds(
-                                since: preparationStartedAt
-                            ),
-                        ]
+                        "helper_crash_loop_reinstall_required",
+                        details: ["artifact_version": helperVersion]
                     )
-                    return
+                } else {
+                    LocalTrafficAudit.shared.recordEvent(
+                        "helper_daemon_unregistered_reinstall_required",
+                        details: ["artifact_version": helperVersion]
+                    )
                 }
-                LocalTrafficAudit.shared.recordEvent(
-                    "helper_daemon_unregistered_reinstall_required",
-                    details: ["artifact_version": helperVersion]
-                )
             }
             if installedVersion == helperVersion {
                 LocalTrafficAudit.shared.recordEvent(
@@ -206,29 +242,61 @@ nonisolated struct HelperManager {
         // Recover DNS and stop Mihomo before launchd replaces an authenticated
         // older helper, but deliberately retain any live PF state. Disarming
         // here opened a direct-egress window for the entire administrator
-        // prompt and left the host open if the user cancelled. The replacement
-        // helper restores the persisted PF state at launch (or installs its
-        // emergency block if the older state is no longer readable), and the
-        // connect transaction tightens it with current metadata immediately
-        // after this method returns.
+        // prompt. The replacement helper restores the persisted PF state at
+        // launch (or installs its emergency block if the older state is no
+        // longer readable), and the connect transaction tightens it with
+        // current metadata immediately after this method returns.
+        var coreStoppedForReplacement = false
+        var upgradeSucceeded = false
+        defer {
+            // A cancelled or failed replacement has no Core to carry traffic.
+            // Release through Disconnect's path, without hiding the install error.
+            if shouldReleaseAfterAbandonedUpgrade(
+                coreStopped: coreStoppedForReplacement,
+                succeeded: upgradeSucceeded
+            ) {
+                do {
+                    try KillSwitchService.disarm()
+                    LocalTrafficAudit.shared.recordEvent(
+                        "helper_upgrade_abandoned_released"
+                    )
+                } catch {
+                    // A disarm reply can be lost after PF was released, just
+                    // as on Disconnect; only a confirmed release clears intent.
+                    if KillSwitchService.refreshStatus()
+                        == .confirmed(requiresProtectionRecovery: false) {
+                        KillSwitchService.isArmed = false
+                        LocalTrafficAudit.shared.recordEvent(
+                            "helper_upgrade_abandoned_released",
+                            details: ["disarm_error": error.localizedDescription]
+                        )
+                    } else {
+                        LocalTrafficAudit.shared.recordEvent(
+                            "helper_upgrade_abandoned_release_failed",
+                            details: ["error": error.localizedDescription]
+                        )
+                    }
+                }
+            }
+        }
         if installedVersion != nil {
             do {
-                _ = try restoreProtectedDNSIfConfigured()
-                try stopCore()
-                let status = try killSwitchStatus()
-                if status.armed || status.wanted, !status.live {
-                    throw HelperIPCError.commandFailed(
-                        "The previous helper could not keep PF fail-closed during its upgrade."
-                    )
-                }
+                try prepareAuthenticatedHelperForReplacement(
+                    restoreDNS: { _ = try restoreProtectedDNSIfConfigured() },
+                    stopCore: {
+                        try stopCore()
+                        coreStoppedForReplacement = true
+                    },
+                    killSwitchStatus: killSwitchStatus
+                )
             } catch {
                 LocalTrafficAudit.shared.recordEvent(
                     "helper_upgrade_preflight_failed",
                     details: ["error": error.localizedDescription]
                 )
                 throw HelperInstallError.installFailed(
-                    "The previous network helper could not restore DNS, stop "
-                        + "the core, and retain firewall protection safely. "
+                    "The previous network helper could not stop the core and "
+                        + "retain firewall protection safely. "
                         + error.localizedDescription
                 )
             }
@@ -245,8 +313,27 @@ nonisolated struct HelperManager {
                 mihomoSource: mihomoSource,
                 preparationStartedAt: preparationStartedAt
             ) {
+                upgradeSucceeded = true
                 return
             }
+        }
+
+        // A caller that did not ask for a repair stops before the prompt
+        // (MAC3-ADD-F1). Connect and Restore internet own the prompt; if Core
+        // was stopped for this upgrade, the deferred cleanup releases PF.
+        guard administratorPrompt else {
+            LocalTrafficAudit.shared.recordEvent(
+                "helper_administrator_prompt_withheld",
+                details: [
+                    "installed_version": installedVersion
+                        ?? (daemonRejected ? "rejected_client" : "unavailable"),
+                    "expected_version": helperVersion,
+                ]
+            )
+            if daemonRejected { throw HelperIPCError.forbidden }
+            throw HelperInstallError.installFailed(
+                "The network helper needs administrator approval, which only Connect or Restore internet asks for."
+            )
         }
 
         try verifyEmbeddedExecutable(
@@ -301,6 +388,10 @@ nonisolated struct HelperManager {
         guard process.terminationStatus == 0 else {
             let data = errors.fileHandleForReading.readDataToEndOfFile()
             let message = String(data: data, encoding: .utf8) ?? ""
+            if let account = boundAccount(inInstallerMessage: message) {
+                LocalTrafficAudit.shared.recordEvent("helper_bound_to_another_account")
+                throw HelperIPCError.boundToAnotherUser(account)
+            }
             // AppleScript reports a dismissed credential dialog with the
             // localized "User canceled" text, so plain "cancel" matching both
             // misses non-English systems (zh-Hans emits "用户已取消") and
@@ -342,6 +433,7 @@ nonisolated struct HelperManager {
                         ),
                     ]
                 )
+                upgradeSucceeded = true
                 return
             }
             guard Date() < startupDeadline else { break }
@@ -361,6 +453,13 @@ nonisolated struct HelperManager {
             ]
         )
         throw HelperInstallError.installFailed(String(localized: "The authenticated helper did not start."))
+    }
+
+    static func shouldReleaseAfterAbandonedUpgrade(
+        coreStopped: Bool,
+        succeeded: Bool
+    ) -> Bool {
+        coreStopped && !succeeded
     }
 
     private static func durationMilliseconds(since start: Date) -> String {
@@ -401,8 +500,136 @@ nonisolated struct HelperManager {
         """
     }
 
+    /// Readies an authenticated older helper for replacement. Stopping the
+    /// core and confirming that any wanted PF state is live are required: PF
+    /// is the leak boundary while the daemon is swapped. DNS recovery is
+    /// attempted but does not gate the swap. An older helper that cannot read
+    /// its own DNS snapshot (corrupt, or naming a service that no longer
+    /// exists) fails this step on every attempt, and the replacement helper
+    /// is the component that can quarantine that snapshot and sweep the
+    /// loopback resolver. Refusing the upgrade here left such a host in
+    /// Protected Offline with no in-product way out.
+    static func prepareAuthenticatedHelperForReplacement(
+        restoreDNS: () throws -> Void,
+        stopCore: () throws -> Void,
+        killSwitchStatus: () throws -> (armed: Bool, wanted: Bool, live: Bool, healed: Bool)
+    ) throws {
+        do {
+            try restoreDNS()
+        } catch {
+            LocalTrafficAudit.shared.recordEvent(
+                "helper_upgrade_dns_restore_deferred",
+                details: ["error": error.localizedDescription]
+            )
+        }
+        try stopCore()
+        let status = try killSwitchStatus()
+        if status.armed || status.wanted, !status.live {
+            throw HelperIPCError.commandFailed(
+                "The previous helper could not keep PF fail-closed during its upgrade."
+            )
+        }
+    }
+
     static func isHelperRunning() -> Bool {
         currentVersion() == helperVersion
+    }
+
+    /// Read-only launchd view of the helper, used to explain an unreachable
+    /// helper while this Mac should be protected. Neither query needs
+    /// privileges.
+    enum LaunchState: Equatable {
+        /// Turned off under Login Items › Allow in the Background. launchd will
+        /// not start it, and no repair from the app works until it is back on.
+        case backgroundDisabled
+        /// launchd has no such job. macOS loads /etc/pf.conf at boot with PF
+        /// disabled. That hook declares an anchor and does not load the rule
+        /// file, so a missing helper does not reinstall a block.
+        case notLoaded
+        /// Loaded (an unreachable helper is then busy or restarting, and its PF
+        /// rules stay in the kernel), or launchd could not say.
+        case loadedOrUnknown
+    }
+
+    static func launchState() -> LaunchState {
+        if SMAppService.statusForLegacyPlist(
+            at: URL(fileURLWithPath: plistInstallPath)
+        ) == .requiresApproval {
+            return .backgroundDisabled
+        }
+        return daemonRegisteredWithLaunchd() ? .loadedOrUnknown : .notLoaded
+    }
+
+    /// What to tell the user instead of a generic repair error. nil when the
+    /// launch state is no evidence that protection is off.
+    static func unprotectedNotice(for state: LaunchState) -> String? {
+        switch state {
+        case .backgroundDisabled:
+            String(localized: "Tono's network helper is turned off in System Settings > General > Login Items & Extensions, so this Mac is not protected right now. Turn Tono on under Allow in the Background, then click Retry.")
+        case .notLoaded:
+            String(localized: "Tono's network helper is not running, so this Mac is not protected right now. Click Retry and approve the administrator prompt to repair it.")
+        case .loadedOrUnknown:
+            nil
+        }
+    }
+
+    /// launchd restarts a KeepAlive job no sooner than ten seconds after its
+    /// last launch (`minimum runtime`), so a crash loop shows two restarts
+    /// well inside this window.
+    static let crashLoopRestarts = 2
+    static let crashLoopWindowSeconds: TimeInterval = 25
+
+    /// Whether launchd restarted the helper job at least `crashLoopRestarts`
+    /// times between two `launchctl print system/<label>` samples. Reads the
+    /// job's top-level `runs = N`; a missing count on either side is no
+    /// evidence.
+    static func launchdShowsCrashLoop(before: String, after: String) -> Bool {
+        guard let first = launchdRunCount(before),
+              let last = launchdRunCount(after) else { return false }
+        return last - first >= crashLoopRestarts
+    }
+
+    private static func launchdRunCount(_ printed: String) -> Int? {
+        let prefix = "\truns = "
+        guard let line = printed.split(separator: "\n").first(where: { $0.hasPrefix(prefix) }) else {
+            return nil
+        }
+        return Int(line.dropFirst(prefix.count).trimmingCharacters(in: .whitespaces))
+    }
+
+    /// A current, registered helper that answers nothing is busy, starting,
+    /// or crash-looping: a startup failure after the PF restore installs the
+    /// emergency block and exits, and KeepAlive restarts it forever. Only the
+    /// administrator reinstall can change that (TM-claude-2). Bounded: the
+    /// socket answering ends the wait, and so does the window.
+    private static func daemonKeepsRestarting() -> Bool {
+        guard let before = launchctlPrint() else { return false }
+        let deadline = Date().addingTimeInterval(crashLoopWindowSeconds)
+        while Date() < deadline {
+            usleep(1_000_000)
+            if probeDaemon() != .unreachable { return false }
+            guard let after = launchctlPrint() else { return false }
+            if launchdShowsCrashLoop(before: before, after: after) { return true }
+        }
+        return false
+    }
+
+    private static func launchctlPrint() -> String? {
+        let process = Process()
+        let output = Pipe()
+        process.executableURL = URL(fileURLWithPath: "/bin/launchctl")
+        process.arguments = ["print", "system/\(plistLabel)"]
+        process.standardOutput = output
+        process.standardError = FileHandle.nullDevice
+        do {
+            try process.run()
+        } catch {
+            return nil
+        }
+        let data = output.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else { return nil }
+        return String(decoding: data, as: UTF8.self)
     }
 
     static var hasInstalledHelperArtifact: Bool {
@@ -472,7 +699,8 @@ nonisolated struct HelperManager {
         }
     }
 
-    private static func currentVersion() -> String? {
+    /// The daemon's own reply, not the required or on-disk helper version.
+    static func currentVersion() -> String? {
         guard case .version(let value) = probeDaemon() else { return nil }
         return value
     }
@@ -493,7 +721,7 @@ nonisolated struct HelperManager {
         return process.terminationStatus == 0
     }
 
-    private static func installedArtifactVersion() -> String? {
+    static func installedArtifactVersion() -> String? {
         guard hasInstalledHelperArtifact else { return nil }
         let process = Process()
         let output = Pipe()
@@ -639,8 +867,9 @@ nonisolated struct HelperManager {
         return try requireKillSwitchSuccess(result, operation: "arm")
     }
 
-    static func disarmKillSwitch() throws {
-        let result = try sendRequest(method: "POST", path: "/killswitch/disarm")
+    static func disarmKillSwitch(preserveAIHold: Bool = false) throws {
+        let path = preserveAIHold ? "/killswitch/release" : "/killswitch/disarm"
+        let result = try sendRequest(method: "POST", path: path)
         _ = try requireKillSwitchSuccess(result, operation: "disarm")
     }
 
@@ -653,6 +882,22 @@ nonisolated struct HelperManager {
         // dropping the field here keeps callers from reading a stale "no" as a
         // statement about the last arm.
         return (reply.armed, reply.wanted, reply.live, reply.healed)
+    }
+
+    /// Read-only PF liveness for a connected session. Unlike
+    /// `killSwitchStatus()`, the helper loads nothing and flushes nothing to
+    /// answer it.
+    static func killSwitchHealth() throws -> (
+        wanted: Bool, live: Bool, repairedSinceArm: Bool
+    ) {
+        let result = try sendRequest(method: "GET", path: "/killswitch/health")
+        let envelope = try requireSuccess(result, operation: "kill switch health")
+        guard let wanted = envelope.wantArmed,
+              let live = envelope.live,
+              let repaired = envelope.repairedSinceArm else {
+            throw HelperIPCError.invalidResponse
+        }
+        return (wanted, live, repaired)
     }
 
     /// Whether any daemon answered the socket at all, regardless of the reply's
@@ -685,6 +930,43 @@ nonisolated struct HelperManager {
               envelope.snapshotPresent != true else {
             throw HelperIPCError.invalidResponse
         }
+        if protectedDNSRestoreNotice(restoreReply: result.body) != nil {
+            // The helper archives that snapshot, so no later restore reports
+            // it again. Keep the notice until a window has shown it: this
+            // restore may run at launch, on Quit or in update preparation.
+            AppProfile.defaults.set(true, forKey: protectedDNSOriginalLostKey)
+            LocalTrafficAudit.shared.recordEvent(
+                "protected_dns_original_not_restored",
+                details: ["service": envelope.service ?? ""]
+            )
+        }
+    }
+
+    private static let protectedDNSOriginalLostKey = "Tono_protectedDNSOriginalLost"
+
+    /// The user-facing notice for a successful `/dns/restore` reply, or nil
+    /// when the original servers went back (or the helper predates the
+    /// field). Success with `originalDNSRestored: false` means PF may be
+    /// released, but the user's saved DNS servers were not restored.
+    static func protectedDNSRestoreNotice(restoreReply body: Data) -> String? {
+        guard let envelope = try? JSONDecoder().decode(Envelope.self, from: body),
+              envelope.originalDNSRestored == false else { return nil }
+        return protectedDNSOriginalLostNotice
+    }
+
+    private static var protectedDNSOriginalLostNotice: String {
+        String(
+            localized: "Tono did not restore the saved DNS settings because the network service was removed or its DNS settings changed. Any newer DNS settings were kept. Check System Settings > Network if DNS needs adjustment."
+        )
+    }
+
+    /// Returns the pending original-DNS notice once and clears it.
+    static func takeProtectedDNSRestoreNotice() -> String? {
+        guard AppProfile.defaults.bool(forKey: protectedDNSOriginalLostKey) else {
+            return nil
+        }
+        AppProfile.defaults.removeObject(forKey: protectedDNSOriginalLostKey)
+        return protectedDNSOriginalLostNotice
     }
 
     /// Restore whenever the helper can inspect DNS. A missing snapshot used to
@@ -846,12 +1128,93 @@ nonisolated struct HelperManager {
         }
     }
 
+    static let silentUpgradePollTimeout: TimeInterval = 45
+
+    struct UpdateStatus: Decodable, Sendable {
+        let pending: Bool
+        let receipt: UpdateContractV1.Receipt?
+        let execution: String?
+        let disconnectVerified: Bool?
+        let diagnostic: String?
+    }
+
+    static func updatePackagePath(_ package: URL) throws -> String {
+        // Foundation resolvingSymlinksInPath strips /private on macOS and can
+        // hand root a /var or /tmp symlink. Keep the POSIX spelling on the wire.
+        // This is not a trust decision: root still walks every component with
+        // openat(O_NOFOLLOW), verifies ownership, copies and hashes its input.
+        let path = package.path
+        guard package.isFileURL, !path.utf8.contains(0), path.utf8.count < Int(PATH_MAX) else {
+            throw HelperIPCError.invalidResponse
+        }
+        var resolved = [CChar](repeating: 0, count: Int(PATH_MAX))
+        guard realpath(path, &resolved) != nil else {
+            throw NativeUpdateDownload.failure("Downloaded update package path is unavailable.")
+        }
+        return String(cString: resolved)
+    }
+
+    static func updateRequest(_ operation: String, object: [String: Any]? = nil) throws -> UpdateStatus {
+        let path = "/update/" + operation
+        let result = try sendRequest(method: operation == "status" ? "GET" : "POST", path: path,
+                                     body: object.map { try JSONSerialization.data(withJSONObject: $0) })
+        _ = try requireSuccess(result, operation: "update " + operation)
+        return try JSONDecoder().decode(UpdateStatus.self, from: result.body)
+    }
+
+    static func updateOffer(manifest: Data, signature: Data) throws -> Bool {
+        let result = try sendJSONObject(method: "POST", path: "/update/offer", object: [
+            "manifest": manifest.base64EncodedString(), "signature": signature.base64EncodedString(),
+        ])
+        _ = try requireSuccess(result, operation: "verify update offer")
+        guard let object = try JSONSerialization.jsonObject(with: result.body) as? [String: Any],
+              let available = object["available"] as? Bool else { throw HelperIPCError.invalidResponse }
+        return available
+    }
+
+    static func receiveTimeout(for path: String) -> Int {
+        switch path {
+        case "/update/stage": return 600
+        case "/update/prepare", "/update/commit", "/update/reconcile", "/update/disconnect", "/update/release", "/update/retire": return 45
+        case "/update/offer", "/update/execute": return 30
+        case "/killswitch/arm", "/helper/upgrade":
+            return 30
+        case "/core/stop":
+            return 6
+        case "/core/start", "/core/sync":
+            return 20
+        case "/version", "/core/status", "/killswitch/status":
+            return 2
+        default:
+            return 6
+        }
+    }
+
+    /// Whether a failed `/helper/upgrade` request may still have reached the
+    /// helper. The helper replies before it exits, so a request written whole
+    /// whose reply was lost (empty or invalid response) can leave the upgrade
+    /// under way and keeps the version poll. A socket, connect or send failure
+    /// proves it never arrived — the helper upgrades only after reading the
+    /// full body — so polling there would wait out the 45 s timeout for
+    /// nothing (MAC-HELPER-UPGRADE-TRY-STALL). Unknown errors keep the poll.
+    static func upgradeRequestMayHaveBeenDelivered(_ error: Error) -> Bool {
+        guard let ipcError = error as? HelperIPCError else { return true }
+        switch ipcError {
+        case .socketFailed, .connectFailed, .boundToAnotherUser:
+            return false
+        default:
+            return true
+        }
+    }
+
     private static func attemptSilentUpgrade(
         helperSource: URL,
         mihomoSource: URL,
         preparationStartedAt: Date
     ) -> Bool {
         do {
+            try HelperPathConfinement.validateUpgradePath(helperSource.path)
+            try HelperPathConfinement.validateUpgradePath(mihomoSource.path)
             try verifyEmbeddedExecutable(
                 helperSource,
                 identifier: "com.raydocs.tono.helper"
@@ -863,14 +1226,27 @@ nonisolated struct HelperManager {
                 "mihomoSource": mihomoSource.path,
             ]
             let body = try JSONSerialization.data(withJSONObject: payload)
-            let response = try sendRequest(
-                method: "POST",
-                path: "/helper/upgrade",
-                body: body
-            )
-            guard response.status == 200 else { return false }
+            var response: (status: Int, body: Data)?
+            do {
+                response = try sendRequest(
+                    method: "POST",
+                    path: "/helper/upgrade",
+                    body: body
+                )
+            } catch {
+                guard Self.upgradeRequestMayHaveBeenDelivered(error) else {
+                    LocalTrafficAudit.shared.recordEvent(
+                        "helper_silent_upgrade_failed",
+                        details: ["error": error.localizedDescription]
+                    )
+                    return false
+                }
+            }
+            if let response, response.status != 200 {
+                return false
+            }
 
-            let startupDeadline = Date().addingTimeInterval(15)
+            let startupDeadline = Date().addingTimeInterval(silentUpgradePollTimeout)
             var pollIntervalMicroseconds: UInt32 = 100_000
             while Date() < startupDeadline {
                 usleep(pollIntervalMicroseconds)
@@ -907,6 +1283,73 @@ nonisolated struct HelperManager {
         }
     }
 
+    /// The account a live helper serves, when that is not the calling account.
+    /// The daemon hands its socket to the one uid it trusts, mode 0600, so
+    /// another account cannot connect at all. It used to see only "helper
+    /// unavailable", and a repair from that account could rebind the helper to
+    /// itself and take the first account's barrier with it (H19-O-F3).
+    /// A socket without the daemon's launchd plist is what `--emergency-reset`
+    /// leaves behind, not a helper serving anyone (MA-Codex-4).
+    static func helperBoundAccount(
+        socketPath: String = HelperManager.socketPath,
+        currentUID: uid_t = getuid(),
+        daemonPlistPath: String = HelperManager.plistInstallPath
+    ) -> String? {
+        var metadata = stat()
+        guard lstat(daemonPlistPath, &metadata) == 0,
+              lstat(socketPath, &metadata) == 0,
+              metadata.st_mode & mode_t(S_IFMT) == mode_t(S_IFSOCK),
+              metadata.st_uid != currentUID, metadata.st_uid != 0 else { return nil }
+        if let record = getpwuid(metadata.st_uid), let name = record.pointee.pw_name {
+            return String(cString: name)
+        }
+        return "UID \(metadata.st_uid)"
+    }
+
+    /// The error for a failed connect to the helper socket.
+    static func connectFailure(
+        socketPath: String = HelperManager.socketPath,
+        currentUID: uid_t = getuid(),
+        daemonPlistPath: String = HelperManager.plistInstallPath
+    ) -> HelperIPCError {
+        if let account = helperBoundAccount(
+            socketPath: socketPath, currentUID: currentUID, daemonPlistPath: daemonPlistPath
+        ) {
+            return .boundToAnotherUser(account)
+        }
+        return .connectFailed
+    }
+
+    private static let boundAccountMarker = "TONO_HELPER_BOUND_TO_ACCOUNT:"
+
+    /// Run by root under the helper's update lock (the same lock
+    /// `--emergency-reset` holds), before the install replaces anything, so the
+    /// record it reads is the one the install overwrites (MA-Codex-3). While
+    /// the trusted-user record names another account that still exists on this
+    /// Mac, refuse and name it: no install from this app, automatic or
+    /// explicit, rebinds the helper away from that account. Moving Tono to
+    /// another account is an administrator's `--emergency-reset`, which
+    /// releases that account's protection and removes the record. A record for
+    /// an account that no longer exists does not block the install.
+    static func boundAccountGuard(uid: uid_t, allowedUIDPath: String) -> String {
+        """
+        if [ -f '\(allowedUIDPath)' ]; then
+          tono_bound_uid=$(/usr/bin/tr -cd '0-9' < '\(allowedUIDPath)')
+          if [ -n "$tono_bound_uid" ] && [ "$tono_bound_uid" != '\(uid)' ] && tono_bound_name=$(/usr/bin/id -un "$tono_bound_uid" 2>/dev/null); then
+            /bin/echo "\(boundAccountMarker)$tono_bound_name" >&2
+            exit 75
+          fi
+        fi
+        """
+    }
+
+    /// The account named by a refused root install, from osascript's error text.
+    static func boundAccount(inInstallerMessage message: String) -> String? {
+        guard let marker = message.range(of: boundAccountMarker) else { return nil }
+        let name = message[marker.upperBound...].prefix { !$0.isWhitespace && $0 != "(" }
+        return name.isEmpty ? nil : String(name)
+    }
+
     // MARK: - Bounded Unix-socket HTTP client
 
     private static func sendRequest(
@@ -926,19 +1369,7 @@ nonisolated struct HelperManager {
         // must fail fast if an old daemon is wedged. Only Kill Switch arm can
         // legitimately spend longer while resolving and committing its bounded
         // allowlist.
-        let receiveTimeoutSeconds: Int
-        switch path {
-        case "/killswitch/arm":
-            receiveTimeoutSeconds = 30
-        case "/core/stop":
-            receiveTimeoutSeconds = 6
-        case "/core/start", "/core/sync":
-            receiveTimeoutSeconds = 20
-        case "/version", "/core/status", "/killswitch/status":
-            receiveTimeoutSeconds = 2
-        default:
-            receiveTimeoutSeconds = 6
-        }
+        let receiveTimeoutSeconds = receiveTimeout(for: path)
         var receiveTimeout = timeval(tv_sec: receiveTimeoutSeconds, tv_usec: 0)
         _ = withUnsafePointer(to: &receiveTimeout) {
             setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, $0, socklen_t(MemoryLayout<timeval>.size))
@@ -959,7 +1390,7 @@ nonisolated struct HelperManager {
                 Darwin.connect(fd, $0, socklen_t(MemoryLayout<sockaddr_un>.size))
             }
         }
-        guard connected == 0 else { throw HelperIPCError.connectFailed }
+        guard connected == 0 else { throw connectFailure() }
 
         let payload = body ?? Data()
         var request = Data(
@@ -1033,6 +1464,9 @@ enum HelperIPCError: LocalizedError {
     case emptyResponse
     case invalidResponse
     case forbidden
+    /// The helper serves another macOS account on this Mac. Never repaired by
+    /// rebinding it to the calling account.
+    case boundToAnotherUser(String)
     case commandFailed(String, code: String? = nil)
 
     var errorDescription: String? {
@@ -1043,6 +1477,8 @@ enum HelperIPCError: LocalizedError {
         case .invalidResponse: String(localized: "The network helper returned an invalid response.")
         case .forbidden:
             String(localized: "The installed network helper rejected this copy of Tono.")
+        case .boundToAnotherUser(let account):
+            String(localized: "Tono's network helper on this Mac is set up for the macOS account “\(account)” and keeps that account's network protection. Use Tono from that account. To move Tono to this account, an administrator can run sudo /Library/PrivilegedHelperTools/tono-core-helper --emergency-reset in Terminal, then reopen Tono.")
         // commandFailed carries helper-produced text verbatim; not a catalog key.
         case .commandFailed(let message, _): message
         }
@@ -1059,5 +1495,60 @@ private extension String {
             .replacingOccurrences(of: "\"", with: "\\\"")
             .replacingOccurrences(of: "\r", with: "")
             .replacingOccurrences(of: "\n", with: "\\n")
+    }
+}
+
+// MARK: - Helper Path Confinement
+
+enum HelperPathConfinement {
+    enum Error: Swift.Error, Equatable {
+        case notInAppBundle(String)
+        case pathTraversal(String)
+        case cannotSafelyOpen(String)
+        case escapesBundle(String)
+    }
+
+    static func isBundleConfined(path: String, bundlePath: String = Bundle.main.bundlePath) -> Bool {
+        guard !path.contains("..") else { return false }
+        let allowedPrefix = bundlePath.hasSuffix("/") ? bundlePath + "Contents/" : bundlePath + "/Contents/"
+        return path.hasPrefix(allowedPrefix)
+    }
+
+    static func validateUpgradePath(_ path: String, bundlePath: String = Bundle.main.bundlePath) throws {
+        guard !path.contains("..") else {
+            throw Error.pathTraversal(path)
+        }
+        guard isBundleConfined(path: path, bundlePath: bundlePath) else {
+            throw Error.notInAppBundle(path)
+        }
+        var resolved = [CChar](repeating: 0, count: Int(PATH_MAX))
+        guard realpath(path, &resolved) != nil else {
+            throw Error.cannotSafelyOpen(path)
+        }
+        let realPath = String(cString: resolved)
+
+        var resolvedBundle = [CChar](repeating: 0, count: Int(PATH_MAX))
+        let canonicalBundlePath: String
+        if realpath(bundlePath, &resolvedBundle) != nil {
+            canonicalBundlePath = String(cString: resolvedBundle)
+        } else {
+            canonicalBundlePath = bundlePath
+        }
+
+        let allowedPrefix = canonicalBundlePath.hasSuffix("/") ? canonicalBundlePath + "Contents/" : canonicalBundlePath + "/Contents/"
+        guard realPath.hasPrefix(allowedPrefix) else {
+            throw Error.escapesBundle(path)
+        }
+
+        let fd = open(realPath, O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK)
+        guard fd >= 0 else {
+            throw Error.cannotSafelyOpen(path)
+        }
+        defer { close(fd) }
+        var metadata = stat()
+        guard fstat(fd, &metadata) == 0,
+              metadata.st_mode & mode_t(S_IFMT) == mode_t(S_IFREG) else {
+            throw Error.cannotSafelyOpen(path)
+        }
     }
 }

@@ -1,12 +1,9 @@
 import SwiftUI
 
-/// Compact region code for the card meta line. Flags are no longer drawn;
-/// the region survives as quiet text next to the protocol chip. A flag emoji
-/// decodes to its ISO letters (🇺🇸 → "US"), otherwise a known region token in
-/// the wire name wins, then the city of the display name, then two-letter
-/// initials. Keep the maps aligned with `nodeCode` in the Windows
-/// `pages/tono/node-meta.ts`.
-func nodeRegionCode(flag: String, name: String) -> String {
+/// Geographic evidence from catalog metadata, without guessed initials or the
+/// hy2 list category. An unknown location must not satisfy a fixed region.
+/// Keep the maps aligned with `nodeCode` in Windows `pages/tono/node-meta.ts`.
+func catalogNodeRegionCode(flag: String, name: String) -> String? {
     let indicators = flag.unicodeScalars.filter { (0x1F1E6...0x1F1FF).contains($0.value) }
     if indicators.count == 2 {
         let letters = indicators.compactMap {
@@ -31,13 +28,21 @@ func nodeRegionCode(flag: String, name: String) -> String {
         "chicago": "US", "dallas": "US", "miami": "US",
         "tokyo": "JP", "osaka": "JP",
     ]
-    let city = displayName.split(separator: "·")[0]
-        .trimmingCharacters(in: .whitespaces)
-        .lowercased()
+    // An empty catalog name, or one that is only the separator, splits to
+    // nothing. Indexing [0] trapped the UI while drawing the card.
+    guard let rawCity = displayName.split(separator: "·").first else { return nil }
+    let city = rawCity.trimmingCharacters(in: .whitespaces).lowercased()
     if let cityCode = cityCodes[city] {
         return cityCode
     }
+    return nil
+}
 
+/// Compact card label: known geography first, then display-only initials.
+/// Guessed initials are never evidence for a recommendation's region.
+func nodeRegionCode(flag: String, name: String) -> String {
+    if let region = catalogNodeRegionCode(flag: flag, name: name) { return region }
+    let displayName = ProxyNode.displayName(for: name)
     let words = displayName.split(whereSeparator: { !$0.isLetter })
     if words.count >= 2 {
         return String(words.prefix(2).compactMap(\.first)).uppercased()
@@ -538,12 +543,7 @@ struct NodeCardView: View {
 
                             HStack(spacing: 6) {
                                 nodeMetaChip(node.protocolType.uppercased(), systemImage: "lock.fill")
-                                Label(
-                                    nodeRegionCode(flag: node.flag, name: node.name),
-                                    systemImage: "globe"
-                                )
-                                .font(.system(size: 10, weight: .semibold, design: .rounded))
-                                .foregroundStyle(.secondary)
+                                nodeRegionChip(flag: node.flag, name: node.name)
                                 if !node.relay.isEmpty {
                                     Text(node.relay)
                                         .font(.system(size: 10, weight: .medium))
@@ -600,6 +600,24 @@ struct NodeCardView: View {
             .padding(.horizontal, 6)
             .padding(.vertical, 3)
             .background(.white.opacity(colorScheme == .dark ? 0.08 : 0.42), in: Capsule())
+    }
+
+    @ViewBuilder
+    private func nodeRegionChip(flag: String, name: String) -> some View {
+        let region = nodeRegionCode(flag: flag, name: name)
+        if let flagEmoji = UnicodeCountryFlag.emoji(for: region) {
+            HStack(spacing: 4) {
+                Text(flagEmoji)
+                    .font(.system(size: 10))
+                Text(region)
+                    .font(.system(size: 10, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.secondary)
+            }
+        } else {
+            Label(region, systemImage: "globe")
+                .font(.system(size: 10, weight: .semibold, design: .rounded))
+                .foregroundStyle(.secondary)
+        }
     }
 }
 

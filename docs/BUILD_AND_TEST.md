@@ -13,7 +13,7 @@ protected-update qualification; this policy does not close either gate.
 | Mac Studio / Windows machine | Native acceptance devices, not required CI workers. Mac Studio's residential-exit role is retired. |
 | Self-hosted runners | Not required or registered by this change. No home-machine dispatcher or connectivity workflow is introduced. |
 | Retired controller | `raydocs/tono-build` remains private, archived, and Actions-disabled; do not register or dispatch there. |
-| Publication safeguards | The earlier 2026-09-14 API readback showed main unprotected and no required-reviewer rules in release environments. This does not establish current enforcement or prove visibility caused it. Re-qualify before signing/publication. |
+| Publication safeguards | The earlier 2026-09-14 API readback showed main unprotected and no required-reviewer rules in release environments. This does not establish current enforcement or prove visibility caused it. Customer publication follows the conditions in [AGENTS.md](../AGENTS.md). |
 
 This decision supersedes the earlier same-day proposal to register both home
 machines directly to private Tono. Do not follow that obsolete onboarding
@@ -26,7 +26,7 @@ proposal or machine addresses in an [archived handoff](archive/README.md).
 | Edit / review | MacBook | Git, docs, fixtures, focused frontend/Worker checks, browser review, remote logs and downloaded candidates. |
 | Routine build / automated checks | GitHub-hosted runner | Source/toolchain pins and exact-SHA evidence; no implicit installer execution or customer publication. |
 | Native acceptance | Recoverable Mac/Windows device | GUI, PF/WFP, DNS, crashes, install/upgrade/uninstall, adapters and sleep; separately authorized scenarios. |
-| Signing / publication | Separately gated release workflow | Match reviewed source/artifacts; SHIP_PLAN and release-line safeguards remain authoritative. |
+| Signing / publication | Release workflows | Signed candidates (draft or prerelease, on no feed) may be built for G3 evidence. Customer publication waits for owner-recorded SHIP_PLAN G1–G3 evidence and follows [AGENTS.md](../AGENTS.md) and [RELEASE_LINES](RELEASE_LINES.md#customer-publish-g4). |
 
 A hosted job can run native tests but does not replace installed-device
 acceptance. `windows-2025` is Windows Server, not Windows 11; hosted Windows
@@ -55,8 +55,11 @@ macOS app currently needs the macOS 26 SDK.
 1. Record the exact source SHA; remote main cannot verify uncommitted edits.
 2. Push intended changes on a review branch only when authorized; do not add
    another agent's dirty files or broaden artifact scope.
-3. Use current path-filtered CI. macOS and Windows CI also support manual
-   dispatch on an authorized remote ref when the required check is missing.
+3. The required status check is `ci-gate`. It runs on every pull request and
+   on `merge_group`, and calls the path-filtered workflows. Dispatch `ci-gate`
+   when that check is missing. macOS and Windows CI still support manual
+   dispatch on an authorized remote ref; dispatching them on a pull request as
+   well as `ci-gate` runs the heavy jobs twice.
 4. Verify each run's head SHA, event, workflow and jobs. A branch can advance
    while queued; distinguish a PR merge SHA from its source head.
 5. Download only needed artifacts/logs. Ordinary CI does not necessarily
@@ -75,6 +78,32 @@ Skipped jobs, compiled-out tests and zero-test runs are not qualification.
 GitHub standard hosted runner usage is free for public repositories; larger
 runners are paid. Manage artifact/cache retention and do not infer that every
 GitHub-hosted resource is free.
+
+### Which workflow must be green for a PR
+
+The required status check is `ci-gate` (`.github/workflows/ci-gate.yml`), green on the exact head SHA
+(`gh pr view N --json headRefOid,statusCheckRollup`). It is the only required check. `ci-gate` calls a
+workflow below when a touched path matches that workflow's list, and passes when each such job succeeded
+or was skipped because its paths were not touched. A missing `ci-gate` run is not green. The lists are
+the workflows' `push` path filters (connect-bench keeps its list in `tooling/scripts/ci-gate-changes.mjs`).
+Those `push` triggers run on `main`, `release/macos`, and `release/windows` only, so a pull-request
+branch does not start the same jobs a second time. In short:
+
+| Touched paths | Called workflow |
+|---|---|
+| `apps/macos/**`, `tooling/scripts/**` | `macos-ci.yml` |
+| `apps/windows/**` (and the update-contract fixtures it lists) | `windows-ci.yml` |
+| `services/**`, `ops-panel/**` (and the tooling scripts it lists) | `services-ci.yml` |
+| `tooling/scripts/sing-box/**`, `tooling/scripts/build-sing-box.sh` | `sing-box-alpha9-check.yml` |
+| `tooling/perf/connect-bench/**` (and the dial files it lists) | `connect-bench.yml` |
+
+Docs-only means every touched path is `*.md` or under `docs/`, none is under `.agents/` or `.claude/`,
+and no filter above matches it. `ci-gate` still runs and passes with those jobs skipped; that skip is
+not qualification of a tree the PR did not touch. A `*.md` that a filter matches (for example under
+`apps/` or `services/`) needs that workflow. Non-docs paths no filter covers (for example
+`.jev-route.json`, `.agents/`, `.claude/`, release or promote workflows) need no called workflow but need a
+dual_cross_family review. Dispatching a promote workflow to "get a check"
+publishes; never do it for that.
 
 ## Public repository and privileged boundaries
 
@@ -117,5 +146,5 @@ GitHub-hosted resource is free.
 - [Self-hosted runner security](https://docs.github.com/en/actions/reference/security/secure-use#hardening-for-self-hosted-runners)
 
 README is the entry point; this guide owns execution policy. Archived reports
-retain historical evidence with superseding notices. None of this authorizes
-production deployment, a version bump or customer update-channel promotion.
+retain historical evidence with superseding notices. Production deployment and
+customer update-channel promotion follow the conditions in [AGENTS.md](../AGENTS.md).

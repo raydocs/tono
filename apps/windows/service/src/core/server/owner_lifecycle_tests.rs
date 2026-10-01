@@ -17,7 +17,34 @@ fn owner(uid: u32) -> AuthenticatedOwner {
         key: uid.to_string(),
         identity: OwnerIdentity::Unix { uid, gid: 20 },
         app_data_root: std::env::temp_dir(),
+        peer_pid: None,
+        peer_session_id: None,
     }
+}
+
+#[tokio::test]
+#[serial]
+async fn release_retires_run_intent_when_the_active_owner_record_is_corrupt() -> anyhow::Result<()> {
+    use crate::core::desired::{load_owner_desired_state, persist_owner_core_started};
+    use crate::core::paths::service_paths;
+
+    let _lifecycle = super::OWNER_LIFECYCLE_LOCK.lock().await;
+    let owner = owner(97_003);
+    let paths = service_paths();
+    let desired_path = paths.for_owner_key(&owner.key).desired_state_path();
+    persist_owner_core_started(&owner, &crate::ClashConfig::default()).await?;
+    tokio::fs::write(paths.active_owner_path(), b"{interrupted owner record").await?;
+    assert!(load_active_owner().await?.is_none());
+
+    super::retire_unrecorded_owner_core(&owner).await?;
+    let still_wanted = load_owner_desired_state(&owner.key).await?.core_should_be_running;
+    tokio::fs::remove_file(&desired_path).await?;
+    assert!(!still_wanted, "a released Core must not retain runnable desired state");
+
+    // An idle release must not manufacture a state file or gain a new disk-write dependency.
+    super::retire_unrecorded_owner_core(&owner).await?;
+    assert!(!desired_path.exists());
+    Ok(())
 }
 
 struct RecordingTransition {
@@ -271,4 +298,33 @@ async fn disconnect_path_gates_stay_open_after_stop_clears_the_owner_record()
     );
     drop(guard);
     Ok(())
+}
+
+#[tokio::test]
+#[serial]
+async fn accepted_goodbye_refuses_new_lifecycle_work_before_its_response_grace() {
+    struct ResetGoodbye;
+    impl Drop for ResetGoodbye {
+        fn drop(&mut self) {
+            super::OWNER_GOODBYE_PENDING.store(false, std::sync::atomic::Ordering::SeqCst);
+        }
+    }
+    let _reset = ResetGoodbye;
+    let reserved_before_unlock = {
+        let _lifecycle = super::OWNER_LIFECYCLE_LOCK.lock().await;
+        super::owner_goodbye_verdict(false, Some(false)).expect("an idle daemon may stop");
+        super::schedule_owner_goodbye_shutdown();
+        // No await between scheduling and this sample: the response-grace task cannot run yet.
+        super::lifecycle_is_stopping()
+    };
+    let result = super::enter_owner_lifecycle(&owner(97_004), super::OwnerLifecycleGate::Unchecked).await;
+    match result {
+        std::ops::ControlFlow::Break(response) => {
+            let response = response.expect("a shutdown refusal must encode");
+            assert_eq!(response.status, http::StatusCode::SERVICE_UNAVAILABLE);
+        }
+        std::ops::ControlFlow::Continue(_) => panic!("a goodbye-reserved process admitted lifecycle work"),
+    }
+    assert!(super::lifecycle_is_stopping(), "shutdown must stay reserved");
+    assert!(reserved_before_unlock, "shutdown must be reserved before dropping the lifecycle lock");
 }

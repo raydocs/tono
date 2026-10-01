@@ -5,9 +5,47 @@ extension KillSwitchManager {
     @discardableResult
     static func writeRules(
         state: KillSwitchState,
-        allowedUID: uid_t
+        allowedUID: uid_t,
+        physicalInterfaces: [String]? = nil
     ) throws -> String {
-        let rules = renderRules(state: state, allowedUID: allowedUID)
+        let rules = physicalInterfaces.map {
+            renderRules(state: state, allowedUID: allowedUID, physicalInterfaces: $0)
+        } ?? renderRules(state: state, allowedUID: allowedUID)
+        // Detach the boot load before the rule file holds a block. A throw
+        // leaves the previous file in place.
+        _ = try ensureMainHook()
+        if mainConfigurationLoadsKillSwitchRules(try diskMainPFText()) {
+            throw HelperFailure.invalid(
+                "Main PF configuration still loads the kill switch rule file."
+            )
+        }
+        try writeRuleText(rules)
+        return rules
+    }
+
+    /// Whether this text would make `com.apple.pfctl` load Tono's rule file
+    /// at boot. The match is the line this helper used to write.
+    static func mainConfigurationLoadsKillSwitchRules(_ text: String) -> Bool {
+        text.components(separatedBy: .newlines).contains { line in
+            line.trimmingCharacters(in: .whitespaces)
+                == "load anchor \"\(killSwitchAnchor)\" from \"\(killSwitchPFPath)\""
+        }
+    }
+
+    static func diskMainPFText() throws -> String {
+        let data = try secureRead(killSwitchMainPFPath, maximumBytes: 1024 * 1024)
+        guard let text = String(data: data, encoding: .utf8) else {
+            throw HelperFailure.invalid("The main PF configuration is not UTF-8.")
+        }
+        return text
+    }
+
+    static func diskLoadsKillSwitchRules() -> Bool {
+        guard let text = try? diskMainPFText() else { return true }
+        return mainConfigurationLoadsKillSwitchRules(text)
+    }
+
+    static func writeRuleText(_ rules: String) throws {
         try atomicWrite(
             path: killSwitchPFPath,
             data: Data(rules.utf8),
@@ -19,12 +57,91 @@ extension KillSwitchManager {
                 checked.message.isEmpty ? "PF rule validation failed." : checked.message
             )
         }
-        return rules
+    }
+
+    /// Wired and Wi-Fi interfaces present now (`enN`, which also covers USB
+    /// and Thunderbolt Ethernet and iPhone USB tethering). VPN clients use
+    /// utun, ipsec or ppp and are never in this list.
+    static func physicalEgressInterfaces() -> [String] {
+        var head: UnsafeMutablePointer<ifaddrs>?
+        guard getifaddrs(&head) == 0, let first = head else { return [] }
+        defer { freeifaddrs(head) }
+        var names = Set<String>()
+        for entry in sequence(first: first, next: { $0.pointee.ifa_next }) {
+            let name = String(cString: entry.pointee.ifa_name)
+            guard name.hasPrefix("en"), name.count > 2,
+                  name.dropFirst(2).allSatisfy({ $0.isASCII && $0.isNumber }) else { continue }
+            names.insert(name)
+        }
+        return names.sorted()
+    }
+
+    /// Interfaces named on the LAN DNS block. `nil` means that block is not in
+    /// the rules (no tunnel). `[]` means the block is unscoped, which stays
+    /// fail-closed and must not be narrowed onto a NIC list.
+    static func lanDNSInterfaces(in rules: String) -> [String]? {
+        let lines = rules.split(separator: "\n")
+            .filter { $0.contains("\"tono-lan-dns\"") }
+        guard !lines.isEmpty else { return nil }
+        var interfaces = Set<String>()
+        for line in lines {
+            guard let start = line.range(of: " on ") else { return [] }
+            let scope = line[start.upperBound...]
+            let names: [String]
+            if scope.hasPrefix("{") {
+                guard let end = scope.firstIndex(of: "}") else { return [] }
+                names = scope[scope.index(after: scope.startIndex)..<end]
+                    .split(whereSeparator: { $0 == "," || $0.isWhitespace }).map(String.init)
+            } else {
+                names = scope.split(whereSeparator: \.isWhitespace).prefix(1).map(String.init)
+            }
+            guard !names.isEmpty, names.allSatisfy(isPhysicalInterfaceName) else { return [] }
+            interfaces.formUnion(names)
+        }
+        return interfaces.sorted()
+    }
+
+    private static func isPhysicalInterfaceName(_ name: String) -> Bool {
+        name.hasPrefix("en") && name.count > 2
+            && name.dropFirst(2).allSatisfy { $0.isASCII && $0.isNumber }
+    }
+
+    /// Widen only the managed DNS blocks. The persisted recovery state omits
+    /// live DIRECT exceptions, so re-rendering it here would revoke traffic.
+    /// A withheld or unconfirmed source is left for the next committed arm.
+    static func widenLANScope(
+        in source: String,
+        current: [String],
+        baseline: Set<String>?
+    ) -> String? {
+        guard let baseline, passRules(in: source) == baseline,
+              !current.isEmpty, current.allSatisfy(isPhysicalInterfaceName),
+              let loaded = lanDNSInterfaces(in: source), !loaded.isEmpty else { return nil }
+        let interfaces = Set(loaded).union(current).sorted().joined(separator: ", ")
+        var lines = source.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        for index in lines.indices where lines[index].contains("\"tono-lan-dns\"") {
+            guard lines[index].hasPrefix("block drop out quick on { "),
+                  let start = lines[index].range(of: "on { "),
+                  let end = lines[index][start.upperBound...].range(of: " }") else { return nil }
+            lines[index].replaceSubrange(start.lowerBound..<end.upperBound, with: "on { \(interfaces) }")
+        }
+        let widened = lines.joined(separator: "\n")
+        guard passRules(in: widened) == baseline else { return nil }
+        return widened
+    }
+
+    /// Reload only to add a physical NIC. An empty current set must not turn
+    /// the scoped block into a global one (that would catch DNS on a company
+    /// VPN's utun). An already-unscoped block is left alone.
+    static func lanDNSScopeNeedsReload(loaded: [String]?, current: [String]) -> Bool {
+        guard let loaded, !loaded.isEmpty, !current.isEmpty else { return false }
+        return !Set(current).isSubset(of: Set(loaded))
     }
 
     static func renderRules(
         state: KillSwitchState,
-        allowedUID: uid_t
+        allowedUID: uid_t,
+        physicalInterfaces: [String] = KillSwitchManager.physicalEgressInterfaces()
     ) -> String {
         var lines = [
             "# Managed by Tono Kill Switch — do not edit",
@@ -71,24 +188,32 @@ extension KillSwitchManager {
         ]
         // Only while a TUN is up. Emergency fail-closed has no tunnel and
         // must not keep Sidecar/clipboard as a side channel.
+        //
+        // `no state`: macOS creates and destroys awdl0, llw0 and bridge100 on
+        // demand (Universal Clipboard, AirDrop, Sidecar), and PF must not hold
+        // if-bound state entries on them. The allow set is unchanged: both
+        // directions have their own pass, and these are the first rules that
+        // can match on those interfaces (only the lo0 passes come before), so
+        // every packet there is decided here without a state. Same shape as
+        // the inbound `tono-dhcp` permit below.
         if !state.tunnelInterfaces.isEmpty {
             lines.append(
-                "pass in quick on awdl0 all keep state (if-bound) label \"tono-continuity\""
+                "pass in quick on awdl0 all no state label \"tono-continuity\""
             )
             lines.append(
-                "pass out quick on awdl0 all keep state (if-bound) label \"tono-continuity\""
+                "pass out quick on awdl0 all no state label \"tono-continuity\""
             )
             lines.append(
-                "pass in quick on llw0 all keep state (if-bound) label \"tono-continuity\""
+                "pass in quick on llw0 all no state label \"tono-continuity\""
             )
             lines.append(
-                "pass out quick on llw0 all keep state (if-bound) label \"tono-continuity\""
+                "pass out quick on llw0 all no state label \"tono-continuity\""
             )
             lines.append(
-                "pass in quick on bridge100 all keep state (if-bound) label \"tono-continuity\""
+                "pass in quick on bridge100 all no state label \"tono-continuity\""
             )
             lines.append(
-                "pass out quick on bridge100 all keep state (if-bound) label \"tono-continuity\""
+                "pass out quick on bridge100 all no state label \"tono-continuity\""
             )
             lines.append(
                 "pass out quick inet proto udp to 224.0.0.251 port 5353 keep state (if-bound) label \"tono-mdns\""
@@ -101,6 +226,24 @@ extension KillSwitchManager {
             )
             lines.append(
                 "pass in quick inet6 proto udp to ff02::fb port 5353 keep state (if-bound) label \"tono-mdns\""
+            )
+            // LAN ranges bypass the TUN, so DNS sent straight to a LAN resolver
+            // would never meet `hijack-dns`. System DNS is the loopback listener;
+            // nothing protected needs plain DNS or DoT to the LAN. Scoped to the
+            // physical interfaces so a company VPN running beside Tono keeps the
+            // DNS it pushes to its own utun. With no physical interface found,
+            // the block stays unscoped: fail closed. PF only: the app's
+            // Protected DNS audit still holds the session on that VPN's split
+            // DNS (provisional product decision; see
+            // holdProtectedDNSSupplementalConflict).
+            let lanDNSScope = physicalInterfaces.isEmpty
+                ? ""
+                : "on { \(physicalInterfaces.joined(separator: ", ")) } "
+            lines.append(
+                "block drop out quick \(lanDNSScope)inet proto { tcp, udp } to { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16 } port { 53, 853 } label \"tono-lan-dns\""
+            )
+            lines.append(
+                "block drop out quick \(lanDNSScope)inet6 proto { tcp, udp } to { fe80::/10, fc00::/7, ff00::/8 } port { 53, 853 } label \"tono-lan-dns\""
             )
             lines.append(
                 "pass out quick inet to { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16 } keep state (if-bound) label \"tono-lan\""
@@ -120,11 +263,17 @@ extension KillSwitchManager {
             lines.append(
                 "pass in quick inet6 from { fe80::/10, ff00::/8, fc00::/7 } keep state (if-bound) label \"tono-linklocal\""
             )
+            // DHCP is identified by ports alone, and any local process can send
+            // from port 68, so the destination carries the bound: the limited
+            // broadcast only (unicast renewal to a LAN server is `tono-lan`).
+            // Server replies come from the server's own address, so the inbound
+            // permit cannot name one; `no state` keeps it from creating a return
+            // path that would let port 68 answer an arbitrary public host.
             lines.append(
-                "pass out quick inet proto udp from any port 68 to any port 67 keep state (if-bound) label \"tono-dhcp\""
+                "pass out quick inet proto udp from any port 68 to 255.255.255.255 port 67 keep state (if-bound) label \"tono-dhcp\""
             )
             lines.append(
-                "pass in quick inet proto udp from any port 67 to any port 68 keep state (if-bound) label \"tono-dhcp\""
+                "pass in quick inet proto udp from any port 67 to any port 68 no state label \"tono-dhcp\""
             )
             lines.append(
                 "pass out quick inet6 proto ipv6-icmp icmp6-type { 133, 134, 135, 136, 137 } keep state (if-bound) label \"tono-ndp\""
@@ -156,16 +305,24 @@ extension KillSwitchManager {
         for endpoint in controlEndpoints.sorted(by: {
             ($0.transport, $0.port, $0.address) < ($1.transport, $1.port, $1.address)
         }) {
-            // Restricted to the two identities that legitimately use this
-            // bootstrap path: the root helper (DERP map refresh) and the signed
-            // app running as the interactive user (control-plane recovery while
+            // Restricted to two UIDs: root (the helper's DERP map refresh) and
+            // the interactive user the app runs as (control-plane recovery while
             // the tunnel is down). Without a `user` clause — the only exception
-            // family that lacked one — *any* local process could send to these
-            // addresses on 443 outside the tunnel. Because the control plane is
-            // fronted by shared anycast addresses and the edge routes by SNI,
-            // that was enough for an unprivileged process to reach an unrelated
-            // origin of its choosing on the same address and disclose the real
-            // IP while the kill switch was armed.
+            // family that lacked one — *any* local process, including other
+            // local users', could send to these addresses on 443 outside the
+            // tunnel.
+            //
+            // This is a UID boundary, not an app boundary. PF's `user` matches
+            // the socket owner's UID and PF has no process or code-signing
+            // condition, so every process the interactive user runs matches it
+            // exactly as the signed app does. The control plane is fronted by
+            // shared anycast addresses and the edge routes by SNI, so such a
+            // process can still reach an unrelated origin on these addresses
+            // from the physical interface, including in Protected Offline. The
+            // bound is these pinned addresses and TCP 443 only. Binding it to
+            // the app requires the bootstrap requests to be issued by root (the
+            // helper) or a dedicated identity and this rule to match only that;
+            // see #331 for the design.
             let family = endpoint.address.contains(":") ? "inet6" : "inet"
             lines.append(
                 "pass out quick \(family) proto \(endpoint.transport) " +
@@ -206,7 +363,13 @@ extension KillSwitchManager {
                 "label \"tono-direct\""
             )
         }
-        if state.reviewedBundleDirectEnabled {
+        // Only while a TUN is up, like continuity above. With no tunnel this
+        // address-free permit is not a scoped exception but root web-port
+        // egress on the physical interface, and the connect's first arm runs
+        // before the TUN exists. Dropped rather than refused: a throw would
+        // fail every connect that sends the flag early, and without the permit
+        // the bundle's direct traffic still fails closed.
+        if state.reviewedBundleDirectEnabled && !state.tunnelInterfaces.isEmpty {
             // The reviewed bundle's traffic is routed direct by the rule engine,
             // and those packets leave as root from the core, so no `to <address>`
             // exception can express them: the addresses rotate and mostly never
@@ -238,58 +401,7 @@ extension KillSwitchManager {
         guard let original = String(data: originalData, encoding: .utf8) else {
             throw HelperFailure.invalid("The main PF configuration is not UTF-8.")
         }
-        let hasBegin = original.contains(killSwitchBeginMarker)
-        let hasEnd = original.contains(killSwitchEndMarker)
-        guard hasBegin == hasEnd else {
-            throw HelperFailure.invalid("Malformed Tono PF markers.")
-        }
-
-        let snippet = """
-        \(killSwitchBeginMarker)
-        anchor "\(killSwitchAnchor)"
-        load anchor "\(killSwitchAnchor)" from "\(killSwitchPFPath)"
-        \(killSwitchEndMarker)
-
-        """
-        let candidate: String
-        if hasBegin,
-           let begin = original.range(of: killSwitchBeginMarker),
-           let end = original.range(
-            of: killSwitchEndMarker,
-            range: begin.upperBound..<original.endIndex
-           ) {
-            let suffixStart = original.index(afterLineContaining: end)
-            candidate = String(original[..<begin.lowerBound]) +
-                snippet +
-                String(original[suffixStart...]).trimmingLeadingNewlines()
-        } else {
-            let legacy = """
-
-            # Tono kill switch
-            anchor "\(killSwitchAnchor)"
-            load anchor "\(killSwitchAnchor)" from "\(killSwitchPFPath)"
-
-            """
-            var cleaned = original.replacingOccurrences(of: legacy, with: "\n")
-            guard !cleaned.contains("anchor \"\(killSwitchAnchor)\""),
-                  !cleaned.contains("load anchor \"\(killSwitchAnchor)\"") else {
-                throw HelperFailure.invalid("An unmanaged Tono PF anchor already exists.")
-            }
-            var lines = cleaned.components(separatedBy: .newlines)
-            var insertion = lines.count
-            for (index, line) in lines.enumerated() {
-                let value = line.trimmingCharacters(in: .whitespaces)
-                if value.hasPrefix("anchor ") || value.hasPrefix("pass ") ||
-                    value.hasPrefix("block ") || value.hasPrefix("match ") {
-                    insertion = index
-                    break
-                }
-            }
-            lines.insert(contentsOf: snippet.components(separatedBy: .newlines), at: insertion)
-            cleaned = lines.joined(separator: "\n")
-            if original.hasSuffix("\n"), !cleaned.hasSuffix("\n") { cleaned += "\n" }
-            candidate = cleaned
-        }
+        let candidate = try hookedMainConfiguration(original)
 
         // Second arm / reassert almost always leaves /etc/pf.conf unchanged.
         // Re-validating the same text with two `pfctl -nf` runs does not
@@ -338,6 +450,160 @@ extension KillSwitchManager {
         return candidate != original
     }
 
+    /// /etc/pf.conf with Tono's marked hook in place: what an arm writes.
+    /// Pure, so removal can be checked against exactly this text.
+    static func hookedMainConfiguration(_ original: String) throws -> String {
+        let hasBegin = original.contains(killSwitchBeginMarker)
+        let hasEnd = original.contains(killSwitchEndMarker)
+        guard hasBegin == hasEnd else {
+            throw HelperFailure.invalid("Malformed Tono PF markers.")
+        }
+
+        // Anchor declaration only. A `load anchor from` here is what
+        // com.apple.pfctl installs at every boot, including Safe Mode, where
+        // this LaunchDaemon does not run (BRICK-M9). The helper loads the
+        // child in the same pfctl transaction via `kernelMainConfiguration`.
+        let snippet = """
+        \(killSwitchBeginMarker)
+        anchor "\(killSwitchAnchor)"
+        \(killSwitchEndMarker)
+
+        """
+        let candidate: String
+        if hasBegin,
+           let begin = original.range(of: killSwitchBeginMarker),
+           let end = original.range(
+            of: killSwitchEndMarker,
+            range: begin.upperBound..<original.endIndex
+           ) {
+            let suffixStart = original.index(afterLineContaining: end)
+            candidate = String(original[..<begin.lowerBound]) +
+                snippet +
+                String(original[suffixStart...]).trimmingLeadingNewlines()
+        } else {
+            let legacy = """
+
+            # Tono kill switch
+            anchor "\(killSwitchAnchor)"
+            load anchor "\(killSwitchAnchor)" from "\(killSwitchPFPath)"
+
+            """
+            var cleaned = original.replacingOccurrences(of: legacy, with: "\n")
+            guard !cleaned.contains("anchor \"\(killSwitchAnchor)\""),
+                  !cleaned.contains("load anchor \"\(killSwitchAnchor)\"") else {
+                throw HelperFailure.invalid("An unmanaged Tono PF anchor already exists.")
+            }
+            var lines = cleaned.components(separatedBy: .newlines)
+            var insertion = lines.count
+            for (index, line) in lines.enumerated() {
+                let value = line.trimmingCharacters(in: .whitespaces)
+                if value.hasPrefix("anchor ") || value.hasPrefix("pass ") ||
+                    value.hasPrefix("block ") || value.hasPrefix("match ") {
+                    insertion = index
+                    break
+                }
+            }
+            lines.insert(contentsOf: snippet.components(separatedBy: .newlines), at: insertion)
+            cleaned = lines.joined(separator: "\n")
+            if original.hasSuffix("\n"), !cleaned.hasSuffix("\n") { cleaned += "\n" }
+            candidate = cleaned
+        }
+        return candidate
+    }
+
+    /// Ruleset passed to `pfctl -f` while this helper is enforcing. Disk
+    /// `/etc/pf.conf` only declares the anchor, so a later boot does not open
+    /// the rule file. The kernel load still carries `load anchor from` inside
+    /// the same transaction: a main reload otherwise flushes the child and,
+    /// when PF is already enabled, that gap is a leak.
+    static func kernelMainConfiguration(disk: String, childPath: String) throws -> String {
+        guard childPath.hasPrefix("/"),
+              !childPath.contains("\""),
+              !childPath.contains("\n"),
+              !childPath.contains("\r") else {
+            throw HelperFailure.invalid("PF anchor path is unsafe.")
+        }
+        let declared = try hookedMainConfiguration(disk)
+        let anchor = "anchor \"\(killSwitchAnchor)\""
+        let load = "load anchor \"\(killSwitchAnchor)\" from \"\(childPath)\""
+        var lines = declared.components(separatedBy: "\n")
+        guard let index = lines.firstIndex(of: anchor) else {
+            throw HelperFailure.invalid("Tono PF anchor is missing from the main ruleset.")
+        }
+        if lines.contains(load) { return declared }
+        lines.insert(load, at: index + 1)
+        var text = lines.joined(separator: "\n")
+        if declared.hasSuffix("\n"), !text.hasSuffix("\n") { text += "\n" }
+        return text
+    }
+
+    /// Load `/etc/pf.conf` into the kernel without writing the `load anchor`
+    /// line onto that file. The ephemeral copy is root-only and removed
+    /// before this returns.
+    static func loadHookedMainRuleset(
+        childPath: String = killSwitchPFPath,
+        loadOutcome: inout KernelLoadOutcome
+    ) throws -> HelperCommandResult {
+        let kernel = try kernelMainConfiguration(disk: try diskMainPFText(), childPath: childPath)
+        let ephemeral = "/etc/.tono-pf-load-\(UUID().uuidString)"
+        defer { unlink(ephemeral) }
+        try atomicWrite(path: ephemeral, data: Data(kernel.utf8), permissions: 0o600)
+        let checked = try run("/sbin/pfctl", ["-nf", ephemeral])
+        guard checked.status == 0 else {
+            throw HelperFailure.system(
+                checked.message.isEmpty ? "Main PF validation failed." : checked.message
+            )
+        }
+        // `-nf` does not change the kernel. Only `-f` can.
+        loadOutcome = .acceptedOrUnknown
+        return try run("/sbin/pfctl", ["-f", ephemeral])
+    }
+
+    /// Full removal only (`--emergency-reset`), after PF is released: take
+    /// Tono's marked block back out of /etc/pf.conf and delete the two backups
+    /// this helper wrote before its first edits. A disarm never calls this; the
+    /// hook stays while Tono is installed. Every line outside the markers is
+    /// kept, and an old backup is never copied over the live file.
+    static func removeMainHookAndBackups(
+        mainPath: String = killSwitchMainPFPath,
+        backupPaths: [String] = [killSwitchMainBackupPath, killSwitchHostsBackupPath]
+    ) throws {
+        let originalData = try secureRead(mainPath, maximumBytes: 1024 * 1024)
+        guard let original = String(data: originalData, encoding: .utf8) else {
+            throw HelperFailure.invalid("The main PF configuration is not UTF-8.")
+        }
+        let unhooked = try unhookedMainConfiguration(original)
+        if unhooked != original {
+            try atomicWrite(path: mainPath, data: Data(unhooked.utf8), permissions: 0o644)
+        }
+        // Only once the hook is out: with malformed markers the backups are
+        // what a person would need to repair the file by hand.
+        for path in backupPaths {
+            try removeIfPresent(path, requiredType: mode_t(S_IFREG), allowedOwner: 0)
+        }
+    }
+
+    /// The inverse of `hookedMainConfiguration`: drop the marked block and the
+    /// blank line a first arm leaves after it. Lines outside the markers stay.
+    static func unhookedMainConfiguration(_ hooked: String) throws -> String {
+        var lines = hooked.components(separatedBy: "\n")
+        let begins = lines.indices.filter { lines[$0] == killSwitchBeginMarker }
+        let ends = lines.indices.filter { lines[$0] == killSwitchEndMarker }
+        if begins.isEmpty, ends.isEmpty,
+           !hooked.contains(killSwitchBeginMarker), !hooked.contains(killSwitchEndMarker) {
+            return hooked
+        }
+        guard begins.count == 1, ends.count == 1, begins[0] < ends[0] else {
+            throw HelperFailure.invalid("Malformed Tono PF markers.")
+        }
+        var upper = ends[0] + 1
+        if upper < lines.count, lines[upper].isEmpty { upper += 1 }
+        lines.removeSubrange(begins[0]..<upper)
+        var unhooked = lines.joined(separator: "\n")
+        if hooked.hasSuffix("\n"), !unhooked.hasSuffix("\n") { unhooked += "\n" }
+        return unhooked
+    }
+
     /// What to do about states established under rules that no longer exist.
     ///
     /// A withdrawal must never leave a usable state behind — that is the whole
@@ -381,37 +647,123 @@ extension KillSwitchManager {
         return hosts.sorted()
     }
 
+    static let reviewedBundleLabel = "label \"tono-bundle\""
+
+    /// Whether the Core may stop without its utun while the reviewed-bundle
+    /// permit is loaded (#608), judged from the anchor file and the recorded
+    /// baseline. The baseline is never changed here: the next arm is measured
+    /// against the full set, so one that really drops the permit still sees
+    /// it withdrawn and flushes, and the app's arm restoring it once the
+    /// tunnel exists withdraws nothing.
+    enum ReviewedBundleWithholding: Equatable {
+        /// No permit in the baseline (none recorded counts as none), or the
+        /// file is the baseline without it: an earlier withhold completed.
+        case notLoaded
+        /// Load `rules`, the file without the permit. `disposal` is always
+        /// `.keep`: dropping a `from any to any` permit through an arm reduces
+        /// to `.full` in `withdrawnHosts`, a machine-wide flush on every
+        /// reload and policy apply, while this only stops new states for the
+        /// restart. If writing or loading fails, `rollback` (the file as read)
+        /// goes back on disk so file, kernel and baseline agree again and the
+        /// idle loop can retry; the Core must not stop.
+        case withhold(rules: String, disposal: StateDisposal, rollback: String)
+        /// The file is not the ruleset the baseline came from, so the permit
+        /// may be loaded and cannot be taken out safely: the Core must not stop.
+        case unknown
+    }
+
+    static func reviewedBundleWithholding(
+        loaded: String,
+        baseline: Set<String>?
+    ) -> ReviewedBundleWithholding {
+        guard let baseline,
+              baseline.contains(where: { $0.contains(reviewedBundleLabel) }) else { return .notLoaded }
+        let loadedPassRules = passRules(in: loaded)
+        if loadedPassRules == baseline.filter({ !$0.contains(reviewedBundleLabel) }) {
+            return .notLoaded
+        }
+        guard loadedPassRules == baseline else { return .unknown }
+        let rules = loaded.split(separator: "\n", omittingEmptySubsequences: false)
+            .filter { !$0.contains(reviewedBundleLabel) }
+            .joined(separator: "\n")
+        return .withhold(rules: rules, disposal: .keep, rollback: loaded)
+    }
+
     static func ensureAnchorLoaded(flushStates: Bool) throws {
         try ensureAnchorLoaded(disposal: flushStates ? .full : .keep)
     }
 
-    static func ensureAnchorLoaded(disposal: StateDisposal) throws {
-        let mainChanged = try ensureMainHook()
+    static func ensureAnchorLoaded(flushStates: Bool, loadOutcome: inout KernelLoadOutcome) throws {
+        try ensureAnchorLoaded(
+            disposal: flushStates ? .full : .keep,
+            loadOutcome: &loadOutcome
+        )
+    }
+
+    /// `standaloneMain` loads a Tono-owned main ruleset that references only
+    /// the Tono anchor instead of hooking `/etc/pf.conf`. Only the emergency
+    /// block uses it, and only after the normal path failed: that file can be
+    /// unparseable (another product's `load anchor` left pointing at a deleted
+    /// file), and the block must not depend on it. The standalone file is not
+    /// `/etc/pf.conf`, so a reboot does not keep it. At boot nothing else
+    /// would enable PF, so a block that failed with `/etc/pf.conf` left the
+    /// machine unprotected until repaired.
+    static func ensureAnchorLoaded(
+        disposal: StateDisposal,
+        standaloneMain: Bool = false
+    ) throws {
+        var outcome = KernelLoadOutcome.notIssued
+        try ensureAnchorLoaded(
+            disposal: disposal,
+            standaloneMain: standaloneMain,
+            loadOutcome: &outcome
+        )
+    }
+
+    static func ensureAnchorLoaded(
+        disposal: StateDisposal,
+        standaloneMain: Bool = false,
+        loadOutcome: inout KernelLoadOutcome
+    ) throws {
+        let mainChanged = try standaloneMain ? false : ensureMainHook()
+        // Read only where it decides the load, as before. No answer fails the
+        // load rather than reading as a missing anchor.
+        var mainAnchorMissing = false
+        if !standaloneMain, !mainChanged { mainAnchorMissing = try !mainAnchorActive() }
         let loaded: HelperCommandResult
-        if mainChanged || !mainAnchorActive() {
+        if standaloneMain {
+            try atomicWrite(
+                path: killSwitchStandaloneMainPath,
+                data: Data(renderStandaloneMain(childPath: killSwitchPFPath).utf8),
+                permissions: 0o600
+            )
+            loadOutcome = .acceptedOrUnknown
+            loaded = try run("/sbin/pfctl", ["-f", killSwitchStandaloneMainPath])
+        } else if mainChanged || mainAnchorMissing
+                    || FileManager.default.fileExists(atPath: killSwitchStandaloneMainPath) {
             // Installing/recovering the anchor point requires one main ruleset
             // load. Normal arm/reassert operations must not flush unrelated
-            // dynamic macOS anchors.
-            loaded = try run("/sbin/pfctl", ["-f", killSwitchMainPFPath])
+            // dynamic macOS anchors. A standalone emergency main is replaced
+            // the first time `/etc/pf.conf` loads again, so the system anchors
+            // it left out come back.
+            // Disk `/etc/pf.conf` has no `load anchor from`. Loading it
+            // directly would flush the child while PF may already be enabled.
+            loaded = try loadHookedMainRuleset(loadOutcome: &loadOutcome)
+            if loaded.status == 0 { unlink(killSwitchStandaloneMainPath) }
         } else {
+            loadOutcome = .acceptedOrUnknown
             loaded = try run(
                 "/sbin/pfctl",
                 ["-a", killSwitchAnchor, "-f", killSwitchPFPath]
             )
         }
         guard loaded.status == 0 else {
+            loadOutcome = .rejected
             throw HelperFailure.system(
                 loaded.message.isEmpty ? "Main PF load failed." : loaded.message
             )
         }
-        if !pfEnabled() {
-            let enabled = try run("/sbin/pfctl", ["-e"])
-            guard enabled.status == 0 || pfEnabled() else {
-                throw HelperFailure.system(
-                    enabled.message.isEmpty ? "PF enable failed." : enabled.message
-                )
-            }
-        }
+        try holdPFEnableReference()
         switch disposal {
         case .keep:
             break
@@ -445,42 +797,839 @@ extension KillSwitchManager {
                 )
             }
         }
-        guard effectiveStatus() else {
+        guard try effectiveStatus() else {
             throw HelperFailure.system("Kill Switch verification failed.")
         }
     }
 
-    static func pfEnabled() -> Bool {
-        guard let result = try? run("/sbin/pfctl", ["-s", "info"]),
-              result.status == 0,
-              let text = String(data: result.output, encoding: .utf8) else {
+    static func renderStandaloneMain(childPath: String) -> String {
+        """
+        # Managed by Tono Kill Switch — emergency main ruleset, used only while
+        # \(killSwitchMainPFPath) cannot be loaded
+        anchor "\(killSwitchAnchor)"
+        load anchor "\(killSwitchAnchor)" from "\(childPath)"
+
+        """
+    }
+
+    /// Emergency block when `/etc/pf.conf` still loads the persistent rule
+    /// file, so that file must not be replaced with a block. Rules are loaded
+    /// from a temporary child and the temporary main is not `/etc/pf.conf`.
+    /// The standalone marker is what a later successful load uses to put
+    /// Apple's anchors back (BRICK-M6).
+    static func loadInMemoryEmergencyBlock(_ rules: String) throws {
+        let child = "/Library/Application Support/Tono/.tono-emergency-\(UUID().uuidString).conf"
+        let main = "/etc/.tono-pf-emergency-\(UUID().uuidString)"
+        defer {
+            unlink(child)
+            unlink(main)
+        }
+        try atomicWrite(path: child, data: Data(rules.utf8), permissions: 0o600)
+        let checked = try run("/sbin/pfctl", ["-nf", child])
+        guard checked.status == 0 else {
+            throw HelperFailure.system(
+                checked.message.isEmpty ? "PF rule validation failed." : checked.message
+            )
+        }
+        try atomicWrite(
+            path: main,
+            data: Data(renderStandaloneMain(childPath: child).utf8),
+            permissions: 0o600
+        )
+        let loaded = try run("/sbin/pfctl", ["-f", main])
+        guard loaded.status == 0 else {
+            throw HelperFailure.system(
+                loaded.message.isEmpty ? "Main PF load failed." : loaded.message
+            )
+        }
+        try atomicWrite(
+            path: killSwitchStandaloneMainPath,
+            data: Data(renderStandaloneMain(childPath: killSwitchPFPath).utf8),
+            permissions: 0o600
+        )
+        try holdPFEnableReference()
+        let flushed = try run("/sbin/pfctl", ["-F", "states"])
+        guard flushed.status == 0 else {
+            throw HelperFailure.system(
+                flushed.message.isEmpty ? "PF state flush failed." : flushed.message
+            )
+        }
+        guard try effectiveStatus() else {
+            throw HelperFailure.system("Kill Switch verification failed.")
+        }
+    }
+
+    /// A release after the emergency block loaded its standalone main ruleset
+    /// (BRICK-M6): put `/etc/pf.conf` back, which only a later normal load did
+    /// before, so Apple's and other products' root anchors stay displaced no
+    /// longer. Only when `/etc/pf.conf` declares Tono's anchor inside the
+    /// marker. Disarm has just set the rule file to the placeholder, and the
+    /// on-disk hook does not load that file, so the reload drops nothing a
+    /// Tono writer put there. A main without that hook is one `ensureMainHook`
+    /// refused; loading it is not a release's call, so it stays displaced.
+    /// Never writes `/etc/pf.conf`, never uses its backup, and cannot throw.
+    /// The marker goes only after a load that pfctl confirmed. Returns whether
+    /// nothing is left displaced.
+    @discardableResult
+    static func restoreDisplacedMainRuleset(
+        standalonePath: String = killSwitchStandaloneMainPath,
+        mainPath: String = killSwitchMainPFPath,
+        reload: (String) throws -> HelperCommandResult = {
+            try KillSwitchManager.run("/sbin/pfctl", ["-f", $0])
+        }
+    ) -> Bool {
+        guard FileManager.default.fileExists(atPath: standalonePath) else { return true }
+        func kept(_ reason: String) -> Bool {
+            FileHandle.standardError.write(Data("tono: emergency main ruleset kept: \(reason)\n".utf8))
             return false
         }
+        let lines: Set<String>
+        do {
+            let data = try secureRead(mainPath, maximumBytes: 1024 * 1024)
+            guard let text = String(data: data, encoding: .utf8) else {
+                return kept("The main PF configuration is not UTF-8.")
+            }
+            lines = Set(text.components(separatedBy: .newlines).map {
+                $0.trimmingCharacters(in: .whitespaces)
+            })
+        } catch {
+            return kept((error as? HelperFailure)?.message ?? String(describing: error))
+        }
+        // The on-disk hook is an anchor declaration. Older files also have
+        // `load anchor from`; both still name this anchor inside the marker.
+        // The reload runs only after the release wrote the placeholder rule
+        // file — `releaseSequence` skips this restore when that write failed,
+        // because a legacy `load anchor from` would load the just-flushed
+        // block rules straight back from the file it could not clear.
+        guard lines.contains(killSwitchBeginMarker),
+              lines.contains("anchor \"\(killSwitchAnchor)\"") else {
+            return kept("The main PF configuration does not attach Tono's anchor.")
+        }
+        do {
+            let loaded = try reload(killSwitchMainPFPath)
+            guard loaded.status == 0 else {
+                return kept(loaded.message.isEmpty ? "Main PF load failed." : loaded.message)
+            }
+        } catch {
+            return kept((error as? HelperFailure)?.message ?? String(describing: error))
+        }
+        unlink(standalonePath)
+        return true
+    }
+
+    /// Longest a read-only `pfctl` query (`-s`, `-sr`) may run. One answers
+    /// in tens of milliseconds. 3 s, plus the two 1 s waits for SIGTERM and
+    /// SIGKILL, keeps a query that meets a wedged `/dev/pf` to about 5 s, under
+    /// the app's default 6 s wait on a helper request. Loads, flushes, enable
+    /// and release keep `helperCommandDeadline`.
+    static let pfctlQueryDeadline: TimeInterval = 3
+
+    /// `pfctl`'s output for a read-only query, or nil when it answered with a
+    /// failure. Throws when it gave no answer at all (it could not start, or
+    /// ran past its deadline). That is no evidence of anything, so no caller
+    /// may release, forget or disable on it, and a chain of commands stops
+    /// there instead of waiting out one deadline per command (#639 review).
+    static func pfctlQuery(
+        _ arguments: [String],
+        deadline: TimeInterval = KillSwitchManager.pfctlQueryDeadline
+    ) throws -> String? {
+        let result = try run("/sbin/pfctl", arguments, deadline: deadline)
+        guard result.status == 0 else { return nil }
+        return String(data: result.output, encoding: .utf8)
+    }
+
+    static func pfEnabled() throws -> Bool {
+        guard let text = try pfctlQuery(["-s", "info"]) else { return false }
         return text.lowercased().contains("status: enabled")
     }
 
-    static func mainAnchorActive() -> Bool {
-        guard let result = try? run("/sbin/pfctl", ["-sr"]),
-              result.status == 0,
-              let text = String(data: result.output, encoding: .utf8) else {
-            return false
-        }
+    static func mainAnchorActive() throws -> Bool {
+        guard let text = try pfctlQuery(["-sr"]) else { return false }
         return text.contains("anchor \"\(killSwitchAnchor)\"")
     }
 
-    static func childAnchorActive() -> Bool {
-        guard let result = try? run(
-            "/sbin/pfctl",
-            ["-a", killSwitchAnchor, "-sr"]
-        ), result.status == 0,
-              let text = String(data: result.output, encoding: .utf8) else {
-            return false
-        }
+    static func childAnchorActive() throws -> Bool {
+        guard let text = try pfctlQuery(["-a", killSwitchAnchor, "-sr"]) else { return false }
         return text.lowercased().contains("block drop out quick all")
     }
 
-    static func effectiveStatus() -> Bool {
-        pfEnabled() && mainAnchorActive() && childAnchorActive()
+    static func effectiveStatus() throws -> Bool {
+        guard try pfEnabled(), try mainAnchorActive() else { return false }
+        return try childAnchorActive()
+    }
+
+    // MARK: - PF enable reference
+
+    /// A token this helper acquired but could not record. Held in memory only,
+    /// so a failing record write costs one token per process, not one per check.
+    nonisolated(unsafe) static var unrecordedPFEnableReference: PFEnableReference?
+
+    /// A `pfctl -E` token and the boot it was issued in. Tokens are kernel
+    /// state: one recorded in an earlier boot means nothing now and must never
+    /// be released, because the same value may belong to another program.
+    struct PFEnableReference: Equatable {
+        let token: String
+        let boot: String
+    }
+
+    /// A `pfctl -E` killed at its deadline. The kernel issues the token before
+    /// pfctl prints it, so the child may hold one that nothing recorded
+    /// (#639 review, opus:F2). `pfctl -s References` lists each token with the
+    /// PID that took it and its age, so once the child has exited a later
+    /// pass can still find its token. The PID alone proves nothing: a token
+    /// outlives the pfctl that took it and PIDs come back, so only a row the
+    /// child's own lifetime accounts for is its token.
+    struct PFEnableAcquire {
+        let pid: pid_t
+        let boot: String
+        /// Wall-clock second read before the child was spawned.
+        let spawned: time_t
+        let child: PFEnableChildExit
+        /// Every word `pfctl -s References` printed just before the child
+        /// was spawned, or nil when that listing did not list every token
+        /// (`pfReferenceSnapshot`). No token in
+        /// it can be the child's, however the wall clock moved (#643 review,
+        /// opus:F3).
+        let listedBefore: Set<String>?
+        /// `CLOCK_MONOTONIC` nanoseconds when `run` gave up on the child.
+        let gaveUp: UInt64
+    }
+
+    /// When a `pfctl -E` child exited: the wall-clock second its termination
+    /// handler ran, after the process was reaped, and the monotonic time of
+    /// that call. Until then the child still holds its PID, so no other
+    /// process can have taken a token under it. Set on Foundation's queue and
+    /// read on the request thread.
+    final class PFEnableChildExit: @unchecked Sendable {
+        private let lock = NSLock()
+        private var reported: (second: time_t, monotonic: UInt64)?
+
+        func record() {
+            lock.lock()
+            if reported == nil {
+                reported = (time(nil), clock_gettime_nsec_np(CLOCK_MONOTONIC))
+            }
+            lock.unlock()
+        }
+
+        var exited: (second: time_t, monotonic: UInt64)? {
+            lock.lock()
+            defer { lock.unlock() }
+            return reported
+        }
+    }
+
+    /// How long after `run` gave up on a `pfctl -E` child its termination
+    /// handler may run and still settle a claim. The PID is free from the
+    /// reap on, and the handler's second closes the claim window, so a late
+    /// handler would stretch that window over whoever takes the PID next
+    /// (#643 review, codex:F2). Later than this, nothing is claimed.
+    static let pfEnableExitReportLimit: UInt64 = 5_000_000_000
+
+    /// Held in memory only, like `unrecordedPFEnableReference`.
+    nonisolated(unsafe) static var unsettledPFEnableAcquire: PFEnableAcquire?
+
+    /// Tokens a newer recorded one replaced that pfctl has not yet answered
+    /// for: their listing or their `-X` gave no answer, so they may still be
+    /// held. Held in memory only, like `unrecordedPFEnableReference`; the next
+    /// hold and the periodic check retry them while the recorded token holds
+    /// PF, and disarm releases them (#643 review, grok:F2, opus:F1).
+    nonisolated(unsafe) static var supersededPFEnableReferences: [SupersededPFEnableReference] = []
+
+    /// A replaced token, whether its `-X` has run, and the row listed just
+    /// before that `-X`. A `-X` with no answer may have released it after all,
+    /// and xnu may then issue the same value to another program, so a retry
+    /// is only as good as that row (#643 review, opus:F1/F2).
+    struct SupersededPFEnableReference: Equatable {
+        let reference: PFEnableReference
+        var releaseTried = false
+        var row: PFEnableRow?
+    }
+
+    /// A `pfctl -s References` row's PID and process name, and the calendar
+    /// seconds its age places the issue in. pfctl prints the age as `time()`
+    /// minus the kernel's stamp, so a row listed between `listedFrom` and
+    /// `listedTo` was issued between `listedFrom - age` and `listedTo - age`.
+    struct PFEnableRow: Equatable {
+        let pid: String
+        let process: String
+        let issuedFrom: time_t
+        let issuedTo: time_t
+
+        /// The same issue: same PID and process, overlapping issue seconds.
+        func sameIssue(as other: PFEnableRow) -> Bool {
+            pid == other.pid && process == other.process
+                && issuedFrom <= other.issuedTo && other.issuedFrom <= issuedTo
+        }
+    }
+
+    /// PF stays enabled while any enable reference is held. Enabling it only
+    /// when it was off meant this helper held none whenever something else had
+    /// enabled PF first, so that program releasing its own token (`pfctl -X`)
+    /// stopped PF under an armed kill switch and nothing noticed. This helper
+    /// now always holds a token of its own, recorded so disarm can release
+    /// exactly that one.
+    ///
+    /// The new token is recorded before the previous one is released, so this
+    /// helper never takes PF through a zero count itself.
+    ///
+    /// `releaseToken` releases a token no record could hold, or one a newer
+    /// record replaced, and throws, as `run` does, when pfctl gave no answer.
+    /// `heldReference` is `heldPFEnableReference`; the self-test replaces it
+    /// to stage a check that reads a held record as not held.
+    static func holdPFEnableReference(
+        recordPath: String = killSwitchPFReferencePath,
+        releaseToken: (String) throws -> Void = {
+            try KillSwitchManager.releasePFEnableTokenOrThrow($0)
+        },
+        heldReference: (String) throws -> PFEnableReference? = {
+            try KillSwitchManager.heldPFEnableReference(recordPath: $0)
+        },
+        listReferences: (TimeInterval) throws -> HelperCommandResult = {
+            try KillSwitchManager.listPFEnableReferences(deadline: $0)
+        }
+    ) throws {
+        if let held = try heldReference(recordPath) {
+            // The recorded token holds PF, so one it replaced can go now.
+            try? releaseSupersededPFEnableReferences(
+                boot: held.boot,
+                keeping: held.token,
+                releaseToken: releaseToken
+            )
+            return
+        }
+        guard let boot = try? TonoAuthenticatedPeer.bootSession() else {
+            // Without a boot identity a token cannot be recorded safely, and
+            // taking an unrecorded one on every check would leak references.
+            // Keep the pre-reference behaviour for this unexpected case.
+            if try !pfEnabled() { _ = try run("/sbin/pfctl", ["-e"]) }
+            guard try pfEnabled() else { throw HelperFailure.system("PF enable failed.") }
+            return
+        }
+        try settlePFEnableAcquire()
+        if unsettledPFEnableAcquire != nil {
+            // That `-E` may still be inside the kernel. Another would queue
+            // behind it and could leave a second token nothing can find, so
+            // hold PF on the kernel's anonymous reference meanwhile, as when
+            // no token can be recorded.
+            guard holdAnonymousPFEnableReference() else {
+                throw HelperFailure.system("PF enable failed.")
+            }
+            return
+        }
+        let previous = readPFEnableReference(recordPath)
+        let token: String
+        if let pending = unrecordedPFEnableReference, pending.boot == boot,
+           try pfEnabled(),
+           try unrecordedPFEnableReferenceHeld(
+               pending,
+               deadline: KillSwitchManager.pfctlQueryDeadline,
+               listReferences: listReferences
+           ) {
+            // A token from an earlier failed record write is still held.
+            // Retry recording that one instead of taking another.
+            token = pending.token
+        } else {
+            unrecordedPFEnableReference = nil
+            let listedBefore = (try? run(
+                "/sbin/pfctl", ["-s", "References"],
+                deadline: pfctlQueryDeadline
+            )).flatMap {
+                pfReferenceSnapshot(
+                    status: $0.status,
+                    output: String(decoding: $0.output, as: UTF8.self)
+                )
+            }
+            var child: pid_t = 0
+            let spawned = time(nil)
+            let childExit = PFEnableChildExit()
+            let acquired: HelperCommandResult
+            do {
+                acquired = try run(
+                    "/sbin/pfctl", ["-E"],
+                    started: { child = $0 },
+                    ended: { childExit.record() }
+                )
+            } catch {
+                // Settled on a later pass once the child has exited, not
+                // listed now: another query here would wait behind the same
+                // pfctl.
+                if child > 0 {
+                    unsettledPFEnableAcquire = .init(
+                        pid: child,
+                        boot: boot,
+                        spawned: spawned,
+                        child: childExit,
+                        listedBefore: listedBefore,
+                        gaveUp: clock_gettime_nsec_np(CLOCK_MONOTONIC)
+                    )
+                }
+                throw error
+            }
+            guard acquired.status == 0,
+                  let issued = parsePFEnableToken(String(decoding: acquired.output, as: UTF8.self))
+            else {
+                throw HelperFailure.system(
+                    acquired.message.isEmpty ? "PF enable failed." : acquired.message
+                )
+            }
+            token = issued
+        }
+        let record = try JSONSerialization.data(
+            withJSONObject: ["token": token, "boot": boot],
+            options: [.sortedKeys]
+        )
+        // Listed as replaced before the write, which can throw after its
+        // rename has already dropped the previous token from the record
+        // (#643 review, codex:F4). While the record still names it, every
+        // release of replaced tokens keeps the recorded one.
+        if let previous, previous.boot == boot, previous.token != token,
+           !supersededPFEnableReferences.contains(where: { $0.reference == previous }) {
+            supersededPFEnableReferences.append(.init(reference: previous))
+        }
+        do {
+            try atomicWrite(path: recordPath, data: record, permissions: 0o600)
+        } catch {
+            // PF is enabled and referenced, which is what protection needs.
+            // Keep the older record (and its token) rather than orphaning it.
+            FileHandle.standardError.write(Data(
+                "tono: PF enable reference could not be recorded\n".utf8
+            ))
+            // A token on no record outlives this process, so a helper whose
+            // startup kept failing took one more at every launchd restart
+            // (TM-claude-6). Hold PF with the kernel's anonymous reference
+            // first, then release the new token: the count never reaches zero.
+            if holdAnonymousPFEnableReference() {
+                do {
+                    try releaseToken(token)
+                    unrecordedPFEnableReference = nil
+                } catch {
+                    // A `-X` with no answer may not have released it (#639
+                    // review, codex:F2). Forgotten here, the token outlives
+                    // this process with nothing left to release it; kept, the
+                    // next check retries and disarm releases it.
+                    unrecordedPFEnableReference = .init(token: token, boot: boot)
+                }
+                return
+            }
+            // Unconfirmed, releasing the new token here could stop PF under an
+            // armed kill switch when nothing else holds a reference, so keep
+            // it in memory: the next check retries this write with the same
+            // token instead of taking one more every ten seconds, and disarm
+            // releases it.
+            unrecordedPFEnableReference = .init(token: token, boot: boot)
+            return
+        }
+        unrecordedPFEnableReference = nil
+        // The new token is held and recorded. The previous one is forgotten
+        // only once pfctl has answered for it: a listing or `-X` with no
+        // answer leaves it held, and forgotten here nothing would release it
+        // (#643 review, grok:F2).
+        try? releaseSupersededPFEnableReferences(
+            boot: boot,
+            keeping: token,
+            releaseToken: releaseToken
+        )
+    }
+
+    /// Releases the tokens a newer recorded one replaced, oldest first. Each
+    /// is forgotten once pfctl has answered for it: released, or no longer
+    /// listed. The first that gets no answer may still be held, so it and
+    /// those after it stay for the next check or disarm, and this throws. A
+    /// token from another boot means nothing now, and one whose value is the
+    /// token `keeping` still holds PF with must not be released: both are
+    /// only forgotten. A boot that could not be read (nil) is not another
+    /// boot: nothing is forgotten on it, and this throws (#643 review,
+    /// grok:F3 = codex:F6). A token whose `-X` already ran is released again
+    /// only while the listing shows the row seen before that `-X`; a
+    /// readable row of another issue may be another program's token under
+    /// the same value, so it is forgotten with no `-X` (#643 review,
+    /// opus:F1/F2). Only a full listing (`pfEnableReferenceListing`) can show
+    /// a token gone, and a row that cannot be read this pass keeps its entry,
+    /// with no `-X`, and this throws (#643 review 8fa64f3b, grok:F1/F2).
+    static func releaseSupersededPFEnableReferences(
+        boot: String?,
+        keeping: String?,
+        queryDeadline: TimeInterval = KillSwitchManager.pfctlQueryDeadline,
+        releaseToken: (String) throws -> Void = {
+            try KillSwitchManager.releasePFEnableTokenOrThrow($0)
+        },
+        listReferences: (TimeInterval) throws -> HelperCommandResult = {
+            try KillSwitchManager.listPFEnableReferences(deadline: $0)
+        }
+    ) throws {
+        guard !supersededPFEnableReferences.isEmpty else { return }
+        guard boot != nil else {
+            throw HelperFailure.system("Boot session unknown; replaced PF references kept.")
+        }
+        while let superseded = supersededPFEnableReferences.first {
+            let token = superseded.reference.token
+            if superseded.reference.boot == boot, token != keeping {
+                let listedFrom = time(nil)
+                let listing = try pfEnableReferenceListing(
+                    deadline: queryDeadline,
+                    listReferences: listReferences
+                )
+                let listedTo = time(nil)
+                if listing.split(whereSeparator: \.isWhitespace).contains(where: { $0 == token }) {
+                    // No readable row this pass (it does not parse, or a clock
+                    // step inverted the window) proves nothing either way:
+                    // keep it, with no `-X`, for the next pass.
+                    guard let row = pfEnableRow(
+                        of: token,
+                        listedFrom: listedFrom,
+                        listedTo: listedTo,
+                        in: listing
+                    ) else {
+                        throw HelperFailure.system("Replaced PF reference row unreadable; kept.")
+                    }
+                    if !superseded.releaseTried {
+                        supersededPFEnableReferences[0].releaseTried = true
+                        supersededPFEnableReferences[0].row = row
+                        try releaseToken(token)
+                    } else if let seen = superseded.row, seen.sameIssue(as: row) {
+                        try releaseToken(token)
+                    } else {
+                        FileHandle.standardError.write(Data(
+                            "tono: replaced PF token no longer proven ours; forgotten unreleased\n".utf8
+                        ))
+                    }
+                }
+            }
+            supersededPFEnableReferences.removeFirst()
+        }
+    }
+
+    /// `pfctl -e` holds PF with the kernel's one anonymous enable reference:
+    /// xnu's `DIOCSTART` starts PF with it, or, while PF runs, adds it unless
+    /// it is already held ("pf already enabled"). Asking again never adds a
+    /// second, and only `pfctl -d` drops it, so after a record failure PF
+    /// stays enabled (with Tono's anchor emptied) past disarm.
+    static func holdAnonymousPFEnableReference() -> Bool {
+        guard let enabled = try? run("/sbin/pfctl", ["-e"]),
+              enabled.status == 0 || enabled.message.contains("already enabled") else {
+            return false
+        }
+        return (try? pfEnabled()) == true
+    }
+
+    /// A non-zero `-X` forgets the token only when a later full listing no
+    /// longer contains it. "Already released" and "still held" are the same
+    /// exit; the listing tells them apart. A `-X` or listing that never
+    /// answers throws from `run` / `pfEnableReferenceListing` and keeps the
+    /// record.
+    static func shouldKeepPFEnableRecord(releaseStatus: Int32, stillListed: Bool) -> Bool {
+        releaseStatus != 0 && stillListed
+    }
+
+    static func releasePFEnableTokenOrThrow(_ token: String) throws {
+        let released = try run("/sbin/pfctl", ["-X", token])
+        if released.status == 0 { return }
+        let listing = try pfEnableReferenceListing(
+            deadline: pfctlQueryDeadline,
+            listReferences: { try listPFEnableReferences(deadline: $0) }
+        )
+        if shouldKeepPFEnableRecord(
+            releaseStatus: released.status,
+            stillListed: listing.split(whereSeparator: \.isWhitespace).contains(where: { $0 == token })
+        ) {
+            throw HelperFailure.system("PF enable reference survived -X; record kept.")
+        }
+    }
+
+    /// Releases the reference this helper recorded, if the kernel still holds
+    /// it in this boot, and then forgets it. PF stops only if no other program
+    /// holds a reference, which is exactly the correct outcome.
+    ///
+    /// A token is forgotten only once pfctl has answered for it. Past a
+    /// listing or a `-X` that never reported back it may still be held, so
+    /// this throws and keeps the record (and any unrecorded token) for the
+    /// next arm to reuse or the next disarm to release (#639 review, opus:F2).
+    /// Without a readable boot no token can be told from another boot's, so
+    /// the record, the unrecorded token and the replaced ones all stay and
+    /// this throws, as for replaced ones alone (#643 review, opus:F2).
+    /// `bootSession` is replaced only by the self-test.
+    static func releasePFEnableReference(
+        recordPath: String = killSwitchPFReferencePath,
+        queryDeadline: TimeInterval = KillSwitchManager.pfctlQueryDeadline,
+        bootSession: () throws -> String = { try TonoAuthenticatedPeer.bootSession() },
+        listReferences: (TimeInterval) throws -> HelperCommandResult = {
+            try KillSwitchManager.listPFEnableReferences(deadline: $0)
+        }
+    ) throws {
+        try settlePFEnableAcquire(deadline: queryDeadline)
+        guard let boot = try? bootSession() else {
+            throw HelperFailure.system("Boot session unknown; PF enable references kept.")
+        }
+        // Only a full listing shows a token gone; any other answer throws
+        // here and keeps it (#643 review 8fa64f3b, grok:F1).
+        if let held = readPFEnableReference(recordPath), held.boot == boot,
+           try pfEnableReferenceListing(deadline: queryDeadline, listReferences: listReferences)
+            .split(whereSeparator: \.isWhitespace).contains(where: { $0 == held.token }) {
+            try releasePFEnableTokenOrThrow(held.token)
+        }
+        unlink(recordPath)
+        if let pending = unrecordedPFEnableReference, pending.boot == boot,
+           try pfEnableReferenceListing(deadline: queryDeadline, listReferences: listReferences)
+            .split(whereSeparator: \.isWhitespace).contains(where: { $0 == pending.token }) {
+            try releasePFEnableTokenOrThrow(pending.token)
+        }
+        unrecordedPFEnableReference = nil
+        try releaseSupersededPFEnableReferences(
+            boot: boot,
+            keeping: nil,
+            queryDeadline: queryDeadline,
+            listReferences: listReferences
+        )
+    }
+
+    /// Settles a `pfctl -E` that ran past its deadline, once its child has
+    /// exited: the one listed token the child's lifetime accounts for becomes
+    /// the unrecorded reference the next hold records and disarm releases.
+    /// With none, the child took none this helper can prove, and nothing is
+    /// claimed. Until the child exits it may still take one, so the question
+    /// stays open; its own termination handler says when, so a PID another
+    /// process has taken over cannot hold it open. Throws when the listing
+    /// gives no answer.
+    static func settlePFEnableAcquire(
+        deadline: TimeInterval = KillSwitchManager.pfctlQueryDeadline
+    ) throws {
+        guard let acquire = unsettledPFEnableAcquire,
+              let exited = acquire.child.exited else { return }
+        // Without the listing from before the spawn, or with a termination
+        // handler that ran long after `run` gave up, no row can be tied to
+        // this child: settle, claiming nothing.
+        guard let listedBefore = acquire.listedBefore,
+              exited.monotonic <= acquire.gaveUp
+                || exited.monotonic - acquire.gaveUp <= pfEnableExitReportLimit else {
+            unsettledPFEnableAcquire = nil
+            return
+        }
+        let listedFrom = time(nil)
+        // Status ignored: with no token at all the kernel answers ENOENT.
+        let listed = try run("/sbin/pfctl", ["-s", "References"], deadline: deadline)
+        let listedTo = time(nil)
+        // An answer that is not a full listing says nothing about any token:
+        // settling it as "the child took none" would clear the acquire while
+        // the token may still be held (R643-F1, same class as the hold path).
+        // The ENOENT shape still counts as a listing with no tokens.
+        guard pfReferenceSnapshot(
+            status: listed.status,
+            output: String(decoding: listed.output, as: UTF8.self)
+        ) != nil else {
+            throw HelperFailure.system("pfctl did not list the PF enable references.")
+        }
+        if let token = pfEnableToken(
+            takenBy: acquire.pid,
+            spawned: acquire.spawned,
+            exited: exited.second,
+            listedFrom: listedFrom,
+            listedTo: listedTo,
+            listedBefore: listedBefore,
+            in: String(decoding: listed.output, as: UTF8.self)
+        ) {
+            unrecordedPFEnableReference = .init(token: token, boot: acquire.boot)
+        }
+        unsettledPFEnableAcquire = nil
+    }
+
+    /// Every word of a `pfctl -s References` answer that listed all tokens,
+    /// or nil for any other answer. macOS 26 pfctl prints its `TOKENS:`
+    /// table, or "No pf starter references held" when `DIOCGETSTARTERS`
+    /// answers ENOENT (the kernel holds none); on any other ioctl error it
+    /// warns and still exits 0, and it exits 1 when /dev/pf will not open.
+    /// A failed answer lists none of the tokens already held, so taken as a
+    /// snapshot it would let a clock stepped back place one of them in the
+    /// recovery window (#643 review, grok:F1).
+    static func pfReferenceSnapshot(status: Int32, output: String) -> Set<String>? {
+        guard status == 0 else { return nil }
+        let lines = output.split(separator: "\n")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+        if lines.contains("TOKENS:") {
+            return Set(output.split(whereSeparator: \.isWhitespace).map(String.init))
+        }
+        return lines.contains("No pf starter references held") ? [] : nil
+    }
+
+    /// The one row `listing` shows for `token`, or nil when no row of the
+    /// `PID  Process Name  TOKEN  <d> days HH:MM:SS` shape does, several do,
+    /// or the window is inverted (#643 review 8fa64f3b, codex:F1).
+    static func pfEnableRow(
+        of token: String,
+        listedFrom: time_t,
+        listedTo: time_t,
+        in listing: String
+    ) -> PFEnableRow? {
+        // A wall clock stepped back during the listing orders nothing.
+        guard listedFrom <= listedTo else { return nil }
+        var found: [PFEnableRow] = []
+        for line in listing.split(separator: "\n") {
+            let words = line.split(whereSeparator: \.isWhitespace)
+            guard words.count == 6, words[2] == token, words[4] == "days",
+                  let age = pfEnableTokenAge(days: words[3], clock: words[5]) else {
+                continue
+            }
+            found.append(.init(
+                pid: String(words[0]),
+                process: String(words[1]),
+                issuedFrom: listedFrom - age,
+                issuedTo: listedTo - age
+            ))
+        }
+        return found.count == 1 ? found[0] : nil
+    }
+
+    /// The token `pfctl -s References` lists for the pfctl process `pid`, only
+    /// if the child that held that PID from `spawned` until `exited` took it.
+    /// Rows read `PID  Process Name  TOKEN  <d> days HH:MM:SS`: xnu stamps each
+    /// token with the calendar second it was issued and pfctl prints its age,
+    /// so a row listed between `listedFrom` and `listedTo` was issued between
+    /// `listedFrom - age` and `listedTo - age`. A row that range does not place
+    /// wholly inside the child's lifetime was issued under another holder of
+    /// the PID, or cannot be told apart from one, and is never returned:
+    /// leaking this child's token only keeps PF enabled past disarm, while
+    /// releasing another program's could stop PF under it (#639 review,
+    /// opus:F1 = codex:F1). One `-E` takes at most one token, so two rows in
+    /// the lifetime are not this child's either. The kernel hands a PID out
+    /// again only after cycling through the others (up to 99999), which no Mac
+    /// does inside the second or so these whole-second bounds leave open.
+    ///
+    /// The window is wall-clock time, so a clock stepped back before the
+    /// spawn can place an older token inside it. A token already listed
+    /// before the spawn (`listedBefore`) is never the child's, so it is
+    /// skipped before anything is counted (#643 review, opus:F3).
+    static func pfEnableToken(
+        takenBy pid: pid_t,
+        spawned: time_t,
+        exited: time_t,
+        listedFrom: time_t,
+        listedTo: time_t,
+        listedBefore: Set<String>,
+        in listing: String
+    ) -> String? {
+        // A wall clock stepped back meanwhile orders nothing.
+        guard spawned <= exited, listedFrom <= listedTo else { return nil }
+        var found: [String] = []
+        for line in listing.split(separator: "\n") {
+            let words = line.split(whereSeparator: \.isWhitespace)
+            guard words.count == 6, words[0] == String(pid), words[1] == "pfctl",
+                  words[4] == "days",
+                  let age = pfEnableTokenAge(days: words[3], clock: words[5]) else {
+                continue
+            }
+            let token = String(words[2])
+            guard token.range(of: #"^[0-9]{1,20}$"#, options: .regularExpression) != nil,
+                  !listedBefore.contains(token),
+                  listedFrom - age >= spawned,
+                  listedTo - age <= exited else {
+                continue
+            }
+            found.append(token)
+        }
+        return found.count == 1 ? found[0] : nil
+    }
+
+    /// Seconds in pfctl's `<d> days HH:MM:SS`, or nil for any other shape:
+    /// the day count is 1 to 6 digits and each clock field exactly two, so a
+    /// sign, an empty field (`00::00:40`) or a short one (`0:00:40`) is no age
+    /// and claims nothing (#643 review, codex:F3).
+    static func pfEnableTokenAge(days: Substring, clock: Substring) -> time_t? {
+        guard days.range(of: #"^[0-9]{1,6}$"#, options: .regularExpression) != nil,
+              clock.range(of: #"^[0-9]{2}:[0-9]{2}:[0-9]{2}$"#, options: .regularExpression) != nil
+        else {
+            return nil
+        }
+        let parts = clock.split(separator: ":")
+        guard let dayCount = time_t(days),
+              parts.count == 3,
+              let hours = time_t(parts[0]), (0..<24).contains(hours),
+              let minutes = time_t(parts[1]), (0..<60).contains(minutes),
+              let seconds = time_t(parts[2]), (0..<60).contains(seconds) else {
+            return nil
+        }
+        return dayCount * 86_400 + hours * 3_600 + minutes * 60 + seconds
+    }
+
+    /// The recorded reference, only if it was issued in this boot and the
+    /// kernel still lists it. `pfctl -d` invalidates every token. Throws when
+    /// pfctl gives no answer.
+    static func heldPFEnableReference(
+        recordPath: String = killSwitchPFReferencePath
+    ) throws -> PFEnableReference? {
+        guard let held = readPFEnableReference(recordPath),
+              held.boot == (try? TonoAuthenticatedPeer.bootSession()),
+              try pfEnabled(),
+              try pfEnableReferenceListed(held.token) else { return nil }
+        return held
+    }
+
+    static func readPFEnableReference(_ path: String) -> PFEnableReference? {
+        guard let data = try? secureRead(path, maximumBytes: 4096),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let token = object["token"] as? String,
+              token.range(of: #"^[0-9]{1,20}$"#, options: .regularExpression) != nil,
+              let boot = object["boot"] as? String, !boot.isEmpty else { return nil }
+        return .init(token: token, boot: boot)
+    }
+
+    /// pfctl prints `Token : <n>` for `-E`.
+    static func parsePFEnableToken(_ output: String) -> String? {
+        guard let range = output.range(
+            of: #"(?<=Token : )[0-9]{1,20}"#,
+            options: .regularExpression
+        ) else { return nil }
+        return String(output[range])
+    }
+
+    static func pfEnableReferenceListed(
+        _ token: String,
+        deadline: TimeInterval = KillSwitchManager.pfctlQueryDeadline
+    ) throws -> Bool {
+        guard let text = try pfctlQuery(["-s", "References"], deadline: deadline) else {
+            return false
+        }
+        return text.split(whereSeparator: \.isWhitespace).contains { $0 == token }
+    }
+
+    /// `pfctl -s References`; the self-test replaces it to stage an answer.
+    static func listPFEnableReferences(deadline: TimeInterval) throws -> HelperCommandResult {
+        try run("/sbin/pfctl", ["-s", "References"], deadline: deadline)
+    }
+
+    /// Whether a full `pfctl -s References` listing still shows an
+    /// unrecorded token. Only a full listing proves it gone: any other
+    /// answer (a failure status, or pfctl's exit 0 after a `DIOCGETSTARTERS`
+    /// warning) says nothing about the token and throws, so the hold path
+    /// keeps it for the next check instead of clearing the only handle to a
+    /// reference that may still be held (R643-F1). A cleared handle has no
+    /// release path afterwards.
+    static func unrecordedPFEnableReferenceHeld(
+        _ pending: PFEnableReference,
+        deadline: TimeInterval = KillSwitchManager.pfctlQueryDeadline,
+        listReferences: (TimeInterval) throws -> HelperCommandResult = {
+            try KillSwitchManager.listPFEnableReferences(deadline: $0)
+        }
+    ) throws -> Bool {
+        try pfEnableReferenceListing(deadline: deadline, listReferences: listReferences)
+            .split(whereSeparator: \.isWhitespace)
+            .contains(where: { $0 == pending.token })
+    }
+
+    /// A `pfctl -s References` answer that listed every token, as
+    /// `pfReferenceSnapshot` reads one. Any other answer (a failure status,
+    /// or pfctl's exit 0 after `DIOCGETSTARTERS: <error>`) says nothing about
+    /// any token and throws, as no answer does (#643 review 8fa64f3b,
+    /// grok:F1).
+    static func pfEnableReferenceListing(
+        deadline: TimeInterval,
+        listReferences: (TimeInterval) throws -> HelperCommandResult
+    ) throws -> String {
+        let listed = try listReferences(deadline)
+        let text = String(decoding: listed.output, as: UTF8.self)
+        guard pfReferenceSnapshot(status: listed.status, output: text) != nil else {
+            throw HelperFailure.system("pfctl did not list the PF enable references.")
+        }
+        return text
     }
 
     // MARK: - Root-owned I/O and commands
@@ -506,8 +1655,15 @@ extension KillSwitchManager {
         }
     }
 
-    static func secureRead(_ path: String, maximumBytes: Int) throws -> Data {
-        let fd = open(path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW)
+    static func secureRead(
+        _ path: String,
+        maximumBytes: Int,
+        requireRootOwnership: Bool = true
+    ) throws -> Data {
+        // O_NONBLOCK: a FIFO with no writer (say at /etc/hosts) returns here at
+        // once and the regular-file check below refuses it, instead of hanging
+        // an arm, a start or a release. Regular-file reads are unaffected.
+        let fd = open(path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK)
         guard fd >= 0 else {
             throw HelperFailure.system("A required root-owned file is unavailable.")
         }
@@ -515,8 +1671,7 @@ extension KillSwitchManager {
         var metadata = stat()
         guard fstat(fd, &metadata) == 0,
               (metadata.st_mode & mode_t(S_IFMT)) == mode_t(S_IFREG),
-              metadata.st_uid == 0,
-              metadata.st_mode & 0o022 == 0,
+              (!requireRootOwnership || (metadata.st_uid == 0 && metadata.st_mode & 0o022 == 0)),
               metadata.st_size >= 0,
               metadata.st_size <= maximumBytes else {
             throw HelperFailure.invalid("A root-owned file is unsafe.")
@@ -541,7 +1696,10 @@ extension KillSwitchManager {
     static func atomicWrite(
         path: String,
         data: Data,
-        permissions: mode_t
+        permissions: mode_t,
+        owner: uid_t = 0,
+        group: gid_t = 0,
+        allowForeignExisting: Bool = false
     ) throws {
         let parent = (path as NSString).deletingLastPathComponent
         if parent == "/Library/Application Support/Tono" {
@@ -550,8 +1708,7 @@ extension KillSwitchManager {
         var existing = stat()
         if lstat(path, &existing) == 0 {
             guard (existing.st_mode & mode_t(S_IFMT)) == mode_t(S_IFREG),
-                  existing.st_uid == 0,
-                  existing.st_mode & 0o022 == 0 else {
+                  (allowForeignExisting || (existing.st_uid == 0 && existing.st_mode & 0o022 == 0)) else {
                 throw HelperFailure.invalid("Refusing to replace an unsafe root-owned file.")
             }
         } else if errno != ENOENT {
@@ -587,9 +1744,9 @@ extension KillSwitchManager {
                 offset += count
             }
         }
-        guard fsync(fd) == 0,
-              fchown(fd, 0, 0) == 0,
+        guard fchown(fd, owner, group) == 0,
               fchmod(fd, permissions) == 0,
+              fsync(fd) == 0,
               rename(temporary, path) == 0 else {
             throw HelperFailure.system("Could not commit a root-owned file.")
         }
@@ -609,9 +1766,25 @@ extension KillSwitchManager {
         }
     }
 
+    /// Longest a helper command may run. A `pfctl` load or query finishes in
+    /// well under a second even on a busy Mac, and the relay-map `curl` caps
+    /// itself at 10 s (`--max-time`), so this fires only on a wedged child.
+    /// Unbounded, one held the helper's single request thread, and with it
+    /// `/core/stop`, forever (R609-F2).
+    static let helperCommandDeadline: TimeInterval = 15
+
+    /// Past `deadline` the command has failed, whatever it would have done:
+    /// no caller may read a load, an enable or a release that never reported
+    /// back as done. The child gets SIGTERM, then SIGKILL, each waited on
+    /// for a second; one stuck in the kernel beyond that exits on its own.
+    /// `ended` runs once the child has exited and been reaped, even after
+    /// this call has given up on it.
     static func run(
         _ executable: String,
-        _ arguments: [String]
+        _ arguments: [String],
+        deadline: TimeInterval = KillSwitchManager.helperCommandDeadline,
+        started: (pid_t) -> Void = { _ in },
+        ended: @escaping @Sendable () -> Void = {}
     ) throws -> HelperCommandResult {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: executable)
@@ -620,10 +1793,39 @@ extension KillSwitchManager {
         let pipe = Pipe()
         process.standardOutput = pipe
         process.standardError = pipe
+        let exited = DispatchSemaphore(value: 0)
+        process.terminationHandler = { _ in
+            ended()
+            exited.signal()
+        }
         try process.run()
-        let output = pipe.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
-        return .init(status: process.terminationStatus, output: output)
+        started(process.processIdentifier)
+        // Drained on its own thread, so a child that fills the pipe still
+        // exits. The block holds the read end and the process until the
+        // child's end closes, so a read abandoned below still finishes, frees
+        // its descriptor, and the child is still reaped.
+        let output = HelperCommandOutput()
+        let reader = pipe.fileHandleForReading
+        DispatchQueue.global(qos: .utility).async {
+            withExtendedLifetime(process) {
+                output.finish(reader.readDataToEndOfFile())
+            }
+        }
+        let end = DispatchTime.now() + deadline
+        if exited.wait(timeout: end) == .success, output.wait(until: end) {
+            return .init(status: process.terminationStatus, output: output.data)
+        }
+        if process.isRunning {
+            process.terminate()
+            if exited.wait(timeout: .now() + 1) == .timedOut, process.isRunning {
+                kill(process.processIdentifier, SIGKILL)
+                _ = exited.wait(timeout: .now() + 1)
+            }
+        }
+        let name = (executable as NSString).lastPathComponent
+        throw HelperFailure.system(
+            "\(name) did not finish within \(Int(deadline.rounded(.up))) seconds."
+        )
     }
 
     static func runBoundedSystemLookup(

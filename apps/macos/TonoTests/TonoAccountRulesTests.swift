@@ -5,7 +5,7 @@ import XCTest
 final class TonoAccountRulesTests: XCTestCase {
     @MainActor
     func testEmailStepResetDoesNotInterruptRestoreAndClearsLocalError() async {
-        let session = AccountSession(sidecar: TonoSidecarService(), descriptorConsumer: { _ in })
+        let session = AccountSession(sidecar: TonoSidecarService(), descriptorConsumer: { _ in }, killSwitchDisarmConsumer: {})
         session.resetEmailSignIn()
         XCTAssertEqual(session.state, .restoring)
         // Invalid input is rejected locally, without a network or keychain call.

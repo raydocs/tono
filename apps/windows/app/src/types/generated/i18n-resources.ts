@@ -755,6 +755,7 @@ export interface TranslationResources {
             label: string
             pathLabel: string
           }
+          internalDiagnostics: string
           networkLogUpload: {
             description: string
             label: string
@@ -928,7 +929,10 @@ export interface TranslationResources {
         deviceLimit: string
         devices: string
         email: string
+        expires: string
+        noExpiry: string
         otherDevices: string
+        plan: string
         revoke: string
         revokeConfirmMessage: string
         revokeConfirmTitle: string
@@ -938,6 +942,8 @@ export interface TranslationResources {
         subtitle: string
         thisComputer: string
         title: string
+        usage: string
+        usageOf: string
       }
       activity: {
         appCount: string
@@ -1019,6 +1025,13 @@ export interface TranslationResources {
         tokyo: string
       }
       dashboard: {
+        aiTraffic: {
+          empty: string
+          note: string
+          subtitle: string
+          title: string
+          week: string
+        }
         catalogRequiresChoice: string
         checklist: {
           admin: string
@@ -1050,8 +1063,10 @@ export interface TranslationResources {
           encryptedDns: string
           nodeUnreachable: string
           protectedHttpsFailed: string
+          protectionHeldByAnotherUser: string
           protectionReleaseFailed: string
           releaseReconciling: string
+          remoteSessionConnectRefused: string
           sendDiagnostics: string
           serviceBusy: string
           serviceNotRunning: string
@@ -1059,6 +1074,7 @@ export interface TranslationResources {
           tunDataPlaneBroken: string
           tunIngressBroken: string
           wfpEngineWedged: string
+          wfpLockUnverified: string
         }
         errorSwitchServer: string
         info: {
@@ -1089,6 +1105,7 @@ export interface TranslationResources {
           ready: string
           refreshingCatalog: string
           serverPool: string
+          sessionTotal: string
           telemetryFailed: string
           trafficRouted: string
           verifiedCatalog: string
@@ -1118,6 +1135,68 @@ export interface TranslationResources {
       }
       errors: {
         unknownAction: string
+      }
+      experience: {
+        catalog: string
+        channel: string
+        channelCandidate: string
+        channelDevelopment: string
+        channelRelease: string
+        channelUnknown: string
+        check: {
+          account: string
+          catalog: string
+          core: string
+          dns: string
+          exit: string
+          service: string
+          tunnel: string
+        }
+        checkedAt: string
+        checkFailed: string
+        checking: string
+        coreExpected: string
+        coreReported: string
+        healthDescription: string
+        healthTitle: string
+        hint: {
+          account: string
+          catalog: string
+          core: string
+          dns: string
+          exit: string
+          service: string
+          tunnel: string
+        }
+        identityHint: string
+        identityTitle: string
+        installHint: string
+        prepareFailed: string
+        preparing: string
+        preview: string
+        previewHint: string
+        receiptContext: string
+        receiptTime: string
+        recoveryActive: string
+        recoveryStopped: string
+        recoveryTitle: string
+        recoveryWaiting: string
+        repair: string
+        repairDescription: string
+        repairing: string
+        repairTitle: string
+        retryHealth: string
+        retryPreview: string
+        runHealth: string
+        service: string
+        source: string
+        stale: string
+        state: {
+          attention: string
+          observed: string
+          unknown: string
+        }
+        summaryHint: string
       }
       intro: {
         getStarted: string
@@ -1153,10 +1232,13 @@ export interface TranslationResources {
         emailLabel: string
         emailPlaceholder: string
         errors: {
+          clockSkew: string
+          codeRejected: string
           deviceLimit: string
           rateLimited: string
           serverError: string
           sessionExpired: string
+          signInNotSaved: string
           unreachable: string
         }
         inboxInstructions: string
@@ -1167,6 +1249,13 @@ export interface TranslationResources {
           description: string
           restore: string
           restoring: string
+          stillRunningDescription: string
+          stillRunningTitle: string
+          title: string
+          unverifiedDescription: string
+        }
+        noEmail: {
+          description: string
           title: string
         }
         resendIn: string
@@ -1182,6 +1271,11 @@ export interface TranslationResources {
         sending: string
         sendNewCode: string
         sent: string
+        sessionEnded: {
+          description: string
+          signIn: string
+          title: string
+        }
         stepCode: string
         stepEmail: string
         stillWaiting: string
@@ -1331,6 +1425,51 @@ export interface TranslationResources {
           uploading: string
         }
       }
+      routeExplanation: {
+        chain: string
+        chainHint: string
+        close: string
+        gone: string
+        insufficient: string
+        limit: string
+        matchedRule: string
+        notReported: string
+        observationHint: string
+        observedRoute: string
+        openApp: string
+        openConnection: string
+        title: string
+        unknown: string
+      }
+      routes: {
+        addFavorite: string
+        anyRegion: string
+        changed: string
+        favorites: string
+        fixedRegion: string
+        keepsConnection: string
+        loadFailed: string
+        loading: string
+        noFavorites: string
+        noRecent: string
+        noRecommendation: string
+        preferenceHint: string
+        reason: {
+          recent: string
+          tcp: string
+        }
+        recent: string
+        recommended: string
+        removeFavorite: string
+        save: string
+        saved: string
+        saveFailed: string
+        selectedRecommendation: string
+        selectOnly: string
+        title: string
+        useRecommendation: string
+        verifiedAt: string
+      }
       servers: {
         cloudGroup: string
         empty: string
@@ -1347,6 +1486,7 @@ export interface TranslationResources {
       }
       settings: {
         about: {
+          checkFailed: string
           checkUpdates: string
           description: string
           latestVersion: string
@@ -1449,6 +1589,7 @@ export interface TranslationResources {
           copyVersion: string
           description: string
           open: string
+          openFailed: string
           title: string
         }
       }

@@ -52,7 +52,35 @@ export function isPublicIPv4(address: string) {
 // into what a signature can override would make a leaked private key sufficient
 // to expose the traffic the product exists to protect, which is a strictly worse
 // position than the allowlist this mechanism replaces.
-export function canonicalTrafficPolicy(value: unknown, trusted = false): TrafficPolicy {
+//
+// Media endpoints need a signature (#318). An exact IP:port leaves the tunnel
+// on UDP for the WeChat process set, and both clients' unsigned media address
+// allowlists are empty, so an unsigned publish carrying one is refused rather
+// than stored for macOS to drop and older Windows builds to honour. Checked
+// last, after every entry has passed its own validation, so a malformed entry
+// is still reported as itself. `admitStoredUnsignedEndpoints` exists only for
+// the read path: a row stored before this rule must keep being served, or every
+// policy fetch becomes a 503; the clients drop those entries themselves.
+//
+// TCP endpoints follow the same rule: an exact IP:port on TCP 80/443 leaves the
+// tunnel, macOS's unsigned address allowlist is empty and Windows does not read
+// `tcpEndpoints` at all, so only a signature may publish one.
+export function canonicalTrafficPolicy(
+  value: unknown,
+  trusted = false,
+  admitStoredUnsignedEndpoints = false,
+): TrafficPolicy {
+  const policy = canonicalTrafficPolicyEntries(value, trusted);
+  if (!trusted && !admitStoredUnsignedEndpoints && policy.mediaEndpoints.length) {
+    throw new ApiError(400, 'VALIDATION_ERROR', 'Media endpoints require a signed policy');
+  }
+  if (!trusted && !admitStoredUnsignedEndpoints && policy.tcpEndpoints?.length) {
+    throw new ApiError(400, 'VALIDATION_ERROR', 'TCP endpoints require a signed policy');
+  }
+  return policy;
+}
+
+function canonicalTrafficPolicyEntries(value: unknown, trusted: boolean): TrafficPolicy {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid policy');
   }
@@ -203,6 +231,30 @@ export function canonicalTrafficPolicy(value: unknown, trusted = false): Traffic
     'sentry.io',
     'tono.app', 'tono.com',
   ];
+  // Match the clients' assistant home domains: a signed direct entry must not
+  // override their residential routes, including assistant auth hosts. Kept
+  // apart from `protectedSuffixes`, whose exact set is a cross-platform contract.
+  // Dedicated Model Studio API namespaces, not Alibaba's general cloud tree.
+  // Clients evaluate these assistant children before the reviewed DIRECT parent.
+  const dedicatedModelAPISuffixes = [
+    'dashscope.aliyuncs.com', 'dashscope-intl.aliyuncs.com',
+    'dashscope-us.aliyuncs.com', 'maas.aliyuncs.com',
+  ];
+  const assistantHomeSuffixes = [
+    ...dedicatedModelAPISuffixes,
+    'chatgpt.com', 'openai.com', 'chat.com', 'ai.com', 'oaistatic.com', 'oaiusercontent.com',
+    'grok.com', 'grok.x.com', 'grokipedia.com', 'x.ai',
+    'perplexity.ai', 'perplexity.com', 'pplx.ai',
+    'gemini.google.com', 'bard.google.com', 'aistudio.google.com',
+    'generativelanguage.googleapis.com', 'notebooklm.google.com',
+    'muse.ai', 'meta.ai', 'muse.meta.com', 'www.muse.ai',
+    'meta.com', 'facebook.com', 'fb.com', 'fb.me', 'fb.watch', 'fbcdn.net',
+    'facebook.net', 'messenger.com', 'instagram.com', 'cdninstagram.com', 'ig.me', 'threads.net',
+    'gmail.com', 'mail.google.com', 'googlemail.com', 'inbox.google.com',
+    'accounts.google.com', 'myaccount.google.com', 'oauth2.googleapis.com',
+    'mail-pa.clients6.google.com', 'gmail.googleapis.com',
+  ];
+  const directGuardSuffixes = [...protectedSuffixes, ...assistantHomeSuffixes];
   const seenHosts = new Set<string>();
   const canonicalDomains = (
     values: unknown[],
@@ -215,7 +267,7 @@ export function canonicalTrafficPolicy(value: unknown, trusted = false): Traffic
     }
     const { host, ports } = entry as Row;
     if (typeof host !== 'string' || host.length > 253 || !/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/.test(host) ||
-        protectedSuffixes.some((suffix) => host === suffix || host.endsWith(`.${suffix}`)) ||
+        directGuardSuffixes.some((suffix) => host === suffix || host.endsWith(`.${suffix}`)) ||
         seenHosts.has(host)) {
       throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid or duplicate domain host');
     }
@@ -283,8 +335,10 @@ export function canonicalTrafficPolicy(value: unknown, trusted = false): Traffic
     // whoever holds the key; it does not remove it.
     if (typeof host !== 'string' || host.length > 253 ||
         !/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/.test(host) ||
-        protectedSuffixes.some((suffix) =>
-          host === suffix || host.endsWith(`.${suffix}`) || suffix.endsWith(`.${host}`)) ||
+        directGuardSuffixes.some((suffix) =>
+          host === suffix || host.endsWith(`.${suffix}`) ||
+          (suffix.endsWith(`.${host}`) &&
+            !(host === 'aliyuncs.com' && dedicatedModelAPISuffixes.includes(suffix)))) ||
         seenSuffixes.has(host)) {
       throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid or duplicate direct suffix host');
     }
@@ -359,7 +413,15 @@ export async function publicTrafficPolicy(e: Env) {
     // allowlist entry removed while the stored policy still uses it makes this
     // throw for every device. See the note on `allowedDirectSuffixes` before
     // narrowing anything.
-    canonicalTrafficPolicy(JSON.parse(json), Boolean(signature));
+    //
+    // A document may name its own revision inside the signed bytes (#317). It
+    // must be the row's; anything else means the envelope was relabelled.
+    const document = JSON.parse(json);
+    if (document && typeof document === 'object' && Object.hasOwn(document, 'revision')) {
+      if (document.revision !== Number(row.revision)) throw new Error('embedded revision mismatch');
+      delete document.revision;
+    }
+    canonicalTrafficPolicy(document, Boolean(signature), true);
     return {
       revision: Number(row.revision),
       json,

@@ -56,7 +56,13 @@ impl PreparedRuntime {
     /// difference between a restart and a failed one — a geo database the running core has
     /// memory-mapped cannot be replaced at all while it lives.
     pub(crate) async fn materialize(&self) -> Result<(), ServiceError> {
-        materialize_plan(&self.runtime, &self.plan, &self.yaml).await
+        materialize_plan(
+            &self.runtime,
+            &self.plan,
+            &self.yaml,
+            Path::new(&self.clash_config.core_config.config_path),
+        )
+        .await
     }
 
     /// The core started against this generation: retire whatever the old layout left behind.
@@ -276,7 +282,7 @@ pub(crate) async fn prepare_runtime(
                 core_path: core_path.to_string_lossy().into_owned(),
                 core_ipc_path: mihomo_ipc_path(&owner.identity),
                 config_path: runtime
-                    .join(RUNTIME_CONFIG_FILE_NAME)
+                    .join(runtime_config_file_name(&core_path))
                     .to_string_lossy()
                     .into_owned(),
                 config_dir: runtime.to_string_lossy().into_owned(),
@@ -338,10 +344,19 @@ async fn plan_runtime_refresh(
 /// the caller has already stopped it — but about what is on disk if this fails part way. A failure
 /// before the commit leaves the generation still describing the configuration the previous core
 /// ran, which is what the desired-state restore would start again.
+fn runtime_config_file_name(core_path: &Path) -> &'static str {
+    if crate::core::structure::is_sing_box_core_path(&core_path.to_string_lossy()) {
+        SING_BOX_RUNTIME_CONFIG_FILE_NAME
+    } else {
+        RUNTIME_CONFIG_FILE_NAME
+    }
+}
+
 async fn materialize_plan(
     runtime: &Path,
     plan: &super::staging::StagePlan,
     yaml: &str,
+    config_path: &Path,
 ) -> Result<(), ServiceError> {
     // The plan is shared, so what gets recorded is corrected here: a copy whose source moved
     // under it loses its entry rather than the whole start losing.
@@ -359,7 +374,7 @@ async fn materialize_plan(
 
     for copy in &plan.copies {
         let target = resolve_in_generation(runtime, &copy.destination)?;
-        super::staging::copy_staged_file(&copy.source, &target)
+        super::staging::copy_staged_file(&copy.source, copy.identity.len, &target)
             .await
             .map_err(|error| {
                 invalid_asset(format!(
@@ -375,7 +390,8 @@ async fn materialize_plan(
         // Staging turns this into a restart; a start cannot, and does not need to. Dropping the
         // entry says the same thing the manifest says about any destination it omits — nothing is
         // proven about it — so the next staging copies it again. A geo database being rewritten
-        // while the core starts must not be a start failure.
+        // while the core starts must not be a start failure. (One that grew past its planned
+        // length is the exception: the copy refuses it rather than copy without bound.)
         if super::staging::source_identity_changed(&copy.source, &copy.identity).await {
             tracing::warn!(
                 destination = %copy.destination,
@@ -385,7 +401,19 @@ async fn materialize_plan(
         }
     }
 
-    let config_path = runtime.join(RUNTIME_CONFIG_FILE_NAME);
+    let allowed_name = config_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| {
+            name.eq_ignore_ascii_case(RUNTIME_CONFIG_FILE_NAME)
+                || name.eq_ignore_ascii_case(SING_BOX_RUNTIME_CONFIG_FILE_NAME)
+        });
+    if !allowed_name {
+        return Err(invalid_asset(
+            "runtime configuration file must be config.yaml or config.json",
+        ));
+    }
+    let config_path = config_path.to_path_buf();
     if let Err(error) =
         super::staging::commit_staged_config(runtime, &config_path, yaml, &manifest).await
     {
@@ -671,6 +699,7 @@ pub(crate) fn is_installed_core_image_path(canonical: &Path) -> bool {
             let name = name.to_string_lossy();
             name.eq_ignore_ascii_case("tono-core.exe")
                 || name.eq_ignore_ascii_case("verge-mihomo.exe")
+                || name.eq_ignore_ascii_case("sing-box.exe")
         });
     is_core_image && is_permitted_windows_core_location(canonical)
 }
@@ -790,8 +819,10 @@ pub(super) fn validate_destination(destination: &str) -> Result<PathBuf, Service
     Ok(path.to_path_buf())
 }
 
-/// The file a runtime generation's configuration always lives in.
+/// The file a mihomo runtime generation's configuration lives in.
 pub(super) const RUNTIME_CONFIG_FILE_NAME: &str = "config.yaml";
+/// The file a sing-box runtime generation's configuration lives in.
+pub(super) const SING_BOX_RUNTIME_CONFIG_FILE_NAME: &str = "config.json";
 /// The infix every file staging writes as a temporary carries.
 pub(super) const STAGING_TEMP_INFIX: &str = ".staging-";
 
@@ -922,6 +953,7 @@ pub(super) fn destination_key_for(
         // runs after the configuration is committed — would then delete the live configuration.
         [only]
             if only.eq_ignore_ascii_case(RUNTIME_CONFIG_FILE_NAME)
+                || only.eq_ignore_ascii_case(SING_BOX_RUNTIME_CONFIG_FILE_NAME)
                 || only.eq_ignore_ascii_case(super::staging::MANIFEST_FILE_NAME) =>
         {
             Err(invalid_asset(format!(
@@ -1495,7 +1527,7 @@ mod destination_type_tests {
             "a recorded executable must still be nameable for deletion"
         );
         // Everything that keeps a deletion inside the generation still holds for a recorded key.
-        for dangerous in ["../escape.exe", "config.yaml", ".runtime-manifest.json"] {
+        for dangerous in ["../escape.exe", "config.yaml", "config.json", ".runtime-manifest.json"] {
             assert!(
                 destination_key_for(Path::new(dangerous), DestinationUse::Recorded).is_err(),
                 "accepted {dangerous}"
@@ -1583,6 +1615,8 @@ mod tests {
             key: uid.to_string(),
             identity: OwnerIdentity::Unix { uid, gid },
             app_data_root,
+            peer_pid: None,
+            peer_session_id: None,
         }
     }
 

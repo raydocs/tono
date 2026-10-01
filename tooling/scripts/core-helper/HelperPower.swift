@@ -10,7 +10,9 @@ import IOKit.pwr_mgt
 /// before `beginSleep()` returns, after which the power callback installs the
 /// all-block barrier and stops Mihomo.
 final class PowerTransitionGate: @unchecked Sendable {
-    private let lock = NSLock()
+    // Commit holds this gate across its final live readback and durable write;
+    // nested same-thread observations may call isAwake without releasing it.
+    private let lock = NSRecursiveLock()
     private var sleeping = false
 
     func whileAwake<T>(_ operation: () throws -> T) throws -> T {

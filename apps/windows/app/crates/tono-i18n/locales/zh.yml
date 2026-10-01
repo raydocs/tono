@@ -34,6 +34,22 @@ notifications:
 service:
   adminInstallPrompt: 安装 Tono 服务需要管理员权限
   adminUninstallPrompt: 卸载 Tono 服务需要管理员权限
+exitRefusal:
+  titleHeld: 网络保护仍然有效
+  titleReleaseMayComplete: 尚未确认网络保护已解除
+  titleUnconfirmed: 无法确认网络保护状态
+  intro: Tono 无法确认网络保护已经解除。详细原因已写入 Tono 日志。
+  held: 本机仍受保护：保护开启期间没有流量离开本机。现在{action}，保护会保持开启。
+  releaseMayComplete: Tono 服务可能仍在完成解除，因此{action}后保护可能被解除，也可能保持开启并继续拦截流量。
+  unconfirmed: Tono 服务没有确认保护仍然开启，因此本机可能已经恢复直连，也可能仍被拦截。
+  recovery: 如果网络仍被拦截，请重新打开 Tono 并断开连接，或在 Tono 安装目录中以管理员身份运行 `tono-service.exe --emergency-disarm`。
+  quitAction: 退出
+  restartAction: 重启
+  quitQuestion: 仍要退出吗？
+  restartQuestion: 仍要重启吗？
+  quitButton: 仍然退出
+  restartButton: 仍然重启
+  stayOpen: 保持打开
 launchGuard:
   currentExeError: 无法确定应用位置：{error}
   homeDirError: 无法确定当前用户主目录，应用将退出：{error}
@@ -81,6 +97,7 @@ tray:
       connecting: 正在连接
       connected: 保护中
       protectedOffline: 保护已开启，当前未连接
+      protectionUnknown: 保护状态未确认
       disconnecting: 正在断开
   ruleMode: 规则模式
   globalMode: 全局模式

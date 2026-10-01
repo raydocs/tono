@@ -1,32 +1,38 @@
 name: macOS CI
 
 on:
+  workflow_call:
+    inputs:
+      update_release_sequence:
+        description: Monotonic sequence for a paired unsigned native candidate
+        required: true
+        type: string
   # Manual re-run, so a flake or an infrastructure hiccup does not need a
-  # pointless commit to retry.
+  # pointless commit to retry. pull_request and merge_group enter through
+  # ci-gate.yml so a PR does not start this workflow twice.
   workflow_dispatch:
-  pull_request:
-    paths:
-      - apps/macos/**
-      - tooling/scripts/**
-      - .github/workflows/macos-ci.yml
-  # Every branch, not just the default one. This repository is a fork, and no
-  # `pull_request` event has ever produced a run here — PR #1 merged without one.
-  # Restricted to `main` and paired with a trigger that does not fire, this
-  # workflow could only ever have run after a merge, which is the wrong time to
-  # learn something is broken. It is also why `macos-ci.yml` existed for days and
-  # never executed once.
+  # Direct pushes on main and the release lines. A pull-request branch is
+  # already covered by ci-gate; keeping push on that branch runs these jobs
+  # twice, because the push ref and the pull_request ref do not share a
+  # concurrency group.
   push:
+    branches:
+      - main
+      - release/macos
+      - release/windows
     paths:
       - apps/macos/**
       - tooling/scripts/**
       - .github/workflows/macos-ci.yml
+      - apps/windows/crates/tono-core/src/update_contract.rs
+      - apps/windows/crates/tono-core/tests/update_contract.rs
 
 permissions:
   contents: read
 
 concurrency:
   group: macos-ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name != 'merge_group' && github.event_name != 'workflow_call' }}
 
 jobs:
   sing-box-input:
@@ -50,8 +56,15 @@ jobs:
     # "value of type 'some View' has no member 'glassEffect'", which reads like a
     # code error and is really a missing SDK.
     runs-on: macos-26
+    env:
+      TONO_UPDATE_RELEASE_SEQUENCE: ${{ inputs.update_release_sequence || '' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        if: inputs.update_release_sequence != ''
+        with:
+          node-version: 24
 
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
@@ -79,24 +92,63 @@ jobs:
           mkdir -p apps/macos/dist
           ditto -c -k --keepParent apps/macos/build/Build/Products/Release/Tono.app apps/macos/dist/Tono-macOS-beta.zip
 
+      - name: Measure paired unsigned update target from the packaged bundle
+        if: inputs.update_release_sequence != ''
+        run: |
+          set -euo pipefail
+          ditto -x -k apps/macos/dist/Tono-macOS-beta.zip "$RUNNER_TEMP/paired-macos"
+          app="$RUNNER_TEMP/paired-macos/Tono.app"
+          version=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist")
+          node tooling/scripts/desktop-update-v1.mjs measure \
+            --version "$version" --source "$GITHUB_SHA" --sequence "$TONO_UPDATE_RELEASE_SEQUENCE" \
+            --target macos-arm64 --artifact apps/macos/dist/Tono-macOS-beta.zip \
+            --app "$app/Contents/MacOS/Tono" --core "$app/Contents/Resources/sing-box" \
+            --privileged "$app/Contents/Resources/tono-core-helper" \
+            --output apps/macos/dist/update-target.macos-arm64.json
+
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: tono-macos-beta-${{ github.sha }}
-          path: apps/macos/dist/Tono-macOS-beta.zip
+          path: |
+            apps/macos/dist/Tono-macOS-beta.zip
+            apps/macos/dist/update-target.macos-arm64.json
           if-no-files-found: error
           retention-days: 7
 
       - name: Run the TonoTests unit tests
         env:
           TEST_RUNNER_TONO_EMIT_SINGBOX: ${{ runner.temp }}/sing-box-product.json
+          TEST_RUNNER_TONO_EMIT_UPDATE_CONTRACT: ${{ runner.temp }}/update-contract-v1-result.txt
         run: |
           xcodebuild \
             -project apps/macos/Tono.xcodeproj \
             -scheme Tono \
             -configuration Debug \
+            -resultBundlePath apps/macos/test-results/TonoTests.xcresult \
             CODE_SIGNING_ALLOWED=NO \
             ENABLE_USER_SCRIPT_SANDBOXING=NO \
             test
+
+      - name: Require the shared update contract XCTest to execute
+        run: |
+          python3 - <<'PY'
+          import hashlib, os, pathlib
+          fixture = pathlib.Path('tooling/scripts/tests/fixtures/update-protocol-v1/manifest.json')
+          result = pathlib.Path(os.environ['RUNNER_TEMP']) / 'update-contract-v1-result.txt'
+          assert result.read_text() == hashlib.sha256(fixture.read_bytes()).hexdigest() + '\n'
+          print('Swift shared update contract executed against the checked-out fixture')
+          PY
+
+      - name: Preserve native test results and render attachments
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: tono-macos-tests-${{ github.sha }}
+          path: |
+            apps/macos/test-results/TonoTests.xcresult
+            apps/macos/test-results/renders/*.png
+          if-no-files-found: warn
+          retention-days: 7
 
       - name: Check actual Swift runtime bytes with fixed core and helper
         run: |
@@ -125,6 +177,12 @@ jobs:
         run: tooling/scripts/test-subscription-url-policy.sh
 
       - name: Helper peer authorization
+        # Hosted runners have no Apple Development identity. The allow case
+        # cannot pass `anchor apple generic` with a self-signed certificate, so
+        # this step runs the reject cases and writes a warning plus a job summary.
+        # macos-release runs the allow case later, against the imported Developer ID.
+        env:
+          TONO_PEER_AUTH_MODE: ci
         run: tooling/scripts/test-helper-peer-authorization.sh
 
       - name: Multi-exit policy
@@ -148,8 +206,14 @@ jobs:
       - name: Install lifecycle recovery safety (no root)
         run: python3 tooling/scripts/tests/test_helper_install_recovery.py
 
+      - name: Install lifecycle argument refusal (no root)
+        run: python3 tooling/scripts/tests/test_helper_install_arguments.py
+
       - name: Release archive installs as Tono.app
         run: python3 tooling/scripts/tests/test_macos_archive_layout.py
+
+      - name: Release gate checks the embedded executables
+        run: python3 tooling/scripts/tests/test_macos_release_gate_core.py
 
       - name: Helper signing timestamp and offline test boundary
         run: python3 tooling/scripts/tests/test_helper_signing_timestamp.py
@@ -224,3 +288,8 @@ jobs:
         # Proves ownership, permission, and symlink enforcement by constructing
         # the failing cases, which needs the ability to chown to another user.
         run: sudo apps/macos/Tono/Resources/tono-core-helper --staging-self-test
+
+      - name: Helper native update transaction self-test
+        # Production store, staging and executor boundaries with temporary I/O,
+        # not a signing bypass or installed-device PF/DNS acceptance.
+        run: sudo apps/macos/Tono/Resources/tono-core-helper --update-self-test

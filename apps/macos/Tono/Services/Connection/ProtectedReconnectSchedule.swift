@@ -5,4 +5,9 @@ import Foundation
 enum ProtectedReconnectSchedule {
     static let delaysSeconds: [Int] = [2, 5, 10, 20, 30]
     static let networkChangeKickCooldown: TimeInterval = 30
+
+    static func backoffSeconds(attempt: Int) -> TimeInterval {
+        let sec = delaysSeconds[min(max(0, attempt), delaysSeconds.count - 1)]
+        return TimeInterval(sec)
+    }
 }

@@ -377,14 +377,14 @@ impl Mihomo {
         } else {
             url.clone()
         };
-        log::info!("connecting to websocket: {safe_url}, id: {id}");
+        log::debug!("connecting to websocket: {safe_url}, id: {id}");
         let manager = Arc::clone(&self.connection_manager);
 
         match ctx.protocol {
             Protocol::Http => {
                 log::debug!("starting connect to websocket by using http");
                 let request = url.into_client_request()?;
-                let (ws_stream, _) = connect_async(request).await?;
+                let (ws_stream, _) = tokio::time::timeout(ctx.request_timeout, connect_async(request)).await??;
                 let (writer, reader) = WsStream::from(ws_stream).split();
                 let (cancel_reader, cancel_reader_rx) = tokio::sync::oneshot::channel();
                 let reader_key = ws_reader_key(&manager, id);
@@ -402,7 +402,7 @@ impl Mihomo {
                 let stream = crate::stream::connect_to_socket(socket_path).await?;
 
                 let request = url.into_client_request()?;
-                let (ws_stream, _) = client_async(request, stream).await?;
+                let (ws_stream, _) = tokio::time::timeout(ctx.request_timeout, client_async(request, stream)).await??;
                 let (writer, reader) = WsStream::from(ws_stream).split();
                 let (cancel_reader, cancel_reader_rx) = tokio::sync::oneshot::channel();
                 let reader_key = ws_reader_key(&manager, id);
@@ -1076,9 +1076,43 @@ impl Mihomo {
 
 #[cfg(test)]
 mod tests {
-    use std::time::Instant;
+    use std::time::{Duration, Instant};
 
     use super::*;
+    use crate::{Error, models::Protocol};
+
+    #[tokio::test]
+    async fn http_websocket_connect_times_out_when_the_handshake_never_finishes() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let port = listener.local_addr().expect("port").port();
+        tokio::spawn(async move {
+            if let Ok((socket, _)) = listener.accept().await {
+                std::future::pending::<()>().await;
+                drop(socket);
+            }
+        });
+        let client = MihomoContext::build_client(&Protocol::Http, None).expect("client");
+        let mihomo = Mihomo::new(MihomoContext::new(
+            Protocol::Http,
+            Some("127.0.0.1".into()),
+            Some(port),
+            None,
+            None,
+            Duration::from_millis(200),
+            client,
+        ));
+        let started = Instant::now();
+        let error = mihomo
+            .connect("/logs", None, |_| true)
+            .await
+            .expect_err("a silent peer must time out");
+        assert!(
+            started.elapsed() < Duration::from_secs(2),
+            "connect hung for {:?}",
+            started.elapsed()
+        );
+        assert!(matches!(error, Error::Timeout(_)), "{error}");
+    }
 
     #[derive(serde::Serialize)]
     #[serde(tag = "type", content = "data")]

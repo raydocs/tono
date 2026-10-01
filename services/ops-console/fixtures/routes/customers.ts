@@ -156,6 +156,11 @@ function onboard({ req, res, store, file }: Context): boolean {
     if (detail) {
       const billing = detail.billing as Record<string, unknown> | undefined;
       if (billing && typeof body.plan === 'string') billing.plan = body.plan;
+      if (billing && typeof body.expiresAt === 'number') {
+        const value = toFileTime(body.expiresAt, clock);
+        existing.expiresAt = value;
+        billing.expiresAt = value;
+      }
     }
     sendJson(res, {
       email,

@@ -62,6 +62,23 @@ const MAX_TEXT_LEN: usize = 2000;
 /// shred the message without protecting anything.
 const MIN_KNOWN_SECRET_LEN: usize = 6;
 
+/// Capture before the originating attempt retires its credentials. Never serialize this list.
+pub(crate) fn known_secrets(inner: &crate::tono::state::TonoInner) -> Vec<String> {
+    use tono_core::credentials::CredentialStore as _;
+    let mut known = Vec::new();
+    if let Some(secret) = &inner.controller_secret {
+        known.push(secret.clone());
+    }
+    for node in &inner.nodes {
+        known.extend([node.uuid.clone(), node.reality_public_key.clone(),
+            node.reality_short_id.clone(), node.server.to_string()]);
+    }
+    if let Ok(Some(token)) = inner.credentials.refresh_token() {
+        known.push(token);
+    }
+    known
+}
+
 /// IPv4 literals in free text. Catalog nodes are guaranteed IPv4 literals, so
 /// this is the shape that could leak an exit address through an error
 /// message. IPv6 is not matched: no product value is an IPv6 literal, and a
@@ -238,6 +255,7 @@ pub struct DiagnosticsSources<'a> {
     pub dns: Option<&'a DnsProtectionStatus>,
     pub failed_stage: Option<&'a str>,
     pub connect_error: Option<&'a str>,
+    pub last_failure: Option<&'a crate::tono::local_evidence::FailedAttempt>,
     pub retry_attempt: u32,
     pub steps: &'a [StepRecord],
     /// Raw adapter names in; only class tokens come out.
@@ -270,6 +288,20 @@ pub fn build_report(sources: &DiagnosticsSources<'_>) -> DiagnosticsReport {
         .collect();
     let total_elapsed_ms = crate::tono::steps::total_elapsed_ms(sources.steps);
     let known = sources.known_secrets;
+    // #594: a newer attempt clears the live stage/error, which left the upload with no failure
+    // at all. Fall back to the retained last failure — its stage key and stable code only; the
+    // local `error_detail` stays in Copy details. No new field: the intake rejects unknown keys.
+    let (failed_stage, error) = match (sources.connect_error, sources.last_failure) {
+        (None, Some(last)) => (
+            sources.failed_stage.or(last.failed_stage),
+            Some(format!(
+                "last failed attempt, {}s before this report: {}",
+                sources.reported_at_ms.saturating_sub(last.failed_at_ms).max(0) / 1000,
+                last.error_code.as_deref().unwrap_or("unclassified"),
+            )),
+        ),
+        (connect_error, _) => (sources.failed_stage, scrub_opt_text(connect_error, known)),
+    };
 
     DiagnosticsReport {
         schema_version: DIAGNOSTICS_SCHEMA_VERSION,
@@ -294,11 +326,17 @@ pub fn build_report(sources: &DiagnosticsSources<'_>) -> DiagnosticsReport {
             .kill_switch
             .and_then(|status| scrub_opt_text(status.last_error.as_deref(), known)),
         dns_enabled: sources.dns.map(|status| status.enabled),
-        dns_last_error: sources
-            .dns
-            .and_then(|status| scrub_opt_text(status.last_error.as_deref(), known)),
-        failed_stage: sources.failed_stage.map(str::to_string),
-        error: scrub_opt_text(sources.connect_error, known),
+        // A resolver policy conflict arrives as the Service's advisory, never as its error. It
+        // shares this field only for display, where the Support page lists it on the DNS warning
+        // row by its `TONO_DNS_POLICY_CONFLICT` marker; a real error takes precedence.
+        dns_last_error: sources.dns.and_then(|status| {
+            scrub_opt_text(
+                status.last_error.as_deref().or(status.resolver_policy_warning.as_deref()),
+                known,
+            )
+        }),
+        failed_stage: failed_stage.map(str::to_string),
+        error,
         retry_attempt: sources.retry_attempt,
         total_elapsed_ms,
         steps,
@@ -425,12 +463,14 @@ mod tests {
                     last_error: Some(format!(
                         "WFP permit for {NODE_IP}:443 rejected; Authorization: Bearer {ACCESS_TOKEN}"
                     )),
+                    reconnect_after_release: false,
                 },
                 dns: DnsProtectionStatus {
                     enabled: false,
                     snapshot_present: true,
                     adapters: 3,
                     last_error: Some(format!("resolver {OTHER_NODE_IP} unreachable; token={REFRESH_TOKEN}")),
+                    resolver_policy_warning: None,
                 },
                 protocol: ProtocolInfo::current(),
                 known: [
@@ -468,6 +508,7 @@ mod tests {
                 dns: Some(&self.dns),
                 failed_stage: Some("securingDNS"),
                 connect_error: Some(&self.connect_error),
+                last_failure: None,
                 retry_attempt: 2,
                 steps: &self.steps,
                 adapter_names: &self.adapters,
@@ -495,6 +536,40 @@ mod tests {
             step_keys.sort_unstable();
             assert_eq!(step_keys, ["elapsedMs", "key", "state"]);
         }
+    }
+
+    /// #594: a retry clears the live `failed_stage`/`connect_error`; the upload must still
+    /// carry the last classified failure, as its stable code only (never the local detail).
+    #[test]
+    fn a_retry_that_cleared_the_live_error_still_uploads_the_last_classified_failure() {
+        let fixture = Fixture::new(&["Ethernet"]);
+        let attempt = crate::tono::local_evidence::AttemptHistory::default().begin(
+            1_712_345_600_000,
+            "US West 1".into(),
+            "hy2",
+            12,
+        );
+        let failed = crate::tono::local_evidence::FailedAttempt {
+            attempt,
+            connection_generation: 7,
+            failed_at_ms: 1_712_345_630_901,
+            failed_stage: Some("verifyingTraffic"),
+            error_code: Some("TONO_WFP_LOCK_UNVERIFIED".into()),
+            error_detail: format!("TONO_WFP_LOCK_UNVERIFIED: kill switch not locked; node {NODE_IP}"),
+            steps: Vec::new(),
+            probe_outcomes: Vec::new(),
+        };
+        let report = build_report(&DiagnosticsSources {
+            failed_stage: None,
+            connect_error: None,
+            last_failure: Some(&failed),
+            ..fixture.sources()
+        });
+        assert_eq!(report.failed_stage.as_deref(), Some("verifyingTraffic"));
+        let error = report.error.expect("the last failed attempt must reach the upload");
+        assert!(error.contains("TONO_WFP_LOCK_UNVERIFIED"), "{error}");
+        assert!(error.contains("48s"), "{error}");
+        assert!(!error.contains(NODE_IP) && !error.contains("kill switch not locked"), "{error}");
     }
 
     #[test]

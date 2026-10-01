@@ -1,0 +1,2202 @@
+//! Service-owned durable update authority. No App journal is read here.
+//! Native effects live in `windows`; the same store/consumption boundary is
+//! exercised with real files and substituted I/O in the focused tests.
+use crate::update_contract::{
+    Components, Context, Observation, Phase, Protection, Receipt, ReleaseManifest, Target,
+    TargetId, canonical,
+};
+use anyhow::{Context as _, Result, ensure};
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+use std::{
+    fs::{File, OpenOptions},
+    io::{Read, Write},
+    path::{Path, PathBuf},
+};
+
+/// Storage major of `state.json`. Absent means 1, the unversioned v1 layout;
+/// a writer emits `schema_version` only once it writes 2 or later. Within one
+/// major, readers ignore fields they do not know: an older executor copy reads
+/// what a newer Service wrote. Additive fields must be optional and safe to
+/// drop, because that older copy may rewrite the record without them. Anything
+/// else bumps the major, which an older reader refuses as newer evidence
+/// (retained), not as corruption. See docs/UPDATE_PROTOCOL_V1.md.
+pub const STATE_SCHEMA_VERSION: u64 = 1;
+
+#[derive(Deserialize)]
+struct SchemaProbe {
+    #[serde(default)]
+    schema_version: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Image {
+    pub pid: u32,
+    pub started_at: u64,
+    pub path: PathBuf,
+    pub sha256: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Execution {
+    Reserved,
+    Extracting,
+    Staged,
+    Launching,
+    Consumed,
+    Replaced,
+    RolledBack,
+    Uncertain,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DisconnectEvidence {
+    pub requested_at_unix: u64,
+    pub verified_at_unix: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Attempt {
+    pub manifest: ReleaseManifest,
+    pub receipt: Receipt,
+    pub initiating_image: Image,
+    pub successor_image: Option<Image>,
+    pub install_root: PathBuf,
+    pub execution: Execution,
+    pub executor: Option<Image>,
+    pub old_components: Components,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub disconnect: Option<DisconnectEvidence>,
+    /// Process-start clock (`Image::started_at`) sampled after the new bytes
+    /// were durable and before a successor was created. Not Unix time. Absent
+    /// on records written before this field existed; those still adopt.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub publication_clock: Option<u64>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct State {
+    pub consumed_sequence: u64,
+    pub generation: u64,
+    pub attempt: Option<Attempt>,
+    pub manual_installer: Option<Image>,
+}
+
+impl State {
+    /// An attempt that has not committed. [`Store::pending`] asks this of the store's view.
+    pub fn pending(&self) -> bool {
+        self.attempt
+            .as_ref()
+            .is_some_and(|a| a.receipt.phase != Phase::Committed)
+    }
+
+    fn validate(&self) -> Result<()> {
+        ensure!(
+            self.consumed_sequence <= 9_007_199_254_740_991
+                && self.generation <= 9_007_199_254_740_991,
+            "update high-water or generation exceeds protocol bounds"
+        );
+        if let Some(a) = &self.attempt {
+            a.manifest.validate()?;
+            Receipt::decode(&canonical(&a.receipt)?, &a.manifest)?;
+            ensure!(
+                a.receipt.target_id == TargetId::WindowsX86_64
+                    && a.receipt.installed_location_sha256 == location_digest(&a.install_root)
+                    && a.initiating_image.path == a.install_root.join("Tono.exe"),
+                "update installation binding corrupted"
+            );
+            ensure!(
+                self.generation
+                    >= a.receipt
+                        .successor_generation
+                        .unwrap_or(a.receipt.initiating_generation),
+                "update generation regressed"
+            );
+            if matches!(
+                a.execution,
+                Execution::Consumed
+                    | Execution::Replaced
+                    | Execution::RolledBack
+                    | Execution::Uncertain
+            ) {
+                ensure!(
+                    self.consumed_sequence >= a.manifest.release_sequence,
+                    "consumed high-water evidence missing"
+                );
+            }
+            if a.execution == Execution::Replaced {
+                // An absent successor means recovery measured the verified
+                // target on disk after the executor-launched successor was
+                // never durably registered; the first authenticated
+                // target-identity App re-proves it on adoption.
+                ensure!(
+                    a.successor_image.as_ref().is_none_or(|s| s.path == a.initiating_image.path
+                        && s.sha256 == target(&a.manifest).components.app_sha256),
+                    "successor evidence conflicts"
+                );
+            }
+            if matches!(
+                a.receipt.phase,
+                Phase::InstalledIdentityVerified | Phase::RecoveryVerified | Phase::Committed
+            ) {
+                ensure!(
+                    a.execution == Execution::Replaced
+                        || (a.receipt.phase != Phase::Committed
+                            && matches!(a.execution, Execution::RolledBack | Execution::Uncertain)),
+                    "proof/execution evidence conflicts"
+                );
+            }
+            ensure!(
+                self.manual_installer.is_none() || a.receipt.phase == Phase::Committed,
+                "manual lease conflicts with pending update"
+            );
+            if let Some(disconnect) = &a.disconnect {
+                ensure!(
+                    a.receipt.phase != Phase::Committed
+                        && disconnect.requested_at_unix >= a.receipt.created_at_unix
+                        && disconnect
+                            .verified_at_unix
+                            .is_none_or(|at| at >= disconnect.requested_at_unix),
+                    "explicit Disconnect evidence conflicts with transaction"
+                );
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Another process (a gate, an executor, the Service) holds the durable store's lock.
+#[derive(Debug, Clone, Copy)]
+pub struct StoreBusy;
+
+impl std::fmt::Display for StoreBusy {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("another update operation owns the durable store")
+    }
+}
+
+/// Only a lock another process holds is [`StoreBusy`]. A failed lock call is an I/O fault that
+/// keeps its own text, so a gate does not report it as another installer being active.
+fn take_store_lock(taken: std::result::Result<(), std::fs::TryLockError>) -> Result<()> {
+    match taken {
+        Ok(()) => Ok(()),
+        Err(held @ std::fs::TryLockError::WouldBlock) => Err(held).context(StoreBusy),
+        Err(std::fs::TryLockError::Error(error)) => {
+            Err(error).context("the durable store lock could not be taken")
+        }
+    }
+}
+
+/// Read and validate `state.json`, with its bytes; `None` when it is absent and the orphan rule
+/// holds (only `transaction.lock` may be present). It takes no lock and writes nothing: the locked
+/// open reaffirms what this returns, and the release admission only reads it.
+fn load(root: &Path) -> Result<Option<(Vec<u8>, State)>> {
+    match File::open(root.join("state.json")) {
+        Ok(file) => {
+            let mut bytes = Vec::new();
+            file.take(65_537).read_to_end(&mut bytes)?;
+            ensure!(
+                bytes.len() <= 65_536,
+                "update state exceeds limit; evidence retained"
+            );
+            let schema = serde_json::from_slice::<SchemaProbe>(&bytes)
+                .context("corrupt update evidence retained")?
+                .schema_version
+                .unwrap_or(1);
+            ensure!(schema >= 1, "corrupt update evidence retained");
+            ensure!(
+                schema <= STATE_SCHEMA_VERSION,
+                "update evidence written by a newer Tono (schema {schema}) retained for that version"
+            );
+            let state: State =
+                serde_json::from_slice(&bytes).context("corrupt update evidence retained")?;
+            state.validate()?;
+            Ok(Some((bytes, state)))
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            ensure!(
+                std::fs::read_dir(root)?
+                    .all(|entry| entry.is_ok_and(|e| e.file_name() == "transaction.lock")),
+                "orphan update evidence without state; manual recovery required"
+            );
+            Ok(None)
+        }
+        Err(e) => Err(e.into()),
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RollbackFinalizationStage {
+    NetworkSettled,
+    Complete,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RollbackFinalizationRecord {
+    attempt_id: String,
+    release_sequence: u64,
+    stage: RollbackFinalizationStage,
+}
+
+/// Finalization evidence grants no publication/consumption authority. It survives dropping
+/// the Store lock for Service readiness and is bound to one private, consumed attempt.
+pub struct RollbackFinalizer {
+    path: PathBuf,
+    attempt_id: String,
+    release_sequence: u64,
+    explicitly_released: bool,
+}
+
+impl RollbackFinalizer {
+    fn stage(&self) -> Result<Option<RollbackFinalizationStage>> {
+        let file = match File::open(&self.path) {
+            Ok(file) => file,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(error.into()),
+        };
+        let mut bytes = Vec::new();
+        file.take(1_025).read_to_end(&mut bytes)?;
+        ensure!(
+            bytes.len() <= 1_024,
+            "rollback finalization record exceeds limit"
+        );
+        let record: RollbackFinalizationRecord = serde_json::from_slice(&bytes)?;
+        ensure!(
+            record.attempt_id == self.attempt_id
+                && record.release_sequence == self.release_sequence,
+            "rollback finalization belongs to another attempt"
+        );
+        Ok(Some(record.stage))
+    }
+
+    fn record(&self, stage: RollbackFinalizationStage) -> Result<()> {
+        atomic_write(
+            &self.path,
+            &serde_json::to_vec(&RollbackFinalizationRecord {
+                attempt_id: self.attempt_id.clone(),
+                release_sequence: self.release_sequence,
+                stage,
+            })?,
+        )
+    }
+
+    /// Settle the stopped-Service network once, then restore supervision/readiness. A marker
+    /// failure still runs restoration; replay after NetworkSettled never stops Service again.
+    pub fn finish(
+        &self,
+        strict: bool,
+        settle: impl FnOnce() -> Result<()>,
+        restore_service: impl FnOnce() -> Result<()>,
+    ) -> (Result<()>, Result<()>) {
+        // Ambiguous evidence cannot prove completion; retry only bounded cleanup, never install.
+        let stage = self.stage().ok().flatten();
+        if stage == Some(RollbackFinalizationStage::Complete) {
+            return (Ok(()), Ok(()));
+        }
+        let mut settled = if self.explicitly_released
+            || stage == Some(RollbackFinalizationStage::NetworkSettled)
+        {
+            Ok(())
+        } else {
+            (if strict { Ok(()) } else { settle() })
+                .and_then(|()| self.record(RollbackFinalizationStage::NetworkSettled))
+        };
+        let restored = restore_service();
+        if settled.is_ok() && restored.is_ok() {
+            // Evidence failure is not a Service readiness failure; never trigger another stop.
+            settled = self.record(RollbackFinalizationStage::Complete);
+        }
+        (settled, restored)
+    }
+}
+
+pub struct Store {
+    root: PathBuf,
+    _lock: File,
+    write_failed: bool,
+    pub state: State,
+}
+
+impl Store {
+    /// The caller must establish a native private, non-reparse root first.
+    pub fn open(root: &Path) -> Result<Self> {
+        Self::open_with(root, atomic_write)
+    }
+
+    fn open_with(root: &Path, reaffirm: impl FnOnce(&Path, &[u8]) -> Result<()>) -> Result<Self> {
+        let lock = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(root.join("transaction.lock"))?;
+        take_store_lock(lock.try_lock())?;
+        let state = match load(root)? {
+            Some((bytes, state)) => {
+                // A rename can become visible before a failed durability ack.
+                // Do not promote mere visibility on query/restart to authority:
+                // re-publish these exact bytes under the lock, with a fresh
+                // successful sync + WRITE_THROUGH acknowledgement, first.
+                reaffirm(&root.join("state.json"), &bytes)?;
+                state
+            }
+            None => State::default(),
+        };
+        Ok(Self {
+            root: root.into(),
+            _lock: lock,
+            write_failed: false,
+            state,
+        })
+    }
+
+    /// The evidence as it stands, read without the store's lock and without a write: no
+    /// `transaction.lock` is created or taken and `state.json` is not re-published. Only the
+    /// release admission (BRICK-W5 d) and the start helper's lease check read this way; both
+    /// only admit or refuse. Every writer publishes a whole file by
+    /// rename, so this sees one complete version. It grants no update authority: every update
+    /// writer still opens the store under its lock and reaffirms first. The caller must
+    /// establish a native private, non-reparse root first, as for [`Self::open`].
+    pub fn read_state(root: &Path) -> Result<State> {
+        Ok(load(root)?.map(|(_, state)| state).unwrap_or_default())
+    }
+
+    pub fn save(&mut self, candidate: State) -> Result<()> {
+        self.save_with(candidate, atomic_write)
+    }
+
+    fn save_with(
+        &mut self,
+        candidate: State,
+        write: impl FnOnce(&Path, &[u8]) -> Result<()>,
+    ) -> Result<()> {
+        ensure!(
+            !self.write_failed,
+            "failed write requires reopening durable evidence"
+        );
+        candidate.validate()?;
+        let bytes = serde_json::to_vec(&candidate)?;
+        if let Err(error) = write(&self.root.join("state.json"), &bytes) {
+            self.write_failed = true;
+            return Err(error);
+        }
+        self.state = candidate; // Never acknowledge/publish a failed write.
+        Ok(())
+    }
+
+    pub fn pending(&self) -> bool {
+        self.state.pending()
+    }
+
+    /// Shared startup/executor admission for interrupted installation recovery.
+    pub fn independent_recovery_pending(&self) -> Result<bool> {
+        Ok(match self.attempt()?.execution {
+            Execution::Consumed | Execution::Replaced | Execution::Uncertain => true,
+            Execution::RolledBack => {
+                self.rollback_finalizer()?.stage().ok().flatten()
+                    != Some(RollbackFinalizationStage::Complete)
+            }
+            _ => false,
+        })
+    }
+
+    pub fn rollback_finalizer(&self) -> Result<RollbackFinalizer> {
+        let a = self.consumed_attempt()?;
+        ensure!(
+            a.execution == Execution::RolledBack,
+            "only a resolved rollback can finalize"
+        );
+        Ok(RollbackFinalizer {
+            path: self.attempt_dir()?.join("rollback-finalization.json"),
+            attempt_id: a.receipt.attempt_id.clone(),
+            release_sequence: a.manifest.release_sequence,
+            explicitly_released: a
+                .disconnect
+                .as_ref()
+                .is_some_and(|release| release.verified_at_unix.is_some()),
+        })
+    }
+
+    pub fn attempt_dir(&self) -> Result<PathBuf> {
+        Ok(self.root.join(&self.attempt()?.receipt.attempt_id))
+    }
+
+    pub fn attempt(&self) -> Result<&Attempt> {
+        self.state.attempt.as_ref().context("no update attempt")
+    }
+
+    pub fn live_attempt(&self, now: u64) -> Result<&Attempt> {
+        ensure!(!self.write_failed, "disk acknowledgement is uncertain");
+        let a = self.attempt()?;
+        ensure!(
+            a.receipt.blocked_reason.is_none()
+                && a.receipt.phase != Phase::Committed
+                && a.disconnect.is_none(),
+            "attempt cannot grant further authority"
+        );
+        ensure!(
+            now >= a.receipt.updated_at_unix && now < a.receipt.expires_at_unix,
+            "expired/clock-uncertain evidence retained"
+        );
+        Ok(a)
+    }
+
+    /// All checks and the high-water/consumed write precede the effect. An exact
+    /// retry observes `Consumed` and refuses: it is not another installation grant.
+    pub fn consume(&mut self, executor: &Image, now: u64) -> Result<()> {
+        self.consume_with(executor, now, atomic_write)
+    }
+
+    /// Capture the successor token before consuming or terminating the initiating App.
+    pub fn capture_before_consuming<T>(
+        &mut self,
+        executor: &Image,
+        mut clock: impl FnMut() -> Result<u64>,
+        capture: impl FnOnce() -> Result<T>,
+    ) -> Result<Result<T>> {
+        let a = self.live_attempt(clock()?)?;
+        ensure!(
+            a.receipt.phase == Phase::InstallationAuthorized
+                && a.execution == Execution::Launching
+                && a.executor.as_ref() == Some(executor)
+                && self.state.consumed_sequence < a.manifest.release_sequence,
+            "token capture requires the authorized unconsumed executor"
+        );
+        match capture() {
+            Ok(captured) => {
+                match self.consume(executor, clock()?) {
+                    Ok(()) => Ok(Ok(captured)),
+                    // The rename may be visible despite a failed durability acknowledgement.
+                    // Keep poisoned evidence; defer only cleanup, never another install grant.
+                    Err(error) if self.write_failed => Ok(Err(error)),
+                    Err(error) => Err(error), // Clock/expiry refusal retains its existing policy.
+                }
+            }
+            Err(capture_error) => {
+                // No install grant was consumed. Preserve the receipt for safe retry/retirement.
+                let mut next = self.state.clone();
+                let attempt = next.attempt.as_mut().context("attempt checked above")?;
+                attempt.execution = Execution::Staged;
+                attempt.executor = None;
+                let error = match self.save(next) {
+                    Ok(()) => capture_error,
+                    Err(record_error) => capture_error.context(format!(
+                        "capture refusal could not return the attempt to Staged: {record_error:#}"
+                    )),
+                };
+                // Even a failed refusal record cannot bypass the guarded failure finalizer.
+                Ok(Err(error))
+            }
+        }
+    }
+
+    fn consume_with(
+        &mut self,
+        executor: &Image,
+        now: u64,
+        write: impl FnOnce(&Path, &[u8]) -> Result<()>,
+    ) -> Result<()> {
+        let a = self.live_attempt(now)?;
+        ensure!(
+            a.receipt.phase == Phase::InstallationAuthorized && a.execution == Execution::Launching,
+            "installation already consumed or not authorized"
+        );
+        ensure!(
+            a.executor.as_ref() == Some(executor),
+            "installer process incarnation mismatch"
+        );
+        ensure!(
+            a.manifest.release_sequence > self.state.consumed_sequence,
+            "release sequence was consumed"
+        );
+        let mut next = self.state.clone();
+        next.consumed_sequence = a.manifest.release_sequence;
+        let attempt = next.attempt.as_mut().unwrap();
+        attempt.execution = Execution::Consumed;
+        attempt.receipt.updated_at_unix = now;
+        self.save_with(next, write)
+    }
+
+    /// Shared gate for repair-resource mutation, including recovery registration.
+    /// Store::open re-establishes durability before a restart can reach this gate.
+    pub fn consumed_attempt(&self) -> Result<&Attempt> {
+        ensure!(!self.write_failed, "consumption durability is uncertain");
+        let a = self.attempt()?;
+        ensure!(
+            matches!(
+                a.execution,
+                Execution::Consumed
+                    | Execution::Replaced
+                    | Execution::RolledBack
+                    | Execution::Uncertain
+            ) && self.state.consumed_sequence >= a.manifest.release_sequence,
+            "repair mutation requires durable consumption"
+        );
+        Ok(a)
+    }
+
+    fn disconnect_peer(&self, owner: &str, peer: &Image) -> Result<&Attempt> {
+        ensure!(
+            !self.write_failed && self.pending(),
+            "no durable pending attempt"
+        );
+        let a = self.attempt()?;
+        ensure!(a.receipt.owner == owner, "Disconnect owner mismatch");
+        // Identity, not incarnation: the executor terminates the initiating
+        // process and successors exit before commit, so requiring the exact
+        // recorded pid+started_at strands the transaction with no provable
+        // peer. The Service derives `peer` from the authenticated pipe, so a
+        // passing process is the owner's live App at the registered install
+        // root running known bytes (original or target).
+        ensure!(
+            peer.path == a.initiating_image.path
+                && (peer.sha256 == a.initiating_image.sha256
+                    || peer.sha256 == a.old_components.app_sha256
+                    || peer.sha256 == target(&a.manifest).components.app_sha256),
+            "Disconnect requires the registered App identity"
+        );
+        Ok(a)
+    }
+
+    /// Explicit release is not cancellation or successful recovery. Persist its
+    /// request before touching protection and leave requiredRecovery unchanged.
+    /// Like the macOS helper, release grants nothing and is not gated on the
+    /// wall clock: a rollback must not strand the owner behind the only exit.
+    /// Recorded times never precede earlier durable evidence.
+    pub fn request_disconnect(&mut self, owner: &str, peer: &Image, now: u64) -> Result<()> {
+        let a = self.disconnect_peer(owner, peer)?;
+        if a.disconnect.is_some() {
+            return Ok(());
+        }
+        let requested_at_unix = now.max(a.receipt.updated_at_unix);
+        let mut next = self.state.clone();
+        next.attempt.as_mut().unwrap().disconnect = Some(DisconnectEvidence {
+            requested_at_unix,
+            verified_at_unix: None,
+        });
+        self.save(next)
+    }
+
+    pub fn verify_disconnect(
+        &mut self,
+        owner: &str,
+        peer: &Image,
+        now: u64,
+        observed: Protection,
+    ) -> Result<()> {
+        let a = self.disconnect_peer(owner, peer)?;
+        let requested = a
+            .disconnect
+            .as_ref()
+            .context("Disconnect was not requested")?;
+        ensure!(
+            observed == Protection::Unprotected,
+            "fresh unprotected readback is required"
+        );
+        let verified_at_unix = now.max(requested.requested_at_unix);
+        let mut next = self.state.clone();
+        next.attempt
+            .as_mut()
+            .unwrap()
+            .disconnect
+            .as_mut()
+            .unwrap()
+            .verified_at_unix = Some(verified_at_unix);
+        self.save(next)
+    }
+
+    /// Archive the full durable state and clear the live slot. The original
+    /// obligation, private payload and sequence/generation high-water remain.
+    fn archive_attempt(
+        &mut self,
+        attempt_id: &str,
+        archive: impl FnOnce(&Path, &[u8]) -> Result<()>,
+    ) -> Result<()> {
+        let path = self
+            .root
+            .join(format!("retired-{attempt_id}.json"));
+        if let Err(error) = archive(&path, &serde_json::to_vec(&self.state)?) {
+            self.write_failed = true;
+            return Err(error);
+        }
+        // Never lower sequence/generation or turn explicit release into commit.
+        let mut next = self.state.clone();
+        next.attempt = None;
+        self.save(next)
+    }
+
+    pub fn retire_unconsumed(&mut self, owner: &str, peer: &Image) -> Result<()> {
+        self.retire_unconsumed_with(owner, peer, atomic_write)
+    }
+
+    fn retire_unconsumed_with(
+        &mut self,
+        owner: &str,
+        peer: &Image,
+        archive: impl FnOnce(&Path, &[u8]) -> Result<()>,
+    ) -> Result<()> {
+        let a = self.disconnect_peer(owner, peer)?;
+        // Consumption is impossible when the durable high-water still sits
+        // below the release AND the recorded executor incarnation is gone
+        // (never registered, or provably dead): `consume_with` only accepts
+        // that exact executor incarnation.
+        ensure!(
+            a.executor
+                .as_ref()
+                .is_none_or(|e| !incarnation_live(e))
+                && matches!(
+                    a.execution,
+                    Execution::Reserved | Execution::Extracting | Execution::Staged
+                        | Execution::Launching
+                )
+                && self.state.consumed_sequence < a.manifest.release_sequence
+                && a.disconnect
+                    .as_ref()
+                    .is_some_and(|d| d.verified_at_unix.is_some()),
+            "consumed, live-executor or unverified evidence cannot be retired"
+        );
+        let attempt_id = a.receipt.attempt_id.clone();
+        self.archive_attempt(&attempt_id, archive)
+    }
+
+    /// Terminal archive for an attempt whose physical replacement already
+    /// undid itself (or never happened). Requires the same verified explicit
+    /// Disconnect as unconsumed retirement; the caller separately proves the
+    /// installed components equal the retained originals. The consumed
+    /// high-water is never lowered and no recovery is fabricated.
+    pub fn retire_rolled_back(&mut self, owner: &str, peer: &Image) -> Result<()> {
+        let a = self.disconnect_peer(owner, peer)?;
+        ensure!(
+            matches!(a.execution, Execution::RolledBack | Execution::Uncertain)
+                && a.disconnect
+                    .as_ref()
+                    .is_some_and(|d| d.verified_at_unix.is_some()),
+            "only a verified Disconnect of a rolled-back attempt can be retired"
+        );
+        let attempt_id = a.receipt.attempt_id.clone();
+        self.archive_attempt(&attempt_id, atomic_write)
+    }
+
+    /// "Installed and released" terminal for a completed replacement whose
+    /// owner then released protection with a verified explicit Disconnect.
+    /// This is not commit: the phase, recorded obligation, successor evidence
+    /// and consumed/generation high-water are archived unchanged. Only a
+    /// provable target-identity successor may end it; the caller separately
+    /// proves the installed plan equals the target. `release_backups` removes
+    /// the retained rollback copies before the slot clears (the Service owns
+    /// that cleanup here, because no executor or commit will ever run for
+    /// this attempt); it must be idempotent so a failure leaves a retryable
+    /// pending record.
+    pub fn retire_released_installation(
+        &mut self,
+        owner: &str,
+        peer: &Image,
+        release_backups: impl FnOnce() -> Result<()>,
+    ) -> Result<()> {
+        self.retire_released_installation_with(owner, peer, release_backups, atomic_write)
+    }
+
+    fn retire_released_installation_with(
+        &mut self,
+        owner: &str,
+        peer: &Image,
+        release_backups: impl FnOnce() -> Result<()>,
+        archive: impl FnOnce(&Path, &[u8]) -> Result<()>,
+    ) -> Result<()> {
+        let a = self.disconnect_peer(owner, peer)?;
+        ensure!(
+            a.execution == Execution::Replaced
+                && a.disconnect
+                    .as_ref()
+                    .is_some_and(|d| d.verified_at_unix.is_some()),
+            "only a verified Disconnect of a replaced attempt can be released"
+        );
+        // Same proof as adoption: target bytes at the registered path, and
+        // either the recorded successor or a later incarnation superseding it.
+        self.authenticate_successor(peer)?;
+        release_backups()?;
+        let attempt_id = self.attempt()?.receipt.attempt_id.clone();
+        self.archive_attempt(&attempt_id, archive)
+    }
+
+    /// Only a target-identity App at the registered installation can adopt:
+    /// the executor-created successor directly, or — once that recorded
+    /// incarnation is gone — a later process whose current bytes are the
+    /// verified target. A path now naming new bytes says nothing about a
+    /// second old mapped App image, so a rebinding peer must postdate the
+    /// recorded successor and must not recycle its pid.
+    pub fn authenticate_successor(&mut self, peer: &Image) -> Result<()> {
+        let a = self.attempt()?;
+        ensure!(
+            a.execution == Execution::Replaced
+                && peer.path == a.initiating_image.path
+                && peer.sha256 == target(&a.manifest).components.app_sha256,
+            "peer is not a target-identity App at the registered location"
+        );
+        match a.successor_image.as_ref() {
+            Some(recorded) if recorded == peer => Ok(()),
+            Some(recorded) => {
+                ensure!(
+                    peer.pid != recorded.pid
+                        && peer.started_at > recorded.started_at
+                        && !incarnation_live(recorded),
+                    "recorded successor incarnation is live or not superseded"
+                );
+                let mut next = self.state.clone();
+                next.attempt.as_mut().unwrap().successor_image = Some(peer.clone());
+                self.save(next)
+            }
+            None => {
+                // Recovery measured the verified target on disk after the
+                // executor-launched successor was never durably registered.
+                // Adoption is measured identity; the initiating incarnation
+                // must be gone so it cannot re-enter as its own successor.
+                ensure!(
+                    peer != &a.initiating_image && !incarnation_live(&a.initiating_image),
+                    "initiating incarnation is still live"
+                );
+                // `image()` hashes the file on disk. A process that started
+                // before publication can still present the new hash while its
+                // mapped bytes are the old App. The floor is the same clock as
+                // `started_at`, not the receipt's Unix time.
+                if let Some(floor) = a.publication_clock {
+                    ensure!(
+                        peer.started_at > floor,
+                        "peer started before the published bytes were durable"
+                    );
+                }
+                let mut next = self.state.clone();
+                next.attempt.as_mut().unwrap().successor_image = Some(peer.clone());
+                self.save(next)
+            }
+        }
+    }
+
+    /// [`Self::authenticate_successor`], also answering whether `peer` is a relaunch: anything
+    /// but the exact incarnation the executor recorded (pid, start time, path and digest). A
+    /// restart kills that incarnation, so every App after one reads as relaunched, and the App
+    /// then does not reconnect by itself (BRICK-W1). Computed before authenticating, which may
+    /// rebind the record to `peer`.
+    pub fn adopt_successor(&mut self, peer: &Image) -> Result<bool> {
+        let relaunched = self.attempt()?.successor_image.as_ref() != Some(peer);
+        self.authenticate_successor(peer)?;
+        Ok(relaunched)
+    }
+
+    /// Record the publication floor once. Later calls leave the saved sample
+    /// in place.
+    pub fn note_publication_clock(&mut self, clock: u64) -> Result<()> {
+        if self.attempt()?.publication_clock.is_some() {
+            return Ok(());
+        }
+        let mut next = self.state.clone();
+        next.attempt
+            .as_mut()
+            .context("no attempt")?
+            .publication_clock = Some(clock);
+        self.save(next)
+    }
+
+    /// Fold a fully measured recovery without stopping Service or granting another install.
+    pub fn record_complete_publication_recovery(&mut self, clock: u64) -> Result<()> {
+        let a = self.consumed_attempt()?;
+        ensure!(
+            matches!(
+                a.execution,
+                Execution::Consumed | Execution::Replaced | Execution::Uncertain
+            ),
+            "complete publication recovery requires an in-flight consumed attempt"
+        );
+        self.note_publication_clock(clock)?;
+        if self.attempt()?.execution != Execution::Replaced {
+            self.execution(Execution::Replaced)?;
+        }
+        Ok(())
+    }
+
+    pub fn execution(&mut self, execution: Execution) -> Result<()> {
+        let mut next = self.state.clone();
+        next.attempt.as_mut().context("no attempt")?.execution = execution;
+        self.save(next)
+    }
+
+    pub fn observe(
+        &mut self,
+        owner: &str,
+        image: &Image,
+        generation: u64,
+        now: u64,
+        observation: Observation,
+    ) -> Result<()> {
+        let a = self.live_attempt(now)?;
+        let context = Context {
+            attempt_id: &a.receipt.attempt_id,
+            owner,
+            installed_location_sha256: &location_digest(
+                image
+                    .path
+                    .parent()
+                    .context("image has no installation root")?,
+            ),
+            target_id: TargetId::WindowsX86_64,
+            generation,
+            now_unix: now,
+        };
+        let receipt = a.receipt.propose(&a.manifest, &context, observation)?;
+        let mut next = self.state.clone();
+        next.generation = next.generation.max(generation);
+        next.attempt.as_mut().unwrap().receipt = receipt;
+        self.save(next)
+    }
+}
+
+pub fn target(manifest: &ReleaseManifest) -> &Target {
+    // Only used after ReleaseManifest::decode/validate.
+    manifest
+        .targets
+        .iter()
+        .find(|t| t.id == TargetId::WindowsX86_64)
+        .unwrap()
+}
+
+/// Whether the recorded process incarnation still runs this exact image.
+/// Windows re-derives pid + kernel creation time + image digest through the
+/// native probe; the store contract also compiles off Windows, where tests
+/// drive dead-incarnation branches through explicit store fields.
+#[cfg(windows)]
+fn incarnation_live(recorded: &Image) -> bool {
+    crate::core::update::security::image(recorded.pid)
+        .ok()
+        .as_ref()
+        == Some(recorded)
+}
+
+#[cfg(not(windows))]
+fn incarnation_live(recorded: &Image) -> bool {
+    let _ = recorded;
+    false
+}
+
+pub fn digest(bytes: &[u8]) -> String {
+    Sha256::digest(bytes)
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
+}
+
+pub fn file_digest(path: &Path) -> Result<String> {
+    let mut source = File::open(path)?;
+    let mut hash = Sha256::new();
+    let mut chunk = [0_u8; 65_536];
+    loop {
+        let n = source.read(&mut chunk)?;
+        if n == 0 {
+            break;
+        }
+        hash.update(&chunk[..n]);
+    }
+    Ok(hash.finalize().iter().map(|b| format!("{b:02x}")).collect())
+}
+
+pub fn location_digest(root: &Path) -> String {
+    digest(root.to_string_lossy().to_ascii_lowercase().as_bytes())
+}
+
+pub fn now() -> Result<u64> {
+    Ok(std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)?
+        .as_secs())
+}
+
+pub fn installed_floor() -> Result<u64> {
+    let floor: u64 = option_env!("TONO_UPDATE_RELEASE_SEQUENCE")
+        .context("Service has no compiled update release sequence")?
+        .parse()?;
+    ensure!(
+        (1..=9_007_199_254_740_991).contains(&floor),
+        "invalid compiled release sequence"
+    );
+    Ok(floor)
+}
+
+pub fn atomic_write(path: &Path, bytes: &[u8]) -> Result<()> {
+    let scratch = path.with_extension(format!("tmp-{}-{}", std::process::id(), now_nanos()));
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&scratch)?;
+    file.write_all(bytes)?;
+    file.sync_all()?;
+    drop(file);
+    replace(&scratch, path)?;
+    #[cfg(unix)]
+    File::open(path.parent().context("no parent")?)?.sync_all()?;
+    Ok(())
+}
+
+fn now_nanos() -> u128 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos()
+}
+
+pub fn replace(source: &Path, target: &Path) -> Result<()> {
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::OsStrExt;
+        use windows_sys::Win32::Storage::FileSystem::{
+            MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW,
+        };
+        let source: Vec<_> = source.as_os_str().encode_wide().chain(Some(0)).collect();
+        let target: Vec<_> = target.as_os_str().encode_wide().chain(Some(0)).collect();
+        ensure!(
+            unsafe {
+                MoveFileExW(
+                    source.as_ptr(),
+                    target.as_ptr(),
+                    MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+                )
+            } != 0,
+            "durable replacement failed: {}",
+            std::io::Error::last_os_error()
+        );
+    }
+    #[cfg(not(windows))]
+    std::fs::rename(source, target)?;
+    Ok(())
+}
+
+#[cfg(test)]
+pub(crate) mod tests {
+    use super::*;
+    use crate::update_contract::Protection;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static NEXT_ROOT: AtomicU64 = AtomicU64::new(0);
+
+    pub(crate) fn reserved() -> (PathBuf, Store, Image, Image) {
+        // Windows clock ticks can be shared by parallel tests. Keep each real
+        // private store isolated without serializing the transaction tests.
+        let root = std::env::temp_dir().join(format!(
+            "tono-update-{}-{}-{}",
+            std::process::id(),
+            now_nanos(),
+            NEXT_ROOT.fetch_add(1, Ordering::Relaxed)
+        ));
+        std::fs::create_dir(&root).unwrap();
+        let manifest = ReleaseManifest::decode(include_bytes!(
+            "../../../../tooling/scripts/tests/fixtures/update-protocol-v1/manifest.json"
+        ))
+        .unwrap();
+        let mut receipt = Receipt::decode(
+            include_bytes!(
+                "../../../../tooling/scripts/tests/fixtures/update-protocol-v1/windows-receipt.json"
+            ),
+            &manifest,
+        )
+        .unwrap();
+        receipt.installed_location_sha256 = location_digest(&root);
+        receipt.required_recovery = Protection::Connected;
+        let peer = Image {
+            pid: 10,
+            started_at: 100,
+            path: root.join("Tono.exe"),
+            sha256: "0".repeat(64),
+        };
+        let executor = Image {
+            pid: 20,
+            started_at: 200,
+            path: root.join("executor.exe"),
+            sha256: "e".repeat(64),
+        };
+        let mut store = Store::open(&root).unwrap();
+        store
+            .save(State {
+                consumed_sequence: 73,
+                generation: 91,
+                manual_installer: None,
+                attempt: Some(Attempt {
+                    old_components: target(&manifest).components.clone(),
+                    manifest,
+                    receipt,
+                    initiating_image: peer.clone(),
+                    successor_image: None,
+                    install_root: root.clone(),
+                    execution: Execution::Staged,
+                    executor: Some(executor.clone()),
+                    disconnect: None,
+                    publication_clock: None,
+                }),
+            })
+            .unwrap();
+        (root, store, peer, executor)
+    }
+
+    pub(crate) fn authorize(store: &mut Store, peer: &Image) {
+        store
+            .observe(
+                "windows:fixture-owner",
+                peer,
+                91,
+                1_900_000_001,
+                Observation::PreparationVerified {
+                    artifact_sha256: "b".repeat(64),
+                    protection: Protection::ProtectedOffline,
+                },
+            )
+            .unwrap();
+        store.execution(Execution::Launching).unwrap();
+    }
+
+    #[test]
+    fn update_interrupted_rollback_remains_pending_for_independent_finalization() {
+        let (root, mut store, peer, executor) = reserved();
+        authorize(&mut store, &peer);
+        store.consume(&executor, 1_900_000_050).unwrap();
+        store.execution(Execution::RolledBack).unwrap();
+        let sequence = store.state.consumed_sequence;
+        let receipt = canonical(&store.attempt().unwrap().receipt).unwrap();
+        drop(store); // Executor died before its selective release / Service restoration.
+
+        let store = Store::open(&root).unwrap();
+        let pending = store.independent_recovery_pending().unwrap();
+        assert_eq!(store.state.consumed_sequence, sequence);
+        assert_eq!(
+            canonical(&store.attempt().unwrap().receipt).unwrap(),
+            receipt
+        );
+        assert!(
+            pending,
+            "RolledBack is not proof that selective finalization completed"
+        );
+        std::fs::create_dir_all(store.attempt_dir().unwrap()).unwrap();
+        let finalizer = store.rollback_finalizer().unwrap();
+        let events = std::cell::RefCell::new(Vec::new());
+        let (settled, restored) = finalizer.finish(
+            false,
+            || {
+                events.borrow_mut().push("AI-held release");
+                Ok(())
+            },
+            || {
+                events.borrow_mut().push("interrupted Service restoration");
+                Err(anyhow::anyhow!("executor died before Service ready"))
+            },
+        );
+        settled.unwrap();
+        assert!(restored.is_err());
+        drop(store);
+        let store = Store::open(&root).unwrap();
+        assert!(store.independent_recovery_pending().unwrap());
+        let (settled, restored) = store.rollback_finalizer().unwrap().finish(
+            false,
+            || panic!("NetworkSettled replay must not stop/release Service again"),
+            || {
+                events.borrow_mut().push("restore Service");
+                Ok(())
+            },
+        );
+        settled.unwrap();
+        restored.unwrap();
+        assert!(!store.independent_recovery_pending().unwrap());
+        assert!(
+            store.pending(),
+            "finalization must not fabricate recovery commit"
+        );
+        assert_eq!(store.state.consumed_sequence, sequence);
+        assert_eq!(
+            canonical(&store.attempt().unwrap().receipt).unwrap(),
+            receipt
+        );
+        assert_eq!(
+            *events.borrow(),
+            [
+                "AI-held release",
+                "interrupted Service restoration",
+                "restore Service"
+            ]
+        );
+        store
+            .rollback_finalizer()
+            .unwrap()
+            .finish(
+                false,
+                || panic!("completed rollback repeats network effects"),
+                || panic!("completed rollback restarts Service"),
+            )
+            .0
+            .unwrap();
+        drop(store);
+        let store = Store::open(&root).unwrap();
+        assert!(!store.independent_recovery_pending().unwrap());
+        drop(store);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn update_rollback_finalization_preserves_verified_explicit_restore() {
+        let (root, mut store, peer, executor) = reserved();
+        authorize(&mut store, &peer);
+        store.consume(&executor, 1_900_000_050).unwrap();
+        store.execution(Execution::RolledBack).unwrap();
+        store
+            .request_disconnect("windows:fixture-owner", &peer, 1_900_000_051)
+            .unwrap();
+        store
+            .verify_disconnect(
+                "windows:fixture-owner",
+                &peer,
+                1_900_000_052,
+                Protection::Unprotected,
+            )
+            .unwrap();
+        std::fs::create_dir_all(store.attempt_dir().unwrap()).unwrap();
+        let (settled, restored) = store.rollback_finalizer().unwrap().finish(
+            false,
+            || panic!("verified Restore cannot replay an automatic AI hold"),
+            || Ok(()),
+        );
+        settled.unwrap();
+        restored.unwrap();
+        assert!(!store.independent_recovery_pending().unwrap());
+        drop(store);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn update_rollback_marker_write_failure_still_restores_service() {
+        let (root, mut store, peer, executor) = reserved();
+        authorize(&mut store, &peer);
+        store.consume(&executor, 1_900_000_050).unwrap();
+        store.execution(Execution::RolledBack).unwrap();
+        let finalizer = store.rollback_finalizer().unwrap();
+        // No attempt directory: deterministic failed marker write after successful release.
+        let restored = std::cell::Cell::new(false);
+        let (settled, restarted) = finalizer.finish(
+            false,
+            || Ok(()),
+            || {
+                restored.set(true);
+                Ok(())
+            },
+        );
+        assert!(settled.is_err());
+        restarted.unwrap();
+        assert!(
+            restored.get(),
+            "failed evidence must not strand Service supervision"
+        );
+        assert!(store.independent_recovery_pending().unwrap());
+        drop(store);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn update_rollback_finalization_keeps_explicit_strict_protection() {
+        let (root, mut store, peer, executor) = reserved();
+        authorize(&mut store, &peer);
+        store.consume(&executor, 1_900_000_050).unwrap();
+        store.execution(Execution::RolledBack).unwrap();
+        std::fs::create_dir_all(store.attempt_dir().unwrap()).unwrap();
+        let (settled, restored) = store.rollback_finalizer().unwrap().finish(
+            true,
+            || panic!("strict rollback releases its block"),
+            || Ok(()),
+        );
+        settled.unwrap();
+        restored.unwrap();
+        assert!(!store.independent_recovery_pending().unwrap());
+        drop(store);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn update_rollback_finalization_rejects_another_attempts_complete_marker() {
+        let (root, mut store, peer, executor) = reserved();
+        authorize(&mut store, &peer);
+        store.consume(&executor, 1_900_000_050).unwrap();
+        store.execution(Execution::RolledBack).unwrap();
+        std::fs::create_dir_all(store.attempt_dir().unwrap()).unwrap();
+        let finalizer = store.rollback_finalizer().unwrap();
+        atomic_write(
+            &finalizer.path,
+            &serde_json::to_vec(&RollbackFinalizationRecord {
+                attempt_id: "another-attempt".into(),
+                release_sequence: finalizer.release_sequence,
+                stage: RollbackFinalizationStage::Complete,
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        assert!(store.independent_recovery_pending().unwrap());
+        let settled = std::cell::Cell::new(false);
+        let (released, restored) = finalizer.finish(
+            false,
+            || {
+                settled.set(true);
+                Ok(())
+            },
+            || Ok(()),
+        );
+        released.unwrap();
+        restored.unwrap();
+        assert!(
+            settled.get(),
+            "foreign completion cannot suppress this attempt's cleanup"
+        );
+        drop(store);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn update_rollback_complete_marker_failure_is_not_a_service_restart_failure() {
+        let (root, mut store, peer, executor) = reserved();
+        authorize(&mut store, &peer);
+        store.consume(&executor, 1_900_000_050).unwrap();
+        store.execution(Execution::RolledBack).unwrap();
+        let dir = store.attempt_dir().unwrap();
+        std::fs::create_dir_all(&dir).unwrap();
+        let finalizer = store.rollback_finalizer().unwrap();
+        let (settled, restored) = finalizer.finish(
+            false,
+            || Ok(()),
+            || {
+                // Remove only this test's marker directory to fail the final bookkeeping write.
+                std::fs::remove_file(&finalizer.path)?;
+                std::fs::remove_dir(&dir)?;
+                Ok(()) // Service readiness succeeded.
+            },
+        );
+        assert!(settled.is_err());
+        restored.unwrap();
+        assert!(store.independent_recovery_pending().unwrap());
+        drop(store);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn update_store_lock_io_failure_is_not_reported_as_busy() {
+        // Only a lock another process holds is `StoreBusy`; a failed lock call is an I/O fault
+        // and must carry its own text, not "another installer is active".
+        let held = take_store_lock(Err(std::fs::TryLockError::WouldBlock)).unwrap_err();
+        assert!(held.is::<StoreBusy>(), "{held:#}");
+        let failed = take_store_lock(Err(std::fs::TryLockError::Error(std::io::Error::other(
+            "lock volume went away",
+        ))))
+        .unwrap_err();
+        assert!(!failed.is::<StoreBusy>(), "{failed:#}");
+        assert!(
+            format!("{failed:#}").contains("lock volume went away"),
+            "{failed:#}"
+        );
+    }
+
+    /// BRICK-W5 (d): the release admission opened the store for writing, so a lock another
+    /// process held, or a rewrite that failed, refused Disconnect with no update in progress.
+    /// Its read succeeds under a held lock and leaves every byte, time and entry as it was.
+    #[test]
+    fn update_release_read_takes_no_lock_and_rewrites_nothing() {
+        let (root, store, _, _) = reserved();
+        let path = root.join("state.json");
+        let bytes = std::fs::read(&path).unwrap();
+        let modified = std::fs::metadata(&path).unwrap().modified().unwrap();
+        let listing = || {
+            let mut names = std::fs::read_dir(&root)
+                .unwrap()
+                .map(|entry| entry.unwrap().file_name())
+                .collect::<Vec<_>>();
+            names.sort();
+            names
+        };
+        let entries = listing();
+        let state = Store::read_state(&root).expect("a held store lock refused the release read");
+        assert_eq!(state.generation, 91);
+        assert_eq!(std::fs::read(&path).unwrap(), bytes);
+        assert_eq!(
+            std::fs::metadata(&path).unwrap().modified().unwrap(),
+            modified
+        );
+        assert_eq!(listing(), entries);
+        drop(store);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn newer_store_fields_are_ignored_and_a_newer_major_is_refused_not_corrupt() {
+        let (root, store, _, _) = reserved();
+        drop(store);
+        let path = root.join("state.json");
+        let mut newer: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        // What a later Service may add within schema 1: optional, safe to drop.
+        newer["future_fact"] = serde_json::json!(true);
+        newer["attempt"]["future_fact"] = serde_json::json!("x");
+        newer["attempt"]["initiating_image"]["future_fact"] = serde_json::json!(1);
+        std::fs::write(&path, serde_json::to_vec(&newer).unwrap()).unwrap();
+        let store = Store::open(&root).expect("an older reader must accept additive fields");
+        assert_eq!(store.state.generation, 91);
+        assert_eq!(store.attempt().unwrap().execution, Execution::Staged);
+        drop(store);
+
+        newer["schema_version"] = serde_json::json!(2);
+        let bytes = serde_json::to_vec(&newer).unwrap();
+        std::fs::write(&path, &bytes).unwrap();
+        let refused = Store::open(&root).err().expect("a newer major must be refused");
+        assert!(format!("{refused:#}").contains("newer Tono (schema 2)"), "{refused:#}");
+        assert_eq!(std::fs::read(&path).unwrap(), bytes, "newer evidence is retained");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn update_consumption_is_bound_durable_and_single_use_after_lost_ack() {
+        let (root, mut store, peer, executor) = reserved();
+        assert!(
+            Store::open(&root).is_err(),
+            "second writer must not interleave"
+        );
+        assert!(
+            store
+                .observe(
+                    "windows:fixture-owner",
+                    &peer,
+                    91,
+                    1_900_000_001,
+                    Observation::PreparationVerified {
+                        artifact_sha256: "a".repeat(64),
+                        protection: Protection::ProtectedOffline
+                    }
+                )
+                .is_err()
+        );
+        assert_eq!(store.attempt().unwrap().receipt.phase, Phase::Preparing);
+        authorize(&mut store, &peer);
+        let mut recycled = executor.clone();
+        recycled.started_at += 1;
+        assert!(store.consume(&recycled, 1_900_000_002).is_err());
+        let before = std::fs::read(root.join("state.json")).unwrap();
+        assert!(
+            store
+                .consume_with(&executor, 1_900_000_002, |_, _| anyhow::bail!(
+                    "injected disk full"
+                ))
+                .is_err()
+        );
+        assert_eq!(std::fs::read(root.join("state.json")).unwrap(), before);
+        assert_eq!(store.state.consumed_sequence, 73);
+        assert!(
+            store.consume(&executor, 1_900_000_002).is_err(),
+            "uncertain writer must not grant on stale memory"
+        );
+        drop(store);
+        let mut store = Store::open(&root).unwrap();
+        // Real atomic disk publication, substituted failed acknowledgement.
+        assert!(
+            store
+                .consume_with(&executor, 1_900_000_002, |path, bytes| {
+                    atomic_write(path, bytes)?;
+                    let durable: State = serde_json::from_slice(&std::fs::read(path)?).unwrap();
+                    assert_eq!(durable.consumed_sequence, 74);
+                    assert_eq!(durable.attempt.unwrap().execution, Execution::Consumed);
+                    anyhow::bail!("injected lost acknowledgement after durable write")
+                })
+                .is_err()
+        );
+        drop(store);
+        assert!(
+            Store::open_with(&root, |_, _| anyhow::bail!(
+                "injected reload durability failure"
+            ))
+            .is_err()
+        );
+        let mut restarted = Store::open(&root).unwrap();
+        assert_eq!(restarted.state.consumed_sequence, 74);
+        assert!(restarted.consume(&executor, 1_900_000_003).is_err());
+        restarted.execution(Execution::RolledBack).unwrap();
+        assert_eq!(
+            restarted.state.consumed_sequence, 74,
+            "rollback must not make a consumed release installable again"
+        );
+        assert!(restarted.pending());
+        drop(restarted);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn update_successor_requires_executor_incarnation_and_original_recovery() {
+        let (root, mut store, peer, executor) = reserved();
+        authorize(&mut store, &peer);
+        store.consume(&executor, 1_900_000_002).unwrap();
+        let successor = Image {
+            pid: 30,
+            started_at: 400,
+            path: peer.path.clone(),
+            sha256: "4".repeat(64),
+        };
+        let mut next = store.state.clone();
+        next.attempt.as_mut().unwrap().execution = Execution::Replaced;
+        next.attempt.as_mut().unwrap().successor_image = Some(successor.clone());
+        assert!(
+            store
+                .save_with(next, |path, bytes| {
+                    atomic_write(path, bytes)?;
+                    anyhow::bail!("successor visible but acknowledgement lost")
+                })
+                .is_err()
+        );
+        assert!(store.authenticate_successor(&successor).is_err());
+        drop(store);
+        assert!(
+            Store::open_with(&root, |_, _| anyhow::bail!(
+                "reload cannot establish durability"
+            ))
+            .is_err()
+        );
+        let mut store = Store::open(&root).unwrap();
+        // An old App started AFTER consumption but BEFORE replacement now
+        // resolves to the same new file/hash. Only executor creation is proof.
+        let mut second_old_app = successor.clone();
+        second_old_app.pid = 29;
+        second_old_app.started_at = 300;
+        assert!(store.authenticate_successor(&second_old_app).is_err());
+        let mut recycled = successor.clone();
+        recycled.started_at += 1;
+        assert!(store.authenticate_successor(&recycled).is_err());
+        store.authenticate_successor(&successor).unwrap();
+        let components = target(&store.attempt().unwrap().manifest)
+            .components
+            .clone();
+        store
+            .observe(
+                "windows:fixture-owner",
+                &successor,
+                92,
+                1_900_000_003,
+                Observation::InstalledIdentityVerified {
+                    components: components.clone(),
+                },
+            )
+            .unwrap();
+        let before = std::fs::read(root.join("state.json")).unwrap();
+        assert!(
+            store
+                .observe(
+                    "windows:fixture-owner",
+                    &successor,
+                    92,
+                    1_900_000_004,
+                    Observation::RecoveryVerified {
+                        components: components.clone(),
+                        protection: Protection::ProtectedOffline
+                    }
+                )
+                .is_err()
+        );
+        assert_eq!(std::fs::read(root.join("state.json")).unwrap(), before);
+        // Native components/protection are injected at this store boundary;
+        // this deliberately makes no claim to execute WFP or a Windows device.
+        store
+            .observe(
+                "windows:fixture-owner",
+                &successor,
+                92,
+                1_900_000_004,
+                Observation::RecoveryVerified {
+                    components: components.clone(),
+                    protection: Protection::Connected,
+                },
+            )
+            .unwrap();
+        store
+            .observe(
+                "windows:fixture-owner",
+                &successor,
+                92,
+                1_900_000_005,
+                Observation::CommitVerified {
+                    components,
+                    protection: Protection::Connected,
+                },
+            )
+            .unwrap();
+        drop(store);
+        let store = Store::open(&root).unwrap();
+        assert!(!store.pending());
+        assert_eq!(store.state.generation, 92);
+        assert_eq!(store.state.consumed_sequence, 74);
+        assert_eq!(
+            store.attempt().unwrap().receipt.successor_generation,
+            Some(92)
+        );
+        drop(store);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn update_explicit_disconnect_archives_only_proven_unconsumed_attempts() {
+        let (root, mut store, peer, _) = reserved();
+        let owner = "windows:fixture-owner";
+        let mut next = store.state.clone();
+        next.attempt.as_mut().unwrap().executor = None;
+        next.attempt.as_mut().unwrap().execution = Execution::Reserved;
+        store.save(next).unwrap();
+        let original = store.attempt().unwrap().receipt.clone();
+        // Disconnect is bound to the registered installation identity, not to
+        // one process incarnation: a relaunched App at the same install root
+        // with known bytes passes, so the rejected peer below is one whose
+        // image lives outside that registered identity.
+        let mut foreign_peer = peer.clone();
+        foreign_peer.path = root.join("elsewhere").join("Tono.exe");
+        assert!(
+            store
+                .request_disconnect(owner, &foreign_peer, 1_900_000_001)
+                .is_err()
+        );
+        assert!(
+            store
+                .request_disconnect("another-owner", &peer, 1_900_000_001)
+                .is_err()
+        );
+        store
+            .request_disconnect(owner, &peer, 1_900_000_001)
+            .unwrap();
+        assert!(
+            store.live_attempt(1_900_000_001).is_err(),
+            "explicit release fences installation and recovery"
+        );
+        assert!(store.retire_unconsumed(owner, &peer).is_err());
+        assert!(
+            store
+                .verify_disconnect(owner, &peer, 1_900_000_002, Protection::ProtectedOffline)
+                .is_err()
+        );
+        // Native readback is injected at this Store boundary, not a WFP test.
+        store
+            .verify_disconnect(owner, &peer, 1_900_000_002, Protection::Unprotected)
+            .unwrap();
+        assert_eq!(
+            store.attempt().unwrap().receipt,
+            original,
+            "Disconnect must not rewrite requiredRecovery/phase"
+        );
+        assert!(
+            store
+                .retire_unconsumed_with(owner, &peer, |_, _| anyhow::bail!("archive disk full"))
+                .is_err()
+        );
+        assert!(store.pending());
+        drop(store);
+        let mut store = Store::open(&root).unwrap();
+        let archive_path = root.join(format!("retired-{}.json", original.attempt_id));
+        store
+            .retire_unconsumed_with(owner, &peer, |path, bytes| {
+                let current: State =
+                    serde_json::from_slice(&std::fs::read(root.join("state.json"))?)?;
+                assert!(current.attempt.is_some(), "archive must precede retirement");
+                atomic_write(path, bytes)
+            })
+            .unwrap();
+        let archive: State = serde_json::from_slice(&std::fs::read(archive_path).unwrap()).unwrap();
+        assert_eq!(archive.attempt.unwrap().receipt, original);
+        drop(store);
+        let store = Store::open(&root).unwrap();
+        assert!(!store.pending());
+        assert_eq!(
+            (store.state.consumed_sequence, store.state.generation),
+            (73, 91)
+        );
+        drop(store);
+        std::fs::remove_dir_all(root).unwrap();
+
+        let (root, mut store, peer, executor) = reserved();
+        authorize(&mut store, &peer);
+        store.consume(&executor, 1_900_000_002).unwrap();
+        let original = store.attempt().unwrap().receipt.clone();
+        store
+            .request_disconnect(owner, &peer, 1_900_000_003)
+            .unwrap();
+        store
+            .verify_disconnect(owner, &peer, 1_900_000_004, Protection::Unprotected)
+            .unwrap();
+        assert!(store.retire_unconsumed(owner, &peer).is_err());
+        assert!(store.consume(&executor, 1_900_000_005).is_err());
+        assert!(store.pending());
+        assert_eq!(store.attempt().unwrap().receipt, original);
+        assert_eq!(
+            (store.state.consumed_sequence, store.state.generation),
+            (74, 91)
+        );
+        drop(store);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn update_explicit_disconnect_releases_after_wall_clock_rollback() {
+        let (root, mut store, peer, _) = reserved();
+        let owner = "windows:fixture-owner";
+        store
+            .observe(
+                owner,
+                &peer,
+                91,
+                1_900_000_010,
+                Observation::PreparationVerified {
+                    artifact_sha256: "b".repeat(64),
+                    protection: Protection::ProtectedOffline,
+                },
+            )
+            .unwrap();
+        let mut next = store.state.clone();
+        next.attempt.as_mut().unwrap().executor = None;
+        store.save(next).unwrap();
+        assert_eq!(
+            store.attempt().unwrap().receipt.updated_at_unix,
+            1_900_000_010
+        );
+        // The wall clock is now behind both updatedAt and createdAt (manual
+        // change, dual-boot RTC, dead battery). Release grants nothing.
+        store
+            .request_disconnect(owner, &peer, 1_899_999_000)
+            .unwrap();
+        store
+            .request_disconnect(owner, &peer, 1_899_999_000)
+            .unwrap();
+        store
+            .verify_disconnect(owner, &peer, 1_899_999_001, Protection::Unprotected)
+            .unwrap();
+        drop(store);
+        let mut store = Store::open(&root).unwrap();
+        assert!(
+            store.live_attempt(1_899_999_001).is_err(),
+            "rollback still refuses further grants"
+        );
+        store.retire_unconsumed(owner, &peer).unwrap();
+        assert!(!store.pending());
+        assert_eq!(store.state.consumed_sequence, 73);
+        drop(store);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn update_expired_corrupt_and_orphaned_evidence_stays_closed() {
+        let (root, mut store, peer, executor) = reserved();
+        authorize(&mut store, &peer);
+        let before = std::fs::read(root.join("state.json")).unwrap();
+        assert!(store.consume(&executor, 1_900_000_600).is_err());
+        assert!(store.consume(&executor, 1_899_999_999).is_err());
+        assert!(store.pending());
+        assert_eq!(std::fs::read(root.join("state.json")).unwrap(), before);
+        drop(store);
+        std::fs::write(root.join("state.json"), b"{truncated").unwrap();
+        assert!(Store::open(&root).is_err());
+        assert_eq!(
+            std::fs::read(root.join("state.json")).unwrap(),
+            b"{truncated"
+        );
+        std::fs::rename(root.join("state.json"), root.join("retained-corrupt.json")).unwrap();
+        assert!(
+            Store::open(&root).is_err(),
+            "absence cannot erase orphan evidence"
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn update_complete_publication_recovery_fences_an_old_mapped_app_incarnation() {
+        let (root, mut store, peer, executor) = reserved();
+        authorize(&mut store, &peer);
+        store.consume(&executor, 1_900_000_002).unwrap();
+        store.record_complete_publication_recovery(450).unwrap();
+        let old_mapped = Image {
+            pid: 41,
+            started_at: 400,
+            path: peer.path.clone(),
+            sha256: target(&store.attempt().unwrap().manifest)
+                .components
+                .app_sha256
+                .clone(),
+        };
+        drop(store);
+        let mut store = Store::open(&root).unwrap();
+        assert!(
+            store.authenticate_successor(&old_mapped).is_err(),
+            "recovery must reject an App mapped before target publication"
+        );
+        store.record_complete_publication_recovery(600).unwrap();
+        assert_eq!(
+            store.attempt().unwrap().publication_clock,
+            Some(450),
+            "later recovery must preserve the first durable publication floor"
+        );
+        let fresh = Image {
+            pid: 42,
+            started_at: 451,
+            ..old_mapped
+        };
+        store.authenticate_successor(&fresh).unwrap();
+        assert_eq!(
+            store.attempt().unwrap().successor_image.as_ref(),
+            Some(&fresh)
+        );
+        drop(store);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn update_fresh_registered_app_incarnation_can_disconnect_and_retire_unconsumed_attempt() {
+        let (root, mut store, peer, _) = reserved();
+        let mut next = store.state.clone();
+        next.attempt.as_mut().unwrap().executor = None;
+        store.save(next).unwrap();
+        let owner = "windows:fixture-owner";
+        // The initiating process exited (crash, user close, executor
+        // termination); a relaunched App at the same registered path with the
+        // same known bytes re-proves the installation identity.
+        let relaunched = Image {
+            pid: 77,
+            started_at: 999,
+            path: peer.path.clone(),
+            sha256: peer.sha256.clone(),
+        };
+        store
+            .request_disconnect(owner, &relaunched, 1_900_000_010)
+            .unwrap();
+        store
+            .verify_disconnect(owner, &relaunched, 1_900_000_011, Protection::Unprotected)
+            .unwrap();
+        store.retire_unconsumed(owner, &relaunched).unwrap();
+        assert!(!store.pending());
+        assert_eq!(store.state.consumed_sequence, 73);
+        drop(store);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn update_app_started_after_replacement_with_target_identity_is_an_adoptable_successor() {
+        let (root, mut store, peer, executor) = reserved();
+        authorize(&mut store, &peer);
+        store.consume(&executor, 1_900_000_002).unwrap();
+        let launched = Image {
+            pid: 30,
+            started_at: 400,
+            path: peer.path.clone(),
+            sha256: target(&store.attempt().unwrap().manifest)
+                .components
+                .app_sha256
+                .clone(),
+        };
+        let mut next = store.state.clone();
+        next.attempt.as_mut().unwrap().execution = Execution::Replaced;
+        next.attempt.as_mut().unwrap().successor_image = Some(launched.clone());
+        store.save(next).unwrap();
+        // The user exited the executor-launched successor before commit and
+        // relaunched: a later incarnation at the registered path whose bytes
+        // are the verified target re-binds as the provable successor.
+        let relaunched = Image {
+            pid: 31,
+            started_at: 500,
+            ..launched.clone()
+        };
+        store.authenticate_successor(&relaunched).unwrap();
+        assert_eq!(
+            store.attempt().unwrap().successor_image,
+            Some(relaunched.clone())
+        );
+        drop(store);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// BRICK-W1: after a restart every App is a later incarnation. Adoption tells it so, which
+    /// is what keeps it from reconnecting by itself, and its release stays admitted.
+    #[test]
+    fn update_adoption_by_a_later_incarnation_reports_a_relaunch() {
+        let (root, mut store, peer, executor) = reserved();
+        authorize(&mut store, &peer);
+        store.consume(&executor, 1_900_000_002).unwrap();
+        let launched = Image {
+            pid: 30,
+            started_at: 400,
+            path: peer.path.clone(),
+            sha256: target(&store.attempt().unwrap().manifest)
+                .components
+                .app_sha256
+                .clone(),
+        };
+        let mut next = store.state.clone();
+        next.attempt.as_mut().unwrap().execution = Execution::Replaced;
+        next.attempt.as_mut().unwrap().successor_image = Some(launched.clone());
+        store.save(next).unwrap();
+        assert!(
+            !store.adopt_successor(&launched).unwrap(),
+            "the executor's own successor is not a relaunch"
+        );
+        let relaunched = Image {
+            pid: 31,
+            started_at: 500,
+            ..launched.clone()
+        };
+        assert!(
+            store.adopt_successor(&relaunched).unwrap(),
+            "a later incarnation must be reported as relaunched"
+        );
+        store
+            .request_disconnect("windows:fixture-owner", &relaunched, 1_900_000_010)
+            .unwrap();
+        drop(store);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn update_launching_without_live_executor_incarnation_is_retirable_after_verified_disconnect() {
+        let (root, mut store, peer, _) = reserved();
+        authorize(&mut store, &peer); // Launching with a registered executor
+        let mut next = store.state.clone();
+        next.attempt.as_mut().unwrap().executor = None; // spawn failed / mirror write lost
+        store.save(next).unwrap();
+        let owner = "windows:fixture-owner";
+        store.request_disconnect(owner, &peer, 1_900_000_003).unwrap();
+        store
+            .verify_disconnect(owner, &peer, 1_900_000_004, Protection::Unprotected)
+            .unwrap();
+        store.retire_unconsumed(owner, &peer).unwrap();
+        assert!(!store.pending());
+        assert_eq!(store.state.consumed_sequence, 73);
+        drop(store);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn update_replaced_attempt_released_by_verified_disconnect_reaches_archive_without_commit() {
+        let (root, mut store, peer, executor) = reserved();
+        authorize(&mut store, &peer);
+        store.consume(&executor, 1_900_000_002).unwrap();
+        let components = target(&store.attempt().unwrap().manifest)
+            .components
+            .clone();
+        let successor = Image {
+            pid: 30,
+            started_at: 400,
+            path: peer.path.clone(),
+            sha256: components.app_sha256.clone(),
+        };
+        let mut next = store.state.clone();
+        next.attempt.as_mut().unwrap().execution = Execution::Replaced;
+        next.attempt.as_mut().unwrap().successor_image = Some(successor.clone());
+        store.save(next).unwrap();
+        let owner = "windows:fixture-owner";
+        store
+            .observe(
+                owner,
+                &successor,
+                92,
+                1_900_000_003,
+                Observation::InstalledIdentityVerified { components },
+            )
+            .unwrap();
+        // Post-upgrade reconnect failed; the user pressed Restore internet.
+        store
+            .request_disconnect(owner, &successor, 1_900_000_004)
+            .unwrap();
+        store
+            .verify_disconnect(owner, &successor, 1_900_000_005, Protection::Unprotected)
+            .unwrap();
+        let original = store.attempt().unwrap().receipt.clone();
+        // Old App bytes at the same path may Disconnect but cannot end a
+        // replaced attempt; a failed backup release leaves it retryable.
+        assert!(
+            store
+                .retire_released_installation(owner, &peer, || panic!("unauthenticated release"))
+                .is_err()
+        );
+        assert!(
+            store
+                .retire_released_installation(owner, &successor, || anyhow::bail!("backup busy"))
+                .is_err()
+        );
+        assert!(store.pending());
+        let mut released = false;
+        store
+            .retire_released_installation_with(
+                owner,
+                &successor,
+                || {
+                    released = true;
+                    Ok(())
+                },
+                |path, bytes| {
+                    let current: State =
+                        serde_json::from_slice(&std::fs::read(root.join("state.json"))?)?;
+                    assert!(current.attempt.is_some(), "archive must precede release");
+                    atomic_write(path, bytes)
+                },
+            )
+            .unwrap();
+        assert!(released, "backup cleanup ownership is exercised before archive");
+        let archive: State = serde_json::from_slice(
+            &std::fs::read(root.join(format!("retired-{}.json", original.attempt_id))).unwrap(),
+        )
+        .unwrap();
+        let archived = archive.attempt.unwrap();
+        assert_eq!(archived.receipt, original, "release is not commit");
+        assert_eq!(archived.receipt.phase, Phase::InstalledIdentityVerified);
+        assert_eq!(archived.successor_image, Some(successor));
+        drop(store);
+        let store = Store::open(&root).unwrap();
+        assert!(!store.pending());
+        assert_eq!(
+            (store.state.consumed_sequence, store.state.generation),
+            (74, 92)
+        );
+        drop(store);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn update_capture_refusal_reaches_cleanup_without_consuming_or_publishing() {
+        let (root, mut store, peer, executor) = reserved();
+        authorize(&mut store, &peer);
+        let sequence = store.state.consumed_sequence;
+        let receipt = canonical(&store.attempt().unwrap().receipt).unwrap();
+        let captured = store
+            .capture_before_consuming(
+                &executor,
+                || Ok(1_900_000_050),
+                || Err::<(), _>(anyhow::anyhow!("initiating App token is unavailable")),
+            )
+            .unwrap();
+        assert!(
+            captured.is_err(),
+            "capture refusal must be deferred to selective cleanup"
+        );
+        assert_eq!(store.state.consumed_sequence, sequence);
+        assert_eq!(
+            canonical(&store.attempt().unwrap().receipt).unwrap(),
+            receipt
+        );
+        assert!(store.pending());
+        assert_eq!(store.attempt().unwrap().execution, Execution::Staged);
+        assert!(store.attempt().unwrap().executor.is_none());
+        drop(store);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn update_capture_refusal_cannot_reset_another_executor() {
+        let (root, mut store, peer, executor) = reserved();
+        authorize(&mut store, &peer);
+        let mut wrong_executor = executor.clone();
+        wrong_executor.started_at += 1;
+        let refused = store.capture_before_consuming(
+            &wrong_executor,
+            || Ok(1_900_000_050),
+            || -> Result<()> { panic!("unbound executor must not reach token capture") },
+        );
+        assert!(refused.is_err());
+        assert_eq!(store.attempt().unwrap().execution, Execution::Launching);
+        assert_eq!(store.attempt().unwrap().executor.as_ref(), Some(&executor));
+        drop(store);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn update_successful_capture_consumes_the_exact_executor_once() {
+        let (root, mut store, peer, executor) = reserved();
+        authorize(&mut store, &peer);
+        let captured = store
+            .capture_before_consuming(
+                &executor,
+                || Ok(1_900_000_050),
+                || Ok("captured user token"),
+            )
+            .unwrap()
+            .unwrap();
+        assert_eq!(captured, "captured user token");
+        assert_eq!(store.attempt().unwrap().execution, Execution::Consumed);
+        assert_eq!(
+            store.state.consumed_sequence,
+            store.attempt().unwrap().manifest.release_sequence
+        );
+        assert!(
+            store
+                .capture_before_consuming(
+                    &executor,
+                    || Ok(1_900_000_051),
+                    || -> Result<()> { panic!("a consumed attempt cannot recapture/reinstall") }
+                )
+                .is_err()
+        );
+        drop(store);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn update_capture_refusal_record_failure_still_reaches_the_failure_finalizer() {
+        let (root, mut store, peer, executor) = reserved();
+        authorize(&mut store, &peer);
+        let sequence = store.state.consumed_sequence;
+        std::fs::remove_file(root.join("state.json")).unwrap();
+        std::fs::create_dir(root.join("state.json")).unwrap();
+        let captured = store
+            .capture_before_consuming(
+                &executor,
+                || Ok(1_900_000_050),
+                || Err::<(), _>(anyhow::anyhow!("token capture refused")),
+            )
+            .unwrap();
+        let error = captured.unwrap_err();
+        assert_eq!(error.root_cause().to_string(), "token capture refused");
+        assert!(store.write_failed);
+        assert_eq!(store.state.consumed_sequence, sequence);
+        drop(store);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn update_consume_write_refusal_reaches_cleanup_without_install_authority() {
+        let (root, mut store, peer, executor) = reserved();
+        authorize(&mut store, &peer);
+        let before = serde_json::to_vec(&store.state).unwrap();
+        let state_path = root.join("state.json");
+        let retained_path = root.join("state-before-refusal.json");
+        let captured = std::cell::Cell::new(false);
+        let result = store.capture_before_consuming(
+            &executor,
+            || Ok(1_900_000_002),
+            || {
+                // Refuse the real atomic replacement deterministically without discarding evidence.
+                std::fs::rename(&state_path, &retained_path)?;
+                std::fs::create_dir(&state_path)?;
+                captured.set(true);
+                Ok("captured user token")
+            },
+        );
+        assert!(
+            captured.get(),
+            "token capture must succeed before the injected write refusal"
+        );
+        assert!(
+            result.is_ok(),
+            "a failed consume write must reach the guarded failure finalizer"
+        );
+        assert!(
+            result.unwrap().is_err(),
+            "a refused consume cannot grant a launch token"
+        );
+        assert!(store.write_failed);
+        assert_eq!(
+            serde_json::to_vec(&store.state).unwrap(),
+            before,
+            "a failed acknowledgement cannot publish memory authority"
+        );
+        assert!(store.consumed_attempt().is_err());
+        assert!(store.consume(&executor, 1_900_000_003).is_err());
+        drop(store);
+        std::fs::remove_dir(&state_path).unwrap();
+        std::fs::rename(&retained_path, &state_path).unwrap();
+        let store = Store::open(&root).unwrap();
+        assert_eq!(
+            serde_json::to_vec(&store.state).unwrap(),
+            before,
+            "retained evidence must remain unmodified"
+        );
+        drop(store);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn update_slow_token_capture_cannot_consume_after_receipt_expiry() {
+        let (root, mut store, peer, executor) = reserved();
+        authorize(&mut store, &peer);
+        let sequence = store.state.consumed_sequence;
+        let expiry = store.attempt().unwrap().receipt.expires_at_unix;
+        let captured = std::cell::Cell::new(false);
+        let result = store.capture_before_consuming(
+            &executor,
+            || Ok(if captured.get() { expiry } else { expiry - 1 }),
+            || {
+                captured.set(true);
+                Ok("user token")
+            },
+        );
+        assert!(captured.get());
+        assert!(
+            result.is_err(),
+            "consume must use time measured after token capture"
+        );
+        assert_eq!(store.state.consumed_sequence, sequence);
+        assert_eq!(store.attempt().unwrap().execution, Execution::Launching);
+        drop(store);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// No recorded successor: a process that started before the publication
+    /// clock can present the new file hash while still mapped to the old App.
+    /// A record with no clock (written before the field existed) still adopts.
+    #[test]
+    fn update_unregistered_successor_must_start_after_the_publication_clock() {
+        let (root, mut store, peer, executor) = reserved();
+        authorize(&mut store, &peer);
+        store.consume(&executor, 1_900_000_002).unwrap();
+        let hash = target(&store.attempt().unwrap().manifest)
+            .components
+            .app_sha256
+            .clone();
+        let mut next = store.state.clone();
+        let attempt = next.attempt.as_mut().unwrap();
+        attempt.execution = Execution::Replaced;
+        attempt.successor_image = None;
+        attempt.publication_clock = Some(450);
+        store.save(next).unwrap();
+        let started_at_the_floor = Image {
+            pid: 41,
+            started_at: 450,
+            path: peer.path.clone(),
+            sha256: hash.clone(),
+        };
+        assert!(store.authenticate_successor(&started_at_the_floor).is_err());
+        let mapped_before_publication = Image {
+            pid: 40,
+            started_at: 300,
+            path: peer.path.clone(),
+            sha256: hash.clone(),
+        };
+        assert!(
+            store
+                .authenticate_successor(&mapped_before_publication)
+                .is_err()
+        );
+        let after = Image {
+            pid: 42,
+            started_at: 451,
+            path: peer.path.clone(),
+            sha256: hash,
+        };
+        store.authenticate_successor(&after).unwrap();
+        drop(store);
+        std::fs::remove_dir_all(root).unwrap();
+
+        let (root, mut store, peer, executor) = reserved();
+        authorize(&mut store, &peer);
+        store.consume(&executor, 1_900_000_002).unwrap();
+        let hash = target(&store.attempt().unwrap().manifest)
+            .components
+            .app_sha256
+            .clone();
+        let mut next = store.state.clone();
+        let attempt = next.attempt.as_mut().unwrap();
+        attempt.execution = Execution::Replaced;
+        attempt.successor_image = None;
+        attempt.publication_clock = None;
+        store.save(next).unwrap();
+        let legacy = Image {
+            pid: 43,
+            started_at: 50,
+            path: peer.path.clone(),
+            sha256: hash,
+        };
+        store.authenticate_successor(&legacy).unwrap();
+        drop(store);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+}

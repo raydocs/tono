@@ -25,6 +25,22 @@ pub const MAX_CACHE_FILE_BYTES: u64 = 2 * 1024 * 1024;
 /// Cache file name inside the app data dir (§3).
 pub const CACHE_FILE_NAME: &str = "managed-exit-catalog.json";
 
+/// Commit a default selection only when it cannot mislabel an active runtime.
+/// Returns the applied name so the caller can persist it after the state change.
+pub fn apply_default_selection(
+    status: &crate::connection::ConnectionStatus,
+    selected: &mut Option<String>,
+    requires_choice: &mut bool,
+    replacement: String,
+) -> Option<String> {
+    if status.is_connected || status.is_connecting || status.is_disconnecting {
+        return None;
+    }
+    *selected = Some(replacement.clone());
+    *requires_choice = false;
+    Some(replacement)
+}
+
 /// Wire shape of `GET exit-catalog` (§3). `updatedAt` is optional.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ExitCatalogResponse {
@@ -40,6 +56,13 @@ pub struct ExitCatalogResponse {
     /// ([`sanitize_routing`]).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub routing: Option<CatalogRouting>,
+    /// Freshness digest of `routing` ([`routing_digest`]), served only on the
+    /// per-account view. A routing-only rotation (rebind, unbind, SOCKS5
+    /// credential change) moves neither `revision` nor `sha256`, so this is
+    /// the third component of the install key. When present it must match
+    /// the served routing.
+    #[serde(rename = "routingSha256", default, skip_serializing_if = "Option::is_none")]
+    pub routing_sha256: Option<String>,
 }
 
 /// Split-routing directives from `GET exit-catalog`: `homeProxy` names the
@@ -176,6 +199,30 @@ pub fn catalog_digest(yaml: &str) -> String {
     URL_SAFE_NO_PAD.encode(Sha256::digest(yaml.as_bytes()))
 }
 
+/// Freshness digest of the routing document, the control plane's
+/// `routingSha256` recipe: home proxy, default proxy and the home SOCKS5
+/// (`host`, `port`, `username`, `password` joined by newlines) joined by
+/// newlines, SHA-256, base64url without padding. An absent document hashes
+/// as empty material, so an unbind moves the digest too.
+pub fn routing_digest(routing: Option<&CatalogRouting>) -> String {
+    let socks5 = routing
+        .and_then(|routing| routing.home_socks5.as_ref())
+        .map(|socks5| {
+            format!(
+                "{}\n{}\n{}\n{}",
+                socks5.host, socks5.port, socks5.username, socks5.password
+            )
+        })
+        .unwrap_or_default();
+    let material = format!(
+        "{}\n{}\n{}",
+        routing.and_then(|routing| routing.home_proxy.as_deref()).unwrap_or(""),
+        routing.and_then(|routing| routing.default_proxy.as_deref()).unwrap_or(""),
+        socks5
+    );
+    catalog_digest(&material)
+}
+
 /// Why a catalog (or its cache) was rejected.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum CatalogError {
@@ -208,6 +255,11 @@ pub fn validate_catalog(catalog: &ExitCatalogResponse) -> Result<Vec<ValidatedNo
     if catalog.sha256 != catalog_digest(&catalog.yaml) {
         return Err(CatalogError::InvalidResponse);
     }
+    if let Some(served) = &catalog.routing_sha256 {
+        if *served != routing_digest(catalog.routing.as_ref()) {
+            return Err(CatalogError::InvalidResponse);
+        }
+    }
     // 3. Parse and admit every node.
     let document: serde_yaml_ng::Value =
         serde_yaml_ng::from_str(&catalog.yaml).map_err(|_| CatalogError::InvalidResponse)?;
@@ -234,7 +286,8 @@ pub fn validate_catalog(catalog: &ExitCatalogResponse) -> Result<Vec<ValidatedNo
 /// Result of a [`CatalogTracker::install`] call.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum InstallOutcome {
-    /// Newer revision: validated nodes, ready to swap in.
+    /// Newer revision, or a different body at the same revision: validated
+    /// nodes, ready to swap in.
     Installed(Vec<ValidatedNode>),
     /// Same revision and digest as the installed catalog: idempotent accept.
     Unchanged,
@@ -247,6 +300,7 @@ pub enum InstallOutcome {
 pub struct CatalogTracker {
     current_revision: i64,
     current_digest: Option<String>,
+    current_routing: Option<String>,
 }
 
 impl Default for CatalogTracker {
@@ -261,15 +315,27 @@ impl CatalogTracker {
         Self {
             current_revision: -1,
             current_digest: None,
+            current_routing: None,
         }
     }
 
     /// Seed from a previously verified cache so a download can never roll
-    /// back across restarts.
+    /// back across restarts. Assumes no routing document; use
+    /// [`CatalogTracker::from_cached`] when the cached response carries one.
     pub fn from_installed(revision: i64, digest: String) -> Self {
         Self {
             current_revision: revision,
             current_digest: Some(digest),
+            current_routing: Some(routing_digest(None)),
+        }
+    }
+
+    /// Seed from a verified cached response, including its routing digest.
+    pub fn from_cached(response: &ExitCatalogResponse) -> Self {
+        Self {
+            current_revision: response.revision,
+            current_digest: Some(response.sha256.clone()),
+            current_routing: Some(routing_digest(response.routing.as_ref())),
         }
     }
 
@@ -281,10 +347,19 @@ impl CatalogTracker {
         self.current_digest.as_deref()
     }
 
-    /// Validate `catalog` (steps 1-3) and commit it if its revision is
-    /// strictly newer. Equal revision with a different digest is
-    /// `invalidResponse`; equal revision with the same digest is an
-    /// idempotent no-op.
+    /// [`routing_digest`] of the installed catalog's routing document.
+    pub fn current_routing(&self) -> Option<&str> {
+        self.current_routing.as_deref()
+    }
+
+    /// Validate `catalog` (steps 1-3) and commit it unless its revision is
+    /// older. Equal revision with the same digest and routing digest is an
+    /// idempotent no-op; a routing-only change at the same revision installs.
+    /// Equal revision with a different digest installs: the revision is
+    /// fleet-wide while the served body is issued per account (client UUID,
+    /// filtered home exits), so it is the next account's or a re-issued
+    /// device's own payload, not a conflicting copy. It has already passed
+    /// the same full validation as any other install.
     pub fn install(
         &mut self,
         catalog: &ExitCatalogResponse,
@@ -293,15 +368,16 @@ impl CatalogTracker {
         if catalog.revision < self.current_revision {
             return Err(CatalogError::StaleRevision);
         }
-        if catalog.revision == self.current_revision {
-            return if self.current_digest == Some(catalog.sha256.clone()) {
-                Ok(InstallOutcome::Unchanged)
-            } else {
-                Err(CatalogError::InvalidResponse)
-            };
+        let routing = routing_digest(catalog.routing.as_ref());
+        if catalog.revision == self.current_revision
+            && self.current_digest.as_deref() == Some(catalog.sha256.as_str())
+            && self.current_routing.as_deref() == Some(routing.as_str())
+        {
+            return Ok(InstallOutcome::Unchanged);
         }
         self.current_revision = catalog.revision;
         self.current_digest = Some(catalog.sha256.clone());
+        self.current_routing = Some(routing);
         Ok(InstallOutcome::Installed(nodes))
     }
 }
@@ -497,6 +573,27 @@ impl CatalogCache {
 mod tests {
     use super::*;
 
+    #[test]
+    fn live_catalog_removal_preserves_selection_and_requires_choice() {
+        let mut status = crate::connection::ConnectionStatus::default();
+        status.is_connected = true;
+        let mut selected = Some("removed exit".to_owned());
+        let mut requires_choice = true;
+        assert_eq!(apply_default_selection(&status, &mut selected, &mut requires_choice, "new default".into()), None);
+        assert_eq!(selected.as_deref(), Some("removed exit"));
+        assert!(requires_choice, "catalog teardown must remain reachable");
+        status.is_connected = false;
+        status.is_connecting = true;
+        assert_eq!(apply_default_selection(&status, &mut selected, &mut requires_choice, "new default".into()), None);
+        status.is_connecting = false;
+        status.is_disconnecting = true;
+        assert_eq!(apply_default_selection(&status, &mut selected, &mut requires_choice, "new default".into()), None);
+        status.is_disconnecting = false;
+        assert_eq!(apply_default_selection(&status, &mut selected, &mut requires_choice, "new default".into()), Some("new default".into()));
+        assert_eq!(selected.as_deref(), Some("new default"));
+        assert!(!requires_choice);
+    }
+
     const NODE_YAML: &str = r#"  - name: "US Reality 01"
     type: vless
     server: 8.8.8.8
@@ -518,6 +615,7 @@ mod tests {
             sha256: catalog_digest(yaml),
             updated_at: None,
             routing: None,
+            routing_sha256: None,
         }
     }
 
@@ -944,20 +1042,23 @@ mod tests {
     }
 
     #[test]
-    fn tracker_same_revision_different_digest_is_invalid() {
+    fn tracker_same_revision_different_digest_installs_the_new_body() {
+        // The control plane keeps one fleet-wide revision but issues the body
+        // per account, so the next account at the same revision is a new
+        // install, not tampering.
         let mut tracker = CatalogTracker::new();
         tracker.install(&valid_catalog(5)).unwrap();
-        let conflicting = catalog_with_yaml(
+        let next_account = catalog_with_yaml(
             5,
             &format!(
                 "proxies:\n{}",
                 NODE_YAML.replace("US Reality 01", "Other Name")
             ),
         );
-        assert_eq!(
-            tracker.install(&conflicting).unwrap_err(),
-            CatalogError::InvalidResponse
-        );
+        let outcome = tracker.install(&next_account).unwrap();
+        assert!(matches!(outcome, InstallOutcome::Installed(ref nodes) if nodes[0].name == "Other Name"));
+        assert_eq!(tracker.current_revision(), 5);
+        assert_eq!(tracker.current_digest(), Some(next_account.sha256.as_str()));
     }
 
     #[test]

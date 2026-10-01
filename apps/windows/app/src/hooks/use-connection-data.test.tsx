@@ -85,4 +85,73 @@ describe('Activity connections WebSocket recovery', () => {
     expect(second.close).not.toHaveBeenCalled()
     unmount()
   })
+
+  it('keeps publishing frames at the throttle rate after the wall clock moves back', async () => {
+    vi.useFakeTimers()
+    const live = socket()
+    connectMock.mockResolvedValueOnce(live)
+
+    const { result, unmount } = renderHook(() =>
+      useConnectionData({ enabled: true, generation: 2 }),
+    )
+    await act(async () => {
+      await Promise.resolve()
+    })
+    const listener = vi.mocked(live.addListener).mock.calls[0][0]
+    const frame = (uploadTotal: number) => ({
+      type: 'Text' as const,
+      data: JSON.stringify({ uploadTotal, downloadTotal: 0, connections: [] }),
+    })
+
+    await act(async () => {
+      listener(frame(1))
+      await vi.advanceTimersByTimeAsync(500)
+    })
+    expect(result.current.response.data.uploadTotal).toBe(1)
+
+    // A clock correction two hours back must not turn the 500 ms throttle into a two-hour wait.
+    vi.setSystemTime(Date.now() - 2 * 60 * 60 * 1000)
+    await act(async () => {
+      listener(frame(2))
+      await vi.advanceTimersByTimeAsync(500)
+    })
+    expect(result.current.response.data.uploadTotal).toBe(2)
+    unmount()
+  })
+})
+
+it('retires live Activity evidence and queued frames after a transport failure', async () => {
+  vi.useFakeTimers()
+  const live = socket()
+  connectMock.mockResolvedValueOnce(live)
+  const { result } = renderHook(() =>
+    useConnectionData({ enabled: true, generation: 3 }),
+  )
+  await act(async () => {
+    await Promise.resolve()
+  })
+  expect(live.addListener).toHaveBeenCalledOnce()
+  const listener = vi.mocked(live.addListener).mock.calls[0]![0]
+  const frame = (uploadTotal: number) => ({
+    type: 'Text' as const,
+    data: JSON.stringify({ uploadTotal, downloadTotal: 0, connections: [] }),
+  })
+  await act(async () => {
+    listener(frame(1))
+    await vi.advanceTimersByTimeAsync(500)
+  })
+  expect(result.current.response.live).toBe(true)
+  await act(async () => {
+    listener(frame(2))
+    listener(frame(3))
+    listener({
+      type: 'Text',
+      data: 'Websocket error: connection reset without closing handshake',
+    })
+  })
+  expect(result.current.response.live).toBe(false)
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(500)
+  })
+  expect(result.current.response.live).toBe(false)
 })

@@ -22,7 +22,7 @@ $installers = @(Get-ChildItem -LiteralPath $CandidateDirectory -Filter '*-setup.
 if ($installers.Count -ne 1) { throw 'Exactly one candidate installer is required.' }
 $installer = $installers[0].FullName
 $manifest = Get-Content (Join-Path $CandidateDirectory 'candidate-manifest.json') -Raw | ConvertFrom-Json
-if ($manifest.version -ne '0.0.73' -or $manifest.candidateOnly -ne $true) { throw 'Not a 0.0.73 test candidate.' }
+if ($manifest.version -ne '0.0.74' -or $manifest.candidateOnly -ne $true) { throw 'Not a 0.0.74 test candidate.' }
 $expected = @($manifest.files | Where-Object name -eq $installers[0].Name)
 if ($expected.Count -ne 1 -or (Get-FileHash $installer -Algorithm SHA256).Hash.ToLowerInvariant() -ne $expected[0].sha256) { throw 'Candidate installer digest mismatch.' }
 function Invoke-Installer([string]$File, [string]$Arguments) {

@@ -183,6 +183,7 @@ struct ActivityView: View {
     @State private var connectionQuery = ""
     @State private var isTestingLatency = false
     @State private var trafficHistory = TrafficHistory()
+    @State private var explainingApp: String?
 
     private enum Section: String, CaseIterable {
         case apps = "Apps"
@@ -249,6 +250,14 @@ struct ActivityView: View {
         .padding(.vertical, 16)
         .padding(.bottom, 16)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .sheet(isPresented: Binding(get: { explainingApp != nil }, set: { if !$0 { explainingApp = nil } })) {
+            VStack(alignment: .trailing, spacing: 0) {
+                ActivityRoutingDetails(entries: appState.connections.filter {
+                    ($0.processName ?? AppTrafficLedger.unattributed) == explainingApp
+                })
+                Button("Close") { explainingApp = nil }.padding(16)
+            }
+        }
         .onChange(of: appState.trafficStats.downloadSpeed) { _, _ in
             guard appState.trafficFeedLive else { return }
             trafficHistory.record(
@@ -474,7 +483,11 @@ struct ActivityView: View {
         ScrollView {
             LazyVStack(spacing: 8) {
                 ForEach(appState.appTrafficLedger.apps) { app in
-                    AppTrafficRow(app: app, peak: appState.appTrafficLedger.apps.first?.total ?? 1)
+                    Button { explainingApp = app.id } label: {
+                        AppTrafficRow(app: app, peak: appState.appTrafficLedger.apps.first?.total ?? 1)
+                    }
+                    .buttonStyle(.plain)
+                    .help(String(localized: "Why this route?"))
                 }
                 if appState.appTrafficLedger.apps.isEmpty {
                     Text(appsEmptyCopy)
@@ -704,6 +717,7 @@ private struct LogEntryRow: View {
     let entry: ConnectionEntry
     var onClose: (() -> Void)?
     @State private var isHovered = false
+    @State private var explainsRoute = false
 
     // Same palette as RouteTint so the per-connection dots agree with the
     // header split bar and legend on this page.
@@ -779,10 +793,13 @@ private struct LogEntryRow: View {
                         }
                     }
 
-                    // Routing policy is deliberately not surfaced here: Tono
-                    // decides it and the user never configures it, so naming
-                    // the matched rule would only invite questions about
-                    // settings that do not exist.
+                    Button("Why this route?") { explainsRoute = true }
+                        .buttonStyle(.plain)
+                        .font(.system(size: 10))
+                        .foregroundStyle(TonoBrand.accent)
+                        .popover(isPresented: $explainsRoute) {
+                            ActivityRoutingDetails(entries: [entry])
+                        }
                     Text(
                         [
                             entry.network.isEmpty ? entry.protocolName : entry.network,
