@@ -2458,6 +2458,12 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
     const t = now();
     const statements = [
       e.DB.prepare('UPDATE sessions SET revoked_at = ? WHERE id = ? AND user_id = ?').bind(t, a.sessionId, a.userId),
+      // Every earlier refresh issued to this device dies with the logout, including
+      // a successor a concurrent refresh committed after auth() read the session.
+      // Sessions on the account's other devices stay valid.
+      e.DB.prepare(
+        'UPDATE sessions SET revoked_at = ? WHERE user_id = ? AND device_id = ? AND revoked_at IS NULL',
+      ).bind(t, a.userId, a.deviceId),
     ];
     if (raw !== undefined) {
       str(raw, 'refreshToken', 20, 500);

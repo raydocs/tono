@@ -24,6 +24,13 @@ export async function tokens(
   const refreshTTL = envInt(e, 'REFRESH_TOKEN_TTL_SECONDS', 2_592_000);
   const insert = 'INSERT INTO sessions(id, user_id, refresh_hash, expires_at, created_at, device_id)';
   const values = [sid, user, await sha256(refresh), t + refreshTTL, t, device];
+  // One live refresh chain per device. A second sign-in, or a refresh of one
+  // chain, retires every other still-valid session on that device. Other
+  // devices stay signed in. The rotated session itself is revoked by the first
+  // statement, which must stay first: meta.changes == 0 means this refresh lost.
+  const retireSiblings = e.DB.prepare(
+    'UPDATE sessions SET revoked_at = ? WHERE user_id = ? AND device_id = ? AND revoked_at IS NULL AND id != ?',
+  ).bind(t, user, device, rotate ? rotate.from : sid);
   try {
     if (rotate) {
       // Revoke and successor insert commit together, and only the request that
@@ -33,6 +40,7 @@ export async function tokens(
         e.DB.prepare(
           'UPDATE sessions SET revoked_at = ?, rotated_at = ?, successor_id = ? WHERE id = ? AND revoked_at IS NULL',
         ).bind(t, rotate.replay ? null : t, sid, rotate.from),
+        retireSiblings,
         e.DB.prepare(
           `${insert} SELECT ?, ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM sessions WHERE id = ? AND successor_id = ?)`,
         ).bind(...values, rotate.from, sid),
@@ -40,7 +48,11 @@ export async function tokens(
       ]);
       if (!revoked.meta.changes) throw new ApiError(401, 'INVALID_REFRESH_TOKEN', 'Refresh token was already used');
     } else {
-      await e.DB.prepare(`${insert} VALUES(?, ?, ?, ?, ?, ?)`).bind(...values).run();
+      // Revoke and insert are one batch, so a rejected insert rolls the revoke back.
+      await e.DB.batch([
+        retireSiblings,
+        e.DB.prepare(`${insert} VALUES(?, ?, ?, ?, ?, ?)`).bind(...values),
+      ]);
     }
   } catch (x) {
     if (String(x).includes('SESSION_DEVICE_INELIGIBLE')) {

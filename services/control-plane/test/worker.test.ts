@@ -5621,6 +5621,55 @@ ${nameLine}
     expect((await api('auth/refresh', json({ refreshToken: recovered.refreshToken }))).status).toBe(401);
   });
 
+  it('revokes earlier refresh tokens on the same device at refresh, the next sign-in, and logout', async () => {
+    const account = await createAccount('same-device-sessions');
+    const leftoverId = `same-device-leftover-${account.user.id}`;
+    await env.DB.prepare(
+      `INSERT INTO sessions(id, user_id, refresh_hash, expires_at, created_at, device_id)
+       VALUES(?, ?, ?, unixepoch() + 2592000, unixepoch(), ?)`,
+    ).bind(
+      leftoverId,
+      account.user.id,
+      await sha256(`leftover-refresh-${account.user.id}-not-a-client-token`),
+      account.device.id,
+    ).run();
+
+    const rotated = await api('auth/refresh', json({ refreshToken: account.refreshToken }));
+    expect(rotated.status).toBe(200);
+    const current = await rotated.json() as any;
+    const leftover = await env.DB.prepare(
+      'SELECT revoked_at FROM sessions WHERE id = ?',
+    ).bind(leftoverId).first<any>();
+    expect(leftover.revoked_at).not.toBeNull();
+
+    const again = await emailSignIn({
+      email: account.email,
+      deviceName: 'Primary Mac',
+      installationId: 'same-device-sessions-installation-one',
+    });
+    expect(again.status).toBe(200);
+    const second = await again.json() as any;
+    expect(second.device.id).toBe(account.device.id);
+    expect((await api('auth/refresh', json({ refreshToken: current.refreshToken }))).status).toBe(401);
+    const liveOnDevice = await env.DB.prepare(
+      'SELECT COUNT(*) AS c FROM sessions WHERE device_id = ? AND revoked_at IS NULL',
+    ).bind(account.device.id).first<any>();
+    expect(liveOnDevice.c).toBe(1);
+
+    const other = await emailSignIn({
+      email: account.email,
+      deviceName: 'Other Mac',
+      installationId: 'same-device-sessions-installation-two',
+    });
+    expect(other.status).toBe(200);
+    const elsewhere = await other.json() as any;
+
+    expect((await api('auth/logout', json({}, second.accessToken))).status).toBe(204);
+    expect((await api('auth/refresh', json({ refreshToken: second.refreshToken }))).status).toBe(401);
+    expect((await api('me', { headers: { authorization: `Bearer ${second.accessToken}` } })).status).toBe(401);
+    expect((await api('auth/refresh', json({ refreshToken: elsewhere.refreshToken }))).status).toBe(200);
+  });
+
   it('rejects a session inserted after its device was revoked', async () => {
     const account = await createAccount('late-session');
     await env.DB.batch([
