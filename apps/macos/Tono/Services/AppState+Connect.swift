@@ -971,7 +971,7 @@ extension AppState {
             if helperReadyForRelease {
                 do {
                     if disarming {
-                        if automaticFailureRelease {
+                        if automaticFailureRelease || afterUnarmedConnectFailure {
                             try await networkProtection.releaseAfterFailure()
                         } else {
                             try await networkProtection.disarm()
