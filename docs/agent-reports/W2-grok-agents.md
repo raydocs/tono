@@ -76,3 +76,4 @@ Hunter: Grok 4.7。槽位 W2-grok-agents。基线 `origin/main` `50bbbbf0`。范
 | [#838](https://github.com/raydocs/tono/pull/838) `hunt/grok-agents-exit-inventory-2c38` | 开，merge commit | 无 |
 | [#842](https://github.com/raydocs/tono/pull/842) `hunt/grok-agents-provision-repo-path-2c38` | 开，merge commit | 无 |
 | [#845](https://github.com/raydocs/tono/pull/845) `hunt/grok-agents-migrate-current-2c38` | 开，merge commit | 无 |
+| [#853](https://github.com/raydocs/tono/pull/853) `hunt/grok-agents-report-2c38` | 开，merge commit | 无。仅文档 |

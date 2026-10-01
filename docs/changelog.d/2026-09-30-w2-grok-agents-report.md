@@ -1,6 +1,6 @@
 ## 2026-09-30 · W2 Grok agents 排查记录
 - 归属：ops 计划里的排查记录，不是 SHIP_PLAN 发版门，也不改产品行为。
-- 来源：本分支文档 PR。修复在 #838、#842、#845。
+- 来源：[#853](https://github.com/raydocs/tono/pull/853)。修复在 #838、#842、#845。
 - 缺陷修复：无（记录本身不改代码）。已修行为见那三个 PR。
 - 新增/优化：无。
 - 工程与测试：新增 `docs/agent-reports/W2-grok-agents.md`。不跑产品测试。
