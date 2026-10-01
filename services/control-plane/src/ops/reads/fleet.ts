@@ -5,13 +5,13 @@ import {
 } from '../../crypto';
 import { ApiError } from '../../errors';
 import {
-  CLIENT_UUID_PLACEHOLDER,
   relistCatalogPlan,
   retirementCatalogPlan,
   splitManagedCatalogProxies,
   catalogBaseName,
   catalogHy2Name,
   catalogEntryMissingClientFields,
+  catalogHy2RelistBlockIsComplete,
 } from '../../catalog-yaml';
 import {
   type Env,
@@ -287,21 +287,6 @@ function hy2FingerprintHex(raw: unknown): string | null {
   return /^[0-9a-f]{64}$/.test(hex) ? hex : null;
 }
 
-/** Same-node hy2 block. SNI matches the provisioner default (`www.microsoft.com`). */
-function hy2BlockFromProfile(base: string, publicIp: string, fingerprint: string, port: number): string {
-  return [
-    `  - name: ${catalogHy2Name(base)}`,
-    '    type: hysteria2',
-    `    server: ${publicIp}`,
-    `    port: ${port}`,
-    `    password: ${CLIENT_UUID_PLACEHOLDER}`,
-    '    sni: www.microsoft.com',
-    `    fingerprint: ${fingerprint}`,
-    '    skip-cert-verify: false',
-    '',
-  ].join('\n');
-}
-
 /**
  * Retirement revokes the node's exit token and throws the new one away, so a
  * name put back in the catalog would point customers at a node that can no
@@ -366,13 +351,13 @@ export async function relistFleetNode(
   }
   const fingerprint = hy2FingerprintHex(profile?.hy2_fingerprint);
   if (fingerprint && ip) {
-    const hy2Port = Number(profile?.hy2_port);
-    const port = Number.isSafeInteger(hy2Port) && hy2Port > 0 && hy2Port <= 65535 ? hy2Port : 443;
-    const hy2Plan = relistCatalogPlan(
-      plan.yaml,
-      catalogHy2Name(name),
-      hy2BlockFromProfile(name, ip, fingerprint, port),
-    );
+    const hy2Name = catalogHy2Name(name);
+    const alreadyListed = splitManagedCatalogProxies(plan.yaml).items.some((item) => item.name === hy2Name);
+    const hy2Block = typeof requestBody.hy2Block === 'string' ? requestBody.hy2Block : '';
+    if (!alreadyListed && !catalogHy2RelistBlockIsComplete(hy2Block)) {
+      throw new ApiError(422, 'RELIST_NO_HY2_TEMPLATE', 'Relist requires the full HY2 entry with its DER and SPKI pins; publish the operator-issued entry');
+    }
+    const hy2Plan = relistCatalogPlan(plan.yaml, hy2Name, hy2Block);
     if (!hy2Plan.safe) {
       throw new ApiError(422, 'RELIST_UNSAFE', hy2Plan.warnings[0] ?? 'Node cannot be relisted');
     }

@@ -647,6 +647,67 @@ describe('ops node jobs', () => {
     expect(await exitStatus(kite)).toEqual({ status: 'active', token_hash: hash });
   });
 
+  it('requires the complete pinned HY2 sibling when relisting a retired dual-transport node', async () => {
+    const e = env as unknown as Env;
+    const t = 1_800_001_050;
+    const kite = 'Tokyo · Kite';
+    const fingerprint = 'a'.repeat(64);
+    const spki = `${'A'.repeat(43)}=`;
+    const hy2Block = [
+      `  - name: ${kite} · hy2`,
+      '    type: hysteria2',
+      '    server: 203.0.113.9',
+      '    port: 443',
+      '    password: {{TONO_CLIENT_UUID}}',
+      '    sni: www.example.com',
+      `    fingerprint: ${fingerprint}`,
+      `    certificate-public-key-sha256: ${spki}`,
+      '    skip-cert-verify: false',
+      '',
+    ].join('\n');
+    const yaml = (await seedTwoNodeCatalog(e, t, kite, 'Tokyo · Fuji'))
+      .replace('proxy-groups:', `${hy2Block}proxy-groups:`);
+    const encrypted = await encryptCatalog(yaml, e.CATALOG_ENCRYPTION_KEY!);
+    await db().prepare('UPDATE managed_exit_catalog SET ciphertext = ?, nonce = ?, content_sha256 = ?')
+      .bind(encrypted.ciphertext, encrypted.nonce, await sha256(yaml)).run();
+    await db().prepare('UPDATE ops_node_profiles SET hy2_port = 443, hy2_fingerprint = ? WHERE catalog_name = ?')
+      .bind(fingerprint, kite).run();
+    await seedExitToken(kite, t);
+    await enqueue('catalog_retire', t, { nodeName: kite, idempotencyKey: 'retire-pinned-hy2' });
+    expect(await runWorkerJobs(e, t, 5)).toBe(1);
+    await db().prepare("UPDATE exit_nodes SET status = 'active', token_hash = ? WHERE name = ?")
+      .bind(await sha256('replacement-token'), kite).run();
+    const block = realityBlock(kite, '203.0.113.9');
+    await expect(relistFleetNode(e, 'ops@example.com', kite, { block }))
+      .rejects.toMatchObject({ status: 422, code: 'RELIST_NO_HY2_TEMPLATE' });
+    expect(await db().prepare('SELECT revision FROM managed_exit_catalog WHERE singleton_id = 1')
+      .first<{ revision: number }>()).toEqual({ revision: 2 });
+    const relist = await enqueue('catalog_relist', t + 1, {
+      nodeName: kite, idempotencyKey: 'relist-pinned-hy2', params: { block, hy2Block, expectedRevision: 2 },
+    });
+    expect(await runWorkerJobs(e, t + 1, 5)).toBe(1);
+    expect(await db().prepare('SELECT status FROM ops_node_jobs WHERE id = ?')
+      .bind(relist.job.id).first<{ status: string }>()).toEqual({ status: 'succeeded' });
+    const published = await db().prepare('SELECT revision, ciphertext, nonce FROM managed_exit_catalog WHERE singleton_id = 1')
+      .first<{ revision: number; ciphertext: string; nonce: string }>();
+    expect(published?.revision).toBe(3);
+    const sibling = splitManagedCatalogProxies(await decryptCatalog(
+      published!.ciphertext, published!.nonce, e.CATALOG_ENCRYPTION_KEY!,
+    )).items.find((item) => item.name === `${kite} · hy2`);
+    expect(sibling?.block).toContain(`fingerprint: ${fingerprint}`);
+    expect(sibling?.block).toContain(`certificate-public-key-sha256: ${spki}`);
+    expect(sibling?.block).toContain('skip-cert-verify: false');
+  });
+
+  it('rejects credential-bearing relist templates before storing job parameters', async () => {
+    const block = realityBlock('Tokyo · Kite', '203.0.113.9')
+      .replace('{{TONO_CLIENT_UUID}}', '123e4567-e89b-12d3-a456-426614174000');
+    await expect(enqueue('catalog_relist', 1_800_001_051, { params: { block } }))
+      .rejects.toMatchObject({ status: 400, code: 'VALIDATION_ERROR' });
+    expect(await db().prepare('SELECT COUNT(*) AS n FROM ops_node_jobs').first<{ n: number }>())
+      .toEqual({ n: 0 });
+  });
+
   it('relist refuses to publish an entry without the Reality settings clients require', async () => {
     const e = env as unknown as Env;
     const t = 1_800_001_000;

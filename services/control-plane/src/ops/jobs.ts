@@ -8,6 +8,7 @@ import { ApiError } from '../errors';
 import { opsAuditStatement } from '../product-account';
 import { rejectUnexpectedKeys } from '../request';
 import { redactJobJson, redactJobResult } from './job-redaction';
+import { catalogRelistTemplateUsesManagedIdentity } from '../catalog-yaml';
 
 const DEFAULT_TTL_SECONDS = 900;
 const DEFAULT_LEASE_SECONDS = 120;
@@ -51,6 +52,13 @@ const homeExitIdParam: ParamGuard = (value) => {
   str(value, 'homeExitId', 1, NAME_MAX);
 };
 
+const catalogTemplateParam: ParamGuard = (value) => {
+  str(value, 'catalog template', 1, PARAMS_MAX);
+  if (!catalogRelistTemplateUsesManagedIdentity(value as string)) {
+    throw new ApiError(400, 'VALIDATION_ERROR', 'Catalog templates must use managed identity placeholders');
+  }
+};
+
 const read = (executor: Executor, leaseSeconds: number, schema: JobTypeConfig['paramsSchema'] = {}, required?: readonly string[]): JobTypeConfig => ({
   executor, leaseSeconds, destructive: false, readOnly: true, paramsSchema: schema, requiredParams: required,
 });
@@ -72,7 +80,14 @@ export const JOB_TYPES = {
   identity_sync: write('hub', DEFAULT_LEASE_SECONDS),
   agent_reinstall: write('hub', DEFAULT_LEASE_SECONDS),
   catalog_retire: write('worker', DEFAULT_LEASE_SECONDS),
-  catalog_relist: write('worker', DEFAULT_LEASE_SECONDS),
+  catalog_relist: {
+    ...write('worker', DEFAULT_LEASE_SECONDS),
+    paramsSchema: {
+      block: catalogTemplateParam,
+      hy2Block: catalogTemplateParam,
+      expectedRevision: intAtMost('expectedRevision', Number.MAX_SAFE_INTEGER),
+    },
+  },
   home_line_probe: read('hub', DEFAULT_LEASE_SECONDS, { homeExitId: homeExitIdParam }, ['homeExitId']),
 } as const satisfies Record<string, JobTypeConfig>;
 
