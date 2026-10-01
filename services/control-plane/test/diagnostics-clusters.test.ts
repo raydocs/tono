@@ -6,6 +6,7 @@ import {
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { jwtSign } from '../src/crypto';
 import worker, { type Env } from '../src/index';
+import { storeDiagnosticsBundle } from '../src/telemetry/diagnostics';
 import {
   ALERT_HOUR_CAP,
   clusterAlertDecision,
@@ -337,6 +338,44 @@ describe('diagnostics read API', () => {
     (env as unknown as Env).FAILURE_ALERT_WEBHOOK_URL = undefined;
     (env as unknown as Env).FAILURE_ALERT_WEBHOOK_SECRET = undefined;
     (env as unknown as Env).DIAGNOSTICS_READ_TOKEN = undefined;
+  });
+
+  it('stores no partial bundle when a later hop is invalid', async () => {
+    const account = await seedAccount();
+    const payload = bundle();
+    payload.hops[1].role = 'invalid';
+    const response = await api('telemetry/diagnostics', json(payload, account.token));
+    expect(response.status).toBe(400);
+    const session = await db().prepare(
+      'SELECT COUNT(*) AS count FROM client_sessions WHERE user_id = ?',
+    ).bind(account.userId).first();
+    const hops = await db().prepare(
+      'SELECT COUNT(*) AS count FROM chain_hops WHERE user_id = ?',
+    ).bind(account.userId).first();
+    expect(session?.count).toBe(0);
+    expect(hops?.count).toBe(0);
+  });
+
+  it('acknowledges committed diagnostic facts when derived clustering fails', async () => {
+    const account = await seedAccount();
+    const real = db();
+    const unavailable = new Proxy(real, {
+      get(target, prop) {
+        if (prop === 'prepare') return (sql: string) => {
+          if (sql.includes('failure_clusters')) throw new Error('cluster storage unavailable');
+          return target.prepare(sql);
+        };
+        const value = Reflect.get(target, prop);
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+    await expect(storeDiagnosticsBundle(
+      unavailable, account.userId, account.deviceId, bundle(), clusterEnv(),
+    )).resolves.toMatchObject({ events: 1 });
+    const event = await real.prepare(
+      'SELECT COUNT(*) AS count FROM connection_events WHERE user_id = ?',
+    ).bind(account.userId).first();
+    expect(event?.count).toBe(1);
   });
 
   it('stores a privacy-safe bundle and rejects a full IP or an AI route without consent', async () => {
