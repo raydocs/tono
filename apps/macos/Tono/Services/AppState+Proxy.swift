@@ -176,7 +176,8 @@ extension AppState {
                     commit: { self.rememberSwitchedNode(desiredNode, name: nodeName) },
                     recover: { error in
                         self.retireFailedRouteSuccess(nodeName, owner: routeOwner, generation: switchGeneration)
-                        self.recoverFailedNodeSwitch(desiredNode, name: nodeName, error: error)
+                        self.recoverFailedNodeSwitch(desiredNode, name: nodeName, error: error,
+                                                     releaseNetwork: releaseNetworkIfSwitchFails)
                     }
                 ) else { return }
                 protectionTransitionInFlight = false
