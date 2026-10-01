@@ -548,11 +548,21 @@ fn spawn_startup_release_retry() {
                 .await
                 .ok()
                 .and_then(|bytes| serde_json::from_slice::<IntentRecord>(&bytes).ok());
-            if intent.as_ref().is_some_and(|intent| intent.wanted) {
+            if intent.as_ref().is_some_and(|intent| {
+                intent.wanted && (intent_is_valid(intent) || intent.strict_kill_switch)
+            }) {
                 drop(running);
                 return;
             }
             let release: Result<()> = async {
+                if intent.as_ref().is_none_or(|intent| intent.wanted) {
+                    // Incomplete non-strict evidence needs its startup AI hold and retention.
+                    // A newer valid or explicitly strict record was gated above.
+                    return release_general_traffic_unlocked(
+                        "startup incomplete-intent release retry",
+                    )
+                    .await;
+                }
                 remove_all_filters_unlocked().await?;
                 sweep_legacy_sublayers_unlocked().await;
                 if intent.is_some_and(|intent| intent.reconnect_after_release) {
@@ -3083,6 +3093,15 @@ async fn release_general_traffic_unlocked(reason: &str) -> Result<()> {
     Ok(())
 }
 
+async fn release_general_traffic_on_startup_unlocked(reason: &str) -> Result<()> {
+    let result = release_general_traffic_unlocked(reason).await;
+    if result.is_err() && armed_guard().is_none() {
+        // No in-memory intent exists for the watchdog to reconcile after this startup failure.
+        spawn_startup_release_retry();
+    }
+    result
+}
+
 async fn release_unhealthy_session_unlocked(reason: &str) -> Result<()> {
     release_general_traffic_unlocked(reason).await?;
     if let Err(error) = persist_disarmed_tombstone().await {
@@ -3299,7 +3318,7 @@ pub async fn restore_on_service_start() -> Result<()> {
                     tracing::warn!(
                         "unusable kill-switch intent; releasing general traffic and keeping the file"
                     );
-                    return release_general_traffic_unlocked("unusable kill-switch intent").await;
+                    return release_general_traffic_on_startup_unlocked("unusable kill-switch intent").await;
                 }
                 let emergency = emergency_armed();
                 *armed_guard() = Some(emergency.clone());
@@ -3317,7 +3336,7 @@ pub async fn restore_on_service_start() -> Result<()> {
                 tracing::warn!(
                     "corrupt kill-switch intent; releasing general traffic and keeping the file"
                 );
-                release_general_traffic_unlocked("corrupt kill-switch intent").await
+                release_general_traffic_on_startup_unlocked("corrupt kill-switch intent").await
             }
         },
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
@@ -3327,7 +3346,7 @@ pub async fn restore_on_service_start() -> Result<()> {
                 .await
                 .unwrap_or(true)
             {
-                return release_general_traffic_unlocked(
+                return release_general_traffic_on_startup_unlocked(
                     "residual WFP without a kill-switch intent",
                 )
                 .await;
@@ -3356,7 +3375,7 @@ pub async fn restore_on_service_start() -> Result<()> {
             tracing::warn!(
                 "kill-switch intent could not be read: {error:#}; releasing general traffic"
             );
-            release_general_traffic_unlocked("unreadable kill-switch intent").await
+            release_general_traffic_on_startup_unlocked("unreadable kill-switch intent").await
         }
     }
 }
@@ -5383,6 +5402,86 @@ mod tests {
         );
         release().await?;
         assert!(!crate::core::selective_layer::test_hold_active());
+        cleanup().await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn corrupt_startup_removal_failure_retries_and_keeps_evidence_and_ai_hold() -> Result<()>
+    {
+        cleanup().await;
+        let evidence = b"{ incomplete intent";
+        atomic_write(&intent_path(), evidence).await?;
+        let residual = wfp_model::intent_floor()
+            .iter()
+            .map(|filter| filter.key)
+            .collect::<Vec<_>>();
+        *TEST_RESIDUAL_FILTER_KEYS.lock().unwrap() = residual.clone();
+        let failures = SimulatedStateFailures::arm_removal();
+
+        let error = restore_on_service_start()
+            .await
+            .expect_err("the initial native removal fails");
+        assert!(format!("{error:#}").contains("simulated WFP removal failure"));
+        assert!(armed_guard().is_none());
+        assert_eq!(*TEST_RESIDUAL_FILTER_KEYS.lock().unwrap(), residual);
+        drop(failures);
+
+        tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            while !TEST_RESIDUAL_FILTER_KEYS.lock().unwrap().is_empty()
+                || STARTUP_RELEASE_RETRY_RUNNING.load(Ordering::Acquire)
+            {
+                tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .expect("recovery must retry after the transient removal error clears");
+
+        assert!(TEST_REMOVE_ATTEMPTS.load(Ordering::Relaxed) >= 2);
+        assert_eq!(tokio::fs::read(intent_path()).await?, evidence);
+        assert!(crate::core::selective_layer::test_hold_active());
+        assert!(!status().await.wanted);
+        cleanup().await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn corrupt_startup_release_retry_preserves_a_new_unusable_strict_record() -> Result<()> {
+        cleanup().await;
+        atomic_write(&intent_path(), b"{ incomplete intent").await?;
+        let residual = wfp_model::intent_floor()
+            .iter()
+            .map(|filter| filter.key)
+            .collect::<Vec<_>>();
+        *TEST_RESIDUAL_FILTER_KEYS.lock().unwrap() = residual.clone();
+        let failures = SimulatedStateFailures::arm_removal();
+        restore_on_service_start()
+            .await
+            .expect_err("the initial removal fails");
+
+        let operation = WFP_OPERATION.lock().await;
+        let mut strict = valid_intent(KillSwitchStatusMode::Blocked, true);
+        strict.strict_kill_switch = true;
+        strict.endpoints.clear();
+        assert!(!intent_is_valid(&strict));
+        let strict_bytes = serde_json::to_vec_pretty(&strict)?;
+        atomic_write(&intent_path(), &strict_bytes).await?;
+        let attempts = TEST_REMOVE_ATTEMPTS.load(Ordering::Relaxed);
+        drop(failures);
+        drop(operation);
+
+        tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            while STARTUP_RELEASE_RETRY_RUNNING.load(Ordering::Acquire) {
+                tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+            }
+        })
+        .await?;
+
+        assert_eq!(TEST_REMOVE_ATTEMPTS.load(Ordering::Relaxed), attempts);
+        assert_eq!(*TEST_RESIDUAL_FILTER_KEYS.lock().unwrap(), residual);
+        assert_eq!(tokio::fs::read(intent_path()).await?, strict_bytes);
         cleanup().await;
         Ok(())
     }
