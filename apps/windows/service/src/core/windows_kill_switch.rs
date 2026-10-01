@@ -6311,6 +6311,10 @@ mod tests {
         );
         assert!(!status().await.wanted);
         assert!(!TUNNEL_PERMIT_RENDERED.load(Ordering::Relaxed));
+        assert!(
+            crate::core::selective_layer::test_hold_active(),
+            "non-strict expiry opens general traffic and puts the AI hold back"
+        );
         assert_disarmed_tombstone_present().await?;
 
         committed_direct_test_session(123).await?;
@@ -6348,6 +6352,7 @@ mod tests {
         assert!(blocked.direct_reload.is_none());
         assert!(blocked.tun_luid.is_none());
         assert!(blocked.core_instance.is_none());
+        crate::core::selective_layer::remove().await;
         cleanup().await;
         Ok(())
     }
