@@ -981,7 +981,7 @@ fn recovery_task_registration(system_directory: &Path, dir: &Path) -> std::proce
         "\"{}\" --update-recover",
         dir.join("executor.exe").display()
     );
-    let mut registration = std::process::Command::new(system_directory.join("schtasks.exe"));
+    let mut registration = std::process::Command::new(schtasks_path(system_directory));
     registration.args([
         "/Create",
         "/TN",
@@ -997,6 +997,10 @@ fn recovery_task_registration(system_directory: &Path, dir: &Path) -> std::proce
         "/F",
     ]);
     registration
+}
+
+fn schtasks_path(system_directory: &Path) -> PathBuf {
+    system_directory.join("schtasks.exe")
 }
 
 fn register_recovery_with(store: &Store, register: impl FnOnce(&Path) -> Result<()>) -> Result<()> {
