@@ -760,6 +760,13 @@ pub enum ServiceErrorCode {
     /// protection yet. Arming would block the physical interface that session arrives on, and the
     /// block cannot be released from outside the console. Mapped to 409 Conflict.
     RemoteSessionConnectRefused = 1015,
+    /// A route that arms or widens protection could not prove that its caller is the registered
+    /// installation's `Tono.exe` (registry, ACL or file read failed, or the tree was changing).
+    /// Unlike `UnauthorizedOwner` this is not a verdict about the caller: retry. Release and the
+    /// other disconnect routes never run this proof. Mapped to 503. (1013–1015
+    /// are taken on main by `StaleReleaseEpoch`, `ProtectionHeldByAnotherUser` and
+    /// `RemoteSessionConnectRefused`.)
+    AppIdentityUnproven = 1016,
 }
 
 pub fn owner_key(identity: &OwnerIdentity) -> String {

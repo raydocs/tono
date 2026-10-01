@@ -300,6 +300,71 @@ async fn disconnect_path_gates_stay_open_after_stop_clears_the_owner_record()
     Ok(())
 }
 
+/// Installs an installed-App image proof that cannot complete, as a transient registry or ACL
+/// read failure would, and restores the previous proof on drop.
+#[cfg(all(windows, feature = "test"))]
+fn unproven_app_image() -> impl Drop {
+    fn unproven(
+        _: &AuthenticatedOwner,
+    ) -> std::result::Result<(), crate::core::auth::ServiceError> {
+        Err(super::app_identity_unproven(
+            "installation tree file held open by another process",
+        ))
+    }
+    struct Restore(super::AppPeerProof);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            super::replace_test_app_peer_proof(self.0);
+        }
+    }
+    Restore(super::replace_test_app_peer_proof(unproven))
+}
+
+/// Connect-side routes enter through `enter_protecting_owner_lifecycle`, so that is where the
+/// installed-App image proof has to be applied; deleting the call must fail this test. A proof
+/// that could not be completed must reach the App as the retryable 503, not as the 401 that
+/// means "not the Tono App".
+#[cfg(all(windows, feature = "test"))]
+#[tokio::test]
+#[serial]
+async fn lifecycle_entry_refuses_when_the_app_image_proof_cannot_complete() {
+    let _restore = unproven_app_image();
+
+    let entered = super::enter_protecting_owner_lifecycle(
+        &owner(92_010),
+        super::OwnerLifecycleGate::ArmedPolicyTakeover,
+    )
+    .await;
+
+    let std::ops::ControlFlow::Break(response) = entered else {
+        panic!("the protecting lifecycle entry must apply the App image proof");
+    };
+    let response = response.expect("the refusal encodes as a response");
+    assert_eq!(response.status, http::StatusCode::SERVICE_UNAVAILABLE);
+}
+
+/// Release must never be refused by the image proof: refusing it while WFP is armed would keep
+/// the machine off the network (decision 031). The `ReleaseKillSwitch` route enters with the
+/// `ArmedPolicyRelease` gate through `enter_owner_lifecycle`, which must admit it even when the
+/// proof would fail.
+#[cfg(all(windows, feature = "test"))]
+#[tokio::test]
+#[serial]
+async fn release_entry_proceeds_when_the_app_image_proof_fails() {
+    let _restore = unproven_app_image();
+
+    let entered = super::enter_owner_lifecycle(
+        &owner(92_011),
+        super::OwnerLifecycleGate::ArmedPolicyRelease,
+    )
+    .await;
+
+    assert!(
+        matches!(entered, std::ops::ControlFlow::Continue(_)),
+        "a failed App image proof must not refuse Release"
+    );
+}
+
 #[tokio::test]
 #[serial]
 async fn accepted_goodbye_refuses_new_lifecycle_work_before_its_response_grace() {
