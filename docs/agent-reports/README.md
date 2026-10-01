@@ -15,3 +15,4 @@ Collected 2026-09-30 (MDT) from the box; credential values, auth paths, and emai
 - [sol-bughunt-report.md](sol-bughunt-report.md) — partial read-only GPT-6.1 Sol benchmark against the same prompts; 2026-09-30; source model: GPT-6.1 Sol.
 - [macos-open-issues-grok.md](macos-open-issues-grok.md) — open macOS-app issues with no unclaimed fix; 2026-10-01; source model: Grok 4.7.
 - [W1-grok-mac-config.md](W1-grok-mac-config.md) — W1 macOS config/account/connectivity hunt (M9–M12); 2026-09-30, addendum 2026-10-01; source model: Grok 4.7.
+- [2026-10-01-hardware-checklist.md](2026-10-01-hardware-checklist.md) — 合并后的实机测试总清单（虚拟机可测 / 必须真机 / CI 已覆盖 / 未合入），含先备份与恢复网络步骤；2026-10-01; source model: Grok Bot (executor).
