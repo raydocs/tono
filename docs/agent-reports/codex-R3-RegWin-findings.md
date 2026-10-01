@@ -1,6 +1,6 @@
 # R3-RegWin: Codex (GPT-6.1 Sol) findings
 
-Generated 2026-09-30 22:36 MT from the run's findings.tsv / prs.tsv.
+Generated 2026-09-30 22:47 MT from the run's findings.tsv / prs.tsv.
 
 ## PRs
 
@@ -25,7 +25,7 @@ Generated 2026-09-30 22:36 MT from the run's findings.tsv / prs.tsv.
 | REG-807 | Windows WebSocket handshake | — | apps/windows/crates/tono-plugin-core/src/mihomo.rs:387 | Merged regression review | ok: timeout bounds handshake only; no filter/state mutation |
 | REG-768 | Windows WebSocket recovery | — | apps/windows/app/src/hooks/use-mihomo-ws-subscription.ts:161 | Merged regression review | ok: connect watchdog cleared after transport completion; initialization rejection now closes and reconnects |
 | R3REGW-HY2-DIRECT-GRAPH | Windows DIRECT graph | P2 | apps/windows/app/src-tauri/src/tono/connection/direct.rs:987 | HY2 UDP reject omission disagrees with optional DIRECT graph proof | false-positive regression: producer omission predates tonight (2026-09-11); out of assigned regression scope |
-| R3REGW-FRESH-ARM-READBACK | Windows Service proof | P1 | apps/windows/service/src/core/windows_kill_switch.rs:4053 | Inherited verification acknowledges an undelivered MarkVerified and leaves fresh deadline active | real-fixed #1037 |
+| R3REGW-FRESH-ARM-READBACK | Windows Service proof | P1 | apps/windows/service/src/core/windows_kill_switch.rs:4074 | Inherited verification acknowledges an undelivered MarkVerified and leaves fresh deadline active | real-fixed #1037 |
 | REG-1021 | Windows Service proof | P1 | apps/windows/service/src/core/windows_kill_switch.rs:4045 | Fresh deadline combines with inherited verified readback to retire healthy reconnect | regression-fixed #1037 |
 | REG-1010 | Windows app | — | apps/windows/app/src-tauri/src/tono/connection.rs:681 | guard transfer uses narrow release | ok |
 | REG-1005 | Windows app | — | apps/windows/service/src/core/windows_kill_switch.rs:3518 | unverified retirement narrow/strict branches retained | ok |
@@ -125,3 +125,5 @@ Generated 2026-09-30 22:36 MT from the run's findings.tsv / prs.tsv.
 | R3REGW-FP-19 | Windows startup retry | — | apps/windows/service/src/core/windows_kill_switch.rs:555 | Stale startup retry removes successor WFP protection | false-positive: ARMED and wanted-intent rechecked under WFP writer lock |
 | R3REGW-FP-20 | Windows startup retry | — | apps/windows/service/src/core/windows_kill_switch.rs:555 | Startup retry overrides explicit Restore by reapplying AI hold | false-positive: wanted:false path preserves disposition; serialized layer supersedes late worker |
 | R3REGW-FP-21 | Windows Core exhaustion | — | apps/windows/service/src/core/windows_kill_switch.rs:3711 | Exhaustion notification deadlocks Core stop joining watcher | false-positive: notifying watcher takes only WFP; retirement drops WFP before lifecycle and join |
+| REG-1036 | Windows catalog release | — | apps/windows/app/src-tauri/src/tono/connection/switch.rs:62 | Catalog removal narrow release composes with lifecycle, strict and update fences | ok |
+| REG-1038 | Windows Quit | — | apps/windows/app/src-tauri/src/feat/window.rs:546 | Only optional idle Service shutdown is bounded after required quit cleanup | ok |

@@ -1,16 +1,6 @@
-# R3-W9inst: Codex (GPT-6.1 Sol) findings
+W9 audit: one verified P1 fix shipped in [#1042](https://github.com/raydocs/tono/pull/1042); merged as `6b2be353`, full CI gate passed. General internet is released after rollback with the existing AI hold; strict blocking remains.
 
-Generated 2026-09-30 22:47 MT from the run's findings.tsv / prs.tsv.
-
-## PRs
-
-| PR | Branch | Labels | Auto-merge requested | Title |
-|---|---|---|---|---|
-| 1042 | hunt/sol-r3inst-rollback-release | needs-hardware | yes | fix(windows): release ordinary traffic after native update rollback |
-
-## Hypotheses
-
-| ID | Area | Sev | Location | Description | Verdict |
+| ID | Area | Severity | File:line | Description | Verdict |
 |---|---|---|---|---|---|
 | WIN-UPDATE-ROLLBACK-UNVERIFIED-HOLD | W9 | P1 | apps/windows/service/src/bin/install_service/update_executor.rs:521 | Native publication rollback restarts predecessor but leaves unverified update barrier indefinitely | real-fixed #1042 (merged 6b2be353; ci-gate SUCCESS) |
 | W9-FP-VERIFIED-ROLLBACK | W9 | — | apps/windows/service/src/core/windows_kill_switch.rs:3277 | Every successful native rollback leaves normal internet blocked | false-positive verified wanted session is released at Service startup |
@@ -30,3 +20,11 @@ Generated 2026-09-30 22:47 MT from the run's findings.tsv / prs.tsv.
 | W9-DUP-RECOVERY-TASK | W9 | P2 | apps/windows/service/src/bin/install_service/update_executor.rs:415 | Task Scheduler failure before publication leaves pending rollback | duplicate X3-2-order issue488 |
 | W9-RESOURCE-CANCEL-REPAIR | W9 | P2 | apps/windows/app/src-tauri/packages/windows/installer.nsi:1461 | Cancel a later retry wizard then App repair can use newer resources against rolled-back old core | real-unfixed multistep upgrade failure/cancel/repair; lower priority native verification pending |
 | W9-TARGET-PUBLICATION-CLOCK | W9 | P2 | apps/windows/service/src/bin/install_service/update_executor.rs:375 | Complete-target early recovery can omit publication floor | unconfirmed interruption plus old mapped image window; no ordinary impact proved |
+
+PR: **#1042**, branch `hunt/sol-r3inst-rollback-release`, `needs-hardware`, non-draft, merged through merge-commit auto-merge; full `ci-gate` SUCCESS. Head `de909743e22f15a07ff5a524fa6062d0f8aa79c5`; CI run [36815189282](https://github.com/raydocs/tono/actions/runs/36815189282).
+
+Validation: exact-production disposition harness failed before (0 passed/1 failed), passed after (1 passed/0 failed). Portable installer/journal suite 17 passed. Independent read-only review passed; diff and findings parser clean. Windows executor is compiled out in the Linux suite; Windows release build and hosted native Service/WFP/DNS/update tests passed in job 110218695595; installed-device SCM/BFE/WFP/DNS/NRPT and NSIS failure/crash/reboot fault injection remain unperformed.
+
+**18 unique hypotheses examined; 11 false positives; 3 duplicates; 1 verified/fixed P1; 2 conditional P2 findings deferred; 1 unconfirmed P2 candidate.**
+
+All assigned files were read end to end (installer Rust plus tests, executor, journal/tests, both NSIS scripts), with cross-file caller/guard checks. Unfinished: installed-device acceptance and P2 candidate native verification; no areas left unread. No deploy, publication, UI or other hunters’ branch edits.
