@@ -2,6 +2,7 @@
 
 Collected 2026-09-30 (MDT) from the box; credential values, auth paths, and email addresses were redacted. Raw JSONL transcripts and large logs are intentionally excluded.
 
+- [W1-grok-mac-runtime.md](W1-grok-mac-runtime.md) — Grok 4.7 macOS runtime hunt (M5–M8): findings, false positives, PRs #835 #836 #840 #854, issues #861 #863 #864; 2026-10-01.
 - [orchestrator-coverage.md](orchestrator-coverage.md) — coverage map for the industrial tono hunt; 2026-09-30; source model: orchestrator (tracking Sol, Grok, and GLM work).
 - [orchestrator-ledger.md](orchestrator-ledger.md) — consolidated findings ledger and PR status; 2026-09-30; source model: orchestrator.
 - [orchestrator-common-prompt.md](orchestrator-common-prompt.md) — shared hunter/fixer operating rules; 2026-09-30; source model: orchestrator.
