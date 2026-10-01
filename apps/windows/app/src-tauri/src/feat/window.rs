@@ -721,6 +721,7 @@ mod tests {
                 endpoints: Vec::new(),
                 direct_endpoint_digest: String::new(),
                 last_error: None,
+                reconnect_after_release: false,
             }
         }
         let live = status(true, true);
@@ -780,6 +781,7 @@ mod tests {
                 endpoints: Vec::new(),
                 direct_endpoint_digest: String::new(),
                 last_error: None,
+                reconnect_after_release: false,
             }),
             network_events: Default::default(),
         };
@@ -842,6 +844,7 @@ mod tests {
                 endpoints: Vec::new(),
                 direct_endpoint_digest: String::new(),
                 last_error: None,
+                reconnect_after_release: false,
             }),
             network_events: Default::default(),
         };

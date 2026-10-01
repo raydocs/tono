@@ -18,6 +18,10 @@ use std::{
     net::Ipv4Addr,
 };
 
+/// Product sing-box fake-IP pool. It sits inside the Windows probe prefix
+/// 198.18.0.0/16 and outside the TUN /30 (198.18.0.0–198.18.0.3).
+pub const SING_BOX_FAKE_IPV4: &str = "198.18.16.0/20";
+
 /// All fields are required at the API boundary; there is no inferred policy.
 pub struct RuntimeInput<'a> {
     pub nodes: &'a [ValidatedNode],
@@ -90,6 +94,18 @@ impl OwnedSingBoxRuntime {
     }
 }
 
+fn certificate_sha256(hex_pin: &str) -> Result<String, SingBoxError> {
+    if hex_pin.len() != 64 || !hex_pin.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err(SingBoxError::UnsupportedCertificatePin);
+    }
+    let mut raw = [0u8; 32];
+    for (index, byte) in raw.iter_mut().enumerate() {
+        *byte = u8::from_str_radix(&hex_pin[index * 2..index * 2 + 2], 16)
+            .map_err(|_| SingBoxError::UnsupportedCertificatePin)?;
+    }
+    Ok(STANDARD.encode(raw))
+}
+
 fn endpoint(node: &ValidatedNode) -> DialEndpoint {
     DialEndpoint {
         host: node.server,
@@ -115,6 +131,7 @@ pub fn build_runtime(input: RuntimeInput<'_>) -> Result<OwnedSingBoxRuntime, Sin
     for capability in input.required_capabilities {
         match capability.as_str() {
             "reality-tcp" | "dns-proxied" | "tun" | "clash-api" => (),
+            "hy2" if input.nodes.iter().any(|node| node.is_hysteria2()) => (),
             "hy2" => return Err(UnsupportedCertificatePin),
             "direct" if input.direct_plan.is_some() => (),
             "home" if input.routing.home_proxy.is_some() || input.routing.home_socks5.is_some() => {
@@ -158,8 +175,8 @@ pub fn build_runtime(input: RuntimeInput<'_>) -> Result<OwnedSingBoxRuntime, Sin
             .and_then(|name| input.nodes.iter().find(|n| &n.name == name))
     };
     let mut outbounds = Vec::new();
-    let mut unavailable_nodes = Vec::new();
-    for (index, node) in input.nodes.iter().enumerate() {
+    let unavailable_nodes = Vec::new();
+    for node in input.nodes {
         let checked = node::admit_node(&serde_yaml_ng::Value::Mapping(node.to_runtime_mapping()))
             .map_err(|_| InvalidNode)?;
         if checked != *node
@@ -169,6 +186,7 @@ pub fn build_runtime(input: RuntimeInput<'_>) -> Result<OwnedSingBoxRuntime, Sin
                 "Tono-Mixed",
                 "Tono-FakeIP",
                 "Tono-DoH",
+                "Tono-DoH-Backup",
                 "Tono-Hosts",
             ]
             .contains(&node.name.as_str())
@@ -177,16 +195,18 @@ pub fn build_runtime(input: RuntimeInput<'_>) -> Result<OwnedSingBoxRuntime, Sin
         }
         let outbound = match node.protocol {
             NodeProtocol::Hysteria2 => {
-                // Existing admission requires DER pin for EVERY HY2 node.
-                // Do not weaken it to manufacture a CA-only product path.
-                if node.name == selected.name
-                    || home.is_some_and(|h| h.name == node.name)
-                    || input.required_capabilities.iter().any(|r| r == "hy2")
-                {
-                    return Err(UnsupportedCertificatePin);
-                }
-                unavailable_nodes.push(index);
-                continue;
+                // Admission already requires a DER pin. Emit it as sing-box
+                // certificate_sha256. A pin that is not 32 raw bytes refuses
+                // the whole runtime; it is never dropped, never `insecure`,
+                // and never rewritten as an SPKI pin.
+                let pin = node
+                    .tls_fingerprint
+                    .as_deref()
+                    .ok_or(UnsupportedCertificatePin)?;
+                let encoded = certificate_sha256(pin)?;
+                json!({"type":"hysteria2","tag":node.name,"server":node.server,"server_port":node.port,
+                    "password":node.uuid,
+                    "tls":{"enabled":true,"server_name":node.servername,"certificate_sha256":[encoded]}})
             }
             NodeProtocol::VlessReality => {
                 if node.client_fingerprint.as_deref() != Some("chrome") {
@@ -516,7 +536,7 @@ mod tests {
             "action":"route","outbound":"Tono-China-Direct"})
         );
         assert_eq!(
-            value["dns"]["servers"][2]["predefined"]["qq.com"],
+            value["dns"]["servers"][3]["predefined"]["qq.com"],
             json!(["101.1.2.3"])
         );
         assert_eq!(
@@ -579,30 +599,162 @@ mod tests {
             build_runtime(request).unwrap_err(),
             SingBoxError::UnsupportedCertificatePin
         );
+        let pin = "ab".repeat(32);
         let hy2 = node::admit_node(&serde_yaml_ng::to_value(json!({"name":"Fixture Alpha · hy2","type":"hysteria2",
-            "server":"8.8.4.4","port":8444,"password":"11111111-1111-4111-8111-111111111111","sni":"hy2.example","fingerprint":"ab".repeat(32)})).unwrap()).unwrap();
+            "server":"8.8.4.4","port":8444,"password":"11111111-1111-4111-8111-111111111111","sni":"hy2.example","fingerprint":pin})).unwrap()).unwrap();
         nodes.push(hy2);
         let routing = CatalogRouting::default();
         let mut request = input(&nodes, &routing);
         request.selected = "Fixture Alpha · hy2";
-        assert_eq!(
-            build_runtime(request).unwrap_err(),
-            SingBoxError::UnsupportedCertificatePin
+        let selected = build_runtime(request).unwrap();
+        let encoded = "q6urq6urq6urq6urq6urq6urq6urq6urq6urq6urq6s=";
+        assert!(selected.runtime_json().contains(encoded));
+        assert!(!selected.runtime_json().contains("insecure"));
+        assert!(
+            !selected
+                .runtime_json()
+                .contains("certificate_public_key_sha256")
         );
-        let runtime = build_runtime(input(&nodes, &routing)).unwrap();
-        assert_eq!(runtime.unavailable_nodes(), &[2]);
-        assert!(!runtime.runtime_json().contains("Fixture Alpha · hy2"));
+        assert!(selected.unavailable_nodes().is_empty());
+        let unselected = build_runtime(input(&nodes, &routing)).unwrap();
+        assert!(unselected.runtime_json().contains("Fixture Alpha · hy2"));
+        assert!(unselected.runtime_json().contains(encoded));
+        assert!(unselected.unavailable_nodes().is_empty());
         let required = ["hy2".into()];
         let mut request = input(&nodes, &routing);
         request.required_capabilities = &required;
-        assert_eq!(
-            build_runtime(request).unwrap_err(),
-            SingBoxError::UnsupportedCertificatePin
+        assert!(
+            build_runtime(request)
+                .unwrap()
+                .runtime_json()
+                .contains(encoded)
         );
         nodes[2].tls_fingerprint = None;
         assert_eq!(
             build_runtime(input(&nodes, &routing)).unwrap_err(),
             SingBoxError::InvalidNode
         );
+        nodes[2].tls_fingerprint = Some("zz".repeat(32));
+        assert_eq!(
+            build_runtime(input(&nodes, &routing)).unwrap_err(),
+            SingBoxError::InvalidNode
+        );
+        assert_eq!(
+            certificate_sha256("abcd").unwrap_err(),
+            SingBoxError::UnsupportedCertificatePin
+        );
+    }
+
+    #[test]
+    fn sing_box_fake_ip_pool_is_inside_the_probe_prefix_and_outside_tun() {
+        let nodes = nodes();
+        let routing = CatalogRouting::default();
+        let runtime = build_runtime(input(&nodes, &routing)).unwrap();
+        let value: Value = serde_json::from_str(runtime.runtime_json()).unwrap();
+        assert_eq!(
+            value["dns"]["servers"][0]["inet4_range"],
+            SING_BOX_FAKE_IPV4
+        );
+        assert_eq!(value["inbounds"][0]["address"][0], "198.18.0.1/30");
+        assert_eq!(value["inbounds"][0]["dns_address"][0], "198.18.0.2");
+        assert!(probe_sees_fake([198, 18, 16, 0]));
+        assert!(probe_sees_fake([198, 18, 31, 255]));
+        assert!(!sing_box_pool([198, 18, 0, 1]));
+        assert!(!sing_box_pool([198, 18, 0, 2]));
+        assert!(!sing_box_pool([198, 19, 0, 1]));
+        assert!(sing_box_pool([198, 18, 16, 1]));
+    }
+
+    #[test]
+    fn sing_box_dns_falls_back_to_a_second_doh_without_plaintext() {
+        let nodes = nodes();
+        let routing = CatalogRouting::default();
+        let runtime = build_runtime(input(&nodes, &routing)).unwrap();
+        let value: Value = serde_json::from_str(runtime.runtime_json()).unwrap();
+        let servers = value["dns"]["servers"].as_array().unwrap();
+        assert!(
+            servers
+                .iter()
+                .all(|server| { matches!(server["type"].as_str(), Some("fakeip" | "https")) })
+        );
+        assert_eq!(servers[1]["tag"], "Tono-DoH");
+        assert_eq!(servers[1]["server"], "1.1.1.1");
+        assert_eq!(servers[1]["detour"], "Tono-Exit");
+        assert_eq!(servers[1]["tls"]["alpn"], json!(["h2"]));
+        assert_eq!(servers[2]["tag"], "Tono-DoH-Backup");
+        assert_eq!(servers[2]["server"], "8.8.8.8");
+        assert_eq!(servers[2]["tls"]["server_name"], "dns.google");
+        assert_eq!(servers[2]["detour"], "Tono-Exit");
+        assert_eq!(servers[2]["tls"]["alpn"], json!(["h2"]));
+        let rules = value["dns"]["rules"].as_array().unwrap();
+        assert_eq!(rules[1]["rewrite_ttl"], 30);
+        assert_eq!(rules[1]["server"], "Tono-FakeIP");
+        assert_eq!(rules[2]["action"], "evaluate");
+        assert_eq!(rules[2]["server"], "Tono-DoH");
+        assert_eq!(rules[2].get("race"), None);
+        assert_eq!(rules[3]["match_response"], "primary");
+        assert_eq!(rules[3]["response_rcode"], "NOERROR");
+        assert_eq!(rules[3]["action"], "respond");
+        assert_eq!(rules[4]["server"], "Tono-DoH-Backup");
+        assert_eq!(rules[5]["match_response"], "backup");
+        assert_eq!(rules[5]["action"], "respond");
+        assert_eq!(value["dns"]["final"], "Tono-DoH");
+        assert_eq!(value["route"]["default_domain_resolver"], "Tono-DoH");
+        let mut stolen = nodes.clone();
+        stolen[0].name = "Tono-DoH-Backup".into();
+        assert_eq!(
+            build_runtime(input(&stolen, &routing)).unwrap_err(),
+            SingBoxError::InvalidNode
+        );
+    }
+
+    fn probe_sees_fake(octets: [u8; 4]) -> bool {
+        octets[0] == 198 && octets[1] == 18 && sing_box_pool(octets)
+    }
+
+    fn sing_box_pool(octets: [u8; 4]) -> bool {
+        octets[0] == 198 && octets[1] == 18 && (16..32).contains(&octets[2])
+    }
+
+    #[test]
+    fn live_mihomo_yaml_stays_byte_for_byte_on_its_own_fake_ip_range() {
+        // Pinned YAML includes #732's dial defaults (`tcp-concurrent: true`,
+        // `dns.ipv6: false`, chrome on each Reality proxy) plus fake-ip-ttl,
+        // prefer-h3 and cache-algorithm.
+        const PINNED_YAML_SHA256: &str =
+            "82c6545e00c8e42058d1a3d6b93d43218c563cc25c5755bc82b663d41630c501";
+        let nodes = [
+            mihomo_node("US Reality 01", "8.8.8.8"),
+            mihomo_node("JP Reality 02", "1.1.1.1"),
+            mihomo_node("SG Reality 03", "9.9.9.9"),
+        ];
+        let runtime =
+            crate::config::build_owned_runtime(&nodes, "JP Reality 02", "test-secret", None)
+                .unwrap();
+        let yaml = runtime.yaml();
+        assert!(yaml.contains("fake-ip-range: 198.18.0.1/16"));
+        assert!(!yaml.contains("198.18.16.0/20"));
+        let digest = Sha256::digest(yaml.as_bytes());
+        let hex: String = digest.iter().map(|byte| format!("{byte:02x}")).collect();
+        assert_eq!(hex, PINNED_YAML_SHA256);
+    }
+
+    fn mihomo_node(name: &str, server: &str) -> ValidatedNode {
+        let yaml = format!(
+            r#"
+name: "{name}"
+type: vless
+server: {server}
+port: 443
+uuid: "9e107d9d-372b-4c81-8d2b-3f2d0a1b2c3d"
+tls: true
+sni: "www.microsoft.com"
+flow: xtls-rprx-vision
+reality-opts:
+  public-key: "0123456789abcdef0123456789abcdef0123456789a"
+  short-id: "0123456789abcdef"
+"#
+        );
+        node::admit_node(&serde_yaml_ng::from_str(&yaml).unwrap()).unwrap()
     }
 }

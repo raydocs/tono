@@ -47,6 +47,8 @@ LiquidClashHelper/
 
 # Python
 __pycache__/
+tooling/perf/connect-bench/.cache/
+tooling/perf/connect-bench/last-run.json
 
 # Wrangler local cache
 .wrangler/
@@ -60,6 +62,10 @@ artifacts/
 # Node — the workspaces keep their own; a stray root one is a tool artefact
 # Also ignore local dependency-cache symlinks used by isolated worktrees.
 node_modules
+
+# Istanbul output from the control-plane coverage floor. The numbers are enforced
+# by vitest thresholds; the directory is a local report.
+services/control-plane/coverage/
 
 # Local development environments
 .venv/

@@ -20,7 +20,7 @@ import {
 import { minSupportedVersions } from '@/lib/releases';
 import { usePrivacy } from '@/lib/privacy';
 import type { FleetNodeDto } from '@/lib/types';
-import { newestFetch, useResource, type Resource } from '@/lib/use-resource';
+import { oldestFetch, useResource, type Resource } from '@/lib/use-resource';
 import { cn } from '@/lib/utils';
 import '@/styles/today.css';
 import { ChoreList } from './today/Chores';
@@ -28,6 +28,7 @@ import { Digest } from './today/Digest';
 import { HeroKpis } from './today/HeroKpis';
 import { IncidentList } from './today/IncidentCard';
 import { IncidentDrawer } from './today/IncidentDrawer';
+import { FailureClusters } from './diagnostics/FailureClusters';
 
 const TABS = ['open', 'resolved', 'chores'] as const;
 type TabId = (typeof TABS)[number];
@@ -156,7 +157,7 @@ export default function TodayPage({
 
           <PageNote
             className="today-hero-note"
-            fetchedAt={newestFetch(incidents, customers, health)}
+            fetchedAt={oldestFetch(incidents, customers, health)}
             backfill={health.status === 'ready' ? health.data.backfill : null}
           />
         </div>
@@ -224,6 +225,11 @@ export default function TodayPage({
               />
             )}
           </div>
+
+          {/* Under the list, not above it. On a phone the first 认领 has to
+              be on screen when the page opens; a block here used to push it
+              past the fold. */}
+          <FailureClusters />
         </div>
       </div>
 

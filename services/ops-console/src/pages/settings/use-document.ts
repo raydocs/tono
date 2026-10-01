@@ -120,7 +120,7 @@ export function useDocument<E>(load: (signal: AbortSignal) => Promise<Snapshot<E
    * live now — the "what changed" an operator needs to merge by hand.
    */
   const publish = useCallback(async (
-    send: (expectedRevision: number) => Promise<number>,
+    send: (expectedRevision: number) => Promise<Pick<Snapshot<E>, 'revision' | 'updatedAt' | 'extra'>>,
     words: {
       told: (was: number, now: number) => Notice;
       conflict: (was: number, fresh: Snapshot<E>, drift: LineDiff) => Notice;
@@ -132,9 +132,10 @@ export function useDocument<E>(load: (signal: AbortSignal) => Promise<Snapshot<E
     setFailure(null);
     setNotice(null);
     try {
-      const revision = await send(frozen.revision);
+      const published = await send(frozen.revision);
+      const { revision } = published;
       setOnline((current) => (current
-        ? { ...current, revision, text: draft ?? current.text }
+        ? { ...current, ...published, text: draft ?? current.text }
         : current));
       setBase({ revision, text: draft ?? frozen.text });
       setNotice(words.told(frozen.revision, revision));

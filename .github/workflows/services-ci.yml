@@ -25,38 +25,20 @@ name: Services CI
 # ratchet that is still under budget is visible before it is not.
 
 on:
+  workflow_call:
   # Manual re-run, so a flake or an infrastructure hiccup does not need a
-  # pointless commit to retry.
+  # pointless commit to retry. pull_request and merge_group enter through
+  # ci-gate.yml so a PR does not start this workflow twice.
   workflow_dispatch:
-  pull_request:
-    paths:
-      - services/**
-      - ops-panel/**
-      - tooling/scripts/remote/**
-      # The download-page check and its tests live here. Without these two the
-      # generator could be changed without ever running the job that guards it.
-      - tooling/scripts/generate-release-center.mjs
-      - tooling/scripts/tests/generate-release-center.test.mjs
-      # The migration-number checker and the *.test.mjs glob live outside
-      # services/**; without these the new steps could be edited without running.
-      - tooling/scripts/check-migration-numbers.mjs
-      - tooling/scripts/check-ops-budgets.mjs
-      - tooling/scripts/compare-connect-performance.mjs
-      - tooling/scripts/windows-package-components.mjs
-      - tooling/scripts/tests/*.test.mjs
-      - tooling/scripts/publish-managed-catalog.rb
-      - tooling/scripts/write-dedirock-hy2-catalog-sources.rb
-      - tooling/scripts/tests/publish-managed-catalog.test.rb
-      - .github/workflows/services-ci.yml
-      # desktop-update-sign-workflow.test.mjs guards this file; run it on every edit.
-      - .github/workflows/desktop-update-sign.yml
-  # Every branch, not just the default one. This repository is a fork, and no
-  # `pull_request` event has ever produced a run here — PR #1 merged without one.
-  # Restricted to `main` and paired with a trigger that does not fire, this
-  # workflow could only ever have run after a merge, which is the wrong time to
-  # learn something is broken. It is also why `macos-ci.yml` existed for days and
-  # never executed once.
+  # Direct pushes on main and the release lines. A pull-request branch is
+  # already covered by ci-gate; keeping push on that branch runs these jobs
+  # twice, because the push ref and the pull_request ref do not share a
+  # concurrency group.
   push:
+    branches:
+      - main
+      - release/macos
+      - release/windows
     paths:
       - services/**
       - ops-panel/**
@@ -84,7 +66,7 @@ permissions:
 
 concurrency:
   group: services-ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name != 'merge_group' && github.event_name != 'workflow_call' }}
 
 jobs:
   control-plane:
@@ -107,11 +89,24 @@ jobs:
 
       - name: Type-check
         # The Worker is deployed from this source; a type error here is a runtime
-        # error on a production domain.
+        # error on a production domain. The second pass counts
+        # noUncheckedIndexedAccess errors and fails only when that count rises.
         run: npm run typecheck
 
+      - name: Unchecked index ratchet
+        working-directory: ${{ github.workspace }}
+        run: node --test services/unchecked-index-ratchet.test.mjs
+
       - name: Test
-        run: npm test
+        run: |
+          npm test
+          node --input-type=module -e '
+            import { readFileSync, appendFileSync } from "node:fs"
+            const total = JSON.parse(readFileSync("./coverage/coverage-summary.json", "utf8")).total
+            const line = `coverage floor auth/sessions/quota/ledger: lines ${total.lines.pct}% branches ${total.branches.pct}% functions ${total.functions.pct}% statements ${total.statements.pct}%`
+            console.log(line)
+            if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, line + "\n")
+          '
 
       - name: Download page guards can still fail
         # The reachability guard is the one check standing between "the manifest
@@ -213,6 +208,10 @@ jobs:
 
       - name: Catalog publisher tests
         run: ruby tooling/scripts/tests/publish-managed-catalog.test.rb
+
+      - name: Type-check the ops console
+        working-directory: services/ops-console
+        run: npm run typecheck
 
       - name: Build the console
         # npm run build ends in check-budgets.mjs, so a bundle that blows the
