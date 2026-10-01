@@ -2727,13 +2727,9 @@ pub(crate) async fn restore_protected() -> Result<DnsProtectionStatus> {
         let live = engine_apply_snapshot(&snapshot).await?;
         let streak = note_apply_round(live.iter().any(|(_, ok)| !ok));
         note_live_results(&mut snapshot, &live);
-        // Refresh failure flags when possible, but the saved original DNS values have not
-        // changed. A disk error here must not skip the machine proof or NRPT/DoH restore:
-        // the existing snapshot still holds the originals, and only those proofs decide
-        // whether disarm is safe. A refused restore keeps both it and the in-memory flags.
-        if let Err(error) = atomic_write(&snapshot_path(), &serde_json::to_vec_pretty(&snapshot)?).await {
-            tracing::warn!("dns: restore outcome could not be saved; continuing DNS proof: {error:#}");
-        }
+        // Prove restoration before refreshing bookkeeping. A successful restore retires
+        // the snapshot, so rewriting it would only add a fallible write and a possible late
+        // replacement racing that retirement. Failed proofs save their flags below.
         // The registry half of the proof, read back off the machine. The stub engine reports no
         // adapters at all, which would make the comparison vacuous, so off Windows the
         // snapshot's own entries stand in and the live evidence below is what decides.
@@ -2810,6 +2806,13 @@ pub(crate) async fn restore_protected() -> Result<DnsProtectionStatus> {
         Ok(None)
     }
     .await;
+    if outcome.is_err() {
+        // The originals have not changed. Keep current failure flags in memory and refresh
+        // their durable record when possible, without replacing the machine-proof error.
+        if let Err(error) = atomic_write(&snapshot_path(), &serde_json::to_vec_pretty(&snapshot)?).await {
+            tracing::warn!("dns: failed restore outcome could not be saved: {error:#}");
+        }
+    }
     let degraded = record_outcome(outcome)?;
     // Required resolver cleanup belongs to the disarm proof, not best-effort housekeeping.
     // A failed NRPT/DoH restore retains the adapter snapshot and its independent captures.
