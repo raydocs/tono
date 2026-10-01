@@ -1189,6 +1189,23 @@ nonisolated struct HelperManager {
         }
     }
 
+    /// Whether a failed `/helper/upgrade` request may still have reached the
+    /// helper. The helper replies before it exits, so a request written whole
+    /// whose reply was lost (empty or invalid response) can leave the upgrade
+    /// under way and keeps the version poll. A socket, connect or send failure
+    /// proves it never arrived — the helper upgrades only after reading the
+    /// full body — so polling there would wait out the 45 s timeout for
+    /// nothing (MAC-HELPER-UPGRADE-TRY-STALL). Unknown errors keep the poll.
+    static func upgradeRequestMayHaveBeenDelivered(_ error: Error) -> Bool {
+        guard let ipcError = error as? HelperIPCError else { return true }
+        switch ipcError {
+        case .socketFailed, .connectFailed, .boundToAnotherUser:
+            return false
+        default:
+            return true
+        }
+    }
+
     private static func attemptSilentUpgrade(
         helperSource: URL,
         mihomoSource: URL,
@@ -1208,11 +1225,22 @@ nonisolated struct HelperManager {
                 "mihomoSource": mihomoSource.path,
             ]
             let body = try JSONSerialization.data(withJSONObject: payload)
-            let response = try? sendRequest(
-                method: "POST",
-                path: "/helper/upgrade",
-                body: body
-            )
+            var response: (status: Int, body: Data)?
+            do {
+                response = try sendRequest(
+                    method: "POST",
+                    path: "/helper/upgrade",
+                    body: body
+                )
+            } catch {
+                guard Self.upgradeRequestMayHaveBeenDelivered(error) else {
+                    LocalTrafficAudit.shared.recordEvent(
+                        "helper_silent_upgrade_failed",
+                        details: ["error": error.localizedDescription]
+                    )
+                    return false
+                }
+            }
             if let response, response.status != 200 {
                 return false
             }

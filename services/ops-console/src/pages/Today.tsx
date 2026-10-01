@@ -226,7 +226,7 @@ export default function TodayPage({
             )}
           </div>
 
-          {/* Under the list, not above it. On a phone the first 认领 has to
+          {/* Under the list, not above it. On a phone the first claim action has to
               be on screen when the page opens; a block here used to push it
               past the fold. */}
           <FailureClusters />

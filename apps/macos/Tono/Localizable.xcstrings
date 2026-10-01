@@ -242,6 +242,16 @@
         }
       }
     },
+    "Network protection was interrupted by another program. The original network is back while Tono looks for a reachable exit.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "另一个程序中断了网络保护。原来的网络已经恢复，Tono 正在寻找可连接的出口。"
+          }
+        }
+      }
+    },
     "Network protection was interrupted by another program; Kill Switch is blocking traffic while Tono reconnects.": {
       "localizations": {
         "zh-Hans": {
@@ -488,6 +498,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "检查期间账户或连接已变化。请重新检查以获取一致的快照。"
+          }
+        }
+      }
+    },
+    "Another program keeps replacing Tono's network protection. The original network is back. Quit the other VPN or firewall, then connect again.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "另一个程序一直在替换 Tono 的网络保护。原来的网络已经恢复。请退出其他 VPN 或防火墙，然后再连接。"
           }
         }
       }
@@ -4286,6 +4306,16 @@
         }
       }
     },
+    "Protected DNS stopped. Tono released the filter and will reconnect only after a proof.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "受保护的 DNS 已停止。Tono 已放开过滤，只有在证明出口可达之后才会重新连接。"
+          }
+        }
+      }
+    },
     "Protected DNS stopped; Kill Switch is blocking traffic while Tono retries.": {
       "localizations": {
         "zh-Hans": {
@@ -6317,6 +6347,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "主题模式"
+          }
+        }
+      }
+    },
+    "This needs your action, so Tono will not reconnect by itself. The original network is back.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "这需要你来处理，Tono 不会自行重连。原来的网络已经恢复。"
           }
         }
       }

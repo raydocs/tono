@@ -90,6 +90,12 @@ final class AppState {
     var disconnectionStartedAt: Date?
     var completedConnectionStages: Set<ConnectionStage> = []
     var lastConnectionFailure: ConnectionFailure?
+    /// Next dial chosen by ExitHeal while PF is down. Nil keeps the selected node.
+    var unarmedDialName: String?
+    /// Test seam. Nil uses a TCP connect that does not install PF.
+    /// Not observed: an optional MainActor closure cannot be yielded by Observation.
+    @ObservationIgnored
+    var unarmedTcpProof: (@MainActor @Sendable (String) async -> Bool)?
     /// Failed update journal still on disk. Dashboard tells the customer to
     /// disconnect and reinstall; a later connect must not hide this.
     var updateIncomplete: Bool = UpdateHandoffStore.showsIncompleteUpdate()
@@ -250,6 +256,10 @@ final class AppState {
     var autoUpdateTimer: Timer?
     private var proxyGuardTimer: Timer?
     private var latencyTestTimer: Timer?
+    /// One guard reapply can still be waiting on the privileged coordinator
+    /// (a bounded-but-slow administrator prompt); a new guard tick must not
+    /// queue another reapply behind it.
+    private var proxyReapplyInFlight = false
     /// Catalog exits already tried in this fail-closed connect loop. Reset on
     /// a fresh user connect so a China GFW hit on one city can move on.
     private var catalogFailoverNamesTried: Set<String> = []
@@ -301,6 +311,39 @@ final class AppState {
     var catalogSelectionRequiresChoice = false
     let initialDataLoader = InitialDataLoader()
     var initialDataLoadTask: Task<InitialDiskSnapshot, Never>?
+    /// Claimed synchronously in `loadInitialData` before that call awaits.
+    /// A second WindowGroup scene joins this task instead of applying the
+    /// same disk snapshot again.
+    @ObservationIgnored
+    var initialDataApplyTask: Task<Void, Never>?
+    /// Test seam. Production leaves this nil. The claimed apply parks here,
+    /// before it reads disk, so a test can observe a second caller joining.
+    @ObservationIgnored
+    var initialDataApplySuspension: (() async -> Void)?
+    /// How many times the claimed apply body has started.
+    @ObservationIgnored
+    private(set) var initialDataApplyCount = 0
+    /// How many callers found an apply already claimed.
+    @ObservationIgnored
+    private(set) var initialDataApplyJoinCount = 0
+
+    /// `private(set)` setters are file-private. The persistence extension
+    /// lives in another file, so it records through these.
+    func recordInitialDataApplyJoined() {
+        initialDataApplyJoinCount += 1
+    }
+
+    func recordInitialDataApplyStarted() {
+        initialDataApplyCount += 1
+    }
+    /// Test seam, called synchronously when a caller joins an in-flight apply
+    /// and before it awaits that task.
+    @ObservationIgnored
+    var initialDataApplyJoined: (() -> Void)?
+    /// Test seam. When set, the apply uses this snapshot and does not read
+    /// `ConfigStorage.shared`.
+    @ObservationIgnored
+    var initialDataSnapshotOverride: InitialDiskSnapshot?
     let managedCatalogProcessor = ManagedCatalogProcessor()
     let managedTrafficPolicyProcessor = ManagedTrafficPolicyProcessor()
     let persistenceWriter = AppStatePersistenceWriter()
@@ -343,6 +386,23 @@ final class AppState {
     /// System boundary for the connected session's read-only DNS and PF
     /// audits, the same pattern as `tunInterfaceExists`.
     var protectionAudits = ProtectionAuditOperations()
+    /// System boundary for the Chromium Secure DNS scan, the same pattern as
+    /// `protectionAudits`. Chromium writes Local State by replace/rename, so
+    /// production retries once off the main actor — a harmless in-flight
+    /// atomic save must not read as a permanent scan gap; a second incomplete
+    /// result stays fail-closed. Tests substitute the report so one monitor
+    /// tick can drive the blocking verdict without Chrome or Edge installed.
+    var scanBrowserProtectedDNS: () async -> BrowserDNSDiagnostics.Report = {
+        let first = await Task.detached(priority: .userInitiated) {
+            BrowserDNSDiagnostics.scan()
+        }.value
+        guard first.outcome == .incomplete, !Task.isCancelled else { return first }
+        try? await Task.sleep(for: .milliseconds(150))
+        guard !Task.isCancelled else { return first }
+        return await Task.detached(priority: .userInitiated) {
+            BrowserDNSDiagnostics.scan()
+        }.value
+    }
     /// System boundary for the post-connect optional-policy background
     /// replacement. Production (nil) resolves the managed web-domain pins and
     /// performs the privileged arm → writeRuntimeConfig → /core/sync → reload
@@ -1294,6 +1354,12 @@ final class AppState {
                 let intact = await PrivilegedRuntimeCoordinator.shared.systemProxyIsIntact()
                 guard !self.nativeUpdatePending, self.isConnected, SystemProxy.didSetProxy else { return }
                 if !intact {
+                    // Each tick spawns its own Task, so without this guard a
+                    // slow reapply (an administrator prompt) accumulates one
+                    // queued reapply per 10 s tick behind it on the actor.
+                    guard !self.proxyReapplyInFlight else { return }
+                    self.proxyReapplyInFlight = true
+                    defer { self.proxyReapplyInFlight = false }
                     do {
                         try await PrivilegedRuntimeCoordinator.shared.reapplySystemProxy()
                         self.isProxyDegraded = false
@@ -2284,21 +2350,6 @@ final class AppState {
             try? await Task.sleep(for: .milliseconds(200))
         }
         return false
-    }
-
-    /// Chromium writes Local State by replace/rename. One short retry keeps a
-    /// harmless in-flight atomic save from looking like a permanent scan gap;
-    /// a second incomplete result remains fail-closed.
-    func scanBrowserProtectedDNS() async -> BrowserDNSDiagnostics.Report {
-        let first = await Task.detached(priority: .userInitiated) {
-            BrowserDNSDiagnostics.scan()
-        }.value
-        guard first.outcome == .incomplete, !Task.isCancelled else { return first }
-        try? await Task.sleep(for: .milliseconds(150))
-        guard !Task.isCancelled else { return first }
-        return await Task.detached(priority: .userInitiated) {
-            BrowserDNSDiagnostics.scan()
-        }.value
     }
 
     func recordBrowserDNSPreflight(_ report: BrowserDNSDiagnostics.Report) {
