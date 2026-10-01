@@ -31,6 +31,8 @@ const mocks = vi.hoisted(() => ({
   tonoRetryNow: vi.fn(),
   tonoConnect: vi.fn(),
   tonoDisconnect: vi.fn(),
+  live: false,
+  cached: false,
 }))
 
 vi.mock('@/hooks/use-tono', async (importOriginal) => ({
@@ -43,8 +45,12 @@ vi.mock('@/hooks/use-tono', async (importOriginal) => ({
 
 vi.mock('@/hooks/use-traffic-data', () => ({
   useTrafficData: () => ({
-    response: { data: undefined },
-    live: false,
+    response: {
+      data: mocks.cached
+        ? { up: 4096, down: 8192, upTotal: 1, downTotal: 1 }
+        : undefined,
+    },
+    live: mocks.live,
     refreshGetClashTraffic: vi.fn(),
   }),
 }))
@@ -111,6 +117,8 @@ const freshSWR = ({ children }: { children: ReactNode }) => (
 
 beforeEach(() => {
   mocks.status = makeStatus()
+  mocks.live = false
+  mocks.cached = false
   mocks.mutateTonoStatus.mockReset().mockResolvedValue(undefined)
   mocks.tonoServers.mockReset().mockResolvedValue(catalogWithHy2())
   mocks.tonoConnectProgress.mockReset().mockResolvedValue({
@@ -307,5 +315,20 @@ describe('TrayPanel backup channel', () => {
       await screen.findByRole('button', { name: 'Try backup channel' }),
     ).toBeDefined()
     expect(mocks.tonoSelectServer).not.toHaveBeenCalled()
+  })
+})
+
+describe('TrayPanel traffic rates', () => {
+  it('hides the /s rates once the traffic feed is no longer live', () => {
+    mocks.status = makeStatus({ uiState: 'connected' })
+    mocks.live = true
+    mocks.cached = true
+    const view = render(<TrayPanel />, { wrapper: freshSWR })
+    expect(screen.queryByText(/↑ 4\.00 KB\/s/)).not.toBeNull()
+    expect(screen.queryByText(/↓ 8\.00 KB\/s/)).not.toBeNull()
+
+    mocks.live = false
+    view.rerender(<TrayPanel />)
+    expect(screen.queryByText(/KB\/s/)).toBeNull()
   })
 })
