@@ -1,0 +1,7 @@
+| ID | 问题（一句） | 状态 | Issue / PR | 等级 | 剩余限制 |
+|---|---|---|---|---|---|
+| WIN-DISCONNECT-CRASH-RETRY-RECONNECT | A failed crash-tombstone write remains pending after successful Disconnect and later overwrites its durable no-reconnect intent | in-PR | Branch `hunt/sol-r3ks1-disconnect-tombstone-retry` (this PR) | 低·已确认（P2，Linux 回归） | Requires automatic crash recovery plus a transient write failure. Same-process reconnect stays false; a later abrupt Service recovery or lifecycle-owned replacement exposes the stale disk flag. Native networking remains untested. |
+
+Baseline `9d5735e6`: `release_unproven_wanted_session_unlocked` sets the pending flag after a failed tombstone write (`windows_kill_switch.rs:2798`). Successful explicit disarm clears only the reconnect flag (`:2692`, `:2756`), so the next `retry_crash_tombstone_unlocked` writes `reconnect_after_release=true` over the user's successful `false` tombstone. A later Service recovery loads that flag; App account restore schedules background Connect (`connection/reconnect.rs:169`, `commands/restore.rs:223`). A normal SCM stop may repair the record, so this is not a claim about every restart.
+
+The production-method regression `explicit_release_supersedes_a_pending_crash_tombstone` failed before the fix at recovered reconnect intent, then passed. Both successful disarm endings now cancel the old retry while holding the WFP writer. Failed disarm leaves its prior recovery state unchanged; AI-layer disposition is unchanged.

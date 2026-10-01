@@ -43,6 +43,8 @@ on:
       - services/**
       - ops-panel/**
       - tooling/scripts/remote/**
+      - tooling/scripts/provision-tono-node.py
+      - tooling/scripts/tests/test_provision_tono_node.py
       # The download-page check and its tests live here. Without these two the
       # generator could be changed without ever running the job that guards it.
       - tooling/scripts/generate-release-center.mjs
@@ -148,6 +150,9 @@ jobs:
         # used before a restart, and both look plausible from outside.
         run: python3 services/exit-agent/test_reconcile_and_report.py
 
+      - name: Transactional node provisioner fixtures
+        run: python3 tooling/scripts/tests/test_provision_tono_node.py
+
       - name: Exit configuration edit
         # Additive and idempotent by requirement: dropping the existing client
         # disconnects every account that still holds that credential, and claiming
@@ -165,6 +170,9 @@ jobs:
 
       - name: Operator SSH collector jobs
         run: python3 -m unittest discover -s ops-panel/tests -p 'test_*.py'
+
+      - name: Node rollback metadata fixtures
+        run: python3 tooling/scripts/remote/test_node_rollback.py
 
   ops-contract:
     runs-on: ubuntu-24.04
