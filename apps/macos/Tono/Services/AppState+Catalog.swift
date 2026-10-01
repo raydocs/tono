@@ -154,6 +154,13 @@ extension AppState {
                 nodes: nodes
             )]
         proxyRegions = managedRegions + customRegions
+        if isConnected, switchTargetChanged, let previousSelection,
+           previousSelection != ConfigPipeline.homeNodeName,
+           localProxyNode(matching: previousSelection) == nil {
+            // A replacement switch can itself lose its target to a newer
+            // catalog while the old removed selection is still authoritative.
+            pendingRemovedCatalogExit = true
+        }
         if switchingNodeId != nil, let previousSwitchTarget,
            let id = nodes.first(where: { proxyTarget($0.name, matches: previousSwitchTarget.name) })?.id {
             // Parsing assigns fresh IDs even when an unrelated city changes.
@@ -320,7 +327,7 @@ extension AppState {
     /// original network unless a strict kill switch was explicitly enabled.
     /// The existing automatic release restores ordinary traffic and retains
     /// the secondary AI hold. Explicit strict protection keeps its own branch.
-    private func settleRemovedCatalogExit(wasConnected: Bool) {
+    func settleRemovedCatalogExit(wasConnected: Bool) {
         let replacement = defaultCloudExitNode()
         let action = CatalogRemovedExitAction.decide(
             replacementName: replacement?.name,
@@ -329,13 +336,19 @@ extension AppState {
         )
         switch action {
         case .keepSession(let name):
+            if wasConnected, connectionCoordinator.configReloadTask != nil || switchingNodeId != nil {
+                // The current owner may still commit its captured, removed
+                // exit. Retain convergence, not a snapshot of this survivor.
+                pendingRemovedCatalogExit = true
+                return
+            }
             catalogSelectionRequiresChoice = false
             errorMessage = String(
                 localized: "The selected cloud server was removed. Tono switched to another cloud server and kept this connection."
             )
             if wasConnected, coreController != nil {
                 let previousSwitch = connectionCoordinator.nodeSwitchTask
-                selectNode(name, releaseNetworkIfSwitchFails: true)
+                selectNode(name, releaseNetworkIfSwitchFails: true, forceRuntimeReplacement: true)
                 let started = connectionCoordinator.nodeSwitchTask != nil
                     && connectionCoordinator.nodeSwitchTask != previousSwitch
                 if !started {
