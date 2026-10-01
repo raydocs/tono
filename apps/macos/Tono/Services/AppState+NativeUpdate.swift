@@ -33,11 +33,14 @@ extension AppState {
 
     func suspendForNativeUpdate() async {
         connectionCoordinator.bumpGeneration()
+        let retirementGeneration = connectionCoordinator.protectionOperationGeneration
         let tasks = [connectionCoordinator.coreMonitorTask, connectionCoordinator.nodeSwitchTask,
                      connectionCoordinator.protectedReconnectTask, connectionCoordinator.connectTask,
-                     connectionCoordinator.configReloadTask, connectionCoordinator.networkEnvironmentTask]
+                     connectionCoordinator.configReloadTask, connectionCoordinator.networkEnvironmentTask,
+                     connectionCoordinator.wakeRecoveryTask, connectionCoordinator.sleepRestrictTask]
             .compactMap { $0 }
         for task in tasks { task.cancel() }
+        resumeProtectionAfterWake = false
         // A cancelled reload may return without clearing its serialization
         // handle. Retire its completion and queued work before draining it;
         // neither may start another mutation during the helper handoff.
@@ -52,6 +55,13 @@ extension AppState {
         stopProxyGuard()
         stopLatencyTestTimer()
         for task in tasks { await task.value }
+        // Wake retries check cancellation, not the protection generation. They
+        // must drain before update release, or a later retry can reconnect once
+        // retirement clears the update gates. Keep the handles until that drain.
+        if connectionCoordinator.protectionOperationGeneration == retirementGeneration {
+            connectionCoordinator.wakeRecoveryTask = nil
+            connectionCoordinator.sleepRestrictTask = nil
+        }
         if connectionCoordinator.configReloadRequestID == reloadRetirementID {
             connectionCoordinator.configReloadTask = nil
         }
