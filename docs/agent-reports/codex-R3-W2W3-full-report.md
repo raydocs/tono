@@ -1,16 +1,8 @@
-# R3-W2W3: Codex (GPT-6.1 Sol) findings
+Merged PR [#1032](https://github.com/raydocs/tono/pull/1032) for exhausted non-strict Core recovery. Auto-merge (MERGE) enabled; needs-hardware applied. ci-gate and all relevant Windows jobs passed on head 8c897190. Merge commit fe0f1b77 (two parents).
 
-Generated 2026-09-30 22:24 MT from the run's findings.tsv / prs.tsv.
+Paths are within apps/windows/service/src/core.
 
-## PRs
-
-| PR | Branch | Labels | Auto-merge requested | Title |
-|---|---|---|---|---|
-| PR#1032 | hunt/sol-r3wfp-core-exhaustion | needs-hardware | yes | fix(windows): release protection after Core recovery exhausts |
-
-## Hypotheses
-
-| ID | Area | Sev | Location | Description | Verdict |
+| ID | area | severity | file:line | one-line description | verdict |
 |---|---|---|---|---|---|
 | R3-WFP-N01 | W2 | — | wfp/mod.rs:148 | Static WFP session leaves filters after Service exit | false-positive deliberate session survival with startup/watchdog reconciliation |
 | R3-WFP-N02 | W2 | — | wfp/mod.rs:437 | Reboot keeps block but loses infrastructure permits | duplicate #753 persistent floor and namespace v12 |
@@ -47,3 +39,7 @@ Generated 2026-09-30 22:24 MT from the run's findings.tsv / prs.tsv.
 | R3-NET-N06 | W3 | — | netmon.rs:242 | Failed Notify registration permanently removes recovery | false-positive event feed degrades but independent DNS and periodic data-plane monitoring remain |
 | R3-NET-N07 | W3 | — | netmon/topology.rs:54 | Source-address-only change silently loses required reconnect | false-positive native host-route behavior and need for rebuild unproved; core may redial |
 | WIN-CORE-EXHAUSTION-HEALTHY-BLOCK | W3 | P2 | manager.rs:923 | Exhausted Core retries leave healthy Blocked WFP with no Core while App is unavailable | real-fixed #1032 (merged fe0f1b77); regression failed before/passed after; strict and successor-arm guards preserved |
+
+Local verification: baseline exhaustion regression failed, fixed targeted 3 passed; WFP suite 104 passed, manager suite 9 passed. Both independent reviews found no blocker. Native Windows execution remains unrun. Proof logs and source fixture remain in this output directory.
+
+False positives: 28; total hypotheses: 35. Assigned-file read-through and cross-call audit completed. Unfinished: native Windows WFP/arbitration, DHCPv6 lease, adapter/sleep and installed Service acceptance; DHCPv6 identity-scoped design. Legacy ownerless intent handling is outside the fix. No deployments or publications.

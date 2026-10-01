@@ -1,12 +1,13 @@
 # R3-A5A6: Codex (GPT-6.1 Sol) findings
 
-Generated 2026-09-30 22:10 MT from the run's findings.tsv / prs.tsv.
+Generated 2026-09-30 22:24 MT from the run's findings.tsv / prs.tsv.
 
 ## PRs
 
 | PR | Branch | Labels | Auto-merge requested | Title |
 |---|---|---|---|---|
 | 1036 | hunt/sol-r3acct-catalog-ai-hold | needs-hardware | yes | fix(windows): retain AI hold after catalog exit removal |
+| 1038 | hunt/sol-r3acct-idle-quit-budget | needs-hardware | yes | fix(windows): bound optional Service shutdown during Quit |
 
 ## Hypotheses
 
@@ -24,7 +25,7 @@ Generated 2026-09-30 22:10 MT from the run's findings.tsv / prs.tsv.
 | WIN-REPLACEMENT-HEAL-STATE | A5 | P2 | commands/account.rs:354 | Replacement sign-in retains previous account healer dial state | real-unfixed lower priority; native reproduction pending |
 | WIN-GRANT-FLUSH-QUEUE | A5 | P2 | offline_grant.rs:512 | Cancelled grant flushes fill the vault queue behind prolonged hung vault | real-unfixed lower priority; native reproduction pending |
 | R3-A5-CONNECTING-ROUTING | A5 | P2 | catalog_sync.rs:346 | Residential catalog rotation during Connecting leaves stale runtime | duplicate known #787 limitation |
-| WIN-IDLE-QUIT-IPC-DELAY | A6 | P1 | feat/window.rs:538 | Optional idle-Service shutdown can silently delay Quit up to 127 seconds | real-unfixed verified; fix in progress |
+| WIN-IDLE-QUIT-IPC-DELAY | A6 | P1 | feat/window.rs:538 | Optional idle-Service shutdown can silently delay Quit up to 127 seconds | real-fixed #1038 |
 | WIN-STARTUP-AUTH-SUPERSESSION | A6 | P2 | commands/restore.rs:128 | Boot preflight can supersede a newer interactive sign-in | real-unfixed verified state race; fix candidate |
 | R3-A6-QUIT-RESTORE | A6 | — | commands/restore.rs:210 | Late startup restore rearms after Quit | false-positive connection epoch and current runtime proof gate reconnect |
 | R3-A6-COMMITTED-HANG | A6 | — | lib.rs:657 | Committed exit hangs indefinitely | false-positive ten-second outer cleanup budget |

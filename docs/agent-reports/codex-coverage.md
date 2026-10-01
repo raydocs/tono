@@ -20,3 +20,6 @@
 | R3-M12 | M12 protected connectivity, probes, websocket, sidecar | Sol (Codex acct 2) | finished 22:00 MT | unfinished: none | PRs: #1027 |
 | R3-W4W7 | W4 service lifecycle, W7 update | Sol (Codex acct 2) | finished 22:10 MT | unfinished: none | PRs: #1005 #1007 #1014 #1017 #1025 |
 | R3-MacQuitHold | MAC-QUIT-AI-HOLD focused check | Sol (Codex acct 2) | finished 22:10 MT | unfinished: decision item (docs PR #1031) | PRs: #1031 |
+| R3-E2T2 | E2 home-agent/provisioning/remote, T2 sing-box/mihomo tooling | Sol (Codex acct 2) | finished 22:24 MT | unfinished: real-device HY2/VPS acceptance; peer-history retention design | PRs: #995 #996 #997 #998 #1000 #1002 #1011 #1018 #1035 |
+| R3-W2W3 | W2 WFP engine/model/security, W3 manager/netmon | Sol (Codex acct 2) | finished 22:24 MT | unfinished: DHCPv6 identity decision item | PRs: #PR#1032 |
+| R3-W1lo | W1 windows_kill_switch.rs lines 1-3278 | Sol (Codex acct 2) | finished 22:24 MT | unfinished: none | PRs: #1021 #1024 #1029 |
