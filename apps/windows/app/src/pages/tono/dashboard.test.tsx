@@ -617,6 +617,25 @@ describe('dashboard claude residential route badge', () => {
     expect(screen.queryByText('First connect')).toBeNull()
   })
 
+  it('says protected in one line when connected instead of explaining every route', async () => {
+    mocks.status = makeStatus({
+      uiState: 'connected',
+      selectedServer: 'Tokyo · Sakura',
+      directOverlay: 'on',
+    })
+    renderDashboard()
+    expect(
+      (
+        await screen.findAllByText(
+          'Traffic is protected. A drop will not leak your IP.',
+        )
+      ).length,
+    ).toBeGreaterThan(0)
+    expect(
+      screen.queryByText(/WeChat and other China apps go direct/),
+    ).toBeNull()
+  })
+
   it('offers explicit confirmed Disconnect for an incomplete update even while idle, without calling it cancellation', async () => {
     mocks.status = makeStatus({ updateIncomplete: true })
     renderDashboard()
