@@ -365,7 +365,11 @@ nonisolated enum HelperProtocolVersion {
     /// - 4.52.30 → 4.52.31: selective cleanup removes a pre-receipt sinkhole
     ///   resolver (exact Tono body, no receipt) and apply never records one
     ///   as the user's original, so a leftover cannot fail the DNS audit.
-    static let current = "4.52.31"
+    /// - 4.52.31 → 4.52.32: removal and `--emergency-reset` keep the helper
+    ///   (PF still released) when owned DNS was not restored, so its DNS
+    ///   recovery retries. An explicit selective-layer removal is recorded as
+    ///   pending until it finishes and a restarted helper finishes it.
+    static let current = "4.52.32"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS

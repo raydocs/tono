@@ -1,0 +1,3 @@
+| ID | 问题（一句） | 状态 | Issue / PR | 等级 | 剩余限制 |
+|---|---|---|---|---|---|
+| R4FMA-REMOVAL-DNS-RETRY | macOS helper removal and `--emergency-reset` delete the daemon after a failed owned DNS restore, removing the only retry | in-PR | [#1165](https://github.com/raydocs/tono/issues/1165) | 中·推导 | P2: removal/reset plus a transient DNS write failure. PF is still released; the installation stays while DNS is unrestored and the idle removal check plus stopped-Core DNS recovery retry it. A persistent restore failure keeps the helper installed (PF open). Native removal/reset with injected SCPreferences contention not run. |
