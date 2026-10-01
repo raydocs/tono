@@ -104,6 +104,39 @@ pub(super) fn unknown_protection_message(reason: &str) -> String {
     )
 }
 
+/// Reserve auth before Service I/O. Startup owns only the initial generation; an
+/// interactive request during pin hydration or adoption supersedes that restore.
+async fn reserve_restore_with_adoption<F>(
+    state: &Arc<TonoState>, expected_generation: Option<u64>, adoption: F,
+) -> (Option<(u64, u64)>, F::Output)
+where
+    F: std::future::Future,
+{
+    let transaction = {
+        let mut inner = state.lock().await;
+        if inner.account_close.is_some()
+            || expected_generation.is_some_and(|expected| inner.sign_in_generation != expected)
+        {
+            None
+        } else {
+            inner.sign_in_generation = inner.sign_in_generation.wrapping_add(1);
+            Some((inner.sign_in_generation, inner.connect_generation))
+        }
+    };
+    // Update adoption is independent of account ownership and must still run if
+    // interactive auth already superseded the initial startup transaction.
+    let update_recovery = adoption.await;
+    let transaction = match transaction {
+        Some((generation, connect_epoch)) => {
+            let inner = state.lock().await;
+            (inner.sign_in_generation == generation && inner.account_close.is_none())
+                .then_some((generation, connect_epoch))
+        }
+        None => None,
+    };
+    (transaction, update_recovery)
+}
+
 /// Startup session restore (§2): load the persisted selection (L4), seed
 /// the catalog from the verified cache, then refresh + `me()`. A 401 suspends
 /// the account and other errors enter the error state; neither releases the
@@ -113,19 +146,24 @@ pub(super) fn unknown_protection_message(reason: &str) -> String {
 /// process obtains a new Service session/controller; weaker evidence continues to wait for the
 /// user and is never promoted directly to Connected.
 pub async fn restore_session(app: AppHandle, state: Arc<TonoState>) {
-    let update_recovery = super::update::adopt().await;
+    restore_session_for_generation(app, state, None).await;
+}
+
+async fn restore_session_for_generation(
+    app: AppHandle, state: Arc<TonoState>, expected_generation: Option<u64>,
+) {
+    let (transaction, update_recovery) =
+        reserve_restore_with_adoption(&state, expected_generation, super::update::adopt()).await;
     if let Err(error) = &update_recovery {
         logging!(warn, Type::Service, "Protected update adoption not established: {error:#}");
     }
+    let Some((generation, connect_epoch)) = transaction else { return; };
     let restore_deadline = tokio::time::Instant::now() + RESTORE_TRANSACTION_TIMEOUT;
-    let (generation, connect_epoch) = {
+    {
         let mut inner = state.lock().await;
-        if inner.account_close.is_some() {
+        if inner.account_close.is_some() || inner.sign_in_generation != generation {
             return;
         }
-        // Restore is an authentication transaction too. A retry supersedes an older restore,
-        // while sign-in/sign-out already bump the same generation.
-        inner.sign_in_generation = inner.sign_in_generation.wrapping_add(1);
         if let Some(selected) = crate::tono::state::load_selection(&inner.catalog_dir) {
             inner.selected_node = Some(selected);
         }
@@ -133,8 +171,7 @@ pub async fn restore_session(app: AppHandle, state: Arc<TonoState>) {
         crate::tono::policy_sync::seed_from_cache(&mut inner);
         connection::remove_legacy_runtime_copy(&inner.catalog_dir);
         emit_status(&app, &status_of(&inner));
-        (inner.sign_in_generation, inner.connect_generation)
-    };
+    }
 
     // Three-valued on purpose: armed / proven absent / unknown. This used to be an
     // `Option<KillSwitchStatus>` where every failure mode became `None`, and `None` reads as
@@ -835,6 +872,36 @@ mod offline_admission_tests {
         (inner.account_state.clone(), status_of(&inner).offline_verified_at_ms)
     }
 
+    #[tokio::test]
+    async fn delayed_startup_restore_cannot_supersede_interactive_sign_in() {
+        let state = Arc::new(TonoState::for_test());
+        let (entered, waiting) = tokio::sync::oneshot::channel();
+        let (resume, resumed) = tokio::sync::oneshot::channel();
+        let restoring = Arc::clone(&state);
+        let startup = tokio::spawn(async move {
+            reserve_restore_with_adoption(&restoring, Some(0), async move {
+                entered.send(()).unwrap();
+                resumed.await.unwrap();
+            }).await
+        });
+        waiting.await.unwrap();
+        let (_, _, user_generation) = super::super::account::begin_sign_in(&state).await.unwrap();
+        state.lock().await.challenge_id = Some("interactive-challenge".into());
+        resume.send(()).unwrap();
+        assert!(startup.await.unwrap().0.is_none(), "the newer interactive request owns auth");
+        let inner = state.lock().await;
+        assert_eq!(inner.sign_in_generation, user_generation);
+        assert_eq!(inner.challenge_id.as_deref(), Some("interactive-challenge"));
+        drop(inner);
+
+        // An interactive request can also start during the guarded startup pin preflight,
+        // before restore reaches adoption. That old startup must still adopt recovery,
+        // but must not claim the already-used initial generation.
+        let (transaction, adopted) = reserve_restore_with_adoption(&state, Some(0), async { true }).await;
+        assert!(adopted && transaction.is_none());
+        assert_eq!(state.lock().await.sign_in_generation, user_generation);
+    }
+
     /// #582 T3: with the control plane unreachable, restore is Ready (offline) only on a positive
     /// grant bound to the session token in memory and to the catalog seeded into memory.
     #[tokio::test]
@@ -953,7 +1020,7 @@ pub async fn restore_session_guarded(app: AppHandle, state: Arc<TonoState>) {
     crate::tono::bootstrap::hydrate_learned_pins_from_service().await;
     let client = { Arc::clone(&state.lock().await.client) };
     let _ = client.transport().refresh_control_plane_pins().await;
-    let outcome = std::panic::AssertUnwindSafe(restore_session(app.clone(), state.clone()))
+    let outcome = std::panic::AssertUnwindSafe(restore_session_for_generation(app.clone(), state.clone(), Some(0)))
         .catch_unwind()
         .await;
     if let Err(payload) = outcome {
