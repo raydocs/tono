@@ -1344,6 +1344,31 @@ async fn may_keep_session_in_place(state: &Arc<TonoState>, tunnel_proven: bool) 
     keep
 }
 
+/// Serialize failure admission with selection/switch completion before transferring lifecycle
+/// ownership to release. A hot switch deliberately keeps the connection generation.
+async fn admit_health_release(
+    state: &Arc<TonoState>,
+    generation: u64,
+    selected_node: Option<&str>,
+) -> Result<(
+    tokio::sync::OwnedRwLockReadGuard<()>,
+    tokio::sync::OwnedRwLockWriteGuard<()>,
+), NetworkChangeOutcome> {
+    let selection = state.begin_policy_activation().await;
+    let lifecycle = state.begin_privileged_release().await;
+    let mut inner = state.lock().await;
+    if inner.connect_generation != generation || !inner.fsm.status().is_connected {
+        return Err(NetworkChangeOutcome::Handled);
+    }
+    if inner.selected_node.as_deref() != selected_node {
+        // The runtime and its monitor still belong to this generation. Discard the old exit's
+        // failure and let the next monitor tick observe the replacement instead of exiting.
+        return Err(NetworkChangeOutcome::RecoveredInPlace);
+    }
+    inner.tasks.abort_reconnect();
+    Ok((selection, lifecycle))
+}
+
 pub(super) async fn handle_network_change_inner(
     state: &Arc<TonoState>,
     app: &AppHandle,
@@ -1360,7 +1385,7 @@ pub(super) async fn handle_network_change_inner(
     // walk into `attempt` and silently re-arm WFP and restart the core with no user action.
     // The netmon caller was protected only by accident, by `abort_network_monitor()` landing at
     // its next await; now both are protected on purpose.
-    let generation = {
+    let (generation, selected_node) = {
         let mut inner = state.lock().await;
         // `is_disconnecting` is redundant now that `begin_disconnect` clears
         // `is_connected`, and it is written out anyway: this guard is the one
@@ -1371,7 +1396,7 @@ pub(super) async fn handle_network_change_inner(
         if !status.is_connected || status.is_disconnecting {
             return NetworkChangeOutcome::Handled;
         }
-        inner.connect_generation
+        (inner.connect_generation, inner.selected_node.clone())
     };
     // Prefer an in-place proof while the core is still the same process.
     // Sleep/Wi-Fi flaps used to stop the core unconditionally, then burn the
@@ -1394,20 +1419,25 @@ pub(super) async fn handle_network_change_inner(
     // explicit strict kill switch keep the protected reconnect below.
     let policy_rebuild = POLICY_REBUILD.try_with(|_| ()).is_ok();
     let strict = tono_core::strict_kill_switch_explicit(None);
-    let health_release = release_after_health_failure(strict, policy_rebuild, |apply_narrow| async move {
-        {
-            let mut inner = state.lock().await;
-            inner.tasks.abort_reconnect();
+    let health_guard = if tono_core::unarmed_probe::health_monitor_releases(strict, policy_rebuild) {
+        match admit_health_release(state, generation, selected_node.as_deref()).await {
+            Ok(guards) => Some(guards),
+            Err(outcome) => return outcome,
         }
+    } else {
+        None
+    };
+    let health_release = release_after_health_failure(strict, policy_rebuild, |apply_narrow| async move {
+        let (_selection, lifecycle) = health_guard.expect("ordinary health release owns admission");
         logging!(
             warn,
             Type::Service,
             "Tono: health failure is restoring the original network with the secondary AI hold"
         );
         if apply_narrow {
-            super::disconnect::release_explicit_applying_narrow(state, app).await
+            super::disconnect::release_explicit_applying_narrow_with_guard(state, app, Some(lifecycle)).await
         } else {
-            super::disconnect::release_explicit(state, app).await
+            super::disconnect::release_explicit_with_guard(state, app, Some(lifecycle)).await
         }
     }).await;
     if let Some(result) = health_release {
@@ -1521,6 +1551,48 @@ mod tests {
     use super::{PolicyChangeDisposition, apply_policy_change_disposition};
     use crate::tono::state::TonoState;
     use std::sync::Arc;
+    use futures::FutureExt;
+
+    #[tokio::test]
+    async fn old_exit_health_failure_cannot_release_a_same_generation_hot_switch() {
+        let state = Arc::new(TonoState::for_test());
+        let (generation, selected) = {
+            let mut inner = state.lock().await;
+            inner.selected_node = Some("A".to_owned());
+            inner.fsm.begin_connect();
+            inner.fsm.mark_kill_switch_armed();
+            inner.fsm.mark_session_verified();
+            inner.fsm.connect_succeeded().unwrap();
+            (inner.connect_generation, inner.selected_node.clone())
+        };
+        let (finish_proof, proof_finished) = tokio::sync::oneshot::channel();
+        let proof_state = Arc::clone(&state);
+        let old_proof = tokio::spawn(async move {
+            proof_finished.await.unwrap();
+            match super::admit_health_release(&proof_state, generation, selected.as_deref()).await {
+                Ok(_) => panic!("an old A proof must not dispatch release against B"),
+                Err(outcome) => outcome,
+            }
+        });
+        {
+            // Selection publication and hot-switch completion own these locks in this order.
+            let _selection = state.begin_policy_update().await;
+            let _switch = state.begin_privileged_release().await;
+            let mut inner = state.lock().await;
+            inner.selected_node = Some("B".to_owned());
+            assert_eq!(inner.connect_generation, generation);
+        }
+        finish_proof.send(()).unwrap();
+        assert_eq!(old_proof.await.unwrap(), super::NetworkChangeOutcome::RecoveredInPlace,
+            "the same-generation monitor must continue watching the replacement");
+        assert_eq!(state.lock().await.selected_node.as_deref(), Some("B"));
+        assert!(state.lock().await.fsm.status().is_connected);
+        let (_selection, lifecycle) = super::admit_health_release(&state, generation, Some("B"))
+            .await.expect("a current B failure must still admit automatic AI-held release");
+        assert!(state.begin_connect_mutation().now_or_never().is_none(),
+            "the admitted release must exclude replacement startup");
+        drop(lifecycle);
+    }
 
     #[tokio::test]
     async fn automatic_health_release_keeps_ai_blocked_and_preserves_protected_recovery() {
