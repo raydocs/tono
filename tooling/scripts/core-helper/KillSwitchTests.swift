@@ -103,7 +103,11 @@ extension KillSwitchManager {
 
         // 1. Armed with the reviewed-bundle permit: it must be installed, and
         //    the catch-all must still be the last word.
-        let armedRules = renderRules(state: state(reviewedBundleDirect: true), allowedUID: 501)
+        let physicalInterfaces = physicalEgressInterfaces()
+        let armedRules = renderRules(
+            state: state(reviewedBundleDirect: true), allowedUID: 501,
+            physicalInterfaces: physicalInterfaces
+        )
         guard let armed = load(armedRules) else {
             FileHandle.standardError.write(Data("lifecycle: armed ruleset failed to load\n".utf8))
             return false
@@ -112,6 +116,7 @@ extension KillSwitchManager {
             FileHandle.standardError.write(Data("--- kernel holds ---\n\(armed)\n".utf8))
         }
         check("armed-permit-installed", permitCount(armed) == expectedPermitRules)
+        check("kernel-lan-dns-interfaces", lanDNSInterfaces(in: armed) == physicalInterfaces)
         check("armed-fails-closed", armed.contains("block drop out quick all"))
         // Order is only observable in what the kernel holds. A permit placed
         // after the catch-all parses, prints, and satisfies every substring
