@@ -31,24 +31,34 @@ extension AppState {
         }
     }
 
-    private func suspendForNativeUpdate() async {
+    func suspendForNativeUpdate() async {
         connectionCoordinator.bumpGeneration()
         let tasks = [connectionCoordinator.coreMonitorTask, connectionCoordinator.nodeSwitchTask,
                      connectionCoordinator.protectedReconnectTask, connectionCoordinator.connectTask,
                      connectionCoordinator.configReloadTask, connectionCoordinator.networkEnvironmentTask]
             .compactMap { $0 }
         for task in tasks { task.cancel() }
+        // A cancelled reload may return without clearing its serialization
+        // handle. Retire its completion and queued work before draining it;
+        // neither may start another mutation during the helper handoff.
+        connectionCoordinator.configReloadRequestID &+= 1
+        let reloadRetirementID = connectionCoordinator.configReloadRequestID
+        pendingFullConfigReload = false
+        pendingDirectPolicyReload = nil
+        isConnected = false
+        isConnecting = false
         isProtectedReconnectScheduled = false
         autoConnectRequested = false
         stopProxyGuard()
         stopLatencyTestTimer()
         for task in tasks { await task.value }
+        if connectionCoordinator.configReloadRequestID == reloadRetirementID {
+            connectionCoordinator.configReloadTask = nil
+        }
         webSocket?.stopAll()
         webSocket = nil
         coreController = nil
         proxyService.setAPI(nil)
-        isConnected = false
-        isConnecting = false
         // Root performs Core/TUN/DNS cleanup; no App-owned disconnect or
         // journal is treated as its proof.
     }

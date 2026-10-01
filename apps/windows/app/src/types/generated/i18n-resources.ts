@@ -929,7 +929,10 @@ export interface TranslationResources {
         deviceLimit: string
         devices: string
         email: string
+        expires: string
+        noExpiry: string
         otherDevices: string
+        plan: string
         revoke: string
         revokeConfirmMessage: string
         revokeConfirmTitle: string
@@ -939,6 +942,8 @@ export interface TranslationResources {
         subtitle: string
         thisComputer: string
         title: string
+        usage: string
+        usageOf: string
       }
       activity: {
         appCount: string
@@ -1020,6 +1025,13 @@ export interface TranslationResources {
         tokyo: string
       }
       dashboard: {
+        aiTraffic: {
+          empty: string
+          note: string
+          subtitle: string
+          title: string
+          week: string
+        }
         catalogRequiresChoice: string
         checklist: {
           admin: string

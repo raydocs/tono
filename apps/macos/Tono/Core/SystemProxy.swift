@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 import SystemConfiguration
 
 // MARK: - System Proxy Error
@@ -393,6 +394,27 @@ nonisolated struct SystemProxy {
 
     // MARK: - Helpers
 
+    /// Wait for `process` to exit, giving up after `timeout` seconds: the
+    /// process is terminated (SIGKILLed if it ignores that) and true is
+    /// returned so the caller takes its failure path. HelperManager bounds
+    /// its administrator prompt the same way — the credential dialog can sit
+    /// unanswered indefinitely, and every privileged coordinator call
+    /// serializes behind this wait.
+    static func waitForExit(_ process: Process, timeout: TimeInterval) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while process.isRunning, Date() < deadline {
+            usleep(200_000)
+        }
+        let timedOut = process.isRunning
+        if timedOut {
+            process.terminate()
+            usleep(300_000)
+            if process.isRunning { kill(process.processIdentifier, SIGKILL) }
+        }
+        process.waitUntilExit()
+        return timedOut
+    }
+
     /// Run networksetup and throw on failure
     private static func runNetworkSetup(_ arguments: [String]) throws {
         let process = Process()
@@ -402,7 +424,13 @@ nonisolated struct SystemProxy {
         process.standardOutput = FileHandle.nullDevice
         process.standardError = errPipe
         try process.run()
-        process.waitUntilExit()
+        // A wedged unprivileged networksetup would hold the coordinator
+        // actor just like the administrator prompt below; a short bound
+        // turns it into an ordinary failed command (callers then fall back
+        // to the privileged path, which is itself bounded).
+        if waitForExit(process, timeout: 15) {
+            throw SystemProxyError.commandFailed("networksetup did not exit within 15 s")
+        }
 
         if process.terminationStatus != 0 {
             let errData = errPipe.fileHandleForReading.readDataToEndOfFile()
@@ -428,7 +456,13 @@ nonisolated struct SystemProxy {
         process.standardOutput = FileHandle.nullDevice
         process.standardError = errPipe
         try process.run()
-        process.waitUntilExit()
+        // The credential dialog can sit unanswered indefinitely, and every
+        // privileged coordinator call serializes behind this wait — an
+        // abandoned prompt would wedge disconnect and the quit path with PF
+        // still armed. Bound it so walking away degrades to a denial instead.
+        if waitForExit(process, timeout: 180) {
+            throw SystemProxyError.privilegesDenied
+        }
 
         if process.terminationStatus != 0 {
             let errData = errPipe.fileHandleForReading.readDataToEndOfFile()

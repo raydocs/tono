@@ -1077,21 +1077,26 @@ def reconcile(binary: Path, commands: dict[str, str], address: str, tag: str,
     removed = 0
     failures: list[str] = []
     if retire_shared_legacy and listed is None:
-        result = remove_inbound_user(
-            binary, commands["remove_user"], address, tag, LEGACY_CLIENT_EMAIL,
-        )
-        if not removal_succeeded(result, LEGACY_CLIENT_EMAIL, commands["remove_user"]):
-            # Like every other removal: reported with the rest, never a reason
-            # to skip the revocations that follow.
-            failures.append(f"removing {LEGACY_CLIENT_EMAIL} failed: {api_error(result)}")
-        elif result.returncode == 0 and (
-            commands["remove_user"] != "rmu"
-            or _total_at_least_one(_output_lines(result), "Removed")
-        ):
-            # Counted like the removals below; an already-absent client is not.
-            removed += 1
-        if recorded is not None:
-            recorded = recorded - {LEGACY_CLIENT_EMAIL}
+        try:
+            result = remove_inbound_user(
+                binary, commands["remove_user"], address, tag, LEGACY_CLIENT_EMAIL,
+            )
+        except (OSError, subprocess.TimeoutExpired) as error:
+            failures.append(f"removing {LEGACY_CLIENT_EMAIL} failed: {type(error).__name__}")
+        else:
+            if not removal_succeeded(result, LEGACY_CLIENT_EMAIL, commands["remove_user"]):
+                # Like every other removal: reported with the rest, never a reason
+                # to skip the revocations that follow.
+                failures.append(f"removing {LEGACY_CLIENT_EMAIL} failed: {api_error(result)}")
+            else:
+                if result.returncode == 0 and (
+                    commands["remove_user"] != "rmu"
+                    or _total_at_least_one(_output_lines(result), "Removed")
+                ):
+                    # An already-absent client is not counted as a removal.
+                    removed += 1
+                if recorded is not None:
+                    recorded = recorded - {LEGACY_CLIENT_EMAIL}
     wanted = {
         client_label(entry["userId"], entry.get("deviceId"), entry["clientUUID"]): entry["clientUUID"]
         for entry in roster
@@ -1124,7 +1129,11 @@ def reconcile(binary: Path, commands: dict[str, str], address: str, tag: str,
                     continue
             elif not label.startswith(CLIENT_LABEL_PREFIX):
                 continue
-            result = remove_inbound_user(binary, commands["remove_user"], address, tag, label)
+            try:
+                result = remove_inbound_user(binary, commands["remove_user"], address, tag, label)
+            except (OSError, subprocess.TimeoutExpired) as error:
+                failures.append(f"removing {label} failed: {type(error).__name__}")
+                continue
             if not removal_succeeded(result, label, commands["remove_user"]):
                 # One failure must not leave every later revocation in place.
                 failures.append(f"removing {label} failed: {api_error(result)}")
@@ -1141,9 +1150,17 @@ def reconcile(binary: Path, commands: dict[str, str], address: str, tag: str,
     for label, client_uuid in sorted(wanted.items()):
         if listed is not None and label in listed:
             continue
-        result = add_inbound_user(
-            binary, commands["add_user"], address, tag, label, client_uuid,
-        )
+        try:
+            result = add_inbound_user(
+                binary, commands["add_user"], address, tag, label, client_uuid,
+            )
+        except (OSError, subprocess.TimeoutExpired) as error:
+            # A timed-out RPC may already have installed the roster-issued label.
+            # Remember it for later removal without claiming this round converged.
+            if known_installed is not None:
+                known_installed.add(label)
+            failures.append(f"adding {label} failed: {type(error).__name__}")
+            continue
         # Already-present is success, not failure: two agents on one timer, or a
         # retry after a lost response, must not turn into an error loop. It is
         # not an addition either, or every round would report the whole roster.
@@ -1413,9 +1430,13 @@ def reconcile_and_read_stable(
             )
         try:
             counters = read_counters(binary, commands["stats_query"], address)
-        except Refusal as error:
-            attach_installed(error, installed)
-            raise
+        except (Refusal, OSError, subprocess.TimeoutExpired) as error:
+            if isinstance(error, Refusal):
+                attach_installed(error, installed)
+                raise
+            raise attach_installed(
+                Refusal(f"reading counters failed: {type(error).__name__}"), installed,
+            ) from error
         marker_after = xray_start_marker(binary)
         if marker_before and marker_after and marker_before != marker_after:
             if attempt == 0:
@@ -1480,7 +1501,7 @@ def persist_shared_legacy_retirement(binary: Path, config: Path) -> bool:
             os.fsync(directory_fd)
         finally:
             os.close(directory_fd)
-    except OSError as error:
+    except (OSError, subprocess.TimeoutExpired) as error:
         raise Refusal(f"cannot persist {LEGACY_CLIENT_EMAIL} retirement to {config}: {error}") from error
     finally:
         if temporary is not None:

@@ -1,13 +1,13 @@
 import Foundation
 
-/// Sticky self-heal that never touches PF, DNS, or the tunnel.
+/// Sticky dial choice. It does not touch PF, DNS, or the tunnel.
 ///
-/// `DialBeforeArm` is applied only while protection is down. `FailOpen` means
-/// one restore of the original network and no further tunnel. `HoldClosed` is
-/// only for an explicit strict kill switch, and it keeps the same node.
-/// This type is not called from the live connect path yet: wiring it into
-/// `AppState` has to be proven on a device so a wrong PF release cannot
-/// brick the Mac. The Windows connect path applies the same decisions.
+/// `DialBeforeArm` is applied only while protection is down. Armed ordinary
+/// failure is `FailOpen`: remember the next dial, do not rotate under PF.
+/// `HoldClosed` is only for an explicit strict kill switch.
+/// `SelectiveAiHold` mirrors the shared disposition and stays unselected
+/// here until the hook is registered. The live release bit is
+/// `ExhaustedFailureNetwork`.
 enum ExitHeal {
     static let hysteresisMs: UInt64 = 45_000
     static let tcpFailFastMs: UInt64 = 2_500
@@ -58,14 +58,13 @@ enum ExitHeal {
         case dialBeforeArm(name: String, change: Change, dialerChanged: Bool)
         case failOpen(remember: String?, dialerChanged: Bool)
         /// General traffic released; AI destinations stay blocked.
-        /// #706 owns the decision. Callers must not full-release.
+        /// Callers must not full-release.
         case selectiveAiHold(remember: String?)
         case holdClosed
     }
 
     /// Mirror of `network_disposition::exhausted_protection_using`.
-    /// #706 owns that function. This copy is not wired to `AppState`.
-    /// `selectiveReady` stays false on the live path until the PF hook lands.
+    /// `selectiveReady` stays false inside `observe` until the PF hook lands.
     static func exhaustedEffect(
         strict: Bool,
         selectiveReady: Bool,
@@ -164,8 +163,8 @@ enum ExitHeal {
         if session.protectionArmed {
             session.pendingDial = next?.candidate.name
             let changed = next.map { baseName($0.candidate.name) != baseName(session.preferred) } ?? false
-            // The Rust hook is not visible here. Ordinary stays a full release
-            // until AppState is wired to the shared decision.
+            // The PF hook is not registered on this path. Ordinary stays a
+            // full release; strict stays closed.
             return exhaustedEffect(
                 strict: stance == .strict,
                 selectiveReady: false,

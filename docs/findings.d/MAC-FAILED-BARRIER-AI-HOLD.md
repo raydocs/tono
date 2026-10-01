@@ -1,0 +1,5 @@
+| ID | 问题（一句） | 状态 | Issue / PR | 等级 | 剩余限制 |
+|---|---|---|---|---|---|
+| MAC-FAILED-BARRIER-AI-HOLD | A failed macOS sleep-barrier or arm commit releases PF and deletes its intent without restoring the secondary AI hold | in-PR | hunt/sol-r3helper-failed-barrier-ai-hold | 中·已确认（P1，源码路径） | Regression self-tests authored before the fix; Swift/PF unavailable locally, so execution awaits macOS CI and hardware. Secondary installation remains best-effort. A later App release using explicit disarm semantics is outside this helper-only correction. |
+
+SHIP_PLAN §2 item 10. At baseline `87a0754c`, `KillSwitchManager.secureForPowerTransition` calls `releaseInstalledBlock` after an accepted/unknown PF load fails. The release clears saved intent, but neither that function nor the no-intent watchdog branch applies the AI layer. Ordinary sleep teardown stops the Core; subsequent watchdog DNS recovery opens general name resolution without the secondary hold. Successful automatic release now applies the existing narrow layer after release, while rejected/unissued loads and strict recovery predicates remain unchanged.

@@ -11,23 +11,37 @@
   --today-radius-sm: 14px;
 }
 
-/* ---------------------------------------------------------- hero card */
+/* ---------------------------------------------------------- hero band */
 
+/* The hero is a band, not one card: the verdict card on the left, the four
+ * numbers as tiles on the right, and the connection-quality dashboard under
+ * both across the full width. */
 .today-hero {
   display: grid;
-  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
-  gap: 28px;
-  align-items: center;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+  gap: 16px;
+  align-items: stretch;
+}
+
+.today-hero > :first-child {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
   background: var(--surface);
   border: 1px solid var(--hairline);
   border-radius: var(--today-radius);
   box-shadow: var(--shadow-card-lg);
-  padding: 28px 30px;
+  padding: 26px 28px;
 }
 
-.dark .today-hero {
+.dark .today-hero > :first-child {
   border-color: rgb(255 255 255 / 0.07);
   box-shadow: var(--shadow-card-lg), inset 0 1px 0 rgb(255 255 255 / 0.06);
+}
+
+.today-hero > .quality-band {
+  grid-column: 1 / -1;
+  margin-top: 16px;
 }
 
 .today-hero-eyebrow {
@@ -51,58 +65,16 @@
 .today-kpis {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  background: var(--background);
-  border: 1px solid var(--hairline);
-  border-radius: var(--today-radius-sm);
-  overflow: hidden;
+  gap: 12px;
 }
 
-.today-kpi {
-  min-width: 0;
-  padding: 16px 18px 14px;
+.today-kpis .stat-tile {
+  justify-content: center;
+  padding: 16px 18px;
 }
 
-.today-kpi:nth-child(odd) {
-  border-right: 1px solid var(--hairline);
-}
-
-.today-kpi:nth-child(n + 3) {
-  border-top: 1px solid var(--hairline);
-}
-
-/* In the dark theme the KPI block must read as part of the hero card, not as
- * a recess cut into it: a faint lift instead of a sunken well. */
-.dark .today-kpis {
-  background: rgb(255 255 255 / 0.03);
-  border-color: rgb(255 255 255 / 0.07);
-}
-
-.today-kpi-label {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-}
-
-.today-kpi-dot {
-  flex: none;
-  width: 7px;
-  height: 7px;
-  border-radius: 999px;
-  background: hsl(var(--tone-line));
-}
-
-.today-kpi-value {
-  margin-top: 6px;
-  font-family: var(--font-mono);
-  font-variant-numeric: tabular-nums;
+.today-kpis .stat-value {
   font-size: 30px;
-  font-weight: 550;
-  letter-spacing: -0.02em;
-  line-height: 1.1;
-}
-
-.today-kpi-sub {
-  margin-top: 2px;
 }
 
 .today-main {
@@ -339,21 +311,20 @@
 @media (max-width: 1023px) {
   .today-hero {
     grid-template-columns: minmax(0, 1fr);
-    gap: 18px;
+    gap: 12px;
+  }
+
+  .today-hero > :first-child {
     padding: 20px;
   }
 
-  .today-kpi {
-    padding: 12px 14px 10px;
-  }
-
-  .today-kpi-value {
-    font-size: 22px;
+  .today-kpis .stat-value {
+    font-size: 24px;
   }
 }
 
 @media (max-width: 640px) {
-  .today-hero {
+  .today-hero > :first-child {
     padding: 18px 16px;
     border-radius: 18px;
   }
@@ -375,3 +346,15 @@
     border-radius: 18px;
   }
 }
+
+/* ------------------------------------------------ incident title control */
+
+.today-page .incident-row { cursor: pointer; }
+
+.today-page .incident-title {
+  text-align: left;
+  border-radius: 4px;
+}
+
+.today-page .incident-title:hover { text-decoration: underline; text-underline-offset: 4px; }
+.today-page .incident-title:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 3px; }

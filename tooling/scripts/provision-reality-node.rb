@@ -432,6 +432,9 @@ begin
         deployment["deploymentId"].to_s.match?(/\A[0-9]{8}T[0-9]{6}Z-[a-f0-9]{8}\z/)
       fail!("The VPS returned an invalid hy2 certificate fingerprint.") unless
         deployment["fingerprint"].to_s.match?(/\A(?:[0-9A-F]{2}:){31}[0-9A-F]{2}\z/)
+      # A SHA-256 SPKI pin is canonical base64 of exactly 32 bytes (one pad).
+      fail!("The VPS returned an invalid hy2 certificate public key pin.") unless
+        deployment["certificatePublicKeySha256"].to_s.match?(/\A[A-Za-z0-9+\/]{42}[AEIMQUYcgkosw048]=\z/)
       fail!("The VPS did not confirm tono-xray was left running.") unless deployment["xrayUntouched"] == true
 
       document = {
@@ -443,6 +446,7 @@ begin
           "password" => "{{TONO_CLIENT_UUID}}",
           "sni" => target,
           "fingerprint" => deployment.fetch("fingerprint").delete(":").downcase,
+          "certificate-public-key-sha256" => deployment.fetch("certificatePublicKeySha256"),
           "skip-cert-verify" => false,
         }],
       }

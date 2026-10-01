@@ -539,6 +539,21 @@
     }
 
     #[test]
+    fn space_delimited_originals_restore_as_separate_servers() {
+        // Mobile broadband drivers write this documented NameServer representation.
+        let mut saved = adapter("{A}", Some("10.20.30.41 10.20.30.40"));
+        saved.ipv6_name_server = Some("2001:db8::53 2001:db8::54".to_owned());
+        assert_eq!(
+            restored_live_servers_v4(&saved),
+            Some(vec!["10.20.30.41".to_owned(), "10.20.30.40".to_owned()]),
+        );
+        assert_eq!(
+            restored_live_servers_v6(&saved),
+            Some(vec!["2001:db8::53".to_owned(), "2001:db8::54".to_owned()]),
+        );
+    }
+
+    #[test]
     fn restore_proof_covers_v6_only_adapters() {
         let v6_only = AdapterDnsSnapshot {
             interface_guid: "{V6}".to_owned(),
@@ -1198,6 +1213,7 @@
     /// real facade, and a leaked failure flag or streak would decide the next test's proof.
     async fn reset_dns_state() {
         let _ = tokio::fs::remove_file(snapshot_path()).await;
+        let _ = tokio::fs::remove_file(snapshot_retirement_path()).await;
         LIVE_APPLY_FAILURES
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -1211,6 +1227,7 @@
         test_hooks::set_live_apply_fails(false);
         test_hooks::set_apply_batch_unavailable(false);
         test_hooks::set_encrypted_restore_fails(false);
+        test_hooks::set_snapshot_delete_fails(false);
         test_hooks::take_automatic_resets();
         test_hooks::take_encrypted_restores();
         test_hooks::set_collected_adapters(Vec::new());
@@ -1537,6 +1554,105 @@
             "the live state confirms the restore outright — this is not the degraded exit"
         );
         reset_dns_state().await;
+        Ok(())
+    }
+
+    /// WIN-DNS-SNAPSHOT-DELETE-BLOCKS: with the restore proven and the resolver policy back,
+    /// a snapshot delete that keeps failing (an AV or backup handle on the file) is
+    /// housekeeping — it must not refuse the release. The restore succeeds, the leftover is
+    /// surfaced as a warning-grade note, and the next restore retries the deletion.
+    #[tokio::test]
+    #[serial]
+    async fn a_snapshot_delete_failure_after_a_proven_restore_still_releases() -> Result<()> {
+        reset_dns_state().await;
+        seed_snapshot(vec![adapter("{A}", Some("1.1.1.1"))]).await?;
+        test_hooks::set_snapshot_delete_fails(true);
+
+        let status = restore_protected().await?;
+
+        assert!(
+            status.snapshot_present,
+            "the leftover snapshot stays on disk instead of failing the restore"
+        );
+        let note = status
+            .last_error
+            .expect("the undeletable leftover must be surfaced as a note");
+        assert!(
+            note.contains(DNS_RESTORE_DEGRADED_PREFIX),
+            "the App must read it as a warning, not a failed restore: {note}"
+        );
+        assert!(
+            note.contains("could not be deleted"),
+            "unexpected note: {note}"
+        );
+        // The disarm gate runs a second restore on the same leftover: it must pass too.
+        ensure_restored().await?;
+
+        // The leftover is inert housekeeping, not a life sentence: once the handle is gone
+        // the next restore deletes the file and reports a clean status.
+        test_hooks::set_snapshot_delete_fails(false);
+        let cleaned = restore_protected().await?;
+        assert!(!cleaned.snapshot_present);
+        assert_eq!(cleaned.last_error, None);
+
+        reset_dns_state().await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn a_retained_restored_snapshot_does_not_replace_the_next_sessions_originals() -> Result<()> {
+        reset_dns_state().await;
+        seed_snapshot(vec![adapter("{A}", Some("10.0.0.53"))]).await?;
+        test_hooks::set_snapshot_delete_fails(true);
+        restore_protected().await?;
+        assert!(snapshot_path().exists(), "the simulated AV handle retains the restored file");
+
+        // Normal offline DNS changes belong to the next session; retirement is stored on disk.
+        test_hooks::set_collected_adapters(vec![adapter("{A}", Some("192.168.1.53"))]);
+        test_hooks::set_snapshot_delete_fails(false);
+        enable().await?;
+        let saved = read_snapshot().await?;
+        reset_dns_state().await;
+        assert_eq!(saved.adapters[0].ipv4_name_server.as_deref(), Some("192.168.1.53"),
+            "a restored leftover must not replay the previous network's resolver");
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn a_retained_restored_snapshot_is_not_applied_again_by_a_restore_retry() -> Result<()> {
+        reset_dns_state().await;
+        seed_snapshot(vec![adapter("{A}", None)]).await?;
+        test_hooks::set_snapshot_delete_fails(true);
+        restore_protected().await?;
+        assert_eq!(test_hooks::take_automatic_resets(), 1);
+        test_hooks::set_collected_adapters(vec![adapter("{A}", Some("192.168.1.53"))]);
+        ensure_restored().await?;
+        let repeated = test_hooks::take_automatic_resets();
+        reset_dns_state().await;
+        assert_eq!(repeated, 0, "cleanup retry must not reset the user's newer DNS to DHCP");
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn a_previous_sessions_retirement_record_cannot_bypass_a_new_restore_proof() -> Result<()> {
+        reset_dns_state().await;
+        seed_snapshot(vec![adapter("{A}", Some("10.0.0.53"))]).await?;
+        test_hooks::set_snapshot_delete_fails(true);
+        restore_protected().await?;
+        let previous = tokio::fs::read(snapshot_retirement_path()).await?;
+        test_hooks::set_collected_adapters(vec![adapter("{A}", Some("192.168.1.53"))]);
+        enable().await?;
+        // A delayed old write must not retire the newly captured originals.
+        atomic_write(&snapshot_retirement_path(), &previous).await?;
+        test_hooks::set_live_dns_on_loopback(true);
+        let result = restore_protected().await;
+        let retained = snapshot_path().exists();
+        reset_dns_state().await;
+        assert!(result.is_err(), "a different snapshot must still prove its restore");
+        assert!(retained, "an unproven restore must retain its current originals");
         Ok(())
     }
 
