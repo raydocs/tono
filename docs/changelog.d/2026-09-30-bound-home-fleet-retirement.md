@@ -8,3 +8,5 @@
 - 验证：`npm ci` passed; `npm run typecheck` passed (indexed-access ratchets 521/521 and 97/99); regression failed before the guard and passed afterward; complete `test/ops-jobs.test.ts` passed 15/15; `git diff --check` passed. Linux + cached Node 24.21.0; disposable local Workers/D1 only.
 - 候选/发布：仅源码，无新候选；no deploy/publish or production database operations.
 - 剩余限制：concurrent bind-vs-retire retains the existing pre-write guard model; separate relist-token race #1072 and relisted HY2 SPKI loss #1073 remain open.
+
+2026-09-30 continuation: initial hosted ops-contract check rejected `fleet.ts` at 507 lines (existing 500-line cap). Moved only the newly added bound-home lookup/assertion into the existing retirement-dependency module; fleet retains one call at its preview boundary. No gate or limit changed. Local budget/purity checks, typecheck and all 15 ops-job tests passed afterward.

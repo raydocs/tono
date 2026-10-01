@@ -22,7 +22,6 @@ import {
   requiredCatalogKey,
 } from '../../env';
 import { publicNodeProfile } from '../../product-account';
-import { assertHomeExitUnbound } from '../../home';
 import { rejectUnexpectedKeys } from '../../request';
 import {
   fleetQualityStatus,
@@ -33,7 +32,7 @@ import {
   operationsActivity,
   operationsNodeSelections,
 } from './activity';
-import { retireDependencies, revokeExitToken } from '../retire-dependencies';
+import { assertCatalogHomeUnbound, retireDependencies, revokeExitToken } from '../retire-dependencies';
 
 export async function managedCatalogTemplate(e: Env) {
   const row = await e.DB.prepare(
@@ -164,13 +163,7 @@ export async function operationsRetirePreview(e: Env, name: string, cache?: OpsR
   ]);
   const node = fleet.nodes.find((candidate) => candidate.name === name);
   if (!node) throw new ApiError(404, 'NOT_FOUND', 'Fleet node not found');
-  // A residential home is still in use even when the customer's selected cloud exit differs.
-  // Both fresh and replayed retirement jobs pass this preview before removing or revoking it.
-  const base = catalogBaseName(name);
-  const homes = await e.DB.prepare(
-    "SELECT id FROM home_exits WHERE kind = 'catalog' AND proxy_name IN (?, ?)",
-  ).bind(base, catalogHy2Name(base)).all<Row>();
-  for (const home of homes.results) await assertHomeExitUnbound(e, String(home.id));
+  await assertCatalogHomeUnbound(e, name);
   const catalogPlan = retirementCatalogPlan(catalog.yaml, name);
   const listedCount = splitManagedCatalogProxies(catalog.yaml).items.length;
   if (catalogPlan.changes.catalogEntryRemoved && listedCount <= 1) {
