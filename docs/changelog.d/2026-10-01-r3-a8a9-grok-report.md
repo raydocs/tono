@@ -11,3 +11,7 @@
 ### 2026-10-01 续记
 - 同一轮 `AppState+Proxy.swift` 阅读补上 MAC-PIN-REFRESH-TEARDOWN。修复在 #950（`cursor/r3-pin-refresh-keep-session-89a9`，基线 `e69db58d`），不在本 PR。提交前失败不再拆会话；提交后 PF 收口失败仍拆。
 - 假设改为 41：修复 1，决定项 2，假阳性 38。XCTest 仍未在本机运行。
+
+### 2026-10-01 续记 2
+- TOP rule 把原来的两条决定项改成修复：目录删出口是 #963，策略更新是 #966。本 PR 仍只改报告，不开启 auto-merge。
+- 假设仍是 41：修复 3，决定项 0，假阳性 38。

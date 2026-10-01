@@ -15,14 +15,14 @@ Sol 的 `W1-sol-win-app` 报告在 `main` 和当时打开的 PR 标题里都没�
 | ID | 区域 | 严重级别 | 文件:行 | 一句话 | 结论 |
 |---|---|---|---|---|---|
 | MAC-PIN-REFRESH-TEARDOWN | M10 钉选 | 中·推导 | `AppState+Proxy.swift:640` | 无后缀策略的后台钉选刷新在 Mihomo 接受新钉之前失败，会 `disconnect(releaseKillSwitch: false)`，PF 收到 bootstrap | 已核实。`0a91a921` 删掉了「失败保持会话」分支。修复在 #950。钉已提交后的收口失败仍拆会话 |
-| MAC-CATALOG-NODE-REMOVED-BLOCK | M10 目录 | 决定项 | `AppState+Catalog.swift:148` | 选中的云出口被目录删掉后 `disconnect(releaseKillSwitch: false)`，没有默认出口时整机继续被 PF 挡住 | 接受注释里的失败关闭。选择性只拦助手的钩子仍未接上，放开则会让助手直连。不改代码，不改 `docs/DECISIONS.md`，不另开 issue |
-| MAC-POLICY-RELOAD-BLOCK | M10 策略 | 决定项 | `AppState+Catalog.swift:606` | 已连接时流量策略变了，会拆掉会话并保持 PF，再安排保护重连，文案写明不打开直连互联网 | 同上，书面失败关闭。不修 |
+| MAC-CATALOG-NODE-REMOVED-BLOCK | M10 目录 | 中·推导 | `AppState+Catalog.swift:148` | 选中的云出口被目录删掉后 `disconnect(releaseKillSwitch: false)`，没有默认出口时整机继续被 PF 挡住 | 已按 TOP rule 修。有别的出口就保持会话并改选；没有就恢复原来的网络。修复在 #963。严格 `permanent` 仍可阻断，本应用不保存该开关 |
+| MAC-POLICY-RELOAD-BLOCK | M10 策略 | 中·推导 | `AppState+Catalog.swift:606` | 已连接时流量策略变了，会拆掉会话并保持 PF，再安排保护重连 | 已按 TOP rule 修。保持当前会话并就地应用；失败则恢复原来的网络。修复在 #966 |
 
-#901（登录钥匙串）按要求不修。没有新的不可修缺陷需要另开 issue；上面两条决定项不另开 issue。
+#901（登录钥匙串）按要求不修。选择性 AI 钩子仍未注册，#963 和 #966 不新写 PF。
 
 ## 网络影响
 
-本 PR 只改报告，不改路由、DNS、PF、WFP 或代理。钉选修复在 #950：刷新在提交前失败时不再拆隧道、不再把 PF 收到 bootstrap，普通互联网留在当前会话上，助手阻断和严格模式不动。钉已提交后收口失败仍保持整机阻断。目录删掉当前出口，或已连接时策略更新，也仍保持整机阻断，直到重连成功或用户点 Restore internet。
+本 PR 只改报告，不改路由、DNS、PF、WFP 或代理。产品修复在别的 PR：#950 钉选提交前失败不再拆隧道；#963 目录删掉当前出口时改选或恢复原来的网络；#966 策略更新保持当前会话，失败才恢复原来的网络。三处都不新写选择性 AI 过滤。显式严格模式仍可整机阻断，macOS 不保存 `permanent`。钉已提交后的 PF 收口失败仍拆会话。
 
 ## 假阳性（38）
 
@@ -75,7 +75,7 @@ A9（16），与 [Hunt Windows A9 commands](bc-7a8634bd-488b-533e-b90e-5589fb2a9
 
 ## 计数
 
-假设 41。修复 1（#950，MAC-PIN-REFRESH-TEARDOWN）。决定项 2。假阳性 38。没有重复开 PR。第一版报告漏写了这条钉选回归，本续记补上。
+假设 41。修复 3（#950 钉选，#963 目录删出口，#966 策略更新）。决定项 0。假阳性 38。没有重复开 PR。目录和策略两条原记为不修，按 TOP rule 改记为修复。
 
 ## 没做完的部分
 
