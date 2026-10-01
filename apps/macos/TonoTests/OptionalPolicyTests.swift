@@ -3,9 +3,8 @@ import XCTest
 @testable import Tono
 
 /// A background policy apply that throws must not leave a whole-machine
-/// block. Non-strict macOS has no `permanent` switch and the selective AI
-/// hook is not registered, so the catch restores the original network and
-/// does not schedule a protected reconnect. XCTest cannot drive the resolver,
+/// block. Non-strict recovery restores ordinary internet with the existing
+/// selective AI release and does not schedule a protected reconnect. XCTest cannot drive the resolver,
 /// the privileged helper, or sing-box; `optionalPolicyRuntimeMutation` stands
 /// in for that replacement.
 final class OptionalPolicyTests: XCTestCase {
@@ -28,6 +27,11 @@ final class OptionalPolicyTests: XCTestCase {
     }
 
     func testBackgroundPolicyFailureRestoresTheOriginalNetwork() async {
+        let savedArmed = KillSwitchService.isArmed
+        let savedUpdateBlock = RuntimeCleanup.nativeUpdateBlocksConnect
+        let savedUpdatePending = RuntimeCleanup.nativeUpdatePending
+        RuntimeCleanup.nativeUpdateBlocksConnect = false
+        RuntimeCleanup.nativeUpdatePending = false
         let app = AppState()
         // Post-connect: onCoreStarted has already published connected and the
         // session's PF arm is live. The mutation seam marks replacement as
@@ -58,11 +62,16 @@ final class OptionalPolicyTests: XCTestCase {
         runtime.coreStatus = { (false, true) }
         runtime.restoreDNS = { true }
         runtime.disableSystemProxy = {}
-        runtime.disarm = {}
+        var aiHold = false
+        var explicitDisarms = 0
+        runtime.disarm = { explicitDisarms += 1; aiHold = false }
+        runtime.releaseAfterFailure = { aiHold = true; KillSwitchService.isArmed = false }
         runtime.restrictToBootstrap = {}
         app.networkProtection = runtime
         defer {
-            KillSwitchService.isArmed = false
+            KillSwitchService.isArmed = savedArmed
+            RuntimeCleanup.nativeUpdateBlocksConnect = savedUpdateBlock
+            RuntimeCleanup.nativeUpdatePending = savedUpdatePending
         }
 
         app.scheduleBackgroundOptionalPolicy()
@@ -71,6 +80,8 @@ final class OptionalPolicyTests: XCTestCase {
         await app.connectionCoordinator.disconnectSequence?.value
 
         XCTAssertFalse(app.isConnected)
+        XCTAssertTrue(aiHold, "optional replacement failure must retain the AI floor")
+        XCTAssertEqual(explicitDisarms, 0)
         XCTAssertFalse(app.isProtectionBlocked)
         XCTAssertFalse(app.isProtectedReconnectScheduled)
         XCTAssertNil(app.connectionCoordinator.protectedReconnectTask)
