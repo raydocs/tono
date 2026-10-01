@@ -776,6 +776,20 @@ pub(super) async fn controller_json(
         .map_err(|error| format!("controller {path} returned invalid JSON: {error}"))
 }
 
+/// Controller waits may end when this connection is retired, while their detached owner still
+/// retracts the captured Service session before dropping lifecycle admission. Never wrap a
+/// mutating Service IPC here: its completion must remain owned through reconciliation.
+async fn wait_direct_controller<T>(
+    cancellation: &tokio_util::sync::CancellationToken,
+    future: impl std::future::Future<Output = Result<T, String>>,
+) -> Result<T, StageFailure> {
+    tokio::select! {
+        biased;
+        _ = cancellation.cancelled() => Err(StageFailure::Stale),
+        result = future => result.map_err(StageFailure::error),
+    }
+}
+
 pub(super) async fn reload_controller_config(secret: &str, controller_port: u16, config_path: &str) -> Result<(), String> {
     let client = controller_client(DIRECT_CONFIG_RELOAD_TIMEOUT)?;
     let mut last = String::from("no response");
@@ -923,7 +937,8 @@ pub(super) fn controller_direct_graph_is_active(
     // AND selector, and a single final MATCH. Requiring the complete
     // cardinality/order rejects broad, missing, duplicated, or stale DIRECT
     // selectors. With home-broadband split routing the home block also carries
-    // CLAUDE_HOME_DOMAINS pointing at Tono-Claude-Home.
+    // CLAUDE_HOME_DOMAINS pointing at Tono-Claude-Home, followed by the same
+    // assistant matchers rejecting UDP even when the selected exit is HY2.
     let claude_target = if claude_home {
         config::CLAUDE_HOME_GROUP_NAME
     } else {
@@ -939,6 +954,7 @@ pub(super) fn controller_direct_graph_is_active(
     let mut home_rows = config::HOME_PROCESS_NAMES.len() + home_path_regexes.len();
     if claude_home {
         home_rows += config::CLAUDE_HOME_DOMAINS.len() + config::CLAUDE_HOME_IPV4_CIDRS.len();
+        home_rows *= 2;
     }
     // + 4 = two loopback rows, the UDP REJECT row, and the final MATCH.
     let expected_len = expected_direct_rules.len() + 3 + home_rows + 1;
@@ -994,6 +1010,48 @@ pub(super) fn controller_direct_graph_is_active(
             claude_target,
         )?;
         index += 1;
+    }
+    if claude_home {
+        for domain in config::CLAUDE_HOME_DOMAINS {
+            expect_rule(
+                rules.get(index),
+                index,
+                "AND",
+                &format!("((Network,udp) && (DomainSuffix,{domain}))"),
+                "REJECT",
+            )?;
+            index += 1;
+        }
+        for cidr in config::CLAUDE_HOME_IPV4_CIDRS {
+            expect_rule(
+                rules.get(index),
+                index,
+                "AND",
+                &format!("((Network,udp) && (IPCIDR,{cidr}))"),
+                "REJECT",
+            )?;
+            index += 1;
+        }
+        for process in config::HOME_PROCESS_NAMES {
+            expect_rule(
+                rules.get(index),
+                index,
+                "AND",
+                &format!("((Network,udp) && (ProcessName,{process}))"),
+                "REJECT",
+            )?;
+            index += 1;
+        }
+        for regex in &home_path_regexes {
+            expect_rule(
+                rules.get(index),
+                index,
+                "AND",
+                &format!("((Network,udp) && ({MIHOMO_PROCESS_PATH_REGEX_TYPE},{regex}))"),
+                "REJECT",
+            )?;
+            index += 1;
+        }
     }
     for (offset, expected) in expected_direct_rules.iter().enumerate() {
         let rule_index = index + offset;
@@ -1097,6 +1155,13 @@ pub(super) async fn activate_direct_runtime_cancellation_safe(
         drop(mutation_guard);
         return Err(StageFailure::Stale);
     }
+    let cancellation = {
+        let inner = state.lock().await;
+        if inner.connect_generation != generation {
+            return Err(StageFailure::Stale);
+        }
+        inner.connect_cancellation.clone()
+    };
     let task_state = Arc::clone(state);
     let task = tokio::spawn(async move {
         let _mutation_guard = mutation_guard;
@@ -1164,31 +1229,31 @@ pub(super) async fn activate_direct_runtime_cancellation_safe(
                 }
             };
             ensure_fresh(&task_state, generation).await?;
-            reload_controller_config(&controller_secret, controller_port, &config_path)
-                .await
-                .map_err(StageFailure::error)?;
-            wait_controller(&controller_secret, controller_port)
-                .await
-                .map_err(StageFailure::error)?;
-            verify_controller_direct_runtime(
-                &controller_secret,
-                controller_port,
-                &expected_controller_rules,
-                &direct_interface,
-                require_wechat_direct,
-                require_web_direct,
-                claude_home,
-            )
-            .await
-            .map_err(StageFailure::error)?;
+            wait_direct_controller(&cancellation,
+                reload_controller_config(&controller_secret, controller_port, &config_path),
+            ).await?;
+            wait_direct_controller(&cancellation,
+                wait_controller(&controller_secret, controller_port),
+            ).await?;
+            wait_direct_controller(&cancellation,
+                verify_controller_direct_runtime(
+                    &controller_secret,
+                    controller_port,
+                    &expected_controller_rules,
+                    &direct_interface,
+                    require_wechat_direct,
+                    require_web_direct,
+                    claude_home,
+                ),
+            ).await?;
             ensure_fresh(&task_state, generation).await?;
 
             lock_kill_switch_with_retries(&session)
                 .await
                 .map_err(StageFailure::error)?;
-            wait_controller(&controller_secret, controller_port)
-                .await
-                .map_err(StageFailure::error)?;
+            wait_direct_controller(&cancellation,
+                wait_controller(&controller_secret, controller_port),
+            ).await?;
             let locked = service::tono_service_status_snapshot()
                 .await
                 .map_err(StageFailure::error)?;
@@ -1689,4 +1754,62 @@ pub fn build_direct_plan(
         reviewed_direct_ports: tono_service_protocol::REVIEWED_DIRECT_PORTS.to_vec(),
     };
     Ok((plan, endpoints))
+}
+
+#[cfg(test)]
+mod cancellation_tests {
+    use super::*;
+    use tokio::io::AsyncReadExt as _;
+    use tokio::sync::oneshot;
+
+    #[tokio::test]
+    async fn disconnect_cancels_a_stalled_direct_reload_before_release_writer_admission() {
+        let state = Arc::new(TonoState::for_test());
+        let cancellation = state.lock().await.connect_cancellation.clone();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let (requested, request_seen) = oneshot::channel();
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut request = Vec::new();
+            let mut bytes = [0; 1024];
+            while !request.windows(4).any(|part| part == b"\r\n\r\n") {
+                let count = socket.read(&mut bytes).await.unwrap();
+                assert!(count > 0 && request.len() < 4096);
+                request.extend_from_slice(&bytes[..count]);
+            }
+            assert!(request.starts_with(b"PUT /configs?force=true "));
+            requested.send(()).unwrap();
+            // One stalled Core handler: it accepts the actual reload but never answers.
+            std::future::pending::<()>().await;
+        });
+        let mutation = state.begin_connect_mutation().await;
+        let (reconciling, reconciliation_started) = oneshot::channel();
+        let (reconciled, reconciliation_done) = oneshot::channel();
+        let worker = tokio::spawn(async move {
+            let _mutation = mutation;
+            let result = wait_direct_controller(&cancellation,
+                reload_controller_config("fixture-secret", port, "fixture.yaml"),
+            ).await;
+            reconciling.send(matches!(result, Err(StageFailure::Stale))).unwrap();
+            // Inject only the Service retraction boundary. The real owner retains its reader
+            // until this non-cancellable step has finished.
+            reconciliation_done.await.unwrap();
+        });
+        tokio::time::timeout(Duration::from_secs(5), request_seen).await.unwrap().unwrap();
+        state.lock().await.invalidate_connection(true);
+        let cancelled = tokio::time::timeout(Duration::from_secs(5), reconciliation_started).await;
+        if cancelled.is_err() {
+            worker.abort();
+            server.abort();
+        }
+        assert!(cancelled.expect("Restore must not wait for both 60-second reload attempts").unwrap());
+        let writer = state.begin_privileged_release();
+        tokio::pin!(writer);
+        assert!(futures::poll!(&mut writer).is_pending(), "retraction still owns the reader");
+        reconciled.send(()).unwrap();
+        drop(tokio::time::timeout(Duration::from_secs(5), writer).await.unwrap());
+        worker.await.unwrap();
+        server.abort();
+    }
 }

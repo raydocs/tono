@@ -2,7 +2,8 @@ use super::{
     MARK_VERIFIED_ATTEMPTS, SERVICE_REPAIR_RETRY_BACKOFF, ServiceHealth, ServiceStatus,
     StopCoreWatchdogAction, advanced_tono_generation, capture_generation_before,
     claim_owner_recovery_generation, forget_failed_service_repair, generate_service_session_token,
-    macos_install_shell, mark_service_unavailable_after_owner_loss, mark_verified_committed,
+    log_snapshot_should_recover_owner, macos_install_shell, mark_service_unavailable_after_owner_loss,
+    mark_verified_committed,
     owner_recovery_policy, record_service_repair, service_core_path_for, service_repair_is_worth_prompting,
     session_matches_status, tono_start_refusal, watchdog_action_after_tono_stop_failure,
 };
@@ -120,6 +121,56 @@ async fn the_release_path_starts_a_stopped_service_and_repairs_only_what_the_sta
     assert_eq!(unreadable.counts(), [1, 1, 0, 1]);
 }
 
+#[tokio::test(start_paused = true)]
+async fn the_release_path_bounds_a_stalled_service_state_probe() {
+    let calls = ReleaseCalls::default();
+    let release = super::ready_or_start_with(
+        || async { anyhow::bail!("service unavailable") },
+        || std::future::pending::<anyhow::Result<bool>>(),
+        || {
+            calls.start.set(calls.start.get() + 1);
+            async { anyhow::Ok(()) }
+        },
+        || {
+            calls.repair.set(calls.repair.get() + 1);
+            async { anyhow::Ok(()) }
+        },
+    );
+    let error = tokio::time::timeout(Duration::from_secs(6), release)
+        .await
+        .expect("a stalled SCM probe must release the reconciliation worker")
+        .expect_err("an unknown service state must not start or repair the Service");
+    assert!(format!("{error:#}").contains("service state probe timed out"), "{error:#}");
+    assert_eq!(calls.counts(), [0, 0, 0, 0]);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_stalled_read_only_service_probe_returns_without_waiting_for_its_thread() {
+    let (release, gate) = std::sync::mpsc::channel();
+    let (entered, waiting) = tokio::sync::oneshot::channel();
+    let probe = tokio::spawn(super::probe_service_state(move || {
+        entered.send(()).unwrap();
+        gate.recv().unwrap();
+        anyhow::Ok(true)
+    }));
+    waiting.await.unwrap();
+    let waiter = tokio::spawn(async move {
+        tokio::time::timeout(Duration::from_secs(6), probe).await
+    });
+    tokio::task::yield_now().await;
+    tokio::time::advance(Duration::from_secs(5)).await;
+    tokio::task::yield_now().await;
+    tokio::time::advance(Duration::from_secs(1)).await;
+    let result = waiter.await.unwrap();
+    // Release the fault injection even if the deadline failed, so runtime shutdown can finish.
+    release.send(()).unwrap();
+    let error = result
+        .expect("a read-only SCM thread must not retain its async caller")
+        .expect("the probe task must finish normally")
+        .expect_err("a stalled query cannot prove the service state");
+    assert!(format!("{error:#}").contains("service state probe timed out"), "{error:#}");
+}
+
 /// BRICK-W5 (e): the release path's start is a privileged helper like any repair. It refuses at
 /// once while another operation holds Run State's slot, frees the slot when it finishes, and a
 /// start that timed out keeps the slot quarantined so no second helper can run behind it.
@@ -193,6 +244,7 @@ fn mark_verified_reconciliation_is_bounded_and_requires_full_proof() {
         tunnel_permit_rendered: true,
         direct_endpoint_digest: tono_service_protocol::direct_endpoint_digest(&[]).unwrap(),
         last_error: None,
+        reconnect_after_release: false,
     };
     assert!(mark_verified_committed(&status));
 
@@ -246,6 +298,18 @@ fn a_repair_that_did_not_help_is_not_repeated_for_the_same_failure() {
     record_service_repair(cause, false);
     forget_failed_service_repair();
     assert!(service_repair_is_worth_prompting(cause));
+}
+
+#[test]
+fn a_core_log_snapshot_does_not_recover_during_our_own_start_handoff() {
+    let not_active = tono_service_protocol::ServiceErrorCode::NotActive as u16;
+    assert!(
+        !log_snapshot_should_recover_owner(not_active, false),
+        "StartClash has already dropped the local session; NotActive is the handoff"
+    );
+    assert!(log_snapshot_should_recover_owner(not_active, true));
+    assert!(!log_snapshot_should_recover_owner(0, true));
+    assert!(!log_snapshot_should_recover_owner(1, false));
 }
 
 #[test]

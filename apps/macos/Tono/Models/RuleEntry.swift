@@ -92,10 +92,10 @@ nonisolated struct RuleItem: Identifiable, Codable, Sendable {
     /// Parse from Clash config line (e.g. "DOMAIN-SUFFIX,google.com,YouTube" or "GEOIP,CN,DIRECT,no-resolve")
     static func from(clashString: String, source: RuleSource = .user, subscriptionId: String? = nil) -> RuleItem? {
         var parts = clashString.split(separator: ",").map(String.init)
-        guard parts.count >= 2 else { return nil }
 
         let noResolve = parts.last == "no-resolve"
         if noResolve { parts.removeLast() }
+        guard parts.count >= 2 else { return nil }
 
         let type = parts[0]
         if type == "MATCH" {

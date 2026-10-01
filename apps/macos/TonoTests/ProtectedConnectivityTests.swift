@@ -2,6 +2,21 @@ import XCTest
 @testable import Tono
 
 final class ProtectedConnectivityTests: XCTestCase {
+    func testExhaustedFailureSelectiveHookDefaultsToFullRelease() {
+        XCTAssertEqual(ExhaustedFailureNetwork.afterFailure(strictKillSwitchExplicit: false), .failOpen)
+        XCTAssertEqual(
+            ExhaustedFailureNetwork.afterFailure(strictKillSwitchExplicit: false, selectiveAiBlockReady: true),
+            .selectiveFailOpen
+        )
+        XCTAssertEqual(
+            ExhaustedFailureNetwork.afterFailure(strictKillSwitchExplicit: true, selectiveAiBlockReady: true),
+            .keepStrictBlock
+        )
+        XCTAssertTrue(ExhaustedFailureNetwork.failOpen.releasesSystemNetwork)
+        XCTAssertFalse(ExhaustedFailureNetwork.selectiveFailOpen.releasesSystemNetwork)
+        XCTAssertFalse(ExhaustedFailureNetwork.keepStrictBlock.releasesSystemNetwork)
+    }
+
     func testBrowserDoHModeMatrix() {
         XCTAssertEqual(BrowserDNSDiagnostics.classify(mode: nil, templates: nil), .clear)
         XCTAssertEqual(BrowserDNSDiagnostics.classify(mode: nil, templates: "https://dns"), .blocking)
@@ -571,7 +586,7 @@ final class ProtectedConnectivityTests: XCTestCase {
         XCTAssertFalse(shown.localizedCaseInsensitiveContains("eof"))
         // Verify the backup-action copy in the active language, not an English
         // substring that necessarily fails on a Chinese test host.
-        XCTAssertEqual(shown, String(localized: "This city could not complete a protected connection. Retry, choose another route, or try the backup channel if one is shown."))
+        XCTAssertEqual(shown, String(localized: "The connection didn't complete. Support code CORE_EXIT_UNREACHABLE."))
         XCTAssertTrue(classified.copyableDetail.contains("CORE_EXIT_UNREACHABLE"))
         XCTAssertTrue(classified.copyableDetail.contains("checkingExit"))
 

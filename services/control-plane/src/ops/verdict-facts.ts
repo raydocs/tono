@@ -257,7 +257,12 @@ async function loadOccupancy(db: D1Database, nowSec: number): Promise<Map<string
        WHERE connected = 1 AND selected_server IS NOT NULL AND last_seen_at >= ?
        GROUP BY selected_server`,
     ).bind(nowSec - OCCUPANCY_FRESH_SECONDS).all<Row>();
-    return new Map((rows.results ?? []).map((row) => [String(row.node), Number(row.n) || 0]));
+    const occupancy = new Map<string, number>();
+    for (const row of rows.results ?? []) {
+      const name = catalogBaseName(String(row.node));
+      occupancy.set(name, (occupancy.get(name) ?? 0) + (Number(row.n) || 0));
+    }
+    return occupancy;
   } catch (error) {
     if (missingTable(error)) return new Map();
     throw error;

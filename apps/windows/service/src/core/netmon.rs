@@ -313,13 +313,20 @@ mod tests {
         let baseline = super::topology::Topology {
             interfaces: vec![(17, 3, 25, 1500, true)],
             routes: vec![(17, 0, 0, 0x0100000a, 10)],
+            ipv6_defaults: vec![(17, [0xfe, 0x80, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], 256)],
         };
         let mut reconciler = super::Reconciler { baseline: Some(baseline.clone()), unknown_reported: false };
         assert!(reconciler.observe(Ok(baseline.clone()), false).is_none(), "DNS-only echoes stay quiet");
         let mut moved = baseline;
         moved.routes[0].3 = 0x0200000a;
         assert!(reconciler.observe(Ok(moved.clone()), false).is_some(), "same adapter, changed gateway is real");
-        assert!(reconciler.observe(Ok(moved), false).is_none(), "one batch must not repeat forever");
+        let mut ipv6_moved = moved.clone();
+        ipv6_moved.ipv6_defaults[0].1[15] = 2;
+        assert!(
+            reconciler.observe(Ok(ipv6_moved.clone()), false).is_some(),
+            "an IPv6 default-hop change during a DNS write is still a real move"
+        );
+        assert!(reconciler.observe(Ok(ipv6_moved), false).is_none(), "one batch must not repeat forever");
         assert_eq!(reconciler.observe(Err("synthetic read refusal".into()), false), Some("network-observation-unknown"));
         assert!(reconciler.observe(Err("still unreadable".into()), false).is_none());
     }

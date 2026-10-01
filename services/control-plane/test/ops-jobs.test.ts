@@ -495,6 +495,58 @@ describe('ops node jobs', () => {
     expect(Number(afterRelist?.n)).toBe(0);
   });
 
+  it('keeps a retiring node available while recent customers use its hy2 transport', async () => {
+    const e = env as unknown as Env;
+    const t = 1_800_000_950;
+    const kite = 'Tokyo · Kite';
+    const fuji = 'Tokyo · Fuji';
+    const yaml = (await seedTwoNodeCatalog(e, t, kite, fuji)).replace('proxy-groups:', [
+      `  - name: ${kite} · hy2`,
+      '    type: hysteria2',
+      '    server: 203.0.113.9',
+      '    port: 443',
+      '    password: {{TONO_CLIENT_UUID}}',
+      `    fingerprint: ${'a'.repeat(64)}`,
+      'proxy-groups:',
+    ].join('\n'));
+    const encrypted = await encryptCatalog(yaml, e.CATALOG_ENCRYPTION_KEY!);
+    await db().prepare(
+      'UPDATE managed_exit_catalog SET ciphertext = ?, nonce = ?, content_sha256 = ?',
+    ).bind(encrypted.ciphertext, encrypted.nonce, await sha256(yaml)).run();
+    const hash = await seedExitToken(kite, t);
+    await db().prepare(
+      `INSERT INTO users(id, email, password_hash, password_salt, created_at, updated_at)
+       VALUES('u-device', 'device@example.com', 'x', 'y', ?, ?),
+             ('u-customer', 'customer@example.com', 'x', 'y', ?, ?)`,
+    ).bind(t, t, t, t).run();
+    await db().prepare(
+      `INSERT INTO ops_device_status(user_id, device_id, connected, selected_server, last_seen_at, updated_at)
+       VALUES('u-device', 'device-hy2', 1, ?, ?, ?)`,
+    ).bind(`${kite} · hy2`, t - 60, t).run();
+    await db().prepare(
+      `INSERT INTO ops_customer_status(user_id, connected, selected_server, last_seen_at, updated_at)
+       VALUES('u-customer', 1, ?, ?, ?)`,
+    ).bind(`${kite} · hy2`, t - 60, t).run();
+
+    const { job } = await enqueue('catalog_retire', t, { nodeName: kite, idempotencyKey: 'retire-hy2' });
+    expect(await runWorkerJobs(e, t, 5)).toBe(1);
+    const row = await db().prepare('SELECT status, result_json FROM ops_node_jobs WHERE id = ?')
+      .bind(job.id).first<{ status: string; result_json: string }>();
+    expect(row?.status).toBe('succeeded');
+    const result = JSON.parse(String(row?.result_json)) as {
+      customersOnNode: Array<{ userId: string }>; exitTokenActive: boolean;
+    };
+    expect(result.customersOnNode.map((customer) => customer.userId).sort())
+      .toEqual(['u-customer', 'u-device']);
+    expect(result.exitTokenActive).toBe(true);
+    expect(await listedNames(e)).not.toContain(`${kite} · hy2`);
+    expect(await exitStatus(kite)).toEqual({ status: 'active', token_hash: hash });
+    expect((await retireIncident(kite))?.status).toBe('open');
+    await runVerdictPass(e, t + 1);
+    expect((await retireIncident(kite))?.status).toBe('open');
+    expect(await exitStatus(kite)).toEqual({ status: 'active', token_hash: hash });
+  });
+
   it('relist refuses to publish an entry without the Reality settings clients require', async () => {
     const e = env as unknown as Env;
     const t = 1_800_001_000;
