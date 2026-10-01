@@ -22,6 +22,7 @@ import { relistFleetNode, retireFleetNode } from '../src/ops/reads/fleet';
 import { retirePendingDedupeKey } from '../src/ops/retire-dependencies';
 import { runVerdictPass } from '../src/ops/verdict-run';
 import { homeExitsResource } from '../src/ops/shared-admin/home-exits';
+import { deleteHomeLine, patchHomeLineRoute } from '../src/ops/handlers/assets';
 
 const db = () => (env as unknown as { DB: D1Database }).DB;
 
@@ -514,6 +515,113 @@ describe('ops node jobs', () => {
       body: JSON.stringify({ homeExitId: 'home-kite', defaultProxyName: 'Tokyo · Fuji' }),
     }), e, 'users/u-home-race/home-binding', 'PUT', 'ops@example.com');
   }
+
+  function bindAfterUnbound(e: Env, userId = 'u-home-race') {
+    let boundStatus: number | undefined;
+    const racingDb = new Proxy(e.DB, {
+      get(target, key) {
+        if (key === 'prepare') return (sql: string) => {
+          const statement = target.prepare(sql);
+          if (sql !== 'SELECT 1 FROM user_home_bindings WHERE home_exit_id = ? LIMIT 1') return statement;
+          return { bind: (...values: unknown[]) => ({ first: async () => {
+            const result = await statement.bind(...values).first();
+            if (!result && boundStatus === undefined) {
+              boundStatus = (await homeExitsResource(new Request('https://test/ops/home-binding', {
+                method: 'PUT', headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({ homeExitId: 'home-kite', defaultProxyName: 'Tokyo · Fuji' }),
+              }), e, `users/${userId}/home-binding`, 'PUT', 'ops@example.com'))?.status;
+            }
+            return result;
+          } }) };
+        };
+        const value = Reflect.get(target, key, target);
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+    return { e: { ...e, DB: racingDb }, boundStatus: () => boundStatus };
+  }
+
+  async function expectHomeStillActive(e: Env) {
+    expect(await e.DB.prepare("SELECT status FROM home_exits WHERE id = 'home-kite'").first())
+      .toEqual({ status: 'active' });
+    expect(await e.DB.prepare('SELECT revision FROM managed_exit_catalog WHERE singleton_id = 1').first())
+      .toEqual({ revision: 2 }); // Only the winning binding bumps the catalog.
+    expect(await e.DB.prepare("SELECT action FROM ops_audit WHERE action IN ('home.update', 'home-line.update', 'home-line.retire')").all())
+      .toMatchObject({ results: [] });
+  }
+
+  it('refuses shared-admin home retirement when a binding commits after its unbound preflight', async () => {
+    const e = env as unknown as Env;
+    await seedBindableHome(e, 1_800_001_100);
+    const race = bindAfterUnbound(e);
+    await expect(homeExitsResource(new Request('https://test/ops/home-exits/home-kite', {
+      method: 'PATCH', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ status: 'retired', notes: 'must not persist' }),
+    }), race.e, 'home-exits/home-kite', 'PATCH', 'ops@example.com'))
+      .rejects.toMatchObject({ status: 409, code: 'HOME_EXIT_IN_USE' });
+    expect(race.boundStatus()).toBe(201);
+    await expectHomeStillActive(e);
+    expect(await e.DB.prepare("SELECT notes FROM home_exits WHERE id = 'home-kite'").first())
+      .toEqual({ notes: null });
+  });
+
+  it('keeps v1 home metadata unchanged when a binding wins its retirement race', async () => {
+    const e = env as unknown as Env;
+    await seedBindableHome(e, 1_800_001_100);
+    const race = bindAfterUnbound(e);
+    await expect(patchHomeLineRoute(new Request('https://test/api/v1/ops/home-lines/home-kite', {
+      method: 'PATCH', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ status: 'retired', price: 123, notes: 'must not persist', displayName: 'New name' }),
+    }), race.e, 'home-kite', { email: 'ops@example.com' }))
+      .rejects.toMatchObject({ status: 409, code: 'HOME_EXIT_IN_USE' });
+    expect(race.boundStatus()).toBe(201);
+    await expectHomeStillActive(e);
+    expect(await e.DB.prepare("SELECT price, notes, display_name FROM home_exits WHERE id = 'home-kite'").first())
+      .toEqual({ price: null, notes: null, display_name: 'Customer home' });
+  });
+
+  it('refuses v1 home DELETE retirement when a binding commits after its unbound preflight', async () => {
+    const e = env as unknown as Env;
+    await seedBindableHome(e, 1_800_001_100);
+    const race = bindAfterUnbound(e);
+    await expect(deleteHomeLine(new Request('https://test/api/v1/ops/home-lines/home-kite', { method: 'DELETE' }),
+      race.e, 'home-kite', { email: 'ops@example.com' }))
+      .rejects.toMatchObject({ status: 409, code: 'HOME_EXIT_IN_USE' });
+    expect(race.boundStatus()).toBe(201);
+    await expectHomeStillActive(e);
+  });
+
+  it('keeps a replaced home active when another customer binds it before automatic retirement', async () => {
+    const e = env as unknown as Env;
+    const t = 1_800_001_100;
+    await seedBindableHome(e, t);
+    expect((await bindHome(e))?.status).toBe(201);
+    await e.DB.prepare(
+      `INSERT INTO users(id, email, password_hash, password_salt, created_at, updated_at)
+       VALUES('u-home-second', 'second@example.com', 'x', 'y', ?, ?)`,
+    ).bind(t, t).run();
+    const race = bindAfterUnbound(e, 'u-home-second');
+    const response = await homeExitsResource(new Request('https://test/ops/home-exits/assign', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ userId: 'u-home-race', replace: true, line: '203.0.113.60:1080:resident:secret' }),
+    }), race.e, 'home-exits/assign', 'POST', 'ops@example.com');
+    expect(response?.status).toBe(201);
+    const result = await response!.json() as {
+      replaced: boolean; retiredHomeExitId?: string; homeExit: { id: string }; binding: { homeExitId: string };
+    };
+    expect(result.replaced).toBe(true);
+    expect(result.retiredHomeExitId).toBeUndefined();
+    expect(race.boundStatus()).toBe(201);
+    expect(await e.DB.prepare("SELECT status FROM home_exits WHERE id = 'home-kite'").first())
+      .toEqual({ status: 'active' });
+    expect(await e.DB.prepare("SELECT home_exit_id FROM user_home_bindings WHERE user_id = 'u-home-second'").first())
+      .toEqual({ home_exit_id: 'home-kite' });
+    expect(await e.DB.prepare("SELECT home_exit_id FROM user_home_bindings WHERE user_id = 'u-home-race'").first())
+      .toEqual({ home_exit_id: result.homeExit.id });
+    expect(result.binding.homeExitId).toBe(result.homeExit.id);
+    expect(await e.DB.prepare('SELECT status FROM home_exits WHERE id = ?').bind(result.homeExit.id).first())
+      .toEqual({ status: 'active' });
+  });
 
   it('refuses retirement when a home binding commits after preview but before its revision bump', async () => {
     const e = env as unknown as Env;
