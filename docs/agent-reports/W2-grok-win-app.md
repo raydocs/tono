@@ -4,7 +4,7 @@ Slot W2-grok-win-app. Areas A2, A3, A4, A11 on `apps/windows`. A6 (update, quit,
 
 No deploy, no publish, no jev-route. `cargo test` was not run: this VM has rustc 1.83 and the workspace needs 1.98 / edition 2024. Hosted Windows CI runs the tests.
 
-Auto-merge was enabled once on each fix PR (`gh pr merge <N> --auto --merge` only). The merge manager may turn that off or on for queueing. This hunt does not turn it back on. This report PR does not enable auto-merge. The label API returned HTTP 403 for this token; some PRs still show `needs-hardware` (added outside this token).
+Auto-merge was enabled once on each fix PR (`gh pr merge <N> --auto --merge` only). The merge manager may turn that off or on for queueing. This hunt does not turn it back on. This report is [#909](https://github.com/raydocs/tono/pull/909). It does not enable auto-merge. The label API returned HTTP 403 for this token; some PRs still show `needs-hardware` (added outside this token).
 
 ## Fixed
 
