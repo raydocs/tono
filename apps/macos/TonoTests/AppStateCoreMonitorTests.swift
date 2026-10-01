@@ -181,8 +181,8 @@ final class AppStateCoreMonitorTests: XCTestCase {
     /// stopped, PF held bootstrap-only, system DNS still pointed at the dead
     /// resolver — with no reconnect scheduled, because only the user can
     /// clear that conflict. The host sat offline until the helper's core-down
-    /// watchdog released PF ~30 s later. The teardown must release outright:
-    /// the same open end state, without the offline window.
+    /// watchdog released PF ~30 s later. The automatic teardown must restore
+    /// ordinary traffic immediately while retaining the secondary AI hold.
     func testBrowserSecureDNSHealthFailureReleasesTheNetwork() async {
         let app = AppState()
         app.isConnected = true
@@ -202,10 +202,11 @@ final class AppStateCoreMonitorTests: XCTestCase {
         runtime.coreStatus = { (false, true) }
         runtime.restoreDNS = { true }
         runtime.disableSystemProxy = {}
-        // The release must reach the helper's disarm, never a bootstrap
-        // restriction; recording which one ran is the whole assertion.
+        // Automatic health cleanup must use the selective release. Explicit
+        // disarm would also remove the secondary AI hold.
         var protectionOperations: [String] = []
         runtime.disarm = { protectionOperations.append("disarm") }
+        runtime.releaseAfterFailure = { protectionOperations.append("releaseAfterFailure") }
         runtime.restrictToBootstrap = { protectionOperations.append("restrictToBootstrap") }
         app.networkProtection = runtime
         app.tunInterfaceExists = { _ in true }
@@ -236,8 +237,8 @@ final class AppStateCoreMonitorTests: XCTestCase {
         await app.connectionCoordinator.disconnectSequence?.value
 
         XCTAssertEqual(
-            protectionOperations, ["disarm"],
-            "a browser Secure DNS conflict must release the network, not hold PF bootstrap-only"
+            protectionOperations, ["releaseAfterFailure"],
+            "a browser Secure DNS conflict must restore ordinary traffic with the secondary AI hold"
         )
         XCTAssertFalse(app.isProtectionBlocked)
         XCTAssertEqual(app.errorMessage, conflictReport.failureMessage)

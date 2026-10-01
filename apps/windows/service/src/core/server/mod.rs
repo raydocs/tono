@@ -602,12 +602,10 @@ async fn stop_ipc_server_inner() -> Result<()> {
         // Still stop Core if DNS restore failed, but never disarm without the DNS proof.
         dns_restore
             .map_err(|error| kode_bridge::KodeBridgeError::custom(error.to_string()))?;
-        // Retire the run intent before opening WFP, as the owner-gated release does: a later
-        // service start must not resurrect this Core on the now-open physical route.
-        crate::core::desired::retire_legacy_active_owner()
-            .await
-            .map_err(|error| kode_bridge::KodeBridgeError::custom(error.to_string()))?;
-        windows_kill_switch::release_after_service_stop()
+        // Try to retire the run intent before opening WFP. A metadata failure after confirmed
+        // Core stop must not leave a stopped Service blocking the machine; the release's
+        // wanted:false tombstone also fences stale runnable intent on the next Service start.
+        finish_service_stop_release(crate::core::desired::retire_legacy_active_owner().await)
             .await
             .map_err(|error| kode_bridge::KodeBridgeError::custom(error.to_string()))?;
     }
@@ -712,6 +710,17 @@ pub async fn run_ipc_supervisor_until_shutdown(
     stop_ipc_server().await?;
     server_handle.abort();
     Ok(())
+}
+
+/// Called only after the stop owner has proved DNS restoration and Core termination.
+#[cfg(any(windows, test))]
+async fn finish_service_stop_release(retirement: AnyResult<()>) -> AnyResult<()> {
+    if let Err(error) = retirement {
+        warn!(
+            "Service stop owner state could not be retired; attempting release after confirmed Core stop: {error:#}"
+        );
+    }
+    windows_kill_switch::release_after_service_stop().await
 }
 
 fn ipc_backoff_delay(attempt: u32) -> Duration {
@@ -1313,3 +1322,50 @@ mod owner_lifecycle_tests;
 mod owner_goodbye_tests;
 #[cfg(test)]
 mod start_clash_kill_switch_gate_tests;
+
+#[cfg(all(test, feature = "test"))]
+mod service_stop_release_tests {
+    use super::finish_service_stop_release;
+    use crate::core::structure::{KillSwitchConfig, ProxyEndpoint, ProxyProtocol};
+    use crate::core::{selective_layer, windows_kill_switch};
+    use serial_test::serial;
+
+    #[tokio::test]
+    #[serial]
+    async fn a_stopped_services_owner_retirement_failure_still_releases_with_the_ai_hold()
+    -> anyhow::Result<()> {
+        windows_kill_switch::release().await?;
+        windows_kill_switch::arm_bootstrap(
+            &KillSwitchConfig {
+                tunnel_interface: "Tono".to_owned(),
+                proxy_endpoints: vec![ProxyEndpoint {
+                    ip: "8.8.8.8".to_owned(),
+                    port: 443,
+                    protocol: ProxyProtocol::Tcp,
+                }],
+                bootstrap_api_hosts: vec!["1.1.1.1".to_owned()],
+                direct_endpoints: Vec::new(),
+            },
+            "/opt/tono/mihomo",
+            "scm-stop-owner",
+        )
+        .await?;
+        let result = finish_service_stop_release(Err(anyhow::anyhow!(
+            "owner desired-state file is locked against replacement"
+        )))
+        .await;
+        let wanted = windows_kill_switch::status().await.wanted;
+        let ai_held = selective_layer::test_hold_active();
+        windows_kill_switch::release().await?;
+        assert!(
+            result.is_ok(),
+            "retirement bookkeeping must not refuse a proven stop release: {result:?}"
+        );
+        assert!(
+            !wanted,
+            "SCM stop must not leave persistent broad WFP protection wanted"
+        );
+        assert!(ai_held, "automatic stop must retain the secondary AI hold");
+        Ok(())
+    }
+}

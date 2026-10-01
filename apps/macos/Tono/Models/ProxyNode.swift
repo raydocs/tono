@@ -273,3 +273,38 @@ enum CatalogLiveSession {
         return !previousHome.liveSessionIdentity(matches: nextHome)
     }
 }
+
+/// A live session whose selected catalog exit disappeared.
+///
+/// Keeping that session on another catalog exit comes first. A whole-machine
+/// block remains only for an explicit strict kill switch. macOS does not
+/// store `permanent`, and the selective AI-floor hook is not registered, so
+/// the non-strict fallback restores the original network instead of inventing
+/// PF rules or holding bootstrap.
+enum CatalogRemovedExitAction: Equatable {
+    case keepSession(switchTo: String)
+    case keepStrictBlock
+    case selectiveRelease
+    case releaseOriginalNetwork
+
+    static func decide(
+        replacementName: String?,
+        strictKillSwitchExplicit: Bool,
+        selectiveAiBlockReady: Bool
+    ) -> CatalogRemovedExitAction {
+        if let replacementName, !replacementName.isEmpty {
+            return .keepSession(switchTo: replacementName)
+        }
+        switch ExhaustedFailureNetwork.afterFailure(
+            strictKillSwitchExplicit: strictKillSwitchExplicit,
+            selectiveAiBlockReady: selectiveAiBlockReady
+        ) {
+        case .keepStrictBlock:
+            return .keepStrictBlock
+        case .selectiveFailOpen:
+            return .selectiveRelease
+        case .failOpen:
+            return .releaseOriginalNetwork
+        }
+    }
+}
