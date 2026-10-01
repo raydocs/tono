@@ -307,7 +307,9 @@ async fn clear_proxy_with_direct_compensation() -> std::result::Result<(), Servi
     Err(ServiceError::proxy_clear_failed(message))
 }
 
-async fn rollback_started_owner(owner: &AuthenticatedOwner) -> Result<(), OwnerRollbackFailure> {
+async fn rollback_started_owner(
+    owner: &AuthenticatedOwner,
+) -> std::result::Result<(), OwnerRollbackFailure> {
     if let Err(stop_error) = CORE_MANAGER.lock().await.stop_core().await {
         set_core_lifecycle_state(ServiceLifecycleState::Fatal);
         return Err(OwnerRollbackFailure::CoreStopUnconfirmed(anyhow!(
