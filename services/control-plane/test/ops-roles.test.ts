@@ -195,6 +195,27 @@ describe('ops roles', () => {
     expect((await ops('no-such-resource')).status).toBe(404);
   });
 
+  it('requires catalog permissions for catalog jobs while preserving ordinary operator jobs', async () => {
+    await db().prepare(
+      `INSERT INTO ops_node_profiles(id, catalog_name, status, created_at, updated_at)
+       VALUES('profile-1', ?, 'active', ?, ?)`,
+    ).bind(NODE, NOW, NOW).run();
+    const path = `nodes/${encodeURIComponent(NODE)}/jobs`;
+    bindRole('operator');
+    const retire = await ops(path, json({ type: 'catalog_retire', confirmName: NODE }));
+    expect(retire.status).toBe(403);
+    expect(await retire.json()).toMatchObject({ error: { code: 'ROLE_FORBIDDEN' } });
+    const relist = await ops(path, json({ type: 'catalog_relist', confirmName: NODE, override: true }));
+    expect(relist.status).toBe(403);
+    expect(await relist.json()).toMatchObject({ error: { code: 'ROLE_FORBIDDEN' } });
+    expect(await db().prepare('SELECT COUNT(*) AS count FROM ops_node_jobs').first('count')).toBe(0);
+
+    expect((await ops(path, json({ type: 'xray_restart', confirmName: NODE }))).status).toBe(201);
+    bindRole('owner');
+    expect((await ops(path, json({ type: 'catalog_retire', confirmName: NODE }))).status).toBe(201);
+    expect((await ops(path, json({ type: 'catalog_relist', confirmName: NODE, override: true }))).status).toBe(201);
+  });
+
   it('viewer is refused on PATCH signup-allowlist/{id}', async () => {
     bindRole('viewer');
     const res = await ops('signup-allowlist/no-such-entry', json({ note: 'x' }, 'PATCH'));
