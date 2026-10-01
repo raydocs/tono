@@ -16,6 +16,7 @@ import os
 import re
 import stat
 import subprocess
+import sys
 import tempfile
 import urllib.error
 import urllib.parse
@@ -30,6 +31,8 @@ MAX_INVENTORY_RESPONSE_BYTES = 512 * 1024
 MAX_SAFE_INTEGER = (1 << 53) - 1
 MAX_REPORTS_PER_REQUEST = 500
 MAX_USERS_PER_REQUEST = 100
+# Same permanent refusals as the exit agent. A timeout or 5xx stays queued.
+REJECTED_REPORT_STATUSES = frozenset({400, 409, 413, 422})
 MAX_INVENTORY_DEVICES = 2_000
 MAX_TAILSCALE_STATUS_BYTES = 4 * 1024 * 1024
 DEFAULT_STATE = "/Library/Application Support/Tono/HomeAgent/state.json"
@@ -596,17 +599,47 @@ def acknowledge(state: dict[str, Any], reports: list[dict[str, Any]]) -> None:
 
 
 def deliver_pending(base: str, token: str, path: Path, state: dict[str, Any]) -> int:
+    """Send the queue in bounded requests, recording progress after each one.
+
+    A batch the control plane refuses outright is halved until one report is
+    isolated, and that report is dropped. Leaving it at the head would stop
+    every later account. The refused delta is not regenerated: the peer
+    baseline for that observation was already saved, and retrying an account
+    the server rejected would fail on every later round. Timeouts and 5xx
+    stay queued and are retried whole.
+    """
     delivered = 0
+    size = MAX_REPORTS_PER_REQUEST
     while state["pendingReports"]:
         batch = next_pending_batch(state)
         if not batch:
             raise RuntimeError("could not form a valid pending report batch")
-        post_reports(base, token, batch)
+        if len(batch) > size:
+            batch = batch[:size]
+        try:
+            post_reports(base, token, batch)
+        except urllib.error.HTTPError as error:
+            if error.code not in REJECTED_REPORT_STATUSES:
+                raise
+            if len(batch) > 1:
+                size = len(batch) // 2
+                continue
+            print(
+                f"dropping a report the control plane refused ({error.code} {error.reason})",
+                file=sys.stderr,
+            )
+            if state["pendingReports"][: len(batch)] != batch:
+                raise RuntimeError("refused report is not the pending prefix")
+            del state["pendingReports"][: len(batch)]
+            save_state(path, state)
+            size = MAX_REPORTS_PER_REQUEST
+            continue
         acknowledge(state, batch)
         # Persist after every accepted chunk. A crash before this write replays
         # the same immutable IDs; a crash after it proceeds with the remainder.
         save_state(path, state)
         delivered += len(batch)
+        size = MAX_REPORTS_PER_REQUEST
     return delivered
 
 
