@@ -154,6 +154,11 @@ export const createSharedSubscriptionEntry = (
         await ws.close()
         return
       }
+      // The watchdog only covers a connect() that never settles. Leaving it
+      // armed through onConnected bumps the epoch, and a later init failure
+      // then skips the close-and-reconnect path because the attempt no longer
+      // matches.
+      clearConnectWatchdog()
 
       entry.ws = ws
       syncSharedWsRefs(entry)

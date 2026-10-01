@@ -19,14 +19,16 @@ use super::endpoints::{proxy_endpoints_for, unique_proxy_endpoints};
 use super::probes::verify_tun_data_plane;
 use super::reconnect::schedule_reconnect_for_generation;
 
-/// §3: the selected node vanished from a new catalog while a tunnel was up —
-/// stop the core, keep the kill switch armed, and wait for the user to pick
-/// a surviving node (no auto-reconnect).
+/// The selected node vanished from a new catalog while a tunnel was up —
+/// release non-strict protection through the normal DNS → Core → WFP path.
+/// Strict mode keeps blocking; both wait for a surviving node (no auto-reconnect).
 pub async fn selected_node_vanished(state: Arc<TonoState>, app: AppHandle, expected_generation: u64) {
-    let guard_state = Arc::clone(&state);
-    let result = tono_core::recovery::reconcile_recovery(
-        async move { guard_state.begin_privileged_release().await },
+    // Own the writer in the detached worker so fail-open can transfer it to release.
+    let result = tokio::spawn(
         async move {
+            let mut guard = Some(state.begin_privileged_release().await);
+            // As in connect failure, no Windows preference means no explicit strict opt-in.
+            let releases = vanished_exit_releases(tono_core::strict_kill_switch_explicit(None));
             let generation = {
                 let mut inner = state.lock().await;
                 let active = inner.fsm.status().is_connected || inner.fsm.status().is_connecting;
@@ -35,8 +37,8 @@ pub async fn selected_node_vanished(state: Arc<TonoState>, app: AppHandle, expec
                 if inner.connect_generation != expected_generation || !inner.catalog_requires_choice || !active {
                     return false;
                 }
-                // Retire connection tasks without permitting them to release the barrier.
-                inner.invalidate_connection(false);
+                // A non-strict catalog teardown also releases any late connection commit.
+                inner.invalidate_connection(releases);
                 // Withdraw Connected before IPC so a new choice cannot hot-switch a
                 // runtime being stopped. A retry must enter normal guarded startup.
                 if inner.fsm.status().is_connected {
@@ -47,18 +49,26 @@ pub async fn selected_node_vanished(state: Arc<TonoState>, app: AppHandle, expec
                     inner.fsm.initial_release_failed();
                 }
                 commands::emit_status(&app, &commands::status_of(&inner));
-                // R2-F2: the unverified arm this leaves behind idles in Protected Offline
-                // until the user picks a node — it must keep its Service-truth poll.
+                // R2-F2: a strict hold or failed release can idle in Protected Offline;
+                // keep its Service-truth poll until release is proved.
                 super::monitor::ensure_protection_resync_locked(&mut inner, || {
                     super::monitor::spawn_protection_resync(&state, &app)
                 });
                 inner.connect_generation
             };
-            logging!(warn, Type::Service, "Tono: 选中节点从新目录中消失，停止核心但保持封锁");
-            // Stop(false) restricts WFP under the Service lifecycle lock. Keep exclusive
-            // ownership through bookkeeping even if the account-scoped caller is aborted.
-            if let Err(error) = service::tono_stop_core(false).await {
-                logging!(warn, Type::Service, "Tono: catalog teardown requires reconciliation: {error:#}");
+            if releases {
+                logging!(warn, Type::Service, "Tono: 选中节点从新目录中消失，释放非严格保护并等待选择");
+                // Transfer the writer; reacquiring it here would deadlock the normal release.
+                if let Err(error) = super::disconnect::release_explicit_with_guard(&state, &app, guard.take()).await {
+                    logging!(warn, Type::Service, "Tono: catalog fail-open requires reconciliation: {error}");
+                }
+            } else {
+                logging!(warn, Type::Service, "Tono: 选中节点从新目录中消失，停止核心但保持严格封锁");
+                // Stop(false) restricts WFP under the Service lifecycle lock. Keep exclusive
+                // ownership through bookkeeping even if the account-scoped caller is aborted.
+                if let Err(error) = service::tono_stop_core(false).await {
+                    logging!(warn, Type::Service, "Tono: catalog teardown requires reconciliation: {error:#}");
+                }
             }
 
             let mut inner = state.lock().await;
@@ -70,20 +80,27 @@ pub async fn selected_node_vanished(state: Arc<TonoState>, app: AppHandle, expec
             inner.controller_secret = None;
             inner.controller_port = None;
             let vanished_node = inner.selected_node.clone();
+            let protection_blocked = inner.fsm.status().is_protection_blocked;
             commands::emit_status(&app, &commands::status_of(&inner));
             drop(inner);
             if let Some(node) = vanished_node {
                 state.audit().log(AuditEvent::SelectionVanished { node });
             }
-            state.audit().log(AuditEvent::ProtectedOffline {
-                reason: "catalogSelectionVanished",
-            });
+            if protection_blocked {
+                state.audit().log(AuditEvent::ProtectedOffline {
+                    reason: "catalogSelectionVanished",
+                });
+            }
             true
         },
     ).await;
     if let Err(error) = result {
         logging!(error, Type::Service, "Tono: catalog teardown worker failed; keeping protection: {error}");
     }
+}
+
+fn vanished_exit_releases(strict_kill_switch: bool) -> bool {
+    !strict_kill_switch
 }
 
 /// Connected node switch: keep the core and WinTUN, widen WFP to old ∪ new,
@@ -328,7 +345,7 @@ pub(super) async fn cold_switch_selected_node(
             inner.fsm.initial_release_failed();
         }
         commands::emit_status(&app, &commands::status_of(&inner));
-        // R2-F2: same armed idle state as the vanish path; the re-entry attempt below may
+        // R2-F2: same armed idle state as the strict vanish path; the re-entry attempt below may
         // be guard-rejected, and the barrier's Service truth must not go unwatched then.
         super::monitor::ensure_protection_resync_locked(&mut inner, || {
             super::monitor::spawn_protection_resync(&state, &app)
@@ -468,6 +485,12 @@ mod convergence_tests {
         assert_eq!(completed, 1, "cleanup must not spend two seconds on every socket");
         drop(guard);
         let _released = release.await;
+    }
+
+    #[test]
+    fn vanished_exit_releases_only_without_strict_kill_switch() {
+        assert!(super::vanished_exit_releases(false), "a removed exit must restore non-strict internet");
+        assert!(!super::vanished_exit_releases(true), "an explicit strict kill switch keeps blocking");
     }
 
     #[test]

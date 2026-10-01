@@ -695,6 +695,17 @@ enum VaultCommand {
     Flush(tokio::sync::oneshot::Sender<Result<(), CredentialError>>),
 }
 
+async fn persist_vault_mutation(
+    vault: Arc<dyn CredentialStore>,
+    key: CredentialKey,
+    value: Option<String>,
+) -> Result<(), CredentialError> {
+    tokio::task::spawn_blocking(move || match value {
+        Some(value) => vault.set(key, &value),
+        None => vault.delete(key),
+    }).await.map_err(join_error).and_then(|result| result)
+}
+
 impl SessionCredentialStore {
     pub fn new() -> Self {
         Self {
@@ -741,22 +752,26 @@ impl SessionCredentialStore {
                     while let Some(command) = receiver.recv().await {
                         match command {
                             VaultCommand::Write(key, value) => {
-                                let vault = vault.clone();
-                                let result = tokio::task::spawn_blocking(move || match value {
-                                    Some(value) => vault.set(key, &value),
-                                    None => vault.delete(key),
-                                }).await.map_err(join_error).and_then(|result| result);
+                                let result = persist_vault_mutation(vault.clone(), key, value.clone()).await;
                                 match result {
                                     Ok(()) => { failures.remove(&key); }
                                     Err(error) => {
                                         tono_logging::logging!(warn, tono_logging::Type::Service,
                                             "Tono: credential persistence failed; durable state is unknown");
-                                        failures.insert(key, error);
+                                        failures.insert(key, (value, error));
                                     }
                                 }
                             }
                             VaultCommand::Flush(done) => {
-                                let result = failures.values().next().cloned().map_or(Ok(()), Err);
+                                // Retry only the latest failed mutation for each key, through the
+                                // same writer. A newer write/delete supersedes it above, so an old
+                                // token cannot be replayed after sign-out or account replacement.
+                                for (key, (value, _)) in std::mem::take(&mut failures) {
+                                    if let Err(error) = persist_vault_mutation(vault.clone(), key, value.clone()).await {
+                                        failures.insert(key, (value, error));
+                                    }
+                                }
+                                let result = failures.values().next().map(|(_, error)| error.clone()).map_or(Ok(()), Err);
                                 let _ = done.send(result);
                             }
                         }
@@ -772,7 +787,8 @@ impl SessionCredentialStore {
         }
     }
 
-    /// Acknowledge all accepted mutations preceding this barrier. A caller's timeout must not
+    /// Retry the latest failed mutations once, then acknowledge all mutations before this barrier.
+    /// A caller's timeout must not
     /// cancel the owner waiting here; sign-out retains account admission until this settles.
     pub async fn flush(&self) -> Result<(), CredentialError> {
         let writer = self.writer.lock().clone();
@@ -802,6 +818,43 @@ impl CredentialStore for SessionCredentialStore {
 mod tests {
     use super::{SERVICE_NAME, SessionCredentialStore, account_name};
     use tono_core::credentials::{CredentialKey, CredentialStore};
+
+    #[tokio::test]
+    async fn flush_retries_a_transiently_failed_vault_write() {
+        use std::sync::{Arc, atomic::{AtomicUsize, Ordering}};
+        use tono_core::credentials::{CredentialError, MemoryCredentialStore};
+
+        struct Vault {
+            durable: MemoryCredentialStore,
+            attempts: AtomicUsize,
+        }
+        impl CredentialStore for Vault {
+            fn get(&self, key: CredentialKey) -> Result<Option<String>, CredentialError> {
+                self.durable.get(key)
+            }
+            fn set(&self, key: CredentialKey, value: &str) -> Result<(), CredentialError> {
+                if self.attempts.fetch_add(1, Ordering::SeqCst) == 0 {
+                    return Err(CredentialError::Store("temporary vault write failure".into()));
+                }
+                self.durable.set(key, value)
+            }
+            fn delete(&self, key: CredentialKey) -> Result<(), CredentialError> {
+                self.durable.delete(key)
+            }
+        }
+        let vault = Arc::new(Vault {
+            durable: MemoryCredentialStore::new(),
+            attempts: AtomicUsize::new(0),
+        });
+        let store = SessionCredentialStore::with_test_vault(vault.clone());
+        store.set_refresh_token("new-session").unwrap();
+
+        tokio::time::timeout(std::time::Duration::from_secs(2), store.flush())
+            .await.unwrap().unwrap();
+
+        assert_eq!(vault.durable.refresh_token().unwrap().as_deref(), Some("new-session"));
+        assert_eq!(vault.attempts.load(Ordering::SeqCst), 2);
+    }
 
     #[tokio::test]
     async fn delayed_vault_mutations_cannot_resurrect_or_erase_a_replacement_token() {

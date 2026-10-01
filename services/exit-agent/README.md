@@ -55,7 +55,11 @@ The roster cycle is ordered deliberately:
 A failed reconciliation is never acknowledged. A failed acknowledgement exits
 non-zero before this round changes the durable usage state, so the roster and
 any queued usage are retried on the next run. The client inventory already
-reflects the installed clients, so the next roster can still revoke them.
+reflects the installed clients, so the next roster can still revoke them. A
+refusal after a partial reconcile, or after a later check such as a counter
+read or a queued report outside the roster clock, records that same known
+inventory and still does not acknowledge or advance usage totals. An unknown
+inventory is not written.
 
 The state lock covers the entire roster/reconcile/counter/delivery cycle. If a
 timer and an operator start overlap, the second run exits without observing or
