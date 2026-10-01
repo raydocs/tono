@@ -173,6 +173,28 @@ describe('ops roles', () => {
     expect((await ops('users/no-such-user', json({ notes: 'x' }, 'PATCH'))).status).not.toBe(403);
   });
 
+  it('shared-admin resources are role-gated on the Access door and raw logs need customers.raw-logs', async () => {
+    bindRole('viewer');
+    expect((await ops('exit-catalog', json({ yaml: 'x', expectedRevision: 1 }, 'PUT'))).status).toBe(403);
+    expect((await ops('signup-allowlist', json({ email: 'a@example.com' }))).status).toBe(403);
+    bindRole('operator');
+    expect((await ops('exit-catalog')).status).toBe(200);
+    const raw = await ops('diagnostics/logs/no-such-log');
+    expect(raw.status).toBe(403);
+    expect(((await raw.json()) as { error: { code: string } }).error.code).toBe('ROLE_FORBIDDEN');
+    bindRole(undefined);
+    expect((await ops('diagnostics/logs/no-such-log')).status).not.toBe(403);
+  });
+
+  it('legacy reads are role-gated and a path no table knows is owner-only', async () => {
+    bindRole('viewer');
+    expect((await ops('catalog-revisions')).status).toBe(403);
+    expect((await ops('fleet-nodes')).status).toBe(200);
+    expect((await ops('no-such-resource')).status).toBe(403);
+    bindRole(undefined);
+    expect((await ops('no-such-resource')).status).toBe(404);
+  });
+
   it('requires catalog permissions for catalog jobs while preserving ordinary operator jobs', async () => {
     await db().prepare(
       `INSERT INTO ops_node_profiles(id, catalog_name, status, created_at, updated_at)

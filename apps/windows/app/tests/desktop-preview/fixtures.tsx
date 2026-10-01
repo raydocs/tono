@@ -1,7 +1,10 @@
 import { navigationItems } from '@/pages/_navigation-meta'
+import { aiTrafficStorageKey } from '@/tono-ui/ai-traffic'
 import { TonoIcon } from '@/tono-ui/TonoIcon'
 import type { DownloadEvent } from '@tauri-apps/plugin-updater'
+import dayjs from 'dayjs'
 import type {
+  TonoAccount,
   TonoDiagnosticsReport,
   TonoLocalDiagnosticsReport,
   TonoRoutePreferences,
@@ -63,6 +66,32 @@ export const useTrafficData = () => ({
   live: false,
   refreshGetClashTraffic: async () => {},
 })
+export const formatTonoActionError = (error: unknown) => String(error)
+export const tonoAccount = async () => ({
+  email: 'preview@example.test',
+  suspended: false,
+  deviceLimit: 3,
+  plan: 'Pro',
+  quotaBytes: 200 * 1024 ** 3,
+  usageBytes: 37.4 * 1024 ** 3,
+  expiresAt: Date.UTC(2027, 2, 31, 12) / 1000,
+})
+export const tonoDevices = async () => [
+  {
+    id: 'this-pc',
+    name: 'DESKTOP-TONO.local',
+    createdAt: 1_756_000_000,
+    current: true,
+  },
+  {
+    id: 'mac',
+    name: 'MacBook-Air.local',
+    createdAt: 1_757_000_000,
+    current: false,
+  },
+]
+export const tonoRevokeDevice = async () => {}
+export const tonoSignOut = async () => {}
 export const tonoEncryptedDnsOverrides = async () =>
   params.get('dns') === 'encrypted'
 export const openWindowsDnsSettings = async () => {}
@@ -340,10 +369,63 @@ const connections = [
     download: 1024,
   },
 ]
+const aiConnections = [
+  {
+    id: 'ai-claude',
+    metadata: {
+      process: 'Claude.exe',
+      host: 'claude.example.test',
+      network: 'tcp',
+      destinationPort: '443',
+    },
+    chains: ['HomeNode', 'Tono-Claude-Home'],
+    rule: 'DOMAIN-SUFFIX',
+    rulePayload: 'example.test',
+    upload: 2_400_000,
+    download: 38_600_000,
+  },
+  {
+    id: 'ai-chatgpt',
+    metadata: {
+      process: 'ChatGPT.exe',
+      host: 'chatgpt.example.test',
+      network: 'tcp',
+      destinationPort: '443',
+    },
+    chains: ['HomeNode', 'Tono-Home-Residential'],
+    rule: 'DOMAIN-SUFFIX',
+    rulePayload: 'example.test',
+    upload: 900_000,
+    download: 11_300_000,
+  },
+]
+const previewAccount: TonoAccount = {
+  email: 'preview@example.test',
+  suspended: false,
+  deviceLimit: 3,
+}
+// Seeds the six earlier days so the week bars have shape; today comes from the feed.
+const seedAiWeek = async () => {
+  const key = await aiTrafficStorageKey(previewAccount.email)
+  const days = Object.fromEntries(
+    [18, 52, 9, 31, 44, 26].map((mb, index) => [
+      dayjs()
+        .subtract(6 - index, 'day')
+        .format('YYYY-MM-DD'),
+      { Claude: mb * 1_000_000 },
+    ]),
+  )
+  localStorage.setItem(key, JSON.stringify(days))
+}
+export const tonoAccount = async () => {
+  if (scenario === 'ai') await seedAiWeek()
+  return previewAccount
+}
 export const useConnectionData = () => ({
   response: {
     data: {
-      activeConnections: connections,
+      activeConnections:
+        scenario === 'ai' ? [...connections, ...aiConnections] : connections,
       closedConnections: [],
       uploadTotal: 320,
       downloadTotal: 9472,

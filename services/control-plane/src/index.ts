@@ -73,9 +73,8 @@ import {
   storedLiveSnapshot,
   storeLiveSnapshot,
 } from './ops/live';
-import {
-  publicUser,
-} from './ops/reads';
+import { publicUser } from './ops/reads';
+import { accessSharedResource } from './ops/access-roles';
 import {
   opsRoutes, publicSystemRoute,
   type OpsRouterDeps,
@@ -2931,7 +2930,7 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
 
   if (p.startsWith('/api/v1/ops/')) {
     const actor = await operationsAdmin(req, e);
-    const shared = await sharedAdministrativeResource(
+    const shared = await accessSharedResource(
       req, e, p.slice('/api/v1/ops/'.length), m, actor.email, sharedAdminDeps,
     );
     if (shared) return shared;

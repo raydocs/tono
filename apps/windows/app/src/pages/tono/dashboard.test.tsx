@@ -63,6 +63,7 @@ vi.mock('@/services/tono', async (importOriginal) => ({
 }))
 
 vi.mock('./connect-progress', () => ({ ConnectProgressCard: () => null }))
+vi.mock('@/tono-ui/AiTrafficCard', () => ({ AiTrafficCard: () => null }))
 
 import DashboardPage from './dashboard'
 

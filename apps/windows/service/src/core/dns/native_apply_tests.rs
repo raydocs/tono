@@ -979,6 +979,52 @@ fn an_unwritable_lost_record_keeps_the_unreadable_capture_in_place() -> Result<(
     Ok(())
 }
 
+#[test]
+#[serial_test::serial]
+fn a_new_doh_template_is_captured_before_an_existing_session_suppresses_it() -> Result<()> {
+    use super::super::{
+        DOH_FLAGS, INTERFACE_DOH_ROOT, interface_doh_key, read_interface_doh_capture,
+        restore_interface_doh, suppress_interface_doh, test_io::{self, Fixture},
+    };
+    use crate::core::dns as facade;
+
+    let fixture = Fixture::new(Vec::new())?;
+    let a_key = interface_doh_key("{A}", "Doh", "1.1.1.1");
+    let b_key = interface_doh_key("{B}", "Doh6", "2001:db8::53");
+    let capture = test_io::with(|io| {
+        for (guid, family) in [("{A}", "Doh"), ("{B}", "Doh6")] {
+            io.keys.insert(format!(r"{INTERFACE_DOH_ROOT}\{guid}"), Default::default());
+            io.keys.insert(format!(r"{INTERFACE_DOH_ROOT}\{guid}\DohInterfaceSettings\{family}"), Default::default());
+        }
+        // A already belongs to the session; B just appeared with encrypted-only DNS.
+        io.keys.insert(a_key.clone(), [(DOH_FLAGS.into(), "0".into())].into());
+        io.keys.insert(b_key.clone(), [(DOH_FLAGS.into(), "2".into())].into());
+        io.capture_dir.join("protected-interface-doh.json")
+    }).unwrap();
+    std::fs::write(facade::snapshot_path(), serde_json::to_vec(&fixture.originals)?)?;
+    std::fs::write(&capture, facade::format_interface_doh_capture(&[facade::InterfaceDohEntry {
+        guid: "{A}".into(), family: "Doh".into(), server: "1.1.1.1".into(), flags: 1,
+    }]).map_err(anyhow::Error::msg)?)?;
+
+    suppress_interface_doh()?;
+    let saved = read_interface_doh_capture()?.unwrap();
+    assert_eq!(saved.len(), 2, "B's originals must be durable before its flags are cleared");
+    assert_eq!(saved[0].flags, 1, "A's original must survive reconciliation");
+    assert_eq!(saved[1].flags, 2);
+    test_io::with(|io| {
+        assert_eq!(io.read(&b_key, DOH_FLAGS).as_deref(), Some("0"));
+        let at_mutation = io.before_doh_write[0].as_ref().unwrap();
+        assert_eq!(at_mutation.len(), 2, "capture precedes the first DoH mutation");
+        assert_eq!(at_mutation[1].flags, 2);
+    });
+    assert!(!restore_interface_doh()?);
+    test_io::with(|io| {
+        assert_eq!(io.read(&a_key, DOH_FLAGS).as_deref(), Some("1"));
+        assert_eq!(io.read(&b_key, DOH_FLAGS).as_deref(), Some("2"));
+    });
+    Ok(())
+}
+
 /// R3-F1 review (#300): the recovery's WinTUN exclusion reads "the TUN address in IPv4
 /// `NameServer` and nothing else" as the removed tunnel's own key. Tono's protected apply must
 /// never leave a real adapter in that shape when it is stopped between its two IPv4 writes,

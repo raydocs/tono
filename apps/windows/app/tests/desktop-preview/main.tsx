@@ -19,6 +19,7 @@ import LoginPage from '@/pages/tono/login'
 import SupportPage from '@/pages/tono/support'
 import ServersPage from '@/pages/tono/servers'
 import ActivityPage from '@/pages/tono/activity'
+import AccountPage from '@/pages/tono/account'
 import { ConnectProgressCard } from '@/pages/tono/connect-progress'
 import { MeshBackground } from '@/tono-ui/MeshBackground'
 import { TonoSidebar } from '@/tono-ui/TonoSidebar'
@@ -171,6 +172,14 @@ const router = createHashRouter([
     element: (
       <PreviewShell>
         <ActivityPage />
+      </PreviewShell>
+    ),
+  },
+  {
+    path: '/account',
+    element: (
+      <PreviewShell>
+        <AccountPage />
       </PreviewShell>
     ),
   },

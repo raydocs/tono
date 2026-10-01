@@ -389,6 +389,17 @@ describe('connectErrorSuggestsServerSwitch', () => {
 })
 
 describe('connectErrorSuggestsBackupChannel', () => {
+  it('does not offer another route when the UDP hop only went idle', () => {
+    const error = new Error(
+      'TONO_CONNECT_HY2_IDLE: timeout: no recent network activity',
+    )
+    expect(connectErrorSuggestsServerSwitch(error)).toBe(false)
+    expect(connectErrorSuggestsBackupChannel(error)).toBe(false)
+    expect(formatTonoActionError(error, (key) => `translated:${key}`)).toBe(
+      'translated:tono.dashboard.errors.hy2Idle (TONO_CONNECT_HY2_IDLE)',
+    )
+  })
+
   it('offers the backup channel for handshake eof and unreachable exits', () => {
     for (const error of [
       new Error(

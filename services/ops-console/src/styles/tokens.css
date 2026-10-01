@@ -58,7 +58,9 @@
   --background: #f5f4f2;
   --surface: #ffffff;
   --foreground: #141413;
-  --muted-foreground: rgb(20 20 19 / 0.58);
+  /* 0.6, not 0.58: at 0.58 the 11 px footers measured 4.48:1 on white, a
+     hair under the 4.5:1 AA floor. */
+  --muted-foreground: rgb(20 20 19 / 0.6);
   --hairline: rgb(20 20 19 / 0.08);
   --accent: #5b4cf5;
   --accent-hover: #4a3ee0;
