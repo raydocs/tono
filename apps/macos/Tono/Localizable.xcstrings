@@ -352,6 +352,26 @@
         }
       }
     },
+    "Protected DNS did not take effect after repeated reconnects: macOS is still resolving through another DNS server. Tono is restoring this Mac's normal internet; AI services stay blocked.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "多次重连后受保护 DNS 仍未生效：macOS 仍在使用其他 DNS 服务器解析。Tono 正在恢复这台 Mac 原来的网络，AI 服务继续拦截。"
+          }
+        }
+      }
+    },
+    "DNS conflict: a corporate VPN, profile or /etc/resolver rule sends some domains to a DNS server outside Tono's protection. Tono is restoring this Mac's normal internet; AI services stay blocked. Turn that rule off, then connect again.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "DNS 冲突：企业 VPN、描述文件或 /etc/resolver 规则把部分域名交给 Tono 保护之外的 DNS 服务器解析。Tono 正在恢复这台 Mac 原来的网络，AI 服务继续拦截。请先关闭该规则，再重新连接。"
+          }
+        }
+      }
+    },
     "Protected DNS did not take effect after repeated reconnects: macOS is still resolving through another DNS server. This Mac is back on its normal internet and AI services stay blocked. Connect again when you are ready.": {
       "localizations": {
         "zh-Hans": {

@@ -148,6 +148,9 @@ final class AppState {
     /// default resolver the audit checks, so a mismatch that outlives
     /// reconnects would otherwise tear the tunnel down forever.
     var consecutiveProtectedDNSBrokenAudits = 0
+    /// Publishes a DNS-failure release's "back on normal internet" text once
+    /// that release has settled open. Tests await it.
+    var dnsFailureReleaseNoticeTask: Task<Void, Never>?
     /// Connect attempts in a row that found no primary network service.
     /// Kept apart from `consecutiveProtectedFailureCount`, which exempts
     /// this environmental failure from its three-strike pause.

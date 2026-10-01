@@ -2550,9 +2550,32 @@ extension AppState {
             "protected_dns_broken_retries_exhausted",
             details: ["audits": String(consecutiveProtectedDNSBrokenAudits)]
         )
-        disconnect(releaseKillSwitch: true, automaticFailureRelease: true)
-        errorMessage = String(localized: "Protected DNS did not take effect after repeated reconnects: macOS is still resolving through another DNS server. This Mac is back on its normal internet and AI services stay blocked. Connect again when you are ready.")
+        releaseAfterProtectedDNSFailure(
+            pending: String(localized: "Protected DNS did not take effect after repeated reconnects: macOS is still resolving through another DNS server. Tono is restoring this Mac's normal internet; AI services stay blocked."),
+            released: String(localized: "Protected DNS did not take effect after repeated reconnects: macOS is still resolving through another DNS server. This Mac is back on its normal internet and AI services stay blocked. Connect again when you are ready.")
+        )
         return true
+    }
+
+    /// The automatic release only queues behind the teardown, which may still
+    /// be repairing the helper or waiting on an administrator prompt with PF
+    /// in place. Show `pending` until then; publish `released` only when the
+    /// teardown settled on an open host. A failed release keeps its own
+    /// "Kill Switch remains active" text, and a newer operation wins.
+    private func releaseAfterProtectedDNSFailure(pending: String, released: String) {
+        disconnect(releaseKillSwitch: true, automaticFailureRelease: true)
+        errorMessage = pending
+        let generation = connectionCoordinator.protectionOperationGeneration
+        let teardown = connectionCoordinator.disconnectSequence
+        dnsFailureReleaseNoticeTask = Task { [weak self] in
+            await teardown?.value
+            guard let self, !Task.isCancelled,
+                  self.connectionCoordinator.protectionOperationGeneration == generation,
+                  !self.isProtectionBlocked, !self.isProtectionUnconfirmed,
+                  !self.isConnected, !self.isConnecting, !self.isDisconnecting,
+                  self.errorMessage == pending else { return }
+            self.errorMessage = released
+        }
     }
 
     /// Split-DNS rules send some domains to a server off this Mac, past the
@@ -2583,9 +2606,13 @@ extension AppState {
                 "resolvers": summary,
             ]
         )
-        disconnect(releaseKillSwitch: true, automaticFailureRelease: true)
-        errorMessage = String(localized: "DNS conflict: a corporate VPN, profile or /etc/resolver rule sends some domains to a DNS server outside Tono's protection. This Mac is back on its normal internet and AI services stay blocked. Turn that rule off, then connect again.")
-            + " (" + summary + ")"
+        let detail = " (" + summary + ")"
+        releaseAfterProtectedDNSFailure(
+            pending: String(localized: "DNS conflict: a corporate VPN, profile or /etc/resolver rule sends some domains to a DNS server outside Tono's protection. Tono is restoring this Mac's normal internet; AI services stay blocked. Turn that rule off, then connect again.")
+                + detail,
+            released: String(localized: "DNS conflict: a corporate VPN, profile or /etc/resolver rule sends some domains to a DNS server outside Tono's protection. This Mac is back on its normal internet and AI services stay blocked. Turn that rule off, then connect again.")
+                + detail
+        )
     }
 
     /// Let the user bypass the weak-network backoff without weakening PF. The
