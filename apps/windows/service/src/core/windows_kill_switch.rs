@@ -500,22 +500,26 @@ fn spawn_startup_release_retry() {
                 drop(running);
                 return;
             }
-            let new_session_wanted = tokio::fs::read(intent_path())
+            let intent = tokio::fs::read(intent_path())
                 .await
                 .ok()
-                .and_then(|bytes| serde_json::from_slice::<IntentRecord>(&bytes).ok())
-                .is_some_and(|intent| intent.wanted);
-            if new_session_wanted {
+                .and_then(|bytes| serde_json::from_slice::<IntentRecord>(&bytes).ok());
+            if intent.as_ref().is_some_and(|intent| intent.wanted) {
                 drop(running);
                 return;
             }
             let release: Result<()> = async {
                 remove_all_filters_unlocked().await?;
                 sweep_legacy_sublayers_unlocked().await;
-                match tokio::fs::remove_file(intent_path()).await {
-                    Ok(()) => {}
-                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-                    Err(error) => return Err(error.into()),
+                if intent.is_some_and(|intent| intent.reconnect_after_release) {
+                    // A retry must retain the same crash-reconnect intent as normal startup.
+                    RECONNECT_AFTER_RELEASE.store(true, Ordering::Release);
+                } else {
+                    match tokio::fs::remove_file(intent_path()).await {
+                        Ok(()) => {}
+                        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                        Err(error) => return Err(error.into()),
+                    }
                 }
                 *armed_guard() = None;
                 TUNNEL_PERMIT_RENDERED.store(false, Ordering::Relaxed);
@@ -4625,6 +4629,36 @@ mod tests {
         assert!(armed_guard().is_none());
         assert!(!TUNNEL_PERMIT_RENDERED.load(Ordering::Relaxed));
         assert!(status().await.last_error.is_none());
+        cleanup().await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn startup_release_retry_preserves_the_crash_reconnect_marker() -> Result<()> {
+        cleanup().await;
+        let intent = crash_recovery_tombstone();
+        atomic_write(&intent_path(), &serde_json::to_vec_pretty(&intent)?).await?;
+        let failures = SimulatedStateFailures::arm_removal();
+
+        restore_on_service_start()
+            .await
+            .expect_err("the initial WFP removal fails");
+        drop(failures);
+        tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            while STARTUP_RELEASE_RETRY_RUNNING.load(Ordering::Acquire) {
+                tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+            }
+        })
+        .await?;
+
+        assert!(
+            status().await.reconnect_after_release,
+            "successful retry must still tell the app to reconnect"
+        );
+        let persisted: IntentRecord = serde_json::from_slice(&tokio::fs::read(intent_path()).await?)?;
+        assert!(persisted.reconnect_after_release);
+        assert!(!persisted.wanted);
         cleanup().await;
         Ok(())
     }
