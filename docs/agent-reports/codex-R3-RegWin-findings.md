@@ -1,6 +1,6 @@
 # R3-RegWin: Codex (GPT-6.1 Sol) findings
 
-Generated 2026-09-30 22:24 MT from the run's findings.tsv / prs.tsv.
+Generated 2026-09-30 22:36 MT from the run's findings.tsv / prs.tsv.
 
 ## PRs
 
@@ -8,6 +8,7 @@ Generated 2026-09-30 22:24 MT from the run's findings.tsv / prs.tsv.
 |---|---|---|---|---|
 | 1037 | hunt/sol-r3regw-fresh-arm-proof | needs-hardware | yes | fix(windows): require fresh-arm proof in verification readback |
 | 1040 | hunt/sol-r3regw-update-release-ai | needs-hardware | yes | fix(windows): keep AI blocking in pending-update failure cleanup |
+| 1044 | hunt/sol-r3regw-direct-single-ai-hold | needs-hardware | yes | fix(windows): avoid reopening the AI hold on DIRECT expiry |
 
 ## Hypotheses
 
@@ -31,7 +32,7 @@ Generated 2026-09-30 22:24 MT from the run's findings.tsv / prs.tsv.
 | REG-1003 | Windows app | — | apps/windows/app/src-tauri/src/tono/connection/monitor.rs:1309 | automatic health cleanup preserves AI hold | ok |
 | REG-945 | Windows app | — | apps/windows/app/src-tauri/src/tono/commands/catalog.rs:280 | hot-switch probe results scoped to node owner | ok |
 | REG-942 | Windows app | — | apps/windows/app/src-tauri/src/tono/connection/monitor.rs:136 | stale status publication generation rejected | ok |
-| REG-917 | Windows app | — | apps/windows/app/src-tauri/src/tono/runtime_generation/owned_config.rs:97 | runtime TUN proof aligns owned producer | ok |
+| REG-917 | Windows app | — | apps/windows/service/src/core/runtime_generation/owned_config.rs:97 | runtime TUN proof aligns owned producer | ok |
 | REG-900 | Windows app | — | apps/windows/app/src-tauri/src/tono/connection.rs:308 | only inactive DIRECT metadata resets | ok |
 | REG-898 | Windows app | — | apps/windows/app/src-tauri/src/tono/connection/direct.rs:796 | controller wait cancellation preserves Service mutation owner | ok |
 | REG-884 | Windows app | — | apps/windows/app/src-tauri/src/tono/connection/transaction.rs:34 | Core/browser-DNS time included in budget | ok |
@@ -75,12 +76,12 @@ Generated 2026-09-30 22:24 MT from the run's findings.tsv / prs.tsv.
 | REG-986 | Windows Service | — | apps/windows/service/src/core/windows_kill_switch.rs:555 | unwanted-intent retries preserve reconnect evidence | ok |
 | REG-983 | Windows Service | — | apps/windows/app/src-tauri/src/core/service/mod.rs:1339 | selective release retry preserves narrow intent | ok |
 | REG-976 | Windows Service | — | apps/windows/service/src/core/windows_kill_switch.rs:1301 | AI hold removed only after exact WFP install succeeds | ok |
-| REG-974 | Windows Service | — | apps/windows/service/src/core/windows_kill_switch.rs:3121 | automatic WFP recovery preserves AI hold; DIRECT double apply concern separately | ok |
+| REG-974 | Windows Service | P2 | apps/windows/service/src/core/windows_kill_switch.rs:3121 | Committed DIRECT expiry deletes its newly-installed AI hold through a redundant second apply | regression-fixed #1044 |
 | REG-955 | Windows Service | — | apps/windows/service/src/core/server/handlers.rs:1041 | shutdown reserved under lifecycle ownership | ok |
 | REG-933 | Windows Service | — | apps/windows/service/src/client/mod.rs:172 | SCM native-thread slots survive waiter timeout | ok |
 | REG-929 | Windows Service | — | apps/windows/app/src-tauri/src/core/service/mod.rs:281 | log read has no owner-recovery mutation | ok |
 | REG-912 | Windows Service | — | apps/windows/app/src-tauri/src/core/service/mod.rs:554 | bounded SCM reads refuse late concurrent repair | ok |
-| REG-911 | Windows Service | — | apps/windows/service/src/bin/install_service/update_executor.rs:468 | publication clock gates successor incarnation | ok |
+| REG-911 | Windows Service | P2 | apps/windows/service/src/bin/install_service/update_executor.rs:376 | Complete-publication recovery returns before missing publication floor is recorded | concern: real-unfixed P2; interrupted publication plus prepublication mapped peer; native exposure unverified |
 | REG-902 | Windows Service | — | apps/windows/service/src/bin/service.rs:422 | SCM stop hint refresher exits and joins bounded | ok |
 | REG-873 | Windows Service | — | apps/windows/service/src/core/server/mod.rs:362 | record absence still stops supervised Core | ok |
 | REG-866 | Windows Service | — | apps/windows/service/src/core/server/mod.rs:339 | unconfirmed stop reinstalls protected DNS | ok |
@@ -89,11 +90,38 @@ Generated 2026-09-30 22:24 MT from the run's findings.tsv / prs.tsv.
 | REG-775 | Windows Service | — | apps/windows/service/src/core/runtime.rs:79 | corrupt record quarantine follows orphan proof | ok |
 | REG-779 | Windows update cleanup | P1 | apps/windows/app/src-tauri/src/tono/connection/disconnect.rs:275 | Automatic failed-Prepare update Disconnect drops narrow intent | regression-fixed #1040 |
 | REG-793 | Windows update cleanup | P1 | apps/windows/service/src/core/update.rs:670 | Early staging error bypasses post-stop AI cleanup and App pending route uses plain release | regression-fixed #1040 |
-| REG-777 | Windows DIRECT expiry | P2 | apps/windows/service/src/core/windows_kill_switch.rs:3664 | Committed DIRECT expiry applies AI hold twice after #974 | concern: verified duplicate native remove/apply gap; fix queued |
-| R3REGW-DIRECT-DOUBLE-HOLD | Windows DIRECT expiry | P2 | apps/windows/service/src/core/windows_kill_switch.rs:3664 | Second selective apply removes already-active AI hold while general traffic is open | concern: verified; P2 transient exposure window |
+| REG-777 | Windows DIRECT expiry | P2 | apps/windows/service/src/core/windows_kill_switch.rs:3664 | Committed DIRECT expiry deletes its newly-installed AI hold through a redundant second apply | regression-fixed #1044 |
+| R3REGW-DIRECT-DOUBLE-HOLD | Windows DIRECT expiry | P2 | apps/windows/service/src/core/windows_kill_switch.rs:3664 | Committed DIRECT expiry deletes its newly-installed AI hold through a redundant second apply | real-fixed #1044 |
 | REG-951 | Windows Activity | — | apps/windows/app/src/pages/tono/activity-model.ts:129 | Object.hasOwn admits only declared string process families | ok |
 | REG-932 | Windows account UI | — | apps/windows/app/src/tono-ui/TonoAccountCard.tsx:54 | account/device cache uses current process and sign-in generation; nil scope disables fetch | ok |
 | REG-984 | Windows singleton | — | apps/windows/app/src-tauri/src/utils/server.rs:100 | authenticated loopback notification bypasses inherited external proxies | ok |
 | REG-820 | Windows status subscription | — | apps/windows/app/src/services/tono.ts:882 | live listener reused; pending registration/last-owner teardown retained | ok |
 | REG-857 | Windows parser tests | — | apps/windows/crates/tono-core/src/node.rs:593 | bounded test additions only; no production parser behavior changes | ok |
 | R3REGW-UPDATE-DISCONNECT-AI-HOLD | Windows update cleanup | P1 | apps/windows/service/src/core/update.rs:670 | Automatic pending-update release loses AI-hold disposition | real-fixed #1040 |
+| R3REGW-RECOVERY-PUBLICATION-FLOOR | Windows update recovery | P2 | apps/windows/service/src/bin/install_service/update_executor.rs:376 | Complete-publication recovery bypasses publication-floor fallback | real-unfixed: incomplete #911; narrow interruption plus old mapped peer; no native reproduction; lower priority tonight |
+| R3REGW-FP-01 | Windows startup retry | — | apps/windows/service/src/core/windows_kill_switch.rs:555 | Startup release retry erases AI hold | false-positive: wanted:false retry preserves existing disposition; corrupt/crash startup applies AI hold directly |
+| R3REGW-FP-02 | Windows owner takeover | — | apps/windows/service/src/core/owner.rs:111 | Owner guard Drop deletes successor metadata | false-positive: metadata is deleted before lock release; successor ownership remains excluded |
+| R3REGW-FP-03 | Windows Core cleanup | — | apps/windows/service/src/core/manager.rs:1147 | Core stop loses process identity before timeout escalation | false-positive: identity is captured while Child is owned; ordinary stop retains it |
+| R3REGW-FP-04 | Windows SCM stop | — | apps/windows/service/src/bin/service.rs:553 | Checkpoint refresh worker hangs shutdown | false-positive: teardown is bounded and refresher joins with a one-second bound |
+| R3REGW-FP-05 | Windows goodbye | — | apps/windows/service/src/core/server/handlers.rs:1041 | Shutdown reservation blocks a new Service process | false-positive: reservation is process-local state and resets on a new process |
+| R3REGW-FP-06 | Windows SCM repair | — | apps/windows/app/src-tauri/src/core/service/mod.rs:554 | Timed-out SCM read enters concurrent privileged repair | false-positive: timeout returns before repair admission |
+| R3REGW-FP-07 | Windows orphan cleanup | — | apps/windows/service/src/core/process.rs:290 | Path recheck kills recycled PID | false-positive: path and captured creation time are verified on the same termination handle |
+| R3REGW-FP-08 | Windows update executor | — | apps/windows/service/src/bin/install_service/update_executor.rs:277 | Executor starts publication before its identity is durable | false-positive: open_waiting waits for store lock held by parent while identity is persisted |
+| R3REGW-FP-09 | Windows DNS retirement | — | apps/windows/service/src/core/dns/engine.rs:528 | Crash between recapture and marker retirement loses original DoH | false-positive: originals are durable and marker cleared before registry suppression |
+| R3REGW-FP-10 | Windows selective worker | — | apps/windows/service/src/core/selective_layer.rs:84 | Worker state mutex spans native apply commands | false-positive: temporary condition guard drops before apply; newer revision is reconciled |
+| R3REGW-FP-11 | Windows update DNS | — | apps/windows/service/src/core/dns/mod.rs:3214 | Update observation heals DNS during concurrent ordinary arm | false-positive: update holds owner lifecycle lock; ordinary arm serializes |
+| R3REGW-FP-12 | Windows installer retry | — | apps/windows/service/src/bin/install_service.rs:1499 | Deleting Service next candidate prevents installer retry | false-positive: each retry stages Service again and revalidates retained candidates |
+| R3REGW-FP-13 | Windows helper quarantine | — | apps/windows/app/src-tauri/src/core/runstate/mod.rs:204 | Quarantined helper state admits another privileged operation | false-positive: op_in_flight remains occupied and begin_operation refuses uncertain slot |
+| R3REGW-FP-14 | Windows DNS callback | — | apps/windows/app/src-tauri/src/tono/windows_dns.rs:52 | Awakened waiter frees callback before notification finishes | false-positive: callback owns separate Arc through response consumption and notification |
+| R3REGW-FP-15 | Windows startup rollback | — | apps/windows/service/src/core/server/handlers.rs:765 | StartClash rollback newly releases strict protection | false-positive: rollback covers new bootstrap arm with existing strict=false construction |
+| R3REGW-FP-16 | Windows catalog rebuild | — | apps/windows/app/src-tauri/src/tono/catalog_sync.rs:282 | Catalog routing rebuild deadlocks its policy writer | false-positive: optional DIRECT reader acquisition is spawned; connect returns and writer drops |
+| R3REGW-FP-17 | Windows DIRECT reset | — | apps/windows/app/src-tauri/src/tono/connection.rs:308 | Clearing signed-app paths widens active policy | false-positive: reset clears inactive metadata before overlay exists; no firewall widening |
+| R3REGW-FP-18 | Windows node probes | — | apps/windows/app/src-tauri/src/tono/state.rs:416 | Same-node ABA probe race is introduced by tonight fix | false-positive: name-based display race predates #945; no network-policy effect proved |
+| R3REGW-DNS-SNAPSHOT-REWRITE | Windows DNS restore | P1 | apps/windows/service/src/core/dns/mod.rs:2771 | Locked snapshot refresh can fail before deletion-tolerant restore proof | duplicate of #982; no competing fix |
+| R3REGW-CATALOG-CONNECTING | Windows catalog routing | — | apps/windows/app/src-tauri/src/tono/catalog_sync.rs:346 | Residential routing rebuild requires Connected while connect uses captured routing | duplicate of known #787 limitation; deliberately deferred, no change |
+| REG-1029 | Windows startup retry | — | apps/windows/service/src/core/windows_kill_switch.rs:555 | Ownerless startup retry preserves AI hold, strict intent, successor and Restore disposition | ok |
+| REG-1032 | Windows Core exhaustion | — | apps/windows/service/src/core/manager.rs:1109 | Epoch-fenced exhaustion retirement preserves AI hold and strict protection | ok |
+| REG-1037 | Windows verification | — | apps/windows/service/src/core/windows_kill_switch.rs:4074 | Fresh-arm readback composes with Core exhaustion and update recovery | ok |
+| R3REGW-FP-19 | Windows startup retry | — | apps/windows/service/src/core/windows_kill_switch.rs:555 | Stale startup retry removes successor WFP protection | false-positive: ARMED and wanted-intent rechecked under WFP writer lock |
+| R3REGW-FP-20 | Windows startup retry | — | apps/windows/service/src/core/windows_kill_switch.rs:555 | Startup retry overrides explicit Restore by reapplying AI hold | false-positive: wanted:false path preserves disposition; serialized layer supersedes late worker |
+| R3REGW-FP-21 | Windows Core exhaustion | — | apps/windows/service/src/core/windows_kill_switch.rs:3711 | Exhaustion notification deadlocks Core stop joining watcher | false-positive: notifying watcher takes only WFP; retirement drops WFP before lifecycle and join |

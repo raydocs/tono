@@ -1,6 +1,6 @@
 # R3-A5A6: Codex (GPT-6.1 Sol) findings
 
-Generated 2026-09-30 22:24 MT from the run's findings.tsv / prs.tsv.
+Generated 2026-09-30 22:36 MT from the run's findings.tsv / prs.tsv.
 
 ## PRs
 
@@ -8,6 +8,7 @@ Generated 2026-09-30 22:24 MT from the run's findings.tsv / prs.tsv.
 |---|---|---|---|---|
 | 1036 | hunt/sol-r3acct-catalog-ai-hold | needs-hardware | yes | fix(windows): retain AI hold after catalog exit removal |
 | 1038 | hunt/sol-r3acct-idle-quit-budget | needs-hardware | yes | fix(windows): bound optional Service shutdown during Quit |
+| 1045 | hunt/sol-r3acct-startup-auth | needs-hardware (automatically applied) | yes | fix(windows): preserve interactive sign-in during startup restore |
 
 ## Hypotheses
 
@@ -26,7 +27,7 @@ Generated 2026-09-30 22:24 MT from the run's findings.tsv / prs.tsv.
 | WIN-GRANT-FLUSH-QUEUE | A5 | P2 | offline_grant.rs:512 | Cancelled grant flushes fill the vault queue behind prolonged hung vault | real-unfixed lower priority; native reproduction pending |
 | R3-A5-CONNECTING-ROUTING | A5 | P2 | catalog_sync.rs:346 | Residential catalog rotation during Connecting leaves stale runtime | duplicate known #787 limitation |
 | WIN-IDLE-QUIT-IPC-DELAY | A6 | P1 | feat/window.rs:538 | Optional idle-Service shutdown can silently delay Quit up to 127 seconds | real-fixed #1038 |
-| WIN-STARTUP-AUTH-SUPERSESSION | A6 | P2 | commands/restore.rs:128 | Boot preflight can supersede a newer interactive sign-in | real-unfixed verified state race; fix candidate |
+| WIN-STARTUP-AUTH-SUPERSESSION | A6 | P2 | commands/restore.rs:128 | Boot preflight can supersede a newer interactive sign-in | real-fixed #1045 |
 | R3-A6-QUIT-RESTORE | A6 | — | commands/restore.rs:210 | Late startup restore rearms after Quit | false-positive connection epoch and current runtime proof gate reconnect |
 | R3-A6-COMMITTED-HANG | A6 | — | lib.rs:657 | Committed exit hangs indefinitely | false-positive ten-second outer cleanup budget |
 | R3-A6-WATCHDOG-CANCEL | A6 | — | lib.rs:286 | Cancelled Quit disables recovery watchdog | false-positive affected watchdog is diagnostic only |
@@ -34,7 +35,7 @@ Generated 2026-09-30 22:24 MT from the run's findings.tsv / prs.tsv.
 | R3-A6-SILENT-WINDOW | A6 | — | resolve/window.rs:159 | Silent boot nevertheless shows window | false-positive silent startup does not create main window |
 | R3-A6-CORE-CLEANUP | A6 | — | feat/window.rs:558 | Core cleanup is indefinitely unbounded | false-positive finite IPC guard; noncancellation deliberate |
 | R3-A6-PROXY-SINGLETON | A6 | P3 | utils/server.rs:100 | Singleton notify inherits proxy | duplicate #984 |
-| WIN-FAILED-PREPARE-AI-HOLD | A6 | P1 | connection/disconnect.rs:267 | Automatic failed-Prepare release discards narrow intent through pending-update Disconnect | real-unfixed verified; needs Service staging-error cleanup extension |
+| WIN-FAILED-PREPARE-AI-HOLD | A6 | P1 | connection/disconnect.rs:267 | Automatic failed-Prepare release discards narrow intent through pending-update Disconnect | duplicate #1040; independently reproduced, own alternate branch not submitted |
 | R3-A6-LEGACY-PREPARE | A6 | — | commands/quit.rs:141 | Legacy update cleanup leaves protection stranded | false-positive command unregistered and no production caller |
 | R3-A6-ADOPT-INCOMPLETE | A6 | P2 | commands/update.rs:346 | Failed Adopt latches INCOMPLETE | duplicate BRICK-W10 |
 | R3-A6-MANUAL-LEASE | A6 | P2 | commands/update.rs:364 | Manual lease refuses pending update release | duplicate BRICK-W2/BRICK-W5 |
