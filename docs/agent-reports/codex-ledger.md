@@ -272,3 +272,48 @@
 | ID | Area | Model | Sev | Verdict | Description [location] |
 |---|---|---|---|---|---|
 | MAC-QUIT-AI-HOLD | macOS Quit/helper | Sol (Codex acct 2, R3-MacQuitHold) | P1 | real-unfixed decision item #1031: documented explicit Disconnect full release requires reconciliation with TOP stop rule | Successful normal Quit removes the selective AI floor [apps/macos/Tono/App/AppDelegate.swift:350] |
+
+### R3-E2T2 (finished 22:24 MT; 47 hypotheses, 33 FP, PRs: #995 #996 #997 #998 #1000 #1002 #1011 #1018 #1035)
+| ID | Area | Model | Sev | Verdict | Description [location] |
+|---|---|---|---|---|---|
+| HY2-PROVISION-SPKI | E2 | Sol (Codex acct 2, R3-E2T2) | P1 | real-fixed #995; merged 140b5d9f, ci-gate passed | Provisioned HY2 source discards SPKI required by macOS [tooling/scripts/provision-reality-node.rb:445] |
+| PROVISION-JOURNAL-BANNER | E2 | Sol (Codex acct 2, R3-E2T2) | P2 | real-fixed #996; merged 72a9c98d, ci-gate passed | No-entry journal banner rejects healthy restart; unreadable journal is accepted [tooling/scripts/remote/manage-tono-node-v2.sh:328] |
+| PROVISION-ROLLBACK-MODE | E2 | Sol (Codex acct 2, R3-E2T2) | P2 | real-fixed #997; merged 857b9e73, ci-gate passed | Immutable snapshot permissions make writable-config rollback verification fail [tooling/scripts/remote/manage-tono-node-v2.sh:151] |
+| CONNECT-BENCH-PARTIAL-CACHE | T2 | Sol (Codex acct 2, R3-E2T2) | P2 | real-fixed #998; merged 7e5c333a, ci-gate passed | Interrupted extraction poisons executable cache reused on retry [tooling/perf/connect-bench/bench.py:127] |
+| CONNECT-BENCH-STARTUP-ORPHAN | T2 | Sol (Codex acct 2, R3-E2T2) | P2 | real-fixed #1000; merged 08aac566, ci-gate passed | Failed startup leaves benchmark child running and log open [tooling/perf/connect-bench/bench.py:571] |
+| PROVISION-PENDING-SUCCESS-DURABILITY | E2 | Sol (Codex acct 2, R3-E2T2) | P2 | real-fixed #1002; merged 156a2536, ci-gate passed | Recovered remote success remains pending on disk and blocks enrollment [tooling/scripts/provision-tono-node.py:182] |
+| HOME-AGENT-PEER-RETENTION-CAP | E2 | Sol (Codex acct 2, R3-E2T2) | P2 | real-unfixed; safe retention needs counter-continuity design, reporter undeployed | Lifetime peer baselines exceed 2000 cap and stop all fresh reports [services/home-agent/report_example.py:148] |
+| HA-GENERATION | E2 | Sol (Codex acct 2, R3-E2T2) | — | duplicate; open issue #5 counter-generation design | Counter reset above the prior watermark can lose usage [services/home-agent/report_example.py:497] |
+| HA-REPORT-400 | E2 | Sol (Codex acct 2, R3-E2T2) | — | duplicate; #899 refusal isolation is already on main | A permanently refused report wedges the queue [services/home-agent/report_example.py:604] |
+| T2-HY2-HOME-UDP | T2 | Sol (Codex acct 2, R3-E2T2) | — | duplicate; known WIN-HY2-HOME-UDP-LEAK, Windows product uses mihomo | HY2 home UDP falls through to the selected exit [apps/windows/crates/tono-core/src/sing_box/runtime.rs:275] |
+| MIGRATE-CURRENT-RESTORE | E2 | Sol (Codex acct 2, R3-E2T2) | — | duplicate; #845 rollback guard is already on main | Failed current-link switch might strand the node [tooling/scripts/remote/migrate-node-to-release-layout.sh:77] |
+| MIGRATE-STALE-CONFIG | E2 | Sol (Codex acct 2, R3-E2T2) | — | duplicate; #913 restaging and comparison is already on main | Migration might activate stale staged config [tooling/scripts/remote/migrate-node-to-release-layout.sh:63] |
+| TCP-TUNE-FALSE-SUCCESS | E2 | Sol (Codex acct 2, R3-E2T2) | — | duplicate; #910 checks effective live values | TCP tuning might report success without live settings [tooling/scripts/remote/tune-tono-tcp.sh:77] |
+| PROVISION-REPO-ROOT | E2 | Sol (Codex acct 2, R3-E2T2) | — | duplicate; #842 corrected parents[2] on main | Provisioner resolves the wrong repository root [tooling/scripts/provision-tono-node.py:20] |
+
+### R3-W2W3 (finished 22:24 MT; 35 hypotheses, 28 FP, PRs: #PR#1032)
+| ID | Area | Model | Sev | Verdict | Description [location] |
+|---|---|---|---|---|---|
+| R3-WFP-N02 | W2 | Sol (Codex acct 2, R3-W2W3) | — | duplicate #753 persistent floor and namespace v12 | Reboot keeps block but loses infrastructure permits [wfp/mod.rs:437] |
+| R3-WFP-N09 | W2 | Sol (Codex acct 2, R3-W2W3) | — | duplicate #676 presence and virtual/type proof | Tunnel alias admits absent or physical interface [wfp/mod.rs:1040] |
+| R3-MGR-M01 | W3 | Sol (Codex acct 2, R3-W2W3) | — | duplicate #1004 single guard spans bounded retry | Failed-child retry re-locks its own mutex [manager.rs:779] |
+| R3-MGR-M02 | W3 | Sol (Codex acct 2, R3-W2W3) | — | duplicate #1012 cached process identity required | Watchdog abort kills a reused PID [manager.rs:1130] |
+| WIN-DHCPV6-RELAY-SOURCE | W2 | Sol (Codex acct 2, R3-W2W3) | P2 | real-unfixed decision item: safe server/service identity required before widening intentional strict permit; native Windows unrun | Inbound DHCPv6 reply permits exclude legitimate non-link-local relay sources [wfp_model.rs:451] |
+| R3-WFP-DHCP-IDENTITY | W2 | Sol (Codex acct 2, R3-W2W3) | — | duplicate TW-OpenAI-1 / H1-F6 | DHCP ports have no service identity [wfp_model.rs:435] |
+| WIN-CORE-EXHAUSTION-HEALTHY-BLOCK | W3 | Sol (Codex acct 2, R3-W2W3) | P2 | real-fixed #1032 (merged fe0f1b77); regression failed before/passed after; strict and successor-arm guards preserved | Exhausted Core retries leave healthy Blocked WFP with no Core while App is unavailable [manager.rs:923] |
+
+### R3-W1lo (finished 22:24 MT; 29 hypotheses, 17 FP, PRs: #1021 #1024 #1029)
+| ID | Area | Model | Sev | Verdict | Description [location] |
+|---|---|---|---|---|---|
+| WIN-LIVE-BOOTSTRAP-APP-DEATH | W1 | Sol (Codex acct 2, R3-W1lo) | P0 | real-fixed #1021 (merged) | App death during first Connect leaves a healthy Bootstrap block forever [windows_kill_switch.rs:1497] |
+| R3KS1-PENDING-EXPIRY | W1 | Sol (Codex acct 2, R3-W1lo) | P1 | real-unfixed decision boundary; #777/#926 deliberately exclude incomplete phases | Uncommitted DIRECT expiry retains healthy Blocked [windows_kill_switch.rs:3489] |
+| R3KS1-STRICT-WATCHDOG | W1 | Sol (Codex acct 2, R3-W1lo) | decision | real-unfixed documented decision 027; preserve existing behavior | Strict watchdog releases after 30 unhealthy ticks [windows_kill_switch.rs:2965] |
+| R3KS1-SELECTIVE-WORKER-HANG | W1 | Sol (Codex acct 2, R3-W1lo) | P2 | duplicate #988 native-failure limitation; bounded async waits | Hung native child can strand future selective operations [selective_layer.rs:281] |
+| R3KS1-NRPT-BYPASS | W1 | Sol (Codex acct 2, R3-W1lo) | decision | duplicate SFO-1 accepted design | Cached answers DoH literal IPs bypass suffix hold [selective_fail_open.rs:36] |
+| R3KS1-SELECTIVE-REMOVAL | W1 | Sol (Codex acct 2, R3-W1lo) | — | duplicate #976; removal follows successful exact replacement | Arming removes the hold before replacement protection exists [windows_kill_switch.rs:1239] |
+| WIN-CORRUPT-STARTUP-RELEASE-RETRY | W1 | Sol (Codex acct 2, R3-W1lo) | P2 | real-fixed #1029 (merged); recovered valid-wanted readback remains a conservative-admission limitation | Ownerless corrupt startup abandons broad-filter removal after transient native failure [windows_kill_switch.rs:3005] |
+| WIN-DISCONNECT-CRASH-RETRY-RECONNECT | W1 | Sol (Codex acct 2, R3-W1lo) | P2 | real-fixed #1024 (merged) | Pending crash tombstone overwrites a successful Disconnect durable reconnect=false [windows_kill_switch.rs:2756] |
+| R3KS1-COMMITTED-DIRECT-EXPIRY | W1 | Sol (Codex acct 2, R3-W1lo) | P0 | duplicate #777/#926 | App death or renewal failure leaves committed DIRECT Blocked [windows_kill_switch.rs:2555] |
+| R3KS1-INTERRUPTED-FIRST-CONNECT | W1 | Sol (Codex acct 2, R3-W1lo) | P0 | duplicate #1005 | Service restart after interrupted first Connect omits AI hold [windows_kill_switch.rs:3486] |
+| R3KS1-LATE-SELECTIVE-WORKER | W1 | Sol (Codex acct 2, R3-W1lo) | P1 | duplicate #988 revisioned single-worker reconciliation | Late selective apply overwrites a newer remove request [selective_layer.rs:74] |
+| R3KS1-RECOVERY-AI-OMISSION | W1 | Sol (Codex acct 2, R3-W1lo) | P0 | duplicate #974 | Corrupt or unproven-session recovery drops secondary AI hold [windows_kill_switch.rs:2786] |
