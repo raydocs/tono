@@ -603,7 +603,9 @@ pub async fn stop_ipc_server() -> Result<()> {
         // Connection handlers outlive the listener. Fence their queued mutations before
         // releasing protection so none can re-arm it between teardown and process exit.
         IPC_STOPPING.store(true, std::sync::atomic::Ordering::SeqCst);
-        match tokio::time::timeout(IPC_SERVICE_STOP_TIMEOUT, stop_ipc_server_inner()).await {
+        let deadline = tokio::time::Instant::now() + IPC_SERVICE_STOP_TIMEOUT;
+        let stop = windows_kill_switch::with_release_deadline(deadline, stop_ipc_server_inner());
+        match tokio::time::timeout_at(deadline, stop).await {
             Ok(Ok(())) => {}
             Ok(Err(error)) => warn!("Service stop cleanup failed; continuing shutdown: {error:#}"),
             Err(_) => warn!("Service stop cleanup timed out; continuing shutdown"),

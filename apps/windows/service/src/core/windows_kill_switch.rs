@@ -615,6 +615,8 @@ fn spawn_startup_release_retry() {
                 drop(running);
                 return;
             }
+            // Cleared before the attempt so a success keeps its AI-hold report.
+            *last_error_guard() = None;
             let release: Result<()> = async {
                 if intent.as_ref().is_none_or(|intent| intent.wanted) {
                     // Incomplete non-strict evidence needs its startup AI hold and retention.
@@ -660,7 +662,6 @@ fn spawn_startup_release_retry() {
             .await;
             match release {
                 Ok(()) => {
-                    *last_error_guard() = None;
                     // Retire under the writer lock so a later startup cannot lose its retry.
                     drop(running);
                     return;
@@ -3013,26 +3014,76 @@ async fn finish_release_follow_up(apply_narrow: bool) {
         // Model process death at the durable boundary, before native selective work starts.
         return;
     }
-    crate::core::selective_layer::finish_release(apply_narrow).await;
+    let held = crate::core::selective_layer::finish_release(apply_narrow).await;
+    // Report last, after the release wrote its own outcome, so neither failure is overwritten.
+    let unconfirmed_before = AI_HOLD_UNCONFIRMED_BEFORE_RELEASE.swap(false, Ordering::SeqCst);
+    if apply_narrow && unconfirmed_before {
+        note_ai_hold_failure("AI hold could not be confirmed before releasing general traffic");
+    }
+    if apply_narrow && !held {
+        tracing::error!("selective fail-open: AI hold not confirmed after WFP release");
+        note_ai_hold_failure("AI hold could not be confirmed after releasing general traffic");
+    }
+}
+
+fn note_ai_hold_failure(note: &str) {
+    let mut last_error = last_error_guard();
+    *last_error = Some(match last_error.take() {
+        Some(previous) => format!("{previous}; {note}"),
+        None => note.to_owned(),
+    });
+}
+
+static AI_HOLD_UNCONFIRMED_BEFORE_RELEASE: AtomicBool = AtomicBool::new(false);
+
+tokio::task_local! {
+    static RELEASE_DEADLINE: tokio::time::Instant;
+}
+
+/// Time a release needs after the AI hold step: the bounded WFP removal (`WFP_CALL_TIMEOUT`,
+/// 25 s) plus its bookkeeping.
+const RELEASE_AFTER_HOLD_RESERVE: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// Run `release` under a caller that cancels it at `deadline` (SCM Stop). The AI hold step
+/// then never spends the time WFP removal needs.
+#[cfg_attr(not(windows), allow(dead_code))]
+pub(crate) async fn with_release_deadline<T>(
+    deadline: tokio::time::Instant,
+    release: impl std::future::Future<Output = T>,
+) -> T {
+    RELEASE_DEADLINE.scope(deadline, release).await
 }
 
 /// Decision 031 (#1271): an automatic release installs the AI hold while WFP still blocks, so AI
 /// traffic is never direct between filter removal and the hold landing. A hold that fails or
 /// misses its budget never keeps the general block: the caller still removes WFP, and the
 /// failure is logged and reported. The post-removal follow-up still runs at the durable boundary.
+/// Under a cancelling caller the wait leaves `RELEASE_AFTER_HOLD_RESERVE` for WFP removal, and
+/// is skipped when less remains, so the hold wait can never cancel the removal itself.
 async fn hold_ai_before_release(apply_narrow: bool) {
-    if !apply_narrow || crate::core::selective_layer::finish_release(true).await {
+    if !apply_narrow {
         return;
     }
-    tracing::error!(
-        "selective fail-open: AI hold not confirmed before WFP release; releasing anyway"
-    );
-    let note = "AI hold could not be confirmed before releasing general traffic";
-    let mut last_error = last_error_guard();
-    *last_error = Some(match last_error.take() {
-        Some(previous) => format!("{previous}; {note}"),
-        None => note.to_owned(),
+    let budget = RELEASE_DEADLINE.try_with(|deadline| {
+        deadline
+            .saturating_duration_since(tokio::time::Instant::now())
+            .saturating_sub(RELEASE_AFTER_HOLD_RESERVE)
     });
+    let held = match budget {
+        Err(_) => crate::core::selective_layer::finish_release(true).await,
+        Ok(budget) if budget.is_zero() => false,
+        Ok(budget) => {
+            tokio::time::timeout(budget, crate::core::selective_layer::finish_release(true))
+                .await
+                .unwrap_or(false)
+        }
+    };
+    AI_HOLD_UNCONFIRMED_BEFORE_RELEASE.store(!held, Ordering::SeqCst);
+    if !held {
+        tracing::error!(
+            "selective fail-open: AI hold not confirmed before WFP release; releasing anyway"
+        );
+    }
 }
 
 /// Normal release — only on explicit user request. See the DNS-before-disarm invariant.
@@ -4967,6 +5018,7 @@ mod tests {
     async fn cleanup() {
         crate::core::selective_layer::remove().await;
         TEST_INTERRUPT_RELEASE_FOLLOW_UP.store(false, Ordering::SeqCst);
+        AI_HOLD_UNCONFIRMED_BEFORE_RELEASE.store(false, Ordering::SeqCst);
         TEST_REMOVE_FAILURE.store(false, Ordering::Relaxed);
         TEST_REMOVE_ATTEMPTS.store(0, Ordering::Relaxed);
         TEST_RESIDUAL_FILTER_KEYS.lock().unwrap().clear();
@@ -5489,6 +5541,37 @@ mod tests {
         assert!(
             held_at_removal,
             "AI must already be held when WFP is removed (#1271)"
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn near_release_deadline_skips_the_ai_hold_wait_before_removing_wfp() -> Result<()> {
+        cleanup().await;
+        arm_bootstrap(&test_config(), "/opt/tono/mihomo", "owner-alice").await?;
+        TEST_HOLD_AT_LAST_REMOVAL.store(true, Ordering::SeqCst);
+
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(1);
+        with_release_deadline(deadline, release_after_service_stop()).await?;
+        let held_at_removal = TEST_HOLD_AT_LAST_REMOVAL.load(Ordering::SeqCst);
+        let released = armed_guard().is_none();
+        let held_after = crate::core::selective_layer::test_hold_active();
+        let reported = status().await.last_error;
+        cleanup().await;
+
+        assert!(released, "SCM Stop must still remove WFP");
+        assert!(
+            !held_at_removal,
+            "no AI hold wait may spend the time WFP removal needs"
+        );
+        assert!(
+            held_after,
+            "the post-removal follow-up still applies the AI hold"
+        );
+        assert!(
+            reported.is_some_and(|error| error.contains("before releasing general traffic")),
+            "the skipped hold must stay visible after the release succeeds"
         );
         Ok(())
     }
