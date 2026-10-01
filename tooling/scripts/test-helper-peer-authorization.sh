@@ -23,6 +23,7 @@ saved_keychains=
 trusted_cert=
 release_keychain=
 plan_only=0
+case_seq=0
 if [ "${1:-}" = "--plan" ]; then
   plan_only=1
 fi
@@ -209,7 +210,13 @@ run_case() {
   identifier=$2
   signing_identity=$3
   entitlements=${4:-}
-  socket_path="$temporary_dir/$expected-$identifier-$(printf %s "$entitlements" | wc -c | tr -d ' ').sock"
+  # The server calls exit(), so Swift defer never unlinks the socket. The
+  # ad-hoc reject and the self-signed right-identifier reject share
+  # expected, identifier, and an empty entitlement file, so a path built
+  # from those three looks already-listening and the client fails at once.
+  case_seq=$((case_seq + 1))
+  socket_path="$temporary_dir/c${case_seq}.sock"
+  rm -f "$socket_path"
   sign_client || return 2
   "$server" "$socket_path" "$expected" &
   server_pid=$!

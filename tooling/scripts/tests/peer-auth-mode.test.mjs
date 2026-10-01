@@ -88,3 +88,10 @@ test('hosted ci runs the reject cases and records that the allow case did not', 
   assert.match(present.stdout, /^allow/m)
   assert.equal(present.summary, '')
 })
+
+test('each signing case gets its own socket because the server leaves the previous one', () => {
+  const source = readFileSync(script, 'utf8')
+  assert.match(source, /case_seq=\$\(\(case_seq \+ 1\)\)/)
+  assert.match(source, /socket_path="\$temporary_dir\/c\$\{case_seq\}\.sock"/)
+  assert.doesNotMatch(source, /\$expected-\$identifier/)
+})

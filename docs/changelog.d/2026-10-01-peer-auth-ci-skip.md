@@ -8,3 +8,7 @@
 - 验证：`node --test tooling/scripts/tests/peer-auth-mode.test.mjs` 2 tests OK。`sh -n` 通过。没有在本机跑 `swiftc` / `codesign`。本机缺身份时 `--plan` 的 local 模式仍是 SKIP、退出 0。
 - 候选/发布：仅源码，无新候选。
 - 剩余限制：托管 `macos-ci` 没有开发证书，放行用例在 CI 里仍不执行。自签失败时只跑 ad-hoc 拒绝，并再写一条 warning。发布步骤改在 Developer ID 导入之后，不再因为缺少 Apple Development 身份而失败。
+
+## 2026-10-01 · 续记
+
+- 工程与测试：`macos / policy-tests` 在第四次重签 `auth-client` 后退出 1，没有别的报错。ad-hoc 拒绝和「自签、正确标识、无 entitlement」共用 `reject-com.raydocs.tono-0.sock`。服务端用 `exit()`，Swift 的 defer 不会删套接字，下一次把残留文件当成已在监听。每个用例改为 `cN.sock`。授权要求没有改。
