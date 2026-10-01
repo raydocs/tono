@@ -136,6 +136,12 @@ impl ProtocolInfo {
         self.protocol.epoch == ProtocolVersion::current().epoch
             && self.protocol.revision >= crate::MIN_SERVICE_REVISION_FOR_SING_BOX
     }
+
+    /// Whether a connected sing-box session can replace its process for reviewed-app DIRECT.
+    pub const fn supports_sing_box_direct(&self) -> bool {
+        self.protocol.epoch == ProtocolVersion::current().epoch
+            && self.protocol.revision >= crate::MIN_SERVICE_REVISION_FOR_SING_BOX_DIRECT
+    }
 }
 
 /// The image file name selects the engine. Omitted and unknown names stay mihomo,
@@ -361,6 +367,30 @@ pub struct ReplaceDirectEndpointsRequest {
     /// not render. The Service still validates every entry against its own
     /// `REVIEWED_DIRECT_PORTS`: the App proposes, the Service decides, and neither side alone
     /// can widen the boundary.
+    #[serde(default)]
+    pub reviewed_direct_ports: Vec<u16>,
+}
+
+fn default_restore_previous() -> bool {
+    true
+}
+
+/// Revision 19. The JSON the compiler produced for the running sing-box process.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReplaceSingBoxRuntimeRequest {
+    pub runtime_json: String,
+    /// The first DIRECT install restores the previous full tunnel. A later
+    /// rollback sets this false so failure cannot write DIRECT rules back.
+    #[serde(default = "default_restore_previous")]
+    pub restore_previous: bool,
+}
+
+/// Revision 19. Permits for the rules the App already read back. No reload id:
+/// the Service creates the Committed lease itself.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CommitSingBoxDirectRequest {
+    #[serde(default)]
+    pub direct_endpoints: Vec<ProxyEndpoint>,
     #[serde(default)]
     pub reviewed_direct_ports: Vec<u16>,
 }
@@ -1369,6 +1399,16 @@ mod tests {
         assert!(!mihomo.iter().any(|arg| arg == "run"));
         assert!(is_sing_box_core_path("sing-box"));
         assert!(!is_sing_box_core_path("tono-core.exe"));
+    }
+
+    #[test]
+    fn sing_box_direct_requires_revision_nineteen() {
+        let mut info = ProtocolInfo::current();
+        info.protocol.revision = 18;
+        assert!(info.supports_sing_box_core());
+        assert!(!info.supports_sing_box_direct());
+        info.protocol.revision = 19;
+        assert!(info.supports_sing_box_direct());
     }
 
     #[test]

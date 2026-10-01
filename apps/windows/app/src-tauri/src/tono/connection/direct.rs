@@ -4,9 +4,10 @@ use std::sync::Arc;
 use std::time::Duration;
 use tauri::AppHandle;
 use tono_core::{
-    EXIT_GROUP_NAME,
+    EXIT_GROUP_NAME, CatalogRouting,
     config::{self, RuntimePorts, build_owned_runtime_with_ports},
     node::ValidatedNode,
+    sing_box::expected_clash_api_rules,
 };
 use tono_logging::{Type, logging};
 use tono_service_protocol::{
@@ -374,6 +375,8 @@ pub(super) struct PendingDirectCommit {
     web_tcp: usize,
     udp: usize,
     wechat_process_path_regexes: Vec<String>,
+    /// sing-box already installed the Committed permits. Do not open the mihomo bracket.
+    permits_already_committed: bool,
 }
 
 /// The applyingCloudPolicy stage. Discovery is optional and occurs while the proven full-tunnel
@@ -434,6 +437,28 @@ pub(super) fn spawn_optional_direct_after_connected(
             clear_direct_reload_in_flight(&state, generation).await;
             return;
         };
+        if pending.permits_already_committed {
+            let heartbeat = DirectLeaseHeartbeat {
+                session: pending.session.clone(),
+                reload_id: pending.reload_id,
+                endpoint_digest: pending.endpoint_digest.clone(),
+                policy: pending.policy.document.clone(),
+            };
+            clear_direct_reload_in_flight(&state, generation).await;
+            let wechat_paths = pending.wechat_process_path_regexes.clone();
+            let mut inner = state.lock().await;
+            if inner.connect_generation != generation || !inner.fsm.status().is_connected {
+                return;
+            }
+            inner.applied_wechat_path_regexes = Some(wechat_paths);
+            inner.optional_direct_active = true;
+            inner.applied_direct_interface = committed_interface;
+            inner.optional_direct_skip = None;
+            commands::emit_status(&app, &commands::status_of(&inner));
+            drop(inner);
+            spawn_direct_lease_heartbeat(&state, generation, heartbeat).await;
+            return;
+        }
         // Reload already mutated the runtime. Even a stale generation must pass through the
         // detached commit/reconciliation owner, which retracts only the captured Service session.
         let wechat_paths = pending.wechat_process_path_regexes.clone();
@@ -489,14 +514,14 @@ pub(super) async fn apply_cloud_policy(
     {
         return Ok(None);
     }
-    if state.lock().await.sing_box_core {
-        // PUT /configs is a no-op on sing-box alpha.9. Entering the reload
-        // bracket and then failing would leave traffic Blocked. Keep the
-        // proven full tunnel until a protected process replace exists.
+    let sing_box = state.lock().await.sing_box_core;
+    if sing_box && !sing_box_direct_service_ready().await {
+        // A revision-18 Service has no process-replace route. PUT /configs does
+        // not apply, and the mihomo bracket would leave traffic Blocked.
         skip_optional_direct_policy(
             state,
             generation,
-            "sing-box keeps the proven full tunnel; in-place config reload does not apply".to_string(),
+            "sing-box keeps the proven full tunnel; this Service cannot replace the process".to_string(),
         )
         .await;
         return Ok(None);
@@ -590,6 +615,26 @@ pub(super) async fn apply_cloud_policy(
         plan.reviewed_direct_ports.clone()
     };
     let direct_interface = plan.physical_interface.clone();
+    if sing_box {
+        return replace_sing_box_for_direct(
+            state,
+            node,
+            nodes,
+            home_node,
+            home_socks5,
+            generation,
+            original_secret,
+            controller_port,
+            mixed_port,
+            &policy,
+            service_session,
+            &plan,
+            direct_endpoints,
+            reviewed_direct_ports,
+            direct_interface,
+        )
+        .await;
+    }
 
     // Build the staged bundle before the irreversible bracket. The controller secret and ports
     // stay byte-identical: this is an in-place reload, not a replacement Core generation.
@@ -1394,6 +1439,7 @@ pub(super) async fn activate_direct_runtime_cancellation_safe(
                 web_tcp,
                 udp,
                 wechat_process_path_regexes,
+                permits_already_committed: false,
             })
         }
         .await;
@@ -1572,6 +1618,234 @@ pub(super) fn classify_optional_direct_resolution<T>(result: Result<T, String>) 
         Ok(value) => OptionalDirectResolution::Ready(value),
         Err(reason) => OptionalDirectResolution::Skip(reason),
     }
+}
+
+async fn sing_box_direct_service_ready() -> bool {
+    match tono_service_protocol::get_version().await {
+        Ok(response) if response.code == 0 => response
+            .data
+            .as_ref()
+            .is_some_and(tono_service_protocol::ProtocolInfo::supports_sing_box_direct),
+        _ => false,
+    }
+}
+
+fn sing_box_rules_keep_ai_blocked(rules: &[tono_core::sing_box::ClashRuleProof]) -> bool {
+    rules.iter().any(|rule| {
+        rule.payload.contains("dashscope.aliyuncs.com")
+            && rule.proxy.starts_with("route(")
+            && !rule.proxy.contains(config::DIRECT_GROUP_NAME)
+    }) && rules.iter().any(|rule| rule.payload.contains("process_path_regex="))
+}
+
+fn clash_rules_match(
+    observed: &serde_json::Value,
+    expected: &[tono_core::sing_box::ClashRuleProof],
+) -> Result<(), String> {
+    let rules = observed
+        .get("rules")
+        .and_then(serde_json::Value::as_array)
+        .ok_or_else(|| "controller /rules omitted its ordered rule list".to_string())?;
+    if rules.len() != expected.len() {
+        return Err(format!(
+            "controller returned {} sing-box rules, expected {}",
+            rules.len(),
+            expected.len()
+        ));
+    }
+    for (index, (rule, expected)) in rules.iter().zip(expected).enumerate() {
+        let type_name = rule.get("type").and_then(serde_json::Value::as_str);
+        let payload = rule.get("payload").and_then(serde_json::Value::as_str);
+        let proxy = rule.get("proxy").and_then(serde_json::Value::as_str);
+        if type_name != Some(expected.type_name.as_str())
+            || payload != Some(expected.payload.as_str())
+            || proxy != Some(expected.proxy.as_str())
+        {
+            return Err(format!(
+                "sing-box controller rule {index} did not match the alpha.9 string"
+            ));
+        }
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments, reason = "one sing-box process replacement")]
+async fn replace_sing_box_for_direct(
+    state: &Arc<TonoState>,
+    node: &ValidatedNode,
+    nodes: &[ValidatedNode],
+    home_node: Option<&ValidatedNode>,
+    home_socks5: Option<&tono_core::CatalogHomeSocks5>,
+    generation: u64,
+    secret: &str,
+    controller_port: u16,
+    mixed_port: u16,
+    policy: &CapturedTrafficPolicy,
+    session: &OwnerSessionProof,
+    plan: &tono_core::config::DirectPlan,
+    endpoints: Vec<ProxyEndpoint>,
+    reviewed_direct_ports: Vec<u16>,
+    direct_interface: String,
+) -> Result<Option<PendingDirectCommit>, StageFailure> {
+    let routing = CatalogRouting {
+        home_proxy: home_node.map(|home| home.name.clone()),
+        home_socks5: home_socks5.cloned(),
+        ..CatalogRouting::default()
+    };
+    let ports = RuntimePorts {
+        mixed_port,
+        controller_port,
+    };
+    let full_tunnel = super::core_select::sing_box_runtime_document(
+        nodes,
+        &node.name,
+        &routing,
+        secret,
+        ports,
+        None,
+    )
+    .map_err(StageFailure::error)?;
+    let direct_document = super::core_select::sing_box_runtime_document(
+        nodes,
+        &node.name,
+        &routing,
+        secret,
+        ports,
+        Some(plan),
+    )
+    .map_err(StageFailure::error)?;
+    let expected = expected_clash_api_rules(&direct_document).map_err(StageFailure::error)?;
+    if !sing_box_rules_keep_ai_blocked(&expected) {
+        skip_optional_direct_policy(
+            state,
+            generation,
+            "sing-box DIRECT document did not keep AI suffixes off the physical NIC".to_string(),
+        )
+        .await;
+        return Ok(None);
+    }
+    ensure_fresh(state, generation).await?;
+    if let Err(error) =
+        service::tono_replace_sing_box_runtime(session, direct_document.clone(), true).await
+    {
+        skip_optional_direct_policy(
+            state,
+            generation,
+            format!("sing-box process replacement did not keep the full tunnel: {error:#}"),
+        )
+        .await;
+        return Ok(None);
+    }
+    let proved = async {
+        wait_controller(secret, controller_port).await?;
+        let client = controller_client(CONTROLLER_HTTP_TIMEOUT)?;
+        let rules = controller_json(&client, secret, controller_port, "/rules").await?;
+        clash_rules_match(&rules, &expected)
+    }
+    .await;
+    if let Err(error) = proved {
+        return restore_sing_box_full_tunnel(
+            state,
+            generation,
+            session,
+            full_tunnel,
+            format!("sing-box /rules did not match; restored the full tunnel: {error}"),
+        )
+        .await;
+    }
+    let committed = match service::tono_commit_sing_box_direct(
+        session,
+        endpoints.clone(),
+        reviewed_direct_ports.clone(),
+    )
+    .await
+    {
+        Ok(result) => result,
+        Err(error) => {
+            return restore_sing_box_full_tunnel(
+                state,
+                generation,
+                session,
+                full_tunnel,
+                format!(
+                    "sing-box DIRECT permits were not installed; restored the full tunnel: {error:#}"
+                ),
+            )
+            .await;
+        }
+    };
+    let endpoint_digest = committed.endpoint_digest.clone();
+    let snapshot = match service::tono_service_status_snapshot().await {
+        Ok(snapshot) => snapshot,
+        Err(error) => {
+            return restore_sing_box_full_tunnel(
+                state,
+                generation,
+                session,
+                full_tunnel,
+                format!("sing-box DIRECT proof failed; restored the full tunnel: {error:#}"),
+            )
+            .await;
+        }
+    };
+    let core_identity = match prove_service_reload_mode(
+        &snapshot,
+        session,
+        KillSwitchStatusMode::Locked,
+    )
+    .and_then(|(identity, status)| {
+        prove_service_endpoint_digest(&status, &endpoint_digest)?;
+        Ok(identity)
+    }) {
+        Ok(identity) => identity,
+        Err(error) => {
+            return restore_sing_box_full_tunnel(
+                state,
+                generation,
+                session,
+                full_tunnel,
+                format!("sing-box DIRECT proof failed; restored the full tunnel: {error}"),
+            )
+            .await;
+        }
+    };
+    let policy_guard = state.begin_policy_activation().await;
+    Ok(Some(PendingDirectCommit {
+        _policy_guard: policy_guard,
+        policy: policy.clone(),
+        selected_node: node.name.clone(),
+        session: session.clone(),
+        reload_id: committed.reload_id,
+        endpoints,
+        reviewed_direct_ports,
+        endpoint_digest,
+        core_identity,
+        controller_secret: secret.to_string(),
+        controller_port,
+        expected_controller_rules: Vec::new(),
+        direct_interface,
+        require_wechat_direct: false,
+        require_web_direct: false,
+        claude_home: false,
+        wechat_tcp: plan.tcp_wechat_rules.len(),
+        web_tcp: plan.tcp_web_rules.len(),
+        udp: plan.udp_wechat_rules.len(),
+        wechat_process_path_regexes: plan.wechat_process_path_regexes.clone(),
+        permits_already_committed: true,
+    }))
+}
+
+async fn restore_sing_box_full_tunnel(
+    state: &Arc<TonoState>,
+    generation: u64,
+    session: &OwnerSessionProof,
+    full_tunnel: String,
+    reason: String,
+) -> Result<Option<PendingDirectCommit>, StageFailure> {
+    // restore_previous is false: a failed rollback must not write DIRECT rules back.
+    let _ = service::tono_replace_sing_box_runtime(session, full_tunnel, false).await;
+    skip_optional_direct_policy(state, generation, reason).await;
+    Ok(None)
 }
 
 pub(super) async fn skip_optional_direct_policy(state: &Arc<TonoState>, generation: u64, reason: String) {

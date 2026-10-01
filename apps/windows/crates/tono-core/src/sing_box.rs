@@ -30,9 +30,11 @@ use sha2::{Digest, Sha256};
 use std::{collections::BTreeSet, fmt, net::SocketAddrV4};
 use thiserror::Error;
 
+mod clash_rules;
 mod flag;
 mod runtime;
 mod select;
+pub use clash_rules::{ClashRuleProof, expected_clash_api_rules};
 pub use flag::{PreferredCore, controller_delay_allowed, enabled_for, preferred_core};
 pub use runtime::{DialEndpoint, OwnedSingBoxRuntime, RuntimeInput, Transport, build_runtime};
 pub use select::{

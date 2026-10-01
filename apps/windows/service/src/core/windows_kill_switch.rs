@@ -2336,6 +2336,150 @@ fn direct_state_may_be_live(armed: &Armed) -> bool {
     !armed.direct_endpoints.is_empty() || armed.direct_reload.is_some()
 }
 
+/// The connected sing-box session is a locked tunnel with no physical DIRECT set.
+pub(crate) fn sing_box_full_tunnel_is_locked() -> Result<()> {
+    ensure_supported()?;
+    let armed = armed_guard().clone().context("kill switch is not armed")?;
+    if armed.intent.mode != KillSwitchStatusMode::Locked {
+        bail!("sing-box replacement requires a locked tunnel");
+    }
+    if let Some(lease) = &armed.direct_reload
+        && lease.phase != DirectReloadPhase::Committed
+    {
+        bail!("sing-box replacement will not interrupt an in-progress DIRECT bracket");
+    }
+    Ok(())
+}
+
+/// Install reviewed-app permits without opening the mihomo bracket.
+///
+/// The lease starts Committed so the watchdog treats it as a heartbeat, not as
+/// a bracket that expires into Blocked. A failed install puts the previous
+/// full-tunnel set back. If that cannot be proved, the caller stops Core and
+/// releases general traffic while the AI hold stays. This function does not
+/// call [`transition_direct_to_blocked_unlocked`].
+pub(crate) async fn commit_sing_box_direct_while_locked(
+    endpoints: &[ProxyEndpoint],
+    reviewed_ports: &[u16],
+    owner_generation: u64,
+) -> Result<crate::DirectRuntimeReloadResult> {
+    ensure_supported()?;
+    let failed = {
+        let _operation = WFP_OPERATION.lock().await;
+        match commit_sing_box_direct_unlocked(endpoints, reviewed_ports, owner_generation).await {
+            Ok(result) => return Ok(result),
+            Err(error) => error,
+        }
+    };
+    if format!("{failed:#}").contains("general traffic was released") {
+        // TUN auto_route would keep capturing packets after WFP is gone.
+        let _ = crate::core::manager::CORE_MANAGER.lock().await.stop_core().await;
+    }
+    Err(failed)
+}
+
+async fn commit_sing_box_direct_unlocked(
+    endpoints: &[ProxyEndpoint],
+    reviewed_ports: &[u16],
+    owner_generation: u64,
+) -> Result<crate::DirectRuntimeReloadResult> {
+    let previous = armed_guard().clone().context("kill switch is not armed")?;
+    if previous.intent.mode != KillSwitchStatusMode::Locked
+        || !previous.direct_endpoints.is_empty()
+        || previous.direct_reload.is_some()
+    {
+        bail!("sing-box DIRECT permits require a locked full tunnel");
+    }
+    let core = current_core_instance_authoritative()
+        .await
+        .context("sing-box DIRECT permits have no running core")?;
+    if tunnel_permit_luid(&previous, Some(core)).is_none() {
+        bail!("sing-box DIRECT permits require the current core's tunnel grant");
+    }
+    prove_current_tunnel_luid(&previous).await.context(
+        "sing-box DIRECT permits lost the locked tunnel; the full tunnel was left in place",
+    )?;
+    let canonical = canonical_direct_endpoints(&previous, endpoints)?;
+    let endpoint_digest = crate::direct_endpoint_digest(&canonical).map_err(anyhow::Error::msg)?;
+    let reload_id = next_direct_reload_id();
+    let tunnel_luid = previous
+        .tun_luid
+        .context("locked sing-box tunnel has no LUID")?;
+    let mut candidate = previous.clone();
+    candidate.direct_endpoints = canonical.clone();
+    candidate.reviewed_direct_ports = reviewed_ports
+        .iter()
+        .copied()
+        .filter(|port| crate::REVIEWED_DIRECT_PORTS.contains(port))
+        .collect();
+    candidate.reviewed_direct_ports.sort_unstable();
+    candidate.reviewed_direct_ports.dedup();
+    candidate.intent.mode = KillSwitchStatusMode::Locked;
+    candidate.direct_reload = Some(DirectReloadLease {
+        owner_generation,
+        reload_id,
+        phase: DirectReloadPhase::Committed,
+        endpoint_digest,
+        core_instance: Some(core),
+        tunnel_luid: Some(tunnel_luid),
+        expires_at: Some(std::time::Instant::now() + DIRECT_COMMITTED_LEASE),
+    });
+    if let Err(error) = install_unlocked_for(&candidate, Some(core)).await {
+        return restore_sing_box_full_tunnel(previous, core, error).await;
+    }
+    let core_after = current_core_instance_authoritative().await;
+    if core_after != Some(core) {
+        return restore_sing_box_full_tunnel(
+            previous,
+            core,
+            anyhow!("core changed during sing-box DIRECT permit install"),
+        )
+        .await;
+    }
+    if let Err(error) = prove_current_tunnel_luid(&candidate).await {
+        return restore_sing_box_full_tunnel(previous, core, error).await;
+    }
+    *armed_guard() = Some(candidate);
+    *last_error_guard() = None;
+    reload_result(owner_generation, reload_id, &canonical)
+}
+
+async fn restore_sing_box_full_tunnel(
+    full_tunnel: Armed,
+    core: CoreInstance,
+    error: anyhow::Error,
+) -> Result<crate::DirectRuntimeReloadResult> {
+    match install_unlocked_for(&full_tunnel, Some(core)).await {
+        Ok(()) => {
+            *armed_guard() = Some(full_tunnel);
+            *last_error_guard() = Some(format!(
+                "sing-box DIRECT permits were not installed; the full tunnel remains: {error:#}"
+            ));
+            Err(error.context(
+                "sing-box DIRECT permits were not installed; the full tunnel remains",
+            ))
+        }
+        Err(restore) => {
+            // The WFP lock is already held. Disarm here; the caller stops Core
+            // after this function returns the lock. Do not publish Blocked.
+            if let Err(release) = disarm_unlocked(true).await {
+                *last_error_guard() = Some(format!(
+                    "sing-box DIRECT permit install failed ({error:#}); full tunnel restore failed ({restore:#}); release failed ({release:#})"
+                ));
+                return Err(release.context(
+                    "sing-box DIRECT permits failed and the full tunnel could not be restored or released",
+                ));
+            }
+            *last_error_guard() = Some(format!(
+                "sing-box DIRECT permit install failed ({error:#}); full tunnel restore failed ({restore:#}); general traffic was released and AI destinations stay blocked"
+            ));
+            Err(error.context(
+                "sing-box full tunnel could not be restored; general traffic was released and AI destinations stay blocked",
+            ))
+        }
+    }
+}
+
 /// Retract every tunnel/DIRECT grant before a TUN-affecting core reload. Every invocation creates
 /// a fresh volatile id, so an ambiguous replay invalidates delayed endpoint requests from the
 /// previous invocation rather than accidentally authorizing them in the new bracket.
