@@ -47,4 +47,4 @@ Sparkle 手动发布：`macos-release.yml` 的 `validate-appcast` 只以 `--dry-
 
 发布门检查的是 `--app`。操作者仍可以把一份已过门的 app 和另一份已经用 Sparkle 私钥签过的 zip 配在一起。`macos-release.yml` 的 dry-run 是从同一个 zip 解出 `--app` 的。没有实机确认 Developer ID 包能通过这道门。
 
-本报告 PR 不开自动合并。
+本报告是 [#941](https://github.com/raydocs/tono/pull/941)，不开自动合并。
