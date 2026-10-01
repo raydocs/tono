@@ -1,6 +1,6 @@
 ## 2026-09-30 · Failed Windows arms preserve the AI hold
 - 归属：SHIP_PLAN §2 item 10；Windows Service WFP installation.
-- 来源：origin/main `8ff1103e` → `hunt/sol-r3ks-arm-ai-hold`; awaiting CI/merge.
+- 来源：origin/main `8ff1103e` → `c2753efe`, `hunt/sol-r3ks-arm-ai-hold`, [#976](https://github.com/raydocs/tono/pull/976); awaiting CI/merge.
 - 缺陷修复：installation removed the previous recovery AI hold before the replacement WFP transaction, including when that transaction failed. Removal now happens only after a successful install. Finding: WIN-FAILED-ARM-AI-HOLD (P2).
 - 新增/优化：无；general release and explicit strict-mode behavior are preserved.
 - 工程与测试：one narrow failed-arm regression; the test backend and serial isolation match #974.
