@@ -1,6 +1,6 @@
 # R4-RestoreDNS: Codex (GPT-6.1 Sol) findings
 
-Generated 2026-09-30 23:48 MT from the run's findings.tsv / prs.tsv.
+Generated 2026-10-01 00:15 MT from the run's findings.tsv / prs.tsv.
 
 ## PRs
 
@@ -24,7 +24,7 @@ Generated 2026-09-30 23:48 MT from the run's findings.tsv / prs.tsv.
 | DNS-CALLBACK-LIFETIME | Windows app DNS | P2 | apps/windows/app/src-tauri/src/tono/windows_dns.rs:39 | Published outcome lets waiter retire completion during callback | false-positive: callback-owned Arc lasts through notification |
 | WIN-IDLE-TOMBSTONE-DNS-SKIP | Windows WFP/DNS | P2 | apps/windows/service/src/core/windows_kill_switch.rs:2764 | Idle tombstone write error appears to skip DNS restore | false-positive: ordinary release handler restores DNS first; SCM scenario needs previous restore failure |
 | WIN-FAILED-START-STRICT-ROLLBACK | Windows WFP | P2 | apps/windows/service/src/core/server/handlers.rs:765 | StartClash failure rollback appears to release strict protection | false-positive: preceding successful bootstrap arm is always non-strict |
-| WIN-SCM-RETIREMENT-FAILURE-RELEASE | Windows WFP/DNS | P1 | apps/windows/service/src/core/server/mod.rs:607 | Owner retirement write failure skips proven SCM stop release and leaves persistent broad WFP | real-fixed #1090 (awaiting CI/merge) |
+| WIN-SCM-RETIREMENT-FAILURE-RELEASE | Windows WFP/DNS | P1 | apps/windows/service/src/core/server/mod.rs:607 | Owner retirement write failure skips proven SCM stop release and leaves persistent broad WFP | real-fixed #1090 (merged; CI passed) |
 | MAC-DNS-DOUBLE-RESTORE-FOREIGN-LOOPBACK | macOS DNS | P2 | apps/macos/Tono/Services/KillSwitchService.swift:333 | Second normal Disconnect restore loses owner evidence and clears a foreign loopback resolver | real-unfixed issue #1097; ownership/recovery contract and native end-to-end qualification required |
 | MAC-UPDATE-RECOVERY-AI-HOLD | macOS PF/update | P1 | apps/macos/Tono/Services/AppState+Connect.swift:724 | Pending-update gate discards automatic failure release intent and removes AI hold | real-fixed #1099 (awaiting CI/merge) |
 | REG-712 | macOS DNS | P2 | apps/macos/Tono/Services/KillSwitchService.swift:333 | Second app restore defeats owner-only helper restoration | issue #1097 |
@@ -86,7 +86,7 @@ Generated 2026-09-30 23:48 MT from the run's findings.tsv / prs.tsv.
 | MAC-RESOLVER-SIGKILL-WAIT | macOS helper | P2 | tooling/scripts/core-helper/KillSwitchPF.swift:1763 | Resolver child wait after SIGKILL remains unbounded | concern: native unkillable-child failure not proved |
 | WFP-STRICT-WATCHDOG-RELEASE | Windows WFP | — | apps/windows/service/src/core/windows_kill_switch.rs:3117 | Strict unhealthy watchdog eventually releases | false-positive: existing deliberate decision027; no reviewed fix introduced it |
 | WFP-SELECTIVE-DOH-COVERAGE | Windows AI recovery | — | apps/windows/service/src/core/selective_layer.rs:145 | Secondary domain hold lacks arbitrary DoH/shared cached CDN coverage | false-positive: documented decision036 best-effort boundary; no new regression |
-| WIN-UPDATE-ROLLBACK-DOUBLE-HOLD | Windows update/AI | P2 | apps/windows/service/src/bin/install_service/update_executor.rs:628 | Failed rollback restart can replace the AI floor twice | duplicate of R3REGW-ROLLBACK-DOUBLE-HOLD issue #1055 |
+| WIN-UPDATE-ROLLBACK-DOUBLE-HOLD | Windows update/AI | P2 | apps/windows/service/src/bin/install_service/update_executor.rs:628 | Failed rollback restart can replace the AI floor twice | duplicate of issue #1055; mitigated by merged #1087 in current main |
 | MAC-UPDATE-SINGLE-FLIGHT-DISPOSITION | macOS update/AI | P2 | apps/macos/Tono/Services/AppState+NativeUpdate.swift:67 | Explicit Restore overlaps selective automatic cleanup | concern: removal may require retry; no native timing evidence, normal network and AI remain available/held |
 | WIN-DNS-RETIREMENT-UNPROVEN-SKIP | Windows DNS | — | apps/windows/service/src/core/dns/mod.rs:2796 | Retirement digest might waive unproven DNS restoration | false-positive: retirement follows accepted proof/policy cleanup; snapshotless safety still checked |
 | WIN-DNS-LATE-RETIREMENT-MARKER | Windows DNS | — | apps/windows/service/src/core/dns/mod.rs:2924 | Late retirement write might retire a newer session | false-positive: exact saved-byte digest binds marker; no single-failure match proved |
@@ -119,3 +119,22 @@ Generated 2026-09-30 23:48 MT from the run's findings.tsv / prs.tsv.
 | REG-991 | macOS update suspension | — | apps/macos/Tono/Services/AppState+NativeUpdate.swift:44 | Suspension fences cancelled reload callbacks and drains owners before retirement | ok |
 | REG-773 | macOS orphan recovery | — | tooling/scripts/core-helper/SocketServer.swift:328 | Dead-owner bootstrap stops Core, releases PF, preserves AI and restores DNS | ok; pending-update exclusion retained |
 | MAC-UPDATE-RETIRE-LOCK-CYCLE | macOS update cleanup | — | tooling/scripts/core-helper/UpdateStorage.swift:70 | Executor retirement while holding update lock appeared to deadlock a waiting executor | false-positive: lock wait is nonblocking and SIGTERM-aware; retirement requires verified Disconnect/native unprotected proof |
+| REG-1087 | Windows selective AI hold | — | apps/windows/service/src/core/selective_layer.rs:74 | Repeated AI hold updates existing firewall/NRPT rules without deletion | ok |
+| REG-1075 | Windows update restore | — | apps/windows/service/src/bin/install_service/update_executor.rs:150 | Failed publication/registration selectively finalizes before restart | concern: known pre-consumption capture issue #1082 |
+| REG-1042 | Windows rollback restore | — | apps/windows/service/src/bin/install_service/update_executor.rs:583 | Durable non-strict rollback releases general traffic with AI before restart | concern: interrupted RolledBack recovery remains issue #1081 |
+| REG-1025 | Windows update cleanup | — | apps/windows/service/src/core/update.rs:355 | New Prepare retains committed evidence until external backups are proven and removed | ok |
+| REG-1017 | Windows update cleanup | — | apps/windows/service/src/bin/install_service/update_executor.rs:813 | Committed cleanup errors retain recovery task for retry | ok |
+| REG-1007 | Windows Prepare restore | — | apps/windows/service/src/core/update.rs:325 | Desired-state write failure cannot bypass selective failed-Prepare release | ok |
+| REG-961 | Windows Install restore | — | apps/windows/service/src/core/update.rs:585 | Spawn refusal releases selectively; admitted binding failures still require Disconnect | concern: original finding documents post-spawn identity failure limitation |
+| REG-911 | Windows update adoption | P2 | apps/windows/service/src/bin/install_service/update_executor.rs:556 | Normal adoption uses publication clock; complete-publication recovery bypass remains | issue #1055; known recovery-publication-floor gap |
+| REG-824 | Windows update task retirement | — | apps/windows/service/src/core/update.rs:1124 | Task create/delete/query use the same OS system directory | ok |
+| REG-776 | Windows installer restore | — | apps/windows/service/src/bin/install_service.rs:1993 | Timed-out runtime abandoned and reboot publication accepts predecessor liveness | ok |
+| REG-1076 | Windows DNS | — | apps/windows/service/src/core/dns/mod.rs:2796 | Content-bound retirement prevents reuse/replay of proven restored adapter captures | ok; merged with CI and portable DNS63/WFP111 passing |
+| REG-1090 | Windows SCM/WFP | — | apps/windows/service/src/core/server/mod.rs:607 | Proven stop releases even if owner retirement write fails | ok; merged with CI and WFP111/server25 passing |
+| WIN-UPDATE-EXECUTOR-BINDING-FAIL | Windows Install restore | P2 | apps/windows/service/src/core/update.rs:639 | Post-spawn binding refusal leaves bootstrap protection with no executor owner | duplicate of #961 documented remaining limitation; no new native proof |
+| WIN-SELECTIVE-REAPPLY-NRPT-GAP | Windows AI hold | — | apps/windows/service/src/core/dns/engine.rs:1888 | NRPT refresh might delete a held sinkhole during reapply | false-positive: create_key/value updates preserve existing keys; apply never deletes |
+| WIN-COMMITTED-PREPARE-SUPERSESSION | Windows update cleanup | — | apps/windows/service/src/core/update.rs:355 | Later Prepare might overwrite retained committed cleanup evidence | false-positive: old plan and all targets proved/cleaned before new reservation and before Core stop |
+| WIN-UPDATE-CAPTURE-FINALIZER | Windows update restore | P2 | apps/windows/service/src/bin/install_service/update_executor.rs:414 | User token capture exits before stopped-Service finalizer | duplicate of issue #1082 |
+| WIN-UPDATE-ROLLEDBACK-RECOVERY-FINALIZER | Windows update restore | P2 | apps/windows/service/src/bin/install_service/update_executor.rs:380 | Interrupted RolledBack recovery skips selective finalization | duplicate of issue #1081 |
+| REG-1086 | macOS reconnect/update | — | apps/macos/Tono/Services/AppState+Connect.swift:2320 | Retry waits normal teardown and selects proved TCP; pending update release stays fenced | ok; all8 main tests retained after #1099 conflict resolution |
+| MAC-PENDING-UPDATE-UNARMED-RETRY-CYCLE | macOS update recovery | — | apps/macos/Tono/Services/AppState+Connect.swift:2291 | New teardown wait might cycle with pending native release | false-positive: synchronous pending gates and generation/post-proof checks retire retries; failing connect never waits on its own native task |

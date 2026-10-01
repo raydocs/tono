@@ -1,6 +1,6 @@
 # R4-Switch: Codex (GPT-6.1 Sol) findings
 
-Generated 2026-09-30 23:48 MT from the run's findings.tsv / prs.tsv.
+Generated 2026-10-01 00:15 MT from the run's findings.tsv / prs.tsv.
 
 ## PRs
 
@@ -12,6 +12,7 @@ Generated 2026-09-30 23:48 MT from the run's findings.tsv / prs.tsv.
 | 1086 | hunt/sol-r4sw-mac-unarmed-target | needs-hardware | yes | fix(macos): reconnect to the proved TCP exit after release |
 | 1098 | hunt/sol-r4sw-unarmed-selection | needs-hardware | yes | fix(windows): preserve newer selection after unarmed proof |
 | 1103 | hunt/sol-r4sw-mac-catalog-ai-hold | needs-hardware | yes | fix(macos): preserve AI hold in catalog and policy cleanup |
+| 1115 | hunt/sol-r4sw-mac-policy-rebuild | needs-hardware | yes | fix(macos): rebuild live DIRECT policy revocations |
 
 ## Hypotheses
 
@@ -24,13 +25,13 @@ Generated 2026-09-30 23:48 MT from the run's findings.tsv / prs.tsv.
 | R4SW-CP-RETIRE-RELIST-TOKEN | Control plane retire/relist | P2 | services/control-plane/src/ops/reads/fleet.ts:268 | Stale retirement can revoke concurrently relisted token | duplicate fixed by other hunter in #1080 (Fixes #1072) |
 | R4SW-CP-RELIST-SPKI | Control plane HY2 relist | P2 | services/control-plane/src/ops/reads/fleet.ts:290 | Synthesized relisted HY2 loses macOS SPKI pin | real-unfixed issue #1073; needs supplied or retained pin contract |
 | R4SW-CP-BOUND-HOME-RETIRE | Control plane retirement | P1 | services/control-plane/src/ops/reads/fleet.ts:169 | Retirement ignored bound residential homeProxy dependency | real-fixed #1083 |
-| REG-1048 | macOS reconnect | — | apps/macos/Tono/Services/AppState+Connect.swift:1646 | Selective automatic release composes with exhausted failures, but browser audit retains full user disarm | concern: browser Secure DNS AI hold omission covered by #1061 |
+| REG-1048 | macOS reconnect | — | apps/macos/Tono/Services/AppState+Connect.swift:1646 | Selective automatic release composes with exhausted failures, but browser audit retains full user disarm | regression-fixed #1061 (other hunter) |
 | REG-1043 | macOS reconnect | — | apps/macos/Tono/Services/AppState+Connect.swift:2283 | Cancellation and generation fences retire late TCP/status answers after Restore | ok |
 | REG-891 | macOS update/reconnect | — | apps/macos/Tono/Services/AppState+Connect.swift:722 | Missing TUN monitor does not treat pending native update as explicit Restore | ok |
 | REG-885 | macOS monitor/catalog | — | apps/macos/Tono/Services/AppState+Connect.swift:1806 | Healthy probes preserve unrelated catalog error notices | ok |
 | REG-802 | macOS switch/catalog | — | apps/macos/Tono/Services/AppState+Catalog.swift:125 | Changed switch target queues latest catalog reload after switch convergence | ok |
 | REG-781 | macOS residential catalog | — | apps/macos/Tono/Services/AppState+Catalog.swift:229 | Same-name residential dial identity changes now trigger existing runtime reload | ok |
-| REG-760 | macOS reconnect | — | apps/macos/Tono/Services/AppState+Connect.swift:1646 | Browser conflict restores ordinary traffic but omits #1048 selective release intent | concern: browser Secure DNS AI hold omission covered by #1061 |
+| REG-760 | macOS reconnect | — | apps/macos/Tono/Services/AppState+Connect.swift:1646 | Browser conflict restores ordinary traffic but omits #1048 selective release intent | regression-fixed #1061 (other hunter) |
 | REG-749 | macOS HY2 / Windows reconnect / Windows tono-core/macOS HY2 | — | apps/macos/Tono/Core/Configuration/ConfigPipeline+SingBoxProduct.swift:122; apps/windows/app/src-tauri/src/tono/connection.rs:500; apps/windows/crates/tono-core/src/sing_box/runtime.rs:392 | HY2 keepalive remains emitted in current runtime without changing certificate pins; HY2 idle context is attached to failure evidence without changing release or node identity; Keepalive stamps every already-admitted HY2 outbound without changing DER/SPKI verification | ok |
 | REG-744 | macOS runtime/catalog | — | apps/macos/Tono/Core/Configuration/ConfigPipeline+SingBoxProduct.swift:234 | Alpha9 DNS/compiler changes compose with current fake-IP probe, delay gate and HY2 keepalive | ok |
 | REG-720 | macOS reconnect | — | apps/macos/Tono/Services/AppState+Connect.swift:2319 | Unarmed retry can choose unprovable HY2 or prove TCP backup yet dial previous selection | regression-fixed #1086 |
@@ -40,8 +41,8 @@ Generated 2026-09-30 23:48 MT from the run's findings.tsv / prs.tsv.
 | R4SW-MAC-SWITCH-CANCEL-CYCLE | macOS switch/reconnect | — | apps/macos/Tono/Services/AppState+Connect.swift:1975 | Monitor awaits failed switch while switch teardown drains monitor | false-positive switch returns before teardown; monitor is not awaiting teardown |
 | R4SW-MAC-CATALOG-ID-REMAP | macOS switch/catalog | — | apps/macos/Tono/Services/AppState+Proxy.swift:176 | Captured switch node ID becomes stale after catalog parse reassigns IDs | false-positive selectedExitNode resolves current catalog by active name; queued reload uses new node |
 | R4SW-MAC-HOME-ROTATE | macOS catalog | — | apps/macos/Tono/Services/AppState+Catalog.swift:235 | Same home route name hides residential credential rotation | duplicate of #781 |
-| R4SW-MAC-POLICY-TEARDOWN | macOS catalog/reconnect | — | apps/macos/Tono/Services/AppState+Catalog.swift:615 | Traffic policy update tears down working tunnel before optional route applies | duplicate of open #966 |
-| R4SW-MAC-REMOVED-EXIT | macOS switch/catalog | — | apps/macos/Tono/Services/AppState+Catalog.swift:149 | Vanished selected exit leaves general internet held without a surviving default | duplicate of open #963 |
+| R4SW-MAC-POLICY-TEARDOWN | macOS catalog/reconnect | — | apps/macos/Tono/Services/AppState+Catalog.swift:615 | Traffic policy update tears down working tunnel before optional route applies | duplicate of merged #966 |
+| R4SW-MAC-REMOVED-EXIT | macOS switch/catalog | — | apps/macos/Tono/Services/AppState+Catalog.swift:149 | Vanished selected exit leaves general internet held without a surviving default | duplicate of merged #963 |
 | R4SW-MAC-AI-DIRECT-GUARD | macOS runtime | — | apps/macos/Tono/Core/Configuration/ConfigPipeline+SingBoxProduct.swift:177 | No residential hop leaves web AI inside reviewed-app broad direct routing | duplicate of codex2 AI-direct suffix guard in-flight per user |
 | R4SW-MAC-RETRY-BACKOFF | macOS reconnect | P1 | apps/macos/Tono/Services/AppState+Connect.swift:2309 | Successful TCP then failed TLS/data-plane resets every automatic reconnect to first 2s delay | real-fixed #1086 |
 | REG-1003 | Windows reconnect | — | apps/windows/app/src-tauri/src/tono/connection/monitor.rs:1309 | Automatic health release preserves the AI hold and strict/policy exclusions | ok |
@@ -91,3 +92,20 @@ Generated 2026-09-30 23:48 MT from the run's findings.tsv / prs.tsv.
 | R4SW-PUBLISH-REALITY-FIELDS | Control-plane catalog | - | services/control-plane/src/catalog-yaml.ts:29 | Catalog PUT validates managed identity but permits incomplete VLESS Reality fields | duplicate #493 body explicitly records global PUT validation as an existing residual; administrator malformed input |
 | R4SW-MAC-CATALOG-AI-HOLD | macOS catalog/switch | P1 | apps/macos/Tono/Services/AppState+Catalog.swift:379 | Automatic catalog removal and failed survivor-switch release remove AI floor | real-fixed #1103 |
 | R4SW-MAC-OPTIONAL-AI-HOLD | macOS policy/reconnect | P1 | apps/macos/Tono/Services/AppState.swift:2031 | Optional Core replacement failure release removes AI floor | real-fixed #1103 |
+| R4SW-CI-WIN-AUX | Windows CI checkout | P1 | docs/agent-reports/2026-10-01-orchestration/scripts/merge-manager/aux.sh:1 | Windows Git rejects newly archived reserved basename before native compilation | duplicate of issue #1100; main fixed by #1108, native qualification pending |
+| R4SW-MAC-POLICY-REVOCATION | macOS live policy | P1 | apps/macos/Tono/Services/AppState.swift:1839 | Accepted DIRECT revocation leaves old suffix/native physical grants active | real-fixed #1115 |
+| R4-DUP-UNARMED-CONNECT-BACKOFF | Windows reconnect | P1 | apps/windows/app/src-tauri/src/tono/connection/unarmed_probe.rs:157 | TCP success plus failed real connect repeatedly resets backoff and re-arms WFP | duplicate of issue #1054; claimed-by-other Codex Sol R4-UnarmedBackoff at 2026-10-01T05:27:03Z |
+| REG-1066 | Windows catalog/reconnect | — | apps/windows/app/src-tauri/src/tono/connection/stages.rs:327 | Merged graph comparison and detached rebuild serialize policy then lifecycle without reacquiring writer in startup | ok |
+| REG-1070 | Windows switch/reconnect | — | apps/windows/app/src-tauri/src/tono/connection/unarmed_probe.rs:242 | Merged retained-barrier TCP skip composes with catalog/cold rebuild while all protected Core/TUN proofs remain | ok |
+| REG-797 | Windows policy | — | apps/windows/crates/tono-core/src/policy.rs:304 | Trusted direct domains and suffixes inherit assistant home guards with parent/child DNS boundaries | ok |
+| REG-1080 | Control-plane retire/catalog | - | services/control-plane/src/ops/reads/fleet.ts:270 | Fresh/replayed retire token revocation now uses committed/observed catalog revision and composes with the bound-home guard | ok |
+| REG-1083 | Control-plane retire/catalog | - | services/control-plane/src/ops/retire-dependencies.ts:26 | Reviewed pending guard PR: both base and legacy HY2 homes are checked before direct and fresh/replayed job retirement | ok (pending PR; pre-write concurrency separately recorded) |
+| R4SW-CP-BIND-RETIRE-CONCURRENCY | Control-plane retire/home binding | P2 | services/control-plane/src/ops/shared-admin/home-exits.ts:433 | Concurrent bind inserts after retire guard but advances revision separately; actual endpoint accepts a binding to the removed home and retired token | real-unfixed issue #1102; P2 overlapping legitimate administrator operations require atomic fence |
+| REG-1061 | macOS reconnect | — | apps/macos/Tono/Services/AppState+Connect.swift:974 | Browser and unarmed automatic cleanup route through existing AI-preserving helper release | ok |
+| REG-963 | macOS catalog/switch | — | apps/macos/Tono/Services/AppState+Catalog.swift:379 | New catalog-removal fallbacks call explicit disarm despite existing automatic AI hold | regression-fixed #1103; remaining busy owner issue #1113 |
+| REG-966 | macOS policy/catalog | — | apps/macos/Tono/Services/AppState.swift:2031 | New optional-policy fallback removes AI hold; in-place apply also preserves prior DIRECT plan | regression-fixed #1103/#1115; remaining busy owner issue #1114 |
+| R4SW-MAC-CATALOG-BUSY-REMOVAL | macOS catalog/switch | P2 | apps/macos/Tono/Services/AppState+Catalog.swift:342 | Removal during switch/reload updates visible selection but skips queued runtime convergence; retired switch can commit | real-unfixed issue #1113; P2 switch/reload overlap requires queued runtime authority |
+| R4SW-MAC-POLICY-COALESCING | macOS policy/reconnect | P2 | apps/macos/Tono/Services/AppState.swift:1846 | Accepted policy change during switch/reload loses queued full plan rebuild and can retain revoked DIRECT routes | real-unfixed issue #1114; P2 busy runtime owner needs newest-policy queue |
+| R4SW-MAC-NO-SELECTIVE-HOOK | macOS automatic release | — | apps/macos/Tono/Core/NetworkProtectionOperations.swift:27 | Catalog/policy comments claimed macOS selective release was unavailable | false-positive existing registered releaseAfterFailure reaches preserveAIHold=true |
+| REG-1086 | macOS automatic recovery | — | apps/macos/Tono/Services/AppState+Connect.swift:2311 | Proved-target admission, slow-release owner and backoff compose with cancellation and selective cleanup | ok |
+| REG-1103 | macOS catalog/policy recovery | — | apps/macos/Tono/Services/AppState+Catalog.swift:349 | Automatic cleanup callers dispatch selective AI release; explicit Restore and strict branches retain behavior | ok |
