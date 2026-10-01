@@ -1,7 +1,7 @@
 ## 2026-10-01 · 目录删掉当前出口不再整机阻断
 
 - 归属：SHIP_PLAN §2 第 10 项（装上会坏）；macOS 已连接会话的目录更新。
-- 来源：main `27e65ba6` → 分支 `cursor/r3-catalog-exit-removed-89a9`；PR 待开；未合 main。
+- 来源：main `27e65ba6` → 分支 `cursor/r3-catalog-exit-removed-89a9`；PR #963；未合 main。
 - 缺陷修复：选中的云出口从新目录消失时，原来先 `disconnect(releaseKillSwitch: false)`，PF 收到 bootstrap。现在还有别的目录出口就改选并保持这次连接；一个都没有就把原来的网络放回来，并写明要另选出口。显式严格模式（`permanent`）仍可保持阻断。关联 MAC-CATALOG-NODE-REMOVED-BLOCK。
 - 新增/优化：无。空闲未连接的提示不变。热切换若武装失败，非严格改为放行，不再安排保护重连。
 - 工程与测试：`CatalogRemovedExitTests.testRemovedExitKeepsASurvivorOrRestoresTheOriginalNetwork`。断开用的特权调用换成空操作。
