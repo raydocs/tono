@@ -70,11 +70,12 @@ export function expiryWeeks(rows: readonly CustomerSummaryDto[], now: number, we
   for (const row of rows) {
     if (row.lifecycle !== 'active' || row.expiresAt === null) continue;
     if (row.expiresAt < now) {
-      out[0] += 1;
+      out[0] = (out[0] ?? 0) + 1;
       continue;
     }
     const week = Math.floor((row.expiresAt - now) / WEEK_SEC);
-    if (week < weeks) out[week + 1] += 1;
+    const slot = week + 1;
+    if (week < weeks) out[slot] = (out[slot] ?? 0) + 1;
   }
   return out;
 }

@@ -206,7 +206,7 @@ export default function CustomersPage({
                       className={cn('count-bit', `tone-${FRAGMENT_TONE[id]}`)}
                       onClick={() => context.change({ filter: filter === id ? null : id, top: 0, left: 0 })}
                     >
-                      <CountText values={[counts[id]]} render={(values) => copy.customerCount[id](values[0])} />
+                      <CountText values={[counts[id] ?? 0]} render={(values) => copy.customerCount[id](values[0] ?? 0)} />
                     </button>
                   </span>
                 ))}
