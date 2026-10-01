@@ -6510,6 +6510,45 @@ ${nameLine}
     expect((await afterSuspend.json() as any).identities).toEqual([]);
   });
 
+  it('names each exit identity with this node source watermark', async () => {
+    await env.DB.prepare("UPDATE exit_nodes SET name = 'Metered' WHERE id = 'exit-default'").run();
+    const yaml = `proxies:
+  - name: "Metered"
+    type: vless
+    server: 8.8.4.4
+    port: 443
+    uuid: {{TONO_CLIENT_UUID}}
+    tls: true
+`;
+    expect((await admin('exit-catalog', { yaml, expectedRevision: 0 }, 'PUT')).status).toBe(200);
+    const billed = await createAccount('roster-watermark');
+    const quiet = await createAccount('roster-watermark-quiet');
+    for (const account of [billed, quiet]) {
+      expect((await api('exit-catalog', {
+        headers: { authorization: `Bearer ${account.accessToken}` },
+      })).status).toBe(200);
+    }
+    const observedAt = Math.floor(Date.now() / 1000);
+    expect((await api('home/usage', json({
+      reports: [{
+        reportId: `roster-watermark-${observedAt}`,
+        userId: billed.user.id,
+        sourceId: 'exit-default',
+        protocolVersion: 2,
+        totalBytes: 1050,
+        observedAt,
+      }],
+    }, EXIT_NODE_TOKENS['exit-default']))).status).toBe(200);
+
+    const listed = await api('home/exit-identities', {
+      headers: { authorization: `Bearer ${EXIT_NODE_TOKENS['exit-default']}` },
+    });
+    expect(listed.status).toBe(200);
+    const identities = (await listed.json() as { identities: Array<{ userId: string; sourceUsageBytes: number }> }).identities;
+    expect(identities.find((entry) => entry.userId === billed.user.id)?.sourceUsageBytes).toBe(1050);
+    expect(identities.find((entry) => entry.userId === quiet.user.id)?.sourceUsageBytes).toBe(0);
+  });
+
   it('revokes sessions and devices as soon as a usage report reaches quota', async () => {
     const account = await createAccount('quota');
     resetMockInventory(account.device.id, account.enrollment.hostname);
