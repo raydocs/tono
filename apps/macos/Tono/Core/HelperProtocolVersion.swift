@@ -356,7 +356,13 @@ nonisolated enum HelperProtocolVersion {
     ///   observed Unprotected state now satisfies a Protected Offline
     ///   recovery and commit; Connected still requires Connected. The
     ///   secondary AI hold on that standard release is unchanged.
-    static let current = "4.52.29"
+    /// - 4.52.29 → 4.52.30: `--emergency-disarm` and its ledger-less fallback
+    ///   release PF even when a stale core survives SIGKILL. A failed daemon
+    ///   startup restores saved DNS after `releasePersistedBlock`, which still
+    ///   applies the secondary AI hold. Explicit emergency disarm still
+    ///   removes that hold. Runtime inputs and package paths open with
+    ///   `O_NONBLOCK` so a swapped-in FIFO is refused instead of hanging.
+    static let current = "4.52.30"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS
