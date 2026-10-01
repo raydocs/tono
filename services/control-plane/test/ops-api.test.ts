@@ -2,6 +2,7 @@ import { createExecutionContext, env, waitOnExecutionContext } from 'cloudflare:
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import worker, { type Env } from '../src/index';
 import { OPS_V1_ROUTES } from '../src/ops/router';
+import { closeExpiredLogWindows } from '../src/ops/shared-admin/diagnostics-logs';
 import {
   assertActivityHour,
   assertAdoptionMatrix,
@@ -315,6 +316,44 @@ describe('ops v1 api', () => {
     assertList(await (await ops('customers/u-1/activity?range=24h')).json(), assertActivityHour);
     assertList(await (await ops('customers/u-1/destinations?range=7d')).json(), assertDestinationRow);
     assertList(await (await ops('customers/u-1/services?range=7d')).json(), assertServiceUsage);
+  });
+
+  it('keeps a renewed log grant when expiry cleanup already selected it', async () => {
+    await seedUser();
+    const t = Math.floor(Date.now() / 1000);
+    for (const [deviceId, expiresAt] of [['d-expired', t - 2], ['d-renewed', t - 1]] as const) {
+      await db().prepare(
+        `INSERT INTO devices(id, user_id, installation_id, name, status, created_at, updated_at)
+         VALUES(?, 'u-1', ?, 'Test', 'active', ?, ?)`,
+      ).bind(deviceId, `inst-${deviceId}`, t, t).run();
+      await db().prepare(
+        `INSERT INTO diagnostics_log_access(device_id, user_id, expires_at, created_at, updated_at)
+         VALUES(?, 'u-1', ?, ?, ?)`,
+      ).bind(deviceId, expiresAt, t, t).run();
+    }
+    let renewed = false;
+    const racingDb = new Proxy(db(), {
+      get(target, key) {
+        if (key === 'batch') return async (statements: D1PreparedStatement[]) => {
+          if (!renewed) {
+            renewed = true;
+            expect((await ops('users/u-1/devices/d-renewed/diagnostics-logs', json({ expiresAt: t + 3600 }, 'PUT'))).status)
+              .toBe(200);
+          }
+          return target.batch(statements);
+        };
+        const value = Reflect.get(target, key, target);
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+    await closeExpiredLogWindows(racingDb, t);
+    expect(renewed).toBe(true);
+    const grants = await db().prepare('SELECT device_id, expires_at FROM diagnostics_log_access').all();
+    expect(grants.results).toEqual([{ device_id: 'd-renewed', expires_at: t + 3600 }]);
+    const audits = await db().prepare(
+      "SELECT summary FROM ops_audit WHERE action = 'diagnostics.window.close' AND target_id = 'u-1'",
+    ).all();
+    expect(audits.results).toEqual([{ summary: 'window:d-expired key:- expired' }]);
   });
 
   it('GET customers/{id} exposes per-device live status and connections filter by deviceId', async () => {
