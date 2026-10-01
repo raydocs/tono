@@ -109,6 +109,11 @@ pub(super) const POST_LOCK_VERIFY_ROUNDS: u32 = 2;
 
 pub(super) const POST_LOCK_VERIFY_ROUND_DELAY: Duration = Duration::from_millis(500);
 
+/// Wait after the data plane is already proved before the advisory `/delay`.
+/// The verdict does not wait. 1500 ms lets the first page open its own
+/// handshakes; the probe itself is a second Reality connection.
+pub(super) const ADVISORY_EXIT_PROBE_DEFER: Duration = Duration::from_millis(1500);
+
 /// C3 — the post-lock verification group: an advisory controller delay check followed by the
 /// authoritative real App data-plane check, retried up to [`POST_LOCK_VERIFY_ROUNDS`] times
 /// inside the still-live transaction.
@@ -232,13 +237,17 @@ pub(super) async fn verify_post_lock(
                         error,
                     });
                 }
-                // The data plane already succeeded. Sample RTT afterwards so
-                // the UI still has a delay, without sharing the handshake
-                // that proved the tunnel.
+                // The data plane already succeeded. Wait before the advisory
+                // sample so the first page does not share the tunnel with a
+                // second Reality handshake. The UI still gets a delay.
                 let delay_state = state.clone();
                 let delay_secret = secret.to_string();
                 let measured_node = state.lock().await.selected_node.clone();
                 tokio::spawn(async move {
+                    tokio::time::sleep(ADVISORY_EXIT_PROBE_DEFER).await;
+                    if delay_state.lock().await.connect_generation != generation {
+                        return;
+                    }
                     let Ok(delay) = probe_exit_once(&delay_secret, controller_port).await else {
                         return;
                     };
@@ -762,4 +771,12 @@ pub(super) fn format_tun_probe_failures(failures: &[String]) -> String {
         TUN_DATA_PLANE_PROBES.len(),
         failures.join(" | ")
     )
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn advisory_exit_probe_waits_until_the_first_page_can_start() {
+        assert_eq!(super::ADVISORY_EXIT_PROBE_DEFER.as_millis(), 1500);
+    }
 }
