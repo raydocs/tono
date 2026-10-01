@@ -1,3 +1,4 @@
+import Observation
 import XCTest
 @testable import Tono
 
@@ -28,6 +29,23 @@ final class AccountLifecycleCoordinatorTests: XCTestCase {
         XCTAssertFalse(coordinator.isBusy)
         await coordinator.run { events.append("new-sign-in") }
         XCTAssertEqual(events.last, "new-sign-in")
+    }
+
+    /// #1256: the sign-in screen must learn that cleanup started, or the
+    /// sign-in it still offers is silently dropped by the barrier.
+    func testCleanupStartAndEndAreObservable() async {
+        let coordinator = AccountLifecycleCoordinator()
+        let release = LifecycleGate()
+        let changes = CleanupObservationCount()
+        withObservationTracking { _ = coordinator.isCleaningUp } onChange: { changes.value += 1 }
+        let cleanup = coordinator.enqueueCleanup(kind: .releaseProtection) { await release.wait() }
+        XCTAssertEqual(changes.value, 1)
+        XCTAssertTrue(coordinator.isCleaningUp)
+        withObservationTracking { _ = coordinator.isCleaningUp } onChange: { changes.value += 1 }
+        release.open()
+        await cleanup.value
+        XCTAssertEqual(changes.value, 2)
+        XCTAssertFalse(coordinator.isCleaningUp)
     }
 
     func testRepeatedLogoutJoinsOneCleanup() async {
@@ -138,4 +156,8 @@ private final class LifecycleGate {
         waiters.removeAll()
         for waiter in pending { waiter.resume() }
     }
+}
+
+nonisolated private final class CleanupObservationCount: @unchecked Sendable {
+    var value = 0
 }

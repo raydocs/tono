@@ -1,16 +1,20 @@
 import Foundation
+import Observation
 
 /// Owns account work and the cleanup barrier. A cancelled sign-in may still
 /// finish a non-cooperative side effect; cleanup must drain it before releasing
 /// protection or clearing credentials, and no new sign-in may cross that barrier.
-@MainActor
+@MainActor @Observable
 final class AccountLifecycleCoordinator {
     enum CleanupKind { case signOut, releaseProtection }
-    private var generation: UInt64 = 0
-    private var work: (id: UUID, task: Task<Void, Never>)?
+    @ObservationIgnored private var generation: UInt64 = 0
+    @ObservationIgnored private var work: (id: UUID, task: Task<Void, Never>)?
     private var cleanup: (id: UUID, kind: CleanupKind, task: Task<Void, Never>)?
 
     var isBusy: Bool { work != nil || cleanup != nil }
+    /// A sign-in requested while this is true is dropped (the barrier above),
+    /// so the sign-in screen observes it and disables its controls (#1256).
+    var isCleaningUp: Bool { cleanup != nil }
 
     func run(_ operation: @escaping @MainActor () async -> Void) async {
         let requestedGeneration = generation
