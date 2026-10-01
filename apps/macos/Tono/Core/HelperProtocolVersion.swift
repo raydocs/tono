@@ -305,11 +305,17 @@ nonisolated enum HelperProtocolVersion {
     ///   `/etc/resolver` files for first-party AI suffixes. Arm, disarm, and
     ///   emergency recovery remove them. The commands cannot name a default
     ///   route. A failure leaves the original network open.
-    /// - 4.52.8 → 4.52.9: a Protected Offline update recovers fail-open. The
+    /// - 4.52.8 → 4.52.9: a release whose placeholder rule file cannot be
+    ///   written still flushes the anchor and removes the intent, and then
+    ///   keeps the standalone emergency main instead of reloading a legacy
+    ///   pf.conf that would load the stale rules back. A PF repair records
+    ///   repairedSinceArm before it can replace kernel rules, so a repair that
+    ///   throws after loading still makes the app re-arm.
+    /// - 4.52.9 → 4.52.10: a Protected Offline update recovers fail-open. The
     ///   successor helper releases PF at launch with the Core stopped, so an
     ///   observed Unprotected state now satisfies a Protected Offline
     ///   recovery and commit; Connected still requires Connected.
-    static let current = "4.52.9"
+    static let current = "4.52.10"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS

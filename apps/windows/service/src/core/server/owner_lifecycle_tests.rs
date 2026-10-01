@@ -22,6 +22,31 @@ fn owner(uid: u32) -> AuthenticatedOwner {
     }
 }
 
+#[tokio::test]
+#[serial]
+async fn release_retires_run_intent_when_the_active_owner_record_is_corrupt() -> anyhow::Result<()> {
+    use crate::core::desired::{load_owner_desired_state, persist_owner_core_started};
+    use crate::core::paths::service_paths;
+
+    let _lifecycle = super::OWNER_LIFECYCLE_LOCK.lock().await;
+    let owner = owner(97_003);
+    let paths = service_paths();
+    let desired_path = paths.for_owner_key(&owner.key).desired_state_path();
+    persist_owner_core_started(&owner, &crate::ClashConfig::default()).await?;
+    tokio::fs::write(paths.active_owner_path(), b"{interrupted owner record").await?;
+    assert!(load_active_owner().await?.is_none());
+
+    super::retire_unrecorded_owner_core(&owner).await?;
+    let still_wanted = load_owner_desired_state(&owner.key).await?.core_should_be_running;
+    tokio::fs::remove_file(&desired_path).await?;
+    assert!(!still_wanted, "a released Core must not retain runnable desired state");
+
+    // An idle release must not manufacture a state file or gain a new disk-write dependency.
+    super::retire_unrecorded_owner_core(&owner).await?;
+    assert!(!desired_path.exists());
+    Ok(())
+}
+
 struct RecordingTransition {
     events: Vec<&'static str>,
     active_owner: ActiveOwnerState,

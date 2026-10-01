@@ -252,12 +252,15 @@ enum CatalogLiveSession {
     /// Skip the reload when the selected exit's dial identity is unchanged
     /// and residential routing did not move. Adding or renaming other cities
     /// is not a reason to close every connection.
+    /// A target rotation during A→B needs the queued reload after the switch
+    /// commits, even when the still-selected A did not move.
     static func shouldReload(
         previousSelected: ProxyNode?,
         nextSelected: ProxyNode?,
-        routingChanged: Bool
+        routingChanged: Bool,
+        switchTargetChanged: Bool = false
     ) -> Bool {
-        if routingChanged { return true }
+        if routingChanged || switchTargetChanged { return true }
         guard let previousSelected, let nextSelected else { return true }
         return !previousSelected.liveSessionIdentity(matches: nextSelected)
     }
