@@ -8,6 +8,101 @@ import XCTest
 /// not an explicit strict kill switch.
 final class PinRefreshKeepSessionTests: XCTestCase {
 
+    func testCommittedPinsWithoutReplacementTunnelRestoreInternetWithAIHold() async throws {
+        let app = AppState()
+        let node = Fixture.realityNode(name: "Los Angeles · Canyon")
+        app.proxyRegions = [ProxyRegion(id: "custom", name: "Custom", nodes: [node])]
+        app.selectedNodeId = node.id
+        app.activeNode = node
+        app.proxyService.activeNodeName = node.name
+        app.tonoTransport = TonoTransportDescriptor(port: 1080)
+        app.coreController = CoreControllerClient(port: 9)
+        app.config.tunEnabled = true
+        app.isConnected = true
+        let pending = ConfigPipeline.ManagedDirectRuntimePolicy(
+            physicalInterface: "en1", domainPins: [], mediaEndpoints: []
+        )
+        app.activeDirectPolicy = ConfigPipeline.ManagedDirectRuntimePolicy(
+            physicalInterface: "en0", domainPins: [], mediaEndpoints: []
+        )
+
+        let configFile = app.coreRuntime.configFilePath
+        let savedConfig = try? Data(contentsOf: configFile)
+        let savedIPC = KillSwitchService.armIPC
+        let savedArmed = KillSwitchService.isArmed
+        let savedUpdateBlock = RuntimeCleanup.nativeUpdateBlocksConnect
+        let savedUpdatePending = RuntimeCleanup.nativeUpdatePending
+        RuntimeCleanup.nativeUpdateBlocksConnect = false
+        RuntimeCleanup.nativeUpdatePending = false
+        KillSwitchService.isArmed = true
+        KillSwitchService.armIPC.prepare = { _ in }
+        KillSwitchService.armIPC.deliver = { _ in (true, true, true, false, false, 0) }
+        defer {
+            app.connectionCoordinator.cancelReconnectTasks()
+            KillSwitchService.armIPC = savedIPC
+            KillSwitchService.isArmed = savedArmed
+            RuntimeCleanup.nativeUpdateBlocksConnect = savedUpdateBlock
+            RuntimeCleanup.nativeUpdatePending = savedUpdatePending
+            if let savedConfig { try? savedConfig.write(to: configFile) }
+            else { try? FileManager.default.removeItem(at: configFile) }
+        }
+
+        var stoppedCores = 0
+        var restoredDNS = 0
+        var selectiveReleases = 0
+        var explicitDisarms = 0
+        var bootstrapRestrictions = 0
+        var aiHold = false
+        var runtime = NetworkProtectionOperations()
+        runtime.repairForRelease = {}
+        runtime.stopCore = { _ in stoppedCores += 1; return true }
+        runtime.coreStatus = { (false, true) }
+        runtime.restoreDNS = { restoredDNS += 1; return true }
+        runtime.disableSystemProxy = {}
+        runtime.disarm = { explicitDisarms += 1; aiHold = false }
+        runtime.releaseAfterFailure = {
+            selectiveReleases += 1
+            aiHold = true
+            KillSwitchService.isArmed = false
+        }
+        runtime.restrictToBootstrap = { bootstrapRestrictions += 1 }
+        runtime.refreshKillSwitchStatus = { .confirmed(requiresProtectionRecovery: false) }
+        app.networkProtection = runtime
+        app.unarmedTcpProof = { _ in false }
+        // Contain the old protected retry without contacting the real helper.
+        app.recordConnectBootSession = { throw POSIXError(.ENOSPC) }
+        var replacements = 0
+        var tunnelChecks = 0
+        var operations = AppState.ConfigReloadOperations()
+        operations.sync = { _, _ in
+            replacements += 1
+            return "/var/run/tono-core/runtime/config.json"
+        }
+        operations.waitForTunnel = {
+            tunnelChecks += 1
+            return false
+        }
+
+        app.reloadCoreConfig(applyingDirectPolicy: pending, operations: operations)
+        await app.connectionCoordinator.configReloadTask?.value
+        await app.finishPendingDisconnect()
+
+        XCTAssertEqual(replacements, 1)
+        XCTAssertEqual(tunnelChecks, 1, "the helper installed pins before tunnel creation failed")
+        XCTAssertEqual(stoppedCores, 1, "retire the installed pins before releasing general traffic")
+        XCTAssertEqual(restoredDNS, 1)
+        XCTAssertEqual(selectiveReleases, 1)
+        XCTAssertTrue(aiHold)
+        XCTAssertEqual(explicitDisarms, 0)
+        XCTAssertEqual(bootstrapRestrictions, 0)
+        XCTAssertFalse(app.isConnected)
+        XCTAssertFalse(app.isProtectionBlocked)
+        XCTAssertFalse(KillSwitchService.isArmed)
+        XCTAssertNil(app.connectionCoordinator.configReloadTask)
+        XCTAssertNil(app.connectionCoordinator.protectedReconnectTask)
+        XCTAssertNotNil(app.connectionCoordinator.unarmedReconnectTask)
+    }
+
     func testFullReloadFailureRestoresInternetWithAIHoldBeforeRetry() async throws {
         let app = AppState()
         let node = Fixture.realityNode(name: "Los Angeles · Canyon")
