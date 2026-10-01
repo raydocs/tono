@@ -228,3 +228,28 @@ async fn sleep_until(state: &TonoState, ticket: u64, generation: u64, until_ms: 
 fn now_ms() -> u64 {
     crate::tono::commands::epoch_millis().max(0) as u64
 }
+
+/// Prove a VLESS exit before `run_stages` installs the tunnel.
+///
+/// Runs beside Service startup. A fresh proof skips the wait. Hysteria2 has no
+/// TCP proof; refusing to install a tunnel for it would block a working UDP exit.
+pub(super) async fn tcp_proof_before_tunnel(
+    state: &Arc<TonoState>,
+    node: &ValidatedNode,
+) -> Result<(), String> {
+    if node.is_hysteria2() {
+        return Ok(());
+    }
+    let endpoint = format!("{}:{}", node.server, node.port);
+    if state.unarmed_proofs.lock().fresh(&endpoint, now_ms()) {
+        return Ok(());
+    }
+    if tcp_open(node).await {
+        state.unarmed_proofs.lock().remember(&endpoint, now_ms());
+        return Ok(());
+    }
+    Err(
+        "tcp connect to the selected exit did not complete before a tunnel was installed"
+            .to_string(),
+    )
+}

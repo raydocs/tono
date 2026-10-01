@@ -121,6 +121,13 @@ may reverse), `reversed` (keep the line; say what replaced it).
 - Why stricter: proofs do not arm a filter or move a route. Hysteria2 is not treated as a TCP success. The release decision stays `disposition_after_exhausted_failure` from the shared failure module. A strict `permanent` kill switch does not enter this loop. Residential routing is not rewritten here.
 - Applied in: branch `cursor/unarmed-background-heal-a925` (`unarmed_probe`).
 
+## 2026-09-30 · A silent TCP loss must not install the tunnel
+
+- Status: provisional
+- Chosen: overlap one TCP proof with Service startup and refuse `run_stages` when it fails. A proof less than 60s old skips the wait. Rejected: installing TUN in parallel with the handshake, and shortening the 10s TUN or 12s first-byte budgets without a device trace.
+- Why stricter: the filter is not installed on a path that did not answer. Hysteria2 still cannot be proved with TCP, so that transport is unchanged. The proof does not change routes.
+- Applied in: branch `cursor/preflight-before-tun-a925`.
+
 ## 2026-09-29 · After an unexpected restart on Windows, does the Service start the Core by itself, and does the App say why it did not?
 
 - Status: provisional
