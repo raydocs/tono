@@ -5642,6 +5642,9 @@ ${nameLine}
     ).bind(leftoverId).first<any>();
     expect(leftover.revoked_at).not.toBeNull();
 
+    // A second sign-in on a still-pending device asks for another enrollment
+    // key and hits the 60s cooldown. That cooldown is not this behavior.
+    (env as unknown as Env).TAILSCALE_ENROLLMENT_ENABLED = 'false';
     const again = await emailSignIn({
       email: account.email,
       deviceName: 'Primary Mac',
