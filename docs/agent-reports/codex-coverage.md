@@ -26,3 +26,5 @@
 | R3-M1M3 | M1 helper socket/power/http, M2 PF kill switch, M3 protected DNS/core manager | Sol (Codex acct 2) | finished 22:47 MT | unfinished: 6 unverified; 1 real-unfixed app-side (MAC-APP-FAILURE-AI-HOLD, handed to R3-P1mac) | PRs: #1028 #1030 #1033 |
 | R3-RegMac | regression review: 49 merged macOS PRs | Sol (Codex acct 2) | finished 22:47 MT | unfinished: none | PRs: #1039 #1043 |
 | R3-W9inst | W9 install_service, update_executor/journal, NSIS | Sol (Codex acct 2) | finished 22:47 MT | unfinished: lower-priority candidates unverified | PRs: #1042 |
+| R3-P1mac | macOS AI hold after exhausted connection failure (fixed, #1048); DashScope coverage investigated | Sol (Codex acct 2) | finished 22:58 MT | unfinished: MAC-DASHSCOPE-DIRECT-COVERAGE unfixed -> issue #1050 | PRs: #1048 |
+| R3-P1win | Windows automatic DIRECT release + update Connecting cleanup investigated; decision record #1046 | Sol (Codex acct 2) | finished 22:58 MT | unfinished: WIN-DIRECT-RESTORE-WRITER-DELAY-AUTO + WIN-UPDATE-CONNECTING-CLEANUP unfixed -> issue #1051 (now R4-Issue1051) | PRs: #1046 |
