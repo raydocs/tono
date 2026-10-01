@@ -316,7 +316,9 @@ final class ProtectedDNSManager {
                 target = service
                 do {
                     let current = try read(service)
-                    if current == [Self.protectedDNSServer] {
+                    // A prior restore can commit these originals to disk
+                    // before Apply fails. Reapply before retiring its snapshot.
+                    if current == [Self.protectedDNSServer] || current == snapshot.servers {
                         attempt(snapshot.servers, for: service)
                     } else if current != snapshot.servers {
                         superseded = true
@@ -388,13 +390,11 @@ final class ProtectedDNSManager {
             throw HelperFailure.invalid("The previously protected network service is unavailable.")
         }
         let current = try read(owner)
-        if current == [Self.protectedDNSServer] {
+        if current == [Self.protectedDNSServer] || current == snapshot.servers {
             try write(snapshot.servers, owner)
             guard try read(owner) == snapshot.servers else {
                 throw HelperFailure.system("The protected DNS transition did not commit.")
             }
-            try removeSnapshot()
-        } else if current == snapshot.servers {
             try removeSnapshot()
         } else {
             try archiveSnapshot()
@@ -1621,6 +1621,76 @@ final class ProtectedDNSManager {
         return true
     }
 
+    static func runRestoreApplyRetrySelfTest() -> Bool {
+        enum ApplyFailure: Error { case injected }
+        let snapshot = Snapshot(service: "Wi-Fi", serviceID: "S1", servers: ["9.9.9.9"])
+        let owner = NetworkService(id: "S1", name: "Wi-Fi")
+        var persisted = [protectedDNSServer]
+        var active = persisted
+        var failApply = true
+        var writes = 0
+        var removed = false
+        func restore() throws {
+            try restoreServices(
+                snapshot: snapshot,
+                services: [owner],
+                read: { _ in persisted },
+                write: { servers, _ in
+                    writes += 1
+                    persisted = servers
+                    if failApply {
+                        failApply = false
+                        throw ApplyFailure.injected
+                    }
+                    active = servers
+                },
+                removeSnapshot: { removed = true },
+                archiveSnapshot: { _ in }
+            )
+        }
+        do { try restore(); return false } catch ApplyFailure.injected {} catch { return false }
+        guard !removed, persisted == snapshot.servers, active == [protectedDNSServer] else {
+            return false
+        }
+        do { try restore() } catch { return false }
+        return removed && writes == 2 && active == snapshot.servers
+    }
+
+    static func runHandoffApplyRetrySelfTest() -> Bool {
+        enum ApplyFailure: Error { case injected }
+        let snapshot = Snapshot(service: "Wi-Fi", serviceID: "S1", servers: ["9.9.9.9"])
+        let owner = NetworkService(id: "S1", name: "Wi-Fi")
+        var persisted = [protectedDNSServer]
+        var active = persisted
+        var failApply = true
+        var writes = 0
+        var removed = false
+        func retire() throws {
+            try retirePreviousSnapshot(
+                snapshot,
+                services: [owner],
+                read: { _ in persisted },
+                write: { servers, _ in
+                    writes += 1
+                    persisted = servers
+                    if failApply {
+                        failApply = false
+                        throw ApplyFailure.injected
+                    }
+                    active = servers
+                },
+                removeSnapshot: { removed = true },
+                archiveSnapshot: {}
+            )
+        }
+        do { try retire(); return false } catch ApplyFailure.injected {} catch { return false }
+        guard !removed, persisted == snapshot.servers, active == [protectedDNSServer] else {
+            return false
+        }
+        do { try retire() } catch { return false }
+        return removed && writes == 2 && active == snapshot.servers
+    }
+
     static func runSelfTests() -> Bool {
         do {
             guard try validateService("Wi-Fi") == "Wi-Fi",
@@ -1657,7 +1727,9 @@ final class ProtectedDNSManager {
                     == ["Wi-Fi", "Ethernet", "Thunderbolt Bridge"] else {
                 return false
             }
-            return runSupersededRestoreSelfTest()
+            return runRestoreApplyRetrySelfTest()
+                && runHandoffApplyRetrySelfTest()
+                && runSupersededRestoreSelfTest()
                 && runForeignLoopbackKeptSelfTest()
                 && runSupersededHandoffSelfTest()
                 && runStableIDIOFailureSelfTest()
