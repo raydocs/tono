@@ -48,7 +48,7 @@ final class OptionalPolicyTests: XCTestCase {
         // the accepted full-policy replacement.
         app.pendingDirectPolicyReload = app.activeDirectPolicy
         for (revision, json) in [
-            (40, #"{"version":3,"domains":[{"host":"example.com","ports":[443]}],"mediaEndpoints":[]}"#),
+            (40, #"{"version":3,"domains":[{"host":"qq.com","ports":[443]}],"mediaEndpoints":[]}"#),
             (41, #"{"version":3,"domains":[],"mediaEndpoints":[]}"#),
         ] {
             let digest = Data(SHA256.hash(data: Data(json.utf8))).base64EncodedString()
