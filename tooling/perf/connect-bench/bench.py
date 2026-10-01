@@ -123,26 +123,30 @@ def ensure_bins() -> tuple[Path, Path]:
     download(SINGBOX_URL, CACHE / "sing-box.tar.gz", SINGBOX_SHA)
     mihomo = CACHE / "mihomo"
     sing = CACHE / "sing-box"
-    if not mihomo.exists():
-        subprocess.run(["gzip", "-dc", str(CACHE / "mihomo.gz")], check=True, stdout=mihomo.open("wb"))
-        mihomo.chmod(0o755)
-    if not sing.exists():
-        subprocess.run(["tar", "-xzf", str(CACHE / "sing-box.tar.gz"), "-C", str(CACHE)], check=True)
-        unpacked = CACHE / "sing-box-1.14.2-linux-amd64" / "sing-box"
-        shutil.copy(unpacked, sing)
-        sing.chmod(0o755)
+    unpack_binary(CACHE / "mihomo.gz", mihomo)
+    unpack_binary(CACHE / "sing-box.tar.gz", sing, "sing-box-1.14.2-linux-amd64/sing-box")
     return mihomo, sing
+
+
+def unpack_binary(archive: Path, dest: Path, member: str | None = None) -> None:
+    # Derive every executable from the archive just checked by download(), even
+    # when a previous extraction/pin left an existing output in this cache.
+    temporary = dest.with_name(dest.name + ".part")
+    command = ["tar", "-xOzf", str(archive), member] if member else ["gzip", "-dc", str(archive)]
+    try:
+        with temporary.open("wb") as output:
+            subprocess.run(command, check=True, stdout=output)
+        temporary.chmod(0o755)
+        temporary.replace(dest)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def ensure_singbox_client() -> Path:
     archive = CACHE / "sing-box-1.15.0-alpha.9.tar.gz"
     download(SINGBOX_CLIENT_URL, archive, SINGBOX_CLIENT_SHA)
     dest = CACHE / "sing-box-1.15.0-alpha.9"
-    if not dest.exists():
-        subprocess.run(["tar", "-xzf", str(archive), "-C", str(CACHE)], check=True)
-        unpacked = CACHE / "sing-box-1.15.0-alpha.9-linux-amd64" / "sing-box"
-        shutil.copy(unpacked, dest)
-        dest.chmod(0o755)
+    unpack_binary(archive, dest, "sing-box-1.15.0-alpha.9-linux-amd64/sing-box")
     return dest
 
 

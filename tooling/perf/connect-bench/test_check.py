@@ -1,8 +1,16 @@
 #!/usr/bin/env python3
 """Handshake ceilings must reject a count of zero."""
 
+import gzip
+import io
+import subprocess
+import tarfile
+import tempfile
 import unittest
+from pathlib import Path
+from unittest import mock
 
+import bench
 from bench import limit_failures
 
 
@@ -61,6 +69,51 @@ class HandshakeFloorTest(unittest.TestCase):
         ))
         self.assertIn("vless/tono-fixed/cold_ms", over)
         self.assertIn("vless/tono-fixed/handshakes", over)
+
+
+class BinaryCacheTest(unittest.TestCase):
+    def archives(self, cache):
+        (cache / "mihomo.gz").write_bytes(gzip.compress(b"fixture-mihomo"))
+        with tarfile.open(cache / "sing-box.tar.gz", "w:gz") as archive:
+            info = tarfile.TarInfo("sing-box-1.14.2-linux-amd64/sing-box")
+            info.size = len(b"fixture-sing-box")
+            archive.addfile(info, io.BytesIO(b"fixture-sing-box"))
+
+    def test_interrupted_extraction_is_not_published_as_a_cached_executable(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cache = Path(directory)
+            self.archives(cache)
+            run = subprocess.run
+            interrupted = False
+
+            def extract(command, **kwargs):
+                nonlocal interrupted
+                if command[0] == "gzip" and not interrupted:
+                    interrupted = True
+                    kwargs["stdout"].write(b"partial")
+                    raise subprocess.CalledProcessError(-15, command)
+                return run(command, **kwargs)
+
+            with mock.patch.object(bench, "CACHE", cache), mock.patch.object(bench, "download"), \
+                    mock.patch.object(bench.subprocess, "run", side_effect=extract):
+                with self.assertRaises(subprocess.CalledProcessError):
+                    bench.ensure_bins()
+                self.assertFalse((cache / "mihomo").exists())
+                mihomo, sing = bench.ensure_bins()
+                self.assertEqual(b"fixture-mihomo", mihomo.read_bytes())
+                self.assertEqual(b"fixture-sing-box", sing.read_bytes())
+                self.assertEqual(0o755, mihomo.stat().st_mode & 0o777)
+
+    def test_an_existing_executable_cannot_override_the_current_pinned_archive(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cache = Path(directory)
+            self.archives(cache)
+            (cache / "mihomo").write_bytes(b"previous-pin")
+            (cache / "sing-box").write_bytes(b"previous-pin")
+            with mock.patch.object(bench, "CACHE", cache), mock.patch.object(bench, "download"):
+                mihomo, sing = bench.ensure_bins()
+            self.assertEqual(b"fixture-mihomo", mihomo.read_bytes())
+            self.assertEqual(b"fixture-sing-box", sing.read_bytes())
 
 
 if __name__ == "__main__":
