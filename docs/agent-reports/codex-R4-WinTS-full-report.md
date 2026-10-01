@@ -1,24 +1,21 @@
-# R4-WinTS: Codex (GPT-6.1 Sol) findings
+Windows TypeScript round-4 audit on current main. No new P0/P1 verified. Four behaviors are fixed in three small PRs. Native account cleanup is outside this slot and tracked in issue #1125; a tray stale-rate presentation bug requires UI review and is tracked in issue #1137. Source fixes preserve normal network fallback, AI blocking and strict-mode behavior because they do not alter packet/control policy. No deploy/publication or jev-route review ran.
 
-Generated 2026-10-01 00:54 MT from the run's findings.tsv / prs.tsv.
+The source area was read end to end across root and three read-only subagents: hooks/services; nonvisual page/auth/state logic; tono-ui, providers and layout/component logic. Native callers and ownership guards were followed where needed. Assigned TypeScript coverage is complete. Native Windows/Tauri/device behavior was not run locally.
 
-## PRs
+Local checks: Node 24.21.0 and pinned pnpm 11.26.0 frozen install. Tray regression failed before/passed after (1 test); feed regressions failed before/passed after (5 tests across the focused files); metadata regressions failed before/passed after (34 tests across the focused files). Typecheck passed for all three source diffs, with unchecked-index errors 79/baseline 79. One new test access initially raised the count to 80 and was fixed; no ratchet baseline or CI gate changed. Independent read-only reviews passed. Earlier targeted account/release/repair guard checks: 14 tests passed. An actual TrayPanel consumer reproduction confirmed cached rates remain after live=true to live=false (1 test).
 
-| PR | Branch | Labels | Auto-merge requested | Title |
-|---|---|---|---|---|
-| 1118 | hunt/sol-r4ts-traffic-feed-recovery | bug | yes | fix(windows): preserve controller feeds when the tray loads |
-| 1123 | hunt/sol-r4ts-feed-error-live | bug | yes | fix(windows): retire stale live feed flags after controller errors |
-| 1129 | hunt/sol-r4ts-metadata-owned-keys | bug | yes | fix(windows): reject inherited node and process metadata keys |
+PRs: [#1118](https://github.com/raydocs/tono/pull/1118), [#1123](https://github.com/raydocs/tono/pull/1123), [#1129](https://github.com/raydocs/tono/pull/1129). All non-draft against main, bug label, merge-commit auto-merge enabled and completed. No needs-hardware or ui-review applies: controller telemetry or rendering logic changes only; no routes/TUN/PF/WFP/DNS/proxy setting change. All three merged through green exact-head CI, including Windows app Rust and service jobs: #1123 at 06:31:38Z, #1118 at 06:32:57Z, #1129 at 06:37:16Z on 2026-10-01. All three pushed heads are ancestors of freshly fetched origin/main (afd58db1). CI/merge receipts are saved in pr-<N>-status.json. Unrelated jobs were skipped by the existing path filter.
 
-## Hypotheses
+35 false positives, 5 deduplicated known findings, 6 verified findings/continuations = 46 hypotheses examined. The full hypothesis table follows, including rejected reasons. Finding line references identify the audited pre-fix trigger locations; each PR has the exact source trace and regression evidence. Assigned source coverage is complete. Two verified fixes remain outside the permitted scope: Windows native account cleanup and tray unavailable-rate presentation.
 
-| ID | Area | Sev | Location | Description | Verdict |
+| ID | Area | Severity | File:line | Description | Verdict |
 |---|---|---|---|---|---|
 | R4TS-TRAY-CLEARS-FEEDS | Windows TypeScript | P2 | apps/windows/app/src/main.tsx:163 | First tray WebView load clears all native controller sockets, leaving dashboard/Activity stale handles | real-fixed #1118 (merged; CI green) |
 | R4TS-FEED-ERROR-LIVE | Windows TypeScript | P2 | apps/windows/app/src/hooks/use-traffic-data.ts:65 | Traffic/Activity transport errors retain live=true and suppress freshness recovery | real-fixed #1123 (merged; CI green) |
 | R4TS-ACCOUNT-LIVE-FAILURE-LEFTOVER | Windows native account (followed from TS) | P2 | apps/windows/app/src-tauri/src/tono/commands/account.rs:359 | Replacement account inherits live connect error/steps despite retained-history reset | real-unfixed outside slot; issue #1125 |
 | R4TS-NODE-META-PROTOTYPE | Windows TypeScript | P2 | apps/windows/app/src/pages/tono/node-meta.ts:80 | Valid prototype-key catalog names resolve inherited metadata and crash rendering | real-fixed #1129 (merged; CI green) |
 | WIN-ACTIVITY-PROCESS-PROTOTYPE | Windows TypeScript | P3 | apps/windows/app/src/pages/tono/activity.tsx:76 | Extensionless toString process still crashes the translation lookup after merged #951 | real-fixed #1129; continuation of #951 (merged; CI green) |
+| R4TS-TRAY-STALE-RATE | Windows TypeScript | P3 | apps/windows/app/src/tono-ui/TrayPanel.tsx:95 | Tray discards feed live status and keeps showing cached /s rates while reconnect fails | real-unfixed visual change excluded; issue #1137 |
 | R4TS-UI-H01 | Windows TS | P1 | apps/windows/app/src/tono-ui/TonoAccountCard.tsx:54 | Replacement sign-in displays old cached devices | duplicate of #932; current queries scoped by auth generation |
 | R4TS-UI-H02 | Windows TS | P2 | apps/windows/app/src/tono-ui/AiTrafficCard.tsx:52 | AI tally crosses account scopes | duplicate of #1085; claimed by other |
 | R4TS-UI-H03 | Windows TS | — | apps/windows/app/src/tono-ui/TonoAccountCard.tsx:69 | Revoke dialog survives account replacement | false-positive: auth guard unmounts Account during replacement |
@@ -59,4 +56,5 @@ Generated 2026-10-01 00:54 MT from the run's findings.tsv / prs.tsv.
 | R4TS-R-H01 | Windows TS | — | apps/windows/app/src/utils/search-matcher.ts:36 | Regular expression input freezes active Activity search | false-positive: helper has no active production caller; Activity uses plain string filters |
 | R4TS-R-H02 | Windows TS | — | apps/windows/app/src/hooks/use-traffic-data.ts:22 | Global duplicate suppression breaks second consumer | false-positive: dashboard and tray consumers run in separate WebViews |
 | R4TS-R-H03 | Windows TS | — | apps/windows/app/src/hooks/use-update.ts:77 | Disabling automatic checks disables manual update check | false-positive: query key remains enabled and manual refetch executes |
-| R4TS-TRAY-STALE-RATE | Windows TypeScript | P3 | apps/windows/app/src/tono-ui/TrayPanel.tsx:95 | Tray ignores feed live=false and indefinitely presents cached traffic rates as current | real-unfixed visual change excluded; issue #1137 |
+
+Hunter: GPT-6.1 Sol (Codex CLI)
