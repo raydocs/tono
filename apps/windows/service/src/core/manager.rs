@@ -834,6 +834,9 @@ impl CoreManager {
                                     "failed to terminate core during watchdog shutdown",
                                 ));
                             }
+                            // Death is confirmed. Retire the PID before final WFP cleanup can
+                            // stall and the join timeout can reopen this recycled number.
+                            running_pid_arc.store(0, Ordering::Release);
                             break 'watchdog;
                         }
                         wait_result = child.wait() => wait_result,
@@ -841,9 +844,22 @@ impl CoreManager {
                 };
 
                 let status = match wait_result {
-                    Ok(status) => status,
+                    Ok(status) => {
+                        // wait() has reaped the child and released its process handle. Process
+                        // bookkeeping must stop naming it before any metadata or WFP await.
+                        // Packed security identity is still revoked under the WFP barrier below.
+                        running_pid_arc.store(0, Ordering::Release);
+                        status
+                    }
                     Err(error) => {
                         warn!("Failed to wait for core process: {}", error);
+                        if let Err(kill_error) = current_guard.kill_now().await {
+                            *failed_child_arc.lock().await = Some(current_guard);
+                            set_core_lifecycle_state(ServiceLifecycleState::Fatal);
+                            return Err(kill_error
+                                .context("failed to terminate core after its wait failed"));
+                        }
+                        running_pid_arc.store(0, Ordering::Release);
                         recovery_exhausted = true;
                         break;
                     }
@@ -1670,6 +1686,75 @@ mod tests {
             child: Some(child),
             readers: Vec::new(),
         })
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn an_exited_core_pid_is_retired_before_watchdog_cleanup_waits() -> anyhow::Result<()> {
+        let manager = CoreManager::new();
+        let child = tokio::process::Command::new("/bin/sh")
+            .args(["-c", "exit 0"])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()?;
+        let pid = child.id().expect("the unreaped child exposes its PID");
+        manager
+            .running_pid
+            .store(pid, std::sync::atomic::Ordering::Release);
+        // The actual watchdog must process the exit, then wait here before final teardown.
+        let reason_guard = manager.last_core_exit_reason.lock().await;
+        manager
+            .start_watchdog(
+                ChildGuard {
+                    child: Some(child),
+                    readers: Vec::new(),
+                },
+                ClashConfig {
+                    core_config: CoreConfig {
+                        core_path: "unused-core".into(),
+                        core_ipc_path: "unused-controller".into(),
+                        config_path: "unused-config".into(),
+                        config_dir: "unused-runtime".into(),
+                    },
+                    log_config: WriterConfig {
+                        directory: "unused-logs".into(),
+                        max_log_size: 1,
+                        max_log_files: 1,
+                    },
+                },
+                OwnerIdentity::Unix {
+                    uid: unsafe { platform_lib::geteuid() },
+                    gid: unsafe { platform_lib::getegid() },
+                },
+            )
+            .await;
+        let retired = tokio::time::timeout(Duration::from_secs(2), async {
+            while manager
+                .running_pid
+                .load(std::sync::atomic::Ordering::Acquire)
+                != 0
+            {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .is_ok();
+        // Abort directly: the baseline's PID fallback is the behavior under review and must
+        // never be allowed to signal an unrelated process in a failing test.
+        let handle = manager
+            .watchdog_handle
+            .lock()
+            .await
+            .take()
+            .expect("watchdog is installed");
+        handle.abort();
+        let _ = handle.await;
+        drop(reason_guard);
+        assert!(
+            retired,
+            "confirmed exit must retire the PID before cleanup can block"
+        );
+        Ok(())
     }
 
     #[tokio::test]
