@@ -286,6 +286,62 @@ fn collect_candidates(
     Ok(())
 }
 
+/// `true` when the recorded successor is carrying recovery forward and the
+/// caller should return. `false` when classification must continue.
+///
+/// A never-resumed process is resumed, then the service is started. The
+/// bootstrap barrier stays up until that app reconnects. A resume that fails
+/// terminates the frozen process and still starts the service, then asks the
+/// caller to classify instead of reporting success.
+fn recover_recorded_successor(recorded: &tx::Image) -> Result<bool, Error> {
+    match native::primary_thread_never_resumed(recorded.pid) {
+        Ok(never_resumed) => match tx::recorded_successor_recovery(true, never_resumed) {
+            tx::RecordedSuccessorRecovery::LeaveToSuccessor => {
+                ensure_windows_service_running()?;
+                Ok(true)
+            }
+            tx::RecordedSuccessorRecovery::FinishLaunch => {
+                if let Err(error) = native::resume_never_resumed_primary(recorded.pid) {
+                    eprintln!(
+                        "suspended successor could not be resumed ({error:#}); terminating it so recovery can continue"
+                    );
+                    let _ = shared::terminate_process_by_pid(recorded.pid);
+                    ensure_windows_service_running()?;
+                    Ok(false)
+                } else {
+                    ensure_windows_service_running()?;
+                    Ok(true)
+                }
+            }
+            tx::RecordedSuccessorRecovery::Continue => Ok(false),
+        },
+        Err(error) => {
+            eprintln!(
+                "recorded successor run state is unreadable ({error:#}); not treating it as a live recovery"
+            );
+            ensure_windows_service_running()?;
+            Ok(false)
+        }
+    }
+}
+
+fn ensure_windows_service_running() -> Result<(), Error> {
+    use platform_lib::service::{ServiceAccess, ServiceState};
+    use platform_lib::service_manager::{ServiceManager, ServiceManagerAccess};
+
+    let manager = ServiceManager::local_computer(None::<&str>, ServiceManagerAccess::CONNECT)?;
+    let service = manager.open_service(
+        tono_service_protocol::WINDOWS_SERVICE_NAME,
+        ServiceAccess::ALL_ACCESS,
+    )?;
+    let state = service.query_status()?.current_state;
+    if matches!(state, ServiceState::Running | ServiceState::StartPending) {
+        return Ok(());
+    }
+    service.start(&Vec::<&std::ffi::OsStr>::new())?;
+    Ok(())
+}
+
 fn execute(recovery: bool) -> Result<(), Error> {
     use platform_lib::{
         service::ServiceAccess,
@@ -328,11 +384,20 @@ fn execute(recovery: bool) -> Result<(), Error> {
         // A dead executor must not re-execute a live publication below. The
         // installed identity — not successor liveness — then classifies the
         // interruption: only an incomplete publication rolls back.
-        if a.successor_image
-            .as_ref()
-            .is_some_and(|e| native::image(e.pid).ok().as_ref() == Some(e))
-        {
-            return Ok(()); // Only the specifically launched successor can recover forward.
+        //
+        // Image equality is not enough. The successor is created suspended and
+        // only resumed after its image is durable. An abort skips `Drop`, so
+        // that process can still match while its primary thread has never run.
+        // Reporting success there leaves the service stopped on the bootstrap
+        // barrier. Resume it and start the service. Do not release WFP: the
+        // resumed app reconnects through the tunnel, which is what keeps AI
+        // services blocked.
+        if let Some(recorded) = a.successor_image.clone() {
+            if native::image(recorded.pid).ok().as_ref() == Some(&recorded)
+                && recover_recorded_successor(&recorded)?
+            {
+                return Ok(());
+            }
         }
         if !matches!(
             a.execution,

@@ -13,8 +13,9 @@ use crate::update_wire::{UpdateRequest, UpdateStatus};
 use anyhow::{Context as _, Result, ensure};
 pub use gate::{GateReason, GateRefusal, GateReport, reason_of, refusal};
 pub use security::{
-    UserLaunch, app_image, image, install_root, parent_image, pin_path, program_files,
-    record_installed_version, tunnel_absent, verify_tree,
+    UserLaunch, app_image, image, install_root, parent_image, pin_path,
+    primary_thread_never_resumed, program_files, record_installed_version,
+    resume_never_resumed_primary, tunnel_absent, verify_tree,
 };
 use std::{
     fs::OpenOptions,

@@ -684,3 +684,136 @@ impl Drop for SuspendedApp {
         }
     }
 }
+
+const THREAD_SUSPEND_COUNT_CLASS: u32 = 35;
+
+#[link(name = "ntdll")]
+unsafe extern "system" {
+    fn NtQueryInformationThread(
+        thread_handle: HANDLE,
+        thread_information_class: u32,
+        thread_information: *mut core::ffi::c_void,
+        thread_information_length: u32,
+        return_length: *mut u32,
+    ) -> i32;
+}
+
+/// `CREATE_SUSPENDED` leaves one thread whose suspend count stays above zero
+/// until `ResumeThread`. More than one thread means the process has executed.
+pub fn primary_thread_never_resumed(pid: u32) -> Result<bool> {
+    let threads = threads_owned_by(pid)?;
+    if threads.len() != 1 {
+        return Ok(false);
+    }
+    Ok(thread_suspend_count(threads[0], pid)? > 0)
+}
+
+/// Resume the single thread of a successor that has never run. A running
+/// process, or a suspend count that is not a created-suspended thread, is an
+/// error so the caller does not treat it as finished.
+pub fn resume_never_resumed_primary(pid: u32) -> Result<()> {
+    use windows_sys::Win32::System::Threading::ResumeThread;
+
+    let threads = threads_owned_by(pid)?;
+    ensure!(
+        threads.len() == 1,
+        "successor {pid} is not a single-thread suspended process"
+    );
+    let thread_id = threads[0];
+    let count = thread_suspend_count(thread_id, pid)?;
+    ensure!(
+        count > 0,
+        "successor {pid} primary thread is already running"
+    );
+    ensure!(
+        count <= 8,
+        "successor {pid} suspend count {count} is not a created-suspended thread"
+    );
+    let thread = open_owned_thread(thread_id, pid)?;
+    for _ in 0..count {
+        let previous = unsafe { ResumeThread(thread.0) };
+        ensure!(
+            previous != u32::MAX,
+            "successor resume failed: {}",
+            std::io::Error::last_os_error()
+        );
+    }
+    Ok(())
+}
+
+fn threads_owned_by(pid: u32) -> Result<Vec<u32>> {
+    use windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE;
+    use windows_sys::Win32::System::Diagnostics::ToolHelp::{
+        CreateToolhelp32Snapshot, TH32CS_SNAPTHREAD, THREADENTRY32, Thread32First, Thread32Next,
+    };
+
+    let raw = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0) };
+    ensure!(
+        raw != INVALID_HANDLE_VALUE,
+        "failed to list the threads of process {pid}: {}",
+        std::io::Error::last_os_error()
+    );
+    let snapshot = Handle(raw);
+    let mut entry = THREADENTRY32 {
+        dwSize: std::mem::size_of::<THREADENTRY32>() as u32,
+        ..Default::default()
+    };
+    let mut threads = Vec::new();
+    let mut has_entry = unsafe { Thread32First(snapshot.0, &mut entry) } != 0;
+    while has_entry {
+        if entry.th32OwnerProcessID == pid {
+            threads.push(entry.th32ThreadID);
+        }
+        has_entry = unsafe { Thread32Next(snapshot.0, &mut entry) } != 0;
+    }
+    ensure!(
+        !threads.is_empty(),
+        "process {pid} has no threads to classify"
+    );
+    Ok(threads)
+}
+
+fn open_owned_thread(thread_id: u32, pid: u32) -> Result<Handle> {
+    use windows_sys::Win32::System::Threading::{
+        GetProcessIdOfThread, OpenThread, THREAD_QUERY_INFORMATION, THREAD_SUSPEND_RESUME,
+    };
+
+    let raw = unsafe {
+        OpenThread(
+            THREAD_QUERY_INFORMATION | THREAD_SUSPEND_RESUME,
+            0,
+            thread_id,
+        )
+    };
+    ensure!(
+        !raw.is_null(),
+        "cannot open thread {thread_id} of process {pid}: {}",
+        std::io::Error::last_os_error()
+    );
+    let thread = Handle(raw);
+    ensure!(
+        unsafe { GetProcessIdOfThread(thread.0) } == pid,
+        "thread {thread_id} no longer belongs to process {pid}"
+    );
+    Ok(thread)
+}
+
+fn thread_suspend_count(thread_id: u32, pid: u32) -> Result<u32> {
+    let thread = open_owned_thread(thread_id, pid)?;
+    let mut count = 0_u32;
+    let mut returned = 0_u32;
+    let status = unsafe {
+        NtQueryInformationThread(
+            thread.0,
+            THREAD_SUSPEND_COUNT_CLASS,
+            (&mut count as *mut u32).cast(),
+            std::mem::size_of::<u32>() as u32,
+            &mut returned,
+        )
+    };
+    ensure!(
+        status == 0,
+        "suspend count query for thread {thread_id} failed ({status})"
+    );
+    Ok(count)
+}

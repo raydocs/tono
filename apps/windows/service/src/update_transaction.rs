@@ -647,6 +647,35 @@ impl Store {
     }
 }
 
+/// What recovery may do when the recorded successor's image still matches.
+///
+/// A `CREATE_SUSPENDED` process that was saved and never resumed still hashes
+/// as the target, but it has not executed. Treating that match as forward
+/// recovery leaves the service stopped on the bootstrap barrier. Finish the
+/// launch instead. A process that has already run owns forward recovery.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RecordedSuccessorRecovery {
+    /// The process has executed. Make sure the service is up and leave it.
+    LeaveToSuccessor,
+    /// The process has never run. Resume it and start the service.
+    FinishLaunch,
+    /// No matching live image. Classify the publication.
+    Continue,
+}
+
+pub fn recorded_successor_recovery(
+    image_matches: bool,
+    never_resumed: bool,
+) -> RecordedSuccessorRecovery {
+    if !image_matches {
+        RecordedSuccessorRecovery::Continue
+    } else if never_resumed {
+        RecordedSuccessorRecovery::FinishLaunch
+    } else {
+        RecordedSuccessorRecovery::LeaveToSuccessor
+    }
+}
+
 pub fn target(manifest: &ReleaseManifest) -> &Target {
     // Only used after ReleaseManifest::decode/validate.
     manifest
@@ -1478,5 +1507,24 @@ pub(crate) mod tests {
         );
         drop(store);
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// A successor saved from `CREATE_SUSPENDED` and never resumed still matches
+    /// the recorded image. That match is not forward recovery: the process has
+    /// not run, so the service has to be started and the process resumed.
+    #[test]
+    fn never_resumed_recorded_successor_does_not_count_as_forward_recovery() {
+        assert_eq!(
+            recorded_successor_recovery(true, true),
+            RecordedSuccessorRecovery::FinishLaunch
+        );
+        assert_eq!(
+            recorded_successor_recovery(true, false),
+            RecordedSuccessorRecovery::LeaveToSuccessor
+        );
+        assert_eq!(
+            recorded_successor_recovery(false, true),
+            RecordedSuccessorRecovery::Continue
+        );
     }
 }
