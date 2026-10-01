@@ -968,6 +968,32 @@ mod tests {
     }
 
     #[test]
+    fn parse_header_bounded_garbage_does_not_panic() {
+        assert_eq!(
+            ProtocolVersion::parse_header("1.2"),
+            Some(ProtocolVersion {
+                epoch: 1,
+                revision: 2
+            })
+        );
+        assert!(ProtocolVersion::parse_header("").is_none());
+        assert!(ProtocolVersion::parse_header("1").is_none());
+        assert!(ProtocolVersion::parse_header("1.2.3").is_none());
+        assert!(ProtocolVersion::parse_header("a.b").is_none());
+        let mut state: u64 = 7;
+        for _ in 0..32 {
+            state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+            let text: String = (0..12)
+                .map(|shift| {
+                    let byte = b'0' + ((state >> (shift % 8)) & 0x0f) as u8;
+                    byte as char
+                })
+                .collect();
+            let _ = ProtocolVersion::parse_header(&text);
+        }
+    }
+
+    #[test]
     fn staging_capability_keeps_its_feature_revision_after_the_protocol_floor_advances() {
         let mut older = ProtocolInfo::current();
         older.protocol.revision = crate::MIN_SERVICE_REVISION_FOR_RUNTIME_STAGING - 1;
