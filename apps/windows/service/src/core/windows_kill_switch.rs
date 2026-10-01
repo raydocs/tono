@@ -259,6 +259,11 @@ static RESTORE_WAS_LOCKED: AtomicBool = AtomicBool::new(false);
 /// record explicitly enabled the strict kill switch. Cleared by the first successful install
 /// or verify.
 static RESTORED_BARRIER_UNPROVEN: AtomicBool = AtomicBool::new(false);
+/// Startup restored an unverified barrier, which `retire_unverified_on_service_start` skips while
+/// update evidence is pending (#1292). Cleared by a fresh arm or when that barrier is gone.
+static STARTUP_UNVERIFIED_BARRIER: AtomicBool = AtomicBool::new(false);
+/// Startup reconciliation and desired-state replay have finished, so a previous Core is settled.
+static STARTUP_SETTLED: AtomicBool = AtomicBool::new(false);
 /// The watchdog's latest verify-by-key result. `/kill-switch/status` reuses it instead of
 /// running a full WFP RPC sweep per request.
 static LAST_VERIFY: Lazy<Mutex<Option<(std::time::Instant, bool)>>> =
@@ -421,6 +426,7 @@ fn clear_wanted_core_window() {
 
 fn note_fresh_arm_core_window(intent: &IntentRecord) {
     clear_wanted_core_window();
+    STARTUP_UNVERIFIED_BARRIER.store(false, Ordering::Release);
     FRESH_ARM_EPOCH.fetch_add(1, Ordering::AcqRel);
     if !intent.strict_kill_switch {
         *WANTED_CORE_DEADLINE
@@ -3351,8 +3357,43 @@ pub async fn note_core_replay_finished() -> Result<()> {
         return Ok(());
     }
     CORE_REPLAY_EXPECTED.store(false, Ordering::Release);
+    STARTUP_SETTLED.store(true, Ordering::Release);
     let _operation = WFP_OPERATION.lock().await;
+    owe_update_held_startup_release_unlocked(update_holds_no_live_owner);
     reconcile_wanted_core_window_unlocked().await.map(|_| ())
+}
+
+/// Decision 031 for #1292: the unverified barrier restored at this Service start is held only
+/// by pending update evidence once startup has settled. When `owed` says no live process still
+/// owns that update, expire the core window: this call or the next watchdog tick then releases
+/// general traffic with the AI hold, retrying each tick until WFP is gone. Strict stays.
+/// Caller holds `WFP_OPERATION`.
+fn owe_update_held_startup_release_unlocked(owed: impl FnOnce() -> bool) {
+    if !STARTUP_UNVERIFIED_BARRIER.load(Ordering::Acquire)
+        || !STARTUP_SETTLED.load(Ordering::Acquire)
+    {
+        return;
+    }
+    let held = armed_guard()
+        .as_ref()
+        .is_some_and(|armed| !armed.intent.strict_kill_switch && !armed.intent.is_verified());
+    if !held {
+        STARTUP_UNVERIFIED_BARRIER.store(false, Ordering::Release);
+        return;
+    }
+    let mut deadline = WANTED_CORE_DEADLINE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if deadline.is_none() && owed() {
+        *deadline = Some(std::time::Instant::now());
+    }
+}
+
+fn update_holds_no_live_owner() -> bool {
+    #[cfg(windows)]
+    return crate::core::update::startup_barrier_release_owed();
+    #[cfg(not(windows))]
+    false
 }
 
 /// `POST /kill-switch/release`: the explicit user-requested disarm. Idempotent — not armed
@@ -3574,6 +3615,8 @@ pub async fn restore_on_service_start() -> Result<()> {
     RESTORE_WAS_LOCKED.store(false, Ordering::Release);
     clear_wanted_core_window();
     RECONNECT_AFTER_RELEASE.store(false, Ordering::Release);
+    STARTUP_UNVERIFIED_BARRIER.store(false, Ordering::Release);
+    STARTUP_SETTLED.store(false, Ordering::Release);
     match tokio::fs::read(intent_path()).await {
         Ok(bytes) => match serde_json::from_slice::<IntentRecord>(&bytes) {
             Ok(intent) if intent_is_valid(&intent) => {
@@ -3596,6 +3639,7 @@ pub async fn restore_on_service_start() -> Result<()> {
                     };
                     armed.intent.mode = KillSwitchStatusMode::Blocked;
                     armed.intent.updated_at = now_unix();
+                    STARTUP_UNVERIFIED_BARRIER.store(true, Ordering::Release);
                     *armed_guard() = Some(armed.clone());
                     let persist = match serde_json::to_vec_pretty(&armed.intent) {
                         Ok(encoded) => atomic_write(&intent_path(), &encoded).await,
@@ -3901,28 +3945,6 @@ pub async fn prepare_for_service_replacement() -> Result<bool> {
     }
 }
 
-/// Service startup with a failed update record (#1292). Its executor releases general traffic
-/// before restarting this Service, but that release can fail, and this Service may not relaunch
-/// recovery. Expire the core window for a non-strict barrier: replay-finished and then every
-/// watchdog tick release it with the AI hold (decision 031) until WFP is gone. Strict stays.
-pub async fn owe_failed_update_release() -> bool {
-    if !SUPPORTED {
-        return false;
-    }
-    let _operation = WFP_OPERATION.lock().await;
-    if !armed_guard()
-        .as_ref()
-        .is_some_and(|armed| !armed.intent.strict_kill_switch)
-    {
-        return false;
-    }
-    clear_wanted_core_window();
-    *WANTED_CORE_DEADLINE
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(std::time::Instant::now());
-    true
-}
-
 /// Finish startup recovery for an initial attempt that never crossed the durable verification
 /// barrier. This runs *after* `reconcile_service_startup` has stopped and identified any surviving
 /// Core, or after that reconciliation failed its bounded startup retries: then the decision-031
@@ -4145,6 +4167,7 @@ pub fn spawn_windows_kill_switch_watchdog() {
         loop {
             tokio::time::sleep(WATCHDOG_PERIOD).await;
             let _operation = WFP_OPERATION.lock().await;
+            owe_update_held_startup_release_unlocked(update_holds_no_live_owner);
             if let Err(error) = reconcile_wanted_core_window_unlocked().await {
                 tracing::warn!(
                     "wanted-session core window could not open the network yet: {error:#}"
@@ -4907,23 +4930,28 @@ mod tests {
 
     #[tokio::test]
     #[serial]
-    async fn failed_update_startup_releases_a_non_strict_barrier_with_the_ai_hold() -> Result<()> {
+    async fn update_held_startup_barrier_releases_with_the_ai_hold() -> Result<()> {
         cleanup().await;
         arm_bootstrap(&test_config(), "/opt/tono/mihomo", "owner-alice").await?;
-        // A restored barrier with no core window: nothing else would open it while the
-        // failed update record stays pending (#1292).
+        // As restored at Service start: unverified, no core window, held by a pending update
+        // whose executor is gone (#1292).
         clear_wanted_core_window();
-        let owed = owe_failed_update_release().await;
-        let replayed = note_core_replay_finished().await;
+        STARTUP_UNVERIFIED_BARRIER.store(true, Ordering::Release);
+        STARTUP_SETTLED.store(true, Ordering::Release);
+        let released = {
+            let _operation = WFP_OPERATION.lock().await;
+            owe_update_held_startup_release_unlocked(|| true);
+            reconcile_wanted_core_window_unlocked().await
+        };
         let wanted = status().await.wanted;
         let held = crate::core::selective_layer::test_hold_active();
+        STARTUP_UNVERIFIED_BARRIER.store(false, Ordering::Release);
         cleanup().await;
 
-        assert!(owed);
-        replayed?;
+        released?;
         assert!(
             !wanted,
-            "a failed update must not leave a non-strict machine Blocked"
+            "an update-held barrier must not leave a non-strict machine Blocked"
         );
         assert!(held, "the release keeps AI blocked");
         Ok(())

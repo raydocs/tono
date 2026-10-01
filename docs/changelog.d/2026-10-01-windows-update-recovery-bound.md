@@ -20,3 +20,12 @@
     - the Core startup reconciliation error with update evidence pending.
   - Non-strict only, AI hold kept, strict unchanged.
   - Tests: `update_recovery_stops_relaunching_after_bounded_failed_runs` and `failed_update_startup_releases_a_non_strict_barrier_with_the_ai_hold`. The startup error branches in `bin/service.rs` have no unit test.
+- 2026-10-01 continuation (Codex review at `231b5a3b`: F2 introduced here, F1 partly pre-existing):
+  - F2: round 3 owed the release on every `reconcile_before_desired` error. That includes `StoreBusy`, which a live, healthy update holds, so a ProtectedOffline obligation could later commit as Unprotected. The startup owe calls in `bin/service.rs` are reverted.
+  - F1: one watchdog mechanism replaces them. `restore_on_service_start` marks the unverified barrier it restored. Once replay has finished, both replay-finished and every watchdog tick ask `update::startup_barrier_release_owed()`. That is a lock-free read with no write, so another holder's lock is never read as a failure. The release is owed when:
+    - the record is unreadable;
+    - the attempt is `Uncertain`/`Reserved`/`Extracting`/`Staged`/`Launching` and its recorded executor is not live (this covers a dead `Launching` demoted to `Staged`, and `Uncertain` written by recovery after startup);
+    - the attempt is `Consumed`/`Replaced` with no live executor and recovery exhausted.
+  - When owed, the core window expires and general traffic is released with the AI hold, retried each tick until WFP is gone. Non-strict only; a fresh arm clears the mark; strict unchanged.
+  - Pre-existing and not closed here: a recovery executor that cannot start below the bound, an unfinished rollback finalizer, and `Replaced` with no successor still hold the barrier with no timeout ([#1308](https://github.com/raydocs/tono/issues/1308), P1).
+  - Tests: `update_startup_barrier_release_waits_only_for_a_live_executor`, `update_held_startup_barrier_releases_with_the_ai_hold` (Windows CI).

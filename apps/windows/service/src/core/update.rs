@@ -1665,26 +1665,103 @@ pub fn reconcile_before_desired() -> Result<bool> {
     Ok(true)
 }
 
-/// Service startup (#1292): `Uncertain` is what a failed executor leaves. Its own release of
-/// general traffic can fail, and a Service it restarts may not relaunch recovery, so startup
-/// owes the decision-031 release too. Read without the lock or a write, so a busy or
-/// unwritable store cannot hide it; evidence that cannot be read owes the release as well.
-pub fn failed_update_release_owed() -> bool {
-    match read_store_state() {
-        Ok(state) => {
-            state.pending()
-                && state
-                    .attempt
-                    .as_ref()
-                    .is_some_and(|a| a.execution == Execution::Uncertain)
-        }
-        Err(_) => true,
+/// Decision 031 for the unverified barrier restored at Service start (#1292): pending update
+/// evidence makes ordinary startup retirement skip it, so it must be released once no live
+/// process still owns the update. Read without the lock or a write: another holder's lock is not
+/// evidence of failure, and evidence that cannot be read owes the release.
+pub fn startup_barrier_release_owed() -> bool {
+    startup_barrier_release_owed_by(
+        read_store_state(),
+        |e| image(e.pid).ok().as_ref() == Some(e),
+        recovery_exhausted_unlocked,
+    )
+}
+
+fn startup_barrier_release_owed_by(
+    state: Result<State>,
+    live: impl Fn(&Image) -> bool,
+    exhausted: impl Fn(&Attempt) -> bool,
+) -> bool {
+    let Ok(state) = state else {
+        return true;
+    };
+    let Some(a) = state.attempt.as_ref().filter(|_| state.pending()) else {
+        return false;
+    };
+    let dead = !a.executor.as_ref().is_some_and(&live);
+    match a.execution {
+        // A settled failure, or a record nothing will run any more once its executor is gone.
+        Execution::Uncertain
+        | Execution::Reserved
+        | Execution::Extracting
+        | Execution::Staged
+        | Execution::Launching => dead,
+        // Startup relaunches recovery for these until the bound; then nothing settles them.
+        Execution::Consumed | Execution::Replaced => dead && exhausted(a),
+        // The rollback finalizer settles the barrier itself.
+        Execution::RolledBack => false,
+    }
+}
+
+/// [`Store::recovery_exhausted`] without the lock: a count that cannot be read also stops
+/// startup from relaunching recovery, so it reads as exhausted.
+fn recovery_exhausted_unlocked(a: &Attempt) -> bool {
+    let path = crate::service_paths()
+        .persistent_state_dir()
+        .join("updates-v1")
+        .join(&a.receipt.attempt_id)
+        .join("recovery-runs");
+    match std::fs::read_to_string(path) {
+        Ok(text) => text
+            .trim()
+            .parse::<u32>()
+            .ok()
+            .is_none_or(|runs| runs >= MAX_RECOVERY_RUNS),
+        Err(error) => error.kind() != std::io::ErrorKind::NotFound,
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn update_startup_barrier_release_waits_only_for_a_live_executor() {
+        let (root, mut store, peer, _) = crate::update_transaction::tests::reserved();
+        crate::update_transaction::tests::authorize(&mut store, &peer);
+        // A dead Launching that startup demoted to Staged (#1292): nothing will run it.
+        store.execution(Execution::Staged).unwrap();
+        let state = || Ok(store.state.clone());
+        assert!(startup_barrier_release_owed_by(
+            state(),
+            |_| false,
+            |_| false
+        ));
+        assert!(
+            !startup_barrier_release_owed_by(state(), |_| true, |_| true),
+            "a live executor still owns the update; its lock or record is not a failure"
+        );
+        assert!(startup_barrier_release_owed_by(
+            Err(anyhow::anyhow!("unreadable")),
+            |_| true,
+            |_| false
+        ));
+        // A dead consumed executor waits for relaunched recovery, until the bound stops it.
+        store.execution(Execution::Consumed).unwrap();
+        let state = || Ok(store.state.clone());
+        assert!(!startup_barrier_release_owed_by(
+            state(),
+            |_| false,
+            |_| false
+        ));
+        assert!(startup_barrier_release_owed_by(
+            state(),
+            |_| false,
+            |_| true
+        ));
+        drop(store);
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     fn committed_with_backup() -> (PathBuf, Store, State, PathBuf) {
         use sha2::{Digest, Sha256};
