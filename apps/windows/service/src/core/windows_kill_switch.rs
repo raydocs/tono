@@ -170,6 +170,7 @@ enum DirectReloadPhase {
     Bracket,
     Pending,
     Committed,
+    Retracting,
 }
 
 #[derive(Debug, Clone)]
@@ -2105,6 +2106,10 @@ fn direct_reload_matches(
     Ok(lease)
 }
 
+#[derive(Debug, thiserror::Error)]
+#[error("live WFP is Blocked but the DIRECT intent could not be persisted")]
+struct DirectBlockedIntentPersistenceFailure;
+
 /// Reconcile to exact Blocked without publishing a state stricter than live WFP proved.
 ///
 /// The Blocked intent is attempted first so a Service restart cannot revive volatile DIRECT
@@ -2164,7 +2169,7 @@ async fn transition_direct_to_blocked_unlocked(
         }
         (Ok(()), Err(error)) => {
             *last_error_guard() = Some(format!("{error:#}"));
-            Err(error.context("live WFP is Blocked but the DIRECT intent could not be persisted"))
+            Err(error.context(DirectBlockedIntentPersistenceFailure))
         }
         (Err(install), Err(persist)) => {
             let message = format!(
@@ -2579,9 +2584,19 @@ pub(crate) async fn retract_direct_before_core_replacement() -> Result<()> {
     // Even an empty volatile receipt is not proof that live WFP is empty: session filters survive
     // a Service-process restart while BFE remains running, and startup's first exact install may
     // have failed. Always overwrite the provider set before allowing the same App-ID path to run.
-    transition_direct_to_blocked_unlocked(armed, None, None)
-        .await
-        .context("could not prove exact Blocked WFP before replacing Core; replacement is refused")
+    match transition_direct_to_blocked_unlocked(armed, None, None).await {
+        // Volatile DIRECT grants cannot be restored by an older intent. Once live WFP is
+        // exact Blocked, a full disk or state-directory ACL must not prevent Disconnect.
+        Err(error) if error.is::<DirectBlockedIntentPersistenceFailure>() => {
+            tracing::warn!(
+                "wfp: exact Blocked WFP was proved before replacing Core; continuing despite intent persistence failure: {error:#}"
+            );
+            Ok(())
+        }
+        result => result.context(
+            "could not prove exact Blocked WFP before replacing Core; replacement is refused",
+        ),
+    }
 }
 
 /// Disconnected-but-armed ("Protected Offline"): floor + endpoint/DNS rules stay, the API
@@ -3426,6 +3441,7 @@ fn direct_reload_invalidation_reason(
             DirectReloadPhase::Committed => {
                 "committed DIRECT heartbeat lease expired after App/session liveness was lost"
             }
+            DirectReloadPhase::Retracting => "DIRECT permits await exact Blocked retraction",
         });
     }
     if lease.phase != DirectReloadPhase::Bracket
@@ -3439,6 +3455,60 @@ fn direct_reload_invalidation_reason(
         return Some("DIRECT endpoint Core/TUN/LUID ownership changed");
     }
     None
+}
+
+async fn reconcile_direct_watchdog_invalidation_unlocked(
+    mut armed: Armed,
+    current_core: Option<CoreInstance>,
+    now: std::time::Instant,
+    reason: &str,
+) -> Result<()> {
+    let release = crash_recovery_releases_network(armed.intent.strict_kill_switch)
+        && armed.direct_reload.as_ref().is_some_and(|lease| {
+            lease.phase == DirectReloadPhase::Committed
+                && lease.expires_at.is_none_or(|deadline| now >= deadline)
+        });
+    // Narrowing failure poisons the deadline. Keep ownership-change retries distinct from
+    // App death, even if the heartbeat deadline passes while the failed install is awaited.
+    if !release {
+        if let Some(lease) = armed.direct_reload.as_mut() {
+            if lease.phase == DirectReloadPhase::Committed {
+                lease.phase = DirectReloadPhase::Retracting;
+                lease.expires_at = Some(now);
+            }
+        }
+    }
+    // App death must release a non-strict session after exact DIRECT retraction. Keep only
+    // its expired receipt until release succeeds so a failed WFP removal retries next tick.
+    let next_lease = if release {
+        armed.direct_reload.clone()
+    } else {
+        None
+    };
+    let transition = transition_direct_to_blocked_unlocked(armed, current_core, next_lease).await;
+    note_verify(transition.is_ok());
+    if let Err(error) = transition {
+        if !release || !error.is::<DirectBlockedIntentPersistenceFailure>() {
+            return Err(error);
+        }
+        tracing::warn!(
+            "wfp: {reason}; exact Blocked WFP was proved; releasing despite intent persistence failure: {error:#}"
+        );
+    }
+    if release {
+        let message = format!("{reason}; exact DIRECT permits were retracted; non-strict session");
+        release_unhealthy_session_unlocked(&message).await?;
+        // General traffic is open. Put the secondary AI hold back; strict sessions never
+        // enter this branch.
+        crate::core::selective_layer::finish_release(true).await;
+        Ok(())
+    } else {
+        let message =
+            format!("{reason}; exact DIRECT permits were retracted and traffic is Blocked");
+        *last_error_guard() = Some(message.clone());
+        tracing::warn!("{message}");
+        Ok(())
+    }
 }
 
 /// One-second verify-after-write watchdog (the macOS helper does the same for PF).
@@ -3490,24 +3560,22 @@ pub fn spawn_windows_kill_switch_watchdog() {
                 } else {
                     None
                 };
+                let now = std::time::Instant::now();
                 if let Some(reason) = direct_reload_invalidation_reason(
                     &armed,
                     current_core,
                     current_tunnel_luid,
-                    std::time::Instant::now(),
+                    now,
                 ) {
-                    let transition =
-                        transition_direct_to_blocked_unlocked(armed, current_core, None).await;
-                    let healthy = transition.is_ok();
-                    note_verify(healthy);
-                    match transition {
-                        Ok(()) => {
-                            let message = format!(
-                                "{reason}; exact DIRECT permits were retracted and traffic is Blocked"
-                            );
-                            *last_error_guard() = Some(message.clone());
-                            tracing::warn!("{message}");
-                        }
+                    match reconcile_direct_watchdog_invalidation_unlocked(
+                        armed,
+                        current_core,
+                        now,
+                        reason,
+                    )
+                    .await
+                    {
+                        Ok(()) => {}
                         Err(error) => {
                             if last_error_log.is_none_or(|at| at.elapsed() >= ERROR_LOG_INTERVAL) {
                                 tracing::error!(
@@ -6081,6 +6149,45 @@ mod tests {
 
     #[tokio::test]
     #[serial]
+    async fn core_replacement_barrier_accepts_only_persist_failure_after_live_blocked() -> Result<()>
+    {
+        cleanup().await;
+        committed_direct_test_session(78).await?;
+        let failures = SimulatedStateFailures::arm(true, false);
+
+        retract_direct_before_core_replacement().await?;
+
+        assert_eq!(TEST_INSTALL_ATTEMPTS.load(Ordering::Relaxed), 1);
+        assert_eq!(TEST_PERSIST_ATTEMPTS.load(Ordering::Relaxed), 1);
+        let blocked = armed_guard().clone().expect("live Blocked remains published");
+        assert_eq!(blocked.intent.mode, KillSwitchStatusMode::Blocked);
+        assert!(blocked.direct_endpoints.is_empty());
+        assert!(blocked.direct_reload.is_none());
+        assert!(blocked.tun_luid.is_none());
+        assert!(blocked.core_instance.is_none());
+        assert!(crate::core::manager::security_core_instance_snapshot().is_none());
+        assert!(
+            status()
+                .await
+                .last_error
+                .expect("persistence error remains visible")
+                .contains("simulated persistent-state write failure")
+        );
+        drop(failures);
+
+        // A previously Blocked record is not proof that a new live installation succeeded.
+        let failures = SimulatedStateFailures::arm(false, true);
+        let error = retract_direct_before_core_replacement()
+            .await
+            .expect_err("live WFP failure must still refuse Core replacement");
+        assert!(format!("{error:#}").contains("simulated WFP install failure"));
+        drop(failures);
+        cleanup().await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
     async fn ambiguous_first_direct_install_publishes_candidate_for_retry() -> Result<()> {
         cleanup().await;
         let core = locked_direct_test_session().await?;
@@ -6229,6 +6336,84 @@ mod tests {
         assert_eq!(blocked.intent.mode, KillSwitchStatusMode::Blocked);
         assert!(blocked.direct_endpoints.is_empty());
         assert!(blocked.direct_reload.is_none());
+        cleanup().await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn committed_direct_lease_expiry_releases_only_non_strict_sessions() -> Result<()> {
+        cleanup().await;
+        let (core, _) = committed_direct_test_session(122).await?;
+        let mut armed = armed_guard().clone().expect("committed session");
+        let now = std::time::Instant::now();
+        armed.direct_reload.as_mut().unwrap().expires_at = Some(now);
+        let reason = direct_reload_invalidation_reason(&armed, Some(core), armed.tun_luid, now)
+            .expect("committed heartbeat expiry must invalidate DIRECT");
+        assert!(reason.contains("heartbeat lease expired"));
+
+        let failures = SimulatedStateFailures::arm(false, true);
+        reconcile_direct_watchdog_invalidation_unlocked(armed, Some(core), now, reason)
+            .await
+            .expect_err("failed live retraction must retry before releasing");
+        let retry = armed_guard().clone().expect("failed retraction stays armed");
+        assert_eq!(retry.intent.mode, KillSwitchStatusMode::Locked);
+        assert!(!retry.direct_endpoints.is_empty());
+        assert!(retry.direct_reload.is_some());
+        drop(failures);
+
+        let now = std::time::Instant::now();
+        let reason = direct_reload_invalidation_reason(&retry, Some(core), retry.tun_luid, now)
+            .expect("expired committed receipt must retry release on the next tick");
+        reconcile_direct_watchdog_invalidation_unlocked(retry, Some(core), now, reason).await?;
+        assert!(
+            armed_guard().is_none(),
+            "non-strict expiry must release the session"
+        );
+        assert!(!status().await.wanted);
+        assert!(!TUNNEL_PERMIT_RENDERED.load(Ordering::Relaxed));
+        assert!(
+            crate::core::selective_layer::test_hold_active(),
+            "non-strict expiry opens general traffic and puts the AI hold back"
+        );
+        assert_disarmed_tombstone_present().await?;
+
+        committed_direct_test_session(123).await?;
+        let armed = armed_guard().clone().expect("committed session before Core loss");
+        let now = std::time::Instant::now();
+        let reason = direct_reload_invalidation_reason(&armed, None, armed.tun_luid, now)
+            .expect("Core ownership loss must retract DIRECT");
+        assert!(reason.contains("ownership changed"));
+        let failures = SimulatedStateFailures::arm(false, true);
+        reconcile_direct_watchdog_invalidation_unlocked(armed, None, now, reason)
+            .await
+            .expect_err("ownership retraction failure must retry Blocked");
+        let retry = armed_guard().clone().expect("ownership retraction retry");
+        let now = std::time::Instant::now();
+        let reason = direct_reload_invalidation_reason(&retry, None, retry.tun_luid, now)
+            .expect("poisoned ownership receipt must still retract");
+        drop(failures);
+        reconcile_direct_watchdog_invalidation_unlocked(retry, None, now, reason).await?;
+        assert_eq!(
+            armed_guard().as_ref().unwrap().intent.mode,
+            KillSwitchStatusMode::Blocked
+        );
+
+        let (core, _) = committed_direct_test_session(124).await?;
+        let mut strict = armed_guard().clone().expect("strict committed session");
+        strict.intent.strict_kill_switch = true;
+        let now = std::time::Instant::now();
+        strict.direct_reload.as_mut().unwrap().expires_at = Some(now);
+        let reason = direct_reload_invalidation_reason(&strict, Some(core), strict.tun_luid, now)
+            .expect("strict heartbeat expiry must still retract DIRECT");
+        reconcile_direct_watchdog_invalidation_unlocked(strict, Some(core), now, reason).await?;
+        let blocked = armed_guard().clone().expect("strict session stays armed");
+        assert_eq!(blocked.intent.mode, KillSwitchStatusMode::Blocked);
+        assert!(blocked.direct_endpoints.is_empty());
+        assert!(blocked.direct_reload.is_none());
+        assert!(blocked.tun_luid.is_none());
+        assert!(blocked.core_instance.is_none());
+        crate::core::selective_layer::remove().await;
         cleanup().await;
         Ok(())
     }
