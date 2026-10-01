@@ -7,3 +7,5 @@
 - 验证：Linux Rust 1.98.1 extracted portable harness of the production writer and checked-in tests: new regression failed before the fix with the injected Store error; after the fix 2 passed. `git diff --check` passed. Full Tauri/Windows-native tests not runnable here; CI must execute them.
 - 候选/发布：source only, no new candidate, deployment or publication.
 - 剩余限制：actual Credential Manager faults were not injected on Windows hardware; a permanently failed or hung vault still cannot acknowledge durability.
+
+2026-09-30 continuation: first hosted Windows run (head `cf76398c`, run 36795661106) compiled and passed the new regression, but its App suite was 571 passed / 1 failed: the existing account-close fixture refused only its first deletion, so the new flush retry correctly succeeded. The fixture now refuses all deletions until explicitly released; every durable-error/admission/token assertion remains. Full-suite rerun is pending CI.

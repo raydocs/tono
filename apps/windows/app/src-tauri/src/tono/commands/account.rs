@@ -701,6 +701,7 @@ mod lifecycle_tests {
             durable: MemoryCredentialStore,
             entered: tokio::sync::Notify,
             first: AtomicBool,
+            refuse: AtomicBool,
             gate: Mutex<std::sync::mpsc::Receiver<()>>,
         }
         impl CredentialStore for Vault {
@@ -710,6 +711,8 @@ mod lifecycle_tests {
                 if self.first.swap(false, Ordering::SeqCst) {
                     self.entered.notify_one();
                     self.gate.lock().unwrap().recv_timeout(Duration::from_secs(5)).unwrap();
+                }
+                if self.refuse.load(Ordering::SeqCst) {
                     return Err(CredentialError::Store("injected delete refusal".into()));
                 }
                 self.durable.delete(key)
@@ -718,7 +721,7 @@ mod lifecycle_tests {
         let (release, gate) = std::sync::mpsc::channel();
         let vault = Arc::new(Vault {
             durable: MemoryCredentialStore::new(), entered: Default::default(),
-            first: AtomicBool::new(true), gate: Mutex::new(gate),
+            first: AtomicBool::new(true), refuse: AtomicBool::new(true), gate: Mutex::new(gate),
         });
         vault.durable.set_refresh_token("persisted-old-session").unwrap();
         let state = Arc::new(TonoState::for_test());
@@ -745,6 +748,7 @@ mod lifecycle_tests {
         assert!(tokio::time::timeout(Duration::from_secs(2), close.wait()).await.unwrap().is_err());
         assert!(matches!(state.lock().await.account_state, AccountState::Error(_)));
         assert_eq!(vault.durable.refresh_token().unwrap().as_deref(), Some("persisted-old-session"));
+        vault.refuse.store(false, Ordering::SeqCst);
         close_account_with(Arc::clone(&state), AccountCloseReason::User,
             |_| async { Ok(()) },
             |client| async move { client.logout().await.map_err(|error| error.to_string()) },
