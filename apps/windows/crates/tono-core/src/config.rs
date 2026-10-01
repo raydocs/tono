@@ -724,6 +724,12 @@ fn quote_block_sequence_scalars_with_flow_indicators(yaml: &str) -> String {
             if scalar.starts_with('\'') || scalar.starts_with('"') {
                 return line.to_string();
             }
+            // A sequence entry can start a mapping (`- name: Tokyo [primary]`).
+            // Its value is already serialized safely; quoting the entire entry
+            // would turn the mapping into a scalar and orphan the following keys.
+            if scalar.contains(": ") {
+                return line.to_string();
+            }
             if !(scalar.contains('[') || scalar.contains(']') || scalar.contains('{') || scalar.contains('}'))
             {
                 return line.to_string();
@@ -2220,6 +2226,18 @@ reality-opts:
             );
         }
         assert!(saw_path_regex, "home routing must emit PROCESS-PATH-REGEX rows");
+    }
+
+    #[test]
+    fn flow_indicators_in_admitted_node_names_preserve_proxy_mappings() {
+        let name = "Tokyo [primary]";
+        let nodes = [node(name, "9.9.9.9")];
+        let runtime = build_owned_runtime(&nodes, name, "test-secret", None).unwrap();
+        let value = parsed(&runtime);
+        assert_eq!(value["proxies"][0]["name"].as_str(), Some(name));
+        let redacted: Value = serde_yaml_ng::from_str(&runtime.redacted_yaml()).unwrap();
+        assert_eq!(redacted["proxies"][0]["name"].as_str(), Some(name));
+        assert_eq!(redacted["secret"].as_str(), Some(""));
     }
 
     #[test]
