@@ -108,7 +108,7 @@ export function nodeQuality(items: readonly SloRowDto[]): NodeQuality[] {
       rate: attempts > 0 ? successes / attempts : null,
       outageMin: [...perDay.values()].reduce((sum, row) => sum + row.verifiedOutageMin, 0),
       unmeasuredMin: [...perDay.values()].reduce((sum, row) => sum + row.unmeasuredMin, 0),
-      p50Ms: p50s.length > 0 ? p50s[Math.floor((p50s.length - 1) / 2)] : null,
+      p50Ms: p50s[Math.floor((p50s.length - 1) / 2)] ?? null,
       days: rates.get(node) ?? [],
     });
   }

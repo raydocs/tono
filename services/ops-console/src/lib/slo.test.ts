@@ -23,7 +23,7 @@ describe('slo folding', () => {
       row({ attempts: 4_000, successes: 3_960 }),
       row({ carrier: 'unicom', attempts: 12, successes: 6 }),
     ], (r) => r.platform);
-    expect(rates.get('macos')?.[0].v).toBeCloseTo(3_966 / 4_012, 6);
+    expect(rates.get('macos')?.[0]?.v).toBeCloseTo(3_966 / 4_012, 6);
   });
 
   it('leaves a day with no attempts for a key as a gap', () => {
@@ -31,7 +31,7 @@ describe('slo folding', () => {
       row({ dayAt: 0, platform: 'macos' }),
       row({ dayAt: 86_400, platform: 'windows' }),
     ], (r) => r.platform);
-    expect(rates.get('windows')?.[0].v).toBeNull();
+    expect(rates.get('windows')?.[0]?.v).toBeNull();
   });
 
   it('counts outage minutes once per node-day, not once per slice', () => {
