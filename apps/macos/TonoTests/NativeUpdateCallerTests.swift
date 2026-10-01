@@ -63,6 +63,68 @@ final class NativeUpdateCallerTests: XCTestCase {
         XCTAssertEqual(result.execution, "consumed")
     }
 
+    func testProtectedOfflineNativeUpdatePublishesHelperReleaseAfterCommit() async throws {
+        let armed = KillSwitchService.isArmed
+        let reassertNeeded = KillSwitchService.needsSessionExceptionReassert
+        let pending = RuntimeCleanup.nativeUpdatePending
+        let blocksConnect = RuntimeCleanup.nativeUpdateBlocksConnect
+        let recovery = RuntimeCleanup.nativeUpdateRecovery
+        let consumer = RuntimeCleanup.launchProtectionConsumer
+        let didStartCore = AppProfile.defaults.object(forKey: SettingsKey.didStartCore)
+        let lastTunEnabled = AppProfile.defaults.object(forKey: SettingsKey.lastTunEnabled)
+        defer {
+            KillSwitchService.isArmed = armed
+            KillSwitchService.needsSessionExceptionReassert = reassertNeeded
+            RuntimeCleanup.nativeUpdatePending = pending
+            RuntimeCleanup.nativeUpdateBlocksConnect = blocksConnect
+            RuntimeCleanup.nativeUpdateRecovery = recovery
+            RuntimeCleanup.launchProtectionConsumer = consumer
+            AppProfile.defaults.set(didStartCore, forKey: SettingsKey.didStartCore)
+            AppProfile.defaults.set(lastTunEnabled, forKey: SettingsKey.lastTunEnabled)
+        }
+        KillSwitchService.isArmed = true
+        RuntimeCleanup.nativeUpdatePending = false
+        RuntimeCleanup.nativeUpdateBlocksConnect = false
+        RuntimeCleanup.nativeUpdateRecovery = nil
+        RuntimeCleanup.markCoreStarted(tunEnabled: true)
+        let app = AppState()
+        var calls = [String]()
+
+        let shouldResume = try await RuntimeCleanup.cleanupStaleRuntime(
+            queryNativeUpdate: {
+                calls.append("status")
+                return self.status(.installedIdentityVerified, execution: "replaced")
+            },
+            nativeUpdate: { operation in
+                calls.append(operation)
+                switch operation {
+                case "reconcile":
+                    return self.status(.installedIdentityVerified, execution: "replaced")
+                case "commit":
+                    return .init(pending: false,
+                                 receipt: self.status(.committed, execution: "replaced").receipt,
+                                 execution: "replaced", disconnectVerified: false, diagnostic: nil)
+                default:
+                    XCTFail("Unexpected update operation: \(operation)")
+                    throw Failure.preparation
+                }
+            },
+            observeProtection: {
+                calls.append("protection")
+                return .confirmed(requiresProtectionRecovery: false)
+            }
+        )
+
+        XCTAssertEqual(calls, ["status", "reconcile", "commit", "protection"])
+        XCTAssertFalse(shouldResume, "Protected Offline must not reconnect automatically")
+        XCTAssertFalse(KillSwitchService.isArmed, "the old receipt cannot preserve released intent")
+        XCTAssertFalse(app.isProtectionBlocked)
+        XCTAssertFalse(app.isProtectionUnconfirmed)
+        XCTAssertEqual(MenuBarProtectionStatus(app).kind, .standby)
+        XCTAssertFalse(RuntimeCleanup.nativeUpdatePending)
+        XCTAssertFalse(RuntimeCleanup.nativeUpdateBlocksConnect, "a committed update must allow Connect")
+    }
+
     func testVerifiedReleaseIsPublishedBeforeFailedRetirementWithoutClearingUpdate() async throws {
         let armed = KillSwitchService.isArmed
         let pending = RuntimeCleanup.nativeUpdatePending
