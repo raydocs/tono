@@ -14,4 +14,5 @@ Collected 2026-09-30 (MDT) from the box; credential values, auth paths, and emai
 - [glm-bughunt-report.md](glm-bughunt-report.md) — read-only GLM-5.3 bug-hunt evaluation and verified findings; 2026-09-30; source model: GLM-5.3.
 - [sol-bughunt-report.md](sol-bughunt-report.md) — partial read-only GPT-6.1 Sol benchmark against the same prompts; 2026-09-30; source model: GPT-6.1 Sol.
 - [macos-open-issues-grok.md](macos-open-issues-grok.md) — open macOS-app issues with no unclaimed fix; 2026-10-01; source model: Grok 4.7.
+- [W2-grok-helper.md](W2-grok-helper.md) — macOS root helper hunt (M1–M4): findings, false positives, and PR list; 2026-09-30; source model: Grok 4.7.
 - [W1-grok-mac-config.md](W1-grok-mac-config.md) — W1 macOS config/account/connectivity hunt (M9–M12); 2026-09-30, addendum 2026-10-01; source model: Grok 4.7.
