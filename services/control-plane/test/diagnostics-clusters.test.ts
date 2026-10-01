@@ -360,7 +360,9 @@ describe('diagnostics read API', () => {
   it('stores no partial bundle when a later hop is invalid', async () => {
     const account = await seedAccount();
     const payload = bundle();
-    payload.hops[1].role = 'invalid';
+    const hop = payload.hops[1];
+    if (!hop) throw new Error('Missing second hop in bundle fixture');
+    hop.role = 'invalid';
     const response = await api('telemetry/diagnostics', json(payload, account.token));
     expect(response.status).toBe(400);
     const session = await db().prepare(
@@ -428,6 +430,20 @@ describe('diagnostics read API', () => {
       'SELECT COUNT(*) AS n FROM ai_service_routes WHERE user_id = ?',
     ).bind(account.userId).first<{ n: number }>();
     expect(Number(ai?.n)).toBe(0);
+  });
+
+  it('keeps a completed session when its delayed start report arrives', async () => {
+    const account = await seedAccount();
+    const atMs = Date.now();
+    const payload = bundle(atMs);
+    const completed = { ...payload, session: { ...payload.session, endedAtMs: atMs, outcome: 'ok' } };
+    expect((await api('telemetry/diagnostics', json(completed, account.token))).status).toBe(202);
+    const { bytesUp: _up, bytesDown: _down, outcome: _outcome, ...started } = payload.session;
+    expect((await api('telemetry/diagnostics', json({ ...payload, session: started }, account.token))).status).toBe(202);
+    const session = await db().prepare(
+      'SELECT ended_at_ms, bytes_up, bytes_down, outcome FROM client_sessions WHERE user_id = ?',
+    ).bind(account.userId).first();
+    expect(session).toMatchObject({ ended_at_ms: atMs, bytes_up: 100, bytes_down: 400, outcome: 'ok' });
   });
 
   it('lists a window and returns the cluster timeline only to the read token', async () => {
@@ -528,5 +544,20 @@ describe('failure cluster open race', () => {
     ).first<{ clusters: number; events: number }>();
     expect(Number(row?.clusters)).toBe(1);
     expect(Number(row?.events)).toBe(2);
+  });
+});
+
+describe('automatic diagnostic excerpt privacy', () => {
+  it('stores structured facts without an arbitrary IPv6 and token log excerpt', async () => {
+    const account = await seedAccount();
+    const payload = {
+      ...bundle(),
+      logExcerpt: 'dial tcp [2001:db8:1234::9]:443 failed token=private-token',
+    };
+    expect((await api('telemetry/diagnostics', json(payload, account.token))).status).toBe(202);
+    const session = await db().prepare(
+      'SELECT log_excerpt, bytes_down, outcome FROM client_sessions WHERE user_id = ?',
+    ).bind(account.userId).first();
+    expect(session).toMatchObject({ log_excerpt: null, bytes_down: 400, outcome: 'fail' });
   });
 });

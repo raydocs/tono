@@ -1521,6 +1521,44 @@ extension KillSwitchManager {
         }
     }
 
+    /// A failed arm or sleep barrier must not flush a ruleset pfctl never
+    /// replaced. Only a load that was accepted, or that never answered, may
+    /// have committed.
+    static func runFailedCommitReleaseSelfTest() -> Bool {
+        !failedCommitReleasesInstalledBlock(load: .notIssued, strictKillSwitchEnabled: false)
+            && !failedCommitReleasesInstalledBlock(load: .rejected, strictKillSwitchEnabled: false)
+            && failedCommitReleasesInstalledBlock(
+                load: .acceptedOrUnknown,
+                strictKillSwitchEnabled: false
+            )
+            && !failedCommitReleasesInstalledBlock(
+                load: .acceptedOrUnknown,
+                strictKillSwitchEnabled: true
+            )
+    }
+
+    /// `/killswitch/health` disconnects the app without a release when `live`
+    /// is false. An unread sample and a down-read that the next read does not
+    /// confirm must not become that false.
+    static func runUnprovenHealthSelfTest() -> Bool {
+        struct Unreadable: Error {}
+        var confirmed = false
+        guard agreedFiltering(first: .success(true), confirmDown: {
+            confirmed = true
+            return false
+        }) == true, !confirmed else { return false }
+        guard agreedFiltering(first: .success(false), confirmDown: { false }) == false else {
+            return false
+        }
+        guard agreedFiltering(first: .success(false), confirmDown: { true }) == true else {
+            return false
+        }
+        guard agreedFiltering(first: .failure(Unreadable()), confirmDown: { false }) == nil else {
+            return false
+        }
+        return agreedFiltering(first: .success(false), confirmDown: { throw Unreadable() }) == nil
+    }
+
     static func runNetworkSelfTest() -> Bool {
         guard let endpoints = try? fetchDERPEndpoints() else { return false }
         return endpoints.count >= 2 &&
