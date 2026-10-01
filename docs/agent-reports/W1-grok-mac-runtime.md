@@ -103,3 +103,23 @@ Hunter: Grok 4.7。席位：macOS 运行时 M5–M8（第二个强模型，在 S
 - `AppState+Proxy` 的节点切换不在本席文件表里，`finishNodeSwitch` 读过的部分站得住，没有整文件收尾。
 - 在线会话里的目录安装拆除没有做一遍完整追踪。
 - 没有把每一份 macOS `docs/findings.d` 分片再对一遍当前源码。
+
+## 续记（2026-10-01，同一席位）
+
+对照当时的 `origin/main` `f80951fb`。没有直接合并。修复 PR 各打开一次自动合并；若合并管理员关掉，本席不再打开。本续记不启用自动合并，叠在 #876 上。
+
+| ID | 区域 | 等级 | file:line | 一句话 | 结论 |
+|---|---|---|---|---|---|
+| MAC-TUN-WAIT-CANCEL | M6/M7 连接 | 低·推导 | `AppState.swift` `waitForOwnedTunnelInterface` | 最后一次睡眠被取消后仍可能把 utun199 报成就绪 | 已修 [#882](https://github.com/raydocs/tono/pull/882)，Fixes #864 |
+| MAC-HEALTH-CLEARS-ERROR | M6 健康检查 | 低·推导 | `AppState+Connect.swift` 健康成功分支 | 健康且没有 advisory 时清掉任意 `errorMessage` | 已修 [#885](https://github.com/raydocs/tono/pull/885)，Fixes #863。流量探测改为 `raceHealthTrafficProbes` |
+| MAC-RECONCILE-DNS-COPY | M7 文案 | 低·推导 | `AppState.swift:560` | DNS 已坏且没有换网时仍说网络变了 | 仍未修 [#861](https://github.com/raydocs/tono/issues/861)。文案改动走 UI review |
+
+补读之后没有新的已核实缺陷，所以没有新开 issue。
+
+- 备份通道（`AppState+Connect.swift` 里 `retryProtectedConnectionNow`、`backupHy2SiblingName`、`tryBackupChannelManually`，以及文件末尾的 `ManualBackupChannelOffer` 等）：按钮是否出现和点下去之后走 Retry 还是 Connect，与注释一致。hy2 不能回答的失败码不会给出备用名。没有新缺陷。
+- 持久化写入（`saveState` / `saveProxyRegionsOnly` / `AppStatePersistenceWriter` / `ConfigStorage.writeSensitive`）：控制器 secret 写成空字符串；写入是 atomic 再收到 0600。保存任务按顺序串起来。退出时 `finishPendingPersistence` 在断开之后调用。没有核实到一次失败就会丢掉目录或把 secret 写进磁盘。
+- 在线目录拆除（`installManagedExitCatalog` 的 `liveSessionTornDown`，`CatalogLiveSession.shouldReload`，策略变更后的 `disconnect` + `scheduleProtectedReconnect`）：`disconnect` 在返回前就把 `isDisconnecting` 设上，自动重连会先等这次断开。选中节点的拨号身份包含 uuid、密码和 Reality 材料；路由令牌单独比较。产品路径上的 VLESS 节点不允许 username。没有新缺陷。
+- `HelperProtocolVersion`：`current` 在 `f80951fb` 上是 `4.52.8`。调用方用字符串相等比较。本席没有改 helper，也没有加版本。
+
+仍未读完：每一份 macOS `docs/findings.d` 分片对当前源码的复核，以及 `AppState+Proxy` 整文件。本机仍未跑 `xcodebuild`。
+

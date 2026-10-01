@@ -51,12 +51,24 @@ install -d -m 0755 -o root -g root "$INSTALL" "$INSTALL/releases"
 install -d -m 0750 -o root -g tono-xray "$REL"
 install -m 0755 -o root -g root "$ARTIFACT" "$REL/xray"
 
-# Copied as late as possible: the ops hub rewrites this file every minute, and a
-# copy taken early would silently drop an account added in between.
-install -m 0640 -o root -g tono-xray "$INSTALL/current/config.json" "$REL/config.json"
-
-"$REL/xray" run -test -config "$REL/config.json" >/dev/null 2>&1 \
-  || fail "the pinned binary rejected the existing configuration; nothing was changed"
+# The hub rewrites config.json about once a minute. A copy taken before
+# `xray run -test` can be stale by the time current is swapped away, and the
+# newer file moves into the backup with the old directory. Accept the staged
+# file only when it still matches the live one after the test. The live
+# directory stays in place until that happens.
+staged=0
+attempt=0
+while [ "$attempt" -lt 3 ]; do
+  attempt=$((attempt + 1))
+  install -m 0640 -o root -g tono-xray "$INSTALL/current/config.json" "$REL/config.json"
+  "$REL/xray" run -test -config "$REL/config.json" >/dev/null 2>&1 \
+    || fail "the pinned binary rejected the existing configuration; nothing was changed"
+  if cmp -s "$INSTALL/current/config.json" "$REL/config.json"; then
+    staged=1
+    break
+  fi
+done
+[ "$staged" = 1 ] || fail "config.json changed throughout the test; the live directory was left in place"
 
 BACKUP="$INSTALL/current.pre-$ID"
 mv "$INSTALL/current" "$BACKUP"
