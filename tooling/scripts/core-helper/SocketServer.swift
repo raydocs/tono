@@ -525,10 +525,10 @@ final class SocketServer {
                 )
                 recordSessionOwner(socket: client)
                 sendResponse(client, status: 200, object: response)
-            case ("POST", "/killswitch/disarm"):
+            case ("POST", "/killswitch/disarm"), ("POST", "/killswitch/release"):
                 guard request.body.isEmpty else { throw HelperFailure.invalid("Unexpected request body.") }
                 let response = try transitionGate.whileAwake {
-                    try killSwitch.disarm()
+                    try killSwitch.disarm(preserveAIHold: request.path == "/killswitch/release")
                 }
                 clearSessionOwner()
                 sendResponse(client, status: 200, object: response)

@@ -18,6 +18,7 @@ final class ArmedFailureReleaseTests: XCTestCase {
         runtime.restoreDNS = { true }
         runtime.disableSystemProxy = {}
         runtime.disarm = { KillSwitchService.isArmed = false }
+        runtime.releaseAfterFailure = { KillSwitchService.isArmed = false }
         runtime.restrictToBootstrap = {}
         app.networkProtection = runtime
         var admissions = 0
@@ -76,6 +77,7 @@ final class ArmedFailureReleaseTests: XCTestCase {
         runtime.restoreDNS = { true }
         runtime.disableSystemProxy = {}
         runtime.disarm = { KillSwitchService.isArmed = false }
+        runtime.releaseAfterFailure = { KillSwitchService.isArmed = false }
         runtime.restrictToBootstrap = {}
         runtime.refreshKillSwitchStatus = {
             await withCheckedContinuation { reply in
@@ -105,11 +107,15 @@ final class ArmedFailureReleaseTests: XCTestCase {
         XCTAssertFalse(app.isProtectionBlocked)
     }
 
-    func testExhaustedArmedFailureRemovesPfAndDoesNotScheduleProtectedReconnect() async {
+    func testExhaustedArmedFailureReleasesGeneralTrafficAndKeepsAIHold() async {
         let app = AppState()
+        let originalArmed = KillSwitchService.isArmed
         KillSwitchService.isArmed = true
+        defer { KillSwitchService.isArmed = originalArmed }
         app.isConnecting = true
         var disarmed = 0
+        var releasedAfterFailure = 0
+        var aiHold = false
         var restricted = 0
         var runtime = NetworkProtectionOperations()
         runtime.repairForRelease = {}
@@ -119,8 +125,15 @@ final class ArmedFailureReleaseTests: XCTestCase {
         runtime.disableSystemProxy = {}
         runtime.disarm = {
             disarmed += 1
+            aiHold = false
             KillSwitchService.isArmed = false
         }
+        runtime.releaseAfterFailure = {
+            releasedAfterFailure += 1
+            aiHold = true
+            KillSwitchService.isArmed = false
+        }
+        runtime.refreshKillSwitchStatus = { .confirmed(requiresProtectionRecovery: false) }
         runtime.restrictToBootstrap = { restricted += 1 }
         app.networkProtection = runtime
         app.unarmedTcpProof = { _ in false }
@@ -129,7 +142,9 @@ final class ArmedFailureReleaseTests: XCTestCase {
         await app.applyExhaustedArmedFailure(message: "tcp connect failed", resumeWhenReachable: true)
         await app.finishPendingDisconnect()
 
-        XCTAssertEqual(disarmed, 1, "PF disarm runs")
+        XCTAssertEqual(releasedAfterFailure, 1, "automatic recovery retains the AI hold")
+        XCTAssertEqual(disarmed, 0, "failure must not use explicit Disconnect")
+        XCTAssertTrue(aiHold)
         XCTAssertEqual(restricted, 0, "the failure does not keep a bootstrap block")
         XCTAssertFalse(app.isProtectionBlocked)
         XCTAssertFalse(app.isProtectedReconnectScheduled)

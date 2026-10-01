@@ -705,6 +705,9 @@ extension AppState {
     /// attempt that failed before its first arm. It is a release, but not the
     /// user's explicit one: see the operation below.
     ///
+    /// `automaticFailureRelease` uses the helper's selective release so an
+    /// exhausted recovery does not remove the secondary AI hold.
+    ///
     /// `exhaustedTunnelLoss` is only the core monitor's missing-TUN verdict.
     /// That path must not run the pending-update disconnect: doing so releases
     /// PF and sets `nativeUpdateBlocksConnect`, so assistant traffic goes
@@ -713,7 +716,8 @@ extension AppState {
     func disconnect(
         releaseKillSwitch: Bool = false,
         afterUnarmedConnectFailure: Bool = false,
-        exhaustedTunnelLoss: Bool = false
+        exhaustedTunnelLoss: Bool = false,
+        automaticFailureRelease: Bool = false
     ) {
         if nativeUpdatePending || RuntimeCleanup.nativeUpdateBlocksConnect
             || (releaseKillSwitch && RuntimeCleanup.nativeUpdatePending) {
@@ -967,7 +971,11 @@ extension AppState {
             if helperReadyForRelease {
                 do {
                     if disarming {
-                        try await networkProtection.disarm()
+                        if automaticFailureRelease {
+                            try await networkProtection.releaseAfterFailure()
+                        } else {
+                            try await networkProtection.disarm()
+                        }
                         transitionLeavesProtectionBlocked = false
                     } else {
                         try await networkProtection.restrictToBootstrap()
@@ -2256,7 +2264,11 @@ extension AppState {
             let holdsUpdateBarrier = nativeUpdatePending
                 || RuntimeCleanup.nativeUpdateBlocksConnect
                 || RuntimeCleanup.nativeUpdatePending
-            disconnect(releaseKillSwitch: true, exhaustedTunnelLoss: exhaustedTunnelLoss)
+            disconnect(
+                releaseKillSwitch: true,
+                exhaustedTunnelLoss: exhaustedTunnelLoss,
+                automaticFailureRelease: true
+            )
             if exhaustedTunnelLoss, holdsUpdateBarrier { return }
             let releaseGeneration = connectionCoordinator.protectionOperationGeneration
             lastConnectionFailure = preservedFailure

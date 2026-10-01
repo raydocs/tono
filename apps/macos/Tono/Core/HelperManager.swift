@@ -867,8 +867,9 @@ nonisolated struct HelperManager {
         return try requireKillSwitchSuccess(result, operation: "arm")
     }
 
-    static func disarmKillSwitch() throws {
-        let result = try sendRequest(method: "POST", path: "/killswitch/disarm")
+    static func disarmKillSwitch(preserveAIHold: Bool = false) throws {
+        let path = preserveAIHold ? "/killswitch/release" : "/killswitch/disarm"
+        let result = try sendRequest(method: "POST", path: path)
         _ = try requireKillSwitchSuccess(result, operation: "disarm")
     }
 

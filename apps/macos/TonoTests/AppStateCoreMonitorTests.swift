@@ -54,6 +54,7 @@ final class AppStateCoreMonitorTests: XCTestCase {
         runtime.restoreDNS = { true }
         runtime.disableSystemProxy = {}
         runtime.disarm = {}
+        runtime.releaseAfterFailure = {}
         runtime.restrictToBootstrap = {}
         app.networkProtection = runtime
         app.tunInterfaceExists = { _ in false }
@@ -134,6 +135,7 @@ final class AppStateCoreMonitorTests: XCTestCase {
         runtime.restoreDNS = { true }
         runtime.disableSystemProxy = {}
         runtime.disarm = {}
+        runtime.releaseAfterFailure = {}
         runtime.restrictToBootstrap = {}
         app.networkProtection = runtime
         app.tunInterfaceExists = { _ in true }
@@ -277,6 +279,7 @@ final class AppStateCoreMonitorTests: XCTestCase {
         runtime.restoreDNS = { true }
         runtime.disableSystemProxy = {}
         runtime.disarm = {}
+        runtime.releaseAfterFailure = {}
         runtime.restrictToBootstrap = {}
         app.networkProtection = runtime
         app.tunInterfaceExists = { _ in true }
