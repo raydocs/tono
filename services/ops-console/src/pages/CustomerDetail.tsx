@@ -29,6 +29,7 @@ import { Quota } from './customer/Quota';
 import { ReplyDraft } from './customer/ReplyDraft';
 import { ServiceUsage } from './customer/Services';
 import { Timeline } from './customer/Timeline';
+import { CustomerDiagnostics } from './diagnostics/CustomerDiagnostics';
 
 const RANGE = '7d' as const;
 
@@ -174,6 +175,8 @@ export default function CustomerDetailPage({ userId }: { userId: string }) {
             state={connections.status}
             message={connections.status === 'error' ? connections.message : undefined}
           />
+
+          <CustomerDiagnostics userId={userId} />
 
           <Section
             title={copy.customerSections.activity}

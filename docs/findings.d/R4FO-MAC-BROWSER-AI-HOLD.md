@@ -1,0 +1,7 @@
+| ID | 问题（一句） | 状态 | Issue / PR | 等级 | 剩余限制 |
+|---|---|---|---|---|---|
+| R4FO-MAC-BROWSER-AI-HOLD | Automatic browser Secure DNS health cleanup restores ordinary internet using explicit disarm and removes the secondary AI hold | in-PR | branch `hunt/sol-r4fo-browser-ai-hold` | 高·已确认（P1，源码与原生产路径回归） | Native XCTest and installed PF/resolver behavior require macOS CI and hardware; the existing selective layer retains its documented DNS/cache limitations. |
+
+Baseline `7f382af7`: while a residential session is Connected, enabling browser Secure DNS makes the periodic browser audit fail (`AppState+Connect.swift:1651`). The release added by #760 calls `disconnect(releaseKillSwitch: true)` with `automaticFailureRelease=false`; disconnect selects `networkProtection.disarm()` at line 1006. That reaches explicit `/killswitch/disarm`, which removes the selective layer. #1048 adds an AI-preserving automatic release to `applyExhaustedArmedFailure`, but the browser verdict bypasses that function.
+
+The browser branch now requests the existing automatic-failure disposition. Ordinary traffic is still restored immediately, and the browser conflict still waits for user action without scheduling reconnect. The existing narrow monitor regression now records both disarm and releaseAfterFailure and requires the latter through the actual production tick/disconnect sequence. It was strengthened before the source change; native execution is unavailable here.

@@ -5,20 +5,47 @@ extension AppState {
 
     /// Loads local disk state only. Network refresh is deferred until
     /// `refreshSubscriptionsIfReady()` when AccountSession reports ready + descriptor.
+    ///
+    /// Each main-window scene runs this from its own `.task`. The apply is
+    /// claimed before the first await, so a second window waits for that
+    /// apply instead of installing the cached catalog a second time.
     func loadInitialData() async {
-        guard !initialDataLoaded else { return }
-        let loadTask: Task<InitialDiskSnapshot, Never>
-        if let initialDataLoadTask {
-            loadTask = initialDataLoadTask
-        } else {
-            let loader = initialDataLoader
-            let task = Task { await loader.load() }
-            initialDataLoadTask = task
-            loadTask = task
+        if initialDataLoaded { return }
+        if let initialDataApplyTask {
+            recordInitialDataApplyJoined()
+            initialDataApplyJoined?()
+            await initialDataApplyTask.value
+            return
         }
-        let snapshot = await loadTask.value
-        // Multiple SwiftUI scene tasks may await the same disk snapshot. Only
-        // the first applies it; every caller still returns after it is ready.
+        let task = Task { await self.applyClaimedInitialData() }
+        initialDataApplyTask = task
+        await task.value
+    }
+
+    private func applyClaimedInitialData() async {
+        recordInitialDataApplyStarted()
+        if let initialDataApplySuspension {
+            await initialDataApplySuspension()
+        }
+        guard !initialDataLoaded else { return }
+        let snapshot: InitialDiskSnapshot
+        if let initialDataSnapshotOverride {
+            snapshot = initialDataSnapshotOverride
+        } else {
+            let loadTask: Task<InitialDiskSnapshot, Never>
+            if let initialDataLoadTask {
+                loadTask = initialDataLoadTask
+            } else {
+                let loader = initialDataLoader
+                let task = Task { await loader.load() }
+                initialDataLoadTask = task
+                loadTask = task
+            }
+            snapshot = await loadTask.value
+        }
+        // A caller that arrived after this apply finished takes the
+        // `initialDataLoaded` return above. This guard covers a suspension
+        // inside the loader only.
         guard !initialDataLoaded else { return }
 
         let runtimeControllerSecret = config.secret
@@ -87,6 +114,7 @@ extension AppState {
         }
         initialDataLoaded = true
         initialDataLoadTask = nil
+        initialDataApplyTask = nil
         attemptAutomaticConnect()
         // Do NOT auto-refresh over the network here (P0 gate).
     }

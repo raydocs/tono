@@ -12,7 +12,7 @@ use shared::run_command;
 use shared::uninstall_old_service;
 use shared::{enter_repair_gate, run_maintenance_if_requested};
 #[cfg(windows)]
-use shared::{force_stop_windows_service, read_service_pid_file, stop_windows_service, terminate_process_by_pid};
+use shared::{force_stop_windows_service, read_service_pid_file, stop_windows_service, terminate_service_process_by_pid};
 
 /// How Windows cleanup ended. `main` maps this onto the exit-code contract with the NSIS
 /// uninstall macro, which must only block when the machine cannot be proven safe; the mapping
@@ -531,7 +531,9 @@ fn windows_cleanup() -> CleanupOutcome {
                     println!(
                         "Owner lock is held by live daemon {pid}; terminating it before disarm."
                     );
-                    terminate_process_by_pid(pid)?;
+                    if !terminate_service_process_by_pid(pid)? {
+                        println!("Owner pid {pid} is gone or belongs to a different image.");
+                    }
                     tono_service_protocol::acquire_service_owner()
                         .await
                         .ok()
