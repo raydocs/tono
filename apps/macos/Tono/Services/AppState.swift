@@ -2163,18 +2163,34 @@ final class AppState {
         return ip
     }
 
+    /// `interfaceExists` and `sleep` are test seams. Production asks the
+    /// kernel and sleeps. A cancel that lands in the last interval must not
+    /// report the interface as ready: connect arms PF before it checks
+    /// cancellation.
     nonisolated static func waitForOwnedTunnelInterface(
         attempts: Int = 50,
-        intervalMs: UInt64 = 100
+        intervalMs: UInt64 = 100,
+        interfaceExists: @escaping @Sendable (String) -> Bool = {
+            KillSwitchService.interfaceExists($0)
+        },
+        sleep: @escaping @Sendable (UInt64) async throws -> Void = { milliseconds in
+            try await Task.sleep(for: .milliseconds(milliseconds))
+        }
     ) async -> Bool {
+        let name = ConfigPipeline.tonoTunInterface
         for _ in 0..<max(1, attempts) {
             if Task.isCancelled { return false }
-            if KillSwitchService.interfaceExists(ConfigPipeline.tonoTunInterface) {
-                return true
+            if interfaceExists(name) { return true }
+            do {
+                try await sleep(intervalMs)
+            } catch is CancellationError {
+                return false
+            } catch {
+                return false
             }
-            try? await Task.sleep(for: .milliseconds(intervalMs))
         }
-        return KillSwitchService.interfaceExists(ConfigPipeline.tonoTunInterface)
+        if Task.isCancelled { return false }
+        return interfaceExists(name)
     }
 
     /// Query Mihomo's DNS listener directly while macOS is still using its

@@ -194,6 +194,7 @@ fn mark_verified_reconciliation_is_bounded_and_requires_full_proof() {
         tunnel_permit_rendered: true,
         direct_endpoint_digest: tono_service_protocol::direct_endpoint_digest(&[]).unwrap(),
         last_error: None,
+        reconnect_after_release: false,
     };
     assert!(mark_verified_committed(&status));
 

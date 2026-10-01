@@ -13,7 +13,7 @@ test('go tarball retries and still checks the pinned sha256', () => {
 })
 
 test('pinned sing-box commit is fetched with a bounded retry', () => {
-  assert.match(script, /93fff5954390367dd456cad3cbd79be54f8b941f/)
+  assert.match(script, /132b38e9caaba1a1959354d518e54d2d08419afe/)
   assert.match(script, /\$attempt" -ge 5/)
   assert.match(script, /pinned sing-box fetch failed/)
 })
