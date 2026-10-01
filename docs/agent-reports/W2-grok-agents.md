@@ -4,15 +4,15 @@ Hunter: Grok 4.7。槽位 W2-grok-agents。基线 `origin/main` `50bbbbf0`。范
 
 旧代理 `bc-0a0f053a` 的开放工作是 Windows/ops（#768、#770、#771、#772）和文档 PR（当时的 #814），不是这五个目录的修复。它把未修的出口库存缺口记成 #810，把配额周期插入失败记成 #811。本轮修了 #810。#811 在 `ops/quota.ts`，不在本槽文件列表里，不重复开题、不改。
 
-没有改客户机路由、TUN、PF、WFP、DNS 或 kill switch，所以三个修复 PR 都没有 `needs-hardware`，也没有 `ui-review`。都已 `gh pr merge --auto --merge`。
+没有改客户机路由、TUN、PF、WFP、DNS 或 kill switch，所以修复 PR 都没有 `needs-hardware`，也没有 `ui-review`。#838 在 `ci-gate` 通过后已用 merge commit 合入。#842、#845、#853 在 #838 合入后落后于 main；每次打开 auto-merge 后，账号 `raydocs` 大约 15 秒内会关掉。本轮结束时这三条没有挂着 auto-merge。按仓库约定，落后分支由合并队列的另一执行者更新，这里没有为了追 main 再推一次空提交。
 
 ## 结论表
 
 | ID | 区域 | 严重度 | 文件:行 | 一句话 | 结论 |
 |---|---|---|---|---|---|
-| EXIT-AGENT-PARTIAL-INVENTORY | E1 | P1（中·推导） | `services/exit-agent/reconcile_and_report.py` `reconcile` 失败抛出；`run_once` 原先在待报时钟检查之后才写库存 | 对账已经装上客户端，随后本轮拒绝，磁盘库存不更新；下一轮列不出 inbound 时吊销会漏掉它 | 已修 [#838](https://github.com/raydocs/tono/pull/838)，Fixes #810。auto-merge 开。无额外标签 |
-| PROVISION-REPO-ROOT | E2 | P2（低·推导） | `tooling/scripts/provision-tono-node.py` `REPO = parents[1]` | 「必须在仓库外」只排除了 `tooling/`，`services/` 或 `apps/` 下 0700 目录能放过私钥路径 | 已修 [#842](https://github.com/raydocs/tono/pull/842)。auto-merge 开。无额外标签 |
-| MIGRATE-CURRENT-RESTORE | E2 | P1（中·推导） | `tooling/scripts/remote/migrate-node-to-release-layout.sh` 原 `mv current` 之后的裸 `ln` | `ln` 失败时 `set -e` 退出，`current` 已经挪走，该出口没有二进制 | 已修 [#845](https://github.com/raydocs/tono/pull/845)。auto-merge 开。无额外标签 |
+| EXIT-AGENT-PARTIAL-INVENTORY | E1 | P1（中·推导） | `services/exit-agent/reconcile_and_report.py` `reconcile` 失败抛出；`run_once` 原先在待报时钟检查之后才写库存 | 对账已经装上客户端，随后本轮拒绝，磁盘库存不更新；下一轮列不出 inbound 时吊销会漏掉它 | 已合 [#838](https://github.com/raydocs/tono/pull/838)，Fixes #810。无额外标签 |
+| PROVISION-REPO-ROOT | E2 | P2（低·推导） | `tooling/scripts/provision-tono-node.py` `REPO = parents[1]` | 「必须在仓库外」只排除了 `tooling/`，`services/` 或 `apps/` 下 0700 目录能放过私钥路径 | 已修 [#842](https://github.com/raydocs/tono/pull/842)。无额外标签。落后于 main 时 auto-merge 被关掉 |
+| MIGRATE-CURRENT-RESTORE | E2 | P1（中·推导） | `tooling/scripts/remote/migrate-node-to-release-layout.sh` 原 `mv current` 之后的裸 `ln` | `ln` 失败时 `set -e` 退出，`current` 已经挪走，该出口没有二进制 | 已修 [#845](https://github.com/raydocs/tono/pull/845)。无额外标签。落后于 main 时 auto-merge 被关掉 |
 
 没有留下已证实但未修的缺陷，所以本轮没有新开 GitHub issue。#4、#5、#780、#789、#811、#816 沿用已有记录。
 
@@ -73,7 +73,7 @@ Hunter: Grok 4.7。槽位 W2-grok-agents。基线 `origin/main` `50bbbbf0`。范
 
 | PR | auto-merge | 标签 |
 |---|---|---|
-| [#838](https://github.com/raydocs/tono/pull/838) `hunt/grok-agents-exit-inventory-2c38` | 开，merge commit | 无 |
-| [#842](https://github.com/raydocs/tono/pull/842) `hunt/grok-agents-provision-repo-path-2c38` | 开，merge commit | 无 |
-| [#845](https://github.com/raydocs/tono/pull/845) `hunt/grok-agents-migrate-current-2c38` | 开，merge commit | 无 |
-| [#853](https://github.com/raydocs/tono/pull/853) `hunt/grok-agents-report-2c38` | 开，merge commit | 无。仅文档 |
+| [#838](https://github.com/raydocs/tono/pull/838) `hunt/grok-agents-exit-inventory-2c38` | 已合入（merge commit） | 无 |
+| [#842](https://github.com/raydocs/tono/pull/842) `hunt/grok-agents-provision-repo-path-2c38` | 已请求；落后于 main 时被 `raydocs` 关掉 | 无 |
+| [#845](https://github.com/raydocs/tono/pull/845) `hunt/grok-agents-migrate-current-2c38` | 已请求；落后于 main 时被 `raydocs` 关掉 | 无 |
+| [#853](https://github.com/raydocs/tono/pull/853) `hunt/grok-agents-report-2c38` | 已请求；落后于 main 时被 `raydocs` 关掉 | 无。仅文档 |
