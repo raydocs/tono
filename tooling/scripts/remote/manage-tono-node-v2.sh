@@ -325,7 +325,9 @@ PY
  local pid started activation; pid=$(systemctl show -p MainPID --value "$service"); started=$(date -d "$(systemctl show -p ExecMainStartTimestamp --value "$service")" +%s); activation=$(cat "$TX/activation-time")
  [[ $pid =~ ^[1-9][0-9]*$ && $pid != "$(cat "$TX/prior-mainpid")" && $started =~ ^[1-9][0-9]*$ && $started -ge $activation ]] || fail "service process was not newly activated"
  systemctl is-active --quiet "$service"; ss -H -lntp "sport = :$port" | grep -Eq "pid=$pid([,\"]|$)" || fail "service PID does not own listener"
- ! journalctl -u "$service" --since '-2 minutes' -p err --no-pager | grep -q . || fail "journal errors"
+ local journal_errors
+ journal_errors=$(journalctl -u "$service" --since '-2 minutes' -p err --no-pager --quiet) || fail "journal unavailable"
+ [[ -z $journal_errors ]] || fail "journal errors"
  read -r load _ </proc/loadavg; read -r _ total used _ < <(free -m | awk '/^Mem:/{print $1,$2,$3,$4}')
  [[ ${load%.*} -lt $(nproc) && $used -lt $total ]] || fail "resource pressure"
  local iface brx btx bre bte brt arx atx are ate art
