@@ -1213,6 +1213,7 @@
     /// real facade, and a leaked failure flag or streak would decide the next test's proof.
     async fn reset_dns_state() {
         let _ = tokio::fs::remove_file(snapshot_path()).await;
+        let _ = tokio::fs::remove_file(snapshot_retirement_path()).await;
         LIVE_APPLY_FAILURES
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -1595,6 +1596,63 @@
         assert_eq!(cleaned.last_error, None);
 
         reset_dns_state().await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn a_retained_restored_snapshot_does_not_replace_the_next_sessions_originals() -> Result<()> {
+        reset_dns_state().await;
+        seed_snapshot(vec![adapter("{A}", Some("10.0.0.53"))]).await?;
+        test_hooks::set_snapshot_delete_fails(true);
+        restore_protected().await?;
+        assert!(snapshot_path().exists(), "the simulated AV handle retains the restored file");
+
+        // Normal offline DNS changes belong to the next session; retirement is stored on disk.
+        test_hooks::set_collected_adapters(vec![adapter("{A}", Some("192.168.1.53"))]);
+        test_hooks::set_snapshot_delete_fails(false);
+        enable().await?;
+        let saved = read_snapshot().await?;
+        reset_dns_state().await;
+        assert_eq!(saved.adapters[0].ipv4_name_server.as_deref(), Some("192.168.1.53"),
+            "a restored leftover must not replay the previous network's resolver");
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn a_retained_restored_snapshot_is_not_applied_again_by_a_restore_retry() -> Result<()> {
+        reset_dns_state().await;
+        seed_snapshot(vec![adapter("{A}", None)]).await?;
+        test_hooks::set_snapshot_delete_fails(true);
+        restore_protected().await?;
+        assert_eq!(test_hooks::take_automatic_resets(), 1);
+        test_hooks::set_collected_adapters(vec![adapter("{A}", Some("192.168.1.53"))]);
+        ensure_restored().await?;
+        let repeated = test_hooks::take_automatic_resets();
+        reset_dns_state().await;
+        assert_eq!(repeated, 0, "cleanup retry must not reset the user's newer DNS to DHCP");
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn a_previous_sessions_retirement_record_cannot_bypass_a_new_restore_proof() -> Result<()> {
+        reset_dns_state().await;
+        seed_snapshot(vec![adapter("{A}", Some("10.0.0.53"))]).await?;
+        test_hooks::set_snapshot_delete_fails(true);
+        restore_protected().await?;
+        let previous = tokio::fs::read(snapshot_retirement_path()).await?;
+        test_hooks::set_collected_adapters(vec![adapter("{A}", Some("192.168.1.53"))]);
+        enable().await?;
+        // A delayed old write must not retire the newly captured originals.
+        atomic_write(&snapshot_retirement_path(), &previous).await?;
+        test_hooks::set_live_dns_on_loopback(true);
+        let result = restore_protected().await;
+        let retained = snapshot_path().exists();
+        reset_dns_state().await;
+        assert!(result.is_err(), "a different snapshot must still prove its restore");
+        assert!(retained, "an unproven restore must retain its current originals");
         Ok(())
     }
 
