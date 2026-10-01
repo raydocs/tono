@@ -43,6 +43,9 @@ const DNS_KEYS: &[&str] = &[
     "ipv6",
     "enhanced-mode",
     "fake-ip-range",
+    "fake-ip-ttl",
+    "prefer-h3",
+    "cache-algorithm",
     "respect-rules",
     "use-hosts",
     "nameserver",
@@ -302,6 +305,10 @@ rules:
         ).replacen(
             "  enable: true\n  listen:",
             "  enable: true\n  ipv6: false\n  listen:",
+            1,
+        ).replacen(
+            "  fake-ip-range: 198.18.0.1/16\n",
+            "  fake-ip-range: 198.18.0.1/16\n  fake-ip-ttl: 30\n  prefer-h3: false\n  cache-algorithm: lru\n",
             1,
         );
         assert_ne!(with_dial_defaults, OWNED);

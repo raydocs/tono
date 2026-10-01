@@ -16,6 +16,13 @@ may reverse), `reversed` (keep the line; say what replaced it).
 - Applied in: PR / commit / command
 ```
 
+## 2026-09-30 · How long may a fake-ip answer live, and may DoH try HTTP/3?
+
+- Status: provisional
+- Chosen: `fake-ip-ttl: 30`, `prefer-h3: false`, `cache-algorithm: lru`, both DoH servers kept. Rejected: plaintext DNS, a 600s fake-ip TTL, `prefer-h3: true`, `cache-algorithm: arc`, and collapsing to one DoH server.
+- Why stricter: lookups stay on the exit. 30s is the recovery bound so a missed OS flush cannot leave apps on 198.18.0.0/16. HTTP/3 would race a UDP probe the VLESS exit cannot carry and drop the HTTP client. LRU keeps stale answers; one dead DoH server still falls through to the other. A pre-warm miss does not block the first request.
+- Applied in: [#741](https://github.com/raydocs/tono/pull/741).
+
 ## 2026-09-30 · macOS 已连接时，哪些网络变化可以拆掉隧道？
 
 - Status: provisional
@@ -33,7 +40,7 @@ may reverse), `reversed` (keep the line; say what replaced it).
 ## 2026-09-30 · On crash or hang without an explicit strict kill switch, what happens to general traffic and to AI services?
 
 - Status: owner
-- Chosen: full release of general traffic comes first. The user always has a network. After that release, a narrow secondary layer is allowed: a system-resolver sinkhole of exclusive first-party AI suffixes, plus a static block of Anthropic's published inbound prefixes `160.79.104.0/23` and `2607:6bc0::/48` only. That layer may exist only when it cannot block general traffic or captive-portal login, and Restore network removes it. Customers are in mainland China, where direct access to those AI services does not work, so real-IP exposure after a crash is limited. Never trade network availability for that exposure. Rejected: blocking Cloudflare, Fastly, Azure, Google, or AS13335; using `CLAUDE_HOME_DOMAINS` as the sinkhole list; a TLS-SNI callout; fetching a fresh prefix list while the core is dead; keeping any general block up in order to hide the real IP. Strict mode keeps the full block. [#701](https://github.com/raydocs/tono/pull/701) and [#703](https://github.com/raydocs/tono/pull/703) are still open, so the layer is prepared on top of them and must not merge first.
+- Chosen: full release of general traffic comes first. The user always has a network. After that release, a narrow secondary layer is allowed: a system-resolver sinkhole of exclusive first-party AI suffixes, plus a static block of Anthropic's published inbound prefixes `160.79.104.0/23` and `2607:6bc0::/48` only. That layer may exist only when it cannot block general traffic or captive-portal login, and Restore network removes it. Customers are in mainland China, where direct access to those AI services does not work, so real-IP exposure after a crash is limited. Never trade network availability for that exposure. Rejected: blocking Cloudflare, Fastly, Azure, Google, or AS13335; using `CLAUDE_HOME_DOMAINS` as the sinkhole list; a TLS-SNI callout; fetching a fresh prefix list while the core is dead; keeping any general block up in order to hide the real IP; re-enabling PF to carry the two prefixes; putting the prefixes in the Windows kill-switch provider (a leftover filter there is treated as still armed and installs an emergency block-all). Strict mode keeps the full block. [#701](https://github.com/raydocs/tono/pull/701) and [#703](https://github.com/raydocs/tono/pull/703) are still open, so this layer is prepared on top of them and must not merge first.
 - Why stricter: availability is the constraint the owner put above the AI hold. The narrow layer does not widen a general outage, and refusing a CDN block does not widen exposure past the full release. The cost, accepted here, is that a crash can still let the real IP reach an AI service when that service is reachable from the network.
 - Applied in: [#709](https://github.com/raydocs/tono/pull/709), [selective-fail-open.md](selective-fail-open.md). The layer is [#738](https://github.com/raydocs/tono/pull/738), blocked on #701 and #703.
 
@@ -99,6 +106,13 @@ may reverse), `reversed` (keep the line; say what replaced it).
 - Chosen: no, unless the on-disk record explicitly sets `strict_kill_switch` (or the PF desired mode is Permanent). Corrupt, unreadable, unusable, and residual-without-intent paths release WFP and attempt DNS restore. The unhealthy watchdog waits three ticks, then releases; strict mode reinstalls and still releases after thirty consecutive unhealthy ticks. Rejected: keeping the ownerless emergency block, and deleting corrupt bytes to synthesize a tombstone.
 - Why stricter: an unreadable file is not an opt-in, so it cannot keep the machine closed. A live wanted session is still restored when the record parses and the install verifies. The cost is a connected session whose WFP verify fails for about three seconds loses the block until the next arm. Needs real-hardware testing.
 - Applied in: [#733](https://github.com/raydocs/tono/pull/733) (`windows_kill_switch.rs`, `macos_kill_switch.rs`).
+
+## 2026-09-30 · Should the 10s TUN and 12s first-byte budgets be shortened now?
+
+- Status: provisional
+- Chosen: no. Record per-stage durations under the existing wire keys (`preparing` … `verifyingTraffic`) so a later field trace can be compared. Rejected: cutting those budgets without a device trace, installing the tunnel in parallel with the handshake, and building a Clash-versus-Tono harness here.
+- Why stricter: a shorter budget fails connects that are merely slow, and a parallel tunnel install is the silent-drop case. The keys do not add a second telemetry upload.
+- Applied in: branch `cursor/connect-stage-timings-a925`.
 
 ## 2026-09-29 · After an unexpected restart on Windows, does the Service start the Core by itself, and does the App say why it did not?
 

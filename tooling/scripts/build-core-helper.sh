@@ -18,6 +18,7 @@ set -- \
   "$helper_dir/SocketServer.swift" \
   "$helper_dir/KillSwitchManager.swift" \
   "$helper_dir/KillSwitchPF.swift" \
+  "$helper_dir/SelectiveFailOpen.swift" \
   "$helper_dir/KillSwitchTests.swift" \
   "$helper_dir/ProtectedDNSManager.swift" \
   "$helper_dir/UpdateStorage.swift" \

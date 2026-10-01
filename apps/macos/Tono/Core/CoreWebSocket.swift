@@ -97,6 +97,8 @@ final class CoreWebSocket {
                     if let traffic { self.onTraffic?(traffic) }
                     self.receiveTraffic(from: task)
                 case .failure:
+                    // Mark stale rates before reconnect resets the watchdog deadline.
+                    self.markStreamStalled("traffic")
                     self.trafficTask = nil
                     self.reconnectTraffic()
                 }
@@ -180,6 +182,8 @@ final class CoreWebSocket {
                     if let response { self.onConnections?(response) }
                     self.receiveConnections(from: task)
                 case .failure:
+                    // Mark stale connections before reconnect resets the watchdog deadline.
+                    self.markStreamStalled("connections")
                     self.connectionsTask = nil
                     self.reconnectConnections()
                 }
