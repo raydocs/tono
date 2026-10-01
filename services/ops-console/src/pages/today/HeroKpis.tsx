@@ -1,12 +1,24 @@
+import { StatTile } from '@/components/ops/StatTile';
 import { copy } from '@/copy/copy';
-import { cn } from '@/lib/utils';
+import { formatCount } from '@/lib/display';
+import { useIsPhone } from '@/lib/use-phone';
+import { QualityBand } from './Quality';
 
 /**
- * The four numbers behind the verdict sentence, each in its own caliber.
+ * The four numbers behind the verdict sentence, each in its own caliber, and
+ * the connection-quality band under them.
  *
  * Every cell is null-aware: a resource that has not landed renders a dash,
  * because a zero drawn from an empty array is a claim of calm nobody measured.
  * A real measured zero renders as zero.
+ *
+ * The band is mounted from here rather than from the page so the page file
+ * keeps its one job — deciding what the verdict says — and the dashboard
+ * below it can grow without touching that decision.
+ *
+ * Not on a phone: mounted here the band sits above the incident list, and on
+ * a phone the first screen belongs to the incident and its claim button. It
+ * comes back on the phone once the page itself can place it below the list.
  */
 export function HeroKpis({
   open,
@@ -24,49 +36,33 @@ export function HeroKpis({
   /** Follows the coverage line: partly unmeasured stays grey, never green. */
   sweptTone: 'ok' | 'unk';
 }) {
-  const sweptText = swept === null || listed === null ? null : `${swept}/${listed}`;
+  const phone = useIsPhone();
+  const sweptText = swept === null || listed === null ? null : copy.todaySweptOf(formatCount(swept), formatCount(listed));
   return (
-    <div className="today-kpis" role="group" aria-label={copy.pages.today}>
-      <Kpi
-        label={copy.todayKpi.open}
-        value={open === null ? null : String(open)}
-        tone={open === null ? 'unk' : open > 0 ? 'sev' : 'ok'}
-      />
-      <Kpi
-        label={copy.todayKpi.impacted}
-        value={impacted === null ? null : String(impacted)}
-        tone={impacted === null ? 'unk' : impacted > 0 ? 'warn' : 'ok'}
-      />
-      <Kpi
-        label={copy.todayKpi.due}
-        value={due === null ? null : String(due)}
-        tone={due === null ? 'unk' : 'rem'}
-      />
-      <Kpi
-        label={copy.todayKpi.swept}
-        value={sweptText}
-        tone={sweptText === null ? 'unk' : sweptTone}
-      />
-    </div>
-  );
-}
-
-function Kpi({
-  label,
-  value,
-  tone,
-}: {
-  label: string;
-  value: string | null;
-  tone: 'sev' | 'warn' | 'rem' | 'ok' | 'unk';
-}) {
-  return (
-    <div className="today-kpi">
-      <span className="today-kpi-label text-micro text-[var(--muted-foreground)]">
-        <span className={cn('today-kpi-dot', `tone-${tone}`)} aria-hidden />
-        {label}
-      </span>
-      <div className="today-kpi-value">{value ?? copy.missing}</div>
-    </div>
+    <>
+      <div className="today-kpis" role="group" aria-label={copy.todayKpiGroup}>
+        <StatTile
+          label={copy.todayKpi.open}
+          value={open === null ? null : formatCount(open)}
+          tone={open === null ? 'unk' : open > 0 ? 'sev' : 'ok'}
+        />
+        <StatTile
+          label={copy.todayKpi.impacted}
+          value={impacted === null ? null : formatCount(impacted)}
+          tone={impacted === null ? 'unk' : impacted > 0 ? 'warn' : 'ok'}
+        />
+        <StatTile
+          label={copy.todayKpi.due}
+          value={due === null ? null : formatCount(due)}
+          tone={due === null ? 'unk' : due > 0 ? 'rem' : 'ok'}
+        />
+        <StatTile
+          label={copy.todayKpi.swept}
+          value={sweptText}
+          tone={sweptText === null ? 'unk' : sweptTone}
+        />
+      </div>
+      {phone ? null : <QualityBand />}
+    </>
   );
 }

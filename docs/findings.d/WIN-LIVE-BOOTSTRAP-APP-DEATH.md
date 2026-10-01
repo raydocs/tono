@@ -1,0 +1,7 @@
+| ID | 问题（一句） | 状态 | Issue / PR | 等级 | 剩余限制 |
+|---|---|---|---|---|---|
+| WIN-LIVE-BOOTSTRAP-APP-DEATH | A Windows App crash during Connect leaves a healthy live-Service Bootstrap block indefinitely because no Service-owned verification deadline exists | in-PR | Branch `hunt/sol-r3ks1-bootstrap-proof-window` (this PR) | 高·已确认（P0，Linux 回归） | A seven-minute cap exceeds the App's 310-second Connect budget; Core/run-intent retirement precedes selective release. Secondary stop/bookkeeping/native failures can postpone cleanup until retry. Real Windows TUN/WFP/DNS require CI and hardware. |
+
+Baseline `ad53abb6`: `arm_bootstrap` publishes the initial arm at `windows_kill_switch.rs:1497`; StartClash returns before the separate Lock/MarkVerified requests. The Service's owner session has no App-lifetime lease, and the watchdog treats exact Bootstrap filters as healthy forever. Startup-only recovery (#740/#1005) does not run while this Service survives. A single App crash while waiting for controller/TUN readiness is enough; no millisecond race or second failure is required.
+
+The failing-first `fresh_arm_releases_after_app_verification_never_arrives` regression exercises the actual watchdog with an abandoned arm and supervised Core identity/run intent. Additional narrow tests cover successful verification, a stale timeout observing a successor arm, and explicit strict protection. Linux tests simulate native filters and Core identity; no Windows packet-level claim is made.

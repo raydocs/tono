@@ -113,7 +113,8 @@ export function Policy() {
     await doc.publish(
       async (expected) => {
         try {
-          return (await hubApi.publishPolicy(sending, expected, signed)).revision;
+          const row = await hubApi.publishPolicy(sending, expected, signed);
+          return { revision: row.revision, updatedAt: row.updatedAt, extra: row.signature };
         } catch (error) {
           const said = refusalWord(error);
           throw said === null ? error : new Error(said);

@@ -15,6 +15,8 @@ export type DataColumn<T> = {
   mono?: boolean;
   width?: string;
   className?: string;
+  /** The header is read aloud but not drawn: a column of one control has no room for a word. */
+  headerHidden?: boolean;
 };
 
 export function DataTable<T>({
@@ -147,7 +149,7 @@ export function DataTable<T>({
                     {col.header}
                     {sortId === col.id ? <span className="font-mono">{sortDir === 'asc' ? '↑' : '↓'}</span> : null}
                   </button>
-                ) : col.header}
+                ) : col.headerHidden ? <span className="sr-only">{col.header}</span> : col.header}
               </th>
             ))}
           </tr>

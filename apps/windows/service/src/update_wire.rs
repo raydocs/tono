@@ -21,9 +21,22 @@ pub enum UpdateRequest {
         attempt_id: String,
     },
     Disconnect,
+    /// Automatic failed-update recovery releases general traffic with the AI hold.
+    /// A separate operation makes an older Service refuse instead of silently dropping intent.
+    DisconnectApplyingNarrow,
     Adopt,
     Commit,
     Status,
+}
+
+impl UpdateRequest {
+    pub fn disconnect(apply_narrow: bool) -> Self {
+        if apply_narrow { Self::DisconnectApplyingNarrow } else { Self::Disconnect }
+    }
+
+    pub fn applies_narrow_on_disconnect(&self) -> bool {
+        matches!(self, Self::DisconnectApplyingNarrow)
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

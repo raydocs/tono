@@ -1,0 +1,7 @@
+| ID | 问题（一句） | 状态 | Issue / PR | 等级 | 剩余限制 |
+|---|---|---|---|---|---|
+| WIN-QUIT-ROTATED-TOKEN-DURABILITY | Quit cancels periodic sync without flushing a failed rotated-token write, so a later relaunch restores an expired predecessor | in-PR | [#980](https://github.com/raydocs/tono/pull/980) | 中·已确认 | P1; portable production-writer regression verified; native Windows Credential Manager and Tauri checks require CI |
+
+After an account device fetch rotates the refresh token, one transient vault write failure leaves the previous token durable. The writer fixed in #843 retains the mutation for a future flush, but Quit aborts the catalog task before its next 300-second sync and the committed exit previously drained only audit. Relaunch after the server's 600-second predecessor grace loses the session. Offline revocation durability waits only for its separate tombstone file, so it does not flush this token.
+
+Committed exit now flushes accepted session mutations alongside the audit drain. Both waits share the existing two-second exit allowance; acquiring the credential store is also inside that deadline, and no product lock is held while the vault flush waits. A persistent vault failure is logged and exit remains bounded. This finding is the missing exit flush caller, separate from #843's writer retaining and retrying failed mutations. It does not cover a token rotation accepted after the exit barrier.
