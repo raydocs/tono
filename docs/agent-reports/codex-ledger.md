@@ -411,3 +411,16 @@
 | W9-DUP-RECOVERY-TASK | W9 | Sol (Codex acct 2, R3-W9inst) | P2 | duplicate X3-2-order issue488 | Task Scheduler failure before publication leaves pending rollback [apps/windows/service/src/bin/install_service/update_executor.rs:415] |
 | W9-RESOURCE-CANCEL-REPAIR | W9 | Sol (Codex acct 2, R3-W9inst) | P2 | real-unfixed multistep upgrade failure/cancel/repair; lower priority native verification pending | Cancel a later retry wizard then App repair can use newer resources against rolled-back old core [apps/windows/app/src-tauri/packages/windows/installer.nsi:1461] |
 | W9-TARGET-PUBLICATION-CLOCK | W9 | Sol (Codex acct 2, R3-W9inst) | P2 | unconfirmed interruption plus old mapped image window; no ordinary impact proved | Complete-target early recovery can omit publication floor [apps/windows/service/src/bin/install_service/update_executor.rs:375] |
+
+### R3-P1mac (finished 22:58 MT; 6 hypotheses, 4 FP, PRs: #1048)
+| ID | Area | Model | Sev | Verdict | Description [location] |
+|---|---|---|---|---|---|
+| MAC-APP-FAILURE-AI-HOLD | macOS app/helper | Sol (Codex acct 2, R3-P1mac) | P1 | real-fixed #1048 merged; ci-gate green; needs-hardware | Exhausted automatic failure uses explicit disarm and deletes AI hold [apps/macos/Tono/Services/AppState+Connect.swift:2259] |
+| MAC-DASHSCOPE-DIRECT-COVERAGE | macOS/shared policy | Sol (Codex acct 2, R3-P1mac) | P1 | real-unfixed coordinated policy migration and recovery helper edits required; helper edits forbidden for this finding | Dedicated model API hosts match Alibaba DIRECT suffix and lack recovery hold [apps/macos/Tono/Core/ConfigPipeline.swift:114] |
+
+### R3-P1win (finished 22:58 MT; 6 hypotheses, 3 FP, PRs: #1046)
+| ID | Area | Model | Sev | Verdict | Description [location] |
+|---|---|---|---|---|---|
+| WIN-DIRECT-RESTORE-WRITER-DELAY-AUTO | Windows automatic DIRECT recovery | Sol (Codex acct 2, R3-P1win) | P1 | real-unfixed decision required; recorded #1046: existing release opens WFP before best-effort AI hold | Automatic release never cancels the stalled DIRECT reader [apps/windows/app/src-tauri/src/tono/connection/monitor.rs:1397] |
+| WIN-REPLACEMENT-HEAL-STATE | Windows replacement account | Sol (Codex acct 2, R3-P1win) | P2 | duplicate of #1047; independent exact-source regression failed before and passed after; own implementation dropped | Replacement sign-in retains previous account fallback and recovery history [apps/windows/app/src-tauri/src/tono/commands/account.rs:359] |
+| WIN-UPDATE-CONNECTING-CLEANUP | Windows update recovery | Sol (Codex acct 2, R3-P1win) | P2 | real-unfixed same AI-preserving release blocker as P1; recorded #1046; earlier release violates top rule | Failed Prepare during Connecting omits immediate generation-owned recovery [apps/windows/app/src-tauri/src/tono/commands/update.rs:277] |
