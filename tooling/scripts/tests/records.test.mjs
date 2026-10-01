@@ -2,7 +2,7 @@
 // finding fragment override the ledger row with the same ID.
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
-import { mkdtempSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
@@ -86,5 +86,9 @@ test('checked-in decisions are one heading per numbered file', () => {
   const headings = result.stdout.split('\n').filter(line => line.startsWith('## '))
   assert.equal(headings.length, files.length)
   assert.ok(files.length >= 38)
-  assert.equal(headings[0], '## 2026-09-30 · macOS 已连接时，哪些网络变化可以拆掉隧道？')
+  // The newest entry is the file with the highest NNN prefix, so a new decision
+  // file does not need to edit this test.
+  const newest = [...files].sort((a, b) => Number.parseInt(b, 10) - Number.parseInt(a, 10))[0]
+  const newestHeading = readFileSync(path.join(repo, 'docs/decisions', newest), 'utf8').split('\n').find(line => line.startsWith('## '))
+  assert.equal(headings[0], newestHeading)
 })
