@@ -600,14 +600,16 @@ extension AppState {
 
         guard allowRuntimeTransition, behaviorChanged,
               isConnected || isConnecting else { return }
-        // Policy changes are rare. Reuse the already-audited full protected
-        // reconnect instead of hot-editing PF states under an active Reality
-        // socket. The bootstrap-only transition clears every session exception.
-        disconnect(releaseKillSwitch: false)
+        // Keep the session and apply on it. Tearing down into bootstrap cut
+        // the machine for a policy write. A connect still in flight already
+        // stores this policy and applies it from onCoreStarted. Failure of
+        // the in-place apply releases the original network unless strict.
         errorMessage = String(
-            localized: "Secure app routing was updated; Tono is applying it without opening direct Internet."
+            localized: "Secure app routing was updated. Tono is applying it on this connection."
         )
-        scheduleProtectedReconnect(immediate: true)
+        if isConnected {
+            scheduleBackgroundOptionalPolicy()
+        }
     }
 
     private func managedDirectProtectedAddresses() -> Set<String> {

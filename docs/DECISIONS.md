@@ -224,3 +224,23 @@ here; the entry itself is the linked file.
 ## 2026-09-30 · Failure-cluster alerts are off until both webhook settings exist
 
 [001 failure-cluster-needs-both-secrets](decisions/001-2026-09-30-failure-cluster-needs-both-secrets.md)
+
+- Status: provisional
+- Chosen: the engineering webhook sends only when `FAILURE_ALERT_WEBHOOK_URL`
+  and `FAILURE_ALERT_WEBHOOK_SECRET` are both set, the secret is at least 32
+  characters, and the URL is public https. One open cluster per
+  code+stage+app version+platform+node. A 30-minute quiet gap closes it. Spike
+  alerts need a 5× growth of at least 10 events and 15 minutes since the last
+  send, with at most 12 sends an hour. The read API is GET-only and uses a
+  separate `DIAGNOSTICS_READ_TOKEN`. Rejected: posting to the human alert
+  allowlist, or a token that can write.
+- Why stricter: an unset bot cannot be reached, and one outage is one alert.
+- Applied in: [diagnostics-privacy.md](diagnostics-privacy.md);
+  [#707](https://github.com/raydocs/tono/pull/707).
+
+## 2026-10-01 · When a traffic policy changes on a live Mac, may the machine stay fully blocked?
+
+- Status: owner
+- Chosen: no, unless the user explicitly enabled a strict kill switch (`permanent`). The TOP rule is that Tono never cuts the network; if it cannot keep the protected session, ordinary internet returns and AI services stay blocked by the selective floor. A policy change keeps the current session and applies in place. If that apply fails, follow `ExhaustedFailureNetwork`: strict holds and retries, a ready selective hook is left alone, and otherwise the original network is restored. Rejected: `disconnect(releaseKillSwitch: false)` plus a protected reconnect, and inventing PF or DNS sinkhole rules in this change.
+- Why stricter: a policy write no longer parks the Mac in bootstrap. The cost is the same as the catalog-exit decision: until the selective hook is registered and returns true, a failed apply is a full release, so AI services are not held by a new filter. A session that stays up still blocks them through the tunnel. macOS does not store `permanent`.
+- Applied in: branch `cursor/r3-policy-reload-release-89a9`. Recorded at the end of this file so it does not collide with the catalog-exit entry at the top.

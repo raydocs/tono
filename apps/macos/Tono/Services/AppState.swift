@@ -1898,17 +1898,32 @@ final class AppState {
             )
             guard !Task.isCancelled, !isDisconnecting,
                   generation == connectionCoordinator.protectionOperationGeneration else { return }
-            disconnect(releaseKillSwitch: false)
-            errorMessage = error.localizedDescription
-            // The preserve teardown above parks the host fail-closed (PF
-            // bootstrap-only, protection blocked), and this was the only
-            // fail-closed failure branch that stopped there: on a stable
-            // network no kick ever follows, so the host sat in Protected
-            // Offline with no automatic recovery. Hand the intent to the
-            // persistent loop exactly as reloadCoreConfig's and
-            // recoverFailedNodeSwitch's failure branches do. The loop never
-            // disarms, so this does not loosen protection.
-            scheduleProtectedReconnect()
+            // macOS stores no `permanent` strict switch. The selective AI
+            // hook is not registered, so a failed in-place apply restores the
+            // original network instead of holding bootstrap. A ready hook
+            // must not be disarmed or replaced with bootstrap. Strict still
+            // holds and retries.
+            let disposition = ExhaustedFailureNetwork.afterFailure(
+                strictKillSwitchExplicit: false,
+                selectiveAiBlockReady: false
+            )
+            switch disposition {
+            case .failOpen:
+                disconnect(releaseKillSwitch: true)
+                errorMessage = String(
+                    localized: "Secure app routing could not be applied. This Mac is back on its normal internet."
+                )
+            case .keepStrictBlock:
+                disconnect(releaseKillSwitch: false)
+                errorMessage = String(
+                    localized: "Secure app routing could not be applied. Strict mode is still blocking traffic while Tono retries."
+                )
+                scheduleProtectedReconnect()
+            case .selectiveFailOpen:
+                errorMessage = String(
+                    localized: "Secure app routing could not be applied. Ordinary internet stays open and AI services stay blocked."
+                )
+            }
         }
     }
 
