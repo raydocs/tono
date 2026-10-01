@@ -1,18 +1,6 @@
-# R3-M1M3: Codex (GPT-6.1 Sol) findings
+M1–M3 helper audit: four verified P1 findings fixed in three published PRs; one verified adjacent App/helper intent omission remains outside assigned App ownership. Native acceptance remains required.
 
-Generated 2026-09-30 22:47 MT from the run's findings.tsv / prs.tsv.
-
-## PRs
-
-| PR | Branch | Labels | Auto-merge requested | Title |
-|---|---|---|---|---|
-| 1028 | hunt/sol-r3helper-failed-barrier-ai-hold | needs-hardware | yes | fix(macos-helper): preserve AI hold after automatic releases |
-| 1030 | hunt/sol-r3helper-dns-prefs-contention | needs-hardware | yes | fix(macos-helper): keep DNS lock contention from hanging recovery |
-| 1033 | hunt/sol-r3helper-dns-apply-retry | needs-hardware | yes | fix(macos-helper): retry DNS activation before retiring recovery |
-
-## Hypotheses
-
-| ID | Area | Sev | Location | Description | Verdict |
+| ID | area | severity | file:line | one-line description | verdict |
 |---|---|---|---|---|---|
 | MAC-FAILED-BARRIER-AI-HOLD | M2 | P1 | tooling/scripts/core-helper/KillSwitchManager.swift:561 | Failed automatic PF commit releases without secondary AI hold | real-fixed #1028 |
 | MAC-ORPHAN-BOOTSTRAP-AI-HOLD | M1 | P1 | tooling/scripts/core-helper/SocketServer.swift:328 | Merged orphan crash release omits secondary AI hold | real-fixed #1028 |
@@ -50,3 +38,13 @@ Generated 2026-09-30 22:47 MT from the run's findings.tsv / prs.tsv.
 | MAIN-STALE-CORE-EMERGENCY | M1 | P2 | tooling/scripts/core-helper/main.swift:805 | Core constructor error aborts emergency release | duplicate #763 |
 | MAIN-UNKNOWN-APP-PRESENCE | M1 | — | tooling/scripts/core-helper/main.swift:1071 | Unreadable other App keeps removed Tono protection | false-positive uncertain ownership preserves installation; Core-down watchdog still releases |
 | MAC-APP-FAILURE-AI-HOLD | M1/caller | P1 | apps/macos/Tono/Services/AppState+Connect.swift:2259 | Automatic exhausted failure invokes explicit disarm removing AI hold | real-unfixed outside assigned App ownership; needs separate automatic-release wire intent |
+
+PRs: [#1028](https://github.com/raydocs/tono/pull/1028), [#1030](https://github.com/raydocs/tono/pull/1030), [#1033](https://github.com/raydocs/tono/pull/1033) all MERGED. All non-draft against main, needs-hardware labelled; MERGE auto-merge was enabled on all three. Exact merged heads: de88cc26 / 4ce0ea41 / 0ee73cd3, protocols4.52.16 / 4.52.14 / 4.52.15. Every relevant macOS job (input, build/XCTest, policy, privileged) and ci-gate passed on each exact merged head. Contract hashes regenerated from and verified against the exact 19-source manifest. No unpushed fix remains.
+
+Counts:36 hypotheses =4 fixed +1 real-unfixed adjacent caller +16 false positives +9 duplicates +6 unverified. M1 power/Core lock inversion cross-check merged into one hypothesis, so not double-counted.
+
+Coverage:all assigned production files read end-to-end with cross-file callers/callees. Unfinished:ordinary-trigger proof for live-Core hang, post-SIGKILL resolver wait, lstat-EIO outage, legacy networksetup stall, APFS snapshot rename durability and diagnostic FileHandle close/callback behavior. Swift cannot execute locally; installed-device PF/DNS/sleep acceptance remains outstanding.
+
+No deploy/publish, no #691, no CI gates altered, no external comments. PR bodies include local/not-runnable checks and hosted evidence when available.
+
+Final status verified22:36 MT September30: all three merged, no CI failures observed. See final-pr-status.json / latest-pr-status.json and ci-receipts.txt for exact-head receipts. File:line positions refer to audited baselines.

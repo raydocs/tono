@@ -23,3 +23,6 @@
 | R3-E2T2 | E2 home-agent/provisioning/remote, T2 sing-box/mihomo tooling | Sol (Codex acct 2) | finished 22:24 MT | unfinished: real-device HY2/VPS acceptance; peer-history retention design | PRs: #995 #996 #997 #998 #1000 #1002 #1011 #1018 #1035 |
 | R3-W2W3 | W2 WFP engine/model/security, W3 manager/netmon | Sol (Codex acct 2) | finished 22:24 MT | unfinished: DHCPv6 identity decision item | PRs: #PR#1032 |
 | R3-W1lo | W1 windows_kill_switch.rs lines 1-3278 | Sol (Codex acct 2) | finished 22:24 MT | unfinished: none | PRs: #1021 #1024 #1029 |
+| R3-M1M3 | M1 helper socket/power/http, M2 PF kill switch, M3 protected DNS/core manager | Sol (Codex acct 2) | finished 22:47 MT | unfinished: 6 unverified; 1 real-unfixed app-side (MAC-APP-FAILURE-AI-HOLD, handed to R3-P1mac) | PRs: #1028 #1030 #1033 |
+| R3-RegMac | regression review: 49 merged macOS PRs | Sol (Codex acct 2) | finished 22:47 MT | unfinished: none | PRs: #1039 #1043 |
+| R3-W9inst | W9 install_service, update_executor/journal, NSIS | Sol (Codex acct 2) | finished 22:47 MT | unfinished: lower-priority candidates unverified | PRs: #1042 |
