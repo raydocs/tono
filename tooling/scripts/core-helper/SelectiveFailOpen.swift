@@ -104,6 +104,45 @@ enum SelectiveFailOpen {
         ]
     }
 
+    /// Read-only RTM_GET of each prefix, paired by index with the deletes.
+    static func routeGetArguments() -> [[String]] {
+        [
+            ["/sbin/route", "-n", "get", "-inet", "-net", ipv4Prefix],
+            ["/sbin/route", "-n", "get", "-inet6", "-net", ipv6Prefix],
+        ]
+    }
+
+    /// How `route -n get` prints each prefix when that exact route exists.
+    static let routeReadbackIdentity: [String: (destination: String, mask: String)] = [
+        ipv4Prefix: ("160.79.104.0", "255.255.254.0"),
+        ipv6Prefix: ("2607:6bc0::", "ffff:ffff:ffff::"),
+    ]
+
+    /// #1164: a delete names only the destination, so it removes whatever
+    /// route holds this exact prefix. Tono only ever adds blackhole routes.
+    /// The delete is skipped only on positive evidence of someone else's
+    /// route: the readback names this exact prefix and its flags lack
+    /// BLACKHOLE. No answer, unparseable output or a different best match
+    /// keeps the delete, so a Tono blackhole is never left behind.
+    static func readbackShowsForeignRoute(_ output: String, prefix: String) -> Bool {
+        guard let identity = routeReadbackIdentity[prefix] else { return false }
+        var fields: [String: String] = [:]
+        for line in output.split(separator: "\n") {
+            let parts = line.split(separator: ":", maxSplits: 1)
+            guard parts.count == 2 else { continue }
+            let key = parts[0].trimmingCharacters(in: .whitespaces)
+            guard ["destination", "mask", "flags"].contains(key), fields[key] == nil else { continue }
+            fields[key] = parts[1].trimmingCharacters(in: .whitespaces)
+        }
+        guard fields["destination"] == identity.destination,
+              fields["mask"] == identity.mask,
+              let flags = fields["flags"], flags.hasPrefix("<"), flags.hasSuffix(">") else {
+            return false
+        }
+        let names = flags.dropFirst().dropLast().split(separator: ",").map(String.init)
+        return !names.isEmpty && !names.contains("BLACKHOLE")
+    }
+
     /// A command may run only when it names exactly one of the two prefixes
     /// and cannot be a default route.
     static func commandIsPrefixOnly(_ args: [String]) -> Bool {
@@ -147,11 +186,26 @@ enum SelectiveFailOpen {
             fputs("selective fail-open: crash applies, restore and arm remove\n", stderr)
             return false
         }
-        let routes = routeAddArguments() + routeDeleteArguments()
+        let routes = routeAddArguments() + routeDeleteArguments() + routeGetArguments()
         if routes.contains(where: { !commandIsPrefixOnly($0) })
             || commandIsPrefixOnly(["/sbin/route", "-n", "add", "-inet", "-net", "0.0.0.0/0", "-blackhole"])
             || commandIsPrefixOnly(["/sbin/route", "add", "default", "192.0.2.1"]) {
             fputs("selective fail-open: route command was not prefix-only\n", stderr)
+            return false
+        }
+        // #1164: an administrator's exact-prefix route survives cleanup; a
+        // Tono blackhole and a default best match are still deleted.
+        let foreign = "destination: 160.79.104.0\n       mask: 255.255.254.0\n    gateway: 10.0.0.1\n"
+            + "      flags: <UP,GATEWAY,DONE,STATIC,PRCLONING>\n"
+        if !readbackShowsForeignRoute(foreign, prefix: ipv4Prefix)
+            || readbackShowsForeignRoute(
+                foreign.replacingOccurrences(of: "STATIC,", with: "STATIC,BLACKHOLE,"), prefix: ipv4Prefix
+            )
+            || readbackShowsForeignRoute(
+                "destination: default\n       mask: default\n      flags: <UP,GATEWAY,DONE,STATIC>\n",
+                prefix: ipv4Prefix
+            ) {
+            fputs("selective fail-open: route cleanup ownership readback is wrong\n", stderr)
             return false
         }
         if resolverPath(for: "claude.ai") != "/etc/resolver/claude.ai"
@@ -253,11 +307,28 @@ enum SelectiveFailOpenInstaller {
     }
 
     static func removeBestEffort() {
-        for args in SelectiveFailOpen.routeDeleteArguments() {
+        for (lookup, args) in zip(SelectiveFailOpen.routeGetArguments(), SelectiveFailOpen.routeDeleteArguments()) {
+            if routeIsForeign(lookup) {
+                FileHandle.standardError.write(Data(
+                    "tono: kept a selective-prefix route that is not a Tono blackhole\n".utf8
+                ))
+                continue
+            }
             // A missing route is the normal case on disconnect. Do not log it.
             runRoute(args, logFailure: false)
         }
         removeResolvers()
+    }
+
+    /// Read-only. Any failure answers false, which keeps the delete.
+    private static func routeIsForeign(_ args: [String]) -> Bool {
+        guard let executable = args.first, SelectiveFailOpen.commandIsPrefixOnly(args),
+              let prefix = args.last else { return false }
+        guard let result = try? KillSwitchManager.run(executable, Array(args.dropFirst()), deadline: 3),
+              result.status == 0 else { return false }
+        return SelectiveFailOpen.readbackShowsForeignRoute(
+            String(decoding: result.output.prefix(16 * 1024), as: UTF8.self), prefix: prefix
+        )
     }
 
     private static let originalsPath = "/Library/Application Support/Tono/selective-resolvers"
