@@ -1492,7 +1492,10 @@ pub async fn begin_manual() -> Result<Option<String>> {
     let installer = gate_installer()?;
     let _repair = gate_repair_lock()?;
     let mut store = gate_store()?;
-    refuse_pending(&store)?;
+    // An exhausted recovery (#1292) is never relaunched; a manual installation is its repair.
+    if !store.recovery_exhausted().unwrap_or(false) {
+        refuse_pending(&store)?;
+    }
     refuse_live_lease(&store, &installer)?;
     drop(store);
     // No stale manual lease may turn armed/unknown protection into permission.
@@ -1599,13 +1602,55 @@ pub async fn retire_orphaned_owner() -> Result<()> {
 
 pub fn finish_manual() -> Result<()> {
     let mut store = open_store()?;
+    let installer = parent_image()?;
     ensure!(
-        store.state.manual_installer.as_ref() == Some(&parent_image()?),
+        store.state.manual_installer.as_ref() == Some(&installer),
         "manual installer mismatch"
     );
+    // The installer also calls this after a failed or cancelled run, so only a proven
+    // installed identity retires an exhausted recovery; otherwise it stays pending.
+    if store.recovery_exhausted().unwrap_or(false)
+        && let Err(error) = retire_repaired_installation(&mut store, &installer)
+    {
+        tracing::warn!("exhausted update recovery stays pending after manual install: {error:#}");
+        store = open_store()?;
+    }
     let mut next = store.state.clone();
     next.manual_installer = None;
     store.save(next)
+}
+
+/// Repair proof for an exhausted recovery (#1292): the installed identity is again one the
+/// record knows, with every plan member at that side. The original is archived as a proven
+/// rollback; the target as an installed release, after its retained rollback copies are freed.
+fn retire_repaired_installation(store: &mut Store, installer: &Image) -> Result<()> {
+    let a = store.attempt()?.clone();
+    let installed = installed_components(&a.install_root)?;
+    let side = if installed == a.old_components {
+        PlanSide::Old
+    } else if installed == target(&a.manifest).components {
+        PlanSide::New
+    } else {
+        return Err(anyhow::anyhow!(
+            "installed identity is neither the original nor the update target"
+        ));
+    };
+    let plan = store.attempt_dir()?.join("replacement.json");
+    let service_dir = crate::service_paths().install_dir();
+    let roots = [a.install_root.as_path(), service_dir.as_path()];
+    if plan.try_exists()? {
+        ensure!(
+            plan_members_at(&plan, &a.receipt.attempt_id, &roots, side)?,
+            "a replacement plan member is not at the installed identity"
+        );
+        if side == PlanSide::New {
+            release_replaced_backups(&plan, &a.receipt.attempt_id, &roots)?;
+        }
+    }
+    if side == PlanSide::New {
+        record_installed_version(&a.manifest.app_version)?;
+    }
+    store.retire_repaired_installation(installer)
 }
 
 /// Startup must not retire protection or restore desired Core while update
@@ -1663,6 +1708,19 @@ pub fn reconcile_before_desired() -> Result<bool> {
         );
     }
     Ok(true)
+}
+
+/// Service startup (#1292): `Uncertain` is what a failed executor leaves. Its own release of
+/// general traffic can fail, and a Service it restarts may not relaunch recovery, so startup
+/// owes the decision-031 release too. Unreadable evidence owes nothing here.
+pub fn failed_update_release_owed() -> bool {
+    read_store_state().is_ok_and(|state| {
+        state.pending()
+            && state
+                .attempt
+                .as_ref()
+                .is_some_and(|a| a.execution == Execution::Uncertain)
+    })
 }
 
 #[cfg(test)]

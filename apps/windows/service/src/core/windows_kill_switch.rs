@@ -3901,6 +3901,28 @@ pub async fn prepare_for_service_replacement() -> Result<bool> {
     }
 }
 
+/// Service startup with a failed update record (#1292). Its executor releases general traffic
+/// before restarting this Service, but that release can fail, and this Service may not relaunch
+/// recovery. Expire the core window for a non-strict barrier: replay-finished and then every
+/// watchdog tick release it with the AI hold (decision 031) until WFP is gone. Strict stays.
+pub async fn owe_failed_update_release() -> bool {
+    if !SUPPORTED {
+        return false;
+    }
+    let _operation = WFP_OPERATION.lock().await;
+    if !armed_guard()
+        .as_ref()
+        .is_some_and(|armed| !armed.intent.strict_kill_switch)
+    {
+        return false;
+    }
+    clear_wanted_core_window();
+    *WANTED_CORE_DEADLINE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(std::time::Instant::now());
+    true
+}
+
 /// Finish startup recovery for an initial attempt that never crossed the durable verification
 /// barrier. This runs *after* `reconcile_service_startup` has stopped and identified any surviving
 /// Core, or after that reconciliation failed its bounded startup retries: then the decision-031
@@ -4880,6 +4902,30 @@ mod tests {
         assert_eq!(current_core_instance().await, Some(CoreInstance { pid: 4243, generation: 2 }));
         assert!(!crate::core::selective_layer::test_hold_active());
         cleanup().await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn failed_update_startup_releases_a_non_strict_barrier_with_the_ai_hold() -> Result<()> {
+        cleanup().await;
+        arm_bootstrap(&test_config(), "/opt/tono/mihomo", "owner-alice").await?;
+        // A restored barrier with no core window: nothing else would open it while the
+        // failed update record stays pending (#1292).
+        clear_wanted_core_window();
+        let owed = owe_failed_update_release().await;
+        let replayed = note_core_replay_finished().await;
+        let wanted = status().await.wanted;
+        let held = crate::core::selective_layer::test_hold_active();
+        cleanup().await;
+
+        assert!(owed);
+        replayed?;
+        assert!(
+            !wanted,
+            "a failed update must not leave a non-strict machine Blocked"
+        );
+        assert!(held, "the release keeps AI blocked");
         Ok(())
     }
 

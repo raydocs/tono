@@ -789,7 +789,17 @@ async fn restore_reconciled_desired_state() {
     match tono_service_protocol::update_native::reconcile_before_desired() {
         Ok(false) => {}
         Ok(true) => {
-            warn!("Update evidence pending: retaining protection and skipping desired-state restoration");
+            if tono_service_protocol::update_native::failed_update_release_owed()
+                && tono_service_protocol::owe_failed_update_release().await
+            {
+                warn!(
+                    "Failed update pending: releasing general traffic with the AI hold, no desired-state restoration"
+                );
+            } else {
+                warn!(
+                    "Update evidence pending: retaining protection and skipping desired-state restoration"
+                );
+            }
             finish_core_replay().await;
             return;
         }
