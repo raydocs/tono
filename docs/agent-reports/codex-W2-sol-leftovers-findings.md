@@ -1,20 +1,24 @@
 # W2-sol-leftovers: Codex (GPT-6.1 Sol) findings
 
-Generated 2026-09-30 18:55 MT from the run's findings.tsv / prs.tsv.
+Generated 2026-09-30 19:37 MT from the run's findings.tsv / prs.tsv.
 
 ## PRs
 
 | PR | Branch | Labels | Auto-merge requested | Title |
 |---|---|---|---|---|
-| 818 | hunt/sol-misc-malformed-match | none | yes (merged) | fix(macos): reject malformed MATCH imports without crashing |
-| 823 | hunt/sol-misc-suite-reachability | none | yes (merged) | fix(tooling): avoid false missing-suite reports from SIGPIPE |
+| 818 | hunt/sol-misc-malformed-match | none | yes | fix(macos): reject malformed MATCH imports without crashing |
+| 823 | hunt/sol-misc-suite-reachability | none | yes | fix(tooling): avoid false missing-suite reports from SIGPIPE |
 | 825 | hunt/sol-misc-quota-roundtrip | ui-review | no | fix(ops): preserve fractional quotas when saving node profiles |
-| 834 | hunt/sol-misc-ws-handle | none | yes (merged) | fix(windows): let renderer WebSocket close reach native cleanup |
+| 834 | hunt/sol-misc-ws-handle | none | yes | fix(windows): let renderer WebSocket close reach native cleanup |
 | 848 | hunt/sol-misc-fx-preview | ui-review | no | fix(ops): preview the UTC posting-day exchange rate |
 | 869 | hunt/sol-misc-destination-node | ui-review | no | fix(ops): preserve exit attribution in destination totals |
 | 880 | hunt/sol-misc-page-freshness | ui-review | no | fix(ops): keep stale page reads visible after health refresh |
 | 892 | hunt/sol-misc-install-arguments | none | yes | fix(tooling): refuse missing lifecycle test option values |
 | 915 | hunt/sol-misc-ops-contract-findings | none | yes | docs(findings): record remaining ops data contract defects |
+| 957 | hunt/sol-misc-slo-utc-day | ui-review | no | fix(ops): retain UTC identity of daily SLO buckets |
+| 965 | hunt/sol-misc-publisher-freshness | ui-review | no | fix(ops): apply publication metadata and refresh open history |
+| 968 | hunt/sol-misc-device-read-error | ui-review | no | fix(ops): preserve failed device standing reads |
+| 969 | hunt/sol-misc-command-identity | ui-review | no | fix(ops): give private command rows distinct identities |
 
 ## Hypotheses
 
@@ -63,8 +67,8 @@ Generated 2026-09-30 18:55 MT from the run's findings.tsv / prs.tsv.
 | T4-FP-SLOT-REAP | T4 | — | tooling/scripts/with-slot.sh:117 | Stale lock reaping might cause customer network loss or a machine hang | false-positive claimed customer impact; no product/runtime path, narrow operator race remains unverified |
 | T4-REGISTRATION-GLOB | T4 | P3 | tooling/scripts/test-suite-reachability.sh:68 | Guard does not recognize wildcard invocations and some suites lack callers | real-unfixed pre-existing scanner/registration gaps; documented in #823, no CI gate lowered |
 | T4-INSTALL-MISSING-ARG | T4 | P3 | tooling/scripts/test-helper-install-lifecycle.sh:47 | Trailing option without value repeats failed shift forever | real-fixed #892; CI pending |
-| T4-AGGREGATE-INSTALL-INPUT | T4 | P3 | tooling/scripts/test-macos-all.sh:79 | Aggregate supplies app but omits required emitted install script | real-unfixed separate harness input contract; native path not executed |
-| T4-AGGREGATE-HIDDEN-SKIP | T4 | P3 | tooling/scripts/test-macos-all.sh:27 | Aggregate hides authorization-suite skip text and counts zero exit as pass | real-unfixed aggregate status-reporting contract; intentional native identity skip retained |
+| T4-AGGREGATE-INSTALL-INPUT | T4 | P3 | tooling/scripts/test-macos-all.sh:79 | Aggregate supplies app but omits required emitted install script | real-unfixed separate harness input contract; native path not executed; engineering limitation recorded #915 |
+| T4-AGGREGATE-HIDDEN-SKIP | T4 | P3 | tooling/scripts/test-macos-all.sh:27 | Aggregate hides authorization-suite skip text and counts zero exit as pass | real-unfixed aggregate status-reporting contract; intentional native identity skip retained; engineering limitation recorded #915 |
 | T4-FP-SLOT-STATUS | T4 | — | tooling/scripts/with-slot.sh:76 | Slot lock might mask command failure | false-positive both locking implementations preserve child exit status |
 | T4-FP-SLOT-TRAVERSAL | T4 | — | tooling/scripts/with-slot.sh:36 | Slot names might escape lock directory | false-positive validation rejects path traversal |
 | T4-FP-RECORDS-OVERRIDE | T4 | — | tooling/scripts/records.mjs:86 | Findings fragments might leave stale duplicate ledger values | false-positive fragments replace entries by ID; regression passed |
@@ -72,3 +76,31 @@ Generated 2026-09-30 18:55 MT from the run's findings.tsv / prs.tsv.
 | T4-FP-ISOLATED-TUN | T4 | — | tooling/scripts/tests/IsolatedDataPlaneRuntime.swift:74 | Isolated test might mutate system tunnel or DNS | false-positive TUN disabled and DNS listener is local |
 | T4-FP-RELOAD-PROOF | T4 | — | tooling/scripts/test-reload-preserves-connections.sh:180 | Reload test might pass without demonstrating a reload | false-positive reload succeeds before stream signal and fresh roundtrip |
 | T4-FP-INSTALL-BACKUP | T4 | — | tooling/scripts/test-helper-install-lifecycle.sh:169 | Lifecycle test might overwrite originals or report success before restore | false-positive verified backups precede mutation; failures retain evidence and success follows restore |
+| O1-SLO-DAY-UTC | O1 | P2 | services/ops-console/src/pages/settings/LedgerSlo.tsx:41 | UTC daily SLO bucket is labeled as the previous local date west of UTC | real-fixed #957; ui-review; local regression passed |
+| O1-PUBLISH-METADATA | O1 | P2 | services/ops-console/src/pages/settings/use-document.ts:135 | New publication retains old timestamp and policy signature marker | real-fixed #965 |
+| O1-CATALOG-HISTORY | O1 | P2 | services/ops-console/src/pages/settings/Catalog.tsx:176 | Open catalog history retains old current revision after successful publish | real-fixed #965 |
+| O1-DEVICE-READ-ERROR | O1 | P2 | services/ops-console/src/pages/customer/Devices.tsx:69 | Failed standing read claims no past action and assumes logs closed | real-fixed #968 |
+| O1-ACTIVITY-HOUR-COLLISION | O1 | P2 | services/ops-console/src/components/ops/HeatStrip.tsx:34 | Device rows or DST repeated local hours overwrite traffic and connection presence | real-unfixed interval/device-minute and repeated-hour semantics require decision; recorded #915 |
+| O1-COMMAND-IDENTITY-COLLISION | O1 | P2 | services/ops-console/src/app/CommandPalette.tsx:95 | Masked email is cmdk identity; Enter can open the wrong customer | real-fixed #969 |
+| O1-FP-CLOSURE-SELECTION | O1 | — | services/ops-console/src/pages/today/CloseDialog.tsx:37 | Verified closure might remain selected after proof turns alarming | false-positive committed verdict binds incident identity; changed kinds retire old ID |
+| O1-FP-RETIRE-PREVIEW | O1 | — | services/control-plane/src/ops/reads/fleet.ts:216 | Old retirement preview might permit unsafe mutation | false-positive rebuilt preview and revision/safety CAS guard actual write |
+| O1-FP-PENDING-ENTITLEMENT | O1 | — | services/control-plane/src/legacy-handlers/users.ts:327 | Onboarding might lose the pending plan or expiry | false-positive pending profile preserved through registration race |
+| O1-FP-POOLED-ACCOUNT | O1 | — | services/control-plane/src/product-account.ts:305 | Pooled account selection might duplicate an existing identity | false-positive guarded pooled-to-assigned transaction claims existing row |
+| O1-FP-TIMESERIES | O1 | — | services/ops-console/src/components/ops/TimeSeries.tsx:55 | Index spacing might distort uneven timestamps | false-positive node-legacy supplies uniform buckets including gaps |
+| O1-FP-COUNTTEXT | O1 | — | services/ops-console/src/components/ops/CountText.tsx:28 | Changing count array length might leave wrong numbers | false-positive production callers use fixed length; intermediate animation deliberate |
+| O1-FP-FIXTURE-UNITS | O1 | — | services/ops-console/src/lib/ops-fixtures.ts:60 | Fixture clock shift might mix seconds and milliseconds | false-positive explicit millisecond keys and aligned hour/day buckets |
+| O1-FP-COVERAGE-ZERO | O1 | — | services/ops-console/src/lib/health.ts:57 | Empty population might be falsely described as covered | false-positive explicit empty-population behavior |
+| O1-FP-QUOTA-FORECAST | O1 | — | services/ops-console/src/components/ops/QuotaGauge.tsx:109 | Forecast might extrapolate from stale data against current time | false-positive fallback uses measurement time; callers provide server forecast |
+| O1-FP-RECEIPT-REVISION | O1 | — | services/ops-console/src/lib/receipts.ts:16 | Non-policy receipt might get a wrong catalog revision label | false-positive those revision receipts are catalog publish/retire/relist |
+| O1-FP-LEDGER-WRITE-READINESS | O1 | — | services/ops-console/src/pages/settings/Ledger.tsx:67 | Lock or reversal might remain enabled after failed post-write refresh | false-positive summary nonce/target revision retire old readiness and confirm is guarded |
+| O1-FP-AUDIT-CURSOR | O1 | — | services/ops-console/src/pages/settings/Audit.tsx:55 | Same-second audit rows might disappear across pages | false-positive timestamp and ID travel together and Worker applies tuple cursor |
+| O1-FP-AUDIT-TIMEZONE | O1 | — | services/ops-console/src/pages/settings/AuditFilters.tsx:19 | Audit datetime filter might use the wrong timezone | false-positive input/parser both local and label explicitly says local |
+| O1-FP-ALERT-DURATION | O1 | — | services/ops-console/src/lib/settings.ts:55 | Alert delay might round ninety seconds to minutes | false-positive larger units chosen only when exactly divisible |
+| O1-FP-DELIVERY-CAP | O1 | — | services/ops-console/src/lib/settings.ts:72 | Eight-row delivery count might purport to be full history | false-positive explicit recent-deliveries sanity-check scope |
+| O1-FP-PROVIDER-MASK | O1 | — | services/ops-console/src/pages/settings/Providers.tsx:210 | Provider save might mask an already masked address again | false-positive unchanged login email omitted from update |
+| O1-FP-RECON-MISSING | O1 | — | services/ops-console/src/pages/settings/LedgerRecon.tsx:98 | Missing reconciliation amount might appear as zero | false-positive null stays missing; expected amount used only if supplied |
+| O1-FP-SLO-ZERO | O1 | — | services/ops-console/src/pages/settings/LedgerSlo.tsx:92 | Zero attempts might cause division by zero | false-positive explicit positive-attempts guard |
+| O1-FP-SLO-OUTAGE | O1 | — | services/control-plane/src/ops/handlers/slo.ts:82 | SLO summary might count the same outage repeatedly | false-positive Worker deduplicates node/day before summing |
+| O1-FP-SLO-MONTH | O1 | — | services/ops-console/src/pages/settings/LedgerSlo.tsx:24 | SLO table might falsely represent selected ledger month | false-positive visible 7/30-day controls and rolling API define intended interval |
+| O1-FP-REHEARSAL-FRESH | O1 | — | services/ops-console/src/pages/settings/Policy.tsx:81 | Edited policy might retain a fresh signing rehearsal | false-positive forText comparison marks edited draft stale |
+| O1-FP-HOMEEXIT-PORT | O1 | — | services/ops-console/src/pages/settings/HomeExitDrawer.tsx:96 | Invalid home-exit port might reach the write | false-positive integer and 1..65535 guards precede submission and Worker also validates |
