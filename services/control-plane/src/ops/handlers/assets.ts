@@ -299,22 +299,11 @@ export async function patchHomeLineRoute(req: Request, e: Env, rawId: string, ac
     cycleEnd: b.cycleEnd as number | null | undefined,
     expiresAt: b.expiresAt as number | null | undefined,
     meterSource: b.meterSource as never,
-  }, now());
-  if (b.notes !== undefined || b.displayName !== undefined || b.status !== undefined) {
-    await e.DB.prepare(
-      `UPDATE home_exits SET
-         notes = CASE WHEN ? THEN ? ELSE notes END,
-         display_name = CASE WHEN ? THEN ? ELSE display_name END,
-         status = CASE WHEN ? THEN ? ELSE status END,
-         updated_at = ?
-       WHERE id = ?`,
-    ).bind(
-      b.notes !== undefined, b.notes == null ? null : String(b.notes),
-      b.displayName !== undefined, b.displayName == null ? null : String(b.displayName),
-      status !== undefined, status ?? null,
-      now(), idValue,
-    ).run();
-  }
+  }, now(), {
+    notes: b.notes === undefined ? undefined : b.notes == null ? null : String(b.notes),
+    displayName: b.displayName === undefined ? undefined : b.displayName == null ? null : String(b.displayName),
+    status,
+  });
   if (status !== undefined && status !== String(existing.status)) await bumpCatalogRevision(e);
   await auditWrite(e, actor.email, 'home-line.update', 'home_exit', idValue, 'patched');
   const dto = await homeLineDto(e, await loadHome(e, idValue));
@@ -328,9 +317,11 @@ export async function deleteHomeLine(req: Request, e: Env, rawId: string, actor:
   const existing = await loadHome(e, idValue);
   if (String(existing.status) !== 'retired') {
     await assertHomeExitUnbound(e, idValue);
-    await e.DB.prepare(
-      `UPDATE home_exits SET status = 'retired', updated_at = ? WHERE id = ?`,
+    const retired = await e.DB.prepare(
+      `UPDATE home_exits SET status = 'retired', updated_at = ? WHERE id = ?
+       AND NOT EXISTS (SELECT 1 FROM user_home_bindings WHERE home_exit_id = home_exits.id)`,
     ).bind(now(), idValue).run();
+    if (!retired.meta.changes) throw new ApiError(409, 'HOME_EXIT_IN_USE', 'Unbind all users before retiring this home exit');
     await bumpCatalogRevision(e);
   }
   await auditWrite(e, actor.email, 'home-line.retire', 'home_exit', idValue, 'retired');

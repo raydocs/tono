@@ -106,6 +106,12 @@ test('actual measured package bytes survive a signed bundle; tampering cannot pr
     appSha256: hash('application bytes'), coreSha256: hash('different core bytes'),
     privilegedSha256: hash('privileged executable bytes'),
   })
+  const singBox = path.join(root, 'sing-box')
+  await writeFile(singBox, 'sing-box bytes')
+  const pinned = await measureTarget({
+    ...common, targetId: 'windows-x86_64', artifact: windowsArtifact, singBox,
+  })
+  assert.equal(pinned.target.components.singBoxSha256, hash('sing-box bytes'))
   const bytes = assembleManifest({ ...inputs(), macos, windows })
   const signatures = signed(bytes)
   const output = path.join(root, 'bundle')

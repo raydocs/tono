@@ -26,9 +26,6 @@ export PATH="$CARGO_HOME/bin:$toolchain_root/xwin:/opt/homebrew/opt/llvm/bin:$PA
 (
   cd "$app_root"
   "$toolchain_root/bin/pnpm" release-version "$version"
-  # Fail before the multi-hour Windows build if packaging still looks like Test 5
-  # (dual Mihomo / whole-directory resources that pull Unix helpers).
-  "$toolchain_root/bin/pnpm" release:preflight --config-only
 )
 
 "$repo_root/tooling/scripts/build-mihomo-adaptive.sh" --install-adaptive-windows
@@ -45,7 +42,23 @@ fi
 TONO_CORE_SHA256=$(/usr/bin/shasum -a 256 "$core_sidecar" | /usr/bin/cut -d' ' -f1)
 export TONO_CORE_SHA256
 echo "pinning core digest for the Service: $TONO_CORE_SHA256"
+/bin/mkdir -p "$app_root/src-tauri/resources"
 printf '%s\n' "$TONO_CORE_SHA256" > "$app_root/src-tauri/resources/core-sha256.txt"
+
+sing_box_sidecar="$app_root/src-tauri/sidecar/sing-box-x86_64-pc-windows-msvc.exe"
+expected_sing_box="b2e6902ee75d9c4af79df28a61ded67afc4283fc83a44dee8896f3737a4ed027"
+if [[ ! -f $sing_box_sidecar ]]; then
+  echo "sing-box sidecar missing, cannot pin alpha.9: $sing_box_sidecar" >&2
+  exit 1
+fi
+TONO_SING_BOX_SHA256=$(/usr/bin/shasum -a 256 "$sing_box_sidecar" | /usr/bin/cut -d' ' -f1)
+if [[ $TONO_SING_BOX_SHA256 != "$expected_sing_box" ]]; then
+  echo "sing-box sidecar $TONO_SING_BOX_SHA256 is not the pinned alpha.9 digest $expected_sing_box" >&2
+  exit 1
+fi
+export TONO_SING_BOX_SHA256
+echo "pinning sing-box digest for the Service: $TONO_SING_BOX_SHA256"
+printf '%s\n' "$TONO_SING_BOX_SHA256" > "$app_root/src-tauri/resources/sing-box-sha256.txt"
 
 (
   # From the service directory: its .cargo/config.toml links the CRT statically (H22-O-F2).
@@ -59,9 +72,12 @@ for name in tono-service tono-service-install tono-service-uninstall; do
     "$windows_root/service/target/x86_64-pc-windows-msvc/release/$name.exe" \
     "$app_root/src-tauri/resources/$name.exe"
 done
+/bin/cp "$app_root/src-tauri/core-identity.json" "$app_root/src-tauri/resources/core-identity.json"
 
 (
   cd "$app_root"
+  # The complete config gate also requires the generated Service and core resources.
+  "$toolchain_root/bin/pnpm" release:preflight --config-only
   eval "$(cargo xwin env --target x86_64-pc-windows-msvc)"
   # cargo-xwin's environment replaces PATH; restore the local pnpm shim for
   # Tauri's beforeBuildCommand.

@@ -15,3 +15,4 @@ Collected 2026-09-30 (MDT) from the box; credential values, auth paths, and emai
 - [sol-bughunt-report.md](sol-bughunt-report.md) — partial read-only GPT-6.1 Sol benchmark against the same prompts; 2026-09-30; source model: GPT-6.1 Sol.
 - [macos-open-issues-grok.md](macos-open-issues-grok.md) — open macOS-app issues with no unclaimed fix; 2026-10-01; source model: Grok 4.7.
 - [R3-A1A7-grok.md](R3-A1A7-grok.md) — wave-3 Grok pass on the Windows connect orchestrator and service/owner/proxy/tray path; 2026-10-01; source model: Grok 4.7.
+- [W1-grok-mac-config.md](W1-grok-mac-config.md) — W1 macOS config/account/connectivity hunt (M9–M12); 2026-09-30, addendum 2026-10-01; source model: Grok 4.7.

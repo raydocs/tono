@@ -1,6 +1,6 @@
 # R3-RegWin: Codex (GPT-6.1 Sol) findings
 
-Generated 2026-09-30 22:47 MT from the run's findings.tsv / prs.tsv.
+Generated 2026-10-01 02:55 MT from the run's findings.tsv / prs.tsv.
 
 ## PRs
 
@@ -127,3 +127,37 @@ Generated 2026-09-30 22:47 MT from the run's findings.tsv / prs.tsv.
 | R3REGW-FP-21 | Windows Core exhaustion | — | apps/windows/service/src/core/windows_kill_switch.rs:3711 | Exhaustion notification deadlocks Core stop joining watcher | false-positive: notifying watcher takes only WFP; retirement drops WFP before lifecycle and join |
 | REG-1036 | Windows catalog release | — | apps/windows/app/src-tauri/src/tono/connection/switch.rs:62 | Catalog removal narrow release composes with lifecycle, strict and update fences | ok |
 | REG-1038 | Windows Quit | — | apps/windows/app/src-tauri/src/feat/window.rs:546 | Only optional idle Service shutdown is bounded after required quit cleanup | ok |
+| REG-1040 | Windows update cleanup | — | apps/windows/service/src/core/update.rs:646 | Narrow pending-update operation composes with strict, owner and release fences | ok |
+| REG-1044 | Windows DIRECT expiry | — | apps/windows/service/src/core/windows_kill_switch.rs:3661 | Merged expiry invokes the shared AI hold once; combined WFP111pass | ok |
+| REG-1045 | Windows startup auth | — | apps/windows/app/src-tauri/src/tono/commands/restore.rs:110 | Startup reserves initial auth generation before adoption and respects interactive ownership | ok |
+| REG-754 | Windows DNS restore | — | apps/windows/service/src/core/dns/mod.rs:1052 | GUID case comparison preserves exact DNS values and live proof | ok |
+| REG-741 | Windows runtime DNS | — | apps/windows/crates/tono-core/src/config.rs:956 | Exit DNS additions retain both DoH resolvers and match Service whitelist | ok |
+| REG-749 | Windows HY2 keepalive | — | apps/windows/crates/tono-core/src/sing_box/runtime.rs:396 | Keepalive stamps admitted HY2 outbound after certificate gate | ok |
+| REG-1042 | Windows update rollback | P2 | apps/windows/service/src/bin/install_service/update_executor.rs:622 | Failed publication plus failed restart repeats a successfully-installed AI hold | concern: real-unfixed; source-proven, native-unverified; two failures; cutoff passed |
+| R3REGW-ROLLBACK-DOUBLE-HOLD | Windows update rollback | P2 | apps/windows/service/src/bin/install_service/update_executor.rs:622 | Second emergency release removes AI hold after rollback already installed it | real-unfixed: two independent failures; native gap unverified; no new fixes after22:45 |
+| REG-714 | Windows background reconnect | P1 | apps/windows/app/src-tauri/src/tono/connection/unarmed_probe.rs:155 | Failed admitted connect resets probe schedule and immediately retries a TCP-open exit | concern: real-unfixed P1; exact production loop harness proves no post-failure backoff; cutoff passed |
+| R3REGW-UNARMED-CONNECT-BACKOFF | Windows background reconnect | P1 | apps/windows/app/src-tauri/src/tono/connection/unarmed_probe.rs:155 | Persistent TLS/data-plane failure with reachable TCP repeatedly arms and releases instead of backing off | real-unfixed: production run plus Schedule harness6failures in119.687us; no new fixes after22:45 |
+| R3REGW-FP-22 | Windows DNS GUID | — | apps/windows/service/src/core/dns/mod.rs:1058 | GUID case folding accepts changed resolver values | false-positive: four resolver values remain exact and live proof is still required |
+| R3REGW-FP-23 | Windows DNS schema | — | apps/windows/service/src/core/runtime_generation/owned_config.rs:43 | Exit DNS additions fail Service runtime whitelist | false-positive: whitelist includes all generated keys |
+| R3REGW-FP-24 | Windows HY2 admission | — | apps/windows/crates/tono-core/src/sing_box/runtime.rs:202 | Keepalive skips certificate pin gate or introduces another outbound | false-positive: certificate admission precedes mutation; only existing HY2 objects changed |
+| REG-757 | Windows App | — | apps/windows/app/src-tauri/src/tono/connection/monitor.rs:400 | Signed-path changes prohibit in-place recovery; health cleanup retains AI hold | ok |
+| REG-715 | Windows health cleanup | — | apps/windows/app/src-tauri/src/tono/connection/monitor.rs:1397 | Health give-up releases narrow while policy-rebuild and strict exclusions remain | ok |
+| REG-722 | Windows stage wire | — | apps/windows/crates/tono-core/src/connect_timing.rs:23 | Shared stage mapping retains all nine Windows strings and timing budgets | ok |
+| REG-735 | Windows account display | — | apps/windows/app/src/tono-ui/TonoAccountCard.tsx:226 | Plan/expiry/usage additions remain display-only; scoped account fetch preserved | ok |
+| REG-731 | Windows session display | — | apps/windows/app/src/pages/tono/dashboard.tsx:717 | Session total consumes generation-bound live feed; no mutation path | ok |
+| REG-726 | Windows connection copy | — | apps/windows/app/src/pages/tono/dashboard.tsx:695 | Connected subtitle remains display-only and preserves skipped DIRECT detail | ok |
+| REG-723 | Windows onboarding hint | — | apps/windows/app/src/pages/tono/dashboard.tsx:852 | Checklist removal retains measured DNS hint without altering cleanup actions | ok |
+| REG-717 | Windows intro | — | apps/windows/app/src/pages/tono/intro.tsx:20 | Single-screen intro preserves persisted seen marker and login navigation | ok |
+| REG-673 | Windows dependencies | — | apps/windows/app/package.json:61 | Manifest and lock update only; applicable frontend/App CI passed | ok: dependency-consumer diff review; package internals not exhausted |
+| REG-670 | Windows plugin build dependencies | — | apps/windows/crates/tono-plugin-core/package.json:29 | Rollup patch update changes build tooling only; lockfile and CI retained | ok: dependency-consumer diff review; package internals not exhausted |
+| R3REGW-FP-25 | Windows background reconnect | — | apps/windows/app/src-tauri/src/tono/connection.rs:331 | Probe admission aborts its own registered background task | false-positive: generation retirement omits cancellation; task-local guard prevents self replacement |
+| REG-753 | Windows startup WFP | — | apps/windows/service/src/core/windows_kill_switch.rs:555 | Startup retry is fenced; persistent loopback, DHCP and NDP permit floor retained | ok |
+| REG-740 | Windows restored barrier | — | apps/windows/service/src/core/windows_kill_switch.rs:2965 | Unproven-Core recovery retains AI hold; strict and explicit release exclusions remain | ok |
+| REG-738 | Windows selective AI hold | P2 | apps/windows/service/src/core/selective_fail_open.rs:106 | Hardcoded C-drive netsh loses Claude IP rules on alternate system drives | concern: real-unfixed; source-proven alternate-drive omission; native untested; cutoff passed |
+| R3REGW-SELECTIVE-NETSH-PATH | Windows selective AI hold | P2 | apps/windows/service/src/core/selective_fail_open.rs:106 | Automatic AI prefix hold invokes nonexistent C-drive netsh on alternate Windows system root | real-unfixed: valid uncommon installation; no system-directory fallback; native untested; cutoff passed |
+| REG-718 | Windows protected policy reconnect | P2 | apps/windows/app/src-tauri/src/tono/connection.rs:440 | Unconditional App TCP proof runs behind retained blocked WFP on policy rebuild | concern: real-unfixed; source-proven, native-unverified; healthy VLESS reconnect fails after cache expiry; cutoff passed |
+| R3REGW-PROTECTED-TCP-PROOF | Windows protected policy reconnect | P2 | apps/windows/app/src-tauri/src/tono/connection.rs:440 | Retained protected policy rebuild blocks its own App TCP preflight before Core restart | real-unfixed: Core-only physical endpoint permit; later failure restores normal internet; native unverified; cutoff passed |
+| R3REGW-FP-26 | Windows health preflight | — | apps/windows/app/src-tauri/src/tono/connection/monitor.rs:1397 | Ordinary health-loss reconnect performs TCP proof behind retained WFP | false-positive: ordinary health loss releases before spawning unarmed probe; policy rebuild separately affected |
+| REG-739 | Windows AI tally | P2/P3 | apps/windows/app/src/tono-ui/AiTrafficCard.tsx:48 | Unscoped account cache shows prior local tally; flow receipt Map retains historical IDs | concern: real-unfixed; actual SWR component and accumulator tests failed; cutoff passed |
+| R3REGW-AI-TALLY-ACCOUNT-SCOPE | Windows AI tally | P2 | apps/windows/app/src/tono-ui/AiTrafficCard.tsx:48 | Cached prior account loads and displays its local tally after replacement sign-in | real-unfixed: real SWR/component test fails under pending replacement local IPC; transient UI data exposure; cutoff passed |
+| R3REGW-AI-TALLY-SEEN-GROWTH | Windows AI tally | P3 | apps/windows/app/src/tono-ui/AiTrafficCard.tsx:28 | Module deduplication retains every historical flow ID until controller generation changes | real-unfixed: actual accumulator retains6000 completed IDs after empty frame; OOM/hang not demonstrated; cutoff passed |

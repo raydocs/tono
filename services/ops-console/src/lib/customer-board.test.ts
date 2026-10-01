@@ -51,4 +51,40 @@ describe('customer board', () => {
       customer({ expiresAt: NOW + 90 * DAY }),
     ], NOW, 4)).toEqual([1, 1, 1, 0, 0]);
   });
+
+  it('counts API-expired customers as overdue while keeping them out of active load and usage', () => {
+    const stats = listStats([
+      customer({
+        expiresAt: NOW + 2 * DAY, quotaBytes: 100,
+        connected: { value: true, asOfSec: NOW, source: 'telemetry' },
+        usageBytes: { value: 90, asOfSec: NOW, source: 'telemetry' },
+        lastSeenAt: NOW,
+      }),
+      customer({
+        lifecycle: 'expired', expiresAt: NOW - DAY, quotaBytes: 100,
+        connected: { value: true, asOfSec: NOW, source: 'telemetry' },
+        usageBytes: { value: 1_000, asOfSec: NOW, source: 'telemetry' },
+        lastSeenAt: NOW,
+      }),
+      customer({ lifecycle: 'suspended', expiresAt: NOW - DAY }),
+      customer({ expiresAt: NOW - 1 }), // A loaded active row crosses expiry before refresh.
+    ], NOW);
+    expect(stats).toEqual({
+      active: 2, online: 1, reporting: 1, seenWeek: 1, failedDay: 0,
+      usage: 90, unmetered: 1, nearQuota: 1, expiringWeek: 1, expired: 2,
+    });
+  });
+
+  it('keeps API-expired customers in the lapsed column while reserving upcoming columns for active accounts', () => {
+    expect(expiryWeeks([
+      customer({ lifecycle: 'expired', expiresAt: NOW - DAY }),
+      customer({ expiresAt: NOW - 1 }),
+      customer({ lifecycle: 'suspended', expiresAt: NOW - DAY }),
+      customer({ lifecycle: 'expired', expiresAt: NOW + 2 * DAY }),
+      customer({ lifecycle: 'expired', expiresAt: null }),
+      customer({ expiresAt: NOW + 2 * DAY }),
+      customer({ expiresAt: NOW + 9 * DAY }),
+      customer({ expiresAt: NOW + 90 * DAY }),
+    ], NOW, 4)).toEqual([2, 1, 1, 0, 0]);
+  });
 });

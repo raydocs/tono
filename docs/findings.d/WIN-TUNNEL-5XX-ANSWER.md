@@ -1,0 +1,7 @@
+| ID | 问题（一句） | 状态 | Issue / PR | 等级 | 剩余限制 |
+|---|---|---|---|---|---|
+| WIN-TUNNEL-5XX-ANSWER | The API tunnel fallback discards authenticated origin 5xx responses and erases response evidence | in-PR | hunt/sol-r4wapp-tunnel-server-response | 低·已确认（P2） | Real CONNECT/TLS production transport regression failed then passed on Linux; native Windows/Tauri compilation remains for CI. No ordinary-UI offline-admission bypass is claimed. |
+
+Baseline `718eda43`: `tono/transport.rs:624-631` treats every tunneled 5xx as a proxy failure, returns `None` and decrements the response counter. `send` then returns the previous direct-path transport error (`:805-815`). However, reqwest's HTTPS proxy CONNECT refusal fails before TLS and is already a transport error; a response delivered by the validated HTTPS connection belongs to the API. A reachable API returning 503 through an existing tunnel is therefore reported as unreachable, and the portable API retry policy can replay a delivered logical request based on the prior direct Connect error.
+
+Trigger requires both direct-path failure and an origin 5xx through the existing tunnel, hence P2. The test establishes CONNECT, validates a test-only localhost certificate, receives 503 through TLS, and requires the status/body and response evidence to survive. The test's explicit trust root is confined to `cfg(test)`; production TLS, proxy selection and retry classifications remain intact.
