@@ -3129,10 +3129,20 @@ pub(crate) async fn status() -> DnsProtectionStatus {
 
 /// Transaction proof reads actual adapter state under the DNS writer lock.
 /// The diagnostic cache is deliberately not proof of update recovery.
+///
+/// A missing snapshot is healed only when the barrier is already down. Healing
+/// while it is wanted resets adapters to DHCP and, on the no-session path,
+/// removes the NRPT catch-all, while WFP is still denying physical DNS.
 #[cfg(windows)]
 pub(crate) async fn observe_for_update() -> Result<DnsProtectionStatus> {
+    let barrier_wanted = crate::core::windows_kill_switch::status().await.wanted;
+    observe_for_update_with(barrier_wanted).await
+}
+
+#[cfg(any(windows, test))]
+async fn observe_for_update_with(barrier_wanted: bool) -> Result<DnsProtectionStatus> {
     let _operation = DNS_OPERATION.lock().await;
-    if !snapshot_path().exists() {
+    if !snapshot_path().exists() && !barrier_wanted {
         ensure_snapshotless_dns_is_safe().await?;
     }
     status_unlocked().await
