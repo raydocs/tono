@@ -297,12 +297,15 @@ nonisolated enum HelperProtocolVersion {
     ///   Update disconnect still releases PF when prepare cannot prove a
     ///   foreign loopback proxy or resolver is Tono's. The lifecycle
     ///   read-failure self-test expects that owner-only restore.
-    /// - 4.52.6 → 4.52.7: --emergency-disarm and its ledger-less fallback
+    /// - 4.52.6 → 4.52.7: an update ledger whose receipt contains a key this
+    ///   build does not know is refused and kept on disk. Additive keys
+    ///   outside the receipt are still tolerated.
+    /// - 4.52.7 → 4.52.8: --emergency-disarm and its ledger-less fallback
     ///   release PF even when a stale core survives SIGKILL. A failed daemon
     ///   startup restores a saved protected-DNS snapshot after the PF release.
     ///   Runtime inputs and update package paths open with O_NONBLOCK so a
     ///   swapped-in FIFO is refused instead of hanging the request loop.
-    static let current = "4.52.7"
+    static let current = "4.52.8"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS

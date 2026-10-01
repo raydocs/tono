@@ -44,8 +44,8 @@ The roster cycle is ordered deliberately:
    missing allowlist, failed write) still lets the Xray reconcile and counter
    read run; the counters are kept in the state file and the round then exits
    non-zero with no ACK or usage report.
-3. POST the roster's `observedAt` to `/api/v1/home/roster-ack` with the same
-   bearer token.
+3. Persist only the reconciled client inventory, then POST the roster's
+   `observedAt` to `/api/v1/home/roster-ack` with the same bearer token.
 4. Persist and deliver usage state.
 5. Only after counters were valid, state was saved, and any usage was delivered,
    POST `{meteringProtocolVersion: 2, observedAt}` to
@@ -53,8 +53,13 @@ The roster cycle is ordered deliberately:
    replaying an old pending queue alone does not prove readiness.
 
 A failed reconciliation is never acknowledged. A failed acknowledgement exits
-non-zero before this round changes the durable state, so the roster and any
-queued usage are retried on the next run.
+non-zero before this round changes the durable usage state, so the roster and
+any queued usage are retried on the next run. The client inventory already
+reflects the installed clients, so the next roster can still revoke them. A
+refusal after a partial reconcile, or after a later check such as a counter
+read or a queued report outside the roster clock, records that same known
+inventory and still does not acknowledge or advance usage totals. An unknown
+inventory is not written.
 
 The state lock covers the entire roster/reconcile/counter/delivery cycle. If a
 timer and an operator start overlap, the second run exits without observing or

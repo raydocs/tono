@@ -209,6 +209,15 @@ class LifetimeTotals(unittest.TestCase):
             {"u1": 2100, "u2": 140},
         )
 
+    def test_an_account_absent_after_a_restart_uses_a_zero_baseline_when_it_returns(self) -> None:
+        state = fresh_state()
+        state["totals"] = agent.lifetime_totals(state, {"u1": 900})
+        # The restart resets even an idle account's counter. Its first new
+        # reading may arrive only after the restart marker has been committed.
+        state["totals"] = agent.lifetime_totals(state, {}, restarted=True)
+        self.assertEqual(state["totals"], {"u1": 900})
+        self.assertEqual(agent.lifetime_totals(state, {"u1": 1200}), {"u1": 2100})
+
     def test_without_a_restart_a_risen_counter_is_growth(self) -> None:
         state = fresh_state()
         agent.lifetime_totals(state, {"u1": 900})
@@ -586,7 +595,163 @@ class RosterControlSignals(unittest.TestCase):
             server_retire=False,
             ack_error=agent.Refusal("roster ack failed"),
         )
-        self.assertFalse(path.exists())
+        self.assertEqual(json.loads(path.read_text(encoding="utf-8")), {
+            **fresh_state(), "installedClients": [],
+        })
+
+    def test_an_ack_failure_keeps_newly_installed_clients_in_the_durable_inventory(self) -> None:
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        path = Path(directory.name) / "state.json"
+        initial = {
+            **fresh_state(),
+            "installedClients": ["u:usr_a", "u:revoked"],
+            "totals": {"u:usr_a": 900}, "counterBaseline": {"u:usr_a": 900},
+            "userTotals": {"usr_a": 900}, "startMarker": "boot:100",
+            "lastReportObservedAt": 100,
+            "pendingReports": [{"reportId": "pending", "userId": "usr_a",
+                                "sourceId": "exit-node-a", "totalBytes": 900,
+                                "observedAt": 100}],
+        }
+        path.write_text(json.dumps(initial), encoding="utf-8")
+        calls: list[list[str]] = []
+
+        def fake_xray(_binary, arguments):
+            calls.append(arguments)
+            stdout = ("Removed 1 user(s) in total." if "rmu" in arguments
+                      else "Added 1 user(s) in total.")
+            return type("Result", (), {"returncode": 0, "stdout": stdout, "stderr": ""})
+
+        with patch.dict(agent.os.environ, {
+                 "TONO_HOME_AGENT_TOKEN": "node-token", "TONO_SOURCE_ID": "exit-node-a",
+             }, clear=True), \
+             patch.object(agent, "api_base", return_value="https://control.example"), \
+             patch.object(agent, "xray_binary", return_value=Path("/unused/xray")), \
+             patch.object(agent, "xray_start_marker", return_value="boot:200"), \
+             patch.object(agent, "require_commands", return_value={
+                 "add_user": "adu", "remove_user": "rmu", "stats_query": "statsquery",
+             }), \
+             patch.object(agent, "fetch_roster", return_value=("exit-node-a", 200, [
+                 {"userId": "usr_a", "clientUUID": "11111111-1111-4111-8111-111111111111"},
+                 {"userId": "usr_b", "clientUUID": "22222222-2222-4222-8222-222222222222"},
+             ], False)), \
+             patch.object(agent, "installed_clients", return_value=None), \
+             patch.object(agent, "run_xray", fake_xray), \
+             patch.object(agent, "read_counters", return_value={"u:usr_a": 1200}), \
+             patch.object(agent, "acknowledge_roster", side_effect=agent.Refusal("roster ack failed")), \
+             patch.object(agent, "deliver_queue") as deliver:
+            with self.assertRaisesRegex(agent.Refusal, "roster ack failed"):
+                agent.run_once(path)
+
+        self.assertIn("u:revoked", [a for c in calls if "rmu" in c for a in c])
+        self.assertEqual(sum("adu" in c for c in calls), 2)
+        self.assertEqual(json.loads(path.read_text(encoding="utf-8")), {
+            **initial, "installedClients": ["u:usr_a", "u:usr_b"],
+        })
+        deliver.assert_not_called()
+
+    def test_a_counter_read_failure_keeps_a_new_client_removable_without_a_live_listing(self) -> None:
+        # Xray has accepted the new client before the counter read refuses.
+        # With no live listing, the next roster can remove that client only
+        # when this round saved the label. Usage totals stay on the old snapshot.
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        path = Path(directory.name) / "state.json"
+        initial = {**fresh_state(), "installedClients": ["u:usr_a"], "totals": {"u:usr_a": 40}}
+        path.write_text(json.dumps(initial), encoding="utf-8")
+        removed: list[str] = []
+        reads = {"n": 0}
+
+        def fake_xray(_binary, arguments):
+            if "rmu" in arguments:
+                removed.append(arguments[-1])
+                stdout = "Removed 1 user(s) in total."
+            else:
+                stdout = "Added 1 user(s) in total."
+            return type("Result", (), {"returncode": 0, "stdout": stdout, "stderr": ""})
+
+        def counters(*_args, **_kwargs):
+            reads["n"] += 1
+            if reads["n"] == 1:
+                raise agent.Refusal("reading counters failed: injected")
+            return {}
+
+        with patch.dict(agent.os.environ, {
+                 "TONO_HOME_AGENT_TOKEN": "node-token", "TONO_SOURCE_ID": "exit-node-a",
+             }, clear=True), \
+             patch.object(agent, "api_base", return_value="https://control.example"), \
+             patch.object(agent, "xray_binary", return_value=Path("/unused/xray")), \
+             patch.object(agent, "xray_start_marker", return_value="boot:1"), \
+             patch.object(agent, "require_commands", return_value={
+                 "add_user": "adu", "remove_user": "rmu", "stats_query": "statsquery",
+             }), \
+             patch.object(agent, "fetch_roster", side_effect=[
+                 ("exit-node-a", 200, [
+                     {"userId": "usr_a", "clientUUID": "11111111-1111-4111-8111-111111111111"},
+                     {"userId": "usr_b", "clientUUID": "22222222-2222-4222-8222-222222222222"},
+                 ], False),
+                 ("exit-node-a", 260, [], False),
+             ]), \
+             patch.object(agent, "run_xray", fake_xray), \
+             patch.object(agent, "read_counters", side_effect=counters), \
+             patch.object(agent, "acknowledge_roster") as acknowledge, \
+             patch.object(agent, "acknowledge_metering"):
+            with self.assertRaisesRegex(agent.Refusal, "reading counters failed"):
+                agent.run_once(path)
+            saved = json.loads(path.read_text(encoding="utf-8"))
+            self.assertEqual(saved["installedClients"], ["u:usr_a", "u:usr_b"])
+            self.assertEqual(saved["totals"], {"u:usr_a": 40})
+            self.assertEqual(saved["pendingReports"], [])
+            acknowledge.assert_not_called()
+            agent.run_once(path)
+
+        self.assertCountEqual(removed, ["u:usr_a", "u:usr_b"])
+        acknowledge.assert_called_once()
+
+    def test_a_later_add_failure_keeps_clients_already_accepted(self) -> None:
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        path = Path(directory.name) / "state.json"
+        initial = {**fresh_state(), "installedClients": ["u:stay"], "totals": {}}
+        path.write_text(json.dumps(initial), encoding="utf-8")
+
+        def fake_xray(_binary, arguments):
+            # `adu` takes a temp JSON path, not the email, so the label is read back.
+            if "adu" in arguments:
+                email = json.loads(Path(arguments[-1]).read_text(encoding="utf-8"))[
+                    "inbounds"][0]["settings"]["clients"][0]["email"]
+                stdout = (
+                    "rpc error: code = Unknown desc = proxy/vless: User u:zzz_fail rejected."
+                    if email == "u:zzz_fail" else "Added 1 user(s) in total."
+                )
+            else:
+                stdout = "Removed 1 user(s) in total." if "rmu" in arguments else ""
+            return type("Result", (), {"returncode": 0, "stdout": stdout, "stderr": ""})
+
+        with patch.dict(agent.os.environ, {
+                 "TONO_HOME_AGENT_TOKEN": "node-token", "TONO_SOURCE_ID": "exit-node-a",
+             }, clear=True), \
+             patch.object(agent, "api_base", return_value="https://control.example"), \
+             patch.object(agent, "xray_binary", return_value=Path("/unused/xray")), \
+             patch.object(agent, "xray_start_marker", return_value="boot:1"), \
+             patch.object(agent, "require_commands", return_value={
+                 "add_user": "adu", "remove_user": "rmu", "stats_query": "statsquery",
+             }), \
+             patch.object(agent, "fetch_roster", return_value=("exit-node-a", 200, [
+                 {"userId": "stay", "clientUUID": "11111111-1111-4111-8111-111111111111"},
+                 {"userId": "aaa_ok", "clientUUID": "22222222-2222-4222-8222-222222222222"},
+                 {"userId": "zzz_fail", "clientUUID": "33333333-3333-4333-8333-333333333333"},
+             ], False)), \
+             patch.object(agent, "run_xray", fake_xray), \
+             patch.object(agent, "read_counters", return_value={}), \
+             patch.object(agent, "acknowledge_roster") as acknowledge:
+            with self.assertRaisesRegex(agent.Refusal, "adding u:zzz_fail failed"):
+                agent.run_once(path)
+
+        saved = json.loads(path.read_text(encoding="utf-8"))
+        self.assertEqual(saved["installedClients"], ["u:aaa_ok", "u:stay"])
+        self.assertEqual(saved["totals"], {})
+        acknowledge.assert_not_called()
 
     def test_a_failed_reconcile_is_never_acknowledged(self) -> None:
         _, _, acknowledge = self.run_round(
@@ -1190,7 +1355,9 @@ class MultipleExits(unittest.TestCase):
             with self.assertRaises(agent.Refusal):
                 agent.run_once(path)
 
-        self.assertEqual(json.loads(path.read_text(encoding="utf-8")), initial)
+        self.assertEqual(json.loads(path.read_text(encoding="utf-8")), {
+            **initial, "installedClients": ["u:usr_1"],
+        })
         deliver.assert_not_called()
 
     def test_a_queued_future_timestamp_is_not_dropped_on_replay(self) -> None:
@@ -1231,10 +1398,13 @@ class MultipleExits(unittest.TestCase):
             with self.assertRaises(agent.Refusal):
                 agent.run_once(path)
 
-        # Revocation is enforced first; the future report still stays queued.
+        # Revocation is enforced first. The queued report stays, and the known
+        # empty inventory is recorded without advancing usage totals.
         reconcile.assert_called_once()
         deliver.assert_not_called()
-        self.assertEqual(json.loads(path.read_text(encoding="utf-8")), initial)
+        self.assertEqual(json.loads(path.read_text(encoding="utf-8")), {
+            **initial, "installedClients": [],
+        })
 
     def test_a_queued_report_is_superseded_only_within_its_own_source(self) -> None:
         # Collapsing the queue across sources would drop one exit's figure in
