@@ -242,16 +242,51 @@ nonisolated struct HelperManager {
         // Recover DNS and stop Mihomo before launchd replaces an authenticated
         // older helper, but deliberately retain any live PF state. Disarming
         // here opened a direct-egress window for the entire administrator
-        // prompt and left the host open if the user cancelled. The replacement
-        // helper restores the persisted PF state at launch (or installs its
-        // emergency block if the older state is no longer readable), and the
-        // connect transaction tightens it with current metadata immediately
-        // after this method returns.
+        // prompt. The replacement helper restores the persisted PF state at
+        // launch (or installs its emergency block if the older state is no
+        // longer readable), and the connect transaction tightens it with
+        // current metadata immediately after this method returns.
+        var coreStoppedForReplacement = false
+        var upgradeSucceeded = false
+        defer {
+            // A cancelled or failed replacement has no Core to carry traffic.
+            // Release through Disconnect's path, without hiding the install error.
+            if shouldReleaseAfterAbandonedUpgrade(
+                coreStopped: coreStoppedForReplacement,
+                succeeded: upgradeSucceeded
+            ) {
+                do {
+                    try KillSwitchService.disarm()
+                    LocalTrafficAudit.shared.recordEvent(
+                        "helper_upgrade_abandoned_released"
+                    )
+                } catch {
+                    // A disarm reply can be lost after PF was released, just
+                    // as on Disconnect; only a confirmed release clears intent.
+                    if KillSwitchService.refreshStatus()
+                        == .confirmed(requiresProtectionRecovery: false) {
+                        KillSwitchService.isArmed = false
+                        LocalTrafficAudit.shared.recordEvent(
+                            "helper_upgrade_abandoned_released",
+                            details: ["disarm_error": error.localizedDescription]
+                        )
+                    } else {
+                        LocalTrafficAudit.shared.recordEvent(
+                            "helper_upgrade_abandoned_release_failed",
+                            details: ["error": error.localizedDescription]
+                        )
+                    }
+                }
+            }
+        }
         if installedVersion != nil {
             do {
                 try prepareAuthenticatedHelperForReplacement(
                     restoreDNS: { _ = try restoreProtectedDNSIfConfigured() },
-                    stopCore: stopCore,
+                    stopCore: {
+                        try stopCore()
+                        coreStoppedForReplacement = true
+                    },
                     killSwitchStatus: killSwitchStatus
                 )
             } catch {
@@ -278,13 +313,14 @@ nonisolated struct HelperManager {
                 mihomoSource: mihomoSource,
                 preparationStartedAt: preparationStartedAt
             ) {
+                upgradeSucceeded = true
                 return
             }
         }
 
         // A caller that did not ask for a repair stops before the prompt
-        // (MAC3-ADD-F1). Nothing above released PF, so it stays as the helper
-        // holds it; Connect and Restore internet own the prompt.
+        // (MAC3-ADD-F1). Connect and Restore internet own the prompt; if Core
+        // was stopped for this upgrade, the deferred cleanup releases PF.
         guard administratorPrompt else {
             LocalTrafficAudit.shared.recordEvent(
                 "helper_administrator_prompt_withheld",
@@ -397,6 +433,7 @@ nonisolated struct HelperManager {
                         ),
                     ]
                 )
+                upgradeSucceeded = true
                 return
             }
             guard Date() < startupDeadline else { break }
@@ -416,6 +453,13 @@ nonisolated struct HelperManager {
             ]
         )
         throw HelperInstallError.installFailed(String(localized: "The authenticated helper did not start."))
+    }
+
+    static func shouldReleaseAfterAbandonedUpgrade(
+        coreStopped: Bool,
+        succeeded: Bool
+    ) -> Bool {
+        coreStopped && !succeeded
     }
 
     private static func durationMilliseconds(since start: Date) -> String {

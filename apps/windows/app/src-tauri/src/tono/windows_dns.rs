@@ -11,7 +11,7 @@ use std::{
     ffi::c_void,
     net::Ipv4Addr,
     ptr,
-    sync::{Condvar, Mutex},
+    sync::{Arc, Condvar, Mutex},
     time::Duration,
 };
 
@@ -34,6 +34,30 @@ enum QueryOutcome {
 struct Completion {
     outcome: Mutex<Option<QueryOutcome>>,
     ready: Condvar,
+}
+
+impl Completion {
+    fn callback_context(self: &Arc<Self>) -> *const c_void {
+        Arc::into_raw(Arc::clone(self)).cast()
+    }
+
+    /// Publish only after consuming the records; keep callback storage alive through notification.
+    ///
+    /// SAFETY: `context` owns one `Arc` reference from `callback_context`, consumed exactly once.
+    unsafe fn publish_from_callback(
+        context: *const c_void,
+        outcome: QueryOutcome,
+        notify: impl FnOnce(&Condvar),
+    ) {
+        let completion = unsafe { Arc::from_raw(context.cast::<Self>()) };
+        let mut slot = completion
+            .outcome
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        *slot = Some(outcome);
+        drop(slot);
+        notify(&completion.ready);
+    }
 }
 
 /// Run one A-only query through the Windows DNS Client. The returned future is
@@ -62,7 +86,7 @@ fn query_a_blocking(host: &str, timeout: Duration) -> Result<Vec<Ipv4Addr>, Stri
     }
 
     let wide_name: Vec<u16> = host.encode_utf16().chain(std::iter::once(0)).collect();
-    let completion = Completion::default();
+    let completion = Arc::new(Completion::default());
     let mut result = DNS_QUERY_RESULT {
         Version: DNS_QUERY_RESULTS_VERSION1,
         ..Default::default()
@@ -76,15 +100,18 @@ fn query_a_blocking(host: &str, timeout: Duration) -> Result<Vec<Ipv4Addr>, Stri
         pDnsServerList: ptr::null_mut(),
         InterfaceIndex: 0,
         pQueryCompletionCallback: Some(query_complete),
-        pQueryContext: ptr::from_ref(&completion).cast_mut().cast::<c_void>(),
+        pQueryContext: completion.callback_context().cast_mut(),
     };
 
-    // SAFETY: `request`, `wide_name`, `result`, `cancel`, and `completion` all
-    // remain alive until a synchronous result is consumed or the asynchronous
-    // completion callback has run. The callback only reads DNSAPI-owned records
-    // during its invocation and frees them exactly once afterwards.
+    // SAFETY: `request`, `wide_name`, `result`, and `cancel` remain alive until
+    // a synchronous result is consumed or the callback publishes its outcome
+    // after consuming the records. The callback has its own completion reference
+    // so a deadline wake cannot free storage while notification is still running.
     let status = unsafe { DnsQueryEx(&request, &mut result, &mut cancel) };
     if status != DNS_REQUEST_PENDING {
+        // SAFETY: synchronous success/error never invokes the callback, so this
+        // path must retire its unused reference. Pending queries retire it there.
+        unsafe { drop(Arc::from_raw(request.pQueryContext.cast::<Completion>())) };
         return finish_sync_query(status, &mut result);
     }
 
@@ -137,18 +164,11 @@ unsafe extern "system" fn query_complete(context: *const c_void, result: *mut DN
         return;
     }
 
-    // SAFETY: the caller keeps `Completion` and `DNS_QUERY_RESULT` alive until
-    // this callback fires, as required by DnsQueryEx. The callback is the sole
-    // consumer of records on the asynchronous path.
-    let completion = unsafe { &*context.cast::<Completion>() };
+    // SAFETY: the caller keeps `DNS_QUERY_RESULT` alive until this callback has
+    // consumed its records. The supplied context owns a separate completion
+    // reference, retired only after publication and notification finish.
     let outcome = unsafe { query_outcome(&mut *result) };
-    let mut slot = completion
-        .outcome
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
-    *slot = Some(outcome);
-    drop(slot);
-    completion.ready.notify_all();
+    unsafe { Completion::publish_from_callback(context, outcome, Condvar::notify_all) };
 }
 
 fn query_outcome(result: &mut DNS_QUERY_RESULT) -> QueryOutcome {
@@ -213,8 +233,8 @@ fn format_outcome(outcome: QueryOutcome) -> Result<Vec<Ipv4Addr>, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{QueryOutcome, format_outcome, ipv4_from_dns_word};
-    use std::net::Ipv4Addr;
+    use super::{Completion, QueryOutcome, format_outcome, ipv4_from_dns_word};
+    use std::{net::Ipv4Addr, sync::Arc};
 
     #[test]
     fn dns_a_word_keeps_wire_octet_order() {
@@ -225,5 +245,27 @@ mod tests {
     #[test]
     fn an_empty_success_is_not_a_dns_proof() {
         assert!(format_outcome(QueryOutcome::Answer(Vec::new())).is_err());
+    }
+
+    #[test]
+    fn callback_storage_survives_the_waiter_consuming_its_result() {
+        let caller = Arc::new(Completion::default());
+        let weak = Arc::downgrade(&caller);
+        let context = caller.callback_context();
+
+        // SAFETY: this is the query's sole callback, consuming its exact context once.
+        unsafe {
+            Completion::publish_from_callback(context, QueryOutcome::Error(123), |_| {
+                assert!(matches!(
+                    caller.outcome.lock().unwrap().take(),
+                    Some(QueryOutcome::Error(123))
+                ));
+                // A deadline wake may consume the outcome before notification finishes.
+                assert_eq!(weak.strong_count(), 2);
+                drop(caller);
+                assert!(weak.upgrade().is_some(), "the callback still owns its storage");
+            });
+        }
+        assert!(weak.upgrade().is_none(), "callback ownership is retired on return");
     }
 }

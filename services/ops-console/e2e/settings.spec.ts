@@ -156,6 +156,9 @@ test.describe('设置', () => {
   /** The publish is a compare-and-swap; landing one has to move the version. */
   test('发出去之后线上版本就是新的那一版', async ({ page }, testInfo) => {
     await open(page, '/settings/catalog', 'default', `catalog-${testInfo.project.name}`);
+    await page.getByRole('button', { name: '发布历史' }).click();
+    const previous = page.locator('tbody tr').filter({ hasText: '线上 r37' });
+    await expect(previous).toContainText('线上这版');
     await page.getByRole('button', { name: '开始编辑' }).click();
     await append(page, '节点目录原文', '# checked by hand\n');
 
@@ -166,6 +169,28 @@ test.describe('设置', () => {
 
     await expect(page.getByText('线上从 r37 变成了 r38')).toBeVisible();
     await expect(page.getByText('线上 r38').first()).toBeVisible();
+    await expect(page.locator('tbody tr').filter({ hasText: '线上 r38' })).toContainText('线上这版');
+    await expect(previous).not.toContainText('线上这版');
+  });
+
+  test('未签名发布替换线上版本的旧签名状态', async ({ page }, testInfo) => {
+    await page.route('**/api/v1/ops/traffic-policy**', async (route) => {
+      if (route.request().method() !== 'GET') return route.continue();
+      const response = await route.fetch();
+      await route.fulfill({ response, json: { ...await response.json(), signature: 'previous-signed-policy' } });
+    });
+    await open(page, '/settings/policy', 'default', `unsigned-${testInfo.project.name}`);
+    await expect(page.getByText('线上这版带着签名', { exact: true })).toBeVisible();
+    await page.getByRole('button', { name: '开始编辑', exact: true }).click();
+    await page.getByRole('button', { name: '关掉全部直连', exact: true }).click();
+    await page.getByRole('button', { name: '发布', exact: true }).click();
+    const published = page.waitForResponse((response) => (
+      response.request().method() === 'PUT' && response.url().includes('/traffic-policy')
+    ));
+    await page.getByRole('dialog').getByRole('button', { name: '发布', exact: true }).click();
+    expect((await (await published).json()).signature ?? null).toBeNull();
+    await expect(page.getByText('线上从 r12 变成了 r13', { exact: true })).toBeVisible();
+    await expect(page.getByText('线上这版没签名', { exact: true })).toBeVisible();
   });
 
   /** The expensive bug: a publish that lands on top of somebody else's. */
