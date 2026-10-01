@@ -133,25 +133,31 @@ extension AppState {
     /// before, and a consumed-side attempt retires only after the privileged
     /// resolved predicates hold (verified Disconnect plus on-disk component
     /// proof). Consumed evidence is archived, never fabricated into commit.
-    func retireDisconnectedNativeUpdate() async throws {
-        let coordinator = PrivilegedRuntimeCoordinator.shared
-        let pending = try await coordinator.nativeUpdate("status")
+    func retireDisconnectedNativeUpdate(
+        nativeUpdate: (String) async throws -> HelperManager.UpdateStatus = {
+            try await PrivilegedRuntimeCoordinator.shared.nativeUpdate($0)
+        }
+    ) async throws {
+        let pending = try await nativeUpdate("status")
         guard pending.pending, AppUpdater.disconnectRetriable(pending) else {
             throw NativeUpdateDownload.failure("This attempt cannot be retried before installation recovery.")
         }
         nativeUpdatePending = true
         await suspendForNativeUpdate()
-        let released = try await coordinator.nativeUpdate("disconnect")
+        let released = try await nativeUpdate("disconnect")
         guard released.disconnectVerified == true else { throw NativeUpdateDownload.failure("Update Disconnect was not verified.") }
-        let retired = try await coordinator.nativeUpdate("retire")
+        // An evidence archive failure cannot undo verified PF release.
+        // Publish it before retirement so the UI cannot retain protection.
+        launchProtectionSequence &+= 1
+        KillSwitchService.isArmed = false
+        isProtectionBlocked = false
+        resetReleasedSessionHistory()
+        let retired = try await nativeUpdate("retire")
         guard !retired.pending else { throw NativeUpdateDownload.failure("Update retirement did not commit.") }
         nativeUpdatePending = false
         RuntimeCleanup.nativeUpdatePending = false
         RuntimeCleanup.nativeUpdateBlocksConnect = false
         RuntimeCleanup.nativeUpdateRecovery = nil
-        KillSwitchService.isArmed = false
-        isProtectionBlocked = false
-        resetReleasedSessionHistory()
         updateIncomplete = UpdateHandoffStore.showsIncompleteUpdate()
         errorMessage = nil
         RuntimeCleanup.clearCoreStarted()
