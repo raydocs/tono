@@ -16,11 +16,13 @@
       "resources/tono-service.exe",
       "resources/tono-service-install.exe",
       "resources/tono-service-uninstall.exe",
-      "resources/core-sha256.txt"
+      "resources/core-sha256.txt",
+      "resources/sing-box-sha256.txt"
     ],
     "publisher": "Raydocs",
     "externalBin": [
-      "sidecar/tono-core"
+      "sidecar/tono-core",
+      "sidecar/sing-box"
     ],
     "copyright": "GNU General Public License v3.0",
     "category": "DeveloperTool",

@@ -2458,7 +2458,7 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
     const t = now();
     const refreshHash = raw === undefined ? null : await sha256(str(raw, 'refreshToken', 20, 500));
     // A refresh can rotate after auth() above. Follow revoked intermediates
-    // too, so its successor cannot survive a successful logout.
+    // too, so its successor cannot survive a successful logout. Other sessions on this device end in the same batch; other devices stay signed in.
     await e.DB.batch([
       e.DB.prepare(
         `WITH RECURSIVE logout_sessions(id, successor_id) AS (
@@ -2472,6 +2472,7 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
          UPDATE sessions SET revoked_at = ?
          WHERE id IN (SELECT id FROM logout_sessions) AND revoked_at IS NULL`,
       ).bind(a.userId, a.sessionId, refreshHash, a.userId, t),
+      e.DB.prepare('UPDATE sessions SET revoked_at = ? WHERE user_id = ? AND device_id = ? AND revoked_at IS NULL').bind(t, a.userId, a.deviceId),
     ]);
     return new Response(null, { status: 204 });
   }

@@ -40,6 +40,32 @@ final class WeChatResolverPolicyTests: XCTestCase {
         return keys
     }
 
+    func testDashScopeUsesProtectedRoutingAndDNSBeforeAlibabaDirect() throws {
+        let node = Fixture.realityNode()
+        let check: (String?) throws -> Void = { home in
+            let yaml = try Fixture.ownedRuntime(
+                overlay: Fixture.overlay(selectedNodeName: node.name, claudeHomeNodeName: home),
+                nodes: [node], directPolicy: Fixture.directPolicy()
+            )
+            let target = home == nil ? ConfigPipeline.exitGroupName : ConfigPipeline.claudeHomeGroupName
+            let direct = try XCTUnwrap(yaml.range(of: "AND,((NETWORK,TCP),(DST-PORT,443),(DOMAIN-SUFFIX,aliyuncs.com)),\(ConfigPipeline.webDirectGroupName)"))
+            for suffix in ["dashscope.aliyuncs.com", "dashscope-intl.aliyuncs.com", "dashscope-us.aliyuncs.com", "maas.aliyuncs.com"] {
+                let tcp = try XCTUnwrap(yaml.range(of: "AND,((NETWORK,TCP),(DOMAIN-SUFFIX,\(suffix))),\(target)"), suffix)
+                let udp = try XCTUnwrap(yaml.range(of: "AND,((NETWORK,UDP),(DOMAIN-SUFFIX,\(suffix))),REJECT"), suffix)
+                XCTAssertLessThan(tcp.lowerBound, direct.lowerBound, suffix)
+                XCTAssertLessThan(udp.lowerBound, direct.lowerBound, suffix)
+                for key in [suffix, "+.\(suffix)"] {
+                    let line = try XCTUnwrap(yaml.components(separatedBy: "\n").first { $0.hasPrefix("    \"\(key)\":") }, key)
+                    XCTAssertTrue(line.contains("#Tono-Exit"), line)
+                    XCTAssertFalse(line.contains("#\(ConfigPipeline.directProxyName)"), line)
+                }
+            }
+            XCTAssertTrue(yaml.contains("\"+.aliyuncs.com\": [\"https://223.5.5.5/dns-query#\(ConfigPipeline.directProxyName)\""))
+        }
+        try check(nil)
+        try check(node.name)
+    }
+
     func testWeChatFamiliesResolveThroughChinaDoHWithNoPolicyHostsAtAll() throws {
         // The regression: this whole block used to be skipped unless published
         // policy carried a resolver host or a web suffix, so on a policy that

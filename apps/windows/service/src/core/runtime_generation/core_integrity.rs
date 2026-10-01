@@ -26,6 +26,9 @@ use std::path::Path;
 /// waiver. Release builds set `TONO_CORE_SHA256` to the digest of the `tono-core.exe` the
 /// installer ships.
 const COMPILED_IN_CORE_SHA256: Option<&str> = option_env!("TONO_CORE_SHA256");
+/// Digest of the bundled sing-box image. Separate from the mihomo pin: checking
+/// sing-box.exe against `TONO_CORE_SHA256` would refuse every authentic binary.
+const COMPILED_IN_SING_BOX_SHA256: Option<&str> = option_env!("TONO_SING_BOX_SHA256");
 /// Publisher thumbprint of a signed core. Absent on official unsigned Mihomo builds.
 ///
 /// SHA-1 (40 hex) or SHA-256 (64 hex), with optional colons/spaces. Set only when the shipped
@@ -40,6 +43,7 @@ const COMPILED_IN_CORE_AUTHENTICODE_THUMBPRINT: Option<&str> =
 /// `ensure_private_installer_directory` — SYSTEM and Administrators only. A pin an unprivileged
 /// user could rewrite would prove nothing, so the location matters as much as the content.
 pub(super) const CORE_DIGEST_PIN_FILE_NAME: &str = "core-sha256.txt";
+pub(super) const SING_BOX_DIGEST_PIN_FILE_NAME: &str = "sing-box-sha256.txt";
 
 /// What a compiled publisher pin says about a core that already matched its digest.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -191,6 +195,27 @@ fn publish_compiled_pin_file() {
     }
 }
 
+fn pinned_sing_box_digest() -> Option<String> {
+    if let Some(pin) = COMPILED_IN_SING_BOX_SHA256 {
+        return Some(pin.to_owned());
+    }
+    let path = crate::service_paths()
+        .install_dir()
+        .join(SING_BOX_DIGEST_PIN_FILE_NAME);
+    match std::fs::read_to_string(&path) {
+        Ok(pin) => Some(pin),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(error) => {
+            tracing::warn!(
+                path = ?path,
+                error = %error,
+                "sing-box digest pin exists but could not be read"
+            );
+            None
+        }
+    }
+}
+
 fn pinned_core_digest() -> Option<String> {
     if let Some(pin) = COMPILED_IN_CORE_SHA256 {
         publish_compiled_pin_file();
@@ -231,7 +256,12 @@ pub(super) fn verify_core_binary(core_path: &Path) -> Result<(), ServiceError> {
             "core binary {core_path:?} could not be read for verification: {error}"
         ))
     })?;
-    match classify_core_digest(pinned_core_digest().as_deref(), &measured) {
+    let pin = if crate::core::structure::is_sing_box_core_path(&core_path.to_string_lossy()) {
+        pinned_sing_box_digest()
+    } else {
+        pinned_core_digest()
+    };
+    match classify_core_digest(pin.as_deref(), &measured) {
         CoreDigestVerdict::Verified => {
             tracing::debug!(core_path = ?core_path, "Core binary matches its pinned digest");
             #[cfg(windows)]

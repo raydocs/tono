@@ -5197,6 +5197,46 @@
         }
       }
     },
+    "Secure app routing could not be applied. Ordinary internet stays open and AI services stay blocked.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "安全应用分流未能应用。普通互联网保持可用，AI 服务仍被拦截。"
+          }
+        }
+      }
+    },
+    "Secure app routing could not be applied. Strict mode is still blocking traffic while Tono retries.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "安全应用分流未能应用。严格模式仍在拦截流量，Tono 正在重试。"
+          }
+        }
+      }
+    },
+    "Secure app routing could not be applied. This Mac is back on its normal internet.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "安全应用分流未能应用。这台 Mac 已回到原来的网络。"
+          }
+        }
+      }
+    },
+    "Secure app routing was updated. Tono is applying it on this connection.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "安全应用分流已更新。Tono 正在这条连接上应用它。"
+          }
+        }
+      }
+    },
     "Secure app routing was updated; Tono is applying it without opening direct Internet.": {
       "localizations": {
         "zh-Hans": {
@@ -6139,6 +6179,16 @@
         }
       }
     },
+    "The cloud server switch failed. This Mac is back on its normal internet.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "切换云端节点失败。这台 Mac 已回到原来的网络。"
+          }
+        }
+      }
+    },
     "The cloud servers no longer match what Tono last verified. Connect again when Tono is reachable.": {
       "localizations": {
         "zh-Hans": {
@@ -6305,6 +6355,46 @@
           "stringUnit": {
             "state": "translated",
             "value": "所选云端节点已被移除。断网保护仍在拦住直连，请另选一个云端节点。"
+          }
+        }
+      }
+    },
+    "The selected cloud server was removed. Ordinary internet stays open and AI services stay blocked. Choose another cloud server.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "所选云端节点已被移除。普通互联网保持可用，AI 服务仍被拦截。请另选一个云端节点。"
+          }
+        }
+      }
+    },
+    "The selected cloud server was removed. Strict mode is still blocking traffic. Choose another cloud server.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "所选云端节点已被移除。严格模式仍在拦截流量。请另选一个云端节点。"
+          }
+        }
+      }
+    },
+    "The selected cloud server was removed. This Mac is back on its normal internet. Choose another cloud server.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "所选云端节点已被移除。这台 Mac 已回到原来的网络。请另选一个云端节点。"
+          }
+        }
+      }
+    },
+    "The selected cloud server was removed. Tono switched to another cloud server and kept this connection.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "所选云端节点已被移除。Tono 已改用另一个云端节点，并保持了这次连接。"
           }
         }
       }

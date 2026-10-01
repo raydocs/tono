@@ -70,3 +70,7 @@
 - 未跑：`xcodebuild`、`swiftc`、`cargo test`（本机 rustc 1.83，crate 要 1.98 / edition 2024）。
 
 Hunter: Grok 4.7
+
+## 状态（2026-10-01 补记）
+
+上表的 PR 在本报告写成之后：#803 #822 #837 #855 #857 #870 已合入 main。#856 已关闭，不再合入：`f4e80a45`（`fix(control-plane): logout also revokes a session rotated by a concurrent refresh`）已覆盖登出后继会话的撤销，Windows 的 `select_action` 在断线中本来就落到 `UpdateOnly`。上面的覆盖率下限和 `noUncheckedIndexedAccess` 基线是写成当时的数字，以 main 上的脚本为准。

@@ -12,6 +12,7 @@ pub use structure::{
     ProtocolVersion, ProxyApplyOutcome, ProxyEndpoint, ProxyProtocol, PrepareCoreStartFreshness,
     PrepareCoreStartPayload, RemoteProvider,
     RenewDirectRuntimeReloadRequest, ReplaceDirectEndpointsRequest, ReplaceProxyEndpointsRequest,
+    ReplaceSingBoxRuntimeRequest, CommitSingBoxDirectRequest,
     RuntimeAsset, RuntimeBundle,
     LEGACY_SERVICE_PROTOCOL_HEADER, SERVICE_PROTOCOL_HEADER, SESSION_TOKEN_HEX_LEN,
     ServiceErrorCode, ServiceLifecycleState,
@@ -71,6 +72,10 @@ mod runtime_generation;
 mod selective_layer;
 #[cfg(feature = "standalone")]
 mod server;
+#[cfg(feature = "standalone")]
+mod sing_box_direct;
+#[cfg(feature = "standalone")]
+mod sing_box_runtime;
 #[cfg(feature = "standalone")]
 mod state;
 #[cfg(feature = "standalone")]

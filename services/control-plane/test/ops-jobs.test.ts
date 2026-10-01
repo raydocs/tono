@@ -18,9 +18,11 @@ import {
 } from '../src/ops/jobs';
 import { redactJobResult } from '../src/ops/job-redaction';
 import { runWorkerJobs } from '../src/ops/jobs-worker';
-import { relistFleetNode } from '../src/ops/reads/fleet';
+import { relistFleetNode, retireFleetNode } from '../src/ops/reads/fleet';
 import { retirePendingDedupeKey } from '../src/ops/retire-dependencies';
 import { runVerdictPass } from '../src/ops/verdict-run';
+import { homeExitsResource } from '../src/ops/shared-admin/home-exits';
+import { deleteHomeLine, patchHomeLineRoute } from '../src/ops/handlers/assets';
 
 const db = () => (env as unknown as { DB: D1Database }).DB;
 
@@ -393,6 +395,350 @@ describe('ops node jobs', () => {
     }>();
   }
 
+  function relistBeforeRevoke(e: Env, name: string): Env {
+    let relisted = false;
+    const raced = new Proxy(e.DB, {
+      get(target, key) {
+        const value = Reflect.get(target, key, target);
+        if (key !== 'prepare') return typeof value === 'function' ? value.bind(target) : value;
+        return (sql: string) => {
+          const statement = target.prepare(sql);
+          if (!sql.includes('SET revoked_token_hash = token_hash')) return statement;
+          return {
+            bind: (...values: unknown[]) => ({
+              run: async () => {
+                if (!relisted) {
+                  relisted = true;
+                  await relistFleetNode(e, 'ops@example.com', name, {
+                    block: realityBlock(name, '203.0.113.9'),
+                  });
+                }
+                return statement.bind(...values).run();
+              },
+            }),
+          };
+        };
+      },
+    });
+    return { ...e, DB: raced };
+  }
+
+  it('keeps an exit token when relist commits before direct retirement revocation', async () => {
+    const e = env as unknown as Env;
+    const t = 1_800_000_800;
+    const kite = 'Tokyo · Kite';
+    await seedTwoNodeCatalog(e, t, kite, 'Tokyo · Fuji');
+    const hash = await seedExitToken(kite, t);
+
+    await retireFleetNode(relistBeforeRevoke(e, kite), 'ops@example.com', kite, {
+      expectedRevision: 1, confirmation: kite, reason: 'retire',
+    }, undefined, t);
+
+    expect(await listedNames(e)).toContain(kite);
+    expect(await exitStatus(kite)).toEqual({ status: 'active', token_hash: hash });
+  });
+
+  it('keeps an exit token when relist commits before a retirement job revokes it', async () => {
+    const e = env as unknown as Env;
+    const t = 1_800_000_800;
+    const kite = 'Tokyo · Kite';
+    await seedTwoNodeCatalog(e, t, kite, 'Tokyo · Fuji');
+    await retireFleetNode(e, 'ops@example.com', kite, {
+      expectedRevision: 1, confirmation: kite, reason: 'retire before reenabling',
+    }, undefined, t);
+    const hash = await seedExitToken(kite, t);
+    const { job } = await enqueue('catalog_retire', t + 1, {
+      nodeName: kite, idempotencyKey: 'retire-relist-race',
+    });
+
+    expect(await runWorkerJobs(relistBeforeRevoke(e, kite), t + 1, 5)).toBe(1);
+
+    const row = await db().prepare('SELECT status FROM ops_node_jobs WHERE id = ?')
+      .bind(job.id).first<{ status: string }>();
+    expect(row?.status).toBe('succeeded');
+    expect(await listedNames(e)).toContain(kite);
+    expect(await exitStatus(kite)).toEqual({ status: 'active', token_hash: hash });
+  });
+
+  it('refuses fleet retirement of a bound catalog home even when the customer selects another cloud node', async () => {
+    const e = env as unknown as Env;
+    const t = 1_800_000_980;
+    const kite = 'Tokyo · Kite';
+    const fuji = 'Tokyo · Fuji';
+    await seedTwoNodeCatalog(e, t, kite, fuji);
+    const hash = await seedExitToken(kite, t);
+    await db().prepare(
+      `INSERT INTO users(id, email, password_hash, password_salt, created_at, updated_at)
+       VALUES('u-home-bound', 'home-bound@example.com', 'x', 'y', ?, ?)`,
+    ).bind(t, t).run();
+    await db().prepare(
+      `INSERT INTO home_exits(id, proxy_name, display_name, kind, status, created_at, updated_at)
+       VALUES('home-kite', ?, 'Customer home', 'catalog', 'active', ?, ?)`,
+    ).bind(kite, t, t).run();
+    await db().prepare(
+      `INSERT INTO user_home_bindings(user_id, home_exit_id, default_proxy_name, created_at, updated_at)
+       VALUES('u-home-bound', 'home-kite', ?, ?, ?)`,
+    ).bind(fuji, t, t).run();
+    await db().prepare(
+      `INSERT INTO ops_customer_status(user_id, connected, selected_server, last_seen_at, updated_at)
+       VALUES('u-home-bound', 1, ?, ?, ?)`,
+    ).bind(fuji, t - 60, t).run();
+    const { job } = await enqueue('catalog_retire', t, { nodeName: kite, idempotencyKey: 'retire-bound-home' });
+    expect(await runWorkerJobs(e, t, 5)).toBe(1);
+    const row = await db().prepare('SELECT status, result_summary FROM ops_node_jobs WHERE id = ?')
+      .bind(job.id).first<{ status: string; result_summary: string }>();
+    expect(row?.status).toBe('failed');
+    expect(row?.result_summary).toContain('Unbind all users');
+    expect(await listedNames(e)).toContain(kite);
+    expect(await exitStatus(kite)).toEqual({ status: 'active', token_hash: hash });
+    expect(await db().prepare('SELECT home_exit_id FROM user_home_bindings WHERE user_id = ?')
+      .bind('u-home-bound').first<{ home_exit_id: string }>()).toEqual({ home_exit_id: 'home-kite' });
+  });
+
+  async function seedBindableHome(e: Env, t: number) {
+    await seedTwoNodeCatalog(e, t, 'Tokyo · Kite', 'Tokyo · Fuji');
+    const hash = await seedExitToken('Tokyo · Kite', t);
+    await db().prepare(
+      `INSERT INTO users(id, email, password_hash, password_salt, created_at, updated_at)
+       VALUES('u-home-race', 'home-race@example.com', 'x', 'y', ?, ?)`,
+    ).bind(t, t).run();
+    await db().prepare(
+      `INSERT INTO home_exits(id, proxy_name, display_name, kind, status, created_at, updated_at)
+       VALUES('home-kite', 'Tokyo · Kite', 'Customer home', 'catalog', 'active', ?, ?)`,
+    ).bind(t, t).run();
+    return hash;
+  }
+
+  function bindHome(e: Env) {
+    return homeExitsResource(new Request('https://test/ops/users/u-home-race/home-binding', {
+      method: 'PUT', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ homeExitId: 'home-kite', defaultProxyName: 'Tokyo · Fuji' }),
+    }), e, 'users/u-home-race/home-binding', 'PUT', 'ops@example.com');
+  }
+
+  function bindAfterUnbound(e: Env, userId = 'u-home-race') {
+    let boundStatus: number | undefined;
+    const racingDb = new Proxy(e.DB, {
+      get(target, key) {
+        if (key === 'prepare') return (sql: string) => {
+          const statement = target.prepare(sql);
+          if (sql !== 'SELECT 1 FROM user_home_bindings WHERE home_exit_id = ? LIMIT 1') return statement;
+          return { bind: (...values: unknown[]) => ({ first: async () => {
+            const result = await statement.bind(...values).first();
+            if (!result && boundStatus === undefined) {
+              boundStatus = (await homeExitsResource(new Request('https://test/ops/home-binding', {
+                method: 'PUT', headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({ homeExitId: 'home-kite', defaultProxyName: 'Tokyo · Fuji' }),
+              }), e, `users/${userId}/home-binding`, 'PUT', 'ops@example.com'))?.status;
+            }
+            return result;
+          } }) };
+        };
+        const value = Reflect.get(target, key, target);
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+    return { e: { ...e, DB: racingDb }, boundStatus: () => boundStatus };
+  }
+
+  async function expectHomeStillActive(e: Env) {
+    expect(await e.DB.prepare("SELECT status FROM home_exits WHERE id = 'home-kite'").first())
+      .toEqual({ status: 'active' });
+    expect(await e.DB.prepare('SELECT revision FROM managed_exit_catalog WHERE singleton_id = 1').first())
+      .toEqual({ revision: 2 }); // Only the winning binding bumps the catalog.
+    expect(await e.DB.prepare("SELECT action FROM ops_audit WHERE action IN ('home.update', 'home-line.update', 'home-line.retire')").all())
+      .toMatchObject({ results: [] });
+  }
+
+  it('refuses shared-admin home retirement when a binding commits after its unbound preflight', async () => {
+    const e = env as unknown as Env;
+    await seedBindableHome(e, 1_800_001_100);
+    const race = bindAfterUnbound(e);
+    await expect(homeExitsResource(new Request('https://test/ops/home-exits/home-kite', {
+      method: 'PATCH', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ status: 'retired', notes: 'must not persist' }),
+    }), race.e, 'home-exits/home-kite', 'PATCH', 'ops@example.com'))
+      .rejects.toMatchObject({ status: 409, code: 'HOME_EXIT_IN_USE' });
+    expect(race.boundStatus()).toBe(201);
+    await expectHomeStillActive(e);
+    expect(await e.DB.prepare("SELECT notes FROM home_exits WHERE id = 'home-kite'").first())
+      .toEqual({ notes: null });
+  });
+
+  it('keeps v1 home metadata unchanged when a binding wins its retirement race', async () => {
+    const e = env as unknown as Env;
+    await seedBindableHome(e, 1_800_001_100);
+    const race = bindAfterUnbound(e);
+    await expect(patchHomeLineRoute(new Request('https://test/api/v1/ops/home-lines/home-kite', {
+      method: 'PATCH', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ status: 'retired', price: 123, notes: 'must not persist', displayName: 'New name' }),
+    }), race.e, 'home-kite', { email: 'ops@example.com' }))
+      .rejects.toMatchObject({ status: 409, code: 'HOME_EXIT_IN_USE' });
+    expect(race.boundStatus()).toBe(201);
+    await expectHomeStillActive(e);
+    expect(await e.DB.prepare("SELECT price, notes, display_name FROM home_exits WHERE id = 'home-kite'").first())
+      .toEqual({ price: null, notes: null, display_name: 'Customer home' });
+  });
+
+  it('refuses v1 home DELETE retirement when a binding commits after its unbound preflight', async () => {
+    const e = env as unknown as Env;
+    await seedBindableHome(e, 1_800_001_100);
+    const race = bindAfterUnbound(e);
+    await expect(deleteHomeLine(new Request('https://test/api/v1/ops/home-lines/home-kite', { method: 'DELETE' }),
+      race.e, 'home-kite', { email: 'ops@example.com' }))
+      .rejects.toMatchObject({ status: 409, code: 'HOME_EXIT_IN_USE' });
+    expect(race.boundStatus()).toBe(201);
+    await expectHomeStillActive(e);
+  });
+
+  it('keeps a replaced home active when another customer binds it before automatic retirement', async () => {
+    const e = env as unknown as Env;
+    const t = 1_800_001_100;
+    await seedBindableHome(e, t);
+    expect((await bindHome(e))?.status).toBe(201);
+    await e.DB.prepare(
+      `INSERT INTO users(id, email, password_hash, password_salt, created_at, updated_at)
+       VALUES('u-home-second', 'second@example.com', 'x', 'y', ?, ?)`,
+    ).bind(t, t).run();
+    const race = bindAfterUnbound(e, 'u-home-second');
+    const response = await homeExitsResource(new Request('https://test/ops/home-exits/assign', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ userId: 'u-home-race', replace: true, line: '203.0.113.60:1080:resident:secret' }),
+    }), race.e, 'home-exits/assign', 'POST', 'ops@example.com');
+    expect(response?.status).toBe(201);
+    const result = await response!.json() as {
+      replaced: boolean; retiredHomeExitId?: string; homeExit: { id: string }; binding: { homeExitId: string };
+    };
+    expect(result.replaced).toBe(true);
+    expect(result.retiredHomeExitId).toBeUndefined();
+    expect(race.boundStatus()).toBe(201);
+    expect(await e.DB.prepare("SELECT status FROM home_exits WHERE id = 'home-kite'").first())
+      .toEqual({ status: 'active' });
+    expect(await e.DB.prepare("SELECT home_exit_id FROM user_home_bindings WHERE user_id = 'u-home-second'").first())
+      .toEqual({ home_exit_id: 'home-kite' });
+    expect(await e.DB.prepare("SELECT home_exit_id FROM user_home_bindings WHERE user_id = 'u-home-race'").first())
+      .toEqual({ home_exit_id: result.homeExit.id });
+    expect(result.binding.homeExitId).toBe(result.homeExit.id);
+    expect(await e.DB.prepare('SELECT status FROM home_exits WHERE id = ?').bind(result.homeExit.id).first())
+      .toEqual({ status: 'active' });
+  });
+
+  it('refuses retirement when a home binding commits after preview but before its revision bump', async () => {
+    const e = env as unknown as Env;
+    const t = 1_800_001_100;
+    const hash = await seedBindableHome(e, t);
+    let boundStatus: number | undefined;
+    const racingDb = new Proxy(e.DB, {
+      get(target, key) {
+        if (key === 'batch') return async (statements: D1PreparedStatement[]) => {
+          let results: D1Result[] | undefined;
+          const bindingDb = new Proxy(target, {
+            get(bindingTarget, bindingKey) {
+              if (bindingKey === 'prepare') return (sql: string) => {
+                const statement = bindingTarget.prepare(sql);
+                if (!sql.includes('WHERE user_home_bindings.user_id = ?')) return statement;
+                return { bind: (...values: unknown[]) => ({ first: async () => {
+                  results = await target.batch(statements);
+                  return statement.bind(...values).first();
+                } }) };
+              };
+              const value = Reflect.get(bindingTarget, bindingKey, bindingTarget);
+              return typeof value === 'function' ? value.bind(bindingTarget) : value;
+            },
+          });
+          boundStatus = (await bindHome({ ...e, DB: bindingDb }))?.status;
+          expect(results).toBeDefined();
+          return results!;
+        };
+        const value = Reflect.get(target, key, target);
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+    await expect(retireFleetNode({ ...e, DB: racingDb }, 'ops@example.com', 'Tokyo · Kite', {
+      expectedRevision: 1, confirmation: 'Tokyo · Kite', reason: 'race',
+    }, undefined, t)).rejects.toMatchObject({ status: 409, code: 'CATALOG_CONFLICT' });
+    expect(boundStatus).toBe(201);
+    expect(await listedNames(e)).toContain('Tokyo · Kite');
+    expect(await exitStatus('Tokyo · Kite')).toEqual({ status: 'active', token_hash: hash });
+    expect(await db().prepare("SELECT status FROM ops_node_profiles WHERE catalog_name = 'Tokyo · Kite'")
+      .first()).toEqual({ status: 'active' });
+    expect(await db().prepare("SELECT 1 FROM ops_audit WHERE action = 'node.retire'").first()).toBeNull();
+    expect(await db().prepare('SELECT home_exit_id FROM user_home_bindings WHERE user_id = ?')
+      .bind('u-home-race').first()).toEqual({ home_exit_id: 'home-kite' });
+  });
+
+  it('refuses a catalog home binding when fleet retirement commits after binding preflight', async () => {
+    const e = env as unknown as Env;
+    const t = 1_800_001_100;
+    await seedBindableHome(e, t);
+    let retired = false;
+    const racingDb = new Proxy(e.DB, {
+      get(target, key) {
+        if (key === 'prepare') return (sql: string) => {
+          const statement = target.prepare(sql);
+          if (!sql.includes('INSERT INTO user_home_bindings')) return statement;
+          return { bind: (...values: unknown[]) => ({ run: async () => {
+            retired = true;
+            await retireFleetNode(e, 'ops@example.com', 'Tokyo · Kite', {
+              expectedRevision: 1, confirmation: 'Tokyo · Kite', reason: 'race',
+            }, undefined, t);
+            return statement.bind(...values).run();
+          } }) };
+        };
+        const value = Reflect.get(target, key, target);
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+    await expect(bindHome({ ...e, DB: racingDb })).rejects.toMatchObject({ status: 409, code: 'HOME_EXIT_INACTIVE' });
+    expect(retired).toBe(true);
+    expect(await listedNames(e)).not.toContain('Tokyo · Kite');
+    expect((await exitStatus('Tokyo · Kite'))?.status).toBe('disabled');
+    expect(await db().prepare('SELECT 1 FROM user_home_bindings WHERE user_id = ?')
+      .bind('u-home-race').first()).toBeNull();
+    expect(await db().prepare('SELECT revision FROM managed_exit_catalog WHERE singleton_id = 1')
+      .first()).toEqual({ revision: 2 });
+    await db().prepare("UPDATE exit_nodes SET status = 'active' WHERE name = 'Tokyo · Kite'").run();
+    await relistFleetNode(e, 'ops@example.com', 'Tokyo · Kite', { block: realityBlock('Tokyo · Kite', '203.0.113.9') });
+    expect((await bindHome(e))?.status).toBe(201);
+  });
+
+  it('preserves the previous binding when retirement commits before a home replacement', async () => {
+    const e = env as unknown as Env;
+    const t = 1_800_001_100;
+    await seedBindableHome(e, t);
+    await db().prepare(
+      `INSERT INTO home_exits(id, proxy_name, display_name, kind, status, created_at, updated_at)
+       VALUES('home-old', 'Old home', 'Previous home', 'socks5', 'active', ?, ?)`,
+    ).bind(t, t).run();
+    await db().prepare(
+      `INSERT INTO user_home_bindings(user_id, home_exit_id, created_at, updated_at)
+       VALUES('u-home-race', 'home-old', ?, ?)`,
+    ).bind(t, t).run();
+    const racingDb = new Proxy(e.DB, {
+      get(target, key) {
+        if (key === 'prepare') return (sql: string) => {
+          const statement = target.prepare(sql);
+          if (!sql.includes('UPDATE user_home_bindings')) return statement;
+          return { bind: (...values: unknown[]) => ({ run: async () => {
+            await retireFleetNode(e, 'ops@example.com', 'Tokyo · Kite', {
+              expectedRevision: 1, confirmation: 'Tokyo · Kite', reason: 'race',
+            }, undefined, t);
+            return statement.bind(...values).run();
+          } }) };
+        };
+        const value = Reflect.get(target, key, target);
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+    await expect(bindHome({ ...e, DB: racingDb })).rejects.toMatchObject({ status: 409, code: 'HOME_EXIT_INACTIVE' });
+    expect(await db().prepare('SELECT home_exit_id FROM user_home_bindings WHERE user_id = ?')
+      .bind('u-home-race').first()).toEqual({ home_exit_id: 'home-old' });
+    expect(await db().prepare('SELECT socks5_rotation_required_at FROM home_exits WHERE id = ?')
+      .bind('home-old').first()).toEqual({ socks5_rotation_required_at: null });
+    expect(await db().prepare('SELECT revision FROM managed_exit_catalog WHERE singleton_id = 1')
+      .first()).toEqual({ revision: 2 });
+  });
+
   it('retires an empty node: catalog gone, token revoked, no incident', async () => {
     const e = env as unknown as Env;
     const t = 1_800_000_800;
@@ -545,6 +891,67 @@ describe('ops node jobs', () => {
     await runVerdictPass(e, t + 1);
     expect((await retireIncident(kite))?.status).toBe('open');
     expect(await exitStatus(kite)).toEqual({ status: 'active', token_hash: hash });
+  });
+
+  it('requires the complete pinned HY2 sibling when relisting a retired dual-transport node', async () => {
+    const e = env as unknown as Env;
+    const t = 1_800_001_050;
+    const kite = 'Tokyo · Kite';
+    const fingerprint = 'a'.repeat(64);
+    const spki = `${'A'.repeat(43)}=`;
+    const hy2Block = [
+      `  - name: ${kite} · hy2`,
+      '    type: hysteria2',
+      '    server: 203.0.113.9',
+      '    port: 443',
+      '    password: {{TONO_CLIENT_UUID}}',
+      '    sni: www.example.com',
+      `    fingerprint: ${fingerprint}`,
+      `    certificate-public-key-sha256: ${spki}`,
+      '    skip-cert-verify: false',
+      '',
+    ].join('\n');
+    const yaml = (await seedTwoNodeCatalog(e, t, kite, 'Tokyo · Fuji'))
+      .replace('proxy-groups:', `${hy2Block}proxy-groups:`);
+    const encrypted = await encryptCatalog(yaml, e.CATALOG_ENCRYPTION_KEY!);
+    await db().prepare('UPDATE managed_exit_catalog SET ciphertext = ?, nonce = ?, content_sha256 = ?')
+      .bind(encrypted.ciphertext, encrypted.nonce, await sha256(yaml)).run();
+    await db().prepare('UPDATE ops_node_profiles SET hy2_port = 443, hy2_fingerprint = ? WHERE catalog_name = ?')
+      .bind(fingerprint, kite).run();
+    await seedExitToken(kite, t);
+    await enqueue('catalog_retire', t, { nodeName: kite, idempotencyKey: 'retire-pinned-hy2' });
+    expect(await runWorkerJobs(e, t, 5)).toBe(1);
+    await db().prepare("UPDATE exit_nodes SET status = 'active', token_hash = ? WHERE name = ?")
+      .bind(await sha256('replacement-token'), kite).run();
+    const block = realityBlock(kite, '203.0.113.9');
+    await expect(relistFleetNode(e, 'ops@example.com', kite, { block }))
+      .rejects.toMatchObject({ status: 422, code: 'RELIST_NO_HY2_TEMPLATE' });
+    expect(await db().prepare('SELECT revision FROM managed_exit_catalog WHERE singleton_id = 1')
+      .first<{ revision: number }>()).toEqual({ revision: 2 });
+    const relist = await enqueue('catalog_relist', t + 1, {
+      nodeName: kite, idempotencyKey: 'relist-pinned-hy2', params: { block, hy2Block, expectedRevision: 2 },
+    });
+    expect(await runWorkerJobs(e, t + 1, 5)).toBe(1);
+    expect(await db().prepare('SELECT status FROM ops_node_jobs WHERE id = ?')
+      .bind(relist.job.id).first<{ status: string }>()).toEqual({ status: 'succeeded' });
+    const published = await db().prepare('SELECT revision, ciphertext, nonce FROM managed_exit_catalog WHERE singleton_id = 1')
+      .first<{ revision: number; ciphertext: string; nonce: string }>();
+    expect(published?.revision).toBe(3);
+    const sibling = splitManagedCatalogProxies(await decryptCatalog(
+      published!.ciphertext, published!.nonce, e.CATALOG_ENCRYPTION_KEY!,
+    )).items.find((item) => item.name === `${kite} · hy2`);
+    expect(sibling?.block).toContain(`fingerprint: ${fingerprint}`);
+    expect(sibling?.block).toContain(`certificate-public-key-sha256: ${spki}`);
+    expect(sibling?.block).toContain('skip-cert-verify: false');
+  });
+
+  it('rejects credential-bearing relist templates before storing job parameters', async () => {
+    const block = realityBlock('Tokyo · Kite', '203.0.113.9')
+      .replace('{{TONO_CLIENT_UUID}}', '123e4567-e89b-12d3-a456-426614174000');
+    await expect(enqueue('catalog_relist', 1_800_001_051, { params: { block } }))
+      .rejects.toMatchObject({ status: 400, code: 'VALIDATION_ERROR' });
+    expect(await db().prepare('SELECT COUNT(*) AS n FROM ops_node_jobs').first<{ n: number }>())
+      .toEqual({ n: 0 });
   });
 
   it('relist refuses to publish an entry without the Reality settings clients require', async () => {

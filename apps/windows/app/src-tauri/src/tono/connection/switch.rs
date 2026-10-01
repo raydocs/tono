@@ -412,6 +412,22 @@ pub(crate) async fn rebuild_for_catalog_routing_change(state: Arc<TonoState>, ap
     cold_switch_selected_node(state, app, generation, guard).await;
 }
 
+/// Startup detected a catalog rotation at its Connected commit. Serialize its detached rebuild
+/// with catalog publication and hot selection. The replacement attempt captures the installed
+/// catalog anew. Do not acquire this writer inside startup: a catalog-driven startup may already
+/// have a caller retaining it through the recovery transaction.
+pub(super) fn spawn_deferred_catalog_rebuild(
+    state: &Arc<TonoState>, app: &AppHandle, generation: u64,
+) {
+    let state = Arc::clone(state);
+    let app = app.clone();
+    let task: BoxedTask = Box::pin(async move {
+        let _catalog_update = state.begin_policy_update().await;
+        rebuild_for_catalog_routing_change(state, app, generation).await;
+    });
+    AsyncHandler::spawn(move || task);
+}
+
 pub(super) async fn close_connections_bound_to(state: &Arc<TonoState>, generation: u64, exit_name: &str) {
     if exit_name.is_empty() {
         return;

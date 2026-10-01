@@ -526,7 +526,7 @@ def require_commands(binary: Path) -> dict[str, str]:
     return resolved
 
 
-def fetch_roster(base: str, token: str) -> tuple[str, int, list[dict[str, str]], bool]:
+def fetch_roster(base: str, token: str) -> tuple[str, int, list[dict], bool, dict[str, int] | None]:
     request = urllib.request.Request(
         f"{base}/api/v1/home/exit-identities",
         headers=REQUEST_HEADERS,
@@ -554,7 +554,7 @@ def fetch_roster(base: str, token: str) -> tuple[str, int, list[dict[str, str]],
     return parse_roster(payload)
 
 
-def parse_roster(payload: dict) -> tuple[str, int, list[dict[str, str]], bool]:
+def parse_roster(payload: dict) -> tuple[str, int, list[dict], bool, dict[str, int] | None]:
     """Validate a roster document, fresh from the control plane or its saved copy."""
     node_id = payload.get("nodeId")
     observed_at = payload.get("observedAt")
@@ -612,7 +612,29 @@ def parse_roster(payload: dict) -> tuple[str, int, list[dict[str, str]], bool]:
             by_user[entry["userId"]] = watermark
     if len({entry["clientUUID"] for entry in roster}) != len(roster):
         raise Refusal("roster repeats an identity, which would merge two accounts' counters")
-    return node_id, observed_at, roster, retire_shared_legacy
+    watermarks: dict[str, int] | None = None
+    if "sourceUsageWatermarks" in payload:
+        entries = payload["sourceUsageWatermarks"]
+        if not isinstance(entries, list):
+            raise Refusal("roster sourceUsageWatermarks is not a list")
+        watermarks = {}
+        for entry in entries:
+            if not isinstance(entry, dict):
+                raise Refusal("roster sourceUsageWatermarks entry is not an object")
+            user_id = entry.get("userId")
+            watermark = entry.get("sourceUsageBytes")
+            if (not isinstance(user_id, str) or not 1 <= len(user_id) <= 100
+                    or isinstance(watermark, bool) or not isinstance(watermark, int)
+                    or not 0 <= watermark <= MAX_SAFE_INTEGER):
+                raise Refusal("roster sourceUsageWatermarks entry is invalid")
+            if user_id in watermarks:
+                raise Refusal("roster sourceUsageWatermarks repeats an account")
+            watermarks[user_id] = watermark
+        for entry in roster:
+            if ("sourceUsageBytes" in entry
+                    and entry["sourceUsageBytes"] != watermarks.get(entry["userId"], 0)):
+                raise Refusal("roster sourceUsageWatermarks disagrees with an identity")
+    return node_id, observed_at, roster, retire_shared_legacy, watermarks
 
 
 def acknowledge_roster(base: str, token: str, observed_at: int) -> None:
@@ -829,7 +851,8 @@ def fetch_roster_or_discard_cache(base: str, token: str, cache: Path):
 
 
 def save_roster_cache(path: Path, node_id: str, observed_at: int,
-                      roster: list[dict[str, str]], retire_shared_legacy: bool) -> str | None:
+                      roster: list[dict[str, str]], retire_shared_legacy: bool,
+                      watermarks: dict[str, int] | None = None) -> str | None:
     """Keep the roster just verified, for an Xray restart during an outage.
 
     The copy holds client credentials, so it is owner-only from creation and
@@ -845,6 +868,11 @@ def save_roster_cache(path: Path, node_id: str, observed_at: int,
         "retireSharedLegacy": retire_shared_legacy,
         "identities": roster,
     }
+    if watermarks is not None:
+        document["sourceUsageWatermarks"] = [
+            {"userId": user_id, "sourceUsageBytes": total}
+            for user_id, total in watermarks.items()
+        ]
     temporary: str | None = None
     try:
         descriptor, temporary = tempfile.mkstemp(prefix=".roster-", dir=path.parent)
@@ -897,7 +925,7 @@ def load_roster_cache(path: Path, source: str) -> tuple[list[dict[str, str]], bo
     # A clock that moved backwards gives no usable age either.
     if not 0 <= age <= ROSTER_CACHE_MAX_AGE_SECONDS:
         raise Refusal(f"the saved roster is {age}s old, outside 0-{ROSTER_CACHE_MAX_AGE_SECONDS}s")
-    node_id, _, roster, retire_shared_legacy = parse_roster(document)
+    node_id, _, roster, retire_shared_legacy, _ = parse_roster(document)
     if node_id != source:
         raise Refusal("the saved roster belongs to another exit node")
     return roster, retire_shared_legacy, age
@@ -1239,9 +1267,8 @@ def aggregate_user_totals(totals: dict[str, int]) -> dict[str, int]:
 def source_watermarks(roster: list[dict]) -> dict[str, int] | None:
     """Per-account server watermark from a parsed roster, or None if it has none.
 
-    An empty roster has nothing to bill and is a known empty map. A roster that
-    predates `sourceUsageBytes` is None: the agent must not treat a raw counter
-    as a fresh lifetime while it cannot see what the server already counted.
+    Compatibility fallback for a server without the independent recovery set.
+    Its identity-only fields cannot recover inactive accounts' old counters.
     """
     if not roster:
         return {}
@@ -1282,6 +1309,9 @@ def adopt_source_watermarks(
             continue
         labels = sorted(label for label in totals if attributed_user(label) == user_id)
         if not labels:
+            # Accounting-only carry after a complete empty counter observation;
+            # it never enters the roster or installed-client inventory.
+            totals[client_label(user_id)] = watermark
             continue
         for index, label in enumerate(labels):
             totals[label] = watermark if index == 0 else 0
@@ -1501,7 +1531,7 @@ def persist_shared_legacy_retirement(binary: Path, config: Path) -> bool:
             os.fsync(directory_fd)
         finally:
             os.close(directory_fd)
-    except OSError as error:
+    except (OSError, subprocess.TimeoutExpired) as error:
         raise Refusal(f"cannot persist {LEGACY_CLIENT_EMAIL} retirement to {config}: {error}") from error
     finally:
         if temporary is not None:
@@ -1610,7 +1640,7 @@ def run_hy2_roster_once() -> None:
     if not SOURCE_ID_PATTERN.fullmatch(expected):
         raise Refusal("hy2-only sync requires an explicit valid TONO_SOURCE_ID")
     try:
-        node_id, observed_at, roster, _ = fetch_roster(base, token)
+        node_id, observed_at, roster, _, _ = fetch_roster(base, token)
     except NodeDisabled:
         sync_hy2_roster([])
         raise Refusal("the control plane reports this exit node disabled; hy2 allowlist emptied")
@@ -1728,7 +1758,7 @@ def run_once(path: Path) -> None:
     override = retire_override(os.environ.get("TONO_RETIRE_SHARED_LEGACY", ""))
     cache = roster_cache_path(path)
     try:
-        node_id, observed_at, roster, server_retire_shared_legacy = fetch_roster_or_discard_cache(
+        node_id, observed_at, roster, server_retire_shared_legacy, watermarks = fetch_roster_or_discard_cache(
             base, token, cache,
         )
     except NodeDisabled:
@@ -1811,7 +1841,7 @@ def run_once(path: Path) -> None:
     # Saved before anything is enforced, so the copy never trails a revocation
     # this round has already seen.
     cache_error = save_roster_cache(
-        cache, node_id, observed_at, roster, server_retire_shared_legacy,
+        cache, node_id, observed_at, roster, server_retire_shared_legacy, watermarks,
     )
     # Revocation runs before every metering check below. A damaged state file,
     # a source mismatch or a queued report ahead of the clock must not keep a
@@ -1945,7 +1975,7 @@ def run_once(path: Path) -> None:
 
     totals = adopt_source_watermarks(
         lifetime_totals(state, counters, restarted=restarted),
-        source_watermarks(roster),
+        watermarks if watermarks is not None else source_watermarks(roster),
         ledger_missing=ledger_missing,
     )
     current_user_totals = aggregate_user_totals(totals)
