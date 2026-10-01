@@ -2968,6 +2968,20 @@ mod tests {
         serde_json::json!({ "rules": rules })
     }
 
+    /// TCP assistant rows, then process pins, then DIRECT. No UDP doubling:
+    /// that block exists only for the residential hop.
+    fn controller_rules_with_assistant_shield(extra: Vec<serde_json::Value>) -> serde_json::Value {
+        let mut rules = vec![
+            serde_json::json!({"type": "IPCIDR", "payload": "127.0.0.0/8", "proxy": "DIRECT"}),
+            serde_json::json!({"type": "IPCIDR", "payload": "::1/128", "proxy": "DIRECT"}),
+        ];
+        rules.extend(home_controller_rules("Tono-Exit", true));
+        rules.extend(extra);
+        rules.push(serde_json::json!({"type": "AND", "payload": "((Network,udp))", "proxy": "REJECT"}));
+        rules.push(serde_json::json!({"type": "Match", "payload": "", "proxy": "Tono-Exit"}));
+        serde_json::json!({ "rules": rules })
+    }
+
     #[test]
     fn controller_readback_requires_the_exact_direct_graph_and_exit_order() {
         // Captured from the packaged Mihomo Meta v1.19.29 `/rules` and `/proxies` APIs. In
@@ -3163,6 +3177,49 @@ mod tests {
         );
         controller_direct_graph_is_active(&split_rules, &proxies, &expected, "Ethernet 2", true, false, true)
             .expect("the exact socks5 split graph must pass");
+    }
+
+    #[test]
+    fn signed_app_direct_readback_requires_assistant_hosts_on_the_exit() {
+        let path = "((Network,tcp) && (DstPort,443) && (ProcessPathRegex,^C:\\\\WeChat\\\\))";
+        let expected = vec![ControllerDirectRuleProof {
+            proxy: "Tono-China-Direct".to_owned(),
+            payload: path.to_owned(),
+        }];
+        let proxies = serde_json::json!({
+            "proxies": {
+                "Tono-Exit": {},
+                "Tono-China-Direct": {"type": "Direct", "interface": "Ethernet 2"}
+            }
+        });
+        let extra = vec![serde_json::json!({
+            "type": "AND",
+            "payload": path,
+            "proxy": "Tono-China-Direct"
+        })];
+        controller_direct_graph_is_active(
+            &controller_rules_with_assistant_shield(extra.clone()),
+            &proxies,
+            &expected,
+            "Ethernet 2",
+            true,
+            false,
+            false,
+        )
+        .expect("assistant hosts must be accepted ahead of the signed-app DIRECT rule");
+        assert!(
+            controller_direct_graph_is_active(
+                &controller_rules_graph("Tono-Exit", false, extra),
+                &proxies,
+                &expected,
+                "Ethernet 2",
+                true,
+                false,
+                false,
+            )
+            .is_err(),
+            "a signed-app DIRECT graph without the assistant rows must fail"
+        );
     }
 
     #[test]
