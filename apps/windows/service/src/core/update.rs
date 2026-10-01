@@ -14,8 +14,8 @@ use anyhow::{Context as _, Result, ensure};
 pub use super::windows_kill_switch::strict_kill_switch_intent_on_disk;
 pub use gate::{GateReason, GateRefusal, GateReport, reason_of, refusal};
 pub use security::{
-    UserLaunch, app_image, image, install_root, parent_image, pin_path, program_files,
-    record_installed_version, resume_successor, tunnel_absent, verify_tree,
+    UserLaunch, app_image, image, install_root, parent_image, pin_path, process_clock_now,
+    program_files, record_installed_version, resume_successor, tunnel_absent, verify_tree,
 };
 use std::{
     fs::OpenOptions,
@@ -424,6 +424,7 @@ pub(crate) async fn request(
                 executor: None,
                 old_components,
                 disconnect: None,
+                publication_clock: None,
             });
             store.save(next)?; // Before staging, quiescence, or ownership changes.
             let dir = store.attempt_dir()?;
