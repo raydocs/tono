@@ -7,6 +7,7 @@ Collected 2026-09-30 (MDT) from the box; credential values, auth paths, and emai
 - [orchestrator-coverage.md](orchestrator-coverage.md) — coverage map for the industrial tono hunt; 2026-09-30; source model: orchestrator (tracking Sol, Grok, and GLM work).
 - [orchestrator-ledger.md](orchestrator-ledger.md) — consolidated findings ledger and PR status; 2026-09-30; source model: orchestrator.
 - [orchestrator-common-prompt.md](orchestrator-common-prompt.md) — shared hunter/fixer operating rules; 2026-09-30; source model: orchestrator.
+- [grok-fixer-windows-backend.md](grok-fixer-windows-backend.md) — Windows and backend fixer report; 2026-10-01; source model: Grok 4.7.
 - [sol2-report.md](sol2-report.md) — GPT-6.1 Sol account-2 bug-hunt report, findings, fixes, and validation; 2026-09-30; source model: GPT-6.1 Sol.
 - [sol2-findings.md](sol2-findings.md) — compact GPT-6.1 Sol findings table; 2026-09-30; source model: GPT-6.1 Sol.
 - [R3-A1A7-grok.md](R3-A1A7-grok.md) — wave-3 Grok pass on the Windows connect orchestrator and service/owner/proxy/tray path; 2026-10-01; source model: Grok 4.7.
