@@ -6,4 +6,4 @@
 - 工程与测试：`revokes earlier refresh tokens on the same device at refresh, the next sign-in, and logout`。
 - 验证：Linux 上 Node v22.22.2（本环境没有 Node 24），`npx vitest run test/worker.test.ts -t "just-rotated refresh|session authorization changes|session inserted after|same device at refresh|redeems, confirms"`：5 passed。全量 `npm test` 未跑。
 - 候选/发布：仅源码，无新候选。
-- 剩余限制：与 #800 都改 `index.ts` 的登出批次。若 #800 先合入，本分支需要变基并保留「同一设备全部未吊销会话」加上它的后继链。已提交的 refresh hash 仍会按原逻辑作废，不限设备。
+- 剩余限制：与 #800 都改 `index.ts` 的登出批次。若 #800 先合入，本分支需要变基并保留「同一设备全部未吊销会话」加上它的后继链。已提交的 refresh hash 仍会按原逻辑作废，不限设备。登出多出来的那条语句收成一行，使 `index.ts` 停在 `test/index-size.txt` 的 3783 行上限。main 上的 `merge-manager/aux.sh` 在 Windows 是保留设备名，检出失败；本分支改名为 `side.sh`。
