@@ -1504,6 +1504,8 @@ if CommandLine.arguments.dropFirst() == ["--self-test"] {
             && runOwnedRuntimeContractSelfTests()
             && PowerTransitionGate.runSelfTests()
             && runStartupOrderSelfTest()
+            && KillSwitchManager.runFailedCommitReleaseSelfTest()
+            && KillSwitchManager.runUnprovenHealthSelfTest()
             && emergencyReleaseDespiteUnreadableLedger(strictKillSwitchEnabled: false)
             && !emergencyReleaseDespiteUnreadableLedger(strictKillSwitchEnabled: true)
             ? 0 : 1

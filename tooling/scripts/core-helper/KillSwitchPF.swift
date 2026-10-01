@@ -475,7 +475,10 @@ extension KillSwitchManager {
     /// Load `/etc/pf.conf` into the kernel without writing the `load anchor`
     /// line onto that file. The ephemeral copy is root-only and removed
     /// before this returns.
-    static func loadHookedMainRuleset(childPath: String = killSwitchPFPath) throws -> HelperCommandResult {
+    static func loadHookedMainRuleset(
+        childPath: String = killSwitchPFPath,
+        loadOutcome: inout KernelLoadOutcome
+    ) throws -> HelperCommandResult {
         let kernel = try kernelMainConfiguration(disk: try diskMainPFText(), childPath: childPath)
         let ephemeral = "/etc/.tono-pf-load-\(UUID().uuidString)"
         defer { unlink(ephemeral) }
@@ -486,6 +489,8 @@ extension KillSwitchManager {
                 checked.message.isEmpty ? "Main PF validation failed." : checked.message
             )
         }
+        // `-nf` does not change the kernel. Only `-f` can.
+        loadOutcome = .acceptedOrUnknown
         return try run("/sbin/pfctl", ["-f", ephemeral])
     }
 
@@ -623,6 +628,13 @@ extension KillSwitchManager {
         try ensureAnchorLoaded(disposal: flushStates ? .full : .keep)
     }
 
+    static func ensureAnchorLoaded(flushStates: Bool, loadOutcome: inout KernelLoadOutcome) throws {
+        try ensureAnchorLoaded(
+            disposal: flushStates ? .full : .keep,
+            loadOutcome: &loadOutcome
+        )
+    }
+
     /// `standaloneMain` loads a Tono-owned main ruleset that references only
     /// the Tono anchor instead of hooking `/etc/pf.conf`. Only the emergency
     /// block uses it, and only after the normal path failed: that file can be
@@ -634,6 +646,19 @@ extension KillSwitchManager {
     static func ensureAnchorLoaded(
         disposal: StateDisposal,
         standaloneMain: Bool = false
+    ) throws {
+        var outcome = KernelLoadOutcome.notIssued
+        try ensureAnchorLoaded(
+            disposal: disposal,
+            standaloneMain: standaloneMain,
+            loadOutcome: &outcome
+        )
+    }
+
+    static func ensureAnchorLoaded(
+        disposal: StateDisposal,
+        standaloneMain: Bool = false,
+        loadOutcome: inout KernelLoadOutcome
     ) throws {
         let mainChanged = try standaloneMain ? false : ensureMainHook()
         // Read only where it decides the load, as before. No answer fails the
@@ -647,6 +672,7 @@ extension KillSwitchManager {
                 data: Data(renderStandaloneMain(childPath: killSwitchPFPath).utf8),
                 permissions: 0o600
             )
+            loadOutcome = .acceptedOrUnknown
             loaded = try run("/sbin/pfctl", ["-f", killSwitchStandaloneMainPath])
         } else if mainChanged || mainAnchorMissing
                     || FileManager.default.fileExists(atPath: killSwitchStandaloneMainPath) {
@@ -657,15 +683,17 @@ extension KillSwitchManager {
             // it left out come back.
             // Disk `/etc/pf.conf` has no `load anchor from`. Loading it
             // directly would flush the child while PF may already be enabled.
-            loaded = try loadHookedMainRuleset()
+            loaded = try loadHookedMainRuleset(loadOutcome: &loadOutcome)
             if loaded.status == 0 { unlink(killSwitchStandaloneMainPath) }
         } else {
+            loadOutcome = .acceptedOrUnknown
             loaded = try run(
                 "/sbin/pfctl",
                 ["-a", killSwitchAnchor, "-f", killSwitchPFPath]
             )
         }
         guard loaded.status == 0 else {
+            loadOutcome = .rejected
             throw HelperFailure.system(
                 loaded.message.isEmpty ? "Main PF load failed." : loaded.message
             )
