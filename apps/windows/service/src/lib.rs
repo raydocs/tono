@@ -55,7 +55,7 @@ pub use core::{
     restore_windows_kill_switch, retire_unverified_windows_kill_switch, run_ipc_server,
     run_ipc_supervisor_until_shutdown, service_lifecycle_state, set_service_lifecycle_state,
     spawn_kill_switch_watchdog, spawn_protected_dns_watchdog, spawn_windows_kill_switch_watchdog,
-    stop_ipc_server,
+    stop_ipc_server, SCM_STOP_WAIT_HINT, stop_pending_refresh_due,
 };
 #[cfg(all(feature = "standalone", windows))]
 pub use core::{note_power_event, start_network_monitor};

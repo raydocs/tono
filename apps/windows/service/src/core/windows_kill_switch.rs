@@ -294,6 +294,19 @@ const DNS_RESTORE_STALLED_PREFIX: &str = "TONO_DNS_RESTORE_STALLED";
 /// also stays under the IPC handler's 60 s budget, so the refusal still reaches the client.
 const DNS_RESTORE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(40);
 
+/// SCM `StopPending` hint posted by the service. Stop is accepted before startup
+/// finishes, and startup can still be inside this DNS budget — twice, when an
+/// unverified barrier is retired. One post of the hint does not cover that.
+/// The service refreshes the checkpoint on [`SCM_STOP_HINT_REFRESH`], which has
+/// to land inside one DNS budget and inside the posted hint or SCM kills the
+/// process mid-restore.
+pub const SCM_STOP_WAIT_HINT: std::time::Duration = std::time::Duration::from_secs(65);
+pub const SCM_STOP_HINT_REFRESH: std::time::Duration = std::time::Duration::from_secs(15);
+
+pub fn stop_pending_refresh_due(elapsed_since_last_post: std::time::Duration) -> bool {
+    elapsed_since_last_post >= SCM_STOP_HINT_REFRESH
+}
+
 /// Budget for the uninstall-only DNS escalation ladder (`dns::restore_for_uninstall`), which is
 /// up to two full restore rounds back to back — the exact restore, then the automatic (DHCP)
 /// fallback — plus their read-backs. Reusing [`DNS_RESTORE_TIMEOUT`] would cut the ladder off
@@ -3526,6 +3539,24 @@ mod tests {
     use super::*;
     use crate::core::structure::{KillSwitchConfig, ProxyEndpoint, ProxyProtocol};
     use serial_test::serial;
+
+    /// Stop is accepted while startup can still be inside DNS restore, and an
+    /// unverified retirement can run that restore again. The posted hint is
+    /// shorter than those two budgets, so the checkpoint has to be refreshed
+    /// inside a single budget.
+    #[test]
+    fn scm_stop_hint_refreshes_before_a_dns_restore_can_outlive_it() {
+        assert!(
+            SCM_STOP_WAIT_HINT < DNS_RESTORE_TIMEOUT.saturating_mul(2),
+            "one wait hint cannot cover startup restore plus unverified retirement"
+        );
+        assert!(SCM_STOP_HINT_REFRESH < DNS_RESTORE_TIMEOUT);
+        assert!(SCM_STOP_HINT_REFRESH < SCM_STOP_WAIT_HINT);
+        assert!(stop_pending_refresh_due(SCM_STOP_HINT_REFRESH));
+        assert!(!stop_pending_refresh_due(
+            SCM_STOP_HINT_REFRESH - std::time::Duration::from_secs(1)
+        ));
+    }
 
     /// Scoped failure seams: reset even when an assertion panics so the serial suite cannot be
     /// poisoned for every later WFP/persistence test.
