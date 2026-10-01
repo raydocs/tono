@@ -889,6 +889,7 @@ export const translationKeys = [
   'tono.dashboard.overview.noActiveRoute',
   'tono.dashboard.overview.reading',
   'tono.dashboard.overview.telemetryFailed',
+  'tono.dashboard.overview.sessionTotal',
   'tono.dashboard.info.protection',
   'tono.dashboard.info.dns',
   'tono.dashboard.info.operator',
