@@ -578,6 +578,22 @@ nonisolated struct SystemNetworkObservation: Equatable {
         )
     }
 
+    /// Dynamic-store split DNS plus `/etc/resolver`. A directory that cannot
+    /// be read is not proof those files are empty: `nil` from the directory
+    /// must not discard conflicts already read from the dynamic store, or one
+    /// unreadable file hides a VPN/profile split and the connected audit
+    /// treats the resolver as intact. When the store list is also empty, nil
+    /// keeps the audit unverifiable instead of intact.
+    static func mergedConflictingResolvers(
+        dynamicStore: [SupplementalResolver],
+        resolverFiles: [SupplementalResolver]?
+    ) -> [SupplementalResolver]? {
+        guard let resolverFiles else {
+            return dynamicStore.isEmpty ? nil : dynamicStore
+        }
+        return dynamicStore + resolverFiles
+    }
+
     /// Nil when `/etc/resolver` exists but cannot be read; an absent
     /// directory is the ordinary case and has no resolvers.
     static func resolverDirectoryConflicts(
@@ -674,7 +690,10 @@ nonisolated struct SystemNetworkObservation: Equatable {
             effectiveDNSServers: (values[dnsKey] as? [String: Any])?[
                 kSCPropNetDNSServerAddresses as String
             ] as? [String],
-            conflictingSupplementalResolvers: fileResolvers.map { supplemental + $0 }
+            conflictingSupplementalResolvers: mergedConflictingResolvers(
+                dynamicStore: supplemental,
+                resolverFiles: fileResolvers
+            )
         )
     }
 }
