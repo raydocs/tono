@@ -1,6 +1,25 @@
 import Foundation
 import Darwin
 
+extension SocketServer {
+    static func runOrphanedBootstrapSelectiveReleaseSelfTest() -> Bool {
+        var intentPresent = true
+        var events: [String] = []
+        do {
+            try releaseOrphanedBootstrapProtection(
+                disarm: {
+                    events.append("disarm")
+                    intentPresent = false
+                },
+                applySelectiveLayer: {
+                    events.append(intentPresent ? "applied-before-disarm" : "apply-ai-hold")
+                }
+            )
+        } catch { return false }
+        return events == ["disarm", "apply-ai-hold"]
+    }
+}
+
 extension KillSwitchManager {
     static func runLifecycleSelfTests() -> Bool {
         let testAnchor = "tono.lifecycle-test"
@@ -1535,6 +1554,31 @@ extension KillSwitchManager {
                 load: .acceptedOrUnknown,
                 strictKillSwitchEnabled: true
             )
+    }
+
+    static func runFailedBarrierSelectiveReleaseSelfTest() -> Bool {
+        var intentPresent = true
+        var events: [String] = []
+        releaseInstalledBlock(
+            release: {
+                events.append("release")
+                intentPresent = false
+            },
+            applySelectiveLayer: {
+                events.append(intentPresent ? "applied-before-release" : "apply-ai-hold")
+            }
+        )
+        return events == ["release", "apply-ai-hold"]
+    }
+
+    static func runFailedBarrierUnreleasedSelfTest() -> Bool {
+        struct ReleaseFailed: Error {}
+        var applied = false
+        releaseInstalledBlock(
+            release: { throw ReleaseFailed() },
+            applySelectiveLayer: { applied = true }
+        )
+        return !applied
     }
 
     /// `/killswitch/health` disconnects the app without a release when `live`

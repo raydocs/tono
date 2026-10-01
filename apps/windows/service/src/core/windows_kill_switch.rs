@@ -3037,7 +3037,7 @@ pub(crate) async fn transition_after_stop(release_requested: bool) -> Result<()>
     restrict_bootstrap_unlocked().await
 }
 
-#[cfg(windows)]
+#[cfg(any(windows, test))]
 pub(crate) fn strict_kill_switch_enabled() -> bool {
     armed_guard()
         .as_ref()
@@ -4069,7 +4069,9 @@ pub(crate) async fn status() -> KillSwitchStatus {
     };
     KillSwitchStatus {
         wanted: armed.intent.wanted,
-        verified: armed.intent.is_verified(),
+        // Durable predecessor proof permits crash recovery, but cannot acknowledge this
+        // arm's MarkVerified request while its independent Connect deadline is pending.
+        verified: armed.intent.is_verified() && !FRESH_ARM_PROOF_PENDING.load(Ordering::Acquire),
         live,
         mode: armed.intent.mode,
         // What the last render decided, not what a render right now would decide: this is a
@@ -4083,6 +4085,17 @@ pub(crate) async fn status() -> KillSwitchStatus {
         reconnect_after_release: !armed.intent.wanted
             && (armed.intent.reconnect_after_release
                 || RECONNECT_AFTER_RELEASE.load(Ordering::Relaxed)),
+    }
+}
+
+/// Pending-update recovery has the same selective disposition as ordinary automatic cleanup.
+#[cfg(any(windows, test))]
+pub(crate) async fn release_for_update_disconnect(apply_narrow: bool) -> Result<KillSwitchStatus> {
+    if apply_narrow {
+        anyhow::ensure!(!strict_kill_switch_enabled(), "automatic update cleanup cannot release explicit strict protection");
+        release_applying_narrow().await
+    } else {
+        release().await
     }
 }
 
@@ -4328,6 +4341,36 @@ mod tests {
 
     #[tokio::test]
     #[serial]
+    async fn automatic_pending_update_disconnect_retains_the_ai_hold() -> Result<()> {
+        cleanup().await;
+        locked_direct_test_session().await?;
+        let request = crate::update_wire::UpdateRequest::disconnect(true);
+        let wire = serde_json::to_vec(&request)?;
+        let received: crate::update_wire::UpdateRequest = serde_json::from_slice(&wire)?;
+        let released = release_for_update_disconnect(received.applies_narrow_on_disconnect()).await?;
+        let ai_held = crate::core::selective_layer::test_hold_active();
+        cleanup().await;
+        assert!(!released.wanted, "automatic failed-update cleanup must release general traffic");
+        assert!(ai_held, "pending-update dispatch must not lose automatic cleanup's AI hold");
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn automatic_pending_update_disconnect_preserves_strict_protection() -> Result<()> {
+        cleanup().await;
+        locked_direct_test_session().await?;
+        armed_guard().as_mut().unwrap().intent.strict_kill_switch = true;
+        let result = release_for_update_disconnect(true).await;
+        let wanted = status().await.wanted;
+        cleanup().await;
+        assert!(result.is_err(), "automatic cleanup cannot release strict protection");
+        assert!(wanted);
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
     async fn fresh_arm_verification_retires_the_connect_deadline() -> Result<()> {
         cleanup().await;
         arm_bootstrap(&test_config(), "/opt/tono/mihomo", "owner-alice").await?;
@@ -4344,6 +4387,34 @@ mod tests {
         mark_verified("owner-alice").await?;
         assert!(WANTED_CORE_DEADLINE.lock().unwrap_or_else(std::sync::PoisonError::into_inner).is_none());
         assert!(status().await.wanted);
+        cleanup().await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn inherited_verification_cannot_acknowledge_a_fresh_arm() -> Result<()> {
+        cleanup().await;
+        arm_bootstrap(&test_config(), "/opt/tono/mihomo", "owner-alice").await?;
+        crate::core::manager::set_running_core_identity_for_kill_switch_tests(Some((4242, 1)))
+            .await;
+        lock(None).await?;
+        mark_verified("owner-alice").await?;
+        assert!(status().await.verified);
+
+        // The new arm retains durable reconnect evidence, but no new MarkVerified arrived.
+        arm_bootstrap(&test_config(), "/opt/tono/mihomo", "owner-alice").await?;
+        lock(None).await?;
+        assert!(armed_guard().as_ref().unwrap().intent.is_verified());
+        let readback = status().await;
+        assert!(readback.wanted && readback.tunnel_permit_rendered);
+        assert_eq!(readback.mode, KillSwitchStatusMode::Locked);
+        assert!(!readback.verified, "a lost request cannot be acknowledged by its predecessor's proof");
+        assert!(FRESH_ARM_PROOF_PENDING.load(Ordering::Acquire));
+
+        mark_verified("owner-alice").await?;
+        assert!(status().await.verified, "a lost reply can still be acknowledged by fresh proof");
+        assert!(!FRESH_ARM_PROOF_PENDING.load(Ordering::Acquire));
         cleanup().await;
         Ok(())
     }

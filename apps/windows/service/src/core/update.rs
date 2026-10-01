@@ -643,10 +643,15 @@ pub(crate) async fn request(
             store.save(next)?;
             // Child waits for the persisted identity while this lock is held.
         }
-        UpdateRequest::Disconnect => {
+        release @ (UpdateRequest::Disconnect | UpdateRequest::DisconnectApplyingNarrow) => {
             if !store.pending() {
                 return status(&store);
             }
+            // Automatic failed-Prepare cleanup must never override an explicit strict hold.
+            ensure!(
+                !release.applies_narrow_on_disconnect() || !wfp::strict_kill_switch_enabled(),
+                "automatic update cleanup cannot release explicit strict protection"
+            );
             begin_update_release(&mut store, owner, &peer)?;
             if let Some(active) = desired::load_active_owner().await? {
                 ensure!(
@@ -667,7 +672,7 @@ pub(crate) async fn request(
             desired::persist_owner_core_stopped(owner).await?;
             desired::clear_active_owner().await?;
             tunnel_absent("Tono")?;
-            wfp::release().await?;
+            wfp::release_for_update_disconnect(release.applies_narrow_on_disconnect()).await?;
             // WFP is gone from here on. Proving the release for the update
             // evidence and archiving the record are update bookkeeping: their
             // failure keeps the record pending but is not a release failure.

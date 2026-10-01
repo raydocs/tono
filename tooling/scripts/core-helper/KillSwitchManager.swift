@@ -635,24 +635,17 @@ final class KillSwitchManager {
     }
 
     /// Flush the anchor and drop saved intent. Does not take `lock`. Never
-    /// installs a block. A second call is a no-op once the anchor is empty.
-    static func releaseInstalledBlock() {
+    /// re-arms PF or blocks general traffic. Restores the secondary AI hold
+    /// after a successful release.
+    static func releaseInstalledBlock(
+        release: () throws -> Void = { try KillSwitchManager.releasePersistedBlockUnlocked() },
+        applySelectiveLayer: () -> Void = SelectiveFailOpenInstaller.applyBestEffort
+    ) {
         do {
-            try releaseSequence(
-                writePlaceholder: {
-                    try atomicWrite(
-                        path: killSwitchPFPath,
-                        data: Data("# Managed by Tono Kill Switch — intentionally disarmed\n".utf8),
-                        permissions: 0o600
-                    )
-                },
-                flushAnchor: { try run("/sbin/pfctl", ["-a", killSwitchAnchor, "-F", "all"]) },
-                anchorStillActive: { try childAnchorActive() },
-                removeIntent: { try removeStateIfPresent() },
-                removeHostsPins: { try removeHostsMappings() },
-                restoreDisplacedMain: { _ = restoreDisplacedMainRuleset() },
-                releaseEnableReference: { try releasePFEnableReference() }
-            )
+            try release()
+            // An automatic failed commit has no explicit Restore intent.
+            // Only after the general block is gone, preserve the AI hold.
+            applySelectiveLayer()
         } catch {
             let detail = (error as? HelperFailure)?.message ?? String(describing: error)
             FileHandle.standardError.write(Data(

@@ -1,0 +1,9 @@
+| ID | 问题（一句） | 状态 | Issue / PR | 等级 | 剩余限制 |
+|---|---|---|---|---|---|
+| MAC-PINS-SYNC-READINESS | Successful pins-only Core replacement followed by controller-readiness failure skips exact PF re-arm, leaving normal DIRECT traffic blocked | in-PR | branch `hunt/sol-r3regm-pins-readiness` | 中·推导 | P1; regression introduced by #950; Swift/XCTest and installed-device PF behavior await macOS CI/hardware |
+
+SHIP_PLAN §2 item 10. Baseline `origin/main` `4ef4bf74`: `AppState+Proxy.swift:514–519` successfully installs the runtime through `/core/sync`, but throws from the later readiness check before pending-policy commit and exact PF convergence. `CoreControllerClient.reloadConfig` only checks readiness; it does not apply configuration. Helper `CoreManager.sync` already stopped/replaced the old process, and `SocketServer.swift:484–486` withheld the reviewed DIRECT permit before stopping it. #950's catch keeps the live session, but cannot restore that missing permit. TUN/exit probes can remain healthy while ordinary DIRECT sites/apps stay blocked.
+
+Pins-only refresh now uses successful helper replacement as the configuration receipt, proves its owned tunnel, and restores exact PF permits before the existing advisory readiness check. Full reload, PF-convergence failure, cancellation, AI routes, and strict-mode behavior retain their existing paths. No helper contract or new release operation.
+
+One XCTest drives the actual transaction and config writer with simulated helper replies: successful sync, recreated tunnel, controller readiness failure. Before the behavior change it leaves one arm and the old in-memory policy; after it performs the exact second arm, commits the installed policy and retains the session. Test authored before the fix; native execution unavailable in this Linux VM and not claimed.

@@ -325,7 +325,10 @@ final class SocketServer {
             ))
         }
         do {
-            _ = try killSwitch.disarm()
+            try Self.releaseOrphanedBootstrapProtection(
+                disarm: { _ = try killSwitch.disarm() },
+                applySelectiveLayer: killSwitch.applySelectiveLayerIfReleased
+            )
         } catch {
             let detail = (error as? HelperFailure)?.message ?? String(describing: error)
             FileHandle.standardError.write(Data(
@@ -337,6 +340,14 @@ final class SocketServer {
         FileHandle.standardError.write(Data(
             "tono: the app (pid \(owner?.pid ?? 0)) died before committing the tunnel; released its bootstrap kill switch\n".utf8
         ))
+    }
+
+    static func releaseOrphanedBootstrapProtection(
+        disarm: () throws -> Void,
+        applySelectiveLayer: () -> Void
+    ) throws {
+        try disarm()
+        applySelectiveLayer()
     }
 
     /// A successful arm or start from an authenticated peer makes that peer
