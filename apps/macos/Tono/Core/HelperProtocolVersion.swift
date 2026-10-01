@@ -324,7 +324,9 @@ nonisolated enum HelperProtocolVersion {
     /// - 4.52.11 → 4.52.12: the watchdog releases a bootstrap-only block whose
     ///   recorded app owner died before committing the tunnel (MAC-ORPHAN-
     ///   BOOTSTRAP-PF).
-    static let current = "4.52.12"
+    /// - 4.52.12 → 4.52.13: DNS writes refuse another preferences
+    ///   writer's lock promptly so helper requests and recovery can continue.
+    static let current = "4.52.13"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS
