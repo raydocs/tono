@@ -1643,7 +1643,7 @@ extension AppState {
                 // core-down watchdog released PF about 30 s later. macOS has
                 // no strict kill switch to hold; take that same open end
                 // state without the offline window.
-                self.disconnect(releaseKillSwitch: true)
+                self.disconnect(releaseKillSwitch: true, automaticFailureRelease: true)
                 self.errorMessage = browserDNS.failureMessage
                 return .stopMonitoring
             }
