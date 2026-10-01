@@ -1,6 +1,6 @@
 # R4-RegCP: Codex (GPT-6.1 Sol) findings
 
-Generated 2026-09-30 23:48 MT from the run's findings.tsv / prs.tsv.
+Generated 2026-10-01 00:15 MT from the run's findings.tsv / prs.tsv.
 
 ## PRs
 
@@ -29,8 +29,8 @@ Generated 2026-09-30 23:48 MT from the run's findings.tsv / prs.tsv.
 | R4CP-CATALOG-INLINE-HY2 | control-plane/catalog | — | services/control-plane/src/catalog-yaml.ts:733 | Retirement leaves one HY2 alias in inline proxy-group members | false-positive no user-facing owned-app path: macOS imports only proxy definitions and Windows validates proxies while ignoring groups; possible engineering cleanup only |
 | R4CP-DEFAULT-PROXY-RETIRE | control-plane/catalog | — | services/control-plane/src/ops/reads/fleet.ts:272 | Retiring a configured default proxy prevents refreshed catalog admission | false-positive both clients deliberately sanitize missing default selection hints; only missing required residential hop rejects admission |
 | R4CP-DIAGNOSTICS-UNICODE | control-plane/diagnostics | P2 | services/control-plane/src/telemetry/diagnostics.ts:90 | Unicode catalog names could break shipped-app diagnostics bundle uploads | false-positive no shipped app produces this new bundle API; nodeId contract is not proved to be a catalog display name |
-| R4CP-RETIRE-RELIST-FENCE | control-plane/catalog | P2 | services/control-plane/src/ops/reads/fleet.ts:269 | Immediate retirement cleanup disables token after a concurrent relist succeeds | real-fixed #1080; closes issue #1072 |
-| R4CP-OPEN833-CAS-SIBLINGS | control-plane/auth | P2 | services/control-plane/src/sessions.ts:43 (PR #833) | Losing refresh CAS in open #833 still revokes the winning successor via unconditional sibling UPDATE | concern: open PR #833; exact SQLite statement sequence yields CAS=0 retired=1 inserted=0 live=[]; root notified, no edit to claimed work |
+| R4CP-RETIRE-RELIST-FENCE | control-plane/catalog | P2 | services/control-plane/src/ops/reads/fleet.ts:270 | Immediate retirement cleanup disables token after a concurrent relist succeeds | real-fixed #1080; closes issue #1072 |
+| R4CP-OPEN833-CAS-SIBLINGS | control-plane/auth | P2 | services/control-plane/src/sessions.ts:43 (PR #833) | A losing refresh CAS in proposed #833 may revoke the winning successor | false-positive latest #833 now gates sibling UPDATE on this request successor_id; prior unmerged snapshot concern resolved |
 | REG-758 | control-plane/devices | — | services/control-plane/src/index.ts:1032 | All six revocation-job reopen paths reset retry stamp while keeping generation-scoped completion | ok |
 | R4CP-REVOCATION-DELETE-CLAIM | control-plane/devices | — | services/control-plane/src/index.ts:1712 | A concurrent confirm adopts a target while prior Tailscale DELETE is awaiting | false-positive pending job fences management-id store and enrollment; final activation checks claim lease; reopened completion uses ownership_generation |
 | R4CP-AUTHRESULT-LATE-REVOKE | control-plane/auth | — | services/control-plane/src/index.ts:1009 | Session insertion after ensureDevice or enrollment could revive a revoked device | false-positive migration0035 sessions_require_eligible_device validates user and device in SQLite INSERT boundary; rotate/expiration revoke existing sessions atomically |
@@ -38,14 +38,14 @@ Generated 2026-09-30 23:48 MT from the run's findings.tsv / prs.tsv.
 | REG-780 | metering/exit-agent | — | services/exit-agent/reconcile_and_report.py:1199 | restart absent-label baseline reset and ACK inventory persistence compose correctly with later fixes | ok |
 | REG-838 | exit-agent | — | services/exit-agent/reconcile_and_report.py:1169 | known inventory survives Refusal after partial mutation and counter read | ok |
 | REG-914 | exit-agent/control-plane | P2 | services/exit-agent/reconcile_and_report.py:1281 | lost ledger recovery omits expired users historical counter labels because source watermark DTO only returns active roster identities | issue #1069 |
-| REG-1009 | exit-agent | P1 | services/exit-agent/reconcile_and_report.py:1491 | CLI exception catches miss static-retirement config validation timeout after accepted additions | regression-fixed #1065 |
+| REG-1009 | exit-agent | P1 | services/exit-agent/reconcile_and_report.py:1504 | CLI exception catches miss static-retirement config validation timeout after accepted additions | regression-fixed #1065 |
 | REG-899 | home-agent | — | services/home-agent/report_example.py:619 | permanent usage refusals isolate one account while retryable delivery failures preserve queue | ok |
 | REG-852 | node quotas | — | services/control-plane/src/ops/quota-cycle.ts:85 | atomic rollover preserves old counter baselines on successor insert failure | ok |
 | REG-904 | node quotas | — | services/control-plane/src/ops/quota-unsampled.ts:37 | unsampled profile save establishes null counters and first measured read counts no historical usage | ok |
 | REG-825 | ops quotas | — | services/ops-console/src/lib/node-detail.ts:304 | fractional GB quota retains ordinary allowances through unrelated saves | ok |
 | REG-805 | ops quotas | — | services/ops-console/src/lib/node-detail.ts:331 | UTC anchor extraction now matches cycle zone | ok |
 | REGCP-MISSING-EXPIRED-WATERMARK | exit-agent/control-plane | P2 | services/exit-agent/reconcile_and_report.py:1239 | Lost ledger recovery replays counters for inactive users omitted from source watermarks | real-unfixed issue #1069; needs recovery API/agent contract change |
-| R4CP-RETIRE-VALIDATION-TIMEOUT | exit-agent | P1 | services/exit-agent/reconcile_and_report.py:1491 | Static retirement CLI timeout skips inventory durability and later revocation misses installed client | real-fixed #1065 |
+| R4CP-RETIRE-VALIDATION-TIMEOUT | exit-agent | P1 | services/exit-agent/reconcile_and_report.py:1504 | Static retirement CLI timeout skips inventory durability and later revocation misses installed client | real-fixed #1065 |
 | REGCP-V2-SEQUENCE-LOSS | metering agents | P2 | services/exit-agent/reconcile_and_report.py:1945 | loss of monotonic observation clock after ledger loss could suppress next report | false-positive ordinary timer next server observation is newer; requires clock rollback or same-second manual race |
 | REGCP-HOME-REFUSAL-LOST-DELTA | home-agent | P2 | services/home-agent/report_example.py:626 | refused report does not advance totals while peer baseline already advanced | false-positive deliberate permanent-refusal policy; rejected delta dropped by design |
 | REGCP-SPECULATIVE-TIMEOUT-INVENTORY | exit-agent | P2 | services/exit-agent/reconcile_and_report.py:1157 | timeout catch adds roster label even if temp-file failure happened before Xray RPC | false-positive conservative candidate; later not-found removal succeeds safely |
@@ -79,8 +79,8 @@ Generated 2026-09-30 23:48 MT from the run's findings.tsv / prs.tsv.
 | REG-766 | control-plane | — | services/control-plane/src/telemetry/failure-clusters.ts:221 | Open-cluster uniqueness loser joins the winner; both join paths preserve monotonic timestamp | ok |
 | REG-767 | control-plane | — | services/control-plane/src/ops/ledger.ts:325 | Single reversal cancellation passed; undo of reversal missed and fixed in #1096 | regression-fixed #1096 |
 | REG-839 | control-plane | — | services/control-plane/src/ops/ledger.ts:81 | Month snapshot now includes reconciliation; reconFromSnapshot reads it under current close fence | ok |
-| REG-865 | control-plane | — | services/control-plane/src/ops/handlers/ledger.ts:269 | Reversal stamp checks immediately preceding INSERT changes inside the same D1 batch | ok |
-| REG-883 | control-plane | — | services/control-plane/src/ops/handlers/ledger.ts:330 | Month-close row/subject CAS composes with guarded writes and immutable amounts | ok |
+| REG-865 | control-plane | — | services/control-plane/src/ops/handlers/ledger.ts:270 | Reversal stamp checks immediately preceding INSERT changes inside the same D1 batch | ok |
+| REG-883 | control-plane | — | services/control-plane/src/ops/handlers/ledger.ts:331 | Month-close row/subject CAS composes with guarded writes and immutable amounts | ok |
 | REG-890 | control-plane | — | services/control-plane/src/ops-timeseries.ts:492 | No-prototype metric map survives constructor/toString/__proto__ through tier stitching and JSON | ok |
 | REG-903 | control-plane | — | services/control-plane/src/telemetry/failure-clusters.ts:229 | MAX timestamp applies to both normal and uniqueness-loser join paths | ok |
 | REG-918 | control-plane | — | services/control-plane/src/telemetry/diagnostics.ts:355 | Whole validated bundle commits atomically; post-commit clustering failure is contained | ok |
@@ -90,10 +90,12 @@ Generated 2026-09-30 23:48 MT from the run's findings.tsv / prs.tsv.
 | REG-837 | control-plane | — | services/unchecked-index-ratchet.mjs:79 | Unchecked-index ratchet preserves strict pass; current Windows shim fix does not change Linux checks | ok |
 | REG-870 | control-plane | — | services/control-plane/vitest.config.ts:86 | Per-file coverage gates remain enforced and full baseline passes all four included runtime files | ok |
 | R4CP-LEDGER-NESTED-REVERSAL | control-plane/ledger | P2 | services/control-plane/src/ops/ledger.ts:325 | Reversing a reversal yields CSV source total -800 while CNY correctly totals 800 | real-fixed #1096 |
-| R4CP-LEDGER-CLOSE-CAS | control-plane/ledger | P2 | services/control-plane/src/ops/handlers/ledger.ts:330 | Ledger additions or subject moves after month-close snapshot could escape freeze | false-positive current atomic JSON state fence rejects changed rows; writes also check closed month at mutation boundary |
-| R4CP-REVERSE-CLOSE-STAMP | control-plane/ledger | P2 | services/control-plane/src/ops/handlers/ledger.ts:269 | Failed reversal insertion can still mark original reversed after month close | false-positive changes() immediately follows guarded INSERT within D1 batch and existing barrier regression still exercises current code |
+| R4CP-LEDGER-CLOSE-CAS | control-plane/ledger | P2 | services/control-plane/src/ops/handlers/ledger.ts:331 | Ledger additions or subject moves after month-close snapshot could escape freeze | false-positive current atomic JSON state fence rejects changed rows; writes also check closed month at mutation boundary |
+| R4CP-REVERSE-CLOSE-STAMP | control-plane/ledger | P2 | services/control-plane/src/ops/handlers/ledger.ts:270 | Failed reversal insertion can still mark original reversed after month close | false-positive changes() immediately follows guarded INSERT within D1 batch and existing barrier regression still exercises current code |
 | R4CP-DIAGNOSTICS-POSTCOMMIT | control-plane/telemetry | P2 | services/control-plane/src/telemetry/diagnostics.ts:359 | Failure clustering exception after bundle insert makes retry duplicate diagnostics | false-positive #918 catches best-effort clustering after committed insert; #903 uses monotonic greatest event time on join paths |
-| R4CP-LEDGER-PAGE-VALIDATOR | control-plane/ledger | P3 | services/control-plane/src/ops/handlers/ledger.ts:152 | Successful edit changes ledger page but leaves conditional validator unchanged | real-fixed #1091 |
-| REG-1065 | exit-agent | — | services/exit-agent/reconcile_and_report.py:1491 | Validation timeout maps to Refusal after durable accepted inventory; later revocation succeeds | ok |
-| REG-1080 | control-plane/catalog | — | services/control-plane/src/ops/reads/fleet.ts:269 | Both immediate revoke callers pass catalog revision and cannot undo newer relist | ok |
-| REG-1091 | control-plane/ledger | — | services/control-plane/src/ops/handlers/ledger.ts:153 | DTO digest composes with paging and current ledger writes; unchanged reads still return304 | ok |
+| R4CP-LEDGER-PAGE-VALIDATOR | control-plane/ledger | P3 | services/control-plane/src/ops/handlers/ledger.ts:154 | Successful edit changes ledger page but leaves conditional validator unchanged | real-fixed #1091 |
+| REG-1065 | exit-agent | — | services/exit-agent/reconcile_and_report.py:1504 | Validation timeout maps to Refusal after durable accepted inventory; later revocation succeeds | ok |
+| REG-1080 | control-plane/catalog | — | services/control-plane/src/ops/reads/fleet.ts:270 | Both immediate revoke callers pass catalog revision and cannot undo newer relist | ok |
+| REG-1091 | control-plane/ledger | — | services/control-plane/src/ops/handlers/ledger.ts:154 | DTO digest composes with paging and current ledger writes; unchanged reads still return304 | ok |
+| REG-1096 | control-plane/ledger | — | services/control-plane/src/ops/ledger.ts:325 | Nested source polarity and cross-month zero-FX ancestry compose with #1091; final combined suite979 passed | ok |
+| REG-1083 | control-plane/catalog | — | services/control-plane/src/ops/reads/fleet.ts:166 | Bound catalog homes and legacy HY2 aliases refuse both direct and queued retirement before catalog/token mutation; #1080 revision fences remain intact | ok |
