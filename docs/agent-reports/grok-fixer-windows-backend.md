@@ -99,3 +99,48 @@ DIRECT 撤回失败仍把 `consecutive_unhealthy` 清零、非严格释放的 3 
 - 本机没有跑 Windows `cargo test`。#833 的全量 `npm test` 只在 CI 跑过一轮（修 last_seen 之前 949/950）；修完之后本地只跑了失败的那一例。
 - `needs-hardware` 标签没有加上。
 - 修复 PR 的自动合并当前都是 off，留给队列管理员。
+
+## Issue pass（2026-10-01 19:00 MDT）
+
+对照当时的 `origin/main` `b341164b`。开放 issue 38 条。筛选：`bug` 标签，或标题/正文里有 P0/P1/P2；范围是 Windows、control-plane、exit-agent、home-agent。macOS、文案/界面、#691、#694 不修。认领评论仍是 403，这条 pass 里 #905 和 #906 没有别人的 “Taking this”。自动合并各开一次；本报告不启用自动合并，也不直接合并。
+
+### 已开修复
+
+| Issue | Severity | 网络影响 | PR |
+|---|---|---|---|
+| [#905](https://github.com/raydocs/tono/issues/905) | P2 | 不改 WFP / DNS / 路由。写回界面前多一次本机 Service 状态读 | [#942](https://github.com/raydocs/tono/pull/942)，自动合并 2026-10-01T01:06:16Z 开过一次 |
+| [#906](https://github.com/raydocs/tono/issues/906) | P2 | 不改选择器和 WFP。只改延迟和出口 IP 记在哪个节点名上 | [#945](https://github.com/raydocs/tono/pull/945)，自动合并 2026-10-01T01:08:25Z 开过一次 |
+
+`cargo test` 未跑：App crate `edition = "2024"`，本机 rustc 1.83。
+
+### 已有开放 PR，未再开一条
+
+| Issue | 原因 |
+|---|---|
+| #850 P1 | [#902](https://github.com/raydocs/tono/pull/902) |
+| #846 P1 | [#866](https://github.com/raydocs/tono/pull/866)，以及 [#902](https://github.com/raydocs/tono/pull/902)、[#911](https://github.com/raydocs/tono/pull/911) 的正文引用 |
+| #851 P2 | [#911](https://github.com/raydocs/tono/pull/911) |
+| #662 | [#663](https://github.com/raydocs/tono/pull/663)。标题和正文没有 P0/P1/P2，也没有 `bug` 标签 |
+| #811 | [#852](https://github.com/raydocs/tono/pull/852)、[#904](https://github.com/raydocs/tono/pull/904)。main 上关闭和插入仍是两次写入，还没合进去。同样没有 P 标记 |
+
+### 留给你关的
+
+这一轮没有「修复已经在 main 上、issue 仍开着」的条目。#849 在 2026-10-01T00:45:12Z 已关闭。
+
+### 跳过（决策、实机，或产品选择）
+
+| Issue | 原因 |
+|---|---|
+| #815 `bug` | 正文写明未确认，要 Windows 应用程序控制拒绝替换，或一个会崩的构建，才能复现。失败修复会不会留下 WFP 也要实机看 |
+| #816 `bug` | 只影响 legacy v1 具名来源的重放。修法要按报告记账，正文认为要 schema。两次条件才发生 |
+| #789 P2 | Google 登录在配置里是关的。2026-09-30 决定先不修 |
+| #829 | 正文是决策项：重启后把 DNS 从 `198.18.0.2` 收回会拆掉 AI 底线。没有 `bug` 标签，正文也没有 P0/P1/P2 |
+| #907 | 标题就是 decision。已有 [#926](https://github.com/raydocs/tono/pull/926) |
+| #602 P1 | `needs-hardware`。剩下的是 DHCP WFP SID，要实机 |
+| #4 P1、#5 P2 | `blocked-external`。计量切换和 home-agent 计数器世代，不发明世代 |
+| #208 P1 | `blocked-external`。D1 备份缺 Cloudflare 凭据，不是代码修复 |
+| #188 #183 P2 | ops 界面 / 截图，不在这次范围 |
+| #317 #664 | `blocked-external` |
+
+macOS 开放项（#928 #901 #897 #896 #895 #894 #893 #864 #863 #861 #817 #331 #860）没有动。
+
