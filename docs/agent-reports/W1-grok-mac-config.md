@@ -6,7 +6,7 @@ Hunter: Grok 4.7。范围：macOS M9 配置与策略签名、M10 代理/更新/�
 
 | ID | 区域 | 严重级别 | 文件:行 | 一句话 | 结论 |
 |---|---|---|---|---|---|
-| MAC-ASSISTANT-DIRECT-GAP | M9 路由 | P1（中·推导） | `ConfigPipeline+SingBoxProduct.swift:157`、`ConfigPipeline+Runtime.swift:691`（基线 `50bbbbf0`） | 没有住宅跳时不发出助手域名/`160.79.104.0/21` 规则，已审核应用的进程直连先匹配，TCP 直出物理网卡；有住宅跳时这些规则只覆盖 TCP，同一进程的 UDP 仍直连 | 已在 [#867](https://github.com/raydocs/tono/pull/867) 修复。auto-merge 已开，合并方式 MERGE。`needs-hardware` 标签两次 `POST` 均 403（集成令牌不能改标签），未打上 |
+| MAC-ASSISTANT-DIRECT-GAP | M9 路由 | P1（中·推导） | `ConfigPipeline+SingBoxProduct.swift:157`、`ConfigPipeline+Runtime.swift:691`（基线 `50bbbbf0`） | 没有住宅跳时不发出助手域名/`160.79.104.0/21` 规则，已审核应用的进程直连先匹配，TCP 直出物理网卡；有住宅跳时这些规则只覆盖 TCP，同一进程的 UDP 仍直连 | 已在 [#867](https://github.com/raydocs/tono/pull/867) 修复。曾打开 auto-merge（MERGE）；随后看到已关闭，按排队规则不再重新打开。`needs-hardware` 标签两次 `POST` 均 403（集成令牌不能改标签），未打上 |
 | AI-DIRECT-SUFFIX（在途） | M9 策略 | 不新开等级 | `ConfigPipeline+Direct.swift` `directSuffixOverlapsProtected` | 受保护后缀列表没有 OpenAI 等助手域，签名策略仍可能写入这些后缀 | 重复 #797（`codex2/ai-direct-suffix-guard`，进行中）。本槽不改该校验。#867 让路由规则先于后缀直连，但 DNS 仍可能把被接受的后缀交给中国 DoH，那部分留给 #797 |
 
 没有已核实、又决定不修的缺陷，因此没有新开 GitHub issue。
@@ -15,8 +15,8 @@ Hunter: Grok 4.7。范围：macOS M9 配置与策略签名、M10 代理/更新/�
 
 | PR | 分支 | 头 SHA | auto-merge | 标签 |
 |---|---|---|---|---|
-| [#867](https://github.com/raydocs/tono/pull/867) | `hunt/grok-maccfg-assistant-direct-guard-89a9` | `e4b5ca6d` | 已开，`mergeMethod=MERGE` | `needs-hardware` 未打上（`gh api` 403 `Resource not accessible by integration`，重试一次仍 403） |
-| 本报告 | `hunt/grok-maccfg-report-89a9` | 见该 PR | 文档 PR，auto-merge + merge commit | 无。不是 UI，也不是路由改动 |
+| [#867](https://github.com/raydocs/tono/pull/867) | `hunt/grok-maccfg-assistant-direct-guard-89a9` | `e4b5ca6d` | 曾打开（MERGE），复查时已关，未再打开 | `needs-hardware` 未打上（`gh api` 403 `Resource not accessible by integration`，重试一次仍 403） |
+| [#875](https://github.com/raydocs/tono/pull/875) | `hunt/grok-maccfg-report-89a9` | #875 的 head | 未开。非草稿，留给合并队列 | 无。不是 UI，也不是路由改动 |
 
 ## 假阳性与已排除（34）
 
