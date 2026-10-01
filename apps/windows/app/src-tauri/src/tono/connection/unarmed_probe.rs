@@ -228,9 +228,25 @@ enum WaitOutcome {
     Retired,
 }
 
-/// One pending native read at most. An unresponsive IP Helper call cannot hold
-/// the async task, UI, release or explicit Connect behind it, or spawn a worker
-/// on every tick. Successful samples remain memory-only.
+#[cfg(any(windows, test))]
+static NATIVE_OBSERVATION_SLOT: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(1);
+
+#[cfg(any(windows, test))]
+fn start_native_observation(
+    observe: impl FnOnce() -> Result<PhysicalNetworkSnapshot, String> + Send + 'static,
+) -> Option<tokio::task::JoinHandle<Result<PhysicalNetworkSnapshot, String>>> {
+    // A dropped owner detaches a started blocking worker. Keep the permit in
+    // that worker, so replacement owners cannot accumulate hung native reads.
+    let permit = NATIVE_OBSERVATION_SLOT.try_acquire().ok()?;
+    Some(tokio::task::spawn_blocking(move || {
+        let _permit = permit;
+        observe()
+    }))
+}
+
+/// One pending native read per process at most, even across owner replacement.
+/// An unresponsive IP Helper call holds neither async workers nor lifecycle
+/// locks, and cannot spawn a worker on every tick. Samples remain memory-only.
 #[derive(Default)]
 struct NetworkWatch {
     snapshot: Option<PhysicalNetworkSnapshot>,
@@ -253,9 +269,9 @@ impl NetworkWatch {
         }
         #[cfg(windows)]
         if self.pending.is_none() {
-            self.pending = Some(tokio::task::spawn_blocking(
+            self.pending = start_native_observation(
                 super::platform::physical_network_snapshot_windows,
-            ));
+            );
         }
         changed
     }
@@ -327,6 +343,31 @@ pub(super) async fn tcp_proof_before_tunnel(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn replacing_an_observer_cannot_accumulate_hung_native_reads() {
+        let (entered, entry) = tokio::sync::oneshot::channel();
+        let (resume, resumed) = std::sync::mpsc::channel();
+        let worker = start_native_observation(move || {
+            entered.send(()).unwrap();
+            resumed.recv().unwrap();
+            Ok(vec![])
+        }).unwrap();
+        entry.await.unwrap();
+        drop(worker); // Dropping the retired owner cannot cancel a started native read.
+        assert!(start_native_observation(|| Ok(vec![])).is_none(),
+            "the old native read must exclude every replacement owner");
+        resume.send(()).unwrap();
+        let replacement = tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if let Some(worker) = start_native_observation(|| Ok(vec![])) {
+                    break worker;
+                }
+                tokio::task::yield_now().await;
+            }
+        }).await.unwrap();
+        assert!(replacement.await.unwrap().unwrap().is_empty());
+    }
 
     #[tokio::test]
     async fn protected_reconnect_does_not_open_an_app_tcp_probe() {
