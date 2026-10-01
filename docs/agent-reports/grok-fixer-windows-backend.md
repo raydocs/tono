@@ -35,7 +35,7 @@ Auto-merge (`gh pr merge N --auto --merge`) was enabled once on each fix PR belo
 | ID | Area | Severity | Why |
 |---|---|---|---|
 | #829 | Windows 重启后 DNS 停在 `198.18.0.2` | P0 描述，issue 自标决策 | Issue 写明不是补丁请求。放行会拆掉 AI 服务拦截。未改启动恢复 |
-| #846 的后半 | Core 已停且记账失败 | 产品选择 | 公网 DNS 可能仍被 WFP 拦住。拆屏障会同时丢掉 AI 拦截。#866 保持屏障 |
+| #846 的后半 | Core 已停且记账失败 | 产品选择里的「拆屏障」仍不做 | 拆屏障会同时丢掉 AI 拦截。DNS 黑洞由 [#930](https://github.com/raydocs/tono/pull/930) 补上：恢复 DNS，保持会话时留下当时的 WFP。#866 仍只覆盖停 Core 未确认的那一半 |
 | #816 | control-plane v1 计量重放 | 中，两次条件（重置并且重放旧报告） | 需要按报告记账，issue 认为要 schema。未改 |
 | #815 | Windows 修复覆盖前任二进制 | 未确认 | 需要应用控制拒绝替换才能复现。未改 |
 | #847 | 挂起的更新后继被当成成功 | P1 | 判断线程从未 resume 是 Win32 查询，本环境没有。未改 |
@@ -72,10 +72,29 @@ Auto-merge (`gh pr merge N --auto --merge`) was enabled once on each fix PR belo
 8. 支持页警告列表没有 `TONO_DNS_SNAPSHOT_RETAINED`：改 UI 会挡自动合并。#827 故意不改 `support.tsx`。
 9. #829 重启黑洞：机制属实，修法会拆 AI 拦截，按 issue 不改。
 
+## Hunt follow-up
+
+同一天两路追查之后又开了两个修复。文档 PR 仍然不启用自动合并。
+
+| ID | Area | Severity | File:line | One line | Verdict |
+|---|---|---|---|---|---|
+| WIN-STOPCLASH-UNRECORDED | Windows StopClash | P0 | `server/handlers.rs` `StopClash`；`server/mod.rs` `recover_after_unrecorded_stop` | Core 已确认停止、desired state 写失败时，在恢复 DNS 之前返回 | 已修 [#930](https://github.com/raydocs/tono/pull/930)。保持会话时拉不起 Core 就恢复 DNS 并留下当时的 WFP；显式释放走原来的停止过渡 |
+| EXIT-LEDGER-MISSING | exit-agent 计量 | P0 | `services/exit-agent/reconcile_and_report.py` `load_state` | 状态文件缺失时把仍在走的原始计数当成新的终身用量 | 已修 [#914](https://github.com/raydocs/tono/pull/914)。本节点水位更高时改记水位，基线留在原始读数 |
+
+| PR | Theme | Auto-merge at this note | `needs-hardware` |
+|---|---|---|---|
+| [#930](https://github.com/raydocs/tono/pull/930) | 未记账的停止恢复 DNS，保持会话不拆屏障 | 开过一次（2026-10-01T00:58:18Z）。之后若被关掉，不再重开 | 403，未加上 |
+| [#914](https://github.com/raydocs/tono/pull/914) | 缺失账本采用本节点水位，不再重复入账 | 开过一次（2026-10-01T00:49:50Z）。之后若被关掉，不再重开 | 不需要 |
+
+`cargo test` 对 #930 未在本机跑：rustc 1.83 编不过 `edition = "2024"`。#914 的 `python3 -m unittest test_reconcile_and_report` 108 通过，对应 vitest 与 `index.ts` 行数棘轮通过。
+
+DIRECT 撤回失败仍把 `consecutive_unhealthy` 清零、非严格释放的 3 次计数因此走不完。这是两次条件（P2 上限），而且改的是 #777 正在改的看门狗循环。留给 [#777](https://github.com/raydocs/tono/pull/777)，这次没有改 `windows_kill_switch.rs`。
+
+#829 和 #846 里「Core 已停、若拆掉 WFP 就会丢掉 AI 底线」的那一半仍不修。#930 只补 DNS，保持会话时不拆屏障。
+
 ## Not finished
 
 - 上面跳过表里的 Windows 服务项（#847 #850 #851 #815）和 #816 的 schema。
-- #866 没有覆盖「Core 已停、记账失败」的黑洞。
 - #849 没有改「CIM 对象取不到」那条仍会 return 的分支。
 - 本机没有跑 Windows `cargo test`。#833 的全量 `npm test` 只在 CI 跑过一轮（修 last_seen 之前 949/950）；修完之后本地只跑了失败的那一例。
 - `needs-hardware` 标签没有加上。
