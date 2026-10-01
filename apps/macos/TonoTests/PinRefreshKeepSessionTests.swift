@@ -32,6 +32,13 @@ final class PinRefreshKeepSessionTests: XCTestCase {
         let savedArmed = KillSwitchService.isArmed
         let savedUpdateBlock = RuntimeCleanup.nativeUpdateBlocksConnect
         let savedUpdatePending = RuntimeCleanup.nativeUpdatePending
+        let savedSessionDefaults = [
+            SettingsKey.didStartCore, SettingsKey.lastTunEnabled, SettingsKey.connectBootSession,
+        ].map { ($0, AppProfile.defaults.object(forKey: $0)) }
+        let savedBootFiles = [
+            RuntimeCleanup.connectBootSessionFile,
+            RuntimeCleanup.connectBootSessionFile.appendingPathExtension("pending"),
+        ].map { ($0, try? Data(contentsOf: $0)) }
         RuntimeCleanup.nativeUpdateBlocksConnect = false
         RuntimeCleanup.nativeUpdatePending = false
         KillSwitchService.isArmed = true
@@ -43,6 +50,13 @@ final class PinRefreshKeepSessionTests: XCTestCase {
             KillSwitchService.isArmed = savedArmed
             RuntimeCleanup.nativeUpdateBlocksConnect = savedUpdateBlock
             RuntimeCleanup.nativeUpdatePending = savedUpdatePending
+            for (key, value) in savedSessionDefaults {
+                AppProfile.defaults.set(value, forKey: key)
+            }
+            for (file, bytes) in savedBootFiles {
+                if let bytes { try? bytes.write(to: file) }
+                else { try? FileManager.default.removeItem(at: file) }
+            }
             if let savedConfig { try? savedConfig.write(to: configFile) }
             else { try? FileManager.default.removeItem(at: configFile) }
         }
@@ -101,6 +115,121 @@ final class PinRefreshKeepSessionTests: XCTestCase {
         XCTAssertNil(app.connectionCoordinator.configReloadTask)
         XCTAssertNil(app.connectionCoordinator.protectedReconnectTask)
         XCTAssertNotNil(app.connectionCoordinator.unarmedReconnectTask)
+    }
+
+    func testRetiredPinsFailureLeavesNativeUpdateAsTheCleanupOwner() async throws {
+        let app = AppState()
+        let node = Fixture.realityNode(name: "Los Angeles · Canyon")
+        app.proxyRegions = [ProxyRegion(id: "custom", name: "Custom", nodes: [node])]
+        app.selectedNodeId = node.id
+        app.activeNode = node
+        app.proxyService.activeNodeName = node.name
+        app.tonoTransport = TonoTransportDescriptor(port: 1080)
+        app.coreController = CoreControllerClient(port: 9)
+        app.config.tunEnabled = true
+        app.isConnected = true
+        let pending = ConfigPipeline.ManagedDirectRuntimePolicy(
+            physicalInterface: "en1", domainPins: [], mediaEndpoints: []
+        )
+        let configFile = app.coreRuntime.configFilePath
+        let savedConfig = try? Data(contentsOf: configFile)
+        let savedIPC = KillSwitchService.armIPC
+        let savedArmed = KillSwitchService.isArmed
+        let savedUpdateBlock = RuntimeCleanup.nativeUpdateBlocksConnect
+        let savedUpdatePending = RuntimeCleanup.nativeUpdatePending
+        RuntimeCleanup.nativeUpdateBlocksConnect = false
+        RuntimeCleanup.nativeUpdatePending = false
+        KillSwitchService.isArmed = true
+        KillSwitchService.armIPC.prepare = { _ in }
+        KillSwitchService.armIPC.deliver = { _ in (true, true, true, false, false, 0) }
+        defer {
+            app.connectionCoordinator.cancelReconnectTasks()
+            KillSwitchService.armIPC = savedIPC
+            KillSwitchService.isArmed = savedArmed
+            RuntimeCleanup.nativeUpdateBlocksConnect = savedUpdateBlock
+            RuntimeCleanup.nativeUpdatePending = savedUpdatePending
+            if let savedConfig { try? savedConfig.write(to: configFile) }
+            else { try? FileManager.default.removeItem(at: configFile) }
+        }
+
+        var stops = 0
+        var dnsRestores = 0
+        var releases = 0
+        var runtime = NetworkProtectionOperations()
+        runtime.repairForRelease = {}
+        runtime.stopCore = { _ in stops += 1; return true }
+        runtime.coreStatus = { (false, true) }
+        runtime.restoreDNS = { dnsRestores += 1; return true }
+        runtime.disableSystemProxy = {}
+        runtime.disarm = { releases += 1 }
+        runtime.releaseAfterFailure = { releases += 1 }
+        runtime.restrictToBootstrap = { releases += 1 }
+        runtime.refreshKillSwitchStatus = { .confirmed(requiresProtectionRecovery: true) }
+        app.networkProtection = runtime
+        app.nativeUpdateDisconnect = {
+            releases += 1
+            throw HelperIPCError.connectFailed
+        }
+        app.nativeUpdateReleaseAfterFailure = {
+            releases += 1
+            throw HelperIPCError.connectFailed
+        }
+        app.protectionAudits.killSwitchHealth = { nil }
+        app.unarmedTcpProof = { _ in false }
+        app.recordConnectBootSession = { throw POSIXError(.ENOSPC) }
+
+        let waitingForTunnel = expectation(description: "committed pins await the replacement tunnel")
+        var tunnelReply: CheckedContinuation<Bool, Never>?
+        var abandonedWait = false
+        var operations = AppState.ConfigReloadOperations()
+        operations.sync = { _, _ in "/var/run/tono-core/runtime/config.json" }
+        operations.waitForTunnel = {
+            if abandonedWait { return false }
+            return await withCheckedContinuation { reply in
+                tunnelReply = reply
+                waitingForTunnel.fulfill()
+            }
+        }
+        app.reloadCoreConfig(applyingDirectPolicy: pending, operations: operations)
+        let mutation = app.connectionCoordinator.configReloadTask
+        let requestID = app.connectionCoordinator.configReloadRequestID
+        await fulfillment(of: [waitingForTunnel], timeout: 5)
+        guard let reply = tunnelReply else {
+            abandonedWait = true
+            app.nativeUpdatePending = true
+            await app.suspendForNativeUpdate()
+            return
+        }
+        app.nativeUpdatePending = true
+        let retirement = Task { await app.suspendForNativeUpdate() }
+        let retired = expectation(description: "native update retires the old reload")
+        let observation = Task {
+            while app.connectionCoordinator.configReloadRequestID == requestID {
+                try? await Task.sleep(for: .milliseconds(1))
+                if Task.isCancelled { return }
+            }
+            retired.fulfill()
+        }
+        await fulfillment(of: [retired], timeout: 5)
+        observation.cancel()
+        await observation.value
+        reply.resume(returning: false)
+        await mutation?.value
+        await retirement.value
+        let unexpectedRelease = app.nativeUpdateDisconnectTask
+        await unexpectedRelease?.value
+
+        XCTAssertEqual(app.activeDirectPolicy, pending, "the helper committed before retirement")
+        XCTAssertEqual(stops, 0)
+        XCTAssertEqual(dnsRestores, 0)
+        XCTAssertEqual(releases, 0)
+        XCTAssertNil(unexpectedRelease, "retired work must not launch a second update release")
+        XCTAssertNil(app.connectionCoordinator.disconnectSequence)
+        XCTAssertNil(app.connectionCoordinator.protectedReconnectTask)
+        XCTAssertNil(app.connectionCoordinator.unarmedReconnectTask)
+        XCTAssertNil(app.connectionCoordinator.configReloadTask)
+        XCTAssertTrue(app.nativeUpdatePending)
+        XCTAssertNil(app.errorMessage)
     }
 
     func testFullReloadFailureRestoresInternetWithAIHoldBeforeRetry() async throws {
