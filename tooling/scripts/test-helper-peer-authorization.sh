@@ -3,10 +3,13 @@ set -eu
 
 # The helper accepts a peer only when Security.framework reports
 # `anchor apple generic`, identifier com.raydocs.tono, team OU YY57758GS7,
-# and no get-task-allow entitlement. A certificate made in a temporary
-# keychain is not an Apple anchor, so it cannot stand in for the allow case.
-# Hosted macOS CI therefore runs the reject cases and says so. A release
-# refuses to continue without the real Apple Development identity.
+# and no get-task-allow entitlement. That requirement does not name an
+# Apple Development leaf. Developer ID certificates carry the same team OU,
+# so the identity the release imports can satisfy the allow case. A
+# certificate made in a temporary keychain is not an Apple anchor, so hosted
+# macOS CI runs the reject cases and says the allow case did not run.
+# A release refuses to continue only when the imported Developer ID identity
+# is missing.
 
 repo_dir=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 temporary_dir=$(mktemp -d "/tmp/tono-peer-auth.XXXXXX")
@@ -18,6 +21,7 @@ esac
 keychain_path=
 saved_keychains=
 trusted_cert=
+release_keychain=
 plan_only=0
 if [ "${1:-}" = "--plan" ]; then
   plan_only=1
@@ -69,6 +73,41 @@ find_apple_development_identity() {
     awk '/Apple Development: Ruirui Wan/ { print $2; exit }'
 }
 
+# Sets $identity to the codesign hash of the imported Developer ID identity,
+# or exits 1 when that identity was not imported. --plan keeps the name and
+# does not touch the keychain.
+resolve_release_identity() {
+  label=
+  if [ -n "${TONO_PEER_AUTH_IDENTITY:-}" ]; then
+    label=$TONO_PEER_AUTH_IDENTITY
+  elif [ -n "${MACOS_DEVELOPER_ID_APPLICATION_IDENTITY:-}" ]; then
+    label=$MACOS_DEVELOPER_ID_APPLICATION_IDENTITY
+  fi
+  if [ -z "$label" ]; then
+    echo "helper peer authorization: release requires the imported Developer ID identity; refusing to skip" >&2
+    exit 1
+  fi
+  if [ "$plan_only" -eq 1 ]; then
+    identity=$label
+    return
+  fi
+  # The release job puts the Developer ID private key only in KEYCHAIN_PATH.
+  # Search that keychain, not the login keychain. Do not assign it to
+  # keychain_path: cleanup deletes keychain_path, and this one must survive
+  # for the notarized archive.
+  if [ -n "$release_keychain" ]; then
+    identity=$(security find-identity -v -p codesigning "$release_keychain" 2>/dev/null |
+      awk -v name="$label" 'index($0, "\"" name "\"") { print $2; exit }')
+  else
+    identity=$(security find-identity -v -p codesigning 2>/dev/null |
+      awk -v name="$label" 'index($0, "\"" name "\"") { print $2; exit }')
+  fi
+  if [ -z "$identity" ]; then
+    echo "helper peer authorization: Developer ID identity is not in the keychain; refusing to skip" >&2
+    exit 1
+  fi
+}
+
 note_allow_skipped() {
   echo "::warning title=Helper peer authorization::Apple Development identity is absent. anchor apple generic cannot be satisfied by a self-signed certificate, so the allow case did not run. Reject cases still run." >&2
   if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
@@ -90,7 +129,12 @@ case $mode in
     exit 2
     ;;
 esac
-identity=$(find_apple_development_identity)
+if [ "$mode" = "release" ]; then
+  release_keychain=${KEYCHAIN_PATH:-}
+  resolve_release_identity
+else
+  identity=$(find_apple_development_identity)
+fi
 
 if [ "$plan_only" -eq 1 ]; then
   if [ -n "$identity" ]; then
@@ -99,7 +143,7 @@ if [ "$plan_only" -eq 1 ]; then
   fi
   case $mode in
     release)
-      echo "helper peer authorization: release requires the Tono Apple Development identity; refusing to skip" >&2
+      echo "helper peer authorization: release requires the imported Developer ID identity; refusing to skip" >&2
       exit 1
       ;;
     ci)
@@ -115,7 +159,7 @@ if [ "$plan_only" -eq 1 ]; then
 fi
 
 if [ -z "$identity" ] && [ "$mode" = "release" ]; then
-  echo "helper peer authorization: release requires the Tono Apple Development identity; refusing to skip" >&2
+  echo "helper peer authorization: release requires the imported Developer ID identity; refusing to skip" >&2
   exit 1
 fi
 if [ -z "$identity" ] && [ "$mode" = "local" ]; then
@@ -138,14 +182,22 @@ xcrun swiftc \
   -o "$client"
 
 sign_client() {
-  if [ -n "$entitlements" ] && [ -n "$keychain_path" ] && [ "$signing_identity" != "-" ]; then
-    codesign --force --sign "$signing_identity" --keychain "$keychain_path" \
+  chosen_keychain=
+  if [ "$signing_identity" != "-" ]; then
+    if [ -n "$keychain_path" ]; then
+      chosen_keychain=$keychain_path
+    elif [ -n "$release_keychain" ]; then
+      chosen_keychain=$release_keychain
+    fi
+  fi
+  if [ -n "$entitlements" ] && [ -n "$chosen_keychain" ]; then
+    codesign --force --sign "$signing_identity" --keychain "$chosen_keychain" \
       --identifier "$identifier" --entitlements "$entitlements" "$client" || return 2
   elif [ -n "$entitlements" ]; then
     codesign --force --sign "$signing_identity" \
       --identifier "$identifier" --entitlements "$entitlements" "$client" || return 2
-  elif [ -n "$keychain_path" ] && [ "$signing_identity" != "-" ]; then
-    codesign --force --sign "$signing_identity" --keychain "$keychain_path" \
+  elif [ -n "$chosen_keychain" ]; then
+    codesign --force --sign "$signing_identity" --keychain "$chosen_keychain" \
       --identifier "$identifier" "$client" || return 2
   else
     codesign --force --sign "$signing_identity" --identifier "$identifier" "$client" || return 2

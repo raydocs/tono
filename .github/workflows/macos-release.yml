@@ -264,14 +264,6 @@ jobs:
       - name: Subscription URL policy
         run: tooling/scripts/test-subscription-url-policy.sh
 
-      - name: Helper peer authorization
-        # A release must not ship while this matrix was skipped. Hosted runners
-        # do not have the Apple Development identity; this step fails until it
-        # is present. macos-ci keeps going and records the skip.
-        env:
-          TONO_PEER_AUTH_MODE: release
-        run: tooling/scripts/test-helper-peer-authorization.sh
-
       - name: Multi-exit policy
         run: tooling/scripts/test-multi-exit-policy.sh "$GITHUB_WORKSPACE/tooling/scripts/tests/fixtures/multi-vless-reality.yaml"
 
@@ -336,6 +328,16 @@ jobs:
             --key-id "$APPLE_NOTARY_KEY_ID" \
             --issuer "$APPLE_NOTARY_ISSUER_ID" \
             --keychain "$KEYCHAIN_PATH" > /dev/null
+
+      - name: Helper peer authorization
+        # After the Developer ID import. The helper accepts that identity:
+        # anchor apple generic, identifier com.raydocs.tono, team OU, and no
+        # get-task-allow. The step fails only when this identity is not in
+        # the keychain. macos-ci does not import it and keeps the loud skip.
+        env:
+          TONO_PEER_AUTH_MODE: release
+          TONO_PEER_AUTH_IDENTITY: ${{ secrets.MACOS_DEVELOPER_ID_APPLICATION_IDENTITY }}
+        run: tooling/scripts/test-helper-peer-authorization.sh
 
       - name: Build, sign and notarize the release archive
         env:
