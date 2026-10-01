@@ -154,7 +154,7 @@ extension AppState {
                 nodes: nodes
             )]
         proxyRegions = managedRegions + customRegions
-        if isConnected, switchTargetChanged, let previousSelection,
+        if allowRuntimeTransition, isConnected, switchTargetChanged, let previousSelection,
            previousSelection != ConfigPipeline.homeNodeName,
            localProxyNode(matching: previousSelection) == nil {
             // A replacement switch can itself lose its target to a newer
