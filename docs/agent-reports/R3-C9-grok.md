@@ -39,4 +39,4 @@ Sol 的 W1-sol-cp 没有报告可对。`docs/agent-reports/W1_CODEX_STATUS.md` �
 
 ## 合并
 
-[#959](https://github.com/raydocs/tono/pull/959) 等 `ci-gate` 绿了再开一次 auto-merge（merge commit）。若队列管理把它关掉，不再打开。本报告 PR 不开 auto-merge。
+[#959](https://github.com/raydocs/tono/pull/959) 等 `ci-gate` 绿了再开一次 auto-merge（merge commit）。若队列管理把它关掉，不再打开。本报告 [#960](https://github.com/raydocs/tono/pull/960) 不开 auto-merge。
