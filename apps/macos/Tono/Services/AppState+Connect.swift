@@ -1089,7 +1089,8 @@ extension AppState {
 
     func disconnectAndWait(releaseKillSwitch: Bool = false) async {
         disconnect(releaseKillSwitch: releaseKillSwitch)
-        if releaseKillSwitch { await nativeUpdateDisconnectTask?.value }
+        // A joined Restore may follow the automatic release as a second task.
+        while releaseKillSwitch, let task = nativeUpdateDisconnectTask { await task.value }
         let pending = self.connectionCoordinator.disconnectSequence
         _ = await pending?.value
     }

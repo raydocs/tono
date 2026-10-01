@@ -79,21 +79,36 @@ extension AppState {
     }
 
     func disconnectPendingNativeUpdate(preserveAIHold: Bool = false) {
+        // An explicit Restore that joins a running automatic release keeps its
+        // remove-AI intent; the running task issues it once it settles.
+        if !preserveAIHold { nativeUpdateExplicitReleaseRequested = true }
         guard nativeUpdateDisconnectTask == nil else { return }
         nativeUpdatePending = true
         RuntimeCleanup.nativeUpdateBlocksConnect = true
         nativeUpdateDisconnectTask = Task {
-            defer { nativeUpdateDisconnectTask = nil }
+            var dispatchedAutomatic = false
+            var settled = false
+            defer {
+                let explicitJoined = dispatchedAutomatic && settled && nativeUpdateExplicitReleaseRequested
+                nativeUpdateExplicitReleaseRequested = false
+                nativeUpdateDisconnectTask = nil
+                // Routed again: still pending runs the plain update Disconnect,
+                // a committed update runs the ordinary explicit release.
+                if explicitJoined { disconnect(releaseKillSwitch: true) }
+            }
             await suspendForNativeUpdate()
             let generation = connectionCoordinator.protectionOperationGeneration
             guard !Task.isCancelled else { return }
             isProtectionBlocked = false
             isProtectionUnconfirmed = true
+            let preserving = !nativeUpdateExplicitReleaseRequested
+            if preserving { dispatchedAutomatic = true } else { nativeUpdateExplicitReleaseRequested = false }
             do {
-                let result = try await (preserveAIHold
+                let result = try await (preserving
                     ? nativeUpdateReleaseAfterFailure() : nativeUpdateDisconnect())
                 guard !Task.isCancelled,
                       connectionCoordinator.protectionOperationGeneration == generation else { return }
+                settled = true
                 guard result.disconnectVerified == true else { throw NativeUpdateDownload.failure("Update Disconnect was not verified.") }
                 launchProtectionSequence &+= 1
                 isProtectionBlocked = false
@@ -103,6 +118,26 @@ extension AppState {
             } catch {
                 guard !Task.isCancelled,
                       connectionCoordinator.protectionOperationGeneration == generation else { return }
+                settled = true
+                // A successor's Commit can finish while its connect drains;
+                // the helper then refuses this pending-only operation. Only an
+                // authenticated status proving nothing is pending retires the
+                // local gates and hands release to ordinary teardown with the
+                // same disposition. An unreadable status changes nothing.
+                if let status = try? await nativeUpdateStatus(), !status.pending {
+                    guard !Task.isCancelled,
+                          connectionCoordinator.protectionOperationGeneration == generation else {
+                        settled = false
+                        return
+                    }
+                    nativeUpdatePending = false
+                    RuntimeCleanup.nativeUpdatePending = false
+                    RuntimeCleanup.nativeUpdateBlocksConnect = false
+                    let automatic = preserving && !nativeUpdateExplicitReleaseRequested
+                    if !automatic { dispatchedAutomatic = false }
+                    disconnect(releaseKillSwitch: true, automaticFailureRelease: automatic)
+                    return
+                }
                 // The helper may have released PF before the reply or ledger
                 // write failed. Until a live readback arrives, neither the old
                 // cached intent nor this error proves protection is held.
