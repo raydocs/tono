@@ -377,6 +377,14 @@ final class MacUsabilityTests: XCTestCase {
         app.updateConnections(from: .init(downloadTotal: 0, uploadTotal: 0, connections: [unknown]))
         XCTAssertEqual(app.connections.first?.routingExplanation?.path, .unknown)
     }
+
+    func testEmptyCatalogNameDoesNotTrapRegionLookup() {
+        XCTAssertNil(catalogNodeRegionCode(flag: "", name: ""))
+        XCTAssertNil(catalogNodeRegionCode(flag: "", name: "·"))
+        XCTAssertNil(catalogNodeRegionCode(flag: "", name: " · hy2"))
+        XCTAssertEqual(nodeRegionCode(flag: "", name: ""), "GL")
+        XCTAssertEqual(catalogNodeRegionCode(flag: "", name: "Los Angeles · Sunset"), "US")
+    }
 }
 
 @MainActor
