@@ -1,29 +1,30 @@
 # R3-E2T2: Codex (GPT-6.1 Sol) findings
 
-Generated 2026-09-30 21:19 MT from the run's findings.tsv / prs.tsv.
+Generated 2026-09-30 21:46 MT from the run's findings.tsv / prs.tsv.
 
 ## PRs
 
 | PR | Branch | Labels | Auto-merge requested | Title |
 |---|---|---|---|---|
 | 995 | hunt/sol-r3ops-hy2-catalog-spki | needs-hardware | yes | fix(provision): retain HY2 SPKI pins in catalog sources |
-| 996 | hunt/sol-r3ops-journal-verification | none | yes | fix(provision): verify journal records without banner failures |
-| 997 | hunt/sol-r3ops-rollback-file-mode | none | yes | fix(provision): restore live artifact permissions on rollback |
+| 996 | hunt/sol-r3ops-journal-verification | needs-hardware | yes | fix(provision): verify journal records without banner failures |
+| 997 | hunt/sol-r3ops-rollback-file-mode | needs-hardware | yes | fix(provision): restore live artifact permissions on rollback |
 | 998 | hunt/sol-r3ops-bench-cache-publication | none | yes | fix(connect-bench): recover executable caches after interrupted extraction |
 | 1000 | hunt/sol-r3ops-bench-startup-cleanup | none | yes | fix(connect-bench): stop core children after failed startup |
 | 1002 | hunt/sol-r3ops-provision-pending-recovery | none | yes | fix(provision): persist recovered pending transaction completion |
 | 1011 | hunt/sol-r3ops-audit-report | none | yes | docs(audit): record E2/T2 findings and peer history limit |
+| 1018 | hunt/sol-r3ops-audit-receipts | none | yes | docs(audit): record hosted E2/T2 receipts and merged fixes |
 
 ## Hypotheses
 
 | ID | Area | Sev | Location | Description | Verdict |
 |---|---|---|---|---|---|
-| HY2-PROVISION-SPKI | E2 | P1 | tooling/scripts/provision-reality-node.rb:445 | Provisioned HY2 source discards SPKI required by macOS | real-fixed #995; Services CI passed, needs-hardware, macOS CI pending |
-| PROVISION-JOURNAL-BANNER | E2 | P2 | tooling/scripts/remote/manage-tono-node-v2.sh:328 | No-entry journal banner rejects healthy restart; unreadable journal is accepted | real-fixed #996; 3 regressions passed, CI pending |
-| PROVISION-ROLLBACK-MODE | E2 | P2 | tooling/scripts/remote/manage-tono-node-v2.sh:151 | Immutable snapshot permissions make writable-config rollback verification fail | real-fixed #997; 2 regressions passed, CI pending |
-| CONNECT-BENCH-PARTIAL-CACHE | T2 | P2 | tooling/perf/connect-bench/bench.py:127 | Interrupted extraction poisons executable cache reused on retry | real-fixed #998; merged 7e5c333a, CI passed |
-| CONNECT-BENCH-STARTUP-ORPHAN | T2 | P2 | tooling/perf/connect-bench/bench.py:571 | Failed startup leaves benchmark child running and log open | real-fixed #1000; merged, 7 combined regressions passed |
-| PROVISION-PENDING-SUCCESS-DURABILITY | E2 | P2 | tooling/scripts/provision-tono-node.py:182 | Recovered remote success remains pending on disk and blocks enrollment | real-fixed #1002; Flow 8 passed, Services CI passed, macOS CI pending |
+| HY2-PROVISION-SPKI | E2 | P1 | tooling/scripts/provision-reality-node.rb:445 | Provisioned HY2 source discards SPKI required by macOS | real-fixed #995; merged 140b5d9f, ci-gate passed |
+| PROVISION-JOURNAL-BANNER | E2 | P2 | tooling/scripts/remote/manage-tono-node-v2.sh:328 | No-entry journal banner rejects healthy restart; unreadable journal is accepted | real-fixed #996; Services CI passed, awaiting macos / build, macos / policy-tests, macos / privileged-tests |
+| PROVISION-ROLLBACK-MODE | E2 | P2 | tooling/scripts/remote/manage-tono-node-v2.sh:151 | Immutable snapshot permissions make writable-config rollback verification fail | real-fixed #997; Services CI passed, awaiting macos / build |
+| CONNECT-BENCH-PARTIAL-CACHE | T2 | P2 | tooling/perf/connect-bench/bench.py:127 | Interrupted extraction poisons executable cache reused on retry | real-fixed #998; merged 7e5c333a, ci-gate passed |
+| CONNECT-BENCH-STARTUP-ORPHAN | T2 | P2 | tooling/perf/connect-bench/bench.py:571 | Failed startup leaves benchmark child running and log open | real-fixed #1000; merged 08aac566, ci-gate passed |
+| PROVISION-PENDING-SUCCESS-DURABILITY | E2 | P2 | tooling/scripts/provision-tono-node.py:182 | Recovered remote success remains pending on disk and blocks enrollment | real-fixed #1002; Services CI passed, awaiting macos / build, macos / policy-tests, macos / privileged-tests |
 | HOME-AGENT-PEER-RETENTION-CAP | E2 | P2 | services/home-agent/report_example.py:148 | Lifetime peer baselines exceed 2000 cap and stop all fresh reports | real-unfixed; safe retention needs counter-continuity design, reporter undeployed |
 | HA-SERVER-AHEAD | E2 | — | services/home-agent/report_example.py:478 | Server watermark ahead discards ambiguous raw history | false-positive; deliberate recovery prevents double billing |
 | HA-POST-CRASH | E2 | — | services/home-agent/report_example.py:652 | Crash after POST could duplicate charges | false-positive; immutable batch replay and server watermarks deduplicate |
@@ -31,7 +32,7 @@ Generated 2026-09-30 21:19 MT from the run's findings.tsv / prs.tsv.
 | HA-OVERLAP | E2 | — | services/home-agent/report_example.py:278 | Overlapping timers can mutate accounting concurrently | false-positive; nonblocking flock covers the whole invocation |
 | HA-CROSS-USER | E2 | — | services/home-agent/report_example.py:493 | Stable node identity could charge a different account | false-positive; explicit persisted-user identity guard and existing regression |
 | HA-REPLAY-ACK | E2 | — | services/home-agent/report_example.py:657 | Pending replay omits a metering ACK | false-positive; replay is not a new observation and must not acknowledge one |
-| HA-RETRY-WEDGE | E2 | — | services/home-agent/report_example.py:621 | Retrying a rejected report blocks all later accounts | false-positive; current main bounds I/O and isolates permanent refusals |
+| HA-UNBOUNDED-DELIVERY | E2 | — | services/home-agent/report_example.py:621 | Bad networks keep the delivery loop retrying indefinitely | false-positive; 20s request timeout, network errors propagate, permanent-refusal batches shrink and isolate |
 | HA-GENERATION | E2 | — | services/home-agent/report_example.py:497 | Counter reset above the prior watermark can lose usage | duplicate; open issue #5 counter-generation design |
 | HA-REPORT-400 | E2 | — | services/home-agent/report_example.py:604 | A permanently refused report wedges the queue | duplicate; #899 refusal isolation is already on main |
 | T2-PIN-DRIFT | T2 | — | tooling/scripts/prepare-macos-sing-box.sh:42 | Prepared binary may not match the committed product pin | false-positive; manifest, binary, source and toolchain pins agree |

@@ -1,6 +1,6 @@
 # R3-W3W9gap: Codex (GPT-6.1 Sol) findings
 
-Generated 2026-09-30 21:19 MT from the run's findings.tsv / prs.tsv.
+Generated 2026-09-30 21:46 MT from the run's findings.tsv / prs.tsv.
 
 ## PRs
 
@@ -10,6 +10,7 @@ Generated 2026-09-30 21:19 MT from the run's findings.tsv / prs.tsv.
 | 999 | hunt/sol-r3proc-watchdog-dead-pid | needs-hardware | yes | fix(windows): retire confirmed dead Core PID before cleanup |
 | 1004 | hunt/sol-r3proc-service-pid-image | needs-hardware | yes | fix(windows): verify Service image before PID escalation |
 | 1012 | hunt/sol-r3proc-watchdog-identity | needs-hardware | yes | fix(windows): bind watchdog timeout cleanup to Core identity |
+| 1022 | hunt/sol-r3proc-owner-takeover | needs-hardware | yes | fix(windows): verify owner takeover before killing or cleanup |
 
 ## Hypotheses
 
@@ -38,9 +39,9 @@ Generated 2026-09-30 21:19 MT from the run's findings.tsv / prs.tsv.
 | R3PROC-FP-UNINSTALL-UPDATE | W9 | — | uninstall_service.rs:792 | Final cleanup deletes live update executors | false-positive maintenance gate plus locked pending-store refusal |
 | R3PROC-FP-UNINSTALL-PROXY | W9 | — | app/installer.nsi:1574 | Uninstall GUI kill leaves newly applied system proxy | false-positive Windows product never enables proxy |
 | WIN-CORE-REAPER-PID-REUSE | W3 | P2 | process.rs:637 -> process.rs:565 | Orphan sweep discards creation identity and can kill reused PID | real-fixed #994; merged; exact-head ci-gate and native Windows service passed |
-| WIN-WATCHDOG-TIMEOUT-PID-REUSE | W3 | P2 | manager.rs:1101 | Timeout drops Core Job before naked PID termination | real-fixed #999; merged; baseline failed then 5 manager tests passed; exact-head ci-gate passed |
-| WIN-SCM-PID-FALLBACK | W9 | P2 | bin/shared/mod.rs:160 | Stale PID-file escalation can target another process | real-fixed #1004; 39 Linux existing bin tests passed; Windows test cross-check passed; native CI pending |
-| WIN-CORE-JOB-SPAWN-WINDOW | W3 | P2 | manager.rs:1174 -> manager.rs:1209 | Service crash before Job assignment leaves running Core | real-unfixed millisecond window; restart sweep mitigates; lower priority |
-| WIN-WATCHDOG-ABORT-PID-REUSE | W3 | P2 | manager.rs:1099 -> manager.rs:1106 | Abort closes live Core Job before raw PID fallback can reopen | real-fixed #1012; actual timeout baseline failed then 6 manager tests passed; native CI pending |
-| WIN-OWNER-TAKEOVER-STALE-PID | W3 caller | P2 | owner.rs:57 -> owner.rs:78 | Owner exits during health wait but raw old PID still killed | real-unfixed verified; post-probe lock reacquire and captured identity needed |
-| WIN-OWNER-CLEANUP-LIVE-PIDFILE | W3 caller | P2 | owner.rs:85 -> owner.rs:87 | Failed takeover deletes a successor owner PID file before lock acquisition | real-unfixed verified; cleanup must be under acquired ownership |
+| WIN-WATCHDOG-TIMEOUT-PID-REUSE | W3 | P2 | manager.rs:826 -> 1057 -> 1101 | Confirmed-dead Core PID remains while metadata/WFP cleanup waits | real-fixed #999; merged; baseline failed then 5 manager tests passed; exact-head ci-gate passed |
+| WIN-SCM-PID-FALLBACK | W9 | P2 | bin/shared/mod.rs:160 | Stale PID-file escalation can target another process | real-fixed #1004; merged; 39 Linux bin tests and exact-head native ci-gate passed |
+| WIN-CORE-JOB-SPAWN-WINDOW | W3 | P2 | manager.rs:1190 -> manager.rs:1225 (ad53abb6) | Service crash between Core creation and Job assignment leaves an unbound Core | real-unfixed atomic Windows launcher/native regression unfinished; SCM restart sweep mitigates; P2 |
+| WIN-WATCHDOG-ABORT-PID-REUSE | W3 | P2 | manager.rs:1099 -> manager.rs:1106 | Abort closes live Core Job before raw PID fallback can reopen | real-fixed #1012; merged; actual timeout baseline failed then 6 manager tests passed; exact-head ci-gate passed |
+| WIN-OWNER-TAKEOVER-STALE-PID | W3 caller | P2 | owner.rs:57 -> owner.rs:78 | Owner exits during health wait but raw old PID still killed | real-fixed #1022; baseline failed then 4 owner tests passed; native CI pending |
+| WIN-OWNER-CLEANUP-LIVE-PIDFILE | W3 caller | P2 | owner.rs:85 -> owner.rs:87 | Failed takeover deletes a successor owner PID file before lock acquisition | real-fixed #1022; baseline failed then 4 owner tests passed; native CI pending |

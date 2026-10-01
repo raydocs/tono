@@ -1,12 +1,14 @@
 # R3-M9M11: Codex (GPT-6.1 Sol) findings
 
-Generated 2026-09-30 21:19 MT from the run's findings.tsv / prs.tsv.
+Generated 2026-09-30 21:46 MT from the run's findings.tsv / prs.tsv.
 
 ## PRs
 
 | PR | Branch | Labels | Auto-merge requested | Title |
 |---|---|---|---|---|
-| 1008 | hunt/sol-r3cfg-refresh-token-durability | needs-hardware | yes | fix(macos): recover rotated refresh-token durability before exit |
+| 1008 | hunt/sol-r3cfg-refresh-token-durability | none | yes | fix(macos): recover rotated refresh-token durability before exit |
+| 1016 | hunt/sol-r3cfg-unresolved-config-findings | none | yes | docs: record unresolved macOS pin and AI API routing findings |
+| 1019 | hunt/sol-r3cfg-findings-source-anchors | none | yes | docs: correct macOS configuration finding source evidence |
 
 ## Hypotheses
 
@@ -22,7 +24,7 @@ Generated 2026-09-30 21:19 MT from the run's findings.tsv / prs.tsv.
 | R3CFG-H08 | M9 | — | CoreRuntimeManager.swift:8 | Bundle signature discovery hangs SwiftUI | false-positive compilation runs on writer actor; no ordinary indefinite hang proved |
 | R3CFG-H09 | M9 | — | ConfigPipeline+Write.swift:41 | Concurrent config replacement starts wrong runtime | false-positive actor writer and helper digest snapshot reject mismatch |
 | R3CFG-H10 | M9 | — | ConfigPipeline+SingBoxProduct.swift:169 | Web-direct real DNS loses hostname routing | duplicate #958 |
-| MAC-ROTATED-TOKEN-DURABILITY | M11 | P1 | TonoAPIClient.swift:591 | Rotated token write refusal remains unpersisted until next refresh | real-fixed #1008 |
+| MAC-ROTATED-TOKEN-DURABILITY | M11 | P1 | Services/TonoAPIClient.swift:591 | Rotated token write refusal remains unpersisted until next refresh | real-fixed #1008 |
 | R3CFG-H11 | M11 | — | Services/TonoAPIClient.swift:800 | Delayed bearer refusal suspends newer session | duplicate #796 guards obsolete bearer verdicts |
 | R3CFG-H12 | M11 | — | Services/KeychainStore.swift:30 | Locked Keychain mistaken for missing credential | false-positive read failures propagate; only item-not-found is absence |
 | R3CFG-H13 | M11 | — | Services/Account/AccountSession+Auth.swift:426 | Catalog worker deadlocks by draining itself | false-positive no reachable self-draining cleanup call found |
