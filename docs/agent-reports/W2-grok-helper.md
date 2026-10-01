@@ -29,8 +29,7 @@ Hunter: Grok 4.7。槽位 W2-grok-helper。开始时基线 `origin/main` `ff8111
 | PR | 分支 | 头 | auto-merge | 标签 |
 |---|---|---|---|---|
 | [#889](https://github.com/raydocs/tono/pull/889) | `hunt/grok-helper-arm-release-6122` | `87181a2d` | 已开，merge commit。写本报告时仍开着，没有被关掉，所以没有再开一次 | `needs-hardware` 没有打上：`POST /issues/889/labels` 返回 `403 Resource not accessible by integration`。这是实机网络行为（何时 flush 活的 PF 锚点、health 如何报 live） |
-
-文档 PR（本文件）不开 auto-merge。
+| [#920](https://github.com/raydocs/tono/pull/920) | `hunt/grok-helper-report-6122` | 本 PR | 不开。留给合并队列成批处理 | 无 |
 
 ## 假阳性（21）
 
