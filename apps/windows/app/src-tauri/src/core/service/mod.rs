@@ -273,6 +273,13 @@ where
     (captured, operation().await)
 }
 
+/// `NotActive` on the core-log snapshot recovers the owner only when this
+/// process still holds a session. The StartClash handoff has already dropped
+/// that session, so the same code during a start is not displacement.
+pub(super) fn log_snapshot_should_recover_owner(code: u16, session_held: bool) -> bool {
+    code == tono_service_protocol::ServiceErrorCode::NotActive as u16 && session_held
+}
+
 pub(crate) async fn get_clash_log_snapshot_by_service() -> Result<String> {
     let credentials = current_owner_credentials()?;
     let (generation, response) = capture_generation_before(&OWNER_MONITOR_GENERATION, || {
@@ -281,7 +288,12 @@ pub(crate) async fn get_clash_log_snapshot_by_service() -> Result<String> {
     .await;
     let response = response.context("无法连接到Tono Service")?;
     if response.code > 0 {
-        if response.code == tono_service_protocol::ServiceErrorCode::NotActive as u16 {
+        // StartClash clears the local session before the Service replies, and that
+        // window lasts for the whole start. NotActive there is our own handoff.
+        // The owner monitor already debounces the same reply; this log read must
+        // not run recovery and mark the core stopped under the start still in flight.
+        // A session we still hold, plus NotActive, is a real displacement.
+        if log_snapshot_should_recover_owner(response.code, active_service_session().is_ok()) {
             recover_after_owner_loss(generation, OwnerRecoveryReason::Displaced).await;
         }
         bail!(response.message);
