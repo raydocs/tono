@@ -16,3 +16,7 @@
 ### 2026-09-30 续记 · 跟着重放到已含 #733 的探测分支
 
 - 来源：`--onto` 重放到 `cursor/unarmed-background-heal-a925` `125721ef`（该分支已变基到 main `cbb4f56a`）。没有把 main 合并进来。放行成功后仍同步启动探测。助手协议仍是 `4.52.6`。
+
+### 2026-10-01 续记 · 跟着重放到当前 #714
+
+- 来源：`--onto` 重放到 `cursor/unarmed-background-heal-a925` `ffa9b3c0`。没有把 main 合并进来。放行成功后仍读取 `connect_generation` 并同步 `spawn_after_release`。释放失败不启动隧道。助手协议仍是该基线上的 `4.52.8`。
