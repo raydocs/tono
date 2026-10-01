@@ -6,7 +6,7 @@
 use std::net::{IpAddr, SocketAddr};
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use tauri::AppHandle;
 use tokio::task_local;
@@ -16,6 +16,8 @@ use tono_logging::{Type, logging};
 
 use crate::process::AsyncHandler;
 use crate::tono::state::{AccountState, TonoState};
+
+use super::platform::PhysicalNetworkSnapshot;
 
 task_local! {
     static IN_UNARMED_PROBE: ();
@@ -76,7 +78,9 @@ fn store_handle(
 }
 
 async fn run(state: Arc<TonoState>, app: AppHandle, ticket: u64, mut generation: u64) {
-    let mut schedule = Schedule::begin(now_ms());
+    let clock = Instant::now();
+    let mut schedule = Schedule::begin(0);
+    let mut network = NetworkWatch::default();
     loop {
         if !still_owner(&state, ticket, generation).await {
             return;
@@ -90,10 +94,14 @@ async fn run(state: Arc<TonoState>, app: AppHandle, ticket: u64, mut generation:
             let targets = probe_targets(&inner.nodes);
             (preferred, region, targets)
         };
-        match schedule.on_clock(&preferred, &region, &targets, now_ms()) {
+        match schedule.on_clock(&preferred, &region, &targets, elapsed_ms(clock)) {
             Step::Wait { until_ms } => {
-                if !sleep_until(&state, ticket, generation, until_ms).await {
-                    return;
+                match sleep_until(
+                    &state, ticket, generation, &preferred, clock, until_ms, &mut network,
+                ).await {
+                    WaitOutcome::Retired => return,
+                    WaitOutcome::Changed => schedule = Schedule::begin(elapsed_ms(clock)),
+                    WaitOutcome::Due => {}
                 }
             }
             Step::Probe { names } => {
@@ -154,10 +162,12 @@ async fn run(state: Arc<TonoState>, app: AppHandle, ticket: u64, mut generation:
                 }
                 if after == before.wrapping_add(1) {
                     generation = after;
-                    schedule = Schedule::begin(now_ms());
                 } else if after != before {
                     return;
                 }
+                // TCP success is not a successful tunnel. Retain the ladder
+                // across our own failure generation and same-generation refusals.
+                schedule.connect_failed(elapsed_ms(clock));
             }
         }
     }
@@ -211,18 +221,76 @@ async fn barrier_is_down(state: &TonoState, ticket: u64, generation: u64) -> boo
         && !status.is_disconnecting
 }
 
-async fn sleep_until(state: &TonoState, ticket: u64, generation: u64, until_ms: u64) -> bool {
-    loop {
-        let now = now_ms();
-        if now >= until_ms {
-            return true;
+#[derive(Debug, PartialEq, Eq)]
+enum WaitOutcome {
+    Due,
+    Changed,
+    Retired,
+}
+
+/// One pending native read at most. An unresponsive IP Helper call cannot hold
+/// the async task, UI, release or explicit Connect behind it, or spawn a worker
+/// on every tick. Successful samples remain memory-only.
+#[derive(Default)]
+struct NetworkWatch {
+    snapshot: Option<PhysicalNetworkSnapshot>,
+    pending: Option<tokio::task::JoinHandle<Result<PhysicalNetworkSnapshot, String>>>,
+}
+
+impl NetworkWatch {
+    fn observe(&mut self, snapshot: PhysicalNetworkSnapshot) -> bool {
+        let changed = self.snapshot.as_ref().is_some_and(|previous| previous != &snapshot);
+        self.snapshot = Some(snapshot);
+        changed
+    }
+
+    async fn changed(&mut self) -> bool {
+        let mut changed = false;
+        if self.pending.as_ref().is_some_and(|pending| pending.is_finished())
+            && let Ok(Ok(snapshot)) = self.pending.take().unwrap().await
+        {
+            changed = self.observe(snapshot);
         }
+        #[cfg(windows)]
+        if self.pending.is_none() {
+            self.pending = Some(tokio::task::spawn_blocking(
+                super::platform::physical_network_snapshot_windows,
+            ));
+        }
+        changed
+    }
+}
+
+async fn sleep_until(
+    state: &TonoState,
+    ticket: u64,
+    generation: u64,
+    preferred: &str,
+    clock: Instant,
+    until_ms: u64,
+    network: &mut NetworkWatch,
+) -> WaitOutcome {
+    loop {
         if !still_owner(state, ticket, generation).await {
-            return false;
+            return WaitOutcome::Retired;
+        }
+        if state.lock().await.selected_node.as_deref() != Some(preferred) {
+            return WaitOutcome::Changed;
+        }
+        if barrier_is_down(state, ticket, generation).await && network.changed().await {
+            return WaitOutcome::Changed;
+        }
+        let now = elapsed_ms(clock);
+        if now >= until_ms {
+            return WaitOutcome::Due;
         }
         let slice = (until_ms - now).min(1_000);
         tokio::time::sleep(Duration::from_millis(slice)).await;
     }
+}
+
+fn elapsed_ms(clock: Instant) -> u64 {
+    clock.elapsed().as_millis().min(u128::from(u64::MAX)) as u64
 }
 
 fn now_ms() -> u64 {
@@ -292,5 +360,21 @@ mod tests {
         tcp_proof_before_tunnel(&state, &node).await.unwrap();
         assert!(!state.unarmed_proofs.lock().fresh(&endpoint, now_ms()),
             "protected re-entry must leave App TCP proof to the unarmed path; WFP permits only Core to dial the exit");
+    }
+
+    #[test]
+    fn only_changed_physical_network_samples_wake_recovery() {
+        let mut network = NetworkWatch::default();
+        let wifi = vec![(17, 0x0100000a, 0x0100000a, 25)];
+        assert!(!network.observe(wifi.clone()), "first observation only seeds");
+        assert!(!network.observe(wifi.clone()), "unchanged DNS/TUN activity must not reset backoff");
+        assert!(network.observe(vec![]), "physical route loss is a change");
+        assert!(!network.observe(vec![]));
+        assert!(network.observe(wifi), "restoring the same route wakes recovery");
+        let moved = vec![(17, 0x0200000a, 0x0100000a, 25)];
+        assert!(network.observe(moved.clone()), "same-adapter address change wakes recovery");
+        assert!(!network.observe(moved));
+        assert!(network.observe(vec![(17, 0x0200000a, 0x0100000a, 30)]),
+            "changed physical route priority wakes recovery");
     }
 }
