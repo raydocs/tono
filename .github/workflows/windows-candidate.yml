@@ -19,6 +19,7 @@ on:
     paths:
       - .github/workflows/windows-candidate.yml
       - .github/workflows/windows-core.yml
+      - tooling/scripts/prepare-windows-sing-box.sh
 
 permissions:
   contents: read
@@ -30,8 +31,23 @@ concurrency:
 jobs:
   pinned-core:
     uses: ./.github/workflows/windows-core.yml
+  # sing-box.exe is not in git (#1159). Rebuild the reviewed alpha.9 input from the
+  # pinned source; the script refuses any bytes but the pinned digest.
+  sing-box-input:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Build and verify fixed windows-amd64-v2 input
+        run: sh tooling/scripts/prepare-windows-sing-box.sh
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: sing-box-windows-amd64-${{ github.sha }}
+          path: apps/windows/app/src-tauri/sidecar/sing-box-x86_64-pc-windows-msvc.exe
+          if-no-files-found: error
+          retention-days: 14
   build:
-    needs: pinned-core
+    needs: [pinned-core, sing-box-input]
     runs-on: windows-2025
     timeout-minutes: 60
     defaults:
@@ -61,6 +77,10 @@ jobs:
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           name: windows-core-${{ github.sha }}
+          path: apps/windows/app/src-tauri/sidecar
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: sing-box-windows-amd64-${{ github.sha }}
           path: apps/windows/app/src-tauri/sidecar
       - name: Install dependencies and check desktop versions
         run: |
