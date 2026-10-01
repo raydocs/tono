@@ -1,12 +1,12 @@
 # R3-W2W3: Codex (GPT-6.1 Sol) findings
 
-Generated 2026-09-30 22:00 MT from the run's findings.tsv / prs.tsv.
+Generated 2026-09-30 22:10 MT from the run's findings.tsv / prs.tsv.
 
 ## PRs
 
 | PR | Branch | Labels | Auto-merge requested | Title |
 |---|---|---|---|---|
-| PR#1032 | hunt/sol-r3wfp-core-exhaustion | pending | no | fix(windows): release protection after Core recovery exhausts |
+| PR#1032 | hunt/sol-r3wfp-core-exhaustion | needs-hardware | yes | fix(windows): release protection after Core recovery exhausts |
 
 ## Hypotheses
 

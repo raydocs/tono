@@ -1,20 +1,8 @@
-# R3-W4W7: Codex (GPT-6.1 Sol) findings
+Operator follow-up: merged PR #1025 needs its body source location corrected from core/update.rs:442 to :459. gh pr edit failed twice with the deprecated Projects classic API error. Branch hunt/sol-r3svc-prior-commit-cleanup; title fix(windows): clean committed backups before the next update; corrected body /workspace/w1-codex/out/R3-W4W7/prior-cleanup-pr-body.md. All commits are pushed.
 
-Generated 2026-09-30 22:10 MT from the run's findings.tsv / prs.tsv.
+GPT-6.1 Sol (Codex CLI): W4/W7 audit completed. Five verified bugs fixed and merged through CI (3 P1, 2 P2). All paths below are relative to apps/windows/service/src; line numbers identify audited baselines.
 
-## PRs
-
-| PR | Branch | Labels | Auto-merge requested | Title |
-|---|---|---|---|---|
-| 1005 | hunt/sol-r3svc-unverified-recovery-ai-hold | needs-hardware | yes | fix(windows): retain AI blocking after interrupted first connection |
-| 1007 | hunt/sol-r3svc-prepare-failure-ai-hold | needs-hardware | yes | fix(windows): retain AI blocking after update Prepare failure |
-| 1014 | hunt/sol-r3svc-service-stop-ai-hold | needs-hardware | yes | fix(windows): retain AI blocking during automatic Service stop |
-| 1017 | hunt/sol-r3svc-committed-cleanup-retry | none | yes | fix(windows): retry committed update cleanup after file locks |
-| 1025 | hunt/sol-r3svc-prior-commit-cleanup | none | yes | fix(windows): clean committed backups before the next update |
-
-## Hypotheses
-
-| ID | Area | Sev | Location | Description | Verdict |
+| ID | Area | Severity | File:line | Description | Verdict |
 |---|---|---|---|---|---|
 | WIN-UNVERIFIED-STARTUP-AI-HOLD | W4 | P1 | core/windows_kill_switch.rs:3410 | Unverified startup crash cleanup releases without secondary AI hold | real-fixed #1005 (merged; CI passed) |
 | R3S-02 | W4 | — | core/windows_kill_switch.rs:2819 | Verified startup reconciliation failure leaves block forever | false-positive independent 30-second wanted-Core deadline |
@@ -52,3 +40,23 @@ Generated 2026-09-30 22:10 MT from the run's findings.tsv / prs.tsv.
 | R3S-34 | W7 | — | core/update.rs:464 | Hung extractor causes network loss after Prepare | false-positive Core stop follows extraction; no single-failure outage; extraction stall remains unqualified |
 | WIN-PREPARE-COMMITTED-BACKUPS | W7 | P2 | core/update.rs:459 | Later Prepare overwrites a committed attempt before retained backups are cleaned | real-fixed #1025 (merged; all CI passed; native regressions passed twice) |
 | R3S-36 | W7 | P3 | core/update.rs:459 | Later Prepare can supersede a failed DisplayVersion retry | false-positive unqualified ordinary trigger; Service and executor registry writes both must fail; no native reproduction |
+
+PRs (all MERGED; merge-commit auto-merge enabled and used):
+
+| PR | Finding | Labels | CI |
+|---|---|---|---|
+| #1005 | Unverified-startup AI hold | needs-hardware | passed |
+| #1007 | Prepare-failure AI hold | needs-hardware | passed |
+| #1014 | Automatic Service-stop AI hold | needs-hardware | passed |
+| #1017 | Committed-cleanup retry | none | passed |
+| #1025 | Prior-committed backup cleanup before Prepare | none | passed |
+
+36 distinct hypotheses: 5 verified fixes, 22 rejected/false-positive hypotheses, 9 known/duplicate items.
+
+Verification: startup regressions failed locally first (0 passed/2 failed), then passed (3 passed); Service-stop regressions baseline1 passed/3 failed, then4 passed. Portable WFP module96 passed, portable installer17 passed, portable journal14 passed. New Windows-only tests could not run locally: GitHub Windows CI passed the Prepare AI regression, all4 Service-stop regressions, the committed sharing-lock regression twice, and all3 prior-committed guard regressions twice. All required CI checks passed for all5 PRs.
+
+Assigned source reading completed. Installed-device crash/reboot/Stop/DNS/WFP/update validation is unavailable on the Linux host and remains for the final hardware batch. No new verified finding remains unfixed. Receipt expiry BRICK-W6 remains an existing decision; native SCM configuration and dual ARP-write failure leads lacked ordinary reproduction.
+
+Operational correction: a wrong PR-number settings command briefly changed #1008. Its label and auto-merge changes were reverted; labels empty and autoMergeRequest null confirmed afterward. No code or branch changes to that PR.
+
+Hunter: GPT-6.1 Sol (Codex CLI)

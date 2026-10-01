@@ -1,6 +1,6 @@
 # R3-E2T2: Codex (GPT-6.1 Sol) findings
 
-Generated 2026-09-30 22:00 MT from the run's findings.tsv / prs.tsv.
+Generated 2026-09-30 22:10 MT from the run's findings.tsv / prs.tsv.
 
 ## PRs
 
@@ -14,17 +14,18 @@ Generated 2026-09-30 22:00 MT from the run's findings.tsv / prs.tsv.
 | 1002 | hunt/sol-r3ops-provision-pending-recovery | none | yes | fix(provision): persist recovered pending transaction completion |
 | 1011 | hunt/sol-r3ops-audit-report | none | yes | docs(audit): record E2/T2 findings and peer history limit |
 | 1018 | hunt/sol-r3ops-audit-receipts | none | yes | docs(audit): record hosted E2/T2 receipts and merged fixes |
+| 1035 | hunt/sol-r3ops-final-delivery | none | yes | docs(audit): record six merged E2/T2 fixes and final verification |
 
 ## Hypotheses
 
 | ID | Area | Sev | Location | Description | Verdict |
 |---|---|---|---|---|---|
 | HY2-PROVISION-SPKI | E2 | P1 | tooling/scripts/provision-reality-node.rb:445 | Provisioned HY2 source discards SPKI required by macOS | real-fixed #995; merged 140b5d9f, ci-gate passed |
-| PROVISION-JOURNAL-BANNER | E2 | P2 | tooling/scripts/remote/manage-tono-node-v2.sh:328 | No-entry journal banner rejects healthy restart; unreadable journal is accepted | real-fixed #996; Services CI passed, awaiting macos / policy-tests |
-| PROVISION-ROLLBACK-MODE | E2 | P2 | tooling/scripts/remote/manage-tono-node-v2.sh:151 | Immutable snapshot permissions make writable-config rollback verification fail | real-fixed #997; Services CI passed, awaiting macos / build |
+| PROVISION-JOURNAL-BANNER | E2 | P2 | tooling/scripts/remote/manage-tono-node-v2.sh:328 | No-entry journal banner rejects healthy restart; unreadable journal is accepted | real-fixed #996; merged 72a9c98d, ci-gate passed |
+| PROVISION-ROLLBACK-MODE | E2 | P2 | tooling/scripts/remote/manage-tono-node-v2.sh:151 | Immutable snapshot permissions make writable-config rollback verification fail | real-fixed #997; merged 857b9e73, ci-gate passed |
 | CONNECT-BENCH-PARTIAL-CACHE | T2 | P2 | tooling/perf/connect-bench/bench.py:127 | Interrupted extraction poisons executable cache reused on retry | real-fixed #998; merged 7e5c333a, ci-gate passed |
 | CONNECT-BENCH-STARTUP-ORPHAN | T2 | P2 | tooling/perf/connect-bench/bench.py:571 | Failed startup leaves benchmark child running and log open | real-fixed #1000; merged 08aac566, ci-gate passed |
-| PROVISION-PENDING-SUCCESS-DURABILITY | E2 | P2 | tooling/scripts/provision-tono-node.py:182 | Recovered remote success remains pending on disk and blocks enrollment | real-fixed #1002; Services CI passed, awaiting macos / build, macos / policy-tests, macos / privileged-tests |
+| PROVISION-PENDING-SUCCESS-DURABILITY | E2 | P2 | tooling/scripts/provision-tono-node.py:182 | Recovered remote success remains pending on disk and blocks enrollment | real-fixed #1002; merged 156a2536, ci-gate passed |
 | HOME-AGENT-PEER-RETENTION-CAP | E2 | P2 | services/home-agent/report_example.py:148 | Lifetime peer baselines exceed 2000 cap and stop all fresh reports | real-unfixed; safe retention needs counter-continuity design, reporter undeployed |
 | HA-SERVER-AHEAD | E2 | — | services/home-agent/report_example.py:478 | Server watermark ahead discards ambiguous raw history | false-positive; deliberate recovery prevents double billing |
 | HA-POST-CRASH | E2 | — | services/home-agent/report_example.py:652 | Crash after POST could duplicate charges | false-positive; immutable batch replay and server watermarks deduplicate |
@@ -37,7 +38,7 @@ Generated 2026-09-30 22:00 MT from the run's findings.tsv / prs.tsv.
 | HA-REPORT-400 | E2 | — | services/home-agent/report_example.py:604 | A permanently refused report wedges the queue | duplicate; #899 refusal isolation is already on main |
 | T2-PIN-DRIFT | T2 | — | tooling/scripts/prepare-macos-sing-box.sh:42 | Prepared binary may not match the committed product pin | false-positive; manifest, binary, source and toolchain pins agree |
 | T2-CANDIDATE-CORE | T2 | — | tooling/scripts/sing-box/certify.py:114 | Candidate certification may silently replace the product binary | false-positive; explicit offline candidate is independent of pinned product packaging |
-| T2-LDFLAGS | T2 | — | tooling/scripts/sing-box/certify.py:177 | Missing linker metadata could accept unknown product bytes | false-positive; exact binary digest and authenticated manifest bind the bytes |
+| T2-LDFLAGS | T2 | — | tooling/scripts/sing-box/certify.py:177 | Missing linker metadata could accept unknown product bytes | false-positive; exact binary digest and committed manifest bind the bytes |
 | T2-ADAPTIVE-HASH | T2 | — | tooling/scripts/build-mihomo-adaptive.sh:136 | Adaptive binary digest varies between builds | false-positive; intentional timestamp variance, source/dependency pins and identity gates remain |
 | T2-ADAPTIVE-WINDOWS | T2 | — | tooling/scripts/build-mihomo-adaptive.sh:163 | Adaptive Windows build omits the alpha sidecar | false-positive; alpha sidecar is intentionally excluded from stable packaging |
 | T2-STOCK-IDENTITY | T2 | — | tooling/scripts/build-mihomo-adaptive.sh:64 | Stock binary could pass as the adaptive build | false-positive; prebuild gate refuses stock or mismatched identity |
