@@ -1111,6 +1111,24 @@ fn runtime_value(
             || !plan.web_suffix_rules.is_empty()
             || !plan.udp_wechat_rules.is_empty()
         {
+            // The address-free signed-app rules below match every destination
+            // on the reviewed ports, including an assistant site opened in
+            // WeChat, DingTalk, or Feishu. Pin the same assistant hosts the
+            // residential hop uses before those rules exist. Hostname flows
+            // and the Anthropic range then stay on Tono-Exit; raw CDN IPs
+            // that are not in that set still take the signed-app shortcut.
+            if !plan.tcp_wechat_rules.is_empty() && !plan.wechat_process_path_regexes.is_empty() {
+                for domain in CLAUDE_HOME_DOMAINS {
+                    rules.push(format!(
+                        "AND,((NETWORK,TCP),(DOMAIN-SUFFIX,{domain})),{EXIT_GROUP_NAME}"
+                    ));
+                }
+                for cidr in CLAUDE_HOME_IPV4_CIDRS {
+                    rules.push(format!(
+                        "AND,((NETWORK,TCP),(IP-CIDR,{cidr},no-resolve)),{EXIT_GROUP_NAME}"
+                    ));
+                }
+            }
             for process in HOME_PROCESS_NAMES {
                 rules.push(format!(
                     "AND,((NETWORK,TCP),(PROCESS-NAME,{process})),Tono-Exit"
@@ -2458,6 +2476,39 @@ reality-opts:
         assert!(rules.contains(
             &"AND,((NETWORK,TCP),(DST-PORT,443),(DOMAIN,wxs.qq.com),(IP-CIDR,9.0.0.10/32,no-resolve)),Tono-China-Direct"
         ));
+    }
+
+    #[test]
+    fn assistant_hosts_precede_address_free_signed_app_direct_without_a_home_hop() {
+        let mut plan = direct_plan();
+        let prefix = wechat_prefix_path_regex(r"C:\Program Files\Tencent\WeChat").unwrap();
+        plan.wechat_process_path_regexes = vec![prefix.clone()];
+        let runtime =
+            build_owned_runtime(&three_nodes(), "JP Reality 02", "test-secret", Some(&plan)).unwrap();
+        let rules: Vec<&str> = get(&parsed(&runtime), &["rules"])
+            .as_sequence()
+            .unwrap()
+            .iter()
+            .map(|rule| rule.as_str().unwrap())
+            .collect();
+        let direct = format!(
+            "AND,((NETWORK,TCP),(DST-PORT,443),(PROCESS-PATH-REGEX,{prefix})),{DIRECT_GROUP_NAME}"
+        );
+        let direct_at = rules
+            .iter()
+            .position(|rule| *rule == direct)
+            .expect("signed-app port rule");
+        for domain in ["claude.ai", "chatgpt.com", "openai.com"] {
+            let shield = format!("AND,((NETWORK,TCP),(DOMAIN-SUFFIX,{domain})),{EXIT_GROUP_NAME}");
+            let at = rules.iter().position(|rule| *rule == shield).expect(domain);
+            assert!(at < direct_at, "{domain} must win before the signed-app DIRECT rule");
+        }
+        let cidr = format!(
+            "AND,((NETWORK,TCP),(IP-CIDR,{},no-resolve)),{EXIT_GROUP_NAME}",
+            CLAUDE_HOME_IPV4_CIDRS[0]
+        );
+        let cidr_at = rules.iter().position(|rule| *rule == cidr).expect("anthropic range");
+        assert!(cidr_at < direct_at);
     }
 
     #[test]
