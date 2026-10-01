@@ -1,6 +1,6 @@
 # R3-W4W7: Codex (GPT-6.1 Sol) findings
 
-Generated 2026-09-30 21:46 MT from the run's findings.tsv / prs.tsv.
+Generated 2026-09-30 22:00 MT from the run's findings.tsv / prs.tsv.
 
 ## PRs
 
@@ -10,12 +10,13 @@ Generated 2026-09-30 21:46 MT from the run's findings.tsv / prs.tsv.
 | 1007 | hunt/sol-r3svc-prepare-failure-ai-hold | needs-hardware | yes | fix(windows): retain AI blocking after update Prepare failure |
 | 1014 | hunt/sol-r3svc-service-stop-ai-hold | needs-hardware | yes | fix(windows): retain AI blocking during automatic Service stop |
 | 1017 | hunt/sol-r3svc-committed-cleanup-retry | none | yes | fix(windows): retry committed update cleanup after file locks |
+| 1025 | hunt/sol-r3svc-prior-commit-cleanup | none | yes | fix(windows): clean committed backups before the next update |
 
 ## Hypotheses
 
 | ID | Area | Sev | Location | Description | Verdict |
 |---|---|---|---|---|---|
-| R3S-01 | W4 | P1 | core/windows_kill_switch.rs:3410 | Unverified startup crash cleanup releases without secondary AI hold | real-fixed #1005 (merged; CI passed) |
+| WIN-UNVERIFIED-STARTUP-AI-HOLD | W4 | P1 | core/windows_kill_switch.rs:3410 | Unverified startup crash cleanup releases without secondary AI hold | real-fixed #1005 (merged; CI passed) |
 | R3S-02 | W4 | — | core/windows_kill_switch.rs:2819 | Verified startup reconciliation failure leaves block forever | false-positive independent 30-second wanted-Core deadline |
 | R3S-03 | W4 | P2 | core/windows_kill_switch.rs:3360 | Unverified reconciliation error retains block | false-positive unverified ordinary trigger; interrupted attempt plus independent reconcile error |
 | R3S-04 | W4 | — | bin/service.rs:446 | Healthy predecessor makes successor exit without SCM restart | duplicate already fixed nonzero fatal exit |
@@ -28,9 +29,9 @@ Generated 2026-09-30 21:46 MT from the run's findings.tsv / prs.tsv.
 | R3S-11 | W4 | — | core/runtime.rs:98 | Unparseable runtime record wedges all Core starts | duplicate #775 quarantine already merged |
 | R3S-12 | W4 | — | core/desired.rs:249 | Reboot replays old run intent without user | duplicate BRICK-W1 boot-session guard already merged |
 | R3S-13 | W4 | — | core/desired.rs:189 | Retired owner resurrects Core on next restart | false-positive retirement persists desired stopped before owner clear |
-| R3S-14 | W7 | P1 | core/update.rs:535 | Failed Prepare uses plain release and omits AI hold | real-fixed #1007 (merged; native CI passed); follow-up to #793 |
-| R3S-15 | W4 | P1 | core/server/mod.rs:578 | Automatic armed SCM Stop releases without AI hold | real-fixed #1014 (merged; native CI passed); selective follow-up to #792 |
-| R3S-16 | W7 | P2 | bin/install_service/update_executor.rs:768 | Committed cleanup ignores locked rollback deletion and retires retry task | real-fixed #1017 (merged; native sharing test passed twice) |
+| WIN-PREPARE-FAILURE-AI-HOLD | W7 | P1 | core/update.rs:535 | Failed Prepare uses plain release and omits AI hold | real-fixed #1007 (merged; native CI passed); follow-up to #793 |
+| WIN-SCM-STOP-AI-HOLD | W4 | P1 | core/server/mod.rs:578 | Automatic armed SCM Stop releases without AI hold | real-fixed #1014 (merged; native CI passed); selective follow-up to #792 |
+| WIN-COMMITTED-CLEANUP-RETRY | W7 | P2 | bin/install_service/update_executor.rs:768 | Committed cleanup ignores locked rollback deletion and retires retry task | real-fixed #1017 (merged; native sharing test passed twice) |
 | R3S-17 | W7 | — | update_transaction.rs:332 | Lost consume acknowledgement grants a second executor | false-positive durable high-water, incarnation binding and poisoned-write reopen guards |
 | R3S-18 | W7 | — | update_transaction.rs:453 | Archive failure clears live update obligation | false-positive archive persistence precedes slot clearing |
 | R3S-19 | W7 | — | update_transaction.rs:571 | Restarted successor cannot adopt pending update | false-positive dead successor can rebind to target-identity process |
@@ -49,4 +50,5 @@ Generated 2026-09-30 21:46 MT from the run's findings.tsv / prs.tsv.
 | R3S-32 | W7 | — | core/update/security.rs:90 | TrustedInstaller default ACL rejects updates | duplicate #352 default ACL fix |
 | R3S-33 | W7 | — | bin/install_service/update_executor.rs:262 | Timed-out BFE work hangs installer Runtime drop | duplicate-fixed #776 block_on_abandoning |
 | R3S-34 | W7 | — | core/update.rs:464 | Hung extractor causes network loss after Prepare | false-positive Core stop follows extraction; no single-failure outage; extraction stall remains unqualified |
-| R3S-35 | W7 | P2 | core/update.rs:442 | Later Prepare overwrites a committed attempt before retained backups are cleaned | real-unfixed verified; regression in progress |
+| WIN-PREPARE-COMMITTED-BACKUPS | W7 | P2 | core/update.rs:459 | Later Prepare overwrites a committed attempt before retained backups are cleaned | real-fixed #1025 (native regression passed twice; app-rust pending) |
+| R3S-36 | W7 | P3 | core/update.rs:459 | Later Prepare can supersede a failed DisplayVersion retry | false-positive unqualified ordinary trigger; Service and executor registry writes both must fail; no native reproduction |

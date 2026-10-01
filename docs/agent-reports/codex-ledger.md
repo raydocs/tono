@@ -225,3 +225,27 @@
 | M5M7-H31 | M7 | Sol (Codex acct 2, R3-M5M7) | — | unverified ordinary corruption path not proved; optional policy refresh does not block sign-in or protected connectivity | Decodable corrupt policy metadata can reject a matching revision [apps/macos/Tono/Services/AppState+Catalog.swift:537] |
 | M5M7-H32 | M5 | Sol (Codex acct 2, R3-M5M7) | P2 | duplicate #795 | Protected Offline native update never commits after fail-open launch [apps/macos/Tono/Core/RuntimeCleanup.swift:224] |
 | M5M7-H33 | M5 | Sol (Codex acct 2, R3-M5M7) | P2 | duplicate #756; current main restores after an available recheck | Helper repair skips snapshotless DNS restoration [apps/macos/Tono/Core/RuntimeCleanup.swift:410] |
+
+### R3-W3W9gap (finished 22:00 MT; 29 hypotheses, 18 FP, PRs: #994 #999 #1004 #1012 #1022 #1026)
+| ID | Area | Model | Sev | Verdict | Description [location] |
+|---|---|---|---|---|---|
+| WIN-PROXY-RESET-JOIN | W3 | Sol (Codex acct 2, R3-W3W9gap) | P2 | duplicate #925 fixed in current source | Concurrent proxy clear returns early [app/core/sysopt.rs:109] |
+| WIN-STARTCLASH-FAILURE | W3 | Sol (Codex acct 2, R3-W3W9gap) | P1 | duplicate #769 | Disk-full log setup failure leaves WFP armed [logger.rs:34] |
+| BRICK-W3 | W9 | Sol (Codex acct 2, R3-W3W9gap) | P1 | duplicate known BRICK-W3; no fix in this hunt | Failed disarm still deletes SCM registration and Service binary [uninstall_service.rs:650] |
+| BRICK-W4 | W9 | Sol (Codex acct 2, R3-W3W9gap) | P1 | duplicate documented BRICK-W4 limitation; decision boundary | Explicit uninstall exit4 permits inexact/stopped-resolver DNS [uninstall_service.rs:584] |
+| WIN-CORE-REAPER-PID-REUSE | W3 | Sol (Codex acct 2, R3-W3W9gap) | P2 | real-fixed #994; merged; exact-head ci-gate and native Windows service passed | Orphan sweep discards creation identity and can kill reused PID [process.rs:637 -> process.rs:565] |
+| WIN-WATCHDOG-TIMEOUT-PID-REUSE | W3 | Sol (Codex acct 2, R3-W3W9gap) | P2 | real-fixed #999; merged; baseline failed then 5 manager tests passed; exact-head ci-gate passed | Confirmed-dead Core PID remains while metadata/WFP cleanup waits [manager.rs:826 -> 1057 -> 1101] |
+| WIN-SCM-PID-FALLBACK | W9 | Sol (Codex acct 2, R3-W3W9gap) | P2 | real-fixed #1004; merged; 39 Linux bin tests and exact-head native ci-gate passed | Stale PID-file escalation can target another process [bin/shared/mod.rs:160] |
+| WIN-CORE-JOB-SPAWN-WINDOW | W3 | Sol (Codex acct 2, R3-W3W9gap) | P2 | real-unfixed documented in merged #1026; atomic Windows launcher/native regression unfinished; SCM restart sweep mitigates; P2 | Service crash between Core creation and Job assignment leaves an unbound Core [manager.rs:1190 -> manager.rs:1225 (ad53abb6)] |
+| WIN-WATCHDOG-ABORT-PID-REUSE | W3 | Sol (Codex acct 2, R3-W3W9gap) | P2 | real-fixed #1012; merged; actual timeout baseline failed then 6 manager tests passed; exact-head ci-gate passed | Abort closes live Core Job before raw PID fallback can reopen [manager.rs:1099 -> manager.rs:1106] |
+| WIN-OWNER-TAKEOVER-STALE-PID | W3 caller | Sol (Codex acct 2, R3-W3W9gap) | P2 | real-fixed #1022; merged; baseline failed then 4 owner tests passed; exact-head native ci-gate passed | Owner exits during health wait but raw old PID still killed [owner.rs:57 -> owner.rs:78] |
+| WIN-OWNER-CLEANUP-LIVE-PIDFILE | W3 caller | Sol (Codex acct 2, R3-W3W9gap) | P2 | real-fixed #1022; merged; baseline failed then 4 owner tests passed; exact-head native ci-gate passed | Failed takeover deletes a successor owner PID file before lock acquisition [owner.rs:85 -> owner.rs:87] |
+
+### R3-M12 (finished 22:00 MT; 36 hypotheses, 31 FP, PRs: #1027)
+| ID | Area | Model | Sev | Verdict | Description [location] |
+|---|---|---|---|---|---|
+| M12-DUP01 | DNS | Sol (Codex acct 2, R3-M12) | P1 | duplicate #886 | Cached public DNS burst ends protected query too early [ProtectedSystemResolver.swift:170] |
+| M12-DUP02 | sidecar | Sol (Codex acct 2, R3-M12) | P3 | duplicate #788 | Stale reused legacy PID blocks account startup [TonoSidecarService.swift:302] |
+| M12-DUP03 | websocket | Sol (Codex acct 2, R3-M12) | P3 | duplicate #799 merged | Receive errors leave traffic/connection feeds falsely live [CoreWebSocket.swift:96] |
+| MAC-LOGS-PONG-UNSUPPORTED | websocket | Sol (Codex acct 2, R3-M12) | P2 | real-fixed #1027 (CI pending) | Unsupported log Pong watchdog causes false reconnects and retained Core subscriptions [apps/macos/Tono/Core/CoreWebSocket.swift:375 (baseline 262b1864)] |
+| M12-DUP04 | websocket | Sol (Codex acct 2, R3-M12) | P2 | duplicate #762 | Old runtime log buffer publishes under successor route [CoreWebSocket.swift:235] |

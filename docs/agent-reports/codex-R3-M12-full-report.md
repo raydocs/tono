@@ -1,16 +1,9 @@
-# R3-M12: Codex (GPT-6.1 Sol) findings
+M12 reliability hunt: 2026-09-30
 
-Generated 2026-09-30 22:00 MT from the run's findings.tsv / prs.tsv.
+Audit baseline 46ba1ffc; fix baseline 262b1864; pushed head 6f130e81.
+All eight assigned files read end to end with caller/callee review. No new P0/P1 proved.
 
-## PRs
-
-| PR | Branch | Labels | Auto-merge requested | Title |
-|---|---|---|---|---|
-| 1027 | hunt/sol-r3probe-quiet-logs | needs-hardware | yes | fix(macos): stop reconnecting quiet sing-box log streams |
-
-## Hypotheses
-
-| ID | Area | Sev | Location | Description | Verdict |
+| ID | area | severity | file:line | description | verdict |
 |---|---|---|---|---|---|
 | M12-FP01 | DNS | — | ProtectedDNSProbe.swift:16 | Current product fake-IP pool is rejected | false-positive explicit 198.18.16.0/20 recognition |
 | M12-FP02 | DNS | — | ConfigPipeline+Runtime.swift:142 | Mihomo DNS range disagrees with probes | false-positive dormant YAML generation; production runtime always sing-box |
@@ -48,3 +41,10 @@ Generated 2026-09-30 22:00 MT from the run's findings.tsv / prs.tsv.
 | M12-DUP04 | websocket | P2 | CoreWebSocket.swift:235 | Old runtime log buffer publishes under successor route | duplicate #762 |
 | M12-FP28 | websocket | — | CoreWebSocket.swift:94 | Malformed frames recover feed falsely | false-positive pinned producer emits compatible text JSON; additional protocol violation required |
 | M12-FP29 | controller | — | CoreControllerClient.swift:286 | Readiness cancellation hangs | false-positive bounded requests/sleep budget and cancellation checks |
+
+PR: https://github.com/raydocs/tono/pull/1027
+Branch: hunt/sol-r3probe-quiet-logs; merge-commit auto-merge yes; label needs-hardware (present at final readback); CI pending: changes, core input and macOS policy tests passed; app build/XCTest and privileged tests queued at handoff.
+Counts: {'false-positive': 31, 'duplicate': 4, 'fixed': 1}; total 36. Two rejected hypotheses remain unproved rather than guard-refuted.
+Areas unfinished: none in assigned source audit. Native Swift/XCTest execution and macOS Foundation acceptance await hosted CI/device; cannot run in this Linux VM.
+Evidence: socket-evidence/README.txt and logs-ping-receipt.json; official Linux pinned-source binary is a different build from Tono.
+Hunter: GPT-6.1 Sol (Codex CLI)

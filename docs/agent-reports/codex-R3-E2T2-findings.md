@@ -1,6 +1,6 @@
 # R3-E2T2: Codex (GPT-6.1 Sol) findings
 
-Generated 2026-09-30 21:46 MT from the run's findings.tsv / prs.tsv.
+Generated 2026-09-30 22:00 MT from the run's findings.tsv / prs.tsv.
 
 ## PRs
 
@@ -20,7 +20,7 @@ Generated 2026-09-30 21:46 MT from the run's findings.tsv / prs.tsv.
 | ID | Area | Sev | Location | Description | Verdict |
 |---|---|---|---|---|---|
 | HY2-PROVISION-SPKI | E2 | P1 | tooling/scripts/provision-reality-node.rb:445 | Provisioned HY2 source discards SPKI required by macOS | real-fixed #995; merged 140b5d9f, ci-gate passed |
-| PROVISION-JOURNAL-BANNER | E2 | P2 | tooling/scripts/remote/manage-tono-node-v2.sh:328 | No-entry journal banner rejects healthy restart; unreadable journal is accepted | real-fixed #996; Services CI passed, awaiting macos / build, macos / policy-tests, macos / privileged-tests |
+| PROVISION-JOURNAL-BANNER | E2 | P2 | tooling/scripts/remote/manage-tono-node-v2.sh:328 | No-entry journal banner rejects healthy restart; unreadable journal is accepted | real-fixed #996; Services CI passed, awaiting macos / policy-tests |
 | PROVISION-ROLLBACK-MODE | E2 | P2 | tooling/scripts/remote/manage-tono-node-v2.sh:151 | Immutable snapshot permissions make writable-config rollback verification fail | real-fixed #997; Services CI passed, awaiting macos / build |
 | CONNECT-BENCH-PARTIAL-CACHE | T2 | P2 | tooling/perf/connect-bench/bench.py:127 | Interrupted extraction poisons executable cache reused on retry | real-fixed #998; merged 7e5c333a, ci-gate passed |
 | CONNECT-BENCH-STARTUP-ORPHAN | T2 | P2 | tooling/perf/connect-bench/bench.py:571 | Failed startup leaves benchmark child running and log open | real-fixed #1000; merged 08aac566, ci-gate passed |

@@ -16,3 +16,5 @@
 | R3-A11 | A11 tono-core config/node/sing_box, connection_plan | Sol (Codex acct 2) | finished 21:46 MT | unfinished: none (0 real) | PRs:  |
 | R3-M9M11 | M9 config pipeline/catalog/policy signature, M11 account/keychain | Sol (Codex acct 2) | finished 21:46 MT | unfinished: none | PRs: #1008 #1016 #1019 |
 | R3-M5M7 | M5 runtime coordinator/helper manager, M7 persistence/launch protection/exit heal | Sol (Codex acct 2) | finished 21:46 MT | unfinished: 3 unverified candidates; 1 real-unfixed | PRs:  |
+| R3-W3W9gap | W3 process.rs/proxy.rs, W9 uninstall/legacy cleanup | Sol (Codex acct 2) | finished 22:00 MT | unfinished: 1 real-unfixed (core job spawn window) | PRs: #994 #999 #1004 #1012 #1022 #1026 |
+| R3-M12 | M12 protected connectivity, probes, websocket, sidecar | Sol (Codex acct 2) | finished 22:00 MT | unfinished: none | PRs: #1027 |

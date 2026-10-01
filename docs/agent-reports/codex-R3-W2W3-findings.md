@@ -1,11 +1,12 @@
 # R3-W2W3: Codex (GPT-6.1 Sol) findings
 
-Generated 2026-09-30 21:46 MT from the run's findings.tsv / prs.tsv.
+Generated 2026-09-30 22:00 MT from the run's findings.tsv / prs.tsv.
 
 ## PRs
 
 | PR | Branch | Labels | Auto-merge requested | Title |
 |---|---|---|---|---|
+| PR#1032 | hunt/sol-r3wfp-core-exhaustion | pending | no | fix(windows): release protection after Core recovery exhausts |
 
 ## Hypotheses
 
@@ -45,3 +46,4 @@ Generated 2026-09-30 21:46 MT from the run's findings.tsv / prs.tsv.
 | R3-NET-N05 | W3 | — | netmon.rs:279 | Callback executes blocking native topology query | false-positive reads execute on spawn_blocking worker |
 | R3-NET-N06 | W3 | — | netmon.rs:242 | Failed Notify registration permanently removes recovery | false-positive event feed degrades but independent DNS and periodic data-plane monitoring remain |
 | R3-NET-N07 | W3 | — | netmon/topology.rs:54 | Source-address-only change silently loses required reconnect | false-positive native host-route behavior and need for rebuild unproved; core may redial |
+| WIN-CORE-EXHAUSTION-HEALTHY-BLOCK | W3 | P2 | manager.rs:923 | Exhausted Core retries leave healthy Blocked WFP with no Core while App is unavailable | real-fixed #1032; regression failed before/passed after; strict and successor-arm guards preserved |
