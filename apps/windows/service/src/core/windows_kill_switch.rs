@@ -4798,6 +4798,38 @@ mod tests {
 
     #[tokio::test]
     #[serial]
+    async fn fresh_arm_expiry_releases_when_the_run_intent_cannot_be_retired() -> Result<()> {
+        cleanup().await;
+        arm_bootstrap(&test_config(), "/opt/tono/mihomo", "owner-alice").await?;
+        // A directory where the desired-state file belongs: every read and write of it fails,
+        // like a persistent ProgramData ACL or AV-handle failure.
+        let desired = crate::core::paths::service_paths()
+            .for_owner_key("owner-alice")
+            .desired_state_path();
+        tokio::fs::create_dir_all(&desired).await?;
+        *WANTED_CORE_DEADLINE
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(std::time::Instant::now());
+
+        let retired =
+            crate::core::server::retire_expired_fresh_arm(FRESH_ARM_EPOCH.load(Ordering::Acquire))
+                .await;
+        let wanted = status().await.wanted;
+        let held = crate::core::selective_layer::test_hold_active();
+        tokio::fs::remove_dir_all(&desired).await?;
+        cleanup().await;
+
+        retired?;
+        assert!(
+            !wanted,
+            "a stopped abandoned Connect must not stay Blocked on a run-intent write failure"
+        );
+        assert!(held, "the release keeps AI blocked");
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
     async fn fresh_arm_deadline_preserves_explicit_strict_protection() -> Result<()> {
         cleanup().await;
         arm_bootstrap(&test_config(), "/opt/tono/mihomo", "owner-alice").await?;
