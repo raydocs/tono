@@ -6,8 +6,8 @@
 use anyhow::Result;
 use tono_service_protocol::{
     acquire_service_owner, add_restored_kill_switch_tunnel, initialize_protected_dns_status,
-    reconcile_service_startup, restore_desired_state, restore_kill_switch,
-    restore_windows_kill_switch, retire_unverified_windows_kill_switch,
+    note_core_replay_finished, reconcile_service_startup, restore_desired_state,
+    restore_kill_switch, restore_windows_kill_switch, retire_unverified_windows_kill_switch,
     run_ipc_supervisor_until_shutdown, spawn_kill_switch_watchdog, spawn_protected_dns_watchdog,
     spawn_windows_kill_switch_watchdog,
 };
@@ -712,10 +712,12 @@ async fn restore_reconciled_desired_state() {
         Ok(false) => {}
         Ok(true) => {
             warn!("Update evidence pending: retaining protection and skipping desired-state restoration");
+            finish_core_replay().await;
             return;
         }
         Err(error) => {
             warn!("Update reconciliation uncertain; no desired-state restoration: {error:#}");
+            finish_core_replay().await;
             return;
         }
     }
@@ -724,6 +726,7 @@ async fn restore_reconciled_desired_state() {
             "Unverified Windows protection could not be safely retired after Core reconciliation; \
              keeping IPC available for recovery and skipping desired Core restore: {error:#}"
         );
+        finish_core_replay().await;
         return;
     }
 
@@ -744,6 +747,15 @@ async fn restore_reconciled_desired_state() {
         Err(error) => warn!(
             "Desired state restoration failed; keeping IPC available for GUI recovery: {error:#}"
         ),
+    }
+    finish_core_replay().await;
+}
+
+async fn finish_core_replay() {
+    if let Err(error) = note_core_replay_finished().await {
+        warn!(
+            "Wanted-session release after Core replay settled could not finish yet: {error:#}"
+        );
     }
 }
 
