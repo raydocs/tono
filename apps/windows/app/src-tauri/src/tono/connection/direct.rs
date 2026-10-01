@@ -34,6 +34,30 @@ use super::probes::verify_tun_data_plane;
 /// blackholes that look like random application hangs.
 pub(super) const MAX_DIRECT_ENDPOINTS: usize = 256;
 
+/// Same spellings as `windows_kill_switch`. A non-strict renewal failure releases.
+const DIRECT_RENEW_FAILED_PREFIX: &str = "TONO_DIRECT_RENEW_FAILED";
+/// Same spelling as the Service. An explicit strict kill switch stays Blocked.
+const DIRECT_RENEW_STRICT_BLOCKED_PREFIX: &str = "TONO_DIRECT_RENEW_STRICT_BLOCKED";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum DirectRenewalFollowUp {
+    /// Open the original network and keep AI-service destinations blocked.
+    SelectiveRelease,
+    /// The Service already narrowed to Blocked because strict mode is on.
+    StrictKeepBlocked,
+}
+
+pub(super) fn direct_renewal_follow_up(error: &str) -> DirectRenewalFollowUp {
+    if error.contains(DIRECT_RENEW_STRICT_BLOCKED_PREFIX) {
+        DirectRenewalFollowUp::StrictKeepBlocked
+    } else if error.contains(DIRECT_RENEW_FAILED_PREFIX) {
+        DirectRenewalFollowUp::SelectiveRelease
+    } else {
+        // The Service handler never ran. Still release; do not cut the network.
+        DirectRenewalFollowUp::SelectiveRelease
+    }
+}
+
 pub(super) async fn spawn_direct_lease_heartbeat(state: &Arc<TonoState>, generation: u64, heartbeat: DirectLeaseHeartbeat) {
     let task_state = Arc::clone(state);
     let handle = AsyncHandler::spawn(move || {
@@ -80,26 +104,50 @@ pub(super) async fn direct_lease_heartbeat_loop(state: Arc<TonoState>, generatio
             Err(error) => Err(format!("{error:#}")),
         };
         if let Err(error) = renewal {
-            let redacted = audit::redact(&error);
-            logging!(
-                error,
-                Type::Service,
-                "Tono: authenticated DIRECT lease renewal failed; restricting traffic to fail-closed Blocked: {redacted}"
-            );
+            let raw = format!("{error:#}");
+            let follow_up = direct_renewal_follow_up(&raw);
+            let redacted = audit::redact(&raw);
             state.audit().log(AuditEvent::HealthProbeFail {
                 probe: "directLeaseHeartbeat",
-                error: redacted,
+                error: redacted.clone(),
             });
             // Do not reconnect from inside the heartbeat task: a successful fresh attempt would
-            // replace this task and abort its own caller mid-commit. Restrict immediately; the
-            // independent health monitor observes Blocked and owns the normal reconnect path.
-            if let Err(restrict_error) = service::tono_restrict_bootstrap().await {
-                logging!(
-                    error,
-                    Type::Service,
-                    "Tono: DIRECT renewal failure could not immediately restrict WFP; the Service lease watchdog remains authoritative: {}",
-                    audit::redact(&format!("{restrict_error:#}"))
-                );
+            // replace this task and abort its own caller mid-commit. Do not restrict to Blocked.
+            // A non-strict failure releases the original network and keeps AI destinations blocked.
+            match follow_up {
+                DirectRenewalFollowUp::StrictKeepBlocked => {
+                    logging!(
+                        error,
+                        Type::Service,
+                        "Tono: authenticated DIRECT lease renewal failed; explicit strict kill switch kept traffic Blocked: {redacted}"
+                    );
+                }
+                DirectRenewalFollowUp::SelectiveRelease => {
+                    logging!(
+                        error,
+                        Type::Service,
+                        "Tono: authenticated DIRECT lease renewal failed; releasing general traffic and keeping AI-service destinations blocked: {redacted}"
+                    );
+                    match service::tono_release_kill_switch_applying_narrow().await {
+                        Ok(status) => {
+                            logging!(
+                                warn,
+                                Type::Service,
+                                "Tono: DIRECT renewal failure released general traffic (wanted={}, live={}); AI-service destinations stay blocked",
+                                status.wanted,
+                                status.live
+                            );
+                        }
+                        Err(release_error) => {
+                            logging!(
+                                error,
+                                Type::Service,
+                                "Tono: DIRECT renewal failure could not release general traffic; protection stays as the Service left it: {}",
+                                audit::redact(&format!("{release_error:#}"))
+                            );
+                        }
+                    }
+                }
             }
             return;
         }
@@ -410,7 +458,7 @@ pub(super) fn spawn_optional_direct_after_connected(
                 logging!(
                     warn,
                     Type::Service,
-                    "Tono: optional DIRECT commit rolled back to full tunnel: {error:?}"
+                    "Tono: optional DIRECT commit failed; Service reconciliation leaves traffic Blocked, not on a full tunnel: {error:?}"
                 );
             }
         }
@@ -1786,6 +1834,35 @@ pub fn build_direct_plan(
         reviewed_direct_ports: tono_service_protocol::REVIEWED_DIRECT_PORTS.to_vec(),
     };
     Ok((plan, endpoints))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        DIRECT_RENEW_FAILED_PREFIX, DIRECT_RENEW_STRICT_BLOCKED_PREFIX, DirectRenewalFollowUp,
+        direct_renewal_follow_up,
+    };
+
+    #[test]
+    fn a_direct_renewal_failure_releases_unless_the_kill_switch_is_strict() {
+        assert_eq!(
+            direct_renewal_follow_up(&format!(
+                "{DIRECT_RENEW_FAILED_PREFIX}: proof mismatched; WFP was left unchanged"
+            )),
+            DirectRenewalFollowUp::SelectiveRelease
+        );
+        assert_eq!(
+            direct_renewal_follow_up("connection refused"),
+            DirectRenewalFollowUp::SelectiveRelease,
+            "a transport failure never reached the handler and must not stay Blocked"
+        );
+        assert_eq!(
+            direct_renewal_follow_up(&format!(
+                "{DIRECT_RENEW_STRICT_BLOCKED_PREFIX}: strict kill switch kept traffic Blocked"
+            )),
+            DirectRenewalFollowUp::StrictKeepBlocked
+        );
+    }
 }
 
 #[cfg(test)]
