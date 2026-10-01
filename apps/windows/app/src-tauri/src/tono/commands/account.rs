@@ -613,6 +613,12 @@ where
             inner.catalog_last_synced_at_ms = None;
             inner.catalog_sync_error = None;
             catalog_sync::discard_account_catalog(&mut inner);
+            // Failover dial, pending dial, and the armed bit belong to the
+            // account that just left. The next sign-in must dial its own
+            // selected server; `prepare` only resets this session when the
+            // preferred name or residential id changes, and two accounts
+            // often share both.
+            inner.heal = tono_core::heal::Session::for_preferred("", "none");
             finalized = true;
             state.audit().log(AuditEvent::SignOut);
             release_result
@@ -795,6 +801,29 @@ mod lifecycle_tests {
         assert!(inner.routing.is_none(), "residential credentials must not survive sign-out");
         assert_eq!(inner.catalog_tracker.current_revision(), -1);
         assert!(!cache_path.exists(), "restart must not reseed the signed-out account's catalog");
+        let _ = std::fs::remove_dir_all(&inner.catalog_dir);
+    }
+
+    #[tokio::test]
+    async fn sign_out_drops_the_previous_accounts_failover_dial() {
+        let state = Arc::new(TonoState::for_test());
+        {
+            let mut inner = state.lock().await;
+            inner.account_state = AccountState::Ready;
+            inner.selected_node = Some("Los Angeles".into());
+            inner.heal = tono_core::heal::Session::for_preferred("Los Angeles", "none");
+            inner.heal.dial = "San Jose".into();
+            inner.heal.protection_armed = true;
+            inner.heal.pending_dial = Some("San Jose".into());
+        }
+        close_account_with(Arc::clone(&state), AccountCloseReason::User,
+            |_| async { Ok(()) }, |_| async { Ok(()) }, |_, _| async {}, |_| {},
+        ).await.unwrap();
+        let inner = state.lock().await;
+        assert_eq!(inner.heal.preferred, "");
+        assert_eq!(inner.heal.dial, "");
+        assert!(inner.heal.pending_dial.is_none());
+        assert!(!inner.heal.protection_armed);
         let _ = std::fs::remove_dir_all(&inner.catalog_dir);
     }
 
