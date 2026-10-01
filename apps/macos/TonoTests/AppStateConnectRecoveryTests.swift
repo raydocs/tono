@@ -69,6 +69,32 @@ final class AppStateConnectRecoveryTests: XCTestCase {
         await app.finishPendingDisconnect()
     }
 
+    func testExhaustedTunnelLossLeavesPendingNativeUpdateArmed() async {
+        let blocksConnect = RuntimeCleanup.nativeUpdateBlocksConnect
+        defer { RuntimeCleanup.nativeUpdateBlocksConnect = blocksConnect }
+        RuntimeCleanup.nativeUpdateBlocksConnect = false
+        let app = makeApp()
+        app.isConnected = true
+        app.nativeUpdatePending = true
+        app.tunInterfaceExists = { _ in false }
+        app.nativeUpdateDisconnect = {
+            XCTFail("exhausted TUN loss must not release a pending update")
+            return .init(pending: true, receipt: nil, execution: nil,
+                          disconnectVerified: false, diagnostic: nil)
+        }
+        var state = AppState.CoreMonitorState()
+
+        let first = await app.runCoreMonitorTick(state: &state)
+        XCTAssertEqual(first, .continueMonitoring)
+        let verdict = await app.runCoreMonitorTick(state: &state)
+
+        XCTAssertEqual(verdict, .stopMonitoring)
+        XCTAssertNil(app.nativeUpdateDisconnectTask)
+        XCTAssertFalse(RuntimeCleanup.nativeUpdateBlocksConnect)
+        XCTAssertTrue(app.nativeUpdatePending)
+        XCTAssertNil(app.connectionCoordinator.protectedReconnectTask)
+    }
+
     func testProtectionRepairsAreForgivenOnlyAfterAnUninterruptedHealthyAuditStreak() async {
         let saved = RuntimeState()
         defer { saved.restore() }
