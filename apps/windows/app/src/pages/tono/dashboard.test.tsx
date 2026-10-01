@@ -25,7 +25,9 @@ const mocks = vi.hoisted(() => ({
   tonoPrepareSupportReport: vi.fn(),
   tonoUploadDiagnostics: vi.fn(),
   trafficLive: false,
-  traffic: undefined as { up: number; down: number } | undefined,
+  traffic: undefined as
+    | { up: number; down: number; upTotal?: number; downTotal?: number }
+    | undefined,
   refreshGetClashTraffic: vi.fn(),
   encryptedDnsOverrides: false,
 }))
@@ -514,6 +516,25 @@ describe('dashboard live traffic copy', () => {
 
     expect(screen.queryByText('Reading traffic…')).toBeNull()
     expect(screen.getByText('4.00 KB/s')).toBeDefined()
+  })
+
+  it('adds this connection total next to the upload rate', () => {
+    mocks.status = makeStatus({
+      uiState: 'connected',
+      selectedServer: 'US West 1',
+    })
+    mocks.trafficLive = true
+    mocks.traffic = {
+      up: 2048,
+      down: 4096,
+      upTotal: 512 * 1024 * 1024,
+      downTotal: 512 * 1024 * 1024,
+    }
+    renderDashboard()
+
+    expect(
+      screen.getByText('↑ 2.00 KB/s · This connection 1.00 GB'),
+    ).toBeDefined()
   })
 })
 
