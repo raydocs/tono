@@ -1,0 +1,57 @@
+slot	owner
+R3-A11	claimed by executor (Codex account 2) 2026-09-30 21:22:21 MDT 
+R3-A12-grok	(empty claim dir, no owner file)
+R3-A1A7-grok	bc-24fdf04a grok, claimed Wed Sep 30 18:39:42 MDT 2026 
+R3-A2A4	claimed by executor (Codex account 2) 2026-09-30 20:51:30 MDT 
+R3-A5A6	claimed by executor (Codex account 2) 2026-09-30 21:56:28 MDT 
+R3-A8A9-grok	bc-f1167603 grok, claimed Wed Sep 30 18:42:04 MDT 2026 
+R3-C4E1	claimed by executor (Codex account 2) 2026-09-30 20:55:31 MDT 
+R3-C7c	claimed by executor (Codex account 1) 2026-09-30 19:18:41 MDT 
+R3-C8-grok	bc-cc0186dc grok, claimed Wed Sep 30 18:51:51 MDT 2026 
+R3-C9-grok	bc-cc0186dc grok, claimed Wed Sep 30 19:09:36 MDT 2026 
+R3-E2T2	claimed by executor (Codex account 2) 2026-09-30 20:31:55 MDT 
+R3-M10gap	claimed by executor (Codex account 2) 2026-09-30 20:19:32 MDT 
+R3-M12	claimed by executor (Codex account 2) 2026-09-30 21:36:24 MDT 
+R3-M13	claimed by executor (Codex account 1) 2026-09-30 19:18:41 MDT (took empty claim) 
+R3-M13-grok	bc-cc0186dc grok 4.7 2026-09-30 19:33 (codex1 credits ran out) 
+R3-M1M3	claimed by executor (Codex account 2) 2026-09-30 21:39:45 MDT 
+R3-M4	claimed by executor (Codex account 1) 2026-09-30 19:18:41 MDT 
+R3-M5M7	claimed by executor (Codex account 2) 2026-09-30 21:28:42 MDT 
+R3-M6M8	claimed by executor (Codex account 2) 2026-09-30 20:47:10 MDT 
+R3-M9M11	claimed by executor (Codex account 2) 2026-09-30 20:55:11 MDT 
+R3-MacQuitHold	claimed by executor (Codex account 2) 2026-09-30 21:53:07 MDT 
+R3-P1mac	claimed by executor (Codex account 2) 2026-09-30 22:35:55 MDT 
+R3-P1win	claimed by executor (Codex account 2) 2026-09-30 22:36:15 MDT 
+R3-RegMac	claimed by executor (Codex account 2) 2026-09-30 22:08:11 MDT 
+R3-RegWin	claimed by executor (Codex account 2) 2026-09-30 22:01:49 MDT 
+R3-T1	claimed by executor (Codex account 1) 2026-09-30 19:18:41 MDT 
+R3-T1-grok	bc-5d2928a1 grok, claimed Wed Sep 30 18:54:00 MDT 2026 
+R3-W1hi	claimed by executor (Codex account 2) 2026-09-30 19:34:12 MDT 
+R3-W1lo	claimed by executor (Codex account 2) 2026-09-30 21:12:59 MDT 
+R3-W2W3	claimed by executor (Codex account 2) 2026-09-30 21:36:04 MDT 
+R3-W3W9gap	claimed by executor (Codex account 2) 2026-09-30 20:19:12 MDT 
+R3-W4W7	claimed by executor (Codex account 2) 2026-09-30 20:52:51 MDT 
+R3-W5gap	claimed by executor (Codex account 2) 2026-09-30 19:54:00 MDT 
+R3-W6W8-grok	bc-cc0186dc grok, claimed Wed Sep 30 18:30:56 MDT 2026 
+R3-W9inst	claimed by executor (Codex account 2) 2026-09-30 22:13:32 MDT 
+R4-FailOpen	claimed by executor (Codex account 2) 2026-09-30 22:55:10 MDT 
+R4-Issue1050	claimed by executor (Codex account 2) 2026-09-30 23:00:11 MDT 
+R4-Issue1051	claimed by executor (Codex account 2) 2026-09-30 23:13:34 MDT 
+R4-KSdeep	claimed by executor (Codex account 2) 2026-09-30 22:56:51 MDT 
+R4-RegCP	claimed by executor (Codex account 2) 2026-09-30 22:56:31 MDT 
+R4-RestoreDNS	claimed by executor (Codex account 2) 2026-09-30 22:55:30 MDT 
+R4-Switch	claimed by executor (Codex account 2) 2026-09-30 22:56:10 MDT 
+R4-UnarmedBackoff	claimed by executor (Codex account 2) 2026-09-30 23:25:57 MDT 
+R4-UpdateInstall	claimed by executor (Codex account 2) 2026-09-30 22:55:50 MDT 
+W1-grok-mac-config	(empty claim dir, no owner file)
+W1-grok-mac-runtime	Held for the Grok 4.7 Cursor cloud agent (parent's claim). Codex executor briefly claimed at 17:51 MT and stopped within a minute without work. 
+W1-grok-win-svc	Held for the Grok 4.7 Cursor cloud agent (parent's claim). Codex executor briefly claimed at 17:51 MT and stopped within a minute without work. 
+W1-grok-win-wfp	Held for the Grok 4.7 Cursor cloud agent (parent's claim). Codex executor briefly claimed at 17:51 MT and stopped within a minute without work. 
+W1-qg	(empty claim dir, no owner file)
+W1-sol-cp	claimed by executor (Codex account 2) 2026-09-30 17:51:53 MDT 
+W1-sol-win-app	claimed by executor (Codex account 2) 2026-09-30 17:53:11 MDT 
+W1-sol-win-trust	claimed by executor (Codex account 2) 2026-09-30 17:53:13 MDT 
+W2-grok-agents	(empty claim dir, no owner file)
+W2-grok-helper	(empty claim dir, no owner file)
+W2-grok-win-app	(empty claim dir, no owner file)
+W2-sol-leftovers	claimed by executor (Codex account 2) 2026-09-30 17:53:15 MDT 

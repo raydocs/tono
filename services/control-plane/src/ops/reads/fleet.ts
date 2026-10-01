@@ -32,7 +32,7 @@ import {
   operationsActivity,
   operationsNodeSelections,
 } from './activity';
-import { retireDependencies, revokeExitToken } from '../retire-dependencies';
+import { assertCatalogHomeUnbound, retireDependencies, revokeExitToken } from '../retire-dependencies';
 
 export async function managedCatalogTemplate(e: Env) {
   const row = await e.DB.prepare(
@@ -163,6 +163,7 @@ export async function operationsRetirePreview(e: Env, name: string, cache?: OpsR
   ]);
   const node = fleet.nodes.find((candidate) => candidate.name === name);
   if (!node) throw new ApiError(404, 'NOT_FOUND', 'Fleet node not found');
+  await assertCatalogHomeUnbound(e, name);
   const catalogPlan = retirementCatalogPlan(catalog.yaml, name);
   const listedCount = splitManagedCatalogProxies(catalog.yaml).items.length;
   if (catalogPlan.changes.catalogEntryRemoved && listedCount <= 1) {
