@@ -125,7 +125,19 @@ enum SelectiveFailOpen {
     /// BLACKHOLE. No answer, unparseable output or a different best match
     /// keeps the delete, so a Tono blackhole is never left behind.
     static func readbackShowsForeignRoute(_ output: String, prefix: String) -> Bool {
-        guard let identity = routeReadbackIdentity[prefix] else { return false }
+        guard let names = readbackFlags(output, prefix: prefix) else { return false }
+        return !names.isEmpty && !names.contains("BLACKHOLE")
+    }
+
+    /// The readback names this exact prefix as a blackhole: a Tono route
+    /// that is still installed.
+    static func readbackShowsTonoBlackhole(_ output: String, prefix: String) -> Bool {
+        readbackFlags(output, prefix: prefix)?.contains("BLACKHOLE") ?? false
+    }
+
+    /// The flag names of an exact-prefix readback; nil for any other answer.
+    private static func readbackFlags(_ output: String, prefix: String) -> [String]? {
+        guard let identity = routeReadbackIdentity[prefix] else { return nil }
         var fields: [String: String] = [:]
         for line in output.split(separator: "\n") {
             let parts = line.split(separator: ":", maxSplits: 1)
@@ -137,10 +149,9 @@ enum SelectiveFailOpen {
         guard fields["destination"] == identity.destination,
               fields["mask"] == identity.mask,
               let flags = fields["flags"], flags.hasPrefix("<"), flags.hasSuffix(">") else {
-            return false
+            return nil
         }
-        let names = flags.dropFirst().dropLast().split(separator: ",").map(String.init)
-        return !names.isEmpty && !names.contains("BLACKHOLE")
+        return flags.dropFirst().dropLast().split(separator: ",").map(String.init)
     }
 
     /// A command may run only when it names exactly one of the two prefixes
@@ -333,6 +344,36 @@ enum SelectiveFailOpenInstaller {
         return SelectiveFailOpen.readbackShowsForeignRoute(
             String(decoding: result.output.prefix(16 * 1024), as: UTF8.self), prefix: prefix
         )
+    }
+
+    /// Read-only. True while the AI layer is still on this Mac: an AI-suffix
+    /// resolver that holds the sinkhole body, or a blackhole on either
+    /// prefix. Only Tono writes either one. This reads the system, not the
+    /// recovery record or the receipts, so a lost record still counts and a
+    /// corrupt receipt with nothing left does not. A route that cannot be
+    /// read counts as still there.
+    static func layerRemains(
+        directory: String = "/etc/resolver",
+        routeReadback: ([String]) -> String? = { args in
+            guard let executable = args.first, SelectiveFailOpen.commandIsPrefixOnly(args),
+                  let result = try? KillSwitchManager.run(executable, Array(args.dropFirst()), deadline: 3)
+            else { return nil }
+            // A nonzero exit means no route holds this prefix.
+            return result.status == 0 ? String(decoding: result.output.prefix(16 * 1024), as: UTF8.self) : ""
+        }
+    ) -> Bool {
+        if isSecureDirectory(directory) {
+            let body = Data(SelectiveFailOpen.resolverBody().utf8)
+            for suffix in SelectiveFailOpen.suffixes where SelectiveFailOpen.resolverPath(for: suffix) != nil {
+                guard let current = try? resolverOriginal(at: directory + "/" + suffix) else { return true }
+                if current.contents == body { return true }
+            }
+        }
+        for args in SelectiveFailOpen.routeGetArguments() {
+            guard let output = routeReadback(args), let prefix = args.last else { return true }
+            if SelectiveFailOpen.readbackShowsTonoBlackhole(output, prefix: prefix) { return true }
+        }
+        return false
     }
 
     private static let originalsPath = "/Library/Application Support/Tono/selective-resolvers"

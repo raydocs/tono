@@ -1639,18 +1639,25 @@ func releaseIfTonoWasRemoved(
 /// A DNS restore failure still opens PF but keeps the installation: this
 /// daemon's DNS recovery and the next removal check retry it (#1165). So
 /// does a Core that survived SIGKILL: the next removal check stops it again
-/// (#1251). So does an AI-layer removal (resolver restore or route delete)
-/// that stayed pending: only this helper's start and watchdog retry it, and
-/// without them the `/etc/resolver` sinkhole outlives Tono.
+/// (#1251). So does an AI layer (sinkhole resolver or blackhole route) still
+/// on the Mac: only this helper's start and watchdog retry its removal, and
+/// without them the `/etc/resolver` sinkhole outlives Tono. That is read
+/// from the system, not the recovery record: a full disk can lose the record
+/// while the layer stays, and a corrupt receipt can keep the record pending
+/// after the layer is gone. With the record lost, start-time recovery has
+/// nothing to retry, so this check removes what it finds before deciding.
 func releaseRemovedInstallationLocked(
     _ storage: UpdateStorage,
     release: (UpdateStorage) -> EmergencyReleaseOutcome = { emergencyRelease(underLock: $0) },
-    selectiveRemovalPending: () -> Bool = { KillSwitchManager.selectiveRemovalPending() },
+    clearSelectiveLayer: () -> Bool = {
+        if SelectiveFailOpenInstaller.layerRemains() { SelectiveFailOpenInstaller.removeBestEffort() }
+        return !SelectiveFailOpenInstaller.layerRemains()
+    },
     removeInstallation: () -> Void = { removeHelperInstallation(); bootoutRemovedHelper() }
 ) -> Bool {
     switch release(storage) {
     case .released:
-        if selectiveRemovalPending() {
+        if !clearSelectiveLayer() {
             fputs("tono: removal kept the helper because the AI-service layer was not removed; retrying later\n", stderr)
             return false
         }
