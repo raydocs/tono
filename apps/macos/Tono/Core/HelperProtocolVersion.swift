@@ -305,10 +305,16 @@ nonisolated enum HelperProtocolVersion {
     ///   `/etc/resolver` files for first-party AI suffixes. Arm, disarm, and
     ///   emergency recovery remove them. The commands cannot name a default
     ///   route. A failure leaves the original network open.
-    /// - 4.52.8 → 4.52.9: one protected-DNS server-count cap (32) for save,
+    /// - 4.52.8 → 4.52.9: a release whose placeholder rule file cannot be
+    ///   written still flushes the anchor and removes the intent, and then
+    ///   keeps the standalone emergency main instead of reloading a legacy
+    ///   pf.conf that would load the stale rules back. A PF repair records
+    ///   repairedSinceArm before it can replace kernel rules, so a repair that
+    ///   throws after loading still makes the app re-arm.
+    /// - 4.52.9 → 4.52.10: one protected-DNS server-count cap (32) for save,
     ///   load and write; enable refuses over-cap lists before any change (MAC-
     ///   DNS-SNAPSHOT-OVER-8).
-    static let current = "4.52.9"
+    static let current = "4.52.10"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS
