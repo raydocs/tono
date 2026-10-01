@@ -462,6 +462,11 @@ fn execute(recovery: bool) -> Result<(), Error> {
                     // first authenticated target-identity App adopts on next
                     // start. An already registered successor is re-proved the
                     // same way after its recorded incarnation exited.
+                    // Sample only when the publishing run did not. Do not move
+                    // a floor that was saved before the successor could start.
+                    if store.attempt()?.publication_clock.is_none() {
+                        store.note_publication_clock(native::process_clock_now())?;
+                    }
                     if a.execution != tx::Execution::Replaced {
                         store.execution(tx::Execution::Replaced)?;
                     }
@@ -522,6 +527,10 @@ fn execute(recovery: bool) -> Result<(), Error> {
             store.execution(tx::Execution::RolledBack)?;
             return Ok(None);
         }
+        // The new bytes are durable. Record the process-start clock before
+        // creating a successor, so an App that was already mapped to the old
+        // file cannot adopt by hashing the new bytes on disk.
+        store.note_publication_clock(native::process_clock_now())?;
         // Create after every replacement, while target handles deny write/delete.
         // Persist PID + kernel creation time + image digest before running any
         // user code. An old App mapped at the same path can never satisfy this.
@@ -919,6 +928,7 @@ mod tests {
                     execution: tx::Execution::Staged,
                     executor: Some(executor.clone()),
                     disconnect: None,
+                    publication_clock: None,
                 }),
             })
             .unwrap();
@@ -1002,6 +1012,7 @@ mod tests {
                     execution: tx::Execution::Staged,
                     executor: Some(executor.clone()),
                     disconnect: None,
+                    publication_clock: None,
                 }),
             })
             .unwrap();
@@ -1155,6 +1166,7 @@ mod tests {
                     execution: tx::Execution::Staged,
                     executor: Some(executor.clone()),
                     disconnect: None,
+                    publication_clock: None,
                 }),
             })
             .unwrap();
@@ -1291,6 +1303,7 @@ mod tests {
                     execution: tx::Execution::Staged,
                     executor: Some(executor.clone()),
                     disconnect: None,
+                    publication_clock: None,
                 }),
             })
             .unwrap();

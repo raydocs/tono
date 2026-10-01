@@ -1,0 +1,7 @@
+| ID | 问题（一句） | 状态 | Issue / PR | 等级 | 剩余限制 |
+|---|---|---|---|---|---|
+| WIN-ACTIVITY-PROCESS-PROTOTYPE | A constructor.exe connection returns an inherited function as its process family and crashes the Activity page | in-PR | hunt/sol-winapp-activity-process-key | 中·已确认（P2，实际页面回归） | Actual Windows game socket ownership not captured; real executable/networking capability verified from developer sources |
+
+`activity-model.ts:133` read an ordinary object's inherited properties as if they were declared family labels. The live connection normalization preserves a valid process filename, `toActivityRow` adopts the function returned for the lowercase constructor stem, and `aggregateActivityApps` throws at its string operation during `ActivityPage` rendering. The actual React page regression reproduces the exception before the fix and renders the executable normally afterward.
+
+A plausible real trigger is Constructor Plus online multiplayer: its [developer support post](https://steamcommunity.com/app/898800/discussions/4/1644290549115899267/) identifies Constructor.exe, and the [official store](https://store.steampowered.com/app/898800/Constructor_Plus/) lists online multiplayer. Socket ownership by that process is an inference, not a captured Windows trace. P2 reflects the narrow process-name condition and page-level failure, not a machine or network crash. Only declared own family labels are now used; unknown executable basenames retain the existing string fallback.

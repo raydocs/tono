@@ -227,7 +227,10 @@ pub async fn tono_install_update(
         super::emit_status(&app, &super::status_of(&inner));
     }
     super::quit::resync_after_cancelled_quit(app).await;
-    outcome.map_err(|e| format!("Protected update stopped; evidence and protection retained: {e:#}"))
+    // The Service error already says whether traffic was released or the barrier
+    // stayed. Do not wrap every failure, including a released spawn failure, as
+    // "protection retained".
+    outcome.map_err(|e| format!("Protected update stopped: {e:#}"))
 }
 
 /// Fold the connection FSM once a native update has taken over, whatever the
