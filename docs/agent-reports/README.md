@@ -10,3 +10,4 @@ Collected 2026-09-30 (MDT) from the box; credential values, auth paths, and emai
 - [sol2-issue-n05-1.md](sol2-issue-n05-1.md) — latent OIDC account-linking finding and suggested fix; 2026-09-30; source model: GPT-6.1 Sol.
 - [fix-bakeoff-report.md](fix-bakeoff-report.md) — Codex versus GLM versus Cursor fix comparison; 2026-09-30; source model: GPT-6.1 Sol/local CLI with GLM-5.3 and Cursor data.
 - [glm-fix-readme.md](glm-fix-readme.md) — GLM-5.3 fix/hunt harness description and workflow; 2026-09-30; source model: GLM-5.3 harness documentation.
+- [W1-qg.md](W1-qg.md) — quality-gate slot: decision split, flake retry, type ratchet, coverage floor, parser properties, logout successor, advisory audit; 2026-09-30; source model: Grok 4.7.
