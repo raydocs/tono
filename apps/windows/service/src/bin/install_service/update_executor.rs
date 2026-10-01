@@ -583,7 +583,7 @@ fn execute(recovery: bool) -> Result<(), Error> {
                 if native::strict_kill_switch_intent_on_disk() {
                     return Ok(());
                 }
-                tono_service_protocol::emergency_disarm_windows_kill_switch().await
+                tono_service_protocol::emergency_disarm_windows_kill_switch_applying_narrow().await
             })?
         })();
         // Restore supervision even if stop or release failed; configuring
