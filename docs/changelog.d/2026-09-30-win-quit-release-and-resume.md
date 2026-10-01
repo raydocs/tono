@@ -1,6 +1,6 @@
 ## 2026-09-30 · Windows 退出前补查服务并恢复取消退出后的目录同步
 - 归属：SHIP_PLAN §2 item 10；Windows App 退出、重启与服务保护释放。
-- 来源：main `026e747c` → 分支 `codex2/win-quit-fixes`；PR #784；已并入 `origin/main` `9d3d36c8`。发现前释放与取消后恢复目录同步仍在。
+- 来源：main `026e747c` → 分支 `codex2/win-quit-fixes`；PR #784；已并入 `origin/main` `e504f6f4`。发现前释放与取消后恢复目录同步仍在。
 - 缺陷修复：重启 App 后在保护发现完成前退出，原只看本地 FSM 而漏掉上次留下的 Core/WFP/DNS；现本地未报告保护时限时 1 秒补查 Service，当前用户为 Service 活动 owner 且其 kill switch wanted 或 Core 运行时走显式释放（kill switch 聚合是全机的，其他用户的屏障不在此释放，避免 owner-gated 拒绝把退出卡住）。`TonoState` 创建失败时也可走不依赖会话的 owner-gated 释放，后台完成释放及自有系统代理清理，不随退出等待超时中止；服务按 DNS → Core/持久意图退役 → WFP 顺序处理。关联 `WIN-QUIT-BEFORE-DISCOVERY-SKIPS-RELEASE`。
 - 缺陷修复：取消退出后原不再刷新云目录与流量策略；现保护重同步后为 Ready、仍有账户且未在关闭账户的当前认证代恢复既有周期同步。重启的两处取消返回也调用重同步。关联 `WIN-CANCELLED-QUIT-STOPS-CATALOG-SYNC`。
 - 新增/优化：无。补查不可读或超时时沿用原退出决定；保留 owner gate 和待更新退出围栏，未重启退出流程未中止的遥测与日志上传。
