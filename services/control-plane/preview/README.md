@@ -1,9 +1,9 @@
 # Isolated operations-preview runbook
 
 This directory is a **local-only preparation**. Rendering configuration and
-emitting synthetic SQL make no Cloudflare request. Do not create resources,
-apply a remote migration, set a secret, or deploy until a human explicitly
-approves the remote-change list below.
+emitting synthetic SQL make no Cloudflare request. Create resources, apply a
+remote migration, set a secret, or deploy only when the task names the
+remote-change list below (conditions in the repository `AGENTS.md`).
 
 ## Isolation design
 
@@ -11,7 +11,7 @@ approves the remote-change list below.
 | --- | --- | --- |
 | API Worker | `tono-control-plane-ops-preview`, `workers_dev: false`, no route | Not publicly reachable; only the preview admin service binding can invoke it. |
 | Admin Worker | `tono-admin-ops-preview`, one new hostname selected in `.preview.env` | The renderer rejects existing production hosts and every `*.afk.ccwu.cc` hostname except a unique `ops-preview-<commit>.afk.ccwu.cc` name. |
-| D1 | `tono-control-plane-ops-preview` | A new database ID is required; the renderer accepts only a UUID supplied from the ignored local file. |
+| D1 | `tono-control-plane-ops-preview` | A new database ID is required; the renderer accepts only a UUID supplied from the ignored local file, and refuses the production database id. |
 | Service binding | `API -> tono-control-plane-ops-preview` | It cannot point at the production API name. |
 | R2 | Two empty buckets under `tono-ops-preview-*` | The renderer refuses non-preview bucket names; do not copy production objects. |
 | Access | One new self-hosted application for the new admin hostname | Separate audience, explicit preview-only Allow policy, no production-policy edit. |
@@ -44,9 +44,9 @@ shows `0028` **pending**, which matches an unfenced schema.
 
 The isolated preview D1 is the database that received 0001–0028.
 
-## Expected remote changes — approval gate
+## Expected remote changes — only when the task names them
 
-Preview storage that has already been created after explicit approval:
+Preview storage that has already been created:
 
 1. D1 `tono-control-plane-ops-preview` — created; migrations 0001–0028 applied;
    synthetic seed applied.
@@ -78,7 +78,7 @@ The Access administrator address is an operator secret/configuration value. It
 belongs only in `ACCESS_ADMIN_EMAILS` through `wrangler secret put`; it is never
 added to this repository or to the seed data.
 
-## Commands to run only after approval
+## Commands to run only when the task names them
 
 Use the authorized Wrangler profile without printing its credential. Replace
 only resource identifiers in the ignored local file; never put secret values on
@@ -151,7 +151,7 @@ host is used only to exercise the "关闭网页直连" UI path, never by a previ
 client. These two first writes exercise revision conflict behavior and make the
 synthetic Seoul incident catalog-listed.
 
-To exercise a partial source failure after approval, apply the emitted scenario
+To exercise a partial source failure, apply the emitted scenario
 to the preview D1 and then manually refresh the console. Re-run the normal seed
 to restore it.
 
@@ -166,5 +166,5 @@ There is no migration rollback for a preview database: if an isolated preview
 schema is unusable, clear the preview D1 in place with
 `tooling/scripts/wipe-d1-in-order.mjs` (recreating it changes its `database_id`
 and forces re-rendering the local config), and delete and recreate **only its
-own** R2/Workers/Access resources after explicit approval. Never remove the
+own** R2/Workers/Access resources when the task names them. Never remove the
 rollup writer fence from a shared database as a recovery action.

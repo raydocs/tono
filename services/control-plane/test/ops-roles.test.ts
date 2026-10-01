@@ -172,4 +172,54 @@ describe('ops roles', () => {
     expect((await ops('incidents/inc-1/ack', json({}))).status).toBe(200);
     expect((await ops('users/no-such-user', json({ notes: 'x' }, 'PATCH'))).status).not.toBe(403);
   });
+
+  it('shared-admin resources are role-gated on the Access door and raw logs need customers.raw-logs', async () => {
+    bindRole('viewer');
+    expect((await ops('exit-catalog', json({ yaml: 'x', expectedRevision: 1 }, 'PUT'))).status).toBe(403);
+    expect((await ops('signup-allowlist', json({ email: 'a@example.com' }))).status).toBe(403);
+    bindRole('operator');
+    expect((await ops('exit-catalog')).status).toBe(200);
+    const raw = await ops('diagnostics/logs/no-such-log');
+    expect(raw.status).toBe(403);
+    expect(((await raw.json()) as { error: { code: string } }).error.code).toBe('ROLE_FORBIDDEN');
+    bindRole(undefined);
+    expect((await ops('diagnostics/logs/no-such-log')).status).not.toBe(403);
+  });
+
+  it('legacy reads are role-gated and a path no table knows is owner-only', async () => {
+    bindRole('viewer');
+    expect((await ops('catalog-revisions')).status).toBe(403);
+    expect((await ops('fleet-nodes')).status).toBe(200);
+    expect((await ops('no-such-resource')).status).toBe(403);
+    bindRole(undefined);
+    expect((await ops('no-such-resource')).status).toBe(404);
+  });
+
+  it('requires catalog permissions for catalog jobs while preserving ordinary operator jobs', async () => {
+    await db().prepare(
+      `INSERT INTO ops_node_profiles(id, catalog_name, status, created_at, updated_at)
+       VALUES('profile-1', ?, 'active', ?, ?)`,
+    ).bind(NODE, NOW, NOW).run();
+    const path = `nodes/${encodeURIComponent(NODE)}/jobs`;
+    bindRole('operator');
+    const retire = await ops(path, json({ type: 'catalog_retire', confirmName: NODE }));
+    expect(retire.status).toBe(403);
+    expect(await retire.json()).toMatchObject({ error: { code: 'ROLE_FORBIDDEN' } });
+    const relist = await ops(path, json({ type: 'catalog_relist', confirmName: NODE, override: true }));
+    expect(relist.status).toBe(403);
+    expect(await relist.json()).toMatchObject({ error: { code: 'ROLE_FORBIDDEN' } });
+    expect(await db().prepare('SELECT COUNT(*) AS count FROM ops_node_jobs').first('count')).toBe(0);
+
+    expect((await ops(path, json({ type: 'xray_restart', confirmName: NODE }))).status).toBe(201);
+    bindRole('owner');
+    expect((await ops(path, json({ type: 'catalog_retire', confirmName: NODE }))).status).toBe(201);
+    expect((await ops(path, json({ type: 'catalog_relist', confirmName: NODE, override: true }))).status).toBe(201);
+  });
+
+  it('viewer is refused on PATCH signup-allowlist/{id}', async () => {
+    bindRole('viewer');
+    const res = await ops('signup-allowlist/no-such-entry', json({ note: 'x' }, 'PATCH'));
+    expect(res.status).toBe(403);
+    expect(((await res.json()) as { error: { code: string } }).error.code).toBe('ROLE_FORBIDDEN');
+  });
 });

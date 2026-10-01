@@ -47,14 +47,16 @@ pub use core::{
     ActiveOwnerState, DesiredState, REPAIR_IN_PROGRESS_EXIT_CODE, ServiceOwnerGuard,
     ServiceRepairGate, acquire_service_owner, acquire_service_repair_gate,
     add_restored_kill_switch_tunnel, cleanup_stale_owner_state, emergency_disarm_kill_switch,
-    emergency_disarm_windows_kill_switch, initialize_protected_dns_status, load_active_owner,
-    load_owner_desired_state, owner_goodbye_requested, prepare_for_service_replacement,
-    prepare_service_install_directory, reconcile_service_startup, relock_restored_tunnel,
+    emergency_disarm_windows_kill_switch, emergency_disarm_windows_kill_switch_applying_narrow,
+    initialize_protected_dns_status, load_active_owner,
+    load_owner_desired_state, note_core_replay_finished, owner_goodbye_requested,
+    prepare_for_service_replacement, prepare_service_install_directory,
+    reconcile_service_startup, relock_restored_tunnel, remove_tono_resolver_rule_within,
     residual_filters_present, restore_desired_state, restore_kill_switch,
     restore_windows_kill_switch, retire_unverified_windows_kill_switch, run_ipc_server,
     run_ipc_supervisor_until_shutdown, service_lifecycle_state, set_service_lifecycle_state,
     spawn_kill_switch_watchdog, spawn_protected_dns_watchdog, spawn_windows_kill_switch_watchdog,
-    stop_ipc_server,
+    stop_ipc_server, SCM_STOP_WAIT_HINT, stop_pending_refresh_due,
 };
 #[cfg(all(feature = "standalone", windows))]
 pub use core::{note_power_event, start_network_monitor};

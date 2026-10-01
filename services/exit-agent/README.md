@@ -44,8 +44,8 @@ The roster cycle is ordered deliberately:
    missing allowlist, failed write) still lets the Xray reconcile and counter
    read run; the counters are kept in the state file and the round then exits
    non-zero with no ACK or usage report.
-3. POST the roster's `observedAt` to `/api/v1/home/roster-ack` with the same
-   bearer token.
+3. Persist only the reconciled client inventory, then POST the roster's
+   `observedAt` to `/api/v1/home/roster-ack` with the same bearer token.
 4. Persist and deliver usage state.
 5. Only after counters were valid, state was saved, and any usage was delivered,
    POST `{meteringProtocolVersion: 2, observedAt}` to
@@ -53,8 +53,13 @@ The roster cycle is ordered deliberately:
    replaying an old pending queue alone does not prove readiness.
 
 A failed reconciliation is never acknowledged. A failed acknowledgement exits
-non-zero before this round changes the durable state, so the roster and any
-queued usage are retried on the next run.
+non-zero before this round changes the durable usage state, so the roster and
+any queued usage are retried on the next run. The client inventory already
+reflects the installed clients, so the next roster can still revoke them. A
+refusal after a partial reconcile, or after a later check such as a counter
+read or a queued report outside the roster clock, records that same known
+inventory and still does not acknowledge or advance usage totals. An unknown
+inventory is not written.
 
 The state lock covers the entire roster/reconcile/counter/delivery cycle. If a
 timer and an operator start overlap, the second run exits without observing or
@@ -99,7 +104,11 @@ A disabled or retired node gets `403 EXIT_NODE_DISABLED` on the roster. Only
 that answer makes the agent remove every `u:` client and `shared-legacy`,
 empty the hy2 allowlist, take a best-effort final counter sample into the
 state file (reported by the next round that may report) and exit non-zero;
-stop `tono-xray` afterwards. Any
+stop `tono-xray` afterwards and start it again only when the node is
+re-enabled. `shared-legacy` comes back only when Xray restarts and reloads its
+static config, so re-enabling a node whose Xray kept running leaves it removed.
+The node keeps getting this answer after its token is rotated while disabled:
+disabling saves the deployed token's hash, which only ever earns the 403. Any
 other HTTP error or network failure keeps the last roster and retries.
 
 Xray drops every client added over its management API when it restarts. Each
@@ -191,5 +200,5 @@ Register the existing catalog node name/source ID, not a second ` · hy2`
 node identity. Do not borrow or rotate another node's token. Give the timer
 only write access to `/opt/tono-hy2` and its lock directory; keep its credential
 file root-owned mode 0600. The existing checker-directory binding/restart
-preflight above still applies. Registration and node deployment require the
-operator's explicit approval; neither publishes a catalog or changes a feed.
+preflight above still applies. Register and deploy a node only when the task
+names it (see the repository `AGENTS.md`); neither publishes a catalog or changes a feed.

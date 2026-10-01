@@ -182,6 +182,83 @@ describe('rollNodeCycle', () => {
     expect(summary.autoUnlistAtPct).toBe(95);
   });
 
+  it('counts traffic since the last sample when a cycle expires, including a counter reset', async () => {
+    const end = utc(2025, 4, 1);
+    const profile = { cycle_kind: 'calendar_day', cycle_anchor_day: 1, quota_counts: 'in_out' };
+    const first = await rollNodeCycle(
+      db(), 'Tokyo · North', profile,
+      { in: 100, out: 40, at: end - 7200 }, end - 7200,
+    );
+    await rollNodeCycle(
+      db(), 'Tokyo · North', profile,
+      { in: 150, out: 80, at: end - 1800 }, end - 1800,
+    );
+
+    const rolled = await rollNodeCycle(
+      db(), 'Tokyo · North', profile,
+      { in: 210, out: 20, at: end + 1800 }, end + 1800,
+    );
+    expect(rolled?.status).toBe('open');
+    expect(Number(rolled?.cycle_start)).toBe(end);
+    expect(Number(rolled?.used_bytes)).toBe(80);
+    expect(Number(rolled?.resets_detected)).toBe(1);
+    expect(Number(rolled?.counter_in_start)).toBe(210);
+    expect(Number(rolled?.counter_out_start)).toBe(20);
+    expect(Number(rolled?.counter_in_last)).toBe(210);
+    expect(Number(rolled?.counter_out_last)).toBe(20);
+
+    const closed = await db().prepare(
+      'SELECT used_bytes, status FROM node_traffic_cycles WHERE id = ?',
+    ).bind(first!.id).first<Record<string, unknown>>();
+    expect(closed?.status).toBe('closed');
+    expect(Number(closed?.used_bytes)).toBe(90);
+  });
+
+  it('keeps the expired cycle open when opening the next one fails', async () => {
+    const name = 'Quota Gap Node';
+    await insertProfile(name, { cycle_kind: 'calendar_day', cycle_anchor_day: 1 });
+    const start = utc(2025, 3, 1);
+    const end = utc(2025, 4, 1);
+    const profile = { cycle_kind: 'calendar_day', cycle_anchor_day: 1, quota_counts: 'in_out' };
+    const first = await rollNodeCycle(
+      db(), name, profile,
+      { in: 100, out: 20, at: start + 3600 }, start + 3600,
+    );
+    await db().prepare(
+      'UPDATE node_traffic_cycles SET counter_in_last = ?, counter_out_last = ? WHERE id = ?',
+    ).bind(400, 50, first!.id).run();
+
+    await db().prepare(
+      `CREATE TRIGGER test_fail_next_cycle_insert
+       BEFORE INSERT ON node_traffic_cycles
+       BEGIN
+         SELECT RAISE(ABORT, 'CYCLE_INSERT_FAILED');
+       END`,
+    ).run();
+    try {
+      await expect(rollNodeCycle(
+        db(), name, profile,
+        { in: 450, out: 70, at: end + 3600 }, end + 3600,
+      )).rejects.toThrow('CYCLE_INSERT_FAILED');
+    } finally {
+      await db().prepare('DROP TRIGGER test_fail_next_cycle_insert').run();
+    }
+
+    const still = await db().prepare(
+      'SELECT status, counter_in_last FROM node_traffic_cycles WHERE id = ?',
+    ).bind(first!.id).first<Record<string, unknown>>();
+    expect(still?.status).toBe('open');
+    expect(Number(still?.counter_in_last)).toBe(400);
+
+    const rolled = await rollNodeCycle(
+      db(), name, profile,
+      { in: 450, out: 70, at: end + 3600 }, end + 3600,
+    );
+    expect(rolled?.status).toBe('open');
+    expect(String(rolled?.id)).not.toBe(String(first?.id));
+    expect(Number(rolled?.used_bytes)).toBe(70);
+  });
+
   it('rolls every active profile through injected counters', async () => {
     await insertProfile('A');
     await insertProfile('B');

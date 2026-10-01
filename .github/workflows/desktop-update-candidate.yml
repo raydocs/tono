@@ -69,7 +69,7 @@ jobs:
           path: paired/macos
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
-          name: tono-windows-0.0.73-candidate-${{ github.sha }}
+          name: tono-windows-0.0.74-candidate-${{ github.sha }}
           path: paired/windows
       - name: Assemble exact-source unsigned manifest and preserve both payloads
         env:

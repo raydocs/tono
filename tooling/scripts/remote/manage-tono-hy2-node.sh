@@ -513,6 +513,12 @@ apply_deployment() {
   local fingerprint
   fingerprint=$(openssl x509 -in "$release/cert.pem" -noout -fingerprint -sha256 | sed 's/^.*=//')
   [[ $fingerprint =~ ^([0-9A-F]{2}:){31}[0-9A-F]{2}$ ]] || fail "could not read the hy2 certificate fingerprint"
+  # sing-box (macOS) pins this, not the DER hash. Printed with every new
+  # certificate so a re-run can never leave the catalog's SPKI pin stale.
+  local public_key_sha256
+  public_key_sha256=$(openssl x509 -in "$release/cert.pem" -pubkey -noout | openssl pkey -pubin -outform der |
+    openssl dgst -sha256 -binary | openssl enc -base64)
+  [[ $public_key_sha256 =~ ^[A-Za-z0-9+/]{43}=$ ]] || fail "could not read the hy2 certificate public key pin"
 
   install_auth_http
   write_allowlist >/dev/null
@@ -598,8 +604,8 @@ EOF
   committed=1
   rm -f "$artifact"
   trap - EXIT
-  printf '{"deploymentId":"%s","version":"%s","port":%s,"fingerprint":"%s","xrayUntouched":true}\n' \
-    "$deployment_id" "$version" "$port" "$fingerprint"
+  printf '{"deploymentId":"%s","version":"%s","port":%s,"fingerprint":"%s","certificatePublicKeySha256":"%s","xrayUntouched":true}\n' \
+    "$deployment_id" "$version" "$port" "$fingerprint" "$public_key_sha256"
 }
 
 mode=${1:-}

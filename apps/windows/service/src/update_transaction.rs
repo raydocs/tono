@@ -67,6 +67,11 @@ pub struct Attempt {
     pub old_components: Components,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub disconnect: Option<DisconnectEvidence>,
+    /// Process-start clock (`Image::started_at`) sampled after the new bytes
+    /// were durable and before a successor was created. Not Unix time. Absent
+    /// on records written before this field existed; those still adopt.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub publication_clock: Option<u64>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -78,6 +83,13 @@ pub struct State {
 }
 
 impl State {
+    /// An attempt that has not committed. [`Store::pending`] asks this of the store's view.
+    pub fn pending(&self) -> bool {
+        self.attempt
+            .as_ref()
+            .is_some_and(|a| a.receipt.phase != Phase::Committed)
+    }
+
     fn validate(&self) -> Result<()> {
         ensure!(
             self.consumed_sequence <= 9_007_199_254_740_991
@@ -153,6 +165,66 @@ impl State {
     }
 }
 
+/// Another process (a gate, an executor, the Service) holds the durable store's lock.
+#[derive(Debug, Clone, Copy)]
+pub struct StoreBusy;
+
+impl std::fmt::Display for StoreBusy {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("another update operation owns the durable store")
+    }
+}
+
+/// Only a lock another process holds is [`StoreBusy`]. A failed lock call is an I/O fault that
+/// keeps its own text, so a gate does not report it as another installer being active.
+fn take_store_lock(taken: std::result::Result<(), std::fs::TryLockError>) -> Result<()> {
+    match taken {
+        Ok(()) => Ok(()),
+        Err(held @ std::fs::TryLockError::WouldBlock) => Err(held).context(StoreBusy),
+        Err(std::fs::TryLockError::Error(error)) => {
+            Err(error).context("the durable store lock could not be taken")
+        }
+    }
+}
+
+/// Read and validate `state.json`, with its bytes; `None` when it is absent and the orphan rule
+/// holds (only `transaction.lock` may be present). It takes no lock and writes nothing: the locked
+/// open reaffirms what this returns, and the release admission only reads it.
+fn load(root: &Path) -> Result<Option<(Vec<u8>, State)>> {
+    match File::open(root.join("state.json")) {
+        Ok(file) => {
+            let mut bytes = Vec::new();
+            file.take(65_537).read_to_end(&mut bytes)?;
+            ensure!(
+                bytes.len() <= 65_536,
+                "update state exceeds limit; evidence retained"
+            );
+            let schema = serde_json::from_slice::<SchemaProbe>(&bytes)
+                .context("corrupt update evidence retained")?
+                .schema_version
+                .unwrap_or(1);
+            ensure!(schema >= 1, "corrupt update evidence retained");
+            ensure!(
+                schema <= STATE_SCHEMA_VERSION,
+                "update evidence written by a newer Tono (schema {schema}) retained for that version"
+            );
+            let state: State =
+                serde_json::from_slice(&bytes).context("corrupt update evidence retained")?;
+            state.validate()?;
+            Ok(Some((bytes, state)))
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            ensure!(
+                std::fs::read_dir(root)?
+                    .all(|entry| entry.is_ok_and(|e| e.file_name() == "transaction.lock")),
+                "orphan update evidence without state; manual recovery required"
+            );
+            Ok(None)
+        }
+        Err(e) => Err(e.into()),
+    }
+}
+
 pub struct Store {
     root: PathBuf,
     _lock: File,
@@ -173,28 +245,9 @@ impl Store {
             .create(true)
             .truncate(false)
             .open(root.join("transaction.lock"))?;
-        lock.try_lock()
-            .context("another update operation owns the durable store")?;
-        let state = match File::open(root.join("state.json")) {
-            Ok(file) => {
-                let mut bytes = Vec::new();
-                file.take(65_537).read_to_end(&mut bytes)?;
-                ensure!(
-                    bytes.len() <= 65_536,
-                    "update state exceeds limit; evidence retained"
-                );
-                let schema = serde_json::from_slice::<SchemaProbe>(&bytes)
-                    .context("corrupt update evidence retained")?
-                    .schema_version
-                    .unwrap_or(1);
-                ensure!(schema >= 1, "corrupt update evidence retained");
-                ensure!(
-                    schema <= STATE_SCHEMA_VERSION,
-                    "update evidence written by a newer Tono (schema {schema}) retained for that version"
-                );
-                let state: State =
-                    serde_json::from_slice(&bytes).context("corrupt update evidence retained")?;
-                state.validate()?;
+        take_store_lock(lock.try_lock())?;
+        let state = match load(root)? {
+            Some((bytes, state)) => {
                 // A rename can become visible before a failed durability ack.
                 // Do not promote mere visibility on query/restart to authority:
                 // re-publish these exact bytes under the lock, with a fresh
@@ -202,15 +255,7 @@ impl Store {
                 reaffirm(&root.join("state.json"), &bytes)?;
                 state
             }
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                ensure!(
-                    std::fs::read_dir(root)?
-                        .all(|entry| entry.is_ok_and(|e| e.file_name() == "transaction.lock")),
-                    "orphan update evidence without state; manual recovery required"
-                );
-                State::default()
-            }
-            Err(e) => return Err(e.into()),
+            None => State::default(),
         };
         Ok(Self {
             root: root.into(),
@@ -218,6 +263,17 @@ impl Store {
             write_failed: false,
             state,
         })
+    }
+
+    /// The evidence as it stands, read without the store's lock and without a write: no
+    /// `transaction.lock` is created or taken and `state.json` is not re-published. Only the
+    /// release admission (BRICK-W5 d) and the start helper's lease check read this way; both
+    /// only admit or refuse. Every writer publishes a whole file by
+    /// rename, so this sees one complete version. It grants no update authority: every update
+    /// writer still opens the store under its lock and reaffirms first. The caller must
+    /// establish a native private, non-reparse root first, as for [`Self::open`].
+    pub fn read_state(root: &Path) -> Result<State> {
+        Ok(load(root)?.map(|(_, state)| state).unwrap_or_default())
     }
 
     pub fn save(&mut self, candidate: State) -> Result<()> {
@@ -244,10 +300,7 @@ impl Store {
     }
 
     pub fn pending(&self) -> bool {
-        self.state
-            .attempt
-            .as_ref()
-            .is_some_and(|a| a.receipt.phase != Phase::Committed)
+        self.state.pending()
     }
 
     pub fn attempt_dir(&self) -> Result<PathBuf> {
@@ -545,11 +598,46 @@ impl Store {
                     peer != &a.initiating_image && !incarnation_live(&a.initiating_image),
                     "initiating incarnation is still live"
                 );
+                // `image()` hashes the file on disk. A process that started
+                // before publication can still present the new hash while its
+                // mapped bytes are the old App. The floor is the same clock as
+                // `started_at`, not the receipt's Unix time.
+                if let Some(floor) = a.publication_clock {
+                    ensure!(
+                        peer.started_at > floor,
+                        "peer started before the published bytes were durable"
+                    );
+                }
                 let mut next = self.state.clone();
                 next.attempt.as_mut().unwrap().successor_image = Some(peer.clone());
                 self.save(next)
             }
         }
+    }
+
+    /// [`Self::authenticate_successor`], also answering whether `peer` is a relaunch: anything
+    /// but the exact incarnation the executor recorded (pid, start time, path and digest). A
+    /// restart kills that incarnation, so every App after one reads as relaunched, and the App
+    /// then does not reconnect by itself (BRICK-W1). Computed before authenticating, which may
+    /// rebind the record to `peer`.
+    pub fn adopt_successor(&mut self, peer: &Image) -> Result<bool> {
+        let relaunched = self.attempt()?.successor_image.as_ref() != Some(peer);
+        self.authenticate_successor(peer)?;
+        Ok(relaunched)
+    }
+
+    /// Record the publication floor once. Later calls leave the saved sample
+    /// in place.
+    pub fn note_publication_clock(&mut self, clock: u64) -> Result<()> {
+        if self.attempt()?.publication_clock.is_some() {
+            return Ok(());
+        }
+        let mut next = self.state.clone();
+        next.attempt
+            .as_mut()
+            .context("no attempt")?
+            .publication_clock = Some(clock);
+        self.save(next)
     }
 
     pub fn execution(&mut self, execution: Execution) -> Result<()> {
@@ -764,6 +852,7 @@ pub(crate) mod tests {
                     execution: Execution::Staged,
                     executor: Some(executor.clone()),
                     disconnect: None,
+                    publication_clock: None,
                 }),
             })
             .unwrap();
@@ -784,6 +873,53 @@ pub(crate) mod tests {
             )
             .unwrap();
         store.execution(Execution::Launching).unwrap();
+    }
+
+    #[test]
+    fn update_store_lock_io_failure_is_not_reported_as_busy() {
+        // Only a lock another process holds is `StoreBusy`; a failed lock call is an I/O fault
+        // and must carry its own text, not "another installer is active".
+        let held = take_store_lock(Err(std::fs::TryLockError::WouldBlock)).unwrap_err();
+        assert!(held.is::<StoreBusy>(), "{held:#}");
+        let failed = take_store_lock(Err(std::fs::TryLockError::Error(std::io::Error::other(
+            "lock volume went away",
+        ))))
+        .unwrap_err();
+        assert!(!failed.is::<StoreBusy>(), "{failed:#}");
+        assert!(
+            format!("{failed:#}").contains("lock volume went away"),
+            "{failed:#}"
+        );
+    }
+
+    /// BRICK-W5 (d): the release admission opened the store for writing, so a lock another
+    /// process held, or a rewrite that failed, refused Disconnect with no update in progress.
+    /// Its read succeeds under a held lock and leaves every byte, time and entry as it was.
+    #[test]
+    fn update_release_read_takes_no_lock_and_rewrites_nothing() {
+        let (root, store, _, _) = reserved();
+        let path = root.join("state.json");
+        let bytes = std::fs::read(&path).unwrap();
+        let modified = std::fs::metadata(&path).unwrap().modified().unwrap();
+        let listing = || {
+            let mut names = std::fs::read_dir(&root)
+                .unwrap()
+                .map(|entry| entry.unwrap().file_name())
+                .collect::<Vec<_>>();
+            names.sort();
+            names
+        };
+        let entries = listing();
+        let state = Store::read_state(&root).expect("a held store lock refused the release read");
+        assert_eq!(state.generation, 91);
+        assert_eq!(std::fs::read(&path).unwrap(), bytes);
+        assert_eq!(
+            std::fs::metadata(&path).unwrap().modified().unwrap(),
+            modified
+        );
+        assert_eq!(listing(), entries);
+        drop(store);
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
@@ -1229,6 +1365,46 @@ pub(crate) mod tests {
         std::fs::remove_dir_all(root).unwrap();
     }
 
+    /// BRICK-W1: after a restart every App is a later incarnation. Adoption tells it so, which
+    /// is what keeps it from reconnecting by itself, and its release stays admitted.
+    #[test]
+    fn update_adoption_by_a_later_incarnation_reports_a_relaunch() {
+        let (root, mut store, peer, executor) = reserved();
+        authorize(&mut store, &peer);
+        store.consume(&executor, 1_900_000_002).unwrap();
+        let launched = Image {
+            pid: 30,
+            started_at: 400,
+            path: peer.path.clone(),
+            sha256: target(&store.attempt().unwrap().manifest)
+                .components
+                .app_sha256
+                .clone(),
+        };
+        let mut next = store.state.clone();
+        next.attempt.as_mut().unwrap().execution = Execution::Replaced;
+        next.attempt.as_mut().unwrap().successor_image = Some(launched.clone());
+        store.save(next).unwrap();
+        assert!(
+            !store.adopt_successor(&launched).unwrap(),
+            "the executor's own successor is not a relaunch"
+        );
+        let relaunched = Image {
+            pid: 31,
+            started_at: 500,
+            ..launched.clone()
+        };
+        assert!(
+            store.adopt_successor(&relaunched).unwrap(),
+            "a later incarnation must be reported as relaunched"
+        );
+        store
+            .request_disconnect("windows:fixture-owner", &relaunched, 1_900_000_010)
+            .unwrap();
+        drop(store);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
     #[test]
     fn update_launching_without_live_executor_incarnation_is_retirable_after_verified_disconnect() {
         let (root, mut store, peer, _) = reserved();
@@ -1330,6 +1506,76 @@ pub(crate) mod tests {
             (store.state.consumed_sequence, store.state.generation),
             (74, 92)
         );
+        drop(store);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// No recorded successor: a process that started before the publication
+    /// clock can present the new file hash while still mapped to the old App.
+    /// A record with no clock (written before the field existed) still adopts.
+    #[test]
+    fn update_unregistered_successor_must_start_after_the_publication_clock() {
+        let (root, mut store, peer, executor) = reserved();
+        authorize(&mut store, &peer);
+        store.consume(&executor, 1_900_000_002).unwrap();
+        let hash = target(&store.attempt().unwrap().manifest)
+            .components
+            .app_sha256
+            .clone();
+        let mut next = store.state.clone();
+        let attempt = next.attempt.as_mut().unwrap();
+        attempt.execution = Execution::Replaced;
+        attempt.successor_image = None;
+        attempt.publication_clock = Some(450);
+        store.save(next).unwrap();
+        let started_at_the_floor = Image {
+            pid: 41,
+            started_at: 450,
+            path: peer.path.clone(),
+            sha256: hash.clone(),
+        };
+        assert!(store.authenticate_successor(&started_at_the_floor).is_err());
+        let mapped_before_publication = Image {
+            pid: 40,
+            started_at: 300,
+            path: peer.path.clone(),
+            sha256: hash.clone(),
+        };
+        assert!(
+            store
+                .authenticate_successor(&mapped_before_publication)
+                .is_err()
+        );
+        let after = Image {
+            pid: 42,
+            started_at: 451,
+            path: peer.path.clone(),
+            sha256: hash,
+        };
+        store.authenticate_successor(&after).unwrap();
+        drop(store);
+        std::fs::remove_dir_all(root).unwrap();
+
+        let (root, mut store, peer, executor) = reserved();
+        authorize(&mut store, &peer);
+        store.consume(&executor, 1_900_000_002).unwrap();
+        let hash = target(&store.attempt().unwrap().manifest)
+            .components
+            .app_sha256
+            .clone();
+        let mut next = store.state.clone();
+        let attempt = next.attempt.as_mut().unwrap();
+        attempt.execution = Execution::Replaced;
+        attempt.successor_image = None;
+        attempt.publication_clock = None;
+        store.save(next).unwrap();
+        let legacy = Image {
+            pid: 43,
+            started_at: 50,
+            path: peer.path.clone(),
+            sha256: hash,
+        };
+        store.authenticate_successor(&legacy).unwrap();
         drop(store);
         std::fs::remove_dir_all(root).unwrap();
     }

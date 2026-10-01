@@ -245,6 +245,41 @@ function catalogHasFingerprint(block: string): boolean {
   return raw.length > 0 && !raw.includes('TONO_CLIENT_UUID');
 }
 
+/**
+ * Optional sing-box pin on a hysteria2 block: standard base64 SHA-256 of the
+ * leaf's SubjectPublicKeyInfo, computed by the operator on the node and never
+ * derived from `fingerprint` (the DER pin stays mandatory). The key may appear
+ * once, as a plain block-style key: clients that predate it merge an unknown
+ * flow-mapping key into its neighbour's value and would refuse the catalog.
+ */
+const HY2_SPKI_PIN_KEY = 'certificate-public-key-sha256';
+// 32 bytes: 42 free characters, a 43rd whose low two bits are zero, one pad.
+const SPKI_PIN_BASE64 = '[A-Za-z0-9+/]{42}[AEIMQUYcgkosw048]=';
+
+/**
+ * Only the one form macOS `ConfigParser` reads as this node's pin: a direct
+ * field of the list item (the column of the fields under `- name:`), a plain
+ * or simply quoted value, nothing after it. macOS keeps a trailing `# comment`
+ * in the value and files a nested key under its parent's path, so either would
+ * publish a pin that macOS silently treats as absent.
+ */
+function catalogSpkiPinIsAdmissible(block: string): boolean {
+  const mentions = block.split(HY2_SPKI_PIN_KEY).length - 1;
+  if (mentions === 0) return true;
+  if (mentions !== 1) return false;
+  const lines = block.split('\n');
+  const column = lines[0].match(/^ *- +/)?.[0].length;
+  const index = lines.findIndex((line) => line.includes(HY2_SPKI_PIN_KEY));
+  if (column === undefined || index < 1) return false;
+  const exact = new RegExp(
+    `^ {${column}}${HY2_SPKI_PIN_KEY}: +(?:"${SPKI_PIN_BASE64}"|'${SPKI_PIN_BASE64}'|${SPKI_PIN_BASE64}) *$`,
+  );
+  if (!exact.test(lines[index])) return false;
+  // A deeper line after a plain value continues it for a YAML parser.
+  const next = lines.slice(index + 1).find((line) => line.trim() !== '' && !/^\s*#/.test(line));
+  return next === undefined || (next.match(/^ */)?.[0].length ?? 0) <= column;
+}
+
 function catalogSkipsCertVerify(block: string): boolean {
   const match = block.match(
     /skip-cert-verify\s*:\s*(?:"((?:\\.|[^"\\])*)"|'((?:\\.|[^'\\])*)'|([^\s,#}]+))/,
@@ -292,7 +327,8 @@ export function catalogEntryMissingClientFields(block: string): string[] {
 /**
  * A proxy block has exactly one managed identity placeholder.
  * VLESS: `uuid: {{TONO_CLIENT_UUID}}`. Hysteria2: `password: {{TONO_CLIENT_UUID}}`,
- * a certificate fingerprint, no `skip-cert-verify: true`, and a ` · hy2` name.
+ * a certificate fingerprint, no `skip-cert-verify: true`, a ` · hy2` name, and
+ * at most one well-formed SPKI pin. VLESS never carries the SPKI pin.
  */
 export function catalogProxyUsesManagedIdentity(block: string): boolean {
   const type = catalogProxyType(block);
@@ -302,10 +338,12 @@ export function catalogProxyUsesManagedIdentity(block: string): boolean {
     if (catalogFieldKeys(block, 'uuid') !== 0) return false;
     return catalogFieldIsPlaceholder(block, 'password')
       && catalogHasFingerprint(block)
-      && !catalogSkipsCertVerify(block);
+      && !catalogSkipsCertVerify(block)
+      && catalogSpkiPinIsAdmissible(block);
   }
   if (type !== 'vless') return false;
   if (name?.endsWith(HY2_NAME_SUFFIX)) return false;
+  if (block.includes(HY2_SPKI_PIN_KEY)) return false;
   return catalogFieldIsPlaceholder(block, 'uuid');
 }
 

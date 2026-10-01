@@ -1,8 +1,9 @@
 ## 2026-09-23 · Windows Service 保护路由只接受已安装的 Tono App
 
 - **归属/来源**：G1 保护不得放宽（内部审查 H2-F3，[#351](https://github.com/raydocs/tono/issues/351)
-  第 1 部分）；影响 Windows Service（`apps/windows/service`）。基线 main 244075f2，分支
-  `fix/win-service-app-image-20260923`；提交时未合 main。第三轮审查结论“需返工”，本条已按其
+  第 1 部分）；影响 Windows Service（`apps/windows/service`）。合入 origin/main `a28b99bd`，分支
+  `fix/win-service-app-image-20260923`；提交时未合 main。保留 main 的 `resume_successor` 与
+  goodbye 停机预约。第三轮审查结论“需返工”，本条已按其
   三个问题修改。**合并前置条件**：在 Win11 验收机的默认安装上运行
   `icacls "C:\Program Files\Tono"`（并记录所有者，如 `(Get-Acl "C:\Program Files\Tono").Owner`），
   确认只有 SYSTEM / Administrators / TrustedInstaller 有写权限、所有者是其中之一；拿到该证据前不得合并。

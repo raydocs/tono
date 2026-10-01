@@ -21,7 +21,9 @@ extension AccountSession {
             try keychain.discardSessionCopiedFromAnotherMac(
                 currentAnchor: KeychainStore.hardwareAnchor()
             )
-            guard try keychain.string(for: .refreshToken) != nil else {
+            // Retry after sign-in's keychain write failure must keep using
+            // the adopted token in memory and retry its persistence first.
+            guard try await api.hasRestorableSession() else {
                 deactivateAppRoutingResearch()
                 // No account owns this launch, so the cache loaded from disk a
                 // moment ago may not stay installed or selectable.
@@ -111,6 +113,9 @@ extension AccountSession {
     /// meaning it has always had here, a refused launch included.
     func settleRestoreFailure(_ error: Error) async {
         offlineVerifiedAt = nil
+        // R612-O5: until Tono accepts the session again, only the offline
+        // admission below lets Connect dial the cached catalog.
+        api.offlineGate.withdrawAcceptance()
         guard Self.isUnreachable(error), !protectionUnconfirmedConsumer() else {
             await fail(error, signsOutOnUnauthorized: true)
             return
@@ -660,6 +665,8 @@ extension AccountSession {
         pauseAppRoutingResearch()
         state = .suspended
         ManagedExitCatalogOwnership.purge()
+        // R612-O5: only `me()` accepting the account again lifts this.
+        api.offlineGate.withdrawAcceptance()
         Task { [weak self] in await self?.descriptorConsumer(nil) }
         updateDiagnosticsLogUploading()
     }
@@ -849,7 +856,10 @@ extension AccountSession {
             // the previous account is reachable by this one.
             ManagedExitCatalogOwnership.adopt(response.user.id)
             adoptEnrollment(response.enrollment)
-            try await reloadDevices()
+            // Cloud-only sign-in already has the authenticated user and this
+            // device in the verify response. Inventory is device-management
+            // data, not an admission gate; a separate read may be unavailable.
+            if AppProfile.homeExitEnabled { try await reloadDevices() }
             if response.user.suspended == true {
                 enterEntitlementBlock(detail: nil)
                 return
@@ -863,6 +873,7 @@ extension AccountSession {
                 enrollmentHostname = nil
                 enrollment = nil
                 await startCloudOnlyRuntime()
+                if !Task.isCancelled, state == .ready { refreshDevicesInBackground() }
             } else if response.enrollment == nil {
                 await resumeOrEnrollRuntime()
             } else {

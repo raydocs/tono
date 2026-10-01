@@ -22,6 +22,28 @@ pub(crate) fn enter_repair_gate() -> Result<tono_service_protocol::ServiceRepair
     }
 }
 
+/// Run one future to completion on a fresh current-thread runtime, then return without waiting
+/// for blocking work it left behind.
+///
+/// Dropping a tokio runtime waits for every `spawn_blocking` task to return, and the DNS and WFP
+/// engine calls leave such a task running when they miss their deadline. A plain drop therefore
+/// turned a timed-out engine call back into a hang, before the uninstall helper could prove Tono's
+/// NRPT rule gone (BRICK-W4). `shutdown_background` does not wait. The abandoned calls only
+/// read or release protection, never arm it; on the uninstall path the helper holds the repair
+/// gate with the Service stopped or gone, and exits right after it reports. Installer gates also
+/// read WFP, so a hung BFE RPC must not keep the repair gate forever. A powershell.exe such a call
+/// started is in the library's kill-on-close exit job, so it ends when the helper exits and cannot
+/// rewrite DNS after the gate is released.
+#[cfg_attr(not(windows), allow(dead_code))]
+pub(crate) fn block_on_abandoning<F: std::future::Future>(future: F) -> Result<F::Output, Error> {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?;
+    let output = runtime.block_on(future);
+    runtime.shutdown_background();
+    Ok(output)
+}
+
 pub(crate) fn run_maintenance_if_requested() -> Result<bool, Error> {
     if !std::env::args().any(|argument| argument == "--cleanup-stale-owners") {
         return Ok(false);
@@ -136,16 +158,25 @@ pub(crate) fn force_stop_windows_service(
         println!("Could not suppress SCM crash-restart before termination: {error}");
     }
 
-    let pid = service
-        .query_status()
-        .ok()
+    let status = service.query_status().ok();
+    if status
+        .as_ref()
+        .is_some_and(|status| status.current_state == ServiceState::Stopped)
+    {
+        // A positive Stopped result needs no PID fallback, even if a crash left the file behind.
+        return Ok(());
+    }
+    let pid = status
         .and_then(|status| status.process_id)
         .filter(|pid| *pid != 0)
         .or_else(read_service_pid_file);
     match pid {
         Some(pid) => {
-            terminate_process_by_pid(pid)?;
-            println!("Terminated wedged service process {pid}.");
+            if terminate_service_process_by_pid(pid)? {
+                println!("Terminated wedged service process {pid}.");
+            } else {
+                println!("Service process {pid} is gone or belongs to a different image.");
+            }
         }
         // No pid anywhere: the process may already be gone with only the SCM state stale.
         // Fall through to the wait; failing there reports the truth.
@@ -170,41 +201,89 @@ pub(crate) fn read_service_pid_file() -> Option<u32> {
         .and_then(|content| content.trim().parse().ok())
 }
 
+#[cfg(windows)]
+pub(crate) fn terminate_service_process_by_pid(pid: u32) -> Result<bool, Error> {
+    let expected_image = tono_service_protocol::service_paths()
+        .install_dir()
+        .join("tono-service.exe");
+    terminate_process_by_pid_matching_image(pid, Some(&expected_image))
+}
+
 /// Native, locale-independent process termination with a hard wait bound. The service library
 /// keeps its own copy private (`core/process.rs`); this bin-side duplicate is deliberate —
 /// these binaries must stay buildable from the public crate surface alone.
 #[cfg(windows)]
 pub(crate) fn terminate_process_by_pid(pid: u32) -> Result<(), Error> {
+    terminate_process_by_pid_matching_image(pid, None).map(|_| ())
+}
+
+#[cfg(windows)]
+fn terminate_process_by_pid_matching_image(
+    pid: u32,
+    expected_image: Option<&std::path::Path>,
+) -> Result<bool, Error> {
     use anyhow::Context as _;
+    use std::os::windows::ffi::OsStringExt as _;
     use std::os::windows::io::{AsRawHandle as _, FromRawHandle as _, OwnedHandle};
     use windows_sys::Win32::Foundation::{
         ERROR_INVALID_PARAMETER, HANDLE, WAIT_OBJECT_0, WAIT_TIMEOUT,
     };
     use windows_sys::Win32::System::Threading::{
-        OpenProcess, PROCESS_TERMINATE, TerminateProcess, WaitForSingleObject,
+        OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_TERMINATE,
+        QueryFullProcessImageNameW, TerminateProcess, WaitForSingleObject,
     };
 
     if pid == 0 {
-        return Ok(());
+        return Ok(false);
     }
-    let raw = unsafe {
-        OpenProcess(
-            PROCESS_TERMINATE | windows_sys::Win32::Storage::FileSystem::SYNCHRONIZE,
-            0,
-            pid,
-        )
-    };
+    let mut access = PROCESS_TERMINATE | windows_sys::Win32::Storage::FileSystem::SYNCHRONIZE;
+    if expected_image.is_some() {
+        access |= PROCESS_QUERY_LIMITED_INFORMATION;
+    }
+    let raw = unsafe { OpenProcess(access, 0, pid) };
     if raw.is_null() {
         let error = std::io::Error::last_os_error();
         // An invalid pid means the process is already gone, which is the goal.
         if error.raw_os_error() == Some(ERROR_INVALID_PARAMETER as i32) {
-            return Ok(());
+            return Ok(false);
         }
         return Err(error).with_context(|| format!("failed to open process {pid} for termination"));
     }
     // SAFETY: `OpenProcess` returned an owned process handle.
     let handle = unsafe { OwnedHandle::from_raw_handle(raw.cast()) };
     let raw = handle.as_raw_handle() as HANDLE;
+
+    if let Some(expected_image) = expected_image {
+        // A pid file or SCM observation may outlive its process. Validate the image on the
+        // same owned handle used for termination, so PID reuse cannot swap in another target.
+        if unsafe { WaitForSingleObject(raw, 0) } == WAIT_OBJECT_0 {
+            return Ok(false);
+        }
+        let mut image = vec![0u16; 32_768];
+        let mut length = image.len() as u32;
+        if unsafe { QueryFullProcessImageNameW(raw, 0, image.as_mut_ptr(), &mut length) } == 0 {
+            let error = std::io::Error::last_os_error();
+            if unsafe { WaitForSingleObject(raw, 0) } == WAIT_OBJECT_0 {
+                return Ok(false);
+            }
+            return Err(error).with_context(|| {
+                format!("failed to inspect service process {pid} before termination")
+            });
+        }
+        let actual_image = std::path::PathBuf::from(std::ffi::OsString::from_wide(
+            &image[..length as usize],
+        ));
+        let actual_image = std::fs::canonicalize(&actual_image)
+            .with_context(|| format!("failed to resolve process {pid} image {actual_image:?}"))?;
+        let expected_image = std::fs::canonicalize(expected_image)
+            .with_context(|| format!("failed to resolve installed service image {expected_image:?}"))?;
+        if !actual_image
+            .to_string_lossy()
+            .eq_ignore_ascii_case(&expected_image.to_string_lossy())
+        {
+            return Ok(false);
+        }
+    }
 
     if unsafe { TerminateProcess(raw, 1) } == 0 {
         // The process may have exited between OpenProcess and TerminateProcess.
@@ -214,7 +293,7 @@ pub(crate) fn terminate_process_by_pid(pid: u32) -> Result<(), Error> {
         }
     }
     match unsafe { WaitForSingleObject(raw, 5_000) } {
-        WAIT_OBJECT_0 => Ok(()),
+        WAIT_OBJECT_0 => Ok(true),
         WAIT_TIMEOUT => anyhow::bail!("process {pid} did not exit within 5 seconds of termination"),
         _ => Err(std::io::Error::last_os_error())
             .with_context(|| format!("failed while waiting for terminated process {pid}")),
@@ -291,4 +370,48 @@ pub fn run_command(cmd: &str, args: &[&str], debug: bool) -> Result<(), Error> {
         stdout,
         stderr
     ))
+}
+
+#[cfg(all(test, windows))]
+mod tests {
+    use super::terminate_process_by_pid_matching_image;
+    use std::process::{Child, Command, Stdio};
+
+    struct ChildFixture(Child);
+
+    impl Drop for ChildFixture {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+
+    #[test]
+    fn service_termination_does_not_kill_a_different_executable() -> anyhow::Result<()> {
+        let mut child = ChildFixture(
+            Command::new("powershell.exe")
+                .args([
+                    "-NoProfile",
+                    "-NonInteractive",
+                    "-Command",
+                    "Start-Sleep -Seconds 30",
+                ])
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()?,
+        );
+        // An existing, different executable ensures this tests image comparison rather than
+        // failing to inspect a missing installed-service binary on the CI machine.
+        let expected_image = std::env::current_exe()?;
+        let terminated =
+            terminate_process_by_pid_matching_image(child.0.id(), Some(&expected_image))?;
+        let survived = child.0.try_wait()?.is_none();
+        assert!(
+            !terminated,
+            "a foreign image must not authorize service termination"
+        );
+        assert!(survived, "the foreign child must remain alive");
+        Ok(())
+    }
 }

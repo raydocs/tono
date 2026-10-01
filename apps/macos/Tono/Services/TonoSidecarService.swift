@@ -309,8 +309,15 @@ actor TonoSidecarService {
         var buffer = [CChar](repeating: 0, count: 4_096)
         let count = proc_pidpath(pid, &buffer, UInt32(buffer.count))
         let path = count > 0 ? String(cString: buffer) : ""
-        guard URL(fileURLWithPath: path).standardizedFileURL == expectedExecutable.standardizedFileURL else {
+        guard !path.isEmpty else {
             throw Error.commandFailed("refusing to terminate an unverified stale process")
+        }
+        guard URL(fileURLWithPath: path).standardizedFileURL == expectedExecutable.standardizedFileURL else {
+            // After reboot, the legacy PID may belong to an unrelated process.
+            // Discard its marker without signaling it or blocking cloud startup.
+            try? fm.removeItem(at: pidFile)
+            LocalTrafficAudit.shared.recordEvent("legacy_sidecar_stale_pid_discarded")
+            return
         }
         Darwin.kill(pid, SIGTERM)
         for _ in 0..<20 where Darwin.kill(pid, 0) == 0 { try? await Task.sleep(for: .milliseconds(50)) }

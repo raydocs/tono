@@ -28,9 +28,10 @@ func catalogNodeRegionCode(flag: String, name: String) -> String? {
         "chicago": "US", "dallas": "US", "miami": "US",
         "tokyo": "JP", "osaka": "JP",
     ]
-    let city = displayName.split(separator: "·")[0]
-        .trimmingCharacters(in: .whitespaces)
-        .lowercased()
+    // An empty catalog name, or one that is only the separator, splits to
+    // nothing. Indexing [0] trapped the UI while drawing the card.
+    guard let rawCity = displayName.split(separator: "·").first else { return nil }
+    let city = rawCity.trimmingCharacters(in: .whitespaces).lowercased()
     if let cityCode = cityCodes[city] {
         return cityCode
     }

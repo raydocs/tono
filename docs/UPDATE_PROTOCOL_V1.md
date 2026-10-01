@@ -7,7 +7,7 @@ receipt shape and pure progress guard in Swift and Rust, with shared conformance
 inputs. Native callers, signature verification, private stores and replacement
 executors belong to [UPDATE_INTEGRATION_V1.md](UPDATE_INTEGRATION_V1.md). Shared
 conformance is not native installation or release acceptance. Product version
-remains 0.0.73.
+remains 0.0.74.
 
 The protocol version is independent of the macOS Helper and Windows Service IPC
 capability versions. Those local versions change with their native adapters;
@@ -211,7 +211,11 @@ its recorded incarnations died.
   successor) and `Uncertain` keep their marker (2026-09-25, #602). A complete,
   verified publication stays installed; a successor that was never durably
   registered is replaced by measured-target evidence and the first
-  authenticated target-identity App adopts it.
+  authenticated target-identity App adopts it. That App's process-start
+  clock must be later than the publication clock sampled once the new bytes
+  were durable (the same clock as `Image.started_at`, not the receipt's Unix
+  time). Records written before that clock existed still adopt, because the
+  field is absent.
 - **Terminal archives after verified Disconnect.** An unconsumed attempt
   whose recorded executor incarnation is provably gone, and a rolled-back or
   uncertain attempt whose installed components equal the retained originals

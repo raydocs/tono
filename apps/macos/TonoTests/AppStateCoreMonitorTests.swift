@@ -54,6 +54,7 @@ final class AppStateCoreMonitorTests: XCTestCase {
         runtime.restoreDNS = { true }
         runtime.disableSystemProxy = {}
         runtime.disarm = {}
+        runtime.releaseAfterFailure = {}
         runtime.restrictToBootstrap = {}
         app.networkProtection = runtime
         app.tunInterfaceExists = { _ in false }
@@ -77,13 +78,20 @@ final class AppStateCoreMonitorTests: XCTestCase {
         XCTAssertNil(app.errorMessage)
 
         // The replacement finishes and its task handle clears, but the
-        // interface is still absent. The tick inside the window already banked
-        // one missing sighting, so this sighting completes the persistence
-        // requirement and the fail-closed verdict arrives — a real TUN death
-        // is still a disconnect, never a skip.
+        // interface is still absent. The tick inside the window banked
+        // nothing, so the first sighting after it is not a verdict yet; the
+        // next one completes the persistence requirement and the fail-closed
+        // verdict arrives — a real TUN death is still a disconnect, never a skip.
         app.connectionCoordinator.configReloadTask?.cancel()
         gate.open()
         app.connectionCoordinator.configReloadTask = nil
+        let settleOutcome = await app.runCoreMonitorTick(state: &state)
+        XCTAssertEqual(settleOutcome, .continueMonitoring)
+        XCTAssertTrue(
+            app.isConnected,
+            "one missing sighting right after the replacement window is not a verdict"
+        )
+        XCTAssertNil(app.errorMessage)
         let verdictOutcome = await app.runCoreMonitorTick(state: &state)
         XCTAssertEqual(verdictOutcome, .stopMonitoring)
         XCTAssertFalse(
@@ -92,7 +100,7 @@ final class AppStateCoreMonitorTests: XCTestCase {
         )
         XCTAssertEqual(
             app.errorMessage,
-            String(localized: "Protected TUN stopped; Kill Switch is blocking traffic while Tono retries.")
+            String(localized: "The connection didn't complete. Support code TONO_CONNECT_TUN.")
         )
 
         // Settle the queued teardown through the replaced seams; no real
@@ -127,11 +135,21 @@ final class AppStateCoreMonitorTests: XCTestCase {
         runtime.restoreDNS = { true }
         runtime.disableSystemProxy = {}
         runtime.disarm = {}
+        runtime.releaseAfterFailure = {}
         runtime.restrictToBootstrap = {}
         app.networkProtection = runtime
         app.tunInterfaceExists = { _ in true }
         var audits = ProtectionAuditOperations()
+        let stableUplink = NetworkUplinkSnapshot(
+            primaryService: "Wi-Fi",
+            primaryInterface: "en0",
+            ipv4Address: "192.168.1.20",
+            ipv4Gateway: "192.168.1.1",
+            ipv6Gateway: nil
+        )
+        app.lastUplinkSnapshot = stableUplink
         audits.primaryNetworkService = { "Wi-Fi" }
+        audits.uplinkSnapshot = { stableUplink }
         audits.protectedDNSIntegrity = { _ in .unverifiable }
         audits.killSwitchHealth = { (wanted: true, live: true, repairedSinceArm: true) }
         app.protectionAudits = audits
@@ -148,12 +166,162 @@ final class AppStateCoreMonitorTests: XCTestCase {
         XCTAssertFalse(app.isConnected)
         XCTAssertEqual(
             app.errorMessage,
-            String(localized: "Network protection was interrupted by another program; Kill Switch is blocking traffic while Tono reconnects.")
+            String(localized: "Network protection was interrupted by another program. The original network is back while Tono looks for a reachable exit.")
         )
 
         // Settle the queued teardown through the replaced seams, as above.
         app.connectionCoordinator.protectedReconnectTask?.cancel()
         app.connectionCoordinator.protectedReconnectTask = nil
         await app.connectionCoordinator.disconnectSequence?.value
+    }
+
+    /// MAC-BROWSER-DOH-FAIL-CLOSED regression: a browser Secure DNS conflict
+    /// the one-minute audit finds mid-session (the user turned Chrome's
+    /// Secure DNS on after connect) used to take the preserve teardown — core
+    /// stopped, PF held bootstrap-only, system DNS still pointed at the dead
+    /// resolver — with no reconnect scheduled, because only the user can
+    /// clear that conflict. The host sat offline until the helper's core-down
+    /// watchdog released PF ~30 s later. The automatic teardown must restore
+    /// ordinary traffic immediately while retaining the secondary AI hold.
+    func testBrowserSecureDNSHealthFailureReleasesTheNetwork() async {
+        let app = AppState()
+        app.isConnected = true
+        app.coreRuntime.isRunning = true
+        app.config.tunEnabled = true
+        app.tonoTransport = TonoTransportDescriptor(port: 1080)
+        // The browser audit only runs for a residential-configured account.
+        app.managedCatalogRouting = TonoExitCatalogRouting(
+            homeProxy: "residential.example.invalid:1080"
+        )
+        let originalArmedState = KillSwitchService.isArmed
+        KillSwitchService.isArmed = true
+        defer { KillSwitchService.isArmed = originalArmedState }
+        var runtime = NetworkProtectionOperations()
+        runtime.repairForRelease = {}
+        runtime.stopCore = { _ in true }
+        runtime.coreStatus = { (false, true) }
+        runtime.restoreDNS = { true }
+        runtime.disableSystemProxy = {}
+        // Automatic health cleanup must use the selective release. Explicit
+        // disarm would also remove the secondary AI hold.
+        var protectionOperations: [String] = []
+        runtime.disarm = { protectionOperations.append("disarm") }
+        runtime.releaseAfterFailure = { protectionOperations.append("releaseAfterFailure") }
+        runtime.restrictToBootstrap = { protectionOperations.append("restrictToBootstrap") }
+        app.networkProtection = runtime
+        app.tunInterfaceExists = { _ in true }
+        var audits = ProtectionAuditOperations()
+        // Healthy PF on the same tick, so the release below is provably the
+        // browser verdict's, not the supervisor-repair branch's.
+        audits.killSwitchHealth = { (wanted: true, live: true, repairedSinceArm: false) }
+        app.protectionAudits = audits
+        let conflictReport = BrowserDNSDiagnostics.Report(
+            chrome: BrowserDNSDiagnostics.BrowserResult(
+                outcome: .blocking, source: .localState, preferenceStoreCount: 1
+            ),
+            edge: BrowserDNSDiagnostics.BrowserResult(
+                outcome: .clear, source: .none, preferenceStoreCount: 0
+            )
+        )
+        app.scanBrowserProtectedDNS = { conflictReport }
+        var state = AppState.CoreMonitorState()
+        // This tick is the twelfth, so the browser audit is due; the PF
+        // health check runs with it and finds nothing.
+        state.healthCycle = 11
+
+        let outcome = await app.runCoreMonitorTick(state: &state)
+        XCTAssertEqual(outcome, .stopMonitoring)
+        XCTAssertFalse(app.isConnected)
+
+        // Settle the queued teardown through the replaced seams, as above.
+        await app.connectionCoordinator.disconnectSequence?.value
+
+        XCTAssertEqual(
+            protectionOperations, ["releaseAfterFailure"],
+            "a browser Secure DNS conflict must restore ordinary traffic with the secondary AI hold"
+        )
+        XCTAssertFalse(app.isProtectionBlocked)
+        XCTAssertEqual(app.errorMessage, conflictReport.failureMessage)
+        XCTAssertEqual(app.lastClassifiedFailure?.code, .protectedDnsNotReady)
+        XCTAssertNil(
+            app.connectionCoordinator.protectedReconnectTask,
+            "a timed retry cannot clear a browser Secure DNS conflict; no reconnect may be scheduled"
+        )
+    }
+
+    /// MAC-PROTECTED-AFTER-PF-RELEASE regression: when the helper fails open
+    /// under a connected session (a re-arm it could not commit released the
+    /// block and deleted its intent), /killswitch/health answers
+    /// wanted=false/live=false and only the app's armed latch still claimed
+    /// PF held the host — Connected forever, wanted=false ignored. The tick
+    /// must notice the released barrier, drop the latch, and re-arm in place
+    /// through the session-exception reassert instead of tearing down a
+    /// session that is still online through the tunnel.
+    func testHelperFailOpenUnderSessionRearmsInPlaceWithoutTearDown() async {
+        let app = AppState()
+        app.isConnected = true
+        app.coreRuntime.isRunning = true
+        app.config.tunEnabled = true
+        app.tonoTransport = TonoTransportDescriptor(port: 1080)
+        let originalArmedState = KillSwitchService.isArmed
+        KillSwitchService.isArmed = true
+        let originalReassert = KillSwitchService.needsSessionExceptionReassert
+        KillSwitchService.needsSessionExceptionReassert = false
+        let savedIPC = KillSwitchService.armIPC
+        defer {
+            KillSwitchService.isArmed = originalArmedState
+            KillSwitchService.needsSessionExceptionReassert = originalReassert
+            KillSwitchService.armIPC = savedIPC
+        }
+        var runtime = NetworkProtectionOperations()
+        runtime.repairForRelease = {}
+        runtime.stopCore = { _ in true }
+        runtime.coreStatus = { (false, true) }
+        runtime.restoreDNS = { true }
+        runtime.disableSystemProxy = {}
+        runtime.disarm = {}
+        runtime.releaseAfterFailure = {}
+        runtime.restrictToBootstrap = {}
+        app.networkProtection = runtime
+        app.tunInterfaceExists = { _ in true }
+        var audits = ProtectionAuditOperations()
+        // The helper answered: it neither wants nor holds PF.
+        audits.killSwitchHealth = { (wanted: false, live: false, repairedSinceArm: false) }
+        app.protectionAudits = audits
+        // The reassert goes through the production KillSwitchService.arm; only
+        // the helper IPC is replaced. The latch is read at arm time to prove
+        // the released barrier was noticed before the re-arm fired.
+        var armedIntentAtRearm: [Bool] = []
+        KillSwitchService.armIPC.deliver = { _ in
+            armedIntentAtRearm.append(KillSwitchService.isArmed)
+            return (
+                armed: true, wanted: true, live: true,
+                healed: false, flushedStates: false, killedHosts: 0
+            )
+        }
+        var state = AppState.CoreMonitorState()
+        // This tick is the twelfth, so the one-minute PF audit is due.
+        state.healthCycle = 11
+
+        let outcome = await app.runCoreMonitorTick(state: &state)
+        XCTAssertEqual(
+            outcome, .continueMonitoring,
+            "an online session must not be torn down over a barrier that is already gone"
+        )
+        XCTAssertTrue(app.isConnected)
+        XCTAssertNil(app.errorMessage)
+        XCTAssertNil(app.connectionCoordinator.protectedReconnectTask)
+        XCTAssertEqual(
+            armedIntentAtRearm, [false],
+            "the stale armed latch must be dropped before the in-place re-arm"
+        )
+        XCTAssertFalse(
+            KillSwitchService.needsSessionExceptionReassert,
+            "only a successful re-arm consumes the intent"
+        )
+        XCTAssertTrue(
+            KillSwitchService.isArmed,
+            "the successful re-arm restores the armed latch"
+        )
     }
 }

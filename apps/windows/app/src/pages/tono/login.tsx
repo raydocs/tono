@@ -13,6 +13,7 @@ import { removeCacheData } from '@/services/query-client'
 import { useThemeMode } from '@/services/states'
 import {
   formatTonoActionError,
+  stableTonoErrorCode,
   tonoDisconnect,
   tonoRetryRestore,
   tonoSignInStart,
@@ -37,6 +38,66 @@ const SENT_ACK_MS = 1500
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
+const AUTH_ERROR_CODES = new Set([
+  'TONO_AUTH_UNREACHABLE',
+  'TONO_AUTH_DNS',
+  'TONO_AUTH_TCP',
+  'TONO_AUTH_TLS',
+  'TONO_AUTH_QUIC',
+  'TONO_AUTH_TIMEOUT',
+  'TONO_AUTH_CAPTIVE',
+  'TONO_AUTH_API',
+  'TONO_AUTH_LOCAL_CONFLICT',
+  'TONO_AUTH_FORBIDDEN',
+  'TONO_AUTH_STORE',
+  'TONO_AUTH_RATE_LIMITED',
+  'TONO_AUTH_DEVICE_LIMIT',
+  'TONO_AUTH_UNAUTHORIZED',
+  'TONO_AUTH_INVALID_CODE',
+  'TONO_SIGN_IN_NOT_SAVED',
+  'TONO_CLOCK_SKEW',
+])
+
+// Copy-to-support gets only fixed labels and allowlisted tokens, never the
+// backend error chain (which may contain request URLs or other private data).
+const authSupportSummary = (
+  stage: 'send-code' | 'verify-code',
+  error: unknown,
+) => {
+  const raw =
+    error instanceof Error
+      ? error.message
+      : typeof error === 'string'
+        ? error
+        : ''
+  const foundCode = stableTonoErrorCode(raw)
+  const code =
+    foundCode && AUTH_ERROR_CODES.has(foundCode) ? foundCode : '(none)'
+  const lines = [`Auth stage: ${stage}`, `Error code: ${code}`]
+  const transport = raw.match(
+    /^TONO_(?:AUTH_[A-Z0-9_]+|CLOCK_SKEW): could not reach Tono: ([\s\S]*)$/,
+  )?.[1]
+  if (transport) {
+    const pinned = transport.match(
+      /^pinned\[(?:TONO_CLOCK_SKEW: )?(dns|connect|tls|timeout|other): /,
+    )?.[1]
+    const resolved = transport.match(
+      /\]; system-dns\[(?:TONO_CLOCK_SKEW: )?(dns|connect|tls|timeout|other): /,
+    )?.[1]
+    const direct = transport.match(
+      /^(?:TONO_CLOCK_SKEW: )?(dns|connect|tls|timeout|other): /,
+    )?.[1]
+    if (pinned) {
+      lines.push(
+        `Transport: pinned=${pinned}${resolved ? `, system-dns=${resolved}` : ''}`,
+      )
+    } else if (direct) {
+      lines.push(`Transport: ${direct}`)
+    }
+  }
+  return lines.join('\n')
+}
+
 const LoginPage = () => {
   const { t } = useTranslation()
   const navigate = useNavigate()
@@ -57,6 +118,9 @@ const LoginPage = () => {
   const [verifySuspended, setVerifySuspended] = useState(false)
   const [suspendedDismissed, setSuspendedDismissed] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [authFailureSummary, setAuthFailureSummary] = useState<string | null>(
+    null,
+  )
   const [restoreInternetError, setRestoreInternetError] = useState<
     string | null
   >(null)
@@ -107,6 +171,7 @@ const LoginPage = () => {
     setSentAck(false)
     setCode('')
     setError(null)
+    setAuthFailureSummary(null)
     autoSubmittedCodeRef.current = null
   }
 
@@ -115,12 +180,14 @@ const LoginPage = () => {
     const trimmed = email.trim().toLowerCase()
     if (!EMAIL_PATTERN.test(trimmed)) {
       setError(t('tono.login.invalidEmail'))
+      setAuthFailureSummary(null)
       return
     }
     authRequestPendingRef.current = true
     setEmail(trimmed)
     setSending(true)
     setError(null)
+    setAuthFailureSummary(null)
     setSuspendedDismissed(false)
     setVerifySuspended(false)
     try {
@@ -131,6 +198,7 @@ const LoginPage = () => {
       setCountdown(RESEND_COUNTDOWN)
     } catch (error) {
       setError(formatTonoActionError(error, t))
+      setAuthFailureSummary(authSupportSummary('send-code', error))
     } finally {
       authRequestPendingRef.current = false
       setSending(false)
@@ -142,11 +210,13 @@ const LoginPage = () => {
     const trimmedCode = code.trim()
     if (!/^\d{6}$/.test(trimmedCode)) {
       setError(t('tono.login.invalidCode'))
+      setAuthFailureSummary(null)
       return
     }
     authRequestPendingRef.current = true
     setVerifying(true)
     setError(null)
+    setAuthFailureSummary(null)
     try {
       const account = await tonoSignInVerify(email.trim(), trimmedCode)
       if (account.suspended) {
@@ -156,7 +226,10 @@ const LoginPage = () => {
       await mutateTonoStatus()
       navigate('/', { replace: true })
     } catch (error) {
+      // The server already used up this code; clear it so a new one is requested.
+      if (String(error).includes('TONO_SIGN_IN_NOT_SAVED')) setCode('')
       setError(formatTonoActionError(error, t))
+      setAuthFailureSummary(authSupportSummary('verify-code', error))
     } finally {
       authRequestPendingRef.current = false
       setVerifying(false)
@@ -192,6 +265,7 @@ const LoginPage = () => {
   const handleRetryRestore = useLockFn(async () => {
     setRetrying(true)
     setError(null)
+    setAuthFailureSummary(null)
     try {
       await tonoRetryRestore()
       await mutateTonoStatus()
@@ -212,6 +286,7 @@ const LoginPage = () => {
       await tonoDisconnect()
       await mutateTonoStatus()
       setError(null)
+      setAuthFailureSummary(null)
     } catch (error) {
       setRestoreInternetError(formatTonoActionError(error, t))
     } finally {
@@ -539,7 +614,11 @@ const LoginPage = () => {
               autoComplete="email"
               placeholder={t('tono.login.emailPlaceholder')}
               value={email}
-              onChange={(event) => setEmail(event.target.value)}
+              onChange={(event) => {
+                setEmail(event.target.value)
+                setError(null)
+                setAuthFailureSummary(null)
+              }}
               disabled={
                 sending ||
                 sentAck ||
@@ -699,7 +778,10 @@ const LoginPage = () => {
           </p>
         )}
         {errorOffersSupport && (
-          <SupportContact email={email} extra={error ?? undefined} />
+          <SupportContact
+            email={email}
+            extra={authFailureSummary ?? error ?? undefined}
+          />
         )}
         {codeSent && (
           <div

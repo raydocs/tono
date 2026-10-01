@@ -302,9 +302,10 @@ nonisolated enum KillSwitchService {
 
     /// Explicit disconnect/logout/quit path. DNS recovery is an invariant of
     /// every PF release, even if a caller forgets to request it separately.
+    /// Automatic failure callers preserve the secondary AI hold.
     /// Failure leaves local intent armed so an unreachable helper can never be
     /// mistaken for a successful disarm.
-    static func disarm() throws {
+    static func disarm(preserveAIHold: Bool = false) throws {
         // Recovery must remain possible across helper-version upgrades. An
         // older authenticated helper may not satisfy the current feature
         // version, but its status/disarm contract is still the authoritative
@@ -330,7 +331,7 @@ nonisolated enum KillSwitchService {
         }
         do {
             _ = try HelperManager.restoreProtectedDNSIfConfigured()
-            try HelperManager.disarmKillSwitch()
+            try HelperManager.disarmKillSwitch(preserveAIHold: preserveAIHold)
             isArmed = false
         } catch HelperIPCError.forbidden {
             throw Error.helperRejected
@@ -404,7 +405,8 @@ nonisolated enum KillSwitchService {
     /// helper is prepared without the administrator prompt (MAC3-ADD-F1): the
     /// version check and silent upgrade still run. A helper that needs the
     /// prompt (one rejecting this app, or one the silent upgrade could not
-    /// replace) fails the call, and PF stays as the helper holds it.
+    /// replace) fails the call. If preparing an authenticated older helper
+    /// stopped Core, the abandoned upgrade releases PF through `disarm`.
     static func restrictToBootstrap() throws {
         guard isArmed else { return }
         try installIfNeeded(administratorPrompt: false)
@@ -435,6 +437,11 @@ nonisolated enum KillSwitchService {
             throw Error.userDenied
         } catch HelperIPCError.forbidden {
             throw Error.helperRejected
+        } catch HelperIPCError.boundToAnotherUser(let account) {
+            // #579: the installer's root guard refused another macOS account's
+            // helper. Keep the error that names that account; as an install
+            // failure it read as a repair for this account to approve.
+            throw HelperIPCError.boundToAnotherUser(account)
         } catch {
             throw Error.installFailed(error.localizedDescription)
         }

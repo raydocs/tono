@@ -48,8 +48,9 @@ echo "pinning core digest for the Service: $TONO_CORE_SHA256"
 printf '%s\n' "$TONO_CORE_SHA256" > "$app_root/src-tauri/resources/core-sha256.txt"
 
 (
-  cd "$windows_root"
-  cargo xwin build --manifest-path service/Cargo.toml --release \
+  # From the service directory: its .cargo/config.toml links the CRT statically (H22-O-F2).
+  cd "$windows_root/service"
+  cargo xwin build --manifest-path Cargo.toml --release \
     --target x86_64-pc-windows-msvc --features standalone,client \
     --bin tono-service --bin tono-service-install --bin tono-service-uninstall
 )

@@ -76,7 +76,8 @@ $cargoArguments = @(
 foreach ($serviceBin in $serviceBins) {
     $cargoArguments += @('--bin', $serviceBin)
 }
-Invoke-Checked -FilePath 'cargo' -ArgumentList $cargoArguments -WorkingDirectory $repositoryRoot
+# From the service directory: its .cargo/config.toml links the CRT statically (H22-O-F2).
+Invoke-Checked -FilePath 'cargo' -ArgumentList $cargoArguments -WorkingDirectory (Split-Path -Parent $serviceManifest)
 
 foreach ($serviceBin in $serviceBins) {
     $source = Join-Path $serviceTarget "$serviceBin.exe"

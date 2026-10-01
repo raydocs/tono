@@ -32,12 +32,14 @@ format and the release script passes and verifies the exact source commit.
 
 ## Current source and published state
 
-Source versions in this tree are **macOS 0.0.73 (build 73)** and **Windows
-0.0.73**. That is not a claim that either candidate is notarised, signed for
+Source versions in this tree are **macOS 0.0.74 (build 74)** and **Windows
+0.0.74**. That is not a claim that either candidate is notarised, signed for
 customers, or present on a live update feed. Publication and channel
 promotion are separate gated operations; see
-`apps/macos/release-notes/build73.md` and
-`apps/windows/release-notes/0.0.73.md`.
+`apps/macos/release-notes/build74.md` and
+`apps/windows/release-notes/0.0.74.md`. The customer release is 0.0.74 because
+`tono-macos-0.0.73-build73` already points at older source (`bdc75a4e`) and
+`v0.0.73` holds an older draft; neither is moved or reused.
 
 In-tree customer feeds in this checkout (what a control-plane deploy of
 *this* commit would serve) are Sparkle `public/appcast.xml` at **0.0.67**
@@ -47,8 +49,10 @@ newer published installer from the source version.
 The first customer publication after 0.0.67 / 0.0.34 is gated by
 [SHIP_PLAN.md](SHIP_PLAN.md): Connected-means-usable, a next step on
 connect failure, a proven protected update journal, then feed promotion
-as **0.0.73**. Do not advance Sparkle or `windows-updates` while that
-plan's four gates are open. GitHub `v0.0.72` / `tono-macos-0.0.72-build72`
+as **0.0.74**. Sparkle and `windows-updates` advance only after the owner
+has recorded G1–G3 evidence (for 0.0.74: G1 and G2; G3 moves to 0.0.75, see
+[0.0.74 defers G3](decisions/019-2026-09-26-release-0074-defers-g3.md)) in SHIP_PLAN §6; agents then run G4 per
+[AGENTS.md](../AGENTS.md). GitHub `v0.0.72` / `tono-macos-0.0.72-build72`
 tags are not those feeds.
 
 - `release/macos` contains the post-Build-62 product line. **Build 64 is the
@@ -99,3 +103,86 @@ If it already happened, reinstalling 0.0.73+ repairs NRPT and encrypted DNS.
    from `release/windows`.
 5. Verify the immutable tag resolves to the source SHA before advancing an
    update feed or channel.
+
+## Customer publish (G4)
+
+When an agent may start is set in [AGENTS.md](../AGENTS.md) (owner-written G1–G3
+evidence in SHIP_PLAN §6; for 0.0.74 G1 and G2 only). Record each step's run URL, SHA and artifact hashes in the publish's
+`docs/changelog.d/` entry ([format](changelog.d/README.md)).
+
+- **Candidate identity.** Before customer promotion, match the release's source SHA,
+  version/build and package hashes to the candidate the owner's G1–G3 evidence (0.0.74: G1–G2) names.
+  A changed candidate does not reuse that acceptance; it needs new owner evidence.
+  The one exception is rebuilding an already-published good source as a higher build
+  for rollback.
+- **Order (SHIP_PLAN §5).** G4.1 freeze → G4.2 on the owner's internal devices
+  first (through internal feeds if the customer feeds do not point there yet) →
+  G4.3 customer feeds (Windows: the back-office release row has `verifiedAt` before
+  promotion) → G4.4 small group. Checking the customer feed after G4.3 is a follow-up
+  check, not a substitute for G4.2.
+
+Both platforms publish the accepted bytes; nothing is rebuilt at publish time. Release
+builds are dispatched with `update_release_sequence` (both workflows refuse an empty
+value, because bytes without a v1 installed floor refuse every later v1 update). For
+0.0.74 the tags are `tono-macos-0.0.74-build74` and `v0.0.74`.
+
+**macOS.** This composite is documented in `macos-release.yml`'s step summary and
+has not yet run end to end.
+
+1. The accepted candidate is a `macos-release.yml` run dispatched on pushed
+   `release/macos` with `version` and `update_release_sequence`. It signs and
+   notarises, and uploads the zip plus `macos-release-proof-<sha>` (holding
+   `enclosure.sig`) as Actions artifacts that expire after 7 days; keep copies. The
+   workflow has no tag trigger, so creating the tag below starts no build.
+2. Tag only now: `gh release create tono-macos-<version>-build<build> --prerelease
+   --target <sha> <accepted zip>`, after checking the zip's SHA-256 against the owner's
+   evidence. Confirm it is not a draft and that
+   `gh api repos/raydocs/tono/commits/<tag> --jq .sha` is the built SHA.
+3. `node tooling/scripts/upload-release-asset.mjs --tag <tag>`, run from the root of
+   the checkout bound to the `tono` wrangler profile.
+4. `node tooling/scripts/publish-macos-appcast.mjs` with the argv of the workflow's
+   "Validate the appcast entry" step (`--signature-file` pointing at that run's
+   `enclosure.sig`), without `--dry-run`.
+5. `git fetch origin windows-updates`, then `node tooling/scripts/generate-release-center.mjs`
+   (the deploy script refuses a stale release centre); commit
+   `services/control-plane/public/` on `main`; deploy per AGENTS.md.
+
+The proven path is `tooling/scripts/release-macos.sh --version <v> --build <n>
+--release-sequence <n> --publish --lifecycle-token <token>`, which does steps 2–5
+except the deploy. It refuses a missing or invalid sequence and checks that the
+bundle it publishes carries that sequence. It
+builds and packages natively, so it runs on the Mac Studio, never the MacBook. Its
+bytes are a new candidate, so it does not publish an accepted workflow candidate; use
+it only where the candidate identity rule above allows a rebuild. The
+token comes from `sudo tooling/scripts/test-helper-install-lifecycle.sh`, which is
+the owner's step.
+
+**Windows.**
+
+1. `windows-release.yml` on `release/windows`, dispatched with `version` and
+   `update_release_sequence`, builds the signed draft `v<version>`; its job waits on
+   environment `windows-release`. Each run for a version overwrites that draft, so the
+   accepted run must be the last one for its version.
+2. Check the draft's installer and `.sig` hashes against the owner's evidence, then
+   `gh release edit v<version> --draft=false`, then
+   `node tooling/scripts/upload-release-asset.mjs --tag v<version>`.
+3. `windows-update-promote.yml` validates the bytes, advances `windows-updates` and
+   commits `services/control-plane/public/windows/latest.json` to `main`; its job
+   waits on environment `windows-update-channel`. Then deploy per AGENTS.md.
+
+Both environments list reviewer `raydocs`, the same account as the agents' token,
+so an agent approving them removes the only human check there. Whether that token
+can approve its own deployment was confirmed on 2026-09-26 for `windows-release` only (kit
+runs recorded in `docs/changelog.d/2026-09-26-kit-0-0-74.md`); `windows-update-channel` is
+configured separately and is still untested. By owner decision of 2026-09-28
+([agents approve GHA environments](decisions/023-2026-09-28-agents-approve-gha-environments.md)), agents approve GitHub Actions environment approvals
+themselves (`windows-release` for any candidate, `windows-update-channel` at G4); none waits
+for the owner. Record each approval (run URL, environment, candidate SHA and release
+sequence) in the changelog. The customer-publish precondition is unchanged: the owner's
+`[x]` for G1–G2 in SHIP_PLAN §6 (0.0.74), and only the candidate that evidence names.
+
+**Rollback.** Moving a feed back to the last good entry only stops machines that
+have not updated yet. Updated machines refuse a lower build or release sequence on
+both platforms, so recover them by shipping the last good source as a higher macOS
+build or a higher Windows version. Worker rollback is `npx wrangler rollback` for
+each Worker config; migrations never roll back.

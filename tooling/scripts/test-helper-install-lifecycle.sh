@@ -43,6 +43,7 @@ app=""
 prebuilt_script=""
 expect_version=""
 while [[ $# -gt 0 ]]; do
+  [[ $# -ge 2 ]] || { usage; exit 2 }
   case $1 in
     --app) app=${2:-}; shift 2 ;;
     # Emitting the script runs xcodebuild, which as root cannot read a project
@@ -392,6 +393,6 @@ restore || exit 1
 print "install lifecycle passed (previous installation restored)"
 print "  bundle token: $token"
 print "  the publish that ships this bundle wants it:"
-print "    tooling/scripts/release-macos.sh --version <x.y.z> --build <n> \\"
+print "    tooling/scripts/release-macos.sh --version <x.y.z> --build <n> --release-sequence <n> \\"
 print "      --publish --lifecycle-token $token"
 exit 0

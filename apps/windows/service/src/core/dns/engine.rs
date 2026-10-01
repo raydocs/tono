@@ -220,6 +220,10 @@ fn enum_subkeys(subkey: &str) -> Result<Vec<String>> {
 }
 
 fn read_flags(subkey: &str, value: &str) -> Result<Option<u64>> {
+    #[cfg(test)]
+    if let Some(value) = test_io::with(|io| io.read(subkey, value)) {
+        return value.map(|value| value.parse::<u64>().context("invalid fixture flags")).transpose();
+    }
     let Some(key) = RegKey::open(subkey, false)? else {
         return Ok(None);
     };
@@ -382,6 +386,52 @@ fn lost_capture_marker(capture: &std::path::Path) -> std::path::PathBuf {
     capture.with_extension("lost.json")
 }
 
+// A retained capture whose OS values were already restored must not replay stale originals
+// on another restore or after the user changes settings while disconnected. This marker is
+// written only when deletion fails, and is removed before a new suppression can mutate DNS.
+fn restored_capture_marker(capture: &std::path::Path) -> std::path::PathBuf {
+    capture.with_extension("restored.json")
+}
+
+fn restored_capture_recorded(capture: &std::path::Path) -> Result<bool> {
+    match std::fs::symlink_metadata(restored_capture_marker(capture)) {
+        Ok(_) => Ok(true),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(error).context("failed to check restored DNS capture record"),
+    }
+}
+
+fn clear_restored_capture_record(capture: &std::path::Path) -> Result<()> {
+    match std::fs::remove_file(restored_capture_marker(capture)) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error).context("failed to remove restored DNS capture record"),
+    }
+}
+
+fn retire_restored_capture(capture: &std::path::Path) -> Result<()> {
+    match std::fs::remove_file(capture) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => {
+            if !restored_capture_recorded(capture)? {
+                write_capture_atomically(&restored_capture_marker(capture), "restored\n")?;
+            }
+            tracing::warn!(
+                "dns: restored capture {} could not be deleted ({error}); its retirement was recorded",
+                capture.display()
+            );
+            return Ok(());
+        }
+    }
+    // Without the capture there is no stale original left to replay. A leftover marker only
+    // asks the next suppression to capture current settings again, so it cannot fail release.
+    if let Err(error) = clear_restored_capture_record(capture) {
+        tracing::warn!("dns: restored capture record could not be removed: {error:#}");
+    }
+    Ok(())
+}
+
 fn record_lost_capture(capture: &std::path::Path) -> Result<()> {
     write_capture_atomically(
         &lost_capture_marker(capture),
@@ -468,21 +518,36 @@ fn read_interface_doh_capture() -> Result<Option<Vec<super::InterfaceDohEntry>>>
 }
 
 fn delete_interface_doh_capture() -> Result<()> {
-    let path = super::interface_doh_capture_path();
-    match std::fs::remove_file(&path) {
-        Ok(()) => Ok(()),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(error).with_context(|| format!("failed to delete {}", path.display())),
-    }
+    retire_restored_capture(&super::interface_doh_capture_path())
 }
 
 fn suppress_interface_doh() -> Result<()> {
     let current = collect_interface_doh()?;
+    let path = super::interface_doh_capture_path();
     match read_interface_doh_capture() {
+        _ if restored_capture_recorded(&path)? => {
+            // Even an empty set is now the user's configuration, not suppressed originals.
+            write_interface_doh_capture(&current)?;
+            clear_restored_capture_record(&path)?;
+        }
         // A capture this build can read stays in force: it may have been written by an older
         // build mid-session (its cross-upgrade role), and the flags below may already be
         // zeroed by that session.
-        Ok(Some(_)) => {}
+        Ok(Some(mut saved)) => {
+            let before = saved.len();
+            for entry in &current {
+                if !saved.iter().any(|original| {
+                    original.guid.eq_ignore_ascii_case(&entry.guid)
+                        && original.family.eq_ignore_ascii_case(&entry.family)
+                        && original.server.eq_ignore_ascii_case(&entry.server)
+                }) {
+                    saved.push(entry.clone());
+                }
+            }
+            if saved.len() != before {
+                write_interface_doh_capture(&saved)?;
+            }
+        }
         unreadable => {
             if let Err(error) = unreadable {
                 let path = super::interface_doh_capture_path();
@@ -525,6 +590,10 @@ fn suppress_interface_doh() -> Result<()> {
 /// Idempotent when no capture exists.
 fn restore_interface_doh() -> Result<bool> {
     let path = super::interface_doh_capture_path();
+    if restored_capture_recorded(&path)? {
+        delete_interface_doh_capture()?;
+        return Ok(lost_capture_recorded(&path));
+    }
     let unreadable = match read_interface_doh_capture() {
         Ok(Some(entries)) => {
             for entry in entries {
@@ -770,8 +839,9 @@ pub(super) fn collect_interface_key_adapters() -> Result<Vec<AdapterDnsSnapshot>
 ///   unsaved Tono-owned DNS address remains" when restoring
 ///   (a restored family's servers may legitimately come back from DHCP in another order).
 ///   A family with no live DNS instance, an interface index of 0, or a CIM `ReturnValue` of
-///   84 ("IP not enabled on adapter") is a non-participant: there is no resolver on it to
-///   leak, and recording it as a failure is what used to pin `live_apply_failed` on forever.
+///   84 ("IP not enabled on adapter") is a non-participant for *that family*: there is no
+///   resolver on it to leak. IPv4 returning 84 must not skip the IPv6 block. Recording the
+///   whole adapter as a failure is what used to pin `live_apply_failed` on forever.
 ///
 /// The script prints `fails|skips`; results are recorded per adapter and required for any
 /// restore proof (see the module docs). An adapter that reports *no* configurable family at
@@ -847,13 +917,17 @@ fn spawn_before_deadline(
     let spawn_args = args.iter().map(|arg| (*arg).to_owned()).collect::<Vec<_>>();
     let (sender, receiver) = std::sync::mpsc::sync_channel::<Result<std::process::Child>>(0);
     std::thread::spawn(move || {
-        let spawned = std::process::Command::new(&spawn_program)
-            .args(&spawn_args)
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .spawn()
-            .with_context(|| format!("failed to start {spawn_program}"));
+        // Created suspended and in the exit Job before it runs, so a caller that abandons this run
+        // and exits takes the child, and anything it started, with it. A child that cannot join
+        // is terminated unrun and this start fails; it never runs unbound.
+        let spawned = crate::core::process::spawn_bound_to_process_exit(
+            std::process::Command::new(&spawn_program)
+                .args(&spawn_args)
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped()),
+        )
+        .with_context(|| format!("failed to start {spawn_program}"));
         if let Err(std::sync::mpsc::SendError(Ok(mut child))) = sender.send(spawned) {
             let _ = child.kill();
             let _ = child.wait();
@@ -970,9 +1044,9 @@ function Set-AdapterDns($g, $i4, $i6, $v4, $v6, $restoring) {
 $c = Get-CimInstance Win32_NetworkAdapterConfiguration -Filter "SettingID='$g'" -ErrorAction SilentlyContinue
 if ($null -eq $c) { $global:fails += $g; return }
 $r = Invoke-CimMethod -InputObject $c -MethodName SetDNSServerSearchOrder -Arguments @{ DNSServerSearchOrder = $v4 } -ErrorAction SilentlyContinue
-if ($r -and $r.ReturnValue -eq 84) { $global:skips += $g; return }
-if (-not $r -or $r.ReturnValue -ne 0) { $global:fails += $g; return }
-$touched = $true
+if ($r -and $r.ReturnValue -eq 84) { $v4 = $null }
+elseif (-not $r -or $r.ReturnValue -ne 0) { $global:fails += $g; return }
+else { $touched = $true }
   }
   if ($i6 -ne 0) {
 $e = 0
@@ -998,6 +1072,24 @@ $touched = $true
   if (-not (Test-Family $i6 'IPv6' $v6 $restoring)) { $global:fails += $g; return }
 }
 "#;
+
+#[cfg(test)]
+#[test]
+fn ipv4_not_enabled_does_not_skip_the_ipv6_block() {
+    let line = SCRIPT_PRELUDE
+        .lines()
+        .find(|line| line.contains("ReturnValue -eq 84"))
+        .expect("CIM 84 branch");
+    assert!(
+        !line.contains("return"),
+        "IPv4 CIM 84 must not leave Set-AdapterDns before IPv6: {line}"
+    );
+    let at_84 = SCRIPT_PRELUDE
+        .find("ReturnValue -eq 84")
+        .expect("84");
+    let at_v6 = SCRIPT_PRELUDE.find("if ($i6 -ne 0)").expect("ipv6 block");
+    assert!(at_84 < at_v6);
+}
 
 /// The result marker the batch must print. Its presence is what distinguishes "the script
 /// ran and found no failures" from "the script produced nothing useful"; without it the
@@ -1354,6 +1446,10 @@ const NRPT_CONFIG_DNS: u32 = 0x8;
 const NRPT_VERSION: u32 = 2;
 
 fn read_dword(subkey: &str, value: &str) -> Result<Option<u32>> {
+    #[cfg(test)]
+    if let Some(value) = test_io::with(|io| io.read(subkey, value)) {
+        return value.map(|value| value.parse::<u32>().context("invalid fixture DWORD")).transpose();
+    }
     let Some(key) = RegKey::open(subkey, false)? else {
         return Ok(None);
     };
@@ -1498,19 +1594,30 @@ fn read_capture_file() -> Result<Option<Option<u32>>> {
 }
 
 fn delete_capture_file() -> Result<()> {
-    let path = super::encrypted_dns_capture_path();
-    match std::fs::remove_file(&path) {
-        Ok(()) => Ok(()),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(error).with_context(|| format!("failed to delete {}", path.display())),
-    }
+    retire_restored_capture(&super::encrypted_dns_capture_path())
 }
 
 fn nrpt_rule_key() -> String {
     format!(r"{NRPT_ROOT}\{NRPT_RULE_GUID}")
 }
 
+/// Delete Tono's NRPT catch-all and read back that it is gone. Only Tono's key is touched, and
+/// an absent key counts as success.
+pub(super) fn remove_nrpt_rule() -> Result<()> {
+    let key = nrpt_rule_key();
+    delete_key(&key)?;
+    anyhow::ensure!(
+        !key_exists(&key)?,
+        "Tono's NRPT rule {key} is still present after the delete"
+    );
+    Ok(())
+}
+
 fn install_nrpt() -> Result<()> {
+    #[cfg(test)]
+    if test_io::active() {
+        return Ok(()); // Capture tests never create an NRPT rule on the test host.
+    }
     let _root = create_key(NRPT_ROOT)?;
     drop(_root);
     let key = nrpt_rule_key();
@@ -1533,12 +1640,17 @@ fn install_nrpt() -> Result<()> {
 /// instead, so the next restore reports the loss rather than a clean result.
 pub(super) fn suppress_encrypted_dns() -> Result<()> {
     #[cfg(test)]
-    if test_io::active() {
+    if test_io::with(|io| !io.apply_resolver_policy).unwrap_or(false) {
         return Ok(()); // Resolver-policy OS effects are outside this apply regression.
     }
     // Both the quarantined-rewrite and the missing-file (re)capture read the live value
     // before it is zeroed below — after that write it is ours, not the user's.
+    let path = super::encrypted_dns_capture_path();
     match read_capture_file() {
+        _ if restored_capture_recorded(&path)? => {
+            write_capture_file(read_dword(DNSCACHE_PARAMETERS, ENABLE_AUTO_DOH)?)?;
+            clear_restored_capture_record(&path)?;
+        }
         Ok(Some(_)) => {}
         unreadable => {
             let current = read_dword(DNSCACHE_PARAMETERS, ENABLE_AUTO_DOH)?;
@@ -1591,6 +1703,9 @@ pub(super) fn restore_encrypted_dns() -> Result<bool> {
     }
     let mut lost = false;
     match read_capture_file() {
+        _ if restored_capture_recorded(&super::encrypted_dns_capture_path())? => {
+            delete_capture_file()?;
+        }
         Ok(Some(saved)) => {
             match saved {
                 Some(value) => write_dword(DNSCACHE_PARAMETERS, ENABLE_AUTO_DOH, value)?,
@@ -1766,4 +1881,48 @@ fn system_lookup_a_blocking(host: &str) -> std::result::Result<Vec<std::net::Ipv
         return Err(format!("DnsQuery_W returned {status}"));
     }
     Ok(addresses)
+}
+
+/// Per-suffix NRPT rules for the secondary hold. Never writes the catch-all
+/// name `.` and never reuses the catch-all key. A refused name writes nothing.
+pub(super) fn install_selective_nrpt() -> Result<()> {
+    use crate::core::selective_fail_open::{self, CATCH_ALL_NRPT_GUID, SINKHOLE_DNS};
+    let mut prepared = Vec::new();
+    for rule in selective_fail_open::NRPT_RULES {
+        if rule.guid.eq_ignore_ascii_case(CATCH_ALL_NRPT_GUID) {
+            bail!("selective NRPT guid collides with the catch-all");
+        }
+        let names = selective_fail_open::names_for_rule(rule)
+            .context("selective NRPT suffix was refused")?;
+        if names.iter().any(|name| !selective_fail_open::nrpt_name_is_safe(name)) {
+            bail!("selective NRPT name was refused");
+        }
+        prepared.push((rule.guid, names));
+    }
+    let _root = create_key(NRPT_ROOT)?;
+    drop(_root);
+    for (guid, names) in &prepared {
+        let key = format!(r"{NRPT_ROOT}\{guid}");
+        let _rule = create_key(&key)?;
+        drop(_rule);
+        let refs: Vec<&str> = names.iter().map(String::as_str).collect();
+        write_multi_sz(&key, "Name", &refs)?;
+        write_dword(&key, "Version", NRPT_VERSION)?;
+        write_dword(&key, "ConfigOptions", NRPT_CONFIG_DNS)?;
+        write_sz(&key, "GenericDNSServers", SINKHOLE_DNS)?;
+    }
+    Ok(())
+}
+
+/// Delete only the selective keys. An absent key is success. The catch-all
+/// key is not in this set.
+pub(super) fn remove_selective_nrpt() -> Result<()> {
+    use crate::core::selective_fail_open::{self, CATCH_ALL_NRPT_GUID};
+    for rule in selective_fail_open::NRPT_RULES {
+        if rule.guid.eq_ignore_ascii_case(CATCH_ALL_NRPT_GUID) {
+            bail!("selective NRPT guid collides with the catch-all");
+        }
+        delete_key(&format!(r"{NRPT_ROOT}\{}", rule.guid))?;
+    }
+    Ok(())
 }

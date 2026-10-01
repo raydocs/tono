@@ -16,32 +16,49 @@ extension AppState {
             isProtectionBlocked = status.receipt?.requiredRecovery != .unprotected
         } catch {
             // Unreachable is pending, never a reason to run ordinary cleanup.
-            if let status = try? await coordinator.nativeUpdate("status") {
+            let status = try? await coordinator.nativeUpdate("status")
+            if let status {
                 nativeUpdatePending = status.pending
                 RuntimeCleanup.nativeUpdatePending = status.pending
+            }
+            // Suspension already cleared isConnected; a barrier that is still
+            // armed must read as blocked, never as Standby. Only ever raised.
+            if !isConnected, KillSwitchService.isArmed
+                || (status?.pending == true && status?.receipt?.requiredRecovery != .unprotected) {
+                isProtectionBlocked = true
             }
             throw error
         }
     }
 
-    private func suspendForNativeUpdate() async {
+    func suspendForNativeUpdate() async {
         connectionCoordinator.bumpGeneration()
         let tasks = [connectionCoordinator.coreMonitorTask, connectionCoordinator.nodeSwitchTask,
                      connectionCoordinator.protectedReconnectTask, connectionCoordinator.connectTask,
                      connectionCoordinator.configReloadTask, connectionCoordinator.networkEnvironmentTask]
             .compactMap { $0 }
         for task in tasks { task.cancel() }
+        // A cancelled reload may return without clearing its serialization
+        // handle. Retire its completion and queued work before draining it;
+        // neither may start another mutation during the helper handoff.
+        connectionCoordinator.configReloadRequestID &+= 1
+        let reloadRetirementID = connectionCoordinator.configReloadRequestID
+        pendingFullConfigReload = false
+        pendingDirectPolicyReload = nil
+        isConnected = false
+        isConnecting = false
         isProtectedReconnectScheduled = false
         autoConnectRequested = false
         stopProxyGuard()
         stopLatencyTestTimer()
         for task in tasks { await task.value }
+        if connectionCoordinator.configReloadRequestID == reloadRetirementID {
+            connectionCoordinator.configReloadTask = nil
+        }
         webSocket?.stopAll()
         webSocket = nil
         coreController = nil
         proxyService.setAPI(nil)
-        isConnected = false
-        isConnecting = false
         // Root performs Core/TUN/DNS cleanup; no App-owned disconnect or
         // journal is treated as its proof.
     }
@@ -53,17 +70,62 @@ extension AppState {
         nativeUpdateDisconnectTask = Task {
             defer { nativeUpdateDisconnectTask = nil }
             await suspendForNativeUpdate()
+            let generation = connectionCoordinator.protectionOperationGeneration
+            guard !Task.isCancelled else { return }
+            isProtectionBlocked = false
+            isProtectionUnconfirmed = true
             do {
-                let result = try await PrivilegedRuntimeCoordinator.shared.nativeUpdate("disconnect")
+                let result = try await nativeUpdateDisconnect()
+                guard !Task.isCancelled,
+                      connectionCoordinator.protectionOperationGeneration == generation else { return }
                 guard result.disconnectVerified == true else { throw NativeUpdateDownload.failure("Update Disconnect was not verified.") }
+                launchProtectionSequence &+= 1
                 isProtectionBlocked = false
                 KillSwitchService.isArmed = false
+                resetReleasedSessionHistory()
                 RuntimeCleanup.clearCoreStarted()
             } catch {
-                isProtectionBlocked = true
+                guard !Task.isCancelled,
+                      connectionCoordinator.protectionOperationGeneration == generation else { return }
+                // The helper may have released PF before the reply or ledger
+                // write failed. Until a live readback arrives, neither the old
+                // cached intent nor this error proves protection is held.
+                isProtectionBlocked = false
+                isProtectionUnconfirmed = true
+                guard await refreshNativeUpdateProtectionStatus() else { return }
+                guard !Task.isCancelled,
+                      connectionCoordinator.protectionOperationGeneration == generation else { return }
                 errorMessage = error.localizedDescription
             }
         }
+    }
+
+    /// Read-only PF reconciliation: desired intent alone is not live protection.
+    /// This never acknowledges Core/DNS cleanup or retires the pending receipt.
+    @discardableResult
+    func refreshNativeUpdateProtectionStatus() async -> Bool {
+        let generation = connectionCoordinator.protectionOperationGeneration
+        let sequence = launchProtectionSequence
+        let health = await protectionAudits.killSwitchHealth()
+        guard !Task.isCancelled,
+              nativeUpdatePending || RuntimeCleanup.nativeUpdatePending
+                || RuntimeCleanup.nativeUpdateBlocksConnect,
+              connectionCoordinator.protectionOperationGeneration == generation,
+              launchProtectionSequence == sequence else { return false }
+        launchProtectionSequence &+= 1
+        guard let health else {
+            isProtectionBlocked = false
+            isProtectionUnconfirmed = true
+            return true
+        }
+        // The current helper maps an unreadable PF status to live=false.
+        // A live reading proves a barrier; a non-live reading cannot certify
+        // release, even if the intent file is absent. Only the verified
+        // Disconnect reply may settle release and clear local recovery intent.
+        if health.wanted || health.live { KillSwitchService.isArmed = true }
+        isProtectionBlocked = health.live
+        isProtectionUnconfirmed = !health.live
+        return true
     }
 
     /// The retry button explicitly requests Internet release. Root rechecks
@@ -89,6 +151,7 @@ extension AppState {
         RuntimeCleanup.nativeUpdateRecovery = nil
         KillSwitchService.isArmed = false
         isProtectionBlocked = false
+        resetReleasedSessionHistory()
         updateIncomplete = UpdateHandoffStore.showsIncompleteUpdate()
         errorMessage = nil
         RuntimeCleanup.clearCoreStarted()

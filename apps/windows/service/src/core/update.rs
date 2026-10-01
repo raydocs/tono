@@ -1,5 +1,6 @@
 //! Native coordinator. All calls execute under the Service lifecycle writer;
 //! the on-disk lock also serializes the independently running SYSTEM executor.
+mod gate;
 pub(crate) mod security;
 use super::{
     auth::AuthenticatedOwner, desired, dns, manager, windows_kill_switch as wfp, windows_security,
@@ -10,9 +11,12 @@ use crate::update_contract::{
 use crate::update_transaction::*;
 use crate::update_wire::{UpdateRequest, UpdateStatus};
 use anyhow::{Context as _, Result, ensure};
+pub use super::windows_kill_switch::strict_kill_switch_intent_on_disk;
+pub use gate::{GateReason, GateRefusal, GateReport, reason_of, refusal};
 pub use security::{
     NotRegisteredApp, UserLaunch, app_image, image, install_root, parent_image, pin_path,
-    program_files, record_installed_version, tunnel_absent, verify_tree,
+    process_clock_now, program_files, record_installed_version, resume_successor, tunnel_absent,
+    verify_tree,
 };
 use std::{
     fs::OpenOptions,
@@ -21,12 +25,18 @@ use std::{
 };
 
 pub fn open_store() -> Result<Store> {
+    let (root, _pins) = store_root()?;
+    Store::open(&root)
+}
+
+/// The private `updates-v1` root, pinned against rename for as long as the caller holds the pins.
+fn store_root() -> Result<(PathBuf, Vec<std::fs::File>)> {
     let paths = crate::service_paths();
     windows_security::ensure_private_installer_directory(paths.persistent_state_dir())?;
     let root = paths.persistent_state_dir().join("updates-v1");
     windows_security::ensure_private_installer_directory(&root)?;
-    let _pins = pin_path(&root, true)?;
-    Store::open(&root)
+    let pins = pin_path(&root, true)?;
+    Ok((root, pins))
 }
 
 pub fn pending() -> bool {
@@ -65,6 +75,106 @@ pub(crate) fn release_allowed() -> Result<()> {
         "update pending; release/quit cannot cancel the recorded recovery obligation"
     );
     Ok(())
+}
+
+/// The update evidence read without the store's lock and without a write (BRICK-W5 d): no ACL is
+/// re-applied, no `transaction.lock` is created and `state.json` is not re-published. An absent
+/// root is the empty store [`store_root`] would create. A reparse point or an ACL that is not the
+/// private one refuses; nothing re-applies it here.
+fn read_store_state() -> Result<State> {
+    let root = crate::service_paths()
+        .persistent_state_dir()
+        .join("updates-v1");
+    if matches!(
+        std::fs::symlink_metadata(&root),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound
+    ) {
+        return Ok(State::default());
+    }
+    let _pins = pin_path(&root, true)?;
+    Store::read_state(&root)
+}
+
+/// Whether the manual installer that took the lease is gone for certain (Service half of
+/// BRICK-W2): no process has its PID or that process has exited, or the PID now names a process
+/// created at another time. A PID names one process object at a time. The same creation time
+/// under any path, and any read failure, count as alive.
+fn holder_conclusively_dead(
+    holder: &Image,
+    live: Result<Option<super::process::ProcessIdentity>>,
+) -> bool {
+    match live {
+        Ok(None) => true,
+        Ok(Some(process)) => process.started_at != holder.started_at,
+        Err(_) => false,
+    }
+}
+
+/// No manual installer lease, or one whose holder is conclusively dead. The lease itself is kept:
+/// it still fences Connect, the other update requests, repair and startup Core restore until an
+/// installer run replaces it.
+fn no_live_lease(
+    state: &State,
+    live: impl FnOnce(u32) -> Result<Option<super::process::ProcessIdentity>>,
+) -> Result<()> {
+    match &state.manual_installer {
+        None => Ok(()),
+        Some(holder) if holder_conclusively_dead(holder, live(holder.pid)) => Ok(()),
+        Some(holder) => Err(anyhow::anyhow!(
+            "the manual installer lease holder (pid {}) may still be running",
+            holder.pid
+        )),
+    }
+}
+
+/// The `ReleaseKillSwitch` admission. It reads the update evidence without writing it
+/// (BRICK-W5 d) and refuses what `lifecycle_allowed` and [`release_allowed`] refuse, except a
+/// manual installer lease whose holder is conclusively dead (Service half of BRICK-W2).
+pub(crate) fn release_admission() -> Result<()> {
+    release_admission_at(&read_store_state()?, super::process::process_identity)
+}
+
+fn release_admission_at(
+    state: &State,
+    live: impl FnOnce(u32) -> Result<Option<super::process::ProcessIdentity>>,
+) -> Result<()> {
+    ensure!(
+        !state.pending(),
+        "update pending; release/quit cannot cancel the recorded recovery obligation"
+    );
+    no_live_lease(state, live).context("manual installer owns the machine lifecycle")?;
+    if let Some(holder) = &state.manual_installer {
+        tracing::warn!(
+            "releasing protection past a manual installer lease whose holder (pid {}) has exited; \
+             the lease stays and still fences Connect",
+            holder.pid
+        );
+    }
+    Ok(())
+}
+
+/// The manual installer lease check for update requests. Only `Status`, the read the App sends
+/// before its release, passes a conclusively dead holder (Service half of BRICK-W2); every other
+/// request refuses any lease.
+fn update_lease_gate(
+    request: &UpdateRequest,
+    state: &State,
+    live: impl FnOnce(u32) -> Result<Option<super::process::ProcessIdentity>>,
+) -> Result<()> {
+    if state.manual_installer.is_none() {
+        return Ok(());
+    }
+    match request {
+        UpdateRequest::Status => no_live_lease(state, live).context("manual installation is pending"),
+        _ => Err(anyhow::anyhow!("manual installation is pending")),
+    }
+}
+
+/// Whether `tono-service-install --start-registered` may start the registered Service
+/// (BRICK-W5 e): no manual installer lease whose holder may still run. A pending attempt does not
+/// refuse the start; the starting Service fences it itself. Read without a lock or a write.
+pub fn start_admission() -> Result<()> {
+    no_live_lease(&read_store_state()?, super::process::process_identity)
 }
 
 fn verify_manifest(bytes: &[u8], signature: &str) -> Result<ReleaseManifest> {
@@ -197,16 +307,85 @@ fn owner_proxy_absent(owner: &AuthenticatedOwner) -> Result<()> {
     security::no_proxy(sid)
 }
 
+fn begin_update_release(
+    store: &mut Store,
+    owner: &AuthenticatedOwner,
+    peer: &Image,
+) -> Result<()> {
+    // Record the authenticated request before any release.
+    // The original recovery obligation is never rewritten as Unprotected.
+    store.request_disconnect(&owner.key, peer, now()?)?;
+    wfp::authorize_write_for(&owner.key)?;
+    Ok(())
+}
+
+fn prepare_failure_releases(strict: bool, core_stop_attempted: bool) -> bool {
+    core_stop_attempted && !strict
+}
+
+async fn release_failed_preparation(
+    store: &mut Store,
+    owner: &AuthenticatedOwner,
+    peer: &Image,
+    core_stopped: bool,
+) -> Result<()> {
+    begin_update_release(store, owner, peer)?;
+    let stopped = if core_stopped {
+        Ok(())
+    } else {
+        manager::CORE_MANAGER.lock().await.stop_core().await
+    };
+    let persisted = desired::persist_owner_core_stopped(owner).await;
+    let cleared = desired::clear_active_owner().await;
+    // Automatic failure opens general traffic but retains the secondary AI hold.
+    // Desired-state failures must not prevent the DNS/WFP release.
+    wfp::release_applying_narrow().await?;
+    stopped?;
+    persisted?;
+    cleared?;
+    Ok(())
+}
+
+/// Prepare already stopped Core and narrowed WFP to bootstrap Blocked before Install
+/// spawns the executor. A `spawn` error means that process never existed. Non-strict
+/// sessions release general traffic and keep the AI hold. Strict stays Blocked.
+fn executor_spawn_failure_releases(strict: bool) -> bool {
+    !strict
+}
+
+fn save_prepared_attempt(store: &mut Store, next: State) -> Result<()> {
+    if let Some(a) = &store.state.attempt
+        && a.receipt.phase == Phase::Committed
+    {
+        let plan = store.attempt_dir()?.join("replacement.json");
+        let service_dir = crate::service_paths().install_dir();
+        let roots = [a.install_root.as_path(), service_dir.as_path()];
+        let mut scratch_remains = false;
+        for member in read_plan(&plan, &a.receipt.attempt_id, &roots)? {
+            for path in [&member.backup, &member.restore, &member.publish_scratch] {
+                match std::fs::symlink_metadata(path) {
+                    Ok(_) => scratch_remains = true,
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(error) => return Err(error.into()),
+                }
+            }
+        }
+        // An already cleaned manual replacement may differ from this old
+        // plan. Remaining backups need every-member proof before deletion.
+        if scratch_remains {
+            release_replaced_backups(&plan, &a.receipt.attempt_id, &roots)?;
+        }
+    }
+    store.save(next)
+}
+
 pub(crate) async fn request(
     owner: &AuthenticatedOwner,
     request: UpdateRequest,
 ) -> Result<UpdateStatus> {
     let peer = app_image(owner.peer_pid.context("pipe did not identify App")?)?;
     let mut store = open_store()?;
-    ensure!(
-        store.state.manual_installer.is_none(),
-        "manual installation is pending"
-    );
+    update_lease_gate(&request, &store.state, super::process::process_identity)?;
     let _repair =
         crate::acquire_service_repair_gate()?.context("repair/uninstall already running")?;
     if let Some(a) = &store.state.attempt
@@ -302,8 +481,9 @@ pub(crate) async fn request(
                 executor: None,
                 old_components,
                 disconnect: None,
+                publication_clock: None,
             });
-            store.save(next)?; // Before staging, quiescence, or ownership changes.
+            save_prepared_attempt(&mut store, next)?; // Before staging, quiescence, or ownership changes.
             let dir = store.attempt_dir()?;
             windows_security::ensure_private_installer_directory(&dir)?;
             windows_security::ensure_private_installer_directory(&dir.join("payload"))?;
@@ -348,37 +528,60 @@ pub(crate) async fn request(
                 "package components do not match signed target"
             );
             store.execution(Execution::Staged)?;
-            let prior_core = super::runtime::read_core_runtime_record().await?;
-            manager::CORE_MANAGER.lock().await.stop_core().await?;
-            if let Some(prior) = prior_core {
+            let strict = wfp::strict_kill_switch_enabled();
+            let mut core_stop_attempted = false;
+            let mut core_stopped = false;
+            let prepared = async {
+                let prior_core = super::runtime::read_core_runtime_record().await?;
+                core_stop_attempted = true;
+                manager::CORE_MANAGER.lock().await.stop_core().await?;
+                core_stopped = true;
+                if let Some(prior) = prior_core {
+                    ensure!(
+                        super::process::process_identity(prior.pid)?.as_ref() != Some(&prior.identity),
+                        "stopped Core incarnation is still running"
+                    );
+                }
+                desired::persist_owner_core_stopped(owner).await?;
+                wfp::transition_after_stop(false).await?;
+                let restored = dns::restore_protected().await?;
                 ensure!(
-                    super::process::process_identity(prior.pid)?.as_ref() != Some(&prior.identity),
-                    "stopped Core incarnation is still running"
+                    !restored.enabled && restored.last_error.is_none(),
+                    "strict DNS cleanup not observed"
                 );
+                owner_proxy_absent(owner)?;
+                ensure!(
+                    app_image(peer.pid)? == peer,
+                    "initiating image changed during preparation"
+                );
+                let observed = protection(owner).await?;
+                store.observe(
+                    &owner.key,
+                    &peer,
+                    generation,
+                    now()?,
+                    Observation::PreparationVerified {
+                        artifact_sha256: file_digest(&dir.join("package.exe"))?,
+                        protection: observed,
+                    },
+                )?;
+                Ok::<_, anyhow::Error>(())
             }
-            desired::persist_owner_core_stopped(owner).await?;
-            wfp::transition_after_stop(false).await?;
-            let restored = dns::restore_protected().await?;
-            ensure!(
-                !restored.enabled && restored.last_error.is_none(),
-                "strict DNS cleanup not observed"
-            );
-            owner_proxy_absent(owner)?;
-            ensure!(
-                app_image(peer.pid)? == peer,
-                "initiating image changed during preparation"
-            );
-            let observed = protection(owner).await?;
-            store.observe(
-                &owner.key,
-                &peer,
-                generation,
-                now()?,
-                Observation::PreparationVerified {
-                    artifact_sha256: file_digest(&dir.join("package.exe"))?,
-                    protection: observed,
-                },
-            )?;
+            .await;
+            if let Err(error) = prepared {
+                if prepare_failure_releases(strict, core_stop_attempted) {
+                    // Failed Prepare must not strand a non-strict owner behind bootstrap WFP
+                    // and dead DNS. Use Disconnect's recorded release; keep the attempt evidence.
+                    let released =
+                        release_failed_preparation(&mut store, owner, &peer, core_stopped).await;
+                    if let Err(release_error) = released {
+                        return Err(error.context(format!(
+                            "Prepare failure cleanup also failed: {release_error:#}"
+                        )));
+                    }
+                }
+                return Err(error);
+            }
         }
         UpdateRequest::Install { attempt_id } => {
             let a = store.live_attempt(now()?)?;
@@ -395,24 +598,62 @@ pub(crate) async fn request(
                 "preparation incomplete"
             );
             let dir = store.attempt_dir()?;
-            store.execution(Execution::Launching)?;
-            let child = std::process::Command::new(dir.join("executor.exe"))
+            // Do not persist Launching before the process exists. The App treats
+            // Launching as "the executor is in flight" and would hide this error
+            // while bootstrap WFP kept the machine offline.
+            let child = match std::process::Command::new(dir.join("executor.exe"))
                 .arg("--update-execute")
-                .spawn()?;
+                .spawn()
+            {
+                Ok(child) => child,
+                Err(error) => {
+                    let error = anyhow::Error::from(error);
+                    if executor_spawn_failure_releases(wfp::strict_kill_switch_enabled()) {
+                        let released = async {
+                            begin_update_release(&mut store, owner, &peer)?;
+                            wfp::release_applying_narrow().await?;
+                            if let Err(clear_error) = desired::clear_active_owner().await {
+                                tracing::warn!(
+                                    "executor did not start; general traffic was released, \
+                                     active owner was not cleared: {clear_error:#}"
+                                );
+                            }
+                            Ok::<_, anyhow::Error>(())
+                        }
+                        .await;
+                        if let Err(release_error) = released {
+                            return Err(error.context(format!(
+                                "executor did not start; selective release was refused \
+                                 and the previous protection remains: {release_error:#}"
+                            )));
+                        }
+                        return Err(error.context(
+                            "executor did not start; general traffic was released \
+                             and AI-service destinations stay blocked",
+                        ));
+                    }
+                    return Err(error.context(
+                        "executor did not start; explicit strict kill switch kept traffic Blocked",
+                    ));
+                }
+            };
+            store.execution(Execution::Launching)?;
             let executor = image(child.id())?;
             let mut next = store.state.clone();
             next.attempt.as_mut().unwrap().executor = Some(executor);
             store.save(next)?;
             // Child waits for the persisted identity while this lock is held.
         }
-        UpdateRequest::Disconnect => {
+        release @ (UpdateRequest::Disconnect | UpdateRequest::DisconnectApplyingNarrow) => {
             if !store.pending() {
                 return status(&store);
             }
-            // Record the explicit authenticated request before any release.
-            // The original recovery obligation is never rewritten as Unprotected.
-            store.request_disconnect(&owner.key, &peer, now()?)?;
-            wfp::authorize_write_for(&owner.key)?;
+            // Automatic failed-Prepare cleanup must never override an explicit strict hold.
+            ensure!(
+                !release.applies_narrow_on_disconnect() || !wfp::strict_kill_switch_enabled(),
+                "automatic update cleanup cannot release explicit strict protection"
+            );
+            begin_update_release(&mut store, owner, &peer)?;
             if let Some(active) = desired::load_active_owner().await? {
                 ensure!(
                     active.owner_key == owner.key,
@@ -432,7 +673,7 @@ pub(crate) async fn request(
             desired::persist_owner_core_stopped(owner).await?;
             desired::clear_active_owner().await?;
             tunnel_absent("Tono")?;
-            wfp::release().await?;
+            wfp::release_for_update_disconnect(release.applies_narrow_on_disconnect()).await?;
             // WFP is gone from here on. Proving the release for the update
             // evidence and archiving the record are update bookkeeping: their
             // failure keeps the record pending but is not a release failure.
@@ -458,7 +699,7 @@ pub(crate) async fn request(
             if !store.pending() {
                 return status(&store);
             }
-            store.authenticate_successor(&peer)?;
+            let relaunched = store.adopt_successor(&peer)?;
             let a = store.live_attempt(now()?)?;
             ensure!(
                 a.execution == Execution::Replaced,
@@ -487,6 +728,9 @@ pub(crate) async fn request(
                     Observation::InstalledIdentityVerified { components: actual },
                 )?;
             }
+            let mut adopted = status(&store)?;
+            adopted.successor_relaunched = relaunched;
+            return Ok(adopted);
         }
         UpdateRequest::Commit => {
             if !store.pending() {
@@ -752,6 +996,7 @@ fn status(store: &Store) -> Result<UpdateStatus> {
             .unwrap_or_else(|| "none".into()),
         offer: None,
         needs_attention: None,
+        successor_relaunched: false,
     })
 }
 
@@ -776,7 +1021,7 @@ fn recovery_task_registration(system_directory: &Path, dir: &Path) -> std::proce
         "\"{}\" --update-recover",
         dir.join("executor.exe").display()
     );
-    let mut registration = std::process::Command::new(system_directory.join("schtasks.exe"));
+    let mut registration = std::process::Command::new(schtasks_path(system_directory));
     registration.args([
         "/Create",
         "/TN",
@@ -792,6 +1037,10 @@ fn recovery_task_registration(system_directory: &Path, dir: &Path) -> std::proce
         "/F",
     ]);
     registration
+}
+
+fn schtasks_path(system_directory: &Path) -> PathBuf {
+    system_directory.join("schtasks.exe")
 }
 
 fn register_recovery_with(store: &Store, register: impl FnOnce(&Path) -> Result<()>) -> Result<()> {
@@ -860,21 +1109,31 @@ pub fn unpack_gate(package: &Path) -> Result<()> {
 /// The ONSTART task [`register_consumed_recovery`] creates.
 pub const RECOVERY_TASK_NAME: &str = "Tono Update Recovery v1";
 
+/// `schtasks.exe` from the OS-reported system directory. Registration and
+/// retirement share this path: a Windows install on another volume can create
+/// the ONSTART task, and the same volume must be able to delete it.
+fn recovery_task_command(system_directory: &Path, args: &[&str]) -> std::process::Command {
+    let mut command = std::process::Command::new(system_directory.join("schtasks.exe"));
+    command.args(args);
+    command
+}
+
 /// Remove the SYSTEM boot task. The executor retires it once the committed
 /// cleanup ran, as macOS retires its launchd job at commit; a final uninstall
 /// retires it after WFP removal is proven. A task that is already gone is not
-/// an error. Same scheduler binary as the registration.
+/// an error. Same scheduler binary as [`recovery_task_registration`].
 pub fn retire_recovery_task() -> Result<()> {
-    let schtasks = Path::new("C:\\Windows\\System32\\schtasks.exe");
-    let deleted = std::process::Command::new(schtasks)
-        .args(["/Delete", "/TN", RECOVERY_TASK_NAME, "/F"])
-        .output()?;
+    let system = security::system_directory()?;
+    let deleted = recovery_task_command(
+        &system,
+        &["/Delete", "/TN", RECOVERY_TASK_NAME, "/F"],
+    )
+    .output()?;
     if deleted.status.success() {
         return Ok(());
     }
-    let present = std::process::Command::new(schtasks)
-        .args(["/Query", "/TN", RECOVERY_TASK_NAME])
-        .output()?;
+    let present =
+        recovery_task_command(&system, &["/Query", "/TN", RECOVERY_TASK_NAME]).output()?;
     ensure!(
         !present.status.success(),
         "could not retire the update recovery task"
@@ -929,14 +1188,105 @@ pub async fn manual_gate() -> Result<()> {
     Ok(())
 }
 
-async fn manual_core_absent() -> Result<()> {
-    if let Some(record) = super::runtime::read_core_runtime_record().await? {
-        ensure!(
-            super::process::process_identity(record.pid)?.as_ref() != Some(&record.identity),
-            "Disconnect before manual installation: Core is still running"
-        );
+/// `Ok(Some(note))` when the only interfaces named `Tono` are ones Windows reports as not
+/// present; the gate ignores those and says so in its log.
+async fn manual_core_absent() -> Result<Option<String>> {
+    let core = || GateRefusal(GateReason::CoreRunning);
+    if let Some(record) = super::runtime::read_core_runtime_record()
+        .await
+        .context(core())?
+    {
+        let live = super::process::process_identity(record.pid);
+        match recorded_core_state(&record.identity, live, || {
+            security::process_image_name(record.pid)
+        }) {
+            RecordedCore::Gone => {
+                // A stale record only misleads a later check once its pid is reused. With no
+                // Service left to write a new one it belongs to nobody, so it goes.
+                if !barrier_service_present().unwrap_or(true) {
+                    super::runtime::remove_core_runtime_record().await;
+                }
+            }
+            RecordedCore::Running => {
+                return Err(refusal(
+                    GateReason::CoreRunning,
+                    format!(
+                        "Disconnect before manual installation: Core is still running (pid {})",
+                        record.pid
+                    ),
+                ));
+            }
+            RecordedCore::Unverifiable(error) => {
+                return Err(error
+                    .context(format!(
+                        "the recorded Tono Core (pid {}) could not be shown stopped",
+                        record.pid
+                    ))
+                    .context(core()));
+            }
+        }
     }
-    tunnel_absent("Tono")
+    // An enumeration failure is not absence; it stays an unexpected refusal with its own text.
+    // Only a row Windows reports as present refuses (WIN-GATE-GHOST-TUN).
+    let (present, not_present) = security::tunnel_rows("Tono")?;
+    let list = |rows: Vec<security::TunnelRow>| {
+        rows.iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("; ")
+    };
+    if !present.is_empty() {
+        return Err(refusal(
+            GateReason::TonoAdapterPresent,
+            format!(
+                "a network interface named \"Tono\" is reported as present: {}",
+                list(present)
+            ),
+        ));
+    }
+    Ok((!not_present.is_empty()).then(|| {
+        format!(
+            "ignored a network interface named \"Tono\" that Windows reports as not present: {}",
+            list(not_present)
+        )
+    }))
+}
+
+/// What a leftover core runtime record says about the Core it names.
+enum RecordedCore {
+    /// That incarnation is gone: the pid exited or now belongs to another program.
+    Gone,
+    Running,
+    /// The pid is alive but could not be inspected, and nothing shows it is another program.
+    Unverifiable(anyhow::Error),
+}
+
+/// A record names one Core incarnation, which runs only if its pid still carries that identity.
+/// When the pid cannot be inspected (`Registry`, `MemCompression`, a protected process after a
+/// reboot reused it), the image name Windows lists for it still tells another program from the
+/// Core; the same name, or none, stays unproven.
+fn recorded_core_state(
+    recorded: &super::process::ProcessIdentity,
+    live: Result<Option<super::process::ProcessIdentity>>,
+    image_name: impl FnOnce() -> Option<String>,
+) -> RecordedCore {
+    match live {
+        Ok(Some(identity)) if identity == *recorded => RecordedCore::Running,
+        Ok(_) => RecordedCore::Gone,
+        Err(error) => {
+            let recorded_name = Path::new(&recorded.executable)
+                .file_name()
+                .and_then(|name| name.to_str());
+            match (image_name(), recorded_name) {
+                (Some(live_name), Some(recorded_name))
+                    if !live_name.eq_ignore_ascii_case(recorded_name) =>
+                {
+                    RecordedCore::Gone
+                }
+                _ => RecordedCore::Unverifiable(error),
+            }
+        }
+    }
 }
 
 /// The manual gate refused only because Tono protection is still active: no
@@ -993,6 +1343,28 @@ fn residual_filter_refusal(
     }
 }
 
+/// A runnable desired owner state refuses the manual gate; [`begin_manual`] reads it only after
+/// [`residual_filter_refusal`] found no Tono filter. A registered Service would restore the Core
+/// on start, so the user must Disconnect ([`ProtectionActive`]). With no Service left either, it
+/// is a stale owner nobody can Disconnect, such as after a confirmed orphan clear whose
+/// [`retire_orphaned_owner`] failed once the filters were removed. The refusal re-offers that
+/// confirmed recovery ([`OrphanedProtection`]), which retires the owner only after proving again
+/// that no Service and no filter is left.
+fn runnable_owner_refusal(
+    core_should_be_running: bool,
+    service_present: impl FnOnce() -> Result<bool>,
+) -> Result<()> {
+    if !core_should_be_running {
+        return Ok(());
+    }
+    // As for residual filters, an unreadable SCM keeps the Disconnect answer.
+    if service_present().unwrap_or(true) {
+        Err(ProtectionActive.into())
+    } else {
+        Err(OrphanedProtection.into())
+    }
+}
+
 /// Whether a Tono Service that can re-arm the barrier is installed: an SCM registration whose
 /// binary is still on disk. A stopped Service counts. Anything unreadable counts as present.
 fn barrier_service_present() -> Result<bool> {
@@ -1017,47 +1389,126 @@ fn barrier_service_present() -> Result<bool> {
     }
 }
 
+/// The installer (or uninstaller) that started this gate; the lease binds its incarnation.
+fn gate_installer() -> Result<Image> {
+    parent_image()
+        .context("the setup program that started this gate could not be identified or read")
+        .context(GateRefusal(GateReason::InstallerUnverifiable))
+}
+
+/// The repair lock every lifecycle writer takes: the Service, repair, install and uninstall.
+fn gate_repair_lock() -> Result<crate::ServiceRepairGate> {
+    crate::acquire_service_repair_gate()
+        .context(GateRefusal(GateReason::StateDirUnusable))?
+        .context(
+            "another lifecycle writer is active: another Tono installer, uninstaller or repair, \
+             or the Service, holds ProgramData\\Tono\\bin\\.repair.lock",
+        )
+        .context(GateRefusal(GateReason::LifecycleWriterActive))
+}
+
+/// The update store as a gate reads it: an unusable state directory, a store another Tono
+/// process holds, and damaged evidence are three different answers for the customer.
+fn gate_store() -> Result<Store> {
+    let (root, _pins) = store_root().context(GateRefusal(GateReason::StateDirUnusable))?;
+    Store::open(&root).map_err(|error| {
+        let reason = if error.is::<StoreBusy>() {
+            GateReason::LifecycleWriterActive
+        } else {
+            GateReason::UpdateEvidenceUnreadable
+        };
+        error.context(GateRefusal(reason))
+    })
+}
+
+fn refuse_pending(store: &Store) -> Result<()> {
+    match store.state.attempt.as_ref() {
+        Some(a) if store.pending() => Err(refusal(
+            GateReason::UpdatePending,
+            format!(
+                "update evidence pending: attempt {} is at {:?}/{:?} and has not committed",
+                a.receipt.attempt_id, a.receipt.phase, a.execution
+            ),
+        )),
+        _ => Ok(()),
+    }
+}
+
+/// A lease whose holder exited is stale and is replaced; only a live other holder refuses.
+fn refuse_live_lease(store: &Store, installer: &Image) -> Result<()> {
+    match &store.state.manual_installer {
+        Some(previous) if previous != installer && security::process_matches(previous).is_ok() => {
+            let name = previous.path.file_name().map_or_else(
+                || previous.path.display().to_string(),
+                |name| name.to_string_lossy().into_owned(),
+            );
+            Err(refusal(
+                GateReason::InstallerLeaseHeld,
+                format!(
+                    "another manual installer is active: {name} (pid {}) still holds the \
+                     installer lease",
+                    previous.pid
+                ),
+            ))
+        }
+        _ => Ok(()),
+    }
+}
+
 /// NSIS calls this before *any* live or repair-resource mutation. The durable
 /// lease fences Service connect/restart even after the short-lived gate exits.
-pub async fn begin_manual() -> Result<()> {
-    let installer = parent_image()?;
-    let _repair =
-        crate::acquire_service_repair_gate()?.context("another lifecycle writer is active")?;
-    let mut store = open_store()?;
-    ensure!(!store.pending(), "update evidence pending");
-    if let Some(previous) = &store.state.manual_installer {
-        ensure!(
-            security::process_matches(previous).is_err() || *previous == installer,
-            "another manual installer is active"
-        );
-    }
+/// Every refusal names its cause ([`GateRefusal`]) for the installer's dialog. The lease is
+/// written only after every check passed; the returned note is for the install-gate log.
+pub async fn begin_manual() -> Result<Option<String>> {
+    let installer = gate_installer()?;
+    let _repair = gate_repair_lock()?;
+    let mut store = gate_store()?;
+    refuse_pending(&store)?;
+    refuse_live_lease(&store, &installer)?;
     drop(store);
     // No stale manual lease may turn armed/unknown protection into permission.
     residual_filter_refusal(
-        wfp::residual_filters_present().await?,
+        wfp::residual_filters_present()
+            .await
+            .context(GateRefusal(GateReason::WfpUnreadable))?,
         barrier_service_present,
     )?;
     let paths = crate::service_paths();
-    if paths.active_owner_path().try_exists()? {
-        let active: crate::ActiveOwnerState =
-            serde_json::from_slice(&std::fs::read(paths.active_owner_path())?)?;
-        ensure!(
-            !desired::load_owner_desired_state(&active.owner_key)
-                .await?
-                .core_should_be_running,
-            ProtectionActive
-        );
+    let owner = || GateRefusal(GateReason::OwnerStateUnreadable);
+    if paths.active_owner_path().try_exists().context(owner())? {
+        let active: crate::ActiveOwnerState = std::fs::read(paths.active_owner_path())
+            .map_err(anyhow::Error::from)
+            .and_then(|bytes| Ok(serde_json::from_slice::<crate::ActiveOwnerState>(&bytes)?))
+            .with_context(|| format!("active owner record {:?}", paths.active_owner_path()))
+            .context(owner())?;
+        let wanted = desired::load_owner_desired_state(&active.owner_key)
+            .await
+            .context(owner())?;
+        runnable_owner_refusal(wanted.core_should_be_running, barrier_service_present)?;
     }
-    let restored = dns::restore_protected().await?;
-    ensure!(
-        !restored.enabled && restored.last_error.is_none(),
-        "DNS restoration is unproven"
-    );
-    manual_core_absent().await?;
-    store = open_store()?;
+    let restored = dns::restore_protected()
+        .await
+        .context(GateRefusal(GateReason::DnsRestoreUnproven))?;
+    if restored.enabled || restored.last_error.is_some() {
+        return Err(refusal(
+            GateReason::DnsRestoreUnproven,
+            format!(
+                "DNS restoration is unproven: {}",
+                restored
+                    .last_error
+                    .as_deref()
+                    .unwrap_or("protected DNS is still enabled")
+            ),
+        ));
+    }
+    let note = manual_core_absent().await?;
+    store = gate_store()?;
     let mut next = store.state.clone();
     next.manual_installer = Some(installer);
-    store.save(next)
+    store
+        .save(next)
+        .context(GateRefusal(GateReason::StateDirUnusable))?;
+    Ok(note)
 }
 
 /// Uninstall only, after the user confirmed releasing active protection. The
@@ -1065,20 +1516,16 @@ pub async fn begin_manual() -> Result<()> {
 /// deletes nothing unless WFP removal is proven, so this takes the same
 /// update/installer lease as [`begin_manual`] without requiring Disconnect.
 pub fn begin_manual_uninstall() -> Result<()> {
-    let installer = parent_image()?;
-    let _repair =
-        crate::acquire_service_repair_gate()?.context("another lifecycle writer is active")?;
-    let mut store = open_store()?;
-    ensure!(!store.pending(), "update evidence pending");
-    if let Some(previous) = &store.state.manual_installer {
-        ensure!(
-            security::process_matches(previous).is_err() || *previous == installer,
-            "another manual installer is active"
-        );
-    }
+    let installer = gate_installer()?;
+    let _repair = gate_repair_lock()?;
+    let mut store = gate_store()?;
+    refuse_pending(&store)?;
+    refuse_live_lease(&store, &installer)?;
     let mut next = store.state.clone();
     next.manual_installer = Some(installer);
-    store.save(next)
+    store
+        .save(next)
+        .context(GateRefusal(GateReason::StateDirUnusable))
 }
 
 /// Install only, after the user confirmed clearing an orphaned barrier ([`OrphanedProtection`]).
@@ -1086,10 +1533,11 @@ pub fn begin_manual_uninstall() -> Result<()> {
 /// The install's own `RemoveVergeService` ladder then removes the filters, and the install stops
 /// there unless that removal is proven.
 pub fn begin_manual_orphan() -> Result<()> {
-    ensure!(
-        !barrier_service_present()?,
-        "a Tono Service still owns the network barrier"
-    );
+    if barrier_service_present()? {
+        // A Service appeared since the user confirmed: Disconnect is the answer again (77).
+        return Err(anyhow::Error::new(ProtectionActive)
+            .context("a Tono Service still owns the network barrier"));
+    }
     begin_manual_uninstall()
 }
 
@@ -1190,6 +1638,248 @@ pub fn reconcile_before_desired() -> Result<bool> {
 mod tests {
     use super::*;
 
+    fn committed_with_backup() -> (PathBuf, Store, State, PathBuf) {
+        use sha2::{Digest, Sha256};
+
+        let (root, mut store, _, _) = crate::update_transaction::tests::reserved();
+        let mut committed = store.state.clone();
+        committed.generation += 1;
+        let a = committed.attempt.as_mut().unwrap();
+        committed.consumed_sequence = a.manifest.release_sequence;
+        a.execution = Execution::Replaced;
+        a.receipt.phase = Phase::Committed;
+        a.receipt.successor_generation = Some(committed.generation);
+        store.save(committed).unwrap();
+        let target = root.join("Tono.exe");
+        let bound = |suffix: &str| {
+            let mut path = target.clone().into_os_string();
+            path.push(suffix);
+            PathBuf::from(path)
+        };
+        let backup = bound(".rollback");
+        std::fs::write(&target, b"new-app").unwrap();
+        std::fs::write(&backup, b"old-app").unwrap();
+        let digest = |bytes: &[u8]| -> [u8; 32] { Sha256::digest(bytes).into() };
+        let dir = store.attempt_dir().unwrap();
+        std::fs::create_dir(&dir).unwrap();
+        std::fs::write(
+            dir.join("replacement.json"),
+            serde_json::to_vec(&serde_json::json!({
+                "attempt_id": store.attempt().unwrap().receipt.attempt_id,
+                "members": [{
+                    "target": target,
+                    "backup": backup,
+                    "restore": bound(".restore"),
+                    "publish_scratch": bound(".publish"),
+                    "old_digest": digest(b"old-app"),
+                    "new_digest": digest(b"new-app"),
+                }],
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        let mut next = store.state.clone();
+        next.generation += 1;
+        let a = next.attempt.as_mut().unwrap();
+        a.manifest.release_sequence += 1;
+        a.receipt.manifest_sha256 = a.manifest.sha256().unwrap();
+        a.receipt.attempt_id = "2".repeat(64);
+        a.receipt.phase = Phase::Preparing;
+        a.receipt.initiating_generation = next.generation;
+        a.receipt.successor_generation = None;
+        a.execution = Execution::Reserved;
+        a.executor = None;
+        (root, store, next, backup)
+    }
+
+    #[test]
+    fn update_prepare_preserves_committed_retry_until_locked_backups_are_cleaned() {
+        use std::os::windows::fs::OpenOptionsExt as _;
+        use windows_sys::Win32::Storage::FileSystem::FILE_SHARE_READ;
+
+        let (root, mut store, next, backup) = committed_with_backup();
+        let before = std::fs::read(root.join("state.json")).unwrap();
+        let held = OpenOptions::new()
+            .read(true)
+            .share_mode(FILE_SHARE_READ)
+            .open(&backup)
+            .unwrap();
+        let locked = save_prepared_attempt(&mut store, next.clone());
+        let durable_while_locked = std::fs::read(root.join("state.json")).unwrap();
+        drop(held);
+        let retry = save_prepared_attempt(&mut store, next);
+        let removed = !backup.exists();
+        let replacement = store.attempt().unwrap().receipt.attempt_id.clone();
+        drop(store);
+        std::fs::remove_dir_all(root).unwrap();
+
+        assert!(locked.is_err(), "committed cleanup must precede supersession");
+        assert_eq!(durable_while_locked, before);
+        assert!(retry.is_ok() && removed);
+        assert_eq!(replacement, "2".repeat(64));
+    }
+
+    #[test]
+    fn update_prepare_allows_manual_replacement_after_committed_scratch_is_absent() {
+        let (root, mut store, next, backup) = committed_with_backup();
+        std::fs::remove_file(backup).unwrap();
+        std::fs::write(root.join("Tono.exe"), b"manual-install").unwrap();
+        let result = save_prepared_attempt(&mut store, next);
+        drop(store);
+        std::fs::remove_dir_all(root).unwrap();
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn update_prepare_keeps_committed_backups_when_installed_members_are_unproven() {
+        let (root, mut store, next, backup) = committed_with_backup();
+        std::fs::write(root.join("Tono.exe"), b"different-install").unwrap();
+        let before = std::fs::read(root.join("state.json")).unwrap();
+        let result = save_prepared_attempt(&mut store, next);
+        let durable = std::fs::read(root.join("state.json")).unwrap();
+        let retained = backup.exists();
+        drop(store);
+        std::fs::remove_dir_all(root).unwrap();
+        assert!(result.is_err());
+        assert_eq!(durable, before);
+        assert!(retained);
+    }
+
+    #[test]
+    fn update_prepare_failure_releases_only_after_stop_without_strict_kill_switch() {
+        assert!(prepare_failure_releases(false, true));
+        assert!(!prepare_failure_releases(true, true));
+        assert!(!prepare_failure_releases(false, false));
+        assert!(!prepare_failure_releases(true, false));
+    }
+
+    #[cfg(feature = "test")]
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn failed_prepare_releases_general_traffic_with_the_secondary_ai_hold() -> Result<()> {
+        use crate::update_transaction::tests::reserved;
+
+        wfp::emergency_disarm_windows_kill_switch().await?;
+        desired::clear_active_owner().await?;
+        let (root, mut store, peer, _) = reserved();
+        let owner = AuthenticatedOwner {
+            key: "failed-prepare-ai-fixture".to_owned(),
+            identity: crate::OwnerIdentity::Windows {
+                sid: "S-1-5-21-1-2-3-1001".to_owned(),
+            },
+            app_data_root: root.clone(),
+            peer_pid: None,
+            peer_session_id: None,
+        };
+        let mut next = store.state.clone();
+        next.attempt.as_mut().unwrap().receipt.owner = owner.key.clone();
+        store.save(next)?;
+        let obligation = store.attempt()?.receipt.required_recovery;
+        wfp::arm_bootstrap(
+            &crate::KillSwitchConfig {
+                tunnel_interface: "Tono".to_owned(),
+                proxy_endpoints: vec![crate::ProxyEndpoint {
+                    ip: "8.8.8.8".to_owned(),
+                    port: 443,
+                    protocol: crate::ProxyProtocol::Tcp,
+                }],
+                bootstrap_api_hosts: vec!["1.1.1.1".to_owned()],
+                direct_endpoints: Vec::new(),
+            },
+            r"C:\Program Files\Tono\tono-core.exe",
+            &owner.key,
+        )
+        .await?;
+
+        release_failed_preparation(&mut store, &owner, &peer, true).await?;
+        let released = !wfp::status().await.wanted;
+        let ai_held = super::super::selective_layer::test_hold_active();
+        let recorded = store.attempt()?.disconnect.is_some()
+            && store.attempt()?.receipt.required_recovery == obligation;
+        // The explicit Restore path still removes the automatic AI hold.
+        wfp::release().await?;
+        let restored = !super::super::selective_layer::test_hold_active();
+        drop(store);
+        std::fs::remove_dir_all(root)?;
+        std::fs::remove_file(
+            crate::service_paths()
+                .for_owner_key(&owner.key)
+                .desired_state_path(),
+        )?;
+
+        assert!(released, "failed Prepare must release general traffic");
+        assert!(ai_held, "automatic failure cleanup must apply the AI hold");
+        assert!(recorded, "release must retain the original recovery obligation");
+        assert!(restored, "explicit Restore must remove the AI hold");
+        Ok(())
+    }
+
+    #[test]
+    fn an_executor_that_never_starts_releases_unless_the_kill_switch_is_strict() {
+        assert!(executor_spawn_failure_releases(false));
+        assert!(!executor_spawn_failure_releases(true));
+    }
+
+    /// WIN-GATE-OPAQUE: a core runtime record outlives its Core when the Service is removed
+    /// without stopping it cleanly. After a reboot its pid can belong to any program, including
+    /// one whose image cannot be read (`Registry`, `MemCompression`, a protected process). That
+    /// read error refused every install with the catch-all dialog. A pid that now runs a
+    /// different image is a stale record; only the same image name, or none, stays unproven.
+    #[test]
+    fn update_manual_gate_treats_a_reused_core_pid_as_a_stale_record() {
+        let recorded = super::super::process::ProcessIdentity {
+            executable: r"C:\Program Files\Tono\tono-core.exe".into(),
+            started_at: 133_000_000_000_000_000,
+        };
+        let state = recorded_core_state(
+            &recorded,
+            Err(anyhow::anyhow!("Access is denied. (os error 5)")),
+            || Some("Registry".into()),
+        );
+        assert!(
+            matches!(state, RecordedCore::Gone),
+            "a reused pid kept refusing the install"
+        );
+        let state = recorded_core_state(
+            &recorded,
+            Err(anyhow::anyhow!("Access is denied. (os error 5)")),
+            || Some("TONO-CORE.EXE".into()),
+        );
+        assert!(matches!(state, RecordedCore::Unverifiable(_)));
+        let state =
+            recorded_core_state(&recorded, Err(anyhow::anyhow!("snapshot failed")), || None);
+        assert!(matches!(state, RecordedCore::Unverifiable(_)));
+    }
+
+    /// WIN-GATE-GHOST-TUN: every Core stop is a hard kill, so its WinTUN device is left "Not
+    /// present" while Windows keeps its interface row named `Tono`. Matching that name alone
+    /// refused every later manual install with 87. Only a row Windows reports as present (any
+    /// status but NotPresent) still refuses, and only an exact name match counts.
+    #[test]
+    fn update_manual_gate_ignores_a_not_present_tono_interface() {
+        use windows_sys::Win32::NetworkManagement::Ndis::{
+            IfOperStatusDown, IfOperStatusNotPresent, IfOperStatusUp,
+        };
+        let row = |alias: &str, oper_status| security::TunnelRow {
+            alias: alias.into(),
+            oper_status,
+            ..Default::default()
+        };
+        let (present, not_present) =
+            security::split_tunnel_rows(vec![row("Tono", IfOperStatusNotPresent)], "Tono");
+        assert!(
+            present.is_empty(),
+            "a not-present Tono interface refused the install: {present:?}"
+        );
+        assert_eq!(not_present.len(), 1);
+        let (present, _) = security::split_tunnel_rows(
+            vec![row("TONO", IfOperStatusDown), row("Tono 1", IfOperStatusUp)],
+            "Tono",
+        );
+        assert_eq!(present.len(), 1, "{present:?}");
+        assert_eq!(present[0].alias, "TONO");
+    }
+
     #[test]
     fn update_manual_gate_names_an_orphaned_barrier_instead_of_asking_to_disconnect() {
         // No filters: the gate does not even ask who owns them.
@@ -1204,6 +1894,24 @@ mod tests {
         // refusal must be the one NSIS turns into the confirmed proven-removal install.
         let refusal = residual_filter_refusal(true, || Ok(false)).unwrap_err();
         assert!(refusal.is::<OrphanedProtection>());
+    }
+
+    /// #602 (#573 residual): a confirmed orphan clear removed the filters and the Service, then
+    /// could not persist the owner's stopped state. The re-run finds no filters, only that stale
+    /// runnable owner, and must be offered the same confirmed recovery again (78) instead of
+    /// Disconnect advice nobody can follow (77). A Service that could restore the Core still wins.
+    #[test]
+    fn update_manual_gate_reoffers_orphan_recovery_for_a_stale_runnable_owner() {
+        runnable_owner_refusal(false, || panic!("no runnable owner to refuse")).unwrap();
+        let refusal = runnable_owner_refusal(true, || Ok(true)).unwrap_err();
+        assert!(refusal.is::<ProtectionActive>());
+        let refusal = runnable_owner_refusal(true, || anyhow::bail!("SCM unreadable")).unwrap_err();
+        assert!(refusal.is::<ProtectionActive>());
+        let refusal = runnable_owner_refusal(true, || Ok(false)).unwrap_err();
+        assert!(
+            refusal.is::<OrphanedProtection>(),
+            "no Service and no filters left: expected the confirmed orphan recovery, got {refusal:#}"
+        );
     }
 
     #[test]
@@ -1386,6 +2094,24 @@ mod tests {
     }
 
     #[test]
+    fn update_recovery_retirement_uses_the_os_system_directory() {
+        // Delete and the follow-up query both come from the same directory the
+        // registration uses. A fixed C:\Windows leaves the ONSTART task in
+        // place when Windows itself is on another volume.
+        let system = Path::new(r"D:\Windows\System32");
+        let delete = recovery_task_command(system, &["/Delete", "/TN", RECOVERY_TASK_NAME, "/F"]);
+        let query = recovery_task_command(system, &["/Query", "/TN", RECOVERY_TASK_NAME]);
+        assert_eq!(
+            Path::new(delete.get_program()),
+            Path::new(r"D:\Windows\System32\schtasks.exe")
+        );
+        assert_eq!(
+            Path::new(query.get_program()),
+            Path::new(r"D:\Windows\System32\schtasks.exe")
+        );
+    }
+
+    #[test]
     fn update_signature_binds_exact_bytes_and_trusted_comment() {
         // Existing public minisign verification vector, also used by packaging.
         // No secret key, signing operation, or compiled-key bypass is introduced.
@@ -1438,5 +2164,128 @@ mod tests {
         );
         assert!(!root.join("linked-copy.exe").exists());
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// BRICK-W2 (Service half): an uninstaller cancelled at "Tono is running" leaves its lease
+    /// behind, and that lease refused every release for good. The release admission now passes
+    /// a lease whose holder is conclusively dead: no process has its PID, or the PID names a
+    /// process created at another time. The same creation time under another path, or an
+    /// unreadable process, still counts as alive, and a pending attempt still refuses.
+    #[test]
+    fn update_release_admission_passes_only_a_conclusively_dead_lease_holder() {
+        use super::super::process::{ProcessIdentity, process_identity};
+        let holder = Image {
+            pid: 4242,
+            started_at: 133_000_000_000_000_000,
+            path: r"C:\Program Files\Tono\uninstall.exe".into(),
+            sha256: "a".repeat(64),
+        };
+        let leased = State {
+            manual_installer: Some(holder.clone()),
+            ..State::default()
+        };
+        assert!(
+            release_admission_at(&leased, |_| Ok(None)).is_ok(),
+            "an exited lease holder kept refusing the release"
+        );
+        assert!(
+            release_admission_at(&leased, |_| Ok(Some(ProcessIdentity {
+                executable: r"C:\Windows\System32\notepad.exe".into(),
+                started_at: holder.started_at + 1,
+            })))
+            .is_ok(),
+            "a lease PID reused by a later process kept refusing the release"
+        );
+        let same_start = release_admission_at(&leased, |_| {
+            Ok(Some(ProcessIdentity {
+                executable: r"C:\Elsewhere\uninstall.exe".into(),
+                started_at: holder.started_at,
+            }))
+        })
+        .unwrap_err();
+        assert!(
+            format!("{same_start:#}").contains("manual installer owns the machine lifecycle"),
+            "{same_start:#}"
+        );
+        assert!(
+            release_admission_at(&leased, |_| Err(anyhow::anyhow!(
+                "Access is denied. (os error 5)"
+            )))
+            .is_err(),
+            "an unreadable lease holder must count as alive"
+        );
+        let (root, store, _, _) = crate::update_transaction::tests::reserved();
+        let pending = release_admission_at(&store.state, |_| Ok(None)).unwrap_err();
+        assert!(format!("{pending:#}").contains("update pending"), "{pending:#}");
+        drop(store);
+        std::fs::remove_dir_all(root).unwrap();
+
+        // The operating system's answers: this process reads as alive. A killed child whose
+        // handle is still held (so its PID cannot be reused) reads as conclusively dead.
+        let own = process_identity(std::process::id())
+            .unwrap()
+            .expect("this process is running");
+        let own_holder = Image {
+            pid: std::process::id(),
+            started_at: own.started_at,
+            path: own.executable.into(),
+            sha256: String::new(),
+        };
+        assert!(!holder_conclusively_dead(
+            &own_holder,
+            process_identity(own_holder.pid)
+        ));
+        let mut child = std::process::Command::new("ping")
+            .args(["-n", "30", "127.0.0.1"])
+            .stdout(std::process::Stdio::null())
+            .spawn()
+            .unwrap();
+        let running = process_identity(child.id())
+            .unwrap()
+            .expect("the child is running");
+        let child_holder = Image {
+            pid: child.id(),
+            started_at: running.started_at,
+            path: running.executable.into(),
+            sha256: String::new(),
+        };
+        child.kill().unwrap();
+        child.wait().unwrap();
+        assert!(
+            holder_conclusively_dead(&child_holder, process_identity(child_holder.pid)),
+            "a killed lease holder still counted as alive"
+        );
+        drop(child);
+    }
+
+    /// BRICK-W2 (Service half): after a restart the App's Disconnect sends `Status` first, and
+    /// any lease refused it before the release was ever asked. Only `Status` passes a
+    /// conclusively dead holder; an unreadable holder refuses it, and every other request keeps
+    /// refusing any lease.
+    #[test]
+    fn update_status_passes_only_a_conclusively_dead_lease_holder() {
+        let leased = State {
+            manual_installer: Some(Image {
+                pid: 4242,
+                started_at: 133_000_000_000_000_000,
+                path: r"C:\Program Files\Tono\uninstall.exe".into(),
+                sha256: "a".repeat(64),
+            }),
+            ..State::default()
+        };
+        assert!(
+            update_lease_gate(&UpdateRequest::Status, &leased, |_| Ok(None)).is_ok(),
+            "Status kept refusing an exited lease holder"
+        );
+        let unreadable = update_lease_gate(&UpdateRequest::Status, &leased, |_| {
+            Err(anyhow::anyhow!("Access is denied. (os error 5)"))
+        })
+        .unwrap_err();
+        assert!(
+            format!("{unreadable:#}").contains("manual installation is pending"),
+            "{unreadable:#}"
+        );
+        assert!(update_lease_gate(&UpdateRequest::Adopt, &leased, |_| Ok(None)).is_err());
+        assert!(update_lease_gate(&UpdateRequest::Disconnect, &leased, |_| Ok(None)).is_err());
     }
 }

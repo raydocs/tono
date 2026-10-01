@@ -71,9 +71,11 @@ export function withInvites(
 ): DataColumn<ListRow>[] {
   return columns.map((column) => ({
     ...column,
-    sortValue: (row: ListRow) => (row.customer === null
-      ? inviteSort(column.id, row.invite)
-      : column.sortValue?.(row.customer) ?? null),
+    sortValue: column.sortValue
+      ? (row: ListRow) => (row.customer === null
+        ? inviteSort(column.id, row.invite)
+        : column.sortValue?.(row.customer) ?? null)
+      : undefined,
     cell: (row: ListRow) => (row.customer === null
       ? inviteCell(column.id, row.invite, mask, wechat)
       : column.cell(row.customer)),

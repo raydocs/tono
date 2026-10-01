@@ -2,7 +2,8 @@ use super::{
     MARK_VERIFIED_ATTEMPTS, SERVICE_REPAIR_RETRY_BACKOFF, ServiceHealth, ServiceStatus,
     StopCoreWatchdogAction, advanced_tono_generation, capture_generation_before,
     claim_owner_recovery_generation, forget_failed_service_repair, generate_service_session_token,
-    macos_install_shell, mark_service_unavailable_after_owner_loss, mark_verified_committed,
+    log_snapshot_should_recover_owner, macos_install_shell, mark_service_unavailable_after_owner_loss,
+    mark_verified_committed,
     owner_recovery_policy, record_service_repair, service_core_path_for, service_repair_is_worth_prompting,
     session_matches_status, tono_start_refusal, watchdog_action_after_tono_stop_failure,
 };
@@ -26,6 +27,248 @@ fn fake_store() -> RunStateStore<FakeEnv> {
     RunStateStore::new(FakeEnv::new())
 }
 
+#[tokio::test]
+async fn selective_release_retry_keeps_the_ai_hold_after_a_transient_refusal() {
+    let calls = std::cell::RefCell::new(Vec::new());
+    let hold = super::release_applying_narrow_with(|apply_narrow| {
+        calls.borrow_mut().push(apply_narrow);
+        let first = calls.borrow().len() == 1;
+        async move {
+            if first {
+                Err(super::release_refusal(
+                    1,
+                    "Kill switch release refused; DNS restore is unproven".to_owned(),
+                ))
+            } else {
+                // The Service opens general traffic in both flavors; false removes the AI hold.
+                Ok(apply_narrow)
+            }
+        }
+    })
+    .await
+    .expect("a transient DNS refusal still gets one release retry");
+    assert!(hold, "automatic recovery must retain its requested AI hold");
+    assert_eq!(&*calls.borrow(), &[true, true]);
+}
+
+#[tokio::test]
+async fn selective_release_keeps_null_payload_compatibility_for_a_legacy_service() {
+    let calls = std::cell::RefCell::new(Vec::new());
+    let released = super::release_applying_narrow_with(|apply_narrow| {
+        calls.borrow_mut().push(apply_narrow);
+        async move {
+            if apply_narrow {
+                Err(super::release_refusal(
+                    400,
+                    "Invalid JSON: JSON serialization error: Failed to parse request JSON: invalid type: map, expected unit".to_owned(),
+                ))
+            } else {
+                Ok(())
+            }
+        }
+    })
+    .await;
+    assert!(released.is_ok(), "an older Service must still open general traffic");
+    assert_eq!(&*calls.borrow(), &[true, false]);
+}
+
+/// How often each step of the release path's readiness choice ran.
+#[derive(Default)]
+struct ReleaseCalls {
+    ready: std::cell::Cell<usize>,
+    stopped: std::cell::Cell<usize>,
+    start: std::cell::Cell<usize>,
+    repair: std::cell::Cell<usize>,
+}
+
+impl ReleaseCalls {
+    /// Ready, stopped, start and repair, in that order.
+    fn counts(&self) -> [usize; 4] {
+        [self.ready.get(), self.stopped.get(), self.start.get(), self.repair.get()]
+    }
+}
+
+/// The release path's readiness choice against scripted steps. `ready` answers each readiness
+/// check in turn; the repair always succeeds.
+async fn release_choice(
+    calls: &ReleaseCalls,
+    ready: &[bool],
+    stopped: anyhow::Result<bool>,
+    start: anyhow::Result<()>,
+) -> anyhow::Result<()> {
+    super::ready_or_start_with(
+        || {
+            let answer = ready[calls.ready.get()];
+            calls.ready.set(calls.ready.get() + 1);
+            async move {
+                if answer {
+                    anyhow::Ok(())
+                } else {
+                    bail!("Tono Service 不可用: Unavailable")
+                }
+            }
+        },
+        move || {
+            calls.stopped.set(calls.stopped.get() + 1);
+            async move { stopped }
+        },
+        move || {
+            calls.start.set(calls.start.get() + 1);
+            async move { start }
+        },
+        || {
+            calls.repair.set(calls.repair.get() + 1);
+            async { anyhow::Ok(()) }
+        },
+    )
+    .await
+}
+
+/// BRICK-W5 (e): the release path starts a Service that SCM reports Stopped as it is, and runs
+/// the repair only where the start cannot help: an unverified registration or binary, a Service
+/// that is not Stopped, or an SCM that cannot be read. Any other failed start is returned: the
+/// repair would fail the same way, or `manual_gate` refuses it while filters are armed.
+#[tokio::test]
+async fn the_release_path_starts_a_stopped_service_and_repairs_only_what_the_start_cannot() {
+    let ready = ReleaseCalls::default();
+    release_choice(&ready, &[true], Ok(true), Ok(())).await.expect("a ready Service");
+    assert_eq!(ready.counts(), [1, 0, 0, 0]);
+
+    let started = ReleaseCalls::default();
+    release_choice(&started, &[false, true], Ok(true), Ok(()))
+        .await
+        .expect("the readiness after the start is the answer");
+    assert_eq!(started.counts(), [2, 1, 1, 0]);
+
+    let unverified = ReleaseCalls::default();
+    release_choice(&unverified, &[false], Ok(true), Err(super::StartTargetUnverified.into()))
+        .await
+        .expect("an unverified target falls back to the repair");
+    assert_eq!(unverified.counts(), [1, 1, 1, 1]);
+
+    let declined = ReleaseCalls::default();
+    let error = release_choice(&declined, &[false], Ok(true), Err(anyhow::anyhow!("helper exited with -1")))
+        .await
+        .expect_err("a failed start is the answer");
+    assert!(format!("{error:#}").contains("helper exited with -1"), "{error:#}");
+    assert_eq!(declined.counts(), [1, 1, 1, 0]);
+
+    let running = ReleaseCalls::default();
+    release_choice(&running, &[false], Ok(false), Ok(()))
+        .await
+        .expect("a Service that is not Stopped takes the repair path");
+    assert_eq!(running.counts(), [1, 1, 0, 1]);
+
+    let unreadable = ReleaseCalls::default();
+    release_choice(&unreadable, &[false], Err(anyhow::anyhow!("SCM unreadable")), Ok(()))
+        .await
+        .expect("an unreadable SCM takes the repair path");
+    assert_eq!(unreadable.counts(), [1, 1, 0, 1]);
+}
+
+#[tokio::test(start_paused = true)]
+async fn the_release_path_bounds_a_stalled_service_state_probe() {
+    let calls = ReleaseCalls::default();
+    let release = super::ready_or_start_with(
+        || async { anyhow::bail!("service unavailable") },
+        || std::future::pending::<anyhow::Result<bool>>(),
+        || {
+            calls.start.set(calls.start.get() + 1);
+            async { anyhow::Ok(()) }
+        },
+        || {
+            calls.repair.set(calls.repair.get() + 1);
+            async { anyhow::Ok(()) }
+        },
+    );
+    let error = tokio::time::timeout(Duration::from_secs(6), release)
+        .await
+        .expect("a stalled SCM probe must release the reconciliation worker")
+        .expect_err("an unknown service state must not start or repair the Service");
+    assert!(format!("{error:#}").contains("service state probe timed out"), "{error:#}");
+    assert_eq!(calls.counts(), [0, 0, 0, 0]);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_stalled_read_only_service_probe_returns_without_waiting_for_its_thread() {
+    let (release, gate) = std::sync::mpsc::channel();
+    let (entered, waiting) = tokio::sync::oneshot::channel();
+    let probe = tokio::spawn(super::probe_service_state(move || {
+        entered.send(()).unwrap();
+        gate.recv().unwrap();
+        anyhow::Ok(true)
+    }));
+    waiting.await.unwrap();
+    let waiter = tokio::spawn(async move {
+        tokio::time::timeout(Duration::from_secs(6), probe).await
+    });
+    tokio::task::yield_now().await;
+    tokio::time::advance(Duration::from_secs(5)).await;
+    tokio::task::yield_now().await;
+    tokio::time::advance(Duration::from_secs(1)).await;
+    let result = waiter.await.unwrap();
+    // Release the fault injection even if the deadline failed, so runtime shutdown can finish.
+    release.send(()).unwrap();
+    let error = result
+        .expect("a read-only SCM thread must not retain its async caller")
+        .expect("the probe task must finish normally")
+        .expect_err("a stalled query cannot prove the service state");
+    assert!(format!("{error:#}").contains("service state probe timed out"), "{error:#}");
+}
+
+/// BRICK-W5 (e): the release path's start is a privileged helper like any repair. It refuses at
+/// once while another operation holds Run State's slot, frees the slot when it finishes, and a
+/// start that timed out keeps the slot quarantined so no second helper can run behind it.
+#[tokio::test(start_paused = true)]
+async fn the_release_start_is_admitted_and_quarantined_like_a_privileged_operation() {
+    let store = fake_store().with_privileged_timeout(Duration::from_millis(50));
+    let helpers = std::cell::Cell::new(0_usize);
+    let helper = || {
+        helpers.set(helpers.get() + 1);
+        async { anyhow::Ok(()) }
+    };
+
+    {
+        let _repair = store.begin_operation().expect("the slot is free");
+        let busy = super::start_registered_under_run_state(&store, helper)
+            .await
+            .expect_err("a busy slot must refuse the start");
+        assert!(
+            busy.to_string().contains(crate::core::runstate::SERVICE_OPERATION_BUSY),
+            "{busy:#}"
+        );
+    }
+    assert_eq!(helpers.get(), 0, "a busy slot ran the helper");
+
+    super::start_registered_under_run_state(&store, helper)
+        .await
+        .expect("a free slot runs the start");
+    assert_eq!(helpers.get(), 1);
+    assert!(!store.operation_in_flight(), "a finished start kept the slot");
+
+    let timed_out = super::start_registered_under_run_state(&store, || {
+        std::future::pending::<anyhow::Result<()>>()
+    })
+    .await
+    .expect_err("a start that never returns must time out");
+    assert!(format!("{timed_out:#}").contains("timed out"), "{timed_out:#}");
+    assert!(
+        store.operation_in_flight(),
+        "a timed-out start must keep the slot quarantined"
+    );
+
+    let quarantined = super::start_registered_under_run_state(&store, helper)
+        .await
+        .expect_err("a quarantined slot must refuse the start");
+    assert!(
+        quarantined
+            .to_string()
+            .contains(crate::core::runstate::PRIVILEGED_OUTCOME_UNCERTAIN),
+        "{quarantined:#}"
+    );
+    assert_eq!(helpers.get(), 1, "a quarantined slot ran the helper");
+}
+
 #[test]
 #[allow(
     clippy::assertions_on_constants,
@@ -46,6 +289,7 @@ fn mark_verified_reconciliation_is_bounded_and_requires_full_proof() {
         tunnel_permit_rendered: true,
         direct_endpoint_digest: tono_service_protocol::direct_endpoint_digest(&[]).unwrap(),
         last_error: None,
+        reconnect_after_release: false,
     };
     assert!(mark_verified_committed(&status));
 
@@ -99,6 +343,18 @@ fn a_repair_that_did_not_help_is_not_repeated_for_the_same_failure() {
     record_service_repair(cause, false);
     forget_failed_service_repair();
     assert!(service_repair_is_worth_prompting(cause));
+}
+
+#[test]
+fn a_core_log_snapshot_does_not_recover_during_our_own_start_handoff() {
+    let not_active = tono_service_protocol::ServiceErrorCode::NotActive as u16;
+    assert!(
+        !log_snapshot_should_recover_owner(not_active, false),
+        "StartClash has already dropped the local session; NotActive is the handoff"
+    );
+    assert!(log_snapshot_should_recover_owner(not_active, true));
+    assert!(!log_snapshot_should_recover_owner(0, true));
+    assert!(!log_snapshot_should_recover_owner(1, false));
 }
 
 #[test]

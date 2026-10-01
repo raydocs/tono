@@ -56,6 +56,9 @@ const IPC_RESTART_WINDOW: Duration = Duration::from_secs(10);
 const IPC_MAX_BACKOFF: Duration = Duration::from_millis(500);
 /// How long shutdown waits for the listener task to acknowledge that it is done.
 const IPC_SHUTDOWN_DONE_TIMEOUT: Duration = Duration::from_secs(5);
+/// SCM Stop must finish even if a lifecycle lock or a DNS/WFP worker never returns.
+#[cfg(windows)]
+const IPC_SERVICE_STOP_TIMEOUT: Duration = Duration::from_secs(60);
 /// The budget one privileged step *advertises*, and nothing more.
 ///
 /// This value is only ever handed to [`OperationGuard::begin`], which records it as a deadline in
@@ -304,31 +307,118 @@ async fn clear_proxy_with_direct_compensation() -> std::result::Result<(), Servi
     Err(ServiceError::proxy_clear_failed(message))
 }
 
-async fn rollback_started_owner(owner: &AuthenticatedOwner) -> AnyResult<()> {
+async fn rollback_started_owner(
+    owner: &AuthenticatedOwner,
+) -> std::result::Result<(), OwnerRollbackFailure> {
     if let Err(stop_error) = CORE_MANAGER.lock().await.stop_core().await {
         set_core_lifecycle_state(ServiceLifecycleState::Fatal);
-        return Err(anyhow!(
+        return Err(OwnerRollbackFailure::CoreStopUnconfirmed(anyhow!(
             "failed to terminate owner core during rollback: {stop_error:#}"
-        ));
+        )));
     }
 
     let desired_result = persist_owner_core_stopped(owner).await;
     let active_result = clear_active_owner().await;
     match (desired_result, active_result) {
         (Ok(_), Ok(())) => Ok(()),
-        (Err(desired_error), Ok(())) => Err(desired_error),
-        (Ok(_), Err(active_error)) => Err(active_error),
+        (Err(desired_error), Ok(())) => Err(OwnerRollbackFailure::Bookkeeping(desired_error)),
+        (Ok(_), Err(active_error)) => Err(OwnerRollbackFailure::Bookkeeping(active_error)),
         (Err(desired_error), Err(active_error)) => {
             set_core_lifecycle_state(ServiceLifecycleState::Fatal);
-            Err(anyhow!(
+            Err(OwnerRollbackFailure::Bookkeeping(anyhow!(
                 "failed to persist stopped owner state: {desired_error:#}; failed to clear active owner: {active_error:#}"
-            ))
+            )))
         }
     }
 }
 
+/// Release already restored public DNS and is about to keep WFP armed. A core stop that did
+/// not finish may have left that core alive, so tunnel DNS has to come back. A stop that
+/// finished left nothing listening on the tunnel resolver; putting it back would black-hole
+/// names, and this function does not open the barrier.
+pub(super) fn release_puts_protected_dns_back(failure: &OwnerRollbackFailure) -> bool {
+    matches!(failure, OwnerRollbackFailure::CoreStopUnconfirmed(_))
+}
+
+pub(super) enum OwnerRollbackFailure {
+    CoreStopUnconfirmed(anyhow::Error),
+    Bookkeeping(anyhow::Error),
+}
+
+impl std::fmt::Display for OwnerRollbackFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let error = match self {
+            Self::CoreStopUnconfirmed(error) | Self::Bookkeeping(error) => error,
+        };
+        if f.alternate() {
+            write!(f, "{error:#}")
+        } else {
+            write!(f, "{error}")
+        }
+    }
+}
+
+#[cfg(any(windows, test))]
+async fn retire_unrecorded_owner_core(owner: &AuthenticatedOwner) -> AnyResult<()> {
+    // Missing/corrupt ownership is not proof that the independently supervised Core is gone.
+    // The caller has already proved ownership of the armed policy under the lifecycle lock.
+    if let Err(error) = CORE_MANAGER.lock().await.stop_core().await {
+        set_core_lifecycle_state(ServiceLifecycleState::Fatal);
+        return Err(error).context("failed to stop Core without an active owner record");
+    }
+    // Do not add a disk-write dependency to an already idle release or create a default record.
+    // A retained runnable intent must still be retired before filters can be released.
+    if load_owner_desired_state(&owner.key).await?.core_should_be_running {
+        persist_owner_core_stopped(owner).await?;
+    }
+    Ok(())
+}
+
+/// Automatic cleanup after abandoned Connect verification or exhausted Core recovery. The
+/// WFP watchdog releases its lock before entering here; serialize with Start/Lock/MarkVerified
+/// and recheck the arm epoch so a queued predecessor cannot tear down a newer session.
+pub(crate) async fn retire_expired_fresh_arm(epoch: u64) -> AnyResult<()> {
+    let _lifecycle = OWNER_LIFECYCLE_LOCK.lock().await;
+    #[cfg(any(windows, test))]
+    if lifecycle_is_stopping() {
+        return Ok(());
+    }
+    #[cfg(windows)]
+    let _repair = crate::acquire_service_repair_gate()?
+        .context("native installer owns abandoned-Connect cleanup")?;
+    #[cfg(windows)]
+    crate::core::update::release_admission()?;
+
+    let Some(owner_key) = windows_kill_switch::expired_fresh_arm_owner(epoch) else {
+        return Ok(());
+    };
+    if load_active_owner()
+        .await?
+        .is_some_and(|owner| owner.owner_key != owner_key)
+    {
+        anyhow::bail!("abandoned Connect does not own the active Core");
+    }
+    CORE_MANAGER.lock().await.stop_core().await
+        .context("failed to stop the abandoned Connect Core")?;
+    if load_owner_desired_state(&owner_key).await?.core_should_be_running {
+        persist_owner_core_stopped_by_key(&owner_key).await?;
+    }
+    clear_active_owner().await?;
+    windows_kill_switch::release_expired_fresh_arm(epoch).await
+}
+
 // 防止旧 listener 的清理删除 supervisor 刚创建的新 socket。
 static IPC_LIFECYCLE_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
+#[cfg(any(windows, test))]
+static IPC_STOPPING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+#[cfg(any(windows, test))]
+static OWNER_GOODBYE_PENDING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+#[cfg(any(windows, test))]
+fn lifecycle_is_stopping() -> bool {
+    IPC_STOPPING.load(std::sync::atomic::Ordering::SeqCst)
+        || OWNER_GOODBYE_PENDING.load(std::sync::atomic::Ordering::SeqCst)
+}
 
 /// The listener and the two ends of its shutdown handshake.
 ///
@@ -368,7 +458,11 @@ pub async fn owner_goodbye_requested() {
 
 /// Fire the owner-goodbye after the response grace (see the constant for why the delay exists).
 /// A full channel means a goodbye is already in flight; either way one trigger is enough.
+/// The route holds OWNER_LIFECYCLE_LOCK: reserve process shutdown before admitting another
+/// mutation. Unlike IPC_STOPPING, this reservation survives a listener restart in the grace.
 fn schedule_owner_goodbye_shutdown() {
+    #[cfg(any(windows, test))]
+    OWNER_GOODBYE_PENDING.store(true, std::sync::atomic::Ordering::SeqCst);
     let sender = OWNER_GOODBYE_CHANNEL.0.clone();
     tokio::spawn(async move {
         tokio::time::sleep(OWNER_GOODBYE_RESPONSE_GRACE).await;
@@ -416,6 +510,8 @@ async fn shutdown_ipc_server() {
 
 pub async fn run_ipc_server() -> Result<JoinHandle<Result<()>>> {
     let _lifecycle_guard = IPC_LIFECYCLE_LOCK.lock().await;
+    #[cfg(windows)]
+    IPC_STOPPING.store(false, std::sync::atomic::Ordering::SeqCst);
 
     make_ipc_dir().await?;
     cleanup_stale_ipc_socket().await?;
@@ -446,7 +542,53 @@ pub async fn run_ipc_server() -> Result<JoinHandle<Result<()>>> {
 }
 
 pub async fn stop_ipc_server() -> Result<()> {
+    #[cfg(windows)]
+    {
+        // Connection handlers outlive the listener. Fence their queued mutations before
+        // releasing protection so none can re-arm it between teardown and process exit.
+        IPC_STOPPING.store(true, std::sync::atomic::Ordering::SeqCst);
+        match tokio::time::timeout(IPC_SERVICE_STOP_TIMEOUT, stop_ipc_server_inner()).await {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => warn!("Service stop cleanup failed; continuing shutdown: {error:#}"),
+            Err(_) => warn!("Service stop cleanup timed out; continuing shutdown"),
+        }
+        return Ok(());
+    }
+    #[cfg(not(windows))]
+    stop_ipc_server_inner().await
+}
+
+async fn stop_ipc_server_inner() -> Result<()> {
     let _lifecycle_guard = IPC_LIFECYCLE_LOCK.lock().await;
+
+    #[cfg(windows)]
+    let _owner_lifecycle_guard = OWNER_LIFECYCLE_LOCK.lock().await;
+    #[cfg(windows)]
+    let repair = match crate::acquire_service_repair_gate() {
+        Ok(guard) => guard,
+        Err(error) => {
+            warn!("Service stop repair gate unavailable; retaining protection: {error:#}");
+            None
+        }
+    };
+    #[cfg(windows)]
+    let lifecycle_owned = match crate::core::update::release_admission() {
+        Ok(()) => repair.is_none(),
+        Err(error) => {
+            warn!("Service stop release fenced by update/installer evidence: {error:#}");
+            true
+        }
+    };
+    #[cfg(windows)]
+    let release = windows_kill_switch::service_stop_release_allowed(lifecycle_owned);
+    #[cfg(windows)]
+    let dns_restore = if release {
+        // SCM Stop has no recovery restart. Use Disconnect's DNS -> Core -> WFP order so a
+        // non-strict session cannot leave a persistent block and a dead protected resolver.
+        dns::ensure_restored().await
+    } else {
+        Ok(())
+    };
 
     CORE_MANAGER
         .lock()
@@ -454,6 +596,21 @@ pub async fn stop_ipc_server() -> Result<()> {
         .stop_core()
         .await
         .map_err(|error| kode_bridge::KodeBridgeError::custom(error.to_string()))?;
+
+    #[cfg(windows)]
+    if release {
+        // Still stop Core if DNS restore failed, but never disarm without the DNS proof.
+        dns_restore
+            .map_err(|error| kode_bridge::KodeBridgeError::custom(error.to_string()))?;
+        // Retire the run intent before opening WFP, as the owner-gated release does: a later
+        // service start must not resurrect this Core on the now-open physical route.
+        crate::core::desired::retire_legacy_active_owner()
+            .await
+            .map_err(|error| kode_bridge::KodeBridgeError::custom(error.to_string()))?;
+        windows_kill_switch::release_after_service_stop()
+            .await
+            .map_err(|error| kode_bridge::KodeBridgeError::custom(error.to_string()))?;
+    }
 
     if let Some(sender) = IPC_SHUTDOWN_SENDER.lock().await.take() {
         let _ = sender.send(());
@@ -761,6 +918,10 @@ enum OwnerLifecycleGate<'a> {
     /// the lifecycle lock: checking before waiting for the lock creates a stale-authorization
     /// window in which a queued StartClash can replace the owner.
     ArmedPolicyOwner,
+    /// `ReleaseKillSwitch` only: the same owner proof, admitted by the update evidence read
+    /// without a lock or a write (BRICK-W5 d) and past a manual installer lease whose holder is
+    /// conclusively dead (Service half of BRICK-W2). Every other route keeps `lifecycle_allowed`.
+    ArmedPolicyRelease,
     /// `StartClash` and `PrepareCoreStart` make the caller the owner and may stop the running
     /// Core, so they must not run over armed protection that another local user still holds.
     /// Nor may they first arm protection from a Remote Desktop session, which the arm would cut.
@@ -887,18 +1048,42 @@ async fn enter_owner_lifecycle(
         return ControlFlow::Break(service_error(error));
     }
     let lifecycle_guard = OWNER_LIFECYCLE_LOCK.lock().await;
+    #[cfg(any(windows, test))]
+    if lifecycle_is_stopping() {
+        return ControlFlow::Break(service_unavailable("service is stopping"));
+    }
     #[cfg(windows)]
     let repair = match crate::acquire_service_repair_gate() {
         Ok(Some(guard)) => guard,
-        _ => return ControlFlow::Break(service_unavailable("native installer owns the lifecycle")),
+        Ok(None) => {
+            return ControlFlow::Break(service_unavailable("native installer owns the lifecycle"));
+        }
+        // Still refused (fail-closed), but under its real cause: taking the gate prepares
+        // `ProgramData\Tono` and its `bin` directory (private ACL) and opens `.repair.lock`, and an
+        // I/O or ACL failure there is not an installer holding the lifecycle.
+        Err(error) => {
+            warn!("service repair gate unavailable: {error:#}");
+            return ControlFlow::Break(service_unavailable(format!(
+                "service repair gate unavailable: {error:#}"
+            )));
+        }
     };
     #[cfg(windows)]
-    if let Err(error) = crate::core::update::lifecycle_allowed(owner) {
-        return ControlFlow::Break(service_error(ServiceError::still_protected(error.to_string())));
+    {
+        let admitted = if matches!(gate, OwnerLifecycleGate::ArmedPolicyRelease) {
+            crate::core::update::release_admission()
+        } else {
+            crate::core::update::lifecycle_allowed(owner)
+        };
+        if let Err(error) = admitted {
+            return ControlFlow::Break(service_error(ServiceError::still_protected(
+                error.to_string(),
+            )));
+        }
     }
     let gated = match gate {
         OwnerLifecycleGate::Unchecked => Ok(()),
-        OwnerLifecycleGate::ArmedPolicyOwner => {
+        OwnerLifecycleGate::ArmedPolicyOwner | OwnerLifecycleGate::ArmedPolicyRelease => {
             windows_kill_switch::authorize_write_for(&owner.key)
         }
         OwnerLifecycleGate::ArmedPolicyTakeover => {
@@ -930,8 +1115,13 @@ async fn enter_owner_lifecycle(
 /// included — a release whose DNS restore cannot be proven is refused and stays armed).
 /// Idempotent: not armed is a successful no-op returning the current status.
 #[cfg(windows)]
-async fn release_kill_switch_for_platform() -> Result<HttpResponse> {
-    match windows_kill_switch::release().await {
+async fn release_kill_switch_for_platform(apply_narrow: bool) -> Result<HttpResponse> {
+    let released = if apply_narrow {
+        windows_kill_switch::release_applying_narrow().await
+    } else {
+        windows_kill_switch::release().await
+    };
+    match released {
         Ok(status) => ok_json(status),
         Err(error) => service_unavailable(format!(
             "Kill switch release refused; protection remains: {error:#}"
@@ -943,7 +1133,7 @@ async fn release_kill_switch_for_platform() -> Result<HttpResponse> {
 /// release/failure semantics (there is no DNS snapshot on macOS). Reported through the same
 /// wire type so the client has one code path.
 #[cfg(target_os = "macos")]
-async fn release_kill_switch_for_platform() -> Result<HttpResponse> {
+async fn release_kill_switch_for_platform(_apply_narrow: bool) -> Result<HttpResponse> {
     match macos_kill_switch::release().await {
         Ok(()) => {
             let (wanted, live, _mode) = macos_kill_switch::status().await;
@@ -957,6 +1147,7 @@ async fn release_kill_switch_for_platform() -> Result<HttpResponse> {
                 endpoints: Vec::new(),
                 direct_endpoint_digest: String::new(),
                 last_error: None,
+                reconnect_after_release: false,
             })
         }
         Err(error) => service_unavailable(format!("Kill switch release failed: {error:#}")),
@@ -964,7 +1155,7 @@ async fn release_kill_switch_for_platform() -> Result<HttpResponse> {
 }
 
 #[cfg(not(any(windows, target_os = "macos")))]
-async fn release_kill_switch_for_platform() -> Result<HttpResponse> {
+async fn release_kill_switch_for_platform(_apply_narrow: bool) -> Result<HttpResponse> {
     bad_request("kill switch release is unsupported on this platform")
 }
 
@@ -1198,6 +1389,22 @@ fn test_proxy_barrier_reset() {
 
 mod handlers;
 use handlers::create_ipc_router;
+
+#[cfg(test)]
+mod release_dns_compensation_tests {
+    use super::{OwnerRollbackFailure, release_puts_protected_dns_back};
+
+    #[test]
+    fn a_failed_core_stop_puts_protected_dns_back_and_bookkeeping_does_not() {
+        let stop = OwnerRollbackFailure::CoreStopUnconfirmed(anyhow::anyhow!("stop"));
+        let bookkeeping = OwnerRollbackFailure::Bookkeeping(anyhow::anyhow!("book"));
+        assert!(release_puts_protected_dns_back(&stop));
+        assert!(
+            !release_puts_protected_dns_back(&bookkeeping),
+            "a stopped core must not be pointed back at the tunnel resolver"
+        );
+    }
+}
 
 #[cfg(test)]
 mod owner_lifecycle_tests;

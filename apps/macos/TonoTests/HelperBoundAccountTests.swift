@@ -96,6 +96,23 @@ final class HelperBoundAccountTests: XCTestCase {
         )
     }
 
+    /// #579 residual: with the daemon unregistered and its socket gone, the
+    /// release repair reaches the installer, whose root guard refuses another
+    /// account's helper. The kill switch wrapped that refusal as a generic
+    /// install failure, so Restore internet asked the user to approve a
+    /// repair instead of naming the account that owns the helper.
+    func testTheInstallersRefusalStillNamesTheOwningAccount() {
+        let savedIPC = KillSwitchService.armIPC
+        defer { KillSwitchService.armIPC = savedIPC }
+        KillSwitchService.armIPC.prepare = { _ in throw HelperIPCError.boundToAnotherUser("alice") }
+        XCTAssertThrowsError(try KillSwitchService.installIfNeeded()) { error in
+            guard case HelperIPCError.boundToAnotherUser(let account) = error else {
+                return XCTFail("the refusal must stay the bound-account error, got: \(error)")
+            }
+            XCTAssertEqual(account, "alice")
+        }
+    }
+
     /// Declining the administrator prompt was filed as a helper mismatch and
     /// told the user to repair a helper that is fine (H20-C-F3). It has its
     /// own code, asks for the approval, and is not retried on a timer.

@@ -38,6 +38,23 @@ final class SingBoxConfigTests: XCTestCase {
         }
     }
 
+    /// A managed hy2 block read by the production catalog parser, so the
+    /// published key name is part of what the test pins.
+    private func catalogHY2(name: String, server: String, spki: String) throws -> ProxyNode {
+        let yaml = """
+        proxies:
+          - name: \(name)
+            type: hysteria2
+            server: \(server)
+            port: 443
+            password: 11111111-1111-4111-8111-111111111111
+            sni: exit.example.com
+            fingerprint: \(String(repeating: "ab", count: 32))
+            certificate-public-key-sha256: "\(spki)"
+        """
+        return try XCTUnwrap(ConfigParser.parseSubscription(yaml).first)
+    }
+
     private func snapshot(_ object: [String: Any], identity: String = "synthetic-owner",
                           status: Snapshot.Status = .syntheticOfflineOnly) throws -> Snapshot {
         let data = try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
@@ -204,7 +221,30 @@ final class SingBoxConfigTests: XCTestCase {
         XCTAssertEqual(value.dialEndpoints, [.init(host: "2.0.0.1", port: 8443, transport: "tcp")])
     }
 
-    func testProductRuntimePreservesHomeDirectAndRejectsPinnedHY2() throws {
+    func testHY2WithPublishedSPKIPinGetsPinnedSingBoxOutbound() throws {
+        let spki = Data(repeating: 0xab, count: 32).base64EncodedString()
+        var values = try nodes()
+        let hy2 = try catalogHY2(name: "Fixture Alpha · hy2", server: values[0].server, spki: spki)
+        XCTAssertNil(ConfigPipeline.singBoxUnavailableReason(hy2))
+        values.append(hy2)
+        let overlay = ConfigPipeline.OverlayConfig(mixedPort: 29190,
+            externalController: "127.0.0.1:29191", secret: secret, tunEnabled: true,
+            selectedNodeName: hy2.name)
+        let result = try ConfigPipeline.buildSingBoxRuntime(overlay: overlay, nodes: values, directPlan: nil)
+        XCTAssertEqual(result.unavailableNodes, [:])
+        XCTAssertEqual(result.dialEndpoints, [.init(host: values[0].server, port: 443, transport: "udp")])
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: result.runtimeJSON) as? [String: Any])
+        let outbounds = try XCTUnwrap(json["outbounds"] as? [[String: Any]])
+        let outbound = try XCTUnwrap(outbounds.first { $0["tag"] as? String == hy2.name })
+        XCTAssertEqual(outbound["tls"] as? NSDictionary, [
+            "enabled": true, "server_name": "exit.example.com", "certificate_public_key_sha256": [spki],
+        ] as NSDictionary)
+        XCTAssertEqual(outbound["keep_alive_period"] as? String, "5s")
+        XCTAssertNil(outbound["idle_timeout"])
+        XCTAssertNil(outbound["disable_chrome_parrot"])
+    }
+
+    func testProductRuntimePreservesHomeDirectAndRejectsHY2WithoutSPKIPin() throws {
         var overlay = ConfigPipeline.OverlayConfig(mixedPort: 29190,
             externalController: "127.0.0.1:29191", secret: secret, tunEnabled: true,
             selectedNodeName: "Fixture Beta", claudeHomeNodeName: "Fixture Alpha")
@@ -219,6 +259,9 @@ final class SingBoxConfigTests: XCTestCase {
         hy2.password = "11111111-1111-4111-8111-111111111111"
         hy2.tlsFingerprint = String(repeating: "ab", count: 32)
         values.append(hy2)
+        // Pinned sibling: its outbound reaches the bytes the fixed core checks below.
+        values.append(try catalogHY2(name: "Fixture Beta · hy2", server: values[1].server,
+                                     spki: Data(repeating: 0xcd, count: 32).base64EncodedString()))
         // Hosted CI has no reviewed app installed; supply the discovered path.
         ConfigPipeline.managedDirectBundlePathsOverride = ["/Applications/WeChat.app/"]
         defer { ConfigPipeline.managedDirectBundlePathsOverride = nil }
@@ -265,7 +308,96 @@ final class SingBoxConfigTests: XCTestCase {
         let direct: Set<String> = ["DIRECT", ConfigPipeline.appDirectGroupName, ConfigPipeline.webDirectGroupName]
         let directRules = rules.filter { direct.contains($0["outbound"] as? String ?? "") }
         XCTAssertFalse(directRules.contains { $0["process_name"] != nil })
-        let continuity = try XCTUnwrap(directRules.first { $0["process_path"] != nil })
-        XCTAssertEqual(continuity["process_path"] as? [String], ConfigPipeline.continuityDirectProcessPaths)
+        XCTAssertFalse(directRules.contains { $0["process_path"] != nil },
+                       "a process identity alone cannot authorize public DIRECT")
+    }
+
+    func testContinuityLocalBypassDoesNotForcePublicAppleTrafficDirectWithoutPolicy() throws {
+        let overlay = ConfigPipeline.OverlayConfig(mixedPort: 29190,
+            externalController: "127.0.0.1:29191", secret: secret, tunEnabled: true,
+            selectedNodeName: "Fixture Beta")
+        let result = try ConfigPipeline.buildSingBoxRuntime(overlay: overlay, nodes: nodes(), directPlan: nil)
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: result.runtimeJSON) as? [String: Any])
+        let route = try XCTUnwrap(json["route"] as? [String: Any])
+        let rules = try XCTUnwrap(route["rules"] as? [[String: Any]])
+        let localIndex = try XCTUnwrap(rules.firstIndex {
+            $0["outbound"] as? String == "DIRECT" && $0["ip_cidr"] != nil
+        })
+        let local = Set(try XCTUnwrap(rules[localIndex]["ip_cidr"] as? [String]))
+        XCTAssertTrue(Set(["169.254.0.0/16", "fe80::/10", "fc00::/7", "224.0.0.0/4", "ff00::/8"])
+            .isSubset(of: local), "AWDL/link-local and multicast remain direct")
+        let inbounds = try XCTUnwrap(json["inbounds"] as? [[String: Any]])
+        let tun = try XCTUnwrap(inbounds.first { $0["type"] as? String == "tun" })
+        let excluded = Set(try XCTUnwrap(tun["route_exclude_address"] as? [String]))
+        let capturedUnlessExcluded: Set<String> = [
+            "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16",
+            "224.0.0.0/4", "255.255.255.255/32", "fe80::/10", "fc00::/7", "ff00::/8",
+        ]
+        XCTAssertTrue(capturedUnlessExcluded.isSubset(of: excluded),
+            "Darwin auto-route must not deliver link broadcast or multicast to utun")
+        XCTAssertFalse(excluded.contains { $0.hasSuffix("/0") },
+            "route exclusion must not punch out a default route")
+        let ipv6RejectIndex = try XCTUnwrap(rules.firstIndex { $0["ip_version"] as? Int == 6 })
+        XCTAssertLessThan(localIndex, ipv6RejectIndex, "local IPv6 must bypass the public IPv6 reject")
+        XCTAssertFalse(rules.contains {
+            $0["outbound"] as? String == "DIRECT" && $0["process_path"] != nil
+                && $0["ip_cidr"] == nil
+        }, "Apple public TCP traffic must not bypass a healthy tunnel without matching PF authorization")
+        XCTAssertEqual(route["final"] as? String, ConfigPipeline.exitGroupName)
+    }
+
+    func testProductRuntimeRequiresChromeAndSequentialDoH() throws {
+        var values = try nodes()
+        values[0].clientFingerprint = "firefox"
+        values[1].clientFingerprint = nil
+        let overlay = ConfigPipeline.OverlayConfig(mixedPort: 29190,
+            externalController: "127.0.0.1:29191", secret: secret, tunEnabled: true,
+            selectedNodeName: "Fixture Beta")
+        let result = try ConfigPipeline.buildSingBoxRuntime(overlay: overlay, nodes: values, directPlan: nil)
+        XCTAssertEqual(result.unavailableNodes, ["Fixture Alpha": "TONO_SINGBOX_UNSUPPORTED_FINGERPRINT"])
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: result.runtimeJSON) as? [String: Any])
+        let outbounds = try XCTUnwrap(json["outbounds"] as? [[String: Any]])
+        XCTAssertFalse(outbounds.contains { $0["tag"] as? String == "Fixture Alpha" })
+        let beta = try XCTUnwrap(outbounds.first { $0["tag"] as? String == "Fixture Beta" })
+        let tls = try XCTUnwrap(beta["tls"] as? [String: Any])
+        XCTAssertEqual((tls["utls"] as? [String: Any])?["fingerprint"] as? String, "chrome")
+        let dns = try XCTUnwrap(json["dns"] as? [String: Any])
+        let servers = try XCTUnwrap(dns["servers"] as? [[String: Any]])
+        XCTAssertEqual(servers[0]["inet4_range"] as? String, "198.18.16.0/20")
+        XCTAssertTrue(servers.allSatisfy { ["fakeip", "https"].contains($0["type"] as? String ?? "") })
+        XCTAssertEqual(servers[1]["server"] as? String, "1.1.1.1")
+        XCTAssertEqual((servers[1]["tls"] as? [String: Any])?["alpn"] as? [String], ["h2"])
+        XCTAssertEqual(servers[1]["detour"] as? String, ConfigPipeline.exitGroupName)
+        XCTAssertEqual(servers[2]["tag"] as? String, "Tono-DoH-Backup")
+        XCTAssertEqual(servers[2]["server"] as? String, "8.8.8.8")
+        XCTAssertEqual((servers[2]["tls"] as? [String: Any])?["server_name"] as? String, "dns.google")
+        XCTAssertEqual((servers[2]["tls"] as? [String: Any])?["alpn"] as? [String], ["h2"])
+        XCTAssertEqual(servers[2]["detour"] as? String, ConfigPipeline.exitGroupName)
+        let rules = try XCTUnwrap(dns["rules"] as? [[String: Any]])
+        let fake = try XCTUnwrap(rules.first { $0["server"] as? String == "Tono-FakeIP" })
+        XCTAssertEqual(fake["rewrite_ttl"] as? Int, 30)
+        XCTAssertEqual(dns["final"] as? String, "Tono-DoH")
+        let evaluate = rules.filter { $0["action"] as? String == "evaluate" }.map { $0["server"] as? String }
+        XCTAssertEqual(evaluate, ["Tono-DoH", "Tono-DoH-Backup"])
+        XCTAssertFalse(rules.contains { $0["race"] != nil })
+        XCTAssertTrue(ProtectedDNSProbe.isFakeIP("198.18.16.1"))
+        XCTAssertTrue(ProtectedDNSProbe.isFakeIP("198.18.31.255"))
+        XCTAssertTrue(ProtectedDNSProbe.isFakeIP("198.19.0.1"))
+        XCTAssertFalse(ProtectedDNSProbe.isFakeIP("198.18.0.1"))
+        XCTAssertFalse(ProtectedDNSProbe.isFakeIP("198.18.0.2"))
+        XCTAssertFalse(ProtectedDNSProbe.isFakeIP("1.1.1.1"))
+        var selectedFirefox = values
+        selectedFirefox[1].clientFingerprint = "firefox"
+        var rejected = overlay
+        rejected.selectedNodeName = "Fixture Beta"
+        XCTAssertThrowsError(try ConfigPipeline.buildSingBoxRuntime(
+            overlay: rejected, nodes: selectedFirefox, directPlan: nil
+        )) { error in
+            XCTAssertEqual(error as? ConfigPipeline.SingBoxError, .unsupportedFingerprint)
+        }
+        SingBoxDelayGate.prove()
+        XCTAssertTrue(SingBoxDelayGate.isProven)
+        SingBoxDelayGate.suspend()
+        XCTAssertFalse(SingBoxDelayGate.isProven)
     }
 }

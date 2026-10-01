@@ -64,6 +64,8 @@ const MARK_VERIFIED_RETRY_DELAY: Duration = Duration::from_millis(500);
 /// is ambiguous; a Service refusal is authoritative and is never retried.
 const DIRECT_MUTATION_ATTEMPTS: u32 = 2;
 const DIRECT_MUTATION_RETRY_DELAY: Duration = Duration::from_millis(350);
+/// A read-only SCM request may outlive its caller; it must not retain the release worker.
+const REGISTERED_SERVICE_PROBE_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// The Service session that owns the running Core, and what that Service can do.
 ///
@@ -273,6 +275,13 @@ where
     (captured, operation().await)
 }
 
+/// `NotActive` on the core-log snapshot recovers the owner only when this
+/// process still holds a session. The StartClash handoff has already dropped
+/// that session, so the same code during a start is not displacement.
+pub(super) fn log_snapshot_should_recover_owner(code: u16, session_held: bool) -> bool {
+    code == tono_service_protocol::ServiceErrorCode::NotActive as u16 && session_held
+}
+
 pub(crate) async fn get_clash_log_snapshot_by_service() -> Result<String> {
     let credentials = current_owner_credentials()?;
     let (generation, response) = capture_generation_before(&OWNER_MONITOR_GENERATION, || {
@@ -281,7 +290,12 @@ pub(crate) async fn get_clash_log_snapshot_by_service() -> Result<String> {
     .await;
     let response = response.context("无法连接到Tono Service")?;
     if response.code > 0 {
-        if response.code == tono_service_protocol::ServiceErrorCode::NotActive as u16 {
+        // StartClash clears the local session before the Service replies, and that
+        // window lasts for the whole start. NotActive there is our own handoff.
+        // The owner monitor already debounces the same reply; this log read must
+        // not run recovery and mark the core stopped under the start still in flight.
+        // A session we still hold, plus NotActive, is a real displacement.
+        if log_snapshot_should_recover_owner(response.code, active_service_session().is_ok()) {
             recover_after_owner_loss(generation, OwnerRecoveryReason::Displaced).await;
         }
         bail!(response.message);
@@ -450,8 +464,8 @@ pub(crate) async fn tono_service_ready_or_repair() -> Result<()> {
     }
 }
 
-/// The same readiness check for a path the user asked for: the Repair control, and the explicit
-/// release that gives a blocked machine its Internet back.
+/// The same readiness check for a path the user asked for: the Repair control. The explicit
+/// release that gives a blocked machine its Internet back takes `tono_service_ready_or_start_now`.
 ///
 /// A person acting on the failure is evidence the record cannot hold — they may be standing at
 /// the machine ready to approve the prompt they declined a minute ago — so the backoff that
@@ -464,6 +478,109 @@ pub(crate) async fn tono_service_ready_or_repair_now() -> Result<()> {
 /// Drop the record, so the next readiness failure is answered with a prompt again.
 fn forget_failed_service_repair() {
     *LAST_FAILED_SERVICE_REPAIR.lock() = None;
+}
+
+/// The readiness check of the release that gives a blocked machine its Internet back
+/// (BRICK-W5 e). A Service that SCM reports Stopped is started as it is through
+/// `tono-service-install.exe --start-registered`, which needs no `manual_gate`; that gate refuses
+/// the full repair while filters are armed. Everything else is [`tono_service_ready_or_repair_now`].
+#[cfg(windows)]
+pub(crate) async fn tono_service_ready_or_start_now() -> Result<()> {
+    forget_failed_service_repair();
+    ready_or_start_with(
+        tono_service_ready,
+        || async {
+            tokio::task::spawn_blocking(registered_service_stopped)
+                .await
+                .context("service state thread did not finish")?
+        },
+        || {
+            start_registered_under_run_state(&RUN_STATE, || async {
+                // Only the join error gets context, so `StartTargetUnverified` stays downcastable.
+                tokio::task::spawn_blocking(start_registered_service)
+                    .await
+                    .context("start helper thread did not finish")?
+            })
+        },
+        tono_service_ready_or_repair,
+    )
+    .await
+}
+
+/// The release path's choice between starting the Service as it is and the repair (BRICK-W5 e).
+///
+/// A Service that is not ready but Stopped is started, and readiness is asked again; that answer
+/// is the result. Only a start helper that found the registration or the binary unverified
+/// ([`StartTargetUnverified`]) falls back to the repair. Any other failed start is returned: after
+/// a declined prompt, or a verified binary that fails to start, the repair would fail the same
+/// way, and with filters armed `manual_gate` refuses it. A Service that is not Stopped, or an SCM
+/// that cannot be read, takes the repair path as before. A stalled read returns an error without
+/// entering another SCM-dependent operation, so the release coordinator can settle and retry.
+#[cfg_attr(not(windows), allow(dead_code))]
+async fn ready_or_start_with<Ready, ReadyFuture, Stopped, StoppedFuture, Start, StartFuture, Repair, RepairFuture>(
+    ready: Ready,
+    stopped: Stopped,
+    start: Start,
+    repair: Repair,
+) -> Result<()>
+where
+    Ready: Fn() -> ReadyFuture,
+    ReadyFuture: Future<Output = Result<()>>,
+    Stopped: FnOnce() -> StoppedFuture,
+    StoppedFuture: Future<Output = Result<bool>>,
+    Start: FnOnce() -> StartFuture,
+    StartFuture: Future<Output = Result<()>>,
+    Repair: FnOnce() -> RepairFuture,
+    RepairFuture: Future<Output = Result<()>>,
+{
+    if ready().await.is_ok() {
+        return Ok(());
+    }
+    let stopped = tokio::time::timeout(REGISTERED_SERVICE_PROBE_TIMEOUT, stopped())
+        .await
+        .context("Windows service state probe timed out")?;
+    if !matches!(stopped, Ok(true)) {
+        return repair().await;
+    }
+    match start().await {
+        Ok(()) => ready().await,
+        Err(error) if error.is::<StartTargetUnverified>() => repair().await,
+        Err(error) => Err(error),
+    }
+}
+
+#[cfg(any(windows, test))]
+/// Read-only SCM probes may finish late, but must not retain an async lifecycle operation.
+pub(crate) async fn probe_service_state<T>(probe: impl FnOnce() -> Result<T> + Send + 'static) -> Result<T>
+where
+    T: Send + 'static,
+{
+    tokio::time::timeout(REGISTERED_SERVICE_PROBE_TIMEOUT, tokio::task::spawn_blocking(probe))
+        .await
+        .context("Windows service state probe timed out")?
+        .context("service state probe thread did not finish")?
+}
+
+/// The release path's start, admitted and bounded like every privileged operation (BRICK-W5 e).
+///
+/// It takes Run State's operation slot, as the repair does through `run_operation`: it refuses at
+/// once while another privileged operation or a readiness refresh holds the slot, or while a
+/// timed-out helper may still be running, and never waits, since a quarantined slot never
+/// settles. The helper runs only after admission, under the privileged bound and quarantine, and
+/// records no Pending Action. The slot is released before this returns, so the caller's readiness
+/// check can take it.
+#[cfg_attr(not(windows), allow(dead_code))]
+async fn start_registered_under_run_state<E, Helper, HelperFuture>(
+    store: &RunStateStore<E>,
+    helper: Helper,
+) -> Result<()>
+where
+    E: RunStateEnv,
+    Helper: FnOnce() -> HelperFuture,
+    HelperFuture: Future<Output = Result<()>>,
+{
+    let _operation = store.begin_operation()?;
+    store.perform_unrecorded("StartRegistered", helper()).await
 }
 
 /// What one attempt at the privileged install/repair entry achieved.
@@ -524,7 +641,7 @@ fn record_service_repair(cause: &str, recovered: bool) {
 /// the caller on its original error path.
 #[cfg(windows)]
 async fn repair_registered_stopped_service() -> ServiceRepairAttempt {
-    if !trusted_service_evidence().unwrap_or(false) {
+    if !probe_service_state(trusted_service_evidence).await.unwrap_or(false) {
         return ServiceRepairAttempt::Skipped;
     }
     logging!(
@@ -1166,13 +1283,89 @@ pub(crate) async fn tono_service_status_snapshot() -> Result<ServiceStatusSnapsh
     response.data.context("Tono Service 未返回状态快照")
 }
 
+/// A release that got no reading from the Tono Service: the owner credentials could not be read,
+/// so no request was sent, or the release IPC and its read-back both failed. Nothing then shows
+/// whether protection is on or off, so callers report it unconfirmed, not still on
+/// (R681-old-helper-still-on). A refusal from the Service is its own answer and is not this error.
+#[derive(Debug)]
+pub(crate) struct ReleaseGotNoReading;
+
+impl std::fmt::Display for ReleaseGotNoReading {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("the release got no reading from the Tono Service")
+    }
+}
+
+impl std::error::Error for ReleaseGotNoReading {}
+
 /// `POST /kill-switch/release` (owner-gated, protocol rev 6): the explicit
 /// user disarm. Works without a session — by the time Protected Offline is
 /// released, the session that armed the switch is long gone. Idempotent on
 /// the Service side and itself enforces DNS-before-disarm.
 pub(crate) async fn tono_release_kill_switch() -> Result<KillSwitchStatus> {
-    let credentials = current_owner_credentials()?;
-    let response = match tono_service_protocol::release_kill_switch(&credentials).await {
+    tono_release_kill_switch_inner(false).await
+}
+
+/// Full release, then the secondary AI hold. Used only after a non-strict
+/// fail-open. Restore and disconnect call [`tono_release_kill_switch`].
+pub(crate) async fn tono_release_kill_switch_applying_narrow() -> Result<KillSwitchStatus> {
+    release_applying_narrow_with(tono_release_kill_switch_inner).await
+}
+
+#[derive(Debug)]
+struct LegacyReleasePayload;
+
+impl std::fmt::Display for LegacyReleasePayload {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Service rejected the selective release payload")
+    }
+}
+
+impl std::error::Error for LegacyReleasePayload {}
+
+fn release_refusal(code: u16, message: String) -> anyhow::Error {
+    // Pre-narrow Services deserialize this route's payload as `()`. Their explicit parse
+    // refusal proves the request never reached DNS/Core/WFP cleanup. Keep their null-body
+    // compatibility path; transport and lifecycle failures do not prove that limitation.
+    let legacy_payload = code == 400 && message.starts_with("Invalid JSON:");
+    let error = anyhow::anyhow!(message);
+    if legacy_payload {
+        error.context(LegacyReleasePayload)
+    } else {
+        error
+    }
+}
+
+async fn release_applying_narrow_with<T, Release, ReleaseFuture>(mut release: Release) -> Result<T>
+where
+    Release: FnMut(bool) -> ReleaseFuture,
+    ReleaseFuture: Future<Output = Result<T>>,
+{
+    match release(true).await {
+        Ok(status) => Ok(status),
+        Err(error) => {
+            // Both flavors perform identical DNS/Core/WFP release steps; the Service's
+            // secondary hold is already best-effort. Retrying an operational failure as
+            // a plain release can remove a committed hold after an ambiguous response.
+            // Only an explicit legacy payload refusal needs the null-body fallback.
+            let apply_narrow = !error.is::<LegacyReleasePayload>();
+            logging!(
+                warn,
+                Type::Service,
+                "Tono: retrying kill-switch release (secondary AI hold: {apply_narrow}): {error:#}"
+            );
+            release(apply_narrow).await
+        }
+    }
+}
+
+async fn tono_release_kill_switch_inner(apply_narrow: bool) -> Result<KillSwitchStatus> {
+    let credentials = current_owner_credentials().context(ReleaseGotNoReading)?;
+    let response = match if apply_narrow {
+        tono_service_protocol::release_kill_switch_applying_narrow(&credentials).await
+    } else {
+        tono_service_protocol::release_kill_switch(&credentials).await
+    } {
         Ok(response) => response,
         Err(error) => {
             // Release is idempotent. If only its response was lost, a read-back prevents the UI
@@ -1191,11 +1384,11 @@ pub(crate) async fn tono_release_kill_switch() -> Result<KillSwitchStatus> {
                 record_verified_release(&status);
                 return Ok(status);
             }
-            return Err(error).context("无法连接到Tono Service");
+            return Err(error).context("无法连接到Tono Service").context(ReleaseGotNoReading);
         }
     };
     if response.code > 0 {
-        bail!(response.message);
+        return Err(release_refusal(response.code, response.message));
     }
     let status = response.data.context("Tono Service 未返回 Kill Switch 状态")?;
     record_verified_release(&status);

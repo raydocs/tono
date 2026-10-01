@@ -30,6 +30,12 @@ pub const BFE_NOT_RUNNING_PREFIX: &str = "TONO_BFE_NOT_RUNNING";
 /// this marker the App showed only "protected, not connected" with every diagnostic field
 /// reading `(unknown)`, which is unactionable for the customer and for support.
 pub const SERVICE_NOT_RUNNING_PREFIX: &str = "TONO_SERVICE_NOT_RUNNING";
+/// An explicit release could not get a ready Service (a start helper older than
+/// `--start-registered`, a declined prompt, a start or repair that failed), so no release ran, or
+/// the release got no reading (no owner credentials, or the IPC and its read-back both failed).
+/// Either way the Service gave no reading of protection. The UI shows protection as unconfirmed,
+/// never as still on.
+pub const PROTECTION_UNCONFIRMED_PREFIX: &str = "TONO_PROTECTION_UNCONFIRMED";
 /// Stable post-lock classifications. The loopback-proxy cross-check distinguishes a selected
 /// node/Core path that works without WinTUN from a failure shared by every Mihomo ingress path.
 /// None of these markers relaxes the real TUN proof required for Connected.
@@ -121,7 +127,8 @@ impl StageFailure {
     /// translated once — whichever stage (arm, lock, release) surfaced them.
     pub(super) fn error(err: impl std::fmt::Display) -> Self {
         let text = err.to_string();
-        StageFailure::Error(map_wfp_engine_error(&text).unwrap_or(text))
+        let text = map_wfp_engine_error(&text).unwrap_or(text);
+        StageFailure::Error(tono_core::stamp_connect_failure(&text))
     }
 }
 

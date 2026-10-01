@@ -6,8 +6,8 @@
 use anyhow::Result;
 use tono_service_protocol::{
     acquire_service_owner, add_restored_kill_switch_tunnel, initialize_protected_dns_status,
-    reconcile_service_startup, restore_desired_state, restore_kill_switch,
-    restore_windows_kill_switch, retire_unverified_windows_kill_switch,
+    note_core_replay_finished, reconcile_service_startup, restore_desired_state,
+    restore_kill_switch, restore_windows_kill_switch, retire_unverified_windows_kill_switch,
     run_ipc_supervisor_until_shutdown, spawn_kill_switch_watchdog, spawn_protected_dns_watchdog,
     spawn_windows_kill_switch_watchdog,
 };
@@ -28,16 +28,12 @@ use {
     std::ffi::OsString,
     std::sync::Arc,
     std::sync::OnceLock,
-    std::sync::atomic::{AtomicBool, Ordering},
+    std::sync::atomic::{AtomicBool, AtomicU32, Ordering},
     std::time::Duration,
 };
 
-/// What SCM is told to expect while teardown runs.
-///
-/// Teardown stops the core, restores DNS and writes the tombstone, so it is not instant. Without
-/// a hint SCM decides the service is hung after its own default.
 #[cfg(windows)]
-const STOP_WAIT_HINT: Duration = Duration::from_secs(45);
+use tono_service_protocol::{SCM_STOP_WAIT_HINT, stop_pending_refresh_due};
 
 // --- Main Entry Points ---
 
@@ -130,12 +126,10 @@ fn run_emergency_disarm() -> Result<()> {
         // succeeds, so it means a live service that *answers* owns the machine.
         // Disarming underneath it loses a race that cannot be won: this process
         // deletes the filters and the intent file, the running service's
-        // watchdog checks its own in-memory intent within its period, finds the
-        // filters gone and reinstalls the block — and the DNS watchdog can
-        // re-point every adapter at the protected resolver and rewrite the
-        // snapshot. The user is told "your network is restored" and is blocked
-        // again seconds later, with the intent file now missing so the next
-        // service start comes up in the emergency block. Because the owner
+        // watchdog checks its own in-memory intent within its period. Without an
+        // explicit strict kill switch it releases after a short unhealthy streak
+        // instead of reinstalling; the DNS watchdog can still re-point adapters
+        // at the protected resolver and rewrite the snapshot. Because the owner
         // answered, the supported route is open, which is exactly what the
         // refusal below tells them to use.
         let _owner_guard = match tono_service_protocol::acquire_service_owner().await {
@@ -152,6 +146,10 @@ fn run_emergency_disarm() -> Result<()> {
             .await
             .map(|()| true)
     });
+    // A timed-out DNS or WFP engine call leaves its `spawn_blocking` task running, and dropping
+    // the runtime would wait for it. This process only releases protection and exits right after
+    // reporting, so the task is abandoned instead.
+    rt.shutdown_background();
 
     match outcome {
         Ok(true) => {
@@ -195,8 +193,22 @@ fn run_emergency_disarm() -> Result<()> {
                         "网络封锁已解除，但 DNS 仍指向已停止的 Tono 解析器。",
                         "The block is removed, but DNS still points at the stopped Tono resolver.",
                         &[
-                            "请重启电脑完成恢复；重启后网络即正常。",
-                            "Reboot once to finish the recovery; the network works after that.",
+                            "请打开“设置”>“网络和 Internet”> 你的网络适配器 >“DNS 服务器分配”>“编辑”，\
+                             IPv4 和 IPv6 都选“自动(DHCP)”。",
+                            "Open Settings > Network & Internet > your adapter > DNS server \
+                             assignment > Edit, and choose Automatic (DHCP) for IPv4 and IPv6.",
+                        ],
+                    );
+                    Err(error)
+                }
+                DisarmErrorClass::ResolverRuleRemains => {
+                    print_disarm_result(
+                        "网络封锁已解除，但 Tono 的 DNS 规则未能删除，域名查询仍被送往已停止的 Tono 解析器。",
+                        "The block is removed, but Tono's DNS rule could not be removed, so name \
+                         lookups still go to the stopped Tono resolver.",
+                        &[
+                            "请再运行一次本快捷方式；仍失败请联系支持。",
+                            "Run this shortcut again; if it still fails, contact support.",
                         ],
                     );
                     Err(error)
@@ -241,15 +253,21 @@ enum DisarmErrorClass {
     /// saved servers could not be proven restored. A safe end state.
     RestoredToAutomatic,
     /// WFP removed, but an adapter still points at Tono's (now dead) loopback
-    /// resolver. The machine needs a reboot to resolve again.
+    /// resolver. Its DNS has to be set back to automatic in Windows Settings.
     EnforcementGoneDnsStale,
     /// Nothing proves the barrier is gone — the genuine failure case.
     StillProtected,
+    /// WFP removed, but Tono's NRPT catch-all could not be removed, so every
+    /// lookup still goes to the stopped resolver. A restart does not remove it;
+    /// running the shortcut again retries.
+    ResolverRuleRemains,
 }
 
 #[cfg(windows)]
 fn classify_disarm_error(message: &str) -> DisarmErrorClass {
-    if message.contains("TONO_DNS_RESTORED_AUTOMATIC") {
+    if message.contains("TONO_DNS_POLICY_REMAINS") {
+        DisarmErrorClass::ResolverRuleRemains
+    } else if message.contains("TONO_DNS_RESTORED_AUTOMATIC") {
         DisarmErrorClass::RestoredToAutomatic
     } else if message.contains("TONO_DNS_STILL_ON_LOOPBACK") || message.contains("TONO_WFP_REMOVED")
     {
@@ -282,6 +300,20 @@ mod disarm_error_tests {
             DisarmErrorClass::StillProtected
         );
     }
+
+    /// BRICK-W4: when Tono's NRPT catch-all could not be removed, every lookup still goes to the
+    /// stopped resolver whatever the adapters say. That outcome is checked before the DNS markers
+    /// it can travel with, so the shortcut never reports it as a stale adapter a restart fixes.
+    #[test]
+    fn a_remaining_nrpt_rule_is_its_own_outcome() {
+        assert_eq!(
+            classify_disarm_error(
+                "TONO_DNS_POLICY_REMAINS: WFP was removed, but Tono's DNS rule could not be \
+                 removed: TONO_DNS_STILL_ON_LOOPBACK: ..."
+            ),
+            DisarmErrorClass::ResolverRuleRemains
+        );
+    }
 }
 
 // --- Windows Service Implementation ---
@@ -306,6 +338,9 @@ fn run_service() -> platform_lib::Result<()> {
     let status_handle: Arc<OnceLock<ServiceStatusHandle>> = Arc::new(OnceLock::new());
     let handler_status = Arc::clone(&status_handle);
     let stopping = Arc::new(AtomicBool::new(false));
+    let checkpoint = Arc::new(AtomicU32::new(0));
+    let handler_stopping = Arc::clone(&stopping);
+    let handler_checkpoint = Arc::clone(&checkpoint);
 
     let event_handler = move |control_event| -> ServiceControlHandlerResult {
         match control_event {
@@ -313,7 +348,12 @@ fn run_service() -> platform_lib::Result<()> {
             // phase leaves enough time to restore the DNS snapshot and write a clean tombstone.
             // Without it a reboot never delivers a stop at all.
             ServiceControl::Stop | ServiceControl::Preshutdown => {
-                begin_stop(&handler_status, &stopping, &shutdown_tx);
+                begin_stop(
+                    &handler_status,
+                    &handler_stopping,
+                    &shutdown_tx,
+                    &handler_checkpoint,
+                );
                 ServiceControlHandlerResult::NoError
             }
             ServiceControl::Interrogate => ServiceControlHandlerResult::NoError,
@@ -355,6 +395,41 @@ fn run_service() -> platform_lib::Result<()> {
         wait_hint: Duration::default(),
         process_id: None,
     })?;
+
+    // Stop is accepted before the block below finishes. That block can spend a full DNS
+    // restore, then another when an unverified barrier is retired. SCM drops a StopPending
+    // service once the posted hint elapses without a new checkpoint, and further Stop
+    // controls are not delivered after the first one. Refresh the hint from this thread.
+    let refresh_stop = Arc::new(AtomicBool::new(false));
+    let hint_thread = {
+        let status = Arc::clone(&status_handle);
+        let stopping = Arc::clone(&stopping);
+        let checkpoint = Arc::clone(&checkpoint);
+        let refresh_stop = Arc::clone(&refresh_stop);
+        std::thread::Builder::new()
+            .name("tono-scm-hint".into())
+            .spawn(move || {
+                let mut posted_at = std::time::Instant::now();
+                while !refresh_stop.load(Ordering::SeqCst) {
+                    std::thread::sleep(Duration::from_secs(1));
+                    if refresh_stop.load(Ordering::SeqCst) {
+                        break;
+                    }
+                    if !stopping.load(Ordering::SeqCst) {
+                        posted_at = std::time::Instant::now();
+                        continue;
+                    }
+                    if !stop_pending_refresh_due(posted_at.elapsed()) {
+                        continue;
+                    }
+                    if let Some(handle) = status.get() {
+                        post_stop_pending(handle, &checkpoint);
+                        posted_at = std::time::Instant::now();
+                    }
+                }
+            })
+            .ok()
+    };
 
     // Keep recovery/status IPC schedulable while another handler coordinates SCM, filesystem,
     // DNS, WFP/BFE, or process teardown. WFP/DNS calls already use blocking workers, but a
@@ -423,6 +498,13 @@ fn run_service() -> platform_lib::Result<()> {
         drop(owner_guard);
         false
     });
+    // A timed-out DNS/WFP call can leave spawn_blocking work behind. A normal runtime drop
+    // waits for it forever, turning a bounded SCM stop back into a hung service process.
+    rt.shutdown_background();
+    refresh_stop.store(true, Ordering::SeqCst);
+    if let Some(thread) = hint_thread {
+        let _ = thread.join();
+    }
 
     registered.set_service_status(ServiceStatus {
         service_type: ServiceType::OWN_PROCESS,
@@ -453,24 +535,32 @@ fn begin_stop(
     status: &OnceLock<ServiceStatusHandle>,
     stopping: &AtomicBool,
     shutdown_tx: &tokio::sync::mpsc::Sender<()>,
+    checkpoint: &AtomicU32,
 ) {
     if let Some(handle) = status.get() {
         // Repeats refresh the wait hint rather than being dropped: that is the progress report
-        // SCM is looking for while teardown runs.
-        let _ = handle.set_service_status(ServiceStatus {
-            service_type: ServiceType::OWN_PROCESS,
-            current_state: ServiceState::StopPending,
-            controls_accepted: ServiceControlAccept::empty(),
-            exit_code: ServiceExitCode::Win32(0),
-            checkpoint: 1,
-            wait_hint: STOP_WAIT_HINT,
-            process_id: None,
-        });
+        // SCM is looking for while teardown runs. The dedicated refresher covers the gap when
+        // SCM sends no further control because STOP was withdrawn.
+        post_stop_pending(handle, checkpoint);
     }
     if stopping.swap(true, Ordering::SeqCst) {
         return;
     }
     let _ = shutdown_tx.try_send(());
+}
+
+#[cfg(windows)]
+fn post_stop_pending(handle: &ServiceStatusHandle, checkpoint: &AtomicU32) {
+    let next = checkpoint.fetch_add(1, Ordering::SeqCst).saturating_add(1);
+    let _ = handle.set_service_status(ServiceStatus {
+        service_type: ServiceType::OWN_PROCESS,
+        current_state: ServiceState::StopPending,
+        controls_accepted: ServiceControlAccept::empty(),
+        exit_code: ServiceExitCode::Win32(0),
+        checkpoint: next,
+        wait_hint: SCM_STOP_WAIT_HINT,
+        process_id: None,
+    });
 }
 
 // --- Common Logic ---
@@ -622,10 +712,12 @@ async fn restore_reconciled_desired_state() {
         Ok(false) => {}
         Ok(true) => {
             warn!("Update evidence pending: retaining protection and skipping desired-state restoration");
+            finish_core_replay().await;
             return;
         }
         Err(error) => {
             warn!("Update reconciliation uncertain; no desired-state restoration: {error:#}");
+            finish_core_replay().await;
             return;
         }
     }
@@ -634,6 +726,7 @@ async fn restore_reconciled_desired_state() {
             "Unverified Windows protection could not be safely retired after Core reconciliation; \
              keeping IPC available for recovery and skipping desired Core restore: {error:#}"
         );
+        finish_core_replay().await;
         return;
     }
 
@@ -654,6 +747,15 @@ async fn restore_reconciled_desired_state() {
         Err(error) => warn!(
             "Desired state restoration failed; keeping IPC available for GUI recovery: {error:#}"
         ),
+    }
+    finish_core_replay().await;
+}
+
+async fn finish_core_replay() {
+    if let Err(error) = note_core_replay_finished().await {
+        warn!(
+            "Wanted-session release after Core replay settled could not finish yet: {error:#}"
+        );
     }
 }
 

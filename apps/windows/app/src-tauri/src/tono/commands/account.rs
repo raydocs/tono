@@ -14,7 +14,7 @@ use crate::{
     tono::{
         audit::AuditEvent,
         catalog_sync, connection,
-        credentials::TonoCredentialStore,
+        credentials::{TonoCredentialStore, VaultSessionOwnership},
         state::{AccountState, TonoInner, TonoState},
     },
 };
@@ -22,25 +22,33 @@ use super::*;
 use super::diagnostics::auth_error;
 
 pub async fn load_credentials(state: &Arc<TonoState>) {
-    load_credentials_from(state, || async {
-        let refresh = TonoCredentialStore::get_async(CredentialKey::RefreshToken).await;
+    let rebind = load_credentials_from(state, || async {
+        let refresh = TonoCredentialStore::get_session_async().await;
         let id = TonoCredentialStore::get_async(CredentialKey::InstallationId).await;
         (refresh, id)
     })
-    .await
+    .await;
+    if rebind {
+        // The marker now vouches for a session an earlier build stored roaming: bind it to this
+        // machine off the load path. A failure leaves it roaming for the next load.
+        tokio::spawn(TonoCredentialStore::bind_session_to_machine_async());
+    }
 }
 
 type VaultRead = Result<Option<String>, tono_core::credentials::CredentialError>;
+type SessionRead = Result<Option<crate::tono::credentials::StoredSession>, tono_core::credentials::CredentialError>;
 
-async fn load_credentials_from<F, Fut>(state: &Arc<TonoState>, read: F)
+/// Returns whether the adopted session was stored roaming by an earlier build and should now be
+/// bound to this machine ([`VaultSessionOwnership::Owned`]).
+async fn load_credentials_from<F, Fut>(state: &Arc<TonoState>, read: F) -> bool
 where
     F: FnOnce() -> Fut,
-    Fut: std::future::Future<Output = (VaultRead, VaultRead)>,
+    Fut: std::future::Future<Output = (SessionRead, VaultRead)>,
 {
     let generation = {
         let inner = state.lock().await;
         if inner.credentials_loaded || inner.account_close.is_some() {
-            return;
+            return false;
         }
         inner.sign_in_generation
     };
@@ -51,11 +59,11 @@ where
     // sign-out or a newer login generation must not let a late startup read resurrect the old
     // refresh token in the memory-first credential store.
     if inner.credentials_loaded || inner.account_close.is_some() {
-        return;
+        return false;
     }
     if inner.sign_in_generation != generation {
         inner.credentials_loaded = true;
-        return;
+        return false;
     }
     // A fresh attempt must not inherit the previous verdict. Retry re-enters
     // here, and a stale error would outlive the condition that produced it.
@@ -69,7 +77,7 @@ where
         inner.credential_error = Some(format!(
             "credential store did not answer within {CREDENTIAL_LOAD_TIMEOUT:?}"
         ));
-        return;
+        return false;
     };
     // The installation id is independent of the refresh token and is handled
     // first, so the early return below cannot cost a persisted id — losing it
@@ -91,8 +99,9 @@ where
             // The id is not auth-critical: keep the ephemeral one.
         }
     }
+    let mut rebind = false;
     match refresh {
-        Ok(Some(token)) => {
+        Ok(Some(stored)) => {
             // Credential Manager outlives an uninstall that deletes the data directory, so a
             // token this directory never adopted is a previous installation's session — possibly
             // another person's account. Leave it unhydrated: restore then takes the signed-out
@@ -106,13 +115,27 @@ where
                 crate::tono::state::selection_path(&inner.catalog_dir),
                 inner.catalog_dir.join(crate::tono::audit::SETTINGS_FILE_NAME),
             ];
-            if crate::tono::credentials::data_dir_owns_vault_session(&inner.catalog_dir, &account_traces) {
-                // Hydrate memory only — writing the same bytes back would
-                // risk another prompting vault call.
-                let _ = inner.credentials.set_local(CredentialKey::RefreshToken, &token);
-            } else {
-                logging!(warn, Type::Service,
-                    "Tono: ignoring a stored session this installation did not create; sign in again");
+            match crate::tono::credentials::data_dir_owns_vault_session(
+                &inner.catalog_dir, &account_traces, stored.legacy_roaming,
+            ) {
+                VaultSessionOwnership::Owned { rebind: roaming } => {
+                    // Hydrate memory only — writing the same bytes back would
+                    // risk another prompting vault call.
+                    let _ = inner.credentials.set_local(CredentialKey::RefreshToken, &stored.token);
+                    rebind = roaming;
+                }
+                VaultSessionOwnership::NotOwned => {
+                    logging!(warn, Type::Service,
+                        "Tono: ignoring a stored session this installation did not create; sign in again");
+                }
+                VaultSessionOwnership::Unrecorded => {
+                    // Neither adopt (the token rotation would rewrite the roaming credential, the
+                    // upgrade's only evidence) nor sign out: the M1 branch keeps protection and
+                    // offers Retry, which re-reads with the gate still closed.
+                    inner.credential_error =
+                        Some("could not record this installation's stored session".to_string());
+                    return false;
+                }
             }
         }
         Ok(None) => {}
@@ -125,12 +148,13 @@ where
             // identical error — so the Retry button the account-error screen
             // offers provably could not succeed, even after the vault recovered.
             inner.credential_error = Some(err.to_string());
-            return;
+            return false;
         }
     }
     // The vault answered — including "there is nothing stored", which is a real answer. The
     // gate opens only here; startup was never blocked, because the read itself is bounded.
     inner.credentials_loaded = true;
+    rebind
 }
 
 /// Start email sign-in (`POST auth/email/start`, §1/§2).
@@ -315,6 +339,8 @@ pub(crate) async fn begin_sign_in(
     Ok((inner.client.clone(), inner.installation_id.clone(), inner.sign_in_generation))
 }
 
+/// The caller has already written this sign-in's session marker pending; it commits once the
+/// session is durable ([`adopt_replacing_with`]). An error here means no session was stored.
 pub(crate) async fn adopt_sign_in_response(
     state: &Arc<TonoState>, client: &Arc<crate::tono::state::TonoApiClient>,
     generation: u64, challenge_id: &str, auth: &tono_core::auth::AuthResponse,
@@ -332,19 +358,21 @@ pub(crate) async fn adopt_sign_in_response(
     // first sync installs them.
     catalog_sync::discard_account_catalog(&mut inner);
     connection::remove_legacy_runtime_copy(&inner.catalog_dir);
+    // Failover belongs to the previous account even when both catalogs have
+    // the same preferred name and residential endpoint (as on sign-out).
+    inner.heal = tono_core::heal::Session::for_preferred("", "none");
     // The retained connect failure belongs to the previous account too: diagnostics fall back to
     // it (#594), so clear it as sign-out does, or this account's report carries that account's
     // failure.
     inner.attempt_history = Default::default();
     // Keep the Tono state lock through adoption: a resend/sign-out cannot invalidate this
     // generation between the last check and the token write.
+    // The refresh token is in memory and its vault write is only queued: the marker commits once
+    // that write is durable ([`commit_marker_when_durable`]).
     client.adopt(auth).await.map_err(|err| err.to_string())?;
+    inner.session_marker.adopted(generation);
     // tono-core has retired the previous identity: its verdicts no longer apply (#582).
     inner.offline.adopt_new_identity();
-    if let Err(error) = crate::tono::credentials::mark_vault_session_owned(&inner.catalog_dir) {
-        // Not fatal: the next launch just asks this user to sign in again.
-        logging!(warn, Type::Service, "Tono: failed to record the vault session marker: {error}");
-    }
     inner.challenge_id = None;
     inner.account = Some(auth.user.clone());
     // Attribute the first catalog/connect failures too, not only records
@@ -355,6 +383,75 @@ pub(crate) async fn adopt_sign_in_response(
     inner.account_state = if info.suspended { AccountState::Suspended } else { AccountState::Ready };
     emit(&inner);
     Ok(info)
+}
+
+/// The commit task's waits double from the first to the last, which then repeats: between reports
+/// that the vault has not acknowledged yet, and between tries after a failure
+/// ([`commit_marker_when_durable`]).
+const SIGN_IN_SAVE_FIRST_WAIT: Duration = Duration::from_secs(5);
+const SIGN_IN_SAVE_LAST_WAIT: Duration = Duration::from_secs(300);
+
+/// The one task that commits adopted sign-in `generation`'s marker, detached so a slow or failing
+/// vault never holds up the sign-in. It first waits for the vault writer to acknowledge every
+/// earlier write ([`crate::tono::credentials::SessionCredentialStore::flush`]) with one request at
+/// a time: a hung vault is waited on, never asked again, so the task cannot fill the writer's
+/// queue; a failed acknowledgement is asked again after a pause. It then commits
+/// ([`crate::tono::credentials::SessionMarker::commit`]) until the file holds a committed marker or
+/// a newer sign-in adopts. Sign-out, a suspension, the account's periodic sync, the auth generation
+/// and a switch in flight do not end it. A marker still pending when the process exits vouches for
+/// nothing, and the next launch asks for a sign-in.
+async fn commit_marker_when_durable(state: Arc<TonoState>, generation: u64) {
+    let credentials = {
+        let inner = state.lock().await;
+        if !inner.session_marker.awaits_commit(generation) {
+            return;
+        }
+        Arc::clone(&inner.credentials)
+    };
+    let mut wait = SIGN_IN_SAVE_FIRST_WAIT;
+    loop {
+        let mut flush = std::pin::pin!(credentials.flush());
+        let acknowledged = loop {
+            match tokio::time::timeout(wait, flush.as_mut()).await {
+                Ok(acknowledged) => break acknowledged,
+                Err(_) => {
+                    logging!(warn, Type::Service,
+                        "Tono: the vault has not acknowledged the sign-in's session yet, so its marker stays pending");
+                    wait = (wait * 2).min(SIGN_IN_SAVE_LAST_WAIT);
+                }
+            }
+        };
+        match acknowledged {
+            Ok(()) => break,
+            Err(error) => {
+                logging!(warn, Type::Service,
+                    "Tono: the sign-in's session is not durable, so its marker stays pending: {error}");
+                tokio::time::sleep(wait).await;
+                wait = (wait * 2).min(SIGN_IN_SAVE_LAST_WAIT);
+            }
+        }
+        if !state.lock().await.session_marker.awaits_commit(generation) {
+            return;
+        }
+    }
+    let mut wait = SIGN_IN_SAVE_FIRST_WAIT;
+    loop {
+        let committed = {
+            let mut guard = state.lock().await;
+            let inner = &mut *guard;
+            inner.session_marker.commit(&inner.catalog_dir, generation)
+        };
+        match committed {
+            Ok(true) => return,
+            // A sign-in in flight writes the marker; try again once it ends.
+            Ok(false) => {}
+            Err(error) => {
+                logging!(warn, Type::Service, "Tono: the sign-in session marker was not committed: {error}");
+            }
+        }
+        tokio::time::sleep(wait).await;
+        wait = (wait * 2).min(SIGN_IN_SAVE_LAST_WAIT);
+    }
 }
 
 /// Adopt a verified sign-in that may replace an account which never signed out. A tunnel still
@@ -372,10 +469,18 @@ where
     RF: std::future::Future<Output = Result<(), String>>,
 {
     let retire = {
-        let mut inner = state.lock().await;
+        let mut guard = state.lock().await;
+        let inner = &mut *guard;
         if inner.sign_in_generation != generation || inner.challenge_id.as_deref() != Some(challenge_id) {
             return Err("sign-in verification was superseded by a newer attempt".to_string());
         }
+        // The pending session marker before anything this sign-in cannot undo (retiring the
+        // previous account's connection, dropping its catalog): a marker that cannot be written
+        // refuses the sign-in with protection and the previous account untouched.
+        inner.session_marker.begin(&inner.catalog_dir, generation).map_err(|error| {
+            logging!(warn, Type::Service, "Tono: {error}");
+            error
+        })?;
         let status = inner.fsm.status();
         let live = status.is_connected || status.is_connecting || status.is_disconnecting;
         if live {
@@ -384,12 +489,30 @@ where
         }
         live
     };
-    if retire {
+    let released = if retire {
         release(Arc::clone(state)).await.map_err(|error| {
             format!("the previous account's connection was not released, so this sign-in was not adopted: {error}")
-        })?;
+        })
+    } else {
+        Ok(())
+    };
+    let adopted = match released {
+        Ok(()) => adopt_sign_in_response(state, client, generation, challenge_id, auth, emit).await,
+        Err(error) => Err(error),
+    };
+    if adopted.is_ok() {
+        // `client.adopt` only queued the refresh token's vault write: the marker commits once that
+        // write is durable, without holding up this sign-in.
+        tokio::spawn(commit_marker_when_durable(Arc::clone(state), generation));
+    } else {
+        // No session reached the vault (`client.adopt` fails before queuing the write), so the
+        // marker goes back to what it held before any sign-in was in flight, unless a newer
+        // sign-in took that over.
+        let mut guard = state.lock().await;
+        let inner = &mut *guard;
+        inner.session_marker.undo(&inner.catalog_dir, generation);
     }
-    adopt_sign_in_response(state, client, generation, challenge_id, auth, emit).await
+    adopted
 }
 
 /// Sign out: bump the connect generation and abort every background task
@@ -493,6 +616,12 @@ where
             inner.catalog_last_synced_at_ms = None;
             inner.catalog_sync_error = None;
             catalog_sync::discard_account_catalog(&mut inner);
+            // Failover dial, pending dial, and the armed bit belong to the
+            // account that just left. The next sign-in must dial its own
+            // selected server; `prepare` only resets this session when the
+            // preferred name or residential id changes, and two accounts
+            // often share both.
+            inner.heal = tono_core::heal::Session::for_preferred("", "none");
             finalized = true;
             state.audit().log(AuditEvent::SignOut);
             release_result
@@ -530,12 +659,15 @@ mod lifecycle_tests {
     #[tokio::test]
     async fn fresh_data_dir_does_not_adopt_a_vault_refresh_token() {
         let state = Arc::new(TonoState::for_test());
-        let vault = || async {
-            let refresh: VaultRead = Ok(Some("previous-install-session".to_string()));
+        let vault = |legacy_roaming: bool| move || async move {
+            let refresh: SessionRead = Ok(Some(crate::tono::credentials::StoredSession {
+                token: "previous-install-session".to_string(),
+                legacy_roaming,
+            }));
             let id: VaultRead = Ok(Some("9e107d9d-372b-4c81-8d2b-3f2d0a1b2c3d".to_string()));
             (refresh, id)
         };
-        load_credentials_from(&state, vault).await;
+        load_credentials_from(&state, vault(false)).await;
         {
             let mut inner = state.lock().await;
             assert!(inner.credentials_loaded);
@@ -545,16 +677,17 @@ mod lifecycle_tests {
             crate::tono::credentials::mark_vault_session_owned(&inner.catalog_dir).unwrap();
             inner.credentials_loaded = false;
         }
-        load_credentials_from(&state, vault).await;
+        load_credentials_from(&state, vault(false)).await;
         {
             let inner = state.lock().await;
             assert_eq!(inner.credentials.refresh_token().unwrap().as_deref(), Some("previous-install-session"));
             let _ = std::fs::remove_dir_all(&inner.catalog_dir);
         }
 
-        // An earlier build signed in without a marker and its catalog sync never succeeded
-        // (offline, or 503 EXIT_IDENTITY_PROPAGATING), so there is no catalog cache. Another
-        // account trace, here the policy cache, still makes the session this installation's.
+        // An earlier build signed in without a marker, storing the session roaming, and its catalog
+        // sync never succeeded (offline, or 503 EXIT_IDENTITY_PROPAGATING), so there is no catalog
+        // cache. Another account trace, here the policy cache, still makes the session this
+        // installation's.
         let upgraded = Arc::new(TonoState::for_test());
         {
             let inner = upgraded.lock().await;
@@ -562,7 +695,7 @@ mod lifecycle_tests {
             assert!(!inner.catalog_cache().path().exists());
             std::fs::write(inner.policy_cache().path(), b"{}").unwrap();
         }
-        load_credentials_from(&upgraded, vault).await;
+        load_credentials_from(&upgraded, vault(true)).await;
         let inner = upgraded.lock().await;
         assert_eq!(inner.credentials.refresh_token().unwrap().as_deref(), Some("previous-install-session"),
             "an upgrade must not sign out, and release the protection of, an account that never cached a catalog");
@@ -577,6 +710,7 @@ mod lifecycle_tests {
             durable: MemoryCredentialStore,
             entered: tokio::sync::Notify,
             first: AtomicBool,
+            refuse: AtomicBool,
             gate: Mutex<std::sync::mpsc::Receiver<()>>,
         }
         impl CredentialStore for Vault {
@@ -586,6 +720,8 @@ mod lifecycle_tests {
                 if self.first.swap(false, Ordering::SeqCst) {
                     self.entered.notify_one();
                     self.gate.lock().unwrap().recv_timeout(Duration::from_secs(5)).unwrap();
+                }
+                if self.refuse.load(Ordering::SeqCst) {
                     return Err(CredentialError::Store("injected delete refusal".into()));
                 }
                 self.durable.delete(key)
@@ -594,7 +730,7 @@ mod lifecycle_tests {
         let (release, gate) = std::sync::mpsc::channel();
         let vault = Arc::new(Vault {
             durable: MemoryCredentialStore::new(), entered: Default::default(),
-            first: AtomicBool::new(true), gate: Mutex::new(gate),
+            first: AtomicBool::new(true), refuse: AtomicBool::new(true), gate: Mutex::new(gate),
         });
         vault.durable.set_refresh_token("persisted-old-session").unwrap();
         let state = Arc::new(TonoState::for_test());
@@ -621,6 +757,7 @@ mod lifecycle_tests {
         assert!(tokio::time::timeout(Duration::from_secs(2), close.wait()).await.unwrap().is_err());
         assert!(matches!(state.lock().await.account_state, AccountState::Error(_)));
         assert_eq!(vault.durable.refresh_token().unwrap().as_deref(), Some("persisted-old-session"));
+        vault.refuse.store(false, Ordering::SeqCst);
         close_account_with(Arc::clone(&state), AccountCloseReason::User,
             |_| async { Ok(()) },
             |client| async move { client.logout().await.map_err(|error| error.to_string()) },
@@ -671,6 +808,29 @@ mod lifecycle_tests {
         assert!(inner.routing.is_none(), "residential credentials must not survive sign-out");
         assert_eq!(inner.catalog_tracker.current_revision(), -1);
         assert!(!cache_path.exists(), "restart must not reseed the signed-out account's catalog");
+        let _ = std::fs::remove_dir_all(&inner.catalog_dir);
+    }
+
+    #[tokio::test]
+    async fn sign_out_drops_the_previous_accounts_failover_dial() {
+        let state = Arc::new(TonoState::for_test());
+        {
+            let mut inner = state.lock().await;
+            inner.account_state = AccountState::Ready;
+            inner.selected_node = Some("Los Angeles".into());
+            inner.heal = tono_core::heal::Session::for_preferred("Los Angeles", "none");
+            inner.heal.dial = "San Jose".into();
+            inner.heal.protection_armed = true;
+            inner.heal.pending_dial = Some("San Jose".into());
+        }
+        close_account_with(Arc::clone(&state), AccountCloseReason::User,
+            |_| async { Ok(()) }, |_| async { Ok(()) }, |_, _| async {}, |_| {},
+        ).await.unwrap();
+        let inner = state.lock().await;
+        assert_eq!(inner.heal.preferred, "");
+        assert_eq!(inner.heal.dial, "");
+        assert!(inner.heal.pending_dial.is_none());
+        assert!(!inner.heal.protection_armed);
         let _ = std::fs::remove_dir_all(&inner.catalog_dir);
     }
 
@@ -800,6 +960,35 @@ mod lifecycle_tests {
     }
 
     #[tokio::test]
+    async fn replacement_sign_in_drops_the_previous_accounts_failover() {
+        let state = Arc::new(TonoState::for_test());
+        {
+            let mut inner = state.lock().await;
+            // The previous account failed over before protection was armed. Both
+            // accounts have the same selected name and residential identity.
+            inner.selected_node = Some("Los Angeles".into());
+            inner.heal = tono_core::heal::Session::for_preferred("Los Angeles", "socks5:203.0.113.9:1080");
+            inner.heal.dial = "San Jose".into();
+            inner.heal.pending_dial = Some("San Jose".into());
+            inner.heal.tried.insert("Los Angeles".into());
+        }
+        let (client, _, generation) = begin_sign_in(&state).await.unwrap();
+        state.lock().await.challenge_id = Some("challenge-b".into());
+        let auth: tono_core::auth::AuthResponse = serde_json::from_value(serde_json::json!({
+            "accessToken": "fixture-access-b",
+            "user": { "id": "account-b", "email": "b@example.test" },
+        })).unwrap();
+        adopt_sign_in_response(&state, &client, generation, "challenge-b", &auth, |_| {}).await.unwrap();
+        let mut inner = state.lock().await;
+        // Connect prepares the same preferred name/residential identity from
+        // B's catalog through this production Session method.
+        inner.heal.stick_to_preferred("Los Angeles", "socks5:203.0.113.9:1080");
+        assert_eq!(inner.heal.dial, "Los Angeles", "a new account starts from its selected server");
+        assert!(inner.heal.pending_dial.is_none());
+        assert!(inner.heal.tried.is_empty());
+    }
+
+    #[tokio::test]
     async fn replacement_sign_in_retires_the_previous_account_before_adopting() {
         use std::sync::atomic::{AtomicBool, Ordering};
         let state = Arc::new(TonoState::for_test());
@@ -869,6 +1058,245 @@ mod lifecycle_tests {
         assert!(!cache_path.exists(), "a restart must not reseed A's catalog under B");
         assert!(!copy.exists(), "A's runtime copy must not outlive the replacement sign-in");
         let _ = std::fs::remove_dir_all(&inner.catalog_dir);
+    }
+
+    #[tokio::test]
+    async fn a_superseded_sign_in_leaves_no_marker_vouching_for_the_vault() {
+        let state = Arc::new(TonoState::for_test());
+        let directory = {
+            let mut inner = state.lock().await;
+            // A tunnel is starting, so adoption awaits its release: the gap in which a newer
+            // sign-in or a restore retry bumps the sign-in generation.
+            inner.fsm.begin_connect();
+            inner.catalog_dir.clone()
+        };
+        let (client, _, generation) = begin_sign_in(&state).await.unwrap();
+        state.lock().await.challenge_id = Some("challenge-a".into());
+        let auth: tono_core::auth::AuthResponse = serde_json::from_value(serde_json::json!({
+            "accessToken": "fixture-access-a",
+            "user": { "id": "account-a", "email": "a@example.test" },
+        })).unwrap();
+        let adopted = adopt_replacing_with(&state, &client, generation, "challenge-a", &auth,
+            |state| async move { begin_sign_in(&state).await.map(|_| ()) },
+            |_| {},
+        ).await;
+        assert!(adopted.is_err(), "a superseded sign-in stores no session");
+        // No newer sign-in stands on the marker A wrote: the next launch must not own whatever the
+        // vault holds (a previous installation's session) on its word.
+        let ownership = crate::tono::credentials::data_dir_owns_vault_session(&directory, &[], false);
+        let _ = std::fs::remove_dir_all(&directory);
+        assert_eq!(ownership, VaultSessionOwnership::NotOwned);
+    }
+
+    #[tokio::test]
+    async fn a_sign_in_cut_off_before_storing_its_session_leaves_no_marker_vouching_for_the_vault() {
+        let state = Arc::new(TonoState::for_test());
+        let directory = {
+            let mut inner = state.lock().await;
+            inner.fsm.begin_connect();
+            inner.catalog_dir.clone()
+        };
+        let (client, _, generation) = begin_sign_in(&state).await.unwrap();
+        state.lock().await.challenge_id = Some("challenge-a".into());
+        let auth: tono_core::auth::AuthResponse = serde_json::from_value(serde_json::json!({
+            "accessToken": "fixture-access-a",
+            "user": { "id": "account-a", "email": "a@example.test" },
+        })).unwrap();
+        // The process ends while the previous tunnel is released: nothing after that point runs,
+        // so neither the session nor any undo of the marker happens.
+        let cut_off = tokio::time::timeout(Duration::from_millis(100), adopt_replacing_with(
+            &state, &client, generation, "challenge-a", &auth,
+            |_| std::future::pending::<Result<(), String>>(),
+            |_| {},
+        )).await;
+        assert!(cut_off.is_err(), "the release never finishes");
+        // The next launch must not own whatever the vault holds (a previous installation's session)
+        // on the word of a marker whose sign-in never stored its own.
+        let ownership = crate::tono::credentials::data_dir_owns_vault_session(&directory, &[], false);
+        let _ = std::fs::remove_dir_all(&directory);
+        assert_eq!(ownership, VaultSessionOwnership::NotOwned);
+    }
+
+    #[tokio::test]
+    async fn a_sign_in_whose_session_never_lands_in_the_vault_leaves_its_marker_pending() {
+        use crate::tono::{credentials::SessionCredentialStore, state::TonoApiClient, transport::TonoTransport};
+        use tono_core::credentials::CredentialError;
+        // Credential Manager refuses the write: the refresh token the sign-in queued never lands.
+        struct RefusingVault;
+        impl tono_core::credentials::CredentialStore for RefusingVault {
+            fn get(&self, _: CredentialKey) -> Result<Option<String>, CredentialError> { Ok(None) }
+            fn set(&self, _: CredentialKey, _: &str) -> Result<(), CredentialError> {
+                Err(CredentialError::Store("the vault refused the write".into()))
+            }
+            fn delete(&self, _: CredentialKey) -> Result<(), CredentialError> { Ok(()) }
+        }
+        let state = Arc::new(TonoState::for_test());
+        let directory = {
+            let mut inner = state.lock().await;
+            inner.credentials = Arc::new(SessionCredentialStore::with_test_vault(Arc::new(RefusingVault)));
+            inner.client = Arc::new(TonoApiClient::new(
+                tono_core::auth::DEFAULT_BASE_URL, TonoTransport::new().unwrap(), inner.credentials.clone(),
+            ).unwrap());
+            // Account A signed in here before, so a committed marker vouches for A's session.
+            crate::tono::credentials::mark_vault_session_owned(&inner.catalog_dir).unwrap();
+            inner.catalog_dir.clone()
+        };
+        let (client, _, generation) = begin_sign_in(&state).await.unwrap();
+        state.lock().await.challenge_id = Some("challenge-b".into());
+        let auth: tono_core::auth::AuthResponse = serde_json::from_value(serde_json::json!({
+            "accessToken": "fixture-access-b",
+            "refreshToken": "fixture-refresh-b",
+            "user": { "id": "account-b", "email": "b@example.test" },
+        })).unwrap();
+        let adopted = adopt_replacing_with(&state, &client, generation, "challenge-b", &auth,
+            |_| async { Ok::<(), String>(()) },
+            |_| {},
+        ).await;
+        let ownership = crate::tono::credentials::data_dir_owns_vault_session(&directory, &[], false);
+        let _ = std::fs::remove_dir_all(&directory);
+        assert!(adopted.is_ok(), "B is signed in for this run: {:?}", adopted.err());
+        // The vault still holds A's refresh token: the next launch must neither restore A nor own
+        // anything else on the word of a marker whose sign-in never reached the vault.
+        assert_eq!(ownership, VaultSessionOwnership::NotOwned,
+            "the next launch must ask for a sign-in, not restore a session B never stored");
+    }
+
+    #[tokio::test]
+    async fn a_switch_refused_before_adopting_keeps_the_previous_account_marker() {
+        let state = Arc::new(TonoState::for_test());
+        let directory = {
+            let mut inner = state.lock().await;
+            // Account A signed in here, so a committed marker vouches for A's session, and A's
+            // tunnel is starting.
+            crate::tono::credentials::mark_vault_session_owned(&inner.catalog_dir).unwrap();
+            inner.fsm.begin_connect();
+            inner.catalog_dir.clone()
+        };
+        let (client, _, generation) = begin_sign_in(&state).await.unwrap();
+        state.lock().await.challenge_id = Some("challenge-b".into());
+        let auth: tono_core::auth::AuthResponse = serde_json::from_value(serde_json::json!({
+            "accessToken": "fixture-access-b",
+            "refreshToken": "fixture-refresh-b",
+            "user": { "id": "account-b", "email": "b@example.test" },
+        })).unwrap();
+        let adopted = adopt_replacing_with(&state, &client, generation, "challenge-b", &auth,
+            |_| async { Err::<(), String>("the Service refused the release".into()) },
+            |_| {},
+        ).await;
+        let ownership = crate::tono::credentials::data_dir_owns_vault_session(&directory, &[], false);
+        let _ = std::fs::remove_dir_all(&directory);
+        assert!(adopted.is_err(), "B is not adopted while A's connection is still up");
+        // Nothing reached the vault, which still holds A's session, and this run is still A.
+        assert_eq!(ownership, VaultSessionOwnership::Owned { rebind: false },
+            "a refused switch must not sign A out on the next launch");
+    }
+
+    #[tokio::test]
+    async fn overlapping_switches_refused_before_adopting_keep_the_previous_account_marker() {
+        let state = Arc::new(TonoState::for_test());
+        let directory = {
+            let mut inner = state.lock().await;
+            // Account A signed in here, so a committed marker vouches for A's session, and A's
+            // tunnel is starting: every switch awaits its release.
+            crate::tono::credentials::mark_vault_session_owned(&inner.catalog_dir).unwrap();
+            inner.fsm.begin_connect();
+            inner.catalog_dir.clone()
+        };
+        fn auth(account: &str) -> tono_core::auth::AuthResponse {
+            serde_json::from_value(serde_json::json!({
+                "accessToken": format!("fixture-access-{account}"),
+                "refreshToken": format!("fixture-refresh-{account}"),
+                "user": { "id": format!("account-{account}"), "email": format!("{account}@example.test") },
+            })).unwrap()
+        }
+        let (b_releasing, b_awaits_release) = oneshot::channel::<()>();
+        let (c_releasing, c_awaits_release) = oneshot::channel::<()>();
+        let (b_done, b_finished) = oneshot::channel::<()>();
+        // B awaits A's release; C starts meanwhile and awaits it too. The Service refuses B first,
+        // then C: neither stores a session.
+        let b = async {
+            let (client, _, generation) = begin_sign_in(&state).await.unwrap();
+            state.lock().await.challenge_id = Some("challenge-b".into());
+            let adopted = adopt_replacing_with(&state, &client, generation, "challenge-b", &auth("b"),
+                move |_| async move {
+                    b_releasing.send(()).unwrap();
+                    c_awaits_release.await.unwrap();
+                    Err::<(), String>("the Service refused the release".into())
+                },
+                |_| {},
+            ).await;
+            b_done.send(()).unwrap();
+            adopted
+        };
+        let c = async {
+            b_awaits_release.await.unwrap();
+            let (client, _, generation) = begin_sign_in(&state).await.unwrap();
+            state.lock().await.challenge_id = Some("challenge-c".into());
+            adopt_replacing_with(&state, &client, generation, "challenge-c", &auth("c"),
+                move |_| async move {
+                    c_releasing.send(()).unwrap();
+                    b_finished.await.unwrap();
+                    Err::<(), String>("the Service refused the release".into())
+                },
+                |_| {},
+            ).await
+        };
+        let (b, c) = tokio::join!(b, c);
+        let ownership = crate::tono::credentials::data_dir_owns_vault_session(&directory, &[], false);
+        let _ = std::fs::remove_dir_all(&directory);
+        assert!(b.is_err() && c.is_err(), "neither switch is adopted while A's connection is still up");
+        // Nothing reached the vault, which still holds A's session, and this run is still A.
+        assert_eq!(ownership, VaultSessionOwnership::Owned { rebind: false },
+            "two refused switches must not sign A out on the next launch");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_hung_vault_never_fills_the_credential_queue_with_marker_commit_retries() {
+        use crate::tono::{credentials::SessionCredentialStore, state::TonoApiClient, transport::TonoTransport};
+        use tono_core::credentials::{CredentialError, CredentialStore as _};
+        // Credential Manager hangs on the write the sign-in queues, until the test lets it go.
+        struct HungVault(std::sync::Mutex<std::sync::mpsc::Receiver<()>>);
+        impl tono_core::credentials::CredentialStore for HungVault {
+            fn get(&self, _: CredentialKey) -> Result<Option<String>, CredentialError> { Ok(None) }
+            fn set(&self, _: CredentialKey, _: &str) -> Result<(), CredentialError> {
+                let _ = self.0.lock().unwrap().recv();
+                Ok(())
+            }
+            fn delete(&self, _: CredentialKey) -> Result<(), CredentialError> { Ok(()) }
+        }
+        let (let_go, hung) = std::sync::mpsc::channel::<()>();
+        let state = Arc::new(TonoState::for_test());
+        let directory = {
+            let mut inner = state.lock().await;
+            inner.credentials = Arc::new(SessionCredentialStore::with_test_vault(Arc::new(
+                HungVault(std::sync::Mutex::new(hung)),
+            )));
+            inner.client = Arc::new(TonoApiClient::new(
+                tono_core::auth::DEFAULT_BASE_URL, TonoTransport::new().unwrap(), inner.credentials.clone(),
+            ).unwrap());
+            inner.catalog_dir.clone()
+        };
+        let (client, _, generation) = begin_sign_in(&state).await.unwrap();
+        state.lock().await.challenge_id = Some("challenge-a".into());
+        let auth: tono_core::auth::AuthResponse = serde_json::from_value(serde_json::json!({
+            "accessToken": "fixture-access-a",
+            "refreshToken": "fixture-refresh-a",
+            "user": { "id": "account-a", "email": "a@example.test" },
+        })).unwrap();
+        adopt_replacing_with(&state, &client, generation, "challenge-a", &auth,
+            |_| async { Ok::<(), String>(()) },
+            |_| {},
+        ).await.unwrap();
+        // Half a day with the vault hung, while the marker's commit task waits for it.
+        for _ in 0..(12 * 360) {
+            tokio::time::advance(Duration::from_secs(10)).await;
+            tokio::task::yield_now().await;
+        }
+        let credentials = Arc::clone(&state.lock().await.credentials);
+        let rotated = credentials.set(CredentialKey::RefreshToken, "fixture-refresh-rotated");
+        drop(let_go);
+        let _ = std::fs::remove_dir_all(&directory);
+        assert!(rotated.is_ok(), "a rotated refresh token must still reach the queue: {:?}", rotated.err());
     }
 }
 

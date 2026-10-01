@@ -47,6 +47,10 @@ const windowsServiceUpdateSource = readFileSync(
   new URL('../../service/src/core/update.rs', import.meta.url),
   'utf8',
 )
+const windowsGateReasonSource = readFileSync(
+  new URL('../../service/src/core/update/gate.rs', import.meta.url),
+  'utf8',
+)
 const windowsServiceUpdateExecutorSource = readFileSync(
   new URL(
     '../../service/src/bin/install_service/update_executor.rs',
@@ -464,51 +468,147 @@ test('privileged upgrade helper coordinates Service, Mihomo, and GUI publication
   )
 })
 
-test('NSIS explains a refused gate and confirms before uninstall releases protection', () => {
+test('NSIS names every gate refusal with its own dialog, code, first error line and log', () => {
+  // WIN-GATE-OPAQUE: every refusal the helper does not type fell back to one catch-all dialog,
+  // and the cause went only to a stderr nobody sees from .onInit.
+  const reasonFile = String.raw`"$PLUGINSDIR\tono-gate-reason.txt"`
+  const escape = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const freshReason = String.raw`Delete ` + escape(reasonFile) + String.raw`\s+`
   const onInit =
     installerSource.match(/Function \.onInit\b([\s\S]*?)FunctionEnd/)?.[1] ?? ''
+  assert.match(
+    onInit,
+    new RegExp(
+      freshReason +
+        String.raw`nsExec::ExecToLog '"\$PLUGINSDIR\\tono-gate\\resources\\tono-service-install\.exe" --manual-update-gate --reason-file ` +
+        escape(reasonFile) +
+        `'`,
+    ),
+  )
   const gate = onInit.slice(onInit.indexOf('--manual-update-gate'))
   // 78: filters with no Tono Service left. Before any refusal, a non-silent install offers the
   // confirmed path into its own proven-removal ladder; No keeps the block and changes nothing.
   const refusalAt = gate.indexOf('${If} $0 != "0"')
   assert.match(
     gate.slice(0, refusalAt),
-    /\$\{If\} \$0 == "78"\s+\$\{AndIfNot\} \$\{Silent\}\s+MessageBox [^\n]*MB_YESNO "\$\(installClearsOrphanedBlock\)" IDYES (\w+)\s+SetErrorLevel 76\s+Abort [^\n]*\s+\1:\s+nsExec::ExecToLog [^\n]*--manual-orphan-gate'\s+Pop \$0/,
+    new RegExp(
+      String.raw`\$\{If\} \$0 == "78"\s+\$\{AndIfNot\} \$\{Silent\}\s+MessageBox [^\n]*MB_YESNO "\$\(installClearsOrphanedBlock\)" IDYES (\w+)\s+SetErrorLevel 76\s+Abort [^\n]*\s+\1:\s+` +
+        freshReason +
+        String.raw`nsExec::ExecToLog [^\n]*--manual-orphan-gate --reason-file ` +
+        escape(reasonFile) +
+        String.raw`'\s+Pop \$0`,
+    ),
   )
   const refusal = gate.slice(refusalAt, gate.indexOf('SetErrorLevel 76', refusalAt))
-  // .onInit never shows Abort text; a refusal without a dialog is a silent exit.
+  // .onInit never shows Abort text; a refusal without a dialog is a silent exit. Each dialog
+  // ends with the code, the helper's first error line and the log path.
+  const footer = String.raw`\$\\r\$\\n\$\\r\$\\n\$\(gateRefusalFooter\)"`
   assert.match(
     refusal,
-    /\$\{IfNot\} \$\{Silent\}\s+\$\{If\} \$0 == "77"\s+MessageBox [^\n]*"\$\(manualInstallNeedsDisconnect\)"\s+\$\{Else\}\s+MessageBox [^\n]*"\$\(manualInstallRefused\)"/,
+    new RegExp(
+      String.raw`\$\{IfNot\} \$\{Silent\}\s+Call TonoGateExplain\s+\$\{If\} \$0 == "77"\s+MessageBox [^\n]*"\$\(manualInstallNeedsDisconnect\)` +
+        footer +
+        String.raw`\s+\$\{ElseIf\} \$0 == "79"\s+MessageBox [^\n]*"\$\(manualInstallNeedsBfe\)` +
+        footer +
+        String.raw`\s+\$\{Else\}\s+MessageBox [^\n]*"\$\(gateInstallRefused\)\$\\r\$\\n\$\\r\$\\n\$R1` +
+        footer,
+    ),
   )
   assert.doesNotMatch(refusal, /--emergency-disarm|--manual-uninstall-gate/)
+  // No refusal falls back to the old catch-all wording.
+  assert.doesNotMatch(installerSource, /manualInstallRefused|manualUninstallRefused/)
 
   const unInit =
     installerSource.match(/Function un\.onInit\b([\s\S]*?)FunctionEnd/)?.[1] ?? ''
-  const gateAt = unInit.indexOf('--manual-update-gate')
+  const pluginsAt = unInit.indexOf('InitPluginsDir')
+  const gateAt = unInit.search(
+    new RegExp(freshReason + String.raw`nsExec::ExecToLog [^\n]*--manual-update-gate --reason-file`),
+  )
   const confirmAt = unInit.indexOf('"$(uninstallReleasesProtection)"')
-  const leaseAt = unInit.indexOf('--manual-uninstall-gate')
-  assert.ok(gateAt >= 0 && gateAt < confirmAt && confirmAt < leaseAt)
+  const leaseAt = unInit.search(
+    new RegExp(freshReason + String.raw`nsExec::ExecToLog [^\n]*--manual-uninstall-gate --reason-file`),
+  )
+  assert.ok(pluginsAt >= 0 && pluginsAt < gateAt && gateAt < confirmAt && confirmAt < leaseAt)
+  // Like .onInit, the uninstaller resolves its language before the gate, so the gate's dialogs
+  // are in the user's language rather than the script's first one.
+  const unLanguageAt = unInit.indexOf('!insertmacro MUI_UNGETLANGUAGE')
+  assert.ok(
+    unLanguageAt >= 0 && unLanguageAt < gateAt,
+    'the uninstaller language must be resolved before the gate',
+  )
   // An orphaned barrier gets the same confirmed release on uninstall.
   assert.match(unInit.slice(gateAt, confirmAt), /\$\{If\} \$0 == "78"\s+StrCpy \$0 "77"/)
   assert.match(
     unInit.slice(gateAt, confirmAt),
     /\$\{If\} \$0 == "77"\s+\$\{AndIfNot\} \$\{Silent\}\s+MessageBox [^\n]*MB_YESNO\b/,
   )
-  assert.match(unInit.slice(leaseAt), /MessageBox [^\n]*"\$\(manualUninstallRefused\)"/)
+  assert.match(
+    unInit.slice(leaseAt),
+    new RegExp(
+      String.raw`\$\{IfNot\} \$\{Silent\}\s+Call un\.TonoGateExplain\s+MessageBox [^\n]*"\$\(gateUninstallRefused\)\$\\r\$\\n\$\\r\$\\n\$R1` +
+        footer,
+    ),
+  )
 
-  for (const name of [
-    'manualInstallNeedsDisconnect',
-    'manualInstallRefused',
+  // One explanation per helper exit code, installer and uninstaller alike.
+  assert.match(
+    installerSource,
+    /!insertmacro TONO_GATE_EXPLAIN ""\s+!insertmacro TONO_GATE_EXPLAIN "un\."/,
+  )
+  const explain =
+    installerSource.match(/!macro TONO_GATE_EXPLAIN\b([\s\S]*?)!macroend/)?.[1] ?? ''
+  assert.match(
+    explain,
+    new RegExp(
+      String.raw`FileOpen \$R4 ` +
+        escape(reasonFile) +
+        String.raw` r\s+\$\{IfNot\} \$\{Errors\}\s+FileReadUTF16LE \$R4 \$R2\s+FileReadUTF16LE \$R4 \$R3\s+FileClose \$R4`,
+    ),
+  )
+  const branch = (exit, code) =>
+    new RegExp(
+      String.raw`\$\{(?:Else)?If\} \$0 == "${exit}"\s+StrCpy \$R0 "${code}"\s+StrCpy \$R1 "\$\((\w+)\)"`,
+    )
+  const codes = [...windowsGateReasonSource.matchAll(/Self::(\w+) => "(TONO_INSTALL_\w+)"/g)]
+  const exits = new Map(
+    [...windowsGateReasonSource.matchAll(/Self::(\w+) => (\d+),/g)].map((m) => [m[1], m[2]]),
+  )
+  assert.equal(codes.length, 12)
+  assert.equal(new Set(exits.values()).size, codes.length)
+  for (const [, variant, code] of codes) {
+    assert.match(explain, branch(exits.get(variant), code), `${code} has no dialog of its own`)
+  }
+  assert.match(explain, branch(77, 'TONO_INSTALL_PROTECTION_ACTIVE'))
+  assert.match(explain, branch(78, 'TONO_INSTALL_ORPHANED_PROTECTION'))
+  assert.match(explain, branch(79, 'TONO_BFE_NOT_RUNNING'))
+  // nsExec reports a helper that could not be started as "error", not as an exit code.
+  assert.match(explain, branch('error', 'TONO_INSTALL_HELPER_BLOCKED'))
+  assert.match(
+    explain,
+    /\$\{Else\}\s+StrCpy \$R0 "TONO_INSTALL_UNEXPECTED"\s+StrCpy \$R1 "\$\(gateReasonUnexpected\)"\s+\$\{EndIf\}/,
+  )
+
+  // Chinese and English; Russian is still a selectable language, so each new string repeats the
+  // English text there instead of being missing.
+  const strings = new Set([
+    ...[...explain.matchAll(/\$\((\w+)\)/g)].map((m) => m[1]),
+    'gateInstallRefused',
+    'gateUninstallRefused',
+    'gateRefusalFooter',
     'uninstallReleasesProtection',
-    'manualUninstallRefused',
     'installClearsOrphanedBlock',
-  ]) {
+  ])
+  for (const name of strings) {
+    const text = (language) =>
+      installerSource.match(new RegExp(`LangString ${name} \\$\\{LANG_${language}\\} (".*")`))?.[1]
     for (const language of ['SIMPCHINESE', 'ENGLISH', 'RUSSIAN']) {
-      assert.match(
-        installerSource,
-        new RegExp(`LangString ${name} \\$\\{LANG_${language}\\} "`),
-      )
+      assert.ok(text(language), `${name} is missing for ${language}`)
+      if (name.startsWith('gate')) {
+        assert.doesNotMatch(text(language), /Device Manager|设备管理器/, `${name} (${language})`)
+      }
+    }
+    if (name.startsWith('gate')) {
+      assert.equal(text('RUSSIAN'), text('ENGLISH'), `${name}: Russian repeats the English text`)
     }
   }
   assert.match(
@@ -518,6 +618,80 @@ test('NSIS explains a refused gate and confirms before uninstall releases protec
   assert.match(
     windowsServiceUpdateSource,
     /pub const MANUAL_GATE_ORPHANED_PROTECTION_EXIT: i32 = 78;/,
+  )
+  assert.match(
+    windowsServiceInstallerSource,
+    /const MANUAL_GATE_BFE_UNAVAILABLE_EXIT: i32 = 79;/,
+  )
+})
+
+test('an uninstaller hands the lease back when its work is done, not when its window closes', () => {
+  // WIN-GATE-OPAQUE: un.onUninstSuccess runs only once the Completed page is closed. A customer
+  // who started the new installer with that page still open was refused as another installer.
+  const uninstall =
+    installerSource.match(/Section Uninstall\b([\s\S]*?)SectionEnd/)?.[1] ?? ''
+  const finishAt = uninstall.indexOf('--manual-update-finish')
+  assert.equal(finishAt, uninstall.lastIndexOf('--manual-update-finish'))
+  for (const helper of [
+    '--delete-app-data-all-profiles',
+    'schtasks.exe',
+    'cmdkey.exe',
+    'NSIS_HOOK_POSTUNINSTALL',
+  ]) {
+    assert.ok(finishAt > uninstall.lastIndexOf(helper), `the lease is released before ${helper}`)
+  }
+  assert.match(
+    uninstall.slice(finishAt),
+    /--manual-update-finish'\s+Pop \$0\s+\$\{If\} \$0 == "0"\s+StrCpy \$TonoLeaseReleased 1\s+\$\{EndIf\}/,
+  )
+  const success =
+    installerSource.match(/Function un\.onUninstSuccess\b([\s\S]*?)FunctionEnd/)?.[1] ?? ''
+  assert.match(
+    success,
+    /^\s*\$\{If\} \$TonoLeaseReleased != 1\s+nsExec::ExecToLog '"\$PLUGINSDIR\\tono-gate\.exe" --manual-update-finish'/,
+  )
+})
+
+test('every uninstaller abort hands the manual lease back first', () => {
+  // BRICK-W2: an uninstall that stopped early (Cancel at "Tono is running", a failed App kill,
+  // the helper missing, unproven cleanup) kept the lease, and the Service then refused release,
+  // update Disconnect and repair until another installer ran.
+  const handBack =
+    installerSource.match(/Function un\.HandBackManualLease\b([\s\S]*?)FunctionEnd/)?.[1] ?? ''
+  assert.match(handBack, /^\s*Push \$0\s+Push \$1\s/, 'the hand-back preserves $0 and $1')
+  assert.match(handBack, /Pop \$1\s+Pop \$0\s*$/, 'the hand-back restores $1 and $0')
+  assert.match(
+    handBack,
+    /\$\{If\} \$TonoLeaseReleased != 1[\s\S]*?nsExec::ExecToLog '"\$PLUGINSDIR\\tono-gate\.exe" --manual-update-finish'\s+Pop \$0\s+\$\{If\} \$0 == "0"\s+StrCpy \$TonoLeaseReleased 1/,
+    'the finish call runs only while the lease is held, and only exit 0 counts',
+  )
+
+  const failed =
+    installerSource.match(/Function un\.onUninstFailed\b([\s\S]*?)FunctionEnd/)?.[1] ?? ''
+  assert.match(failed, /Call un\.HandBackManualLease/, 'un.onUninstFailed hands the lease back')
+
+  const removeService =
+    installerSource.match(/!macro RemoveVergeService\b([\s\S]*?)!macroend/)?.[1] ?? ''
+  const aborts = [...removeService.matchAll(/^[ \t]*Abort\b/gm)]
+  assert.equal(aborts.length, 2, 'RemoveVergeService has two Aborts')
+  for (const abort of aborts) {
+    assert.match(
+      removeService.slice(0, abort.index),
+      /!ifdef __UNINSTALL__\s+Call un\.HandBackManualLease\s+!endif\s*$/,
+      'an uninstaller Abort in RemoveVergeService hands the lease back first',
+    )
+  }
+
+  const uninstall =
+    installerSource.match(/Section Uninstall\b([\s\S]*?)SectionEnd/)?.[1] ?? ''
+  const mutatedAt = uninstall.indexOf('StrCpy $TonoManualMutated 1')
+  assert.ok(
+    mutatedAt > uninstall.indexOf('!insertmacro CheckIfAppIsRunning'),
+    'a Cancel at "Tono is running" is not a mutation',
+  )
+  assert.ok(
+    mutatedAt < uninstall.indexOf('!insertmacro RemoveVergeService'),
+    'the uninstall is marked mutated before its first change',
   )
 })
 
@@ -529,7 +703,7 @@ test('a confirmed orphaned-block clear reinstalls through the fresh path, not th
     installerSource.match(/Function \.onInit\b([\s\S]*?)FunctionEnd/)?.[1] ?? ''
   assert.match(
     onInit.slice(0, onInit.indexOf('Call DetectExistingInstall')),
-    /--manual-orphan-gate'\s+Pop \$0\s+\$\{If\} \$0 == "0"\s+StrCpy \$ClearingOrphanedBlock 1\s+\$\{EndIf\}/,
+    /--manual-orphan-gate --reason-file [^\n]*'\s+Pop \$0\s+\$\{If\} \$0 == "0"\s+StrCpy \$ClearingOrphanedBlock 1\s+\$\{EndIf\}/,
   )
   const detector =
     installerSource.match(
@@ -684,9 +858,9 @@ test('all-profile app data is deleted only inside the repair gate, under the uni
   const ladderAt = uninstall.indexOf('!insertmacro RemoveVergeService')
   const callAt = uninstall.indexOf('--delete-app-data-all-profiles')
   // The gate admits the helper on the uninstaller's own lease, which is released only after
-  // this section (un.onUninstSuccess / un.onGUIEnd).
+  // the helper ran (at the end of this section, or in un.onGUIEnd for an unchanged machine).
   assert.ok(ladderAt >= 0 && callAt > ladderAt)
-  assert.doesNotMatch(uninstall, /--manual-update-finish/)
+  assert.ok(uninstall.indexOf('--manual-update-finish') > callAt)
 })
 
 test('NSIS removes every known old payload on upgrade and uninstall', () => {

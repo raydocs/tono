@@ -96,14 +96,14 @@ pub(crate) async fn note_session_rejected(state: &Arc<TonoState>, app: &AppHandl
     if !suspend_rejected_session(&mut inner, auth_generation) {
         return;
     }
-    let snapshot = commands::status_of(&inner);
+    // Under the lock, like every status publisher (H16-C-F3).
+    commands::emit_status(app, &commands::status_of(&inner));
     drop(inner);
     logging!(
         warn,
         Type::Service,
         "Tono: the control plane rejected this session; account suspended"
     );
-    commands::emit_status(app, &snapshot);
 }
 
 /// Whether the periodic sync for this authentication generation keeps running.
@@ -192,6 +192,28 @@ fn selected_exit_still_present(selected: &str, nodes: &[ValidatedNode]) -> bool 
     nodes.iter().any(|node| node.name == selected)
 }
 
+/// Residential routing is baked into the runtime, including a same-name home node's dial identity.
+/// Catalog growth and default-exit hints alone do not require a live session rebuild.
+pub(crate) fn residential_routing_changed(
+    previous_routing: Option<&tono_core::CatalogRouting>,
+    previous_nodes: &[ValidatedNode],
+    next_routing: Option<&tono_core::CatalogRouting>,
+    next_nodes: &[ValidatedNode],
+) -> bool {
+    let previous_home = previous_routing.and_then(|routing| routing.home_proxy.as_deref());
+    let next_home = next_routing.and_then(|routing| routing.home_proxy.as_deref());
+    previous_home != next_home
+        || previous_routing.and_then(|routing| routing.home_socks5.as_ref())
+            != next_routing.and_then(|routing| routing.home_socks5.as_ref())
+        || previous_home.and_then(|name| previous_nodes.iter().find(|node| node.name == name))
+            != next_home.and_then(|name| next_nodes.iter().find(|node| node.name == name))
+}
+
+enum CatalogRuntimeChange {
+    SelectionVanished(u64),
+    ResidentialRoutingChanged(u64),
+}
+
 /// What a successful [`install_and_persist`] produced.
 #[derive(Debug)]
 pub struct PersistedInstall {
@@ -236,47 +258,34 @@ async fn sync_once_inner(state: &Arc<TonoState>, app: &AppHandle, auth_generatio
     let client = { state.lock().await.client.clone() };
     let response = client.exit_catalog().await.map_err(SyncFailure::from_api)?;
 
-    let (selection_vanished, server_confirmed) = {
-        let mut inner = state.lock().await;
-        if inner.sign_in_generation != auth_generation {
-            return Ok(());
-        }
-        let (installed, emit) = match install_and_persist(&inner.catalog_tracker, &inner.catalog_cache(), &response) {
-            Ok(effect) if effect.installed => {
-                let node_count = effect.nodes.len();
-                inner.cancel_server_tests();
-                inner.catalog_tracker = effect.tracker;
-                inner.nodes = effect.nodes;
-                inner.routing = sanitized_routing(response.routing.as_ref(), &inner.nodes);
-                enforce_selection_survival(&mut inner);
-                let _ = ensure_usable_selection(&mut inner);
-                state.audit().log(crate::tono::audit::AuditEvent::SyncOk {
-                    revision: response.revision,
-                    node_count,
-                });
-                (true, true)
-            }
-            Ok(_) => (false, true),
-            // Benign out-of-order delivery (tono-core L5): never an error.
-            Err(CatalogError::StaleRevision) => (false, false),
-            Err(err) => return Err(SyncFailure::Failed(err.to_string())),
-        };
-        let vanished = (installed
-            && inner.catalog_requires_choice
-            && (inner.fsm.status().is_connected || inner.fsm.status().is_connecting))
-            .then_some(inner.connect_generation);
-        let snapshot = emit.then(|| commands::status_of(&inner));
-        drop(inner);
-        if let Some(snapshot) = snapshot {
-            commands::emit_status(app, &snapshot);
-        }
-        (vanished, emit)
-    };
+    // A hot switch must not derive H2's WFP permits while the live runtime still dials H1.
+    // Retain the selection/policy writer until a residential rebuild has settled.
+    let catalog_update = state.begin_policy_update().await;
+    let (runtime_change, server_confirmed) =
+        commit_fetched_catalog(state, auth_generation, &response, |inner| {
+            commands::emit_status(app, &commands::status_of(inner));
+        })
+        .await?;
 
-    if let Some(generation) = selection_vanished {
-        if state.lock().await.sign_in_generation == auth_generation {
-            connection::selected_node_vanished(state.clone(), app.clone(), generation).await;
+    match runtime_change {
+        Some(CatalogRuntimeChange::SelectionVanished(generation)) => {
+            if state.lock().await.sign_in_generation == auth_generation {
+                connection::selected_node_vanished(state.clone(), app.clone(), generation).await;
+            }
+            drop(catalog_update);
         }
+        Some(CatalogRuntimeChange::ResidentialRoutingChanged(generation)) => {
+            let state = Arc::clone(state);
+            let app = app.clone();
+            // Account sync cancellation must not abandon a keep-armed teardown midway.
+            AsyncHandler::spawn(move || async move {
+                let _catalog_update = catalog_update;
+                if state.lock().await.sign_in_generation == auth_generation {
+                    connection::rebuild_for_catalog_routing_change(state, app, generation).await;
+                }
+            });
+        }
+        None => drop(catalog_update),
     }
 
     // #582: Installed or Unchanged, the server has just confirmed exactly the catalog in memory.
@@ -286,6 +295,70 @@ async fn sync_once_inner(state: &Arc<TonoState>, app: &AppHandle, auth_generatio
         crate::tono::offline_grant::record_server_verified_catalog(state, auth_generation, &response).await;
     }
     Ok(())
+}
+
+/// The locked half of [`sync_once_inner`]: commit a fetched catalog for this authentication
+/// generation and publish the resulting status. Returns the generation needing runtime recovery,
+/// and whether the server confirmed the catalog in memory.
+async fn commit_fetched_catalog<P>(
+    state: &Arc<TonoState>,
+    auth_generation: u64,
+    response: &tono_core::ExitCatalogResponse,
+    publish: P,
+) -> Result<(Option<CatalogRuntimeChange>, bool), SyncFailure>
+where
+    P: FnOnce(&TonoInner) + Send,
+{
+    let mut inner = state.lock().await;
+    if inner.sign_in_generation != auth_generation {
+        return Ok((None, false));
+    }
+    let mut routing_changed = false;
+    let (installed, emit) = match install_and_persist(&inner.catalog_tracker, &inner.catalog_cache(), response) {
+        Ok(effect) if effect.installed => {
+            let node_count = effect.nodes.len();
+            let routing = sanitized_routing(response.routing.as_ref(), &effect.nodes);
+            routing_changed = residential_routing_changed(
+                inner.routing.as_ref(), &inner.nodes, routing.as_ref(), &effect.nodes,
+            );
+            inner.cancel_server_tests();
+            inner.catalog_tracker = effect.tracker;
+            inner.nodes = effect.nodes;
+            inner.routing = routing;
+            enforce_selection_survival(&mut inner);
+            let _ = ensure_usable_selection(&mut inner);
+            state.audit().log(crate::tono::audit::AuditEvent::SyncOk {
+                revision: response.revision,
+                node_count,
+            });
+            (true, true)
+        }
+        Ok(_) => (false, true),
+        // Benign out-of-order delivery (tono-core L5): never an error.
+        Err(CatalogError::StaleRevision) => (false, false),
+        Err(err) => return Err(SyncFailure::Failed(err.to_string())),
+    };
+    let runtime_change = if installed
+        && inner.catalog_requires_choice
+        && (inner.fsm.status().is_connected || inner.fsm.status().is_connecting)
+    {
+        Some(CatalogRuntimeChange::SelectionVanished(inner.connect_generation))
+    } else if routing_changed
+        && inner.fsm.status().is_connected
+        && !inner.fsm.status().is_connecting
+        && !inner.fsm.status().is_disconnecting
+    {
+        Some(CatalogRuntimeChange::ResidentialRoutingChanged(inner.connect_generation))
+    } else {
+        None
+    };
+    // H16-C-F3: publish before the unlock. Sign-out bumps the generation and publishes its final
+    // status under this lock, so a snapshot published after the unlock could overwrite it.
+    if emit {
+        publish(&inner);
+    }
+    drop(inner);
+    Ok((runtime_change, emit))
 }
 
 /// Login/restore variant whose responses cannot commit across an authentication generation.
@@ -443,7 +516,15 @@ fn compact_exit_name(name: &str) -> String {
 }
 
 pub fn names_equivalent(left: &str, right: &str) -> bool {
-    left == right || compact_exit_name(left) == compact_exit_name(right)
+    if left == right {
+        return true;
+    }
+    // ASCII folding exists so "Buffalo · Niagara" matches "Buffalo - Niagara"
+    // and a flag prefix still matches the legacy wire name. Names with no
+    // ASCII letters or digits all fold to empty; treating that as one city
+    // made 东京 and 大阪 the same exit, so failover never left the dead one.
+    let compact = compact_exit_name(left);
+    !compact.is_empty() && compact == compact_exit_name(right)
 }
 
 fn node_named<'a>(nodes: &'a [ValidatedNode], name: &str) -> Option<&'a ValidatedNode> {
@@ -638,9 +719,10 @@ pub fn region_rank(name: &str) -> u8 {
 #[cfg(test)]
 mod tests {
     use super::{
-        SyncFailure, default_usable_exit, install_and_persist, is_exit_blocked, is_legacy_wire_name, names_equivalent,
-        next_catalog_exit, periodic_sync_continues, periodic_sync_interval, region_rank, replacement_for_selection,
-        run_with_retries, selected_exit_still_present, sort_server_names, suspend_rejected_session, tcp_probe_socket,
+        SyncFailure, commit_fetched_catalog, default_usable_exit, install_and_persist, is_exit_blocked,
+        is_legacy_wire_name, names_equivalent, next_catalog_exit, periodic_sync_continues, periodic_sync_interval,
+        region_rank, replacement_for_selection, residential_routing_changed, run_with_retries,
+        selected_exit_still_present, sort_server_names, suspend_rejected_session, tcp_probe_socket,
     };
     use std::collections::BTreeSet;
     use std::net::Ipv4Addr;
@@ -679,6 +761,49 @@ mod tests {
             protocol: NodeProtocol::Hysteria2,
             tls_fingerprint: Some("e3aa4a745aa90539ab1a493d940eeba7b4305b7516ab84167e46c98ad9fed3db".to_string()),
         }
+    }
+
+    #[test]
+    fn residential_routing_change_tracks_the_home_dial_identity_only() {
+        let previous_nodes = vec![node("home"), node("exit")];
+        let previous = tono_core::CatalogRouting {
+            home_proxy: Some("home".into()),
+            default_proxy: Some("exit".into()),
+            ..Default::default()
+        };
+        let mut next = previous.clone();
+        next.default_proxy = Some("new-exit".into());
+        let mut next_nodes = previous_nodes.clone();
+        next_nodes.push(node("new-exit"));
+        next_nodes[1].uuid = "9e107d9d-372b-4c81-8d2b-3f2d0a1b2c3e".into();
+        assert!(!residential_routing_changed(Some(&previous), &previous_nodes, Some(&next), &next_nodes));
+
+        // Same home name, new endpoint or credentials: the live outbound must be rebuilt.
+        next_nodes[0].port = 8443;
+        assert!(residential_routing_changed(Some(&previous), &previous_nodes, Some(&next), &next_nodes));
+        next_nodes[0] = previous_nodes[0].clone();
+        next_nodes[0].uuid = "9e107d9d-372b-4c81-8d2b-3f2d0a1b2c3f".into();
+        assert!(residential_routing_changed(Some(&previous), &previous_nodes, Some(&next), &next_nodes));
+        next.home_proxy = Some("new-exit".into());
+        assert!(residential_routing_changed(Some(&previous), &previous_nodes, Some(&next), &next_nodes));
+
+        let socks = tono_core::CatalogRouting {
+            home_socks5: Some(tono_core::CatalogHomeSocks5 {
+                host: "home.example.com".into(),
+                port: 1080,
+                username: "user".into(),
+                password: "old-password".into(),
+            }),
+            ..Default::default()
+        };
+        let mut rotated_socks = socks.clone();
+        rotated_socks.home_socks5.as_mut().unwrap().password = "new-password".into();
+        assert!(residential_routing_changed(Some(&socks), &previous_nodes, Some(&rotated_socks), &previous_nodes));
+        assert!(residential_routing_changed(Some(&previous), &previous_nodes, Some(&socks), &previous_nodes));
+        assert!(residential_routing_changed(Some(&socks), &previous_nodes, None, &previous_nodes));
+        assert!(!residential_routing_changed(None, &previous_nodes, Some(&tono_core::CatalogRouting {
+            default_proxy: Some("new-exit".into()), ..Default::default()
+        }), &next_nodes));
     }
 
     /// H13-F2: waking from an 8 h sleep yields one catch-up sync, not one
@@ -825,6 +950,12 @@ mod tests {
         assert!(is_legacy_wire_name("🇺🇸 US-VLESS-Reality"));
         assert!(names_equivalent("🇺🇸 US-VLESS-Reality", "US-VLESS-Reality"));
         assert!(!is_legacy_wire_name("Salt Lake City · Summit"));
+        assert!(!names_equivalent("东京", "大阪"));
+        let cities = vec![node("东京"), node("大阪")];
+        assert_eq!(
+            next_catalog_exit(Some("东京"), &cities, &BTreeSet::new()).as_deref(),
+            Some("大阪")
+        );
         let nodes = vec![
             node("US-VLESS-Reality"),
             node("Salt Lake City · Summit"),
@@ -1071,6 +1202,33 @@ mod tests {
         let corrected = install_and_persist(&accepted.tracker, &cache, &catalog(6)).unwrap();
         assert!(corrected.installed);
         assert_eq!(corrected.tracker.current_revision(), 6);
+    }
+
+    /// H16-C-F3: the sync publishes its status before it releases the state lock. Sign-out bumps
+    /// the generation and publishes SignedOut under that lock; a Ready snapshot published after
+    /// the unlock could land after it in the `tono_status` cache and never be corrected.
+    #[tokio::test]
+    async fn catalog_sync_publishes_status_before_releasing_the_state_lock() {
+        let state = std::sync::Arc::new(crate::tono::state::TonoState::for_test());
+        {
+            let mut inner = state.lock().await;
+            inner.sign_in_generation = 4;
+            let mut tracker = CatalogTracker::new();
+            tracker.install(&catalog(3)).unwrap();
+            inner.catalog_tracker = tracker;
+        }
+        let probe = std::sync::Arc::clone(&state);
+        let mut lock_held_at_publish = None;
+        let result = commit_fetched_catalog(&state, 4, &catalog(3), |_| {
+            lock_held_at_publish = Some(futures::FutureExt::now_or_never(probe.lock()).is_none());
+        })
+        .await;
+        assert!(matches!(result, Ok((None, true))), "an unchanged catalog is confirmed and published");
+        assert_eq!(
+            lock_held_at_publish,
+            Some(true),
+            "the status was published after the state lock was released"
+        );
     }
 
     #[test]

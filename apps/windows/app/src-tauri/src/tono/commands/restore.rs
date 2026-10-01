@@ -31,7 +31,8 @@ enum StoredProtection {
     /// The Service answered and wants the barrier.
     Armed(Box<KillSwitchStatus>),
     /// The Service answered and wants no barrier. The only reading that proves absence.
-    ProvenAbsent,
+    /// `reconnect_after_release` is set only by the crash-window tombstone.
+    ProvenAbsent { reconnect_after_release: bool },
     /// The Service did not answer. Never treated as absence.
     Unknown(String),
 }
@@ -44,7 +45,12 @@ async fn probe_stored_protection(deadline: tokio::time::Instant) -> StoredProtec
             Ok(Ok(snapshot)) => {
                 return match snapshot.kill_switch {
                     Some(status) if status.wanted => StoredProtection::Armed(Box::new(status)),
-                    _ => StoredProtection::ProvenAbsent,
+                    Some(status) => StoredProtection::ProvenAbsent {
+                        reconnect_after_release: status.reconnect_after_release,
+                    },
+                    None => StoredProtection::ProvenAbsent {
+                        reconnect_after_release: false,
+                    },
                 };
             }
             Ok(Err(error)) => last_error = error.to_string(),
@@ -86,7 +92,7 @@ fn apply_stored_protection(inner: &mut TonoInner, protection: &StoredProtection)
             inner.fsm.mark_kill_switch_armed();
         }
         StoredProtection::Unknown(_) => inner.fsm.mark_kill_switch_armed(),
-        StoredProtection::ProvenAbsent => {}
+        StoredProtection::ProvenAbsent { .. } => {}
     }
 }
 
@@ -98,6 +104,39 @@ pub(super) fn unknown_protection_message(reason: &str) -> String {
     )
 }
 
+/// Reserve auth before Service I/O. Startup owns only the initial generation; an
+/// interactive request during pin hydration or adoption supersedes that restore.
+async fn reserve_restore_with_adoption<F>(
+    state: &Arc<TonoState>, expected_generation: Option<u64>, adoption: F,
+) -> (Option<(u64, u64)>, F::Output)
+where
+    F: std::future::Future,
+{
+    let transaction = {
+        let mut inner = state.lock().await;
+        if inner.account_close.is_some()
+            || expected_generation.is_some_and(|expected| inner.sign_in_generation != expected)
+        {
+            None
+        } else {
+            inner.sign_in_generation = inner.sign_in_generation.wrapping_add(1);
+            Some((inner.sign_in_generation, inner.connect_generation))
+        }
+    };
+    // Update adoption is independent of account ownership and must still run if
+    // interactive auth already superseded the initial startup transaction.
+    let update_recovery = adoption.await;
+    let transaction = match transaction {
+        Some((generation, connect_epoch)) => {
+            let inner = state.lock().await;
+            (inner.sign_in_generation == generation && inner.account_close.is_none())
+                .then_some((generation, connect_epoch))
+        }
+        None => None,
+    };
+    (transaction, update_recovery)
+}
+
 /// Startup session restore (§2): load the persisted selection (L4), seed
 /// the catalog from the verified cache, then refresh + `me()`. A 401 suspends
 /// the account and other errors enter the error state; neither releases the
@@ -107,19 +146,24 @@ pub(super) fn unknown_protection_message(reason: &str) -> String {
 /// process obtains a new Service session/controller; weaker evidence continues to wait for the
 /// user and is never promoted directly to Connected.
 pub async fn restore_session(app: AppHandle, state: Arc<TonoState>) {
-    let update_recovery = super::update::adopt().await;
+    restore_session_for_generation(app, state, None).await;
+}
+
+async fn restore_session_for_generation(
+    app: AppHandle, state: Arc<TonoState>, expected_generation: Option<u64>,
+) {
+    let (transaction, update_recovery) =
+        reserve_restore_with_adoption(&state, expected_generation, super::update::adopt()).await;
     if let Err(error) = &update_recovery {
         logging!(warn, Type::Service, "Protected update adoption not established: {error:#}");
     }
+    let Some((generation, connect_epoch)) = transaction else { return; };
     let restore_deadline = tokio::time::Instant::now() + RESTORE_TRANSACTION_TIMEOUT;
-    let generation = {
+    {
         let mut inner = state.lock().await;
-        if inner.account_close.is_some() {
+        if inner.account_close.is_some() || inner.sign_in_generation != generation {
             return;
         }
-        // Restore is an authentication transaction too. A retry supersedes an older restore,
-        // while sign-in/sign-out already bump the same generation.
-        inner.sign_in_generation = inner.sign_in_generation.wrapping_add(1);
         if let Some(selected) = crate::tono::state::load_selection(&inner.catalog_dir) {
             inner.selected_node = Some(selected);
         }
@@ -127,8 +171,7 @@ pub async fn restore_session(app: AppHandle, state: Arc<TonoState>) {
         crate::tono::policy_sync::seed_from_cache(&mut inner);
         connection::remove_legacy_runtime_copy(&inner.catalog_dir);
         emit_status(&app, &status_of(&inner));
-        inner.sign_in_generation
-    };
+    }
 
     // Three-valued on purpose: armed / proven absent / unknown. This used to be an
     // `Option<KillSwitchStatus>` where every failure mode became `None`, and `None` reads as
@@ -190,15 +233,61 @@ pub async fn restore_session(app: AppHandle, state: Arc<TonoState>) {
         // the restore task does not await that potentially long connection transaction.
         match update_recovery {
             Ok(Some(tono_service_protocol::update_contract::Protection::Connected)) => {
-                let state = state.clone();
-                let app = app.clone();
-                AsyncHandler::spawn(move || async move {
-                    if let Err(error) = connection::connect(state, app).await {
-                        logging!(warn, Type::Service, "Update recovery remains incomplete: {error}");
-                    }
-                });
+                let adoption = super::update::recovery_adoption();
+                let allowed = {
+                    let inner = state.lock().await;
+                    update_recovery_connect_allowed(&inner, generation, connect_epoch, adoption)
+                };
+                if allowed {
+                    let state = state.clone();
+                    let app = app.clone();
+                    AsyncHandler::spawn(move || async move {
+                        // Admission re-checks `connect_epoch` under the lock that starts the
+                        // attempt: a Restore internet after the check above still wins.
+                        if let Err(error) = connection::connect_for_generation(state, app, Some(connect_epoch)).await {
+                            logging!(warn, Type::Service, "Update recovery remains incomplete: {error}");
+                        }
+                    });
+                } else if adoption != super::update::Adoption::Allowed {
+                    logging!(info, Type::Service, "Tono: update recovery Connect held; this App is not the update executor's own successor (a restart or a relaunch), or its adoption answer was uncertain. Connect finishes the update; Restore internet releases it");
+                } else {
+                    logging!(info, Type::Service, "Tono: update recovery Connect skipped; a Restore internet or newer connection action during restore owns the connection");
+                }
             }
-            Ok(None) => connection::schedule_startup_resume_if_proven(&state, &app, generation).await,
+            Ok(None) => {
+                let spawn_reconnect = {
+                    let inner = state.lock().await;
+                    connection::crash_recovery_reconnect_allowed(
+                        matches!(
+                            protection,
+                            StoredProtection::ProvenAbsent {
+                                reconnect_after_release: true
+                            }
+                        ),
+                        matches!(inner.account_state, AccountState::Ready),
+                        inner.selected_node.is_some(),
+                        inner.catalog_requires_choice,
+                        inner.fsm.status().is_disconnecting,
+                    )
+                };
+                if spawn_reconnect {
+                    let state = state.clone();
+                    let app = app.clone();
+                    AsyncHandler::spawn(move || async move {
+                        if let Err(error) =
+                            connection::connect_for_generation(state, app, Some(connect_epoch)).await
+                        {
+                            logging!(
+                                warn,
+                                Type::Service,
+                                "Tono: 崩溃恢复放行后的后台重连未完成: {error}"
+                            );
+                        }
+                    });
+                } else {
+                    connection::schedule_startup_resume_if_proven(&state, &app, generation).await;
+                }
+            }
             // An offline obligation must stay offline. Failed adoption
             // cannot grant reconnect by falling through legacy restore.
             _ => {}
@@ -214,6 +303,23 @@ pub async fn restore_session(app: AppHandle, state: Arc<TonoState>) {
             .await;
         }
     }
+}
+
+/// Whether update recovery's automatic Connect still belongs to this restore. Restore internet
+/// does not change `sign_in_generation` but always retires the connection generation, so any
+/// connection transition since restore began (a Disconnect, a node switch, a quit) or a release
+/// still in flight wins: the user's choice stands and recovery waits for them.
+fn update_recovery_connect_allowed(
+    inner: &TonoInner,
+    generation: u64,
+    connect_epoch: u64,
+    adoption: super::update::Adoption,
+) -> bool {
+    // BRICK-W1: only the executor's own successor, after a certain Adopt answer.
+    adoption == super::update::Adoption::Allowed
+        && inner.sign_in_generation == generation
+        && inner.connect_generation == connect_epoch
+        && !inner.fsm.status().is_disconnecting
 }
 
 /// Commit a `me()` answer as this session's account: its log-upload owner, the payload, and
@@ -376,6 +482,11 @@ where
         inner.account_state = AccountState::Restoring;
         // A new restore decides afresh whether this launch runs offline.
         inner.offline.leave_offline();
+        // H16-O-F7: publish the stored barrier before the network call, never Standby over a
+        // live block while `me()` runs. F515-1: this path applies it only here. A Restore internet
+        // (or a Service re-read) during `me()` owns the newer truth, so no `me()` branch below
+        // re-applies this older reading.
+        apply_stored_protection(&mut inner, protection);
         emit(&inner);
     }
 
@@ -401,7 +512,6 @@ where
             if inner.sign_in_generation != generation {
                 return None;
             }
-            apply_stored_protection(&mut inner, protection);
             // #582: the budget elapsed without any server answer, so the control plane is unreachable.
             let unanswered = answer_probe.transport().answers_seen() == answers_before;
             if let Some(admitted) = unanswered.then(|| settle_unreachable_restore(&mut inner, protection)).flatten() {
@@ -423,7 +533,6 @@ where
                 return None;
             }
             commit_account(state, &mut inner, me.user, info.suspended);
-            apply_stored_protection(&mut inner, protection);
             emit(&inner);
             Some((info, false))
         }
@@ -441,10 +550,9 @@ where
 
 /// Restore's answer when `me()` fails; true when the account was admitted offline (#582).
 /// Nothing here releases protection, signs out or deletes the stored session: the barrier stays
-/// exactly as the Service holds it, with Disconnect ("Restore internet") still offered while it
-/// blocks.
+/// exactly as the Service holds it (applied before `me()`), with Disconnect ("Restore internet")
+/// still offered while it blocks.
 fn settle_failed_restore(inner: &mut TonoInner, protection: &StoredProtection, error: &ApiError) -> bool {
-    apply_stored_protection(inner, protection);
     // #582: only an unreachable control plane may fall back to the offline grant. Any server
     // answer (401, 403, 5xx, an invalid body) keeps its own meaning below.
     if matches!(error, ApiError::Transport { .. })
@@ -508,6 +616,10 @@ fn offline_account_info() -> TonoAccountInfo {
         email: String::new(),
         suspended: false,
         device_limit: i64::from(DEFAULT_DEVICE_LIMIT),
+        plan: None,
+        quota_bytes: None,
+        usage_bytes: None,
+        expires_at: None,
     }
 }
 
@@ -577,6 +689,146 @@ mod rejected_session_tests {
 }
 
 #[cfg(test)]
+mod barrier_before_me_tests {
+    use super::*;
+    use tokio::sync::oneshot;
+
+    type MeResult = Result<tono_core::auth::MeResponse, ApiError>;
+
+    fn kill_switch(wanted: bool) -> KillSwitchStatus {
+        serde_json::from_value(serde_json::json!({
+            "wanted": wanted, "verified": wanted, "live": wanted, "mode": "blocked",
+        })).unwrap()
+    }
+
+    fn me_answer() -> MeResult {
+        Ok(serde_json::from_value(serde_json::json!({
+            "user": { "id": "fixture-owner", "email": "fixture@example.test" },
+        })).unwrap())
+    }
+
+    /// A cold start that holds a session token: the FSM starts unprotected.
+    async fn launch_with_token() -> (Arc<TonoState>, u64) {
+        let state = Arc::new(TonoState::for_test());
+        let generation = {
+            let inner = state.lock().await;
+            inner.credentials.set_local(CredentialKey::RefreshToken, "persisted-session").unwrap();
+            inner.sign_in_generation
+        };
+        (state, generation)
+    }
+
+    /// H16-O-F7: a stored barrier is published before the network call, not after `me()` answers.
+    #[tokio::test]
+    async fn cold_restore_applies_the_stored_barrier_before_me() {
+        let (state, generation) = launch_with_token().await;
+        let (entered, at_me) = oneshot::channel::<()>();
+        let (answer, answered) = oneshot::channel::<MeResult>();
+        let protection = StoredProtection::Armed(Box::new(kill_switch(true)));
+        let restore = restore_account_with(
+            &state, generation, &protection,
+            tokio::time::Instant::now() + Duration::from_secs(10),
+            move |_| async move { entered.send(()).unwrap(); answered.await.unwrap() },
+            |_| async { Ok(()) },
+            |_| async { Ok(()) },
+            |_| {},
+        );
+        let during_me = async {
+            at_me.await.unwrap();
+            let blocked = {
+                let inner = state.lock().await;
+                inner.fsm.kill_switch_armed() && inner.fsm.status().is_protection_blocked
+            };
+            answer.send(me_answer()).unwrap();
+            blocked
+        };
+        let (_, blocked) = tokio::join!(restore, during_me);
+        assert!(blocked, "Standby must not be shown over a stored barrier while `me()` runs");
+    }
+
+    /// F515-1: a Restore internet proven while `me()` is in flight is newer than the probe. The
+    /// late answer must not put the old reading back ("Network blocked" over an open machine).
+    #[tokio::test]
+    async fn late_me_answer_does_not_reapply_a_released_barrier() {
+        let (state, generation) = launch_with_token().await;
+        let (entered, at_me) = oneshot::channel::<()>();
+        let (answer, answered) = oneshot::channel::<MeResult>();
+        let protection = StoredProtection::Armed(Box::new(kill_switch(true)));
+        let restore = restore_account_with(
+            &state, generation, &protection,
+            tokio::time::Instant::now() + Duration::from_secs(10),
+            move |_| async move { entered.send(()).unwrap(); answered.await.unwrap() },
+            |_| async { Ok(()) },
+            |_| async { Ok(()) },
+            |_| {},
+        );
+        let during_me = async {
+            at_me.await.unwrap();
+            // `disconnect()`'s own steps, then its proven Service release.
+            {
+                let mut inner = state.lock().await;
+                inner.invalidate_connection(true);
+                inner.fsm.begin_disconnect();
+            }
+            let release_state = Arc::clone(&state);
+            let release = crate::tono::connection::coordinate_release(&state, None,
+                move |_guard| async move {
+                    release_state.lock().await.kill_switch = Some(kill_switch(false));
+                    Ok(())
+                },
+                || async {},
+            ).await;
+            release.wait().await.unwrap();
+            answer.send(me_answer()).unwrap();
+        };
+        tokio::join!(restore, during_me);
+        let inner = state.lock().await;
+        assert!(!inner.fsm.kill_switch_armed() && !inner.fsm.status().is_protection_blocked,
+            "a late `me()` re-armed a barrier the user already released");
+        assert_eq!(inner.kill_switch.as_ref(), Some(&kill_switch(false)));
+    }
+
+    /// #651 review (opus:F1): a Restore internet completed during restore must not be undone by
+    /// update recovery's automatic Connect (re-arm WFP and connect).
+    #[tokio::test]
+    async fn restore_internet_during_restore_skips_update_recovery_connect() {
+        let state = Arc::new(TonoState::for_test());
+        let mut inner = state.lock().await;
+        let (generation, connect_epoch) = (inner.sign_in_generation, inner.connect_generation);
+        let allowed = super::super::update::Adoption::Allowed;
+        assert!(update_recovery_connect_allowed(&inner, generation, connect_epoch, allowed),
+            "an untouched restore keeps its update recovery Connect");
+        // `disconnect()`'s own steps, then what its proven release leaves behind.
+        inner.invalidate_connection(true);
+        inner.fsm.begin_disconnect();
+        inner.fsm.sign_out_or_quit();
+        assert!(!update_recovery_connect_allowed(&inner, generation, connect_epoch, allowed),
+            "update recovery reconnected a machine the user released during restore");
+    }
+
+    /// BRICK-W1: after a restart mid-update every App is a later incarnation, and it reconnected
+    /// by itself at every logon. Only the executor's own successor, after a certain answer, may
+    /// run the recovery Connect; a lost answer holds for the rest of the process, even when a
+    /// retried restore then reads the incarnation the first Adopt rebound.
+    #[tokio::test]
+    async fn an_uncertain_or_relaunched_adoption_never_starts_the_recovery_connect() {
+        use super::super::update::Adoption;
+        let state = Arc::new(TonoState::for_test());
+        let inner = state.lock().await;
+        let (generation, connect_epoch) = (inner.sign_in_generation, inner.connect_generation);
+        let retried = Adoption::Undecided.after(None).after(Some(false));
+        assert!(!update_recovery_connect_allowed(&inner, generation, connect_epoch, retried),
+            "a lost Adopt answer followed by a same-process retry started the recovery Connect");
+        let relaunched = Adoption::Undecided.after(Some(true));
+        assert!(!update_recovery_connect_allowed(&inner, generation, connect_epoch, relaunched),
+            "a relaunched App started the recovery Connect");
+        let own_successor = Adoption::Undecided.after(Some(false));
+        assert!(update_recovery_connect_allowed(&inner, generation, connect_epoch, own_successor),
+            "the executor's own successor keeps its recovery Connect");
+    }
+}
+
+#[cfg(test)]
 mod offline_admission_tests {
     use super::*;
     use crate::tono::offline_grant::{
@@ -620,6 +872,36 @@ mod offline_admission_tests {
         (inner.account_state.clone(), status_of(&inner).offline_verified_at_ms)
     }
 
+    #[tokio::test]
+    async fn delayed_startup_restore_cannot_supersede_interactive_sign_in() {
+        let state = Arc::new(TonoState::for_test());
+        let (entered, waiting) = tokio::sync::oneshot::channel();
+        let (resume, resumed) = tokio::sync::oneshot::channel();
+        let restoring = Arc::clone(&state);
+        let startup = tokio::spawn(async move {
+            reserve_restore_with_adoption(&restoring, Some(0), async move {
+                entered.send(()).unwrap();
+                resumed.await.unwrap();
+            }).await
+        });
+        waiting.await.unwrap();
+        let (_, _, user_generation) = super::super::account::begin_sign_in(&state).await.unwrap();
+        state.lock().await.challenge_id = Some("interactive-challenge".into());
+        resume.send(()).unwrap();
+        assert!(startup.await.unwrap().0.is_none(), "the newer interactive request owns auth");
+        let inner = state.lock().await;
+        assert_eq!(inner.sign_in_generation, user_generation);
+        assert_eq!(inner.challenge_id.as_deref(), Some("interactive-challenge"));
+        drop(inner);
+
+        // An interactive request can also start during the guarded startup pin preflight,
+        // before restore reaches adoption. That old startup must still adopt recovery,
+        // but must not claim the already-used initial generation.
+        let (transaction, adopted) = reserve_restore_with_adoption(&state, Some(0), async { true }).await;
+        assert!(adopted && transaction.is_none());
+        assert_eq!(state.lock().await.sign_in_generation, user_generation);
+    }
+
     /// #582 T3: with the control plane unreachable, restore is Ready (offline) only on a positive
     /// grant bound to the session token in memory and to the catalog seeded into memory.
     #[tokio::test]
@@ -629,7 +911,9 @@ mod offline_admission_tests {
         leave_verified_session(&dir, &catalog_a, "session-a").await;
         let grant_path = dir.join(GRANT_FILE_NAME);
         let saved_grant = std::fs::read(&grant_path).unwrap();
-        let known = || StoredProtection::ProvenAbsent;
+        let known = || StoredProtection::ProvenAbsent {
+            reconnect_after_release: false,
+        };
 
         assert_eq!(restore_unreachable(&dir, "session-a", known(), None).await, (AccountState::Ready, Some(1_000)),
             "a matching grant admits offline, verified when the online session confirmed the catalog");
@@ -679,7 +963,15 @@ mod offline_admission_tests {
         );
         crate::tono::state::write_private_file(&dir.join(GRANT_FILE_NAME), revoked_a.as_bytes()).unwrap();
 
-        let (account, offline) = restore_unreachable(&dir, "session-b", StoredProtection::ProvenAbsent, None).await;
+        let (account, offline) = restore_unreachable(
+            &dir,
+            "session-b",
+            StoredProtection::ProvenAbsent {
+                reconnect_after_release: false,
+            },
+            None,
+        )
+        .await;
         assert!(
             account != AccountState::Suspended && account != AccountState::Ready && offline.is_none(),
             "A's revocation must not decide B's launch: {account:?}"
@@ -728,7 +1020,7 @@ pub async fn restore_session_guarded(app: AppHandle, state: Arc<TonoState>) {
     crate::tono::bootstrap::hydrate_learned_pins_from_service().await;
     let client = { Arc::clone(&state.lock().await.client) };
     let _ = client.transport().refresh_control_plane_pins().await;
-    let outcome = std::panic::AssertUnwindSafe(restore_session(app.clone(), state.clone()))
+    let outcome = std::panic::AssertUnwindSafe(restore_session_for_generation(app.clone(), state.clone(), Some(0)))
         .catch_unwind()
         .await;
     if let Err(payload) = outcome {

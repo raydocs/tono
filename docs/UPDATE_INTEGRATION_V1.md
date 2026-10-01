@@ -4,7 +4,7 @@ This is the implementation contract for #26, following the shared value model
 in [UPDATE_PROTOCOL_V1.md](UPDATE_PROTOCOL_V1.md). It is not acceptance evidence.
 The owner requested real macOS/Windows integration and permits manually replacing
 legacy clients. Source work does not authorize signing, deployment, feed changes
-or device installation. Product version remains 0.0.73 during development.
+or device installation. Product version remains 0.0.74 during development.
 
 ## Settled implementation choices
 
@@ -198,3 +198,17 @@ signatures and artifact binding, not Developer ID, Authenticode or G3 acceptance
 Uploading the result or advancing a customer pointer is a separate authorized,
 gated operation. Re-signing or stapling after measurement requires a new manifest
 and both signatures.
+
+`desktop-update-sign.yml` runs `measure`, `assemble`, both signatures and `bundle`
+for a real pair. An operator dispatches it on `release/windows` with the two
+release-workflow run ids, the source SHA, sequence, version and channel. Before
+measuring it binds each producer run (workflow file, `workflow_dispatch`, release
+line, SHA, success, build-job env), its artifact by id and digest, and the package
+contents: the macOS receipt, sealed `tono-build-source.json`, Info.plist channel and
+key, Developer ID/notarization and release gate; the Windows installer signature,
+version resources, the installed payload copy of each component (any gate copy must
+be identical), and the updater key compiled into `tono-service.exe`.
+Each private key is used in one step of its own environment job (`macos-appcast`,
+`windows-release`), through env or stdin. Both signatures are verified under the
+pinned keys before the bundle is uploaded as a 30-day workflow artifact. The token
+is read-only and there is no release, feed, bucket or promote step.

@@ -261,9 +261,9 @@ fn wait_for_service_ready() -> Result<(), Error> {
     })
 }
 
-/// Rollback only needs proof that the restored predecessor is the live IPC owner. Requiring it to
-/// satisfy the *new* helper's protocol floor would misclassify a healthy older Service as failed
-/// recovery during a cross-version upgrade. Commit readiness above remains deliberately strict.
+/// Rollback or reboot-pending publication only needs proof that the predecessor is the live IPC
+/// owner. Requiring it to satisfy the *new* helper's protocol floor would misclassify a healthy
+/// older Service as failed during a cross-version upgrade. Commit readiness above remains strict.
 #[cfg(windows)]
 fn wait_for_previous_service_liveness() -> Result<(), Error> {
     const LIVE_TIMEOUT: Duration = Duration::from_secs(20);
@@ -668,6 +668,8 @@ impl Drop for RestartServiceOnFailure<'_> {
 enum WindowsInstallMode {
     ServiceOnly,
     ReplaceRuntime,
+    /// Start the registered, stopped TonoService as it is ([`start_registered_with`]).
+    StartRegistered,
 }
 
 #[cfg(windows)]
@@ -678,12 +680,13 @@ fn parse_windows_install_mode(
     match arguments.as_slice() {
         [] => Ok(WindowsInstallMode::ServiceOnly),
         [argument] if argument == "--replace-runtime" => Ok(WindowsInstallMode::ReplaceRuntime),
+        [argument] if argument == "--start-registered" => Ok(WindowsInstallMode::StartRegistered),
         // `run_maintenance_if_requested` handles this mode before any install work. Keep it in the
         // strict parser so adding argument validation cannot break the existing recovery command.
         [argument] if argument == "--cleanup-stale-owners" => Ok(WindowsInstallMode::ServiceOnly),
         _ => bail!(
             "unsupported Tono Service installer arguments; expected no arguments, \
-             --replace-runtime, or --cleanup-stale-owners"
+             --replace-runtime, --start-registered, or --cleanup-stale-owners"
         ),
     }
 }
@@ -1021,9 +1024,11 @@ impl CoordinatedBinaryReplacement {
         let backup = path_with_suffix(target, ROLLBACK_SUFFIX);
         let restore = path_with_suffix(target, RESTORE_SUFFIX);
         let publish_scratch = path_with_suffix(target, PUBLISH_SUFFIX);
-        ensure_update_scratch_absent(&backup)?;
-        ensure_update_scratch_absent(&restore)?;
-        ensure_update_scratch_absent(&publish_scratch)?;
+        // The native update executor has no discovery pass: a retired rollback leaves copies
+        // equal to the restored target, and only those are cleared. Any other bytes still refuse.
+        adopt_or_refuse_update_scratch(target, &backup)?;
+        adopt_or_refuse_update_scratch(target, &restore)?;
+        adopt_or_refuse_update_scratch(target, &publish_scratch)?;
         let changed = old_digest != measured_new_digest;
         if changed {
             copy_ordinary_file_exclusive(target, &backup)?;
@@ -1141,12 +1146,19 @@ impl CoordinatedBinaryReplacement {
     }
 
     fn cleanup(&self) {
+        self.cleanup_with_staged_retained(false);
+    }
+
+    fn cleanup_with_staged_retained(&self, keep_staged: bool) {
         for path in [
             &self.staged,
             &self.backup,
             &self.restore,
             &self.publish_scratch,
         ] {
+            if keep_staged && path == &self.staged {
+                continue;
+            }
             if let Err(error) = remove_ordinary_file_if_exists(path) {
                 eprintln!("could not remove completed replacement artifact {path:?}: {error:#}");
             }
@@ -1158,6 +1170,16 @@ impl CoordinatedBinaryReplacement {
             self.cleanup();
         }
     }
+}
+
+#[cfg(windows)]
+fn keep_installer_retry_candidates(update_error: &Error, rollback_succeeded: bool) -> bool {
+    // NSIS retries without restaging after a locked executable was restored. Access denied (5)
+    // can also mean a mapped image; sharing/lock violations are 32/33. Validation errors stay fatal.
+    rollback_succeeded
+        && update_error
+            .downcast_ref::<std::io::Error>()
+            .is_some_and(|error| matches!(error.raw_os_error(), Some(5 | 32 | 33)))
 }
 
 #[cfg(windows)]
@@ -1474,9 +1496,13 @@ fn replace_existing_service_and_runtime(
                     // `--replace-runtime` run calls `ensure_update_scratch_absent` before any
                     // other work and refuses, so the "run the same installer again" remedy
                     // this function's own error prints would be permanently unavailable.
+                    // Retain verified `.next` candidates for NSIS's retry after a transient lock;
+                    // the next invocation revalidates them before preparing another transaction.
+                    let keep_staged =
+                        keep_installer_retry_candidates(&update_error, recovery_result.is_ok());
                     service_replacement.cleanup();
-                    runtime_replacement.cleanup();
-                    app_replacement.cleanup();
+                    runtime_replacement.cleanup_with_staged_retained(keep_staged);
+                    app_replacement.cleanup_with_staged_retained(keep_staged);
                     return recovery_result;
                 }
 
@@ -1539,73 +1565,387 @@ fn replace_existing_service_and_runtime(
     }
 }
 
-/// Make sure the dependency TonoService declares can actually be satisfied.
-///
-/// TonoService is AutoStart and hard-depends on BFE, so a machine where BFE has been switched
-/// off — routinely done by "network accelerator" and "anti-freeloader" utilities — refuses to
-/// start it at boot and never retries. Nothing in the product recovered from that: the App
-/// showed "protected, not connected" with every diagnostic field reading unknown, and rebooting
-/// did not help. The installer already holds the elevation needed to fix it, and BFE is a core
-/// Windows service that Windows Firewall and IPsec also require, so restoring it repairs the
-/// machine rather than reconfiguring it.
-///
-/// The start type goes through `sc.exe` rather than `change_config`, which takes a whole
-/// `ServiceInfo`: reconstructing one for a core OS service from our side risks writing a wrong
-/// binary path or account onto the component Windows Firewall depends on. Starting it is a
-/// single unambiguous call, so that part uses the API.
-///
-/// Never fatal: an install that otherwise succeeded must not fail over this, and the connect
-/// path reports a still-stopped BFE with instructions of its own.
+/// Exit code of `--manual-update-gate` for [`BfeUnavailable`]; kept in sync with installer.nsi,
+/// which then names the fix instead of the generic refusal.
 #[cfg(windows)]
-fn ensure_bfe_ready() -> Vec<String> {
-    use platform_lib::service::{ServiceAccess, ServiceState};
-    use platform_lib::service_manager::{ServiceManager, ServiceManagerAccess};
+const MANUAL_GATE_BFE_UNAVAILABLE_EXIT: i32 = 79;
 
-    let mut notes = Vec::new();
-    let manager = match ServiceManager::local_computer(None::<&str>, ServiceManagerAccess::CONNECT) {
-        Ok(manager) => manager,
-        Err(error) => {
-            notes.push(format!("could not open the service manager to check BFE: {error}"));
-            return notes;
-        }
-    };
-    let service =
-        match manager.open_service("BFE", ServiceAccess::QUERY_STATUS | ServiceAccess::START) {
-            Ok(service) => service,
+/// How long a stopped or StartPending BFE gets to reach Running before the helper refuses.
+#[cfg(windows)]
+const BFE_START_BUDGET: Duration = Duration::from_secs(30);
+#[cfg(windows)]
+const BFE_POLL_INTERVAL: Duration = Duration::from_millis(250);
+
+/// The Base Filtering Engine is not running and this helper could not bring it up. Every check
+/// behind the manual gate starts with a WFP read, an RPC to BFE, and an unanswered read is never
+/// taken as "no Tono filters": the gate keeps refusing, only with a cause the user can fix.
+#[cfg(windows)]
+#[derive(Debug)]
+struct BfeUnavailable(String);
+
+#[cfg(windows)]
+impl std::fmt::Display for BfeUnavailable {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "TONO_BFE_NOT_RUNNING: the Base Filtering Engine (BFE) {}, so Tono cannot check its \
+             network filters and changed nothing. In an administrator PowerShell run \
+             `sc.exe config BFE start= auto`, then `sc.exe start BFE`, and try again",
+            self.0
+        )
+    }
+}
+
+#[cfg(windows)]
+impl std::error::Error for BfeUnavailable {}
+
+/// What the helper can see of the Base Filtering Engine: the SCM in production, a script in tests.
+#[cfg(windows)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BfeState {
+    Running,
+    /// Stopped with start type Disabled.
+    Disabled,
+    Stopped,
+    /// Start, stop or continue pending, or paused: SCM has not settled.
+    Pending,
+}
+
+#[cfg(windows)]
+trait BfeControl {
+    fn state(&mut self) -> Result<BfeState, Error>;
+    fn start(&mut self) -> Result<(), Error>;
+    /// Sleep one poll interval; false once the wait budget is spent.
+    fn wait(&mut self) -> bool;
+}
+
+/// Bring BFE to Running before anything reads WFP (H22-O-F1).
+///
+/// TonoService is AutoStart and hard-depends on BFE, and "network accelerator" and
+/// "anti-freeloader" utilities routinely stop it. The installer's gate and the App's repair both
+/// read WFP first, so a stopped BFE refused them before any repair could run. A stopped BFE is
+/// started here — a core Windows service that Windows Firewall also needs, and starting it changes
+/// no setting — and StartPending is waited out rather than refused. A Disabled BFE is refused with
+/// instructions: re-enabling it changes a machine setting, which this helper leaves to the user
+/// (docs/DECISIONS.md, 2026-09-26). An SCM that cannot be read is no verdict either way; the WFP
+/// read that follows decides, and it fails closed.
+#[cfg(windows)]
+fn bring_bfe_up(bfe: &mut impl BfeControl) -> Result<(), Error> {
+    let mut start_requested = false;
+    let mut start_error = None;
+    loop {
+        let state = match bfe.state() {
+            Ok(state) => state,
             Err(error) => {
-                notes.push(format!("could not open the Base Filtering Engine: {error}"));
-                return notes;
+                eprintln!(
+                    "tono-install: could not read the Base Filtering Engine state ({error:#}); \
+                     the WFP check decides"
+                );
+                return Ok(());
             }
         };
+        match state {
+            BfeState::Running => return Ok(()),
+            BfeState::Disabled => return Err(BfeUnavailable("is disabled".into()).into()),
+            BfeState::Stopped if !start_requested => {
+                start_requested = true;
+                // A start that races another starter fails here and reads Running next time.
+                start_error = bfe.start().err().map(|error| format!("{error:#}"));
+            }
+            BfeState::Stopped => {
+                if let Some(error) = &start_error {
+                    let cause = format!("is stopped and did not start ({error})");
+                    return Err(BfeUnavailable(cause).into());
+                }
+            }
+            BfeState::Pending => {}
+        }
+        if !bfe.wait() {
+            return Err(BfeUnavailable(format!("is still {state:?}")).into());
+        }
+    }
+}
 
-    let running = match service.query_status() {
-        Ok(status) => status.current_state == ServiceState::Running,
+#[cfg(windows)]
+struct ScmBfe {
+    service: platform_lib::service::Service,
+    deadline: Instant,
+}
+
+#[cfg(windows)]
+impl BfeControl for ScmBfe {
+    fn state(&mut self) -> Result<BfeState, Error> {
+        use platform_lib::service::{ServiceStartType, ServiceState};
+
+        Ok(match self.service.query_status()?.current_state {
+            ServiceState::Running => BfeState::Running,
+            ServiceState::Stopped => {
+                if self.service.query_config()?.start_type == ServiceStartType::Disabled {
+                    BfeState::Disabled
+                } else {
+                    BfeState::Stopped
+                }
+            }
+            _ => BfeState::Pending,
+        })
+    }
+
+    fn start(&mut self) -> Result<(), Error> {
+        Ok(self.service.start::<&std::ffi::OsStr>(&[])?)
+    }
+
+    fn wait(&mut self) -> bool {
+        if Instant::now() >= self.deadline {
+            return false;
+        }
+        std::thread::sleep(BFE_POLL_INTERVAL);
+        true
+    }
+}
+
+/// [`bring_bfe_up`] against the local SCM.
+#[cfg(windows)]
+fn bring_scm_bfe_up() -> Result<(), Error> {
+    use platform_lib::service::ServiceAccess;
+    use platform_lib::service_manager::{ServiceManager, ServiceManagerAccess};
+
+    let manager = match ServiceManager::local_computer(None::<&str>, ServiceManagerAccess::CONNECT)
+    {
+        Ok(manager) => manager,
         Err(error) => {
-            notes.push(format!("could not query the Base Filtering Engine: {error}"));
-            return notes;
+            eprintln!(
+                "tono-install: could not open the service manager ({error}); the WFP check decides"
+            );
+            return Ok(());
         }
     };
-    if running {
-        return notes;
+    let access = ServiceAccess::QUERY_STATUS | ServiceAccess::QUERY_CONFIG | ServiceAccess::START;
+    let service = match manager.open_service("BFE", access) {
+        Ok(service) => service,
+        Err(error) => {
+            eprintln!(
+                "tono-install: could not open the Base Filtering Engine ({error}); the WFP check \
+                 decides"
+            );
+            return Ok(());
+        }
+    };
+    bring_bfe_up(&mut ScmBfe {
+        service,
+        deadline: Instant::now() + BFE_START_BUDGET,
+    })
+}
+
+/// Exit code of `--start-registered` when TonoService's registration or installed binary does not
+/// verify: nothing was started and the SCM registration is unchanged, but the repair gate taken
+/// first may already have re-applied the private ACL to `ProgramData\Tono` and its `bin`
+/// directory and created `.repair.lock`. The App runs its full repair on exactly this code, and
+/// keeps its own copy of the value (`START_TARGET_UNVERIFIED_EXIT` in the App's service installer).
+#[cfg(windows)]
+const START_TARGET_UNVERIFIED_EXIT: i32 = 74;
+
+/// The effects of `--start-registered`: the SCM and the repair gate in production, a script in
+/// tests. [`start_registered_with`] owns their order.
+#[cfg(windows)]
+trait StartRegisteredEffects {
+    /// Take the raw repair gate; `Ok(false)` when another lifecycle writer holds it.
+    fn acquire_repair_gate(&mut self) -> Result<bool, Error>;
+    /// No manual installer lease whose holder may still run.
+    fn start_admission(&mut self) -> Result<(), Error>;
+    /// Open TonoService and read its state: true only for Stopped.
+    fn service_stopped(&mut self) -> Result<bool, Error>;
+    /// The registration and the installed binary are what the installer writes.
+    fn target_verifies(&mut self) -> Result<bool, Error>;
+    fn bring_bfe_up(&mut self) -> Result<(), Error>;
+    fn start_service(&mut self) -> Result<(), Error>;
+    fn release_repair_gate(&mut self);
+    fn wait_for_service_ready(&mut self) -> Result<(), Error>;
+}
+
+/// `--start-registered` (BRICK-W5 e): start the registered, stopped TonoService as it is, so the
+/// App's release can reach it. An SCM stop leaves WFP armed, and the full repair is refused by
+/// `manual_gate` while filters exist or the owner still wants its Core.
+///
+/// Order: the raw repair gate (never `enter_repair_gate`, whose `maintenance_allowed` refuses any
+/// lease and any pending attempt; taking the raw gate still prepares the install directory, which
+/// may re-apply its private ACL, before anything is verified), the lease admission, the service
+/// state; only for a Stopped
+/// Service the target verification, BFE and the start; then the gate is released before the
+/// readiness wait, so a recovery executor the starting Service spawns can take it. A Service
+/// that is not Stopped is neither verified nor started. Every early return ends the process,
+/// which closes the gate's handle. Exits: 0 ready, 74 target unverified, 75 gate held, 1
+/// otherwise, with the reason on stderr.
+#[cfg(windows)]
+fn start_registered_with(effects: &mut impl StartRegisteredEffects) -> i32 {
+    match effects.acquire_repair_gate() {
+        Ok(true) => {}
+        Ok(false) => {
+            eprintln!("Service repair is already in progress");
+            return tono_service_protocol::REPAIR_IN_PROGRESS_EXIT_CODE;
+        }
+        Err(error) => {
+            eprintln!("tono-install: could not take the repair gate: {error:#}");
+            return 1;
+        }
+    }
+    if let Err(error) = effects.start_admission() {
+        eprintln!("tono-install: TonoService was not started: {error:#}");
+        return 1;
+    }
+    let stopped = match effects.service_stopped() {
+        Ok(stopped) => stopped,
+        Err(error) => {
+            eprintln!("tono-install: could not read the TonoService state: {error:#}");
+            return 1;
+        }
+    };
+    if stopped {
+        match effects.target_verifies() {
+            Ok(true) => {}
+            Ok(false) => {
+                eprintln!(
+                    "tono-install: the registered TonoService is not what the installer writes; \
+                     nothing was started"
+                );
+                return START_TARGET_UNVERIFIED_EXIT;
+            }
+            Err(error) => {
+                eprintln!(
+                    "tono-install: the registered TonoService could not be verified ({error:#}); \
+                     nothing was started"
+                );
+                return START_TARGET_UNVERIFIED_EXIT;
+            }
+        }
+        if let Err(error) = effects.bring_bfe_up() {
+            eprintln!("tono-install: {error:#}");
+            return 1;
+        }
+        if let Err(error) = effects.start_service() {
+            eprintln!("tono-install: TonoService did not start: {error:#}");
+            return 1;
+        }
+    }
+    effects.release_repair_gate();
+    match effects.wait_for_service_ready() {
+        Ok(()) => 0,
+        Err(error) => {
+            eprintln!("tono-install: {error:#}");
+            1
+        }
+    }
+}
+
+/// Whether SCM's registered command line (ImagePath) for TonoService is exactly the installed
+/// binary, with no argument. A fully quoted value is unquoted and compared; nothing may follow the
+/// closing quote. An unquoted value containing any whitespace fails: SCM may run a shorter prefix
+/// of it (`C:\Program.exe` for `C:\Program Files\...`), so equality would not prove which file
+/// starts. The installer's `create_service` quotes exactly the paths that contain whitespace
+/// (windows-service `shell_escape`), so a real install still verifies. ASCII case-insensitive,
+/// with no canonicalization.
+#[cfg(windows)]
+fn start_target_is_installed_service(registered: &std::ffi::OsStr, installed: &Path) -> bool {
+    let (Some(registered), Some(installed)) = (registered.to_str(), installed.to_str()) else {
+        return false;
+    };
+    let path = match registered.strip_prefix('"') {
+        Some(quoted) => match quoted.strip_suffix('"') {
+            Some(inner) if !inner.contains('"') => inner,
+            _ => return false,
+        },
+        None if registered.contains(char::is_whitespace) => return false,
+        None => registered,
+    };
+    path.eq_ignore_ascii_case(installed)
+}
+
+/// [`StartRegisteredEffects`] against the local SCM. It holds the repair gate and the
+/// TonoService handle between the steps.
+#[cfg(windows)]
+#[derive(Default)]
+struct ScmStartRegistered {
+    gate: Option<tono_service_protocol::ServiceRepairGate>,
+    service: Option<platform_lib::service::Service>,
+}
+
+#[cfg(windows)]
+impl ScmStartRegistered {
+    fn service(&self) -> Result<&platform_lib::service::Service, Error> {
+        self.service.as_ref().context("TonoService was not opened")
+    }
+}
+
+#[cfg(windows)]
+impl StartRegisteredEffects for ScmStartRegistered {
+    fn acquire_repair_gate(&mut self) -> Result<bool, Error> {
+        self.gate = tono_service_protocol::acquire_service_repair_gate()?;
+        Ok(self.gate.is_some())
     }
 
-    // Manual or Disabled is how this survives a reboot and reaches a customer again, so restore
-    // the start type before starting: a Disabled service cannot be started at all.
-    match std::process::Command::new("sc.exe")
-        .args(["config", "BFE", "start=", "auto"])
-        .output()
-    {
-        Ok(output) if !output.status.success() => notes.push(format!(
-            "could not set the Base Filtering Engine to start automatically: sc.exe exited {}",
-            output.status
-        )),
-        Err(error) => notes.push(format!("could not run sc.exe for the Base Filtering Engine: {error}")),
-        Ok(_) => {}
+    fn start_admission(&mut self) -> Result<(), Error> {
+        tono_service_protocol::update_native::start_admission()
     }
-    if let Err(error) = service.start(&Vec::<&std::ffi::OsStr>::new()) {
-        notes.push(format!("could not start the Base Filtering Engine: {error}"));
+
+    fn service_stopped(&mut self) -> Result<bool, Error> {
+        use platform_lib::service::{ServiceAccess, ServiceState};
+        use platform_lib::service_manager::{ServiceManager, ServiceManagerAccess};
+
+        let manager = ServiceManager::local_computer(None::<&str>, ServiceManagerAccess::CONNECT)?;
+        let service = manager.open_service(
+            tono_service_protocol::WINDOWS_SERVICE_NAME,
+            ServiceAccess::QUERY_STATUS | ServiceAccess::QUERY_CONFIG | ServiceAccess::START,
+        )?;
+        let stopped = service.query_status()?.current_state == ServiceState::Stopped;
+        self.service = Some(service);
+        Ok(stopped)
     }
-    notes
+
+    fn target_verifies(&mut self) -> Result<bool, Error> {
+        use platform_lib::service::ServiceStartType;
+
+        let config = self.service()?.query_config()?;
+        let installed = tono_service_protocol::service_paths()
+            .install_dir()
+            .join("tono-service.exe");
+        if !start_target_is_installed_service(config.executable_path.as_os_str(), &installed) {
+            eprintln!(
+                "tono-install: TonoService is registered as {:?}, not {installed:?}",
+                config.executable_path
+            );
+            return Ok(false);
+        }
+        if config.start_type == ServiceStartType::Disabled {
+            eprintln!("tono-install: TonoService is disabled");
+            return Ok(false);
+        }
+        let metadata = std::fs::symlink_metadata(&installed)
+            .with_context(|| format!("failed to inspect {installed:?}"))?;
+        if !metadata.file_type().is_file() {
+            eprintln!("tono-install: {installed:?} is not an ordinary file");
+            return Ok(false);
+        }
+        if sha256(&installed)? != sha256(&bundled_service_binary()?)? {
+            eprintln!("tono-install: {installed:?} differs from the bundled tono-service.exe");
+            return Ok(false);
+        }
+        Ok(true)
+    }
+
+    fn bring_bfe_up(&mut self) -> Result<(), Error> {
+        bring_scm_bfe_up()
+    }
+
+    fn start_service(&mut self) -> Result<(), Error> {
+        Ok(self.service()?.start::<&std::ffi::OsStr>(&[])?)
+    }
+
+    fn release_repair_gate(&mut self) {
+        self.gate = None;
+    }
+
+    fn wait_for_service_ready(&mut self) -> Result<(), Error> {
+        wait_for_service_ready()
+    }
 }
 
 /// install and start the service
@@ -1626,6 +1966,13 @@ fn main() -> anyhow::Result<()> {
     if run_maintenance_if_requested()? {
         return Ok(());
     }
+    if install_mode == WindowsInstallMode::StartRegistered {
+        // Before the replacement candidates, `enter_repair_gate`, `manual_gate`, the digest pin,
+        // staging and any SCM configuration change (BRICK-W5 e). The raw repair gate it takes
+        // still runs `prepare_service_install_directory`, which may re-apply the private ACL to
+        // `ProgramData\Tono` and `bin` before the target is verified; exit 74 does not undo that.
+        std::process::exit(start_registered_with(&mut ScmStartRegistered::default()));
+    }
     let mut replacement_candidates = if install_mode == WindowsInstallMode::ReplaceRuntime {
         let runtime = runtime_replacement_candidate(&std::env::current_exe()?)?;
         let app = app_replacement_candidate(&runtime)?;
@@ -1638,9 +1985,12 @@ fn main() -> anyhow::Result<()> {
     // privileged installer state.
     let _gate = enter_repair_gate()?;
     let source = bundled_service_binary()?;
+    // manual_gate's first check reads WFP, an RPC to BFE. Bring BFE up before it, or a stopped
+    // BFE refuses this repair before it could ever reach the Service's dependency (H22-O-F1).
+    bring_scm_bfe_up()?;
     // Legacy user journals are diagnostics only. This entry has no v1 grant:
     // both runtime replacement and service-only repair require verified Disconnect.
-    tokio::runtime::Runtime::new()?.block_on(tono_service_protocol::update_native::manual_gate())?;
+    shared::block_on_abandoning(tono_service_protocol::update_native::manual_gate())??;
     let install_dir = tono_service_protocol::prepare_service_install_directory()?;
     publish_core_digest_pin(&install_dir)?;
     let target = install_dir.join("tono-service.exe");
@@ -1652,11 +2002,6 @@ fn main() -> anyhow::Result<()> {
         adopt_or_refuse_update_scratch(&target, &path_with_suffix(&target, PUBLISH_SUFFIX))?;
     }
     let staged = stage_service_binary(&source, &target)?;
-
-    // Before the service is created or started, its BFE dependency must be satisfiable.
-    for note in ensure_bfe_ready() {
-        eprintln!("tono-install: {note}");
-    }
 
     let manager_access = ServiceManagerAccess::CONNECT | ServiceManagerAccess::CREATE_SERVICE;
     let service_manager = ServiceManager::local_computer(None::<&str>, manager_access)?;
@@ -1727,9 +2072,13 @@ fn main() -> anyhow::Result<()> {
                     configure_windows_service_recovery(&service)?;
                     service.start(&Vec::<&OsStr>::new())?;
                     // The service is running on either path here — the old binary when the swap
-                    // was deferred — so readiness stays provable, and a build that dies on start
+                    // was deferred — so liveness stays provable, and a build that dies on start
                     // must not pass as a successful "reboot pending" install.
-                    wait_for_service_ready()?;
+                    if publish_outcome == PublishOutcome::RebootRequired {
+                        wait_for_previous_service_liveness()?;
+                    } else {
+                        wait_for_service_ready()?;
+                    }
                     restart_on_failure.disarm();
                     if publish_outcome == PublishOutcome::RebootRequired {
                         println!(
@@ -1908,6 +2257,36 @@ fn configure_windows_service_recovery(
 mod tests {
     use super::*;
 
+    /// A timed-out BFE RPC must let the installer return and release its repair gate even
+    /// while the blocking engine call is still running.
+    #[test]
+    fn installer_gate_runtime_returns_after_a_timed_out_blocking_call() {
+        let (release, hang) = std::sync::mpsc::channel::<()>();
+        let (answer, answered) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let value = super::shared::block_on_abandoning(async move {
+                let (started, running) = tokio::sync::oneshot::channel();
+                let task = tokio::task::spawn_blocking(move || {
+                    let _ = started.send(());
+                    let _ = hang.recv();
+                });
+                running.await.unwrap();
+                tokio::time::timeout(Duration::from_millis(100), task)
+                    .await
+                    .is_err()
+            });
+            let _ = answer.send(value.ok());
+        });
+        let returned = answered.recv_timeout(Duration::from_secs(5));
+        // Lets the abandoned blocking call end, whatever the answer was.
+        let _ = release.send(());
+        assert_eq!(
+            returned.ok().flatten(),
+            Some(true),
+            "the installer runtime waited for an abandoned blocking call"
+        );
+    }
+
     #[test]
     fn missing_launchd_service_skips_bootout() {
         let plan = classify_launchd_service_probe(
@@ -1966,6 +2345,124 @@ mod tests {
         );
     }
 
+    /// BRICK-W5 (e): a TonoService stopped from services.msc left WFP armed, and the release
+    /// path could revive it only through the full repair, which `manual_gate` refuses while
+    /// filters exist. `--start-registered` starts only a stopped Service whose registration and
+    /// binary verify, releases the repair gate before it waits, and reports an unverified target
+    /// as 74 with nothing started.
+    #[cfg(windows)]
+    #[test]
+    fn windows_start_registered_starts_only_a_stopped_verified_service_and_waits_without_the_gate()
+    {
+        struct Scripted<'a> {
+            stopped: bool,
+            verifies: bool,
+            log: &'a std::cell::RefCell<Vec<&'static str>>,
+        }
+        impl StartRegisteredEffects for Scripted<'_> {
+            fn acquire_repair_gate(&mut self) -> Result<bool, Error> {
+                self.log.borrow_mut().push("gate");
+                Ok(true)
+            }
+            fn start_admission(&mut self) -> Result<(), Error> {
+                self.log.borrow_mut().push("admission");
+                Ok(())
+            }
+            fn service_stopped(&mut self) -> Result<bool, Error> {
+                self.log.borrow_mut().push("stopped");
+                Ok(self.stopped)
+            }
+            fn target_verifies(&mut self) -> Result<bool, Error> {
+                self.log.borrow_mut().push("verify");
+                Ok(self.verifies)
+            }
+            fn bring_bfe_up(&mut self) -> Result<(), Error> {
+                self.log.borrow_mut().push("bfe");
+                Ok(())
+            }
+            fn start_service(&mut self) -> Result<(), Error> {
+                self.log.borrow_mut().push("start");
+                Ok(())
+            }
+            fn release_repair_gate(&mut self) {
+                self.log.borrow_mut().push("release");
+            }
+            fn wait_for_service_ready(&mut self) -> Result<(), Error> {
+                self.log.borrow_mut().push("wait");
+                Ok(())
+            }
+        }
+        let log = std::cell::RefCell::new(Vec::new());
+        let stopped_verified = start_registered_with(&mut Scripted {
+            stopped: true,
+            verifies: true,
+            log: &log,
+        });
+        assert_eq!(stopped_verified, 0);
+        assert_eq!(
+            *log.borrow(),
+            ["gate", "admission", "stopped", "verify", "bfe", "start", "release", "wait"]
+        );
+        log.borrow_mut().clear();
+        let running = start_registered_with(&mut Scripted {
+            stopped: false,
+            verifies: true,
+            log: &log,
+        });
+        assert_eq!(running, 0);
+        assert_eq!(
+            *log.borrow(),
+            ["gate", "admission", "stopped", "release", "wait"]
+        );
+        log.borrow_mut().clear();
+        let unverified = start_registered_with(&mut Scripted {
+            stopped: true,
+            verifies: false,
+            log: &log,
+        });
+        assert_eq!(unverified, 74, "the App repairs on exactly 74");
+        assert_eq!(unverified, START_TARGET_UNVERIFIED_EXIT);
+        assert_eq!(*log.borrow(), ["gate", "admission", "stopped", "verify"]);
+    }
+
+    /// BRICK-W5 (e): the start helper starts only the binary the installer registers, with no
+    /// argument after it.
+    #[cfg(windows)]
+    #[test]
+    fn windows_start_registered_target_must_be_the_installed_path() {
+        use std::ffi::{OsStr, OsString};
+
+        assert_eq!(
+            parse_windows_install_mode([OsString::from("--start-registered")]).unwrap(),
+            WindowsInstallMode::StartRegistered
+        );
+        let installed = Path::new(r"C:\ProgramData\Tono\bin\tono-service.exe");
+        assert!(start_target_is_installed_service(
+            OsStr::new(r#""C:\ProgramData\Tono\bin\tono-service.exe""#),
+            installed
+        ));
+        assert!(start_target_is_installed_service(
+            OsStr::new(r"c:\programdata\tono\BIN\tono-service.exe"),
+            installed
+        ));
+        assert!(!start_target_is_installed_service(
+            OsStr::new(r#""C:\ProgramData\Tono\bin\tono-service.exe" --run"#),
+            installed
+        ));
+        assert!(!start_target_is_installed_service(
+            OsStr::new(r"C:\ProgramData\Tono\bin\tono-service.exe --run"),
+            installed
+        ));
+        assert!(!start_target_is_installed_service(
+            OsStr::new(r"C:\Users\Public\tono-service.exe"),
+            installed
+        ));
+        assert!(!start_target_is_installed_service(
+            OsStr::new(r"C:\Program Data\Tono\bin\tono-service.exe"),
+            Path::new(r"C:\Program Data\Tono\bin\tono-service.exe")
+        ));
+    }
+
     #[cfg(windows)]
     struct TransactionTestDirectory(PathBuf);
 
@@ -1992,6 +2489,25 @@ mod tests {
         fn drop(&mut self) {
             let _ = std::fs::remove_dir_all(&self.0);
         }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn installer_retry_keeps_candidates_only_after_a_recovered_file_lock() {
+        let locked = Error::new(std::io::Error::from_raw_os_error(32))
+            .context("failed to publish coordinated executable");
+        assert!(keep_installer_retry_candidates(&locked, true));
+        assert!(!keep_installer_retry_candidates(&locked, false));
+
+        let mapped_image = Error::new(std::io::Error::from_raw_os_error(5));
+        assert!(keep_installer_retry_candidates(&mapped_image, true));
+        let lock_violation = Error::new(std::io::Error::from_raw_os_error(33));
+        assert!(keep_installer_retry_candidates(&lock_violation, true));
+
+        let validation_error = anyhow::anyhow!("published executable failed hash verification");
+        assert!(!keep_installer_retry_candidates(&validation_error, true));
+        let disk_full = Error::new(std::io::Error::from_raw_os_error(112));
+        assert!(!keep_installer_retry_candidates(&disk_full, true));
     }
 
     #[cfg(windows)]

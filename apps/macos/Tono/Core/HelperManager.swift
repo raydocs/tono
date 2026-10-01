@@ -242,16 +242,51 @@ nonisolated struct HelperManager {
         // Recover DNS and stop Mihomo before launchd replaces an authenticated
         // older helper, but deliberately retain any live PF state. Disarming
         // here opened a direct-egress window for the entire administrator
-        // prompt and left the host open if the user cancelled. The replacement
-        // helper restores the persisted PF state at launch (or installs its
-        // emergency block if the older state is no longer readable), and the
-        // connect transaction tightens it with current metadata immediately
-        // after this method returns.
+        // prompt. The replacement helper restores the persisted PF state at
+        // launch (or installs its emergency block if the older state is no
+        // longer readable), and the connect transaction tightens it with
+        // current metadata immediately after this method returns.
+        var coreStoppedForReplacement = false
+        var upgradeSucceeded = false
+        defer {
+            // A cancelled or failed replacement has no Core to carry traffic.
+            // Release through Disconnect's path, without hiding the install error.
+            if shouldReleaseAfterAbandonedUpgrade(
+                coreStopped: coreStoppedForReplacement,
+                succeeded: upgradeSucceeded
+            ) {
+                do {
+                    try KillSwitchService.disarm()
+                    LocalTrafficAudit.shared.recordEvent(
+                        "helper_upgrade_abandoned_released"
+                    )
+                } catch {
+                    // A disarm reply can be lost after PF was released, just
+                    // as on Disconnect; only a confirmed release clears intent.
+                    if KillSwitchService.refreshStatus()
+                        == .confirmed(requiresProtectionRecovery: false) {
+                        KillSwitchService.isArmed = false
+                        LocalTrafficAudit.shared.recordEvent(
+                            "helper_upgrade_abandoned_released",
+                            details: ["disarm_error": error.localizedDescription]
+                        )
+                    } else {
+                        LocalTrafficAudit.shared.recordEvent(
+                            "helper_upgrade_abandoned_release_failed",
+                            details: ["error": error.localizedDescription]
+                        )
+                    }
+                }
+            }
+        }
         if installedVersion != nil {
             do {
                 try prepareAuthenticatedHelperForReplacement(
                     restoreDNS: { _ = try restoreProtectedDNSIfConfigured() },
-                    stopCore: stopCore,
+                    stopCore: {
+                        try stopCore()
+                        coreStoppedForReplacement = true
+                    },
                     killSwitchStatus: killSwitchStatus
                 )
             } catch {
@@ -278,13 +313,14 @@ nonisolated struct HelperManager {
                 mihomoSource: mihomoSource,
                 preparationStartedAt: preparationStartedAt
             ) {
+                upgradeSucceeded = true
                 return
             }
         }
 
         // A caller that did not ask for a repair stops before the prompt
-        // (MAC3-ADD-F1). Nothing above released PF, so it stays as the helper
-        // holds it; Connect and Restore internet own the prompt.
+        // (MAC3-ADD-F1). Connect and Restore internet own the prompt; if Core
+        // was stopped for this upgrade, the deferred cleanup releases PF.
         guard administratorPrompt else {
             LocalTrafficAudit.shared.recordEvent(
                 "helper_administrator_prompt_withheld",
@@ -397,6 +433,7 @@ nonisolated struct HelperManager {
                         ),
                     ]
                 )
+                upgradeSucceeded = true
                 return
             }
             guard Date() < startupDeadline else { break }
@@ -416,6 +453,13 @@ nonisolated struct HelperManager {
             ]
         )
         throw HelperInstallError.installFailed(String(localized: "The authenticated helper did not start."))
+    }
+
+    static func shouldReleaseAfterAbandonedUpgrade(
+        coreStopped: Bool,
+        succeeded: Bool
+    ) -> Bool {
+        coreStopped && !succeeded
     }
 
     private static func durationMilliseconds(since start: Date) -> String {
@@ -498,8 +542,9 @@ nonisolated struct HelperManager {
         /// Turned off under Login Items › Allow in the Background. launchd will
         /// not start it, and no repair from the app works until it is back on.
         case backgroundDisabled
-        /// launchd has no such job, so nothing restored PF after the last
-        /// restart: macOS loads the PF rules at boot but leaves PF disabled.
+        /// launchd has no such job. macOS loads /etc/pf.conf at boot with PF
+        /// disabled. That hook declares an anchor and does not load the rule
+        /// file, so a missing helper does not reinstall a block.
         case notLoaded
         /// Loaded (an unreachable helper is then busy or restarting, and its PF
         /// rules stay in the kernel), or launchd could not say.
@@ -822,8 +867,9 @@ nonisolated struct HelperManager {
         return try requireKillSwitchSuccess(result, operation: "arm")
     }
 
-    static func disarmKillSwitch() throws {
-        let result = try sendRequest(method: "POST", path: "/killswitch/disarm")
+    static func disarmKillSwitch(preserveAIHold: Bool = false) throws {
+        let path = preserveAIHold ? "/killswitch/release" : "/killswitch/disarm"
+        let result = try sendRequest(method: "POST", path: path)
         _ = try requireKillSwitchSuccess(result, operation: "disarm")
     }
 
@@ -890,7 +936,7 @@ nonisolated struct HelperManager {
             // restore may run at launch, on Quit or in update preparation.
             AppProfile.defaults.set(true, forKey: protectedDNSOriginalLostKey)
             LocalTrafficAudit.shared.recordEvent(
-                "protected_dns_original_service_missing",
+                "protected_dns_original_not_restored",
                 details: ["service": envelope.service ?? ""]
             )
         }
@@ -910,7 +956,7 @@ nonisolated struct HelperManager {
 
     private static var protectedDNSOriginalLostNotice: String {
         String(
-            localized: "The network service whose DNS settings Tono saved has been deleted, so those DNS servers could not be put back. DNS is now obtained automatically. If your network needs manual DNS servers, set them again in System Settings > Network."
+            localized: "Tono did not restore the saved DNS settings because the network service was removed or its DNS settings changed. Any newer DNS settings were kept. Check System Settings > Network if DNS needs adjustment."
         )
     }
 
@@ -1144,6 +1190,23 @@ nonisolated struct HelperManager {
         }
     }
 
+    /// Whether a failed `/helper/upgrade` request may still have reached the
+    /// helper. The helper replies before it exits, so a request written whole
+    /// whose reply was lost (empty or invalid response) can leave the upgrade
+    /// under way and keeps the version poll. A socket, connect or send failure
+    /// proves it never arrived — the helper upgrades only after reading the
+    /// full body — so polling there would wait out the 45 s timeout for
+    /// nothing (MAC-HELPER-UPGRADE-TRY-STALL). Unknown errors keep the poll.
+    static func upgradeRequestMayHaveBeenDelivered(_ error: Error) -> Bool {
+        guard let ipcError = error as? HelperIPCError else { return true }
+        switch ipcError {
+        case .socketFailed, .connectFailed, .boundToAnotherUser:
+            return false
+        default:
+            return true
+        }
+    }
+
     private static func attemptSilentUpgrade(
         helperSource: URL,
         mihomoSource: URL,
@@ -1163,11 +1226,22 @@ nonisolated struct HelperManager {
                 "mihomoSource": mihomoSource.path,
             ]
             let body = try JSONSerialization.data(withJSONObject: payload)
-            let response = try? sendRequest(
-                method: "POST",
-                path: "/helper/upgrade",
-                body: body
-            )
+            var response: (status: Int, body: Data)?
+            do {
+                response = try sendRequest(
+                    method: "POST",
+                    path: "/helper/upgrade",
+                    body: body
+                )
+            } catch {
+                guard Self.upgradeRequestMayHaveBeenDelivered(error) else {
+                    LocalTrafficAudit.shared.recordEvent(
+                        "helper_silent_upgrade_failed",
+                        details: ["error": error.localizedDescription]
+                    )
+                    return false
+                }
+            }
             if let response, response.status != 200 {
                 return false
             }

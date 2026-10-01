@@ -82,20 +82,35 @@ else
 fi
 
 # The daemon refuses an ad-hoc signed helper, so an unsigned or ad-hoc embedded
-# copy fails at install time rather than at run time.
-for embedded in Contents/Resources/tono-core-helper Contents/Resources/mihomo; do
+# copy fails at install time rather than at run time. The list is the app
+# target's Embed Executables phase (tests/test_macos_release_gate_core.py).
+for embedded in Contents/Resources/tono-core-helper Contents/Resources/sing-box; do
   path="$app/$embedded"
   if [ ! -f "$path" ]; then
     fail "missing embedded executable: $embedded"
     continue
   fi
-  authority=$(codesign -dv --verbose=2 "$path" 2>&1 |
-    sed -n 's/^Authority=//p' | head -1)
+  details=$(codesign -dv --verbose=2 "$path" 2>&1 || true)
+  authority=$(printf '%s\n' "$details" | sed -n 's/^Authority=//p' | head -1)
   case $authority in
-    "Developer ID Application:"*) pass "$embedded signed by $authority" ;;
-    "") fail "$embedded is unsigned or ad-hoc signed" ;;
-    *) fail "$embedded has unexpected authority: $authority" ;;
+    "Developer ID Application:"*) ;;
+    "") fail "$embedded is unsigned or ad-hoc signed"; continue ;;
+    *) fail "$embedded has unexpected authority: $authority"; continue ;;
   esac
+  # The "Pin sing-box codesign identifier" phase re-signs the core with a fixed
+  # identifier and the hardened runtime; a release core without either is not
+  # the one the build phase ships.
+  if [ "$embedded" = Contents/Resources/sing-box ]; then
+    if ! printf '%s\n' "$details" | grep -qx 'Identifier=sing-box'; then
+      fail "$embedded identifier is not sing-box"
+      continue
+    fi
+    if ! printf '%s\n' "$details" | grep -q "flags=.*runtime"; then
+      fail "$embedded hardened runtime is not enabled"
+      continue
+    fi
+  fi
+  pass "$embedded signed by $authority"
 done
 
 echo

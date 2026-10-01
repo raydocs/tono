@@ -163,6 +163,7 @@ export async function opsRoutes(
   }
   mt = p.match(/^\/api\/v1\/ops\/signup-allowlist\/([^/]+)$/);
   if (mt && m === 'PATCH') {
+    requireCan('customers.write', role);
     return patchOpsSignupAllowlist(req, e, actor, mt);
   }
   if (p === '/api/v1/ops/users/onboard' && m === 'POST') {

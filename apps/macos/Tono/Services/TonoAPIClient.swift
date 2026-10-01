@@ -35,6 +35,39 @@ nonisolated private enum SessionUse: Sendable {
     case decisive(SessionScope)
 }
 
+/// One caller's wait for a shared token renewal (535R-C-F2), settled exactly
+/// once: with the renewal's answer, or with cancellation when the caller is
+/// cancelled first, possibly before the continuation is installed.
+nonisolated private final class RenewalWait: @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<String, Error>?
+    private var outcome: Result<String, Error>?
+
+    func install(_ continuation: CheckedContinuation<String, Error>) {
+        lock.lock()
+        if let outcome {
+            lock.unlock()
+            continuation.resume(with: outcome)
+            return
+        }
+        self.continuation = continuation
+        lock.unlock()
+    }
+
+    func finish(_ result: Result<String, Error>) {
+        lock.lock()
+        guard outcome == nil else {
+            lock.unlock()
+            return
+        }
+        outcome = result
+        let continuation = self.continuation
+        self.continuation = nil
+        lock.unlock()
+        continuation?.resume(with: result)
+    }
+}
+
 actor TonoAPIClient {
     enum APIError: LocalizedError, Equatable {
         case invalidConfiguration, transport(String), unauthorized, forbidden, notFound
@@ -388,6 +421,7 @@ actor TonoAPIClient {
     /// Every authorized path went through the same `if let accessToken` dance,
     /// which used a token right up to its final second and then paid for a 401.
     private func currentAccessToken() async throws -> String {
+        retryRefreshTokenPersistence()
         if let accessToken {
             guard let expiry = accessTokenExpiry else { return accessToken }
             if expiry.timeIntervalSinceNow > Self.accessTokenRenewalWindow {
@@ -442,9 +476,7 @@ actor TonoAPIClient {
                     try await sendLogout(bearer: token, session: .bearer(scope))
                 } catch APIError.unauthorized {
                     guard generation == credentialGeneration else { return }
-                    accessToken = nil
-                    accessTokenExpiry = nil
-                    let renewed = try await refreshAccessToken()
+                    let renewed = try await accessTokenAfterUnauthorized(token)
                     guard generation == credentialGeneration else { return }
                     try await sendLogout(bearer: renewed, session: .decisive(scope))
                 }
@@ -503,17 +535,53 @@ actor TonoAPIClient {
         try unpersistedRefreshToken ?? keychain.string(for: .refreshToken)
     }
 
+    /// Retry after a failed sign-in write must keep the adopted session, even
+    /// if the keychain still cannot acknowledge its refresh token.
+    func hasRestorableSession() throws -> Bool {
+        retryRefreshTokenPersistence()
+        return try currentRefreshToken() != nil
+    }
+
+    private func retryRefreshTokenPersistence() {
+        if let pending = unpersistedRefreshToken,
+           (try? keychain.set(pending, for: .refreshToken)) != nil {
+            unpersistedRefreshToken = nil
+        }
+    }
+
+    /// Exit starts no request, but a shared renewal can outlive its cancelled
+    /// caller. Save its successor before losing the in-memory replacement.
+    /// The app's termination deadline bounds this wait after network cleanup.
+    func finishCredentialPersistence(renewalObserved: (@Sendable () -> Void)? = nil) async {
+        if let pending = refreshTask {
+            renewalObserved?()
+            _ = await pending.task.result
+        }
+        retryRefreshTokenPersistence()
+    }
+
+    /// A delayed 401 must not rotate the session that superseded its bearer.
+    private func accessTokenAfterUnauthorized(_ bearer: String) async throws -> String {
+        if let accessToken, accessToken != bearer { return accessToken }
+        if let refreshTask { return try await Self.awaitRenewal(refreshTask.task) }
+        // Still current, or already dropped with no renewal running: renew as before.
+        accessToken = nil
+        accessTokenExpiry = nil
+        return try await refreshAccessToken()
+    }
+
     private func refreshAccessToken() async throws -> String {
-        if let refreshTask { return try await refreshTask.task.value }
+        if let refreshTask { return try await Self.awaitRenewal(refreshTask.task) }
         let id = UUID()
         let generation = credentialGeneration
         let scope = SessionScope(generation: generation, readScope: offlineGate.readScope)
         let task = Task<String, Error> {
+            // The slot is released when the renewal ends, not when its caller
+            // stops waiting: a second renewal beside it would send the refresh
+            // token this one is rotating (535R-C-F2).
+            defer { if refreshTask?.id == id { refreshTask = nil } }
             try requireCredentialGeneration(generation)
-            if let pending = unpersistedRefreshToken,
-               (try? keychain.set(pending, for: .refreshToken)) != nil {
-                unpersistedRefreshToken = nil
-            }
+            retryRefreshTokenPersistence()
             guard let refresh = try currentRefreshToken() else { throw APIError.unauthorized }
             // The renewal answers for the session: its 401 is the server refusing it.
             let response: TonoTokenResponse = try await publicRequest(
@@ -530,16 +598,34 @@ actor TonoAPIClient {
             } catch {
                 // The server has already rotated; dropping the new token here
                 // would be an irreversible logout. Keep it usable in-memory
-                // and retry persistence on the next refresh.
+                // and retry persistence on ordinary reads and before exit.
                 unpersistedRefreshToken = response.refreshToken
             }
             return response.accessToken
         }
         refreshTask = (id, task)
-        defer {
-            if refreshTask?.id == id { refreshTask = nil }
+        return try await Self.awaitRenewal(task)
+    }
+
+    /// 535R-C-F2: every caller that needs a renewal shares one, and it runs
+    /// to the end even when they stop waiting: the server rotates the refresh
+    /// token on the way, and dropping its answer would sign the user out. A
+    /// cancelled caller stops waiting at once (Restore internet and sign-out
+    /// cancel account work, then wait for it) and leaves the renewal running.
+    nonisolated private static func awaitRenewal(_ renewal: Task<String, Error>) async throws -> String {
+        try Task.checkCancellation()
+        let wait = RenewalWait()
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<String, Error>) in
+                wait.install(continuation)
+                Task {
+                    let result = await renewal.result
+                    wait.finish(result)
+                }
+            }
+        } onCancel: {
+            wait.finish(.failure(CancellationError()))
         }
-        return try await task.value
     }
 
     private func publicRequest<Response: Decodable, Body: Encodable>(
@@ -603,9 +689,7 @@ actor TonoAPIClient {
         catch APIError.unauthorized {
             try requireAuthenticatedRequest(generation)
             try Self.requireCurrent(requestIsCurrent)
-            accessToken = nil
-            accessTokenExpiry = nil
-            let renewed = try await refreshAccessToken()
+            let renewed = try await accessTokenAfterUnauthorized(token)
             try requireAuthenticatedRequest(generation)
             try Self.requireCurrent(requestIsCurrent)
             do {
@@ -638,9 +722,7 @@ actor TonoAPIClient {
         do { _ = try await sendData(path, method: method, body: nil, bearer: token, session: .bearer(scope)) }
         catch APIError.unauthorized {
             try requireAuthenticatedRequest(generation)
-            accessToken = nil
-            accessTokenExpiry = nil
-            let renewed = try await refreshAccessToken()
+            let renewed = try await accessTokenAfterUnauthorized(token)
             try requireAuthenticatedRequest(generation)
             _ = try await sendData(path, method: method, body: nil, bearer: renewed, session: .decisive(scope))
         }
@@ -656,9 +738,7 @@ actor TonoAPIClient {
         do { _ = try await sendData(path, method: method, body: bodyData, bearer: token, session: .bearer(scope)) }
         catch APIError.unauthorized {
             try requireAuthenticatedRequest(generation)
-            accessToken = nil
-            accessTokenExpiry = nil
-            let renewed = try await refreshAccessToken()
+            let renewed = try await accessTokenAfterUnauthorized(token)
             try requireAuthenticatedRequest(generation)
             _ = try await sendData(path, method: method, body: bodyData, bearer: renewed, session: .decisive(scope))
         }
@@ -693,7 +773,8 @@ actor TonoAPIClient {
         bearer: String?,
         session: SessionUse,
         additionalHeaders: [String: String] = [:],
-        requestIsCurrent: (@Sendable () -> Bool)? = nil
+        requestIsCurrent: (@Sendable () -> Bool)? = nil,
+        retryStaleBearer: Bool = true
     ) async throws -> Data {
         let validOrigin: Bool
         #if DEBUG
@@ -768,6 +849,33 @@ actor TonoAPIClient {
             }
             let status = answer.status
             let data = answer.body
+            // A renewal revokes the predecessor SID. Its delayed 401, even on
+            // a decisive replay's transport retry, says nothing about the
+            // replacement session and must not reach the verdict sink.
+            if status == 401, let bearer, bearer != accessToken {
+                switch session {
+                case .noSession:
+                    break
+                case let .bearer(scope), let .decisive(scope):
+                    try requireCredentialGeneration(scope.generation)
+                    try Self.requireCurrent(requestIsCurrent)
+                    if let failure = answer.bodyFailure, Self.isCancellation(failure) {
+                        throw CancellationError()
+                    }
+                    // The first attempt's existing handler replays with the
+                    // newer token, including an entitlement-coded stale 401.
+                    if case .bearer = session { throw APIError.unauthorized }
+                    guard retryStaleBearer else { throw CancellationError() }
+                    let current = try await accessTokenAfterUnauthorized(bearer)
+                    try requireCredentialGeneration(scope.generation)
+                    try Self.requireCurrent(requestIsCurrent)
+                    return try await sendData(
+                        path, method: method, body: body, bearer: current, session: session,
+                        additionalHeaders: additionalHeaders,
+                        requestIsCurrent: requestIsCurrent, retryStaleBearer: false
+                    )
+                }
+            }
             if let failure = answer.bodyFailure {
                 guard !(200..<300).contains(status) else {
                     try await handleTransportFailure(

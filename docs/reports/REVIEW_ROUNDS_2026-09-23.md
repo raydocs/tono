@@ -113,8 +113,8 @@
 - 每个行为一个窄回归（Worker 一个 `it`、Windows 一个 `#[test]`、macOS 一个 XCTest），
   必须在修复前失败；不得为变绿改断言或加测试专用分支。新 seam 的存在性测试要如实写明它的失败方式。
 - D1 schema 变更加新 migration，不改旧 migration。
-- 同 PR 更新 INTERNAL_CHANGELOG（按模板，插在模板代码块之后最前）和 FINDINGS_LEDGER 对应行。
-- 不碰 appcast/latest.json/windows-updates，不部署，不合并自己的 PR。
+- 同 PR 新建一个 `docs/changelog.d/` 条目，新发现写 `docs/findings.d/<ID>.md`，已有总账行就地改状态（2026-09-25 起；INTERNAL_CHANGELOG 已冻结）。
+- 修复 agent 不碰 appcast/latest.json/windows-updates，不部署，不合并自己的 PR；合并、部署与发布由另一方按 [AGENTS.md](../../AGENTS.md) 的条件执行。
 
 ### 4.5 独立 diff 审查
 
@@ -127,8 +127,8 @@
 
 ### 4.6 串行合并
 
-- 一次只合一个；每个 base=main 的 PR 都会在 INTERNAL_CHANGELOG 同一位置插入，
-  合并前 rebase 并把条目放到最新条目之上。叠枝链按顺序合并。
+- 一次只合一个；叠枝链按顺序合并。记录已改为分文件（`docs/changelog.d/`、`docs/findings.d/`），
+  并行 PR 不再在同一位置冲突。
 - 合并前复核该 head 的 CI；记录 pre-merge head、CI run、merge commit 与冲突处理。
 
 ## 5. 本轮教训

@@ -589,7 +589,27 @@ def parse_roster(payload: dict) -> tuple[str, int, list[dict[str, str]], bool]:
             # label, where two devices can overwrite each other and the wrong
             # identity can remain installed.
             raise Refusal("roster entry has an invalid deviceId")
-        roster.append({"userId": user_id, "clientUUID": client_uuid, "deviceId": device_id})
+        parsed = {"userId": user_id, "clientUUID": client_uuid, "deviceId": device_id}
+        if "sourceUsageBytes" in entry:
+            watermark = entry.get("sourceUsageBytes")
+            if (
+                isinstance(watermark, bool)
+                or not isinstance(watermark, int)
+                or not 0 <= watermark <= MAX_SAFE_INTEGER
+            ):
+                raise Refusal("roster entry has an invalid sourceUsageBytes")
+            parsed["sourceUsageBytes"] = watermark
+        roster.append(parsed)
+    if roster and any("sourceUsageBytes" in entry for entry in roster):
+        if any("sourceUsageBytes" not in entry for entry in roster):
+            raise Refusal("roster sourceUsageBytes is present on only some identities")
+        by_user: dict[str, int] = {}
+        for entry in roster:
+            previous = by_user.get(entry["userId"])
+            watermark = entry["sourceUsageBytes"]
+            if previous is not None and previous != watermark:
+                raise Refusal("roster sourceUsageBytes disagrees for one account")
+            by_user[entry["userId"]] = watermark
     if len({entry["clientUUID"] for entry in roster}) != len(roster):
         raise Refusal("roster repeats an identity, which would merge two accounts' counters")
     return node_id, observed_at, roster, retire_shared_legacy
@@ -643,9 +663,21 @@ def acknowledge_metering(base: str, token: str, observed_at: int) -> None:
         raise Refusal(f"metering ack failed: {error}") from error
 
 
+# Present only on the dict returned for a state file that does not exist yet.
+# Every load site removes it before the first save. A file that actually
+# contains the key is an older agent writing an unknown field, not evidence
+# that the ledger was missing: only the absent-file branch sets it.
+_LEDGER_MISSING = "_ledgerMissing"
+
+
 def load_state(path: Path) -> dict:
     if not path.exists():
-        return {"totals": {}, "counterBaseline": {}, "pendingReports": []}
+        return {
+            "totals": {},
+            "counterBaseline": {},
+            "pendingReports": [],
+            _LEDGER_MISSING: True,
+        }
     with path.open("r", encoding="utf-8") as handle:
         state = json.load(handle)
     # Valid JSON that is not an object ([] or null) must be a refusal like any
@@ -675,6 +707,11 @@ def load_state(path: Path) -> dict:
     return state
 
 
+def take_ledger_missing(state: dict) -> bool:
+    """Whether this process invented the ledger because the file was absent."""
+    return bool(state.pop(_LEDGER_MISSING, False))
+
+
 def save_state(path: Path, state: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix(".new")
@@ -685,6 +722,40 @@ def save_state(path: Path, state: dict) -> None:
     # lifetime totals truncated, and truncated totals bill nobody for what they
     # already used.
     temporary.replace(path)
+
+
+def attach_installed(error: Refusal, installed: set[str] | None) -> Refusal:
+    """Keep a known label set on a refusal that would otherwise drop it."""
+    if isinstance(installed, set):
+        error.installed = installed
+    return error
+
+
+def refusal_installed(error: BaseException) -> set[str] | None:
+    installed = getattr(error, "installed", None)
+    return installed if isinstance(installed, set) else None
+
+
+def persist_installed_inventory(path: Path, state: dict | None,
+                                installed: set[str] | None) -> None:
+    """Save clients this round already added or removed, and nothing else.
+
+    A refusal after those mutations must not acknowledge the roster and must
+    not advance usage totals. Without the label, a later round that cannot
+    list the inbound has nothing to remove when the roster drops that client.
+    None is not written: an empty list is a real inventory, and None means
+    this round could not say what the inbound holds.
+    """
+    if state is None or not isinstance(installed, set):
+        return
+    labels = sorted(
+        label for label in installed
+        if isinstance(label, str)
+        and (label == LEGACY_CLIENT_EMAIL or label.startswith(CLIENT_LABEL_PREFIX))
+    )
+    if state.get("installedClients") == labels:
+        return
+    save_state(path, {**state, "installedClients": labels})
 
 
 def roster_cache_path(path: Path) -> Path:
@@ -1006,15 +1077,26 @@ def reconcile(binary: Path, commands: dict[str, str], address: str, tag: str,
     removed = 0
     failures: list[str] = []
     if retire_shared_legacy and listed is None:
-        result = remove_inbound_user(
-            binary, commands["remove_user"], address, tag, LEGACY_CLIENT_EMAIL,
-        )
-        if not removal_succeeded(result, LEGACY_CLIENT_EMAIL, commands["remove_user"]):
-            # Like every other removal: reported with the rest, never a reason
-            # to skip the revocations that follow.
-            failures.append(f"removing {LEGACY_CLIENT_EMAIL} failed: {api_error(result)}")
-        if recorded is not None:
-            recorded = recorded - {LEGACY_CLIENT_EMAIL}
+        try:
+            result = remove_inbound_user(
+                binary, commands["remove_user"], address, tag, LEGACY_CLIENT_EMAIL,
+            )
+        except (OSError, subprocess.TimeoutExpired) as error:
+            failures.append(f"removing {LEGACY_CLIENT_EMAIL} failed: {type(error).__name__}")
+        else:
+            if not removal_succeeded(result, LEGACY_CLIENT_EMAIL, commands["remove_user"]):
+                # Like every other removal: reported with the rest, never a reason
+                # to skip the revocations that follow.
+                failures.append(f"removing {LEGACY_CLIENT_EMAIL} failed: {api_error(result)}")
+            else:
+                if result.returncode == 0 and (
+                    commands["remove_user"] != "rmu"
+                    or _total_at_least_one(_output_lines(result), "Removed")
+                ):
+                    # An already-absent client is not counted as a removal.
+                    removed += 1
+                if recorded is not None:
+                    recorded = recorded - {LEGACY_CLIENT_EMAIL}
     wanted = {
         client_label(entry["userId"], entry.get("deviceId"), entry["clientUUID"]): entry["clientUUID"]
         for entry in roster
@@ -1028,7 +1110,8 @@ def reconcile(binary: Path, commands: dict[str, str], address: str, tag: str,
     if not wanted and listed is None and recorded is None:
         if failures:
             raise Refusal("; ".join(failures))
-        return 0, 0, None
+        # A confirmed shared-legacy removal above still counts.
+        return 0, removed, None
     installed = listed if listed is not None else recorded
     known_installed = None if installed is None else {
         label for label in installed
@@ -1046,7 +1129,11 @@ def reconcile(binary: Path, commands: dict[str, str], address: str, tag: str,
                     continue
             elif not label.startswith(CLIENT_LABEL_PREFIX):
                 continue
-            result = remove_inbound_user(binary, commands["remove_user"], address, tag, label)
+            try:
+                result = remove_inbound_user(binary, commands["remove_user"], address, tag, label)
+            except (OSError, subprocess.TimeoutExpired) as error:
+                failures.append(f"removing {label} failed: {type(error).__name__}")
+                continue
             if not removal_succeeded(result, label, commands["remove_user"]):
                 # One failure must not leave every later revocation in place.
                 failures.append(f"removing {label} failed: {api_error(result)}")
@@ -1063,9 +1150,17 @@ def reconcile(binary: Path, commands: dict[str, str], address: str, tag: str,
     for label, client_uuid in sorted(wanted.items()):
         if listed is not None and label in listed:
             continue
-        result = add_inbound_user(
-            binary, commands["add_user"], address, tag, label, client_uuid,
-        )
+        try:
+            result = add_inbound_user(
+                binary, commands["add_user"], address, tag, label, client_uuid,
+            )
+        except (OSError, subprocess.TimeoutExpired) as error:
+            # A timed-out RPC may already have installed the roster-issued label.
+            # Remember it for later removal without claiming this round converged.
+            if known_installed is not None:
+                known_installed.add(label)
+            failures.append(f"adding {label} failed: {type(error).__name__}")
+            continue
         # Already-present is success, not failure: two agents on one timer, or a
         # retry after a lost response, must not turn into an error loop. It is
         # not an addition either, or every round would report the whole roster.
@@ -1085,7 +1180,10 @@ def reconcile(binary: Path, commands: dict[str, str], address: str, tag: str,
         if known_installed is not None:
             known_installed.add(label)
     if failures:
-        raise Refusal("; ".join(failures))
+        # Successful adds and removals already changed the inbound. The set has
+        # to leave with the error, or the caller keeps the previous inventory
+        # and a later unlistable round cannot revoke the client just installed.
+        raise attach_installed(Refusal("; ".join(failures)), known_installed)
     return added, removed, known_installed
 
 
@@ -1113,10 +1211,11 @@ def lifetime_totals(state: dict, counters: dict[str, int], *,
         totals[label] = total
         baseline[label] = observed
     # Accounts absent from this reading keep whatever they had: removal from the
-    # roster must not roll a total backwards.
+    # roster must not roll a total backwards. A restart resets even an absent
+    # account's baseline, or its later first reading would forgive old bytes.
     for label, carried in state["totals"].items():
         totals.setdefault(label, int(carried))
-        baseline.setdefault(label, int(state["counterBaseline"].get(label, 0)))
+        baseline.setdefault(label, 0 if restarted else int(state["counterBaseline"].get(label, 0)))
     state["counterBaseline"] = baseline
     return totals
 
@@ -1135,6 +1234,58 @@ def aggregate_user_totals(totals: dict[str, int]) -> dict[str, int]:
             continue
         user_totals[user_id] = user_totals.get(user_id, 0) + int(total)
     return user_totals
+
+
+def source_watermarks(roster: list[dict]) -> dict[str, int] | None:
+    """Per-account server watermark from a parsed roster, or None if it has none.
+
+    An empty roster has nothing to bill and is a known empty map. A roster that
+    predates `sourceUsageBytes` is None: the agent must not treat a raw counter
+    as a fresh lifetime while it cannot see what the server already counted.
+    """
+    if not roster:
+        return {}
+    if any("sourceUsageBytes" not in entry for entry in roster):
+        return None
+    return {entry["userId"]: int(entry["sourceUsageBytes"]) for entry in roster}
+
+
+def adopt_source_watermarks(
+    label_totals: dict[str, int],
+    watermarks: dict[str, int] | None,
+    *,
+    ledger_missing: bool,
+) -> dict[str, int]:
+    """Stop a lost local ledger from being posted as a fresh lifetime.
+
+    `lifetime_totals` has already folded this reading and pointed each baseline
+    at the current raw counter. A missing state file has no carried total, so
+    that fold is the raw counter itself. The control plane adds a reported
+    total that is below its watermark on top of the watermark. Posting the raw
+    counter therefore bills it twice.
+
+    When the roster names a higher watermark, one of the account's labels keeps
+    that watermark and the others stay at zero. The baselines stay on the raw
+    reading, so the next round adds only bytes measured after this one. When
+    the roster does not name watermarks, a missing ledger publishes nothing:
+    the baselines still advance, and a later roster that does name the
+    watermark can adopt it before any of those bytes are reported.
+    """
+    if watermarks is None:
+        if ledger_missing:
+            return {label: 0 for label in label_totals}
+        return label_totals
+    totals = dict(label_totals)
+    user_totals = aggregate_user_totals(totals)
+    for user_id, watermark in watermarks.items():
+        if watermark <= user_totals.get(user_id, 0):
+            continue
+        labels = sorted(label for label in totals if attributed_user(label) == user_id)
+        if not labels:
+            continue
+        for index, label in enumerate(labels):
+            totals[label] = watermark if index == 0 else 0
+    return totals
 
 
 def merge_reports(queued: list, fresh: list[dict]) -> list[dict]:
@@ -1270,11 +1421,22 @@ def reconcile_and_read_stable(
                 retire_shared_legacy=retire_shared_legacy,
             )
         if "stats_query" not in commands:
-            raise Refusal(
-                "clients were reconciled, but this xray offers no stats command "
-                "(tried statsquery, stats); usage cannot be metered"
+            raise attach_installed(
+                Refusal(
+                    "clients were reconciled, but this xray offers no stats command "
+                    "(tried statsquery, stats); usage cannot be metered"
+                ),
+                installed,
             )
-        counters = read_counters(binary, commands["stats_query"], address)
+        try:
+            counters = read_counters(binary, commands["stats_query"], address)
+        except (Refusal, OSError, subprocess.TimeoutExpired) as error:
+            if isinstance(error, Refusal):
+                attach_installed(error, installed)
+                raise
+            raise attach_installed(
+                Refusal(f"reading counters failed: {type(error).__name__}"), installed,
+            ) from error
         marker_after = xray_start_marker(binary)
         if marker_before and marker_after and marker_before != marker_after:
             if attempt == 0:
@@ -1339,7 +1501,7 @@ def persist_shared_legacy_retirement(binary: Path, config: Path) -> bool:
             os.fsync(directory_fd)
         finally:
             os.close(directory_fd)
-    except OSError as error:
+    except (OSError, subprocess.TimeoutExpired) as error:
         raise Refusal(f"cannot persist {LEGACY_CLIENT_EMAIL} retirement to {config}: {error}") from error
     finally:
         if temporary is not None:
@@ -1460,7 +1622,8 @@ def run_hy2_roster_once() -> None:
 
 
 def keep_usage_locally(path: Path, state: dict, installed: set[str] | None,
-                       counters: dict[str, int], settled_marker: str | None) -> None:
+                       counters: dict[str, int], settled_marker: str | None,
+                       *, ledger_missing: bool = False) -> None:
     """Fold one counter reading into the durable totals without reporting it.
 
     For rounds that must not report or acknowledge: the growth waits in the
@@ -1482,6 +1645,11 @@ def keep_usage_locally(path: Path, state: dict, installed: set[str] | None,
         # round would treat the growth folded here as already reported.
         state["userTotals"] = aggregate_user_totals(state["totals"])
     totals = lifetime_totals(state, counters, restarted=restarted)
+    # No roster clock and no watermark during an outage. A missing file must
+    # not become a lifetime equal to the raw counter; the next round that
+    # reaches the control plane adopts the watermark or reports only growth.
+    if ledger_missing:
+        totals = {label: 0 for label in totals}
     state["totals"] = {label: int(value) for label, value in totals.items()}
     if settled_marker:
         state["startMarker"] = settled_marker
@@ -1514,22 +1682,29 @@ def run_outage_round(path: Path, configured: str, binary: Path,
         state_error: Exception | None = None
     except (Refusal, ValueError, OSError) as error:
         state, state_error = None, error
+    ledger_missing = take_ledger_missing(state) if state is not None else False
     try:
         roster, server_retire, age = load_roster_cache(roster_cache_path(path), configured)
     except Refusal as refusal:
         roster, server_retire, age, unusable = None, False, 0, refusal
     retire_shared_legacy = server_retire if override is None else override
     remembered = state.get("installedClients") if state else None
-    added, removed, installed, counters, settled_marker = reconcile_and_read_stable(
-        binary, commands, address, tag, roster,
-        set(remembered) if isinstance(remembered, list) else None,
-        retire_shared_legacy=retire_shared_legacy,
-    )
+    try:
+        added, removed, installed, counters, settled_marker = reconcile_and_read_stable(
+            binary, commands, address, tag, roster,
+            set(remembered) if isinstance(remembered, list) else None,
+            retire_shared_legacy=retire_shared_legacy,
+        )
+    except Refusal as error:
+        persist_installed_inventory(path, state, refusal_installed(error))
+        raise
     if state is None:
         raise Refusal(
             f"control plane unreachable ({failure}); the state file is unusable: {state_error}"
         ) from failure
-    keep_usage_locally(path, state, installed, counters, settled_marker)
+    keep_usage_locally(
+        path, state, installed, counters, settled_marker, ledger_missing=ledger_missing,
+    )
     if roster is None:
         raise Refusal(
             f"control plane unreachable ({failure}) and {unusable}; restored no clients."
@@ -1572,6 +1747,7 @@ def run_once(path: Path) -> None:
             state = load_state(path)
         except (Refusal, ValueError, OSError):
             state = None
+        ledger_missing = take_ledger_missing(state) if state is not None else False
         remembered = state.get("installedClients") if state else None
         withdrawal_error: Refusal | None = None
         try:
@@ -1596,18 +1772,27 @@ def run_once(path: Path) -> None:
                 _, _, _, counters, settled_marker = reconcile_and_read_stable(
                     binary, commands, address, tag, None, None,
                 )
-                keep_usage_locally(path, state, None, counters, settled_marker)
+                keep_usage_locally(
+                    path, state, None, counters, settled_marker, ledger_missing=ledger_missing,
+                )
             except Exception as error:  # noqa: BLE001 - best effort after withdrawal
                 metering_note = f"; usage since the last round is not kept: {error}"
+        # The withdrawal also pulls shared-legacy from the running Xray, and
+        # only a restart reloads it from the static config: re-enabling a node
+        # whose Xray kept running leaves it removed.
+        procedure = ("; stop tono-xray now and start it again only when the node is re-enabled"
+                     " (the restart restores shared-legacy)")
         if withdrawal_error is not None:
-            raise Refusal(f"{withdrawal_error}{cache_note}{metering_note}") from withdrawal_error
+            raise Refusal(
+                f"{withdrawal_error}{procedure}{cache_note}{metering_note}"
+            ) from withdrawal_error
         # Never a success: the node is out of service and an operator should
         # stop tono-xray. Usage and acknowledgements are not sent.
         raise Refusal(
             f"the control plane reports this exit node disabled; removed {removed} client(s)"
             " and emptied hy2"
-            + ("" if remaining is not None else
-               "; the client inventory is unknown, so stop tono-xray on this node")
+            + ("" if remaining is not None else "; the client inventory is unknown")
+            + procedure
             + cache_note
             + metering_note
         )
@@ -1637,6 +1822,7 @@ def run_once(path: Path) -> None:
         state_error: Exception | None = None
     except (Refusal, ValueError, OSError) as error:
         state, state_error = None, error
+    ledger_missing = take_ledger_missing(state) if state is not None else False
     remembered = state.get("installedClients") if state else None
     # An explicit environment value wins in both directions so an operator can
     # stop an automatic retirement. An unset value follows the control plane.
@@ -1660,6 +1846,7 @@ def run_once(path: Path) -> None:
             retire_shared_legacy=retire_shared_legacy,
         )
     except Refusal as error:
+        persist_installed_inventory(path, state, refusal_installed(error))
         if hy2_error is None:
             raise
         raise Refusal(f"{hy2_error}; {error}") from error
@@ -1680,18 +1867,28 @@ def run_once(path: Path) -> None:
         # node as converged and nothing is reported or acknowledged.
         if state is None:
             raise Refusal(f"{hy2_error}; the state file is unusable: {state_error}")
+        inventory_base = dict(state)
         try:
             keep_usage_locally(path, state, installed, counters, settled_marker)
         except (Refusal, OSError) as error:
+            # source_id can refuse before keep_usage_locally writes. The clients
+            # already reconciled still have to be remembered.
+            persist_installed_inventory(path, inventory_base, installed)
             raise Refusal(f"{hy2_error}; usage not kept: {error}") from error
         raise hy2_error
     if cache_error:
         # An older saved roster is still on disk and may name an account this
         # roster revoked. Never report the round as complete while it is.
+        persist_installed_inventory(path, state, installed)
         raise Refusal(cache_error)
     if state is None:
         raise Refusal(f"clients were reconciled, but the state file is unusable: {state_error}")
-    source = source_id(state)
+    durable_state = dict(state)
+    try:
+        source = source_id(state)
+    except Refusal:
+        persist_installed_inventory(path, durable_state, installed)
+        raise
     for report in state["pendingReports"]:
         pending_at = report.get("observedAt")
         if (
@@ -1699,12 +1896,14 @@ def run_once(path: Path) -> None:
             or isinstance(pending_at, bool)
             or not 0 <= pending_at <= MAX_SAFE_INTEGER
         ):
+            persist_installed_inventory(path, durable_state, installed)
             raise Refusal("a queued usage report has an invalid observedAt")
         if pending_at > observed_at + 300:
             # A 400 is normally isolated and dropped so one bad account cannot
             # wedge the queue. This report is locally known to be outside the
             # server window, though, so retain it until the server clock catches
             # up instead of silently losing the last growth for an idle account.
+            persist_installed_inventory(path, durable_state, installed)
             raise Refusal("queued usage is more than five minutes ahead of the roster clock")
     if installed is None:
         # Additions can be attempted safely without a live listing, but they do
@@ -1713,8 +1912,12 @@ def run_once(path: Path) -> None:
         raise Refusal(
             "the live client inventory is unavailable and no durable inventory can prove complete reconciliation"
         )
+    # Keep the reconciled inventory even if the ACK fails, or a newly installed
+    # client revoked before the next poll would never be a removal candidate.
+    state["installedClients"] = sorted(installed)
+    save_state(path, {**durable_state, "installedClients": state["installedClients"]})
     # Only a complete reconciliation is readiness evidence. Do this before any
-    # state save so a failed acknowledgement leaves the durable state intact and
+    # usage state save so a failed acknowledgement leaves that state intact and
     # the whole roster can be retried next round.
     acknowledge_roster(base, token, observed_at)
 
@@ -1728,8 +1931,6 @@ def run_once(path: Path) -> None:
         replayed, discarded = deliver_queue(base, token, path, state)
         print(f"replayed {replayed} queued report(s), dropped {discarded}")
 
-    if installed is not None:
-        state["installedClients"] = sorted(installed)
     recorded_marker = state.get("startMarker")
     restarted = bool(
         settled_marker
@@ -1742,7 +1943,11 @@ def run_once(path: Path) -> None:
         + (", after an xray restart" if restarted else "")
     )
 
-    totals = lifetime_totals(state, counters, restarted=restarted)
+    totals = adopt_source_watermarks(
+        lifetime_totals(state, counters, restarted=restarted),
+        source_watermarks(roster),
+        ledger_missing=ledger_missing,
+    )
     current_user_totals = aggregate_user_totals(totals)
     previous_user_totals = state.get("userTotals")
     if not isinstance(previous_user_totals, dict):
