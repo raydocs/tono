@@ -804,8 +804,10 @@ extension KillSwitchManager {
         }
         // The on-disk hook is an anchor declaration. Older files also have
         // `load anchor from`; both still name this anchor inside the marker.
-        // A release has already written the placeholder rule file, so a
-        // reload cannot install a block from either shape.
+        // The reload runs only after the release wrote the placeholder rule
+        // file — `releaseSequence` skips this restore when that write failed,
+        // because a legacy `load anchor from` would load the just-flushed
+        // block rules straight back from the file it could not clear.
         guard lines.contains(killSwitchBeginMarker),
               lines.contains("anchor \"\(killSwitchAnchor)\"") else {
             return kept("The main PF configuration does not attach Tono's anchor.")

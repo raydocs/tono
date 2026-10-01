@@ -476,7 +476,7 @@ export async function queryAgentMetrics(
   if (span > ROLLUP_5M_RETENTION_SECONDS) resolutionSeconds = 3600;
   else if (span > SAMPLE_RETENTION_SECONDS) resolutionSeconds = 300;
 
-  const series: Record<string, MetricPoint[]> = {};
+  const series: Record<string, MetricPoint[]> = Object.create(null);
   const push = (name: string, row: Row) => {
     const point: MetricPoint = { t: Number(row.t) };
     for (const field of requested) point[field] = finite(row[field]);

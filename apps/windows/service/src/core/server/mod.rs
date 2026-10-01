@@ -988,6 +988,7 @@ async fn release_kill_switch_for_platform(_apply_narrow: bool) -> Result<HttpRes
                 endpoints: Vec::new(),
                 direct_endpoint_digest: String::new(),
                 last_error: None,
+                reconnect_after_release: false,
             })
         }
         Err(error) => service_unavailable(format!("Kill switch release failed: {error:#}")),
