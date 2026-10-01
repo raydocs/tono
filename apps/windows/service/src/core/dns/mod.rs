@@ -548,9 +548,19 @@ fn parse_name_server_list(value: &str) -> Vec<String> {
 /// (`engine::apply_snapshot`), which is what the restore proof compares.
 #[cfg_attr(any(not(windows), feature = "test"), allow(dead_code))]
 fn restored_family_servers(profile: Option<&str>, base: Option<&str>) -> Option<Vec<String>> {
-    let profile = profile.map(parse_name_server_list).unwrap_or_default();
+    // Windows also accepts space-separated servers, used by mobile broadband drivers.
+    // Normalize at the restore boundary; ownership/protection predicates keep their contract.
+    let parse_servers = |value: &str| {
+        value
+            .split(|separator: char| separator == ',' || separator.is_ascii_whitespace())
+            .map(str::trim)
+            .filter(|server| !server.is_empty())
+            .map(ToOwned::to_owned)
+            .collect::<Vec<_>>()
+    };
+    let profile = profile.map(parse_servers).unwrap_or_default();
     let effective = if profile.is_empty() {
-        base.map(parse_name_server_list).unwrap_or_default()
+        base.map(parse_servers).unwrap_or_default()
     } else {
         profile
     };
