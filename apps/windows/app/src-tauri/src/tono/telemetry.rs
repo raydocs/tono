@@ -25,6 +25,7 @@ use crate::{
     process::AsyncHandler,
     tono::{
         audit::{AuditEvent, FailureReportScope, redact},
+        diagnostics::scrub_text_with,
         state::TonoState,
     },
 };
@@ -203,7 +204,8 @@ pub(crate) fn spawn_connect_failure_report(
         .to_string();
     // Free text stays behind the explicit timeline opt-in.
     let error = if scope == FailureReportScope::Full {
-        let clipped: String = redact(error).chars().take(200).collect();
+        // Raw dial errors carry the exit address; scrub like the support report.
+        let clipped: String = scrub_text_with(error, &[]).chars().take(200).collect();
         (!clipped.is_empty()).then_some(clipped)
     } else {
         None
@@ -543,6 +545,14 @@ fn map_event(value: &Value, ts: i64, kind: &str) -> Option<TelemetryEvent> {
             .map(redact)
             .filter(|s| !s.is_empty())
     };
+    // Free text from raw errors and probes: also strip addresses and UUIDs.
+    let text_field = |key: &str| -> Option<String> {
+        value
+            .get(key)
+            .and_then(Value::as_str)
+            .map(|text| scrub_text_with(text, &[]))
+            .filter(|s| !s.is_empty())
+    };
     let i64_field = |key: &str| -> Option<i64> {
         value.get(key).and_then(|v| {
             v.as_i64()
@@ -556,13 +566,13 @@ fn map_event(value: &Value, ts: i64, kind: &str) -> Option<TelemetryEvent> {
         ts,
         kind: kind.to_string(),
         stage: str_field("stage"),
-        error: str_field("error"),
+        error: text_field("error"),
         node: str_field("node"),
         action: str_field("action"),
-        reason: str_field("reason"),
-        probe: str_field("probe"),
-        from: str_field("from"),
-        to: str_field("to"),
+        reason: text_field("reason"),
+        probe: text_field("probe"),
+        from: text_field("from"),
+        to: text_field("to"),
         mode: str_field("mode"),
         reference: str_field("reference"),
         outcome: str_field("outcome"),
@@ -767,6 +777,22 @@ mod tests {
         assert_eq!(events[0].code.as_deref(), Some("TONO_NODE_OR_CORE_UNREACHABLE"));
         assert_eq!(events[0].node.as_deref(), Some("Tokyo · Sakura"));
         assert_eq!(events[0].transport.as_deref(), Some("tcp"));
+    }
+
+    #[test]
+    fn timeline_free_text_drops_exit_addresses_and_uuids() {
+        let value = serde_json::json!({
+            "error": "dial 203.0.113.7:443: i/o timeout",
+            "reason": "node 1b4e28ba-2fa1-11d2-883f-0016d3cca427 gone",
+            "probe": "tcp 198.51.100.4:443", "from": "Tokyo · Sakura", "to": "192.0.2.9"
+        });
+        let event = map_event(&value, 100, "connectFail").unwrap();
+        let json = serde_json::to_string(&event).unwrap();
+        for private in ["203.0.113.7", "1b4e28ba", "198.51.100.4", "192.0.2.9"] {
+            assert!(!json.contains(private), "{private} leaked: {json}");
+        }
+        assert_eq!(event.error.as_deref(), Some("dial <ip>:443: i/o timeout"));
+        assert_eq!(event.from.as_deref(), Some("Tokyo · Sakura"));
     }
 
     #[test]
