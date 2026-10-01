@@ -1,19 +1,10 @@
-# R4-WinAppDeep: Codex (GPT-6.1 Sol) findings
+Windows app lifecycle audit — GPT-6.1 Sol (Codex CLI)
 
-Generated 2026-10-01 00:54 MT from the run's findings.tsv / prs.tsv.
+Report finalized 2026-10-01 06:37 UTC. Four fix PRs are pushed; three merged with all required hosted CI passing. #1107 remains open with merge-commit auto-merge enabled because its old checkout contains the Windows-reserved aux.sh path (known #1100). Both app-rust and Service jobs fail at git checkout, before native tests. The separate main fix removed that path; this branch was not resynchronized solely to rerun CI, per operator instructions.
 
-## PRs
+46 hypotheses: 4 fixed in PRs, 2 real-unfixed, 14 duplicates, 26 false positives. Source line references are audited pre-fix baselines unless indicated otherwise. False-positive rows include unsupported hypotheses rejected for lack of a realistic trigger.
 
-| PR | Branch | Labels | Auto-merge requested | Title |
-|---|---|---|---|---|
-| 1107 | hunt/sol-r4wapp-stable-installation-id | - | yes | fix(windows): require a durable installation identity before sign-in |
-| 1111 | hunt/sol-r4wapp-quit-resync-generation | needs-hardware | yes | fix(windows): keep cancelled-Quit resync within its connection generation |
-| 1116 | hunt/sol-r4wapp-direct-skip-generation | needs-hardware | yes | fix(windows): keep stale DIRECT discovery out of successor state |
-| 1128 | hunt/sol-r4wapp-tunnel-server-response | - | yes | fix(windows): preserve API server errors received through the tunnel |
-
-## Hypotheses
-
-| ID | Area | Sev | Location | Description | Verdict |
+| ID | Area | Severity | File:line | One-line description | Verdict |
 |---|---|---|---|---|---|
 | WIN-INSTALLATION-ID-DURABILITY | Windows account | P1 | account.rs:86-100 (baseline) | Unknown or undurable installation identity can enroll a phantom device and evict another device | real-fixed #1107; auto-merge enabled, native CI blocked before tests by known checkout issue #1100 |
 | WIN-QUIT-STALE-RESYNC | Windows quit/update | P2 | commands/quit.rs:427 | Cancelled-quit Service read can reset a successor connection without a generation fence | real-fixed #1111; merged, all hosted CI passed, needs-hardware |
@@ -61,3 +52,25 @@ Generated 2026-10-01 00:54 MT from the run's findings.tsv / prs.tsv.
 | R4WAPP-VAULT-LOCK-CYCLE | Windows credentials | — | credentials.rs; offline_grant.rs | Vault and product identity/file locks deadlock on account switching | false-positive: file-lock holders do not await product/client identity locks |
 | WIN-LATE-TIMEOUT-AI-HOLD | Windows connection cleanup | P2 | connection/cleanup.rs:45-56,143-144 | Automatic timeout followed by late successful StartClash compensation removes the AI floor | real-unfixed #1134; native sleep ordering and release-cause qualification needed |
 | R4WAPP-VAULT-QUEUE-ATOMICITY | Windows credentials | — | credentials.rs:780-786 | A full persistence queue changes memory to an unpersisted replacement token | false-positive: mutate admits the queued mutation before committing memory |
+
+PRs and status:
+
+| PR | Branch | State / checks | Labels | Merge-commit auto-merge |
+|---|---|---|---|---|
+| [#1107](https://github.com/raydocs/tono/pull/1107) | hunt/sol-r4wapp-stable-installation-id | Open; core/frontend passed; native checkout blocked by #1100 before tests | None | Enabled |
+| [#1111](https://github.com/raydocs/tono/pull/1111) | hunt/sol-r4wapp-quit-resync-generation | Merged; required hosted CI passed | needs-hardware | Enabled before merge |
+| [#1116](https://github.com/raydocs/tono/pull/1116) | hunt/sol-r4wapp-direct-skip-generation | Merged; required hosted CI passed | needs-hardware | Enabled before merge |
+| [#1128](https://github.com/raydocs/tono/pull/1128) | hunt/sol-r4wapp-tunnel-server-response | Merged; required hosted CI passed | None | Enabled before merge |
+
+Each fix includes its finding and changelog fragments plus a regression that failed before and passed after the fix. Local Linux checks used exact extracted production functions for identity (3 regressions), Quit (1, real FSM), and DIRECT skip (1); the transport harness imported the complete production module with real CONNECT/TLS and versions aligned to the app lockfile (1 regression). Narrow fixtures live next to this report. Windows/Tauri native tests cannot be run in this VM; hosted native checks passed for the three merged PRs. #1107's native tests have not run. Parser and whitespace checks passed locally. No tests were deleted or skipped to obtain green checks.
+
+Unfixed issues:
+
+- [#1120](https://github.com/raydocs/tono/issues/1120): account replacement deliberately uses sign-out/full-release semantics from #506, removing the old runtime's AI hold. Whether replacement sign-in authorizes this release needs a product decision. No policy-changing fix was made.
+- [#1134](https://github.com/raydocs/tono/issues/1134): late successful StartClash compensation following an automatic timeout can remove the AI floor. A narrow Linux source-function fixture reproduced the missing hold; realistic native sleep/timeout ordering remains unqualified. The existing release-intent Boolean also covers explicit user operations; a fix needs a qualified release cause/disposition. No indiscriminate narrow-release replacement was made.
+
+Coverage and limits: all assigned production files were read end to end across root and three read-only auditors, including callers/callees in DIRECT, switch, stages, controller, reconnect, unarmed recovery, runstate, Service IPC and Service kill-switch/selective release. Latest-main changes to those paths were reviewed after the initial scan. No assigned source area remains unread. Real-machine WFP, DNS, TUN, DPAPI, sleep and install/update execution were not exercised here; hardware testing remains for #1111/#1116, and native ordering qualification remains for #1134. No macOS or control-plane implementation changes were made. Nothing was deployed or published. All fix branches are pushed; no local-only recovery commits remain.
+
+Machine-readable records: findings.tsv and prs.tsv in this directory. PR and issue bodies plus failing/passing proof logs are retained here for the operator.
+
+Hunter: GPT-6.1 Sol (Codex CLI)

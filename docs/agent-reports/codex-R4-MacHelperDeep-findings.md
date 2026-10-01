@@ -1,18 +1,20 @@
 # R4-MacHelperDeep: Codex (GPT-6.1 Sol) findings
 
-Generated 2026-10-01 00:15 MT from the run's findings.tsv / prs.tsv.
+Generated 2026-10-01 00:54 MT from the run's findings.tsv / prs.tsv.
 
 ## PRs
 
 | PR | Branch | Labels | Auto-merge requested | Title |
 |---|---|---|---|---|
 | 1110 | hunt/sol-r4mh-selective-route-gateway | needs-hardware | yes | fix(macos): supply gateways for selective AI blackhole routes |
+| 1130 | hunt/sol-r4mh-upgrade-staging-isolation | needs-hardware | yes | fix(macos): isolate silent upgrade staging and locked replacement |
+| 1135 | hunt/sol-r4mh-lan-scope-normalized | needs-hardware | yes | fix(macos): refresh LAN DNS scope without revoking session permits |
 
 ## Hypotheses
 
 | ID | Area | Sev | Location | Description | Verdict |
 |---|---|---|---|---|---|
-| R4MH-SELECTIVE-ROUTE-GATEWAY | macOS helper | P1 | tooling/scripts/core-helper/SelectiveFailOpen.swift:87 | Automatic AI fallback omits gateway in both blackhole adds; Darwin rejects every route | real-fixed #1110 |
+| R4MH-SELECTIVE-ROUTE-GATEWAY | macOS helper | P1 | tooling/scripts/core-helper/SelectiveFailOpen.swift:87 | Automatic AI fallback omits gateway in both blackhole adds; Darwin rejects every route | real-fixed #1110 (merged; native CI passed) |
 | R4MH-RESOLVER-OWNERSHIP | macOS helper | P2 | tooling/scripts/core-helper/SelectiveFailOpen.swift:168 | Secondary hold overwrites/deletes preexisting resolvers | duplicate #1062 |
 | R4MH-RELEASE-INTERRUPTED | macOS helper | P2 | tooling/scripts/core-helper/KillSwitchManager.swift:703 | Release interruption loses durable AI hold intent | duplicate #1078 |
 | R4MH-PF-TOKEN-FORGET | macOS helper | P3 | tooling/scripts/core-helper/KillSwitchPF.swift:1268 | Failed token release forgets its recovery record | duplicate #895 / #979 |
@@ -84,3 +86,13 @@ Generated 2026-10-01 00:15 MT from the run's findings.tsv / prs.tsv.
 | R4MH-C08 | macOS client | — | apps/macos/Tono/Core/CoreRuntimeManager.swift:180 | Synchronous stop stalls UI main actor | false-positive no production callers |
 | R4MH-C09 | macOS client | — | apps/macos/Tono/Core/CoreRuntimeManager.swift:216 | Async stop reports stopped after unverified failure | false-positive catch retains running unless helper confirms stopped |
 | R4MH-C10 | macOS client | — | apps/macos/Tono/Core/CoreRuntimeManager.swift:108 | Concurrent writer mislabels installed config digest | false-positive callers carry and verify returned digest; no new proved race |
+| R4MH-UPGRADE-STAGING-COLLISION | macOS helper | P2 | tooling/scripts/core-helper/SocketServer.swift:43 | Unlocked silent upgrade cleanup deletes concurrent installer candidates; final renames escape update lock | real-fixed #1130 (CI pending) |
+| R4MH-STATUS-SAVED-NAME | macOS helper | — | tooling/scripts/core-helper/ProtectedDNSManager.swift:423 | Renamed protected DNS service reports old display name | false-positive app audits captured name; reconnect rewrites name preserving originals |
+| R4MH-IU01 | macOS helper | — | tooling/scripts/core-helper/UpdateTransaction.swift:105 | Installed floor read could alter runtime before reservation | false-positive sealed metadata is read before reservation and effects |
+| R4MH-IU02 | macOS helper | — | tooling/scripts/core-helper/UpdatePackage.swift:140 | Staged target seal could change after capture | false-positive private root-owned secure staging preserves capture |
+| R4MH-IU03 | macOS client | — | apps/macos/Tono/Core/RuntimeCleanup.swift:104 | Wake cancellation drain cycles with disconnect | false-positive no await cycle; task retirement precedes disconnect ownership |
+| R4MH-IU04 | macOS helper | — | tooling/scripts/core-helper/UpdateTransaction.swift:392 | Retirement errors hide verified release | false-positive merged #785 publishes verified release before later failure |
+| R4MH-LAN-SCOPE-NORMALIZATION | macOS helper | P2 | tooling/scripts/core-helper/KillSwitchPF.swift:82 | Merged #979 parses only renderer lists; scalar kernel scopes suppress LAN DNS refresh | real-fixed #1135 / Fixes #1131 (CI pending) |
+| R4MH-CALLER-DNS-DEADLINE | macOS client | — | apps/macos/Tono/Services/ProtectedSystemResolver.swift:111 | Blocked DNS setup queue prevents cleanup restoration | false-positive deadline/cancel resumes independently; helper/coordinator DNS cleanup uses separate IPC |
+| R4MH-CALLER-DNS-LATE-PROOF | macOS client | — | apps/macos/Tono/Services/ProtectedSystemResolver.swift:164 | Old DNS callback grants newer connection readiness | false-positive terminal identity arbitration plus query/connect cancellation guards |
+| R4MH-CALLER-DEFERRED-ADVISORY | macOS client | — | apps/macos/Tono/Services/AppState.swift:1766 | Deferred advisory mutates later session after disconnect | false-positive generation guard; discarded bounded read-only response has no network-policy effects |

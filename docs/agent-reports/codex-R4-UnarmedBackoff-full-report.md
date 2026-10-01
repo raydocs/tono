@@ -1,16 +1,6 @@
-# R4-UnarmedBackoff: Codex (GPT-6.1 Sol) findings
+Fixed the P1 failed-connect retry loop in PR #1106. It merged through green CI at 2026-10-01 06:20:44 UTC (merge commit 520294ad); needs-hardware applied and MERGE auto-merge completed.
 
-Generated 2026-10-01 00:54 MT from the run's findings.tsv / prs.tsv.
-
-## PRs
-
-| PR | Branch | Labels | Auto-merge requested | Title |
-|---|---|---|---|---|
-| 1106 | hunt/sol-r4ub-unarmed-backoff | needs-hardware | yes | fix(windows): back off failed unarmed reconnect attempts |
-
-## Hypotheses
-
-| ID | Area | Sev | Location | Description | Verdict |
+| ID | area | severity | file:line | one-line description | verdict |
 |---|---|---|---|---|---|
 | R4UB-WIN-FAILED-CONNECT-BACKOFF | Windows unarmed probe | P1 | apps/windows/app/src-tauri/src/tono/connection/unarmed_probe.rs:157 | Reachable TCP plus failed full connect resets backoff and repeatedly arms/releases WFP | real-fixed #1106; merged 520294ad; needs-hardware; merge-commit auto-merge completed; CI green |
 | R4UB-WIN-UNARMED-SELECTION | Windows unarmed probe | P2 | apps/windows/app/src-tauri/src/tono/connection/unarmed_probe.rs:132 | A late TCP proof overwrites a newer idle user selection | duplicate of #1098; overlapping guard/test removed |
@@ -33,3 +23,11 @@ Generated 2026-10-01 00:54 MT from the run's findings.tsv / prs.tsv.
 | R4UB-DUP-STALE-HOTSWITCH-HEALTH | Windows health monitor | P2 | apps/windows/app/src-tauri/src/tono/connection/monitor.rs:1397 | Old exit health proof can release a successfully hot-switched replacement | duplicate of #1095; same-generation switch differs from cold-switch false positive |
 | R4UB-DUP-WINDOWS-CHECKOUT | Windows CI | P2 engineering | docs/agent-reports/2026-10-01-orchestration/scripts/merge-manager/aux.sh:1 | Reserved AUX basename prevents native Windows checkout before compilation | duplicate of #1100; main ca5df8fc removed path; latest native checkout passed; gates intact |
 | R4UB-FP-SAMPLER-SHUTDOWN | Windows unarmed probe | — | apps/windows/app/src-tauri/src/main.rs:13 | A hung native sampler could make Tokio runtime shutdown wait forever | false-positive: committed App::run exit calls Tao Windows process::exit; runtime Drop is not reached after sampler starts |
+
+PR: https://github.com/raydocs/tono/pull/1106 — `hunt/sol-r4ub-unarmed-backoff`; label `needs-hardware`; auto-merge yes (MERGE), completed.
+
+13 false positives, 6 duplicates, 21 total hypotheses. Two new verified product findings: one fixed in #1106, one unfixed (#1101).
+
+Local checks: 330 core unit + 15 integration tests and two portable observer regressions passed. Native Windows Tauri/Service/core/frontend and all required macOS gate jobs passed in run 36822709263. Hardware acceptance remains required.
+
+Unfinished: #1101 timeout-owner handling requires a separate authoritative ownership fix and native sleep regression. Assigned unarmed/reconnect/health paths were audited; real-device WFP/DNS/uplink behavior could not be exercised on Linux.
