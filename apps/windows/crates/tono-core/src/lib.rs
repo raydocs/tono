@@ -8,6 +8,7 @@
 #![forbid(unsafe_code)]
 
 pub mod auth;
+pub mod hy2_idle;
 pub mod catalog;
 pub mod config;
 pub mod connect_timing;
@@ -22,6 +23,7 @@ pub mod policy_signature;
 pub mod protected_connectivity;
 pub mod recovery;
 pub mod sing_box;
+pub mod unarmed_probe;
 pub mod update_contract;
 pub mod update_journal;
 

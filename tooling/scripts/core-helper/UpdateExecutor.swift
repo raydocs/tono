@@ -76,7 +76,15 @@ enum UpdateExecutor {
     /// block entirely when the allowed uid could not be read (BRICK-M13).
     /// There is no strict kill switch, and no uid is required to release.
     private static func armEmergencyBlock() {
+        // Same class as a crash/hang release: open the general block, then
+        // best-effort restore a saved dead-loopback DNS snapshot and apply
+        // the secondary AI sinkhole. releaseInstalledBlock alone omitted
+        // both (M4-UPDATE-SELECTIVE-OMISSION / M4-UPDATE-LEDGER-DNS).
         KillSwitchManager.releaseInstalledBlock()
+        if let dns = try? ProtectedDNSManager() {
+            try? dns.restore(deferringLossNotice: true)
+        }
+        SelectiveFailOpenInstaller.applyBestEffort()
     }
 
     /// Called before constructing CoreManager or restoring normal desired
@@ -214,6 +222,10 @@ enum UpdateExecutor {
             if let dns = try? ProtectedDNSManager() {
                 try? dns.restore(deferringLossNotice: true)
             }
+            // Crash/hang release applies the secondary AI layer after PF is
+            // gone; update failure must too, or the next helper launch skips
+            // it once the intent file is deleted (M4-UPDATE-SELECTIVE-OMISSION).
+            SelectiveFailOpenInstaller.applyBestEffort()
             // Before the replacing write no binary mutation occurred. Mark
             // this consumed attempt blocked and make diagnostics available.
             if let storage = try? UpdateStorage() {

@@ -90,6 +90,12 @@ final class AppState {
     var disconnectionStartedAt: Date?
     var completedConnectionStages: Set<ConnectionStage> = []
     var lastConnectionFailure: ConnectionFailure?
+    /// Next dial chosen by ExitHeal while PF is down. Nil keeps the selected node.
+    var unarmedDialName: String?
+    /// Test seam. Nil uses a TCP connect that does not install PF.
+    /// Not observed: an optional MainActor closure cannot be yielded by Observation.
+    @ObservationIgnored
+    var unarmedTcpProof: (@MainActor @Sendable (String) async -> Bool)?
     /// Failed update journal still on disk. Dashboard tells the customer to
     /// disconnect and reinstall; a later connect must not hide this.
     var updateIncomplete: Bool = UpdateHandoffStore.showsIncompleteUpdate()
@@ -250,6 +256,10 @@ final class AppState {
     var autoUpdateTimer: Timer?
     private var proxyGuardTimer: Timer?
     private var latencyTestTimer: Timer?
+    /// One guard reapply can still be waiting on the privileged coordinator
+    /// (a bounded-but-slow administrator prompt); a new guard tick must not
+    /// queue another reapply behind it.
+    private var proxyReapplyInFlight = false
     /// Catalog exits already tried in this fail-closed connect loop. Reset on
     /// a fresh user connect so a China GFW hit on one city can move on.
     private var catalogFailoverNamesTried: Set<String> = []
@@ -301,6 +311,39 @@ final class AppState {
     var catalogSelectionRequiresChoice = false
     let initialDataLoader = InitialDataLoader()
     var initialDataLoadTask: Task<InitialDiskSnapshot, Never>?
+    /// Claimed synchronously in `loadInitialData` before that call awaits.
+    /// A second WindowGroup scene joins this task instead of applying the
+    /// same disk snapshot again.
+    @ObservationIgnored
+    var initialDataApplyTask: Task<Void, Never>?
+    /// Test seam. Production leaves this nil. The claimed apply parks here,
+    /// before it reads disk, so a test can observe a second caller joining.
+    @ObservationIgnored
+    var initialDataApplySuspension: (() async -> Void)?
+    /// How many times the claimed apply body has started.
+    @ObservationIgnored
+    private(set) var initialDataApplyCount = 0
+    /// How many callers found an apply already claimed.
+    @ObservationIgnored
+    private(set) var initialDataApplyJoinCount = 0
+
+    /// `private(set)` setters are file-private. The persistence extension
+    /// lives in another file, so it records through these.
+    func recordInitialDataApplyJoined() {
+        initialDataApplyJoinCount += 1
+    }
+
+    func recordInitialDataApplyStarted() {
+        initialDataApplyCount += 1
+    }
+    /// Test seam, called synchronously when a caller joins an in-flight apply
+    /// and before it awaits that task.
+    @ObservationIgnored
+    var initialDataApplyJoined: (() -> Void)?
+    /// Test seam. When set, the apply uses this snapshot and does not read
+    /// `ConfigStorage.shared`.
+    @ObservationIgnored
+    var initialDataSnapshotOverride: InitialDiskSnapshot?
     let managedCatalogProcessor = ManagedCatalogProcessor()
     let managedTrafficPolicyProcessor = ManagedTrafficPolicyProcessor()
     let persistenceWriter = AppStatePersistenceWriter()
@@ -325,6 +368,15 @@ final class AppState {
     /// interface index; tests substitute the syscall so a single monitor tick
     /// can be driven without the privileged helper.
     var tunInterfaceExists: (String) -> Bool = { KillSwitchService.interfaceExists($0) }
+    /// Health-tick traffic race. Production probes the real origins. Tests
+    /// return a won race so one tick can reach the healthy branch without TLS.
+    @ObservationIgnored
+    var raceHealthTrafficProbes: @MainActor (Int, String?) async -> OriginRace = { timeout, preferred in
+        await ProtectedConnectivityVerifier.raceSystemTUNProbes(
+            timeoutSeconds: timeout,
+            preferredLabel: preferred
+        )
+    }
     /// The account's say over Connect (#582), given the catalog digest and
     /// routing token Connect would dial: nil lets it proceed, a message
     /// refuses it. The app installs the account session's offline grant gate;
@@ -334,11 +386,28 @@ final class AppState {
     /// System boundary for the connected session's read-only DNS and PF
     /// audits, the same pattern as `tunInterfaceExists`.
     var protectionAudits = ProtectionAuditOperations()
+    /// System boundary for the Chromium Secure DNS scan, the same pattern as
+    /// `protectionAudits`. Chromium writes Local State by replace/rename, so
+    /// production retries once off the main actor — a harmless in-flight
+    /// atomic save must not read as a permanent scan gap; a second incomplete
+    /// result stays fail-closed. Tests substitute the report so one monitor
+    /// tick can drive the blocking verdict without Chrome or Edge installed.
+    var scanBrowserProtectedDNS: () async -> BrowserDNSDiagnostics.Report = {
+        let first = await Task.detached(priority: .userInitiated) {
+            BrowserDNSDiagnostics.scan()
+        }.value
+        guard first.outcome == .incomplete, !Task.isCancelled else { return first }
+        try? await Task.sleep(for: .milliseconds(150))
+        guard !Task.isCancelled else { return first }
+        return await Task.detached(priority: .userInitiated) {
+            BrowserDNSDiagnostics.scan()
+        }.value
+    }
     /// System boundary for the post-connect optional-policy background
     /// replacement. Production (nil) resolves the managed web-domain pins and
     /// performs the privileged arm → writeRuntimeConfig → /core/sync → reload
     /// → TUN-verify sequence inline; tests substitute a closure (typically one
-    /// that throws) to drive the failure branch deterministically without DNS,
+    /// that throws) to model a failure after replacement starts without DNS,
     /// the helper, or sing-box — the same pattern as `networkProtection` and
     /// `tunInterfaceExists`.
     var optionalPolicyRuntimeMutation: (() async throws -> Void)?
@@ -1285,6 +1354,12 @@ final class AppState {
                 let intact = await PrivilegedRuntimeCoordinator.shared.systemProxyIsIntact()
                 guard !self.nativeUpdatePending, self.isConnected, SystemProxy.didSetProxy else { return }
                 if !intact {
+                    // Each tick spawns its own Task, so without this guard a
+                    // slow reapply (an administrator prompt) accumulates one
+                    // queued reapply per 10 s tick behind it on the actor.
+                    guard !self.proxyReapplyInFlight else { return }
+                    self.proxyReapplyInFlight = true
+                    defer { self.proxyReapplyInFlight = false }
                     do {
                         try await PrivilegedRuntimeCoordinator.shared.reapplySystemProxy()
                         self.isProxyDegraded = false
@@ -1593,6 +1668,9 @@ final class AppState {
             url: ProtectedProbeOrigin.google.url,
             timeout: 5_000
         )
+        if health.message == SingBoxDelayGate.deferredMessage {
+            return .ok
+        }
         if let delay = health.delay, delay > 0 {
             return .ok
         }
@@ -1787,10 +1865,21 @@ final class AppState {
         }
     }
 
+    enum OptionalPolicyFailureAction: Equatable {
+        case keepSession
+        case teardown
+    }
+
+    static func optionalPolicyFailureAction(replacementStarted: Bool) -> OptionalPolicyFailureAction {
+        replacementStarted ? .teardown : .keepSession
+    }
+
     private func applyOptionalDirectPolicyInBackground(policy: TonoTrafficPolicy) async {
         guard isConnected, !isDisconnecting, !Task.isCancelled,
               let api = coreController else { return }
         let generation = connectionCoordinator.protectionOperationGeneration
+        let base = activeDirectPolicy
+        var replacementStarted = false
         ConnectionTelemetryBuffer.shared.record(
             "optionalPolicyBegin",
             action: "resolve",
@@ -1800,12 +1889,12 @@ final class AppState {
         do {
             // Test seam: `optionalPolicyRuntimeMutation` stands in for the
             // resolver pass plus the privileged runtime replacement so the
-            // failure branch below can be driven deterministically.
+            // failure after replacement starts can be driven deterministically.
             if let runtimeMutation = optionalPolicyRuntimeMutation {
+                replacementStarted = true
                 try await runtimeMutation()
                 return
             }
-            let base = activeDirectPolicy
             let resolved = await resolveManagedDirectDomains(
                 policy: policy,
                 base: base,
@@ -1839,6 +1928,7 @@ final class AppState {
                 customNodes: runtimeNodes,
                 directPolicy: resolved
             )
+            replacementStarted = true
             let runtimeConfigPath = try await PrivilegedRuntimeCoordinator.shared
                 .syncCoreConfig(
                     configDirectory: coreRuntime.configDirectory.path,
@@ -1898,6 +1988,37 @@ final class AppState {
             )
             guard !Task.isCancelled, !isDisconnecting,
                   generation == connectionCoordinator.protectionOperationGeneration else { return }
+            if Self.optionalPolicyFailureAction(replacementStarted: replacementStarted) == .keepSession {
+                do {
+                    // A full disk or failed arm before /core/sync left Core
+                    // untouched. Restore its original PF exceptions rather
+                    // than stopping the working tunnel for an optional overlay.
+                    try await PrivilegedRuntimeCoordinator.shared.armKillSwitch(
+                        apiHosts: [],
+                        tunnelInterfaces: [ConfigPipeline.tonoTunInterface],
+                        proxyEndpoints: currentProxyEndpoints(),
+                        sessionDirectEndpoints: base?.sessionEndpoints ?? [],
+                        tailscaleBootstrapEnabled: AppProfile.homeExitEnabled && tonoTransport != nil,
+                        helperPrepared: true,
+                        reviewedBundleDirect: base?.requiresAddressFreeDirectPermit == true
+                    )
+                    guard !Task.isCancelled, !isDisconnecting,
+                          generation == connectionCoordinator.protectionOperationGeneration else { return }
+                    errorMessage = error.localizedDescription
+                    return
+                } catch {
+                    ConnectionTelemetryBuffer.shared.record(
+                        "optionalPolicyRollback",
+                        reason: "session_restore_failed",
+                        error: error.localizedDescription,
+                        generation: Int(generation)
+                    )
+                }
+            }
+            guard !Task.isCancelled, !isDisconnecting,
+                  generation == connectionCoordinator.protectionOperationGeneration else { return }
+            // Replacement already touched Core (or the PF rollback above
+            // failed): keep the existing sibling-branch contract unchanged.
             disconnect(releaseKillSwitch: false)
             errorMessage = error.localizedDescription
             // The preserve teardown above parks the host fail-closed (PF
@@ -2163,18 +2284,34 @@ final class AppState {
         return ip
     }
 
+    /// `interfaceExists` and `sleep` are test seams. Production asks the
+    /// kernel and sleeps. A cancel that lands in the last interval must not
+    /// report the interface as ready: connect arms PF before it checks
+    /// cancellation.
     nonisolated static func waitForOwnedTunnelInterface(
         attempts: Int = 50,
-        intervalMs: UInt64 = 100
+        intervalMs: UInt64 = 100,
+        interfaceExists: @escaping @Sendable (String) -> Bool = {
+            KillSwitchService.interfaceExists($0)
+        },
+        sleep: @escaping @Sendable (UInt64) async throws -> Void = { milliseconds in
+            try await Task.sleep(for: .milliseconds(milliseconds))
+        }
     ) async -> Bool {
+        let name = ConfigPipeline.tonoTunInterface
         for _ in 0..<max(1, attempts) {
             if Task.isCancelled { return false }
-            if KillSwitchService.interfaceExists(ConfigPipeline.tonoTunInterface) {
-                return true
+            if interfaceExists(name) { return true }
+            do {
+                try await sleep(intervalMs)
+            } catch is CancellationError {
+                return false
+            } catch {
+                return false
             }
-            try? await Task.sleep(for: .milliseconds(intervalMs))
         }
-        return KillSwitchService.interfaceExists(ConfigPipeline.tonoTunInterface)
+        if Task.isCancelled { return false }
+        return interfaceExists(name)
     }
 
     /// Query Mihomo's DNS listener directly while macOS is still using its
@@ -2213,21 +2350,6 @@ final class AppState {
             try? await Task.sleep(for: .milliseconds(200))
         }
         return false
-    }
-
-    /// Chromium writes Local State by replace/rename. One short retry keeps a
-    /// harmless in-flight atomic save from looking like a permanent scan gap;
-    /// a second incomplete result remains fail-closed.
-    func scanBrowserProtectedDNS() async -> BrowserDNSDiagnostics.Report {
-        let first = await Task.detached(priority: .userInitiated) {
-            BrowserDNSDiagnostics.scan()
-        }.value
-        guard first.outcome == .incomplete, !Task.isCancelled else { return first }
-        try? await Task.sleep(for: .milliseconds(150))
-        guard !Task.isCancelled else { return first }
-        return await Task.detached(priority: .userInitiated) {
-            BrowserDNSDiagnostics.scan()
-        }.value
     }
 
     func recordBrowserDNSPreflight(_ report: BrowserDNSDiagnostics.Report) {
@@ -2517,8 +2639,11 @@ final class AppState {
         LocalTrafficAudit.shared.setResidentialRouteContext(context)
         LocalTrafficAudit.setAssistantDirectFirstMember(terminal)
         // Callback-time lookup alone would stamp a buffered old WebSocket
-        // frame with the new context. Invalidate its receive task at commit.
+        // frame with the new context. Invalidate its receive task at commit;
+        // recordCoreLogs has no generation guard, so the logs stream's
+        // coalescing buffer must be dropped for the same reason.
         webSocket?.restartConnectionsStreamAfterRuntimeChange()
+        webSocket?.restartLogsStreamAfterRuntimeChange()
     }
 
     func compactRemoteDiagnosticSnapshot() -> TonoDiagnosticSnapshot {
