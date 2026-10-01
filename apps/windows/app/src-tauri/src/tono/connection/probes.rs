@@ -185,6 +185,7 @@ pub(super) async fn verify_post_lock(
             });
             transaction
                 .wait("advisory exit measurement", async {
+                    let measured_node = state.lock().await.selected_node.clone();
                     let began = std::time::Instant::now();
                     let result = probe_exit_once(secret, controller_port).await;
                     if let Some(recorder) = controller_recorder {
@@ -198,9 +199,9 @@ pub(super) async fn verify_post_lock(
                     }
                     match result {
                         Ok(delay) => {
-                            if delay > 0 {
+                            if let Some(node) = measured_node.as_deref() {
                                 let mut inner = state.lock().await;
-                                inner.record_exit_delay(delay);
+                                inner.record_exit_delay(node, delay);
                             }
                             Ok(())
                         }
@@ -234,16 +235,17 @@ pub(super) async fn verify_post_lock(
                 // that proved the tunnel.
                 let delay_state = state.clone();
                 let delay_secret = secret.to_string();
+                let measured_node = state.lock().await.selected_node.clone();
                 tokio::spawn(async move {
                     let Ok(delay) = probe_exit_once(&delay_secret, controller_port).await else {
                         return;
                     };
-                    if delay == 0 {
+                    let Some(node) = measured_node else {
                         return;
-                    }
+                    };
                     let mut inner = delay_state.lock().await;
                     if inner.connect_generation == generation {
-                        inner.record_exit_delay(delay);
+                        inner.record_exit_delay(&node, delay);
                     }
                 });
                 log_current_stage_duration(state, generation, started).await;
@@ -536,23 +538,29 @@ pub(super) async fn probe_exit_once(secret: &str, controller_port: u16) -> Resul
 /// in-memory controller endpoint is never exposed to the WebView; only the measured milliseconds
 /// cross the Tauri command boundary.
 pub async fn test_current_server(state: &Arc<TonoState>, app: &AppHandle) -> Result<u64, String> {
-    let (secret, controller_port) = {
+    let (secret, controller_port, measured_node) = {
         let inner = state.lock().await;
         if !inner.fsm.status().is_connected {
             return Err("connect before testing the current server".to_string());
         }
-        inner
+        let (secret, controller_port) = inner
             .controller_secret
             .clone()
             .zip(inner.controller_port)
-            .ok_or_else(|| "connected controller endpoint is unavailable".to_string())?
+            .ok_or_else(|| "connected controller endpoint is unavailable".to_string())?;
+        (secret, controller_port, inner.selected_node.clone())
     };
     let delay = probe_exit_once(&secret, controller_port)
         .await
         .map_err(|error| format!("current server test failed: {error}"))?;
     {
         let mut inner = state.lock().await;
-        inner.record_exit_delay(delay);
+        let stamped = measured_node
+            .as_deref()
+            .is_some_and(|node| inner.record_exit_delay(node, delay));
+        if !stamped {
+            return Err("selected server changed before the delay was recorded".to_string());
+        }
         crate::tono::commands::emit_status(app, &crate::tono::commands::status_of(&inner));
     }
     Ok(delay)

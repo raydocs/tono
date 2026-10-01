@@ -363,6 +363,7 @@ pub(super) async fn run_stages(
         inner.exit_ip = None;
         inner.exit_org = None;
         inner.exit_location = None;
+        inner.exit_identity_node = None;
         // M4 seeds must reset on *every* success, not only on disconnect: a
         // reconnect's own StartClash always changes the core pid and bumps
         // the netmon counter, so comparing against pre-reconnect values made

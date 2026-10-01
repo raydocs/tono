@@ -361,9 +361,12 @@ pub struct TonoInner {
     /// without a TUN permit is expected and must not tear the session down.
     pub direct_reload_until: Option<(u64, std::time::Instant)>,
     /// Display-only exit identity from the last successful lookup.
+    /// `exit_identity_node` is the node selected when that lookup started. Status
+    /// hides the identity when it no longer matches `selected_node`.
     pub exit_ip: Option<String>,
     pub exit_org: Option<String>,
     pub exit_location: Option<String>,
+    pub exit_identity_node: Option<String>,
     /// Last successful HTTP generate_204 through the selected exit. Display and
     /// heartbeat only — never a connection verdict.
     pub last_exit_delay_ms: Option<u64>,
@@ -397,17 +400,69 @@ fn matching_selected_delay(
     }
 }
 
+/// A sample that started while `measured` was selected may be stored or shown only
+/// while that same node is still selected. An empty name is not a node.
+pub(crate) fn measurement_belongs_to_selected(measured: Option<&str>, selected: Option<&str>) -> bool {
+    match (measured, selected) {
+        (Some(measured), Some(selected)) if !measured.is_empty() && measured == selected => true,
+        _ => false,
+    }
+}
+
 impl TonoInner {
-    pub fn record_exit_delay(&mut self, delay_ms: u64) {
-        if delay_ms == 0 {
-            return;
+    /// Record a delay measured while `measured_node` was selected. A hot switch
+    /// does not bump `connect_generation`, so the name captured at the start of
+    /// the probe is what keeps the previous exit's RTT off the new node.
+    pub fn record_exit_delay(&mut self, measured_node: &str, delay_ms: u64) -> bool {
+        if delay_ms == 0
+            || !measurement_belongs_to_selected(Some(measured_node), self.selected_node.as_deref())
+        {
+            return false;
         }
-        let Some(node) = self.selected_node.clone() else {
-            return;
-        };
         self.last_exit_delay_ms = Some(delay_ms);
         self.last_exit_delay_at_ms = Some(now_ms());
-        self.last_exit_delay_node = Some(node);
+        self.last_exit_delay_node = Some(measured_node.to_string());
+        true
+    }
+
+    /// Store an exit-identity lookup that started on `measured_node`. Returns
+    /// false when the selection has already moved, leaving the previous identity
+    /// in place so a rolled-back switch can still show it.
+    pub fn commit_exit_identity(
+        &mut self,
+        measured_node: &str,
+        ip: String,
+        org: Option<String>,
+        location: Option<String>,
+    ) -> bool {
+        if ip.is_empty()
+            || !measurement_belongs_to_selected(Some(measured_node), self.selected_node.as_deref())
+        {
+            return false;
+        }
+        self.exit_ip = Some(ip);
+        self.exit_org = org;
+        self.exit_location = location;
+        self.exit_identity_node = Some(measured_node.to_string());
+        true
+    }
+
+    pub fn published_exit_ip(&self) -> Option<String> {
+        self.exit_identity_visible().then(|| self.exit_ip.clone()).flatten()
+    }
+
+    pub fn published_exit_org(&self) -> Option<String> {
+        self.exit_identity_visible().then(|| self.exit_org.clone()).flatten()
+    }
+
+    pub fn published_exit_location(&self) -> Option<String> {
+        self.exit_identity_visible()
+            .then(|| self.exit_location.clone())
+            .flatten()
+    }
+
+    fn exit_identity_visible(&self) -> bool {
+        measurement_belongs_to_selected(self.exit_identity_node.as_deref(), self.selected_node.as_deref())
     }
 
     pub fn record_tcp_delay(&mut self, node: &str, delay_ms: u64) {
@@ -652,6 +707,7 @@ impl TonoState {
                 exit_ip: None,
                 exit_org: None,
                 exit_location: None,
+                exit_identity_node: None,
                 last_exit_delay_ms: None,
                 last_exit_delay_at_ms: None,
                 last_exit_delay_node: None,
@@ -1210,6 +1266,32 @@ mod tests {
             assert_eq!(result, Err("kept protected".to_string()));
         }
         assert_eq!(operation.wait().await, Err("kept protected".to_string()));
+    }
+
+    #[tokio::test]
+    async fn a_measurement_from_the_previous_exit_is_not_shown_on_the_new_node() {
+        let state = super::TonoState::for_test();
+        let mut inner = state.lock().await;
+        inner.selected_node = Some("Tokyo · Fuji".to_string());
+        assert!(inner.record_exit_delay("Tokyo · Fuji", 80));
+        assert!(inner.commit_exit_identity("Tokyo · Fuji", "203.0.113.5".to_string(), None, None));
+        inner.selected_node = Some("Tokyo · Neon".to_string());
+        assert!(!inner.record_exit_delay("Tokyo · Fuji", 400));
+        assert_eq!(inner.selected_exit_delay_ms(), None);
+        assert!(!inner.commit_exit_identity(
+            "Tokyo · Fuji",
+            "198.51.100.8".to_string(),
+            None,
+            None
+        ));
+        assert!(inner.published_exit_ip().is_none());
+        assert!(inner.published_exit_org().is_none());
+        assert!(inner.published_exit_location().is_none());
+        assert!(inner.record_exit_delay("Tokyo · Neon", 90));
+        assert_eq!(inner.selected_exit_delay_ms(), Some(90));
+        assert!(inner.commit_exit_identity("Tokyo · Neon", "198.51.100.9".to_string(), None, Some("JP".to_string())));
+        assert_eq!(inner.published_exit_ip().as_deref(), Some("198.51.100.9"));
+        assert_eq!(inner.published_exit_location().as_deref(), Some("JP"));
     }
 
     #[test]

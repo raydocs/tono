@@ -16,7 +16,8 @@ use super::{
 };
 use super::controller::{controller_client, controller_url, fetch_connections, select_exit_group};
 use super::endpoints::{proxy_endpoints_for, unique_proxy_endpoints};
-use super::probes::verify_tun_data_plane;
+use super::monitor::spawn_exit_identity_lookup;
+use super::probes::{probe_exit_once, verify_tun_data_plane};
 use super::reconnect::schedule_reconnect_for_generation;
 
 /// The selected node vanished from a new catalog while a tunnel was up —
@@ -304,10 +305,45 @@ pub async fn switch_selected_node(
     ).await {
         return;
     }
-    let inner = state.lock().await;
-    if inner.connect_generation == generation {
-        commands::emit_status(&app, &commands::status_of(&inner));
+    let still_on_next = {
+        let inner = state.lock().await;
+        inner.connect_generation == generation && inner.selected_node.as_deref() == Some(next_name.as_str())
+    };
+    if !still_on_next {
+        return;
     }
+    {
+        let inner = state.lock().await;
+        if inner.connect_generation == generation {
+            commands::emit_status(&app, &commands::status_of(&inner));
+        }
+    }
+    // The previous exit's delay and IP stay tagged with its own name, so the
+    // status just emitted hides them. These samples are for the node that committed.
+    spawn_exit_identity_lookup(&state, &app, generation);
+    spawn_switched_exit_delay(Arc::clone(&state), app.clone(), generation, next_name, secret, port);
+}
+
+fn spawn_switched_exit_delay(
+    state: Arc<TonoState>,
+    app: AppHandle,
+    generation: u64,
+    node: String,
+    secret: String,
+    port: u16,
+) {
+    AsyncHandler::spawn(move || async move {
+        let Ok(delay) = probe_exit_once(&secret, port).await else {
+            return;
+        };
+        let mut inner = state.lock().await;
+        if inner.connect_generation != generation || !inner.fsm.status().is_connected {
+            return;
+        }
+        if inner.record_exit_delay(&node, delay) {
+            commands::emit_status(&app, &commands::status_of(&inner));
+        }
+    });
 }
 
 /// The verified selector is not a completed switch until the exact endpoint set commits.

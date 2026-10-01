@@ -259,9 +259,9 @@ pub(crate) fn status_of(inner: &TonoInner) -> TonoStatus {
         catalog_requires_choice: inner.catalog_requires_choice,
         route_preference_scope: crate::tono::route_preferences::scope_of(inner),
         controller_generation: inner.controller_generation,
-        exit_ip: inner.exit_ip.clone(),
-        exit_org: inner.exit_org.clone(),
-        exit_location: inner.exit_location.clone(),
+        exit_ip: inner.published_exit_ip(),
+        exit_org: inner.published_exit_org(),
+        exit_location: inner.published_exit_location(),
         direct_overlay: if inner.optional_direct_active {
             "on".to_string()
         } else if inner.optional_direct_skip.is_some() {

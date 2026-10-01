@@ -452,6 +452,18 @@ pub(super) fn spawn_exit_identity_lookup(state: &Arc<TonoState>, app: &AppHandle
     let state = Arc::clone(state);
     let app = app.clone();
     AsyncHandler::spawn(move || async move {
+        // Capture the node before the request. A same-generation hot switch
+        // publishes the new name while this lookup is still in flight.
+        let measured_node = {
+            let inner = state.lock().await;
+            if inner.connect_generation != generation || !inner.fsm.status().is_connected {
+                return;
+            }
+            inner.selected_node.clone()
+        };
+        let Some(measured_node) = measured_node else {
+            return;
+        };
         let Ok(client) = reqwest::Client::builder()
             .no_proxy()
             .redirect(reqwest::redirect::Policy::none())
@@ -503,9 +515,14 @@ pub(super) fn spawn_exit_identity_lookup(state: &Arc<TonoState>, app: &AppHandle
         if inner.connect_generation != generation || !inner.fsm.status().is_connected {
             return;
         }
-        inner.exit_ip = Some(ip.to_string());
-        inner.exit_org = (!org.is_empty()).then(|| org.to_string());
-        inner.exit_location = location;
+        if !inner.commit_exit_identity(
+            &measured_node,
+            ip.to_string(),
+            (!org.is_empty()).then(|| org.to_string()),
+            location,
+        ) {
+            return;
+        }
         commands::emit_status(&app, &commands::status_of(&inner));
     });
 }
