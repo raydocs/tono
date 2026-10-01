@@ -1,6 +1,6 @@
 # R4-MacAppDeep: Codex (GPT-6.1 Sol) findings
 
-Generated 2026-10-01 01:22 MT from the run's findings.tsv / prs.tsv.
+Generated 2026-10-01 01:50 MT from the run's findings.tsv / prs.tsv.
 
 ## PRs
 
@@ -14,7 +14,7 @@ Generated 2026-10-01 01:22 MT from the run's findings.tsv / prs.tsv.
 | ID | Area | Sev | Location | Description | Verdict |
 |---|---|---|---|---|---|
 | R4MA-RELOAD-FAILURE-BLOCK | macOS config reload | P1 | apps/macos/Tono/Services/AppState+Proxy.swift:718 | A single full reload failure stops the core but retains bootstrap PF and dead-loopback DNS through protected retries | real-fixed #1146 merged b5412bf4; native CI passed |
-| R4MA-PIN-REFRESH-REVOKE | macOS DIRECT policy | P2 | apps/macos/Tono/Services/AppState+Catalog.swift:907 | Old DNS pin resolution can reinstall withdrawn DIRECT authority after a newer policy applies successfully | real-fixed #1153 (CI pending) |
+| R4MA-PIN-REFRESH-REVOKE | macOS DIRECT policy | P2 | apps/macos/Tono/Services/AppState+Catalog.swift:907 | Old DNS pin resolution can reinstall withdrawn DIRECT authority after a newer policy applies successfully | real-fixed #1153 merged e018c115; native CI passed |
 | R4MA-MAC-UPDATE-COMMIT-RELEASE-RACE | macOS native update | P2 | apps/macos/Tono/Services/AppState+Connect.swift:1155 | Restore during dispatched native update Commit drains Commit then calls a rejected pending-only release leaving gates latched | real-unfixed #1151; native lifecycle qualification needed after #1099 |
 | R4MA-CFG-FP01 | macOS config | — | apps/macos/Tono/Services/AppState+Catalog.swift:700 | Empty policy enables default DIRECT | false-positive initialDirectPolicy returns nil for an empty policy |
 | R4MA-CFG-FP02 | macOS config | — | apps/macos/Tono/Core/Configuration/ConfigPipeline+SingBoxProduct.swift:197 | Trusted Claude IP escapes DIRECT | false-positive earlier assistant TCP/CIDR and UDP-reject rules win |

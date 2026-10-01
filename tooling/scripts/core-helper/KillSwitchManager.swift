@@ -966,12 +966,15 @@ final class KillSwitchManager {
             current: current
         ) else { return }
         do {
-            guard let state = try loadState(), state.armed else { return }
-            _ = try Self.writeRules(
-                state: state,
-                allowedUID: allowedUID,
-                physicalInterfaces: current
-            )
+            guard !reviewedBundleFileUnconfirmed,
+                  let source = String(
+                    data: try Self.secureRead(killSwitchPFPath, maximumBytes: 4 * 1024 * 1024),
+                    encoding: .utf8
+                  ),
+                  let widened = Self.widenLANScope(
+                    in: source, current: current, baseline: lastLoadedPassRules
+                  ) else { return }
+            try Self.writeRuleText(widened)
             var outcome = KernelLoadOutcome.notIssued
             try Self.ensureAnchorLoaded(flushStates: false, loadOutcome: &outcome)
         } catch {

@@ -839,9 +839,10 @@ mod tests {
     fn live_mihomo_yaml_stays_byte_for_byte_on_its_own_fake_ip_range() {
         // Pinned YAML includes #732's dial defaults (`tcp-concurrent: true`,
         // `dns.ipv6: false`, chrome on each Reality proxy) plus fake-ip-ttl,
-        // prefer-h3 and cache-algorithm.
+        // prefer-h3, cache-algorithm, and the lazy exit-DoH fallback.
+        // sing-box is the Windows default; this document is the mihomo fallback.
         const PINNED_YAML_SHA256: &str =
-            "82c6545e00c8e42058d1a3d6b93d43218c563cc25c5755bc82b663d41630c501";
+            "884ee2292c509cc84aa43b2ee51c74a3113a8795bc277c6f8021e0f537baf804";
         let nodes = [
             mihomo_node("US Reality 01", "8.8.8.8"),
             mihomo_node("JP Reality 02", "1.1.1.1"),
