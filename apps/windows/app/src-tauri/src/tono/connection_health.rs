@@ -273,6 +273,22 @@ pub fn owned_direct_reload_in_flight(
     reload_until.is_some_and(|(generation, until)| generation == connect_generation && now < until)
 }
 
+/// #1228: whether a Core identity change seen on this tick belongs to this session's own DIRECT
+/// reload. The sing-box path replaces the process, so the pid moves on purpose. A marker set,
+/// cleared or replaced since the tick began counts too: the snapshot may straddle the
+/// replacement, and the reload re-baselines the proved pid only while its marker is set.
+pub fn core_identity_change_owned(
+    owned_at_tick_start: bool,
+    marker_at_tick_start: Option<(u64, std::time::Instant)>,
+    marker_now: Option<(u64, std::time::Instant)>,
+    connect_generation: u64,
+    now: std::time::Instant,
+) -> bool {
+    owned_at_tick_start
+        || marker_now != marker_at_tick_start
+        || owned_direct_reload_in_flight(marker_now, connect_generation, now)
+}
+
 pub fn kill_switch_unhealthy_for_monitor(
     status: Option<&KillSwitchStatus>,
     owned_direct_reload: bool,
@@ -450,6 +466,25 @@ mod tests {
         NetworkEventProbeEffect, NetworkEventProbePlan, apply_network_event_probe, may_recover_in_place,
         plan_network_event_probe,
     };
+
+    #[test]
+    fn sing_box_direct_replacement_pid_change_is_owned_not_a_crash() {
+        use super::core_identity_change_owned;
+        let now = std::time::Instant::now();
+        let marker = Some((7, now + std::time::Duration::from_secs(60)));
+        assert!(
+            core_identity_change_owned(false, None, marker, 7, now),
+            "a replacement that began after the tick started must not read as a Core crash"
+        );
+        assert!(
+            core_identity_change_owned(true, marker, None, 7, now),
+            "a replacement that finished during the tick is still owned"
+        );
+        assert!(
+            !core_identity_change_owned(false, None, None, 7, now),
+            "an unexplained pid change still fires"
+        );
+    }
 
     #[test]
     fn a_debounced_sample_stays_visible_until_the_window_elapses() {

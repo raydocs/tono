@@ -212,6 +212,17 @@ async fn clear_direct_reload_in_flight(state: &Arc<TonoState>, generation: u64) 
     inner.direct_reload_until = None;
 }
 
+/// #1228: the commit proof saw the replacement Core. Make it the monitor's baseline while the
+/// owned-reload marker is still set, so the expected identity change never reads as a crash.
+async fn adopt_replaced_core_baseline(state: &Arc<TonoState>, generation: u64, pid: u32, restart_count: u32) {
+    let mut inner = state.lock().await;
+    if inner.connect_generation != generation {
+        return;
+    }
+    inner.last_core_pid = Some(pid);
+    inner.last_restart_count = Some(restart_count);
+}
+
 /// Must stay comfortably below the Service's 60-second committed lease. A dedicated task keeps
 /// renewal independent of the health monitor's potentially slow public data-plane probes.
 pub(super) const DIRECT_LEASE_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(10);
@@ -1725,6 +1736,9 @@ async fn replace_sing_box_for_direct(
         return Ok(None);
     }
     let (policy_guard, _mutation_guard) = admit_sing_box_replacement(state, generation, &node.name, policy).await?;
+    // #1228: the replacement changes the Core pid. Own it like the mihomo bracket so the monitor
+    // does not read it as a crash; the spawned owner clears the marker on every exit.
+    mark_direct_reload_in_flight(state, generation).await;
     if let Err(error) =
         service::tono_replace_sing_box_runtime(session, direct_document.clone(), true).await
     {
@@ -1815,6 +1829,7 @@ async fn replace_sing_box_for_direct(
             .await;
         }
     };
+    adopt_replaced_core_baseline(state, generation, core_identity.pid, snapshot.restart_count).await;
     Ok(Some(PendingDirectCommit {
         _policy_guard: policy_guard,
         policy: policy.clone(),
