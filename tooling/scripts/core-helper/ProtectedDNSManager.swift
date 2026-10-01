@@ -210,7 +210,8 @@ final class ProtectedDNSManager {
             write: Self.writeDNS,
             removeSnapshot: removeSnapshot,
             archiveSnapshot: { try Self.quarantineSnapshot(reason: $0) },
-            quarantine: { try Self.quarantineSnapshot() }
+            quarantine: { try Self.quarantineSnapshot() },
+            activate: Self.scApplyDNSPreferences
         )
         var object = Self.response(
             configured: false,
@@ -482,7 +483,8 @@ final class ProtectedDNSManager {
         write: ([String], NetworkService) throws -> Void,
         removeSnapshot: () throws -> Void,
         archiveSnapshot: (String) throws -> Void,
-        quarantine: () throws -> Void
+        quarantine: () throws -> Void,
+        activate: () throws -> Void = {}
     ) throws -> (snapshot: Snapshot?, originalRestored: Bool) {
         let snapshot: Snapshot?
         switch snapshotResult {
@@ -503,6 +505,11 @@ final class ProtectedDNSManager {
             removeSnapshot: removeSnapshot,
             archiveSnapshot: archiveSnapshot
         )
+        // A previous snapshotless write may have committed automatic DNS
+        // while Apply failed. Empty persisted settings alone do not prove
+        // the dead listener is gone from active configuration. Activate the
+        // stored preferences without rewriting another service's custom DNS.
+        if snapshot == nil { try activate() }
         return (snapshot, originalRestored)
     }
 
@@ -918,6 +925,14 @@ final class ProtectedDNSManager {
                   SCPreferencesCommitChanges(prefs),
                   SCPreferencesApplyChanges(prefs) else {
                 throw HelperFailure.system("Could not update the protected DNS settings.")
+            }
+        }
+    }
+
+    private static func scApplyDNSPreferences() throws {
+        try withPreferences(lock: true) { prefs in
+            guard SCPreferencesApplyChanges(prefs) else {
+                throw HelperFailure.system("Could not activate the restored DNS settings.")
             }
         }
     }
@@ -1727,6 +1742,48 @@ final class ProtectedDNSManager {
         return removed && writes == 2 && active == snapshot.servers
     }
 
+    static func runSnapshotlessRestoreApplyRetrySelfTest() -> Bool {
+        enum ApplyFailure: Error { case injected }
+        let owner = NetworkService(id: "S1", name: "Wi-Fi")
+        let foreign = NetworkService(id: "S2", name: "Ethernet")
+        var persisted = [owner: [protectedDNSServer], foreign: ["9.9.9.9"]]
+        var active = persisted
+        var writes = 0
+        var activations = 0
+        var failActivation = true
+        func restore() throws {
+            _ = try restoreTransaction(
+                snapshotResult: .success(nil),
+                services: [owner, foreign],
+                read: { persisted[$0] ?? [] },
+                write: { servers, service in
+                    writes += 1
+                    persisted[service] = servers
+                    // Model Commit succeeding while its first Apply fails.
+                    throw ApplyFailure.injected
+                },
+                removeSnapshot: {}, archiveSnapshot: { _ in }, quarantine: {},
+                activate: {
+                    activations += 1
+                    if failActivation {
+                        failActivation = false
+                        throw ApplyFailure.injected
+                    }
+                    active = persisted
+                }
+            )
+        }
+        do { try restore(); return false } catch ApplyFailure.injected {} catch { return false }
+        guard persisted[owner] == [], active[owner] == [protectedDNSServer] else { return false }
+        // No write is needed on retry, but failed activation is not success.
+        do { try restore(); return false } catch ApplyFailure.injected {} catch { return false }
+        do { try restore() } catch { return false }
+        let passed = writes == 1 && activations == 2 && active[owner] == []
+            && persisted[foreign] == ["9.9.9.9"] && active[foreign] == ["9.9.9.9"]
+        print("DNS snapshotless Apply retry regression \(passed ? "passed" : "FAILED")")
+        return passed
+    }
+
     static func runHandoffApplyRetrySelfTest() -> Bool {
         enum ApplyFailure: Error { case injected }
         let snapshot = Snapshot(service: "Wi-Fi", serviceID: "S1", servers: ["9.9.9.9"])
@@ -1799,6 +1856,7 @@ final class ProtectedDNSManager {
                 return false
             }
             return runRestoreApplyRetrySelfTest()
+                && runSnapshotlessRestoreApplyRetrySelfTest()
                 && runHandoffApplyRetrySelfTest()
                 && runSupersededRestoreSelfTest()
                 && runForeignLoopbackKeptSelfTest()
