@@ -293,6 +293,9 @@ const WANTED_CORE_PROOF_WINDOW: std::time::Duration = std::time::Duration::from_
 /// Unlike startup recovery, Core may not have been published yet when this window starts.
 const FRESH_ARM_PROOF_WINDOW: std::time::Duration = std::time::Duration::from_secs(7 * 60);
 static FRESH_ARM_PROOF_PENDING: AtomicBool = AtomicBool::new(false);
+/// Committed DIRECT expiry must retire its Service-owned Core before opening general traffic.
+/// A late Lock/MarkVerified from the expired session cannot cancel that retirement.
+static DIRECT_EXPIRY_RETIREMENT_PENDING: AtomicBool = AtomicBool::new(false);
 static FRESH_ARM_EPOCH: AtomicU64 = AtomicU64::new(0);
 
 /// Bind a Core watchdog to the arm that admitted it. A successor arms before joining the
@@ -400,6 +403,7 @@ fn core_still_expected(running: bool) -> bool {
 }
 
 fn clear_wanted_core_window() {
+    DIRECT_EXPIRY_RETIREMENT_PENDING.store(false, Ordering::Release);
     FRESH_ARM_PROOF_PENDING.store(false, Ordering::Release);
     *WANTED_CORE_DEADLINE
         .lock()
@@ -439,6 +443,23 @@ pub(super) async fn release_expired_fresh_arm(epoch: u64) -> Result<()> {
         return Ok(());
     }
     release_unproven_wanted_session_unlocked().await
+}
+
+/// Reuse the epoch-fenced owner lifecycle cleanup after committed DIRECT expiry. Caller holds
+/// WFP_OPERATION and has already proved exact Blocked. Core owns its own routes and strict-route
+/// WFP session, so removing only Tono's filters cannot complete selective fallback.
+fn queue_direct_expiry_retirement() -> bool {
+    if !armed_guard().as_ref().is_some_and(|armed| {
+        armed.intent.wanted && !armed.intent.strict_kill_switch && armed.intent.owner_key.is_some()
+    }) {
+        return false;
+    }
+    DIRECT_EXPIRY_RETIREMENT_PENDING.store(true, Ordering::Release);
+    *WANTED_CORE_DEADLINE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(std::time::Instant::now());
+    FRESH_ARM_PROOF_PENDING.store(true, Ordering::Release);
+    true
 }
 
 fn note_wanted_core_window(intent: &IntentRecord) {
@@ -1589,6 +1610,9 @@ pub(crate) async fn mark_verified(owner_key: &str) -> Result<()> {
     ensure_supported()?;
     let _operation = WFP_OPERATION.lock().await;
     let mut armed = armed_guard().clone().context("kill switch is not armed")?;
+    if DIRECT_EXPIRY_RETIREMENT_PENDING.load(Ordering::Acquire) {
+        bail!("expired DIRECT session is retiring Core; a fresh Connect is required");
+    }
     if armed.intent.owner_key.as_deref() != Some(owner_key) {
         bail!("kill switch belongs to a different owner");
     }
@@ -2041,6 +2065,9 @@ pub(crate) async fn lock(tunnel_interface: Option<&str>) -> Result<()> {
 /// Perform the tunnel lock while [`WFP_OPERATION`] is held. Once an install succeeds, publish its
 /// candidate immediately so every later error can reconcile the set that may actually be live.
 async fn lock_unlocked(tunnel_interface: Option<&str>) -> Result<()> {
+    if DIRECT_EXPIRY_RETIREMENT_PENDING.load(Ordering::Acquire) {
+        bail!("expired DIRECT session is retiring Core; a fresh Connect is required");
+    }
     // Same poison contract as every other mutation: a prior panic while `ARMED` was held must
     // not make the next tunnel lock panic the IPC task. `mark_verified` is the sibling path.
     let mut armed = armed_guard()
@@ -3657,6 +3684,10 @@ async fn reconcile_direct_watchdog_invalidation_unlocked(
         );
     }
     if release {
+        if queue_direct_expiry_retirement() {
+            tracing::warn!("wfp: {reason}; retiring the expired session's Core before selective fallback");
+            return Ok(());
+        }
         let message = format!("{reason}; exact DIRECT permits were retracted; non-strict session");
         release_unhealthy_session_unlocked(&message).await?;
         Ok(())
@@ -7008,6 +7039,49 @@ mod tests {
 
     #[tokio::test]
     #[serial]
+    async fn committed_direct_expiry_retires_core_before_selective_fallback() -> Result<()> {
+        cleanup().await;
+        committed_direct_test_session(126).await?;
+        mark_verified("owner-alice").await?;
+        let owner = crate::core::auth::AuthenticatedOwner {
+            key: "owner-alice".to_owned(),
+            identity: crate::OwnerIdentity::Unix { uid: 97006, gid: 20 },
+            app_data_root: std::env::temp_dir(),
+            peer_pid: None,
+            peer_session_id: None,
+        };
+        crate::core::desired::persist_owner_core_started(&owner, &crate::ClashConfig::default())
+            .await?;
+        crate::core::desired::persist_active_owner(&owner).await?;
+        armed_guard().as_mut().unwrap().direct_reload.as_mut().unwrap().expires_at =
+            Some(std::time::Instant::now());
+
+        spawn_windows_kill_switch_watchdog();
+        let retired = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            loop {
+                if !status().await.wanted && current_core_instance().await.is_none()
+                    && crate::core::selective_layer::test_hold_active()
+                {
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+        }).await.is_ok();
+        let wanted_core = crate::core::desired::load_owner_desired_state(&owner.key)
+            .await?.core_should_be_running;
+        let active = crate::core::desired::load_active_owner().await?;
+        tokio::fs::remove_file(crate::service_paths().for_owner_key(&owner.key).desired_state_path())
+            .await?;
+        cleanup().await;
+
+        assert!(retired, "fallback must retire Core and its TUN before applying the AI hold");
+        assert!(!wanted_core, "fallback must not replay the retired Core");
+        assert!(active.is_none(), "the retired session must no longer own Core");
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
     async fn committed_direct_expiry_does_not_interrupt_its_new_ai_hold() -> Result<()> {
         cleanup().await;
         let (core, _) = committed_direct_test_session(125).await?;
@@ -7019,6 +7093,7 @@ mod tests {
             .expect("committed heartbeat expiry must invalidate DIRECT");
 
         reconcile_direct_watchdog_invalidation_unlocked(armed, Some(core), now, reason).await?;
+        crate::core::server::retire_expired_fresh_arm(core_arm_epoch()).await?;
         let wanted = status().await.wanted;
         let held = crate::core::selective_layer::test_hold_active();
         let removals_after = crate::core::selective_layer::test_active_hold_removals();
@@ -7059,6 +7134,9 @@ mod tests {
         let reason = direct_reload_invalidation_reason(&retry, Some(core), retry.tun_luid, now)
             .expect("expired committed receipt must retry release on the next tick");
         reconcile_direct_watchdog_invalidation_unlocked(retry, Some(core), now, reason).await?;
+        assert!(lock(None).await.is_err(), "the expired session cannot cancel retirement");
+        assert!(mark_verified("owner-alice").await.is_err());
+        crate::core::server::retire_expired_fresh_arm(core_arm_epoch()).await?;
         assert!(
             armed_guard().is_none(),
             "non-strict expiry must release the session"
