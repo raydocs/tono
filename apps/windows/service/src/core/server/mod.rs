@@ -374,9 +374,9 @@ async fn retire_unrecorded_owner_core(owner: &AuthenticatedOwner) -> AnyResult<(
     Ok(())
 }
 
-/// Automatic cleanup of a Connect whose App never committed verification. The watchdog
-/// releases its WFP lock before entering here; serialize with Start/Lock/MarkVerified and
-/// recheck the arm epoch so a queued timeout cannot tear down a verified or newer session.
+/// Automatic cleanup after abandoned Connect verification or exhausted Core recovery. The
+/// WFP watchdog releases its lock before entering here; serialize with Start/Lock/MarkVerified
+/// and recheck the arm epoch so a queued predecessor cannot tear down a newer session.
 pub(crate) async fn retire_expired_fresh_arm(epoch: u64) -> AnyResult<()> {
     let _lifecycle = OWNER_LIFECYCLE_LOCK.lock().await;
     #[cfg(any(windows, test))]
