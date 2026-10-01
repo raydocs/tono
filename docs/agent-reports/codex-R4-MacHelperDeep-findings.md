@@ -1,6 +1,6 @@
 # R4-MacHelperDeep: Codex (GPT-6.1 Sol) findings
 
-Generated 2026-10-01 00:54 MT from the run's findings.tsv / prs.tsv.
+Generated 2026-10-01 01:22 MT from the run's findings.tsv / prs.tsv.
 
 ## PRs
 
@@ -16,7 +16,7 @@ Generated 2026-10-01 00:54 MT from the run's findings.tsv / prs.tsv.
 |---|---|---|---|---|---|
 | R4MH-SELECTIVE-ROUTE-GATEWAY | macOS helper | P1 | tooling/scripts/core-helper/SelectiveFailOpen.swift:87 | Automatic AI fallback omits gateway in both blackhole adds; Darwin rejects every route | real-fixed #1110 (merged; native CI passed) |
 | R4MH-RESOLVER-OWNERSHIP | macOS helper | P2 | tooling/scripts/core-helper/SelectiveFailOpen.swift:168 | Secondary hold overwrites/deletes preexisting resolvers | duplicate #1062 |
-| R4MH-RELEASE-INTERRUPTED | macOS helper | P2 | tooling/scripts/core-helper/KillSwitchManager.swift:703 | Release interruption loses durable AI hold intent | duplicate #1078 |
+| R4MH-RELEASE-INTERRUPTED | macOS helper | P2 | tooling/scripts/core-helper/KillSwitchManager.swift:703 | Release interruption loses durable AI hold intent | duplicate #1078 / fixed #1136 |
 | R4MH-PF-TOKEN-FORGET | macOS helper | P3 | tooling/scripts/core-helper/KillSwitchPF.swift:1268 | Failed token release forgets its recovery record | duplicate #895 / #979 |
 | R4MH-LAN-NIC-SCOPE | macOS helper | P2 | tooling/scripts/core-helper/KillSwitchPF.swift:170 | LAN DNS scope misses new physical NIC | duplicate #894 / #979 |
 | R4MH-SINKHOLE-CACHE-LIMIT | macOS helper | P2 | tooling/scripts/core-helper/SelectiveFailOpen.swift:159 | DNS hold cannot cover cached/literal/DoH traffic alone | duplicate accepted SFO-1; IP route omission separately fixed #1110 |
@@ -47,7 +47,7 @@ Generated 2026-10-01 00:54 MT from the run's findings.tsv / prs.tsv.
 | R4MH-U02 | macOS helper | P2 | tooling/scripts/core-helper/UpdateTransaction.swift:44 | Installed update floor reread after seal verification | duplicate #896 / #979 |
 | R4MH-U03 | macOS client | P2 | apps/macos/Tono/Models/UpdateContractV1.swift:164 | Protected Offline update cannot commit after startup release | duplicate #795 |
 | R4MH-U04 | macOS helper | P1 | tooling/scripts/core-helper/UpdateRuntime.swift:95 | Pending-update automatic cleanup removes AI hold | duplicate #1099 |
-| R4MH-U05 | macOS helper | P2 | tooling/scripts/core-helper/KillSwitchManager.swift:703 | Interrupted automatic release loses durable disposition | duplicate #1078 |
+| R4MH-U05 | macOS helper | P2 | tooling/scripts/core-helper/KillSwitchManager.swift:703 | Interrupted automatic release loses durable disposition | duplicate #1078 / fixed #1136 |
 | R4MH-U06 | macOS client | P2 | apps/macos/Tono/Core/HelperManager.swift:259 | Abandoned legacy upgrade removes AI hold | duplicate #1071 |
 | R4MH-U07 | macOS helper | P2 | tooling/scripts/core-helper/UpdateTransaction.swift:409 | Retirement clears retry owner before cleanup | duplicate fixed #1064 |
 | R4MH-U08 | macOS helper | — | tooling/scripts/core-helper/HelperPower.swift:15 | Update execute/commit nested power observations deadlock | false-positive recursive power lock |
@@ -96,3 +96,4 @@ Generated 2026-10-01 00:54 MT from the run's findings.tsv / prs.tsv.
 | R4MH-CALLER-DNS-DEADLINE | macOS client | — | apps/macos/Tono/Services/ProtectedSystemResolver.swift:111 | Blocked DNS setup queue prevents cleanup restoration | false-positive deadline/cancel resumes independently; helper/coordinator DNS cleanup uses separate IPC |
 | R4MH-CALLER-DNS-LATE-PROOF | macOS client | — | apps/macos/Tono/Services/ProtectedSystemResolver.swift:164 | Old DNS callback grants newer connection readiness | false-positive terminal identity arbitration plus query/connect cancellation guards |
 | R4MH-CALLER-DEFERRED-ADVISORY | macOS client | — | apps/macos/Tono/Services/AppState.swift:1766 | Deferred advisory mutates later session after disconnect | false-positive generation guard; discarded bounded read-only response has no network-policy effects |
+| R4MH-CONTRACT-METADATA-MISMATCH | macOS build | P2 | tooling/scripts/build-core-helper.sh:57 | Matching helper hash with contradictory recorded/source version passes guard | real-unfixed #1152 build validation outside assigned compiled sources; own branch metadata corrected |
