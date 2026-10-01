@@ -1758,10 +1758,24 @@ final class AppState {
             let controllerResult: ProbeCheck
             if case .ok = tun {
                 controllerResult = controller ?? .ok
-                // The tunnel is already proved. A delay sample after that
-                // does not sit on the handshake the probe just paid for.
+                // The tunnel is already proved. Wait so the first page does not
+                // share that tunnel with the advisory /delay handshake.
                 if controllerTask == nil, let advisoryProbe {
-                    _ = advisoryProbe()
+                    let capturedGeneration = generation
+                    Task { @MainActor in
+                        do {
+                            try await Task.sleep(for: .milliseconds(
+                                ProtectedConnectivity.advisoryDelayDeferralMilliseconds
+                            ))
+                        } catch {
+                            return
+                        }
+                        guard !Task.isCancelled else { return }
+                        guard capturedGeneration == self.connectionCoordinator.protectionOperationGeneration else {
+                            return
+                        }
+                        _ = advisoryProbe()
+                    }
                 }
             } else if includeMixed {
                 if let controller {
