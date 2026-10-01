@@ -5,7 +5,7 @@ import { Panel, type PanelState } from '@/components/ops/Panel';
 import { Segmented } from '@/components/ops/Segmented';
 import { copy } from '@/copy/copy';
 import type { SloResponseDto } from '@/lib/api-slo';
-import { formatDate, formatDay, formatRate, formatTally } from '@/lib/display';
+import { formatUtcDate, formatUtcDay, formatRate, formatTally } from '@/lib/display';
 import { dailyAttempts, dailyRate, keysByAttempts, rateDomain } from '@/lib/slo';
 import type { Resource } from '@/lib/use-resource';
 
@@ -86,15 +86,16 @@ export function NodeQualityBand({
               series={series}
               domain={domain}
               format={formatRate}
-              when={formatDate}
-              tick={formatDay}
+              when={formatUtcDate}
+              tick={formatUtcDay}
+              tickOffsetSec={0}
               label={words.rateChartLabel(rangeWord)}
               height={HEIGHT}
             />
           </Panel>
           <Panel title={words.attemptsChart} description={words.attemptsChartLead} {...panel}>
             <Bars
-              columns={attempts.map((day) => ({ key: String(day.dayAt), label: formatDay(day.dayAt), values: day.values }))}
+              columns={attempts.map((day) => ({ key: String(day.dayAt), label: formatUtcDay(day.dayAt), values: day.values }))}
               stacks={carriers.map((key) => ({ key, name: carrierName(key) }))}
               format={formatTally}
               label={words.attemptsChartLabel(rangeWord)}

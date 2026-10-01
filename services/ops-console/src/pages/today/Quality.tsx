@@ -7,8 +7,8 @@ import { Spark } from '@/components/ops/Spark';
 import { copy } from '@/copy/copy';
 import { sloApi, type SloResponseDto } from '@/lib/api-slo';
 import {
-  formatDate,
-  formatDay,
+  formatUtcDate,
+  formatUtcDay,
   formatLatency,
   formatMinutes,
   formatRate,
@@ -151,15 +151,16 @@ export function QualityBand() {
               series={series}
               domain={domain}
               format={formatRate}
-              when={formatDate}
-              tick={formatDay}
+              when={formatUtcDate}
+              tick={formatUtcDay}
+              tickOffsetSec={0}
               label={words.rateChartLabel(rangeWord)}
               height={220}
             />
           </Panel>
           <Panel title={words.attemptsChart} description={words.attemptsChartLead} bodyHeight={220} {...panel}>
             <Bars
-              columns={attempts.map((day) => ({ key: String(day.dayAt), label: formatDay(day.dayAt), values: day.values }))}
+              columns={attempts.map((day) => ({ key: String(day.dayAt), label: formatUtcDay(day.dayAt), values: day.values }))}
               stacks={carriers.map((key) => ({ key, name: carrierName(key) }))}
               format={formatTally}
               label={words.attemptsChartLabel(rangeWord)}
@@ -171,7 +172,7 @@ export function QualityBand() {
           </Panel>
           <Panel title={words.outageChart} description={words.outageChartLead} bodyHeight={200} {...panel}>
             <Bars
-              columns={outage.map((day) => ({ key: String(day.dayAt), label: formatDay(day.dayAt), values: [day.minutes] }))}
+              columns={outage.map((day) => ({ key: String(day.dayAt), label: formatUtcDay(day.dayAt), values: [day.minutes] }))}
               stacks={[{ key: 'outage', name: words.outageStack, tone: 'sev' }]}
               format={formatMinutes}
               scale="minutes"
