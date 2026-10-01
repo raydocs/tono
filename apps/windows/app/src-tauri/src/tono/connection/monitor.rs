@@ -20,6 +20,7 @@ use crate::tono::{
     connection_health::{
         CoreSample, HealthLegs, NetworkChangeOutcome, NetworkEventProbeEffect, NetworkEventProbePlan,
         apply_network_event_probe,         classify_core_sample, commit_core_baseline, connection_loop_continues, core_change_fires,
+        core_identity_change_owned,
         health_threshold_reached, kill_switch_unhealthy_for_monitor, may_recover_in_place,
         monitor_requires_reconnect, network_event_fires, next_network_events_counter,
         owned_direct_reload_in_flight,
@@ -870,7 +871,7 @@ pub(super) async fn network_monitor_loop(state: Arc<TonoState>, app: AppHandle) 
     let mut last_in_place_recovery: Option<std::time::Instant> = None;
     loop {
         interval.tick().await;
-        let (owned_direct_reload, captured_connect_generation) = {
+        let (owned_direct_reload, captured_connect_generation, captured_reload_marker) = {
             let inner = state.lock().await;
             if !inner.fsm.status().is_connected {
                 return;
@@ -882,6 +883,7 @@ pub(super) async fn network_monitor_loop(state: Arc<TonoState>, app: AppHandle) 
                     std::time::Instant::now(),
                 ),
                 inner.connect_generation,
+                inner.direct_reload_until,
             )
         };
         let snapshot = match service::tono_service_status_snapshot().await {
@@ -1017,7 +1019,18 @@ pub(super) async fn network_monitor_loop(state: Arc<TonoState>, app: AppHandle) 
             } else {
                 0
             };
-            let core_changed = !first_sample && core_change_fires(sample, missing_core_samples);
+            // #1228: a sing-box DIRECT replacement changes the Core pid on purpose. While this
+            // session owns that reload, or it started or ended during this tick, defer the change
+            // and keep the old baseline: the reload adopts the proved new pid before it clears,
+            // and anything else still fires on the first tick after.
+            let core_change_owned = core_identity_change_owned(
+                owned_direct_reload,
+                captured_reload_marker,
+                inner.direct_reload_until,
+                inner.connect_generation,
+                std::time::Instant::now(),
+            );
+            let core_changed = !first_sample && !core_change_owned && core_change_fires(sample, missing_core_samples);
 
             // P0-13: the first change inside the window invalidates Connected.
             // A later change in that window stays pending. Consuming the
@@ -1034,6 +1047,7 @@ pub(super) async fn network_monitor_loop(state: Arc<TonoState>, app: AppHandle) 
                 invalidated,
             );
             if (sample != CoreSample::Missing || core_changed)
+                && (first_sample || !core_change_owned)
                 && commit_core_baseline(first_sample, core_changed, invalidated)
             {
                 inner.last_core_pid = snapshot.core_pid;

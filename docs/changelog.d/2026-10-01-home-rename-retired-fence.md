@@ -1,0 +1,11 @@
+## 2026-10-01 · A bound catalog home cannot be renamed to a fleet-retired node
+- Ownership: ops plan; control-plane shared-admin home exits.
+- Source: baseline `origin/main`; branch `hunt/claude-be-home-rename-fence`. Source only.
+- Defect fix: the shared-admin home PATCH could rename a bound catalog home to a retired node's catalog name, which skipped #1170's bind-time fence and left the user's catalog pointing at a removed node (CBS-CP-01). Such a rename now returns 409 `HOME_EXIT_INACTIVE` and changes nothing.
+- Added/optimized: none. Edits that keep the name, unbound homes and socks5 homes are unchanged.
+- Engineering/tests: one worker vitest, `refuses renaming a bound catalog home to a fleet-retired node name`. It fails on the old code (200) and passes with the fix.
+- Verification: macOS, local miniflare D1.
+  - `npm run typecheck` passed.
+  - `npx vitest run test/worker.test.ts test/ops-jobs.test.ts`: 232 passed.
+- Candidate/publication: no deploy, publication or new candidate.
+- Remaining limits: existing rows that already carry a retired name are not rewritten.

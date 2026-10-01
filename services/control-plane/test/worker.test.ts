@@ -3445,6 +3445,33 @@ ${nameLine}
     expect((await admin(`home-exits/${homeBId}`, undefined, 'DELETE')).status).toBe(204);
   });
 
+  it('refuses renaming a bound catalog home to a fleet-retired node name', async () => {
+    const yaml = `proxies:
+  - name: "Home Rename A"
+    type: vless
+    server: 8.8.8.8
+    port: 443
+    uuid: {{TONO_CLIENT_UUID}}
+    tls: true
+`;
+    expect((await admin('exit-catalog', { yaml, expectedRevision: 0 }, 'PUT')).status).toBe(200);
+    const home = await admin('home-exits', { proxyName: 'Home Rename A', displayName: '家庭 rename' });
+    expect(home.status).toBe(201);
+    const homeId = ((await home.json()) as any).homeExit.id;
+    const owner = await createAccount('home-rename-owner');
+    expect((await admin(`users/${owner.user.id}/home-binding`, { homeExitId: homeId }, 'PUT')).status).toBe(201);
+    await env.DB.prepare(
+      `INSERT INTO ops_node_profiles(id, catalog_name, status, created_at, updated_at)
+       VALUES('profile-retired-rename', 'Retired Fleet Node', 'retired', unixepoch(), unixepoch())`,
+    ).run();
+
+    const renamed = await admin(`home-exits/${homeId}`, { proxyName: 'Retired Fleet Node' }, 'PATCH');
+    expect(renamed.status).toBe(409);
+    expect((await renamed.json() as any).error.code).toBe('HOME_EXIT_INACTIVE');
+    const row = await env.DB.prepare('SELECT proxy_name FROM home_exits WHERE id = ?').bind(homeId).first<any>();
+    expect(row.proxy_name).toBe('Home Rename A');
+  });
+
   it('keeps a retired home exit and its hy2 twin out of other accounts\' catalogs', async () => {
     const yaml = `proxies:
   - name: "Shared JP"

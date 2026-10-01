@@ -110,6 +110,9 @@ jobs:
       - name: Verify paired manifest signatures and artifact binding
         run: node --test ../../../tooling/scripts/tests/desktop-update-v1.test.mjs
 
+      - name: Verify Tauri JS plugins match their Rust crates
+        run: node --test ../../../tooling/scripts/tests/windows-tauri-plugin-versions.test.mjs
+
       - name: Test
         run: pnpm test
 

@@ -48,6 +48,7 @@ final class ProtectedSystemResolverTests: XCTestCase {
         XCTAssertEqual(nextResult, ["203.0.113.8"])
         XCTAssertFalse(ProtectedDNSProbe.containsFakeIP(nextResult ?? []))
         XCTAssertEqual(held.deallocations, 1, "late callback cannot release the old ref twice")
+        await next.drainOwnerQueue() // dispose runs on the owner queue after the waiter resumes
         XCTAssertEqual(next.deallocations, 1)
     }
 
@@ -122,6 +123,7 @@ final class ProtectedSystemResolverTests: XCTestCase {
         await second.value
         XCTAssertEqual(secondResult, ["203.0.113.8"], "old fake-IP cannot prove the new SYSTEM request")
         XCTAssertFalse(ProtectedDNSProbe.containsFakeIP(secondResult ?? []))
+        await next.drainOwnerQueue() // dispose runs on the owner queue after the waiter resumes
         XCTAssertEqual(next.deallocations, 1)
     }
 
