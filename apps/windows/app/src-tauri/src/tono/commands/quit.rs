@@ -492,6 +492,7 @@ mod quit_tests {
                 endpoints: Vec::new(),
                 direct_endpoint_digest: String::new(),
                 last_error: None,
+                reconnect_after_release: false,
             }),
             network_events: Default::default(),
         };
