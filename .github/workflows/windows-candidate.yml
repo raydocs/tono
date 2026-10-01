@@ -178,15 +178,14 @@ jobs:
           }
           $version = node -p "require('./package.json').version"
           $measureArgs = @(
-            '../../../tooling/scripts/desktop-update-v1.mjs', 'measure',
             '--version', $version, '--source', $env:GITHUB_SHA, '--sequence', $env:TONO_UPDATE_RELEASE_SEQUENCE,
-            '--target', 'windows-x86_64', '--artifact', $installer[0].FullName,
+            '--artifact', $installer[0].FullName,
             '--app', $components['WINDOWS_APP'], '--core', $components['WINDOWS_CORE'],
             '--privileged', $components['WINDOWS_SERVICE'],
             '--output', 'target/release/bundle/nsis/update-target.windows-x86_64.json'
           )
           if ($components['WINDOWS_SING_BOX']) { $measureArgs += @('--sing-box', $components['WINDOWS_SING_BOX']) }
-          node @measureArgs
+          node ../../../tooling/scripts/desktop-update-v1.mjs measure --target windows-x86_64 @measureArgs
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
