@@ -10,6 +10,7 @@ import {
 } from '../src/ops/contract';
 import { runOpsCron } from '../src/ops/cron';
 import { ledgerCsv } from '../src/ops/ledger';
+import { postLedgerReverse } from '../src/ops/handlers/ledger';
 
 const ACCESS_TEAM_DOMAIN = 'test-team.cloudflareaccess.com';
 const ACCESS_AUDIENCE = 'test-access-audience-0001';
@@ -405,6 +406,36 @@ describe('ops ledger, month close, live FX', () => {
     const reversed = await ops(`ledger/${entry.id}/reverse`, json({ note: 'undo' }));
     expect(reversed.status).toBe(409);
     expect((await reversed.json() as { error: { code: string } }).error.code).toBe('MONTH_CLOSED');
+  });
+
+  it('does not stamp a reversal when month close wins after its preflight', async () => {
+    const created = await ops('ledger', json({
+      kind: 'revenue', category: 'plan', subjectType: 'user', subjectId: 'u-1',
+      amountMinor: 800, currency: 'CNY', month: MONTH(),
+    }));
+    expect(created.status).toBe(201);
+    const entry = assertLedgerEntry(await created.json());
+    const real = db();
+    const racingDb = new Proxy(real, {
+      get(target, key) {
+        const value = Reflect.get(target, key, target);
+        if (key !== 'batch') return typeof value === 'function' ? value.bind(target) : value;
+        return async (statements: D1PreparedStatement[]) => {
+          expect((await ops(`months/${MONTH()}/close`, json({ notes: 'won the race' }))).status).toBe(200);
+          return target.batch(statements);
+        };
+      },
+    });
+    await expect(postLedgerReverse(
+      new Request(`https://test/api/v1/ops/ledger/${entry.id}/reverse`, json({ note: 'undo' })),
+      { ...(env as unknown as Env), DB: racingDb }, entry.id, { email: ACCESS_ADMIN_EMAIL },
+    )).rejects.toMatchObject({ status: 409, code: 'MONTH_CLOSED' });
+
+    const original = await real.prepare('SELECT reversed_by FROM ops_ledger_entries WHERE id = ?')
+      .bind(entry.id).first<{ reversed_by: string | null }>();
+    expect(original?.reversed_by).toBeNull();
+    expect(await real.prepare('SELECT id FROM ops_ledger_entries WHERE reverses = ?')
+      .bind(entry.id).first()).toBeNull();
   });
 
   it('rejects a concurrent second reverse', async () => {
