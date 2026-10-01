@@ -2740,6 +2740,9 @@ async fn release_unproven_wanted_session_unlocked() -> Result<()> {
     *armed_guard() = None;
     TUNNEL_PERMIT_RENDERED.store(false, Ordering::Relaxed);
     RECONNECT_AFTER_RELEASE.store(true, Ordering::Release);
+    // WFP is already gone. Recovery keeps only the existing narrow AI hold;
+    // its best-effort installation cannot refuse or undo the general release.
+    crate::core::selective_layer::finish_release(true).await;
     let tombstone = crash_recovery_tombstone();
     match atomic_write(&intent_path(), &serde_json::to_vec_pretty(&tombstone)?).await {
         Ok(()) => {
@@ -2943,6 +2946,9 @@ async fn release_general_traffic_unlocked(reason: &str) -> Result<()> {
     TUNNEL_PERMIT_RENDERED.store(false, Ordering::Relaxed);
     RESTORED_BARRIER_UNPROVEN.store(false, Ordering::Release);
     note_verify(false);
+    // Crash/corrupt-state recovery must retain the secondary AI floor just like
+    // other non-strict failure releases, after the general block is removed.
+    crate::core::selective_layer::finish_release(true).await;
     Ok(())
 }
 
@@ -4058,6 +4064,7 @@ mod tests {
     }
 
     async fn cleanup() {
+        crate::core::selective_layer::remove().await;
         TEST_REMOVE_FAILURE.store(false, Ordering::Relaxed);
         TEST_REMOVE_ATTEMPTS.store(0, Ordering::Relaxed);
         TEST_RESIDUAL_FILTER_KEYS.lock().unwrap().clear();
@@ -4173,6 +4180,10 @@ mod tests {
             "no Core process and no replay releases before the cap"
         );
         assert!(released.reconnect_after_release);
+        assert!(
+            crate::core::selective_layer::test_hold_active(),
+            "an unproven Core must leave AI destinations blocked after general traffic is released"
+        );
         let on_disk: IntentRecord =
             serde_json::from_slice(&tokio::fs::read(intent_path()).await?)?;
         assert!(!on_disk.wanted);
@@ -4825,6 +4836,12 @@ mod tests {
         );
         assert!(!status().await.wanted);
         assert_eq!(tokio::fs::read(intent_path()).await?, b"{ not json");
+        assert!(
+            crate::core::selective_layer::test_hold_active(),
+            "crash recovery must retain the narrow AI hold after opening general traffic"
+        );
+        release().await?;
+        assert!(!crate::core::selective_layer::test_hold_active());
         cleanup().await;
         Ok(())
     }
@@ -6439,6 +6456,7 @@ mod tests {
     /// "Locked with the permit retracted". `tunnel_permit_rendered` changes only after the exact
     /// install/verify operation succeeds, never while merely constructing an expected model.
     #[tokio::test]
+    #[serial]
     async fn the_status_flag_tracks_what_the_last_exact_install_proved() {
         let running = CoreInstance {
             pid: 90,
