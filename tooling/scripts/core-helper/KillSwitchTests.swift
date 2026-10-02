@@ -1330,6 +1330,24 @@ extension KillSwitchManager {
                     "self-test: IGMP or LAN discovery multicast is not passed with a tunnel\n".utf8
                 ))
             }
+            // A stateful pass creates state from a SYN only (`flags S/SA` is
+            // the default), so a TCP connection that predates the arm, or
+            // whose state a flush removed, matched no rule and was dropped by
+            // the final block. The outbound loopback, LAN and link-local
+            // passes therefore keep no state.
+            let establishedFlowNeedles = [
+                "pass out quick on lo0 all no state label \"tono-loopback\"",
+                "pass out quick inet to { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16 } no state label \"tono-lan\"",
+                "pass out quick inet6 to fe80::/10 no state label \"tono-linklocal\"",
+                "pass out quick inet6 to { ff00::/8, fc00::/7 } no state label \"tono-linklocal\"",
+            ]
+            let establishedFlowsSurvive = establishedFlowNeedles.allSatisfy(cloudRules.contains)
+                && rules.contains(establishedFlowNeedles[0])
+            if !establishedFlowsSurvive {
+                FileHandle.standardError.write(Data(
+                    "self-test: an outbound loopback, LAN or link-local pass still needs a SYN\n".utf8
+                ))
+            }
             // The supervisor reinstalls saved state before any TUN exists,
             // and only while the Core is running. Boot, launch and status()
             // do not. A saved utun that is not up must render the no-tunnel
@@ -1541,6 +1559,7 @@ extension KillSwitchManager {
                 && continuityOffWithoutTunnel
                 && continuityOnWithTunnel
                 && lanDiscoveryHolds
+                && establishedFlowsSurvive
                 && bootRestoreHasNoTunnelPass
                 && lanDNSBlockedFirst
                 && emergencyRules == emergencyExpected
