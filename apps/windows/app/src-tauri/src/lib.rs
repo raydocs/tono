@@ -671,14 +671,15 @@ pub fn run() {
                     // Claim the single-flight synchronously before returning to Tao. Cleanup runs
                     // on the async runtime so the native event loop keeps pumping paint, drag and
                     // minimize messages while Service/Core shutdown completes.
-                    handle::Handle::global().set_is_exiting();
-                    AsyncHandler::spawn(move || async move {
-                        // `feat::quit` is the sole explicit-release owner. A second release here
-                        // used to consume another 2.5 s budget and could race the Service cleanup.
-                        // The barrier may already be released while the FSM still claims
-                        // protection; re-sync only when quitting was actually cancelled.
-                        feat::quit_or_resync().await;
-                    });
+                    if let Some(claim) = feat::claim_exit_request() {
+                        AsyncHandler::spawn(move || async move {
+                            // `feat::quit` is the sole explicit-release owner. A second release here
+                            // used to consume another 2.5 s budget and could race the Service cleanup.
+                            // The barrier may already be released while the FSM still claims
+                            // protection; re-sync only when quitting was actually cancelled.
+                            feat::quit_or_resync_claimed(claim).await;
+                        });
+                    }
                 }
             }
         }
