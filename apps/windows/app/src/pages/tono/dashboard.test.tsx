@@ -437,7 +437,7 @@ describe('dashboard connecting pill', () => {
     renderDashboard()
 
     const pill = screen.getByRole('button', { name: /^Connecting/ })
-    expect(screen.queryByRole('button', { name: /^Cancel/ })).toBeNull()
+    expect(pill.textContent).not.toMatch(/Cancel/)
     expect(pill.getAttribute('aria-disabled')).toBe('true')
     expect(
       screen.getByText(

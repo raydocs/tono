@@ -847,6 +847,34 @@ const DashboardPage = () => {
           >
             {connectHint}
           </p>
+          {/* Its own control, not the pill: a click on the pill during a slow
+              start is how a live attempt used to be dropped by accident. */}
+          {uiState === 'connecting' && (
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'center',
+                marginTop: 10,
+              }}
+            >
+              <button
+                type="button"
+                className="tono-button"
+                onClick={() => {
+                  // A barrier held from before this attempt is released by
+                  // the same call, so it gets the same confirmation.
+                  if (status?.protectionBlocked) {
+                    requestRelease()
+                  } else {
+                    void handleDisconnect()
+                  }
+                }}
+                style={{ minHeight: 32, padding: '6px 12px', fontSize: 12 }}
+              >
+                {t('tono.dashboard.cancelConnecting')}
+              </button>
+            </div>
+          )}
         </div>
         {/* Failure + backup first. The idle Encrypted DNS hint hides once a
             connect fails, so it never sits above Try backup channel. */}
