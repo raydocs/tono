@@ -277,6 +277,22 @@ extension KillSwitchManager {
             lines.append(
                 "block drop out quick inet proto { tcp, udp } to { 224.0.0.0/24, 239.255.0.0/16, 255.255.255.255 } port { 53, 853 } label \"tono-multicast-dns\""
             )
+            // PF matches a fragment against address-only rules: it skips every
+            // rule with a port or a TCP flag set (xnu `pf_test_fragment`), so
+            // the port blocks above never see one. The stateful LAN pass had
+            // the implicit `flags S/SA` and was skipped too, which left a TCP
+            // fragment for the final block. The stateless passes below have no
+            // flag set, so these two rules keep that outcome: an outbound TCP
+            // fragment to a LAN or link-local destination is dropped on every
+            // interface. TCP sets DF and sizes segments to the path, so an
+            // ordinary connection sends none. UDP fragments are unchanged:
+            // the stateful pass never had a flag set and already matched them.
+            lines.append(
+                "block drop out quick inet proto tcp to { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16 } fragment label \"tono-lan-fragment\""
+            )
+            lines.append(
+                "block drop out quick inet6 proto tcp to { fe80::/10, fc00::/7, ff00::/8 } fragment label \"tono-lan-fragment\""
+            )
             lines.append(
                 "pass out quick inet to { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16 } no state label \"tono-lan\""
             )
