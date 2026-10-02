@@ -1871,12 +1871,16 @@
         Ok(())
     }
 
-    /// Confirmed stop, desired-state write failed, caller is keeping the session. The core
-    /// binary is absent, so the restart cannot be proven. Protected DNS must come back and
-    /// the barrier must stay; a kept session is not full-opened.
+    /// Confirmed stop of an already verified non-strict session, desired-state write failed,
+    /// caller is keeping the session. The core binary is absent, so the restart cannot be
+    /// proven. Protected DNS must come back, and the session must not stay Blocked with no
+    /// Core and no deadline (#1139): the stop queues the epoch-fenced automatic retirement,
+    /// which opens general traffic and keeps the AI hold.
     #[tokio::test]
     #[serial]
-    async fn an_unrecorded_stop_restores_dns_without_dropping_the_barrier() -> Result<()> {
+    async fn an_unrecorded_stop_that_cannot_restart_queues_the_selective_release() -> Result<()> {
+        use crate::core::windows_kill_switch;
+
         reset_dns_state().await;
         test_hooks::set_collected_adapters(vec![adapter("{A}", Some("1.1.1.1"))]);
         test_hooks::set_live_dns_on_loopback(false);
@@ -1889,30 +1893,50 @@
         let owner = unrecorded_stop_owner(91_441);
         crate::core::desired::persist_owner_core_started(&owner, &missing_core_config()).await?;
         arm_for_unrecorded_stop(&owner.key).await?;
-        assert!(crate::core::windows_kill_switch::status().await.wanted);
+        crate::core::manager::set_running_core_identity_for_kill_switch_tests(Some((4242, 1)))
+            .await;
+        windows_kill_switch::lock(None).await?;
+        windows_kill_switch::mark_verified(&owner.key).await?;
+        // The confirmed stop: no Core, and a verified arm has no proof deadline of its own.
+        crate::core::manager::set_running_core_identity_for_kill_switch_tests(None).await;
+        let epoch = windows_kill_switch::core_arm_epoch();
+        assert!(windows_kill_switch::expired_fresh_arm_owner(epoch).is_none());
 
         crate::core::server::recover_after_unrecorded_stop(&owner, false).await?;
 
-        let barrier = crate::core::windows_kill_switch::status().await;
-        assert!(
-            barrier.wanted,
-            "a kept session stays behind the barrier: {barrier:?}"
-        );
         let dns = status().await;
         assert!(
             !dns.snapshot_present,
             "protected DNS must not stay aimed at the dead resolver: {dns:?}"
         );
-        let desired = crate::core::desired::load_owner_desired_state(&owner.key).await?;
-        assert!(desired.core_should_be_running);
         let core = crate::core::manager::CORE_MANAGER.lock().await.status().await;
         assert!(
             core.core_pid.is_none(),
             "the failed restart must not leave a live core: {core:?}"
         );
+        assert_eq!(
+            windows_kill_switch::expired_fresh_arm_owner(epoch).as_deref(),
+            Some(owner.key.as_str()),
+            "the session nothing can restart must be queued for automatic retirement"
+        );
 
-        crate::core::windows_kill_switch::release().await?;
+        // What the next WFP watchdog tick runs.
+        crate::core::server::retire_expired_fresh_arm(epoch).await?;
+        let barrier = windows_kill_switch::status().await;
+        let held = crate::core::selective_layer::test_hold_active();
+        let desired = crate::core::desired::load_owner_desired_state(&owner.key).await?;
+        crate::core::selective_layer::remove().await;
         reset_dns_state().await;
+
+        assert!(
+            !barrier.wanted,
+            "ordinary network must come back once the Core cannot be restarted: {barrier:?}"
+        );
+        assert!(held, "AI services stay blocked after the release");
+        assert!(
+            !desired.core_should_be_running,
+            "the retired Core must not be replayed into the opened network"
+        );
         Ok(())
     }
 
