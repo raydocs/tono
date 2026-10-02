@@ -2085,6 +2085,7 @@ extension AppState {
             }
             protectedReconnectPausedForUserAction = true
             protectedReconnectPauseLiftsOnNetworkChange = false
+            helperRejectedStatusRead = true
             self.connectionCoordinator.protectedReconnectTask?.cancel()
             self.connectionCoordinator.protectedReconnectTask = nil
             self.connectionCoordinator.protectedReconnectID = nil
@@ -2096,6 +2097,7 @@ extension AppState {
                 )
             return false
         case .confirmed(let requiresProtectionRecovery):
+            helperRejectedStatusRead = false
             KillSwitchService.isArmed = requiresProtectionRecovery
             guard !requiresProtectionRecovery else { return false }
             acceptConfirmedExternalProtectionRelease()

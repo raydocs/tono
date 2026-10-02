@@ -34,7 +34,7 @@ struct MenuBarProtectionStatus {
             title = "Waiting to retry…"
             color = TonoStatus.blocked
             symbolName = Self.blockedSymbol
-        } else if appState.isProtectionUnconfirmed {
+        } else if appState.isProtectionUnconfirmed || appState.isProtectionBlockUnreadable {
             kind = .unconfirmed
             title = "Protection unknown"
             color = TonoStatus.blocked
