@@ -1,0 +1,38 @@
+## 2026-10-02 · Release the update-held Windows startup barrier when no update owner is left
+- Ownership: SHIP_PLAN §2 item 10; Windows failed-update recovery (`R4-WIN-UPDATE-RECOVERY-LOOP`, [#1308](https://github.com/raydocs/tono/issues/1308), residual of #1297).
+- Source: baseline `361a64b8`; branch `fix/win-update-held-barrier-1308`, [#1316](https://github.com/raydocs/tono/pull/1316); not yet merged.
+- Defect fix: on a non-strict machine, the unverified barrier restored at Service start stayed Blocked with no timeout in three cases. Now `update::startup_barrier_release_owed` owes the release (ordinary network, AI hold kept) once no update owner is left:
+  - `Consumed` below the recovery bound whose recovery executor could not start, or ended without stopping this Service. Startup launches recovery at most once per Service start, and the existing guard waits while that child runs.
+  - `RolledBack` whose rollback finalization did not finish, once its executor is conclusively gone.
+  - `Replaced` with no live successor App and a `Connected` obligation: the App re-proves it after adoption by reconnecting.
+- Kept: a live recorded executor, a running recovery child, a live successor, or a probe that cannot tell still holds the barrier. Strict is unchanged. The existing watchdog re-check, store-lock fence and conclusive-death probe are reused; no new mechanism.
+- New/optimization: none.
+- Engineering/tests: `update_startup_barrier_release_owed_when_consumed_recovery_cannot_start`, `update_startup_barrier_release_owed_when_rollback_finalization_stalls`, `update_startup_barrier_release_owed_when_replaced_has_no_successor` (Windows CI). The old below-bound `Consumed` assertion in `update_startup_barrier_release_waits_only_for_a_live_executor` encoded this defect and was removed.
+- Verification: `rustfmt --edition 2024` shows no diffs on the changed lines. No local cargo on the MacBook; Windows CI runs the tests.
+- Candidate/publication: source only; no new candidate.
+- Limits:
+  - needs-hardware: a fault-injected executor (missing or unverifiable `executor.exe` in the attempt directory), and a stalled rollback finalizer.
+  - `Replaced` with no successor and a `ProtectedOffline` or `Unprotected` obligation still holds the barrier below the bound. Commit requires the observed protection to equal that obligation, and lifecycle stays fenced for it, so a release here would leave the record unable to commit (the #1307 repair gap). A `ProtectedOffline` obligation means the network was already held offline when the update was prepared. It still has no timeout: a forward recovery that proves the target is not a counted failure, so the bound does not end it. Only an adopting App or an owner decision closes it.
+  - A recovery or finalizer process that stays alive but hung still holds the barrier: it is a live owner.
+- 2026-10-02 continuation (Codex review at `06c416d8`, partial coverage; two majors):
+  - Unregistered adopter: `successor_image == None` (or a dead recorded successor) no longer reads as "no adopter". The `Replaced` release also needs a clean process scan: no process whose image path is exactly the installed App path (the path `authenticate_successor` admits) and that started after the publication clock (`security::adopter_may_be_running`). A failed snapshot, or an App-named process that cannot be inspected, counts as an adopter. The fence re-check runs the same scan under the store lock, and Adopt takes that lock, so an App that registers during the release fails Adopt with `StoreBusy` instead of losing its barrier.
+  - `Replaced` obligations: the release now covers every obligation except `ProtectedOffline`. An `Unprotected` Commit needs the barrier gone, so holding it never helped.
+  - `ProtectedOffline` stays open. The App commits it right after Adopt (`app/src-tauri/src/tono/commands/update.rs:350-355`). Commit proves `ProtectedOffline` only while WFP is still wanted (`service/src/core/update.rs:316-331`), and lifecycle stays fenced for that obligation (`:56-63`). Releasing at boot, before the user logs in and the App starts, would break every healthy adoption of this kind across a reboot.
+  - Tests: `update_startup_barrier_release_owed_when_replaced_has_no_successor` now also asserts that an unregistered adopter keeps the barrier. The scan itself has no unit test: it reads the live process table on Windows only.
+  - New residual: an App started during a fenced release (DNS restore of up to 40 s, then WFP removal) gets `StoreBusy` on its first Adopt and keeps the record unadopted until its restore runs again. The network is already released by then.
+- 2026-10-02 continuation (Codex full review at `b385616c`; scope narrowed by the coordinator, stricter option):
+  - Case 3 (`Replaced` with no successor) is reverted to its `main` behaviour and stays open in [#1308](https://github.com/raydocs/tono/issues/1308). The App process scan, its `security.rs` enumeration, and the `Connected`/`Unprotected` release paths are removed. Reasons from the review:
+    - After the last check, the release waits for DNS (up to 40 s) and then removes WFP. An App started in that window is not blocked by the store lock. Its Adopt fails on that lock instead, and the barrier is still removed.
+    - A `Process32FirstW`/`Process32NextW` failure read as "no App".
+    - A `ProtectedOffline` obligation cannot be bounded: a recovery that proves the target returns without counting a failure.
+  - Exhausted recovery never frees a live adopter (Codex major 1). It also exists on `main` from #1297:
+    - `Replaced` at the bound is now released only when the recorded successor is also conclusively gone.
+    - A `recovery-runs` count that cannot be read or parsed is inconclusive, not exhausted, so nothing is released that tick. Startup still refuses to relaunch recovery on such a count (`Store::recovery_runs` errors).
+  - Closed by this PR:
+    - case 1 (`Consumed` recovery that cannot start below the bound);
+    - case 2 for a finalizer that is conclusively dead or never started;
+    - the exhausted-count issue above.
+  - Still open:
+    - case 3;
+    - a finalizer or recovery that stays alive but hung. It is a live owner and holds the barrier.
+  - Tests: `update_exhausted_recovery_never_frees_a_live_adopter` replaces `update_startup_barrier_release_owed_when_replaced_has_no_successor`.
