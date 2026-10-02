@@ -114,20 +114,7 @@ final class UpdateRuntime {
             guard !requiresTUN || if_nametoindex("utun199") != 0 else {
                 throw HelperFailure.invalid("Successor TUN is not present.")
             }
-            // Probe through the actual owned runtime's selected exit, not an
-            // App claim or an unauthenticated localhost listener. The root
-            // config secret never appears in command arguments or diagnostics.
-            let bytes = try UpdateStorage.read(runtimeConfigPath, maximum: 8 * 1024 * 1024)
-            guard let config = try JSONSerialization.jsonObject(with: bytes) as? [String: Any],
-                  let experimental = config["experimental"] as? [String: Any],
-                  let controller = experimental["clash_api"] as? [String: Any],
-                  let address = controller["external_controller"] as? String, address.hasPrefix("127.0.0.1:"),
-                  let secret = controller["secret"] as? String,
-                  let url = URL(string: "http://\(address)/proxies/Tono-Exit/delay?url=https%3A%2F%2Fwww.gstatic.com%2Fgenerate_204&timeout=5000") else {
-                throw HelperFailure.invalid("Cannot inspect successor runtime configuration.")
-            }
-            var request = URLRequest(url: url, timeoutInterval: 7)
-            request.setValue("Bearer \(secret)", forHTTPHeaderField: "Authorization")
+            let request = try Self.exitDelayRequest()
             let result = UpdateProbeResult()
             let session = URLSession(configuration: .ephemeral)
             defer { session.invalidateAndCancel() }
@@ -138,6 +125,33 @@ final class UpdateRuntime {
             guard result.wait() else { throw HelperFailure.invalid("Successor exit traffic was not verified.") }
         }
         return protection
+    }
+
+    /// A delay test through the owned runtime's selected exit, not an App
+    /// claim or an unauthenticated localhost listener. The root config secret
+    /// never appears in command arguments or diagnostics.
+    static func exitDelayRequest() throws -> URLRequest {
+        let bytes = try UpdateStorage.read(runtimeConfigPath, maximum: 8 * 1024 * 1024)
+        guard let config = try JSONSerialization.jsonObject(with: bytes) as? [String: Any],
+              let experimental = config["experimental"] as? [String: Any],
+              let controller = experimental["clash_api"] as? [String: Any],
+              let address = controller["external_controller"] as? String, address.hasPrefix("127.0.0.1:"),
+              let secret = controller["secret"] as? String,
+              let url = URL(string: "http://\(address)/proxies/Tono-Exit/delay?url=https%3A%2F%2Fwww.gstatic.com%2Fgenerate_204&timeout=5000") else {
+            throw HelperFailure.invalid("Cannot inspect successor runtime configuration.")
+        }
+        var request = URLRequest(url: url, timeoutInterval: 7)
+        request.setValue("Bearer \(secret)", forHTTPHeaderField: "Authorization")
+        return request
+    }
+
+    /// Whether the controller answered that delay test with a measured delay.
+    static func exitDelayVerified(data: Data?, response: URLResponse?, error: Error?) -> Bool {
+        guard error == nil, (response as? HTTPURLResponse)?.statusCode == 200,
+              let data, data.count < 4096,
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let delay = object["delay"] as? Int else { return false }
+        return delay >= 0
     }
 
     /// Read persisted AND active settings for every network service. No
@@ -225,10 +239,7 @@ private final class UpdateProbeResult: @unchecked Sendable {
 
     func finish(data: Data?, response: URLResponse?, error: Error?) {
         lock.lock()
-        if error == nil, (response as? HTTPURLResponse)?.statusCode == 200,
-           let data, data.count < 4096,
-           let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-           let delay = object["delay"] as? Int, delay >= 0 { verified = true }
+        if UpdateRuntime.exitDelayVerified(data: data, response: response, error: error) { verified = true }
         lock.unlock()
         done.signal()
     }
