@@ -1137,6 +1137,17 @@ mod tests {
         assert!(sustained >= Duration::from_secs(2));
     }
 
+    /// An exit that dies behind a live tunnel leaves no local evidence, so only the periodic probe
+    /// finds it. The wait for that probe plus the confirming probes is how long the UI says
+    /// Connected while nothing loads; keep it near a minute (macOS probes every ten seconds).
+    #[test]
+    fn a_silently_dead_exit_is_confirmed_within_about_a_minute() {
+        let worst_case = super::monitor::EXIT_PROBE_INTERVAL
+            + NETWORK_MONITOR_INTERVAL
+            + TUN_DATA_PLANE_TIMEOUT * HEALTH_FAILURE_THRESHOLD;
+        assert!(worst_case <= Duration::from_secs(70), "{worst_case:?}");
+    }
+
     // ---- H8: one failed observation is one failure ----
 
     #[test]
