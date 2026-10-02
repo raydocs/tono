@@ -279,6 +279,7 @@ extension KillSwitchManager {
         if let labelText = armedLabels {
             for expected in ["tono-loopback", "tono-continuity", "tono-mdns", "tono-igmp",
                              "tono-multicast", "tono-multicast-dns", "tono-linklocal",
+                             "tono-lan-fragment",
                              "tono-tunnel", "tono-control", "tono-exit",
                              "tono-bundle", "tono-block"] {
                 check("labels-report-\(expected)", labelText.contains(expected))
@@ -1352,6 +1353,28 @@ extension KillSwitchManager {
                     "self-test: an outbound loopback, LAN or link-local pass still needs a SYN\n".utf8
                 ))
             }
+            // PF skips every rule with a port or a TCP flag set when it
+            // matches a fragment. The stateful LAN pass had `flags S/SA`, so a
+            // TCP fragment fell to the final block; without state the pass
+            // would match it by address and carry it past the port 53/853
+            // block. TCP fragments to those destinations are dropped first.
+            let tcpFragmentBlocks = [
+                "block drop out quick inet proto tcp to { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16 } fragment label \"tono-lan-fragment\"",
+                "block drop out quick inet6 proto tcp to { fe80::/10, fc00::/7, ff00::/8 } fragment label \"tono-lan-fragment\"",
+            ]
+            let tcpFragmentsStayBlocked: Bool = {
+                guard let firstPass = establishedFlowNeedles.dropFirst()
+                    .compactMap({ cloudRules.range(of: $0)?.lowerBound }).min()
+                else { return false }
+                return tcpFragmentBlocks.allSatisfy { block in
+                    cloudRules.range(of: block).map { $0.lowerBound < firstPass } ?? false
+                } && !tcpFragmentBlocks.contains(where: rules.contains)
+            }()
+            if !tcpFragmentsStayBlocked {
+                FileHandle.standardError.write(Data(
+                    "self-test: a TCP fragment can reach a stateless LAN or link-local pass\n".utf8
+                ))
+            }
             // The supervisor reinstalls saved state before any TUN exists,
             // and only while the Core is running. Boot, launch and status()
             // do not. A saved utun that is not up must render the no-tunnel
@@ -1564,6 +1587,7 @@ extension KillSwitchManager {
                 && continuityOnWithTunnel
                 && lanDiscoveryHolds
                 && establishedFlowsSurvive
+                && tcpFragmentsStayBlocked
                 && bootRestoreHasNoTunnelPass
                 && lanDNSBlockedFirst
                 && emergencyRules == emergencyExpected
