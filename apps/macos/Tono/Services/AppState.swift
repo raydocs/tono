@@ -559,6 +559,23 @@ final class AppState {
             return
         }
         if !isConnected {
+            // A released host can be minutes into the unarmed backoff, and
+            // the network coming back is what ends most of those outages.
+            // Start again from the first delay. Later notifications of the
+            // same transition leave that wait alone, so a flapping network
+            // cannot keep pushing the first probe back. The loop stays
+            // unarmed: no PF, no tunnel.
+            if unarmedReconnectAwaitsNetwork {
+                if connectionCoordinator.unarmedReconnectOwner?.restarted != true {
+                    LocalTrafficAudit.shared.recordEvent(
+                        "unarmed_reconnect_network_kick",
+                        details: auditProtectionDetails()
+                    )
+                    unarmedReconnectAttempt = 0
+                    scheduleUnarmedReconnect(afterNetworkChange: true)
+                }
+                return
+            }
             // PF still armed after the user's Restore internet failed is not
             // a session to recover; only the user's next Connect is (X1-2).
             guard KillSwitchService.isArmed, isTonoReady,

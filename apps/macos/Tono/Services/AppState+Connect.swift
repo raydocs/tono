@@ -1621,6 +1621,7 @@ extension AppState {
                     self.protectedReconnectPauseLiftsOnNetworkChange = false
                     self.connectionCoordinator.unarmedReconnectTask?.cancel()
                     self.connectionCoordinator.unarmedReconnectTask = nil
+                    self.connectionCoordinator.unarmedReconnectOwner = nil
                 }
                 return .stopMonitoring
             } else if let health, !health.wanted, !health.live, KillSwitchService.isArmed {
@@ -2317,7 +2318,20 @@ extension AppState {
         }
     }
 
+    /// Whether a network change may restart the unarmed loop: only a loop
+    /// that still owns the current generation and would still probe.
+    var unarmedReconnectAwaitsNetwork: Bool {
+        guard let owner = connectionCoordinator.unarmedReconnectOwner,
+              owner.generation == connectionCoordinator.protectionOperationGeneration
+        else { return false }
+        return !KillSwitchService.isArmed && !isProtectionBlocked
+            && !protectedReconnectPausedForUserAction
+            && !automaticResumeHeldAfterRestart
+            && !nativeUpdatePending && !RuntimeCleanup.nativeUpdateBlocksConnect
+    }
+
     func scheduleUnarmedReconnect(
+        afterNetworkChange: Bool = false,
         sleep: @escaping @MainActor (TimeInterval) async throws -> Void = { delay in
             try await Task.sleep(for: .seconds(delay))
         }
@@ -2329,7 +2343,14 @@ extension AppState {
         connectionCoordinator.unarmedReconnectTask?.cancel()
         let generation = connectionCoordinator.protectionOperationGeneration
         let initialAttempt = unarmedReconnectAttempt
+        let id = UUID()
+        connectionCoordinator.unarmedReconnectOwner = (id, generation, afterNetworkChange)
         connectionCoordinator.unarmedReconnectTask = Task { [weak self] in
+            defer {
+                if let self, self.connectionCoordinator.unarmedReconnectOwner?.id == id {
+                    self.connectionCoordinator.unarmedReconnectOwner = nil
+                }
+            }
             // This distinct owner may wait for the automatic release. The failed connect or
             // monitor caller cannot: the teardown queue drains that caller before releasing.
             await self?.finishPendingDisconnect()
@@ -2342,7 +2363,11 @@ extension AppState {
                       !self.nativeUpdatePending, !RuntimeCleanup.nativeUpdateBlocksConnect else { return }
                 if self.isConnected || self.isConnecting || self.isDisconnecting { return }
                 if self.protectedReconnectPausedForUserAction { return }
+                // After an unexpected restart only the user reconnects.
+                if self.automaticResumeHeldAfterRestart { return }
                 if KillSwitchService.isArmed || self.isProtectionBlocked { return }
+                // The first wait is over; the next network change restarts the loop again.
+                self.connectionCoordinator.unarmedReconnectOwner?.restarted = false
                 let preferred = self.selectedExitNode()?.name ?? ""
                 let candidates = UnarmedReconnect.tcpCandidateNames(
                     preferred: preferred, remembered: self.unarmedDialName,
@@ -2367,6 +2392,7 @@ extension AppState {
                       self.connectionCoordinator.protectionOperationGeneration == generation,
                       !self.isConnected, !self.isConnecting, !self.isDisconnecting,
                       !self.protectedReconnectPausedForUserAction,
+                      !self.automaticResumeHeldAfterRestart,
                       !self.nativeUpdatePending, !RuntimeCleanup.nativeUpdateBlocksConnect else { return }
                 guard UnarmedReconnect.shouldConnect(
                     tcpReachable: provenName != nil,
