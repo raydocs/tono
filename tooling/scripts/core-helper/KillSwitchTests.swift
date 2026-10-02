@@ -278,7 +278,7 @@ extension KillSwitchManager {
         //    step 1.
         if let labelText = armedLabels {
             for expected in ["tono-loopback", "tono-continuity", "tono-mdns", "tono-igmp",
-                             "tono-multicast", "tono-linklocal",
+                             "tono-multicast", "tono-multicast-dns", "tono-linklocal",
                              "tono-tunnel", "tono-control", "tono-exit",
                              "tono-bundle", "tono-block"] {
                 check("labels-report-\(expected)", labelText.contains(expected))
@@ -1305,25 +1305,29 @@ extension KillSwitchManager {
             }
             // IGMP reports and router queries carry the Router Alert option,
             // and PF drops an IPv4 packet with options unless the rule passing
-            // it says `allow-opts`; the inbound pass must also sit ahead of
-            // `tono-lan`, which would match a router's query first. SSDP and
-            // broadcast discovery leave on their own pass, never on a DNS port.
-            let lanDiscoveryDNSBlock = "block drop out quick on { en0, en7 } inet proto { tcp, udp } to { 224.0.0.0/24, 239.0.0.0/8, 255.255.255.255 } port { 53, 853 } label \"tono-lan-dns\""
-            let lanDiscoveryPass = "pass out quick inet to { 224.0.0.0/24, 239.0.0.0/8, 255.255.255.255 } no state label \"tono-multicast\""
-            let lanDiscoveryNeedles = [
-                "pass out quick inet proto igmp to 224.0.0.0/4 allow-opts no state label \"tono-igmp\"",
-                "pass in quick inet proto igmp to 224.0.0.0/4 allow-opts no state label \"tono-igmp\"",
-                lanDiscoveryDNSBlock,
-                lanDiscoveryPass,
-            ]
+            // it says `allow-opts`. Both IGMP passes must sit ahead of every
+            // pass without it that would match the packet first: the
+            // Continuity interface passes and `tono-lan`. SSDP and broadcast
+            // discovery leave on their own pass, never on a DNS port on any
+            // interface, and only to link-local and Local Scope multicast.
+            let lanDiscoveryDNSBlock = "block drop out quick inet proto { tcp, udp } to { 224.0.0.0/24, 239.255.0.0/16, 255.255.255.255 } port { 53, 853 } label \"tono-multicast-dns\""
+            let lanDiscoveryPass = "pass out quick inet to { 224.0.0.0/24, 239.255.0.0/16, 255.255.255.255 } no state label \"tono-multicast\""
+            let igmpOut = "pass out quick inet proto igmp to 224.0.0.0/4 allow-opts no state label \"tono-igmp\""
+            let igmpIn = "pass in quick inet proto igmp to 224.0.0.0/4 allow-opts no state label \"tono-igmp\""
+            let lanDiscoveryNeedles = [igmpOut, igmpIn, lanDiscoveryDNSBlock, lanDiscoveryPass]
             let lanDiscoveryHolds: Bool = {
                 guard lanDiscoveryNeedles.allSatisfy(cloudRules.contains),
                       !lanDiscoveryNeedles.contains(where: rules.contains),
-                      let igmp = cloudRules.range(of: "label \"tono-igmp\""),
+                      let igmpOutAt = cloudRules.range(of: igmpOut),
+                      let igmpInAt = cloudRules.range(of: igmpIn),
+                      let continuity = cloudRules.range(of: "label \"tono-continuity\""),
                       let lan = cloudRules.range(of: "label \"tono-lan\""),
                       let block = cloudRules.range(of: lanDiscoveryDNSBlock),
                       let pass = cloudRules.range(of: lanDiscoveryPass) else { return false }
-                return igmp.lowerBound < lan.lowerBound && block.lowerBound < pass.lowerBound
+                let firstOptionlessPass = min(continuity.lowerBound, lan.lowerBound)
+                return igmpOutAt.lowerBound < firstOptionlessPass
+                    && igmpInAt.lowerBound < firstOptionlessPass
+                    && block.lowerBound < pass.lowerBound
             }()
             if !lanDiscoveryHolds {
                 FileHandle.standardError.write(Data(
