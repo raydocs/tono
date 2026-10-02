@@ -675,10 +675,16 @@ fn v6_conditions(prefixes: &[([u8; 16], u8)]) -> Vec<Condition> {
 ///     query to those ports is decided by exactly the rules that decided it before this one.
 ///   - The core is blocked from these ranges above the permit. It has no business on the LAN, and
 ///     the reviewed DIRECT permit (rule H) stays bounded to public unicast for the process that
-///     dials on WeChat's behalf. If the core's app id does not resolve, the engine drops this
-///     block with the other app-scoped rules; the core has no endpoint permit then either.
-///   - Inbound is opened for LAN peers only, and Windows Firewall still decides in its own
-///     sublayer; a permit here does not override a block there.
+///     dials on WeChat's behalf. If the core's app id does not resolve, the engine cannot
+///     install this block, and `without_unresolved_apps` withholds the permits with it.
+///   - Inbound is opened for LAN peers only, with the same hole at the peer's DNS ports, and
+///     Windows Firewall still decides in its own sublayer; a permit here does not override a
+///     block there.
+///
+/// What it does not promise: these ranges are private, not on-link. A destination in them that
+/// Windows routes out of the physical adapter (a more specific route, or any ULA, since the
+/// tunnel carries no IPv6) is permitted even when a router forwards it elsewhere. The macOS
+/// anchor permits the same ranges without an interface either.
 fn lan_rules(app_path: &str) -> Vec<FilterSpec> {
     use Condition as C;
     use FilterAction as A;
@@ -711,11 +717,33 @@ fn lan_rules(app_path: &str) -> Vec<FilterSpec> {
             false,
         ));
     }
-    for (tag, layer, addresses) in [
-        ("out-v4", L::AleAuthConnectV4, v4_conditions(&LAN_V4)),
-        ("out-v6", L::AleAuthConnectV6, v6_conditions(&LAN_V6)),
-        ("discovery-v4", L::AleAuthConnectV4, v4_conditions(&LOCAL_DISCOVERY_V4)),
-        ("discovery-v6", L::AleAuthConnectV6, v6_conditions(&[LOCAL_DISCOVERY_V6])),
+    for (tag, description, layer, addresses) in [
+        ("out-v4", "session permit local network", L::AleAuthConnectV4, v4_conditions(&LAN_V4)),
+        ("out-v6", "session permit local network", L::AleAuthConnectV6, v6_conditions(&LAN_V6)),
+        (
+            "discovery-v4",
+            "session permit local network",
+            L::AleAuthConnectV4,
+            v4_conditions(&LOCAL_DISCOVERY_V4),
+        ),
+        (
+            "discovery-v6",
+            "session permit local network",
+            L::AleAuthConnectV6,
+            v6_conditions(&[LOCAL_DISCOVERY_V6]),
+        ),
+        (
+            "in-v4",
+            "session permit local network peers",
+            L::AleAuthRecvAcceptV4,
+            v4_conditions(&LAN_V4),
+        ),
+        (
+            "in-v6",
+            "session permit local network peers",
+            L::AleAuthRecvAcceptV6,
+            v6_conditions(&LAN_V6),
+        ),
     ] {
         let mut conditions = addresses;
         conditions.extend(
@@ -725,25 +753,11 @@ fn lan_rules(app_path: &str) -> Vec<FilterSpec> {
         );
         filters.push(spec(
             format!("session/permit-lan/{tag}"),
-            "session permit local network",
+            description,
             layer,
             WEIGHT_LAN_PERMIT,
             A::Permit,
             conditions,
-            false,
-        ));
-    }
-    for (tag, layer, addresses) in [
-        ("in-v4", L::AleAuthRecvAcceptV4, v4_conditions(&LAN_V4)),
-        ("in-v6", L::AleAuthRecvAcceptV6, v6_conditions(&LAN_V6)),
-    ] {
-        filters.push(spec(
-            format!("session/permit-lan/{tag}"),
-            "session permit local network peers",
-            layer,
-            WEIGHT_LAN_PERMIT,
-            A::Permit,
-            addresses,
             false,
         ));
     }
@@ -1097,6 +1111,40 @@ pub fn diff(current_keys: &[Guid], desired: &[FilterSpec]) -> ChangePlan {
         .copied()
         .collect();
     ChangePlan { install, remove }
+}
+
+/// What the engine applies when an app id did not resolve: `plan` without the rules scoped to
+/// that app. The LAN permits (the only rules at their weight) are sound only under the core
+/// block, so without the core's id they are neither installed nor left installed from an
+/// earlier pass (`expected` supplies their keys; removing an absent filter is a no-op).
+#[cfg_attr(any(not(windows), feature = "test"), allow(dead_code))]
+pub fn without_unresolved_apps(
+    plan: &ChangePlan,
+    expected: &[FilterSpec],
+    core_unresolved: bool,
+    tono_app_unresolved: bool,
+) -> ChangePlan {
+    let lan_permit = |spec: &FilterSpec| core_unresolved && spec.weight == WEIGHT_LAN_PERMIT;
+    let mut remove = plan.remove.clone();
+    for spec in expected.iter().filter(|spec| lan_permit(spec)) {
+        if !remove.contains(&spec.key) {
+            remove.push(spec.key);
+        }
+    }
+    ChangePlan {
+        install: plan
+            .install
+            .iter()
+            .filter(|spec| {
+                !(lan_permit(spec)
+                    || (core_unresolved && spec.conditions.contains(&Condition::AleAppId))
+                    || (tono_app_unresolved
+                        && spec.conditions.contains(&Condition::AleAppIdTonoApp)))
+            })
+            .cloned()
+            .collect(),
+        remove,
+    }
 }
 
 /// `IfOperStatusNotPresent` (ifdef.h).
@@ -2074,6 +2122,7 @@ mod tests {
         assert_eq!(verdict(OutV4, Udp, "239.255.255.250", 1900), Permit, "SSDP");
         assert_eq!(verdict(OutV6, Tcp, "fe80::1", 445), Permit, "link-local IPv6");
 
+        assert_eq!(verdict(InV4, Udp, "192.168.1.1", 53), Block, "a flow from a LAN peer's DNS port");
         assert_eq!(verdict(OutV4, Udp, "192.168.1.1", 53), Block, "the LAN resolver");
         assert_eq!(verdict(OutV4, Tcp, "192.168.1.1", 853), Block, "DNS over TLS on the LAN");
         assert_eq!(verdict(OutV4, Udp, "224.0.0.251", 53), Block, "DNS to a multicast group");
@@ -2100,6 +2149,32 @@ mod tests {
                 config.mode
             );
         }
+    }
+
+    #[test]
+    fn an_unresolved_core_id_withholds_the_lan_permits() {
+        let locked = expected_filters(&config(KillSwitchStatusMode::Locked));
+        // The permits are live from an earlier pass; this one only has to re-add the core block.
+        let installed = locked
+            .iter()
+            .filter(|spec| spec.weight != WEIGHT_CORE_LAN_BLOCK)
+            .map(|spec| spec.key)
+            .collect::<Vec<_>>();
+        let fallback = without_unresolved_apps(&diff(&installed, &locked), &locked, true, false);
+
+        assert!(fallback.install.is_empty(), "the core block cannot be installed without its id");
+        let live = locked
+            .iter()
+            .filter(|spec| installed.contains(&spec.key) && !fallback.remove.contains(&spec.key))
+            .cloned()
+            .collect::<Vec<_>>();
+        let mut core = packet(LayerKind::AleAuthConnectV4, IpProtocol::Tcp, "192.168.1.1", 80);
+        core.app_id_matches = true;
+        assert_eq!(
+            arbitrate(&live, &core),
+            FilterAction::Block,
+            "no core block, so no LAN permit for the core to use"
+        );
     }
 
     #[test]

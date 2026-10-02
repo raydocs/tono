@@ -324,12 +324,15 @@ simplicity and Tono's PF semantics. Rule tables live in
   physical DNS leaks; there is deliberately no extra port-53 block, because
   Windows resolver traffic transitions between loopback and the TUN path.
   While locked with a tunnel, the local network (RFC 1918, link-local, ULA,
-  link-local multicast, SSDP) is permitted at weight 4 on every port except
-  53 and 853, and the core is blocked from it at weight 6 (decision 048).
+  link-local multicast; SSDP on UDP 1900 only) is permitted at weight 4, in
+  both directions, on every remote port except 53 and 853, and the core is
+  blocked from it at weight 6 (decision 048). These ranges are private, not
+  on-link: one that Windows routes out of the physical adapter is permitted.
   WFP arbitrates sublayer-first, so "weighted permits over a floor block" is
   only sound inside a single sublayer.
 - `ALE_AUTH_CONNECT_V4/V6` for the outbound fail-closed boundary; IPv6 is
-  blocked wholesale at WFP (no adapter reconfiguration needed).
+  blocked at WFP apart from NDP/DHCPv6 and the local-network ranges above
+  (no adapter reconfiguration needed).
 - Persistent flags only on the intent floor: the condition-free block-alls
   plus their loopback, DHCP and NDP permits, so a reboot without a running
   service keeps loopback and address configuration working. Every rule

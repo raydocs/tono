@@ -944,19 +944,12 @@ pub(crate) fn install(expected: &[FilterSpec], app_path: &str, tono_app_path: &s
         // Fail closed: install everything except the permits whose app id did not resolve so
         // the block is live, then surface why they are missing. The watchdog will keep
         // retrying the full set.
-        let unresolved = |spec: &FilterSpec| {
-            (app_id.is_err() && spec.conditions.contains(&Condition::AleAppId))
-                || (tono_app_id.is_err() && spec.conditions.contains(&Condition::AleAppIdTonoApp))
-        };
-        let without_app_rules = model::ChangePlan {
-            install: plan
-                .install
-                .iter()
-                .filter(|spec| !unresolved(spec))
-                .cloned()
-                .collect(),
-            remove: plan.remove.clone(),
-        };
+        let without_app_rules = model::without_unresolved_apps(
+            &plan,
+            expected,
+            app_id.is_err(),
+            tono_app_id.is_err(),
+        );
         apply_plan(
             &engine,
             &without_app_rules,
