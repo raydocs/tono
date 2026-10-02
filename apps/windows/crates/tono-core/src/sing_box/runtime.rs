@@ -845,7 +845,7 @@ mod tests {
         let routing = CatalogRouting::default();
         let runtime = build_runtime(input(&nodes, &routing)).unwrap();
         let value: Value = serde_json::from_str(runtime.runtime_json()).unwrap();
-        assert_eq!(value["dns"]["servers"][0]["inet4_range"], "198.18.16.0/22");
+        assert_eq!(value["dns"]["servers"][0]["inet4_range"], "198.18.128.0/20");
         assert_eq!(value["inbounds"][0]["address"][0], "198.18.0.1/30");
         assert_eq!(value["inbounds"][0]["dns_address"][0], "198.18.0.2");
         // alpha.9 sing-tun (stack omitted) caps send at 2 MiB and receive at
@@ -853,12 +853,12 @@ mod tests {
         // `stack` would select the deprecated gVisor path.
         assert!(value["inbounds"][0].get("stack").is_none());
         assert!(value["inbounds"][0].get("tcp_fast_open").is_none());
-        assert!(probe_sees_fake([198, 18, 16, 0]));
-        assert!(probe_sees_fake([198, 18, 31, 255]));
+        assert!(probe_sees_fake([198, 18, 128, 0]));
+        assert!(probe_sees_fake([198, 18, 255, 255]));
         assert!(!sing_box_pool([198, 18, 0, 1]));
         assert!(!sing_box_pool([198, 18, 0, 2]));
         assert!(!sing_box_pool([198, 19, 0, 1]));
-        assert!(sing_box_pool([198, 18, 16, 1]));
+        assert!(sing_box_pool([198, 18, 128, 1]));
     }
 
     /// #1258: a replacement process starts with an empty fake-IP store and allocates from the
@@ -877,6 +877,9 @@ mod tests {
         let bounds = |value: &Value| {
             let range = value["dns"]["servers"][0]["inet4_range"].as_str().unwrap();
             let (address, bits) = range.split_once('/').unwrap();
+            // A slot is as large as the range one process had before the pool was split:
+            // a smaller one wraps sooner and hands a cached address to another name.
+            assert_eq!(bits, "20");
             let first = u32::from(address.parse::<Ipv4Addr>().unwrap());
             (first, first + (1u32 << (32 - bits.parse::<u32>().unwrap())) - 1)
         };
@@ -891,10 +894,16 @@ mod tests {
             assert!(probe_sees_fake(octets));
         }
         // Outside the new range the cached address is a plain IP to sing-box. It is refused
-        // before a home, DIRECT or exit rule can dial it.
+        // before a home, DIRECT or exit rule can dial it, and so is one cached from a build
+        // that still used the old pool. `no_drop`: the refusal stays a reset however many
+        // connections retry at once.
         assert_eq!(
             replaced["route"]["rules"][3],
-            json!({"ip_cidr": [SING_BOX_FAKE_IPV4], "action": "reject"})
+            json!({
+                "ip_cidr": [SING_BOX_FAKE_IPV4, "198.18.16.0/20"],
+                "action": "reject",
+                "no_drop": true
+            })
         );
     }
 
@@ -961,7 +970,7 @@ mod tests {
     }
 
     fn sing_box_pool(octets: [u8; 4]) -> bool {
-        octets[0] == 198 && octets[1] == 18 && (16..32).contains(&octets[2])
+        octets[0] == 198 && octets[1] == 18 && octets[2] >= 128
     }
 
     #[test]
