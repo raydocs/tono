@@ -19,6 +19,7 @@ import { useThemeMode } from '@/services/states'
 import {
   formatTonoActionError,
   idleSelectShouldConnect,
+  isSupersededConnectRejection,
   tonoConnect,
   tonoDisconnect,
   tonoRetryNow,
@@ -124,6 +125,12 @@ export const TrayPanel = () => {
       else await tonoRetryNow()
       await mutateTonoStatus()
     } catch (error) {
+      // A newer click won, or this connect overlapped one still running. That
+      // is not a failed attempt; show the live state, as the dashboard does.
+      if (action === 'connect' && isSupersededConnectRejection(error)) {
+        await mutateTonoStatus()
+        return
+      }
       setActionError(formatTonoActionError(error, t))
     }
   })
