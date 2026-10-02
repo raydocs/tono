@@ -4,11 +4,11 @@
 
 ## 候选与总量
 
-- macOS 候选：<待填 SHA / 包哈希>
-- Windows 候选：<待填 SHA / 包哈希>
-- 源码 `main`：<待填 SHA>（两个候选必须是这同一个 SHA）
-- macOS helper 协议版本应为 `4.52.35`；若 [#1302](https://github.com/raydocs/tono/pull/1302) 已合入候选，则为 `4.52.36`。Windows 包里必须有 `sing-box.exe` 和 `sing-box-sha256.txt`（摘要 `b2e6902ee75d9c4af79df28a61ded67afc4283fc83a44dee8896f3737a4ed027`，alpha.9）。
-- 来源：2026-10-01 清单的全部条目（基线 `0676435b`），加上之后合入的全部 `needs-hardware` PR：#352 #663（经 #1243 移到 main）#763 #795 #1188 #1216 #1220 #1222 #1226 #1227 #1232 #1237 #1243 #1244 #1245 #1248 #1253 #1257 #1263 #1266 #1267 #1268 #1272 #1275 #1278 #1281 #1283 #1285 #1289 #1295 #1306，以及即将合入的 #1297 #1302。判据：[决策 031](../decisions/031-2026-09-30-fail-open-keeps-ai-block.md)、[决策 044](../decisions/044-2026-10-01-macos-paused-states-release.md)。
+- macOS 候选：`Tono-0.0.74-build74-arm64.zip` sha256 `2818754d79098500bc7aa32cb2d06c4e048bf12e7826ce29ca5430748c69047d`（Developer ID 签名 + 公证，未 Sparkle 签名；[run 36943270858](https://github.com/raydocs/tono/actions/runs/36943270858)，artifact `Tono-0.0.74-build74-arm64`）。包内 `Tono` `467b3393…`，`tono-core-helper` `08235ca7…`，`sing-box` `5208f09b…`（签名后）。
+- Windows 候选：`Tono_0.0.74_x64-setup.exe` sha256 `34e2603281ba4029f4b88d7a6e0bf070520c5d94679e079ccad2c15f50150b50`（未 Authenticode 签名、未 updater 签名，SmartScreen 会拦，选“仍要运行”；[run 36943273462](https://github.com/raydocs/tono/actions/runs/36943273462)，artifact `tono-windows-0.0.74-candidate-36e3194d…`）。包内 `tono-service.exe` `fdbafedc…`，`tono-core` `9d5c6f1d…`，sing-box 为 alpha.9 `b2e6902e…`。
+- 源码 `main`：`36e3194d0f77bd9b792450423fc47b0f2cfccbe1`（两个候选同一个 SHA；含 #1297 #1302 #1311 #1312）
+- macOS helper 协议版本应为 `4.52.36`（候选含 [#1302](https://github.com/raydocs/tono/pull/1302)）。Windows 包里必须有 `sing-box.exe` 和 `sing-box-sha256.txt`（摘要 `b2e6902ee75d9c4af79df28a61ded67afc4283fc83a44dee8896f3737a4ed027`，alpha.9）。
+- 来源：2026-10-01 清单的全部条目（基线 `0676435b`），加上之后合入的全部 `needs-hardware` PR：#352 #663（经 #1243 移到 main）#763 #795 #1188 #1216 #1220 #1222 #1226 #1227 #1232 #1237 #1243 #1244 #1245 #1248 #1253 #1257 #1263 #1266 #1267 #1268 #1272 #1275 #1278 #1281 #1283 #1285 #1289 #1295 #1306，以及 #1297 #1302（均已合入候选）。判据：[决策 031](../decisions/031-2026-09-30-fail-open-keeps-ai-block.md)、[决策 044](../decisions/044-2026-10-01-macos-paused-states-release.md)。
 - 标记：**[VM]** 虚拟机可测（macOS 用 UTM / Parallels 的 macOS 客户机；Windows 用 **x64** 虚拟机，Apple Silicon 上的 Windows ARM 虚拟机跑 x64 TUN 驱动不可靠，结果不算数）。**[真机]** 必须真机：真实网卡、Wi-Fi、睡眠唤醒、真实安装 / 升级 / 卸载、家用宽带。「要后台配合」= 需要有人在预发控制面改目录或策略；「开发在场」= 需要开发做故障注入。
 - **总数：45 项。[VM] 33 项，[真机] 12 项。** 其中 E1、E2 要配对的签名候选和测试更新源，没有就整组记「未测」；E3 要开发在场。
 - 时间估计：VM 部分约 4 小时；真机部分约 3 小时，另加 D5 的 4 小时浸泡（可与其他真机项同时挂着）和 D1 / D3 的一晚睡眠。
@@ -162,7 +162,7 @@ E1、E2 要配对的签名候选和测试更新源（第 3 节），没有就记
 |---|---|---|---|---|---|
 | E1 | 真机 | mac | (a) 已连接时做一次应用内更新。(b) 处于「保护离线」时做一次。(c) 更新挂起时点「恢复网络」。(d) 连着时让更新准备失败（拒绝写更新暂存目录）。(e) 连续更新两次。 | (a) 更新后需要已验证的连接才提交，连接正常。(b) 重开后更新提交，「连接」可用，PF 未武装。(c) 恢复生效，更新状态不卡住，之后能连接。(d) 报错，从「保护离线」变成「未连接」，普通网络能用，DNS 恢复，AI 窄层在。(e) 第二次前清掉上一次的备份。 | [#795](https://github.com/raydocs/tono/pull/795) [#1220](https://github.com/raydocs/tono/pull/1220) [#971](https://github.com/raydocs/tono/pull/971) [#1099](https://github.com/raydocs/tono/pull/1099) [#891](https://github.com/raydocs/tono/pull/891) [#991](https://github.com/raydocs/tono/pull/991) [#993](https://github.com/raydocs/tono/pull/993) [#785](https://github.com/raydocs/tono/pull/785) [#1001](https://github.com/raydocs/tono/pull/1001) [#1064](https://github.com/raydocs/tono/pull/1064) |
 | E2 | 真机 | Win | (a) 从发布版应用内更新到候选（含 `sing-box.exe` 成员）。(b) 连着时让更新 Prepare 失败（拒绝写暂存目录）。(c) 更新执行中占住一个安装文件，造成回滚。(d) 连续更新两次。 | (a) `sing-box.exe` 随更新装好，摘要对；pin 缺失或不符的包被拒。(b) 报错，网络能用，没有 `Tono ` 过滤器，AI 窄层在，App 不被关掉。(c) 回滚后放行：普通网络回来、AI 窄层在、服务能起来。(d) 第二次前清掉上一次的备份。 | [#779](https://github.com/raydocs/tono/pull/779) [#793](https://github.com/raydocs/tono/pull/793) [#1007](https://github.com/raydocs/tono/pull/1007) [#1040](https://github.com/raydocs/tono/pull/1040) [#858](https://github.com/raydocs/tono/pull/858) [#961](https://github.com/raydocs/tono/pull/961) [#1042](https://github.com/raydocs/tono/pull/1042) [#978](https://github.com/raydocs/tono/pull/978) [#1017](https://github.com/raydocs/tono/pull/1017) [#1025](https://github.com/raydocs/tono/pull/1025) [#1159](https://github.com/raydocs/tono/pull/1159) |
-| E3 | VM（开发在场，先快照） | Win | 仅当候选含 [#1297](https://github.com/raydocs/tono/pull/1297)。开发按 #1297 的方法让更新回滚**连续失败**。观察服务启动 / 恢复执行器的循环次数，再重启一次虚拟机。 | 恢复执行器最多跑 3 次后不再被拉起；服务正常启动，更新状态带 `needs_attention`（日志有警告）。每次都是普通网络回来、AI 窄层在，不会停在启动屏障里。重启后循环不再开始。之后安装 / 更新 / 卸载被拒是已知问题 #1307，不判本项失败。 | [#1297](https://github.com/raydocs/tono/pull/1297) |
+| E3 | VM（开发在场，先快照） | Win | 候选已含 [#1297](https://github.com/raydocs/tono/pull/1297)。开发按 #1297 的方法让更新回滚**连续失败**。观察服务启动 / 恢复执行器的循环次数，再重启一次虚拟机。 | 恢复执行器最多跑 3 次后不再被拉起；服务正常启动，更新状态带 `needs_attention`（日志有警告）。每次都是普通网络回来、AI 窄层在，不会停在启动屏障里。重启后循环不再开始。之后安装 / 更新 / 卸载被拒是已知问题 #1307，不判本项失败。 | [#1297](https://github.com/raydocs/tono/pull/1297) |
 
 ### F. Windows sing-box 默认内核
 
