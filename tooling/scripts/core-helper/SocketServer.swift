@@ -588,13 +588,20 @@ final class SocketServer {
     /// A successful arm or start from an authenticated peer makes that peer
     /// the session owner; a later one replaces it. Only the main app passes
     /// the authorizer for these routes, and it is long-lived.
-    private func recordSessionOwner(socket: Int32) {
+    private func recordSessionOwner(_ peer: SessionOwner?) {
         // Whatever was counted or asked belongs to the previous owner. A
-        // peer that cannot be read is an unknown owner, not that one.
+        // peer that could not be read is an unknown owner, not that one.
         clearSessionOwner()
+        sessionOwner = peer
+    }
+
+    /// Read as soon as the peer is accepted, before the request is read or
+    /// served: an app that dies while its start runs is still the owner the
+    /// orphan checks look for.
+    private func peerOwner(socket: Int32) -> SessionOwner? {
         let pid = Self.peerPID(socket: socket)
-        guard pid > 0, let start = Self.processStartTime(pid: pid) else { return }
-        sessionOwner = SessionOwner(
+        guard pid > 0, let start = Self.processStartTime(pid: pid) else { return nil }
+        return SessionOwner(
             pid: pid,
             startSeconds: start.seconds,
             startMicroseconds: start.microseconds
@@ -661,6 +668,7 @@ final class SocketServer {
             sendResponse(client, status: 403, object: ["ok": false, "error": "Forbidden."])
             return
         }
+        let owner = peerOwner(socket: client)
 
         do {
             let request = try readRequest(client)
@@ -680,7 +688,7 @@ final class SocketServer {
                         guard let peer else { throw HelperFailure.invalid("Cannot authenticate update peer.") }
                         try handleUpdate(request, peer: peer, client: client)
                     } else {
-                        try handleRuntime(request, client: client)
+                        try handleRuntime(request, client: client, owner: owner)
                     }
                 }
             }
@@ -694,7 +702,7 @@ final class SocketServer {
         }
     }
 
-    private func handleRuntime(_ request: HTTPRequest, client: Int32) throws {
+    private func handleRuntime(_ request: HTTPRequest, client: Int32, owner: SessionOwner?) throws {
             switch (request.method, request.path) {
             case ("GET", "/version"):
                 guard request.body.isEmpty else { throw HelperFailure.invalid("Unexpected request body.") }
@@ -722,7 +730,7 @@ final class SocketServer {
                         transitionGate.isAwake() && killSwitch.status()["live"] as? Bool == true
                     }
                 )
-                recordSessionOwner(socket: client)
+                recordSessionOwner(owner)
                 sendResponse(client, status: 200, object: ["ok": true])
             case ("POST", "/core/sync"):
                 let object = try jsonObject(request.body)
@@ -768,7 +776,7 @@ final class SocketServer {
                     object,
                     commitAllowed: { transitionGate.isAwake() }
                 )
-                recordSessionOwner(socket: client)
+                recordSessionOwner(owner)
                 sendResponse(client, status: 200, object: response)
             case ("POST", "/killswitch/disarm"), ("POST", "/killswitch/release"):
                 guard request.body.isEmpty else { throw HelperFailure.invalid("Unexpected request body.") }
