@@ -1358,6 +1358,9 @@ async fn may_keep_session_in_place(state: &Arc<TonoState>, tunnel_proven: bool) 
     keep
 }
 
+/// How often a queued health release wakes the controller waits again (#1051).
+const HEALTH_RELEASE_REWAKE: Duration = Duration::from_millis(250);
+
 /// Serialize failure admission with selection/switch completion before transferring lifecycle
 /// ownership to release. A hot switch deliberately keeps the connection generation.
 async fn admit_health_release(
@@ -1377,15 +1380,23 @@ async fn admit_health_release(
         std::task::Poll::Pending => {
             // #1051: a reader is in the way. A stalled optional DIRECT reload keeps its reader
             // for both 60-second controller attempts, and ordinary traffic stayed Blocked that
-            // long behind this release. The writer is queued now, so no new reader can start;
-            // wake this generation's controller waits. Their detached owner still retracts its
-            // Service session before it drops the reader.
-            {
-                let mut inner = state.lock().await;
-                health_release_is_current(&inner, generation, selected_node, switch_task, check_switch_task)?;
-                inner.cancel_connection_waits();
+            // long behind this release. Wake this generation's controller waits. Their detached
+            // owner still retracts its Service session before it drops the reader.
+            //
+            // One wake is not enough: a reload takes its reader first and reads the token
+            // afterwards, and a pending poll does not prove the writer is queued yet, so a
+            // reader can still hold the token installed by the previous wake. Wake again until
+            // the writer is admitted.
+            loop {
+                {
+                    let mut inner = state.lock().await;
+                    health_release_is_current(&inner, generation, selected_node, switch_task, check_switch_task)?;
+                    inner.cancel_connection_waits();
+                }
+                if let Ok(lifecycle) = tokio::time::timeout(HEALTH_RELEASE_REWAKE, writer.as_mut()).await {
+                    break lifecycle;
+                }
             }
-            writer.await
         }
     };
     let mut inner = state.lock().await;
