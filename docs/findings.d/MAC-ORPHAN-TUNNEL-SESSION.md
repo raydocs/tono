@@ -1,6 +1,6 @@
 | ID | 问题（一句） | 状态 | Issue / PR | 等级 | 剩余限制 |
 |---|---|---|---|---|---|
-| MAC-ORPHAN-TUNNEL-SESSION | App 在已连接时崩溃或被强退，helper 保留 Core 和已提交的 PF 阻断；之后出口不可达时所有包仍进 TUN，机器断网直到重开 Tono | in-PR | [#1269](https://github.com/raydocs/tono/issues/1269)；[#1357](https://github.com/raydocs/tono/pull/1357) 修 | 中·推导 | 没有实机验证；放开约在出口连续不可达 70 秒后；纯 IPv6 网络不触发；放开后是真实地址且没有 App 提示（[决策 049](../decisions/049-2026-10-02-macos-orphaned-session-release.md)） |
+| MAC-ORPHAN-TUNNEL-SESSION | App 在已连接时崩溃或被强退，helper 保留 Core 和已提交的 PF 阻断；之后出口不可达时所有包仍进 TUN，机器断网直到重开 Tono | fixed(c3532faa) | [#1269](https://github.com/raydocs/tono/issues/1269)；[#1357](https://github.com/raydocs/tono/pull/1357) 修 | 中·推导 | 没有实机验证；放开约在出口连续不可达 70 秒后；纯 IPv6 网络不触发；放开后是真实地址且没有 App 提示（[决策 049](../decisions/049-2026-10-02-macos-orphaned-session-release.md)） |
 
 依据（`main` `cc673eaa`）：`SocketServer.observeCoreForWatchdog` 在 Core 运行时只调 `observeOrphanedBootstrap`（只管 `tunnelInterfaces` 为空的 bootstrap 阻断）和 `superviseProtection`；看门狗只看 Core 进程是否存活，不看出口是否可达。App 死后没有任何一方做出口健康检查。
 
