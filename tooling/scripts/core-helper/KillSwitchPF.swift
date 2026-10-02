@@ -207,8 +207,10 @@ extension KillSwitchManager {
             // interface passes just below, and `tono-lan`, whose inbound pass
             // matches a router's query. The whole multicast range, because an
             // IGMPv2 report goes to the group it reports. PF cannot match the
-            // TTL or the message type; sending protocol 2 takes a raw socket,
-            // which is root, and root can remove this anchor.
+            // TTL or the message type. The reports the kernel sends for a
+            // socket's group membership leave with TTL 1; choosing the TTL of
+            // a protocol 2 packet takes a raw socket, which is root, and root
+            // can remove this anchor.
             lines.append(
                 "pass out quick inet proto igmp to 224.0.0.0/4 allow-opts no state label \"tono-igmp\""
             )
@@ -273,6 +275,16 @@ extension KillSwitchManager {
             // own label keeps it out of `lanDNSInterfaces`.
             lines.append(
                 "block drop out quick inet proto { tcp, udp } to { 224.0.0.0/24, 255.255.255.255 } port { 53, 853 } label \"tono-dns-multicast\""
+            )
+            // PF matches a fragment against address-only rules and skips every
+            // rule with a port (xnu `pf_test_fragment`), so the block above
+            // never sees one and the portless `tono-multicast` pass would.
+            // Before that pass existed a fragment to these destinations fell
+            // to the final block; this keeps it there. The IPv4 output hook
+            // runs before the stack fragments a datagram, so ordinary
+            // discovery traffic never arrives here as a fragment.
+            lines.append(
+                "block drop out quick inet to { 224.0.0.0/24, 255.255.255.255 } fragment label \"tono-fragment-multicast\""
             )
             lines.append(
                 "pass out quick inet to { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16 } keep state (if-bound) label \"tono-lan\""
