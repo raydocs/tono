@@ -1591,6 +1591,47 @@ extension KillSwitchManager {
                     ownerAlive: false,
                     consecutiveChecks: SocketServer.orphanedBootstrapReleaseThreshold
                 ) == .release
+            // MAC-ORPHAN-TUNNEL-SESSION (#1269): a committed session whose
+            // owner died keeps its tunnel while the exit answers. With an
+            // uplink present and the exit unreachable for the whole
+            // threshold, nobody is left to lift the block, so it releases.
+            // A live owner, no recorded owner, no uplink and a probe that
+            // has not answered never count toward that.
+            func orphanedTunnel(
+                committed: Bool = true, ownerRecorded: Bool = true, ownerAlive: Bool = false,
+                uplinkPresent: Bool = true, exitReachable: Bool? = false, failures: Int
+            ) -> OrphanedTunnelAction {
+                SocketServer.orphanedTunnelAction(
+                    stateFilePresent: true, committed: committed, ownerRecorded: ownerRecorded,
+                    ownerAlive: ownerAlive, uplinkPresent: uplinkPresent,
+                    exitReachable: exitReachable, consecutiveFailures: failures
+                )
+            }
+            let threshold = SocketServer.orphanedTunnelReleaseThreshold
+            let orphanedTunnelReleases = orphanedTunnel(failures: threshold - 1) == .count
+                && orphanedTunnel(failures: threshold) == .release
+                && orphanedTunnel(exitReachable: true, failures: threshold) == .reset
+                && orphanedTunnel(exitReachable: nil, failures: threshold) == .wait
+                && orphanedTunnel(ownerAlive: true, failures: threshold) == .reset
+                && orphanedTunnel(ownerRecorded: false, failures: threshold) == .reset
+                && orphanedTunnel(uplinkPresent: false, failures: threshold) == .reset
+                && orphanedTunnel(committed: false, failures: threshold) == .reset
+                && [(200, ExitDelayVerdict.reachable), (503, .unreachable), (504, .unreachable), (401, .unknown)]
+                    .allSatisfy { status, verdict in
+                        UpdateRuntime.exitDelayVerdict(
+                            data: Data(#"{"delay":120}"#.utf8),
+                            response: HTTPURLResponse(
+                                url: URL(fileURLWithPath: "/"), statusCode: status, httpVersion: nil, headerFields: nil
+                            ),
+                            error: nil
+                        ) == verdict
+                    }
+                && UpdateRuntime.exitDelayVerdict(data: nil, response: nil, error: URLError(.cannotConnectToHost)) == .unknown
+            if !orphanedTunnelReleases {
+                FileHandle.standardError.write(Data(
+                    "self-test: a committed session whose owner died is not released when its exit stays unreachable\n".utf8
+                ))
+            }
             return ruleShapesHold
                 && bundleShapesHold
                 && bundleOffWithoutTunnel
@@ -1618,6 +1659,7 @@ extension KillSwitchManager {
                 && watchdogReleases
                 && orphanedBootstrapUntouched
                 && orphanedBootstrapReleases
+                && orphanedTunnelReleases
                 && failureRecoveryReleasesNetwork(strictKillSwitchEnabled: false)
                 && !failureRecoveryReleasesNetwork(strictKillSwitchEnabled: true)
                 && shouldReinstallKillSwitch(coreRunning: true)
