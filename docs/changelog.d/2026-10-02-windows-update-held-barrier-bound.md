@@ -1,6 +1,6 @@
 ## 2026-10-02 · Release the update-held Windows startup barrier when no update owner is left
 - Ownership: SHIP_PLAN §2 item 10; Windows failed-update recovery (`R4-WIN-UPDATE-RECOVERY-LOOP`, [#1308](https://github.com/raydocs/tono/issues/1308), residual of #1297).
-- Source: baseline `361a64b8`; branch `fix/win-update-held-barrier-1308`; not yet merged.
+- Source: baseline `361a64b8`; branch `fix/win-update-held-barrier-1308`, [#1316](https://github.com/raydocs/tono/pull/1316); not yet merged.
 - Defect fix: on a non-strict machine, the unverified barrier restored at Service start stayed Blocked with no timeout in three cases. Now `update::startup_barrier_release_owed` owes the release (ordinary network, AI hold kept) once no update owner is left:
   - `Consumed` below the recovery bound whose recovery executor could not start, or ended without stopping this Service. Startup launches recovery at most once per Service start, and the existing guard waits while that child runs.
   - `RolledBack` whose rollback finalization did not finish, once its executor is conclusively gone.
