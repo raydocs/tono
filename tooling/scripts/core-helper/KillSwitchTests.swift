@@ -278,7 +278,8 @@ extension KillSwitchManager {
         //    step 1.
         if let labelText = armedLabels {
             for expected in ["tono-loopback", "tono-continuity", "tono-mdns", "tono-igmp",
-                             "tono-multicast", "tono-multicast-dns", "tono-linklocal",
+                             "tono-multicast", "tono-dns-multicast", "tono-ssdp",
+                             "tono-linklocal",
                              "tono-tunnel", "tono-control", "tono-exit",
                              "tono-bundle", "tono-block"] {
                 check("labels-report-\(expected)", labelText.contains(expected))
@@ -1307,17 +1308,20 @@ extension KillSwitchManager {
             // and PF drops an IPv4 packet with options unless the rule passing
             // it says `allow-opts`. Both IGMP passes must sit ahead of every
             // pass without it that would match the packet first: the
-            // Continuity interface passes and `tono-lan`. SSDP and broadcast
-            // discovery leave on their own pass, never on a DNS port on any
-            // interface, and only to link-local and Local Scope multicast.
-            let lanDiscoveryDNSBlock = "block drop out quick inet proto { tcp, udp } to { 224.0.0.0/24, 239.255.0.0/16, 255.255.255.255 } port { 53, 853 } label \"tono-multicast-dns\""
-            let lanDiscoveryPass = "pass out quick inet to { 224.0.0.0/24, 239.255.0.0/16, 255.255.255.255 } no state label \"tono-multicast\""
+            // Continuity interface passes and `tono-lan`. Link-local multicast
+            // and broadcast discovery leave on their own pass, never on a DNS
+            // port; of the routable multicast groups only SSDP's is passed,
+            // and only its port.
+            let lanDiscoveryDNSBlock = "block drop out quick inet proto { tcp, udp } to { 224.0.0.0/24, 255.255.255.255 } port { 53, 853 } label \"tono-dns-multicast\""
+            let lanDiscoveryPass = "pass out quick inet to { 224.0.0.0/24, 255.255.255.255 } no state label \"tono-multicast\""
+            let ssdpPass = "pass out quick inet proto udp to 239.255.255.250 port 1900 no state label \"tono-ssdp\""
             let igmpOut = "pass out quick inet proto igmp to 224.0.0.0/4 allow-opts no state label \"tono-igmp\""
             let igmpIn = "pass in quick inet proto igmp to 224.0.0.0/4 allow-opts no state label \"tono-igmp\""
-            let lanDiscoveryNeedles = [igmpOut, igmpIn, lanDiscoveryDNSBlock, lanDiscoveryPass]
+            let lanDiscoveryNeedles = [igmpOut, igmpIn, lanDiscoveryDNSBlock, lanDiscoveryPass, ssdpPass]
             let lanDiscoveryHolds: Bool = {
                 guard lanDiscoveryNeedles.allSatisfy(cloudRules.contains),
                       !lanDiscoveryNeedles.contains(where: rules.contains),
+                      !cloudRules.contains("239.255.0.0/16"),
                       let igmpOutAt = cloudRules.range(of: igmpOut),
                       let igmpInAt = cloudRules.range(of: igmpIn),
                       let continuity = cloudRules.range(of: "label \"tono-continuity\""),
@@ -1348,7 +1352,8 @@ extension KillSwitchManager {
             )
             let tunnelOnlyLabels = [
                 "tono-continuity", "tono-mdns", "tono-igmp", "tono-lan", "tono-linklocal",
-                "tono-dhcp", "tono-ndp", "tono-multicast", "tono-tunnel",
+                "tono-dhcp", "tono-ndp", "tono-multicast", "tono-dns-multicast", "tono-ssdp",
+                "tono-tunnel",
             ]
             let bootRestoreHasNoTunnelPass =
                 !tunnelOnlyLabels.contains(where: bootRestoreRules.contains)
