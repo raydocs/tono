@@ -338,6 +338,27 @@ fn build_condition(
             FWP_MATCH_EQUAL,
             condition_value_u16(*port),
         ),
+        Condition::RemotePortRange { min, max } => {
+            keep.ranges.push(Box::new(FWP_RANGE0 {
+                valueLow: FWP_VALUE0 {
+                    r#type: FWP_UINT16,
+                    Anonymous: FWP_VALUE0_0 { uint16: *min },
+                },
+                valueHigh: FWP_VALUE0 {
+                    r#type: FWP_UINT16,
+                    Anonymous: FWP_VALUE0_0 { uint16: *max },
+                },
+            }));
+            let ptr = keep.ranges.last_mut().map(|v| &mut **v).expect("pushed");
+            (
+                FWPM_CONDITION_IP_REMOTE_PORT,
+                FWP_MATCH_RANGE,
+                FWP_CONDITION_VALUE0 {
+                    r#type: FWP_RANGE_TYPE,
+                    Anonymous: FWP_CONDITION_VALUE0_0 { rangeValue: ptr },
+                },
+            )
+        }
         Condition::IcmpV6TypeRange { min, max } => {
             // FWPM_CONDITION_ICMP_TYPE is a `#define` alias of FWPM_CONDITION_IP_LOCAL_PORT
             // in fwpmu.h, so the metadata-based bindings only carry the latter; the SDK's C
@@ -923,19 +944,12 @@ pub(crate) fn install(expected: &[FilterSpec], app_path: &str, tono_app_path: &s
         // Fail closed: install everything except the permits whose app id did not resolve so
         // the block is live, then surface why they are missing. The watchdog will keep
         // retrying the full set.
-        let unresolved = |spec: &FilterSpec| {
-            (app_id.is_err() && spec.conditions.contains(&Condition::AleAppId))
-                || (tono_app_id.is_err() && spec.conditions.contains(&Condition::AleAppIdTonoApp))
-        };
-        let without_app_rules = model::ChangePlan {
-            install: plan
-                .install
-                .iter()
-                .filter(|spec| !unresolved(spec))
-                .cloned()
-                .collect(),
-            remove: plan.remove.clone(),
-        };
+        let without_app_rules = model::without_unresolved_apps(
+            &plan,
+            expected,
+            app_id.is_err(),
+            tono_app_id.is_err(),
+        );
         apply_plan(
             &engine,
             &without_app_rules,

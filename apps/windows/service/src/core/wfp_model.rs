@@ -57,6 +57,11 @@ pub const TONO_WFP_SUBLAYER_WEIGHT: u16 = 1000;
 pub const WEIGHT_HARD_PERMIT: u64 = 8;
 /// Infrastructure permits: floor DHCP/NDP, bootstrap API channel.
 pub const WEIGHT_INFRA_PERMIT: u64 = 7;
+/// The core never dials the local network (rule I): above the LAN permit, below every permit
+/// the core does need (loopback, endpoint, tunnel, DIRECT).
+pub const WEIGHT_CORE_LAN_BLOCK: u64 = 6;
+/// The local network while a tunnel is up (rule I).
+pub const WEIGHT_LAN_PERMIT: u64 = 4;
 /// All block-alls: the intent floor's persistent set and the session's redundant set.
 pub const WEIGHT_BLOCK_ALL: u64 = 1;
 
@@ -80,8 +85,9 @@ pub const MAX_API_HOST_IPS: usize = 8;
 /// v10: `…9e09…` inbound `ALE_AUTH_RECV_ACCEPT` default-deny with loopback, tunnel and
 /// DHCP/NDP permits (#343); v11: `…9e0a…` DHCP client permits bounded to broadcast/multicast
 /// and non-public servers (#345); v12: `…9e0b…` intent-floor loopback/DHCP/NDP permits
-/// persistent alongside the block-alls.)
-const FILTER_NAMESPACE: u128 = 0x2f7c_9e0b_0000_4a6c_0000_0000_0000_0000;
+/// persistent alongside the block-alls; v13: `…9e0c…` local-network permits while locked,
+/// never on the DNS ports and never for the core (decision 048).)
+const FILTER_NAMESPACE: u128 = 0x2f7c_9e0c_0000_4a6c_0000_0000_0000_0000;
 
 const fn fnv1a64(bytes: &[u8]) -> u64 {
     let mut hash = 0xcbf2_9ce4_8422_2325_u64;
@@ -142,6 +148,11 @@ pub enum Condition {
     Protocol(IpProtocol),
     LocalPort(u16),
     RemotePort(u16),
+    /// An inclusive remote-port range; several on one filter are OR'd like any repeated field.
+    RemotePortRange {
+        min: u16,
+        max: u16,
+    },
     /// NDP types 133–137 as one inclusive range.
     IcmpV6TypeRange {
         min: u16,
@@ -596,6 +607,174 @@ fn emit_prefixes(mut start: u32, end: u32, out: &mut Vec<([u8; 4], u8)>) {
     }
 }
 
+/// The local network: RFC 1918 and IPv4 link-local. Static on purpose: a prefix computed from
+/// the adapter would let a hostile network declare any public range "local" (TunnelCrack
+/// LocalNet). Carrier NAT (100.64.0.0/10) is not here; the macOS anchor leaves it out too.
+const LAN_V4: [([u8; 4], u8); 4] = [
+    ([10, 0, 0, 0], 8),
+    ([172, 16, 0, 0], 12),
+    ([192, 168, 0, 0], 16),
+    ([169, 254, 0, 0], 16),
+];
+
+/// Link-local and unique-local IPv6 unicast.
+const LAN_V6: [([u8; 16], u8); 2] = [
+    ([0xfe, 0x80, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], 10),
+    ([0xfc, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], 7),
+];
+
+/// Discovery that routers do not forward: link-local multicast and the limited broadcast.
+const LOCAL_DISCOVERY_V4: [([u8; 4], u8); 2] =
+    [([224, 0, 0, 0], 24), ([255, 255, 255, 255], 32)];
+
+/// Link-local scope IPv6 multicast (`ff02::/16`).
+const LOCAL_DISCOVERY_V6: ([u8; 16], u8) =
+    ([0xff, 0x02, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], 16);
+
+/// SSDP, the one routable-scope group casting needs, on its one port.
+const SSDP_GROUP: [u8; 4] = [239, 255, 255, 250];
+const SSDP_PORT: u16 = 1900;
+
+/// Every remote port except DNS (53) and DNS over TLS (853). Protocols without ports carry
+/// their ICMP code or zero in this field, so they fall in the first range.
+const NON_DNS_PORT_RANGES: [(u16, u16); 3] = [(0, 52), (54, 852), (854, u16::MAX)];
+
+fn v4_conditions(prefixes: &[([u8; 4], u8)]) -> Vec<Condition> {
+    prefixes
+        .iter()
+        .map(|(addr, prefix)| Condition::RemoteAddressV4 {
+            addr: *addr,
+            prefix: *prefix,
+        })
+        .collect()
+}
+
+fn v6_conditions(prefixes: &[([u8; 16], u8)]) -> Vec<Condition> {
+    prefixes
+        .iter()
+        .map(|(addr, prefix)| Condition::RemoteAddressV6 {
+            addr: *addr,
+            prefix: *prefix,
+        })
+        .collect()
+}
+
+/// Rule I: the local network while a tunnel carries everything else (decision 048, owner
+/// 2026-10-02). The macOS PF anchor has the same shape (`tono-lan`, `tono-linklocal`,
+/// `tono-lan-dns`, `tono-ssdp`).
+///
+/// Without it a connected Windows machine cannot reach its own router page, printer or NAS, and
+/// discovery (mDNS, SSDP, casting) finds nothing: on-link destinations leave on the physical
+/// adapter, where only the floor's DHCP and NDP permits applied.
+///
+/// What keeps it from being a way out of the tunnel:
+///   - The address tables are static non-routable ranges, never the adapter's current prefix.
+///   - The outbound permits do not cover the DNS ports, so the LAN resolver, and through it the
+///     ISP, still sees no query. This is a hole in the permit and not a block above it: rule E
+///     records that a terminating port-53 block broke the resolver path on real machines, and a
+///     query to those ports is decided by exactly the rules that decided it before this one.
+///   - The core is blocked from these ranges above the permit. It has no business on the LAN, and
+///     the reviewed DIRECT permit (rule H) stays bounded to public unicast for the process that
+///     dials on WeChat's behalf. If the core's app id does not resolve, the engine cannot
+///     install this block, and `without_unresolved_apps` withholds the permits with it.
+///   - Inbound is opened for LAN peers only, with the same hole at the peer's DNS ports, and
+///     Windows Firewall still decides in its own sublayer; a permit here does not override a
+///     block there.
+///
+/// What it does not promise: these ranges are private, not on-link. A destination in them that
+/// Windows routes out of the physical adapter (a more specific route, or any ULA, since the
+/// tunnel carries no IPv6) is permitted even when a router forwards it elsewhere. The macOS
+/// anchor permits the same ranges without an interface either.
+fn lan_rules(app_path: &str) -> Vec<FilterSpec> {
+    use Condition as C;
+    use FilterAction as A;
+    use LayerKind as L;
+
+    let ssdp = C::RemoteAddressV4 {
+        addr: SSDP_GROUP,
+        prefix: 32,
+    };
+    let mut core_v4 = v4_conditions(&LAN_V4);
+    core_v4.extend(v4_conditions(&LOCAL_DISCOVERY_V4));
+    core_v4.push(ssdp.clone());
+    let mut core_v6 = v6_conditions(&LAN_V6);
+    core_v6.extend(v6_conditions(&[LOCAL_DISCOVERY_V6]));
+
+    let mut filters = Vec::new();
+    for (tag, layer, addresses) in [
+        ("v4", L::AleAuthConnectV4, core_v4),
+        ("v6", L::AleAuthConnectV6, core_v6),
+    ] {
+        let mut conditions = vec![C::AleAppId];
+        conditions.extend(addresses);
+        filters.push(spec(
+            format!("session/block-core-lan/{app_path}/{tag}"),
+            "session block core to local network",
+            layer,
+            WEIGHT_CORE_LAN_BLOCK,
+            A::Block,
+            conditions,
+            false,
+        ));
+    }
+    for (tag, description, layer, addresses) in [
+        ("out-v4", "session permit local network", L::AleAuthConnectV4, v4_conditions(&LAN_V4)),
+        ("out-v6", "session permit local network", L::AleAuthConnectV6, v6_conditions(&LAN_V6)),
+        (
+            "discovery-v4",
+            "session permit local network",
+            L::AleAuthConnectV4,
+            v4_conditions(&LOCAL_DISCOVERY_V4),
+        ),
+        (
+            "discovery-v6",
+            "session permit local network",
+            L::AleAuthConnectV6,
+            v6_conditions(&[LOCAL_DISCOVERY_V6]),
+        ),
+        (
+            // Not `in-*`: an earlier head of this change keyed the same rules without the
+            // port hole, and a key that is already installed is never replaced.
+            "peers-v4",
+            "session permit local network peers",
+            L::AleAuthRecvAcceptV4,
+            v4_conditions(&LAN_V4),
+        ),
+        (
+            "peers-v6",
+            "session permit local network peers",
+            L::AleAuthRecvAcceptV6,
+            v6_conditions(&LAN_V6),
+        ),
+    ] {
+        let mut conditions = addresses;
+        conditions.extend(
+            NON_DNS_PORT_RANGES
+                .iter()
+                .map(|(min, max)| C::RemotePortRange { min: *min, max: *max }),
+        );
+        filters.push(spec(
+            format!("session/permit-lan/{tag}"),
+            description,
+            layer,
+            WEIGHT_LAN_PERMIT,
+            A::Permit,
+            conditions,
+            false,
+        ));
+    }
+    filters.push(spec(
+        "session/permit-lan/ssdp".into(),
+        "session permit SSDP discovery",
+        L::AleAuthConnectV4,
+        WEIGHT_LAN_PERMIT,
+        A::Permit,
+        vec![C::Protocol(IpProtocol::Udp), C::RemotePort(SSDP_PORT), ssdp],
+        false,
+    ));
+    filters
+}
+
 pub fn session_rules(config: &RuleConfig) -> Vec<FilterSpec> {
     use Condition as C;
     use FilterAction as A;
@@ -816,6 +995,12 @@ pub fn session_rules(config: &RuleConfig) -> Vec<FilterSpec> {
         }
     }
 
+    // I: the local network. Locked with a renderable tunnel only: in Bootstrap and Blocked
+    // nothing carries the rest of the traffic, and the user is told nothing gets out.
+    if config.mode == KillSwitchStatusMode::Locked && config.tun_luid.is_some() {
+        filters.extend(lan_rules(&config.app_path));
+    }
+
     // E: redundant block-all, always present while armed. This default-deny floor already blocks
     // physical DNS unless a more specific permit matches. Do not add a separate port-53 block:
     // Windows resolver traffic starts at 127.0.0.1 and can transition to the TUN address, and a
@@ -928,6 +1113,40 @@ pub fn diff(current_keys: &[Guid], desired: &[FilterSpec]) -> ChangePlan {
         .copied()
         .collect();
     ChangePlan { install, remove }
+}
+
+/// What the engine applies when an app id did not resolve: `plan` without the rules scoped to
+/// that app. The LAN permits (the only rules at their weight) are sound only under the core
+/// block, so without the core's id they are neither installed nor left installed from an
+/// earlier pass (`expected` supplies their keys; removing an absent filter is a no-op).
+#[cfg_attr(any(not(windows), feature = "test"), allow(dead_code))]
+pub fn without_unresolved_apps(
+    plan: &ChangePlan,
+    expected: &[FilterSpec],
+    core_unresolved: bool,
+    tono_app_unresolved: bool,
+) -> ChangePlan {
+    let lan_permit = |spec: &FilterSpec| core_unresolved && spec.weight == WEIGHT_LAN_PERMIT;
+    let mut remove = plan.remove.clone();
+    for spec in expected.iter().filter(|spec| lan_permit(spec)) {
+        if !remove.contains(&spec.key) {
+            remove.push(spec.key);
+        }
+    }
+    ChangePlan {
+        install: plan
+            .install
+            .iter()
+            .filter(|spec| {
+                !(lan_permit(spec)
+                    || (core_unresolved && spec.conditions.contains(&Condition::AleAppId))
+                    || (tono_app_unresolved
+                        && spec.conditions.contains(&Condition::AleAppIdTonoApp)))
+            })
+            .cloned()
+            .collect(),
+        remove,
+    }
 }
 
 /// `IfOperStatusNotPresent` (ifdef.h).
@@ -1151,7 +1370,7 @@ mod tests {
         // Upgrade safety: the key-only diff adopts anything with a matching key, so the
         // namespace must change whenever the rule tables do. Pin the current marker (see the
         // constant's doc comment); any rule-table change must bump it and this pin.
-        assert_eq!(FILTER_NAMESPACE >> 64, 0x2f7c_9e0b_0000_4a6c);
+        assert_eq!(FILTER_NAMESPACE >> 64, 0x2f7c_9e0c_0000_4a6c);
     }
 
     #[test]
@@ -1176,8 +1395,15 @@ mod tests {
             &before.iter().map(|filter| filter.key).collect::<Vec<_>>(),
             &after,
         );
-        assert_eq!(plan.install.len(), 1);
-        assert_eq!(plan.remove.len(), 1);
+        // The endpoint permit, and rule I's two core blocks (one per address family).
+        assert_eq!(plan.install.len(), 3);
+        assert_eq!(plan.remove.len(), 3);
+        assert!(
+            plan.install
+                .iter()
+                .all(|filter| filter.conditions.contains(&Condition::AleAppId)),
+            "only app-scoped rules are rekeyed"
+        );
     }
 
     #[test]
@@ -1462,6 +1688,9 @@ mod tests {
             Condition::Protocol(protocol) => *protocol == packet.protocol,
             Condition::LocalPort(port) => packet.local_port == Some(*port),
             Condition::RemotePort(port) => *port == packet.remote_port,
+            Condition::RemotePortRange { min, max } => {
+                (*min..=*max).contains(&packet.remote_port)
+            }
             Condition::IcmpV6TypeRange { min, max } => packet
                 .icmp_type
                 .is_some_and(|ty| (*min..=*max).contains(&ty)),
@@ -1490,7 +1719,8 @@ mod tests {
             Condition::RemoteAddressV6 { .. } => 1,
             Condition::Protocol(_) => 2,
             Condition::LocalPort(_) => 3,
-            Condition::RemotePort(_) => 4,
+            // Same WFP field (`IP_REMOTE_PORT`) as an exact remote port.
+            Condition::RemotePort(_) | Condition::RemotePortRange { .. } => 4,
             Condition::IcmpV6TypeRange { .. } => 5,
             Condition::AleLoopback => 6,
             // Same WFP field (`ALE_APP_ID`) as the core's app id.
@@ -1873,6 +2103,86 @@ mod tests {
                 &classified
             ),
             FilterAction::Permit
+        );
+    }
+
+    /// Decision 048 (owner, 2026-10-02): while the tunnel is up the local network stays
+    /// reachable, as on macOS: the router page, a printer, a NAS, discovery. DNS to the LAN,
+    /// the core itself, and every state without a tunnel stay closed.
+    #[test]
+    fn a_locked_session_reaches_the_lan_but_not_its_dns() {
+        use FilterAction::{Block, Permit};
+        use IpProtocol::{Tcp, Udp};
+        use LayerKind::{AleAuthConnectV4 as OutV4, AleAuthConnectV6 as OutV6, AleAuthRecvAcceptV4 as InV4};
+        let locked = expected_filters(&config(KillSwitchStatusMode::Locked));
+        let verdict = |layer, protocol, ip, port| arbitrate(&locked, &packet(layer, protocol, ip, port));
+
+        assert_eq!(verdict(OutV4, Tcp, "192.168.1.1", 80), Permit, "router page");
+        assert_eq!(verdict(OutV4, Tcp, "10.0.0.5", 445), Permit, "NAS");
+        assert_eq!(verdict(InV4, Tcp, "192.168.1.20", 50_000), Permit, "a LAN peer connecting in");
+        assert_eq!(verdict(OutV4, Udp, "224.0.0.251", 5353), Permit, "mDNS");
+        assert_eq!(verdict(OutV4, Udp, "239.255.255.250", 1900), Permit, "SSDP");
+        assert_eq!(verdict(OutV6, Tcp, "fe80::1", 445), Permit, "link-local IPv6");
+
+        assert_eq!(verdict(InV4, Udp, "192.168.1.1", 53), Block, "a flow from a LAN peer's DNS port");
+        assert_eq!(verdict(OutV4, Udp, "192.168.1.1", 53), Block, "the LAN resolver");
+        assert_eq!(verdict(OutV4, Tcp, "192.168.1.1", 853), Block, "DNS over TLS on the LAN");
+        assert_eq!(verdict(OutV4, Udp, "224.0.0.251", 53), Block, "DNS to a multicast group");
+        assert_eq!(verdict(OutV4, Udp, "239.255.255.250", 3702), Block, "routable multicast beyond SSDP");
+        assert_eq!(verdict(OutV4, Tcp, "100.64.0.1", 443), Block, "carrier NAT is not the LAN");
+        assert_eq!(verdict(OutV4, Tcp, "9.9.9.9", 443), Block, "the Internet");
+        assert_eq!(verdict(OutV6, Tcp, "2001:db8::1", 443), Block, "global IPv6");
+
+        let mut core = packet(OutV4, Tcp, "192.168.1.1", 80);
+        core.app_id_matches = true;
+        assert_eq!(arbitrate(&locked, &core), Block, "the core never dials the LAN");
+
+        let mut no_tunnel = config(KillSwitchStatusMode::Locked);
+        no_tunnel.tun_luid = None;
+        for config in [
+            config(KillSwitchStatusMode::Bootstrap),
+            config(KillSwitchStatusMode::Blocked),
+            no_tunnel,
+        ] {
+            assert_eq!(
+                arbitrate(&expected_filters(&config), &packet(OutV4, Tcp, "192.168.1.1", 80)),
+                Block,
+                "{:?}: no tunnel, no LAN",
+                config.mode
+            );
+        }
+    }
+
+    #[test]
+    fn an_unresolved_core_id_withholds_the_lan_permits() {
+        let locked = expected_filters(&config(KillSwitchStatusMode::Locked));
+        // The permits are live from an earlier pass; this one only has to re-add the core block.
+        let installed = locked
+            .iter()
+            .filter(|spec| spec.weight != WEIGHT_CORE_LAN_BLOCK)
+            .map(|spec| spec.key)
+            .collect::<Vec<_>>();
+        let fallback = without_unresolved_apps(&diff(&installed, &locked), &locked, true, false);
+
+        assert!(fallback.install.is_empty(), "the core block cannot be installed without its id");
+        assert!(
+            locked
+                .iter()
+                .filter(|spec| spec.weight == WEIGHT_LAN_PERMIT)
+                .all(|spec| fallback.remove.contains(&spec.key)),
+            "every LAN permit is withdrawn, not only the one the packet below would hit"
+        );
+        let live = locked
+            .iter()
+            .filter(|spec| installed.contains(&spec.key) && !fallback.remove.contains(&spec.key))
+            .cloned()
+            .collect::<Vec<_>>();
+        let mut core = packet(LayerKind::AleAuthConnectV4, IpProtocol::Tcp, "192.168.1.1", 80);
+        core.app_id_matches = true;
+        assert_eq!(
+            arbitrate(&live, &core),
+            FilterAction::Block,
+            "no core block, so no LAN permit for the core to use"
         );
     }
 
