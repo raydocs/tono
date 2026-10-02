@@ -1,5 +1,5 @@
 import { useLockFn } from 'ahooks'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useLocation, useNavigate } from 'react-router'
 
@@ -61,6 +61,11 @@ export const ProtectedOfflineBanner = () => {
 
   const shouldShow =
     status?.uiState === 'protectedOffline' && location.pathname !== '/'
+  // The banner stays mounted while hidden. An error belongs to the episode it
+  // was raised in; the next Protected Offline starts without it.
+  useEffect(() => {
+    if (!shouldShow) setActionError(null)
+  }, [shouldShow])
   // Protected Offline is the FSM's fail-closed intent. Say "blocked" only with
   // the Service's live barrier, like the pill, progress card and tray panel;
   // say "retrying" only while a retry is actually scheduled. Same 2 s poll as

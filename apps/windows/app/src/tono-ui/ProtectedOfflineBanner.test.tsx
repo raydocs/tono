@@ -1,5 +1,11 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen } from '@testing-library/react'
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -108,5 +114,31 @@ describe('ProtectedOfflineBanner', () => {
     mocks.status = { uiState: 'connected', selectedServer: null, killSwitch: null }
     renderAt('/servers')
     expect(screen.queryByRole('alert')).toBeNull()
+  })
+
+  it('does not carry a failed retry into the next protected-offline episode', async () => {
+    mocks.tonoRetryNow.mockRejectedValue('retry failed')
+    const tree = () => (
+      <MemoryRouter initialEntries={['/servers']}>
+        <ProtectedOfflineBanner />
+      </MemoryRouter>
+    )
+    const view = render(tree())
+    const clean = screen.getByRole('alert').textContent
+    fireEvent.click(screen.getByRole('button', { name: 'tono.tray.retry' }))
+    await waitFor(() =>
+      expect(screen.getByRole('alert').textContent).not.toBe(clean),
+    )
+
+    mocks.status = { uiState: 'connected', selectedServer: null, killSwitch: null }
+    view.rerender(tree())
+    mocks.status = {
+      uiState: 'protectedOffline',
+      selectedServer: null,
+      killSwitch: { wanted: true, live: true },
+    }
+    view.rerender(tree())
+
+    expect(screen.getByRole('alert').textContent).toBe(clean)
   })
 })
