@@ -980,6 +980,15 @@ mod tests {
     }
 
     #[test]
+    fn a_respelled_selection_follows_the_same_exit() {
+        let nodes = vec![node("Salt Lake City · Summit"), node("Buffalo · Niagara")];
+        assert_eq!(
+            replacement_for_selection(Some("Buffalo - Niagara"), &nodes, None, None).as_deref(),
+            Some("Buffalo · Niagara")
+        );
+    }
+
+    #[test]
     fn recent_success_only_replaces_missing_choices_and_never_selects_hy2() {
         let nodes = vec![node("Salt Lake City · Summit"), node("Tokyo · Fuji"), hy2("Tokyo · Fuji · hy2")];
         assert_eq!(replacement_for_selection(None, &nodes, None, Some("Tokyo · Fuji")).as_deref(), Some("Tokyo · Fuji"));
