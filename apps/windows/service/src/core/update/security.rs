@@ -603,6 +603,49 @@ pub fn process_image_name(pid: u32) -> Option<String> {
     None
 }
 
+/// Whether a process that could still adopt a replacement may be running (#1308): its image
+/// path is exactly `app` (the path `authenticate_successor` admits) and it started after
+/// `floor`, the publication clock, when one was recorded. A failed snapshot, or a process with
+/// the App's file name that cannot be inspected, counts as one: only a clean scan says none.
+pub fn adopter_may_be_running(app: &Path, floor: Option<u64>) -> bool {
+    use windows_sys::Win32::System::Diagnostics::ToolHelp::*;
+    let Some(name) = app.file_name() else {
+        return true;
+    };
+    let snapshot = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) };
+    if snapshot == INVALID_HANDLE_VALUE {
+        return true;
+    }
+    let snapshot = Handle(snapshot);
+    let mut entry = PROCESSENTRY32W::default();
+    entry.dwSize = std::mem::size_of_val(&entry) as u32;
+    let mut found = unsafe { Process32FirstW(snapshot.0, &mut entry) };
+    while found != 0 {
+        let end = entry
+            .szExeFile
+            .iter()
+            .position(|c| *c == 0)
+            .unwrap_or(entry.szExeFile.len());
+        if String::from_utf16_lossy(&entry.szExeFile[..end])
+            .eq_ignore_ascii_case(&name.to_string_lossy())
+        {
+            match super::super::process::process_identity(entry.th32ProcessID) {
+                Ok(None) => {}
+                Ok(Some(identity)) => {
+                    if Path::new(&identity.executable) == app
+                        && floor.is_none_or(|floor| identity.started_at > floor)
+                    {
+                        return true;
+                    }
+                }
+                Err(_) => return true,
+            }
+        }
+        found = unsafe { Process32NextW(snapshot.0, &mut entry) };
+    }
+    false
+}
+
 /// Manual installers may live in Downloads; this is an incarnation binding,
 /// not an updater image trust proof. UAC + verified Disconnect remain required.
 pub fn parent_image() -> Result<Image> {
