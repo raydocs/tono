@@ -502,35 +502,79 @@ final class SingBoxConfigTests: XCTestCase {
     /// allocates from the start of its range. On the replaced process's range,
     /// a name an app still has cached resolves to another name.
     func testAReplacementDocumentLeavesThePreviousFakeIPRange() throws {
-        let values = try nodes()
-        var overlay = ConfigPipeline.OverlayConfig(mixedPort: 29190,
-            externalController: "127.0.0.1:29191", secret: secret, tunEnabled: true,
-            selectedNodeName: "Fixture Beta")
-        let rotation = SingBoxFakeIPRotation(slot: 0)
-        func write() throws -> [String: Any] {
-            let data = try rotation.document { slot in
-                try ConfigPipeline.buildSingBoxRuntime(overlay: overlay, nodes: values,
-                                                       directPlan: nil, fakeIPSlot: slot).runtimeJSON
-            }
-            return try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let rotation = SingBoxFakeIPRotation(defaults: nil)
+        let running = try fakeIPRange(writeDocument(rotation, selected: "Fixture Beta"))
+        let replacement = try writeDocument(rotation, selected: "Fixture Alpha")
+        let replacementRange = try fakeIPRange(replacement)
+        XCTAssertNotEqual(replacementRange, running)
+        // A range is as large as the one a process had before the pool was
+        // split: a smaller one wraps sooner and hands a cached address to
+        // another name. The DNS proof accepts every range.
+        for range in [running, replacementRange] {
+            XCTAssertTrue(range.hasSuffix(".0/20"))
+            XCTAssertTrue(ProtectedDNSProbe.isFakeIP(String(range.dropLast(4)) + "1"))
+            XCTAssertGreaterThanOrEqual(try XCTUnwrap(Int(range.split(separator: ".")[2])), 128)
         }
-        func fakeRange(_ json: [String: Any]) throws -> String {
-            let servers = try XCTUnwrap((json["dns"] as? [String: Any])?["servers"] as? [[String: Any]])
-            return try XCTUnwrap(servers.first { $0["type"] as? String == "fakeip" }?["inet4_range"] as? String)
-        }
-        let running = try fakeRange(write())
-        // The same config again is the same bytes. The reload path compares
-        // digests and skips the Core restart.
-        XCTAssertEqual(try fakeRange(write()), running)
-        overlay.selectedNodeName = "Fixture Alpha"
-        let replacement = try write()
-        XCTAssertNotEqual(try fakeRange(replacement), running)
-        XCTAssertTrue(ConfigPipeline.singBoxFakeIPRanges.contains(try fakeRange(replacement)))
         // Outside the new range the cached address is a plain IP to sing-box.
-        // It is refused before a home, DIRECT or exit rule can dial it.
-        let rules = try XCTUnwrap((replacement["route"] as? [String: Any])?["rules"] as? [[String: Any]])
+        // It is refused before a home, DIRECT or exit rule can dial it, and so
+        // is one cached from a build that still used the old pool. `no_drop`:
+        // the refusal stays a reset however many connections retry at once.
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: replacement) as? [String: Any])
+        let rules = try XCTUnwrap((json["route"] as? [String: Any])?["rules"] as? [[String: Any]])
         XCTAssertEqual(rules[2] as NSDictionary,
-                       ["ip_cidr": [ConfigPipeline.singBoxFakeIPPool], "action": "reject"] as NSDictionary)
+                       ["ip_cidr": ["198.18.128.0/17", "198.18.16.0/20"], "action": "reject",
+                        "no_drop": true] as NSDictionary)
+    }
+
+    /// The full reload skips the Core restart when the document it wrote is the
+    /// one installed. Only that document keeps its range, whatever was written
+    /// and not installed in between. Every other path restarts the Core.
+    func testOnlyAReloadOfTheInstalledDocumentKeepsItsFakeIPRange() throws {
+        let rotation = SingBoxFakeIPRotation(defaults: nil)
+        let installed = try writeDocument(rotation, selected: "Fixture Beta")
+        let digest = SHA256.hash(data: installed).map { String(format: "%02x", $0) }.joined()
+        // Another config is written and its /core/sync fails.
+        _ = try writeDocument(rotation, selected: "Fixture Alpha", keeping: digest)
+        XCTAssertEqual(try writeDocument(rotation, selected: "Fixture Beta", keeping: digest), installed)
+        // A pins refresh restarts the Core with the same config.
+        XCTAssertNotEqual(try fakeIPRange(writeDocument(rotation, selected: "Fixture Beta")),
+                          try fakeIPRange(installed))
+    }
+
+    /// A relaunched app adopts the Core the last one started. Its first
+    /// document takes the slot after that Core's, not an unrelated one.
+    func testARelaunchedAppTakesTheFakeIPSlotAfterTheLastOne() throws {
+        let suite = "tono-fake-ip-rotation-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set(41, forKey: SingBoxFakeIPRotation.defaultsKey)
+        var slots: [Int] = []
+        for _ in 0..<2 {
+            _ = SingBoxFakeIPRotation(defaults: defaults).document { slot in
+                slots.append(slot)
+                return Data()
+            }
+        }
+        XCTAssertEqual(slots, [41, 42])
+    }
+
+    private func writeDocument(
+        _ rotation: SingBoxFakeIPRotation, selected: String, keeping installed: String? = nil
+    ) throws -> Data {
+        let overlay = ConfigPipeline.OverlayConfig(mixedPort: 29190,
+            externalController: "127.0.0.1:29191", secret: secret, tunEnabled: true,
+            selectedNodeName: selected)
+        let values = try nodes()
+        return try rotation.document(keeping: installed) { slot in
+            try ConfigPipeline.buildSingBoxRuntime(overlay: overlay, nodes: values,
+                                                   directPlan: nil, fakeIPSlot: slot).runtimeJSON
+        }
+    }
+
+    private func fakeIPRange(_ document: Data) throws -> String {
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: document) as? [String: Any])
+        let servers = try XCTUnwrap((json["dns"] as? [String: Any])?["servers"] as? [[String: Any]])
+        return try XCTUnwrap(servers.first { $0["type"] as? String == "fakeip" }?["inet4_range"] as? String)
     }
 
     func testProductRuntimeRequiresChromeAndSequentialDoH() throws {
@@ -550,7 +594,7 @@ final class SingBoxConfigTests: XCTestCase {
         XCTAssertEqual((tls["utls"] as? [String: Any])?["fingerprint"] as? String, "chrome")
         let dns = try XCTUnwrap(json["dns"] as? [String: Any])
         let servers = try XCTUnwrap(dns["servers"] as? [[String: Any]])
-        XCTAssertEqual(servers[0]["inet4_range"] as? String, "198.18.16.0/22")
+        XCTAssertEqual(servers[0]["inet4_range"] as? String, "198.18.128.0/20")
         XCTAssertTrue(servers.allSatisfy { ["fakeip", "https"].contains($0["type"] as? String ?? "") })
         XCTAssertEqual(servers[1]["server"] as? String, "1.1.1.1")
         XCTAssertEqual((servers[1]["tls"] as? [String: Any])?["alpn"] as? [String], ["h2"])

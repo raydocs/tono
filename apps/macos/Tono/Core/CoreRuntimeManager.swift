@@ -39,16 +39,18 @@ nonisolated final class SingBoxFakeIPRotation: @unchecked Sendable {
     private var slot: Int
     private var written: Data?
 
+    static let defaultsKey = "singBoxFakeIPSlot"
+
     /// A relaunched app cannot read which quarter a Core it adopts is using,
     /// so it starts anywhere.
-    init(slot: Int = Int.random(in: 0..<ConfigPipeline.singBoxFakeIPRanges.count)) {
-        self.slot = slot
+    init(defaults: UserDefaults? = AppProfile.defaults) {
+        slot = Int.random(in: 0..<ConfigPipeline.singBoxFakeIPRanges.count)
     }
 
     /// `render` returns the document for a slot. The config last written keeps
     /// its bytes: the reload path skips a Core restart on an equal digest. Any
     /// other document replaces the process and takes the next quarter.
-    func document(_ render: (Int) throws -> Data) rethrows -> Data {
+    func document(keeping installedDigest: String? = nil, _ render: (Int) throws -> Data) rethrows -> Data {
         lock.lock()
         defer { lock.unlock() }
         var document = try render(slot)
