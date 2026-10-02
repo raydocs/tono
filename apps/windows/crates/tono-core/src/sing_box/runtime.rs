@@ -22,6 +22,17 @@ use std::{
 /// 198.18.0.0/16 and outside the TUN /30 (198.18.0.0–198.18.0.3).
 pub const SING_BOX_FAKE_IPV4: &str = "198.18.16.0/20";
 
+/// The pool in quarters. One process allocates from one of them (#1258): its fake-IP store is
+/// in memory only and hands addresses out in order from the start of its range, so a
+/// replacement on the same range maps a name an app still has cached to another name. On a
+/// different quarter that address is a plain IP, and the template rejects the pool.
+const SING_BOX_FAKE_IPV4_SLOTS: [&str; 4] = [
+    "198.18.16.0/22",
+    "198.18.20.0/22",
+    "198.18.24.0/22",
+    "198.18.28.0/22",
+];
+
 /// All fields are required at the API boundary; there is no inferred policy.
 pub struct RuntimeInput<'a> {
     pub nodes: &'a [ValidatedNode],
@@ -281,6 +292,8 @@ pub fn build_runtime(input: RuntimeInput<'_>) -> Result<OwnedSingBoxRuntime, Sin
         "../../../../../../tooling/scripts/sing-box/runtime-template.json"
     ))
     .map_err(|_| UnsupportedPolicy)?;
+    runtime["dns"]["servers"][0]["inet4_range"] =
+        json!(SING_BOX_FAKE_IPV4_SLOTS[input.fake_ip_slot % SING_BOX_FAKE_IPV4_SLOTS.len()]);
     runtime["inbounds"][0]["interface_name"] = json!(interface);
     runtime["inbounds"][0]["route_exclude_address"] = json!(exclusions);
     if ports.mixed_port != 0 {
@@ -723,7 +736,7 @@ mod tests {
         let value: Value = serde_json::from_str(runtime.runtime_json()).unwrap();
         assert_eq!(value["outbounds"][3]["detour"], "Tono-Exit");
         assert_eq!(
-            value["route"]["rules"][3]["outbound"],
+            value["route"]["rules"][4]["outbound"],
             "Tono-Home-Residential"
         );
         assert_eq!(runtime.dial_endpoints().len(), 1);
@@ -832,10 +845,7 @@ mod tests {
         let routing = CatalogRouting::default();
         let runtime = build_runtime(input(&nodes, &routing)).unwrap();
         let value: Value = serde_json::from_str(runtime.runtime_json()).unwrap();
-        assert_eq!(
-            value["dns"]["servers"][0]["inet4_range"],
-            SING_BOX_FAKE_IPV4
-        );
+        assert_eq!(value["dns"]["servers"][0]["inet4_range"], "198.18.16.0/22");
         assert_eq!(value["inbounds"][0]["address"][0], "198.18.0.1/30");
         assert_eq!(value["inbounds"][0]["dns_address"][0], "198.18.0.2");
         // alpha.9 sing-tun (stack omitted) caps send at 2 MiB and receive at

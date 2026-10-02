@@ -101,7 +101,7 @@ after all platform callers have migrated; this PR does not break main callers.
 | homeSocks5 | `socks` version 5, credentials, `detour: Tono-Exit`; home server NOT a physical permit |
 | home precedence | SOCKS wins over homeProxy as existing catalog contract; domain/CIDR/process/path TCP rules precede DIRECT |
 | DNS | AAAA empty NOERROR, pinned A, fake A with `rewrite_ttl` 30; primary DoH then, only when that answer is not NOERROR, backup DoH. Both are `https` through `Tono-Exit` with `alpn: h2`. No udp, tcp, or local DNS. `final` stays `Tono-DoH` |
-| TUN | utun199/Tono; 198.18.0.1/30, DNS 198.18.0.2; Windows sing-box template fake `198.18.16.0/20` (inside the probe's 198.18/16, outside the TUN /30). Live mihomo YAML stays `198.18.0.1/16`. Frozen M0 reference and the synthetic draft stay on `198.19.0.0/16`. No `stack`; core DNS disabled |
+| TUN | utun199/Tono; 198.18.0.1/30, DNS 198.18.0.2; sing-box fake pool `198.18.16.0/20` (inside the probe's 198.18/16, outside the TUN /30). The Windows compiler gives each document one /22 of it and takes the next one for the next document; the template rejects plain-IP destinations in the pool, so an address cached from a replaced process is refused instead of mapped to another name (#1258). Live mihomo YAML stays `198.18.0.1/16`. Frozen M0 reference and the synthetic draft stay on `198.19.0.0/16`. No `stack`; core DNS disabled |
 | control | authenticated loopback Clash API for observation; no PUT configs success assumption or selector change |
 | state | draft → bounded check → protected start → native receipts → Connected; reload is protected stop/start |
 

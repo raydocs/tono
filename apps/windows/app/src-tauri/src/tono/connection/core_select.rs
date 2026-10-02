@@ -109,11 +109,27 @@ pub(super) fn sing_box_runtime_document(
         home_process_names: &home_names,
         home_process_path_regexes: &home_paths,
         direct_process_names: &direct_names,
-        fake_ip_slot: 0,
+        fake_ip_slot: next_fake_ip_slot(),
     };
     build_runtime(input)
         .map(|runtime| runtime.runtime_json().to_string())
         .map_err(|error| error.to_string())
+}
+
+/// #1258: every document composed here starts a sing-box process with an empty fake-IP store.
+/// Each one takes the next quarter of the pool, so an address an app cached from the process
+/// being replaced is refused instead of reaching the name the new process hands it first. A
+/// relaunched App cannot read which quarter the running process uses, so it starts anywhere.
+fn next_fake_ip_slot() -> usize {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    static NEXT: std::sync::OnceLock<AtomicUsize> = std::sync::OnceLock::new();
+    NEXT.get_or_init(|| {
+        let started = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |elapsed| elapsed.as_micros() as usize);
+        AtomicUsize::new(started)
+    })
+    .fetch_add(1, Ordering::Relaxed)
 }
 
 fn compile_sing_box(
