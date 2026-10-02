@@ -168,6 +168,11 @@ final class AppState {
     /// Publishes a failure release's "back on normal internet" text once
     /// that release has settled open. Tests await it.
     var failureReleaseNoticeTask: Task<Void, Never>?
+    /// Reads the helper once after a withdrawn transport stopped the Core
+    /// with PF kept. Tests await it.
+    var withdrawnTransportReconcileTask: Task<Void, Never>?
+    /// Past the helper's core-down watchdog: three checks 10 s apart.
+    var withdrawnTransportReconcileDelay: Duration = .seconds(40)
     /// Connect attempts in a row that found no primary network service.
     /// Kept apart from `consecutiveProtectedFailureCount`, which exempts
     /// this environmental failure from its three-strike pause.
