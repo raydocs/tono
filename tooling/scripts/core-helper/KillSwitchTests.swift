@@ -278,8 +278,8 @@ extension KillSwitchManager {
         //    step 1.
         if let labelText = armedLabels {
             for expected in ["tono-loopback", "tono-continuity", "tono-mdns", "tono-igmp",
-                             "tono-multicast", "tono-dns-multicast", "tono-ssdp",
-                             "tono-linklocal",
+                             "tono-multicast", "tono-dns-multicast",
+                             "tono-fragment-multicast", "tono-ssdp", "tono-linklocal",
                              "tono-tunnel", "tono-control", "tono-exit",
                              "tono-bundle", "tono-block"] {
                 check("labels-report-\(expected)", labelText.contains(expected))
@@ -1310,14 +1310,19 @@ extension KillSwitchManager {
             // pass without it that would match the packet first: the
             // Continuity interface passes and `tono-lan`. Link-local multicast
             // and broadcast discovery leave on their own pass, never on a DNS
-            // port; of the routable multicast groups only SSDP's is passed,
-            // and only its port.
+            // port, and never as a fragment, which PF matches without ports;
+            // of the routable multicast groups only SSDP's is passed, and only
+            // its port.
             let lanDiscoveryDNSBlock = "block drop out quick inet proto { tcp, udp } to { 224.0.0.0/24, 255.255.255.255 } port { 53, 853 } label \"tono-dns-multicast\""
+            let lanDiscoveryFragmentBlock = "block drop out quick inet to { 224.0.0.0/24, 255.255.255.255 } fragment label \"tono-fragment-multicast\""
             let lanDiscoveryPass = "pass out quick inet to { 224.0.0.0/24, 255.255.255.255 } no state label \"tono-multicast\""
             let ssdpPass = "pass out quick inet proto udp to 239.255.255.250 port 1900 no state label \"tono-ssdp\""
             let igmpOut = "pass out quick inet proto igmp to 224.0.0.0/4 allow-opts no state label \"tono-igmp\""
             let igmpIn = "pass in quick inet proto igmp to 224.0.0.0/4 allow-opts no state label \"tono-igmp\""
-            let lanDiscoveryNeedles = [igmpOut, igmpIn, lanDiscoveryDNSBlock, lanDiscoveryPass, ssdpPass]
+            let lanDiscoveryNeedles = [
+                igmpOut, igmpIn, lanDiscoveryDNSBlock, lanDiscoveryFragmentBlock, lanDiscoveryPass,
+                ssdpPass,
+            ]
             let lanDiscoveryHolds: Bool = {
                 guard lanDiscoveryNeedles.allSatisfy(cloudRules.contains),
                       !lanDiscoveryNeedles.contains(where: rules.contains),
@@ -1327,11 +1332,13 @@ extension KillSwitchManager {
                       let continuity = cloudRules.range(of: "label \"tono-continuity\""),
                       let lan = cloudRules.range(of: "label \"tono-lan\""),
                       let block = cloudRules.range(of: lanDiscoveryDNSBlock),
+                      let fragmentBlock = cloudRules.range(of: lanDiscoveryFragmentBlock),
                       let pass = cloudRules.range(of: lanDiscoveryPass) else { return false }
                 let firstOptionlessPass = min(continuity.lowerBound, lan.lowerBound)
                 return igmpOutAt.lowerBound < firstOptionlessPass
                     && igmpInAt.lowerBound < firstOptionlessPass
                     && block.lowerBound < pass.lowerBound
+                    && fragmentBlock.lowerBound < pass.lowerBound
             }()
             if !lanDiscoveryHolds {
                 FileHandle.standardError.write(Data(
@@ -1352,8 +1359,8 @@ extension KillSwitchManager {
             )
             let tunnelOnlyLabels = [
                 "tono-continuity", "tono-mdns", "tono-igmp", "tono-lan", "tono-linklocal",
-                "tono-dhcp", "tono-ndp", "tono-multicast", "tono-dns-multicast", "tono-ssdp",
-                "tono-tunnel",
+                "tono-dhcp", "tono-ndp", "tono-multicast", "tono-dns-multicast",
+                "tono-fragment-multicast", "tono-ssdp", "tono-tunnel",
             ]
             let bootRestoreHasNoTunnelPass =
                 !tunnelOnlyLabels.contains(where: bootRestoreRules.contains)
