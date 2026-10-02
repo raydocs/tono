@@ -409,7 +409,7 @@ final class CoreWebSocket {
 
     // MARK: - Helper
 
-    private func createTask(url: URL) -> URLSessionWebSocketTask {
+    func createTask(url: URL) -> URLSessionWebSocketTask {
         var request = URLRequest(url: url)
         if !secret.isEmpty {
             request.setValue("Bearer \(secret)", forHTTPHeaderField: "Authorization")
