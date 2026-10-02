@@ -20,7 +20,7 @@ use crate::tono::{
     connection_health::{
         CoreSample, HealthLegs, NetworkChangeOutcome, NetworkEventProbeEffect, NetworkEventProbePlan,
         apply_network_event_probe,         classify_core_sample, commit_core_baseline, connection_loop_continues, core_change_fires,
-        core_identity_change_owned,
+        core_identity_change_owned, exit_probe_due,
         health_threshold_reached, kill_switch_unhealthy_for_monitor, may_recover_in_place,
         monitor_requires_reconnect, network_event_fires, next_network_events_counter,
         owned_direct_reload_in_flight,
@@ -945,7 +945,7 @@ pub(super) async fn network_monitor_loop(state: Arc<TonoState>, app: AppHandle) 
         legs.observe_protected_dns(protected_dns_unhealthy(protected_dns.as_ref()));
 
         // F2 leg 2: periodic real App data-plane probe through the tunnel.
-        if last_probe.elapsed() >= EXIT_PROBE_INTERVAL {
+        if exit_probe_due(last_probe.elapsed(), EXIT_PROBE_INTERVAL, legs.probe) {
             last_probe = std::time::Instant::now();
             if owned_direct_reload {
                 // TUN permit is retracted for this session's own reload; a failed probe is not

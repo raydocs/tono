@@ -385,6 +385,16 @@ pub const fn health_threshold_reached(consecutive_failures: u32) -> bool {
     consecutive_failures >= HEALTH_FAILURE_THRESHOLD
 }
 
+/// F2: whether the periodic exit probe runs on this tick.
+///
+/// A failed probe is confirmed on the next tick, as a failed network-event proof is. The
+/// interval alone used to decide, so the second sample [`HEALTH_FAILURE_THRESHOLD`] asks for
+/// came a whole interval after the first, and an exit that died behind a live tunnel read
+/// Connected for two intervals. A success clears the count and the cadence is the interval again.
+pub fn exit_probe_due(since_last: Duration, interval: Duration, pending_failures: u32) -> bool {
+    since_last >= interval || pending_failures > 0
+}
+
 /// Consecutive failed network-event proofs before the tunnel is rebuilt.
 ///
 /// One failure is a blip: packet loss, a DHCP flicker, a route notification
@@ -469,9 +479,10 @@ pub const fn apply_network_event_probe(
 #[cfg(test)]
 mod tests {
     use super::{
-        NetworkEventProbeEffect, NetworkEventProbePlan, apply_network_event_probe, may_recover_in_place,
-        plan_network_event_probe,
+        NetworkEventProbeEffect, NetworkEventProbePlan, apply_network_event_probe, exit_probe_due,
+        may_recover_in_place, plan_network_event_probe,
     };
+    use std::time::Duration;
 
     #[test]
     fn sing_box_direct_replacement_pid_change_is_owned_not_a_crash() {
@@ -607,5 +618,15 @@ mod tests {
             plan_network_event_probe(true, true, false, false, true, 0, false),
             NetworkEventProbePlan::Idle
         );
+    }
+
+    /// WIN-EXIT-PROBE-SLOW-CONFIRM: the second sample of a failed exit probe is taken on the
+    /// next tick, not a whole probe interval later.
+    #[test]
+    fn a_failed_exit_probe_is_confirmed_on_the_next_tick() {
+        let interval = Duration::from_secs(120);
+        let next_tick = Duration::from_secs(2);
+        assert!(!exit_probe_due(next_tick, interval, 0));
+        assert!(exit_probe_due(next_tick, interval, 1));
     }
 }
