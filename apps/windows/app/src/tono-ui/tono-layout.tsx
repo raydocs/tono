@@ -23,7 +23,12 @@ import {
 import { TonoAuthGuard } from '@/pages/_layout/tono-auth-guard'
 import { handleNoticeMessage } from '@/pages/_layout/utils'
 import { useThemeMode } from '@/services/states'
-import { tonoConnect, tonoDisconnect } from '@/services/tono'
+import {
+  connectRejectionNeedsServerChoice,
+  isSupersededConnectRejection,
+  tonoConnect,
+  tonoDisconnect,
+} from '@/services/tono'
 import getSystem from '@/utils/get-system'
 
 import { MeshBackground } from './MeshBackground'
@@ -97,14 +102,21 @@ export const handleTonoWindowShortcut = (
   return false
 }
 
-// Ctrl+K has no button to carry an error. Exported for unit tests.
+// Ctrl+K has no button to carry an error, so a refused connect lands the
+// user where it is solved or shown: the picker when no usable server is
+// selected, otherwise the dashboard and its progress card. A superseded
+// call is not a failure. Exported for unit tests.
 // eslint-disable-next-line react-refresh/only-export-components
-export const connectFromShortcut = (
+export const connectFromShortcut = async (
   connect: () => Promise<unknown>,
-  _navigate: (path: string) => void,
+  navigate: (path: string) => void,
 ): Promise<void> => {
-  void connect()
-  return Promise.resolve()
+  try {
+    await connect()
+  } catch (error) {
+    if (isSupersededConnectRejection(error)) return
+    navigate(connectRejectionNeedsServerChoice(error) ? '/servers' : '/')
+  }
 }
 
 /**
