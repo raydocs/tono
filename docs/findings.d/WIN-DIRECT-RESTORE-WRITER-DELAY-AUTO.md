@@ -1,6 +1,6 @@
 | ID | 问题（一句） | 状态 | Issue / PR | 等级 | 剩余限制 |
 |---|---|---|---|---|---|
-| WIN-DIRECT-RESTORE-WRITER-DELAY-AUTO | Automatic health release never cancels a stalled optional DIRECT controller reader, delaying ordinary internet recovery for two 60-second attempts | in-PR | #1051 / #1329 | 中·已确认（P1，源码与锁回归） | Not reproduced on hardware (needs-hardware). The 60 s reload grace before the health proof may fail is unchanged. The policy-rebuild and strict recoveries still queue behind the reader. A queued policy writer and the DIRECT commit owner's proofs still delay the release |
+| WIN-DIRECT-RESTORE-WRITER-DELAY-AUTO | Automatic health release never cancels a stalled optional DIRECT controller reader, delaying ordinary internet recovery for two 60-second attempts | fixed(f0568a88) | #1051 / #1329 | 中·已确认（P1，源码与锁回归） | Not reproduced on hardware (needs-hardware). The 60 s reload grace before the health proof may fail is unchanged. The policy-rebuild and strict recoveries still queue behind the reader. A queued policy writer and the DIRECT commit owner's proofs still delay the release |
 
 Ownership: SHIP_PLAN §2 item 10. Follow-up to merged #898; ordinary-health AI disposition is #974/#1003/#1010.
 

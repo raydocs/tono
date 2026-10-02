@@ -8,3 +8,8 @@
 - Verification: no local cargo on the MacBook; Windows CI runs the test. See the PR for the red run on the test-only commit and the green run on the fix.
 - Candidate/publication: source only; no new candidate.
 - Limits: needs-hardware (no full-disk reproduction on a Windows machine). The release waits for the WFP watchdog tick (1 s). A restart that fails but leaves a live Core is not queued; its own Core watchdog owns that case.
+
+### 2026-10-02 continuation: merged to main
+- Merged: #1327, merge commit `927a1f33`, PR head `2b2a31e3`. `ci-gate` green on that head: https://github.com/raydocs/tono/actions/runs/37000467745 .
+- Independent review (Codex `gpt-6.1-sol`, high): rounds, findings and dispositions are recorded in https://github.com/raydocs/tono/pull/1327#issuecomment-5951819840 ; its one major is the behaviour Decision 031 asks for and is recorded there as not a defect.
+- Candidate/publication: source merged to main only. No new package, no deploy, no customer publish. No hardware verification.

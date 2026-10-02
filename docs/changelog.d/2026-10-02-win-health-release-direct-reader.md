@@ -9,3 +9,8 @@
 - Verification: no local cargo on the MacBook; Windows CI runs the test. See the PR for the red run on the test-only commit and the green run on the fix.
 - Candidate/publication: source only; no new candidate.
 - Limits: needs-hardware (no stalled-Core reproduction on a Windows machine). The 60 s reload grace before a health failure counts is unchanged. `WIN-UPDATE-CONNECTING-CLEANUP` (failed update Prepare while Connecting) is not part of this change. The strict and policy-rebuild recoveries still wait for the reader. A policy or catalog sync that queues its policy writer while the reload stalls still delays the release: the release waits for its policy reader before it reaches the wake (review round 1, minor, open). The reload's Service mutations and its reconciliation are not cancellable, so the release still waits for those. The DIRECT commit owner (`direct.rs` controller readiness, graph proof, TUN proof) does not read the cancellation either: a release queued behind it waits for those budgets (15 s readiness, 6 s per graph request, the TUN proof), not for the two 60 s attempts (review round 2, minor, open).
+
+### 2026-10-02 continuation: merged to main
+- Merged: #1329, merge commit `f0568a88`, PR head `d73d4f2d`. `ci-gate` green on that head: https://github.com/raydocs/tono/actions/runs/37013238221 .
+- Independent review (Codex `gpt-6.1-sol`, high): rounds, findings and dispositions are recorded in https://github.com/raydocs/tono/pull/1329#issuecomment-5953761628 ; no unresolved major in the last round.
+- Candidate/publication: source merged to main only. No new package, no deploy, no customer publish. No hardware verification.

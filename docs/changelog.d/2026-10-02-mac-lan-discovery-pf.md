@@ -12,3 +12,8 @@
 - 验证：见 PR。本机没有运行 `pfctl`、没有连接、没有原生构建；规则解析和内核加载由 hosted macOS CI 的 `privileged-tests` 完成。
 - 候选/发布：仅源码，无新候选。
 - 剩余限制：没有实机证明通用剪贴板或投屏因此恢复（`needs-hardware`）；实机步骤写在 PR 里。用 SSDP 以外的可路由组播做发现的设备仍然发现不了（有意为之）。网络给 `239.255.255.250` 配了组播转发时，TTL 设大的 SSDP 包会被转发出本链路，Tono 限制不了。`tono-igmp` 不区分 IGMP 消息类型和 TTL（内核替普通进程发的成员报告 TTL 固定为 1；自定 TTL 要 root）。`tono-dns-multicast` 管不到 lo0 和 Continuity 网卡（`awdl0`、`llw0`、`bridge100`），那里和 main 一样全部放行。在网全球 IPv6 和非私网 IPv4 仍被丢弃（MAC-CONTINUITY-ONLINK-PF，[决策 045](../decisions/045-2026-10-02-macos-lan-discovery-pf.md) 说明为什么这次不放）。武装或整表清状态时已建立的局域网 TCP 连接被丢弃是另一个缺陷（MAC-PF-ESTABLISHED-FLOWS），不在本 PR。
+
+### 2026-10-02 续记：已合 main
+- 来源合入：#1330，merge commit `c1c4651d`，PR 头 `fc70cdf8`。该头的 `ci-gate` 全绿：https://github.com/raydocs/tono/actions/runs/37017141486 。
+- 独立评审（Codex `gpt-6.1-sol`，high）：各轮范围、发现和处置记录在 https://github.com/raydocs/tono/pull/1330#issuecomment-5954448382 ；最后一轮没有未处理的 major。
+- 候选/发布：仅源码合入 main。无新安装包，无部署，无客户发布。没有实机验证。
