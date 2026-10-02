@@ -287,11 +287,15 @@ extension KillSwitchManager {
             // the port blocks above never see one. The stateful LAN pass had
             // the implicit `flags S/SA` and was skipped too, which left a TCP
             // fragment for the final block. The stateless passes below have no
-            // flag set, so these two rules keep that outcome: an outbound TCP
-            // fragment to a LAN or link-local destination is dropped on every
-            // interface. TCP sets DF and sizes segments to the path, so an
-            // ordinary connection sends none. UDP fragments are unchanged:
-            // the stateful pass never had a flag set and already matched them.
+            // flag set, so these two rules keep that outcome: an outbound
+            // fragment PF reads as TCP, to a LAN or link-local destination, is
+            // dropped wherever these rules are reached (lo0 and the Continuity
+            // interfaces pass everything earlier). With path MTU discovery on,
+            // TCP sets DF and sizes segments to the path, so an ordinary
+            // connection sends none. Unchanged from the stateful passes: UDP
+            // fragments, which never met a flag set, and an IPv6 fragment
+            // header followed by another extension header, which PF matches
+            // by that header's protocol, not as TCP.
             lines.append(
                 "block drop out quick inet proto tcp to { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16 } fragment label \"tono-lan-fragment\""
             )
