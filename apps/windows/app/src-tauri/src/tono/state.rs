@@ -556,6 +556,14 @@ impl TonoInner {
         self.connect_cancellation = CancellationToken::new();
     }
 
+    /// Wake the stages waiting on this generation's cancellation token and keep the generation.
+    /// For the automatic health release, which still owns the generation it is about to take
+    /// down and only needs its in-flight controller waits to give up their lifecycle reader.
+    pub fn cancel_connection_waits(&mut self) {
+        self.connect_cancellation.cancel();
+        self.connect_cancellation = CancellationToken::new();
+    }
+
     /// The intent of the bump that retired `generation` (H-1).
     ///
     /// Callers pass the generation they were *running under*, so the answer describes the bump

@@ -1358,6 +1358,9 @@ async fn may_keep_session_in_place(state: &Arc<TonoState>, tunnel_proven: bool) 
     keep
 }
 
+/// How often a queued health release wakes the controller waits again (#1051).
+const HEALTH_RELEASE_REWAKE: Duration = Duration::from_millis(250);
+
 /// Serialize failure admission with selection/switch completion before transferring lifecycle
 /// ownership to release. A hot switch deliberately keeps the connection generation.
 async fn admit_health_release(
@@ -1371,8 +1374,45 @@ async fn admit_health_release(
     tokio::sync::OwnedRwLockWriteGuard<()>,
 ), NetworkChangeOutcome> {
     let selection = state.begin_policy_activation().await;
-    let lifecycle = state.begin_privileged_release().await;
+    let mut writer = std::pin::pin!(state.begin_privileged_release());
+    let lifecycle = match futures::poll!(writer.as_mut()) {
+        std::task::Poll::Ready(lifecycle) => lifecycle,
+        std::task::Poll::Pending => {
+            // #1051: a reader is in the way. A stalled optional DIRECT reload keeps its reader
+            // for both 60-second controller attempts, and ordinary traffic stayed Blocked that
+            // long behind this release. Wake this generation's controller waits. Their detached
+            // owner still retracts its Service session before it drops the reader.
+            //
+            // One wake is not enough: a reload takes its reader first and reads the token
+            // afterwards, and a pending poll does not prove the writer is queued yet, so a
+            // reader can still hold the token installed by the previous wake. Wake again until
+            // the writer is admitted.
+            loop {
+                {
+                    let mut inner = state.lock().await;
+                    health_release_is_current(&inner, generation, selected_node, switch_task, check_switch_task)?;
+                    inner.cancel_connection_waits();
+                }
+                if let Ok(lifecycle) = tokio::time::timeout(HEALTH_RELEASE_REWAKE, writer.as_mut()).await {
+                    break lifecycle;
+                }
+            }
+        }
+    };
     let mut inner = state.lock().await;
+    health_release_is_current(&inner, generation, selected_node, switch_task, check_switch_task)?;
+    inner.tasks.abort_reconnect();
+    Ok((selection, lifecycle))
+}
+
+/// Whether the failed proof still describes the runtime this release would take down.
+fn health_release_is_current(
+    inner: &TonoInner,
+    generation: u64,
+    selected_node: Option<&str>,
+    switch_task: Option<tokio::task::Id>,
+    check_switch_task: bool,
+) -> Result<(), NetworkChangeOutcome> {
     if inner.connect_generation != generation || !inner.fsm.status().is_connected {
         return Err(NetworkChangeOutcome::Handled);
     }
@@ -1386,8 +1426,7 @@ async fn admit_health_release(
     if check_switch_task && inner.tasks.switch.as_ref().map(|task| task.inner().id()) != switch_task {
         return Err(NetworkChangeOutcome::RecoveredInPlace);
     }
-    inner.tasks.abort_reconnect();
-    Ok((selection, lifecycle))
+    Ok(())
 }
 
 fn capture_health_context(
@@ -1711,6 +1750,70 @@ mod tests {
         assert!(state.begin_connect_mutation().now_or_never().is_none(),
             "the admitted release must exclude replacement startup");
         drop(lifecycle);
+    }
+
+    /// #1051: the release writer queued behind a stalled optional DIRECT reload for both of its
+    /// 60-second controller attempts. Admission now wakes that reader's controller wait.
+    #[tokio::test]
+    async fn health_release_admission_wakes_a_stalled_controller_reader() {
+        let state = Arc::new(TonoState::for_test());
+        let (generation, selected, switch_task) = {
+            let mut inner = state.lock().await;
+            inner.fsm.begin_connect();
+            inner.fsm.mark_kill_switch_armed();
+            inner.fsm.mark_session_verified();
+            inner.fsm.connect_succeeded().unwrap();
+            inner.selected_node = Some("A".to_owned());
+            super::capture_health_context(&inner, true).unwrap()
+        };
+        // The optional DIRECT reload: a lifecycle reader kept until its controller wait ends.
+        let reader = state.begin_connect_mutation().await;
+        let cancellation = state.lock().await.connect_cancellation.clone();
+        let stalled = tokio::spawn(async move {
+            let _reader = reader;
+            cancellation.cancelled().await;
+        });
+        let admitted = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            super::admit_health_release(&state, generation, selected.as_deref(), switch_task, true),
+        ).await;
+        stalled.abort();
+        let admitted = admitted.expect("the release must not wait out a stalled controller reader");
+        assert!(admitted.is_ok(), "the current failure still owns the release");
+        assert_eq!(state.lock().await.connect_generation, generation,
+            "waking the reader must not retire the generation the release still owns");
+    }
+
+    /// #1051 review: the reload takes its lifecycle reader first and reads the cancellation
+    /// token afterwards. One that reads it after the release's first wake holds a fresh token.
+    #[tokio::test]
+    async fn health_release_admission_wakes_a_reader_that_reads_its_token_late() {
+        let state = Arc::new(TonoState::for_test());
+        let (generation, selected, switch_task) = {
+            let mut inner = state.lock().await;
+            inner.fsm.begin_connect();
+            inner.fsm.mark_kill_switch_armed();
+            inner.fsm.mark_session_verified();
+            inner.fsm.connect_succeeded().unwrap();
+            inner.selected_node = Some("A".to_owned());
+            super::capture_health_context(&inner, true).unwrap()
+        };
+        let reader = state.begin_connect_mutation().await;
+        let first = state.lock().await.connect_cancellation.clone();
+        let late_state = Arc::clone(&state);
+        let stalled = tokio::spawn(async move {
+            let _reader = reader;
+            first.cancelled().await;
+            let late = late_state.lock().await.connect_cancellation.clone();
+            late.cancelled().await;
+        });
+        let admitted = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            super::admit_health_release(&state, generation, selected.as_deref(), switch_task, true),
+        ).await;
+        stalled.abort();
+        let admitted = admitted.expect("a reader holding the token read after the first wake must be woken too");
+        assert!(admitted.is_ok(), "the current failure still owns the release");
     }
 
     #[tokio::test]
