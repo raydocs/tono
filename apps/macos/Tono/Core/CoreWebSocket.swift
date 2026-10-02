@@ -409,12 +409,16 @@ final class CoreWebSocket {
 
     // MARK: - Helper
 
-    private func createTask(url: URL) -> URLSessionWebSocketTask {
+    func createTask(url: URL) -> URLSessionWebSocketTask {
         var request = URLRequest(url: url)
         if !secret.isEmpty {
             request.setValue("Bearer \(secret)", forHTTPHeaderField: "Authorization")
         }
-        return session.webSocketTask(with: request)
+        let task = session.webSocketTask(with: request)
+        // `/connections` is one frame per snapshot. Over the limit the receive
+        // fails for good and the reconnect meets the same snapshot.
+        task.maximumMessageSize = 16 * 1024 * 1024
+        return task
     }
 }
 
