@@ -193,6 +193,20 @@ extension AppState {
                     detail: "selected catalog exit absent at revision \(catalog.revision)"
                 )
                 settleRemovedCatalogExit(wasConnected: isConnected)
+            } else if allowRuntimeTransition,
+                      connectionCoordinator.protectedReconnectTask != nil
+                        || connectionCoordinator.wakeRecoveryTask != nil {
+                // An automatic recovery still owns the barrier. Asking for a
+                // choice ends it with PF held and nothing scheduled: a
+                // survivor is what it retries next, and with none left the
+                // settlement restores the original network.
+                if defaultCloudExitNode() != nil {
+                    applyDefaultProxySelection(persist: true)
+                    catalogSelectionRequiresChoice = false
+                    errorMessage = String(localized: "The selected cloud server was removed. Tono switched to the managed default cloud server.")
+                } else {
+                    settleRemovedCatalogExit(wasConnected: false)
+                }
             } else {
                 applyDefaultProxySelection(persist: true)
                 if managedCatalogRouting?.defaultProxy != nil,
