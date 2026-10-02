@@ -1773,6 +1773,38 @@ mod tests {
             "waking the reader must not retire the generation the release still owns");
     }
 
+    /// #1051 review: the reload takes its lifecycle reader first and reads the cancellation
+    /// token afterwards. One that reads it after the release's first wake holds a fresh token.
+    #[tokio::test]
+    async fn health_release_admission_wakes_a_reader_that_reads_its_token_late() {
+        let state = Arc::new(TonoState::for_test());
+        let (generation, selected, switch_task) = {
+            let mut inner = state.lock().await;
+            inner.fsm.begin_connect();
+            inner.fsm.mark_kill_switch_armed();
+            inner.fsm.mark_session_verified();
+            inner.fsm.connect_succeeded().unwrap();
+            inner.selected_node = Some("A".to_owned());
+            super::capture_health_context(&inner, true).unwrap()
+        };
+        let reader = state.begin_connect_mutation().await;
+        let first = state.lock().await.connect_cancellation.clone();
+        let late_state = Arc::clone(&state);
+        let stalled = tokio::spawn(async move {
+            let _reader = reader;
+            first.cancelled().await;
+            let late = late_state.lock().await.connect_cancellation.clone();
+            late.cancelled().await;
+        });
+        let admitted = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            super::admit_health_release(&state, generation, selected.as_deref(), switch_task, true),
+        ).await;
+        stalled.abort();
+        let admitted = admitted.expect("a reader holding the token read after the first wake must be woken too");
+        assert!(admitted.is_ok(), "the current failure still owns the release");
+    }
+
     #[tokio::test]
     async fn automatic_health_release_keeps_ai_blocked_and_preserves_protected_recovery() {
         let mut general_blocked = true;
