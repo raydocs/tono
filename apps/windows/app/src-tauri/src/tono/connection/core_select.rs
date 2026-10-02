@@ -48,9 +48,16 @@ pub(super) async fn prepare_owned_core(
     let home_proxy = routing.and_then(|routing| routing.home_proxy.as_deref());
     let home_socks5 = routing.and_then(|routing| routing.home_socks5.as_ref());
     match resolve(preferred, proof, protection_armed, service_can_run) {
-        CoreSelection::Run(CoreChoice::SingBox) => {
-            compile_sing_box(nodes, selected, routing, secret, ports, None, binary)
-        }
+        CoreSelection::Run(CoreChoice::SingBox) => compile_sing_box(
+            nodes,
+            selected,
+            routing,
+            secret,
+            ports,
+            None,
+            next_fake_ip_slot(state),
+            binary,
+        ),
         CoreSelection::Run(CoreChoice::Mihomo { automatic_fallback }) => {
             if automatic_fallback {
                 logging!(
@@ -85,6 +92,7 @@ pub(super) fn sing_box_runtime_document(
     secret: &str,
     ports: RuntimePorts,
     plan: Option<&tono_core::config::DirectPlan>,
+    fake_ip_slot: usize,
 ) -> Result<String, String> {
     let home_names: Vec<String> = config::HOME_PROCESS_NAMES
         .iter()
@@ -109,46 +117,48 @@ pub(super) fn sing_box_runtime_document(
         home_process_names: &home_names,
         home_process_path_regexes: &home_paths,
         direct_process_names: &direct_names,
-        fake_ip_slot: next_fake_ip_slot(),
+        fake_ip_slot,
     };
     build_runtime(input)
         .map(|runtime| runtime.runtime_json().to_string())
         .map_err(|error| error.to_string())
 }
 
-/// #1258: every document composed here starts a sing-box process with an empty fake-IP store.
-/// Each one takes the next slot of the pool, so an address an app cached from an earlier
-/// process is refused instead of reaching the name the new process hands it first. The count
-/// is kept on disk: a relaunched App carries on after the slot of the process it finds
-/// running. When the file cannot be read the count starts from the clock.
-fn next_fake_ip_slot() -> usize {
-    static NEXT: std::sync::Mutex<Option<usize>> = std::sync::Mutex::new(None);
-    let file = dirs::app_home_dir()
-        .or_else(|_| dirs::preinit_app_data_dir())
-        .ok()
-        .map(|home| home.join("tono").join("fake-ip-slot"));
-    let mut next = NEXT
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
-    advance_fake_ip_slot(&mut next, file.as_deref())
+/// #1258: every document composed for a start takes the next fake-IP slot, so an address an
+/// app cached from an earlier sing-box process is refused instead of reaching the name the
+/// new process hands it first. The count is the next document's slot, kept in the Tono data
+/// directory: a relaunched App carries on from the documents the previous one composed.
+pub(super) fn next_fake_ip_slot(state: &TonoState) -> usize {
+    advance_fake_ip_slot(&mut state.fake_ip_slot.lock(), &state.fake_ip_slot_file)
 }
 
-fn advance_fake_ip_slot(next: &mut Option<usize>, file: Option<&Path>) -> usize {
-    let slot = next
-        .or_else(|| std::fs::read_to_string(file?).ok()?.trim().parse().ok())
-        .unwrap_or_else(|| {
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map_or(0, |elapsed| elapsed.as_micros() as usize)
-        });
+fn advance_fake_ip_slot(next: &mut Option<usize>, file: &Path) -> usize {
+    let clock = || {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |elapsed| elapsed.as_micros() as usize)
+    };
+    let slot = next.unwrap_or_else(|| stored_fake_ip_slot(file).unwrap_or_else(clock));
+    let saved = std::fs::write(file, slot.wrapping_add(1).to_string()).is_ok();
+    // A stored count that cannot be saved would be read back unchanged by every launch, each
+    // one starting on the slot the last process may still run on. The clock at least varies.
+    let slot = if next.is_none() && !saved { clock() } else { slot };
     *next = Some(slot.wrapping_add(1));
-    if let Some(file) = file {
-        // Best effort. Without the file the next launch starts from the clock.
-        let _ = std::fs::write(file, slot.wrapping_add(1).to_string());
-    }
     slot
 }
 
+fn stored_fake_ip_slot(file: &Path) -> Option<usize> {
+    use std::io::Read as _;
+    let mut text = String::new();
+    std::fs::File::open(file)
+        .ok()?
+        .take(32)
+        .read_to_string(&mut text)
+        .ok()?;
+    text.trim().parse().ok()
+}
+
+#[allow(clippy::too_many_arguments, reason = "one sing-box document")]
 fn compile_sing_box(
     nodes: &[ValidatedNode],
     selected: &str,
@@ -156,11 +166,20 @@ fn compile_sing_box(
     secret: &str,
     ports: RuntimePorts,
     plan: Option<&tono_core::config::DirectPlan>,
+    fake_ip_slot: usize,
     binary: PathBuf,
 ) -> Result<PreparedCore, StageFailure> {
     let routing_owned = routing.cloned().unwrap_or_default();
-    let document = sing_box_runtime_document(nodes, selected, &routing_owned, secret, ports, plan)
-        .map_err(StageFailure::error)?;
+    let document = sing_box_runtime_document(
+        nodes,
+        selected,
+        &routing_owned,
+        secret,
+        ports,
+        plan,
+        fake_ip_slot,
+    )
+    .map_err(StageFailure::error)?;
     Ok(PreparedCore {
         document,
         core_path: binary,
@@ -268,9 +287,29 @@ mod tests {
             std::process::id()
         ));
         std::fs::write(&file, "41").unwrap();
-        let before_relaunch = advance_fake_ip_slot(&mut None, Some(&file));
-        let after_relaunch = advance_fake_ip_slot(&mut None, Some(&file));
+        let before_relaunch = advance_fake_ip_slot(&mut None, &file);
+        let after_relaunch = advance_fake_ip_slot(&mut None, &file);
         let _ = std::fs::remove_file(&file);
         assert_eq!((before_relaunch, after_relaunch), (41, 42));
+    }
+
+    /// #1258: a count that can be read but not saved would be read back unchanged by every
+    /// launch, and each one would start on the slot the last process still runs on.
+    #[test]
+    fn a_slot_count_that_cannot_be_saved_is_not_used() {
+        let file = std::env::temp_dir().join(format!(
+            "tono-fake-ip-slot-read-only-test-{}",
+            std::process::id()
+        ));
+        std::fs::write(&file, "41").unwrap();
+        let mut permissions = std::fs::metadata(&file).unwrap().permissions();
+        permissions.set_readonly(true);
+        std::fs::set_permissions(&file, permissions.clone()).unwrap();
+        let slot = advance_fake_ip_slot(&mut None, &file);
+        #[allow(clippy::permissions_set_readonly_false, reason = "a temp file the test removes")]
+        permissions.set_readonly(false);
+        let _ = std::fs::set_permissions(&file, permissions);
+        let _ = std::fs::remove_file(&file);
+        assert_ne!(slot, 41);
     }
 }
