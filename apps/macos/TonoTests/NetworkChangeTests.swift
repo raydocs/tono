@@ -74,4 +74,48 @@ final class NetworkChangeTests: XCTestCase {
         )
         app.connectionCoordinator.cancelReconnectTasks()
     }
+
+    /// MAC-RECONCILE-DNS-COPY (#861): Protected DNS read broken on the uplink
+    /// the session was captured on, and the reconnect notice said the active
+    /// network had changed. The helper and SCDynamicStore are replaced by the
+    /// audit seams; the debounce and the broken re-read run for real.
+    func testBrokenDNSOnTheSameUplinkDoesNotSayTheNetworkChanged() async {
+        let app = AppState()
+        app.isConnected = true
+        app.protectedDNSService = "Wi-Fi"
+        var runtime = NetworkProtectionOperations()
+        runtime.repairForRelease = {}
+        runtime.stopCore = { _ in true }
+        runtime.coreStatus = { (false, true) }
+        runtime.restoreDNS = { true }
+        runtime.disableSystemProxy = {}
+        runtime.disarm = {}
+        runtime.releaseAfterFailure = {}
+        runtime.restrictToBootstrap = {}
+        app.networkProtection = runtime
+        let uplink = NetworkUplinkSnapshot(
+            primaryService: "Wi-Fi",
+            primaryInterface: "en0",
+            ipv4Address: "192.168.1.20",
+            ipv4Gateway: "192.168.1.1",
+            ipv6Gateway: nil
+        )
+        app.lastUplinkSnapshot = uplink
+        var audits = ProtectionAuditOperations()
+        audits.uplinkSnapshot = { uplink }
+        audits.protectedDNSIntegrity = { _ in .broken }
+        app.protectionAudits = audits
+
+        app.handleSystemNetworkChange()
+        await app.connectionCoordinator.networkEnvironmentTask?.value
+
+        XCTAssertFalse(app.isConnected)
+        XCTAssertEqual(
+            app.errorMessage,
+            String(localized: "Protected DNS stopped; Kill Switch is blocking traffic while Tono retries.")
+        )
+
+        app.connectionCoordinator.cancelReconnectTasks()
+        await app.connectionCoordinator.disconnectSequence?.value
+    }
 }
