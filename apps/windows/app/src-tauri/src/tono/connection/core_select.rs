@@ -273,4 +273,24 @@ mod tests {
         let _ = std::fs::remove_file(&file);
         assert_eq!((before_relaunch, after_relaunch), (41, 42));
     }
+
+    /// #1258: a count that can be read but not saved would be read back unchanged by every
+    /// launch, and each one would start on the slot the last process still runs on.
+    #[test]
+    fn a_slot_count_that_cannot_be_saved_is_not_used() {
+        let file = std::env::temp_dir().join(format!(
+            "tono-fake-ip-slot-read-only-test-{}",
+            std::process::id()
+        ));
+        std::fs::write(&file, "41").unwrap();
+        let mut permissions = std::fs::metadata(&file).unwrap().permissions();
+        permissions.set_readonly(true);
+        std::fs::set_permissions(&file, permissions.clone()).unwrap();
+        let slot = advance_fake_ip_slot(&mut None, Some(&file));
+        #[allow(clippy::permissions_set_readonly_false, reason = "a temp file the test removes")]
+        permissions.set_readonly(false);
+        let _ = std::fs::set_permissions(&file, permissions);
+        let _ = std::fs::remove_file(&file);
+        assert_ne!(slot, 41);
+    }
 }
