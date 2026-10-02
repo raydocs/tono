@@ -267,15 +267,18 @@ final class SocketServer {
         return consecutiveChecks >= orphanedBootstrapReleaseThreshold ? .release : .count
     }
 
-    /// Exit probes, one per idle-loop check (10s apart), that must fail in a
-    /// row before a committed session whose owner died is released. Six is
-    /// about a minute: a path that blips recovers inside it, and the Mac is
-    /// not left without a network for much longer than that.
+    /// Failed exit probes, one per idle-loop check (10s apart), counted in a
+    /// row before the next failure releases a committed session whose owner
+    /// died: the seventh, about 70s after the first probe. A path that blips
+    /// recovers inside that, and the Mac is not left without a network for
+    /// much longer.
     static let orphanedTunnelReleaseThreshold = 6
 
     /// What the Core-running branch of the idle loop should do about a
     /// committed session (a saved state with `tunnelInterfaces`) whose
     /// recorded owner died (MAC-ORPHAN-TUNNEL-SESSION, #1269).
+    /// `exitReachable` is false only for the Core's own verdict that the
+    /// exit failed, and nil while no probe has answered.
     static func orphanedTunnelAction(
         stateFilePresent: Bool,
         committed: Bool,
@@ -297,15 +300,19 @@ final class SocketServer {
         return consecutiveFailures >= orphanedTunnelReleaseThreshold ? .release : .count
     }
 
-    /// Whether macOS has a primary IPv4 service with a router. The Core's
-    /// utun is not a network service, so this stays the physical uplink
-    /// while the tunnel is up. Unreadable counts as absent.
+    /// Whether macOS has a primary IPv4 service with a router on an
+    /// interface that is not itself a tunnel. The Core's utun is not a
+    /// network service, so this is expected to stay the physical uplink
+    /// while the tunnel is up. Another VPN as the primary service, or
+    /// anything unreadable, counts as absent.
     static func uplinkPresent() -> Bool {
         guard let store = SCDynamicStoreCreate(nil, "Tono orphaned session uplink" as CFString, nil, nil),
-              let global = SCDynamicStoreCopyValue(store, "State:/Network/Global/IPv4" as CFString) as? [String: Any] else {
+              let global = SCDynamicStoreCopyValue(store, "State:/Network/Global/IPv4" as CFString) as? [String: Any],
+              global["Router"] is String,
+              let interface = global["PrimaryInterface"] as? String else {
             return false
         }
-        return global["Router"] is String
+        return !["utun", "ipsec", "ppp"].contains { interface.hasPrefix($0) }
     }
 
     func run() {
@@ -403,6 +410,9 @@ final class SocketServer {
             killSwitch.superviseProtection()
             return
         }
+        // No running Core, no session to probe: an answer from the one that
+        // stopped must not count against the next.
+        resetOrphanedTunnel()
         // The Core took its utun with it (#608). Narrow the reviewed-bundle
         // permit immediately. The all-block, if still saved, waits for the
         // threshold below so a connect can start the Core.
@@ -489,7 +499,7 @@ final class SocketServer {
         let committed = !nativeUpdatePending()
             && !((try? killSwitch.loadState())?.tunnelInterfaces.isEmpty ?? true)
         let ownerAlive = owner.map { !Self.sessionOwnerHasExited($0) } ?? true
-        let uplinkPresent = Self.uplinkPresent()
+        let uplinkPresent = transitionGate.isAwake() && Self.uplinkPresent()
         let failures = consecutiveOrphanedTunnelFailures
         let decide = { (exitReachable: Bool?) in
             Self.orphanedTunnelAction(
@@ -502,11 +512,14 @@ final class SocketServer {
                 consecutiveFailures: failures
             )
         }
-        switch decide(orphanedTunnelProbe?.answer()) {
+        // Only the Core's own "the exit failed" counts. A controller that
+        // gave no verdict proves nothing about the exit, so the streak
+        // starts over as it does for an exit that answered.
+        switch decide(orphanedTunnelProbe?.answer().map { $0 != .unreachable }) {
         case .reset:
             resetOrphanedTunnel()
-            // An exit that answered is probed again. Anything else that
-            // reset (a live or unknown owner, no uplink, no committed
+            // Such an exit is probed again. Anything else that reset (a
+            // live or unknown owner, no uplink, asleep, no committed
             // session) asks the Core nothing.
             guard decide(nil) == .wait else { return false }
         case .wait:
@@ -522,8 +535,8 @@ final class SocketServer {
             return true
         }
         // A runtime config that cannot be read starts no probe, so nothing
-        // counts and the block stays.
-        orphanedTunnelProbe = OrphanedTunnelProbe()
+        // counts and the block stays. The origin alternates with the streak.
+        orphanedTunnelProbe = OrphanedTunnelProbe(origin: consecutiveOrphanedTunnelFailures)
         return false
     }
 
@@ -576,6 +589,9 @@ final class SocketServer {
     /// the session owner; a later one replaces it. Only the main app passes
     /// the authorizer for these routes, and it is long-lived.
     private func recordSessionOwner(socket: Int32) {
+        // Whatever was counted or asked belongs to the previous owner. A
+        // peer that cannot be read is an unknown owner, not that one.
+        clearSessionOwner()
         let pid = Self.peerPID(socket: socket)
         guard pid > 0, let start = Self.processStartTime(pid: pid) else { return }
         sessionOwner = SessionOwner(
@@ -583,7 +599,6 @@ final class SocketServer {
             startSeconds: start.seconds,
             startMicroseconds: start.microseconds
         )
-        consecutiveOrphanedOwnerChecks = 0
     }
 
     /// The session is over: stop, disarm, or the orphan release above.
@@ -985,29 +1000,33 @@ enum OrphanedTunnelAction: Equatable {
 /// and is read by a later idle-loop check, so the loop never waits on it.
 final class OrphanedTunnelProbe: @unchecked Sendable {
     private let lock = NSLock()
-    private var reachable: Bool?
-    private let session = URLSession(configuration: .ephemeral)
+    private var verdict: ExitDelayVerdict?
+    private let session: URLSession
 
-    init?() {
-        guard let request = try? UpdateRuntime.exitDelayRequest() else { return nil }
+    init?(origin: Int) {
+        guard let request = try? UpdateRuntime.exitDelayRequest(origin: origin) else { return nil }
+        // Straight to the loopback controller, whatever the system proxy is.
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.connectionProxyDictionary = [:]
+        session = URLSession(configuration: configuration)
         session.dataTask(with: request) { [weak self] data, response, error in
-            self?.finish(UpdateRuntime.exitDelayVerified(data: data, response: response, error: error))
+            self?.finish(UpdateRuntime.exitDelayVerdict(data: data, response: response, error: error))
         }.resume()
     }
 
     deinit { session.invalidateAndCancel() }
 
-    private func finish(_ verified: Bool) {
+    private func finish(_ answered: ExitDelayVerdict) {
         lock.lock()
-        reachable = verified
+        verdict = answered
         lock.unlock()
     }
 
     /// nil until the controller has answered or the request has failed.
-    func answer() -> Bool? {
+    func answer() -> ExitDelayVerdict? {
         lock.lock()
         defer { lock.unlock() }
-        return reachable
+        return verdict
     }
 }
 

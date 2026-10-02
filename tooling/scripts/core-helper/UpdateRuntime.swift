@@ -127,17 +127,26 @@ final class UpdateRuntime {
         return protection
     }
 
+    /// Two unrelated origins for the delay test, percent-encoded for its
+    /// query. The update check uses the first; the orphaned-session probe
+    /// alternates, so one origin failing behind a working exit is not
+    /// taken for the exit.
+    static let exitDelayOrigins = [
+        "https%3A%2F%2Fwww.gstatic.com%2Fgenerate_204",
+        "https%3A%2F%2Fcp.cloudflare.com%2Fgenerate_204",
+    ]
+
     /// A delay test through the owned runtime's selected exit, not an App
     /// claim or an unauthenticated localhost listener. The root config secret
     /// never appears in command arguments or diagnostics.
-    static func exitDelayRequest() throws -> URLRequest {
+    static func exitDelayRequest(origin: Int = 0) throws -> URLRequest {
         let bytes = try UpdateStorage.read(runtimeConfigPath, maximum: 8 * 1024 * 1024)
         guard let config = try JSONSerialization.jsonObject(with: bytes) as? [String: Any],
               let experimental = config["experimental"] as? [String: Any],
               let controller = experimental["clash_api"] as? [String: Any],
               let address = controller["external_controller"] as? String, address.hasPrefix("127.0.0.1:"),
               let secret = controller["secret"] as? String,
-              let url = URL(string: "http://\(address)/proxies/Tono-Exit/delay?url=https%3A%2F%2Fwww.gstatic.com%2Fgenerate_204&timeout=5000") else {
+              let url = URL(string: "http://\(address)/proxies/Tono-Exit/delay?url=\(exitDelayOrigins[origin % exitDelayOrigins.count])&timeout=5000") else {
             throw HelperFailure.invalid("Cannot inspect successor runtime configuration.")
         }
         var request = URLRequest(url: url, timeoutInterval: 7)
@@ -152,6 +161,16 @@ final class UpdateRuntime {
               let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let delay = object["delay"] as? Int else { return false }
         return delay >= 0
+    }
+
+    /// 503 and 504 are the controller's own verdicts that the test through
+    /// the exit failed or timed out. A controller that did not answer,
+    /// refused the secret or sent anything else says nothing about the exit.
+    static func exitDelayVerdict(data: Data?, response: URLResponse?, error: Error?) -> ExitDelayVerdict {
+        if exitDelayVerified(data: data, response: response, error: error) { return .reachable }
+        guard error == nil, let status = (response as? HTTPURLResponse)?.statusCode,
+              status == 503 || status == 504 else { return .unknown }
+        return .unreachable
     }
 
     /// Read persisted AND active settings for every network service. No
@@ -230,6 +249,12 @@ final class UpdateRuntime {
         }
         return ports
     }
+}
+
+enum ExitDelayVerdict: Equatable {
+    case reachable
+    case unreachable
+    case unknown
 }
 
 private final class UpdateProbeResult: @unchecked Sendable {

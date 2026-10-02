@@ -1616,6 +1616,17 @@ extension KillSwitchManager {
                 && orphanedTunnel(ownerRecorded: false, failures: threshold) == .reset
                 && orphanedTunnel(uplinkPresent: false, failures: threshold) == .reset
                 && orphanedTunnel(committed: false, failures: threshold) == .reset
+                && [(200, ExitDelayVerdict.reachable), (503, .unreachable), (504, .unreachable), (401, .unknown)]
+                    .allSatisfy { status, verdict in
+                        UpdateRuntime.exitDelayVerdict(
+                            data: Data(#"{"delay":120}"#.utf8),
+                            response: HTTPURLResponse(
+                                url: URL(fileURLWithPath: "/"), statusCode: status, httpVersion: nil, headerFields: nil
+                            ),
+                            error: nil
+                        ) == verdict
+                    }
+                && UpdateRuntime.exitDelayVerdict(data: nil, response: nil, error: URLError(.cannotConnectToHost)) == .unknown
             if !orphanedTunnelReleases {
                 FileHandle.standardError.write(Data(
                     "self-test: a committed session whose owner died is not released when its exit stays unreachable\n".utf8
