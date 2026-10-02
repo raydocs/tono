@@ -998,6 +998,10 @@ FunctionEnd
   Delete /REBOOTOK "$INSTDIR\sing-box.exe.rollback"
   Delete /REBOOTOK "$INSTDIR\sing-box.exe.restore"
   Delete /REBOOTOK "$INSTDIR\sing-box.exe.publish"
+  Delete /REBOOTOK "$INSTDIR\sing-box-sha256.txt.next"
+  Delete /REBOOTOK "$INSTDIR\sing-box-sha256.txt.rollback"
+  Delete /REBOOTOK "$INSTDIR\sing-box-sha256.txt.restore"
+  Delete /REBOOTOK "$INSTDIR\sing-box-sha256.txt.publish"
 !macroend
 
 Section CheckAndInstallVSRuntime
@@ -1636,6 +1640,9 @@ Section Uninstall
   {{#each binaries}}
     Delete "$INSTDIR\\{{this}}"
   {{/each}}
+  ; Copied beside sing-box.exe by the install section or published by the Service helper; it is
+  ; in no generated list, and leaving it keeps the RMDir below from removing the product root.
+  Delete "$INSTDIR\sing-box-sha256.txt"
 
   ; These files came from older bundles and therefore never appear in the generated lists above.
   !insertmacro RemoveKnownLegacyPayload
