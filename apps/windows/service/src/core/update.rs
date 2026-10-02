@@ -1705,7 +1705,6 @@ pub fn startup_barrier_release_owed() -> bool {
             read_store_state(),
             super::process::process_started_at,
             recovery_exhausted_unlocked,
-            |a| security::adopter_may_be_running(&a.initiating_image.path, a.publication_clock),
         )
 }
 
@@ -1773,7 +1772,6 @@ fn startup_barrier_release_owed_by(
     state: Result<State>,
     probe: impl Fn(u32) -> Result<Option<u64>>,
     exhausted: impl Fn(&Attempt) -> bool,
-    adopter: impl Fn(&Attempt) -> bool,
 ) -> bool {
     let Ok(state) = state else {
         return true;
@@ -1797,36 +1795,30 @@ fn startup_barrier_release_owed_by(
         // nothing settles these before the next start (#1308): a recovery below the bound, or a
         // rollback finalization that did not finish.
         Execution::Consumed | Execution::RolledBack => dead,
-        // A live successor App adopts it, and so may any App at the installed path that started
-        // after publication but has not registered yet (`adopter`). With neither, the barrier is
-        // not the Commit proof of a Connected obligation (the App re-proves it by connecting) nor
-        // of an Unprotected one (Commit needs it gone). A ProtectedOffline obligation is proved
-        // only by this barrier, so it waits for an adopting App or the bound.
-        Execution::Replaced => {
-            dead && (exhausted(a)
-                || (a.receipt.required_recovery != Protection::ProtectedOffline
-                    && gone(a.successor_image.as_ref())
-                    && !adopter(a)))
-        }
+        // Startup relaunches recovery for this until the bound; then nothing settles it. The
+        // bound never frees a live registered successor: it still adopts. Below the bound this
+        // stays held (#1308 case 3, open).
+        Execution::Replaced => dead && gone(a.successor_image.as_ref()) && exhausted(a),
     }
 }
 
-/// [`Store::recovery_exhausted`] without the lock: a count that cannot be read also stops
-/// startup from relaunching recovery, so it reads as exhausted.
+/// [`Store::recovery_exhausted`] without the lock. Only a count read as at least the bound is
+/// exhausted: a count that cannot be read or parsed is inconclusive and frees nothing this tick.
 fn recovery_exhausted_unlocked(a: &Attempt) -> bool {
-    let path = crate::service_paths()
-        .persistent_state_dir()
-        .join("updates-v1")
-        .join(&a.receipt.attempt_id)
-        .join("recovery-runs");
-    match std::fs::read_to_string(path) {
-        Ok(text) => text
-            .trim()
-            .parse::<u32>()
-            .ok()
-            .is_none_or(|runs| runs >= MAX_RECOVERY_RUNS),
-        Err(error) => error.kind() != std::io::ErrorKind::NotFound,
-    }
+    recovery_exhausted_at(
+        &crate::service_paths()
+            .persistent_state_dir()
+            .join("updates-v1")
+            .join(&a.receipt.attempt_id)
+            .join("recovery-runs"),
+    )
+}
+
+fn recovery_exhausted_at(path: &Path) -> bool {
+    std::fs::read_to_string(path)
+        .ok()
+        .and_then(|text| text.trim().parse::<u32>().ok())
+        .is_some_and(|runs| runs >= MAX_RECOVERY_RUNS)
 }
 
 #[cfg(test)]
@@ -1843,25 +1835,19 @@ mod tests {
         let gone = |_: u32| -> Result<Option<u64>> { Ok(None) };
         let running = |_: u32| -> Result<Option<u64>> { Ok(Some(executor.started_at)) };
         let inconclusive = |_: u32| -> Result<Option<u64>> { Err(anyhow::anyhow!("denied")) };
-        assert!(startup_barrier_release_owed_by(
-            state(),
-            gone,
-            |_| false,
-            |_| false
-        ));
+        assert!(startup_barrier_release_owed_by(state(), gone, |_| false));
         assert!(
-            !startup_barrier_release_owed_by(state(), running, |_| true, |_| false),
+            !startup_barrier_release_owed_by(state(), running, |_| true),
             "a live executor still owns the update; its lock or record is not a failure"
         );
         assert!(
-            !startup_barrier_release_owed_by(state(), inconclusive, |_| true, |_| false),
+            !startup_barrier_release_owed_by(state(), inconclusive, |_| true),
             "only conclusive death frees the update"
         );
         assert!(startup_barrier_release_owed_by(
             Err(anyhow::anyhow!("unreadable")),
             running,
-            |_| false,
-            |_| true
+            |_| false
         ));
         drop(store);
         std::fs::remove_dir_all(root).unwrap();
@@ -1878,16 +1864,10 @@ mod tests {
         assert!(startup_barrier_release_owed_by(
             state(),
             |_| Ok(None),
-            |_| false,
             |_| false
         ));
         assert!(
-            !startup_barrier_release_owed_by(
-                state(),
-                |_| Ok(Some(executor.started_at)),
-                |_| false,
-                |_| false
-            ),
+            !startup_barrier_release_owed_by(state(), |_| Ok(Some(executor.started_at)), |_| false),
             "a live recovery still owns the consumed attempt"
         );
         drop(store);
@@ -1903,23 +1883,16 @@ mod tests {
         assert!(startup_barrier_release_owed_by(
             state(),
             |_| Ok(None),
-            |_| false,
             |_| false
         ));
         assert!(
-            !startup_barrier_release_owed_by(
-                state(),
-                |_| Ok(Some(executor.started_at)),
-                |_| false,
-                |_| false
-            ),
+            !startup_barrier_release_owed_by(state(), |_| Ok(Some(executor.started_at)), |_| false),
             "a live finalizer settles the barrier itself"
         );
         assert!(
             !startup_barrier_release_owed_by(
                 state(),
                 |_| Err(anyhow::anyhow!("denied")),
-                |_| false,
                 |_| false
             ),
             "only conclusive death frees the rollback"
@@ -1929,48 +1902,37 @@ mod tests {
     }
 
     #[test]
-    fn update_startup_barrier_release_owed_when_replaced_has_no_successor() {
+    fn update_exhausted_recovery_never_frees_a_live_adopter() {
         let (root, store, peer, executor) = crate::update_transaction::tests::reserved();
         let mut replaced = store.state.clone();
         let a = replaced.attempt.as_mut().unwrap();
         a.execution = Execution::Replaced;
-        a.receipt.required_recovery = Protection::Connected;
         let successor = Image {
             pid: peer.pid + 1,
             started_at: peer.started_at + 1,
             ..peer
         };
         assert_ne!(executor.pid, successor.pid);
-        // Executor gone; the successor, when recorded, is live.
+        a.successor_image = Some(successor.clone());
+        // The executor is gone and the registered successor is live.
         let probe = |pid: u32| -> Result<Option<u64>> {
             Ok((pid == successor.pid).then_some(successor.started_at))
         };
-        assert!(startup_barrier_release_owed_by(
-            Ok(replaced.clone()),
-            probe,
-            |_| false,
-            |_| false
-        ));
         assert!(
-            !startup_barrier_release_owed_by(Ok(replaced.clone()), probe, |_| false, |_| true),
-            "an App that may adopt but has not registered yet keeps the barrier"
+            !startup_barrier_release_owed_by(Ok(replaced.clone()), probe, |_| true),
+            "the bound never frees a live registered successor"
         );
-        let mut adopting = replaced.clone();
-        adopting.attempt.as_mut().unwrap().successor_image = Some(successor.clone());
+        replaced.attempt.as_mut().unwrap().successor_image = None;
         assert!(
-            !startup_barrier_release_owed_by(Ok(adopting), probe, |_| false, |_| false),
-            "a live successor adopts the replacement"
+            startup_barrier_release_owed_by(Ok(replaced), probe, |_| true),
+            "with no live owner left, the bound releases it"
         );
-        let mut offline = replaced;
-        offline.attempt.as_mut().unwrap().receipt.required_recovery = Protection::ProtectedOffline;
-        assert!(
-            !startup_barrier_release_owed_by(Ok(offline.clone()), probe, |_| false, |_| false),
-            "a ProtectedOffline obligation could not be proved at Commit after a release"
-        );
-        assert!(
-            startup_barrier_release_owed_by(Ok(offline), probe, |_| true, |_| false),
-            "the bound still releases it"
-        );
+        // A count that cannot be parsed is inconclusive, not exhausted.
+        let count = root.join("recovery-runs");
+        std::fs::write(&count, b"corrupt").unwrap();
+        assert!(!recovery_exhausted_at(&count));
+        std::fs::write(&count, MAX_RECOVERY_RUNS.to_string()).unwrap();
+        assert!(recovery_exhausted_at(&count));
         drop(store);
         std::fs::remove_dir_all(root).unwrap();
     }

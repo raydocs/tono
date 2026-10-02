@@ -20,3 +20,19 @@
   - `ProtectedOffline` stays open. The App commits it right after Adopt (`app/src-tauri/src/tono/commands/update.rs:350-355`). Commit proves `ProtectedOffline` only while WFP is still wanted (`service/src/core/update.rs:316-331`), and lifecycle stays fenced for that obligation (`:56-63`). Releasing at boot, before the user logs in and the App starts, would break every healthy adoption of this kind across a reboot.
   - Tests: `update_startup_barrier_release_owed_when_replaced_has_no_successor` now also asserts that an unregistered adopter keeps the barrier. The scan itself has no unit test: it reads the live process table on Windows only.
   - New residual: an App started during a fenced release (DNS restore of up to 40 s, then WFP removal) gets `StoreBusy` on its first Adopt and keeps the record unadopted until its restore runs again. The network is already released by then.
+- 2026-10-02 continuation (Codex full review at `b385616c`; scope narrowed by the coordinator, stricter option):
+  - Case 3 (`Replaced` with no successor) is reverted to its `main` behaviour and stays open in [#1308](https://github.com/raydocs/tono/issues/1308). The App process scan, its `security.rs` enumeration, and the `Connected`/`Unprotected` release paths are removed. Reasons from the review:
+    - After the last check, the release waits for DNS (up to 40 s) and then removes WFP. An App started in that window is not blocked by the store lock. Its Adopt fails on that lock instead, and the barrier is still removed.
+    - A `Process32FirstW`/`Process32NextW` failure read as "no App".
+    - A `ProtectedOffline` obligation cannot be bounded: a recovery that proves the target returns without counting a failure.
+  - Exhausted recovery never frees a live adopter (Codex major 1). It also exists on `main` from #1297:
+    - `Replaced` at the bound is now released only when the recorded successor is also conclusively gone.
+    - A `recovery-runs` count that cannot be read or parsed is inconclusive, not exhausted, so nothing is released that tick. Startup still refuses to relaunch recovery on such a count (`Store::recovery_runs` errors).
+  - Closed by this PR:
+    - case 1 (`Consumed` recovery that cannot start below the bound);
+    - case 2 for a finalizer that is conclusively dead or never started;
+    - the exhausted-count issue above.
+  - Still open:
+    - case 3;
+    - a finalizer or recovery that stays alive but hung. It is a live owner and holds the barrier.
+  - Tests: `update_exhausted_recovery_never_frees_a_live_adopter` replaces `update_startup_barrier_release_owed_when_replaced_has_no_successor`.
