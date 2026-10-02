@@ -89,9 +89,11 @@ private struct ProtectedOfflineBanner: View {
                 .fill(TonoStatus.blocked)
                 .frame(width: 8, height: 8)
             VStack(alignment: .leading, spacing: 2) {
-                Text("Protected Offline")
+                Text(appState.isProtectionBlockUnreadable ? "Protection unknown" : "Protected Offline")
                     .font(.system(size: 13, weight: .semibold))
-                Text("Direct traffic is blocked. Restore internet from here if you need the network.")
+                Text(appState.isProtectionBlockUnreadable
+                    ? "Tono's network helper is not answering this copy of Tono, so Tono cannot tell whether direct traffic is still blocked. Repair and reconnect from the dashboard, or restore internet here."
+                    : "Direct traffic is blocked. Restore internet from here if you need the network.")
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)

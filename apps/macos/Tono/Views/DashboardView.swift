@@ -62,8 +62,10 @@ struct DashboardView: View {
                         }
                     ), isConnecting: appState.isConnecting,
                        isDisconnecting: appState.isDisconnecting,
-                       isProtectionBlocked: appState.isProtectionBlocked,
-                       isProtectionUnconfirmed: appState.isProtectionUnconfirmed,
+                       isProtectionBlocked: appState.isProtectionBlocked
+                           && !appState.isProtectionBlockUnreadable,
+                       isProtectionUnconfirmed: appState.isProtectionUnconfirmed
+                           || appState.isProtectionBlockUnreadable,
                        isRecovering: appState.isRecoveringProtectedConnection,
                        connectionStage: appState.connectionStage,
                        disconnectionStage: appState.disconnectionStage,
@@ -206,6 +208,7 @@ struct DashboardView: View {
     private var statusBadgeTitle: LocalizedStringKey {
         if appState.isConnecting { return "Connecting" }
         if appState.isDisconnecting { return "Disconnecting" }
+        if appState.isProtectionBlockUnreadable { return "Protection unknown" }
         if appState.isProtectionBlocked { return "Protected offline" }
         if appState.isProtectionUnconfirmed { return "Protection unknown" }
         if isDegradedWhileConnected { return "Protected — exit degraded" }
@@ -234,6 +237,7 @@ struct DashboardView: View {
     private var protectionValue: String {
         if appState.isConnecting { return String(localized: "Connecting") }
         if appState.isDisconnecting { return String(localized: "Finishing") }
+        if appState.isProtectionBlockUnreadable { return String(localized: "Unknown") }
         if appState.isProtectionBlocked { return String(localized: "Offline") }
         if appState.isProtectionUnconfirmed { return String(localized: "Unknown") }
         if isDegradedWhileConnected { return String(localized: "Degraded") }
@@ -243,6 +247,9 @@ struct DashboardView: View {
     }
 
     private var protectionDetail: String {
+        if appState.isProtectionBlockUnreadable {
+            return String(localized: "Direct traffic may be blocked")
+        }
         if appState.isProtectionBlocked {
             return String(localized: "Direct traffic blocked")
         }

@@ -6984,6 +6984,16 @@
         }
       }
     },
+    "Tono's network helper is not answering this copy of Tono, so Tono cannot tell whether direct traffic is still blocked. Repair and reconnect from the dashboard, or restore internet here.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tono 的网络助手不回应当前这份 Tono，所以 Tono 无法确认直连流量是否仍被拦截。请在首页选择「修复并重新连接」，或在这里恢复正常网络。"
+          }
+        }
+      }
+    },
     "Tono's network helper rejected this copy of Tono, so automatic retries are paused. Choose Repair and reconnect to reinstall the helper, or Restore internet to turn protection off. If repair keeps failing, the Support page has a recovery command.": {
       "localizations": {
         "zh-Hans": {

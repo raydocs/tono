@@ -125,7 +125,24 @@ final class AppState {
     /// automatic reconnect loop: retrying the identical transaction would
     /// re-trigger the same prompt or fail the same way forever. PF stays
     /// fail-closed; Retry Now and Protected Offline remain available.
-    var protectedReconnectPausedForUserAction = false
+    var protectedReconnectPausedForUserAction = false {
+        didSet {
+            if !protectedReconnectPausedForUserAction, helperRejectedStatusRead {
+                helperRejectedStatusRead = false
+            }
+        }
+    }
+    /// The pause above came from a helper that rejects this copy of Tono, so
+    /// nothing this app asks is answered. With the Core down the helper's
+    /// watchdog releases PF about 30 s later, and the app cannot read that.
+    /// Ends with the pause, or with the first status read the helper answers.
+    var helperRejectedStatusRead = false
+    /// Protected Offline is still the app's verdict and its actions stay, but
+    /// surfaces say the protection state is unknown instead of claiming a
+    /// block the helper may have lifted (#1305).
+    var isProtectionBlockUnreadable: Bool {
+        isProtectionBlocked && helperRejectedStatusRead
+    }
     /// A repeated-failure pause is new-information-sensitive: a network-change
     /// kick may lift it (the environment changed, the outcome may differ). A
     /// user-action pause (denied admin prompt) must never be lifted by a route
