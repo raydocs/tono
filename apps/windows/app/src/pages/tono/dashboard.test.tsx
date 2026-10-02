@@ -451,6 +451,20 @@ describe('dashboard connecting pill', () => {
     expect(mocks.tonoConnect).not.toHaveBeenCalled()
   })
 
+  it('cancels a live attempt from its own control, not from the pill', async () => {
+    mocks.status = makeStatus({
+      uiState: 'connecting',
+      selectedServer: 'US West 1',
+      stage: 'startingKillSwitch',
+    })
+    renderDashboard()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel connection' }))
+    await waitFor(() => expect(mocks.tonoDisconnect).toHaveBeenCalledTimes(1))
+    expect(mocks.tonoConnect).not.toHaveBeenCalled()
+    expect(screen.queryByRole('alert')).toBeNull()
+  })
+
   it('does not turn a superseded connect IPC into a fake failure card', async () => {
     mocks.status = makeStatus({ selectedServer: 'US West 1' })
     mocks.tonoConnect.mockRejectedValue(
