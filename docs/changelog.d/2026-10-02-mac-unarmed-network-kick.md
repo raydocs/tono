@@ -9,3 +9,8 @@
 - 工程与测试修正：`ConnectionCoordinator.unarmedReconnectOwner` 记录仍在等待的循环和它所属的代（结束的循环会留下任务句柄，
   句柄说明不了它是否还活着）。回归 `testNetworkChangeRestartsAWaitingUnarmedReconnect` 先单独推送为 `4e6f8a84`（红），结果记在 PR。
 - 验证：仅托管 CI（XCTest）；未在 Mac 实机上断网再恢复。仅源码，无新候选。
+
+### 2026-10-02 续记：已合 main
+- 来源合入：#1346，merge commit `32fb4576`，PR 头 `bb65de77`。该头的 `ci-gate` 全绿：https://github.com/raydocs/tono/actions/runs/37036778230 。红测试 `4e6f8a84`：run 37035620685（`macos / build` XCTest 失败）。
+- 独立评审：Codex `gpt-6.1-sol`（high）两轮；第一轮 1 个 major（未遵守意外重启后的暂停）和 2 个 minor 已在 `bb65de77` 修正；第二轮无 major，1 个测试夹具 minor 记在 PR limitations；记录在 https://github.com/raydocs/tono/pull/1346#issuecomment-5957337103 。
+- 候选/发布：仅源码合入 main。无新安装包，无部署，无客户发布。没有实机验证。
