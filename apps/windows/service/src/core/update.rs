@@ -1781,10 +1781,8 @@ fn startup_barrier_release_owed_by(
     };
     // Only conclusive death frees the update; a probe that cannot tell keeps the barrier and
     // the next watchdog tick asks again.
-    let dead = a
-        .executor
-        .as_ref()
-        .is_none_or(|e| incarnation_dead(e, probe(e.pid)));
+    let gone = |image: Option<&Image>| image.is_none_or(|e| incarnation_dead(e, probe(e.pid)));
+    let dead = gone(a.executor.as_ref());
     match a.execution {
         // A settled failure, or a record nothing will run any more once its executor is gone.
         Execution::Uncertain
@@ -1792,10 +1790,19 @@ fn startup_barrier_release_owed_by(
         | Execution::Extracting
         | Execution::Staged
         | Execution::Launching => dead,
-        // Startup relaunches recovery for these until the bound; then nothing settles them.
-        Execution::Consumed | Execution::Replaced => dead && exhausted(a),
-        // The rollback finalizer settles the barrier itself.
-        Execution::RolledBack => false,
+        // Startup launches recovery at most once per Service start, and the caller waits while
+        // that child runs. Once it could not start or has ended without stopping this Service,
+        // nothing settles these before the next start (#1308): a recovery below the bound, or a
+        // rollback finalization that did not finish.
+        Execution::Consumed | Execution::RolledBack => dead,
+        // A live successor App adopts it. Without one, a Connected obligation is re-proved after
+        // adoption by the App reconnecting; any other obligation could no longer be proved at
+        // Commit once the barrier is gone, so it waits for an adopting App or the bound.
+        Execution::Replaced => {
+            dead && (exhausted(a)
+                || (a.receipt.required_recovery == Protection::Connected
+                    && gone(a.successor_image.as_ref())))
+        }
     }
 }
 
@@ -1845,12 +1852,96 @@ mod tests {
             running,
             |_| false
         ));
-        // A dead consumed executor waits for relaunched recovery, until the bound stops it.
+        drop(store);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn update_startup_barrier_release_owed_when_consumed_recovery_cannot_start() {
+        let (root, store, _, executor) = crate::update_transaction::tests::reserved();
         let mut consumed = store.state.clone();
         consumed.attempt.as_mut().unwrap().execution = Execution::Consumed;
         let state = || Ok(consumed.clone());
-        assert!(!startup_barrier_release_owed_by(state(), gone, |_| false));
-        assert!(startup_barrier_release_owed_by(state(), gone, |_| true));
+        // Below the bound: startup's recovery could not start, or ended without stopping this
+        // Service, and nothing relaunches it before the next start (#1308).
+        assert!(startup_barrier_release_owed_by(
+            state(),
+            |_| Ok(None),
+            |_| false
+        ));
+        assert!(
+            !startup_barrier_release_owed_by(state(), |_| Ok(Some(executor.started_at)), |_| false),
+            "a live recovery still owns the consumed attempt"
+        );
+        drop(store);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn update_startup_barrier_release_owed_when_rollback_finalization_stalls() {
+        let (root, store, _, executor) = crate::update_transaction::tests::reserved();
+        let mut rolled_back = store.state.clone();
+        rolled_back.attempt.as_mut().unwrap().execution = Execution::RolledBack;
+        let state = || Ok(rolled_back.clone());
+        assert!(startup_barrier_release_owed_by(
+            state(),
+            |_| Ok(None),
+            |_| false
+        ));
+        assert!(
+            !startup_barrier_release_owed_by(state(), |_| Ok(Some(executor.started_at)), |_| false),
+            "a live finalizer settles the barrier itself"
+        );
+        assert!(
+            !startup_barrier_release_owed_by(
+                state(),
+                |_| Err(anyhow::anyhow!("denied")),
+                |_| false
+            ),
+            "only conclusive death frees the rollback"
+        );
+        drop(store);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn update_startup_barrier_release_owed_when_replaced_has_no_successor() {
+        let (root, store, peer, executor) = crate::update_transaction::tests::reserved();
+        let mut replaced = store.state.clone();
+        let a = replaced.attempt.as_mut().unwrap();
+        a.execution = Execution::Replaced;
+        a.receipt.required_recovery = Protection::Connected;
+        let successor = Image {
+            pid: peer.pid + 1,
+            started_at: peer.started_at + 1,
+            ..peer
+        };
+        // Executor gone; the successor, when recorded, is live.
+        let probe = |pid: u32| -> Result<Option<u64>> {
+            Ok((pid == successor.pid).then_some(successor.started_at))
+        };
+        assert!(startup_barrier_release_owed_by(
+            Ok(replaced.clone()),
+            probe,
+            |_| false
+        ));
+        let mut adopting = replaced.clone();
+        adopting.attempt.as_mut().unwrap().successor_image = Some(successor.clone());
+        assert!(
+            !startup_barrier_release_owed_by(Ok(adopting), probe, |_| false),
+            "a live successor adopts the replacement"
+        );
+        let mut offline = replaced;
+        offline.attempt.as_mut().unwrap().receipt.required_recovery = Protection::ProtectedOffline;
+        assert!(
+            !startup_barrier_release_owed_by(Ok(offline.clone()), probe, |_| false),
+            "a ProtectedOffline obligation could not be proved at Commit after a release"
+        );
+        assert!(
+            startup_barrier_release_owed_by(Ok(offline), probe, |_| true),
+            "the bound still releases it"
+        );
+        assert_ne!(executor.pid, successor.pid);
         drop(store);
         std::fs::remove_dir_all(root).unwrap();
     }

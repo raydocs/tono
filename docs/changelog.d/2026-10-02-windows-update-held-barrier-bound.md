@@ -1,0 +1,16 @@
+## 2026-10-02 · Release the update-held Windows startup barrier when no update owner is left
+- Ownership: SHIP_PLAN §2 item 10; Windows failed-update recovery (`R4-WIN-UPDATE-RECOVERY-LOOP`, [#1308](https://github.com/raydocs/tono/issues/1308), residual of #1297).
+- Source: baseline `361a64b8`; branch `fix/win-update-held-barrier-1308`; not yet merged.
+- Defect fix: on a non-strict machine, the unverified barrier restored at Service start stayed Blocked with no timeout in three cases. Now `update::startup_barrier_release_owed` owes the release (ordinary network, AI hold kept) once no update owner is left:
+  - `Consumed` below the recovery bound whose recovery executor could not start, or ended without stopping this Service. Startup launches recovery at most once per Service start, and the existing guard waits while that child runs.
+  - `RolledBack` whose rollback finalization did not finish, once its executor is conclusively gone.
+  - `Replaced` with no live successor App and a `Connected` obligation: the App re-proves it after adoption by reconnecting.
+- Kept: a live recorded executor, a running recovery child, a live successor, or a probe that cannot tell still holds the barrier. Strict is unchanged. The existing watchdog re-check, store-lock fence and conclusive-death probe are reused; no new mechanism.
+- New/optimization: none.
+- Engineering/tests: `update_startup_barrier_release_owed_when_consumed_recovery_cannot_start`, `update_startup_barrier_release_owed_when_rollback_finalization_stalls`, `update_startup_barrier_release_owed_when_replaced_has_no_successor` (Windows CI). The old below-bound `Consumed` assertion in `update_startup_barrier_release_waits_only_for_a_live_executor` encoded this defect and was removed.
+- Verification: `rustfmt --edition 2024` shows no diffs on the changed lines. No local cargo on the MacBook; Windows CI runs the tests.
+- Candidate/publication: source only; no new candidate.
+- Limits:
+  - needs-hardware: a fault-injected executor (missing or unverifiable `executor.exe` in the attempt directory), and a stalled rollback finalizer.
+  - `Replaced` with no successor and a `ProtectedOffline` or `Unprotected` obligation still holds the barrier below the bound. Commit requires the observed protection to equal that obligation, and lifecycle stays fenced for it, so a release here would leave the record unable to commit (the #1307 repair gap). A `ProtectedOffline` obligation means the network was already held offline when the update was prepared. It still has no timeout: a forward recovery that proves the target is not a counted failure, so the bound does not end it. Only an adopting App or an owner decision closes it.
+  - A recovery or finalizer process that stays alive but hung still holds the barrier: it is a live owner.
