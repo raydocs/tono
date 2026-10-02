@@ -550,7 +550,7 @@ final class SingBoxConfigTests: XCTestCase {
         XCTAssertEqual((tls["utls"] as? [String: Any])?["fingerprint"] as? String, "chrome")
         let dns = try XCTUnwrap(json["dns"] as? [String: Any])
         let servers = try XCTUnwrap(dns["servers"] as? [[String: Any]])
-        XCTAssertEqual(servers[0]["inet4_range"] as? String, "198.18.16.0/20")
+        XCTAssertEqual(servers[0]["inet4_range"] as? String, "198.18.16.0/22")
         XCTAssertTrue(servers.allSatisfy { ["fakeip", "https"].contains($0["type"] as? String ?? "") })
         XCTAssertEqual(servers[1]["server"] as? String, "1.1.1.1")
         XCTAssertEqual((servers[1]["tls"] as? [String: Any])?["alpn"] as? [String], ["h2"])

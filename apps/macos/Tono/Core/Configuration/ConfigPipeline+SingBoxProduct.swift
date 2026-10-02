@@ -167,7 +167,8 @@ nonisolated extension ConfigPipeline {
             outbounds.append(["type": "selector", "tag": webDirectGroupName, "outbounds": [webDirectProxyName], "default": webDirectProxyName])
         }
         var dnsServers: [[String: Any]] = [
-            ["type": "fakeip", "tag": "Tono-FakeIP", "inet4_range": "198.18.16.0/20"],
+            ["type": "fakeip", "tag": "Tono-FakeIP",
+             "inet4_range": singBoxFakeIPRanges[fakeIPSlot % singBoxFakeIPRanges.count]],
             ["type": "https", "tag": "Tono-DoH", "server": "1.1.1.1", "server_port": 443,
              "path": "/dns-query", "tls": ["enabled": true, "server_name": "1.1.1.1", "alpn": ["h2"]],
              "detour": exitGroupName],
@@ -190,6 +191,11 @@ nonisolated extension ConfigPipeline {
         var rules: [[String: Any]] = [
             ["inbound": ["Tono-DNS"], "action": "hijack-dns"],
             ["port": [53], "action": "hijack-dns"],
+            // #1258: an address cached from a replaced Core is outside this
+            // document's fake-IP quarter, so it arrives as a plain IP. Refuse it
+            // before a home, DIRECT or exit rule dials it. A destination the
+            // fake-IP table turned into a name does not match ip_cidr.
+            ["ip_cidr": [singBoxFakeIPPool], "action": "reject"],
         ]
         let assistant = home == nil ? exitGroupName : claudeHomeGroupName
         // Always, including when no residential hop is bound. Later reviewed-bundle
