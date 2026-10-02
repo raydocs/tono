@@ -559,6 +559,9 @@ pub fn next_catalog_exit(
 /// Whether the saved selection must move onto a signed usable catalog city.
 /// A catalog city the user just picked is never replaced. Only a missing,
 /// blocked, or leftover imported name (not in this catalog) is retargeted.
+/// A selection the catalog now spells differently (a separator, a flag prefix)
+/// moves to that exit's exact name: connect and the survival check look the
+/// exact name up, and left as it was it asked for a new choice on every Connect.
 pub fn replacement_for_selection(
     selected: Option<&str>,
     nodes: &[ValidatedNode],
@@ -573,8 +576,11 @@ pub fn replacement_for_selection(
     match selected {
         None => Some(preferred),
         Some(name) if is_exit_blocked(name) => Some(preferred),
-        Some(name) if node_named(nodes, name).is_none() => Some(preferred),
-        Some(_) => None,
+        Some(name) if nodes.iter().any(|node| node.name == name) => None,
+        Some(name) => match node_named(nodes, name) {
+            Some(node) if !is_exit_blocked(&node.name) => Some(node.name.clone()),
+            _ => Some(preferred),
+        },
     }
 }
 
@@ -976,6 +982,15 @@ mod tests {
         assert_eq!(
             replacement_for_selection(Some("imported leftover"), &nodes, None, None).as_deref(),
             Some("Salt Lake City · Summit")
+        );
+    }
+
+    #[test]
+    fn a_respelled_selection_follows_the_same_exit() {
+        let nodes = vec![node("Salt Lake City · Summit"), node("Buffalo · Niagara")];
+        assert_eq!(
+            replacement_for_selection(Some("Buffalo - Niagara"), &nodes, None, None).as_deref(),
+            Some("Buffalo · Niagara")
         );
     }
 
