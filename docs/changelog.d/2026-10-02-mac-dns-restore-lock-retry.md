@@ -8,3 +8,8 @@
 - Verification: no local `xcodebuild` on the MacBook; hosted macOS CI runs the XCTest.
 - Candidate/publication: source only; no new candidate.
 - Limits: needs-hardware (the lock race was not reproduced). A writer that holds the lock for longer than the retries (about 0.6 s) still blocks the release until the next attempt. A restore that fails for a lasting reason now takes about 0.6 s longer to report.
+
+### 2026-10-02 continuation: merged to main
+- Merged: #1328, merge commit `b1df598c`, PR head `e016ca79`. CI on that head: see the PR.
+- Ordinary-risk change: the main session checked the diff and hosted CI ran the matching test; no independent review.
+- Candidate/publication: source merged to main only. No new package, no deploy, no customer publish. No hardware verification.

@@ -9,3 +9,8 @@
 - 验证：见 PR。本机没有连接、没有原生构建；`tono-core` 和 App 的测试由 hosted CI 运行。hosted 的 alpha.9 `check` 只检查冻结的参考文档和 macOS、hy2 fixture，不检查 Windows 模板或 Windows 编译出的文档；同一条拒绝规则（两个 CIDR、`no_drop`）由 [#1334](https://github.com/raydocs/tono/pull/1334) 的 macOS fixture 和 macOS 编译结果过 pinned 解析器。
 - 候选/发布：仅源码，无新候选。
 - 剩余限制：没有实机验证（`needs-hardware`）。用旧地址的连接被拒绝，应用什么时候重新解析取决于它自己的缓存（fake-IP 应答的 TTL 是 30 秒）。槽位在八份文档后复用：同一段缓存时间内编译了八份文档（DIRECT 替换一次用两份）才会回到原槽位。失败、取消或没有启动的编译也消耗计数。计数文件读不到、或第一次取槽位时存不回去，起点取自时钟（可能与正在运行的进程同槽）；运行中途才开始存不回去时，下次启动读到的是较早的计数。写计数不是原子写，掉电后可能回退。读写在取槽位的锁里同步进行。Service 自己用同一份文档重启进程的路径（看门狗重启、期望状态恢复、替换失败后的还原和重试）没有修，另记 WIN-SINGBOX-FAKEIP-SERVICE-RESTART。从旧版本升级时，旧进程发出的 `198.18.16.0/20` 地址由同一条规则拒绝。macOS 的 `/core/sync` 重启有同样的问题，见 [#1334](https://github.com/raydocs/tono/pull/1334)。[决策 047](../decisions/047-2026-10-02-windows-fakeip-rotation.md)。
+
+### 2026-10-02 续记：已合 main
+- 来源合入：#1333，merge commit `212dbd6b`，PR 头 `2ef9f917`。该头的 `ci-gate` 全绿：https://github.com/raydocs/tono/actions/runs/37017275168 。
+- 独立评审（Codex `gpt-6.1-sol`，high）：各轮范围、发现和处置记录在 https://github.com/raydocs/tono/pull/1333#issuecomment-5954529114 ；最后一轮没有未处理的 major。
+- 候选/发布：仅源码合入 main。无新安装包，无部署，无客户发布。没有实机验证。

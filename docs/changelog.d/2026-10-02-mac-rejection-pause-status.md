@@ -7,3 +7,8 @@
 - 验证：见 PR。XCTest 只在 hosted macOS CI 运行。
 - 候选/发布：仅源码，无新候选。
 - 剩余限制：App 仍读不到 PF 的真实状态，也不会自动释放（释放需要管理员重装 helper，不在没有用户操作时弹出）。诊断快照的 stage 仍是 Protected Offline。未实机验证（`needs-hardware`）。
+
+### 2026-10-02 续记：已合 main
+- 来源合入：#1335，merge commit `08a433a6`，PR 头 `34c57781`。该头的 CI 结果见 PR。
+- 普通风险改动：主会话核对差异并在 hosted CI 上跑了对应测试，没有独立评审。
+- 候选/发布：仅源码合入 main。无新安装包，无部署，无客户发布。没有实机验证。

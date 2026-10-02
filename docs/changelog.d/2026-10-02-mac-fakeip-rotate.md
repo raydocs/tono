@@ -9,3 +9,8 @@
 - 验证：见 PR。本机没有连接、没有原生构建；XCTest 和 pinned sing-box 对 Swift 实际输出的 `check` 由 hosted macOS CI 运行。
 - 候选/发布：仅源码，无新候选。
 - 剩余限制：没有实机验证（`needs-hardware`）。用旧地址的连接被拒绝，应用什么时候重新解析取决于它自己的缓存（fake-IP 应答的 TTL 是 30 秒）。槽位会复用：新文档只避开「已安装的那份」的槽位，不避开更早被换掉的进程的槽位；每成功渲染一份文档（装没装上都算）就往前一个槽位，所以两次实际替换之间渲染过六份没装上的文档时，下一份就可能回到两个进程之前的槽位。跳过槽位靠的是这次 App 运行里的记录：App 重启后记录是空的，存下来的计数只保证重启后的第一份文档避开重启前已安装的槽位；不传已安装摘要的路径（Connect）只按计数走。「已安装的那份」是 App 自己的记录，不是 helper 的回答：`/core/sync` 已经换了进程但应答丢失时这条记录是旧的（main 上就是这样，MAC-SYNC-REPLY-LOST-DIGEST，未关），那时保持原字节和跳过槽位依据的都是旧记录。第一次升级到这个版本时起点随机，但旧版本的池整个被拒绝，不会同段；已经在用新池、UserDefaults 里的计数却读不到时，重启后的 App 有八分之一概率和它接管的 Core 同段。渲染本身不保证同样的输入得到同样的字节（原生 App 的路径正则来自实时扫描，基线如此），那种情况下 reload 会照常重启并换槽位。[决策 047](../decisions/047-2026-10-02-windows-fakeip-rotation.md)。
+
+### 2026-10-02 续记：已合 main
+- 来源合入：#1334，merge commit `8e5ad113`，PR 头 `26a9ccde`。该头的 `ci-gate` 全绿：https://github.com/raydocs/tono/actions/runs/37019151617 。
+- 独立评审（Codex `gpt-6.1-sol`，high）：各轮范围、发现和处置记录在 https://github.com/raydocs/tono/pull/1334#issuecomment-5954676084 ；最后一轮没有未处理的 major。
+- 候选/发布：仅源码合入 main。无新安装包，无部署，无客户发布。没有实机验证。

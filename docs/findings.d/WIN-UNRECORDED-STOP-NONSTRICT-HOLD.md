@@ -1,6 +1,6 @@
 | ID | 问题（一句） | 状态 | Issue / PR | 等级 | 剩余限制 |
 |---|---|---|---|---|---|
-| WIN-UNRECORDED-STOP-NONSTRICT-HOLD | A kept `StopClash` whose stop could not be recorded and whose Core could not be restarted left a verified non-strict session Blocked with no Core, no watchdog and no deadline; only the App's next failed Connect released it | in-PR | #1139 / #1327 | 高·推导（P1，源码与回归） | Not reproduced on hardware (needs-hardware); the release waits for the 1 s WFP watchdog tick |
+| WIN-UNRECORDED-STOP-NONSTRICT-HOLD | A kept `StopClash` whose stop could not be recorded and whose Core could not be restarted left a verified non-strict session Blocked with no Core, no watchdog and no deadline; only the App's next failed Connect released it | fixed(927a1f33) | #1139 / #1327 | 高·推导（P1，源码与回归） | Not reproduced on hardware (needs-hardware); the release waits for the 1 s WFP watchdog tick |
 
 Reported by Codex on main `9947450e`. #1295 already let the App's explicit release through after a bookkeeping failure, which closed the
 App-driven half. The Service-side half stayed: with the App gone or stuck after the failed stop, nothing opened the barrier. The fix
