@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 vi.mock('./design-tokens.css', () => ({}))
 vi.mock('./tono.css', () => ({}))
 
-import { handleTonoWindowShortcut } from './tono-layout'
+import { connectFromShortcut, handleTonoWindowShortcut } from './tono-layout'
 
 const fire = (
   init: KeyboardEventInit,
@@ -53,6 +53,17 @@ describe('handleTonoWindowShortcut', () => {
       connect: vi.fn(),
       disconnect: vi.fn(),
     })
+    expect(navigate).toHaveBeenCalledWith('/servers')
+  })
+})
+
+describe('connectFromShortcut', () => {
+  it('opens the server picker when Ctrl+K connect is refused for no server', async () => {
+    const navigate = vi.fn()
+    await connectFromShortcut(
+      () => Promise.reject(new Error('select a server first')),
+      navigate,
+    )
     expect(navigate).toHaveBeenCalledWith('/servers')
   })
 })
