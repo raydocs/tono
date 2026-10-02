@@ -485,18 +485,53 @@ async fn ask_to_restart_without_release(refusal: RefusalProtection) -> bool {
 /// open" could clear the exiting flag and resume sync while the other flow exits. A call made
 /// while one is in flight returns without doing anything.
 pub async fn quit_or_resync() {
-    let admitted = single_flight(&QUIT_IN_FLIGHT, || {
-        resync_if_cancelled(quit(), || {
-            crate::tono::commands::resync_after_cancelled_quit(handle::Handle::app_handle().clone())
-        })
-    })
-    .await;
+    let admitted = single_flight(&QUIT_IN_FLIGHT, quit_then_resync).await;
     if admitted.is_none() {
         logging!(info, Type::System, "Quit ignored: another Quit is already in flight");
     }
 }
 
+/// The Quit lifecycle for a caller that already holds the slot.
+pub async fn quit_or_resync_claimed(_claim: QuitClaim) {
+    quit_then_resync().await;
+}
+
+async fn quit_then_resync() {
+    resync_if_cancelled(quit(), || {
+        crate::tono::commands::resync_after_cancelled_quit(handle::Handle::app_handle().clone())
+    })
+    .await;
+}
+
+/// Admission of the event loop's exit request, taken before it returns to Tao: raises the
+/// exiting flag and claims the Quit slot. `None` means a Quit is already in flight.
+pub fn claim_exit_request() -> Option<QuitClaim> {
+    claim_raising(&QUIT_IN_FLIGHT, || handle::Handle::global().set_is_exiting()).map(QuitClaim)
+}
+
 static QUIT_IN_FLIGHT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// The Quit slot, held until dropped.
+pub struct QuitClaim(Held<'static>);
+
+struct Held<'a>(&'a std::sync::atomic::AtomicBool);
+impl Drop for Held<'_> {
+    fn drop(&mut self) {
+        self.0.store(false, std::sync::atomic::Ordering::Release);
+    }
+}
+
+fn claim(slot: &std::sync::atomic::AtomicBool) -> Option<Held<'_>> {
+    use std::sync::atomic::Ordering;
+    slot.compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+        .ok()?;
+    Some(Held(slot))
+}
+
+fn claim_raising(slot: &std::sync::atomic::AtomicBool, raise: impl FnOnce()) -> Option<Held<'_>> {
+    raise();
+    claim(slot)
+}
 
 /// Run `run` only when `slot` is free, holding it until `run` finishes (or is dropped).
 /// `None` means another run held the slot and `run` was not started.
@@ -504,16 +539,7 @@ async fn single_flight<F: std::future::Future>(
     slot: &std::sync::atomic::AtomicBool,
     run: impl FnOnce() -> F,
 ) -> Option<F::Output> {
-    use std::sync::atomic::Ordering;
-    struct Held<'a>(&'a std::sync::atomic::AtomicBool);
-    impl Drop for Held<'_> {
-        fn drop(&mut self) {
-            self.0.store(false, Ordering::Release);
-        }
-    }
-    slot.compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
-        .ok()?;
-    let _held = Held(slot);
+    let _held = claim(slot)?;
     Some(run().await)
 }
 
@@ -766,6 +792,22 @@ mod tests {
         release.send(()).unwrap();
         assert_eq!(first.await, Some("first"));
         assert!(super::single_flight(&slot, || async {}).await.is_some());
+    }
+
+    /// #1309: a cancelled Quit has cleared the exiting flag and still holds the slot while it
+    /// re-syncs. An exit request refused in that window must leave the flag down, or nothing
+    /// clears it again.
+    #[test]
+    fn an_exit_request_refused_by_a_quit_in_flight_does_not_raise_the_exiting_flag() {
+        let slot = AtomicBool::new(false);
+        let exiting = AtomicBool::new(false);
+        let cancelled_quit = super::claim(&slot).unwrap();
+        let refused = super::claim_raising(&slot, || exiting.store(true, Ordering::SeqCst));
+        assert!(refused.is_none());
+        assert!(!exiting.load(Ordering::SeqCst));
+        drop(cancelled_quit);
+        assert!(super::claim_raising(&slot, || exiting.store(true, Ordering::SeqCst)).is_some());
+        assert!(exiting.load(Ordering::SeqCst));
     }
 
     use super::{
