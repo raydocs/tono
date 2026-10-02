@@ -205,7 +205,10 @@ extension KillSwitchManager {
             // stops reaching it. Ahead of every pass that would match the
             // packet first and drop it for its options: the Continuity
             // interface passes just below, and `tono-lan`, whose inbound pass
-            // matches a router's query.
+            // matches a router's query. The whole multicast range, because an
+            // IGMPv2 report goes to the group it reports. PF cannot match the
+            // TTL or the message type; sending protocol 2 takes a raw socket,
+            // which is root, and root can remove this anchor.
             lines.append(
                 "pass out quick inet proto igmp to 224.0.0.0/4 allow-opts no state label \"tono-igmp\""
             )
@@ -260,14 +263,16 @@ extension KillSwitchManager {
             lines.append(
                 "block drop out quick \(lanDNSScope)inet6 proto { tcp, udp } to { fe80::/10, fc00::/7, ff00::/8 } port { 53, 853 } label \"tono-lan-dns\""
             )
-            // Same bound for the discovery destinations passed below. That
-            // pass names no interface, so neither does this block: an
-            // interface that appears after the arm is covered at once, without
-            // waiting for the LAN scope to widen. No VPN pushes a resolver at
-            // a multicast or broadcast address, so nothing beside Tono loses
-            // DNS to it. Its own label keeps it out of `lanDNSInterfaces`.
+            // Same bound for the discovery destinations `tono-multicast`
+            // passes below. That pass names no interface, so neither does this
+            // block: an interface that appears after the arm is covered at
+            // once, without waiting for the LAN scope to widen. As on main,
+            // lo0 and the Continuity interfaces pass everything before any
+            // block is reached. No VPN pushes a resolver at a multicast or
+            // broadcast address, so nothing beside Tono loses DNS to it. Its
+            // own label keeps it out of `lanDNSInterfaces`.
             lines.append(
-                "block drop out quick inet proto { tcp, udp } to { 224.0.0.0/24, 239.255.0.0/16, 255.255.255.255 } port { 53, 853 } label \"tono-multicast-dns\""
+                "block drop out quick inet proto { tcp, udp } to { 224.0.0.0/24, 255.255.255.255 } port { 53, 853 } label \"tono-dns-multicast\""
             )
             lines.append(
                 "pass out quick inet to { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16 } keep state (if-bound) label \"tono-lan\""
@@ -305,18 +310,19 @@ extension KillSwitchManager {
             lines.append(
                 "pass in quick inet6 proto ipv6-icmp icmp6-type { 133, 134, 135, 136, 137 } keep state (if-bound) label \"tono-ndp\""
             )
-            // Local discovery beyond mDNS: SSDP (239.255.255.250, DLNA casting)
-            // and protocols that announce on the limited broadcast. Link-local
-            // multicast (224.0.0.0/24, never forwarded) and the IPv4 Local
-            // Scope (239.255.0.0/16, RFC 2365) only. The rest of 239.0.0.0/8
-            // is organization scope, which a site's multicast routers do
-            // forward, so it stays blocked. Local Scope is bounded by router
-            // configuration, not by the protocol: it reaches no further than
-            // the private unicast ranges `tono-lan` already passes. `no
+            // Local discovery beyond mDNS. Link-local multicast (224.0.0.0/24)
+            // and the limited broadcast are never forwarded by a router. `no
             // state`: answers come back unicast from a LAN address, which
             // `tono-lan` passes.
             lines.append(
-                "pass out quick inet to { 224.0.0.0/24, 239.255.0.0/16, 255.255.255.255 } no state label \"tono-multicast\""
+                "pass out quick inet to { 224.0.0.0/24, 255.255.255.255 } no state label \"tono-multicast\""
+            )
+            // SSDP (DLNA casting) is the one routable group: its address and
+            // port only. A multicast router may forward it as far as its
+            // configuration allows (RFC 2365 section 10), and PF cannot bound
+            // the TTL a sender sets.
+            lines.append(
+                "pass out quick inet proto udp to 239.255.255.250 port 1900 no state label \"tono-ssdp\""
             )
         }
         for interface in state.tunnelInterfaces.sorted() {
