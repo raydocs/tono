@@ -733,13 +733,15 @@ fn lan_rules(app_path: &str) -> Vec<FilterSpec> {
             v6_conditions(&[LOCAL_DISCOVERY_V6]),
         ),
         (
-            "in-v4",
+            // Not `in-*`: an earlier head of this change keyed the same rules without the
+            // port hole, and a key that is already installed is never replaced.
+            "peers-v4",
             "session permit local network peers",
             L::AleAuthRecvAcceptV4,
             v4_conditions(&LAN_V4),
         ),
         (
-            "in-v6",
+            "peers-v6",
             "session permit local network peers",
             L::AleAuthRecvAcceptV6,
             v6_conditions(&LAN_V6),
@@ -2163,6 +2165,13 @@ mod tests {
         let fallback = without_unresolved_apps(&diff(&installed, &locked), &locked, true, false);
 
         assert!(fallback.install.is_empty(), "the core block cannot be installed without its id");
+        assert!(
+            locked
+                .iter()
+                .filter(|spec| spec.weight == WEIGHT_LAN_PERMIT)
+                .all(|spec| fallback.remove.contains(&spec.key)),
+            "every LAN permit is withdrawn, not only the one the packet below would hit"
+        );
         let live = locked
             .iter()
             .filter(|spec| installed.contains(&spec.key) && !fallback.remove.contains(&spec.key))
