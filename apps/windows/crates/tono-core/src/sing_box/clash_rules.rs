@@ -42,6 +42,8 @@ fn refuse_unknown_keys(rule: &Value) -> Result<(), String> {
     const ALLOWED: &[&str] = &[
         "type",
         "action",
+        // Reject option. `RuleActionReject::String` does not print it.
+        "no_drop",
         "outbound",
         "mode",
         "rules",
