@@ -35,11 +35,22 @@ nonisolated extension ConfigPipeline {
         return nil
     }
 
+    /// Product fake-IP pool, in eight /20 slots. One Core process allocates
+    /// from one of them: `fakeIPSlot` picks it, `SingBoxFakeIPRotation` owns
+    /// the order. A slot is the size of the whole pool before the split, so a
+    /// process wraps no sooner than it did.
+    static let singBoxFakeIPPool = "198.18.128.0/17"
+    static let singBoxFakeIPSlots = 8
+    /// The pool before #1258. An address an app cached from a build that used
+    /// it is refused like one from another slot.
+    static let singBoxFormerFakeIPPool = "198.18.16.0/20"
+
     static func buildSingBoxRuntime(
         overlay: OverlayConfig,
         nodes inputNodes: [ProxyNode],
         directPlan: ManagedDirectRuntimePolicy?,
-        requiredCapabilities: [String] = []
+        requiredCapabilities: [String] = [],
+        fakeIPSlot: Int = 0
     ) throws -> OwnedSingBoxRuntime {
         let known: Set<String> = ["reality-tcp", "hy2", "direct", "home", "dns-proxied", "tun", "clash-api"]
         guard Set(requiredCapabilities).isSubset(of: known) else { throw SingBoxError.unsupportedPolicy }
@@ -161,7 +172,8 @@ nonisolated extension ConfigPipeline {
             outbounds.append(["type": "selector", "tag": webDirectGroupName, "outbounds": [webDirectProxyName], "default": webDirectProxyName])
         }
         var dnsServers: [[String: Any]] = [
-            ["type": "fakeip", "tag": "Tono-FakeIP", "inet4_range": "198.18.16.0/20"],
+            ["type": "fakeip", "tag": "Tono-FakeIP",
+             "inet4_range": "198.18.\(128 + 16 * (fakeIPSlot % singBoxFakeIPSlots)).0/20"],
             ["type": "https", "tag": "Tono-DoH", "server": "1.1.1.1", "server_port": 443,
              "path": "/dns-query", "tls": ["enabled": true, "server_name": "1.1.1.1", "alpn": ["h2"]],
              "detour": exitGroupName],
@@ -184,6 +196,12 @@ nonisolated extension ConfigPipeline {
         var rules: [[String: Any]] = [
             ["inbound": ["Tono-DNS"], "action": "hijack-dns"],
             ["port": [53], "action": "hijack-dns"],
+            // #1258: an address cached from a replaced Core is outside this
+            // document's fake-IP slot, so it arrives as a plain IP. Refuse it
+            // before a home, DIRECT or exit rule dials it. A destination the
+            // fake-IP table turned into a name does not match ip_cidr.
+            // `no_drop`: sing-box turns a reject into a drop after 50 in 30 s.
+            ["ip_cidr": [singBoxFakeIPPool, singBoxFormerFakeIPPool], "action": "reject", "no_drop": true],
         ]
         let assistant = home == nil ? exitGroupName : claudeHomeGroupName
         // Always, including when no residential hop is bound. Later reviewed-bundle

@@ -7,7 +7,7 @@
       {
         "type": "fakeip",
         "tag": "Tono-FakeIP",
-        "inet4_range": "198.18.16.0/20"
+        "inet4_range": "198.18.128.0/20"
       },
       {
         "type": "https",
@@ -167,6 +167,14 @@
           53
         ],
         "action": "hijack-dns"
+      },
+      {
+        "ip_cidr": [
+          "198.18.128.0/17",
+          "198.18.16.0/20"
+        ],
+        "action": "reject",
+        "no_drop": true
       },
       {
         "ip_version": 6,

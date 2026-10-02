@@ -19,8 +19,9 @@ nonisolated enum ProtectedDNSProbe {
         guard parts.count == 4, parts[0] == "198", parts[1] == "18",
               let third = Int(parts[2]), let fourth = Int(parts[3]),
               (0...255).contains(fourth) else { return false }
-        // Product pool 198.18.16.0/20. TUN 198.18.0.1 and DNS 198.18.0.2 are outside it.
-        return (16..<32).contains(third)
+        // Product pool 198.18.128.0/17, and 198.18.16.0/20 before #1258.
+        // TUN 198.18.0.1 and DNS 198.18.0.2 are outside both.
+        return third >= 128 || (16..<32).contains(third)
     }
 
     static func containsFakeIP(_ answers: [String]) -> Bool {

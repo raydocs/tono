@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import Observation
 
@@ -10,14 +11,96 @@ private actor RuntimeConfigWriter {
         overlay: ConfigPipeline.OverlayConfig,
         customNodes: [ProxyNode],
         directPolicy: ConfigPipeline.ManagedDirectRuntimePolicy?,
-        outputPath: URL
+        outputPath: URL,
+        fakeIPRotation: SingBoxFakeIPRotation,
+        installedDigest: String?,
+        keepsInstalled: Bool
     ) throws -> String {
-        let runtime = try ConfigPipeline.buildSingBoxRuntime(
-            overlay: overlay,
-            nodes: customNodes,
-            directPlan: directPolicy
-        )
-        return try ConfigPipeline.secureWrite(String(decoding: runtime.runtimeJSON, as: UTF8.self), to: outputPath)
+        let document = try fakeIPRotation.document(installed: installedDigest, keeping: keepsInstalled) { slot in
+            try ConfigPipeline.buildSingBoxRuntime(
+                overlay: overlay,
+                nodes: customNodes,
+                directPlan: directPolicy,
+                fakeIPSlot: slot
+            ).runtimeJSON
+        }
+        return try ConfigPipeline.secureWrite(String(decoding: document, as: UTF8.self), to: outputPath)
+    }
+}
+
+// MARK: - Fake-IP rotation
+
+/// Which slot of the fake-IP pool the next runtime document takes (#1258).
+///
+/// The Core keeps its fake-IP table in memory and hands addresses out in order
+/// from the start of its range. A replacement process on the same range maps
+/// an address an app still has cached to whichever name it resolves first.
+/// On another slot that address is a plain IP, and the document rejects the
+/// pool.
+nonisolated final class SingBoxFakeIPRotation: @unchecked Sendable {
+    static let defaultsKey = "singBoxFakeIPSlot"
+
+    private let lock = NSLock()
+    private let defaults: UserDefaults?
+    private var next: Int
+    /// The slot each remembered document was rendered on, newest last.
+    private var rendered: [(digest: String, slot: Int)] = []
+    private static let remembered = 64
+
+    /// The count is kept in `defaults`: a relaunched app adopts the Core the
+    /// last one started and carries on after its slot. With nothing stored it
+    /// starts anywhere.
+    init(defaults: UserDefaults? = AppProfile.defaults) {
+        self.defaults = defaults
+        let stored = (defaults?.object(forKey: Self.defaultsKey) as? Int).flatMap { $0 >= 0 ? $0 : nil }
+        next = stored ?? Int.random(in: 0..<ConfigPipeline.singBoxFakeIPSlots)
+    }
+
+    /// `render` returns the document for a slot. A document takes the next
+    /// slot that is not the installed document's, because every path that
+    /// writes one restarts the Core; the count moves once it has rendered. The
+    /// one exception is the reload that skips the restart on an equal digest:
+    /// a config that still renders to the installed bytes on the installed
+    /// document's slot keeps them.
+    func document(
+        installed installedDigest: String? = nil, keeping: Bool = false, _ render: (Int) throws -> Data
+    ) rethrows -> Data {
+        lock.lock()
+        defer { lock.unlock() }
+        var installedSlot: Int?
+        if let index = rendered.lastIndex(where: { $0.digest == installedDigest }) {
+            // Named again, so it outlives the documents that were not installed.
+            let installed = rendered.remove(at: index)
+            rendered.append(installed)
+            installedSlot = installed.slot
+        }
+        if keeping, let installedSlot {
+            let document = try render(installedSlot)
+            if Self.digest(document) == installedDigest { return document }
+        }
+        let slot = Self.slot(next, avoiding: installedSlot)
+        let document = try render(slot)
+        // Stored already past the installed slot: a relaunched app does not
+        // remember which one that was.
+        next = Self.slot(Self.following(slot), avoiding: installedSlot)
+        defaults?.set(next, forKey: Self.defaultsKey)
+        rendered.append((Self.digest(document), slot))
+        if rendered.count > Self.remembered { rendered.removeFirst() }
+        return document
+    }
+
+    private static func slot(_ slot: Int, avoiding installed: Int?) -> Int {
+        guard let installed else { return slot }
+        let slots = ConfigPipeline.singBoxFakeIPSlots
+        return slot % slots == installed % slots ? following(slot) : slot
+    }
+
+    private static func following(_ slot: Int) -> Int {
+        slot == Int.max ? 0 : slot + 1
+    }
+
+    private static func digest(_ document: Data) -> String {
+        SHA256.hash(data: document).map { String(format: "%02x", $0) }.joined()
     }
 }
 
@@ -61,6 +144,7 @@ final class CoreRuntimeManager {
     var logOutput: [String] = []
     private(set) var runtimeConfigSHA256: String?
     private let configWriter = RuntimeConfigWriter()
+    private let fakeIPRotation = SingBoxFakeIPRotation()
 
     /// Config directory for the owned sing-box runtime.
     var configDirectory: URL {
@@ -89,13 +173,18 @@ final class CoreRuntimeManager {
     func writeRuntimeConfig(
         overlay: ConfigPipeline.OverlayConfig,
         customNodes: [ProxyNode] = [],
-        directPolicy: ConfigPipeline.ManagedDirectRuntimePolicy? = nil
+        directPolicy: ConfigPipeline.ManagedDirectRuntimePolicy? = nil,
+        installed installedDigest: String? = nil,
+        keepsInstalled: Bool = false
     ) async throws -> String {
         let digest = try await configWriter.write(
             overlay: overlay,
             customNodes: customNodes,
             directPolicy: directPolicy,
-            outputPath: configFilePath
+            outputPath: configFilePath,
+            fakeIPRotation: fakeIPRotation,
+            installedDigest: installedDigest,
+            keepsInstalled: keepsInstalled
         )
         runtimeConfigSHA256 = digest
         return digest
