@@ -117,19 +117,36 @@ pub(super) fn sing_box_runtime_document(
 }
 
 /// #1258: every document composed here starts a sing-box process with an empty fake-IP store.
-/// Each one takes the next quarter of the pool, so an address an app cached from the process
-/// being replaced is refused instead of reaching the name the new process hands it first. A
-/// relaunched App cannot read which quarter the running process uses, so it starts anywhere.
+/// Each one takes the next slot of the pool, so an address an app cached from an earlier
+/// process is refused instead of reaching the name the new process hands it first. The count
+/// is kept on disk: a relaunched App carries on after the slot of the process it finds
+/// running. When the file cannot be read the count starts from the clock.
 fn next_fake_ip_slot() -> usize {
-    use std::sync::atomic::{AtomicUsize, Ordering};
-    static NEXT: std::sync::OnceLock<AtomicUsize> = std::sync::OnceLock::new();
-    NEXT.get_or_init(|| {
-        let started = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map_or(0, |elapsed| elapsed.as_micros() as usize);
-        AtomicUsize::new(started)
-    })
-    .fetch_add(1, Ordering::Relaxed)
+    static NEXT: std::sync::Mutex<Option<usize>> = std::sync::Mutex::new(None);
+    let file = dirs::app_home_dir()
+        .or_else(|_| dirs::preinit_app_data_dir())
+        .ok()
+        .map(|home| home.join("tono").join("fake-ip-slot"));
+    let mut next = NEXT
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    advance_fake_ip_slot(&mut next, file.as_deref())
+}
+
+fn advance_fake_ip_slot(next: &mut Option<usize>, file: Option<&Path>) -> usize {
+    let slot = next
+        .or_else(|| std::fs::read_to_string(file?).ok()?.trim().parse().ok())
+        .unwrap_or_else(|| {
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |elapsed| elapsed.as_micros() as usize)
+        });
+    *next = Some(slot.wrapping_add(1));
+    if let Some(file) = file {
+        // Best effort. Without the file the next launch starts from the clock.
+        let _ = std::fs::write(file, slot.wrapping_add(1).to_string());
+    }
+    slot
 }
 
 fn compile_sing_box(
@@ -228,7 +245,7 @@ fn service_refusal_message(probe: &ServiceSingBoxProbe) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{ServiceSingBoxProbe, service_refusal_message};
+    use super::{ServiceSingBoxProbe, advance_fake_ip_slot, service_refusal_message};
 
     #[test]
     fn a_failed_version_probe_is_retryable_not_an_old_service() {
@@ -240,5 +257,20 @@ mod tests {
             service_refusal_message(&ServiceSingBoxProbe::TooOld)
                 .contains("install the current service")
         );
+    }
+
+    /// #1258: a relaunched App finds the sing-box process the previous one started. Its first
+    /// document must take the slot after that process's, not an unrelated one.
+    #[test]
+    fn a_relaunched_app_takes_the_fake_ip_slot_after_the_last_one() {
+        let file = std::env::temp_dir().join(format!(
+            "tono-fake-ip-slot-test-{}",
+            std::process::id()
+        ));
+        std::fs::write(&file, "41").unwrap();
+        let before_relaunch = advance_fake_ip_slot(&mut None, Some(&file));
+        let after_relaunch = advance_fake_ip_slot(&mut None, Some(&file));
+        let _ = std::fs::remove_file(&file);
+        assert_eq!((before_relaunch, after_relaunch), (41, 42));
     }
 }
