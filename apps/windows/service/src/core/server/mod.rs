@@ -339,9 +339,16 @@ async fn rollback_started_owner(
 /// When the caller asked to release, run the same stop transition a recorded
 /// stop runs: restore DNS, then the non-strict WFP release. Otherwise the
 /// intent still wants the core, so bring it back and leave the barrier armed.
-/// If that restart cannot be proven, restore DNS and keep the barrier. A kept
-/// session is not full-opened here, and the success path of `StopClash` is
-/// unchanged.
+/// If that restart cannot be proven, restore DNS. A kept session is not
+/// full-opened here, and the success path of `StopClash` is unchanged.
+///
+/// A non-strict session whose restart failed has no Core, no Core watchdog and,
+/// once verified, no proof deadline: nothing in the Service would ever open it
+/// (#1139, decision 031). Queue the same epoch-fenced retirement an exhausted
+/// Core watchdog queues; the WFP watchdog then retires the run intent and opens
+/// general traffic with the AI hold. The caller holds owner lifecycle, so the
+/// arm read here is the one that was stopped, and a successor Connect revokes
+/// the queued retirement by arming. Strict keeps its barrier.
 pub(crate) async fn recover_after_unrecorded_stop(
     owner: &AuthenticatedOwner,
     release_kill_switch: bool,
@@ -352,9 +359,14 @@ pub(crate) async fn recover_after_unrecorded_stop(
     }
     if let Err(error) = restart_still_wanted_core(owner).await {
         warn!(
-            "stop was not recorded and the core could not be brought back; restoring DNS and keeping the barrier: {error:#}"
+            "stop was not recorded and the core could not be brought back; restoring DNS and retiring a non-strict session: {error:#}"
         );
-        dns::ensure_restored().await.context(
+        let dns_restored = dns::ensure_restored().await;
+        // Not gated on the DNS verdict: the queued release restores DNS best-effort again,
+        // and a dead resolver behind a kept barrier is the worse outcome.
+        windows_kill_switch::note_core_recovery_exhausted(windows_kill_switch::core_arm_epoch())
+            .await;
+        dns_restored.context(
             "protected DNS stayed pointed at the dead resolver after the core could not be restarted",
         )?;
     }
