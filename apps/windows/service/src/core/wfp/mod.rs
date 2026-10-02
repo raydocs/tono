@@ -338,6 +338,27 @@ fn build_condition(
             FWP_MATCH_EQUAL,
             condition_value_u16(*port),
         ),
+        Condition::RemotePortRange { min, max } => {
+            keep.ranges.push(Box::new(FWP_RANGE0 {
+                valueLow: FWP_VALUE0 {
+                    r#type: FWP_UINT16,
+                    Anonymous: FWP_VALUE0_0 { uint16: *min },
+                },
+                valueHigh: FWP_VALUE0 {
+                    r#type: FWP_UINT16,
+                    Anonymous: FWP_VALUE0_0 { uint16: *max },
+                },
+            }));
+            let ptr = keep.ranges.last_mut().map(|v| &mut **v).expect("pushed");
+            (
+                FWPM_CONDITION_IP_REMOTE_PORT,
+                FWP_MATCH_RANGE,
+                FWP_CONDITION_VALUE0 {
+                    r#type: FWP_RANGE_TYPE,
+                    Anonymous: FWP_CONDITION_VALUE0_0 { rangeValue: ptr },
+                },
+            )
+        }
         Condition::IcmpV6TypeRange { min, max } => {
             // FWPM_CONDITION_ICMP_TYPE is a `#define` alias of FWPM_CONDITION_IP_LOCAL_PORT
             // in fwpmu.h, so the metadata-based bindings only carry the latter; the SDK's C

@@ -323,6 +323,9 @@ simplicity and Tono's PF semantics. Rule tables live in
   (8/8/7) over the block-all pair (1). The default-deny floor already blocks
   physical DNS leaks; there is deliberately no extra port-53 block, because
   Windows resolver traffic transitions between loopback and the TUN path.
+  While locked with a tunnel, the local network (RFC 1918, link-local, ULA,
+  link-local multicast, SSDP) is permitted at weight 4 on every port except
+  53 and 853, and the core is blocked from it at weight 6 (decision 048).
   WFP arbitrates sublayer-first, so "weighted permits over a floor block" is
   only sound inside a single sublayer.
 - `ALE_AUTH_CONNECT_V4/V6` for the outbound fail-closed boundary; IPv6 is
