@@ -6,7 +6,7 @@
   - 出站 IPv4 组播原先只放行 mDNS（224.0.0.251:5353）。SSDP（239.255.255.250:1900，DLNA 投屏）和走有限广播的发现协议都被丢。现在新增 `tono-multicast`（`224.0.0.0/24`、`255.255.255.255`，`no state`）和 `tono-ssdp`（UDP `239.255.255.250:1900`，`no state`）。前两段的 53/853 端口先由一条新的 `tono-dns-multicast` 丢弃规则挡住；放行不限网卡，所以这条丢弃也不限网卡（原有局域网 DNS 丢弃规则仍按物理网卡限定，不变）。
   - 评审第一轮后的收紧（Codex，记录在 PR 评论）：`239.0.0.0/8` 缩到 `239.255.0.0/16`（其余是站点内可路由的组织范围）；组播 DNS 丢弃从「跟物理网卡」改成不限网卡（原来武装后新出现的网卡在范围加宽前可向 `255.255.255.255:53` 发包）；IGMP 两条规则提到 Continuity 放行之前（原来在 `bridge100` 等网卡上仍被没有 `allow-opts` 的放行先命中）。
   - 评审第二轮后的收紧：可路由的组播从 `239.255.0.0/16` 缩到 SSDP 的一个组一个端口（Local Scope 的边界靠路由器配置，PF 限制不了 TTL）；DNS 丢弃规则的标签从 `tono-multicast-dns` 改成 `tono-dns-multicast`，因为标签检查是子串匹配，旧名字会让 `tono-multicast` 的检查在放行规则缺失时照样通过。
-  - 评审第三轮后的收紧：PF 匹配分片时跳过带端口的规则，所以已分片的包绕过 `tono-dns-multicast`、命中没有端口的 `tono-multicast` 放行（main 上这些分片落到末尾丢弃）。新增 `tono-fragment-multicast`，丢弃发往 `224.0.0.0/24` 和 `255.255.255.255` 的全部分片。
+  - 评审第三轮后的收紧：PF 匹配分片时跳过带端口的规则，所以已分片的包绕过 `tono-dns-multicast`、命中没有端口的 `tono-multicast` 放行（main 上这些分片落到末尾丢弃）。新增 `tono-fragment-multicast`，丢弃到达这条规则的、发往 `224.0.0.0/24` 和 `255.255.255.255` 的分片（协议号 2 的分片先命中 `tono-igmp`；lo0 和 Continuity 网卡上的包更早放行）。第四轮评审没有 major，这句的限定是它指出的记录问题。
 - 新增/优化：无。
 - 工程与测试：helper self-test 新增一条断言（六条规则都在、IGMP 出入两条都在 `tono-continuity` 和 `tono-lan` 之前、DNS 丢弃和分片丢弃都在组播放行之前、渲染结果里没有 `239.255.0.0/16`、无隧道时都不出现）；lifecycle self-test 的标签清单加 `tono-igmp`、`tono-multicast`、`tono-dns-multicast`、`tono-fragment-multicast`、`tono-ssdp`，由内核实际加载。helper `4.52.36` → `4.52.37`，`CONTRACT.sha256` 同步。
 - 验证：见 PR。本机没有运行 `pfctl`、没有连接、没有原生构建；规则解析和内核加载由 hosted macOS CI 的 `privileged-tests` 完成。
