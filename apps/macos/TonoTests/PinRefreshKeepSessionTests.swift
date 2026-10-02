@@ -430,4 +430,58 @@ final class PinRefreshKeepSessionTests: XCTestCase {
         XCTAssertNil(app.connectionCoordinator.configReloadTask)
         XCTAssertNil(app.errorMessage)
     }
+
+    /// MAC-SYNC-REPLY-LOST-DIGEST: the helper replaces the Core before it
+    /// replies to `/core/sync`. With the reply lost, the kept session's record
+    /// of the installed document described the Core that may be gone, and an
+    /// equal full reload skipped as unchanged.
+    func testPinsRefreshWithALostSyncReplyForgetsTheInstalledDocument() async throws {
+        let savedConsumer = RuntimeCleanup.launchProtectionConsumer
+        let savedSlot = AppProfile.defaults.object(forKey: SingBoxFakeIPRotation.defaultsKey)
+        let app = AppState()
+        let node = Fixture.realityNode(name: "Los Angeles · Canyon")
+        app.proxyRegions = [ProxyRegion(id: "custom", name: "Custom", nodes: [node])]
+        app.selectedNodeId = node.id
+        app.activeNode = node
+        app.proxyService.activeNodeName = node.name
+        app.tonoTransport = TonoTransportDescriptor(port: 1080)
+        app.coreController = CoreControllerClient(port: 9)
+        app.config.tunEnabled = true
+        app.isConnected = true
+        let live = ConfigPipeline.ManagedDirectRuntimePolicy(
+            physicalInterface: "en0", domainPins: [], mediaEndpoints: []
+        )
+        app.activeDirectPolicy = live
+        app.loadedRuntimeConfigDigest = "installed"
+
+        let configFile = app.coreRuntime.configFilePath
+        let savedConfig = try? Data(contentsOf: configFile)
+        let savedIPC = KillSwitchService.armIPC
+        let savedArmed = KillSwitchService.isArmed
+        KillSwitchService.armIPC.prepare = { _ in }
+        KillSwitchService.armIPC.deliver = { _ in (true, true, true, false, false, 0) }
+        defer {
+            RuntimeCleanup.launchProtectionConsumer = savedConsumer
+            AppProfile.defaults.set(savedSlot, forKey: SingBoxFakeIPRotation.defaultsKey)
+            KillSwitchService.armIPC = savedIPC
+            KillSwitchService.isArmed = savedArmed
+            if let savedConfig { try? savedConfig.write(to: configFile) }
+            else { try? FileManager.default.removeItem(at: configFile) }
+        }
+
+        var operations = AppState.ConfigReloadOperations()
+        operations.sync = { _, _ in throw HelperIPCError.emptyResponse }
+
+        app.reloadCoreConfig(
+            applyingDirectPolicy: ConfigPipeline.ManagedDirectRuntimePolicy(
+                physicalInterface: "en1", domainPins: [], mediaEndpoints: []
+            ),
+            operations: operations
+        )
+        await app.connectionCoordinator.configReloadTask?.value
+
+        XCTAssertNil(app.loadedRuntimeConfigDigest)
+        XCTAssertTrue(app.isConnected)
+        XCTAssertEqual(app.activeDirectPolicy, live)
+    }
 }
