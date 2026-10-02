@@ -508,13 +508,15 @@ async fn quit_then_resync() {
 /// owns the flag — one that was cancelled has cleared it and is still re-syncing, and a flag
 /// raised here would have no flow left to clear it.
 pub fn claim_exit_request() -> Option<QuitClaim> {
-    claim_raising(&QUIT_IN_FLIGHT, || handle::Handle::global().set_is_exiting()).map(QuitClaim)
+    claim_raising(&QUIT_IN_FLIGHT, || handle::Handle::global().set_is_exiting()).map(|held| QuitClaim { _held: held })
 }
 
 static QUIT_IN_FLIGHT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// The Quit slot, held until dropped.
-pub struct QuitClaim(Held<'static>);
+pub struct QuitClaim {
+    _held: Held<'static>,
+}
 
 struct Held<'a>(&'a std::sync::atomic::AtomicBool);
 impl Drop for Held<'_> {
