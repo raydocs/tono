@@ -1196,7 +1196,7 @@ extension KillSwitchManager {
                 "pass out quick inet proto tcp to 8.8.8.8 port 80 user root keep state (if-bound)",
                 "pass out quick inet proto udp to 8.8.8.8 port 8000 user root keep state (if-bound)",
                 "pass in quick on lo0 all keep state (if-bound)",
-                "pass out quick on lo0 all keep state (if-bound)",
+                "pass out quick on lo0 all no state",
                 "block drop out quick all",
             ]
             let forbidden = [
@@ -1381,7 +1381,7 @@ extension KillSwitchManager {
             let emergencyExpected = [
                 "# Managed by Tono Kill Switch — do not edit",
                 "pass in quick on lo0 all keep state (if-bound) label \"tono-loopback\"",
-                "pass out quick on lo0 all keep state (if-bound) label \"tono-loopback\"",
+                "pass out quick on lo0 all no state label \"tono-loopback\"",
                 "block drop out quick all label \"tono-block\"",
                 "",
             ].joined(separator: "\n")
