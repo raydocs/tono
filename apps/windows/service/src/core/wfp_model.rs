@@ -1876,6 +1876,52 @@ mod tests {
         );
     }
 
+    /// Decision 048 (owner, 2026-10-02): while the tunnel is up the local network stays
+    /// reachable, as on macOS: the router page, a printer, a NAS, discovery. DNS to the LAN,
+    /// the core itself, and every state without a tunnel stay closed.
+    #[test]
+    fn a_locked_session_reaches_the_lan_but_not_its_dns() {
+        use FilterAction::{Block, Permit};
+        use IpProtocol::{Tcp, Udp};
+        use LayerKind::{AleAuthConnectV4 as OutV4, AleAuthConnectV6 as OutV6, AleAuthRecvAcceptV4 as InV4};
+        let locked = expected_filters(&config(KillSwitchStatusMode::Locked));
+        let verdict = |layer, protocol, ip, port| arbitrate(&locked, &packet(layer, protocol, ip, port));
+
+        assert_eq!(verdict(OutV4, Tcp, "192.168.1.1", 80), Permit, "router page");
+        assert_eq!(verdict(OutV4, Tcp, "10.0.0.5", 445), Permit, "NAS");
+        assert_eq!(verdict(InV4, Tcp, "192.168.1.20", 50_000), Permit, "a LAN peer connecting in");
+        assert_eq!(verdict(OutV4, Udp, "224.0.0.251", 5353), Permit, "mDNS");
+        assert_eq!(verdict(OutV4, Udp, "239.255.255.250", 1900), Permit, "SSDP");
+        assert_eq!(verdict(OutV6, Tcp, "fe80::1", 445), Permit, "link-local IPv6");
+
+        assert_eq!(verdict(OutV4, Udp, "192.168.1.1", 53), Block, "the LAN resolver");
+        assert_eq!(verdict(OutV4, Tcp, "192.168.1.1", 853), Block, "DNS over TLS on the LAN");
+        assert_eq!(verdict(OutV4, Udp, "224.0.0.251", 53), Block, "DNS to a multicast group");
+        assert_eq!(verdict(OutV4, Udp, "239.255.255.250", 3702), Block, "routable multicast beyond SSDP");
+        assert_eq!(verdict(OutV4, Tcp, "100.64.0.1", 443), Block, "carrier NAT is not the LAN");
+        assert_eq!(verdict(OutV4, Tcp, "9.9.9.9", 443), Block, "the Internet");
+        assert_eq!(verdict(OutV6, Tcp, "2001:db8::1", 443), Block, "global IPv6");
+
+        let mut core = packet(OutV4, Tcp, "192.168.1.1", 80);
+        core.app_id_matches = true;
+        assert_eq!(arbitrate(&locked, &core), Block, "the core never dials the LAN");
+
+        let mut no_tunnel = config(KillSwitchStatusMode::Locked);
+        no_tunnel.tun_luid = None;
+        for config in [
+            config(KillSwitchStatusMode::Bootstrap),
+            config(KillSwitchStatusMode::Blocked),
+            no_tunnel,
+        ] {
+            assert_eq!(
+                arbitrate(&expected_filters(&config), &packet(OutV4, Tcp, "192.168.1.1", 80)),
+                Block,
+                "{:?}: no tunnel, no LAN",
+                config.mode
+            );
+        }
+    }
+
     #[test]
     fn arbitration_endpoint_permit_requires_the_staged_app_id() {
         let filters = expected_filters(&config(KillSwitchStatusMode::Bootstrap));
