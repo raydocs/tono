@@ -382,7 +382,11 @@ nonisolated enum HelperProtocolVersion {
     ///   DNS restored) until every AI sinkhole resolver and blackhole route is
     ///   proven absent, read from the system rather than the recovery record
     ///   (unreadable counts as present), and retries that removal itself.
-    static let current = "4.52.36"
+    /// - 4.52.36 → 4.52.37: with a tunnel up, PF passes IGMP (`allow-opts`:
+    ///   its Router Alert option is otherwise dropped) and outbound link-local
+    ///   and administratively scoped IPv4 multicast and the limited broadcast,
+    ///   so mDNS and SSDP discovery survive an IGMP-snooping network.
+    static let current = "4.52.37"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS
