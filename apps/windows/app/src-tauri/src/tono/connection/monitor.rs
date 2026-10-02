@@ -1713,6 +1713,38 @@ mod tests {
         drop(lifecycle);
     }
 
+    /// #1051: the release writer queued behind a stalled optional DIRECT reload for both of its
+    /// 60-second controller attempts. Admission now wakes that reader's controller wait.
+    #[tokio::test]
+    async fn health_release_admission_wakes_a_stalled_controller_reader() {
+        let state = Arc::new(TonoState::for_test());
+        let (generation, selected, switch_task) = {
+            let mut inner = state.lock().await;
+            inner.fsm.begin_connect();
+            inner.fsm.mark_kill_switch_armed();
+            inner.fsm.mark_session_verified();
+            inner.fsm.connect_succeeded().unwrap();
+            inner.selected_node = Some("A".to_owned());
+            super::capture_health_context(&inner, true).unwrap()
+        };
+        // The optional DIRECT reload: a lifecycle reader kept until its controller wait ends.
+        let reader = state.begin_connect_mutation().await;
+        let cancellation = state.lock().await.connect_cancellation.clone();
+        let stalled = tokio::spawn(async move {
+            let _reader = reader;
+            cancellation.cancelled().await;
+        });
+        let admitted = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            super::admit_health_release(&state, generation, selected.as_deref(), switch_task, true),
+        ).await;
+        stalled.abort();
+        let admitted = admitted.expect("the release must not wait out a stalled controller reader");
+        assert!(admitted.is_ok(), "the current failure still owns the release");
+        assert_eq!(state.lock().await.connect_generation, generation,
+            "waking the reader must not retire the generation the release still owns");
+    }
+
     #[tokio::test]
     async fn automatic_health_release_keeps_ai_blocked_and_preserves_protected_recovery() {
         let mut general_blocked = true;
