@@ -162,15 +162,13 @@ final class PeriodicTelemetryConsentTests: XCTestCase {
         XCTAssertTrue(TelemetryOutbox.pending(defaults: defaults).isEmpty)
     }
 
-    func testANetworkLossReportStillQueuesAfterTheSnapshotIsOff() {
+    func testANetworkLossReportIsNotQueuedAfterTheSnapshotIsOff() {
         defaults.set(false, forKey: SettingsKey.periodicTelemetryEnabled)
         AccountSession.notePeriodicTelemetryChoice()
         XCTAssertFalse(AccountSession.isPeriodicTelemetryEnabled)
-        XCTAssertTrue(TelemetryOutbox.sendsWhenSnapshotOff("p0"))
-        XCTAssertFalse(TelemetryOutbox.sendsWhenSnapshotOff("failure"))
         defaults.removeObject(forKey: TelemetryOutbox.key)
         NetworkLossReport.enqueue(code: NetworkLossReport.restoreNetwork, node: "Osaka", defaults: defaults)
-        XCTAssertEqual(TelemetryOutbox.pending(defaults: defaults).count, 1)
+        XCTAssertTrue(TelemetryOutbox.pending(defaults: defaults).isEmpty)
     }
 
     private static func queuedEvent(_ item: [String: String]) throws -> (code: String, stage: String, kind: String, node: String) {

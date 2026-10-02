@@ -111,6 +111,10 @@ extension AccountSession {
     func periodicTelemetrySettingChanged() {
         routeTelemetryCursor.reset(to: routeSplitConsumer())
         _ = ConnectionTelemetryBuffer.shared.drain()
+        // Turning the switch off also drops what was waiting to be sent.
+        if !Self.isPeriodicTelemetryEnabled {
+            AppProfile.defaults.removeObject(forKey: TelemetryOutbox.key)
+        }
         updatePeriodicTelemetry()
     }
 
@@ -126,10 +130,8 @@ extension AccountSession {
             state == .ready && user != nil && Self.isPeriodicTelemetryEnabled,
             current: routeSplitConsumer()
         )
-        // The snapshot switch stops the window. It does not stop a queued P0:
-        // a machine that just got its network back still has to report that
-        // it was offline, including after an explicit opt-out.
-        guard state == .ready, !systemSleeping, user != nil else {
+        guard state == .ready, !systemSleeping, user != nil,
+              Self.isPeriodicTelemetryEnabled else {
             periodicTelemetryTask?.cancel()
             periodicTelemetryTask = nil
             return
@@ -152,10 +154,8 @@ extension AccountSession {
     func uploadPeriodicTelemetryWindow() async {
         // The switch can be turned off while this task is parked on its sleep,
         // and the cancellation only lands at the next suspension point.
-        // P0 still leaves; the window itself does not.
-        let consented = periodicTelemetryConsent()
-        await TelemetryOutbox.drain(api: api, includeOrdinary: consented)
-        guard consented else { return }
+        guard periodicTelemetryConsent() else { return }
+        await TelemetryOutbox.drain(api: api)
         // A sleep cancels the timer and a wake starts a fresh one, so the task
         // being new is not evidence that a window is due. Hold the cadence
         // across restarts rather than spending the hourly budget on them.
@@ -643,23 +643,14 @@ nonisolated enum TelemetryOutbox {
         defaults.array(forKey: key) as? [[String: String]] ?? []
     }
 
-    /// A network-loss report still posts after the snapshot is turned off.
-    static func sendsWhenSnapshotOff(_ kind: String) -> Bool {
-        kind == "p0"
-    }
-
     @MainActor
-    static func drain(api: TonoAPIClient, includeOrdinary: Bool = true) async {
+    static func drain(api: TonoAPIClient) async {
         let items = pending()
         guard !items.isEmpty else { return }
         var kept: [[String: String]] = []
         for item in items {
             guard let kind = item["kind"], let encoded = item["body"],
                   let body = Data(base64Encoded: encoded) else { continue }
-            if !includeOrdinary && !sendsWhenSnapshotOff(kind) {
-                kept.append(item)
-                continue
-            }
             let path = (kind == "diagnostics" || kind == "p0")
                 ? "telemetry/diagnostics" : "telemetry/failures"
             do {
@@ -670,14 +661,18 @@ nonisolated enum TelemetryOutbox {
                 }
             }
         }
-        AppProfile.defaults.set(kept, forKey: key)
+        // An opt-out during this pass already emptied the queue. Reports
+        // queued while it was sending stay queued.
+        guard AccountSession.isPeriodicTelemetryEnabled else { return }
+        AppProfile.defaults.set(kept + pending().dropFirst(items.count), forKey: key)
     }
 }
 
 /// Events that leave the user without a working network.
 ///
 /// Queued on disk and posted to `telemetry/diagnostics` on a later signed-in
-/// pass, including after the snapshot is turned off. The control plane treats
+/// pass. Nothing is queued or posted while the snapshot switch is off
+/// (decision 050). The control plane treats
 /// these codes as severity `p0` and alerts on the first event of the cluster.
 /// The closed set matches `P0_NETWORK_LOSS_CODES` in `failure-clusters.ts`.
 nonisolated enum NetworkLossReport {
@@ -706,7 +701,7 @@ nonisolated enum NetworkLossReport {
     }
 
     static func enqueue(code: String, node: String, defaults: UserDefaults = AppProfile.defaults) {
-        guard isP0(code) else { return }
+        guard isP0(code), AccountSession.isPeriodicTelemetryEnabled else { return }
         let version = (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String)
             .map { String($0.prefix(40)) }
             .flatMap { $0.isEmpty ? nil : $0 } ?? "unknown"
