@@ -8,3 +8,8 @@
 - 工程与测试修正：`PinRefreshKeepSessionTests.testPinsRefreshWithALostSyncReplyForgetsTheInstalledDocument`
   先单独推送（红），结果记在 PR。
 - 验证：仅托管 CI；未在实机上制造 helper 应答丢失。仅源码，无新候选。
+
+### 2026-10-02 续记：已合 main
+- 来源合入：#1342，merge commit `8006e57e`，PR 头 `995f0684`。该头的 `ci-gate` 全绿：https://github.com/raydocs/tono/actions/runs/37027746080 。
+- 独立评审：Codex `gpt-6.1-sol`（high），两轮均无 major；两个 minor 未修，记在 finding；记录在 https://github.com/raydocs/tono/pull/1342#issuecomment-5955746282 。
+- 候选/发布：仅源码合入 main。无新安装包，无部署，无客户发布。没有实机验证。

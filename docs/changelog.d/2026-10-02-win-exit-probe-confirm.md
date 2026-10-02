@@ -9,3 +9,8 @@
 - 工程与测试修正：把探测时机抽成 `exit_probe_due`；回归 `a_failed_exit_probe_is_confirmed_on_the_next_tick`
   先随保持旧行为的抽取单独推送为 `cff4cb35`（红），结果记在 PR。
 - 验证：仅托管 CI；未在 Windows 实机上让出口静默失效。仅源码，无新候选。
+
+### 2026-10-02 续记：已合 main
+- 来源合入：#1343，merge commit `3e2d603a`，PR 头 `728afc94`。该头的 `ci-gate` 全绿：https://github.com/raydocs/tono/actions/runs/37029134595 。
+- 独立评审：Codex `gpt-6.1-sol`（high），无 major；两处既有竞争未改，记在 finding；记录在 https://github.com/raydocs/tono/pull/1343#issuecomment-5955951813 。
+- 候选/发布：仅源码合入 main。无新安装包，无部署，无客户发布。没有实机验证。
