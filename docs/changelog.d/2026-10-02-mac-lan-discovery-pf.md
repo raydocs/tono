@@ -1,0 +1,11 @@
+## 2026-10-02 · macOS：TUN 下放行 IGMP 和局域网发现组播
+- 归属：[SHIP_PLAN](../SHIP_PLAN.md) §2 第 10 项。macOS helper（Kill Switch PF 规则）。所有者报告：开 TUN 后手机复制、电脑粘贴不了，手机投屏投不上。
+- 来源：`main` `4da6e98c` → 分支 `fix/mac-lan-discovery-pf`，[#1330](https://github.com/raydocs/tono/pull/1330)。未合 main。
+- 缺陷修复：
+  - PF 启用后，带 IP 选项的 IPv4 包只有命中写了 `allow-opts` 的规则才放行（`man pf.conf`；xnu `pf.c` 的 `PFRES_IPOPTIONS`）。IGMP 成员报告和路由器查询都带 Router Alert 选项，Tono 规则里没有一条 `allow-opts`：出站报告落到末尾的 `block drop out`，入站查询先命中 `tono-lan` 的入站放行再因选项被丢。开了 IGMP snooping 的路由器或 AP 在成员关系过期后不再把组播转给这台 Mac，手机就发现不了它（mDNS 的 IPv4 一侧、SSDP）。现在有隧道时新增 `tono-igmp` 两条规则（出、入，`allow-opts no state`），排在 `tono-lan` 之前。
+  - 出站 IPv4 组播原先只放行 mDNS（224.0.0.251:5353）。SSDP（239.255.255.250:1900，DLNA 投屏）和走有限广播的发现协议都被丢。现在新增 `tono-multicast`：`224.0.0.0/24`、`239.0.0.0/8`、`255.255.255.255`，`no state`。这三段的 53/853 端口先由一条新的 `tono-lan-dns` 丢弃规则挡住，范围与原有局域网 DNS 丢弃规则相同。
+- 新增/优化：无。
+- 工程与测试：helper self-test 新增一条断言（四条规则都在、IGMP 在 `tono-lan` 之前、DNS 丢弃在组播放行之前、无隧道时都不出现）；lifecycle self-test 的标签清单加 `tono-igmp`、`tono-multicast`，由内核实际加载。helper `4.52.36` → `4.52.37`，`CONTRACT.sha256` 同步。
+- 验证：见 PR。本机没有运行 `pfctl`、没有连接、没有原生构建；规则解析和内核加载由 hosted macOS CI 的 `privileged-tests` 完成。
+- 候选/发布：仅源码，无新候选。
+- 剩余限制：没有实机证明通用剪贴板或投屏因此恢复（`needs-hardware`）；实机步骤写在 PR 里。在网全球 IPv6 和非私网 IPv4 仍被丢弃（MAC-CONTINUITY-ONLINK-PF，[决策 045](../decisions/045-2026-10-02-macos-lan-discovery-pf.md) 说明为什么这次不放）。武装或整表清状态时已建立的局域网 TCP 连接被丢弃是另一个缺陷（MAC-PF-ESTABLISHED-FLOWS），不在本 PR。

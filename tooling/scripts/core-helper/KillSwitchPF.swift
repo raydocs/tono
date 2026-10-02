@@ -227,6 +227,19 @@ extension KillSwitchManager {
             lines.append(
                 "pass in quick inet6 proto udp to ff02::fb port 5353 keep state (if-bound) label \"tono-mdns\""
             )
+            // IGMP membership reports and router queries carry the Router Alert
+            // IP option, and PF drops an IPv4 packet with options unless the
+            // rule that passes it says `allow-opts` (the implicit pass does
+            // not). Without these the Mac's group memberships expire on an
+            // IGMP-snooping switch or access point and multicast discovery
+            // stops reaching it. Ahead of `tono-lan`, whose inbound pass would
+            // match a router's query first and drop it for its options.
+            lines.append(
+                "pass out quick inet proto igmp to 224.0.0.0/4 allow-opts no state label \"tono-igmp\""
+            )
+            lines.append(
+                "pass in quick inet proto igmp to 224.0.0.0/4 allow-opts no state label \"tono-igmp\""
+            )
             // LAN ranges bypass the TUN, so DNS sent straight to a LAN resolver
             // would never meet `hijack-dns`. System DNS is the loopback listener;
             // nothing protected needs plain DNS or DoT to the LAN. Scoped to the
@@ -244,6 +257,10 @@ extension KillSwitchManager {
             )
             lines.append(
                 "block drop out quick \(lanDNSScope)inet6 proto { tcp, udp } to { fe80::/10, fc00::/7, ff00::/8 } port { 53, 853 } label \"tono-lan-dns\""
+            )
+            // Same bound for the discovery destinations passed below.
+            lines.append(
+                "block drop out quick \(lanDNSScope)inet proto { tcp, udp } to { 224.0.0.0/24, 239.0.0.0/8, 255.255.255.255 } port { 53, 853 } label \"tono-lan-dns\""
             )
             lines.append(
                 "pass out quick inet to { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16 } keep state (if-bound) label \"tono-lan\""
@@ -280,6 +297,14 @@ extension KillSwitchManager {
             )
             lines.append(
                 "pass in quick inet6 proto ipv6-icmp icmp6-type { 133, 134, 135, 136, 137 } keep state (if-bound) label \"tono-ndp\""
+            )
+            // Local discovery beyond mDNS: SSDP (239.255.255.250, DLNA casting)
+            // and protocols that announce on the limited broadcast. Link-local
+            // and administratively scoped multicast only; neither is forwarded
+            // to the Internet. `no state`: answers come back unicast from a
+            // LAN address, which `tono-lan` passes.
+            lines.append(
+                "pass out quick inet to { 224.0.0.0/24, 239.0.0.0/8, 255.255.255.255 } no state label \"tono-multicast\""
             )
         }
         for interface in state.tunnelInterfaces.sorted() {
