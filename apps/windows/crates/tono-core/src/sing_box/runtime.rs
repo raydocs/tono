@@ -35,6 +35,9 @@ pub struct RuntimeInput<'a> {
     pub home_process_names: &'a [String],
     pub home_process_path_regexes: &'a [String],
     pub direct_process_names: &'a [String],
+    /// Which quarter of the fake-IP pool this document's process allocates from. The caller
+    /// passes a different one for every document it starts (#1258).
+    pub fake_ip_slot: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -535,6 +538,7 @@ mod tests {
             home_process_names: &[],
             home_process_path_regexes: &[],
             direct_process_names: &[],
+            fake_ip_slot: 0,
         }
     }
 
@@ -845,6 +849,43 @@ mod tests {
         assert!(!sing_box_pool([198, 18, 0, 2]));
         assert!(!sing_box_pool([198, 19, 0, 1]));
         assert!(sing_box_pool([198, 18, 16, 1]));
+    }
+
+    /// #1258: a replacement process starts with an empty fake-IP store and allocates from the
+    /// start of its range. On the previous process's range, a name an app still has cached
+    /// resolves to whichever name the new process hands that address first.
+    #[test]
+    fn a_replacement_document_leaves_the_previous_fake_ip_range() {
+        let nodes = nodes();
+        let routing = CatalogRouting::default();
+        let document = |slot| {
+            let mut request = input(&nodes, &routing);
+            request.fake_ip_slot = slot;
+            let runtime = build_runtime(request).unwrap();
+            serde_json::from_str::<Value>(runtime.runtime_json()).unwrap()
+        };
+        let bounds = |value: &Value| {
+            let range = value["dns"]["servers"][0]["inet4_range"].as_str().unwrap();
+            let (address, bits) = range.split_once('/').unwrap();
+            let first = u32::from(address.parse::<Ipv4Addr>().unwrap());
+            (first, first + (1u32 << (32 - bits.parse::<u32>().unwrap())) - 1)
+        };
+        let replaced = document(0);
+        let (first, last) = bounds(&replaced);
+        let (next_first, next_last) = bounds(&document(1));
+        assert!(
+            last < next_first || next_last < first,
+            "the replacement allocates from the range the replaced process answered from"
+        );
+        for octets in [first, last, next_first, next_last].map(u32::to_be_bytes) {
+            assert!(probe_sees_fake(octets));
+        }
+        // Outside the new range the cached address is a plain IP to sing-box. It is refused
+        // before a home, DIRECT or exit rule can dial it.
+        assert_eq!(
+            replaced["route"]["rules"][3],
+            json!({"ip_cidr": [SING_BOX_FAKE_IPV4], "action": "reject"})
+        );
     }
 
     #[test]

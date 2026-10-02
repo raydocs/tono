@@ -109,6 +109,7 @@ pub(super) fn sing_box_runtime_document(
         home_process_names: &home_names,
         home_process_path_regexes: &home_paths,
         direct_process_names: &direct_names,
+        fake_ip_slot: 0,
     };
     build_runtime(input)
         .map(|runtime| runtime.runtime_json().to_string())

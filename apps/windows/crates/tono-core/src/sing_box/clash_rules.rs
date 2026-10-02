@@ -247,6 +247,7 @@ mod tests {
             home_process_names: &[],
             home_process_path_regexes: &[],
             direct_process_names: &[],
+            fake_ip_slot: 0,
         })
         .unwrap();
         let rules = expected_clash_api_rules(runtime.runtime_json()).unwrap();
