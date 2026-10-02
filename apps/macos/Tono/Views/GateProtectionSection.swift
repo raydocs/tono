@@ -31,6 +31,10 @@ extension AppState {
     /// Restore internet button; it is shown exactly when the menu bar offers
     /// Restore internet to an account that is not ready.
     var gateProtectionNotice: GateProtectionNotice? {
+        // A helper that rejects this copy of Tono cannot say whether its
+        // watchdog lifted the block; the menu bar says unknown, and so does
+        // the gate. Restore internet stays.
+        if isProtectionBlockUnreadable { return .unconfirmed }
         if isProtectionBlocked || isConnected { return .blocking }
         // The stored intent keeps the escape hatch reachable on a path that
         // has published no verdict, without claiming a block nobody confirmed.

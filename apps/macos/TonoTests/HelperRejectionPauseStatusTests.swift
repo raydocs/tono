@@ -27,4 +27,24 @@ final class HelperRejectionPauseStatusTests: XCTestCase {
         XCTAssertTrue(app.isProtectionBlocked, "Repair and reconnect stays the primary action")
         XCTAssertEqual(MenuBarProtectionStatus(app).kind, .unconfirmed)
     }
+
+    /// The account gate is where a refused account lands, and it read only
+    /// `isProtectionBlocked`.
+    func testARejectedStatusReadDoesNotClaimABlockOnTheAccountGate() async {
+        let app = AppState()
+        let originalArmedState = KillSwitchService.isArmed
+        KillSwitchService.isArmed = true
+        defer { KillSwitchService.isArmed = originalArmedState }
+        app.isProtectionBlocked = true
+        var runtime = NetworkProtectionOperations()
+        runtime.refreshKillSwitchStatus = { .rejected }
+        app.networkProtection = runtime
+
+        app.reconcileExternalProtectionState()
+        for _ in 0..<200 where !app.protectedReconnectPausedForUserAction {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+
+        XCTAssertEqual(app.gateProtectionNotice, .unconfirmed)
+    }
 }

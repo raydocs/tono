@@ -168,6 +168,11 @@ final class AppState {
     /// Publishes a failure release's "back on normal internet" text once
     /// that release has settled open. Tests await it.
     var failureReleaseNoticeTask: Task<Void, Never>?
+    /// Reads the helper once after a withdrawn transport stopped the Core
+    /// with PF kept. Tests await it.
+    var withdrawnTransportReconcileTask: Task<Void, Never>?
+    /// Past the helper's core-down watchdog: three checks 10 s apart.
+    var withdrawnTransportReconcileDelay: Duration = .seconds(40)
     /// Connect attempts in a row that found no primary network service.
     /// Kept apart from `consecutiveProtectedFailureCount`, which exempts
     /// this environmental failure from its three-strike pause.
@@ -982,11 +987,40 @@ final class AppState {
             } else if isConnected || isConnecting || coreRuntime.isRunning {
                 await disconnectAndWait(releaseKillSwitch: false)
             }
+            if isProtectionBlocked, isTransportWithdrawn {
+                reconcileAfterWithdrawnTransport()
+            }
             return
         }
         autoConnectRequested = RuntimeCleanup.nativeUpdateRecovery == nil
             || RuntimeCleanup.nativeUpdateRecovery == .connected
         attemptAutomaticConnect()
+    }
+
+    /// No transport of either kind: the account is not ready to connect.
+    private var isTransportWithdrawn: Bool {
+        tonoTransport == nil && !cloudOnlyTransportReady
+    }
+
+    /// A withdrawn transport (a refused account, a sign-out on 401) leaves
+    /// the Core stopped with PF kept, and nothing reconnects until the user
+    /// acts: the withdrawal's own teardown, one it joined, or a block a
+    /// reconnect loop already held (the loop skips its read while the account
+    /// is not ready). The helper's core-down watchdog lifts that hold about
+    /// 30 s later (AI hold kept), and only activation read it back, so the
+    /// account gate and the menu bar kept claiming a block over an open host.
+    /// Read the helper once after the watchdog has had its turn. PF is not
+    /// touched here: only the helper's own confirmed release clears anything,
+    /// as on activation. A transport accepted meanwhile retires the read; its
+    /// own connect, retry or repair owns the helper from then on.
+    private func reconcileAfterWithdrawnTransport() {
+        withdrawnTransportReconcileTask?.cancel()
+        let delay = withdrawnTransportReconcileDelay
+        withdrawnTransportReconcileTask = Task { [weak self] in
+            try? await Task.sleep(for: delay)
+            guard let self, !Task.isCancelled, self.isTransportWithdrawn else { return }
+            self.reconcileExternalProtectionState()
+        }
     }
 
     /// Makes the authenticated cloud-only session ready for an explicit user
