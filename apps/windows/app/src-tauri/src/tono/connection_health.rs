@@ -386,8 +386,13 @@ pub const fn health_threshold_reached(consecutive_failures: u32) -> bool {
 }
 
 /// F2: whether the periodic exit probe runs on this tick.
-pub fn exit_probe_due(since_last: Duration, interval: Duration, _pending_failures: u32) -> bool {
-    since_last >= interval
+///
+/// A failed probe is confirmed on the next tick, as a failed network-event proof is. The
+/// interval alone used to decide, so the second sample [`HEALTH_FAILURE_THRESHOLD`] asks for
+/// came a whole interval after the first, and an exit that died behind a live tunnel read
+/// Connected for two intervals. A success clears the count and the cadence is the interval again.
+pub fn exit_probe_due(since_last: Duration, interval: Duration, pending_failures: u32) -> bool {
+    since_last >= interval || pending_failures > 0
 }
 
 /// Consecutive failed network-event proofs before the tunnel is rebuilt.
