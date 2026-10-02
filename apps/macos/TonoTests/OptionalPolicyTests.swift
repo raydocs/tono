@@ -171,6 +171,14 @@ final class OptionalPolicyTests: XCTestCase {
         let savedIPC = KillSwitchService.armIPC
         let updateBlocked = RuntimeCleanup.nativeUpdateBlocksConnect
         let updatePending = RuntimeCleanup.nativeUpdatePending
+        // The refused switch ends in the release teardown, which clears these.
+        let sessionDefaults = [
+            SettingsKey.didStartCore, SettingsKey.lastTunEnabled, SettingsKey.connectBootSession,
+        ].map { ($0, AppProfile.defaults.object(forKey: $0)) }
+        let bootFiles = [
+            RuntimeCleanup.connectBootSessionFile,
+            RuntimeCleanup.connectBootSessionFile.appendingPathExtension("pending"),
+        ].map { ($0, try? Data(contentsOf: $0)) }
         RuntimeCleanup.nativeUpdateBlocksConnect = false
         RuntimeCleanup.nativeUpdatePending = false
         let app = AppState()
@@ -214,6 +222,11 @@ final class OptionalPolicyTests: XCTestCase {
             app.connectionCoordinator.cancelReconnectTasks()
             if delayWasProven { SingBoxDelayGate.prove() }
             else { SingBoxDelayGate.suspend() }
+            for (key, value) in sessionDefaults { AppProfile.defaults.set(value, forKey: key) }
+            for (file, data) in bootFiles {
+                if let data { try? data.write(to: file) }
+                else { try? FileManager.default.removeItem(at: file) }
+            }
         }
         KillSwitchService.isArmed = true
         app.scheduleBackgroundOptionalPolicy()

@@ -1910,6 +1910,7 @@ final class AppState {
     func scheduleBackgroundOptionalPolicy() {
         guard isConnected, !isDisconnecting else { return }
         let policy = managedTrafficPolicy
+        let revision = managedTrafficPolicyRevision
         // A full accepted document supersedes pins derived from earlier
         // authorization. Read the newest document when the shared owner drains.
         pendingDirectPolicyReload = nil
@@ -1941,7 +1942,7 @@ final class AppState {
         let requestID = connectionCoordinator.configReloadRequestID
         connectionCoordinator.configReloadTask = Task { [weak self] in
             guard let self else { return }
-            await self.applyOptionalDirectPolicyInBackground(policy: policy)
+            await self.applyOptionalDirectPolicyInBackground(policy: policy, revision: revision)
             self.finishConfigReloadRequest(requestID)
         }
     }
@@ -1980,7 +1981,7 @@ final class AppState {
         return resolved
     }
 
-    private func applyOptionalDirectPolicyInBackground(policy: TonoTrafficPolicy) async {
+    private func applyOptionalDirectPolicyInBackground(policy: TonoTrafficPolicy, revision: Int) async {
         guard isConnected, !isDisconnecting, !Task.isCancelled,
               let api = coreController else { return }
         let generation = connectionCoordinator.protectionOperationGeneration
@@ -2146,7 +2147,6 @@ final class AppState {
                     // Queue it again so a revoked grant does not outlive a
                     // transient failure; after the limit the message stands
                     // until the next document or Connect.
-                    let revision = managedTrafficPolicyRevision
                     let retried = optionalPolicyRetry.generation == generation
                         && optionalPolicyRetry.revision == revision ? optionalPolicyRetry.count : 0
                     if retried < Self.optionalPolicyRetryLimit {
