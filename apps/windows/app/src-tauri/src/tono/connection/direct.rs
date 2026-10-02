@@ -1714,6 +1714,7 @@ async fn replace_sing_box_for_direct(
         secret,
         ports,
         None,
+        super::core_select::next_fake_ip_slot(state),
     )
     .map_err(StageFailure::error)?;
     let direct_document = super::core_select::sing_box_runtime_document(
@@ -1723,6 +1724,7 @@ async fn replace_sing_box_for_direct(
         secret,
         ports,
         Some(plan),
+        super::core_select::next_fake_ip_slot(state),
     )
     .map_err(StageFailure::error)?;
     let expected = expected_clash_api_rules(&direct_document).map_err(StageFailure::error)?;
@@ -2243,6 +2245,7 @@ mod tests {
             secret,
             ports,
             Some(&plan),
+            0,
         )
         .unwrap();
         assert!(sing_box.contains("process_path_regex"));

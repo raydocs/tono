@@ -647,6 +647,10 @@ pub struct TonoState {
     pub(crate) unarmed_probe_ticket: AtomicU64,
     /// Recent TCP proofs, keyed by `ip:port`. Not a tunnel and not a route.
     pub(crate) unarmed_proofs: parking_lot::Mutex<tono_core::unarmed_probe::ProofCache>,
+    /// #1258: the fake-IP slot the next sing-box document takes, and the file that carries
+    /// the count across a relaunch.
+    pub(crate) fake_ip_slot: parking_lot::Mutex<Option<usize>>,
+    pub(crate) fake_ip_slot_file: PathBuf,
 }
 
 impl TonoState {
@@ -680,6 +684,7 @@ impl TonoState {
         catalog_dir: PathBuf, audit: Arc<crate::tono::audit::Audit>, credentials: Arc<SessionCredentialStore>,
     ) -> Result<Self> {
         let transport = TonoTransport::new()?;
+        let fake_ip_slot_file = catalog_dir.join("fake-ip-slot");
         // The production client is built only here: every server answer on this session reaches
         // the offline gate (#582).
         let offline = Arc::new(crate::tono::offline_grant::OfflineGate::new(catalog_dir.clone(), credentials.clone()));
@@ -775,6 +780,8 @@ impl TonoState {
             next_release_id: AtomicU64::new(1),
             unarmed_probe_ticket: AtomicU64::new(1),
             unarmed_proofs: parking_lot::Mutex::new(tono_core::unarmed_probe::ProofCache::default()),
+            fake_ip_slot: parking_lot::Mutex::new(None),
+            fake_ip_slot_file,
         })
     }
 

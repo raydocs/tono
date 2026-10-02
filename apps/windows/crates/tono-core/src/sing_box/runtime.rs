@@ -18,9 +18,21 @@ use std::{
     net::Ipv4Addr,
 };
 
-/// Product sing-box fake-IP pool. It sits inside the Windows probe prefix
-/// 198.18.0.0/16 and outside the TUN /30 (198.18.0.0–198.18.0.3).
-pub const SING_BOX_FAKE_IPV4: &str = "198.18.16.0/20";
+/// sing-box fake-IP pool: the upper half of the 198.18.0.0/16 the Windows DNS proof accepts,
+/// clear of the TUN /30 (198.18.0.0–198.18.0.3). The template refuses plain-IP connections
+/// into it.
+pub const SING_BOX_FAKE_IPV4: &str = "198.18.128.0/17";
+
+/// The pool holds eight /20 slots, and one process allocates from one of them (#1258). Its
+/// fake-IP store is in memory only and hands addresses out in order from the start of its
+/// range, so a replacement on the same range maps a name an app still has cached to another
+/// name. On a different slot that address is a plain IP, which the template refuses. A slot
+/// is the size of the whole pool before the split, so a process wraps no sooner than it did.
+const SING_BOX_FAKE_IPV4_SLOTS: usize = 8;
+
+fn fake_ipv4_range(slot: usize) -> String {
+    format!("198.18.{}.0/20", 128 + 16 * (slot % SING_BOX_FAKE_IPV4_SLOTS))
+}
 
 /// All fields are required at the API boundary; there is no inferred policy.
 pub struct RuntimeInput<'a> {
@@ -35,6 +47,9 @@ pub struct RuntimeInput<'a> {
     pub home_process_names: &'a [String],
     pub home_process_path_regexes: &'a [String],
     pub direct_process_names: &'a [String],
+    /// Which slot of the fake-IP pool this document's process allocates from, modulo the
+    /// slot count. The caller passes the next one for every document it composes (#1258).
+    pub fake_ip_slot: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -278,6 +293,7 @@ pub fn build_runtime(input: RuntimeInput<'_>) -> Result<OwnedSingBoxRuntime, Sin
         "../../../../../../tooling/scripts/sing-box/runtime-template.json"
     ))
     .map_err(|_| UnsupportedPolicy)?;
+    runtime["dns"]["servers"][0]["inet4_range"] = json!(fake_ipv4_range(input.fake_ip_slot));
     runtime["inbounds"][0]["interface_name"] = json!(interface);
     runtime["inbounds"][0]["route_exclude_address"] = json!(exclusions);
     if ports.mixed_port != 0 {
@@ -535,6 +551,7 @@ mod tests {
             home_process_names: &[],
             home_process_path_regexes: &[],
             direct_process_names: &[],
+            fake_ip_slot: 0,
         }
     }
 
@@ -719,7 +736,7 @@ mod tests {
         let value: Value = serde_json::from_str(runtime.runtime_json()).unwrap();
         assert_eq!(value["outbounds"][3]["detour"], "Tono-Exit");
         assert_eq!(
-            value["route"]["rules"][3]["outbound"],
+            value["route"]["rules"][4]["outbound"],
             "Tono-Home-Residential"
         );
         assert_eq!(runtime.dial_endpoints().len(), 1);
@@ -828,10 +845,7 @@ mod tests {
         let routing = CatalogRouting::default();
         let runtime = build_runtime(input(&nodes, &routing)).unwrap();
         let value: Value = serde_json::from_str(runtime.runtime_json()).unwrap();
-        assert_eq!(
-            value["dns"]["servers"][0]["inet4_range"],
-            SING_BOX_FAKE_IPV4
-        );
+        assert_eq!(value["dns"]["servers"][0]["inet4_range"], "198.18.128.0/20");
         assert_eq!(value["inbounds"][0]["address"][0], "198.18.0.1/30");
         assert_eq!(value["inbounds"][0]["dns_address"][0], "198.18.0.2");
         // alpha.9 sing-tun (stack omitted) caps send at 2 MiB and receive at
@@ -839,12 +853,58 @@ mod tests {
         // `stack` would select the deprecated gVisor path.
         assert!(value["inbounds"][0].get("stack").is_none());
         assert!(value["inbounds"][0].get("tcp_fast_open").is_none());
-        assert!(probe_sees_fake([198, 18, 16, 0]));
-        assert!(probe_sees_fake([198, 18, 31, 255]));
+        assert!(probe_sees_fake([198, 18, 128, 0]));
+        assert!(probe_sees_fake([198, 18, 255, 255]));
         assert!(!sing_box_pool([198, 18, 0, 1]));
         assert!(!sing_box_pool([198, 18, 0, 2]));
         assert!(!sing_box_pool([198, 19, 0, 1]));
-        assert!(sing_box_pool([198, 18, 16, 1]));
+        assert!(sing_box_pool([198, 18, 128, 1]));
+    }
+
+    /// #1258: a replacement process starts with an empty fake-IP store and allocates from the
+    /// start of its range. On the previous process's range, a name an app still has cached
+    /// resolves to whichever name the new process hands that address first.
+    #[test]
+    fn a_replacement_document_leaves_the_previous_fake_ip_range() {
+        let nodes = nodes();
+        let routing = CatalogRouting::default();
+        let document = |slot| {
+            let mut request = input(&nodes, &routing);
+            request.fake_ip_slot = slot;
+            let runtime = build_runtime(request).unwrap();
+            serde_json::from_str::<Value>(runtime.runtime_json()).unwrap()
+        };
+        let bounds = |value: &Value| {
+            let range = value["dns"]["servers"][0]["inet4_range"].as_str().unwrap();
+            let (address, bits) = range.split_once('/').unwrap();
+            // A slot is as large as the range one process had before the pool was split:
+            // a smaller one wraps sooner and hands a cached address to another name.
+            assert_eq!(bits, "20");
+            let first = u32::from(address.parse::<Ipv4Addr>().unwrap());
+            (first, first + (1u32 << (32 - bits.parse::<u32>().unwrap())) - 1)
+        };
+        let replaced = document(0);
+        let (first, last) = bounds(&replaced);
+        let (next_first, next_last) = bounds(&document(1));
+        assert!(
+            last < next_first || next_last < first,
+            "the replacement allocates from the range the replaced process answered from"
+        );
+        for octets in [first, last, next_first, next_last].map(u32::to_be_bytes) {
+            assert!(probe_sees_fake(octets));
+        }
+        // Outside the new range the cached address is a plain IP to sing-box. It is refused
+        // before a home, DIRECT or exit rule can dial it, and so is one cached from a build
+        // that still used the old pool. `no_drop`: the refusal stays a reset however many
+        // connections retry at once.
+        assert_eq!(
+            replaced["route"]["rules"][3],
+            json!({
+                "ip_cidr": [SING_BOX_FAKE_IPV4, "198.18.16.0/20"],
+                "action": "reject",
+                "no_drop": true
+            })
+        );
     }
 
     #[test]
@@ -910,7 +970,7 @@ mod tests {
     }
 
     fn sing_box_pool(octets: [u8; 4]) -> bool {
-        octets[0] == 198 && octets[1] == 18 && (16..32).contains(&octets[2])
+        octets[0] == 198 && octets[1] == 18 && octets[2] >= 128
     }
 
     #[test]

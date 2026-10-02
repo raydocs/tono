@@ -2,7 +2,7 @@
   "log": {"level": "warn"},
   "dns": {
     "servers": [
-      {"type": "fakeip", "tag": "Tono-FakeIP", "inet4_range": "198.18.16.0/20"},
+      {"type": "fakeip", "tag": "Tono-FakeIP", "inet4_range": "198.18.128.0/20"},
       {"type": "https", "tag": "Tono-DoH", "server": "1.1.1.1", "server_port": 443, "path": "/dns-query", "tls": {"enabled": true, "server_name": "1.1.1.1", "alpn": ["h2"]}, "detour": "Tono-Exit"},
       {"type": "https", "tag": "Tono-DoH-Backup", "server": "8.8.8.8", "server_port": 443, "path": "/dns-query", "tls": {"enabled": true, "server_name": "dns.google", "alpn": ["h2"]}, "detour": "Tono-Exit"}
     ],
@@ -28,7 +28,8 @@
     "rules": [
       {"ip_version": 6, "action": "reject"},
       {"inbound": ["Tono-DNS"], "action": "hijack-dns"},
-      {"port": [53], "action": "hijack-dns"}
+      {"port": [53], "action": "hijack-dns"},
+      {"ip_cidr": ["198.18.128.0/17", "198.18.16.0/20"], "action": "reject", "no_drop": true}
     ],
     "final": "Tono-Exit"
   },
