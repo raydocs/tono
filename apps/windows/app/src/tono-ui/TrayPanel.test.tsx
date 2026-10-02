@@ -318,6 +318,31 @@ describe('TrayPanel backup channel', () => {
   })
 })
 
+describe('TrayPanel connect', () => {
+  it('shows no error when a newer transition supersedes the tray connect', async () => {
+    mocks.status = makeStatus({
+      uiState: 'notConnected',
+      protectionBlocked: false,
+    })
+    mocks.tonoConnectProgress.mockResolvedValue({
+      steps: [],
+      totalElapsedMs: 0,
+      failedStage: null,
+      error: null,
+      retryAttempt: 0,
+      nextRetryAtMs: null,
+    })
+    mocks.tonoConnect.mockRejectedValue(
+      'connection superseded by a newer transition',
+    )
+    render(<TrayPanel />, { wrapper: freshSWR })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Connect' }))
+    await waitFor(() => expect(mocks.mutateTonoStatus).toHaveBeenCalled())
+    expect(screen.queryByRole('alert')).toBeNull()
+  })
+})
+
 describe('TrayPanel traffic rates', () => {
   it('hides the /s rates once the traffic feed is no longer live', () => {
     mocks.status = makeStatus({ uiState: 'connected' })
