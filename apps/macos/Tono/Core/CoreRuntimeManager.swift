@@ -10,14 +10,63 @@ private actor RuntimeConfigWriter {
         overlay: ConfigPipeline.OverlayConfig,
         customNodes: [ProxyNode],
         directPolicy: ConfigPipeline.ManagedDirectRuntimePolicy?,
-        outputPath: URL
+        outputPath: URL,
+        fakeIPRotation: SingBoxFakeIPRotation
     ) throws -> String {
-        let runtime = try ConfigPipeline.buildSingBoxRuntime(
-            overlay: overlay,
-            nodes: customNodes,
-            directPlan: directPolicy
-        )
-        return try ConfigPipeline.secureWrite(String(decoding: runtime.runtimeJSON, as: UTF8.self), to: outputPath)
+        let document = try fakeIPRotation.document { slot in
+            try ConfigPipeline.buildSingBoxRuntime(
+                overlay: overlay,
+                nodes: customNodes,
+                directPlan: directPolicy,
+                fakeIPSlot: slot
+            ).runtimeJSON
+        }
+        return try ConfigPipeline.secureWrite(String(decoding: document, as: UTF8.self), to: outputPath)
+    }
+}
+
+// MARK: - Fake-IP rotation
+
+/// Which quarter of the fake-IP pool the next runtime document takes (#1258).
+///
+/// The Core keeps its fake-IP table in memory and hands addresses out in order
+/// from the start of its range. A replacement process on the same range maps
+/// an address an app still has cached to whichever name it resolves first.
+/// On another quarter that address is a plain IP, and the document rejects
+/// the pool.
+nonisolated final class SingBoxFakeIPRotation: @unchecked Sendable {
+    private let lock = NSLock()
+    private var slot: Int
+    private var written: Data?
+
+    /// A relaunched app cannot read which quarter a Core it adopts is using,
+    /// so it starts anywhere.
+    init(slot: Int = Int.random(in: 0..<ConfigPipeline.singBoxFakeIPRanges.count)) {
+        self.slot = slot
+    }
+
+    /// `render` returns the document for a slot. The config last written keeps
+    /// its bytes: the reload path skips a Core restart on an equal digest. Any
+    /// other document replaces the process and takes the next quarter.
+    func document(_ render: (Int) throws -> Data) rethrows -> Data {
+        lock.lock()
+        defer { lock.unlock() }
+        var document = try render(slot)
+        if let written, written != document {
+            slot = (slot + 1) % ConfigPipeline.singBoxFakeIPRanges.count
+            document = try render(slot)
+        }
+        written = document
+        return document
+    }
+
+    /// The process is gone. The next document starts a new one, even with the
+    /// same config.
+    func processStopped() {
+        lock.lock()
+        defer { lock.unlock() }
+        written = nil
+        slot = (slot + 1) % ConfigPipeline.singBoxFakeIPRanges.count
     }
 }
 
@@ -61,6 +110,7 @@ final class CoreRuntimeManager {
     var logOutput: [String] = []
     private(set) var runtimeConfigSHA256: String?
     private let configWriter = RuntimeConfigWriter()
+    private let fakeIPRotation = SingBoxFakeIPRotation()
 
     /// Config directory for the owned sing-box runtime.
     var configDirectory: URL {
@@ -95,7 +145,8 @@ final class CoreRuntimeManager {
             overlay: overlay,
             customNodes: customNodes,
             directPolicy: directPolicy,
-            outputPath: configFilePath
+            outputPath: configFilePath,
+            fakeIPRotation: fakeIPRotation
         )
         runtimeConfigSHA256 = digest
         return digest
@@ -190,6 +241,7 @@ final class CoreRuntimeManager {
             stopped = !isRunning
         }
         Self.flushSystemDNSCacheBestEffort()
+        fakeIPRotation.processStopped()
         return stopped
     }
 
@@ -208,6 +260,7 @@ final class CoreRuntimeManager {
             stopped = !isRunning
         }
         Self.flushSystemDNSCacheBestEffort()
+        fakeIPRotation.processStopped()
         return stopped
     }
 

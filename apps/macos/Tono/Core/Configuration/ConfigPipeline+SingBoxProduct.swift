@@ -35,11 +35,17 @@ nonisolated extension ConfigPipeline {
         return nil
     }
 
+    /// Product fake-IP pool, and the quarters one Core process allocates from.
+    /// `fakeIPSlot` picks the quarter; `SingBoxFakeIPRotation` owns the order.
+    static let singBoxFakeIPPool = "198.18.16.0/20"
+    static let singBoxFakeIPRanges = ["198.18.16.0/22", "198.18.20.0/22", "198.18.24.0/22", "198.18.28.0/22"]
+
     static func buildSingBoxRuntime(
         overlay: OverlayConfig,
         nodes inputNodes: [ProxyNode],
         directPlan: ManagedDirectRuntimePolicy?,
-        requiredCapabilities: [String] = []
+        requiredCapabilities: [String] = [],
+        fakeIPSlot: Int = 0
     ) throws -> OwnedSingBoxRuntime {
         let known: Set<String> = ["reality-tcp", "hy2", "direct", "home", "dns-proxied", "tun", "clash-api"]
         guard Set(requiredCapabilities).isSubset(of: known) else { throw SingBoxError.unsupportedPolicy }

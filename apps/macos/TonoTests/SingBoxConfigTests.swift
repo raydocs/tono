@@ -498,6 +498,41 @@ final class SingBoxConfigTests: XCTestCase {
         XCTAssertLessThan(assistant, web)
     }
 
+    /// #1258: a replacement Core starts with an empty fake-IP table and
+    /// allocates from the start of its range. On the replaced process's range,
+    /// a name an app still has cached resolves to another name.
+    func testAReplacementDocumentLeavesThePreviousFakeIPRange() throws {
+        let values = try nodes()
+        var overlay = ConfigPipeline.OverlayConfig(mixedPort: 29190,
+            externalController: "127.0.0.1:29191", secret: secret, tunEnabled: true,
+            selectedNodeName: "Fixture Beta")
+        let rotation = SingBoxFakeIPRotation(slot: 0)
+        func write() throws -> [String: Any] {
+            let data = try rotation.document { slot in
+                try ConfigPipeline.buildSingBoxRuntime(overlay: overlay, nodes: values,
+                                                       directPlan: nil, fakeIPSlot: slot).runtimeJSON
+            }
+            return try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        }
+        func fakeRange(_ json: [String: Any]) throws -> String {
+            let servers = try XCTUnwrap((json["dns"] as? [String: Any])?["servers"] as? [[String: Any]])
+            return try XCTUnwrap(servers.first { $0["type"] as? String == "fakeip" }?["inet4_range"] as? String)
+        }
+        let running = try fakeRange(write())
+        // The same config again is the same bytes. The reload path compares
+        // digests and skips the Core restart.
+        XCTAssertEqual(try fakeRange(write()), running)
+        overlay.selectedNodeName = "Fixture Alpha"
+        let replacement = try write()
+        XCTAssertNotEqual(try fakeRange(replacement), running)
+        XCTAssertTrue(ConfigPipeline.singBoxFakeIPRanges.contains(try fakeRange(replacement)))
+        // Outside the new range the cached address is a plain IP to sing-box.
+        // It is refused before a home, DIRECT or exit rule can dial it.
+        let rules = try XCTUnwrap((replacement["route"] as? [String: Any])?["rules"] as? [[String: Any]])
+        XCTAssertEqual(rules[2] as NSDictionary,
+                       ["ip_cidr": [ConfigPipeline.singBoxFakeIPPool], "action": "reject"] as NSDictionary)
+    }
+
     func testProductRuntimeRequiresChromeAndSequentialDoH() throws {
         var values = try nodes()
         values[0].clientFingerprint = "firefox"
