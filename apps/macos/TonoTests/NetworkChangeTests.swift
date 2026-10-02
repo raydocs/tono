@@ -118,4 +118,40 @@ final class NetworkChangeTests: XCTestCase {
         app.connectionCoordinator.cancelReconnectTasks()
         await app.connectionCoordinator.disconnectSequence?.value
     }
+
+    /// After an automatic release the unarmed loop backs off to a two-minute
+    /// wait. A network change is what ends most of those outages, so it
+    /// restarts the loop at its first delay instead of leaving the wait to run.
+    func testNetworkChangeRestartsAWaitingUnarmedReconnect() async {
+        let app = AppState()
+        let node = Fixture.realityNode()
+        app.proxyRegions = [ProxyRegion(id: AppState.managedCatalogRegionID, name: "TONO CLOUD", nodes: [node])]
+        app.applyProxySelection(node.name)
+        let savedArmed = KillSwitchService.isArmed
+        let savedUpdateBlock = RuntimeCleanup.nativeUpdateBlocksConnect
+        let savedUpdatePending = RuntimeCleanup.nativeUpdatePending
+        KillSwitchService.isArmed = false
+        RuntimeCleanup.nativeUpdateBlocksConnect = false
+        RuntimeCleanup.nativeUpdatePending = false
+        let proofEntered = expectation(description: "proof after the network change")
+        app.unarmedTcpProof = { _ in
+            proofEntered.fulfill()
+            app.connectionCoordinator.unarmedReconnectTask?.cancel()
+            return false
+        }
+        defer {
+            app.connectionCoordinator.unarmedReconnectTask?.cancel()
+            KillSwitchService.isArmed = savedArmed
+            RuntimeCleanup.nativeUpdateBlocksConnect = savedUpdateBlock
+            RuntimeCleanup.nativeUpdatePending = savedUpdatePending
+        }
+        // The loop is parked in its longest wait.
+        app.unarmedReconnectAttempt = 5
+        app.scheduleUnarmedReconnect(sleep: { _ in try await Task.sleep(for: .seconds(600)) })
+
+        app.handleSystemNetworkChange()
+
+        await fulfillment(of: [proofEntered], timeout: 10)
+        XCTAssertEqual(app.unarmedReconnectAttempt, 0)
+    }
 }
