@@ -43,8 +43,9 @@ nonisolated final class SingBoxFakeIPRotation: @unchecked Sendable {
     private let lock = NSLock()
     private let defaults: UserDefaults?
     private var next: Int
-    /// Digest of the last document rendered on each slot.
-    private var rendered: [Int: String] = [:]
+    /// The slot each remembered document was rendered on, newest last.
+    private var rendered: [(digest: String, slot: Int)] = []
+    private static let remembered = 64
 
     /// The count is kept in `defaults`: a relaunched app adopts the Core the
     /// last one started and carries on after its slot. With nothing stored it
@@ -55,27 +56,47 @@ nonisolated final class SingBoxFakeIPRotation: @unchecked Sendable {
         next = stored ?? Int.random(in: 0..<ConfigPipeline.singBoxFakeIPSlots)
     }
 
-    /// `render` returns the document for a slot. Every document takes the next
-    /// slot, because every path that writes one restarts the Core. The one
-    /// exception is the reload that skips the restart on an equal digest: it
-    /// names the installed document, and a config that still renders to those
-    /// bytes on that document's slot keeps them.
+    /// `render` returns the document for a slot. A document takes the next
+    /// slot that is not the installed document's, because every path that
+    /// writes one restarts the Core; the count moves once it has rendered. The
+    /// one exception is the reload that skips the restart on an equal digest:
+    /// a config that still renders to the installed bytes on the installed
+    /// document's slot keeps them.
     func document(
         installed installedDigest: String? = nil, keeping: Bool = false, _ render: (Int) throws -> Data
     ) rethrows -> Data {
         lock.lock()
         defer { lock.unlock() }
-        if keeping, let installedDigest,
-           let slot = rendered.first(where: { $0.value == installedDigest })?.key {
-            let document = try render(slot)
+        var installedSlot: Int?
+        if let index = rendered.lastIndex(where: { $0.digest == installedDigest }) {
+            // Named again, so it outlives the documents that were not installed.
+            let installed = rendered.remove(at: index)
+            rendered.append(installed)
+            installedSlot = installed.slot
+        }
+        if keeping, let installedSlot {
+            let document = try render(installedSlot)
             if Self.digest(document) == installedDigest { return document }
         }
-        let slot = next
-        next = slot == Int.max ? 0 : slot + 1
-        defaults?.set(next, forKey: Self.defaultsKey)
+        let slot = Self.slot(next, avoiding: installedSlot)
         let document = try render(slot)
-        rendered[slot % ConfigPipeline.singBoxFakeIPSlots] = Self.digest(document)
+        // Stored already past the installed slot: a relaunched app does not
+        // remember which one that was.
+        next = Self.slot(Self.following(slot), avoiding: installedSlot)
+        defaults?.set(next, forKey: Self.defaultsKey)
+        rendered.append((Self.digest(document), slot))
+        if rendered.count > Self.remembered { rendered.removeFirst() }
         return document
+    }
+
+    private static func slot(_ slot: Int, avoiding installed: Int?) -> Int {
+        guard let installed else { return slot }
+        let slots = ConfigPipeline.singBoxFakeIPSlots
+        return slot % slots == installed % slots ? following(slot) : slot
+    }
+
+    private static func following(_ slot: Int) -> Int {
+        slot == Int.max ? 0 : slot + 1
     }
 
     private static func digest(_ document: Data) -> String {
