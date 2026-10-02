@@ -1137,6 +1137,17 @@ mod tests {
         assert!(sustained >= Duration::from_secs(2));
     }
 
+    /// An exit that dies behind a live tunnel leaves no local evidence, so only the periodic probe
+    /// finds it. The wait for that probe plus the confirming probes is how long the UI says
+    /// Connected while nothing loads; keep it near a minute (macOS probes every ten seconds).
+    #[test]
+    fn a_silently_dead_exit_is_confirmed_within_about_a_minute() {
+        let worst_case = super::monitor::EXIT_PROBE_INTERVAL
+            + NETWORK_MONITOR_INTERVAL
+            + TUN_DATA_PLANE_TIMEOUT * HEALTH_FAILURE_THRESHOLD;
+        assert!(worst_case <= Duration::from_secs(70), "{worst_case:?}");
+    }
+
     // ---- H8: one failed observation is one failure ----
 
     #[test]
@@ -1169,7 +1180,7 @@ mod tests {
     /// updater replacing the runtime — invalidate Connected on the Service leg alone while
     /// mihomo and WFP are untouched, so the TUN proof succeeds and nothing is torn down. The
     /// call used to be terminal for the caller regardless, which ended the connected-lifetime
-    /// monitor for the rest of the session: no more kill-switch, protected-DNS or 120 s exit
+    /// monitor for the rest of the session: no more kill-switch, protected-DNS or periodic exit
     /// probing, so a later dead exit would have shown Connected forever.
     #[test]
     fn a_recovered_in_place_network_change_keeps_the_monitor_alive() {
