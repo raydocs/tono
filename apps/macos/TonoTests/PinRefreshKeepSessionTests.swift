@@ -436,6 +436,8 @@ final class PinRefreshKeepSessionTests: XCTestCase {
     /// of the installed document described the Core that may be gone, and an
     /// equal full reload skipped as unchanged.
     func testPinsRefreshWithALostSyncReplyForgetsTheInstalledDocument() async throws {
+        let savedConsumer = RuntimeCleanup.launchProtectionConsumer
+        let savedSlot = AppProfile.defaults.object(forKey: SingBoxFakeIPRotation.defaultsKey)
         let app = AppState()
         let node = Fixture.realityNode(name: "Los Angeles · Canyon")
         app.proxyRegions = [ProxyRegion(id: "custom", name: "Custom", nodes: [node])]
@@ -459,6 +461,8 @@ final class PinRefreshKeepSessionTests: XCTestCase {
         KillSwitchService.armIPC.prepare = { _ in }
         KillSwitchService.armIPC.deliver = { _ in (true, true, true, false, false, 0) }
         defer {
+            RuntimeCleanup.launchProtectionConsumer = savedConsumer
+            AppProfile.defaults.set(savedSlot, forKey: SingBoxFakeIPRotation.defaultsKey)
             KillSwitchService.armIPC = savedIPC
             KillSwitchService.isArmed = savedArmed
             if let savedConfig { try? savedConfig.write(to: configFile) }
