@@ -548,7 +548,8 @@ extension AppState {
                 let digest = try await coreRuntime.writeRuntimeConfig(
                     overlay: overlay,
                     customNodes: runtimeNodes,
-                    directPolicy: effectiveDirectPolicy
+                    directPolicy: effectiveDirectPolicy,
+                    keeping: pinsOnlyRefresh ? nil : installedDigest
                 )
                 try Task.checkCancellation()
                 guard let api else {

@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import Observation
 
@@ -11,9 +12,10 @@ private actor RuntimeConfigWriter {
         customNodes: [ProxyNode],
         directPolicy: ConfigPipeline.ManagedDirectRuntimePolicy?,
         outputPath: URL,
-        fakeIPRotation: SingBoxFakeIPRotation
+        fakeIPRotation: SingBoxFakeIPRotation,
+        installedDigest: String?
     ) throws -> String {
-        let document = try fakeIPRotation.document { slot in
+        let document = try fakeIPRotation.document(keeping: installedDigest) { slot in
             try ConfigPipeline.buildSingBoxRuntime(
                 overlay: overlay,
                 nodes: customNodes,
@@ -27,48 +29,54 @@ private actor RuntimeConfigWriter {
 
 // MARK: - Fake-IP rotation
 
-/// Which quarter of the fake-IP pool the next runtime document takes (#1258).
+/// Which slot of the fake-IP pool the next runtime document takes (#1258).
 ///
 /// The Core keeps its fake-IP table in memory and hands addresses out in order
 /// from the start of its range. A replacement process on the same range maps
 /// an address an app still has cached to whichever name it resolves first.
-/// On another quarter that address is a plain IP, and the document rejects
-/// the pool.
+/// On another slot that address is a plain IP, and the document rejects the
+/// pool.
 nonisolated final class SingBoxFakeIPRotation: @unchecked Sendable {
-    private let lock = NSLock()
-    private var slot: Int
-    private var written: Data?
-
     static let defaultsKey = "singBoxFakeIPSlot"
 
-    /// A relaunched app cannot read which quarter a Core it adopts is using,
-    /// so it starts anywhere.
+    private let lock = NSLock()
+    private let defaults: UserDefaults?
+    private var next: Int
+    /// Digest of the last document rendered on each slot.
+    private var rendered: [Int: String] = [:]
+
+    /// The count is kept in `defaults`: a relaunched app adopts the Core the
+    /// last one started and carries on after its slot. With nothing stored it
+    /// starts anywhere.
     init(defaults: UserDefaults? = AppProfile.defaults) {
-        slot = Int.random(in: 0..<ConfigPipeline.singBoxFakeIPRanges.count)
+        self.defaults = defaults
+        let stored = (defaults?.object(forKey: Self.defaultsKey) as? Int).flatMap { $0 >= 0 ? $0 : nil }
+        next = stored ?? Int.random(in: 0..<ConfigPipeline.singBoxFakeIPSlots)
     }
 
-    /// `render` returns the document for a slot. The config last written keeps
-    /// its bytes: the reload path skips a Core restart on an equal digest. Any
-    /// other document replaces the process and takes the next quarter.
+    /// `render` returns the document for a slot. Every document takes the next
+    /// slot, because every path that writes one restarts the Core. The one
+    /// exception is the reload that skips the restart on an equal digest: it
+    /// names the installed document, and a config that still renders to those
+    /// bytes on that document's slot keeps them.
     func document(keeping installedDigest: String? = nil, _ render: (Int) throws -> Data) rethrows -> Data {
         lock.lock()
         defer { lock.unlock() }
-        var document = try render(slot)
-        if let written, written != document {
-            slot = (slot + 1) % ConfigPipeline.singBoxFakeIPRanges.count
-            document = try render(slot)
+        if let installedDigest,
+           let slot = rendered.first(where: { $0.value == installedDigest })?.key {
+            let document = try render(slot)
+            if Self.digest(document) == installedDigest { return document }
         }
-        written = document
+        let slot = next
+        next = slot == Int.max ? 0 : slot + 1
+        defaults?.set(next, forKey: Self.defaultsKey)
+        let document = try render(slot)
+        rendered[slot % ConfigPipeline.singBoxFakeIPSlots] = Self.digest(document)
         return document
     }
 
-    /// The process is gone. The next document starts a new one, even with the
-    /// same config.
-    func processStopped() {
-        lock.lock()
-        defer { lock.unlock() }
-        written = nil
-        slot = (slot + 1) % ConfigPipeline.singBoxFakeIPRanges.count
+    private static func digest(_ document: Data) -> String {
+        SHA256.hash(data: document).map { String(format: "%02x", $0) }.joined()
     }
 }
 
@@ -141,14 +149,16 @@ final class CoreRuntimeManager {
     func writeRuntimeConfig(
         overlay: ConfigPipeline.OverlayConfig,
         customNodes: [ProxyNode] = [],
-        directPolicy: ConfigPipeline.ManagedDirectRuntimePolicy? = nil
+        directPolicy: ConfigPipeline.ManagedDirectRuntimePolicy? = nil,
+        keeping installedDigest: String? = nil
     ) async throws -> String {
         let digest = try await configWriter.write(
             overlay: overlay,
             customNodes: customNodes,
             directPolicy: directPolicy,
             outputPath: configFilePath,
-            fakeIPRotation: fakeIPRotation
+            fakeIPRotation: fakeIPRotation,
+            installedDigest: installedDigest
         )
         runtimeConfigSHA256 = digest
         return digest
@@ -243,7 +253,6 @@ final class CoreRuntimeManager {
             stopped = !isRunning
         }
         Self.flushSystemDNSCacheBestEffort()
-        fakeIPRotation.processStopped()
         return stopped
     }
 
@@ -262,7 +271,6 @@ final class CoreRuntimeManager {
             stopped = !isRunning
         }
         Self.flushSystemDNSCacheBestEffort()
-        fakeIPRotation.processStopped()
         return stopped
     }
 

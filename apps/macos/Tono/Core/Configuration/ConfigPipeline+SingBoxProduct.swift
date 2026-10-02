@@ -35,10 +35,15 @@ nonisolated extension ConfigPipeline {
         return nil
     }
 
-    /// Product fake-IP pool, and the quarters one Core process allocates from.
-    /// `fakeIPSlot` picks the quarter; `SingBoxFakeIPRotation` owns the order.
-    static let singBoxFakeIPPool = "198.18.16.0/20"
-    static let singBoxFakeIPRanges = ["198.18.16.0/22", "198.18.20.0/22", "198.18.24.0/22", "198.18.28.0/22"]
+    /// Product fake-IP pool, in eight /20 slots. One Core process allocates
+    /// from one of them: `fakeIPSlot` picks it, `SingBoxFakeIPRotation` owns
+    /// the order. A slot is the size of the whole pool before the split, so a
+    /// process wraps no sooner than it did.
+    static let singBoxFakeIPPool = "198.18.128.0/17"
+    static let singBoxFakeIPSlots = 8
+    /// The pool before #1258. An address an app cached from a build that used
+    /// it is refused like one from another slot.
+    static let singBoxFormerFakeIPPool = "198.18.16.0/20"
 
     static func buildSingBoxRuntime(
         overlay: OverlayConfig,
@@ -168,7 +173,7 @@ nonisolated extension ConfigPipeline {
         }
         var dnsServers: [[String: Any]] = [
             ["type": "fakeip", "tag": "Tono-FakeIP",
-             "inet4_range": singBoxFakeIPRanges[fakeIPSlot % singBoxFakeIPRanges.count]],
+             "inet4_range": "198.18.\(128 + 16 * (fakeIPSlot % singBoxFakeIPSlots)).0/20"],
             ["type": "https", "tag": "Tono-DoH", "server": "1.1.1.1", "server_port": 443,
              "path": "/dns-query", "tls": ["enabled": true, "server_name": "1.1.1.1", "alpn": ["h2"]],
              "detour": exitGroupName],
@@ -192,10 +197,11 @@ nonisolated extension ConfigPipeline {
             ["inbound": ["Tono-DNS"], "action": "hijack-dns"],
             ["port": [53], "action": "hijack-dns"],
             // #1258: an address cached from a replaced Core is outside this
-            // document's fake-IP quarter, so it arrives as a plain IP. Refuse it
+            // document's fake-IP slot, so it arrives as a plain IP. Refuse it
             // before a home, DIRECT or exit rule dials it. A destination the
             // fake-IP table turned into a name does not match ip_cidr.
-            ["ip_cidr": [singBoxFakeIPPool], "action": "reject"],
+            // `no_drop`: sing-box turns a reject into a drop after 50 in 30 s.
+            ["ip_cidr": [singBoxFakeIPPool, singBoxFormerFakeIPPool], "action": "reject", "no_drop": true],
         ]
         let assistant = home == nil ? exitGroupName : claudeHomeGroupName
         // Always, including when no residential hop is bound. Later reviewed-bundle
