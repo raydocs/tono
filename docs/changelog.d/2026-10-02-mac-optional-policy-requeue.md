@@ -10,3 +10,8 @@
 - Verification: no local `xcodebuild` on the MacBook; hosted macOS CI runs the XCTests.
 - Candidate/publication: source only; no new candidate.
 - Limits: needs-hardware. The retries are immediate, so a failure that lasts longer than three applies (a full disk, a helper that stays busy) still leaves the old plan in force until the next document or Connect. The survivor switch that follows a removal arms without the removed exit for its own duration, as before. A lost `/core/sync` reply is `MAC-SYNC-REPLY-LOST-DIGEST`, not this change.
+
+### 2026-10-02 续记：已合 main
+- 来源合入：#1338，merge commit `3c792d20`，PR 头 `ee5aa70d`。该头的 `ci-gate` 全绿：https://github.com/raydocs/tono/actions/runs/37022837515 。
+- 独立评审：Codex `gpt-6.1-sol`（high），第一轮两个 minor 已修，第二轮无发现；记录在 https://github.com/raydocs/tono/pull/1338#issuecomment-5955221500 。
+- 候选/发布：仅源码合入 main。无新安装包，无部署，无客户发布。没有实机验证。

@@ -10,3 +10,8 @@
   `an_exit_request_refused_by_a_quit_in_flight_does_not_raise_the_exiting_flag` 先随保持旧顺序的重构
   单独推送为 `c4c54fb6`（红），结果记在 PR。
 - 验证：仅托管 CI；未在 Windows 实机上复现该时序。仅源码，无新候选。
+
+### 2026-10-02 续记：已合 main
+- 来源合入：#1340，merge commit `ecdc3f96`，PR 头 `c10168c4`。该头的 `ci-gate` 全绿：https://github.com/raydocs/tono/actions/runs/37024372067 。
+- 独立评审：Codex `gpt-6.1-sol`（high），第一轮无 major、两个 minor（一个已修，一个记在 finding），第二轮无发现；记录在 https://github.com/raydocs/tono/pull/1340#issuecomment-5955439545 。
+- 候选/发布：仅源码合入 main。无新安装包，无部署，无客户发布。没有实机验证。

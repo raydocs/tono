@@ -9,3 +9,8 @@
 - 工程与测试修正：`CatalogRemovedExitTests` 两条回归（有幸存出口继续重试；无幸存出口恢复网络）
   先单独推送为 `8ab893b8`（红），结果记在 PR。
 - 验证：仅托管 CI；未在实机上触发目录移除。仅源码，无新候选。
+
+### 2026-10-02 续记：已合 main
+- 来源合入：#1341，merge commit `373e7316`，PR 头 `931a7c5c`。该头的 `ci-gate` 全绿：https://github.com/raydocs/tono/actions/runs/37025595739 。
+- 独立评审：Codex `gpt-6.1-sol`（high），第一轮一个 major 和一个 minor 已修，第二轮无 major，剩一个 minor 记在 PR 限制里；记录在 https://github.com/raydocs/tono/pull/1341#issuecomment-5955439163 。
+- 候选/发布：仅源码合入 main。无新安装包，无部署，无客户发布。没有实机验证。

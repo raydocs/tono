@@ -9,3 +9,8 @@
 - 工程与测试修正：`NetworkChangeTests.testBrokenDNSOnTheSameUplinkDoesNotSayTheNetworkChanged`
   先单独推送为 `b17eee4b`（红），结果记在 PR。
 - 验证：仅托管 CI；未在实机上触发 DNS 被改动的场景。仅源码，无新候选。
+
+### 2026-10-02 续记：已合 main
+- 来源合入：#1339，merge commit `5b2efd51`，PR 头 `65976809`。该头的 `ci-gate` 全绿：https://github.com/raydocs/tono/actions/runs/37023726142 。
+- 普通风险改动：主会话核对差异并在 hosted CI 上跑了对应测试，没有独立评审。
+- 候选/发布：仅源码合入 main。无新安装包，无部署，无客户发布。没有实机验证。
