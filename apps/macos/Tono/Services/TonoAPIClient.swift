@@ -320,6 +320,14 @@ actor TonoAPIClient {
         )
     }
 
+    /// Repost a saved telemetry body on the pinned client. `path` is one of the
+    /// two telemetry routes; this does not post anywhere else.
+    func uploadSavedTelemetry(path: String, body: Data) async throws {
+        // Empty struct: JSONDecoder ignores keys that are not declared.
+        guard path == "telemetry/failures" || path == "telemetry/diagnostics" else { return }
+        let _: TonoEmptyObject = try await authorizedRequest(path, method: "POST", bodyData: body)
+    }
+
     func reportConnectFailure(
         _ report: TonoConnectFailureReport,
         requestIsCurrent: (@Sendable () -> Bool)? = nil
@@ -1183,3 +1191,5 @@ actor TonoAPIClient {
         return value
     }
 }
+
+private struct TonoEmptyObject: Decodable {}

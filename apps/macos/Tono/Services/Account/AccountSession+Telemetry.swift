@@ -111,6 +111,10 @@ extension AccountSession {
     func periodicTelemetrySettingChanged() {
         routeTelemetryCursor.reset(to: routeSplitConsumer())
         _ = ConnectionTelemetryBuffer.shared.drain()
+        // Turning the switch off also drops what was waiting to be sent.
+        if !Self.isPeriodicTelemetryEnabled {
+            AppProfile.defaults.removeObject(forKey: TelemetryOutbox.key)
+        }
         updatePeriodicTelemetry()
     }
 
@@ -151,6 +155,7 @@ extension AccountSession {
         // The switch can be turned off while this task is parked on its sleep,
         // and the cancellation only lands at the next suspension point.
         guard periodicTelemetryConsent() else { return }
+        await TelemetryOutbox.drain(api: api)
         // A sleep cancels the timer and a wake starts a fresh one, so the task
         // being new is not evidence that a window is due. Hold the cadence
         // across restarts rather than spending the hourly budget on them.
@@ -313,8 +318,12 @@ extension AccountSession {
                 AccountSession.failureReportStillAllowed(builtAs: scope, internalBuild: internalBuild)
             })
         } catch {
-            // Best effort: the window still carries the event, and a report
-            // that did not land must never touch protection or the sign-in.
+            // A timeout may already have been delivered. Anything else that
+            // never left the machine waits for the next signed-in pass.
+            if Self.shouldQueueTelemetry(error),
+               let body = try? TonoCoding.encoder().encode(report) {
+                TelemetryOutbox.enqueue(kind: "failure", body: body)
+            }
         }
         scheduleEarlyTelemetryWindow()
     }
@@ -606,5 +615,127 @@ extension AccountSession {
         api.offlineGate.leaveOffline()
         api.offlineGate.withdrawAcceptance()
         offlineVerifiedAt = nil
+    }
+
+    /// A timeout may have reached the server. Other URL failures have not.
+    nonisolated static func shouldQueueTelemetry(_ error: Error) -> Bool {
+        guard let urlError = error as? URLError else { return false }
+        return urlError.code != .timedOut
+    }
+}
+
+/// Capped queue for a privacy-safe post that did not leave the machine.
+/// The send still uses the pinned control-plane client.
+nonisolated enum TelemetryOutbox {
+    static let key = "telemetryOutbox.v1"
+    static let maxItems = 32
+
+    static func enqueue(kind: String, body: Data, defaults: UserDefaults = AppProfile.defaults) {
+        var items = defaults.array(forKey: key) as? [[String: String]] ?? []
+        items.append(["kind": kind, "body": body.base64EncodedString()])
+        if items.count > maxItems {
+            items.removeFirst(items.count - maxItems)
+        }
+        defaults.set(items, forKey: key)
+    }
+
+    static func pending(defaults: UserDefaults = AppProfile.defaults) -> [[String: String]] {
+        defaults.array(forKey: key) as? [[String: String]] ?? []
+    }
+
+    @MainActor
+    static func drain(api: TonoAPIClient) async {
+        let items = pending()
+        guard !items.isEmpty else { return }
+        var kept: [[String: String]] = []
+        for item in items {
+            guard let kind = item["kind"], let encoded = item["body"],
+                  let body = Data(base64Encoded: encoded) else { continue }
+            let path = (kind == "diagnostics" || kind == "p0")
+                ? "telemetry/diagnostics" : "telemetry/failures"
+            do {
+                try await api.uploadSavedTelemetry(path: path, body: body)
+            } catch {
+                if AccountSession.shouldQueueTelemetry(error) {
+                    kept.append(item)
+                }
+            }
+        }
+        // An opt-out during this pass already emptied the queue. Reports
+        // queued while it was sending stay queued.
+        guard AccountSession.isPeriodicTelemetryEnabled else { return }
+        AppProfile.defaults.set(kept + pending().dropFirst(items.count), forKey: key)
+    }
+}
+
+/// Events that leave the user without a working network.
+///
+/// Queued on disk and posted to `telemetry/diagnostics` on a later signed-in
+/// pass. Nothing is queued or posted while the snapshot switch is off
+/// (decision 050). The control plane treats
+/// these codes as severity `p0` and alerts on the first event of the cluster.
+/// The closed set matches `P0_NETWORK_LOSS_CODES` in `failure-clusters.ts`.
+nonisolated enum NetworkLossReport {
+    static let networkLoss = "TONO_NETWORK_LOSS"
+    static let failOpen = "TONO_FAIL_OPEN"
+    static let watchdogRestore = "TONO_WATCHDOG_RESTORE"
+    static let killSwitchStuck = "TONO_KILL_SWITCH_STUCK"
+    static let restoreNetwork = "TONO_RESTORE_NETWORK"
+    static let crashWhileProtected = "TONO_CRASH_WHILE_PROTECTED"
+
+    static func isP0(_ code: String) -> Bool {
+        switch code {
+        case networkLoss, failOpen, watchdogRestore, killSwitchStuck, restoreNetwork, crashWhileProtected:
+            return true
+        default:
+            return false
+        }
+    }
+
+    static func eventKind(for code: String) -> String {
+        switch code {
+        case crashWhileProtected: return "appCrash"
+        case killSwitchStuck: return "killSwitchFail"
+        default: return "connectFail"
+        }
+    }
+
+    static func enqueue(code: String, node: String, defaults: UserDefaults = AppProfile.defaults) {
+        guard isP0(code), AccountSession.isPeriodicTelemetryEnabled else { return }
+        let version = (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String)
+            .map { String($0.prefix(40)) }
+            .flatMap { $0.isEmpty ? nil : $0 } ?? "unknown"
+        let osVersion = String(DiagnosticsLogUploader.compactOperatingSystemVersion().prefix(80))
+        let body: [String: Any] = [
+            "schemaVersion": 1,
+            "aiServicesConsent": false,
+            "client": [
+                "appVersion": version,
+                "platform": "macos",
+                "osVersion": osVersion.isEmpty ? "unknown" : osVersion,
+                "channel": AccountSession.isInternalBuild() ? "beta" : "release",
+            ],
+            "events": [[
+                "ts": Int(Date().timeIntervalSince1970 * 1_000),
+                "kind": eventKind(for: code),
+                "stage": "protection",
+                "code": code,
+                "node": sanitizedNode(node),
+            ]],
+        ]
+        guard JSONSerialization.isValidJSONObject(body),
+              let data = try? JSONSerialization.data(withJSONObject: body) else { return }
+        TelemetryOutbox.enqueue(kind: "p0", body: data, defaults: defaults)
+    }
+
+    /// Node names ride the cluster key. Anything that is not a catalog label
+    /// (a URL, an email) is dropped rather than sent.
+    static func sanitizedNode(_ raw: String) -> String {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "unselected" }
+        let clipped = String(trimmed.prefix(80))
+        let allowed = CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 .·_-")
+        guard clipped.unicodeScalars.allSatisfy({ allowed.contains($0) }) else { return "unselected" }
+        return clipped
     }
 }
