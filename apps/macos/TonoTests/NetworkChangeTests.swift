@@ -123,7 +123,9 @@ final class NetworkChangeTests: XCTestCase {
     /// wait. A network change is what ends most of those outages, so it
     /// restarts the loop at its first delay instead of leaving the wait to run.
     func testNetworkChangeRestartsAWaitingUnarmedReconnect() async {
+        let savedConsumer = RuntimeCleanup.launchProtectionConsumer
         let app = AppState()
+        app.automaticResumeHeldAfterRestart = false
         let node = Fixture.realityNode()
         app.proxyRegions = [ProxyRegion(id: AppState.managedCatalogRegionID, name: "TONO CLOUD", nodes: [node])]
         app.applyProxySelection(node.name)
@@ -144,6 +146,7 @@ final class NetworkChangeTests: XCTestCase {
             KillSwitchService.isArmed = savedArmed
             RuntimeCleanup.nativeUpdateBlocksConnect = savedUpdateBlock
             RuntimeCleanup.nativeUpdatePending = savedUpdatePending
+            RuntimeCleanup.launchProtectionConsumer = savedConsumer
         }
         // The loop is parked in its longest wait.
         app.unarmedReconnectAttempt = 5

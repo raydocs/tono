@@ -27,8 +27,9 @@ final class ConnectionCoordinator {
     var unarmedReconnectTask: Task<Void, Never>?
     /// Set while the unarmed loop is waiting or probing, with the generation
     /// it runs under. A finished loop leaves its task handle behind, so the
-    /// handle cannot say that.
-    var unarmedReconnectOwner: (id: UUID, generation: UInt64)?
+    /// handle cannot say that. `restarted` holds from a network-change
+    /// restart until that loop's first probe.
+    var unarmedReconnectOwner: (id: UUID, generation: UInt64, restarted: Bool)?
     var protectedReconnectID: UUID?
     var lastProtectedReconnectKick: Date?
     var coreMonitorTask: Task<Void, Never>?
