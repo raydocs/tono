@@ -6,3 +6,8 @@
 - 新增/优化：无。真正下架、被屏蔽的选择仍换到默认服务器；连接中的会话处理不变。
 - 工程与测试修正：回归 `a_respelled_selection_follows_the_same_exit` 先单独推送为 `42bf551b`（红），结果记在 PR。
 - 验证：仅托管 CI（cargo test）；未在 Windows 实机上复现。仅源码，无新候选。
+
+### 2026-10-02 续记：已合 main
+- 来源合入：#1352，merge commit `4f49338a`，PR 头 `b6108e3e`。该头的 `ci-gate` 全绿：https://github.com/raydocs/tono/actions/runs/37050512411 （`windows / app-rust` 等 9 项成功，services / sing_box / connect_bench 按路径跳过）。红测试 `42bf551b`：run 37048949470（`windows / app-rust` `649 passed; 1 failed`，只有 `a_respelled_selection_follows_the_same_exit` 失败）。
+- 独立评审：普通风险（空闲时的默认选择），主会话核对 diff；未做独立评审。合并前 0 个未解决的评审线程。
+- 候选/发布：仅源码合入 main。无新安装包，无部署，无客户发布。没有实机验证。
