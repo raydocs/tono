@@ -559,6 +559,19 @@ final class AppState {
             return
         }
         if !isConnected {
+            // A released host can be minutes into the unarmed backoff, and
+            // the network coming back is what ends most of those outages.
+            // Start again from the first delay, which also absorbs the burst
+            // one transition emits. The loop stays unarmed: no PF, no tunnel.
+            if unarmedReconnectAwaitsNetwork {
+                LocalTrafficAudit.shared.recordEvent(
+                    "unarmed_reconnect_network_kick",
+                    details: auditProtectionDetails()
+                )
+                unarmedReconnectAttempt = 0
+                scheduleUnarmedReconnect()
+                return
+            }
             // PF still armed after the user's Restore internet failed is not
             // a session to recover; only the user's next Connect is (X1-2).
             guard KillSwitchService.isArmed, isTonoReady,

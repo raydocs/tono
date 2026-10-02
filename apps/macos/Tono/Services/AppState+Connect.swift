@@ -1621,6 +1621,7 @@ extension AppState {
                     self.protectedReconnectPauseLiftsOnNetworkChange = false
                     self.connectionCoordinator.unarmedReconnectTask?.cancel()
                     self.connectionCoordinator.unarmedReconnectTask = nil
+                    self.connectionCoordinator.unarmedReconnectOwner = nil
                 }
                 return .stopMonitoring
             } else if let health, !health.wanted, !health.live, KillSwitchService.isArmed {
@@ -2317,6 +2318,17 @@ extension AppState {
         }
     }
 
+    /// Whether a network change may restart the unarmed loop: only a loop
+    /// that still owns the current generation and would still probe.
+    var unarmedReconnectAwaitsNetwork: Bool {
+        guard let owner = connectionCoordinator.unarmedReconnectOwner,
+              owner.generation == connectionCoordinator.protectionOperationGeneration
+        else { return false }
+        return !KillSwitchService.isArmed && !isProtectionBlocked
+            && !protectedReconnectPausedForUserAction
+            && !nativeUpdatePending && !RuntimeCleanup.nativeUpdateBlocksConnect
+    }
+
     func scheduleUnarmedReconnect(
         sleep: @escaping @MainActor (TimeInterval) async throws -> Void = { delay in
             try await Task.sleep(for: .seconds(delay))
@@ -2329,7 +2341,14 @@ extension AppState {
         connectionCoordinator.unarmedReconnectTask?.cancel()
         let generation = connectionCoordinator.protectionOperationGeneration
         let initialAttempt = unarmedReconnectAttempt
+        let id = UUID()
+        connectionCoordinator.unarmedReconnectOwner = (id, generation)
         connectionCoordinator.unarmedReconnectTask = Task { [weak self] in
+            defer {
+                if let self, self.connectionCoordinator.unarmedReconnectOwner?.id == id {
+                    self.connectionCoordinator.unarmedReconnectOwner = nil
+                }
+            }
             // This distinct owner may wait for the automatic release. The failed connect or
             // monitor caller cannot: the teardown queue drains that caller before releasing.
             await self?.finishPendingDisconnect()
