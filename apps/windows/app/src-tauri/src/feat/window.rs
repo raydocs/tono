@@ -503,8 +503,10 @@ async fn quit_then_resync() {
     .await;
 }
 
-/// Admission of the event loop's exit request, taken before it returns to Tao: raises the
-/// exiting flag and claims the Quit slot. `None` means a Quit is already in flight.
+/// Admission of the event loop's exit request, taken before it returns to Tao: claims the Quit
+/// slot and only then raises the exiting flag. `None` means a Quit is already in flight and
+/// owns the flag — one that was cancelled has cleared it and is still re-syncing, and a flag
+/// raised here would have no flow left to clear it.
 pub fn claim_exit_request() -> Option<QuitClaim> {
     claim_raising(&QUIT_IN_FLIGHT, || handle::Handle::global().set_is_exiting()).map(QuitClaim)
 }
@@ -529,8 +531,9 @@ fn claim(slot: &std::sync::atomic::AtomicBool) -> Option<Held<'_>> {
 }
 
 fn claim_raising(slot: &std::sync::atomic::AtomicBool, raise: impl FnOnce()) -> Option<Held<'_>> {
+    let held = claim(slot)?;
     raise();
-    claim(slot)
+    Some(held)
 }
 
 /// Run `run` only when `slot` is free, holding it until `run` finishes (or is dropped).
