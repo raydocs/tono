@@ -277,7 +277,8 @@ extension KillSwitchManager {
         //    number rather than an inference. Read from the armed set captured in
         //    step 1.
         if let labelText = armedLabels {
-            for expected in ["tono-loopback", "tono-continuity", "tono-mdns", "tono-linklocal",
+            for expected in ["tono-loopback", "tono-continuity", "tono-mdns", "tono-igmp",
+                             "tono-multicast", "tono-linklocal",
                              "tono-tunnel", "tono-control", "tono-exit",
                              "tono-bundle", "tono-block"] {
                 check("labels-report-\(expected)", labelText.contains(expected))
@@ -1302,6 +1303,33 @@ extension KillSwitchManager {
                     "self-test: Continuity passes missing or keeping state with a tunnel\n".utf8
                 ))
             }
+            // IGMP reports and router queries carry the Router Alert option,
+            // and PF drops an IPv4 packet with options unless the rule passing
+            // it says `allow-opts`; the inbound pass must also sit ahead of
+            // `tono-lan`, which would match a router's query first. SSDP and
+            // broadcast discovery leave on their own pass, never on a DNS port.
+            let lanDiscoveryDNSBlock = "block drop out quick on { en0, en7 } inet proto { tcp, udp } to { 224.0.0.0/24, 239.0.0.0/8, 255.255.255.255 } port { 53, 853 } label \"tono-lan-dns\""
+            let lanDiscoveryPass = "pass out quick inet to { 224.0.0.0/24, 239.0.0.0/8, 255.255.255.255 } no state label \"tono-multicast\""
+            let lanDiscoveryNeedles = [
+                "pass out quick inet proto igmp to 224.0.0.0/4 allow-opts no state label \"tono-igmp\"",
+                "pass in quick inet proto igmp to 224.0.0.0/4 allow-opts no state label \"tono-igmp\"",
+                lanDiscoveryDNSBlock,
+                lanDiscoveryPass,
+            ]
+            let lanDiscoveryHolds: Bool = {
+                guard lanDiscoveryNeedles.allSatisfy(cloudRules.contains),
+                      !lanDiscoveryNeedles.contains(where: rules.contains),
+                      let igmp = cloudRules.range(of: "label \"tono-igmp\""),
+                      let lan = cloudRules.range(of: "label \"tono-lan\""),
+                      let block = cloudRules.range(of: lanDiscoveryDNSBlock),
+                      let pass = cloudRules.range(of: lanDiscoveryPass) else { return false }
+                return igmp.lowerBound < lan.lowerBound && block.lowerBound < pass.lowerBound
+            }()
+            if !lanDiscoveryHolds {
+                FileHandle.standardError.write(Data(
+                    "self-test: IGMP or LAN discovery multicast is not passed with a tunnel\n".utf8
+                ))
+            }
             // The supervisor reinstalls saved state before any TUN exists,
             // and only while the Core is running. Boot, launch and status()
             // do not. A saved utun that is not up must render the no-tunnel
@@ -1315,8 +1343,8 @@ extension KillSwitchManager {
                 allowedUID: 501
             )
             let tunnelOnlyLabels = [
-                "tono-continuity", "tono-mdns", "tono-lan", "tono-linklocal",
-                "tono-dhcp", "tono-ndp", "tono-tunnel",
+                "tono-continuity", "tono-mdns", "tono-igmp", "tono-lan", "tono-linklocal",
+                "tono-dhcp", "tono-ndp", "tono-multicast", "tono-tunnel",
             ]
             let bootRestoreHasNoTunnelPass =
                 !tunnelOnlyLabels.contains(where: bootRestoreRules.contains)
@@ -1512,6 +1540,7 @@ extension KillSwitchManager {
                 && bundleWithheldForCoreSync
                 && continuityOffWithoutTunnel
                 && continuityOnWithTunnel
+                && lanDiscoveryHolds
                 && bootRestoreHasNoTunnelPass
                 && lanDNSBlockedFirst
                 && emergencyRules == emergencyExpected
