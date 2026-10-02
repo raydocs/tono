@@ -986,12 +986,30 @@ final class AppState {
                 await finishPendingDisconnect()
             } else if isConnected || isConnecting || coreRuntime.isRunning {
                 await disconnectAndWait(releaseKillSwitch: false)
+                reconcileAfterWithdrawnTransport()
             }
             return
         }
         autoConnectRequested = RuntimeCleanup.nativeUpdateRecovery == nil
             || RuntimeCleanup.nativeUpdateRecovery == .connected
         attemptAutomaticConnect()
+    }
+
+    /// A withdrawn transport (a refused account, a sign-out on 401) stops the
+    /// Core with PF kept, and nothing reconnects until the user acts. The
+    /// helper's core-down watchdog lifts that hold about 30 s later (AI hold
+    /// kept), and only activation read it back, so the account gate and the
+    /// menu bar kept claiming a block over an open host. Read the helper once
+    /// after the watchdog has had its turn. PF is not touched here: only the
+    /// helper's own confirmed release clears anything, as on activation.
+    private func reconcileAfterWithdrawnTransport() {
+        withdrawnTransportReconcileTask?.cancel()
+        let delay = withdrawnTransportReconcileDelay
+        withdrawnTransportReconcileTask = Task { [weak self] in
+            try? await Task.sleep(for: delay)
+            guard !Task.isCancelled else { return }
+            self?.reconcileExternalProtectionState()
+        }
     }
 
     /// Makes the authenticated cloud-only session ready for an explicit user
