@@ -359,43 +359,51 @@ final class CatalogRemovedExitTests: XCTestCase {
         RuntimeCleanup.nativeUpdatePending = false
         ManagedExitCatalogOwnership.adopt("removal-owner")
         let app = await makeApp()
-        defer {
-            app.connectionCoordinator.cancelReconnectTasks()
-            for (key, value) in sessionDefaults { AppProfile.defaults.set(value, forKey: key) }
-            for (file, data) in bootFiles {
-                if let data { try? data.write(to: file) }
-                else { try? FileManager.default.removeItem(at: file) }
-            }
-            KillSwitchService.isArmed = armed
-            AppProfile.defaults.set(selection, forKey: SettingsKey.selectedProxyTargetName)
-            RuntimeCleanup.nativeUpdateBlocksConnect = updateBlocked
-            RuntimeCleanup.nativeUpdatePending = updatePending
-            for (url, data) in savedFiles {
-                if let data { try? storage.writeSensitive(data, to: url) }
-                else { try? FileManager.default.removeItem(at: url) }
-            }
-            ManagedExitCatalogOwnership.purge()
-        }
         app.networkProtection.releaseAfterFailure = { KillSwitchService.isArmed = false }
         let removed = Fixture.realityNode(name: "US-Removed", id: "us-removed")
         let survivor = Fixture.realityNode(name: "JP-Survivor", id: "jp-survivor", server: "203.0.114.9")
         let remaining = keepSurvivor ? [survivor] : []
-        try await app.installManagedExitCatalog(
-            try catalog([removed] + remaining, revision: 86),
-            persistCache: false, allowRuntimeTransition: false
-        )
-        XCTAssertTrue(app.applyProxySelection(removed.name))
-        KillSwitchService.isArmed = true
-        app.isProtectionBlocked = true
-        // The loop sleeps in its first backoff while the catalog arrives.
-        app.scheduleProtectedReconnect()
-        XCTAssertNotNil(app.connectionCoordinator.protectedReconnectTask)
-        try await app.installManagedExitCatalog(
-            try catalog(remaining, revision: 87),
-            persistCache: false, allowRuntimeTransition: true
-        )
-        await verify(app)
+        let outcome: Result<Void, Error>
+        do {
+            try await app.installManagedExitCatalog(
+                try catalog([removed] + remaining, revision: 86),
+                persistCache: false, allowRuntimeTransition: false
+            )
+            XCTAssertTrue(app.applyProxySelection(removed.name))
+            KillSwitchService.isArmed = true
+            app.isProtectionBlocked = true
+            // The loop sleeps in its first backoff while the catalog arrives.
+            app.scheduleProtectedReconnect()
+            XCTAssertNotNil(app.connectionCoordinator.protectedReconnectTask)
+            try await app.installManagedExitCatalog(
+                try catalog(remaining, revision: 87),
+                persistCache: false, allowRuntimeTransition: true
+            )
+            await verify(app)
+            outcome = .success(())
+        } catch {
+            outcome = .failure(error)
+        }
+        app.connectionCoordinator.cancelReconnectTasks()
+        await app.connectionCoordinator.disconnectSequence?.value
+        // Purging queues a save of the emptied catalog; let it land before
+        // the saved files go back.
+        ManagedExitCatalogOwnership.purge()
         await app.finishPendingPersistence()
+        for (key, value) in sessionDefaults { AppProfile.defaults.set(value, forKey: key) }
+        for (file, data) in bootFiles {
+            if let data { try? data.write(to: file) }
+            else { try? FileManager.default.removeItem(at: file) }
+        }
+        KillSwitchService.isArmed = armed
+        AppProfile.defaults.set(selection, forKey: SettingsKey.selectedProxyTargetName)
+        RuntimeCleanup.nativeUpdateBlocksConnect = updateBlocked
+        RuntimeCleanup.nativeUpdatePending = updatePending
+        for (url, data) in savedFiles {
+            if let data { try? storage.writeSensitive(data, to: url) }
+            else { try? FileManager.default.removeItem(at: url) }
+        }
+        try outcome.get()
     }
 
     func testFailedAutomaticCatalogSwitchRetainsAIHold() async {
