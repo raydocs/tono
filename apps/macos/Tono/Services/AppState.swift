@@ -458,6 +458,11 @@ final class AppState {
     var residentialRouteAuditGeneration: UInt64 = 0
     var pendingFullConfigReload = false
     var pendingOptionalPolicyReload = false
+    /// Applies of one accepted document that failed on this session before
+    /// touching the Core and were queued again.
+    @ObservationIgnored
+    var optionalPolicyRetry: (generation: UInt64, revision: Int, count: Int) = (0, -1, 0)
+    private static let optionalPolicyRetryLimit = 2
     var pendingRemovedCatalogExit = false
     var pendingDirectPolicyReload:
         ConfigPipeline.ManagedDirectRuntimePolicy?
@@ -1905,6 +1910,7 @@ final class AppState {
     func scheduleBackgroundOptionalPolicy() {
         guard isConnected, !isDisconnecting else { return }
         let policy = managedTrafficPolicy
+        let revision = managedTrafficPolicyRevision
         // A full accepted document supersedes pins derived from earlier
         // authorization. Read the newest document when the shared owner drains.
         pendingDirectPolicyReload = nil
@@ -1936,7 +1942,7 @@ final class AppState {
         let requestID = connectionCoordinator.configReloadRequestID
         connectionCoordinator.configReloadTask = Task { [weak self] in
             guard let self else { return }
-            await self.applyOptionalDirectPolicyInBackground(policy: policy)
+            await self.applyOptionalDirectPolicyInBackground(policy: policy, revision: revision)
             self.finishConfigReloadRequest(requestID)
         }
     }
@@ -1975,12 +1981,15 @@ final class AppState {
         return resolved
     }
 
-    private func applyOptionalDirectPolicyInBackground(policy: TonoTrafficPolicy) async {
+    private func applyOptionalDirectPolicyInBackground(policy: TonoTrafficPolicy, revision: Int) async {
         guard isConnected, !isDisconnecting, !Task.isCancelled,
               let api = coreController else { return }
         let generation = connectionCoordinator.protectionOperationGeneration
         let base = activeDirectPolicy
         var replacementStarted = false
+        // What the first arm of this apply admitted for the exit. Nil until
+        // then: nothing touched PF, so a failure has nothing to restore.
+        var armedProxyEndpoints: [ConfigPipeline.DialEndpoint]?
         ConnectionTelemetryBuffer.shared.record(
             "optionalPolicyBegin",
             action: "resolve",
@@ -2007,6 +2016,19 @@ final class AppState {
                 )
                 return
             }
+            // A catalog that removed the selected exit while this owner was
+            // busy has queued its switch behind it. That exit has no endpoint
+            // left to arm, so an arm here would block the exit the Core still
+            // dials. The switch goes first; this document applies after it.
+            guard !pendingRemovedCatalogExit else {
+                pendingOptionalPolicyReload = true
+                ConnectionTelemetryBuffer.shared.record(
+                    "optionalPolicyRollback",
+                    reason: "catalog_removal_pending",
+                    generation: Int(generation)
+                )
+                return
+            }
             if let runtimeMutation = optionalPolicyPreparedRuntimeMutation {
                 replacementStarted = true
                 try await runtimeMutation(resolved)
@@ -2019,10 +2041,17 @@ final class AppState {
             let transitionEndpoints = Array(Set((base?.sessionEndpoints ?? []) + (resolved?.sessionEndpoints ?? [])))
             let transitionReviewedPermit = base?.requiresAddressFreeDirectPermit == true
                 || resolved?.requiresAddressFreeDirectPermit == true
+            // One selection for the whole replacement. A catalog installed
+            // during the awaits below must not change which exit PF admits
+            // or the document names while the Core dials the captured one.
+            let proxyEndpoints = currentProxyEndpoints()
+            let runtimeNodes = importedExitNodes
+            let overlay = currentOwnedRuntimeOverlay()
+            armedProxyEndpoints = proxyEndpoints
             try await PrivilegedRuntimeCoordinator.shared.armKillSwitch(
                 apiHosts: [],
                 tunnelInterfaces: [ConfigPipeline.tonoTunInterface],
-                proxyEndpoints: currentProxyEndpoints(),
+                proxyEndpoints: proxyEndpoints,
                 sessionDirectEndpoints: transitionEndpoints,
                 tailscaleBootstrapEnabled: AppProfile.homeExitEnabled && tonoTransport != nil,
                 helperPrepared: true,
@@ -2030,8 +2059,6 @@ final class AppState {
             )
             guard generation == connectionCoordinator.protectionOperationGeneration,
                   !Task.isCancelled else { return }
-            let runtimeNodes = importedExitNodes
-            let overlay = currentOwnedRuntimeOverlay()
             let digest = try await coreRuntime.writeRuntimeConfig(
                 overlay: overlay,
                 customNodes: runtimeNodes,
@@ -2070,7 +2097,7 @@ final class AppState {
                 try await PrivilegedRuntimeCoordinator.shared.armKillSwitch(
                     apiHosts: [],
                     tunnelInterfaces: [ConfigPipeline.tonoTunInterface],
-                    proxyEndpoints: currentProxyEndpoints(),
+                    proxyEndpoints: proxyEndpoints,
                     sessionDirectEndpoints: resolved?.sessionEndpoints ?? [],
                     tailscaleBootstrapEnabled: AppProfile.homeExitEnabled && tonoTransport != nil,
                     helperPrepared: true,
@@ -2103,17 +2130,30 @@ final class AppState {
                     // A full disk or failed arm before /core/sync left Core
                     // untouched. Restore its original PF exceptions rather
                     // than stopping the working tunnel for an optional overlay.
-                    try await PrivilegedRuntimeCoordinator.shared.armKillSwitch(
-                        apiHosts: [],
-                        tunnelInterfaces: [ConfigPipeline.tonoTunInterface],
-                        proxyEndpoints: currentProxyEndpoints(),
-                        sessionDirectEndpoints: base?.sessionEndpoints ?? [],
-                        tailscaleBootstrapEnabled: AppProfile.homeExitEnabled && tonoTransport != nil,
-                        helperPrepared: true,
-                        reviewedBundleDirect: base?.requiresAddressFreeDirectPermit == true
-                    )
-                    guard !Task.isCancelled, !isDisconnecting,
-                          generation == connectionCoordinator.protectionOperationGeneration else { return }
+                    if let armedProxyEndpoints {
+                        try await PrivilegedRuntimeCoordinator.shared.armKillSwitch(
+                            apiHosts: [],
+                            tunnelInterfaces: [ConfigPipeline.tonoTunInterface],
+                            proxyEndpoints: armedProxyEndpoints,
+                            sessionDirectEndpoints: base?.sessionEndpoints ?? [],
+                            tailscaleBootstrapEnabled: AppProfile.homeExitEnabled && tonoTransport != nil,
+                            helperPrepared: true,
+                            reviewedBundleDirect: base?.requiresAddressFreeDirectPermit == true
+                        )
+                        guard !Task.isCancelled, !isDisconnecting,
+                              generation == connectionCoordinator.protectionOperationGeneration else { return }
+                    }
+                    // The accepted document is still not the one in force.
+                    // Queue it again so a revoked grant does not outlive a
+                    // transient failure; after the limit the message stands
+                    // until the next document or Connect.
+                    let retried = optionalPolicyRetry.generation == generation
+                        && optionalPolicyRetry.revision == revision ? optionalPolicyRetry.count : 0
+                    if retried < Self.optionalPolicyRetryLimit {
+                        optionalPolicyRetry = (generation, revision, retried + 1)
+                        pendingOptionalPolicyReload = true
+                        return
+                    }
                     errorMessage = error.localizedDescription
                     return
                 } catch {

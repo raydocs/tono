@@ -160,6 +160,126 @@ final class OptionalPolicyTests: XCTestCase {
         app.connectionCoordinator.cancelReconnectTasks()
     }
 
+    /// #1238: a catalog that removed the selected exit queues its switch
+    /// behind a busy optional-policy owner. The removed exit has no endpoint
+    /// left to arm and the Core still dials it, so that owner must leave PF
+    /// alone and let the switch go first.
+    func testOptionalPolicyOwnerLeavesPFAloneWhileTheSelectedExitIsRemoved() async throws {
+        let selection = AppProfile.defaults.object(forKey: SettingsKey.selectedProxyTargetName)
+        let armed = KillSwitchService.isArmed
+        let delayWasProven = SingBoxDelayGate.isProven
+        let savedIPC = KillSwitchService.armIPC
+        let updateBlocked = RuntimeCleanup.nativeUpdateBlocksConnect
+        let updatePending = RuntimeCleanup.nativeUpdatePending
+        // The refused switch ends in the release teardown, which clears these.
+        let sessionDefaults = [
+            SettingsKey.didStartCore, SettingsKey.lastTunEnabled, SettingsKey.connectBootSession,
+        ].map { ($0, AppProfile.defaults.object(forKey: $0)) }
+        let bootFiles = [
+            RuntimeCleanup.connectBootSessionFile,
+            RuntimeCleanup.connectBootSessionFile.appendingPathExtension("pending"),
+        ].map { ($0, try? Data(contentsOf: $0)) }
+        RuntimeCleanup.nativeUpdateBlocksConnect = false
+        RuntimeCleanup.nativeUpdatePending = false
+        let app = AppState()
+        var runtime = NetworkProtectionOperations()
+        runtime.repairForRelease = {}
+        runtime.stopCore = { _ in true }
+        runtime.coreStatus = { (false, true) }
+        runtime.restoreDNS = { true }
+        runtime.disableSystemProxy = {}
+        runtime.disarm = {}
+        runtime.releaseAfterFailure = { KillSwitchService.isArmed = false }
+        runtime.restrictToBootstrap = {}
+        app.networkProtection = runtime
+        let removed = Fixture.realityNode(name: "US-Removed", id: "us-removed")
+        let survivor = Fixture.realityNode(name: "JP-Survivor", id: "jp-survivor", server: "203.0.114.9")
+        app.proxyRegions = [ProxyRegion(id: AppState.managedCatalogRegionID, name: "TONO CLOUD", nodes: [removed, survivor])]
+        _ = app.applyProxySelection(removed.name)
+        app.isConnected = true
+        app.coreController = CoreControllerClient()
+        app.activeDirectPolicy = try app.initialDirectPolicy(
+            physicalInterface: "en0",
+            policy: TonoTrafficPolicy(version: 3, domains: [], mediaEndpoints: [],
+                directSuffixes: [.init(host: "example.net", ports: [443])], trusted: true)
+        )
+        app.managedTrafficPolicy = TonoTrafficPolicy(version: 3, domains: [], mediaEndpoints: [],
+            directSuffixes: [.init(host: "example.org", ports: [443])], trusted: true)
+        var arms = 0
+        // The owner arms with a prepared helper; the survivor switch behind it
+        // prepares first, so refusing preparation ends this test at the switch.
+        KillSwitchService.armIPC.prepare = { _ in throw HelperIPCError.connectFailed }
+        KillSwitchService.armIPC.deliver = { _ in
+            arms += 1
+            return (true, true, true, false, false, 0)
+        }
+        defer {
+            KillSwitchService.armIPC = savedIPC
+            KillSwitchService.isArmed = armed
+            AppProfile.defaults.set(selection, forKey: SettingsKey.selectedProxyTargetName)
+            RuntimeCleanup.nativeUpdateBlocksConnect = updateBlocked
+            RuntimeCleanup.nativeUpdatePending = updatePending
+            app.connectionCoordinator.cancelReconnectTasks()
+            if delayWasProven { SingBoxDelayGate.prove() }
+            else { SingBoxDelayGate.suspend() }
+            for (key, value) in sessionDefaults { AppProfile.defaults.set(value, forKey: key) }
+            for (file, data) in bootFiles {
+                if let data { try? data.write(to: file) }
+                else { try? FileManager.default.removeItem(at: file) }
+            }
+        }
+        KillSwitchService.isArmed = true
+        app.scheduleBackgroundOptionalPolicy()
+        let owner = app.connectionCoordinator.configReloadTask
+        // Model the accepted catalog before the scheduled owner starts: it
+        // found the owner busy and queued the removal.
+        app.proxyRegions = [ProxyRegion(id: AppState.managedCatalogRegionID, name: "TONO CLOUD", nodes: [survivor])]
+        app.pendingRemovedCatalogExit = true
+        await owner?.value
+        await app.connectionCoordinator.nodeSwitchTask?.value
+        await app.connectionCoordinator.disconnectSequence?.value
+        XCTAssertEqual(arms, 0, "the owner must not arm PF without the exit the Core still dials")
+    }
+
+    /// #1238: an apply that fails before /core/sync keeps the session, but the
+    /// accepted document is still not the one in force. It is tried again,
+    /// twice, so a revoked grant does not outlive a transient failure.
+    func testOptionalPolicyFailureBeforeReplacementIsTriedAgain() async throws {
+        let armed = KillSwitchService.isArmed
+        let savedIPC = KillSwitchService.armIPC
+        let app = AppState()
+        app.isConnected = true
+        app.coreController = CoreControllerClient()
+        app.activeDirectPolicy = try app.initialDirectPolicy(
+            physicalInterface: "en0",
+            policy: TonoTrafficPolicy(version: 3, domains: [], mediaEndpoints: [],
+                directSuffixes: [.init(host: "example.net", ports: [443])], trusted: true)
+        )
+        app.managedTrafficPolicy = TonoTrafficPolicy(version: 3, domains: [], mediaEndpoints: [],
+            directSuffixes: [.init(host: "example.org", ports: [443])], trusted: true)
+        var arms = 0
+        // Every apply's first arm fails; the arm that restores the session's
+        // own exceptions after it succeeds.
+        KillSwitchService.armIPC.status = { (true, true, true, false) }
+        KillSwitchService.armIPC.deliver = { _ in
+            arms += 1
+            guard arms.isMultiple(of: 2) else { throw HelperIPCError.connectFailed }
+            return (true, true, true, false, false, 0)
+        }
+        defer {
+            KillSwitchService.armIPC = savedIPC
+            KillSwitchService.isArmed = armed
+        }
+        KillSwitchService.isArmed = true
+        app.scheduleBackgroundOptionalPolicy()
+        while let owner = app.connectionCoordinator.configReloadTask {
+            await owner.value
+        }
+        XCTAssertEqual(arms, 6, "one apply and two retries, each restoring the session's exceptions")
+        XCTAssertTrue(app.isConnected)
+        XCTAssertNil(app.connectionCoordinator.disconnectSequence)
+    }
+
     func testAcceptedEmptyPolicyClearsTheLiveDirectPlanWithoutDisconnect() async throws {
         let storage = ConfigStorage.shared
         let url = storage.appSupportDirectory.appendingPathComponent("managed-traffic-policy.json")
