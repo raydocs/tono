@@ -97,6 +97,16 @@ export const handleTonoWindowShortcut = (
   return false
 }
 
+// Ctrl+K has no button to carry an error. Exported for unit tests.
+// eslint-disable-next-line react-refresh/only-export-components
+export const connectFromShortcut = (
+  connect: () => Promise<unknown>,
+  _navigate: (path: string) => void,
+): Promise<void> => {
+  void connect()
+  return Promise.resolve()
+}
+
 /**
  * The Tono application shell: frosted window background, 200px sidebar,
  * custom titlebar on undecorated windows, and the existing auth guard. The
@@ -148,7 +158,7 @@ const TonoLayout = () => {
         navigate,
         uiState: status?.uiState,
         connect: () => {
-          void tonoConnect()
+          void connectFromShortcut(tonoConnect, navigate)
         },
         disconnect: () => {
           void tonoDisconnect()
