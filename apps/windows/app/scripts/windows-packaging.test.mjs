@@ -909,6 +909,13 @@ test('NSIS removes every known old payload on upgrade and uninstall', () => {
   )
 })
 
+test('NSIS uninstall removes the sing-box pin copied beside sing-box.exe', () => {
+  const uninstall =
+    installerSource.match(/Section Uninstall\b([\s\S]*?)SectionEnd/)?.[1] ?? ''
+  assert.ok(uninstall.includes('Delete "$INSTDIR\\sing-box-sha256.txt"'))
+  assert.equal(validateNsisLegacyCleanup(installerSource), null)
+})
+
 test('release feature gate rejects synchronous traced WebView dispatch', () => {
   const safe = `tauri-runtime-wry v2.11.4\n└── tauri v2.11.5\n    └── clash-verge v0.0.5`
   assert.equal(validateReleaseFeatureTree(safe), null)
