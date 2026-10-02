@@ -142,7 +142,8 @@ extension AppState {
                 nextOverlay.selectedNodeName = nodeName
                 let digest = try await self.coreRuntime.writeRuntimeConfig(
                     overlay: nextOverlay, customNodes: self.importedExitNodes,
-                    directPolicy: self.activeDirectPolicy
+                    directPolicy: self.activeDirectPolicy,
+                    installed: self.loadedRuntimeConfigDigest
                 )
                 try checkSwitchCurrent()
                 let path = try await PrivilegedRuntimeCoordinator.shared.syncCoreConfig(
@@ -549,7 +550,8 @@ extension AppState {
                     overlay: overlay,
                     customNodes: runtimeNodes,
                     directPolicy: effectiveDirectPolicy,
-                    keeping: pinsOnlyRefresh ? nil : installedDigest
+                    installed: installedDigest,
+                    keepsInstalled: !pinsOnlyRefresh
                 )
                 try Task.checkCancellation()
                 guard let api else {

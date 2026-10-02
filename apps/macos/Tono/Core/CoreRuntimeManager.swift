@@ -13,9 +13,10 @@ private actor RuntimeConfigWriter {
         directPolicy: ConfigPipeline.ManagedDirectRuntimePolicy?,
         outputPath: URL,
         fakeIPRotation: SingBoxFakeIPRotation,
-        installedDigest: String?
+        installedDigest: String?,
+        keepsInstalled: Bool
     ) throws -> String {
-        let document = try fakeIPRotation.document(keeping: installedDigest) { slot in
+        let document = try fakeIPRotation.document(installed: installedDigest, keeping: keepsInstalled) { slot in
             try ConfigPipeline.buildSingBoxRuntime(
                 overlay: overlay,
                 nodes: customNodes,
@@ -59,10 +60,12 @@ nonisolated final class SingBoxFakeIPRotation: @unchecked Sendable {
     /// exception is the reload that skips the restart on an equal digest: it
     /// names the installed document, and a config that still renders to those
     /// bytes on that document's slot keeps them.
-    func document(keeping installedDigest: String? = nil, _ render: (Int) throws -> Data) rethrows -> Data {
+    func document(
+        installed installedDigest: String? = nil, keeping: Bool = false, _ render: (Int) throws -> Data
+    ) rethrows -> Data {
         lock.lock()
         defer { lock.unlock() }
-        if let installedDigest,
+        if keeping, let installedDigest,
            let slot = rendered.first(where: { $0.value == installedDigest })?.key {
             let document = try render(slot)
             if Self.digest(document) == installedDigest { return document }
@@ -150,7 +153,8 @@ final class CoreRuntimeManager {
         overlay: ConfigPipeline.OverlayConfig,
         customNodes: [ProxyNode] = [],
         directPolicy: ConfigPipeline.ManagedDirectRuntimePolicy? = nil,
-        keeping installedDigest: String? = nil
+        installed installedDigest: String? = nil,
+        keepsInstalled: Bool = false
     ) async throws -> String {
         let digest = try await configWriter.write(
             overlay: overlay,
@@ -158,7 +162,8 @@ final class CoreRuntimeManager {
             directPolicy: directPolicy,
             outputPath: configFilePath,
             fakeIPRotation: fakeIPRotation,
-            installedDigest: installedDigest
+            installedDigest: installedDigest,
+            keepsInstalled: keepsInstalled
         )
         runtimeConfigSHA256 = digest
         return digest

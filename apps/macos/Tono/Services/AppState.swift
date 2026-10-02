@@ -2018,7 +2018,8 @@ final class AppState {
             let digest = try await coreRuntime.writeRuntimeConfig(
                 overlay: overlay,
                 customNodes: runtimeNodes,
-                directPolicy: resolved
+                directPolicy: resolved,
+                installed: loadedRuntimeConfigDigest
             )
             replacementStarted = true
             let runtimeConfigPath = try await PrivilegedRuntimeCoordinator.shared

@@ -534,11 +534,31 @@ final class SingBoxConfigTests: XCTestCase {
         let installed = try writeDocument(rotation, selected: "Fixture Beta")
         let digest = SHA256.hash(data: installed).map { String(format: "%02x", $0) }.joined()
         // Another config is written and its /core/sync fails.
-        _ = try writeDocument(rotation, selected: "Fixture Alpha", keeping: digest)
-        XCTAssertEqual(try writeDocument(rotation, selected: "Fixture Beta", keeping: digest), installed)
+        _ = try writeDocument(rotation, selected: "Fixture Alpha", installed: digest, keeping: true)
+        XCTAssertEqual(
+            try writeDocument(rotation, selected: "Fixture Beta", installed: digest, keeping: true),
+            installed
+        )
         // A pins refresh restarts the Core with the same config.
         XCTAssertNotEqual(try fakeIPRange(writeDocument(rotation, selected: "Fixture Beta")),
                           try fakeIPRange(installed))
+    }
+
+    /// Apps hold cached addresses in the installed document's range. Documents
+    /// that are written and never installed must not walk a later one back onto
+    /// that range, nor make the reload forget which range it is.
+    func testDocumentsThatAreNotInstalledLeaveTheInstalledFakeIPRangeAlone() throws {
+        let rotation = SingBoxFakeIPRotation(defaults: nil)
+        let installed = try writeDocument(rotation, selected: "Fixture Beta")
+        let digest = SHA256.hash(data: installed).map { String(format: "%02x", $0) }.joined()
+        for _ in 0..<ConfigPipeline.singBoxFakeIPSlots {
+            let attempt = try writeDocument(rotation, selected: "Fixture Alpha", installed: digest)
+            XCTAssertNotEqual(try fakeIPRange(attempt), try fakeIPRange(installed))
+        }
+        XCTAssertEqual(
+            try writeDocument(rotation, selected: "Fixture Beta", installed: digest, keeping: true),
+            installed
+        )
     }
 
     /// A relaunched app adopts the Core the last one started. Its first
@@ -559,13 +579,14 @@ final class SingBoxConfigTests: XCTestCase {
     }
 
     private func writeDocument(
-        _ rotation: SingBoxFakeIPRotation, selected: String, keeping installed: String? = nil
+        _ rotation: SingBoxFakeIPRotation, selected: String, installed: String? = nil,
+        keeping: Bool = false
     ) throws -> Data {
         let overlay = ConfigPipeline.OverlayConfig(mixedPort: 29190,
             externalController: "127.0.0.1:29191", secret: secret, tunEnabled: true,
             selectedNodeName: selected)
         let values = try nodes()
-        return try rotation.document(keeping: installed) { slot in
+        return try rotation.document(installed: installed, keeping: keeping) { slot in
             try ConfigPipeline.buildSingBoxRuntime(overlay: overlay, nodes: values,
                                                    directPlan: nil, fakeIPSlot: slot).runtimeJSON
         }
