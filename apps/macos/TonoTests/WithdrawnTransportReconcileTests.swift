@@ -51,4 +51,31 @@ final class WithdrawnTransportReconcileTests: XCTestCase {
         )
         XCTAssertFalse(KillSwitchService.isArmed)
     }
+
+    /// A withdrawal that finds the block already published (a reconnect loop
+    /// in backoff, a teardown it only joined) stops nothing itself, and the
+    /// loop skips its own read while the account is not ready.
+    func testWithdrawalOverAnExistingBlockAlsoReadsTheHelper() async {
+        let originalArmed = KillSwitchService.isArmed
+        let originalReassert = KillSwitchService.needsSessionExceptionReassert
+        KillSwitchService.isArmed = true
+        defer {
+            KillSwitchService.isArmed = originalArmed
+            KillSwitchService.needsSessionExceptionReassert = originalReassert
+        }
+        let app = AppState()
+        app.isProtectionBlocked = true
+        var runtime = NetworkProtectionOperations()
+        runtime.refreshKillSwitchStatus = { .confirmed(requiresProtectionRecovery: false) }
+        app.networkProtection = runtime
+        app.withdrawnTransportReconcileDelay = .milliseconds(20)
+
+        await app.acceptTonoTransport(nil)
+        await app.withdrawnTransportReconcileTask?.value
+        for _ in 0..<200 where app.isProtectionBlocked {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+
+        XCTAssertFalse(app.isProtectionBlocked)
+    }
 }
