@@ -183,8 +183,16 @@ extension KillSwitchManager {
             // terminating `block drop`. A bad position is a parse error that takes
             // the whole ruleset down and leaves the session unable to arm at all,
             // which is why this was proven on a real machine before shipping.
+            //
+            // The outbound loopback, LAN and link-local passes keep no state. A
+            // stateful pass creates state from a SYN only (`flags S/SA` is the
+            // default), so a TCP connection that predates the arm, or whose
+            // state a flush removed, matched no rule and was dropped by the
+            // final block until its own timeout. The allow set is the same
+            // addresses: these rules match on interface or destination alone,
+            // and the reply direction has no block to pass.
             "pass in quick on lo0 all keep state (if-bound) label \"tono-loopback\"",
-            "pass out quick on lo0 all keep state (if-bound) label \"tono-loopback\"",
+            "pass out quick on lo0 all no state label \"tono-loopback\"",
         ]
         // Only while a TUN is up. Emergency fail-closed has no tunnel and
         // must not keep Sidecar/clipboard as a side channel.
@@ -286,20 +294,40 @@ extension KillSwitchManager {
             lines.append(
                 "block drop out quick inet to { 224.0.0.0/24, 255.255.255.255 } fragment label \"tono-fragment-multicast\""
             )
+            // PF matches a fragment against address-only rules: it skips every
+            // rule with a port or a TCP flag set (xnu `pf_test_fragment`), so
+            // the port blocks above never see one. The stateful LAN pass had
+            // the implicit `flags S/SA` and was skipped too, which left a TCP
+            // fragment for the final block. The stateless passes below have no
+            // flag set, so these two rules keep that outcome: an outbound
+            // fragment PF reads as TCP, to a LAN or link-local destination, is
+            // dropped wherever these rules are reached (lo0 and the Continuity
+            // interfaces pass everything earlier). With path MTU discovery on,
+            // TCP sets DF and sizes segments to the path, so an ordinary
+            // connection sends none. Unchanged from the stateful passes: UDP
+            // fragments, which never met a flag set, and an IPv6 fragment
+            // header followed by another extension header, which PF matches
+            // by that header's protocol, not as TCP.
             lines.append(
-                "pass out quick inet to { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16 } keep state (if-bound) label \"tono-lan\""
+                "block drop out quick inet proto tcp to { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16 } fragment label \"tono-lan-fragment\""
+            )
+            lines.append(
+                "block drop out quick inet6 proto tcp to { fe80::/10, fc00::/7, ff00::/8 } fragment label \"tono-lan-fragment\""
+            )
+            lines.append(
+                "pass out quick inet to { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16 } no state label \"tono-lan\""
             )
             lines.append(
                 "pass in quick inet from { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16 } keep state (if-bound) label \"tono-lan\""
             )
             lines.append(
-                "pass out quick inet6 to fe80::/10 keep state (if-bound) label \"tono-linklocal\""
+                "pass out quick inet6 to fe80::/10 no state label \"tono-linklocal\""
             )
             lines.append(
                 "pass in quick inet6 to fe80::/10 keep state (if-bound) label \"tono-linklocal\""
             )
             lines.append(
-                "pass out quick inet6 to { ff00::/8, fc00::/7 } keep state (if-bound) label \"tono-linklocal\""
+                "pass out quick inet6 to { ff00::/8, fc00::/7 } no state label \"tono-linklocal\""
             )
             lines.append(
                 "pass in quick inet6 from { fe80::/10, ff00::/8, fc00::/7 } keep state (if-bound) label \"tono-linklocal\""

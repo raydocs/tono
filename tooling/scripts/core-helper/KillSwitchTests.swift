@@ -280,6 +280,7 @@ extension KillSwitchManager {
             for expected in ["tono-loopback", "tono-continuity", "tono-mdns", "tono-igmp",
                              "tono-multicast", "tono-dns-multicast",
                              "tono-fragment-multicast", "tono-ssdp", "tono-linklocal",
+                             "tono-lan-fragment",
                              "tono-tunnel", "tono-control", "tono-exit",
                              "tono-bundle", "tono-block"] {
                 check("labels-report-\(expected)", labelText.contains(expected))
@@ -1197,7 +1198,7 @@ extension KillSwitchManager {
                 "pass out quick inet proto tcp to 8.8.8.8 port 80 user root keep state (if-bound)",
                 "pass out quick inet proto udp to 8.8.8.8 port 8000 user root keep state (if-bound)",
                 "pass in quick on lo0 all keep state (if-bound)",
-                "pass out quick on lo0 all keep state (if-bound)",
+                "pass out quick on lo0 all no state",
                 "block drop out quick all",
             ]
             let forbidden = [
@@ -1345,6 +1346,46 @@ extension KillSwitchManager {
                     "self-test: IGMP or LAN discovery multicast is not passed with a tunnel\n".utf8
                 ))
             }
+            // A stateful pass creates state from a SYN only (`flags S/SA` is
+            // the default), so a TCP connection that predates the arm, or
+            // whose state a flush removed, matched no rule and was dropped by
+            // the final block. The outbound loopback, LAN and link-local
+            // passes therefore keep no state.
+            let establishedFlowNeedles = [
+                "pass out quick on lo0 all no state label \"tono-loopback\"",
+                "pass out quick inet to { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16 } no state label \"tono-lan\"",
+                "pass out quick inet6 to fe80::/10 no state label \"tono-linklocal\"",
+                "pass out quick inet6 to { ff00::/8, fc00::/7 } no state label \"tono-linklocal\"",
+            ]
+            let establishedFlowsSurvive = establishedFlowNeedles.allSatisfy(cloudRules.contains)
+                && rules.contains(establishedFlowNeedles[0])
+            if !establishedFlowsSurvive {
+                FileHandle.standardError.write(Data(
+                    "self-test: an outbound loopback, LAN or link-local pass still needs a SYN\n".utf8
+                ))
+            }
+            // PF skips every rule with a port or a TCP flag set when it
+            // matches a fragment. The stateful LAN pass had `flags S/SA`, so a
+            // TCP fragment fell to the final block; without state the pass
+            // would match it by address and carry it past the port 53/853
+            // block. TCP fragments to those destinations are dropped first.
+            let tcpFragmentBlocks = [
+                "block drop out quick inet proto tcp to { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16 } fragment label \"tono-lan-fragment\"",
+                "block drop out quick inet6 proto tcp to { fe80::/10, fc00::/7, ff00::/8 } fragment label \"tono-lan-fragment\"",
+            ]
+            let tcpFragmentsStayBlocked: Bool = {
+                guard let firstPass = establishedFlowNeedles.dropFirst()
+                    .compactMap({ cloudRules.range(of: $0)?.lowerBound }).min()
+                else { return false }
+                return tcpFragmentBlocks.allSatisfy { block in
+                    cloudRules.range(of: block).map { $0.lowerBound < firstPass } ?? false
+                } && !tcpFragmentBlocks.contains(where: rules.contains)
+            }()
+            if !tcpFragmentsStayBlocked {
+                FileHandle.standardError.write(Data(
+                    "self-test: a TCP fragment can reach a stateless LAN or link-local pass\n".utf8
+                ))
+            }
             // The supervisor reinstalls saved state before any TUN exists,
             // and only while the Core is running. Boot, launch and status()
             // do not. A saved utun that is not up must render the no-tunnel
@@ -1379,7 +1420,7 @@ extension KillSwitchManager {
             let emergencyExpected = [
                 "# Managed by Tono Kill Switch — do not edit",
                 "pass in quick on lo0 all keep state (if-bound) label \"tono-loopback\"",
-                "pass out quick on lo0 all keep state (if-bound) label \"tono-loopback\"",
+                "pass out quick on lo0 all no state label \"tono-loopback\"",
                 "block drop out quick all label \"tono-block\"",
                 "",
             ].joined(separator: "\n")
@@ -1557,6 +1598,8 @@ extension KillSwitchManager {
                 && continuityOffWithoutTunnel
                 && continuityOnWithTunnel
                 && lanDiscoveryHolds
+                && establishedFlowsSurvive
+                && tcpFragmentsStayBlocked
                 && bootRestoreHasNoTunnelPass
                 && lanDNSBlockedFirst
                 && emergencyRules == emergencyExpected

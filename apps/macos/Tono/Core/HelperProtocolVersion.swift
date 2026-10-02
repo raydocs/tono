@@ -386,7 +386,10 @@ nonisolated enum HelperProtocolVersion {
     ///   its Router Alert option is otherwise dropped) and outbound link-local
     ///   and administratively scoped IPv4 multicast and the limited broadcast,
     ///   so mDNS and SSDP discovery survive an IGMP-snooping network.
-    static let current = "4.52.37"
+    /// - 4.52.37 → 4.52.38: the outbound loopback, LAN and link-local PF
+    ///   passes keep no state, so a TCP connection that predates the arm (or
+    ///   whose state a flush removed) is no longer dropped by the final block.
+    static let current = "4.52.38"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS
