@@ -923,9 +923,33 @@ nonisolated struct HelperManager {
         }
     }
 
+    /// The helper never waits for another network-settings writer: it refuses
+    /// the request ("Could not lock network preferences") and leaves the retry
+    /// to its caller. Without one, a millisecond lock race failed the DNS
+    /// restore and with it the Kill Switch release (#1239). Identity and
+    /// transport failures are not that case and are thrown at once.
+    static func retryingHelperRefusal<T>(
+        attempts: Int = 3,
+        pause: () -> Void = { usleep(300_000) },
+        _ operation: () throws -> T
+    ) throws -> T {
+        var remaining = attempts
+        while true {
+            do {
+                return try operation()
+            } catch HelperIPCError.commandFailed where remaining > 1 {
+                remaining -= 1
+                pause()
+            }
+        }
+    }
+
     static func restoreProtectedDNS() throws {
-        let result = try sendRequest(method: "POST", path: "/dns/restore")
-        let envelope = try requireSuccess(result, operation: "restore protected DNS")
+        let (result, envelope) = try retryingHelperRefusal {
+            let result = try sendRequest(method: "POST", path: "/dns/restore")
+            let envelope = try requireSuccess(result, operation: "restore protected DNS")
+            return (result, envelope)
+        }
         guard envelope.configured == false,
               envelope.snapshotPresent != true else {
             throw HelperIPCError.invalidResponse
