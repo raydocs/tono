@@ -262,6 +262,28 @@ final class SocketServer {
         return consecutiveChecks >= orphanedBootstrapReleaseThreshold ? .release : .count
     }
 
+    /// Exit probes, one per idle-loop check (10s apart), that must fail in a
+    /// row before a committed session whose owner died is released. Six is
+    /// about a minute: a path that blips recovers inside it, and the Mac is
+    /// not left without a network for much longer than that.
+    static let orphanedTunnelReleaseThreshold = 6
+
+    /// What the Core-running branch of the idle loop should do about a
+    /// committed session (a saved state with `tunnelInterfaces`) whose
+    /// recorded owner died (MAC-ORPHAN-TUNNEL-SESSION, #1269).
+    static func orphanedTunnelAction(
+        stateFilePresent: Bool,
+        committed: Bool,
+        ownerRecorded: Bool,
+        ownerAlive: Bool,
+        uplinkPresent: Bool,
+        exitReachable: Bool?,
+        consecutiveFailures: Int
+    ) -> OrphanedTunnelAction {
+        // A committed session never releases.
+        .reset
+    }
+
     func run() {
         // After listen, before any client. The stale Core is already gone.
         // macOS has no strict kill-switch opt-in, so a helper start with the
@@ -855,6 +877,19 @@ enum OrphanedBootstrapAction: Equatable {
     /// The owner is gone; count this check.
     case count
     /// The owner stayed gone past the threshold; fail open.
+    case release
+}
+
+/// The idle loop's verdict on a committed session whose recorded owner may be
+/// gone.
+enum OrphanedTunnelAction: Equatable {
+    /// The conditions do not hold; any count from earlier probes is void.
+    case reset
+    /// No probe has answered since the last check; the count stands.
+    case wait
+    /// The exit did not answer; count this probe.
+    case count
+    /// The exit stayed unreachable past the threshold; fail open.
     case release
 }
 

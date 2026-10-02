@@ -389,7 +389,11 @@ nonisolated enum HelperProtocolVersion {
     /// - 4.52.37 → 4.52.38: the outbound loopback, LAN and link-local PF
     ///   passes keep no state, so a TCP connection that predates the arm (or
     ///   whose state a flush removed) is no longer dropped by the final block.
-    static let current = "4.52.38"
+    /// - 4.52.38 → 4.52.39: a committed session whose recorded app owner died
+    ///   is released, with the AI hold kept, once its exit has stayed
+    ///   unreachable for about a minute while the Mac has an uplink
+    ///   (MAC-ORPHAN-TUNNEL-SESSION, #1269).
+    static let current = "4.52.39"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS
