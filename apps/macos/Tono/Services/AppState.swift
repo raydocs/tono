@@ -665,9 +665,9 @@ final class AppState {
             )
             self.recoveryCause = .networkChange
             self.disconnect(releaseKillSwitch: false)
-            self.errorMessage = String(
-                localized: "The active network changed; Kill Switch is blocking traffic while Tono protects the new connection."
-            )
+            self.errorMessage = networkMoved
+                ? String(localized: "The active network changed; Kill Switch is blocking traffic while Tono protects the new connection.")
+                : String(localized: "Protected DNS stopped; Kill Switch is blocking traffic while Tono retries.")
             self.scheduleProtectedReconnect(immediate: true)
         }
     }
