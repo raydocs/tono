@@ -457,6 +457,22 @@ extension AppState {
         }
     }
 
+    /// Whether a failed `/core/sync` may still have replaced the Core. The
+    /// helper replaces it before it replies, so a request written whole whose
+    /// reply was lost (empty or invalid response) proves nothing about which
+    /// document is running. A socket or connect failure never arrived, and
+    /// after an answered refusal the new document is not the one running.
+    /// Unknown errors count as lost.
+    static func syncReplyWasLost(_ error: Error) -> Bool {
+        guard let ipcError = error as? HelperIPCError else { return true }
+        switch ipcError {
+        case .emptyResponse, .invalidResponse:
+            return true
+        default:
+            return false
+        }
+    }
+
     /// Rewrite config on disk and tell mihomo to reload it.
     ///
     /// `applyingDirectPolicy` switches the transaction into a lightweight
@@ -568,9 +584,18 @@ extension AppState {
                     finishConfigReloadRequest(requestID)
                     return
                 }
-                let runtimeConfigPath = try await operations.sync(
-                    coreRuntime.configDirectory.path, digest
-                )
+                let runtimeConfigPath: String
+                do {
+                    runtimeConfigPath = try await operations.sync(
+                        coreRuntime.configDirectory.path, digest
+                    )
+                } catch {
+                    // The Core may already be the new document. A kept
+                    // session must not compare later reloads against the old
+                    // one and skip them as unchanged.
+                    if Self.syncReplyWasLost(error) { loadedRuntimeConfigDigest = nil }
+                    throw error
+                }
                 try Task.checkCancellation()
                 if !pinsOnlyRefresh {
                     try await operations.reload(api, runtimeConfigPath)
