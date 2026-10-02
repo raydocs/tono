@@ -986,6 +986,8 @@ final class AppState {
                 await finishPendingDisconnect()
             } else if isConnected || isConnecting || coreRuntime.isRunning {
                 await disconnectAndWait(releaseKillSwitch: false)
+            }
+            if isProtectionBlocked, isTransportWithdrawn {
                 reconcileAfterWithdrawnTransport()
             }
             return
@@ -995,20 +997,29 @@ final class AppState {
         attemptAutomaticConnect()
     }
 
-    /// A withdrawn transport (a refused account, a sign-out on 401) stops the
-    /// Core with PF kept, and nothing reconnects until the user acts. The
-    /// helper's core-down watchdog lifts that hold about 30 s later (AI hold
-    /// kept), and only activation read it back, so the account gate and the
-    /// menu bar kept claiming a block over an open host. Read the helper once
-    /// after the watchdog has had its turn. PF is not touched here: only the
-    /// helper's own confirmed release clears anything, as on activation.
+    /// No transport of either kind: the account is not ready to connect.
+    private var isTransportWithdrawn: Bool {
+        tonoTransport == nil && !cloudOnlyTransportReady
+    }
+
+    /// A withdrawn transport (a refused account, a sign-out on 401) leaves
+    /// the Core stopped with PF kept, and nothing reconnects until the user
+    /// acts: the withdrawal's own teardown, one it joined, or a block a
+    /// reconnect loop already held (the loop skips its read while the account
+    /// is not ready). The helper's core-down watchdog lifts that hold about
+    /// 30 s later (AI hold kept), and only activation read it back, so the
+    /// account gate and the menu bar kept claiming a block over an open host.
+    /// Read the helper once after the watchdog has had its turn. PF is not
+    /// touched here: only the helper's own confirmed release clears anything,
+    /// as on activation. A transport accepted meanwhile retires the read; its
+    /// own connect, retry or repair owns the helper from then on.
     private func reconcileAfterWithdrawnTransport() {
         withdrawnTransportReconcileTask?.cancel()
         let delay = withdrawnTransportReconcileDelay
         withdrawnTransportReconcileTask = Task { [weak self] in
             try? await Task.sleep(for: delay)
-            guard !Task.isCancelled else { return }
-            self?.reconcileExternalProtectionState()
+            guard let self, !Task.isCancelled, self.isTransportWithdrawn else { return }
+            self.reconcileExternalProtectionState()
         }
     }
 
