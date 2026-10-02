@@ -819,6 +819,7 @@ export const translationKeys = [
   'tono.dashboard.killSwitchModes.blocked',
   'tono.dashboard.taglineIdle',
   'tono.dashboard.taglineConnecting',
+  'tono.dashboard.cancelConnecting',
   'tono.dashboard.taglineConnected',
   'tono.dashboard.directOn',
   'tono.dashboard.directSkipped',

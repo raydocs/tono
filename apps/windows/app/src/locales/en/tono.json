@@ -324,6 +324,7 @@
     },
     "taglineIdle": "Pick a node, then connect.",
     "taglineConnecting": "Turning on protection. This usually takes a few seconds.",
+    "cancelConnecting": "Cancel connection",
     "taglineConnected": "Traffic is protected. A drop will not leak your IP.",
     "directOn": "WeChat and other China apps go direct. Claude, ChatGPT, and Cursor use home broadband. Everything else uses the tunnel.",
     "directSkipped": "China-direct is off. WeChat uses the tunnel. Claude, ChatGPT, and Cursor still use home broadband.",

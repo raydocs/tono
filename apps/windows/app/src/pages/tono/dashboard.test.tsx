@@ -437,7 +437,7 @@ describe('dashboard connecting pill', () => {
     renderDashboard()
 
     const pill = screen.getByRole('button', { name: /^Connecting/ })
-    expect(screen.queryByRole('button', { name: /^Cancel/ })).toBeNull()
+    expect(pill.textContent).not.toMatch(/Cancel/)
     expect(pill.getAttribute('aria-disabled')).toBe('true')
     expect(
       screen.getByText(
@@ -449,6 +449,20 @@ describe('dashboard connecting pill', () => {
     fireEvent.click(pill)
     expect(mocks.tonoDisconnect).not.toHaveBeenCalled()
     expect(mocks.tonoConnect).not.toHaveBeenCalled()
+  })
+
+  it('cancels a live attempt from its own control, not from the pill', async () => {
+    mocks.status = makeStatus({
+      uiState: 'connecting',
+      selectedServer: 'US West 1',
+      stage: 'startingKillSwitch',
+    })
+    renderDashboard()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel connection' }))
+    await waitFor(() => expect(mocks.tonoDisconnect).toHaveBeenCalledTimes(1))
+    expect(mocks.tonoConnect).not.toHaveBeenCalled()
+    expect(screen.queryByRole('alert')).toBeNull()
   })
 
   it('does not turn a superseded connect IPC into a fake failure card', async () => {

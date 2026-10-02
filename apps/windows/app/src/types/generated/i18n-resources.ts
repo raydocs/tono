@@ -1032,6 +1032,7 @@ export interface TranslationResources {
           title: string
           week: string
         }
+        cancelConnecting: string
         catalogRequiresChoice: string
         checklist: {
           admin: string
