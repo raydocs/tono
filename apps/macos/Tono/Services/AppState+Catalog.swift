@@ -193,6 +193,18 @@ extension AppState {
                     detail: "selected catalog exit absent at revision \(catalog.revision)"
                 )
                 settleRemovedCatalogExit(wasConnected: isConnected)
+            } else if allowRuntimeTransition, automaticRecoveryIsRunning {
+                // An automatic recovery still owns the barrier. Asking for a
+                // choice ends it with PF held and nothing scheduled: a
+                // survivor is what it retries next, and with none left the
+                // settlement restores the original network.
+                if defaultCloudExitNode() != nil {
+                    applyDefaultProxySelection(persist: true)
+                    catalogSelectionRequiresChoice = false
+                    errorMessage = String(localized: "The selected cloud server was removed. Tono switched to the managed default cloud server.")
+                } else {
+                    settleRemovedCatalogExit(wasConnected: false)
+                }
             } else {
                 applyDefaultProxySelection(persist: true)
                 if managedCatalogRouting?.defaultProxy != nil,
@@ -320,6 +332,18 @@ extension AppState {
         catalog.revision == installedRevision
             && installedDigest == catalog.sha256
             && installedRoutingToken == routingToken
+    }
+
+    /// A protected reconnect loop or wake recovery that will still act. A
+    /// handle that is only draining (a native update suspended it) or a
+    /// recovery that waits for the user is not one.
+    private var automaticRecoveryIsRunning: Bool {
+        guard !nativeUpdatePending, !RuntimeCleanup.nativeUpdatePending,
+              !RuntimeCleanup.nativeUpdateBlocksConnect,
+              !protectedReconnectPausedForUserAction,
+              !automaticResumeHeldAfterRestart else { return false }
+        return [connectionCoordinator.protectedReconnectTask, connectionCoordinator.wakeRecoveryTask]
+            .contains { $0?.isCancelled == false }
     }
 
     /// The selected exit is gone and a session was up or still connecting.

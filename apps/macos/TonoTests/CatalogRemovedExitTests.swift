@@ -314,6 +314,98 @@ final class CatalogRemovedExitTests: XCTestCase {
         await app.finishPendingPersistence()
     }
 
+    /// MAC-CATALOG-REMOVED-RETRY-STUCK: Protected Offline was retrying the
+    /// selected exit when the catalog removed it. Asking for a choice ended
+    /// the retry loop with the barrier held and nothing scheduled.
+    func testRemovedExitDuringProtectedRetryKeepsRetryingOnTheSurvivor() async throws {
+        try await withRemovalWhileRetrying(survivor: true) { app in
+            XCTAssertFalse(app.catalogSelectionRequiresChoice)
+            XCTAssertEqual(app.proxyService.activeNodeName, "JP-Survivor")
+            XCTAssertNotNil(app.connectionCoordinator.protectedReconnectTask, "the retry loop must keep its barrier's recovery")
+        }
+    }
+
+    func testRemovedLastExitDuringProtectedRetryRestoresNetwork() async throws {
+        try await withRemovalWhileRetrying(survivor: false) { app in
+            await app.connectionCoordinator.disconnectSequence?.value
+            XCTAssertTrue(app.catalogSelectionRequiresChoice)
+            XCTAssertFalse(app.isProtectionBlocked)
+            XCTAssertNil(app.connectionCoordinator.protectedReconnectTask)
+        }
+    }
+
+    private func withRemovalWhileRetrying(
+        survivor keepSurvivor: Bool,
+        _ verify: (AppState) async -> Void
+    ) async throws {
+        let storage = ConfigStorage.shared
+        let savedFiles = ["regions.json", "rules.json", "config.json"].map { name in
+            let url = storage.appSupportDirectory.appendingPathComponent(name)
+            return (url, try? Data(contentsOf: url))
+        }
+        let selection = AppProfile.defaults.object(forKey: SettingsKey.selectedProxyTargetName)
+        let armed = KillSwitchService.isArmed
+        let updateBlocked = RuntimeCleanup.nativeUpdateBlocksConnect
+        let updatePending = RuntimeCleanup.nativeUpdatePending
+        // The release teardown clears these.
+        let sessionDefaults = [
+            SettingsKey.didStartCore, SettingsKey.lastTunEnabled, SettingsKey.connectBootSession,
+        ].map { ($0, AppProfile.defaults.object(forKey: $0)) }
+        let bootFiles = [
+            RuntimeCleanup.connectBootSessionFile,
+            RuntimeCleanup.connectBootSessionFile.appendingPathExtension("pending"),
+        ].map { ($0, try? Data(contentsOf: $0)) }
+        RuntimeCleanup.nativeUpdateBlocksConnect = false
+        RuntimeCleanup.nativeUpdatePending = false
+        ManagedExitCatalogOwnership.adopt("removal-owner")
+        let app = await makeApp()
+        app.networkProtection.releaseAfterFailure = { KillSwitchService.isArmed = false }
+        let removed = Fixture.realityNode(name: "US-Removed", id: "us-removed")
+        let survivor = Fixture.realityNode(name: "JP-Survivor", id: "jp-survivor", server: "203.0.114.9")
+        let remaining = keepSurvivor ? [survivor] : []
+        let outcome: Result<Void, Error>
+        do {
+            try await app.installManagedExitCatalog(
+                try catalog([removed] + remaining, revision: 86),
+                persistCache: false, allowRuntimeTransition: false
+            )
+            XCTAssertTrue(app.applyProxySelection(removed.name))
+            KillSwitchService.isArmed = true
+            app.isProtectionBlocked = true
+            // The loop sleeps in its first backoff while the catalog arrives.
+            app.scheduleProtectedReconnect()
+            XCTAssertNotNil(app.connectionCoordinator.protectedReconnectTask)
+            try await app.installManagedExitCatalog(
+                try catalog(remaining, revision: 87),
+                persistCache: false, allowRuntimeTransition: true
+            )
+            await verify(app)
+            outcome = .success(())
+        } catch {
+            outcome = .failure(error)
+        }
+        app.connectionCoordinator.cancelReconnectTasks()
+        await app.connectionCoordinator.disconnectSequence?.value
+        // Purging queues a save of the emptied catalog; let it land before
+        // the saved files go back.
+        ManagedExitCatalogOwnership.purge()
+        await app.finishPendingPersistence()
+        for (key, value) in sessionDefaults { AppProfile.defaults.set(value, forKey: key) }
+        for (file, data) in bootFiles {
+            if let data { try? data.write(to: file) }
+            else { try? FileManager.default.removeItem(at: file) }
+        }
+        KillSwitchService.isArmed = armed
+        AppProfile.defaults.set(selection, forKey: SettingsKey.selectedProxyTargetName)
+        RuntimeCleanup.nativeUpdateBlocksConnect = updateBlocked
+        RuntimeCleanup.nativeUpdatePending = updatePending
+        for (url, data) in savedFiles {
+            if let data { try? storage.writeSensitive(data, to: url) }
+            else { try? FileManager.default.removeItem(at: url) }
+        }
+        try outcome.get()
+    }
+
     func testFailedAutomaticCatalogSwitchRetainsAIHold() async {
         let armed = KillSwitchService.isArmed
         let selection = AppProfile.defaults.object(forKey: SettingsKey.selectedProxyTargetName)
