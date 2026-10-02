@@ -7,3 +7,8 @@
 - 工程与测试修正：回归 `shows no error when a newer transition supersedes the tray connect` 先单独推送为
   `a6889023`（红），结果记在 PR。
 - 验证：仅托管 CI（vitest）；未在 Windows 实机上点出这个时序。仅源码，无新候选。
+
+### 2026-10-02 续记：已合 main
+- 来源合入：#1345，merge commit `0c4c07bc`，PR 头 `719438ad`。该头的 `ci-gate` 全绿：https://github.com/raydocs/tono/actions/runs/37033131351 。红测试 `a6889023`：run 37031321540（`windows / app` vitest 1 failed）。
+- 独立评审：普通风险（前端提示），主会话核对 diff；未做独立评审。
+- 候选/发布：仅源码合入 main。无新安装包，无部署，无客户发布。没有实机验证。
