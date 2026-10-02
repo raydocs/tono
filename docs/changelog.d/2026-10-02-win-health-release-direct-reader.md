@@ -1,0 +1,11 @@
+## 2026-10-02 · The Windows automatic health release no longer waits out a stalled DIRECT reload
+- Ownership: SHIP_PLAN §2 item 10 (decision 031); Windows App health monitor (`WIN-DIRECT-RESTORE-WRITER-DELAY-AUTO`, [#1051](https://github.com/raydocs/tono/issues/1051)).
+- Source: baseline `4da6e98c`; branch `fix/win-health-release-direct-reader-1051`, [#1329](https://github.com/raydocs/tono/pull/1329); not yet merged.
+- Defect fix: after Connected, one stalled Core `/configs` answer kept the optional DIRECT reload's lifecycle reader for two 60-second attempts. When the health proof then failed, the automatic release queued its lifecycle writer behind that reader, so a non-strict machine stayed Blocked for about two more minutes. `admit_health_release` now queues the writer and, if a reader is in the way, cancels this generation's controller waits. The reader's owner retracts its Service session and drops the reader; the release then runs at once.
+- Why now: the 2026-10-01 attempt stopped because the release removed WFP before the AI hold. #1271 changed that order (`hold_ai_before_release`), so the earlier release no longer exposes AI traffic.
+- Kept: the connection generation is not retired, so the release still owns the session it captured. A proof that is no longer current (generation, selection or switch changed) returns before anything is cancelled. Nothing is cancelled when the writer is free. Strict mode and the policy-rebuild recovery are unchanged.
+- New/optimization: none.
+- Engineering/tests: `health_release_admission_wakes_a_stalled_controller_reader`. The test commit was pushed alone first so hosted CI ran it against the old code.
+- Verification: no local cargo on the MacBook; Windows CI runs the test. See the PR for the red run on the test-only commit and the green run on the fix.
+- Candidate/publication: source only; no new candidate.
+- Limits: needs-hardware (no stalled-Core reproduction on a Windows machine). The 60 s reload grace before a health failure counts is unchanged. `WIN-UPDATE-CONNECTING-CLEANUP` (failed update Prepare while Connecting) is not part of this change. The strict and policy-rebuild recoveries still wait for the reader.

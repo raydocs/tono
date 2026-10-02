@@ -1371,8 +1371,37 @@ async fn admit_health_release(
     tokio::sync::OwnedRwLockWriteGuard<()>,
 ), NetworkChangeOutcome> {
     let selection = state.begin_policy_activation().await;
-    let lifecycle = state.begin_privileged_release().await;
+    let mut writer = std::pin::pin!(state.begin_privileged_release());
+    let lifecycle = match futures::poll!(writer.as_mut()) {
+        std::task::Poll::Ready(lifecycle) => lifecycle,
+        std::task::Poll::Pending => {
+            // #1051: a reader is in the way. A stalled optional DIRECT reload keeps its reader
+            // for both 60-second controller attempts, and ordinary traffic stayed Blocked that
+            // long behind this release. The writer is queued now, so no new reader can start;
+            // wake this generation's controller waits. Their detached owner still retracts its
+            // Service session before it drops the reader.
+            {
+                let mut inner = state.lock().await;
+                health_release_is_current(&inner, generation, selected_node, switch_task, check_switch_task)?;
+                inner.cancel_connection_waits();
+            }
+            writer.await
+        }
+    };
     let mut inner = state.lock().await;
+    health_release_is_current(&inner, generation, selected_node, switch_task, check_switch_task)?;
+    inner.tasks.abort_reconnect();
+    Ok((selection, lifecycle))
+}
+
+/// Whether the failed proof still describes the runtime this release would take down.
+fn health_release_is_current(
+    inner: &TonoInner,
+    generation: u64,
+    selected_node: Option<&str>,
+    switch_task: Option<tokio::task::Id>,
+    check_switch_task: bool,
+) -> Result<(), NetworkChangeOutcome> {
     if inner.connect_generation != generation || !inner.fsm.status().is_connected {
         return Err(NetworkChangeOutcome::Handled);
     }
@@ -1386,8 +1415,7 @@ async fn admit_health_release(
     if check_switch_task && inner.tasks.switch.as_ref().map(|task| task.inner().id()) != switch_task {
         return Err(NetworkChangeOutcome::RecoveredInPlace);
     }
-    inner.tasks.abort_reconnect();
-    Ok((selection, lifecycle))
+    Ok(())
 }
 
 fn capture_health_context(
