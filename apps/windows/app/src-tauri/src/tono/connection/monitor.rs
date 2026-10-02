@@ -50,7 +50,12 @@ pub(super) const NETWORK_MONITOR_INTERVAL: Duration = Duration::from_secs(2);
 
 /// F2: exit-probe cadence while Connected (the Mac "9.17 h fake-green"
 /// lesson — a silent tunnel must be caught by probing, not by watching).
-pub(super) const EXIT_PROBE_INTERVAL: Duration = Duration::from_secs(120);
+///
+/// 30 s, down from 120 s (owner, 2026-10-02): an exit that dies behind a live tunnel leaves no
+/// network event, so this interval is most of the time the UI says Connected while nothing
+/// loads. A probe is one protected DNS query and one small HTTPS request; macOS runs its own
+/// every ten seconds.
+pub(super) const EXIT_PROBE_INTERVAL: Duration = Duration::from_secs(30);
 
 /// How long a successful data-plane proof stands in for the next network-change event.
 ///

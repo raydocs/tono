@@ -232,7 +232,7 @@ pub enum NetworkChangeOutcome {
 /// unavailability while mihomo and WFP are untouched, which an SCM recovery restart or the
 /// updater's replace-runtime step produces — therefore ended the connection-phase health
 /// monitor for the rest of the session, and nothing restarts it before the next connect. With
-/// it went the 120 s exit probe, the one leg that notices a dead exit behind a live tunnel.
+/// it went the periodic exit probe, the one leg that notices a dead exit behind a live tunnel.
 pub const fn connection_loop_continues(outcome: NetworkChangeOutcome) -> bool {
     matches!(outcome, NetworkChangeOutcome::RecoveredInPlace)
 }

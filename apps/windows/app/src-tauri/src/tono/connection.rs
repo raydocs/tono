@@ -1180,7 +1180,7 @@ mod tests {
     /// updater replacing the runtime — invalidate Connected on the Service leg alone while
     /// mihomo and WFP are untouched, so the TUN proof succeeds and nothing is torn down. The
     /// call used to be terminal for the caller regardless, which ended the connected-lifetime
-    /// monitor for the rest of the session: no more kill-switch, protected-DNS or 120 s exit
+    /// monitor for the rest of the session: no more kill-switch, protected-DNS or periodic exit
     /// probing, so a later dead exit would have shown Connected forever.
     #[test]
     fn a_recovered_in_place_network_change_keeps_the_monitor_alive() {
