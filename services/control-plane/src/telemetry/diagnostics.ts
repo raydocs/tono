@@ -53,9 +53,10 @@ const SESSION_ID = /^[A-Za-z0-9_-]{8,64}$/;
 const PREFIX = /^(?:\d{1,3}\.){3}0\/24$/;
 const HASH = /^[a-f0-9]{64}$/;
 const NODE_ID = /^[A-Za-z0-9 .·_\-]{1,80}$/;
-// A classified value, never prose: no spaces, `=`, `/` or `@`, so a core log
-// line (credentials, peers, hostnames in a sentence) cannot be stored as one.
-const CLASS_TOKEN = /^[A-Za-z0-9_.:-]{1,80}$/;
+// A classified value, never prose: an identifier with no spaces, dots, colons,
+// `=`, `/` or `@`, so neither a core log line nor a bare hostname or address
+// can be stored as one.
+const CLASS_TOKEN = /^[A-Za-z][A-Za-z0-9_]{0,79}$/;
 
 export type StoredBundle = { sessionId: string | null; events: number };
 
