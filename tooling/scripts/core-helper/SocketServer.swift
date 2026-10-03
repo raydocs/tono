@@ -144,6 +144,10 @@ final class SocketServer {
     /// Idle-loop checks, 10s apart, with the bootstrap-only block still held
     /// after its recorded owner died.
     private var consecutiveOrphanedOwnerChecks = 0
+    /// Relaunches of the app issued for the current recorded owner after it
+    /// died, and the idle-loop checks since the last one.
+    private var orphanedOwnerRelaunchAttempts = 0
+    private var checksSinceOrphanedOwnerRelaunch = 0
     /// The exit probe a committed session with a dead owner is waiting on,
     /// and how many in a row have failed.
     private var orphanedTunnelProbe: OrphanedTunnelProbe?
@@ -265,6 +269,34 @@ final class SocketServer {
             return .reset
         }
         return consecutiveChecks >= orphanedBootstrapReleaseThreshold ? .release : .count
+    }
+
+    /// How many times the app is brought back for one dead owner, and how
+    /// many idle-loop checks (10s apart) separate two launches. Two: the
+    /// first catches a crash, the second a launch that did not come up; an
+    /// app that keeps dying is not restarted forever, and the releases
+    /// below still end the outage.
+    static let orphanedOwnerRelaunchLimit = 2
+    static let orphanedOwnerRelaunchSpacing = 3
+
+    /// MAC-ORPHAN-OWNER-RELAUNCH: whether this idle-loop check relaunches the
+    /// app. The recorded owner died while PF still holds a block (bootstrap
+    /// or committed); the relaunched app finds the armed state and resumes
+    /// the route itself, as it does after any crash. No recorded owner is
+    /// unknown, not gone; a pending native update launches its own
+    /// successor; a sleeping Mac waits.
+    static func orphanedOwnerRelaunchDue(
+        protectionPresent: Bool,
+        ownerRecorded: Bool,
+        ownerAlive: Bool,
+        awake: Bool,
+        updatePending: Bool,
+        attempts: Int,
+        checksSinceLastAttempt: Int
+    ) -> Bool {
+        guard protectionPresent, ownerRecorded, !ownerAlive, awake, !updatePending else { return false }
+        guard attempts < orphanedOwnerRelaunchLimit else { return false }
+        return attempts == 0 || checksSinceLastAttempt >= orphanedOwnerRelaunchSpacing
     }
 
     /// Failed exit probes, one per idle-loop check (10s apart), counted in a
@@ -400,6 +432,9 @@ final class SocketServer {
             openNetworkEpoch = epoch
             consecutiveCoreDownChecks = 0
         }
+        // The app is the only thing that reconnects or shows the state.
+        // Bring it back before deciding anything about its session.
+        observeOrphanedOwner()
         if KillSwitchManager.shouldReinstallKillSwitch(coreRunning: core.status().running) {
             consecutiveCoreDownChecks = 0
             // MAC-ORPHAN-BOOTSTRAP-PF: an app that died between /core/start
@@ -438,6 +473,67 @@ final class SocketServer {
             killSwitch.reconcileSelectiveRecoveryIfReleased()
         }
         recoverDNSAfterStoppedCore()
+    }
+
+    /// MAC-ORPHAN-OWNER-RELAUNCH: the app that owns the session died while
+    /// PF still holds a block. Launch Services starts the installed app in
+    /// the owner's session, as the native update's successor launch does; it
+    /// authenticates anew, finds the armed state and resumes the route, so
+    /// the menu bar and the reconnect logic are back within seconds instead
+    /// of the Mac waiting for the releases below. The launch is a request to
+    /// the user's session, not a wait for the app.
+    private func observeOrphanedOwner() {
+        let owner = sessionOwner
+        let ownerAlive = owner.map { !Self.sessionOwnerHasExited($0) } ?? true
+        if owner != nil, !ownerAlive, orphanedOwnerRelaunchAttempts > 0 {
+            checksSinceOrphanedOwnerRelaunch += 1
+        }
+        guard Self.orphanedOwnerRelaunchDue(
+            protectionPresent: KillSwitchManager.stateFileExists(),
+            ownerRecorded: owner != nil,
+            ownerAlive: ownerAlive,
+            awake: transitionGate.isAwake(),
+            updatePending: nativeUpdatePending(),
+            attempts: orphanedOwnerRelaunchAttempts,
+            checksSinceLastAttempt: checksSinceOrphanedOwnerRelaunch
+        ) else { return }
+        orphanedOwnerRelaunchAttempts += 1
+        checksSinceOrphanedOwnerRelaunch = 0
+        do {
+            try Self.relaunchInstalledApp(uid: allowedUID)
+            FileHandle.standardError.write(Data(
+                "tono: the app (pid \(owner?.pid ?? 0)) died with protection held; asked its session to relaunch it (attempt \(orphanedOwnerRelaunchAttempts))\n".utf8
+            ))
+        } catch {
+            let detail = (error as? HelperFailure)?.message ?? String(describing: error)
+            FileHandle.standardError.write(Data(
+                "tono: could not relaunch the app after its owner died: \(detail)\n".utf8
+            ))
+        }
+    }
+
+    /// Only the installed, correctly signed bundle is launched, and only as
+    /// the allowed user: root asks that user's Launch Services, it does not
+    /// run the app. The app must authenticate on helper IPC like any peer.
+    /// The request is not awaited: this runs inside the idle loop under the
+    /// update lock, and a stuck `open` must not stall IPC or the releases
+    /// that follow it. `sudo -n` can never prompt; a non-zero exit is logged
+    /// by the termination handler and still counts as an attempt.
+    static func relaunchInstalledApp(uid: uid_t) throws {
+        _ = try UpdatePackage.verifyCode(UpdatePackage.appPath, identifier: "com.raydocs.tono")
+        let child = Process()
+        child.executableURL = URL(fileURLWithPath: "/bin/launchctl")
+        child.arguments = ["asuser", String(uid), "/usr/bin/sudo", "-n", "-u", "#\(uid)", "/usr/bin/open", UpdatePackage.appPath]
+        child.environment = ["PATH": "/usr/bin:/bin:/usr/sbin:/sbin", "HOME": "/var/root"]
+        child.standardOutput = FileHandle.nullDevice
+        child.standardError = FileHandle.nullDevice
+        child.terminationHandler = { process in
+            guard process.terminationStatus != 0 else { return }
+            FileHandle.standardError.write(Data(
+                "tono: the relaunch request exited with status \(process.terminationStatus)\n".utf8
+            ))
+        }
+        try child.run()
     }
 
     /// MAC-ORPHAN-BOOTSTRAP-PF: the app armed the bootstrap block (empty
@@ -612,6 +708,8 @@ final class SocketServer {
     private func clearSessionOwner() {
         sessionOwner = nil
         consecutiveOrphanedOwnerChecks = 0
+        orphanedOwnerRelaunchAttempts = 0
+        checksSinceOrphanedOwnerRelaunch = 0
         resetOrphanedTunnel()
     }
 
