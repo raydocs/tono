@@ -102,9 +102,6 @@ export type FailureClusterInput = {
   node: string;
   userId: string;
   deviceId: string | null;
-  appBuild?: string | null;
-  gitCommit?: string | null;
-  coreVersion?: string | null;
   channel?: string | null;
 };
 
@@ -139,54 +136,53 @@ async function hmacHex(secret: string, message: string): Promise<string> {
   return [...new Uint8Array(sig)].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
-// What a client-supplied field may look like once it leaves the control plane.
-// A length check is not a class: each shape below excludes dots-and-labels
-// hostnames, addresses and `key=value`, so text a client put in the wrong
-// field goes out as a placeholder, never verbatim. Ingest stays tolerant (old
-// clients keep reporting); only the outbound copy is strict.
+// What a client-supplied field may be once it leaves the control plane (the
+// alert webhook, the read API's sample). A length check is not a class and a
+// shape is not provenance: `192.168.257` is a version to a regex and an
+// address to a URL parser. So an identifier goes out only as an identifier, an
+// enum as an enum, and a name or version only when the server issued it;
+// anything else is a placeholder. Ingest stays tolerant (old clients keep
+// reporting); only the outbound copy is strict.
 const UNCLASSIFIED = '[unclassified]';
-const UNLISTED_NODE = '[unlisted]';
+const UNLISTED = '[unlisted]';
 const OUTBOUND = {
   code: /^[A-Za-z][A-Za-z0-9_]{0,79}$/,
   stage: /^[A-Za-z][A-Za-z0-9_]{0,39}$/,
-  appVersion: /^\d{1,4}\.\d{1,4}\.\d{1,4}$/,
-  appBuild: /^\d{1,10}$/,
-  gitCommit: /^[0-9a-f]{7,40}$/,
-  coreVersion: /^v?\d{1,4}\.\d{1,4}\.\d{1,4}(?:-[A-Za-z0-9]{1,16})?$/,
   platform: /^(?:macos|windows|ios|android|linux|unknown)$/,
   channel: /^(?:release|beta)$/,
 } as const;
 
-function outbound(value: unknown, shape: RegExp): string | null {
-  if (value === null || value === undefined || value === '') return null;
+function outbound(value: unknown, shape: RegExp): string {
   return typeof value === 'string' && shape.test(value) ? value : UNCLASSIFIED;
 }
 
-// A node name goes out only if the server issued it; a catalog display name
-// has spaces and separators no charset can tell from prose.
+// A catalog display name has spaces and separators no charset can tell from
+// prose, so it goes out only if the server issued it.
 async function outboundNode(db: D1Database, node: string): Promise<string> {
   const base = node.replace(/ · hy2$/, '');
   const known = await db.prepare(
     `SELECT 1 AS ok WHERE EXISTS (SELECT 1 FROM exit_nodes WHERE name = ?1)
         OR EXISTS (SELECT 1 FROM operations_logical_nodes WHERE display_name = ?1)`,
   ).bind(base).first<{ ok: number }>();
-  return known ? node : UNLISTED_NODE;
+  return known ? node : UNLISTED;
 }
 
-function outboundSample(value: unknown): Record<string, string | null> {
-  const row = value && typeof value === 'object' ? value as Record<string, unknown> : {};
-  return {
-    appBuild: outbound(row.appBuild, OUTBOUND.appBuild),
-    gitCommit: outbound(row.gitCommit, OUTBOUND.gitCommit),
-    coreVersion: outbound(row.coreVersion, OUTBOUND.coreVersion),
-    channel: outbound(row.channel, OUTBOUND.channel),
-  };
+// A version goes out only if the release registry lists it.
+async function outboundVersion(db: D1Database, version: string): Promise<string> {
+  const known = await db.prepare(
+    `SELECT 1 AS ok FROM client_releases WHERE version = ? LIMIT 1`,
+  ).bind(version).first<{ ok: number }>();
+  return known ? version : UNLISTED;
 }
 
-// Build identifiers only. Client error text cannot be proven free of
-// hostnames, addresses or credentials by regex scrubbing, and this sample is
-// what the alert webhook sends to a third party; the text stays on the
-// failure's own connection_events row.
+// The release channel only. Client error text and build identifiers cannot be
+// proven free of hostnames, addresses or credentials; they stay on the
+// failure's own connection_events row and never enter the sample.
+export function outboundSample(value: unknown): { channel: string | null } {
+  const channel = value && typeof value === 'object' ? (value as { channel?: unknown }).channel : null;
+  return { channel: typeof channel === 'string' && OUTBOUND.channel.test(channel) ? channel : null };
+}
+
 function sampleOf(input: FailureClusterInput): string {
   return JSON.stringify(outboundSample(input)).slice(0, SAMPLE_LIMIT);
 }
@@ -324,7 +320,7 @@ async function sendClusterAlert(
   if (reason === 'spike' && row.alerted_at != null && nowSec - Number(row.alerted_at) < ALERT_MIN_GAP_SEC) {
     return false;
   }
-  let sample: Record<string, string | null> | null = null;
+  let sample: { channel: string | null } | null = null;
   try {
     sample = row.sample_json ? outboundSample(JSON.parse(row.sample_json)) : null;
   } catch {
@@ -339,7 +335,7 @@ async function sendClusterAlert(
       id: row.id,
       code: outbound(row.code, OUTBOUND.code),
       stage: outbound(row.stage, OUTBOUND.stage),
-      appVersion: outbound(row.app_version, OUTBOUND.appVersion),
+      appVersion: await outboundVersion(db, row.app_version),
       platform: outbound(row.platform, OUTBOUND.platform),
       node: await outboundNode(db, row.node),
       count: Number(row.event_count),

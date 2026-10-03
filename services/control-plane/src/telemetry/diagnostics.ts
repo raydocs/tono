@@ -317,8 +317,7 @@ export async function storeDiagnosticsBundle(
     if (FAILURE_KINDS.has(kind) && code && stage && node) {
       failures.push({
         atMs, code, stage, appVersion: client.appVersion, platform: client.platform, node,
-        userId, deviceId, appBuild: client.appBuild, gitCommit: client.gitCommit,
-        coreVersion: client.coreVersion, channel: client.channel,
+        userId, deviceId, channel: client.channel,
       });
     }
   }

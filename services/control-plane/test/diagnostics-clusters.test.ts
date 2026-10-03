@@ -152,7 +152,6 @@ function failureInput(code: string, atMs: number) {
     node: 'Tokyo',
     userId: 'user-cluster',
     deviceId: 'device-cluster',
-    appBuild: '74',
     channel: 'release',
   };
 }
