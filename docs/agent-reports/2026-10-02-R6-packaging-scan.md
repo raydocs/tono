@@ -25,7 +25,7 @@ This scan was read-only. It looked for bugs that only appear when an app is real
 | R6-4 | P3 | #1321 | open (release trust) | The v1 Windows measurement treats sing-box as optional and does not cross-check duplicate copies of it (`windows-package-components.mjs:16-24,64-65`, `desktop-update-v1.mjs:47-50`). |
 | R6-5 | P3 | #1322 | open | The macOS bundle ships a stale `core-identity.json` (alpha.3, 6c86720c…) while the input is alpha.9 (ab0187a7…). |
 | R6-6 | P3 | #1323 | open | Every CI macOS build records `dirty:true`, because `build-core-helper.sh` rewrites a tracked helper binary that is now stale. |
-| R6-7 | P3 | #1324 | open | `package-macos-dmg.sh` requires `Contents/Resources/mihomo` and has no callers. |
+| R6-7 | P3 | #1324 | script deleted (2026-10-03, see `docs/changelog.d/2026-10-03-remove-dead-macos-dmg-script.md`) | `package-macos-dmg.sh` requires `Contents/Resources/mihomo` and has no callers. |
 | R6-8 | P3 | #1325 | open | `release-version.mjs` skips `Cargo.lock` and the pbxproj, and rewrites every `version =` line. |
 
 ## Checked and consistent
