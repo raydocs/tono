@@ -11,3 +11,7 @@
 - 来源合入：#1362，merge commit `854e91cc`，PR 头 `d680fa76`。该头的 `ci-gate` 全绿：https://github.com/raydocs/tono/actions/runs/37110582602 （build、privileged-tests 的 helper 自测链通过）。红测试 `b3499928`：run 37110061560 红，但红在 helper 合约摘要检查（`digest-mismatch: error`，红提交未重算 `CONTRACT.sha256`，且自测调用的 `orphanedOwnerRelaunchDue` 当时还不存在，本就不能编译），不是自测自己的失败信息。
 - 独立评审：Codex gpt-6.1-sol high 只读两轮，记录在 https://github.com/raydocs/tono/pull/1362#issuecomment-5967316722 ：r1 `eb363310..5c5ac233` 1 major（`open` 在持锁空闲循环里等待）→ `d680fa76` 改为不等待的 `Process` + `sudo -n`；r2 `5c5ac233..d680fa76` 0 major，2 minor 保留开放（finding 片段），A–F 全覆盖，CONTRACT 重算一致。
 - 候选/发布：仅源码合入 main。无新安装包，无部署，无客户发布。没有实机验证（needs-hardware）：`launchctl asuser … sudo -n -u … open` 在守护进程上下文的实际行为依赖原生升级拉起路径的先例。
+
+### 2026-10-03 续记：更正红测试的失败原因
+- 上一条续记写红运行 37110061560「红在 helper 合约摘要检查（`digest-mismatch: error`）」，不对。那一行是 `actions/download-artifact` 回显的输入参数，不是失败。实际失败在 `macos / build`（步骤 Verify core and build current helper）和 `macos / privileged-tests`（步骤 Build the privileged helper）里的 `build-core-helper`：`helper sources changed but HelperProtocolVersion.current is still 4.52.39`（helper 源码改了但协议版本没升的守卫）。结论不变：红提交没有跑到自测自己的断言，它证明的只是「红提交过不了 CI」，不是「新自测在旧代码上失败」。
+
