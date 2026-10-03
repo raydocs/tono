@@ -1,6 +1,6 @@
 | ID | 问题（一句） | 状态 | Issue / PR | 等级 | 剩余限制 |
 |---|---|---|---|---|---|
-| WIN-SCM-VERIFIER-WORKERS | Recurring status polls keep spawning detached SCM verification threads during one prolonged SCM stall | in-PR | [#933](https://github.com/raydocs/tono/pull/933) | 中·已确认（P2） | Narrow failing-then-passing Linux regression; actual Windows SCM stall and resource exhaustion not reproduced |
+| WIN-SCM-VERIFIER-WORKERS | Recurring status polls keep spawning detached SCM verification threads during one prolonged SCM stall | fixed(d5f71172) | [#933](https://github.com/raydocs/tono/pull/933) | 中·已确认（P2） | Narrow failing-then-passing Linux regression; actual Windows SCM stall and resource exhaustion not reproduced |
 
 Baseline `560af1ac`, `service/src/client/mod.rs:165-174`: `run_with_deadline` starts an OS thread, returns after three seconds in the verifier, and leaves stalled SCM work detached. The sixteen-worker IPC runtime and vendor eight-connect budget cover the outer request, not the surviving inner thread. Request retry counts therefore do not cap process-lifetime thread growth.
 

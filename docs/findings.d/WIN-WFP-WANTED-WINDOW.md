@@ -1,5 +1,5 @@
 | ID | 问题（一句） | 状态 | Issue / PR | 等级 | 剩余限制 |
 |---|---|---|---|---|---|
-| WIN-WFP-WANTED-WINDOW | Windows 崩溃或重启后，可读的 wanted 意图会重新装上 WFP，而 Service 不会自己拉起 Core，机器一直没有网 | in-PR | [#740](https://github.com/raydocs/tono/pull/740) | 高·推导 | Core 未跑且不会启动则立刻放行；正在跑或即将启动则最多约 30 秒，需要实机校准。严格开关为真时仍保持拦截，恢复靠紧急解除；不健康看门狗的放行在 #733。macOS 启动重装由 #710 对齐 #701 |
+| WIN-WFP-WANTED-WINDOW | Windows 崩溃或重启后，可读的 wanted 意图会重新装上 WFP，而 Service 不会自己拉起 Core，机器一直没有网 | fixed(6160ca78) | [#740](https://github.com/raydocs/tono/pull/740) | 高·推导 | Core 未跑且不会启动则立刻放行；正在跑或即将启动则最多约 30 秒，需要实机校准。严格开关为真时仍保持拦截，恢复靠紧急解除；不健康看门狗的放行在 #733。macOS 启动重装由 #710 对齐 #701 |
 
 服务启动先装拦截，避免 Core 马上回来时漏流量。Core 没在跑、本开机也不会启动它时立刻放行。否则连接证明是：Core 进程在、意图已验证、模式为 Locked、隧道许可已渲染；最多约 30 秒。到点或启动落空仍无证明则放行并让应用后台重连。生产不写 `strict_kill_switch`。

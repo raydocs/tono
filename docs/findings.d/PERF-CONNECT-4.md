@@ -1,6 +1,6 @@
 | ID | 问题（一句） | 状态 | Issue / PR | 等级 | 剩余限制 |
 |---|---|---|---|---|---|
-| PERF-CONNECT-4 | sing-box 冷 DoH 比 mihomo 多一次 Reality 握手；macOS 发出器的指纹和 fake-ip 段仍和 Windows 不一致 | in-PR | 本 PR | 中·实测 | 首包探测仍是应用层；基准用的是上游 tarball |
+| PERF-CONNECT-4 | sing-box 冷 DoH 比 mihomo 多一次 Reality 握手；macOS 发出器的指纹和 fake-ip 段仍和 Windows 不一致 | fixed(a56733a8) | 本 PR | 中·实测 | 首包探测仍是应用层；基准用的是上游 tarball |
 
 rebase 到已合入的 #729 之后再读模板。Windows 发出器拒绝非 chrome，写出 `utls.fingerprint=chrome`。A 查询从 TUN/DNS/Mixed 进 fake-ip，规则上有 `rewrite_ttl: 30`。AAAA 直接 NOERROR。DoH 是 `https`，`alpn: [h2]`，并带 `Tono-DoH-Backup`（`8.8.8.8`）。#728 在开关文件不存在时返回关闭。先前写的「只有一个 DoH、TTL 写不出 30」这两条已经在 main 上，不再算缺口。
 

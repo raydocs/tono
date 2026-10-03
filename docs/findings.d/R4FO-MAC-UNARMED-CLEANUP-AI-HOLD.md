@@ -1,6 +1,6 @@
 | ID | 问题（一句） | 状态 | Issue / PR | 等级 | 剩余限制 |
 |---|---|---|---|---|---|
-| R4FO-MAC-UNARMED-CLEANUP-AI-HOLD | Automatic cleanup of an unarmed failed connection removes the selective AI hold that the helper just installed | in-PR | [#1061](https://github.com/raydocs/tono/pull/1061) | 高·已确认（P1，源码与生产拆线回归） | Swift/XCTest and native PF/resolver execution require macOS CI/hardware; existing selective-layer coverage limitations remain. |
+| R4FO-MAC-UNARMED-CLEANUP-AI-HOLD | Automatic cleanup of an unarmed failed connection removes the selective AI hold that the helper just installed | fixed(53e64771) | [#1061](https://github.com/raydocs/tono/pull/1061) | 高·已确认（P1，源码与生产拆线回归） | Swift/XCTest and native PF/resolver execution require macOS CI/hardware; existing selective-layer coverage limitations remain. |
 
 Baseline `7f382af7`: a native failure after a bootstrap PF load reaches helper `releaseInstalledBlock` and installs the narrow layer (#1028). The authenticated response proves wanted=false/armed=false, so `KillSwitchService.arm` throws without raising the initial App latch. The live Connect catch (`AppState+Connect.swift:665`) calls `disconnect(releaseKillSwitch: true, afterUnarmedConnectFailure: true)`. That flag only bypassed helper repair; at line 975 the subsequent successful cleanup selected explicit disarm and removed the newly installed layer. The connect watchdog has the same caller at line 168. No second independent failure is needed.
 

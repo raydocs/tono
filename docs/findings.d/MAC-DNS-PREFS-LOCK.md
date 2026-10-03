@@ -1,6 +1,6 @@
 | ID | 问题（一句） | 状态 | Issue / PR | 等级 | 剩余限制 |
 |---|---|---|---|---|---|
-| MAC-DNS-PREFS-LOCK | Another network-preferences writer can hold the helper's DNS restore, update lock and watchdog indefinitely | in-PR | hunt/sol-r3helper-dns-prefs-contention | 中·已确认（P1，源码/API 路径） | Native contention regression authored before the fix, not executed on Linux. Framework startup/create/commit/apply stalls and kernel hangs are not bounded by this correction. Contention still refuses DNS writes and preserves the snapshot. |
+| MAC-DNS-PREFS-LOCK | Another network-preferences writer can hold the helper's DNS restore, update lock and watchdog indefinitely | fixed(00c6def8) | hunt/sol-r3helper-dns-prefs-contention | 中·已确认（P1，源码/API 路径） | Native contention regression authored before the fix, not executed on Linux. Framework startup/create/commit/apply stalls and kernel hangs are not bounded by this correction. Contention still refuses DNS writes and preserves the snapshot. |
 
 SHIP_PLAN §2 item 10. Baseline `72a9c98d`: `ProtectedDNSManager.withPreferences` called `SCPreferencesLock(prefs, true)` on the serialized helper request thread. Ordinary Disconnect/update preparation stops Core before DNS restoration. A hung/paused ordinary network settings writer then prevents the helper from returning to accept, watchdog or shutdown, while its update flock also prevents emergency recovery. Acquisition now requests nonblocking contention failure; the existing error path retains recovery evidence and allows later requests/retries.
 

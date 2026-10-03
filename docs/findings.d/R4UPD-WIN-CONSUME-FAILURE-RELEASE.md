@@ -1,6 +1,6 @@
 | ID | 问题（一句） | 状态 | Issue / PR | 等级 | 剩余限制 |
 |---|---|---|---|---|---|
-| R4UPD-WIN-CONSUME-FAILURE-RELEASE | A failed Windows update consumption acknowledgement after successful token capture escaped the selective failure finalizer | in-PR | #1171; hunt/sol-r4fwa-consume-refusal | P1·回归证实 | Native filesystem/SCM/WFP fault injection remains for CI/hardware; clock/expiry policy and possible-consumed evidence are preserved. |
+| R4UPD-WIN-CONSUME-FAILURE-RELEASE | A failed Windows update consumption acknowledgement after successful token capture escaped the selective failure finalizer | fixed(8e276a78) | #1171; hunt/sol-r4fwa-consume-refusal | P1·回归证实 | Native filesystem/SCM/WFP fault injection remains for CI/hardware; clock/expiry policy and possible-consumed evidence are preserved. |
 
 Baseline `42fffd3d`, `apps/windows/service/src/update_transaction.rs:468`: Prepare has stopped Core and retained bootstrap Blocked WFP, but the successful capture arm propagates `consume` write failure outside the executor outcome. The existing healthy Blocked watchdog has no wanted-Core deadline for an established session and does not autonomously release it. One failed durable write acknowledgement can therefore retain the full block until manual recovery; no second interruption is required.
 

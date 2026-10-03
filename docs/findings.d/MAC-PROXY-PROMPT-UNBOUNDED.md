@@ -1,6 +1,6 @@
 | ID | 问题（一句） | 状态 | Issue / PR | 等级 | 剩余限制 |
 |---|---|---|---|---|---|
-| MAC-PROXY-PROMPT-UNBOUNDED | 系统代理的 administrator 授权弹窗被无期限等待，不理会对话框会把断开/恢复/退出全部挂死在 PrivilegedRuntimeCoordinator 上 | in-PR | [#774](https://github.com/raydocs/tono/pull/774) | 中·推导 | 180 s 期限内 actor 仍被占住；osascript 被杀后凭据对话框的系统侧收尾未实机核对；`parseProxyInfo` 等只读子进程调用仍未设期限 |
+| MAC-PROXY-PROMPT-UNBOUNDED | 系统代理的 administrator 授权弹窗被无期限等待，不理会对话框会把断开/恢复/退出全部挂死在 PrivilegedRuntimeCoordinator 上 | fixed(4ab46285) | [#774](https://github.com/raydocs/tono/pull/774) | 中·推导 | 180 s 期限内 actor 仍被占住；osascript 被杀后凭据对话框的系统侧收尾未实机核对；`parseProxyInfo` 等只读子进程调用仍未设期限 |
 
 `apps/macos/Tono/Core/SystemProxy.swift` 的 `runNetworkSetupWithPrivileges` 在未提权 `networksetup` 失败后
 （非管理员用户、MDM 锁定代理设置）用 `osascript ... with administrator privileges` 重试，并以无期限

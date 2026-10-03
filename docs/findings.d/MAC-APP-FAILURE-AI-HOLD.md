@@ -1,6 +1,6 @@
 | ID | 问题（一句） | 状态 | Issue / PR | 等级 | 剩余限制 |
 |---|---|---|---|---|---|
-| MAC-APP-FAILURE-AI-HOLD | Exhausted automatic macOS recovery used explicit Disconnect and removed the secondary AI hold | in-PR | 本 PR | 高·推导（P1） | Source path and regression authored; Swift/XCTest and installed PF/DNS behavior require macOS CI and hardware. Existing selective-layer best-effort limitations remain. |
+| MAC-APP-FAILURE-AI-HOLD | Exhausted automatic macOS recovery used explicit Disconnect and removed the secondary AI hold | fixed(0650bb52) | 本 PR | 高·推导（P1） | Source path and regression authored; Swift/XCTest and installed PF/DNS behavior require macOS CI and hardware. Existing selective-layer best-effort limitations remain. |
 
 Baseline `3853f5ec`: `AppState+Connect.swift:2259` calls `disconnect(releaseKillSwitch: true)` after an armed failure. The teardown invokes `NetworkProtectionOperations.disarm`, which reaches `/killswitch/disarm`; `KillSwitchManager.swift:585` removes the AI resolver sinkholes and Claude blackhole routes after releasing PF. Saved intent is deleted, so the watchdog cannot restore this floor later. A single ordinary exhausted connection/health failure triggers the path.
 

@@ -1,6 +1,6 @@
 | ID | 问题（一句） | 状态 | Issue / PR | 等级 | 剩余限制 |
 |---|---|---|---|---|---|
-| WIN-DNS-RESTORE-SNAPSHOT-WRITE | Restored adapter DNS is stranded behind WFP, and NRPT cleanup is skipped, when rewriting restore failure flags hits a disk error | in-PR | Branch `hunt/sol-r3dns-restore-write` (this PR) | 中·已确认（P1，Linux facade regression） | Windows native DNS/WFP and real disk-error recovery need CI/device verification; strict DNS proof unchanged |
+| WIN-DNS-RESTORE-SNAPSHOT-WRITE | Restored adapter DNS is stranded behind WFP, and NRPT cleanup is skipped, when rewriting restore failure flags hits a disk error | fixed(f95a4fff) | Branch `hunt/sol-r3dns-restore-write` (this PR) | 中·已确认（P1，Linux facade regression） | Windows native DNS/WFP and real disk-error recovery need CI/device verification; strict DNS proof unchanged |
 
 Trigger: an existing readable DNS snapshot and a failed temporary-file write during restore. `restore_protected` restored the saved adapter values, then propagated the snapshot refresh error before machine proof and NRPT/DoH restoration. `ensure_restored` propagated that error to the WFP disarm gate. The original values are unchanged by the refresh: stale failure flags cannot override current machine proof.
 

@@ -1,6 +1,6 @@
 | ID | 问题（一句） | 状态 | Issue / PR | 等级 | 剩余限制 |
 |---|---|---|---|---|---|
-| R4MH-UPGRADE-STAGING-COLLISION | Unlocked silent-upgrade cleanup can delete an overlapping administrator installer's shared candidates, leaving the helper booted out before replacement bootstrap. | in-PR | this PR | 中·推导 / P2 | Requires overlapping authorized upgrade and repair; native regression and real-device qualification remain pending. |
+| R4MH-UPGRADE-STAGING-COLLISION | Unlocked silent-upgrade cleanup can delete an overlapping administrator installer's shared candidates, leaving the helper booted out before replacement bootstrap. | fixed(0baa9cdc) | this PR | 中·推导 / P2 | Requires overlapping authorized upgrade and repair; native regression and real-device qualification remain pending. |
 
 Baseline `1826a6cf`: `SocketServer.swift:43–53, 761–772, 802–813` uses the same fixed `.new` paths as `HelperManager.swift:95–101`. After the installer replaces those paths, `bootout` at `:115` makes the old daemon cancel its copy and unlink the installer's candidates. The installer's `set -e` then exits at `mv` (`:119`) before bootstrap (`:126`). Its preflight can retain armed PF; no replacement daemon remains to run the normal recovery watchdog. The final gate at `SocketServer.swift:698–708` also unlocks before the two renames. These are one transaction-isolation defect in the merged #979 copy-unlocking fix.
 

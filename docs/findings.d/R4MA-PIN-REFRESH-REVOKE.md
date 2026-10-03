@@ -1,6 +1,6 @@
 | ID | 问题（一句） | 状态 | Issue / PR | 等级 | 剩余限制 |
 |---|---|---|---|---|---|
-| R4MA-PIN-REFRESH-REVOKE | An old macOS DNS pin refresh can reinstall withdrawn DIRECT authority after a newer accepted policy successfully applies | in-PR | hunt/sol-r4ma-pin-refresh-freshness | 中·推导（P2） | Requires an ordinary policy update during asynchronous DNS resolution. Suspended-resolver XCTest authored; Swift unavailable on Linux. Native CI and DIRECT/PF hardware acceptance remain required. No AI suffix bypass or arbitrary authorization is claimed. |
+| R4MA-PIN-REFRESH-REVOKE | An old macOS DNS pin refresh can reinstall withdrawn DIRECT authority after a newer accepted policy successfully applies | fixed(e018c115) | hunt/sol-r4ma-pin-refresh-freshness | 中·推导（P2） | Requires an ordinary policy update during asynchronous DNS resolution. Suspended-resolver XCTest authored; Swift unavailable on Linux. Native CI and DIRECT/PF hardware acceptance remain required. No AI suffix bypass or arbitrary authorization is claimed. |
 
 On `ad8ab2cd`, `AppState+Catalog.swift:898–906` captures the active plan and
 resolves the old document. The wait owns no config mutation handle. A newer

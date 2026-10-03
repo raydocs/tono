@@ -1,6 +1,6 @@
 | ID | 问题（一句） | 状态 | Issue / PR | 等级 | 剩余限制 |
 |---|---|---|---|---|---|
-| R3REGW-RECOVERY-PUBLICATION-FLOOR | Windows complete-publication recovery could mark Replaced without the process-start floor required to reject an older mapped App | in-PR | #1055; hunt/sol-r4fwa-recovery-clock | P2·回归证实 | Native process scheduling was not reproduced; ordinary parallel initialized Apps are excluded by the singleton. Other #1055 rows remain outside this fix. |
+| R3REGW-RECOVERY-PUBLICATION-FLOOR | Windows complete-publication recovery could mark Replaced without the process-start floor required to reject an older mapped App | fixed(afb98c5d) | #1055; hunt/sol-r4fwa-recovery-clock | P2·回归证实 | Native process scheduling was not reproduced; ordinary parallel initialized Apps are excluded by the singleton. Other #1055 rows remain outside this fix. |
 
 On baseline `fafa1bc0`, the early complete-publication recovery return in `apps/windows/service/src/bin/install_service/update_executor.rs:394` skipped the later missing-floor fallback. When publication succeeded but the executor stopped before saving the floor, an unregistered peer with a pre-publication process start and the current on-disk target hash could pass `Store::authenticate_successor`; its mapped executable identity was not measured by that hash. This is a narrow interruption plus process-incarnation boundary, calibrated P2.
 

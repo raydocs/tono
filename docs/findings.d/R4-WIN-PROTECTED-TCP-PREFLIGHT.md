@@ -1,5 +1,5 @@
 | ID | 问题（一句） | 状态 | Issue / PR | 等级 | 剩余限制 |
 |---|---|---|---|---|---|
-| R4-WIN-PROTECTED-TCP-PREFLIGHT | Windows 受保护冷切换在 Core 停止后用 App 做出口 TCP 预检，现有 WFP 必然拒绝该连接 | in-PR | #1070 | 中·已确认 | P1; native Windows regression / needs-hardware outstanding |
+| R4-WIN-PROTECTED-TCP-PREFLIGHT | Windows 受保护冷切换在 Core 停止后用 App 做出口 TCP 预检，现有 WFP 必然拒绝该连接 | fixed(6ab2d67c) | #1070 | 中·已确认 | P1; native Windows regression / needs-hardware outstanding |
 
 Composition of #718 with protected cold switch/catalog/policy rebuild. `switch.rs` stops Core with release=false, preserving bootstrap WFP, before re-entering `attempt_for_generation`. The unconditional `tcp_proof_before_tunnel` then opens a TCP socket from Tono App to the chosen exit after the 60-second proof cache expires. Endpoint ALE permissions belong only to the staged Core executable (`wfp_model.rs:606–630`); App bootstrap permissions do not permit arbitrary exit endpoints. The proof fails before StartClash can replace Core. Non-strict failure releases safely, but the cold-switch caller schedules only armed reconnect, which is now ineligible, so the user's healthy protected connection never returns automatically. Skip this unarmed proof while the FSM retains protection; the existing transaction still proves controller, WFP, protected DNS and real TUN traffic. No endpoint permissions are widened.

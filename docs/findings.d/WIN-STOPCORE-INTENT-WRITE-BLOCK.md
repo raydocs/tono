@@ -1,6 +1,6 @@
 | ID | 问题（一句） | 状态 | Issue / PR | 等级 | 剩余限制 |
 |---|---|---|---|---|---|
-| WIN-STOPCORE-INTENT-WRITE-BLOCK | Core 停止屏障已把 live WFP 装成 Blocked 后意图写盘失败，stop_core 提前退出并让 Disconnect 与 owner-gated 释放持续被拒 | in-PR | #777 | 高·推导 | Core 替换屏障仅忽略 live 安装成功后的持久化失败，保留警告与 last_error；live 安装失败及其他调用方仍返回错误；Needs real-hardware test (静杰 batch) |
+| WIN-STOPCORE-INTENT-WRITE-BLOCK | Core 停止屏障已把 live WFP 装成 Blocked 后意图写盘失败，stop_core 提前退出并让 Disconnect 与 owner-gated 释放持续被拒 | fixed(1abae1ec) | #777 | 高·推导 | Core 替换屏障仅忽略 live 安装成功后的持久化失败，保留警告与 last_error；live 安装失败及其他调用方仍返回错误；Needs real-hardware test (静杰 batch) |
 
 来源：main `64af499a` → 分支 `codex2/win-direct-fail-open`；PR #777；未合 main。归属 SHIP_PLAN §2 第 10 项。
 

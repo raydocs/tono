@@ -1,6 +1,6 @@
 | ID | 问题（一句） | 状态 | Issue / PR | 等级 | 剩余限制 |
 |---|---|---|---|---|---|
-| WIN-CONNECT-FAILURE-AI-HOLD-OMISSION | The single guarded Windows failed-connect release restores ordinary internet without requesting the secondary AI hold | in-PR | branch `hunt/sol-r3wconn-failed-connect-ai-hold` | 高·已确认（P1，Linux dispatch/ownership regression） | Windows App/WFP/NRPT verification needs CI and hardware; existing narrow-layer DNS/cache limitations remain. |
+| WIN-CONNECT-FAILURE-AI-HOLD-OMISSION | The single guarded Windows failed-connect release restores ordinary internet without requesting the secondary AI hold | fixed(d30ec05e) | branch `hunt/sol-r3wconn-failed-connect-ai-hold` | 高·已确认（P1，Linux dispatch/ownership regression） | Windows App/WFP/NRPT verification needs CI and hardware; existing narrow-layer DNS/cache limitations remain. |
 
 Baseline `1fb29265`: an ordinary VLESS→HY2 cold switch on a network where the UDP exit is unreachable stops the old Core, fails protected traffic verification, and calls `fail_connect` directly (`switch.rs:363`). `connection.rs:680` transfers its writer to plain `release_explicit_with_guard`; `disconnect.rs:69` requests `apply_narrow=false`. Service release removes the secondary AI hold. This path never reaches the second-release caller removed by #798, so this is a separate finding.
 

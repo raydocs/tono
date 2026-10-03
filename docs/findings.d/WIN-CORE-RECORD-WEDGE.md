@@ -1,6 +1,6 @@
 | ID | 问题（一句） | 状态 | Issue / PR | 等级 | 剩余限制 |
 |---|---|---|---|---|---|
-| WIN-CORE-RECORD-WEDGE | 无法解析的 `tono-service.core.json` 让启动对账永久失败，之后每次 Core 启动都被拒绝，直到记录被清除 | in-PR | [#775](https://github.com/raydocs/tono/pull/775) | 高·推导 | 需 hosted CI 与实机确认；恢复依赖隔离成功或下次 start 覆盖 |
+| WIN-CORE-RECORD-WEDGE | 无法解析的 `tono-service.core.json` 让启动对账永久失败，之后每次 Core 启动都被拒绝，直到记录被清除 | fixed(dedd82cc) | [#775](https://github.com/raydocs/tono/pull/775) | 高·推导 | 需 hosted CI 与实机确认；恢复依赖隔离成功或下次 start 覆盖 |
 
 `read_core_runtime_record` 解析失败即 `Err` 且不删文件，`reconcile_service_startup` 原样上抛，
 `ensure_startup_reconciled` 把该确定性失败重放在每次 PrepareCoreStart/StartClash 上（StartClash 在

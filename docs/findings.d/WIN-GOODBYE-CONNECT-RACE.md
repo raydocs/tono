@@ -1,6 +1,6 @@
 | ID | 问题（一句） | 状态 | Issue / PR | 等级 | 剩余限制 |
 |---|---|---|---|---|---|
-| WIN-GOODBYE-CONNECT-RACE | Accepted idle owner-goodbye leaves lifecycle admission open during its 250 ms response grace, so shutdown can stop newly admitted work | in-PR | [#955](https://github.com/raydocs/tono/pull/955) | 低·已确认（P2） | Narrow actual-admission regression passed; requires concurrent quit/new lifecycle work in a short window; Windows hardware validation pending |
+| WIN-GOODBYE-CONNECT-RACE | Accepted idle owner-goodbye leaves lifecycle admission open during its 250 ms response grace, so shutdown can stop newly admitted work | fixed(945bf1fa) | [#955](https://github.com/raydocs/tono/pull/955) | 低·已确认（P2） | Narrow actual-admission regression passed; requires concurrent quit/new lifecycle work in a short window; Windows hardware validation pending |
 
 Initially recorded open in #873 while P1 fixes took priority. Baseline `b341164b`: `core/server/mod.rs:392-398` schedules shutdown without reserving it, and `handlers.rs:1028` releases the owner lifecycle guard after acceptance. #792 fences work once teardown starts, but that is after this grace period and its listener-start reset clears that flag.
 

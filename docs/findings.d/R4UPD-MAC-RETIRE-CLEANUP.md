@@ -1,6 +1,6 @@
 | ID | 问题（一句） | 状态 | Issue / PR | 等级 | 剩余限制 |
 |---|---|---|---|---|---|
-| R4UPD-MAC-RETIRE-CLEANUP | Resolved native-update retirement clears its retry owner before removing the executor job, so a cleanup failure can strand the next update | in-PR | hunt/sol-r4upd-mac-retire-cleanup | 低·已确认（P2，源码路径） | Helper regression authored before fix; Swift/native launchd execution requires macOS CI and hardware. No network policy change. |
+| R4UPD-MAC-RETIRE-CLEANUP | Resolved native-update retirement clears its retry owner before removing the executor job, so a cleanup failure can strand the next update | fixed(7d33a838) | hunt/sol-r4upd-mac-retire-cleanup | 低·已确认（P2，源码路径） | Helper regression authored before fix; Swift/native launchd execution requires macOS CI and hardware. No network policy change. |
 
 After a verified Disconnect of a rolled-back or abandoned consumed update, `UpdateTransaction.retireResolved` archived the receipt and saved `attempt = nil` before calling `UpdateExecutor.retire`. A failed `launchctl bootout` with a still-loaded job therefore left no durable cleanup retry owner. A subsequent reservation skipped prior-attempt cleanup, and its launch accepted `launchctl print` of the old job after bootstrap failed. A successfully exited old job does not restart under `KeepAlive.SuccessfulExit = false`, so the new consumed update can stay pending.
 

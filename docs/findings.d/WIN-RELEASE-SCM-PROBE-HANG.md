@@ -1,6 +1,6 @@
 | ID | 问题（一句） | 状态 | Issue / PR | 等级 | 剩余限制 |
 |---|---|---|---|---|---|
-| WIN-RELEASE-SCM-PROBE-HANG | An unresponsive read-only SCM query retains Disconnect's release worker indefinitely; Connect/Repair also make unbounded evidence/BFE reads | in-PR | [#912](https://github.com/raydocs/tono/pull/912) | 中·已确认（P1） | Failed-before/passed-after portable tests; full Windows/Tauri CI and real SCM fault validation required |
+| WIN-RELEASE-SCM-PROBE-HANG | An unresponsive read-only SCM query retains Disconnect's release worker indefinitely; Connect/Repair also make unbounded evidence/BFE reads | fixed(8ee3d098) | [#912](https://github.com/raydocs/tono/pull/912) | 中·已确认（P1） | Failed-before/passed-after portable tests; full Windows/Tauri CI and real SCM fault validation required |
 
 Baseline `d628cef8`: `core/service/mod.rs:524` awaits the stopped-state probe without a deadline. Its production closure at `:479` runs `registered_service_stopped` on a blocking thread, so one stalled SCM RPC remains awaited forever after the initial bounded readiness failure. `tono/connection/disconnect.rs:216-224` retains the exclusive release guard; `:164-167` waits for that worker, while the 55-second UI wait at `:91` deliberately leaves reconciliation running. Subsequent Disconnect/sign-out therefore cannot finish. This is an operation hang, not a proven machine freeze or a P0 outage.
 
