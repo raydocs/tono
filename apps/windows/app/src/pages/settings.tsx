@@ -272,7 +272,7 @@ export const PrivacyCard = () => {
   })
 
   const handlePeriodicTelemetry = useLockFn(async (value: boolean) => {
-    const previous = periodicTelemetryEnabled ?? false
+    const previous = periodicTelemetryEnabled ?? true
     setCacheData(tonoPeriodicTelemetryEnabledQueryKey, value)
     try {
       await tonoSetPeriodicTelemetryEnabled(value)
@@ -329,7 +329,7 @@ export const PrivacyCard = () => {
         subtitle={t('settings.sections.tono.periodicTelemetry.description')}
       >
         <TonoToggle
-          checked={periodicTelemetryEnabled ?? false}
+          checked={periodicTelemetryEnabled ?? true}
           onChange={(value) => void handlePeriodicTelemetry(value)}
           label={t('settings.sections.tono.periodicTelemetry.label')}
         />

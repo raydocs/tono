@@ -44,6 +44,9 @@ pub mod endpoints {
     /// not the 3.5 raw connection log: the body is the same `connectFail`
     /// shape the periodic window already carries (stage, code, node).
     pub const TELEMETRY_FAILURES: &str = "telemetry/failures";
+    /// Privacy-safe diagnostics bundle (version, session, chain, DNS, allowlisted
+    /// AI routes). Not the raw hostname log. Direct POST on the pinned API client.
+    pub const TELEMETRY_DIAGNOSTICS: &str = "telemetry/diagnostics";
     /// Raw audit-log segments for the test programme. Unlike
     /// [`DIAGNOSTICS_REPORTS`] this carries hostnames, process paths and routes,
     /// so it is gated on its own product toggle and its own disclosure.
@@ -1213,6 +1216,22 @@ impl<T: HttpTransport, S: CredentialStore> ApiClient<T, S> {
         Ok(receipt)
     }
 
+    /// Repost a saved telemetry body. `path` is one of the telemetry endpoints;
+    /// this does not post anywhere else. The pinned API client is the direct
+    /// path the kill switch already allows.
+    pub async fn upload_saved_telemetry(
+        &self, path: &'static str, body: &str, identity: u64,
+    ) -> Result<(), ApiError> {
+        if path != endpoints::TELEMETRY_DIAGNOSTICS && path != endpoints::TELEMETRY_FAILURES {
+            return Err(ApiError::InvalidInput("telemetry path".to_string()));
+        }
+        let response = self
+            .authorized_for_identity(HttpMethod::Post, path, Some(body.to_string()), identity)
+            .await?;
+        saved_telemetry_body_present(&response)?;
+        Ok(())
+    }
+
     /// `POST telemetry/failures`: one classified connectFail, the moment it
     /// happens. Same consent as the periodic window. A timeout is never resent.
     pub async fn upload_connect_failure(
@@ -1645,6 +1664,17 @@ fn catalog_accept_headers(path: &str) -> Vec<(String, String)> {
         vec![("X-Tono-Accept".to_string(), "hy2".to_string())]
     } else {
         Vec::new()
+    }
+}
+
+/// The pinned client returns the response bytes. Empty, whitespace-only, and
+/// non-UTF-8 bodies are not an accepted telemetry post.
+fn saved_telemetry_body_present(body: &[u8]) -> Result<(), ApiError> {
+    let text = std::str::from_utf8(body).map_err(|_| ApiError::InvalidResponse)?;
+    if text.trim().is_empty() {
+        Err(ApiError::InvalidResponse)
+    } else {
+        Ok(())
     }
 }
 
@@ -3556,6 +3586,18 @@ mod connect_failure_report_tests {
                 .unwrap()
                 .get("bytesByRoute")
                 .is_none()
+        );
+    }
+
+    #[test]
+    fn a_saved_telemetry_body_must_be_nonempty_utf8() {
+        assert_eq!(saved_telemetry_body_present(b"{}"), Ok(()));
+        assert_eq!(saved_telemetry_body_present(b"  {\"ok\":true}\n"), Ok(()));
+        assert_eq!(saved_telemetry_body_present(b""), Err(ApiError::InvalidResponse));
+        assert_eq!(saved_telemetry_body_present(b" \n\t"), Err(ApiError::InvalidResponse));
+        assert_eq!(
+            saved_telemetry_body_present(&[0xFF, 0xFE]),
+            Err(ApiError::InvalidResponse)
         );
     }
 }

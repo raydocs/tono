@@ -1,0 +1,11 @@
+## 2026-09-30 · Windows 诊断默认重新开启
+
+- 归属：G2（失败可见）。影响 Windows 客户端。不发布。
+- 来源：`origin/main` `d2363002` → 分支 `cursor/diagnostics-windows-e0fd`（#724，未合）；2026-10-03 六个提交移植到 `main` `eb363310`，分支 `feat/windows-diagnostics-default-on-20261003`，新 PR 取代 #724。#707 已合入。
+- 缺陷修复：`a68d4e76` 把周期诊断强制关掉，发布版失败因此不上报。新安装默认开启；已被强制关掉且用户没有亲自选择的安装，加载时重新打开一次。用户关闭后保持关闭。
+- 新增/优化：失败与诊断包走钉扎的控制面直连；发不出去时写入本机队列，下次再试，超时不重发。失败码沿用 #706 的 wire token 查阶段，不另写分类器。阶段名仍是现有连接步骤键；#703 的预算名不当作实测耗时。AI 允许列表只在内存里分类，泄漏标志没有实测前不上传。断网类事件（网络变化进入受保护离线、重试预算耗尽、释放失败、用户断开、核心重启，以及已武装但会话未验证时把 WFP 放开）写入同一队列，代号为 `TONO_NETWORK_LOSS`、`TONO_FAIL_OPEN` 等，网络恢复后的下一次发送带上，即使用户关了普通时间线。
+- 工程与测试：`periodic_telemetry_defaults_on_and_an_explicit_opt_out_sticks` 与离线队列测试。本环境 Cargo 1.83 不能编译 edition 2024，测试未执行。仅源码，无新候选。
+- 实机：杀毒/断网保护打开时，失败是否仍能到达 `telemetry/failures`；飞行模式下失败是否在恢复联网后发出；设置里关闭后时间线停止、分类失败报告和保护丢失事件仍发出。
+- 2026-09-30 续记：CI `b02b8704` 的 `core` 与 `app-rust` 编译失败，因为已保存诊断的响应是 `Vec<u8>`，不能直接 `trim`。先按 UTF-8 解码再去掉空白；空正文、纯空白和非 UTF-8 仍是 `InvalidResponse`。本环境 Cargo 1.83 不能编译 edition 2024，测试未执行。
+- 2026-09-30 续记：`16692adf` 的 `app-rust` 有两条断言失败。网络日志的旧关闭仍然保持关闭；同文件里没有用户选择的周期快照关闭，按 v3 重新打开。同一账号的失败上报可以再带一份诊断包，仍用原账号的令牌；挂起的旧尝试不能在换成新账号后发出。
+- 2026-10-03 续记：所有者决定（决策 051）连接失败和保护丢失在 mac 和 win 都始终上报。`failure_report_scope` 不再返回 `None`：时间线和本机日志开关都开着才带错误原文（`Full`），否则是分类记录（`Classified`），所有构建一样；`internal_build` 不再参与。队列发送不再按开关跳过 `failure`/`diagnostics` 项；关闭时间线时用 `telemetry_outbox::retain_kind` 只留 `p0` 项。设置文案改成如实说明。回归 `a_release_build_reports_classified_failures_with_every_switch_off`、`turning_the_timeline_off_keeps_only_the_network_loss_items` 先单独推送为红（`abba6ae2`）。本机没有 Windows 工具链，只做 `rustfmt --check` 解析；cargo test 由 CI 跑。

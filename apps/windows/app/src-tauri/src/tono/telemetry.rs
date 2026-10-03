@@ -1,11 +1,14 @@
-//! Periodic diagnostic timeline upload (testing default-on).
+//! Periodic diagnostic timeline upload. Default ON.
+//!
+//! Agents must not default this off or bring back the a68d4e76 force-off.
+//! The timeline has no hostnames or page contents; the opt-out is the settings
+//! switch. See docs/diagnostics-upload-guard.md.
 //!
 //! Every ~20 minutes while signed in, ship a short redacted audit window to
-//! the control plane so operators can reconstruct network anomalies before
-//! Claude bans. Users can disable this in Settings. A connectFail also posts
-//! immediately to `telemetry/failures` (same consent, not the 3.5 log); an
-//! internal candidate build also posts a classified record without that
-//! consent (see [`crate::tono::audit::failure_report_scope`]).
+//! the control plane. A connectFail also posts immediately to
+//! `telemetry/failures`. Both posts use the authorized client, whose pinned
+//! API addresses stay reachable when the kill switch is up. A failed post is
+//! written to the on-disk outbox and retried on the next pass.
 //! Failures never touch the connect / kill-switch path.
 
 use std::{path::Path, sync::Arc, time::Duration};
@@ -13,8 +16,8 @@ use std::{path::Path, sync::Arc, time::Duration};
 use serde_json::Value;
 use tauri::AppHandle;
 use tono_core::auth::{
-    ApiError, BytesByRoute, ConnectFailureReport, TELEMETRY_KIND_PERIODIC_WINDOW, TELEMETRY_SCHEMA_VERSION,
-    TelemetryEvent, TelemetryWindowReport, UNKNOWN_CLASSIFIED_FAILURE,
+    ApiError, BytesByRoute, ConnectFailureReport, TransportKind, TELEMETRY_KIND_PERIODIC_WINDOW,
+    TELEMETRY_SCHEMA_VERSION, TelemetryEvent, TelemetryWindowReport, UNKNOWN_CLASSIFIED_FAILURE,
 };
 
 use tono_logging::{Type, logging};
@@ -27,6 +30,7 @@ use crate::{
         audit::{AuditEvent, FailureReportScope, redact},
         diagnostics::scrub_text_with,
         state::TonoState,
+        telemetry_outbox,
     },
 };
 
@@ -134,6 +138,7 @@ pub(crate) async fn spawn_periodic_for_auth_generation(state: &Arc<TonoState>, _
             if !crate::tono::catalog_sync::periodic_sync_continues(&*task_state.lock().await, generation) {
                 return;
             }
+            drain_outbox(&task_state, generation).await;
             match upload_once(&task_state, generation).await {
                 Ok(()) => consecutive_not_found = 0,
                 Err(ApiError::NotFound) => {
@@ -180,9 +185,9 @@ pub(crate) async fn spawn_periodic_for_auth_generation(state: &Arc<TonoState>, _
 }
 
 /// Best-effort `POST telemetry/failures` for one connectFail. Never blocks
-/// connect / kill-switch, and never retries a timeout. Uses the same consent
-/// as the periodic window — this is not the 3.5 raw connection log — except
-/// that an internal build sends the classified fields without it.
+/// connect / kill-switch, and never retries a timeout. The classified record
+/// always goes; the error text rides the timeline consent (decision 051).
+/// This is not the 3.5 raw connection log.
 pub(crate) fn spawn_connect_failure_report(
     state: &Arc<TonoState>,
     account_owner: (u64, u64),
@@ -192,17 +197,21 @@ pub(crate) fn spawn_connect_failure_report(
     transport: Option<&'static str>,
     code: Option<&str>,
 ) -> Option<tauri::async_runtime::JoinHandle<()>> {
-    let scope = state.audit().failure_report_scope()?;
+    let scope = state.audit().failure_report_scope();
     let Some(node) = node.filter(|name| !name.trim().is_empty()) else {
         return None;
     };
-    let stage = stage.unwrap_or("unknown").to_string();
     let code = code
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .unwrap_or(UNKNOWN_CLASSIFIED_FAILURE)
         .to_string();
-    // Free text stays behind the explicit timeline opt-in.
+    let stage = stage.map(str::to_string).filter(|value| value != "unknown").unwrap_or_else(|| {
+        crate::tono::support_codes::stage_for_support_code(&code)
+            .unwrap_or("unknown")
+            .to_string()
+    });
+    // Free text stays behind the timeline switch.
     let error = if scope == FailureReportScope::Full {
         // Raw dial errors carry the exit address; scrub like the support report.
         let clipped: String = scrub_text_with(error, &[]).chars().take(200).collect();
@@ -254,8 +263,110 @@ pub(crate) fn spawn_connect_failure_report(
             exit_delay_ms,
             transport,
         };
-        let _ = client.upload_connect_failure_for_identity(&report, identity).await;
+        let queued = serde_json::to_string(&report).unwrap_or_default();
+        if let Err(err) = client.upload_connect_failure_for_identity(&report, identity).await {
+            if should_queue(&err) && !queued.is_empty() {
+                telemetry_outbox::enqueue(
+                    task_state.audit().settings_dir(),
+                    "failure",
+                    &queued,
+                    epoch_ms(),
+                );
+            }
+        }
+        if let Ok(bundle) = diagnostics_bundle(&report) {
+            let body = serde_json::to_string(&bundle).unwrap_or_default();
+            if !body.is_empty() {
+                if let Err(err) = client
+                    .upload_saved_telemetry(tono_core::auth::endpoints::TELEMETRY_DIAGNOSTICS, &body, identity)
+                    .await
+                {
+                    if should_queue(&err) {
+                        telemetry_outbox::enqueue(
+                            task_state.audit().settings_dir(),
+                            "diagnostics",
+                            &body,
+                            epoch_ms(),
+                        );
+                    }
+                }
+            }
+        }
     }))
+}
+
+fn should_queue(err: &ApiError) -> bool {
+    match err {
+        // A timeout may have been delivered. Do not post it again.
+        ApiError::Transport { kind: TransportKind::Timeout, .. } => false,
+        ApiError::Transport { .. } | ApiError::NotFound => true,
+        ApiError::Server { status, .. } if *status == 404 || *status >= 500 => true,
+        _ => false,
+    }
+}
+
+fn diagnostics_bundle(report: &ConnectFailureReport) -> Result<serde_json::Value, ()> {
+    let channel = if crate::tono::audit::internal_build() { "beta" } else { "release" };
+    let mut event = serde_json::json!({
+        "ts": report.ts,
+        "kind": "connectFail",
+        "stage": report.stage,
+        "code": report.code,
+        "node": report.node,
+    });
+    if let Some(elapsed) = report.tcp_delay_ms {
+        event["elapsedMs"] = serde_json::json!(elapsed);
+    }
+    let mut bundle = serde_json::json!({
+        "schemaVersion": 1,
+        "aiServicesConsent": crate::tono::ai_allowlist::consent(),
+        "client": {
+            "appVersion": report.app_version,
+            "appBuild": env!("CARGO_PKG_VERSION"),
+            "gitCommit": option_env!("TONO_GIT_COMMIT").unwrap_or("unknown"),
+            "platform": "windows",
+            "osVersion": report.os_version,
+            "channel": channel,
+        },
+        "events": [event],
+    });
+    // Allowlisted AI notes stay on device until routingLeak and exitSwitched
+    // are measured. Sending those flags as false would hide a leak.
+    Ok(bundle)
+}
+
+/// Everything queued is sent: the timeline switch going off already dropped
+/// what may carry error text (decision 051).
+async fn drain_outbox(state: &Arc<TonoState>, generation: u64) {
+    let items = telemetry_outbox::due(state.audit().settings_dir(), epoch_ms());
+    if items.is_empty() {
+        return;
+    }
+    let (client, identity) = {
+        let inner = state.lock().await;
+        if inner.sign_in_generation != generation {
+            return;
+        }
+        (inner.client.clone(), inner.client.diagnostics_log_identity().await)
+    };
+    for item in items {
+        let result = match item.kind.as_str() {
+            "failure" => client
+                .upload_saved_telemetry(tono_core::auth::endpoints::TELEMETRY_FAILURES, &item.body, identity)
+                .await,
+            "diagnostics" | "p0" => client
+                .upload_saved_telemetry(tono_core::auth::endpoints::TELEMETRY_DIAGNOSTICS, &item.body, identity)
+                .await,
+            _ => continue,
+        };
+        match result {
+            Ok(()) => telemetry_outbox::complete(state.audit().settings_dir(), &item.body),
+            Err(err) if should_queue(&err) => {
+                telemetry_outbox::postpone(state.audit().settings_dir(), &item.body, epoch_ms());
+            }
+            Err(_) => telemetry_outbox::complete(state.audit().settings_dir(), &item.body),
+        }
+    }
 }
 
 /// Probe whether the account session behind a `NotFound` upload is still

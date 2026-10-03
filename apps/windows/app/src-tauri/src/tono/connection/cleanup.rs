@@ -292,11 +292,22 @@ mod tests {
         stop_server.send(()).unwrap();
         let requests = timeout(Duration::from_secs(5), server).await.unwrap().unwrap();
         std::fs::remove_dir_all(&directory).unwrap();
-        assert_eq!(requests.len(), 1, "A's held failure must not become a B-authenticated upload");
-        assert!(requests[0].0.contains("authorization: bearer fixture-access-a"));
-        assert!(requests[0].0.contains("telemetry/failures http/1.1"));
-        assert_eq!(requests[0].1["node"], "Fixture City");
-        assert_eq!(requests[0].1["error"], "CORE_EXIT_UNREACHABLE: same-account evidence");
+        let failures: Vec<_> = requests
+            .iter()
+            .filter(|request| request.0.contains("telemetry/failures http/1.1"))
+            .collect();
+        assert_eq!(failures.len(), 1, "A's held failure must not become a second failure upload");
+        assert!(failures[0].0.contains("authorization: bearer fixture-access-a"));
+        assert_eq!(failures[0].1["node"], "Fixture City");
+        assert_eq!(failures[0].1["error"], "CORE_EXIT_UNREACHABLE: same-account evidence");
+        assert!(
+            requests.iter().all(|request| request.0.contains("authorization: bearer fixture-access-a")),
+            "A's held failure must not become a B-authenticated upload"
+        );
+        assert!(
+            requests.iter().all(|request| request.1["error"] != "CORE_EXIT_UNREACHABLE: old attempt A"),
+            "the held attempt must not be uploaded under either account"
+        );
         assert_eq!(state.lock().await.account.as_ref().unwrap().id, "b");
     }
 
