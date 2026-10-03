@@ -143,6 +143,26 @@ nonisolated final class ConnectionTelemetryBuffer: @unchecked Sendable {
         sink?(notice)
     }
 
+    /// A connect the user (or an update, sign-out, quit) cancelled before an
+    /// outcome. Kind `connectCancel` with the stage it stopped at and how
+    /// long it had run. Not a failure: no code, and the failure sink does not
+    /// hear about it, so no failure report is uploaded for a deliberate stop.
+    func recordConnectCancel(
+        stage: String,
+        elapsedMs: Int? = nil,
+        node: String? = nil,
+        generation: Int? = nil
+    ) {
+        record(
+            "connectCancel",
+            stage: stage,
+            elapsedMs: elapsedMs,
+            node: node,
+            generation: generation,
+            transport: node.map { ProxyNode.catalogTransport(for: $0) }
+        )
+    }
+
     /// Keep events available to retry (and to the termination audit) until a
     /// successful upload acknowledges exactly this bounded snapshot.
     func snapshot() -> Snapshot {

@@ -186,6 +186,9 @@ extension AppState {
             },
             perform: { [weak self, coreRuntime] attemptID, generation in
                 guard let self else { return }
+                // Kept locally: a Disconnect that cancels this attempt resets
+                // connectionStartedAt before the cancel reaches the catch below.
+                let attemptStartedAt = self.connectionStartedAt ?? Date()
                 let routeOwner = ManagedExitCatalogOwnership.currentAccount
                 let routeCatalogDigest = self.managedCatalogDigest
                 let port = self.config.mixedPort
@@ -561,7 +564,17 @@ extension AppState {
                 // A second click while connecting is an intentional cancel.
                 // The serialized disconnect sequence runs after any in-flight
                 // helper operation, so a late arm/start cannot win the race.
-                if Task.isCancelled { return }
+                // It still leaves a typed event: a connectBegin with no outcome
+                // row is indistinguishable from a crash in connection_events.
+                if Task.isCancelled {
+                    ConnectionTelemetryBuffer.shared.recordConnectCancel(
+                        stage: self.connectionStage.rawValue,
+                        elapsedMs: max(0, Int(Date().timeIntervalSince(attemptStartedAt) * 1_000)),
+                        node: selectedExit?.name,
+                        generation: Int(clamping: generation)
+                    )
+                    return
+                }
                 self.retireFailedRouteSuccess(selectedExitName, owner: routeOwner, generation: generation)
                 let failedStage = self.connectionStage
                 let failedAt = Date()
