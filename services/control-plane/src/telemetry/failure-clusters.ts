@@ -3,7 +3,6 @@
 // the HMAC secret must be set; either one missing disables the send.
 // Payloads never include emails, hostnames, URLs, or full IP addresses.
 
-import { redactJobResult } from '../ops/job-redaction';
 
 export const CLUSTER_GAP_MS = 30 * 60 * 1000;
 export const ALERT_MIN_GAP_SEC = 15 * 60;
@@ -107,7 +106,6 @@ export type FailureClusterInput = {
   gitCommit?: string | null;
   coreVersion?: string | null;
   channel?: string | null;
-  error?: string | null;
 };
 
 export type ClusterEnv = {
@@ -141,10 +139,12 @@ async function hmacHex(secret: string, message: string): Promise<string> {
   return [...new Uint8Array(sig)].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
+// Build identifiers only. Client error text cannot be proven free of
+// hostnames, addresses or credentials by regex scrubbing, and this sample is
+// what the alert webhook sends to a third party; the text stays on the
+// failure's own connection_events row.
 function sampleOf(input: FailureClusterInput): string {
-  const error = input.error ? redactJobResult(input.error).slice(0, 200) : null;
   return JSON.stringify({
-    error,
     appBuild: input.appBuild ?? null,
     gitCommit: input.gitCommit ?? null,
     coreVersion: input.coreVersion ?? null,

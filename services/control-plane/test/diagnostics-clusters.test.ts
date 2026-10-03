@@ -154,7 +154,6 @@ function failureInput(code: string, atMs: number) {
     deviceId: 'device-cluster',
     appBuild: '74',
     channel: 'release',
-    error: 'dial failed for ada@example.com via 203.0.113.9 password=s3cret',
   };
 }
 
@@ -262,7 +261,7 @@ describe('failure cluster webhook', () => {
       kind: string;
       severity: string;
       reason: string;
-      cluster: { id: string; count: number; sample: { error: string } };
+      cluster: { id: string; count: number; sample: Record<string, unknown> };
       detailPath: string;
     };
     expect(opened.schemaVersion).toBe(1);
@@ -272,10 +271,9 @@ describe('failure cluster webhook', () => {
     expect(opened.cluster.id).toBe(first.clusterId);
     expect(opened.cluster.count).toBe(1);
     expect(opened.detailPath).toBe(`/api/v1/diagnostics/clusters/${first.clusterId}`);
-    expect(opened.cluster.sample.error).toContain('[redacted]');
-    expect(opened.cluster.sample.error).not.toContain('ada@example.com');
-    expect(opened.cluster.sample.error).not.toContain('203.0.113.9');
-    expect(opened.cluster.sample.error).not.toContain('s3cret');
+    expect(opened.cluster.sample).toEqual({
+      appBuild: '74', gitCommit: null, coreVersion: null, channel: 'release',
+    });
     expect(calls[0].signature.startsWith('sha256=')).toBe(true);
     const key = await crypto.subtle.importKey(
       'raw',

@@ -1,0 +1,5 @@
+| ID | 问题（一句） | 状态 | Issue / PR | 等级 | 剩余限制 |
+|---|---|---|---|---|---|
+| CP-DIAG-RAW-TEXT | 失败聚类样本保存客户端错误原文（主机名、IPv6 解析器不被正则脱敏）并随告警 webhook 外发；`session.reason` 接受 80 字符散文（含密码、对端地址） | in-PR | 本 PR | 高·已确认 | 失败上报自己的 `connection_events.error` 行仍存脱敏后的错误原文（决策 051：故障报告含错误文本），只有控制面读权限可见，不外发 |
+
+来源：部署前 Codex 范围评审（`57c1c64c..66a5bc5c`，`services/control-plane/src` + `migrations`，2026-10-03）。复现：`lookup private.example.com on [2001:db8::53]:53 failed` 原样进入 `failure_clusters.sample_json` 和 webhook body；`SOCKS5 password=s3cret peer=203.0.113.9` 作为 `session.reason` 返回 202 并入库。两项都未部署到生产（生产 Worker 仍是 `57c1c64c`，无 0093）。修法见决策 053：样本只留构建标识，`session.outcome`/`session.reason` 只收分类值。

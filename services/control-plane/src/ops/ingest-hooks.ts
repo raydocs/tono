@@ -277,7 +277,7 @@ export async function ingestConnectFailure(
   if (Number(inserted.meta.changes ?? 0) > 0) {
     await swallow('ops failure cluster failed', () => recordFailureCluster(e.DB, {
       atMs, code, stage, appVersion, platform: platform ?? 'unknown', node,
-      userId: a.userId, deviceId: a.deviceId, appBuild, gitCommit, coreVersion, channel, error: errorText,
+      userId: a.userId, deviceId: a.deviceId, appBuild, gitCommit, coreVersion, channel,
     }, e, t));
   }
   if (Number(inserted.meta.changes ?? 0) > 0) {
