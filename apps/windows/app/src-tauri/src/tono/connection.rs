@@ -515,6 +515,17 @@ async fn attempt_inner(state: &Arc<TonoState>, app: &AppHandle, expected_generat
     if let Attempt::Failed { error, .. } = &outcome {
         retain_attempt_failure(state, generation, &attempt_record, error).await;
     }
+    // Past connectBegin, Stale means a Disconnect, Quit, sign-out or update stopped this
+    // attempt (or superseded a timed-out one). Record it as the deliberate stop it is; a
+    // begin with no outcome row otherwise reads like a crash in connection_events.
+    if matches!(outcome, Attempt::Stale) {
+        state.audit().log(AuditEvent::ConnectCancel {
+            stage: transaction.last_stage(),
+            elapsed_ms: started.elapsed().as_millis() as u64,
+            node: node.name.clone(),
+            transport: node.catalog_transport(),
+        });
+    }
     outcome
 }
 
