@@ -5,3 +5,4 @@
 - 新增/优化：无。
 - 工程与测试修正：`tooling/scripts/package-macos-dmg.sh` 要求并校验 `Contents/Resources/mihomo`，现在的包里只有 `sing-box`，脚本一定失败；仓库里没有任何工作流、脚本或文档调用它（`grep -rn package-macos-dmg` 只剩 R6 报告那一行）。按「删除过期内容」直接删除。真正的 macOS 打包路径（`package-macos-test.sh`、候选工作流）没动。以后要 DMG 再按 sing-box 重写。
 - 验证：删除前 `grep -rn package-macos-dmg .` 只命中 R6 报告。没有新增测试（没有行为可测）。仅源码，无新候选。
+- Merged: #1372, merge commit `552761a9`, PR head `926441a2`; ci-gate run 37149666475 green on that head. Issue #1324 closed.

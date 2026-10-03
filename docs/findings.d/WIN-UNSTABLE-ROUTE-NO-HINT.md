@@ -1,6 +1,6 @@
 | ID | 问题（一句） | 状态 | Issue / PR | 等级 | 剩余限制 |
 |---|---|---|---|---|---|
-| WIN-UNSTABLE-ROUTE-NO-HINT | Windows 已连接的线路反复中断（数据面探测失败后恢复或重连），界面每次都回到「已连接」，从不提示用户换线路；现场一位用户在同一条线路上连续 9 天每天 7–30 次探测失败，直到自己手动换节点 | in-PR | 本 PR | 中·已确认（生产数据） | 只提示不自动换（决策 054）；本机网络反复掉线也会触发；记录只在内存里，重启 App 清零；macOS 没有对应提示；未实机 |
+| WIN-UNSTABLE-ROUTE-NO-HINT | Windows 已连接的线路反复中断（数据面探测失败后恢复或重连），界面每次都回到「已连接」，从不提示用户换线路；现场一位用户在同一条线路上连续 9 天每天 7–30 次探测失败，直到自己手动换节点 | fixed(acb9bafd) | [#1370](https://github.com/raydocs/tono/pull/1370)（提示）、[#1371](https://github.com/raydocs/tono/pull/1371)（推荐跳过这条线路，75f2f12f） | 中·已确认（生产数据） | 只提示不自动换（决策 054）；本机网络反复掉线也会触发；记录只在内存里，重启 App 清零；macOS 没有对应提示；未实机 |
 
 依据：`apps/windows/app/src-tauri/src/tono/connection/monitor.rs` 的 `periodic_data_plane_probe_failed` 在探测失败时只写一条 `healthProbeFail` 审计事件，然后由健康腿决定就地保持、重连或放开；恢复后状态回到 Connected，`TonoStatus` 里没有任何「这条线路最近不稳定」的字段，首页也就没有可显示的东西。失败卡片上的「切换节点」只在连接失败（`TONO_NODE_OR_CORE_UNREACHABLE`）时出现，已连接期间的反复中断走不到那里。
 

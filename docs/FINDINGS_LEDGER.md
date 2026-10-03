@@ -187,7 +187,7 @@
 | H14-F2 | 可重新上架退役时出口 token 已吊销的节点；drain 与吊销存在竞态 | fixed(6cfa4d9e) | [#449](https://github.com/raydocs/tono/issues/449)，[#451](https://github.com/raydocs/tono/pull/451) | 中·推导 | 与 #375 在 revokeExitToken 同一 UPDATE 相邻行冲突，后合者保留双方 |
 | H15-F7 | 控制台重新上架会发布不完整的 Reality 条目，客户端整份目录不可用 | fixed(6cfa4d9e) | [#492](https://github.com/raydocs/tono/issues/492)，[#493](https://github.com/raydocs/tono/pull/493) | 中·推导 | — |
 | H15-F8 | 未声明 hy2 能力的客户端也收到 hy2 条目 | fixed(6cfa4d9e) | [#494](https://github.com/raydocs/tono/issues/494)，[#495](https://github.com/raydocs/tono/pull/495) | 中·推导 | — |
-| H17-O-F3 | 到期与超额在一个 cron 周期内吊销全部设备、会话与出口凭据，控制台却写「到期不撤设备」；续期或重置用量不能自行恢复服务 | open | 待开 | 中·已确认 | 需 owner 在两种修法间决定（只对非 active 账户吊销，或保留吊销并改文案、告知需重新登录）；修复队列暂按更严格的后者 |
+| H17-O-F3 | 到期与超额在一个 cron 周期内吊销全部设备、会话与出口凭据，控制台却写「到期不撤设备」；续期或重置用量不能自行恢复服务 | fixed(e338e1d4) | [#530](https://github.com/raydocs/tono/issues/530)，[#531](https://github.com/raydocs/tono/pull/531)（保留吊销，控制台文案改为实情） | 中·已确认 | 按更严格的修法落地：到期/超额仍吊销，续期或清零不自动恢复，每台设备重新登录；owner 尚未在两种修法间正式选定。2026-10-03 核对：文案在 main 的 `services/ops-console/src/copy/customers-actions.ts`，此行此前漏更新 |
 | H17-G-F2 | Tailscale enrollment 关闭（生产配置）时吊销任务永不执行，带 tailnet 绑定设备的账户停用或销户后重新启用永远返回 409（= H17-O-F5） | open | 待开 | 中·推导 | 取决于生产是否仍有带 tailscale_node_id 的设备行（未查 D1）；这些设备的 tailnet 节点也不会被删除 |
 | H17-C-F2 | 退款销户由多次独立提交组成，中途失败可留下「住宅线与产品账户已回收、VPN 仍有效」的账户 | open | 待开 | 中·推导 | 需故障注入确认；cron 不识别这种部分销户状态 |
 | H17-G-F5 | 同一设备再次登录或登出只作废当前会话，更早签发的 refresh token 仍然有效 | fixed | [#833](https://github.com/raydocs/tono/pull/833) | 中·已确认 | 同一设备的再次登录、refresh 与登出都会作废该设备其余未吊销会话；其他设备保持登录。refresh 有效期默认仍为 30 天 |
