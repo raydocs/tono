@@ -502,7 +502,7 @@ final class SocketServer {
         do {
             try Self.relaunchInstalledApp(uid: allowedUID)
             FileHandle.standardError.write(Data(
-                "tono: the app (pid \(owner?.pid ?? 0)) died with protection held; relaunched it (attempt \(orphanedOwnerRelaunchAttempts))\n".utf8
+                "tono: the app (pid \(owner?.pid ?? 0)) died with protection held; asked its session to relaunch it (attempt \(orphanedOwnerRelaunchAttempts))\n".utf8
             ))
         } catch {
             let detail = (error as? HelperFailure)?.message ?? String(describing: error)
@@ -515,12 +515,25 @@ final class SocketServer {
     /// Only the installed, correctly signed bundle is launched, and only as
     /// the allowed user: root asks that user's Launch Services, it does not
     /// run the app. The app must authenticate on helper IPC like any peer.
+    /// The request is not awaited: this runs inside the idle loop under the
+    /// update lock, and a stuck `open` must not stall IPC or the releases
+    /// that follow it. `sudo -n` can never prompt; a non-zero exit is logged
+    /// by the termination handler and still counts as an attempt.
     static func relaunchInstalledApp(uid: uid_t) throws {
         _ = try UpdatePackage.verifyCode(UpdatePackage.appPath, identifier: "com.raydocs.tono")
-        try UpdatePackage.run(
-            "/bin/launchctl",
-            ["asuser", String(uid), "/usr/bin/sudo", "-u", "#\(uid)", "/usr/bin/open", UpdatePackage.appPath]
-        )
+        let child = Process()
+        child.executableURL = URL(fileURLWithPath: "/bin/launchctl")
+        child.arguments = ["asuser", String(uid), "/usr/bin/sudo", "-n", "-u", "#\(uid)", "/usr/bin/open", UpdatePackage.appPath]
+        child.environment = ["PATH": "/usr/bin:/bin:/usr/sbin:/sbin", "HOME": "/var/root"]
+        child.standardOutput = FileHandle.nullDevice
+        child.standardError = FileHandle.nullDevice
+        child.terminationHandler = { process in
+            guard process.terminationStatus != 0 else { return }
+            FileHandle.standardError.write(Data(
+                "tono: the relaunch request exited with status \(process.terminationStatus)\n".utf8
+            ))
+        }
+        try child.run()
     }
 
     /// MAC-ORPHAN-BOOTSTRAP-PF: the app armed the bootstrap block (empty
