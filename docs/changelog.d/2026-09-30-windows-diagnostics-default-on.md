@@ -9,3 +9,8 @@
 - 2026-09-30 续记：CI `b02b8704` 的 `core` 与 `app-rust` 编译失败，因为已保存诊断的响应是 `Vec<u8>`，不能直接 `trim`。先按 UTF-8 解码再去掉空白；空正文、纯空白和非 UTF-8 仍是 `InvalidResponse`。本环境 Cargo 1.83 不能编译 edition 2024，测试未执行。
 - 2026-09-30 续记：`16692adf` 的 `app-rust` 有两条断言失败。网络日志的旧关闭仍然保持关闭；同文件里没有用户选择的周期快照关闭，按 v3 重新打开。同一账号的失败上报可以再带一份诊断包，仍用原账号的令牌；挂起的旧尝试不能在换成新账号后发出。
 - 2026-10-03 续记：所有者决定（决策 051）连接失败和保护丢失在 mac 和 win 都始终上报。`failure_report_scope` 不再返回 `None`：时间线和本机日志开关都开着才带错误原文（`Full`），否则是分类记录（`Classified`），所有构建一样；`internal_build` 不再参与。队列发送不再按开关跳过 `failure`/`diagnostics` 项；关闭时间线时用 `telemetry_outbox::retain_kind` 只留 `p0` 项。设置文案改成如实说明。回归 `a_release_build_reports_classified_failures_with_every_switch_off`、`turning_the_timeline_off_keeps_only_the_network_loss_items` 先单独推送为红（`abba6ae2`）。本机没有 Windows 工具链，只做 `rustfmt --check` 解析；cargo test 由 CI 跑。
+
+### 2026-10-03 续记：已合 main
+- 来源合入：#1361（#724 的六个提交 `9b5c556a..b9278f16` 原样挑拣，加决策 051 的改动），merge commit `b41ff725`，PR 头 `3bbbdba0`。该头的 `ci-gate` 全绿：https://github.com/raydocs/tono/actions/runs/37109797876 。红测试 `abba6ae2`：run 37109665659（`windows / app-rust` 编译失败 `error[E0425]: cannot find function retain_kind`，其余任务全绿）。#724 已关闭为被取代，分支未改。
+- 独立评审：普通风险（遥测范围与文案），主会话核对 diff；未做独立评审。
+- 候选/发布：仅源码合入 main。无新安装包，无部署，无客户发布。没有实机验证；合入前正式版 Windows 完全不发失败报告，合入后首个候选才会带上。
