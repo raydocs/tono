@@ -34,4 +34,13 @@ screenshot overhead, including a delayed sunset capture. No exact 300ms capture
 cadence or zero style-work claim. Pacing uses frame intervals / measured elapsed
 time rather than frame count / an assumed five seconds.
 
+Review correction: [native frame-swap timestamps](timestamps.json),
+[rolling 300ms means/direct pairs](luminance-stamped.json),
+[timestamped samples](stamped-frames.png). Call completion is not image time.
+Rolling analysis interpolates neighboring native means; direct pairs use actual
+native timestamps within 300±5ms. Initial/other gaps remain; no perfect cadence
+claim. Raw PNGs were captured separately and retained in the local QA directory,
+not all committed as a large archive. The sample montage is downscaled; means
+were computed from full 920×664 PNGs using the original crop/resize method.
+
 [Contract and limitations](../../../sea-scene-preview.md).

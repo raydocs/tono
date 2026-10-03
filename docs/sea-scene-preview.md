@@ -153,6 +153,51 @@ Following the owner's request to continue the visual refinements:
   60fps, p95 16.7ms/max 16.8ms. This is MacBook Chrome only, not a performance
   improvement claim or Windows qualification. Main-thread style work remains.
 
+### Review correction: frame timestamps and remaining fidelity limits
+
+The full Anthropic review of `a97c963e...b053c638` found no major-or-worse
+issue, but noted that callback completion timestamps do not prove a 300ms image
+cadence. The nominal values above are historical samples, not strict cadence
+proof. Normalising them by callback duration is also invalid: that duration is
+not the image's presentation time. No source timing change was made to force a
+measurement pass.
+
+Repeat capture used Chrome's `Page.screencastFrame` PNGs, `everyNthFrame=6`, and
+its native metadata `timestamp` (the runtime protocol describes it as "Frame
+swap timestamp"). [Raw timestamps](screenshots/sea-scene-2026-10-03/visual-polish/timestamps.json),
+[means and rolling windows](screenshots/sea-scene-2026-10-03/visual-polish/luminance-stamped.json)
+and [timestamped sample frames](screenshots/sea-scene-2026-10-03/visual-polish/stamped-frames.png)
+retain the correction. The same PNG→L/crop/resize method is used.
+
+- Rolling 300ms changes, interpolating means between adjacent native frames:
+  sunset max 7.37; dawn max 7.29. Direct measured frame pairs separated by 300±5ms:
+  sunset max 7.43; dawn max 6.90. Both methods stay below 8 in this run.
+- Native gaps covering the steepest windows are 89–105ms for sunset and 95–103ms
+  for dawn. The run also has initial/other gaps up to 348/369ms: no perfect cadence
+  or analytical guarantee for every possible 300ms window is claimed. Raw
+  frames/timestamps remain available; this is measured sampling, not virtual time.
+
+Two minor **visual-fidelity engineering items remain open after this correction
+pass**, not product/protection defects or a claim of pixel-identical matching:
+
+1. The transform timing/curve remains shared by sun/mirror, but some auxiliary
+   opacity easings differ from normative `WinHome.dc.html`: failed day/dusk/stars
+   and idle day/stars/glow/path/light use the port's grouped sky easing; idle
+   mirror opacity uses 6000ms rather than 2800ms, red overlay 2200ms rather than
+   2000ms, and shade follows sun time/easing rather than the reference's separate
+   shade curve. The dawn sky change is intentional and already documented;
+   other differences are retained port approximations, not new owner approvals.
+2. Mirror soft glow is fixed `#ff824c` instead of the prototype's phase tint;
+   idle water glow uses `#e2443f` rather than RGB(150,44,62). Warm/red cross-fades
+   approximate connecting glitter/water colors too. The opacity-only port
+   removes animated colors but does **not** reproduce every original color
+   interpolation. This polish preserves its existing RGB values, not exact
+   prototype palette equivalence. Aligning those endpoints remains a follow-up.
+
+The stale question-4 wording is superseded by new [decision 056](decisions/056-2026-10-03-windows-frameless-direction.md);
+055 is immutable historical scope. No native window change is implemented.
+Review status/coverage for subsequent exact heads is recorded in PR comments.
+
 Frontend: narrow vitest (two tests), TypeScript, scoped ESLint/Biome, Vite build
 and i18n type generation passed. The locale scanner exits 0 but reports inactive
 locale gaps and legacy backend unused/missing-source keys: **not a globally clean
@@ -169,6 +214,6 @@ Protection mapping, all real dashboard cards, light theme, navigation, chrome,
 tray sizing and branded icons are later PRs. Section 7 questions 1–5 were asked
 together. The owner selected visual frameless/full-bleed Windows chrome (question
 4), with Windows controls at top right and native drag/resize/maximise/snap
-qualification; this PR does not implement it. Questions 1–3 and 5 remain pending
+qualification; [decision 056](decisions/056-2026-10-03-windows-frameless-direction.md) records it and this PR does not implement it. Questions 1–3 and 5 remain pending
 before PR 2. The original provisional scope remains in
 [decision 055](decisions/055-2026-10-03-windows-sea-scene-preview.md).

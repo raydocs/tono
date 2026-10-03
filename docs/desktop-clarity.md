@@ -78,8 +78,10 @@ and an opaque dock. Native occlusion/closed tray must pass `paused`; neither a
 GPU probe nor automatic remote-desktop detection is introduced.
 Windows first, macOS later: [provisional decision 055](decisions/055-2026-10-03-windows-sea-scene-preview.md).
 [SeaScene reproduction and evidence](sea-scene-preview.md) is not real Windows
-frame-pacing or protection qualification. The owner's section 7 decisions remain
-open before any production home integration.
+frame-pacing or protection qualification. Section 7 questions 1–3 and 5 remain
+open before production home integration; question 4's later frameless direction
+is recorded in [decision 056](decisions/056-2026-10-03-windows-frameless-direction.md),
+not implemented by this preview.
 
 ## Reproduction
 
