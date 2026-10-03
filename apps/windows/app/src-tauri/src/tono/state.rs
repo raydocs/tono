@@ -1367,6 +1367,27 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_route_that_keeps_dropping_is_reported_unstable() {
+        let state = super::TonoState::for_test();
+        let mut inner = state.lock().await;
+        inner.selected_node = Some("Los Angeles · Pacific".into());
+        let start = 1_800_000_000_000_i64;
+        // One outage fails several probes seconds apart: one drop, not three.
+        inner.record_route_probe_failure("Los Angeles · Pacific", start);
+        inner.record_route_probe_failure("Los Angeles · Pacific", start + 2_000);
+        inner.record_route_probe_failure("Los Angeles · Pacific", start + 4_000);
+        assert!(!inner.selected_route_unstable(start + 5_000));
+
+        inner.record_route_probe_failure("Los Angeles · Pacific", start + 8 * 60_000);
+        inner.record_route_probe_failure("Los Angeles · Pacific", start + 20 * 60_000);
+        assert!(inner.selected_route_unstable(start + 21 * 60_000));
+        // The drops age out, and another route does not inherit them.
+        assert!(!inner.selected_route_unstable(start + 51 * 60_000));
+        inner.selected_node = Some("Tokyo · Fuji".into());
+        assert!(!inner.selected_route_unstable(start + 21 * 60_000));
+    }
+
+    #[tokio::test]
     async fn a_sample_from_the_previous_exit_is_not_shown_on_the_new_node() {
         let state = super::TonoState::for_test();
         let mut inner = state.lock().await;
