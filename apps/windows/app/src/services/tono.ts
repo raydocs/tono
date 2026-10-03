@@ -122,6 +122,8 @@ export interface TonoStatus {
   claudeHomeHost?: string | null
   /** Failed update journal still on disk. Disconnect, then reinstall. */
   updateIncomplete?: boolean
+  /** The selected route dropped repeatedly while connected; set until this time. */
+  routeUnstableUntilMs?: number | null
 }
 
 export const TONO_STATUS_EVENT = 'tono://status'
