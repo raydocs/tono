@@ -1514,15 +1514,22 @@ mod tests {
         );
         assert_eq!(
             failure_report_scope(false, audit, false),
-            None,
-            "the timeline opt-out stops release failure reports"
+            Some(FailureReportScope::Classified),
+            "the timeline opt-out drops the error text, not the report (decision 051)"
         );
         assert_eq!(failure_report_scope(false, audit, true), Some(FailureReportScope::Full));
         assert_eq!(
             failure_report_scope(true, false, true),
-            None,
-            "the local log switch stops every report"
+            Some(FailureReportScope::Classified),
+            "the local log switch drops the error text, not the report"
         );
+    }
+
+    /// Owner decision 2026-10-03 (decision 051): a release build with both
+    /// switches off still reports the classified connect failure.
+    #[test]
+    fn a_release_build_reports_classified_failures_with_every_switch_off() {
+        assert_eq!(failure_report_scope(false, false, false), Some(FailureReportScope::Classified));
     }
 
     #[test]

@@ -144,6 +144,20 @@ mod tests {
         assert!(due(&dir.path, now + 86_400_000).is_empty());
     }
 
+    /// The timeline switch went off: bodies that may carry error text go,
+    /// the lost-protection reports stay (decision 051).
+    #[test]
+    fn turning_the_timeline_off_keeps_only_the_network_loss_items() {
+        let dir = temp();
+        enqueue(&dir.path, "failure", "{\"f\":1}", 1);
+        enqueue(&dir.path, "p0", "{\"p\":1}", 2);
+        enqueue(&dir.path, "diagnostics", "{\"d\":1}", 3);
+        retain_kind(&dir.path, "p0");
+        let items = due(&dir.path, i64::MAX);
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].kind, "p0");
+    }
+
     #[test]
     fn the_queue_drops_the_oldest_item_past_the_cap() {
         let dir = temp();
