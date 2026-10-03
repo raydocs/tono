@@ -1,4 +1,8 @@
-import type { TonoRoutePreferences, TonoServer } from '@/services/tono'
+import type {
+  TonoRoutePreferences,
+  TonoServer,
+  TonoStatus,
+} from '@/services/tono'
 
 import { catalogBaseName, hy2UdpIsVendorBlocked, nodeCode } from './node-meta'
 
@@ -55,6 +59,17 @@ export const recentRoutes = (
     )
     .slice(0, 8)
 
+/** The selected route, while the backend still reports it as dropping repeatedly. */
+export const unstableRoute = (
+  status:
+    | Pick<TonoStatus, 'selectedServer' | 'routeUnstableUntilMs'>
+    | undefined,
+  now: number,
+): string | null =>
+  (status?.routeUnstableUntilMs ?? 0) > now
+    ? (status?.selectedServer ?? null)
+    : null
+
 export interface RouteRecommendation {
   name: string
   reason: 'recent' | 'tcp'
@@ -64,6 +79,8 @@ export interface RouteRecommendation {
 /** Only fresh evidence can propose a route; preference alone is not reachability.
  * History is exact transport + catalog revision, while favorites share the hy2 base identity.
  * Fixed region is a constraint: no quiet fallback to a different region.
+ * `avoid` is the route the backend reports as dropping repeatedly: an earlier success or an
+ * open TCP port does not make it the next choice.
  */
 export const recommendRoute = (
   servers: readonly TonoServer[],
@@ -72,6 +89,7 @@ export const recommendRoute = (
   revision: number | null | undefined,
   evidence: EndpointEvidence,
   now: number,
+  avoid: string | null = null,
 ): RouteRecommendation | null => {
   if (!preferencesMatch(preferences, scope, revision)) return null
   const endpointsCurrent = endpointEvidenceMatches(
@@ -86,6 +104,7 @@ export const recommendRoute = (
   const candidates = servers.flatMap((server) => {
     if (
       !server.available ||
+      server.name === avoid ||
       hy2UdpIsVendorBlocked(server.name) ||
       (preferences.fixedRegion &&
         nodeCode(server.name) !== preferences.fixedRegion) ||

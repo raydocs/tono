@@ -57,6 +57,7 @@ import {
   MAX_FAVORITES,
   preferencesMatch,
   recommendRoute,
+  unstableRoute,
   type EndpointEvidence,
 } from './route-preferences'
 import { RoutePreferencesPanel } from './route-preferences-panel'
@@ -147,6 +148,7 @@ const ServersPage = () => {
     status?.catalogRevision,
     endpointTests,
     now,
+    unstableRoute(status, now),
   )
 
   useEffect(() => {
@@ -190,6 +192,7 @@ const ServersPage = () => {
       status?.catalogRevision,
       endpointTests,
       Date.now(),
+      unstableRoute(status, Date.now()),
     )
     if (!current || !preferences || status?.uiState !== 'notConnected') return
     setSelectingRecommendation(true)
