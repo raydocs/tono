@@ -56,7 +56,8 @@ pub(super) struct ConnectTransaction {
     deadline: tokio::time::Instant,
     cancellation: CancellationToken,
     /// The stage most recently entered, so a cancel can be recorded with it.
-    last_stage: std::sync::Mutex<Option<&'static str>>,
+    /// Shared by clones, like the deadline and the cancellation.
+    last_stage: std::sync::Arc<std::sync::Mutex<Option<&'static str>>>,
 }
 
 impl ConnectTransaction {
@@ -64,7 +65,7 @@ impl ConnectTransaction {
         Self {
             deadline: tokio::time::Instant::now() + CONNECT_TRANSACTION_TIMEOUT,
             cancellation,
-            last_stage: std::sync::Mutex::new(None),
+            last_stage: std::sync::Arc::new(std::sync::Mutex::new(None)),
         }
     }
 
