@@ -238,18 +238,19 @@ final class AccountSession {
         AppProfile.defaults.bool(forKey: SettingsKey.internalFailureReportsOptedOut)
     }
 
-    /// Whether a connect failure is reported, and with what. Release builds
-    /// report only after the snapshot opt-in; internal builds also send the
-    /// classified record without it unless the user saved the opt-out. That
-    /// default comes from the build, not from UserDefaults, so the one-shot v2
-    /// reset cannot turn it off on upgrade.
+    /// Whether a connect failure is reported, and with what. Every build
+    /// reports the classified record (stage, code, node, versions); the error
+    /// text and Core lines ride the snapshot opt-in. Owner decision 2026-10-03
+    /// (decision 051): without the reports no field failure can be debugged.
+    /// Internal builds keep their saved opt-out for test noise. None of this
+    /// comes from the one-shot v2 reset, so an upgrade cannot turn it off.
     nonisolated static func failureReportScope(
         internalBuild: Bool,
         snapshotOptedIn: Bool,
         internalOptedOut: Bool
     ) -> ConnectFailureReportScope? {
         if snapshotOptedIn { return .full }
-        return internalBuild && !internalOptedOut ? .classified : nil
+        return internalBuild && internalOptedOut ? nil : .classified
     }
 
     /// Re-checked before every send attempt of a report built with `built`: a
