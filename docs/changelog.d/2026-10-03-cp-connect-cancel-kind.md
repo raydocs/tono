@@ -6,3 +6,6 @@
 - Clients: macOS and Windows emit the kind in follow-up PRs (mac `AppState+Connect.swift` cancel path; Windows `telemetry.rs INCLUDE_KINDS` + the #1356 cancel paths). Until they ship, the server accepts the kind and nothing sends it.
 - Verification: `npx vitest run test/ops-flatten.test.ts` — red on main (`keeps a cancelled connect with its stage and elapsed time` fails: row count 1, cancel row absent), green after the one-line change (13 passed). Red ci-gate dispatched on the red commit; PR body records both run ids.
 - No migration: `connection_events.kind` is free text (CHECK length 1–40, migration 0039).
+
+### 2026-10-03 follow-up: merged to main
+- Merged: #1365, merge commit `d684ec24`, PR head `e18b3260`. ci-gate green on that head: run 37145744818. Red run 37145662190 failed on exactly the new `it`. Not deployed: production does not accept the kind yet.
