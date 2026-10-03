@@ -126,6 +126,24 @@ mod tests {
         assert!(!polled.load(Ordering::SeqCst));
     }
 
+    /// A Disconnect, Quit or sign-out during a connect used to leave only a
+    /// connectBegin behind. The transaction remembers the stage it was in when
+    /// the cancel arrived so the attempt can record a `connectCancel` with it.
+    #[tokio::test(start_paused = true)]
+    async fn cancelled_stage_is_remembered_for_the_cancel_event() {
+        let cancellation = CancellationToken::new();
+        let transaction = ConnectTransaction::new(cancellation.clone());
+        assert_eq!(transaction.last_stage(), None);
+        let result = transaction
+            .wait("starting core", async {
+                cancellation.cancel();
+                std::future::pending::<()>().await
+            })
+            .await;
+        assert!(matches!(result, Err(StageFailure::Stale)));
+        assert_eq!(transaction.last_stage(), Some("starting core"));
+    }
+
     #[tokio::test(start_paused = true)]
     async fn expired_before_entry_never_polls_the_stage() {
         let transaction = ConnectTransaction::new(CancellationToken::new());
