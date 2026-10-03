@@ -85,9 +85,10 @@ final class PeriodicTelemetryConsentTests: XCTestCase {
             .full,
             "release builds report failures while the snapshot stays on"
         )
-        XCTAssertNil(
+        XCTAssertEqual(
             AccountSession.failureReportScope(internalBuild: false, snapshotOptedIn: false, internalOptedOut: false),
-            "the snapshot opt-out stops release failure reports"
+            .classified,
+            "the snapshot opt-out drops the error text, not the report"
         )
         XCTAssertEqual(
             AccountSession.failureReportScope(internalBuild: false, snapshotOptedIn: true, internalOptedOut: false),
@@ -162,13 +163,27 @@ final class PeriodicTelemetryConsentTests: XCTestCase {
         XCTAssertTrue(TelemetryOutbox.pending(defaults: defaults).isEmpty)
     }
 
-    func testANetworkLossReportIsNotQueuedAfterTheSnapshotIsOff() {
+    /// Owner decision 2026-10-03 (decision 051): failures and lost protection
+    /// are always reported; the snapshot switch governs the timeline and the
+    /// error text only.
+    func testANetworkLossReportIsQueuedWhileTheSnapshotIsOff() {
         defaults.set(false, forKey: SettingsKey.periodicTelemetryEnabled)
         AccountSession.notePeriodicTelemetryChoice()
         XCTAssertFalse(AccountSession.isPeriodicTelemetryEnabled)
         defaults.removeObject(forKey: TelemetryOutbox.key)
         NetworkLossReport.enqueue(code: NetworkLossReport.restoreNetwork, node: "Osaka", defaults: defaults)
-        XCTAssertTrue(TelemetryOutbox.pending(defaults: defaults).isEmpty)
+        XCTAssertEqual(TelemetryOutbox.pending(defaults: defaults).count, 1)
+    }
+
+    func testAReleaseBuildReportsClassifiedFailuresWithTheSnapshotOff() {
+        XCTAssertEqual(
+            AccountSession.failureReportScope(internalBuild: false, snapshotOptedIn: false, internalOptedOut: false),
+            .classified
+        )
+        XCTAssertTrue(
+            AccountSession.failureReportStillAllowed(builtAs: .classified, internalBuild: false),
+            "a classified report never waits on the snapshot switch"
+        )
     }
 
     private static func queuedEvent(_ item: [String: String]) throws -> (code: String, stage: String, kind: String, node: String) {
