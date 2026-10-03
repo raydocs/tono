@@ -178,6 +178,21 @@ describe('telemetry flatten', () => {
     ]);
   });
 
+  /// A connect the user cancelled (second click, Disconnect, Quit, sign-out)
+  /// used to leave only a connectBegin behind: the field showed 257 begins
+  /// against 34 oks on macOS with no failure rows. The cancel is its own kind.
+  it('keeps a cancelled connect with its stage and elapsed time', async () => {
+    const row = windowRow('win-cancel', [
+      { ts: RECEIVED * 1000 - 9_000, kind: 'connectBegin', node: 'Osaka · Nara' },
+      { ts: RECEIVED * 1000 - 3_000, kind: 'connectCancel', stage: 'startingCore', elapsedMs: 6_000, node: 'Osaka · Nara' },
+    ]);
+    expect(await flattenWindow(db(), row, edgeAttribution(undefined, new Set()))).toBe(2);
+    const cancel = await db().prepare(
+      "SELECT kind, stage, elapsed_ms, node FROM connection_events WHERE kind = 'connectCancel'",
+    ).first<Record<string, unknown>>();
+    expect(cancel).toMatchObject({ kind: 'connectCancel', stage: 'startingCore', elapsed_ms: 6_000, node: 'Osaka · Nara' });
+  });
+
   it('writes nothing for a window with no events', async () => {
     expect(await flattenWindow(db(), windowRow('win-empty', []), edgeAttribution(undefined, new Set()))).toBe(0);
     expect(await eventCount()).toBe(0);
