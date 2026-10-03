@@ -56,7 +56,7 @@ pub(super) struct ConnectTransaction {
     deadline: tokio::time::Instant,
     cancellation: CancellationToken,
     /// The stage most recently entered, so a cancel can be recorded with it.
-    last_stage: std::cell::Cell<Option<&'static str>>,
+    last_stage: std::sync::Mutex<Option<&'static str>>,
 }
 
 impl ConnectTransaction {
@@ -64,18 +64,20 @@ impl ConnectTransaction {
         Self {
             deadline: tokio::time::Instant::now() + CONNECT_TRANSACTION_TIMEOUT,
             cancellation,
-            last_stage: std::cell::Cell::new(None),
+            last_stage: std::sync::Mutex::new(None),
         }
     }
 
     /// The stage the transaction was in when it last checked, or `None`
     /// before any stage ran.
     pub(super) fn last_stage(&self) -> Option<&'static str> {
-        self.last_stage.get()
+        self.last_stage.lock().map(|stage| *stage).unwrap_or(None)
     }
 
     pub(super) fn check(&self, stage: &'static str) -> Result<(), StageFailure> {
-        self.last_stage.set(Some(stage));
+        if let Ok(mut last) = self.last_stage.lock() {
+            *last = Some(stage);
+        }
         if self.cancellation.is_cancelled() {
             return Err(StageFailure::Stale);
         }
