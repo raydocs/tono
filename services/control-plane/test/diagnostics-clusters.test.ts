@@ -271,9 +271,7 @@ describe('failure cluster webhook', () => {
     expect(opened.cluster.id).toBe(first.clusterId);
     expect(opened.cluster.count).toBe(1);
     expect(opened.detailPath).toBe(`/api/v1/diagnostics/clusters/${first.clusterId}`);
-    expect(opened.cluster.sample).toEqual({
-      appBuild: '74', gitCommit: null, coreVersion: null, channel: 'release',
-    });
+    expect(opened.cluster.sample).toEqual({ channel: 'release' });
     expect(calls[0].signature.startsWith('sha256=')).toBe(true);
     const key = await crypto.subtle.importKey(
       'raw',
@@ -292,35 +290,51 @@ describe('failure cluster webhook', () => {
     expect(JSON.parse(calls[1].body).reason).toBe('spike');
   });
 
-  /// Codex pre-deploy review (57c1c64c..66a5bc5c): regex redaction kept a
-  /// hostname and an IPv6 resolver in the cluster sample, and the webhook sent
-  /// them to a third party. An alert carries classified fields only.
-  it('alerts and stores a failure report without its error text', async () => {
+  /// Codex pre-deploy review (57c1c64c..66a5bc5c) and its re-reviews: regex
+  /// redaction kept a hostname and an IPv6 resolver in the cluster sample and
+  /// the webhook sent them to a third party; a length check or a shape is not
+  /// provenance either (`192.168.257` is an address to a URL parser). A value
+  /// leaves only when the server issued it.
+  it('alerts with server-issued values only, never client text', async () => {
     (env as unknown as Env).FAILURE_ALERT_WEBHOOK_URL = HOOK;
     (env as unknown as Env).FAILURE_ALERT_WEBHOOK_SECRET = SECRET;
     const { calls } = hookSpy();
     const account = await seedAccount();
-    // Every client-supplied field, not only `error`: a length check is not a class.
-    const response = await api('telemetry/failures', json({
-      ts: Date.now(), stage: 'securingDNS', code: 'DNS_PRIVACY_PROBE', node: 'private.example.com',
-      appVersion: '203.0.113.9', osVersion: 'Windows 10', osArch: 'x86_64', platform: 'windows',
-      appBuild: 'password=s3cret', gitCommit: 'private.example.com', coreVersion: 'peer 2001:db8::53',
-      error: 'lookup private.example.com on [2001:db8::53]:53 failed',
+    const t = Math.floor(Date.now() / 1000);
+    await db().prepare(
+      `INSERT INTO exit_nodes(id, name, token_hash, created_at, updated_at) VALUES('n-priv', 'Osaka · Nara', ?, ?, ?)`,
+    ).bind('h'.repeat(43), t, t).run();
+    await db().prepare(
+      `INSERT INTO client_releases(id, platform, channel, version, created_at, updated_at)
+       VALUES('r-priv', 'windows', 'stable', '0.0.74', ?, ?)`,
+    ).bind(t, t).run();
+    const report = (fields: Record<string, unknown>) => api('telemetry/failures', json({
+      ts: Date.now(), stage: 'securingDNS', osVersion: 'Windows 10', osArch: 'x86_64', platform: 'windows',
+      ...fields,
     }, account.token));
-    expect(response.status).toBe(202);
-    expect(calls).toHaveLength(1);
-    for (const leaked of ['private.example.com', '2001:db8', '203.0.113.9', 's3cret']) {
-      expect(calls[0].body).not.toContain(leaked);
-    }
-    expect((JSON.parse(calls[0].body) as { cluster: Record<string, unknown> }).cluster).toMatchObject({
-      code: 'DNS_PRIVACY_PROBE', stage: 'securingDNS', platform: 'windows',
-      node: '[unlisted]', appVersion: '[unclassified]',
+    expect((await report({
+      code: 'DNS_PRIVACY_PROBE', node: 'private.example.com', appVersion: '192.168.257',
+      appBuild: '3232235777', gitCommit: 'private.example.com', coreVersion: 'v1.2.3-intranet',
+      error: 'lookup private.example.com on [2001:db8::53]:53 failed password=s3cret',
+    })).status).toBe(202);
+    expect((await report({
+      code: 'DNS_PRIVACY_KNOWN', node: 'Osaka · Nara · hy2', appVersion: '0.0.74', channel: 'release',
+    })).status).toBe(202);
+    const clusters = calls.map((call) => {
+      for (const leaked of ['private.example.com', '2001:db8', '192.168.257', '3232235777', 'intranet', 's3cret']) {
+        expect(call.body).not.toContain(leaked);
+      }
+      return (JSON.parse(call.body) as { cluster: Record<string, unknown> }).cluster;
     });
-    const cluster = await db().prepare(
+    expect(clusters).toMatchObject([
+      { code: 'DNS_PRIVACY_PROBE', stage: 'securingDNS', platform: 'windows',
+        node: '[unlisted]', appVersion: '[unlisted]', sample: { channel: null } },
+      { code: 'DNS_PRIVACY_KNOWN', node: 'Osaka · Nara · hy2', appVersion: '0.0.74', sample: { channel: 'release' } },
+    ]);
+    const stored = await db().prepare(
       "SELECT sample_json FROM failure_clusters WHERE code = 'DNS_PRIVACY_PROBE'",
     ).first<{ sample_json: string }>();
-    expect(cluster?.sample_json).not.toContain('private.example.com');
-    expect(cluster?.sample_json).not.toContain('2001:db8');
+    expect(stored?.sample_json).toBe('{"channel":null}');
   });
 
   it('does not call the webhook when the URL or secret is unset or the URL is private', async () => {
@@ -588,6 +602,27 @@ describe('automatic diagnostic excerpt privacy', () => {
       'SELECT log_excerpt, bytes_down, outcome FROM client_sessions WHERE user_id = ?',
     ).bind(account.userId).first();
     expect(session).toMatchObject({ log_excerpt: null, bytes_down: 400, outcome: 'fail' });
+  });
+
+  /// Rows written before the sample was reduced keep their old JSON; the read
+  /// API is a way out of the control plane too.
+  it('returns only the classified sample for a cluster stored with client text', async () => {
+    const account = await seedAccount();
+    expect((await api('telemetry/diagnostics', json(bundle(), account.token))).status).toBe(202);
+    await db().prepare('UPDATE failure_clusters SET sample_json = ?').bind(JSON.stringify({
+      error: 'lookup private.example.com failed', appBuild: 'password=s3cret', channel: 'release',
+    })).run();
+    (env as unknown as Env).DIAGNOSTICS_READ_TOKEN = READ;
+    try {
+      const list = await api('diagnostics/clusters', { headers: { authorization: `Bearer ${READ}` } });
+      const listed = await list.json() as { clusters: Array<{ sample: unknown }> };
+      expect(listed.clusters.map((cluster) => cluster.sample)).toEqual(
+        listed.clusters.map(() => ({ channel: 'release' })),
+      );
+      expect(listed.clusters.length).toBeGreaterThan(0);
+    } finally {
+      (env as unknown as Env).DIAGNOSTICS_READ_TOKEN = undefined;
+    }
   });
 
   /// The same review: `session.reason` took 80 characters of prose, so a core
