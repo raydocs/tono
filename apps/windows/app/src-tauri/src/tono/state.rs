@@ -394,11 +394,21 @@ pub struct TonoInner {
     pub last_tcp_delay_ms: Option<u64>,
     pub last_tcp_delay_at_ms: Option<i64>,
     pub last_tcp_delay_node: Option<String>,
+    /// When the connected route's data-plane probe started failing, one entry per drop.
+    /// Display only: the health monitor's own counters decide teardown.
+    pub route_drops_ms: Vec<i64>,
+    pub route_drop_last_failure_ms: Option<i64>,
+    pub route_drop_node: Option<String>,
     pub tasks: TaskRegistry,
     /// Offline admission and the server's verdicts on this session (#582). Shared with the
     /// tono-core verdict sink, which cannot take this mutex.
     pub offline: Arc<crate::tono::offline_grant::OfflineGate>,
 }
+
+/// Decision 054: three separate drops inside half an hour mark a route unstable.
+const ROUTE_UNSTABLE_DROPS: usize = 3;
+const ROUTE_UNSTABLE_WINDOW_MS: i64 = 30 * 60_000;
+const ROUTE_DROP_GAP_MS: i64 = 60_000;
 
 fn now_ms() -> i64 {
     std::time::SystemTime::now()
@@ -471,6 +481,51 @@ impl TonoInner {
         self.last_tcp_delay_ms = Some(delay_ms);
         self.last_tcp_delay_at_ms = Some(now_ms());
         self.last_tcp_delay_node = Some(node.to_string());
+    }
+
+    /// Record one failed data-plane probe on a connected route. Probes that fail within
+    /// [`ROUTE_DROP_GAP_MS`] of the previous failure belong to the same drop, so one outage
+    /// counts once however long it lasts.
+    pub fn record_route_probe_failure(&mut self, node: &str, at_ms: i64) {
+        if node.is_empty() {
+            return;
+        }
+        if self.route_drop_node.as_deref() != Some(node) {
+            self.route_drop_node = Some(node.to_string());
+            self.route_drops_ms.clear();
+            self.route_drop_last_failure_ms = None;
+        }
+        let same_drop = self
+            .route_drop_last_failure_ms
+            .is_some_and(|last| (0..ROUTE_DROP_GAP_MS).contains(&(at_ms - last)));
+        self.route_drop_last_failure_ms = Some(at_ms);
+        if same_drop {
+            return;
+        }
+        self.route_drops_ms
+            .retain(|at| (0..ROUTE_UNSTABLE_WINDOW_MS).contains(&(at_ms - at)));
+        self.route_drops_ms.push(at_ms);
+    }
+
+    /// Until when the selected route counts as unstable: it dropped
+    /// [`ROUTE_UNSTABLE_DROPS`] times inside [`ROUTE_UNSTABLE_WINDOW_MS`]. A hint to try
+    /// another route, never a connection verdict and never a reason to switch by itself.
+    pub fn selected_route_unstable_until_ms(&self, now_ms: i64) -> Option<i64> {
+        if self.selected_node.is_none() || self.selected_node != self.route_drop_node {
+            return None;
+        }
+        let recent: Vec<i64> = self
+            .route_drops_ms
+            .iter()
+            .copied()
+            .filter(|at| (0..ROUTE_UNSTABLE_WINDOW_MS).contains(&(now_ms - at)))
+            .collect();
+        let oldest_counted = recent.len().checked_sub(ROUTE_UNSTABLE_DROPS)?;
+        recent.get(oldest_counted).map(|at| at + ROUTE_UNSTABLE_WINDOW_MS)
+    }
+
+    pub fn selected_route_unstable(&self, now_ms: i64) -> bool {
+        self.selected_route_unstable_until_ms(now_ms).is_some()
     }
 
     pub fn selected_exit_delay_ms(&self) -> Option<u64> {
@@ -767,6 +822,9 @@ impl TonoState {
                 last_tcp_delay_ms: None,
                 last_tcp_delay_at_ms: None,
                 last_tcp_delay_node: None,
+                route_drops_ms: Vec::new(),
+                route_drop_last_failure_ms: None,
+                route_drop_node: None,
                 tasks: TaskRegistry::default(),
                 offline,
             }),
@@ -1364,6 +1422,27 @@ mod tests {
             matching_selected_delay(Some("Tokyo · Fuji"), Some(0), Some("Tokyo · Fuji")),
             None
         );
+    }
+
+    #[tokio::test]
+    async fn a_route_that_keeps_dropping_is_reported_unstable() {
+        let state = super::TonoState::for_test();
+        let mut inner = state.lock().await;
+        inner.selected_node = Some("Los Angeles · Pacific".into());
+        let start = 1_800_000_000_000_i64;
+        // One outage fails several probes seconds apart: one drop, not three.
+        inner.record_route_probe_failure("Los Angeles · Pacific", start);
+        inner.record_route_probe_failure("Los Angeles · Pacific", start + 2_000);
+        inner.record_route_probe_failure("Los Angeles · Pacific", start + 4_000);
+        assert!(!inner.selected_route_unstable(start + 5_000));
+
+        inner.record_route_probe_failure("Los Angeles · Pacific", start + 8 * 60_000);
+        inner.record_route_probe_failure("Los Angeles · Pacific", start + 20 * 60_000);
+        assert!(inner.selected_route_unstable(start + 21 * 60_000));
+        // The drops age out, and another route does not inherit them.
+        assert!(!inner.selected_route_unstable(start + 51 * 60_000));
+        inner.selected_node = Some("Tokyo · Fuji".into());
+        assert!(!inner.selected_route_unstable(start + 21 * 60_000));
     }
 
     #[tokio::test]

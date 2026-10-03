@@ -125,6 +125,10 @@ pub struct TonoStatus {
     /// disconnect and reinstall; a later connect must not hide this.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub update_incomplete: bool,
+    /// The selected route dropped repeatedly while connected; set until this time. The UI
+    /// offers another route. It never switches by itself.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub route_unstable_until_ms: Option<i64>,
     /// Ready on an offline grant (#582): when the server last verified this session and its
     /// catalog. Absent once any server answer arrives.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -293,6 +297,7 @@ pub(crate) fn status_of(inner: &TonoInner) -> TonoStatus {
             None
         },
         update_incomplete: update::incomplete() || crate::tono::update_handoff::incomplete(),
+        route_unstable_until_ms: inner.selected_route_unstable_until_ms(epoch_millis()),
         offline_verified_at_ms: inner.offline.offline_verified_at_ms(),
     }
 }

@@ -349,6 +349,7 @@
     "openDnsSettings": "Open Windows DNS settings",
     "errorRetry": "Try again",
     "errorSwitchServer": "Switch node",
+    "routeUnstableHint": "This route dropped several times in the last half hour. Another route may be steadier.",
     "whatFailed": "What failed",
     "copyDetails": "Copy details",
     "catalogRequiresChoice": "That node is gone — pick another",

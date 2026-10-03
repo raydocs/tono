@@ -1114,6 +1114,7 @@ export interface TranslationResources {
         pickServer: string
         protectedOffline: string
         protectedOfflineDescription: string
+        routeUnstableHint: string
         rulesDescription: string
         rulesTitle: string
         secureDnsHint: string

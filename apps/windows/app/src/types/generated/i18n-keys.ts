@@ -842,6 +842,7 @@ export const translationKeys = [
   'tono.dashboard.openDnsSettings',
   'tono.dashboard.errorRetry',
   'tono.dashboard.errorSwitchServer',
+  'tono.dashboard.routeUnstableHint',
   'tono.dashboard.whatFailed',
   'tono.dashboard.copyDetails',
   'tono.dashboard.catalogRequiresChoice',

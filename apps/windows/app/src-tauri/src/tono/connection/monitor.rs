@@ -824,7 +824,7 @@ mod protection_resync_tests {
 /// doubled measurement and persistent 504s on distant Reality exits do not prove user traffic is
 /// dead. A single public origin is likewise insufficient: every independent TLS target must fail
 /// before this leg reports failure.
-pub(super) async fn periodic_data_plane_probe_failed(state: &Arc<TonoState>) -> bool {
+pub(super) async fn periodic_data_plane_probe_failed(state: &Arc<TonoState>, app: &AppHandle) -> bool {
     match verify_tun_data_plane().await {
         Ok(()) => false,
         Err(err) => {
@@ -832,8 +832,24 @@ pub(super) async fn periodic_data_plane_probe_failed(state: &Arc<TonoState>) -> 
                 probe: "tunDataPlane",
                 error: err,
             });
+            note_route_probe_failure(state, app).await;
             true
         }
+    }
+}
+
+/// Count the failure toward the route's drop record and publish once when the route becomes
+/// unstable. Display only: the legs above decide what happens to the session.
+async fn note_route_probe_failure(state: &Arc<TonoState>, app: &AppHandle) {
+    let now = commands::epoch_millis();
+    let mut inner = state.lock().await;
+    let Some(node) = inner.selected_node.clone() else {
+        return;
+    };
+    let was_unstable = inner.selected_route_unstable(now);
+    inner.record_route_probe_failure(&node, now);
+    if !was_unstable && inner.selected_route_unstable(now) {
+        commands::emit_status(app, &commands::status_of(&inner));
     }
 }
 
@@ -843,13 +859,14 @@ pub(super) async fn periodic_data_plane_probe_failed(state: &Arc<TonoState>) -> 
 /// reuse a Service that never answers again would probe every other tick for the whole session.
 pub(super) async fn in_place_hold_still_proven(
     state: &Arc<TonoState>,
+    app: &AppHandle,
     legs: &mut HealthLegs,
     last_proof: &mut Option<std::time::Instant>,
 ) -> bool {
     if last_proof.is_some_and(|at| at.elapsed() < NETWORK_EVENT_PROBE_COOLDOWN) {
         return true;
     }
-    let failed = periodic_data_plane_probe_failed(state).await;
+    let failed = periodic_data_plane_probe_failed(state, app).await;
     *last_proof = if failed { None } else { Some(std::time::Instant::now()) };
     legs.observe_probe(failed);
     !failed
@@ -917,7 +934,7 @@ pub(super) async fn network_monitor_loop(state: Arc<TonoState>, app: AppHandle) 
                         // Elapsed time on its own is not evidence: this path continues before
                         // the periodic probe below, so nothing watches the tunnel while the hold
                         // runs.
-                        if in_place_hold_still_proven(&state, &mut legs, &mut last_event_probe_ok).await {
+                        if in_place_hold_still_proven(&state, &app, &mut legs, &mut last_event_probe_ok).await {
                             continue;
                         }
                     }
@@ -957,7 +974,7 @@ pub(super) async fn network_monitor_loop(state: Arc<TonoState>, app: AppHandle) 
                 // evidence the tunnel died.
                 legs.observe_probe(false);
             } else {
-                legs.observe_probe(periodic_data_plane_probe_failed(&state).await);
+                legs.observe_probe(periodic_data_plane_probe_failed(&state, &app).await);
             }
         }
         let health_invalid = legs.invalid();
@@ -1110,7 +1127,7 @@ pub(super) async fn network_monitor_loop(state: Arc<TonoState>, app: AppHandle) 
             recent_proof,
         );
         let probed = match plan {
-            NetworkEventProbePlan::Probe => Some(periodic_data_plane_probe_failed(&state).await),
+            NetworkEventProbePlan::Probe => Some(periodic_data_plane_probe_failed(&state, &app).await),
             NetworkEventProbePlan::ReuseRecentProof => {
                 logging!(
                     info,

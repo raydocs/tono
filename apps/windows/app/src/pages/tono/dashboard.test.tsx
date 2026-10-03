@@ -665,6 +665,21 @@ describe('dashboard claude residential route badge', () => {
     expect(screen.queryByText('First connect')).toBeNull()
   })
 
+  it('offers another route when the connected route keeps dropping', () => {
+    mocks.status = makeStatus({
+      uiState: 'connected',
+      selectedServer: 'Los Angeles · Pacific',
+      routeUnstableUntilMs: Date.now() + 600_000,
+    })
+    renderDashboard()
+    expect(
+      screen.getByText(
+        'This route dropped several times in the last half hour. Another route may be steadier.',
+      ),
+    ).toBeDefined()
+    expect(screen.getByRole('button', { name: 'Switch node' })).toBeDefined()
+  })
+
   it('says protected in one line when connected instead of explaining every route', async () => {
     mocks.status = makeStatus({
       uiState: 'connected',

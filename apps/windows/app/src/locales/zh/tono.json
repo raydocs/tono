@@ -349,6 +349,7 @@
     "openDnsSettings": "打开 Windows DNS 设置",
     "errorRetry": "重试",
     "errorSwitchServer": "切换节点",
+    "routeUnstableHint": "这条线路最近半小时内多次中断，换一条线路可能更稳定。",
     "whatFailed": "失败原因",
     "copyDetails": "复制诊断信息",
     "catalogRequiresChoice": "当前节点已下线，请另选一个",

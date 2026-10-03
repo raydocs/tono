@@ -89,6 +89,58 @@ const EncryptedDnsHint = ({
   )
 }
 
+/** The connected route keeps dropping. Offers the picker; never switches by itself. */
+const UnstableRouteHint = ({
+  dark,
+  message,
+  action,
+  onSwitch,
+}: {
+  dark: boolean
+  message: string
+  action: string
+  onSwitch: () => void
+}) => {
+  const text = tonoText(dark)
+  return (
+    <GlassCard
+      radius="var(--tono-radius-card)"
+      padding={14}
+      style={{ width: 520, maxWidth: '100%' }}
+    >
+      <p
+        role="status"
+        style={{
+          margin: '0 0 10px',
+          fontSize: 12,
+          lineHeight: 1.5,
+          color: text.secondary,
+        }}
+      >
+        {message}
+      </p>
+      <button
+        type="button"
+        className="tono-button"
+        onClick={onSwitch}
+        style={{
+          minHeight: 32,
+          padding: '6px 12px',
+          fontSize: 12,
+          fontWeight: 600,
+          borderRadius: 9,
+          border: `1px solid ${hex(TONO_COLORS.accent, 0.35)}`,
+          cursor: 'pointer',
+          color: 'var(--tono-text-link)',
+          background: hex(TONO_COLORS.accent, dark ? 0.14 : 0.08),
+        }}
+      >
+        {action}
+      </button>
+    </GlassCard>
+  )
+}
+
 const ActiveNodeCard = ({
   serverName,
   connected,
@@ -472,6 +524,13 @@ const DashboardPage = () => {
   const protectionConfirmed = hasLiveProtection(status)
   const uiState = status?.uiState ?? 'notConnected'
   const connected = uiState === 'connected'
+  // Wall-clock for the hint's expiry, sampled outside render.
+  const [hintNow, setHintNow] = useState(() => Date.now())
+  useEffect(() => {
+    const timer = window.setInterval(() => setHintNow(Date.now()), 30_000)
+    return () => window.clearInterval(timer)
+  }, [])
+  const routeUnstable = (status?.routeUnstableUntilMs ?? 0) > hintNow
   const busy =
     uiState === 'connecting' ||
     uiState === 'disconnecting' ||
@@ -897,6 +956,14 @@ const DashboardPage = () => {
               )}
             />
           )}
+        {connected && routeUnstable && (
+          <UnstableRouteHint
+            dark={dark}
+            message={t('tono.dashboard.routeUnstableHint')}
+            action={t('tono.dashboard.errorSwitchServer')}
+            onSwitch={() => navigate('/servers')}
+          />
+        )}
         {/* Actionable error under the primary control — includes a switch-server
             path when the exit itself is the likely problem. */}
         {showActionError && (
