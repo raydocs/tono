@@ -94,6 +94,13 @@ pub fn complete(dir: &Path, body: &str) {
     }
 }
 
+/// Drops every item whose kind is not `kind`.
+pub fn retain_kind(dir: &Path, kind: &str) {
+    let mut file = load(dir);
+    file.items.retain(|item| item.kind == kind);
+    let _ = store(dir, &file);
+}
+
 pub fn postpone(dir: &Path, body: &str, now_ms: i64) {
     let mut file = load(dir);
     if let Some(item) = file.items.iter_mut().find(|item| item.body == body) {

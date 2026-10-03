@@ -540,24 +540,16 @@ pub enum FailureReportScope {
     Classified,
 }
 
-/// Whether a connect failure is reported, and with what. The local log switch
-/// still stops every report. Release builds report when the timeline is on.
-/// The timeline defaults on, so those reports default on; turning the timeline
-/// off is the opt-out. Internal builds still send a classified record when the
-/// timeline is off. Do not gate release reports on a second default-off switch.
-pub fn failure_report_scope(
-    internal_build: bool,
-    audit_enabled: bool,
-    timeline_opted_in: bool,
-) -> Option<FailureReportScope> {
-    if !audit_enabled {
-        None
-    } else if timeline_opted_in {
-        Some(FailureReportScope::Full)
-    } else if internal_build {
-        Some(FailureReportScope::Classified)
+/// Whether a connect failure is reported, and with what. Every build sends
+/// the classified record (stage, code, node, versions); the error text rides
+/// the timeline switch and the local log switch. Owner decision 2026-10-03
+/// (decision 051): without the reports no field failure can be debugged. Do
+/// not gate the classified report on any switch.
+pub fn failure_report_scope(audit_enabled: bool, timeline_opted_in: bool) -> FailureReportScope {
+    if audit_enabled && timeline_opted_in {
+        FailureReportScope::Full
     } else {
-        None
+        FailureReportScope::Classified
     }
 }
 
@@ -855,9 +847,9 @@ impl Audit {
         &self.settings_dir
     }
 
-    /// [`failure_report_scope`] for this build and the current switches.
-    pub fn failure_report_scope(&self) -> Option<FailureReportScope> {
-        failure_report_scope(internal_build(), self.enabled(), self.periodic_telemetry_enabled())
+    /// [`failure_report_scope`] for the current switches.
+    pub fn failure_report_scope(&self) -> FailureReportScope {
+        failure_report_scope(self.enabled(), self.periodic_telemetry_enabled())
     }
 
     pub fn log_path(&self) -> &Path {
@@ -1021,7 +1013,7 @@ impl Audit {
         Ok(())
     }
 
-    /// Toggle cloud periodic telemetry (explicit opt-in, default OFF).
+    /// Toggle the periodic timeline (default on, decision 002).
     pub fn set_periodic_telemetry_enabled(&self, enabled: bool) -> Result<(), String> {
         if self.periodic_telemetry_enabled() == enabled {
             return Ok(());
@@ -1033,6 +1025,9 @@ impl Audit {
             self.record(AuditEvent::PeriodicTelemetryEnabled);
         } else {
             self.record(AuditEvent::PeriodicTelemetryDisabled);
+            // Queued timeline and failure bodies may carry error text; the
+            // lost-protection reports stay (decision 051).
+            crate::tono::telemetry_outbox::retain_kind(&self.settings_dir, "p0");
         }
         Ok(())
     }
@@ -1491,7 +1486,7 @@ mod tests {
     }
 
     #[test]
-    fn internal_builds_keep_classified_failure_reports_through_the_timeline_reset() {
+    fn failure_reports_survive_the_timeline_reset() {
         // An upgraded install: the v2 migration resets the legacy default-on timeline switch.
         let upgraded = TempDir::new("failure-report-upgrade");
         std::fs::write(
@@ -1503,24 +1498,18 @@ mod tests {
         let audit = audit_enabled_from_settings(upgraded.path());
         assert!(timeline && audit);
         assert_eq!(
-            failure_report_scope(true, audit, timeline),
-            Some(FailureReportScope::Full),
-            "an internal build with the timeline on sends the full failure report"
+            failure_report_scope(audit, timeline),
+            FailureReportScope::Full,
+            "the timeline on sends the full failure report"
         );
         assert_eq!(
-            failure_report_scope(false, audit, timeline),
-            Some(FailureReportScope::Full),
-            "release builds report failures while the timeline stays on"
-        );
-        assert_eq!(
-            failure_report_scope(false, audit, false),
-            Some(FailureReportScope::Classified),
+            failure_report_scope(audit, false),
+            FailureReportScope::Classified,
             "the timeline opt-out drops the error text, not the report (decision 051)"
         );
-        assert_eq!(failure_report_scope(false, audit, true), Some(FailureReportScope::Full));
         assert_eq!(
-            failure_report_scope(true, false, true),
-            Some(FailureReportScope::Classified),
+            failure_report_scope(false, true),
+            FailureReportScope::Classified,
             "the local log switch drops the error text, not the report"
         );
     }
@@ -1529,7 +1518,7 @@ mod tests {
     /// switches off still reports the classified connect failure.
     #[test]
     fn a_release_build_reports_classified_failures_with_every_switch_off() {
-        assert_eq!(failure_report_scope(false, false, false), Some(FailureReportScope::Classified));
+        assert_eq!(failure_report_scope(false, false), FailureReportScope::Classified);
     }
 
     #[test]

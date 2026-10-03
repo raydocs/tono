@@ -23,7 +23,7 @@
       "internalDiagnostics": "Internal test build: failed connections are reported to Tono automatically (stage, error code, version and server only).",
       "periodicTelemetry": {
         "label": "Share diagnostic timeline",
-        "description": "On by default. About every 20 minutes while signed in, Tono uploads a short protection and network event summary — version, selected server, per-route byte totals, connection stage and error code — and reports a failed connection when it happens. No website names, page contents, passwords, or node secrets. Turn this off to stop those uploads."
+        "description": "On by default. About every 20 minutes while signed in, Tono uploads a short protection and network event summary — version, selected server, per-route byte totals, connection stage and error code. No website names, page contents, passwords, or node secrets. Turning this off stops the timeline and the error text in failure reports. Failed connections and lost protection are always reported with their stage, code and server."
       },
       "networkLogUpload": {
         "label": "Upload the full traffic log",

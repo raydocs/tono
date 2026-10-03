@@ -185,9 +185,9 @@ pub(crate) async fn spawn_periodic_for_auth_generation(state: &Arc<TonoState>, _
 }
 
 /// Best-effort `POST telemetry/failures` for one connectFail. Never blocks
-/// connect / kill-switch, and never retries a timeout. Uses the same consent
-/// as the periodic window — this is not the 3.5 raw connection log — except
-/// that an internal build sends the classified fields without it.
+/// connect / kill-switch, and never retries a timeout. The classified record
+/// always goes; the error text rides the timeline consent (decision 051).
+/// This is not the 3.5 raw connection log.
 pub(crate) fn spawn_connect_failure_report(
     state: &Arc<TonoState>,
     account_owner: (u64, u64),
@@ -197,7 +197,7 @@ pub(crate) fn spawn_connect_failure_report(
     transport: Option<&'static str>,
     code: Option<&str>,
 ) -> Option<tauri::async_runtime::JoinHandle<()>> {
-    let scope = state.audit().failure_report_scope()?;
+    let scope = state.audit().failure_report_scope();
     let Some(node) = node.filter(|name| !name.trim().is_empty()) else {
         return None;
     };
@@ -211,7 +211,7 @@ pub(crate) fn spawn_connect_failure_report(
             .unwrap_or("unknown")
             .to_string()
     });
-    // Free text stays behind the explicit timeline opt-in.
+    // Free text stays behind the timeline switch.
     let error = if scope == FailureReportScope::Full {
         // Raw dial errors carry the exit address; scrub like the support report.
         let clipped: String = scrub_text_with(error, &[]).chars().take(200).collect();
@@ -335,8 +335,9 @@ fn diagnostics_bundle(report: &ConnectFailureReport) -> Result<serde_json::Value
     Ok(bundle)
 }
 
+/// Everything queued is sent: the timeline switch going off already dropped
+/// what may carry error text (decision 051).
 async fn drain_outbox(state: &Arc<TonoState>, generation: u64) {
-    let telemetry_on = state.audit().periodic_telemetry_enabled();
     let items = telemetry_outbox::due(state.audit().settings_dir(), epoch_ms());
     if items.is_empty() {
         return;
@@ -349,9 +350,6 @@ async fn drain_outbox(state: &Arc<TonoState>, generation: u64) {
         (inner.client.clone(), inner.client.diagnostics_log_identity().await)
     };
     for item in items {
-        if !telemetry_on && item.kind != "p0" {
-            continue;
-        }
         let result = match item.kind.as_str() {
             "failure" => client
                 .upload_saved_telemetry(tono_core::auth::endpoints::TELEMETRY_FAILURES, &item.body, identity)
