@@ -300,15 +300,22 @@ describe('failure cluster webhook', () => {
     (env as unknown as Env).FAILURE_ALERT_WEBHOOK_SECRET = SECRET;
     const { calls } = hookSpy();
     const account = await seedAccount();
+    // Every client-supplied field, not only `error`: a length check is not a class.
     const response = await api('telemetry/failures', json({
-      ts: Date.now(), stage: 'securingDNS', code: 'DNS_PRIVACY_PROBE', node: 'Tokyo',
-      appVersion: '0.0.44', osVersion: 'Windows 10', osArch: 'x86_64', platform: 'windows',
+      ts: Date.now(), stage: 'securingDNS', code: 'DNS_PRIVACY_PROBE', node: 'private.example.com',
+      appVersion: '203.0.113.9', osVersion: 'Windows 10', osArch: 'x86_64', platform: 'windows',
+      appBuild: 'password=s3cret', gitCommit: 'private.example.com', coreVersion: 'peer 2001:db8::53',
       error: 'lookup private.example.com on [2001:db8::53]:53 failed',
     }, account.token));
     expect(response.status).toBe(202);
     expect(calls).toHaveLength(1);
-    expect(calls[0].body).not.toContain('private.example.com');
-    expect(calls[0].body).not.toContain('2001:db8');
+    for (const leaked of ['private.example.com', '2001:db8', '203.0.113.9', 's3cret']) {
+      expect(calls[0].body).not.toContain(leaked);
+    }
+    expect((JSON.parse(calls[0].body) as { cluster: Record<string, unknown> }).cluster).toMatchObject({
+      code: 'DNS_PRIVACY_PROBE', stage: 'securingDNS', platform: 'windows',
+      node: '[unlisted]', appVersion: '[unclassified]',
+    });
     const cluster = await db().prepare(
       "SELECT sample_json FROM failure_clusters WHERE code = 'DNS_PRIVACY_PROBE'",
     ).first<{ sample_json: string }>();
@@ -596,6 +603,8 @@ describe('automatic diagnostic excerpt privacy', () => {
       withReason('SOCKS5 password=s3cret peer=203.0.113.9'), account.token,
     ));
     expect(prose.status).toBe(400);
+    // A hostname is one token to a charset that allows dots; the class has none.
+    expect((await api('telemetry/diagnostics', json(withReason('private.example.com'), account.token))).status).toBe(400);
     expect((await api('telemetry/diagnostics', json(withReason('tunnel_lost'), account.token))).status).toBe(202);
     const session = await db().prepare(
       'SELECT reason FROM client_sessions WHERE user_id = ?',
