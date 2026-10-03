@@ -1632,6 +1632,35 @@ extension KillSwitchManager {
                     "self-test: a committed session whose owner died is not released when its exit stays unreachable\n".utf8
                 ))
             }
+            // MAC-ORPHAN-OWNER-RELAUNCH: an owner that died with protection
+            // still held is brought back at once, again after the spacing,
+            // and then no more. A live or unknown owner, no protection, a
+            // sleeping Mac and a pending native update never relaunch.
+            func relaunch(
+                protectionPresent: Bool = true, ownerRecorded: Bool = true, ownerAlive: Bool = false,
+                awake: Bool = true, updatePending: Bool = false, attempts: Int = 0, checksSinceLastAttempt: Int = 0
+            ) -> Bool {
+                SocketServer.orphanedOwnerRelaunchDue(
+                    protectionPresent: protectionPresent, ownerRecorded: ownerRecorded, ownerAlive: ownerAlive,
+                    awake: awake, updatePending: updatePending, attempts: attempts,
+                    checksSinceLastAttempt: checksSinceLastAttempt
+                )
+            }
+            let spacing = SocketServer.orphanedOwnerRelaunchSpacing
+            let orphanedOwnerRelaunches = relaunch()
+                && !relaunch(attempts: 1, checksSinceLastAttempt: spacing - 1)
+                && relaunch(attempts: 1, checksSinceLastAttempt: spacing)
+                && !relaunch(attempts: SocketServer.orphanedOwnerRelaunchLimit, checksSinceLastAttempt: 99)
+                && !relaunch(ownerAlive: true)
+                && !relaunch(ownerRecorded: false)
+                && !relaunch(protectionPresent: false)
+                && !relaunch(awake: false)
+                && !relaunch(updatePending: true)
+            if !orphanedOwnerRelaunches {
+                FileHandle.standardError.write(Data(
+                    "self-test: an owner that died with protection held is not relaunched exactly twice\n".utf8
+                ))
+            }
             return ruleShapesHold
                 && bundleShapesHold
                 && bundleOffWithoutTunnel
@@ -1660,6 +1689,7 @@ extension KillSwitchManager {
                 && orphanedBootstrapUntouched
                 && orphanedBootstrapReleases
                 && orphanedTunnelReleases
+                && orphanedOwnerRelaunches
                 && failureRecoveryReleasesNetwork(strictKillSwitchEnabled: false)
                 && !failureRecoveryReleasesNetwork(strictKillSwitchEnabled: true)
                 && shouldReinstallKillSwitch(coreRunning: true)
