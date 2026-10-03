@@ -89,11 +89,8 @@ extension AppState {
                 self.completedConnectionStages = []
                 self.lastConnectionStageDurations = []
                 self.lastConnectionFailure = nil
-                // Kept locally: a Disconnect that cancels this attempt resets
-                // connectionStartedAt before the cancel reaches the catch below.
-                let attemptStartedAt = Date()
-                self.connectionStartedAt = attemptStartedAt
-                self.connectionStageStartedAt = attemptStartedAt
+                self.connectionStartedAt = Date()
+                self.connectionStageStartedAt = self.connectionStartedAt
                 self.connectedSessionStartedAt = nil
                 if !self.isProtectedReconnectScheduled {
                     self.protectedReconnectAttempt = 0
@@ -189,6 +186,9 @@ extension AppState {
             },
             perform: { [weak self, coreRuntime] attemptID, generation in
                 guard let self else { return }
+                // Kept locally: a Disconnect that cancels this attempt resets
+                // connectionStartedAt before the cancel reaches the catch below.
+                let attemptStartedAt = self.connectionStartedAt ?? Date()
                 let routeOwner = ManagedExitCatalogOwnership.currentAccount
                 let routeCatalogDigest = self.managedCatalogDigest
                 let port = self.config.mixedPort
@@ -571,7 +571,7 @@ extension AppState {
                         stage: self.connectionStage.rawValue,
                         elapsedMs: max(0, Int(Date().timeIntervalSince(attemptStartedAt) * 1_000)),
                         node: selectedExit?.name,
-                        generation: generation
+                        generation: Int(clamping: generation)
                     )
                     return
                 }
