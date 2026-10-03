@@ -1,0 +1,499 @@
+/* Decorative scene values are scoped; application/control tokens stay untouched. */
+.sea-scene {
+  --sea-offset: 0px;
+  --sea-scale: 1;
+  --sea-day: 1;
+  --sea-dusk: 0.75;
+  --sea-stars: 0;
+  --sea-red: 0;
+  --sea-shade: 0;
+  --sea-glow: 1;
+  --sea-mirror: 0.3;
+  --sea-path: 1;
+  --sea-path-scale: 1;
+  --sea-path-red: 0;
+  --sea-light: 0.5;
+  --sea-light-red: 0;
+  --sea-horizon: 0.9;
+  --sea-sun-time: var(--tono-ambient-sun-arrive);
+  --sea-sun-ease: var(--tono-ambient-ease-sun);
+  --sea-sky-time: var(--tono-ambient-sky);
+  --sea-sky-ease: var(--tono-ambient-ease-sky);
+  --sea-day-time: var(--sea-sky-time);
+  --sea-stars-time: var(--sea-sky-time);
+  --sea-glow-time: var(--sea-sky-time);
+  --sea-path-time: var(--sea-sky-time);
+  --sea-light-time: var(--sea-sky-time);
+  isolation: isolate;
+  contain: layout paint;
+}
+.sea-scene[data-phase="connecting"] {
+  --sea-offset: 125px;
+  --sea-scale: 1.08;
+  --sea-day: 0.18;
+  --sea-dusk: 1;
+  --sea-stars: 0.3;
+  --sea-red: 0.45;
+  --sea-glow: 0.75;
+  --sea-mirror: 0.8;
+  --sea-path: 0.9;
+  --sea-path-scale: 0.72;
+  --sea-path-red: 0.6;
+  --sea-light: 0.6;
+  --sea-light-red: 0.45;
+  --sea-sun-time: var(--tono-ambient-sun-rise);
+  --sea-sky-ease: var(--tono-ambient-ease-dawn);
+}
+.sea-scene[data-phase="failed"] {
+  --sea-offset: 223px;
+  --sea-scale: 1.1;
+  --sea-day: 0;
+  --sea-dusk: 0.5;
+  --sea-stars: 0.6;
+  --sea-red: 1;
+  --sea-shade: 0.08;
+  --sea-glow: 0.4;
+  --sea-mirror: 0.7;
+  --sea-path: 0.5;
+  --sea-path-scale: 0.45;
+  --sea-path-red: 1;
+  --sea-light: 0.4;
+  --sea-light-red: 1;
+  --sea-horizon: 0.55;
+  --sea-sun-time: var(--tono-ambient-sun-fail);
+  --sea-sun-ease: var(--tono-ambient-ease-fail);
+  --sea-sky-time: 2200ms;
+  --sea-day-time: 1800ms;
+  --sea-glow-time: 1800ms;
+  --sea-stars-time: 2600ms;
+}
+.sea-scene[data-phase="idle"] {
+  --sea-offset: 290px;
+  --sea-scale: 1.1;
+  --sea-day: 0;
+  --sea-dusk: 0.22;
+  --sea-stars: 1;
+  --sea-red: 1;
+  --sea-shade: 0.26;
+  --sea-glow: 0;
+  --sea-mirror: 0.72;
+  --sea-path: 0;
+  --sea-path-scale: 0.3;
+  --sea-path-red: 1;
+  --sea-light: 0.12;
+  --sea-light-red: 1;
+  --sea-horizon: 0.26;
+  --sea-sun-time: var(--tono-ambient-sun-set);
+  --sea-sun-ease: var(--tono-ambient-ease-set);
+  --sea-sky-time: var(--tono-ambient-night);
+  --sea-sky-ease: cubic-bezier(0.5, 0, 0.3, 1);
+  --sea-day-time: 3400ms;
+  --sea-glow-time: 3400ms;
+  --sea-path-time: 4400ms;
+  --sea-light-time: 5600ms;
+}
+.sea-sky {
+  background: linear-gradient(180deg, #04050a, #080b19 56%, #111529);
+}
+.sea-water {
+  background: linear-gradient(180deg, #0b0d19, #05060a);
+}
+.sea-day {
+  opacity: var(--sea-day);
+  transition: opacity var(--sea-day-time) var(--sea-sky-ease);
+}
+.sea-dusk {
+  opacity: var(--sea-dusk);
+  transition: opacity var(--sea-sky-time) var(--sea-sky-ease);
+}
+.sea-sky-day {
+  background:
+    radial-gradient(
+      440px 310px at 67.3913% calc(100% - 134px),
+      #ffb4648c,
+      #e260463d 46%,
+      transparent
+    ),
+    linear-gradient(180deg, transparent 42%, #ffac6266);
+}
+.sea-sky-dusk {
+  background:
+    radial-gradient(540px 210px at 67.3913% 100%, #ff96549e, transparent),
+    linear-gradient(
+      180deg,
+      transparent 18%,
+      #5c162899 62%,
+      #ce4232d9 90%,
+      #ff9654f2
+    );
+}
+.sea-water-day {
+  background: linear-gradient(
+    180deg,
+    #ffa66057,
+    #aa40361f 32%,
+    transparent 76%
+  );
+}
+.sea-water-dusk {
+  background: linear-gradient(
+    180deg,
+    #ce423280,
+    #5c162842 26%,
+    transparent 70%
+  );
+}
+.sea-stars {
+  opacity: var(--sea-stars);
+  transition: opacity var(--sea-stars-time) var(--sea-sky-ease);
+}
+.sea-star {
+  border-radius: 50%;
+  background: #fff;
+  opacity: 0.65;
+}
+.sea-track,
+.sea-mirror-track {
+  transform: translateY(var(--sea-offset)) scale(var(--sea-scale));
+  transition: transform var(--sea-sun-time) var(--sea-sun-ease);
+}
+.sea-mirror-track {
+  transform: translateY(calc(-1 * var(--sea-offset))) scale(var(--sea-scale));
+}
+.sea-disk {
+  background: linear-gradient(
+    180deg,
+    #fff6de,
+    #ffd58e 30%,
+    #ffa35e 66%,
+    #f2685a
+  );
+}
+.sea-red {
+  background: linear-gradient(
+    180deg,
+    #ffb86e,
+    #ff7a44 34%,
+    #e0403e 70%,
+    #9a1e38
+  );
+  opacity: var(--sea-red);
+  transition: opacity 2200ms var(--tono-ambient-ease-sky);
+}
+.sea-shade {
+  background: #2a0714;
+  opacity: var(--sea-shade);
+  transition: opacity var(--sea-sun-time) var(--sea-sun-ease);
+}
+.sea-sun-glow {
+  box-shadow:
+    0 0 50px 6px #ffaa6099,
+    0 0 160px 50px #f060544d;
+  opacity: var(--sea-glow);
+  transition: opacity var(--sea-glow-time) var(--sea-sky-ease);
+}
+.sea-halo {
+  opacity: 0;
+  transition: opacity 800ms ease;
+}
+.sea-scene[data-phase="connecting"] .sea-halo {
+  opacity: 1;
+}
+.sea-breathe {
+  background: radial-gradient(
+    ellipse,
+    #ff965a99,
+    #f0545a3d 45%,
+    transparent 72%
+  );
+  animation: sea-breathe var(--tono-ambient-breathe) ease-in-out infinite;
+}
+.sea-scene:not([data-phase="connecting"]) .sea-breathe {
+  animation-play-state: paused;
+}
+.sea-cloud {
+  border-radius: 999px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    #0e060a80 35%,
+    #0e060a80 70%,
+    transparent
+  );
+  mask-image: linear-gradient(
+    180deg,
+    transparent,
+    #000 40%,
+    #000 60%,
+    transparent
+  );
+}
+.sea-cloud-1 {
+  animation: sea-cloud var(--tono-ambient-cloud-near) ease-in-out infinite
+    alternate;
+}
+.sea-cloud-2 {
+  animation: sea-cloud var(--tono-ambient-cloud-far) ease-in-out -9s infinite
+    alternate-reverse;
+}
+.sea-water-light {
+  opacity: var(--sea-light);
+  transition: opacity var(--sea-light-time) var(--sea-sky-ease);
+}
+.sea-light-warm,
+.sea-light-red {
+  background: radial-gradient(
+    50% 100% at 50% 0%,
+    #ffb46e,
+    #ffb46e57 42%,
+    transparent
+  );
+  opacity: calc(1 - var(--sea-light-red));
+  transition: opacity var(--sea-light-time) var(--sea-sky-ease);
+}
+.sea-light-red {
+  background: radial-gradient(
+    50% 100% at 50% 0%,
+    #e2443f,
+    #e2443f57 42%,
+    transparent
+  );
+  opacity: var(--sea-light-red);
+}
+.sea-mirror {
+  opacity: var(--sea-mirror);
+  transition: opacity var(--sea-sky-time) var(--sea-sky-ease);
+  mask-image: linear-gradient(
+    180deg,
+    #000,
+    #000000b8 24%,
+    #00000038 50%,
+    transparent 66%
+  );
+}
+.sea-mirror .sea-disk,
+.sea-mirror .sea-red {
+  transform: scaleY(-1);
+}
+.sea-mirror-soft {
+  border-radius: 50%;
+  background: radial-gradient(
+    ellipse,
+    #ff824c73,
+    #ff824c4d 50%,
+    transparent 72%
+  );
+}
+.sea-ripple {
+  mask-size: 100% 270px;
+  mask-repeat: no-repeat;
+  mask-mode: luminance;
+}
+.sea-ripple-1 {
+  mask-image: url("./sea-assets/ripple-1.png");
+}
+.sea-ripple-2 {
+  mask-image: url("./sea-assets/ripple-2.png");
+}
+.sea-wobble-1 {
+  animation: sea-wobble var(--tono-ambient-water-near) ease-in-out infinite;
+}
+.sea-wobble-2 {
+  animation: sea-wobble var(--tono-ambient-water-far) ease-in-out -1.9s infinite
+    reverse;
+}
+.sea-sun-path {
+  opacity: var(--sea-path);
+  transform: scaleY(var(--sea-path-scale));
+  transform-origin: 50% 0;
+  transition:
+    opacity var(--sea-path-time) var(--sea-sky-ease),
+    transform var(--sea-sun-time) var(--sea-sun-ease);
+}
+.sea-path-gold {
+  color: #ffd9a0;
+  opacity: calc(1 - var(--sea-path-red));
+  transition: opacity var(--sea-path-time) var(--sea-sky-ease);
+}
+.sea-path-red {
+  color: #e8553f;
+  opacity: var(--sea-path-red);
+  transition: opacity var(--sea-path-time) var(--sea-sky-ease);
+}
+.sea-bar {
+  border-radius: 999px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    currentColor 28%,
+    currentColor 72%,
+    transparent
+  );
+}
+.sea-glitter-0 {
+  animation: sea-glitter-1 var(--tono-ambient-glitter-near) ease-in-out infinite;
+}
+.sea-glitter-1 {
+  animation: sea-glitter-2 var(--tono-ambient-glitter-mid) ease-in-out infinite;
+}
+.sea-glitter-2 {
+  animation: sea-glitter-3 var(--tono-ambient-glitter-far) ease-in-out infinite;
+}
+.sea-horizon {
+  background: radial-gradient(
+    50% 100% at 67.3913% 50%,
+    #ffd6aae6,
+    #ff966459 45%,
+    #ff96640f
+  );
+  opacity: var(--sea-horizon);
+  transition: opacity var(--sea-sky-time) var(--sea-sky-ease);
+}
+.sea-moon {
+  opacity: 0;
+  transform: translateY(30px);
+  transition:
+    opacity 1400ms var(--tono-ambient-ease-sky),
+    transform 2000ms var(--tono-ambient-ease-sky);
+}
+.sea-moon-glow {
+  border-radius: 50%;
+  background: radial-gradient(
+    ellipse,
+    #ced8ff33,
+    #ced8ff0f 40%,
+    transparent 70%
+  );
+}
+.sea-crescent {
+  border-radius: 50%;
+  box-shadow: inset 9px -6px 0 #f4eee2;
+  transform: rotate(-16deg);
+}
+.sea-moon-path {
+  color: #c6cff0;
+  opacity: 0;
+  transition: opacity 1400ms var(--tono-ambient-ease-sky);
+}
+.sea-scene[data-phase="idle"] .sea-moon {
+  opacity: 1;
+  transform: translateY(0);
+  transition:
+    opacity 3400ms var(--tono-ambient-ease-sky) 2800ms,
+    transform 4200ms var(--tono-ambient-ease-sun) 2400ms;
+}
+.sea-scene[data-phase="idle"] .sea-moon-path {
+  opacity: 0.34;
+  transition: opacity 3400ms var(--tono-ambient-ease-sky) 3200ms;
+}
+.sea-twinkle-0 {
+  animation: sea-twinkle var(--tono-ambient-star-near) ease-in-out infinite;
+}
+.sea-twinkle-1 {
+  animation: sea-twinkle var(--tono-ambient-star-mid) ease-in-out -2s infinite;
+}
+.sea-twinkle-2 {
+  animation: sea-twinkle var(--tono-ambient-star-far) ease-in-out -1s infinite;
+}
+.sea-grain {
+  background: url("./sea-assets/grain.png") repeat;
+  mix-blend-mode: overlay;
+  opacity: 0.5;
+}
+@keyframes sea-breathe {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+@keyframes sea-cloud {
+  from {
+    transform: translateX(-16px);
+  }
+  to {
+    transform: translateX(16px);
+  }
+}
+@keyframes sea-wobble {
+  0%,
+  100% {
+    transform: translateX(-5px);
+  }
+  50% {
+    transform: translateX(6px);
+  }
+}
+@keyframes sea-twinkle {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.2;
+  }
+}
+@keyframes sea-glitter-1 {
+  0%,
+  100% {
+    transform: scaleX(1) translateX(0);
+    opacity: 1;
+  }
+  50% {
+    transform: scaleX(0.6) translateX(9px);
+    opacity: 0.5;
+  }
+}
+@keyframes sea-glitter-2 {
+  0%,
+  100% {
+    transform: scaleX(0.68) translateX(-7px);
+    opacity: 0.55;
+  }
+  50% {
+    transform: scaleX(1.08) translateX(5px);
+    opacity: 1;
+  }
+}
+@keyframes sea-glitter-3 {
+  0%,
+  100% {
+    transform: scaleX(0.85) translateX(0);
+    opacity: 0.8;
+  }
+  33% {
+    transform: scaleX(0.5) translateX(-11px);
+    opacity: 0.4;
+  }
+  66% {
+    transform: scaleX(1.1) translateX(7px);
+    opacity: 1;
+  }
+}
+/* No loop restart on visibility changes; retain the presentation position. */
+.sea-scene[data-paused="true"] .sea-loop {
+  animation-play-state: paused;
+}
+.sea-scene[data-phase][data-motion="static"] *,
+.sea-scene[data-phase][data-paused="true"] * {
+  transition: none;
+}
+@media (prefers-reduced-motion: reduce), (prefers-reduced-transparency: reduce),
+  (forced-colors: active) {
+  .sea-scene[data-phase][data-motion] * {
+    transition: none;
+  }
+  .sea-scene .sea-loop {
+    animation-play-state: paused;
+  }
+}
+@supports not (backdrop-filter: blur(1px)) {
+  .sea-scene[data-phase][data-motion] * {
+    transition: none;
+  }
+  .sea-scene .sea-loop {
+    animation-play-state: paused;
+  }
+}

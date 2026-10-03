@@ -859,6 +859,7 @@ export const translationKeys = [
   'tono.dashboard.errors.protectionHeldByAnotherUser',
   'tono.dashboard.errors.remoteSessionConnectRefused',
   'tono.dashboard.errors.browserDnsPreflight',
+  'tono.dashboard.errors.hy2Idle',
   'tono.dashboard.errors.nodeUnreachable',
   'tono.dashboard.errors.tunDataPlaneBroken',
   'tono.dashboard.errors.tunIngressBroken',
@@ -1107,6 +1108,16 @@ export const translationKeys = [
   'tono.servicePrereq.repair',
   'tono.servicePrereq.repairing',
   'tono.servicePrereq.repairFailed',
+  'tono.scenePreview.notice',
+  'tono.scenePreview.connected',
+  'tono.scenePreview.connecting',
+  'tono.scenePreview.failed',
+  'tono.scenePreview.idle',
+  'tono.scenePreview.detail',
+  'tono.scenePreview.paused',
+  'tono.scenePreview.viewport',
+  'tono.scenePreview.node',
+  'tono.scenePreview.action',
 ] as const
 
 export type TranslationKey = (typeof translationKeys)[number]
