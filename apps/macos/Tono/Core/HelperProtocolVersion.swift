@@ -393,7 +393,11 @@ nonisolated enum HelperProtocolVersion {
     ///   is released, with the AI hold kept, once its exit has stayed
     ///   unreachable for about a minute while the Mac has an uplink
     ///   (MAC-ORPHAN-TUNNEL-SESSION, #1269).
-    static let current = "4.52.39"
+    /// - 4.52.39 → 4.52.40: an app owner that died while PF holds a block is
+    ///   relaunched by the helper, at most twice about 30 s apart, through
+    ///   the user's Launch Services; the relaunched app resumes the route
+    ///   itself (MAC-ORPHAN-OWNER-RELAUNCH).
+    static let current = "4.52.40"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS
