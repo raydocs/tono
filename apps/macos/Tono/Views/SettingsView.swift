@@ -215,7 +215,7 @@ struct SettingsView: View {
 
             SettingToggleRow(
                 label: "Protection snapshot",
-                subtitle: "On by default. About every 20 minutes, share protection status, the selected server, per-route byte totals and recent connection events with Tono, and report a failed connection when it happens. No website names or page contents. Turn this off to stop those uploads.",
+                subtitle: "On by default. About every 20 minutes, share protection status, the selected server, per-route byte totals and recent connection events with Tono. No website names or page contents. Turning this off stops the snapshot and the error text in failure reports. Failed connections and lost protection are always reported with their stage, code and server.",
                 isOn: Binding(
                     get: { periodicTelemetryEnabled },
                     set: { newValue in

@@ -8267,12 +8267,12 @@
         }
       }
     },
-    "On by default. About every 20 minutes, share protection status, the selected server, per-route byte totals and recent connection events with Tono, and report a failed connection when it happens. No website names or page contents. Turn this off to stop those uploads.": {
+    "On by default. About every 20 minutes, share protection status, the selected server, per-route byte totals and recent connection events with Tono. No website names or page contents. Turning this off stops the snapshot and the error text in failure reports. Failed connections and lost protection are always reported with their stage, code and server.": {
       "localizations": {
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "默认开启。大约每 20 分钟向 Tono 分享保护状态、所选服务器、各线路的流量小计和最近的连接事件，并在连接失败时上报。不含网站名或页面内容。关闭后停止这些上传。"
+            "value": "默认开启。大约每 20 分钟向 Tono 分享保护状态、所选服务器、各线路的流量小计和最近的连接事件。不含网站名或页面内容。关闭后停止快照和故障报告里的错误原文；连接失败和保护丢失始终上报，只含阶段、错误码和服务器。"
           }
         }
       }

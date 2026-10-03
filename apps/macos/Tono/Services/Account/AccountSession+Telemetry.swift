@@ -111,9 +111,10 @@ extension AccountSession {
     func periodicTelemetrySettingChanged() {
         routeTelemetryCursor.reset(to: routeSplitConsumer())
         _ = ConnectionTelemetryBuffer.shared.drain()
-        // Turning the switch off also drops what was waiting to be sent.
+        // Turning the switch off drops the waiting timeline and failure
+        // bodies, which may carry error text. Lost-protection reports stay.
         if !Self.isPeriodicTelemetryEnabled {
-            AppProfile.defaults.removeObject(forKey: TelemetryOutbox.key)
+            TelemetryOutbox.keepOnlyNetworkLoss()
         }
         updatePeriodicTelemetry()
     }
@@ -130,8 +131,9 @@ extension AccountSession {
             state == .ready && user != nil && Self.isPeriodicTelemetryEnabled,
             current: routeSplitConsumer()
         )
-        guard state == .ready, !systemSleeping, user != nil,
-              Self.isPeriodicTelemetryEnabled else {
+        // The task runs for every signed-in session: with the switch off it
+        // only sends the queued failure and lost-protection reports.
+        guard state == .ready, !systemSleeping, user != nil else {
             periodicTelemetryTask?.cancel()
             periodicTelemetryTask = nil
             return
@@ -152,10 +154,10 @@ extension AccountSession {
     }
 
     func uploadPeriodicTelemetryWindow() async {
+        await TelemetryOutbox.drain(api: api)
         // The switch can be turned off while this task is parked on its sleep,
         // and the cancellation only lands at the next suspension point.
         guard periodicTelemetryConsent() else { return }
-        await TelemetryOutbox.drain(api: api)
         // A sleep cancels the timer and a wake starts a fresh one, so the task
         // being new is not evidence that a window is due. Hold the cadence
         // across restarts rather than spending the hourly budget on them.
@@ -273,12 +275,10 @@ extension AccountSession {
         }
     }
 
-    /// The failure travels on its own, the moment it happens. It rides the same
-    /// consent as the protection snapshot — it is a slice of the same event
-    /// ring — and the Worker keeps a separate budget for it, so a bad evening
-    /// of retries cannot starve the heartbeat that would show the recovery.
-    /// An internal build also sends the classified fields without that consent,
-    /// until the user turns that off in Settings.
+    /// The failure travels on its own, the moment it happens. The classified
+    /// record always goes; the error text rides the snapshot consent (decision
+    /// 051). The Worker keeps a separate budget for it, so a bad evening of
+    /// retries cannot starve the heartbeat that would show the recovery.
     func reportConnectFailure(_ notice: ConnectFailureNotice) async {
         let internalBuild = Self.isInternalBuild()
         guard state == .ready, !systemSleeping, user != nil,
@@ -661,19 +661,22 @@ nonisolated enum TelemetryOutbox {
                 }
             }
         }
-        // An opt-out during this pass already emptied the queue. Reports
-        // queued while it was sending stay queued.
-        guard AccountSession.isPeriodicTelemetryEnabled else { return }
+        // Reports queued while it was sending stay queued.
         AppProfile.defaults.set(kept + pending().dropFirst(items.count), forKey: key)
+    }
+
+    /// The snapshot switch went off: what may carry error text is dropped,
+    /// the lost-protection reports are not.
+    static func keepOnlyNetworkLoss(defaults: UserDefaults = AppProfile.defaults) {
+        defaults.set(pending(defaults: defaults).filter { $0["kind"] == "p0" }, forKey: key)
     }
 }
 
 /// Events that leave the user without a working network.
 ///
 /// Queued on disk and posted to `telemetry/diagnostics` on a later signed-in
-/// pass. Nothing is queued or posted while the snapshot switch is off
-/// (decision 050). The control plane treats
-/// these codes as severity `p0` and alerts on the first event of the cluster.
+/// pass, with or without the snapshot switch (decision 051). The control plane
+/// treats these codes as severity `p0` and alerts on the first event of the cluster.
 /// The closed set matches `P0_NETWORK_LOSS_CODES` in `failure-clusters.ts`.
 nonisolated enum NetworkLossReport {
     static let networkLoss = "TONO_NETWORK_LOSS"
@@ -701,7 +704,7 @@ nonisolated enum NetworkLossReport {
     }
 
     static func enqueue(code: String, node: String, defaults: UserDefaults = AppProfile.defaults) {
-        guard isP0(code), AccountSession.isPeriodicTelemetryEnabled else { return }
+        guard isP0(code) else { return }
         let version = (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String)
             .map { String($0.prefix(40)) }
             .flatMap { $0.isEmpty ? nil : $0 } ?? "unknown"
