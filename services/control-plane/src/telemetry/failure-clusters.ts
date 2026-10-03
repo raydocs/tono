@@ -3,7 +3,6 @@
 // the HMAC secret must be set; either one missing disables the send.
 // Payloads never include emails, hostnames, URLs, or full IP addresses.
 
-import { redactJobResult } from '../ops/job-redaction';
 
 export const CLUSTER_GAP_MS = 30 * 60 * 1000;
 export const ALERT_MIN_GAP_SEC = 15 * 60;
@@ -103,11 +102,7 @@ export type FailureClusterInput = {
   node: string;
   userId: string;
   deviceId: string | null;
-  appBuild?: string | null;
-  gitCommit?: string | null;
-  coreVersion?: string | null;
   channel?: string | null;
-  error?: string | null;
 };
 
 export type ClusterEnv = {
@@ -141,15 +136,55 @@ async function hmacHex(secret: string, message: string): Promise<string> {
   return [...new Uint8Array(sig)].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
+// What a client-supplied field may be once it leaves the control plane (the
+// alert webhook, the read API's sample). A length check is not a class and a
+// shape is not provenance: `192.168.257` is a version to a regex and an
+// address to a URL parser. So an identifier goes out only as an identifier, an
+// enum as an enum, and a name or version only when the server issued it;
+// anything else is a placeholder. Ingest stays tolerant (old clients keep
+// reporting); only the outbound copy is strict.
+const UNCLASSIFIED = '[unclassified]';
+const UNLISTED = '[unlisted]';
+const OUTBOUND = {
+  code: /^[A-Za-z][A-Za-z0-9_]{0,79}$/,
+  stage: /^[A-Za-z][A-Za-z0-9_]{0,39}$/,
+  platform: /^(?:macos|windows|ios|android|linux|unknown)$/,
+  channel: /^(?:release|beta)$/,
+} as const;
+
+function outbound(value: unknown, shape: RegExp): string {
+  return typeof value === 'string' && shape.test(value) ? value : UNCLASSIFIED;
+}
+
+// A catalog display name has spaces and separators no charset can tell from
+// prose, so it goes out only if the server issued it.
+async function outboundNode(db: D1Database, node: string): Promise<string> {
+  const base = node.replace(/ · hy2$/, '');
+  const known = await db.prepare(
+    `SELECT 1 AS ok WHERE EXISTS (SELECT 1 FROM exit_nodes WHERE name = ?1)
+        OR EXISTS (SELECT 1 FROM operations_logical_nodes WHERE display_name = ?1)`,
+  ).bind(base).first<{ ok: number }>();
+  return known ? node : UNLISTED;
+}
+
+// A version goes out only if the release registry lists it.
+async function outboundVersion(db: D1Database, version: string): Promise<string> {
+  const known = await db.prepare(
+    `SELECT 1 AS ok FROM client_releases WHERE version = ? LIMIT 1`,
+  ).bind(version).first<{ ok: number }>();
+  return known ? version : UNLISTED;
+}
+
+// The release channel only. Client error text and build identifiers cannot be
+// proven free of hostnames, addresses or credentials; they stay on the
+// failure's own connection_events row and never enter the sample.
+export function outboundSample(value: unknown): { channel: string | null } {
+  const channel = value && typeof value === 'object' ? (value as { channel?: unknown }).channel : null;
+  return { channel: typeof channel === 'string' && OUTBOUND.channel.test(channel) ? channel : null };
+}
+
 function sampleOf(input: FailureClusterInput): string {
-  const error = input.error ? redactJobResult(input.error).slice(0, 200) : null;
-  return JSON.stringify({
-    error,
-    appBuild: input.appBuild ?? null,
-    gitCommit: input.gitCommit ?? null,
-    coreVersion: input.coreVersion ?? null,
-    channel: input.channel ?? null,
-  }).slice(0, SAMPLE_LIMIT);
+  return JSON.stringify(outboundSample(input)).slice(0, SAMPLE_LIMIT);
 }
 
 type ClusterRow = {
@@ -285,9 +320,9 @@ async function sendClusterAlert(
   if (reason === 'spike' && row.alerted_at != null && nowSec - Number(row.alerted_at) < ALERT_MIN_GAP_SEC) {
     return false;
   }
-  let sample: unknown = null;
+  let sample: { channel: string | null } | null = null;
   try {
-    sample = row.sample_json ? JSON.parse(row.sample_json) : null;
+    sample = row.sample_json ? outboundSample(JSON.parse(row.sample_json)) : null;
   } catch {
     sample = null;
   }
@@ -298,11 +333,11 @@ async function sendClusterAlert(
     reason,
     cluster: {
       id: row.id,
-      code: row.code,
-      stage: row.stage,
-      appVersion: row.app_version,
-      platform: row.platform,
-      node: row.node,
+      code: outbound(row.code, OUTBOUND.code),
+      stage: outbound(row.stage, OUTBOUND.stage),
+      appVersion: await outboundVersion(db, row.app_version),
+      platform: outbound(row.platform, OUTBOUND.platform),
+      node: await outboundNode(db, row.node),
       count: Number(row.event_count),
       users: Number(row.user_count),
       devices: Number(row.device_count),

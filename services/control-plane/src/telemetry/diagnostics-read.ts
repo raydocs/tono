@@ -3,7 +3,7 @@
 // not join users.email and do not return hostnames or full IPs.
 
 import { ApiError } from '../errors';
-import { tokenMatches } from './failure-clusters';
+import { outboundSample, tokenMatches } from './failure-clusters';
 
 type Row = Record<string, unknown>;
 
@@ -30,7 +30,9 @@ export async function authorizeDiagnosticsRead(req: Request, expected: string | 
 function clusterDto(row: Row) {
   let sample: unknown = null;
   try {
-    sample = typeof row.sample_json === 'string' ? JSON.parse(row.sample_json) : null;
+    // The same filter as the webhook: a row stored before the sample was
+    // reduced must not hand its old client text to a reader.
+    sample = typeof row.sample_json === 'string' ? outboundSample(JSON.parse(row.sample_json)) : null;
   } catch {
     sample = null;
   }

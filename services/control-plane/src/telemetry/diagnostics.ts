@@ -53,6 +53,10 @@ const SESSION_ID = /^[A-Za-z0-9_-]{8,64}$/;
 const PREFIX = /^(?:\d{1,3}\.){3}0\/24$/;
 const HASH = /^[a-f0-9]{64}$/;
 const NODE_ID = /^[A-Za-z0-9 .·_\-]{1,80}$/;
+// A classified value, never prose: an identifier with no spaces, dots, colons,
+// `=`, `/` or `@`, so neither a core log line nor a bare hostname or address
+// can be stored as one.
+const CLASS_TOKEN = /^[A-Za-z][A-Za-z0-9_]{0,79}$/;
 
 export type StoredBundle = { sessionId: string | null; events: number };
 
@@ -147,7 +151,11 @@ export async function storeDiagnosticsBundle(
     const bytesDown = diagnosticsInt(session, 'bytesDown', 0, 1_000_000_000_000_000, true) ?? 0;
     const outcome = optionalText(session.outcome, 'outcome', 40);
     const reason = optionalText(session.reason, 'reason', 80);
-    if (reason) rejectSecrets(reason, 'reason');
+    for (const [name, value] of [['outcome', outcome], ['reason', reason]] as const) {
+      if (value && !CLASS_TOKEN.test(value)) {
+        throw new ApiError(400, 'VALIDATION_ERROR', `session.${name} must be a classified token`);
+      }
+    }
     const excerpt = optionalText(root.logExcerpt, 'logExcerpt', 1500);
     if (excerpt && /https?:\/\//i.test(excerpt)) {
       throw new ApiError(400, 'VALIDATION_ERROR', 'logExcerpt must not contain a URL');
@@ -309,8 +317,7 @@ export async function storeDiagnosticsBundle(
     if (FAILURE_KINDS.has(kind) && code && stage && node) {
       failures.push({
         atMs, code, stage, appVersion: client.appVersion, platform: client.platform, node,
-        userId, deviceId, appBuild: client.appBuild, gitCommit: client.gitCommit,
-        coreVersion: client.coreVersion, channel: client.channel,
+        userId, deviceId, channel: client.channel,
       });
     }
   }
