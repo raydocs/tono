@@ -50,6 +50,23 @@ final class ConnectionTelemetryBufferTests: XCTestCase {
         XCTAssertEqual(event.transport, "tcp")
     }
 
+    /// A cancelled connect used to record nothing, so the field could not tell
+    /// a user's second click from a crash. The cancel is a typed event with its
+    /// stage and elapsed time, and it is not a failure: the sink stays silent.
+    func testConnectCancelCarriesStageAndElapsedTimeWithoutAFailureNotice() {
+        let buffer = ConnectionTelemetryBuffer()
+        let box = NoticeBox()
+        buffer.setFailureSink { notice in box.store(notice) }
+        buffer.recordConnectCancel(stage: "startingCore", elapsedMs: 6_000, node: "anon-1", generation: 3)
+        let drained = buffer.drain()
+        XCTAssertEqual(drained.events.map(\.kind), ["connectCancel"])
+        XCTAssertEqual(drained.events[0].stage, "startingCore")
+        XCTAssertEqual(drained.events[0].elapsedMs, 6_000)
+        XCTAssertEqual(drained.events[0].node, "anon-1")
+        XCTAssertNil(drained.events[0].code)
+        XCTAssertNil(box.notice)
+    }
+
     /// The immediate report is only as useful as its bounds are honest: a core
     /// that logged a thousand lines must still produce a notice the Worker
     /// accepts (at most twenty lines of two hundred characters).
