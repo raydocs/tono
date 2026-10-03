@@ -55,6 +55,9 @@ pub(super) const CONNECT_BUDGET_LEGS: [(&str, u64); 13] = [
 pub(super) struct ConnectTransaction {
     deadline: tokio::time::Instant,
     cancellation: CancellationToken,
+    /// The stage most recently entered, so a cancel can be recorded with it.
+    /// Shared by clones, like the deadline and the cancellation.
+    last_stage: std::sync::Arc<std::sync::Mutex<Option<&'static str>>>,
 }
 
 impl ConnectTransaction {
@@ -62,10 +65,20 @@ impl ConnectTransaction {
         Self {
             deadline: tokio::time::Instant::now() + CONNECT_TRANSACTION_TIMEOUT,
             cancellation,
+            last_stage: std::sync::Arc::new(std::sync::Mutex::new(None)),
         }
     }
 
+    /// The stage the transaction was in when it last checked, or `None`
+    /// before any stage ran.
+    pub(super) fn last_stage(&self) -> Option<&'static str> {
+        self.last_stage.lock().map(|stage| *stage).unwrap_or(None)
+    }
+
     pub(super) fn check(&self, stage: &'static str) -> Result<(), StageFailure> {
+        if let Ok(mut last) = self.last_stage.lock() {
+            *last = Some(stage);
+        }
         if self.cancellation.is_cancelled() {
             return Err(StageFailure::Stale);
         }
@@ -124,6 +137,24 @@ mod tests {
 
         assert!(matches!(result, Err(StageFailure::Stale)));
         assert!(!polled.load(Ordering::SeqCst));
+    }
+
+    /// A Disconnect, Quit or sign-out during a connect used to leave only a
+    /// connectBegin behind. The transaction remembers the stage it was in when
+    /// the cancel arrived so the attempt can record a `connectCancel` with it.
+    #[tokio::test(start_paused = true)]
+    async fn cancelled_stage_is_remembered_for_the_cancel_event() {
+        let cancellation = CancellationToken::new();
+        let transaction = ConnectTransaction::new(cancellation.clone());
+        assert_eq!(transaction.last_stage(), None);
+        let result = transaction
+            .wait("starting core", async {
+                cancellation.cancel();
+                std::future::pending::<()>().await
+            })
+            .await;
+        assert!(matches!(result, Err(StageFailure::Stale)));
+        assert_eq!(transaction.last_stage(), Some("starting core"));
     }
 
     #[tokio::test(start_paused = true)]

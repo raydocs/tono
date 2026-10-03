@@ -96,6 +96,7 @@ const INCLUDE_KINDS: &[&str] = &[
     "connectBegin",
     "stage",
     "connectFail",
+    "connectCancel",
     "connectOk",
     "protectedRouteEvidence",
     "disconnectBegin",

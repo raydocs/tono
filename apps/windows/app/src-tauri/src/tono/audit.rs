@@ -142,6 +142,16 @@ pub enum AuditEvent {
         elapsed_ms: u64,
         transport: &'static str,
     },
+    /// The user (or an update, sign-out, quit) stopped the attempt before an
+    /// outcome. Not a failure: no code, no failure report. Without it a
+    /// connectBegin with no outcome row is indistinguishable from a crash.
+    ConnectCancel {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        stage: Option<&'static str>,
+        elapsed_ms: u64,
+        node: String,
+        transport: &'static str,
+    },
     /// One destination the DIRECT overlay actually dialled, recorded once per distinct
     /// `(address, port, protocol)` per session.
     ///
@@ -333,6 +343,12 @@ impl AuditEvent {
             ConnectOk { node, elapsed_ms, transport } => ConnectOk {
                 node: redact(&node),
                 elapsed_ms,
+                transport,
+            },
+            ConnectCancel { stage, elapsed_ms, node, transport } => ConnectCancel {
+                stage,
+                elapsed_ms,
+                node: redact(&node),
                 transport,
             },
             ReleaseFail { error } => ReleaseFail { error: redact(&error) },
@@ -1250,6 +1266,12 @@ mod tests {
             AuditEvent::ConnectOk {
                 node: "n token=abc".to_string(),
                 elapsed_ms: 1,
+                transport: "tcp",
+            },
+            AuditEvent::ConnectCancel {
+                stage: Some("arm"),
+                elapsed_ms: 1,
+                node: "n token=abc".to_string(),
                 transport: "tcp",
             },
             AuditEvent::ReleaseFail {
