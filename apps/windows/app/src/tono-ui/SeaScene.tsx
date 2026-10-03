@@ -1,4 +1,9 @@
-import { useSyncExternalStore, type CSSProperties } from 'react'
+import {
+  useLayoutEffect,
+  useRef,
+  useSyncExternalStore,
+  type CSSProperties,
+} from 'react'
 
 import './tokens/motion.css'
 import './sea-scene.css'
@@ -137,12 +142,61 @@ const SunDisk = () => (
 
 /** Persistent, inert scenery. No connection state, native IPC, canvas or frame loop. */
 export const SeaScene = ({ phase, paused = false }: SeaSceneProps) => {
+  const sceneRef = useRef<HTMLDivElement>(null)
+  const frozenTransitionsRef = useRef(new Set<Animation>())
   const environment = useSyncExternalStore(subscribe, snapshot, () => 1)
   const isStatic = paused || (environment & 1) !== 0
-  const isPaused = isStatic || (environment & 2) !== 0
+  const isHidden = (environment & 2) !== 0
+  const isPaused = isStatic || isHidden
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: A phase commit creates new CSS transitions even when visibility is unchanged.
+  useLayoutEffect(() => {
+    const frozen = frozenTransitionsRef.current
+    if (!isHidden || isStatic) {
+      for (const transition of frozen) {
+        if (transition.playState === 'paused') {
+          if (isStatic) transition.cancel()
+          else transition.play()
+        }
+      }
+      frozen.clear()
+      return
+    }
+
+    // Visibility is transient: hold the presentation, including delayed moon fades.
+    // CSS still owns the loops; only pause this scene's in-flight transitions.
+    for (const animation of sceneRef.current?.getAnimations?.({
+      subtree: true,
+    }) ?? []) {
+      if (
+        'transitionProperty' in animation &&
+        animation.playState === 'running'
+      ) {
+        animation.pause()
+        frozen.add(animation)
+      }
+    }
+    for (const transition of frozen) {
+      if (
+        transition.playState === 'idle' ||
+        transition.playState === 'finished'
+      ) {
+        frozen.delete(transition)
+      }
+    }
+  }, [isHidden, isStatic, phase])
+
+  useLayoutEffect(() => {
+    const frozen = frozenTransitionsRef.current
+    return () => {
+      for (const transition of frozen) transition.cancel()
+      frozen.clear()
+    }
+  }, [])
 
   return (
     <div
+      ref={sceneRef}
       className="sea-scene"
       data-phase={phase}
       data-motion={isStatic ? 'static' : 'ambient'}

@@ -1,0 +1,1631 @@
+{
+  "host": "MacBook Chrome; simulated document.hidden, not native Windows visibility",
+  "source": "continuation of c416d0c7; same palette, assets, timings",
+  "freeze": {
+    "before": {
+      "sun": 36.7419,
+      "mirror": -36.7419,
+      "moonOpacity": "0",
+      "waterTime": 1733.2449998570532,
+      "phase": "idle",
+      "motion": "ambient",
+      "paused": "false",
+      "transitions": [
+        {
+          "target": "sea-stars",
+          "property": "opacity",
+          "state": "running",
+          "time": 899.9450000332594
+        },
+        {
+          "target": "sea-dusk sea-sky-dusk",
+          "property": "opacity",
+          "state": "running",
+          "time": 899.9450000332594
+        },
+        {
+          "target": "sea-day sea-sky-day",
+          "property": "opacity",
+          "state": "running",
+          "time": 899.9450000332594
+        },
+        {
+          "target": "sea-moon",
+          "property": "opacity",
+          "state": "running",
+          "time": 899.9450000332594
+        },
+        {
+          "target": "sea-moon",
+          "property": "transform",
+          "state": "running",
+          "time": 899.9450000332594
+        },
+        {
+          "target": "sea-track",
+          "property": "transform",
+          "state": "running",
+          "time": 899.9450000332594
+        },
+        {
+          "target": "sea-sun-glow",
+          "property": "opacity",
+          "state": "running",
+          "time": 899.9450000332594
+        },
+        {
+          "target": "sea-red",
+          "property": "opacity",
+          "state": "running",
+          "time": 899.9450000332594
+        },
+        {
+          "target": "sea-shade",
+          "property": "opacity",
+          "state": "running",
+          "time": 899.9450000332594
+        },
+        {
+          "target": "sea-dusk sea-water-dusk",
+          "property": "opacity",
+          "state": "running",
+          "time": 899.9450000332594
+        },
+        {
+          "target": "sea-day sea-water-day",
+          "property": "opacity",
+          "state": "running",
+          "time": 899.9450000332594
+        },
+        {
+          "target": "sea-water-light",
+          "property": "opacity",
+          "state": "running",
+          "time": 899.9450000332594
+        },
+        {
+          "target": "sea-light-warm",
+          "property": "opacity",
+          "state": "running",
+          "time": 899.9450000332594
+        },
+        {
+          "target": "sea-light-red",
+          "property": "opacity",
+          "state": "running",
+          "time": 899.9450000332594
+        },
+        {
+          "target": "sea-mirror",
+          "property": "opacity",
+          "state": "running",
+          "time": 899.9450000332594
+        },
+        {
+          "target": "sea-mirror-track",
+          "property": "transform",
+          "state": "running",
+          "time": 899.9450000332594
+        },
+        {
+          "target": "sea-mirror-track",
+          "property": "transform",
+          "state": "running",
+          "time": 899.9450000332594
+        },
+        {
+          "target": "sea-red",
+          "property": "opacity",
+          "state": "running",
+          "time": 899.9450000332594
+        },
+        {
+          "target": "sea-shade",
+          "property": "opacity",
+          "state": "running",
+          "time": 899.9450000332594
+        },
+        {
+          "target": "sea-mirror-track",
+          "property": "transform",
+          "state": "running",
+          "time": 899.9450000332594
+        },
+        {
+          "target": "sea-red",
+          "property": "opacity",
+          "state": "running",
+          "time": 899.9450000332594
+        },
+        {
+          "target": "sea-shade",
+          "property": "opacity",
+          "state": "running",
+          "time": 899.9450000332594
+        },
+        {
+          "target": "sea-moon-path",
+          "property": "opacity",
+          "state": "running",
+          "time": 899.9450000332594
+        },
+        {
+          "target": "sea-sun-path",
+          "property": "opacity",
+          "state": "running",
+          "time": 899.9450000332594
+        },
+        {
+          "target": "sea-sun-path",
+          "property": "transform",
+          "state": "running",
+          "time": 899.9450000332594
+        },
+        {
+          "target": "sea-path-gold",
+          "property": "opacity",
+          "state": "running",
+          "time": 899.9450000332594
+        },
+        {
+          "target": "sea-path-red",
+          "property": "opacity",
+          "state": "running",
+          "time": 899.9450000332594
+        },
+        {
+          "target": "sea-horizon",
+          "property": "opacity",
+          "state": "running",
+          "time": 899.9450000332594
+        }
+      ],
+      "runningLoops": 49
+    },
+    "hidden": {
+      "sun": 38.4918,
+      "mirror": -38.4918,
+      "moonOpacity": "0",
+      "waterTime": 1749.9869998570532,
+      "phase": "idle",
+      "motion": "ambient",
+      "paused": "true",
+      "transitions": [
+        {
+          "target": "sea-stars",
+          "property": "opacity",
+          "state": "paused",
+          "time": 916.6870000332594
+        },
+        {
+          "target": "sea-dusk sea-sky-dusk",
+          "property": "opacity",
+          "state": "paused",
+          "time": 916.6870000332594
+        },
+        {
+          "target": "sea-day sea-sky-day",
+          "property": "opacity",
+          "state": "paused",
+          "time": 916.6870000332594
+        },
+        {
+          "target": "sea-moon",
+          "property": "opacity",
+          "state": "paused",
+          "time": 916.6870000332594
+        },
+        {
+          "target": "sea-moon",
+          "property": "transform",
+          "state": "paused",
+          "time": 916.6870000332594
+        },
+        {
+          "target": "sea-track",
+          "property": "transform",
+          "state": "paused",
+          "time": 916.6870000332594
+        },
+        {
+          "target": "sea-sun-glow",
+          "property": "opacity",
+          "state": "paused",
+          "time": 916.6870000332594
+        },
+        {
+          "target": "sea-red",
+          "property": "opacity",
+          "state": "paused",
+          "time": 916.6870000332594
+        },
+        {
+          "target": "sea-shade",
+          "property": "opacity",
+          "state": "paused",
+          "time": 916.6870000332594
+        },
+        {
+          "target": "sea-dusk sea-water-dusk",
+          "property": "opacity",
+          "state": "paused",
+          "time": 916.6870000332594
+        },
+        {
+          "target": "sea-day sea-water-day",
+          "property": "opacity",
+          "state": "paused",
+          "time": 916.6870000332594
+        },
+        {
+          "target": "sea-water-light",
+          "property": "opacity",
+          "state": "paused",
+          "time": 916.6870000332594
+        },
+        {
+          "target": "sea-light-warm",
+          "property": "opacity",
+          "state": "paused",
+          "time": 916.6870000332594
+        },
+        {
+          "target": "sea-light-red",
+          "property": "opacity",
+          "state": "paused",
+          "time": 916.6870000332594
+        },
+        {
+          "target": "sea-mirror",
+          "property": "opacity",
+          "state": "paused",
+          "time": 916.6870000332594
+        },
+        {
+          "target": "sea-mirror-track",
+          "property": "transform",
+          "state": "paused",
+          "time": 916.6870000332594
+        },
+        {
+          "target": "sea-mirror-track",
+          "property": "transform",
+          "state": "paused",
+          "time": 916.6870000332594
+        },
+        {
+          "target": "sea-red",
+          "property": "opacity",
+          "state": "paused",
+          "time": 916.6870000332594
+        },
+        {
+          "target": "sea-shade",
+          "property": "opacity",
+          "state": "paused",
+          "time": 916.6870000332594
+        },
+        {
+          "target": "sea-mirror-track",
+          "property": "transform",
+          "state": "paused",
+          "time": 916.6870000332594
+        },
+        {
+          "target": "sea-red",
+          "property": "opacity",
+          "state": "paused",
+          "time": 916.6870000332594
+        },
+        {
+          "target": "sea-shade",
+          "property": "opacity",
+          "state": "paused",
+          "time": 916.6870000332594
+        },
+        {
+          "target": "sea-moon-path",
+          "property": "opacity",
+          "state": "paused",
+          "time": 916.6870000332594
+        },
+        {
+          "target": "sea-sun-path",
+          "property": "opacity",
+          "state": "paused",
+          "time": 916.6870000332594
+        },
+        {
+          "target": "sea-sun-path",
+          "property": "transform",
+          "state": "paused",
+          "time": 916.6870000332594
+        },
+        {
+          "target": "sea-path-gold",
+          "property": "opacity",
+          "state": "paused",
+          "time": 916.6870000332594
+        },
+        {
+          "target": "sea-path-red",
+          "property": "opacity",
+          "state": "paused",
+          "time": 916.6870000332594
+        },
+        {
+          "target": "sea-horizon",
+          "property": "opacity",
+          "state": "paused",
+          "time": 916.6870000332594
+        }
+      ],
+      "runningLoops": 0
+    },
+    "held": {
+      "sun": 38.4918,
+      "mirror": -38.4918,
+      "moonOpacity": "0",
+      "waterTime": 1749.9869998570532,
+      "phase": "idle",
+      "motion": "ambient",
+      "paused": "true",
+      "transitions": [
+        {
+          "target": "sea-stars",
+          "property": "opacity",
+          "state": "paused",
+          "time": 916.6870000332594
+        },
+        {
+          "target": "sea-dusk sea-sky-dusk",
+          "property": "opacity",
+          "state": "paused",
+          "time": 916.6870000332594
+        },
+        {
+          "target": "sea-day sea-sky-day",
+          "property": "opacity",
+          "state": "paused",
+          "time": 916.6870000332594
+        },
+        {
+          "target": "sea-moon",
+          "property": "opacity",
+          "state": "paused",
+          "time": 916.6870000332594
+        },
+        {
+          "target": "sea-moon",
+          "property": "transform",
+          "state": "paused",
+          "time": 916.6870000332594
+        },
+        {
+          "target": "sea-track",
+          "property": "transform",
+          "state": "paused",
+          "time": 916.6870000332594
+        },
+        {
+          "target": "sea-sun-glow",
+          "property": "opacity",
+          "state": "paused",
+          "time": 916.6870000332594
+        },
+        {
+          "target": "sea-red",
+          "property": "opacity",
+          "state": "paused",
+          "time": 916.6870000332594
+        },
+        {
+          "target": "sea-shade",
+          "property": "opacity",
+          "state": "paused",
+          "time": 916.6870000332594
+        },
+        {
+          "target": "sea-dusk sea-water-dusk",
+          "property": "opacity",
+          "state": "paused",
+          "time": 916.6870000332594
+        },
+        {
+          "target": "sea-day sea-water-day",
+          "property": "opacity",
+          "state": "paused",
+          "time": 916.6870000332594
+        },
+        {
+          "target": "sea-water-light",
+          "property": "opacity",
+          "state": "paused",
+          "time": 916.6870000332594
+        },
+        {
+          "target": "sea-light-warm",
+          "property": "opacity",
+          "state": "paused",
+          "time": 916.6870000332594
+        },
+        {
+          "target": "sea-light-red",
+          "property": "opacity",
+          "state": "paused",
+          "time": 916.6870000332594
+        },
+        {
+          "target": "sea-mirror",
+          "property": "opacity",
+          "state": "paused",
+          "time": 916.6870000332594
+        },
+        {
+          "target": "sea-mirror-track",
+          "property": "transform",
+          "state": "paused",
+          "time": 916.6870000332594
+        },
+        {
+          "target": "sea-mirror-track",
+          "property": "transform",
+          "state": "paused",
+          "time": 916.6870000332594
+        },
+        {
+          "target": "sea-red",
+          "property": "opacity",
+          "state": "paused",
+          "time": 916.6870000332594
+        },
+        {
+          "target": "sea-shade",
+          "property": "opacity",
+          "state": "paused",
+          "time": 916.6870000332594
+        },
+        {
+          "target": "sea-mirror-track",
+          "property": "transform",
+          "state": "paused",
+          "time": 916.6870000332594
+        },
+        {
+          "target": "sea-red",
+          "property": "opacity",
+          "state": "paused",
+          "time": 916.6870000332594
+        },
+        {
+          "target": "sea-shade",
+          "property": "opacity",
+          "state": "paused",
+          "time": 916.6870000332594
+        },
+        {
+          "target": "sea-moon-path",
+          "property": "opacity",
+          "state": "paused",
+          "time": 916.6870000332594
+        },
+        {
+          "target": "sea-sun-path",
+          "property": "opacity",
+          "state": "paused",
+          "time": 916.6870000332594
+        },
+        {
+          "target": "sea-sun-path",
+          "property": "transform",
+          "state": "paused",
+          "time": 916.6870000332594
+        },
+        {
+          "target": "sea-path-gold",
+          "property": "opacity",
+          "state": "paused",
+          "time": 916.6870000332594
+        },
+        {
+          "target": "sea-path-red",
+          "property": "opacity",
+          "state": "paused",
+          "time": 916.6870000332594
+        },
+        {
+          "target": "sea-horizon",
+          "property": "opacity",
+          "state": "paused",
+          "time": 916.6870000332594
+        }
+      ],
+      "runningLoops": 0
+    },
+    "resumed": {
+      "sun": 38.4918,
+      "mirror": -38.4918,
+      "moonOpacity": "0",
+      "waterTime": 1749.9869998570532,
+      "phase": "idle",
+      "motion": "ambient",
+      "paused": "false",
+      "transitions": [
+        {
+          "target": "sea-stars",
+          "property": "opacity",
+          "state": "running",
+          "time": 916.6870000332594
+        },
+        {
+          "target": "sea-dusk sea-sky-dusk",
+          "property": "opacity",
+          "state": "running",
+          "time": 916.6870000332594
+        },
+        {
+          "target": "sea-day sea-sky-day",
+          "property": "opacity",
+          "state": "running",
+          "time": 916.6870000332594
+        },
+        {
+          "target": "sea-moon",
+          "property": "opacity",
+          "state": "running",
+          "time": 916.6870000332594
+        },
+        {
+          "target": "sea-moon",
+          "property": "transform",
+          "state": "running",
+          "time": 916.6870000332594
+        },
+        {
+          "target": "sea-track",
+          "property": "transform",
+          "state": "running",
+          "time": 916.6870000332594
+        },
+        {
+          "target": "sea-sun-glow",
+          "property": "opacity",
+          "state": "running",
+          "time": 916.6870000332594
+        },
+        {
+          "target": "sea-red",
+          "property": "opacity",
+          "state": "running",
+          "time": 916.6870000332594
+        },
+        {
+          "target": "sea-shade",
+          "property": "opacity",
+          "state": "running",
+          "time": 916.6870000332594
+        },
+        {
+          "target": "sea-dusk sea-water-dusk",
+          "property": "opacity",
+          "state": "running",
+          "time": 916.6870000332594
+        },
+        {
+          "target": "sea-day sea-water-day",
+          "property": "opacity",
+          "state": "running",
+          "time": 916.6870000332594
+        },
+        {
+          "target": "sea-water-light",
+          "property": "opacity",
+          "state": "running",
+          "time": 916.6870000332594
+        },
+        {
+          "target": "sea-light-warm",
+          "property": "opacity",
+          "state": "running",
+          "time": 916.6870000332594
+        },
+        {
+          "target": "sea-light-red",
+          "property": "opacity",
+          "state": "running",
+          "time": 916.6870000332594
+        },
+        {
+          "target": "sea-mirror",
+          "property": "opacity",
+          "state": "running",
+          "time": 916.6870000332594
+        },
+        {
+          "target": "sea-mirror-track",
+          "property": "transform",
+          "state": "running",
+          "time": 916.6870000332594
+        },
+        {
+          "target": "sea-mirror-track",
+          "property": "transform",
+          "state": "running",
+          "time": 916.6870000332594
+        },
+        {
+          "target": "sea-red",
+          "property": "opacity",
+          "state": "running",
+          "time": 916.6870000332594
+        },
+        {
+          "target": "sea-shade",
+          "property": "opacity",
+          "state": "running",
+          "time": 916.6870000332594
+        },
+        {
+          "target": "sea-mirror-track",
+          "property": "transform",
+          "state": "running",
+          "time": 916.6870000332594
+        },
+        {
+          "target": "sea-red",
+          "property": "opacity",
+          "state": "running",
+          "time": 916.6870000332594
+        },
+        {
+          "target": "sea-shade",
+          "property": "opacity",
+          "state": "running",
+          "time": 916.6870000332594
+        },
+        {
+          "target": "sea-moon-path",
+          "property": "opacity",
+          "state": "running",
+          "time": 916.6870000332594
+        },
+        {
+          "target": "sea-sun-path",
+          "property": "opacity",
+          "state": "running",
+          "time": 916.6870000332594
+        },
+        {
+          "target": "sea-sun-path",
+          "property": "transform",
+          "state": "running",
+          "time": 916.6870000332594
+        },
+        {
+          "target": "sea-path-gold",
+          "property": "opacity",
+          "state": "running",
+          "time": 916.6870000332594
+        },
+        {
+          "target": "sea-path-red",
+          "property": "opacity",
+          "state": "running",
+          "time": 916.6870000332594
+        },
+        {
+          "target": "sea-horizon",
+          "property": "opacity",
+          "state": "running",
+          "time": 916.6870000332594
+        }
+      ],
+      "runningLoops": 49
+    },
+    "progressed": {
+      "sun": 79.0288,
+      "mirror": -79.0288,
+      "moonOpacity": "0",
+      "waterTime": 2050.0219997635927,
+      "phase": "idle",
+      "motion": "ambient",
+      "paused": "false",
+      "transitions": [
+        {
+          "target": "sea-stars",
+          "property": "opacity",
+          "state": "running",
+          "time": 1216.7219999397994
+        },
+        {
+          "target": "sea-dusk sea-sky-dusk",
+          "property": "opacity",
+          "state": "running",
+          "time": 1216.7219999397994
+        },
+        {
+          "target": "sea-day sea-sky-day",
+          "property": "opacity",
+          "state": "running",
+          "time": 1216.7219999397994
+        },
+        {
+          "target": "sea-moon",
+          "property": "opacity",
+          "state": "running",
+          "time": 1216.7219999397994
+        },
+        {
+          "target": "sea-moon",
+          "property": "transform",
+          "state": "running",
+          "time": 1216.7219999397994
+        },
+        {
+          "target": "sea-track",
+          "property": "transform",
+          "state": "running",
+          "time": 1216.7219999397994
+        },
+        {
+          "target": "sea-sun-glow",
+          "property": "opacity",
+          "state": "running",
+          "time": 1216.7219999397994
+        },
+        {
+          "target": "sea-red",
+          "property": "opacity",
+          "state": "running",
+          "time": 1216.7219999397994
+        },
+        {
+          "target": "sea-shade",
+          "property": "opacity",
+          "state": "running",
+          "time": 1216.7219999397994
+        },
+        {
+          "target": "sea-dusk sea-water-dusk",
+          "property": "opacity",
+          "state": "running",
+          "time": 1216.7219999397994
+        },
+        {
+          "target": "sea-day sea-water-day",
+          "property": "opacity",
+          "state": "running",
+          "time": 1216.7219999397994
+        },
+        {
+          "target": "sea-water-light",
+          "property": "opacity",
+          "state": "running",
+          "time": 1216.7219999397994
+        },
+        {
+          "target": "sea-light-warm",
+          "property": "opacity",
+          "state": "running",
+          "time": 1216.7219999397994
+        },
+        {
+          "target": "sea-light-red",
+          "property": "opacity",
+          "state": "running",
+          "time": 1216.7219999397994
+        },
+        {
+          "target": "sea-mirror",
+          "property": "opacity",
+          "state": "running",
+          "time": 1216.7219999397994
+        },
+        {
+          "target": "sea-mirror-track",
+          "property": "transform",
+          "state": "running",
+          "time": 1216.7219999397994
+        },
+        {
+          "target": "sea-mirror-track",
+          "property": "transform",
+          "state": "running",
+          "time": 1216.7219999397994
+        },
+        {
+          "target": "sea-red",
+          "property": "opacity",
+          "state": "running",
+          "time": 1216.7219999397994
+        },
+        {
+          "target": "sea-shade",
+          "property": "opacity",
+          "state": "running",
+          "time": 1216.7219999397994
+        },
+        {
+          "target": "sea-mirror-track",
+          "property": "transform",
+          "state": "running",
+          "time": 1216.7219999397994
+        },
+        {
+          "target": "sea-red",
+          "property": "opacity",
+          "state": "running",
+          "time": 1216.7219999397994
+        },
+        {
+          "target": "sea-shade",
+          "property": "opacity",
+          "state": "running",
+          "time": 1216.7219999397994
+        },
+        {
+          "target": "sea-moon-path",
+          "property": "opacity",
+          "state": "running",
+          "time": 1216.7219999397994
+        },
+        {
+          "target": "sea-sun-path",
+          "property": "opacity",
+          "state": "running",
+          "time": 1216.7219999397994
+        },
+        {
+          "target": "sea-sun-path",
+          "property": "transform",
+          "state": "running",
+          "time": 1216.7219999397994
+        },
+        {
+          "target": "sea-path-gold",
+          "property": "opacity",
+          "state": "running",
+          "time": 1216.7219999397994
+        },
+        {
+          "target": "sea-path-red",
+          "property": "opacity",
+          "state": "running",
+          "time": 1216.7219999397994
+        },
+        {
+          "target": "sea-horizon",
+          "property": "opacity",
+          "state": "running",
+          "time": 1216.7219999397994
+        }
+      ],
+      "runningLoops": 49
+    }
+  },
+  "retarget": {
+    "before": {
+      "sun": 20.9557,
+      "mirror": -20.9557,
+      "moonOpacity": "0",
+      "waterTime": 1516.6419999364764,
+      "phase": "idle",
+      "motion": "ambient",
+      "paused": "true",
+      "transitions": [
+        {
+          "target": "sea-stars",
+          "property": "opacity",
+          "state": "paused",
+          "time": 716.6739999007434
+        },
+        {
+          "target": "sea-dusk sea-sky-dusk",
+          "property": "opacity",
+          "state": "paused",
+          "time": 716.6739999007434
+        },
+        {
+          "target": "sea-day sea-sky-day",
+          "property": "opacity",
+          "state": "paused",
+          "time": 716.6739999007434
+        },
+        {
+          "target": "sea-moon",
+          "property": "opacity",
+          "state": "paused",
+          "time": 716.6739999007434
+        },
+        {
+          "target": "sea-moon",
+          "property": "transform",
+          "state": "paused",
+          "time": 716.6739999007434
+        },
+        {
+          "target": "sea-track",
+          "property": "transform",
+          "state": "paused",
+          "time": 716.6739999007434
+        },
+        {
+          "target": "sea-sun-glow",
+          "property": "opacity",
+          "state": "paused",
+          "time": 716.6739999007434
+        },
+        {
+          "target": "sea-red",
+          "property": "opacity",
+          "state": "paused",
+          "time": 716.6739999007434
+        },
+        {
+          "target": "sea-shade",
+          "property": "opacity",
+          "state": "paused",
+          "time": 716.6739999007434
+        },
+        {
+          "target": "sea-dusk sea-water-dusk",
+          "property": "opacity",
+          "state": "paused",
+          "time": 716.6739999007434
+        },
+        {
+          "target": "sea-day sea-water-day",
+          "property": "opacity",
+          "state": "paused",
+          "time": 716.6739999007434
+        },
+        {
+          "target": "sea-water-light",
+          "property": "opacity",
+          "state": "paused",
+          "time": 716.6739999007434
+        },
+        {
+          "target": "sea-light-warm",
+          "property": "opacity",
+          "state": "paused",
+          "time": 716.6739999007434
+        },
+        {
+          "target": "sea-light-red",
+          "property": "opacity",
+          "state": "paused",
+          "time": 716.6739999007434
+        },
+        {
+          "target": "sea-mirror",
+          "property": "opacity",
+          "state": "paused",
+          "time": 716.6739999007434
+        },
+        {
+          "target": "sea-mirror-track",
+          "property": "transform",
+          "state": "paused",
+          "time": 716.6739999007434
+        },
+        {
+          "target": "sea-mirror-track",
+          "property": "transform",
+          "state": "paused",
+          "time": 716.6739999007434
+        },
+        {
+          "target": "sea-red",
+          "property": "opacity",
+          "state": "paused",
+          "time": 716.6739999007434
+        },
+        {
+          "target": "sea-shade",
+          "property": "opacity",
+          "state": "paused",
+          "time": 716.6739999007434
+        },
+        {
+          "target": "sea-mirror-track",
+          "property": "transform",
+          "state": "paused",
+          "time": 716.6739999007434
+        },
+        {
+          "target": "sea-red",
+          "property": "opacity",
+          "state": "paused",
+          "time": 716.6739999007434
+        },
+        {
+          "target": "sea-shade",
+          "property": "opacity",
+          "state": "paused",
+          "time": 716.6739999007434
+        },
+        {
+          "target": "sea-moon-path",
+          "property": "opacity",
+          "state": "paused",
+          "time": 716.6739999007434
+        },
+        {
+          "target": "sea-sun-path",
+          "property": "opacity",
+          "state": "paused",
+          "time": 716.6739999007434
+        },
+        {
+          "target": "sea-sun-path",
+          "property": "transform",
+          "state": "paused",
+          "time": 716.6739999007434
+        },
+        {
+          "target": "sea-path-gold",
+          "property": "opacity",
+          "state": "paused",
+          "time": 716.6739999007434
+        },
+        {
+          "target": "sea-path-red",
+          "property": "opacity",
+          "state": "paused",
+          "time": 716.6739999007434
+        },
+        {
+          "target": "sea-horizon",
+          "property": "opacity",
+          "state": "paused",
+          "time": 716.6739999007434
+        }
+      ],
+      "runningLoops": 0
+    },
+    "hidden": {
+      "sun": 20.9557,
+      "mirror": -20.9557,
+      "moonOpacity": "0",
+      "waterTime": 1516.6419999364764,
+      "phase": "connecting",
+      "motion": "ambient",
+      "paused": "true",
+      "transitions": [
+        {
+          "target": "sea-stars",
+          "property": "opacity",
+          "state": "paused",
+          "time": 0
+        },
+        {
+          "target": "sea-dusk sea-sky-dusk",
+          "property": "opacity",
+          "state": "paused",
+          "time": 0
+        },
+        {
+          "target": "sea-day sea-sky-day",
+          "property": "opacity",
+          "state": "paused",
+          "time": 0
+        },
+        {
+          "target": "sea-track",
+          "property": "transform",
+          "state": "paused",
+          "time": 0
+        },
+        {
+          "target": "sea-halo",
+          "property": "opacity",
+          "state": "paused",
+          "time": 0
+        },
+        {
+          "target": "sea-sun-glow",
+          "property": "opacity",
+          "state": "paused",
+          "time": 0
+        },
+        {
+          "target": "sea-red",
+          "property": "opacity",
+          "state": "paused",
+          "time": 0
+        },
+        {
+          "target": "sea-shade",
+          "property": "opacity",
+          "state": "paused",
+          "time": 0
+        },
+        {
+          "target": "sea-dusk sea-water-dusk",
+          "property": "opacity",
+          "state": "paused",
+          "time": 0
+        },
+        {
+          "target": "sea-day sea-water-day",
+          "property": "opacity",
+          "state": "paused",
+          "time": 0
+        },
+        {
+          "target": "sea-water-light",
+          "property": "opacity",
+          "state": "paused",
+          "time": 0
+        },
+        {
+          "target": "sea-light-warm",
+          "property": "opacity",
+          "state": "paused",
+          "time": 0
+        },
+        {
+          "target": "sea-light-red",
+          "property": "opacity",
+          "state": "paused",
+          "time": 0
+        },
+        {
+          "target": "sea-mirror",
+          "property": "opacity",
+          "state": "paused",
+          "time": 0
+        },
+        {
+          "target": "sea-mirror-track",
+          "property": "transform",
+          "state": "paused",
+          "time": 0
+        },
+        {
+          "target": "sea-mirror-track",
+          "property": "transform",
+          "state": "paused",
+          "time": 0
+        },
+        {
+          "target": "sea-red",
+          "property": "opacity",
+          "state": "paused",
+          "time": 0
+        },
+        {
+          "target": "sea-shade",
+          "property": "opacity",
+          "state": "paused",
+          "time": 0
+        },
+        {
+          "target": "sea-mirror-track",
+          "property": "transform",
+          "state": "paused",
+          "time": 0
+        },
+        {
+          "target": "sea-red",
+          "property": "opacity",
+          "state": "paused",
+          "time": 0
+        },
+        {
+          "target": "sea-shade",
+          "property": "opacity",
+          "state": "paused",
+          "time": 0
+        },
+        {
+          "target": "sea-sun-path",
+          "property": "opacity",
+          "state": "paused",
+          "time": 0
+        },
+        {
+          "target": "sea-sun-path",
+          "property": "transform",
+          "state": "paused",
+          "time": 0
+        },
+        {
+          "target": "sea-path-gold",
+          "property": "opacity",
+          "state": "paused",
+          "time": 0
+        },
+        {
+          "target": "sea-path-red",
+          "property": "opacity",
+          "state": "paused",
+          "time": 0
+        },
+        {
+          "target": "sea-horizon",
+          "property": "opacity",
+          "state": "paused",
+          "time": 0
+        }
+      ],
+      "runningLoops": 0
+    },
+    "held": {
+      "sun": 20.9557,
+      "mirror": -20.9557,
+      "moonOpacity": "0",
+      "waterTime": 1516.6419999364764,
+      "phase": "connecting",
+      "motion": "ambient",
+      "paused": "true",
+      "transitions": [
+        {
+          "target": "sea-stars",
+          "property": "opacity",
+          "state": "paused",
+          "time": 0
+        },
+        {
+          "target": "sea-dusk sea-sky-dusk",
+          "property": "opacity",
+          "state": "paused",
+          "time": 0
+        },
+        {
+          "target": "sea-day sea-sky-day",
+          "property": "opacity",
+          "state": "paused",
+          "time": 0
+        },
+        {
+          "target": "sea-track",
+          "property": "transform",
+          "state": "paused",
+          "time": 0
+        },
+        {
+          "target": "sea-halo",
+          "property": "opacity",
+          "state": "paused",
+          "time": 0
+        },
+        {
+          "target": "sea-sun-glow",
+          "property": "opacity",
+          "state": "paused",
+          "time": 0
+        },
+        {
+          "target": "sea-red",
+          "property": "opacity",
+          "state": "paused",
+          "time": 0
+        },
+        {
+          "target": "sea-shade",
+          "property": "opacity",
+          "state": "paused",
+          "time": 0
+        },
+        {
+          "target": "sea-dusk sea-water-dusk",
+          "property": "opacity",
+          "state": "paused",
+          "time": 0
+        },
+        {
+          "target": "sea-day sea-water-day",
+          "property": "opacity",
+          "state": "paused",
+          "time": 0
+        },
+        {
+          "target": "sea-water-light",
+          "property": "opacity",
+          "state": "paused",
+          "time": 0
+        },
+        {
+          "target": "sea-light-warm",
+          "property": "opacity",
+          "state": "paused",
+          "time": 0
+        },
+        {
+          "target": "sea-light-red",
+          "property": "opacity",
+          "state": "paused",
+          "time": 0
+        },
+        {
+          "target": "sea-mirror",
+          "property": "opacity",
+          "state": "paused",
+          "time": 0
+        },
+        {
+          "target": "sea-mirror-track",
+          "property": "transform",
+          "state": "paused",
+          "time": 0
+        },
+        {
+          "target": "sea-mirror-track",
+          "property": "transform",
+          "state": "paused",
+          "time": 0
+        },
+        {
+          "target": "sea-red",
+          "property": "opacity",
+          "state": "paused",
+          "time": 0
+        },
+        {
+          "target": "sea-shade",
+          "property": "opacity",
+          "state": "paused",
+          "time": 0
+        },
+        {
+          "target": "sea-mirror-track",
+          "property": "transform",
+          "state": "paused",
+          "time": 0
+        },
+        {
+          "target": "sea-red",
+          "property": "opacity",
+          "state": "paused",
+          "time": 0
+        },
+        {
+          "target": "sea-shade",
+          "property": "opacity",
+          "state": "paused",
+          "time": 0
+        },
+        {
+          "target": "sea-sun-path",
+          "property": "opacity",
+          "state": "paused",
+          "time": 0
+        },
+        {
+          "target": "sea-sun-path",
+          "property": "transform",
+          "state": "paused",
+          "time": 0
+        },
+        {
+          "target": "sea-path-gold",
+          "property": "opacity",
+          "state": "paused",
+          "time": 0
+        },
+        {
+          "target": "sea-path-red",
+          "property": "opacity",
+          "state": "paused",
+          "time": 0
+        },
+        {
+          "target": "sea-horizon",
+          "property": "opacity",
+          "state": "paused",
+          "time": 0
+        }
+      ],
+      "runningLoops": 0
+    },
+    "resumed": {
+      "sun": 20.9557,
+      "mirror": -20.9557,
+      "moonOpacity": "0",
+      "waterTime": 1516.6419999364764,
+      "phase": "connecting",
+      "motion": "ambient",
+      "paused": "false",
+      "transitions": [
+        {
+          "target": "sea-stars",
+          "property": "opacity",
+          "state": "running",
+          "time": 0
+        },
+        {
+          "target": "sea-dusk sea-sky-dusk",
+          "property": "opacity",
+          "state": "running",
+          "time": 0
+        },
+        {
+          "target": "sea-day sea-sky-day",
+          "property": "opacity",
+          "state": "running",
+          "time": 0
+        },
+        {
+          "target": "sea-track",
+          "property": "transform",
+          "state": "running",
+          "time": 0
+        },
+        {
+          "target": "sea-halo",
+          "property": "opacity",
+          "state": "running",
+          "time": 0
+        },
+        {
+          "target": "sea-sun-glow",
+          "property": "opacity",
+          "state": "running",
+          "time": 0
+        },
+        {
+          "target": "sea-red",
+          "property": "opacity",
+          "state": "running",
+          "time": 0
+        },
+        {
+          "target": "sea-shade",
+          "property": "opacity",
+          "state": "running",
+          "time": 0
+        },
+        {
+          "target": "sea-dusk sea-water-dusk",
+          "property": "opacity",
+          "state": "running",
+          "time": 0
+        },
+        {
+          "target": "sea-day sea-water-day",
+          "property": "opacity",
+          "state": "running",
+          "time": 0
+        },
+        {
+          "target": "sea-water-light",
+          "property": "opacity",
+          "state": "running",
+          "time": 0
+        },
+        {
+          "target": "sea-light-warm",
+          "property": "opacity",
+          "state": "running",
+          "time": 0
+        },
+        {
+          "target": "sea-light-red",
+          "property": "opacity",
+          "state": "running",
+          "time": 0
+        },
+        {
+          "target": "sea-mirror",
+          "property": "opacity",
+          "state": "running",
+          "time": 0
+        },
+        {
+          "target": "sea-mirror-track",
+          "property": "transform",
+          "state": "running",
+          "time": 0
+        },
+        {
+          "target": "sea-mirror-track",
+          "property": "transform",
+          "state": "running",
+          "time": 0
+        },
+        {
+          "target": "sea-red",
+          "property": "opacity",
+          "state": "running",
+          "time": 0
+        },
+        {
+          "target": "sea-shade",
+          "property": "opacity",
+          "state": "running",
+          "time": 0
+        },
+        {
+          "target": "sea-mirror-track",
+          "property": "transform",
+          "state": "running",
+          "time": 0
+        },
+        {
+          "target": "sea-red",
+          "property": "opacity",
+          "state": "running",
+          "time": 0
+        },
+        {
+          "target": "sea-shade",
+          "property": "opacity",
+          "state": "running",
+          "time": 0
+        },
+        {
+          "target": "sea-sun-path",
+          "property": "opacity",
+          "state": "running",
+          "time": 0
+        },
+        {
+          "target": "sea-sun-path",
+          "property": "transform",
+          "state": "running",
+          "time": 0
+        },
+        {
+          "target": "sea-path-gold",
+          "property": "opacity",
+          "state": "running",
+          "time": 0
+        },
+        {
+          "target": "sea-path-red",
+          "property": "opacity",
+          "state": "running",
+          "time": 0
+        },
+        {
+          "target": "sea-horizon",
+          "property": "opacity",
+          "state": "running",
+          "time": 0
+        }
+      ],
+      "runningLoops": 50
+    },
+    "finished": {
+      "sun": 125,
+      "mirror": -125,
+      "moonOpacity": "0",
+      "waterTime": 4516.493999825403,
+      "phase": "connecting",
+      "motion": "ambient",
+      "paused": "false",
+      "transitions": [],
+      "runningLoops": 50
+    }
+  },
+  "staticHidden": {
+    "sun": 290,
+    "mirror": -290,
+    "moonOpacity": "1",
+    "waterTime": 1416.5909998759628,
+    "phase": "idle",
+    "motion": "static",
+    "paused": "true",
+    "transitions": [],
+    "runningLoops": 0
+  },
+  "staticVisible": {
+    "sun": 290,
+    "mirror": -290,
+    "moonOpacity": "1",
+    "waterTime": 1416.5909998759628,
+    "phase": "idle",
+    "motion": "static",
+    "paused": "true",
+    "transitions": [],
+    "runningLoops": 0
+  },
+  "regressionBeforeFix": {
+    "before": 36.7511,
+    "hidden": 290,
+    "resumed": 290,
+    "destination": 290
+  }
+}

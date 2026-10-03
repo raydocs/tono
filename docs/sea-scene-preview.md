@@ -50,7 +50,11 @@ are in the ordinary locale/type system; other inactive locales are not expanded.
   reduces the peak without slowing the 2600ms sky or desynchronising the sun.
 - Labels/actions in the preview update on the React commit, without the
   prototype's delayed text entrance. Production text/control timing is unchanged.
-- Document visibility pauses loops without restarting them. `paused` also selects
+- Document visibility freezes loops and in-flight CSS transitions (including
+  delayed moon fades) at their current presentation, then resumes them. A phase
+  received while hidden is retargeted and held; canceled transitions are not
+  revived. The Web Animations API is used only on visibility/hidden phase commits,
+  not per frame. Unmount cancels retained transitions. `paused` instead selects
   a static destination: native occlusion/minimisation, closed tray or known
   software rendering must be passed explicitly by a future caller. No unreliable
   GPU/remote-desktop detection is claimed. Media changes are subscribed/unsubscribed.
@@ -85,7 +89,40 @@ Absolute means include the preview's different disclaimer/controls and should
 not be treated as a pixel-identical full-home comparison. Baked water is an
 intentional approximation of the prototype's live distortion, not a new palette.
 
-Frontend: narrow vitest (one test), TypeScript, scoped ESLint/Biome, Vite build
+### Continuation: transient visibility is not static mode
+
+The first visibility check covered only a water loop. A deeper audit found that
+`data-paused` also removed transitions, so a sunset jumped from y=36.75 to its
+290px destination on hide/show. The new narrow regression was run against the
+old source and failed (expected `pause` once, observed zero); both tests now pass.
+Only explicit static/media fallbacks remove transitions. Temporary hiding pauses
+scene-owned CSS transitions without imperatively playing CSS loops.
+
+[Raw visibility checks](screenshots/sea-scene-2026-10-03/visibility-continuation.json),
+[performance counters](screenshots/sea-scene-2026-10-03/performance-continuation.json),
+[visible trace](screenshots/sea-scene-2026-10-03/ambient-visible-continuation.json.gz)
+and [hidden trace](screenshots/sea-scene-2026-10-03/ambient-hidden-continuation.json.gz)
+append evidence without replacing the original samples/screenshots.
+
+- Sunset: y=36.74 before hide, 38.49 after the pause commit, then exactly 38.49
+  after 400ms and on resume; continued to 79.03 after another 300ms. The initial
+  1.75px is one presentation frame, not a jump to 290. All 28 transition clocks,
+  sun/mirror and the water loop held, including delayed moon fades.
+- Background retarget to connecting held y=20.96 throughout and completed at
+  y=125 after resume. Reduced motion enabled while hidden snapped to y=290,
+  canceled transitions and remained static after showing; no loop override.
+- Fresh 3s traces: visible Paint/Layout/RasterTask=0, UpdateLayoutTree=65;
+  simulated hidden Paint/Layout/RasterTask/UpdateLayoutTree=0. The visible style
+  work is not a regression budget claim or zero-style claim. Pausing individual
+  decorative groups did not consistently remove it, so no speculative
+  `will-change`, extra layers or phase timers were shipped.
+- Fresh pacing: 302 frames / 5016.5ms, 60.00fps, p95/max 16.8ms. MacBook Chrome
+  only, simulated `document.hidden`, not native Windows qualification.
+- Palette, baked assets, geometry and easing are unchanged by this continuation.
+  The reflection's remaining regular banding is a visual follow-up suggestion,
+  not an approved palette redesign or an implemented effect.
+
+Frontend: narrow vitest (two tests), TypeScript, scoped ESLint/Biome, Vite build
 and i18n type generation passed. The locale scanner exits 0 but reports inactive
 locale gaps and legacy backend unused/missing-source keys: **not a globally clean
 i18n result**. English/Chinese frontend keys are clean; no bulk locale cleanup.
@@ -98,6 +135,9 @@ The 1920×1080 images are a simulated large viewport, not Windows device evidenc
 No native builds, Tauri, packaging, merge, deployment or customer publish.
 
 Protection mapping, all real dashboard cards, light theme, navigation, chrome,
-tray sizing and branded icons are later PRs. Before PR 2 ask the owner section 7
-questions 1–5 in one numbered message; the provisional choices remain in
+tray sizing and branded icons are later PRs. Section 7 questions 1–5 were asked
+together. The owner selected visual frameless/full-bleed Windows chrome (question
+4), with Windows controls at top right and native drag/resize/maximise/snap
+qualification; this PR does not implement it. Questions 1–3 and 5 remain pending
+before PR 2. The original provisional scope remains in
 [decision 055](decisions/055-2026-10-03-windows-sea-scene-preview.md).

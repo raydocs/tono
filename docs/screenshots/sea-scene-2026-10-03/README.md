@@ -17,5 +17,13 @@ from live SVG distortion. These are **not** real Windows qualification.
 [browser checks](browser-checks.json), [brightness](luminance.json),
 [steady trace (gzipped JSON)](ambient-trace.json.gz).
 
+Continuation evidence (original artifacts retained):
+[visibility freeze / background retarget](visibility-continuation.json),
+[performance counters](performance-continuation.json),
+[visible trace](ambient-visible-continuation.json.gz),
+[simulated hidden trace](ambient-hidden-continuation.json.gz).
+The visibility JSON includes the pre-fix destination jump and all transition
+clocks; native Windows visibility remains unverified.
+
 [Contract, methods and limitations](../../sea-scene-preview.md). The default
 preview controls switch phases immediately; there is no actual connected state.

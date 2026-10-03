@@ -476,8 +476,7 @@
 .sea-scene[data-paused="true"] .sea-loop {
   animation-play-state: paused;
 }
-.sea-scene[data-phase][data-motion="static"] *,
-.sea-scene[data-phase][data-paused="true"] * {
+.sea-scene[data-phase][data-motion="static"] * {
   transition: none;
 }
 @media (prefers-reduced-motion: reduce), (prefers-reduced-transparency: reduce),
