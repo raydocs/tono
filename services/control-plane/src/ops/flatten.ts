@@ -10,6 +10,10 @@ export const FLATTEN_KINDS = [
   'connectBegin',
   'connectOk',
   'connectFail',
+  // User-cancelled connect (second click, Disconnect, Quit, sign-out): neither
+  // ok nor fail, so SLO and verdict counters ignore it; it explains begins
+  // that never reach an outcome.
+  'connectCancel',
   'nodeSwitch',
   'connectCatalogFailover',
   'healthProbeFail',
