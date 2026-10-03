@@ -1,6 +1,6 @@
 | ID | 问题（一句） | 状态 | Issue / PR | 等级 | 剩余限制 |
 |---|---|---|---|---|---|
-| WIN-OWNER-CLEANUP-LIVE-PIDFILE | 旧 takeover 在重新获取 owner 锁之前删 PID 文件，可删除健康启动中 successor 的监督证据 | in-PR | 本 PR · hunt/sol-r3proc-owner-takeover | 低·推导（P2） | Linux 真锁/真 successor 回归先失败后通过；Windows 原生启动交接仍需 CI / needs-hardware |
+| WIN-OWNER-CLEANUP-LIVE-PIDFILE | 旧 takeover 在重新获取 owner 锁之前删 PID 文件，可删除健康启动中 successor 的监督证据 | fixed(fdbb126b) | 本 PR · hunt/sol-r3proc-owner-takeover | 低·推导（P2） | Linux 真锁/真 successor 回归先失败后通过；Windows 原生启动交接仍需 CI / needs-hardware |
 
 基线 ad53abb6 apps/windows/service/src/core/owner.rs:85 在 probe 失败后、不持有 owner 锁时调用 cleanup；:245 删除 PID 文件，之后 :87 才获取锁。旧 owner 在 probes 中死亡，另一个普通启动进程可先获得锁并写新 PID；旧 takeover 清掉 successor 的证据，再重试锁失败返回错误。successor IPC 未就绪时可走此路径（启动/恢复需要时间），仅 P2 timing race。
 

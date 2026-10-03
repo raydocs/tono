@@ -1,6 +1,6 @@
 | ID | 问题（一句） | 状态 | Issue / PR | 等级 | 剩余限制 |
 |---|---|---|---|---|---|
-| WIN-WATCHDOG-TIMEOUT-PID-REUSE | Core 已确认退出但 watchdog 清理还保留 PID，停止超时后可能误杀复用此 PID 的其他进程 | in-PR | 本 PR · hunt/sol-r3proc-watchdog-dead-pid | 低·推导（P2） | 原生 Windows PID 复用未实机复现；Linux 真实 watchdog 回归先失败后通过；Windows CI / needs-hardware 待验 |
+| WIN-WATCHDOG-TIMEOUT-PID-REUSE | Core 已确认退出但 watchdog 清理还保留 PID，停止超时后可能误杀复用此 PID 的其他进程 | fixed(1fb29265) | 本 PR · hunt/sol-r3proc-watchdog-dead-pid | 低·推导（P2） | 原生 Windows PID 复用未实机复现；Linux 真实 watchdog 回归先失败后通过；Windows CI / needs-hardware 待验 |
 
 基线 `d33399bb`：`apps/windows/service/src/core/manager.rs:826–837` 的 shutdown 分支在 `kill_now()` 确认子进程死亡、关闭句柄后离开循环。最终 WFP 清理 `:1057` 可等待 25 秒的原生调用（`core/windows_kill_switch.rs:944`），但 `running_pid` 到 `:1065` 才清空。`stop_watchdog` 只等 5 秒（`:39`），超时中止任务后 `:1101–1106` 按旧 PID 重新打开进程并终止。自然退出分支 `:843` 到元数据/WFP await 也有相同窗口。需要普通清理延迟与 PID 复用，因此是 P2，不宣称 P0/P1。
 

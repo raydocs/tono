@@ -1,5 +1,5 @@
 | ID | 问题（一句） | 状态 | Issue / PR | 等级 | 剩余限制 |
 |---|---|---|---|---|---|
-| OPS-CURSOR-COLON | 邮箱里的冒号让运维客户列表在翻页边界返回 500 | in-PR | [#770](https://github.com/raydocs/tono/pull/770) | 低·已确认 | 含非法百分号序列的旧游标会 400 |
+| OPS-CURSOR-COLON | 邮箱里的冒号让运维客户列表在翻页边界返回 500 | fixed(2daccd5a) | [#770](https://github.com/raydocs/tono/pull/770) | 低·已确认 | 含非法百分号序列的旧游标会 400 |
 
 `encodeCursor` 用第一个 `:` 分开排序键和 id。客户列表把邮箱当作排序键。

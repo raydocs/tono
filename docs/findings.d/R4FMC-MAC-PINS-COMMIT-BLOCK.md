@@ -1,6 +1,6 @@
 | ID | 问题（一句） | 状态 | Issue / PR | 等级 | 剩余限制 |
 |---|---|---|---|---|---|
-| R4FMC-MAC-PINS-COMMIT-BLOCK | A committed pins refresh with failed replacement-TUN/PF convergence stops Core but keeps ordinary internet blocked during protected retries | in-PR | hunt/sol-r4fmc-pins-commit-release | 高·推导（P1） | Authored transaction and update-retirement XCTest; Swift unavailable locally. Native CI and PF/DNS hardware acceptance required; changed failure notice needs UI review. |
+| R4FMC-MAC-PINS-COMMIT-BLOCK | A committed pins refresh with failed replacement-TUN/PF convergence stops Core but keeps ordinary internet blocked during protected retries | fixed(e0a1e207) | hunt/sol-r4fmc-pins-commit-release | 高·推导（P1） | Authored transaction and update-retirement XCTest; Swift unavailable locally. Native CI and PF/DNS hardware acceptance required; changed failure notice needs UI review. |
 
 Baseline `efc511da`: successful `/core/sync` commits pins at
 `AppState+Proxy.swift:608–609`, but the replacement tunnel can miss its five-second

@@ -1,6 +1,6 @@
 | ID | 问题（一句） | 状态 | Issue / PR | 等级 | 剩余限制 |
 |---|---|---|---|---|---|
-| MAC-LOGS-PONG-UNSUPPORTED | macOS log watchdog requires a Pong that pinned sing-box never sends, repeatedly reconnecting a healthy quiet stream and retaining Core subscriptions | in-PR | hunt/sol-r3probe-quiet-logs | 低·已确认 | P2; loopback-only official Linux binary at pinned source reproduced 12 handshakes, zero Pongs and Core descriptors 8→20; different build from Tono. Authored XCTest and native macOS timing await hosted CI. Protection is unaffected. |
+| MAC-LOGS-PONG-UNSUPPORTED | macOS log watchdog requires a Pong that pinned sing-box never sends, repeatedly reconnecting a healthy quiet stream and retaining Core subscriptions | fixed(9792d351) | hunt/sol-r3probe-quiet-logs | 低·已确认 | P2; loopback-only official Linux binary at pinned source reproduced 12 handshakes, zero Pongs and Core descriptors 8→20; different build from Tono. Authored XCTest and native macOS timing await hosted CI. Protection is unaffected. |
 
 The pinned [sing-box log handler](https://github.com/SagerNet/sing-box/blob/93fff5954390367dd456cad3cbd79be54f8b941f/experimental/clashapi/server.go#L297-L365) upgrades to a raw connection and writes frames without reading Ping or Close frames. Ordinary quiet log levels therefore trigger `CoreWebSocket.checkStreamLiveness`'s 20-second missing-Pong deadline. The handler cannot retire the abandoned subscription until a matching log or Core shutdown.
 

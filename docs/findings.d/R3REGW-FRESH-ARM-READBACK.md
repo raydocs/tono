@@ -1,6 +1,6 @@
 | ID | 问题（一句） | 状态 | Issue / PR | 等级 | 剩余限制 |
 |---|---|---|---|---|---|
-| R3REGW-FRESH-ARM-READBACK | A reconnect's inherited verification can falsely acknowledge an undelivered MarkVerified and leave the fresh Connect deadline active | in-PR | branch `hunt/sol-r3regw-fresh-arm-proof` | 中·已确认（P1，production Service regression on Linux） | Native Windows/Tauri and installed WFP/DNS behavior require CI and hardware; Linux tests simulate filters. |
+| R3REGW-FRESH-ARM-READBACK | A reconnect's inherited verification can falsely acknowledge an undelivered MarkVerified and leave the fresh Connect deadline active | fixed(9ecc8c1d) | branch `hunt/sol-r3regw-fresh-arm-proof` | 中·已确认（P1，production Service regression on Linux） | Native Windows/Tauri and installed WFP/DNS behavior require CI and hardware; Linux tests simulate filters. |
 
 Regression interaction with #1021 on baseline `f7d82d30`: `arm_bootstrap` retains same-owner durable verification, while creating a new fresh-proof deadline. A MarkVerified transport failure before Service dispatch reaches the App's status readback (`apps/windows/app/src-tauri/src/core/service/mod.rs:1150`). Locked/live/tunnel-permitted status still carried predecessor `verified=true`, satisfying `mark_verified_committed` without clearing the fresh deadline. Seven minutes later the watchdog retires the healthy connection. One failed IPC request is sufficient; no crash or second independent failure is required.
 

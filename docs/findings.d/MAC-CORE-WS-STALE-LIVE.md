@@ -1,6 +1,6 @@
 | ID | 问题（一句） | 状态 | Issue / PR | 等级 | 剩余限制 |
 |---|---|---|---|---|---|
-| MAC-CORE-WS-STALE-LIVE | macOS Core WebSocket 接收失败未标记停滞，持续重连失败时旧流量速率与连接快照仍显示为实时 | in-PR | #799 | 低·推导 | 接收失败先标记停滞，成功接收沿用既有恢复；无现成 XCTest 故障注入点，Swift/XCTest 未执行，待托管 macOS CI |
+| MAC-CORE-WS-STALE-LIVE | macOS Core WebSocket 接收失败未标记停滞，持续重连失败时旧流量速率与连接快照仍显示为实时 | fixed(2a440bed) | #799 | 低·推导 | 接收失败先标记停滞，成功接收沿用既有恢复；无现成 XCTest 故障注入点，Swift/XCTest 未执行，待托管 macOS CI |
 
 来源：main `846705c7`；分支 `codex2/mac-websocket-stall`；未合 main。
 

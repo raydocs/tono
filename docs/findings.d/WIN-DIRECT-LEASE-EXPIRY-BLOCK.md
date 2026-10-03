@@ -1,6 +1,6 @@
 | ID | 问题（一句） | 状态 | Issue / PR | 等级 | 剩余限制 |
 |---|---|---|---|---|---|
-| WIN-DIRECT-LEASE-EXPIRY-BLOCK | App 崩溃或挂起后已提交 DIRECT 心跳租约过期，看门狗撤回后把 Blocked 判为健康，非严格用户永久失去普通网络 | in-PR | #777 | 高·推导 | 非严格过期先 live 精确撤回再释放；严格及其他撤回原因仍保留 Blocked；renew/finalize 抢先消费过期回执的相邻路径未改，原生测试及实机未执行；Needs real-hardware test (静杰 batch) |
+| WIN-DIRECT-LEASE-EXPIRY-BLOCK | App 崩溃或挂起后已提交 DIRECT 心跳租约过期，看门狗撤回后把 Blocked 判为健康，非严格用户永久失去普通网络 | fixed(1abae1ec) | #777 | 高·推导 | 非严格过期先 live 精确撤回再释放；严格及其他撤回原因仍保留 Blocked；renew/finalize 抢先消费过期回执的相邻路径未改，原生测试及实机未执行；Needs real-hardware test (静杰 batch) |
 
 来源：main `64af499a` → 分支 `codex2/win-direct-fail-open`；PR #777；未合 main。归属 SHIP_PLAN §2 第 10 项。
 

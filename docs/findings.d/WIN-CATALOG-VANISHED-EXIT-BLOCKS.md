@@ -1,6 +1,6 @@
 | ID | 问题（一句） | 状态 | Issue / PR | 等级 | 剩余限制 |
 |---|---|---|---|---|---|
-| WIN-CATALOG-VANISHED-EXIT-BLOCKS | Windows 非严格会话的所选出口被目录同步移除后只停 Core，健康 Blocked WFP 持续全阻断，用户选另一个节点前没有互联网 | in-PR | #791 | 高·推导 | needs-hardware；Windows-only Rust 未编译、未运行，hosted Windows CI 待跑；释放拒绝沿用既有路径；释放后的窄 AI 阻断由独立 #738 提供，未在本基线 |
+| WIN-CATALOG-VANISHED-EXIT-BLOCKS | Windows 非严格会话的所选出口被目录同步移除后只停 Core，健康 Blocked WFP 持续全阻断，用户选另一个节点前没有互联网 | fixed(6eb225df) | #791 | 高·推导 | needs-hardware；Windows-only Rust 未编译、未运行，hosted Windows CI 待跑；释放拒绝沿用既有路径；释放后的窄 AI 阻断由独立 #738 提供，未在本基线 |
 
 来源：main `378c165d` → 分支 `codex2/win-catalog-exit-removed-release`；PR #791；未合 main。读码复核 `catalog_sync.rs` → `selected_node_vanished` → `tono_stop_core(false)` → Service 的 `transition_after_stop(false)`；后者收窄到 Blocked，而看门狗将安装正确的 Blocked 视为健康，不会因 Core 已停止而放行。
 

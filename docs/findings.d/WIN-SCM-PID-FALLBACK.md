@@ -1,6 +1,6 @@
 | ID | 问题（一句） | 状态 | Issue / PR | 等级 | 剩余限制 |
 |---|---|---|---|---|---|
-| WIN-SCM-PID-FALLBACK | Service 强制停止信任崩溃遗留 PID 文件，可误杀复用该 PID 的无关用户进程 | in-PR | 本 PR · hunt/sol-r3proc-service-pid-image | 低·推导（P2） | Windows 原生回归已写，VM 未执行；Linux 既有安装/卸载测试通过，Windows GNU 交叉检查通过；实机和托管 Windows CI 待验 |
+| WIN-SCM-PID-FALLBACK | Service 强制停止信任崩溃遗留 PID 文件，可误杀复用该 PID 的无关用户进程 | fixed(ad53abb6) | 本 PR · hunt/sol-r3proc-service-pid-image | 低·推导（P2） | Windows 原生回归已写，VM 未执行；Linux 既有安装/卸载测试通过，Windows GNU 交叉检查通过；实机和托管 Windows CI 待验 |
 
 基线 `0ad57ccd`：`apps/windows/service/src/core/owner.rs:33–35` 只在正常 Drop 删除 PID 文件，进程崩溃或被强制终止留下旧 PID。`bin/uninstall_service.rs:486–493` 在 SCM 查询/正常停止失败后进入 force-stop；`bin/shared/mod.rs:160–168` 甚至在第二次 SCM 查询已成功报告 Stopped / 无 PID 时仍读旧文件，再调用 `:198–243` 的裸 PID 终止。旧 PID 已被无关应用复用时会误杀该应用。另一个服务专用裸 PID 调用在卸载 owner-lock 分支 `bin/uninstall_service.rs:527–534`。需要崩溃遗留文件、PID 复用与 SCM 失败/停止窗口，所以仅 P2。
 

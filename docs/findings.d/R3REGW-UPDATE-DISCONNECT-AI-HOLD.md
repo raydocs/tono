@@ -1,6 +1,6 @@
 | ID | 问题（一句） | 状态 | Issue / PR | 等级 | 剩余限制 |
 |---|---|---|---|---|---|
-| R3REGW-UPDATE-DISCONNECT-AI-HOLD | Automatic cleanup after early update staging failure drops AI-hold intent through pending-update Disconnect | in-PR | branch `hunt/sol-r3regw-update-release-ai` | 高·已确认（P1，wire/disposition production regression） | Native Windows update/App and installed WFP/DNS require CI and hardware; Linux test covers wire and shared release disposition. |
+| R3REGW-UPDATE-DISCONNECT-AI-HOLD | Automatic cleanup after early update staging failure drops AI-hold intent through pending-update Disconnect | fixed(1edb98b4) | branch `hunt/sol-r3regw-update-release-ai` | 高·已确认（P1，wire/disposition production regression） | Native Windows update/App and installed WFP/DNS require CI and hardware; Linux test covers wire and shared release disposition. |
 
 Combination of #779/#793/#1007 on baseline `00c6def8`: Prepare persists a pending attempt before private staging (`service/src/core/update.rs:485`), so an extraction/copy refusal before the Core-stop block leaves Core running. App failed-Prepare cleanup asks `disconnect_for_generation` for automatic `apply_narrow=true`, but the pending-update dispatch ignored it (`app/src-tauri/src/tono/connection/disconnect.rs:267`). `disconnect_if_pending` sent explicit `UpdateRequest::Disconnect`; Service called `wfp::release()`, restoring normal Internet while removing AI blocking. The post-stop Prepare recovery added by #793/#1007 starts after this early staging failure and cannot cover it.
 

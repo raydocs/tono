@@ -1,5 +1,5 @@
 | ID | 问题（一句） | 状态 | Issue / PR | 等级 | 剩余限制 |
 |---|---|---|---|---|---|
-| CP-CLUSTER-OPEN-RACE | 两份诊断同时新建同一失败聚类时，第二条撞上唯一索引，上传 500 | in-PR | [#766](https://github.com/raydocs/tono/pull/766) | 低·已确认 | 输掉插入的请求仍可能再发一次 opened 告警 |
+| CP-CLUSTER-OPEN-RACE | 两份诊断同时新建同一失败聚类时，第二条撞上唯一索引，上传 500 | fixed(026e747c) | [#766](https://github.com/raydocs/tono/pull/766) | 低·已确认 | 输掉插入的请求仍可能再发一次 opened 告警 |
 
 `recordFailureCluster` 先读「没有 status=open 的行」再 INSERT。部分唯一索引保证只有一行，冲突以前直接抛出。诊断 POST 在此之前已经写入更早的事件，500 之后客户端重试会再写一遍。

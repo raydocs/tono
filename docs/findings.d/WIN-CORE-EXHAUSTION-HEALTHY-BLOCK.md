@@ -1,6 +1,6 @@
 | ID | 问题（一句） | 状态 | Issue / PR | 等级 | 剩余限制 |
 |---|---|---|---|---|---|
-| WIN-CORE-EXHAUSTION-HEALTHY-BLOCK | Core retries exhaust while App recovery is unavailable, leaving healthy Blocked WFP and no Core indefinitely | in-PR | 本 PR · hunt/sol-r3wfp-core-exhaustion | 低·已确认（P2，Linux 回归） | Requires unavailable App recovery plus independent persistent Core failure. Native Windows WFP/DNS/TUN acceptance remains unrun; existing cleanup failures and ownerless legacy intents remain outside the fix. |
+| WIN-CORE-EXHAUSTION-HEALTHY-BLOCK | Core retries exhaust while App recovery is unavailable, leaving healthy Blocked WFP and no Core indefinitely | fixed(fe0f1b77) | 本 PR · hunt/sol-r3wfp-core-exhaustion | 低·已确认（P2，Linux 回归） | Requires unavailable App recovery plus independent persistent Core failure. Native Windows WFP/DNS/TUN acceptance remains unrun; existing cleanup failures and ownerless legacy intents remain outside the fix. |
 
 Baseline `3ea3fd01`: `core/manager.rs:923` exhausts recovery, `:1106` sets Fatal, and `windows_kill_switch::retract_direct_before_core_replacement` has already installed exact Blocked. The WFP watchdog verifies that policy successfully, so its unhealthy-release guard never fires. #1021 cancels its unfinished-Connect deadline after verification; #740 covers startup recovery. A live App normally detects Blocked/no-TUN and releases protection, which makes this P2 rather than P0/P1.
 

@@ -1,5 +1,5 @@
 | ID | 问题（一句） | 状态 | Issue / PR | 等级 | 剩余限制 |
 |---|---|---|---|---|---|
-| R4REL-MAC-OFFLINE-SIGNER | Local macOS release obtains the offline signer from the now-empty App package graph and fails on a fresh artifact tree | in-PR | hunt/sol-r4rel-macos-offline-signer | 中·已确认（P1，offline shell regression） | Native zsh, ditto, codesign and signed packaging cannot run in this Linux VM; no release/publish performed. |
+| R4REL-MAC-OFFLINE-SIGNER | Local macOS release obtains the offline signer from the now-empty App package graph and fails on a fresh artifact tree | fixed(9cbd14e6) | hunt/sol-r4rel-macos-offline-signer | 中·已确认（P1，offline shell regression） | Native zsh, ditto, codesign and signed packaging cannot run in this Linux VM; no release/publish performed. |
 
 Baseline main `6adbc1b8`: `release-macos.sh:272–280` resolves the App project graph and searches its package artifacts for sign_update. `project.pbxproj:275` has an empty packageReferences list and no remote package reference. Its old Package.resolved pin satisfies the previous check but cannot cause resolution of a removed dependency. A fresh signer directory yields zero candidates. The hosted workflow already downloads the independently pinned offline signer. The local path now does the same, with a fresh extraction, checksum validation, modern signer selection and signature verification.

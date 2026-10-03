@@ -1,6 +1,6 @@
 | ID | 问题（一句） | 状态 | Issue / PR | 等级 | 剩余限制 |
 |---|---|---|---|---|---|
-| WIN-RELEASE-ROUTE-BOOKKEEPING | The explicit `ReleaseKillSwitch` route stopped the Core, then refused the release when only the run-intent or active-owner write failed, on every retry, so a non-strict machine stayed Blocked until the elevated Restore Network shortcut | in-PR | #1274 | 中·推导（P2，源码与回归） | Not reproduced on hardware (needs-hardware); CI runs the regression |
+| WIN-RELEASE-ROUTE-BOOKKEEPING | The explicit `ReleaseKillSwitch` route stopped the Core, then refused the release when only the run-intent or active-owner write failed, on every retry, so a non-strict machine stayed Blocked until the elevated Restore Network shortcut | fixed(8a91ee51) | #1274 | 中·推导（P2，源码与回归） | Not reproduced on hardware (needs-hardware); CI runs the regression |
 
 Found in the round-3 Windows Service hunt (main `10ce26c9`). Same class as WIN-FRESH-ARM-RETIRE-BOOKKEEPING (automatic path, #1275)
 and WIN-SCM-RETIREMENT-FAILURE-RELEASE (SCM Stop). The fix keeps the refusal for an unconfirmed Core stop, a readable foreign owner

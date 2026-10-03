@@ -1,5 +1,5 @@
 | ID | 问题（一句） | 状态 | Issue / PR | 等级 | 剩余限制 |
 |---|---|---|---|---|---|
-| R4FMC-MAC-BUSY-CATALOG-REMOVAL | macOS catalog removal loses survivor convergence behind an active switch or reload | in-PR | #1113 | 中·已确认（P2） | Normal overlapping lifecycle operations; native CI and installed PF/TUN acceptance required |
+| R4FMC-MAC-BUSY-CATALOG-REMOVAL | macOS catalog removal loses survivor convergence behind an active switch or reload | fixed(935c1b9d) | #1113 | 中·已确认（P2） | Normal overlapping lifecycle operations; native CI and installed PF/TUN acceptance required |
 
 Baseline `6ba79f61`: Catalog:336–344 calls selectNode while Proxy:8–13 refuses a busy owner, then only persists the visible survivor. Catalog:216 suppresses the removal's other reload, and captured B may commit after A/B were removed. Keep a distinct pending removal intent and recompute the latest survivor at shared-owner drain. Force the catalog replacement even if an older completion already reports its name; retaining the name does not prove current credentials. Failure of the older owner releases normal traffic with the existing AI hold and retires obsolete retry selection. Cancellation may only retain a target still present in the latest catalog. Disconnect/update retirement clears queued work and retains the latest surviving target. No helper/AI/strict contract changes.

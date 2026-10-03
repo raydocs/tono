@@ -1,5 +1,5 @@
 | ID | 问题（一句） | 状态 | Issue / PR | 等级 | 剩余限制 |
 |---|---|---|---|---|---|
-| C8-G-F1 | Wipe and preview restore treat only the D1 name and binding as production, so the live database_id still reaches wrangler | in-PR | https://github.com/raydocs/tono/pull/943 | 高·已确认 | Both production gates still allow an intentional wipe. A preview config with some other id is unchanged. |
+| C8-G-F1 | Wipe and preview restore treat only the D1 name and binding as production, so the live database_id still reaches wrangler | fixed(dbec7989) | https://github.com/raydocs/tono/pull/943 | 高·已确认 | Both production gates still allow an intentional wipe. A preview config with some other id is unchanged. |
 
 Wrangler 4.131 resolves `d1 execute` / `d1 migrations apply` by `database_name` or `binding`, then by the Cloudflare D1 API, which accepts the database id on the same path. `wipe-d1-in-order.mjs` refused `tono-control-plane` and `DB` only, so the id published in `wrangler.jsonc` was sent to wrangler with neither gate. `restore-control-plane-d1-preview.sh` applies later migrations with `wrangler.preview.jsonc`; when that file's `database_name` is the preview name and its `database_id` is still production, wrangler migrates the live database. The id is now on the same refuse list, and a preview config that still carries it stops before any remote call.

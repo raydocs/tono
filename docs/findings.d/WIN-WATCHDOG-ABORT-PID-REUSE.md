@@ -1,6 +1,6 @@
 | ID | 问题（一句） | 状态 | Issue / PR | 等级 | 剩余限制 |
 |---|---|---|---|---|---|
-| WIN-WATCHDOG-ABORT-PID-REUSE | watchdog timeout 中止关闭 Core Job/handle 后裸 PID 重开，仍可误杀复用 PID 的进程 | in-PR | 本 PR · hunt/sol-r3proc-watchdog-identity | 低·推导（P2） | 真实 timeout + 合成 creation mismatch 回归先失败后通过；实际 Windows PID 复用未实机重现，needs-hardware |
+| WIN-WATCHDOG-ABORT-PID-REUSE | watchdog timeout 中止关闭 Core Job/handle 后裸 PID 重开，仍可误杀复用 PID 的进程 | fixed(16c12729) | 本 PR · hunt/sol-r3proc-watchdog-identity | 低·推导（P2） | 真实 timeout + 合成 creation mismatch 回归先失败后通过；实际 Windows PID 复用未实机重现，needs-hardware |
 
 基线 `1fb29265`：`apps/windows/service/src/core/manager.rs:1117–1123` 在 5 秒 timeout 后 abort/join watchdog，再按 retained PID 调用裸终止。live ChildGuard Drop（`:239–252`）关闭 kill-on-close Job，并启动异步 child kill；两者可能在 timeout caller 再打开 PID 之前终止并释放原进程 handle。此处是独立于已合 #999 的较窄窗口：#999 解决 confirmed-dead 后等清理的长窗口，但不解决 live guard 被 abort/drop 的重开。仅 P2。
 

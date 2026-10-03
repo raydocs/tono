@@ -1,6 +1,6 @@
 | ID | 问题（一句） | 状态 | Issue / PR | 等级 | 剩余限制 |
 |---|---|---|---|---|---|
-| MAC-STALE-BEARER-401-SUSPENDS | macOS 同一账户续期后，旧 bearer 的迟到 401 可再次续期，决定性重放的传输重试随后误把被替换 bearer 的 401 当作当前会话拒绝，挂起健康账户并撤回出口 | in-PR | #796 | 中·推导 | P2 多步竞态，未实机复现；新增 XCTest 未执行，无 Swift / Xcode，需 hosted macOS CI；同会话旧 bearer 的 403 / 2xx 判定不在本次范围 |
+| MAC-STALE-BEARER-401-SUSPENDS | macOS 同一账户续期后，旧 bearer 的迟到 401 可再次续期，决定性重放的传输重试随后误把被替换 bearer 的 401 当作当前会话拒绝，挂起健康账户并撤回出口 | fixed(1f26fac1) | #796 | 中·推导 | P2 多步竞态，未实机复现；新增 XCTest 未执行，无 Swift / Xcode，需 hosted macOS CI；同会话旧 bearer 的 403 / 2xx 判定不在本次范围 |
 
 2026-09-30：`TonoAPIClient` 的身份代际不随同账户续期变化，四处 unauthorized 恢复原先无条件清空 access token；`sendData` 的传输重试继续发送已构造的旧 Authorization，决定性 401 又只校验身份代际。控制面续期会撤销前驱 SID，因此迟到拒绝可被绑定到新 refresh token 并送入账户挂起路径。
 

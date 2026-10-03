@@ -1,6 +1,6 @@
 | ID | 问题（一句） | 状态 | Issue / PR | 等级 | 剩余限制 |
 |---|---|---|---|---|---|
-| WIN-OWNER-TAKEOVER-STALE-PID | 旧 Service 在健康探测等待中退出，owner takeover 仍按旧 PID 终止，可误杀复用 PID 的进程 | in-PR | 本 PR · hunt/sol-r3proc-owner-takeover | 低·推导（P2） | Linux 真锁/真进程回归先失败后通过；Windows GNU 检查通过，原生 PID 复用/SCM handoff 未实机执行 |
+| WIN-OWNER-TAKEOVER-STALE-PID | 旧 Service 在健康探测等待中退出，owner takeover 仍按旧 PID 终止，可误杀复用 PID 的进程 | fixed(fdbb126b) | 本 PR · hunt/sol-r3proc-owner-takeover | 低·推导（P2） | Linux 真锁/真进程回归先失败后通过；Windows GNU 检查通过，原生 PID 复用/SCM handoff 未实机执行 |
 
 基线 ad53abb6 的 apps/windows/service/src/core/owner.rs:57 保存裸 PID，:63 等待最多二十次 IPC health probes，再 :77–78 重开该 PID 终止。真实旧 owner 在多秒等待中退出后会释放文件锁和 PID，替代进程可能获得该 PID；代码直到 :87 才再尝试锁，即使锁已空也先杀进程。Window 是 P2，不宣称 P0/P1。
 
