@@ -7,7 +7,7 @@ downloaded competitor assets, UI kit or new runtime dependency.
 
 - [Apple: Adopting Liquid Glass](https://developer.apple.com/documentation/technologyoverviews/adopting-liquid-glass): let native controls adapt; test accessibility settings; avoid overuse. Tono keeps macOS NavigationSplitView and its native material, rather than reproducing iOS tabs in a desktop window.
 - [Apple HIG: Materials](https://developer.apple.com/design/human-interface-guidelines/materials): glass belongs to the functional/navigation layer, not the content layer. Tono removes content backdrop sampling; the welcome's two linked rings suggest a connection with a static optical edge, never a refracting text surface.
-- [Microsoft: Mica](https://learn.microsoft.com/en-us/windows/apps/design/style/mica): performance and opaque fallback are part of the material design. Tono's WebView implementation uses opaque content by default, not an imitation wallpaper sampler. No shader, continuous displacement loop, canvas, or GPU capability probe is required to get the low-cost version.
+- [Microsoft: Mica](https://learn.microsoft.com/en-us/windows/apps/design/style/mica): performance and opaque fallback are part of the material design. Tono's WebView implementation uses opaque content by default, not an imitation wallpaper sampler. No shader, continuous displacement loop, canvas, or GPU capability probe is required to get the low-cost version. The isolated 0.0.75 SeaScene preview below is an ambient-ground exception, not a shipped content-card change.
 - [Linear: UI redesign](https://linear.app/now/how-we-redesigned-the-linear-ui): consistent chrome, alignment and navigation hierarchy reduce noise. Tono adopts the separation of navigation from work, not Linear's pixels, typeface, branding or app architecture.
 
 ## System
@@ -55,12 +55,33 @@ are unchanged. This does not rewrite the routing, VPN, billing or auth protocol.
    Safety banners, retry, support and explicit restore-internet remain reachable.
 
 Motion is feedback, not a loading prerequisite: 100–220ms existing press/state
-transitions, no new perpetual animations. The old 500ms web root fade and macOS
+transitions, no new perpetual animations in the control-motion class. The old 500ms web root fade and macOS
 entrance offset / forever-shimmer are removed. Web reduced-motion eliminates
 spatial transitions; contrast/transparency modes remove filters and forced colors
 uses system boundaries. macOS uses Reduce Motion and Reduce Transparency, removes
 the extra full-window NSVisualEffectView, and delegates navigation material to
 SwiftUI. Native status surfaces still require actual-system acceptance.
+
+## Ambient-ground exception (2026-10-03, preview only)
+
+Windows `SeaScene` explores an ink-blue sea with warm sunrise/sunset for 0.0.75.
+It is an isolated component preview; `MeshBackground` remains the production
+ground and none of the dashboard, connection mapping or recovery surfaces change.
+The old solid-ground/no-continuous-work rule still applies everywhere else.
+Ambient timings live separately in `tokens/motion.css`; control timings above
+remain unchanged. Navigation/controls alone may use glass, not the scene itself.
+
+Baked water/grain assets replace runtime filter work. Loops use only transform
+and opacity and stop when unseen. Reduced-motion/transparency, no backdrop
+filter, forced colors and explicit software-rendering mode use static scenery
+and an opaque dock. Native occlusion/closed tray must pass `paused`; neither a
+GPU probe nor automatic remote-desktop detection is introduced.
+Windows first, macOS later: [provisional decision 055](decisions/055-2026-10-03-windows-sea-scene-preview.md).
+[SeaScene reproduction and evidence](sea-scene-preview.md) is not real Windows
+frame-pacing or protection qualification. Section 7 questions 1–3 and 5 remain
+open before production home integration; question 4's later frameless direction
+is recorded in [decision 056](decisions/056-2026-10-03-windows-frameless-direction.md),
+not implemented by this preview.
 
 ## Reproduction
 

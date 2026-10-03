@@ -683,5 +683,17 @@
     "repair": "修复",
     "repairing": "正在修复…",
     "repairFailed": "修复没成功。请用管理员身份的 PowerShell 依次运行 sc.exe config BFE start= auto、sc.exe start BFE、sc.exe start TonoService。"
+  },
+  "scenePreview": {
+    "notice": "场景预览 · 模拟状态 · 没有 VPN 连接",
+    "connected": "已连接",
+    "connecting": "连接中",
+    "failed": "没连上",
+    "idle": "未连接",
+    "detail": "仅演示背景，不代表真实连接或保护状态。",
+    "paused": "静态 / 软件渲染模式",
+    "viewport": "适应窗口",
+    "node": "Westwood · 演示节点",
+    "action": "切换场景"
   }
 }

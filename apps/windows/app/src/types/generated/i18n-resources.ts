@@ -1062,6 +1062,7 @@ export interface TranslationResources {
           coreUnpinned: string
           dnsPortBusy: string
           encryptedDns: string
+          hy2Idle: string
           nodeUnreachable: string
           protectedHttpsFailed: string
           protectionHeldByAnotherUser: string
@@ -1471,6 +1472,18 @@ export interface TranslationResources {
         title: string
         useRecommendation: string
         verifiedAt: string
+      }
+      scenePreview: {
+        action: string
+        connected: string
+        connecting: string
+        detail: string
+        failed: string
+        idle: string
+        node: string
+        notice: string
+        paused: string
+        viewport: string
       }
       servers: {
         cloudGroup: string

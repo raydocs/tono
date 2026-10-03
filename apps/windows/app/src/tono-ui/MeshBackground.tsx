@@ -2,7 +2,8 @@ import { glassOpacity, useGlassTransparency } from './theme'
 
 /**
  * Clarity's quiet content ground. The appearance slider changes tint, not
- * backdrop sampling. No mesh, canvas, or continuous compositor work.
+ * backdrop sampling. No mesh, canvas, or continuous compositor work here.
+ * SeaScene is an isolated 0.0.75 ambient-ground preview, not mounted by this app.
  */
 
 export const MeshBackground = ({ dark }: { dark: boolean }) => {
