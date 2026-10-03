@@ -30,18 +30,27 @@ def png(name, width, height, rows, color_type=0):
 
 DEST.mkdir(parents=True, exist_ok=True)
 for layer, bands in enumerate(BANDS):
-    rows = []
-    for y in range(270):
-        row = bytearray()
+    rows = [bytearray(920) for _ in range(270)]
+    rng = random.Random(17 + layer)
+    for lo, hi in bands:
+        middle = (lo + hi) / 2
+        depth = min(middle / 150, 1)
+        phase = rng.uniform(0, math.tau)
+        wavelength = rng.uniform(28, 58) * (.65 + depth * .75)
+        feather = .65 + depth * 1.15
         for x in range(920):
-            # Baked cross-wave interference. Perspective widens ripples near us.
-            offset = ((.5 + y / 90) * math.sin(x / 37 + y / 21 + layer * 2) +
-                      .8 * math.sin(x / 13 - y / 17))
-            at = y + offset
-            alpha = max(max(0, min(1, (at - lo + 1.2) / 1.2,
-                                      (hi + 1.2 - at) / 1.2)) for lo, hi in bands)
-            row.append(round(alpha * 255))
-        rows.append(bytes(row))
+            # Distant ribbons stay fine; nearer folds bend, taper and break up.
+            bend = ((.35 + depth * 5.5) * math.sin(x / 42 + phase) +
+                    (.15 + depth * 1.5) * math.sin(x / 15 - phase))
+            scallop = (.5 + .3 * math.sin(x / wavelength + phase) +
+                       .2 * math.sin(x / (wavelength * .43) - phase))
+            half = (hi - lo) / 2 * (1 - depth * .75 * (1 - scallop))
+            density = 1 - depth * (.12 + .75 * (1 - scallop))
+            center = middle + bend
+            for y in range(max(0, math.floor(center - half - feather)),
+                           min(270, math.ceil(center + half + feather))):
+                coverage = max(0, min(1, (half + feather - abs(y + .5 - center)) / feather))
+                rows[y][x] = max(rows[y][x], round(255 * coverage * density))
     png(f"ripple-{layer + 1}.png", 920, 270, rows)
 
 rng = random.Random(7)

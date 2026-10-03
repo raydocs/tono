@@ -25,5 +25,7 @@ Continuation evidence (original artifacts retained):
 The visibility JSON includes the pre-fix destination jump and all transition
 clocks; native Windows visibility remains unverified.
 
+[Latest visual polish: comparisons, all sizes, brightness and traces](visual-polish/README.md).
+
 [Contract, methods and limitations](../../sea-scene-preview.md). The default
 preview controls switch phases immediately; there is no actual connected state.

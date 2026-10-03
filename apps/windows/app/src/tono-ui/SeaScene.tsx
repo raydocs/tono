@@ -322,18 +322,20 @@ export const SeaScene = ({ phase, paused = false }: SeaSceneProps) => {
               style={{ position: 'absolute', inset: -7 }}
             />
           </div>
-          <div className="sea-ripple sea-ripple-1" style={fill}>
-            <div className="sea-loop sea-wobble-1" style={fill}>
-              <div className="sea-mirror-track" style={mirrorBox}>
-                <SunDisk />
-              </div>
+          <div
+            className="sea-ripple sea-ripple-1 sea-loop sea-wobble-1"
+            style={fill}
+          >
+            <div className="sea-mirror-track" style={mirrorBox}>
+              <SunDisk />
             </div>
           </div>
-          <div className="sea-ripple sea-ripple-2" style={fill}>
-            <div className="sea-loop sea-wobble-2" style={fill}>
-              <div className="sea-mirror-track" style={mirrorBox}>
-                <SunDisk />
-              </div>
+          <div
+            className="sea-ripple sea-ripple-2 sea-loop sea-wobble-2"
+            style={fill}
+          >
+            <div className="sea-mirror-track" style={mirrorBox}>
+              <SunDisk />
             </div>
           </div>
         </div>

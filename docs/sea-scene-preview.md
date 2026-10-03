@@ -38,7 +38,7 @@ are in the ordinary locale/type system; other inactive locales are not expanded.
   Horizon follows 55% height, centre follows 67.3913% width, diameter stays fixed.
   Sun/mirror destination transforms and timing remain the prototype's, including
   1.45× vertical reflection. No subtree remounts on phase changes.
-- Bake cross-wave ripple masks and white grain once using the stdlib script.
+- Bake seeded, depth-dependent ripple ribbons and white grain once using the stdlib script.
   Ripple width stretches with the scene; its depth stays 270px, preserving the
   drawn water scale rather than enlarging ripples on a maximised window. No SVG
   turbulence, displacement, blur filter, canvas pass or JS frame loop ships.
@@ -118,9 +118,40 @@ append evidence without replacing the original samples/screenshots.
   `will-change`, extra layers or phase timers were shipped.
 - Fresh pacing: 302 frames / 5016.5ms, 60.00fps, p95/max 16.8ms. MacBook Chrome
   only, simulated `document.hidden`, not native Windows qualification.
-- Palette, baked assets, geometry and easing are unchanged by this continuation.
-  The reflection's remaining regular banding is a visual follow-up suggestion,
-  not an approved palette redesign or an implemented effect.
+- Palette, baked assets, geometry and easing were unchanged by this lifecycle-only
+  continuation (`cb0c5e2b`). The subsequently requested visual polish is below.
+
+### Visual polish: moving, tapered reflection ribbons
+
+[Latest comparisons and raw evidence](screenshots/sea-scene-2026-10-03/visual-polish/README.md).
+Following the owner's request to continue the visual refinements:
+
+- Bake each ribbon with its own seeded phase/wavelength, variable width, density
+  and feathering. Fine, comparatively continuous distant ripples become more
+  curved and fragmented nearby instead of uniformly filled horizontal bands.
+  The same two 920×270 grayscale masks remain; repeated baking is byte-identical,
+  PNG CRC/row encoding was checked and the grain asset is unchanged.
+- Move the **whole masked ripple** with each existing 3.1/3.8s wobble, rather than
+  moving only its sun disk behind a fixed striped mask. Keep the same transform
+  range, loops, phases, sun/mirror curve and 1.45× vertical stretch. Remove only
+  the two obsolete wrappers; no new animation, per-frame mask update or JS work.
+- Clouds use a softer, lower-opacity radial envelope in the same RGB tint,
+  replacing the flat dark centre and vertical mask. Geometry, drift timing,
+  approved RGB palette and every phase/timing token are unchanged. No new filter.
+- Review all four phases at 860×540, 920×600 and simulated 1920×1080. Static
+  before/after crops control animation timing; their dock is intentionally opaque.
+- New real-time nominal 300ms brightness: sunset 78.03→27.60, max step 7.01,
+  max rise +0.003; dawn 27.51→64.34, max step 7.07 and all steps positive;
+  arrival/failure max steps 2.95/7.46. Completion timestamps are retained, including
+  one delayed screenshot; not a claim of exact capture cadence.
+- Existing interaction checks still pass: persistent reversals 2.334/1.508px,
+  labels on first rAF, reduced-motion/transparency and explicit static fallbacks;
+  all 28 transition clocks held while hidden, including moon delays, and hidden
+  retarget/static changes still behave correctly.
+- Two fresh 3s visible traces: Paint/Layout/RasterTask=0, UpdateLayoutTree=65/54;
+  simulated hidden all four counters=0. Correct interval-based pacing is about
+  60fps, p95 16.7ms/max 16.8ms. This is MacBook Chrome only, not a performance
+  improvement claim or Windows qualification. Main-thread style work remains.
 
 Frontend: narrow vitest (two tests), TypeScript, scoped ESLint/Biome, Vite build
 and i18n type generation passed. The locale scanner exits 0 but reports inactive
