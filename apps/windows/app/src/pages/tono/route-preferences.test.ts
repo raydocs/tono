@@ -151,3 +151,18 @@ it('rejects stale, future, cross-account and cross-revision evidence rather than
     )?.reason,
   ).toBe('tcp')
 })
+
+it('does not propose the route that keeps dropping, even though it verified recently', () => {
+  const servers = [server('Tokyo · Dawn'), server('Buffalo · Niagara')]
+  expect(
+    recommendRoute(
+      servers,
+      preferences,
+      preferences.scope,
+      54,
+      evidence,
+      now,
+      'Buffalo · Niagara',
+    ),
+  ).toMatchObject({ name: 'Tokyo · Dawn', reason: 'tcp' })
+})
