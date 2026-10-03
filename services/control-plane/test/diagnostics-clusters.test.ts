@@ -294,6 +294,30 @@ describe('failure cluster webhook', () => {
     expect(JSON.parse(calls[1].body).reason).toBe('spike');
   });
 
+  /// Codex pre-deploy review (57c1c64c..66a5bc5c): regex redaction kept a
+  /// hostname and an IPv6 resolver in the cluster sample, and the webhook sent
+  /// them to a third party. An alert carries classified fields only.
+  it('alerts and stores a failure report without its error text', async () => {
+    (env as unknown as Env).FAILURE_ALERT_WEBHOOK_URL = HOOK;
+    (env as unknown as Env).FAILURE_ALERT_WEBHOOK_SECRET = SECRET;
+    const { calls } = hookSpy();
+    const account = await seedAccount();
+    const response = await api('telemetry/failures', json({
+      ts: Date.now(), stage: 'securingDNS', code: 'DNS_PRIVACY_PROBE', node: 'Tokyo',
+      appVersion: '0.0.44', osVersion: 'Windows 10', osArch: 'x86_64', platform: 'windows',
+      error: 'lookup private.example.com on [2001:db8::53]:53 failed',
+    }, account.token));
+    expect(response.status).toBe(202);
+    expect(calls).toHaveLength(1);
+    expect(calls[0].body).not.toContain('private.example.com');
+    expect(calls[0].body).not.toContain('2001:db8');
+    const cluster = await db().prepare(
+      "SELECT sample_json FROM failure_clusters WHERE code = 'DNS_PRIVACY_PROBE'",
+    ).first<{ sample_json: string }>();
+    expect(cluster?.sample_json).not.toContain('private.example.com');
+    expect(cluster?.sample_json).not.toContain('2001:db8');
+  });
+
   it('does not call the webhook when the URL or secret is unset or the URL is private', async () => {
     const { calls } = hookSpy();
     const atMs = 1_800_000_100_000;
@@ -559,5 +583,25 @@ describe('automatic diagnostic excerpt privacy', () => {
       'SELECT log_excerpt, bytes_down, outcome FROM client_sessions WHERE user_id = ?',
     ).bind(account.userId).first();
     expect(session).toMatchObject({ log_excerpt: null, bytes_down: 400, outcome: 'fail' });
+  });
+
+  /// The same review: `session.reason` took 80 characters of prose, so a core
+  /// line with a password and a peer address was stored. It is a classified
+  /// token or the bundle is refused.
+  it('refuses a session reason that is prose and stores a classified one', async () => {
+    const account = await seedAccount();
+    const withReason = (reason: string) => {
+      const base = bundle();
+      return { ...base, session: { ...base.session, reason } };
+    };
+    const prose = await api('telemetry/diagnostics', json(
+      withReason('SOCKS5 password=s3cret peer=203.0.113.9'), account.token,
+    ));
+    expect(prose.status).toBe(400);
+    expect((await api('telemetry/diagnostics', json(withReason('tunnel_lost'), account.token))).status).toBe(202);
+    const session = await db().prepare(
+      'SELECT reason FROM client_sessions WHERE user_id = ?',
+    ).bind(account.userId).first();
+    expect(session).toMatchObject({ reason: 'tunnel_lost' });
   });
 });
