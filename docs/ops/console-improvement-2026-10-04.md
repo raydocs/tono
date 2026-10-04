@@ -59,3 +59,5 @@ Tono 证据入口：`services/control-plane/admin/src/{main.tsx,hooks.tsx,pages/
 ### CI 续修
 
 run [37196358993](https://github.com/raydocs/tono/actions/runs/37196358993)（`6bde6e77`）后端及分片2/4成功，分片1/3的账目浅深各一例因页头与正文同名产生严格定位歧义。现有断言限定 main 内的账目标题，保留笔数与操作检查，不改产品源码或截图阈值。修后 typecheck 通过；本机定向两例缺少 Playwright Chromium 1243，启动失败，不当作行为回归或通过，完整行为验证交由 CI。修后 CI 结果以 PR 最新 head 的 checks 为准。
+
+修后 run [37196915052](https://github.com/raydocs/tono/actions/runs/37196915052) 在实际 head `cfc45609e7ed958e08b68f6fef9ac7ead3165ebe` 上 `ci-gate` success；控制面、合同、迁移、代理全部成功。页面四分片通过89/89/79/88例，共345例；9条深色文档采集按原规则跳过。这是既有Linux行为检查（`--ignore-snapshots`），不是macOS像素比较；旧截图基线仍待集成阶段按必要变化处理。PR继续保持draft、不自动合并，未部署。
