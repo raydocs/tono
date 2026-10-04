@@ -141,6 +141,8 @@ The scene must never delay labels or actions: switch those within 250ms.
 | Shared solar/lunar broken light; moon halo | 9.2 / 13.7s shimmer; 12s breath | Two depth envelopes, counter-drifting baked fields; near/far clocks staggered, cool lunar paint |
 | Connecting halo / connected glow / failed bob + ember | 2.4s / 7.6s / 5 + 6.4s | Separate `--tono-ambient-*` tokens; calm transform/opacity only |
 | Stars / clouds / meteor | Seeded 3–9s / 110–137s / 60s | Three star tiers, one third twinkle; one-way cloud passes; 700ms meteor after a 55s idle-entry delay |
+| Dawn stars | 2000ms fades, 0 / 300 / 600ms delay | `--tono-ambient-star-exit/stagger`; persistent dim/middle/bright groups, unchanged phase endpoints; no sky/control delay |
+| Shared sun/mirror disk shape | Same travel duration; at most3% vertical compression | Round high-sun targets; `--tono-ambient-ease-horizon` delays sunset shape until18% and settles by55%; travel curve unchanged |
 | Caller-controlled connecting progress | 900ms per update | `--tono-ambient-progress`; no autonomous progress |
 
 Only transform/opacity animate; color changes cross-fade prepainted layers.
@@ -156,7 +158,9 @@ not a simulated ocean. Initial connected mounts never play the arrival one-shot;
 phase changes cancel it and hidden surfaces hold its delay as well as its duration.
 Pause loops on document visibility changes and via `paused` for native hidden
 surfaces or a closed tray. Reduced motion, forced colors and explicit `paused`
-render a static destination. Reduced transparency/missing backdrop-filter make
+render a static destination. Keep static transition guards after every phase rule,
+including delayed afterglow, so an in-flight preference change snaps too.
+Reduced transparency/missing backdrop-filter make
 controls opaque, not the scene static (review E30, decision 057). Software rendering/remote-desktop detection is not
 reliable in the renderer: the caller must explicitly set `paused`.
 See [preview and measured evidence](sea-scene-preview.md).

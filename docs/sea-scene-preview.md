@@ -349,9 +349,36 @@ delivery. No additional particle engine, filter or JavaScript frame loop.
 [Updated comparisons, films, viewport matrix, per-item data, narrow regressions
 and lifecycle/seam traces](screenshots/sea-scene-2026-10-04-depth/README.md)
 supersede the earlier deferred lunar-bar/arrival timing descriptions. Those
-sections and images remain historical evidence. Only these first three effects
-are implemented; sunrise star ordering, horizon shape and home/control motion
-remain later work. The scene remains isolated, unmounted and draft-only.
+sections and images remain historical evidence. These were the only three effects
+at that checkpoint; the next continuation below handles sunrise star ordering
+and horizon shape. Home/control motion remains later work. The scene stays
+isolated, unmounted and draft-only.
+
+## Sunrise ordering and horizon shape — 2026-10-04
+
+Owner approved continuing the two remaining scene refinements. Three persistent
+star groups now fade dim → middle → bright with2000ms fades and0/300/600ms
+delays, settling within the existing2600ms sky transition. Phase endpoints stay
+unchanged (connecting.3, connected0); this stages the fade, not the connection.
+Early bright sunset entry, seeded positions/counts and twinkle clocks remain.
+
+All three `SunDisk` copies share a centered, at-most3% vertical compression.
+Connected/full connecting progress is round; default connecting is.98, halfway
+progress.9775, lower sun/failed.97. Targets follow existing local travel values,
+not window pixels or an autonomous clock. CSS interpolates this small optical
+approximation; it is not continuous physical refraction. Sunset shape waits
+until18% of its4600ms travel, then settles by55% while the disc crosses the
+horizon; travel/easing, glow, progress and reflection stretch are unchanged.
+
+A new in-flight reduced-motion check exposed the existing afterglow phase rule
+overriding the static guard. Move the scene guards after all phase rules so
+reduced motion/forced colors/explicit pause snap every transition, including
+that6600ms afterglow. No connection or control behavior changes.
+
+[Current close-ups, native-timestamp films, ordering/shape/lifecycle data and
+per-step/default/large measurements](screenshots/sea-scene-2026-10-04-sunrise/README.md).
+Previous evidence remains historical. Windows hardware acceptance and PR2/3
+remain pending; this continuation does not mount the scene or start home work.
 
 ## Not verified / not implemented
 

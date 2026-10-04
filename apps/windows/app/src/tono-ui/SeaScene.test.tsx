@@ -272,3 +272,32 @@ it('keeps shared broken-light depth planes mounted across phases', () => {
   expect(container.firstElementChild?.getAttribute('data-paused')).toBe('true')
   expect(container.querySelector('.sea-moon-path')).toBe(moonlight)
 })
+
+it('keeps separate brightness-tier star groups mounted during dawn and reversal', () => {
+  vi.stubGlobal('matchMedia', () => ({
+    matches: false,
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+  }))
+  const { container, rerender } = render(<SeaScene phase="idle" />)
+  const groups = [...container.querySelectorAll('.sea-stars')]
+  const stars = [...container.querySelectorAll('.sea-star')]
+  expect(groups).toHaveLength(3)
+  expect(groups[0].querySelectorAll('.sea-star-tier-0')).toHaveLength(30)
+  expect(groups[1].querySelectorAll('.sea-star-tier-1')).toHaveLength(15)
+  expect(groups[2].querySelectorAll('.sea-star-tier-2')).toHaveLength(9)
+  rerender(<SeaScene phase="connecting" progress={0.5} />)
+  groups.forEach((group, index) => {
+    expect(container.querySelectorAll('.sea-stars')[index]).toBe(group)
+  })
+  stars.forEach((star, index) => {
+    expect(container.querySelectorAll('.sea-star')[index]).toBe(star)
+  })
+  rerender(<SeaScene phase="idle" paused />)
+  groups.forEach((group, index) => {
+    expect(container.querySelectorAll('.sea-stars')[index]).toBe(group)
+  })
+  stars.forEach((star, index) => {
+    expect(container.querySelectorAll('.sea-star')[index]).toBe(star)
+  })
+})

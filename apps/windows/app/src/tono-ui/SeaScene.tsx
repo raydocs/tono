@@ -233,14 +233,14 @@ export const SeaScene = ({
         className="sea-sky"
         style={{ ...fill, bottom: '45%', overflow: 'hidden' }}
       >
-        {[false, true].map((bright) => (
+        {[0, 1, 2].map((tier) => (
           <div
-            key={String(bright)}
-            className={bright ? 'sea-stars sea-stars-bright' : 'sea-stars'}
-            style={fill}
+            key={tier}
+            className={`sea-stars${tier === 2 ? ' sea-stars-bright' : ''}`}
+            style={{ ...fill, '--sea-star-tier': tier } as CSSProperties}
           >
             {STARS.slice(0, starCount).map((star) =>
-              (star.tier === 2) === bright ? (
+              star.tier === tier ? (
                 <span
                   key={star.id}
                   className={`sea-star sea-star-tier-${star.tier}`}

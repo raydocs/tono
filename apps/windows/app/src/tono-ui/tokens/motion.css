@@ -53,6 +53,7 @@
   --tono-ambient-ease-dawn: cubic-bezier(0.25, 0, 0.75, 1);
   --tono-ambient-ease-fail: cubic-bezier(0.45, 0, 0.3, 1);
   --tono-ambient-ease-set: cubic-bezier(0.4, 0, 0.2, 1);
+  --tono-ambient-ease-horizon: var(--tono-ambient-ease-set);
   --tono-ambient-sun-arrive: 2400ms;
   --tono-ambient-sun-rise: 2600ms;
   --tono-ambient-progress: 900ms;
@@ -68,6 +69,8 @@
   --tono-ambient-water-far: 3.8s;
   /* Seeded star periods vary from 3–9s; the meteor is a 700ms shot per minute. */
   --tono-ambient-meteor: 60s;
+  --tono-ambient-star-exit: 2000ms;
+  --tono-ambient-star-stagger: 300ms;
   --tono-ambient-cloud-near: 110s;
   --tono-ambient-cloud-far: 137s;
   --tono-ambient-reflection-near: 24s;
@@ -91,6 +94,9 @@
 /* Keep the original curve as the fallback in older web engines. */
 @supports (transition-timing-function: linear(0, 1)) {
   :root {
+    /* Delay sunset deformation until the high sun approaches the horizon.
+       Shared disk copies use this curve; the travel curve remains unchanged. */
+    --tono-ambient-ease-horizon: linear(0, 0 18%, 0.6 38%, 1 55%, 1);
     --tono-ambient-ease-set: linear(
       0,
       0.05 6%,

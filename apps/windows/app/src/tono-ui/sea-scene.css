@@ -3,6 +3,8 @@
   --sea-unit: 1px;
   --sea-offset: 0px;
   --sea-scale: 1;
+  --sea-disk-shape: 1;
+  --sea-shape-ease: var(--sea-sun-ease);
   --sea-day: 1;
   --sea-dusk: 0.75;
   --sea-stars: 0;
@@ -36,6 +38,12 @@
 .sea-scene[data-phase="connecting"] {
   --sea-offset: calc(var(--sea-progress-offset, 125) * var(--sea-unit));
   --sea-scale: 1.08;
+  /* Round above 60 local px; at the horizon, at most 3% vertical compression.
+     This is a target-shape approximation, not a per-frame refraction model. */
+  --sea-disk-shape: calc(
+    1 -
+    clamp(0, (var(--sea-progress-offset, 125) - 85) * 0.0005, 0.03)
+  );
   --sea-day: 0.18;
   --sea-dusk: 1;
   --sea-stars: 0.3;
@@ -53,6 +61,7 @@
 .sea-scene[data-phase="failed"] {
   --sea-offset: calc(223 * var(--sea-unit));
   --sea-scale: 1.1;
+  --sea-disk-shape: 0.97;
   --sea-day: 0;
   --sea-dusk: 0.5;
   --sea-stars: 0.6;
@@ -76,6 +85,8 @@
 .sea-scene[data-phase="idle"] {
   --sea-offset: calc(290 * var(--sea-unit));
   --sea-scale: 1.1;
+  --sea-disk-shape: 0.97;
+  --sea-shape-ease: var(--tono-ambient-ease-horizon);
   --sea-day: 0;
   --sea-dusk: 0.22;
   --sea-stars: 1;
@@ -157,6 +168,16 @@
 .sea-stars {
   opacity: var(--sea-stars);
   transition: opacity var(--sea-stars-time) var(--sea-sky-ease);
+}
+/* Only stars stagger at dawn; the sky and controls still respond immediately.
+   All three exits settle inside the existing 2600ms sky transition. */
+.sea-scene[data-phase="connecting"] .sea-stars,
+.sea-scene[data-phase="connected"] .sea-stars {
+  transition-duration: var(--tono-ambient-star-exit);
+  transition-delay: calc(
+    var(--sea-star-tier) *
+    var(--tono-ambient-star-stagger)
+  );
 }
 .sea-star {
   border-radius: 50%;
@@ -467,17 +488,6 @@
     opacity: 0.2;
   }
 }
-.sea-scene[data-phase][data-motion="static"] * {
-  transition: none;
-}
-@media (prefers-reduced-motion: reduce), (forced-colors: active) {
-  .sea-scene[data-phase][data-motion] * {
-    transition: none;
-  }
-  .sea-scene .sea-loop {
-    animation-play-state: paused;
-  }
-}
 
 .sea-swell-envelope {
   mask-image: linear-gradient(
@@ -631,6 +641,9 @@
 }
 
 .sea-sun-body {
+  transform: scaleY(var(--sea-disk-shape));
+  transform-origin: 50% 50%;
+  transition: transform var(--sea-sun-time) var(--sea-shape-ease);
   mask-image: radial-gradient(
     closest-side,
     #000 calc(100% - 1.5px),
@@ -786,5 +799,18 @@
   }
   82% {
     opacity: 0.8;
+  }
+}
+
+/* Keep static guards after phase rules, including the delayed afterglow. */
+.sea-scene[data-phase][data-motion="static"] * {
+  transition: none;
+}
+@media (prefers-reduced-motion: reduce), (forced-colors: active) {
+  .sea-scene[data-phase][data-motion] * {
+    transition: none;
+  }
+  .sea-scene .sea-loop {
+    animation-play-state: paused;
   }
 }

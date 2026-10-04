@@ -1,0 +1,2 @@
+PASS production scene selectors/dev entry/10baked texture hashes excluded; all10source assets and control-token block unchanged.
+Shared ambient tokens remain in the normal motion stylesheet, as before; token presence is not a component mount.
