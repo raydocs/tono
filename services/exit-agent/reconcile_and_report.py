@@ -1202,6 +1202,12 @@ def reconcile(binary: Path, commands: dict[str, str], address: str, tag: str,
             if known_installed is not None:
                 known_installed.add(label)
             failures.append(f"adding {label} failed: {type(error).__name__}")
+            if isinstance(error, subprocess.TimeoutExpired):
+                # A wedged API answers every add the same way, 30 s each, while
+                # this round holds the lock. Revocations already ran above; the
+                # remaining adds wait for the next round, which this one refuses.
+                failures.append("remaining adds skipped after an API timeout")
+                break
             continue
         # Already-present is success, not failure: two agents on one timer, or a
         # retry after a lost response, must not turn into an error loop. It is

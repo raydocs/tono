@@ -1164,6 +1164,54 @@ class RosterControlSignals(unittest.TestCase):
         acknowledge.assert_called_once()
         metering.assert_called_once()
 
+    def test_a_wedged_api_revokes_then_stops_after_the_first_add_timeout(self) -> None:
+        # EXIT-AGENT-ROUND-DEADLINE: each CLI call waits 30 s, so trying every
+        # add against a wedged API held the round lock for N x 30 s.
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        path = Path(directory.name) / "state.json"
+        path.write_text(json.dumps({**fresh_state(), "installedClients": ["u:old"]}),
+                        encoding="utf-8")
+        calls: list[tuple[str, str]] = []
+
+        def invoke(arguments, **_kwargs):
+            if "inbounduser" in arguments:
+                raise agent.subprocess.TimeoutExpired(arguments, 30)
+            if "rmu" in arguments:
+                calls.append(("remove", arguments[-1]))
+                return agent.subprocess.CompletedProcess(
+                    arguments, 0, "Removed 1 user(s) in total.", "",
+                )
+            if "adu" in arguments:
+                calls.append(("add", json.loads(Path(arguments[-1]).read_text(
+                    encoding="utf-8"))["inbounds"][0]["settings"]["clients"][0]["email"]))
+                raise agent.subprocess.TimeoutExpired(arguments, 30)
+            return agent.subprocess.CompletedProcess(arguments, 0, "{}", "")
+
+        with patch.dict(agent.os.environ, {
+                 "TONO_HOME_AGENT_TOKEN": "node-token", "TONO_SOURCE_ID": "exit-node-a",
+             }, clear=True), \
+             patch.object(agent, "api_base", return_value="https://control.example"), \
+             patch.object(agent, "xray_binary", return_value=Path("/unused/xray")), \
+             patch.object(agent, "xray_start_marker", return_value="boot:1"), \
+             patch.object(agent, "require_commands", return_value={
+                 "add_user": "adu", "remove_user": "rmu", "list_users": "inbounduser",
+                 "stats_query": "statsquery",
+             }), \
+             patch.object(agent, "fetch_roster", return_value=("exit-node-a", 200, [
+                 {"userId": "aaa", "clientUUID": "11111111-1111-4111-8111-111111111111"},
+                 {"userId": "bbb", "clientUUID": "22222222-2222-4222-8222-222222222222"},
+             ], False, None)), \
+             patch.object(agent.subprocess, "run", side_effect=invoke), \
+             patch.object(agent, "acknowledge_roster") as acknowledge:
+            with self.assertRaisesRegex(agent.Refusal, "adding u:aaa failed"):
+                agent.run_once(path)
+
+        self.assertEqual(calls, [("remove", "u:old"), ("add", "u:aaa")])
+        saved = json.loads(path.read_text(encoding="utf-8"))
+        self.assertEqual(saved["installedClients"], ["u:aaa"])
+        acknowledge.assert_not_called()
+
     def test_a_failed_hy2_publish_still_revokes_xray_and_keeps_usage_but_is_never_acknowledged(self) -> None:
         # TF-opus-8: a hy2 error used to end the round before the Xray
         # reconcile, so revoked accounts stayed on VLESS and no counter was read.

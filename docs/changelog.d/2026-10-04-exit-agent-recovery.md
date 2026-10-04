@@ -1,0 +1,11 @@
+## 2026-10-04 · exit 节点重启身份恢复与卡死 API 的轮次截断
+- 归属：运维计划 [plan-2026-09-11](../ops/plan-2026-09-11.md)（exit 数据面）；影响 `ops-panel` hub job 执行器、`services/exit-agent`。不是 ship gate。
+- 来源：基线 main `a97c963e` → 分支 `raydocs/fix-exit-agent-recovery-20261004`；PR 待开；未合 main。
+- 缺陷修复：
+  - [EXIT-RESTART-IDENTITY-GAP](../findings.d/EXIT-RESTART-IDENTITY-GAP.md)：hub `xray_restart` 成功后只检查 :443，API 新增身份要等下一次 timer → 成功的 restart 之后，hub 以独立时限运行既有 `identity_sync` 并单独记日志；restart 失败不触发。
+  - [EXIT-AGENT-ROUND-DEADLINE](../findings.d/EXIT-AGENT-ROUND-DEADLINE.md)：API 卡住时一轮对账逐个新增、每个等 30 秒 → 第一次新增超时后停止余下新增，撤销仍先完成，超时标签保守记入库存，整轮不 ACK。
+- 新增/优化：无。
+- 工程与测试：两个回归各一个用例：`ops-panel/tests/test_jobs.py` `test_only_a_successful_xray_restart_is_followed_by_an_identity_sync`；`services/exit-agent/test_reconcile_and_report.py` `test_a_wedged_api_revokes_then_stops_after_the_first_add_timeout`。
+- 验证：MacBook 本地 python3 stdlib。两个新用例在旧代码上失败（ops：`AssertionError: 1 != 2`；agent：多出 `('add', 'u:bbb')`），修复后通过。`python3 services/exit-agent/test_reconcile_and_report.py` Ran 119 OK；`python3 -m unittest discover -s ops-panel/tests -p 'test_*.py'` Ran 30 OK。CI 未跑。
+- 候选/发布：仅源码，无新候选；exit-agent 需另行部署到节点，hub 需更新 `ops-panel`。
+- 剩余限制：未加节点侧 Xray unit 重启 hook（`User=tono-xray` 权限与 `-` 吞失败）；节点自身重启仍等下一次 timer。撤销很多时一轮仍可很长。F-D1（timer 开机基准）需 SSH 核实，不在本次范围。未在真实节点验证。

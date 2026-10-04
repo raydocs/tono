@@ -485,6 +485,44 @@ class RunJobsExitTests(unittest.TestCase):
         self.assertEqual(ssh_nodes, ["A"])
         self.assertEqual([result["id"] for result in ingest.results], ["job-digest"])
 
+    def test_only_a_successful_xray_restart_is_followed_by_an_identity_sync(self):
+        # EXIT-RESTART-IDENTITY-GAP: a restart drops every API-added identity.
+        # :443 listening is not identity recovery, so the agent sync follows as
+        # its own bounded run; a failed restart does not trigger it.
+        def run(restart_rc: str) -> tuple[list[str], FakeIngest]:
+            ingest = FakeIngest([
+                {"id": "job-restart", "nodeName": "B", "type": "xray_restart", "params": {}},
+            ])
+            remotes: list[str] = []
+
+            def ssh(_node, remote, timeout=60):
+                remotes.append(remote)
+                if "systemctl restart" in remote:
+                    return 0, f"===RC===\n{restart_rc}\n===SS===\nLISTEN 0 0 *:443 \n===END===\n"
+                return 0, ('===JSON===\n{"rc": 0, "added": 2, "removed": 0, '
+                           '"installed": 2, "stateExists": true}\n===END===\n')
+
+            jobs.run_jobs(
+                collector=FakeCollector(),
+                client=ingest,
+                token="tok",
+                nodes=[{"name": "B", "host": "198.51.100.5"}],
+                cn_agents=[],
+                heartbeat_interval=0.01,
+                ssh_fn=ssh,
+                acquire_lock=False,
+            )
+            return remotes, ingest
+
+        remotes, ingest = run("0")
+        self.assertEqual(len(remotes), 2)
+        self.assertIn(jobs.EXIT_AGENT_UNIT, remotes[1])
+        self.assertEqual([r["status"] for r in ingest.results], ["ok"])
+
+        remotes, ingest = run("1")
+        self.assertEqual(len(remotes), 1)
+        self.assertEqual([r["status"] for r in ingest.results], ["error"])
+
     def test_result_unreachable_is_nonzero(self):
         ingest = FakeIngest([{
             "id": "job-reinstall",

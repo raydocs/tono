@@ -1010,6 +1010,21 @@ def run_jobs(
             except ControlPlaneUnreachable as exc:
                 col.log(f"jobs: result post failed {job_id} {exc}")
                 unreachable = True
+            if job_type == "xray_restart" and status == "ok":
+                # A restart drops every API-added identity, and :443 listening
+                # says nothing about them. The agent sync runs next under its
+                # own time bound and is logged on its own; it never changes the
+                # restart job's result.
+                sync_status, sync_summary, _ = execute_bounded(
+                    lambda run_handler=run_handler: run_handler("identity_sync", {}),
+                    timeout=JOB_TIMEOUTS.get("identity_sync", DEFAULT_TIMEOUT),
+                    on_heartbeat=lambda: [renew(held) for held in waiting],
+                    interval=heartbeat_interval,
+                )
+                col.log(
+                    f"jobs: {job_id} follow-up identity_sync {node_name} {sync_status} "
+                    f"{redact_text(sync_summary, allow_ip)}"
+                )
         return 1 if unreachable else 0
     finally:
         if lock_fd is not None:
