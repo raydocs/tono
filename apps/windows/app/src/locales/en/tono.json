@@ -694,6 +694,8 @@
     "paused": "Static / software-rendering mode",
     "viewport": "Fit viewport",
     "node": "Westwood · preview node",
-    "action": "Change scene"
+    "action": "Change scene",
+    "useProgress": "Use stage progress",
+    "progress": "Progress (preview)"
   }
 }

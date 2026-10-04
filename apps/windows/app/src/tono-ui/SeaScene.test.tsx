@@ -164,3 +164,79 @@ it('arms arrival once only on a new connected phase without remounting scenery',
   rerender(<SeaScene phase="idle" />)
   expect(scene?.getAttribute('data-arrival')).toBe('false')
 })
+
+it('accepts bounded caller progress only while connecting and never advances it', () => {
+  vi.stubGlobal('matchMedia', () => ({
+    matches: false,
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+  }))
+  vi.useFakeTimers()
+  try {
+    const { container, rerender } = render(
+      <SeaScene phase="connecting" progress={0} />,
+    )
+    const scene = container.firstElementChild as HTMLElement
+    expect(scene.style.getPropertyValue('--sea-progress-offset')).toBe('205')
+    act(() => {
+      vi.advanceTimersByTime(10000)
+    })
+    expect(scene.style.getPropertyValue('--sea-progress-offset')).toBe('205')
+    rerender(<SeaScene phase="connecting" progress={0.5} />)
+    expect(scene.style.getPropertyValue('--sea-progress-offset')).toBe('130')
+    rerender(<SeaScene phase="connecting" progress={1} />)
+    expect(scene.style.getPropertyValue('--sea-progress-offset')).toBe('55')
+    rerender(<SeaScene phase="connecting" progress={0.25} />)
+    expect(scene.style.getPropertyValue('--sea-progress-offset')).toBe('167.5')
+    rerender(<SeaScene phase="connecting" progress={-1} />)
+    expect(scene.style.getPropertyValue('--sea-progress-offset')).toBe('205')
+    rerender(<SeaScene phase="connecting" progress={2} />)
+    expect(scene.style.getPropertyValue('--sea-progress-offset')).toBe('55')
+    rerender(<SeaScene phase="idle" progress={1} />)
+    expect(scene.style.getPropertyValue('--sea-progress-offset')).toBe('')
+    expect(container.firstElementChild).toBe(scene)
+    rerender(<SeaScene phase="connecting" />)
+    expect(scene.style.getPropertyValue('--sea-progress-offset')).toBe('')
+    rerender(<SeaScene phase="connecting" progress={Number.NaN} />)
+    expect(scene.style.getPropertyValue('--sea-progress-offset')).toBe('')
+  } finally {
+    vi.useRealTimers()
+  }
+})
+
+it('scales star density with the scene area without remounting the scene', () => {
+  vi.stubGlobal('matchMedia', () => ({
+    matches: false,
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+  }))
+  let resize: ResizeObserverCallback | undefined
+  const disconnect = vi.fn()
+  const observe = vi.fn()
+  vi.stubGlobal(
+    'ResizeObserver',
+    class {
+      constructor(callback: ResizeObserverCallback) {
+        resize = callback
+      }
+      observe = observe
+      disconnect = disconnect
+    },
+  )
+  const { container, unmount } = render(<SeaScene phase="idle" />)
+  const scene = container.firstElementChild
+  const smallCount = container.querySelectorAll('.sea-star').length
+  expect(observe).toHaveBeenCalledWith(scene)
+  act(() => {
+    resize?.(
+      [{ contentRect: { width: 1920, height: 1080 } } as ResizeObserverEntry],
+      {} as ResizeObserver,
+    )
+  })
+  expect(container.firstElementChild).toBe(scene)
+  expect(container.querySelectorAll('.sea-star').length).toBeGreaterThan(
+    smallCount,
+  )
+  unmount()
+  expect(disconnect).toHaveBeenCalledOnce()
+})

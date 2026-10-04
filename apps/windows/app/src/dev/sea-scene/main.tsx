@@ -39,6 +39,10 @@ export const Preview = () => {
   )
   const [paused, setPaused] = useState(parameters.has('static'))
   const [fit, setFit] = useState(parameters.has('fit'))
+  const [useProgress, setUseProgress] = useState(parameters.has('progress'))
+  const [progress, setProgress] = useState(
+    Math.min(1, Math.max(0, Number(parameters.get('progress')) || 0)),
+  )
 
   return (
     <>
@@ -53,7 +57,11 @@ export const Preview = () => {
           overflow: 'hidden',
         }}
       >
-        <SeaScene phase={phase} paused={paused} />
+        <SeaScene
+          phase={phase}
+          paused={paused}
+          progress={useProgress ? progress : undefined}
+        />
         <p
           className="sea-preview-notice"
           style={{ position: 'absolute', left: 24, top: 12, margin: 0 }}
@@ -137,6 +145,27 @@ export const Preview = () => {
             onChange={(event) => setFit(event.target.checked)}
           />
           {t('tono.scenePreview.viewport')}
+        </label>
+        <label>
+          <input
+            type="checkbox"
+            checked={useProgress}
+            onChange={(event) => setUseProgress(event.target.checked)}
+          />
+          {t('tono.scenePreview.useProgress')}
+        </label>
+        <label>
+          {t('tono.scenePreview.progress')}
+          <input
+            type="range"
+            min={0}
+            max={1}
+            step={0.125}
+            value={progress}
+            disabled={!useProgress}
+            data-progress-input
+            onChange={(event) => setProgress(Number(event.target.value))}
+          />
         </label>
       </footer>
     </>

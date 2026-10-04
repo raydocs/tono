@@ -1,5 +1,6 @@
 /* Decorative scene values are scoped; application/control tokens stay untouched. */
 .sea-scene {
+  --sea-unit: 1px;
   --sea-offset: 0px;
   --sea-scale: 1;
   --sea-day: 1;
@@ -27,8 +28,13 @@
   isolation: isolate;
   contain: layout paint;
 }
+@supports (width: 1cqh) {
+  .sea-scene {
+    --sea-unit: clamp(1px, 0.1368421cqh, 1.5789474px);
+  }
+}
 .sea-scene[data-phase="connecting"] {
-  --sea-offset: 125px;
+  --sea-offset: calc(var(--sea-progress-offset, 125) * var(--sea-unit));
   --sea-scale: 1.08;
   --sea-day: 0.18;
   --sea-dusk: 1;
@@ -45,7 +51,7 @@
   --sea-sky-ease: var(--tono-ambient-ease-dawn);
 }
 .sea-scene[data-phase="failed"] {
-  --sea-offset: 223px;
+  --sea-offset: calc(223 * var(--sea-unit));
   --sea-scale: 1.1;
   --sea-day: 0;
   --sea-dusk: 0.5;
@@ -54,8 +60,8 @@
   --sea-shade: 0.08;
   --sea-glow: 0.4;
   --sea-mirror: 0.7;
-  --sea-path: 0.5;
-  --sea-path-scale: 0.45;
+  --sea-path: 0.22;
+  --sea-path-scale: 0.2;
   --sea-path-red: 1;
   --sea-light: 0.4;
   --sea-light-red: 1;
@@ -68,7 +74,7 @@
   --sea-stars-time: 2600ms;
 }
 .sea-scene[data-phase="idle"] {
-  --sea-offset: 290px;
+  --sea-offset: calc(290 * var(--sea-unit));
   --sea-scale: 1.1;
   --sea-day: 0;
   --sea-dusk: 0.22;
@@ -76,11 +82,11 @@
   --sea-red: 1;
   --sea-shade: 0.26;
   --sea-glow: 0;
-  --sea-mirror: 0.72;
+  --sea-mirror: 0;
   --sea-path: 0;
   --sea-path-scale: 0.3;
   --sea-path-red: 1;
-  --sea-light: 0.12;
+  --sea-light: 0;
   --sea-light-red: 1;
   --sea-horizon: 0.26;
   --sea-sun-time: var(--tono-ambient-sun-set);
@@ -109,7 +115,8 @@
 .sea-sky-day {
   background:
     radial-gradient(
-      440px 310px at 67.3913% calc(100% - 134px),
+      calc(440 * var(--sea-unit)) calc(310 * var(--sea-unit)) at 67.3913%
+        calc(100% - 134 * var(--sea-unit)),
       #ffb4648c,
       #e260463d 46%,
       transparent
@@ -118,7 +125,11 @@
 }
 .sea-sky-dusk {
   background:
-    radial-gradient(540px 210px at 67.3913% 100%, #ff96549e, transparent),
+    radial-gradient(
+      calc(540 * var(--sea-unit)) calc(210 * var(--sea-unit)) at 67.3913% 100%,
+      #ff96549e,
+      transparent
+    ),
     linear-gradient(
       180deg,
       transparent 18%,
@@ -149,8 +160,7 @@
 }
 .sea-star {
   border-radius: 50%;
-  background: #fff;
-  opacity: 0.65;
+  opacity: 0.3;
 }
 .sea-track,
 .sea-mirror-track {
@@ -185,10 +195,12 @@
   opacity: var(--sea-shade);
   transition: opacity var(--sea-sun-time) var(--sea-sun-ease);
 }
-.sea-sun-glow {
+.sea-glow-pulse {
   box-shadow:
-    0 0 50px 6px #ffaa6099,
-    0 0 160px 50px #f060544d;
+    0 0 calc(72 * var(--sea-unit)) calc(12 * var(--sea-unit)) #ffaa6080,
+    0 0 calc(190 * var(--sea-unit)) calc(60 * var(--sea-unit)) #f0605433;
+}
+.sea-sun-glow {
   opacity: var(--sea-glow);
   transition: opacity var(--sea-glow-time) var(--sea-sky-ease);
 }
@@ -212,18 +224,16 @@
   animation-play-state: paused;
 }
 .sea-cloud {
-  background-size: 100% 100%;
+  background-size: 60% 100%;
   background-repeat: no-repeat;
 }
 .sea-cloud-1 {
   background-image: url("./sea-assets/cloud-1.png");
-  animation: sea-cloud var(--tono-ambient-cloud-near) ease-in-out infinite
-    alternate;
+  animation: sea-cloud var(--tono-ambient-cloud-near) linear -47s infinite;
 }
 .sea-cloud-2 {
   background-image: url("./sea-assets/cloud-2.png");
-  animation: sea-cloud var(--tono-ambient-cloud-far) ease-in-out -9s infinite
-    alternate-reverse;
+  animation: sea-cloud var(--tono-ambient-cloud-far) linear -98s infinite;
 }
 .sea-water-light {
   opacity: var(--sea-light);
@@ -266,6 +276,7 @@
 }
 .sea-reflected-disk {
   opacity: 0.6;
+  transition: opacity var(--sea-sky-time) var(--sea-sky-ease);
   mask-image: radial-gradient(
     closest-side,
     #000 calc(100% - 14px),
@@ -275,6 +286,9 @@
 .sea-reflected-disk .sea-red {
   opacity: max(0.65, var(--sea-red));
 }
+.sea-scene[data-phase="failed"] .sea-reflected-disk {
+  opacity: 0.9;
+}
 .sea-mirror-soft {
   border-radius: 50%;
   background: radial-gradient(
@@ -283,6 +297,9 @@
     #ff824c4d 50%,
     transparent 72%
   );
+}
+.sea-scene[data-phase="failed"] .sea-mirror-soft {
+  opacity: 0.18;
 }
 .sea-ripple {
   mask-size: 100% 270px;
@@ -385,10 +402,10 @@
 }
 .sea-horizon {
   background: radial-gradient(
-    50% 100% at 67.3913% 50%,
-    #ffd6aae6,
-    #ff966459 45%,
-    #ff96640f
+    ellipse calc(260 * var(--sea-unit)) 9px at 67.3913% 50%,
+    #ffd6aa60,
+    #ff966420 45%,
+    transparent
   );
   opacity: var(--sea-horizon);
   transition: opacity var(--sea-sky-time) var(--sea-sky-ease);
@@ -410,8 +427,7 @@
   );
 }
 .sea-crescent {
-  border-radius: 50%;
-  box-shadow: inset 9px -6px 0 #f4eee2;
+  overflow: visible;
   transform: rotate(-16deg);
 }
 .sea-moon-path {
@@ -430,14 +446,14 @@
   opacity: 0.34;
   transition: opacity 3400ms var(--tono-ambient-ease-sky) 3200ms;
 }
-.sea-twinkle-0 {
-  animation: sea-twinkle var(--tono-ambient-star-near) ease-in-out infinite;
+.sea-star-tier-1 {
+  opacity: 0.55;
 }
-.sea-twinkle-1 {
-  animation: sea-twinkle var(--tono-ambient-star-mid) ease-in-out -2s infinite;
+.sea-star-tier-2 {
+  opacity: 0.9;
 }
-.sea-twinkle-2 {
-  animation: sea-twinkle var(--tono-ambient-star-far) ease-in-out -1s infinite;
+.sea-twinkle {
+  animation: sea-twinkle ease-in-out infinite;
 }
 .sea-grain {
   background: url("./sea-assets/grain.png") repeat;
@@ -455,10 +471,10 @@
 }
 @keyframes sea-cloud {
   from {
-    transform: translateX(-16px);
+    transform: translateX(-65%);
   }
   to {
-    transform: translateX(16px);
+    transform: translateX(100%);
   }
 }
 @keyframes sea-twinkle {
@@ -520,7 +536,12 @@
 }
 
 .sea-swell-envelope {
-  mask-image: linear-gradient(transparent, #000 18%, #000 85%, transparent);
+  mask-image: linear-gradient(
+    transparent,
+    #000 16%,
+    #00000080 42%,
+    transparent calc(100% - 100px)
+  );
 }
 .sea-swell {
   background: #ced8ff;
@@ -608,15 +629,148 @@
   }
   100% {
     opacity: 0;
-    transform: translateY(330px);
+    transform: translateY(calc(330 * var(--sea-unit)));
   }
-}
-/* Hold every loop and one-shot without restarting on visibility changes. */
-.sea-scene[data-paused="true"] .sea-loop {
-  animation-play-state: paused;
 }
 .sea-scene[data-motion="static"] .sea-arrival-bloom,
 .sea-scene[data-motion="static"] .sea-arrival-sweep {
   animation: none;
   opacity: 0;
+}
+
+.sea-light-column {
+  opacity: var(--sea-path);
+  transition: opacity var(--sea-path-time) var(--sea-sky-ease);
+}
+.sea-column-gold,
+.sea-column-red {
+  background: radial-gradient(
+    ellipse at 50% 0%,
+    #ffd9a040,
+    #ffd9a014 40%,
+    transparent 70%
+  );
+  opacity: calc(1 - var(--sea-path-red));
+  transition: opacity var(--sea-path-time) var(--sea-sky-ease);
+}
+.sea-column-red {
+  background: radial-gradient(
+    ellipse at 50% 0%,
+    #f07c5426,
+    #e8553f0a 40%,
+    transparent 70%
+  );
+  opacity: var(--sea-path-red);
+}
+.sea-near-specks {
+  mask-image: linear-gradient(#000, transparent);
+  opacity: 0.65;
+}
+
+.sea-scene[data-phase="connecting"] .sea-reflected-disk {
+  opacity: 0.84;
+}
+.sea-reflection-lift {
+  background: radial-gradient(
+    ellipse at 50% 0%,
+    #ffcf8c30,
+    #ffb8780f 45%,
+    transparent 72%
+  );
+  opacity: 0;
+  transition: opacity var(--sea-sky-time) var(--sea-sky-ease);
+}
+.sea-scene[data-phase="connecting"] .sea-reflection-lift {
+  opacity: 1;
+}
+
+.sea-sun-body {
+  mask-image: radial-gradient(
+    closest-side,
+    #000 calc(100% - 1.5px),
+    transparent
+  );
+}
+
+.sea-scene[data-phase="connected"] .sea-glow-pulse {
+  animation: sea-sun-breathe var(--tono-ambient-sun-breathe) ease-in-out
+    infinite;
+}
+@keyframes sea-sun-breathe {
+  0%,
+  100% {
+    opacity: 0.9;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.03);
+  }
+}
+
+.sea-meteor {
+  background: linear-gradient(90deg, transparent, #ced8ffb3);
+  opacity: 0;
+}
+/* Every new idle entry starts a fresh long wait, safely beyond all night fades.
+   Leaving idle cancels the shot, including its trail; hidden holds the delay. */
+.sea-scene[data-phase="idle"][data-motion="ambient"] .sea-meteor {
+  animation: sea-meteor var(--tono-ambient-meteor) linear 55s infinite;
+}
+@keyframes sea-meteor {
+  0% {
+    opacity: 0;
+    transform: translate(0, 0) rotate(24deg);
+  }
+  0.3% {
+    opacity: 0.7;
+  }
+  1.166667%,
+  100% {
+    opacity: 0;
+    transform: translate(180px, 80px) rotate(24deg);
+  }
+}
+
+.sea-scene[data-phase="failed"] .sea-sun-motion,
+.sea-scene[data-phase="failed"] .sea-mirror-motion {
+  animation: sea-bob var(--tono-ambient-bob) ease-in-out infinite;
+}
+.sea-scene[data-phase="failed"] .sea-mirror-motion {
+  animation-direction: reverse;
+}
+.sea-scene[data-phase="failed"] .sea-glow-pulse {
+  animation: sea-ember var(--tono-ambient-ember) ease-in-out infinite;
+}
+@keyframes sea-bob {
+  0%,
+  50%,
+  100% {
+    transform: translateY(0);
+  }
+  25% {
+    transform: translateY(3px);
+  }
+  75% {
+    transform: translateY(-3px);
+  }
+}
+@keyframes sea-ember {
+  0%,
+  100% {
+    opacity: 0.82;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.025);
+  }
+}
+/* Keep this after every phase animation. Hidden holds loops, shots and delays. */
+.sea-scene[data-phase][data-paused="true"] .sea-loop {
+  animation-play-state: paused;
+}
+
+.sea-scene[data-phase="connecting"][data-progress="true"] {
+  --sea-sun-time: var(--tono-ambient-progress);
 }

@@ -1118,6 +1118,8 @@ export const translationKeys = [
   'tono.scenePreview.viewport',
   'tono.scenePreview.node',
   'tono.scenePreview.action',
+  'tono.scenePreview.useProgress',
+  'tono.scenePreview.progress',
 ] as const
 
 export type TranslationKey = (typeof translationKeys)[number]

@@ -1483,6 +1483,8 @@ export interface TranslationResources {
         node: string
         notice: string
         paused: string
+        progress: string
+        useProgress: string
         viewport: string
       }
       servers: {

@@ -1,0 +1,1374 @@
+{
+  "A10": {
+    "brightness": {
+      "sunset": {
+        "first": 77.98631239935588,
+        "last": 27.28804347826087,
+        "maxRolling300": 7.461333006772598,
+        "maxRise300": 0.05344559391856052,
+        "maxFall300": -7.461333006772598,
+        "direct300Max": 7.455515297906608,
+        "directPairs": 63,
+        "maxGapMs": 350.25906562805176
+      },
+      "sunrise": {
+        "first": 27.294283413848632,
+        "last": 63.903985507246375,
+        "maxRolling300": 6.615604887131482,
+        "maxRise300": 6.615604887131482,
+        "maxFall300": 0.04555576633106284,
+        "direct300Max": 6.584943639291467,
+        "directPairs": 23,
+        "maxGapMs": 341.31908416748047
+      },
+      "arrival": {
+        "first": 64.01046698872786,
+        "last": 78.17471819645732,
+        "maxRolling300": 3.197629978088969,
+        "maxRise300": 3.197629978088969,
+        "maxFall300": 0.02656267354196018,
+        "direct300Max": 3.2119565217391255,
+        "directPairs": 25,
+        "maxGapMs": 114.30096626281738
+      },
+      "failure": {
+        "first": 64.01046698872786,
+        "last": 38.93276972624799,
+        "maxRolling300": 7.074140366273269,
+        "maxRise300": 0.23147348291150394,
+        "maxFall300": -7.074140366273269,
+        "direct300Max": 7.070048309178745,
+        "directPairs": 31,
+        "maxGapMs": 104.7368049621582
+      }
+    },
+    "performance": {
+      "connected": {
+        "trace": {
+          "Paint": 0,
+          "Layout": 0,
+          "RasterTask": 0,
+          "UpdateLayoutTree": 62
+        },
+        "pacing": {
+          "fps": 60.00393468424157,
+          "p95": 16.700000000000728,
+          "max": 16.800000000000182
+        }
+      },
+      "connecting": {
+        "trace": {
+          "Paint": 0,
+          "Layout": 0,
+          "RasterTask": 0,
+          "UpdateLayoutTree": 67
+        },
+        "pacing": {
+          "fps": 60.00393468424157,
+          "p95": 16.700000000000728,
+          "max": 16.800000000000182
+        }
+      },
+      "failed": {
+        "trace": {
+          "Paint": 0,
+          "Layout": 0,
+          "RasterTask": 0,
+          "UpdateLayoutTree": 62
+        },
+        "pacing": {
+          "fps": 60.00393468424157,
+          "p95": 16.799999999999272,
+          "max": 16.800000000000182
+        }
+      },
+      "idle": {
+        "trace": {
+          "Paint": 0,
+          "Layout": 0,
+          "RasterTask": 0,
+          "UpdateLayoutTree": 63
+        },
+        "pacing": {
+          "fps": 60,
+          "p95": 16.800000000000182,
+          "max": 16.800000000000182
+        }
+      }
+    }
+  },
+  "A1": {
+    "brightness": {
+      "sunset": {
+        "first": 77.88305152979066,
+        "last": 28.529991948470208,
+        "maxRolling300": 7.231296476687611,
+        "maxRise300": 0.080488601369332,
+        "maxFall300": -7.231296476687611,
+        "direct300Max": 7.226046698872786,
+        "directPairs": 65,
+        "maxGapMs": 350.36611557006836
+      },
+      "sunrise": {
+        "first": 28.55998389694042,
+        "last": 63.68800322061192,
+        "maxRolling300": 6.688033027580303,
+        "maxRise300": 6.688033027580303,
+        "maxFall300": 0.05756053066094324,
+        "direct300Max": 6.729066022544281,
+        "directPairs": 26,
+        "maxGapMs": 349.87688064575195
+      },
+      "arrival": {
+        "first": 63.80636070853462,
+        "last": 77.85950080515298,
+        "maxRolling300": 3.215126478831266,
+        "maxRise300": 3.215126478831266,
+        "maxFall300": 0.022468309767702976,
+        "direct300Max": 3.1795491143317207,
+        "directPairs": 23,
+        "maxGapMs": 352.0529270172119
+      },
+      "failure": {
+        "first": 63.80636070853462,
+        "last": 39.25281803542673,
+        "maxRolling300": 6.998412764649082,
+        "maxRise300": 0.1735042461796752,
+        "maxFall300": -6.998412764649082,
+        "direct300Max": 7.005032206119161,
+        "directPairs": 21,
+        "maxGapMs": 347.93591499328613
+      }
+    },
+    "performance": {
+      "connected": {
+        "trace": {
+          "Paint": 0,
+          "Layout": 0,
+          "RasterTask": 0,
+          "UpdateLayoutTree": 38
+        },
+        "pacing": {
+          "fps": 60,
+          "p95": 16.700000000000728,
+          "max": 16.800000000000182
+        }
+      },
+      "connecting": {
+        "trace": {
+          "Paint": 0,
+          "Layout": 0,
+          "RasterTask": 0,
+          "UpdateLayoutTree": 43
+        },
+        "pacing": {
+          "fps": 60.00983767830792,
+          "p95": 16.700000000000728,
+          "max": 16.800000000000182
+        }
+      },
+      "failed": {
+        "trace": {
+          "Paint": 0,
+          "Layout": 0,
+          "RasterTask": 0,
+          "UpdateLayoutTree": 38
+        },
+        "pacing": {
+          "fps": 60.00393468424162,
+          "p95": 16.800000000000182,
+          "max": 16.800000000000182
+        }
+      },
+      "idle": {
+        "trace": {
+          "Paint": 0,
+          "Layout": 0,
+          "RasterTask": 0,
+          "UpdateLayoutTree": 38
+        },
+        "pacing": {
+          "fps": 60,
+          "p95": 16.800000000000182,
+          "max": 16.800000000000182
+        }
+      }
+    }
+  },
+  "A3": {
+    "brightness": {
+      "sunset": {
+        "first": 78.69263285024155,
+        "last": 28.529991948470208,
+        "maxRolling300": 7.323732260105295,
+        "maxRise300": 0.08309097623713768,
+        "maxFall300": -7.323732260105295,
+        "direct300Max": 7.356481481481481,
+        "directPairs": 63,
+        "maxGapMs": 351.02081298828125
+      },
+      "sunrise": {
+        "first": 28.55998389694042,
+        "last": 64.23611111111111,
+        "maxRolling300": 6.862019827332105,
+        "maxRise300": 6.862019827332105,
+        "maxFall300": 0.06256048954965365,
+        "direct300Max": 6.851449275362313,
+        "directPairs": 26,
+        "maxGapMs": 354.215145111084
+      },
+      "arrival": {
+        "first": 64.34359903381643,
+        "last": 78.67210144927536,
+        "maxRolling300": 3.2701568762483504,
+        "maxRise300": 3.2701568762483504,
+        "maxFall300": 0.03721040777492135,
+        "direct300Max": 3.2459742351046685,
+        "directPairs": 25,
+        "maxGapMs": 350.53300857543945
+      },
+      "failure": {
+        "first": 64.34359903381643,
+        "last": 39.35648148148148,
+        "maxRolling300": 7.1730875850428575,
+        "maxRise300": 0.17456905505542863,
+        "maxFall300": -7.1730875850428575,
+        "direct300Max": 7.170289855072461,
+        "directPairs": 25,
+        "maxGapMs": 350.3379821777344
+      }
+    },
+    "performance": {
+      "connected": {
+        "trace": {
+          "Paint": 0,
+          "Layout": 0,
+          "RasterTask": 0,
+          "UpdateLayoutTree": 38
+        },
+        "pacing": {
+          "fps": 60.00393468424162,
+          "p95": 16.700000000000728,
+          "max": 16.800000000000182
+        }
+      },
+      "connecting": {
+        "trace": {
+          "Paint": 0,
+          "Layout": 0,
+          "RasterTask": 0,
+          "UpdateLayoutTree": 43
+        },
+        "pacing": {
+          "fps": 60,
+          "p95": 16.700000000000728,
+          "max": 16.800000000000182
+        }
+      },
+      "failed": {
+        "trace": {
+          "Paint": 0,
+          "Layout": 0,
+          "RasterTask": 0,
+          "UpdateLayoutTree": 38
+        },
+        "pacing": {
+          "fps": 60,
+          "p95": 16.700000000000728,
+          "max": 16.800000000000182
+        }
+      },
+      "idle": {
+        "trace": {
+          "Paint": 0,
+          "Layout": 0,
+          "RasterTask": 0,
+          "UpdateLayoutTree": 38
+        },
+        "pacing": {
+          "fps": 59.99400059994004,
+          "p95": 16.800000000000182,
+          "max": 16.800000000000182
+        }
+      }
+    }
+  },
+  "A12": {
+    "brightness": {
+      "sunset": {
+        "first": 77.98631239935588,
+        "last": 27.28804347826087,
+        "maxRolling300": 7.055132105756975,
+        "maxRise300": 0.04687789282580468,
+        "maxFall300": -7.055132105756975,
+        "direct300Max": 7.056159420289852,
+        "directPairs": 59,
+        "maxGapMs": 350.38089752197266
+      },
+      "sunrise": {
+        "first": 27.294283413848632,
+        "last": 63.903985507246375,
+        "maxRolling300": 6.611481482556329,
+        "maxRise300": 6.611481482556329,
+        "maxFall300": 0.04578353000171376,
+        "direct300Max": 6.584943639291467,
+        "directPairs": 24,
+        "maxGapMs": 342.97704696655273
+      },
+      "arrival": {
+        "first": 64.01046698872786,
+        "last": 78.17451690821257,
+        "maxRolling300": 3.1930674888972703,
+        "maxRise300": 3.1930674888972703,
+        "maxFall300": 0.022420383227483853,
+        "direct300Max": 3.1906199677938787,
+        "directPairs": 29,
+        "maxGapMs": 105.31091690063477
+      },
+      "failure": {
+        "first": 64.01046698872786,
+        "last": 38.93276972624799,
+        "maxRolling300": 7.0745812723142265,
+        "maxRise300": 0.23111046120796175,
+        "maxFall300": -7.0745812723142265,
+        "direct300Max": 7.070048309178745,
+        "directPairs": 31,
+        "maxGapMs": 104.99405860900879
+      }
+    },
+    "performance": {
+      "connected": {
+        "trace": {
+          "Paint": 0,
+          "Layout": 0,
+          "RasterTask": 0,
+          "UpdateLayoutTree": 63
+        },
+        "pacing": {
+          "fps": 60.00393468424157,
+          "p95": 16.700000000000728,
+          "max": 16.800000000000182
+        }
+      },
+      "connecting": {
+        "trace": {
+          "Paint": 0,
+          "Layout": 0,
+          "RasterTask": 0,
+          "UpdateLayoutTree": 67
+        },
+        "pacing": {
+          "fps": 60,
+          "p95": 16.699999999999818,
+          "max": 16.800000000000182
+        }
+      },
+      "failed": {
+        "trace": {
+          "Paint": 0,
+          "Layout": 0,
+          "RasterTask": 0,
+          "UpdateLayoutTree": 62
+        },
+        "pacing": {
+          "fps": 60.00393468424162,
+          "p95": 16.800000000000182,
+          "max": 16.800000000000182
+        }
+      },
+      "idle": {
+        "trace": {
+          "Paint": 0,
+          "Layout": 0,
+          "RasterTask": 0,
+          "UpdateLayoutTree": 63
+        },
+        "pacing": {
+          "fps": 60.00393468424157,
+          "p95": 16.700000000000728,
+          "max": 16.800000000000182
+        }
+      }
+    }
+  },
+  "A7": {
+    "brightness": {
+      "sunset": {
+        "first": 78.03381642512078,
+        "last": 27.467995169082126,
+        "maxRolling300": 7.45637398348245,
+        "maxRise300": 0.041068793437574413,
+        "maxFall300": -7.45637398348245,
+        "direct300Max": 7.461755233494365,
+        "directPairs": 65,
+        "maxGapMs": 349.9488830566406
+      },
+      "sunrise": {
+        "first": 27.467995169082126,
+        "last": 63.98329307568438,
+        "maxRolling300": 6.638501255549805,
+        "maxRise300": 6.638501255549805,
+        "maxFall300": 0.050371230269469436,
+        "direct300Max": 6.616948470209337,
+        "directPairs": 26,
+        "maxGapMs": 347.14794158935547
+      },
+      "arrival": {
+        "first": 64.08494363929147,
+        "last": 78.20712560386474,
+        "maxRolling300": 3.226391378601221,
+        "maxRise300": 3.226391378601221,
+        "maxFall300": 0.026109106481072786,
+        "direct300Max": 3.198268921095007,
+        "directPairs": 29,
+        "maxGapMs": 102.56195068359375
+      },
+      "failure": {
+        "first": 64.08494363929147,
+        "last": 38.81561996779388,
+        "maxRolling300": 7.0866533093509645,
+        "maxRise300": 0.204897345090032,
+        "maxFall300": -7.0866533093509645,
+        "direct300Max": 7.163446054750402,
+        "directPairs": 25,
+        "maxGapMs": 352.07414627075195
+      }
+    },
+    "performance": {
+      "connected": {
+        "trace": {
+          "Paint": 0,
+          "Layout": 0,
+          "RasterTask": 0,
+          "UpdateLayoutTree": 38
+        },
+        "pacing": {
+          "fps": 60,
+          "p95": 16.699999999999818,
+          "max": 16.799999999999272
+        }
+      },
+      "connecting": {
+        "trace": {
+          "Paint": 0,
+          "Layout": 0,
+          "RasterTask": 0,
+          "UpdateLayoutTree": 43
+        },
+        "pacing": {
+          "fps": 60,
+          "p95": 16.700000000000728,
+          "max": 16.800000000000182
+        }
+      },
+      "failed": {
+        "trace": {
+          "Paint": 0,
+          "Layout": 0,
+          "RasterTask": 0,
+          "UpdateLayoutTree": 38
+        },
+        "pacing": {
+          "fps": 59.998032851381936,
+          "p95": 16.700000000000728,
+          "max": 16.799999999999272
+        }
+      },
+      "idle": {
+        "trace": {
+          "Paint": 0,
+          "Layout": 0,
+          "RasterTask": 0,
+          "UpdateLayoutTree": 38
+        },
+        "pacing": {
+          "fps": 60.00393468424157,
+          "p95": 16.700000000000728,
+          "max": 16.800000000000182
+        }
+      }
+    }
+  },
+  "A14": {
+    "brightness": {
+      "sunset": {
+        "first": 77.98631239935588,
+        "last": 27.291062801932366,
+        "maxRolling300": 7.059702708445691,
+        "maxRise300": 0.04696580966761488,
+        "maxFall300": -7.059702708445691,
+        "direct300Max": 7.056159420289852,
+        "directPairs": 65,
+        "maxGapMs": 349.72500801086426
+      },
+      "sunrise": {
+        "first": 27.294283413848632,
+        "last": 63.90358293075684,
+        "maxRolling300": 6.6484049632795745,
+        "maxRise300": 6.6484049632795745,
+        "maxFall300": 0.04808855536046508,
+        "direct300Max": 6.5883655394524965,
+        "directPairs": 26,
+        "maxGapMs": 349.2770195007324
+      },
+      "arrival": {
+        "first": 64.01046698872786,
+        "last": 78.17451690821257,
+        "maxRolling300": 3.193079095780888,
+        "maxRise300": 3.193079095780888,
+        "maxFall300": 0.02274459824464259,
+        "direct300Max": 3.1906199677938787,
+        "directPairs": 29,
+        "maxGapMs": 102.81491279602051
+      },
+      "failure": {
+        "first": 64.01046698872786,
+        "last": 38.93276972624799,
+        "maxRolling300": 7.122418441096734,
+        "maxRise300": 0.23127008226172308,
+        "maxFall300": -7.122418441096734,
+        "direct300Max": 7.070048309178745,
+        "directPairs": 31,
+        "maxGapMs": 102.77485847473145
+      }
+    },
+    "performance": {
+      "connected": {
+        "trace": {
+          "Paint": 0,
+          "Layout": 0,
+          "RasterTask": 0,
+          "UpdateLayoutTree": 63
+        },
+        "pacing": {
+          "fps": 60,
+          "p95": 16.800000000000182,
+          "max": 16.800000000000182
+        }
+      },
+      "connecting": {
+        "trace": {
+          "Paint": 0,
+          "Layout": 0,
+          "RasterTask": 0,
+          "UpdateLayoutTree": 67
+        },
+        "pacing": {
+          "fps": 60.00393468424157,
+          "p95": 16.799999999999272,
+          "max": 16.800000000000182
+        }
+      },
+      "failed": {
+        "trace": {
+          "Paint": 0,
+          "Layout": 0,
+          "RasterTask": 0,
+          "UpdateLayoutTree": 63
+        },
+        "pacing": {
+          "fps": 60,
+          "p95": 16.799999999999272,
+          "max": 16.800000000000182
+        }
+      },
+      "idle": {
+        "trace": {
+          "Paint": 0,
+          "Layout": 0,
+          "RasterTask": 0,
+          "UpdateLayoutTree": 64
+        },
+        "pacing": {
+          "fps": 60.00393468424157,
+          "p95": 16.799999999999272,
+          "max": 16.800000000000182
+        }
+      }
+    }
+  },
+  "A9": {
+    "brightness": {
+      "sunset": {
+        "first": 78.00080515297907,
+        "last": 27.285426731078903,
+        "maxRolling300": 7.505079051924888,
+        "maxRise300": 0.03684601873254323,
+        "maxFall300": -7.505079051924888,
+        "direct300Max": 7.453502415458935,
+        "directPairs": 63,
+        "maxGapMs": 349.08294677734375
+      },
+      "sunrise": {
+        "first": 27.278582930756844,
+        "last": 63.904790660225444,
+        "maxRolling300": 6.638136887059446,
+        "maxRise300": 6.638136887059446,
+        "maxFall300": 0.05160430515370251,
+        "direct300Max": 6.5871578099839,
+        "directPairs": 25,
+        "maxGapMs": 342.2360420227051
+      },
+      "arrival": {
+        "first": 64.01046698872786,
+        "last": 78.17451690821257,
+        "maxRolling300": 3.209286947081921,
+        "maxRise300": 3.209286947081921,
+        "maxFall300": 0.022628329745771225,
+        "direct300Max": 3.1906199677938787,
+        "directPairs": 29,
+        "maxGapMs": 106.07004165649414
+      },
+      "failure": {
+        "first": 64.01046698872786,
+        "last": 38.82548309178744,
+        "maxRolling300": 7.1219825492931434,
+        "maxRise300": 0.20700736246602958,
+        "maxFall300": -7.1219825492931434,
+        "direct300Max": 7.116143317230275,
+        "directPairs": 25,
+        "maxGapMs": 347.49698638916016
+      }
+    },
+    "performance": {
+      "connected": {
+        "trace": {
+          "Paint": 0,
+          "Layout": 0,
+          "RasterTask": 0,
+          "UpdateLayoutTree": 63
+        },
+        "pacing": {
+          "fps": 59.99400059993999,
+          "p95": 16.800000000000182,
+          "max": 16.800000000000182
+        }
+      },
+      "connecting": {
+        "trace": {
+          "Paint": 0,
+          "Layout": 0,
+          "RasterTask": 0,
+          "UpdateLayoutTree": 68
+        },
+        "pacing": {
+          "fps": 60.00983767830792,
+          "p95": 16.700000000000728,
+          "max": 16.800000000000182
+        }
+      },
+      "failed": {
+        "trace": {
+          "Paint": 0,
+          "Layout": 0,
+          "RasterTask": 0,
+          "UpdateLayoutTree": 63
+        },
+        "pacing": {
+          "fps": 60,
+          "p95": 16.700000000000728,
+          "max": 16.799999999999272
+        }
+      },
+      "idle": {
+        "trace": {
+          "Paint": 0,
+          "Layout": 0,
+          "RasterTask": 0,
+          "UpdateLayoutTree": 63
+        },
+        "pacing": {
+          "fps": 60,
+          "p95": 16.800000000000182,
+          "max": 16.800000000000182
+        }
+      }
+    }
+  },
+  "A5": {
+    "brightness": {
+      "sunset": {
+        "first": 78.69263285024155,
+        "last": 28.529991948470208,
+        "maxRolling300": 7.334827865823698,
+        "maxRise300": 0.08305921455885468,
+        "maxFall300": -7.334827865823698,
+        "direct300Max": 7.356481481481481,
+        "directPairs": 65,
+        "maxGapMs": 351.15504264831543
+      },
+      "sunrise": {
+        "first": 27.977858293075684,
+        "last": 63.95028180354267,
+        "maxRolling300": 6.859424791739372,
+        "maxRise300": 6.859424791739372,
+        "maxFall300": 0.053734501840821736,
+        "direct300Max": 6.907407407407412,
+        "directPairs": 25,
+        "maxGapMs": 349.66206550598145
+      },
+      "arrival": {
+        "first": 64.05394524959742,
+        "last": 78.13888888888889,
+        "maxRolling300": 3.249431819707951,
+        "maxRise300": 3.249431819707951,
+        "maxFall300": 0.030172325554445933,
+        "direct300Max": 3.222020933977447,
+        "directPairs": 25,
+        "maxGapMs": 352.24390029907227
+      },
+      "failure": {
+        "first": 64.05394524959742,
+        "last": 38.813204508856685,
+        "maxRolling300": 7.183881890823187,
+        "maxRise300": 0.19755397862488877,
+        "maxFall300": -7.183881890823187,
+        "direct300Max": 7.195853462157807,
+        "directPairs": 25,
+        "maxGapMs": 350.0549793243408
+      }
+    },
+    "performance": {
+      "connected": {
+        "trace": {
+          "Paint": 0,
+          "Layout": 0,
+          "RasterTask": 0,
+          "UpdateLayoutTree": 38
+        },
+        "pacing": {
+          "fps": 60.00393468424157,
+          "p95": 16.700000000000728,
+          "max": 16.800000000000182
+        }
+      },
+      "connecting": {
+        "trace": {
+          "Paint": 0,
+          "Layout": 0,
+          "RasterTask": 0,
+          "UpdateLayoutTree": 42
+        },
+        "pacing": {
+          "fps": 60,
+          "p95": 16.799999999999272,
+          "max": 16.800000000000182
+        }
+      },
+      "failed": {
+        "trace": {
+          "Paint": 0,
+          "Layout": 0,
+          "RasterTask": 0,
+          "UpdateLayoutTree": 38
+        },
+        "pacing": {
+          "fps": 60,
+          "p95": 16.800000000000182,
+          "max": 16.800000000000182
+        }
+      },
+      "idle": {
+        "trace": {
+          "Paint": 0,
+          "Layout": 0,
+          "RasterTask": 0,
+          "UpdateLayoutTree": 38
+        },
+        "pacing": {
+          "fps": 60,
+          "p95": 16.700000000000728,
+          "max": 16.800000000000182
+        }
+      }
+    }
+  },
+  "A11": {
+    "brightness": {
+      "sunset": {
+        "first": 77.98631239935588,
+        "last": 27.28804347826087,
+        "maxRolling300": 7.407826270044588,
+        "maxRise300": 0.053580978535002544,
+        "maxFall300": -7.407826270044588,
+        "direct300Max": 7.455515297906608,
+        "directPairs": 64,
+        "maxGapMs": 349.37405586242676
+      },
+      "sunrise": {
+        "first": 27.276167471819647,
+        "last": 63.90116747181965,
+        "maxRolling300": 6.7152099542798425,
+        "maxRise300": 6.7152099542798425,
+        "maxFall300": 0.05592598947806238,
+        "direct300Max": 6.596014492753625,
+        "directPairs": 25,
+        "maxGapMs": 349.5149612426758
+      },
+      "arrival": {
+        "first": 64.01046698872786,
+        "last": 78.17471819645732,
+        "maxRolling300": 3.2138254207160344,
+        "maxRise300": 3.2138254207160344,
+        "maxFall300": 0.026616440387371654,
+        "direct300Max": 3.2119565217391255,
+        "directPairs": 29,
+        "maxGapMs": 102.1418571472168
+      },
+      "failure": {
+        "first": 64.01046698872786,
+        "last": 38.93276972624799,
+        "maxRolling300": 7.072249111654436,
+        "maxRise300": 0.23115222754857,
+        "maxFall300": -7.072249111654436,
+        "direct300Max": 7.070048309178745,
+        "directPairs": 29,
+        "maxGapMs": 104.8729419708252
+      }
+    },
+    "performance": {
+      "connected": {
+        "trace": {
+          "Paint": 0,
+          "Layout": 0,
+          "RasterTask": 0,
+          "UpdateLayoutTree": 63
+        },
+        "pacing": {
+          "fps": 60.00393468424157,
+          "p95": 16.700000000000728,
+          "max": 16.800000000000182
+        }
+      },
+      "connecting": {
+        "trace": {
+          "Paint": 0,
+          "Layout": 0,
+          "RasterTask": 0,
+          "UpdateLayoutTree": 67
+        },
+        "pacing": {
+          "fps": 60,
+          "p95": 16.700000000000728,
+          "max": 16.799999999999272
+        }
+      },
+      "failed": {
+        "trace": {
+          "Paint": 0,
+          "Layout": 0,
+          "RasterTask": 0,
+          "UpdateLayoutTree": 62
+        },
+        "pacing": {
+          "fps": 60.00393468424157,
+          "p95": 16.700000000000728,
+          "max": 16.800000000000182
+        }
+      },
+      "idle": {
+        "trace": {
+          "Paint": 0,
+          "Layout": 0,
+          "RasterTask": 0,
+          "UpdateLayoutTree": 63
+        },
+        "pacing": {
+          "fps": 60.00393468424162,
+          "p95": 16.700000000000728,
+          "max": 16.800000000000182
+        }
+      }
+    }
+  },
+  "A13": {
+    "brightness": {
+      "sunset": {
+        "first": 77.96537842190016,
+        "last": 27.285426731078903,
+        "maxRolling300": 7.0269944239825435,
+        "maxRise300": 0.03020186039342576,
+        "maxFall300": -7.0269944239825435,
+        "direct300Max": 7.047302737520127,
+        "directPairs": 65,
+        "maxGapMs": 349.9000072479248
+      },
+      "sunrise": {
+        "first": 27.294283413848632,
+        "last": 63.903985507246375,
+        "maxRolling300": 6.608455860597125,
+        "maxRise300": 6.608455860597125,
+        "maxFall300": 0.04576967064850379,
+        "direct300Max": 6.584943639291467,
+        "directPairs": 25,
+        "maxGapMs": 341.4289951324463
+      },
+      "arrival": {
+        "first": 64.01046698872786,
+        "last": 78.17451690821257,
+        "maxRolling300": 3.2032154101229082,
+        "maxRise300": 3.2032154101229082,
+        "maxFall300": 0.022713050819177738,
+        "direct300Max": 3.1906199677938787,
+        "directPairs": 29,
+        "maxGapMs": 101.59015655517578
+      },
+      "failure": {
+        "first": 64.01046698872786,
+        "last": 38.93276972624799,
+        "maxRolling300": 7.016528688039024,
+        "maxRise300": 0.23123405747387693,
+        "maxFall300": -7.016528688039024,
+        "direct300Max": 7.070048309178745,
+        "directPairs": 31,
+        "maxGapMs": 102.88596153259277
+      }
+    },
+    "performance": {
+      "connected": {
+        "trace": {
+          "Paint": 0,
+          "Layout": 0,
+          "RasterTask": 0,
+          "UpdateLayoutTree": 62
+        },
+        "pacing": {
+          "fps": 60,
+          "p95": 16.700000000000728,
+          "max": 16.800000000000182
+        }
+      },
+      "connecting": {
+        "trace": {
+          "Paint": 0,
+          "Layout": 0,
+          "RasterTask": 0,
+          "UpdateLayoutTree": 67
+        },
+        "pacing": {
+          "fps": 60,
+          "p95": 16.799999999999272,
+          "max": 16.800000000000182
+        }
+      },
+      "failed": {
+        "trace": {
+          "Paint": 0,
+          "Layout": 0,
+          "RasterTask": 0,
+          "UpdateLayoutTree": 63
+        },
+        "pacing": {
+          "fps": 60.00393468424162,
+          "p95": 16.800000000000182,
+          "max": 16.800000000000182
+        }
+      },
+      "idle": {
+        "trace": {
+          "Paint": 0,
+          "Layout": 0,
+          "RasterTask": 0,
+          "UpdateLayoutTree": 63
+        },
+        "pacing": {
+          "fps": 60,
+          "p95": 16.700000000000728,
+          "max": 16.700000000000728
+        }
+      }
+    }
+  },
+  "A2": {
+    "brightness": {
+      "sunset": {
+        "first": 77.98389694041867,
+        "last": 28.529991948470208,
+        "maxRolling300": 7.24129068756821,
+        "maxRise300": 0.08207756909707697,
+        "maxFall300": -7.24129068756821,
+        "direct300Max": 7.233896940418681,
+        "directPairs": 65,
+        "maxGapMs": 351.67622566223145
+      },
+      "sunrise": {
+        "first": 28.55998389694042,
+        "last": 63.902375201288244,
+        "maxRolling300": 6.82415894268717,
+        "maxRise300": 6.82415894268717,
+        "maxFall300": 0.061238008712138026,
+        "direct300Max": 6.803945249597426,
+        "directPairs": 26,
+        "maxGapMs": 350.36611557006836
+      },
+      "arrival": {
+        "first": 64.02113526570048,
+        "last": 77.96175523349436,
+        "maxRolling300": 3.1568912033625764,
+        "maxRise300": 3.1568912033625764,
+        "maxFall300": 0.031259852402769184,
+        "direct300Max": 3.152576489533004,
+        "directPairs": 25,
+        "maxGapMs": 349.729061126709
+      },
+      "failure": {
+        "first": 64.02113526570048,
+        "last": 39.29367954911433,
+        "maxRolling300": 7.124282369638273,
+        "maxRise300": 0.16413818886929477,
+        "maxFall300": -7.124282369638273,
+        "direct300Max": 7.102254428341389,
+        "directPairs": 25,
+        "maxGapMs": 348.9658832550049
+      }
+    },
+    "performance": {
+      "connected": {
+        "trace": {
+          "Paint": 0,
+          "Layout": 0,
+          "RasterTask": 0,
+          "UpdateLayoutTree": 38
+        },
+        "pacing": {
+          "fps": 59.998032851381936,
+          "p95": 16.699999999999818,
+          "max": 16.800000000000182
+        }
+      },
+      "connecting": {
+        "trace": {
+          "Paint": 0,
+          "Layout": 0,
+          "RasterTask": 0,
+          "UpdateLayoutTree": 44
+        },
+        "pacing": {
+          "fps": 60.00393468424157,
+          "p95": 16.799999999999272,
+          "max": 16.799999999999272
+        }
+      },
+      "failed": {
+        "trace": {
+          "Paint": 0,
+          "Layout": 0,
+          "RasterTask": 0,
+          "UpdateLayoutTree": 38
+        },
+        "pacing": {
+          "fps": 60.00393468424157,
+          "p95": 16.699999999999818,
+          "max": 16.799999999999272
+        }
+      },
+      "idle": {
+        "trace": {
+          "Paint": 0,
+          "Layout": 0,
+          "RasterTask": 0,
+          "UpdateLayoutTree": 38
+        },
+        "pacing": {
+          "fps": 60.00393468424162,
+          "p95": 16.700000000000728,
+          "max": 16.800000000000182
+        }
+      }
+    }
+  },
+  "A6": {
+    "brightness": {
+      "sunset": {
+        "first": 78.16284219001611,
+        "last": 27.47061191626409,
+        "maxRolling300": 7.471267172677038,
+        "maxRise300": 0.057434369249904194,
+        "maxFall300": -7.471267172677038,
+        "direct300Max": 7.468397745571657,
+        "directPairs": 64,
+        "maxGapMs": 350.1160144805908
+      },
+      "sunrise": {
+        "first": 27.467995169082126,
+        "last": 63.98329307568438,
+        "maxRolling300": 6.628562316482558,
+        "maxRise300": 6.628562316482558,
+        "maxFall300": 0.0486762658825981,
+        "direct300Max": 6.616948470209337,
+        "directPairs": 26,
+        "maxGapMs": 349.1709232330322
+      },
+      "arrival": {
+        "first": 64.08494363929147,
+        "last": 78.15539452495975,
+        "maxRolling300": 3.18657798096109,
+        "maxRise300": 3.18657798096109,
+        "maxFall300": 0.026538407204853343,
+        "direct300Max": 3.180555555555557,
+        "directPairs": 25,
+        "maxGapMs": 351.1309623718262
+      },
+      "failure": {
+        "first": 64.08494363929147,
+        "last": 38.81561996779388,
+        "maxRolling300": 7.1560849678789324,
+        "maxRise300": 0.20479226707914222,
+        "maxFall300": -7.1560849678789324,
+        "direct300Max": 7.163446054750402,
+        "directPairs": 25,
+        "maxGapMs": 350.69799423217773
+      }
+    },
+    "performance": {
+      "connected": {
+        "trace": {
+          "Paint": 0,
+          "Layout": 0,
+          "RasterTask": 0,
+          "UpdateLayoutTree": 38
+        },
+        "pacing": {
+          "fps": 60,
+          "p95": 16.800000000000182,
+          "max": 16.800000000000182
+        }
+      },
+      "connecting": {
+        "trace": {
+          "Paint": 0,
+          "Layout": 0,
+          "RasterTask": 0,
+          "UpdateLayoutTree": 43
+        },
+        "pacing": {
+          "fps": 60,
+          "p95": 16.799999999999272,
+          "max": 16.800000000000182
+        }
+      },
+      "failed": {
+        "trace": {
+          "Paint": 0,
+          "Layout": 0,
+          "RasterTask": 0,
+          "UpdateLayoutTree": 38
+        },
+        "pacing": {
+          "fps": 60,
+          "p95": 16.800000000000182,
+          "max": 16.800000000000182
+        }
+      },
+      "idle": {
+        "trace": {
+          "Paint": 0,
+          "Layout": 0,
+          "RasterTask": 0,
+          "UpdateLayoutTree": 38
+        },
+        "pacing": {
+          "fps": 60.00393468424157,
+          "p95": 16.700000000000728,
+          "max": 16.800000000000182
+        }
+      }
+    }
+  },
+  "A8": {
+    "brightness": {
+      "sunset": {
+        "first": 78.00583735909822,
+        "last": 27.290458937198068,
+        "maxRolling300": 7.445393904122923,
+        "maxRise300": 0.0453294845176373,
+        "maxFall300": -7.445393904122923,
+        "direct300Max": 7.449879227053145,
+        "directPairs": 58,
+        "maxGapMs": 349.0278720855713
+      },
+      "sunrise": {
+        "first": 27.28985507246377,
+        "last": 63.903985507246375,
+        "maxRolling300": 6.683533481231528,
+        "maxRise300": 6.683533481231528,
+        "maxFall300": 0.04471768569671042,
+        "direct300Max": 6.589975845410628,
+        "directPairs": 25,
+        "maxGapMs": 342.3151969909668
+      },
+      "arrival": {
+        "first": 64.00865539452496,
+        "last": 78.17451690821257,
+        "maxRolling300": 3.1920674928642256,
+        "maxRise300": 3.1920674928642256,
+        "maxFall300": 0.02268405359593828,
+        "direct300Max": 3.1926328502415373,
+        "directPairs": 29,
+        "maxGapMs": 103.27887535095215
+      },
+      "failure": {
+        "first": 64.00865539452496,
+        "last": 38.82769726247987,
+        "maxRolling300": 7.112849735071457,
+        "maxRise300": 0.20969556187994698,
+        "maxFall300": -7.112849735071457,
+        "direct300Max": 7.117149758454104,
+        "directPairs": 25,
+        "maxGapMs": 349.37500953674316
+      }
+    },
+    "performance": {
+      "connected": {
+        "trace": {
+          "Paint": 0,
+          "Layout": 0,
+          "RasterTask": 0,
+          "UpdateLayoutTree": 38
+        },
+        "pacing": {
+          "fps": 60,
+          "p95": 16.700000000000728,
+          "max": 16.700000000000728
+        }
+      },
+      "connecting": {
+        "trace": {
+          "Paint": 0,
+          "Layout": 0,
+          "RasterTask": 0,
+          "UpdateLayoutTree": 43
+        },
+        "pacing": {
+          "fps": 60,
+          "p95": 16.800000000000182,
+          "max": 16.800000000000182
+        }
+      },
+      "failed": {
+        "trace": {
+          "Paint": 0,
+          "Layout": 0,
+          "RasterTask": 0,
+          "UpdateLayoutTree": 38
+        },
+        "pacing": {
+          "fps": 60,
+          "p95": 16.800000000000182,
+          "max": 16.800000000000182
+        }
+      },
+      "idle": {
+        "trace": {
+          "Paint": 0,
+          "Layout": 0,
+          "RasterTask": 0,
+          "UpdateLayoutTree": 38
+        },
+        "pacing": {
+          "fps": 60,
+          "p95": 16.800000000000182,
+          "max": 16.800000000000182
+        }
+      }
+    }
+  },
+  "A4": {
+    "brightness": {
+      "sunset": {
+        "first": 78.69263285024155,
+        "last": 28.529991948470208,
+        "maxRolling300": 7.36228875622534,
+        "maxRise300": 0.08295670506995734,
+        "maxFall300": -7.36228875622534,
+        "direct300Max": 7.356481481481481,
+        "directPairs": 63,
+        "maxGapMs": 351.5889644622803
+      },
+      "sunrise": {
+        "first": 28.55998389694042,
+        "last": 64.47141706924316,
+        "maxRolling300": 6.8646274241431655,
+        "maxRise300": 6.8646274241431655,
+        "maxFall300": 0.06175763069212792,
+        "direct300Max": 6.914049919484704,
+        "directPairs": 26,
+        "maxGapMs": 351.06801986694336
+      },
+      "arrival": {
+        "first": 64.61151368760065,
+        "last": 78.67210144927536,
+        "maxRolling300": 3.2401792118570683,
+        "maxRise300": 3.2401792118570683,
+        "maxFall300": 0.03785557167270781,
+        "direct300Max": 3.2135668276972638,
+        "directPairs": 25,
+        "maxGapMs": 344.5589542388916
+      },
+      "failure": {
+        "first": 64.61151368760065,
+        "last": 39.35648148148148,
+        "maxRolling300": 7.165234308178988,
+        "maxRise300": 0.17347806924323805,
+        "maxFall300": -7.165234308178988,
+        "direct300Max": 7.165458937198068,
+        "directPairs": 23,
+        "maxGapMs": 350.57711601257324
+      }
+    },
+    "performance": {
+      "connected": {
+        "trace": {
+          "Paint": 0,
+          "Layout": 0,
+          "RasterTask": 0,
+          "UpdateLayoutTree": 38
+        },
+        "pacing": {
+          "fps": 60.00393468424162,
+          "p95": 16.700000000000728,
+          "max": 16.800000000000182
+        }
+      },
+      "connecting": {
+        "trace": {
+          "Paint": 0,
+          "Layout": 0,
+          "RasterTask": 0,
+          "UpdateLayoutTree": 43
+        },
+        "pacing": {
+          "fps": 60.00393468424162,
+          "p95": 16.700000000000728,
+          "max": 16.800000000000182
+        }
+      },
+      "failed": {
+        "trace": {
+          "Paint": 0,
+          "Layout": 0,
+          "RasterTask": 0,
+          "UpdateLayoutTree": 38
+        },
+        "pacing": {
+          "fps": 60,
+          "p95": 16.800000000000182,
+          "max": 16.800000000000182
+        }
+      },
+      "idle": {
+        "trace": {
+          "Paint": 0,
+          "Layout": 0,
+          "RasterTask": 0,
+          "UpdateLayoutTree": 38
+        },
+        "pacing": {
+          "fps": 60,
+          "p95": 16.700000000000728,
+          "max": 16.800000000000182
+        }
+      }
+    }
+  }
+}

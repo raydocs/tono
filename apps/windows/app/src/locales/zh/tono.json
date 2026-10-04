@@ -694,6 +694,8 @@
     "paused": "静态 / 软件渲染模式",
     "viewport": "适应窗口",
     "node": "Westwood · 演示节点",
-    "action": "切换场景"
+    "action": "切换场景",
+    "useProgress": "按输入进度",
+    "progress": "连接进度（预览）"
   }
 }

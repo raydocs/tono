@@ -78,8 +78,9 @@ and missing backdrop-filter affect only material, not scenery motion ([decision 
 GPU probe nor automatic remote-desktop detection is introduced.
 Windows first, macOS later: [provisional decision 055](decisions/055-2026-10-03-windows-sea-scene-preview.md).
 [SeaScene reproduction and evidence](sea-scene-preview.md) is not real Windows
-frame-pacing or protection qualification. Section 7 questions 1–3 and 5 remain
-open before production home integration; question 4's later frameless direction
+frame-pacing or protection qualification. Section 7 questions 1, 2 and 5 remain
+open with ROUND-2 defaults. The owner selected the top navigation capsule
+([decision 058](decisions/058-2026-10-04-windows-top-navigation.md)); question 4's later frameless direction
 is recorded in [decision 056](decisions/056-2026-10-03-windows-frameless-direction.md),
 not implemented by this preview.
 

@@ -13,6 +13,7 @@ pnpm install --frozen-lockfile
 pnpm web:dev --host 127.0.0.1
 # Open http://127.0.0.1:3000/dev/sea-scene/index.html?lang=zh
 # ?phase=idle, connecting, failed or connected; &fit; &static; lang=en
+# &progress=0..1 opts into caller-controlled connecting progress
 python3 scripts/bake-sea-textures.py
 pnpm exec vitest run src/tono-ui/SeaScene.test.tsx
 pnpm exec tsc --noEmit
@@ -31,13 +32,19 @@ are in the ordinary locale/type system; other inactive locales are not expanded.
 
 ## Component contract and deliberate refinements
 
-- `SeaScene({ phase, paused })` is inert and `aria-hidden`. A decorative phase is
+- `SeaScene({ phase, paused, progress? })` is inert and `aria-hidden`. A decorative phase is
   **not** protection evidence. A future caller must require `hasLiveProtection`
   for `connected`; PR 1 adds no caller or real state mapping.
 - At 920×600 the horizon is y=330, sun diameter 190 and centre (620,185).
-  Horizon follows 55% height, centre follows 67.3913% width, diameter stays fixed.
-  Sun/mirror destination transforms and timing remain the prototype's, including
-  1.45× vertical reflection. No subtree remounts on phase changes.
+  Horizon follows 55% height and centre follows 67.3913% width. Diameter is
+  `clamp(190px, 26% of scene height, 300px)` via scene-local container units;
+  position, phase travel, glow and reflection size scale together. Mirror remains
+  vertically stretched 1.45×. No subtree remounts on phase changes.
+- Optional finite `progress` is clamped to 0–1 and ignored outside `connecting`.
+  At reference scale the offset is `205px − 150px × progress`; mirror shares
+  the opposite offset/easing, each update takes 900ms. Omit/non-finite input
+  keeps 125px. No timer, inferred connection stage or autonomous progress.
+  Progress retargets received while hidden are held like phase retargets.
 - Bake seeded, depth-dependent ripple ribbons and white grain once using the stdlib script.
   Ripple width stretches with the scene; its depth stays 270px, preserving the
   drawn water scale rather than enlarging ripples on a maximised window. No SVG
@@ -203,12 +210,14 @@ Review status/coverage for subsequent exact heads is recorded in PR comments.
 
 ## Motion polish — 2026-10-04
 
+**Historical first pass at a83bfd42; ROUND-2 below is the current contract/evidence.**
+
 The owner's supplied review correctly identifies weak, concentrated steady-state
 motion, not an absence of animations. Same-harness baseline samples confirm no
 changed pixels above 5/255 in the water region left of the sun column; the new
 surface layers animate that region too. [Scope, comparison, films and raw evidence](screenshots/sea-scene-2026-10-04-motion/README.md).
 
-Implemented only the prioritized independent batch:
+At `a83bfd42`, implemented only the prioritized independent batch (the later ROUND-2 pass below supersedes its deferred list):
 
 - **A1–2:** feather the mirrored disc by 14px, apply a dimmer/redder prepainted
   reflection, reduce connected mirror opacity from .3 to .1 and connecting .8
@@ -276,17 +285,67 @@ and i18n type generation passed. The locale scanner exits 0 but reports inactive
 locale gaps and legacy backend unused/missing-source keys: **not a globally clean
 i18n result**. English/Chinese frontend keys are clean; no bulk locale cleanup.
 
+## Round 2 — 2026-10-04
+
+Owner-supplied ROUND-2 Part A continues #1375, isolated/unmounted. [Four-state
+2× comparisons, films, per-item data, large viewports and Chrome traces](screenshots/sea-scene-2026-10-04-round2/README.md).
+
+- A1–6: short/dim failed ripples (sweep opacity0), clouds behind the sun, a soft
+  near-horizon light column/stronger near specks and connecting reflection,
+  depth-faded swells, local18px haze,1.5px disk feather/wider glow, SVG moon and
+  no unsupported warm solar patch at night. Baked assets remain unchanged.
+- A7–10:7.6s connected glow,110/137s one-way cloud passes; three star tiers,
+  seeded3–9s twinkles on one third and bounded area-dependent count;700ms idle
+  meteor per60s after a55s entry delay, canceled on any phase transition.
+  Failed sun/inverse mirror bob by3 local pixels over5s, with6.4s ember breathing.
+- A11: optional controlled progress, nine real keyboard-driven steps all rise
+  in settled brightness, no autonomous advancement; hidden updates freeze and
+  resume. **This is an input contract, not the real connection feed (PR2).**
+- A12/13: `linear()` horizon linger, geometric disk boundary at3.740s vs2.652s
+  with the old easing on the same new geometry;190/190/280.8/300px sun at
+  860×540/920×600/1920×1080/2560×1440. Older CSS engines keep the190px/original
+  easing fallback; an actual older engine was not tested.
+- Steady sky changed pixels>5/255 over~2s: connected4.758%, idle.376%; open
+  water9.59–12.13% after deliberately fading the scan-like lower folds.
+- Every A1–A14 check and final four-phase3s traces have Paint/Layout/RasterTask0;
+  observed~60fps/p9516.7–16.8ms at default and2560×1440. Earlier30fps results
+  remain historical, not proof of a source-induced speedup. Final sampled
+  rolling300 brightness maxima7.039/6.607/3.175/7.070; sunset rise≤.047,
+  capture gaps≤350ms disclosed. Hidden trace0/0/0/style0; visible style work exists.
+- A14 investigated: no unique masked-layer cause proved. Full first PNG capture
+  ~173ms, unchanged captures similarly slow; format controls PNG158ms vs fast
+  lossless PNG89ms/JPEG58ms, first rAF sees the new phase in2–17ms. Full-scene
+  ablation draw max2.55ms; PNG format-control draw max1.402ms. This supports a
+  **screenshot delivery/readback/encoding inference**, not an encoder CPU
+  measurement, Windows guarantee or a claimed fix for a demonstrated UI freeze.
+  Layer ablations alter image entropy too; raw traces/variance/outlier are attached.
+- Six narrow vitests/typecheck/scoped ESLint/Biome/build pass; two new regressions
+  were run and failed before their implementations. Two preview-only en/zh keys;
+  i18n generated1118 keys, active frontend en/zh clean. Scanner exits0 but
+  inactive/legacy gaps remain (overall missing6820), not globally clean.
+
+[Decision062](decisions/062-2026-10-04-sea-scene-round2-contract.md) supersedes
+only the earlier fixed-size/no-progress/deferred-sky scope. Owner directions
+are recorded with2026-10-04 quotes: [top capsule058](decisions/058-2026-10-04-windows-top-navigation.md),
+[collapsed clean steps059](decisions/059-2026-10-04-windows-home-collapsed-steps.md),
+[details060](decisions/060-2026-10-04-windows-home-details-sheet.md),
+[no bottom dock061](decisions/061-2026-10-04-windows-home-no-bottom-dock.md).
+Repository status remains provisional because only the owner sets `owner`;
+these choices are owner-selected, not reopened agent defaults. Part B then
+Part C remain separate default-off drafts; no automatic merge/review. Optional
+pointer parallax is not added; final home/native acceptance comes in Part C.
+
 ## Not verified / not implemented
 
 Real Windows/WebView2 frame pacing, low-end or remote-desktop hardware, native
 visibility/occlusion and real Windows maximisation: **not run** on this MacBook.
-The 1920×1080 images are a simulated large viewport, not Windows device evidence.
+The 1920×1080 and 2560×1440 images are simulated large viewports, not Windows device evidence.
 No native builds, Tauri, packaging, merge, deployment or customer publish.
 
 Protection mapping, all real dashboard cards, light theme, navigation, chrome,
 tray sizing and branded icons are later PRs. Section 7 questions 1–5 were asked
 together. The owner selected visual frameless/full-bleed Windows chrome (question
 4), with Windows controls at top right and native drag/resize/maximise/snap
-qualification; [decision 056](decisions/056-2026-10-03-windows-frameless-direction.md) records it and this PR does not implement it. Questions 1–3 and 5 remain pending
+qualification; [decision 056](decisions/056-2026-10-03-windows-frameless-direction.md) records it and this PR does not implement it. Question 3 was subsequently selected as a top capsule ([decision 058](decisions/058-2026-10-04-windows-top-navigation.md)); questions 1, 2 and 5 remain open with ROUND-2 defaults
 before PR 2. The original provisional scope remains in
 [decision 055](decisions/055-2026-10-03-windows-sea-scene-preview.md).

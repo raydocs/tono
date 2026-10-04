@@ -55,21 +55,24 @@
   --tono-ambient-ease-set: cubic-bezier(0.4, 0, 0.2, 1);
   --tono-ambient-sun-arrive: 2400ms;
   --tono-ambient-sun-rise: 2600ms;
+  --tono-ambient-progress: 900ms;
   --tono-ambient-sun-fail: 1800ms;
   --tono-ambient-sun-set: 4600ms;
   --tono-ambient-sky: 2600ms;
   --tono-ambient-night: 6000ms;
   --tono-ambient-breathe: 2.4s;
+  --tono-ambient-sun-breathe: 7.6s;
+  --tono-ambient-bob: 5s;
+  --tono-ambient-ember: 6.4s;
   --tono-ambient-water-near: 3.1s;
   --tono-ambient-water-far: 3.8s;
   --tono-ambient-glitter-near: 2.6s;
   --tono-ambient-glitter-mid: 3.3s;
   --tono-ambient-glitter-far: 4.1s;
-  --tono-ambient-star-near: 3.7s;
-  --tono-ambient-star-mid: 5.3s;
-  --tono-ambient-star-far: 4.4s;
-  --tono-ambient-cloud-near: 23s;
-  --tono-ambient-cloud-far: 31s;
+  /* Seeded star periods vary from 3–9s; the meteor is a 700ms shot per minute. */
+  --tono-ambient-meteor: 60s;
+  --tono-ambient-cloud-near: 110s;
+  --tono-ambient-cloud-far: 137s;
   --tono-ambient-reflection-near: 24s;
   --tono-ambient-reflection-far: 31s;
   --tono-ambient-speck-near: 8s;
@@ -80,4 +83,21 @@
   --tono-ambient-sweep: 600ms;
   --tono-ambient-moon-exit: 500ms;
   --tono-ambient-afterglow: 6600ms;
+}
+
+/* Keep the original curve as the fallback in older web engines. */
+@supports (transition-timing-function: linear(0, 1)) {
+  :root {
+    --tono-ambient-ease-set: linear(
+      0,
+      0.05 6%,
+      0.3 18%,
+      0.58 38%,
+      0.72 55%,
+      0.82 72%,
+      0.86 82%,
+      0.91 91%,
+      1
+    );
+  }
 }

@@ -139,11 +139,14 @@ The scene must never delay labels or actions: switch those within 250ms.
 | Reflection / solar specks / whole-water folds | 24–31s / 8–11s / 40–65s | `--tono-ambient-reflection-*`, `--tono-ambient-speck-*`, `--tono-ambient-swell-*` |
 | Arrival bloom / sweep; moon exit / afterglow | 900 / 600ms; 500 / 6600ms | Separate `--tono-ambient-*` tokens; arrival never loops |
 | Lunar bars | 2.6–4.1s | `--tono-ambient-glitter-*`; speck conversion deferred |
-| Connecting halo / stars / clouds | 2.4s / 3.7–5.3s / 23–31s | `--tono-ambient-breathe`, `--tono-ambient-star-*`, `--tono-ambient-cloud-*` |
+| Connecting halo / connected glow / failed bob + ember | 2.4s / 7.6s / 5 + 6.4s | Separate `--tono-ambient-*` tokens; calm transform/opacity only |
+| Stars / clouds / meteor | Seeded 3–9s / 110–137s / 60s | Three star tiers, one third twinkle; one-way cloud passes; 700ms meteor after a 55s idle-entry delay |
+| Caller-controlled connecting progress | 900ms per update | `--tono-ambient-progress`; no autonomous progress |
 
 Only transform/opacity animate; color changes cross-fade prepainted layers.
 The 2600ms dawn sky uses a broader `.25,0,.75,1` curve to meet the measured
-brightness-step limit; sun and mirror keep the prototype's shared curve.
+brightness-step limit. Sun and mirror share each destination's curve; sunset
+uses the ROUND-2 `linear()` curve to linger at the horizon without delaying controls.
 Water uses baked PNG masks, never live SVG turbulence/displacement. Keep one
 persistent DOM so a changed destination retargets from the current presentation.
 Pause loops on document visibility changes and via `paused` for native hidden
