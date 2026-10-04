@@ -14,8 +14,7 @@
 /* ---------------------------------------------------------- hero band */
 
 /* The hero is a band, not one card: the verdict card on the left, the four
- * numbers as tiles on the right, and the connection-quality dashboard under
- * both across the full width. */
+ * numbers as tiles on the right. Handling comes next; trends follow it. */
 .today-hero {
   display: grid;
   grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
@@ -37,11 +36,6 @@
 .dark .today-hero > :first-child {
   border-color: rgb(255 255 255 / 0.07);
   box-shadow: var(--shadow-card-lg), inset 0 1px 0 rgb(255 255 255 / 0.06);
-}
-
-.today-hero > .quality-band {
-  grid-column: 1 / -1;
-  margin-top: 16px;
 }
 
 .today-hero-eyebrow {
@@ -106,7 +100,7 @@
   align-items: start;
 }
 
-@media (min-width: 1024px) {
+@media (min-width: 1280px) {
   .today-grid {
     grid-template-columns: minmax(0, 1fr) 348px;
   }

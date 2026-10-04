@@ -26,6 +26,7 @@ import '@/styles/today.css';
 import { ChoreList } from './today/Chores';
 import { Digest } from './today/Digest';
 import { HeroKpis } from './today/HeroKpis';
+import { QualityBand } from './today/Quality';
 import { IncidentList } from './today/IncidentCard';
 import { IncidentDrawer } from './today/IncidentDrawer';
 import { FailureClusters } from './diagnostics/FailureClusters';
@@ -173,23 +174,6 @@ export default function TodayPage({
       </section>
 
       <div className="today-grid">
-        <div className="today-aux">
-          {/* The morning read sits in the aux column on desktop and folds shut
-              on a phone, in the review's order: what the night did, what is
-              waiting, what falls due today. Every line lands somewhere the
-              reader can act. */}
-          <Digest
-            digest={digest}
-            openCount={counts.open}
-            choresToday={dueToday}
-            customers={people}
-            incidents={all}
-            onShowOpen={() => setTab('open')}
-            onShowResolved={() => setTab('resolved')}
-            onShowChores={() => setTab('chores')}
-          />
-        </div>
-
         <div className="today-main">
           {/* Three tabs, one line, always: on a phone the strip scrolls sideways
               rather than wrapping, because a tab row that reflows every time a
@@ -231,7 +215,25 @@ export default function TodayPage({
               past the fold. */}
           <FailureClusters />
         </div>
+        <div className="today-aux">
+          {/* The morning read sits in the aux column on desktop and folds shut
+              on a phone, in the review's order: what the night did, what is
+              waiting, what falls due today. Every line lands somewhere the
+              reader can act. */}
+          <Digest
+            digest={digest}
+            openCount={counts.open}
+            choresToday={dueToday}
+            customers={people}
+            incidents={all}
+            onShowOpen={() => setTab('open')}
+            onShowResolved={() => setTab('resolved')}
+            onShowChores={() => setTab('chores')}
+          />
+        </div>
       </div>
+
+      <QualityBand />
 
       <IncidentDrawer
         id={selected}
