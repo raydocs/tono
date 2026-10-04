@@ -1,6 +1,7 @@
 import {
   useLayoutEffect,
   useRef,
+  useState,
   useSyncExternalStore,
   type CSSProperties,
 } from 'react'
@@ -19,7 +20,6 @@ export interface SeaSceneProps {
 
 const MEDIA = [
   '(prefers-reduced-motion: reduce)',
-  '(prefers-reduced-transparency: reduce)',
   '(forced-colors: active)',
 ] as const
 
@@ -35,8 +35,7 @@ const subscribe = (notify: () => void) => {
 
 const snapshot = () => {
   const reduced = MEDIA.some((query) => window.matchMedia(query).matches)
-  const opaque = !CSS.supports('backdrop-filter', 'blur(1px)')
-  return (reduced || opaque ? 1 : 0) | (document.hidden ? 2 : 0)
+  return (reduced ? 1 : 0) | (document.hidden ? 2 : 0)
 }
 
 const fill: CSSProperties = { position: 'absolute', inset: 0 }
@@ -90,45 +89,22 @@ const STARS = [
   [196, 226],
 ] as const
 
-const GLITTER = [
-  [70, 3, 160, 2, 0.95],
-  [58, 9, 176, 2, 0.95],
-  [86, 16, 140, 2, 0.9],
-  [54, 24, 184, 3, 0.9],
-  [96, 33, 128, 3, 0.85],
-  [48, 43, 190, 3, 0.85],
-  [84, 54, 150, 4, 0.8],
-  [36, 66, 208, 4, 0.75],
-  [102, 80, 120, 4, 0.7],
-  [44, 95, 198, 5, 0.65],
-  [88, 111, 150, 5, 0.58],
-  [30, 128, 226, 6, 0.5],
-  [96, 146, 132, 6, 0.42],
-  [52, 165, 190, 7, 0.34],
-] as const
-const MOON_GLITTER = [
-  [34, 10, 72, 2, 0.9],
-  [46, 24, 54, 2, 0.8],
-  [28, 42, 86, 3, 0.7],
-  [44, 66, 60, 3, 0.55],
-  [22, 96, 98, 4, 0.4],
-] as const
-
-type Bands = readonly (readonly [number, number, number, number, number])[]
-
-const Glitter = ({ bands }: { bands: Bands }) => (
+const Specks = () => (
   <>
-    {bands.map(([left, top, width, height, opacity], i) => (
-      <div
-        key={top}
-        style={{ position: 'absolute', left, top, width, height, opacity }}
-      >
-        <div
-          className={`sea-loop sea-bar sea-glitter-${i % 3}`}
-          style={{ ...fill, animationDelay: `${-i * 0.37}s` }}
-        />
-      </div>
-    ))}
+    <div
+      className="sea-specks sea-specks-1 sea-loop"
+      style={{ ...fill, top: -192 }}
+    >
+      <div className="sea-path-gold" style={fill} />
+      <div className="sea-path-red" style={fill} />
+    </div>
+    <div
+      className="sea-specks sea-specks-2 sea-loop"
+      style={{ ...fill, top: -192 }}
+    >
+      <div className="sea-path-gold" style={fill} />
+      <div className="sea-path-red" style={fill} />
+    </div>
   </>
 )
 
@@ -148,6 +124,17 @@ export const SeaScene = ({ phase, paused = false }: SeaSceneProps) => {
   const isStatic = paused || (environment & 1) !== 0
   const isHidden = (environment & 2) !== 0
   const isPaused = isStatic || isHidden
+  const [entry, setEntry] = useState({ phase, isStatic, arrival: false })
+  // Track prop changes before commit, not on a timer or an extra effect render.
+  if (entry.phase !== phase || entry.isStatic !== isStatic) {
+    setEntry({
+      phase,
+      isStatic,
+      arrival:
+        !isStatic &&
+        (entry.phase !== phase ? phase === 'connected' : entry.arrival),
+    })
+  }
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: A phase commit creates new CSS transitions even when visibility is unchanged.
   useLayoutEffect(() => {
@@ -199,6 +186,7 @@ export const SeaScene = ({ phase, paused = false }: SeaSceneProps) => {
       ref={sceneRef}
       className="sea-scene"
       data-phase={phase}
+      data-arrival={entry.arrival && phase === 'connected' ? 'true' : 'false'}
       data-motion={isStatic ? 'static' : 'ambient'}
       data-paused={isPaused ? 'true' : 'false'}
       aria-hidden="true"
@@ -213,23 +201,33 @@ export const SeaScene = ({ phase, paused = false }: SeaSceneProps) => {
         className="sea-sky"
         style={{ ...fill, bottom: '45%', overflow: 'hidden' }}
       >
-        <div className="sea-stars" style={fill}>
-          {STARS.map(([x, y], i) => (
-            <span
-              key={`${x}-${y}`}
-              className={
-                i < 25 ? 'sea-star' : `sea-star sea-loop sea-twinkle-${i % 3}`
-              }
-              style={{
-                position: 'absolute',
-                left: `${x / 9.2}%`,
-                top: `${y / 3.3}%`,
-                width: i < 25 ? 1 : 2,
-                height: i < 25 ? 1 : 2,
-              }}
-            />
-          ))}
-        </div>
+        {[false, true].map((bright) => (
+          <div
+            key={String(bright)}
+            className={bright ? 'sea-stars sea-stars-bright' : 'sea-stars'}
+            style={fill}
+          >
+            {STARS.map(([x, y], i) =>
+              (i % 7 === 0) === bright ? (
+                <span
+                  key={`${x}-${y}`}
+                  className={
+                    i < 25
+                      ? 'sea-star'
+                      : `sea-star sea-loop sea-twinkle-${i % 3}`
+                  }
+                  style={{
+                    position: 'absolute',
+                    left: `${x / 9.2}%`,
+                    top: `${y / 3.3}%`,
+                    width: i < 25 ? 1 : 2,
+                    height: i < 25 ? 1 : 2,
+                  }}
+                />
+              ) : null,
+            )}
+          </div>
+        ))}
         <div className="sea-dusk sea-sky-dusk" style={fill} />
         <div className="sea-day sea-sky-day" style={fill} />
         <div
@@ -254,7 +252,21 @@ export const SeaScene = ({ phase, paused = false }: SeaSceneProps) => {
             }}
           />
         </div>
+        <div
+          className="sea-afterglow"
+          style={{
+            position: 'absolute',
+            left: 'calc(67.3913% - 220px)',
+            bottom: 0,
+            width: 440,
+            height: 28,
+          }}
+        />
         <div className="sea-track" style={sunBox}>
+          <div
+            className="sea-arrival-bloom sea-loop"
+            style={{ position: 'absolute', inset: -100 }}
+          />
           <div
             className="sea-halo"
             style={{ position: 'absolute', inset: -90 }}
@@ -269,9 +281,9 @@ export const SeaScene = ({ phase, paused = false }: SeaSceneProps) => {
           style={{
             position: 'absolute',
             left: '45.65%',
-            bottom: 63,
-            width: 400,
-            height: 5,
+            bottom: 32,
+            width: 480,
+            height: 64,
           }}
         />
         <div
@@ -279,9 +291,9 @@ export const SeaScene = ({ phase, paused = false }: SeaSceneProps) => {
           style={{
             position: 'absolute',
             left: '32.61%',
-            bottom: 34,
-            width: 540,
-            height: 4,
+            bottom: 8,
+            width: 580,
+            height: 58,
           }}
         />
       </div>
@@ -291,6 +303,16 @@ export const SeaScene = ({ phase, paused = false }: SeaSceneProps) => {
       >
         <div className="sea-dusk sea-water-dusk" style={fill} />
         <div className="sea-day sea-water-day" style={fill} />
+        <div className="sea-swell-envelope" style={fill}>
+          <div
+            className="sea-swell sea-swell-1 sea-loop"
+            style={{ ...fill, top: -180 }}
+          />
+          <div
+            className="sea-swell sea-swell-2 sea-loop"
+            style={{ ...fill, top: -180 }}
+          />
+        </div>
         <div
           className="sea-water-light"
           style={{
@@ -322,22 +344,24 @@ export const SeaScene = ({ phase, paused = false }: SeaSceneProps) => {
               style={{ position: 'absolute', inset: -7 }}
             />
           </div>
-          <div
-            className="sea-ripple sea-ripple-1 sea-loop sea-wobble-1"
-            style={fill}
-          >
-            <div className="sea-mirror-track" style={mirrorBox}>
-              <SunDisk />
+          {[1, 2].map((layer) => (
+            <div
+              key={layer}
+              className={`sea-ripple sea-ripple-${layer} sea-loop sea-ripple-flow-${layer}`}
+              style={{ ...fill, top: -270, bottom: 'auto', height: 540 }}
+            >
+              <div
+                className={`sea-ripple-counter sea-loop sea-ripple-flow-${layer}`}
+                style={{ ...fill, top: 270, bottom: 'auto', height: 270 }}
+              >
+                <div className="sea-mirror-track" style={mirrorBox}>
+                  <div className="sea-reflected-disk" style={fill}>
+                    <SunDisk />
+                  </div>
+                </div>
+              </div>
             </div>
-          </div>
-          <div
-            className="sea-ripple sea-ripple-2 sea-loop sea-wobble-2"
-            style={fill}
-          >
-            <div className="sea-mirror-track" style={mirrorBox}>
-              <SunDisk />
-            </div>
-          </div>
+          ))}
         </div>
         <div
           className="sea-moon-path"
@@ -349,7 +373,30 @@ export const SeaScene = ({ phase, paused = false }: SeaSceneProps) => {
             height: 150,
           }}
         >
-          <Glitter bands={MOON_GLITTER} />
+          {[
+            [34, 10, 72, 2, 0.9],
+            [46, 24, 54, 2, 0.8],
+            [28, 42, 86, 3, 0.7],
+            [44, 66, 60, 3, 0.55],
+            [22, 96, 98, 4, 0.4],
+          ].map(([left, top, width, height, opacity], i) => (
+            <div
+              key={top}
+              style={{
+                position: 'absolute',
+                left,
+                top,
+                width,
+                height,
+                opacity,
+              }}
+            >
+              <div
+                className={`sea-loop sea-bar sea-glitter-${i % 3}`}
+                style={{ ...fill, animationDelay: `${-i * 0.37}s` }}
+              />
+            </div>
+          ))}
         </div>
         <div
           className="sea-sun-path"
@@ -358,15 +405,20 @@ export const SeaScene = ({ phase, paused = false }: SeaSceneProps) => {
             left: 'calc(67.3913% - 150px)',
             top: 0,
             width: 300,
-            height: 190,
+            height: 270,
           }}
         >
-          <div className="sea-path-gold" style={fill}>
-            <Glitter bands={GLITTER} />
-          </div>
-          <div className="sea-path-red" style={fill}>
-            <Glitter bands={GLITTER} />
-          </div>
+          <Specks />
+          <div
+            className="sea-arrival-sweep sea-loop"
+            style={{
+              position: 'absolute',
+              left: 0,
+              right: 0,
+              top: -60,
+              height: 60,
+            }}
+          />
         </div>
       </div>
       <div

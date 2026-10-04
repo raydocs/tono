@@ -58,9 +58,11 @@ are in the ordinary locale/type system; other inactive locales are not expanded.
   a static destination: native occlusion/minimisation, closed tray or known
   software rendering must be passed explicitly by a future caller. No unreliable
   GPU/remote-desktop detection is claimed. Media changes are subscribed/unsubscribed.
-- Reduced motion/transparency, forced colors, no backdrop-filter and explicit
-  static mode snap to the right phase, stop loops and make the preview dock opaque.
-  The component has no app theme or transparency-slider coupling in PR 1.
+- Reduced motion, forced colors and explicit static mode snap to the right phase,
+  stop loops and make the preview dock opaque. Per the 2026-10-04 review E30,
+  reduced transparency and missing backdrop-filter affect only dock material:
+  the dock becomes opaque while scene motion remains enabled. The component
+  has no app theme or transparency-slider coupling in PR 1.
 
 ## Measured evidence (MacBook, Chrome headless; 2026-10-03)
 
@@ -177,8 +179,9 @@ retain the correction. The same PNG→L/crop/resize method is used.
   or analytical guarantee for every possible 300ms window is claimed. Raw
   frames/timestamps remain available; this is measured sampling, not virtual time.
 
-Two minor **visual-fidelity engineering items remain open after this correction
-pass**, not product/protection defects or a claim of pixel-identical matching:
+Two minor **visual-fidelity engineering items were left open after this correction
+pass**. The owner-supplied 2026-10-04 review E31 accepts these approximations;
+this is not a product/protection defect or a claim of pixel-identical matching:
 
 1. The transform timing/curve remains shared by sun/mirror, but some auxiliary
    opacity easings differ from normative `WinHome.dc.html`: failed day/dusk/stars
@@ -192,13 +195,83 @@ pass**, not product/protection defects or a claim of pixel-identical matching:
    approximate connecting glitter/water colors too. The opacity-only port
    removes animated colors but does **not** reproduce every original color
    interpolation. This polish preserves its existing RGB values, not exact
-   prototype palette equivalence. Aligning those endpoints remains a follow-up.
+   prototype palette equivalence. Those endpoints are accepted approximations, not exact prototype matching.
 
 The stale question-4 wording is superseded by new [decision 056](decisions/056-2026-10-03-windows-frameless-direction.md);
 055 is immutable historical scope. No native window change is implemented.
 Review status/coverage for subsequent exact heads is recorded in PR comments.
 
-Frontend: narrow vitest (two tests), TypeScript, scoped ESLint/Biome, Vite build
+## Motion polish — 2026-10-04
+
+The owner's supplied review correctly identifies weak, concentrated steady-state
+motion, not an absence of animations. Same-harness baseline samples confirm no
+changed pixels above 5/255 in the water region left of the sun column; the new
+surface layers animate that region too. [Scope, comparison, films and raw evidence](screenshots/sea-scene-2026-10-04-motion/README.md).
+
+Implemented only the prioritized independent batch:
+
+- **A1–2:** feather the mirrored disc by 14px, apply a dimmer/redder prepainted
+  reflection, reduce connected mirror opacity from .3 to .1 and connecting .8
+  to .6. Reflection disc strength .6 is a layer opacity, not a measured claim
+  that final pixel luminance is exactly 60% of the sun.
+- **A3:** two deterministic soft RGBA cloud bands with irregular bodies and a
+  restrained warm underside replace ruler-straight dark gradients. Existing
+  slow drift is retained; full-width 90–140s cloud passes (B13) are deferred.
+- **A4:** two periodic baked speck masks drift in opposite directions at 8/11s
+  behind a fixed feathered perspective wedge. Warm/red paints cross-fade by
+  opacity. Remove the 28 duplicate solar bar loops; the five lunar bars remain
+  deliberately unchanged pending B15.
+- **B10–11:** whole-water folds drift at 40/65s at .04 opacity each. Mirrored
+  ripple planes travel toward the viewer at 24/31s; matching counter-transforms
+  keep the sun disc anchored, including across loop wraps. No animated mask
+  property or JavaScript frame work. New durations remain separate ambient tokens.
+- **C19:** a causal 900ms halo bloom and 600ms path sweep occur once on entering
+  connected, never on initial mount. All carry `.sea-loop`, pause when hidden,
+  cancel under static mode and do not replay when static mode is released.
+- **C20–21:** six early stars fade in over 3000ms; a narrow afterglow fades for
+  6600ms, covering the sun/moon handoff. Moon/path exit in 500ms before the dawn
+  sun is substantially visible. Keep the shared sun/mirror transform curves.
+- **E30:** glass preferences/support no longer freeze the scene. Reduced motion,
+  forced colors, explicit paused and transient visibility still work separately.
+
+New narrow regressions were actually run before their implementations: glass-only
+fallback failed with `static` instead of `ambient`; arrival entry failed with no
+attribute. Four tests now pass. TypeScript, scoped ESLint/Biome and Vite build
+pass; deterministic rebake, PNG CRC/dimensions/rows and unchanged grain pass.
+Production output still contains no SeaScene CSS/dev HTML/baked image assets.
+No locale source changes; the earlier scanner's inactive/legacy gaps are not
+reclassified as globally clean.
+
+- Same-harness 2s RGB-difference samples: water outside the sun column changes
+  from **0% to 20.66–23.42%**, depending on phase. This measures spatial activity,
+  not aesthetic quality; low-contrast motion remains subtle. Sky motion stays
+  restrained in this batch; halo breathing/cloud passes/star expansion are deferred.
+- Native-frame rolling 300ms brightness, with explicitly interpolated means:
+  sunset max 7.35, dawn 6.73, arrival 3.19, failure 7.06; all below 8. Sunset
+  settled ambient variation rises by up to .084, within the <=1 tolerance; do
+  not call an animated steady scene mathematically monotonic. Native capture
+  gaps reach 353ms, so this is sampled evidence, not every-window proof.
+- Each stage (A4, B10, B11) and all four final steady phases have 0 Paint/Layout/
+  RasterTask in 3s traces. Final style updates are 27/31/27/27. Simulated hidden
+  trace has 0 Paint/Layout/RasterTask and one empty style event, not zero style work.
+- This session observed both ~60fps early and ~30fps later. A fresh Chrome
+  retry did not resolve it. **Exact 9f baseline and final in the same harness
+  are both ~30fps, p95 33.4ms.** No 60fps, speedup or Windows qualification claim.
+- Browser checks hold every active transition/loop for 1.5s when hidden and
+  freeze/resume the arrival one-shots; reversals stay continuous. At 550ms into
+  dawn moon opacity is zero; at sunset 1.6s early/other star opacity is .72/.15,
+  and at 3.2s afterglow opacity remains .12. Static/material preferences pass.
+  Missing-backdrop CSS fallback is inspected and the JS-support regression passes;
+  Chrome cannot emulate an actually unsupported CSS engine.
+
+**Deferred:** C18 and C25–29 are PR 2/later integration; A5–9, B12–17, C22–24
+await owner effect review. Optional parallax/failure hesitation are not added.
+Windows/WebView2/low-end/RDP/native occlusion tests remain unrun. The PR remains
+draft; owner arranges external review and no automatic reviewer is invoked.
+[Decision 057](decisions/057-2026-10-04-sea-scene-motion-polish.md) records this
+scope/fallback update without modifying historical decisions.
+
+Historical initial delivery: narrow vitest (two tests), TypeScript, scoped ESLint/Biome, Vite build
 and i18n type generation passed. The locale scanner exits 0 but reports inactive
 locale gaps and legacy backend unused/missing-source keys: **not a globally clean
 i18n result**. English/Chinese frontend keys are clean; no bulk locale cleanup.

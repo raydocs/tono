@@ -72,9 +72,9 @@ Ambient timings live separately in `tokens/motion.css`; control timings above
 remain unchanged. Navigation/controls alone may use glass, not the scene itself.
 
 Baked water/grain assets replace runtime filter work. Loops use only transform
-and opacity and stop when unseen. Reduced-motion/transparency, no backdrop
-filter, forced colors and explicit software-rendering mode use static scenery
-and an opaque dock. Native occlusion/closed tray must pass `paused`; neither a
+and opacity and stop when unseen. Reduced motion, forced colors and explicit
+software-rendering mode use static scenery and an opaque dock. Reduced transparency
+and missing backdrop-filter affect only material, not scenery motion ([decision 057](decisions/057-2026-10-04-sea-scene-motion-polish.md)). Native occlusion/closed tray must pass `paused`; neither a
 GPU probe nor automatic remote-desktop detection is introduced.
 Windows first, macOS later: [provisional decision 055](decisions/055-2026-10-03-windows-sea-scene-preview.md).
 [SeaScene reproduction and evidence](sea-scene-preview.md) is not real Windows

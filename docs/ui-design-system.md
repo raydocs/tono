@@ -136,7 +136,9 @@ The scene must never delay labels or actions: switch those within 250ms.
 |---|---|---|
 | Sun arrival / rise / failure / sunset | 2400 / 2600 / 1800 / 4600ms | `--tono-ambient-sun-*`; mirrored track uses the same curve |
 | Sky / night | 2600 / 6000ms | `--tono-ambient-sky`, `--tono-ambient-night`; no sky transition delays |
-| Water / glitter | 3.1–3.8s / 2.6–4.1s | `--tono-ambient-water-*`, `--tono-ambient-glitter-*` |
+| Reflection / solar specks / whole-water folds | 24–31s / 8–11s / 40–65s | `--tono-ambient-reflection-*`, `--tono-ambient-speck-*`, `--tono-ambient-swell-*` |
+| Arrival bloom / sweep; moon exit / afterglow | 900 / 600ms; 500 / 6600ms | Separate `--tono-ambient-*` tokens; arrival never loops |
+| Lunar bars | 2.6–4.1s | `--tono-ambient-glitter-*`; speck conversion deferred |
 | Connecting halo / stars / clouds | 2.4s / 3.7–5.3s / 23–31s | `--tono-ambient-breathe`, `--tono-ambient-star-*`, `--tono-ambient-cloud-*` |
 
 Only transform/opacity animate; color changes cross-fade prepainted layers.
@@ -145,9 +147,9 @@ brightness-step limit; sun and mirror keep the prototype's shared curve.
 Water uses baked PNG masks, never live SVG turbulence/displacement. Keep one
 persistent DOM so a changed destination retargets from the current presentation.
 Pause loops on document visibility changes and via `paused` for native hidden
-surfaces or a closed tray. Reduced motion/transparency, forced colors, missing
-backdrop-filter and explicit `paused` render a static destination; opaque
-controls remain usable. Software rendering/remote-desktop detection is not
+surfaces or a closed tray. Reduced motion, forced colors and explicit `paused`
+render a static destination. Reduced transparency/missing backdrop-filter make
+controls opaque, not the scene static (review E30, decision 057). Software rendering/remote-desktop detection is not
 reliable in the renderer: the caller must explicitly set `paused`.
 See [preview and measured evidence](sea-scene-preview.md).
 

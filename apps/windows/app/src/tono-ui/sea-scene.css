@@ -8,7 +8,7 @@
   --sea-red: 0;
   --sea-shade: 0;
   --sea-glow: 1;
-  --sea-mirror: 0.3;
+  --sea-mirror: 0.1;
   --sea-path: 1;
   --sea-path-scale: 1;
   --sea-path-red: 0;
@@ -35,7 +35,7 @@
   --sea-stars: 0.3;
   --sea-red: 0.45;
   --sea-glow: 0.75;
-  --sea-mirror: 0.8;
+  --sea-mirror: 0.6;
   --sea-path: 0.9;
   --sea-path-scale: 0.72;
   --sea-path-red: 0.6;
@@ -212,20 +212,16 @@
   animation-play-state: paused;
 }
 .sea-cloud {
-  border-radius: 999px;
-  background: radial-gradient(
-    ellipse at 58% 50%,
-    #0e060a60,
-    #0e060a26 42%,
-    #0e060a0a 72%,
-    transparent 90%
-  );
+  background-size: 100% 100%;
+  background-repeat: no-repeat;
 }
 .sea-cloud-1 {
+  background-image: url("./sea-assets/cloud-1.png");
   animation: sea-cloud var(--tono-ambient-cloud-near) ease-in-out infinite
     alternate;
 }
 .sea-cloud-2 {
+  background-image: url("./sea-assets/cloud-2.png");
   animation: sea-cloud var(--tono-ambient-cloud-far) ease-in-out -9s infinite
     alternate-reverse;
 }
@@ -268,6 +264,17 @@
 .sea-mirror .sea-red {
   transform: scaleY(-1);
 }
+.sea-reflected-disk {
+  opacity: 0.6;
+  mask-image: radial-gradient(
+    closest-side,
+    #000 calc(100% - 14px),
+    transparent
+  );
+}
+.sea-reflected-disk .sea-red {
+  opacity: max(0.65, var(--sea-red));
+}
 .sea-mirror-soft {
   border-radius: 50%;
   background: radial-gradient(
@@ -279,7 +286,7 @@
 }
 .sea-ripple {
   mask-size: 100% 270px;
-  mask-repeat: no-repeat;
+  mask-repeat: repeat-y;
   mask-mode: luminance;
 }
 .sea-ripple-1 {
@@ -288,14 +295,58 @@
 .sea-ripple-2 {
   mask-image: url("./sea-assets/ripple-2.png");
 }
-.sea-wobble-1 {
-  animation: sea-wobble var(--tono-ambient-water-near) ease-in-out infinite;
+.sea-ripple-flow-1 {
+  animation: sea-ripple-flow var(--tono-ambient-reflection-near) linear infinite;
 }
-.sea-wobble-2 {
-  animation: sea-wobble var(--tono-ambient-water-far) ease-in-out -1.9s infinite
+.sea-ripple-flow-2 {
+  animation: sea-ripple-flow var(--tono-ambient-reflection-far) linear -7s
+    infinite;
+}
+.sea-ripple-counter {
+  animation-name: sea-ripple-counter;
+}
+@keyframes sea-ripple-flow {
+  from {
+    transform: translateY(0);
+  }
+  to {
+    transform: translateY(270px);
+  }
+}
+@keyframes sea-ripple-counter {
+  from {
+    transform: translateY(0);
+  }
+  to {
+    transform: translateY(-270px);
+  }
+}
+.sea-specks {
+  mask-mode: luminance;
+  mask-size: 100% 192px;
+  mask-repeat: repeat-y;
+}
+.sea-specks-1 {
+  mask-image: url("./sea-assets/specks-1.png");
+  animation: sea-speck-flow var(--tono-ambient-speck-near) linear infinite;
+}
+.sea-specks-2 {
+  mask-image: url("./sea-assets/specks-2.png");
+  animation: sea-speck-flow var(--tono-ambient-speck-far) linear -4s infinite
     reverse;
 }
+@keyframes sea-speck-flow {
+  from {
+    transform: translateY(0);
+  }
+  to {
+    transform: translateY(192px);
+  }
+}
 .sea-sun-path {
+  mask-image: url("./sea-assets/path-envelope.png");
+  mask-mode: luminance;
+  mask-size: 100% 100%;
   opacity: var(--sea-path);
   transform: scaleY(var(--sea-path-scale));
   transform-origin: 50% 0;
@@ -304,12 +355,12 @@
     transform var(--sea-sun-time) var(--sea-sun-ease);
 }
 .sea-path-gold {
-  color: #ffd9a0;
+  background: #ffd9a0;
   opacity: calc(1 - var(--sea-path-red));
   transition: opacity var(--sea-path-time) var(--sea-sky-ease);
 }
 .sea-path-red {
-  color: #e8553f;
+  background: #e8553f;
   opacity: var(--sea-path-red);
   transition: opacity var(--sea-path-time) var(--sea-sky-ease);
 }
@@ -346,8 +397,8 @@
   opacity: 0;
   transform: translateY(30px);
   transition:
-    opacity 1400ms var(--tono-ambient-ease-sky),
-    transform 2000ms var(--tono-ambient-ease-sky);
+    opacity var(--tono-ambient-moon-exit) ease-out,
+    transform var(--tono-ambient-moon-exit) ease-in;
 }
 .sea-moon-glow {
   border-radius: 50%;
@@ -366,7 +417,7 @@
 .sea-moon-path {
   color: #c6cff0;
   opacity: 0;
-  transition: opacity 1400ms var(--tono-ambient-ease-sky);
+  transition: opacity var(--tono-ambient-moon-exit) ease-out;
 }
 .sea-scene[data-phase="idle"] .sea-moon {
   opacity: 1;
@@ -408,15 +459,6 @@
   }
   to {
     transform: translateX(16px);
-  }
-}
-@keyframes sea-wobble {
-  0%,
-  100% {
-    transform: translateX(-5px);
-  }
-  50% {
-    transform: translateX(6px);
   }
 }
 @keyframes sea-twinkle {
@@ -465,15 +507,10 @@
     opacity: 1;
   }
 }
-/* No loop restart on visibility changes; retain the presentation position. */
-.sea-scene[data-paused="true"] .sea-loop {
-  animation-play-state: paused;
-}
 .sea-scene[data-phase][data-motion="static"] * {
   transition: none;
 }
-@media (prefers-reduced-motion: reduce), (prefers-reduced-transparency: reduce),
-  (forced-colors: active) {
+@media (prefers-reduced-motion: reduce), (forced-colors: active) {
   .sea-scene[data-phase][data-motion] * {
     transition: none;
   }
@@ -481,11 +518,105 @@
     animation-play-state: paused;
   }
 }
-@supports not (backdrop-filter: blur(1px)) {
-  .sea-scene[data-phase][data-motion] * {
-    transition: none;
+
+.sea-swell-envelope {
+  mask-image: linear-gradient(transparent, #000 18%, #000 85%, transparent);
+}
+.sea-swell {
+  background: #ced8ff;
+  opacity: 0.04;
+  mask-mode: luminance;
+  mask-size: 100% 180px;
+  mask-repeat: repeat-y;
+}
+.sea-swell-1 {
+  mask-image: url("./sea-assets/swell-1.png");
+  animation: sea-swell-flow var(--tono-ambient-swell-near) linear infinite;
+}
+.sea-swell-2 {
+  mask-image: url("./sea-assets/swell-2.png");
+  animation: sea-swell-flow var(--tono-ambient-swell-far) linear -19s infinite
+    reverse;
+}
+@keyframes sea-swell-flow {
+  from {
+    transform: translateY(0);
   }
-  .sea-scene .sea-loop {
-    animation-play-state: paused;
+  to {
+    transform: translateY(180px);
   }
+}
+
+.sea-scene[data-phase="idle"] .sea-stars-bright {
+  transition-duration: 3000ms;
+  transition-timing-function: ease-out;
+}
+.sea-afterglow {
+  background: radial-gradient(
+    ellipse at 50% 100%,
+    #ff96544d,
+    #f2685a14 50%,
+    transparent 72%
+  );
+  opacity: 0.5;
+  transition: opacity 2600ms var(--sea-sky-ease);
+}
+.sea-scene[data-phase="idle"] .sea-afterglow {
+  opacity: 0;
+  transition: opacity var(--tono-ambient-afterglow) var(--tono-ambient-ease-set);
+}
+.sea-arrival-bloom {
+  background: radial-gradient(
+    ellipse,
+    #fff6de33,
+    #ffb46414 45%,
+    transparent 72%
+  );
+  opacity: 0;
+}
+.sea-arrival-sweep {
+  background: linear-gradient(transparent, #ffe2b099, transparent);
+  opacity: 0;
+}
+.sea-scene[data-arrival="true"] .sea-arrival-bloom {
+  animation: sea-arrival-bloom var(--tono-ambient-bloom) ease-out;
+}
+.sea-scene[data-arrival="true"] .sea-arrival-sweep {
+  animation: sea-arrival-sweep var(--tono-ambient-sweep) ease-out;
+}
+@keyframes sea-arrival-bloom {
+  0% {
+    opacity: 0;
+    transform: scale(1);
+  }
+  38% {
+    opacity: 0.6;
+    transform: scale(1.12);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1);
+  }
+}
+@keyframes sea-arrival-sweep {
+  0% {
+    opacity: 0;
+    transform: translateY(0);
+  }
+  20% {
+    opacity: 0.45;
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(330px);
+  }
+}
+/* Hold every loop and one-shot without restarting on visibility changes. */
+.sea-scene[data-paused="true"] .sea-loop {
+  animation-play-state: paused;
+}
+.sea-scene[data-motion="static"] .sea-arrival-bloom,
+.sea-scene[data-motion="static"] .sea-arrival-sweep {
+  animation: none;
+  opacity: 0;
 }

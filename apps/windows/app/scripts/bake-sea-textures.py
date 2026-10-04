@@ -1,4 +1,4 @@
-"""Bake deterministic ripple masks and grain; Python stdlib, no live SVG filter."""
+"""Bake deterministic sea masks, soft clouds and grain; Python stdlib, no live SVG filter."""
 from pathlib import Path
 import math
 import random
@@ -47,13 +47,77 @@ for layer, bands in enumerate(BANDS):
             half = (hi - lo) / 2 * (1 - depth * .75 * (1 - scallop))
             density = 1 - depth * (.12 + .75 * (1 - scallop))
             center = middle + bend
-            for y in range(max(0, math.floor(center - half - feather)),
-                           min(270, math.ceil(center + half + feather))):
+            for y in range(math.floor(center - half - feather),
+                           math.ceil(center + half + feather)):
                 coverage = max(0, min(1, (half + feather - abs(y + .5 - center)) / feather))
-                rows[y][x] = max(rows[y][x], round(255 * coverage * density))
+                rows[y % 270][x] = max(rows[y % 270][x], round(255 * coverage * density))
     png(f"ripple-{layer + 1}.png", 920, 270, rows)
 
 rng = random.Random(7)
 png("grain.png", 220, 220,
     [bytes(value for _ in range(220) for value in (255, 255, 255, rng.randrange(48, 93)))
      for _ in range(220)], color_type=6)
+
+
+# Two periodic, subpixel-soft highlight fields, not a stack of rounded bars.
+for layer in range(2):
+    width, height = 512, 192
+    rows = [bytearray(width) for _ in range(height)]
+    rng = random.Random(51 + layer)
+    for _ in range(480):
+        cx, cy = rng.uniform(0, width), rng.uniform(0, height)
+        rx, ry = rng.uniform(1.5, 9), rng.uniform(.45, 1.25)
+        intensity = rng.uniform(.18, .9)
+        for y in range(math.floor(cy - ry * 2), math.ceil(cy + ry * 2)):
+            for x in range(math.floor(cx - rx * 2), math.ceil(cx + rx * 2)):
+                value = round(255 * intensity * math.exp(
+                    -2 * (((x + .5 - cx) / rx) ** 2 + ((y + .5 - cy) / ry) ** 2)))
+                rows[y % height][x % width] = max(rows[y % height][x % width], value)
+    png(f"specks-{layer + 1}.png", width, height, rows)
+
+# Fixed perspective/edge envelope. The specks move behind this, not the wedge.
+rows = []
+for y in range(270):
+    depth = y / 269
+    half = 7 + 143 * depth ** .72
+    fade = (1 - depth) ** .8
+    rows.append(bytes(round(255 * max(0, 1 - (abs(x + .5 - 150) / half) ** 3)
+                            * fade) for x in range(300)))
+png("path-envelope.png", 300, 270, rows)
+
+# Clouds are prepainted RGBA: lumpy feathered bodies and a restrained warm underside.
+for layer in range(2):
+    width, height = 768, 128
+    rng = random.Random(91 + layer)
+    phases = [rng.uniform(0, math.tau) for _ in range(4)]
+    rows = [bytearray() for _ in range(height)]
+    for y in range(height):
+        for x in range(width):
+            u = x / width
+            edge = math.sin(math.pi * u) ** 1.5
+            center = 57 + 10 * math.sin(x / 93 + phases[0]) + 5 * math.sin(x / 37 + phases[1])
+            radius = 12 + 7 * math.sin(x / 71 + phases[2]) + 3 * math.sin(x / 19 + phases[3])
+            body = math.exp(-1.4 * ((y - center) / radius) ** 2) * edge * (.5 + .5 * math.sin(x / 83 + phases[2]) ** 2)
+            rim = math.exp(-2 * ((y - center - radius * .6) / 4) ** 2) * edge * .04
+            alpha = min(.55, body * .24 + rim)
+            warm = rim / max(body * .24 + rim, .001)
+            rows[y].extend((round(14 + 241 * warm), round(6 + 144 * warm),
+                            round(10 + 74 * warm), round(255 * alpha)))
+    png(f"cloud-{layer + 1}.png", width, height, rows, color_type=6)
+
+
+# Periodic broad sea folds. Counter-drifting planes reveal the whole surface.
+for layer in range(2):
+    width, height = 920, 180
+    rng = random.Random(123 + layer)
+    rows = [bytearray(width) for _ in range(height)]
+    for band in range(15):
+        phase = rng.uniform(0, math.tau)
+        jitter = rng.uniform(-3, 3)
+        for x in range(width):
+            center = jitter + band * 12 + 3.5 * math.sin(x / 110 + phase) + 1.2 * math.sin(x / 39 - phase)
+            strength = .35 + .65 * (.5 + .5 * math.sin(x / 167 + phase))
+            for y in range(math.floor(center - 4), math.ceil(center + 4)):
+                value = round(255 * strength * math.exp(-.65 * (y + .5 - center) ** 2))
+                rows[y % height][x] = max(rows[y % height][x], value)
+    png(f"swell-{layer + 1}.png", width, height, rows)

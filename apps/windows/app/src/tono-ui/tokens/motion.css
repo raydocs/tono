@@ -70,4 +70,14 @@
   --tono-ambient-star-far: 4.4s;
   --tono-ambient-cloud-near: 23s;
   --tono-ambient-cloud-far: 31s;
+  --tono-ambient-reflection-near: 24s;
+  --tono-ambient-reflection-far: 31s;
+  --tono-ambient-speck-near: 8s;
+  --tono-ambient-speck-far: 11s;
+  --tono-ambient-swell-near: 40s;
+  --tono-ambient-swell-far: 65s;
+  --tono-ambient-bloom: 900ms;
+  --tono-ambient-sweep: 600ms;
+  --tono-ambient-moon-exit: 500ms;
+  --tono-ambient-afterglow: 6600ms;
 }

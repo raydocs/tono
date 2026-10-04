@@ -129,3 +129,38 @@ it('freezes hidden phase transitions and resumes only live scene transitions', (
   unmount()
   expect(replacement.cancel).toHaveBeenCalledOnce()
 })
+
+it('keeps ambient motion when only glass transparency is unavailable', () => {
+  vi.stubGlobal('CSS', { supports: () => false })
+  vi.stubGlobal('matchMedia', (query: string) => ({
+    matches: query.includes('reduced-transparency'),
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+  }))
+  const { container } = render(<SeaScene phase="connecting" />)
+  expect(container.firstElementChild?.getAttribute('data-motion')).toBe(
+    'ambient',
+  )
+  expect(container.firstElementChild?.getAttribute('data-paused')).toBe('false')
+})
+
+it('arms arrival once only on a new connected phase without remounting scenery', () => {
+  vi.stubGlobal('matchMedia', () => ({
+    matches: false,
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+  }))
+  const { container, rerender } = render(<SeaScene phase="connected" />)
+  const scene = container.firstElementChild
+  expect(scene?.getAttribute('data-arrival')).toBe('false')
+  rerender(<SeaScene phase="connecting" />)
+  rerender(<SeaScene phase="connected" />)
+  expect(scene?.getAttribute('data-arrival')).toBe('true')
+  rerender(<SeaScene phase="connected" paused />)
+  expect(container.firstElementChild).toBe(scene)
+  expect(scene?.getAttribute('data-arrival')).toBe('false')
+  rerender(<SeaScene phase="connected" />)
+  expect(scene?.getAttribute('data-arrival')).toBe('false')
+  rerender(<SeaScene phase="idle" />)
+  expect(scene?.getAttribute('data-arrival')).toBe('false')
+})
