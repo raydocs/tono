@@ -136,9 +136,9 @@ The scene must never delay labels or actions: switch those within 250ms.
 |---|---|---|
 | Sun arrival / rise / failure / sunset | 2400 / 2600 / 1800 / 4600ms | `--tono-ambient-sun-*`; mirrored track uses the same curve |
 | Sky / night | 2600 / 6000ms | `--tono-ambient-sky`, `--tono-ambient-night`; no sky transition delays |
-| Reflection / solar specks / whole-water folds | 24–31s / 8–11s / 40–65s | `--tono-ambient-reflection-*`, `--tono-ambient-speck-*`, `--tono-ambient-swell-*` |
-| Arrival bloom / sweep; moon exit / afterglow | 900 / 600ms; 500 / 6600ms | Separate `--tono-ambient-*` tokens; arrival never loops |
-| Lunar bars | 2.6–4.1s | `--tono-ambient-glitter-*`; speck conversion deferred |
+| Reflection / near and distant glints / whole-water folds | 24–31s / 8–11s and 16–21s / 40–65s | `--tono-ambient-reflection-*`, `--tono-ambient-speck-*`, `--tono-ambient-swell-*` |
+| Two-stage arrival bloom / late sweep; moon exit / afterglow | 2400ms / 900ms after 1400ms; 500 / 6600ms | Immediate quiet confirmation, then settling light; never delays controls or loops |
+| Shared solar/lunar broken light; moon halo | 9.2 / 13.7s shimmer; 12s breath | Two depth envelopes, counter-drifting baked fields; near/far clocks staggered, cool lunar paint |
 | Connecting halo / connected glow / failed bob + ember | 2.4s / 7.6s / 5 + 6.4s | Separate `--tono-ambient-*` tokens; calm transform/opacity only |
 | Stars / clouds / meteor | Seeded 3–9s / 110–137s / 60s | Three star tiers, one third twinkle; one-way cloud passes; 700ms meteor after a 55s idle-entry delay |
 | Caller-controlled connecting progress | 900ms per update | `--tono-ambient-progress`; no autonomous progress |
@@ -149,6 +149,11 @@ brightness-step limit. Sun and mirror share each destination's curve; sunset
 uses the ROUND-2 `linear()` curve to linger at the horizon without delaying controls.
 Water uses baked PNG masks, never live SVG turbulence/displacement. Keep one
 persistent DOM so a changed destination retargets from the current presentation.
+Glint fields use integral96/192CSS-pixel vertical tile periods to avoid fractional
+raster seams at loop resets. Their width follows the path; the far tier is half
+the near tier's footprint and drifts more slowly. This is a two-depth approximation,
+not a simulated ocean. Initial connected mounts never play the arrival one-shot;
+phase changes cancel it and hidden surfaces hold its delay as well as its duration.
 Pause loops on document visibility changes and via `paused` for native hidden
 surfaces or a closed tray. Reduced motion, forced colors and explicit `paused`
 render a static destination. Reduced transparency/missing backdrop-filter make

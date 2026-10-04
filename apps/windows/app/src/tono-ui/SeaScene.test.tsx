@@ -240,3 +240,35 @@ it('scales star density with the scene area without remounting the scene', () =>
   unmount()
   expect(disconnect).toHaveBeenCalledOnce()
 })
+
+it('keeps shared broken-light depth planes mounted across phases', () => {
+  vi.stubGlobal('matchMedia', () => ({
+    matches: false,
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+  }))
+  const { container, rerender } = render(<SeaScene phase="idle" />)
+  const moonlight = container.querySelector('.sea-moon-path')
+  const sunlight = container.querySelector('.sea-sun-path')
+  const distant = moonlight?.querySelector('.sea-glints-far')
+  const nearby = moonlight?.querySelector('.sea-glints-near')
+  expect(moonlight?.querySelectorAll('.sea-specks')).toHaveLength(4)
+  expect(sunlight?.querySelectorAll('.sea-specks')).toHaveLength(4)
+  const solarDepth = sunlight?.querySelector('.sea-glints-far')
+  expect(solarDepth).not.toBeNull()
+  expect(distant).not.toBeNull()
+  expect(nearby).not.toBeNull()
+  expect(moonlight?.querySelector('.sea-bar')).toBeNull()
+  expect(container.querySelector('.sea-moon-glow')?.classList).toContain(
+    'sea-loop',
+  )
+  rerender(<SeaScene phase="connecting" progress={0.5} />)
+  expect(container.querySelector('.sea-moon-path')).toBe(moonlight)
+  expect(moonlight?.querySelector('.sea-glints-far')).toBe(distant)
+  expect(moonlight?.querySelector('.sea-glints-near')).toBe(nearby)
+  expect(container.querySelector('.sea-sun-path')).toBe(sunlight)
+  expect(sunlight?.querySelector('.sea-glints-far')).toBe(solarDepth)
+  rerender(<SeaScene phase="idle" paused />)
+  expect(container.firstElementChild?.getAttribute('data-paused')).toBe('true')
+  expect(container.querySelector('.sea-moon-path')).toBe(moonlight)
+})

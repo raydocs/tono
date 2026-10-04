@@ -1,0 +1,18 @@
+$ pnpm exec vitest run src/tono-ui/SeaScene.test.tsx
+
+ RUN  v5.0.1 /Users/ruirui/orca/workspaces/tono/coral/apps/windows/app
+
+
+ Test Files  1 passed (1)
+      Tests  7 passed (7)
+   Start at  03:46:58
+   Duration  1.14s (environment 64%, tests 20%, import 11%, transform 5%)
+
+$ pnpm exec tsc --noEmit
+PASS tsc --noEmit
+$ pnpm exec eslint --max-warnings=0 src/tono-ui/SeaScene.tsx src/tono-ui/SeaScene.test.tsx
+PASS scoped ESLint
+$ pnpm exec biome check (four touched source files)
+Checked 4 files in 32ms. No fixes applied.
+$ pnpm exec vite build
+✓ built in 1.49s

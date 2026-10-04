@@ -335,6 +335,24 @@ these choices are owner-selected, not reopened agent defaults. Part B then
 Part C remain separate default-off drafts; no automatic merge/review. Optional
 pointer parallax is not added; final home/native acceptance comes in Part C.
 
+## Moonlight, arrival and depth — 2026-10-04
+
+Owner approved the recommended first three follow-ups after ROUND-2. Replace
+lunar bars with cool broken light and a12s halo breath; share two-depth glints
+with the solar path (fine/slow far, wider/faster near, staggered shimmer); retime
+arrival into an immediate quiet confirmation and a late settling bloom/sweep.
+Keep all existing phase/progress inputs, sun/mirror curves, palette, fallbacks
+and app/control logic. The same10baked assets are reused. Integral96/192CSS-pixel
+tile periods correct a new fractional-period reset flicker found at2560 before
+delivery. No additional particle engine, filter or JavaScript frame loop.
+
+[Updated comparisons, films, viewport matrix, per-item data, narrow regressions
+and lifecycle/seam traces](screenshots/sea-scene-2026-10-04-depth/README.md)
+supersede the earlier deferred lunar-bar/arrival timing descriptions. Those
+sections and images remain historical evidence. Only these first three effects
+are implemented; sunrise star ordering, horizon shape and home/control motion
+remain later work. The scene remains isolated, unmounted and draft-only.
+
 ## Not verified / not implemented
 
 Real Windows/WebView2 frame pacing, low-end or remote-desktop hardware, native

@@ -66,9 +66,6 @@
   --tono-ambient-ember: 6.4s;
   --tono-ambient-water-near: 3.1s;
   --tono-ambient-water-far: 3.8s;
-  --tono-ambient-glitter-near: 2.6s;
-  --tono-ambient-glitter-mid: 3.3s;
-  --tono-ambient-glitter-far: 4.1s;
   /* Seeded star periods vary from 3–9s; the meteor is a 700ms shot per minute. */
   --tono-ambient-meteor: 60s;
   --tono-ambient-cloud-near: 110s;
@@ -77,10 +74,16 @@
   --tono-ambient-reflection-far: 31s;
   --tono-ambient-speck-near: 8s;
   --tono-ambient-speck-far: 11s;
+  --tono-ambient-speck-distant: 16s;
+  --tono-ambient-speck-distant-alt: 21s;
+  --tono-ambient-glint-shimmer: 9.2s;
+  --tono-ambient-glint-shimmer-alt: 13.7s;
+  --tono-ambient-moon-breathe: 12s;
   --tono-ambient-swell-near: 40s;
   --tono-ambient-swell-far: 65s;
-  --tono-ambient-bloom: 900ms;
-  --tono-ambient-sweep: 600ms;
+  --tono-ambient-bloom: var(--tono-ambient-sun-arrive);
+  --tono-ambient-sweep: 900ms;
+  --tono-ambient-sweep-delay: 1400ms;
   --tono-ambient-moon-exit: 500ms;
   --tono-ambient-afterglow: 6600ms;
 }

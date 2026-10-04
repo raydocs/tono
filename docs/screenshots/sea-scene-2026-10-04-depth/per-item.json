@@ -1,0 +1,7818 @@
+{
+  "before": {
+    "brightness": {
+      "sunset": {
+        "first": 77.98631239935588,
+        "last": 27.289251207729468,
+        "maxRolling300": 7.057107924773099,
+        "maxRise300": 0.047323595123913265,
+        "maxFall300": -7.057107924773099,
+        "direct300Max": 7.056159420289852,
+        "directPairs": 52,
+        "maxGapMs": 347.08094596862793
+      },
+      "sunrise": {
+        "first": 27.294283413848632,
+        "last": 63.903985507246375,
+        "maxRolling300": 6.792507673365925,
+        "maxRise300": 6.792507673365925,
+        "maxFall300": 0.04605537149768679,
+        "direct300Max": 6.584943639291467,
+        "directPairs": 21,
+        "maxGapMs": 337.56113052368164
+      },
+      "arrival": {
+        "first": 63.9963768115942,
+        "last": 78.17934782608695,
+        "maxRolling300": 3.1876117909732216,
+        "maxRise300": 3.1876117909732216,
+        "maxFall300": 0.021695284447446284,
+        "direct300Max": 3.214371980676333,
+        "directPairs": 29,
+        "maxGapMs": 102.48589515686035
+      },
+      "failure": {
+        "first": 63.992149758454104,
+        "last": 38.92451690821256,
+        "maxRolling300": 6.628872700302352,
+        "maxRise300": 0.2324728204383888,
+        "maxFall300": -6.628872700302352,
+        "direct300Max": 6.610104669887278,
+        "directPairs": 22,
+        "maxGapMs": 801.1829853057861
+      }
+    },
+    "performance": {
+      "connected": {
+        "trace": {
+          "Paint": 0,
+          "Layout": 0,
+          "RasterTask": 0,
+          "UpdateLayoutTree": 68
+        },
+        "pacing": {
+          "fps": 60,
+          "p95": 16.700000000000728,
+          "max": 16.800000000000182
+        },
+        "animations": [
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-cloud",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-cloud",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-breathe",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-sun-breathe",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-swell-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-swell-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-ripple-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-ripple-counter",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-ripple-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-ripple-counter",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glitter-1",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glitter-2",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glitter-3",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glitter-1",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glitter-2",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-speck-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-speck-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-speck-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-speck-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          }
+        ]
+      },
+      "connecting": {
+        "trace": {
+          "Paint": 0,
+          "Layout": 0,
+          "RasterTask": 0,
+          "UpdateLayoutTree": 69
+        },
+        "pacing": {
+          "fps": 60.00393468424157,
+          "p95": 16.700000000000728,
+          "max": 16.800000000000182
+        },
+        "animations": [
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-cloud",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-cloud",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-breathe",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-swell-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-swell-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-ripple-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-ripple-counter",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-ripple-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-ripple-counter",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glitter-1",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glitter-2",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glitter-3",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glitter-1",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glitter-2",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-speck-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-speck-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-speck-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-speck-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          }
+        ]
+      },
+      "failed": {
+        "trace": {
+          "Paint": 0,
+          "Layout": 0,
+          "RasterTask": 0,
+          "UpdateLayoutTree": 63
+        },
+        "pacing": {
+          "fps": 60.00393468424162,
+          "p95": 16.700000000000728,
+          "max": 16.800000000000182
+        },
+        "animations": [
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-cloud",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-cloud",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-bob",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-breathe",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-ember",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-swell-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-swell-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-bob",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-ripple-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-ripple-counter",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-bob",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-ripple-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-ripple-counter",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-bob",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glitter-1",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glitter-2",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glitter-3",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glitter-1",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glitter-2",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-speck-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-speck-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-speck-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-speck-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          }
+        ]
+      },
+      "idle": {
+        "trace": {
+          "Paint": 0,
+          "Layout": 0,
+          "RasterTask": 0,
+          "UpdateLayoutTree": 62
+        },
+        "pacing": {
+          "fps": 60.00393468424157,
+          "p95": 16.700000000000728,
+          "max": 16.800000000000182
+        },
+        "animations": [
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-meteor",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-cloud",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-cloud",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-breathe",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-swell-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-swell-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-ripple-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-ripple-counter",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-ripple-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-ripple-counter",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glitter-1",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glitter-2",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glitter-3",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glitter-1",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glitter-2",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-speck-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-speck-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-speck-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-speck-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          }
+        ]
+      }
+    }
+  },
+  "moon": {
+    "brightness": {
+      "sunset": {
+        "first": 77.98832528180354,
+        "last": 27.30233494363929,
+        "maxRolling300": 7.003690835587811,
+        "maxRise300": 0.05042103420051802,
+        "maxFall300": -7.003690835587811,
+        "direct300Max": 7.056159420289852,
+        "directPairs": 65,
+        "maxGapMs": 349.7121334075928
+      },
+      "sunrise": {
+        "first": 27.232487922705314,
+        "last": 63.90438808373591,
+        "maxRolling300": 6.675124139787286,
+        "maxRise300": 6.675124139787286,
+        "maxFall300": 0.04635644677264139,
+        "direct300Max": 6.584943639291467,
+        "directPairs": 25,
+        "maxGapMs": 341.357946395874
+      },
+      "arrival": {
+        "first": 64.00986312399355,
+        "last": 78.1773349436393,
+        "maxRolling300": 3.202132742209699,
+        "maxRise300": 3.202132742209699,
+        "maxFall300": 0.024542763430858372,
+        "direct300Max": 3.1906199677938787,
+        "directPairs": 29,
+        "maxGapMs": 101.5329360961914
+      },
+      "failure": {
+        "first": 64.00986312399355,
+        "last": 38.92975040257649,
+        "maxRolling300": 7.04629038250625,
+        "maxRise300": 0.23019332183235264,
+        "maxFall300": -7.04629038250625,
+        "direct300Max": 7.049919484702087,
+        "directPairs": 31,
+        "maxGapMs": 100.82101821899414
+      }
+    },
+    "performance": {
+      "connected": {
+        "trace": {
+          "Paint": 0,
+          "Layout": 0,
+          "RasterTask": 0,
+          "UpdateLayoutTree": 45
+        },
+        "pacing": {
+          "fps": 60,
+          "p95": 16.700000000000728,
+          "max": 16.800000000000182
+        },
+        "animations": [
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-moon-breathe",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-cloud",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-cloud",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-breathe",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-sun-breathe",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-swell-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-swell-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-ripple-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-ripple-counter",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-ripple-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-ripple-counter",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-shimmer",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-shimmer",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-shimmer",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-shimmer",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-speck-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-speck-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-speck-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-speck-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          }
+        ]
+      },
+      "connecting": {
+        "trace": {
+          "Paint": 0,
+          "Layout": 0,
+          "RasterTask": 0,
+          "UpdateLayoutTree": 48
+        },
+        "pacing": {
+          "fps": 60.00393468424157,
+          "p95": 16.700000000000728,
+          "max": 16.800000000000182
+        },
+        "animations": [
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-moon-breathe",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-cloud",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-cloud",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-breathe",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-swell-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-swell-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-ripple-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-ripple-counter",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-ripple-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-ripple-counter",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-shimmer",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-shimmer",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-shimmer",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-shimmer",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-speck-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-speck-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-speck-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-speck-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          }
+        ]
+      },
+      "failed": {
+        "trace": {
+          "Paint": 0,
+          "Layout": 0,
+          "RasterTask": 0,
+          "UpdateLayoutTree": 43
+        },
+        "pacing": {
+          "fps": 60.00393468424157,
+          "p95": 16.700000000000728,
+          "max": 16.800000000000182
+        },
+        "animations": [
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-moon-breathe",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-cloud",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-cloud",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-bob",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-breathe",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-ember",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-swell-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-swell-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-bob",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-ripple-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-ripple-counter",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-bob",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-ripple-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-ripple-counter",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-bob",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-shimmer",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-shimmer",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-shimmer",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-shimmer",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-speck-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-speck-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-speck-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-speck-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          }
+        ]
+      },
+      "idle": {
+        "trace": {
+          "Paint": 0,
+          "Layout": 0,
+          "RasterTask": 0,
+          "UpdateLayoutTree": 43
+        },
+        "pacing": {
+          "fps": 60,
+          "p95": 16.700000000000728,
+          "max": 16.800000000000182
+        },
+        "animations": [
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-meteor",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-moon-breathe",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-cloud",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-cloud",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-breathe",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-swell-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-swell-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-ripple-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-ripple-counter",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-ripple-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-ripple-counter",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-shimmer",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-shimmer",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-shimmer",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-shimmer",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-speck-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-speck-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-speck-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-speck-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          }
+        ]
+      }
+    }
+  },
+  "arrival": {
+    "brightness": {
+      "sunset": {
+        "first": 77.96739130434783,
+        "last": 27.298510466988727,
+        "maxRolling300": 6.925386120405449,
+        "maxRise300": 0.03310604632074998,
+        "maxFall300": -6.925386120405449,
+        "direct300Max": 6.8339371980676304,
+        "directPairs": 60,
+        "maxGapMs": 350.21400451660156
+      },
+      "sunrise": {
+        "first": 27.232487922705314,
+        "last": 63.90438808373591,
+        "maxRolling300": 6.68441833137782,
+        "maxRise300": 6.68441833137782,
+        "maxFall300": 0.0463059187104804,
+        "direct300Max": 6.584943639291467,
+        "directPairs": 23,
+        "maxGapMs": 344.8290824890137
+      },
+      "arrival": {
+        "first": 64.00986312399355,
+        "last": 78.1773349436393,
+        "maxRolling300": 3.216805141502448,
+        "maxRise300": 3.216805141502448,
+        "maxFall300": -0.04061017126317523,
+        "direct300Max": 3.205716586151368,
+        "directPairs": 29,
+        "maxGapMs": 105.23796081542969
+      },
+      "failure": {
+        "first": 64.00986312399355,
+        "last": 38.90318035426731,
+        "maxRolling300": 7.091569661787112,
+        "maxRise300": 0.2302226509634977,
+        "maxFall300": -7.091569661787112,
+        "direct300Max": 7.049919484702087,
+        "directPairs": 28,
+        "maxGapMs": 105.76009750366211
+      }
+    },
+    "performance": {
+      "connected": {
+        "trace": {
+          "Paint": 0,
+          "Layout": 0,
+          "RasterTask": 0,
+          "UpdateLayoutTree": 47
+        },
+        "pacing": {
+          "fps": 60,
+          "p95": 16.700000000000728,
+          "max": 16.800000000000182
+        },
+        "animations": [
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-moon-breathe",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-cloud",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-cloud",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-breathe",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-sun-breathe",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-swell-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-swell-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-ripple-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-ripple-counter",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-ripple-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-ripple-counter",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-shimmer",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-shimmer",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-shimmer",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-shimmer",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-speck-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-speck-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-speck-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-speck-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          }
+        ]
+      },
+      "connecting": {
+        "trace": {
+          "Paint": 0,
+          "Layout": 0,
+          "RasterTask": 0,
+          "UpdateLayoutTree": 48
+        },
+        "pacing": {
+          "fps": 60.00393468424157,
+          "p95": 16.700000000000728,
+          "max": 16.800000000000182
+        },
+        "animations": [
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-moon-breathe",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-cloud",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-cloud",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-breathe",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-swell-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-swell-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-ripple-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-ripple-counter",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-ripple-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-ripple-counter",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-shimmer",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-shimmer",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-shimmer",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-shimmer",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-speck-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-speck-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-speck-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-speck-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          }
+        ]
+      },
+      "failed": {
+        "trace": {
+          "Paint": 0,
+          "Layout": 0,
+          "RasterTask": 0,
+          "UpdateLayoutTree": 44
+        },
+        "pacing": {
+          "fps": 60,
+          "p95": 16.700000000000728,
+          "max": 16.800000000000182
+        },
+        "animations": [
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-moon-breathe",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-cloud",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-cloud",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-bob",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-breathe",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-ember",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-swell-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-swell-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-bob",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-ripple-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-ripple-counter",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-bob",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-ripple-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-ripple-counter",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-bob",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-shimmer",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-shimmer",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-shimmer",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-shimmer",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-speck-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-speck-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-speck-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-speck-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          }
+        ]
+      },
+      "idle": {
+        "trace": {
+          "Paint": 0,
+          "Layout": 0,
+          "RasterTask": 0,
+          "UpdateLayoutTree": 44
+        },
+        "pacing": {
+          "fps": 60,
+          "p95": 16.800000000000182,
+          "max": 16.800000000000182
+        },
+        "animations": [
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-meteor",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-moon-breathe",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-cloud",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-cloud",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-breathe",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-swell-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-swell-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-ripple-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-ripple-counter",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-ripple-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-ripple-counter",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-shimmer",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-shimmer",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-shimmer",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-shimmer",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-speck-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-speck-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-speck-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-speck-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          }
+        ]
+      }
+    }
+  },
+  "final": {
+    "brightness": {
+      "sunset": {
+        "first": 77.98812399355877,
+        "last": 27.300322061191626,
+        "maxRolling300": 7.107538954944509,
+        "maxRise300": 0.04660705506931251,
+        "maxFall300": -7.107538954944509,
+        "direct300Max": 7.053945249597426,
+        "directPairs": 63,
+        "maxGapMs": 352.4169921875
+      },
+      "sunrise": {
+        "first": 27.215579710144926,
+        "last": 63.90801127214171,
+        "maxRolling300": 6.603971843674309,
+        "maxRise300": 6.603971843674309,
+        "maxFall300": 0.047845431034673425,
+        "direct300Max": 6.580716586151368,
+        "directPairs": 24,
+        "maxGapMs": 348.03199768066406
+      },
+      "arrival": {
+        "first": 64.00764895330113,
+        "last": 78.19323671497584,
+        "maxRolling300": 3.2096716400190957,
+        "maxRise300": 3.2096716400190957,
+        "maxFall300": -0.040051244062681235,
+        "direct300Max": 3.2039049919484768,
+        "directPairs": 29,
+        "maxGapMs": 103.11198234558105
+      },
+      "failure": {
+        "first": 64.00704508856683,
+        "last": 38.93156199677939,
+        "maxRolling300": 7.070663843492319,
+        "maxRise300": 0.23077873172064045,
+        "maxFall300": -7.070663843492319,
+        "direct300Max": 7.071054750402574,
+        "directPairs": 31,
+        "maxGapMs": 101.715087890625
+      }
+    },
+    "performance": {
+      "connected": {
+        "trace": {
+          "Paint": 0,
+          "Layout": 0,
+          "RasterTask": 0,
+          "UpdateLayoutTree": 48
+        },
+        "pacing": {
+          "fps": 60,
+          "p95": 16.800000000000182,
+          "max": 16.800000000000182
+        },
+        "animations": [
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-moon-breathe",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-cloud",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-cloud",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-breathe",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-sun-breathe",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-swell-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-swell-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-ripple-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-ripple-counter",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-ripple-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-ripple-counter",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-shimmer",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-shimmer",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-shimmer",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-shimmer",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-shimmer",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-shimmer",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-shimmer",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-shimmer",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          }
+        ]
+      },
+      "connecting": {
+        "trace": {
+          "Paint": 0,
+          "Layout": 0,
+          "RasterTask": 0,
+          "UpdateLayoutTree": 53
+        },
+        "pacing": {
+          "fps": 60.00393468424157,
+          "p95": 16.699999999999818,
+          "max": 16.800000000000182
+        },
+        "animations": [
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-moon-breathe",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-cloud",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-cloud",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-breathe",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-swell-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-swell-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-ripple-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-ripple-counter",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-ripple-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-ripple-counter",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-shimmer",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-shimmer",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-shimmer",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-shimmer",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-shimmer",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-shimmer",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-shimmer",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-shimmer",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          }
+        ]
+      },
+      "failed": {
+        "trace": {
+          "Paint": 0,
+          "Layout": 0,
+          "RasterTask": 0,
+          "UpdateLayoutTree": 49
+        },
+        "pacing": {
+          "fps": 60,
+          "p95": 16.800000000000182,
+          "max": 16.800000000000182
+        },
+        "animations": [
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-moon-breathe",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-cloud",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-cloud",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-bob",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-breathe",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-ember",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-swell-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-swell-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-bob",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-ripple-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-ripple-counter",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-bob",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-ripple-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-ripple-counter",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-bob",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-shimmer",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-shimmer",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-shimmer",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-shimmer",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-shimmer",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-shimmer",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-shimmer",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-shimmer",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          }
+        ]
+      },
+      "idle": {
+        "trace": {
+          "Paint": 0,
+          "Layout": 0,
+          "RasterTask": 0,
+          "UpdateLayoutTree": 49
+        },
+        "pacing": {
+          "fps": 60.00393468424157,
+          "p95": 16.699999999999818,
+          "max": 16.800000000000182
+        },
+        "animations": [
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-twinkle",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-meteor",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-moon-breathe",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-cloud",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-cloud",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-breathe",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-swell-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-swell-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-ripple-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-ripple-counter",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-ripple-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-ripple-counter",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-shimmer",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-shimmer",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-shimmer",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-shimmer",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-shimmer",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-shimmer",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-shimmer",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-flow",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "transform",
+              "computedOffset"
+            ]
+          },
+          {
+            "name": "sea-glint-shimmer",
+            "loop": true,
+            "properties": [
+              "offset",
+              "easing",
+              "composite",
+              "opacity",
+              "computedOffset"
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

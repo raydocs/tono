@@ -73,22 +73,32 @@ const STARS = (() => {
   }))
 })()
 
-const Specks = () => (
+const Glints = ({ tone }: { tone: 'sun' | 'moon' }) => (
   <>
-    <div
-      className="sea-specks sea-specks-1 sea-loop"
-      style={{ ...fill, top: -192 }}
-    >
-      <div className="sea-path-gold" style={fill} />
-      <div className="sea-path-red" style={fill} />
-    </div>
-    <div
-      className="sea-specks sea-specks-2 sea-loop"
-      style={{ ...fill, top: -192 }}
-    >
-      <div className="sea-path-gold" style={fill} />
-      <div className="sea-path-red" style={fill} />
-    </div>
+    {(['far', 'near'] as const).map((depth) => (
+      <div
+        key={depth}
+        className={`sea-glints-${depth}`}
+        style={{ ...fill, overflow: 'hidden' }}
+      >
+        {[1, 2].map((layer) => (
+          <div
+            key={layer}
+            className={`sea-specks sea-glint-${layer} sea-loop`}
+            style={{ ...fill, top: 'calc(-1 * var(--sea-glint-tile))' }}
+          >
+            {tone === 'moon' ? (
+              <div className="sea-path-cool" style={fill} />
+            ) : (
+              <>
+                <div className="sea-path-gold" style={fill} />
+                <div className="sea-path-red" style={fill} />
+              </>
+            )}
+          </div>
+        ))}
+      </div>
+    ))}
   </>
 )
 
@@ -282,7 +292,7 @@ export const SeaScene = ({
             height: 140,
           }}
         >
-          <div className="sea-moon-glow" style={fill} />
+          <div className="sea-moon-glow sea-loop" style={fill} />
           <svg
             className="sea-crescent"
             aria-hidden="true"
@@ -451,36 +461,13 @@ export const SeaScene = ({
           className="sea-moon-path"
           style={{
             position: 'absolute',
-            left: 'calc(81.08696% - 70px)',
+            left: 'calc(81.08696% - 84px)',
             top: 0,
-            width: 140,
-            height: 150,
+            width: 168,
+            height: 170,
           }}
         >
-          {[
-            [34, 10, 72, 2, 0.9],
-            [46, 24, 54, 2, 0.8],
-            [28, 42, 86, 3, 0.7],
-            [44, 66, 60, 3, 0.55],
-            [22, 96, 98, 4, 0.4],
-          ].map(([left, top, width, height, opacity], i) => (
-            <div
-              key={top}
-              style={{
-                position: 'absolute',
-                left,
-                top,
-                width,
-                height,
-                opacity,
-              }}
-            >
-              <div
-                className={`sea-loop sea-bar sea-glitter-${i % 3}`}
-                style={{ ...fill, animationDelay: `${-i * 0.37}s` }}
-              />
-            </div>
-          ))}
+          <Glints tone="moon" />
         </div>
         <div
           className="sea-light-column"
@@ -505,18 +492,7 @@ export const SeaScene = ({
             height: 'calc(270 * var(--sea-unit))',
           }}
         >
-          <Specks />
-          <div
-            className="sea-near-specks"
-            style={{
-              ...fill,
-              bottom: 'auto',
-              height: 'calc(80 * var(--sea-unit))',
-              overflow: 'hidden',
-            }}
-          >
-            <Specks />
-          </div>
+          <Glints tone="sun" />
           <div
             className="sea-arrival-sweep sea-loop"
             style={{
