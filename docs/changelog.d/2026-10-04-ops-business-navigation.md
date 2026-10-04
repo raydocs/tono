@@ -1,6 +1,6 @@
 ## 2026-10-04 · 运维控制台业务入口和事故优先工作台
 - 归属：运维计划 `docs/ops/plan-2026-09-11.md`；ops2，不推进客户 SHIP_PLAN 门。
-- 来源：基线 `a97c963e` → `raydocs/seadevil`；待开 PR，尚未合 main。
+- 来源：基线 `a97c963e` → 实现 `a4f9a818`，`raydocs/seadevil`；[#1377](https://github.com/raydocs/tono/pull/1377) draft，尚未合 main。
 - 缺陷修复：OPS-TODAY-FIRST-ACTION；事故/待办先于质量图，手机不再隐藏质量趋势；1024px 处理区单列。
 - 新增/优化：五个业务分组、14个可见入口；侧栏/手机更多/全局搜索共享清单，页头显示归属，支持业务别名与手机搜索；保留旧链接和原角色门，不改 API/写动作，不移除 ops1。
 - 工程与测试：沿用现有组件、DTO和文案/体积规则；未增加 UI 单测或 Playwright 用例；未重生成基线。形成 [aiproxy 对照与后续路线](../ops/console-improvement-2026-10-04.md)，外部源码固定 5b03e26b，未复制代码。
