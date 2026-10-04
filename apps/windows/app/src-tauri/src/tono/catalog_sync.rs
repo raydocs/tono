@@ -453,23 +453,30 @@ fn periodic_sync_interval() -> tokio::time::Interval {
 /// Wait for this generation's next periodic catalog request: the short
 /// [`IDENTITY_PROPAGATING_RETRY`] while the latest sync ended on
 /// `EXIT_IDENTITY_PROPAGATING`, else the next 300 s tick. Returns whether it was
-/// the short retry; the regular period then restarts from it.
+/// the short retry; the regular period then restarts from it. The flag is read
+/// again every short period, so a manual refresh that ends on that answer during
+/// a 300 s wait still gets the short retry.
 async fn wait_for_next_catalog_sync(
     interval: &mut tokio::time::Interval,
     state: &Arc<TonoState>,
     auth_generation: u64,
 ) -> bool {
-    let propagating = {
-        let inner = state.lock().await;
-        inner.sign_in_generation == auth_generation && inner.catalog_identity_propagating
-    };
-    if propagating {
-        tokio::time::sleep(IDENTITY_PROPAGATING_RETRY).await;
-        interval.reset();
-    } else {
-        interval.tick().await;
+    loop {
+        let propagating = {
+            let inner = state.lock().await;
+            inner.sign_in_generation == auth_generation && inner.catalog_identity_propagating
+        };
+        if propagating {
+            tokio::time::sleep(IDENTITY_PROPAGATING_RETRY).await;
+            interval.reset();
+            return true;
+        }
+        // `Interval::tick` is cancel safe: losing this race consumes no tick.
+        tokio::select! {
+            _ = interval.tick() => return false,
+            _ = tokio::time::sleep(IDENTITY_PROPAGATING_RETRY) => {}
+        }
     }
-    propagating
 }
 
 async fn spawn_periodic_inner(state: &Arc<TonoState>, app: &AppHandle, auth_generation: u64) {
@@ -480,6 +487,9 @@ async fn spawn_periodic_inner(state: &Arc<TonoState>, app: &AppHandle, auth_gene
         // The first tick fires immediately; the login/restore path already
         // synced, so skip it.
         interval.tick().await;
+        // The login/restore path synced the policy too. Short catalog retries reset
+        // the shared interval, so the policy keeps its own deadline.
+        let mut policy_synced_at = tokio::time::Instant::now();
         loop {
             let propagating_retry = wait_for_next_catalog_sync(&mut interval, &task_state, auth_generation).await;
             if !periodic_sync_continues(&*task_state.lock().await, auth_generation) {
@@ -492,7 +502,7 @@ async fn spawn_periodic_inner(state: &Arc<TonoState>, app: &AppHandle, auth_gene
                 return;
             }
             // The short retry asks for the catalog only; the policy keeps its period.
-            if propagating_retry {
+            if propagating_retry && policy_synced_at.elapsed() < SYNC_INTERVAL {
                 continue;
             }
             // The cloud traffic policy rides the same cadence (Build 28).
@@ -502,6 +512,7 @@ async fn spawn_periodic_inner(state: &Arc<TonoState>, app: &AppHandle, auth_gene
                 auth_generation,
             )
             .await;
+            policy_synced_at = tokio::time::Instant::now();
         }
     });
     let mut inner = state.lock().await;

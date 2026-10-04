@@ -7,4 +7,5 @@
 - 新增/优化：无。产品选择见决策 055（provisional）。
 - 工程与测试：`worker.test.ts` 新增回归 `never serves a new dual account an exit identity no served exit has acknowledged`。13 个原有用例依赖旧的「铸造即下发」：其中 11 个只测别的行为，改用 `acknowledgeServedExits` 先登记已确认的出口；`keeps catalogs on an acknowledged legacy user credential while the device credential propagates`（原名 `…while exit nodes are being provisioned`）改为验证已确认的共享凭据仍可下发；吊销用例改为直接写入共享凭据，不再靠目录铸造。Rust 回归 `identity_propagating_schedules_the_next_catalog_request_within_30_s`；XCTest `testPropagatingIdentityWithoutACacheWaitsAndStartsOnALaterCatalog`。
 - 验证：本机 `services/control-plane`：新回归在旧代码上失败（`AssertionError: expected 200 to be 503`），修复后通过；`worker.test.ts` 207 通过；全量 vitest 1002 通过，`test/parser-properties.test.ts` 因本机借用的 node_modules 缺 `fast-check` 无法加载（环境问题，与本改动无关）。Rust 和 XCTest 本机未运行，由托管 CI 运行。没有实机验证。仅源码，无新候选。
+- 独立审查：Codex `gpt-6.1-sol` high 静态审查 `a97c963e...60c0b077`，无 major。两个 minor 已修：Windows 的短重试不再推迟或跳过已到期的策略同步；手动刷新在 300 秒等待期间遇到传播中，周期任务 15 秒内会发现并改用短重试。措辞 nit 已改：macOS 用完 20 次后的错误文案不再承诺自动重试。
 - 剩余限制：macOS 等待期间只显示原有的恢复/登录进度，没有「正在准备安全身份」的专门界面；Windows 在出口长期不确认时会每 15 秒请求一次，没有上限（只在登录会话内）；准入/认证路径改动，合并前需要独立的跨厂商审查。

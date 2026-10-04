@@ -104,7 +104,7 @@ actor TonoAPIClient {
             case let .entitlementBlocked(code, _): Self.entitlementDescription(code)
             case .invalidOrExpiredCode: String(localized: "That code is wrong or expired. Request a new one.")
             case .clockSkew: CertificateClock.userMessage
-            case .exitIdentityPropagating: String(localized: "Tono is still preparing this Mac's secure identity. It will try again shortly.")
+            case .exitIdentityPropagating: String(localized: "Tono is still preparing this Mac's secure identity. Try again in a minute.")
             }
         }
 

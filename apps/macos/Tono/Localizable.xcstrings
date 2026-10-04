@@ -722,12 +722,12 @@
         }
       }
     },
-    "Tono is still preparing this Mac's secure identity. It will try again shortly.": {
+    "Tono is still preparing this Mac's secure identity. Try again in a minute.": {
       "localizations": {
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "Tono 仍在为这台 Mac 准备安全身份，稍后会自动重试。"
+            "value": "Tono 仍在为这台 Mac 准备安全身份，请一分钟后再试。"
           }
         }
       }
