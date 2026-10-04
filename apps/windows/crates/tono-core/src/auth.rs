@@ -164,6 +164,11 @@ pub enum ApiError {
     RateLimited,
     #[error("server error {status}: {message}")]
     Server { status: u16, message: String },
+    /// HTTP 503 `EXIT_IDENTITY_PROPAGATING`: this device's exit identity is
+    /// not yet acknowledged by every served exit. Transient by design, so a
+    /// caller retries soon instead of waiting for its normal period.
+    #[error("your secure exit identity is still being prepared; Tono will retry shortly")]
+    ExitIdentityPropagating,
     #[error("Tono returned an invalid response")]
     InvalidResponse,
     #[error("credential store failed: {0}")]
@@ -1704,6 +1709,7 @@ fn map_status(response: ApiResponse) -> Result<Vec<u8>, ApiError> {
         404 => Err(ApiError::NotFound),
         409 if code.as_deref() == Some("DEVICE_LIMIT") => Err(ApiError::DeviceLimit),
         429 => Err(ApiError::RateLimited),
+        503 if code.as_deref() == Some("EXIT_IDENTITY_PROPAGATING") => Err(ApiError::ExitIdentityPropagating),
         status => Err(ApiError::Server {
             status,
             message: message.unwrap_or_else(|| format!("Tono request failed ({status}).")),

@@ -2,7 +2,9 @@
 //! verified copy, immediately on login/restore and then every 300 s. Failures
 //! retry at 1 s intervals, at most 3 retries. A `StaleRevision` install result
 //! is a benign no-op (out-of-order delivery), never an error and never counted
-//! toward retries.
+//! toward retries. A sync that ends on 503 `EXIT_IDENTITY_PROPAGATING` (a new
+//! device whose exit identity the served exits have not acknowledged yet) is
+//! asked again after 15 s by the same periodic task, not after 300 s.
 
 use std::{sync::Arc, time::Duration};
 
@@ -24,6 +26,11 @@ pub const SYNC_INTERVAL: Duration = Duration::from_secs(300);
 /// §3: failures retry at most 3 times.
 const MAX_RETRIES: u32 = 3;
 const RETRY_DELAY: Duration = Duration::from_secs(1);
+/// Next catalog request after a sync ended on `EXIT_IDENTITY_PROPAGATING`.
+/// The served exits acknowledge a new identity on their next roster round
+/// (about a minute), so a full 300 s period would leave a new device with no
+/// catalog long after it could have one.
+pub(crate) const IDENTITY_PROPAGATING_RETRY: Duration = Duration::from_secs(15);
 
 /// Why one catalog or policy sync attempt failed.
 pub(crate) enum SyncFailure {
@@ -32,6 +39,9 @@ pub(crate) enum SyncFailure {
     /// plan, a used-up allowance, a disabled account and a revoked device or
     /// session; retrying only repeats a refresh that must fail.
     SessionRejected,
+    /// 503 `EXIT_IDENTITY_PROPAGATING`: not an error to retry at 1 s, but a
+    /// wait for the exits' next roster round.
+    IdentityPropagating,
     Failed(String),
 }
 
@@ -39,6 +49,7 @@ impl SyncFailure {
     pub(crate) fn from_api(err: ApiError) -> Self {
         match err {
             ApiError::Unauthorized => Self::SessionRejected,
+            ApiError::ExitIdentityPropagating => Self::IdentityPropagating,
             other => Self::Failed(other.to_string()),
         }
     }
@@ -48,6 +59,7 @@ impl std::fmt::Display for SyncFailure {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::SessionRejected => f.write_str("Tono no longer accepts this session"),
+            Self::IdentityPropagating => write!(f, "{}", ApiError::ExitIdentityPropagating),
             Self::Failed(message) => f.write_str(message),
         }
     }
@@ -65,6 +77,8 @@ where
         match attempt().await {
             Ok(()) => return Ok(()),
             Err(SyncFailure::SessionRejected) => return Err(SyncFailure::SessionRejected),
+            // 1 s retries cannot outrun a roster round; the periodic task asks again soon.
+            Err(SyncFailure::IdentityPropagating) => return Err(SyncFailure::IdentityPropagating),
             Err(failure) => {
                 last = failure;
                 if n < MAX_RETRIES {
@@ -388,6 +402,7 @@ async fn sync_with_retries_inner(state: &Arc<TonoState>, app: &AppHandle, auth_g
             if inner.sign_in_generation == auth_generation {
                 inner.catalog_last_synced_at_ms = Some(unix_time_ms());
                 inner.catalog_sync_error = None;
+                inner.catalog_identity_propagating = false;
             }
             return Ok(());
         }
@@ -399,6 +414,7 @@ async fn sync_with_retries_inner(state: &Arc<TonoState>, app: &AppHandle, auth_g
         return Ok(());
     }
     inner.catalog_sync_error = Some(last_error.clone());
+    inner.catalog_identity_propagating = matches!(failure, SyncFailure::IdentityPropagating);
     drop(inner);
     state.audit().log(crate::tono::audit::AuditEvent::SyncFail {
         error: last_error.clone(),
@@ -434,6 +450,28 @@ fn periodic_sync_interval() -> tokio::time::Interval {
     interval
 }
 
+/// Wait for this generation's next periodic catalog request: the short
+/// [`IDENTITY_PROPAGATING_RETRY`] while the latest sync ended on
+/// `EXIT_IDENTITY_PROPAGATING`, else the next 300 s tick. Returns whether it was
+/// the short retry; the regular period then restarts from it.
+async fn wait_for_next_catalog_sync(
+    interval: &mut tokio::time::Interval,
+    state: &Arc<TonoState>,
+    auth_generation: u64,
+) -> bool {
+    let propagating = {
+        let inner = state.lock().await;
+        inner.sign_in_generation == auth_generation && inner.catalog_identity_propagating
+    };
+    if propagating {
+        tokio::time::sleep(IDENTITY_PROPAGATING_RETRY).await;
+        interval.reset();
+    } else {
+        interval.tick().await;
+    }
+    propagating
+}
+
 async fn spawn_periodic_inner(state: &Arc<TonoState>, app: &AppHandle, auth_generation: u64) {
     let task_state = state.clone();
     let task_app = app.clone();
@@ -443,7 +481,7 @@ async fn spawn_periodic_inner(state: &Arc<TonoState>, app: &AppHandle, auth_gene
         // synced, so skip it.
         interval.tick().await;
         loop {
-            interval.tick().await;
+            let propagating_retry = wait_for_next_catalog_sync(&mut interval, &task_state, auth_generation).await;
             if !periodic_sync_continues(&*task_state.lock().await, auth_generation) {
                 return;
             }
@@ -452,6 +490,10 @@ async fn spawn_periodic_inner(state: &Arc<TonoState>, app: &AppHandle, auth_gene
             let _ = sync_with_retries_inner(&task_state, &task_app, auth_generation).await;
             if !periodic_sync_continues(&*task_state.lock().await, auth_generation) {
                 return;
+            }
+            // The short retry asks for the catalog only; the policy keeps its period.
+            if propagating_retry {
+                continue;
             }
             // The cloud traffic policy rides the same cadence (Build 28).
             let _ = crate::tono::policy_sync::sync_with_retries_for_auth_generation(
@@ -729,6 +771,7 @@ mod tests {
         is_legacy_wire_name, names_equivalent, next_catalog_exit, periodic_sync_continues, periodic_sync_interval,
         region_rank, replacement_for_selection, residential_routing_changed, run_with_retries,
         selected_exit_still_present, sort_server_names, suspend_rejected_session, tcp_probe_socket,
+        wait_for_next_catalog_sync,
     };
     use std::collections::BTreeSet;
     use std::net::Ipv4Addr;
@@ -736,6 +779,7 @@ mod tests {
     use tono_core::catalog::{CatalogCache, catalog_digest};
     use tono_core::node::{NodeProtocol, ValidatedNode};
     use tono_core::{CatalogError, CatalogTracker, ExitCatalogResponse};
+    use tono_core::auth::ApiError;
 
     fn node(name: &str) -> ValidatedNode {
         ValidatedNode {
@@ -858,6 +902,34 @@ mod tests {
         assert_eq!(inner.account_state, crate::tono::state::AccountState::Suspended);
         assert!(!periodic_sync_continues(&inner, 4));
         assert!(!crate::tono::log_upload::periodic_upload_continues(&inner, 4, "fixture-owner"));
+    }
+
+    /// CLIENT-PROPAGATING-SLOW-RETRY: a sync that ends on 503
+    /// `EXIT_IDENTITY_PROPAGATING` costs one request and the same periodic task
+    /// asks again within 30 s, not after the 300 s period.
+    #[tokio::test(start_paused = true)]
+    async fn identity_propagating_schedules_the_next_catalog_request_within_30_s() {
+        let mut attempts = 0;
+        let result = run_with_retries(|| {
+            attempts += 1;
+            async { Err(SyncFailure::from_api(ApiError::ExitIdentityPropagating)) }
+        })
+        .await;
+        assert!(matches!(result, Err(SyncFailure::IdentityPropagating)));
+        assert_eq!(attempts, 1, "1 s retries cannot outrun a roster round");
+
+        let state = std::sync::Arc::new(crate::tono::state::TonoState::for_test());
+        {
+            let mut inner = state.lock().await;
+            inner.sign_in_generation = 4;
+            inner.catalog_identity_propagating = true;
+        }
+        let mut interval = periodic_sync_interval();
+        // The immediate tick the periodic task skips after the login sync.
+        interval.tick().await;
+        let started = tokio::time::Instant::now();
+        assert!(wait_for_next_catalog_sync(&mut interval, &state, 4).await);
+        assert!(started.elapsed() <= std::time::Duration::from_secs(30));
     }
 
     #[test]

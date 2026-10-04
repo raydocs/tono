@@ -154,7 +154,10 @@ pub fn auth_support_prefix(err: &ApiError) -> &'static str {
         ApiError::Server { status, message } if *status == 511 || is_captive(message) => {
             CustomerFailureCode::AuthCaptive.as_str()
         }
-        ApiError::Server { .. } | ApiError::NotFound | ApiError::InvalidResponse => {
+        ApiError::Server { .. }
+        | ApiError::ExitIdentityPropagating
+        | ApiError::NotFound
+        | ApiError::InvalidResponse => {
             CustomerFailureCode::AuthApi.as_str()
         }
         ApiError::InvalidConfiguration | ApiError::InvalidInput(_) => {

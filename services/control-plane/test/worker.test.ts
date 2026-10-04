@@ -178,6 +178,19 @@ async function createAccount(prefix: string) {
   return { email, ...(await response.json() as any) };
 }
 
+// A catalog is served only on identities its exits acknowledged, so tests that
+// exercise other catalog behavior register their served exit names as active
+// nodes with an acknowledgement an hour ahead.
+async function acknowledgeServedExits(...names: string[]) {
+  const timestamp = Math.floor(Date.now() / 1000);
+  for (const name of names) {
+    await env.DB.prepare(
+      `INSERT OR IGNORE INTO exit_nodes(id, name, token_hash, status, last_roster_at, created_at, updated_at)
+       VALUES(?, ?, ?, 'active', ?, ?, ?)`,
+    ).bind(`exit-acked-${name}`, name, await sha256(`exit-acked-${name}-token`), timestamp + 3600, timestamp, timestamp).run();
+  }
+}
+
 async function startEmailSignIn(body: {
   email: string;
   deviceName: string;
@@ -1328,11 +1341,23 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     }
   });
 
-  it('keeps catalogs usable on the legacy user credential while exit nodes are being provisioned', async () => {
+  it('keeps catalogs on an acknowledged legacy user credential while the device credential propagates', async () => {
     await env.DB.prepare('DELETE FROM exit_nodes').run();
     const account = await createAccount('dual-rollout-fallback');
     const yaml = `proxies:\n  - name: Tono-Exit\n    type: vless\n    server: exit.example.com\n    port: 443\n    uuid: {{TONO_CLIENT_UUID}}\n    tls: true\n`;
     expect((await admin('exit-catalog', { yaml, expectedRevision: 0 }, 'PUT')).status).toBe(200);
+    // The served exit acknowledged a roster after the shared credential was
+    // created but before this device's credential existed.
+    const deviceCreated = Number((await env.DB.prepare(
+      'SELECT created_at FROM device_exit_credentials WHERE device_id = ?',
+    ).bind(account.device.id).first<any>()).created_at);
+    await env.DB.prepare(
+      'INSERT INTO exit_credentials(user_id, client_uuid, created_at) VALUES(?, ?, ?)',
+    ).bind(account.user.id, crypto.randomUUID(), deviceCreated - 100).run();
+    await env.DB.prepare(
+      `INSERT INTO exit_nodes(id, name, token_hash, status, last_roster_at, created_at, updated_at)
+       VALUES('exit-tono', 'Tono-Exit', ?, 'active', ?, ?, ?)`,
+    ).bind(await sha256('exit-tono-token-with-at-least-32-characters'), deviceCreated - 50, deviceCreated, deviceCreated).run();
 
     const catalog = await api('exit-catalog', {
       headers: { authorization: `Bearer ${account.accessToken}` },
@@ -1357,6 +1382,36 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     expect(identities).toEqual(expect.arrayContaining([legacy.client_uuid, device.client_uuid]));
   });
 
+  it('never serves a new dual account an exit identity no served exit has acknowledged', async () => {
+    await env.DB.prepare('DELETE FROM exit_nodes').run();
+    const account = await createAccount('dual-unacked-shared');
+    const yaml = `proxies:\n  - name: Tono-Exit\n    type: vless\n    server: exit.example.com\n    port: 443\n    uuid: {{TONO_CLIENT_UUID}}\n    tls: true\n`;
+    expect((await admin('exit-catalog', { yaml, expectedRevision: 0 }, 'PUT')).status).toBe(200);
+    const node = await admin('exit-nodes', { id: 'exit-unacked', name: 'Tono-Exit' });
+    const nodeToken = String((await node.json() as any).token);
+
+    const propagating = await api('exit-catalog', {
+      headers: { authorization: `Bearer ${account.accessToken}` },
+    });
+    expect(propagating.status).toBe(503);
+    expect((await propagating.json() as any).error.code).toBe('EXIT_IDENTITY_PROPAGATING');
+    expect(await env.DB.prepare(
+      'SELECT client_uuid FROM exit_credentials WHERE user_id = ?',
+    ).bind(account.user.id).first()).toBeNull();
+
+    const device = await env.DB.prepare(
+      'SELECT client_uuid, created_at FROM device_exit_credentials WHERE device_id = ?',
+    ).bind(account.device.id).first<any>();
+    expect((await api('home/roster-ack', json({
+      observedAt: Number(device.created_at) + 1,
+    }, nodeToken))).status).toBe(200);
+    const ready = await api('exit-catalog', {
+      headers: { authorization: `Bearer ${account.accessToken}` },
+    });
+    expect(ready.status).toBe(200);
+    expect(String((await ready.json() as any).yaml)).toContain(device.client_uuid);
+  });
+
   it('removes the shared legacy credential from the exit roster once any device of the account is revoked', async () => {
     await env.DB.prepare('DELETE FROM exit_nodes').run();
     const account = await createAccount('dual-rollout-revoke');
@@ -1370,12 +1425,11 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     const yaml = `proxies:\n  - name: Tono-Exit\n    type: vless\n    server: exit.example.com\n    port: 443\n    uuid: {{TONO_CLIENT_UUID}}\n    tls: true\n`;
     expect((await admin('exit-catalog', { yaml, expectedRevision: 0 }, 'PUT')).status).toBe(200);
 
-    const catalog = await api('exit-catalog', {
-      headers: { authorization: `Bearer ${account.accessToken}` },
-    });
-    expect(catalog.status).toBe(200);
-    const leakedUUID = /uuid: ([0-9a-f-]{36})/.exec((await catalog.json() as any).yaml)?.[1];
-    expect(leakedUUID).toBeDefined();
+    // The shared credential a revoked device may hold.
+    const leakedUUID = crypto.randomUUID();
+    await env.DB.prepare(
+      'INSERT INTO exit_credentials(user_id, client_uuid, created_at) VALUES(?, ?, 1)',
+    ).bind(account.user.id, leakedUUID).run();
 
     const revoked = await api(`devices/${account.device.id}`, {
       method: 'DELETE',
@@ -3106,6 +3160,7 @@ rules: []
     // An account is served its own identity, and the digest is recomputed over
     // what it actually received — the template's digest would read as tampering
     // to a client that verifies, and every client verifies.
+    await acknowledgeServedExits('Managed Test');
     const account = await createAccount('managed-catalog');
     const fetched = await api('exit-catalog', {
       headers: { authorization: `Bearer ${account.accessToken}` },
@@ -3187,6 +3242,7 @@ rules: []
 `;
     expect((await admin('exit-catalog', { yaml, expectedRevision: 0 }, 'PUT')).status).toBe(200);
 
+    await acknowledgeServedExits('Tokyo · Sakura');
     const hidden = await createAccount('hy2-hidden');
     const hiddenFetched = await api('exit-catalog', {
       headers: { authorization: `Bearer ${hidden.accessToken}` },
@@ -3291,6 +3347,7 @@ ${nameLine}
     )).status).toBe(200);
     const home = await admin('home-exits', { proxyName: 'Home A', displayName: 'Home A' });
     expect(home.status).toBe(201);
+    await acknowledgeServedExits('Shared JP');
     const owner = await createAccount('plain-name-owner');
     const other = await createAccount('plain-name-other');
     expect((await admin(
@@ -3353,6 +3410,7 @@ ${nameLine}
     expect(conflict.status).toBe(409);
     expect((await conflict.json() as any).error.code).toBe('HOME_EXIT_CONFLICT');
 
+    await acknowledgeServedExits('Shared JP');
     const owner = await createAccount('home-owner');
     const other = await createAccount('home-other');
 
@@ -3512,6 +3570,7 @@ ${nameLine}
     expect(home.status).toBe(201);
     expect((await admin('home-exits', { proxyName: 'Home Residential B', displayName: '家庭 B' })).status).toBe(201);
     const homeId = ((await home.json()) as any).homeExit.id;
+    await acknowledgeServedExits('Shared JP');
     const owner = await createAccount('retired-home-owner');
     const other = await createAccount('retired-home-other');
     expect((await admin(`users/${owner.user.id}/home-binding`, { homeExitId: homeId }, 'PUT')).status).toBe(201);
@@ -3556,6 +3615,7 @@ ${nameLine}
     expect(home.status).toBe(201);
     const homeId = ((await home.json()) as any).homeExit.id;
 
+    await acknowledgeServedExits('Shared VPS JP');
     const owner = await createAccount('routing-owner');
     const other = await createAccount('routing-other');
 
@@ -3801,6 +3861,7 @@ ${nameLine}
     expect(home.status).toBe(201);
     const homeId = ((await home.json()) as any).homeExit.id as string;
 
+    await acknowledgeServedExits('Shared VPS JP');
     const owner = await createAccount('socks5-owner');
     const other = await createAccount('socks5-other');
     expect(
@@ -3982,6 +4043,7 @@ ${nameLine}
     expect(home.status).toBe(201);
     const homeId = ((await home.json()) as any).homeExit.id as string;
 
+    await acknowledgeServedExits('Shared VPS JP');
     const owner = await createAccount('routing-digest-owner');
     expect(
       (await admin(`users/${owner.user.id}/home-binding`, { homeExitId: homeId }, 'PUT')).status,
@@ -4060,6 +4122,7 @@ ${nameLine}
     expect(home.status).toBe(201);
     const homeId = ((await home.json()) as any).homeExit.id as string;
 
+    await acknowledgeServedExits('Shared VPS JP');
     const owner = await createAccount('digest-split-owner');
     const other = await createAccount('digest-split-other');
     expect(
@@ -9765,6 +9828,7 @@ ${nameLine}
     tls: true
 `;
       await admin('exit-catalog', { yaml, expectedRevision: curRev }, 'PUT');
+      await acknowledgeServedExits('Tono-Exit');
       const email = `dual-${Date.now()}@example.com`;
 
       const res1 = await emailSignIn({
@@ -9844,6 +9908,7 @@ ${nameLine}
     tls: true
 `;
       await admin('exit-catalog', { yaml, expectedRevision: curRev }, 'PUT');
+      await acknowledgeServedExits('Tono-Exit');
 
       const email = `solo-${Date.now()}@example.com`;
       const devRes = await emailSignIn({

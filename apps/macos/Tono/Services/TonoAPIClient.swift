@@ -85,6 +85,10 @@ actor TonoAPIClient {
         /// this Mac's clock is wrong. No status line arrived: offline
         /// admission reads it as unreachable, but the user is told the clock.
         case clockSkew
+        /// HTTP 503 `EXIT_IDENTITY_PROPAGATING`: this device's exit identity
+        /// is not yet acknowledged by every served exit. Transient by design;
+        /// a launch without a cached catalog waits and asks again soon.
+        case exitIdentityPropagating
 
         var errorDescription: String? {
             switch self {
@@ -100,6 +104,7 @@ actor TonoAPIClient {
             case let .entitlementBlocked(code, _): Self.entitlementDescription(code)
             case .invalidOrExpiredCode: String(localized: "That code is wrong or expired. Request a new one.")
             case .clockSkew: CertificateClock.userMessage
+            case .exitIdentityPropagating: String(localized: "Tono is still preparing this Mac's secure identity. It will try again shortly.")
             }
         }
 
@@ -939,6 +944,7 @@ actor TonoAPIClient {
                 if status == 401 { throw APIError.unauthorized }; if status == 403 { throw APIError.forbidden }
                 if status == 404 { throw APIError.notFound }
                 if status == 409 && envelope?.error.code == "DEVICE_LIMIT" { throw APIError.deviceLimit }
+                if status == 503 && envelope?.error.code == "EXIT_IDENTITY_PROPAGATING" { throw APIError.exitIdentityPropagating }
                 throw APIError.server(status: status, message: envelope?.error.message ?? "Tono request failed (\(status)).")
             }
             LocalTrafficAudit.shared.recordEvent(

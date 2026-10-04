@@ -722,6 +722,16 @@
         }
       }
     },
+    "Tono is still preparing this Mac's secure identity. It will try again shortly.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tono 仍在为这台 Mac 准备安全身份，稍后会自动重试。"
+          }
+        }
+      }
+    },
     "Tono manages these rules. Each flow can take a different path. This shows up to eight currently reported flows; totals can include closed flows whose rule evidence is no longer available.": {
       "localizations": {
         "zh-Hans": {
