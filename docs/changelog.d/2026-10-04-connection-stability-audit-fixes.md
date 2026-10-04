@@ -9,5 +9,9 @@
 - 剩余限制：四个故障触发尚未安装机复现；不关闭既有 #1300/#1290/#1291/#1284/#1307/#1247 等独立缺口。高风险审查或 exact-head CI 未完成前不合并。
 
 ### 同轮审查续修
-- `7a81dcdd` 的双供应商审查（run `12625351`，main policy decision `54173f9b`）无 major-or-worse，确认一项 minor：已复用 PID 的新进程路径读不到时，完整 identity 读取会拒绝本可恢复的安装器租约。改为既有 `process_started_at` 无路径原语，仍拒绝真实的不确定创建时间；同一窄回归补证已更换创建时间可持久替换租约。其他既有释放门未扩大改动。
+- `7a81dcdd` 的双供应商审查（run `12625351`，main policy decision `54173f9b`）无 major-or-worse，确认一项 minor：已复用 PID 的新进程路径读不到时，完整 identity 读取会拒绝本可恢复的安装器租约。改为既有 `process_started_at` 无路径原语，仍拒绝真实的不确定创建时间；扩充同一窄回归，覆盖已更换创建时间可持久替换租约；当时尚未运行。其他既有释放门未扩大改动。
 - 首轮 `7a81dcdd` 的 hosted macOS privileged-tests 已成功（ci-gate run `37187454487`；Helper core lifecycle self-test step success）；不能沿用为后续提交的 exact-head ci-gate。新增续修的原生 CI 与增量审查仍待补。
+
+### 原生 CI 编译纠正（工程项，不计新产品缺陷）
+- `ec36d2a5` 的 Windows service lifecycle 步骤实跑发现 E0382：新增测试断言构造 `Some(replacement)` 提前移动了 fixture，后续场景无法借用。改为比较引用，不改变生产准入或测试预期；失败日志保留在本轮本地 receipts。
+- macOS 同一 head 的 app 构建、TonoTests、policy-tests、privileged-tests 成功；Windows Service 红灯意味着该 head 的 ci-gate 不通过，不能沿用为整体通过。后续提交须重新跑 exact-head CI 与该测试修正的 scoped 审查。

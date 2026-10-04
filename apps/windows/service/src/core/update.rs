@@ -1889,7 +1889,7 @@ mod tests {
         assert!(format!("{refused:#}").contains("Access is denied. (os error 5)"));
         assert_eq!(store.state.manual_installer.as_ref(), Some(&previous));
         assert_eq!(Store::read_state(&root).unwrap().manual_installer, Some(previous.clone()));
-        assert_ne!(store.state.manual_installer, Some(replacement));
+        assert_ne!(store.state.manual_installer.as_ref(), Some(&replacement));
         begin_manual_uninstall_at(&mut store, replacement.clone(), |pid| {
             assert_eq!(pid, previous.pid);
             Ok(Some(previous.started_at + 1))
