@@ -23,6 +23,7 @@ const GIB = 1_073_741_824;
 const WINDOWS: Record<string, { span: number; step: number }> = {
   '24h': { span: DAY, step: 300 },
   '7d': { span: 7 * DAY, step: 1_800 },
+  '90d': { span: 90 * DAY, step: 21_600 },
 };
 
 type Point = Record<string, number | null> & { t: number };
@@ -145,6 +146,18 @@ export function metricsBody(options: {
     series[name] = samplesFor(name, from, to, shape.step).map((row) => only(row, fields));
   }
   return { metrics: { from, to, resolutionSeconds: shape.step, series } };
+}
+
+/** Synthetic hourly increments with a gap; never production customer data. */
+export function usageHoursBody(range: string | null, empty: boolean, nowUnix: number) {
+  const span = WINDOWS[range ?? '24h']?.span ?? DAY;
+  const to = Math.floor(nowUnix / HOUR) * HOUR;
+  const from = to - span;
+  const fleet = empty ? [] : Array.from({ length: span / HOUR }, (_, index) => ({
+    t: from + index * HOUR,
+    bytes: index % 29 === 0 ? null : (index % 7) * GIB / 10,
+  }));
+  return { usageHours: { from, to, resolutionSeconds: HOUR, fleet, users: [] } };
 }
 
 /**

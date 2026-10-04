@@ -54,6 +54,7 @@ export function FleetTable({
   phone,
   asOfSec,
   onRetry,
+  initialQuery = null,
 }: {
   nodes: readonly NodeSummaryDto[];
   state: PanelState;
@@ -64,10 +65,11 @@ export function FleetTable({
   phone: boolean;
   asOfSec: number | null;
   onRetry: () => void;
+  initialQuery?: string | null;
 }) {
   const [health, setHealth] = useState<HealthFilter>(ALL);
   const [lifecycle, setLifecycle] = useState<NodeLifecycle | null>(null);
-  const [query, setQuery] = useState('');
+  const [query, setQuery] = useState(initialQuery ?? '');
 
   const onShow = useMemo(() => selectLifecycle(nodes, lifecycle), [nodes, lifecycle]);
   const counts = useMemo(() => countLine(onShow), [onShow]);

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Bell, BookOpen, Building2, FileClock, Globe, House, ListFilter, Monitor, MoreHorizontal,
-  Network, Server, ShieldCheck, SunMoon, Users, Wallet, X } from 'lucide-react';
+  Network, Server, ShieldCheck, SunMoon, Users, Wallet, X, ChartNoAxesCombined } from 'lucide-react';
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet';
 import { copy } from '@/copy/copy';
 import type { OpsRoute } from '@/lib/hash-route';
@@ -12,6 +12,7 @@ const ICONS = {
   alerts: Bell, catalog: BookOpen, policy: Network, homeinventory: Globe,
   homelines: House, ledger: Wallet, providers: Building2, candidates: ListFilter,
   allowlist: ShieldCheck, audit: FileClock,
+  traffic: ChartNoAxesCombined,
 };
 const DOCK_IDS = ['today', 'nodes', 'customers', 'clients'];
 

@@ -45,8 +45,8 @@ describe('copy', () => {
     }
   });
 
-  it('exposes the five shell pages', () => {
-    expect(Object.keys(copy.pages)).toEqual(['today', 'nodes', 'customers', 'clients', 'settings']);
+  it('exposes the six shell pages including traffic', () => {
+    expect(Object.keys(copy.pages)).toEqual(['today', 'nodes', 'customers', 'clients', 'settings', 'traffic']);
   });
 
   it('calls the hy2 timeline channel 备用通道, never hysteria2', () => {

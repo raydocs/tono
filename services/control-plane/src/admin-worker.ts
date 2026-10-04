@@ -1,11 +1,12 @@
 import controlPlane, { type Env } from './index';
+import { opsConsoleRedirect } from './ops-console-route';
 
 type AdminEnv = Pick<
   Env,
   'DB' | 'ASSETS' | 'ALLOWED_ORIGIN' | 'ACCESS_TEAM_DOMAIN' | 'ACCESS_AUD' | 'ACCESS_ADMIN_EMAILS' | 'BUILD_SHA'
 > & { API: Fetcher };
 
-const ADMIN_MONITOR = 'https://admin.afk.ccwu.cc/ops/#/monitor';
+const ADMIN_MONITOR = 'https://admin.afk.ccwu.cc/ops2/#/nodes';
 const ABSORBED_HOSTS = new Set(['quality.afk.ccwu.cc', 'ops.afk.ccwu.cc']);
 
 const closedHeaders = {
@@ -51,23 +52,16 @@ export default {
       url.pathname.startsWith('/api/v1/ops/');
     if (!allowed) return unavailable();
 
-    if (url.pathname === '/') {
-      url.pathname = '/ops/';
-      request = new Request(url, request);
-    }
-
-    // The console routes on the hash, so `/ops/monitor` names no asset and the
-    // asset binding answered it with a bare 404 — which is what someone typing
-    // or sharing the obvious URL for a page actually gets. Send them to the
-    // page they meant instead. A segment containing a dot is a real file
-    // (`index.html`, `assets/index-*.js`) and is left alone.
-    const deepLink = /^\/(ops2?)\/([A-Za-z0-9_-]+)\/?$/.exec(url.pathname);
-    if (deepLink) {
+    // Old pages redirect once; real modern assets stay behind Access. Retired
+    // hashes are migrated by the sole console, not by a second HTML bundle.
+    const redirect = opsConsoleRedirect(url);
+    if (redirect) {
       return new Response(null, {
         status: 302,
-        headers: { ...closedHeaders, location: `/${deepLink[1]}/#/${deepLink[2]}` },
+        headers: { ...closedHeaders, location: redirect },
       });
     }
+    if (url.pathname.startsWith('/ops/')) return unavailable();
 
     if (url.pathname.startsWith('/api/v1/ops/')) {
       // Stripping `origin` below also strips the API worker's cross-site

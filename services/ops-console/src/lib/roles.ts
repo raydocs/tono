@@ -11,6 +11,7 @@ export const PAGE_REQUIRES: Record<PageId, OpsAction> = {
   customers: 'customers.read',
   clients: 'releases.read',
   settings: 'settings.read',
+  traffic: 'customers.read',
 };
 
 export function currentRole(): OpsRole {

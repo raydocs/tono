@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import { defineConfig, type Plugin, type ViteDevServer } from 'vite';
+import { opsConsoleRedirect } from '../control-plane/src/ops-console-route';
 import { materializeFleet, materializeLive } from './src/lib/fixture-load';
 import { materializeOps } from './src/lib/ops-fixtures';
 import { createSettingsFixtures } from './fixtures/routes/settings';
@@ -258,6 +259,13 @@ function fixturesPlugin(): Plugin {
     configureServer(server: ViteDevServer) {
       server.middlewares.use((req, res, next) => {
         const url = req.url ?? '';
+        const redirect = opsConsoleRedirect(new URL(url, 'http://fixtures.local'));
+        if (redirect) {
+          res.statusCode = 302;
+          res.setHeader('location', redirect);
+          res.end();
+          return;
+        }
         const pathOnly = url.split('?')[0];
         if (!pathOnly.startsWith('/api/v1/ops/')) {
           next();

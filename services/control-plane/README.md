@@ -2,22 +2,27 @@
 
 ## Operations console
 
-The only ops URL is `https://admin.afk.ccwu.cc/ops/`. Source is `admin/`, built
-to Worker assets `/ops/` by `npm run admin:build`. Six work areas share one
-view-model and hash-router layer:
+The sole console implementation is `services/ops-console/`, built to
+`public/ops2/` by `npm run console:build`. Its canonical URL remains
+`https://admin.afk.ccwu.cc/ops2/`. `/` and the retired `/ops/` UI URLs redirect
+there; the console migrates old hash links, including customer/node subjects.
+Old list predicates that cannot map to engine verdicts produce an explicit
+notice rather than silently pretending to apply. Object links from traffic
+keep a return entry for their original time window.
 
-- **总览** — current incidents, problem nodes, online users, operational chores
-- **故障** — node incidents and fresh customer-path incidents
-- **服务器** — full node union, Komari metrics, carrier paths, billing and retire flow
-- **客户** — search, person drawers, onboarding and home-exit inventory
-- **流量** — counter-derived machine rates and honest customer cycle totals
-- **目录和规则** — raw-text diff, frozen revision and confirmed publication
+Business navigation groups the workbench, customers/access, nodes/lines,
+finance and system management. The read-only **用量** page preserves machine
+rates, interval bytes and peaks, customer cycle totals and hourly increments
+for 24h/7d/90d. Publishing, confirmation and receipt flows stay in the modern
+console. No second UI is built or served. `admin/src/lib/`, its API types and
+existing helper tests remain shared compatibility code, not an app.
+`admin:dev` and `admin:build` are aliases to the modern console commands.
 
 Product writes go through same-origin `/api/v1/ops/*` under Cloudflare Access —
 the browser never stores or sends `ADMIN_API_TOKEN`. Token-authenticated
 `/api/v1/admin/*` remains for CLI/automation. Node quality is ingested into D1
 by `ops-panel/collect.py` (`PUT /api/v1/ops-ingest/snapshot`).
-`quality.afk.ccwu.cc` / `ops.afk.ccwu.cc` 302 to the admin monitor.
+`quality.afk.ccwu.cc` / `ops.afk.ccwu.cc` 302 to the modern nodes page.
 
 The collector runs on two timers: the 12h full SSH sweep (quality, block
 probes, report files) and `collect.py --agents-only` every 1-5 minutes, which
@@ -59,7 +64,7 @@ Local checks (no remote writes):
 
 ```sh
 npm install
-npm run admin:build
+npm run console:build
 npm run typecheck
 npm test
 ```

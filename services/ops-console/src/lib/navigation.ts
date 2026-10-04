@@ -37,7 +37,7 @@ const GROUPS: NavigationGroup[] = [
   { id: 'customers', label: copy.navigation.groups.customers, items: [page('customers'), section('allowlist')] },
   { id: 'resources', label: copy.navigation.groups.resources,
     items: [page('nodes'), section('homeinventory'), section('homelines'), section('providers')] },
-  { id: 'finance', label: copy.navigation.groups.finance, items: [section('ledger')] },
+  { id: 'finance', label: copy.navigation.groups.finance, items: [page('traffic'), section('ledger')] },
   { id: 'system', label: copy.navigation.groups.system,
     items: [page('clients'), section('alerts'), section('catalog'), section('policy'), section('candidates'), section('audit')] },
 ];

@@ -12,7 +12,8 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { copy } from '@/copy/copy';
 import { cn } from '@/lib/utils';
-import { BLANK_ROUTE, readRoute, type OpsRoute } from '@/lib/hash-route';
+import { BLANK_ROUTE, readRoute, writeRoute, type OpsRoute } from '@/lib/hash-route';
+import { trafficRange } from '@/lib/api-traffic';
 import { navigationContext } from '@/lib/navigation';
 import { usePrivacy } from '@/lib/privacy';
 import { consoleBehind, worstSource } from '@/lib/sources';
@@ -107,6 +108,13 @@ export function Shell({
         ) : null}
 
         <main className="shell-main flex-1">
+          {route.legacyFilter ? <p className="px-6 py-3 text-fine" role="status">{copy.legacyFilterNotice}</p> : null}
+          {route.returnToTraffic ? <div className="flex flex-wrap items-center gap-3 px-6 py-3 text-fine">
+            <button type="button" className="text-[color:var(--accent)] hover:underline"
+              onClick={() => writeRoute({ ...BLANK_ROUTE, page: 'traffic', range: route.range })}>
+              {copy.traffic.back(copy.traffic.range[trafficRange(route.range)])}
+            </button><span>{copy.traffic.detailWindow}</span>
+          </div> : null}
           <Enter>
             {children}
           </Enter>

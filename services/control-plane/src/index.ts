@@ -10,6 +10,7 @@ import {
   type OidcProvider,
 } from './oidc';
 import { AccessVerificationError, verifyAccessRequest } from './access';
+import { opsConsoleRedirect } from './ops-console-route';
 import {
   recordAgentSamples,
   recordHomeProbeSamples,
@@ -3710,7 +3711,7 @@ export default {
     const path = url.pathname;
     const secure = (r: Response, includeCors = true) => {
       const h = new Headers(r.headers);
-      const isOpsUi = path === '/ops' || path.startsWith('/ops/');
+      const isOpsUi = path === '/ops' || path.startsWith('/ops/') || path === '/ops2' || path.startsWith('/ops2/');
       h.set(
         'content-security-policy',
         isOpsUi
@@ -3723,7 +3724,7 @@ export default {
       h.set('referrer-policy', 'no-referrer');
       h.set('x-content-type-options', 'nosniff');
       h.set('x-frame-options', 'DENY');
-      if (path.startsWith('/api/') || path === '/' || path === '/ops' || path === '/ops/' || path.endsWith('.html')) {
+      if (path.startsWith('/api/') || path === '/' || path === '/ops' || path === '/ops/' || path === '/ops2' || path === '/ops2/' || path.endsWith('.html')) {
         h.set('cache-control', 'no-store');
       }
       if (includeCors && origin) {
@@ -3735,7 +3736,7 @@ export default {
     if (origin && origin !== e.ALLOWED_ORIGIN) {
       return secure(error(new ApiError(403, 'ORIGIN_NOT_ALLOWED', 'Origin is not allowed')), false);
     }
-    const isOperationsPath = path === '/ops' || path.startsWith('/ops/') || path.startsWith('/api/v1/ops/');
+    const isOperationsPath = path === '/ops' || path.startsWith('/ops/') || path === '/ops2' || path.startsWith('/ops2/') || path.startsWith('/api/v1/ops/');
     if (req.method === 'OPTIONS' && !isOperationsPath) {
       return secure(new Response(null, {
         status: 204,
@@ -3747,15 +3748,14 @@ export default {
       }));
     }
     try {
-      if (path === '/ops' || path.startsWith('/ops/')) {
+      if (path === '/ops' || path.startsWith('/ops/') || path === '/ops2' || path.startsWith('/ops2/')) {
         await operationsAdmin(req, e);
         if (req.method !== 'GET' && req.method !== 'HEAD') {
           return secure(new Response(null, { status: 405, headers: { allow: 'GET, HEAD' } }));
         }
-        const assetRequest = path === '/ops'
-          ? new Request(new URL('/ops/', req.url), req)
-          : req;
-        return secure(await e.ASSETS.fetch(assetRequest));
+        const redirect = opsConsoleRedirect(url);
+        if (redirect || path.startsWith('/ops/')) return secure(new Response(null, { status: redirect ? 302 : 404, headers: redirect ? { location: redirect } : undefined }));
+        return secure(await e.ASSETS.fetch(req));
       }
       if (
         path === '/' ||
