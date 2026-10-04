@@ -36,14 +36,14 @@ test.describe('设置', () => {
   for (const section of SECTIONS) {
     test(`${section} 有数据`, async ({ page }) => {
       await open(page, `/settings/${section}`);
-      await expect(page.getByRole('navigation', { name: '设置' })).toBeVisible();
+      await expect(page.getByRole('navigation', { name: '业务导航' })).toBeVisible();
       await settle(page);
       await expect(page).toHaveScreenshot(`${section}.png`);
     });
 
     test(`${section} 空`, async ({ page }) => {
       await open(page, `/settings/${section}`, 'empty');
-      await expect(page.getByRole('navigation', { name: '设置' })).toBeVisible();
+      await expect(page.getByRole('navigation', { name: '业务导航' })).toBeVisible();
       await settle(page);
       await expect(page).toHaveScreenshot(`${section}-empty.png`);
     });
@@ -51,7 +51,7 @@ test.describe('设置', () => {
 
   test('没写分节的链接落在告警上', async ({ page }) => {
     await open(page, '/settings');
-    await expect(page.getByRole('heading', { name: '告警', exact: true })).toBeVisible();
+    await expect(page.locator('.settings-hero').getByRole('heading', { name: '告警', exact: true })).toBeVisible();
     await expect(page.getByRole('link', { name: '告警', exact: true })).toHaveAttribute('aria-current', 'page');
   });
 

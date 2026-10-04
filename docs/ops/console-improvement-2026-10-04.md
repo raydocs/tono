@@ -51,7 +51,7 @@ Tono 证据入口：`services/control-plane/admin/src/{main.tsx,hooks.tsx,pages/
 - `npm run build` 及预算通过：首屏 JS 202.0 KB / 400 KB gzip；全量 311.3 KB / 600 KB gzip；0 个源码文件超过 400 行。
 - ego-browser：1600px 下14个入口，事故首行顶部约413px，趋势在其后；1024px dense 单列无横向溢出；390px 下5个底栏目标均高52px，首个事故动作在屏内，趋势仍挂载；320px 底栏完整无横向溢出，深色主题读数与入口正常。核验账目深链、审计别名搜索、历史后退、更多菜单14条、Esc焦点恢复、手机家宽跳转及财务搜索。
 - 纯导航函数实测：viewer 仍只可见 today/customers/nodes/clients；operator 可见14项。是 UI 过滤证据，不替代 Worker 权限测试或线上角色验证。
-- empty/error 夹具：空事故有明确提示；接口错误时四个 KPI 都是 `—`，不是零。未写新 UI 单测、Playwright 用例或重生成截图基线。
+- empty/error 夹具：空事故有明确提示；接口错误时四个 KPI 都是 `—`，不是零。未写新 UI 单测或 Playwright 用例；现有设置验收定位改为业务导航和告警正文标题。未重生成截图基线，CI 已启动但尚未完成；布局变化仍需必要的基线同步，不能声称 ci-gate 已通过。
 - 无 Worker 源码变更，未运行 Worker 测试；未运行全站 Playwright；未验证线上 Access 会话、真实告警或生产动作；未合并、未部署。UI PR 不启用自动合并。
 
 截图均为夹具，不含生产数据：[改前桌面](evidence/2026-10-04-console-navigation/before-desktop.png)、[改后桌面](evidence/2026-10-04-console-navigation/after-desktop.png)、[改后手机](evidence/2026-10-04-console-navigation/after-phone.png)、[改后深色](evidence/2026-10-04-console-navigation/after-dark.png)。

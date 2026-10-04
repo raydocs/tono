@@ -56,7 +56,7 @@ for (const section of [
   test(`capture the 设置 ${section} section for docs`, async ({ page }, testInfo) => {
     test.skip(testInfo.project.name !== 'light', '设置 figures are light-only');
     await open(page, `/settings/${section}`);
-    await expect(page.getByRole('navigation', { name: '设置' })).toBeVisible();
+    await expect(page.getByRole('navigation', { name: '业务导航' })).toBeVisible();
     await page.screenshot({ path: `docs/screenshots/settings-${section}.png` });
   });
 }
