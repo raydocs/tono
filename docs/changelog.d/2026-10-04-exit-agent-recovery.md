@@ -1,6 +1,6 @@
 ## 2026-10-04 · exit 节点重启身份恢复与卡死 API 的轮次截断
 - 归属：运维计划 [plan-2026-09-11](../ops/plan-2026-09-11.md)（exit 数据面）；影响 `ops-panel` hub job 执行器、`services/exit-agent`。不是 ship gate。
-- 来源：基线 main `a97c963e` → 分支 `raydocs/fix-exit-agent-recovery-20261004`；PR 待开；未合 main。
+- 来源：基线 main `a97c963e` → 分支 `raydocs/fix-exit-agent-recovery-20261004`；[#1378](https://github.com/raydocs/tono/pull/1378)（draft）；未合 main。
 - 缺陷修复：
   - [EXIT-RESTART-IDENTITY-GAP](../findings.d/EXIT-RESTART-IDENTITY-GAP.md)：hub `xray_restart` 成功后只检查 :443，API 新增身份要等下一次 timer → 成功的 restart 之后，hub 以独立时限运行既有 `identity_sync` 并单独记日志；restart 失败不触发。
   - [EXIT-AGENT-ROUND-DEADLINE](../findings.d/EXIT-AGENT-ROUND-DEADLINE.md)：API 卡住时一轮对账逐个新增、每个等 30 秒 → 第一次新增超时后停止余下新增，撤销仍先完成，超时标签保守记入库存，整轮不 ACK。
