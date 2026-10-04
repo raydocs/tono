@@ -1496,10 +1496,26 @@ fn refuse_pending(store: &Store) -> Result<()> {
     }
 }
 
-/// A lease whose holder exited is stale and is replaced; only a live other holder refuses.
-fn refuse_live_lease(store: &Store, installer: &Image) -> Result<()> {
+/// Only a proven exited or PID-replaced holder is stale; an unreadable holder still owns the lease.
+fn refuse_live_lease(
+    store: &Store,
+    installer: &Image,
+    live: impl FnOnce(u32) -> Result<Option<super::process::ProcessIdentity>>,
+) -> Result<()> {
     match &store.state.manual_installer {
-        Some(previous) if previous != installer && security::process_matches(previous).is_ok() => {
+        Some(previous) if previous != installer => {
+            let observed = live(previous.pid)
+                .with_context(|| {
+                    format!(
+                        "could not verify whether manual installer pid {} still holds its lease; \
+                         close the previous installer or restore process access, then retry",
+                        previous.pid
+                    )
+                })
+                .context(GateRefusal(GateReason::InstallerLeaseHeld))?;
+            if holder_conclusively_dead(previous, Ok(observed)) {
+                return Ok(());
+            }
             let name = previous.path.file_name().map_or_else(
                 || previous.path.display().to_string(),
                 |name| name.to_string_lossy().into_owned(),
@@ -1526,7 +1542,7 @@ pub async fn begin_manual() -> Result<Option<String>> {
     let _repair = gate_repair_lock()?;
     let mut store = gate_store()?;
     refuse_pending(&store)?;
-    refuse_live_lease(&store, &installer)?;
+    refuse_live_lease(&store, &installer, super::process::process_identity)?;
     drop(store);
     // No stale manual lease may turn armed/unknown protection into permission.
     residual_filter_refusal(
@@ -1581,8 +1597,16 @@ pub fn begin_manual_uninstall() -> Result<()> {
     let installer = gate_installer()?;
     let _repair = gate_repair_lock()?;
     let mut store = gate_store()?;
-    refuse_pending(&store)?;
-    refuse_live_lease(&store, &installer)?;
+    begin_manual_uninstall_at(&mut store, installer, super::process::process_identity)
+}
+
+fn begin_manual_uninstall_at(
+    store: &mut Store,
+    installer: Image,
+    live: impl FnOnce(u32) -> Result<Option<super::process::ProcessIdentity>>,
+) -> Result<()> {
+    refuse_pending(store)?;
+    refuse_live_lease(store, &installer, live)?;
     let mut next = store.state.clone();
     next.manual_installer = Some(installer);
     store
@@ -1824,6 +1848,51 @@ fn recovery_exhausted_at(path: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn update_manual_uninstall_refuses_unreadable_previous_holder_without_replacing_lease() {
+        let root = std::env::temp_dir().join(format!(
+            "tono-manual-lease-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir(&root).unwrap();
+        let mut store = Store::open(&root).unwrap();
+        let previous = Image {
+            pid: 4242,
+            started_at: 133_000_000_000_000_000,
+            path: r"C:\Program Files\Tono\uninstall.exe".into(),
+            sha256: "a".repeat(64),
+        };
+        let replacement = Image {
+            pid: 4343,
+            started_at: previous.started_at + 1,
+            path: r"C:\Program Files\Tono\setup.exe".into(),
+            sha256: "b".repeat(64),
+        };
+        store
+            .save(State {
+                manual_installer: Some(previous.clone()),
+                ..State::default()
+            })
+            .unwrap();
+
+        let refused = begin_manual_uninstall_at(&mut store, replacement.clone(), |pid| {
+            assert_eq!(pid, previous.pid);
+            Err(anyhow::anyhow!("Access is denied. (os error 5)"))
+        })
+        .unwrap_err();
+        assert_eq!(reason_of(&refused), GateReason::InstallerLeaseHeld);
+        assert!(format!("{refused:#}").contains("Access is denied. (os error 5)"));
+        assert_eq!(store.state.manual_installer.as_ref(), Some(&previous));
+        assert_eq!(Store::read_state(&root).unwrap().manual_installer, Some(previous));
+        assert_ne!(store.state.manual_installer, Some(replacement));
+        drop(store);
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn update_startup_barrier_release_waits_only_for_a_live_executor() {

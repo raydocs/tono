@@ -40,6 +40,68 @@ final class AppStateCoreMonitorTests: XCTestCase {
         }
     }
 
+    @MainActor
+    func testCompletedNodeSwitchDiscardsHealthFailureFromPreviousRoute() async {
+        let armed = KillSwitchService.isArmed
+        let needsReassert = KillSwitchService.needsSessionExceptionReassert
+        defer {
+            KillSwitchService.isArmed = armed
+            KillSwitchService.needsSessionExceptionReassert = needsReassert
+        }
+        KillSwitchService.isArmed = false
+        KillSwitchService.needsSessionExceptionReassert = false
+        let app = AppState()
+        app.isConnected = true
+        app.coreRuntime.isRunning = true
+        app.config.tunEnabled = true
+        app.tonoTransport = TonoTransportDescriptor(port: 1080)
+        app.tunInterfaceExists = { _ in true }
+        app.coreController = CoreControllerClient()
+        app.proxyRegions = []
+        app.activeNode = nil
+        var runtime = NetworkProtectionOperations()
+        runtime.repairForRelease = {}
+        runtime.stopCore = { _ in true }
+        runtime.coreStatus = { (false, true) }
+        runtime.restoreDNS = { true }
+        runtime.disableSystemProxy = {}
+        runtime.disarm = {}
+        runtime.releaseAfterFailure = {}
+        runtime.restrictToBootstrap = {}
+        app.networkProtection = runtime
+
+        let probe = ReloadGate()
+        let started = expectation(description: "old route health probe held")
+        app.raceHealthTrafficProbes = { _, _ in
+            started.fulfill()
+            await probe.wait()
+            return .lost([])
+        }
+        var state = AppState.CoreMonitorState()
+        state.healthCycle = 1
+        state.consecutiveHealthFailures = 1
+        let tick = Task { await app.runCoreMonitorTick(state: &state) }
+        await fulfillment(of: [started], timeout: 2)
+        let protectionGeneration = app.connectionCoordinator.protectionOperationGeneration
+        app.switchingNodeId = "replacement-exit"
+        let switchTask = Task {}
+        app.connectionCoordinator.nodeSwitchTask = switchTask
+        await switchTask.value
+        app.switchingNodeId = nil
+        app.connectionCoordinator.nodeSwitchTask = nil
+        probe.open()
+
+        let outcome = await tick.value
+        XCTAssertEqual(outcome, .continueMonitoring)
+        XCTAssertEqual(app.connectionCoordinator.protectionOperationGeneration, protectionGeneration)
+        XCTAssertEqual(state.consecutiveHealthFailures, 0)
+        XCTAssertTrue(app.isConnected)
+        XCTAssertNil(app.errorMessage)
+        XCTAssertNil(app.connectionCoordinator.protectedReconnectTask)
+        app.connectionCoordinator.protectedReconnectTask?.cancel()
+        await app.finishPendingDisconnect()
+    }
+
     func testMonitorHoldsMissingTUNVerdictWhileRuntimeReplacementIsInFlight() async {
         let app = AppState()
         app.isConnected = true

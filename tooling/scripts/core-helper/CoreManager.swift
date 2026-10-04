@@ -123,7 +123,12 @@ final class CoreManager {
             configDirectory,
             expectedSHA256: configSHA256
         )
+        try launchValidatedSnapshotLocked(configPath: configPath, startAllowed: startAllowed)
+    }
 
+    private func launchValidatedSnapshotLocked(configPath: String, startAllowed: () -> Bool) throws {
+        // Recheck the root-owned binary at launch, including after a sync stop.
+        _ = try secureMetadata(mihomoPath, type: mode_t(S_IFREG), owner: 0)
         let child = Process()
         child.executableURL = URL(fileURLWithPath: mihomoPath)
         child.arguments = ["run", "-D", runtimeDirectory, "-c", configPath]
@@ -184,11 +189,10 @@ final class CoreManager {
             throw HelperFailure.invalid("sing-box is not running.")
         }
         // Refuse malformed or swapped bytes before disrupting the live child.
-        _ = try snapshot(configDirectory, expectedSHA256: configSHA256)
+        let configPath = try snapshot(configDirectory, expectedSHA256: configSHA256)
         try beforeStop()
         try stopLocked()
-        try startLocked(configDirectory: configDirectory, configSHA256: configSHA256,
-                        startAllowed: startAllowed)
+        try launchValidatedSnapshotLocked(configPath: configPath, startAllowed: startAllowed)
         return runtimeConfigPath
     }
 
