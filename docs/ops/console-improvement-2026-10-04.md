@@ -55,3 +55,7 @@ Tono 证据入口：`services/control-plane/admin/src/{main.tsx,hooks.tsx,pages/
 - 无 Worker 源码变更，未运行 Worker 测试；未运行全站 Playwright；未验证线上 Access 会话、真实告警或生产动作；未合并、未部署。UI PR 不启用自动合并。
 
 截图均为夹具，不含生产数据：[改前桌面](evidence/2026-10-04-console-navigation/before-desktop.png)、[改后桌面](evidence/2026-10-04-console-navigation/after-desktop.png)、[改后手机](evidence/2026-10-04-console-navigation/after-phone.png)、[改后深色](evidence/2026-10-04-console-navigation/after-dark.png)。
+
+### CI 续修
+
+run [37196358993](https://github.com/raydocs/tono/actions/runs/37196358993)（`6bde6e77`）后端及分片2/4成功，分片1/3的账目浅深各一例因页头与正文同名产生严格定位歧义。现有断言限定 main 内的账目标题，保留笔数与操作检查，不改产品源码或截图阈值。修后 typecheck 通过；本机定向两例缺少 Playwright Chromium 1243，启动失败，不当作行为回归或通过，完整行为验证交由 CI。修后 CI 结果以 PR 最新 head 的 checks 为准。
