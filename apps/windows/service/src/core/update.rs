@@ -1500,7 +1500,7 @@ fn refuse_pending(store: &Store) -> Result<()> {
 fn refuse_live_lease(
     store: &Store,
     installer: &Image,
-    live: impl FnOnce(u32) -> Result<Option<super::process::ProcessIdentity>>,
+    live: impl FnOnce(u32) -> Result<Option<u64>>,
 ) -> Result<()> {
     match &store.state.manual_installer {
         Some(previous) if previous != installer => {
@@ -1513,7 +1513,7 @@ fn refuse_live_lease(
                     )
                 })
                 .context(GateRefusal(GateReason::InstallerLeaseHeld))?;
-            if holder_conclusively_dead(previous, Ok(observed)) {
+            if observed != Some(previous.started_at) {
                 return Ok(());
             }
             let name = previous.path.file_name().map_or_else(
@@ -1542,7 +1542,7 @@ pub async fn begin_manual() -> Result<Option<String>> {
     let _repair = gate_repair_lock()?;
     let mut store = gate_store()?;
     refuse_pending(&store)?;
-    refuse_live_lease(&store, &installer, super::process::process_identity)?;
+    refuse_live_lease(&store, &installer, super::process::process_started_at)?;
     drop(store);
     // No stale manual lease may turn armed/unknown protection into permission.
     residual_filter_refusal(
@@ -1597,13 +1597,13 @@ pub fn begin_manual_uninstall() -> Result<()> {
     let installer = gate_installer()?;
     let _repair = gate_repair_lock()?;
     let mut store = gate_store()?;
-    begin_manual_uninstall_at(&mut store, installer, super::process::process_identity)
+    begin_manual_uninstall_at(&mut store, installer, super::process::process_started_at)
 }
 
 fn begin_manual_uninstall_at(
     store: &mut Store,
     installer: Image,
-    live: impl FnOnce(u32) -> Result<Option<super::process::ProcessIdentity>>,
+    live: impl FnOnce(u32) -> Result<Option<u64>>,
 ) -> Result<()> {
     refuse_pending(store)?;
     refuse_live_lease(store, &installer, live)?;
@@ -1850,7 +1850,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn update_manual_uninstall_refuses_unreadable_previous_holder_without_replacing_lease() {
+    fn update_manual_uninstall_requires_conclusive_previous_holder_death() {
         let root = std::env::temp_dir().join(format!(
             "tono-manual-lease-{}-{}",
             std::process::id(),
@@ -1888,8 +1888,15 @@ mod tests {
         assert_eq!(reason_of(&refused), GateReason::InstallerLeaseHeld);
         assert!(format!("{refused:#}").contains("Access is denied. (os error 5)"));
         assert_eq!(store.state.manual_installer.as_ref(), Some(&previous));
-        assert_eq!(Store::read_state(&root).unwrap().manual_installer, Some(previous));
+        assert_eq!(Store::read_state(&root).unwrap().manual_installer, Some(previous.clone()));
         assert_ne!(store.state.manual_installer, Some(replacement));
+        begin_manual_uninstall_at(&mut store, replacement.clone(), |pid| {
+            assert_eq!(pid, previous.pid);
+            Ok(Some(previous.started_at + 1))
+        })
+        .unwrap();
+        assert_eq!(store.state.manual_installer.as_ref(), Some(&replacement));
+        assert_eq!(Store::read_state(&root).unwrap().manual_installer, Some(replacement));
         drop(store);
         std::fs::remove_dir_all(root).unwrap();
     }
