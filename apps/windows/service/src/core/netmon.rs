@@ -56,7 +56,7 @@ impl Reconciler {
         match observed {
             Ok(current) => {
                 let changed = self.baseline.as_ref().is_none_or(|old| *old != current);
-                let publish = changed || external;
+                let publish = changed;
                 self.baseline = Some(current);
                 self.unknown_reported = false;
                 publish.then_some("network-change (ip-interface/route)")
