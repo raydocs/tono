@@ -285,9 +285,21 @@ async function allOrNothing(files, edits) {
   try {
     await edits()
   } catch (error) {
-    await Promise.all(
-      files.map((file, index) => fs.writeFile(file, originals[index], 'utf8')),
-    )
+    // One file that cannot be put back must not stop the others, and must
+    // not replace the error that caused the rollback.
+    const stuck = []
+    for (const [index, file] of files.entries()) {
+      try {
+        await fs.writeFile(file, originals[index], 'utf8')
+      } catch {
+        stuck.push(file)
+      }
+    }
+    if (stuck.length > 0) {
+      console.error(
+        `[ERROR]: could not restore ${stuck.join(', ')}; check the version there by hand`,
+      )
+    }
     throw error
   }
 }
