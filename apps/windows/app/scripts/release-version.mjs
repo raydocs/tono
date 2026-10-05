@@ -186,22 +186,20 @@ async function updateCargoVersion(newVersion) {
       ? newVersion.slice(1)
       : newVersion
 
-    await fs.writeFile(
-      cargoTomlPath,
-      setCargoPackageVersion(data, versionWithoutV),
-      'utf8',
-    )
-    console.log(`[INFO]: Cargo.toml version updated to: ${versionWithoutV}`)
-
     // `cargo metadata --locked` (windows-release.yml) and
     // verify-desktop-version.py both read the lock entry.
     const cargoLockPath = path.join(_dirname, 'Cargo.lock')
     const lock = await fs.readFile(cargoLockPath, 'utf8')
-    await fs.writeFile(
-      cargoLockPath,
-      setCargoLockVersion(lock, 'tono-windows', versionWithoutV),
-      'utf8',
+    const bumpedToml = setCargoPackageVersion(data, versionWithoutV)
+    const bumpedLock = setCargoLockVersion(
+      lock,
+      'tono-windows',
+      versionWithoutV,
     )
+
+    await fs.writeFile(cargoTomlPath, bumpedToml, 'utf8')
+    console.log(`[INFO]: Cargo.toml version updated to: ${versionWithoutV}`)
+    await fs.writeFile(cargoLockPath, bumpedLock, 'utf8')
     console.log(`[INFO]: Cargo.lock version updated to: ${versionWithoutV}`)
   } catch (error) {
     console.error('Error updating Cargo.toml version:', error)
@@ -275,6 +273,26 @@ async function updateTauriConfigVersion(newVersion) {
 }
 
 /**
+ * Run the edits; when any of them fails, put every file back as it was. A
+ * version bumped in two files out of four is worse than no bump.
+ * @param {string[]} files
+ * @param {() => Promise<void>} edits
+ */
+async function allOrNothing(files, edits) {
+  const originals = await Promise.all(
+    files.map((file) => fs.readFile(file, 'utf8')),
+  )
+  try {
+    await edits()
+  } catch (error) {
+    await Promise.all(
+      files.map((file, index) => fs.writeFile(file, originals[index], 'utf8')),
+    )
+    throw error
+  }
+}
+
+/**
  * 获取当前版本号
  */
 async function getCurrentVersion() {
@@ -338,9 +356,20 @@ async function main(versionArg) {
     }
 
     console.log(`[INFO]: Updating versions to: ${newVersion}`)
-    await updatePackageVersion(newVersion)
-    await updateCargoVersion(newVersion)
-    await updateTauriConfigVersion(newVersion)
+    const cwd = process.cwd()
+    await allOrNothing(
+      [
+        path.join(cwd, 'package.json'),
+        path.join(cwd, 'src-tauri', 'Cargo.toml'),
+        path.join(cwd, 'Cargo.lock'),
+        path.join(cwd, 'src-tauri', 'tauri.conf.json'),
+      ],
+      async () => {
+        await updatePackageVersion(newVersion)
+        await updateCargoVersion(newVersion)
+        await updateTauriConfigVersion(newVersion)
+      },
+    )
     console.log('[SUCCESS]: All version updates completed successfully!')
     reportDesktopVersions()
   } catch (error) {

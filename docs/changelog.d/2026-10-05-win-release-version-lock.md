@@ -8,5 +8,11 @@
   - `Cargo.toml` 以前把每一行以 `version =` 开头的都改掉；今天只有 `[package]` 有，但依赖一旦写成独立表（`[dependencies.x]` 下一行 `version = "…"`）就会被一起改。现在只改 `[package]` 表里的那一行，找不到就报错。
   - 脚本最后跑一次 `tooling/scripts/verify-desktop-version.py`，版本仍不一致时打印告警（不失败）。没有做成失败、也没有让它去改 macOS 工程：`alpha`/`autobuild`/`deploytest` 这些是只给 Windows 用的版本串，macOS 的 `MARKETING_VERSION` 和构建号是另一步手工升的；拦截仍由各发布工作流里的同一个校验脚本负责。
   - 回归两条（`scripts/cargo-version.test.mjs`，进 `test:dev-control`，`windows-ci` 会跑）：「只改 `[package]`」「lock 里本地那条跟着改」。红提交先推（本机红：`ERR_MODULE_NOT_FOUND`，被测模块还不存在，不是断言失败）。
-- 验证：本机 `node --test scripts/cargo-version.test.mjs` 2 通过；把四个文件拷到临时目录跑 `release-version.mjs 0.0.75`，`Cargo.toml` 和 `Cargo.lock` 各只变一行；biome 检查通过。没有跑 `cargo metadata`（本机不跑 cargo），由 `windows-ci` 的 `--locked` 步骤间接覆盖不到「升版本后的树」这一点，记为未验证。
+- 验证：本机 `node --test scripts/cargo-version.test.mjs` 6 通过（第一轮 2 条）；把四个文件拷到临时目录跑 `release-version.mjs 0.0.75`，`Cargo.toml` 和 `Cargo.lock` 各只变一行；biome 检查通过。没有跑 `cargo metadata`（本机不跑 cargo），由 `windows-ci` 的 `--locked` 步骤间接覆盖不到「升版本后的树」这一点，记为未验证。
+- 复核后续（Codex `gpt-6.1-sol` high 审 `a65fed55`，4 个 major、1 个 minor，同一 PR 内修）：
+  - CRLF 的 `Cargo.lock`（Windows 检出常见）以前按 `\n` 切行后 `name = "tono-windows"\r` 对不上，报「找到 0 条」。现在比较前去掉行尾 `\r`，写回时保留原来的换行。
+  - lock 里若有带版本的引用（`"tono-windows 0.0.74"`，同名包有两份时 Cargo 才这么写），只改版本会留下悬空引用，现在直接报错不改。
+  - `Cargo.toml` 的行扫描以前会被 `[package] # 注释`、多行字符串里的 `version = …`、`version.workspace = true` 骗过。现在表头允许带注释，跳过多行字符串，只替换引号里的值（缩进、行尾注释不动），继承写法、重复的 `version`、找不到都报错。
+  - 以前任何一步失败都会留下只改了一半的树（`package.json` 已写、lock 没写）。现在 `Cargo.toml` 和 `Cargo.lock` 两个结果都算出来才写；四个文件任何一步失败，全部写回原内容。
+  - 回归加四条（CRLF、带版本引用、形似的行与格式保留、继承写法），红提交 `3c16f64c` 先推（本机红：`pass 2, fail 4`）。「失败后还原」没有单独写测试，只在临时目录手工验过（lock 里没有本地包 → 退出码 1，`package.json` 与 `Cargo.toml` 和原文件逐字节相同），记为未自动化。
 - 候选/发布：仅源码，无新候选。
