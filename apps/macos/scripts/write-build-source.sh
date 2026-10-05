@@ -13,23 +13,25 @@ if [ "$commit_json" != null ]; then
   # The helper binary is a build product: packaging recompiles it from tracked
   # sources (tooling/scripts/build-core-helper.sh) before this runs, and the
   # tracked copy lags behind them. Only the binary that builder left behind,
-  # from the sources CONTRACT.sha256 records, is exempt: a hand-edited or
-  # stale binary still counts, and so do the helper's sources.
+  # compiled from the helper sources as they are now, is exempt: a hand-edited
+  # or stale binary still counts, and so do the helper's sources.
   helper=apps/macos/Tono/Resources/tono-core-helper
-  set -- ':(top)'
   if top=$(git -C "$root" rev-parse --show-toplevel 2>/dev/null) &&
      built=$(git -C "$root" rev-parse --git-path tono-core-helper.built 2>/dev/null); then
     case "$built" in /*) ;; *) built="$root/$built" ;; esac
-    binary_hash=$(shasum -a 256 "$top/$helper" 2>/dev/null | cut -d' ' -f1)
-    sources_hash=$(cut -d' ' -f2 "$top/tooling/scripts/core-helper/CONTRACT.sha256" 2>/dev/null || true)
-    if [ -n "$binary_hash" ] && [ -n "$sources_hash" ] && [ -f "$built" ] &&
-       [ "$(cat "$built")" = "$binary_hash $sources_hash" ]; then
-      set -- "$@" ":(top,exclude)$helper"
+    set -- ':(top)'
+    if [ -f "$built" ]; then
+      binary_hash=$(shasum -a 256 "$top/$helper" 2>/dev/null | cut -d' ' -f1)
+      sources_hash=$(sh "$top/tooling/scripts/build-core-helper.sh" --sources-hash 2>/dev/null || true)
+      if [ -n "$binary_hash" ] && [ -n "$sources_hash" ] &&
+         [ "$(cat "$built")" = "$binary_hash $sources_hash" ]; then
+        set -- "$@" ":(top,exclude)$helper"
+      fi
     fi
-  fi
-  if status=$(git -C "$root" status --porcelain --untracked-files=normal -- "$@" 2>/dev/null); then
-    dirty=false
-    if [ -n "$status" ]; then dirty=true; fi
+    if status=$(git -C "$root" status --porcelain --untracked-files=normal -- "$@" 2>/dev/null); then
+      dirty=false
+      if [ -n "$status" ]; then dirty=true; fi
+    fi
   fi
 fi
 case "${CONFIGURATION:-}" in
