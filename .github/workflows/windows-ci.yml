@@ -75,6 +75,12 @@ jobs:
         working-directory: apps/windows
         run: cargo test --locked -p tono-core
 
+      - name: Lint tono-core
+        # After the tests so a lint never hides a failing test. The pinned
+        # toolchain (rust-toolchain.toml) carries clippy.
+        working-directory: apps/windows
+        run: cargo clippy --locked -p tono-core --all-targets -- -D warnings
+
   app:
     # 17 test files, 110 tests, a typecheck, and nothing ran any of them: the
     # release workflow runs one subset of them and only from a tag, which is after
