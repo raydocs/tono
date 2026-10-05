@@ -1,0 +1,21 @@
+## 2026-10-05 · 控制面生产部署（迁移 0093）与邮件告警规则
+
+- 归属：[运维计划](../ops/plan-2026-09-11.md) §2 项 1（先在 preview 演练迁移）与项 7（部署前导出 D1）；不是发布门。所有者 2026-10-05「提交 然后告警发邮件 部署」。
+- 来源：生产此前是 `57c1c64c`（2026-09-25 构建），D1 在 0092。本次部署 `main@107ce6d961419a83fc15756e3d17914fe2ebf92e`，脚本 `tooling/scripts/deploy-control-plane-main.sh`，在维护者的 main checkout（干净、等于 origin/main）里跑。
+- 缺陷修复：无新修复；本次把 `57c1c64c..107ce6d9` 已合入 main 的控制面改动第一次带到生产（客户端诊断会话与失败聚类、`connectCancel` 事件、告警只带服务端签发的值等）。
+- 新增/优化：迁移 `0093_client_diagnostics.sql`（`client_sessions`、`failure_clusters`、`failure_alert_sends` 等）；生产 `ops_alert_rules` 新增一条邮件规则（见下）。
+- 工程与测试：
+  - preview 演练：`tono-control-plane-ops-preview` 上 0072–0093 全部 ✅。
+  - 导出：`~/tono-backups/control-plane-d1/2026-10-05T17-38-53Z.sql.gz`，sha256 `dadd18f40e7de3c6e01f89d74e7fac5daa68f410b0daa0c957e81ada15db7d53`（原始 83,041,688 字节，gzip 6,368,714）；已上传 R2 `tono-releases/backups/control-plane-d1/2026-10-05T17:38:53Z.sql.gz` 与 `.sha256`。
+  - 脚本内检查：`Test Files 46 passed`、`Tests 1003 passed`，typecheck、策略签名契约、后台与控制台构建、release-center 检查通过；`0093_client_diagnostics.sql ✅`。
+  - Worker 版本：API `16549f87-427a-4a7e-99f2-55df811907a8`，后台 `5621abf7-b9d9-488a-a99c-ce72c79aeb5e`。
+  - 部署后：`GET /api/v1/system/version` 的 `buildSha` 为 `107ce6d9…`；`GET /api/v1/system/pulse` 返回 `ok:true`（`cronAgeSec` 109）；三张新表存在；`d1_migrations` 最后一行是 0093。
+- 审查覆盖（按 AGENTS.md「部署已合批次」沿用，不重审整批）：`57c1c64c..66a5bc5c` 的控制面源码与迁移由 [2026-10-03 范围审查](2026-10-03-cp-predeploy-range-review.md) 覆盖（Codex `gpt-6.1-sol` high）；其唯一 major 的修复 #1368 在头 `e7037111` 上第 4 轮 clean。`66a5bc5c..107ce6d9` 里控制面只有两项：#1368（已覆盖）和 #1365（`flatten.ts` 接受 `connectCancel`，4 行，普通改动，红绿见该 PR）。`wrangler.jsonc` 的差异只有注释。范围审查留下的两条注意事项都已满足：脚本先迁移后部署；生产策略修订 10 在 main 的校验下通过。
+- 邮件告警规则（所有者点名的临时 D1 写入，在上面的导出之后）：id `2dd81896-28cb-4cbc-b332-9ff7fa0631f0`，名称 `Email: warn and above`，`channel=email`、`min_severity=warn`、`fire_on=open`、`delay_seconds=0`、`cooldown_seconds=3600`、无匹配过滤、模板 `generic`。收件地址取 `ops_audit` 里唯一的 Access 管理员登录邮箱（子查询写入，未打印、未入库到仓库）。邮件走已配置的 Resend（`RESEND_API_KEY`、`EMAIL_FROM`），没有新增密钥。
+- 部署后在生产看到的（只读汇总）：
+  - 规则表有两条启用的邮件规则。第二条 `ops-email-owner-20261005`（「严重事故 · 邮件」，`min_severity=severe`，冷却 900 秒）不是本会话建的，建于本会话那条之后约 4 分钟，两条指向同一个地址。本会话没有动它。严重事故会因此收到两封。
+  - `ops_alert_deliveries` 有 1 行：第二条规则对一条已开着的 `node-down` 事故发出，`status=sent`、Resend 返回 200。邮件通道因此算端到端发通过一次；本会话那条规则还没有投递记录（规则只在事故打开或升级时触发，已开着的不补发）。
+  - 未关闭的节点事故：`node-down`（severe）1 条，`Tokyo · Sakura`「整机失联，仍在客户目录」，开于部署前约 2 小时，占用 0；`node-degraded`（warn）5 条；`node-no-probe`（notice）1 条（09-11 起）。本会话没有处理节点，也没有改目录。
+- 验证：见上；控制台 `/ops2/#/settings/alerts` 的「测试」按钮与部署后页面检查需要 Cloudflare Access 会话，本会话没有，未做。
+- 候选/发布：无客户端包；不涉及客户发布。
+- 剩余限制：失败聚类的 webhook（`FAILURE_ALERT_WEBHOOK_URL`/`SECRET`）仍未配置，聚类告警不外发；`client_releases` 为空、`exit_nodes` 只认得部分节点名，决定 053 下告警里的版本和约一半节点显示 `[unlisted]`；两条邮件规则是否合并、地址是否正确由所有者定。回滚：每个 Worker `npx wrangler rollback`；0093 只增表，不需要回滚迁移。

@@ -21,6 +21,8 @@
 
 第九次 `aa240b8`（PR #128；迁移 0053 账目 / 月结 / 汇率，0054 `users.wechat_id`，0055 白名单行上的微信号/联系方式/备注）：收入、退款、补偿只记人民币，支出缺省美元；每日 `fx` 步骤从 frankfurter 拉汇率——没有当天汇率时非人民币条目会 409 `FX_RATE_MISSING`，这是设计而不是故障，等下一个 tick。开户早于客户注册时，微信号等先落在 `signup_allowlist`，首次登录自动带到 `users`。部署前备份 `backups/control-plane-d1/20260910T085207Z.sql.gz`。
 
+2026-10-05 `107ce6d9`（迁移 0093 客户端诊断会话与失败聚类；上一次生产构建是 09-25 的 `57c1c64c`）：preview 先演练 0072–0093，导出 `backups/control-plane-d1/2026-10-05T17:38:53Z.sql.gz` 后用部署脚本上线，`/api/v1/system/version` 与 `/system/pulse` 核对通过。同日生产第一次有了告警规则（邮件，Resend）。细节与沿用的审查范围见 [changelog](../changelog.d/2026-10-05-control-plane-deploy-0093.md)。
+
 ### 客户开通漏斗
 
 开通了但还没用起来的人现在出现在 `GET customers/funnel`：白名单未注册是 `invited`（带着开通时记下的微信号），注册未装客户端 / 装了未上报 / 上报过未连上分别是 `registered`、`device_added`、`reported`。他们不再只活在旧后台的白名单页，也不会在客户列表里被标成「未上报」——从未连上过的判定是「还没用起来」。已经连上过的人只计入 `connected`，不出现在卡住名单里。
