@@ -1,0 +1,38 @@
+## 2026-10-05 · 连接审查二轮：反复整机拦截、误换城、无谓等待的窄修
+- 归属：SHIP_PLAN §2 第 10 项冻结期修复（连接稳定性）。Windows App/Service/tono-core 与 macOS App。G3 仍按决策 019 属于 0.0.75，不推进发布门。
+- 来源：基线 `a97c963e` → 分支 `raydocs/fix-connection-audit-20261004`，[#1386](https://github.com/raydocs/tono/pull/1386)（draft），尚未合入 main。发现来自 2026-10-04 六路并行审查（Windows 提速、Windows 稳定、Windows DNS、macOS App、macOS Helper、数据面/准入）。每项先经 Codex `gpt-6.1-sol` max 只读核验（`31cc4caa`），主会话再读码；只修 CONFIRMED/PARTIAL 且有安全最小修法的项。同轮的数据面修复在 #1378、#1379。
+- 缺陷修复：
+  - WIN-UNARMED-METRIC-WAKE：自动放行后，Windows 后台重连每次完整连接都要整机拦截约 30–55 秒；同一上行仅 metric 变化（Wi-Fi 速率波动）就让退避清零立即再试，前 10 分钟整机断网可达约 41–61%。现在失败后下一轮至少等「退避档位」与「该次尝试 × 3」中较长者，从释放完成起算；真正换网（首选上行的 LUID/源地址/网关变化）清零退避和探测，但不早于该下限；metric 变化不再唤醒。手动连接和换选线路不受限。产品取舍见决策 063（provisional）。
+  - NETMON-UNCHANGED-EXTERNAL-NOISE：Service 把 DNS 自写窗口外的每个回调批次都发布为网络变化，即使观察到的拓扑完全没变；每次发布都让 App 做一次数据面证明和 pin 刷新。现在只有拓扑确实变化才发布；观察新增 IPv4 单播地址（LUID、地址、前缀、DAD 状态）和接口运行状态，同一网关后换了源地址仍算换网。读不出拓扑和电源事件照旧发布。
+  - WIN-NETWORK-CHANGE-DOUBLE-AUDIT：去抖暂缓的变化在暂缓那一拍和接纳那一拍各记一条 `NetworkChange`。现在只在接纳那一拍记。
+  - MAC-HEALTH-AUTO-CITY-SWITCH：健康监控连续两次失败后自动换到并持久化下一个城市，而 SHIP_PLAN G2.8 关闭了 macOS 自动换城，连接路径也已经遵守 `CatalogCityFailover`。健康路径现在走同一门控；坏出口在用户选的城市上走原有 re-arm/升级和自动放行。
+  - MAC-UNARMED-DNS-KICK：每个网络通知都把后台重连退避拉回 2 秒档（每档都是一次带 PF 的完整连接），包括同一上行上的纯 DNS 通知（含 Tono 自己恢复 DNS）。现在去抖 750 ms，与单独的后台重连上行基线比较，只有换网或新拿到具体上行才重启。
+  - MAC-WAKE-NO-SERVICE-RELEASE：唤醒后 PF 一重新确认就连接，此时 macOS 还没给出主网络服务，连接以「无网络服务」失败，带 PF 的失败随即自动放行，快速唤醒反而落到未保护。现在保持屏障（PF 仍在）最多等 8 秒主网络服务，等待后复查取消和保护代次，超时照原失败处理走。
+  - MAC-DNS-ENABLE-LOCK-RETRY：Helper 对 `/dns/enable` 的锁忙拒绝不重试（restore 早已重试），一次锁竞争就让连接失败并自动放行。现在 `enableProtectedDNS` 走 `retryingHelperRefusal`（最多 3 次，间隔 300 ms）；返回包校验不变，403/传输错误仍立即失败。
+- 新增/优化（连接提速，不放宽任何门）：
+  - WIN-RESUME-DNS-PROBE-WAIT：重启后接管已证明的同属主 Core 时，loopback:53 预检对该 Core 正占用的端口重试 30 次（约 2.9 秒），而准入只看 resume 状态。现在本次尝试的 resume 状态一到且为 `Some` 就停止探测；停止的探测不算证明端口空闲；`None` 仍等探测结论。
+  - WIN-ARMED-BOOTSTRAP-LOOKUP-WAIT：保护中重入时，bootstrap 查询走的是受保护解析器，它要等本次 Core 起来才应答，于是在 PreparingService 里耗满 2 秒。保护中预算改为 300 ms，编译内置和已学到的 pins 照旧合并；未保护时仍是 2 秒。
+  - WIN-REFINE-PROOF-UNSHARED：恢复时 refine 已用 TCP 证明了端点却没记入证明缓存，接着隧道前证明又拨同一端点。现在成功即记入。
+  - MAC-CONTROLLER-READY-SAMPLING：控制器就绪的 50 ms 密集采样在累计睡眠 500 ms 后就停了，600 ms 才绑定的控制器要到 750 ms 才被发现。密集窗口改为前 2 秒；总预算和取消不变。
+- 工程与测试：每个行为一条窄回归。
+  - Windows Service：`netmon::tests::unchanged_external_topology_is_silent`。
+  - Windows App：`connection_health::tests::suppressed_network_change_is_audited_once`、`connection::unarmed_probe::tests::metric_wake_preserves_attempt_floor`、`connection::controller::tests::proven_resume_stops_the_dns_listener_probe`、`connection::monitor::tests::armed_bootstrap_lookup_is_short_best_effort`、`connection::heal::tests::successful_refine_populates_endpoint_proof`。
+  - macOS：`AppStateCoreMonitorTests.testUnreachableExitDuringHealthKeepsTheChosenCity`、`NetworkChangeTests.testSameUplinkNotificationLeavesTheUnarmedLadderAlone`、`AppStateSleepTests.testWakeHoldsTheBarrierWhileNoPrimaryServiceIsNamed`、`HelperRefusalRetryTests.testProtectedDNSEnableRetriesTheLockRefusal`、新文件 `CoreControllerReadinessPollTests`。
+  - 改动的现有断言：`unarmed_probe.rs` 里 metric-only 变化原来断言「唤醒」，现在断言不唤醒。R4UB-WIN-FAILED-CONNECT-BACKOFF（#1106）当时有意保留了 metric 唤醒，本次由决策 063 改变。netmon 现有测试的 fixture 补上两个新观察字段。
+- 验证：
+  - MacBook 上 `git diff --check` 无输出。
+  - 按 2026-09-14 所有者规定，MacBook 不跑原生 cargo/xcodebuild，本次所有 Rust/Swift 回归本机都未运行，hosted CI 是第一次运行。修前失败未实跑，只由编译失败或推理确定；`successful_refine_populates_endpoint_proof` 在旧代码上能编译，应在行为上失败。
+  - windows-sys 0.61.2 的 `GetUnicastIpAddressTable`、`MIB_UNICASTIPADDRESS_ROW`、`IF_OPER_STATUS`/`NL_DAD_STATE`（均为 `i32`）已对照本机 registry 源码核对签名。
+  - 没有实机验证。
+- 候选/发布：仅源码，无新候选。
+- 剩余限制：
+  - 决策 063 的下限：接近 310 秒事务上限的尝试会带来约 15.5 分钟的下限，期间普通流量保持放行、AI 保持拦截（决策 030/031），保护要等下一轮或手动连接才恢复。
+  - netmon：一个去抖批次内完成、且所有观察字段完全相同的换网不再发布，靠 30 秒出口探测发现死隧道。
+  - 保护中 300 ms 之后才返回的真实地址会被丢弃，pins 仍在。
+  - A-S1 只修了 DNS 探测部分：传统已证明启动的首档 2 秒（WIN-RESUME-FIRST-RUNG）和保留回执（WIN-RESUME-RECEIPT-RACE）仍 open。
+  - 跨厂商范围审查和 exact-head `ci-gate` 完成前不合并（连接路径并发、netmon 路由观察、WFP 相关重试节奏）。
+- 同轮记为 open（未修，各有分片）：
+  - Windows：WIN-RESUME-FIRST-RUNG、WIN-TCP-PROOF-SERIAL、WIN-RESUME-RECEIPT-RACE、WIN-DIRECT-RENEW-AMBIGUITY、WIN-MISSING-UPLINK-GRACE、WIN-UPLINK-READER-HANG。
+  - Windows DNS：WIN-DNS-RACE-MASKS-SYSTEM、WIN-DNS-DHCPV6-RESIDUAL、WIN-NRPT-NO-REFRESH、WIN-DNS-SNAPSHOT-LATE-DELETE、WIN-DNS-ENABLE-NO-FLUSH。
+  - 数据面：EXIT-AGENT-TIMER-BOOT、EXIT-XRAY-CONN-IDLE、SINGBOX-REJECT-NO-DROP。
+  - macOS：MAC-WATCHDOG-STALL-AS-CANCEL、MAC-HEALTH-PROBE-FANOUT、MAC-CORE-START-SLEEP-MISLABEL、MAC-WAKE-GATE-RACE。
