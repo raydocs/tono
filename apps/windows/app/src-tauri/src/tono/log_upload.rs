@@ -39,12 +39,9 @@ pub const FIRST_DELAY: Duration = Duration::from_secs(90);
 const READ_CHUNK_BYTES: usize = 4 * 1024 * 1024;
 /// After the server declines storage (no ops collection window for this
 /// device, the usual case since upload is on by default), check back at this
-/// interval with a probe of at most `DECLINED_PROBE_BYTES` raw bytes. Resending
-/// the full segment every 16 minutes cost up to 2 MiB a time, through the exit
-/// node and the user's quota, for nothing. The cursor stays put, so once ops
-/// opens a window the log is sent from where it was.
+/// interval with an empty probe. The cursor stays put, so once ops opens a
+/// window the log is sent from where it was.
 const DECLINED_INTERVAL: Duration = Duration::from_secs(30 * 60);
-const DECLINED_PROBE_BYTES: usize = 64 * 1024;
 const CURSOR_FILE_NAME: &str = "traffic-audit.upload-cursor.json";
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
@@ -83,6 +80,17 @@ struct PendingSegment {
     next_cursor: Cursor,
 }
 
+/// What one sweep iteration does with the pending read.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Step {
+    /// Other scopes' lines only: move the cursor, send nothing.
+    Skip,
+    /// An empty body under the current receipt key.
+    Probe,
+    /// The pending lines under the current receipt key.
+    Lines,
+}
+
 /// Receipt identity and bytes live together across failed sweeps. Replacing a
 /// scope creates a new queue/session, never reuses a key for a different body.
 struct UploadQueue {
@@ -93,6 +101,10 @@ struct UploadQueue {
     sequence: u32,
     pending: Option<PendingSegment>,
     declined: bool,
+    /// The server stored an upload for this queue. Until then only an empty
+    /// probe is sent: the server answers `not_enabled` before reading the body,
+    /// so no log line leaves the device without an open collection window.
+    confirmed: bool,
 }
 
 impl UploadQueue {
@@ -104,7 +116,7 @@ impl UploadQueue {
         };
         Self { log_path, cursor_path, cursor,
             session_id: tono_core::auth::new_installation_id(), sequence: 0, pending: None,
-            declined: false }
+            declined: false, confirmed: false }
     }
 
     fn prepare(&mut self) -> Option<&PendingSegment> {
@@ -112,6 +124,13 @@ impl UploadQueue {
             self.pending = self.read_next();
         }
         self.pending.as_ref()
+    }
+
+    /// Decided from a single read: a line written after an empty read is seen
+    /// by the next iteration, which probes before sending it.
+    fn next_step(&mut self) -> Option<Step> {
+        let lines = self.prepare()?.segment.line_count;
+        Some(if lines == 0 { Step::Skip } else if self.confirmed { Step::Lines } else { Step::Probe })
     }
 
     fn read_next(&self) -> Option<PendingSegment> {
@@ -132,8 +151,7 @@ impl UploadQueue {
         let offset = if self.cursor.file_id.as_ref() == Some(&id) && size >= self.cursor.offset {
             self.cursor.offset
         } else { 0 };
-        let max_chunk = if self.declined { DECLINED_PROBE_BYTES } else { READ_CHUNK_BYTES };
-        let segment = read_open_segment(file, offset, Some(&self.cursor.scope), max_chunk)?;
+        let segment = read_open_segment(file, offset, Some(&self.cursor.scope), READ_CHUNK_BYTES)?;
         let next_cursor = Cursor { scope: self.cursor.scope.clone(), file_id: Some(id),
             offset: offset + segment.consumed };
         Some(PendingSegment { segment, next_cursor })
@@ -141,9 +159,27 @@ impl UploadQueue {
 
     /// The server said it did not store this receipt key, so the bytes can be
     /// dropped without orphaning a stored segment. The cursor does not move.
+    /// A key that carried lines is retired: the probe that follows has another
+    /// body, and the server answers a known key as stored without reading it.
     fn decline(&mut self) {
         self.pending = None;
         self.declined = true;
+        if self.confirmed { self.advance_sequence(); }
+        self.confirmed = false;
+    }
+
+    /// The server stored the empty probe under this receipt key: a window is
+    /// open, and the next key carries real lines.
+    fn confirm(&mut self) {
+        self.declined = false;
+        self.confirmed = true;
+        self.advance_sequence();
+    }
+
+    fn advance_sequence(&mut self) {
+        // Never wrap or saturate into a previously used receipt key.
+        if let Some(next) = self.sequence.checked_add(1) { self.sequence = next; }
+        else { self.session_id = tono_core::auth::new_installation_id(); self.sequence = 0; }
     }
 
     fn acknowledge(&mut self) {
@@ -152,9 +188,7 @@ impl UploadQueue {
                 // Only a stored upload ends the stand-down; skipping lines
                 // that belong to another scope is not an answer from the server.
                 self.declined = false;
-                // Never wrap or saturate into a previously used receipt key.
-                if let Some(next) = self.sequence.checked_add(1) { self.sequence = next; }
-                else { self.session_id = tono_core::auth::new_installation_id(); self.sequence = 0; }
+                self.advance_sequence();
             }
             self.cursor = pending.next_cursor;
             self.cursor.save(&self.cursor_path);
@@ -318,32 +352,35 @@ async fn sweep(
         {
             let inner = state.lock().await;
             if inner.sign_in_generation != generation
+                || inner.account_state == AccountState::Suspended
                 || state.audit().with_log_upload_scope(scope, || ()).is_none() { return Ok(()); }
         }
-        if queue.prepare().is_none() { return Ok(()); }
-        let segment = &queue.pending.as_ref().unwrap().segment;
-        if segment.line_count > 0 {
+        let Some(step) = queue.next_step() else { return Ok(()) };
+        if step != Step::Skip {
             let os_version = os_version_string();
+            let empty = gzip_within_limit(&[]).expect("an empty gzip fits");
+            let segment = &queue.pending.as_ref().unwrap().segment;
+            let (line_count, gzip) = match step {
+                Step::Lines => (segment.line_count, &segment.gzip),
+                _ => (0, &empty),
+            };
             // A revoked consent/owner cancels catch-up, including the awaited
             // HTTP future; it cannot recall bytes already accepted by a server.
             let result = tokio::select! {
                 biased;
                 _ = scope.cancelled.cancelled() => return Ok(()),
                 result = client.upload_diagnostics_log_segment_for_identity(DiagnosticsLogSegment {
-                    session_id: &queue.session_id, sequence: queue.sequence,
-                    line_count: segment.line_count, client_version: env!("CARGO_PKG_VERSION"),
-                    os_version: &os_version, gzip: &segment.gzip,
+                    session_id: &queue.session_id, sequence: queue.sequence, line_count,
+                    client_version: env!("CARGO_PKG_VERSION"), os_version: &os_version, gzip,
                 }, identity) => result,
             };
-            if let Err(err) = result {
-                let newly_declined = is_not_stored(&err) && !queue.declined;
-                if is_not_stored(&err) { queue.decline(); }
-                if !is_not_stored(&err) || newly_declined {
-                    state.audit().log(AuditEvent::NetworkLogSegmentUploadFail { error: err.to_string() });
-                }
-                return Err(err);
-            }
+            if let Err(err) = result { return Err(record_upload_error(state, queue, err)); }
         }
+        if step == Step::Probe {
+            queue.confirm();
+            continue;
+        }
+        let segment = &queue.pending.as_ref().unwrap().segment;
         let event = (segment.line_count > 0).then(|| AuditEvent::NetworkLogSegmentUploaded {
             sequence: queue.sequence, line_count: segment.line_count, bytes: segment.gzip.len() as u32,
         });
@@ -363,6 +400,16 @@ async fn sweep(
             _ = tokio::time::sleep(Duration::from_millis(80)) => {}
         }
     }
+}
+
+/// A not-stored answer stands the queue down; the first one and every real failure are audited.
+fn record_upload_error(state: &Arc<TonoState>, queue: &mut UploadQueue, err: ApiError) -> ApiError {
+    let newly_declined = is_not_stored(&err) && !queue.declined;
+    if is_not_stored(&err) { queue.decline(); }
+    if !is_not_stored(&err) || newly_declined {
+        state.audit().log(AuditEvent::NetworkLogSegmentUploadFail { error: err.to_string() });
+    }
+    err
 }
 
 /// The `os_version` header value, bounded so the server cannot reject the whole
@@ -549,25 +596,33 @@ mod tests {
     }
 
     #[test]
-    fn a_not_stored_receipt_stands_down_to_a_small_probe() {
+    fn no_log_line_is_sent_until_the_server_stores_an_empty_probe() {
         // Upload is on by default and the server stores nothing unless ops
-        // opened a collection window. Treating that answer as a failed send
-        // resent the same full segment every 16 minutes, forever.
+        // opened a collection window. Probing with real lines sent the raw
+        // log off the device on every launch only for it to be discarded.
         let dir = Dir::new("declined");
         let live = dir.join("traffic-audit.jsonl");
-        let scoped = |n| format!("{{\"_uploadScope\":\"a\",\"n\":{n},\"pad\":\"{}\"}}\n", "x".repeat(200));
-        std::fs::write(&live, (1..=1200).map(scoped).collect::<String>()).unwrap();
+        std::fs::write(&live, "").unwrap();
         let mut queue = UploadQueue::new(live.clone(), "a");
-        assert_eq!(queue.prepare().unwrap().segment.line_count, 1200);
+        assert_eq!(queue.next_step(), None);
+        // A line written after the empty read is probed for like any other.
+        std::fs::OpenOptions::new().append(true).open(&live).unwrap()
+            .write_all(b"{\"_uploadScope\":\"a\",\"host\":\"visited.example\"}\n").unwrap();
+        assert_eq!(queue.next_step(), Some(Step::Probe));
+        assert!(gunzip(&gzip_within_limit(&[]).unwrap()).is_empty());
         assert!(is_not_stored(&ApiError::Server { status: 200, message: String::new() }));
 
         queue.decline();
         assert_eq!(next_sweep_delay(0, queue.declined), DECLINED_INTERVAL);
-        let probe = &queue.prepare().unwrap().segment;
-        assert!(probe.consumed as usize <= DECLINED_PROBE_BYTES, "probe read {} bytes", probe.consumed);
-        assert!(probe.line_count > 0);
-        assert_eq!(queue.cursor.offset, 0);
-        assert_eq!(queue.sequence, 0);
+        assert_eq!((queue.next_step(), queue.sequence, queue.cursor.offset), (Some(Step::Probe), 0, 0));
+
+        queue.confirm();
+        assert!(!queue.declined);
+        assert_eq!((queue.next_step(), queue.sequence), (Some(Step::Lines), 1));
+        // The window closed before the lines arrived. Their key is retired:
+        // the server answers a known key as stored without reading the body.
+        queue.decline();
+        assert_eq!((queue.next_step(), queue.sequence), (Some(Step::Probe), 2));
     }
 
     #[test]
