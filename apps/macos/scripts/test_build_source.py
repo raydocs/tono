@@ -43,14 +43,17 @@ class BuildSourceTests(unittest.TestCase):
             helper = repo / 'apps/macos/Tono/Resources/tono-core-helper'
             builder = repo / 'tooling/scripts/build-core-helper.sh'
             helper_source = repo / 'tooling/scripts/core-helper/main.swift'
-            version = repo / 'apps/macos/Tono/Core/HelperProtocolVersion.swift'
             source = repo / 'apps/macos/Tono/App.swift'
-            for path in (helper, helper_source, version):
-                path.parent.mkdir(parents=True, exist_ok=True)
+            # The builder's whole manifest, so its hash mode reads real inputs.
+            for directory in ('tooling/scripts/core-helper', 'tooling/scripts/helper-shared'):
+                shutil.copytree(ROOT / directory, repo / directory)
+            for name in ('tooling/scripts/build-core-helper.sh',
+                         'apps/macos/Tono/Models/UpdateContractV1.swift',
+                         'apps/macos/Tono/Core/HelperProtocolVersion.swift'):
+                (repo / name).parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy(ROOT / name, repo / name)
+            helper.parent.mkdir(parents=True)
             helper.write_bytes(b'committed helper')
-            shutil.copy(ROOT / 'tooling/scripts/build-core-helper.sh', builder)
-            helper_source.write_text('let helper = 1\n')
-            version.write_text('enum HelperProtocolVersion { static let current = "1" }\n')
             source.write_text('// committed\n')
             git = ['git', '-C', str(repo), '-c', 'user.name=t', '-c', 'user.email=t@example.invalid']
             subprocess.run(['git', 'init', '-q', str(repo)], check=True)
@@ -68,13 +71,16 @@ class BuildSourceTests(unittest.TestCase):
 
             self.assertIs(dirty(), False)
             # What a build leaves behind: the binary, and in the git directory
-            # its hash next to the hash of the sources it was compiled from.
-            sources_hash = subprocess.run(
-                ['sh', str(builder), '--sources-hash'], check=True, text=True,
-                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL).stdout.strip()
-            helper.write_bytes(b'rebuilt helper')
-            (repo / '.git/tono-core-helper.built').write_text(
-                hashlib.sha256(b'rebuilt helper').hexdigest() + ' ' + sources_hash + '\n')
+            # its hash next to the fingerprint of what it was compiled from.
+            def record_build():
+                fingerprint = subprocess.run(
+                    ['sh', str(builder), '--build-fingerprint'], check=True, text=True,
+                    capture_output=True).stdout.strip()
+                helper.write_bytes(b'rebuilt helper')
+                (repo / '.git/tono-core-helper.built').write_text(
+                    hashlib.sha256(b'rebuilt helper').hexdigest() + ' ' + fingerprint + '\n')
+
+            record_build()
             self.assertIs(dirty(), False)
             source.write_text('// edited\n')
             self.assertIs(dirty(), True)
@@ -84,9 +90,21 @@ class BuildSourceTests(unittest.TestCase):
             helper.write_bytes(b'rebuilt helper')
             self.assertIs(dirty(), False)
             # Helper sources committed without a rebuild: the binary is stale.
-            helper_source.write_text('let helper = 2\n')
+            with helper_source.open('a') as file:
+                file.write('let staleness = 1\n')
             subprocess.run(git + ['commit', '-q', '-m', 'helper source', str(helper_source)], check=True)
             self.assertIs(dirty(), True)
+            record_build()
+            self.assertIs(dirty(), False)
+            # So is one built with another recipe (compiler flags live in the builder).
+            with builder.open('a') as file:
+                file.write('# another recipe\n')
+            subprocess.run(git + ['commit', '-q', '-m', 'recipe', str(builder)], check=True)
+            self.assertIs(dirty(), True)
+            # A fingerprint over a partial manifest is not a fingerprint.
+            helper_source.unlink()
+            self.assertNotEqual(subprocess.run(
+                ['sh', str(builder), '--build-fingerprint'], capture_output=True).returncode, 0)
 
 
 if __name__ == '__main__':
