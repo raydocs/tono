@@ -713,7 +713,9 @@
   "home": {
     "title": {
       "idle": "未连接",
-      "failed": "没连上"
+      "failed": "没连上",
+      "connecting": "连接中",
+      "disconnecting": "断开中"
     },
     "sentence": {
       "idle": "选好线路，点连接。"

@@ -6,6 +6,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from '@testing-library/react'
 import i18n from 'i18next'
 import { initReactI18next } from 'react-i18next'
@@ -327,7 +328,7 @@ it('starts the sunset in the same commit as the authoritative disconnecting titl
     screen
       .getByRole('heading', { level: 1 })
       .querySelector('.tono-home__text-in')?.textContent,
-  ).toBe(enTono.pill.title.disconnecting)
+  ).toBe(enTono.home.title.disconnecting)
   expect(
     screen
       .getByRole('button', { name: enTono.pill.title.disconnecting })
@@ -453,4 +454,33 @@ it('shows a released failure sentence and retry only once, with diagnostics outs
   expect(screen.queryByRole('button', { name: 'Retry Now' })).toBeNull()
   expect(container.querySelector('.tono-home__progress-card button')).toBeNull()
   expect(screen.getByRole('button', { name: 'Copy details' })).toBeDefined()
+})
+
+it('uses the selected chip name and measured exit latency in the checked popover row', async () => {
+  mocks.status.exitDelayMs = 83
+  render(view())
+  fireEvent.click(screen.getByTestId('tono-home-line-chip'))
+  const row = await within(
+    screen.getByRole('dialog', { name: 'Switch line' }),
+  ).findByRole('button', { name: /Sakura.*Tokyo/ })
+  expect(within(row).getByText('83 ms')).toBeDefined()
+  expect(row.getAttribute('aria-pressed')).toBe('true')
+  expect(
+    row.querySelector('[data-testid="tono-home-selected-check"]'),
+  ).not.toBeNull()
+})
+
+it('removes the trailing stage ellipsis before the slow sentence suffix', () => {
+  vi.useFakeTimers()
+  mocks.status.uiState = 'connecting'
+  mocks.status.stage = 'startingTunnel'
+  render(view())
+  act(() => {
+    vi.advanceTimersByTime(8000)
+  })
+  expect(
+    screen
+      .getByTestId('tono-home-sentence')
+      .querySelector('.tono-home__text-in')?.textContent,
+  ).not.toMatch(/(?:\.\.\.|…)/)
 })

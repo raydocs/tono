@@ -713,7 +713,9 @@
   "home": {
     "title": {
       "idle": "Not connected",
-      "failed": "Couldn't connect"
+      "failed": "Couldn't connect",
+      "connecting": "Connecting",
+      "disconnecting": "Disconnecting"
     },
     "sentence": {
       "idle": "Choose a line, then connect."

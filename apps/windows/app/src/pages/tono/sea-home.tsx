@@ -20,15 +20,16 @@ import { CONNECT_STAGE_LABEL_KEYS } from '@/tono-ui/connect-stages'
 import { hasLiveProtection } from '@/tono-ui/protection-evidence'
 import { SeaScene, type SeaPhase } from '@/tono-ui/SeaScene'
 import { TONO_FONT_STACK } from '@/tono-ui/theme'
+import { TonoIcon } from '@/tono-ui/TonoIcon'
 
 import { useHomeDialog } from './home-focus'
+import { homeLineParts, homeLineReading } from './home-line-meta'
 import { HomeLines } from './home-lines'
 import {
   HOME_CONNECT_TIMES,
   useHomeTiming,
   useRetryCountdown,
 } from './home-timing'
-import { nodeCityLabel, nodeCityParts } from './node-meta'
 
 import './sea-home.css'
 
@@ -167,9 +168,9 @@ export const SeaHome = ({
         : state === 'protectedOffline' && !hasLiveProtection(status)
           ? 'tono.pill.title.protectionUnknown'
           : state === 'connecting'
-            ? 'tono.pill.title.connecting'
+            ? 'tono.home.title.connecting'
             : state === 'disconnecting'
-              ? 'tono.pill.title.disconnecting'
+              ? 'tono.home.title.disconnecting'
               : state === 'protectedOffline'
                 ? 'tono.pill.title.protectedOffline'
                 : 'tono.pill.title.connected',
@@ -177,7 +178,9 @@ export const SeaHome = ({
   const sentence =
     state === 'connecting'
       ? elapsed >= HOME_CONNECT_TIMES.slow
-        ? t('tono.home.slow.sentence', { stage: stageSentence })
+        ? t('tono.home.slow.sentence', {
+            stage: stageSentence.replace(/(?:\.{3}|…)+\s*$/, '').trimEnd(),
+          })
         : stageSentence
       : state === 'disconnecting'
         ? t('tono.pill.subtitle.restoringAccess')
@@ -218,14 +221,11 @@ export const SeaHome = ({
     ? title.length > 4
     : title.length > 12
   const selected = status?.selectedServer
-  const delay = status?.exitDelayMs
-  const lineName = selected
-    ? nodeCityParts(selected).codename || nodeCityLabel(selected, t)
-    : t('tono.home.pickLine')
-  const lineDetail =
-    selected && nodeCityParts(selected).codename
-      ? nodeCityLabel(selected, t)
-      : ''
+  const reading = selected ? homeLineReading(selected, status) : null
+  const delay = reading?.ms
+  const parts = selected ? homeLineParts(selected, t) : null
+  const lineName = parts?.name ?? t('tono.home.pickLine')
+  const lineDetail = parts?.city ?? ''
 
   useEffect(() => {
     if (protectedNow && firstVisit) markFirstConnectedHintSeen()
@@ -311,7 +311,7 @@ export const SeaHome = ({
         </small>
       )}
       <span className="tono-home__chevron" aria-hidden="true">
-        ⌄
+        <TonoIcon name="chevronDown" size={12} />
       </span>
     </button>
   )

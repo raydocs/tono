@@ -16,13 +16,11 @@ import {
 } from '@/services/tono'
 import { hasLiveProtection } from '@/tono-ui/protection-evidence'
 import { useTonoToast } from '@/tono-ui/tono-toast-context'
+import { TonoIcon } from '@/tono-ui/TonoIcon'
 
 import { useHomeDialog } from './home-focus'
-import {
-  latencyLabelKey,
-  latencyLabelVars,
-  readNodeLatency,
-} from './node-latency'
+import { homeLineParts, homeLineReading } from './home-line-meta'
+import { latencyLabelKey, latencyLabelVars } from './node-latency'
 import { catalogBaseName, nodeCityLabel } from './node-meta'
 import {
   preferencesMatch,
@@ -193,7 +191,9 @@ export const HomeLines = ({
       >
         {rows.map((row, index) => {
           const server = servers?.find((server) => server.name === row.name)
-          const delay = readNodeLatency(row.name)
+          const reading = homeLineReading(row.name, status)
+          const delay = reading?.ms ?? null
+          const parts = homeLineParts(row.name, t)
           return (
             <div key={row.name}>
               {rows[index - 1]?.group !== row.group && (
@@ -206,7 +206,9 @@ export const HomeLines = ({
                 className="tono-home__line-row"
                 disabled={selecting !== null || !server?.available}
                 onClick={() => void select(row.name)}
-                aria-label={`${nodeCityLabel(row.name, t)} · ${delay === null ? t('tono.nodes.untested') : t(latencyLabelKey('cached', delay), latencyLabelVars(delay))}`}
+                aria-pressed={server?.selected === true}
+                title={`${parts.name} ${parts.city}`}
+                aria-label={`${parts.name} ${parts.city} · ${reading === null ? t('tono.nodes.untested') : t(latencyLabelKey(reading.kind, reading.ms), latencyLabelVars(reading.ms))}`}
               >
                 <span
                   className="tono-home__dot"
@@ -216,7 +218,12 @@ export const HomeLines = ({
                     hasLiveProtection(status)
                   }
                 />
-                <span>{nodeCityLabel(row.name, t)}</span>
+                <span className="tono-home__row-name">
+                  {parts.name}{' '}
+                  {parts.city && (
+                    <span className="tono-home__row-city">{parts.city}</span>
+                  )}
+                </span>
                 <small>
                   {selecting === row.name
                     ? '…'
@@ -224,6 +231,14 @@ export const HomeLines = ({
                       ? '—'
                       : `${delay} ms`}
                 </small>
+                {server?.selected && (
+                  <span
+                    aria-hidden="true"
+                    data-testid="tono-home-selected-check"
+                  >
+                    <TonoIcon name="check" size={12} />
+                  </span>
+                )}
               </button>
             </div>
           )

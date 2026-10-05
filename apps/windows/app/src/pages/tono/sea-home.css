@@ -678,3 +678,35 @@
   color: #ffe2b0 !important;
   background: rgba(255, 217, 160, 0.1) !important;
 }
+
+.tono-home__row-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tono-home__row-city {
+  color: rgba(246, 242, 236, 0.72);
+  font-size: 12px;
+}
+.tono-home__chevron {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  align-self: center;
+}
+.tono-home__progress[data-expanded="false"] .tono-home__progress-card {
+  background: transparent !important;
+  padding: 0 !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+.tono-home__progress-card summary {
+  font-size: 13px;
+  color: rgba(246, 242, 236, 0.86);
+  cursor: pointer;
+  padding: 4px 0;
+}

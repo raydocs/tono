@@ -1132,6 +1132,8 @@ export const translationKeys = [
   'tono.scenePreview.staticProbe',
   'tono.home.title.idle',
   'tono.home.title.failed',
+  'tono.home.title.connecting',
+  'tono.home.title.disconnecting',
   'tono.home.sentence.idle',
   'tono.home.details',
   'tono.home.closeDetails',

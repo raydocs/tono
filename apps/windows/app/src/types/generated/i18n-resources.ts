@@ -1243,6 +1243,8 @@ export interface TranslationResources {
           aiToday: string
         }
         title: {
+          connecting: string
+          disconnecting: string
           failed: string
           idle: string
         }
