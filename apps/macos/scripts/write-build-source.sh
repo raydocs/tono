@@ -10,7 +10,11 @@ case "$commit" in
 esac
 dirty=null
 if [ "$commit_json" != null ]; then
-  if status=$(git -C "$root" status --porcelain --untracked-files=normal 2>/dev/null); then
+  # The helper binary is a build product: packaging recompiles it from tracked
+  # sources (tooling/scripts/build-core-helper.sh) before this runs, and the
+  # tracked copy lags behind them. Its sources still count toward `dirty`.
+  if status=$(git -C "$root" status --porcelain --untracked-files=normal -- \
+      ':(top)' ':(top,exclude)apps/macos/Tono/Resources/tono-core-helper' 2>/dev/null); then
     dirty=false
     if [ -n "$status" ]; then dirty=true; fi
   fi

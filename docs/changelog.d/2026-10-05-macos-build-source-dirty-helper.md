@@ -1,0 +1,11 @@
+## 2026-10-05 · macOS：CI 构建不再一律记 `dirty:true`；打包缺 helper 构建器时直接失败
+- 归属：SHIP_PLAN §2 第 10 项（R6 打包扫描 R6-6，Issue #1323）；所有者 2026-10-05「把没做的做了」。动 `apps/macos/scripts/write-build-source.sh`、`tooling/scripts/package-macos-test.sh`、`macos-ci.yml`（多跑一个已有的 Python 测试文件）。
+- 来源：基线 main `107ce6d9` → 分支 `fix/macos-build-source-dirty-helper-20261005`；尚未合入 main。
+- 缺陷修复：无客户运行时缺陷。
+- 新增/优化：无。
+- 工程与测试修正：
+  - 打包先跑 `build-core-helper.sh`，它重写被 git 跟踪的 `apps/macos/Tono/Resources/tono-core-helper`（仓库里那份比 helper 源码旧），随后 `write-build-source.sh` 看到工作区有改动，于是每个 CI 包的 `tono-build-source.json` 都是 `dirty:true`，诊断里分不出干净的 CI 构建和本地改过的构建。现在算 `dirty` 时不看这一个文件（它是由受跟踪源码编译出来的产物，源码本身仍然计入）。
+  - `package-macos-test.sh` 原来只在构建器可执行时才跑它；构建器缺失时会悄悄把仓库里那份旧 helper 打进包。现在缺构建器直接失败。
+  - 没有选「不再跟踪这个二进制」：`macos-release.yml` 在打包前有两次直接 `xcodebuild`（构建和测试），它们靠仓库里的这份文件满足工程引用；改成不跟踪要同时改发布工作流，本机又不能构建验证。留作后续。
+  - `test_build_source.py` 之前没有任何工作流运行，现在加进 `macos-ci` 的策略测试。回归 `test_rebuilding_the_helper_binary_does_not_mark_the_build_dirty` 先单独推送为红（`0f346659`），本机红：`AssertionError: True is not False`。
+- 验证：本机 `python3 apps/macos/scripts/test_build_source.py` 2 通过，`test_macos_archive_layout.py` 2 通过，两个脚本 `sh -n` 通过。打包本身只有托管 CI/候选工作流能跑，本 PR 没有构建新候选；`dirty:false` 要在下一个 macOS 候选的 `tono-build-source.json` 里确认。
