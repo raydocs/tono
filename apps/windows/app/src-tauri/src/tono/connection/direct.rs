@@ -61,8 +61,11 @@ pub(super) fn direct_renewal_follow_up(error: &str) -> DirectRenewalFollowUp {
 
 /// A renewal that reached no Service verdict is retried on later ticks until this long after the
 /// last granted one was sent. The Service committed that renewal no earlier than its send, so its
-/// 60 s committed lease outlasts this window; the grace only stops one IPC blip (a busy pipe, a
-/// Service restart, a long WFP operation) releasing protection.
+/// 60 s committed lease outlasts this window; the grace only stops one short IPC blip (a busy
+/// pipe, a transient transport error) releasing protection while the Service still holds the
+/// lease. It does not carry a session across a Service restart, which loses the in-memory lease,
+/// or cover a renewal queued behind a long WFP operation, which gets no verdict only after its
+/// own IPC timeout, past this window.
 pub(super) const DIRECT_RENEWAL_AMBIGUITY_GRACE: Duration = Duration::from_secs(40);
 
 /// When this heartbeat's last granted renewal was sent. Counting from its reply instead would

@@ -23,10 +23,13 @@
   - minor：DNS 回归靠固定等待猜时序 → 改由钩子驱动；minor：该测试断言失败时清理不全 → 失败路径也恢复并等删除返回，断言前先重置状态。
 - 候选/发布：仅源码，无新候选。
 - 剩余限制：
-  - DIRECT：宽限只覆盖没有 Service 判决的情况。单次续租 IPC 自身最长约 95 秒，超过宽限后照旧处置。
+  - DIRECT：宽限只覆盖没有 Service 判决的情况，实际能救的只有一种：Service 进程还在、租约还在，这一拍的 IPC 没送到（管道忙、瞬时传输错误）。Service 重启不在内：租约只存在 Service 内存里，重启后恢复出的状态不带租约，宽限只是把处置推迟到 Service 回来。排在长 WFP 操作后面的续租也不在内：它要等到自己的 IPC 超时（单次最长约 95 秒，已过宽限）才算没有判决，而 Service 取到锁后会按到期拒绝（另记 WIN-DIRECT-RENEW-QUEUE-EXPIRY）。超过宽限后照旧处置。
   - DNS：删除真卡住时，之后每次 enable/restore 都等 5 秒后失败（有界，失败关闭），直到删除返回。卸载时的快照隔离改名未加等待，那里只可能碰到迟到删除自己的旧快照。
   - 上行读取：5 秒期限是推定值（Codex 建议 2 秒，正常读取只需毫秒），挂起是否真实发生、持续多久需实机。读取一直不回答时会话保持：若 DIRECT 绑定的网卡确已消失，直连流量会一直失败到读取恢复（不泄漏；其间的网络变化同样得不到回答）。
   - 冻结期不合并。合并前仍需 jev-route 范围审查和 exact-head `ci-gate`。
 - 同轮仍 open（需所有者决定，未改代码）：
   - WIN-DNS-RACE-MASKS-SYSTEM：若持续的系统 DNS 失败要让连接失败，会推翻 SHIP_PLAN 第 47 行的所有者快修和 G1.1（Win10 必须过 securingDNS）。
   - WIN-MISSING-UPLINK-GRACE：缺上行时保持 Core/WFP 的宽限要诚实显示「恢复中」，需要新的连接状态机子状态和界面改动，并需睡眠/Wi-Fi 实机验证。
+- 复核中新记的 open 项（另一会话读 `8297ddea`、`239ba954` 的 diff 与调用点，未改行为，只改了 `DIRECT_RENEWAL_AMBIGUITY_GRACE` 的注释）：
+  - WIN-DIRECT-RENEW-QUEUE-EXPIRY：Service 在取得 WFP 操作锁之后才判 DIRECT 租约是否到期，排队超过期限的续租被拒绝，尽管请求在期限内已到达。缩短 App 端续租超时没有用，数值保持不变。
+  - WIN-DNS-SNAPSHOT-LATE-RENAME：本轮只围住了迟到的快照删除；隔离改名和原子写入末尾的替换同样按路径、可迟到落地，未围住。
