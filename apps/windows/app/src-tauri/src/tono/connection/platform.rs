@@ -235,37 +235,73 @@ pub(super) fn detect_physical_interface_windows() -> Result<String, String> {
 }
 
 /// How long the health monitor waits for the uplink enumeration, well past a normal read of a few
-/// milliseconds. A slower read counts as unknown, and an unknown read does not keep a committed
-/// DIRECT binding in place.
+/// milliseconds. A slower read gives no answer this time; its answer goes to the next read.
 #[cfg(windows)]
 const UPLINK_READ_BUDGET: std::time::Duration = std::time::Duration::from_secs(5);
 
+/// Keyed by the connect generation and the committed DIRECT adapter the read was for.
 #[cfg(windows)]
-static UPLINK_READ_SLOT: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(1);
+static UPLINK_READ: NativeRead<(u64, String), Vec<String>> = NativeRead::new();
 
-/// One native read in flight at most, answered within `budget`. `Ok(None)` is no answer: an
-/// earlier read still holds the only slot, or this one did not return in time. Neither says
-/// anything about the uplinks, unlike a read that failed. The permit lives in the blocking worker:
-/// a read that never returns keeps the slot, so later reads answer `None` at once instead of
-/// leaving one more hung worker behind on every monitor tick.
+/// One native read in flight at most, answered within a budget. The permit lives in the blocking
+/// worker: a read that never returns keeps the slot, so later reads give no answer at once instead
+/// of leaving one more hung worker behind on every monitor tick. A read that returns after its
+/// caller stopped waiting leaves its answer for the next read with the same key, so a native call
+/// that always outlasts the budget still answers one read later.
 #[cfg(any(windows, test))]
-async fn bounded_native_read<T: Send + 'static>(
-    slot: &'static tokio::sync::Semaphore,
-    budget: std::time::Duration,
-    read: impl FnOnce() -> Result<T, String> + Send + 'static,
-) -> Result<Option<T>, String> {
-    let Ok(permit) = slot.try_acquire() else {
-        return Ok(None);
-    };
-    let worker = tokio::task::spawn_blocking(move || {
-        let _permit = permit;
-        read()
-    });
-    match tokio::time::timeout(budget, worker).await {
-        Ok(joined) => joined
-            .map_err(|error| format!("physical uplink enumeration worker failed: {error}"))?
-            .map(Some),
-        Err(_) => Ok(None),
+pub(super) struct NativeRead<K, T> {
+    slot: tokio::sync::Semaphore,
+    late: std::sync::Mutex<Option<(K, Result<T, String>)>>,
+}
+
+#[cfg(any(windows, test))]
+impl<K, T> NativeRead<K, T> {
+    pub(super) const fn new() -> Self {
+        Self {
+            slot: tokio::sync::Semaphore::const_new(1),
+            late: std::sync::Mutex::new(None),
+        }
+    }
+}
+
+#[cfg(any(windows, test))]
+impl<K: PartialEq + Send + 'static, T: Send + 'static> NativeRead<K, T> {
+    /// `Ok(None)` is no answer: an earlier read still holds the only slot, or this one did not
+    /// return within `budget`. Neither says anything about the result, unlike a read that failed.
+    /// A late answer read for another key is dropped: it may predate what this caller compares it with.
+    pub(super) async fn read(
+        &'static self,
+        key: K,
+        budget: std::time::Duration,
+        call: impl FnOnce() -> Result<T, String> + Send + 'static,
+    ) -> Result<Option<T>, String> {
+        let Ok(permit) = self.slot.try_acquire() else {
+            return Ok(None);
+        };
+        // The slot is free, so the worker that left a late answer has finished writing it.
+        let late = self
+            .late
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take();
+        if let Some((late_key, answer)) = late
+            && late_key == key
+        {
+            return answer.map(Some);
+        }
+        let (answered, answer) = tokio::sync::oneshot::channel();
+        tokio::task::spawn_blocking(move || {
+            // Bound first, so dropped last: the slot frees only after a late answer is stored.
+            let _permit = permit;
+            if let Err(unread) = answered.send(call()) {
+                *self.late.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some((key, unread));
+            }
+        });
+        match tokio::time::timeout(budget, answer).await {
+            Ok(Ok(answer)) => answer.map(Some),
+            Ok(Err(_)) => Err("physical uplink enumeration worker failed".to_owned()),
+            Err(_) => Ok(None),
+        }
     }
 }
 
@@ -273,12 +309,12 @@ async fn bounded_native_read<T: Send + 'static>(
 /// operationally up, by alias. Unlike [`detect_physical_interface`] this is safe after WinTUN
 /// starts: it never consults `GetBestRoute2` (which then resolves to Tono's own adapter), and the
 /// same filter that keeps Wintun/virtual adapters out of the DIRECT choice applies to each row.
-/// Used only to decide whether the committed DIRECT binding still names a live uplink.
-/// `Ok(None)`: no answer within the read's budget (see [`bounded_native_read`]).
-pub(super) async fn usable_physical_uplinks() -> Result<Option<Vec<String>>, String> {
+/// Used only to decide whether the committed DIRECT binding of `generation` (`committed`) still
+/// names a live uplink. `Ok(None)`: no answer within the read's budget (see [`NativeRead::read`]).
+pub(super) async fn usable_physical_uplinks(generation: u64, committed: &str) -> Result<Option<Vec<String>>, String> {
     #[cfg(windows)]
     {
-        bounded_native_read(&UPLINK_READ_SLOT, UPLINK_READ_BUDGET, || -> Result<Vec<String>, String> {
+        UPLINK_READ.read((generation, committed.to_owned()), UPLINK_READ_BUDGET, || -> Result<Vec<String>, String> {
             let mut uplinks = Vec::new();
             for luid in default_route_interface_luids()? {
                 if let Ok((alias, true)) = hardware_uplink_alias(luid)
@@ -293,6 +329,7 @@ pub(super) async fn usable_physical_uplinks() -> Result<Option<Vec<String>>, Str
     }
     #[cfg(not(windows))]
     {
+        let _ = (generation, committed);
         detect_physical_interface_route_command().await.map(|alias| Some(vec![alias]))
     }
 }
@@ -536,19 +573,19 @@ pub(crate) fn remove_legacy_runtime_copy(catalog_dir: &std::path::Path) {
 
 #[cfg(test)]
 mod tests {
-    use super::{bounded_native_read, first_up_hardware_alias};
+    use super::{NativeRead, first_up_hardware_alias};
 
     /// WIN-UPLINK-READER-HANG: the uplink read had no bound, so an IP Helper call that never
     /// returned stopped the health monitor of a session with DIRECT. It now gives no answer within
     /// its budget, and the hung worker keeps the only slot instead of a second worker starting.
     #[tokio::test]
     async fn hung_uplink_reader_is_bounded() {
-        static SLOT: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(1);
+        static READ: NativeRead<u64, Vec<String>> = NativeRead::new();
         let budget = std::time::Duration::from_millis(50);
         let (resume, resumed) = std::sync::mpsc::channel::<()>();
         let hung = tokio::time::timeout(
             std::time::Duration::from_secs(5),
-            bounded_native_read(&SLOT, budget, move || {
+            READ.read(1, budget, move || {
                 let _ = resumed.recv();
                 Ok(Vec::<String>::new())
             }),
@@ -556,15 +593,65 @@ mod tests {
         .await;
         let second_ran = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         let ran = std::sync::Arc::clone(&second_ran);
-        let second = bounded_native_read(&SLOT, budget, move || {
-            ran.store(true, std::sync::atomic::Ordering::SeqCst);
-            Ok(Vec::<String>::new())
-        })
-        .await;
+        let second = READ
+            .read(1, budget, move || {
+                ran.store(true, std::sync::atomic::Ordering::SeqCst);
+                Ok(Vec::<String>::new())
+            })
+            .await;
         drop(resume);
         assert!(matches!(hung, Ok(Ok(None))), "a hung read must give no answer within its budget");
         assert!(matches!(second, Ok(None)), "the hung read still holds the only slot");
         assert!(!second_ran.load(std::sync::atomic::Ordering::SeqCst), "no second native worker started");
+    }
+
+    /// Leave a late answer in `read`: a read for `key` that outlives its budget, then returns
+    /// `uplink` after its caller has stopped waiting.
+    async fn leave_late_answer(read: &'static NativeRead<u64, Vec<String>>, key: u64, uplink: &'static str) {
+        let (resume, resumed) = std::sync::mpsc::channel::<()>();
+        let slow = read
+            .read(key, std::time::Duration::from_millis(50), move || {
+                let _ = resumed.recv();
+                Ok(vec![uplink.to_owned()])
+            })
+            .await;
+        assert!(matches!(slow, Ok(None)), "the slow read gives no answer within its budget");
+        drop(resume);
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            while read.slot.available_permits() == 0 {
+                tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .expect("the slow read returns once resumed");
+    }
+
+    /// WIN-UPLINK-READER-HANG (review): a read that outlived its budget lost its answer, so a
+    /// native call that always took longer than the budget never answered, and a DIRECT adapter
+    /// that was gone stayed in place for good. The answer now reaches the next read for the same
+    /// key without another native call; a read for another key drops it and reads for itself.
+    #[tokio::test]
+    async fn late_uplink_answer_reaches_the_next_read() {
+        static READ: NativeRead<u64, Vec<String>> = NativeRead::new();
+        let answer_now = std::time::Duration::from_secs(5);
+        let native_calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let fresh_read = |calls: &std::sync::Arc<std::sync::atomic::AtomicUsize>| {
+            let calls = std::sync::Arc::clone(calls);
+            move || {
+                calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                Ok::<_, String>(vec!["Wi-Fi".to_owned()])
+            }
+        };
+
+        leave_late_answer(&READ, 1, "Ethernet").await;
+        let late = READ.read(1, answer_now, fresh_read(&native_calls)).await;
+        assert_eq!(late, Ok(Some(vec!["Ethernet".to_owned()])), "the late answer reaches the next read");
+        assert_eq!(native_calls.load(std::sync::atomic::Ordering::SeqCst), 0, "without another native call");
+
+        leave_late_answer(&READ, 1, "Ethernet").await;
+        let other = READ.read(2, answer_now, fresh_read(&native_calls)).await;
+        assert_eq!(other, Ok(Some(vec!["Wi-Fi".to_owned()])), "a read for another key reads for itself");
+        assert_eq!(native_calls.load(std::sync::atomic::Ordering::SeqCst), 1);
     }
 
     #[test]

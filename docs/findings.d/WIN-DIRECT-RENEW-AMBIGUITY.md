@@ -4,4 +4,4 @@
 
 Codex 核验 PARTIAL：Service release 先恢复 DNS、停本 owner Core，最后才释放 WFP，审查报告里「先放 WFP 再跑约 4 秒」不成立。WIN-DIRECT-RENEW-SELECTIVE（fixed bededbae）解决释放类别，不是宽限。记录于 #1386。
 
-2026-10-05 三轮：按 Codex 的修法在 #1395 修复，见 [changelog](../changelog.d/2026-10-05-connection-audit-fixes-r2.md)。Codex high 复审 major：第一版从回复到达算宽限，回复慢时宽限可越过 Service 租约；已改为从获准续租的发送时刻算。
+2026-10-05 三轮：按 Codex 的修法在 #1395 修复，见 [changelog](../changelog.d/2026-10-05-connection-audit-fixes-r2.md)。Codex high 复审 major：第一版从回复到达算宽限，回复慢时宽限可越过 Service 租约；已改为从获准续租的发送时刻算。复审另提「首拍无宽限会放行 strict 会话」：Windows 上没有 strict 的 DIRECT 会话（App 不设 strict，Service 布防固定写 false，只有 `emergency_armed()` 置 true 且不带 DIRECT），不成立；首拍照本 PR 之前的非 strict 处置。

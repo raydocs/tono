@@ -1385,7 +1385,9 @@ static UNREAD_DIRECT_BINDING: std::sync::atomic::AtomicU64 =
 const NO_UNREAD_DIRECT_BINDING: u64 = u64::MAX;
 
 /// X2-1: apply [`in_place_verdict`] to the live session. The uplinks are read only when a
-/// DIRECT overlay is committed, so a full-tunnel session pays nothing for it.
+/// DIRECT overlay is committed, so a full-tunnel session pays nothing for it. A check whose
+/// session was replaced while it read decides nothing for the new one: it returns
+/// [`InPlaceVerdict::Unanswered`] and leaves the marker alone.
 async fn may_keep_session_in_place(state: &Arc<TonoState>, tunnel_proven: bool) -> InPlaceVerdict {
     let (committed, generation) = {
         let inner = state.lock().await;
@@ -1396,10 +1398,9 @@ async fn may_keep_session_in_place(state: &Arc<TonoState>, tunnel_proven: bool) 
         };
         (committed, inner.connect_generation)
     };
-    let read = if committed.is_some() {
-        usable_physical_uplinks().await
-    } else {
-        Ok(Some(Vec::new()))
+    let read = match committed.as_deref() {
+        Some(interface) => usable_physical_uplinks(generation, interface).await,
+        None => Ok(Some(Vec::new())),
     };
     if let Err(error) = &read {
         logging!(warn, Type::Service, "Tono: physical uplinks unreadable; DIRECT is not kept in place: {error}");
@@ -1410,22 +1411,30 @@ async fn may_keep_session_in_place(state: &Arc<TonoState>, tunnel_proven: bool) 
         Err(_) => UplinkRead::Failed,
     };
     let verdict = in_place_verdict(tunnel_proven, committed.as_deref(), uplinks);
-    if verdict == InPlaceVerdict::Unanswered {
-        // Logged once per unanswered stretch: a hung read keeps answering this on every tick.
-        if UNREAD_DIRECT_BINDING.swap(generation, std::sync::atomic::Ordering::AcqRel) != generation {
-            logging!(
-                warn,
-                Type::Service,
-                "Tono: physical uplinks gave no answer in time; keeping DIRECT in place and reading them again on a later tick"
+    {
+        // The generation cannot move under the state lock, so a check from a replaced session
+        // can neither set nor clear the marker of the session that replaced it.
+        let inner = state.lock().await;
+        if inner.connect_generation != generation {
+            return InPlaceVerdict::Unanswered;
+        }
+        if verdict == InPlaceVerdict::Unanswered {
+            // Logged once per unanswered stretch: a hung read keeps answering this on every tick.
+            if UNREAD_DIRECT_BINDING.swap(generation, std::sync::atomic::Ordering::AcqRel) != generation {
+                logging!(
+                    warn,
+                    Type::Service,
+                    "Tono: physical uplinks gave no answer in time; keeping DIRECT in place and reading them again on a later tick"
+                );
+            }
+        } else {
+            let _ = UNREAD_DIRECT_BINDING.compare_exchange(
+                generation,
+                NO_UNREAD_DIRECT_BINDING,
+                std::sync::atomic::Ordering::AcqRel,
+                std::sync::atomic::Ordering::Acquire,
             );
         }
-    } else {
-        let _ = UNREAD_DIRECT_BINDING.compare_exchange(
-            generation,
-            NO_UNREAD_DIRECT_BINDING,
-            std::sync::atomic::Ordering::AcqRel,
-            std::sync::atomic::Ordering::Acquire,
-        );
     }
     if tunnel_proven && verdict == InPlaceVerdict::Rebuild {
         logging!(

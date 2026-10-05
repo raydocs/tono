@@ -2202,6 +2202,7 @@ pub(crate) mod test_hooks {
     static SNAPSHOT_DELETE_RESUMED: Condvar = Condvar::new();
     static SNAPSHOT_DELETE_REACHED_PAUSE: AtomicBool = AtomicBool::new(false);
     static SNAPSHOT_SETTLE_WAITED: AtomicBool = AtomicBool::new(false);
+    static SNAPSHOT_DELETE_RETURNED: AtomicBool = AtomicBool::new(false);
 
     /// While paused, the snapshot delete stops on its blocking thread before the file is
     /// touched, until the test resumes it: an unlink stalled behind a filter driver.
@@ -2225,6 +2226,7 @@ pub(crate) mod test_hooks {
     pub(crate) fn set_snapshot_delete_paused(paused: bool) {
         SNAPSHOT_DELETE_REACHED_PAUSE.store(false, Ordering::Release);
         SNAPSHOT_SETTLE_WAITED.store(false, Ordering::Release);
+        SNAPSHOT_DELETE_RETURNED.store(false, Ordering::Release);
         *SNAPSHOT_DELETE_PAUSED
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = paused;
@@ -2249,6 +2251,18 @@ pub(crate) mod test_hooks {
     #[cfg(test)]
     pub(crate) fn snapshot_settle_waited() -> bool {
         SNAPSHOT_SETTLE_WAITED.load(Ordering::Acquire)
+    }
+
+    /// Record that a snapshot delete's unlink has returned, independently of the guard it holds.
+    #[cfg(test)]
+    pub(crate) fn note_snapshot_delete_returned() {
+        SNAPSHOT_DELETE_RETURNED.store(true, Ordering::Release);
+    }
+
+    /// Whether a snapshot delete's unlink has returned since the pause was armed or resumed.
+    #[cfg(test)]
+    pub(crate) fn snapshot_delete_returned() -> bool {
+        SNAPSHOT_DELETE_RETURNED.load(Ordering::Acquire)
     }
 
     #[cfg(test)]
@@ -2813,7 +2827,10 @@ async fn remove_restored_snapshot() -> std::io::Result<()> {
         let _held = held;
         #[cfg(any(not(windows), feature = "test"))]
         test_hooks::pause_snapshot_delete();
-        std::fs::remove_file(path)
+        let removed = std::fs::remove_file(path);
+        #[cfg(test)]
+        test_hooks::note_snapshot_delete_returned();
+        removed
     })
     .await
     .unwrap_or_else(|error| Err(std::io::Error::other(error)))

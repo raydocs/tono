@@ -4,4 +4,4 @@
 
 Codex 核验 PARTIAL：后继快照可与旧快照字节相同，延后再比摘要仍可能删掉新快照。WIN-DNS-SNAPSHOT-DELETE-BLOCKS、WIN-DNS-RETIRED-SNAPSHOT-REPLAY 是相关的不同机制。记录于 #1386。
 
-2026-10-05 三轮：没有采用按句柄删除（需要本机无法编译的 Win32 调用），改为让迟到的删除与后继快照写入串行：删除线程持锁到删除返回，后继有界等待。见 [changelog](../changelog.d/2026-10-05-connection-audit-fixes-r2.md)，#1395。
+2026-10-05 三轮：没有采用按句柄删除（需要本机无法编译的 Win32 调用），改为让迟到的删除与后继快照写入串行：删除线程持锁到删除返回，后继有界等待。见 [changelog](../changelog.d/2026-10-05-connection-audit-fixes-r2.md)，#1395。Codex 复审的测试 minor：删除已返回改由独立钩子证明（不靠被测的锁）；panic 路径不复原文件与全局状态，记为限制。

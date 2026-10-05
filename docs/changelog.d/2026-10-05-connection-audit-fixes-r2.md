@@ -2,30 +2,38 @@
 - 归属：SHIP_PLAN §2 第 10 项冻结期修复（连接稳定性）。Windows App 与 Windows Service。G3 仍按决策 019 属于 0.0.75，不推进发布门。
 - 来源：叠在 [#1386](https://github.com/raydocs/tono/pull/1386)（`bff773d6`）之上 → 分支 `raydocs/fix-connection-audit-r2-20261005`，[#1395](https://github.com/raydocs/tono/pull/1395)（draft），尚未合入 main。四项都是 2026-10-04 审查记为 open 的项，Codex `gpt-6.1-sol` max 核验为 PARTIAL 或 NEEDS-HARDWARE，修法守核验给的边界。
 - 缺陷修复：
-  - WIN-DIRECT-RENEW-AMBIGUITY：DIRECT 租约心跳的两次续租都没拿到 Service 判决（管道忙、Service 重启、长 WFP 操作）时，App 立即放行普通流量并永久退出心跳，而 Service 的 60 秒租约仍有效。现在「没有判决」是类型化错误，只有它在宽限内等下一拍重试：宽限从上次获准续租的**发送**时刻起算 40 秒（Service 在发送之后才提交，租约至少到发送后 60 秒），本心跳还没有获准续租时不给宽限。Service 拒绝或证明不符仍立即按原处置（非 strict 选择性放行，strict 保持拦截）。每拍的代次、策略、已连接检查照旧，Service 到期回收不变。
+  - WIN-DIRECT-RENEW-AMBIGUITY：DIRECT 租约心跳的两次续租都没拿到 Service 判决（如管道忙、瞬时传输错误）时，App 立即放行普通流量并永久退出心跳，而 Service 的 60 秒租约仍有效。现在「没有判决」是类型化错误，只有它在宽限内等下一拍重试：宽限从上次获准续租的**发送**时刻起算 40 秒（Service 在发送之后才提交，租约至少到发送后 60 秒），本心跳还没有获准续租时不给宽限。Service 拒绝或证明不符仍立即按原处置（非 strict 选择性放行，strict 保持拦截）。每拍的代次、策略、已连接检查照旧，Service 到期回收不变。
   - WIN-DNS-SNAPSHOT-LATE-DELETE：DNS 恢复被 40 秒预算丢弃时，已交给阻塞线程的按路径删除仍会迟到执行；后继 enable 若已在同一路径写入新快照，新快照会被删掉，用户原始 DNS 无从恢复。现在删除线程持有一把独立锁，直到删除真正返回；enable 和 restore 在 DNS 锁内、读快照之前最多等它 5 秒，超时就失败关闭（enable 失败；restore 失败，保护维持原状）。DNS 主锁不交给删除线程。
-  - WIN-UPLINK-READER-HANG（防御性）：带 DIRECT 的健康监控读取物理上行的原生调用没有期限，一旦挂起，整个监控停住。现在读取 5 秒内没返回，或更早的读取还占着进程内唯一的名额，都算「没有回答」：没有回答不是绑定丢失的证据，所以保持会话（不放行），该代次的监控在之后的空闲拍再读，读到确认丢失才照现有处置重建（非 strict 按决策 030/031 选择性放行，strict 受保护重连）；原生读取报错仍照旧重建。挂住的读取占着唯一名额，后续读取立即答「没有回答」，不会每拍多留一个挂起线程。是否真会挂起仍需实机。
+  - WIN-UPLINK-READER-HANG（防御性）：带 DIRECT 的健康监控读取物理上行的原生调用没有期限，一旦挂起，整个监控停住。现在读取 5 秒内没返回，或更早的读取还占着进程内唯一的名额，都算「没有回答」：没有回答不是绑定丢失的证据，所以保持会话（不放行），该代次的监控在之后的空闲拍再读，读到确认丢失才照现有处置重建（非 strict 按决策 030/031 选择性放行，strict 受保护重连）；原生读取报错仍照旧重建。挂住的读取占着唯一名额，后续读取立即答「没有回答」，不会每拍多留一个挂起线程。超时后才返回的读取把答案留给同一会话（同一连接代次、同一 DIRECT 网卡）的下一次读取，所以每次都超过期限的读取也会在下一次读取时给出答案；换了代次或网卡的读取丢弃它，自己重读。「没有回答」的标记在状态锁下核对代次后才写入或清除，被替换的会话碰不到新会话的标记。是否真会挂起仍需实机。
 - 新增/优化（不放宽任何门）：
   - WIN-RESUME-FIRST-RUNG：重启后接管已证明的同属主运行时（传统已证明启动恢复），要先等退避首档 2 秒；旁边的更新接管和崩溃恢复连接都是立即开始。现在这条路径的首次尝试立即开始，首档照样计入阶梯和预算，失败后从第二档（5 秒）继续。准入、登记、取消和决策 025/026 的门控不变。
 - 工程与测试：每个行为一条窄回归。
-  - Windows App：`connection::direct::tests::transport_ambiguity_grace_counts_from_the_granted_send`、`connection::platform::tests::hung_uplink_reader_is_bounded`、`connection_health::tests::unanswered_uplink_read_keeps_a_proven_session`、`connection::reconnect::tests::proven_startup_resume_skips_the_first_rung`。
-  - Windows Service：`core::dns::tests::dropped_restore_delete_spares_successor_snapshot`，配测试钩子：删除线程在动文件之前暂停；记录 DNS 操作在等删除。时序全由钩子驱动，不靠固定等待。
+  - Windows App：`connection::direct::tests::transport_ambiguity_grace_counts_from_the_granted_send`、`connection::platform::tests::hung_uplink_reader_is_bounded`、`connection::platform::tests::late_uplink_answer_reaches_the_next_read`、`connection_health::tests::unanswered_uplink_read_keeps_a_proven_session`、`connection::reconnect::tests::proven_startup_resume_skips_the_first_rung`。
+  - Windows Service：`core::dns::tests::dropped_restore_delete_spares_successor_snapshot`，配测试钩子：删除线程在动文件之前暂停；记录 DNS 操作在等删除；删除真正返回后另记一个信号（不靠被测的锁自证）。时序全由钩子驱动，不靠固定等待。
   - `tono_renew_direct_runtime_reload` 的最终错误改为类型 `DirectRenewalAmbiguous`，文本不变，日志与遥测保持连续。
 - 验证：
   - MacBook 上 `git diff --check` 无输出。
   - 按 2026-09-14 所有者规定，MacBook 不跑原生 cargo，本次回归只在 hosted CI 运行。
   - 第一版（`8297ddea`）：hosted `ci-gate` run 37380942126 全绿，日志确认 4 条新回归 ok（Windows App Rust 669 过，Service 480 过）。修前失败分支 `red/conn-audit-r2-20261005`（`6d544cb3`，四处行为改回旧逻辑、测试不动）：Windows CI 37381000518 中 App Rust 恰好 3 失败/666 过，Service 恰好 1 失败/479 过。
-  - 审查修复后的结果待补。
+  - 审查修复（`239ba954`）：`ci-gate` 37383811417 全绿，日志确认 5 条回归 ok（App Rust 670 过，Service 480 过）。修前失败分支 `red/conn-audit-r2-20261005b`（`afd4d83f`，五处行为改回，含两项审查修复，测试不动）：Windows CI 37383926221 中 App Rust 恰好 4 失败/666 过（direct、platform、connection_health、reconnect 各停在预期断言），Service 恰好 1 失败/479 过（停在「迟到删除不得删掉后继快照」断言）。
+  - 复审修复后的结果待补。
   - 没有实机验证。
 - 独立审查：Codex `gpt-6.1-sol` high 静态审查 `bff773d6...8297ddea`，2 个 major、2 个 minor，均在本 PR 修复：
   - major：DIRECT 宽限从回复到达算，回复慢时可越过 Service 租约 → 改从获准续租的发送时刻算，未获准前不给宽限。
   - major：上行读取的名额被旧会话挂住的读取占着时，健康的新会话会按「未知」被放行 → 没有回答不再作为放行依据。
   - minor：DNS 回归靠固定等待猜时序 → 改由钩子驱动；minor：该测试断言失败时清理不全 → 失败路径也恢复并等删除返回，断言前先重置状态。
+- 复审：同模型同强度复审 `8297ddea...239ba954`，3 个 major、2 个 minor：
+  - major（不成立）：「本心跳首次续租没有判决时不给宽限，会放行 strict 会话」。Windows 上没有 strict 的 DIRECT 会话：App 侧 `strict_kill_switch_explicit(None)` 恒为 false，Service 布防时固定写 `strict_kill_switch: false`（`windows_kill_switch.rs:1664`），只有不可用意图的 `emergency_armed()` 置 true，而它不带 DIRECT 租约。非 strict 的首拍处置与本 PR 之前相同（决策 030/031 选择性放行）。
+  - major（已修）：超时读取的答案被丢弃，每次都超过期限的读取永远不回答，失效的 DIRECT 会一直留着 → 迟到答案留给同一会话的下一次读取。
+  - major（已修）：旧代次的检查可能在新会话写入后覆盖「没有回答」标记 → 在状态锁下核对代次再写或清；被替换的检查不作决定。该竞争需要两个监控同时在读，没有单独回归，靠读码确认。
+  - minor（已修）：DNS 回归用被测的锁证明删除已返回，删除线程若不再持锁可能误绿 → 改用独立的「删除已返回」钩子。
+  - minor（记为限制）：panic 路径的清理不含文件和全局状态复原；每个 DNS 测试开头都会重置状态，Drop 负责恢复暂停的删除并最多等 5 秒。
 - 候选/发布：仅源码，无新候选。
 - 剩余限制：
-  - DIRECT：宽限只覆盖没有 Service 判决的情况，实际能救的只有一种：Service 进程还在、租约还在，这一拍的 IPC 没送到（管道忙、瞬时传输错误）。Service 重启不在内：租约只存在 Service 内存里，重启后恢复出的状态不带租约，宽限只是把处置推迟到 Service 回来。排在长 WFP 操作后面的续租也不在内：它要等到自己的 IPC 超时（单次最长约 95 秒，已过宽限）才算没有判决，而 Service 取到锁后会按到期拒绝（另记 WIN-DIRECT-RENEW-QUEUE-EXPIRY）。超过宽限后照旧处置。
+  - DIRECT：宽限只覆盖没有 Service 判决的情况，实际能救的只有一种：Service 进程还在、租约还在，这一拍的 IPC 没送到（管道忙、瞬时传输错误）。Service 重启不在内：租约只存在 Service 内存里，重启后恢复出的状态不带租约，宽限只是把处置推迟到 Service 回来。排在长 WFP 操作后面的续租也不在内：它要等到自己的 IPC 超时（单次最长约 95 秒，已过宽限）才算没有判决，而 Service 取到锁后会按到期拒绝（另记 WIN-DIRECT-RENEW-QUEUE-EXPIRY）。超过宽限后照旧处置。本心跳首次续租（finalize 之后立即发出）没有判决时不给宽限，照本 PR 之前的处置。
   - DNS：删除真卡住时，之后每次 enable/restore 都等 5 秒后失败（有界，失败关闭），直到删除返回。卸载时的快照隔离改名未加等待，那里只可能碰到迟到删除自己的旧快照。
-  - 上行读取：5 秒期限是推定值（Codex 建议 2 秒，正常读取只需毫秒），挂起是否真实发生、持续多久需实机。读取一直不回答时会话保持：若 DIRECT 绑定的网卡确已消失，直连流量会一直失败到读取恢复（不泄漏；其间的网络变化同样得不到回答）。
+  - 上行读取：5 秒期限是推定值（Codex 建议 2 秒，正常读取只需毫秒），挂起是否真实发生、持续多久需实机。读取一直不返回时会话保持：若 DIRECT 绑定的网卡确已消失，直连流量会一直失败到读取恢复（不泄漏；其间的网络变化同样得不到回答）。迟到答案由下一次读取使用（留有「没有回答」标记时，每个空闲拍都会再读），只用于同一代次、同一网卡；其间若只有探测暂缓或自有重载的拍，答案会更旧一些。
+  - DNS 回归：panic 路径不复原快照文件和全局状态，靠下一个测试开头的重置。
   - 冻结期不合并。合并前仍需 jev-route 范围审查和 exact-head `ci-gate`。
 - 同轮仍 open（需所有者决定，未改代码）：
   - WIN-DNS-RACE-MASKS-SYSTEM：若持续的系统 DNS 失败要让连接失败，会推翻 SHIP_PLAN 第 47 行的所有者快修和 G1.1（Win10 必须过 securingDNS）。

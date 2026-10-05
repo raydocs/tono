@@ -1752,8 +1752,14 @@
                 enabled
             })
             .await;
-            // Taking the delete guard proves the late delete has returned.
-            let delete_returned = tokio::time::timeout(WATCHDOG, SNAPSHOT_DELETE.lock()).await.is_ok();
+            // Its own signal, not the guard under test, proves the late delete has returned.
+            let delete_returned = tokio::time::timeout(WATCHDOG, async {
+                while !test_hooks::snapshot_delete_returned() {
+                    tokio::time::sleep(POLL).await;
+                }
+            })
+            .await
+            .is_ok();
             Some((successor, delete_returned, snapshot_path().exists()))
         } else {
             None
