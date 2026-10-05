@@ -908,3 +908,20 @@
     animation-play-state: paused;
   }
 }
+
+/* Review S2: diffuse near-horizon daylight, using a prepainted 60px field.
+   The existing day/path/red opacity envelopes fade it; no new loop or live filter. */
+.sea-column-gold::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  height: 60px;
+  pointer-events: none;
+  background: radial-gradient(
+    ellipse 50% 100% at 50% 0%,
+    #ffd9a035,
+    transparent
+  );
+  opacity: var(--sea-day);
+  transition: opacity var(--sea-day-time) var(--sea-sky-ease);
+}
