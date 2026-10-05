@@ -121,6 +121,31 @@ pub(super) fn note_reconnect_budget_exhausted(state: &Arc<TonoState>) {
 /// Disconnect/sign-out must never observe an empty task slot and then be followed by a reconnect
 /// handle that escaped their abort.
 pub(super) fn schedule_reconnect_locked(inner: &mut TonoInner, state: &Arc<TonoState>, app: &AppHandle) {
+    schedule_reconnect_locked_with(inner, state, false, |delay, generation| spawn_reconnect_loop(state, app, delay, generation));
+}
+
+fn spawn_reconnect_loop(
+    state: &Arc<TonoState>,
+    app: &AppHandle,
+    delay: Duration,
+    generation: u64,
+) -> tauri::async_runtime::JoinHandle<()> {
+    let task_state = state.clone();
+    let task_app = app.clone();
+    // The task future is boxed into a trait object so this function's opaque
+    // type never embeds the reconnect loop's (which re-enters `attempt`).
+    AsyncHandler::spawn(move || Box::pin(reconnect_loop(task_state, task_app, delay, generation)) as BoxedTask)
+}
+
+/// `proven_startup`: the first attempt starts at once, like the update and crash-recovery
+/// takeovers beside it. The rung it skipped is still charged, so a failure continues the ladder
+/// from the second rung under the same admission, registration and budget.
+fn schedule_reconnect_locked_with(
+    inner: &mut TonoInner,
+    state: &Arc<TonoState>,
+    proven_startup: bool,
+    spawn: impl FnOnce(Duration, u64) -> tauri::async_runtime::JoinHandle<()>,
+) {
     if inner.account_close.is_some() || !reconnect_allowed(
         inner.catalog_requires_choice,
         inner.fsm.status(),
@@ -136,18 +161,15 @@ pub(super) fn schedule_reconnect_locked(inner: &mut TonoInner, state: &Arc<TonoS
     {
         return;
     }
-    let Some(delay) = inner.fsm.next_reconnect_delay() else {
+    let Some(rung) = inner.fsm.next_reconnect_delay() else {
         if inner.fsm.reconnect_budget_exhausted() {
             note_reconnect_budget_exhausted(state);
         }
         return;
     };
-    let task_state = state.clone();
-    let task_app = app.clone();
-    // The task future is boxed into a trait object so this function's opaque
-    // type never embeds the reconnect loop's (which re-enters `attempt`).
+    let delay = if proven_startup { Duration::ZERO } else { rung };
     let generation = inner.connect_generation;
-    let handle = AsyncHandler::spawn(move || Box::pin(reconnect_loop(task_state, task_app, delay, generation)) as BoxedTask);
+    let handle = spawn(delay, generation);
     inner.tasks.reconnect = Some(handle);
     // F3: expose the scheduled deadline to the UI.
     inner.next_retry_at_ms = Some(commands::epoch_millis() + delay.as_millis() as i64);
@@ -222,7 +244,9 @@ pub async fn schedule_startup_resume_if_proven(state: &Arc<TonoState>, app: &App
     }
     // Register under this same generation/admission lock. A later Disconnect/sign-out either
     // sees this handle and aborts it, or ran first and failed one of the checks above.
-    schedule_reconnect_locked(&mut inner, state, app);
+    schedule_reconnect_locked_with(&mut inner, state, true, |delay, generation| {
+        spawn_reconnect_loop(state, app, delay, generation)
+    });
 }
 
 /// F3: publish (or withdraw) the deadline the Protected Offline card counts down to.
@@ -380,6 +404,32 @@ mod tests {
         let inner = state.lock().await;
         assert!(inner.tasks.reconnect.is_none());
         assert!(inner.fsm.kill_switch_armed(), "task retirement must not release protection");
+    }
+
+    /// WIN-RESUME-FIRST-RUNG: taking over a proven same-owner runtime at startup waited the
+    /// ladder's first 2 s rung, though the update and crash-recovery takeovers connect at once.
+    /// It now starts at once and still charges that rung, so a failure goes on from the second.
+    #[tokio::test]
+    async fn proven_startup_resume_skips_the_first_rung() {
+        let state = Arc::new(TonoState::for_test());
+        let mut inner = state.lock().await;
+        inner.account_state = AccountState::Ready;
+        inner.fsm.begin_connect();
+        inner.fsm.mark_kill_switch_armed();
+        inner.fsm.mark_session_verified();
+        inner.fsm.connect_succeeded().unwrap();
+        inner.fsm.tunnel_died();
+        let mut first = None;
+        schedule_reconnect_locked_with(&mut inner, &state, true, |delay, _| {
+            first = Some(delay);
+            tauri::async_runtime::spawn(std::future::pending::<()>())
+        });
+        inner.tasks.abort_reconnect();
+        assert_eq!(first, Some(Duration::ZERO));
+        assert_eq!(
+            inner.fsm.next_reconnect_delay(),
+            Some(Duration::from_secs(ReconnectBackoff::DELAYS_SECS[1]))
+        );
     }
 
     #[test]

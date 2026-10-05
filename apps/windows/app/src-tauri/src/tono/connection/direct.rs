@@ -59,6 +59,17 @@ pub(super) fn direct_renewal_follow_up(error: &str) -> DirectRenewalFollowUp {
     }
 }
 
+/// A renewal that reached no Service verdict is retried on later ticks until this long after the
+/// last one that succeeded. The Service's own 60 s committed lease still bounds DIRECT; this only
+/// stops one IPC blip (a busy pipe, a Service restart, a long WFP operation) releasing protection.
+pub(super) const DIRECT_RENEWAL_AMBIGUITY_GRACE: Duration = Duration::from_secs(40);
+
+/// Whether a failed renewal waits for the next tick instead of acting now. Only a renewal with no
+/// Service verdict qualifies: a rejection, or a proof that does not match, acts at once.
+pub(super) fn direct_renewal_retries(ambiguous: bool, since_last_renewal: Duration) -> bool {
+    ambiguous && since_last_renewal < DIRECT_RENEWAL_AMBIGUITY_GRACE
+}
+
 pub(super) async fn spawn_direct_lease_heartbeat(state: &Arc<TonoState>, generation: u64, heartbeat: DirectLeaseHeartbeat) {
     let task_state = Arc::clone(state);
     let handle = AsyncHandler::spawn(move || {
@@ -76,6 +87,8 @@ pub(super) async fn spawn_direct_lease_heartbeat(state: &Arc<TonoState>, generat
 pub(super) async fn direct_lease_heartbeat_loop(state: Arc<TonoState>, generation: u64, heartbeat: DirectLeaseHeartbeat) {
     let mut interval = tokio::time::interval(DIRECT_LEASE_HEARTBEAT_INTERVAL);
     interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    // Finalize granted the lease just before this task started.
+    let mut last_renewed = tokio::time::Instant::now();
     loop {
         // Tokio's first tick is immediate, closing the finalize-to-monitor handoff window.
         interval.tick().await;
@@ -101,10 +114,11 @@ pub(super) async fn direct_lease_heartbeat_loop(state: Arc<TonoState>, generatio
                 Some(heartbeat.reload_id),
                 &heartbeat.endpoint_digest,
             )
-            .map(|_| ()),
-            Err(error) => Err(format!("{error:#}")),
+            .map(|_| ())
+            .map_err(|error| (false, error)),
+            Err(error) => Err((error.is::<service::DirectRenewalAmbiguous>(), format!("{error:#}"))),
         };
-        if let Err(error) = renewal {
+        if let Err((ambiguous, error)) = renewal {
             let raw = format!("{error:#}");
             let follow_up = direct_renewal_follow_up(&raw);
             let redacted = audit::redact(&raw);
@@ -112,6 +126,15 @@ pub(super) async fn direct_lease_heartbeat_loop(state: Arc<TonoState>, generatio
                 probe: "directLeaseHeartbeat",
                 error: redacted.clone(),
             });
+            // Read after the call returned, so time spent waiting on the Service counts.
+            if direct_renewal_retries(ambiguous, last_renewed.elapsed()) {
+                logging!(
+                    warn,
+                    Type::Service,
+                    "Tono: DIRECT lease renewal reached no Service verdict; retrying on the next heartbeat: {redacted}"
+                );
+                continue;
+            }
             // Do not reconnect from inside the heartbeat task: a successful fresh attempt would
             // replace this task and abort its own caller mid-commit. Do not restrict to Blocked.
             // A non-strict failure releases the original network and keeps AI destinations blocked.
@@ -152,6 +175,7 @@ pub(super) async fn direct_lease_heartbeat_loop(state: Arc<TonoState>, generatio
             }
             return;
         }
+        last_renewed = tokio::time::Instant::now();
     }
 }
 
@@ -2182,9 +2206,25 @@ pub fn build_direct_plan(
 #[cfg(test)]
 mod tests {
     use super::{
-        DIRECT_RENEW_FAILED_PREFIX, DIRECT_RENEW_STRICT_BLOCKED_PREFIX, DirectRenewalFollowUp,
-        direct_renewal_follow_up,
+        DIRECT_RENEW_FAILED_PREFIX, DIRECT_RENEW_STRICT_BLOCKED_PREFIX, DIRECT_RENEWAL_AMBIGUITY_GRACE,
+        DirectRenewalFollowUp, direct_renewal_follow_up, direct_renewal_retries,
     };
+    use crate::core::service::DirectRenewalAmbiguous;
+    use std::time::Duration;
+
+    /// WIN-DIRECT-RENEW-AMBIGUITY: two renewal attempts that reached no Service verdict released a
+    /// working session at once and ended its heartbeat, while the Service lease still held. That
+    /// case alone now waits, within the grace; a Service rejection still acts at once.
+    #[test]
+    fn transport_ambiguity_has_bounded_grace() {
+        let ambiguous = anyhow::Error::from(DirectRenewalAmbiguous("pipe busy".into()));
+        assert!(ambiguous.is::<DirectRenewalAmbiguous>());
+        assert!(direct_renewal_retries(true, Duration::from_secs(10)));
+        assert!(!direct_renewal_retries(true, DIRECT_RENEWAL_AMBIGUITY_GRACE));
+        let rejected = anyhow::anyhow!("{DIRECT_RENEW_FAILED_PREFIX}: proof mismatched");
+        assert!(!rejected.is::<DirectRenewalAmbiguous>());
+        assert!(!direct_renewal_retries(false, Duration::ZERO));
+    }
 
     #[test]
     fn a_direct_renewal_failure_releases_unless_the_kill_switch_is_strict() {

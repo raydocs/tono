@@ -369,6 +369,12 @@ async fn clear_snapshot_retirement() -> Result<()> {
 }
 
 static DNS_OPERATION: Lazy<tokio::sync::Mutex<()>> = Lazy::new(|| tokio::sync::Mutex::new(()));
+/// Held by a snapshot delete until its blocking call returns, even after the restore that
+/// started it was dropped by its budget. `enable` and `restore_protected` wait for it under
+/// `DNS_OPERATION` before they touch the snapshot, so a late delete cannot remove a newer
+/// snapshot written to the same path (WIN-DNS-SNAPSHOT-LATE-DELETE).
+static SNAPSHOT_DELETE: Lazy<std::sync::Arc<tokio::sync::Mutex<()>>> =
+    Lazy::new(|| std::sync::Arc::new(tokio::sync::Mutex::new(())));
 static DNS_LAST_ERROR: Lazy<Mutex<Option<String>>> = Lazy::new(|| Mutex::new(None));
 
 // --- Self-inflicted network-change suppression ---
@@ -1648,6 +1654,10 @@ const DNS_SLOW_CALL: std::time::Duration = std::time::Duration::from_secs(5);
 const SNAPSHOT_DELETE_ATTEMPTS: usize = 3;
 const SNAPSHOT_DELETE_RETRY_DELAY: std::time::Duration = std::time::Duration::from_millis(100);
 const SNAPSHOT_RETIREMENT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(1);
+/// How long `enable` and `restore_protected` wait for a snapshot delete that a dropped restore
+/// left running. An unlink takes milliseconds; one stalled past this is treated as wedged, and
+/// the operation fails closed instead of writing a snapshot the late delete could remove.
+const SNAPSHOT_DELETE_SETTLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// A DNS engine call that was handed to a blocking thread and has not come back yet.
 ///
@@ -2089,7 +2099,7 @@ async fn engine_any_loopback(adapters: &[AdapterDnsSnapshot]) -> Result<bool> {
 pub(crate) mod test_hooks {
     use super::AdapterDnsSnapshot;
     use std::sync::{
-        LazyLock, Mutex,
+        Condvar, LazyLock, Mutex,
         atomic::{AtomicBool, Ordering},
     };
 
@@ -2186,6 +2196,44 @@ pub(crate) mod test_hooks {
     #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn set_snapshot_delete_fails(fails: bool) {
         SNAPSHOT_DELETE_FAILS.store(fails, Ordering::Relaxed);
+    }
+
+    static SNAPSHOT_DELETE_PAUSED: Mutex<bool> = Mutex::new(false);
+    static SNAPSHOT_DELETE_RESUMED: Condvar = Condvar::new();
+    static SNAPSHOT_DELETE_REACHED_PAUSE: AtomicBool = AtomicBool::new(false);
+
+    /// While paused, the snapshot delete stops on its blocking thread before the file is
+    /// touched, until the test resumes it: an unlink stalled behind a filter driver.
+    #[cfg(any(not(windows), feature = "test"))]
+    pub(crate) fn pause_snapshot_delete() {
+        let mut paused = SNAPSHOT_DELETE_PAUSED
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if *paused {
+            SNAPSHOT_DELETE_REACHED_PAUSE.store(true, Ordering::Release);
+        }
+        while *paused {
+            paused = SNAPSHOT_DELETE_RESUMED
+                .wait(paused)
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+        }
+    }
+
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn set_snapshot_delete_paused(paused: bool) {
+        if paused {
+            SNAPSHOT_DELETE_REACHED_PAUSE.store(false, Ordering::Release);
+        }
+        *SNAPSHOT_DELETE_PAUSED
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = paused;
+        SNAPSHOT_DELETE_RESUMED.notify_all();
+    }
+
+    /// Whether a delete has stopped at the pause since it was armed.
+    #[cfg(test)]
+    pub(crate) fn snapshot_delete_reached_pause() -> bool {
+        SNAPSHOT_DELETE_REACHED_PAUSE.load(Ordering::Acquire)
     }
 
     #[cfg(test)]
@@ -2516,6 +2564,9 @@ async fn enable_unlocked(trigger: EnableTrigger) -> Result<DnsProtectionStatus> 
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
     }
+    // A delete that a dropped restore left running must land before this reads or writes the
+    // snapshot.
+    settle_snapshot_delete().await?;
     let existing = match tokio::fs::read(snapshot_path()).await {
         Ok(bytes) if snapshot_was_restored(&bytes).await => None,
         Ok(bytes) => match parse_snapshot(&bytes) {
@@ -2739,7 +2790,32 @@ async fn remove_restored_snapshot() -> std::io::Result<()> {
     if test_hooks::snapshot_delete_fails() {
         return Err(std::io::Error::other("simulated snapshot delete failure"));
     }
-    tokio::fs::remove_file(snapshot_path()).await
+    let path = snapshot_path();
+    let held = std::sync::Arc::clone(&*SNAPSHOT_DELETE).lock_owned().await;
+    // The guard moves into the blocking call and is released only when the delete returns,
+    // even if the restore's budget drops this future first (see `settle_snapshot_delete`).
+    tokio::task::spawn_blocking(move || {
+        let _held = held;
+        #[cfg(any(not(windows), feature = "test"))]
+        test_hooks::pause_snapshot_delete();
+        std::fs::remove_file(path)
+    })
+    .await
+    .unwrap_or_else(|error| Err(std::io::Error::other(error)))
+}
+
+/// Wait, bounded, for a snapshot delete that an earlier restore left running when its budget
+/// dropped it. Callers hold `DNS_OPERATION`, so once this returns no new delete can start until
+/// they release it, and every snapshot read and write they make lands after the late delete.
+async fn settle_snapshot_delete() -> Result<()> {
+    match tokio::time::timeout(SNAPSHOT_DELETE_SETTLE_TIMEOUT, SNAPSHOT_DELETE.lock()).await {
+        Ok(_settled) => Ok(()),
+        Err(_) => bail!(
+            "an earlier DNS snapshot delete has not returned within \
+             {SNAPSHOT_DELETE_SETTLE_TIMEOUT:?}; protected-dns.json is left untouched and this \
+             DNS operation is refused. Retry once the file system settles."
+        ),
+    }
 }
 
 /// Restore adapters and resolver policies before dropping their recovery snapshot. A failed
@@ -2754,6 +2830,8 @@ pub(crate) async fn restore_protected() -> Result<DnsProtectionStatus> {
     // proceeds on an unproven one — must never be undone by the reconciler putting loopback back
     // while no core is listening. An explicit `enable` sets it again.
     PROTECTION_WANTED.store(false, Ordering::Release);
+    // A failed wait leaves the snapshot and, through the disarm gate, protection as they are.
+    settle_snapshot_delete().await?;
     let bytes = match tokio::fs::read(snapshot_path()).await {
         Ok(bytes) => bytes,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {

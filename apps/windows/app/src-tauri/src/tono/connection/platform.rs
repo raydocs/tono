@@ -234,6 +234,37 @@ pub(super) fn detect_physical_interface_windows() -> Result<String, String> {
     first_up_hardware_alias(candidates.into_iter().map(hardware_uplink_alias))
 }
 
+/// How long the health monitor waits for the uplink enumeration, well past a normal read of a few
+/// milliseconds. A slower read counts as unknown, and an unknown read does not keep a committed
+/// DIRECT binding in place.
+#[cfg(windows)]
+const UPLINK_READ_BUDGET: std::time::Duration = std::time::Duration::from_secs(5);
+
+#[cfg(windows)]
+static UPLINK_READ_SLOT: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(1);
+
+/// One native read in flight at most, answered within `budget`. The permit lives in the blocking
+/// worker: a read that never returns keeps the slot, so later reads answer unknown at once instead
+/// of leaving one more hung worker behind on every monitor tick.
+#[cfg(any(windows, test))]
+async fn bounded_native_read<T: Send + 'static>(
+    slot: &'static tokio::sync::Semaphore,
+    budget: std::time::Duration,
+    read: impl FnOnce() -> Result<T, String> + Send + 'static,
+) -> Result<T, String> {
+    let permit = slot
+        .try_acquire()
+        .map_err(|_| "an earlier physical uplink enumeration has not returned".to_owned())?;
+    let worker = tokio::task::spawn_blocking(move || {
+        let _permit = permit;
+        read()
+    });
+    match tokio::time::timeout(budget, worker).await {
+        Ok(joined) => joined.map_err(|error| format!("physical uplink enumeration worker failed: {error}"))?,
+        Err(_) => Err(format!("physical uplink enumeration did not return within {budget:?}")),
+    }
+}
+
 /// X2-1: every hardware adapter that currently carries an IPv4 default route and is
 /// operationally up, by alias. Unlike [`detect_physical_interface`] this is safe after WinTUN
 /// starts: it never consults `GetBestRoute2` (which then resolves to Tono's own adapter), and the
@@ -242,7 +273,7 @@ pub(super) fn detect_physical_interface_windows() -> Result<String, String> {
 pub(super) async fn usable_physical_uplinks() -> Result<Vec<String>, String> {
     #[cfg(windows)]
     {
-        tokio::task::spawn_blocking(|| -> Result<Vec<String>, String> {
+        bounded_native_read(&UPLINK_READ_SLOT, UPLINK_READ_BUDGET, || -> Result<Vec<String>, String> {
             let mut uplinks = Vec::new();
             for luid in default_route_interface_luids()? {
                 if let Ok((alias, true)) = hardware_uplink_alias(luid)
@@ -254,7 +285,6 @@ pub(super) async fn usable_physical_uplinks() -> Result<Vec<String>, String> {
             Ok(uplinks)
         })
         .await
-        .map_err(|error| format!("physical uplink enumeration worker failed: {error}"))?
     }
     #[cfg(not(windows))]
     {
@@ -501,7 +531,36 @@ pub(crate) fn remove_legacy_runtime_copy(catalog_dir: &std::path::Path) {
 
 #[cfg(test)]
 mod tests {
-    use super::first_up_hardware_alias;
+    use super::{bounded_native_read, first_up_hardware_alias};
+
+    /// WIN-UPLINK-READER-HANG: the uplink read had no bound, so an IP Helper call that never
+    /// returned stopped the health monitor of a session with DIRECT. It now answers unknown within
+    /// its budget, and the hung worker keeps the only slot instead of a second worker starting.
+    #[tokio::test]
+    async fn hung_uplink_reader_is_bounded() {
+        static SLOT: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(1);
+        let budget = std::time::Duration::from_millis(50);
+        let (resume, resumed) = std::sync::mpsc::channel::<()>();
+        let hung = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            bounded_native_read(&SLOT, budget, move || {
+                let _ = resumed.recv();
+                Ok(Vec::<String>::new())
+            }),
+        )
+        .await;
+        let second_ran = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let ran = std::sync::Arc::clone(&second_ran);
+        let second = bounded_native_read(&SLOT, budget, move || {
+            ran.store(true, std::sync::atomic::Ordering::SeqCst);
+            Ok(Vec::<String>::new())
+        })
+        .await;
+        drop(resume);
+        assert!(matches!(hung, Ok(Err(_))), "a hung read must answer unknown within its budget");
+        assert!(second.is_err(), "the hung read still holds the only slot");
+        assert!(!second_ran.load(std::sync::atomic::Ordering::SeqCst), "no second native worker started");
+    }
 
     #[test]
     fn direct_bind_skips_a_down_hardware_alias() {

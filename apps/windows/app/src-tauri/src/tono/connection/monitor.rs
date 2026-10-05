@@ -1365,7 +1365,13 @@ async fn may_keep_session_in_place(state: &Arc<TonoState>, tunnel_proven: bool) 
         None
     };
     let uplinks = if committed.is_some() {
-        usable_physical_uplinks().await.ok()
+        match usable_physical_uplinks().await {
+            Ok(uplinks) => Some(uplinks),
+            Err(error) => {
+                logging!(warn, Type::Service, "Tono: physical uplinks unreadable; DIRECT is not kept in place: {error}");
+                None
+            }
+        }
     } else {
         None
     };

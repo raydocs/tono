@@ -1228,6 +1228,7 @@
         test_hooks::set_apply_batch_unavailable(false);
         test_hooks::set_encrypted_restore_fails(false);
         test_hooks::set_snapshot_delete_fails(false);
+        test_hooks::set_snapshot_delete_paused(false);
         test_hooks::take_automatic_resets();
         test_hooks::take_encrypted_restores();
         test_hooks::set_collected_adapters(Vec::new());
@@ -1680,6 +1681,52 @@
         reset_dns_state().await;
         assert!(result.is_err(), "a different snapshot must still prove its restore");
         assert!(retained, "an unproven restore must retain its current originals");
+        Ok(())
+    }
+
+    /// WIN-DNS-SNAPSHOT-LATE-DELETE: a restore dropped by its budget while its snapshot delete
+    /// was stalled left that path-based delete running. The successor `enable` wrote its own
+    /// snapshot to the same path, and the late delete then removed it, losing the originals.
+    #[tokio::test]
+    #[serial]
+    async fn dropped_restore_delete_spares_successor_snapshot() -> Result<()> {
+        struct ResumeOnDrop;
+        impl Drop for ResumeOnDrop {
+            fn drop(&mut self) {
+                test_hooks::set_snapshot_delete_paused(false);
+            }
+        }
+
+        reset_dns_state().await;
+        seed_snapshot(vec![adapter("{A}", Some("1.1.1.1"))]).await?;
+        let _resume = ResumeOnDrop;
+        test_hooks::set_snapshot_delete_paused(true);
+
+        let dropped =
+            tokio::time::timeout(std::time::Duration::from_millis(500), restore_protected()).await;
+        assert!(dropped.is_err(), "the stalled delete must outlive the restore's budget");
+        assert!(
+            test_hooks::snapshot_delete_reached_pause(),
+            "the restore was dropped while its delete was in flight"
+        );
+
+        let successor = tokio::time::timeout(std::time::Duration::from_secs(10), async {
+            let (enabled, ()) = tokio::join!(enable(), async {
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                test_hooks::set_snapshot_delete_paused(false);
+            });
+            enabled
+        })
+        .await;
+        // Give a late delete time to land before looking for the successor's snapshot.
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        let kept = snapshot_path().exists();
+        reset_dns_state().await;
+        assert!(
+            matches!(successor, Ok(Ok(_))),
+            "the successor enable must succeed: {successor:?}"
+        );
+        assert!(kept, "the late delete must not remove the successor's snapshot");
         Ok(())
     }
 
