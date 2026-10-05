@@ -957,12 +957,7 @@ pub(super) async fn network_monitor_loop(state: Arc<TonoState>, app: AppHandle) 
             }
         };
         legs.observe_service_ok();
-        // An uplink read that began before a network change the Service has since counted may
-        // describe the network from before it, so its late answer is not served after this.
-        let network_events = snapshot.network_events.counter;
-        if uplink_events_seen.replace(network_events) != Some(network_events) {
-            uplinks_may_have_changed();
-        }
+        observe_network_events(&mut uplink_events_seen, snapshot.network_events.counter);
 
         // F2 leg 1: kill-switch completeness every tick.
         legs.observe_kill_switch(kill_switch_unhealthy_for_monitor(
@@ -996,7 +991,10 @@ pub(super) async fn network_monitor_loop(state: Arc<TonoState>, app: AppHandle) 
         // Blocked while this task is still in the probe). Read the generation again and
         // publish only a reading that is still current.
         let fresh_kill_switch = match service::tono_service_status_snapshot().await {
-            Ok(fresh) => Some((fresh.snapshot_generation, fresh.kill_switch)),
+            Ok(fresh) => {
+                observe_network_events(&mut uplink_events_seen, fresh.network_events.counter);
+                Some((fresh.snapshot_generation, fresh.kill_switch))
+            }
             Err(_) => None,
         };
 
@@ -1393,6 +1391,15 @@ where
 static UNREAD_DIRECT_BINDING: std::sync::atomic::AtomicU64 =
     std::sync::atomic::AtomicU64::new(NO_UNREAD_DIRECT_BINDING);
 const NO_UNREAD_DIRECT_BINDING: u64 = u64::MAX;
+
+/// An uplink read that began before a network change the Service has since counted may describe
+/// the network from before it. Both Service readings in a health-monitor tick go through here, so
+/// once the counter moves, such a read's late answer is not served.
+fn observe_network_events(seen: &mut Option<u64>, counter: u64) {
+    if seen.replace(counter) != Some(counter) {
+        uplinks_may_have_changed();
+    }
+}
 
 /// X2-1: apply [`in_place_verdict`] to the live session. The uplinks are read only when a
 /// DIRECT overlay is committed, so a full-tunnel session pays nothing for it. A check whose
