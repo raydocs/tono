@@ -87,6 +87,11 @@ jobs:
             ENABLE_USER_SCRIPT_SANDBOXING=NO \
             build
 
+      - name: A rebuilt helper leaves the build source stamp clean
+        run: |
+          git status --porcelain
+          grep -F '"dirty":false' apps/macos/build/Build/Products/Release/Tono.app/Contents/Resources/tono-build-source.json
+
       - name: Package macOS Beta App
         run: |
           mkdir -p apps/macos/dist

@@ -99,5 +99,13 @@ chmod 0755 "$temporary_file"
 "$temporary_file" --version
 mv -f "$temporary_file" "$output_file"
 printf '%s %s\n' "$helper_version" "$helper_sources_hash" > "$contract_file"
+# Tells write-build-source.sh that this exact binary came from the sources
+# recorded above, so rebuilding it does not mark the app build dirty. It lives
+# in the git directory: never tracked, never part of a package.
+if built_record=$(git -C "$repo_dir" rev-parse --git-path tono-core-helper.built 2>/dev/null); then
+  case "$built_record" in /*) ;; *) built_record="$repo_dir/$built_record" ;; esac
+  printf '%s %s\n' "$(shasum -a 256 "$output_file" | cut -d' ' -f1)" "$helper_sources_hash" \
+    > "$built_record"
+fi
 rm -rf "$module_cache_dir"
 trap - EXIT
