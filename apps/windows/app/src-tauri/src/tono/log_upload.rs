@@ -549,25 +549,27 @@ mod tests {
     }
 
     #[test]
-    fn a_not_stored_receipt_stands_down_to_a_small_probe() {
+    fn no_log_line_is_sent_until_the_server_stores_an_empty_probe() {
         // Upload is on by default and the server stores nothing unless ops
-        // opened a collection window. Treating that answer as a failed send
-        // resent the same full segment every 16 minutes, forever.
+        // opened a collection window. Probing with real lines sent the raw
+        // log off the device on every launch only for it to be discarded.
         let dir = Dir::new("declined");
         let live = dir.join("traffic-audit.jsonl");
-        let scoped = |n| format!("{{\"_uploadScope\":\"a\",\"n\":{n},\"pad\":\"{}\"}}\n", "x".repeat(200));
-        std::fs::write(&live, (1..=1200).map(scoped).collect::<String>()).unwrap();
+        std::fs::write(&live, "{\"_uploadScope\":\"a\",\"host\":\"visited.example\"}\n").unwrap();
         let mut queue = UploadQueue::new(live.clone(), "a");
-        assert_eq!(queue.prepare().unwrap().segment.line_count, 1200);
+        assert!(!queue.confirmed);
+        assert!(gunzip(&gzip_within_limit(&[]).unwrap()).is_empty());
         assert!(is_not_stored(&ApiError::Server { status: 200, message: String::new() }));
 
         queue.decline();
+        assert!(!queue.confirmed);
         assert_eq!(next_sweep_delay(0, queue.declined), DECLINED_INTERVAL);
-        let probe = &queue.prepare().unwrap().segment;
-        assert!(probe.consumed as usize <= DECLINED_PROBE_BYTES, "probe read {} bytes", probe.consumed);
-        assert!(probe.line_count > 0);
         assert_eq!(queue.cursor.offset, 0);
         assert_eq!(queue.sequence, 0);
+
+        queue.confirm();
+        assert!(queue.confirmed && !queue.declined);
+        assert_eq!(queue.sequence, 1, "the stored probe's receipt key is never reused");
     }
 
     #[test]
