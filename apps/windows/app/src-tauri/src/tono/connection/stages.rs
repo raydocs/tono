@@ -18,7 +18,7 @@ use super::cleanup::{
 use super::core_select::prepare_owned_core;
 use super::controller::{
     allocate_runtime_ports, configure_owned_controller_for_ui, lock_kill_switch_with_retries, preflight_bfe,
-    preflight_dns_listener, wait_controller,
+    preflight_dns_listener, preflight_dns_listener_unless_resuming, wait_controller,
 };
 use super::endpoints::proxy_endpoints_for;
 use super::monitor::{
@@ -103,6 +103,9 @@ pub(super) async fn run_stages(
     };
     let needs_physical_interface = WINDOWS_OPTIONAL_DIRECT_ENABLED
         && traffic_policy.as_ref().is_some_and(|policy| policy.has_direct_content());
+    // A protected re-entry resolves through the protected resolver, which is down until this
+    // attempt's Core answers; its bootstrap lookup gets a short budget.
+    let armed = state.lock().await.fsm.kill_switch_armed();
 
     // The preparation probes are independent of each other and all read-only /
     // cancellation-safe (the two port binds are released immediately; the core-path query is a
@@ -118,21 +121,21 @@ pub(super) async fn run_stages(
     //    egress from the Windows TUN path, and the runtime binds it explicitly to 127.0.0.1.
     //  - Mihomo's DNS listener still owns loopback:53 and publishes that resolver through the
     //    TUN endpoint at 198.18.0.2. Prove both listener sockets are available before installing
-    //    WFP rather than timing out after the arm.
+    //    WFP rather than timing out after the arm, unless this attempt proves the active runtime
+    //    that holds them.
     //  - The Service-side core binary path validation.
     let (
         bootstrap_api_hosts,
         physical_interface_probe,
         runtime_ports,
-        dns_preflight,
-        active_runtime_resume,
+        (dns_preflight, active_runtime_resume),
         core_path,
         bfe_preflight,
     ) = transaction
         .wait("preparing service", async {
             refresh_control_plane_pins_from_service(state).await;
             tokio::join!(
-                bootstrap_hosts(),
+                bootstrap_hosts(armed),
                 async {
                     if needs_physical_interface {
                         Some(detect_physical_interface().await)
@@ -141,8 +144,7 @@ pub(super) async fn run_stages(
                     }
                 },
                 allocate_runtime_ports(),
-                preflight_dns_listener(),
-                active_runtime_resume_status(),
+                preflight_dns_listener_unless_resuming(preflight_dns_listener(), active_runtime_resume_status()),
                 service::tono_core_binary_path(),
                 preflight_bfe(),
             )

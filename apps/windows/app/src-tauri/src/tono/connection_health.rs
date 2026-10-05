@@ -172,6 +172,13 @@ pub fn next_network_events_counter(
     }
 }
 
+/// Whether this tick records a `NetworkChange`: only the tick that accepts the change. A
+/// change the debounce holds keeps its counter pending and is seen again on the next tick, so
+/// recording the held tick as well logged one change twice.
+pub const fn network_change_audited(network_changed: bool, invalidated: bool) -> bool {
+    network_changed && invalidated
+}
+
 /// A core-identity change inside the debounce window must stay visible.
 /// Committing the new pid while the event is suppressed makes the next
 /// sample look unchanged.
@@ -536,6 +543,25 @@ mod tests {
         assert_eq!(next_network_events_counter(pending, 5, false, true), Some(5));
         assert!(!commit_core_baseline(false, true, false));
         assert!(commit_core_baseline(false, true, true));
+    }
+
+    /// WIN-NETWORK-CHANGE-DOUBLE-AUDIT: the held tick and the accepting tick both recorded the
+    /// same counter, so one change became two `NetworkChange` rows.
+    #[test]
+    fn suppressed_network_change_is_audited_once() {
+        use super::{NETWORK_EVENT_DEBOUNCE, network_change_audited, network_event_fires, next_network_events_counter};
+        let mut stored = Some(4);
+        let mut audited = 0;
+        for since_last_event in [Duration::from_millis(500), NETWORK_EVENT_DEBOUNCE] {
+            let network_changed = stored != Some(5);
+            let invalidated = network_event_fires(network_changed, Some(since_last_event));
+            stored = next_network_events_counter(stored, 5, false, invalidated);
+            if network_change_audited(network_changed, invalidated) {
+                audited += 1;
+            }
+        }
+        assert_eq!(audited, 1);
+        assert_eq!(stored, Some(5));
     }
 
     #[test]

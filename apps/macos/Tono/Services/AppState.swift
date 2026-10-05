@@ -95,6 +95,10 @@ final class AppState {
     /// Next dial chosen by ExitHeal while PF is down. Nil keeps the selected node.
     var unarmedDialName: String?
     var unarmedReconnectAttempt = 0
+    /// Uplink the unarmed ladder last restarted for. Kept apart from
+    /// `lastUplinkSnapshot`, which belongs to a connected session.
+    @ObservationIgnored var unarmedUplinkBaseline: NetworkUplinkSnapshot?
+    @ObservationIgnored var unarmedNetworkKickTask: Task<Void, Never>?
     /// Test seam. Nil uses a TCP connect that does not install PF.
     /// Not observed: an optional MainActor closure cannot be yielded by Observation.
     @ObservationIgnored
@@ -566,18 +570,13 @@ final class AppState {
         if !isConnected {
             // A released host can be minutes into the unarmed backoff, and
             // the network coming back is what ends most of those outages.
-            // Start again from the first delay. Later notifications of the
-            // same transition leave that wait alone, so a flapping network
-            // cannot keep pushing the first probe back. The loop stays
-            // unarmed: no PF, no tunnel.
+            // A new or returning uplink starts again from the first delay.
+            // Later notifications of the same transition leave that wait
+            // alone, so a flapping network cannot keep pushing the first
+            // probe back. The loop stays unarmed: no PF, no tunnel.
             if unarmedReconnectAwaitsNetwork {
                 if connectionCoordinator.unarmedReconnectOwner?.restarted != true {
-                    LocalTrafficAudit.shared.recordEvent(
-                        "unarmed_reconnect_network_kick",
-                        details: auditProtectionDetails()
-                    )
-                    unarmedReconnectAttempt = 0
-                    scheduleUnarmedReconnect(afterNetworkChange: true)
+                    scheduleUnarmedNetworkKick()
                 }
                 return
             }
@@ -602,6 +601,42 @@ final class AppState {
             details: auditProtectionDetails()
         )
         scheduleNetworkEnvironmentReconciliation()
+    }
+
+    /// Every notification used to restart the unarmed ladder, and DNS-only
+    /// ones on the same uplink (Tono's own DNS restore among them) kept a
+    /// dead exit on the two-second rung, each rung a full armed connect.
+    /// Restart only for a moved or newly filled uplink. A dropped reading
+    /// becomes the baseline without a restart, so the same network coming
+    /// back still restarts.
+    private func scheduleUnarmedNetworkKick() {
+        unarmedNetworkKickTask?.cancel()
+        let owner = connectionCoordinator.unarmedReconnectOwner?.id
+        unarmedNetworkKickTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(750))
+            guard let self, !Task.isCancelled else { return }
+            let uplink = await self.protectionAudits.uplinkSnapshot()
+            guard !Task.isCancelled, self.unarmedReconnectAwaitsNetwork,
+                  let current = self.connectionCoordinator.unarmedReconnectOwner,
+                  current.id == owner, !current.restarted,
+                  !self.isConnected, !self.isConnecting, !self.isDisconnecting else { return }
+            switch NetworkUplinkSnapshot.classify(from: self.unarmedUplinkBaseline, to: uplink) {
+            case .stay:
+                return
+            case .inconclusive:
+                self.unarmedUplinkBaseline = uplink
+                return
+            case .moved, .adopt:
+                self.unarmedUplinkBaseline = uplink
+            }
+            guard uplink.isConcrete else { return }
+            LocalTrafficAudit.shared.recordEvent(
+                "unarmed_reconnect_network_kick",
+                details: self.auditProtectionDetails()
+            )
+            self.unarmedReconnectAttempt = 0
+            self.scheduleUnarmedReconnect(afterNetworkChange: true)
+        }
     }
 
     /// Reconcile a network change that was held pending through a connect or
@@ -933,6 +968,23 @@ final class AppState {
                         )
                     }
                     continue
+                }
+                // macOS names the new primary service a moment after wake. A
+                // connect before that fails on "no network service" and, with
+                // PF armed, takes the automatic release, so a quick wake ended
+                // open. Hold the barrier up to eight seconds for the service;
+                // then connect and let its ordinary failure handling run.
+                let generation = self.connectionCoordinator.protectionOperationGeneration
+                let serviceDeadline = ContinuousClock.now + .seconds(8)
+                while await self.protectionAudits.primaryNetworkService() == nil,
+                      ContinuousClock.now < serviceDeadline {
+                    try? await Task.sleep(for: .milliseconds(250))
+                    guard !Task.isCancelled else { return }
+                }
+                guard !Task.isCancelled else { return }
+                guard self.connectionCoordinator.protectionOperationGeneration == generation else {
+                    self.connectionCoordinator.wakeRecoveryTask = nil
+                    return
                 }
                 guard !self.isConnected, !self.isConnecting,
                       !self.isDisconnecting else {

@@ -148,7 +148,18 @@ final class NetworkChangeTests: XCTestCase {
             RuntimeCleanup.nativeUpdatePending = savedUpdatePending
             RuntimeCleanup.launchProtectionConsumer = savedConsumer
         }
-        // The loop is parked in its longest wait.
+        // The loop is parked in its longest wait, and an uplink appears.
+        var audits = ProtectionAuditOperations()
+        audits.uplinkSnapshot = {
+            NetworkUplinkSnapshot(
+                primaryService: "Wi-Fi",
+                primaryInterface: "en0",
+                ipv4Address: "192.168.1.20",
+                ipv4Gateway: "192.168.1.1",
+                ipv6Gateway: nil
+            )
+        }
+        app.protectionAudits = audits
         app.unarmedReconnectAttempt = 5
         app.scheduleUnarmedReconnect(sleep: { _ in try await Task.sleep(for: .seconds(600)) })
 
@@ -156,5 +167,47 @@ final class NetworkChangeTests: XCTestCase {
 
         await fulfillment(of: [proofEntered], timeout: 10)
         XCTAssertEqual(app.unarmedReconnectAttempt, 0)
+    }
+
+    /// MAC-UNARMED-DNS-KICK regression: a notification on the uplink the
+    /// ladder already restarted for, such as a DNS-only change, put a parked
+    /// loop back on its two-second rung.
+    func testSameUplinkNotificationLeavesTheUnarmedLadderAlone() async {
+        let savedConsumer = RuntimeCleanup.launchProtectionConsumer
+        let app = AppState()
+        app.automaticResumeHeldAfterRestart = false
+        let savedArmed = KillSwitchService.isArmed
+        let savedUpdateBlock = RuntimeCleanup.nativeUpdateBlocksConnect
+        let savedUpdatePending = RuntimeCleanup.nativeUpdatePending
+        KillSwitchService.isArmed = false
+        RuntimeCleanup.nativeUpdateBlocksConnect = false
+        RuntimeCleanup.nativeUpdatePending = false
+        defer {
+            app.connectionCoordinator.unarmedReconnectTask?.cancel()
+            KillSwitchService.isArmed = savedArmed
+            RuntimeCleanup.nativeUpdateBlocksConnect = savedUpdateBlock
+            RuntimeCleanup.nativeUpdatePending = savedUpdatePending
+            RuntimeCleanup.launchProtectionConsumer = savedConsumer
+        }
+        let uplink = NetworkUplinkSnapshot(
+            primaryService: "Wi-Fi",
+            primaryInterface: "en0",
+            ipv4Address: "192.168.1.20",
+            ipv4Gateway: "192.168.1.1",
+            ipv6Gateway: nil
+        )
+        var audits = ProtectionAuditOperations()
+        audits.uplinkSnapshot = { uplink }
+        app.protectionAudits = audits
+        app.unarmedUplinkBaseline = uplink
+        app.unarmedReconnectAttempt = 5
+        app.scheduleUnarmedReconnect(sleep: { _ in try await Task.sleep(for: .seconds(600)) })
+        let owner = app.connectionCoordinator.unarmedReconnectOwner?.id
+
+        app.handleSystemNetworkChange()
+        await app.unarmedNetworkKickTask?.value
+
+        XCTAssertEqual(app.unarmedReconnectAttempt, 5, "the same uplink is not a new network")
+        XCTAssertEqual(app.connectionCoordinator.unarmedReconnectOwner?.id, owner)
     }
 }

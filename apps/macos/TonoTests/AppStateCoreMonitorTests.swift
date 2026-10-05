@@ -324,4 +324,82 @@ final class AppStateCoreMonitorTests: XCTestCase {
             "the successful re-arm restores the armed latch"
         )
     }
+
+    /// MAC-HEALTH-AUTO-CITY-SWITCH regression: SHIP_PLAN G2 turned the
+    /// `CORE_EXIT_UNREACHABLE` city hop off and the connect path honours
+    /// `CatalogCityFailover`, but the health monitor still switched to, and
+    /// persisted, the next catalog city after two failed ticks. A dead exit
+    /// must take the ordinary release on the city the user chose.
+    func testUnreachableExitDuringHealthKeepsTheChosenCity() async {
+        let selection = AppProfile.defaults.object(forKey: SettingsKey.selectedProxyTargetName)
+        let originalArmedState = KillSwitchService.isArmed
+        let originalReassert = KillSwitchService.needsSessionExceptionReassert
+        let delayWasProven = SingBoxDelayGate.isProven
+        let savedIPC = KillSwitchService.armIPC
+        let app = AppState()
+        defer {
+            app.connectionCoordinator.cancelReconnectTasks()
+            AppProfile.defaults.set(selection, forKey: SettingsKey.selectedProxyTargetName)
+            KillSwitchService.isArmed = originalArmedState
+            KillSwitchService.needsSessionExceptionReassert = originalReassert
+            KillSwitchService.armIPC = savedIPC
+            if delayWasProven { SingBoxDelayGate.prove() } else { SingBoxDelayGate.suspend() }
+        }
+        let chosen = Fixture.realityNode(name: "Los Angeles · Canyon", id: "chosen")
+        let other = Fixture.realityNode(name: "Seattle · Rain", id: "other", server: "203.0.114.9")
+        app.proxyRegions = [
+            ProxyRegion(id: AppState.managedCatalogRegionID, name: "TONO CLOUD", nodes: [chosen, other]),
+        ]
+        _ = app.applyProxySelection(chosen.name)
+        AppProfile.defaults.set(chosen.name, forKey: SettingsKey.selectedProxyTargetName)
+        app.isConnected = true
+        app.coreRuntime.isRunning = true
+        app.config.tunEnabled = true
+        app.tunInterfaceExists = { _ in true }
+        app.tonoTransport = TonoTransportDescriptor(port: 1080)
+        // Nothing listens on the discard port, so the controller's exit check
+        // fails the way a dead exit does; the TUN race loses with it.
+        app.coreController = CoreControllerClient(port: 9)
+        app.raceHealthTrafficProbes = { _, _ in .lost([]) }
+        SingBoxDelayGate.prove()
+        KillSwitchService.isArmed = true
+        KillSwitchService.needsSessionExceptionReassert = false
+        var switchArms = 0
+        KillSwitchService.armIPC.prepare = { _ in
+            switchArms += 1
+            throw HelperIPCError.connectFailed
+        }
+        var runtime = NetworkProtectionOperations()
+        runtime.repairForRelease = {}
+        runtime.stopCore = { _ in true }
+        runtime.coreStatus = { (false, true) }
+        runtime.restoreDNS = { true }
+        runtime.disableSystemProxy = {}
+        runtime.disarm = {}
+        var releases = 0
+        runtime.releaseAfterFailure = {
+            releases += 1
+            KillSwitchService.isArmed = false
+        }
+        runtime.restrictToBootstrap = {}
+        runtime.refreshKillSwitchStatus = { .confirmed(requiresProtectionRecovery: false) }
+        app.networkProtection = runtime
+        var state = AppState.CoreMonitorState()
+        state.healthCycle = 1
+
+        let first = await app.runCoreMonitorTick(state: &state)
+        XCTAssertEqual(first, .continueMonitoring)
+        let verdict = await app.runCoreMonitorTick(state: &state)
+        await app.connectionCoordinator.disconnectSequence?.value
+
+        XCTAssertEqual(verdict, .stopMonitoring)
+        XCTAssertEqual(app.lastClassifiedFailure?.code, .coreExitUnreachable)
+        XCTAssertEqual(switchArms, 0, "a dead exit must not start a city switch")
+        XCTAssertEqual(
+            AppProfile.defaults.string(forKey: SettingsKey.selectedProxyTargetName), chosen.name,
+            "the user's city must stay the saved choice"
+        )
+        XCTAssertEqual(app.selectedExitNode()?.id, chosen.id)
+        XCTAssertEqual(releases, 1, "the exhausted failure releases ordinary traffic once")
+    }
 }

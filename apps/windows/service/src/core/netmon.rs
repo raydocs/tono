@@ -15,7 +15,10 @@
 //! and rebuild a perfectly healthy tunnel every few seconds for ever. `raw_notify` therefore
 //! defers notifications arriving in the DNS-write window to a bounded topology read. A DNS
 //! echo has no interface/route change; a real overlapping change must still reach the App.
-//! Pre-window notifications retain their unconditional invalidation semantics.
+//! Pre-window notifications take the same comparison: a callback is not proof of a change
+//! (Tono's own adapter, IPv6 router refreshes and parameter echoes raise them with nothing
+//! observed changed), and every published batch costs the App a data-plane proof. Only an
+//! unreadable observation is still published for them.
 
 mod topology;
 
@@ -55,7 +58,7 @@ impl Reconciler {
                 let changed = self.baseline.as_ref().is_none_or(|old| *old != current);
                 self.baseline = Some(current);
                 self.unknown_reported = false;
-                (external || changed).then_some("network-change (ip-interface/route)")
+                changed.then_some("network-change (ip-interface/route)")
             }
             Err(error) => {
                 // Unknown is never "unchanged", but do not create a reconnect loop merely
@@ -311,8 +314,9 @@ mod tests {
         assert_eq!(super::change_count(), before, "the callback must not publish a DNS echo");
         assert!(retained, "the worker must reconcile physical changes that overlap a DNS write");
         let baseline = super::topology::Topology {
-            interfaces: vec![(17, 3, 25, 1500, true)],
+            interfaces: vec![(17, 3, 25, 1500, true, 1)],
             routes: vec![(17, 0, 0, 0x0100000a, 10)],
+            addresses: vec![(17, 0x1400000a, 24, 4)],
             ipv6_defaults: vec![(17, [0xfe, 0x80, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], 256)],
         };
         let mut reconciler = super::Reconciler { baseline: Some(baseline.clone()), unknown_reported: false };
@@ -352,6 +356,24 @@ mod tests {
         // The tail keeps suppressing for a moment after the guard drops (the callback is
         // asynchronous), but the guard itself never leaves a window open.
         assert_eq!(crate::core::dns::self_write_depth_for_tests(), 0);
+    }
+
+    /// NETMON-UNCHANGED-EXTERNAL-NOISE: a batch outside the DNS-write window published even
+    /// when nothing observed had changed. A new source address behind the same gateway, which
+    /// the old observation did not hold, must still publish.
+    #[test]
+    fn unchanged_external_topology_is_silent() {
+        let baseline = super::topology::Topology {
+            interfaces: vec![(17, 3, 25, 1500, true, 1)],
+            routes: vec![(17, 0, 0, 0x0100000a, 10)],
+            addresses: vec![(17, 0x1400000a, 24, 4)],
+            ipv6_defaults: Vec::new(),
+        };
+        let mut reconciler = super::Reconciler { baseline: Some(baseline.clone()), unknown_reported: false };
+        assert!(reconciler.observe(Ok(baseline.clone()), true).is_none());
+        let mut readdressed = baseline;
+        readdressed.addresses[0].1 = 0x1500000a;
+        assert!(reconciler.observe(Ok(readdressed), true).is_some(), "a new source address is a move");
     }
 
     #[test]

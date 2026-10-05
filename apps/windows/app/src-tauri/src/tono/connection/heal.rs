@@ -94,6 +94,10 @@ pub async fn refine_before_arm(state: &Arc<TonoState>, node: ValidatedNode) -> V
     .ok()
     .and_then(|result| result.ok())
     .is_some();
+    if reachable {
+        // The pre-tunnel proof dials this same endpoint next; this answer stands in for it.
+        state.unarmed_proofs.lock().remember(&address.to_string(), now_ms());
+    }
     let mut inner = state.lock().await;
     heal::note_health(&mut inner.heal, &node.name, reachable, now_ms());
     if reachable {
@@ -148,4 +152,42 @@ fn candidates(nodes: &[ValidatedNode]) -> Vec<Candidate> {
 
 fn now_ms() -> u64 {
     crate::tono::commands::epoch_millis().max(0) as u64
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// WIN-REFINE-PROOF-UNSHARED: a recovery refine proved the endpoint with TCP but did not
+    /// record it, so the pre-tunnel proof dialed the same endpoint again.
+    #[tokio::test]
+    async fn successful_refine_populates_endpoint_proof() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let node = ValidatedNode {
+            name: "US Reality fixture".into(),
+            server: std::net::Ipv4Addr::LOCALHOST,
+            port: listener.local_addr().unwrap().port(),
+            uuid: "9e107d9d-372b-4c81-8d2b-3f2d0a1b2c3d".into(),
+            servername: "www.microsoft.com".into(),
+            flow: None,
+            client_fingerprint: None,
+            reality_public_key: "0123456789abcdef0123456789abcdef0123456789a".into(),
+            reality_short_id: "0123456789abcdef".into(),
+            protocol: tono_core::node::NodeProtocol::VlessReality,
+            tls_fingerprint: None,
+            certificate_public_key_sha256: None,
+        };
+        let state = Arc::new(TonoState::for_test());
+        {
+            let mut inner = state.lock().await;
+            inner.heal = heal::Session::for_preferred(node.name.clone(), "none");
+            inner.heal.tried.insert("Tokyo · Fuji".into());
+        }
+        assert_eq!(refine_before_arm(&state, node.clone()).await.name, node.name);
+        // Closed: a second dial to this endpoint can no longer succeed.
+        drop(listener);
+        super::super::unarmed_probe::tcp_proof_before_tunnel(&state, &node)
+            .await
+            .expect("the refine's answer stands in for the pre-tunnel dial");
+    }
 }
