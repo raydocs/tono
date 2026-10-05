@@ -247,11 +247,13 @@ static UPLINK_READ: NativeRead<(u64, String), Vec<String>> = NativeRead::new();
 /// worker: a read that never returns keeps the slot, so later reads give no answer at once instead
 /// of leaving one more hung worker behind on every monitor tick. A read that returns after its
 /// caller stopped waiting leaves its answer for the next read with the same key, so a native call
-/// that always outlasts the budget still answers one read later.
+/// that always outlasts the budget still answers one read later, unless [`NativeRead::invalidate`]
+/// ran after that read began.
 #[cfg(any(windows, test))]
 pub(super) struct NativeRead<K, T> {
     slot: tokio::sync::Semaphore,
-    late: std::sync::Mutex<Option<(K, Result<T, String>)>>,
+    epoch: std::sync::atomic::AtomicU64,
+    late: std::sync::Mutex<Option<(K, u64, Result<T, String>)>>,
 }
 
 #[cfg(any(windows, test))]
@@ -259,8 +261,15 @@ impl<K, T> NativeRead<K, T> {
     pub(super) const fn new() -> Self {
         Self {
             slot: tokio::sync::Semaphore::const_new(1),
+            epoch: std::sync::atomic::AtomicU64::new(0),
             late: std::sync::Mutex::new(None),
         }
+    }
+
+    /// What was read may have changed: a late answer from a read that began before this call is
+    /// dropped instead of served.
+    pub(super) fn invalidate(&self) {
+        self.epoch.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
     }
 }
 
@@ -278,31 +287,46 @@ impl<K: PartialEq + Send + 'static, T: Send + 'static> NativeRead<K, T> {
         let Ok(permit) = self.slot.try_acquire() else {
             return Ok(None);
         };
+        // Taken before the native call starts, so its answer is no older than this epoch.
+        let epoch = self.epoch.load(std::sync::atomic::Ordering::Acquire);
         // The slot is free, so the worker that left a late answer has finished writing it.
         let late = self
             .late
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .take();
-        if let Some((late_key, answer)) = late
+        if let Some((late_key, late_epoch, answer)) = late
             && late_key == key
+            && late_epoch == epoch
         {
             return answer.map(Some);
         }
-        let (answered, answer) = tokio::sync::oneshot::channel();
+        let (answered, mut answer) = tokio::sync::oneshot::channel();
         tokio::task::spawn_blocking(move || {
             // Bound first, so dropped last: the slot frees only after a late answer is stored.
             let _permit = permit;
             if let Err(unread) = answered.send(call()) {
-                *self.late.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some((key, unread));
+                *self.late.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some((key, epoch, unread));
             }
         });
-        match tokio::time::timeout(budget, answer).await {
+        let answered_in_time = tokio::time::timeout(budget, &mut answer).await;
+        match answered_in_time {
             Ok(Ok(answer)) => answer.map(Some),
             Ok(Err(_)) => Err("physical uplink enumeration worker failed".to_owned()),
-            Err(_) => Ok(None),
+            Err(_) => {
+                // An answer sent as the budget ran out is still this read's. Once closed, a later
+                // one fails to send and the worker leaves it for the next read instead.
+                answer.close();
+                answer.try_recv().map_or(Ok(None), |answer| answer.map(Some))
+            }
         }
     }
+}
+
+/// The network may have changed since earlier uplink reads began: their late answers are not served.
+pub(super) fn uplinks_may_have_changed() {
+    #[cfg(windows)]
+    UPLINK_READ.invalidate();
 }
 
 /// X2-1: every hardware adapter that currently carries an IPv4 default route and is
@@ -652,6 +676,24 @@ mod tests {
         let other = READ.read(2, answer_now, fresh_read(&native_calls)).await;
         assert_eq!(other, Ok(Some(vec!["Wi-Fi".to_owned()])), "a read for another key reads for itself");
         assert_eq!(native_calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+    }
+
+    /// WIN-UPLINK-READER-HANG (second review): a late answer was served on its key alone, so one
+    /// read before a network change could decide the DIRECT binding after the monitor had seen
+    /// that change. A change seen after the read began now drops its late answer.
+    #[tokio::test]
+    async fn late_uplink_answer_does_not_cross_a_network_change() {
+        static READ: NativeRead<u64, Vec<String>> = NativeRead::new();
+        leave_late_answer(&READ, 1, "Ethernet").await;
+        READ.invalidate();
+        let fresh = READ
+            .read(1, std::time::Duration::from_secs(5), || Ok(vec!["Wi-Fi".to_owned()]))
+            .await;
+        assert_eq!(
+            fresh,
+            Ok(Some(vec!["Wi-Fi".to_owned()])),
+            "a change seen after the read began drops its late answer"
+        );
     }
 
     #[test]

@@ -39,7 +39,7 @@ use super::direct::dns_query_a;
 use super::reconnect::schedule_reconnect_for_generation;
 use super::controller::{CONTROLLER_HTTP_TIMEOUT, controller_client, controller_url, fetch_connections};
 use super::probes::{verify_locked, verify_tun_data_plane};
-use super::platform::usable_physical_uplinks;
+use super::platform::{uplinks_may_have_changed, usable_physical_uplinks};
 
 /// `lookup_host` delegates to the OS resolver and has no Tokio timeout of its own. Bound every
 /// lookup so a broken adapter/resolver cannot strand Connecting forever.
@@ -891,6 +891,8 @@ pub(super) async fn network_monitor_loop(state: Arc<TonoState>, app: AppHandle) 
     // The last recovered-in-place verdict, so a leg that stays failed while the tunnel keeps
     // working re-proves the data plane at the exit-probe cadence rather than every two ticks.
     let mut last_in_place_recovery: Option<std::time::Instant> = None;
+    // The Service's network-event counter at the last tick, to drop uplink answers read before a change.
+    let mut uplink_events_seen: Option<u64> = None;
     loop {
         interval.tick().await;
         let (owned_direct_reload, captured_connect_generation, captured_reload_marker) = {
@@ -938,6 +940,8 @@ pub(super) async fn network_monitor_loop(state: Arc<TonoState>, app: AppHandle) 
                             continue;
                         }
                     }
+                    // The Service could not report network changes meanwhile.
+                    uplinks_may_have_changed();
                     if !connection_loop_continues(handle_network_change(&state, &app).await) {
                         return;
                     }
@@ -953,6 +957,12 @@ pub(super) async fn network_monitor_loop(state: Arc<TonoState>, app: AppHandle) 
             }
         };
         legs.observe_service_ok();
+        // An uplink read that began before a network change the Service has since counted may
+        // describe the network from before it, so its late answer is not served after this.
+        let network_events = snapshot.network_events.counter;
+        if uplink_events_seen.replace(network_events) != Some(network_events) {
+            uplinks_may_have_changed();
+        }
 
         // F2 leg 1: kill-switch completeness every tick.
         legs.observe_kill_switch(kill_switch_unhealthy_for_monitor(
