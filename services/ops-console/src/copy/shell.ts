@@ -16,6 +16,7 @@ export const shellCopy = {
     traffic: '用量',
   } as const,
   legacyFilterNotice: '旧入口的筛选或搜索范围不能完全等价迁移，已保留可用的关键词与对象链接；请在此重新核对筛选。',
+  privacyCustomerSearchNotice: '隐私模式下可搜索显示的邮箱掩码、微信号或客户 ID；完整邮箱搜索需先关闭隐私模式。',
   emptyMigrated: '还没有可展示的数据',
   searchPrompt: '搜索客户、节点或功能',
   navigation: {

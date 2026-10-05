@@ -1,3 +1,3 @@
 | ID | 问题（一句） | 状态 | Issue / PR | 等级 | 剩余限制 |
 |---|---|---|---|---|---|
-| OPS-PRIVACY-CUSTOMER-SEARCH | 新客户搜索以掩码而非原值匹配，隐私模式下真实邮箱/微信静默查不到 | in-PR | [#1377](https://github.com/raydocs/tono/pull/1377) | 低·已复现 | 搜索使用已获权限的数据原值，显示和 tooltip 仍脱敏；本地真实 React/jsdom 运行 before privacySearchRows:0，after:1、privacyDisplayMasked:true。未合 main/部署。 |
+| OPS-PRIVACY-CUSTOMER-SEARCH | 新客户搜索未说明隐私模式的邮箱匹配范围且微信也按掩码比对，操作员会误把空结果当作客户不存在 | in-PR | [#1377](https://github.com/raydocs/tono/pull/1377) | 低·已复现 | 初次按原邮箱子串匹配的修复被复审指出不符既有隐私规则，未上线；最终对齐 CommandPalette：邮箱仍只匹配显示的掩码，微信原值可搜且展示仍mask，并显式说明完整邮箱须关闭隐私。保留原实验收据，不以改断言掩盖取舍变化。未合 main/部署。 |

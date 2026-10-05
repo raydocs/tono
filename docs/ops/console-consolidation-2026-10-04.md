@@ -53,3 +53,10 @@ MacBook，本工作树；本轮日志保留于 `/tmp/tono-ops-consolidation/`：
 - 所有者在本会话确认两周日常使用/真实事故完成，并指定先邮件、Telegram 后补，见[决定 057](../decisions/057-2026-10-05-ops-retirement-email-alerts.md)。这是 owner 确认，尚无可引用的事故日期/笔录；不制造历史证据。生产只读核查当时规则和投递均为空，942 条事故中无 ack；这些数据不能单独证明 UI 使用情况。
 - 邮件复用现有 Resend 配置（只检查 secret 名称存在，不读取/打印值）。在维护者的 `tono` profile 中先导出并上传 D1：`backups/control-plane-d1/2026-10-05T17:47:51Z.sql.gz` 与 `.sha256`，压缩大小 6,388,109 bytes，SHA-256 `b691557923abfb5f14fd12523487dc2f705b5f6805b7eae6463a75108b988a53`，本地 checksum 检查 OK。之后按本任务配置 `ops-email-owner-20261005`：enabled、email、severe、open、delay/cooldown 各 900 秒；收件人由 owner 提供，不进仓库。窄写入规则、两条注明 D1 操作来源的 system 审计，以及一条当前真实 severe/open 事故的初始 outbox；没有新建假事故。实读规则正确，投递初始 `pending/attempts=0`；后续只读确认 `sent/attempts=1/response_code=200/sent_at=2026-10-05 17:53:02 UTC/error=null`。这是 Resend 接受投递的回执，不是收件箱签收。
 - 生产 Worker 仍为 `57c1c64cf4241bd6a961ff29b15720bbf2a4b162`，未部署此 PR。维护检出存在他人的 AGENTS/BUILD_AND_TEST 冲突，未修改或清除；浏览器 space 17 停在 Cloudflare Access 登录页并已实际 handOff，未进入私有 UI。尚未合并/部署，续修 delta 审查、最新 head CI、main 合批审查及可用的干净维护检出仍须满足。
+
+### 续修复审与隐私规则校准
+
+- `cecf5cc1` 续修审查 run `2edd381f-ee5c-4c6b-b2a7-abed9668db5e`（两 finder high）完成：0 major 阻断，确认一个新 minor：初次原邮箱子串搜索不符 CommandPalette 既有隐私规则。该草稿未部署，未把前一轮“隐私邮箱应按原值匹配”的假设当作最终产品要求。
+- 最终选择更保守的既有口径：隐私模式邮箱仍按显示的掩码匹配，微信原值及客户 ID 可搜且结果展示仍脱敏；显式说明完整邮箱搜索需先关闭隐私。新 finding 的原实验仍保留，后续修正记录在同一片段。实际 prior Git `cecf5cc1` 源码通过 Vite 注入到真实 React/jsdom 挂载：before `privateEmailRows:1,privacyScopeNotice:false`；最终 after `privateEmailRows:0,privacyScopeNotice:true,visibleEmailRows:1,idRows:1,wechatRows:1,privacyDisplayMasked:true`，所有断言通过。没有硬编码业务结果、放宽测试或新添 UI 测试文件。
+- 最终既有控制台 44 文件/345 测试、类型197/219、lint通过；构建预算绿。最终修正需要其自己的审查和 CI，不拿 `cecf5cc1` 的状态充数。
+- 继续实读发现维护检出的冲突已由其他任务解决，成为干净 `main@107ce6d9`；本任务没有修改那些变化。生产 API 也已由其他任务更新到 `107ce6d961419a83fc15756e3d17914fe2ebf92e`，不是本 PR 的部署。生产/preview 迁移均实读“无待应用”，0093 在 preview 于17:38:43、生产于17:46:31 UTC 已应用；本任务仅只读查询，未执行迁移或恢复。之前的 57c1c64c/冲突描述是当时观察，不当作当前 blocker。

@@ -20,3 +20,5 @@
 
 - 2026-10-05 退役续接：`50a94765` 的 ci-gate run37217958463 已绿；按 trusted main 策略决定df8c4f2d运行跨厂商全diff审查937f6bab，Opus5.5/high、GPT6.1-sol/high finder成功（交叉verifier medium），结果PASSED/0阻断。四条minor合并为三个根因后续修：旧客户/节点搜索范围提示、隐私模式原值匹配但展示脱敏、不可应用私人筛选不留URL。已跑before/after真实React/jsdom复现与既有345测试/类型/lint/build；无新增UI测试。新findings仍in-PR，续修最终审查/CI待核；两条非当前故障suggestion记录在限制。
 - 所有者确认使用/事故条件已完成并选择邮件、Telegram后补（决定057）；不捏造历史事故证明。只读核查此前无告警规则/投递；在tono profile导出/上传D1备份 `2026-10-05T17:47:51Z.sql.gz` 与校验旁文件、校验OK后，按明确任务窄配严重事故邮件规则（延迟/冷却900秒），并排队一条当前真实严重事故，system审计注明D1操作来源；初始投递pending，随后只读确认 `sent/attempts1/HTTP200/2026-10-05 17:53:02 UTC`，未宣称收件箱收到。未读/打印/新增第三方密钥，无假事故。生产仍57c1c64c，主维护检出冲突未动，浏览器Access需登录；仅源码/邮件配置，无新客户候选或Worker部署。
+
+- 2026-10-05 续修复审2edd381f：0 major，一条确认minor指出初次原邮箱搜索不符现有隐私口径。最终恢复邮箱mask匹配、允许已知微信/ID搜索且显示脱敏，加入明确说明；真实prior Git源码before privateEmailRows1/noticefalse，after0/noticetrue，privacy off邮箱与privacy on微信/ID各命中1，maskedtrue；现有345测试/类型/lint/预算绿。非此PR的主维护冲突已由他人解决，生产API已由其他任务更新107ce6d9、preview/生产0093已应用；本任务仅实读，不领取其部署/迁移功劳。本PR最终审查及CI继续核验。

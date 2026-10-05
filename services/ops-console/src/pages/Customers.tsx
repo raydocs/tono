@@ -153,10 +153,10 @@ export default function CustomersPage({
     const needle = query.trim().toLowerCase();
     return selectByStage(table, stage).filter((row) => {
       const person = row.customer ?? row.invite;
-      return !needle || [person.email, person.wechatId ?? '', row.customer?.userId ?? '']
+      return !needle || [privacy.email(person.email), person.wechatId ?? '', row.customer?.userId ?? '']
         .some((value) => value.toLowerCase().includes(needle));
     });
-  }, [table, stage, query]);
+  }, [table, stage, query, privacy]);
   const picked = useMemo(
     () => shown.map((row) => row.customer).filter((row): row is CustomerSummaryDto => row !== null),
     [shown],
@@ -203,6 +203,7 @@ export default function CustomersPage({
       <label className="flex items-center gap-3 text-fine">{copy.traffic.search}
         <input type="search" className="min-w-0 max-w-sm flex-1 rounded-md border border-[var(--hairline)] bg-[var(--surface)] px-3 py-2 text-body" value={query} onChange={(event) => setQuery(event.target.value)} />
       </label>
+      {privacy.privacy ? <p className="text-fine" role="status">{copy.privacyCustomerSearchNotice}</p> : null}
       <div className="page-head">
         <section className="customers-hero" aria-label={copy.pages.customers}>
           {/* The sentence the page is built around, and the one button that
