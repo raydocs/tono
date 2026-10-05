@@ -46,7 +46,7 @@
   background: linear-gradient(
     90deg,
     rgba(10, 8, 15, 0.56),
-    rgba(10, 8, 15, 0.56) 48%,
+    rgba(10, 8, 15, 0.56) calc(60% - 160px),
     transparent 60%
   );
   z-index: 1;
@@ -64,7 +64,7 @@
 }
 .tono-home__sentence {
   margin: 10px 0 0;
-  max-width: min(400px, calc(100% - 24px));
+  max-width: min(400px, calc(100% - 24px), calc(60cqw - 216px));
   font-size: 15px;
   line-height: 1.55;
   color: rgba(246, 242, 236, 0.94);
@@ -559,6 +559,9 @@
 
 /* The intermediate 200px sidebar narrows the canvas; final full-bleed geometry is PR 3. */
 @container (max-width: 760px) {
+  .tono-home__sentence {
+    max-width: min(400px, calc(100% - 24px), calc(60cqw - 192px));
+  }
   .tono-home__title[data-long="true"] {
     font-size: 36px !important;
   }
