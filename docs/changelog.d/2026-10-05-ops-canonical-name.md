@@ -1,9 +1,21 @@
 ## 2026-10-05 · 唯一后台正式改名 ops
 - 归属：运维计划 §6 后台收敛；控制面/Admin 与 ops-console。
-- 来源：基线 `f693ef02` → `ops/canonical-name-20261005`；尚未合 main/部署。
+- 来源：基线 `f693ef02` → `702d8b11`，`ops/canonical-name-20261005`、[#1392](https://github.com/raydocs/tono/pull/1392)。初次提交尚未合 main/部署；后续合并与上线见下。
 - 缺陷修复：无新增产品缺陷；这是所有者要求的命名收口。
 - 新增/优化：正式入口 `/ops/`；`/ops2/`、`/ops2/index.html`、旧根与旧路径页面兼容跳转，保留 query/fragment。旧专属 hash 自动迁移；新版节点页/对象、客户搜索、用量窗口不套用 ops1 解析。吸收域名与告警入口同步改名。
 - 工程与测试：构建 base/outDir、theme-init、预算与既有 E2E URL 改为 ops；成功构建后仅清除 ignored `public/ops2`，无新增 UI 测试/E2E case 或截图基线。
-- 验证：MacBook 窄 Worker检查原始 `Test Files 1 passed / Tests 5 passed | 202 skipped (207)`；预算测试 `1 passed / 3 passed`；构建 `initial JS 204.7 KB / total JS 317.2 KB / all budgets green`，`canonical ops index exists`、`retired ops2 output absent`。两服务 typecheck 与 console lint 退出 0；Worker 现有路由文件 `1 passed / 207 passed`、console `44 passed / 345 passed`。实际旧 Git 模块在 unmarked 旧用户书签上不迁移，当前模块迁移通过；真实 Vite SSR + jsdom 检查 canonical 无循环、alias/query/hash/编码对象、旧用户/用量/搜索/分流与新版节点/抽屉/对象/窗口通过（原始工件 `/tmp/tono-ops-name-20261005`）。独立路由审查、精确 head CI 待完成。
-- 候选/发布：无客户包、无客户更新源变更、无新迁移/数据写入；当前仅源码。
+- 验证：MacBook 窄 Worker检查原始 `Test Files 1 passed / Tests 5 passed | 202 skipped (207)`；预算测试 `1 passed / 3 passed`；构建 `initial JS 204.7 KB / total JS 317.2 KB / all budgets green`，`canonical ops index exists`、`retired ops2 output absent`。两服务 typecheck 与 console lint 退出 0；Worker 现有路由文件 `1 passed / 207 passed`、console `44 passed / 345 passed`。实际旧 Git 模块在 unmarked 旧用户书签上不迁移，当前模块迁移通过；真实 Vite SSR + jsdom 检查 canonical 无循环、alias/query/hash/编码对象、旧用户/用量/搜索/分流与新版节点/抽屉/对象/窗口通过（原始工件 `/tmp/tono-ops-name-20261005`）。初次提交时独立路由审查、精确 head CI 待完成；后续结果见下。
+- 候选/发布：无客户包、无客户更新源变更、无新迁移/数据写入；初次提交仅源码；Worker 上线续记见下。
 - 剩余限制：旧 unmarked `#/nodes` 与新版节点页同 URL，选择新版；旧根/路径或 `legacy=ops1` 的旧 nodes 别名仍到目录。生产登录后人工页面验收未执行；浏览器由所有者控制，不夺回。
+
+### 2026-10-05 续记 · CI 重试、合并与生产上线
+
+- 当前状态：正式入口为 [`https://admin.afk.ccwu.cc/ops/`](https://admin.afk.ccwu.cc/ops/)；唯一 `ops-console` 实现，`/ops2/` 只作兼容跳转。实现 PR1392 已于 **21:56:33 UTC** 合并为 main@[`e8ce5f38d7fbfc961da71dd85fedf200ca9595a5`](https://github.com/raydocs/tono/commit/e8ce5f38d7fbfc961da71dd85fedf200ca9595a5)，随后 API/Admin 均部署此源码。
+- CI：精确 head `702d8b1140a7600ba0fd44fa4785d8ab1b8f6be6` 的 [ci-gate37367011653](https://github.com/raydocs/tono/actions/runs/37367011653) **SUCCESS**；控制面/迁移/合同/采集器及四个 UI E2E shard 成功，未触及的 macOS/Windows/sing-box/connect-bench 合法 skipped。首轮失败保留：hosted runner 未取到任务，annotation `The job was not acquired by Runner of type hosted even after multiple attempts`；当时服务检查未执行，不计通过。完整重试一次后通过，未改单独 workflow、runner 配置或 required check。
+- 审查：系统 Codex0.160.0、`gpt-6.1-sol/high`、只读后台，覆盖 `f693ef02..702d8b11`，五项 routing/Access/状态/构建/链接清单均 covered，结果 **No actionable findings; no major-or-worse blocker**（[精确收据](https://github.com/raydocs/tono/pull/1392#issuecomment-6002056417)）。首个 CLI 因继承模型指令冲突未审查，不计通过；独立进程以 `--ignore-user-config` 重试且实际 model/effort header 确认为 GPT6.1/high；未改主会话或全局配置。
+- 合并：GraphQL reviewThreads/reviews 为空且无分页遗漏；ready、无 stack 依赖，手动 merge，`autoMergeRequest:null`，无 UI auto-merge 或 admin 绕过（[验收收据](https://github.com/raydocs/tono/pull/1392#issuecomment-6003853867)）。
+- main 合批核对范围 `933436cb..e8ce5f38`：`git diff --exit-code 702d8b11..e8ce5f38` 全树为空，无新高风险集成改动；`933436cb..f693ef02` 的 control-plane/ops-console/deploy script 差异为空。复用 [#1387 的81bb01b4审查](https://github.com/raydocs/tono/pull/1387#issuecomment-6000382323)、[#1389 的410d228f审查](https://github.com/raydocs/tono/pull/1389#issuecomment-6000495892)，各 merged 路径与精确 covered head 实际 diff--exit-code 为空；两者均无 major、已记录工程 minor。本次不构建或发布客户包，不把它们算作实机通过。
+- 部署前：维护者 `main` clean，`git pull --ff-only` 到 e8ce5f38，实际 `Active profile: tono`。D1 已导出到 R2 `backups/control-plane-d1/2026-10-05T21:53:08Z.sql.gz` +sidecar；gzip6380133 bytes，SHA256 `739200cf867822ab7fd9d30ed34b26e1330d5dbb1f19fe932f6cb58dc8f3c8f7`，实际 `2026-10-05T21:53:08Z.sql.gz: OK`。不记录导出签名 URL、邮箱或 SQL 数据。
+- 部署：`npm run deploy` 退出0，原始 `Test Files44 passed / Tests1000 passed`、`check-budgets: all budgets green`、两次 `No migrations to apply`，最后 `deployed control plane and admin Worker from main@e8ce5f38d7fbfc961da71dd85fedf200ca9595a5`。API Worker version `2787af30-006c-4c5d-82b4-500e80497461`；Admin `813b1f34-77b6-44dd-aa79-de45aa11f7f6`。
+- 生产核对：curl VERSION buildSha=e8ce5f38；PULSE `ok:true,cronAgeSec199,buildSha=e8ce5f38`。API `/`404，`/ops/`、index、assets 与 `/ops2/`、assets401；匿名401只证明门禁，不证明私有页面或旧 asset404。`quality.afk.ccwu.cc`、`ops.afk.ccwu.cc` 实际302到 `https://admin.afk.ccwu.cc/ops/#/nodes`。Admin 最新 deployment `9458ceda-9716-4c36-9c6f-4aca9f0e9170`（21:59:24.588 UTC）为上述 version100%，metadata message `source main@e8ce5f38...`；维护产物 actual `canonical ops index exists / retired ops2 output absent`。
+- 验证边界：首次 Python urllib 公共探测403，未当通过；curl 重试实际200并断言 SHA/健康，未改服务器或本机网络配置。登录后的生产页面/书签、生产 Access 配置人工核对和 macOS 像素基线未执行；浏览器仍由所有者控制。无新密钥/邮件规则/Telegram/迁移/恢复/客户发布。原始工件 `/tmp/tono-ops-name-20261005`。
