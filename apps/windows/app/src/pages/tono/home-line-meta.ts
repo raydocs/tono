@@ -1,17 +1,26 @@
 import type { TonoStatus } from '@/services/tono'
 
 import { readNodeLatency } from './node-latency'
-import { nodeCityLabel, nodeCityParts } from './node-meta'
+import {
+  HY2_NAME_SUFFIX,
+  isHy2CatalogName,
+  nodeCityLabel,
+  nodeCityParts,
+} from './node-meta'
 
 /** One display identity for the chip and picker; wire names stay with the handler. */
 export const homeLineParts = (
   name: string,
   t: Parameters<typeof nodeCityLabel>[1],
 ) => {
-  const codename = nodeCityParts(name).codename
+  const { codename, city } = nodeCityParts(name)
+  const label = nodeCityLabel(
+    codename ? `${city}${isHy2CatalogName(name) ? HY2_NAME_SUFFIX : ''}` : name,
+    t,
+  )
   return {
-    name: codename || nodeCityLabel(name, t),
-    city: codename ? nodeCityLabel(name, t) : '',
+    name: codename || label,
+    city: codename ? label : '',
   }
 }
 

@@ -25,6 +25,7 @@
   --tono-glass-blur: none;
   --tono-glass-blur-strong: none;
   --tono-accent: #ffe2b0;
+  --tono-accent-soft: #ffe2b0;
   isolation: isolate;
   background: #090b17;
 }
