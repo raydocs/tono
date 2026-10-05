@@ -1,0 +1,24 @@
+## 2026-10-05 · Windows 版本号脚本：只改 `[package]`，同时改 Cargo.lock
+- 归属：SHIP_PLAN §2 第 10 项（R6 打包扫描，Issue #1325）；所有者 2026-10-05「把没做的做了」。动 `apps/windows/app/scripts/release-version.mjs`、新文件 `scripts/cargo-version.mjs` 及其测试、`package.json` 的 `test:dev-control` 清单。
+- 来源：基线 main `107ce6d9` → 分支 `fix/win-release-version-lock-20261005`；尚未合入 main。
+- 缺陷修复：无客户运行时缺陷。
+- 新增/优化：无。
+- 工程与测试修正：
+  - `pnpm release-version <版本>` 以前改 `package.json`、`src-tauri/Cargo.toml`、`tauri.conf.json`，不改 `Cargo.lock`。`windows-release.yml` 用 `cargo metadata --locked` 读版本、`verify-desktop-version.py` 也核对 lock，所以单用这个脚本升版本得到的是发布工作流会拒绝的树，`build-windows-release.sh` 调它之后 lock 也是脏的。现在同时改 lock 里本地 `tono-windows` 那一条（没有 `source` 的那条，必须恰好一条，否则报错）。
+  - `Cargo.toml` 以前把每一行以 `version =` 开头的都改掉；今天只有 `[package]` 有，但依赖一旦写成独立表（`[dependencies.x]` 下一行 `version = "…"`）就会被一起改。现在只改 `[package]` 表里的那一行，找不到就报错。
+  - 脚本最后跑一次 `tooling/scripts/verify-desktop-version.py`，版本仍不一致时打印告警（不失败）。没有做成失败、也没有让它去改 macOS 工程：`alpha`/`autobuild`/`deploytest` 这些是只给 Windows 用的版本串，macOS 的 `MARKETING_VERSION` 和构建号是另一步手工升的；拦截仍由各发布工作流里的同一个校验脚本负责。
+  - 回归两条（`scripts/cargo-version.test.mjs`，进 `test:dev-control`，`windows-ci` 会跑）：「只改 `[package]`」「lock 里本地那条跟着改」。红提交先推（本机红：`ERR_MODULE_NOT_FOUND`，被测模块还不存在，不是断言失败）。
+- 验证：本机 `node --test scripts/cargo-version.test.mjs` 8 通过（第一轮 2 条、第二轮 6 条）；把四个文件拷到临时目录跑 `release-version.mjs 0.0.75`，`Cargo.toml` 和 `Cargo.lock` 各只变一行；biome 检查通过。没有跑 `cargo metadata`（本机不跑 cargo），由 `windows-ci` 的 `--locked` 步骤间接覆盖不到「升版本后的树」这一点，记为未验证。
+- 复核后续（Codex `gpt-6.1-sol` high 审 `a65fed55`，4 个 major、1 个 minor，同一 PR 内修）：
+  - CRLF 的 `Cargo.lock`（Windows 检出常见）以前按 `\n` 切行后 `name = "tono-windows"\r` 对不上，报「找到 0 条」。现在比较前去掉行尾 `\r`，写回时保留原来的换行。
+  - lock 里若有带版本的引用（`"tono-windows 0.0.74"`，同名包有两份时 Cargo 才这么写），只改版本会留下悬空引用，现在直接报错不改。
+  - `Cargo.toml` 的行扫描以前会被 `[package] # 注释`、多行字符串里的 `version = …`、`version.workspace = true` 骗过。现在表头允许带注释，跳过多行字符串，只替换引号里的值（缩进、行尾注释不动），继承写法、重复的 `version`、找不到都报错。
+  - 以前任何一步失败都会留下只改了一半的树（`package.json` 已写、lock 没写）。现在 `Cargo.toml` 和 `Cargo.lock` 两个结果都算出来才写；四个文件任何一步失败，全部写回原内容。
+  - 回归加四条（CRLF、带版本引用、形似的行与格式保留、继承写法），红提交 `3c16f64c` 先推（本机红：`pass 2, fail 4`）。「失败后还原」没有单独写测试，只在临时目录手工验过（lock 里没有本地包 → 退出码 1，`package.json` 与 `Cargo.toml` 和原文件逐字节相同），记为未自动化。
+- 复核后续第二轮（Codex 审 `74798c58`，报 5 个 major、1 个 minor；按本仓库的停止规则它们都不是泄漏/越权一类，但都是真的，同一 PR 内再修一轮）：
+  - 思路改了：这是按行扫描，不是 TOML 解析器，继续补特例补不完，所以改成「读不准就拒绝」。`Cargo.toml` 里任何位置出现三引号（多行字符串，或注释里的三引号）整份拒绝，提示手工改；版本值后面只允许空白和注释，`"""0.0.74"""`、`"0.0.74" "x"` 都拒绝。上一轮「跳过多行字符串」的逻辑删掉，对应那条回归改成不含多行字符串的写法（多了一张 `[package.metadata.bundle]` 子表里的同名行），另加一条「读不准就拒绝」。今天的 `src-tauri/Cargo.toml` 没有三引号。
+  - `Cargo.lock`：带版本的引用现在整份文件里查（写成一行的 `dependencies = ["tono-windows 0.0.74"]` 以前漏掉）；`source` 行不再要求等号两边有空格（`source="…"` 以前被当成本地包）。Cargo 自己生成的 lock 不会写成这两种样子，这是防手改。
+  - 还原：以前用 `Promise.all`，一个文件写不回去就丢掉原始错误、其余文件也可能没还原。现在逐个还原、互不影响，还原不了的文件名打印出来，抛出的仍是最初的错误。这条没有自动化测试（要注入写盘失败）。
+  - 单引号版本（`version = '0.0.74'`）仍然拒绝而不是支持：安全的拒绝，记为未做。
+  - 红提交 `2df329d2` 先推（本机红：`pass 5, fail 3`）；修后 8 条全过，真实的 `Cargo.toml` 与 `Cargo.lock` 各只变一行。
+- 候选/发布：仅源码，无新候选。
