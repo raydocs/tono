@@ -15,6 +15,9 @@ pub(super) struct Topology {
     /// An unreadable IPv6 table leaves this empty rather than failing the
     /// whole observation, so a DNS echo is not reported as "unknown".
     pub ipv6_defaults: Vec<(u64, [u8; 16], u32)>,
+    /// The IPv6 default routes could not be read in full. An external batch is then
+    /// published even when everything else compares equal: an unread part proves nothing.
+    pub ipv6_unreadable: bool,
 }
 
 #[cfg(not(feature = "test"))]
@@ -108,8 +111,9 @@ pub(super) fn read() -> Result<Topology, String> {
     topology.addresses.dedup();
     // IPv4 is the observation that must succeed. A missing IPv6 stack must not
     // turn every later DNS echo into an unknown topology.
-    if let Ok(defaults) = read_ipv6_defaults() {
-        topology.ipv6_defaults = defaults;
+    match read_ipv6_defaults() {
+        Ok(defaults) => topology.ipv6_defaults = defaults,
+        Err(_) => topology.ipv6_unreadable = true,
     }
     Ok(topology)
 }
@@ -141,7 +145,10 @@ fn read_ipv6_defaults() -> Result<Vec<(u64, [u8; 16], u32)>, String> {
         let mut interface = MIB_IF_ROW2 { InterfaceLuid: row.InterfaceLuid, ..Default::default() };
         // SAFETY: InterfaceLuid is taken from the route row; GetIfEntry2 writes the rest.
         let status = unsafe { GetIfEntry2(&mut interface) };
-        if status != 0 || interface.Type == MIB_IF_TYPE_LOOPBACK {
+        if status != 0 {
+            return Err(format!("GetIfEntry2 failed for an IPv6 default route: {status}"));
+        }
+        if interface.Type == MIB_IF_TYPE_LOOPBACK {
             continue;
         }
         let end = interface.Alias.iter().position(|ch| *ch == 0).unwrap_or(interface.Alias.len());

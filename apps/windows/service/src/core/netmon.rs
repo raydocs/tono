@@ -17,8 +17,8 @@
 //! echo has no interface/route change; a real overlapping change must still reach the App.
 //! Pre-window notifications take the same comparison: a callback is not proof of a change
 //! (Tono's own adapter, IPv6 router refreshes and parameter echoes raise them with nothing
-//! observed changed), and every published batch costs the App a data-plane proof. Only an
-//! unreadable observation is still published for them.
+//! observed changed), and every published batch costs the App a data-plane proof. An
+//! unreadable observation, or one whose IPv6 part could not be read, is still published for them.
 
 mod topology;
 
@@ -56,9 +56,10 @@ impl Reconciler {
         match observed {
             Ok(current) => {
                 let changed = self.baseline.as_ref().is_none_or(|old| *old != current);
+                let publish = changed || (external && current.ipv6_unreadable);
                 self.baseline = Some(current);
                 self.unknown_reported = false;
-                changed.then_some("network-change (ip-interface/route)")
+                publish.then_some("network-change (ip-interface/route)")
             }
             Err(error) => {
                 // Unknown is never "unchanged", but do not create a reconnect loop merely
@@ -318,6 +319,7 @@ mod tests {
             routes: vec![(17, 0, 0, 0x0100000a, 10)],
             addresses: vec![(17, 0x1400000a, 24, 4)],
             ipv6_defaults: vec![(17, [0xfe, 0x80, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], 256)],
+            ipv6_unreadable: false,
         };
         let mut reconciler = super::Reconciler { baseline: Some(baseline.clone()), unknown_reported: false };
         assert!(reconciler.observe(Ok(baseline.clone()), false).is_none(), "DNS-only echoes stay quiet");
@@ -360,7 +362,8 @@ mod tests {
 
     /// NETMON-UNCHANGED-EXTERNAL-NOISE: a batch outside the DNS-write window published even
     /// when nothing observed had changed. A new source address behind the same gateway, which
-    /// the old observation did not hold, must still publish.
+    /// the old observation did not hold, must still publish, and so must a batch whose IPv6
+    /// part could not be read.
     #[test]
     fn unchanged_external_topology_is_silent() {
         let baseline = super::topology::Topology {
@@ -368,12 +371,16 @@ mod tests {
             routes: vec![(17, 0, 0, 0x0100000a, 10)],
             addresses: vec![(17, 0x1400000a, 24, 4)],
             ipv6_defaults: Vec::new(),
+            ipv6_unreadable: false,
         };
         let mut reconciler = super::Reconciler { baseline: Some(baseline.clone()), unknown_reported: false };
         assert!(reconciler.observe(Ok(baseline.clone()), true).is_none());
-        let mut readdressed = baseline;
+        let mut readdressed = baseline.clone();
         readdressed.addresses[0].1 = 0x1500000a;
         assert!(reconciler.observe(Ok(readdressed), true).is_some(), "a new source address is a move");
+        let blind = super::topology::Topology { ipv6_unreadable: true, ..baseline };
+        reconciler.observe(Ok(blind.clone()), false);
+        assert!(reconciler.observe(Ok(blind), true).is_some(), "an unread IPv6 part never proves a batch unchanged");
     }
 
     #[test]

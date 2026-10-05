@@ -24,6 +24,7 @@
   - 按 2026-09-14 所有者规定，MacBook 不跑原生 cargo/xcodebuild，本次所有 Rust/Swift 回归本机都未运行，hosted CI 是第一次运行。修前失败未实跑，只由编译失败或推理确定；`successful_refine_populates_endpoint_proof` 在旧代码上能编译，应在行为上失败。
   - windows-sys 0.61.2 的 `GetUnicastIpAddressTable`、`MIB_UNICASTIPADDRESS_ROW`、`IF_OPER_STATUS`/`NL_DAD_STATE`（均为 `i32`）已对照本机 registry 源码核对签名。
   - 没有实机验证。
+- 独立审查：Codex `gpt-6.1-sol` high 静态审查 `a97c963e...5d8b648f`（18 个代码文件），没有放宽 PF/WFP、提前放行或编译错误的发现；一个 major：IPv6 默认路由读不出时，过滤会把外部批次当成未变而吞掉真实的 IPv6 变化（旧代码对外部批次一律发布，所以是本 PR 引入）。已修：观察记 `ipv6_unreadable`，外部批次遇到它照旧发布，回归补了这一断言。修复提交只经主会话读码，未再送审。
 - 候选/发布：仅源码，无新候选。
 - 剩余限制：
   - 决策 063 的下限：接近 310 秒事务上限的尝试会带来约 15.5 分钟的下限，期间普通流量保持放行、AI 保持拦截（决策 030/031），保护要等下一轮或手动连接才恢复。
