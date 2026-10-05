@@ -67,7 +67,9 @@ pub(super) const DIRECT_RENEWAL_AMBIGUITY_GRACE: Duration = Duration::from_secs(
 /// Whether a failed renewal waits for the next tick instead of acting now. Only a renewal with no
 /// Service verdict qualifies: a rejection, or a proof that does not match, acts at once.
 pub(super) fn direct_renewal_retries(ambiguous: bool, since_last_renewal: Duration) -> bool {
-    ambiguous && since_last_renewal < DIRECT_RENEWAL_AMBIGUITY_GRACE
+    // RED-ON-OLD: no grace, like the old heartbeat.
+    let _ = (ambiguous, since_last_renewal, DIRECT_RENEWAL_AMBIGUITY_GRACE);
+    false
 }
 
 pub(super) async fn spawn_direct_lease_heartbeat(state: &Arc<TonoState>, generation: u64, heartbeat: DirectLeaseHeartbeat) {

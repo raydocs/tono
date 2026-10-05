@@ -167,7 +167,9 @@ fn schedule_reconnect_locked_with(
         }
         return;
     };
-    let delay = if proven_startup { Duration::ZERO } else { rung };
+    // RED-ON-OLD: every schedule waits its rung, like the old startup resume.
+    let _ = proven_startup;
+    let delay = rung;
     let generation = inner.connect_generation;
     let handle = spawn(delay, generation);
     inner.tasks.reconnect = Some(handle);

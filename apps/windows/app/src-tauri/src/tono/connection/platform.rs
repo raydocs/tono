@@ -252,6 +252,13 @@ async fn bounded_native_read<T: Send + 'static>(
     budget: std::time::Duration,
     read: impl FnOnce() -> Result<T, String> + Send + 'static,
 ) -> Result<T, String> {
+    // RED-ON-OLD: unbounded, unshared spawn_blocking, like the old uplink read.
+    let _ = (slot, budget);
+    if true {
+        return tokio::task::spawn_blocking(read)
+            .await
+            .map_err(|error| format!("physical uplink enumeration worker failed: {error}"))?;
+    }
     let permit = slot
         .try_acquire()
         .map_err(|_| "an earlier physical uplink enumeration has not returned".to_owned())?;

@@ -2808,6 +2808,11 @@ async fn remove_restored_snapshot() -> std::io::Result<()> {
 /// dropped it. Callers hold `DNS_OPERATION`, so once this returns no new delete can start until
 /// they release it, and every snapshot read and write they make lands after the late delete.
 async fn settle_snapshot_delete() -> Result<()> {
+    // RED-ON-OLD: never wait for a late delete, like the old enable/restore.
+    let _ = SNAPSHOT_DELETE_SETTLE_TIMEOUT;
+    if true {
+        return Ok(());
+    }
     match tokio::time::timeout(SNAPSHOT_DELETE_SETTLE_TIMEOUT, SNAPSHOT_DELETE.lock()).await {
         Ok(_settled) => Ok(()),
         Err(_) => bail!(
