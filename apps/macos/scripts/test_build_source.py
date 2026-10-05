@@ -33,6 +33,36 @@ class BuildSourceTests(unittest.TestCase):
             subprocess.run(['sh', str(SCRIPT)], env=env, check=True)
             self.assertIsNone(json.loads(output.read_text())['releaseSequence'])
 
+    def test_rebuilding_the_helper_binary_does_not_mark_the_build_dirty(self):
+        # Packaging recompiles the tracked helper binary from tracked sources
+        # before the app is built, so every CI build used to record dirty:true.
+        with tempfile.TemporaryDirectory() as temporary:
+            repo = Path(temporary) / 'repo'
+            helper = repo / 'apps/macos/Tono/Resources/tono-core-helper'
+            source = repo / 'apps/macos/Tono/App.swift'
+            helper.parent.mkdir(parents=True)
+            helper.write_bytes(b'committed helper')
+            source.write_text('// committed\n')
+            git = ['git', '-C', str(repo), '-c', 'user.name=t', '-c', 'user.email=t@example.invalid']
+            subprocess.run(['git', 'init', '-q', str(repo)], check=True)
+            subprocess.run(git + ['add', '-A'], check=True)
+            subprocess.run(git + ['commit', '-q', '-m', 'base'], check=True)
+            env = dict(os.environ, SRCROOT=str(repo / 'apps/macos'),
+                       BUILT_PRODUCTS_DIR=str(Path(temporary) / 'out'),
+                       UNLOCALIZED_RESOURCES_FOLDER_PATH='Tono.app/Contents/Resources',
+                       CONFIGURATION='Release')
+            output = Path(temporary) / 'out/Tono.app/Contents/Resources/tono-build-source.json'
+
+            def dirty():
+                subprocess.run(['sh', str(SCRIPT)], env=env, check=True)
+                return json.loads(output.read_text())['dirty']
+
+            self.assertIs(dirty(), False)
+            helper.write_bytes(b'rebuilt helper')
+            self.assertIs(dirty(), False)
+            source.write_text('// edited\n')
+            self.assertIs(dirty(), True)
+
 
 if __name__ == '__main__':
     unittest.main()
