@@ -592,21 +592,27 @@ mod tests {
         // log off the device on every launch only for it to be discarded.
         let dir = Dir::new("declined");
         let live = dir.join("traffic-audit.jsonl");
-        std::fs::write(&live, "{\"_uploadScope\":\"a\",\"host\":\"visited.example\"}\n").unwrap();
+        std::fs::write(&live, "").unwrap();
         let mut queue = UploadQueue::new(live.clone(), "a");
-        assert!(!queue.confirmed);
+        assert_eq!(queue.next_step(), None);
+        // A line written after the empty read is probed for like any other.
+        std::fs::OpenOptions::new().append(true).open(&live).unwrap()
+            .write_all(b"{\"_uploadScope\":\"a\",\"host\":\"visited.example\"}\n").unwrap();
+        assert_eq!(queue.next_step(), Some(Step::Probe));
         assert!(gunzip(&gzip_within_limit(&[]).unwrap()).is_empty());
         assert!(is_not_stored(&ApiError::Server { status: 200, message: String::new() }));
 
         queue.decline();
-        assert!(!queue.confirmed);
         assert_eq!(next_sweep_delay(0, queue.declined), DECLINED_INTERVAL);
-        assert_eq!(queue.cursor.offset, 0);
-        assert_eq!(queue.sequence, 0);
+        assert_eq!((queue.next_step(), queue.sequence, queue.cursor.offset), (Some(Step::Probe), 0, 0));
 
         queue.confirm();
-        assert!(queue.confirmed && !queue.declined);
-        assert_eq!(queue.sequence, 1, "the stored probe's receipt key is never reused");
+        assert!(!queue.declined);
+        assert_eq!((queue.next_step(), queue.sequence), (Some(Step::Lines), 1));
+        // The window closed before the lines arrived. Their key is retired:
+        // the server answers a known key as stored without reading the body.
+        queue.decline();
+        assert_eq!((queue.next_step(), queue.sequence), (Some(Step::Probe), 2));
     }
 
     #[test]
