@@ -38,9 +38,9 @@ function fakeBuild(opts: { initialBytes?: Buffer; extraChunk?: boolean; longSrc?
   writeFileSync(
     join(dist, 'index.html'),
     `<!doctype html><html><head>
-<link rel="modulepreload" href="/ops2/assets/vendor.js">
+<link rel="modulepreload" href="/ops/assets/vendor.js">
 </head><body>
-<script type="module" src="/ops2/assets/index.js"></script>
+<script type="module" src="/ops/assets/index.js"></script>
 </body></html>\n`,
   );
   writeFileSync(join(src, 'ok.ts'), 'export const ok = 1;\n');
@@ -83,7 +83,7 @@ describe('budget-report', () => {
   // non-zero exit as check-budgets.mjs. Swallowing it would post a comment
   // with no numbers.
   it('exits non-zero with the check-budgets message when dist is missing', () => {
-    const missing = join(tempDir('budget-report-missing-'), 'ops2');
+    const missing = join(tempDir('budget-report-missing-'), 'ops');
     const result = runReport(['--dist', missing]);
     expect(result.code).toBe(1);
     expect(result.stderr).toContain(`check-budgets: no build at ${missing} — run vite build first.`);

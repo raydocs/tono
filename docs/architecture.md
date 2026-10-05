@@ -139,9 +139,9 @@ See [RELEASE_LINES.md](RELEASE_LINES.md).
 Shipped names: `Tono.app`, `Tono.exe`, `tono-core-helper`, `tono-core`,
 `TonoService`, `TonoPreferences`, events `tono://…`, errors `TONO_ERROR:`.
 
-Ops uses `https://admin.afk.ccwu.cc/ops2/` (Cloudflare Access), built from
-`services/ops-console/`. The old `/ops/` UI source is retired; its URLs only
-redirect and migrate old hash links to that same console. ops2 still imports
+Ops uses `https://admin.afk.ccwu.cc/ops/` (Cloudflare Access), built from
+`services/ops-console/`. The old UI source is retired; `/ops2/` redirects to `/ops/`, and legacy
+hash links migrate in that same console. The console still imports
 `services/control-plane/admin/src/lib/` through `@legacy-lib`, so that directory
 is not dead code. The console uses the same Worker
 and `/api/v1/ops/*` management API. Token CLI is

@@ -22,7 +22,7 @@ const SECTIONS = [
  * per-request flag the settings fixtures read, so this one goes direct.
  */
 async function openConflicting(page: Page, hash: string, session: string): Promise<void> {
-  await page.goto(`/ops2/?fixtures=conflict&session=${session}#${hash}`, { waitUntil: 'networkidle' });
+  await page.goto(`/ops/?fixtures=conflict&session=${session}#${hash}`, { waitUntil: 'networkidle' });
   await settle(page);
 }
 

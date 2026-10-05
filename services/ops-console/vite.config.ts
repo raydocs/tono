@@ -466,7 +466,7 @@ function fixturesPlugin(): Plugin {
 }
 
 export default defineConfig(({ mode }) => ({
-  base: '/ops2/',
+  base: '/ops/',
   plugins: [
     react(),
     tailwindcss(),

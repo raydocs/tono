@@ -57,12 +57,12 @@ Admin Worker `tono-admin-production`：`ACCESS_TEAM_DOMAIN`、`ACCESS_AUD`、`AC
 | 自定义域 | `api.afk.ccwu.cc`、`releases.afk.ccwu.cc` | `admin.afk.ccwu.cc` |
 | 区域路由 | — | `quality.afk.ccwu.cc/*`、`ops.afk.ccwu.cc/*`（zone `afk.ccwu.cc`） |
 | cron | `*/5 * * * *` | — |
-| ASSETS | `./public`，`run_worker_first: true`（`/ops/`、`/ops2/` 静态包在里面） | `./public`，同上 |
+| ASSETS | `./public`，`run_worker_first: true`（唯一静态包为 `/ops/`，`/ops2/` 仅兼容跳转） | `./public`，同上 |
 | D1 | `DB` → `tono-control-plane`（`caf9b9fb-b4d5-498d-a1ad-7d5cdbb4237c`） | 同一个库 |
 | R2 | `DIAGNOSTICS_LOGS`、`RELEASES` | — |
 | 服务绑定 | — | `API` → `tono-control-plane-staging` |
 
-自定义域与区域路由随 `wrangler deploy` 一起建（zone 必须还在这个账号）。Access：`ACCESS_TEAM_DOMAIN` / `ACCESS_AUD` 指向的自托管应用要存在，覆盖 `admin.afk.ccwu.cc`，允许 `ACCESS_ADMIN_EMAILS` 里的邮箱；应用不在，`/ops2/` 打不开。Access 应用的配置（策略、会话时长）**未记录——待老板确认**。
+自定义域与区域路由随 `wrangler deploy` 一起建（zone 必须还在这个账号）。Access：`ACCESS_TEAM_DOMAIN` / `ACCESS_AUD` 指向的自托管应用要存在，覆盖 `admin.afk.ccwu.cc`，允许 `ACCESS_ADMIN_EMAILS` 里的邮箱；应用不在，`/ops/` 打不开。Access 应用的配置（策略、会话时长）**未记录——待老板确认**。
 
 ## 5. 两条恢复路径
 
@@ -134,7 +134,7 @@ npx wrangler d1 execute tono-control-plane --remote --json --command \
 1. `curl -s https://api.afk.ccwu.cc/api/v1/system/version` —— `buildSha` 是你刚部署（或本来就在线）的提交。
 2. `curl -s https://api.afk.ccwu.cc/api/v1/system/pulse` —— `ok` 为真且 `cronAgeSec < 900`；cron 是 5 分钟一次，恢复后第一轮跑完前这个值会偏大，等两轮。
 3. `https://admin.afk.ccwu.cc/api/v1/ops/system/health`（Access 登录后）—— 每个来源有时间，没有 `stale`。
-4. 浏览器 `https://admin.afk.ccwu.cc/ops2/`，忽略缓存重载，五个入口各开一次：今天 / 节点 / 客户 / 客户端 / 设置；节点页应显示真实节点而不是「无数据」。
+4. 浏览器 `https://admin.afk.ccwu.cc/ops/`，忽略缓存重载，六个入口各开一次：今天 / 节点 / 客户 / 客户端 / 用量 / 设置；节点页应显示真实节点而不是「无数据」。
 5. 一台客户端登出再登入（路径 (a) 或换了 `JWT_SECRET` 时所有客户端都要），能拿到目录并连上一个节点——这一步证明 `CATALOG_ENCRYPTION_KEY` 是对的。
 6. 让 hub 跑一次采集（`collect.py`），10 分钟后今天页没有 `collector_stale`。
 

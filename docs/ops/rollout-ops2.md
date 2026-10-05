@@ -1,5 +1,7 @@
 # 新后台（/ops2/）上线步骤
 
+当前正式入口为 `/ops/`，`/ops2/` 仅兼容跳转；命名交付状态见 [2026-10-05 记录](../changelog.d/2026-10-05-ops-canonical-name.md)。本文文件名和旧部署段落保留为历史记录。
+
 这份是把 `ops/platform` 分支推到生产的操作清单。生产步骤在绑定 `tono` wrangler profile 的维护者 `main` 检出里执行（§0.3 的 preview 演练记录是在 spookfish 目录跑的）（条件见 [AGENTS.md](../../AGENTS.md)）；hub 的 SSH 与 Telegram bot token 由老板提供。
 
 2026-10-05：§0 的部署与演练是历史证据；当前源码仅构建 `ops-console`，不再保留旧 UI。
@@ -116,8 +118,8 @@ npx wrangler d1 migrations apply tono-control-plane-ops-preview --remote --confi
 
 ```sh
 curl -s https://api.afk.ccwu.cc/api/v1/system/version
-# 已登录 Access 的浏览器打开 https://admin.afk.ccwu.cc/ops2/，检查数据时效与两 Worker SHA 对齐
-# 本次退役部署后 /ops/ 应转到 /ops2/ 并迁移旧 hash；旧 hashed assets 应 404，不再渲染旧 UI
+# 已登录 Access 的浏览器打开 https://admin.afk.ccwu.cc/ops/，检查数据时效与两 Worker SHA 对齐
+# /ops2/ 应转到 /ops/；旧专属 hash 迁移到新版页面；旧 hashed assets 不再渲染旧 UI
 ```
 
 ## 3. 新密钥与变量（两个 Worker 都要）
@@ -162,4 +164,4 @@ ssh tono-199.30.91.172 'cd /opt/tono-ops && python3 collect.py --jobs --max 1; s
 
 - Worker：`npx wrangler rollback --config wrangler.jsonc` 与 `--config wrangler.admin.jsonc`。
 - 新表是投影，可以清空重建：`DELETE FROM connection_events; DELETE FROM ops_flatten_cursor;` 后 cron 会重新回填。
-- `/ops2/` 是路径，不影响 `/ops/`；出问题时直接不打开它即可。
+- 唯一 UI 是 `/ops/`，`/ops2/` 仅兼容跳转；UI 回滚需回滚两个 Worker，不存在可切回的第二个后台。

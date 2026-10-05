@@ -128,7 +128,7 @@ export async function planAndSendAlerts(
   const sent = await sendPending(e.DB, {
     secrets,
     allowedHosts: e.ALERT_WEBHOOK_ALLOWED_HOSTS ?? 'api.telegram.org,open.feishu.cn,hooks.slack.com',
-    consoleUrl: 'https://admin.afk.ccwu.cc/ops2/',
+    consoleUrl: 'https://admin.afk.ccwu.cc/ops/',
     resendApiKey: e.RESEND_API_KEY,
     emailFrom: e.EMAIL_FROM,
     incidents: transitions,
