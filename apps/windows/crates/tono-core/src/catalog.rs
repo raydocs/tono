@@ -575,8 +575,7 @@ mod tests {
 
     #[test]
     fn live_catalog_removal_preserves_selection_and_requires_choice() {
-        let mut status = crate::connection::ConnectionStatus::default();
-        status.is_connected = true;
+        let status = crate::connection::ConnectionStatus { is_connected: true, ..Default::default() };
         let mut selected = Some("removed exit".to_owned());
         let mut requires_choice = true;
         assert_eq!(apply_default_selection(&status, &mut selected, &mut requires_choice, "new default".into()), None);

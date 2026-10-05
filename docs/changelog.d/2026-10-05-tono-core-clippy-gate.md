@@ -1,0 +1,13 @@
+## 2026-10-05 · CI：tono-core 加 clippy 门（Linux 作业）
+- 归属：运维计划（工程门，Issue #862；不是发布门）；所有者 2026-10-05「把没做的做了」。动 `.github/workflows/windows-ci.yml` 的 `core` 作业，以及 `apps/windows/crates/tono-core` 里四处 clippy 报的写法。
+- 来源：基线 main `933436cb` → 分支 `ci/tono-core-clippy-20261005`；尚未合入 main。
+- 缺陷修复：无。
+- 新增/优化：无。
+- 工程与测试修正：
+  - `core` 作业在 `cargo test` 之后跑 `cargo clippy --locked -p tono-core --all-targets -- -D warnings`。#862 当时没开是因为没人证明过它能过；这次先在分支上试跑（run 37353444743）：12 处报错，全部是写法类，没有正确性类。
+  - 工具链：测试仍用 runner 自带的 Rust；clippy 用 `apps/windows/app/rust-toolchain.toml` 里固定的版本（今天 1.98.1，步骤里读文件，不另写一份版本号）。不固定的话，Rust 出新稳定版带新 lint 那天，所有 Windows PR 的门会一起红。
+  - 关掉两条写法 lint：`collapsible_if`（8 处，在 auth、catalog、config、heal、unarmed_probe、update_journal）和 `too_many_arguments`（config 里 1 处）。它们只是写法偏好，为了它们去改配置生成、自愈和登录代码不值得。
+  - 改掉的四处：`sing_box/runtime.rs` 一个匹配分支的 `{ () }` 写成 `{}`；`SING_BOX_FAKE_IPV4` 只有测试在用，标成 `#[cfg(test)]`（生产用的是按槽位算的网段，行为不变；整个 `apps/windows` 没有别处引用）；测试里一处多余的 `&`；`catalog.rs` 测试里一处先 `default()` 再赋值。
+  - 没做：`cargo llvm-cov`。装 llvm-tools 会加长 Windows CI 关键路径，覆盖率下限也没有人量过，#862 的这一半继续开着。
+- 验证：本机不跑 cargo；由分支上的 `ci-gate`（`windows / core`）验证，结果记在 PR。
+- 候选/发布：仅 CI 与写法，无新候选。
