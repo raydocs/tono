@@ -295,9 +295,8 @@ impl<K: PartialEq + Send + 'static, T: Send + 'static> NativeRead<K, T> {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .take();
-        if let Some((late_key, late_epoch, answer)) = late
+        if let Some((late_key, _late_epoch, answer)) = late
             && late_key == key
-            && late_epoch == epoch
         {
             return answer.map(Some);
         }
