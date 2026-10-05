@@ -2,7 +2,7 @@
 
 接续所有者 2026-10-04“升级，然后 ops1 和 2 就留一个”的指令。归属运维计划 §6；基线 `c271fe13`，`raydocs/seadevil`，[#1377](https://github.com/raydocs/tono/pull/1377)。**2026-10-05 已合并 main@933436cb 并部署 API/Admin 两 Worker；只构建 ops-console，旧生成产物已移除。**精确 CI、审查、备份、邮件去重与生产核对见[上线记录](../changelog.d/2026-10-05-ops1-retirement-deploy.md)；登录后的页面验收仍未做。选择见[决定 056](../decisions/056-2026-10-04-single-ops-console.md)。下文保留初次草稿/续修各阶段的原始失败与当时状态，不把它们改成从未失败。
 
-2026-10-05 所有者继续要求去掉数字后缀：canonical 改为 `/ops/`，`/ops2/` 仅兼容跳转；后续交付状态见[命名记录](../changelog.d/2026-10-05-ops-canonical-name.md)。下文 `/ops2/` 为退役那一批的历史入口，不是当前第二套后台。
+2026-10-05 所有者继续要求去掉数字后缀：canonical 改为 `/ops/`，`/ops2/` 仅兼容跳转；**PR1392 已合并并部署 main@e8ce5f38 的 API/Admin，两 Worker 生产源码已核对。**交付状态见[命名记录](../changelog.d/2026-10-05-ops-canonical-name.md)。下文 `/ops2/` 为退役那一批的历史入口，不是当前第二套后台。
 
 ## 实现边界
 
