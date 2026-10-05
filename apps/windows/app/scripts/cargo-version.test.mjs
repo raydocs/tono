@@ -80,21 +80,63 @@ test('a lock that names the package with its version is refused', () => {
   ].join('\n')
 
   assert.throws(() => setCargoLockVersion(lock, 'tono-windows', '0.0.75'))
+  assert.throws(() =>
+    setCargoLockVersion(
+      lock.replace('[\n "tono-windows 0.0.74",\n]', '["tono-windows 0.0.74"]'),
+      'tono-windows',
+      '0.0.75',
+    ),
+  )
+})
+
+test('a package with a source is never the local one, however it is spaced', () => {
+  const lock = [
+    '[[package]]',
+    'name = "tono-windows"',
+    'version = "0.0.74"',
+    'source="registry+https://github.com/rust-lang/crates.io-index"',
+    '',
+  ].join('\n')
+
+  assert.throws(() => setCargoLockVersion(lock, 'tono-windows', '0.0.75'))
 })
 
 test('only the version value changes, wherever a look-alike line sits', () => {
   const toml = [
     '[package] # the app',
-    'description = """',
-    'version = "example"',
-    '"""',
+    'description = "version = 0.0.74"',
     'version="0.0.74" # bumped by release-version',
+    '',
+    '[package.metadata.bundle]',
+    'version = "0.0.74"',
     '',
   ].join('\n')
 
   assert.equal(
     setCargoPackageVersion(toml, '0.0.75'),
     toml.replace('version="0.0.74"', 'version="0.0.75"'),
+  )
+})
+
+test('a Cargo.toml the line scan cannot read safely is refused', () => {
+  // A multi-line string can hold a line that looks like the version, and a
+  // delimiter inside a comment can hide where one starts. Refuse the file.
+  const hidden = [
+    '[package]',
+    "name = \"tono-windows\" # '''",
+    "description = '''",
+    'version = "example"',
+    "'''",
+    'version = "0.0.74"',
+    '',
+  ].join('\n')
+
+  assert.throws(() => setCargoPackageVersion(hidden, '0.0.75'))
+  assert.throws(() =>
+    setCargoPackageVersion('[package]\nversion = """0.0.74"""\n', '0.0.75'),
+  )
+  assert.throws(() =>
+    setCargoPackageVersion('[package]\nversion = "0.0.74" "x"\n', '0.0.75'),
   )
 })
 
