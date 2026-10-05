@@ -293,9 +293,7 @@ impl<K: PartialEq + Send + 'static, T: Send + 'static> NativeRead<K, T> {
         tokio::task::spawn_blocking(move || {
             // Bound first, so dropped last: the slot frees only after a late answer is stored.
             let _permit = permit;
-            if let Err(unread) = answered.send(call()) {
-                *self.late.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some((key, unread));
-            }
+            let _ = answered.send(call());
         });
         match tokio::time::timeout(budget, answer).await {
             Ok(Ok(answer)) => answer.map(Some),

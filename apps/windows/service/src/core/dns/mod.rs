@@ -2821,10 +2821,8 @@ async fn remove_restored_snapshot() -> std::io::Result<()> {
     }
     let path = snapshot_path();
     let held = std::sync::Arc::clone(&*SNAPSHOT_DELETE).lock_owned().await;
-    // The guard moves into the blocking call and is released only when the delete returns,
-    // even if the restore's budget drops this future first (see `settle_snapshot_delete`).
+    drop(held);
     tokio::task::spawn_blocking(move || {
-        let _held = held;
         #[cfg(any(not(windows), feature = "test"))]
         test_hooks::pause_snapshot_delete();
         let removed = std::fs::remove_file(path);
