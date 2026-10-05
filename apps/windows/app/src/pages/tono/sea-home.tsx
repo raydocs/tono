@@ -321,6 +321,7 @@ export const SeaHome = ({
       ref={rootRef}
       className="tono-home"
       data-state={state}
+      data-failed={failed}
       data-tone={phase === 'idle' ? 'cool' : 'warm'}
       data-tono-theme="dark"
       style={{

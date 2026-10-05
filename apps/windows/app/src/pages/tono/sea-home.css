@@ -573,6 +573,12 @@
   .tono-home__column {
     left: 32px !important;
   }
+  .tono-home:is([data-state="protectedOffline"], [data-failed="true"])
+    .tono-home__column {
+    top: 16% !important;
+    width: calc(100% - 64px) !important;
+    max-height: calc(84% - 60px) !important;
+  }
   .tono-home__telemetry {
     left: 32px !important;
     right: 32px !important;
