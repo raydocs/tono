@@ -21,7 +21,9 @@
   - 改动的现有断言：`unarmed_probe.rs` 里 metric-only 变化原来断言「唤醒」，现在断言不唤醒。R4UB-WIN-FAILED-CONNECT-BACKOFF（#1106）当时有意保留了 metric 唤醒，本次由决策 063 改变。netmon 现有测试的 fixture 补上两个新观察字段。
 - 验证：
   - MacBook 上 `git diff --check` 无输出。
-  - 按 2026-09-14 所有者规定，MacBook 不跑原生 cargo/xcodebuild，本次所有 Rust/Swift 回归本机都未运行，hosted CI 是第一次运行。修前失败未实跑，只由编译失败或推理确定；`successful_refine_populates_endpoint_proof` 在旧代码上能编译，应在行为上失败。
+  - 按 2026-09-14 所有者规定，MacBook 不跑原生 cargo/xcodebuild，本次所有 Rust/Swift 回归只在 hosted CI 运行。
+  - hosted `ci-gate` run 37352470536（`3e3dcde9`）全绿，日志逐条确认 11 条新回归 ok/passed：Windows Service 479 过，Windows App Rust 666 过，tono-core 343 过，macOS 整套 passed。
+  - 修前失败已实跑，分支 `red/conn-audit-20261005`（不合并）。第一轮 `8ad2e5cb` 把每项行为改回旧逻辑、测试不动：Windows CI 37355420764 中 Service 1 失败/478 过，App Rust 6 失败/660 过（5 条新回归加那条翻转的 metric 断言）；macOS CI 37355425800 恰好 5 条新 XCTest 失败，593 过。第二轮 `4ef1e32f` 只去掉下限和「IPv6 读不全照旧发布」（Windows CI 37357814997）：metric 测试停在下限断言（得到 Probe，应为 Wait 到 216000 ms），netmon 测试停在 IPv6 断言。
   - windows-sys 0.61.2 的 `GetUnicastIpAddressTable`、`MIB_UNICASTIPADDRESS_ROW`、`IF_OPER_STATUS`/`NL_DAD_STATE`（均为 `i32`）已对照本机 registry 源码核对签名。
   - 没有实机验证。
 - 独立审查：Codex `gpt-6.1-sol` high 静态审查 `a97c963e...5d8b648f`（18 个代码文件），没有放宽 PF/WFP、提前放行或编译错误的发现；一个 major：IPv6 默认路由读不出时，过滤会把外部批次当成未变而吞掉真实的 IPv6 变化（旧代码对外部批次一律发布，所以是本 PR 引入）。已修：观察记 `ipv6_unreadable`，外部批次遇到它照旧发布，回归补了这一断言。修复提交只经主会话读码，未再送审。
@@ -31,7 +33,7 @@
   - netmon：一个去抖批次内完成、且所有观察字段完全相同的换网不再发布，靠 30 秒出口探测发现死隧道。
   - 保护中 300 ms 之后才返回的真实地址会被丢弃，pins 仍在。
   - A-S1 只修了 DNS 探测部分：传统已证明启动的首档 2 秒（WIN-RESUME-FIRST-RUNG）和保留回执（WIN-RESUME-RECEIPT-RACE）仍 open。
-  - 跨厂商范围审查和 exact-head `ci-gate` 完成前不合并（连接路径并发、netmon 路由观察、WFP 相关重试节奏）。
+  - 冻结期不合并。合并前仍需按 AGENTS 跑 jev-route 范围审查（`3e3dcde9` 的修复未经复审）和 exact-head `ci-gate`（连接路径并发、netmon 路由观察、WFP 相关重试节奏）。
 - 同轮记为 open（未修，各有分片）：
   - Windows：WIN-RESUME-FIRST-RUNG、WIN-TCP-PROOF-SERIAL、WIN-RESUME-RECEIPT-RACE、WIN-DIRECT-RENEW-AMBIGUITY、WIN-MISSING-UPLINK-GRACE、WIN-UPLINK-READER-HANG。
   - Windows DNS：WIN-DNS-RACE-MASKS-SYSTEM、WIN-DNS-DHCPV6-RESIDUAL、WIN-NRPT-NO-REFRESH、WIN-DNS-SNAPSHOT-LATE-DELETE、WIN-DNS-ENABLE-NO-FLUSH。
