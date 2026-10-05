@@ -1201,6 +1201,42 @@ export interface TranslationResources {
         }
         summaryHint: string
       }
+      home: {
+        chooseOtherLine: string
+        closeDetails: string
+        details: string
+        duration: {
+          justConnected: string
+          minutes_one: string
+          minutes_other: string
+        }
+        firstRun: string
+        pickLine: string
+        popover: {
+          all: string
+          empty: string
+          favorites: string
+          recent: string
+          recommended: string
+          title: string
+        }
+        sentence: {
+          idle: string
+        }
+        showSteps: string
+        slow: {
+          elapsed: string
+          sentence: string
+          switch: string
+        }
+        telemetry: {
+          aiToday: string
+        }
+        title: {
+          failed: string
+          idle: string
+        }
+      }
       intro: {
         getStarted: string
         landmark: string

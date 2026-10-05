@@ -12,6 +12,7 @@ export interface SceneProbeReport {
 }
 interface AppearancePreferences {
   newAppearance: boolean
+  firstConnectedHintSeen: boolean
   motion: MotionPreference
   automaticQuality: SceneQuality
   measured: boolean
@@ -23,6 +24,7 @@ const KEY = 'tono-ui-preferences'
 const EVENT = 'tono-ui-preferences-changed'
 const DEFAULT: AppearancePreferences = {
   newAppearance: false,
+  firstConnectedHintSeen: false,
   motion: 'auto',
   automaticQuality: 'full',
   measured: false,
@@ -49,6 +51,7 @@ export const readAppearancePreferences = (): AppearancePreferences => {
     cache = {
       ...DEFAULT,
       newAppearance: value?.newAppearance === true,
+      firstConnectedHintSeen: value?.firstConnectedHintSeen === true,
       motion: isMotionPreference(value?.motion) ? value.motion : 'auto',
       automaticQuality: isQuality(value?.automaticQuality)
         ? value.automaticQuality
@@ -129,4 +132,13 @@ export const recordSceneProbe = (
         ? quality
         : current.automaticQuality,
   })
+}
+
+export const setNewAppearance = (newAppearance: boolean) => {
+  write({ ...readAppearancePreferences(), newAppearance })
+}
+export const markFirstConnectedHintSeen = () => {
+  const current = readAppearancePreferences()
+  if (!current.firstConnectedHintSeen)
+    write({ ...current, firstConnectedHintSeen: true })
 }

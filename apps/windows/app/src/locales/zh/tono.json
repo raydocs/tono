@@ -709,5 +709,41 @@
     "probeFinished": "采样完成 · 不再运行帧脚本",
     "probePending": "仅采样最初 3 秒可见动画",
     "staticProbe": "静态 · 不运行帧采样"
+  },
+  "home": {
+    "title": {
+      "idle": "未连接",
+      "failed": "没连上"
+    },
+    "sentence": {
+      "idle": "选好线路，点连接。"
+    },
+    "details": "详情",
+    "closeDetails": "关闭详情",
+    "showSteps": "查看步骤",
+    "pickLine": "选择线路",
+    "chooseOtherLine": "选择其他线路",
+    "popover": {
+      "title": "换一条线路",
+      "recommended": "推荐",
+      "favorites": "收藏",
+      "recent": "最近用过",
+      "all": "全部线路",
+      "empty": "从全部线路中选择；推荐需要近期连接证据。"
+    },
+    "slow": {
+      "sentence": "{{stage}}，比平时久一点。",
+      "elapsed": "已用 {{seconds}} 秒。",
+      "switch": "换一条线路"
+    },
+    "duration": {
+      "justConnected": "刚刚连上。",
+      "minutes_other": "已保护 {{count}} 分钟。",
+      "minutes_one": "已保护 {{count}} 分钟。"
+    },
+    "firstRun": "关掉窗口，保护还在。断开在右下角托盘。",
+    "telemetry": {
+      "aiToday": "AI 今天 {{total}}"
+    }
   }
 }

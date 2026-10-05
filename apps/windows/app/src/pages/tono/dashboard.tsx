@@ -1,5 +1,5 @@
 import { useLockFn } from 'ahooks'
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link, useNavigate } from 'react-router'
 
@@ -25,6 +25,7 @@ import {
   tonoRetryNow,
 } from '@/services/tono'
 import { AiTrafficCard } from '@/tono-ui/AiTrafficCard'
+import { useAppearancePreferences } from '@/tono-ui/appearance-preferences'
 import { ConnectPill } from '@/tono-ui/ConnectPill'
 import { GlassCard } from '@/tono-ui/GlassCard'
 import { OpenDnsSettingsButton } from '@/tono-ui/OpenDnsSettingsButton'
@@ -50,6 +51,7 @@ import {
   readNodeLatency,
 } from './node-latency'
 import { nodeCityLabel, nodeCityParts, nodeCode } from './node-meta'
+import { HomeAttention, SeaHome } from './sea-home'
 
 const hex = (color: string, alpha: number) =>
   `${color}${Math.round(alpha * 255)
@@ -150,6 +152,7 @@ const ActiveNodeCard = ({
   tcpDelayMs,
   claudeHomeActive,
   claudeHomeHost: _claudeHomeHost,
+  darkOverride,
 }: {
   serverName: string
   connected: boolean
@@ -159,9 +162,11 @@ const ActiveNodeCard = ({
   tcpDelayMs?: number | null
   claudeHomeActive?: boolean | null
   claudeHomeHost?: string | null
+  darkOverride?: boolean
 }) => {
   const { t } = useTranslation()
-  const dark = useThemeMode() !== 'light'
+  const appDark = useThemeMode() !== 'light'
+  const dark = darkOverride ?? appDark
   const text = tonoText(dark)
   const navigate = useNavigate()
   const [showClaudeRules, setShowClaudeRules] = useState(false)
@@ -443,12 +448,15 @@ const InfoItem = ({
   label,
   value,
   valueColor,
+  darkOverride,
 }: {
   label: string
   value: string
   valueColor?: string
+  darkOverride?: boolean
 }) => {
-  const dark = useThemeMode() !== 'light'
+  const appDark = useThemeMode() !== 'light'
+  const dark = darkOverride ?? appDark
   const text = tonoText(dark)
   return (
     <span
@@ -491,8 +499,19 @@ interface DashboardActionError {
 
 const DashboardPage = () => {
   const { t } = useTranslation()
-  const dark = useThemeMode() !== 'light'
+  const appDark = useThemeMode() !== 'light'
+  const { newAppearance } = useAppearancePreferences()
+  const dark = newAppearance || appDark
   const text = tonoText(dark)
+  const [aiSummary, setAiSummary] = useState<{
+    scope: string | null | undefined
+    total: string | null
+  }>({ scope: undefined, total: null })
+  const handleAiTotal = useCallback(
+    (total: string | null, scope: string | null | undefined) =>
+      setAiSummary({ scope, total }),
+    [],
+  )
   const navigate = useNavigate()
   const { status, mutateTonoStatus } = useTonoStatus()
   // The overview's "server pool" card reads the same catalog status the
@@ -672,8 +691,10 @@ const DashboardPage = () => {
     }
   })
 
-  const { requestRelease, dialog: releaseDialog } =
-    useReleaseProtection(mutateTonoStatus)
+  const { requestRelease, dialog: releaseDialog } = useReleaseProtection(
+    mutateTonoStatus,
+    newAppearance ? true : undefined,
+  )
 
   const handleDisconnect = useLockFn(async () => {
     setActionError(null)
@@ -767,6 +788,344 @@ const DashboardPage = () => {
         : `↑ ${up} ${upUnit}/s`
       : ''
 
+  const catalogNotice = status?.catalogRequiresChoice && (
+    <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 8 }}>
+      <Link
+        to="/servers"
+        style={{
+          fontSize: 12,
+          fontWeight: 500,
+          color: TONO_COLORS.protectedOffline,
+          borderRadius: 10,
+          padding: '8px 12px',
+          background: hex(TONO_COLORS.protectedOffline, 0.12),
+          textDecoration: 'none',
+        }}
+      >
+        {t('tono.dashboard.catalogRequiresChoice')}
+      </Link>
+    </div>
+  )
+  const updateNotice = status?.updateIncomplete && (
+    <div
+      role="alert"
+      style={{
+        display: 'flex',
+        justifyContent: 'center',
+        flexShrink: 0,
+        marginBottom: 8,
+      }}
+    >
+      <div
+        style={{
+          fontSize: 12,
+          fontWeight: 500,
+          color: TONO_COLORS.protectedOffline,
+          borderRadius: 10,
+          padding: '8px 12px',
+          background: hex(TONO_COLORS.protectedOffline, 0.12),
+        }}
+      >
+        <p style={{ margin: '0 0 8px' }}>
+          {t('tono.dashboard.updateIncomplete')}
+        </p>
+        <button
+          type="button"
+          className="tono-button tono-action"
+          onClick={requestRelease}
+          disabled={uiState === 'disconnecting'}
+          style={{ minHeight: 32, padding: '6px 12px', fontSize: 12 }}
+        >
+          {t('tono.tray.disconnect')}
+        </button>
+      </div>
+    </div>
+  )
+  const killSwitchNotice = status?.killSwitch?.last_error && (
+    <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 8 }}>
+      <span
+        style={{
+          fontSize: 13,
+          fontWeight: 500,
+          color: 'var(--tono-text-error)',
+          borderRadius: 10,
+          padding: '8px 12px',
+          background: hex(TONO_COLORS.error, 0.12),
+        }}
+      >
+        {t('tono.dashboard.killSwitchError', {
+          message: formatTonoActionError(status.killSwitch.last_error, t),
+        })}{' '}
+        <span style={{ opacity: 0.7 }}>
+          {t('tono.dashboard.killSwitchErrorNote')}
+        </span>
+      </span>
+    </div>
+  )
+  const progressCard = (
+    <ConnectProgressCard
+      uiState={uiState}
+      protectionConfirmed={protectionConfirmed}
+      selectedServer={status?.selectedServer}
+      darkOverride={newAppearance ? true : undefined}
+      collapseCleanSteps={newAppearance}
+      onRefreshStatus={mutateTonoStatus}
+      onChooseRoute={() => navigate('/servers')}
+    />
+  )
+  const dnsNotice = encryptedDnsOverrides === true &&
+    (connected || (uiState === 'notConnected' && actionError == null)) && (
+      <EncryptedDnsHint
+        dark={dark}
+        message={t(
+          connected
+            ? 'tono.dashboard.encryptedDnsHint'
+            : 'tono.dashboard.checklist.encryptedDns',
+        )}
+      />
+    )
+  const routeNotice = connected && routeUnstable && (
+    <UnstableRouteHint
+      dark={dark}
+      message={t('tono.dashboard.routeUnstableHint')}
+      action={t('tono.dashboard.errorSwitchServer')}
+      onSwitch={() => navigate('/servers')}
+    />
+  )
+  const actionNotice = showActionError && (
+    <div
+      role="alert"
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        gap: 10,
+        maxWidth: 480,
+        width: '100%',
+        minWidth: 0,
+        boxSizing: 'border-box',
+        borderRadius: 14,
+        padding: '12px 14px',
+        background: hex(TONO_COLORS.error, dark ? 0.14 : 0.1),
+        border: `1px solid ${hex(TONO_COLORS.error, 0.22)}`,
+      }}
+    >
+      <span
+        style={{
+          fontSize: 11,
+          fontWeight: 600,
+          letterSpacing: 0.2,
+          color: 'var(--tono-text-error)',
+        }}
+      >
+        {t('tono.dashboard.whatFailed')}
+      </span>
+      <span
+        data-testid="tono-action-error-message"
+        style={{
+          fontSize: 13,
+          fontWeight: 500,
+          lineHeight: 1.45,
+          color: 'var(--tono-text-error)',
+          textAlign: 'center',
+          maxWidth: '100%',
+          overflowWrap: 'anywhere',
+        }}
+      >
+        {actionError.message}
+      </span>
+      {actionError.detail && (
+        <span
+          data-testid="tono-action-error-detail"
+          style={{
+            fontSize: 12,
+            fontWeight: 500,
+            lineHeight: 1.45,
+            color: text.secondary,
+            textAlign: 'center',
+            maxWidth: '100%',
+            overflowWrap: 'anywhere',
+            fontFamily: TONO_MONO_STACK,
+          }}
+        >
+          {actionError.detail}
+        </span>
+      )}
+      <div
+        style={{
+          display: 'flex',
+          flexWrap: 'wrap',
+          justifyContent: 'center',
+          gap: 8,
+          maxWidth: '100%',
+        }}
+      >
+        {actionError.encryptedDns && <OpenDnsSettingsButton accent />}
+        <button
+          type="button"
+          className="tono-button tono-action"
+          onClick={retryFailedAction}
+          style={{
+            minHeight: 32,
+            padding: '6px 12px',
+            fontSize: 12,
+            fontWeight: 600,
+            borderRadius: 9,
+            border: 'none',
+            cursor: 'pointer',
+          }}
+        >
+          {t('tono.dashboard.errorRetry')}
+        </button>
+        <button
+          type="button"
+          className="tono-button"
+          onClick={() => void handleCopyDetails()}
+          style={{
+            minHeight: 32,
+            padding: '6px 12px',
+            fontSize: 12,
+            fontWeight: 600,
+            borderRadius: 9,
+            border: `1px solid ${hex(TONO_COLORS.accent, 0.35)}`,
+            cursor: 'pointer',
+            color: 'var(--tono-text-link)',
+            background: hex(TONO_COLORS.accent, dark ? 0.14 : 0.08),
+          }}
+        >
+          {t('tono.dashboard.copyDetails')}
+        </button>
+        <SupportReportAction
+          testIdPrefix="tono-dashboard"
+          style={{
+            minHeight: 32,
+            padding: '6px 12px',
+            fontSize: 12,
+            fontWeight: 600,
+            borderRadius: 9,
+            border: `1px solid ${hex(TONO_COLORS.accent, 0.35)}`,
+            cursor: 'pointer',
+            color: 'var(--tono-text-link)',
+            background: hex(TONO_COLORS.accent, dark ? 0.14 : 0.08),
+          }}
+        />
+        {actionError.retry !== 'disconnect' && actionError.suggestsSwitch && (
+          <button
+            type="button"
+            className="tono-button"
+            onClick={() => navigate('/servers')}
+            style={{
+              minHeight: 32,
+              padding: '6px 12px',
+              fontSize: 12,
+              fontWeight: 600,
+              borderRadius: 9,
+              border: `1px solid ${hex(TONO_COLORS.accent, 0.35)}`,
+              cursor: 'pointer',
+              color: 'var(--tono-text-link)',
+              background: hex(TONO_COLORS.accent, dark ? 0.14 : 0.08),
+            }}
+          >
+            {t('tono.dashboard.errorSwitchServer')}
+          </button>
+        )}
+      </div>
+    </div>
+  )
+  const exitCard = status?.selectedServer && (
+    <ActiveNodeCard
+      darkOverride={newAppearance ? true : undefined}
+      serverName={status.selectedServer}
+      connected={connected}
+      exitOrg={status.exitOrg}
+      exitLocation={status.exitLocation}
+      exitDelayMs={status.exitDelayMs}
+      tcpDelayMs={status.tcpDelayMs}
+      claudeHomeActive={status.claudeHomeActive}
+      claudeHomeHost={status.claudeHomeHost}
+    />
+  )
+  if (newAppearance) {
+    return (
+      <SeaHome
+        status={status}
+        connectHint={connectHint}
+        failedAction={actionError?.retry === 'connect'}
+        onPrimary={(failed) => {
+          if (uiState === 'connected') void handleDisconnect()
+          else if (uiState === 'protectedOffline') void handleRetryNow()
+          else if (uiState === 'connecting') {
+            if (status?.protectionBlocked) requestRelease()
+            else void handleDisconnect()
+          } else if (uiState === 'notConnected') {
+            if (failed && actionError) retryFailedAction()
+            else void handleConnect()
+          }
+        }}
+        onRestore={requestRelease}
+        refreshStatus={mutateTonoStatus}
+        attention={
+          <>
+            <HomeAttention>{updateNotice}</HomeAttention>
+            <HomeAttention>{killSwitchNotice}</HomeAttention>
+            {progressCard}
+            <HomeAttention>{actionNotice}</HomeAttention>
+            <HomeAttention>{catalogNotice}</HomeAttention>
+            <HomeAttention>{routeNotice}</HomeAttention>
+            <HomeAttention>{dnsNotice}</HomeAttention>
+          </>
+        }
+        details={
+          <>
+            {exitCard}
+            <GlassCard padding={14}>
+              <InfoItem
+                darkOverride
+                label={t('tono.dashboard.overview.liveTraffic')}
+                value={trafficValue}
+              />
+              <p style={{ fontSize: 12 }}>{trafficDetail}</p>
+            </GlassCard>
+            <AiTrafficCard
+              connected={connected}
+              generation={status?.controllerGeneration}
+              onTodayTotal={handleAiTotal}
+            />
+            <GlassCard padding={14}>
+              <InfoItem
+                darkOverride
+                label={t('tono.dashboard.overview.serverPool')}
+                value={
+                  catalog && catalog.nodeCount > 0
+                    ? t('tono.nodes.catalogNodes', { count: catalog.nodeCount })
+                    : t('shared.statuses.loading')
+                }
+              />
+              <p style={{ fontSize: 12 }}>
+                {t(
+                  status?.catalogRevision != null
+                    ? 'tono.nodes.catalogSynced'
+                    : 'tono.dashboard.overview.refreshingCatalog',
+                )}
+              </p>
+            </GlassCard>
+          </>
+        }
+        traffic={
+          trafficLive
+            ? `↓ ${down} ${downUnit}/s · ↑ ${up} ${upUnit}/s · ${t('tono.dashboard.overview.sessionTotal', { total: `${sessionTotal} ${sessionTotalUnit}` })}`
+            : trafficValue
+        }
+        aiTotal={
+          status?.routePreferenceScope &&
+          aiSummary.scope === status.routePreferenceScope
+            ? aiSummary.total
+            : null
+        }
+        releaseDialog={releaseDialog}
+      />
+    )
+  }
   return (
     // Structural layout inline as well as in the stylesheet (see TonoSidebar):
     // without it a machine whose stylesheet never applied showed the connect
@@ -784,84 +1143,9 @@ const DashboardPage = () => {
         title={t('tono.dashboard.title')}
         subtitle={t('tono.dashboard.subtitle')}
       />
-      {status?.catalogRequiresChoice && (
-        <div
-          style={{ display: 'flex', justifyContent: 'center', marginBottom: 8 }}
-        >
-          <Link
-            to="/servers"
-            style={{
-              fontSize: 12,
-              fontWeight: 500,
-              color: TONO_COLORS.protectedOffline,
-              borderRadius: 10,
-              padding: '8px 12px',
-              background: hex(TONO_COLORS.protectedOffline, 0.12),
-              textDecoration: 'none',
-            }}
-          >
-            {t('tono.dashboard.catalogRequiresChoice')}
-          </Link>
-        </div>
-      )}
-      {status?.updateIncomplete && (
-        <div
-          role="alert"
-          style={{
-            display: 'flex',
-            justifyContent: 'center',
-            flexShrink: 0,
-            marginBottom: 8,
-          }}
-        >
-          <div
-            style={{
-              fontSize: 12,
-              fontWeight: 500,
-              color: TONO_COLORS.protectedOffline,
-              borderRadius: 10,
-              padding: '8px 12px',
-              background: hex(TONO_COLORS.protectedOffline, 0.12),
-            }}
-          >
-            <p style={{ margin: '0 0 8px' }}>
-              {t('tono.dashboard.updateIncomplete')}
-            </p>
-            <button
-              type="button"
-              className="tono-button tono-action"
-              onClick={requestRelease}
-              disabled={uiState === 'disconnecting'}
-              style={{ minHeight: 32, padding: '6px 12px', fontSize: 12 }}
-            >
-              {t('tono.tray.disconnect')}
-            </button>
-          </div>
-        </div>
-      )}
-      {status?.killSwitch?.last_error && (
-        <div
-          style={{ display: 'flex', justifyContent: 'center', marginBottom: 8 }}
-        >
-          <span
-            style={{
-              fontSize: 13,
-              fontWeight: 500,
-              color: 'var(--tono-text-error)',
-              borderRadius: 10,
-              padding: '8px 12px',
-              background: hex(TONO_COLORS.error, 0.12),
-            }}
-          >
-            {t('tono.dashboard.killSwitchError', {
-              message: formatTonoActionError(status.killSwitch.last_error, t),
-            })}{' '}
-            <span style={{ opacity: 0.7 }}>
-              {t('tono.dashboard.killSwitchErrorNote')}
-            </span>
-          </span>
-        </div>
-      )}
+      {catalogNotice}
+      {updateNotice}
+      {killSwitchNotice}
       {/* Center stack — pill, then failure/backup, then idle checklist */}
       <div
         className="tono-dashboard__content"
@@ -937,188 +1221,13 @@ const DashboardPage = () => {
         </div>
         {/* Failure + backup first. The idle Encrypted DNS hint hides once a
             connect fails, so it never sits above Try backup channel. */}
-        <ConnectProgressCard
-          uiState={uiState}
-          protectionConfirmed={protectionConfirmed}
-          selectedServer={status?.selectedServer}
-          onRefreshStatus={mutateTonoStatus}
-          onChooseRoute={() => navigate('/servers')}
-        />
-        {encryptedDnsOverrides === true &&
-          (connected ||
-            (uiState === 'notConnected' && actionError == null)) && (
-            <EncryptedDnsHint
-              dark={dark}
-              message={t(
-                connected
-                  ? 'tono.dashboard.encryptedDnsHint'
-                  : 'tono.dashboard.checklist.encryptedDns',
-              )}
-            />
-          )}
-        {connected && routeUnstable && (
-          <UnstableRouteHint
-            dark={dark}
-            message={t('tono.dashboard.routeUnstableHint')}
-            action={t('tono.dashboard.errorSwitchServer')}
-            onSwitch={() => navigate('/servers')}
-          />
-        )}
+        {progressCard}
+        {dnsNotice}
+        {routeNotice}
         {/* Actionable error under the primary control — includes a switch-server
             path when the exit itself is the likely problem. */}
-        {showActionError && (
-          <div
-            role="alert"
-            style={{
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              gap: 10,
-              maxWidth: 480,
-              width: '100%',
-              minWidth: 0,
-              boxSizing: 'border-box',
-              borderRadius: 14,
-              padding: '12px 14px',
-              background: hex(TONO_COLORS.error, dark ? 0.14 : 0.1),
-              border: `1px solid ${hex(TONO_COLORS.error, 0.22)}`,
-            }}
-          >
-            <span
-              style={{
-                fontSize: 11,
-                fontWeight: 600,
-                letterSpacing: 0.2,
-                color: 'var(--tono-text-error)',
-              }}
-            >
-              {t('tono.dashboard.whatFailed')}
-            </span>
-            <span
-              data-testid="tono-action-error-message"
-              style={{
-                fontSize: 13,
-                fontWeight: 500,
-                lineHeight: 1.45,
-                color: 'var(--tono-text-error)',
-                textAlign: 'center',
-                maxWidth: '100%',
-                overflowWrap: 'anywhere',
-              }}
-            >
-              {actionError.message}
-            </span>
-            {actionError.detail && (
-              <span
-                data-testid="tono-action-error-detail"
-                style={{
-                  fontSize: 12,
-                  fontWeight: 500,
-                  lineHeight: 1.45,
-                  color: text.secondary,
-                  textAlign: 'center',
-                  maxWidth: '100%',
-                  overflowWrap: 'anywhere',
-                  fontFamily: TONO_MONO_STACK,
-                }}
-              >
-                {actionError.detail}
-              </span>
-            )}
-            <div
-              style={{
-                display: 'flex',
-                flexWrap: 'wrap',
-                justifyContent: 'center',
-                gap: 8,
-                maxWidth: '100%',
-              }}
-            >
-              {actionError.encryptedDns && <OpenDnsSettingsButton accent />}
-              <button
-                type="button"
-                className="tono-button tono-action"
-                onClick={retryFailedAction}
-                style={{
-                  minHeight: 32,
-                  padding: '6px 12px',
-                  fontSize: 12,
-                  fontWeight: 600,
-                  borderRadius: 9,
-                  border: 'none',
-                  cursor: 'pointer',
-                }}
-              >
-                {t('tono.dashboard.errorRetry')}
-              </button>
-              <button
-                type="button"
-                className="tono-button"
-                onClick={() => void handleCopyDetails()}
-                style={{
-                  minHeight: 32,
-                  padding: '6px 12px',
-                  fontSize: 12,
-                  fontWeight: 600,
-                  borderRadius: 9,
-                  border: `1px solid ${hex(TONO_COLORS.accent, 0.35)}`,
-                  cursor: 'pointer',
-                  color: 'var(--tono-text-link)',
-                  background: hex(TONO_COLORS.accent, dark ? 0.14 : 0.08),
-                }}
-              >
-                {t('tono.dashboard.copyDetails')}
-              </button>
-              <SupportReportAction
-                testIdPrefix="tono-dashboard"
-                style={{
-                  minHeight: 32,
-                  padding: '6px 12px',
-                  fontSize: 12,
-                  fontWeight: 600,
-                  borderRadius: 9,
-                  border: `1px solid ${hex(TONO_COLORS.accent, 0.35)}`,
-                  cursor: 'pointer',
-                  color: 'var(--tono-text-link)',
-                  background: hex(TONO_COLORS.accent, dark ? 0.14 : 0.08),
-                }}
-              />
-              {actionError.retry !== 'disconnect' &&
-                actionError.suggestsSwitch && (
-                  <button
-                    type="button"
-                    className="tono-button"
-                    onClick={() => navigate('/servers')}
-                    style={{
-                      minHeight: 32,
-                      padding: '6px 12px',
-                      fontSize: 12,
-                      fontWeight: 600,
-                      borderRadius: 9,
-                      border: `1px solid ${hex(TONO_COLORS.accent, 0.35)}`,
-                      cursor: 'pointer',
-                      color: 'var(--tono-text-link)',
-                      background: hex(TONO_COLORS.accent, dark ? 0.14 : 0.08),
-                    }}
-                  >
-                    {t('tono.dashboard.errorSwitchServer')}
-                  </button>
-                )}
-            </div>
-          </div>
-        )}
-        {status?.selectedServer && (
-          <ActiveNodeCard
-            serverName={status.selectedServer}
-            connected={connected}
-            exitOrg={status.exitOrg}
-            exitLocation={status.exitLocation}
-            exitDelayMs={status.exitDelayMs}
-            tcpDelayMs={status.tcpDelayMs}
-            claudeHomeActive={status.claudeHomeActive}
-            claudeHomeHost={status.claudeHomeHost}
-          />
-        )}
+        {actionNotice}
+        {exitCard}
         <AiTrafficCard
           connected={connected}
           generation={status?.controllerGeneration}

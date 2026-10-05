@@ -144,6 +144,8 @@ interface ConnectProgressCardProps {
   selectedServer?: string | null
   onRefreshStatus: () => Promise<unknown>
   onChooseRoute?: () => void
+  collapseCleanSteps?: boolean
+  darkOverride?: boolean
 }
 
 export const ConnectProgressCard = ({
@@ -152,9 +154,12 @@ export const ConnectProgressCard = ({
   selectedServer = null,
   onRefreshStatus,
   onChooseRoute,
+  collapseCleanSteps = false,
+  darkOverride,
 }: ConnectProgressCardProps) => {
   const { t } = useTranslation()
-  const dark = useThemeMode() !== 'light'
+  const appDark = useThemeMode() !== 'light'
+  const dark = darkOverride ?? appDark
   const text = tonoText(dark)
 
   const active = uiState === 'connecting' || uiState === 'protectedOffline'
@@ -164,8 +169,10 @@ export const ConnectProgressCard = ({
 
   const [retryError, setRetryError] = useState<string | null>(null)
   const [retrying, setRetrying] = useState(false)
-  const { requestRelease, dialog: restoreDialog } =
-    useReleaseProtection(onRefreshStatus)
+  const { requestRelease, dialog: restoreDialog } = useReleaseProtection(
+    onRefreshStatus,
+    darkOverride,
+  )
   const [nowMs, setNowMs] = useState(() => Date.now())
 
   const nextRetryAtMs = progress?.nextRetryAtMs ?? null
@@ -273,6 +280,141 @@ export const ConnectProgressCard = ({
   const showFailureCopy =
     progress?.error != null || uiState === 'protectedOffline'
 
+  const progressContent = showProgress && progress != null && (
+    <>
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          marginBottom: 10,
+        }}
+      >
+        <span
+          style={{
+            fontSize: 11,
+            fontWeight: 600,
+            letterSpacing: 0.2,
+            fontFamily: TONO_MONO_STACK,
+            color: text.tertiary,
+          }}
+        >
+          {completedCount > 0
+            ? t('tono.progress.completedCount', { count: completedCount })
+            : t('tono.progress.total', {
+                elapsed:
+                  progress.totalElapsedMs != null
+                    ? formatElapsed(progress.totalElapsedMs)
+                    : '—',
+              })}
+        </span>
+        {progress.retryAttempt > 0 && (
+          <span
+            style={{
+              fontSize: 11,
+              fontWeight: 600,
+              fontFamily: TONO_MONO_STACK,
+              borderRadius: 6,
+              padding: '3px 8px',
+              color: TONO_COLORS.protectedOffline,
+              background: hex(TONO_COLORS.protectedOffline, 0.15),
+            }}
+          >
+            {t('tono.progress.tryBadge', {
+              count: progress.retryAttempt + 1,
+            })}
+          </span>
+        )}
+      </div>
+
+      {uiState === 'connecting' && (
+        <div
+          aria-hidden
+          data-testid="tono-connect-dots"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+            marginBottom: 10,
+          }}
+        >
+          {CONNECT_STAGE_KEYS.map((key) => {
+            const state =
+              progress.steps.find((step) => step.key === key)?.state ??
+              'pending'
+            return (
+              <span
+                key={key}
+                data-testid={`tono-connect-dot-${key}`}
+                data-state={state}
+                style={{
+                  width: 6,
+                  height: 6,
+                  borderRadius: '50%',
+                  flexShrink: 0,
+                  background: dotFill(state),
+                  transition: `background ${STEP_TRANSITION}`,
+                }}
+              />
+            )
+          })}
+        </div>
+      )}
+
+      {highlightedSteps.map((step) => {
+        const stepLabel = t(
+          CONNECT_STAGE_LABEL_KEYS[step.key] ?? 'tono.progress.unknownStage',
+        )
+        return (
+          <div
+            key={step.key}
+            data-testid={`tono-step-${step.key}`}
+            data-state={step.state}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 7,
+              minWidth: 0,
+              marginBottom: 8,
+            }}
+          >
+            <StepIcon state={step.state} />
+            <span
+              key={stepLabel}
+              className="tono-text-in"
+              style={{
+                flex: 1,
+                fontSize: 12,
+                fontWeight: 600,
+                color:
+                  step.state === 'failed'
+                    ? TONO_COLORS.protectedOffline
+                    : text.primary,
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {stepLabel}
+            </span>
+            {step.elapsedMs != null && (
+              <span
+                style={{
+                  fontSize: 11,
+                  fontFamily: TONO_MONO_STACK,
+                  color: text.secondary,
+                  flexShrink: 0,
+                }}
+              >
+                {formatElapsed(step.elapsedMs)}
+              </span>
+            )}
+          </div>
+        )
+      })}
+    </>
+  )
+
   return (
     <GlassCard
       radius="var(--tono-radius-card)"
@@ -355,140 +497,19 @@ export const ConnectProgressCard = ({
           </div>
         )}
 
-      {showProgress && progress != null && (
-        <>
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              marginBottom: 10,
-            }}
-          >
-            <span
-              style={{
-                fontSize: 11,
-                fontWeight: 600,
-                letterSpacing: 0.2,
-                fontFamily: TONO_MONO_STACK,
-                color: text.tertiary,
-              }}
-            >
-              {completedCount > 0
-                ? t('tono.progress.completedCount', { count: completedCount })
-                : t('tono.progress.total', {
-                    elapsed:
-                      progress.totalElapsedMs != null
-                        ? formatElapsed(progress.totalElapsedMs)
-                        : '—',
-                  })}
-            </span>
-            {progress.retryAttempt > 0 && (
-              <span
-                style={{
-                  fontSize: 11,
-                  fontWeight: 600,
-                  fontFamily: TONO_MONO_STACK,
-                  borderRadius: 6,
-                  padding: '3px 8px',
-                  color: TONO_COLORS.protectedOffline,
-                  background: hex(TONO_COLORS.protectedOffline, 0.15),
-                }}
-              >
-                {t('tono.progress.tryBadge', {
-                  count: progress.retryAttempt + 1,
-                })}
-              </span>
-            )}
-          </div>
-
-          {uiState === 'connecting' && (
-            <div
-              aria-hidden
-              data-testid="tono-connect-dots"
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 6,
-                marginBottom: 10,
-              }}
-            >
-              {CONNECT_STAGE_KEYS.map((key) => {
-                const state =
-                  progress.steps.find((step) => step.key === key)?.state ??
-                  'pending'
-                return (
-                  <span
-                    key={key}
-                    data-testid={`tono-connect-dot-${key}`}
-                    data-state={state}
-                    style={{
-                      width: 6,
-                      height: 6,
-                      borderRadius: '50%',
-                      flexShrink: 0,
-                      background: dotFill(state),
-                      transition: `background ${STEP_TRANSITION}`,
-                    }}
-                  />
-                )
-              })}
-            </div>
-          )}
-
-          {highlightedSteps.map((step) => {
-            const stepLabel = t(
-              CONNECT_STAGE_LABEL_KEYS[step.key] ??
-                'tono.progress.unknownStage',
-            )
-            return (
-              <div
-                key={step.key}
-                data-testid={`tono-step-${step.key}`}
-                data-state={step.state}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 7,
-                  minWidth: 0,
-                  marginBottom: 8,
-                }}
-              >
-                <StepIcon state={step.state} />
-                <span
-                  key={stepLabel}
-                  className="tono-text-in"
-                  style={{
-                    flex: 1,
-                    fontSize: 12,
-                    fontWeight: 600,
-                    color:
-                      step.state === 'failed'
-                        ? TONO_COLORS.protectedOffline
-                        : text.primary,
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap',
-                  }}
-                >
-                  {stepLabel}
-                </span>
-                {step.elapsedMs != null && (
-                  <span
-                    style={{
-                      fontSize: 11,
-                      fontFamily: TONO_MONO_STACK,
-                      color: text.secondary,
-                      flexShrink: 0,
-                    }}
-                  >
-                    {formatElapsed(step.elapsedMs)}
-                  </span>
-                )}
-              </div>
-            )
-          })}
-        </>
+      {collapseCleanSteps ? (
+        <details
+          open={
+            uiState !== 'connecting' ||
+            !!progress?.error ||
+            (progress?.retryAttempt ?? 0) > 0
+          }
+        >
+          <summary>{t('tono.home.showSteps')}</summary>
+          {progressContent}
+        </details>
+      ) : (
+        progressContent
       )}
 
       {progressError && (

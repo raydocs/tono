@@ -709,5 +709,41 @@
     "probeFinished": "Sample complete · frame probe stopped",
     "probePending": "Sampling first 3 seconds of visible motion",
     "staticProbe": "Static · no frame probe"
+  },
+  "home": {
+    "title": {
+      "idle": "Not connected",
+      "failed": "Couldn't connect"
+    },
+    "sentence": {
+      "idle": "Choose a line, then connect."
+    },
+    "details": "Details",
+    "closeDetails": "Close details",
+    "showSteps": "View steps",
+    "pickLine": "Choose a line",
+    "chooseOtherLine": "Choose another line",
+    "popover": {
+      "title": "Switch line",
+      "recommended": "Recommended",
+      "favorites": "Favorites",
+      "recent": "Used recently",
+      "all": "All lines",
+      "empty": "Choose from all lines. Recommendations need recent connection evidence."
+    },
+    "slow": {
+      "sentence": "{{stage}} — taking a little longer than usual.",
+      "elapsed": "{{seconds}} seconds elapsed.",
+      "switch": "Switch line"
+    },
+    "duration": {
+      "justConnected": "Just connected.",
+      "minutes_one": "Protected for {{count}} minute.",
+      "minutes_other": "Protected for {{count}} minutes."
+    },
+    "firstRun": "Close the window, protection stays on. Disconnect from the system tray.",
+    "telemetry": {
+      "aiToday": "AI today {{total}}"
+    }
   }
 }

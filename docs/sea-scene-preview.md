@@ -5,6 +5,10 @@ not a 0.0.74 G4 freeze exception. Device-local motion preferences only; no
 production mount, native window change, dashboard rewrite, state mapping,
 routing/protection change or new logo.
 
+These scope statements describe PR 1. The subsequent default-off production home
+mount is documented in [Windows SeaHome](windows-sea-home.md); it does not change
+this isolated preview or rewrite its historical measurements.
+
 ## Reproduce
 
 From `apps/windows/app`:
@@ -30,7 +34,7 @@ pnpm i18n:types
 
 This HTML has its own React/i18n entry; it does not bootstrap the Tauri app or
 make native/network calls. Vite's production input remains `src/index.html`.
-The preview allows development or the explicitly isolated standalone build only. Production output contains no
+The preview allows development or the explicitly isolated standalone build only. PR 1 production output contains no
 SeaScene CSS, preview HTML or baked textures. Its English/Chinese preview keys
 are in the ordinary locale/type system; other inactive locales are not expanded.
 
