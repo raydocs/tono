@@ -81,7 +81,7 @@ const emailCodes = new Map<string, string>();
 // a reintroduced fallback fails a test rather than silently timing out twice
 // in production.
 const ABSORBED_HOSTS = ['ops.afk.ccwu.cc', 'quality.afk.ccwu.cc'];
-const ADMIN_MONITOR_URL = 'https://admin.afk.ccwu.cc/ops2/#/nodes';
+const ADMIN_MONITOR_URL = 'https://admin.afk.ccwu.cc/ops/#/nodes';
 let absorbedHostFetches: string[] = [];
 let oidcPrivateKey: CryptoKey;
 let oidcPublicKey: JsonWebKey & { kid: string };
@@ -1150,9 +1150,9 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
 
   it('sends a path-style console link to the page it names instead of a 404', async () => {
     for (const [path, hash] of [
-      ['/ops/monitor', '/ops2/?legacy=ops1#/monitor'],
-      ['/ops/users/', '/ops2/?legacy=ops1#/users'],
-      ['/ops/dashboard', '/ops2/?legacy=ops1#/dashboard'],
+      ['/ops/monitor', '/ops/?legacy=ops1#/monitor'],
+      ['/ops/users/', '/ops/?legacy=ops1#/users'],
+      ['/ops/dashboard', '/ops/?legacy=ops1#/dashboard'],
     ] as const) {
       const context = createExecutionContext();
       const response = await adminWorker.fetch(
@@ -1179,10 +1179,10 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     }
   });
 
-  it('requires an Access admin before serving the sole ops2 console assets', async () => {
+  it('requires an Access admin before serving the sole ops console assets', async () => {
     const request = async (assertion?: string) => {
       const context = createExecutionContext();
-      const response = await worker.fetch(new Request('https://test/ops2/', {
+      const response = await worker.fetch(new Request('https://test/ops/', {
         headers: assertion ? { 'cf-access-jwt-assertion': assertion } : {},
       }), env as unknown as Env, context);
       await waitOnExecutionContext(context);
@@ -2497,7 +2497,7 @@ rules: []
       );
       await waitOnExecutionContext(context);
       expect(response.status).toBe(302);
-      expect(response.headers.get('location')).toBe('https://admin.afk.ccwu.cc/ops2/#/nodes');
+      expect(response.headers.get('location')).toBe('https://admin.afk.ccwu.cc/ops/#/nodes');
     }
   });
 

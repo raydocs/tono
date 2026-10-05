@@ -44,7 +44,7 @@ test.describe('today page', () => {
       await pending;
       await route.fulfill({ status: 503, json: { error: { code: 'UPSTREAM', message: 'unavailable' } } });
     });
-    await page.goto('/ops2/?session=partial-182#/today', { waitUntil: 'domcontentloaded' });
+    await page.goto('/ops/?session=partial-182#/today', { waitUntil: 'domcontentloaded' });
     await expect(page.getByText('现在 2 个事故，影响 5 位客户')).toBeVisible();
     const tab = page.getByRole('tab', { name: /待办/ });
     await tab.click();

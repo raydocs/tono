@@ -17,7 +17,7 @@ import { dirname, extname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const DIST = resolve(ROOT, '../control-plane/public/ops2');
+const DIST = resolve(ROOT, '../control-plane/public/ops');
 const SRC = join(ROOT, 'src');
 
 const KB = 1024;
@@ -62,7 +62,7 @@ function initialScripts(html) {
 }
 
 function distPath(dist, href) {
-  return join(dist, href.replace(/^\/ops2\//, '').replace(/^\//, ''));
+  return join(dist, href.replace(/^\/ops\//, '').replace(/^\//, ''));
 }
 
 /**

@@ -1,7 +1,7 @@
-# Tono 运维控制台（`/ops2/`）
+# Tono 运维控制台（`/ops/`）
 
-Vite + React 19 + Tailwind v4 + shadcn/ui。构建产物写进 `../control-plane/public/ops2`，由 admin Worker 提供。
-这是唯一 UI 实现；旧 `/`、`/ops/` 入口只做兼容重定向和 hash 迁移，不再构建旧页面。
+Vite + React 19 + Tailwind v4 + shadcn/ui。构建产物写进 `../control-plane/public/ops`，由 admin Worker 提供。
+这是唯一 UI 实现；旧 `/`、`/ops2/` 入口兼容跳转，旧专属 hash 自动迁移，不再构建旧页面。
 源码收敛、生产切换及其门禁状态见 [退役记录](../../docs/ops/console-consolidation-2026-10-04.md)。
 
 ## 页面
@@ -26,7 +26,7 @@ Vite + React 19 + Tailwind v4 + shadcn/ui。构建产物写进 `../control-plane
 
 ```bash
 npm install
-npm run dev:fixtures   # 用夹具数据起本地服务，http://localhost:5174/ops2/
+npm run dev:fixtures   # 用夹具数据起本地服务，http://localhost:5174/ops/
 npm run dev            # 打真实 /api/v1/ops/*，需要已登录的 Cloudflare Access 会话
 ```
 

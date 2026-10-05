@@ -6,7 +6,7 @@ type AdminEnv = Pick<
   'DB' | 'ASSETS' | 'ALLOWED_ORIGIN' | 'ACCESS_TEAM_DOMAIN' | 'ACCESS_AUD' | 'ACCESS_ADMIN_EMAILS' | 'BUILD_SHA'
 > & { API: Fetcher };
 
-const ADMIN_MONITOR = 'https://admin.afk.ccwu.cc/ops2/#/nodes';
+const ADMIN_MONITOR = 'https://admin.afk.ccwu.cc/ops/#/nodes';
 const ABSORBED_HOSTS = new Set(['quality.afk.ccwu.cc', 'ops.afk.ccwu.cc']);
 
 const closedHeaders = {
@@ -61,7 +61,7 @@ export default {
         headers: { ...closedHeaders, location: redirect },
       });
     }
-    if (url.pathname.startsWith('/ops/')) return unavailable();
+    if (url.pathname.startsWith('/ops2/')) return unavailable();
 
     if (url.pathname.startsWith('/api/v1/ops/')) {
       // Stripping `origin` below also strips the API worker's cross-site

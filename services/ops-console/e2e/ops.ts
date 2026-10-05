@@ -19,7 +19,7 @@ export async function open(
   // in the light project cannot change what the dark project screenshots.
   if (session) params.set('session', session);
   const query = params.toString();
-  await page.goto(`/ops2/${query ? `?${query}` : ''}#${hash}`, { waitUntil: 'networkidle' });
+  await page.goto(`/ops/${query ? `?${query}` : ''}#${hash}`, { waitUntil: 'networkidle' });
   await settle(page);
 }
 

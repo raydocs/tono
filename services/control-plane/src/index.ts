@@ -3754,7 +3754,7 @@ export default {
           return secure(new Response(null, { status: 405, headers: { allow: 'GET, HEAD' } }));
         }
         const redirect = opsConsoleRedirect(url);
-        if (redirect || path.startsWith('/ops/')) return secure(new Response(null, { status: redirect ? 302 : 404, headers: redirect ? { location: redirect } : undefined }));
+        if (redirect || path.startsWith('/ops2/')) return secure(new Response(null, { status: redirect ? 302 : 404, headers: redirect ? { location: redirect } : undefined }));
         return secure(await e.ASSETS.fetch(req));
       }
       if (

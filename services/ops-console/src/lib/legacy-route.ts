@@ -3,7 +3,15 @@ import { parseOpsHash } from '@legacy-lib/hash';
 /** Run once before React reads the URL, including fragments inherited by a 302. */
 export function migrateLegacyRoute() {
   const url = new URL(window.location.href);
-  if (url.searchParams.get('legacy') !== 'ops1') return;
+  const [slug = '', hashQuery = ''] = url.hash.replace(/^#\/?/, '').split('?');
+  const page = slug.replace(/\/+$/, '');
+  const params = new URLSearchParams(hashQuery);
+  const has = (key: string) => url.searchParams.has(key) || params.has(key);
+  // /ops/ is now canonical, so its modern hashes must not be parsed as ops1.
+  // Only old-only page names/parameters (or an explicit marker) identify it.
+  const oldPage = ['dashboard', 'failures', 'users', 'monitor', 'control', 'homes', 'servers', 'catalog'].includes(page);
+  const oldSelection = (!page || page === 'traffic') && ['user', 'node', 'focus', 'q'].some(has);
+  if (url.searchParams.get('legacy') !== 'ops1' && !oldPage && !oldSelection) return;
   const old = parseOpsHash(url.hash);
   const read = (key: string, fallback: string | null) => url.searchParams.get(key) || fallback;
   const user = read('user', old.user);

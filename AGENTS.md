@@ -107,7 +107,7 @@ CI ([BUILD_AND_TEST](docs/BUILD_AND_TEST.md)).
 - Node 24 matches services and Windows frontend CI. `/exec-daemon/node` is Node 22
   and precedes nvm; a login shell prepends `~/.nvm/versions/node/v24.*/bin`.
 - `npm ci` in `services/control-plane` and `services/ops-console`. Ops fixtures:
-  `npm run dev:fixtures` → `http://127.0.0.1:5174/ops2/`. Playwright screenshot
+  `npm run dev:fixtures` → `http://127.0.0.1:5174/ops/`. Playwright screenshot
   baselines are macOS; on Linux pass `--ignore-snapshots`.
 - Windows UI only: `pnpm@11.26.0` (`packageManager`) and
   `pnpm install --frozen-lockfile` in `apps/windows/app`, then `pnpm web:dev`

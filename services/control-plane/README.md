@@ -3,8 +3,8 @@
 ## Operations console
 
 The sole console implementation is `services/ops-console/`, built to
-`public/ops2/` by `npm run console:build`. Its canonical URL remains
-`https://admin.afk.ccwu.cc/ops2/`. `/` and the retired `/ops/` UI URLs redirect
+`public/ops/` by `npm run console:build`. Its canonical URL is
+`https://admin.afk.ccwu.cc/ops/`. `/` and the previous `/ops2/` URLs redirect
 there; the console migrates old hash links, including customer/node subjects.
 Old list predicates that cannot map to engine verdicts produce an explicit
 notice rather than silently pretending to apply. Object links from traffic

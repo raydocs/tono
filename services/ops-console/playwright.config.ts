@@ -49,7 +49,7 @@ export default defineConfig({
   ],
   webServer: {
     command: 'npm run dev:fixtures',
-    url: `http://localhost:${PORT}/ops2/`,
+    url: `http://localhost:${PORT}/ops/`,
     reuseExistingServer: !process.env.CI,
     timeout: 60_000,
     env: { VITE_FAKE_NOW: FAKE_NOW, TZ: TIMEZONE, OPS_CONSOLE_PORT: String(PORT) },
