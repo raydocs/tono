@@ -1,0 +1,11 @@
+
+ RUN  v5.0.1 /Users/ruirui/orca/workspaces/tono/coral/apps/windows/app
+
+
+ Test Files  49 passed (49)
+      Tests  351 passed (351)
+   Start at  16:52:21
+   Duration  9.40s (tests 41%, environment 33%, import 19%, transform 7%)
+
+    Isolate  49 workers spawned · ~639ms startup each (spawn + environment, per file)
+             at least ~2.21s faster with isolate: false — reuses workers across files instead of one per file

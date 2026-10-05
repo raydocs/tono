@@ -1,0 +1,12 @@
+{
+  timing: {
+    timeOrigin: 1791239988695.1,
+    down: 3619.5,
+    pressed: 3673,
+    click: 3824.2999999523163,
+    label: 3835.9000000953674,
+    pressMs: 53.5,
+    labelMs: 11.600000143051147
+  },
+  frames: 74
+}

@@ -1,0 +1,10 @@
+file:///private/tmp/tono-round3-20261005/cdp.mjs:9
+  const evaluate = async expression => { const r=await send('Runtime.evaluate',{expression,returnByValue:true,awaitPromise:true}); if(r.exceptionDetails) throw Error(JSON.stringify(r.exceptionDetails)); return r.result.value; };
+                                                                                                                                                                ^
+
+Error: {"exceptionId":13,"text":"Uncaught","lineNumber":0,"columnNumber":0,"scriptId":"9527","exception":{"type":"object","subtype":"error","className":"SyntaxError","description":"SyntaxError: Identifier 's' has already been declared","objectId":"8942542699797666664.191.2"}}
+    at Object.evaluate (file:///private/tmp/tono-round3-20261005/cdp.mjs:9:161)
+    at async file:///private/tmp/tono-pr2-review-20261005/review-audit.mjs:35:693
+
+Node.js v26.10.0
+VISUAL FAIL: protectedOffline860 narrow Chinese explanation card ~52px; long English title/body/three action rows exhaust attention budget (card absent). Screenshots long-en-protectedOffline-860-review.png/protectedOffline-860-review.png retained as before controls. Instrumentation also aborted because two Runtime.evaluate top-level let s declarations shared a global lexical environment; correction must use block scope, not app logic.

@@ -1,0 +1,86 @@
+
+ RUN  v5.0.1 /Users/ruirui/orca/workspaces/tono/coral/apps/windows/app
+
+ ❯ src/pages/tono/sea-home.test.tsx (18 tests | 4 failed) 468ms
+   × does not claim an automatic retry when the protected-offline record has no timer 12ms
+   × counts down the same scheduled retry as the progress record without inventing one 10ms
+   × shows a released failure sentence and retry only once, with diagnostics outside the explanation card 13ms
+   × uses the selected chip name and measured exit latency in the checked popover row 21ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 4 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pages/tono/sea-home.test.tsx > does not claim an automatic retry when the protected-offline record has no timer
+AssertionError: expected 'Direct traffic is blocked. A retry is…' to contain 'No automatic retry is scheduled'
+
+Expected: "No automatic retry is scheduled"
+Received: "Direct traffic is blocked. A retry is scheduled."
+
+ ❯ src/pages/tono/sea-home.test.tsx:397:64
+    395|   mocks.progress = { steps: [], totalElapsedMs: null, failedStage: nul…
+    396|   render(view())
+    397|   expect(screen.getByTestId('tono-home-sentence').textContent).toConta…
+       |                                                                ^
+    398|   expect(screen.queryByText(enTono.experience.recoveryTitle)).toBeNull…
+    399| })
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/4]⎯
+
+ FAIL  src/pages/tono/sea-home.test.tsx > counts down the same scheduled retry as the progress record without inventing one
+AssertionError: expected 'Direct traffic is blocked. A retry is…' to contain 'Retrying automatically in 5 seconds'
+
+Expected: "Retrying automatically in 5 seconds"
+Received: "Direct traffic is blocked. A retry is scheduled."
+
+ ❯ src/pages/tono/sea-home.test.tsx:407:64
+    405|   mocks.progress = { steps: [], totalElapsedMs: null, failedStage: nul…
+    406|   render(view())
+    407|   expect(screen.getByTestId('tono-home-sentence').textContent).toConta…
+       |                                                                ^
+    408|   act(() => { vi.advanceTimersByTime(1000) })
+    409|   expect(screen.getByTestId('tono-home-sentence').textContent).toConta…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/4]⎯
+
+ FAIL  src/pages/tono/sea-home.test.tsx > shows a released failure sentence and retry only once, with diagnostics outside the explanation card
+AssertionError: expected [ Array(2) ] to have a length of 1 but got 2
+
+- Expected
++ Received
+
+- 1
++ 2
+
+ ❯ src/pages/tono/sea-home.test.tsx:415:68
+    413|   mocks.progress = { steps: [], totalElapsedMs: 1000, failedStage: 'st…
+    414|   const { container } = render(view())
+    415|   expect(screen.getAllByText(enTono.progress.releasedFailureBody)).toH…
+       |                                                                    ^
+    416|   expect(screen.getAllByRole('button', { name: /^Retry$/ })).toHaveLen…
+    417|   expect(screen.queryByRole('button', { name: 'Retry Now' })).toBeNull…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/4]⎯
+
+ FAIL  src/pages/tono/sea-home.test.tsx > uses the selected chip name and measured exit latency in the checked popover row
+AssertionError: expected null to be 'true' // Object.is equality
+
+- Expected:
+"true"
+
++ Received:
+null
+
+ ❯ src/pages/tono/sea-home.test.tsx:427:44
+    425|   fireEvent.click(screen.getByTestId('tono-home-line-chip'))
+    426|   const row = await screen.findByRole('button', { name: /Sakura.*Tokyo…
+    427|   expect(row.getAttribute('aria-pressed')).toBe('true')
+       |                                            ^
+    428|   expect(row.querySelector('[data-testid="tono-home-selected-check"]')…
+    429| })
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/4]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  4 failed | 14 passed (18)
+   Start at  16:03:37
+   Duration  1.55s (environment 38%, tests 32%, import 18%, transform 11%)

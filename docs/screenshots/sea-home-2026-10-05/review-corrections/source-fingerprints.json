@@ -1,0 +1,22 @@
+{
+  "sourceCodeRef": "70f870b9d187844c4dcc0f8c54c481d4b319ea6a",
+  "description": "SHA-256 current source inputs for review corrections; not native build or merged-main evidence.",
+  "sources": {
+    "src/pages/tono/sea-home.tsx": "eaf911ae70688f5fc9646528f5ea6f5da6f02408f337a648658addc924fb9d73",
+    "src/pages/tono/sea-home.test.tsx": "d803df888e1a0fe78c9573e54f4a24a069b0fe75968b9960bfb4a83ff10bec8e",
+    "src/pages/tono/sea-home.css": "508b92262fa2305cac793e349550ba0c58544669a68cf2cf7b37467dc9983fc1",
+    "src/pages/tono/home-line-meta.ts": "16039edbe730e6a9753950e65c088fc1954282c49e71b8476f9d007d072eb0c4",
+    "src/pages/tono/home-lines.tsx": "43aba9c4d11f6d10420d71597145abe2941587cf7d52e1b27d490fbb6685de8f",
+    "src/pages/tono/home-timing.ts": "ba2753874b56531f4c925944432f6fe800c11d9776d063242c9e138a0629ae4f",
+    "src/pages/tono/connect-progress.tsx": "f1939445219a71b685fa47e1521ecff301d0df0896315dcd07d78225500642f6",
+    "src/pages/tono/dashboard.tsx": "c70f808120c8dfef8e3e4015afb289ef6c89f34a55d83017e292553904662a9e",
+    "src/dev/sea-home/fixtures.ts": "23ce966147397a4de3c6ca8874a6f153d65e9ba8bf382a21a475e35be04d4be4",
+    "src/locales/en/tono.json": "4c86785938f0b717f9f233056e13c6a5f3d04d46793367315069334e16d1094c",
+    "src/locales/zh/tono.json": "ec803c2005ad0ad0c6dd322692edf04d962346650ce356b442f34707ad9589c3",
+    "src/tono-ui/SeaScene.tsx": "52cc08bed1534fea9355f605f5ca484626740d13861cd84fdc42d1af73f6e01e",
+    "src/tono-ui/sea-scene.css": "66cde691d31a08813045cd5b50afe015cca634978374bbb7994c52d2db90edef",
+    "src/tono-ui/tokens/motion.css": "f704d1a0cda64e06f56fea8188ab0a3bcfcc5718c2ed4bfdddaca150c26f53c0",
+    "src/pages/tono/home-line-meta.test.ts": "0ed10d0652d4e7c3e20e9bcdb6d9c4ce5436bb865ce42e949e0afd30f74b76ce"
+  },
+  "bundleZipSHA256": "aac8024f26e3789d656e7d2bf390d8dffa0c68e804bfd26148275f360580ea5d"
+}

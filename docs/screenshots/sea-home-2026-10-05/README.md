@@ -1,5 +1,8 @@
 # SeaHome PR 2 evidence — 2026-10-05
 
+This is the initial d2dd8f21 delivery. [Owner-review correction evidence](review-corrections/README.md)
+is the current receipt; historical captures/failed controls below are retained.
+
 Actual DashboardPage/SeaScene/ConnectProgressCard and status-push/SWR path,
 **synthetic native IO/traffic**, MacBook M3 Pro, macOS26.5.2, headless Chrome.
 Node26.10.0/pnpm10.33.0 locally; no toolchain/native builds. Baseline:

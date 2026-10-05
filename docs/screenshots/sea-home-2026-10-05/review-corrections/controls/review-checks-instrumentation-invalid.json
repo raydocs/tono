@@ -1,0 +1,1937 @@
+[
+  {
+    "name": "idle 860: no exception/window overflow",
+    "pass": true,
+    "detail": {
+      "root": {
+        "x": 200,
+        "y": 0,
+        "width": 660,
+        "height": 540,
+        "bottom": 540,
+        "right": 860,
+        "client": 540,
+        "scroll": 752,
+        "overflow": "hidden",
+        "background": "rgb(9, 11, 23) none repeat scroll 0% 0% / auto padding-box border-box",
+        "shadow": "none",
+        "padding": "0px"
+      },
+      "title": "未连接",
+      "sentence": "选好线路，点连接。",
+      "phase": "idle",
+      "card": null,
+      "attention": {
+        "x": 232,
+        "y": 308.4375,
+        "width": 316.796875,
+        "height": 0,
+        "bottom": 308.4375,
+        "right": 548.796875,
+        "client": 0,
+        "scroll": 0,
+        "overflow": "auto",
+        "background": "rgba(0, 0, 0, 0) none repeat scroll 0% 0% / auto padding-box border-box",
+        "shadow": "none",
+        "padding": "0px"
+      },
+      "actions": {
+        "x": 232,
+        "y": 244.4375,
+        "width": 316.796875,
+        "height": 48,
+        "bottom": 292.4375,
+        "right": 548.796875,
+        "client": 48,
+        "scroll": 48,
+        "overflow": "visible",
+        "background": "rgba(0, 0, 0, 0) none repeat scroll 0% 0% / auto padding-box border-box",
+        "shadow": "none",
+        "padding": "0px"
+      },
+      "cardButtons": 0,
+      "tools": [],
+      "pageOverflow": false,
+      "exceptions": []
+    }
+  },
+  {
+    "name": "connecting 860: no exception/window overflow",
+    "pass": true,
+    "detail": {
+      "root": {
+        "x": 200,
+        "y": 0,
+        "width": 660,
+        "height": 540,
+        "bottom": 540,
+        "right": 860,
+        "client": 540,
+        "scroll": 672,
+        "overflow": "hidden",
+        "background": "rgb(9, 11, 23) none repeat scroll 0% 0% / auto padding-box border-box",
+        "shadow": "none",
+        "padding": "0px"
+      },
+      "title": "未连接\n连接中",
+      "sentence": "选好线路，点连接。\n正在启动隧道…",
+      "phase": "connecting",
+      "card": {
+        "x": 232,
+        "y": 388.4375,
+        "width": 316.796875,
+        "height": 24,
+        "bottom": 412.4375,
+        "right": 548.796875,
+        "client": 24,
+        "scroll": 24,
+        "overflow": "auto",
+        "background": "rgba(0, 0, 0, 0) none repeat scroll 0% 0% / auto padding-box border-box",
+        "shadow": "none",
+        "padding": "0px"
+      },
+      "attention": {
+        "x": 232,
+        "y": 388.4375,
+        "width": 316.796875,
+        "height": 24,
+        "bottom": 412.4375,
+        "right": 548.796875,
+        "client": 24,
+        "scroll": 24,
+        "overflow": "auto",
+        "background": "rgba(0, 0, 0, 0) none repeat scroll 0% 0% / auto padding-box border-box",
+        "shadow": "none",
+        "padding": "0px"
+      },
+      "actions": {
+        "x": 232,
+        "y": 264.4375,
+        "width": 316.796875,
+        "height": 108,
+        "bottom": 372.4375,
+        "right": 548.796875,
+        "client": 108,
+        "scroll": 108,
+        "overflow": "visible",
+        "background": "rgba(0, 0, 0, 0) none repeat scroll 0% 0% / auto padding-box border-box",
+        "shadow": "none",
+        "padding": "0px"
+      },
+      "cardButtons": 0,
+      "tools": [],
+      "pageOverflow": false,
+      "exceptions": []
+    }
+  },
+  {
+    "name": "collapsed steps 860: text only",
+    "pass": false,
+    "detail": {
+      "x": 232,
+      "y": 388.4375,
+      "width": 316.796875,
+      "height": 24,
+      "bottom": 412.4375,
+      "right": 548.796875,
+      "client": 24,
+      "scroll": 24,
+      "overflow": "auto",
+      "background": "rgba(0, 0, 0, 0) none repeat scroll 0% 0% / auto padding-box border-box",
+      "shadow": "none",
+      "padding": "0px"
+    }
+  },
+  {
+    "name": "connected 860: no exception/window overflow",
+    "pass": true,
+    "detail": {
+      "root": {
+        "x": 200,
+        "y": 0,
+        "width": 660,
+        "height": 540,
+        "bottom": 540,
+        "right": 860,
+        "client": 540,
+        "scroll": 728,
+        "overflow": "hidden",
+        "background": "rgb(9, 11, 23) none repeat scroll 0% 0% / auto padding-box border-box",
+        "shadow": "none",
+        "padding": "0px"
+      },
+      "title": "未连接\n已连接",
+      "sentence": "选好线路，点连接。\n流量已保护；断线不会漏 IP。 刚刚连上。",
+      "phase": "connected",
+      "card": null,
+      "attention": {
+        "x": 232,
+        "y": 331.6875,
+        "width": 316.796875,
+        "height": 0,
+        "bottom": 331.6875,
+        "right": 548.796875,
+        "client": 0,
+        "scroll": 0,
+        "overflow": "auto",
+        "background": "rgba(0, 0, 0, 0) none repeat scroll 0% 0% / auto padding-box border-box",
+        "shadow": "none",
+        "padding": "0px"
+      },
+      "actions": {
+        "x": 232,
+        "y": 267.6875,
+        "width": 316.796875,
+        "height": 48,
+        "bottom": 315.6875,
+        "right": 548.796875,
+        "client": 48,
+        "scroll": 48,
+        "overflow": "visible",
+        "background": "rgba(0, 0, 0, 0) none repeat scroll 0% 0% / auto padding-box border-box",
+        "shadow": "none",
+        "padding": "0px"
+      },
+      "cardButtons": 0,
+      "tools": [],
+      "pageOverflow": false,
+      "exceptions": []
+    }
+  },
+  {
+    "name": "disconnecting 860: no exception/window overflow",
+    "pass": true,
+    "detail": {
+      "root": {
+        "x": 200,
+        "y": 0,
+        "width": 660,
+        "height": 540,
+        "bottom": 540,
+        "right": 860,
+        "client": 540,
+        "scroll": 692,
+        "overflow": "hidden",
+        "background": "rgb(9, 11, 23) none repeat scroll 0% 0% / auto padding-box border-box",
+        "shadow": "none",
+        "padding": "0px"
+      },
+      "title": "未连接\n断开中",
+      "sentence": "选好线路，点连接。\n正在恢复网络访问",
+      "phase": "idle",
+      "card": null,
+      "attention": {
+        "x": 232,
+        "y": 368.4375,
+        "width": 316.796875,
+        "height": 0,
+        "bottom": 368.4375,
+        "right": 548.796875,
+        "client": 0,
+        "scroll": 0,
+        "overflow": "auto",
+        "background": "rgba(0, 0, 0, 0) none repeat scroll 0% 0% / auto padding-box border-box",
+        "shadow": "none",
+        "padding": "0px"
+      },
+      "actions": {
+        "x": 232,
+        "y": 244.4375,
+        "width": 316.796875,
+        "height": 108,
+        "bottom": 352.4375,
+        "right": 548.796875,
+        "client": 108,
+        "scroll": 108,
+        "overflow": "visible",
+        "background": "rgba(0, 0, 0, 0) none repeat scroll 0% 0% / auto padding-box border-box",
+        "shadow": "none",
+        "padding": "0px"
+      },
+      "cardButtons": 0,
+      "tools": [],
+      "pageOverflow": false,
+      "exceptions": []
+    }
+  },
+  {
+    "name": "failed 860: no exception/window overflow",
+    "pass": true,
+    "detail": {
+      "root": {
+        "x": 200,
+        "y": 0,
+        "width": 660,
+        "height": 540,
+        "bottom": 540,
+        "right": 860,
+        "client": 540,
+        "scroll": 761,
+        "overflow": "hidden",
+        "background": "rgb(9, 11, 23) none repeat scroll 0% 0% / auto padding-box border-box",
+        "shadow": "none",
+        "padding": "0px"
+      },
+      "title": "未连接\n没连上",
+      "sentence": "选好线路，点连接。\n连接没有完成。原来的网络仍然可用。",
+      "phase": "failed",
+      "card": {
+        "x": 232,
+        "y": 342.28125,
+        "width": 596,
+        "height": 137.703125,
+        "bottom": 479.984375,
+        "right": 828,
+        "client": 138,
+        "scroll": 184,
+        "overflow": "auto",
+        "background": "rgba(0, 0, 0, 0) linear-gradient(rgba(26, 16, 18, 0.56), rgba(16, 10, 14, 0.66)) repeat scroll 0% 0% / auto padding-box border-box",
+        "shadow": "rgba(255, 235, 220, 0.2) 0px 1px 0px 0px inset",
+        "padding": "14px 16px"
+      },
+      "attention": {
+        "x": 232,
+        "y": 299.28125,
+        "width": 596,
+        "height": 180.703125,
+        "bottom": 479.984375,
+        "right": 828,
+        "client": 181,
+        "scroll": 181,
+        "overflow": "auto",
+        "background": "rgba(0, 0, 0, 0) none repeat scroll 0% 0% / auto padding-box border-box",
+        "shadow": "none",
+        "padding": "0px"
+      },
+      "actions": {
+        "x": 232,
+        "y": 235.28125,
+        "width": 596,
+        "height": 48,
+        "bottom": 283.28125,
+        "right": 828,
+        "client": 48,
+        "scroll": 48,
+        "overflow": "visible",
+        "background": "rgba(0, 0, 0, 0) none repeat scroll 0% 0% / auto padding-box border-box",
+        "shadow": "none",
+        "padding": "0px"
+      },
+      "cardButtons": 0,
+      "tools": [
+        "试用备用通道",
+        "复制诊断信息",
+        "上传诊断信息"
+      ],
+      "pageOverflow": false,
+      "exceptions": []
+    }
+  },
+  {
+    "name": "failed 860: useful scrollable card, no duplicate card actions",
+    "pass": true,
+    "detail": {
+      "root": {
+        "x": 200,
+        "y": 0,
+        "width": 660,
+        "height": 540,
+        "bottom": 540,
+        "right": 860,
+        "client": 540,
+        "scroll": 761,
+        "overflow": "hidden",
+        "background": "rgb(9, 11, 23) none repeat scroll 0% 0% / auto padding-box border-box",
+        "shadow": "none",
+        "padding": "0px"
+      },
+      "title": "未连接\n没连上",
+      "sentence": "选好线路，点连接。\n连接没有完成。原来的网络仍然可用。",
+      "phase": "failed",
+      "card": {
+        "x": 232,
+        "y": 342.28125,
+        "width": 596,
+        "height": 137.703125,
+        "bottom": 479.984375,
+        "right": 828,
+        "client": 138,
+        "scroll": 184,
+        "overflow": "auto",
+        "background": "rgba(0, 0, 0, 0) linear-gradient(rgba(26, 16, 18, 0.56), rgba(16, 10, 14, 0.66)) repeat scroll 0% 0% / auto padding-box border-box",
+        "shadow": "rgba(255, 235, 220, 0.2) 0px 1px 0px 0px inset",
+        "padding": "14px 16px"
+      },
+      "attention": {
+        "x": 232,
+        "y": 299.28125,
+        "width": 596,
+        "height": 180.703125,
+        "bottom": 479.984375,
+        "right": 828,
+        "client": 181,
+        "scroll": 181,
+        "overflow": "auto",
+        "background": "rgba(0, 0, 0, 0) none repeat scroll 0% 0% / auto padding-box border-box",
+        "shadow": "none",
+        "padding": "0px"
+      },
+      "actions": {
+        "x": 232,
+        "y": 235.28125,
+        "width": 596,
+        "height": 48,
+        "bottom": 283.28125,
+        "right": 828,
+        "client": 48,
+        "scroll": 48,
+        "overflow": "visible",
+        "background": "rgba(0, 0, 0, 0) none repeat scroll 0% 0% / auto padding-box border-box",
+        "shadow": "none",
+        "padding": "0px"
+      },
+      "cardButtons": 0,
+      "tools": [
+        "试用备用通道",
+        "复制诊断信息",
+        "上传诊断信息"
+      ],
+      "pageOverflow": false,
+      "exceptions": []
+    }
+  },
+  {
+    "name": "protectedOffline 860: no exception/window overflow",
+    "pass": true,
+    "detail": {
+      "root": {
+        "x": 200,
+        "y": 0,
+        "width": 660,
+        "height": 540,
+        "bottom": 540,
+        "right": 860,
+        "client": 540,
+        "scroll": 768,
+        "overflow": "hidden",
+        "background": "rgb(9, 11, 23) none repeat scroll 0% 0% / auto padding-box border-box",
+        "shadow": "none",
+        "padding": "0px"
+      },
+      "title": "未连接\n保护中，未连上",
+      "sentence": "选好线路，点连接。\n已拦住直连。没有安排自动重试，可以立即重试或恢复正常网络。",
+      "phase": "failed",
+      "card": {
+        "x": 232,
+        "y": 334.734375,
+        "width": 596,
+        "height": 145.25,
+        "bottom": 479.984375,
+        "right": 828,
+        "client": 145,
+        "scroll": 240,
+        "overflow": "auto",
+        "background": "rgba(0, 0, 0, 0) linear-gradient(rgba(26, 16, 18, 0.56), rgba(16, 10, 14, 0.66)) repeat scroll 0% 0% / auto padding-box border-box",
+        "shadow": "rgba(255, 235, 220, 0.2) 0px 1px 0px 0px inset",
+        "padding": "14px 16px"
+      },
+      "attention": {
+        "x": 232,
+        "y": 291.734375,
+        "width": 596,
+        "height": 188.25,
+        "bottom": 479.984375,
+        "right": 828,
+        "client": 188,
+        "scroll": 188,
+        "overflow": "auto",
+        "background": "rgba(0, 0, 0, 0) none repeat scroll 0% 0% / auto padding-box border-box",
+        "shadow": "none",
+        "padding": "0px"
+      },
+      "actions": {
+        "x": 232,
+        "y": 227.734375,
+        "width": 596,
+        "height": 48,
+        "bottom": 275.734375,
+        "right": 828,
+        "client": 48,
+        "scroll": 48,
+        "overflow": "visible",
+        "background": "rgba(0, 0, 0, 0) none repeat scroll 0% 0% / auto padding-box border-box",
+        "shadow": "none",
+        "padding": "0px"
+      },
+      "cardButtons": 0,
+      "tools": [
+        "试用备用通道",
+        "复制诊断信息",
+        "上传诊断信息"
+      ],
+      "pageOverflow": false,
+      "exceptions": []
+    }
+  },
+  {
+    "name": "protectedOffline 860: useful scrollable card, no duplicate card actions",
+    "pass": true,
+    "detail": {
+      "root": {
+        "x": 200,
+        "y": 0,
+        "width": 660,
+        "height": 540,
+        "bottom": 540,
+        "right": 860,
+        "client": 540,
+        "scroll": 768,
+        "overflow": "hidden",
+        "background": "rgb(9, 11, 23) none repeat scroll 0% 0% / auto padding-box border-box",
+        "shadow": "none",
+        "padding": "0px"
+      },
+      "title": "未连接\n保护中，未连上",
+      "sentence": "选好线路，点连接。\n已拦住直连。没有安排自动重试，可以立即重试或恢复正常网络。",
+      "phase": "failed",
+      "card": {
+        "x": 232,
+        "y": 334.734375,
+        "width": 596,
+        "height": 145.25,
+        "bottom": 479.984375,
+        "right": 828,
+        "client": 145,
+        "scroll": 240,
+        "overflow": "auto",
+        "background": "rgba(0, 0, 0, 0) linear-gradient(rgba(26, 16, 18, 0.56), rgba(16, 10, 14, 0.66)) repeat scroll 0% 0% / auto padding-box border-box",
+        "shadow": "rgba(255, 235, 220, 0.2) 0px 1px 0px 0px inset",
+        "padding": "14px 16px"
+      },
+      "attention": {
+        "x": 232,
+        "y": 291.734375,
+        "width": 596,
+        "height": 188.25,
+        "bottom": 479.984375,
+        "right": 828,
+        "client": 188,
+        "scroll": 188,
+        "overflow": "auto",
+        "background": "rgba(0, 0, 0, 0) none repeat scroll 0% 0% / auto padding-box border-box",
+        "shadow": "none",
+        "padding": "0px"
+      },
+      "actions": {
+        "x": 232,
+        "y": 227.734375,
+        "width": 596,
+        "height": 48,
+        "bottom": 275.734375,
+        "right": 828,
+        "client": 48,
+        "scroll": 48,
+        "overflow": "visible",
+        "background": "rgba(0, 0, 0, 0) none repeat scroll 0% 0% / auto padding-box border-box",
+        "shadow": "none",
+        "padding": "0px"
+      },
+      "cardButtons": 0,
+      "tools": [
+        "试用备用通道",
+        "复制诊断信息",
+        "上传诊断信息"
+      ],
+      "pageOverflow": false,
+      "exceptions": []
+    }
+  },
+  {
+    "name": "unknown 860: no exception/window overflow",
+    "pass": true,
+    "detail": {
+      "root": {
+        "x": 200,
+        "y": 0,
+        "width": 660,
+        "height": 540,
+        "bottom": 540,
+        "right": 860,
+        "client": 540,
+        "scroll": 736,
+        "overflow": "hidden",
+        "background": "rgb(9, 11, 23) none repeat scroll 0% 0% / auto padding-box border-box",
+        "shadow": "none",
+        "padding": "0px"
+      },
+      "title": "未连接\n保护状态未确认",
+      "sentence": "选好线路，点连接。\nTono 无法确认网络保护状态。如有提示，请修复服务；也可以选择「恢复正常网络」。",
+      "phase": "failed",
+      "card": null,
+      "attention": {
+        "x": 232,
+        "y": 324.140625,
+        "width": 316.796875,
+        "height": 0,
+        "bottom": 324.140625,
+        "right": 548.796875,
+        "client": 0,
+        "scroll": 0,
+        "overflow": "auto",
+        "background": "rgba(0, 0, 0, 0) none repeat scroll 0% 0% / auto padding-box border-box",
+        "shadow": "none",
+        "padding": "0px"
+      },
+      "actions": {
+        "x": 232,
+        "y": 260.140625,
+        "width": 316.796875,
+        "height": 48,
+        "bottom": 308.140625,
+        "right": 548.796875,
+        "client": 48,
+        "scroll": 48,
+        "overflow": "visible",
+        "background": "rgba(0, 0, 0, 0) none repeat scroll 0% 0% / auto padding-box border-box",
+        "shadow": "none",
+        "padding": "0px"
+      },
+      "cardButtons": 0,
+      "tools": [],
+      "pageOverflow": false,
+      "exceptions": []
+    }
+  },
+  {
+    "name": "idle 920: no exception/window overflow",
+    "pass": true,
+    "detail": {
+      "root": {
+        "x": 200,
+        "y": 0,
+        "width": 720,
+        "height": 600,
+        "bottom": 600,
+        "right": 920,
+        "client": 600,
+        "scroll": 854,
+        "overflow": "hidden",
+        "background": "rgb(9, 11, 23) none repeat scroll 0% 0% / auto padding-box border-box",
+        "shadow": "none",
+        "padding": "0px"
+      },
+      "title": "未连接",
+      "sentence": "选好线路，点连接。",
+      "phase": "idle",
+      "card": null,
+      "attention": {
+        "x": 232,
+        "y": 321.640625,
+        "width": 345.59375,
+        "height": 0,
+        "bottom": 321.640625,
+        "right": 577.59375,
+        "client": 0,
+        "scroll": 0,
+        "overflow": "auto",
+        "background": "rgba(0, 0, 0, 0) none repeat scroll 0% 0% / auto padding-box border-box",
+        "shadow": "none",
+        "padding": "0px"
+      },
+      "actions": {
+        "x": 232,
+        "y": 257.640625,
+        "width": 345.59375,
+        "height": 48,
+        "bottom": 305.640625,
+        "right": 577.59375,
+        "client": 48,
+        "scroll": 48,
+        "overflow": "visible",
+        "background": "rgba(0, 0, 0, 0) none repeat scroll 0% 0% / auto padding-box border-box",
+        "shadow": "none",
+        "padding": "0px"
+      },
+      "cardButtons": 0,
+      "tools": [],
+      "pageOverflow": false,
+      "exceptions": []
+    }
+  },
+  {
+    "name": "connecting 920: no exception/window overflow",
+    "pass": true,
+    "detail": {
+      "root": {
+        "x": 200,
+        "y": 0,
+        "width": 720,
+        "height": 600,
+        "bottom": 600,
+        "right": 920,
+        "client": 600,
+        "scroll": 838,
+        "overflow": "hidden",
+        "background": "rgb(9, 11, 23) none repeat scroll 0% 0% / auto padding-box border-box",
+        "shadow": "none",
+        "padding": "0px"
+      },
+      "title": "未连接\n连接中",
+      "sentence": "选好线路，点连接。\n正在启动隧道…",
+      "phase": "connecting",
+      "card": {
+        "x": 232,
+        "y": 341.640625,
+        "width": 345.59375,
+        "height": 24,
+        "bottom": 365.640625,
+        "right": 577.59375,
+        "client": 24,
+        "scroll": 24,
+        "overflow": "auto",
+        "background": "rgba(0, 0, 0, 0) none repeat scroll 0% 0% / auto padding-box border-box",
+        "shadow": "none",
+        "padding": "0px"
+      },
+      "attention": {
+        "x": 232,
+        "y": 341.640625,
+        "width": 345.59375,
+        "height": 24,
+        "bottom": 365.640625,
+        "right": 577.59375,
+        "client": 24,
+        "scroll": 24,
+        "overflow": "auto",
+        "background": "rgba(0, 0, 0, 0) none repeat scroll 0% 0% / auto padding-box border-box",
+        "shadow": "none",
+        "padding": "0px"
+      },
+      "actions": {
+        "x": 232,
+        "y": 277.640625,
+        "width": 345.59375,
+        "height": 48,
+        "bottom": 325.640625,
+        "right": 577.59375,
+        "client": 48,
+        "scroll": 48,
+        "overflow": "visible",
+        "background": "rgba(0, 0, 0, 0) none repeat scroll 0% 0% / auto padding-box border-box",
+        "shadow": "none",
+        "padding": "0px"
+      },
+      "cardButtons": 0,
+      "tools": [],
+      "pageOverflow": false,
+      "exceptions": []
+    }
+  },
+  {
+    "name": "collapsed steps 920: text only",
+    "pass": false,
+    "detail": {
+      "x": 232,
+      "y": 341.640625,
+      "width": 345.59375,
+      "height": 24,
+      "bottom": 365.640625,
+      "right": 577.59375,
+      "client": 24,
+      "scroll": 24,
+      "overflow": "auto",
+      "background": "rgba(0, 0, 0, 0) none repeat scroll 0% 0% / auto padding-box border-box",
+      "shadow": "none",
+      "padding": "0px"
+    }
+  },
+  {
+    "name": "connected 920: no exception/window overflow",
+    "pass": true,
+    "detail": {
+      "root": {
+        "x": 200,
+        "y": 0,
+        "width": 720,
+        "height": 600,
+        "bottom": 600,
+        "right": 920,
+        "client": 600,
+        "scroll": 835,
+        "overflow": "hidden",
+        "background": "rgb(9, 11, 23) none repeat scroll 0% 0% / auto padding-box border-box",
+        "shadow": "none",
+        "padding": "0px"
+      },
+      "title": "未连接\n已连接",
+      "sentence": "选好线路，点连接。\n流量已保护；断线不会漏 IP。 刚刚连上。",
+      "phase": "connected",
+      "card": null,
+      "attention": {
+        "x": 232,
+        "y": 344.890625,
+        "width": 345.59375,
+        "height": 0,
+        "bottom": 344.890625,
+        "right": 577.59375,
+        "client": 0,
+        "scroll": 0,
+        "overflow": "auto",
+        "background": "rgba(0, 0, 0, 0) none repeat scroll 0% 0% / auto padding-box border-box",
+        "shadow": "none",
+        "padding": "0px"
+      },
+      "actions": {
+        "x": 232,
+        "y": 280.890625,
+        "width": 345.59375,
+        "height": 48,
+        "bottom": 328.890625,
+        "right": 577.59375,
+        "client": 48,
+        "scroll": 48,
+        "overflow": "visible",
+        "background": "rgba(0, 0, 0, 0) none repeat scroll 0% 0% / auto padding-box border-box",
+        "shadow": "none",
+        "padding": "0px"
+      },
+      "cardButtons": 0,
+      "tools": [],
+      "pageOverflow": false,
+      "exceptions": []
+    }
+  },
+  {
+    "name": "disconnecting 920: no exception/window overflow",
+    "pass": true,
+    "detail": {
+      "root": {
+        "x": 200,
+        "y": 0,
+        "width": 720,
+        "height": 600,
+        "bottom": 600,
+        "right": 920,
+        "client": 600,
+        "scroll": 854,
+        "overflow": "hidden",
+        "background": "rgb(9, 11, 23) none repeat scroll 0% 0% / auto padding-box border-box",
+        "shadow": "none",
+        "padding": "0px"
+      },
+      "title": "未连接\n断开中",
+      "sentence": "选好线路，点连接。\n正在恢复网络访问",
+      "phase": "idle",
+      "card": null,
+      "attention": {
+        "x": 232,
+        "y": 321.640625,
+        "width": 345.59375,
+        "height": 0,
+        "bottom": 321.640625,
+        "right": 577.59375,
+        "client": 0,
+        "scroll": 0,
+        "overflow": "auto",
+        "background": "rgba(0, 0, 0, 0) none repeat scroll 0% 0% / auto padding-box border-box",
+        "shadow": "none",
+        "padding": "0px"
+      },
+      "actions": {
+        "x": 232,
+        "y": 257.640625,
+        "width": 345.59375,
+        "height": 48,
+        "bottom": 305.640625,
+        "right": 577.59375,
+        "client": 48,
+        "scroll": 48,
+        "overflow": "visible",
+        "background": "rgba(0, 0, 0, 0) none repeat scroll 0% 0% / auto padding-box border-box",
+        "shadow": "none",
+        "padding": "0px"
+      },
+      "cardButtons": 0,
+      "tools": [],
+      "pageOverflow": false,
+      "exceptions": []
+    }
+  },
+  {
+    "name": "failed 920: no exception/window overflow",
+    "pass": true,
+    "detail": {
+      "root": {
+        "x": 200,
+        "y": 0,
+        "width": 720,
+        "height": 600,
+        "bottom": 600,
+        "right": 920,
+        "client": 600,
+        "scroll": 854,
+        "overflow": "hidden",
+        "background": "rgb(9, 11, 23) none repeat scroll 0% 0% / auto padding-box border-box",
+        "shadow": "none",
+        "padding": "0px"
+      },
+      "title": "未连接\n没连上",
+      "sentence": "选好线路，点连接。\n连接没有完成。原来的网络仍然可用。",
+      "phase": "failed",
+      "card": {
+        "x": 232,
+        "y": 351.890625,
+        "width": 656,
+        "height": 183.59375,
+        "bottom": 535.484375,
+        "right": 888,
+        "client": 184,
+        "scroll": 184,
+        "overflow": "auto",
+        "background": "rgba(0, 0, 0, 0) linear-gradient(rgba(26, 16, 18, 0.56), rgba(16, 10, 14, 0.66)) repeat scroll 0% 0% / auto padding-box border-box",
+        "shadow": "rgba(255, 235, 220, 0.2) 0px 1px 0px 0px inset",
+        "padding": "14px 16px"
+      },
+      "attention": {
+        "x": 232,
+        "y": 308.890625,
+        "width": 656,
+        "height": 226.59375,
+        "bottom": 535.484375,
+        "right": 888,
+        "client": 227,
+        "scroll": 227,
+        "overflow": "auto",
+        "background": "rgba(0, 0, 0, 0) none repeat scroll 0% 0% / auto padding-box border-box",
+        "shadow": "none",
+        "padding": "0px"
+      },
+      "actions": {
+        "x": 232,
+        "y": 244.890625,
+        "width": 656,
+        "height": 48,
+        "bottom": 292.890625,
+        "right": 888,
+        "client": 48,
+        "scroll": 48,
+        "overflow": "visible",
+        "background": "rgba(0, 0, 0, 0) none repeat scroll 0% 0% / auto padding-box border-box",
+        "shadow": "none",
+        "padding": "0px"
+      },
+      "cardButtons": 0,
+      "tools": [
+        "试用备用通道",
+        "复制诊断信息",
+        "上传诊断信息"
+      ],
+      "pageOverflow": false,
+      "exceptions": []
+    }
+  },
+  {
+    "name": "failed 920: useful scrollable card, no duplicate card actions",
+    "pass": true,
+    "detail": {
+      "root": {
+        "x": 200,
+        "y": 0,
+        "width": 720,
+        "height": 600,
+        "bottom": 600,
+        "right": 920,
+        "client": 600,
+        "scroll": 854,
+        "overflow": "hidden",
+        "background": "rgb(9, 11, 23) none repeat scroll 0% 0% / auto padding-box border-box",
+        "shadow": "none",
+        "padding": "0px"
+      },
+      "title": "未连接\n没连上",
+      "sentence": "选好线路，点连接。\n连接没有完成。原来的网络仍然可用。",
+      "phase": "failed",
+      "card": {
+        "x": 232,
+        "y": 351.890625,
+        "width": 656,
+        "height": 183.59375,
+        "bottom": 535.484375,
+        "right": 888,
+        "client": 184,
+        "scroll": 184,
+        "overflow": "auto",
+        "background": "rgba(0, 0, 0, 0) linear-gradient(rgba(26, 16, 18, 0.56), rgba(16, 10, 14, 0.66)) repeat scroll 0% 0% / auto padding-box border-box",
+        "shadow": "rgba(255, 235, 220, 0.2) 0px 1px 0px 0px inset",
+        "padding": "14px 16px"
+      },
+      "attention": {
+        "x": 232,
+        "y": 308.890625,
+        "width": 656,
+        "height": 226.59375,
+        "bottom": 535.484375,
+        "right": 888,
+        "client": 227,
+        "scroll": 227,
+        "overflow": "auto",
+        "background": "rgba(0, 0, 0, 0) none repeat scroll 0% 0% / auto padding-box border-box",
+        "shadow": "none",
+        "padding": "0px"
+      },
+      "actions": {
+        "x": 232,
+        "y": 244.890625,
+        "width": 656,
+        "height": 48,
+        "bottom": 292.890625,
+        "right": 888,
+        "client": 48,
+        "scroll": 48,
+        "overflow": "visible",
+        "background": "rgba(0, 0, 0, 0) none repeat scroll 0% 0% / auto padding-box border-box",
+        "shadow": "none",
+        "padding": "0px"
+      },
+      "cardButtons": 0,
+      "tools": [
+        "试用备用通道",
+        "复制诊断信息",
+        "上传诊断信息"
+      ],
+      "pageOverflow": false,
+      "exceptions": []
+    }
+  },
+  {
+    "name": "protectedOffline 920: no exception/window overflow",
+    "pass": true,
+    "detail": {
+      "root": {
+        "x": 200,
+        "y": 0,
+        "width": 720,
+        "height": 600,
+        "bottom": 600,
+        "right": 920,
+        "client": 600,
+        "scroll": 854,
+        "overflow": "hidden",
+        "background": "rgb(9, 11, 23) none repeat scroll 0% 0% / auto padding-box border-box",
+        "shadow": "none",
+        "padding": "0px"
+      },
+      "title": "未连接\n保护中，未连上",
+      "sentence": "选好线路，点连接。\n已拦住直连。没有安排自动重试，可以立即重试或恢复正常网络。",
+      "phase": "failed",
+      "card": {
+        "x": 232,
+        "y": 321.09375,
+        "width": 656,
+        "height": 218.890625,
+        "bottom": 539.984375,
+        "right": 888,
+        "client": 219,
+        "scroll": 240,
+        "overflow": "auto",
+        "background": "rgba(0, 0, 0, 0) linear-gradient(rgba(26, 16, 18, 0.56), rgba(16, 10, 14, 0.66)) repeat scroll 0% 0% / auto padding-box border-box",
+        "shadow": "rgba(255, 235, 220, 0.2) 0px 1px 0px 0px inset",
+        "padding": "14px 16px"
+      },
+      "attention": {
+        "x": 232,
+        "y": 278.09375,
+        "width": 656,
+        "height": 261.890625,
+        "bottom": 539.984375,
+        "right": 888,
+        "client": 262,
+        "scroll": 262,
+        "overflow": "auto",
+        "background": "rgba(0, 0, 0, 0) none repeat scroll 0% 0% / auto padding-box border-box",
+        "shadow": "none",
+        "padding": "0px"
+      },
+      "actions": {
+        "x": 232,
+        "y": 214.09375,
+        "width": 656,
+        "height": 48,
+        "bottom": 262.09375,
+        "right": 888,
+        "client": 48,
+        "scroll": 48,
+        "overflow": "visible",
+        "background": "rgba(0, 0, 0, 0) none repeat scroll 0% 0% / auto padding-box border-box",
+        "shadow": "none",
+        "padding": "0px"
+      },
+      "cardButtons": 0,
+      "tools": [
+        "试用备用通道",
+        "复制诊断信息",
+        "上传诊断信息"
+      ],
+      "pageOverflow": false,
+      "exceptions": []
+    }
+  },
+  {
+    "name": "protectedOffline 920: useful scrollable card, no duplicate card actions",
+    "pass": true,
+    "detail": {
+      "root": {
+        "x": 200,
+        "y": 0,
+        "width": 720,
+        "height": 600,
+        "bottom": 600,
+        "right": 920,
+        "client": 600,
+        "scroll": 854,
+        "overflow": "hidden",
+        "background": "rgb(9, 11, 23) none repeat scroll 0% 0% / auto padding-box border-box",
+        "shadow": "none",
+        "padding": "0px"
+      },
+      "title": "未连接\n保护中，未连上",
+      "sentence": "选好线路，点连接。\n已拦住直连。没有安排自动重试，可以立即重试或恢复正常网络。",
+      "phase": "failed",
+      "card": {
+        "x": 232,
+        "y": 321.09375,
+        "width": 656,
+        "height": 218.890625,
+        "bottom": 539.984375,
+        "right": 888,
+        "client": 219,
+        "scroll": 240,
+        "overflow": "auto",
+        "background": "rgba(0, 0, 0, 0) linear-gradient(rgba(26, 16, 18, 0.56), rgba(16, 10, 14, 0.66)) repeat scroll 0% 0% / auto padding-box border-box",
+        "shadow": "rgba(255, 235, 220, 0.2) 0px 1px 0px 0px inset",
+        "padding": "14px 16px"
+      },
+      "attention": {
+        "x": 232,
+        "y": 278.09375,
+        "width": 656,
+        "height": 261.890625,
+        "bottom": 539.984375,
+        "right": 888,
+        "client": 262,
+        "scroll": 262,
+        "overflow": "auto",
+        "background": "rgba(0, 0, 0, 0) none repeat scroll 0% 0% / auto padding-box border-box",
+        "shadow": "none",
+        "padding": "0px"
+      },
+      "actions": {
+        "x": 232,
+        "y": 214.09375,
+        "width": 656,
+        "height": 48,
+        "bottom": 262.09375,
+        "right": 888,
+        "client": 48,
+        "scroll": 48,
+        "overflow": "visible",
+        "background": "rgba(0, 0, 0, 0) none repeat scroll 0% 0% / auto padding-box border-box",
+        "shadow": "none",
+        "padding": "0px"
+      },
+      "cardButtons": 0,
+      "tools": [
+        "试用备用通道",
+        "复制诊断信息",
+        "上传诊断信息"
+      ],
+      "pageOverflow": false,
+      "exceptions": []
+    }
+  },
+  {
+    "name": "unknown 920: no exception/window overflow",
+    "pass": true,
+    "detail": {
+      "root": {
+        "x": 200,
+        "y": 0,
+        "width": 720,
+        "height": 600,
+        "bottom": 600,
+        "right": 920,
+        "client": 600,
+        "scroll": 843,
+        "overflow": "hidden",
+        "background": "rgb(9, 11, 23) none repeat scroll 0% 0% / auto padding-box border-box",
+        "shadow": "none",
+        "padding": "0px"
+      },
+      "title": "未连接\n保护状态未确认",
+      "sentence": "选好线路，点连接。\nTono 无法确认网络保护状态。如有提示，请修复服务；也可以选择「恢复正常网络」。",
+      "phase": "failed",
+      "card": null,
+      "attention": {
+        "x": 232,
+        "y": 337.34375,
+        "width": 345.59375,
+        "height": 0,
+        "bottom": 337.34375,
+        "right": 577.59375,
+        "client": 0,
+        "scroll": 0,
+        "overflow": "auto",
+        "background": "rgba(0, 0, 0, 0) none repeat scroll 0% 0% / auto padding-box border-box",
+        "shadow": "none",
+        "padding": "0px"
+      },
+      "actions": {
+        "x": 232,
+        "y": 273.34375,
+        "width": 345.59375,
+        "height": 48,
+        "bottom": 321.34375,
+        "right": 577.59375,
+        "client": 48,
+        "scroll": 48,
+        "overflow": "visible",
+        "background": "rgba(0, 0, 0, 0) none repeat scroll 0% 0% / auto padding-box border-box",
+        "shadow": "none",
+        "padding": "0px"
+      },
+      "cardButtons": 0,
+      "tools": [],
+      "pageOverflow": false,
+      "exceptions": []
+    }
+  },
+  {
+    "name": "idle 1920: no exception/window overflow",
+    "pass": true,
+    "detail": {
+      "root": {
+        "x": 200,
+        "y": 0,
+        "width": 1720,
+        "height": 1080,
+        "bottom": 1080,
+        "right": 1920,
+        "client": 1080,
+        "scroll": 1392,
+        "overflow": "hidden",
+        "background": "rgb(9, 11, 23) none repeat scroll 0% 0% / auto padding-box border-box",
+        "shadow": "none",
+        "padding": "0px"
+      },
+      "title": "未连接",
+      "sentence": "选好线路，点连接。",
+      "phase": "idle",
+      "card": null,
+      "attention": {
+        "x": 256,
+        "y": 427.234375,
+        "width": 440,
+        "height": 0,
+        "bottom": 427.234375,
+        "right": 696,
+        "client": 0,
+        "scroll": 0,
+        "overflow": "auto",
+        "background": "rgba(0, 0, 0, 0) none repeat scroll 0% 0% / auto padding-box border-box",
+        "shadow": "none",
+        "padding": "0px"
+      },
+      "actions": {
+        "x": 256,
+        "y": 363.234375,
+        "width": 440,
+        "height": 48,
+        "bottom": 411.234375,
+        "right": 696,
+        "client": 48,
+        "scroll": 48,
+        "overflow": "visible",
+        "background": "rgba(0, 0, 0, 0) none repeat scroll 0% 0% / auto padding-box border-box",
+        "shadow": "none",
+        "padding": "0px"
+      },
+      "cardButtons": 0,
+      "tools": [],
+      "pageOverflow": false,
+      "exceptions": []
+    }
+  },
+  {
+    "name": "connecting 1920: no exception/window overflow",
+    "pass": true,
+    "detail": {
+      "root": {
+        "x": 200,
+        "y": 0,
+        "width": 1720,
+        "height": 1080,
+        "bottom": 1080,
+        "right": 1920,
+        "client": 1080,
+        "scroll": 1392,
+        "overflow": "hidden",
+        "background": "rgb(9, 11, 23) none repeat scroll 0% 0% / auto padding-box border-box",
+        "shadow": "none",
+        "padding": "0px"
+      },
+      "title": "未连接\n连接中",
+      "sentence": "选好线路，点连接。\n正在启动隧道…",
+      "phase": "connecting",
+      "card": {
+        "x": 256,
+        "y": 447.234375,
+        "width": 440,
+        "height": 24,
+        "bottom": 471.234375,
+        "right": 696,
+        "client": 24,
+        "scroll": 24,
+        "overflow": "auto",
+        "background": "rgba(0, 0, 0, 0) none repeat scroll 0% 0% / auto padding-box border-box",
+        "shadow": "none",
+        "padding": "0px"
+      },
+      "attention": {
+        "x": 256,
+        "y": 447.234375,
+        "width": 440,
+        "height": 24,
+        "bottom": 471.234375,
+        "right": 696,
+        "client": 24,
+        "scroll": 24,
+        "overflow": "auto",
+        "background": "rgba(0, 0, 0, 0) none repeat scroll 0% 0% / auto padding-box border-box",
+        "shadow": "none",
+        "padding": "0px"
+      },
+      "actions": {
+        "x": 256,
+        "y": 383.234375,
+        "width": 440,
+        "height": 48,
+        "bottom": 431.234375,
+        "right": 696,
+        "client": 48,
+        "scroll": 48,
+        "overflow": "visible",
+        "background": "rgba(0, 0, 0, 0) none repeat scroll 0% 0% / auto padding-box border-box",
+        "shadow": "none",
+        "padding": "0px"
+      },
+      "cardButtons": 0,
+      "tools": [],
+      "pageOverflow": false,
+      "exceptions": []
+    }
+  },
+  {
+    "name": "collapsed steps 1920: text only",
+    "pass": false,
+    "detail": {
+      "x": 256,
+      "y": 447.234375,
+      "width": 440,
+      "height": 24,
+      "bottom": 471.234375,
+      "right": 696,
+      "client": 24,
+      "scroll": 24,
+      "overflow": "auto",
+      "background": "rgba(0, 0, 0, 0) none repeat scroll 0% 0% / auto padding-box border-box",
+      "shadow": "none",
+      "padding": "0px"
+    }
+  },
+  {
+    "name": "connected 1920: no exception/window overflow",
+    "pass": true,
+    "detail": {
+      "root": {
+        "x": 200,
+        "y": 0,
+        "width": 1720,
+        "height": 1080,
+        "bottom": 1080,
+        "right": 1920,
+        "client": 1080,
+        "scroll": 1392,
+        "overflow": "hidden",
+        "background": "rgb(9, 11, 23) none repeat scroll 0% 0% / auto padding-box border-box",
+        "shadow": "none",
+        "padding": "0px"
+      },
+      "title": "未连接\n已连接",
+      "sentence": "选好线路，点连接。\n流量已保护；断线不会漏 IP。 刚刚连上。",
+      "phase": "connected",
+      "card": null,
+      "attention": {
+        "x": 256,
+        "y": 427.234375,
+        "width": 440,
+        "height": 0,
+        "bottom": 427.234375,
+        "right": 696,
+        "client": 0,
+        "scroll": 0,
+        "overflow": "auto",
+        "background": "rgba(0, 0, 0, 0) none repeat scroll 0% 0% / auto padding-box border-box",
+        "shadow": "none",
+        "padding": "0px"
+      },
+      "actions": {
+        "x": 256,
+        "y": 363.234375,
+        "width": 440,
+        "height": 48,
+        "bottom": 411.234375,
+        "right": 696,
+        "client": 48,
+        "scroll": 48,
+        "overflow": "visible",
+        "background": "rgba(0, 0, 0, 0) none repeat scroll 0% 0% / auto padding-box border-box",
+        "shadow": "none",
+        "padding": "0px"
+      },
+      "cardButtons": 0,
+      "tools": [],
+      "pageOverflow": false,
+      "exceptions": []
+    }
+  },
+  {
+    "name": "disconnecting 1920: no exception/window overflow",
+    "pass": true,
+    "detail": {
+      "root": {
+        "x": 200,
+        "y": 0,
+        "width": 1720,
+        "height": 1080,
+        "bottom": 1080,
+        "right": 1920,
+        "client": 1080,
+        "scroll": 1392,
+        "overflow": "hidden",
+        "background": "rgb(9, 11, 23) none repeat scroll 0% 0% / auto padding-box border-box",
+        "shadow": "none",
+        "padding": "0px"
+      },
+      "title": "未连接\n断开中",
+      "sentence": "选好线路，点连接。\n正在恢复网络访问",
+      "phase": "idle",
+      "card": null,
+      "attention": {
+        "x": 256,
+        "y": 427.234375,
+        "width": 440,
+        "height": 0,
+        "bottom": 427.234375,
+        "right": 696,
+        "client": 0,
+        "scroll": 0,
+        "overflow": "auto",
+        "background": "rgba(0, 0, 0, 0) none repeat scroll 0% 0% / auto padding-box border-box",
+        "shadow": "none",
+        "padding": "0px"
+      },
+      "actions": {
+        "x": 256,
+        "y": 363.234375,
+        "width": 440,
+        "height": 48,
+        "bottom": 411.234375,
+        "right": 696,
+        "client": 48,
+        "scroll": 48,
+        "overflow": "visible",
+        "background": "rgba(0, 0, 0, 0) none repeat scroll 0% 0% / auto padding-box border-box",
+        "shadow": "none",
+        "padding": "0px"
+      },
+      "cardButtons": 0,
+      "tools": [],
+      "pageOverflow": false,
+      "exceptions": []
+    }
+  },
+  {
+    "name": "failed 1920: no exception/window overflow",
+    "pass": true,
+    "detail": {
+      "root": {
+        "x": 200,
+        "y": 0,
+        "width": 1720,
+        "height": 1080,
+        "bottom": 1080,
+        "right": 1920,
+        "client": 1080,
+        "scroll": 1392,
+        "overflow": "hidden",
+        "background": "rgb(9, 11, 23) none repeat scroll 0% 0% / auto padding-box border-box",
+        "shadow": "none",
+        "padding": "0px"
+      },
+      "title": "未连接\n没连上",
+      "sentence": "选好线路，点连接。\n连接没有完成。原来的网络仍然可用。",
+      "phase": "failed",
+      "card": {
+        "x": 256,
+        "y": 470.234375,
+        "width": 440,
+        "height": 183.59375,
+        "bottom": 653.828125,
+        "right": 696,
+        "client": 184,
+        "scroll": 184,
+        "overflow": "auto",
+        "background": "rgba(0, 0, 0, 0) linear-gradient(rgba(26, 16, 18, 0.56), rgba(16, 10, 14, 0.66)) repeat scroll 0% 0% / auto padding-box border-box",
+        "shadow": "rgba(255, 235, 220, 0.2) 0px 1px 0px 0px inset",
+        "padding": "14px 16px"
+      },
+      "attention": {
+        "x": 256,
+        "y": 427.234375,
+        "width": 440,
+        "height": 226.59375,
+        "bottom": 653.828125,
+        "right": 696,
+        "client": 227,
+        "scroll": 227,
+        "overflow": "auto",
+        "background": "rgba(0, 0, 0, 0) none repeat scroll 0% 0% / auto padding-box border-box",
+        "shadow": "none",
+        "padding": "0px"
+      },
+      "actions": {
+        "x": 256,
+        "y": 363.234375,
+        "width": 440,
+        "height": 48,
+        "bottom": 411.234375,
+        "right": 696,
+        "client": 48,
+        "scroll": 48,
+        "overflow": "visible",
+        "background": "rgba(0, 0, 0, 0) none repeat scroll 0% 0% / auto padding-box border-box",
+        "shadow": "none",
+        "padding": "0px"
+      },
+      "cardButtons": 0,
+      "tools": [
+        "试用备用通道",
+        "复制诊断信息",
+        "上传诊断信息"
+      ],
+      "pageOverflow": false,
+      "exceptions": []
+    }
+  },
+  {
+    "name": "failed 1920: useful scrollable card, no duplicate card actions",
+    "pass": true,
+    "detail": {
+      "root": {
+        "x": 200,
+        "y": 0,
+        "width": 1720,
+        "height": 1080,
+        "bottom": 1080,
+        "right": 1920,
+        "client": 1080,
+        "scroll": 1392,
+        "overflow": "hidden",
+        "background": "rgb(9, 11, 23) none repeat scroll 0% 0% / auto padding-box border-box",
+        "shadow": "none",
+        "padding": "0px"
+      },
+      "title": "未连接\n没连上",
+      "sentence": "选好线路，点连接。\n连接没有完成。原来的网络仍然可用。",
+      "phase": "failed",
+      "card": {
+        "x": 256,
+        "y": 470.234375,
+        "width": 440,
+        "height": 183.59375,
+        "bottom": 653.828125,
+        "right": 696,
+        "client": 184,
+        "scroll": 184,
+        "overflow": "auto",
+        "background": "rgba(0, 0, 0, 0) linear-gradient(rgba(26, 16, 18, 0.56), rgba(16, 10, 14, 0.66)) repeat scroll 0% 0% / auto padding-box border-box",
+        "shadow": "rgba(255, 235, 220, 0.2) 0px 1px 0px 0px inset",
+        "padding": "14px 16px"
+      },
+      "attention": {
+        "x": 256,
+        "y": 427.234375,
+        "width": 440,
+        "height": 226.59375,
+        "bottom": 653.828125,
+        "right": 696,
+        "client": 227,
+        "scroll": 227,
+        "overflow": "auto",
+        "background": "rgba(0, 0, 0, 0) none repeat scroll 0% 0% / auto padding-box border-box",
+        "shadow": "none",
+        "padding": "0px"
+      },
+      "actions": {
+        "x": 256,
+        "y": 363.234375,
+        "width": 440,
+        "height": 48,
+        "bottom": 411.234375,
+        "right": 696,
+        "client": 48,
+        "scroll": 48,
+        "overflow": "visible",
+        "background": "rgba(0, 0, 0, 0) none repeat scroll 0% 0% / auto padding-box border-box",
+        "shadow": "none",
+        "padding": "0px"
+      },
+      "cardButtons": 0,
+      "tools": [
+        "试用备用通道",
+        "复制诊断信息",
+        "上传诊断信息"
+      ],
+      "pageOverflow": false,
+      "exceptions": []
+    }
+  },
+  {
+    "name": "protectedOffline 1920: no exception/window overflow",
+    "pass": true,
+    "detail": {
+      "root": {
+        "x": 200,
+        "y": 0,
+        "width": 1720,
+        "height": 1080,
+        "bottom": 1080,
+        "right": 1920,
+        "client": 1080,
+        "scroll": 1392,
+        "overflow": "hidden",
+        "background": "rgb(9, 11, 23) none repeat scroll 0% 0% / auto padding-box border-box",
+        "shadow": "none",
+        "padding": "0px"
+      },
+      "title": "未连接\n保护中，未连上",
+      "sentence": "选好线路，点连接。\n已拦住直连。没有安排自动重试，可以立即重试或恢复正常网络。",
+      "phase": "failed",
+      "card": {
+        "x": 256,
+        "y": 535.890625,
+        "width": 440,
+        "height": 239.59375,
+        "bottom": 775.484375,
+        "right": 696,
+        "client": 240,
+        "scroll": 240,
+        "overflow": "auto",
+        "background": "rgba(0, 0, 0, 0) linear-gradient(rgba(26, 16, 18, 0.56), rgba(16, 10, 14, 0.66)) repeat scroll 0% 0% / auto padding-box border-box",
+        "shadow": "rgba(255, 235, 220, 0.2) 0px 1px 0px 0px inset",
+        "padding": "14px 16px"
+      },
+      "attention": {
+        "x": 256,
+        "y": 492.890625,
+        "width": 440,
+        "height": 282.59375,
+        "bottom": 775.484375,
+        "right": 696,
+        "client": 283,
+        "scroll": 283,
+        "overflow": "auto",
+        "background": "rgba(0, 0, 0, 0) none repeat scroll 0% 0% / auto padding-box border-box",
+        "shadow": "none",
+        "padding": "0px"
+      },
+      "actions": {
+        "x": 256,
+        "y": 368.890625,
+        "width": 440,
+        "height": 108,
+        "bottom": 476.890625,
+        "right": 696,
+        "client": 108,
+        "scroll": 108,
+        "overflow": "visible",
+        "background": "rgba(0, 0, 0, 0) none repeat scroll 0% 0% / auto padding-box border-box",
+        "shadow": "none",
+        "padding": "0px"
+      },
+      "cardButtons": 0,
+      "tools": [
+        "试用备用通道",
+        "复制诊断信息",
+        "上传诊断信息"
+      ],
+      "pageOverflow": false,
+      "exceptions": []
+    }
+  },
+  {
+    "name": "protectedOffline 1920: useful scrollable card, no duplicate card actions",
+    "pass": true,
+    "detail": {
+      "root": {
+        "x": 200,
+        "y": 0,
+        "width": 1720,
+        "height": 1080,
+        "bottom": 1080,
+        "right": 1920,
+        "client": 1080,
+        "scroll": 1392,
+        "overflow": "hidden",
+        "background": "rgb(9, 11, 23) none repeat scroll 0% 0% / auto padding-box border-box",
+        "shadow": "none",
+        "padding": "0px"
+      },
+      "title": "未连接\n保护中，未连上",
+      "sentence": "选好线路，点连接。\n已拦住直连。没有安排自动重试，可以立即重试或恢复正常网络。",
+      "phase": "failed",
+      "card": {
+        "x": 256,
+        "y": 535.890625,
+        "width": 440,
+        "height": 239.59375,
+        "bottom": 775.484375,
+        "right": 696,
+        "client": 240,
+        "scroll": 240,
+        "overflow": "auto",
+        "background": "rgba(0, 0, 0, 0) linear-gradient(rgba(26, 16, 18, 0.56), rgba(16, 10, 14, 0.66)) repeat scroll 0% 0% / auto padding-box border-box",
+        "shadow": "rgba(255, 235, 220, 0.2) 0px 1px 0px 0px inset",
+        "padding": "14px 16px"
+      },
+      "attention": {
+        "x": 256,
+        "y": 492.890625,
+        "width": 440,
+        "height": 282.59375,
+        "bottom": 775.484375,
+        "right": 696,
+        "client": 283,
+        "scroll": 283,
+        "overflow": "auto",
+        "background": "rgba(0, 0, 0, 0) none repeat scroll 0% 0% / auto padding-box border-box",
+        "shadow": "none",
+        "padding": "0px"
+      },
+      "actions": {
+        "x": 256,
+        "y": 368.890625,
+        "width": 440,
+        "height": 108,
+        "bottom": 476.890625,
+        "right": 696,
+        "client": 108,
+        "scroll": 108,
+        "overflow": "visible",
+        "background": "rgba(0, 0, 0, 0) none repeat scroll 0% 0% / auto padding-box border-box",
+        "shadow": "none",
+        "padding": "0px"
+      },
+      "cardButtons": 0,
+      "tools": [
+        "试用备用通道",
+        "复制诊断信息",
+        "上传诊断信息"
+      ],
+      "pageOverflow": false,
+      "exceptions": []
+    }
+  },
+  {
+    "name": "unknown 1920: no exception/window overflow",
+    "pass": true,
+    "detail": {
+      "root": {
+        "x": 200,
+        "y": 0,
+        "width": 1720,
+        "height": 1080,
+        "bottom": 1080,
+        "right": 1920,
+        "client": 1080,
+        "scroll": 1392,
+        "overflow": "hidden",
+        "background": "rgb(9, 11, 23) none repeat scroll 0% 0% / auto padding-box border-box",
+        "shadow": "none",
+        "padding": "0px"
+      },
+      "title": "未连接\n保护状态未确认",
+      "sentence": "选好线路，点连接。\nTono 无法确认网络保护状态。如有提示，请修复服务；也可以选择「恢复正常网络」。",
+      "phase": "failed",
+      "card": null,
+      "attention": {
+        "x": 256,
+        "y": 432.890625,
+        "width": 440,
+        "height": 0,
+        "bottom": 432.890625,
+        "right": 696,
+        "client": 0,
+        "scroll": 0,
+        "overflow": "auto",
+        "background": "rgba(0, 0, 0, 0) none repeat scroll 0% 0% / auto padding-box border-box",
+        "shadow": "none",
+        "padding": "0px"
+      },
+      "actions": {
+        "x": 256,
+        "y": 368.890625,
+        "width": 440,
+        "height": 48,
+        "bottom": 416.890625,
+        "right": 696,
+        "client": 48,
+        "scroll": 48,
+        "overflow": "visible",
+        "background": "rgba(0, 0, 0, 0) none repeat scroll 0% 0% / auto padding-box border-box",
+        "shadow": "none",
+        "padding": "0px"
+      },
+      "cardButtons": 0,
+      "tools": [],
+      "pageOverflow": false,
+      "exceptions": []
+    }
+  },
+  {
+    "name": "failed main retry invokes connect once",
+    "pass": true
+  },
+  {
+    "name": "restore remains confirmation-gated, no disconnect before approval",
+    "pass": true,
+    "detail": {
+      "text": "Tono\n\nHome preview\n\nSimulated native IO. Existing 200px sidebar footprint; top bar belongs to PR 3.\n\nHome\n未连接\n保护中，未连上\n\n选好线路，点连接。\n已拦住直连。没有安排自动重试，可以立即重试或恢复正常网络。\n\n连接\n立即重试\n恢复正常网络\nSakura\n东京 · 83 ms\n试用备用通道\n复制诊断信息\n上传诊断信息\n当前线路未通过检查\n失败于 正在验证连接\n未安排自动重试\n当前没有安排自动重试。请选择重试或查看健康检查。\n查看步骤\n总计 9.1s\n第 2 次\n正在验证连接…\n3.1s\n技术详情\n详情 ⌃\n恢复正常网络\n将解除网络保护并恢复正常 Internet 连接。\n取消\n恢复正常网络",
+      "calls": null,
+      "dialogs": [
+        "恢复正常网络\n将解除网络保护并恢复正常 Internet 连接。\n取消\n恢复正常网络"
+      ]
+    }
+  },
+  {
+    "name": "long English failed: usable card",
+    "pass": true,
+    "detail": {
+      "height": 85.25,
+      "bottom": 479.984375,
+      "room": 482,
+      "body": "Tono\n\nHome preview\n\nSimulated native IO. Existing 200px sidebar footprint; top bar belongs to PR 3.\n\nHome\nNot connected\nCouldn't connect\n\nChoose a line, then connect.\nThe connection didn't complete. The original network stays available.\n\nConnect\nTry again\nAn exceptionally long residential route name for overflow testing\nLos Angeles · 83 ms\nTry backup channel\nCopy details\nUpload diagnostics\nThis route did not pass the connection check\nFailed at Verifying the connection\nView steps\nTOTAL 9.1s\nVerifying the connection…\n3.1s\nTechnical details\nDetails ⌃",
+      "overflow": "auto"
+    }
+  },
+  {
+    "name": "long English protectedOffline: usable card",
+    "pass": true,
+    "detail": {
+      "height": 62,
+      "bottom": 479.984375,
+      "room": 482,
+      "body": "Tono\n\nHome preview\n\nSimulated native IO. Existing 200px sidebar footprint; top bar belongs to PR 3.\n\nHome\nNot connected\nProtected, not connected\n\nChoose a line, then connect.\nDirect traffic is blocked. No automatic retry is scheduled. Retry now or restore normal internet.\n\nConnect\nRetry Now\nRestore Normal Internet\nAn exceptionally long residential route name for overflow testing\nLos Angeles · 83 ms\nTry backup channel\nCopy details\nUpload diagnostics\nThis route did not pass the connection check\nFailed at Verifying the connection\nAutomatic retry not scheduled\nNo automatic retry is scheduled. Choose Retry or review the health check.\nView steps\nTOTAL 9.1s\nTRY 2\nVerifying the connection…\n3.1s\nTechnical details\nDetails ⌃",
+      "overflow": "auto"
+    }
+  },
+  {
+    "name": "scheduled recovery shares same deadline count",
+    "pass": false,
+    "detail": {
+      "sentence": "已拦住直连，12 秒后自动重试。",
+      "card": "当前线路未通过检查\n失败于 正在验证连接\n已安排自动重试\n已安排重试。你可以立即重试，也可以明确选择恢复普通网络。\n查看步骤\n总计 9.1s\n第 2 次\n正在验证连接…\n3.1s\n技术详情"
+    }
+  },
+  {
+    "name": "line row matches chip with real 83ms/check; unmeasured rows dash",
+    "pass": true,
+    "detail": [
+      {
+        "name": "Sakura 东京83 ms",
+        "picked": "true",
+        "check": true
+      },
+      {
+        "name": "Niagara 布法罗—",
+        "picked": "false",
+        "check": false
+      },
+      {
+        "name": "Harbor Singapore · Harbor—",
+        "picked": "false",
+        "check": false
+      }
+    ]
+  },
+  {
+    "name": "expanded clean steps get panel",
+    "pass": true,
+    "detail": {
+      "expanded": "true",
+      "background": "rgb(29, 25, 23) none repeat scroll 0% 0% / auto padding-box border-box"
+    }
+  },
+  {
+    "name": "sheet has one scroll area; all cards intact and last reachable",
+    "pass": true,
+    "detail": {
+      "scroll": 692,
+      "client": 186,
+      "scrollTop": 506,
+      "nestedScroll": [],
+      "cards": [
+        {
+          "height": 252,
+          "client": 252,
+          "scroll": 252,
+          "overflow": "visible",
+          "text": "当前节点\n切换\n运营商: Example exit organization\n国家: Tokyo, Japan\n东京\nSakura · JP\n0.1 秒\nClaude / AI 住宅专线：已就绪\nClaude 网页、API、Claude Code 及人机验证均走独立家庭宽带。Tono 会统一路由 Chrome / Edge 的所有用户资料，不支持按资料单独路由。\n查看规则"
+        },
+        {
+          "height": 96,
+          "client": 96,
+          "scroll": 96,
+          "overflow": "visible",
+          "text": "实时流量\n2.29 MB/s\n\n↑ 313 KB/s · 本次连接 1.13 GB"
+        },
+        {
+          "height": 145,
+          "client": 145,
+          "scroll": 145,
+          "overflow": "visible",
+          "text": "今天的 AI 流量\n\n家宽上的流量，不是剩余额度。\n\n今天还没有。\n\n近 7 天\n\n在总览页打开时累计，只存在这台电脑上。"
+        },
+        {
+          "height": 99,
+          "client": 99,
+          "scroll": 99,
+          "overflow": "visible",
+          "text": "节点池\n3 个云端节点\n\n节点列表已同步"
+        }
+      ],
+      "lastVisible": true
+    }
+  },
+  {
+    "name": "press and synthetic authoritative commit label <100ms",
+    "pass": true,
+    "detail": {
+      "down": 3260.4000000953674,
+      "pressed": 3345.800000190735,
+      "click": 3413.4000000953674,
+      "pressMs": 85.40000009536743,
+      "labelMs": null
+    }
+  }
+]
