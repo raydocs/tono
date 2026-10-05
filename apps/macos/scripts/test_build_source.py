@@ -1,4 +1,5 @@
 """Exercise the production metadata writer, not a Swift/build substitute."""
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -39,9 +40,12 @@ class BuildSourceTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             repo = Path(temporary) / 'repo'
             helper = repo / 'apps/macos/Tono/Resources/tono-core-helper'
+            contract = repo / 'tooling/scripts/core-helper/CONTRACT.sha256'
             source = repo / 'apps/macos/Tono/App.swift'
             helper.parent.mkdir(parents=True)
+            contract.parent.mkdir(parents=True)
             helper.write_bytes(b'committed helper')
+            contract.write_text('v1 sources-hash\n')
             source.write_text('// committed\n')
             git = ['git', '-C', str(repo), '-c', 'user.name=t', '-c', 'user.email=t@example.invalid']
             subprocess.run(['git', 'init', '-q', str(repo)], check=True)
@@ -58,8 +62,15 @@ class BuildSourceTests(unittest.TestCase):
                 return json.loads(output.read_text())['dirty']
 
             self.assertIs(dirty(), False)
+            # What build-core-helper.sh leaves behind: the binary and a record
+            # of its hash and the source hash, in the git directory.
             helper.write_bytes(b'rebuilt helper')
+            (repo / '.git/tono-core-helper.built').write_text(
+                hashlib.sha256(b'rebuilt helper').hexdigest() + ' sources-hash\n')
             self.assertIs(dirty(), False)
+            helper.write_bytes(b'edited by hand')
+            self.assertIs(dirty(), True)
+            helper.write_bytes(b'rebuilt helper')
             source.write_text('// edited\n')
             self.assertIs(dirty(), True)
 
