@@ -1,0 +1,14 @@
+## 2026-10-05 · macOS：CI 构建不再一律记 `dirty:true`；打包缺 helper 构建器时直接失败
+- 归属：SHIP_PLAN §2 第 10 项（R6 打包扫描 R6-6，Issue #1323）；所有者 2026-10-05「把没做的做了」。动 `apps/macos/scripts/write-build-source.sh`、`tooling/scripts/package-macos-test.sh`、`macos-ci.yml`（多跑一个已有的 Python 测试文件）。
+- 来源：基线 main `107ce6d9` → 分支 `fix/macos-build-source-dirty-helper-20261005`；尚未合入 main。
+- 缺陷修复：无客户运行时缺陷。
+- 新增/优化：无。
+- 工程与测试修正：
+  - 打包先跑 `build-core-helper.sh`，它重写被 git 跟踪的 `apps/macos/Tono/Resources/tono-core-helper`（仓库里那份比 helper 源码旧），随后 `write-build-source.sh` 看到工作区有改动，于是每个 CI 包的 `tono-build-source.json` 都是 `dirty:true`，诊断里分不出干净的 CI 构建和本地改过的构建。现在算 `dirty` 时不看这一个文件（它是由受跟踪源码编译出来的产物，源码本身仍然计入）。
+  - `package-macos-test.sh` 原来只在构建器可执行时才跑它；构建器缺失时会悄悄把仓库里那份旧 helper 打进包。现在缺构建器直接失败。
+  - 没有选「不再跟踪这个二进制」：`macos-release.yml` 在打包前有两次直接 `xcodebuild`（构建和测试），它们靠仓库里的这份文件满足工程引用；改成不跟踪要同时改发布工作流，本机又不能构建验证。留作后续。
+  - `test_build_source.py` 之前没有任何工作流运行，现在加进 `macos-ci` 的策略测试。回归 `test_rebuilding_the_helper_binary_does_not_mark_the_build_dirty` 先单独推送为红（`0f346659`），本机红：`AssertionError: True is not False`。
+- 验证：本机 `python3 apps/macos/scripts/test_build_source.py` 2 通过，`test_macos_archive_layout.py` 2 通过，两个脚本 `sh -n` 通过。打包本身只有托管 CI/候选工作流能跑，本 PR 没有构建新候选；`dirty:false` 要在下一个 macOS 候选的 `tono-build-source.json` 里确认。
+- 续记 2026-10-05（审查后一轮）：Codex 高强度审查 `e646d32c` 报 1 个 major——直接把这个路径排除后，没提交的、手改过的 helper 二进制也会被记成 `dirty:false`（改之前是 `true`）。改为：`build-core-helper.sh` 编完后在 git 目录里留一行记录（二进制 sha256 + 源码摘要，不被跟踪、不进包）；`write-build-source.sh` 只有在当前二进制的 sha256 与该记录一致、且记录里的源码摘要等于 `CONTRACT.sha256` 时才不计这个文件，其余情况照旧计入。测试加了「手改二进制 → dirty」一步，先单独推红（本机红：`AssertionError: False is not True`）。`macos-ci` 构建完 App 后断言 `tono-build-source.json` 是 `"dirty":false`（先打印 `git status --porcelain`），这是 #1323 本身的端到端检查。测试里的记录是按构建器的格式手写的，没有在测试里真的编 helper；两边格式由上面的 CI 断言对上。
+- 续记 2026-10-05（审查第二轮后）：Codex 审查 `52d697e8` 报 2 个 major、1 个 minor。① 记录只和 `CONTRACT.sha256` 比，没有和「现在的源码」比：留下记录后只提交 helper 源码、不重建，旧二进制仍被豁免。改为 `build-core-helper.sh --sources-hash` 用构建器自己的文件清单和归一化规则算出当前源码摘要，`write-build-source.sh` 拿它和记录比（不再读 `CONTRACT.sha256`）。② 记录写不进去（git 目录只读）会让本来成功的构建失败；改为尽力而为，写不进去只告警，之后该二进制照旧算改动。③ 新加的两条 git 查询失败时现在保持 `dirty:null`，不再落到 `false`。测试改为把真实的构建器脚本拷进临时仓库、用它的 `--sources-hash` 生成记录，并加了「helper 源码已提交但没重建 → dirty」一步；红提交 `d676c184`（本机红：构建器没有 `--sources-hash` 模式，命令退出 1）。
+- 续记 2026-10-05（审查第三轮后）：Codex 审查 `1a1a7a70` 报 1 个 major、1 个 minor。major：记录只覆盖 helper 源码，不覆盖构建配方——把构建器里的编译参数改了并提交、但不重建，旧二进制仍被豁免。改为 `--build-fingerprint`：源码摘要加上构建器脚本自身的 sha256 一起算（`CONTRACT.sha256` 里的源码摘要不变，所以不触发协议版本升级）。minor：清单里的文件缺失时摘要照样算得出来；现在任何一个读不到就报错退出，构建器也不再接受未知参数（未知参数以前会被当成一次真实构建）。测试夹具改为拷贝构建器的完整清单，新增「配方已提交但没重建 → dirty」和「缺文件 → 指纹失败」。红提交 `12263432`，本机红：`AssertionError: True is not False`。**如实记录**：这次本机跑红测试时，因为当时的构建器还不认识 `--build-fingerprint`，它在临时目录里真的编了一次 helper 并以普通用户跑了它的 `--self-test`（约 30 秒，没有 sudo，产物随临时目录删除）；这违反了「MacBook 不做原生构建」，是无意的，上面的未知参数检查就是为了不再发生。

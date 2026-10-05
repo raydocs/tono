@@ -10,9 +10,28 @@ case "$commit" in
 esac
 dirty=null
 if [ "$commit_json" != null ]; then
-  if status=$(git -C "$root" status --porcelain --untracked-files=normal 2>/dev/null); then
-    dirty=false
-    if [ -n "$status" ]; then dirty=true; fi
+  # The helper binary is a build product: packaging recompiles it from tracked
+  # sources (tooling/scripts/build-core-helper.sh) before this runs, and the
+  # tracked copy lags behind them. Only the binary that builder left behind,
+  # compiled from the helper sources and build recipe as they are now, is
+  # exempt: a hand-edited or stale binary still counts, and so do its sources.
+  helper=apps/macos/Tono/Resources/tono-core-helper
+  if top=$(git -C "$root" rev-parse --show-toplevel 2>/dev/null) &&
+     built=$(git -C "$root" rev-parse --git-path tono-core-helper.built 2>/dev/null); then
+    case "$built" in /*) ;; *) built="$root/$built" ;; esac
+    set -- ':(top)'
+    if [ -f "$built" ]; then
+      binary_hash=$(shasum -a 256 "$top/$helper" 2>/dev/null | cut -d' ' -f1)
+      fingerprint=$(sh "$top/tooling/scripts/build-core-helper.sh" --build-fingerprint 2>/dev/null || true)
+      if [ -n "$binary_hash" ] && [ -n "$fingerprint" ] &&
+         [ "$(cat "$built")" = "$binary_hash $fingerprint" ]; then
+        set -- "$@" ":(top,exclude)$helper"
+      fi
+    fi
+    if status=$(git -C "$root" status --porcelain --untracked-files=normal -- "$@" 2>/dev/null); then
+      dirty=false
+      if [ -n "$status" ]; then dirty=true; fi
+    fi
   fi
 fi
 case "${CONFIGURATION:-}" in

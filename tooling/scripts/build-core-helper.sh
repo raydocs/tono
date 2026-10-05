@@ -6,6 +6,11 @@ helper_dir="$repo_dir/tooling/scripts/core-helper"
 protocol_version_source="$repo_dir/apps/macos/Tono/Core/HelperProtocolVersion.swift"
 output_file="$repo_dir/apps/macos/Tono/Resources/tono-core-helper"
 temporary_file="$output_file.new"
+mode=${1:-}
+case "$mode" in
+  ''|--build-fingerprint) ;;
+  *) echo "build-core-helper: unknown argument $mode" >&2; exit 2 ;;
+esac
 contract_file="$helper_dir/CONTRACT.sha256"
 # One manifest for both CONTRACT hashing and swiftc. Adding a helper source
 # without listing it here would compile an old daemon while the hash gate
@@ -49,8 +54,24 @@ fi
 # daemon can observe. Only lines whose first non-blank characters are `//` are
 # removed, so nothing inside code or a string literal (`http://…`) is touched,
 # and a trailing comment still counts as a change.
+for helper_source in "$@"; do
+  if [ ! -r "$helper_source" ]; then
+    echo "build-core-helper: cannot read $helper_source" >&2
+    exit 1
+  fi
+done
 helper_sources_hash=$(cat "$@" \
   | sed -E '/^[[:space:]]*\/\//d; /^[[:space:]]*$/d' | shasum -a 256 | cut -d' ' -f1)
+# What a build made right now would be made from: the sources above and this
+# script, which holds the compiler flags and the manifest. Not the contract
+# hash: a recipe change alone needs no protocol bump, but it does make an
+# already built binary stale. write-build-source.sh asks for it.
+build_fingerprint=$(printf '%s %s\n' "$helper_sources_hash" \
+  "$(shasum -a 256 "$repo_dir/tooling/scripts/build-core-helper.sh" | cut -d' ' -f1)" | shasum -a 256 | cut -d' ' -f1)
+if [ "$mode" = --build-fingerprint ]; then
+  printf '%s\n' "$build_fingerprint"
+  exit 0
+fi
 if [ -f "$contract_file" ]; then
   recorded_version=$(cut -d' ' -f1 "$contract_file")
   recorded_hash=$(cut -d' ' -f2 "$contract_file")
@@ -99,5 +120,15 @@ chmod 0755 "$temporary_file"
 "$temporary_file" --version
 mv -f "$temporary_file" "$output_file"
 printf '%s %s\n' "$helper_version" "$helper_sources_hash" > "$contract_file"
+# Tells write-build-source.sh that this exact binary came from the sources
+# and recipe fingerprinted above, so rebuilding it does not mark the app build dirty. It lives in
+# the git directory: never tracked, never part of a package. Best effort: with
+# no record the binary simply counts as a modified file again.
+if built_record=$(git -C "$repo_dir" rev-parse --git-path tono-core-helper.built 2>/dev/null); then
+  case "$built_record" in /*) ;; *) built_record="$repo_dir/$built_record" ;; esac
+  binary_hash=$(shasum -a 256 "$output_file" | cut -d' ' -f1)
+  { printf '%s %s\n' "$binary_hash" "$build_fingerprint" > "$built_record"; } 2>/dev/null ||
+    echo "build-core-helper: could not record the built helper; the app build will be stamped dirty" >&2
+fi
 rm -rf "$module_cache_dir"
 trap - EXIT

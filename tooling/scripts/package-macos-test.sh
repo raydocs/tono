@@ -52,10 +52,14 @@ if [ ! -x "$developer_dir/usr/bin/xcodebuild" ]; then
     exit 1
 fi
 
+# The tracked helper binary is older than its sources; a package must never
+# ship it. No builder, no package.
 helper_builder="$repo_root/tooling/scripts/build-core-helper.sh"
-if [ -x "$helper_builder" ]; then
-    "$helper_builder" >/dev/null
+if [ ! -x "$helper_builder" ]; then
+    echo "Missing helper builder: $helper_builder" >&2
+    exit 1
 fi
+"$helper_builder" >/dev/null
 
 for executable in \
     "$repo_root/apps/macos/Tono/Resources/tono-core-helper" \
