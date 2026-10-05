@@ -1,6 +1,6 @@
 ## 2026-10-05 · 连接审查三轮：DIRECT 续租宽限、DNS 快照迟到删除、上行读取期限、启动接管免首档
 - 归属：SHIP_PLAN §2 第 10 项冻结期修复（连接稳定性）。Windows App 与 Windows Service。G3 仍按决策 019 属于 0.0.75，不推进发布门。
-- 来源：叠在 [#1386](https://github.com/raydocs/tono/pull/1386)（`bff773d6`）之上 → 分支 `raydocs/fix-connection-audit-r2-20261005`，[#PRNUM](https://github.com/raydocs/tono/pull/PRNUM)（draft），尚未合入 main。四项都是 2026-10-04 审查记为 open 的项，Codex `gpt-6.1-sol` max 核验为 PARTIAL 或 NEEDS-HARDWARE，修法守核验给的边界。
+- 来源：叠在 [#1386](https://github.com/raydocs/tono/pull/1386)（`bff773d6`）之上 → 分支 `raydocs/fix-connection-audit-r2-20261005`，[#1395](https://github.com/raydocs/tono/pull/1395)（draft），尚未合入 main。四项都是 2026-10-04 审查记为 open 的项，Codex `gpt-6.1-sol` max 核验为 PARTIAL 或 NEEDS-HARDWARE，修法守核验给的边界。
 - 缺陷修复：
   - WIN-DIRECT-RENEW-AMBIGUITY：DIRECT 租约心跳的两次续租都没拿到 Service 判决（管道忙、Service 重启、长 WFP 操作）时，App 立即放行普通流量并永久退出心跳，而 Service 的 60 秒租约仍有效。现在「没有判决」是类型化错误，只有它在距上次成功续租 40 秒内等下一拍重试；Service 拒绝或证明不符仍立即按原处置（非 strict 选择性放行，strict 保持拦截）。每拍的代次、策略、已连接检查照旧，Service 到期回收不变。
   - WIN-DNS-SNAPSHOT-LATE-DELETE：DNS 恢复被 40 秒预算丢弃时，已交给阻塞线程的按路径删除仍会迟到执行；后继 enable 若已在同一路径写入新快照，新快照会被删掉，用户原始 DNS 无从恢复。现在删除线程持有一把独立锁，直到删除真正返回；enable 和 restore 在 DNS 锁内、读快照之前最多等它 5 秒，超时就失败关闭（enable 失败；restore 失败，保护维持原状）。DNS 主锁不交给删除线程。
