@@ -254,19 +254,12 @@ async fn bounded_native_read<T: Send + 'static>(
     budget: std::time::Duration,
     read: impl FnOnce() -> Result<T, String> + Send + 'static,
 ) -> Result<Option<T>, String> {
-    let Ok(permit) = slot.try_acquire() else {
-        return Ok(None);
-    };
-    let worker = tokio::task::spawn_blocking(move || {
-        let _permit = permit;
-        read()
-    });
-    match tokio::time::timeout(budget, worker).await {
-        Ok(joined) => joined
-            .map_err(|error| format!("physical uplink enumeration worker failed: {error}"))?
-            .map(Some),
-        Err(_) => Ok(None),
-    }
+    // RED-ON-OLD: an unbounded read with no slot, like the old reader.
+    let _ = (slot, budget);
+    tokio::task::spawn_blocking(read)
+        .await
+        .map_err(|error| format!("physical uplink enumeration worker failed: {error}"))?
+        .map(Some)
 }
 
 /// X2-1: every hardware adapter that currently carries an IPv4 default route and is

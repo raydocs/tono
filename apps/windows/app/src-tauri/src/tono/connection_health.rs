@@ -253,9 +253,7 @@ pub fn in_place_verdict(
 ) -> InPlaceVerdict {
     let uplinks = match read {
         UplinkRead::Answered(uplinks) => Some(uplinks),
-        UplinkRead::Unanswered if tunnel_proven && committed_direct_interface.is_some() => {
-            return InPlaceVerdict::Unanswered;
-        }
+        // RED-ON-OLD: no answer counts as a failed read, like the first version.
         UplinkRead::Failed | UplinkRead::Unanswered => None,
     };
     if may_recover_in_place(tunnel_proven, committed_direct_interface, uplinks) {

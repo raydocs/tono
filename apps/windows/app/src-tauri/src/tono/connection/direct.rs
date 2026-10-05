@@ -75,10 +75,10 @@ pub(super) struct DirectRenewalGrace {
 impl DirectRenewalGrace {
     /// Run one renewal, remembering when it was sent if the Service granted it.
     pub(super) async fn renew<T, E>(&mut self, renewal: impl std::future::Future<Output = Result<T, E>>) -> Result<T, E> {
-        let sent = tokio::time::Instant::now();
         let result = renewal.await;
         if result.is_ok() {
-            self.last_granted_sent = Some(sent);
+            // RED-ON-OLD: count from the reply, like the first version.
+            self.last_granted_sent = Some(tokio::time::Instant::now());
         }
         result
     }
