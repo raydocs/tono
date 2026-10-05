@@ -1120,6 +1120,16 @@ export const translationKeys = [
   'tono.scenePreview.action',
   'tono.scenePreview.useProgress',
   'tono.scenePreview.progress',
+  'tono.scenePreview.quality',
+  'tono.scenePreview.qualityModes.auto',
+  'tono.scenePreview.qualityModes.full',
+  'tono.scenePreview.qualityModes.lite',
+  'tono.scenePreview.qualityModes.static',
+  'tono.scenePreview.remeasure',
+  'tono.scenePreview.notSampled',
+  'tono.scenePreview.probeFinished',
+  'tono.scenePreview.probePending',
+  'tono.scenePreview.staticProbe',
 ] as const
 
 export type TranslationKey = (typeof translationKeys)[number]

@@ -1482,8 +1482,20 @@ export interface TranslationResources {
         idle: string
         node: string
         notice: string
+        notSampled: string
         paused: string
+        probeFinished: string
+        probePending: string
         progress: string
+        quality: string
+        qualityModes: {
+          auto: string
+          full: string
+          lite: string
+          static: string
+        }
+        remeasure: string
+        staticProbe: string
         useProgress: string
         viewport: string
       }

@@ -283,9 +283,9 @@ it('keeps separate brightness-tier star groups mounted during dawn and reversal'
   const groups = [...container.querySelectorAll('.sea-stars')]
   const stars = [...container.querySelectorAll('.sea-star')]
   expect(groups).toHaveLength(3)
-  expect(groups[0].querySelectorAll('.sea-star-tier-0')).toHaveLength(30)
-  expect(groups[1].querySelectorAll('.sea-star-tier-1')).toHaveLength(15)
-  expect(groups[2].querySelectorAll('.sea-star-tier-2')).toHaveLength(9)
+  expect(groups[0]?.querySelectorAll('.sea-star-tier-0')).toHaveLength(30)
+  expect(groups[1]?.querySelectorAll('.sea-star-tier-1')).toHaveLength(15)
+  expect(groups[2]?.querySelectorAll('.sea-star-tier-2')).toHaveLength(9)
   rerender(<SeaScene phase="connecting" progress={0.5} />)
   groups.forEach((group, index) => {
     expect(container.querySelectorAll('.sea-stars')[index]).toBe(group)
@@ -300,4 +300,33 @@ it('keeps separate brightness-tier star groups mounted during dawn and reversal'
   stars.forEach((star, index) => {
     expect(container.querySelectorAll('.sea-star')[index]).toBe(star)
   })
+})
+
+it('honours stored lite quality without drift, twinkle or breathing loops', () => {
+  vi.stubGlobal('matchMedia', () => ({
+    matches: false,
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+  }))
+  localStorage.setItem(
+    'tono-ui-preferences',
+    JSON.stringify({ motion: 'lite' }),
+  )
+  try {
+    const { container } = render(<SeaScene phase="idle" />)
+    expect(container.firstElementChild?.getAttribute('data-quality')).toBe(
+      'lite',
+    )
+    expect(container.querySelector('.sea-cloud.sea-loop')).toBeNull()
+    expect(container.querySelector('.sea-twinkle')).toBeNull()
+    expect(container.querySelector('.sea-moon-glow.sea-loop')).toBeNull()
+    expect(container.querySelector('.sea-glints-far')).toBeNull()
+    expect(container.querySelectorAll('.sea-glints-near')).toHaveLength(2)
+    expect(container.firstElementChild?.getAttribute('data-motion')).toBe(
+      'ambient',
+    )
+  } finally {
+    cleanup()
+    localStorage.removeItem('tono-ui-preferences')
+  }
 })

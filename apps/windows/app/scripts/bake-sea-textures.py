@@ -121,3 +121,21 @@ for layer in range(2):
                 value = round(255 * strength * math.exp(-.65 * (y + .5 - center) ** 2))
                 rows[y % height][x] = max(rows[y % height][x], value)
     png(f"swell-{layer + 1}.png", width, height, rows)
+
+
+# Stationary reflection envelope: 32px side feather, shorter broken bands nearby.
+rows = []
+for y in range(270):
+    depth = y / 269
+    half = 116 - 58 * depth ** .7
+    fade = (1 - depth) ** 1.5
+    row = []
+    for x in range(330):
+        distance = abs(x + .5 - 165)
+        edge = max(0, min(1, (half - distance) / 32))
+        edge = edge * edge * (3 - 2 * edge)
+        gaps = (.5 + .5 * math.sin(x / (19 - 10 * depth) + y / 7)) ** 2
+        fragments = 1 - depth * .85 * gaps
+        row.append(round(255 * edge * fade * fragments))
+    rows.append(bytes(row))
+png("reflection-envelope.png", 330, 270, rows)

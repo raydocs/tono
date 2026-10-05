@@ -6,6 +6,8 @@ import {
   type CSSProperties,
 } from 'react'
 
+import { useSceneQuality } from './useSceneQuality'
+
 import './tokens/motion.css'
 import './sea-scene.css'
 
@@ -14,7 +16,7 @@ export type SeaPhase = 'connected' | 'connecting' | 'failed' | 'idle'
 export interface SeaSceneProps {
   /** Decorative phase only. The caller must verify live protection before connected. */
   phase: SeaPhase
-  /** Hidden native surfaces / closed tray / software rendering must opt out. */
+  /** Hidden native surfaces / closed tray may explicitly opt out. */
   paused?: boolean
   /** Caller-owned stage progress (0–1), connecting only; omitted keeps the half-rise. */
   progress?: number
@@ -52,6 +54,7 @@ const sunBox: CSSProperties = {
 const mirrorBox: CSSProperties = {
   ...sunBox,
   top: 'calc(50 * var(--sea-unit))',
+  left: 'calc(50% - 95 * var(--sea-unit))',
 }
 
 // Seeded once: phase commits never randomise/remount the sky.
@@ -73,9 +76,9 @@ const STARS = (() => {
   }))
 })()
 
-const Glints = ({ tone }: { tone: 'sun' | 'moon' }) => (
+const Glints = ({ tone, full }: { tone: 'sun' | 'moon'; full: boolean }) => (
   <>
-    {(['far', 'near'] as const).map((depth) => (
+    {(full ? (['far', 'near'] as const) : (['near'] as const)).map((depth) => (
       <div
         key={depth}
         className={`sea-glints-${depth}`}
@@ -110,7 +113,7 @@ const SunDisk = () => (
   </div>
 )
 
-/** Persistent, inert scenery. No connection state, native IPC, canvas or frame loop. */
+/** Persistent, inert scenery. No connection state or native IPC; one bounded quality probe. */
 export const SeaScene = ({
   phase,
   paused = false,
@@ -120,7 +123,10 @@ export const SeaScene = ({
   const [starCount, setStarCount] = useState(54)
   const frozenTransitionsRef = useRef(new Set<Animation>())
   const environment = useSyncExternalStore(subscribe, snapshot, () => 1)
-  const isStatic = paused || (environment & 1) !== 0
+  const [hasSize, setHasSize] = useState(false)
+  const { quality } = useSceneQuality(hasSize && !paused && environment === 0)
+  const isStatic = paused || (environment & 1) !== 0 || quality === 'static'
+  const full = quality !== 'lite'
   const isHidden = (environment & 2) !== 0
   const isPaused = isStatic || isHidden
   const progressStyle =
@@ -151,8 +157,11 @@ export const SeaScene = ({
         !entry ||
         entry.contentRect.width <= 0 ||
         entry.contentRect.height <= 0
-      )
+      ) {
+        setHasSize(false)
         return
+      }
+      setHasSize(true)
       const area = entry.contentRect.width * entry.contentRect.height
       setStarCount(
         Math.min(
@@ -215,6 +224,13 @@ export const SeaScene = ({
       ref={sceneRef}
       className="sea-scene"
       data-phase={phase}
+      data-quality={isStatic ? 'static' : quality}
+      data-low-sun={
+        phase === 'failed' ||
+        (phase === 'connecting' && progressStyle && (progress ?? 1) <= 0)
+          ? 'true'
+          : 'false'
+      }
       data-progress={progressStyle ? 'true' : 'false'}
       data-arrival={entry.arrival && phase === 'connected' ? 'true' : 'false'}
       data-motion={isStatic ? 'static' : 'ambient'}
@@ -254,7 +270,7 @@ export const SeaScene = ({
                 >
                   <span
                     className={
-                      star.twinkle
+                      star.twinkle && full
                         ? 'sea-star-light sea-twinkle sea-loop'
                         : 'sea-star-light'
                     }
@@ -271,7 +287,7 @@ export const SeaScene = ({
           </div>
         ))}
         <div
-          className="sea-meteor sea-loop"
+          className={`sea-meteor${full ? ' sea-loop' : ''}`}
           style={{
             position: 'absolute',
             left: '42%',
@@ -280,19 +296,29 @@ export const SeaScene = ({
             height: 1,
           }}
         />
-        <div className="sea-dusk sea-sky-dusk" style={fill} />
+        <div className="sea-dusk" style={fill}>
+          <div className="sea-sky-dusk sea-evening" style={fill} />
+          <div className="sea-sky-night sea-night" style={fill} />
+          <div
+            className="sea-sky-dusk sea-sky-night-top sea-night"
+            style={fill}
+          />
+        </div>
         <div className="sea-day sea-sky-day" style={fill} />
         <div
           className="sea-moon"
           style={{
             position: 'absolute',
-            left: 'calc(81.08696% - 70px)',
-            top: 'calc(100% - 238px)',
-            width: 140,
-            height: 140,
+            left: 'calc(81.08696% - 70 * var(--sea-unit))',
+            top: 'calc(100% - 238 * var(--sea-unit))',
+            width: 'calc(140 * var(--sea-unit))',
+            height: 'calc(140 * var(--sea-unit))',
           }}
         >
-          <div className="sea-moon-glow sea-loop" style={fill} />
+          <div
+            className={`sea-moon-glow${full ? ' sea-loop' : ''}`}
+            style={fill}
+          />
           <svg
             className="sea-crescent"
             aria-hidden="true"
@@ -300,10 +326,10 @@ export const SeaScene = ({
             viewBox="0 0 40 40"
             style={{
               position: 'absolute',
-              left: 50,
-              top: 50,
-              width: 40,
-              height: 40,
+              left: 'calc(50 * var(--sea-unit))',
+              top: 'calc(50 * var(--sea-unit))',
+              width: 'calc(40 * var(--sea-unit))',
+              height: 'calc(40 * var(--sea-unit))',
             }}
           >
             <path
@@ -323,7 +349,7 @@ export const SeaScene = ({
           }}
         />
         <div
-          className="sea-cloud sea-loop sea-cloud-1"
+          className={`sea-cloud sea-cloud-1${full ? ' sea-loop' : ''}`}
           style={{
             position: 'absolute',
             left: 0,
@@ -333,7 +359,7 @@ export const SeaScene = ({
           }}
         />
         <div
-          className="sea-cloud sea-loop sea-cloud-2"
+          className={`sea-cloud sea-cloud-2${full ? ' sea-loop' : ''}`}
           style={{
             position: 'absolute',
             left: 0,
@@ -343,7 +369,10 @@ export const SeaScene = ({
           }}
         />
         <div className="sea-track" style={sunBox}>
-          <div className="sea-sun-motion sea-loop" style={fill}>
+          <div
+            className={`sea-sun-motion${full ? ' sea-loop' : ''}`}
+            style={fill}
+          >
             <div
               className="sea-arrival-bloom sea-loop"
               style={{
@@ -358,10 +387,16 @@ export const SeaScene = ({
                 inset: 'calc(-90 * var(--sea-unit))',
               }}
             >
-              <div className="sea-loop sea-breathe" style={fill} />
+              <div
+                className={`sea-breathe${full ? ' sea-loop' : ''}`}
+                style={fill}
+              />
             </div>
             <div className="sea-sun-glow" style={disk}>
-              <div className="sea-glow-pulse sea-loop" style={disk} />
+              <div
+                className={`sea-glow-pulse${full ? ' sea-loop' : ''}`}
+                style={disk}
+              />
             </div>
             <SunDisk />
           </div>
@@ -371,7 +406,10 @@ export const SeaScene = ({
         className="sea-water"
         style={{ ...fill, top: '55%', overflow: 'hidden' }}
       >
-        <div className="sea-dusk sea-water-dusk" style={fill} />
+        <div className="sea-dusk" style={fill}>
+          <div className="sea-water-dusk sea-evening" style={fill} />
+          <div className="sea-water-night sea-night" style={fill} />
+        </div>
         <div className="sea-day sea-water-day" style={fill} />
         <div className="sea-swell-envelope" style={fill}>
           <div
@@ -410,16 +448,19 @@ export const SeaScene = ({
           className="sea-mirror"
           style={{
             position: 'absolute',
-            left: 0,
+            left: 'calc(67.3913% - 165 * var(--sea-unit))',
             top: 0,
-            width: '100%',
+            width: 'calc(330 * var(--sea-unit))',
             height: 'calc(270 * var(--sea-unit))',
             transform: 'scaleY(1.45)',
             transformOrigin: '50% 0',
           }}
         >
           <div className="sea-mirror-track" style={mirrorBox}>
-            <div className="sea-mirror-motion sea-loop" style={fill}>
+            <div
+              className={`sea-mirror-motion${full ? ' sea-loop' : ''}`}
+              style={fill}
+            >
               <div
                 className="sea-mirror-soft"
                 style={{ position: 'absolute', inset: -7 }}
@@ -447,7 +488,10 @@ export const SeaScene = ({
                 }}
               >
                 <div className="sea-mirror-track" style={mirrorBox}>
-                  <div className="sea-mirror-motion sea-loop" style={fill}>
+                  <div
+                    className={`sea-mirror-motion${full ? ' sea-loop' : ''}`}
+                    style={fill}
+                  >
                     <div className="sea-reflected-disk" style={fill}>
                       <SunDisk />
                     </div>
@@ -461,13 +505,13 @@ export const SeaScene = ({
           className="sea-moon-path"
           style={{
             position: 'absolute',
-            left: 'calc(81.08696% - 84px)',
+            left: 'calc(81.08696% - 84 * var(--sea-unit))',
             top: 0,
-            width: 168,
-            height: 170,
+            width: 'calc(168 * var(--sea-unit))',
+            height: 'calc(170 * var(--sea-unit))',
           }}
         >
-          <Glints tone="moon" />
+          <Glints tone="moon" full={full} />
         </div>
         <div
           className="sea-light-column"
@@ -492,7 +536,7 @@ export const SeaScene = ({
             height: 'calc(270 * var(--sea-unit))',
           }}
         >
-          <Glints tone="sun" />
+          <Glints tone="sun" full={full} />
           <div
             className="sea-arrival-sweep sea-loop"
             style={{

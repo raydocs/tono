@@ -120,6 +120,7 @@
   transition: opacity var(--sea-day-time) var(--sea-sky-ease);
 }
 .sea-dusk {
+  isolation: isolate;
   opacity: var(--sea-dusk);
   transition: opacity var(--sea-sky-time) var(--sea-sky-ease);
 }
@@ -216,14 +217,50 @@
   opacity: var(--sea-shade);
   transition: opacity var(--sea-sun-time) var(--sea-sun-ease);
 }
-.sea-glow-pulse {
-  box-shadow:
-    0 0 calc(72 * var(--sea-unit)) calc(12 * var(--sea-unit)) #ffaa6080,
-    0 0 calc(190 * var(--sea-unit)) calc(60 * var(--sea-unit)) #f0605433;
+.sea-glow-pulse::after {
+  content: "";
+  position: absolute;
+  inset: calc(-10 * var(--sea-unit));
+  background: radial-gradient(
+    ellipse closest-side,
+    #ffe9c280 85%,
+    #ffcb7f66 91%,
+    transparent
+  );
+}
+.sea-track .sea-sun-body::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: radial-gradient(
+    closest-side,
+    transparent calc(100% - 8 * var(--sea-unit)),
+    #ffd59a99 calc(100% - 2 * var(--sea-unit)),
+    #ffe6bfcf
+  );
 }
 .sea-sun-glow {
   opacity: var(--sea-glow);
   transition: opacity var(--sea-glow-time) var(--sea-sky-ease);
+}
+.sea-track .sea-sun-glow {
+  transform: scaleY(var(--sea-disk-shape));
+  transition:
+    opacity var(--sea-glow-time) var(--sea-sky-ease),
+    transform var(--sea-sun-time) var(--sea-shape-ease);
+}
+.sea-glow-pulse::before {
+  content: "";
+  position: absolute;
+  inset: calc(-250 * var(--sea-unit));
+  background: radial-gradient(
+    ellipse closest-side,
+    #ffaa6080,
+    #ffaa6052 27%,
+    #f0605429 58%,
+    transparent 72%
+  );
 }
 .sea-halo {
   opacity: 0;
@@ -283,13 +320,9 @@
 .sea-mirror {
   opacity: var(--sea-mirror);
   transition: opacity var(--sea-sky-time) var(--sea-sky-ease);
-  mask-image: linear-gradient(
-    180deg,
-    #000,
-    #000000b8 24%,
-    #00000038 50%,
-    transparent 66%
-  );
+  mask-image: url("./sea-assets/reflection-envelope.png");
+  mask-mode: luminance;
+  mask-size: 100% 100%;
 }
 .sea-mirror .sea-disk,
 .sea-mirror .sea-red {
@@ -300,7 +333,7 @@
   transition: opacity var(--sea-sky-time) var(--sea-sky-ease);
   mask-image: radial-gradient(
     closest-side,
-    #000 calc(100% - 14px),
+    #000 calc(100% - 32 * var(--sea-unit)),
     transparent
   );
 }
@@ -398,7 +431,7 @@
 }
 .sea-moon {
   opacity: 0;
-  transform: translateY(30px);
+  transform: translateY(calc(30 * var(--sea-unit)));
   transition:
     opacity var(--tono-ambient-moon-exit) ease-out,
     transform var(--tono-ambient-moon-exit) ease-in;
@@ -624,7 +657,7 @@
   opacity: var(--sea-path-red);
 }
 .sea-scene[data-phase="connecting"] .sea-reflected-disk {
-  opacity: 0.84;
+  opacity: 0.62;
 }
 .sea-reflection-lift {
   background: radial-gradient(
@@ -800,6 +833,67 @@
   82% {
     opacity: 0.8;
   }
+}
+
+/* A grazing sun has diffuse water light, not a diagonally clipped mirror. */
+.sea-scene[data-low-sun="true"] .sea-mirror {
+  opacity: 0;
+}
+.sea-evening,
+.sea-night {
+  mix-blend-mode: plus-lighter;
+  transition: opacity 500ms ease-out;
+}
+.sea-evening {
+  opacity: 1;
+}
+.sea-night {
+  opacity: 0;
+}
+.sea-scene[data-phase="idle"] .sea-evening {
+  opacity: 0;
+  transition: opacity 2200ms linear 3800ms;
+}
+.sea-scene[data-phase="idle"] .sea-night {
+  opacity: 1;
+  transition: opacity 2200ms linear 3800ms;
+}
+.sea-sky-night {
+  mask-image: linear-gradient(transparent 45.4545%, #000 60.6061%);
+  background:
+    radial-gradient(
+      calc(540 * var(--sea-unit)) calc(210 * var(--sea-unit)) at 67.3913% 100%,
+      #9dacfa9e,
+      transparent
+    ),
+    linear-gradient(
+      180deg,
+      transparent 18%,
+      #26295199 62%,
+      #5763b1d9 90%,
+      #96a9f8f2
+    );
+}
+.sea-sky-night-top {
+  mask-image: linear-gradient(#000 45.4545%, transparent 60.6061%);
+}
+.sea-water-night {
+  background: linear-gradient(
+    180deg,
+    #56629480,
+    #26295142 26%,
+    transparent 70%
+  );
+}
+.sea-scene[data-phase][data-quality="lite"] .sea-cloud,
+.sea-scene[data-phase][data-quality="lite"] .sea-twinkle,
+.sea-scene[data-phase][data-quality="lite"] .sea-meteor,
+.sea-scene[data-phase][data-quality="lite"] .sea-sun-motion,
+.sea-scene[data-phase][data-quality="lite"] .sea-mirror-motion,
+.sea-scene[data-phase][data-quality="lite"] .sea-glow-pulse,
+.sea-scene[data-phase][data-quality="lite"] .sea-breathe,
+.sea-scene[data-phase][data-quality="lite"] .sea-moon-glow {
+  animation: none;
 }
 
 /* Keep static guards after phase rules, including the delayed afterglow. */

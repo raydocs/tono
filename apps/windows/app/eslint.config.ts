@@ -42,6 +42,7 @@ export default defineConfig([
           allowDefaultProject: [
             'eslint.config.ts',
             `vite.config.mts`,
+            'vite.scene-preview.config.mts',
             'scripts/*.mjs',
             'tests/*.ts',
             'src/polyfills/*.js',

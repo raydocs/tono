@@ -1,8 +1,9 @@
 # SeaScene — isolated Windows 0.0.75 preview
 
-Scope: handoff section 8 **PR 1 only**, under [SHIP_PLAN](SHIP_PLAN.md). Draft,
-not a 0.0.74 G4 freeze exception. No production mount, preference, native window
-change, dashboard rewrite, state mapping, routing/protection change or new logo.
+Scope: **ROUND-3 S0 / PR1 continuation**, under [SHIP_PLAN](SHIP_PLAN.md). Draft,
+not a 0.0.74 G4 freeze exception. Device-local motion preferences only; no
+production mount, native window change, dashboard rewrite, state mapping,
+routing/protection change or new logo.
 
 ## Reproduce
 
@@ -14,8 +15,11 @@ pnpm web:dev --host 127.0.0.1
 # Open http://127.0.0.1:3000/dev/sea-scene/index.html?lang=zh
 # ?phase=idle, connecting, failed or connected; &fit; &static; lang=en
 # &progress=0..1 opts into caller-controlled connecting progress
+# &quality=auto|full|lite|static; picking Auto again rearms its saved result
+pnpm scene:build
+# Extract sea-preview.zip; open tono-sea-preview/index.html in Edge
 python3 scripts/bake-sea-textures.py
-pnpm exec vitest run src/tono-ui/SeaScene.test.tsx
+pnpm exec vitest run src/tono-ui/SeaScene.test.tsx src/tono-ui/scene-quality-probe.test.ts src/tono-ui/appearance-preferences.test.ts
 pnpm exec tsc --noEmit
 pnpm exec eslint --max-warnings=0 src/tono-ui/SeaScene.tsx src/tono-ui/SeaScene.test.tsx src/tono-ui/MeshBackground.tsx src/dev/sea-scene/main.tsx
 pnpm exec biome check src/tono-ui/SeaScene.tsx src/tono-ui/SeaScene.test.tsx src/tono-ui/sea-scene.css src/tono-ui/tokens/motion.css src/dev/sea-scene
@@ -26,7 +30,7 @@ pnpm i18n:types
 
 This HTML has its own React/i18n entry; it does not bootstrap the Tauri app or
 make native/network calls. Vite's production input remains `src/index.html`.
-The preview rejects non-development execution. Production output contains no
+The preview allows development or the explicitly isolated standalone build only. Production output contains no
 SeaScene CSS, preview HTML or baked textures. Its English/Chinese preview keys
 are in the ordinary locale/type system; other inactive locales are not expanded.
 
@@ -46,9 +50,11 @@ are in the ordinary locale/type system; other inactive locales are not expanded.
   keeps 125px. No timer, inferred connection stage or autonomous progress.
   Progress retargets received while hidden are held like phase retargets.
 - Bake seeded, depth-dependent ripple ribbons and white grain once using the stdlib script.
-  Ripple width stretches with the scene; its depth stays 270px, preserving the
+  Ripple width stretches within its reflection envelope; its depth stays 270px, preserving the
   drawn water scale rather than enlarging ripples on a maximised window. No SVG
-  turbulence, displacement, blur filter, canvas pass or JS frame loop ships.
+  turbulence, displacement, blur filter or canvas drawing ships. S0 adds one
+  bounded numeric3s RAF probe and one WebGL renderer lookup, never a steady-state
+  frame/render loop.
 - Replace animated colors with opacity cross-fades of prepainted warm/red layers.
   Only transform and opacity animate; glass is confined to the preview dock.
 - Dawn sky uses `--tono-ambient-ease-dawn` (`.25,0,.75,1`) rather than the
@@ -62,9 +68,10 @@ are in the ordinary locale/type system; other inactive locales are not expanded.
   received while hidden is retargeted and held; canceled transitions are not
   revived. The Web Animations API is used only on visibility/hidden phase commits,
   not per frame. Unmount cancels retained transitions. `paused` instead selects
-  a static destination: native occlusion/minimisation, closed tray or known
-  software rendering must be passed explicitly by a future caller. No unreliable
-  GPU/remote-desktop detection is claimed. Media changes are subscribed/unsubscribed.
+  a static destination: native occlusion/minimisation or a closed tray must be
+  passed explicitly by a future caller. Automatic quality recognises
+  only the specified software renderer names, not remote-desktop/occlusion
+  detection; hardware validation remains required. Media changes are subscribed/unsubscribed.
 - Reduced motion, forced colors and explicit static mode snap to the right phase,
   stop loops and make the preview dock opaque. Per the 2026-10-04 review E30,
   reduced transparency and missing backdrop-filter affect only dock material:
@@ -380,17 +387,55 @@ per-step/default/large measurements](screenshots/sea-scene-2026-10-04-sunrise/RE
 Previous evidence remains historical. Windows hardware acceptance and PR2/3
 remain pending; this continuation does not mount the scene or start home work.
 
+## ROUND-3 S0 — 2026-10-05
+
+[Current evidence, three-tier movies, raw measurements and Windows web ZIP](screenshots/sea-scene-2026-10-05-s0/README.md).
+The [seven supplied owner approvals](decisions/063-2026-10-05-windows-round3-appearance.md)
+supersede the earlier unresolved questions; the moon stays. No PR2/3 mount yet.
+
+- Filled soft sun glow/feathered edge removes the dark cut-out; all measured
+  visible rim normals beat the sky6px outside, including nine Full loop extrema.
+- Stationary32px-feathered/tapered broken reflection envelope; remove mirror
+  only for failed/finite progress≤0, preserving phase DOM and diffuse light.
+  Moon/halo/path scale with the sun clamp; periodic glint tiles remain integral.
+- Idle indigo arrives after3800ms; upper150px exactly unchanged. Additive
+  prepainted-opacity cross-fades avoid an artificial dark midpoint. Sunset
+  max sampled300ms step7.333, end27.245, tiny+.018 ambient fluctuation.
+- Root `data-quality=full|lite|static`; stored device preference
+  auto/full/lite/static beside the default-off future appearance flag. Full
+  retains the scene; Lite stops drift/twinkle/meteor/breath/bob and removes one
+  glint depth, but keeps transitions and water flow; Static snaps. Reduced/forced
+  always Static. Lite/connecting preview controls have no backdrop-filter.
+- One total3s visible sampling budget:1500ms checkpoint permits full→lite,
+  Lite's own p95>50ms permits static, software names start Lite. Auto saved result
+  only moves down, no new probe until explicit Auto/rearm. No continuous FPS
+  readout; static shows unsampled values, not fabricated performance data.
+- Standalone classic-script/IIFE web build, inline PNGs and SHA256 input manifest,
+  separate from production inputs; opens on file:// in Chrome without network.
+  **Windows/Edge check still not run.** Owner's five-minute check determines
+  initial Auto default; it does not block the next stacked draft.
+-14narrow tests, full79/79indexed-access ratchet, scoped lint/Biome, both builds
+  and en/zh locale checks pass locally. Prior dd0CI's3extra unchecked indexes were
+  in its new Scene test; assertions retained with safe access, not an activity
+  change or baseline relaxation. New exact-head CI is reported on the draft.
+- Default and large steady traces Paint/Layout/Raster0,≈60fps/p95≤16.8ms on
+  M3Pro/Metal only. Static pixel activity0; Lite sky0/water6–9%; Full sky.5–4.2%
+  and water6.8–9%, threshold>5RGB/1.6s. No universal or Windows FPS claim.
+- The broad all-transition preview diagnostic still flags sunrise's immediate
+  opaque-dock change (−1.634). Dock-isolated scene contribution rises; see raw
+  evidence and limits rather than relabeling the failing diagnostic green.
+
 ## Not verified / not implemented
 
-Real Windows/WebView2 frame pacing, low-end or remote-desktop hardware, native
-visibility/occlusion and real Windows maximisation: **not run** on this MacBook.
-The 1920×1080 and 2560×1440 images are simulated large viewports, not Windows device evidence.
-No native builds, Tauri, packaging, merge, deployment or customer publish.
+Real Windows/Edge/WebView2, weak hardware/RDP, native visibility, DPI125/150 and
+maximisation: **not run** on this MacBook. Large viewports are simulated. No
+native build, Tauri, native package, merge, deploy or publish. Web-preview ZIP
+only, as explicitly requested in S0.4. No automatic external review.
 
-Protection mapping, all real dashboard cards, light theme, navigation, chrome,
-tray sizing and branded icons are later PRs. Section 7 questions 1–5 were asked
-together. The owner selected visual frameless/full-bleed Windows chrome (question
-4), with Windows controls at top right and native drag/resize/maximise/snap
-qualification; [decision 056](decisions/056-2026-10-03-windows-frameless-direction.md) records it and this PR does not implement it. Question 3 was subsequently selected as a top capsule ([decision 058](decisions/058-2026-10-04-windows-top-navigation.md)); questions 1, 2 and 5 remain open with ROUND-2 defaults
-before PR 2. The original provisional scope remains in
-[decision 055](decisions/055-2026-10-03-windows-sea-scene-preview.md).
+Production protection mapping, home/popovers/details, whole-look toggle wiring,
+bar/frameless native behaviour, other pages/tray/icons remain later stacked
+drafts. Section7questions1–5 were already asked together; subsequent supplied
+ROUND-3 approvals settle protectedOffline/dark-only/tray320×232/four labels+
+two icons. New app/tray icon sheets still require owner approval before wiring.
+The old appearance stays untouched; only PR4 is allowed its listed vocabulary
+changes. Scene design is frozen after S0; later edits only fix exposed defects.

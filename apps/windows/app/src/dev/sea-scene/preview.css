@@ -47,6 +47,9 @@ input:focus-visible {
   outline: 2px solid #ffe2b0;
   outline-offset: 3px;
 }
+footer button {
+  padding: 8px 10px;
+}
 .sea-preview-dock button {
   min-width: 120px;
 }
@@ -65,4 +68,54 @@ input:focus-visible {
     background: #1d1917;
     backdrop-filter: none;
   }
+}
+
+.sea-preview-readout {
+  position: absolute;
+  right: 16px;
+  top: 12px;
+  max-width: 260px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  color: #d8d9e2;
+  background: #11111bd9;
+  font:
+    10px / 1.5 ui-monospace,
+    monospace;
+  overflow-wrap: anywhere;
+}
+/* Match the app's existing connection-time glass opt-out. */
+.sea-preview-window:has([data-phase="connecting"]) .sea-preview-dock {
+  background: rgba(34, 16, 16, 0.78);
+  backdrop-filter: none;
+}
+.sea-preview-window:has([data-quality="lite"]) .sea-preview-dock {
+  background: rgba(22, 22, 36, 0.8);
+  backdrop-filter: none;
+}
+.sea-preview-window:has([data-quality="lite"][data-phase="connected"])
+  .sea-preview-dock,
+.sea-preview-window:has([data-quality="lite"][data-phase="connecting"])
+  .sea-preview-dock,
+.sea-preview-window:has([data-quality="lite"][data-phase="failed"])
+  .sea-preview-dock {
+  background: rgba(34, 16, 16, 0.78);
+}
+select {
+  color: inherit;
+  background: #1d1917;
+  border: 1px solid #ffffff42;
+  border-radius: 8px;
+  margin-inline-start: 6px;
+  font: inherit;
+}
+footer label {
+  white-space: nowrap;
+}
+footer input[type="range"] {
+  width: 90px;
+}
+select:focus-visible {
+  outline: 2px solid #ffe2b0;
+  outline-offset: 3px;
 }

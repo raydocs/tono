@@ -696,6 +696,18 @@
     "node": "Westwood · preview node",
     "action": "Change scene",
     "useProgress": "Use stage progress",
-    "progress": "Progress (preview)"
+    "progress": "Progress (preview)",
+    "quality": "Quality",
+    "qualityModes": {
+      "auto": "Auto",
+      "full": "Full",
+      "lite": "Lite",
+      "static": "Static"
+    },
+    "remeasure": "Remeasure",
+    "notSampled": "Not sampled",
+    "probeFinished": "Sample complete · frame probe stopped",
+    "probePending": "Sampling first 3 seconds of visible motion",
+    "staticProbe": "Static · no frame probe"
   }
 }

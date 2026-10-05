@@ -1,0 +1,37 @@
+Tono SeaScene S0 — isolated Windows web preview (not the VPN app)
+
+1. Extract the entire ZIP. Open tono-sea-preview/index.html in Microsoft Edge.
+   No install, network access, sign-in, native IPC or VPN connection is needed.
+   If your organisation blocks file:// scripts, serve this folder on localhost
+   with a static server you already have and open its index.html in Edge.
+2. For Chinese, append ?lang=zh to the file URL. Quality accepts
+   &quality=auto / full / lite / static. &fit fills the viewport.
+   &phase=connected / connecting / failed / idle selects the initial scene.
+   &progress=0 / 0.5 / 1 uses caller-owned connecting progress, not fake progress.
+3. The Quality menu persists locally. Auto starts Full, samples at most 3 seconds
+   of visible animation, may downgrade to Lite then Static, and saves the result.
+   Software renderers start Lite. Auto never upgrades itself. Picking Auto again
+   rearms the probe. Remeasure explicitly rearms the currently selected mode.
+   Static/reduced motion/forced colours do not sample. Hidden time is excluded.
+   fps/p95 are the bounded startup sample, NOT a continuous frame-rate monitor.
+   Reload without a quality query to check the saved result without resampling.
+   Browser/file storage may not be available: then persistence is window-local.
+   The file preview has its own origin, not the installed application's settings.
+4. Five-minute owner check on Windows AND the weakest available machine:
+   - Pick Full, Remeasure, note quality/fps/p95/renderer in the draft PR.
+   - Each phase for 20 seconds; connect→connected, connected→idle,
+     idle→connecting, connecting→failed. Check both Full and Lite.
+   - Minimise during sunset; restore and confirm it resumes without a jump.
+   - Test 125% and 150% display scaling; remote desktop if available.
+   - Repeat sampling if the initial readout is noisy. If Full cannot maintain
+     30 fps on the weak machine, report it: Auto's initial default becomes Lite.
+   - Observe sustained pacing independently (Edge DevTools Performance or a
+     recording) because the corner readout deliberately stops after 3 seconds.
+   - Check connecting controls are opaque (no glass blur), including in Full.
+   Paste OS/Edge version, machine/GPU, scaling, phase, selected/actual tier,
+   fps, p95, renderer and visible stutters into #1375. Do not call Mac Chrome
+   evidence Windows/WebView2/hardware qualification.
+
+Source identity: sources.json records exact SHA-256 build inputs. This web-only
+bundle is separate from the production Vite entry. New appearance remains off;
+there is no app mount or native-window implementation in S0. Drafts do not merge.
