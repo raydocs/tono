@@ -3,6 +3,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -40,12 +41,16 @@ class BuildSourceTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             repo = Path(temporary) / 'repo'
             helper = repo / 'apps/macos/Tono/Resources/tono-core-helper'
-            contract = repo / 'tooling/scripts/core-helper/CONTRACT.sha256'
+            builder = repo / 'tooling/scripts/build-core-helper.sh'
+            helper_source = repo / 'tooling/scripts/core-helper/main.swift'
+            version = repo / 'apps/macos/Tono/Core/HelperProtocolVersion.swift'
             source = repo / 'apps/macos/Tono/App.swift'
-            helper.parent.mkdir(parents=True)
-            contract.parent.mkdir(parents=True)
+            for path in (helper, helper_source, version):
+                path.parent.mkdir(parents=True, exist_ok=True)
             helper.write_bytes(b'committed helper')
-            contract.write_text('v1 sources-hash\n')
+            shutil.copy(ROOT / 'tooling/scripts/build-core-helper.sh', builder)
+            helper_source.write_text('let helper = 1\n')
+            version.write_text('enum HelperProtocolVersion { static let current = "1" }\n')
             source.write_text('// committed\n')
             git = ['git', '-C', str(repo), '-c', 'user.name=t', '-c', 'user.email=t@example.invalid']
             subprocess.run(['git', 'init', '-q', str(repo)], check=True)
@@ -62,16 +67,25 @@ class BuildSourceTests(unittest.TestCase):
                 return json.loads(output.read_text())['dirty']
 
             self.assertIs(dirty(), False)
-            # What build-core-helper.sh leaves behind: the binary and a record
-            # of its hash and the source hash, in the git directory.
+            # What a build leaves behind: the binary, and in the git directory
+            # its hash next to the hash of the sources it was compiled from.
+            sources_hash = subprocess.run(
+                ['sh', str(builder), '--sources-hash'], check=True, text=True,
+                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL).stdout.strip()
             helper.write_bytes(b'rebuilt helper')
             (repo / '.git/tono-core-helper.built').write_text(
-                hashlib.sha256(b'rebuilt helper').hexdigest() + ' sources-hash\n')
+                hashlib.sha256(b'rebuilt helper').hexdigest() + ' ' + sources_hash + '\n')
             self.assertIs(dirty(), False)
+            source.write_text('// edited\n')
+            self.assertIs(dirty(), True)
+            source.write_text('// committed\n')
             helper.write_bytes(b'edited by hand')
             self.assertIs(dirty(), True)
             helper.write_bytes(b'rebuilt helper')
-            source.write_text('// edited\n')
+            self.assertIs(dirty(), False)
+            # Helper sources committed without a rebuild: the binary is stale.
+            helper_source.write_text('let helper = 2\n')
+            subprocess.run(git + ['commit', '-q', '-m', 'helper source', str(helper_source)], check=True)
             self.assertIs(dirty(), True)
 
 
