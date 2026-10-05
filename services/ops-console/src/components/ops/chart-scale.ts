@@ -102,7 +102,7 @@ const DAY = 24 * HOUR;
 const TIME_STEPS = [
   MINUTE, 5 * MINUTE, 15 * MINUTE, 30 * MINUTE,
   HOUR, 3 * HOUR, 6 * HOUR, 12 * HOUR,
-  DAY, 2 * DAY, 7 * DAY,
+  DAY, 2 * DAY, 7 * DAY, 14 * DAY, 30 * DAY, 90 * DAY,
 ];
 
 /**

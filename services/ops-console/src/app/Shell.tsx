@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
-import { Monitor, Server, Settings, SunMoon, UserRound, Users } from 'lucide-react';
+import { Search, UserRound } from 'lucide-react';
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
@@ -10,9 +10,11 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { copy, type PageId } from '@/copy/copy';
+import { copy } from '@/copy/copy';
 import { cn } from '@/lib/utils';
-import { BLANK_ROUTE, goPage, readRoute, type OpsRoute } from '@/lib/hash-route';
+import { BLANK_ROUTE, readRoute, writeRoute, type OpsRoute } from '@/lib/hash-route';
+import { trafficRange } from '@/lib/api-traffic';
+import { navigationContext } from '@/lib/navigation';
 import { usePrivacy } from '@/lib/privacy';
 import { consoleBehind, worstSource } from '@/lib/sources';
 import { useTheme, type ThemeChoice } from '@/lib/theme';
@@ -25,18 +27,11 @@ import type {
   NodeSummaryDto,
   SystemHealthDto,
 } from '@contract';
-import { can, currentRole, PAGE_REQUIRES, type OpsAction } from '@/lib/roles';
+import { currentRole } from '@/lib/roles';
 import '@/styles/shell.css';
 import { CommandPalette } from './CommandPalette';
 import { Enter } from './Enter';
-
-const NAV: Array<{ id: PageId; icon: typeof Server; requires: OpsAction }> = [
-  { id: 'today', icon: SunMoon, requires: PAGE_REQUIRES.today },
-  { id: 'nodes', icon: Server, requires: PAGE_REQUIRES.nodes },
-  { id: 'customers', icon: Users, requires: PAGE_REQUIRES.customers },
-  { id: 'clients', icon: Monitor, requires: PAGE_REQUIRES.clients },
-  { id: 'settings', icon: Settings, requires: PAGE_REQUIRES.settings },
-];
+import { Navigation } from './Navigation';
 
 const THEMES: ThemeChoice[] = ['system', 'light', 'dark'];
 
@@ -67,6 +62,7 @@ export function Shell({
   const privacy = usePrivacy();
   const theme = useTheme();
   const role = currentRole();
+  const context = navigationContext(route, role);
 
   useEffect(() => {
     const sync = () => setRoute(readRoute());
@@ -85,45 +81,14 @@ export function Shell({
 
   return (
     <div className="shell-root flex min-h-screen bg-[var(--background)] text-[var(--foreground)]">
-      {/* Floating capsules in whitespace, not an attached full-height
-          sidebar: one for the brand, one for the pages. Icons stay
-          monochrome; the live one is a solid circle. The Chinese name is
-          always the accessible name and becomes visible on hover or keyboard
-          focus. */}
-      <aside className="shell-rail" aria-label={copy.brand}>
-        <div className="rail-float rail-brandbox">
-          <span className="rail-brand" title={copy.brand} aria-hidden>T</span>
-        </div>
-        <div className="rail-float rail-navbox">
-          <nav className="rail-nav" aria-label={copy.brand}>
-            {NAV.filter((item) => can(item.requires, role)).map((item) => {
-              const Icon = item.icon;
-              const active = route.page === item.id;
-              return (
-                <a
-                  key={item.id}
-                  href={`#/${item.id}`}
-                  aria-current={active ? 'page' : undefined}
-                  aria-label={copy.pages[item.id]}
-                  title={copy.pages[item.id]}
-                  className="rail-link"
-                  onClick={(event) => {
-                    event.preventDefault();
-                    goPage(item.id);
-                  }}
-                >
-                  <Icon size={18} strokeWidth={1.75} className="shrink-0" />
-                  <span className="rail-tip" aria-hidden>{copy.pages[item.id]}</span>
-                </a>
-              );
-            })}
-          </nav>
-        </div>
-      </aside>
+      <Navigation route={route} role={role} />
 
       <div className="shell-frame flex min-w-0 flex-1 flex-col">
         <header className="shell-header flex h-14 items-center gap-3 border-b border-[var(--hairline)] bg-[var(--surface)] px-4 min-[960px]:px-6">
-          <h1 className="text-page mr-auto truncate">{copy.pages[route.page]}</h1>
+          <div className="shell-heading mr-auto min-w-0">
+            <span className="text-fine text-[var(--muted-foreground)]">{context.group}</span>
+            <h1 className="text-page truncate">{context.title}</h1>
+          </div>
           <SearchBox />
           <SourcePill sources={sources} behind={consoleBehind(fetchedAt)} />
           <PreferencesMenu theme={theme} privacy={privacy} />
@@ -143,6 +108,13 @@ export function Shell({
         ) : null}
 
         <main className="shell-main flex-1">
+          {route.legacyFilter ? <p className="px-6 py-3 text-fine" role="status">{copy.legacyFilterNotice}</p> : null}
+          {route.returnToTraffic ? <div className="flex flex-wrap items-center gap-3 px-6 py-3 text-fine">
+            <button type="button" className="text-[color:var(--accent)] hover:underline"
+              onClick={() => writeRoute({ ...BLANK_ROUTE, page: 'traffic', range: route.range })}>
+              {copy.traffic.back(copy.traffic.range[trafficRange(route.range)])}
+            </button><span>{copy.traffic.detailWindow}</span>
+          </div> : null}
           <Enter>
             {children}
           </Enter>
@@ -169,19 +141,23 @@ export function Shell({
  */
 function SearchBox() {
   return (
-    <div className="relative hidden min-[960px]:block">
+    <div className="relative">
+      <button type="button" className="shell-search-mobile" aria-label={copy.searchPrompt}
+        onClick={() => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', metaKey: true }))}>
+        <Search size={18} aria-hidden />
+      </button>
       <label className="sr-only" htmlFor="ops-search">{copy.searchPrompt}</label>
       <input
         id="ops-search"
         readOnly
-        className="h-8 w-64 rounded-[10px] border border-[var(--hairline)] bg-[var(--background)] pl-3 pr-12 text-body outline-none placeholder:text-[var(--muted-foreground)]"
+        className="hidden min-[960px]:block h-8 w-64 rounded-[10px] border border-[var(--hairline)] bg-[var(--background)] pl-3 pr-12 text-body outline-none placeholder:text-[var(--muted-foreground)]"
         placeholder={copy.searchPrompt}
         onFocus={() => {
           const event = new KeyboardEvent('keydown', { key: 'k', metaKey: true });
           window.dispatchEvent(event);
         }}
       />
-      <kbd className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 rounded-[6px] border border-[var(--hairline)] px-1.5 py-0.5 font-mono text-micro text-[var(--muted-foreground)]">
+      <kbd className="pointer-events-none hidden min-[960px]:block absolute right-2 top-1/2 -translate-y-1/2 rounded-[6px] border border-[var(--hairline)] px-1.5 py-0.5 font-mono text-micro text-[var(--muted-foreground)]">
         ⌘K
       </kbd>
     </div>

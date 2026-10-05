@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { nowSec } from '../../src/lib/clock';
 import { materializeOps } from '../../src/lib/ops-fixtures';
-import { metricsBody, qualityTextBody } from './node-legacy';
+import { metricsBody, qualityTextBody, usageHoursBody } from './node-legacy';
 
 /**
  * The 节点详情 endpoints, served by the fixture dev server.
@@ -233,6 +233,7 @@ export function serveNodeRoutes(options: {
   const method = req.method ?? 'GET';
   const owned = (parts[0] === 'nodes' && parts.length >= 2)
     || (parts[0] === 'metrics' && parts.length === 1)
+    || (parts[0] === 'usage-hours' && parts.length === 1)
     || (parts[0] === 'jobs' && parts.length === 3 && parts[2] === 'cancel')
     || (parts[0] === 'fleet-nodes' && parts.length === 3
       && (parts[2] === 'retire-preview' || parts[2] === 'retire' || parts[2] === 'quality-text'));
@@ -247,10 +248,14 @@ export function serveNodeRoutes(options: {
   // store behind it, and neither may go through the clock shift below — the
   // samples are already stamped in the frozen present.
   const query = new URLSearchParams(url.split('?')[1] ?? '');
-  if (parts[0] === 'metrics' || parts[2] === 'quality-text') {
+  if (parts[0] === 'metrics' || parts[0] === 'usage-hours' || parts[2] === 'quality-text') {
     if (method !== 'GET' && method !== 'HEAD') {
       res.statusCode = 405;
       res.end();
+      return true;
+    }
+    if (parts[0] === 'usage-hours') {
+      send(res, usageHoursBody(query.get('range'), set === 'empty', nowSec()));
       return true;
     }
     if (parts[0] === 'metrics') {

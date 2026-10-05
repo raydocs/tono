@@ -61,9 +61,6 @@ export default defineConfig({
       '**/dist/**',
       '**/cjs/**',
       '**/.{idea,git,cache,output,temp}/**',
-      // The beforeunload-guard component test needs a real DOM (jsdom) that the
-      // Workers pool cannot provide. Run it via `vitest.admin.config.ts`.
-      'admin/src/pages/ControlPage.test.tsx',
     ],
     coverage: {
       // Off unless `vitest run --coverage` (npm test). The ops-contract job

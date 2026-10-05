@@ -42,12 +42,14 @@ export default function NodesPage({
   health,
   fleet,
   selected,
+  query = null,
 }: {
   nodes: Resource<NodeSummaryDto[]> & { reload: () => void };
   health: Resource<SystemHealthDto>;
   /** The legacy read, for the flat facts only. */
   fleet: FleetState;
   selected: string | null;
+  query?: string | null;
 }) {
   const privacy = usePrivacy();
   const phone = useIsPhone();
@@ -117,6 +119,7 @@ export default function NodesPage({
         phone={phone}
         asOfSec={newest}
         onRetry={nodes.reload}
+        initialQuery={query}
       />
 
       {/* On a phone the list is what the page is opened for, so the charts follow it. */}

@@ -9,14 +9,13 @@ import {
   CommandList,
 } from '@/components/ui/command';
 import type { CustomerSummaryDto, FunnelDto, IncidentDto, NodeSummaryDto } from '@contract';
-import { copy, type PageId } from '@/copy/copy';
+import { copy } from '@/copy/copy';
 import { invitesOf } from '@/lib/funnel';
-import { goPage, openCustomer, openIncident, openInvite, openNode } from '@/lib/hash-route';
+import { openCustomer, openIncident, openInvite, openNode } from '@/lib/hash-route';
 import { openIncidents } from '@/lib/incidents';
 import { usePrivacy } from '@/lib/privacy';
-import { can, currentRole, PAGE_REQUIRES } from '@/lib/roles';
-
-const PAGE_IDS = Object.keys(copy.pages) as PageId[];
+import { currentRole } from '@/lib/roles';
+import { openNavigation, visibleNavigation } from '@/lib/navigation';
 
 // Identifiers select a row; only its displayed address/known handle are searchable.
 const filter = (value: string, search: string, keywords?: string[]) => (
@@ -44,6 +43,7 @@ export function CommandPalette({
   const [open, setOpen] = useState(false);
   const privacy = usePrivacy();
   const role = currentRole();
+  const groups = visibleNavigation(role);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -62,18 +62,20 @@ export function CommandPalette({
       <CommandList>
         <CommandEmpty>{copy.commandEmpty}</CommandEmpty>
         <CommandGroup heading={copy.commandPages}>
-          {PAGE_IDS.filter((id) => can(PAGE_REQUIRES[id], role)).map((id) => (
+          {groups.flatMap((group) => group.items.map((item) => (
             <CommandItem
-              key={id}
-              value={`${copy.pages[id]} ${id}`}
+              key={item.id}
+              value={`navigation:${item.id}`}
+              keywords={[group.label, item.label, copy.pages[item.page], item.page, item.id, ...item.keywords]}
               onSelect={() => {
-                goPage(id);
+                openNavigation(item);
                 setOpen(false);
               }}
             >
-              {copy.pages[id]}
+              <span>{item.label}</span>
+              <span className="ml-auto text-micro text-[var(--muted-foreground)]">{group.label}</span>
             </CommandItem>
-          ))}
+          )))}
         </CommandGroup>
         <CommandGroup heading={copy.commandIncidents}>
           {openIncidents(incidents).map((incident) => (

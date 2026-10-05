@@ -81,7 +81,7 @@ const emailCodes = new Map<string, string>();
 // a reintroduced fallback fails a test rather than silently timing out twice
 // in production.
 const ABSORBED_HOSTS = ['ops.afk.ccwu.cc', 'quality.afk.ccwu.cc'];
-const ADMIN_MONITOR_URL = 'https://admin.afk.ccwu.cc/ops/#/monitor';
+const ADMIN_MONITOR_URL = 'https://admin.afk.ccwu.cc/ops2/#/nodes';
 let absorbedHostFetches: string[] = [];
 let oidcPrivateKey: CryptoKey;
 let oidcPublicKey: JsonWebKey & { kid: string };
@@ -1150,9 +1150,9 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
 
   it('sends a path-style console link to the page it names instead of a 404', async () => {
     for (const [path, hash] of [
-      ['/ops/monitor', '/ops/#/monitor'],
-      ['/ops/users/', '/ops/#/users'],
-      ['/ops/dashboard', '/ops/#/dashboard'],
+      ['/ops/monitor', '/ops2/?legacy=ops1#/monitor'],
+      ['/ops/users/', '/ops2/?legacy=ops1#/users'],
+      ['/ops/dashboard', '/ops2/?legacy=ops1#/dashboard'],
     ] as const) {
       const context = createExecutionContext();
       const response = await adminWorker.fetch(
@@ -1165,8 +1165,9 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
       expect(response.headers.get('location')).toBe(hash);
     }
 
-    // A real file must still be served rather than bounced.
-    for (const path of ['/ops/assets/index-abc123.js', '/ops/index.html', '/ops/']) {
+    // Retired hashed assets cannot boot a second UI; modern assets still use
+    // the guarded asset path rather than becoming page redirects.
+    for (const path of ['/ops/assets/index-abc123.js', '/ops2/assets/index-abc123.js']) {
       const context = createExecutionContext();
       const response = await adminWorker.fetch(
         new Request(`https://admin.afk.ccwu.cc${path}`),
@@ -1176,6 +1177,19 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
       await waitOnExecutionContext(context);
       expect(response.status).not.toBe(302);
     }
+  });
+
+  it('requires an Access admin before serving the sole ops2 console assets', async () => {
+    const request = async (assertion?: string) => {
+      const context = createExecutionContext();
+      const response = await worker.fetch(new Request('https://test/ops2/', {
+        headers: assertion ? { 'cf-access-jwt-assertion': assertion } : {},
+      }), env as unknown as Env, context);
+      await waitOnExecutionContext(context);
+      return response;
+    };
+    expect((await request()).status).toBe(401);
+    expect((await request(await accessAssertion('not-an-admin@example.com'))).status).toBe(403);
   });
 
   it('stops cross-site ops writes before the origin header is stripped for the API worker', async () => {
@@ -2483,7 +2497,7 @@ rules: []
       );
       await waitOnExecutionContext(context);
       expect(response.status).toBe(302);
-      expect(response.headers.get('location')).toBe('https://admin.afk.ccwu.cc/ops/#/monitor');
+      expect(response.headers.get('location')).toBe('https://admin.afk.ccwu.cc/ops2/#/nodes');
     }
   });
 

@@ -24,7 +24,7 @@ async function keep(page: Page, name: string) {
 test.describe('账目', () => {
   test('一个月的账，一页', async ({ page }) => {
     await open(page, LEDGER);
-    await expect(page.getByRole('heading', { name: '账目', exact: true })).toBeVisible();
+    await expect(page.getByRole('main').getByRole('heading', { name: '账目', exact: true })).toBeVisible();
     await expect(page.getByText('40 笔')).toBeVisible();
     await settle(page);
     await expect(page).toHaveScreenshot('ledger.png');

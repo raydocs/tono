@@ -36,6 +36,7 @@ const CustomersPage = lazy(() => import('@/pages/Customers'));
 const CustomerDetailPage = lazy(() => import('@/pages/CustomerDetail'));
 const ClientsPage = lazy(() => import('@/pages/Clients'));
 const SettingsPage = lazy(() => import('@/pages/Settings'));
+const TrafficPage = lazy(() => import('@/pages/Traffic'));
 
 /**
  * How often the whole shell re-reads the world.
@@ -132,14 +133,14 @@ export function App() {
         {page === 'nodes' ? (
           route.nodeName
             ? <NodeDetailPage name={route.nodeName} customers={people} fleet={fleet} />
-            : <NodesPage nodes={nodes} health={health} fleet={fleet} selected={route.node} />
+            : <NodesPage key={route.query ?? ''} nodes={nodes} health={health} fleet={fleet} selected={route.node} query={route.query} />
         )
           : page === 'customers' ? (
             route.customerId
               ? <CustomerDetailPage key={route.customerId} userId={route.customerId} />
               : (
                 <CustomersPage
-                  key={`${route.platform ?? ''}/${route.bucket ?? ''}`}
+                  key={`${route.platform ?? ''}/${route.bucket ?? ''}/${route.query ?? ''}`}
                   customers={customers}
                   funnel={funnel}
                   releases={releases}
@@ -147,11 +148,13 @@ export function App() {
                   platform={route.platform}
                   bucket={route.bucket}
                   invite={route.invite}
+                  query={route.query}
                   listCounts={customerList.status === 'ready' ? customerList.data.counts : undefined}
                 />
               )
           )
-            : page === 'clients'
+            : page === 'traffic' ? <TrafficPage range={route.range} customers={customers} />
+              : page === 'clients'
               ? <ClientsPage releases={releases} health={health} onChanged={releases.reload} />
               : page === 'settings' ? <SettingsPage section={route.section} />
                 : (

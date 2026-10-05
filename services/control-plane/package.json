@@ -4,8 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "admin:dev": "vite admin --base /ops/",
-    "admin:build": "vite build admin --base /ops/ --outDir ../public/ops --emptyOutDir",
+    "admin:dev": "npm --prefix ../ops-console run dev",
+    "admin:build": "npm run console:build",
     "console:build": "npm --prefix ../ops-console ci && npm --prefix ../ops-console run build",
     "admin:worker:deploy": "npm run deploy",
     "preview:render-config": "node preview/render-config.mjs",
@@ -18,11 +18,9 @@
     "check:contract": "node ../../tooling/scripts/check-ops-contract-purity.mjs",
     "check:budgets": "node ../../tooling/scripts/check-ops-budgets.mjs"
   },
-  "dependencies": {
-    "react": "19.3.0",
-    "react-dom": "19.3.0"
-  },
   "devDependencies": {
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
     "@cloudflare/vitest-pool-workers": "0.22.0",
     "@cloudflare/workers-types": "^5.20260910.1",
     "@testing-library/react": "^16.3.3",

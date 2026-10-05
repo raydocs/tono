@@ -68,6 +68,7 @@ export default function CustomersPage({
   bucket,
   invite,
   listCounts,
+  query: initialQuery = null,
 }: {
   /**
    * The shell owns this list, so onboarding a customer has to ask it to read
@@ -91,11 +92,13 @@ export default function CustomersPage({
   bucket: AdoptionBucket | null;
   /** The address whose drawer is open, from the URL: two other pages link here. */
   invite: string | null;
+  query?: string | null;
 }) {
   const privacy = usePrivacy();
   const context = useCustomerView(`${platform ?? ''}/${bucket ?? ''}`, customers.status === 'ready');
   const { filter, stage, sort } = context.view;
   const [onboarding, setOnboarding] = useState(false);
+  const [query, setQuery] = useState(initialQuery ?? '');
 
   const all = useMemo(
     () => (customers.status === 'ready' ? customers.data : []),
@@ -146,7 +149,14 @@ export default function CustomersPage({
     () => (listCounts ? listCounts.byStage : stageCounts(listRows(all, invites))),
     [all, invites, listCounts],
   );
-  const shown = useMemo(() => selectByStage(table, stage), [table, stage]);
+  const shown = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    return selectByStage(table, stage).filter((row) => {
+      const person = row.customer ?? row.invite;
+      return !needle || [privacy.email(person.email), person.wechatId ?? '', row.customer?.userId ?? '']
+        .some((value) => value.toLowerCase().includes(needle));
+    });
+  }, [table, stage, query, privacy]);
   const picked = useMemo(
     () => shown.map((row) => row.customer).filter((row): row is CustomerSummaryDto => row !== null),
     [shown],
@@ -190,6 +200,10 @@ export default function CustomersPage({
 
   return (
     <div ref={context.container} className="page-wrap customers-page customers-wide">
+      <label className="flex items-center gap-3 text-fine">{copy.traffic.search}
+        <input type="search" className="min-w-0 max-w-sm flex-1 rounded-md border border-[var(--hairline)] bg-[var(--surface)] px-3 py-2 text-body" value={query} onChange={(event) => setQuery(event.target.value)} />
+      </label>
+      {privacy.privacy ? <p className="text-fine" role="status">{copy.privacyCustomerSearchNotice}</p> : null}
       <div className="page-head">
         <section className="customers-hero" aria-label={copy.pages.customers}>
           {/* The sentence the page is built around, and the one button that

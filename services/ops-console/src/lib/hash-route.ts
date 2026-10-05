@@ -31,6 +31,10 @@ export type OpsRoute = {
    * what there is to link to, and ⌘K and 今天 both jump straight into it.
    */
   invite: string | null;
+  query: string | null;
+  range: string | null;
+  legacyFilter: string | null;
+  returnToTraffic: boolean;
 };
 
 /** What the route is before a window exists, and the base every jump starts from. */
@@ -44,6 +48,10 @@ export const BLANK_ROUTE: OpsRoute = {
   bucket: null,
   section: null,
   invite: null,
+  query: null,
+  range: null,
+  legacyFilter: null,
+  returnToTraffic: false,
 };
 const EMPTY = BLANK_ROUTE;
 
@@ -64,6 +72,7 @@ export function readRoute(): OpsRoute {
   const bucket = read('bucket');
   const pair = platform !== null && PLATFORMS.includes(platform);
   const segment = segments[1] ? decodeURIComponent(segments[1]) : null;
+  const returnToTraffic = (page === 'nodes' || page === 'customers') && read('from') === 'traffic';
   return {
     page,
     node: read('node'),
@@ -74,6 +83,10 @@ export function readRoute(): OpsRoute {
     bucket: pair && bucket !== null && BUCKETS.includes(bucket) ? bucket as AdoptionBucket : null,
     section: page === 'settings' && segments[1] ? decodeURIComponent(segments[1]) : null,
     invite: page === 'customers' ? read('invite') : null,
+    query: page === 'customers' || page === 'nodes' ? read('q') : null,
+    range: page === 'traffic' || returnToTraffic ? read('range') : null,
+    legacyFilter: read('legacyFilter'),
+    returnToTraffic,
   };
 }
 
@@ -97,6 +110,10 @@ export function writeRoute(next: OpsRoute, replace = false) {
     ['platform', next.platform],
     ['bucket', next.bucket],
     ['invite', next.invite],
+    ['q', next.query],
+    ['range', next.range],
+    ['legacyFilter', next.legacyFilter],
+    ['from', next.returnToTraffic ? 'traffic' : null],
   ] as const;
   for (const [key, value] of params) {
     if (value) url.searchParams.set(key, value);
@@ -105,6 +122,10 @@ export function writeRoute(next: OpsRoute, replace = false) {
   const method = replace ? 'replaceState' : 'pushState';
   window.history[method]({}, '', url);
   window.dispatchEvent(new HashChangeEvent('hashchange'));
+}
+
+export function setTrafficRange(range: string) {
+  writeRoute({ ...EMPTY, page: 'traffic', range }, true);
 }
 
 /**
