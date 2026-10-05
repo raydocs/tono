@@ -1,5 +1,5 @@
 /**
- * CLI tool to update version numbers in package.json, src-tauri/Cargo.toml, and src-tauri/tauri.conf.json.
+ * CLI tool to update version numbers in package.json, src-tauri/Cargo.toml, Cargo.lock, and src-tauri/tauri.conf.json.
  *
  * Usage:
  *   pnpm release-version <version>
@@ -23,17 +23,25 @@
  * The script will:
  *   - Validate and normalize the version argument
  *   - Update the version field in package.json
- *   - Update the version field in src-tauri/Cargo.toml
+ *   - Update the [package] version in src-tauri/Cargo.toml
+ *   - Update the local tono-windows entry in Cargo.lock
  *   - Update the version field in src-tauri/tauri.conf.json
+ *   - Run tooling/scripts/verify-desktop-version.py and warn when the desktop
+ *     versions still disagree (the macOS project is bumped separately)
  *
  * Errors are logged and the process exits with code 1 on failure.
  */
 
-import { execSync } from 'child_process'
+import { execSync, spawnSync } from 'child_process'
 import fs from 'fs/promises'
 import path from 'path'
 
 import { program } from 'commander'
+
+import {
+  setCargoLockVersion,
+  setCargoPackageVersion,
+} from './cargo-version.mjs'
 
 /**
  * 获取当前 git 短 commit hash
@@ -174,27 +182,60 @@ async function updateCargoVersion(newVersion) {
   const cargoTomlPath = path.join(_dirname, 'src-tauri', 'Cargo.toml')
   try {
     const data = await fs.readFile(cargoTomlPath, 'utf8')
-    const lines = data.split('\n')
     const versionWithoutV = newVersion.startsWith('v')
       ? newVersion.slice(1)
       : newVersion
 
-    const updatedLines = lines.map((line) => {
-      if (line.trim().startsWith('version =')) {
-        return line.replace(
-          /version\s*=\s*"[^"]+"/,
-          `version = "${versionWithoutV}"`,
-        )
-      }
-      return line
-    })
-
-    await fs.writeFile(cargoTomlPath, updatedLines.join('\n'), 'utf8')
+    await fs.writeFile(
+      cargoTomlPath,
+      setCargoPackageVersion(data, versionWithoutV),
+      'utf8',
+    )
     console.log(`[INFO]: Cargo.toml version updated to: ${versionWithoutV}`)
+
+    // `cargo metadata --locked` (windows-release.yml) and
+    // verify-desktop-version.py both read the lock entry.
+    const cargoLockPath = path.join(_dirname, 'Cargo.lock')
+    const lock = await fs.readFile(cargoLockPath, 'utf8')
+    await fs.writeFile(
+      cargoLockPath,
+      setCargoLockVersion(lock, 'tono-windows', versionWithoutV),
+      'utf8',
+    )
+    console.log(`[INFO]: Cargo.lock version updated to: ${versionWithoutV}`)
   } catch (error) {
     console.error('Error updating Cargo.toml version:', error)
     throw error
   }
+}
+
+/**
+ * Report whether every desktop version now agrees. Not fatal: a tag such as
+ * autobuild is a Windows-only version, and the macOS project is bumped by hand.
+ */
+function reportDesktopVersions() {
+  const verifier = path.join(
+    process.cwd(),
+    '..',
+    '..',
+    '..',
+    'tooling',
+    'scripts',
+    'verify-desktop-version.py',
+  )
+  for (const python of ['python3', 'python']) {
+    const result = spawnSync(python, [verifier], { encoding: 'utf8' })
+    if (result.error) continue
+    if (result.status === 0) {
+      console.log('[INFO]: Desktop versions agree')
+    } else {
+      console.warn(
+        `[WARN]: Desktop versions still disagree; the release workflows refuse this tree:\n${result.stderr || result.stdout}`,
+      )
+    }
+    return
+  }
+  console.warn('[WARN]: python not found, verify-desktop-version.py not run')
 }
 
 /**
@@ -301,6 +342,7 @@ async function main(versionArg) {
     await updateCargoVersion(newVersion)
     await updateTauriConfigVersion(newVersion)
     console.log('[SUCCESS]: All version updates completed successfully!')
+    reportDesktopVersions()
   } catch (error) {
     console.error('[ERROR]: Failed to update versions:', error)
     process.exit(1)
