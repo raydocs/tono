@@ -80,6 +80,17 @@ struct PendingSegment {
     next_cursor: Cursor,
 }
 
+/// What one sweep iteration does with the pending read.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Step {
+    /// Other scopes' lines only: move the cursor, send nothing.
+    Skip,
+    /// An empty body under the current receipt key.
+    Probe,
+    /// The pending lines under the current receipt key.
+    Lines,
+}
+
 /// Receipt identity and bytes live together across failed sweeps. Replacing a
 /// scope creates a new queue/session, never reuses a key for a different body.
 struct UploadQueue {
@@ -115,6 +126,13 @@ impl UploadQueue {
         self.pending.as_ref()
     }
 
+    /// Decided from a single read: a line written after an empty read is seen
+    /// by the next iteration, which probes before sending it.
+    fn next_step(&mut self) -> Option<Step> {
+        let lines = self.prepare()?.segment.line_count;
+        Some(if lines == 0 { Step::Skip } else if self.confirmed { Step::Lines } else { Step::Probe })
+    }
+
     fn read_next(&self) -> Option<PendingSegment> {
         let live = std::fs::File::open(&self.log_path).ok();
         let backup = std::fs::File::open(self.log_path.with_file_name(AUDIT_BACKUP_FILE_NAME)).ok();
@@ -141,9 +159,12 @@ impl UploadQueue {
 
     /// The server said it did not store this receipt key, so the bytes can be
     /// dropped without orphaning a stored segment. The cursor does not move.
+    /// A key that carried lines is retired: the probe that follows has another
+    /// body, and the server answers a known key as stored without reading it.
     fn decline(&mut self) {
         self.pending = None;
         self.declined = true;
+        if self.confirmed { self.advance_sequence(); }
         self.confirmed = false;
     }
 
@@ -331,40 +352,35 @@ async fn sweep(
         {
             let inner = state.lock().await;
             if inner.sign_in_generation != generation
+                || inner.account_state == AccountState::Suspended
                 || state.audit().with_log_upload_scope(scope, || ()).is_none() { return Ok(()); }
         }
-        if !queue.confirmed && has_scoped_lines(queue) {
+        let Some(step) = queue.next_step() else { return Ok(()) };
+        if step != Step::Skip {
             let os_version = os_version_string();
             let empty = gzip_within_limit(&[]).expect("an empty gzip fits");
-            let result = tokio::select! {
-                biased;
-                _ = scope.cancelled.cancelled() => return Ok(()),
-                result = client.upload_diagnostics_log_segment_for_identity(DiagnosticsLogSegment {
-                    session_id: &queue.session_id, sequence: queue.sequence, line_count: 0,
-                    client_version: env!("CARGO_PKG_VERSION"), os_version: &os_version, gzip: &empty,
-                }, identity) => result,
+            let segment = &queue.pending.as_ref().unwrap().segment;
+            let (line_count, gzip) = match step {
+                Step::Lines => (segment.line_count, &segment.gzip),
+                _ => (0, &empty),
             };
-            if let Err(err) = result { return Err(record_upload_error(state, queue, err)); }
-            queue.confirm();
-            continue;
-        }
-        if queue.prepare().is_none() { return Ok(()); }
-        let segment = &queue.pending.as_ref().unwrap().segment;
-        if segment.line_count > 0 {
-            let os_version = os_version_string();
             // A revoked consent/owner cancels catch-up, including the awaited
             // HTTP future; it cannot recall bytes already accepted by a server.
             let result = tokio::select! {
                 biased;
                 _ = scope.cancelled.cancelled() => return Ok(()),
                 result = client.upload_diagnostics_log_segment_for_identity(DiagnosticsLogSegment {
-                    session_id: &queue.session_id, sequence: queue.sequence,
-                    line_count: segment.line_count, client_version: env!("CARGO_PKG_VERSION"),
-                    os_version: &os_version, gzip: &segment.gzip,
+                    session_id: &queue.session_id, sequence: queue.sequence, line_count,
+                    client_version: env!("CARGO_PKG_VERSION"), os_version: &os_version, gzip,
                 }, identity) => result,
             };
             if let Err(err) = result { return Err(record_upload_error(state, queue, err)); }
         }
+        if step == Step::Probe {
+            queue.confirm();
+            continue;
+        }
+        let segment = &queue.pending.as_ref().unwrap().segment;
         let event = (segment.line_count > 0).then(|| AuditEvent::NetworkLogSegmentUploaded {
             sequence: queue.sequence, line_count: segment.line_count, bytes: segment.gzip.len() as u32,
         });
@@ -394,12 +410,6 @@ fn record_upload_error(state: &Arc<TonoState>, queue: &mut UploadQueue, err: Api
         state.audit().log(AuditEvent::NetworkLogSegmentUploadFail { error: err.to_string() });
     }
     err
-}
-
-/// Probe only when there is something this scope would send. A chunk of other
-/// scopes' lines is skipped by the normal path without any upload.
-fn has_scoped_lines(queue: &mut UploadQueue) -> bool {
-    queue.prepare().is_some_and(|pending| pending.segment.line_count > 0)
 }
 
 /// The `os_version` header value, bounded so the server cannot reject the whole
