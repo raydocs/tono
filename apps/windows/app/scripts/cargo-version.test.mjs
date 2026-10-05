@@ -54,3 +54,55 @@ test('the lock entry of the local package follows the bump', () => {
     ),
   )
 })
+
+test('a CRLF lock keeps its line endings', () => {
+  const lock = '[[package]]\r\nname = "tono-windows"\r\nversion = "0.0.74"\r\n'
+
+  assert.equal(
+    setCargoLockVersion(lock, 'tono-windows', '0.0.75'),
+    lock.replace('0.0.74', '0.0.75'),
+  )
+})
+
+test('a lock that names the package with its version is refused', () => {
+  const lock = [
+    '[[package]]',
+    'name = "tono-windows"',
+    'version = "0.0.74"',
+    '',
+    '[[package]]',
+    'name = "consumer"',
+    'version = "1.0.0"',
+    'dependencies = [',
+    ' "tono-windows 0.0.74",',
+    ']',
+    '',
+  ].join('\n')
+
+  assert.throws(() => setCargoLockVersion(lock, 'tono-windows', '0.0.75'))
+})
+
+test('only the version value changes, wherever a look-alike line sits', () => {
+  const toml = [
+    '[package] # the app',
+    'description = """',
+    'version = "example"',
+    '"""',
+    'version="0.0.74" # bumped by release-version',
+    '',
+  ].join('\n')
+
+  assert.equal(
+    setCargoPackageVersion(toml, '0.0.75'),
+    toml.replace('version="0.0.74"', 'version="0.0.75"'),
+  )
+})
+
+test('an inherited package version is refused', () => {
+  assert.throws(() =>
+    setCargoPackageVersion(
+      '[package]\nversion = { workspace = true } # version = "old"\n',
+      '0.0.75',
+    ),
+  )
+})
