@@ -1,6 +1,6 @@
 # 运维后台收敛为一套
 
-接续所有者 2026-10-04“升级，然后 ops1 和 2 就留一个”的指令。归属运维计划 §6；基线 `c271fe13`，`raydocs/seadevil`，[#1377](https://github.com/raydocs/tono/pull/1377) draft。**源码只保留 ops-console 一个 UI；未合并、未部署，不声称线上旧入口已经退役。**选择见[决定 056](../decisions/056-2026-10-04-single-ops-console.md)。
+接续所有者 2026-10-04“升级，然后 ops1 和 2 就留一个”的指令。归属运维计划 §6；基线 `c271fe13`，`raydocs/seadevil`，[#1377](https://github.com/raydocs/tono/pull/1377)。**2026-10-05 已合并 main@933436cb 并部署 API/Admin 两 Worker；只构建 ops-console，旧生成产物已移除。**精确 CI、审查、备份、邮件去重与生产核对见[上线记录](../changelog.d/2026-10-05-ops1-retirement-deploy.md)；登录后的页面验收仍未做。选择见[决定 056](../decisions/056-2026-10-04-single-ops-console.md)。下文保留初次草稿/续修各阶段的原始失败与当时状态，不把它们改成从未失败。
 
 ## 实现边界
 
@@ -28,7 +28,7 @@
 
 客户/节点 ID 只解码一次再作为编码路径段写入，加号与百分号不丢。带对象的 traffic 链接进入详情，并保留原 range/from 上下文与“返回原窗口用量”入口；明确告知对象详情使用自己的时间范围，不假装详情已经应用 90 天。不能等价迁移的旧 focus/q 产生通用提示，不把原始邮箱/搜索内容直接回显在提示中。现代 `/ops2/#/nodes` 不走旧 nodes 别名。
 
-## 检查与已知限制
+## 初批检查与已知限制（2026-10-04 当时状态）
 
 MacBook，本工作树；本轮日志保留于 `/tmp/tono-ops-consolidation/`：
 
