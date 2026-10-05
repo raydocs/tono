@@ -18,10 +18,10 @@ use crate::tono::{
     audit::{self, AuditEvent},
     bootstrap, commands, signed_apps,
     connection_health::{
-        CoreSample, HealthLegs, NetworkChangeOutcome, NetworkEventProbeEffect, NetworkEventProbePlan,
-        apply_network_event_probe,         classify_core_sample, commit_core_baseline, connection_loop_continues, core_change_fires,
+        CoreSample, HealthLegs, InPlaceVerdict, NetworkChangeOutcome, NetworkEventProbeEffect,
+        NetworkEventProbePlan, UplinkRead, apply_network_event_probe,         classify_core_sample, commit_core_baseline, connection_loop_continues, core_change_fires,
         core_identity_change_owned, exit_probe_due,
-        health_threshold_reached, kill_switch_unhealthy_for_monitor, may_recover_in_place,
+        health_threshold_reached, in_place_verdict, kill_switch_unhealthy_for_monitor,
         monitor_requires_reconnect, network_change_audited, network_event_fires, next_network_events_counter,
         owned_direct_reload_in_flight,
         plan_network_event_probe, protected_dns_unhealthy,
@@ -1176,7 +1176,9 @@ pub(super) async fn network_monitor_loop(state: Arc<TonoState>, app: AppHandle) 
         }
         // X2-1: a proven tunnel still has to drop a DIRECT overlay whose adapter
         // no longer carries a default route. A held blip has not proven the tunnel.
-        if effect == NetworkEventProbeEffect::Proven && !may_keep_session_in_place(&state, true).await {
+        if effect == NetworkEventProbeEffect::Proven
+            && may_keep_session_in_place(&state, true).await == InPlaceVerdict::Rebuild
+        {
             if !connection_loop_continues(handle_network_change_inner(&state, &app, false).await) {
                 return;
             }
@@ -1194,6 +1196,25 @@ pub(super) async fn network_monitor_loop(state: Arc<TonoState>, app: AppHandle) 
             legs.observe_probe(false);
             let generation = state.lock().await.connect_generation;
             let _ = refresh_control_plane_pins_once(&state, generation).await;
+        }
+        // A DIRECT check whose uplink read gave no answer kept the session without proving the
+        // binding. Read again on a quiet tick; the read is single-flight, so while an earlier
+        // one is still out this answers at once and starts no second worker.
+        if effect == NetworkEventProbeEffect::Unchanged
+            && !invalidate
+            && !core_changed
+            && !health_invalid
+            && !owned_direct_reload
+            && UNREAD_DIRECT_BINDING.load(std::sync::atomic::Ordering::Acquire) == captured_connect_generation
+            && may_keep_session_in_place(&state, true).await == InPlaceVerdict::Rebuild
+        {
+            if !connection_loop_continues(handle_network_change_inner(&state, &app, false).await) {
+                return;
+            }
+            last_in_place_recovery = Some(std::time::Instant::now());
+            legs = HealthLegs::default();
+            pending_event_probe_failures = 0;
+            continue;
         }
         // Probe failure is decided above. Passing false here keeps a single blip from
         // taking the old immediate-rebuild path. Core identity and protection legs still fire.
@@ -1356,34 +1377,64 @@ where
     Some(release(true).await)
 }
 
-/// X2-1: apply [`may_recover_in_place`] to the live session. The uplinks are read only when a
+/// The connect generation whose DIRECT binding check got no answer from the uplink read, or
+/// [`NO_UNREAD_DIRECT_BINDING`]. That check kept the session without proving the binding, so the
+/// monitor of the same generation reads the uplinks again on a later quiet tick.
+static UNREAD_DIRECT_BINDING: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(NO_UNREAD_DIRECT_BINDING);
+const NO_UNREAD_DIRECT_BINDING: u64 = u64::MAX;
+
+/// X2-1: apply [`in_place_verdict`] to the live session. The uplinks are read only when a
 /// DIRECT overlay is committed, so a full-tunnel session pays nothing for it.
-async fn may_keep_session_in_place(state: &Arc<TonoState>, tunnel_proven: bool) -> bool {
-    let committed = if tunnel_proven {
-        state.lock().await.applied_direct_interface.clone()
-    } else {
-        None
+async fn may_keep_session_in_place(state: &Arc<TonoState>, tunnel_proven: bool) -> InPlaceVerdict {
+    let (committed, generation) = {
+        let inner = state.lock().await;
+        let committed = if tunnel_proven {
+            inner.applied_direct_interface.clone()
+        } else {
+            None
+        };
+        (committed, inner.connect_generation)
     };
-    let uplinks = if committed.is_some() {
-        match usable_physical_uplinks().await {
-            Ok(uplinks) => Some(uplinks),
-            Err(error) => {
-                logging!(warn, Type::Service, "Tono: physical uplinks unreadable; DIRECT is not kept in place: {error}");
-                None
-            }
+    let read = if committed.is_some() {
+        usable_physical_uplinks().await
+    } else {
+        Ok(Some(Vec::new()))
+    };
+    if let Err(error) = &read {
+        logging!(warn, Type::Service, "Tono: physical uplinks unreadable; DIRECT is not kept in place: {error}");
+    }
+    let uplinks = match &read {
+        Ok(Some(uplinks)) => UplinkRead::Answered(uplinks.as_slice()),
+        Ok(None) => UplinkRead::Unanswered,
+        Err(_) => UplinkRead::Failed,
+    };
+    let verdict = in_place_verdict(tunnel_proven, committed.as_deref(), uplinks);
+    if verdict == InPlaceVerdict::Unanswered {
+        // Logged once per unanswered stretch: a hung read keeps answering this on every tick.
+        if UNREAD_DIRECT_BINDING.swap(generation, std::sync::atomic::Ordering::AcqRel) != generation {
+            logging!(
+                warn,
+                Type::Service,
+                "Tono: physical uplinks gave no answer in time; keeping DIRECT in place and reading them again on a later tick"
+            );
         }
     } else {
-        None
-    };
-    let keep = may_recover_in_place(tunnel_proven, committed.as_deref(), uplinks.as_deref());
-    if tunnel_proven && !keep {
+        let _ = UNREAD_DIRECT_BINDING.compare_exchange(
+            generation,
+            NO_UNREAD_DIRECT_BINDING,
+            std::sync::atomic::Ordering::AcqRel,
+            std::sync::atomic::Ordering::Acquire,
+        );
+    }
+    if tunnel_proven && verdict == InPlaceVerdict::Rebuild {
         logging!(
             warn,
             Type::Service,
             "Tono: DIRECT is bound to an adapter that no longer carries a usable default route; rebuilding the session under the locked barrier"
         );
     }
-    keep
+    verdict
 }
 
 /// How often a queued health release wakes the controller waits again (#1051).
@@ -1501,7 +1552,9 @@ pub(super) async fn handle_network_change_inner(
     // Sleep/Wi-Fi flaps used to stop the core unconditionally, then burn the
     // first reconnect on "DNS 53 busy" because the just-killed listener was
     // the one we needed.
-    if allow_in_place && may_keep_session_in_place(state, verify_tun_data_plane().await.is_ok()).await {
+    if allow_in_place
+        && may_keep_session_in_place(state, verify_tun_data_plane().await.is_ok()).await != InPlaceVerdict::Rebuild
+    {
         let inner = state.lock().await;
         if inner.connect_generation != generation || !inner.fsm.status().is_connected {
             return NetworkChangeOutcome::Handled;

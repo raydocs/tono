@@ -243,25 +243,29 @@ const UPLINK_READ_BUDGET: std::time::Duration = std::time::Duration::from_secs(5
 #[cfg(windows)]
 static UPLINK_READ_SLOT: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(1);
 
-/// One native read in flight at most, answered within `budget`. The permit lives in the blocking
-/// worker: a read that never returns keeps the slot, so later reads answer unknown at once instead
-/// of leaving one more hung worker behind on every monitor tick.
+/// One native read in flight at most, answered within `budget`. `Ok(None)` is no answer: an
+/// earlier read still holds the only slot, or this one did not return in time. Neither says
+/// anything about the uplinks, unlike a read that failed. The permit lives in the blocking worker:
+/// a read that never returns keeps the slot, so later reads answer `None` at once instead of
+/// leaving one more hung worker behind on every monitor tick.
 #[cfg(any(windows, test))]
 async fn bounded_native_read<T: Send + 'static>(
     slot: &'static tokio::sync::Semaphore,
     budget: std::time::Duration,
     read: impl FnOnce() -> Result<T, String> + Send + 'static,
-) -> Result<T, String> {
-    let permit = slot
-        .try_acquire()
-        .map_err(|_| "an earlier physical uplink enumeration has not returned".to_owned())?;
+) -> Result<Option<T>, String> {
+    let Ok(permit) = slot.try_acquire() else {
+        return Ok(None);
+    };
     let worker = tokio::task::spawn_blocking(move || {
         let _permit = permit;
         read()
     });
     match tokio::time::timeout(budget, worker).await {
-        Ok(joined) => joined.map_err(|error| format!("physical uplink enumeration worker failed: {error}"))?,
-        Err(_) => Err(format!("physical uplink enumeration did not return within {budget:?}")),
+        Ok(joined) => joined
+            .map_err(|error| format!("physical uplink enumeration worker failed: {error}"))?
+            .map(Some),
+        Err(_) => Ok(None),
     }
 }
 
@@ -270,7 +274,8 @@ async fn bounded_native_read<T: Send + 'static>(
 /// starts: it never consults `GetBestRoute2` (which then resolves to Tono's own adapter), and the
 /// same filter that keeps Wintun/virtual adapters out of the DIRECT choice applies to each row.
 /// Used only to decide whether the committed DIRECT binding still names a live uplink.
-pub(super) async fn usable_physical_uplinks() -> Result<Vec<String>, String> {
+/// `Ok(None)`: no answer within the read's budget (see [`bounded_native_read`]).
+pub(super) async fn usable_physical_uplinks() -> Result<Option<Vec<String>>, String> {
     #[cfg(windows)]
     {
         bounded_native_read(&UPLINK_READ_SLOT, UPLINK_READ_BUDGET, || -> Result<Vec<String>, String> {
@@ -288,7 +293,7 @@ pub(super) async fn usable_physical_uplinks() -> Result<Vec<String>, String> {
     }
     #[cfg(not(windows))]
     {
-        detect_physical_interface_route_command().await.map(|alias| vec![alias])
+        detect_physical_interface_route_command().await.map(|alias| Some(vec![alias]))
     }
 }
 
@@ -534,7 +539,7 @@ mod tests {
     use super::{bounded_native_read, first_up_hardware_alias};
 
     /// WIN-UPLINK-READER-HANG: the uplink read had no bound, so an IP Helper call that never
-    /// returned stopped the health monitor of a session with DIRECT. It now answers unknown within
+    /// returned stopped the health monitor of a session with DIRECT. It now gives no answer within
     /// its budget, and the hung worker keeps the only slot instead of a second worker starting.
     #[tokio::test]
     async fn hung_uplink_reader_is_bounded() {
@@ -557,8 +562,8 @@ mod tests {
         })
         .await;
         drop(resume);
-        assert!(matches!(hung, Ok(Err(_))), "a hung read must answer unknown within its budget");
-        assert!(second.is_err(), "the hung read still holds the only slot");
+        assert!(matches!(hung, Ok(Ok(None))), "a hung read must give no answer within its budget");
+        assert!(matches!(second, Ok(None)), "the hung read still holds the only slot");
         assert!(!second_ran.load(std::sync::atomic::Ordering::SeqCst), "no second native worker started");
     }
 

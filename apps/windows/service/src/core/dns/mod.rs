@@ -2201,6 +2201,7 @@ pub(crate) mod test_hooks {
     static SNAPSHOT_DELETE_PAUSED: Mutex<bool> = Mutex::new(false);
     static SNAPSHOT_DELETE_RESUMED: Condvar = Condvar::new();
     static SNAPSHOT_DELETE_REACHED_PAUSE: AtomicBool = AtomicBool::new(false);
+    static SNAPSHOT_SETTLE_WAITED: AtomicBool = AtomicBool::new(false);
 
     /// While paused, the snapshot delete stops on its blocking thread before the file is
     /// touched, until the test resumes it: an unlink stalled behind a filter driver.
@@ -2219,11 +2220,11 @@ pub(crate) mod test_hooks {
         }
     }
 
+    /// Arming or resuming the pause also clears what the last run observed.
     #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn set_snapshot_delete_paused(paused: bool) {
-        if paused {
-            SNAPSHOT_DELETE_REACHED_PAUSE.store(false, Ordering::Release);
-        }
+        SNAPSHOT_DELETE_REACHED_PAUSE.store(false, Ordering::Release);
+        SNAPSHOT_SETTLE_WAITED.store(false, Ordering::Release);
         *SNAPSHOT_DELETE_PAUSED
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = paused;
@@ -2234,6 +2235,20 @@ pub(crate) mod test_hooks {
     #[cfg(test)]
     pub(crate) fn snapshot_delete_reached_pause() -> bool {
         SNAPSHOT_DELETE_REACHED_PAUSE.load(Ordering::Acquire)
+    }
+
+    /// Record a DNS operation that found a snapshot delete still in flight and waits for it.
+    #[cfg(test)]
+    pub(crate) fn note_snapshot_settle(delete: &tokio::sync::Mutex<()>) {
+        if delete.try_lock().is_err() {
+            SNAPSHOT_SETTLE_WAITED.store(true, Ordering::Release);
+        }
+    }
+
+    /// Whether a DNS operation has waited for an in-flight delete since the pause was armed.
+    #[cfg(test)]
+    pub(crate) fn snapshot_settle_waited() -> bool {
+        SNAPSHOT_SETTLE_WAITED.load(Ordering::Acquire)
     }
 
     #[cfg(test)]
@@ -2808,6 +2823,8 @@ async fn remove_restored_snapshot() -> std::io::Result<()> {
 /// dropped it. Callers hold `DNS_OPERATION`, so once this returns no new delete can start until
 /// they release it, and every snapshot read and write they make lands after the late delete.
 async fn settle_snapshot_delete() -> Result<()> {
+    #[cfg(test)]
+    test_hooks::note_snapshot_settle(&SNAPSHOT_DELETE);
     match tokio::time::timeout(SNAPSHOT_DELETE_SETTLE_TIMEOUT, SNAPSHOT_DELETE.lock()).await {
         Ok(_settled) => Ok(()),
         Err(_) => bail!(

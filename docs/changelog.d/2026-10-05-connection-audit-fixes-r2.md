@@ -2,24 +2,30 @@
 - 归属：SHIP_PLAN §2 第 10 项冻结期修复（连接稳定性）。Windows App 与 Windows Service。G3 仍按决策 019 属于 0.0.75，不推进发布门。
 - 来源：叠在 [#1386](https://github.com/raydocs/tono/pull/1386)（`bff773d6`）之上 → 分支 `raydocs/fix-connection-audit-r2-20261005`，[#1395](https://github.com/raydocs/tono/pull/1395)（draft），尚未合入 main。四项都是 2026-10-04 审查记为 open 的项，Codex `gpt-6.1-sol` max 核验为 PARTIAL 或 NEEDS-HARDWARE，修法守核验给的边界。
 - 缺陷修复：
-  - WIN-DIRECT-RENEW-AMBIGUITY：DIRECT 租约心跳的两次续租都没拿到 Service 判决（管道忙、Service 重启、长 WFP 操作）时，App 立即放行普通流量并永久退出心跳，而 Service 的 60 秒租约仍有效。现在「没有判决」是类型化错误，只有它在距上次成功续租 40 秒内等下一拍重试；Service 拒绝或证明不符仍立即按原处置（非 strict 选择性放行，strict 保持拦截）。每拍的代次、策略、已连接检查照旧，Service 到期回收不变。
+  - WIN-DIRECT-RENEW-AMBIGUITY：DIRECT 租约心跳的两次续租都没拿到 Service 判决（管道忙、Service 重启、长 WFP 操作）时，App 立即放行普通流量并永久退出心跳，而 Service 的 60 秒租约仍有效。现在「没有判决」是类型化错误，只有它在宽限内等下一拍重试：宽限从上次获准续租的**发送**时刻起算 40 秒（Service 在发送之后才提交，租约至少到发送后 60 秒），本心跳还没有获准续租时不给宽限。Service 拒绝或证明不符仍立即按原处置（非 strict 选择性放行，strict 保持拦截）。每拍的代次、策略、已连接检查照旧，Service 到期回收不变。
   - WIN-DNS-SNAPSHOT-LATE-DELETE：DNS 恢复被 40 秒预算丢弃时，已交给阻塞线程的按路径删除仍会迟到执行；后继 enable 若已在同一路径写入新快照，新快照会被删掉，用户原始 DNS 无从恢复。现在删除线程持有一把独立锁，直到删除真正返回；enable 和 restore 在 DNS 锁内、读快照之前最多等它 5 秒，超时就失败关闭（enable 失败；restore 失败，保护维持原状）。DNS 主锁不交给删除线程。
-  - WIN-UPLINK-READER-HANG（防御性）：带 DIRECT 的健康监控读取物理上行的原生调用没有期限，一旦挂起，整个监控停住。现在 5 秒内没返回就按「未知」处理：不保留 DIRECT 原地会话，照现有失败处置（非 strict 按决策 030/031 选择性放行，strict 受保护重连）。进程内同时最多一个这类原生读取：挂住的那个占着唯一名额，后续读取立即答「未知」，不会每拍多留一个挂起线程。读不出时记一条警告。是否真会挂起仍需实机。
+  - WIN-UPLINK-READER-HANG（防御性）：带 DIRECT 的健康监控读取物理上行的原生调用没有期限，一旦挂起，整个监控停住。现在读取 5 秒内没返回，或更早的读取还占着进程内唯一的名额，都算「没有回答」：没有回答不是绑定丢失的证据，所以保持会话（不放行），该代次的监控在之后的空闲拍再读，读到确认丢失才照现有处置重建（非 strict 按决策 030/031 选择性放行，strict 受保护重连）；原生读取报错仍照旧重建。挂住的读取占着唯一名额，后续读取立即答「没有回答」，不会每拍多留一个挂起线程。是否真会挂起仍需实机。
 - 新增/优化（不放宽任何门）：
   - WIN-RESUME-FIRST-RUNG：重启后接管已证明的同属主运行时（传统已证明启动恢复），要先等退避首档 2 秒；旁边的更新接管和崩溃恢复连接都是立即开始。现在这条路径的首次尝试立即开始，首档照样计入阶梯和预算，失败后从第二档（5 秒）继续。准入、登记、取消和决策 025/026 的门控不变。
 - 工程与测试：每个行为一条窄回归。
-  - Windows App：`connection::direct::tests::transport_ambiguity_has_bounded_grace`、`connection::platform::tests::hung_uplink_reader_is_bounded`、`connection::reconnect::tests::proven_startup_resume_skips_the_first_rung`。
-  - Windows Service：`core::dns::tests::dropped_restore_delete_spares_successor_snapshot`，配一个新测试钩子：删除线程在动文件之前暂停。
+  - Windows App：`connection::direct::tests::transport_ambiguity_grace_counts_from_the_granted_send`、`connection::platform::tests::hung_uplink_reader_is_bounded`、`connection_health::tests::unanswered_uplink_read_keeps_a_proven_session`、`connection::reconnect::tests::proven_startup_resume_skips_the_first_rung`。
+  - Windows Service：`core::dns::tests::dropped_restore_delete_spares_successor_snapshot`，配测试钩子：删除线程在动文件之前暂停；记录 DNS 操作在等删除。时序全由钩子驱动，不靠固定等待。
   - `tono_renew_direct_runtime_reload` 的最终错误改为类型 `DirectRenewalAmbiguous`，文本不变，日志与遥测保持连续。
 - 验证：
   - MacBook 上 `git diff --check` 无输出。
-  - 按 2026-09-14 所有者规定，MacBook 不跑原生 cargo，本次回归只在 hosted CI 运行，结果待补。
+  - 按 2026-09-14 所有者规定，MacBook 不跑原生 cargo，本次回归只在 hosted CI 运行。
+  - 第一版（`8297ddea`）：hosted `ci-gate` run 37380942126 全绿，日志确认 4 条新回归 ok（Windows App Rust 669 过，Service 480 过）。修前失败分支 `red/conn-audit-r2-20261005`（`6d544cb3`，四处行为改回旧逻辑、测试不动）：Windows CI 37381000518 中 App Rust 恰好 3 失败/666 过，Service 恰好 1 失败/479 过。
+  - 审查修复后的结果待补。
   - 没有实机验证。
+- 独立审查：Codex `gpt-6.1-sol` high 静态审查 `bff773d6...8297ddea`，2 个 major、2 个 minor，均在本 PR 修复：
+  - major：DIRECT 宽限从回复到达算，回复慢时可越过 Service 租约 → 改从获准续租的发送时刻算，未获准前不给宽限。
+  - major：上行读取的名额被旧会话挂住的读取占着时，健康的新会话会按「未知」被放行 → 没有回答不再作为放行依据。
+  - minor：DNS 回归靠固定等待猜时序 → 改由钩子驱动；minor：该测试断言失败时清理不全 → 失败路径也恢复并等删除返回，断言前先重置状态。
 - 候选/发布：仅源码，无新候选。
 - 剩余限制：
   - DIRECT：宽限只覆盖没有 Service 判决的情况。单次续租 IPC 自身最长约 95 秒，超过宽限后照旧处置。
   - DNS：删除真卡住时，之后每次 enable/restore 都等 5 秒后失败（有界，失败关闭），直到删除返回。卸载时的快照隔离改名未加等待，那里只可能碰到迟到删除自己的旧快照。
-  - 上行读取：5 秒期限是推定值（Codex 建议 2 秒；取更长是因为超时会走放行处置，正常读取只需毫秒），挂起是否真实发生、持续多久需实机。
+  - 上行读取：5 秒期限是推定值（Codex 建议 2 秒，正常读取只需毫秒），挂起是否真实发生、持续多久需实机。读取一直不回答时会话保持：若 DIRECT 绑定的网卡确已消失，直连流量会一直失败到读取恢复（不泄漏；其间的网络变化同样得不到回答）。
   - 冻结期不合并。合并前仍需 jev-route 范围审查和 exact-head `ci-gate`。
 - 同轮仍 open（需所有者决定，未改代码）：
   - WIN-DNS-RACE-MASKS-SYSTEM：若持续的系统 DNS 失败要让连接失败，会推翻 SHIP_PLAN 第 47 行的所有者快修和 G1.1（Win10 必须过 securingDNS）。

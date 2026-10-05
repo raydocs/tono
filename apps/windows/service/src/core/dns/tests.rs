@@ -1687,45 +1687,90 @@
     /// WIN-DNS-SNAPSHOT-LATE-DELETE: a restore dropped by its budget while its snapshot delete
     /// was stalled left that path-based delete running. The successor `enable` wrote its own
     /// snapshot to the same path, and the late delete then removed it, losing the originals.
+    /// Hooks, not timing, drive each step: the restore is dropped once its delete has stopped,
+    /// and the delete resumes once the successor has finished or is waiting for it.
     #[tokio::test]
     #[serial]
     async fn dropped_restore_delete_spares_successor_snapshot() -> Result<()> {
-        struct ResumeOnDrop;
-        impl Drop for ResumeOnDrop {
+        /// Resume a stalled delete and wait for it to return, even when an assertion fails, so
+        /// it cannot remove a file the next test writes.
+        struct SettleOnDrop;
+        impl Drop for SettleOnDrop {
             fn drop(&mut self) {
                 test_hooks::set_snapshot_delete_paused(false);
+                for _ in 0..500 {
+                    if SNAPSHOT_DELETE.try_lock().is_ok() {
+                        break;
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
             }
         }
+        const WATCHDOG: std::time::Duration = std::time::Duration::from_secs(10);
+        const POLL: std::time::Duration = std::time::Duration::from_millis(5);
 
         reset_dns_state().await;
         seed_snapshot(vec![adapter("{A}", Some("1.1.1.1"))]).await?;
-        let _resume = ResumeOnDrop;
+        let settle = SettleOnDrop;
         test_hooks::set_snapshot_delete_paused(true);
 
-        let dropped =
-            tokio::time::timeout(std::time::Duration::from_millis(500), restore_protected()).await;
-        assert!(dropped.is_err(), "the stalled delete must outlive the restore's budget");
-        assert!(
-            test_hooks::snapshot_delete_reached_pause(),
-            "the restore was dropped while its delete was in flight"
-        );
-
-        let successor = tokio::time::timeout(std::time::Duration::from_secs(10), async {
-            let (enabled, ()) = tokio::join!(enable(), async {
-                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-                test_hooks::set_snapshot_delete_paused(false);
-            });
-            enabled
+        // Run the restore until its delete has stopped at the pause, then drop it there, as its
+        // budget would.
+        let mut restore = Box::pin(restore_protected());
+        let reached = tokio::time::timeout(WATCHDOG, async {
+            loop {
+                tokio::select! {
+                    biased;
+                    finished = &mut restore => break Err(format!("{finished:?}")),
+                    () = tokio::time::sleep(POLL) => {
+                        if test_hooks::snapshot_delete_reached_pause() {
+                            break Ok(());
+                        }
+                    }
+                }
+            }
         })
         .await;
-        // Give a late delete time to land before looking for the successor's snapshot.
-        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-        let kept = snapshot_path().exists();
+        drop(restore);
+
+        let outcome = if matches!(reached, Ok(Ok(()))) {
+            let done = AtomicBool::new(false);
+            let successor = tokio::time::timeout(WATCHDOG, async {
+                let (enabled, ()) = tokio::join!(
+                    async {
+                        let enabled = enable().await;
+                        done.store(true, Ordering::Release);
+                        enabled
+                    },
+                    async {
+                        while !done.load(Ordering::Acquire) && !test_hooks::snapshot_settle_waited() {
+                            tokio::time::sleep(POLL).await;
+                        }
+                        test_hooks::set_snapshot_delete_paused(false);
+                    }
+                );
+                enabled
+            })
+            .await;
+            // Taking the delete guard proves the late delete has returned.
+            let delete_returned = tokio::time::timeout(WATCHDOG, SNAPSHOT_DELETE.lock()).await.is_ok();
+            Some((successor, delete_returned, snapshot_path().exists()))
+        } else {
+            None
+        };
+        drop(settle);
         reset_dns_state().await;
+
+        assert!(
+            matches!(reached, Ok(Ok(()))),
+            "the restore must stop at its in-flight delete: {reached:?}"
+        );
+        let (successor, delete_returned, kept) = outcome.expect("the restore reached its delete");
         assert!(
             matches!(successor, Ok(Ok(_))),
             "the successor enable must succeed: {successor:?}"
         );
+        assert!(delete_returned, "the late delete must return once resumed");
         assert!(kept, "the late delete must not remove the successor's snapshot");
         Ok(())
     }

@@ -221,6 +221,50 @@ pub fn may_recover_in_place(
         })
 }
 
+/// The hardware uplink read behind [`in_place_verdict`].
+#[derive(Debug, Clone, Copy)]
+pub enum UplinkRead<'a> {
+    /// The read answered with these usable uplinks.
+    Answered(&'a [String]),
+    /// The native read failed.
+    Failed,
+    /// No answer within the read's budget, or an earlier read still holds the only slot.
+    Unanswered,
+}
+
+/// What the in-place check decided about a session.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InPlaceVerdict {
+    /// The tunnel is proven and any committed DIRECT binding names a usable uplink.
+    Keep,
+    /// The tunnel is not proven, or the committed binding is gone or could not be read.
+    Rebuild,
+    /// The tunnel is proven, but the uplink read gave no answer. That is not evidence the binding
+    /// is gone, so the session stays and the binding is read again later.
+    Unanswered,
+}
+
+/// [`may_recover_in_place`] for a read that can also give no answer. Only an answer, or a read
+/// that failed, can rebuild (and so release) a session whose tunnel is proven.
+pub fn in_place_verdict(
+    tunnel_proven: bool,
+    committed_direct_interface: Option<&str>,
+    read: UplinkRead<'_>,
+) -> InPlaceVerdict {
+    let uplinks = match read {
+        UplinkRead::Answered(uplinks) => Some(uplinks),
+        UplinkRead::Unanswered if tunnel_proven && committed_direct_interface.is_some() => {
+            return InPlaceVerdict::Unanswered;
+        }
+        UplinkRead::Failed | UplinkRead::Unanswered => None,
+    };
+    if may_recover_in_place(tunnel_proven, committed_direct_interface, uplinks) {
+        InPlaceVerdict::Keep
+    } else {
+        InPlaceVerdict::Rebuild
+    }
+}
+
 /// What one [`handle_network_change`] call did to the session.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NetworkChangeOutcome {
@@ -562,6 +606,26 @@ mod tests {
         }
         assert_eq!(audited, 1);
         assert_eq!(stored, Some(5));
+    }
+
+    /// WIN-UPLINK-READER-HANG (review): an uplink read that gave no answer (an earlier read still
+    /// holding the only slot, or this one out of time) is not evidence that DIRECT lost its
+    /// adapter. It must not rebuild, and so release, a session whose tunnel is proven; a read
+    /// that failed still rebuilds, as before.
+    #[test]
+    fn unanswered_uplink_read_keeps_a_proven_session() {
+        use super::{InPlaceVerdict, UplinkRead, in_place_verdict};
+        let uplinks = vec!["Ethernet".to_string()];
+        assert_eq!(
+            in_place_verdict(true, Some("Ethernet"), UplinkRead::Unanswered),
+            InPlaceVerdict::Unanswered
+        );
+        assert_eq!(in_place_verdict(true, Some("Ethernet"), UplinkRead::Failed), InPlaceVerdict::Rebuild);
+        assert_eq!(
+            in_place_verdict(true, Some("Ethernet"), UplinkRead::Answered(uplinks.as_slice())),
+            InPlaceVerdict::Keep
+        );
+        assert_eq!(in_place_verdict(false, Some("Ethernet"), UplinkRead::Unanswered), InPlaceVerdict::Rebuild);
     }
 
     #[test]
