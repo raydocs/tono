@@ -153,10 +153,10 @@ export default function CustomersPage({
     const needle = query.trim().toLowerCase();
     return selectByStage(table, stage).filter((row) => {
       const person = row.customer ?? row.invite;
-      return !needle || [privacy.email(person.email), privacy.wechat(person.wechatId), row.customer?.userId ?? '']
+      return !needle || [person.email, person.wechatId ?? '', row.customer?.userId ?? '']
         .some((value) => value.toLowerCase().includes(needle));
     });
-  }, [table, stage, query, privacy]);
+  }, [table, stage, query]);
   const picked = useMemo(
     () => shown.map((row) => row.customer).filter((row): row is CustomerSummaryDto => row !== null),
     [shown],

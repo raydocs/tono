@@ -43,3 +43,13 @@ MacBook，本工作树；本轮日志保留于 `/tmp/tono-ops-consolidation/`：
 - 未验证生产 Access、真实事故处理、Telegram 真实告警或两周日常使用证据；未改变采集器或告警协议，未执行生产 D1 写/部署。生产切换须完成这些退役条件及全局审查/CI/备份门禁。对象工作区、服务端分页、报表目录和更多操作闭环仍是下一批，不冒称已交付。
 
 截图是合成夹具，不含生产数据：[桌面](evidence/2026-10-04-console-consolidation/traffic-desktop.png)、[手机](evidence/2026-10-04-console-consolidation/traffic-phone.png)。
+
+## 2026-10-05 · 退役续接
+
+- 精确源码 `50a94765a49685e159a7df7dae174bfe962f31e8` 的 [ci-gate run 37217958463](https://github.com/raydocs/tono/actions/runs/37217958463) 已成功（2026-10-04 16:55:34 UTC）；四个行为 E2E shard 及相关服务/macOS jobs 成功。不是 macOS 像素基线验证；后续提交须读取其自己的 CI。
+- 从更新后的 main `a97c963e` 独立检出按 main 策略路由，决定 `df8c4f2d` 为 `dual_cross_family`。只读全 diff 审查 run `937f6bab-87c8-4de9-83db-436abc447294`：Opus 5.5/high 和 GPT-6.1-sol/high finder 都成功、无替换；交叉 verifier 实际 medium。结果 `PASSED`，0 major 或以上阻断。该正式审查替代前轮指定模型未完成的审查记录；不改写前轮状态。
+- 本地验证后修正四条确认 minor（三个根因）：客户/节点旧 q 的搜索字段范围变窄时给通用提示；隐私模式搜索原值但展示仍脱敏；不可迁移筛选只留下 `legacyFilter=1` 而非私人原值。续修最终现有44文件/345测试、类型197/219、lint通过，构建首屏204.6KB/全量317.0KB gzip，预算通过。Node/Vite 加真实 React/jsdom 运行 before 为 `oldSearchWarning:false, privateFilterRetainsEmail:true, privacySearchRows:0`，after 为 `true,false,1`、`privacyDisplayMasked:true`。初次 SSR/CJS 工具缝失败，改为真实 DOM 挂载后实际复现，不改产品适配测试环境。未新增 UI 测试文件或 Playwright 用例。
+- 角色组合问题被反驳：当前 viewer/operator/owner 均同时有 nodes.read 和 customers.read，不存在审查假设的单权限角色。两条 suggestion 留作工程限制：普通用量榜→对象跳转没有额外的显式返回窗口上下文（浏览器后退可用；旧对象深链另有返回入口）；未来若增加无扩展名的顶层静态资源，应收窄现代页面重定向正则。不是当前资产故障。
+- 所有者在本会话确认两周日常使用/真实事故完成，并指定先邮件、Telegram 后补，见[决定 057](../decisions/057-2026-10-05-ops-retirement-email-alerts.md)。这是 owner 确认，尚无可引用的事故日期/笔录；不制造历史证据。生产只读核查当时规则和投递均为空，942 条事故中无 ack；这些数据不能单独证明 UI 使用情况。
+- 邮件复用现有 Resend 配置（只检查 secret 名称存在，不读取/打印值）。在维护者的 `tono` profile 中先导出并上传 D1：`backups/control-plane-d1/2026-10-05T17:47:51Z.sql.gz` 与 `.sha256`，压缩大小 6,388,109 bytes，SHA-256 `b691557923abfb5f14fd12523487dc2f705b5f6805b7eae6463a75108b988a53`，本地 checksum 检查 OK。之后按本任务配置 `ops-email-owner-20261005`：enabled、email、severe、open、delay/cooldown 各 900 秒；收件人由 owner 提供，不进仓库。窄写入规则、两条注明 D1 操作来源的 system 审计，以及一条当前真实 severe/open 事故的初始 outbox；没有新建假事故。实读规则正确，投递初始 `pending/attempts=0`；后续只读确认 `sent/attempts=1/response_code=200/sent_at=2026-10-05 17:53:02 UTC/error=null`。这是 Resend 接受投递的回执，不是收件箱签收。
+- 生产 Worker 仍为 `57c1c64cf4241bd6a961ff29b15720bbf2a4b162`，未部署此 PR。维护检出存在他人的 AGENTS/BUILD_AND_TEST 冲突，未修改或清除；浏览器 space 17 停在 Cloudflare Access 登录页并已实际 handOff，未进入私有 UI。尚未合并/部署，续修 delta 审查、最新 head CI、main 合批审查及可用的干净维护检出仍须满足。

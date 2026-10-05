@@ -2,6 +2,10 @@
 
 这份是把 `ops/platform` 分支推到生产的操作清单。生产步骤在绑定 `tono` wrangler profile 的维护者 `main` 检出里执行（§0.3 的 preview 演练记录是在 spookfish 目录跑的）（条件见 [AGENTS.md](../../AGENTS.md)）；hub 的 SSH 与 Telegram bot token 由老板提供。
 
+2026-10-05：§0 的部署与演练是历史证据；当前源码仅构建 `ops-console`，不再保留旧 UI。
+本次退役的实现、CI、独立审查及生产切换门禁以[收敛记录](console-consolidation-2026-10-04.md)为准，
+不能把当年的上线步骤当成今日已完成的退役验收。
+
 ## 0. 上线前的状态
 
 - 分支 `ops/platform`（worktree `~/orca/workspaces/tono/spookfish`），未推送。
@@ -105,12 +109,13 @@ npx wrangler d1 migrations apply tono-control-plane-ops-preview --remote --confi
 ## 2. 合并与部署
 
 1. 开 PR：`ops/platform` → `main`。PR 描述用 `docs/ops/rollout-ops2.md` 的第 0 节。
-2. 合并后在 `main` 上跑既有脚本：`tooling/scripts/deploy-control-plane-main.sh`。脚本会先应用生产 D1 迁移，再构建旧控制台与新控制台（`console:build`），最后部署两个 Worker。
+2. 审查与退役门禁满足、合并及 main 合批审查完成后，在干净、已推送且绑定 `tono` profile 的维护者 `main` 检出中先导出 D1，再运行 `tooling/scripts/deploy-control-plane-main.sh`（或控制面的 `npm run deploy`）。脚本先运行检查和唯一的 `console:build`，然后应用迁移，最后部署两个 Worker；有新迁移须先在 preview 演练。
 3. 部署后核对：
 
 ```sh
 curl -s https://api.afk.ccwu.cc/api/v1/system/version
-# 浏览器打开 https://admin.afk.ccwu.cc/ops2/ ，右上角 数据源 胶囊应显示时间；/ops/ 旧后台不受影响
+# 已登录 Access 的浏览器打开 https://admin.afk.ccwu.cc/ops2/，检查数据时效与两 Worker SHA 对齐
+# 本次退役部署后 /ops/ 应转到 /ops2/ 并迁移旧 hash；旧 hashed assets 应 404，不再渲染旧 UI
 ```
 
 ## 3. 新密钥与变量（两个 Worker 都要）

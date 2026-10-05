@@ -1,5 +1,10 @@
 # 旧后台 `/ops/` 与新后台 `/ops2/` 功能对照
 
+历史功能盘点：下表引用的是旧 UI 尚在时的文件与缺口，不是当前源码待办。
+2026-10-04 起旧 UI 已在 [#1377](https://github.com/raydocs/tono/pull/1377) 源码中删除；
+现行路由映射、用量迁入及上线门禁见[收敛记录](console-consolidation-2026-10-04.md)。
+共享库和 legacy API 仍有消费者，不随旧页面删除。
+
 对照范围：旧后台 `services/control-plane/admin/src`（六页：总览 / 故障 / 服务器 / 客户 / 流量 / 目录和规则）对 新后台 `services/ops-console/src`（今天 / 节点 / 客户 / 客户端 / 设置）。接口前缀一律 `/api/v1/ops/`。路由分三处：legacy 在 `services/control-plane/src/ops/router.ts` + `legacy-handlers/`；两扇门共用写在 `shared-admin/`；v1 合同在 `handlers/dispatch.ts`（`OPS_V1_ROUTES`）。`src/index.ts` 先走 `sharedAdministrativeResource`，再 `opsRoutes`。
 
 新后台已有、旧后台没有的面（客户端发布、告警规则、商家账号、直连候选、事故 ack/snooze）不列入缺口——那是引擎侧增量，不是替换障碍。

@@ -27,8 +27,9 @@ export function migrateLegacyRoute() {
   // Old cohort predicates differ from the engine's verdicts. Never pretend
   // they are equivalent, and never silently show an unfiltered list.
   const appliedFocus = !user && !node && ((old.page === 'users' && focus === 'homes') || (old.page === 'control' && focus === 'policy'));
-  if (focus && !appliedFocus) url.searchParams.set('legacyFilter', focus);
-  if (query && old.page !== 'users' && old.page !== 'monitor') url.searchParams.set('legacyFilter', query);
+  // Search no longer includes every old customer/node field. Keep supported
+  // queries, but explain the narrower scope without storing private values twice.
+  if ((focus && !appliedFocus) || query) url.searchParams.set('legacyFilter', '1');
   url.hash = `#/${path}`;
   window.history.replaceState({}, '', url);
 }
