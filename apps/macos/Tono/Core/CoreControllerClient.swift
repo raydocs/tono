@@ -338,7 +338,7 @@ actor CoreControllerClient {
         budgetMs: UInt64,
         intervalMs: UInt64
     ) -> UInt64 {
-        let fastPollCeilingMs: UInt64 = 2_000
+        let fastPollCeilingMs: UInt64 = 500
         let fastPollIntervalMs = min(UInt64(50), intervalMs)
         return min(
             sleptMs < fastPollCeilingMs ? fastPollIntervalMs : intervalMs,

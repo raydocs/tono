@@ -175,8 +175,8 @@ pub fn next_network_events_counter(
 /// Whether this tick records a `NetworkChange`: only the tick that accepts the change. A
 /// change the debounce holds keeps its counter pending and is seen again on the next tick, so
 /// recording the held tick as well logged one change twice.
-pub const fn network_change_audited(network_changed: bool, invalidated: bool) -> bool {
-    network_changed && invalidated
+pub const fn network_change_audited(network_changed: bool, _invalidated: bool) -> bool {
+    network_changed
 }
 
 /// A core-identity change inside the debounce window must stay visible.

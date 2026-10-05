@@ -282,6 +282,7 @@ fn start_native_observation(
 /// The uplink Windows routes through: lowest effective metric, ties by LUID. Its
 /// metric is left out: Wi-Fi link-rate changes move the automatic metric with no
 /// move of the network, and each such wake used to restart the ladder.
+#[allow(dead_code)]
 fn preferred_uplink(snapshot: &PhysicalNetworkSnapshot) -> Option<(u64, u32, u32)> {
     snapshot
         .iter()
@@ -294,15 +295,14 @@ fn preferred_uplink(snapshot: &PhysicalNetworkSnapshot) -> Option<(u64, u32, u32
 /// locks, and cannot spawn a worker on every tick. Samples remain memory-only.
 #[derive(Default)]
 struct NetworkWatch {
-    uplink: Option<Option<(u64, u32, u32)>>,
+    snapshot: Option<PhysicalNetworkSnapshot>,
     pending: Option<tokio::task::JoinHandle<Result<PhysicalNetworkSnapshot, String>>>,
 }
 
 impl NetworkWatch {
     fn observe(&mut self, snapshot: PhysicalNetworkSnapshot) -> bool {
-        let uplink = preferred_uplink(&snapshot);
-        let changed = self.uplink.as_ref().is_some_and(|previous| previous != &uplink);
-        self.uplink = Some(uplink);
+        let changed = self.snapshot.as_ref().is_some_and(|previous| previous != &snapshot);
+        self.snapshot = Some(snapshot);
         changed
     }
 

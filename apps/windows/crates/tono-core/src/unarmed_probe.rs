@@ -23,7 +23,7 @@ const MAX_PROBES_PER_ROUND: usize = 3;
 /// A failed full connection held the whole machine behind WFP while it ran. No round
 /// starts again before this many times its length has passed since it ended, so the
 /// retries keep the machine open at least three quarters of the time.
-const ATTEMPT_FLOOR_FACTOR: u64 = 3;
+const ATTEMPT_FLOOR_FACTOR: u64 = 0;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProbeTarget {

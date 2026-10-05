@@ -576,7 +576,12 @@ final class AppState {
             // probe back. The loop stays unarmed: no PF, no tunnel.
             if unarmedReconnectAwaitsNetwork {
                 if connectionCoordinator.unarmedReconnectOwner?.restarted != true {
-                    scheduleUnarmedNetworkKick()
+                    LocalTrafficAudit.shared.recordEvent(
+                        "unarmed_reconnect_network_kick",
+                        details: auditProtectionDetails()
+                    )
+                    unarmedReconnectAttempt = 0
+                    scheduleUnarmedReconnect(afterNetworkChange: true)
                 }
                 return
             }
@@ -968,23 +973,6 @@ final class AppState {
                         )
                     }
                     continue
-                }
-                // macOS names the new primary service a moment after wake. A
-                // connect before that fails on "no network service" and, with
-                // PF armed, takes the automatic release, so a quick wake ended
-                // open. Hold the barrier up to eight seconds for the service;
-                // then connect and let its ordinary failure handling run.
-                let generation = self.connectionCoordinator.protectionOperationGeneration
-                let serviceDeadline = ContinuousClock.now + .seconds(8)
-                while await self.protectionAudits.primaryNetworkService() == nil,
-                      ContinuousClock.now < serviceDeadline {
-                    try? await Task.sleep(for: .milliseconds(250))
-                    guard !Task.isCancelled else { return }
-                }
-                guard !Task.isCancelled else { return }
-                guard self.connectionCoordinator.protectionOperationGeneration == generation else {
-                    self.connectionCoordinator.wakeRecoveryTask = nil
-                    return
                 }
                 guard !self.isConnected, !self.isConnecting,
                       !self.isDisconnecting else {

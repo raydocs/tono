@@ -94,10 +94,6 @@ pub async fn refine_before_arm(state: &Arc<TonoState>, node: ValidatedNode) -> V
     .ok()
     .and_then(|result| result.ok())
     .is_some();
-    if reachable {
-        // The pre-tunnel proof dials this same endpoint next; this answer stands in for it.
-        state.unarmed_proofs.lock().remember(&address.to_string(), now_ms());
-    }
     let mut inner = state.lock().await;
     heal::note_health(&mut inner.heal, &node.name, reachable, now_ms());
     if reachable {

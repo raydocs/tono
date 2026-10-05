@@ -324,17 +324,7 @@ pub(super) async fn preflight_dns_listener_unless_resuming<T>(
     preflight: impl std::future::Future<Output = Result<(), String>>,
     resume: impl std::future::Future<Output = Option<T>>,
 ) -> (Result<(), String>, Option<T>) {
-    tokio::pin!(preflight, resume);
-    tokio::select! {
-        status = &mut resume => match status {
-            Some(status) => (
-                Err("loopback:53 probe stopped; this attempt proved the active runtime that holds it".to_owned()),
-                Some(status),
-            ),
-            None => (preflight.await, None),
-        },
-        verdict = &mut preflight => (verdict, resume.await),
-    }
+    tokio::join!(preflight, resume)
 }
 
 /// §6.4: poll the mihomo controller `/version` for at most 15 seconds. Each localhost request is

@@ -1910,7 +1910,6 @@ extension AppState {
             // node/core path or the real TUN data path is proven dead. The
             // city hop takes the same gate as the connect path (G2.8 off).
             if (failure.code == .coreExitUnreachable || failure.code == .tunRouteUnavailable),
-               CatalogCityFailover.shouldRotate(after: failure.code),
                await self.attemptAutomaticCloudFailover() {
                 state.consecutiveHealthFailures = 0
                 self.healthCounters = ProtectedHealthCounters()

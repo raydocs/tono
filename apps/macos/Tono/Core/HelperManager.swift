@@ -916,12 +916,10 @@ nonisolated struct HelperManager {
         service: String,
         send: (([String: String]) throws -> (status: Int, body: Data))? = nil
     ) throws {
-        let envelope = try retryingHelperRefusal {
-            let object = ["service": service]
-            let result = try send?(object)
-                ?? sendJSON(method: "POST", path: "/dns/enable", object: object)
-            return try requireSuccess(result, operation: "enable protected DNS")
-        }
+        let object = ["service": service]
+        let result = try send?(object)
+            ?? sendJSON(method: "POST", path: "/dns/enable", object: object)
+        let envelope = try requireSuccess(result, operation: "enable protected DNS")
         guard envelope.configured == true,
               envelope.snapshotPresent != false,
               envelope.service == service else {

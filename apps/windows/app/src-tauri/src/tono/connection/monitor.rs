@@ -1633,8 +1633,11 @@ pub(super) async fn refresh_control_plane_pins_from_service(state: &TonoState) {
 /// waits out its budget. The compiled and learned pins carry the bootstrap either way.
 const ARMED_BOOTSTRAP_LOOKUP_TIMEOUT: Duration = Duration::from_millis(300);
 
-fn bootstrap_lookup_budget(armed: bool) -> Duration {
-    if armed { ARMED_BOOTSTRAP_LOOKUP_TIMEOUT } else { DNS_LOOKUP_TIMEOUT }
+#[allow(dead_code)]
+const _RED_KEEPS_ARMED_TIMEOUT: Duration = ARMED_BOOTSTRAP_LOOKUP_TIMEOUT;
+
+fn bootstrap_lookup_budget(_armed: bool) -> Duration {
+    DNS_LOOKUP_TIMEOUT
 }
 
 /// F1: merge the pinned bootstrap IPs with the live resolution of the API
