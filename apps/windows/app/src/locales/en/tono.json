@@ -744,6 +744,16 @@
     "firstRun": "Close the window, protection stays on. Disconnect from the system tray.",
     "telemetry": {
       "aiToday": "AI today {{total}}"
+    },
+    "retry": {
+      "checking": "Direct traffic is blocked. Reading the retry schedule.",
+      "unscheduled": "Direct traffic is blocked. No automatic retry is scheduled. Retry now or restore normal internet.",
+      "scheduled": "Direct traffic is blocked. Retrying automatically in {{seconds}} seconds.",
+      "now": "Direct traffic is blocked. Retrying automatically."
+    },
+    "recovery": {
+      "scheduled": "Automatic retry scheduled",
+      "unscheduled": "Automatic retry not scheduled"
     }
   }
 }

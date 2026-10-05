@@ -72,3 +72,16 @@ export const useHomeTiming = (
     minutes: protectedNow && duration.owner === owner ? duration.minutes : 0,
   }
 }
+
+/** Same deadline semantics for the home sentence and the retained progress record. */
+export const useRetryCountdown = (deadline: number | null | undefined) => {
+  const [now, setNow] = useState(Date.now)
+  useEffect(() => {
+    if (deadline == null) return
+    const timer = window.setInterval(() => setNow(Date.now()), 1000)
+    return () => window.clearInterval(timer)
+  }, [deadline])
+  return deadline == null
+    ? null
+    : Math.max(0, Math.ceil((deadline - now) / 1000))
+}

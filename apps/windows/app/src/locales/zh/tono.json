@@ -744,6 +744,16 @@
     "firstRun": "关掉窗口，保护还在。断开在右下角托盘。",
     "telemetry": {
       "aiToday": "AI 今天 {{total}}"
+    },
+    "retry": {
+      "checking": "已拦住直连。正在读取重试安排。",
+      "unscheduled": "已拦住直连。没有安排自动重试，可以立即重试或恢复正常网络。",
+      "scheduled": "已拦住直连，{{seconds}} 秒后自动重试。",
+      "now": "已拦住直连，正在自动重试。"
+    },
+    "recovery": {
+      "scheduled": "已安排自动重试",
+      "unscheduled": "未安排自动重试"
     }
   }
 }

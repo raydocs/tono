@@ -23,7 +23,11 @@ import { TONO_FONT_STACK } from '@/tono-ui/theme'
 
 import { useHomeDialog } from './home-focus'
 import { HomeLines } from './home-lines'
-import { HOME_CONNECT_TIMES, useHomeTiming } from './home-timing'
+import {
+  HOME_CONNECT_TIMES,
+  useHomeTiming,
+  useRetryCountdown,
+} from './home-timing'
 import { nodeCityLabel, nodeCityParts } from './node-meta'
 
 import './sea-home.css'
@@ -112,6 +116,7 @@ export const SeaHome = ({
   const { t } = useTranslation()
   const navigate = useNavigate()
   const rootRef = useRef<HTMLDivElement>(null)
+  const attentionRef = useRef<HTMLDivElement>(null)
   const actionsRef = useRef<HTMLDivElement>(null)
   const columnRef = useRef<HTMLDivElement>(null)
   const [sheetHeight, setSheetHeight] = useState(240)
@@ -132,6 +137,7 @@ export const SeaHome = ({
     queryKey: tonoConnectProgressQueryKey,
     queryFn: tonoConnectProgress,
   })
+  const retrySeconds = useRetryCountdown(progress?.nextRetryAtMs)
   const releasedFailure = state === 'notConnected' && progress?.error != null
   const failed = failedAction || releasedFailure
   const phase: SeaPhase = protectedNow
@@ -178,8 +184,15 @@ export const SeaHome = ({
         : state === 'protectedOffline'
           ? t(
               hasLiveProtection(status)
-                ? 'tono.dashboard.protectedOfflineDescription'
+                ? progress == null
+                  ? 'tono.home.retry.checking'
+                  : retrySeconds == null
+                    ? 'tono.home.retry.unscheduled'
+                    : retrySeconds > 0
+                      ? 'tono.home.retry.scheduled'
+                      : 'tono.home.retry.now'
                 : 'tono.progress.protectionUnknownBody',
+              { seconds: retrySeconds },
             )
           : state === 'connected'
             ? protectedNow
@@ -226,6 +239,11 @@ export const SeaHome = ({
       const available = Math.max(0, bounds.bottom - actions.bottom - 38)
       // eslint-disable-next-line @eslint-react/set-state-in-effect -- measured layout constraint is committed before paint, not an animation loop
       setSheetHeight(Math.min(310, bounds.height * 0.42, available))
+      if (attentionRef.current)
+        rootRef.current?.style.setProperty(
+          '--tono-home-attention-room',
+          `${Math.max(0, bounds.bottom - 60 - attentionRef.current.getBoundingClientRect().top)}px`,
+        )
     }
     place()
     const observer = new ResizeObserver(place)
@@ -233,6 +251,7 @@ export const SeaHome = ({
       rootRef.current,
       columnRef.current,
       actionsRef.current,
+      attentionRef.current,
     ])
       if (element) observer.observe(element)
     return () => observer.disconnect()
@@ -327,7 +346,7 @@ export const SeaHome = ({
           left: 56,
           top: '22%',
           width: 'min(48%, 440px)',
-          maxHeight: 'calc(78% - 76px)',
+          maxHeight: 'calc(78% - 60px)',
           display: 'flex',
           flexDirection: 'column',
         }}
@@ -336,6 +355,7 @@ export const SeaHome = ({
           aria-live="polite"
           aria-atomic="true"
           className="tono-home__title"
+          data-long={longTitle}
           style={{ fontSize: longTitle ? 48 : 64 }}
         >
           <TextSwap text={title} />
@@ -380,9 +400,8 @@ export const SeaHome = ({
             >
               {t('tono.progress.restore')}
             </button>
-          ) : (
-            lineChip
-          )}
+          ) : null}
+          {lineChip}
         </div>
         {state === 'connecting' && elapsed >= HOME_CONNECT_TIMES.switchLine && (
           <p className="tono-home__slow" role="status">
@@ -402,16 +421,11 @@ export const SeaHome = ({
           <p className="tono-home__first">{t('tono.home.firstRun')}</p>
         )}
         <div
+          ref={attentionRef}
           className="tono-home__attention"
           style={{ minHeight: 0, overflowY: 'auto' }}
         >
           {attention}
-          {state === 'protectedOffline' && (
-            <div className="tono-home__route-choice">
-              <span>{t('tono.home.chooseOtherLine')}</span>
-              {lineChip}
-            </div>
-          )}
         </div>
       </div>
       <div

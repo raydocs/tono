@@ -869,6 +869,7 @@ const DashboardPage = () => {
       selectedServer={status?.selectedServer}
       darkOverride={newAppearance ? true : undefined}
       collapseCleanSteps={newAppearance}
+      homePresentation={newAppearance}
       onRefreshStatus={mutateTonoStatus}
       onChooseRoute={() => navigate('/servers')}
     />

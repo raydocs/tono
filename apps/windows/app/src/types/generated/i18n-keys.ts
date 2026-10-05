@@ -1152,6 +1152,12 @@ export const translationKeys = [
   'tono.home.duration.minutes_other',
   'tono.home.firstRun',
   'tono.home.telemetry.aiToday',
+  'tono.home.retry.checking',
+  'tono.home.retry.unscheduled',
+  'tono.home.retry.scheduled',
+  'tono.home.retry.now',
+  'tono.home.recovery.scheduled',
+  'tono.home.recovery.unscheduled',
 ] as const
 
 export type TranslationKey = (typeof translationKeys)[number]

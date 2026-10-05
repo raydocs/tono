@@ -206,14 +206,12 @@ it('keeps protected-offline retry, restore, diagnostics and route actions withou
   expect(
     container.querySelector('.sea-scene')?.getAttribute('data-phase'),
   ).toBe('failed')
-  expect(
-    screen.getAllByRole('button', { name: 'Retry Now' }).length,
-  ).toBeGreaterThan(0)
+  expect(screen.getAllByRole('button', { name: 'Retry Now' }).length).toBe(1)
   expect(
     screen.getAllByRole('button', { name: 'Restore Normal Internet' }).length,
-  ).toBeGreaterThan(0)
+  ).toBe(1)
   expect(screen.getByRole('button', { name: 'Copy details' })).toBeDefined()
-  expect(screen.getByTestId('tono-progress-switch-route')).toBeDefined()
+  expect(screen.getByTestId('tono-home-line-chip')).toBeDefined()
   expect(screen.queryByText(enTono.progress.releasedFailureBody)).toBeNull()
 })
 it('selects a popover row through the existing select-then-idle-connect path exactly once', async () => {
@@ -386,4 +384,73 @@ it('hides an earlier owner AI summary immediately when the account scope changes
   expect(
     home.container.querySelector('.tono-home__telemetry')?.textContent,
   ).not.toContain('123 MB')
+})
+
+it('does not claim an automatic retry when the protected-offline record has no timer', () => {
+  mocks.status.uiState = 'protectedOffline'
+  mocks.status.killSwitch = {
+    wanted: true,
+    live: true,
+  } as TonoStatus['killSwitch']
+  mocks.progress = {
+    steps: [],
+    totalElapsedMs: null,
+    failedStage: null,
+    error: null,
+    retryAttempt: 1,
+    nextRetryAtMs: null,
+  }
+  render(view())
+  expect(screen.getByTestId('tono-home-sentence').textContent).toContain(
+    'No automatic retry is scheduled',
+  )
+  expect(screen.queryByText(enTono.experience.recoveryTitle)).toBeNull()
+})
+
+it('counts down the same scheduled retry as the progress record without inventing one', () => {
+  vi.useFakeTimers()
+  mocks.status.uiState = 'protectedOffline'
+  mocks.status.killSwitch = {
+    wanted: true,
+    live: true,
+  } as TonoStatus['killSwitch']
+  mocks.progress = {
+    steps: [],
+    totalElapsedMs: null,
+    failedStage: null,
+    error: null,
+    retryAttempt: 1,
+    nextRetryAtMs: Date.now() + 5000,
+  }
+  render(view())
+  expect(screen.getByTestId('tono-home-sentence').textContent).toContain(
+    'Retrying automatically in 5 seconds',
+  )
+  act(() => {
+    vi.advanceTimersByTime(1000)
+  })
+  expect(screen.getByTestId('tono-home-sentence').textContent).toContain(
+    'Retrying automatically in 4 seconds',
+  )
+})
+
+it('shows a released failure sentence and retry only once, with diagnostics outside the explanation card', () => {
+  mocks.progress = {
+    steps: [],
+    totalElapsedMs: 1000,
+    failedStage: 'startingTunnel',
+    error: 'handshake eof',
+    retryAttempt: 0,
+    nextRetryAtMs: null,
+  }
+  const { container } = render(view())
+  expect(screen.getAllByText(enTono.progress.releasedFailureBody)).toHaveLength(
+    1,
+  )
+  expect(
+    screen.getAllByRole('button', { name: enTono.dashboard.errorRetry }),
+  ).toHaveLength(1)
+  expect(screen.queryByRole('button', { name: 'Retry Now' })).toBeNull()
+  expect(container.querySelector('.tono-home__progress-card button')).toBeNull()
+  expect(screen.getByRole('button', { name: 'Copy details' })).toBeDefined()
 })

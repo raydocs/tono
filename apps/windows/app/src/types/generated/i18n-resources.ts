@@ -1220,6 +1220,16 @@ export interface TranslationResources {
           recommended: string
           title: string
         }
+        recovery: {
+          scheduled: string
+          unscheduled: string
+        }
+        retry: {
+          checking: string
+          now: string
+          scheduled: string
+          unscheduled: string
+        }
         sentence: {
           idle: string
         }

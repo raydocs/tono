@@ -225,6 +225,7 @@
   }
 }
 .tono-home__attention > .tono-glass-card,
+.tono-home__progress-card,
 .tono-home__attention-slot > :where([role="alert"]),
 .tono-home__attention-slot > :where(div:not([role])) > :where(span, a),
 .tono-home__route-choice {
@@ -558,6 +559,9 @@
 
 /* The intermediate 200px sidebar narrows the canvas; final full-bleed geometry is PR 3. */
 @container (max-width: 760px) {
+  .tono-home__title[data-long="true"] {
+    font-size: 36px !important;
+  }
   .tono-home__column {
     left: 32px !important;
   }
@@ -622,4 +626,52 @@
   .tono-home__pill::after {
     display: none;
   }
+}
+
+/* Exception actions stay reachable beside, never inside, the explanation card. */
+.tono-home__progress {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+  max-height: var(--tono-home-attention-room, 220px);
+  flex-shrink: 1;
+}
+.tono-home__progress-card {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+.tono-home__tools {
+  display: flex;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.tono-home :is(.tono-button, .tono-link) {
+  color: #f6f2ec !important;
+  background: var(--tono-home-quiet) !important;
+  border: 0 !important;
+  box-shadow: var(--tono-home-highlight) !important;
+  backdrop-filter: var(--tono-home-blur) !important;
+  -webkit-backdrop-filter: var(--tono-home-blur) !important;
+}
+.tono-home__tiles .tono-button,
+.tono-home__tiles .tono-link {
+  background: rgba(255, 255, 255, 0.07) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+.tono-home__tools button {
+  font: inherit;
+  font-size: 12px;
+  padding: 6px 10px;
+  min-height: 32px;
+  border-radius: 999px;
+  cursor: pointer;
+}
+.tono-home__tiles .tono-glass-card > div > button > span:last-child {
+  color: #ffe2b0 !important;
+  background: rgba(255, 217, 160, 0.1) !important;
 }
