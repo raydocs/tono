@@ -55,6 +55,11 @@ let status: TonoStatus = {
   exitLocation: 'Tokyo, Japan',
   claudeHomeActive: true,
 }
+const primaryName = status.selectedServer ?? 'Tokyo · Sakura'
+const scheduledAt = params.has('scheduled')
+  ? Date.now() +
+    1000 * Math.max(1, Math.min(120, Number(params.get('scheduled')) || 15))
+  : null
 let attemptedAt = Date.now()
 let failed = scenario === 'failed' || scenario === 'protectedOffline'
 let transaction = 0
@@ -146,7 +151,7 @@ export const tonoSelectServer = async (name: string) => {
   push({ selectedServer: name })
 }
 export const tonoServers = async () =>
-  ['Tokyo · Sakura', 'Buffalo · Niagara', 'Singapore · Harbor'].map((name) => ({
+  [primaryName, 'Buffalo · Niagara', 'Singapore · Harbor'].map((name) => ({
     name,
     server: '192.0.2.1',
     port: 443,
@@ -164,7 +169,7 @@ export const tonoRoutePreferences = async () => ({
   catalogRevision: 54,
   favorites: ['Buffalo · Niagara', 'Singapore · Harbor'],
   recent: [
-    { name: 'Tokyo · Sakura', revision: 54, verifiedAtMs: Date.now() - 5000 },
+    { name: primaryName, revision: 54, verifiedAtMs: Date.now() - 5000 },
   ],
   fixedRegion: null,
 })
@@ -179,7 +184,16 @@ export const tonoConnectProgress = async (): Promise<TonoConnectProgress> => ({
             elapsedMs: Date.now() - attemptedAt,
           },
         ]
-      : [],
+      : failed
+        ? [
+            {
+              key: 'verifyingTraffic',
+              label: '',
+              state: 'failed',
+              elapsedMs: 3100,
+            },
+          ]
+        : [],
   totalElapsedMs:
     status.uiState === 'connecting'
       ? Date.now() - attemptedAt
@@ -191,7 +205,7 @@ export const tonoConnectProgress = async (): Promise<TonoConnectProgress> => ({
     ? 'TONO_NODE_OR_CORE_UNREACHABLE: tunnel probe timed out'
     : null,
   retryAttempt: scenario === 'protectedOffline' ? 1 : 0,
-  nextRetryAtMs: null,
+  nextRetryAtMs: status.uiState === 'protectedOffline' ? scheduledAt : null,
 })
 export const tonoEncryptedDnsOverrides = async () => params.has('dns')
 export const openWindowsDnsSettings = async () => {}
