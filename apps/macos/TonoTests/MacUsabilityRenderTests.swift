@@ -573,7 +573,7 @@ final class MacUsabilityRenderTests: XCTestCase {
             let stringValue = full?.accessibilityValue() as? String
                 ?? (object?.accessibilityAttributeValue(.value) as? String)
             let identifier = full?.accessibilityIdentifier()
-                ?? (element as? any NSAccessibilityElementProtocol)?.accessibilityIdentifier()
+                ?? (element as? any NSAccessibilityElementProtocol)?.accessibilityIdentifier?()
                 ?? (object?.accessibilityAttributeValue(.identifier) as? String)
                 ?? ""
             if let frame {
