@@ -1,12 +1,12 @@
 ## 2026-10-05 · ops 客户列表与本次节点任务闭环
 - 归属：[运维计划](../ops/plan-2026-09-11.md)、[后台改进路线](../ops/console-improvement-2026-10-04.md)第二/第五批的小步交付，不推进客户发布门。
-- 来源：`cccec2a629180d72d2b170a803008c12600d7f9c` → 实现 `7692571204658cc5c09f9034ee11cd7fc304ddfd`；分支 `ops/workbench-workflow-20261005`，PR 待建，尚未合入/部署。
+- 来源：`cccec2a629180d72d2b170a803008c12600d7f9c` → 实现 `7692571204658cc5c09f9034ee11cd7fc304ddfd`，返回时概览展开偏好续修 `5c021e97e7719e2e608def59c3ffac5bd7a8c27b`；分支 `ops/workbench-workflow-20261005`、[#1396](https://github.com/raydocs/tono/pull/1396)，尚未合入/部署。
 - 缺陷修复：`OPS-CUSTOMER-SEARCH-RETURN`，搜索→客户详情→页面返回由清空搜索改为保留输入；沿用既有筛选、排序、滚动偏好。不同 q 深链接重新播种搜索，同一深链编辑后的输入返回仍保留。仅 tab 内存，不新增 URL、磁盘缓存或自动恢复写意图；隐私匹配规则未改。
 - 缺陷修复：`OPS-NODE-JOB-TRACKING`，节点入队提示不再五秒消失后让操作员去页面底部找结果；每个本页新任务保留独立状态卡，按 POST 返回的任务 ID、节点主体关联任务，按同一 jobId/节点/动作类型关联变更回执。
 - 新增/优化：客户用量/到期统计保留在可展开概览，列表优先；状态卡只读刷新，区分排队、执行、执行完成、失败/取消/过期、读取未知和回执待验证。任务完成或配置刷新不宣称连接恢复。
 - 工程与测试：无依赖、合同、Worker、权限、确认、幂等、告警、迁移或生产数据写入变更；按 ops 计划不新增 UI 单测/E2E案例，不重生成截图基线。
 - 验证（MacBook，当前实现树）：typecheck/lint 成功，棘轮 `197 (baseline 219)`；窄测 `3 files / 52 tests passed`；全量现有单测 `44 files / 345 tests passed`。build 预算 `initial JS 205.1 KB / total JS 318.6 KB gzip / all budgets green`，源码无超过400行文件。
-- 浏览器（本地 fixture，Ego space20）：1600×968 下表格 top `983 → 545`；390×844 下 top `600`、整页横向溢出 `0`。原实际 `before query=liu.yang,rows=1 / after query='',rows=22`，现返回仍 `query=liu.yang,rows=1`；带 q=wang.tao 深链编辑后返回也保留 liu.yang。
+- 浏览器（本地 fixture，Ego space20）：1600×968 下表格 top `983 → 545`；390×844 下 top `600`、整页横向溢出 `0`。原实际 `before query=liu.yang,rows=1 / after query='',rows=22`，现返回仍 `query=liu.yang,rows=1`；带 q=wang.tao 深链编辑后返回也保留 liu.yang；展开概览后详情返回 `query=liu.yang,open=true,rows=1`。
 - 节点浏览器：本地真实 fixture 入队，超过5秒仍有同一任务卡，GET reads=4 / enqueue POST=1；注入读取失败后显示未知且没有再次入队；真实 fixture 取消返回200，卡显示已取消。成功/其他任务回执/错节点回执/匹配回执/回执503通过客户端只读响应注入核验；不是执行器或生产节点验收。
 - 本机 Playwright：首次 grep 过窄 `No tests found`；修正 grep 后 Chromium headless shell1243缺失，启动0ms失败，行为与像素检查未执行；未安装浏览器/工具链。完整既有 Linux 行为检查交 CI（忽略 macOS 像素基线），CI 尚待结果。
 - 图像均为 fixture：[桌面列表](../ops/evidence/2026-10-05-workbench/customers-desktop.png)、[手机列表](../ops/evidence/2026-10-05-workbench/customers-phone.png)、[本次任务](../ops/evidence/2026-10-05-workbench/node-job.png)。不含生产客户数据。
