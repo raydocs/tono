@@ -1,5 +1,5 @@
 ## 2026-10-06 · Windows 新外观 PR 10：品牌资产图稿
-- 归属：`docs/SHIP_PLAN.md` 0.0.75 UI，ROUND-3 §12；stacked on #1412，未合 main。
+- 归属：`docs/SHIP_PLAN.md` 0.0.75 UI，ROUND-3 §12；stacked on #1412，2026-10-06 已合 main `5a77c6b6`（#1413）。
 - 来源：`33945d5b` → 本 PR head；`codex/windows-ui-pr10-20261006`。
 - 缺陷修复：无；不是运行时或安装故障修复。
 - 新增/优化：dev-only日出/海平线mark、16/24/32/48/64/128/256像素SVG/PNG、七尺寸RGBA ICO、150×57安装器header/164×314side SVG/PNG/BMP24、bar lockup、#0B0A12初始splash；一张审批sheet同时展示浅/深底1×应用图标、安装器位置示意和PR7托盘四态。

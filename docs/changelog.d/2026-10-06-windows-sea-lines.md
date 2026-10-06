@@ -1,6 +1,6 @@
 ## 2026-10-06 · Windows 新外观 PR 5：线路页
 - 归属：`docs/SHIP_PLAN.md` 0.0.75 UI，ROUND-3 §7；默认关闭，stacked on #1407。
-- 来源：`05dc44ef` → 本 PR head，`codex/windows-ui-pr5-20261006`；未合 main。
+- 来源：`05dc44ef` → 本 PR head，`codex/windows-ui-pr5-20261006`；2026-10-06 已合 main `5a77c6b6`（#1408）。
 - 缺陷修复：实际 shell fixture 暴露窄顶栏隐藏状态词时链接无可访问名称（UI0075-W-F1）；补充同一状态词 aria-label，回归实际先红后绿。新线路搜索也纳入既有 Ctrl/Cmd+F 目标。六页 browser 截图又发现 UI0075-W-F2：首页路由容器0px裁掉操作；新增只在 opt-in 首页生效的全高 route frame。
 - 新增/优化：760px 线路列、搜索/单测速按钮、地区/收藏 Tabs、推荐与证据说明、46px 收藏/全部列表、latency 三格、不可用原因、空/读取状态、静默同步和显式选择后连接胶囊。连接中/已连接仍走既有选线处理；断开时新外观只选择，胶囊按钮调用既有 idle admission helper。scope/revision 由既有后端接口验证，陈旧选择不展示胶囊。
 - 保留行为：旧外观完整原列表与选线语义；测试全部/当前/取消、刷新及错误详情、收藏上限/同节点 hy2 共享身份、地区按账号保存在本机、近期验证、不可用/供应商屏蔽、连接竞争拒绝分类均保留。新 Tabs 映射既有 fixedRegion；收藏只是展示过滤，不改偏好地区。

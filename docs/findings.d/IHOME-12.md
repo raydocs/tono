@@ -2,7 +2,7 @@
 |---|---|---|---|---|---|
 | IHOME-12 | Reused details cards are clipped in the two-column home sheet | fixed(bca5fa9a) | [#1393](https://github.com/raydocs/tono/pull/1393), [#1422](https://github.com/raydocs/tono/pull/1422) | 低·已确认 | #1422 restyles the reused cards inside the sheet (one 14px edge, page font, tabular figures, equal small tiles, latency in ms). Preview only; Windows not run. |
 
-Current correction/verification: [H1–H12 evidence](../screenshots/sea-home-2026-10-05/review-corrections/README.md). The earlier functional scroll correction does not close the remaining cosmetic defect. Carried to PR4; not merged or Windows-qualified.
+Current correction/verification: [H1–H12 evidence](../screenshots/sea-home-2026-10-05/review-corrections/README.md). The earlier functional scroll correction does not close the remaining cosmetic defect. Carried to PR4, then restyled in #1422; merged to main (bca5fa9a) on 2026-10-06; not Windows-qualified.
 
 Owner re-check of819b8588 (2026-10-05): retain the working scroll area in PR2;
 restyle the reused cards with PR4 shared components. No new PR2 card restyling.

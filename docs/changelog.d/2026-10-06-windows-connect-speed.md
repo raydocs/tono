@@ -1,6 +1,6 @@
 ## 2026-10-06 · Windows 连接路径缩短三处等待（0.0.75 候选）
 - 归属：SHIP_PLAN 0.0.75（老板 2026-10-06：「开始做 然后就叫 0.0.75 candidate 连接速度升级」）；Windows App 连接路径，Service 未改。
-- 来源：main `c7d775176` → 分支 `claude/win-connect-speed-20261006`，[#1418](https://github.com/raydocs/tono/pull/1418)（draft），尚未合入 main。依据 2026-10-04 连接速度审查的 S5/S6/S7/S4/S11；S1/S1b/S8/S12 已在 #1386/#1395 修过。
+- 来源：main `c7d775176` → 分支 `claude/win-connect-speed-20261006`，[#1418](https://github.com/raydocs/tono/pull/1418)，2026-10-06 已合 main `f26c57bd`（#1418）。依据 2026-10-04 连接速度审查的 S5/S6/S7/S4/S11；S1/S1b/S8/S12 已在 #1386/#1395 修过。
 - 缺陷修复：无（没有错误行为，只有可省的等待）。
 - 新增/优化（不移动任何保护步骤，不放宽任何门）：
   - WIN-LOCK-RETRY-GRID：StartClash 之后的锁定只有 WinTUN 网卡注册后才可能成功，App 却固定每 200 ms 问一次 Service。现在被拒的重试在等待期间每 20 ms 本地查一次网卡别名（阻塞线程，无 IPC），网卡一出现就再问；拒绝之前网卡已在的那次重试仍等满 200 ms，网卡始终不出现时也是原来的 50 × 200 ms。LUID 的解析、隧道类型校验和授权仍只在 Service 里做，App 的查询只决定「什么时候问」。

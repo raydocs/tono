@@ -1,6 +1,6 @@
 ## 2026-10-06 · 整份替换目录时做客户端准入检查（#1273）
 - 归属：SHIP_PLAN §2 item 10（新设备连不上且无下一手）；控制面。
-- 来源：`ba639f6a` → 本 PR head，`claude/catalog-put-admission-20261006`；未合 main、未部署。
+- 来源：`ba639f6a` → 本 PR head，`claude/catalog-put-admission-20261006`；2026-10-06 已合 main `c7d77517`（#1415）、未部署。
 - 缺陷修复：C3-PC-F2。共享后台 `PUT exit-catalog` 只检查名称与身份占位，一条缺 Reality 字段（或 `network`/`flow` 不对）的 VLESS、
   或缺 `server`/`port`/`sni` 的 hy2 会被发布；Windows/macOS 遇到一条不收的条目就拒收整份目录，新登录和新设备拿不到目录。
   现在发布前逐条跑重新上架已在用的 `catalogEntryMissingClientFields`，不通过返回 400 `INVALID_CATALOG`，写明条目名与缺的字段，目录不变。

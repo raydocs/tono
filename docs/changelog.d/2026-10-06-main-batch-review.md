@@ -15,12 +15,13 @@
   | [#1421](https://github.com/raydocs/tono/pull/1421) | Windows 依赖与四份 Cargo.lock | `aaa0c1da1` |
   | [#1422](https://github.com/raydocs/tono/pull/1422) | Windows 新外观细节打磨 | `bca5fa9a8` |
 
-  这些 PR 各自的 changelog 来源行写于开 PR 时（「未合 main」「draft」），保留为当时状态；合入结果以本表为准。
+  本批新增的 18 个 changelog 分片的来源行原先写于开 PR 时（「未合 main」「draft」），现逐个改为合入的 main SHA 与 PR 号。
   UI 类 PR（#1417、#1405、#1422）按老板 2026-10-06「能合并的全都合并到 main」的授权合入，不是按 AGENTS 的自动合并条件。
 - 缺陷修复：无新修复。43 条 finding 的状态从 `in-PR` 改为 `fixed(<main SHA>)`，SHA 取第一个包含该修复的 main merge：#1405 的 16 条、
   #1393 的 13 条与 #1408 的 2 条（`5a77c6b6`，随 #1417 整栈进入 main）、IHOME-12（`bca5fa9a`，#1422）、#1418 的 4 条、C3-PC-F2（`c7d77517`，#1415）、
   #1376 的 4 条（`92e004f6`，原行只写了分支名）、#1378 的 2 条（`f4d8d401`）。「真机未验」「未部署」等剩余限制原样保留；只删掉已不成立的
-  「未合 main」「默认关闭的草稿」字样，#1405 各行的「尚待 hosted CI」改为合并 head `6889f36e` 的 ci-gate 已过。`WIN-LOG-UPLOAD-PROBE-LINES` 仍为 `in-PR`（对应 issue #1191，未合）。
+  「未合 main」「默认关闭的草稿」字样（含 IHOME 分片正文里的「Not fixed on main」）。#1405 的 M1–M8 八行里「尚待 hosted CI」改为合并 head `6889f36e` 的
+  ci-gate 已过，「合并 head 的原生 PNG 人工审阅与真机未验」保留。`WIN-LOG-UPLOAD-PROBE-LINES` 仍为 `in-PR`（对应 issue #1191，未合）。
 - 新增/优化：dependabot 的旧 PR 收尾：#1381、#1382 在 #1419/#1420 合入后由 dependabot 自行关闭；#1403、#1384 与新开的 #1423（只剩 vitest 5）
   手动关闭并留言指向取代它们的 PR。仍压着的版本：`vitest` 5（等 `@cloudflare/vitest-pool-workers` 支持）、`typescript` 7（等 `typescript-eslint`）、
   `minisign-verify` 0.3（等 `tauri-plugin-updater` 一起动）。
@@ -34,6 +35,8 @@
     词条与生成类型）PASSED，无发现；macOS 与服务片 `0db2e40e`（`apps/macos`、两个服务的 `src`/`test`/`package.json`、`.github`）PASSED，无发现。
   - 三方都没有读的：Windows 的 `*.test.tsx`、`*.css`、`locales`、生成的 i18n 类型在两片之外，Opus 与 Codex 没有读（各 PR 自己的评审读过）；
     lockfile 与 `docs/screenshots` 没有任何一方逐行读。评审方无网络，Tauri 2.11→2.12 / wry 0.57 / tao 0.37 的上游变更说明（权限标识、窗口 API）没有核对。
+- 本 PR 的评审（jev-route `92938a11`，Opus 5.5 + Codex，PASSED，无拦截项）后的一轮修复：opus:F1 / codex:F1 第一版清理把 M1–M8 的「当前 head PNG 人工审阅」限制一并删了，已恢复；
+  opus:F2 / codex:F2 IHOME 分片正文仍写「Not fixed on main」「not merged」，与状态格矛盾，已改；并补做 grok:F1 点名的 changelog 来源行。
 - 验证：main 自动 CI：Windows CI [37523933629](https://github.com/raydocs/tono/actions/runs/37523933629) 在 `bca5fa9a8` success；
   macOS CI [37520153661](https://github.com/raydocs/tono/actions/runs/37520153661) 在 `4c98c8c1c` success（其后无 `apps/macos` 改动）；
   Services CI [37523452599](https://github.com/raydocs/tono/actions/runs/37523452599) 在 `70af58a73` success（其后无服务改动）。`e76232924`、`aaa0c1da1` 上的同名 run 被后一次 push 取消，不计通过。
