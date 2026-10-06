@@ -12,3 +12,9 @@
 - 图像均为 fixture：[桌面列表](../ops/evidence/2026-10-05-workbench/customers-desktop.png)、[手机列表](../ops/evidence/2026-10-05-workbench/customers-phone.png)、[本次任务](../ops/evidence/2026-10-05-workbench/node-job.png)。不含生产客户数据。
 - 候选/发布：仅源码，无新客户包/候选/更新源变更；UI PR 不启用自动合并。
 - 剩余限制：任务卡生命周期为当前对象页面，刷新/离开后从既有任务记录追溯；旧同步退役路径未伪造任务 ID。当前任务若不在返回列表中，显示未知而非用最新一条替代。服务端分页搜索、全后台刷新失败状态、邮件健康和经营报表未在本批实现；无生产登录后操作验收。
+
+### 2026-10-05 · 审查续修
+- trusted main 路由 `01fc660c` 选择 single/Anthropic；实际 Claude CLI `claude-opus-5-5 --effort high`、plan权限、仅 Read/Grep/Glob，覆盖 `cccec2a6…dec9fdfc` 当前源代码及实际 Worker 契约，不复核整个审计报告。首启动因主检出 HEAD 生成空diff已终止，未计通过；一次纠正后实际407行diff完成审查，0 major、3 minor。
+- 决定性 minor：初稿等待 `identity_sync`/`xray_restart` 回执，但 Worker 实际只有下架/上架写带 jobId 的回执；初稿 xray 响应注入不证明后端支持。`cf03e21d7bc4579962110b9554b7854d6c09652c` 改为仅等待已提供的两类，其余明确“不提供变更回执”，不补虚假后端语义。另两个 minor 为终态手动读取引发重复资源刷新、登录过期通用文案；同轮加每任务终态刷新去重、显式登录过期提示。未上线初稿的问题不冒充新增已发布客户故障。
+- 续修最终源码：typecheck/lint、既有44文件345例、build预算205.1KB/318.6KB通过。真实 Vite SSR + jsdom 的当前组件（临时探针，不新增仓库UI测试）实际 `jobReads=1,receiptReads=0,completed=true,noFalseWait=true`；会话过期 `explicit=true,unknown=true,paused=true,receiptReads=0`。
+- `dec9fdfc` 的 ci-gate [37410046100](https://github.com/raydocs/tono/actions/runs/37410046100) success，后端/合同/代理/迁移/四个既有E2E分片成功，未触及原生任务合法skip。这是续修前准确head的结果，不替代续修后的 CI；修正delta独立复核与最新head CI待结果。未合并/部署。
