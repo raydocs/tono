@@ -217,6 +217,7 @@ export const nodeDetailCopy = {
     readFailed: '读取本次状态失败，保留最后已知状态；没有重新下发。',
     receiptMissing: '暂未查到本次变更回执，效果仍待验证。',
     receiptFailed: '任务状态已读到，但变更回执读取失败，效果仍待验证。',
+    noReceipt: '这类任务不提供变更回执；连接效果仍以最新测量为准。',
     safety: '执行完成不等于连接恢复；请以最新测量为准。客户端刷新配置也不代表故障已恢复。',
     paused: '自动跟踪已暂停，可刷新状态继续查看；不会重新提交任务。',
     states: {

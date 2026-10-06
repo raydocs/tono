@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { ArrowLeft } from 'lucide-react';
 import { Empty } from '@/components/ops/Empty';
 import { copy } from '@/copy/copy';
@@ -55,6 +55,7 @@ export default function NodeDetailPage({ name, customers, fleet }: {
   const [editing, setEditing] = useState(false);
   const [range, setRange] = useState<QualityRange>('7d');
   const [startedJobs, setStartedJobs] = useState<JobDto[]>([]);
+  const notifiedJobs = useRef(new Set<string>());
   // The week feeds the headline tiles whatever the chart shows; the month is
   // only fetched once somebody asks for it.
   const week = useResource(`node-slo-7d-${name}`, (signal) => sloApi.get({ node: name, range: '7d' }, signal));
@@ -107,6 +108,8 @@ export default function NodeDetailPage({ name, customers, fleet }: {
 
       {startedJobs.filter((job) => job.subjectType === 'node' && job.subjectId === name).map((job) => (
         <NodeJobReceipt key={job.id} nodeName={name} initialJob={job} onChanged={() => {
+          if (notifiedJobs.current.has(job.id)) return;
+          notifiedJobs.current.add(job.id);
           detail.reload();
           acceptance.reload();
           jobs.reload();

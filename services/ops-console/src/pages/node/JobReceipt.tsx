@@ -9,7 +9,7 @@ import { formatWhenAgo } from '@/lib/display';
 import { receiptSentence } from '@/lib/receipts';
 
 const words = copy.nodeJobReceipt;
-const RECEIPT_TYPES = new Set(['catalog_retire', 'catalog_relist', 'identity_sync', 'xray_restart']);
+const RECEIPT_TYPES = new Set(['catalog_retire', 'catalog_relist']);
 type Snapshot = {
   job: JobDto;
   receipt: ChangeReceiptDto | null;
@@ -83,7 +83,7 @@ export function NodeJobReceipt({ nodeName, initialJob, onChanged }: {
         const paused = failures >= 3 || error instanceof SessionExpiredError;
         setSnapshot((current) => ({
           ...current, checking: false, unknown: !jobRead, paused,
-          problem: jobRead ? words.receiptFailed
+          problem: error instanceof SessionExpiredError ? copy.sessionExpired : jobRead ? words.receiptFailed
             : error instanceof Error && error.message === words.missing ? words.missing : words.readFailed,
         }));
         if (!paused) timer = setTimeout(() => { void read(); }, 15_000);
@@ -111,6 +111,7 @@ export function NodeJobReceipt({ nodeName, initialJob, onChanged }: {
         {snapshot.problem ? <p className="mt-1">{snapshot.problem}</p> : null}
         {snapshot.receipt ? <p className="mt-1">{snapshot.problem ? `${words.lastKnown} · ` : ''}{receiptSentence(snapshot.receipt)}</p> : null}
         {snapshot.paused ? <p className="mt-1">{words.paused}</p> : null}
+        {snapshot.job.status === 'succeeded' && !RECEIPT_TYPES.has(snapshot.job.type) ? <p className="mt-1">{words.noReceipt}</p> : null}
       </div>
       <p className="mt-2 break-all font-mono text-fine">{words.id} · {initialJob.id}</p>
       {snapshot.checkedAt === null ? null : <p className="mt-1 text-fine">{words.checked} · {formatWhenAgo(snapshot.checkedAt)}</p>}
