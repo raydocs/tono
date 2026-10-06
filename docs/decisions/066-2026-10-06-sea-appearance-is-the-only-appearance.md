@@ -7,7 +7,7 @@
   choice stays. Rejected: keeping the switch (decision 065's "An explicit off … is kept"), and honouring a stored off
   with no switch to undo it (a device would stay on the old look with no way out).
 - What this changes in earlier decisions, without editing them: the "switch stays" clause of 065 and the opt-in clauses
-  of 055/063. 065's merge authorisation and its gates stand.
+  of 055/069. 065's merge authorisation and its gates stand.
 - The agent's reading, to be corrected by the owner if wrong: "只用新外观" is about what the customer gets, not an order
   to delete code in this release. The old-look code and its tests stay, reachable only inside one window (its tests),
   and are removed in a dedicated cleanup after 0.0.75; deleting them inside a product fix was the larger, riskier diff.

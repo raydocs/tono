@@ -8,7 +8,7 @@
   Settings → Appearance is kept and returns the previous look. Rejected: default off with a switch (the agent's
   recommendation; the owner chose on) and shipping the look in a later version (decision 061's "Not included").
 - What this changes in earlier decisions, without editing them: decision 061's exclusion of the Windows UI from 0.0.75,
-  and the "default-off" clauses of 055/063 (Windows) and 064 (macOS). AGENTS forbids agents to auto-merge UI PRs; the
+  and the "default-off" clauses of 055/069 (Windows; 069 was numbered 063 before it reached main) and 064 (macOS). AGENTS forbids agents to auto-merge UI PRs; the
   owner's "授权你合并" is the owner merging through the agent for these PRs only, not a change to that rule.
 - What it does not change: every merge condition in AGENTS (exact-head ci-gate, review depth per PR, no open review
   thread, base-first order, combined regression review of the batch). The gates: the frozen source `e28ca45c` and its

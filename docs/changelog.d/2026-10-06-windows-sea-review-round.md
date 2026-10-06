@@ -37,4 +37,4 @@
   两席均无发现；该 head 的 [ci-gate 37511628558](https://github.com/raydocs/tono/actions/runs/37511628558) 成功。
   合入前记录改号：本栈的 ROUND-3 外观决策文件原为 `063-…-windows-round3-appearance.md`，与 main 已有的
   `063-…-unarmed-retry-attempt-floor.md` 撞号（main 的 063 先合入）；本栈那份尚未进过 main，改为 `069`（068 已被 macOS 分支占用），
-  内容未动，四处链接与一处文字引用同步改。整栈以本 PR 一次合入 main（老板 2026-10-06 授权合并 UI PR、只保留新外观，决策 066）。
+  内容未动；指向它的五处链接和四处文字引用（两份 changelog、决策 065 与 066）同步改为 069。docs-only 增量评审 jev-route `34a53897`（Opus 5.5）PASSED，指出其中三处文字引用最初漏改，已补。整栈以本 PR 一次合入 main（老板 2026-10-06 授权合并 UI PR、只保留新外观，决策 066）。
