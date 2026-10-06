@@ -10,10 +10,13 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Tono</title>
     <script>
+      // Same default as appearance-preferences.ts: on unless explicitly turned off.
+      let seaAppearance = true;
       try {
         const value = JSON.parse(localStorage.getItem('tono-ui-preferences') || '{}');
-        if (value.newAppearance === true) document.documentElement.dataset.seaAppearance = 'true';
+        seaAppearance = value?.newAppearance !== false;
       } catch {}
+      if (seaAppearance) document.documentElement.dataset.seaAppearance = 'true';
     </script>
     <!-- Tauri adds its runtime CSP nonce to bundled style elements. Runtime CSS-in-JS reads
          this marked element's DOM `nonce` property and reuses it for styles created later. -->

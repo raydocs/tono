@@ -4,7 +4,9 @@ import i18n from 'i18next'
 import { initReactI18next } from 'react-i18next'
 import { MemoryRouter } from 'react-router'
 import { SWRConfig } from 'swr'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+import { setNewAppearance } from './appearance-preferences'
 
 import enShared from '@/locales/en/shared.json'
 import enTono from '@/locales/en/tono.json'
@@ -47,6 +49,10 @@ void i18n.use(initReactI18next).init({
 })
 
 afterEach(() => cleanup())
+beforeEach(() => {
+  // These cover the old look, which stays selectable; a fresh store now picks the new one.
+  setNewAppearance(false)
+})
 
 describe('account card facts', () => {
   it('shows plan, expiry and data used against the quota', async () => {

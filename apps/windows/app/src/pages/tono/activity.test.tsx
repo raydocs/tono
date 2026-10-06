@@ -134,6 +134,8 @@ const localDnsConnection = (
   })
 
 beforeEach(() => {
+  // These cover the old look, which stays selectable; a fresh store now picks the new one.
+  setNewAppearance(false)
   closeConnectionMock.mockReset().mockResolvedValue(undefined)
   closeAllConnectionsMock.mockReset().mockResolvedValue(undefined)
   serversMock

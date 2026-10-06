@@ -281,7 +281,10 @@ it('traps sheet focus and returns it to Details on Escape', () => {
   expect(document.activeElement).toBe(trigger)
 })
 it('keeps the legacy overview when the appearance switch is off', () => {
-  localStorage.removeItem('tono-ui-preferences')
+  localStorage.setItem(
+    'tono-ui-preferences',
+    JSON.stringify({ newAppearance: false }),
+  )
   const { container } = render(view())
   expect(container.querySelector('.sea-scene')).toBeNull()
   expect(screen.getByText(enTono.dashboard.title)).toBeDefined()

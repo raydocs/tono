@@ -117,6 +117,8 @@ const stubClipboard = () => {
 }
 
 beforeEach(() => {
+  // These cover the old look, which stays selectable; a fresh store now picks the new one.
+  setNewAppearance(false)
   diagnosticsReportMock.mockReset().mockResolvedValue(report)
   localDiagnosticsReportMock.mockReset().mockResolvedValue(report)
   prepareSupportReportMock

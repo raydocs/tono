@@ -5,6 +5,8 @@ import { initReactI18next } from 'react-i18next'
 import { MemoryRouter } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { setNewAppearance } from '@/tono-ui/appearance-preferences'
+
 import enTono from '@/locales/en/tono.json'
 import { version } from '@root/package.json'
 
@@ -39,6 +41,8 @@ void i18n.use(initReactI18next).init({
 })
 
 beforeEach(() => {
+  // These cover the old look, which stays selectable; a fresh store now picks the new one.
+  setNewAppearance(false)
   vi.useFakeTimers()
   mocks.invoke.mockReset().mockResolvedValue({ expiresIn: 600 })
   mocks.copy.mockReset().mockResolvedValue(undefined)

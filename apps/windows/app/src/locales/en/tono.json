@@ -777,8 +777,8 @@
     "exit": "Exit"
   },
   "seaSettings": {
-    "preview": "New appearance (preview)",
-    "previewHint": "Use the sea scene and new controls on this device. Off by default.",
+    "preview": "New appearance",
+    "previewHint": "Use the sea scene and new controls on this device. Turn it off to return to the previous look.",
     "motion": "Motion",
     "motionHint": "Auto samples once on this device. Reduced motion and forced colours always use Static.",
     "learnMore": "Learn more",

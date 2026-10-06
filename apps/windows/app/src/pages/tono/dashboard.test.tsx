@@ -12,6 +12,8 @@ import { MemoryRouter } from 'react-router'
 import { SWRConfig } from 'swr'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { setNewAppearance } from '@/tono-ui/appearance-preferences'
+
 import enShared from '@/locales/en/shared.json'
 import enTono from '@/locales/en/tono.json'
 import { removeCacheData } from '@/services/query-client'
@@ -96,6 +98,8 @@ const renderDashboard = () =>
   )
 
 beforeEach(() => {
+  // These cover the old look, which stays selectable; a fresh store now picks the new one.
+  setNewAppearance(false)
   mocks.status = makeStatus()
   mocks.mutateTonoStatus.mockReset().mockResolvedValue({ data: makeStatus() })
   mocks.tonoConnect.mockReset().mockResolvedValue(undefined)

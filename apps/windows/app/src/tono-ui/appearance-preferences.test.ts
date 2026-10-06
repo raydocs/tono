@@ -5,12 +5,13 @@ import {
   readAppearancePreferences,
   recordSceneProbe,
   setMotionPreference,
+  setNewAppearance,
 } from './appearance-preferences'
 
 it('persists a downgrade without repeating it until Auto is explicitly rearmed', () => {
   localStorage.removeItem('tono-ui-preferences')
   try {
-    expect(readAppearancePreferences().newAppearance).toBe(false)
+    expect(readAppearancePreferences().newAppearance).toBe(true)
     setMotionPreference('auto')
     const revision = readAppearancePreferences().revision
     const report = {
@@ -38,4 +39,14 @@ it('persists a downgrade without repeating it until Auto is explicitly rearmed',
   } finally {
     localStorage.removeItem('tono-ui-preferences')
   }
+})
+
+it('gives a fresh install the new appearance and keeps an explicit off', () => {
+  localStorage.clear()
+  expect(readAppearancePreferences().newAppearance).toBe(true)
+  setNewAppearance(false)
+  expect(readAppearancePreferences().newAppearance).toBe(false)
+  expect(JSON.parse(localStorage.getItem('tono-ui-preferences') ?? '{}')).toMatchObject({
+    newAppearance: false,
+  })
 })

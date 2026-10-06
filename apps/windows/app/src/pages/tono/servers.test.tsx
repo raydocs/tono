@@ -86,6 +86,8 @@ void i18n.use(initReactI18next).init({
 })
 
 beforeEach(() => {
+  // These cover the old look, which stays selectable; a fresh store now picks the new one.
+  setNewAppearance(false)
   vi.clearAllMocks()
   selectServerMock.mockResolvedValue(undefined)
   connectMock.mockResolvedValue(undefined)

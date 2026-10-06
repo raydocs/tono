@@ -22,8 +22,10 @@ interface AppearancePreferences {
 
 const KEY = 'tono-ui-preferences'
 const EVENT = 'tono-ui-preferences-changed'
+// The new appearance is the default from 0.0.75 (decision 065); only an explicit
+// off keeps the old look.
 const DEFAULT: AppearancePreferences = {
-  newAppearance: false,
+  newAppearance: true,
   firstConnectedHintSeen: false,
   motion: 'auto',
   automaticQuality: 'full',
@@ -50,7 +52,7 @@ export const readAppearancePreferences = (): AppearancePreferences => {
     const value = raw ? JSON.parse(raw) : null
     cache = {
       ...DEFAULT,
-      newAppearance: value?.newAppearance === true,
+      newAppearance: value?.newAppearance !== false,
       firstConnectedHintSeen: value?.firstConnectedHintSeen === true,
       motion: isMotionPreference(value?.motion) ? value.motion : 'auto',
       automaticQuality: isQuality(value?.automaticQuality)
