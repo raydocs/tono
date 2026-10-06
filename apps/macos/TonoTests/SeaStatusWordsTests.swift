@@ -4,18 +4,25 @@ import XCTest
 @MainActor
 final class SeaStatusWordsTests: XCTestCase {
     func testUnknownProtectionPreemptsAnApparentlyConnectedDisplayWord() {
-        XCTAssertEqual(SeaStatusWords.title(kind: .connected, connected: true, protectionBlocked: false, unknown: true, disconnecting: false),
-                       String(localized: "Protection status unconfirmed"))
+        XCTAssertEqual(SeaStatusWords.key(kind: .connected, connected: true, protectionBlocked: false, unknown: true, disconnecting: false),
+                       "Protection status unconfirmed")
     }
 
     func testADegradedFlagWithoutAConnectionNeverShowsConnected() {
-        XCTAssertEqual(SeaStatusWords.title(kind: .degraded, connected: false, protectionBlocked: false, unknown: false, disconnecting: false),
-                       String(localized: "Not connected"))
+        XCTAssertEqual(SeaStatusWords.key(kind: .degraded, connected: false, protectionBlocked: false, unknown: false, disconnecting: false),
+                       "Not connected")
     }
 
     func testARetryDisplayKindWithoutABarrierNeverClaimsProtected() {
-        XCTAssertEqual(SeaStatusWords.title(kind: .blocked, connected: false, protectionBlocked: false,
+        XCTAssertEqual(SeaStatusWords.key(kind: .blocked, connected: false, protectionBlocked: false,
                                             unknown: false, disconnecting: false),
-                       String(localized: "Not connected"))
+                       "Not connected")
+    }
+
+    func testBusyStateKeysUseTheSeaWordTableWithoutChangingLegacyKeys() {
+        XCTAssertEqual(SeaStatusWords.key(kind: .connecting, connected: false, protectionBlocked: false,
+                                          unknown: false, disconnecting: false), "sea.status.connecting")
+        XCTAssertEqual(SeaStatusWords.key(kind: .connecting, connected: false, protectionBlocked: false,
+                                          unknown: false, disconnecting: true), "sea.status.disconnecting")
     }
 }

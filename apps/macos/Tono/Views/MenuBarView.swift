@@ -60,14 +60,14 @@ struct MenuBarView: View {
     private var header: some View {
         HStack(spacing: 10) {
             Circle()
-                .fill(status.color)
+                .fill(seaAppearance && status.kind == .connecting ? SeaTheme.cool : status.color)
                 .frame(width: 8, height: 8)
                 .shadow(color: appState.isConnected ? TonoStatus.connected.opacity(0.6) : .clear, radius: 3)
             VStack(alignment: .leading, spacing: 1) {
                 if !seaAppearance {
                     Text("Tono").font(.system(size: 13, weight: .semibold))
                 }
-                Text(seaAppearance ? LocalizedStringKey(SeaStatusWords.title(kind: status.kind, connected: appState.isConnected, protectionBlocked: appState.isProtectionBlocked,
+                Text(seaAppearance ? LocalizedStringKey(SeaStatusWords.key(kind: status.kind, connected: appState.isConnected, protectionBlocked: appState.isProtectionBlocked,
                     unknown: appState.isProtectionUnconfirmed || appState.isProtectionBlockUnreadable,
                     disconnecting: appState.isDisconnecting)) : status.title)
                     .font(.system(size: seaAppearance ? 20 : 11, weight: seaAppearance ? .light : .regular))
@@ -76,10 +76,6 @@ struct MenuBarView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 0)
-            if seaAppearance {
-                Image(systemName: status.kind == .connected ? "sun.horizon" : "moon.stars")
-                    .font(.system(size: 15)).foregroundStyle(SeaTheme.muted).accessibilityHidden(true)
-            }
         }
         .padding(.horizontal, 16)
         .padding(.top, seaAppearance ? 16 : 12)

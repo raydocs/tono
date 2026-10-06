@@ -1,6 +1,9 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "Disconnect": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Disconnect"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "断开"}}}},
+    "sea.status.connecting": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Connecting"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "连接中"}}}},
+    "sea.status.disconnecting": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Disconnecting"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "断开中"}}}},
     "Protection status unconfirmed": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Protection status unconfirmed"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "保护状态未确认"}}}},
     "Protected, not connected": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Protected, not connected"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "保护中，未连上"}}}},
     "Cancel connection": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Cancel connection"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "取消连接"}}}},

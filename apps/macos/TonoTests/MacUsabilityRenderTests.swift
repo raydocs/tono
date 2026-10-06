@@ -1,6 +1,8 @@
 import AppKit
+import ImageIO
 import ScreenCaptureKit
 import SwiftUI
+import Vision
 import XCTest
 @testable import Tono
 
@@ -64,12 +66,27 @@ final class MacUsabilityRenderTests: XCTestCase {
     func testNativeUsabilityStatesProduceReviewableAttachments() async throws {
         try await capture("sea-night", width: 600, height: 400) {
             SeaScene(phase: .night, motionEnabled: false).frame(width: 600, height: 375)
+                .environment(\.seaDecorationsOverride, true)
         }
         try await capture("sea-confirmed", width: 600, height: 400) {
             SeaScene(phase: .day, motionEnabled: false).frame(width: 600, height: 375)
+                .environment(\.seaDecorationsOverride, true)
         }
         try await capture("sea-blocked", width: 600, height: 400) {
             SeaScene(phase: .blocked, motionEnabled: false).frame(width: 600, height: 375)
+                .environment(\.seaDecorationsOverride, true)
+        }
+        try await capture("sea-night-reduced", width: 600, height: 400) {
+            SeaScene(phase: .night, motionEnabled: false).frame(width: 600, height: 375)
+                .environment(\.seaDecorationsOverride, false)
+        }
+        try await capture("sea-confirmed-reduced", width: 600, height: 400) {
+            SeaScene(phase: .day, motionEnabled: false).frame(width: 600, height: 375)
+                .environment(\.seaDecorationsOverride, false)
+        }
+        try await capture("sea-blocked-reduced", width: 600, height: 400) {
+            SeaScene(phase: .blocked, motionEnabled: false).frame(width: 600, height: 375)
+                .environment(\.seaDecorationsOverride, false)
         }
         let suite = "tono-render-\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
@@ -99,14 +116,17 @@ final class MacUsabilityRenderTests: XCTestCase {
         app.isConnected = true
         try await captureDashboard("dashboard-sea-confirmed-normal", app: app, account: account,
                              sea: true, width: 920, height: 600)
+        try await captureDashboard("dashboard-sea-confirmed-decorated-normal", app: app, account: account,
+                             sea: true, width: 920, height: 600, decorations: true)
         app.isConnected = false
         app.isProtectionBlocked = true
         try await captureDashboard("dashboard-sea-blocked-minimum", app: app, account: account,
                              sea: true, width: 660, height: 540)
         app.recoveryCause = .wake
         app.protectedReconnectPausedForUserAction = true
+        let pausedFeedback = try XCTUnwrap(app.recoveryFeedback)
         try await captureDashboard("dashboard-sea-blocked-paused-recovery-minimum", app: app, account: account,
-                                   sea: true, width: 660, height: 540)
+                                   sea: true, width: 660, height: 540, recoveryFeedback: pausedFeedback)
         app.recoveryCause = nil
         app.protectedReconnectPausedForUserAction = false
         try await capture("settings-sea-normal", width: 920, height: 600, annotate: false, darkAppearance: true) {
@@ -216,7 +236,8 @@ final class MacUsabilityRenderTests: XCTestCase {
         let preferenceBefore = AppProfile.defaults.object(forKey: SeaAppearance.enabledKey) as? Bool
         let introBefore = AppProfile.defaults.object(forKey: SettingsKey.introSeen) as? Bool
         try await capture("servers-sea-normal", width: 760, height: 720, annotate: false, darkAppearance: true,
-                          nativeLabels: ["Servers", "Favorites", "Cloud Servers", "Remove favorite"]) {
+                          nativeLabels: ["Servers", "Favorites", "Cloud Servers", "Paris"],
+                          nativeAXLabels: ["Remove favorite"]) {
             ZStack { MeshGradientBackground(); ProxiesView() }
                 .modifier(SeaPageAppearance()).environment(\.seaAppearanceOverride, true)
                 .environment(app).environment(account)
@@ -278,15 +299,17 @@ final class MacUsabilityRenderTests: XCTestCase {
 
     private func captureDashboard(
         _ name: String, app: AppState, account: AccountSession,
-        sea: Bool, width: CGFloat, height: CGFloat
+        sea: Bool, width: CGFloat, height: CGFloat, recoveryFeedback: String? = nil, decorations: Bool? = nil
     ) async throws {
-        try await capture(name, width: width, height: height, annotate: false, darkAppearance: sea) {
+        try await capture(name, width: width, height: height, annotate: false, darkAppearance: sea,
+                          requiredRecoveryFeedback: recoveryFeedback) {
             ZStack {
                 MeshGradientBackground()
                 DashboardView()
             }
             .modifier(SeaPageAppearance())
             .environment(\.seaAppearanceOverride, sea)
+            .environment(\.seaDecorationsOverride, decorations)
             .environment(app)
             .environment(account)
         }
@@ -298,6 +321,8 @@ final class MacUsabilityRenderTests: XCTestCase {
         darkAppearance: Bool = false,
         nativeLabels: [String]? = nil,
         nativeIdentifiers: [String] = [],
+        nativeAXLabels: [String]? = nil,
+        requiredRecoveryFeedback: String? = nil,
         @ViewBuilder content: () -> Content
     ) async throws {
         let root = Group {
@@ -395,9 +420,10 @@ final class MacUsabilityRenderTests: XCTestCase {
                 let paused = name == "dashboard-sea-blocked-paused-recovery-minimum"
                 let labels = nativeLabels ?? ["Protected, not connected",
                     paused ? "Repair and reconnect" : "Retry now", "Restore internet"]
-                let identifiers = nativeLabels == nil && paused ? ["protectedRecoveryFeedback"] : nativeIdentifiers
                 await captureNativeWindowAcceptance(name, window: window, host: host, folder: folder,
-                    width: Int(width), height: Int(height), requiredLabels: labels, requiredIdentifiers: identifiers)
+                    width: Int(width), height: Int(height), requiredLabels: labels,
+                    requiredIdentifiers: nativeIdentifiers.isEmpty && paused ? ["protectedRecoveryFeedback"] : nativeIdentifiers, requiredRecoveryFeedback: requiredRecoveryFeedback,
+                    requiredAXLabels: nativeAXLabels)
             } else {
                 XCTFail("\(name): exact-window native acceptance unavailable; TEST_RUNNER_TONO_HOSTED_WINDOW_DIAGNOSTIC=1 required")
             }
@@ -412,7 +438,8 @@ final class MacUsabilityRenderTests: XCTestCase {
     /// Offscreen cacheDisplay output remains separate failed diagnostic evidence.
     private func captureNativeWindowAcceptance(
         _ name: String, window: NSWindow, host: NSView, folder: URL,
-        width: Int, height: Int, requiredLabels: [String], requiredIdentifiers: [String]
+        width: Int, height: Int, requiredLabels: [String], requiredIdentifiers: [String],
+        requiredRecoveryFeedback: String?, requiredAXLabels: [String]?
     ) async {
         var receipt = ["name=\(name)", "api=ScreenCaptureKit independent window"]
         defer {
@@ -433,6 +460,16 @@ final class MacUsabilityRenderTests: XCTestCase {
 
         let expectedPID = ProcessInfo.processInfo.processIdentifier
         receipt.append("windowNumber=\(window.windowNumber) processID=\(expectedPID) visible=\(window.isVisible) frame=\(window.frame)")
+        receipt.append("preCaptureWindow opaque=\(window.isOpaque) opacity=\(window.alphaValue) background=\(window.backgroundColor) hostBackground=\(host.layer?.backgroundColor.debugDescription ?? "nil")")
+        let processLanguage = Locale.preferredLanguages.first ?? "missing"
+        let bundleLanguage = Bundle.main.preferredLocalizations.first ?? "missing"
+        let testBundleLanguage = Bundle(for: type(of: self)).preferredLocalizations.first ?? "missing"
+        receipt.append("language source=English fixture strings processPreferred=\(processLanguage) bundlePreferred=\(bundleLanguage) testBundlePreferred=\(testBundleLanguage) AppleLanguages=\(ProcessInfo.processInfo.environment["AppleLanguages"] ?? "unset") SwiftUILocale=en")
+        guard processLanguage.lowercased().hasPrefix("en"), bundleLanguage.lowercased().hasPrefix("en") else {
+            receipt.append("acceptance=failed: process or app bundle preferred language is not English")
+            XCTFail("\(name): English native-text source not established before capture")
+            return
+        }
         guard window.windowNumber > 0, window.isVisible,
               window.frame.width == CGFloat(width), window.frame.height == CGFloat(height),
               !requiredLabels.isEmpty else {
@@ -487,6 +524,7 @@ final class MacUsabilityRenderTests: XCTestCase {
             configuration.width = width
             configuration.height = height
             configuration.showsCursor = false
+            receipt.append("captureTimeWindow opaque=\(window.isOpaque) opacity=\(window.alphaValue) background=\(window.backgroundColor) backgroundAlpha=\(window.backgroundColor.alphaComponent) appearance=\(window.effectiveAppearance.name.rawValue) frame=\(window.frame)")
             receipt.append("captureImageDeadline=10s")
             let image: CGImage = try await nativeWindowRequest("SCScreenshotManager.captureImage", timeout: 10) { complete in
                 SCScreenshotManager.captureImage(contentFilter: filter, configuration: configuration) { image, error in
@@ -523,22 +561,35 @@ final class MacUsabilityRenderTests: XCTestCase {
                 XCTFail("\(name): native PNG outside original 5KB..4MiB bounds")
                 return
             }
+            var fractional: [(Int, Int, CGFloat)] = []
             for y in 0..<bitmap.pixelsHigh {
                 for x in 0..<bitmap.pixelsWide {
-                    guard bitmap.colorAt(x: x, y: y)?.alphaComponent == 1 else {
-                        receipt.append("acceptance=failed: nonopaque pixel at \(x),\(y)")
-                        XCTFail("\(name): native image contains a transparent pixel")
-                        return
+                    let alpha = bitmap.colorAt(x: x, y: y)?.alphaComponent ?? 0
+                    if alpha != 1 {
+                        fractional.append((x, y, alpha))
                     }
                 }
             }
-            guard nativeContentIsVisible(host: host, window: window, bitmap: bitmap,
-                required: requiredLabels, requiredIdentifiers: requiredIdentifiers, receipt: &receipt) else {
+            nativeAXDiagnostic(host: host, window: window, required: requiredAXLabels ?? requiredLabels,
+                               requiredIdentifiers: requiredIdentifiers, receipt: &receipt)
+            let visualContentVisible = nativeVisionContentIsVisible(
+                image: image, bitmap: bitmap, required: requiredLabels,
+                recoveryFeedback: requiredRecoveryFeedback, receipt: &receipt)
+            if !fractional.isEmpty {
+                await nativeAlphaDiagnostic(name, window: window, expectedID: expectedID, expectedPID: expectedPID,
+                                            expectedFrame: windowServerFrame, original: image,
+                                            bitmap: bitmap, png: png, fractional: fractional, folder: folder,
+                                            receipt: &receipt)
+                receipt.append("acceptance=failed: \(fractional.count) original nonopaque pixels; original image remains sole acceptance source")
+                XCTFail("\(name): native image contains a transparent pixel")
+                return
+            }
+            guard visualContentVisible else {
                 receipt.append("acceptance=failed: fixture content/layout evidence")
                 XCTFail("\(name): native image lacks bounded fixture content/layout evidence")
                 return
             }
-            receipt.append("acceptance=passed: exact window, opaque native PNG and content/layout evidence")
+            receipt.append("acceptance=passed: exact window, original opaque native PNG and Vision glyph/layout evidence; AX/action/hardware unverified")
         } catch {
             let failure = error as NSError
             receipt.append("capture=failed: domain=\(failure.domain) code=\(failure.code) reason=\(failure.localizedDescription) userInfo=\(failure.userInfo)")
@@ -546,13 +597,15 @@ final class MacUsabilityRenderTests: XCTestCase {
         }
     }
 
-    /// Public in-process accessibility geometry must agree with visible pixels;
-    /// an opaque gradient alone cannot satisfy the Dashboard fixture contract.
-    private func nativeContentIsVisible(
-        host: NSView, window: NSWindow, bitmap: NSBitmapImageRep,
+    /// AX is a bounded diagnostic only; SwiftUI may not vend fixture children here.
+    private func nativeAXDiagnostic(
+        host: NSView, window: NSWindow,
         required: [String], requiredIdentifiers: [String], receipt: inout [String]
-    ) -> Bool {
-        guard host.window === window else { return false }
+    ) {
+        guard host.window === window else {
+            receipt.append("AX=unavailable: host/window mismatch; AX/action semantics unverified")
+            return
+        }
         var queue: [AnyObject] = [window, host]
         var visited = Set<ObjectIdentifier>()
         var matches: [String: NSRect] = [:]
@@ -589,7 +642,9 @@ final class MacUsabilityRenderTests: XCTestCase {
             if children.isEmpty, let object {
                 children = object.accessibilityAttributeValue(.children) as? [Any] ?? []
             }
-            receipt.append("AX[\(visited.count)] type=\(type(of: element)) label=\(label) value=\(stringValue ?? "") identifier=\(identifier) frame=\(String(describing: frame)) children=\(children.count)")
+            if visited.count <= 16 {
+                receipt.append("AX[\(visited.count)] label=\(label) value=\(stringValue ?? "") identifier=\(identifier) frame=\(String(describing: frame)) children=\(children.count)")
+            }
             for child in children {
                 if let child = child as? NSObject {
                     queue.append(child)
@@ -598,38 +653,215 @@ final class MacUsabilityRenderTests: XCTestCase {
                 }
             }
         }
-        receipt.append("accessibilityNodes=\(visited.count) unsupportedChildren=\(unsupportedChildren) matched=\(matches.keys.sorted())")
-        guard visited.count < 512, unsupportedChildren == 0,
-              required.allSatisfy({ matches[$0] != nil }) else { return false }
-        guard requiredIdentifiers.allSatisfy({ matches[$0] != nil }) else { return false }
-        for key in required + requiredIdentifiers {
-            guard let frame = matches[key], frame.width >= 10, frame.height >= 10,
-                  window.frame.contains(frame),
-                  nativePixelContrast(in: frame, windowFrame: window.frame, bitmap: bitmap, requireLightText: key == required.first) else {
-                receipt.append("contentMissingOrBlank=\(key) frame=\(String(describing: matches[key]))")
+        receipt.append("accessibilityNodes=\(visited.count) unsupportedChildren=\(unsupportedChildren) matched=\(matches.keys.sorted()) AX/action/identifier semantics=unverified")
+    }
+
+    /// Recognition is performed on the original accepted-source CGImage, never on
+    /// an AX string, a cacheDisplay image, or a recaptured replacement image.
+    private func nativeVisionContentIsVisible(
+        image: CGImage, bitmap: NSBitmapImageRep, required: [String],
+        recoveryFeedback: String?, receipt: inout [String]
+    ) -> Bool {
+        let request = VNRecognizeTextRequest()
+        request.recognitionLevel = .accurate
+        request.recognitionLanguages = ["en-US"]
+        request.usesLanguageCorrection = false
+        do {
+            try VNImageRequestHandler(cgImage: image, options: [:]).perform([request])
+        } catch {
+            receipt.append("Vision=failed: \(error)")
+            return false
+        }
+        let lines = (request.results ?? []).compactMap { observation -> (String, Float, CGRect)? in
+            guard let candidate = observation.topCandidates(1).first else { return nil }
+            return (candidate.string, candidate.confidence, observation.boundingBox)
+        }.sorted { left, right in
+            if abs(left.2.midY - right.2.midY) > 0.015 { return left.2.midY > right.2.midY }
+            return left.2.minX < right.2.minX
+        }
+        receipt.append("Vision lines=\(lines.count) recognition=accurate language=en-US correction=false")
+        for (index, line) in lines.prefix(80).enumerated() {
+            receipt.append("OCR[\(index)] text=\(line.0.debugDescription) confidence=\(line.1) box=\(line.2)")
+        }
+        if lines.count > 80 { receipt.append("OCR omittedLines=\(lines.count - 80)") }
+        guard !lines.isEmpty, lines.count <= 200 else { return false }
+        var expectations = required
+        if let recoveryFeedback {
+            guard !recoveryFeedback.isEmpty else { return false }
+            expectations.append(recoveryFeedback)
+            receipt.append("recoveryFeedbackWitness=complete visible app.recoveryFeedback; protectedRecoveryFeedback AX identifier unverified")
+        }
+        for (index, expected) in expectations.enumerated() {
+            let expectedTokens = nativeNormalizedTokens(expected)
+            guard !expectedTokens.isEmpty else { return false }
+            var matched = false
+            for start in lines.indices {
+                for end in start..<min(lines.count, start + 8) {
+                    let group = Array(lines[start...end])
+                    guard group.allSatisfy({ $0.1 >= 0.35 }) else { continue }
+                    let tokens = nativeNormalizedTokens(group.map { $0.0 }.joined(separator: " "))
+                    guard tokens.count >= expectedTokens.count else { continue }
+                    let containsExactTokens = (0...(tokens.count - expectedTokens.count)).contains {
+                        Array(tokens[$0..<($0 + expectedTokens.count)]) == expectedTokens
+                    }
+                    guard containsExactTokens else { continue }
+                    let bounds = group.map { $0.2 }.reduce(CGRect.null) { $0.union($1) }
+                    let pixelRect = NSRect(x: bounds.minX * CGFloat(image.width),
+                                           y: bounds.minY * CGFloat(image.height),
+                                           width: bounds.width * CGFloat(image.width),
+                                           height: bounds.height * CGFloat(image.height))
+                    let imageRect = NSRect(x: 0, y: 0, width: CGFloat(image.width), height: CGFloat(image.height))
+                    guard pixelRect.width >= 10, pixelRect.height >= 8,
+                          imageRect.contains(pixelRect),
+                          let lightness = nativePixelLightness(in: pixelRect, windowFrame: imageRect, bitmap: bitmap),
+                          lightness.high - lightness.low >= 0.08,
+                          index != 0 || lightness.high >= 0.75 else { continue }
+                    receipt.append("contentVisible=\(expected.debugDescription) OCRLines=\(start)...\(end) confidenceMin=\(group.map { $0.1 }.min() ?? 0) imageBox=\(pixelRect) lightnessLow=\(lightness.low) lightnessHigh=\(lightness.high)")
+                    matched = true
+                    break
+                }
+                if matched { break }
+            }
+            if !matched {
+                receipt.append("contentMissingOrBlank=\(expected.debugDescription) requiredExactNormalizedTokens=\(expectedTokens)")
                 return false
             }
-            receipt.append("contentVisible=\(key) frame=\(frame)")
         }
         return true
     }
 
-    private func nativePixelContrast(in screenFrame: NSRect, windowFrame: NSRect, bitmap: NSBitmapImageRep, requireLightText: Bool) -> Bool {
+    private func nativeNormalizedTokens(_ text: String) -> [String] {
+        let folded = text.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: Locale(identifier: "en_US"))
+        let normalized = folded.unicodeScalars.map {
+            CharacterSet.alphanumerics.contains($0) ? String($0) : " "
+        }.joined()
+        return normalized.split(whereSeparator: \.isWhitespace).map(String.init)
+    }
+
+    /// Diagnostic only. The first image still fails for any fractional pixel.
+    private func nativeAlphaDiagnostic(
+        _ name: String, window: NSWindow, expectedID: CGWindowID, expectedPID: pid_t,
+        expectedFrame: CGRect, original: CGImage,
+        bitmap: NSBitmapImageRep, png: Data, fractional: [(Int, Int, CGFloat)],
+        folder: URL, receipt: inout [String]
+    ) async {
+        receipt.append("alphaDiagnostic originalCG alphaInfo=\(original.alphaInfo.rawValue) bitmapInfo=\(original.bitmapInfo.rawValue) bitsPerPixel=\(original.bitsPerPixel) bitsPerComponent=\(original.bitsPerComponent) bytesPerRow=\(original.bytesPerRow) colorSpace=\(String(describing: original.colorSpace))")
+        receipt.append("alphaDiagnostic NSBitmap alpha=\(bitmap.hasAlpha) samplesPerPixel=\(bitmap.samplesPerPixel) bitsPerSample=\(bitmap.bitsPerSample) PNGBytes=\(png.count)")
+        let raw = original.dataProvider?.data as Data?
+        let pngBitmap = NSBitmapImageRep(data: png)
+        let minX = fractional.map { $0.0 }.min() ?? 0
+        let maxX = fractional.map { $0.0 }.max() ?? 0
+        let minY = fractional.map { $0.1 }.min() ?? 0
+        let maxY = fractional.map { $0.1 }.max() ?? 0
+        receipt.append("alphaDiagnostic fractionalCount=\(fractional.count) bbox=(\(minX),\(minY))...(\(maxX),\(maxY)) rawProviderBytes=\(raw?.count ?? 0) decodedPNG=\(pngBitmap != nil)")
+        for (x, y, alpha) in fractional.prefix(64) {
+            let adjacentFractional = fractional.filter {
+                abs($0.0 - x) <= 1 && abs($0.1 - y) <= 1 && ($0.0 != x || $0.1 != y)
+            }.count
+            let edgeDistance = [x, y, bitmap.pixelsWide - 1 - x, bitmap.pixelsHigh - 1 - y].min() ?? 0
+            let neighbors = (max(0, y - 1)...min(bitmap.pixelsHigh - 1, y + 1)).map { ny in
+                (max(0, x - 1)...min(bitmap.pixelsWide - 1, x + 1)).map { nx in
+                    let color = bitmap.colorAt(x: nx, y: ny)?.usingColorSpace(.deviceRGB)
+                    return "(\(nx),\(ny):\(color?.redComponent ?? -1),\(color?.greenComponent ?? -1),\(color?.blueComponent ?? -1),\(color?.alphaComponent ?? -1))"
+                }.joined(separator: " ")
+            }.joined(separator: " / ")
+            var rawRGBA = "unavailable"
+            if let raw, original.bitsPerPixel == 32, original.bitsPerComponent == 8 {
+                let offset = y * original.bytesPerRow + x * 4
+                if offset + 4 <= raw.count { rawRGBA = Array(raw[offset..<(offset + 4)]).description }
+            }
+            receipt.append("alphaPixel=(\(x),\(y)) NSAlpha=\(alpha) PNGAlpha=\(pngBitmap?.colorAt(x: x, y: y)?.alphaComponent ?? -1) raw4=\(rawRGBA) adjacentFractional=\(adjacentFractional) edgeDistance=\(edgeDistance) neighbors=\(neighbors)")
+        }
+        if fractional.count > 64 { receipt.append("alphaDiagnostic omittedPixelNeighborhoods=\(fractional.count - 64); original fractionalCount/bbox retained") }
+        let directURL = folder.appendingPathComponent(name + "-native-window-direct-imageio-diagnostic.png")
+        if let destination = CGImageDestinationCreateWithURL(directURL as CFURL, "public.png" as CFString, 1, nil) {
+            CGImageDestinationAddImage(destination, original, nil)
+            receipt.append("alphaDiagnostic directImageIOPNG=\(CGImageDestinationFinalize(destination) ? directURL.path : "encode failed") diagnosticOnly=true")
+        } else {
+            receipt.append("alphaDiagnostic directImageIOPNG=destination unavailable")
+        }
+        RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+        do {
+            receipt.append("alphaRepeat shareableContentDeadline=10s captureImageDeadline=10s diagnosticOnly=true")
+            guard window.windowNumber == Int(expectedID), window.isVisible,
+                  let info = (CGWindowListCopyWindowInfo([.optionIncludingWindow], expectedID) as? [[String: Any]])?.first(where: {
+                      ($0[kCGWindowNumber as String] as? NSNumber)?.uint32Value == expectedID
+                  }),
+                  (info[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value == expectedPID,
+                  (info[kCGWindowIsOnscreen as String] as? NSNumber)?.boolValue == true,
+                  let bounds = info[kCGWindowBounds as String] as? [String: Any],
+                  let frame = CGRect(dictionaryRepresentation: bounds as CFDictionary), frame == expectedFrame else {
+                receipt.append("alphaRepeat=failed exact own WindowServer source changed")
+                return
+            }
+            let content: SCShareableContent = try await nativeWindowRequest("alpha repeat shareable content", timeout: 10) { complete in
+                SCShareableContent.getCurrentProcessShareableContent { value, error in
+                    if let error { complete(.failure(error)) }
+                    else if let value { complete(.success(value)) }
+                    else { complete(.failure(NSError(domain: "TonoNativeWindowDiagnostic", code: 4))) }
+                }
+            }
+            guard let target = content.windows.first(where: {
+                $0.windowID == expectedID && $0.owningApplication?.processID == expectedPID
+            }), target.isOnScreen, target.frame == expectedFrame else {
+                receipt.append("alphaRepeat=failed exact own shareable source changed")
+                return
+            }
+            let configuration = SCStreamConfiguration()
+            configuration.width = original.width
+            configuration.height = original.height
+            configuration.showsCursor = false
+            let repeatFilter = SCContentFilter(desktopIndependentWindow: target)
+            let repeated: CGImage = try await nativeWindowRequest("alpha repeat exact-window image", timeout: 10) { complete in
+                SCScreenshotManager.captureImage(contentFilter: repeatFilter, configuration: configuration) { image, error in
+                    if let error { complete(.failure(error)) }
+                    else if let image { complete(.success(image)) }
+                    else { complete(.failure(NSError(domain: "TonoNativeWindowDiagnostic", code: 5))) }
+                }
+            }
+            guard repeated.width == original.width, repeated.height == original.height else {
+                receipt.append("alphaRepeat=failed image dimensions changed")
+                return
+            }
+            let repeatBitmap = NSBitmapImageRep(cgImage: repeated)
+            var count = 0
+            var first: String?
+            for y in 0..<repeatBitmap.pixelsHigh {
+                for x in 0..<repeatBitmap.pixelsWide {
+                    if repeatBitmap.colorAt(x: x, y: y)?.alphaComponent != 1 {
+                        count += 1
+                        if first == nil { first = "\(x),\(y)" }
+                    }
+                }
+            }
+            if let data = repeatBitmap.representation(using: .png, properties: [:]) {
+                let url = folder.appendingPathComponent(name + "-native-window-repeat-diagnostic.png")
+                try data.write(to: url, options: .atomic)
+                receipt.append("alphaRepeat=saved diagnosticOnly path=\(url.path) fractionalCount=\(count) first=\(first ?? "none")")
+            } else {
+                receipt.append("alphaRepeat=PNG encoding failed fractionalCount=\(count) first=\(first ?? "none")")
+            }
+        } catch {
+            receipt.append("alphaRepeat=failed \(error)")
+        }
+    }
+
+    private func nativePixelLightness(in screenFrame: NSRect, windowFrame: NSRect, bitmap: NSBitmapImageRep) -> (low: CGFloat, high: CGFloat)? {
         let minX = max(0, Int(screenFrame.minX - windowFrame.minX))
         let maxX = min(bitmap.pixelsWide - 1, Int(screenFrame.maxX - windowFrame.minX))
         let minY = max(0, Int(windowFrame.maxY - screenFrame.maxY))
         let maxY = min(bitmap.pixelsHigh - 1, Int(windowFrame.maxY - screenFrame.minY))
-        guard maxX > minX, maxY > minY else { return false }
+        guard maxX > minX, maxY > minY else { return nil }
         var low: CGFloat = 1
         var high: CGFloat = 0
         for y in stride(from: minY, through: maxY, by: 2) {
             for x in stride(from: minX, through: maxX, by: 2) {
-                guard let color = bitmap.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB) else { return false }
+                guard let color = bitmap.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB) else { return nil }
                 let luminance = 0.2126 * color.redComponent + 0.7152 * color.greenComponent + 0.0722 * color.blueComponent
                 low = min(low, luminance)
                 high = max(high, luminance)
             }
         }
-        return high - low >= 0.08 && (!requireLightText || high >= 0.75)
+        return (low, high)
     }
 }

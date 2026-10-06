@@ -99,3 +99,17 @@ struct SeaPageHeading: View {
         }
     }
 }
+
+/// Opt-in primary chrome; native legacy prominence remains unchanged off.
+struct SeaPrimaryAction: ViewModifier {
+    @SeaAppearancePreference private var enabled
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if enabled {
+            content.buttonStyle(GateProminentButtonStyle()).controlSize(.small)
+        } else {
+            content.buttonStyle(.borderedProminent)
+        }
+    }
+}

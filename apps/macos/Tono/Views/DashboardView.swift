@@ -152,8 +152,8 @@ struct DashboardView: View {
         }
     }
 
-    private var seaStatusTitle: String {
-        SeaStatusWords.title(kind: MenuBarProtectionStatus(appState).kind, connected: appState.isConnected, protectionBlocked: appState.isProtectionBlocked,
+    private var seaStatusKey: String {
+        SeaStatusWords.key(kind: MenuBarProtectionStatus(appState).kind, connected: appState.isConnected, protectionBlocked: appState.isProtectionBlocked,
             unknown: appState.isProtectionUnconfirmed || appState.isProtectionBlockUnreadable,
             disconnecting: appState.isDisconnecting)
     }
@@ -259,14 +259,16 @@ struct DashboardView: View {
     private var seaLineChip: some View {
         Button { appState.selectedPage = .proxies } label: {
             HStack(spacing: 8) {
-                Image(systemName: "network").accessibilityHidden(true)
+                Circle().fill(seaPhase == .day ? SeaTheme.warm : SeaTheme.cool.opacity(0.60))
+                    .frame(width: 6, height: 6).accessibilityHidden(true)
                 if let name = appState.activeNode?.name ?? appState.proxyService.activeNodeName {
                     Text(nodeRouteTitle(for: name)).lineLimit(1)
                     let runtime = appState.proxyService.node(named: name)
-                    Text(runtime?.lastTestFailed == true ? String(localized: "Timeout")
-                         : (runtime?.latency ?? 0) > 0 ? LatencyLevel.spokenTitle(for: runtime?.latency ?? 0, kind: .exit)
-                         : String(localized: "Not tested"))
-                        .foregroundStyle(SeaTheme.muted)
+                    if runtime?.lastTestFailed == true {
+                        Text("Timeout").foregroundStyle(SeaTheme.muted)
+                    } else if let latency = runtime?.latency, latency > 0 {
+                        Text(LatencyLevel.spokenTitle(for: latency, kind: .exit)).foregroundStyle(SeaTheme.muted)
+                    }
                 } else { Text("No server selected") }
                 Image(systemName: "chevron.down").accessibilityHidden(true)
             }
@@ -288,7 +290,7 @@ struct DashboardView: View {
 
     private var seaDashboardHeader: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text(seaStatusTitle)
+            Text(LocalizedStringKey(seaStatusKey))
                 .font(.system(size: showsConnectionDetails ? 32 : 44, weight: .light)).tracking(-0.7)
                 .foregroundStyle(SeaTheme.text)
                 .fixedSize(horizontal: false, vertical: true)

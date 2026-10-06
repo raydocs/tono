@@ -207,7 +207,7 @@ struct SupportReportConfirmationView: View {
                 Spacer()
                 if receipt == nil {
                     Button(sending ? String(localized: "Sending…") : String(localized: "Send this report"), action: confirm)
-                        .buttonStyle(.borderedProminent)
+                        .modifier(SeaPrimaryAction())
                         .disabled(sending || !canSend)
                         .accessibilityIdentifier("confirmSupportReport")
                 }

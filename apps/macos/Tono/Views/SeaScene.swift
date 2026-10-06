@@ -16,10 +16,20 @@ private struct SeaAppearanceOverrideKey: EnvironmentKey {
     static let defaultValue: Bool? = nil
 }
 
+private struct SeaDecorationsOverrideKey: EnvironmentKey {
+    static let defaultValue: Bool? = nil
+}
+
 extension EnvironmentValues {
     var seaAppearanceOverride: Bool? {
         get { self[SeaAppearanceOverrideKey.self] }
         set { self[SeaAppearanceOverrideKey.self] = newValue }
+    }
+
+    /// Render fixtures can show both appearances without changing accessibility preferences.
+    var seaDecorationsOverride: Bool? {
+        get { self[SeaDecorationsOverrideKey.self] }
+        set { self[SeaDecorationsOverrideKey.self] = newValue }
     }
 }
 
@@ -93,32 +103,94 @@ enum SeaPresentationPhase: Equatable {
     }
 }
 
-/// Static scene colors. Water begins with the exact last sky stop in every
-/// phase; a different first water stop reads as a false band at the horizon.
+/// The water is a dark base with a phase tint that fades before the foreground.
+/// Stops are the sRGB compositions of those two fields at the CSS control depths.
+struct SeaSceneRGB {
+    let red: Double
+    let green: Double
+    let blue: Double
+
+    init(hex: String) {
+        let value = Int(hex, radix: 16) ?? 0
+        red = Double((value >> 16) & 0xFF) / 255
+        green = Double((value >> 8) & 0xFF) / 255
+        blue = Double(value & 0xFF) / 255
+    }
+
+    private init(red: Double, green: Double, blue: Double) {
+        self.red = red
+        self.green = green
+        self.blue = blue
+    }
+
+    func mixed(with other: Self, amount: Double) -> Self {
+        Self(red: red * (1 - amount) + other.red * amount,
+             green: green * (1 - amount) + other.green * amount,
+             blue: blue * (1 - amount) + other.blue * amount)
+    }
+
+    var color: Color { Color(red: red, green: green, blue: blue) }
+}
+
 struct SeaScenePalette {
     let sky: [String]
-    let deepWater: String
+    let tintStart: String
+    let tintStartOpacity: Double
+    let tintMiddle: String
+    let tintMiddleOpacity: Double
+    let tintMiddleDepth: Double
+    let tintFadeDepth: Double
     let reflection: String
 
-    var water: [String] { [sky[2], deepWater, "05060A"] }
+    private func baseWater(at depth: Double) -> SeaSceneRGB {
+        SeaSceneRGB(hex: "0B0D19").mixed(with: SeaSceneRGB(hex: "05060A"), amount: depth)
+    }
+
+    var waterSurface: SeaSceneRGB {
+        baseWater(at: 0).mixed(with: SeaSceneRGB(hex: tintStart), amount: tintStartOpacity)
+    }
+
+    var waterStops: [Gradient.Stop] {
+        [.init(color: waterSurface.color, location: 0),
+         .init(color: baseWater(at: tintMiddleDepth)
+            .mixed(with: SeaSceneRGB(hex: tintMiddle), amount: tintMiddleOpacity).color,
+               location: tintMiddleDepth),
+         .init(color: baseWater(at: tintFadeDepth).color, location: tintFadeDepth),
+         .init(color: baseWater(at: 1).color, location: 1)]
+    }
 
     static func forPhase(_ phase: SeaPresentationPhase) -> Self {
         switch phase {
         case .day:
             return .init(sky: ["08070D", "42272B", "B66C4B"],
-                         deepWater: "301E25", reflection: "FFD9A0")
+                         tintStart: "FFA660", tintStartOpacity: 0.34,
+                         tintMiddle: "AA4036", tintMiddleOpacity: 0.12,
+                         tintMiddleDepth: 0.32, tintFadeDepth: 0.76,
+                         reflection: "FFD9A0")
         case .dawn:
             return .init(sky: ["070813", "392238", "A84A42"],
-                         deepWater: "291821", reflection: "FFAA73")
+                         tintStart: "CE4232", tintStartOpacity: 0.50,
+                         tintMiddle: "5C1628", tintMiddleOpacity: 0.26,
+                         tintMiddleDepth: 0.26, tintFadeDepth: 0.70,
+                         reflection: "FFAA73")
         case .dusk:
             return .init(sky: ["080811", "312039", "80363A"],
-                         deepWater: "211720", reflection: "E98167")
+                         tintStart: "CE4232", tintStartOpacity: 0.50,
+                         tintMiddle: "5C1628", tintMiddleOpacity: 0.26,
+                         tintMiddleDepth: 0.26, tintFadeDepth: 0.70,
+                         reflection: "E98167")
         case .blocked:
             return .init(sky: ["0A0912", "2D1D30", "753638"],
-                         deepWater: "20151D", reflection: "DE8069")
+                         tintStart: "CE4232", tintStartOpacity: 0.50,
+                         tintMiddle: "5C1628", tintMiddleOpacity: 0.26,
+                         tintMiddleDepth: 0.26, tintFadeDepth: 0.70,
+                         reflection: "DE8069")
         case .night:
-            return .init(sky: ["04050A", "1A1D38", "343A60"],
-                         deepWater: "121628", reflection: "CED8FF")
+            return .init(sky: ["04050A", "1A1D38", "505A91"],
+                         tintStart: "566294", tintStartOpacity: 0.50,
+                         tintMiddle: "262951", tintMiddleOpacity: 0.26,
+                         tintMiddleDepth: 0.26, tintFadeDepth: 0.70,
+                         reflection: "CED8FF")
         }
     }
 }
@@ -129,6 +201,7 @@ struct SeaScene: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.colorSchemeContrast) private var contrast
+    @Environment(\.seaDecorationsOverride) private var decorationsOverride
 
     var body: some View {
         GeometryReader { geometry in
@@ -138,7 +211,7 @@ struct SeaScene: View {
             let waterHeight = height - horizon
             let disc = min(max(height * 0.25, 120), 230)
             let palette = SeaScenePalette.forPhase(phase)
-            let decorationsEnabled = !reduceTransparency && contrast != .increased
+            let decorationsEnabled = decorationsOverride ?? (!reduceTransparency && contrast != .increased)
             ZStack(alignment: .topLeading) {
                 LinearGradient(colors: palette.sky.map(Color.init(hex:)),
                                startPoint: .top, endPoint: .bottom)
@@ -192,35 +265,45 @@ struct SeaScene: View {
                             .frame(width: disc * 1.36, height: disc * 1.36)
                             .position(x: width * 0.72, y: sunY(horizon: horizon, disc: disc))
                     }
+                    let sunFill = LinearGradient(
+                        colors: phase == .day
+                            ? [Color(hex: "FFF6DE"), Color(hex: "FFD58E"),
+                               Color(hex: "FFA35E"), Color(hex: "F2685A")]
+                            : [Color(hex: "FFB86E"), Color(hex: "FF7A44"),
+                               Color(hex: "E0403E"), Color(hex: "9A1E38")],
+                        startPoint: .top, endPoint: .bottom
+                    )
+                    if decorationsEnabled {
+                        Circle()
+                            .fill(sunFill)
+                            .frame(width: disc, height: disc)
+                            .blur(radius: disc * 0.02)
+                            .position(x: width * 0.72, y: sunY(horizon: horizon, disc: disc))
+                    }
                     Circle()
-                        .fill(LinearGradient(
-                            colors: phase == .day
-                                ? [Color(hex: "FFF6DE"), Color(hex: "FFD58E"),
-                                   Color(hex: "FFA35E"), Color(hex: "F2685A")]
-                                : [Color(hex: "FFB86E"), Color(hex: "FF7A44"),
-                                   Color(hex: "E0403E"), Color(hex: "9A1E38")],
-                            startPoint: .top, endPoint: .bottom
-                        ))
+                        .fill(sunFill)
                         .frame(width: disc, height: disc)
-                        .mask {
-                            Circle().fill(RadialGradient(
-                                stops: [.init(color: .black, location: 0),
-                                        .init(color: .black, location: 0.88),
-                                        .init(color: .clear, location: 1)],
-                                center: .center, startRadius: 0, endRadius: disc * 0.5
-                            ))
-                        }
                         .position(x: width * 0.72, y: sunY(horizon: horizon, disc: disc))
                 }
 
                 LinearGradient(
-                    colors: palette.water.map(Color.init(hex:)),
+                    stops: palette.waterStops,
                     startPoint: .top, endPoint: .bottom
                 )
                 .frame(height: waterHeight)
                 .offset(y: horizon)
 
                 if decorationsEnabled {
+                    Ellipse()
+                        .fill(RadialGradient(
+                            stops: [.init(color: Color(hex: palette.reflection).opacity(0.38), location: 0),
+                                    .init(color: Color(hex: phase == .night ? "566294" : "FF9664")
+                                        .opacity(0.12), location: 0.48),
+                                    .init(color: .clear, location: 1)],
+                            center: .center, startRadius: 0, endRadius: disc * 1.35
+                        ))
+                        .frame(width: disc * 2.7, height: 9)
+                        .position(x: width * (phase == .night ? 0.78 : 0.72), y: horizon + 3)
                     reflection(width: width, waterHeight: waterHeight, disc: disc,
                                palette: palette)
                         .frame(width: width, height: waterHeight)

@@ -32,3 +32,12 @@
 - 2026-10-06 状态词源码续核：旧 MenuBar.kind 可在 isConnected=false 时仍为 degraded，新词映射因此额外要求实际 isConnected 才显示 Connected；未知仍优先，已无连接的残留 degraded 只说 Not connected。不改原 status model/FSM/动作，新增一个窄投影回归（未本机运行），避免外观映射凭单独 degraded 标志误宣告连接成功。
 
 - 2026-10-06 同类投影续核：旧 kind.blocked 也用于 Waiting to retry，并非独自证明屏障；海景 Protected, not connected 额外要求实际 isProtectionBlocked 且未知标志不成立，否则说 Not connected/Protection status unconfirmed。新增一个无屏障重试 kind 的窄回归，原 FSM 与屏障读回仍不动；hosted 待验。
+
+- 2026-10-06 M5/M8 最后源码对照：菜单忙碌圆点新模式改冷色；报告确认动作新模式暖填充（关时保留原 native prominence）。状态映射输出资源 key，由真实 Text/SwiftUI locale 本地化，避免 Foundation 当前 locale 覆盖视图语言；新增仅海景 Connecting=连接中、Disconnecting=断开中两键，旧正在连接/正在断开译文保持。新增一个忙碌词表 key 回归，原生待hosted。
+
+- 2026-10-06 exact81e2d7c6/run37462290756：产品与测试原生编译通过；LocalizationCoverage 报新 Disconnect 缺zh-Hans，现补真实断开动作译文；native截图内容/少数alpha不足仍失败，窗口 backing 修正未解决，已保留原始新图/收据，下一步只审定该夹具证据策略，不跳过图像断言或包装成UI通过。
+
+- 2026-10-06 第二轮协作 MAC-REVIEW-2（不是owner验收）已读；root查看81e2确认连接/暂停恢复原生图及场景图：首页层级和浅字已可见，装饰路径尚无图证明、旧水色仍成光带、日轮遮罩边缘锯齿。M3继续in-PR，将用可注入只读装饰覆盖出开/关对照，按真实Windows源码撤回先前water==sky模型。首页芯片改静态相位点/真实线路，未知延迟省略（线路页Not tested不变）；菜单海景去重复月亮符号，原native状态项不动。首页“断线不漏IP”新保证文案暂未新增，保留当前事实型说明，协作建议不作为owner授权或安全证明。
+
+- 2026-10-06 M3/R1–R3 源码续修：加入只读 seaDecorationsOverride（nil仍尊重生产降低透明度/对比度），渲染明确输出夜/日/阻断装饰开关六图并增加真实首页装饰版；水面改独立深色底按相位着色并渐淡，第一色不再沿用sky末端；夜色为可辨靛蓝地平线，旧同色断言按被撤回的建议删除，改真实水面组合比天空暗的一个回归。日轮改普通Circle加装饰态柔边副本，短椭圆地平光代替全幅色带；无持续渲染/偏好写入/状态变化。source数学与diff检查通过，native图仍待新head。
+- 2026-10-06 原生证据裁定：只读arbiter据81e2的真实PNG/TXT确认SwiftUI托管AX只到HostingScrollView，不能靠再猜API证明画面；改用预选同一精确窗口原图的Vision英文文字/布局/对比度证据，捕获前记录并要求process与app-bundle英文。原AX保留诊断，绝不宣称动作、AX语义或恢复identifier通过；暂停态以真实app.recoveryFeedback完整可见文本作视觉证据。线路星号的Remove favorite本是不可见AX标签，不可用OCR冒充；视觉合同用真实Favorites/Paris行，原AX标签仍单独诊断未验。所有原图逐像素alpha1门槛保持，少数fractionalpixel继续使CI失败；增加真实window背景/不透明度、原CG/PNG/邻域与一次同来源重复捕获、ImageIO诊断，后者绝不择优替换原图。本机不跑原生，不以这些源码更改宣布绿色或UI/G1/G2验收。
