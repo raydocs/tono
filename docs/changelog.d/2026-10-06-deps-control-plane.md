@@ -1,6 +1,6 @@
 ## 2026-10-06 · services/control-plane npm dependencies to the newest supported versions
 - Owner: ops (dependency upkeep, not a ship gate); services/control-plane only.
-- Source: baseline `origin/main` c7d775176; branch `claude/deps-control-plane-20261006`; supersedes dependabot PR #1381 (its CI is red because it moves vitest to 5.x). PR opened from this branch; merge state is on the PR.
+- Source: baseline `origin/main` 5a77c6b68; branch `claude/deps-control-plane-20261006`, PR #1419; supersedes dependabot PR #1381 (its CI is red because it moves vitest to 5.x). Merge state is on the PR.
 - Bug fixes: none.
 - Updates (old -> new, `services/control-plane/package.json`; the lockfile carries the resolved versions):
   - `@cloudflare/workers-types` ^5.20260910.1 -> ^5.20261006.1 (resolved 5.20260911.1 -> 5.20261006.1)
