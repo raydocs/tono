@@ -19,7 +19,10 @@ export const PageHeader = ({
   return (
     <header className="tono-page-header">
       <div className="tono-page-header__copy">
-        <h1 className="tono-page-title" style={{ color: text.primary }}>
+        <h1
+          className="tono-page-title"
+          style={{ color: `var(--sea-text, ${text.primary})` }}
+        >
           {title}
         </h1>
         {subtitle && (

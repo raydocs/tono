@@ -648,8 +648,6 @@ export const translationKeys = [
   'tono.experience.repair',
   'tono.experience.repairing',
   'tono.experience.installHint',
-  'tono.nav.home',
-  'tono.nav.lines',
   'tono.nav.dashboard',
   'tono.nav.activity',
   'tono.nav.nodes',

@@ -81,6 +81,7 @@ export const ServicePrereqBanner = () => {
 
   return (
     <div
+      className="tono-attention"
       role="alert"
       style={{
         display: 'flex',
@@ -89,9 +90,9 @@ export const ServicePrereqBanner = () => {
         gap: 10,
         margin: '10px 16px 0',
         padding: '10px 12px',
-        borderRadius: 12,
-        background: hex(TONO_COLORS.error, dark ? 0.18 : 0.12),
-        border: `1px solid ${hex(TONO_COLORS.error, 0.35)}`,
+        borderRadius: 'var(--tono-attention-radius, 12px)',
+        background: `var(--tono-attention-background, ${hex(TONO_COLORS.error, dark ? 0.18 : 0.12)})`,
+        border: `1px solid var(--tono-attention-border, ${hex(TONO_COLORS.error, 0.35)})`,
         color: text.primary,
       }}
     >

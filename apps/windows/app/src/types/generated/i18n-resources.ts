@@ -1346,8 +1346,6 @@ export interface TranslationResources {
         account: string
         activity: string
         dashboard: string
-        home: string
-        lines: string
         nodes: string
         settings: string
         support: string

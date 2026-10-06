@@ -9,8 +9,8 @@ import { TonoIcon } from './TonoIcon'
 import { TonoLogo } from './TonoLogo'
 
 const links = [
-  ['/', 'tono.nav.home'],
-  ['/servers', 'tono.nav.lines'],
+  ['/', 'tono.nav.dashboard'],
+  ['/servers', 'tono.nav.nodes'],
   ['/activity', 'tono.nav.activity'],
   ['/account', 'tono.nav.account'],
 ] as const
@@ -51,7 +51,10 @@ export const SeaChrome = ({
       </div>
       {!login && (
         <div className="tono-sea-navigation">
-          <nav aria-label={t('tono.nav.home')} className="tono-sea-capsule">
+          <nav
+            aria-label={t('tono.nav.dashboard')}
+            className="tono-sea-capsule"
+          >
             {links.map(([path, label]) => (
               <NavLink key={path} to={path} end={path === '/'} viewTransition>
                 {t(label)}

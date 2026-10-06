@@ -235,7 +235,7 @@ describe('dashboard action-error ownership', () => {
 
     fireEvent.click(
       screen.getByRole('button', {
-        name: 'Standby — Click to connect',
+        name: 'Not connected — Click to connect',
       }),
     )
     await waitFor(() => expect(mocks.tonoConnect).toHaveBeenCalled())
@@ -271,7 +271,7 @@ describe('dashboard action-error ownership', () => {
 
     fireEvent.click(
       screen.getByRole('button', {
-        name: 'Standby — Click to connect',
+        name: 'Not connected — Click to connect',
       }),
     )
     await waitFor(() => expect(mocks.tonoConnect).toHaveBeenCalled())
@@ -307,7 +307,7 @@ describe('dashboard action-error ownership', () => {
     // A connect failure that arms the fail-closed barrier records a `retryNow`
     // owner so "Try again" drives `tono_retry_now` while blocked.
     fireEvent.click(
-      screen.getByRole('button', { name: 'Standby — Click to connect' }),
+      screen.getByRole('button', { name: 'Not connected — Click to connect' }),
     )
     await waitFor(() => expect(mocks.tonoConnect).toHaveBeenCalled())
     await waitFor(() => expect(mocks.mutateTonoStatus).toHaveBeenCalled())
@@ -364,13 +364,13 @@ describe('dashboard action-error ownership', () => {
       expect(screen.queryByRole('button', { name: 'Try again' })).toBeNull()
     })
     expect(
-      screen.getByRole('button', { name: 'Standby — Click to connect' }),
+      screen.getByRole('button', { name: 'Not connected — Click to connect' }),
     ).toBeDefined()
 
     mocks.tonoConnect.mockReset().mockResolvedValue(undefined)
     mocks.tonoRetryNow.mockReset()
     fireEvent.click(
-      screen.getByRole('button', { name: 'Standby — Click to connect' }),
+      screen.getByRole('button', { name: 'Not connected — Click to connect' }),
     )
     await waitFor(() => expect(mocks.tonoConnect).toHaveBeenCalledTimes(1))
     expect(mocks.tonoRetryNow).not.toHaveBeenCalled()
@@ -385,7 +385,7 @@ describe('dashboard action-error ownership', () => {
 
     fireEvent.click(
       screen.getByRole('button', {
-        name: 'Standby — Click to connect',
+        name: 'Not connected — Click to connect',
       }),
     )
     const alert = await screen.findByRole('alert')
@@ -413,7 +413,7 @@ describe('dashboard action-error ownership', () => {
 
     fireEvent.click(
       screen.getByRole('button', {
-        name: 'Standby — Click to connect',
+        name: 'Not connected — Click to connect',
       }),
     )
     await screen.findByRole('alert')
@@ -474,7 +474,7 @@ describe('dashboard connecting pill', () => {
 
     fireEvent.click(
       screen.getByRole('button', {
-        name: 'Standby — Click to connect',
+        name: 'Not connected — Click to connect',
       }),
     )
     await waitFor(() => expect(mocks.tonoConnect).toHaveBeenCalled())
@@ -491,7 +491,7 @@ describe('dashboard connecting pill', () => {
 
     fireEvent.click(
       screen.getByRole('button', {
-        name: 'Standby — Click to connect',
+        name: 'Not connected — Click to connect',
       }),
     )
     await waitFor(() =>
@@ -613,7 +613,7 @@ describe('dashboard claude residential route badge', () => {
 
     fireEvent.click(
       screen.getByRole('button', {
-        name: 'Standby — Click to connect',
+        name: 'Not connected — Click to connect',
       }),
     )
     await waitFor(() =>
@@ -630,7 +630,7 @@ describe('dashboard claude residential route badge', () => {
     renderDashboard()
     expect(
       await screen.findByRole('button', {
-        name: 'Standby — Click to connect',
+        name: 'Not connected — Click to connect',
       }),
     ).toBeDefined()
     expect(screen.queryByText('First connect')).toBeNull()
@@ -655,9 +655,7 @@ describe('dashboard claude residential route badge', () => {
     })
     renderDashboard()
     expect(
-      await screen.findByText(
-        "The connection didn't complete.",
-      ),
+      await screen.findByText("The connection didn't complete."),
     ).toBeDefined()
     expect(
       screen.getByRole('button', { name: 'Open Windows DNS settings' }),

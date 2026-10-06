@@ -19,6 +19,7 @@ export const TonoToggle = ({
 }: TonoToggleProps) => (
   <button
     type="button"
+    className="tono-toggle"
     role="switch"
     aria-checked={checked}
     aria-label={label}
@@ -34,7 +35,9 @@ export const TonoToggle = ({
       padding: 0,
       cursor: disabled ? 'default' : 'pointer',
       opacity: disabled ? 0.45 : 1,
-      background: checked ? TONO_COLORS.connected : 'rgba(142,142,147,0.45)',
+      background: checked
+        ? `var(--tono-toggle-on, ${TONO_COLORS.connected})`
+        : 'var(--tono-toggle-off, rgba(142,142,147,0.45))',
       transition: `background 0.22s ${TONO_EASE}`,
     }}
   >
@@ -43,13 +46,13 @@ export const TonoToggle = ({
       style={{
         position: 'absolute',
         top: 2,
-        left: checked ? 18 : 2,
+        left: `var(--tono-toggle-left, ${checked ? 18 : 2}px)`,
         width: 16,
         height: 16,
         borderRadius: '50%',
         background: '#fff',
         boxShadow: '0 1px 2px rgba(0,0,0,0.25)',
-        transition: `left 0.22s ${TONO_EASE}`,
+        transition: `var(--tono-toggle-transition, left 0.22s ${TONO_EASE})`,
       }}
     />
   </button>

@@ -191,7 +191,7 @@ describe('TrayPanel backup channel', () => {
     })
     render(<TrayPanel />, { wrapper: freshSWR })
 
-    fireEvent.click(screen.getByTitle('Switch node'))
+    fireEvent.click(screen.getByTitle('Switch server'))
     fireEvent.click(
       await screen.findByRole('button', { name: /Backup channel/ }),
     )
@@ -217,7 +217,7 @@ describe('TrayPanel backup channel', () => {
     })
     render(<TrayPanel />, { wrapper: freshSWR })
 
-    fireEvent.click(screen.getByTitle('Switch node'))
+    fireEvent.click(screen.getByTitle('Switch server'))
     const current = await waitFor(() => {
       const row = document.querySelector('.tono-tray-pick')
       if (!(row instanceof HTMLElement)) throw new Error('missing tray pick')
@@ -241,7 +241,7 @@ describe('TrayPanel backup channel', () => {
       }),
     )
     render(<TrayPanel />, { wrapper: freshSWR })
-    fireEvent.click(screen.getByTitle('Switch node'))
+    fireEvent.click(screen.getByTitle('Switch server'))
     fireEvent.click(
       await screen.findByRole('button', { name: /Backup channel/ }),
     )
@@ -250,7 +250,7 @@ describe('TrayPanel backup channel', () => {
     mocks.status = makeStatus({ uiState: 'connecting' })
     await act(async () => rejectConnect(new Error('already connecting')))
     await waitFor(() => expect(mocks.mutateTonoStatus).toHaveBeenCalledTimes(1))
-    expect(screen.getByTitle('Switch node').getAttribute('aria-expanded')).toBe(
+    expect(screen.getByTitle('Switch server').getAttribute('aria-expanded')).toBe(
       'false',
     )
     expect(screen.queryByRole('alert')).toBeNull()
@@ -260,23 +260,23 @@ describe('TrayPanel backup channel', () => {
       protectionBlocked: false,
     })
     mocks.tonoConnect.mockRejectedValueOnce(new Error('already connected'))
-    fireEvent.click(screen.getByTitle('Switch node'))
+    fireEvent.click(screen.getByTitle('Switch server'))
     fireEvent.click(
       await screen.findByRole('button', { name: /Backup channel/ }),
     )
     await waitFor(() => expect(mocks.mutateTonoStatus).toHaveBeenCalledTimes(2))
-    expect(screen.getByTitle('Switch node').getAttribute('aria-expanded')).toBe(
+    expect(screen.getByTitle('Switch server').getAttribute('aria-expanded')).toBe(
       'false',
     )
     expect(screen.queryByRole('alert')).toBeNull()
 
     mocks.tonoConnect.mockRejectedValueOnce(new Error('DNS restoration failed'))
-    fireEvent.click(screen.getByTitle('Switch node'))
+    fireEvent.click(screen.getByTitle('Switch server'))
     fireEvent.click(
       await screen.findByRole('button', { name: /Backup channel/ }),
     )
     expect(await screen.findByRole('alert')).toBeDefined()
-    expect(screen.getByTitle('Switch node').getAttribute('aria-expanded')).toBe(
+    expect(screen.getByTitle('Switch server').getAttribute('aria-expanded')).toBe(
       'true',
     )
     expect(mocks.mutateTonoStatus).toHaveBeenCalledTimes(2)

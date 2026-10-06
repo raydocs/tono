@@ -33,7 +33,7 @@ it('uses four capsule links and two icon routes only when the appearance is on',
   const navigation = screen.getByRole('navigation')
   expect(within(navigation).getAllByRole('link')).toHaveLength(4)
   expect(
-    screen.getByRole('link', { name: 'tono.nav.lines' }).getAttribute('href'),
+    screen.getByRole('link', { name: 'tono.nav.nodes' }).getAttribute('href'),
   ).toBe('/servers')
   expect(
     screen.getByRole('link', { name: 'tono.nav.support' }).getAttribute('href'),

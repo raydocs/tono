@@ -107,8 +107,6 @@
     "installHint": "If TonoService is not installed, reinstall the verified candidate instead of repeatedly reconnecting."
   },
   "nav": {
-    "home": "Home",
-    "lines": "Servers",
     "dashboard": "Dashboard",
     "activity": "Activity",
     "nodes": "Nodes",
@@ -120,13 +118,13 @@
     "open": "Open Tono",
     "quit": "Quit",
     "closeKeepsConnected": "Closing the window does not disconnect. Use the tray.",
-    "noServer": "No node selected",
+    "noServer": "No server selected",
     "connect": "Connect",
     "disconnect": "Disconnect",
     "retry": "Retry",
     "connecting": "Connecting…",
     "disconnecting": "Disconnecting…",
-    "pickNode": "Switch node"
+    "pickNode": "Switch server"
   },
   "activity": {
     "title": "Activity",
@@ -289,7 +287,7 @@
   },
   "pill": {
     "title": {
-      "notConnected": "Standby",
+      "notConnected": "Not connected",
       "connecting": "Connecting…",
       "connected": "Connected",
       "protectedOffline": "Protected, not connected",
@@ -386,7 +384,7 @@
       "disconnecting": "Disconnecting",
       "offline": "Protected offline",
       "protected": "Protected",
-      "standby": "Standby"
+      "standby": "Not connected"
     },
     "aiTraffic": {
       "title": "Today's AI traffic",
