@@ -448,10 +448,11 @@ async fn wait_for_lock_retry<Present: std::future::Future<Output = bool>>(
     adapter_was_present: bool,
     adapter_present: &mut impl FnMut() -> Present,
 ) {
-    if adapter_was_present {
-        tokio::time::sleep(LOCK_RETRY_INTERVAL).await;
-        return;
-    }
+    // RED: the old fixed grid, whatever the adapter does.
+    let _ = (adapter_was_present, &adapter_present, TUNNEL_ADAPTER_POLL_INTERVAL);
+    tokio::time::sleep(LOCK_RETRY_INTERVAL).await;
+    return;
+    #[allow(unreachable_code)]
     let deadline = tokio::time::Instant::now() + LOCK_RETRY_INTERVAL;
     loop {
         let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());

@@ -80,16 +80,11 @@ async fn ready_service_beside<Addresses, Image>(
     addresses: impl std::future::Future<Output = Addresses>,
     image: impl std::future::Future<Output = Image>,
 ) -> Result<(Addresses, Image), String> {
-    let service = async {
-        ready.await?;
-        learned_pins.await;
-        Ok::<(), String>(())
-    };
-    let ((), addresses, image) = tokio::try_join!(
-        service,
-        async { Ok::<Addresses, String>(addresses.await) },
-        async { Ok::<Image, String>(image.await) },
-    )?;
+    // RED: the old order, one read after another behind the readiness check.
+    ready.await?;
+    learned_pins.await;
+    let addresses = addresses.await;
+    let image = image.await;
     Ok((addresses, image))
 }
 
