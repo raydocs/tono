@@ -450,30 +450,42 @@ fn periodic_sync_interval() -> tokio::time::Interval {
     interval
 }
 
-/// Wait for this generation's next periodic catalog request: the short
+#[derive(Debug, PartialEq, Eq)]
+enum PeriodicSyncWake {
+    Catalog,
+    Policy,
+}
+
+/// Wait for this generation's next catalog request or the independent policy deadline: the short
 /// [`IDENTITY_PROPAGATING_RETRY`] while the latest sync ended on
-/// `EXIT_IDENTITY_PROPAGATING`, else the next 300 s tick. Returns whether it was
-/// the short retry; the regular period then restarts from it. The flag is read
+/// `EXIT_IDENTITY_PROPAGATING`, else the next 300 s tick. A short catalog retry
+/// restarts only the catalog period. The flag is read
 /// again every short period, so a manual refresh that ends on that answer during
 /// a 300 s wait still gets the short retry.
-async fn wait_for_next_catalog_sync(
+async fn wait_for_next_periodic_sync(
     interval: &mut tokio::time::Interval,
     state: &Arc<TonoState>,
     auth_generation: u64,
-) -> bool {
+    policy_due: tokio::time::Instant,
+) -> PeriodicSyncWake {
     loop {
         let propagating = {
             let inner = state.lock().await;
             inner.sign_in_generation == auth_generation && inner.catalog_identity_propagating
         };
         if propagating {
-            tokio::time::sleep(IDENTITY_PROPAGATING_RETRY).await;
-            interval.reset();
-            return true;
+            tokio::select! {
+                _ = tokio::time::sleep_until(policy_due) => return PeriodicSyncWake::Policy,
+                _ = tokio::time::sleep(IDENTITY_PROPAGATING_RETRY) => {
+                    interval.reset();
+                    return PeriodicSyncWake::Catalog;
+                }
+            }
         }
         // `Interval::tick` is cancel safe: losing this race consumes no tick.
         tokio::select! {
-            _ = interval.tick() => return false,
+            _ = tokio::time::sleep_until(policy_due) => return PeriodicSyncWake::Policy,
+            _ = interval.tick() => return PeriodicSyncWake::Catalog,
             _ = tokio::time::sleep(IDENTITY_PROPAGATING_RETRY) => {}
         }
     }
@@ -491,18 +503,22 @@ async fn spawn_periodic_inner(state: &Arc<TonoState>, app: &AppHandle, auth_gene
         // the shared interval, so the policy keeps its own deadline.
         let mut policy_synced_at = tokio::time::Instant::now();
         loop {
-            let propagating_retry = wait_for_next_catalog_sync(&mut interval, &task_state, auth_generation).await;
+            let wake = wait_for_next_periodic_sync(
+                &mut interval, &task_state, auth_generation, policy_synced_at + SYNC_INTERVAL,
+            ).await;
             if !periodic_sync_continues(&*task_state.lock().await, auth_generation) {
                 return;
             }
             // A failing sync never replaces the last verified copy (§3) and
             // never surfaces to the UI beyond the log.
-            let _ = sync_with_retries_inner(&task_state, &task_app, auth_generation).await;
-            if !periodic_sync_continues(&*task_state.lock().await, auth_generation) {
-                return;
+            if wake == PeriodicSyncWake::Catalog {
+                let _ = sync_with_retries_inner(&task_state, &task_app, auth_generation).await;
+                if !periodic_sync_continues(&*task_state.lock().await, auth_generation) {
+                    return;
+                }
             }
-            // The short retry asks for the catalog only; the policy keeps its period.
-            if propagating_retry && policy_synced_at.elapsed() < SYNC_INTERVAL {
+            // Catalog ticks never advance the policy's independent deadline.
+            if policy_synced_at.elapsed() < SYNC_INTERVAL {
                 continue;
             }
             // The cloud traffic policy rides the same cadence (Build 28).
@@ -782,7 +798,7 @@ mod tests {
         is_legacy_wire_name, names_equivalent, next_catalog_exit, periodic_sync_continues, periodic_sync_interval,
         region_rank, replacement_for_selection, residential_routing_changed, run_with_retries,
         selected_exit_still_present, sort_server_names, suspend_rejected_session, tcp_probe_socket,
-        wait_for_next_catalog_sync,
+        PeriodicSyncWake, wait_for_next_periodic_sync,
     };
     use std::collections::BTreeSet;
     use std::net::Ipv4Addr;
@@ -939,8 +955,24 @@ mod tests {
         // The immediate tick the periodic task skips after the login sync.
         interval.tick().await;
         let started = tokio::time::Instant::now();
-        assert!(wait_for_next_catalog_sync(&mut interval, &state, 4).await);
+        assert_eq!(wait_for_next_periodic_sync(&mut interval, &state, 4, started + super::SYNC_INTERVAL).await,
+            PeriodicSyncWake::Catalog);
         assert!(started.elapsed() <= std::time::Duration::from_secs(30));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn policy_deadline_survives_a_successful_short_catalog_retry() {
+        let state = std::sync::Arc::new(crate::tono::state::TonoState::for_test());
+        state.lock().await.sign_in_generation = 4;
+        let mut interval = periodic_sync_interval();
+        interval.tick().await;
+        let started = tokio::time::Instant::now();
+        tokio::time::advance(std::time::Duration::from_secs(285)).await;
+        // A short retry succeeded and reset the catalog period at t=285.
+        interval.reset();
+        assert_eq!(wait_for_next_periodic_sync(&mut interval, &state, 4, started + super::SYNC_INTERVAL).await,
+            PeriodicSyncWake::Policy);
+        assert_eq!(started.elapsed(), super::SYNC_INTERVAL, "the policy cannot wait for the next catalog at t=585");
     }
 
     #[test]

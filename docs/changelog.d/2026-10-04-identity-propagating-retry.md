@@ -9,3 +9,9 @@
 - 验证：本机 `services/control-plane`：新回归在旧代码上失败（`AssertionError: expected 200 to be 503`），修复后通过；`worker.test.ts` 207 通过；全量 vitest 1002 通过，`test/parser-properties.test.ts` 因本机借用的 node_modules 缺 `fast-check` 无法加载（环境问题，与本改动无关）。Rust 和 XCTest 本机未运行，由托管 CI 运行。没有实机验证。仅源码，无新候选。
 - 独立审查：Codex `gpt-6.1-sol` high 静态审查 `a97c963e...60c0b077`，无 major。两个 minor 已修：Windows 的短重试不再推迟或跳过已到期的策略同步；手动刷新在 300 秒等待期间遇到传播中，周期任务 15 秒内会发现并改用短重试。措辞 nit 已改：macOS 用完 20 次后的错误文案不再承诺自动重试。
 - 剩余限制：macOS 等待期间只显示原有的恢复/登录进度，没有「正在准备安全身份」的专门界面；Windows 在出口长期不确认时会每 15 秒请求一次，没有上限（只在登录会话内）；准入/认证路径改动，合并前需要独立的跨厂商审查。
+
+### 2026-10-06 · 补审与一轮 minor 修正
+- Codex `gpt-6.1-sol` high 在当前有效账户下只读补审 `60c0b077...9f9fe41c`：无 major 以上发现；旧账户的 401 任务不计通过。
+- 新 minor：短目录重试成功并清旗标后，策略虽有时间戳却不能按自己的期限唤醒，可能等到下一目录 tick；普通目录 tick 又可提前同步策略。已修：同一个周期任务分别选择目录 tick/15 秒重试与策略 deadline；纯策略唤醒不额外取目录，所有策略调用均先检查到期。
+- 一条 paused-clock 回归模拟 t=285 目录重试成功/reset，策略仍在 t=300 唤醒而不是 t=585；登出 abort、代际 fence 和历史 Delay catch-up 保持。
+- 本机只做 `git diff --check`（无输出）；原生回归未在 MacBook 执行，等待精确 head hosted CI 和窄复审。仅源码，无新候选、无客户源变动。
