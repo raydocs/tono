@@ -35,6 +35,7 @@ import {
 import './sea-home.css'
 
 const stages = Object.keys(CONNECT_STAGE_LABEL_KEYS)
+const CANCEL_GUARD_MS = 600
 const TextSwap = ({
   text,
   transitionKey = text,
@@ -261,6 +262,15 @@ export const SeaHome = ({
     return () => observer.disconnect()
   }, [])
   useHomeDialog(sheetOpen, sheetRef, detailsTriggerRef, closeSheet)
+  // The pill turns from Connect into Cancel in place. The second click of a double-click
+  // lands on Cancel, so it is ignored for a moment after that change.
+  const previousStateRef = useRef(state)
+  const becameCancelAtRef = useRef(0)
+  useEffect(() => {
+    if (state === 'connecting' && previousStateRef.current !== 'connecting')
+      becameCancelAtRef.current = Date.now()
+    previousStateRef.current = state
+  }, [state])
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (
@@ -273,6 +283,10 @@ export const SeaHome = ({
       )
         return
       if (event.key !== 'Enter' && event.key !== ' ') return
+      // A stray key must not end protection; disconnecting needs the button itself.
+      if (state === 'connected') return
+      // A confirmation that is open owns the keyboard.
+      if (document.querySelector('[role="dialog"][aria-modal="true"]')) return
       const focused = document.activeElement
       if (focused && focused !== document.body && focused !== rootRef.current)
         return
@@ -281,7 +295,7 @@ export const SeaHome = ({
     }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
-  }, [sheetOpen, linesOpen])
+  }, [sheetOpen, linesOpen, state])
 
   // The sentence in both cases names "restore normal internet"; the action
   // it names must be on the same screen.
@@ -399,7 +413,14 @@ export const SeaHome = ({
             type="button"
             className={`tono-home__pill ${state === 'notConnected' || state === 'protectedOffline' ? 'tono-home__primary' : 'tono-home__quiet'}`}
             disabled={state === 'disconnecting'}
-            onClick={() => onPrimary(failed)}
+            onClick={() => {
+              if (
+                state === 'connecting' &&
+                Date.now() - becameCancelAtRef.current < CANCEL_GUARD_MS
+              )
+                return
+              onPrimary(failed)
+            }}
           >
             <TextSwap text={action} />
           </button>

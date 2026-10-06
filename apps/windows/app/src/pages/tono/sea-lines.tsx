@@ -42,6 +42,8 @@ import './sea-lines.css'
 interface Props {
   servers?: TonoServer[]
   uiState?: TonoUiState
+  /** Live Service evidence, not the FSM state: only this may colour a line as good. */
+  protectionLive: boolean
   preferences?: TonoRoutePreferences
   recommendation: RouteRecommendation | null
   catalog?: TonoCatalogStatus
@@ -81,6 +83,7 @@ export const SeaLines = ({
   recommendation,
   pendingName,
   uiState,
+  protectionLive,
   latency,
   busy,
   saving,
@@ -193,7 +196,12 @@ export const SeaLines = ({
               onSelect(server.name, server.selected, server.available)
           }}
           onKeyDown={(event) => {
-            if (event.key.toLowerCase() === 'f') {
+            if (
+              event.key.toLowerCase() === 'f' &&
+              !event.ctrlKey &&
+              !event.metaKey &&
+              !event.altKey
+            ) {
               event.preventDefault()
               if (
                 preferences &&
@@ -337,20 +345,25 @@ export const SeaLines = ({
         </div>
         {recommended &&
           (recommended.selected && uiState === 'connected' ? (
-            <SeaTag kind="good">{t('tono.seaLines.inUse')}</SeaTag>
+            <SeaTag kind={protectionLive ? 'good' : 'quiet'}>
+              {t('tono.seaLines.inUse')}
+            </SeaTag>
           ) : (
-            <SeaButton
-              disabled={busy || !recommended.available}
-              onClick={() =>
-                onSelect(
-                  recommended.name,
-                  recommended.selected,
-                  recommended.available,
-                )
-              }
-            >
-              {t('tono.routes.useRecommendation')}
-            </SeaButton>
+            // Select only, as the explanation says: a running tunnel is switched from its row.
+            idle && (
+              <SeaButton
+                disabled={busy || !recommended.available}
+                onClick={() =>
+                  onSelect(
+                    recommended.name,
+                    recommended.selected,
+                    recommended.available,
+                  )
+                }
+              >
+                {t('tono.routes.useRecommendation')}
+              </SeaButton>
+            )
           ))}
       </SeaPanel>
       <SeaPopover anchor={help} onClose={() => setHelp(null)}>

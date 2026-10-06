@@ -1571,8 +1571,6 @@ export interface TranslationResources {
         motion: string
         motionHint: string
         networkBrief: string
-        preview: string
-        previewHint: string
         telemetryBrief: string
       }
       servers: {

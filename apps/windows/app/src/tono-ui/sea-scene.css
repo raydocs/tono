@@ -900,6 +900,19 @@
 .sea-scene[data-phase][data-motion="static"] * {
   transition: none;
 }
+/* A lite scene takes .sea-loop off these, so the pause rules miss them once it turns static. */
+.sea-scene[data-phase][data-motion="static"]
+:is(
+  .sea-cloud,
+  .sea-meteor,
+  .sea-sun-motion,
+  .sea-mirror-motion,
+  .sea-glow-pulse,
+  .sea-breathe,
+  .sea-moon-glow
+):not(.sea-loop) {
+  animation: none;
+}
 @media (prefers-reduced-motion: reduce), (forced-colors: active) {
   .sea-scene[data-phase][data-motion] * {
     transition: none;

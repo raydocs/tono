@@ -353,6 +353,17 @@ describe('sea sign-in', () => {
     await act(async () => vi.advanceTimersByTime(1000))
     expect(mocks.verify).toHaveBeenCalledTimes(1)
   })
+  it('takes the code, not the date beside it, from a pasted message', async () => {
+    setNewAppearance(true)
+    await enterCodeStep()
+    mocks.verify.mockRejectedValue(new Error('Unavailable'))
+    await act(async () =>
+      fireEvent.paste(screen.getByLabelText('6-digit code'), {
+        clipboardData: { getData: () => '2026-10-06 code 123456' },
+      }),
+    )
+    expect(mocks.verify).toHaveBeenCalledWith('person@example.com', '123456')
+  })
   it('clears only an invalid code in the new look, retaining the recovery error and retry input', async () => {
     setNewAppearance(true)
     await enterCodeStep()

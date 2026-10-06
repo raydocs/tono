@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 
 import type { TonoConnectProgress, TonoStatus } from '@/services/tono'
 import { hasLiveProtection } from '@/tono-ui/protection-evidence'
+import { whileVisible } from '@/tono-ui/while-visible'
 
 export const HOME_CONNECT_TIMES = {
   slow: 8_000,
@@ -30,12 +31,7 @@ export const useHomeTiming = (
     const start = Date.now() - recordedElapsed
     const tick = () =>
       setElapsed({ attempt, ms: Math.max(0, Date.now() - start) })
-    const initial = window.setTimeout(tick, 0)
-    const timer = window.setInterval(tick, HOME_CONNECT_TIMES.tick)
-    return () => {
-      window.clearTimeout(initial)
-      window.clearInterval(timer)
-    }
+    return whileVisible(tick, HOME_CONNECT_TIMES.tick)
   }, [state, attempt, recordedElapsed])
   useEffect(() => {
     if (!protectedNow) {
@@ -54,12 +50,7 @@ export const useHomeTiming = (
           Math.floor((Date.now() - since) / HOME_CONNECT_TIMES.minute),
         ),
       })
-    const initial = window.setTimeout(tick, 0)
-    const timer = window.setInterval(tick, HOME_CONNECT_TIMES.minute)
-    return () => {
-      window.clearTimeout(initial)
-      window.clearInterval(timer)
-    }
+    return whileVisible(tick, HOME_CONNECT_TIMES.minute)
   }, [protectedNow, owner, statusKnown])
   return {
     elapsed:
@@ -78,8 +69,7 @@ export const useRetryCountdown = (deadline: number | null | undefined) => {
   const [now, setNow] = useState(Date.now)
   useEffect(() => {
     if (deadline == null) return
-    const timer = window.setInterval(() => setNow(Date.now()), 1000)
-    return () => window.clearInterval(timer)
+    return whileVisible(() => setNow(Date.now()), 1000)
   }, [deadline])
   return deadline == null
     ? null

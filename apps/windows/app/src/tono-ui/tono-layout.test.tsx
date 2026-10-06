@@ -4,7 +4,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 vi.mock('./design-tokens.css', () => ({}))
 vi.mock('./tono.css', () => ({}))
 
-import { connectFromShortcut, handleTonoWindowShortcut } from './tono-layout'
+import {
+  applyWindowFrame,
+  connectFromShortcut,
+  handleTonoWindowShortcut,
+} from './tono-layout'
 
 const fire = (
   init: KeyboardEventInit,
@@ -65,5 +69,16 @@ describe('connectFromShortcut', () => {
       navigate,
     )
     expect(navigate).toHaveBeenCalledWith('/servers')
+  })
+})
+
+describe('applyWindowFrame', () => {
+  it('gives the old look its frame back when the window was restored frameless', async () => {
+    const target = {
+      isDecorated: vi.fn().mockResolvedValue(false),
+      setDecorations: vi.fn().mockResolvedValue(undefined),
+    }
+    expect(await applyWindowFrame(target, false)).toBe(true)
+    expect(target.setDecorations).toHaveBeenCalledWith(true)
   })
 })

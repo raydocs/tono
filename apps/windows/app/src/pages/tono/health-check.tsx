@@ -27,10 +27,13 @@ export const HealthCheck = ({
   actions,
   tools,
   technicalDetails,
+  technicalOpen,
 }: {
   actions?: ReactNode
   tools?: ReactNode
   technicalDetails?: ReactNode
+  /** A failure reported inside the details must not start out of sight. */
+  technicalOpen?: boolean
 } = {}) => {
   const { t } = useTranslation()
   const { newAppearance } = useAppearancePreferences()
@@ -323,7 +326,10 @@ export const HealthCheck = ({
       <div className="sea-support-content">
         {healthPanel}
         {tools}
-        <details className="sea-support-technical">
+        <details
+          className="sea-support-technical"
+          open={technicalOpen || undefined}
+        >
           <summary>{t('tono.progress.technicalDetails')}</summary>
           <div>
             {identityPanel}

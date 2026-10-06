@@ -41,12 +41,21 @@ it('persists a downgrade without repeating it until Auto is explicitly rearmed',
   }
 })
 
-it('gives a fresh install the new appearance and keeps an explicit off', () => {
+it('gives every install the new appearance, whatever an earlier build stored', () => {
   localStorage.clear()
   expect(readAppearancePreferences().newAppearance).toBe(true)
+  localStorage.setItem(
+    'tono-ui-preferences',
+    JSON.stringify({ newAppearance: false }),
+  )
+  expect(readAppearancePreferences().newAppearance).toBe(true)
+  localStorage.clear()
+})
+
+it('takes the first-frame flag off the document when the appearance is turned off', () => {
+  document.documentElement.dataset.seaAppearance = 'true'
   setNewAppearance(false)
-  expect(readAppearancePreferences().newAppearance).toBe(false)
-  expect(JSON.parse(localStorage.getItem('tono-ui-preferences') ?? '{}')).toMatchObject({
-    newAppearance: false,
-  })
+  expect(document.documentElement.dataset.seaAppearance).toBeUndefined()
+  setNewAppearance(true)
+  expect(document.documentElement.dataset.seaAppearance).toBe('true')
 })

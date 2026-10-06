@@ -22,8 +22,9 @@ interface AppearancePreferences {
 
 const KEY = 'tono-ui-preferences'
 const EVENT = 'tono-ui-preferences-changed'
-// The new appearance is the default from 0.0.75 (decision 065); only an explicit
-// off keeps the old look.
+// The new appearance is the only one from 0.0.75 (decision 066): nothing stored can
+// select the old look. Its code stays until the cleanup, reachable in this window only.
+let oldLook = false
 const DEFAULT: AppearancePreferences = {
   newAppearance: true,
   firstConnectedHintSeen: false,
@@ -52,7 +53,7 @@ export const readAppearancePreferences = (): AppearancePreferences => {
     const value = raw ? JSON.parse(raw) : null
     cache = {
       ...DEFAULT,
-      newAppearance: value?.newAppearance !== false,
+      newAppearance: !oldLook,
       firstConnectedHintSeen: value?.firstConnectedHintSeen === true,
       motion: isMotionPreference(value?.motion) ? value.motion : 'auto',
       automaticQuality: isQuality(value?.automaticQuality)
@@ -101,6 +102,16 @@ const subscribe = (notify: () => void) => {
     window.removeEventListener('storage', onStorage)
   }
 }
+// index.html sets the flag before first paint; afterwards it follows setNewAppearance.
+const syncDocumentFlag = () => {
+  if (readAppearancePreferences().newAppearance)
+    document.documentElement.dataset.seaAppearance = 'true'
+  else delete document.documentElement.dataset.seaAppearance
+}
+if (typeof window !== 'undefined') {
+  window.addEventListener(EVENT, syncDocumentFlag)
+  window.addEventListener('storage', syncDocumentFlag)
+}
 export const useAppearancePreferences = () =>
   useSyncExternalStore(subscribe, readAppearancePreferences, () => DEFAULT)
 
@@ -137,6 +148,7 @@ export const recordSceneProbe = (
 }
 
 export const setNewAppearance = (newAppearance: boolean) => {
+  oldLook = !newAppearance
   write({ ...readAppearancePreferences(), newAppearance })
 }
 export const markFirstConnectedHintSeen = () => {

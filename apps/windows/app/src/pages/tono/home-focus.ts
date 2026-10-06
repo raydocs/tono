@@ -21,7 +21,11 @@ export const useHomeDialog = (
       )
     const first = () => (items()[0] ?? element).focus()
     first()
+    // A confirmation opened from inside the sheet handles its own Escape and Tab first.
+    const nested = () =>
+      element.querySelector('[role="dialog"][aria-modal="true"]') !== null
     const onKey = (event: KeyboardEvent) => {
+      if (nested()) return
       if (event.key === 'Escape') {
         event.preventDefault()
         event.stopPropagation()

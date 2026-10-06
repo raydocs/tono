@@ -20,6 +20,7 @@ import {
 } from '@/hooks/use-tono'
 import enShared from '@/locales/en/shared.json'
 import enTono from '@/locales/en/tono.json'
+import delayManager from '@/services/delay'
 import { removeCacheData } from '@/services/query-client'
 import type { TonoServer, TonoStatus } from '@/services/tono'
 
@@ -418,11 +419,35 @@ it('new-look quick switch calls the existing native selection once without dupli
 
 it('new-look connecting action cancels through the existing Disconnect command once', async () => {
   setNewAppearance(true)
-  mocks.status = makeStatus({ uiState: 'connecting' })
+  // No barrier is held here; with one held the flyout offers no cancel (next test).
+  mocks.status = makeStatus({ uiState: 'connecting', protectionBlocked: false })
   render(<TrayPanel />, { wrapper: freshSWR })
   await act(async () =>
     fireEvent.click(screen.getByRole('button', { name: 'Cancel connection' })),
   )
   expect(mocks.tonoDisconnect).toHaveBeenCalledTimes(1)
   expect(mocks.tonoConnect).not.toHaveBeenCalled()
+})
+
+it('new-look tray offers no cancel while the barrier is held, since cancelling would release it unconfirmed', () => {
+  setNewAppearance(true)
+  mocks.status = makeStatus({ uiState: 'connecting', protectionBlocked: true })
+  render(<TrayPanel />, { wrapper: freshSWR })
+  expect(screen.queryByRole('button', { name: 'Cancel connection' })).toBeNull()
+  for (const button of screen.getAllByRole('button')) fireEvent.click(button)
+  expect(mocks.tonoDisconnect).not.toHaveBeenCalled()
+})
+
+it('new-look tray reads latency in milliseconds, as the home chip and the lines page do', () => {
+  setNewAppearance(true)
+  const cached = vi
+    .spyOn(delayManager, 'getDelayUpdate')
+    .mockReturnValue({ delay: 816, updatedAt: Date.now() })
+  mocks.status = makeStatus({ uiState: 'connected' })
+  try {
+    render(<TrayPanel />, { wrapper: freshSWR })
+    expect(screen.getByText(/816 ms/)).toBeTruthy()
+  } finally {
+    cached.mockRestore()
+  }
 })

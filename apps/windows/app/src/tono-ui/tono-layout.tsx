@@ -126,6 +126,23 @@ export const connectFromShortcut = async (
 }
 
 /**
+ * The new look is frameless and the old look has the Windows frame. The value read at startup
+ * cannot stand for the old look: the window-state plugin restores a frameless window as saved.
+ */
+export const applyWindowFrame = async (
+  target: {
+    isDecorated: () => Promise<boolean>
+    setDecorations: (decorated: boolean) => Promise<void>
+  },
+  newAppearance: boolean,
+) => {
+  const desired = !newAppearance
+  if ((await target.isDecorated()) === desired) return false
+  await target.setDecorations(desired)
+  return true
+}
+
+/**
  * The Tono application shell: frosted window background, 200px sidebar,
  * custom titlebar on undecorated windows, and the existing auth guard. The
  * MUI ThemeProvider stays for leftover setting widgets that still use MUI.
@@ -149,7 +166,6 @@ const TonoLayout = () => {
   const { currentWindow, toggleMaximize } = useWindowControls()
   const { newAppearance } = useAppearancePreferences()
   const { tone } = seaPresentation(status)
-  const originalDecorationsRef = useRef<boolean | null>(null)
   const decorationQueueRef = useRef(Promise.resolve())
   const scrollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   useEffect(
@@ -167,14 +183,10 @@ const TonoLayout = () => {
 
   useEffect(() => {
     if (OS !== 'windows' || isTrayRoute || decorated === null) return
-    originalDecorationsRef.current ??= decorated
-    const desired = newAppearance ? false : originalDecorationsRef.current
     decorationQueueRef.current = decorationQueueRef.current
       .then(async () => {
-        if ((await currentWindow.isDecorated()) !== desired) {
-          await currentWindow.setDecorations(desired)
+        if (await applyWindowFrame(currentWindow, newAppearance))
           await refreshDecorated()
-        }
       })
       .catch((error) =>
         console.warn(

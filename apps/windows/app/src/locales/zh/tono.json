@@ -777,8 +777,6 @@
     "exit": "线路"
   },
   "seaSettings": {
-    "preview": "新外观",
-    "previewHint": "在这台设备上使用海面与新控件。关闭后回到旧外观。",
     "motion": "动效",
     "motionHint": "自动模式在本机采样一次；减少动态效果或强制颜色时始终使用静态。",
     "learnMore": "了解更多",

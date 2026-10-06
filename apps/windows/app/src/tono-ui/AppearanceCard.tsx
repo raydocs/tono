@@ -3,11 +3,10 @@ import { useTranslation } from 'react-i18next'
 import {
   isMotionPreference,
   setMotionPreference,
-  setNewAppearance,
   useAppearancePreferences,
 } from './appearance-preferences'
 import { GlassCard } from './GlassCard'
-import { SeaSegmented, SeaToggle } from './SeaControls'
+import { SeaSegmented } from './SeaControls'
 
 /** Device-local presentation settings only; never writes native preferences. */
 export const AppearanceCard = () => {
@@ -18,17 +17,6 @@ export const AppearanceCard = () => {
       className={`sea-appearance-settings ${newAppearance ? '' : 'sea-appearance-legacy'}`}
     >
       <h2>{t('tono.settings.appearance.title')}</h2>
-      <div className="tono-row">
-        <div>
-          <span>{t('tono.seaSettings.preview')}</span>
-          <p>{t('tono.seaSettings.previewHint')}</p>
-        </div>
-        <SeaToggle
-          checked={newAppearance}
-          onChange={setNewAppearance}
-          label={t('tono.seaSettings.preview')}
-        />
-      </div>
       <div className="tono-row sea-motion-row">
         <div>
           <span>{t('tono.seaSettings.motion')}</span>

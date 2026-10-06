@@ -344,7 +344,8 @@
 .tono-home__sheet[data-open="true"] {
   opacity: 1;
   visibility: visible;
-  transform: translateY(0);
+  /* none, not translateY(0): a transform would confine a confirmation opened inside the sheet. */
+  transform: none;
   pointer-events: auto;
   transition-delay: 0s;
 }

@@ -5,6 +5,7 @@ import { afterEach, expect, it, vi } from 'vitest'
 import type { TonoStatus } from '@/services/tono'
 
 import { SeaBackdrop } from './SeaBackdrop'
+import { useSharedSeaBackdrop } from './use-shared-sea-backdrop'
 
 const native = vi.hoisted(() => ({
   status: { uiState: 'connecting' } as TonoStatus,
@@ -53,4 +54,34 @@ it('keeps one scene across a route visit and applies an away phase without repla
   )
   expect(container.querySelector('.sea-scene')).toBe(scene)
   expect(scene?.getAttribute('data-arrival')).toBe('false')
+})
+
+it('drops a home that is gone instead of keeping its sunrise without live protection', () => {
+  vi.stubGlobal('CSS', { supports: () => true })
+  vi.stubGlobal('matchMedia', () => ({
+    matches: false,
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+  }))
+  native.status = {
+    uiState: 'connected',
+    killSwitch: { wanted: true, live: false },
+  } as TonoStatus
+  const Home = () => {
+    useSharedSeaBackdrop('connected', undefined, 'connected')
+    return null
+  }
+  const { container, rerender } = render(
+    <SeaBackdrop enabled active>
+      <Home />
+    </SeaBackdrop>,
+  )
+  rerender(
+    <SeaBackdrop enabled active>
+      <span>Error</span>
+    </SeaBackdrop>,
+  )
+  expect(
+    container.querySelector('.sea-scene')?.getAttribute('data-phase'),
+  ).not.toBe('connected')
 })

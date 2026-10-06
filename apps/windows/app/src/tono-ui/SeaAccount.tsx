@@ -76,7 +76,6 @@ export const SeaAccount = ({
         >
           {t('tono.account.signOut')}
         </button>
-        <p>{t('tono.account.signOutConfirmMessage')}</p>
       </footer>
       {dialogs}
     </div>

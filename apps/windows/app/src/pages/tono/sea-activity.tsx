@@ -134,12 +134,15 @@ export const SeaActivity = ({
           if (connected) onFilter(value as SeaActivityFilter)
         }}
       />
-      <p className="sea-activity-summary">
-        {t('tono.seaActivity.summary', {
-          apps: connected ? apps.length : 0,
-          connections: connected ? rows.length : 0,
-        })}
-      </p>
+      {/* Without a reading there is no count to state, not a zero. */}
+      {connected && (
+        <p className="sea-activity-summary">
+          {t('tono.seaActivity.summary', {
+            apps: apps.length,
+            connections: rows.length,
+          })}
+        </p>
+      )}
       {!connected || !apps.length ? (
         reading ? (
           <div>
@@ -212,7 +215,9 @@ export const SeaActivity = ({
                     })}
                     onClick={() => onExplainApp(app.process)}
                   >
-                    {t('tono.routeExplanation.title')}
+                    {t('tono.routeExplanation.title', {
+                      name: processLabel(app.process),
+                    })}
                   </SeaButton>
                   {rows.filter((row) => row.process === app.process).length >
                     20 && <p>{t('tono.routeExplanation.limit')}</p>}

@@ -25,6 +25,7 @@ import {
 } from '@/services/tono'
 import { useAppearancePreferences } from '@/tono-ui/appearance-preferences'
 import { PageHeader } from '@/tono-ui/PageHeader'
+import { hasLiveProtection } from '@/tono-ui/protection-evidence'
 import {
   TONO_COLORS,
   TONO_EASE,
@@ -522,6 +523,7 @@ const ServersPage = () => {
       <SeaLines
         servers={servers}
         uiState={status?.uiState}
+        protectionLive={hasLiveProtection(status)}
         preferences={preferences}
         recommendation={recommendation}
         catalog={catalog}

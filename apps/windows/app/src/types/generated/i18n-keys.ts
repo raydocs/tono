@@ -1172,8 +1172,6 @@ export const translationKeys = [
   'tono.seaIntro.line',
   'tono.seaActivity.summary',
   'tono.seaActivity.exit',
-  'tono.seaSettings.preview',
-  'tono.seaSettings.previewHint',
   'tono.seaSettings.motion',
   'tono.seaSettings.motionHint',
   'tono.seaSettings.learnMore',

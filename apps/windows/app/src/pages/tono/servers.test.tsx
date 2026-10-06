@@ -794,3 +794,15 @@ it('titles the sea lines page with the word the navigation uses', async () => {
     setNewAppearance(false)
   }
 })
+
+it('does not paint the in-use mark as good while protection has no live evidence', async () => {
+  // The mocked status reports connected and carries no kill-switch evidence.
+  uiStateMock.mockReturnValue('connected')
+  const { unmount } = renderSeaRoutes()
+  try {
+    expect((await screen.findByText('In use')).dataset.kind).not.toBe('good')
+  } finally {
+    unmount()
+    setNewAppearance(false)
+  }
+})

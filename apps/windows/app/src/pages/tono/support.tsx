@@ -590,7 +590,7 @@ const SupportPage = () => {
           }
           tools={
             <div className="sea-support-tools">
-              <details>
+              <details open={terminalEnv?.hasConflict || undefined}>
                 <summary>{t('tono.support.terminalEnv.title')}</summary>
                 {terminalPanel}
               </details>
@@ -600,6 +600,7 @@ const SupportPage = () => {
               </details>
             </div>
           }
+          technicalOpen={Boolean(reportError)}
           technicalDetails={
             <>
               {summaryPanel}

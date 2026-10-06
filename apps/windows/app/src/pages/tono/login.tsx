@@ -42,6 +42,17 @@ const SENT_ACK_MS = 1500
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
+/**
+ * The code in pasted text: six digits standing alone, so a date or year in the same
+ * message is not read as the code; otherwise its digits when there are at most six.
+ */
+const pastedCode = (text: string) => {
+  const alone = text.match(/(?<!\d)\d{6}(?!\d)/)
+  if (alone) return alone[0]
+  const digits = text.replace(/\D/g, '')
+  return digits.length <= 6 ? digits : ''
+}
+
 const AUTH_ERROR_CODES = new Set([
   'TONO_AUTH_UNREACHABLE',
   'TONO_AUTH_DNS',
@@ -178,6 +189,7 @@ const LoginPage = () => {
     setCode('')
     setError(null)
     setAuthFailureSummary(null)
+    setRejectedAttempt(0)
     autoSubmittedCodeRef.current = null
   }
 
@@ -777,12 +789,10 @@ const LoginPage = () => {
                       newAppearance
                         ? (event) => {
                             event.preventDefault()
-                            setCode(
-                              event.clipboardData
-                                .getData('text')
-                                .replace(/\D/g, '')
-                                .slice(0, 6),
+                            const pasted = pastedCode(
+                              event.clipboardData.getData('text'),
                             )
+                            if (pasted) setCode(pasted)
                           }
                         : undefined
                     }

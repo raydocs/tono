@@ -16,6 +16,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import enShared from '@/locales/en/shared.json'
 import enTono from '@/locales/en/tono.json'
 import type { TonoConnectProgress, TonoStatus } from '@/services/tono'
+import { setNewAppearance } from '@/tono-ui/appearance-preferences'
 
 const mocks = vi.hoisted(() => ({
   status: {} as TonoStatus,
@@ -280,14 +281,15 @@ it('traps sheet focus and returns it to Details on Escape', () => {
   fireEvent.keyDown(document, { key: 'Escape' })
   expect(document.activeElement).toBe(trigger)
 })
-it('keeps the legacy overview when the appearance switch is off', () => {
-  localStorage.setItem(
-    'tono-ui-preferences',
-    JSON.stringify({ newAppearance: false }),
-  )
-  const { container } = render(view())
-  expect(container.querySelector('.sea-scene')).toBeNull()
-  expect(screen.getByText(enTono.dashboard.title)).toBeDefined()
+it('keeps the legacy overview while the old look is selected in this window', () => {
+  setNewAppearance(false)
+  try {
+    const { container } = render(view())
+    expect(container.querySelector('.sea-scene')).toBeNull()
+    expect(screen.getByText(enTono.dashboard.title)).toBeDefined()
+  } finally {
+    setNewAppearance(true)
+  }
 })
 it('shows the first protected-connect hint only on its first home visit', () => {
   mocks.status.uiState = 'connected'
@@ -564,4 +566,71 @@ it('opens a scrollable line picker downward when 255 pixels remain below the chi
   } finally {
     geometry.mockRestore()
   }
+})
+
+it('does not disconnect on a stray Enter while connected', () => {
+  mocks.status.uiState = 'connected'
+  mocks.status.killSwitch = {
+    wanted: true,
+    live: true,
+  } as TonoStatus['killSwitch']
+  render(view())
+  fireEvent.keyDown(document, { key: 'Enter' })
+  expect(mocks.disconnect).not.toHaveBeenCalled()
+})
+
+it('holds the protected-duration timer while the window is hidden and catches up on return', () => {
+  vi.useFakeTimers()
+  mocks.status.uiState = 'connected'
+  mocks.status.killSwitch = {
+    wanted: true,
+    live: true,
+  } as TonoStatus['killSwitch']
+  render(view())
+  const sentence = () => screen.getByTestId('tono-home-sentence').textContent
+  const visibility = vi.spyOn(document, 'visibilityState', 'get')
+  visibility.mockReturnValue('hidden')
+  act(() => {
+    document.dispatchEvent(new Event('visibilitychange'))
+    vi.advanceTimersByTime(60_000)
+  })
+  expect(sentence()).toContain('Just connected')
+  visibility.mockReturnValue('visible')
+  act(() => {
+    document.dispatchEvent(new Event('visibilitychange'))
+    vi.advanceTimersByTime(0)
+  })
+  expect(sentence()).toContain('Protected for 1 minute')
+  visibility.mockRestore()
+})
+
+it('leaves the keyboard to an open confirmation instead of pressing the primary action behind it', () => {
+  mocks.status.uiState = 'protectedOffline'
+  mocks.status.protectionBlocked = true
+  mocks.status.killSwitch = {
+    wanted: true,
+    live: true,
+  } as TonoStatus['killSwitch']
+  render(view())
+  fireEvent.click(
+    screen.getByRole('button', { name: 'Restore Normal Internet' }),
+  )
+  ;(document.activeElement as HTMLElement).blur()
+  fireEvent.keyDown(document, { key: 'Enter' })
+  expect(mocks.retry).not.toHaveBeenCalled()
+})
+
+it('ignores the second click of a double-click that lands on Cancel just after Connect', () => {
+  vi.useFakeTimers()
+  const home = render(view())
+  fireEvent.click(screen.getByRole('button', { name: 'Connect' }))
+  mocks.status = { ...mocks.status, uiState: 'connecting' }
+  home.rerender(view())
+  fireEvent.click(screen.getByRole('button', { name: 'Cancel connection' }))
+  expect(mocks.disconnect).not.toHaveBeenCalled()
+  act(() => {
+    vi.advanceTimersByTime(600)
+  })
+  fireEvent.click(screen.getByRole('button', { name: 'Cancel connection' }))
+  expect(mocks.disconnect).toHaveBeenCalledTimes(1)
 })

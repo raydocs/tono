@@ -45,6 +45,7 @@ import {
   tonoServers,
   type TonoUiState,
 } from '@/services/tono'
+import { CONNECT_STAGE_LABEL_KEYS } from '@/tono-ui/connect-stages'
 import { hasLiveProtection } from '@/tono-ui/protection-evidence'
 import { TONO_COLORS, TONO_MONO_STACK, tonoText } from '@/tono-ui/theme'
 import { TonoIcon } from '@/tono-ui/TonoIcon'
@@ -54,6 +55,7 @@ import parseTraffic from '@/utils/parse-traffic'
 import { useAppearancePreferences } from './appearance-preferences'
 import { seaPresentation } from './sea-presentation'
 import { SeaTray } from './SeaTray'
+import { whileVisible } from './while-visible'
 
 const STATUS_LABEL: Record<TonoUiState, string> = {
   notConnected: 'tono.dashboard.status.standby',
@@ -115,16 +117,18 @@ export const TrayPanel = () => {
   }, [newAppearance])
   useEffect(() => {
     if (!newAppearance) return
-    const timer = window.setInterval(() => setNow(Date.now()), 1000)
-    return () => window.clearInterval(timer)
+    // The flyout stays loaded while closed; its clock must not keep running there.
+    return whileVisible(() => setNow(Date.now()), 1000)
   }, [newAppearance])
   const dark = useThemeMode() !== 'light'
   const text = tonoText(dark)
   const { status, mutateTonoStatus } = useTonoStatus()
   const uiState: TonoUiState = status?.uiState ?? 'notConnected'
   const color = STATUS_COLOR[uiState]
+  // Cancelling while the barrier is held releases it. That needs the confirmation the
+  // main window shows, so the flyout offers no cancel then.
   const action =
-    newAppearance && uiState === 'connecting'
+    newAppearance && uiState === 'connecting' && !status?.protectionBlocked
       ? 'disconnect'
       : actionFor(uiState)
   const busy = action == null
@@ -266,7 +270,10 @@ export const TrayPanel = () => {
     const presentation = seaPresentation(status)
     const subtitle =
       uiState === 'connecting'
-        ? (status?.stageLabel ?? t('tono.tray.connecting'))
+        ? t(
+            (status?.stage && CONNECT_STAGE_LABEL_KEYS[status.stage]) ||
+              'tono.tray.connecting',
+          )
         : uiState === 'protectedOffline' && progress?.nextRetryAtMs
           ? t('tono.progress.retryIn', {
               n: progress.retryAttempt,
@@ -276,7 +283,8 @@ export const TrayPanel = () => {
               ),
             })
           : latency != null
-            ? t(latencyLabelKey('cached', latency), latencyLabelVars(latency))
+            ? // The same unit as the home chip and the lines page.
+              `${Math.round(latency)} ms`
             : ''
     return (
       <SeaTray
