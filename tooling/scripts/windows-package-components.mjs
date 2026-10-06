@@ -13,12 +13,13 @@ import path from 'node:path'
 import process from 'node:process'
 import { pathToFileURL } from 'node:url'
 
-const INSTALLED = { app: 'Tono.exe.next', core: 'tono-core.exe.next', privileged: 'resources/tono-service.exe' }
+const INSTALLED = { app: 'Tono.exe.next', core: 'tono-core.exe.next', privileged: 'resources/tono-service.exe', singBox: 'sing-box.exe.next' }
 
 // Installed location for a file carrying a component's name, or null.
 function installedPath(name) {
   if (/^tono\.exe\.next$/i.test(name)) return INSTALLED.app
   if (/^tono-core\.exe\.next$/i.test(name)) return INSTALLED.core
+  if (/^sing-box\.exe\.next$/i.test(name)) return INSTALLED.singBox
   if (/^tono-service[A-Za-z0-9._-]*\.exe$/i.test(name)) return `resources/${name}`
   return null
 }
@@ -60,8 +61,6 @@ export async function windowsPackageComponents(root) {
     }
   }
   const measured = Object.fromEntries(Object.entries(INSTALLED).map(([role, expected]) => [role, path.join(root, installed(expected))]))
-  const singBox = byPath.get('sing-box.exe.next')
-  if (singBox) measured.singBox = path.join(root, singBox)
   return measured
 }
 
@@ -74,8 +73,8 @@ async function main() {
     `WINDOWS_APP=${measured.app}`,
     `WINDOWS_CORE=${measured.core}`,
     `WINDOWS_SERVICE=${measured.privileged}`,
+    `WINDOWS_SING_BOX=${measured.singBox}`,
   ]
-  if (measured.singBox) lines.push(`WINDOWS_SING_BOX=${measured.singBox}`)
   console.log(lines.join('\n'))
 }
 

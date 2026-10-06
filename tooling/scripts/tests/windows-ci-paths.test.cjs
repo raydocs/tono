@@ -212,6 +212,19 @@ test('paired candidates share one source and sequence without granting signing o
   }
 })
 
+test('Windows candidate provenance and both publication measurements always include sing-box', () => {
+  const candidate = load(readFileSync(path.join(root, '.github/workflows/windows-candidate.yml'), 'utf8'))
+  const signing = load(readFileSync(path.join(root, '.github/workflows/desktop-update-sign.yml'), 'utf8'))
+  const provenance = candidate.jobs.build.steps.find(step => step.name === 'Inspect installer payload and record provenance')
+  assert.ok(provenance.run.includes("$files += (Resolve-Path src-tauri/sidecar/sing-box-x86_64-pc-windows-msvc.exe).Path"))
+  const candidateMeasure = candidate.jobs.build.steps.find(step => step.run?.includes('--target windows-x86_64'))
+  const signedMeasure = signing.jobs['windows-verify'].steps.find(step => step.id === 'measure')
+  for (const step of [candidateMeasure, signedMeasure]) {
+    assert.ok(step.run.includes("'--sing-box',"))
+    assert.ok(!/if\s*\([^\n]*WINDOWS_SING_BOX/.test(step.run), 'sing-box cannot be an optional measurement input')
+  }
+})
+
 test('ci-gate reuses the Windows and macOS push path lists for pull requests', async () => {
   const { filtersFromRepo, pushPathList } = await import('../ci-gate-changes.mjs')
   const filters = filtersFromRepo(root)
