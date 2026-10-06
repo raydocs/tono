@@ -31,3 +31,5 @@
 - Full 水面 idle/connected 原图分别有 67811/89298 个变化像素，天空变化按 owner 回复允许。arm64、低电量关，5s 自身 user+system/wall：可见 idle0.418%、connected0.395%；隐藏0.347%，时钟速度断言0通过但不能声称进程 CPU 真为0。该数值仍只是合成 UI host，没有网络/helper 负载。
 - 夹具需修：NSHostingView 自动尺寸 + AppKit 小屏约束使920×600变920×604、1280×720变1024×677；1280状态继承了上轮Settings选择，页面截图还处在过渡。修为固定请求原生窗口面、不裁切或放大PNG、每个稳态页面初次挂载，尺寸直接断言；此前图保留为失败证据。
 - 窄呈现续修：星点层级的CSS opacity覆盖不是乘积；低电量暂停Auto采样，已测Static不被电量事件提升。加实际层级与质量回归，等待新head托管执行。
+
+- 第六轮454a26ff / [37532863763](https://github.com/raydocs/tono/actions/runs/37532863763)：634 XCTest，1skipped、17failures；星点层级/低电量窄回归通过，但16次920×600整窗仍被首次toolbar布局改为604pt，stored-off的1个alpha254接缝也未被单加底色消除。保留失败，下一轮在真实toolbar第一次布局之后再设置外窗请求框（不改断言、不裁图）；首页胶囊改为CSS border-radius对应的圆弧 `.circular`，替换SwiftUI默认`.continuous`的延伸接缝，填充/描边/材质/点击区域一致。原透明像素断言仍原样，等待托管证据。

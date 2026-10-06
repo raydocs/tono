@@ -221,6 +221,10 @@ final class MacSeaPolishRenderTests: XCTestCase {
         window.setFrame(CGRect(x: 80, y: 80, width: size.width, height: size.height), display: false)
         window.orderFront(nil)
         host.layoutSubtreeIfNeeded()
+        // NavigationSplitView installs its toolbar during the first layout;
+        // AppKit may preserve the content size by growing the outer frame then.
+        window.setFrame(CGRect(x: 80, y: 80, width: size.width, height: size.height), display: true)
+        host.layoutSubtreeIfNeeded()
         XCTAssertEqual(window.frame.size, size, "whole-window evidence must use its requested native dimensions")
         return (window, host)
     }

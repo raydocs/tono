@@ -31,21 +31,21 @@ private struct SeaHomePill: View {
             .frame(minWidth: 120, minHeight: 48, maxHeight: 48)
             .background {
                 if primary {
-                    Capsule().fill(SeaTheme.primaryGradient)
+                    Capsule(style: .circular).fill(SeaTheme.primaryGradient)
                 } else {
-                    Capsule().fill(LinearGradient(
+                    Capsule(style: .circular).fill(LinearGradient(
                         colors: [Color(hex: "28100E").opacity(opaque ? 1 : 0.34),
                                  Color(hex: "28100E").opacity(opaque ? 1 : 0.46)],
                         startPoint: .top, endPoint: .bottom))
-                        .background(.ultraThinMaterial, in: Capsule())
+                        .background(.ultraThinMaterial, in: Capsule(style: .circular))
                 }
             }
             .overlay {
-                Capsule().strokeBorder(LinearGradient(
+                Capsule(style: .circular).strokeBorder(LinearGradient(
                     colors: [Color(hex: "FFEBD2").opacity(opaque ? 0.5 : 0.28), .white.opacity(0.05)],
                     startPoint: .top, endPoint: .bottom), lineWidth: 1)
             }
-            .contentShape(Capsule())
+            .contentShape(Capsule(style: .circular))
             .opacity(enabled ? (hovered ? 0.88 : 1) : 0.45)
             .scaleEffect(configuration.isPressed ? 0.97 : 1)
             .animation(TonoMotion.press(reduceMotion: reduceMotion), value: configuration.isPressed)
