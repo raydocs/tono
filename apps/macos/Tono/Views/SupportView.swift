@@ -514,7 +514,7 @@ struct SupportView: View {
                     }
                     .buttonStyle(.plain)
                     .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(TonoBrand.accent)
+                    .foregroundStyle(seaEnabled ? SeaTheme.cool : TonoBrand.accent)
                     .disabled(isUploadingLog || logUploadBlockedReason != nil)
                 }
 
@@ -534,7 +534,7 @@ struct SupportView: View {
                             }
                             .buttonStyle(.plain)
                             .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(TonoBrand.accent)
+                            .foregroundStyle(seaEnabled ? SeaTheme.cool : TonoBrand.accent)
                         }
                     }
                 } else if let outcome = logUploadOutcome {
@@ -644,7 +644,7 @@ struct SupportView: View {
                     }
                     .buttonStyle(.plain)
                     .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(TonoBrand.accent)
+                    .foregroundStyle(seaEnabled ? SeaTheme.cool : TonoBrand.accent)
                 }
             }
         }
@@ -702,7 +702,7 @@ struct SupportView: View {
                 Button(String(localized: "Show in Finder"), action: reveal)
                     .buttonStyle(.plain)
                     .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(TonoBrand.accent)
+                    .foregroundStyle(seaEnabled ? SeaTheme.cool : TonoBrand.accent)
 
                 Button(
                     copiedTarget == copyTarget
@@ -713,7 +713,7 @@ struct SupportView: View {
                 }
                 .buttonStyle(.plain)
                 .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(TonoBrand.accent)
+                .foregroundStyle(seaEnabled ? SeaTheme.cool : TonoBrand.accent)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)

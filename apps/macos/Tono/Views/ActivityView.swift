@@ -361,6 +361,7 @@ struct ActivityView: View {
                 Text("Session bytes include closed connections; they are not current traffic.")
                     .font(.system(size: 10))
                     .foregroundStyle(SeaTheme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
         .foregroundStyle(SeaTheme.text)

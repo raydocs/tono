@@ -19,9 +19,8 @@ struct SupportHealthSection: View {
             if seaEnabled {
                 HStack(spacing: 10) {
                     Button(checking ? String(localized: "Checking…") : String(localized: "Check this Mac"), action: runCheck)
-                        .buttonStyle(.borderedProminent)
-                        .tint(SeaTheme.warm)
-                        .foregroundStyle(SeaTheme.ink)
+                        .buttonStyle(GateProminentButtonStyle())
+                        .controlSize(.small)
                         .disabled(checking)
                         .accessibilityIdentifier("localHealthCheck")
                     Button(reportCopied ? String(localized: "Copied") : String(localized: "Copy for support"), action: copyReport)

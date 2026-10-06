@@ -23,15 +23,39 @@ struct DashboardView: View {
     private var showsSeaAppearance: Bool { seaAppearanceOverride ?? seaAppearanceEnabled }
 
     var body: some View {
-        @Bindable var appState = appState
+        Group {
+            if showsSeaAppearance { seaDashboard } else { legacyDashboard }
+        }
+        .modifier(SeaPageAppearance())
+        .background {
+            if showsSeaAppearance {
+                SeaScene(phase: seaPhase, motionEnabled: SeaAppearance.animates(
+                    seaMotionMode, reduceMotion: reduceMotion
+                ))
+            }
+        }
+        .contentShape(Rectangle())
+        // Surfaces swap with the critically damped contract spring; the one
+        // overshoot in the app belongs to the connected glow, not the layout.
+        .animation(TonoMotion.surfaceIn(reduceMotion: reduceMotion), value: appState.isConnected)
+        .animation(TonoMotion.surfaceIn(reduceMotion: reduceMotion), value: showsConnectionDetails)
+        .onChange(of: appState.isConnecting) { _, connecting in
+            connectingSince = connecting ? Date() : nil
+        }
+        .onChange(of: appState.isConnected) { _, connected in
+            if !connected {
+                appState.networkInfo = NetworkInfo()
+            }
+        }
+        .onAppear {
+            appState.updateIncomplete = UpdateHandoffStore.showsIncompleteUpdate()
+        }
+    }
 
+    private var legacyDashboard: some View {
         GlassEffectContainer(spacing: 24) {
             VStack(spacing: 0) {
-                if showsSeaAppearance {
-                    seaDashboardHeader
-                } else {
-                    dashboardHeader
-                }
+                dashboardHeader
 
                 if appState.updateIncomplete {
                     Text(UpdateHandoffStore.incompleteUpdateCopy)
@@ -45,7 +69,7 @@ struct DashboardView: View {
                 // Center: ConnectPill + ActiveNodeCard
                 Spacer(minLength: 12)
 
-                VStack(alignment: showsSeaAppearance ? .leading : .center, spacing: 24) {
+                VStack(alignment: .center, spacing: 24) {
                     RecoveryNotice(appState: appState)
                         .frame(maxWidth: 520, alignment: .leading)
                     ConnectPill(isConnected: Binding(
@@ -111,67 +135,147 @@ struct DashboardView: View {
                         RouteChoicesView()
                     }
                 }
-                .frame(maxWidth: .infinity, alignment: showsSeaAppearance ? .leading : .center)
+                .frame(maxWidth: .infinity, alignment: .center)
 
                 Spacer(minLength: 12)
 
                 if !showsConnectionDetails {
-                    if !showsSeaAppearance || showsSeaDetails {
-                        if showsSeaAppearance {
-                            Button {
-                                showsSeaDetails = false
-                            } label: {
-                                Label("Hide details", systemImage: "chevron.down")
-                                    .font(.system(size: 12, weight: .medium))
-                            }
-                            .buttonStyle(.bordered)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                        }
-                        dashboardOverview
-
-                        if appState.isConnected {
-                            networkInfoBar
-                        }
-                    } else {
-                        Button {
-                            showsSeaDetails = true
-                        } label: {
-                            Label("Details", systemImage: "chevron.up")
-                                .font(.system(size: 12, weight: .medium))
-                        }
-                        .buttonStyle(.bordered)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                    dashboardOverview
+                    if appState.isConnected {
+                        networkInfoBar
                     }
                 }
             }
             .padding(.horizontal, 32)
             .padding(.vertical, 12)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .modifier(SeaDashboardScroll(enabled: showsSeaAppearance))
         }
-        .background {
-            if showsSeaAppearance {
-                SeaScene(phase: seaPhase, motionEnabled: SeaAppearance.animates(
-                    seaMotionMode, reduceMotion: reduceMotion
-                ))
+    }
+
+    private var seaStatusTitle: String {
+        SeaStatusWords.title(kind: MenuBarProtectionStatus(appState).kind,
+            unknown: appState.isProtectionUnconfirmed || appState.isProtectionBlockUnreadable,
+            disconnecting: appState.isDisconnecting)
+    }
+
+    private var seaDashboard: some View {
+        GeometryReader { geometry in
+            ScrollView(.vertical) {
+                VStack(alignment: .leading, spacing: showsConnectionDetails ? 12 : 20) {
+                    seaDashboardHeader
+                    if appState.updateIncomplete {
+                        Text(UpdateHandoffStore.incompleteUpdateCopy)
+                            .font(.system(size: 13)).foregroundStyle(SeaTheme.warm)
+                            .accessibilityIdentifier("updateIncompleteNotice")
+                    }
+                    if !showsConnectionDetails {
+                        seaConnectionAction
+                    }
+                    seaLineChip
+                    RecoveryNotice(appState: appState)
+                        .frame(maxWidth: 520, alignment: .leading)
+                    if showsConnectionDetails {
+                        ConnectionProgressCard(appState: appState)
+                            .frame(maxWidth: 520, alignment: .leading)
+                    }
+                    Button { showsSeaDetails = true } label: {
+                        Label("Details", systemImage: "chevron.up")
+                            .font(.system(size: 12)).foregroundStyle(SeaTheme.muted)
+                    }
+                    .buttonStyle(.plain).accessibilityIdentifier("seaDashboardDetails")
+                }
+                .foregroundStyle(SeaTheme.text)
+                .frame(maxWidth: .infinity, minHeight: max(0, geometry.size.height - (showsConnectionDetails ? 48 : 64)), alignment: .topLeading)
+                .padding(showsConnectionDetails ? 24 : 32)
             }
         }
-        .contentShape(Rectangle())
-        // Surfaces swap with the critically damped contract spring; the one
-        // overshoot in the app belongs to the connected glow, not the layout.
-        .animation(TonoMotion.surfaceIn(reduceMotion: reduceMotion), value: appState.isConnected)
-        .animation(TonoMotion.surfaceIn(reduceMotion: reduceMotion), value: showsConnectionDetails)
-        .onChange(of: appState.isConnecting) { _, connecting in
-            connectingSince = connecting ? Date() : nil
-        }
-        .onChange(of: appState.isConnected) { _, connected in
-            if !connected {
-                appState.networkInfo = NetworkInfo()
+        .environment(\.colorScheme, .dark)
+        .preferredColorScheme(.dark)
+        .sheet(isPresented: $showsSeaDetails) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    HStack {
+                        SeaPageHeading(title: "Details")
+                        Spacer()
+                        Button("Close") { showsSeaDetails = false }.keyboardShortcut(.cancelAction)
+                    }
+                    if let name = appState.activeNode?.name ?? appState.proxyService.activeNodeName {
+                        ActiveNodeCard(nodeName: name,
+                            groupName: appState.isConnected ? appState.proxyService.activeGroupName : String(localized: "Ready to connect"),
+                            latency: appState.proxyService.latency(forNodeNamed: name),
+                            eyebrow: appState.isConnected ? "ACTIVE SERVER" : "SELECTED SERVER",
+                            isConnected: appState.isConnected, isClaudeHomeActive: appState.isClaudeHomeActive,
+                            claudeHomeHost: appState.residentialHomeHost,
+                            onSwitch: { showsSeaDetails = false; appState.selectedPage = .proxies })
+                    }
+                    RouteChoicesView()
+                    dashboardOverview
+                    if appState.isConnected { networkInfoBar }
+                }
+                .padding(24).frame(minWidth: 560, maxWidth: 760)
             }
+            .frame(minWidth: 560, idealWidth: 640, maxWidth: 760,
+                   minHeight: 360, idealHeight: 520, maxHeight: 640)
+            .background(SeaSecondaryScene())
+            .environment(\.colorScheme, .dark).preferredColorScheme(.dark)
         }
-        .onAppear {
-            appState.updateIncomplete = UpdateHandoffStore.showsIncompleteUpdate()
+    }
+
+    @ViewBuilder
+    private var seaConnectionAction: some View {
+        let quiet = appState.isConnected || appState.isConnecting || appState.isDisconnecting
+        let title = appState.isDisconnecting ? String(localized: "Disconnecting…")
+            : appState.isConnecting ? String(localized: "Cancel connection")
+            : (appState.isProtectionUnconfirmed || appState.isProtectionBlockUnreadable) ? String(localized: "Restore internet")
+            : appState.isConnected ? String(localized: "Disconnect") : String(localized: "Connect")
+        if quiet {
+            Button(action: seaToggleConnection) {
+                Text(title).font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(SeaTheme.text).frame(width: 190, height: 44)
+                    .background(.white.opacity(0.08), in: Capsule())
+                    .contentShape(Capsule())
+            }
+            .buttonStyle(.plain).disabled(appState.isDisconnecting)
+        } else {
+            Button(title, action: seaToggleConnection)
+                .buttonStyle(GateProminentButtonStyle()).frame(width: 190)
         }
+    }
+
+    private func seaToggleConnection() {
+        if appState.isConnecting {
+            guard let since = connectingSince,
+                  Date().timeIntervalSince(since) >= Self.cancelGraceInterval else { return }
+            appState.restoreInternet()
+        } else if appState.isProtectionBlocked || appState.isProtectionUnconfirmed || appState.isProtectionBlockUnreadable {
+            appState.restoreInternet()
+        } else if !appState.isConnected {
+            appState.connect()
+        } else {
+            appState.disconnect(releaseKillSwitch: true)
+        }
+    }
+
+    private var seaLineChip: some View {
+        Button { appState.selectedPage = .proxies } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "network").accessibilityHidden(true)
+                if let name = appState.activeNode?.name ?? appState.proxyService.activeNodeName {
+                    Text(nodeRouteTitle(for: name)).lineLimit(1)
+                    let runtime = appState.proxyService.node(named: name)
+                    Text(runtime?.lastTestFailed == true ? String(localized: "Timeout")
+                         : (runtime?.latency ?? 0) > 0 ? LatencyLevel.spokenTitle(for: runtime?.latency ?? 0, kind: .exit)
+                         : String(localized: "Not tested"))
+                        .foregroundStyle(SeaTheme.muted)
+                } else { Text("No server selected") }
+                Image(systemName: "chevron.down").accessibilityHidden(true)
+            }
+            .font(.system(size: 12)).foregroundStyle(SeaTheme.text)
+            .padding(.horizontal, 14).padding(.vertical, 10)
+            .background(.white.opacity(0.08), in: Capsule())
+        }
+        .buttonStyle(.plain).frame(maxWidth: 440, alignment: .leading)
+        .accessibilityHint("Choose another route")
     }
 
     private var seaPhase: SeaPresentationPhase {
@@ -183,22 +287,17 @@ struct DashboardView: View {
     }
 
     private var seaDashboardHeader: some View {
-        HStack(alignment: .top) {
-            VStack(alignment: .leading, spacing: 8) {
-                Text(MenuBarProtectionStatus(appState).title)
-                    .font(.system(size: 40, weight: .light))
-                    .foregroundStyle(Color(hex: "F6F2EC"))
-                Text(seaSummary)
-                    .font(.system(size: 14))
-                    .foregroundStyle(Color(hex: "E7E2E3"))
-            }
-            Spacer(minLength: 0)
-            Image(systemName: seaPhase == .day ? "sun.horizon" : "moon.stars")
-                .font(.system(size: 17))
-                .foregroundStyle(Color(hex: "F6F2EC").opacity(0.7))
-                .accessibilityHidden(true)
+        VStack(alignment: .leading, spacing: 10) {
+            Text(seaStatusTitle)
+                .font(.system(size: showsConnectionDetails ? 32 : 44, weight: .light)).tracking(-0.7)
+                .foregroundStyle(SeaTheme.text)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityAddTraits(.isHeader)
+            Text(seaSummary)
+                .font(.system(size: 14)).foregroundStyle(SeaTheme.muted)
+                .fixedSize(horizontal: false, vertical: true)
         }
-        .padding(.top, 24)
+        .frame(maxWidth: 440, alignment: .leading)
     }
 
     private var seaSummary: String {
@@ -275,7 +374,7 @@ struct DashboardView: View {
                     value: trafficSummaryValue,
                     detail: trafficSummaryDetail,
                     systemImage: "waveform.path.ecg",
-                    tint: Color(hex: "5856D6")
+                    tint: showsSeaAppearance ? SeaTheme.cool : Color(hex: "5856D6")
                 )
             }
             .buttonStyle(.plain)
@@ -512,6 +611,7 @@ struct DashboardView: View {
 }
 
 private struct ConnectionProgressCard: View {
+    @SeaAppearancePreference private var seaAppearance
     @Bindable var appState: AppState
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -576,8 +676,8 @@ private struct ConnectionProgressCard: View {
     }
 
     private func dotColor(_ stage: ConnectionStage) -> Color {
-        if appState.completedConnectionStages.contains(stage) { return TonoBrand.accent }
-        if stage == appState.connectionStage { return TonoBrand.accent.opacity(0.55) }
+        if appState.completedConnectionStages.contains(stage) { return seaAppearance ? SeaTheme.cool : TonoBrand.accent }
+        if stage == appState.connectionStage { return (seaAppearance ? SeaTheme.cool : TonoBrand.accent).opacity(0.55) }
         if appState.lastConnectionFailure?.stage == stage { return TonoStatus.blocked }
         return Color.secondary.opacity(0.35)
     }
@@ -595,7 +695,7 @@ private struct ConnectionProgressCard: View {
         if appState.lastConnectionFailure != nil, !appState.isConnecting {
             return .orange.opacity(0.08)
         }
-        return TonoBrand.accent.opacity(0.06)
+        return (seaAppearance ? SeaTheme.cool : TonoBrand.accent).opacity(0.06)
     }
 
     @ViewBuilder
@@ -703,7 +803,7 @@ private struct ConnectionProgressCard: View {
     private var headerColor: Color {
         appState.lastConnectionFailure != nil && !appState.isConnecting
             ? .orange
-            : TonoBrand.accent
+            : (seaAppearance ? SeaTheme.cool : TonoBrand.accent)
     }
 
     private var activeStartedAt: Date? {
@@ -946,25 +1046,6 @@ private struct DashboardStatCard: View {
                     .white.opacity(colorScheme == .dark ? 0.10 : 0.7),
                     lineWidth: 0.5
                 )
-        }
-    }
-}
-
-/// At the minimum window height, blocked/recovery cards can be taller than
-/// the calm state. Scrolling preserves their original actions instead of
-/// clipping them behind the bottom edge of the sea preview.
-private struct SeaDashboardScroll: ViewModifier {
-    let enabled: Bool
-
-    @ViewBuilder
-    func body(content: Content) -> some View {
-        if enabled {
-            ScrollView {
-                content
-            }
-            .scrollIndicators(.hidden)
-        } else {
-            content
         }
     }
 }

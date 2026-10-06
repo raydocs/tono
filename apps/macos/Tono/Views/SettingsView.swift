@@ -254,7 +254,7 @@ struct SettingsView: View {
                 }
                 .buttonStyle(.plain)
                 .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(TonoBrand.accent)
+                .foregroundStyle(seaEnabled ? SeaTheme.cool : TonoBrand.accent)
                 .disabled(!updater.canCheckForUpdates)
             }
         }
@@ -382,7 +382,7 @@ struct SettingsView: View {
                 }
                 .buttonStyle(.plain)
                 .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(TonoBrand.accent)
+                .foregroundStyle(seaEnabled ? SeaTheme.cool : TonoBrand.accent)
             }
 
             settingDivider
@@ -610,7 +610,7 @@ private struct SettingToggleRow: View {
             SettingRow(label: label, subtitle: seaEnabled ? (seaSummary ?? subtitle) : subtitle) {
                 Toggle("", isOn: $isOn)
                     .toggleStyle(.switch)
-                    .tint(TonoBrand.accent)
+                    .tint(seaEnabled ? SeaTheme.cool : TonoBrand.accent)
                     .labelsHidden()
             }
             if seaEnabled, let subtitle, seaSummary != nil {

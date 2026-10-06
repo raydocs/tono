@@ -33,7 +33,7 @@ struct SeaPageAppearance: ViewModifier {
     @ViewBuilder
     func body(content: Content) -> some View {
         if previewOverride ?? enabled {
-            content.environment(\.colorScheme, .dark).preferredColorScheme(.dark)
+            content.environment(\.colorScheme, .dark).preferredColorScheme(.dark).tint(SeaTheme.cool)
         } else {
             content
         }
@@ -50,19 +50,21 @@ struct SeaSecondaryScene: View {
         GeometryReader { geometry in
             ZStack(alignment: .top) {
                 LinearGradient(
-                    colors: [Color(hex: "111A30"), Color(hex: "26364D"), Color(hex: "102139")],
+                    colors: [Color(hex: "0A0A12"), Color(hex: "0E0D18"), Color(hex: "12111E")],
                     startPoint: .top, endPoint: .bottom
                 )
                 if !reduceTransparency && contrast != .increased {
                     Ellipse()
-                        .fill(Color(hex: "7187A5").opacity(0.12))
-                        .frame(width: geometry.size.width * 1.2, height: geometry.size.height * 0.22)
-                        .position(x: geometry.size.width * 0.55, y: geometry.size.height * 0.78)
-                    Rectangle()
-                        .fill(LinearGradient(colors: [Color(hex: "8498AE").opacity(0.18), .clear],
-                                             startPoint: .top, endPoint: .bottom))
-                        .frame(height: 2)
-                        .offset(y: geometry.size.height * 0.72)
+                        .fill(RadialGradient(
+                            colors: [Color(hex: "FF9650").opacity(0.16),
+                                     Color(hex: "BE463C").opacity(0.06), .clear],
+                            center: .center, startRadius: 0,
+                            endRadius: geometry.size.width * 0.65
+                        ))
+                        .frame(width: geometry.size.width * 1.5,
+                               height: geometry.size.height * 0.65)
+                        .position(x: geometry.size.width * 0.80,
+                                  y: geometry.size.height * 1.04)
                 }
             }
             .frame(width: geometry.size.width, height: geometry.size.height)
@@ -91,6 +93,36 @@ enum SeaPresentationPhase: Equatable {
     }
 }
 
+/// Static scene colors. Water begins with the exact last sky stop in every
+/// phase; a different first water stop reads as a false band at the horizon.
+struct SeaScenePalette {
+    let sky: [String]
+    let deepWater: String
+    let reflection: String
+
+    var water: [String] { [sky[2], deepWater, "05060A"] }
+
+    static func forPhase(_ phase: SeaPresentationPhase) -> Self {
+        switch phase {
+        case .day:
+            return .init(sky: ["08070D", "42272B", "B66C4B"],
+                         deepWater: "301E25", reflection: "FFD9A0")
+        case .dawn:
+            return .init(sky: ["070813", "392238", "A84A42"],
+                         deepWater: "291821", reflection: "FFAA73")
+        case .dusk:
+            return .init(sky: ["080811", "312039", "80363A"],
+                         deepWater: "211720", reflection: "E98167")
+        case .blocked:
+            return .init(sky: ["0A0912", "2D1D30", "753638"],
+                         deepWater: "20151D", reflection: "DE8069")
+        case .night:
+            return .init(sky: ["04050A", "1A1D38", "343A60"],
+                         deepWater: "121628", reflection: "CED8FF")
+        }
+    }
+}
+
 struct SeaScene: View {
     let phase: SeaPresentationPhase
     let motionEnabled: Bool
@@ -98,83 +130,103 @@ struct SeaScene: View {
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.colorSchemeContrast) private var contrast
 
-    private var isWarm: Bool { phase == .day || phase == .dawn }
-    private var sky: [Color] {
-        switch phase {
-        case .day: return [Color(hex: "211F38"), Color(hex: "76495A"), Color(hex: "E18B67")]
-        case .dawn: return [Color(hex: "151B36"), Color(hex: "45415C"), Color(hex: "B76868")]
-        case .dusk: return [Color(hex: "131831"), Color(hex: "39324D"), Color(hex: "8F505C")]
-        case .blocked: return [Color(hex: "17172C"), Color(hex: "463144"), Color(hex: "96535C")]
-        case .night: return [Color(hex: "0D1429"), Color(hex: "1B2441"), Color(hex: "343D65")]
-        }
-    }
-
     var body: some View {
         GeometryReader { geometry in
             let width = geometry.size.width
             let height = geometry.size.height
-            let horizon = height * 0.57
+            let horizon = height * 0.55
+            let waterHeight = height - horizon
             let disc = min(max(height * 0.25, 120), 230)
+            let palette = SeaScenePalette.forPhase(phase)
+            let decorationsEnabled = !reduceTransparency && contrast != .increased
             ZStack(alignment: .topLeading) {
-                LinearGradient(colors: sky, startPoint: .top, endPoint: .bottom)
+                LinearGradient(colors: palette.sky.map(Color.init(hex:)),
+                               startPoint: .top, endPoint: .bottom)
+                    .frame(height: horizon)
 
                 if phase == .night {
-                    if !reduceTransparency && contrast != .increased {
+                    if decorationsEnabled {
                         starField(width: width, horizon: horizon)
+                        Circle()
+                            .fill(RadialGradient(
+                                colors: [Color(hex: "CED8FF").opacity(0.20), .clear],
+                                center: .center, startRadius: 0, endRadius: disc * 0.34
+                            ))
+                            .frame(width: disc * 0.72, height: disc * 0.72)
+                            .position(x: width * 0.78, y: horizon * 0.40)
                     }
                     Circle()
-                        .fill(Color(hex: "E5E8FA"))
-                        .frame(width: disc * 0.17, height: disc * 0.17)
-                        .overlay(alignment: .topTrailing) {
+                        .fill(Color(hex: "F4EEE2"))
+                        .frame(width: disc * 0.19, height: disc * 0.19)
+                        .mask {
                             Circle()
-                                .fill(Color(hex: "202B4B"))
-                                .frame(width: disc * 0.16, height: disc * 0.16)
-                                .offset(x: disc * 0.045, y: -disc * 0.045)
+                                .fill(.white)
+                                .overlay {
+                                    Circle()
+                                        .fill(.black)
+                                        .offset(x: disc * 0.055, y: -disc * 0.055)
+                                        .blendMode(.destinationOut)
+                                }
+                                .compositingGroup()
                         }
-                        .position(x: width * 0.72, y: horizon * 0.40)
+                        .rotationEffect(.degrees(-16))
+                        .position(x: width * 0.78, y: horizon * 0.40)
                 } else {
-                    if !reduceTransparency && contrast != .increased {
+                    if decorationsEnabled {
                         Circle()
-                            .fill(RadialGradient(colors: [Color(hex: "FFBC85").opacity(0.35), .clear],
-                                                 center: .center, startRadius: disc * 0.3, endRadius: disc * 1.15))
-                            .frame(width: disc * 2.3, height: disc * 2.3)
+                            .fill(RadialGradient(
+                                colors: [Color(hex: "FFAA60").opacity(0.23),
+                                         Color(hex: "F06054").opacity(0.09), .clear],
+                                center: .center, startRadius: disc * 0.35,
+                                endRadius: disc * 1.9
+                            ))
+                            .frame(width: disc * 3.8, height: disc * 3.8)
+                            .position(x: width * 0.72, y: sunY(horizon: horizon, disc: disc))
+                        Circle()
+                            .fill(RadialGradient(
+                                colors: [Color(hex: "FFE9C2").opacity(0.46),
+                                         Color(hex: "FFCB7F").opacity(0.28), .clear],
+                                center: .center, startRadius: disc * 0.43,
+                                endRadius: disc * 0.68
+                            ))
+                            .frame(width: disc * 1.36, height: disc * 1.36)
                             .position(x: width * 0.72, y: sunY(horizon: horizon, disc: disc))
                     }
                     Circle()
                         .fill(LinearGradient(
-                            colors: isWarm ? [Color(hex: "FFE4A7"), Color(hex: "FF9B69")]
-                                : [Color(hex: "EE977B"), Color(hex: "B84F5A")],
+                            colors: phase == .day
+                                ? [Color(hex: "FFF6DE"), Color(hex: "FFD58E"),
+                                   Color(hex: "FFA35E"), Color(hex: "F2685A")]
+                                : [Color(hex: "FFB86E"), Color(hex: "FF7A44"),
+                                   Color(hex: "E0403E"), Color(hex: "9A1E38")],
                             startPoint: .top, endPoint: .bottom
                         ))
                         .frame(width: disc, height: disc)
+                        .mask {
+                            Circle().fill(RadialGradient(
+                                stops: [.init(color: .black, location: 0),
+                                        .init(color: .black, location: 0.88),
+                                        .init(color: .clear, location: 1)],
+                                center: .center, startRadius: 0, endRadius: disc * 0.5
+                            ))
+                        }
                         .position(x: width * 0.72, y: sunY(horizon: horizon, disc: disc))
                 }
 
                 LinearGradient(
-                    colors: [Color(hex: "443B60"), Color(hex: "111B33"), Color(hex: "0B1429")],
+                    colors: palette.water.map(Color.init(hex:)),
                     startPoint: .top, endPoint: .bottom
                 )
-                .frame(height: height - horizon)
+                .frame(height: waterHeight)
                 .offset(y: horizon)
 
-                // Static, geometry-scaled ripples. No display link or steady
-                // frame work, including in the full motion preference.
-                if !reduceTransparency && contrast != .increased {
-                    ForEach(0..<12, id: \.self) { index in
-                        Capsule()
-                            .fill((isWarm ? Color(hex: "F5B48D") : Color(hex: "8996C0"))
-                                .opacity(isWarm ? 0.17 - Double(index) * 0.009 : 0.08))
-                            .frame(width: width * (0.07 + CGFloat(index % 4) * 0.035), height: 1)
-                            .position(
-                                x: width * (0.61 + CGFloat((index * 7) % 13) * 0.017),
-                                y: horizon + CGFloat(index + 1) * (height - horizon) / 14
-                            )
-                    }
+                if decorationsEnabled {
+                    reflection(width: width, waterHeight: waterHeight, disc: disc,
+                               palette: palette)
+                        .frame(width: width, height: waterHeight)
+                        .clipped()
+                        .offset(y: horizon)
                 }
-                LinearGradient(colors: [sky[2].opacity(0.4), .clear],
-                               startPoint: .top, endPoint: .bottom)
-                    .frame(height: 20)
-                    .offset(y: horizon - 8)
             }
             .frame(width: width, height: height)
             .clipped()
@@ -190,6 +242,45 @@ struct SeaScene: View {
         case .dusk, .blocked: return horizon + disc * 0.36
         case .night: return horizon + disc
         }
+    }
+
+    private func reflection(width: CGFloat, waterHeight: CGFloat, disc: CGFloat,
+                            palette: SeaScenePalette) -> some View {
+        let isMoon = phase == .night
+        let centerX = width * (isMoon ? 0.78 : 0.72)
+        let light = Color(hex: palette.reflection)
+        return ZStack(alignment: .topLeading) {
+            Ellipse()
+                .fill(RadialGradient(
+                    colors: [light.opacity(isMoon ? 0.08 : 0.19), .clear],
+                    center: .top, startRadius: 0, endRadius: waterHeight * 0.72
+                ))
+                .frame(width: disc * (isMoon ? 0.8 : 1.7), height: waterHeight * 1.15)
+                .position(x: centerX, y: waterHeight * 0.40)
+
+            // A deterministic column: small near-horizon dashes broaden and
+            // fragment toward the viewer, never a set of full-width stripes.
+            ForEach(0..<28, id: \.self) { index in
+                let depth = CGFloat(index) / 28
+                let spread = disc * (0.12 + depth * (isMoon ? 0.32 : 0.75))
+                let offset = CGFloat((index * 37) % 17 - 8) / 8 * spread * 0.54
+                let length = disc * (0.10 + depth * (isMoon ? 0.19 : 0.36))
+                    * (index.isMultiple(of: 4) ? 0.48 : 1)
+                Capsule()
+                    .fill(LinearGradient(colors: [.clear,
+                                                  light.opacity(isMoon ? 0.32 : 0.78), .clear],
+                                         startPoint: .leading, endPoint: .trailing))
+                    .frame(width: length, height: index.isMultiple(of: 5) ? 1.7 : 0.9)
+                    .position(x: centerX + offset,
+                              y: 3 + depth * waterHeight * 0.92)
+            }
+        }
+        .mask(LinearGradient(
+            stops: [.init(color: .white, location: 0),
+                    .init(color: .white.opacity(isMoon ? 0.24 : 0.65), location: 0.20),
+                    .init(color: .clear, location: 0.94)],
+            startPoint: .top, endPoint: .bottom
+        ))
     }
 
     private func starField(width: CGFloat, horizon: CGFloat) -> some View {

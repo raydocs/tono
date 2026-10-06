@@ -67,7 +67,9 @@ struct MenuBarView: View {
                 if !seaAppearance {
                     Text("Tono").font(.system(size: 13, weight: .semibold))
                 }
-                Text(status.title)
+                Text(seaAppearance ? LocalizedStringKey(SeaStatusWords.title(kind: status.kind,
+                    unknown: appState.isProtectionUnconfirmed || appState.isProtectionBlockUnreadable,
+                    disconnecting: appState.isDisconnecting)) : status.title)
                     .font(.system(size: seaAppearance ? 20 : 11, weight: seaAppearance ? .light : .regular))
                     .foregroundStyle(seaAppearance ? SeaTheme.text : .secondary)
                     .lineLimit(seaAppearance ? nil : 2)

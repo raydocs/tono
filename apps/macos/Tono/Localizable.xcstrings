@@ -1,6 +1,9 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "Protection status unconfirmed": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Protection status unconfirmed"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "保护状态未确认"}}}},
+    "Protected, not connected": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Protected, not connected"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "保护中，未连上"}}}},
+    "Cancel connection": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Cancel connection"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "取消连接"}}}},
     "Upload connection hostnames, processes, rules, and routes.": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Upload connection hostnames, processes, rules, and routes."}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "上传连接的主机名、进程、规则与线路。"}}}},
     "Save a local record of connections on this Mac.": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Save a local record of connections on this Mac."}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "在这台 Mac 保存本地连接记录。"}}}},
     "Share anonymized app-route counts.": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Share anonymized app-route counts."}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "分享匿名的应用线路统计。"}}}},

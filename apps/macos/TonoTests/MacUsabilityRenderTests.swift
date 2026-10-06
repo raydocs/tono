@@ -109,7 +109,7 @@ final class MacUsabilityRenderTests: XCTestCase {
                                    sea: true, width: 660, height: 540)
         app.recoveryCause = nil
         app.protectedReconnectPausedForUserAction = false
-        try await capture("settings-sea-normal", width: 920, height: 600, annotate: false) {
+        try await capture("settings-sea-normal", width: 920, height: 600, annotate: false, darkAppearance: true) {
             ZStack {
                 MeshGradientBackground()
                 SettingsView()
@@ -215,13 +215,13 @@ final class MacUsabilityRenderTests: XCTestCase {
         app.toggleRouteFavorite(other.name, owner: owner)
         let preferenceBefore = AppProfile.defaults.object(forKey: SeaAppearance.enabledKey) as? Bool
         let introBefore = AppProfile.defaults.object(forKey: SettingsKey.introSeen) as? Bool
-        try await capture("servers-sea-normal", width: 760, height: 720, annotate: false,
+        try await capture("servers-sea-normal", width: 760, height: 720, annotate: false, darkAppearance: true,
                           nativeLabels: ["Servers", "Favorites", "Cloud Servers", "Remove favorite"]) {
             ZStack { MeshGradientBackground(); ProxiesView() }
                 .modifier(SeaPageAppearance()).environment(\.seaAppearanceOverride, true)
                 .environment(app).environment(account)
         }
-        try await capture("account-sea-normal", width: 660, height: 540, annotate: false,
+        try await capture("account-sea-normal", width: 660, height: 540, annotate: false, darkAppearance: true,
                           nativeLabels: ["Account", "fixture@example.test", "Sign Out"]) {
             ZStack { MeshGradientBackground(); AccountSettingsCard(session: account).padding(32) }
                 .modifier(SeaPageAppearance()).environment(\.seaAppearanceOverride, true)
@@ -230,18 +230,18 @@ final class MacUsabilityRenderTests: XCTestCase {
         let direct = APIConnection(id: "fixture-direct", metadata: .init(network: "tcp", type: "HTTPS", process: "Fixture App", processPath: nil, sourceIP: nil, destinationIP: nil, sourcePort: nil, destinationPort: "443", host: "direct.example.test"), upload: 5, download: 20, start: "0", chains: ["DIRECT"], rule: "MATCH", rulePayload: nil)
         app.isConnected = true
         app.updateConnections(from: .init(downloadTotal: 50, uploadTotal: 15, connections: [cloud, direct]))
-        try await capture("activity-sea-normal", width: 760, height: 640, annotate: false,
+        try await capture("activity-sea-normal", width: 760, height: 640, annotate: false, darkAppearance: true,
                           nativeLabels: ["Activity", "Routes now", "Session bytes include closed connections; they are not current traffic."]) {
             ZStack { MeshGradientBackground(); ActivityView() }
                 .modifier(SeaPageAppearance()).environment(\.seaAppearanceOverride, true).environment(app)
         }
-        try await capture("settings-sea-grouped", width: 760, height: 820, annotate: false,
+        try await capture("settings-sea-grouped", width: 760, height: 820, annotate: false, darkAppearance: true,
                           nativeLabels: ["Settings", "Account", "General"]) {
             ZStack { MeshGradientBackground(); SettingsView() }
                 .modifier(SeaPageAppearance()).environment(\.seaAppearanceOverride, true)
                 .environment(app).environment(account).environmentObject(AppUpdater(enabled: false))
         }
-        try await capture("support-sea-actions", width: 760, height: 420, annotate: false,
+        try await capture("support-sea-actions", width: 760, height: 420, annotate: false, darkAppearance: true,
                           nativeLabels: ["Local health check", "Check this Mac", "Upload diagnostics"]) {
             ZStack {
                 MeshGradientBackground()
@@ -254,17 +254,17 @@ final class MacUsabilityRenderTests: XCTestCase {
         login.state = .signedOut
         login.authMethods = .init(email: .init(enabled: true, clientId: nil),
             apple: .init(enabled: false, clientId: nil), google: .init(enabled: false, clientId: nil))
-        try await capture("login-sea-email", width: 760, height: 720, annotate: false,
+        try await capture("login-sea-email", width: 760, height: 720, annotate: false, darkAppearance: true,
                           nativeLabels: ["Sign in to Tono", "Send a sign-in code"]) {
             LoginView(session: login).modifier(SeaPageAppearance())
                 .environment(\.seaAppearanceOverride, true).environment(app)
         }
-        try await capture("intro-sea-first", width: 760, height: 680, annotate: false,
+        try await capture("intro-sea-first", width: 760, height: 680, annotate: false, darkAppearance: true,
                           nativeLabels: ["Connected means protected.", "Illustration only · not your current connection status", "Next"]) {
             WelcomeIntroView().modifier(SeaPageAppearance()).environment(\.seaAppearanceOverride, true)
         }
         app.isConnected = false
-        try await capture("menubar-sea-normal", width: 280, height: 480, annotate: false,
+        try await capture("menubar-sea-normal", width: 280, height: 480, annotate: false, darkAppearance: true,
                           nativeLabels: ["Open Tono", "Quit Tono", "Connect"]) {
             MenuBarView().modifier(SeaPageAppearance()).environment(\.seaAppearanceOverride, true)
                 .environment(app).environment(account)
@@ -280,7 +280,7 @@ final class MacUsabilityRenderTests: XCTestCase {
         _ name: String, app: AppState, account: AccountSession,
         sea: Bool, width: CGFloat, height: CGFloat
     ) async throws {
-        try await capture(name, width: width, height: height, annotate: false) {
+        try await capture(name, width: width, height: height, annotate: false, darkAppearance: sea) {
             ZStack {
                 MeshGradientBackground()
                 DashboardView()
@@ -295,6 +295,7 @@ final class MacUsabilityRenderTests: XCTestCase {
     private func capture<Content: View>(
         _ name: String, width: CGFloat, height: CGFloat,
         annotate: Bool = true,
+        darkAppearance: Bool = false,
         nativeLabels: [String]? = nil,
         nativeIdentifiers: [String] = [],
         @ViewBuilder content: () -> Content
@@ -312,7 +313,7 @@ final class MacUsabilityRenderTests: XCTestCase {
         }
         .frame(width: width, height: height, alignment: .topLeading)
         .background(Color(nsColor: .windowBackgroundColor))
-        .environment(\.colorScheme, .light)
+        .environment(\.colorScheme, darkAppearance ? .dark : .light)
         .environment(\.locale, Locale(identifier: "en"))
         .transaction { transaction in
             transaction.animation = nil
@@ -322,7 +323,11 @@ final class MacUsabilityRenderTests: XCTestCase {
         let rect = NSRect(x: 0, y: 0, width: width, height: height)
         let window = NSWindow(contentRect: rect, styleMask: [.borderless], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
-        window.appearance = NSAppearance(named: .aqua)
+        window.appearance = NSAppearance(named: darkAppearance ? .darkAqua : .aqua)
+        // The screenshot is of this fixture window, not a desktop composite.
+        // Give its backing surface an opaque base under the SwiftUI content.
+        window.backgroundColor = .windowBackgroundColor
+        window.isOpaque = true
         window.contentView = host
         defer {
             window.orderOut(nil)
@@ -388,7 +393,7 @@ final class MacUsabilityRenderTests: XCTestCase {
                 ?? environment["TONO_HOSTED_WINDOW_DIAGNOSTIC"]
             if hostedDiagnostic == "1" {
                 let paused = name == "dashboard-sea-blocked-paused-recovery-minimum"
-                let labels = nativeLabels ?? [paused ? "Protected Offline · retries paused" : "Protected Offline",
+                let labels = nativeLabels ?? ["Protected, not connected",
                     paused ? "Repair and reconnect" : "Retry now", "Restore internet"]
                 let identifiers = nativeLabels == nil && paused ? ["protectedRecoveryFeedback"] : nativeIdentifiers
                 await captureNativeWindowAcceptance(name, window: window, host: host, folder: folder,
@@ -547,33 +552,60 @@ final class MacUsabilityRenderTests: XCTestCase {
         host: NSView, window: NSWindow, bitmap: NSBitmapImageRep,
         required: [String], requiredIdentifiers: [String], receipt: inout [String]
     ) -> Bool {
-        var queue: [any NSAccessibilityProtocol] = [host]
+        guard host.window === window else { return false }
+        var queue: [AnyObject] = [window, host]
         var visited = Set<ObjectIdentifier>()
         var matches: [String: NSRect] = [:]
+        var unsupportedChildren = 0
         while !queue.isEmpty && visited.count < 512 {
             let element = queue.removeFirst()
-            guard visited.insert(ObjectIdentifier(element as AnyObject)).inserted else { continue }
-            let label = element.accessibilityLabel() ?? ""
-            let stringValue = element.accessibilityValue() as? String
-            let identifier = element.accessibilityIdentifier() ?? ""
-            for expected in required where label == expected || stringValue == expected {
-                matches[expected] = element.accessibilityFrame()
+            guard visited.insert(ObjectIdentifier(element)).inserted else { continue }
+            let full = element as? any NSAccessibilityProtocol
+            let object = element as? NSObject
+            // SwiftUI can vend role-based accessibility elements that implement
+            // only NSAccessibilityElementProtocol, not the full AppKit protocol.
+            let frame = full?.accessibilityFrame()
+                ?? (element as? any NSAccessibilityElementProtocol)?.accessibilityFrame()
+            let label = full?.accessibilityLabel()
+                ?? (object?.accessibilityAttributeValue(.description) as? String)
+                ?? (object?.accessibilityAttributeValue(.title) as? String)
+                ?? ""
+            let stringValue = full?.accessibilityValue() as? String
+                ?? (object?.accessibilityAttributeValue(.value) as? String)
+            let identifier = full?.accessibilityIdentifier()
+                ?? (element as? any NSAccessibilityElementProtocol)?.accessibilityIdentifier()
+                ?? (object?.accessibilityAttributeValue(.identifier) as? String)
+                ?? ""
+            if let frame {
+                for expected in required where label == expected || stringValue == expected {
+                    matches[expected] = frame
+                }
+                if requiredIdentifiers.contains(identifier) {
+                    matches[identifier] = frame
+                }
             }
-            receipt.append("AX[\(visited.count)] label=\(label) value=\(stringValue ?? "") identifier=\(identifier) frame=\(element.accessibilityFrame())")
-            if requiredIdentifiers.contains(identifier) {
-                matches[identifier] = element.accessibilityFrame()
+            var children = full?.accessibilityChildren() ?? []
+            children += (full?.accessibilityChildrenInNavigationOrder() ?? []).map { $0 as Any }
+            if children.isEmpty, let object {
+                children = object.accessibilityAttributeValue(.children) as? [Any] ?? []
             }
-            for child in element.accessibilityChildren() ?? [] {
-                if let child = child as? any NSAccessibilityProtocol { queue.append(child) }
+            receipt.append("AX[\(visited.count)] type=\(type(of: element)) label=\(label) value=\(stringValue ?? "") identifier=\(identifier) frame=\(String(describing: frame)) children=\(children.count)")
+            for child in children {
+                if let child = child as? NSObject {
+                    queue.append(child)
+                } else {
+                    unsupportedChildren += 1
+                }
             }
         }
-        receipt.append("accessibilityNodes=\(visited.count) matched=\(matches.keys.sorted())")
-        guard visited.count < 512, required.allSatisfy({ matches[$0] != nil }) else { return false }
+        receipt.append("accessibilityNodes=\(visited.count) unsupportedChildren=\(unsupportedChildren) matched=\(matches.keys.sorted())")
+        guard visited.count < 512, unsupportedChildren == 0,
+              required.allSatisfy({ matches[$0] != nil }) else { return false }
         guard requiredIdentifiers.allSatisfy({ matches[$0] != nil }) else { return false }
         for key in required + requiredIdentifiers {
             guard let frame = matches[key], frame.width >= 10, frame.height >= 10,
                   window.frame.contains(frame),
-                  nativePixelContrast(in: frame, windowFrame: window.frame, bitmap: bitmap) else {
+                  nativePixelContrast(in: frame, windowFrame: window.frame, bitmap: bitmap, requireLightText: key == required.first) else {
                 receipt.append("contentMissingOrBlank=\(key) frame=\(String(describing: matches[key]))")
                 return false
             }
@@ -582,7 +614,7 @@ final class MacUsabilityRenderTests: XCTestCase {
         return true
     }
 
-    private func nativePixelContrast(in screenFrame: NSRect, windowFrame: NSRect, bitmap: NSBitmapImageRep) -> Bool {
+    private func nativePixelContrast(in screenFrame: NSRect, windowFrame: NSRect, bitmap: NSBitmapImageRep, requireLightText: Bool) -> Bool {
         let minX = max(0, Int(screenFrame.minX - windowFrame.minX))
         let maxX = min(bitmap.pixelsWide - 1, Int(screenFrame.maxX - windowFrame.minX))
         let minY = max(0, Int(windowFrame.maxY - screenFrame.maxY))
@@ -598,6 +630,6 @@ final class MacUsabilityRenderTests: XCTestCase {
                 high = max(high, luminance)
             }
         }
-        return high - low >= 0.08
+        return high - low >= 0.08 && (!requireLightText || high >= 0.75)
     }
 }
