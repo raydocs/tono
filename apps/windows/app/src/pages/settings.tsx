@@ -23,13 +23,19 @@ import {
   formatTonoActionError,
 } from '@/services/tono'
 import { TONO_UPDATES_CONFIGURED } from '@/services/update'
+import { useAppearancePreferences } from '@/tono-ui/appearance-preferences'
+import { AppearanceCard } from '@/tono-ui/AppearanceCard'
 import { GlassCard } from '@/tono-ui/GlassCard'
 import { PageHeader } from '@/tono-ui/PageHeader'
+import { PrivacyDescription } from '@/tono-ui/PrivacyDescription'
+import { SeaSegmented, SeaToggle } from '@/tono-ui/SeaControls'
 import { TONO_COLORS, TONO_MONO_STACK, tonoText } from '@/tono-ui/theme'
 import { TonoIcon } from '@/tono-ui/TonoIcon'
 import { TonoLogo } from '@/tono-ui/TonoLogo'
 import { TonoToggle } from '@/tono-ui/TonoToggle'
 import { version } from '@root/package.json'
+
+import './sea-settings.css'
 
 const tonoAuditEnabledQueryKey = ['tonoAuditEnabled'] as const
 const tonoAuditLogPathQueryKey = ['tonoAuditLogPath'] as const
@@ -55,8 +61,10 @@ const CardHeader = ({
   title: string
   tint: string
 }) => {
+  const { newAppearance } = useAppearancePreferences()
   const dark = useThemeMode() !== 'light'
   const text = tonoText(dark)
+  if (newAppearance) return <h2>{title}</h2>
   return (
     <div
       style={{
@@ -95,9 +103,10 @@ const Row = ({
   children,
 }: {
   label: string
-  subtitle?: string
+  subtitle?: ReactNode
   children?: React.ReactNode
 }) => {
+  const { newAppearance } = useAppearancePreferences()
   const dark = useThemeMode() !== 'light'
   const text = tonoText(dark)
   return (
@@ -110,7 +119,13 @@ const Row = ({
           minWidth: 0,
         }}
       >
-        <span style={{ fontSize: 13, fontWeight: 500, color: text.primary }}>
+        <span
+          style={{
+            fontSize: newAppearance ? 15 : 13,
+            fontWeight: newAppearance ? 400 : 500,
+            color: text.primary,
+          }}
+        >
           {label}
         </span>
         {subtitle && (
@@ -126,8 +141,10 @@ const Row = ({
 
 const GeneralCard = () => {
   const { t } = useTranslation()
+  const { newAppearance } = useAppearancePreferences()
   const dark = useThemeMode() !== 'light'
   const text = tonoText(dark)
+  const Toggle = newAppearance ? SeaToggle : TonoToggle
   const { preferences, mutatePreferences, patchPreferences } =
     useTonoPreferences()
   const { switchLanguage } = useI18n()
@@ -171,73 +188,91 @@ const GeneralCard = () => {
     <GlassCard>
       <CardHeader
         icon={<TonoIcon name="settings" size={18} />}
-        title={t('tono.settings.preferences.title')}
+        title={t(
+          newAppearance
+            ? 'tono.settings.general.title'
+            : 'tono.settings.preferences.title',
+        )}
         tint={`${TONO_COLORS.accent}26`}
       />
       <Row
         label={t('tono.settings.general.launchAtStartup')}
         subtitle={t('tono.settings.general.launchAtStartupHint')}
       >
-        <TonoToggle
+        <Toggle
           checked={preferences?.enable_auto_launch ?? false}
           onChange={(value) => void handleAutostart(value)}
           label={t('tono.settings.general.launchAtStartup')}
         />
       </Row>
       <Row label={t('tono.settings.general.language')}>
-        <span className="tono-segmented">
-          {supportedLanguages.map((code) => {
-            const active = resolveLanguage(preferences?.language) === code
-            return (
+        {newAppearance ? (
+          <SeaSegmented
+            label={t('tono.settings.general.language')}
+            value={resolveLanguage(preferences?.language) ?? ''}
+            options={supportedLanguages.map((code) => ({
+              value: code,
+              label: LANGUAGE_LABELS[code] ?? code,
+            }))}
+            onChange={(language) => void handleLanguage(language)}
+          />
+        ) : (
+          <span className="tono-segmented">
+            {supportedLanguages.map((code) => {
+              const active = resolveLanguage(preferences?.language) === code
+              return (
+                <button
+                  key={code}
+                  type="button"
+                  className="tono-link"
+                  onClick={() => void handleLanguage(code)}
+                  style={{
+                    padding: '6px 10px',
+                    fontSize: 11,
+                    fontWeight: active ? 600 : 400,
+                    color: active ? '#fff' : text.secondary,
+                    background: active ? TONO_COLORS.accent : 'transparent',
+                  }}
+                >
+                  {LANGUAGE_LABELS[code] ?? code}
+                </button>
+              )
+            })}
+          </span>
+        )}
+      </Row>
+      {!newAppearance && (
+        <Row label={t('tono.settings.appearance.themeMode')}>
+          <span className="tono-segmented">
+            {(['light', 'dark', 'system'] as const).map((value) => (
               <button
-                key={code}
+                key={value}
                 type="button"
                 className="tono-link"
-                onClick={() => void handleLanguage(code)}
+                onClick={() => void handleThemeMode(value)}
                 style={{
                   padding: '6px 10px',
                   fontSize: 11,
-                  fontWeight: active ? 600 : 400,
-                  color: active ? '#fff' : text.secondary,
-                  background: active ? TONO_COLORS.accent : 'transparent',
+                  fontWeight: themeMode === value ? 600 : 400,
+                  color: themeMode === value ? '#fff' : text.secondary,
+                  background:
+                    themeMode === value ? TONO_COLORS.accent : 'transparent',
                 }}
               >
-                {LANGUAGE_LABELS[code] ?? code}
+                {t(`tono.settings.appearance.theme.${value}`)}
               </button>
-            )
-          })}
-        </span>
-      </Row>
-      <Row label={t('tono.settings.appearance.themeMode')}>
-        <span className="tono-segmented">
-          {(['light', 'dark', 'system'] as const).map((value) => (
-            <button
-              key={value}
-              type="button"
-              className="tono-link"
-              onClick={() => void handleThemeMode(value)}
-              style={{
-                padding: '6px 10px',
-                fontSize: 11,
-                fontWeight: themeMode === value ? 600 : 400,
-                color: themeMode === value ? '#fff' : text.secondary,
-                background:
-                  themeMode === value ? TONO_COLORS.accent : 'transparent',
-              }}
-            >
-              {t(`tono.settings.appearance.theme.${value}`)}
-            </button>
-          ))}
-        </span>
-      </Row>
+            ))}
+          </span>
+        </Row>
+      )}
     </GlassCard>
   )
 }
 
 export const PrivacyCard = () => {
   const { t } = useTranslation()
-  const dark = useThemeMode() !== 'light'
-  const text = tonoText(dark)
+  const { newAppearance } = useAppearancePreferences()
+  const Toggle = newAppearance ? SeaToggle : TonoToggle
   const { data: auditEnabled } = useQuery({
     queryKey: tonoAuditEnabledQueryKey,
     queryFn: tonoAuditEnabled,
@@ -316,9 +351,18 @@ export const PrivacyCard = () => {
       )}
       <Row
         label={t('settings.sections.tono.auditLog.label')}
-        subtitle={t('settings.sections.tono.auditLog.description')}
+        subtitle={
+          newAppearance ? (
+            <PrivacyDescription
+              brief={t('tono.seaSettings.auditBrief')}
+              full={t('settings.sections.tono.auditLog.description')}
+            />
+          ) : (
+            t('settings.sections.tono.auditLog.description')
+          )
+        }
       >
-        <TonoToggle
+        <Toggle
           checked={auditEnabled ?? true}
           onChange={(value) => void handleAudit(value)}
           label={t('settings.sections.tono.auditLog.label')}
@@ -326,9 +370,18 @@ export const PrivacyCard = () => {
       </Row>
       <Row
         label={t('settings.sections.tono.periodicTelemetry.label')}
-        subtitle={t('settings.sections.tono.periodicTelemetry.description')}
+        subtitle={
+          newAppearance ? (
+            <PrivacyDescription
+              brief={t('tono.seaSettings.telemetryBrief')}
+              full={t('settings.sections.tono.periodicTelemetry.description')}
+            />
+          ) : (
+            t('settings.sections.tono.periodicTelemetry.description')
+          )
+        }
       >
-        <TonoToggle
+        <Toggle
           checked={periodicTelemetryEnabled ?? true}
           onChange={(value) => void handlePeriodicTelemetry(value)}
           label={t('settings.sections.tono.periodicTelemetry.label')}
@@ -336,58 +389,101 @@ export const PrivacyCard = () => {
       </Row>
       <Row
         label={t('settings.sections.tono.networkLogUpload.label')}
-        subtitle={t('settings.sections.tono.networkLogUpload.description')}
+        subtitle={
+          newAppearance ? (
+            <PrivacyDescription
+              brief={t('tono.seaSettings.networkBrief')}
+              full={t('settings.sections.tono.networkLogUpload.description')}
+            />
+          ) : (
+            t('settings.sections.tono.networkLogUpload.description')
+          )
+        }
       >
-        <TonoToggle
+        <Toggle
           checked={networkLogUploadEnabled ?? false}
           onChange={(value) => void handleNetworkLogUpload(value)}
           label={t('settings.sections.tono.networkLogUpload.label')}
         />
       </Row>
-      <Row label={t('settings.sections.tono.auditLog.pathLabel')}>
+      {!newAppearance && (
+        <AuditPathRow logPath={logPath} onCopy={handleCopyPath} />
+      )}
+    </GlassCard>
+  )
+}
+
+const AuditPathRow = ({
+  logPath,
+  onCopy,
+}: {
+  logPath: string | undefined
+  onCopy: () => void
+}) => {
+  const { t } = useTranslation()
+  const text = tonoText(useThemeMode() !== 'light')
+  const { newAppearance } = useAppearancePreferences()
+  return (
+    <Row label={t('settings.sections.tono.auditLog.pathLabel')}>
+      <span
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 6,
+          maxWidth: 280,
+        }}
+      >
         <span
           style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 6,
-            maxWidth: 280,
+            fontSize: 10,
+            fontFamily: TONO_MONO_STACK,
+            color: text.tertiary,
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+            direction: 'rtl',
           }}
+          title={logPath ?? undefined}
         >
-          <span
-            style={{
-              fontSize: 10,
-              fontFamily: TONO_MONO_STACK,
-              color: text.tertiary,
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap',
-              direction: 'rtl',
-            }}
-            title={logPath ?? undefined}
-          >
-            {logPath ?? '—'}
-          </span>
-          <button
-            type="button"
-            className="tono-link"
-            aria-label={t('settings.sections.tono.auditLog.copyPath')}
-            title={t('settings.sections.tono.auditLog.copyPath')}
-            disabled={!logPath}
-            style={{ color: TONO_COLORS.accent, display: 'flex' }}
-            onClick={handleCopyPath}
-          >
-            <TonoIcon name="copy" size={14} />
-          </button>
+          {logPath ?? '—'}
         </span>
-      </Row>
-    </GlassCard>
+        <button
+          type="button"
+          className="tono-link"
+          aria-label={t('settings.sections.tono.auditLog.copyPath')}
+          title={t('settings.sections.tono.auditLog.copyPath')}
+          disabled={!logPath}
+          style={{
+            color: newAppearance ? 'var(--sea-accent)' : TONO_COLORS.accent,
+            display: 'flex',
+          }}
+          onClick={onCopy}
+        >
+          <TonoIcon name="copy" size={14} />
+        </button>
+      </span>
+    </Row>
   )
 }
 
 const AboutCard = () => {
   const { t } = useTranslation()
+  const { newAppearance } = useAppearancePreferences()
   const dark = useThemeMode() !== 'light'
   const text = tonoText(dark)
+  const { data: auditLogInfo } = useQuery({
+    queryKey: tonoAuditLogPathQueryKey,
+    queryFn: tonoAuditLogPath,
+  })
+  const handleCopyPath = useLockFn(async () => {
+    if (!auditLogInfo?.path) return
+    try {
+      await navigator.clipboard.writeText(auditLogInfo.path)
+      showNotice.success('settings.sections.tono.auditLog.copied')
+    } catch {
+      showNotice.error('settings.sections.tono.auditLog.copyFailed')
+    }
+  })
   const updateRef = useRef<DialogRef>(null)
   const { checkUpdate, loading } = useUpdate()
 
@@ -409,6 +505,36 @@ const AboutCard = () => {
       showNotice.error(error)
     }
   })
+
+  if (newAppearance)
+    return (
+      <>
+        <UpdateViewer ref={updateRef} />
+        <GlassCard>
+          <h2>{t('tono.settings.about.title')}</h2>
+          <Row label={`Tono v${version}`}>
+            <button
+              type="button"
+              className="sea-button"
+              data-variant="text"
+              disabled={loading}
+              aria-busy={loading}
+              onClick={() => void onCheckUpdate()}
+            >
+              {t('tono.settings.about.checkUpdates')}
+            </button>
+          </Row>
+          <Row
+            label={t('tono.settings.about.tagline')}
+            subtitle={t('tono.settings.about.description')}
+          />
+          <p className="sea-settings-about-copy">
+            {t('tono.settings.about.unsigned')}
+          </p>
+          <AuditPathRow logPath={auditLogInfo?.path} onCopy={handleCopyPath} />
+        </GlassCard>
+      </>
+    )
 
   return (
     <>
@@ -454,6 +580,19 @@ const AboutCard = () => {
 
 const SettingPage = () => {
   const { t } = useTranslation()
+  const { newAppearance } = useAppearancePreferences()
+  if (newAppearance)
+    return (
+      <div className="tono-page sea-settings">
+        <PageHeader title={t('tono.settings.title')} />
+        <div className="sea-settings-groups">
+          <GeneralCard />
+          <AppearanceCard />
+          <PrivacyCard />
+          <AboutCard />
+        </div>
+      </div>
+    )
 
   return (
     <div className="tono-page">
@@ -471,6 +610,7 @@ const SettingPage = () => {
         <GeneralCard />
         <AboutCard />
       </div>
+      <AppearanceCard />
       <PrivacyCard />
     </div>
   )

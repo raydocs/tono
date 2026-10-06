@@ -1,0 +1,290 @@
+{
+  "png": {
+    "samples": [
+      {
+        "unchangedMs": 157.9893750000001,
+        "firstMs": 149.25962499999991,
+        "firstRAF": {
+          "ms": 15.200000047683716,
+          "phase": "idle",
+          "transform": "matrix(1, 0, 0, 1, 0, 0)"
+        },
+        "bytes": 624781
+      },
+      {
+        "unchangedMs": 155.60291700000016,
+        "firstMs": 150.25466599999982,
+        "firstRAF": {
+          "ms": 2.799999952316284,
+          "phase": "connected",
+          "transform": "matrix(1.01213, 0, 0, 1.01213, 0, 35.1658)"
+        },
+        "bytes": 622940
+      },
+      {
+        "unchangedMs": 156.80891699999984,
+        "firstMs": 169.96795900000006,
+        "firstRAF": {
+          "ms": 16.5,
+          "phase": "idle",
+          "transform": "matrix(1, 0, 0, 1, 0, 0)"
+        },
+        "bytes": 625662
+      },
+      {
+        "unchangedMs": 157.88841600000023,
+        "firstMs": 172.794625,
+        "firstRAF": {
+          "ms": 14.300000190734863,
+          "phase": "connected",
+          "transform": "matrix(1.01363, 0, 0, 1.01363, 0, 39.5397)"
+        },
+        "bytes": 624183
+      },
+      {
+        "unchangedMs": 159.33300000000008,
+        "firstMs": 152.91799999999967,
+        "firstRAF": {
+          "ms": 9.900000095367432,
+          "phase": "idle",
+          "transform": "matrix(1, 0, 0, 1, 0, 0)"
+        },
+        "bytes": 624952
+      },
+      {
+        "unchangedMs": 156.9646660000003,
+        "firstMs": 152.17454200000066,
+        "firstRAF": {
+          "ms": 2.0999999046325684,
+          "phase": "connected",
+          "transform": "matrix(1.01213, 0, 0, 1.01213, 0, 35.1666)"
+        },
+        "bytes": 622532
+      }
+    ],
+    "traceNames": [
+      "ProxyImpl::ScheduledActionDraw"
+    ],
+    "draw": {
+      "count": 142,
+      "totalMs": 131.73599999999996,
+      "maxMs": 1.402
+    }
+  },
+  "pngFast": {
+    "samples": [
+      {
+        "unchangedMs": 97.24633399999948,
+        "firstMs": 77.71345800000017,
+        "firstRAF": {
+          "ms": 3,
+          "phase": "idle",
+          "transform": "matrix(1, 0, 0, 1, 0, 0)"
+        },
+        "bytes": 775709
+      },
+      {
+        "unchangedMs": 96.01529200000004,
+        "firstMs": 97.39841700000034,
+        "firstRAF": {
+          "ms": 2.299999952316284,
+          "phase": "connected",
+          "transform": "matrix(1.00609, 0, 0, 1.00609, 0, 17.6534)"
+        },
+        "bytes": 775548
+      },
+      {
+        "unchangedMs": 89.68345899999986,
+        "firstMs": 76.3703749999986,
+        "firstRAF": {
+          "ms": 5.599999904632568,
+          "phase": "idle",
+          "transform": "matrix(1, 0, 0, 1, 0, 0)"
+        },
+        "bytes": 775966
+      },
+      {
+        "unchangedMs": 96.69166600000062,
+        "firstMs": 77.0057080000006,
+        "firstRAF": {
+          "ms": 2.1999998092651367,
+          "phase": "connected",
+          "transform": "matrix(1.00609, 0, 0, 1.00609, 0, 17.6568)"
+        },
+        "bytes": 777206
+      },
+      {
+        "unchangedMs": 92.17299999999886,
+        "firstMs": 104.27779100000043,
+        "firstRAF": {
+          "ms": 6.099999904632568,
+          "phase": "idle",
+          "transform": "matrix(1, 0, 0, 1, 0, 0)"
+        },
+        "bytes": 776927
+      },
+      {
+        "unchangedMs": 87.36708299999918,
+        "firstMs": 101.5145420000008,
+        "firstRAF": {
+          "ms": 17,
+          "phase": "connected",
+          "transform": "matrix(1.0076, 0, 0, 1.0076, 0, 22.0336)"
+        },
+        "bytes": 777826
+      }
+    ],
+    "traceNames": [
+      "ProxyImpl::ScheduledActionDraw"
+    ],
+    "draw": {
+      "count": 113,
+      "totalMs": 102.92699999999999,
+      "maxMs": 1.297
+    }
+  },
+  "jpeg": {
+    "samples": [
+      {
+        "unchangedMs": 66.24425000000338,
+        "firstMs": 44.247833000001265,
+        "firstRAF": {
+          "ms": 2.299999952316284,
+          "phase": "idle",
+          "transform": "matrix(1, 0, 0, 1, 0, 0)"
+        },
+        "bytes": 44360
+      },
+      {
+        "unchangedMs": 62.0412499999984,
+        "firstMs": 63.789333000000624,
+        "firstRAF": {
+          "ms": 2.1999998092651367,
+          "phase": "connected",
+          "transform": "matrix(1.00423, 0, 0, 1.00423, 0, 12.2579)"
+        },
+        "bytes": 43831
+      },
+      {
+        "unchangedMs": 52.26329100000294,
+        "firstMs": 60.190958999999566,
+        "firstRAF": {
+          "ms": 7.800000190734863,
+          "phase": "idle",
+          "transform": "matrix(1, 0, 0, 1, 0, 0)"
+        },
+        "bytes": 44323
+      },
+      {
+        "unchangedMs": 61.16554100000212,
+        "firstMs": 61.21066599999904,
+        "firstRAF": {
+          "ms": 3.700000047683716,
+          "phase": "connected",
+          "transform": "matrix(1.00453, 0, 0, 1.00453, 0, 13.1345)"
+        },
+        "bytes": 43939
+      },
+      {
+        "unchangedMs": 56.85504199999923,
+        "firstMs": 57.23191699999734,
+        "firstRAF": {
+          "ms": 7.300000190734863,
+          "phase": "idle",
+          "transform": "matrix(1, 0, 0, 1, 0, 0)"
+        },
+        "bytes": 44326
+      },
+      {
+        "unchangedMs": 66.26050000000032,
+        "firstMs": 59.4800839999989,
+        "firstRAF": {
+          "ms": 2.4000000953674316,
+          "phase": "connected",
+          "transform": "matrix(1.00453, 0, 0, 1.00453, 0, 13.1356)"
+        },
+        "bytes": 44077
+      }
+    ],
+    "traceNames": [
+      "ProxyImpl::ScheduledActionDraw"
+    ],
+    "draw": {
+      "count": 88,
+      "totalMs": 83.52099999999997,
+      "maxMs": 1.61
+    }
+  },
+  "webp": {
+    "samples": [
+      {
+        "unchangedMs": 87.27979100000084,
+        "firstMs": 88.14629099999729,
+        "firstRAF": {
+          "ms": 4,
+          "phase": "idle",
+          "transform": "matrix(1, 0, 0, 1, 0, 0)"
+        },
+        "bytes": 18708
+      },
+      {
+        "unchangedMs": 71.37749999999869,
+        "firstMs": 69.56316700000025,
+        "firstRAF": {
+          "ms": 17,
+          "phase": "connected",
+          "transform": "matrix(1.00609, 0, 0, 1.00609, 0, 17.6492)"
+        },
+        "bytes": 18412
+      },
+      {
+        "unchangedMs": 75.43375000000015,
+        "firstMs": 83.98812499999985,
+        "firstRAF": {
+          "ms": 15.099999904632568,
+          "phase": "idle",
+          "transform": "matrix(1, 0, 0, 1, 0, 0)"
+        },
+        "bytes": 18554
+      },
+      {
+        "unchangedMs": 78.44075000000157,
+        "firstMs": 95.46933300000092,
+        "firstRAF": {
+          "ms": 12.299999952316284,
+          "phase": "connected",
+          "transform": "matrix(1.00609, 0, 0, 1.00609, 0, 17.6478)"
+        },
+        "bytes": 18472
+      },
+      {
+        "unchangedMs": 78.33570800000234,
+        "firstMs": 82.75904099999752,
+        "firstRAF": {
+          "ms": 2,
+          "phase": "idle",
+          "transform": "matrix(1, 0, 0, 1, 0, 0)"
+        },
+        "bytes": 18638
+      },
+      {
+        "unchangedMs": 77.13166699999783,
+        "firstMs": 83.76308399999834,
+        "firstRAF": {
+          "ms": 14.099999904632568,
+          "phase": "connected",
+          "transform": "matrix(1.00609, 0, 0, 1.00609, 0, 17.651)"
+        },
+        "bytes": 18440
+      }
+    ],
+    "traceNames": [
+      "ProxyImpl::ScheduledActionDraw"
+    ],
+    "draw": {
+      "count": 107,
+      "totalMs": 100.94200000000001,
+      "maxMs": 2.643
+    }
+  }
+}

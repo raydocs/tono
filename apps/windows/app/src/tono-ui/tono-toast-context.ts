@@ -5,7 +5,10 @@ import { createContext, use } from 'react'
  * component-free module so the provider file stays a clean fast-refresh unit.
  */
 
-export type ShowTonoToast = (message: string) => void
+export type ShowTonoToast = (
+  message: string,
+  kind?: 'success' | 'attention' | 'error',
+) => void
 
 export const TonoToastContext = createContext<ShowTonoToast>(() => {})
 

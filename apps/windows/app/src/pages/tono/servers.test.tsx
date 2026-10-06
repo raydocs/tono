@@ -9,12 +9,15 @@ import {
 } from '@testing-library/react'
 import i18n from 'i18next'
 import { initReactI18next } from 'react-i18next'
+import { MemoryRouter } from 'react-router'
 import { SWRConfig, unstable_serialize } from 'swr'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 
 import enShared from '@/locales/en/shared.json'
 import enTono from '@/locales/en/tono.json'
+import delayManager from '@/services/delay'
 import type { TonoRoutePreferences, TonoServer } from '@/services/tono'
+import { setNewAppearance } from '@/tono-ui/appearance-preferences'
 
 const {
   serversMock,
@@ -83,6 +86,8 @@ void i18n.use(initReactI18next).init({
 })
 
 beforeEach(() => {
+  // These cover the old look, which stays selectable; a fresh store now picks the new one.
+  setNewAppearance(false)
   vi.clearAllMocks()
   selectServerMock.mockResolvedValue(undefined)
   connectMock.mockResolvedValue(undefined)
@@ -668,4 +673,136 @@ it('does not show late account-A preferences as account-B history or recommendat
     screen.queryByText('No verified successful connections yet.'),
   ).toBeNull()
   expect(connectMock).not.toHaveBeenCalled()
+})
+
+it('selects without connecting in the sea look, then the selection capsule connects once', async () => {
+  const name = 'Los Angeles · Grove'
+  scopeMock.mockReturnValue('account:sea')
+  serversMock.mockResolvedValue([
+    {
+      name,
+      server: 'example.test',
+      port: 443,
+      selected: false,
+      available: true,
+    },
+  ])
+  preferencesMock.mockResolvedValue({
+    scope: 'account:sea',
+    catalogRevision: 54,
+    fixedRegion: null,
+    favorites: [],
+    recent: [],
+  })
+  statusMock.mockResolvedValue({
+    uiState: 'notConnected',
+    routePreferenceScope: 'account:sea',
+    catalogRevision: 54,
+    selectedServer: name,
+  })
+  setNewAppearance(true)
+  const { unmount } = render(
+    <MemoryRouter>
+      <SWRConfig value={{ provider: () => new Map(), errorRetryCount: 0 }}>
+        <ServersPage />
+      </SWRConfig>
+    </MemoryRouter>,
+  )
+  try {
+    const row = await screen.findByRole('button', {
+      name: /Los Angeles · Grove/,
+    })
+    fireEvent.click(row)
+    const connect = await screen.findByRole('button', { name: 'Connect' })
+    expect(selectServerMock).toHaveBeenCalledOnce()
+    expect(selectServerMock).toHaveBeenCalledWith(name, {
+      scope: 'account:sea',
+      catalogRevision: 54,
+    })
+    expect(connectMock).not.toHaveBeenCalled()
+    fireEvent.click(connect)
+    await waitFor(() => expect(connectMock).toHaveBeenCalledOnce())
+  } finally {
+    unmount()
+    setNewAppearance(false)
+  }
+})
+
+const renderSeaRoutes = () => {
+  scopeMock.mockReturnValue('account-a:7')
+  serversMock.mockResolvedValue(
+    routeServers.map((server, index) => ({ ...server, selected: index === 0 })),
+  )
+  preferencesMock.mockResolvedValue({
+    ...routeFixture(),
+    recent: [
+      {
+        name: 'Buffalo · Niagara',
+        revision: 54,
+        verifiedAtMs: Date.now() - 60_000,
+      },
+    ],
+  })
+  statusMock.mockResolvedValue({
+    uiState: 'notConnected',
+    routePreferenceScope: 'account-a:7',
+    catalogRevision: 54,
+    selectedServer: 'Buffalo · Niagara',
+  })
+  setNewAppearance(true)
+  return render(
+    <MemoryRouter>
+      <SWRConfig value={{ provider: () => new Map(), errorRetryCount: 0 }}>
+        <ServersPage />
+      </SWRConfig>
+    </MemoryRouter>,
+  )
+}
+
+it('reads latency in milliseconds in the sea look, as the home chip does', async () => {
+  const cached = vi
+    .spyOn(delayManager, 'getDelayUpdate')
+    .mockReturnValue({ delay: 816, updatedAt: Date.now() })
+  const { unmount } = renderSeaRoutes()
+  try {
+    expect((await screen.findAllByText('816 ms')).length).toBeGreaterThan(0)
+  } finally {
+    unmount()
+    setNewAppearance(false)
+    cached.mockRestore()
+  }
+})
+
+it('states the 24-hour record as a plain sentence without a count in the sea look', async () => {
+  const { unmount } = renderSeaRoutes()
+  try {
+    expect(
+      await screen.findByText('Connected and verified in the last 24 hours'),
+    ).toBeTruthy()
+  } finally {
+    unmount()
+    setNewAppearance(false)
+  }
+})
+
+it('titles the sea lines page with the word the navigation uses', async () => {
+  const { unmount } = renderSeaRoutes()
+  try {
+    expect(await screen.findByRole('heading', { name: 'Servers' })).toBeTruthy()
+  } finally {
+    unmount()
+    setNewAppearance(false)
+  }
+})
+
+it('does not paint the in-use mark as good while protection has no live evidence', async () => {
+  // The mocked status reports connected and carries no kill-switch evidence.
+  uiStateMock.mockReturnValue('connected')
+  const { unmount } = renderSeaRoutes()
+  try {
+    expect((await screen.findByText('In use')).dataset.kind).not.toBe('good')
+  } finally {
+    unmount()
+    setNewAppearance(false)
+  }
 })

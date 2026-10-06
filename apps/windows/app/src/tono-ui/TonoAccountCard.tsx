@@ -29,7 +29,9 @@ import {
 import { TONO_COLORS, tonoText } from '@/tono-ui/theme'
 import parseTraffic from '@/utils/parse-traffic'
 
+import { useAppearancePreferences } from './appearance-preferences'
 import { GlassCard } from './GlassCard'
+import { SeaAccount } from './SeaAccount'
 
 const formatBytes = (bytes: number) =>
   parseTraffic(Math.max(0, bytes)).join(' ')
@@ -47,6 +49,7 @@ const blurDeviceName = (name: string) => {
  */
 export const TonoAccountCard = () => {
   const { t } = useTranslation()
+  const { newAppearance } = useAppearancePreferences()
   const dark = useThemeMode() !== 'light'
   const text = tonoText(dark)
   const navigate = useNavigate()
@@ -137,7 +140,7 @@ export const TonoAccountCard = () => {
                 marginLeft: 6,
                 fontSize: 10,
                 fontWeight: 600,
-                color: TONO_COLORS.accent,
+                color: newAppearance ? 'var(--sea-accent)' : TONO_COLORS.accent,
               }}
             >
               {t('tono.account.currentDevice')}
@@ -177,6 +180,62 @@ export const TonoAccountCard = () => {
       )}
     </div>
   )
+
+  const dialogs = (
+    <>
+      {/* Revoke confirm */}
+      {revokeTarget && (
+        <TonoConfirmDialog
+          dark={dark}
+          title={t('tono.account.revokeConfirmTitle')}
+          message={t('tono.account.revokeConfirmMessage', {
+            name: revokeTarget.name,
+          })}
+          error={revokeError}
+          confirmLabel={t('shared.actions.confirm')}
+          cancelLabel={t('shared.actions.cancel')}
+          onConfirm={handleRevoke}
+          onCancel={() => setRevokeTarget(null)}
+        />
+      )}
+
+      {/* Sign-out confirm */}
+      {signOutOpen && (
+        <TonoConfirmDialog
+          dark={dark}
+          title={t('tono.account.signOutConfirmTitle')}
+          message={t('tono.account.signOutConfirmMessage')}
+          error={signOutError}
+          confirmLabel={t('tono.account.signOut')}
+          cancelLabel={t('shared.actions.cancel')}
+          onConfirm={handleSignOut}
+          onCancel={() => setSignOutOpen(false)}
+        />
+      )}
+    </>
+  )
+
+  if (newAppearance)
+    return (
+      <SeaAccount
+        account={account}
+        deviceCount={deviceList.length}
+        devices={
+          <>
+            {currentDevices.map(renderDeviceRow)}
+            {otherDevices.length > 0 && (
+              <h2>{t('tono.account.otherDevices')}</h2>
+            )}
+            {otherDevices.map(renderDeviceRow)}
+          </>
+        }
+        onSignOut={() => {
+          setSignOutError(null)
+          setSignOutOpen(true)
+        }}
+        dialogs={dialogs}
+      />
+    )
 
   return (
     <GlassCard padding={20}>
@@ -287,35 +346,7 @@ export const TonoAccountCard = () => {
         </button>
       </div>
 
-      {/* Revoke confirm */}
-      {revokeTarget && (
-        <TonoConfirmDialog
-          dark={dark}
-          title={t('tono.account.revokeConfirmTitle')}
-          message={t('tono.account.revokeConfirmMessage', {
-            name: revokeTarget.name,
-          })}
-          error={revokeError}
-          confirmLabel={t('shared.actions.confirm')}
-          cancelLabel={t('shared.actions.cancel')}
-          onConfirm={handleRevoke}
-          onCancel={() => setRevokeTarget(null)}
-        />
-      )}
-
-      {/* Sign-out confirm */}
-      {signOutOpen && (
-        <TonoConfirmDialog
-          dark={dark}
-          title={t('tono.account.signOutConfirmTitle')}
-          message={t('tono.account.signOutConfirmMessage')}
-          error={signOutError}
-          confirmLabel={t('tono.account.signOut')}
-          cancelLabel={t('shared.actions.cancel')}
-          onConfirm={handleSignOut}
-          onCancel={() => setSignOutOpen(false)}
-        />
-      )}
+      {dialogs}
     </GlassCard>
   )
 }

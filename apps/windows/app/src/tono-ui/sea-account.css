@@ -1,0 +1,71 @@
+.sea-account {
+  padding: 8px 24px 20px;
+}
+.sea-account-fact {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  min-height: 48px;
+  border-bottom: 1px solid var(--sea-divider);
+  font-size: 15px;
+}
+.sea-account-fact > :first-child {
+  color: var(--sea-secondary);
+}
+.sea-account-fact > :last-child {
+  text-align: right;
+  overflow-wrap: anywhere;
+  font-weight: 400;
+}
+.sea-account h2 {
+  font-size: 13px;
+  color: var(--sea-secondary);
+  font-weight: 400;
+  margin: 24px 0 8px;
+}
+.sea-account-usage {
+  padding: 16px 0;
+  border-bottom: 1px solid var(--sea-divider);
+  font-size: 13px;
+}
+.sea-account-usage > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+.sea-account progress {
+  display: block;
+  width: 100%;
+  height: 6px;
+  border: 0;
+  border-radius: 99px;
+  overflow: hidden;
+  accent-color: var(--sea-accent);
+}
+.sea-account progress::-webkit-progress-bar {
+  background: #ffffff12;
+}
+.sea-account progress::-webkit-progress-value {
+  background: var(--sea-accent);
+}
+.sea-account progress::-moz-progress-bar {
+  background: var(--sea-accent);
+}
+.sea-account .tono-row {
+  min-height: 48px;
+  padding: 8px 0;
+  border-color: var(--sea-divider);
+}
+.sea-account footer {
+  border-top: 1px solid var(--sea-divider);
+  margin-top: 18px;
+  padding-top: 12px;
+}
+.sea-account footer > p {
+  font-size: 12px;
+  color: var(--sea-secondary);
+  margin: 8px 0 0;
+  line-height: 1.6;
+}

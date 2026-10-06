@@ -17,6 +17,7 @@ import {
   tonoLocalDiagnosticsReport,
   type TonoDiagnosticsReport,
 } from '@/services/tono'
+import { useAppearancePreferences } from '@/tono-ui/appearance-preferences'
 import { GlassCard } from '@/tono-ui/GlassCard'
 import { PageHeader } from '@/tono-ui/PageHeader'
 import { SupportContact } from '@/tono-ui/SupportContact'
@@ -26,6 +27,7 @@ import { TonoIcon } from '@/tono-ui/TonoIcon'
 
 import { HealthCheck } from './health-check'
 import { nodeCityLabel } from './node-meta'
+import './sea-support.css'
 
 const hex = (color: string, alpha: number) =>
   `${color}${Math.round(alpha * 255)
@@ -111,6 +113,7 @@ const SummaryRow = ({
 
 const SupportPage = () => {
   const { t } = useTranslation()
+  const { newAppearance } = useAppearancePreferences()
   const dark = useThemeMode() !== 'light'
   const text = tonoText(dark)
 
@@ -231,6 +234,384 @@ const SupportPage = () => {
     border: secondaryBorder,
   } as const
 
+  const contactPanel = (
+    <GlassCard radius="var(--tono-radius-card)" padding={18}>
+      <h2 style={{ margin: '0 0 8px', fontSize: 14, color: text.primary }}>
+        {t('tono.support.contact.copyMessage')}
+      </h2>
+      <SupportContact extra={rawLastError ? lastError : undefined} />
+    </GlassCard>
+  )
+  const summaryPanel = (
+    <GlassCard radius="var(--tono-radius-card)" padding={18}>
+      <h2 style={{ margin: '0 0 6px', fontSize: 14, color: text.primary }}>
+        {t('tono.support.summary.title')}
+      </h2>
+      <p style={{ fontSize: 12, lineHeight: 1.55, color: text.secondary }}>
+        {t('tono.experience.summaryHint')}
+      </p>
+      {reportError && (
+        <p
+          role="alert"
+          style={{ fontSize: 12, color: 'var(--tono-text-error)' }}
+        >
+          {t('tono.support.loadFailed')}
+        </p>
+      )}
+      <SummaryRow
+        label={t('tono.support.summary.app')}
+        value={report ? `Tono ${report.appVersion} · ${report.osVersion}` : '—'}
+      />
+      <SummaryRow
+        label={t('tono.support.summary.service')}
+        value={
+          report
+            ? `${valueOrUnknown(report.serviceProtocol)}${report.serviceBuild ? ` · ${report.serviceBuild}` : ''}`
+            : '—'
+        }
+      />
+      <SummaryRow
+        label={t('tono.support.summary.protection')}
+        value={report ? protectionSummary(report, t) : '—'}
+      />
+      <SummaryRow
+        label={t('tono.support.summary.dns')}
+        value={
+          report
+            ? boolStatus(
+                report.dnsEnabled,
+                t('tono.support.enabled'),
+                t('tono.support.disabled'),
+              )
+            : '—'
+        }
+      />
+      <SummaryRow
+        label={t('tono.support.summary.node')}
+        value={
+          report?.selectedServer ? nodeCityLabel(report.selectedServer, t) : '—'
+        }
+      />
+      <SummaryRow
+        label={t('tono.support.summary.lastError')}
+        value={lastError}
+        monospace
+      />
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 10 }}>
+        <button
+          type="button"
+          className="tono-button"
+          disabled={!report}
+          onClick={() => {
+            if (!report) return
+            void navigator.clipboard
+              .writeText(`Tono ${report.appVersion} · ${report.osVersion}`)
+              .then(() => showNotice.success('tono.support.detailsCopied'))
+              .catch(() => showNotice.error('tono.support.copyFailed'))
+          }}
+          style={buttonStyle}
+        >
+          {t('tono.support.webrtc.copyVersion')}
+        </button>
+      </div>
+      {dnsWarning && (
+        <SummaryRow
+          label={t('tono.support.summary.lastWarning')}
+          value={dnsWarning}
+          monospace
+        />
+      )}
+    </GlassCard>
+  )
+  const auditPanel = (
+    <GlassCard radius="var(--tono-radius-card)" padding={18}>
+      <h2 style={{ margin: '0 0 6px', fontSize: 14, color: text.primary }}>
+        {t('tono.support.audit.title')}
+      </h2>
+      <p style={{ margin: '0 0 12px', fontSize: 12, color: text.secondary }}>
+        {t('tono.support.audit.description')}
+      </p>
+      {auditPathError && (
+        <p
+          role="alert"
+          style={{ fontSize: 12, color: 'var(--tono-text-error)' }}
+        >
+          {t('tono.support.audit.loadFailed')}
+        </p>
+      )}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <code
+          data-testid="tono-support-audit-path"
+          style={{
+            flex: 1,
+            minWidth: 0,
+            padding: '9px 11px',
+            borderRadius: 9,
+            fontSize: 11,
+            color: text.primary,
+            background: secondaryBackground,
+            overflowWrap: 'anywhere',
+            userSelect: 'text',
+          }}
+        >
+          {auditLogInfo?.path ?? '—'}
+        </code>
+        <button
+          type="button"
+          className="tono-button"
+          aria-label={t('tono.support.audit.copyPath')}
+          disabled={!auditLogInfo?.path}
+          onClick={handleCopyAuditPath}
+          style={buttonStyle}
+        >
+          <TonoIcon name="copy" size={15} />
+          {t('tono.support.audit.copyPath')}
+        </button>
+      </div>
+    </GlassCard>
+  )
+  const terminalPanel = (
+    <GlassCard radius="var(--tono-radius-card)" padding={18}>
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          marginBottom: 6,
+        }}
+      >
+        <h2 style={{ margin: 0, fontSize: 14, color: text.primary }}>
+          {t('tono.support.terminalEnv.title')}
+        </h2>
+        <span
+          style={{
+            fontSize: 11,
+            fontWeight: 600,
+            padding: '3px 8px',
+            borderRadius: 8,
+            background: terminalEnvLoading
+              ? hex(TONO_COLORS.gray, 0.12)
+              : terminalEnvError || terminalEnv == null
+                ? hex(TONO_COLORS.error, 0.12)
+                : terminalEnv.hasConflict
+                  ? hex(TONO_COLORS.error, 0.12)
+                  : hex(TONO_COLORS.latencyGood, 0.12),
+            color: terminalEnvLoading
+              ? TONO_COLORS.gray
+              : terminalEnvError || terminalEnv == null
+                ? 'var(--tono-text-error)'
+                : terminalEnv.hasConflict
+                  ? 'var(--tono-text-error)'
+                  : TONO_COLORS.latencyGood,
+          }}
+        >
+          {terminalEnvLoading
+            ? t('tono.support.terminalEnv.checking')
+            : terminalEnvError || terminalEnv == null
+              ? t('tono.support.terminalEnv.checkFailed')
+              : terminalEnv.hasConflict
+                ? t('tono.support.terminalEnv.conflictDetected')
+                : t('tono.support.terminalEnv.ready')}
+        </span>
+      </div>
+      <p style={{ margin: '0 0 12px', fontSize: 12, color: text.secondary }}>
+        {terminalEnvLoading
+          ? t('tono.support.terminalEnv.checkingDesc')
+          : terminalEnvError || terminalEnv == null
+            ? t('tono.support.terminalEnv.checkFailedDesc')
+            : terminalEnv.hasConflict
+              ? t('tono.support.terminalEnv.conflictDesc')
+              : t('tono.support.terminalEnv.readyDesc')}
+      </p>
+
+      {terminalEnv?.hasConflict && terminalEnv.entries.length > 0 && (
+        <div
+          style={{
+            marginBottom: 12,
+            padding: '10px 12px',
+            borderRadius: 10,
+            background: secondaryBackground,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 6,
+          }}
+        >
+          {terminalEnv.entries.map((entry) => (
+            <div
+              key={`${entry.key}-${entry.source}`}
+              style={{
+                display: 'grid',
+                gap: 3,
+                fontSize: 11,
+              }}
+            >
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: 12,
+                  fontFamily: TONO_MONO_STACK,
+                }}
+              >
+                <span
+                  style={{
+                    fontWeight: 600,
+                    color: 'var(--tono-text-error)',
+                  }}
+                >
+                  {entry.key}={entry.value}
+                </span>
+                <span style={{ color: text.tertiary }}>{entry.source}</span>
+              </div>
+              <span style={{ color: text.secondary }}>{entry.guidance}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {terminalEnv?.hasConflict && (
+        <p
+          style={{
+            margin: '0 0 12px',
+            fontSize: 11,
+            color: text.secondary,
+          }}
+        >
+          {t('tono.support.terminalEnv.restartNotice')}
+        </p>
+      )}
+
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+        {terminalEnv?.hasConflict && terminalEnv.canAutoClear && (
+          <button
+            type="button"
+            className="tono-button"
+            disabled={clearingEnv}
+            onClick={handleClearTerminalEnv}
+            style={{
+              ...buttonStyle,
+              background: hex(TONO_COLORS.error, dark ? 0.16 : 0.1),
+              color: 'var(--tono-text-error)',
+              borderColor: hex(TONO_COLORS.error, 0.3),
+            }}
+          >
+            {clearingEnv
+              ? t('tono.support.terminalEnv.clearing')
+              : t('tono.support.terminalEnv.clearAction')}
+          </button>
+        )}
+        <button
+          type="button"
+          className="tono-button"
+          disabled={terminalEnvLoading}
+          onClick={() => void refetchTerminalEnv()}
+          style={buttonStyle}
+        >
+          {t('tono.support.terminalEnv.recheck')}
+        </button>
+      </div>
+    </GlassCard>
+  )
+  const webrtcPanel = (
+    <GlassCard radius="var(--tono-radius-card)" padding={18}>
+      <h2 style={{ margin: '0 0 6px', fontSize: 14, color: text.primary }}>
+        {t('tono.support.webrtc.title')}
+      </h2>
+      <p style={{ margin: '0 0 12px', fontSize: 12, color: text.secondary }}>
+        {t('tono.support.webrtc.description')}
+      </p>
+      <button
+        type="button"
+        className="tono-button"
+        onClick={() => {
+          void openUrl('https://ip.cx/webrtc').catch((error) => {
+            console.warn('[Support] open WebRTC check failed:', error)
+            showNotice.error('tono.support.webrtc.openFailed')
+          })
+        }}
+        style={buttonStyle}
+      >
+        {t('tono.support.webrtc.open')}
+      </button>
+    </GlassCard>
+  )
+  const diagnosticsPanel = (
+    <GlassCard radius="var(--tono-radius-card)" padding={18}>
+      <h2 style={{ margin: '0 0 6px', fontSize: 14, color: text.primary }}>
+        {t('tono.support.diagnostics.title')}
+      </h2>
+      <p style={{ margin: '0 0 14px', fontSize: 12, color: text.secondary }}>
+        {t('tono.support.diagnostics.description')}
+      </p>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+        <button
+          type="button"
+          className="tono-button"
+          onClick={handleCopyDetails}
+          disabled={!report}
+          style={buttonStyle}
+        >
+          {t('tono.progress.copyDetails')}
+        </button>
+        {!newAppearance && <SupportReportAction testIdPrefix="tono-support" />}
+      </div>
+    </GlassCard>
+  )
+  if (newAppearance)
+    return (
+      <div className="tono-page sea-support-page">
+        <PageHeader
+          title={t('tono.support.title')}
+          subtitle={t('tono.support.subtitle')}
+          trailing={
+            <button
+              type="button"
+              className="tono-button"
+              onClick={() => void refreshReport()}
+              disabled={isFetching}
+              aria-busy={isFetching}
+              style={buttonStyle}
+            >
+              <TonoIcon name="refresh" size={15} />
+              {t('tono.support.refresh')}
+            </button>
+          }
+        />
+        <HealthCheck
+          actions={
+            <>
+              <SupportContact
+                compact
+                extra={rawLastError ? lastError : undefined}
+              />
+              <SupportReportAction testIdPrefix="tono-support" />
+            </>
+          }
+          tools={
+            <div className="sea-support-tools">
+              <details open={terminalEnv?.hasConflict || undefined}>
+                <summary>{t('tono.support.terminalEnv.title')}</summary>
+                {terminalPanel}
+              </details>
+              <details>
+                <summary>{t('tono.support.webrtc.title')}</summary>
+                {webrtcPanel}
+              </details>
+            </div>
+          }
+          technicalOpen={Boolean(reportError)}
+          technicalDetails={
+            <>
+              {summaryPanel}
+              {auditPanel}
+              {diagnosticsPanel}
+            </>
+          }
+        />
+      </div>
+    )
+
   return (
     <div className="tono-page">
       <PageHeader
@@ -253,338 +634,16 @@ const SupportPage = () => {
 
       <div style={{ display: 'grid', gap: 14, maxWidth: 680 }}>
         <HealthCheck />
-        <GlassCard radius="var(--tono-radius-card)" padding={18}>
-          <h2 style={{ margin: '0 0 8px', fontSize: 14, color: text.primary }}>
-            {t('tono.support.contact.copyMessage')}
-          </h2>
-          <SupportContact extra={rawLastError ? lastError : undefined} />
-        </GlassCard>
-        <GlassCard radius="var(--tono-radius-card)" padding={18}>
-          <h2 style={{ margin: '0 0 6px', fontSize: 14, color: text.primary }}>
-            {t('tono.support.summary.title')}
-          </h2>
-          <p style={{ fontSize: 12, lineHeight: 1.55, color: text.secondary }}>
-            {t('tono.experience.summaryHint')}
-          </p>
-          {reportError && (
-            <p
-              role="alert"
-              style={{ fontSize: 12, color: 'var(--tono-text-error)' }}
-            >
-              {t('tono.support.loadFailed')}
-            </p>
-          )}
-          <SummaryRow
-            label={t('tono.support.summary.app')}
-            value={
-              report ? `Tono ${report.appVersion} · ${report.osVersion}` : '—'
-            }
-          />
-          <SummaryRow
-            label={t('tono.support.summary.service')}
-            value={
-              report
-                ? `${valueOrUnknown(report.serviceProtocol)}${report.serviceBuild ? ` · ${report.serviceBuild}` : ''}`
-                : '—'
-            }
-          />
-          <SummaryRow
-            label={t('tono.support.summary.protection')}
-            value={report ? protectionSummary(report, t) : '—'}
-          />
-          <SummaryRow
-            label={t('tono.support.summary.dns')}
-            value={
-              report
-                ? boolStatus(
-                    report.dnsEnabled,
-                    t('tono.support.enabled'),
-                    t('tono.support.disabled'),
-                  )
-                : '—'
-            }
-          />
-          <SummaryRow
-            label={t('tono.support.summary.node')}
-            value={
-              report?.selectedServer
-                ? nodeCityLabel(report.selectedServer, t)
-                : '—'
-            }
-          />
-          <SummaryRow
-            label={t('tono.support.summary.lastError')}
-            value={lastError}
-            monospace
-          />
-          <div
-            style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 10 }}
-          >
-            <button
-              type="button"
-              className="tono-button"
-              disabled={!report}
-              onClick={() => {
-                if (!report) return
-                void navigator.clipboard
-                  .writeText(`Tono ${report.appVersion} · ${report.osVersion}`)
-                  .then(() => showNotice.success('tono.support.detailsCopied'))
-                  .catch(() => showNotice.error('tono.support.copyFailed'))
-              }}
-              style={buttonStyle}
-            >
-              {t('tono.support.webrtc.copyVersion')}
-            </button>
-          </div>
-          {dnsWarning && (
-            <SummaryRow
-              label={t('tono.support.summary.lastWarning')}
-              value={dnsWarning}
-              monospace
-            />
-          )}
-        </GlassCard>
+        {contactPanel}
+        {summaryPanel}
 
-        <GlassCard radius="var(--tono-radius-card)" padding={18}>
-          <h2 style={{ margin: '0 0 6px', fontSize: 14, color: text.primary }}>
-            {t('tono.support.audit.title')}
-          </h2>
-          <p
-            style={{ margin: '0 0 12px', fontSize: 12, color: text.secondary }}
-          >
-            {t('tono.support.audit.description')}
-          </p>
-          {auditPathError && (
-            <p
-              role="alert"
-              style={{ fontSize: 12, color: 'var(--tono-text-error)' }}
-            >
-              {t('tono.support.audit.loadFailed')}
-            </p>
-          )}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <code
-              data-testid="tono-support-audit-path"
-              style={{
-                flex: 1,
-                minWidth: 0,
-                padding: '9px 11px',
-                borderRadius: 9,
-                fontSize: 11,
-                color: text.primary,
-                background: secondaryBackground,
-                overflowWrap: 'anywhere',
-                userSelect: 'text',
-              }}
-            >
-              {auditLogInfo?.path ?? '—'}
-            </code>
-            <button
-              type="button"
-              className="tono-button"
-              aria-label={t('tono.support.audit.copyPath')}
-              disabled={!auditLogInfo?.path}
-              onClick={handleCopyAuditPath}
-              style={buttonStyle}
-            >
-              <TonoIcon name="copy" size={15} />
-              {t('tono.support.audit.copyPath')}
-            </button>
-          </div>
-        </GlassCard>
+        {auditPanel}
 
-        <GlassCard radius="var(--tono-radius-card)" padding={18}>
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              marginBottom: 6,
-            }}
-          >
-            <h2 style={{ margin: 0, fontSize: 14, color: text.primary }}>
-              {t('tono.support.terminalEnv.title')}
-            </h2>
-            <span
-              style={{
-                fontSize: 11,
-                fontWeight: 600,
-                padding: '3px 8px',
-                borderRadius: 8,
-                background: terminalEnvLoading
-                  ? hex(TONO_COLORS.gray, 0.12)
-                  : terminalEnvError || terminalEnv == null
-                    ? hex(TONO_COLORS.error, 0.12)
-                    : terminalEnv.hasConflict
-                      ? hex(TONO_COLORS.error, 0.12)
-                      : hex(TONO_COLORS.latencyGood, 0.12),
-                color: terminalEnvLoading
-                  ? TONO_COLORS.gray
-                  : terminalEnvError || terminalEnv == null
-                    ? 'var(--tono-text-error)'
-                    : terminalEnv.hasConflict
-                      ? 'var(--tono-text-error)'
-                      : TONO_COLORS.latencyGood,
-              }}
-            >
-              {terminalEnvLoading
-                ? t('tono.support.terminalEnv.checking')
-                : terminalEnvError || terminalEnv == null
-                  ? t('tono.support.terminalEnv.checkFailed')
-                  : terminalEnv.hasConflict
-                    ? t('tono.support.terminalEnv.conflictDetected')
-                    : t('tono.support.terminalEnv.ready')}
-            </span>
-          </div>
-          <p
-            style={{ margin: '0 0 12px', fontSize: 12, color: text.secondary }}
-          >
-            {terminalEnvLoading
-              ? t('tono.support.terminalEnv.checkingDesc')
-              : terminalEnvError || terminalEnv == null
-                ? t('tono.support.terminalEnv.checkFailedDesc')
-                : terminalEnv.hasConflict
-                  ? t('tono.support.terminalEnv.conflictDesc')
-                  : t('tono.support.terminalEnv.readyDesc')}
-          </p>
+        {terminalPanel}
 
-          {terminalEnv?.hasConflict && terminalEnv.entries.length > 0 && (
-            <div
-              style={{
-                marginBottom: 12,
-                padding: '10px 12px',
-                borderRadius: 10,
-                background: secondaryBackground,
-                display: 'flex',
-                flexDirection: 'column',
-                gap: 6,
-              }}
-            >
-              {terminalEnv.entries.map((entry) => (
-                <div
-                  key={`${entry.key}-${entry.source}`}
-                  style={{
-                    display: 'grid',
-                    gap: 3,
-                    fontSize: 11,
-                  }}
-                >
-                  <div
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      gap: 12,
-                      fontFamily: TONO_MONO_STACK,
-                    }}
-                  >
-                    <span
-                      style={{
-                        fontWeight: 600,
-                        color: 'var(--tono-text-error)',
-                      }}
-                    >
-                      {entry.key}={entry.value}
-                    </span>
-                    <span style={{ color: text.tertiary }}>{entry.source}</span>
-                  </div>
-                  <span style={{ color: text.secondary }}>
-                    {entry.guidance}
-                  </span>
-                </div>
-              ))}
-            </div>
-          )}
+        {webrtcPanel}
 
-          {terminalEnv?.hasConflict && (
-            <p
-              style={{
-                margin: '0 0 12px',
-                fontSize: 11,
-                color: text.secondary,
-              }}
-            >
-              {t('tono.support.terminalEnv.restartNotice')}
-            </p>
-          )}
-
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-            {terminalEnv?.hasConflict && terminalEnv.canAutoClear && (
-              <button
-                type="button"
-                className="tono-button"
-                disabled={clearingEnv}
-                onClick={handleClearTerminalEnv}
-                style={{
-                  ...buttonStyle,
-                  background: hex(TONO_COLORS.error, dark ? 0.16 : 0.1),
-                  color: 'var(--tono-text-error)',
-                  borderColor: hex(TONO_COLORS.error, 0.3),
-                }}
-              >
-                {clearingEnv
-                  ? t('tono.support.terminalEnv.clearing')
-                  : t('tono.support.terminalEnv.clearAction')}
-              </button>
-            )}
-            <button
-              type="button"
-              className="tono-button"
-              disabled={terminalEnvLoading}
-              onClick={() => void refetchTerminalEnv()}
-              style={buttonStyle}
-            >
-              {t('tono.support.terminalEnv.recheck')}
-            </button>
-          </div>
-        </GlassCard>
-
-        <GlassCard radius="var(--tono-radius-card)" padding={18}>
-          <h2 style={{ margin: '0 0 6px', fontSize: 14, color: text.primary }}>
-            {t('tono.support.webrtc.title')}
-          </h2>
-          <p
-            style={{ margin: '0 0 12px', fontSize: 12, color: text.secondary }}
-          >
-            {t('tono.support.webrtc.description')}
-          </p>
-          <button
-            type="button"
-            className="tono-button"
-            onClick={() => {
-              void openUrl('https://ip.cx/webrtc').catch((error) => {
-                console.warn('[Support] open WebRTC check failed:', error)
-                showNotice.error('tono.support.webrtc.openFailed')
-              })
-            }}
-            style={buttonStyle}
-          >
-            {t('tono.support.webrtc.open')}
-          </button>
-        </GlassCard>
-
-        <GlassCard radius="var(--tono-radius-card)" padding={18}>
-          <h2 style={{ margin: '0 0 6px', fontSize: 14, color: text.primary }}>
-            {t('tono.support.diagnostics.title')}
-          </h2>
-          <p
-            style={{ margin: '0 0 14px', fontSize: 12, color: text.secondary }}
-          >
-            {t('tono.support.diagnostics.description')}
-          </p>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-            <button
-              type="button"
-              className="tono-button"
-              onClick={handleCopyDetails}
-              disabled={!report}
-              style={buttonStyle}
-            >
-              {t('tono.progress.copyDetails')}
-            </button>
-            <SupportReportAction testIdPrefix="tono-support" />
-          </div>
-        </GlassCard>
+        {diagnosticsPanel}
       </div>
     </div>
   )

@@ -1,0 +1,7 @@
+## 2026-10-04 · Prioritized unmounted SeaScene motion polish and independent material fallback
+
+- Status: provisional
+- Chosen: implement owner-supplied `MOTION_POLISH.md` items A1–4, B10–11, C19–21 and E30 in draft PR #1375. Keep the current warm sky and moon while those owner decisions are open. Defer C18 real connection-stage progress, PR 2 integration, remaining/optional effects, native chrome and production UI changes.
+- Why stricter: scenery remains inert and unmounted; no invented progress, protection evidence, network/IPC, frame loop, live filter, automatic external review or merge. Reduced transparency and missing backdrop-filter only make controls opaque; reduced motion, forced colors and explicit `paused` remain static. Native occlusion/software rendering still requires the caller's explicit opt-out. Mac Chrome samples do not qualify Windows/WebView2 or remote-desktop hardware.
+- Applied in: draft PR #1375, continuation of `9f266c99`; [SHIP_PLAN](../SHIP_PLAN.md), deferred 0.0.75 UI work, not a G4 freeze exception. See [current scope/evidence](../sea-scene-preview.md#motion-polish--2026-10-04).
+- Supersedes: only the material-equals-static fallback wording in [decision 055](055-2026-10-03-windows-sea-scene-preview.md) and the original handoff, per owner-supplied review E30. VF1/VF2 are accepted visual-fidelity approximations in that review (E31), not a pixel-equivalence claim. Other 055/056 scope and pending section 7 questions remain unchanged.

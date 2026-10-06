@@ -1,9 +1,13 @@
 import { invoke } from '@tauri-apps/api/core'
 import { useLockFn } from 'ahooks'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
-import { tonoServersQueryKey, useTonoStatus } from '@/hooks/use-tono'
+import {
+  tonoConnectProgressQueryKey,
+  tonoServersQueryKey,
+  useTonoStatus,
+} from '@/hooks/use-tono'
 import { useTrafficData } from '@/hooks/use-traffic-data'
 import {
   latencyColor,
@@ -11,7 +15,19 @@ import {
   latencyLabelVars,
   readNodeLatency,
 } from '@/pages/tono/node-latency'
-import { nodeCityLabel, nodeCityParts, nodeCode } from '@/pages/tono/node-meta'
+import {
+  catalogBaseName,
+  hy2UdpIsVendorBlocked,
+  nodeCityLabel,
+  nodeCityParts,
+  nodeCode,
+} from '@/pages/tono/node-meta'
+import {
+  preferencesMatch,
+  recommendRoute,
+  recentRoutes,
+  unstableRoute,
+} from '@/pages/tono/route-preferences'
 import { useManualBackupChannel } from '@/pages/tono/use-backup-channel'
 import { useQuery } from '@/services/query-client'
 import { connectIfIdleAfterSelection } from '@/services/server-selection'
@@ -21,17 +37,25 @@ import {
   idleSelectShouldConnect,
   isSupersededConnectRejection,
   tonoConnect,
+  tonoConnectProgress,
+  tonoRoutePreferences,
   tonoDisconnect,
   tonoRetryNow,
   tonoSelectServer,
   tonoServers,
   type TonoUiState,
 } from '@/services/tono'
+import { CONNECT_STAGE_LABEL_KEYS } from '@/tono-ui/connect-stages'
 import { hasLiveProtection } from '@/tono-ui/protection-evidence'
 import { TONO_COLORS, TONO_MONO_STACK, tonoText } from '@/tono-ui/theme'
 import { TonoIcon } from '@/tono-ui/TonoIcon'
 import { TonoNodeBadge } from '@/tono-ui/TonoNodeBadge'
 import parseTraffic from '@/utils/parse-traffic'
+
+import { useAppearancePreferences } from './appearance-preferences'
+import { seaPresentation } from './sea-presentation'
+import { SeaTray } from './SeaTray'
+import { whileVisible } from './while-visible'
 
 const STATUS_LABEL: Record<TonoUiState, string> = {
   notConnected: 'tono.dashboard.status.standby',
@@ -70,6 +94,8 @@ const ACTION_LABEL: Record<Exclude<Action, null>, string> = {
   retry: 'tono.tray.retry',
 }
 
+let appearanceQueue = Promise.resolve()
+
 const hex = (color: string, alpha: number) =>
   `${color}${Math.round(alpha * 255)
     .toString(16)
@@ -78,12 +104,33 @@ const hex = (color: string, alpha: number) =>
 
 export const TrayPanel = () => {
   const { t } = useTranslation()
+  const { newAppearance } = useAppearancePreferences()
+  const [now, setNow] = useState(Date.now)
+  useEffect(() => {
+    appearanceQueue = appearanceQueue
+      .then(() =>
+        invoke<void>('tray_flyout_set_appearance', { enabled: newAppearance }),
+      )
+      .catch(() => {
+        // Size failure is not protection evidence. Native placement requires hosted/hardware checks.
+      })
+  }, [newAppearance])
+  useEffect(() => {
+    if (!newAppearance) return
+    // The flyout stays loaded while closed; its clock must not keep running there.
+    return whileVisible(() => setNow(Date.now()), 1000)
+  }, [newAppearance])
   const dark = useThemeMode() !== 'light'
   const text = tonoText(dark)
   const { status, mutateTonoStatus } = useTonoStatus()
   const uiState: TonoUiState = status?.uiState ?? 'notConnected'
   const color = STATUS_COLOR[uiState]
-  const action = actionFor(uiState)
+  // Cancelling while the barrier is held releases it. That needs the confirmation the
+  // main window shows, so the flyout offers no cancel then.
+  const action =
+    newAppearance && uiState === 'connecting' && !status?.protectionBlocked
+      ? 'disconnect'
+      : actionFor(uiState)
   const busy = action == null
   const serverName = status?.selectedServer
   const city = serverName
@@ -112,8 +159,69 @@ export const TrayPanel = () => {
   const { data: servers } = useQuery({
     queryKey: tonoServersQueryKey,
     queryFn: tonoServers,
-    enabled: picking,
+    enabled: picking || newAppearance,
   })
+
+  const scope = status?.routePreferenceScope
+  const { data: storedPreferences } = useQuery({
+    queryKey: ['tono', 'route-preferences', scope, status?.catalogRevision],
+    queryFn: tonoRoutePreferences,
+    enabled: newAppearance && !!scope,
+    refetchInterval: newAppearance ? 30_000 : false,
+  })
+  const { data: progress } = useQuery({
+    queryKey: tonoConnectProgressQueryKey,
+    queryFn: tonoConnectProgress,
+    enabled:
+      newAppearance &&
+      (uiState === 'connecting' || uiState === 'protectedOffline'),
+    refetchInterval:
+      newAppearance &&
+      (uiState === 'connecting' || uiState === 'protectedOffline')
+        ? 1000
+        : false,
+  })
+  const preferences = preferencesMatch(
+    storedPreferences,
+    scope,
+    status?.catalogRevision,
+  )
+    ? storedPreferences
+    : undefined
+  const recommendation = recommendRoute(
+    servers ?? [],
+    preferences,
+    scope,
+    status?.catalogRevision,
+    { scope: null, revision: null, atMs: 0, latencies: {}, failures: {} },
+    now,
+    unstableRoute(status, now),
+  )
+  const candidates = preferences
+    ? [
+        recommendation?.name,
+        ...(servers ?? [])
+          .filter((server) =>
+            preferences.favorites.includes(catalogBaseName(server.name)),
+          )
+          .map((server) => server.name),
+        ...recentRoutes(preferences, servers ?? [], now)
+          .filter((entry) => entry.revision === status?.catalogRevision)
+          .map((entry) => entry.name),
+      ]
+    : []
+  const quick = [...new Set(candidates)]
+    .flatMap((name) => {
+      const server = servers?.find(
+        (server) =>
+          server.name === name &&
+          server.available &&
+          server.name !== serverName &&
+          !hy2UdpIsVendorBlocked(server.name),
+      )
+      return server ? [server] : []
+    })
+    .slice(0, 2)
 
   const runAction = useLockFn(async () => {
     if (!action) return
@@ -157,6 +265,98 @@ export const TrayPanel = () => {
       setActionError(formatTonoActionError(error, t))
     }
   })
+
+  if (newAppearance) {
+    const presentation = seaPresentation(status)
+    const subtitle =
+      uiState === 'connecting'
+        ? t(
+            (status?.stage && CONNECT_STAGE_LABEL_KEYS[status.stage]) ||
+              'tono.tray.connecting',
+          )
+        : uiState === 'protectedOffline' && progress?.nextRetryAtMs
+          ? t('tono.progress.retryIn', {
+              n: progress.retryAttempt,
+              seconds: Math.max(
+                0,
+                Math.ceil((progress.nextRetryAtMs - now) / 1000),
+              ),
+            })
+          : latency != null
+            ? // The same unit as the home chip and the lines page.
+              `${Math.round(latency)} ms`
+            : ''
+    return (
+      <SeaTray
+        tone={presentation.tone}
+        title={t(presentation.titleKey)}
+        subtitle={`${city}${subtitle ? ` · ${subtitle}` : ''}`}
+        phase={presentation.phase}
+        action={
+          action
+            ? uiState === 'connecting'
+              ? t('tono.dashboard.cancelConnecting')
+              : t(ACTION_LABEL[action])
+            : t(
+                uiState === 'disconnecting'
+                  ? 'tono.tray.disconnecting'
+                  : 'tono.tray.connecting',
+              )
+        }
+        quiet={action === 'disconnect'}
+        busy={busy}
+        onAction={() => void runAction()}
+        quick={
+          uiState === 'connecting' || uiState === 'disconnecting' ? [] : quick
+        }
+        onSelect={(name) => void pickServer(name)}
+        traffic={
+          connected && trafficLive
+            ? `↑ ${up} ${upUnit}/s · ↓ ${down} ${downUnit}/s`
+            : null
+        }
+        ai={connected && status?.claudeHomeActive === true}
+        error={actionError}
+        backup={
+          backupAvailable ? (
+            <button
+              type="button"
+              data-testid="tono-tray-try-backup"
+              className="sea-button"
+              data-variant="text"
+              onClick={() => void tryBackup()}
+            >
+              {t('tono.progress.tryBackupChannel')}
+            </button>
+          ) : null
+        }
+        picker={
+          <details>
+            <summary>{t('tono.tray.pickNode')}</summary>
+            {(servers ?? [])
+              .filter((server) => !hy2UdpIsVendorBlocked(server.name))
+              .map((server) => (
+                <button
+                  type="button"
+                  className="sea-tray-quick"
+                  key={server.name}
+                  disabled={!server.available}
+                  onClick={() => {
+                    if (server.selected && !idleSelectShouldConnect(uiState))
+                      return
+                    void pickServer(server.name)
+                  }}
+                >
+                  {nodeCityLabel(server.name, t)}
+                </button>
+              ))}
+          </details>
+        }
+        onOpen={() => void invoke('tray_flyout_open_dashboard')}
+        onQuit={() => void invoke('tray_flyout_quit')}
+      />
+    )
+  }
 
   return (
     <div className="tono-tray-panel" role="dialog" aria-label="Tono">

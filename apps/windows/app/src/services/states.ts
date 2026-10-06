@@ -1,8 +1,15 @@
 import { createContextState } from 'foxact/create-context-state'
 
-const [ThemeModeProvider, useThemeMode, useSetThemeMode] = createContextState<
-  'light' | 'dark'
->()
+import { useAppearancePreferences } from '@/tono-ui/appearance-preferences'
+
+const [ThemeModeProvider, useStoredThemeMode, useSetThemeMode] =
+  createContextState<'light' | 'dark'>()
+
+const useThemeMode = () => {
+  const storedMode = useStoredThemeMode()
+  const { newAppearance } = useAppearancePreferences()
+  return newAppearance ? 'dark' : storedMode
+}
 
 // save the state of each profile item loading
 const [LoadingCacheProvider, useLoadingCache, useSetLoadingCache] =

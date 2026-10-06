@@ -1,0 +1,273 @@
+[
+  {
+    "name": "downward title-clear/in-bounds 920",
+    "pass": true,
+    "detail": {
+      "root": {
+        "x": 200,
+        "y": 0,
+        "width": 720,
+        "height": 600,
+        "bottom": 600,
+        "right": 920
+      },
+      "title": {
+        "x": 232,
+        "y": 132,
+        "width": 345.59375,
+        "height": 70.390625,
+        "bottom": 202.390625,
+        "right": 577.59375
+      },
+      "chip": {
+        "x": 337.96875,
+        "y": 280.890625,
+        "width": 205.953125,
+        "height": 48,
+        "bottom": 328.890625,
+        "right": 543.921875
+      },
+      "panel": {
+        "x": 337.96875,
+        "y": 336.890625,
+        "width": 320,
+        "height": 210,
+        "bottom": 546.890625,
+        "right": 657.96875
+      },
+      "maxHeight": "255.109px",
+      "overflow": "auto"
+    }
+  },
+  {
+    "name": "picker escape returns focus 920",
+    "pass": true
+  },
+  {
+    "name": "downward title-clear/in-bounds 860",
+    "pass": true,
+    "detail": {
+      "root": {
+        "x": 200,
+        "y": 0,
+        "width": 660,
+        "height": 540,
+        "bottom": 540,
+        "right": 860
+      },
+      "title": {
+        "x": 232,
+        "y": 118.796875,
+        "width": 316.796875,
+        "height": 70.390625,
+        "bottom": 189.1875,
+        "right": 548.796875
+      },
+      "chip": {
+        "x": 337.96875,
+        "y": 267.6875,
+        "width": 205.953125,
+        "height": 48,
+        "bottom": 315.6875,
+        "right": 543.921875
+      },
+      "panel": {
+        "x": 337.96875,
+        "y": 323.6875,
+        "width": 320,
+        "height": 208.3125,
+        "bottom": 532,
+        "right": 657.96875
+      },
+      "maxHeight": "208.312px",
+      "overflow": "auto"
+    }
+  },
+  {
+    "name": "picker escape returns focus 860",
+    "pass": true
+  },
+  {
+    "name": "secondary tools disclosed, no third row failed/920",
+    "pass": true,
+    "detail": {
+      "inCard": true,
+      "open": false,
+      "toolVisibility": [
+        false,
+        false,
+        false
+      ],
+      "cardBottom": 492.484375,
+      "cardHeight": 183.59375,
+      "toolsOutside": false
+    }
+  },
+  {
+    "name": "disclosed tools are text buttons failed/920",
+    "pass": true,
+    "detail": {
+      "open": true,
+      "buttons": [
+        {
+          "text": "试用备用通道",
+          "bg": "rgba(0, 0, 0, 0)",
+          "shadow": "none",
+          "blur": "none"
+        },
+        {
+          "text": "复制诊断信息",
+          "bg": "rgba(0, 0, 0, 0)",
+          "shadow": "none",
+          "blur": "none"
+        },
+        {
+          "text": "上传诊断信息",
+          "bg": "rgba(0, 0, 0, 0)",
+          "shadow": "none",
+          "blur": "none"
+        }
+      ]
+    }
+  },
+  {
+    "name": "secondary tools disclosed, no third row protectedOffline/920",
+    "pass": true,
+    "detail": {
+      "inCard": true,
+      "open": false,
+      "toolVisibility": [
+        false,
+        false,
+        false
+      ],
+      "cardBottom": 517.6875,
+      "cardHeight": 239.59375,
+      "toolsOutside": false
+    }
+  },
+  {
+    "name": "disclosed tools are text buttons protectedOffline/920",
+    "pass": true,
+    "detail": {
+      "open": true,
+      "buttons": [
+        {
+          "text": "试用备用通道",
+          "bg": "rgba(0, 0, 0, 0)",
+          "shadow": "none",
+          "blur": "none"
+        },
+        {
+          "text": "复制诊断信息",
+          "bg": "rgba(0, 0, 0, 0)",
+          "shadow": "none",
+          "blur": "none"
+        },
+        {
+          "text": "上传诊断信息",
+          "bg": "rgba(0, 0, 0, 0)",
+          "shadow": "none",
+          "blur": "none"
+        }
+      ]
+    }
+  },
+  {
+    "name": "secondary tools disclosed, no third row failed/860",
+    "pass": true,
+    "detail": {
+      "inCard": true,
+      "open": false,
+      "toolVisibility": [
+        false,
+        false,
+        false
+      ],
+      "cardBottom": 479.984375,
+      "cardHeight": 180.703125,
+      "toolsOutside": false
+    }
+  },
+  {
+    "name": "disclosed tools are text buttons failed/860",
+    "pass": true,
+    "detail": {
+      "open": true,
+      "buttons": [
+        {
+          "text": "试用备用通道",
+          "bg": "rgba(0, 0, 0, 0)",
+          "shadow": "none",
+          "blur": "none"
+        },
+        {
+          "text": "复制诊断信息",
+          "bg": "rgba(0, 0, 0, 0)",
+          "shadow": "none",
+          "blur": "none"
+        },
+        {
+          "text": "上传诊断信息",
+          "bg": "rgba(0, 0, 0, 0)",
+          "shadow": "none",
+          "blur": "none"
+        }
+      ]
+    }
+  },
+  {
+    "name": "secondary tools disclosed, no third row protectedOffline/860",
+    "pass": true,
+    "detail": {
+      "inCard": true,
+      "open": false,
+      "toolVisibility": [
+        false,
+        false,
+        false
+      ],
+      "cardBottom": 479.984375,
+      "cardHeight": 188.25,
+      "toolsOutside": false
+    }
+  },
+  {
+    "name": "disclosed tools are text buttons protectedOffline/860",
+    "pass": true,
+    "detail": {
+      "open": true,
+      "buttons": [
+        {
+          "text": "试用备用通道",
+          "bg": "rgba(0, 0, 0, 0)",
+          "shadow": "none",
+          "blur": "none"
+        },
+        {
+          "text": "复制诊断信息",
+          "bg": "rgba(0, 0, 0, 0)",
+          "shadow": "none",
+          "blur": "none"
+        },
+        {
+          "text": "上传诊断信息",
+          "bg": "rgba(0, 0, 0, 0)",
+          "shadow": "none",
+          "blur": "none"
+        }
+      ]
+    }
+  },
+  {
+    "name": "upward fallback only with <200 below and more above",
+    "pass": true,
+    "detail": {
+      "below": 117.109375,
+      "above": 402.890625,
+      "panelTop": 200.890625,
+      "chipTop": 418.890625,
+      "panelBottom": 410.890625
+    }
+  }
+]

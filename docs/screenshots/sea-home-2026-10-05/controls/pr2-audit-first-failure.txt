@@ -1,0 +1,9 @@
+file:///private/tmp/tono-round3-20261005/pr2-audit.mjs:4
+const checks=[];const assert=(name,value,detail)=>{checks.push({name,pass:!!value,detail});if(!value)throw new Error(name+': '+JSON.stringify(detail))};
+                                                                                                           ^
+
+Error: popover anchored/in bounds/initial focus: {"x":161.96875,"y":313.4722900390625,"width":319.640869140625,"bottom":523.236572265625,"root":600,"focused":true,"rows":4}
+    at assert (file:///private/tmp/tono-round3-20261005/pr2-audit.mjs:4:108)
+    at file:///private/tmp/tono-round3-20261005/pr2-audit.mjs:11:357
+
+Node.js v26.10.0

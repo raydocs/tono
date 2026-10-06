@@ -13,6 +13,7 @@ import { Fragment } from 'react'
 import { initReactI18next } from 'react-i18next'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { setNewAppearance } from '@/tono-ui/appearance-preferences'
 import enShared from '@/locales/en/shared.json'
 import enTono from '@/locales/en/tono.json'
 
@@ -133,6 +134,8 @@ const localDnsConnection = (
   })
 
 beforeEach(() => {
+  // These cover the old look, which stays selectable; a fresh store now picks the new one.
+  setNewAppearance(false)
   closeConnectionMock.mockReset().mockResolvedValue(undefined)
   closeAllConnectionsMock.mockReset().mockResolvedValue(undefined)
   serversMock
@@ -782,4 +785,36 @@ it('renders an extensionless process whose basename is an inherited translation 
   ]
   render(<ActivityPage />)
   expect(screen.getByText('toString')).toBeDefined()
+})
+
+it('sea activity caps an expanded app at twenty and retains the generation-scoped close path', async () => {
+  const metadata = { ...connection('group').metadata, process: 'Example.exe' }
+  connectionDataMock.activeConnections = Array.from(
+    { length: 23 },
+    (_, index) =>
+      connection(`group-${index}`, {
+        metadata: { ...metadata, host: `group-${index}.example.test` },
+      }),
+  )
+  setNewAppearance(true)
+  try {
+    const { container } = render(<ActivityPage />)
+    fireEvent.click(screen.getByText('Example.exe'))
+    expect(container.querySelectorAll('.sea-activity-connection')).toHaveLength(
+      20,
+    )
+    expect(
+      screen.getByText('Showing the first 20 connections for this app.'),
+    ).toBeTruthy()
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'Close connection to group-0.example.test:443',
+      }),
+    )
+    await waitFor(() =>
+      expect(closeConnectionMock).toHaveBeenCalledExactlyOnceWith('group-0', 7),
+    )
+  } finally {
+    setNewAppearance(false)
+  }
 })

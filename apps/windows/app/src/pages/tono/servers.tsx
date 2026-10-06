@@ -23,7 +23,9 @@ import {
   tonoTestCurrentServer,
   tonoUpdateRoutePreferences,
 } from '@/services/tono'
+import { useAppearancePreferences } from '@/tono-ui/appearance-preferences'
 import { PageHeader } from '@/tono-ui/PageHeader'
+import { hasLiveProtection } from '@/tono-ui/protection-evidence'
 import {
   TONO_COLORS,
   TONO_EASE,
@@ -61,6 +63,7 @@ import {
   type EndpointEvidence,
 } from './route-preferences'
 import { RoutePreferencesPanel } from './route-preferences-panel'
+import { SeaLines } from './sea-lines'
 
 const catalogStatusQueryKey = ['tono', 'catalog-status'] as const
 
@@ -76,6 +79,12 @@ const SERVER_SKELETONS = ['sk-a', 'sk-b', 'sk-c', 'sk-d'] as const
 
 const ServersPage = () => {
   const { t } = useTranslation()
+  const { newAppearance } = useAppearancePreferences()
+  const [previewSelection, setPreviewSelection] = useState<{
+    name: string
+    scope: string
+    revision: number
+  } | null>(null)
   const dark = useThemeMode() !== 'light'
   const text = tonoText(dark)
   const { status, mutateTonoStatus } = useTonoStatus()
@@ -259,6 +268,62 @@ const ServersPage = () => {
     },
   )
 
+  const handleSeaSelect = useLockFn(
+    async (name: string, selected: boolean, available: boolean) => {
+      if (status?.uiState !== 'notConnected')
+        return handleSelect(name, selected, available)
+      if (!available) {
+        setSelectError(t('tono.nodes.unavailableHint'))
+        return
+      }
+      if (!scope || status.catalogRevision === null) {
+        setSelectError(t('tono.routes.changed'))
+        return
+      }
+      setSwitchingName(name)
+      setSelectError(null)
+      try {
+        // Select only, using the existing backend's scope/revision admission.
+        await tonoSelectServer(name, {
+          scope,
+          catalogRevision: status.catalogRevision,
+        })
+        setPreviewSelection({ name, scope, revision: status.catalogRevision })
+        await Promise.all([mutateServers(), mutateTonoStatus()])
+      } catch (error) {
+        setSelectError(formatTonoActionError(error, t))
+      } finally {
+        setSwitchingName(null)
+      }
+    },
+  )
+  const handleSeaConnect = useLockFn(async () => {
+    if (
+      !previewSelection ||
+      previewSelection.scope !== scope ||
+      previewSelection.revision !== status?.catalogRevision
+    )
+      return false
+    setSelectError(null)
+    try {
+      const current = await tonoStatus()
+      if (
+        current.routePreferenceScope !== previewSelection.scope ||
+        current.catalogRevision !== previewSelection.revision ||
+        current.selectedServer !== previewSelection.name
+      ) {
+        setSelectError(t('tono.routes.changed'))
+        return false
+      }
+      await connectIfIdleAfterSelection()
+      await mutateTonoStatus()
+      return true
+    } catch (error) {
+      setSelectError(formatTonoActionError(error, t))
+      return false
+    }
+  })
+
   const handleTestCurrent = useLockFn(async () => {
     if (!selected) return
     setTesting(true)
@@ -364,9 +429,9 @@ const ServersPage = () => {
   // later periodic or manual success, or sign-in/out resetting it): the backend's `catalog.error`
   // speaks for the catalog from then on. A later failed sync does not move it. Adjusted during
   // render rather than in an effect, so the refresh area never pays a synchronous re-render.
-  const [clearedSyncAtMs, setClearedSyncAtMs] = useState<number | null | undefined>(
-    catalog?.lastSyncedAtMs,
-  )
+  const [clearedSyncAtMs, setClearedSyncAtMs] = useState<
+    number | null | undefined
+  >(catalog?.lastSyncedAtMs)
   if (catalog?.lastSyncedAtMs !== clearedSyncAtMs) {
     setClearedSyncAtMs(catalog?.lastSyncedAtMs)
     setRefreshError(null)
@@ -452,6 +517,133 @@ const ServersPage = () => {
     catalog?.revision !== null &&
     catalog?.revision !== undefined &&
     (servers ?? []).some((server) => server.available !== false)
+
+  if (newAppearance)
+    return (
+      <SeaLines
+        servers={servers}
+        uiState={status?.uiState}
+        protectionLive={hasLiveProtection(status)}
+        preferences={preferences}
+        recommendation={recommendation}
+        catalog={catalog}
+        search={searchText}
+        onSearch={setSearchText}
+        now={now}
+        regionLabel={regionLabel}
+        busy={switchingName !== null || selectingRecommendation}
+        saving={savingPreferences}
+        testing={testing || testingAll}
+        testLabel={
+          testingAll
+            ? t('tono.nodes.cancelTest')
+            : testing
+              ? '…'
+              : status?.uiState === 'connected'
+                ? t('tono.nodes.testCurrent')
+                : t('tono.nodes.testAll')
+        }
+        testDisabled={
+          testing ||
+          (!testingAll &&
+            (status?.uiState === 'connected' ? !selected : !canTestAll))
+        }
+        onTest={() =>
+          void (testingAll
+            ? handleCancelTests()
+            : status?.uiState === 'connected'
+              ? handleTestCurrent()
+              : handleTestAll())
+        }
+        onSelect={(name, selected, available) =>
+          void handleSeaSelect(name, selected, available)
+        }
+        onFavorite={(name) => {
+          if (!preferences) return
+          const base = catalogBaseName(name)
+          void savePreferences(
+            preferences.favorites.includes(base)
+              ? preferences.favorites.filter((item) => item !== base)
+              : [...preferences.favorites, base],
+            preferences.fixedRegion,
+          )
+        }}
+        onRegion={(region) => {
+          if (preferences) void savePreferences(preferences.favorites, region)
+        }}
+        onConnect={async () => Boolean(await handleSeaConnect())}
+        pendingName={
+          previewSelection &&
+          previewSelection.scope === scope &&
+          previewSelection?.revision === status?.catalogRevision
+            ? previewSelection.name
+            : null
+        }
+        error={selectError}
+        readError={serversError ? formatTonoActionError(serversError, t) : null}
+        preferencesError={Boolean(preferencesError)}
+        onPreferencesRetry={() => void refreshPreferences()}
+        catalogError={catalogFailure}
+        feedback={refreshFeedback}
+        refreshing={refreshing}
+        refreshDisabled={refreshing || status?.accountState !== 'ready'}
+        onRefresh={() => void handleRefresh()}
+        onReadRetry={() => void mutateServers().catch(() => {})}
+        latency={(server) => {
+          const endpointCurrent = endpointEvidenceMatches(
+            endpointTests,
+            scope,
+            status?.catalogRevision,
+            now,
+          )
+          const endpoint = endpointCurrent
+            ? endpointTests.latencies[server.name]
+            : undefined
+          const failure = endpointCurrent
+            ? endpointTests.failures[server.name]
+            : undefined
+          const exit =
+            currentExitTest?.name === server.name &&
+            currentExitTest.scope === scope &&
+            currentExitTest.generation === status?.controllerGeneration &&
+            now >= currentExitTest.atMs &&
+            now - currentExitTest.atMs < 120_000
+              ? currentExitTest.latency
+              : server.selected && status?.exitDelayMs && status.exitDelayMs > 0
+                ? status.exitDelayMs
+                : undefined
+          const cached = readNodeLatency(server.name)
+          const value = endpoint ?? exit ?? cached
+          const kind =
+            endpoint !== undefined
+              ? 'tcp'
+              : exit !== undefined
+                ? 'exit'
+                : 'cached'
+          const label = !server.available
+            ? t('tono.nodes.unavailable')
+            : failure === 'timeout'
+              ? t('tono.nodes.timeout')
+              : failure
+                ? t('tono.nodes.testFailed')
+                : value !== null
+                  ? // One unit in the new look: the home chip reads milliseconds too.
+                    `${Math.round(value)} ms`
+                  : t('tono.nodes.untested')
+          return {
+            label,
+            level:
+              !server.available || failure || value === null
+                ? 0
+                : value < (kind === 'tcp' ? 200 : 1000)
+                  ? 3
+                  : value < (kind === 'tcp' ? 400 : 1500)
+                    ? 2
+                    : 1,
+          }
+        }}
+      />
+    )
 
   return (
     <div className="tono-page">

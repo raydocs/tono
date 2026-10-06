@@ -1,0 +1,7 @@
+off {'first': 89.8164, 'last': 24.4338, 'maxRolling300': 9.2015, 'maxRise300': 0.0378, 'maxFall300': -9.2015, 'direct300Max': 9.1606, 'directPairs': 228, 'maxGapMs': 282.6941, 'frames': 248}
+on {'first': 90.1121, 'last': 24.402, 'maxRolling300': 9.1724, 'maxRise300': 0.0448, 'maxFall300': -9.1724, 'direct300Max': 9.1906, 'directPairs': 228, 'maxGapMs': 283.5081, 'frames': 248}
+Traceback (most recent call last):
+  File "/tmp/tono-pr2-review-20261005/measure-sunset.py", line 16, in <module>
+    out['nightDifference']=abs(out['on']['last']-out['off']['last']);(p/'sunset-results.json').write_text(json.dumps(out,indent=2)+'\n');assert out['on']['maxRolling300']<=8;assert out['on']['maxRise300']<=1;assert out['nightDifference']<=1.5;print('PASS sampled/interpolated rolling300<=8, no material upward reversal; control night difference<=1.5. Not an exact300ms frame cadence.')
+                                                                                                                                                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError

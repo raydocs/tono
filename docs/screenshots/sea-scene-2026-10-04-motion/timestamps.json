@@ -1,0 +1,855 @@
+{
+  "stage": "final",
+  "runs": {
+    "sunset": {
+      "start": 1791095387.677,
+      "frames": [
+        {
+          "file": "sunset-0.png",
+          "timestamp": 1791095387.565312,
+          "relativeMs": -111.68813705444336
+        },
+        {
+          "file": "sunset-1.png",
+          "timestamp": 1791095387.665401,
+          "relativeMs": -11.599063873291016
+        },
+        {
+          "file": "sunset-2.png",
+          "timestamp": 1791095387.76472,
+          "relativeMs": 87.71991729736328
+        },
+        {
+          "file": "sunset-3.png",
+          "timestamp": 1791095387.864763,
+          "relativeMs": 187.76297569274902
+        },
+        {
+          "file": "sunset-4.png",
+          "timestamp": 1791095387.96558,
+          "relativeMs": 288.57994079589844
+        },
+        {
+          "file": "sunset-5.png",
+          "timestamp": 1791095388.072522,
+          "relativeMs": 395.521879196167
+        },
+        {
+          "file": "sunset-6.png",
+          "timestamp": 1791095388.174341,
+          "relativeMs": 497.3409175872803
+        },
+        {
+          "file": "sunset-7.png",
+          "timestamp": 1791095388.270198,
+          "relativeMs": 593.1980609893799
+        },
+        {
+          "file": "sunset-8.png",
+          "timestamp": 1791095388.368017,
+          "relativeMs": 691.0169124603271
+        },
+        {
+          "file": "sunset-9.png",
+          "timestamp": 1791095388.465361,
+          "relativeMs": 788.3610725402832
+        },
+        {
+          "file": "sunset-10.png",
+          "timestamp": 1791095388.567817,
+          "relativeMs": 890.8169269561768
+        },
+        {
+          "file": "sunset-11.png",
+          "timestamp": 1791095388.668863,
+          "relativeMs": 991.8630123138428
+        },
+        {
+          "file": "sunset-12.png",
+          "timestamp": 1791095388.769703,
+          "relativeMs": 1092.702865600586
+        },
+        {
+          "file": "sunset-13.png",
+          "timestamp": 1791095388.865972,
+          "relativeMs": 1188.971996307373
+        },
+        {
+          "file": "sunset-14.png",
+          "timestamp": 1791095388.969996,
+          "relativeMs": 1292.9959297180176
+        },
+        {
+          "file": "sunset-15.png",
+          "timestamp": 1791095389.070873,
+          "relativeMs": 1393.8729763031006
+        },
+        {
+          "file": "sunset-16.png",
+          "timestamp": 1791095389.169198,
+          "relativeMs": 1492.1979904174805
+        },
+        {
+          "file": "sunset-17.png",
+          "timestamp": 1791095389.264789,
+          "relativeMs": 1587.7890586853027
+        },
+        {
+          "file": "sunset-18.png",
+          "timestamp": 1791095389.365388,
+          "relativeMs": 1688.3878707885742
+        },
+        {
+          "file": "sunset-19.png",
+          "timestamp": 1791095389.468263,
+          "relativeMs": 1791.2628650665283
+        },
+        {
+          "file": "sunset-20.png",
+          "timestamp": 1791095389.570716,
+          "relativeMs": 1893.7158584594727
+        },
+        {
+          "file": "sunset-21.png",
+          "timestamp": 1791095389.670138,
+          "relativeMs": 1993.1378364562988
+        },
+        {
+          "file": "sunset-22.png",
+          "timestamp": 1791095389.770061,
+          "relativeMs": 2093.0609703063965
+        },
+        {
+          "file": "sunset-23.png",
+          "timestamp": 1791095389.866084,
+          "relativeMs": 2189.084053039551
+        },
+        {
+          "file": "sunset-24.png",
+          "timestamp": 1791095389.967839,
+          "relativeMs": 2290.8389568328857
+        },
+        {
+          "file": "sunset-25.png",
+          "timestamp": 1791095390.066203,
+          "relativeMs": 2389.2030715942383
+        },
+        {
+          "file": "sunset-26.png",
+          "timestamp": 1791095390.172433,
+          "relativeMs": 2495.4328536987305
+        },
+        {
+          "file": "sunset-27.png",
+          "timestamp": 1791095390.268417,
+          "relativeMs": 2591.416835784912
+        },
+        {
+          "file": "sunset-28.png",
+          "timestamp": 1791095390.367848,
+          "relativeMs": 2690.847873687744
+        },
+        {
+          "file": "sunset-29.png",
+          "timestamp": 1791095390.470625,
+          "relativeMs": 2793.6248779296875
+        },
+        {
+          "file": "sunset-30.png",
+          "timestamp": 1791095390.570103,
+          "relativeMs": 2893.1028842926025
+        },
+        {
+          "file": "sunset-31.png",
+          "timestamp": 1791095390.665968,
+          "relativeMs": 2988.9678955078125
+        },
+        {
+          "file": "sunset-32.png",
+          "timestamp": 1791095390.772075,
+          "relativeMs": 3095.0748920440674
+        },
+        {
+          "file": "sunset-33.png",
+          "timestamp": 1791095390.87262,
+          "relativeMs": 3195.620059967041
+        },
+        {
+          "file": "sunset-34.png",
+          "timestamp": 1791095390.974052,
+          "relativeMs": 3297.0519065856934
+        },
+        {
+          "file": "sunset-35.png",
+          "timestamp": 1791095391.07015,
+          "relativeMs": 3393.1498527526855
+        },
+        {
+          "file": "sunset-36.png",
+          "timestamp": 1791095391.167049,
+          "relativeMs": 3490.048885345459
+        },
+        {
+          "file": "sunset-37.png",
+          "timestamp": 1791095391.274016,
+          "relativeMs": 3597.015857696533
+        },
+        {
+          "file": "sunset-38.png",
+          "timestamp": 1791095391.366189,
+          "relativeMs": 3689.1889572143555
+        },
+        {
+          "file": "sunset-39.png",
+          "timestamp": 1791095391.465453,
+          "relativeMs": 3788.4528636932373
+        },
+        {
+          "file": "sunset-40.png",
+          "timestamp": 1791095391.569799,
+          "relativeMs": 3892.798900604248
+        },
+        {
+          "file": "sunset-41.png",
+          "timestamp": 1791095391.672386,
+          "relativeMs": 3995.3858852386475
+        },
+        {
+          "file": "sunset-42.png",
+          "timestamp": 1791095391.771954,
+          "relativeMs": 4094.954013824463
+        },
+        {
+          "file": "sunset-43.png",
+          "timestamp": 1791095391.865508,
+          "relativeMs": 4188.508033752441
+        },
+        {
+          "file": "sunset-44.png",
+          "timestamp": 1791095391.972062,
+          "relativeMs": 4295.062065124512
+        },
+        {
+          "file": "sunset-45.png",
+          "timestamp": 1791095392.072638,
+          "relativeMs": 4395.637989044189
+        },
+        {
+          "file": "sunset-46.png",
+          "timestamp": 1791095392.171785,
+          "relativeMs": 4494.7850704193115
+        },
+        {
+          "file": "sunset-47.png",
+          "timestamp": 1791095392.272076,
+          "relativeMs": 4595.075845718384
+        },
+        {
+          "file": "sunset-48.png",
+          "timestamp": 1791095392.371908,
+          "relativeMs": 4694.907903671265
+        },
+        {
+          "file": "sunset-49.png",
+          "timestamp": 1791095392.471272,
+          "relativeMs": 4794.271945953369
+        },
+        {
+          "file": "sunset-50.png",
+          "timestamp": 1791095392.571677,
+          "relativeMs": 4894.676923751831
+        },
+        {
+          "file": "sunset-51.png",
+          "timestamp": 1791095392.667639,
+          "relativeMs": 4990.638971328735
+        },
+        {
+          "file": "sunset-52.png",
+          "timestamp": 1791095392.767804,
+          "relativeMs": 5090.803861618042
+        },
+        {
+          "file": "sunset-53.png",
+          "timestamp": 1791095392.87054,
+          "relativeMs": 5193.53985786438
+        },
+        {
+          "file": "sunset-54.png",
+          "timestamp": 1791095392.9694,
+          "relativeMs": 5292.399883270264
+        },
+        {
+          "file": "sunset-55.png",
+          "timestamp": 1791095393.070685,
+          "relativeMs": 5393.684864044189
+        },
+        {
+          "file": "sunset-56.png",
+          "timestamp": 1791095393.169973,
+          "relativeMs": 5492.972850799561
+        },
+        {
+          "file": "sunset-57.png",
+          "timestamp": 1791095393.266101,
+          "relativeMs": 5589.1008377075195
+        },
+        {
+          "file": "sunset-58.png",
+          "timestamp": 1791095393.365087,
+          "relativeMs": 5688.086986541748
+        },
+        {
+          "file": "sunset-59.png",
+          "timestamp": 1791095393.46507,
+          "relativeMs": 5788.0699634552
+        },
+        {
+          "file": "sunset-60.png",
+          "timestamp": 1791095393.565579,
+          "relativeMs": 5888.57889175415
+        },
+        {
+          "file": "sunset-61.png",
+          "timestamp": 1791095393.665957,
+          "relativeMs": 5988.956928253174
+        },
+        {
+          "file": "sunset-62.png",
+          "timestamp": 1791095394.016505,
+          "relativeMs": 6339.504957199097
+        },
+        {
+          "file": "sunset-63.png",
+          "timestamp": 1791095394.116207,
+          "relativeMs": 6439.206838607788
+        },
+        {
+          "file": "sunset-64.png",
+          "timestamp": 1791095394.215246,
+          "relativeMs": 6538.245916366577
+        },
+        {
+          "file": "sunset-65.png",
+          "timestamp": 1791095394.316448,
+          "relativeMs": 6639.447927474976
+        },
+        {
+          "file": "sunset-66.png",
+          "timestamp": 1791095394.414933,
+          "relativeMs": 6737.932920455933
+        },
+        {
+          "file": "sunset-67.png",
+          "timestamp": 1791095394.515082,
+          "relativeMs": 6838.081836700439
+        },
+        {
+          "file": "sunset-68.png",
+          "timestamp": 1791095394.614289,
+          "relativeMs": 6937.288999557495
+        },
+        {
+          "file": "sunset-69.png",
+          "timestamp": 1791095394.714331,
+          "relativeMs": 7037.330865859985
+        },
+        {
+          "file": "sunset-70.png",
+          "timestamp": 1791095394.814349,
+          "relativeMs": 7137.348890304565
+        }
+      ]
+    },
+    "sunrise": {
+      "start": 1791095396.6581,
+      "frames": [
+        {
+          "file": "sunrise-0.png",
+          "timestamp": 1791095396.548101,
+          "relativeMs": -109.99894142150879
+        },
+        {
+          "file": "sunrise-1.png",
+          "timestamp": 1791095396.647914,
+          "relativeMs": -10.185956954956055
+        },
+        {
+          "file": "sunrise-2.png",
+          "timestamp": 1791095396.748196,
+          "relativeMs": 90.09599685668945
+        },
+        {
+          "file": "sunrise-3.png",
+          "timestamp": 1791095396.848123,
+          "relativeMs": 190.02318382263184
+        },
+        {
+          "file": "sunrise-4.png",
+          "timestamp": 1791095396.948827,
+          "relativeMs": 290.7271385192871
+        },
+        {
+          "file": "sunrise-5.png",
+          "timestamp": 1791095397.048524,
+          "relativeMs": 390.4240131378174
+        },
+        {
+          "file": "sunrise-6.png",
+          "timestamp": 1791095397.148319,
+          "relativeMs": 490.2191162109375
+        },
+        {
+          "file": "sunrise-7.png",
+          "timestamp": 1791095397.265048,
+          "relativeMs": 606.9481372833252
+        },
+        {
+          "file": "sunrise-8.png",
+          "timestamp": 1791095397.365395,
+          "relativeMs": 707.2951793670654
+        },
+        {
+          "file": "sunrise-9.png",
+          "timestamp": 1791095397.465434,
+          "relativeMs": 807.3341846466064
+        },
+        {
+          "file": "sunrise-10.png",
+          "timestamp": 1791095397.564763,
+          "relativeMs": 906.663179397583
+        },
+        {
+          "file": "sunrise-11.png",
+          "timestamp": 1791095397.665556,
+          "relativeMs": 1007.4560642242432
+        },
+        {
+          "file": "sunrise-12.png",
+          "timestamp": 1791095397.764847,
+          "relativeMs": 1106.7471504211426
+        },
+        {
+          "file": "sunrise-13.png",
+          "timestamp": 1791095397.865073,
+          "relativeMs": 1206.9730758666992
+        },
+        {
+          "file": "sunrise-14.png",
+          "timestamp": 1791095397.965157,
+          "relativeMs": 1307.0571422576904
+        },
+        {
+          "file": "sunrise-15.png",
+          "timestamp": 1791095398.065059,
+          "relativeMs": 1406.959056854248
+        },
+        {
+          "file": "sunrise-16.png",
+          "timestamp": 1791095398.164857,
+          "relativeMs": 1506.7570209503174
+        },
+        {
+          "file": "sunrise-17.png",
+          "timestamp": 1791095398.264647,
+          "relativeMs": 1606.5471172332764
+        },
+        {
+          "file": "sunrise-18.png",
+          "timestamp": 1791095398.364797,
+          "relativeMs": 1706.6972255706787
+        },
+        {
+          "file": "sunrise-19.png",
+          "timestamp": 1791095398.465457,
+          "relativeMs": 1807.3570728302002
+        },
+        {
+          "file": "sunrise-20.png",
+          "timestamp": 1791095398.56464,
+          "relativeMs": 1906.5401554107666
+        },
+        {
+          "file": "sunrise-21.png",
+          "timestamp": 1791095398.664964,
+          "relativeMs": 2006.864070892334
+        },
+        {
+          "file": "sunrise-22.png",
+          "timestamp": 1791095398.763896,
+          "relativeMs": 2105.7960987091064
+        },
+        {
+          "file": "sunrise-23.png",
+          "timestamp": 1791095398.86818,
+          "relativeMs": 2210.080146789551
+        },
+        {
+          "file": "sunrise-24.png",
+          "timestamp": 1791095398.965178,
+          "relativeMs": 2307.0781230926514
+        },
+        {
+          "file": "sunrise-25.png",
+          "timestamp": 1791095399.064662,
+          "relativeMs": 2406.562089920044
+        },
+        {
+          "file": "sunrise-26.png",
+          "timestamp": 1791095399.164936,
+          "relativeMs": 2506.836175918579
+        },
+        {
+          "file": "sunrise-27.png",
+          "timestamp": 1791095399.265441,
+          "relativeMs": 2607.3410511016846
+        },
+        {
+          "file": "sunrise-28.png",
+          "timestamp": 1791095399.617227,
+          "relativeMs": 2959.127187728882
+        },
+        {
+          "file": "sunrise-29.png",
+          "timestamp": 1791095399.716266,
+          "relativeMs": 3058.166027069092
+        },
+        {
+          "file": "sunrise-30.png",
+          "timestamp": 1791095399.815232,
+          "relativeMs": 3157.132148742676
+        },
+        {
+          "file": "sunrise-31.png",
+          "timestamp": 1791095399.914772,
+          "relativeMs": 3256.672143936157
+        },
+        {
+          "file": "sunrise-32.png",
+          "timestamp": 1791095400.013703,
+          "relativeMs": 3355.6032180786133
+        },
+        {
+          "file": "sunrise-33.png",
+          "timestamp": 1791095400.113884,
+          "relativeMs": 3455.7840824127197
+        },
+        {
+          "file": "sunrise-34.png",
+          "timestamp": 1791095400.214391,
+          "relativeMs": 3556.291103363037
+        }
+      ]
+    },
+    "arrival": {
+      "start": 1791095401.977,
+      "frames": [
+        {
+          "file": "arrival-0.png",
+          "timestamp": 1791095401.865156,
+          "relativeMs": -111.84406280517578
+        },
+        {
+          "file": "arrival-1.png",
+          "timestamp": 1791095401.964797,
+          "relativeMs": -12.202978134155273
+        },
+        {
+          "file": "arrival-2.png",
+          "timestamp": 1791095402.06488,
+          "relativeMs": 87.87989616394043
+        },
+        {
+          "file": "arrival-3.png",
+          "timestamp": 1791095402.164552,
+          "relativeMs": 187.55197525024414
+        },
+        {
+          "file": "arrival-4.png",
+          "timestamp": 1791095402.264892,
+          "relativeMs": 287.89210319519043
+        },
+        {
+          "file": "arrival-5.png",
+          "timestamp": 1791095402.364502,
+          "relativeMs": 387.50195503234863
+        },
+        {
+          "file": "arrival-6.png",
+          "timestamp": 1791095402.464028,
+          "relativeMs": 487.0278835296631
+        },
+        {
+          "file": "arrival-7.png",
+          "timestamp": 1791095402.56443,
+          "relativeMs": 587.4300003051758
+        },
+        {
+          "file": "arrival-8.png",
+          "timestamp": 1791095402.665034,
+          "relativeMs": 688.0340576171875
+        },
+        {
+          "file": "arrival-9.png",
+          "timestamp": 1791095402.764409,
+          "relativeMs": 787.4090671539307
+        },
+        {
+          "file": "arrival-10.png",
+          "timestamp": 1791095402.865023,
+          "relativeMs": 888.0228996276855
+        },
+        {
+          "file": "arrival-11.png",
+          "timestamp": 1791095402.964705,
+          "relativeMs": 987.7049922943115
+        },
+        {
+          "file": "arrival-12.png",
+          "timestamp": 1791095403.065361,
+          "relativeMs": 1088.3610248565674
+        },
+        {
+          "file": "arrival-13.png",
+          "timestamp": 1791095403.164277,
+          "relativeMs": 1187.27707862854
+        },
+        {
+          "file": "arrival-14.png",
+          "timestamp": 1791095403.264676,
+          "relativeMs": 1287.6760959625244
+        },
+        {
+          "file": "arrival-15.png",
+          "timestamp": 1791095403.363958,
+          "relativeMs": 1386.9578838348389
+        },
+        {
+          "file": "arrival-16.png",
+          "timestamp": 1791095403.464501,
+          "relativeMs": 1487.5009059906006
+        },
+        {
+          "file": "arrival-17.png",
+          "timestamp": 1791095403.564625,
+          "relativeMs": 1587.6250267028809
+        },
+        {
+          "file": "arrival-18.png",
+          "timestamp": 1791095403.664755,
+          "relativeMs": 1687.7551078796387
+        },
+        {
+          "file": "arrival-19.png",
+          "timestamp": 1791095403.7646,
+          "relativeMs": 1787.600040435791
+        },
+        {
+          "file": "arrival-20.png",
+          "timestamp": 1791095403.864795,
+          "relativeMs": 1887.7949714660645
+        },
+        {
+          "file": "arrival-21.png",
+          "timestamp": 1791095403.964326,
+          "relativeMs": 1987.32590675354
+        },
+        {
+          "file": "arrival-22.png",
+          "timestamp": 1791095404.064802,
+          "relativeMs": 2087.801933288574
+        },
+        {
+          "file": "arrival-23.png",
+          "timestamp": 1791095404.164692,
+          "relativeMs": 2187.6919269561768
+        },
+        {
+          "file": "arrival-24.png",
+          "timestamp": 1791095404.264809,
+          "relativeMs": 2287.808895111084
+        },
+        {
+          "file": "arrival-25.png",
+          "timestamp": 1791095404.36414,
+          "relativeMs": 2387.1400356292725
+        },
+        {
+          "file": "arrival-26.png",
+          "timestamp": 1791095404.464432,
+          "relativeMs": 2487.4320030212402
+        },
+        {
+          "file": "arrival-27.png",
+          "timestamp": 1791095404.564695,
+          "relativeMs": 2587.6948833465576
+        },
+        {
+          "file": "arrival-28.png",
+          "timestamp": 1791095404.916578,
+          "relativeMs": 2939.578056335449
+        }
+      ]
+    },
+    "failure": {
+      "start": 1791095406.7035,
+      "frames": [
+        {
+          "file": "failure-0.png",
+          "timestamp": 1791095406.59859,
+          "relativeMs": -104.91013526916504
+        },
+        {
+          "file": "failure-1.png",
+          "timestamp": 1791095406.700525,
+          "relativeMs": -2.974987030029297
+        },
+        {
+          "file": "failure-2.png",
+          "timestamp": 1791095406.798143,
+          "relativeMs": 94.64287757873535
+        },
+        {
+          "file": "failure-3.png",
+          "timestamp": 1791095406.897981,
+          "relativeMs": 194.48089599609375
+        },
+        {
+          "file": "failure-4.png",
+          "timestamp": 1791095406.997921,
+          "relativeMs": 294.4209575653076
+        },
+        {
+          "file": "failure-5.png",
+          "timestamp": 1791095407.098208,
+          "relativeMs": 394.70791816711426
+        },
+        {
+          "file": "failure-6.png",
+          "timestamp": 1791095407.196754,
+          "relativeMs": 493.2539463043213
+        },
+        {
+          "file": "failure-7.png",
+          "timestamp": 1791095407.297775,
+          "relativeMs": 594.2749977111816
+        },
+        {
+          "file": "failure-8.png",
+          "timestamp": 1791095407.398197,
+          "relativeMs": 694.6969032287598
+        },
+        {
+          "file": "failure-9.png",
+          "timestamp": 1791095407.49841,
+          "relativeMs": 794.9099540710449
+        },
+        {
+          "file": "failure-10.png",
+          "timestamp": 1791095407.596925,
+          "relativeMs": 893.4249877929688
+        },
+        {
+          "file": "failure-11.png",
+          "timestamp": 1791095407.696667,
+          "relativeMs": 993.1669235229492
+        },
+        {
+          "file": "failure-12.png",
+          "timestamp": 1791095407.796658,
+          "relativeMs": 1093.1580066680908
+        },
+        {
+          "file": "failure-13.png",
+          "timestamp": 1791095407.899164,
+          "relativeMs": 1195.6639289855957
+        },
+        {
+          "file": "failure-14.png",
+          "timestamp": 1791095407.997062,
+          "relativeMs": 1293.5619354248047
+        },
+        {
+          "file": "failure-15.png",
+          "timestamp": 1791095408.097082,
+          "relativeMs": 1393.5818672180176
+        },
+        {
+          "file": "failure-16.png",
+          "timestamp": 1791095408.197635,
+          "relativeMs": 1494.1349029541016
+        },
+        {
+          "file": "failure-17.png",
+          "timestamp": 1791095408.297186,
+          "relativeMs": 1593.6858654022217
+        },
+        {
+          "file": "failure-18.png",
+          "timestamp": 1791095408.396847,
+          "relativeMs": 1693.3469772338867
+        },
+        {
+          "file": "failure-19.png",
+          "timestamp": 1791095408.497691,
+          "relativeMs": 1794.1908836364746
+        },
+        {
+          "file": "failure-20.png",
+          "timestamp": 1791095408.597267,
+          "relativeMs": 1893.7668800354004
+        },
+        {
+          "file": "failure-21.png",
+          "timestamp": 1791095408.696967,
+          "relativeMs": 1993.466854095459
+        },
+        {
+          "file": "failure-22.png",
+          "timestamp": 1791095408.796877,
+          "relativeMs": 2093.376874923706
+        },
+        {
+          "file": "failure-23.png",
+          "timestamp": 1791095408.897192,
+          "relativeMs": 2193.6919689178467
+        },
+        {
+          "file": "failure-24.png",
+          "timestamp": 1791095408.997714,
+          "relativeMs": 2294.2140102386475
+        },
+        {
+          "file": "failure-25.png",
+          "timestamp": 1791095409.097386,
+          "relativeMs": 2393.885850906372
+        },
+        {
+          "file": "failure-26.png",
+          "timestamp": 1791095409.196555,
+          "relativeMs": 2493.0548667907715
+        },
+        {
+          "file": "failure-27.png",
+          "timestamp": 1791095409.296722,
+          "relativeMs": 2593.22190284729
+        },
+        {
+          "file": "failure-28.png",
+          "timestamp": 1791095409.649418,
+          "relativeMs": 2945.918083190918
+        },
+        {
+          "file": "failure-29.png",
+          "timestamp": 1791095409.746731,
+          "relativeMs": 3043.2310104370117
+        },
+        {
+          "file": "failure-30.png",
+          "timestamp": 1791095409.847557,
+          "relativeMs": 3144.057035446167
+        }
+      ]
+    }
+  }
+}

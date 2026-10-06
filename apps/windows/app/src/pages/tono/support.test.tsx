@@ -17,6 +17,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import enShared from '@/locales/en/shared.json'
 import enTono from '@/locales/en/tono.json'
 import type { TonoDiagnosticsReport } from '@/services/tono'
+import { setNewAppearance } from '@/tono-ui/appearance-preferences'
 
 const {
   diagnosticsReportMock,
@@ -116,6 +117,8 @@ const stubClipboard = () => {
 }
 
 beforeEach(() => {
+  // These cover the old look, which stays selectable; a fresh store now picks the new one.
+  setNewAppearance(false)
   diagnosticsReportMock.mockReset().mockResolvedValue(report)
   localDiagnosticsReportMock.mockReset().mockResolvedValue(report)
   prepareSupportReportMock
@@ -574,4 +577,31 @@ describe('support terminal environment diagnostic card', () => {
     expect(await screen.findByText('Check Failed')).toBeDefined()
     expect(screen.queryByText('Environment Ready')).toBeNull()
   })
+})
+
+it('sea support keeps the three explicit actions and collapsed technical details without implicit upload', async () => {
+  setNewAppearance(true)
+  try {
+    const { container } = renderPage()
+    await screen.findByText('Tono 0.0.18 · Windows 11 Pro 23H2')
+    expect(
+      container
+        .querySelector('.sea-support-actions')
+        ?.querySelectorAll('button'),
+    ).toHaveLength(3)
+    expect(
+      container
+        .querySelector('details.sea-support-technical')
+        ?.hasAttribute('open'),
+    ).toBe(false)
+    expect(uploadDiagnosticsMock).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: 'Run health check' }))
+    await waitFor(() =>
+      expect(localDiagnosticsReportMock).toHaveBeenCalledTimes(1),
+    )
+    expect(repairServiceMock).not.toHaveBeenCalled()
+    expect(uploadDiagnosticsMock).not.toHaveBeenCalled()
+  } finally {
+    setNewAppearance(false)
+  }
 })

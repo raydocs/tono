@@ -1,0 +1,63 @@
+
+ RUN  v5.0.1 /Users/ruirui/orca/workspaces/tono/coral/apps/windows/app
+
+ ❯ src/pages/tono/sea-home.test.tsx (19 tests | 2 failed) 849ms
+   × shows a released failure sentence and retry only once, with secondary tools hidden in the card technical details 81ms
+   × opens a scrollable line picker downward when 255 pixels remain below the chip 24ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/pages/tono/sea-home.test.tsx > shows a released failure sentence and retry only once, with secondary tools hidden in the card technical details
+AssertionError: expected null to be <details …(1)>…(2)</details> // Object.is equality
+
+- Expected:
+<details
+  style="margin-top: 8px;"
+>
+  <summary
+    style="cursor: pointer; font-size: 12px; font-weight: 600; color: rgba(255, 255, 255, 0.72);"
+  >
+    Technical details
+  </summary>
+  <pre
+    data-testid="tono-progress-error"
+    style="margin: 8px 0px 0px; padding: 10px 12px; border-radius: 10px; font-size: 11px; font-family: ui-monospace, \"SF Mono\", \"Cascadia Mono\", Menlo, Consolas, \"Microsoft YaHei UI\", \"Microsoft YaHei\", monospace; line-height: 1.5; white-space: pre-wrap; word-break: break-word; user-select: text; color: var(--tono-text-error); background: rgba(255, 59, 48, 0.1);"
+  >
+    handshake eof
+  </pre>
+</details>
+
++ Received:
+null
+
+ ❯ src/pages/tono/sea-home.test.tsx:459:76
+    457|     .closest('details')
+    458|   expect(technical?.open).toBe(false)
+    459|   expect(container.querySelector('.tono-home__tools')?.closest('detail…
+       |                                                                            ^
+    460|     technical,
+    461|   )
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  src/pages/tono/sea-home.test.tsx > opens a scrollable line picker downward when 255 pixels remain below the chip
+AssertionError: expected '273px' to be '337px' // Object.is equality
+
+Expected: "337px"
+Received: "273px"
+
+ ❯ src/pages/tono/sea-home.test.tsx:510:27
+    508|   fireEvent.click(screen.getByTestId('tono-home-line-chip'))
+    509|   const panel = screen.getByRole('dialog', { name: 'Switch line' })
+    510|   expect(panel.style.top).toBe('337px')
+       |                           ^
+    511|   expect(panel.style.maxHeight).toBe('255px')
+    512|   expect(panel.style.overflowY).toBe('auto')
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 17 passed (19)
+   Start at  18:07:08
+   Duration  1.98s (tests 45%, environment 29%, import 15%, transform 10%)

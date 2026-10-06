@@ -1,0 +1,132 @@
+[
+  {
+    "name": "popover anchored/in bounds/initial focus",
+    "pass": true,
+    "detail": {
+      "x": 161.96875,
+      "y": 313.640625,
+      "width": 320,
+      "bottom": 523.640625,
+      "root": 600,
+      "focused": true,
+      "rows": 4
+    }
+  },
+  {
+    "name": "popover Escape returns focus",
+    "pass": true
+  },
+  {
+    "name": "sheet preserves controls/focus/solid wide panel",
+    "pass": true,
+    "detail": {
+      "top": 326,
+      "actions": 305.640625,
+      "focus": true,
+      "blur": "none"
+    }
+  },
+  {
+    "name": "sheet Shift-Tab remains inside",
+    "pass": true
+  },
+  {
+    "name": "sheet Escape focus return",
+    "pass": true
+  },
+  {
+    "name": "popover outside dismiss",
+    "pass": true
+  },
+  {
+    "name": "short/long/English popover stays in window",
+    "pass": true,
+    "detail": {
+      "x": 232,
+      "y": 132.9375,
+      "right": 552,
+      "bottom": 342.9375
+    }
+  },
+  {
+    "name": "Lite controls opaque",
+    "pass": true
+  },
+  {
+    "name": "connecting controls opaque",
+    "pass": true
+  },
+  {
+    "name": "8s stage explanation",
+    "pass": true
+  },
+  {
+    "name": "20s manual link not early",
+    "pass": true
+  },
+  {
+    "name": "20s link appears without automatic selection",
+    "pass": true
+  },
+  {
+    "name": "slow link opens anchored picker",
+    "pass": true
+  },
+  {
+    "name": "reduced transparency changes material, not scene motion",
+    "pass": true,
+    "detail": {
+      "media": true,
+      "motion": "ambient",
+      "blur": "none"
+    }
+  },
+  {
+    "name": "reduced motion keeps fades, removes travel",
+    "pass": true,
+    "detail": {
+      "motion": "static",
+      "text": "0.24s",
+      "sheet": "0.16s, 0s"
+    }
+  },
+  {
+    "name": "pointer-down scale feedback",
+    "pass": true,
+    "detail": "matrix(0.97, 0, 0, 0.97, 0, 0)"
+  },
+  {
+    "name": "connect title and phase same authoritative commit",
+    "pass": true,
+    "detail": {
+      "ms": 272,
+      "phase": "connecting",
+      "title": "连接中"
+    }
+  },
+  {
+    "name": "arrival after live protection push",
+    "pass": true,
+    "detail": {
+      "ms": 2125,
+      "phase": "connected",
+      "title": "已连接"
+    }
+  },
+  {
+    "name": "sunset starts before idle status",
+    "pass": true,
+    "detail": {
+      "ms": 5146,
+      "phase": "idle",
+      "title": "断开中"
+    }
+  },
+  {
+    "name": "recording covers complete cycle",
+    "pass": true,
+    "detail": {
+      "frames": 164
+    }
+  }
+]

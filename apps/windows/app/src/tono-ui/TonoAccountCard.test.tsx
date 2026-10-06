@@ -4,7 +4,9 @@ import i18n from 'i18next'
 import { initReactI18next } from 'react-i18next'
 import { MemoryRouter } from 'react-router'
 import { SWRConfig } from 'swr'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+import { setNewAppearance } from './appearance-preferences'
 
 import enShared from '@/locales/en/shared.json'
 import enTono from '@/locales/en/tono.json'
@@ -38,6 +40,7 @@ vi.mock('@/services/tono', () => ({
 }))
 
 import { TonoAccountCard } from './TonoAccountCard'
+import { SeaAccount } from './SeaAccount'
 
 void i18n.use(initReactI18next).init({
   resources: { en: { translation: { tono: enTono, shared: enShared } } },
@@ -46,6 +49,10 @@ void i18n.use(initReactI18next).init({
 })
 
 afterEach(() => cleanup())
+beforeEach(() => {
+  // These cover the old look, which stays selectable; a fresh store now picks the new one.
+  setNewAppearance(false)
+})
 
 describe('account card facts', () => {
   it('shows plan, expiry and data used against the quota', async () => {
@@ -61,4 +68,40 @@ describe('account card facts', () => {
     expect(screen.getByText('2026-12-31')).toBeDefined()
     expect(screen.getByText('12.0 GB of 100 GB')).toBeDefined()
   })
+})
+
+it('sea account leaves unknown account facts unknown', () => {
+  render(
+    <SeaAccount
+      account={null}
+      devices={null}
+      deviceCount={0}
+      onSignOut={() => {}}
+      dialogs={null}
+    />,
+  )
+  expect(screen.queryByText('No expiry')).toBeNull()
+  expect(screen.queryByRole('progressbar')).toBeNull()
+  expect(screen.getAllByText('—')).toHaveLength(2)
+})
+
+it('sea account says what the date beside the plan is', () => {
+  render(
+    <SeaAccount
+      account={{
+        email: 'a@example.test',
+        suspended: false,
+        deviceLimit: 3,
+        plan: 'Pro',
+        quotaBytes: null,
+        usageBytes: null,
+        expiresAt: Date.UTC(2026, 11, 31, 12) / 1000,
+      }}
+      devices={null}
+      deviceCount={0}
+      onSignOut={() => {}}
+      dialogs={null}
+    />,
+  )
+  expect(screen.getByText(/Expires 2026-12-31/)).toBeTruthy()
 })

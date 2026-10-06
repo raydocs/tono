@@ -1,0 +1,14 @@
+[
+  {
+    "theme": "light",
+    "bbox": null,
+    "maxRGBDelta": 0,
+    "pixelIdentical": true
+  },
+  {
+    "theme": "dark",
+    "bbox": null,
+    "maxRGBDelta": 0,
+    "pixelIdentical": true
+  }
+]

@@ -1,0 +1,44 @@
+[
+  {
+    "field": "on",
+    "fps": 29.999999999999996,
+    "p95": 33.400000000000546,
+    "samples": 90,
+    "Paint": 0,
+    "PaintCpuMs": 0,
+    "Layout": 0,
+    "LayoutCpuMs": 0,
+    "RasterTask": 1,
+    "RasterTaskCpuMs": 0.259,
+    "UpdateLayoutTree": 92,
+    "UpdateLayoutTreeCpuMs": 63.267
+  },
+  {
+    "field": "off",
+    "fps": 30.001318739285246,
+    "p95": 33.400000000000546,
+    "samples": 91,
+    "Paint": 1,
+    "PaintCpuMs": 0.05,
+    "Layout": 1,
+    "LayoutCpuMs": 0.098,
+    "RasterTask": 2,
+    "RasterTaskCpuMs": 0.069,
+    "UpdateLayoutTree": 92,
+    "UpdateLayoutTreeCpuMs": 35.379
+  },
+  {
+    "field": "blank-control",
+    "fps": 29.835902536051716,
+    "p95": 33.40000000000009,
+    "samples": 90,
+    "Paint": 0,
+    "PaintCpuMs": 0,
+    "Layout": 0,
+    "LayoutCpuMs": 0,
+    "RasterTask": 0,
+    "RasterTaskCpuMs": 0,
+    "UpdateLayoutTree": 0,
+    "UpdateLayoutTreeCpuMs": 0
+  }
+]

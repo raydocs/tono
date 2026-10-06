@@ -1,0 +1,338 @@
+{
+  "method": "Chrome real-time 300ms samples; L crop (0,56,920,600), resize (92,54); capture latency recorded separately",
+  "summary": {
+    "sunset": {
+      "first": 78.141,
+      "last": 27.572,
+      "maxStep": 7.385,
+      "maxRise": 0.002,
+      "maxFall": -7.385
+    },
+    "sunrise": {
+      "first": 27.519,
+      "last": 64.976,
+      "maxStep": 7.27,
+      "maxRise": 7.27,
+      "maxFall": 0.105
+    },
+    "arrival": {
+      "first": 64.99,
+      "last": 78.214,
+      "maxStep": 2.928,
+      "maxRise": 2.928,
+      "maxFall": 0.011
+    },
+    "failure": {
+      "first": 64.736,
+      "last": 38.627,
+      "maxStep": 7.672,
+      "maxRise": 0.124,
+      "maxFall": -7.672
+    }
+  },
+  "frames": {
+    "sunset": [
+      {
+        "at": 0,
+        "elapsed": 171,
+        "luminance": 78.141
+      },
+      {
+        "at": 300,
+        "elapsed": 450,
+        "luminance": 77.498
+      },
+      {
+        "at": 600,
+        "elapsed": 753,
+        "luminance": 75.423
+      },
+      {
+        "at": 900,
+        "elapsed": 1046,
+        "luminance": 71.367
+      },
+      {
+        "at": 1200,
+        "elapsed": 1351,
+        "luminance": 65.309
+      },
+      {
+        "at": 1500,
+        "elapsed": 1672,
+        "luminance": 57.924
+      },
+      {
+        "at": 1800,
+        "elapsed": 1949,
+        "luminance": 50.825
+      },
+      {
+        "at": 2100,
+        "elapsed": 2245,
+        "luminance": 44.843
+      },
+      {
+        "at": 2400,
+        "elapsed": 2549,
+        "luminance": 39.773
+      },
+      {
+        "at": 2700,
+        "elapsed": 2837,
+        "luminance": 35.935
+      },
+      {
+        "at": 3000,
+        "elapsed": 3145,
+        "luminance": 33.194
+      },
+      {
+        "at": 3300,
+        "elapsed": 3434,
+        "luminance": 31.431
+      },
+      {
+        "at": 3600,
+        "elapsed": 3738,
+        "luminance": 30.226
+      },
+      {
+        "at": 3900,
+        "elapsed": 4028,
+        "luminance": 29.392
+      },
+      {
+        "at": 4200,
+        "elapsed": 4340,
+        "luminance": 28.736
+      },
+      {
+        "at": 4500,
+        "elapsed": 4640,
+        "luminance": 28.3
+      },
+      {
+        "at": 4800,
+        "elapsed": 4943,
+        "luminance": 27.988
+      },
+      {
+        "at": 5100,
+        "elapsed": 5232,
+        "luminance": 27.775
+      },
+      {
+        "at": 5400,
+        "elapsed": 5542,
+        "luminance": 27.638
+      },
+      {
+        "at": 5700,
+        "elapsed": 5845,
+        "luminance": 27.585
+      },
+      {
+        "at": 6000,
+        "elapsed": 6137,
+        "luminance": 27.587
+      },
+      {
+        "at": 6300,
+        "elapsed": 6439,
+        "luminance": 27.587
+      },
+      {
+        "at": 6600,
+        "elapsed": 6740,
+        "luminance": 27.587
+      },
+      {
+        "at": 6900,
+        "elapsed": 7037,
+        "luminance": 27.58
+      },
+      {
+        "at": 7200,
+        "elapsed": 7340,
+        "luminance": 27.572
+      }
+    ],
+    "sunrise": [
+      {
+        "at": 0,
+        "elapsed": 150,
+        "luminance": 27.519
+      },
+      {
+        "at": 300,
+        "elapsed": 458,
+        "luminance": 29.637
+      },
+      {
+        "at": 600,
+        "elapsed": 756,
+        "luminance": 34.153
+      },
+      {
+        "at": 900,
+        "elapsed": 1046,
+        "luminance": 41.423
+      },
+      {
+        "at": 1200,
+        "elapsed": 1364,
+        "luminance": 48.251
+      },
+      {
+        "at": 1500,
+        "elapsed": 1666,
+        "luminance": 53.895
+      },
+      {
+        "at": 1800,
+        "elapsed": 1952,
+        "luminance": 58.477
+      },
+      {
+        "at": 2100,
+        "elapsed": 2265,
+        "luminance": 61.95
+      },
+      {
+        "at": 2400,
+        "elapsed": 2562,
+        "luminance": 64.266
+      },
+      {
+        "at": 2700,
+        "elapsed": 2866,
+        "luminance": 64.741
+      },
+      {
+        "at": 3000,
+        "elapsed": 3167,
+        "luminance": 64.871
+      },
+      {
+        "at": 3300,
+        "elapsed": 3457,
+        "luminance": 64.976
+      }
+    ],
+    "arrival": [
+      {
+        "at": 0,
+        "elapsed": 195,
+        "luminance": 64.99
+      },
+      {
+        "at": 300,
+        "elapsed": 444,
+        "luminance": 65.591
+      },
+      {
+        "at": 600,
+        "elapsed": 755,
+        "luminance": 67.939
+      },
+      {
+        "at": 900,
+        "elapsed": 1030,
+        "luminance": 70.405
+      },
+      {
+        "at": 1200,
+        "elapsed": 1373,
+        "luminance": 73.333
+      },
+      {
+        "at": 1500,
+        "elapsed": 1644,
+        "luminance": 75.54
+      },
+      {
+        "at": 1800,
+        "elapsed": 1948,
+        "luminance": 76.964
+      },
+      {
+        "at": 2100,
+        "elapsed": 2253,
+        "luminance": 77.782
+      },
+      {
+        "at": 2400,
+        "elapsed": 2543,
+        "luminance": 78.145
+      },
+      {
+        "at": 2700,
+        "elapsed": 2848,
+        "luminance": 78.203
+      },
+      {
+        "at": 3000,
+        "elapsed": 3134,
+        "luminance": 78.214
+      }
+    ],
+    "failure": [
+      {
+        "at": 0,
+        "elapsed": 172,
+        "luminance": 64.736
+      },
+      {
+        "at": 300,
+        "elapsed": 457,
+        "luminance": 62.745
+      },
+      {
+        "at": 600,
+        "elapsed": 754,
+        "luminance": 57.091
+      },
+      {
+        "at": 900,
+        "elapsed": 1042,
+        "luminance": 49.419
+      },
+      {
+        "at": 1200,
+        "elapsed": 1345,
+        "luminance": 43.714
+      },
+      {
+        "at": 1500,
+        "elapsed": 1644,
+        "luminance": 40.376
+      },
+      {
+        "at": 1800,
+        "elapsed": 1939,
+        "luminance": 38.974
+      },
+      {
+        "at": 2100,
+        "elapsed": 2249,
+        "luminance": 38.503
+      },
+      {
+        "at": 2400,
+        "elapsed": 2537,
+        "luminance": 38.627
+      },
+      {
+        "at": 2700,
+        "elapsed": 2847,
+        "luminance": 38.628
+      },
+      {
+        "at": 3000,
+        "elapsed": 3143,
+        "luminance": 38.627
+      }
+    ]
+  }
+}

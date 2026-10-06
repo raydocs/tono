@@ -14,9 +14,11 @@ import { TonoConfirmDialog } from './TonoAccountCard'
  */
 export const useReleaseProtection = (
   mutateStatus: () => Promise<unknown>,
+  darkOverride?: boolean,
 ): { requestRelease: () => void; dialog: ReactNode } => {
   const { t } = useTranslation()
-  const dark = useThemeMode() !== 'light'
+  const appDark = useThemeMode() !== 'light'
+  const dark = darkOverride ?? appDark
   const [open, setOpen] = useState(false)
   const [error, setError] = useState<string | null>(null)
 

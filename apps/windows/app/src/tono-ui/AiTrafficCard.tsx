@@ -38,9 +38,14 @@ const formatBytes = (bytes: number) => parseTraffic(bytes).join(' ')
 export const AiTrafficCard = ({
   connected,
   generation,
+  onTodayTotal,
 }: {
   connected: boolean
   generation?: number
+  onTodayTotal?: (
+    total: string | null,
+    scope: string | null | undefined,
+  ) => void
 }) => {
   const { t } = useTranslation()
   const { status } = useTonoStatus()
@@ -106,9 +111,12 @@ export const AiTrafficCard = ({
     return { day, total: aiTrafficDayTotal(days[day]) }
   })
   const weekMax = Math.max(...week.map((entry) => entry.total))
-  if (!storageKey || (!connected && weekMax === 0)) return null
-
   const today = days[week[week.length - 1]?.day ?? ''] ?? {}
+  const total = storageKey ? formatBytes(aiTrafficDayTotal(today)) : null
+  useEffect(() => {
+    onTodayTotal?.(total, accountScope)
+  }, [onTodayTotal, total, accountScope])
+  if (!storageKey || (!connected && weekMax === 0)) return null
   const rows = AI_TRAFFIC_FAMILIES.filter((family) => (today[family] ?? 0) > 0)
 
   return (

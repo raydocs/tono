@@ -1,0 +1,28 @@
+{
+  "baseline": "3f9c19520ce0d5c40a3d9c6a5e4294b4edd74af2",
+  "scope": "actual baseline/current DashboardPage in identical development fixture shell and native IO; relative imports remapped only",
+  "results": [
+    {
+      "theme": "light",
+      "bbox": [
+        0,
+        0,
+        903,
+        600
+      ],
+      "maxRGBDelta": 239,
+      "pixelIdentical": false
+    },
+    {
+      "theme": "dark",
+      "bbox": [
+        0,
+        0,
+        912,
+        600
+      ],
+      "maxRGBDelta": 239,
+      "pixelIdentical": false
+    }
+  ]
+}

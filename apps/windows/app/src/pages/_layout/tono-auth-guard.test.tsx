@@ -14,6 +14,8 @@ import { MemoryRouter, Route, Routes } from 'react-router'
 import { SWRConfig } from 'swr'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { setNewAppearance } from '@/tono-ui/appearance-preferences'
+
 import { tonoStatusQueryKey } from '@/hooks/use-tono'
 import LoginPage from '@/pages/tono/login'
 import { removeCacheData } from '@/services/query-client'
@@ -119,6 +121,8 @@ const renderAt = (path: string) =>
   )
 
 beforeEach(() => {
+  // These cover the old look, which stays selectable; a fresh store now picks the new one.
+  setNewAppearance(false)
   tonoStatusMock.mockReset()
   subscribeTonoStatusMock.mockReset()
   subscribeTonoStatusMock.mockImplementation(() => () => {})
