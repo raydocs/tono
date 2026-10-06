@@ -1169,6 +1169,8 @@ export const translationKeys = [
   'tono.seaIntro.next',
   'tono.seaIntro.skip',
   'tono.seaIntro.line',
+  'tono.seaActivity.summary',
+  'tono.seaActivity.exit',
 ] as const
 
 export type TranslationKey = (typeof translationKeys)[number]

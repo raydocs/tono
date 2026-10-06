@@ -1547,6 +1547,10 @@ export interface TranslationResources {
         useProgress: string
         viewport: string
       }
+      seaActivity: {
+        exit: string
+        summary: string
+      }
       seaIntro: {
         line: string
         next: string

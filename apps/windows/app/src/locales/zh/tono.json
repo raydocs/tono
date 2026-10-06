@@ -770,5 +770,9 @@
     "next": "下一步",
     "skip": "跳过",
     "line": "线路由 Tono 推荐"
+  },
+  "seaActivity": {
+    "summary": "当前 {{apps}} 个应用 · {{connections}} 条活动连接",
+    "exit": "线路"
   }
 }

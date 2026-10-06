@@ -12,6 +12,7 @@ import {
   tonoCloseConnection,
   tonoServers,
 } from '@/services/tono'
+import { useAppearancePreferences } from '@/tono-ui/appearance-preferences'
 import { GlassCard } from '@/tono-ui/GlassCard'
 import { PageHeader } from '@/tono-ui/PageHeader'
 import {
@@ -29,6 +30,7 @@ import {
   WECHAT_ACTIVITY_PROCESS,
   toActivityRow,
 } from './activity-model'
+import { SeaActivity } from './sea-activity'
 
 type ActivityFilter = 'all' | Exclude<ActivityRoute, 'local'>
 type ActivityView = 'apps' | 'connections'
@@ -108,6 +110,7 @@ const RouteBadge = ({ route }: { route: ActivityRoute }) => {
 
 const ActivityPage = () => {
   const { t } = useTranslation()
+  const { newAppearance } = useAppearancePreferences()
   const dark = useThemeMode() !== 'light'
   const text = tonoText(dark)
   const { status } = useTonoStatus()
@@ -365,6 +368,72 @@ const ActivityPage = () => {
       visibleRows,
     ],
   )
+
+  if (newAppearance) {
+    const emptyKey = !connected
+      ? 'tono.activity.disconnected'
+      : normalizedQuery || filter !== 'all'
+        ? 'tono.activity.noMatches'
+        : !live && !waitedForFeed
+          ? 'tono.activity.reading'
+          : !live
+            ? 'tono.activity.telemetryFailed'
+            : activeConnections.length > 0
+              ? 'tono.activity.emptyHiddenDns'
+              : 'tono.activity.empty'
+    return (
+      <SeaActivity
+        apps={visibleApps}
+        rows={visibleRows}
+        connected={connected}
+        empty={t(emptyKey)}
+        reading={
+          connected &&
+          !live &&
+          !waitedForFeed &&
+          !normalizedQuery &&
+          filter === 'all'
+        }
+        query={query}
+        onQuery={setQuery}
+        filter={filter}
+        onFilter={setFilter}
+        processLabel={(process) => activityProcessLabel(process, t)}
+        closingId={closingId}
+        closingAll={closingAll}
+        onClose={(id) => void handleClose(id)}
+        onCloseAll={() => void handleCloseAll()}
+        capped={visibleRows.length >= MAX_ACTIVITY_CONNECTIONS}
+        onExplainApp={(process) =>
+          setExplanation({
+            kind: 'app',
+            value: process,
+            title: activityProcessLabel(process, t),
+            generation,
+          })
+        }
+        onExplainConnection={(row) =>
+          setExplanation({
+            kind: 'connection',
+            value: row.id,
+            title: activityProcessLabel(row.process, t),
+            generation,
+          })
+        }
+        explanation={
+          explanation &&
+          explanationRows && (
+            <ActivityRouteExplanation
+              rows={explanationRows}
+              title={explanation.title}
+              dark={dark}
+              onClose={() => setExplanation(null)}
+            />
+          )
+        }
+      />
+    )
+  }
 
   return (
     <div

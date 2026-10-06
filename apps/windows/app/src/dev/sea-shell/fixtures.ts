@@ -79,7 +79,13 @@ export const tonoDevices = async () => [
     id: 'synthetic-device',
     name: 'Preview Computer',
     current: true,
-    createdAt: null,
+    createdAt: 1790000000,
+  },
+  {
+    id: 'synthetic-other-device',
+    name: 'Example Laptop',
+    current: false,
+    createdAt: 1790000000,
   },
 ]
 export const tonoAuditEnabled = async () => false
@@ -180,3 +186,59 @@ export const tonoSignInVerify = async () => {
   )
   return { email: 'preview@example.test', suspended, deviceLimit: 3 }
 }
+
+// Populated, privacy-safe activity/account fixtures; no native feed or account IO.
+export const tonoAccount = async () => ({
+  email: params.has('long')
+    ? 'a-deliberately-long-synthetic-account@example.test'
+    : 'home-preview@example.test',
+  suspended: false,
+  deviceLimit: 3,
+  plan: 'Pro',
+  quotaBytes: 100 * 1024 ** 3,
+  usageBytes: 12 * 1024 ** 3,
+  expiresAt: 1790000000,
+})
+const activityConnections: IConnectionsItem[] = params.has('empty')
+  ? []
+  : Array.from({ length: 27 }, (_, index) => ({
+      id: `synthetic-flow-${index}`,
+      metadata: {
+        network: index % 2 ? 'udp' : 'tcp',
+        type: 'HTTPS',
+        host: `flow-${index}.example.test`,
+        sourceIP: '192.0.2.2',
+        sourcePort: '50000',
+        destinationIP: '192.0.2.1',
+        destinationPort: '443',
+        remoteDestination: '',
+        process: index < 23 ? 'Example Browser.exe' : 'Example Mail.exe',
+        processPath: '',
+      },
+      upload: 0,
+      download: 0,
+      start: '2026-10-06T00:00:00Z',
+      chains:
+        index % 4 === 0
+          ? ['DIRECT']
+          : index % 4 === 1
+            ? ['REJECT-DROP']
+            : index % 4 === 2
+              ? ['Tono-Home-Residential']
+              : ['Tokyo · Sakura', 'Tono-Exit'],
+      rule: 'DOMAIN-SUFFIX',
+      rulePayload: 'example.test',
+    }))
+export const useConnectionData = () => ({
+  response: {
+    data: {
+      activeConnections: params.has('reading') ? [] : activityConnections,
+      closedConnections: [],
+    },
+    live: !params.has('reading'),
+  },
+  refreshGetClashConnection: () => {},
+})
+export const tonoCloseConnection = async () => {}
+export const tonoCloseAllConnections = async () => {}
+export const tonoRevokeDevice = async () => {}

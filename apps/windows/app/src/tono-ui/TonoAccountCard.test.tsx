@@ -38,6 +38,7 @@ vi.mock('@/services/tono', () => ({
 }))
 
 import { TonoAccountCard } from './TonoAccountCard'
+import { SeaAccount } from './SeaAccount'
 
 void i18n.use(initReactI18next).init({
   resources: { en: { translation: { tono: enTono, shared: enShared } } },
@@ -61,4 +62,19 @@ describe('account card facts', () => {
     expect(screen.getByText('2026-12-31')).toBeDefined()
     expect(screen.getByText('12.0 GB of 100 GB')).toBeDefined()
   })
+})
+
+it('sea account leaves unknown account facts unknown', () => {
+  render(
+    <SeaAccount
+      account={null}
+      devices={null}
+      deviceCount={0}
+      onSignOut={() => {}}
+      dialogs={null}
+    />,
+  )
+  expect(screen.queryByText('No expiry')).toBeNull()
+  expect(screen.queryByRole('progressbar')).toBeNull()
+  expect(screen.getAllByText('—')).toHaveLength(2)
 })

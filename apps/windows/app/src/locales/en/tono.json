@@ -770,5 +770,9 @@
     "next": "Next",
     "skip": "Skip",
     "line": "Tono recommends your server"
+  },
+  "seaActivity": {
+    "summary": "Now · {{apps}} apps · {{connections}} active connections",
+    "exit": "Exit"
   }
 }
