@@ -765,5 +765,10 @@
     "all": "All servers · {{count}}",
     "evidence": "{{count}} tunnel verification records in the last 24 hours",
     "selected": "Selected {{name}} · {{latency}}"
+  },
+  "seaIntro": {
+    "next": "Next",
+    "skip": "Skip",
+    "line": "Tono recommends your server"
   }
 }

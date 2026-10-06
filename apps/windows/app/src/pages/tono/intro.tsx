@@ -3,7 +3,10 @@ import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router'
 
 import { writeTonoIntroSeen } from '@/pages/_layout/tono-guard'
+import { useAppearancePreferences } from '@/tono-ui/appearance-preferences'
 import { WelcomeHeroTile } from '@/tono-ui/WelcomeHeroTile'
+
+import { SeaIntro } from './sea-intro'
 
 const POINT_KEYS = [
   { headline: 'tono.intro.step1.headline', body: 'tono.intro.step1.body' },
@@ -14,6 +17,7 @@ const POINT_KEYS = [
 const IntroPage = () => {
   const { t } = useTranslation()
   const navigate = useNavigate()
+  const { newAppearance } = useAppearancePreferences()
   const startRef = useRef<HTMLButtonElement>(null)
 
   const finish = useCallback(() => {
@@ -34,6 +38,8 @@ const IntroPage = () => {
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [finish])
+
+  if (newAppearance) return <SeaIntro onFinish={finish} />
 
   return (
     <section

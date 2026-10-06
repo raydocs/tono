@@ -1166,6 +1166,9 @@ export const translationKeys = [
   'tono.seaLines.all',
   'tono.seaLines.evidence',
   'tono.seaLines.selected',
+  'tono.seaIntro.next',
+  'tono.seaIntro.skip',
+  'tono.seaIntro.line',
 ] as const
 
 export type TranslationKey = (typeof translationKeys)[number]

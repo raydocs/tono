@@ -16,7 +16,7 @@ const storeListeners = new Set<() => void>()
 const initial: TonoUiState =
   scenario === 'unknown' || scenario === 'connected'
     ? 'connected'
-    : scenario === 'protectedOffline'
+    : ['protectedOffline', 'protectedUnknown', 'previous'].includes(scenario)
       ? 'protectedOffline'
       : scenario === 'connecting'
         ? 'connecting'
@@ -24,7 +24,14 @@ const initial: TonoUiState =
           ? 'disconnecting'
           : 'notConnected'
 let status: TonoStatus = {
-  accountState: 'ready',
+  accountState:
+    params.get('account') === 'signedOut'
+      ? 'signedOut'
+      : params.get('account') === 'suspended'
+        ? 'suspended'
+        : params.get('account') === 'error'
+          ? 'error'
+          : 'ready',
   uiState: initial,
   stage: initial === 'connecting' ? 'startingTunnel' : null,
   stageLabel: null,
@@ -39,7 +46,8 @@ let status: TonoStatus = {
     initial === 'protectedOffline'
       ? {
           wanted: true,
-          live: true,
+          live: scenario !== 'protectedUnknown',
+          tunnel_permit_rendered: scenario === 'previous',
           mode: 'locked',
           endpoints: [],
           last_error: null,

@@ -20,8 +20,10 @@ import {
   tonoSignInVerify,
   tonoSignOut,
 } from '@/services/tono'
+import { useAppearancePreferences } from '@/tono-ui/appearance-preferences'
 import { GlassCard } from '@/tono-ui/GlassCard'
 import { hasLiveProtection } from '@/tono-ui/protection-evidence'
+import { SeaScene } from '@/tono-ui/SeaScene'
 import { SupportContact } from '@/tono-ui/SupportContact'
 import {
   TONO_COLORS,
@@ -32,6 +34,8 @@ import {
 import { TonoIcon } from '@/tono-ui/TonoIcon'
 import { TonoLogo } from '@/tono-ui/TonoLogo'
 import { WelcomeHeroTile } from '@/tono-ui/WelcomeHeroTile'
+
+import './sea-welcome.css'
 
 const RESEND_COUNTDOWN = 60
 const SENT_ACK_MS = 1500
@@ -101,6 +105,8 @@ const authSupportSummary = (
 const LoginPage = () => {
   const { t } = useTranslation()
   const navigate = useNavigate()
+  const { newAppearance } = useAppearancePreferences()
+  const [rejectedAttempt, setRejectedAttempt] = useState(0)
   const dark = useThemeMode() !== 'light'
   const text = tonoText(dark)
   const { status, mutateTonoStatus } = useTonoStatus()
@@ -228,6 +234,14 @@ const LoginPage = () => {
     } catch (error) {
       // The server already used up this code; clear it so a new one is requested.
       if (String(error).includes('TONO_SIGN_IN_NOT_SAVED')) setCode('')
+      if (
+        newAppearance &&
+        stableTonoErrorCode(String(error)) === 'TONO_AUTH_INVALID_CODE'
+      ) {
+        setCode('')
+        autoSubmittedCodeRef.current = null
+        setRejectedAttempt((attempt) => attempt + 1)
+      }
       setError(formatTonoActionError(error, t))
       setAuthFailureSummary(authSupportSummary('verify-code', error))
     } finally {
@@ -325,11 +339,13 @@ const LoginPage = () => {
   }
 
   const primaryButtonStyle: React.CSSProperties = {
-    width: '100%',
-    padding: '12px 16px',
+    width: newAppearance && !codeSent ? 'auto' : '100%',
+    padding: newAppearance ? '12px 20px' : '12px 16px',
     fontSize: 14,
-    color: '#fff',
-    background: 'var(--tono-action-fill)',
+    color: newAppearance ? '#1A0F0A' : '#fff',
+    background: newAppearance
+      ? 'var(--sea-primary)'
+      : 'var(--tono-action-fill)',
   }
 
   // A restore that did not take over the Service's barrier leaves it as it is.
@@ -342,6 +358,7 @@ const LoginPage = () => {
   const internetRecovery = internetBlocked ? (
     <div
       role="alert"
+      className={newAppearance ? 'sea-attention' : undefined}
       style={{
         width: '100%',
         boxSizing: 'border-box',
@@ -404,14 +421,24 @@ const LoginPage = () => {
   if (suspended) {
     return (
       <div
-        className="tono-page"
+        className={
+          newAppearance
+            ? 'tono-page sea-login sea-login--suspended'
+            : 'tono-page'
+        }
         style={{
           ...TONO_PAGE_LAYOUT,
           alignItems: 'center',
           justifyContent: 'center',
         }}
       >
+        {newAppearance && (
+          <div className="sea-welcome-scene">
+            <SeaScene phase={internetBlocked ? 'failed' : 'idle'} />
+          </div>
+        )}
         <GlassCard
+          className={newAppearance ? 'sea-login-recovery' : undefined}
           style={{
             width: 470,
             maxWidth: '100%',
@@ -472,33 +499,56 @@ const LoginPage = () => {
   }
 
   return (
-    <div className="tono-welcome">
-      <aside className="tono-welcome__story tono-welcome-ground">
-        <div className="tono-welcome__hero">
-          <div className="tono-welcome__brand">
-            <TonoLogo connected={false} size={32} />
-            <span>Tono</span>
-          </div>
-          <div className="tono-welcome__message">
-            <span className="tono-welcome__eyebrow">
-              {t('tono.login.brandLabel')}
-            </span>
-            <h2>{t('tono.login.brandTitle')}</h2>
-            <p>{t('tono.login.brandDescription')}</p>
-          </div>
+    <div
+      className={newAppearance ? 'sea-login' : 'tono-welcome'}
+      data-code-step={codeSent}
+    >
+      {newAppearance && (
+        <div className="sea-welcome-scene">
+          <SeaScene phase={internetBlocked ? 'failed' : 'idle'} />
         </div>
-        <WelcomeHeroTile size="small" />
-        <p className="tono-welcome__footnote">
-          {t('tono.login.brandFootnote')}
-        </p>
-      </aside>
+      )}
+      {!newAppearance && (
+        <aside className="tono-welcome__story tono-welcome-ground">
+          <div className="tono-welcome__hero">
+            <div className="tono-welcome__brand">
+              <TonoLogo connected={false} size={32} />
+              <span>Tono</span>
+            </div>
+            <div className="tono-welcome__message">
+              <span className="tono-welcome__eyebrow">
+                {t('tono.login.brandLabel')}
+              </span>
+              <h2>{t('tono.login.brandTitle')}</h2>
+              <p>{t('tono.login.brandDescription')}</p>
+            </div>
+          </div>
+          <WelcomeHeroTile size="small" />
+          <p className="tono-welcome__footnote">
+            {t('tono.login.brandFootnote')}
+          </p>
+        </aside>
+      )}
       <GlassCard
         className="tono-welcome__form"
-        padding="clamp(24px, 4vw, 48px)"
+        padding={newAppearance ? 0 : 'clamp(24px, 4vw, 48px)'}
+        style={
+          newAppearance
+            ? {
+                position: 'relative',
+                background: 'none',
+                border: 'none',
+                boxShadow: 'none',
+                backdropFilter: 'none',
+                WebkitBackdropFilter: 'none',
+              }
+            : undefined
+        }
       >
         {internetRecovery}
         {restoreFailed && (
           <div
+            className={newAppearance ? 'sea-attention' : undefined}
             style={{
               display: 'flex',
               alignItems: 'center',
@@ -551,8 +601,8 @@ const LoginPage = () => {
           <h1
             style={{
               margin: 0,
-              fontSize: 28,
-              fontWeight: 650,
+              fontSize: newAppearance ? 44 : 28,
+              fontWeight: newAppearance ? 300 : 650,
               letterSpacing: -0.4,
               color: text.primary,
             }}
@@ -585,6 +635,7 @@ const LoginPage = () => {
         </p>
 
         <form
+          className={newAppearance ? 'sea-login-fields' : undefined}
           aria-busy={sending || sentAck || verifying}
           onSubmit={(event) => {
             event.preventDefault()
@@ -592,13 +643,20 @@ const LoginPage = () => {
             else void handleVerify()
           }}
           style={{
-            display: 'flex',
+            display: newAppearance && !codeSent ? 'grid' : 'flex',
             flexDirection: 'column',
             gap: 12,
             width: '100%',
           }}
         >
-          <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <label
+            className={newAppearance ? 'sea-email-field' : undefined}
+            style={{
+              display: newAppearance && codeSent ? 'none' : 'flex',
+              flexDirection: 'column',
+              gap: 6,
+            }}
+          >
             <span
               style={{ fontSize: 12, fontWeight: 600, color: text.secondary }}
             >
@@ -660,6 +718,7 @@ const LoginPage = () => {
           ) : (
             <>
               <label
+                className={newAppearance ? 'sea-code-label' : undefined}
                 style={{ display: 'flex', flexDirection: 'column', gap: 6 }}
               >
                 <span
@@ -671,30 +730,70 @@ const LoginPage = () => {
                 >
                   {t('tono.login.codeLabel')}
                 </span>
-                <input
-                  className="tono-input"
-                  style={{
-                    ...inputStyle,
-                    textAlign: 'center',
-                    letterSpacing: 10,
-                    fontSize: 22,
-                    fontWeight: 650,
-                  }}
-                  ref={codeInputRef}
-                  placeholder={t('tono.login.codePlaceholder')}
-                  value={code}
-                  maxLength={6}
-                  inputMode="numeric"
-                  autoComplete="one-time-code"
-                  aria-describedby="tono-code-help"
-                  aria-invalid={Boolean(error)}
-                  onChange={(event) =>
-                    setCode(event.target.value.replace(/\D/g, '').slice(0, 6))
-                  }
-                  disabled={
-                    sending || verifying || restoringInternet || internetBlocked
-                  }
-                />
+                <div
+                  className={newAppearance ? 'sea-code-entry' : undefined}
+                  data-rejected={newAppearance && rejectedAttempt > 0}
+                >
+                  {newAppearance && (
+                    <div
+                      className="sea-code-boxes"
+                      key={rejectedAttempt}
+                      data-rejected={rejectedAttempt > 0}
+                      aria-hidden="true"
+                    >
+                      {[0, 1, 2, 3, 4, 5].map((position) => (
+                        <span
+                          key={`digit-${position}`}
+                          data-active={Math.min(code.length, 5) === position}
+                        >
+                          {code[position] ?? ''}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                  <input
+                    className={
+                      newAppearance ? 'tono-input sea-code-input' : 'tono-input'
+                    }
+                    style={{
+                      ...inputStyle,
+                      textAlign: 'center',
+                      letterSpacing: 10,
+                      fontSize: 22,
+                      fontWeight: 650,
+                    }}
+                    ref={codeInputRef}
+                    placeholder={t('tono.login.codePlaceholder')}
+                    value={code}
+                    maxLength={6}
+                    inputMode="numeric"
+                    autoComplete="one-time-code"
+                    aria-describedby="tono-code-help"
+                    aria-invalid={Boolean(error)}
+                    onChange={(event) =>
+                      setCode(event.target.value.replace(/\D/g, '').slice(0, 6))
+                    }
+                    onPaste={
+                      newAppearance
+                        ? (event) => {
+                            event.preventDefault()
+                            setCode(
+                              event.clipboardData
+                                .getData('text')
+                                .replace(/\D/g, '')
+                                .slice(0, 6),
+                            )
+                          }
+                        : undefined
+                    }
+                    disabled={
+                      sending ||
+                      verifying ||
+                      restoringInternet ||
+                      internetBlocked
+                    }
+                  />
+                </div>
               </label>
               <button
                 type="submit"

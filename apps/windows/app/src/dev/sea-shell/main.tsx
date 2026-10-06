@@ -14,6 +14,8 @@ import SettingsPage from '@/pages/settings'
 import AccountPage from '@/pages/tono/account'
 import ActivityPage from '@/pages/tono/activity'
 import DashboardPage from '@/pages/tono/dashboard'
+import IntroPage from '@/pages/tono/intro'
+import LoginPage from '@/pages/tono/login'
 import ServersPage from '@/pages/tono/servers'
 import SupportPage from '@/pages/tono/support'
 import {
@@ -26,7 +28,8 @@ if (!import.meta.env.DEV) throw new Error('Shell preview is development-only')
 const params = new URLSearchParams(location.search)
 setNewAppearance(params.get('appearance') !== 'old')
 setMotionPreference('static')
-writeTonoIntroSeen()
+if (params.get('route') === '/intro') localStorage.removeItem('tono.introSeen')
+else writeTonoIntroSeen()
 void i18n.use(initReactI18next).init({
   resources: {
     en: { translation: { tono: en, shared: enShared, settings: enSettings } },
@@ -43,6 +46,8 @@ const router = createMemoryRouter(
       element: <TonoLayout />,
       children: [
         { index: true, element: <DashboardPage /> },
+        { path: 'login', element: <LoginPage /> },
+        { path: 'intro', element: <IntroPage /> },
         { path: 'servers', element: <ServersPage /> },
         { path: 'activity', element: <ActivityPage /> },
         { path: 'account', element: <AccountPage /> },

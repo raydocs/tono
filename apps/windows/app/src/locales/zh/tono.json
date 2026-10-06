@@ -765,5 +765,10 @@
     "all": "全部线路 · {{count}}",
     "evidence": "24 小时内有 {{count}} 条隧道验证记录",
     "selected": "已选 {{name}} · {{latency}}"
+  },
+  "seaIntro": {
+    "next": "下一步",
+    "skip": "跳过",
+    "line": "线路由 Tono 推荐"
   }
 }

@@ -159,3 +159,24 @@ export const tonoUpdateRoutePreferences = async (
   preference = { ...preference, favorites, fixedRegion }
   return tonoRoutePreferences()
 }
+
+// Sign-in fixture uses no credentials or network; only synthetic status events.
+export const tonoSignInStart = async () => {
+  window.dispatchEvent(
+    new CustomEvent('preview-home-state', {
+      detail: { accountState: 'authenticating' },
+    }),
+  )
+  return { challengeId: 'synthetic', expiresIn: 600, message: '' }
+}
+export const tonoSignInVerify = async () => {
+  if (params.has('badCode'))
+    throw new Error('TONO_AUTH_INVALID_CODE: Synthetic rejected code')
+  const suspended = params.has('paused')
+  window.dispatchEvent(
+    new CustomEvent('preview-home-state', {
+      detail: { accountState: suspended ? 'suspended' : 'ready' },
+    }),
+  )
+  return { email: 'preview@example.test', suspended, deviceLimit: 3 }
+}
