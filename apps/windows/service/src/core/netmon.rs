@@ -55,7 +55,12 @@ impl Reconciler {
     fn observe(&mut self, observed: Result<topology::Topology, String>, external: bool) -> Option<&'static str> {
         match observed {
             Ok(current) => {
-                let changed = self.baseline.as_ref().is_none_or(|old| *old != current);
+                let changed = self.baseline.as_ref().is_none_or(|old| {
+                    old.interfaces != current.interfaces
+                        || old.routes != current.routes
+                        || old.addresses != current.addresses
+                        || old.ipv6_defaults != current.ipv6_defaults
+                });
                 let publish = changed || (external && current.ipv6_unreadable);
                 self.baseline = Some(current);
                 self.unknown_reported = false;
@@ -364,6 +369,16 @@ mod tests {
     /// when nothing observed had changed. A new source address behind the same gateway, which
     /// the old observation did not hold, must still publish, and so must a batch whose IPv6
     /// part could not be read.
+    #[test]
+    fn dns_self_write_readability_changes_are_silent() {
+        let baseline = super::topology::Topology::default();
+        let mut reconciler = super::Reconciler { baseline: Some(baseline.clone()), unknown_reported: false };
+        let blind = super::topology::Topology { ipv6_unreadable: true, ..baseline.clone() };
+        assert!(reconciler.observe(Ok(blind.clone()), false).is_none(), "readability alone is not a DNS-window network move");
+        assert!(reconciler.observe(Ok(baseline), false).is_none(), "readability recovery alone is not a network move");
+        assert!(reconciler.observe(Ok(blind), true).is_some(), "an unread external observation still publishes");
+    }
+
     #[test]
     fn unchanged_external_topology_is_silent() {
         let baseline = super::topology::Topology {

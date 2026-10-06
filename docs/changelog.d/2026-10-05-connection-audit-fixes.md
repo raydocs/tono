@@ -39,3 +39,8 @@
   - Windows DNS：WIN-DNS-RACE-MASKS-SYSTEM、WIN-DNS-DHCPV6-RESIDUAL、WIN-NRPT-NO-REFRESH、WIN-DNS-SNAPSHOT-LATE-DELETE、WIN-DNS-ENABLE-NO-FLUSH。
   - 数据面：EXIT-AGENT-TIMER-BOOT、EXIT-XRAY-CONN-IDLE、SINGBOX-REJECT-NO-DROP。
   - macOS：MAC-WATCHDOG-STALL-AS-CANCEL、MAC-HEALTH-PROBE-FANOUT、MAC-CORE-START-SLEEP-MISLABEL、MAC-WAKE-GATE-RACE。
+
+### 2026-10-06 · IPv6 修复补审与 minor 收口
+- Codex `gpt-6.1-sol` high 只读补审 `5d8b648f...3e3dcde9`：原 major 的未读 IPv6 外部批次发布已经修好，无 major 以上发现。
+- 新 minor：`ipv6_unreadable` 进入派生相等比较，可读性单独变化会额外发布 DNS 自写批次。已将实际接口、路由、地址、IPv6 默认路由的比较与可读性分开；外部未读观察仍强制发布。
+- 一条回归覆盖 DNS 窗口内可读性失败/恢复都静默，外部未读仍发布。`git diff --check` 无输出；未在 MacBook 跑原生测试，hosted CI 和窄复审待完成。仅源码，无新候选。
