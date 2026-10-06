@@ -21,8 +21,8 @@ This scan was read-only. It looked for bugs that only appear when an app is real
 |---|---|---|---|---|
 | R6-1 | P2 | #1317 / #1318 | PR open, needs-hardware, not auto-merge | Uninstall never deletes `$INSTDIR\sing-box-sha256.txt` or the helper's pin staging names, so `C:\Program Files\Tono` survives uninstall. See `installer.nsi:1305-1312` and `1626-1667`. |
 | R6-2 | P3 | #1319 | open | The Service uninstaller leaves `%ProgramData%\Tono\bin\sing-box-sha256.txt(.tmp)`. See `uninstall_service.rs:845-858`. |
-| R6-3 | P3 | #1320 | open | The Windows `candidate-manifest.json` omits the sing-box digest (`windows-candidate.yml:169-171`). Confirmed in the artifact. |
-| R6-4 | P3 | #1321 | open (release trust) | The v1 Windows measurement treats sing-box as optional and does not cross-check duplicate copies of it (`windows-package-components.mjs:16-24,64-65`, `desktop-update-v1.mjs:47-50`). |
+| R6-3 | P3 | #1320 | fix in PR (2026-10-06; `docs/changelog.d/2026-10-06-win-sing-box-publication-required.md`) | The Windows `candidate-manifest.json` omits the sing-box digest (`windows-candidate.yml:169-171`). Confirmed in the artifact. |
+| R6-4 | P3 | #1321 | fix in PR (2026-10-06; release-trust review pending) | The v1 Windows measurement treats sing-box as optional and does not cross-check duplicate copies of it (`windows-package-components.mjs:16-24,64-65`, `desktop-update-v1.mjs:47-50`). |
 | R6-5 | P3 | #1322 | file removed from the bundle (2026-10-03, see `docs/changelog.d/2026-10-03-macos-drop-stale-core-identity.md`) | The macOS bundle ships a stale `core-identity.json` (alpha.3, 6c86720c…) while the input is alpha.9 (ab0187a7…). |
 | R6-6 | P3 | #1323 | fix in PR (2026-10-05, see `docs/changelog.d/2026-10-05-macos-build-source-dirty-helper.md`) | Every CI macOS build records `dirty:true`, because `build-core-helper.sh` rewrites a tracked helper binary that is now stale. |
 | R6-7 | P3 | #1324 | script deleted (2026-10-03, see `docs/changelog.d/2026-10-03-remove-dead-macos-dmg-script.md`) | `package-macos-dmg.sh` requires `Contents/Resources/mihomo` and has no callers. |

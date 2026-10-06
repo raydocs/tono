@@ -36,7 +36,7 @@ function sequence(value) {
   requireValue(Number.isSafeInteger(value) && value > 0, 'releaseSequence must be a positive safe integer')
 }
 
-function targetShape(target, expectedId) {
+function targetShape(target, expectedId, requireSingBox = false) {
   requireValue(exactKeys(target, ['id', 'artifactSha256', 'artifactSizeBytes', 'components']), 'invalid target fields')
   requireValue(target.id === expectedId, `expected target ${expectedId}`)
   requireValue(hex(target.artifactSha256, 64), 'invalid artifact digest')
@@ -44,6 +44,7 @@ function targetShape(target, expectedId) {
     && target.artifactSizeBytes > 0 && target.artifactSizeBytes <= MAX_ARTIFACT_BYTES, 'invalid artifact size')
   const componentKeys = Object.keys(target.components)
   const required = ['appSha256', 'coreSha256', 'privilegedSha256']
+  if (requireSingBox) required.push('singBoxSha256')
   requireValue(required.every(key => componentKeys.includes(key))
     && componentKeys.every(key => required.includes(key) || key === 'singBoxSha256')
     && required.every(key => hex(target.components[key], 64))
@@ -108,6 +109,8 @@ export async function measureTarget({ appVersion, buildCommit, releaseSequence, 
   requireValue(identifier(appVersion, 64) && hex(buildCommit, 40), 'invalid measurement identity')
   sequence(releaseSequence)
   requireValue(TARGETS.includes(targetId), 'unsupported native target')
+  requireValue(targetId !== 'windows-x86_64' || typeof singBox === 'string' && singBox.length > 0,
+    'Windows measurement requires sing-box')
   const packageBytes = await digestFile(artifact)
   return {
     kind: 'tonoUpdateTargetMeasurement', appVersion, buildCommit, releaseSequence,
@@ -134,7 +137,9 @@ export function assembleManifest({ macos, windows, buildCommit, releaseId, relea
     requireValue(report.buildCommit === buildCommit, 'native packages must come from the same exact source SHA')
     requireValue(report.releaseSequence === releaseSequence, 'native packages must use the same release sequence')
     requireValue(identifier(report.appVersion, 64) && report.appVersion === macos.appVersion, 'native package versions differ')
-    targetShape(report.target, TARGETS[index])
+    // Existing signed manifests remain readable; newly published Windows targets
+    // must bind the fourth installed component.
+    targetShape(report.target, TARGETS[index], TARGETS[index] === 'windows-x86_64')
   }
   const bytes = canonical({
     kind: 'tonoUpdateManifest', protocolVersion: 1, appVersion: macos.appVersion,

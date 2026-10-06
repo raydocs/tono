@@ -174,6 +174,7 @@ jobs:
           $version = node -p "require('./package.json').version"
           $files = @($installer.FullName) + @(Get-ChildItem src-tauri/resources/tono-service*.exe | ForEach-Object FullName)
           $files += (Resolve-Path src-tauri/sidecar/tono-core-x86_64-pc-windows-msvc.exe).Path
+          $files += (Resolve-Path src-tauri/sidecar/sing-box-x86_64-pc-windows-msvc.exe).Path
           $hashes = @($files | ForEach-Object { @{ name = (Split-Path -Leaf $_); sha256 = (Get-FileHash $_ -Algorithm SHA256).Hash.ToLowerInvariant() } })
           @{ version = $version; source = $env:GITHUB_SHA; candidateOnly = $true; releaseAccepted = $false; updaterSigned = $false; authenticodeSigned = $false; files = $hashes } | ConvertTo-Json -Depth 5 | Set-Content target/release/bundle/nsis/candidate-manifest.json
 
@@ -193,7 +194,7 @@ jobs:
             $name, $value = $line -split '=', 2
             $components[$name] = $value
           }
-          foreach ($name in @('WINDOWS_APP', 'WINDOWS_CORE', 'WINDOWS_SERVICE')) {
+          foreach ($name in @('WINDOWS_APP', 'WINDOWS_CORE', 'WINDOWS_SERVICE', 'WINDOWS_SING_BOX')) {
             if (-not $components[$name]) { throw "The component selector did not return $name" }
           }
           $version = node -p "require('./package.json').version"
@@ -202,9 +203,9 @@ jobs:
             '--artifact', $installer[0].FullName,
             '--app', $components['WINDOWS_APP'], '--core', $components['WINDOWS_CORE'],
             '--privileged', $components['WINDOWS_SERVICE'],
+            '--sing-box', $components['WINDOWS_SING_BOX'],
             '--output', 'target/release/bundle/nsis/update-target.windows-x86_64.json'
           )
-          if ($components['WINDOWS_SING_BOX']) { $measureArgs += @('--sing-box', $components['WINDOWS_SING_BOX']) }
           node ../../../tooling/scripts/desktop-update-v1.mjs measure --target windows-x86_64 @measureArgs
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a

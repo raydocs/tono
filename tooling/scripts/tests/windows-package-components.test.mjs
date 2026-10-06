@@ -18,6 +18,7 @@ test('measures the installed payload copy and refuses a gate copy that differs',
     }
     await put('Tono.exe.next', 'app')
     await put('tono-core.exe.next', 'core')
+    await put('sing-box.exe.next', 'sing-box')
     await put('uninstall.exe', 'uninstaller')
     for (const prefix of ['', '$PLUGINSDIR/tono-gate/']) {
       await put(`${prefix}resources/tono-service.exe`, 'service')
@@ -30,8 +31,8 @@ test('measures the installed payload copy and refuses a gate copy that differs',
       app: path.join(root, 'Tono.exe.next'),
       core: path.join(root, 'tono-core.exe.next'),
       privileged: path.join(root, 'resources', 'tono-service.exe'),
+      singBox: path.join(root, 'sing-box.exe.next'),
     })
-    await put('sing-box.exe.next', 'sing-box')
     assert.equal(
       (await windowsPackageComponents(root)).singBox,
       path.join(root, 'sing-box.exe.next'),
@@ -42,4 +43,30 @@ test('measures the installed payload copy and refuses a gate copy that differs',
   } finally {
     await rm(root, { recursive: true, force: true })
   }
+})
+
+test('requires the installed sing-box component', async t => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'tono-nsis-sing-box-'))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  await mkdir(path.join(root, 'resources'))
+  await writeFile(path.join(root, 'Tono.exe.next'), 'app')
+  await writeFile(path.join(root, 'tono-core.exe.next'), 'core')
+  await writeFile(path.join(root, 'resources/tono-service.exe'), 'service')
+  await assert.rejects(windowsPackageComponents(root), /no installed sing-box\.exe\.next/)
+})
+
+test('refuses a duplicate sing-box payload copy that differs', async t => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'tono-nsis-sing-box-copies-'))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  await mkdir(path.join(root, 'resources'))
+  await writeFile(path.join(root, 'Tono.exe.next'), 'app')
+  await writeFile(path.join(root, 'tono-core.exe.next'), 'core')
+  await writeFile(path.join(root, 'resources/tono-service.exe'), 'service')
+  await writeFile(path.join(root, 'sing-box.exe.next'), 'sing-box')
+  const gate = path.join(root, '$PLUGINSDIR/tono-gate')
+  await mkdir(gate, { recursive: true })
+  await writeFile(path.join(gate, 'sing-box.exe.next'), 'sing-box')
+  assert.equal((await windowsPackageComponents(root)).singBox, path.join(root, 'sing-box.exe.next'))
+  await writeFile(path.join(gate, 'sing-box.exe.next'), 'different sing-box')
+  await assert.rejects(windowsPackageComponents(root), /sing-box\.exe\.next differs from the installed/)
 })

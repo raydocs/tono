@@ -427,7 +427,7 @@ jobs:
             $name, $value = $line -split '=', 2
             $components[$name] = $value
           }
-          foreach ($name in @('WINDOWS_APP', 'WINDOWS_CORE', 'WINDOWS_SERVICE')) {
+          foreach ($name in @('WINDOWS_APP', 'WINDOWS_CORE', 'WINDOWS_SERVICE', 'WINDOWS_SING_BOX')) {
             if (-not $components[$name]) { throw "The component selector did not return $name" }
           }
           $appVersion = [Diagnostics.FileVersionInfo]::GetVersionInfo($components['WINDOWS_APP']).ProductVersion
@@ -456,9 +456,9 @@ jobs:
             '--version', $env:VERSION, '--source', $env:SOURCE_SHA, '--sequence', $env:SEQUENCE,
             '--target', 'windows-x86_64', '--artifact', $env:INSTALLER,
             '--app', $env:WINDOWS_APP, '--core', $env:WINDOWS_CORE, '--privileged', $env:WINDOWS_SERVICE,
+            '--sing-box', $env:WINDOWS_SING_BOX,
             '--output', $output
           )
-          if ($env:WINDOWS_SING_BOX) { $measureArgs += @('--sing-box', $env:WINDOWS_SING_BOX) }
           node @measureArgs
           "measurement=$([Convert]::ToBase64String([IO.File]::ReadAllBytes($output)))" |
             Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append

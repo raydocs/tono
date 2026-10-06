@@ -10,6 +10,9 @@ import { assembleManifest, measureTarget, readManifest, verifyManifest, writeBun
 const fixture = await readFile(new URL('./fixtures/update-protocol-v1/manifest.json', import.meta.url))
 const source = JSON.parse(fixture)
 const hash = bytes => createHash('sha256').update(bytes).digest('hex')
+const publishedSource = structuredClone(source)
+publishedSource.targets[1].components.singBoxSha256 = hash('sing-box bytes')
+const publishedFixture = Buffer.from(`${JSON.stringify(publishedSource)}\n`)
 const macosKeys = generateKeyPairSync('ed25519')
 const windowsKeys = generateKeyPairSync('ed25519')
 
@@ -22,7 +25,7 @@ function measurement(target) {
 
 function inputs() {
   return {
-    macos: measurement(source.targets[0]), windows: measurement(source.targets[1]),
+    macos: measurement(source.targets[0]), windows: measurement(publishedSource.targets[1]),
     buildCommit: source.buildCommit, releaseId: source.releaseId, releaseSequence: source.releaseSequence,
   }
 }
@@ -48,7 +51,7 @@ function signed(bytes) {
 }
 
 test('publisher produces the exact common native manifest and rejects malformed wire bytes', async () => {
-  assert.deepEqual(assembleManifest(inputs()), fixture)
+  assert.deepEqual(assembleManifest(inputs()), publishedFixture)
   assert.deepEqual(readManifest(fixture), source)
   const cases = JSON.parse(await readFile(new URL('./fixtures/update-protocol-v1/conformance.json', import.meta.url)))
   for (const item of cases.rejectedDocuments.filter(item => item.document === 'manifest.json')) {
@@ -67,7 +70,28 @@ test('pairing refuses independently built source, version and sequence rather th
   assert.throws(() => assembleManifest({ ...value, windows: { ...value.windows, buildCommit: 'f'.repeat(40) } }), /same exact source SHA/)
   assert.throws(() => assembleManifest({ ...value, windows: { ...value.windows, appVersion: '0.0.74' } }), /versions differ/)
   assert.throws(() => assembleManifest({ ...value, windows: { ...value.windows, releaseSequence: 73 } }), /same release sequence/)
-  assert.deepEqual(assembleManifest(value), fixture)
+  assert.deepEqual(assembleManifest(value), publishedFixture)
+})
+
+test('Windows measurement requires and hashes the actual sing-box component', async t => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'tono-sing-box-measure-'))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const component = path.join(root, 'component')
+  await writeFile(component, 'actual executable bytes')
+  const options = {
+    appVersion: source.appVersion, buildCommit: source.buildCommit, releaseSequence: source.releaseSequence,
+    targetId: 'windows-x86_64', artifact: component, app: component, core: component, privileged: component,
+  }
+  await assert.rejects(measureTarget(options), /Windows measurement requires sing-box/)
+  const measured = await measureTarget({ ...options, singBox: component })
+  assert.equal(measured.target.components.singBoxSha256, hash('actual executable bytes'))
+})
+
+test('new Windows assembly requires sing-box while legacy signed manifests remain readable', () => {
+  const missing = structuredClone(inputs())
+  delete missing.windows.target.components.singBoxSha256
+  assert.throws(() => assembleManifest(missing), /component digests/)
+  assert.deepEqual(readManifest(fixture), source)
 })
 
 test('both platform signatures must bind the same complete manifest, including the release sequence', () => {
@@ -96,9 +120,11 @@ test('actual measured package bytes survive a signed bundle; tampering cannot pr
   await writeFile(app, 'application bytes')
   await writeFile(core, 'different core bytes')
   await writeFile(privileged, 'privileged executable bytes')
+  const singBox = path.join(root, 'sing-box')
+  await writeFile(singBox, 'sing-box bytes')
   const common = { appVersion: source.appVersion, buildCommit: source.buildCommit, releaseSequence: 74, app, core, privileged }
   const macos = await measureTarget({ ...common, targetId: 'macos-arm64', artifact: macosArtifact })
-  const windows = await measureTarget({ ...common, targetId: 'windows-x86_64', artifact: windowsArtifact })
+  const windows = await measureTarget({ ...common, targetId: 'windows-x86_64', artifact: windowsArtifact, singBox })
   assert.equal(macos.target.artifactSha256, hash(macBytes))
   assert.equal(windows.target.artifactSha256, hash(windowsBytes))
   assert.equal(macos.target.artifactSizeBytes, macBytes.length)
@@ -106,8 +132,6 @@ test('actual measured package bytes survive a signed bundle; tampering cannot pr
     appSha256: hash('application bytes'), coreSha256: hash('different core bytes'),
     privilegedSha256: hash('privileged executable bytes'),
   })
-  const singBox = path.join(root, 'sing-box')
-  await writeFile(singBox, 'sing-box bytes')
   const pinned = await measureTarget({
     ...common, targetId: 'windows-x86_64', artifact: windowsArtifact, singBox,
   })
