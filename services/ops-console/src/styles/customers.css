@@ -57,6 +57,16 @@
 .page-wrap.customers-page.customers-wide { max-width: 1280px; }
 
 .customers-page .customers-board { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.customers-page .customers-overview > summary {
+  cursor: pointer;
+  padding: 12px 0;
+  color: var(--muted-foreground);
+}
+.customers-page .customers-overview > summary:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 4px;
+}
+.customers-page .customers-overview[open] .customers-board { margin-top: 12px; }
 
 .customers-page .customers-stats {
   display: grid;
@@ -97,8 +107,6 @@
 @media (max-width: 1100px) {
   .customers-page .customers-charts { grid-template-columns: minmax(0, 1fr); }
 }
-/* On a phone the list is the job; the dashboard follows it. */
 @media (max-width: 640px) {
   .customers-page .customers-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .customers-page .customers-board { order: 1; }
 }
