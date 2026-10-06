@@ -1,4 +1,5 @@
 import AppKit
+import ScreenCaptureKit
 import SwiftUI
 import XCTest
 @testable import Tono
@@ -8,13 +9,13 @@ import XCTest
 @MainActor
 final class MacUsabilityRenderTests: XCTestCase {
     func testNativeUsabilityStatesProduceReviewableAttachments() async throws {
-        try capture("sea-night", width: 600, height: 400) {
+        try await capture("sea-night", width: 600, height: 400) {
             SeaScene(phase: .night, motionEnabled: false).frame(width: 600, height: 375)
         }
-        try capture("sea-confirmed", width: 600, height: 400) {
+        try await capture("sea-confirmed", width: 600, height: 400) {
             SeaScene(phase: .day, motionEnabled: false).frame(width: 600, height: 375)
         }
-        try capture("sea-blocked", width: 600, height: 400) {
+        try await capture("sea-blocked", width: 600, height: 400) {
             SeaScene(phase: .blocked, motionEnabled: false).frame(width: 600, height: 375)
         }
         let suite = "tono-render-\(UUID().uuidString)"
@@ -36,20 +37,26 @@ final class MacUsabilityRenderTests: XCTestCase {
         app.activeNode = node
         app.proxyService.activeNodeName = node.name
         let appearanceBefore = AppProfile.defaults.object(forKey: SeaAppearance.enabledKey) as? Bool
-        try captureDashboard("dashboard-sea-night-normal", app: app, account: account,
+        try await captureDashboard("dashboard-sea-night-normal", app: app, account: account,
                              sea: true, width: 920, height: 600)
-        try captureDashboard("dashboard-sea-night-minimum", app: app, account: account,
+        try await captureDashboard("dashboard-sea-night-minimum", app: app, account: account,
                              sea: true, width: 660, height: 540)
-        try captureDashboard("dashboard-off-normal", app: app, account: account,
+        try await captureDashboard("dashboard-off-normal", app: app, account: account,
                              sea: false, width: 920, height: 600)
         app.isConnected = true
-        try captureDashboard("dashboard-sea-confirmed-normal", app: app, account: account,
+        try await captureDashboard("dashboard-sea-confirmed-normal", app: app, account: account,
                              sea: true, width: 920, height: 600)
         app.isConnected = false
         app.isProtectionBlocked = true
-        try captureDashboard("dashboard-sea-blocked-minimum", app: app, account: account,
+        try await captureDashboard("dashboard-sea-blocked-minimum", app: app, account: account,
                              sea: true, width: 660, height: 540)
-        try capture("settings-sea-normal", width: 920, height: 600, annotate: false) {
+        app.recoveryCause = .wake
+        app.protectedReconnectPausedForUserAction = true
+        try await captureDashboard("dashboard-sea-blocked-paused-recovery-minimum", app: app, account: account,
+                                   sea: true, width: 660, height: 540)
+        app.recoveryCause = nil
+        app.protectedReconnectPausedForUserAction = false
+        try await capture("settings-sea-normal", width: 920, height: 600, annotate: false) {
             ZStack {
                 MeshGradientBackground()
                 SettingsView()
@@ -64,24 +71,24 @@ final class MacUsabilityRenderTests: XCTestCase {
                        appearanceBefore, "render fixtures must not change device appearance")
         let observation = await app.collectLocalHealth(account: account, probe: { .init(helperInstalled: true, helperRejectsApp: true) })
         let check = try XCTUnwrap(observation)
-        try capture("health-unknown-helper", width: 660, height: 780) {
+        try await capture("health-unknown-helper", width: 660, height: 780) {
             SupportCard(icon: "stethoscope", title: String(localized: "Local health check")) {
                 LocalHealthResults(check: check)
             }.padding(20)
         }
-        try capture("build-unverified", width: 700, height: 480) {
+        try await capture("build-unverified", width: 700, height: 480) {
             BuildIdentityDetails(check: check).padding(24)
         }
         account.previewSupportReport(check)
         let draft = try XCTUnwrap(account.supportReportDraft)
-        try capture("report-preview", width: 660, height: 540) {
+        try await capture("report-preview", width: 660, height: 540) {
             SupportReportConfirmationView(draft: draft, receipt: nil, sending: false, error: nil, canSend: true, confirm: {}, close: {})
         }
         let receipt = SupportReportReceipt(draftID: draft.id, server: .init(referenceCode: "SYNTHETIC-NOT-A-SERVER-RECEIPT", receivedAt: 1_790_000_000), localIdentity: check.localIdentity)
-        try capture("report-receipt", width: 660, height: 600) {
+        try await capture("report-receipt", width: 660, height: 600) {
             SupportReportConfirmationView(draft: draft, receipt: receipt, sending: false, error: nil, canSend: true, confirm: {}, close: {})
         }
-        try capture("report-no-receipt", width: 660, height: 610) {
+        try await capture("report-no-receipt", width: 660, height: 610) {
             SupportReportConfirmationView(draft: draft, receipt: nil, sending: false,
                 error: String(localized: "No support receipt was received. The server may have stored the report. Try again only if you want to send this same preview again."),
                 canSend: true, confirm: {}, close: {})
@@ -96,12 +103,12 @@ final class MacUsabilityRenderTests: XCTestCase {
         // AppKit cacheDisplay omits compositor-backed Liquid Glass content:
         // the full Nodes page captured partially and Dashboard was alpha=0.
         // Render the exact production components, not substitute page mocks.
-        try capture("nodes-route-choices-favorite-component", width: 600, height: 340) {
+        try await capture("nodes-route-choices-favorite-component", width: 600, height: 340) {
             RouteChoicesView().environment(app).environment(account).padding(24)
         }
         app.setPreferredRouteRegion("JP", owner: owner)
         app.proxyRegions[0].nodes = [node]
-        try capture("nodes-region-unavailable-component", width: 600, height: 300) {
+        try await capture("nodes-region-unavailable-component", width: 600, height: 300) {
             RouteChoicesView().environment(app).environment(account).padding(24)
         }
         app.proxyRegions[0].nodes = [node, other]
@@ -109,22 +116,22 @@ final class MacUsabilityRenderTests: XCTestCase {
         app.isProtectionBlocked = true
         app.recoveryCause = .wake
         app.protectedReconnectPausedForUserAction = true
-        try capture("dashboard-wake-notice-component", width: 560, height: 220) {
+        try await capture("dashboard-wake-notice-component", width: 560, height: 220) {
             RecoveryNotice(appState: app).padding(24)
         }
-        try capture("menubar-wake-paused", width: 300, height: 480) {
+        try await capture("menubar-wake-paused", width: 300, height: 480) {
             MenuBarView().environment(app).environment(account)
         }
         app.protectedReconnectPausedForUserAction = false
         app.isProtectedReconnectScheduled = true
         app.recoveryCause = .networkChange
-        try capture("network-recovery-running", width: 560, height: 220) {
+        try await capture("network-recovery-running", width: 560, height: 220) {
             RecoveryNotice(appState: app).padding(24)
         }
         let cloud = APIConnection(id: "synthetic-cloud", metadata: .init(network: "tcp", type: "HTTPS", process: "Example App", processPath: nil, sourceIP: nil, destinationIP: nil, sourcePort: nil, destinationPort: "443", host: "cloud.example.test"), upload: 10, download: 30, start: "0", chains: [node.name, "Tono-Exit"], rule: "DOMAIN-SUFFIX", rulePayload: "example.test")
         let unknown = APIConnection(id: "synthetic-unknown", metadata: .init(network: "tcp", type: "HTTPS", process: "Example App", processPath: nil, sourceIP: nil, destinationIP: nil, sourcePort: nil, destinationPort: nil, host: "unknown.example.test"), upload: 0, download: 0, start: "0", chains: ["Tono-Exit"], rule: "MATCH", rulePayload: nil)
         app.updateConnections(from: .init(downloadTotal: 30, uploadTotal: 10, connections: [cloud, unknown]))
-        try capture("activity-cloud-and-unknown", width: 540, height: 500) {
+        try await capture("activity-cloud-and-unknown", width: 540, height: 500) {
             ActivityRoutingDetails(entries: app.connections)
         }
         XCTAssertNil(app.connectionCoordinator.connectTask)
@@ -135,8 +142,8 @@ final class MacUsabilityRenderTests: XCTestCase {
     private func captureDashboard(
         _ name: String, app: AppState, account: AccountSession,
         sea: Bool, width: CGFloat, height: CGFloat
-    ) throws {
-        try capture(name, width: width, height: height, annotate: false) {
+    ) async throws {
+        try await capture(name, width: width, height: height, annotate: false) {
             ZStack {
                 MeshGradientBackground()
                 DashboardView()
@@ -152,7 +159,7 @@ final class MacUsabilityRenderTests: XCTestCase {
         _ name: String, width: CGFloat, height: CGFloat,
         annotate: Bool = true,
         @ViewBuilder content: () -> Content
-    ) throws {
+    ) async throws {
         let root = Group {
             if annotate {
                 VStack(alignment: .leading, spacing: 0) {
@@ -228,5 +235,99 @@ final class MacUsabilityRenderTests: XCTestCase {
         attachment.name = name
         attachment.lifetime = .keepAlways
         add(attachment)
+        if name == "dashboard-sea-blocked-minimum"
+            || name == "dashboard-sea-blocked-paused-recovery-minimum" {
+            let environment = ProcessInfo.processInfo.environment
+            if environment["CI"] == "true" && environment["GITHUB_ACTIONS"] == "true"
+                && environment["RUNNER_OS"] == "macOS" {
+                await captureNativeWindowDiagnostic(name, window: window, folder: folder)
+            }
+        }
+    }
+
+    /// One-shot WindowServer evidence for the synthetic test window only. An
+    /// unavailable capture is recorded, never treated as an offscreen pass.
+    private func captureNativeWindowDiagnostic(_ name: String, window: NSWindow, folder: URL) async {
+        var receipt = ["name=\(name)", "api=ScreenCaptureKit independent window"]
+        defer {
+            let data = Data((receipt.joined(separator: "\n") + "\n").utf8)
+            let url = folder.appendingPathComponent(name + "-native-window.txt")
+            do {
+                try data.write(to: url, options: .atomic)
+            } catch {
+                NSLog("native-window receipt write failed: %@", String(reflecting: error))
+            }
+            let attachment = XCTAttachment(data: data, uniformTypeIdentifier: "public.plain-text")
+            attachment.name = name + "-native-window-receipt"
+            attachment.lifetime = .keepAlways
+            add(attachment)
+            NSLog("native-window diagnostic: %@", receipt.joined(separator: " | "))
+        }
+
+        let expectedPID = ProcessInfo.processInfo.processIdentifier
+        receipt.append("windowNumber=\(window.windowNumber) processID=\(expectedPID) visible=\(window.isVisible) frame=\(window.frame)")
+        guard window.windowNumber > 0, window.isVisible,
+              window.frame.width == 660, window.frame.height == 540 else {
+            receipt.append("capture=skipped: synthetic window not visible at 660x540")
+            return
+        }
+        let expectedID = CGWindowID(window.windowNumber)
+
+        do {
+            let content: SCShareableContent = try await withCheckedThrowingContinuation { continuation in
+                SCShareableContent.getCurrentProcessShareableContent { content, error in
+                    if let error {
+                        continuation.resume(throwing: error)
+                    } else if let content {
+                        continuation.resume(returning: content)
+                    } else {
+                        continuation.resume(throwing: NSError(domain: "TonoNativeWindowDiagnostic", code: 1,
+                            userInfo: [NSLocalizedDescriptionKey: "current-process shareable content was nil without an error"]))
+                    }
+                }
+            }
+            guard let target = content.windows.first(where: {
+                $0.windowID == expectedID && $0.owningApplication?.processID == expectedPID
+            }) else {
+                receipt.append("capture=skipped: exact windowID/processID not present in current-process shareable content")
+                return
+            }
+            receipt.append("shareableWindowID=\(target.windowID) ownerPID=\(target.owningApplication?.processID ?? -1) onScreen=\(target.isOnScreen) frame=\(target.frame)")
+            guard target.isOnScreen, target.frame.width == 660, target.frame.height == 540 else {
+                receipt.append("capture=skipped: matching window not on screen at 660x540")
+                return
+            }
+            let filter = SCContentFilter(desktopIndependentWindow: target)
+            let configuration = SCStreamConfiguration()
+            configuration.width = 660
+            configuration.height = 540
+            configuration.showsCursor = false
+            let image: CGImage = try await withCheckedThrowingContinuation { continuation in
+                SCScreenshotManager.captureImage(contentFilter: filter, configuration: configuration) { image, error in
+                    if let error {
+                        continuation.resume(throwing: error)
+                    } else if let image {
+                        continuation.resume(returning: image)
+                    } else {
+                        continuation.resume(throwing: NSError(domain: "TonoNativeWindowDiagnostic", code: 2,
+                            userInfo: [NSLocalizedDescriptionKey: "independent-window capture returned nil without an error"]))
+                    }
+                }
+            }
+            guard let png = NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:]) else {
+                receipt.append("capture=failed: CGImage could not be encoded as PNG")
+                return
+            }
+            let url = folder.appendingPathComponent(name + "-native-window.png")
+            try png.write(to: url, options: .atomic)
+            let attachment = XCTAttachment(data: png, uniformTypeIdentifier: "public.png")
+            attachment.name = name + "-native-window"
+            attachment.lifetime = .keepAlways
+            add(attachment)
+            receipt.append("capture=saved path=\(url.path) pixels=\(image.width)x\(image.height) bytes=\(png.count)")
+        } catch {
+            let failure = error as NSError
+            receipt.append("capture=failed: domain=\(failure.domain) code=\(failure.code) reason=\(failure.localizedDescription) userInfo=\(failure.userInfo)")
+        }
     }
 }
