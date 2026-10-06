@@ -15,14 +15,14 @@ use tono_service_protocol::{KillSwitchConfig, RuntimeBundle};
 use super::cleanup::{
     enable_dns_cancellation_safe, ensure_fresh, start_core_cancellation_safe,
 };
-use super::core_select::prepare_owned_core;
+use super::core_select::{SingBoxImage, prepare_owned_core, prove_sing_box_image};
 use super::controller::{
-    allocate_runtime_ports, configure_owned_controller_for_ui, lock_kill_switch_with_retries, preflight_bfe,
-    preflight_dns_listener, preflight_dns_listener_unless_resuming, wait_controller,
+    allocate_runtime_ports, configure_owned_controller_for_ui, ensure_service_ready, lock_kill_switch_with_retries,
+    preflight_bfe, preflight_dns_listener, preflight_dns_listener_unless_resuming, wait_controller,
 };
 use super::endpoints::proxy_endpoints_for;
 use super::monitor::{
-    bootstrap_hosts, refresh_control_plane_pins_from_service, spawn_control_plane_pin_refresh,
+    bootstrap_addresses, refresh_control_plane_pins_from_service, spawn_control_plane_pin_refresh,
     spawn_deferred_policy_reconnect, spawn_exit_identity_lookup, spawn_network_monitor,
 };
 use super::probes::{verify_fake_ip, verify_post_lock};
@@ -33,8 +33,65 @@ use super::reconnect::active_runtime_resume_status;
 use super::{failure::StageFailure, transaction::ConnectTransaction};
 use crate::{
     core::service,
-    tono::{audit::AuditEvent, commands, state::TonoState},
+    tono::{audit::AuditEvent, bootstrap, commands, state::TonoState},
 };
+
+/// What a start reads before `PrepareCoreStart`: the bootstrap permit hosts and the App's proof
+/// of the sing-box image.
+pub(super) struct Prefetched {
+    bootstrap_api_hosts: Vec<String>,
+    sing_box: Option<SingBoxImage>,
+}
+
+/// WIN-TCP-PROOF-SERIAL: the unarmed TCP proof of the exit ran beside the Service readiness
+/// check alone, and the reads below followed both, one after another. None of them installs a
+/// filter, a route or DNS, or stops a Core, so they now share that wait and are finished
+/// before the Service reconciles Core ownership. The physical uplink, the runtime ports and
+/// the loopback:53 proof depend on that reconciliation and stay behind it.
+///  - F1: pinned bootstrap IPs merged with the live resolution — the WFP bootstrap permit
+///    must not depend on the system resolver once blocking starts, and the app's own API
+///    client is pinned to the same addresses (see `tono::bootstrap` / `tono::transport`).
+///  - The sing-box image proof, which only chooses the core for this start.
+pub(super) async fn ready_service_and_prefetch(state: &TonoState) -> Result<Prefetched, String> {
+    // A protected re-entry resolves through the protected resolver, which is down until this
+    // attempt's Core answers; its bootstrap lookup gets a short budget.
+    let armed = state.lock().await.fsm.kill_switch_armed();
+    let (addresses, sing_box) = ready_service_beside(
+        ensure_service_ready(),
+        refresh_control_plane_pins_from_service(state),
+        bootstrap_addresses(armed),
+        async {
+            match service::tono_core_binary_path().await {
+                Ok(core_path) => Some(prove_sing_box_image(&core_path).await),
+                Err(_) => None,
+            }
+        },
+    )
+    .await?;
+    // After the learned pins were read from the Service: the merge puts them in the permit set.
+    Ok(Prefetched { bootstrap_api_hosts: bootstrap::merge_bootstrap_hosts(&addresses), sing_box })
+}
+
+/// The learned pins come from the Service, so they are read once it is ready; the two local
+/// reads do not wait for either. A Service that is not ready ends the wait at once.
+async fn ready_service_beside<Addresses, Image>(
+    ready: impl std::future::Future<Output = Result<(), String>>,
+    learned_pins: impl std::future::Future<Output = ()>,
+    addresses: impl std::future::Future<Output = Addresses>,
+    image: impl std::future::Future<Output = Image>,
+) -> Result<(Addresses, Image), String> {
+    let service = async {
+        ready.await?;
+        learned_pins.await;
+        Ok::<(), String>(())
+    };
+    let ((), addresses, image) = tokio::try_join!(
+        service,
+        async { Ok::<Addresses, String>(addresses.await) },
+        async { Ok::<Image, String>(image.await) },
+    )?;
+    Ok((addresses, image))
+}
 
 /// The §6 stage sequence, from endpoint computation to `Connected`. The
 /// generation is re-checked at every stage boundary; a moved generation
@@ -49,7 +106,9 @@ pub(super) async fn run_stages(
     started: std::time::Instant,
     transaction: &ConnectTransaction,
     route_owner: Option<&crate::tono::route_preferences::PreferenceContext>,
+    prefetched: Prefetched,
 ) -> Result<(), StageFailure> {
+    let Prefetched { bootstrap_api_hosts, sing_box } = prefetched;
     // §6.2: proxy endpoints (public IPv4/port/TCP) from the selected node;
     // the bootstrap API hosts are the only control-plane recovery channel.
     // When the catalog binds a home-broadband exit, its endpoint joins the
@@ -103,17 +162,12 @@ pub(super) async fn run_stages(
     };
     let needs_physical_interface = WINDOWS_OPTIONAL_DIRECT_ENABLED
         && traffic_policy.as_ref().is_some_and(|policy| policy.has_direct_content());
-    // A protected re-entry resolves through the protected resolver, which is down until this
-    // attempt's Core answers; its bootstrap lookup gets a short budget.
-    let armed = state.lock().await.fsm.kill_switch_armed();
 
     // The preparation probes are independent of each other and all read-only /
     // cancellation-safe (the two port binds are released immediately; the core-path query is a
     // read IPC), so they run concurrently under one transaction wait instead of paying their
-    // worst cases back to back (the bootstrap DNS lookup alone budgets 2 s):
-    //  - F1: pinned bootstrap IPs merged with the live resolution — the WFP bootstrap permit
-    //    must not depend on the system resolver once blocking starts, and the app's own API
-    //    client is pinned to the same addresses (see `tono::bootstrap` / `tono::transport`).
+    // worst cases back to back. The bootstrap hosts were read before `PrepareCoreStart`
+    // (`ready_service_and_prefetch`).
     //  - The physical egress interface, still strictly before the first Core start (above).
     //  - Fresh loopback controller and diagnostic mixed-proxy ports eliminate collisions with
     //    another proxy or stale fixed listeners. The mixed listener is never a connection proof
@@ -125,7 +179,6 @@ pub(super) async fn run_stages(
     //    that holds them.
     //  - The Service-side core binary path validation.
     let (
-        bootstrap_api_hosts,
         physical_interface_probe,
         runtime_ports,
         (dns_preflight, active_runtime_resume),
@@ -133,9 +186,7 @@ pub(super) async fn run_stages(
         bfe_preflight,
     ) = transaction
         .wait("preparing service", async {
-            refresh_control_plane_pins_from_service(state).await;
             tokio::join!(
-                bootstrap_hosts(armed),
                 async {
                     if needs_physical_interface {
                         Some(detect_physical_interface().await)
@@ -211,6 +262,7 @@ pub(super) async fn run_stages(
         &secret,
         runtime_ports,
         &core_path,
+        sing_box,
     )
     .await?;
     {
@@ -481,6 +533,32 @@ async fn controller_commit_guard<'a>(
 mod tests {
     use super::*;
     use std::sync::atomic::{AtomicBool, Ordering};
+
+    /// WIN-TCP-PROOF-SERIAL: the learned-pin read, the bootstrap lookup and the sing-box image
+    /// hash each waited for the one before it, after the Service readiness check.
+    #[tokio::test(start_paused = true)]
+    async fn reads_before_prepare_share_the_readiness_wait() {
+        let after = |millis: u64| tokio::time::sleep(std::time::Duration::from_millis(millis));
+        let started = tokio::time::Instant::now();
+        let read = ready_service_beside(
+            async {
+                after(30).await;
+                Ok(())
+            },
+            after(20),
+            async {
+                after(200).await;
+                "addresses"
+            },
+            async {
+                after(100).await;
+                "image"
+            },
+        )
+        .await;
+        assert_eq!(read, Ok(("addresses", "image")));
+        assert!(started.elapsed() < std::time::Duration::from_millis(250), "read in {:?}", started.elapsed());
+    }
 
     #[tokio::test]
     async fn retired_verification_cannot_publish_a_controller_over_the_replacement() {

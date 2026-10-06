@@ -1,0 +1,24 @@
+## 2026-10-06 · Windows 连接路径缩短三处等待（0.0.75 候选）
+- 归属：SHIP_PLAN 0.0.75（老板 2026-10-06：「开始做 然后就叫 0.0.75 candidate 连接速度升级」）；Windows App 连接路径，Service 未改。
+- 来源：main `c7d775176` → 分支 `claude/win-connect-speed-20261006`，[#1418](https://github.com/raydocs/tono/pull/1418)（draft），尚未合入 main。依据 2026-10-04 连接速度审查的 S5/S6/S7/S4/S11；S1/S1b/S8/S12 已在 #1386/#1395 修过。
+- 缺陷修复：无（没有错误行为，只有可省的等待）。
+- 新增/优化（不移动任何保护步骤，不放宽任何门）：
+  - WIN-LOCK-RETRY-GRID：StartClash 之后的锁定只有 WinTUN 网卡注册后才可能成功，App 却固定每 200 ms 问一次 Service。现在被拒的重试在等待期间每 20 ms 本地查一次网卡别名（阻塞线程，无 IPC），网卡一出现就再问；拒绝之前网卡已在的那次重试仍等满 200 ms，网卡始终不出现时也是原来的 50 × 200 ms。LUID 的解析、隧道类型校验和授权仍只在 Service 里做，App 的查询只决定「什么时候问」。
+  - WIN-TUN-ROUTE-POLL-GRID：锁定后等受保护路由就绪的轮询从 100 ms 改为 20 ms（每轮两次本地路由查询，无 IPC），20 秒上限不变。
+  - WIN-TCP-PROOF-SERIAL：未保护时隧道前的 TCP 证明原来只与 Service 就绪检查并行，之后已学 pins 读取、bootstrap 域名查询、sing-box 镜像哈希依次串行。现在这三项只读准备与就绪检查、TCP 证明共用同一段等待，并在 PrepareCoreStart 之前全部完成（守 #1386 记录的边界：只重叠没有保护副作用的读取）。已学 pins 仍在 Service 就绪后才读，bootstrap 合并在 pins 读完之后做，所以放行集合里已学 pins 不会少。物理上行探测、运行时端口分配和 loopback:53 占用证明依赖 Prepare 的结果，位置不变。
+  - WIN-SINGBOX-PROOF-ASYNC-HASH：App 对约 35 MB 的 sing-box 镜像做整文件 SHA-256，原来同步跑在异步线程上；现在放到阻塞线程。这份证明只用来选内核，Service 在 StartClash 内仍自己哈希并校验签名。阻塞线程 panic 或被取消时按「未认证」处理（保护中拒绝回退，未保护回退 mihomo，与镜像校验失败相同）；读取本身和原来一样没有单独期限，只受连接事务期限约束。
+- 自行选择的边界：数据面证明（`verify_post_lock`）要求 WFP 已锁且系统 DNS 已指向 WinTUN，仍在 DNS 启用之后，不并行。不改 Service 的对端证明、屏障重装和 DACL 重写（审查 S2/S3/S9）：属鉴权与 WFP 路径，且没有实机分段耗时可排序。
+- 工程与测试：每个行为一条窄回归（暂停时钟）。
+  - `connection::controller::tests::lock_retry_follows_the_tunnel_adapter`：网卡 250 ms 出现，须在 300 ms 内锁上（旧网格为 400 ms）。
+  - `connection::stages::tests::reads_before_prepare_share_the_readiness_wait`：就绪 30 ms、pins 20 ms、查询 200 ms、哈希 100 ms，须在 250 ms 内读完（旧顺序 350 ms）。
+  - 现有 `armed_bootstrap_lookup_is_short_best_effort` 随函数拆分改为先取地址再合并，断言不变。
+  - 路由轮询间隔没有单独回归：只是一个常量，测试只能复述它。
+  - 红分支 `red/conn-speed-20261006`（同样的测试 + 旧行为）在 hosted Windows CI 上的结果见续记。
+- 预期收益（推导，未实测）：未保护的全新连接约省 150–400 ms（锁定网格平均约 100 ms、路由网格平均约 40 ms、三项读取与一次出口往返重叠约 40–190 ms）；审查估计的全新连接总耗时为 1.5–4.5 秒，其中约 5 个出口往返是网络决定的。保护中重入没有 TCP 证明可重叠，但三项读取同样与 Service 就绪检查并行、哈希同样离开异步线程，加上网格两项；幅度更小，同样未实测。
+- 候选/发布：仅源码，无新候选。冻结源码 `e28ca45c` 与 7501 候选不含本项。
+- 剩余限制：MacBook 未编译、未运行（原生检查只在 hosted CI）；没有任何实机分段计时，线上遥测只有 0.0.32/0.0.43/0.0.44，无法对比。TCP 证明很快失败时，本次尝试的失败上报要等 bootstrap 查询（未保护预算 2 秒，通常几十毫秒）和镜像哈希（冷盘可达数百毫秒）结束，原来不等这两项。
+- 续记 2026-10-06（评审与修复轮）：jev-route `6488d502`（Opus 5.5 + Codex gpt-6.1-sol，互验，high）PASSED，无阻断。两条 minor 本轮修掉：
+  ① 网卡反复出现/消失时，提前重试没有次数约束，50 次生命周期 IPC 可以连续跳过 200 ms（codex:F1）——每条阶梯最多 3 次提前重试，之后回到固定网格；
+  ② 每次请求锁定之前都无期限地等 App 本地的网卡查询，IP Helper 挂住时锁定请求发不出去（opus:F1）——查询限 100 ms，超时按「没看到」处理并在本条阶梯内不再查询。
+  记录修正三处（codex:F2/F3、opus:F2/F3）：哈希线程「没有返回」实为 panic/取消才按未认证；保护中重入也受益于读取并行；失败上报还要等镜像哈希。
+- 续记 2026-10-06（CI 与红分支）：修复轮之前的 head `34067de0d` 上 ci-gate 通过（run 37514338918：`windows / app-rust` 15m20s、`service`、`core`、`app` 全部 pass），即首次在 hosted Windows 上编译并跑完。红分支 run 37514188521 的 `app-rust` 只失败两条新测试：`controller::tests::lock_retry_follows_the_tunnel_adapter ... FAILED`、`stages::tests::reads_before_prepare_share_the_readiness_wait ... FAILED`，其余通过。修复轮的 head 以该 PR 上的 ci-gate 为准。

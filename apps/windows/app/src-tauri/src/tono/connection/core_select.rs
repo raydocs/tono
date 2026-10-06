@@ -12,7 +12,7 @@ use tono_core::{
     config::{self, RuntimePorts, build_owned_runtime_with_ports},
     node::ValidatedNode,
     sing_box::{
-        CoreChoice, CoreSelection, RuntimeInput, build_runtime, preferred_core,
+        CoreChoice, CoreSelection, RuntimeInput, SingBoxBinaryProof, build_runtime, preferred_core,
         prove_sing_box_binary, resolve, sing_box_pin_from_env_or_file,
     },
 };
@@ -21,6 +21,28 @@ use tono_service_protocol::ProtocolInfo;
 
 use super::failure::StageFailure;
 use crate::{tono::state::TonoState, utils::dirs};
+
+/// The App's proof of the bundled sing-box image for one start. It only chooses the core:
+/// the Service hashes the image and checks its signature again inside StartClash.
+pub(super) struct SingBoxImage {
+    binary: PathBuf,
+    proof: SingBoxBinaryProof,
+}
+
+/// A whole-file SHA-256 of a ~35 MB image, so it is measured on a blocking thread. A worker
+/// that panicked or was cancelled authenticated nothing. The read itself has no deadline of
+/// its own, as before; the connect transaction's does apply.
+pub(super) async fn prove_sing_box_image(mihomo_path: &Path) -> SingBoxImage {
+    let binary = sing_box_binary(mihomo_path);
+    let measured = binary.clone();
+    let proof = tokio::task::spawn_blocking(move || {
+        let pin = sing_box_pin_from_env_or_file(&measured.with_file_name("sing-box-sha256.txt"));
+        prove_sing_box_binary(&measured, pin.as_deref())
+    })
+    .await
+    .unwrap_or(SingBoxBinaryProof::AuthenticationFailed);
+    SingBoxImage { binary, proof }
+}
 
 pub(super) struct PreparedCore {
     pub document: String,
@@ -37,12 +59,15 @@ pub(super) async fn prepare_owned_core(
     secret: &str,
     ports: RuntimePorts,
     mihomo_path: &Path,
+    image: Option<SingBoxImage>,
 ) -> Result<PreparedCore, StageFailure> {
     let installation_id = state.lock().await.installation_id.clone();
     let preferred = preferred_core(&preference_path(), &installation_id);
-    let binary = sing_box_binary(mihomo_path);
-    let pin = sing_box_pin_from_env_or_file(&binary.with_file_name("sing-box-sha256.txt"));
-    let proof = prove_sing_box_binary(&binary, pin.as_deref());
+    // A proof taken ahead of this stage counts only for the image this start will run.
+    let SingBoxImage { binary, proof } = match image {
+        Some(image) if image.binary == sing_box_binary(mihomo_path) => image,
+        _ => prove_sing_box_image(mihomo_path).await,
+    };
     let service_probe = probe_service_sing_box().await;
     let service_can_run = matches!(service_probe, ServiceSingBoxProbe::Supported);
     let home_proxy = routing.and_then(|routing| routing.home_proxy.as_deref());

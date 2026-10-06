@@ -15,6 +15,11 @@ use tono_logging::{Type, logging};
 #[cfg(windows)]
 const TUN_ROUTE_READY_TIMEOUT: Duration = Duration::from_secs(20);
 
+/// Two route lookups per poll, no IPC. A 100 ms grid added half of itself, on average, to
+/// every connect after the routes were already in place.
+#[cfg(windows)]
+const TUN_ROUTE_POLL_INTERVAL: Duration = Duration::from_millis(20);
+
 #[cfg(windows)]
 const TUN_INTERFACE_OPER_STATUS_UP: i32 = 1;
 #[cfg(windows)]
@@ -83,8 +88,36 @@ fn wait_for_tun_route_ready_windows() -> Result<(), String> {
                 "TONO_TUN_ROUTE_UNAVAILABLE: {last}; expected both protected routes to use the active {TUN_DEVICE_NAME:?} tunnel",
             ));
         }
-        std::thread::sleep(Duration::from_millis(100));
+        std::thread::sleep(TUN_ROUTE_POLL_INTERVAL);
     }
+}
+
+/// Whether Windows has registered the Tono adapter alias: the same lookup the Service's lock
+/// starts with. It grants nothing; it only tells a waiting lock retry that asking again can
+/// now succeed.
+pub(super) async fn tunnel_adapter_present() -> bool {
+    #[cfg(windows)]
+    {
+        // An IP Helper call, kept off the async workers like the route lookups above. A worker
+        // that panicked proves nothing; the caller bounds one that does not return.
+        tokio::task::spawn_blocking(tunnel_adapter_present_windows).await.unwrap_or(false)
+    }
+    #[cfg(not(windows))]
+    {
+        false
+    }
+}
+
+#[cfg(windows)]
+fn tunnel_adapter_present_windows() -> bool {
+    use windows_sys::Win32::NetworkManagement::IpHelper::ConvertInterfaceAliasToLuid;
+    use windows_sys::Win32::NetworkManagement::Ndis::NET_LUID_LH;
+
+    let alias: Vec<u16> = TUN_DEVICE_NAME.encode_utf16().chain(std::iter::once(0)).collect();
+    let mut luid = NET_LUID_LH::default();
+    // SAFETY: `alias` is a NUL-terminated UTF-16 buffer; `luid` is a valid out-pointer.
+    let status = unsafe { ConvertInterfaceAliasToLuid(alias.as_ptr(), &mut luid) };
+    status == 0
 }
 
 #[cfg(windows)]
