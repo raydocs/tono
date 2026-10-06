@@ -1,0 +1,45 @@
+{
+  checks: 13,
+  failures: [
+    {
+      name: 'secondary tools disclosed, no third row failed/920',
+      pass: false,
+      detail: [Object]
+    },
+    {
+      name: 'disclosed tools are text buttons failed/920',
+      pass: false,
+      detail: [Object]
+    },
+    {
+      name: 'secondary tools disclosed, no third row protectedOffline/920',
+      pass: false,
+      detail: [Object]
+    },
+    {
+      name: 'disclosed tools are text buttons protectedOffline/920',
+      pass: false,
+      detail: [Object]
+    },
+    {
+      name: 'secondary tools disclosed, no third row failed/860',
+      pass: false,
+      detail: [Object]
+    },
+    {
+      name: 'disclosed tools are text buttons failed/860',
+      pass: false,
+      detail: [Object]
+    },
+    {
+      name: 'secondary tools disclosed, no third row protectedOffline/860',
+      pass: false,
+      detail: [Object]
+    },
+    {
+      name: 'disclosed tools are text buttons protectedOffline/860',
+      pass: false,
+      detail: [Object]
+    }
+  ]
+}

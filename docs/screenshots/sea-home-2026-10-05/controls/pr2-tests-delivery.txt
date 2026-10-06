@@ -1,0 +1,8 @@
+
+ RUN  v5.0.1 /Users/ruirui/orca/workspaces/tono/coral/apps/windows/app
+
+
+ Test Files  9 passed (9)
+      Tests  106 passed (106)
+   Start at  15:01:24
+   Duration  5.19s (tests 43%, environment 37%, import 12%, transform 8%)

@@ -1,0 +1,65 @@
+{
+  "stage": "static-corrected",
+  "runs": {
+    "sunset": {
+      "start": 1791226934.5392003,
+      "frames": [
+        {
+          "file": "sunset-0.png",
+          "timestamp": 1791226934.242208,
+          "relativeMs": -296.99230194091797
+        },
+        {
+          "file": "sunset-1.png",
+          "timestamp": 1791226934.550799,
+          "relativeMs": 11.598587036132812
+        }
+      ]
+    },
+    "sunrise": {
+      "start": 1791226943.4251,
+      "frames": [
+        {
+          "file": "sunrise-0.png",
+          "timestamp": 1791226943.130184,
+          "relativeMs": -294.91615295410156
+        },
+        {
+          "file": "sunrise-1.png",
+          "timestamp": 1791226943.439389,
+          "relativeMs": 14.288902282714844
+        }
+      ]
+    },
+    "arrival": {
+      "start": 1791226948.7164001,
+      "frames": [
+        {
+          "file": "arrival-0.png",
+          "timestamp": 1791226948.421768,
+          "relativeMs": -294.6321964263916
+        },
+        {
+          "file": "arrival-1.png",
+          "timestamp": 1791226948.732306,
+          "relativeMs": 15.90585708618164
+        }
+      ]
+    },
+    "failure": {
+      "start": 1791226953.401,
+      "frames": [
+        {
+          "file": "failure-0.png",
+          "timestamp": 1791226953.104133,
+          "relativeMs": -296.86713218688965
+        },
+        {
+          "file": "failure-1.png",
+          "timestamp": 1791226953.421059,
+          "relativeMs": 20.058870315551758
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,7 @@
+## 2026-10-04 · ROUND-2 controlled progress, living sky and adaptive scene scale
+
+- Status: provisional
+- Chosen: implement owner-supplied ROUND-2 Part A (A1–A14) in isolated draft #1375. Add optional finite caller-owned connecting progress, horizon linger, responsive sun/glow/travel, steady sky motion and capture-cost evidence. Defer optional pointer parallax, all production/home/native integration and final home acceptance to later drafts.
+- Why stricter: no invented connection progress, protection evidence, network/IPC, JS frame loop, live filter or app mount. Omitted/non-finite progress retains the half-rise, bounded input never changes itself; hidden retargets are held. Keep palette, moon and independent static/material fallbacks. Star density is bounded at 200 to limit animated layer growth. Mac Chrome measurements do not qualify Windows hardware.
+- Applied in: continuation of `a83bfd42` in draft PR #1375, under [SHIP_PLAN](../SHIP_PLAN.md), deferred 0.0.75 work; [current contract](../sea-scene-preview.md#round-2--2026-10-04) and [evidence](../screenshots/sea-scene-2026-10-04-round2/README.md). No merge, auto-merge, native build, deploy, package or automatic external review.
+- Supersedes: only the fixed-diameter/no-progress/deferred-sky wording of earlier preview records055/057. Actual connection-stage feed remains PR2. Owner top-navigation/steps/details/dock directions are recorded separately in058–061; frameless direction056 is unchanged and unimplemented here.

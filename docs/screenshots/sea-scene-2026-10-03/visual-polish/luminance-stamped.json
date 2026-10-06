@@ -1,0 +1,2442 @@
+{
+  "method": "Chrome Page.screencastFrame PNG, everyNthFrame=6. Native swap timestamps from metadata, not callback completion; PNG\u2192L crop(0,56,920,600) resize(92,54).",
+  "analysis": "Native timestamp endpoints; rolling300ms changes interpolate means between neighboring native PNG frames. Also retain direct frame pairs within300\u00b15ms. No callback-completion normalization.",
+  "runs": {
+    "sunset": {
+      "maxRolling300": 7.370981134309545,
+      "maxDirect300plusminus5": 7.42814009661835,
+      "maxRise300": 0.020330969958223477,
+      "maxGapMs": 347.51009941101074,
+      "frames": [
+        {
+          "filename": "sunset-0.png",
+          "timestamp": 1791070792.558123,
+          "relativeMs": -199.37682151794434,
+          "received": 1791070792.597,
+          "metadata": {
+            "offsetTop": 0,
+            "pageScaleFactor": 1,
+            "deviceWidth": 920,
+            "deviceHeight": 664,
+            "scrollOffsetX": 0,
+            "scrollOffsetY": 0,
+            "timestamp": 1791070792.558123
+          },
+          "mean": 78.03119967793882
+        },
+        {
+          "filename": "sunset-1.png",
+          "timestamp": 1791070792.656386,
+          "relativeMs": -101.11403465270996,
+          "received": 1791070792.692,
+          "metadata": {
+            "offsetTop": 0,
+            "pageScaleFactor": 1,
+            "deviceWidth": 920,
+            "deviceHeight": 664,
+            "scrollOffsetX": 0,
+            "scrollOffsetY": 0,
+            "timestamp": 1791070792.656386
+          },
+          "mean": 78.02536231884058
+        },
+        {
+          "filename": "sunset-2.png",
+          "timestamp": 1791070792.751685,
+          "relativeMs": -5.815029144287109,
+          "received": 1791070792.789,
+          "metadata": {
+            "offsetTop": 0,
+            "pageScaleFactor": 1,
+            "deviceWidth": 920,
+            "deviceHeight": 664,
+            "scrollOffsetX": 0,
+            "scrollOffsetY": 0,
+            "timestamp": 1791070792.751685
+          },
+          "mean": 78.01590177133656
+        },
+        {
+          "filename": "sunset-3.png",
+          "timestamp": 1791070792.851646,
+          "relativeMs": 94.1460132598877,
+          "received": 1791070792.888,
+          "metadata": {
+            "offsetTop": 0,
+            "pageScaleFactor": 1,
+            "deviceWidth": 920,
+            "deviceHeight": 664,
+            "scrollOffsetX": 0,
+            "scrollOffsetY": 0,
+            "timestamp": 1791070792.851646
+          },
+          "mean": 78.01791465378422
+        },
+        {
+          "filename": "sunset-4.png",
+          "timestamp": 1791070792.956139,
+          "relativeMs": 198.6391544342041,
+          "received": 1791070792.992,
+          "metadata": {
+            "offsetTop": 0,
+            "pageScaleFactor": 1,
+            "deviceWidth": 920,
+            "deviceHeight": 664,
+            "scrollOffsetX": 0,
+            "scrollOffsetY": 0,
+            "timestamp": 1791070792.956139
+          },
+          "mean": 77.86916264090178
+        },
+        {
+          "filename": "sunset-5.png",
+          "timestamp": 1791070793.051632,
+          "relativeMs": 294.1319942474365,
+          "received": 1791070793.09,
+          "metadata": {
+            "offsetTop": 0,
+            "pageScaleFactor": 1,
+            "deviceWidth": 920,
+            "deviceHeight": 664,
+            "scrollOffsetX": 0,
+            "scrollOffsetY": 0,
+            "timestamp": 1791070793.051632
+          },
+          "mean": 77.5919887278583
+        },
+        {
+          "filename": "sunset-6.png",
+          "timestamp": 1791070793.151822,
+          "relativeMs": 394.32215690612793,
+          "received": 1791070793.189,
+          "metadata": {
+            "offsetTop": 0,
+            "pageScaleFactor": 1,
+            "deviceWidth": 920,
+            "deviceHeight": 664,
+            "scrollOffsetX": 0,
+            "scrollOffsetY": 0,
+            "timestamp": 1791070793.151822
+          },
+          "mean": 77.15760869565217
+        },
+        {
+          "filename": "sunset-7.png",
+          "timestamp": 1791070793.251931,
+          "relativeMs": 494.4310188293457,
+          "received": 1791070793.291,
+          "metadata": {
+            "offsetTop": 0,
+            "pageScaleFactor": 1,
+            "deviceWidth": 920,
+            "deviceHeight": 664,
+            "scrollOffsetX": 0,
+            "scrollOffsetY": 0,
+            "timestamp": 1791070793.251931
+          },
+          "mean": 76.54971819645732
+        },
+        {
+          "filename": "sunset-8.png",
+          "timestamp": 1791070793.354223,
+          "relativeMs": 596.7230796813965,
+          "received": 1791070793.392,
+          "metadata": {
+            "offsetTop": 0,
+            "pageScaleFactor": 1,
+            "deviceWidth": 920,
+            "deviceHeight": 664,
+            "scrollOffsetX": 0,
+            "scrollOffsetY": 0,
+            "timestamp": 1791070793.354223
+          },
+          "mean": 75.8029388083736
+        },
+        {
+          "filename": "sunset-9.png",
+          "timestamp": 1791070793.452203,
+          "relativeMs": 694.7031021118164,
+          "received": 1791070793.488,
+          "metadata": {
+            "offsetTop": 0,
+            "pageScaleFactor": 1,
+            "deviceWidth": 920,
+            "deviceHeight": 664,
+            "scrollOffsetX": 0,
+            "scrollOffsetY": 0,
+            "timestamp": 1791070793.452203
+          },
+          "mean": 74.7926731078905
+        },
+        {
+          "filename": "sunset-10.png",
+          "timestamp": 1791070793.551898,
+          "relativeMs": 794.3980693817139,
+          "received": 1791070793.587,
+          "metadata": {
+            "offsetTop": 0,
+            "pageScaleFactor": 1,
+            "deviceWidth": 920,
+            "deviceHeight": 664,
+            "scrollOffsetX": 0,
+            "scrollOffsetY": 0,
+            "timestamp": 1791070793.551898
+          },
+          "mean": 73.58756038647343
+        },
+        {
+          "filename": "sunset-11.png",
+          "timestamp": 1791070793.65216,
+          "relativeMs": 894.6599960327148,
+          "received": 1791070793.69,
+          "metadata": {
+            "offsetTop": 0,
+            "pageScaleFactor": 1,
+            "deviceWidth": 920,
+            "deviceHeight": 664,
+            "scrollOffsetX": 0,
+            "scrollOffsetY": 0,
+            "timestamp": 1791070793.65216
+          },
+          "mean": 72.10225442834138
+        },
+        {
+          "filename": "sunset-12.png",
+          "timestamp": 1791070793.761253,
+          "relativeMs": 1003.7531852722168,
+          "received": 1791070793.8,
+          "metadata": {
+            "offsetTop": 0,
+            "pageScaleFactor": 1,
+            "deviceWidth": 920,
+            "deviceHeight": 664,
+            "scrollOffsetX": 0,
+            "scrollOffsetY": 0,
+            "timestamp": 1791070793.761253
+          },
+          "mean": 70.32387278582931
+        },
+        {
+          "filename": "sunset-13.png",
+          "timestamp": 1791070793.857058,
+          "relativeMs": 1099.5581150054932,
+          "received": 1791070793.895,
+          "metadata": {
+            "offsetTop": 0,
+            "pageScaleFactor": 1,
+            "deviceWidth": 920,
+            "deviceHeight": 664,
+            "scrollOffsetX": 0,
+            "scrollOffsetY": 0,
+            "timestamp": 1791070793.857058
+          },
+          "mean": 68.38989533011272
+        },
+        {
+          "filename": "sunset-14.png",
+          "timestamp": 1791070793.962991,
+          "relativeMs": 1205.491065979004,
+          "received": 1791070794.002,
+          "metadata": {
+            "offsetTop": 0,
+            "pageScaleFactor": 1,
+            "deviceWidth": 920,
+            "deviceHeight": 664,
+            "scrollOffsetX": 0,
+            "scrollOffsetY": 0,
+            "timestamp": 1791070793.962991
+          },
+          "mean": 66.2818035426731
+        },
+        {
+          "filename": "sunset-15.png",
+          "timestamp": 1791070794.051769,
+          "relativeMs": 1294.26908493042,
+          "received": 1791070794.088,
+          "metadata": {
+            "offsetTop": 0,
+            "pageScaleFactor": 1,
+            "deviceWidth": 920,
+            "deviceHeight": 664,
+            "scrollOffsetX": 0,
+            "scrollOffsetY": 0,
+            "timestamp": 1791070794.051769
+          },
+          "mean": 64.0024154589372
+        },
+        {
+          "filename": "sunset-16.png",
+          "timestamp": 1791070794.151744,
+          "relativeMs": 1394.2439556121826,
+          "received": 1791070794.191,
+          "metadata": {
+            "offsetTop": 0,
+            "pageScaleFactor": 1,
+            "deviceWidth": 920,
+            "deviceHeight": 664,
+            "scrollOffsetX": 0,
+            "scrollOffsetY": 0,
+            "timestamp": 1791070794.151744
+          },
+          "mean": 61.56723027375201
+        },
+        {
+          "filename": "sunset-17.png",
+          "timestamp": 1791070794.256608,
+          "relativeMs": 1499.108076095581,
+          "received": 1791070794.293,
+          "metadata": {
+            "offsetTop": 0,
+            "pageScaleFactor": 1,
+            "deviceWidth": 920,
+            "deviceHeight": 664,
+            "scrollOffsetX": 0,
+            "scrollOffsetY": 0,
+            "timestamp": 1791070794.256608
+          },
+          "mean": 59.07830112721417
+        },
+        {
+          "filename": "sunset-18.png",
+          "timestamp": 1791070794.353992,
+          "relativeMs": 1596.492052078247,
+          "received": 1791070794.39,
+          "metadata": {
+            "offsetTop": 0,
+            "pageScaleFactor": 1,
+            "deviceWidth": 920,
+            "deviceHeight": 664,
+            "scrollOffsetX": 0,
+            "scrollOffsetY": 0,
+            "timestamp": 1791070794.353992
+          },
+          "mean": 56.57427536231884
+        },
+        {
+          "filename": "sunset-19.png",
+          "timestamp": 1791070794.451244,
+          "relativeMs": 1693.74418258667,
+          "received": 1791070794.487,
+          "metadata": {
+            "offsetTop": 0,
+            "pageScaleFactor": 1,
+            "deviceWidth": 920,
+            "deviceHeight": 664,
+            "scrollOffsetX": 0,
+            "scrollOffsetY": 0,
+            "timestamp": 1791070794.451244
+          },
+          "mean": 54.21054750402576
+        },
+        {
+          "filename": "sunset-20.png",
+          "timestamp": 1791070794.55222,
+          "relativeMs": 1794.72017288208,
+          "received": 1791070794.587,
+          "metadata": {
+            "offsetTop": 0,
+            "pageScaleFactor": 1,
+            "deviceWidth": 920,
+            "deviceHeight": 664,
+            "scrollOffsetX": 0,
+            "scrollOffsetY": 0,
+            "timestamp": 1791070794.55222
+          },
+          "mean": 51.91626409017714
+        },
+        {
+          "filename": "sunset-21.png",
+          "timestamp": 1791070794.658677,
+          "relativeMs": 1901.177167892456,
+          "received": 1791070794.693,
+          "metadata": {
+            "offsetTop": 0,
+            "pageScaleFactor": 1,
+            "deviceWidth": 920,
+            "deviceHeight": 664,
+            "scrollOffsetX": 0,
+            "scrollOffsetY": 0,
+            "timestamp": 1791070794.658677
+          },
+          "mean": 49.76147342995169
+        },
+        {
+          "filename": "sunset-22.png",
+          "timestamp": 1791070794.758936,
+          "relativeMs": 2001.4359951019287,
+          "received": 1791070794.793,
+          "metadata": {
+            "offsetTop": 0,
+            "pageScaleFactor": 1,
+            "deviceWidth": 920,
+            "deviceHeight": 664,
+            "scrollOffsetX": 0,
+            "scrollOffsetY": 0,
+            "timestamp": 1791070794.758936
+          },
+          "mean": 47.721014492753625
+        },
+        {
+          "filename": "sunset-23.png",
+          "timestamp": 1791070794.862957,
+          "relativeMs": 2105.457067489624,
+          "received": 1791070794.897,
+          "metadata": {
+            "offsetTop": 0,
+            "pageScaleFactor": 1,
+            "deviceWidth": 920,
+            "deviceHeight": 664,
+            "scrollOffsetX": 0,
+            "scrollOffsetY": 0,
+            "timestamp": 1791070794.862957
+          },
+          "mean": 45.783816425120776
+        },
+        {
+          "filename": "sunset-24.png",
+          "timestamp": 1791070794.954627,
+          "relativeMs": 2197.127103805542,
+          "received": 1791070794.989,
+          "metadata": {
+            "offsetTop": 0,
+            "pageScaleFactor": 1,
+            "deviceWidth": 920,
+            "deviceHeight": 664,
+            "scrollOffsetX": 0,
+            "scrollOffsetY": 0,
+            "timestamp": 1791070794.954627
+          },
+          "mean": 43.93860708534621
+        },
+        {
+          "filename": "sunset-25.png",
+          "timestamp": 1791070795.05187,
+          "relativeMs": 2294.370174407959,
+          "received": 1791070795.086,
+          "metadata": {
+            "offsetTop": 0,
+            "pageScaleFactor": 1,
+            "deviceWidth": 920,
+            "deviceHeight": 664,
+            "scrollOffsetX": 0,
+            "scrollOffsetY": 0,
+            "timestamp": 1791070795.05187
+          },
+          "mean": 42.22081320450886
+        },
+        {
+          "filename": "sunset-26.png",
+          "timestamp": 1791070795.151228,
+          "relativeMs": 2393.728017807007,
+          "received": 1791070795.184,
+          "metadata": {
+            "offsetTop": 0,
+            "pageScaleFactor": 1,
+            "deviceWidth": 920,
+            "deviceHeight": 664,
+            "scrollOffsetX": 0,
+            "scrollOffsetY": 0,
+            "timestamp": 1791070795.151228
+          },
+          "mean": 40.553945249597426
+        },
+        {
+          "filename": "sunset-27.png",
+          "timestamp": 1791070795.251766,
+          "relativeMs": 2494.2660331726074,
+          "received": 1791070795.285,
+          "metadata": {
+            "offsetTop": 0,
+            "pageScaleFactor": 1,
+            "deviceWidth": 920,
+            "deviceHeight": 664,
+            "scrollOffsetX": 0,
+            "scrollOffsetY": 0,
+            "timestamp": 1791070795.251766
+          },
+          "mean": 39.0883655394525
+        },
+        {
+          "filename": "sunset-28.png",
+          "timestamp": 1791070795.358657,
+          "relativeMs": 2601.1569499969482,
+          "received": 1791070795.391,
+          "metadata": {
+            "offsetTop": 0,
+            "pageScaleFactor": 1,
+            "deviceWidth": 920,
+            "deviceHeight": 664,
+            "scrollOffsetX": 0,
+            "scrollOffsetY": 0,
+            "timestamp": 1791070795.358657
+          },
+          "mean": 37.76529790660226
+        },
+        {
+          "filename": "sunset-29.png",
+          "timestamp": 1791070795.451608,
+          "relativeMs": 2694.108009338379,
+          "received": 1791070795.485,
+          "metadata": {
+            "offsetTop": 0,
+            "pageScaleFactor": 1,
+            "deviceWidth": 920,
+            "deviceHeight": 664,
+            "scrollOffsetX": 0,
+            "scrollOffsetY": 0,
+            "timestamp": 1791070795.451608
+          },
+          "mean": 36.53462157809984
+        },
+        {
+          "filename": "sunset-30.png",
+          "timestamp": 1791070795.552028,
+          "relativeMs": 2794.528007507324,
+          "received": 1791070795.585,
+          "metadata": {
+            "offsetTop": 0,
+            "pageScaleFactor": 1,
+            "deviceWidth": 920,
+            "deviceHeight": 664,
+            "scrollOffsetX": 0,
+            "scrollOffsetY": 0,
+            "timestamp": 1791070795.552028
+          },
+          "mean": 35.457729468599034
+        },
+        {
+          "filename": "sunset-31.png",
+          "timestamp": 1791070795.652437,
+          "relativeMs": 2894.937038421631,
+          "received": 1791070795.685,
+          "metadata": {
+            "offsetTop": 0,
+            "pageScaleFactor": 1,
+            "deviceWidth": 920,
+            "deviceHeight": 664,
+            "scrollOffsetX": 0,
+            "scrollOffsetY": 0,
+            "timestamp": 1791070795.652437
+          },
+          "mean": 34.51107085346216
+        },
+        {
+          "filename": "sunset-32.png",
+          "timestamp": 1791070795.751985,
+          "relativeMs": 2994.4851398468018,
+          "received": 1791070795.785,
+          "metadata": {
+            "offsetTop": 0,
+            "pageScaleFactor": 1,
+            "deviceWidth": 920,
+            "deviceHeight": 664,
+            "scrollOffsetX": 0,
+            "scrollOffsetY": 0,
+            "timestamp": 1791070795.751985
+          },
+          "mean": 33.62721417069243
+        },
+        {
+          "filename": "sunset-33.png",
+          "timestamp": 1791070795.856257,
+          "relativeMs": 3098.757028579712,
+          "received": 1791070795.886,
+          "metadata": {
+            "offsetTop": 0,
+            "pageScaleFactor": 1,
+            "deviceWidth": 920,
+            "deviceHeight": 664,
+            "scrollOffsetX": 0,
+            "scrollOffsetY": 0,
+            "timestamp": 1791070795.856257
+          },
+          "mean": 32.83313204508857
+        },
+        {
+          "filename": "sunset-34.png",
+          "timestamp": 1791070795.956666,
+          "relativeMs": 3199.1660594940186,
+          "received": 1791070795.99,
+          "metadata": {
+            "offsetTop": 0,
+            "pageScaleFactor": 1,
+            "deviceWidth": 920,
+            "deviceHeight": 664,
+            "scrollOffsetX": 0,
+            "scrollOffsetY": 0,
+            "timestamp": 1791070795.956666
+          },
+          "mean": 32.23752012882448
+        },
+        {
+          "filename": "sunset-35.png",
+          "timestamp": 1791070796.056659,
+          "relativeMs": 3299.159049987793,
+          "received": 1791070796.09,
+          "metadata": {
+            "offsetTop": 0,
+            "pageScaleFactor": 1,
+            "deviceWidth": 920,
+            "deviceHeight": 664,
+            "scrollOffsetX": 0,
+            "scrollOffsetY": 0,
+            "timestamp": 1791070796.056659
+          },
+          "mean": 31.71316425120773
+        },
+        {
+          "filename": "sunset-36.png",
+          "timestamp": 1791070796.154309,
+          "relativeMs": 3396.8091011047363,
+          "received": 1791070796.189,
+          "metadata": {
+            "offsetTop": 0,
+            "pageScaleFactor": 1,
+            "deviceWidth": 920,
+            "deviceHeight": 664,
+            "scrollOffsetX": 0,
+            "scrollOffsetY": 0,
+            "timestamp": 1791070796.154309
+          },
+          "mean": 31.254227053140095
+        },
+        {
+          "filename": "sunset-37.png",
+          "timestamp": 1791070796.256259,
+          "relativeMs": 3498.7590312957764,
+          "received": 1791070796.291,
+          "metadata": {
+            "offsetTop": 0,
+            "pageScaleFactor": 1,
+            "deviceWidth": 920,
+            "deviceHeight": 664,
+            "scrollOffsetX": 0,
+            "scrollOffsetY": 0,
+            "timestamp": 1791070796.256259
+          },
+          "mean": 30.831119162640903
+        },
+        {
+          "filename": "sunset-38.png",
+          "timestamp": 1791070796.358636,
+          "relativeMs": 3601.1359691619873,
+          "received": 1791070796.394,
+          "metadata": {
+            "offsetTop": 0,
+            "pageScaleFactor": 1,
+            "deviceWidth": 920,
+            "deviceHeight": 664,
+            "scrollOffsetX": 0,
+            "scrollOffsetY": 0,
+            "timestamp": 1791070796.358636
+          },
+          "mean": 30.445450885668276
+        },
+        {
+          "filename": "sunset-39.png",
+          "timestamp": 1791070796.45607,
+          "relativeMs": 3698.5700130462646,
+          "received": 1791070796.485,
+          "metadata": {
+            "offsetTop": 0,
+            "pageScaleFactor": 1,
+            "deviceWidth": 920,
+            "deviceHeight": 664,
+            "scrollOffsetX": 0,
+            "scrollOffsetY": 0,
+            "timestamp": 1791070796.45607
+          },
+          "mean": 30.100040257648953
+        },
+        {
+          "filename": "sunset-40.png",
+          "timestamp": 1791070796.556001,
+          "relativeMs": 3798.5010147094727,
+          "received": 1791070796.585,
+          "metadata": {
+            "offsetTop": 0,
+            "pageScaleFactor": 1,
+            "deviceWidth": 920,
+            "deviceHeight": 664,
+            "scrollOffsetX": 0,
+            "scrollOffsetY": 0,
+            "timestamp": 1791070796.556001
+          },
+          "mean": 29.791062801932366
+        },
+        {
+          "filename": "sunset-41.png",
+          "timestamp": 1791070796.656061,
+          "relativeMs": 3898.5610008239746,
+          "received": 1791070796.686,
+          "metadata": {
+            "offsetTop": 0,
+            "pageScaleFactor": 1,
+            "deviceWidth": 920,
+            "deviceHeight": 664,
+            "scrollOffsetX": 0,
+            "scrollOffsetY": 0,
+            "timestamp": 1791070796.656061
+          },
+          "mean": 29.534621578099838
+        },
+        {
+          "filename": "sunset-42.png",
+          "timestamp": 1791070796.751172,
+          "relativeMs": 3993.6721324920654,
+          "received": 1791070796.782,
+          "metadata": {
+            "offsetTop": 0,
+            "pageScaleFactor": 1,
+            "deviceWidth": 920,
+            "deviceHeight": 664,
+            "scrollOffsetX": 0,
+            "scrollOffsetY": 0,
+            "timestamp": 1791070796.751172
+          },
+          "mean": 29.30112721417069
+        },
+        {
+          "filename": "sunset-43.png",
+          "timestamp": 1791070796.85108,
+          "relativeMs": 4093.5800075531006,
+          "received": 1791070796.881,
+          "metadata": {
+            "offsetTop": 0,
+            "pageScaleFactor": 1,
+            "deviceWidth": 920,
+            "deviceHeight": 664,
+            "scrollOffsetX": 0,
+            "scrollOffsetY": 0,
+            "timestamp": 1791070796.85108
+          },
+          "mean": 29.05756843800322
+        },
+        {
+          "filename": "sunset-44.png",
+          "timestamp": 1791070796.953965,
+          "relativeMs": 4196.465015411377,
+          "received": 1791070796.984,
+          "metadata": {
+            "offsetTop": 0,
+            "pageScaleFactor": 1,
+            "deviceWidth": 920,
+            "deviceHeight": 664,
+            "scrollOffsetX": 0,
+            "scrollOffsetY": 0,
+            "timestamp": 1791070796.953965
+          },
+          "mean": 28.852455716586153
+        },
+        {
+          "filename": "sunset-45.png",
+          "timestamp": 1791070797.051604,
+          "relativeMs": 4294.104099273682,
+          "received": 1791070797.081,
+          "metadata": {
+            "offsetTop": 0,
+            "pageScaleFactor": 1,
+            "deviceWidth": 920,
+            "deviceHeight": 664,
+            "scrollOffsetX": 0,
+            "scrollOffsetY": 0,
+            "timestamp": 1791070797.051604
+          },
+          "mean": 28.685185185185187
+        },
+        {
+          "filename": "sunset-46.png",
+          "timestamp": 1791070797.155979,
+          "relativeMs": 4398.478984832764,
+          "received": 1791070797.186,
+          "metadata": {
+            "offsetTop": 0,
+            "pageScaleFactor": 1,
+            "deviceWidth": 920,
+            "deviceHeight": 664,
+            "scrollOffsetX": 0,
+            "scrollOffsetY": 0,
+            "timestamp": 1791070797.155979
+          },
+          "mean": 28.528381642512077
+        },
+        {
+          "filename": "sunset-47.png",
+          "timestamp": 1791070797.264227,
+          "relativeMs": 4506.726980209351,
+          "received": 1791070797.294,
+          "metadata": {
+            "offsetTop": 0,
+            "pageScaleFactor": 1,
+            "deviceWidth": 920,
+            "deviceHeight": 664,
+            "scrollOffsetX": 0,
+            "scrollOffsetY": 0,
+            "timestamp": 1791070797.264227
+          },
+          "mean": 28.39975845410628
+        },
+        {
+          "filename": "sunset-48.png",
+          "timestamp": 1791070797.351847,
+          "relativeMs": 4594.34700012207,
+          "received": 1791070797.381,
+          "metadata": {
+            "offsetTop": 0,
+            "pageScaleFactor": 1,
+            "deviceWidth": 920,
+            "deviceHeight": 664,
+            "scrollOffsetX": 0,
+            "scrollOffsetY": 0,
+            "timestamp": 1791070797.351847
+          },
+          "mean": 28.266505636070853
+        },
+        {
+          "filename": "sunset-49.png",
+          "timestamp": 1791070797.451522,
+          "relativeMs": 4694.022178649902,
+          "received": 1791070797.482,
+          "metadata": {
+            "offsetTop": 0,
+            "pageScaleFactor": 1,
+            "deviceWidth": 920,
+            "deviceHeight": 664,
+            "scrollOffsetX": 0,
+            "scrollOffsetY": 0,
+            "timestamp": 1791070797.451522
+          },
+          "mean": 28.150764895330113
+        },
+        {
+          "filename": "sunset-50.png",
+          "timestamp": 1791070797.551658,
+          "relativeMs": 4794.157981872559,
+          "received": 1791070797.581,
+          "metadata": {
+            "offsetTop": 0,
+            "pageScaleFactor": 1,
+            "deviceWidth": 920,
+            "deviceHeight": 664,
+            "scrollOffsetX": 0,
+            "scrollOffsetY": 0,
+            "timestamp": 1791070797.551658
+          },
+          "mean": 28.060789049919485
+        },
+        {
+          "filename": "sunset-51.png",
+          "timestamp": 1791070797.650951,
+          "relativeMs": 4893.450975418091,
+          "received": 1791070797.681,
+          "metadata": {
+            "offsetTop": 0,
+            "pageScaleFactor": 1,
+            "deviceWidth": 920,
+            "deviceHeight": 664,
+            "scrollOffsetX": 0,
+            "scrollOffsetY": 0,
+            "timestamp": 1791070797.650951
+          },
+          "mean": 27.96598228663446
+        },
+        {
+          "filename": "sunset-52.png",
+          "timestamp": 1791070797.751299,
+          "relativeMs": 4993.7989711761475,
+          "received": 1791070797.781,
+          "metadata": {
+            "offsetTop": 0,
+            "pageScaleFactor": 1,
+            "deviceWidth": 920,
+            "deviceHeight": 664,
+            "scrollOffsetX": 0,
+            "scrollOffsetY": 0,
+            "timestamp": 1791070797.751299
+          },
+          "mean": 27.885668276972623
+        },
+        {
+          "filename": "sunset-53.png",
+          "timestamp": 1791070797.851715,
+          "relativeMs": 5094.215154647827,
+          "received": 1791070797.881,
+          "metadata": {
+            "offsetTop": 0,
+            "pageScaleFactor": 1,
+            "deviceWidth": 920,
+            "deviceHeight": 664,
+            "scrollOffsetX": 0,
+            "scrollOffsetY": 0,
+            "timestamp": 1791070797.851715
+          },
+          "mean": 27.82588566827697
+        },
+        {
+          "filename": "sunset-54.png",
+          "timestamp": 1791070797.960085,
+          "relativeMs": 5202.584981918335,
+          "received": 1791070797.99,
+          "metadata": {
+            "offsetTop": 0,
+            "pageScaleFactor": 1,
+            "deviceWidth": 920,
+            "deviceHeight": 664,
+            "scrollOffsetX": 0,
+            "scrollOffsetY": 0,
+            "timestamp": 1791070797.960085
+          },
+          "mean": 27.764492753623188
+        },
+        {
+          "filename": "sunset-55.png",
+          "timestamp": 1791070798.058096,
+          "relativeMs": 5300.595998764038,
+          "received": 1791070798.088,
+          "metadata": {
+            "offsetTop": 0,
+            "pageScaleFactor": 1,
+            "deviceWidth": 920,
+            "deviceHeight": 664,
+            "scrollOffsetX": 0,
+            "scrollOffsetY": 0,
+            "timestamp": 1791070798.058096
+          },
+          "mean": 27.712761674718198
+        },
+        {
+          "filename": "sunset-56.png",
+          "timestamp": 1791070798.15125,
+          "relativeMs": 5393.749952316284,
+          "received": 1791070798.181,
+          "metadata": {
+            "offsetTop": 0,
+            "pageScaleFactor": 1,
+            "deviceWidth": 920,
+            "deviceHeight": 664,
+            "scrollOffsetX": 0,
+            "scrollOffsetY": 0,
+            "timestamp": 1791070798.15125
+          },
+          "mean": 27.680958132045088
+        },
+        {
+          "filename": "sunset-57.png",
+          "timestamp": 1791070798.250407,
+          "relativeMs": 5492.9070472717285,
+          "received": 1791070798.284,
+          "metadata": {
+            "offsetTop": 0,
+            "pageScaleFactor": 1,
+            "deviceWidth": 920,
+            "deviceHeight": 664,
+            "scrollOffsetX": 0,
+            "scrollOffsetY": 0,
+            "timestamp": 1791070798.250407
+          },
+          "mean": 27.643719806763286
+        },
+        {
+          "filename": "sunset-58.png",
+          "timestamp": 1791070798.35294,
+          "relativeMs": 5595.440149307251,
+          "received": 1791070798.383,
+          "metadata": {
+            "offsetTop": 0,
+            "pageScaleFactor": 1,
+            "deviceWidth": 920,
+            "deviceHeight": 664,
+            "scrollOffsetX": 0,
+            "scrollOffsetY": 0,
+            "timestamp": 1791070798.35294
+          },
+          "mean": 27.60084541062802
+        },
+        {
+          "filename": "sunset-59.png",
+          "timestamp": 1791070798.451339,
+          "relativeMs": 5693.839073181152,
+          "received": 1791070798.48,
+          "metadata": {
+            "offsetTop": 0,
+            "pageScaleFactor": 1,
+            "deviceWidth": 920,
+            "deviceHeight": 664,
+            "scrollOffsetX": 0,
+            "scrollOffsetY": 0,
+            "timestamp": 1791070798.451339
+          },
+          "mean": 27.61413043478261
+        },
+        {
+          "filename": "sunset-60.png",
+          "timestamp": 1791070798.551062,
+          "relativeMs": 5793.562173843384,
+          "received": 1791070798.581,
+          "metadata": {
+            "offsetTop": 0,
+            "pageScaleFactor": 1,
+            "deviceWidth": 920,
+            "deviceHeight": 664,
+            "scrollOffsetX": 0,
+            "scrollOffsetY": 0,
+            "timestamp": 1791070798.551062
+          },
+          "mean": 27.59842995169082
+        },
+        {
+          "filename": "sunset-61.png",
+          "timestamp": 1791070798.651435,
+          "relativeMs": 5893.934965133667,
+          "received": 1791070798.681,
+          "metadata": {
+            "offsetTop": 0,
+            "pageScaleFactor": 1,
+            "deviceWidth": 920,
+            "deviceHeight": 664,
+            "scrollOffsetX": 0,
+            "scrollOffsetY": 0,
+            "timestamp": 1791070798.651435
+          },
+          "mean": 27.590378421900162
+        },
+        {
+          "filename": "sunset-62.png",
+          "timestamp": 1791070798.752935,
+          "relativeMs": 5995.434999465942,
+          "received": 1791070798.784,
+          "metadata": {
+            "offsetTop": 0,
+            "pageScaleFactor": 1,
+            "deviceWidth": 920,
+            "deviceHeight": 664,
+            "scrollOffsetX": 0,
+            "scrollOffsetY": 0,
+            "timestamp": 1791070798.752935
+          },
+          "mean": 27.590378421900162
+        },
+        {
+          "filename": "sunset-63.png",
+          "timestamp": 1791070799.100445,
+          "relativeMs": 6342.945098876953,
+          "received": 1791070799.13,
+          "metadata": {
+            "offsetTop": 0,
+            "pageScaleFactor": 1,
+            "deviceWidth": 920,
+            "deviceHeight": 664,
+            "scrollOffsetX": 0,
+            "scrollOffsetY": 0,
+            "timestamp": 1791070799.100445
+          },
+          "mean": 27.613929146537842
+        },
+        {
+          "filename": "sunset-64.png",
+          "timestamp": 1791070799.200592,
+          "relativeMs": 6443.092107772827,
+          "received": 1791070799.231,
+          "metadata": {
+            "offsetTop": 0,
+            "pageScaleFactor": 1,
+            "deviceWidth": 920,
+            "deviceHeight": 664,
+            "scrollOffsetX": 0,
+            "scrollOffsetY": 0,
+            "timestamp": 1791070799.200592
+          },
+          "mean": 27.612520128824478
+        },
+        {
+          "filename": "sunset-65.png",
+          "timestamp": 1791070799.303016,
+          "relativeMs": 6545.516014099121,
+          "received": 1791070799.333,
+          "metadata": {
+            "offsetTop": 0,
+            "pageScaleFactor": 1,
+            "deviceWidth": 920,
+            "deviceHeight": 664,
+            "scrollOffsetX": 0,
+            "scrollOffsetY": 0,
+            "timestamp": 1791070799.303016
+          },
+          "mean": 27.610909822866343
+        },
+        {
+          "filename": "sunset-66.png",
+          "timestamp": 1791070799.404209,
+          "relativeMs": 6646.708965301514,
+          "received": 1791070799.434,
+          "metadata": {
+            "offsetTop": 0,
+            "pageScaleFactor": 1,
+            "deviceWidth": 920,
+            "deviceHeight": 664,
+            "scrollOffsetX": 0,
+            "scrollOffsetY": 0,
+            "timestamp": 1791070799.404209
+          },
+          "mean": 27.611513687600645
+        },
+        {
+          "filename": "sunset-67.png",
+          "timestamp": 1791070799.509252,
+          "relativeMs": 6751.752138137817,
+          "received": 1791070799.539,
+          "metadata": {
+            "offsetTop": 0,
+            "pageScaleFactor": 1,
+            "deviceWidth": 920,
+            "deviceHeight": 664,
+            "scrollOffsetX": 0,
+            "scrollOffsetY": 0,
+            "timestamp": 1791070799.509252
+          },
+          "mean": 27.60950080515298
+        },
+        {
+          "filename": "sunset-68.png",
+          "timestamp": 1791070799.607743,
+          "relativeMs": 6850.243091583252,
+          "received": 1791070799.638,
+          "metadata": {
+            "offsetTop": 0,
+            "pageScaleFactor": 1,
+            "deviceWidth": 920,
+            "deviceHeight": 664,
+            "scrollOffsetX": 0,
+            "scrollOffsetY": 0,
+            "timestamp": 1791070799.607743
+          },
+          "mean": 27.607286634460547
+        },
+        {
+          "filename": "sunset-69.png",
+          "timestamp": 1791070799.700907,
+          "relativeMs": 6943.40705871582,
+          "received": 1791070799.73,
+          "metadata": {
+            "offsetTop": 0,
+            "pageScaleFactor": 1,
+            "deviceWidth": 920,
+            "deviceHeight": 664,
+            "scrollOffsetX": 0,
+            "scrollOffsetY": 0,
+            "timestamp": 1791070799.700907
+          },
+          "mean": 27.603864734299517
+        },
+        {
+          "filename": "sunset-70.png",
+          "timestamp": 1791070799.801389,
+          "relativeMs": 7043.889045715332,
+          "received": 1791070799.83,
+          "metadata": {
+            "offsetTop": 0,
+            "pageScaleFactor": 1,
+            "deviceWidth": 920,
+            "deviceHeight": 664,
+            "scrollOffsetX": 0,
+            "scrollOffsetY": 0,
+            "timestamp": 1791070799.801389
+          },
+          "mean": 27.60205314009662
+        },
+        {
+          "filename": "sunset-71.png",
+          "timestamp": 1791070799.900934,
+          "relativeMs": 7143.434047698975,
+          "received": 1791070799.931,
+          "metadata": {
+            "offsetTop": 0,
+            "pageScaleFactor": 1,
+            "deviceWidth": 920,
+            "deviceHeight": 664,
+            "scrollOffsetX": 0,
+            "scrollOffsetY": 0,
+            "timestamp": 1791070799.900934
+          },
+          "mean": 27.599838969404185
+        },
+        {
+          "filename": "sunset-72.png",
+          "timestamp": 1791070800.001456,
+          "relativeMs": 7243.956089019775,
+          "received": 1791070800.034,
+          "metadata": {
+            "offsetTop": 0,
+            "pageScaleFactor": 1,
+            "deviceWidth": 920,
+            "deviceHeight": 664,
+            "scrollOffsetX": 0,
+            "scrollOffsetY": 0,
+            "timestamp": 1791070800.001456
+          },
+          "mean": 27.59681964573269
+        },
+        {
+          "filename": "sunset-73.png",
+          "timestamp": 1791070800.100283,
+          "relativeMs": 7342.782974243164,
+          "received": 1791070800.13,
+          "metadata": {
+            "offsetTop": 0,
+            "pageScaleFactor": 1,
+            "deviceWidth": 920,
+            "deviceHeight": 664,
+            "scrollOffsetX": 0,
+            "scrollOffsetY": 0,
+            "timestamp": 1791070800.100283
+          },
+          "mean": 27.593800322061192
+        }
+      ],
+      "rollingWindows": [
+        {
+          "at": 94.1460132598877,
+          "delta": -0.8595422775401005
+        },
+        {
+          "at": 198.6391544342041,
+          "delta": -1.3501657820125246
+        },
+        {
+          "at": 294.1319942474365,
+          "delta": -1.770133796583977
+        },
+        {
+          "at": 394.32215690612793,
+          "delta": -2.361007686282136
+        },
+        {
+          "at": 494.4310188293457,
+          "delta": -2.9626459315722116
+        },
+        {
+          "at": 596.7230796813965,
+          "delta": -3.734315719562744
+        },
+        {
+          "at": 694.7031021118164,
+          "delta": -4.321270472875739
+        },
+        {
+          "at": 794.3980693817139,
+          "delta": -5.09350118990163
+        },
+        {
+          "at": 894.6599960327148,
+          "delta": -5.6049099289298425
+        },
+        {
+          "at": 1003.7531852722168,
+          "delta": -6.552470785470831
+        },
+        {
+          "at": 1099.5581150054932,
+          "delta": -6.948795577862128
+        },
+        {
+          "at": 1205.491065979004,
+          "delta": -7.367627683131332
+        },
+        {
+          "at": 1294.26908493042,
+          "delta": -7.370981134309545
+        },
+        {
+          "at": 1394.2439556121826,
+          "delta": -7.36803815192917
+        },
+        {
+          "at": 1499.108076095581,
+          "delta": -7.2508523644047
+        },
+        {
+          "at": 1596.492052078247,
+          "delta": -6.71797073975695
+        },
+        {
+          "at": 1693.74418258667,
+          "delta": -6.332989911508761
+        },
+        {
+          "at": 1794.72017288208,
+          "delta": -5.9324930692357185
+        },
+        {
+          "at": 1901.177167892456,
+          "delta": -5.89441052006601
+        },
+        {
+          "at": 2001.4359951019287,
+          "delta": -5.618740395848235
+        },
+        {
+          "at": 2105.457067489624,
+          "delta": -5.400849856290179
+        },
+        {
+          "at": 2197.127103805542,
+          "delta": -4.885655125103206
+        },
+        {
+          "at": 2294.370174407959,
+          "delta": -4.371510376066837
+        },
+        {
+          "at": 2393.728017807007,
+          "delta": -4.0142925660319335
+        },
+        {
+          "at": 2494.2660331726074,
+          "delta": -3.6278266892652127
+        },
+        {
+          "at": 2601.1569499969482,
+          "delta": -3.309451716728617
+        },
+        {
+          "at": 2694.108009338379,
+          "delta": -2.9040589827225176
+        },
+        {
+          "at": 2794.528007507324,
+          "delta": -2.5923913315024194
+        },
+        {
+          "at": 2894.937038421631,
+          "delta": -2.248464780456068
+        },
+        {
+          "at": 2994.4851398468018,
+          "delta": -1.8895402789411122
+        },
+        {
+          "at": 3098.757028579712,
+          "delta": -1.5869891905667366
+        },
+        {
+          "at": 3199.1660594940186,
+          "delta": -1.4079342984668735
+        },
+        {
+          "at": 3299.159049987793,
+          "delta": -1.2602660338696765
+        },
+        {
+          "at": 3396.8091011047363,
+          "delta": -1.1479442371884971
+        },
+        {
+          "at": 3498.7590312957764,
+          "delta": -1.0407176249334285
+        },
+        {
+          "at": 3601.1359691619873,
+          "delta": -0.9171507610479317
+        },
+        {
+          "at": 3698.5700130462646,
+          "delta": -0.8108532613326247
+        },
+        {
+          "at": 3798.5010147094727,
+          "delta": -0.7433049397454674
+        },
+        {
+          "at": 3898.5610008239746,
+          "delta": -0.6857566018187491
+        },
+        {
+          "at": 3993.6721324920654,
+          "delta": -0.6152020044968438
+        },
+        {
+          "at": 4093.5800075531006,
+          "delta": -0.521827007848632
+        },
+        {
+          "at": 4196.465015411377,
+          "delta": -0.4405037190610628
+        },
+        {
+          "at": 4294.104099273682,
+          "delta": -0.41831014469530814
+        },
+        {
+          "at": 4398.478984832764,
+          "delta": -0.38162135783298723
+        },
+        {
+          "at": 4506.726980209351,
+          "delta": -0.3509705133033165
+        },
+        {
+          "at": 4594.34700012207,
+          "delta": -0.3012404871947396
+        },
+        {
+          "at": 4694.022178649902,
+          "delta": -0.265229504557702
+        },
+        {
+          "at": 4794.157981872559,
+          "delta": -0.23486934392534664
+        },
+        {
+          "at": 4893.450975418091,
+          "delta": -0.19631499969660027
+        },
+        {
+          "at": 4993.7989711761475,
+          "delta": -0.16931907116062916
+        },
+        {
+          "at": 5094.215154647827,
+          "delta": -0.14510224239639413
+        },
+        {
+          "at": 5202.584981918335,
+          "delta": -0.12481979217690053
+        },
+        {
+          "at": 5300.595998764038,
+          "delta": -0.11122016313831651
+        },
+        {
+          "at": 5393.749952316284,
+          "delta": -0.0668397296384029
+        },
+        {
+          "at": 5492.9070472717285,
+          "delta": -0.04518671143179276
+        },
+        {
+          "at": 5595.440149307251,
+          "delta": -0.010466988727856119
+        },
+        {
+          "at": 5693.839073181152,
+          "delta": -0.023752012882447104
+        },
+        {
+          "at": 5793.562173843384,
+          "delta": -0.0014014610094825741
+        },
+        {
+          "at": 5893.934965133667,
+          "delta": 0.013452322795661331
+        },
+        {
+          "at": 5995.434999465942,
+          "delta": 0.020330969958223477
+        },
+        {
+          "at": 6342.945098876953,
+          "delta": -0.0024379196537935854
+        },
+        {
+          "at": 6443.092107772827,
+          "delta": -0.0028533764457314703
+        },
+        {
+          "at": 6545.516014099121,
+          "delta": -0.003516919189589629
+        },
+        {
+          "at": 6646.708965301514,
+          "delta": -0.0077084835214975556
+        },
+        {
+          "at": 6751.752138137817,
+          "delta": -0.007622563127050341
+        },
+        {
+          "at": 6850.243091583252,
+          "delta": -0.007652184454393307
+        },
+        {
+          "at": 6943.40705871582,
+          "delta": -0.007028597654272772
+        }
+      ],
+      "directPairs": [
+        {
+          "at": 94.1460132598877,
+          "deltaMs": 300.17614364624023,
+          "delta": -0.8603059581320451
+        },
+        {
+          "at": 198.6391544342041,
+          "deltaMs": 295.7918643951416,
+          "delta": -1.319444444444457
+        },
+        {
+          "at": 294.1319942474365,
+          "deltaMs": 302.59108543395996,
+          "delta": -1.7890499194846967
+        },
+        {
+          "at": 394.32215690612793,
+          "deltaMs": 300.3809452056885,
+          "delta": -2.3649355877616784
+        },
+        {
+          "at": 494.4310188293457,
+          "deltaMs": 299.96705055236816,
+          "delta": -2.9621578099838928
+        },
+        {
+          "at": 596.7230796813965,
+          "deltaMs": 297.93691635131836,
+          "delta": -3.7006843800322144
+        },
+        {
+          "at": 1294.26908493042,
+          "deltaMs": 302.22296714782715,
+          "delta": -7.42814009661835
+        },
+        {
+          "at": 1394.2439556121826,
+          "deltaMs": 299.5002269744873,
+          "delta": -7.356682769726248
+        },
+        {
+          "at": 1499.108076095581,
+          "deltaMs": 295.612096786499,
+          "delta": -7.162037037037031
+        },
+        {
+          "at": 1596.492052078247,
+          "deltaMs": 304.685115814209,
+          "delta": -6.812801932367151
+        },
+        {
+          "at": 1901.177167892456,
+          "deltaMs": 295.94993591308594,
+          "delta": -5.82286634460548
+        },
+        {
+          "at": 2197.127103805542,
+          "deltaMs": 297.13892936706543,
+          "delta": -4.8502415458937165
+        },
+        {
+          "at": 2393.728017807007,
+          "deltaMs": 300.37999153137207,
+          "delta": -4.019323671497588
+        },
+        {
+          "at": 2494.2660331726074,
+          "deltaMs": 300.2619743347168,
+          "delta": -3.6306360708534626
+        },
+        {
+          "at": 2694.108009338379,
+          "deltaMs": 300.37713050842285,
+          "delta": -2.9074074074074048
+        },
+        {
+          "at": 2794.528007507324,
+          "deltaMs": 304.2290210723877,
+          "delta": -2.6245974235104654
+        },
+        {
+          "at": 2894.937038421631,
+          "deltaMs": 304.2290210723877,
+          "delta": -2.27355072463768
+        },
+        {
+          "at": 2994.4851398468018,
+          "deltaMs": 304.6739101409912,
+          "delta": -1.9140499194847038
+        },
+        {
+          "at": 3098.757028579712,
+          "deltaMs": 298.0520725250244,
+          "delta": -1.5789049919484732
+        },
+        {
+          "at": 3199.1660594940186,
+          "deltaMs": 299.5929718017578,
+          "delta": -1.4064009661835755
+        },
+        {
+          "at": 3299.159049987793,
+          "deltaMs": 301.97691917419434,
+          "delta": -1.2677133655394535
+        },
+        {
+          "at": 3396.8091011047363,
+          "deltaMs": 301.7609119415283,
+          "delta": -1.1541867954911424
+        },
+        {
+          "at": 3498.7590312957764,
+          "deltaMs": 299.7419834136963,
+          "delta": -1.0400563607085367
+        },
+        {
+          "at": 3601.1359691619873,
+          "deltaMs": 297.4250316619873,
+          "delta": -0.9108293075684379
+        },
+        {
+          "at": 3698.5700130462646,
+          "deltaMs": 295.1021194458008,
+          "delta": -0.7989130434782616
+        },
+        {
+          "at": 3798.5010147094727,
+          "deltaMs": 295.07899284362793,
+          "delta": -0.7334943639291467
+        },
+        {
+          "at": 3898.5610008239746,
+          "deltaMs": 297.90401458740234,
+          "delta": -0.6821658615136847
+        },
+        {
+          "at": 3993.6721324920654,
+          "deltaMs": 300.4319667816162,
+          "delta": -0.6159420289855042
+        },
+        {
+          "at": 4093.5800075531006,
+          "deltaMs": 304.8989772796631,
+          "delta": -0.5291867954911424
+        },
+        {
+          "at": 4294.104099273682,
+          "deltaMs": 300.2429008483887,
+          "delta": -0.4186795491143336
+        },
+        {
+          "at": 4398.478984832764,
+          "deltaMs": 295.5431938171387,
+          "delta": -0.37761674718196403
+        },
+        {
+          "at": 4594.34700012207,
+          "deltaMs": 299.1039752960205,
+          "delta": -0.3005233494363928
+        },
+        {
+          "at": 4694.022178649902,
+          "deltaMs": 299.7767925262451,
+          "delta": -0.26509661835748943
+        },
+        {
+          "at": 4794.157981872559,
+          "deltaMs": 300.05717277526855,
+          "delta": -0.23490338164251412
+        },
+        {
+          "at": 5094.215154647827,
+          "deltaMs": 299.53479766845703,
+          "delta": -0.14492753623188293
+        },
+        {
+          "at": 5393.749952316284,
+          "deltaMs": 300.08912086486816,
+          "delta": -0.06682769726247884
+        },
+        {
+          "at": 5492.9070472717285,
+          "deltaMs": 300.6551265716553,
+          "delta": -0.045289855072464746
+        },
+        {
+          "at": 5595.440149307251,
+          "deltaMs": 298.494815826416,
+          "delta": -0.010466988727856119
+        },
+        {
+          "at": 5693.839073181152,
+          "deltaMs": 301.59592628479004,
+          "delta": -0.023752012882447104
+        },
+        {
+          "at": 6342.945098876953,
+          "deltaMs": 303.76386642456055,
+          "delta": -0.002415458937196746
+        },
+        {
+          "at": 6545.516014099121,
+          "deltaMs": 304.72707748413086,
+          "delta": -0.0036231884057968955
+        },
+        {
+          "at": 6646.708965301514,
+          "deltaMs": 296.69809341430664,
+          "delta": -0.007648953301128358
+        },
+        {
+          "at": 6943.40705871582,
+          "deltaMs": 300.5490303039551,
+          "delta": -0.007045088566826507
+        },
+        {
+          "at": 7043.889045715332,
+          "deltaMs": 298.89392852783203,
+          "delta": -0.008252818035426657
+        }
+      ]
+    },
+    "sunrise": {
+      "maxRolling300": 7.287231743169478,
+      "maxDirect300plusminus5": 6.903784219001608,
+      "maxRise300": 7.287231743169478,
+      "maxGapMs": 368.5898780822754,
+      "frames": [
+        {
+          "filename": "sunrise-0.png",
+          "timestamp": 1791070801.953687,
+          "relativeMs": -109.61318016052246,
+          "received": 1791070801.986,
+          "metadata": {
+            "offsetTop": 0,
+            "pageScaleFactor": 1,
+            "deviceWidth": 920,
+            "deviceHeight": 664,
+            "scrollOffsetX": 0,
+            "scrollOffsetY": 0,
+            "timestamp": 1791070801.953687
+          },
+          "mean": 27.59219001610306
+        },
+        {
+          "filename": "sunrise-1.png",
+          "timestamp": 1791070802.050225,
+          "relativeMs": -13.075113296508789,
+          "received": 1791070802.08,
+          "metadata": {
+            "offsetTop": 0,
+            "pageScaleFactor": 1,
+            "deviceWidth": 920,
+            "deviceHeight": 664,
+            "scrollOffsetX": 0,
+            "scrollOffsetY": 0,
+            "timestamp": 1791070802.050225
+          },
+          "mean": 27.59440418679549
+        },
+        {
+          "filename": "sunrise-2.png",
+          "timestamp": 1791070802.156056,
+          "relativeMs": 92.75579452514648,
+          "received": 1791070802.186,
+          "metadata": {
+            "offsetTop": 0,
+            "pageScaleFactor": 1,
+            "deviceWidth": 920,
+            "deviceHeight": 664,
+            "scrollOffsetX": 0,
+            "scrollOffsetY": 0,
+            "timestamp": 1791070802.156056
+          },
+          "mean": 27.59561191626409
+        },
+        {
+          "filename": "sunrise-3.png",
+          "timestamp": 1791070802.256566,
+          "relativeMs": 193.2659149169922,
+          "received": 1791070802.286,
+          "metadata": {
+            "offsetTop": 0,
+            "pageScaleFactor": 1,
+            "deviceWidth": 920,
+            "deviceHeight": 664,
+            "scrollOffsetX": 0,
+            "scrollOffsetY": 0,
+            "timestamp": 1791070802.256566
+          },
+          "mean": 27.998590982286636
+        },
+        {
+          "filename": "sunrise-4.png",
+          "timestamp": 1791070802.356042,
+          "relativeMs": 292.7417755126953,
+          "received": 1791070802.386,
+          "metadata": {
+            "offsetTop": 0,
+            "pageScaleFactor": 1,
+            "deviceWidth": 920,
+            "deviceHeight": 664,
+            "scrollOffsetX": 0,
+            "scrollOffsetY": 0,
+            "timestamp": 1791070802.356042
+          },
+          "mean": 28.781602254428343
+        },
+        {
+          "filename": "sunrise-5.png",
+          "timestamp": 1791070802.453544,
+          "relativeMs": 390.2437686920166,
+          "received": 1791070802.484,
+          "metadata": {
+            "offsetTop": 0,
+            "pageScaleFactor": 1,
+            "deviceWidth": 920,
+            "deviceHeight": 664,
+            "scrollOffsetX": 0,
+            "scrollOffsetY": 0,
+            "timestamp": 1791070802.453544
+          },
+          "mean": 29.882045088566827
+        },
+        {
+          "filename": "sunrise-6.png",
+          "timestamp": 1791070802.555912,
+          "relativeMs": 492.6118850708008,
+          "received": 1791070802.588,
+          "metadata": {
+            "offsetTop": 0,
+            "pageScaleFactor": 1,
+            "deviceWidth": 920,
+            "deviceHeight": 664,
+            "scrollOffsetX": 0,
+            "scrollOffsetY": 0,
+            "timestamp": 1791070802.555912
+          },
+          "mean": 31.07145732689211
+        },
+        {
+          "filename": "sunrise-7.png",
+          "timestamp": 1791070802.661281,
+          "relativeMs": 597.9809761047363,
+          "received": 1791070802.693,
+          "metadata": {
+            "offsetTop": 0,
+            "pageScaleFactor": 1,
+            "deviceWidth": 920,
+            "deviceHeight": 664,
+            "scrollOffsetX": 0,
+            "scrollOffsetY": 0,
+            "timestamp": 1791070802.661281
+          },
+          "mean": 32.509661835748794
+        },
+        {
+          "filename": "sunrise-8.png",
+          "timestamp": 1791070802.760676,
+          "relativeMs": 697.3757743835449,
+          "received": 1791070802.793,
+          "metadata": {
+            "offsetTop": 0,
+            "pageScaleFactor": 1,
+            "deviceWidth": 920,
+            "deviceHeight": 664,
+            "scrollOffsetX": 0,
+            "scrollOffsetY": 0,
+            "timestamp": 1791070802.760676
+          },
+          "mean": 34.51932367149758
+        },
+        {
+          "filename": "sunrise-9.png",
+          "timestamp": 1791070802.86112,
+          "relativeMs": 797.8198528289795,
+          "received": 1791070802.894,
+          "metadata": {
+            "offsetTop": 0,
+            "pageScaleFactor": 1,
+            "deviceWidth": 920,
+            "deviceHeight": 664,
+            "scrollOffsetX": 0,
+            "scrollOffsetY": 0,
+            "timestamp": 1791070802.86112
+          },
+          "mean": 36.847624798711756
+        },
+        {
+          "filename": "sunrise-10.png",
+          "timestamp": 1791070802.955953,
+          "relativeMs": 892.6527500152588,
+          "received": 1791070802.989,
+          "metadata": {
+            "offsetTop": 0,
+            "pageScaleFactor": 1,
+            "deviceWidth": 920,
+            "deviceHeight": 664,
+            "scrollOffsetX": 0,
+            "scrollOffsetY": 0,
+            "timestamp": 1791070802.955953
+          },
+          "mean": 39.25402576489533
+        },
+        {
+          "filename": "sunrise-11.png",
+          "timestamp": 1791070803.053341,
+          "relativeMs": 990.0407791137695,
+          "received": 1791070803.086,
+          "metadata": {
+            "offsetTop": 0,
+            "pageScaleFactor": 1,
+            "deviceWidth": 920,
+            "deviceHeight": 664,
+            "scrollOffsetX": 0,
+            "scrollOffsetY": 0,
+            "timestamp": 1791070803.053341
+          },
+          "mean": 41.64512882447665
+        },
+        {
+          "filename": "sunrise-12.png",
+          "timestamp": 1791070803.156026,
+          "relativeMs": 1092.7257537841797,
+          "received": 1791070803.189,
+          "metadata": {
+            "offsetTop": 0,
+            "pageScaleFactor": 1,
+            "deviceWidth": 920,
+            "deviceHeight": 664,
+            "scrollOffsetX": 0,
+            "scrollOffsetY": 0,
+            "timestamp": 1791070803.156026
+          },
+          "mean": 43.90499194847021
+        },
+        {
+          "filename": "sunrise-13.png",
+          "timestamp": 1791070803.253763,
+          "relativeMs": 1190.4628276824951,
+          "received": 1791070803.288,
+          "metadata": {
+            "offsetTop": 0,
+            "pageScaleFactor": 1,
+            "deviceWidth": 920,
+            "deviceHeight": 664,
+            "scrollOffsetX": 0,
+            "scrollOffsetY": 0,
+            "timestamp": 1791070803.253763
+          },
+          "mean": 46.15780998389694
+        },
+        {
+          "filename": "sunrise-14.png",
+          "timestamp": 1791070803.354234,
+          "relativeMs": 1290.9338474273682,
+          "received": 1791070803.388,
+          "metadata": {
+            "offsetTop": 0,
+            "pageScaleFactor": 1,
+            "deviceWidth": 920,
+            "deviceHeight": 664,
+            "scrollOffsetX": 0,
+            "scrollOffsetY": 0,
+            "timestamp": 1791070803.354234
+          },
+          "mean": 48.227858293075684
+        },
+        {
+          "filename": "sunrise-15.png",
+          "timestamp": 1791070803.464987,
+          "relativeMs": 1401.6869068145752,
+          "received": 1791070803.5,
+          "metadata": {
+            "offsetTop": 0,
+            "pageScaleFactor": 1,
+            "deviceWidth": 920,
+            "deviceHeight": 664,
+            "scrollOffsetX": 0,
+            "scrollOffsetY": 0,
+            "timestamp": 1791070803.464987
+          },
+          "mean": 50.167270531400966
+        },
+        {
+          "filename": "sunrise-16.png",
+          "timestamp": 1791070803.554696,
+          "relativeMs": 1491.3959503173828,
+          "received": 1791070803.588,
+          "metadata": {
+            "offsetTop": 0,
+            "pageScaleFactor": 1,
+            "deviceWidth": 920,
+            "deviceHeight": 664,
+            "scrollOffsetX": 0,
+            "scrollOffsetY": 0,
+            "timestamp": 1791070803.554696
+          },
+          "mean": 51.97906602254428
+        },
+        {
+          "filename": "sunrise-17.png",
+          "timestamp": 1791070803.658268,
+          "relativeMs": 1594.9678421020508,
+          "received": 1791070803.693,
+          "metadata": {
+            "offsetTop": 0,
+            "pageScaleFactor": 1,
+            "deviceWidth": 920,
+            "deviceHeight": 664,
+            "scrollOffsetX": 0,
+            "scrollOffsetY": 0,
+            "timestamp": 1791070803.658268
+          },
+          "mean": 53.633856682769725
+        },
+        {
+          "filename": "sunrise-18.png",
+          "timestamp": 1791070803.751731,
+          "relativeMs": 1688.4307861328125,
+          "received": 1791070803.786,
+          "metadata": {
+            "offsetTop": 0,
+            "pageScaleFactor": 1,
+            "deviceWidth": 920,
+            "deviceHeight": 664,
+            "scrollOffsetX": 0,
+            "scrollOffsetY": 0,
+            "timestamp": 1791070803.751731
+          },
+          "mean": 55.22081320450886
+        },
+        {
+          "filename": "sunrise-19.png",
+          "timestamp": 1791070803.851612,
+          "relativeMs": 1788.3119583129883,
+          "received": 1791070803.886,
+          "metadata": {
+            "offsetTop": 0,
+            "pageScaleFactor": 1,
+            "deviceWidth": 920,
+            "deviceHeight": 664,
+            "scrollOffsetX": 0,
+            "scrollOffsetY": 0,
+            "timestamp": 1791070803.851612
+          },
+          "mean": 56.67673107890499
+        },
+        {
+          "filename": "sunrise-20.png",
+          "timestamp": 1791070803.952851,
+          "relativeMs": 1889.5509243011475,
+          "received": 1791070803.987,
+          "metadata": {
+            "offsetTop": 0,
+            "pageScaleFactor": 1,
+            "deviceWidth": 920,
+            "deviceHeight": 664,
+            "scrollOffsetX": 0,
+            "scrollOffsetY": 0,
+            "timestamp": 1791070803.952851
+          },
+          "mean": 58.05072463768116
+        },
+        {
+          "filename": "sunrise-21.png",
+          "timestamp": 1791070804.053946,
+          "relativeMs": 1990.6458854675293,
+          "received": 1791070804.088,
+          "metadata": {
+            "offsetTop": 0,
+            "pageScaleFactor": 1,
+            "deviceWidth": 920,
+            "deviceHeight": 664,
+            "scrollOffsetX": 0,
+            "scrollOffsetY": 0,
+            "timestamp": 1791070804.053946
+          },
+          "mean": 59.31702898550725
+        },
+        {
+          "filename": "sunrise-22.png",
+          "timestamp": 1791070804.154068,
+          "relativeMs": 2090.7678604125977,
+          "received": 1791070804.19,
+          "metadata": {
+            "offsetTop": 0,
+            "pageScaleFactor": 1,
+            "deviceWidth": 920,
+            "deviceHeight": 664,
+            "scrollOffsetX": 0,
+            "scrollOffsetY": 0,
+            "timestamp": 1791070804.154068
+          },
+          "mean": 60.489533011272144
+        },
+        {
+          "filename": "sunrise-23.png",
+          "timestamp": 1791070804.255596,
+          "relativeMs": 2192.295789718628,
+          "received": 1791070804.29,
+          "metadata": {
+            "offsetTop": 0,
+            "pageScaleFactor": 1,
+            "deviceWidth": 920,
+            "deviceHeight": 664,
+            "scrollOffsetX": 0,
+            "scrollOffsetY": 0,
+            "timestamp": 1791070804.255596
+          },
+          "mean": 61.481280193236714
+        },
+        {
+          "filename": "sunrise-24.png",
+          "timestamp": 1791070804.355799,
+          "relativeMs": 2292.498826980591,
+          "received": 1791070804.391,
+          "metadata": {
+            "offsetTop": 0,
+            "pageScaleFactor": 1,
+            "deviceWidth": 920,
+            "deviceHeight": 664,
+            "scrollOffsetX": 0,
+            "scrollOffsetY": 0,
+            "timestamp": 1791070804.355799
+          },
+          "mean": 62.427536231884055
+        },
+        {
+          "filename": "sunrise-25.png",
+          "timestamp": 1791070804.454066,
+          "relativeMs": 2390.765905380249,
+          "received": 1791070804.489,
+          "metadata": {
+            "offsetTop": 0,
+            "pageScaleFactor": 1,
+            "deviceWidth": 920,
+            "deviceHeight": 664,
+            "scrollOffsetX": 0,
+            "scrollOffsetY": 0,
+            "timestamp": 1791070804.454066
+          },
+          "mean": 63.18619162640902
+        },
+        {
+          "filename": "sunrise-26.png",
+          "timestamp": 1791070804.560461,
+          "relativeMs": 2497.1609115600586,
+          "received": 1791070804.595,
+          "metadata": {
+            "offsetTop": 0,
+            "pageScaleFactor": 1,
+            "deviceWidth": 920,
+            "deviceHeight": 664,
+            "scrollOffsetX": 0,
+            "scrollOffsetY": 0,
+            "timestamp": 1791070804.560461
+          },
+          "mean": 63.731884057971016
+        },
+        {
+          "filename": "sunrise-27.png",
+          "timestamp": 1791070804.65557,
+          "relativeMs": 2592.2698974609375,
+          "received": 1791070804.69,
+          "metadata": {
+            "offsetTop": 0,
+            "pageScaleFactor": 1,
+            "deviceWidth": 920,
+            "deviceHeight": 664,
+            "scrollOffsetX": 0,
+            "scrollOffsetY": 0,
+            "timestamp": 1791070804.65557
+          },
+          "mean": 64.01892109500805
+        },
+        {
+          "filename": "sunrise-28.png",
+          "timestamp": 1791070805.02416,
+          "relativeMs": 2960.859775543213,
+          "received": 1791070805.063,
+          "metadata": {
+            "offsetTop": 0,
+            "pageScaleFactor": 1,
+            "deviceWidth": 920,
+            "deviceHeight": 664,
+            "scrollOffsetX": 0,
+            "scrollOffsetY": 0,
+            "timestamp": 1791070805.02416
+          },
+          "mean": 64.18679549114331
+        },
+        {
+          "filename": "sunrise-29.png",
+          "timestamp": 1791070805.128542,
+          "relativeMs": 3065.241813659668,
+          "received": 1791070805.165,
+          "metadata": {
+            "offsetTop": 0,
+            "pageScaleFactor": 1,
+            "deviceWidth": 920,
+            "deviceHeight": 664,
+            "scrollOffsetX": 0,
+            "scrollOffsetY": 0,
+            "timestamp": 1791070805.128542
+          },
+          "mean": 64.23268921095008
+        },
+        {
+          "filename": "sunrise-30.png",
+          "timestamp": 1791070805.222565,
+          "relativeMs": 3159.2648029327393,
+          "received": 1791070805.259,
+          "metadata": {
+            "offsetTop": 0,
+            "pageScaleFactor": 1,
+            "deviceWidth": 920,
+            "deviceHeight": 664,
+            "scrollOffsetX": 0,
+            "scrollOffsetY": 0,
+            "timestamp": 1791070805.222565
+          },
+          "mean": 64.27918679549114
+        },
+        {
+          "filename": "sunrise-31.png",
+          "timestamp": 1791070805.323667,
+          "relativeMs": 3260.366916656494,
+          "received": 1791070805.36,
+          "metadata": {
+            "offsetTop": 0,
+            "pageScaleFactor": 1,
+            "deviceWidth": 920,
+            "deviceHeight": 664,
+            "scrollOffsetX": 0,
+            "scrollOffsetY": 0,
+            "timestamp": 1791070805.323667
+          },
+          "mean": 64.31300322061192
+        },
+        {
+          "filename": "sunrise-32.png",
+          "timestamp": 1791070805.417201,
+          "relativeMs": 3353.900909423828,
+          "received": 1791070805.453,
+          "metadata": {
+            "offsetTop": 0,
+            "pageScaleFactor": 1,
+            "deviceWidth": 920,
+            "deviceHeight": 664,
+            "scrollOffsetX": 0,
+            "scrollOffsetY": 0,
+            "timestamp": 1791070805.417201
+          },
+          "mean": 64.34078099838969
+        },
+        {
+          "filename": "sunrise-33.png",
+          "timestamp": 1791070805.524156,
+          "relativeMs": 3460.8559608459473,
+          "received": 1791070805.56,
+          "metadata": {
+            "offsetTop": 0,
+            "pageScaleFactor": 1,
+            "deviceWidth": 920,
+            "deviceHeight": 664,
+            "scrollOffsetX": 0,
+            "scrollOffsetY": 0,
+            "timestamp": 1791070805.524156
+          },
+          "mean": 64.35708534621578
+        }
+      ],
+      "rollingWindows": [
+        {
+          "at": 92.75579452514648,
+          "delta": 2.3156203291500717
+        },
+        {
+          "at": 193.2659149169922,
+          "delta": 3.0817933331985152
+        },
+        {
+          "at": 292.7417755126953,
+          "delta": 3.6565486492212926
+        },
+        {
+          "at": 390.2437686920166,
+          "delta": 4.493076673989776
+        },
+        {
+          "at": 492.6118850708008,
+          "delta": 5.655446396077487
+        },
+        {
+          "at": 597.9809761047363,
+          "delta": 6.875184296111797
+        },
+        {
+          "at": 697.3757743835449,
+          "delta": 7.287231743169478
+        },
+        {
+          "at": 797.8198528289795,
+          "delta": 7.174785011217196
+        },
+        {
+          "at": 892.6527500152588,
+          "delta": 6.948904145460816
+        },
+        {
+          "at": 990.0407791137695,
+          "delta": 6.564329192009424
+        },
+        {
+          "at": 1092.7257537841797,
+          "delta": 6.105358584938699
+        },
+        {
+          "at": 1190.4628276824951,
+          "delta": 5.802410364715698
+        },
+        {
+          "at": 1290.9338474273682,
+          "delta": 5.341546378670216
+        },
+        {
+          "at": 1401.6869068145752,
+          "delta": 5.246770511993439
+        },
+        {
+          "at": 1491.3959503173828,
+          "delta": 4.739520335185375
+        },
+        {
+          "at": 1594.9678421020508,
+          "delta": 4.484719670604868
+        },
+        {
+          "at": 1688.4307861328125,
+          "delta": 4.068469690727859
+        },
+        {
+          "at": 1788.3119583129883,
+          "delta": 3.7840414619483838
+        },
+        {
+          "at": 1889.5509243011475,
+          "delta": 3.4037431054123743
+        },
+        {
+          "at": 1990.6458854675293,
+          "delta": 3.0930092029650993
+        },
+        {
+          "at": 2090.7678604125977,
+          "delta": 2.696668642358965
+        },
+        {
+          "at": 2192.295789718628,
+          "delta": 2.225651000283044
+        },
+        {
+          "at": 2292.498826980591,
+          "delta": 1.5914891291582975
+        },
+        {
+          "at": 2390.765905380249,
+          "delta": 0.877589511791804
+        },
+        {
+          "at": 2497.1609115600586,
+          "delta": 0.38035472509832857
+        },
+        {
+          "at": 2592.2698974609375,
+          "delta": 0.1366351108245425
+        },
+        {
+          "at": 2960.859775543213,
+          "delta": 0.1263540989779699
+        },
+        {
+          "at": 3065.241813659668,
+          "delta": 0.1098206075828756
+        },
+        {
+          "at": 3159.2648029327393,
+          "delta": 0.07765599283028735
+        }
+      ],
+      "directPairs": [
+        {
+          "at": 92.75579452514648,
+          "deltaMs": 297.4879741668701,
+          "delta": 2.2864331723027362
+        },
+        {
+          "at": 193.2659149169922,
+          "deltaMs": 299.3459701538086,
+          "delta": 3.0728663446054725
+        },
+        {
+          "at": 892.6527500152588,
+          "deltaMs": 297.8100776672363,
+          "delta": 6.903784219001608
+        },
+        {
+          "at": 990.0407791137695,
+          "deltaMs": 300.89306831359863,
+          "delta": 6.582729468599034
+        },
+        {
+          "at": 1190.4628276824951,
+          "deltaMs": 300.9331226348877,
+          "delta": 5.821256038647341
+        },
+        {
+          "at": 1290.9338474273682,
+          "deltaMs": 304.0339946746826,
+          "delta": 5.405998389694041
+        },
+        {
+          "at": 1491.3959503173828,
+          "deltaMs": 296.91600799560547,
+          "delta": 4.697665056360712
+        },
+        {
+          "at": 1688.4307861328125,
+          "deltaMs": 302.2150993347168,
+          "delta": 4.096215780998392
+        },
+        {
+          "at": 1788.3119583129883,
+          "deltaMs": 302.4559020996094,
+          "delta": 3.812801932367151
+        },
+        {
+          "at": 1889.5509243011475,
+          "deltaMs": 302.74486541748047,
+          "delta": 3.430555555555557
+        },
+        {
+          "at": 1990.6458854675293,
+          "deltaMs": 301.8529415130615,
+          "delta": 3.1105072463768053
+        },
+        {
+          "at": 2090.7678604125977,
+          "deltaMs": 299.99804496765137,
+          "delta": 2.696658615136876
+        },
+        {
+          "at": 2192.295789718628,
+          "deltaMs": 304.86512184143066,
+          "delta": 2.250603864734302
+        },
+        {
+          "at": 2292.498826980591,
+          "deltaMs": 299.7710704803467,
+          "delta": 1.5913848631239986
+        },
+        {
+          "at": 2960.859775543213,
+          "deltaMs": 299.50714111328125,
+          "delta": 0.1262077294686037
+        },
+        {
+          "at": 3159.2648029327393,
+          "deltaMs": 301.591157913208,
+          "delta": 0.07789855072464036
+        }
+      ]
+    }
+  }
+}

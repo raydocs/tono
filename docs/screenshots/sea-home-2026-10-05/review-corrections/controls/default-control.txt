@@ -1,0 +1,30 @@
+[
+  {
+    theme: 'light',
+    baseline: false,
+    scene: false,
+    title: '总览',
+    exceptions: []
+  },
+  {
+    theme: 'light',
+    baseline: true,
+    scene: false,
+    title: '总览',
+    exceptions: []
+  },
+  {
+    theme: 'dark',
+    baseline: false,
+    scene: false,
+    title: '总览',
+    exceptions: []
+  },
+  {
+    theme: 'dark',
+    baseline: true,
+    scene: false,
+    title: '总览',
+    exceptions: []
+  }
+]

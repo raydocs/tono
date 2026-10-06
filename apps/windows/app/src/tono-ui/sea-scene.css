@@ -1,0 +1,927 @@
+/* Decorative scene values are scoped; application/control tokens stay untouched. */
+.sea-scene {
+  --sea-unit: 1px;
+  --sea-offset: 0px;
+  --sea-scale: 1;
+  --sea-disk-shape: 1;
+  --sea-shape-ease: var(--sea-sun-ease);
+  --sea-day: 1;
+  --sea-dusk: 0.75;
+  --sea-stars: 0;
+  --sea-red: 0;
+  --sea-shade: 0;
+  --sea-glow: 1;
+  --sea-mirror: 0.1;
+  --sea-path: 1;
+  --sea-path-scale: 1;
+  --sea-path-red: 0;
+  --sea-light: 0.5;
+  --sea-light-red: 0;
+  --sea-horizon: 0.9;
+  --sea-sun-time: var(--tono-ambient-sun-arrive);
+  --sea-sun-ease: var(--tono-ambient-ease-sun);
+  --sea-sky-time: var(--tono-ambient-sky);
+  --sea-sky-ease: var(--tono-ambient-ease-sky);
+  --sea-day-time: var(--sea-sky-time);
+  --sea-stars-time: var(--sea-sky-time);
+  --sea-glow-time: var(--sea-sky-time);
+  --sea-path-time: var(--sea-sky-time);
+  --sea-light-time: var(--sea-sky-time);
+  isolation: isolate;
+  contain: layout paint;
+}
+@supports (width: 1cqh) {
+  .sea-scene {
+    --sea-unit: clamp(1px, 0.1368421cqh, 1.5789474px);
+  }
+}
+.sea-scene[data-phase="connecting"] {
+  --sea-offset: calc(var(--sea-progress-offset, 125) * var(--sea-unit));
+  --sea-scale: 1.08;
+  /* Round above 60 local px; at the horizon, at most 3% vertical compression.
+     This is a target-shape approximation, not a per-frame refraction model. */
+  --sea-disk-shape: calc(
+    1 -
+    clamp(0, (var(--sea-progress-offset, 125) - 85) * 0.0005, 0.03)
+  );
+  --sea-day: 0.18;
+  --sea-dusk: 1;
+  --sea-stars: 0.3;
+  --sea-red: 0.45;
+  --sea-glow: 0.75;
+  --sea-mirror: 0.6;
+  --sea-path: 0.9;
+  --sea-path-scale: 0.72;
+  --sea-path-red: 0.6;
+  --sea-light: 0.6;
+  --sea-light-red: 0.45;
+  --sea-sun-time: var(--tono-ambient-sun-rise);
+  --sea-sky-ease: var(--tono-ambient-ease-dawn);
+}
+.sea-scene[data-phase="failed"] {
+  --sea-offset: calc(223 * var(--sea-unit));
+  --sea-scale: 1.1;
+  --sea-disk-shape: 0.97;
+  --sea-day: 0;
+  --sea-dusk: 0.5;
+  --sea-stars: 0.6;
+  --sea-red: 1;
+  --sea-shade: 0.08;
+  --sea-glow: 0.4;
+  --sea-mirror: 0.7;
+  --sea-path: 0.22;
+  --sea-path-scale: 0.2;
+  --sea-path-red: 1;
+  --sea-light: 0.4;
+  --sea-light-red: 1;
+  --sea-horizon: 0.55;
+  --sea-sun-time: var(--tono-ambient-sun-fail);
+  --sea-sun-ease: var(--tono-ambient-ease-fail);
+  --sea-sky-time: 2200ms;
+  --sea-day-time: 1800ms;
+  --sea-glow-time: 1800ms;
+  --sea-stars-time: 2600ms;
+}
+.sea-scene[data-phase="idle"] {
+  --sea-offset: calc(290 * var(--sea-unit));
+  --sea-scale: 1.1;
+  --sea-disk-shape: 0.97;
+  --sea-shape-ease: var(--tono-ambient-ease-horizon);
+  --sea-day: 0;
+  --sea-dusk: 0.22;
+  --sea-stars: 1;
+  --sea-red: 1;
+  --sea-shade: 0.26;
+  --sea-glow: 0;
+  --sea-mirror: 0;
+  --sea-path: 0;
+  --sea-path-scale: 0.3;
+  --sea-path-red: 1;
+  --sea-light: 0;
+  --sea-light-red: 1;
+  --sea-horizon: 0.26;
+  --sea-sun-time: var(--tono-ambient-sun-set);
+  --sea-sun-ease: var(--tono-ambient-ease-set);
+  --sea-sky-time: var(--tono-ambient-night);
+  --sea-sky-ease: cubic-bezier(0.5, 0, 0.3, 1);
+  --sea-day-time: 3400ms;
+  --sea-glow-time: 3400ms;
+  --sea-path-time: 4400ms;
+  --sea-light-time: 5600ms;
+}
+.sea-sky {
+  background: linear-gradient(180deg, #04050a, #080b19 56%, #111529);
+}
+.sea-water {
+  background: linear-gradient(180deg, #0b0d19, #05060a);
+}
+.sea-day {
+  opacity: var(--sea-day);
+  transition: opacity var(--sea-day-time) var(--sea-sky-ease);
+}
+.sea-dusk {
+  isolation: isolate;
+  opacity: var(--sea-dusk);
+  transition: opacity var(--sea-sky-time) var(--sea-sky-ease);
+}
+.sea-sky-day {
+  background:
+    radial-gradient(
+      calc(440 * var(--sea-unit)) calc(310 * var(--sea-unit)) at 67.3913%
+        calc(100% - 134 * var(--sea-unit)),
+      #ffb4648c,
+      #e260463d 46%,
+      transparent
+    ),
+    linear-gradient(180deg, transparent 42%, #ffac6266);
+}
+.sea-sky-dusk {
+  background:
+    radial-gradient(
+      calc(540 * var(--sea-unit)) calc(210 * var(--sea-unit)) at 67.3913% 100%,
+      #ff96549e,
+      transparent
+    ),
+    linear-gradient(
+      180deg,
+      transparent 18%,
+      #5c162899 62%,
+      #ce4232d9 90%,
+      #ff9654f2
+    );
+}
+.sea-water-day {
+  background: linear-gradient(
+    180deg,
+    #ffa66057,
+    #aa40361f 32%,
+    transparent 76%
+  );
+}
+.sea-water-dusk {
+  background: linear-gradient(
+    180deg,
+    #ce423280,
+    #5c162842 26%,
+    transparent 70%
+  );
+}
+.sea-stars {
+  opacity: var(--sea-stars);
+  transition: opacity var(--sea-stars-time) var(--sea-sky-ease);
+}
+/* Only stars stagger at dawn; the sky and controls still respond immediately.
+   All three exits settle inside the existing 2600ms sky transition. */
+.sea-scene[data-phase="connecting"] .sea-stars,
+.sea-scene[data-phase="connected"] .sea-stars {
+  transition-duration: var(--tono-ambient-star-exit);
+  transition-delay: calc(
+    var(--sea-star-tier) *
+    var(--tono-ambient-star-stagger)
+  );
+}
+.sea-star {
+  border-radius: 50%;
+  opacity: 0.3;
+}
+.sea-track,
+.sea-mirror-track {
+  transform: translateY(var(--sea-offset)) scale(var(--sea-scale));
+  transition: transform var(--sea-sun-time) var(--sea-sun-ease);
+}
+.sea-mirror-track {
+  transform: translateY(calc(-1 * var(--sea-offset))) scale(var(--sea-scale));
+}
+.sea-disk {
+  background: linear-gradient(
+    180deg,
+    #fff6de,
+    #ffd58e 30%,
+    #ffa35e 66%,
+    #f2685a
+  );
+}
+.sea-red {
+  background: linear-gradient(
+    180deg,
+    #ffb86e,
+    #ff7a44 34%,
+    #e0403e 70%,
+    #9a1e38
+  );
+  opacity: var(--sea-red);
+  transition: opacity 2200ms var(--tono-ambient-ease-sky);
+}
+.sea-shade {
+  background: #2a0714;
+  opacity: var(--sea-shade);
+  transition: opacity var(--sea-sun-time) var(--sea-sun-ease);
+}
+.sea-glow-pulse::after {
+  content: "";
+  position: absolute;
+  inset: calc(-10 * var(--sea-unit));
+  background: radial-gradient(
+    ellipse closest-side,
+    #ffe9c280 85%,
+    #ffcb7f66 91%,
+    transparent
+  );
+}
+.sea-track .sea-sun-body::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: radial-gradient(
+    closest-side,
+    transparent calc(100% - 8 * var(--sea-unit)),
+    #ffd59a99 calc(100% - 2 * var(--sea-unit)),
+    #ffe6bfcf
+  );
+}
+.sea-sun-glow {
+  opacity: var(--sea-glow);
+  transition: opacity var(--sea-glow-time) var(--sea-sky-ease);
+}
+.sea-track .sea-sun-glow {
+  transform: scaleY(var(--sea-disk-shape));
+  transition:
+    opacity var(--sea-glow-time) var(--sea-sky-ease),
+    transform var(--sea-sun-time) var(--sea-shape-ease);
+}
+.sea-glow-pulse::before {
+  content: "";
+  position: absolute;
+  inset: calc(-250 * var(--sea-unit));
+  background: radial-gradient(
+    ellipse closest-side,
+    #ffaa6080,
+    #ffaa6052 27%,
+    #f0605429 58%,
+    transparent 72%
+  );
+}
+.sea-halo {
+  opacity: 0;
+  transition: opacity 800ms ease;
+}
+.sea-scene[data-phase="connecting"] .sea-halo {
+  opacity: 1;
+}
+.sea-breathe {
+  background: radial-gradient(
+    ellipse,
+    #ff965a99,
+    #f0545a3d 45%,
+    transparent 72%
+  );
+  animation: sea-breathe var(--tono-ambient-breathe) ease-in-out infinite;
+}
+.sea-scene:not([data-phase="connecting"]) .sea-breathe {
+  animation-play-state: paused;
+}
+.sea-cloud {
+  background-size: 60% 100%;
+  background-repeat: no-repeat;
+}
+.sea-cloud-1 {
+  background-image: url("./sea-assets/cloud-1.png");
+  animation: sea-cloud var(--tono-ambient-cloud-near) linear -47s infinite;
+}
+.sea-cloud-2 {
+  background-image: url("./sea-assets/cloud-2.png");
+  animation: sea-cloud var(--tono-ambient-cloud-far) linear -98s infinite;
+}
+.sea-water-light {
+  opacity: var(--sea-light);
+  transition: opacity var(--sea-light-time) var(--sea-sky-ease);
+}
+.sea-light-warm,
+.sea-light-red {
+  background: radial-gradient(
+    50% 100% at 50% 0%,
+    #ffb46e,
+    #ffb46e57 42%,
+    transparent
+  );
+  opacity: calc(1 - var(--sea-light-red));
+  transition: opacity var(--sea-light-time) var(--sea-sky-ease);
+}
+.sea-light-red {
+  background: radial-gradient(
+    50% 100% at 50% 0%,
+    #e2443f,
+    #e2443f57 42%,
+    transparent
+  );
+  opacity: var(--sea-light-red);
+}
+.sea-mirror {
+  opacity: var(--sea-mirror);
+  transition: opacity var(--sea-sky-time) var(--sea-sky-ease);
+  mask-image: url("./sea-assets/reflection-envelope.png");
+  mask-mode: luminance;
+  mask-size: 100% 100%;
+}
+.sea-mirror .sea-disk,
+.sea-mirror .sea-red {
+  transform: scaleY(-1);
+}
+.sea-reflected-disk {
+  opacity: 0.6;
+  transition: opacity var(--sea-sky-time) var(--sea-sky-ease);
+  mask-image: radial-gradient(
+    closest-side,
+    #000 calc(100% - 32 * var(--sea-unit)),
+    transparent
+  );
+}
+.sea-reflected-disk .sea-red {
+  opacity: max(0.65, var(--sea-red));
+}
+.sea-scene[data-phase="failed"] .sea-reflected-disk {
+  opacity: 0.9;
+}
+.sea-mirror-soft {
+  border-radius: 50%;
+  background: radial-gradient(
+    ellipse,
+    #ff824c73,
+    #ff824c4d 50%,
+    transparent 72%
+  );
+}
+.sea-scene[data-phase="failed"] .sea-mirror-soft {
+  opacity: 0.18;
+}
+.sea-ripple {
+  mask-size: 100% 270px;
+  mask-repeat: repeat-y;
+  mask-mode: luminance;
+}
+.sea-ripple-1 {
+  mask-image: url("./sea-assets/ripple-1.png");
+}
+.sea-ripple-2 {
+  mask-image: url("./sea-assets/ripple-2.png");
+}
+.sea-ripple-flow-1 {
+  animation: sea-ripple-flow var(--tono-ambient-reflection-near) linear infinite;
+}
+.sea-ripple-flow-2 {
+  animation: sea-ripple-flow var(--tono-ambient-reflection-far) linear -7s
+    infinite;
+}
+.sea-ripple-counter {
+  animation-name: sea-ripple-counter;
+}
+@keyframes sea-ripple-flow {
+  from {
+    transform: translateY(0);
+  }
+  to {
+    transform: translateY(270px);
+  }
+}
+@keyframes sea-ripple-counter {
+  from {
+    transform: translateY(0);
+  }
+  to {
+    transform: translateY(-270px);
+  }
+}
+.sea-specks {
+  mask-mode: luminance;
+}
+.sea-sun-path,
+.sea-moon-path {
+  mask-image: url("./sea-assets/path-envelope.png");
+  mask-mode: luminance;
+  mask-size: 100% 100%;
+}
+.sea-sun-path {
+  opacity: var(--sea-path);
+  transform: scaleY(var(--sea-path-scale));
+  transform-origin: 50% 0;
+  transition:
+    opacity var(--sea-path-time) var(--sea-sky-ease),
+    transform var(--sea-sun-time) var(--sea-sun-ease);
+}
+.sea-path-gold {
+  background: #ffd9a0;
+  opacity: calc(1 - var(--sea-path-red));
+  transition: opacity var(--sea-path-time) var(--sea-sky-ease);
+}
+.sea-path-red {
+  background: #e8553f;
+  opacity: var(--sea-path-red);
+  transition: opacity var(--sea-path-time) var(--sea-sky-ease);
+}
+.sea-horizon {
+  background: radial-gradient(
+    ellipse calc(260 * var(--sea-unit)) 9px at 67.3913% 50%,
+    #ffd6aa60,
+    #ff966420 45%,
+    transparent
+  );
+  opacity: var(--sea-horizon);
+  transition: opacity var(--sea-sky-time) var(--sea-sky-ease);
+}
+.sea-moon {
+  opacity: 0;
+  transform: translateY(calc(30 * var(--sea-unit)));
+  transition:
+    opacity var(--tono-ambient-moon-exit) ease-out,
+    transform var(--tono-ambient-moon-exit) ease-in;
+}
+.sea-moon-glow {
+  border-radius: 50%;
+  background: radial-gradient(
+    ellipse,
+    #ced8ff33,
+    #ced8ff0f 40%,
+    transparent 70%
+  );
+  animation: sea-moon-breathe var(--tono-ambient-moon-breathe) ease-in-out
+    infinite;
+}
+.sea-scene:not([data-phase="idle"]) .sea-moon .sea-loop,
+.sea-scene:not([data-phase="idle"]) .sea-moon-path .sea-loop {
+  animation-play-state: paused;
+}
+@keyframes sea-moon-breathe {
+  0%,
+  100% {
+    opacity: 0.82;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.025);
+  }
+}
+.sea-crescent {
+  overflow: visible;
+  transform: rotate(-16deg);
+}
+.sea-moon-path {
+  opacity: 0;
+  transition: opacity var(--tono-ambient-moon-exit) ease-out;
+}
+.sea-scene[data-phase="idle"] .sea-moon {
+  opacity: 1;
+  transform: translateY(0);
+  transition:
+    opacity 3400ms var(--tono-ambient-ease-sky) 2800ms,
+    transform 4200ms var(--tono-ambient-ease-sun) 2400ms;
+}
+.sea-scene[data-phase="idle"] .sea-moon-path {
+  opacity: 0.34;
+  transition: opacity 3400ms var(--tono-ambient-ease-sky) 3200ms;
+}
+.sea-star-tier-1 {
+  opacity: 0.55;
+}
+.sea-star-tier-2 {
+  opacity: 0.9;
+}
+.sea-twinkle {
+  animation: sea-twinkle ease-in-out infinite;
+}
+.sea-grain {
+  background: url("./sea-assets/grain.png") repeat;
+  mix-blend-mode: overlay;
+  opacity: 0.5;
+}
+@keyframes sea-breathe {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+@keyframes sea-cloud {
+  from {
+    transform: translateX(-65%);
+  }
+  to {
+    transform: translateX(100%);
+  }
+}
+@keyframes sea-twinkle {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.2;
+  }
+}
+
+.sea-swell-envelope {
+  mask-image: linear-gradient(
+    transparent,
+    #000 16%,
+    #00000080 42%,
+    transparent calc(100% - 100px)
+  );
+}
+.sea-swell {
+  background: #ced8ff;
+  opacity: 0.04;
+  mask-mode: luminance;
+  mask-size: 100% 180px;
+  mask-repeat: repeat-y;
+}
+.sea-swell-1 {
+  mask-image: url("./sea-assets/swell-1.png");
+  animation: sea-swell-flow var(--tono-ambient-swell-near) linear infinite;
+}
+.sea-swell-2 {
+  mask-image: url("./sea-assets/swell-2.png");
+  animation: sea-swell-flow var(--tono-ambient-swell-far) linear -19s infinite
+    reverse;
+}
+@keyframes sea-swell-flow {
+  from {
+    transform: translateY(0);
+  }
+  to {
+    transform: translateY(180px);
+  }
+}
+
+.sea-scene[data-phase="idle"] .sea-stars-bright {
+  transition-duration: 3000ms;
+  transition-timing-function: ease-out;
+}
+.sea-afterglow {
+  background: radial-gradient(
+    ellipse at 50% 100%,
+    #ff96544d,
+    #f2685a14 50%,
+    transparent 72%
+  );
+  opacity: 0.5;
+  transition: opacity 2600ms var(--sea-sky-ease);
+}
+.sea-scene[data-phase="idle"] .sea-afterglow {
+  opacity: 0;
+  transition: opacity var(--tono-ambient-afterglow) var(--tono-ambient-ease-set);
+}
+.sea-arrival-bloom {
+  background: radial-gradient(
+    ellipse,
+    #fff6de33,
+    #ffb46414 45%,
+    transparent 72%
+  );
+  opacity: 0;
+}
+.sea-arrival-sweep {
+  background: linear-gradient(transparent, #ffe2b099, transparent);
+  opacity: 0;
+}
+.sea-scene[data-arrival="true"] .sea-arrival-bloom {
+  animation: sea-arrival-bloom var(--tono-ambient-bloom) ease-out;
+}
+.sea-scene[data-arrival="true"] .sea-arrival-sweep {
+  animation: sea-arrival-sweep var(--tono-ambient-sweep) ease-out
+    var(--tono-ambient-sweep-delay);
+}
+@keyframes sea-arrival-bloom {
+  0%,
+  20%,
+  52% {
+    opacity: 0;
+    transform: scale(1);
+  }
+  8% {
+    opacity: 0.12;
+    transform: scale(1.025);
+  }
+  74% {
+    opacity: 0.5;
+    transform: scale(1.08);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1);
+  }
+}
+@keyframes sea-arrival-sweep {
+  0% {
+    opacity: 0;
+    transform: translateY(0);
+  }
+  20% {
+    opacity: 0.45;
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(calc(330 * var(--sea-unit)));
+  }
+}
+.sea-scene[data-motion="static"] .sea-arrival-bloom,
+.sea-scene[data-motion="static"] .sea-arrival-sweep {
+  animation: none;
+  opacity: 0;
+}
+
+.sea-light-column {
+  opacity: var(--sea-path);
+  transition: opacity var(--sea-path-time) var(--sea-sky-ease);
+}
+.sea-column-gold,
+.sea-column-red {
+  background: radial-gradient(
+    ellipse at 50% 0%,
+    #ffd9a040,
+    #ffd9a014 40%,
+    transparent 70%
+  );
+  opacity: calc(1 - var(--sea-path-red));
+  transition: opacity var(--sea-path-time) var(--sea-sky-ease);
+}
+.sea-column-red {
+  background: radial-gradient(
+    ellipse at 50% 0%,
+    #f07c5426,
+    #e8553f0a 40%,
+    transparent 70%
+  );
+  opacity: var(--sea-path-red);
+}
+.sea-scene[data-phase="connecting"] .sea-reflected-disk {
+  opacity: 0.62;
+}
+.sea-reflection-lift {
+  background: radial-gradient(
+    ellipse at 50% 0%,
+    #ffcf8c30,
+    #ffb8780f 45%,
+    transparent 72%
+  );
+  opacity: 0;
+  transition: opacity var(--sea-sky-time) var(--sea-sky-ease);
+}
+.sea-scene[data-phase="connecting"] .sea-reflection-lift {
+  opacity: 1;
+}
+
+.sea-sun-body {
+  transform: scaleY(var(--sea-disk-shape));
+  transform-origin: 50% 50%;
+  transition: transform var(--sea-sun-time) var(--sea-shape-ease);
+  mask-image: radial-gradient(
+    closest-side,
+    #000 calc(100% - 1.5px),
+    transparent
+  );
+}
+
+.sea-scene[data-phase="connected"] .sea-glow-pulse {
+  animation: sea-sun-breathe var(--tono-ambient-sun-breathe) ease-in-out
+    infinite;
+}
+@keyframes sea-sun-breathe {
+  0%,
+  100% {
+    opacity: 0.9;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.03);
+  }
+}
+
+.sea-meteor {
+  background: linear-gradient(90deg, transparent, #ced8ffb3);
+  opacity: 0;
+}
+/* Every new idle entry starts a fresh long wait, safely beyond all night fades.
+   Leaving idle cancels the shot, including its trail; hidden holds the delay. */
+.sea-scene[data-phase="idle"][data-motion="ambient"] .sea-meteor {
+  animation: sea-meteor var(--tono-ambient-meteor) linear 55s infinite;
+}
+@keyframes sea-meteor {
+  0% {
+    opacity: 0;
+    transform: translate(0, 0) rotate(24deg);
+  }
+  0.3% {
+    opacity: 0.7;
+  }
+  1.166667%,
+  100% {
+    opacity: 0;
+    transform: translate(180px, 80px) rotate(24deg);
+  }
+}
+
+.sea-scene[data-phase="failed"] .sea-sun-motion,
+.sea-scene[data-phase="failed"] .sea-mirror-motion {
+  animation: sea-bob var(--tono-ambient-bob) ease-in-out infinite;
+}
+.sea-scene[data-phase="failed"] .sea-mirror-motion {
+  animation-direction: reverse;
+}
+.sea-scene[data-phase="failed"] .sea-glow-pulse {
+  animation: sea-ember var(--tono-ambient-ember) ease-in-out infinite;
+}
+@keyframes sea-bob {
+  0%,
+  50%,
+  100% {
+    transform: translateY(0);
+  }
+  25% {
+    transform: translateY(3px);
+  }
+  75% {
+    transform: translateY(-3px);
+  }
+}
+@keyframes sea-ember {
+  0%,
+  100% {
+    opacity: 0.82;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.025);
+  }
+}
+/* Keep this after every phase animation. Hidden holds loops, shots and delays. */
+.sea-scene[data-phase][data-paused="true"] .sea-loop {
+  animation-play-state: paused;
+}
+
+.sea-scene[data-phase="connecting"][data-progress="true"] {
+  --sea-sun-time: var(--tono-ambient-progress);
+}
+
+/* Fixed depth envelopes: distant glints stay fine/slow, nearer glints spread out.
+   Integral CSS-pixel tile periods avoid fractional raster seams at loop resets.
+   Only the periodic baked fields behind them move; no per-frame mask updates. */
+.sea-glints-far {
+  --sea-glint-tile: 96px;
+  --sea-glint-width: 50%;
+  --sea-glint-time-1: var(--tono-ambient-speck-distant);
+  --sea-glint-time-2: var(--tono-ambient-speck-distant-alt);
+  mask-image: linear-gradient(#000, #000 20%, transparent 72%);
+}
+.sea-glints-near {
+  --sea-glint-tile: 192px;
+  --sea-glint-width: 100%;
+  --sea-glint-time-1: var(--tono-ambient-speck-near);
+  --sea-glint-time-2: var(--tono-ambient-speck-far);
+  mask-image: linear-gradient(transparent, #000 34%, #000 80%, transparent);
+}
+.sea-glint-1,
+.sea-glint-2 {
+  mask-size: var(--sea-glint-width) var(--sea-glint-tile);
+  mask-repeat: repeat;
+}
+.sea-glint-1 {
+  mask-image: url("./sea-assets/specks-1.png");
+  animation:
+    sea-glint-flow var(--sea-glint-time-1) linear infinite,
+    sea-glint-shimmer var(--tono-ambient-glint-shimmer) ease-in-out -2s infinite;
+}
+.sea-glint-2 {
+  mask-image: url("./sea-assets/specks-2.png");
+  animation:
+    sea-glint-flow var(--sea-glint-time-2) linear -4s infinite reverse,
+    sea-glint-shimmer var(--tono-ambient-glint-shimmer-alt) ease-in-out -7s
+    infinite reverse;
+}
+.sea-glints-far .sea-glint-1 {
+  animation-delay: -5s, -5.3s;
+}
+.sea-glints-far .sea-glint-2 {
+  animation-delay: -11s, -1.1s;
+}
+.sea-path-cool {
+  background: #c6cff0;
+}
+@keyframes sea-glint-flow {
+  from {
+    transform: translateY(0);
+  }
+  to {
+    transform: translateY(var(--sea-glint-tile));
+  }
+}
+@keyframes sea-glint-shimmer {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  27% {
+    opacity: 0.72;
+  }
+  61% {
+    opacity: 0.94;
+  }
+  82% {
+    opacity: 0.8;
+  }
+}
+
+/* A grazing sun has diffuse water light, not a diagonally clipped mirror. */
+.sea-scene[data-low-sun="true"] .sea-mirror {
+  opacity: 0;
+}
+.sea-evening,
+.sea-night {
+  mix-blend-mode: plus-lighter;
+  transition: opacity 500ms ease-out;
+}
+.sea-evening {
+  opacity: 1;
+}
+.sea-night {
+  opacity: 0;
+}
+.sea-scene[data-phase="idle"] .sea-evening {
+  opacity: 0;
+  transition: opacity 2200ms linear 3800ms;
+}
+.sea-scene[data-phase="idle"] .sea-night {
+  opacity: 1;
+  transition: opacity 2200ms linear 3800ms;
+}
+.sea-sky-night {
+  mask-image: linear-gradient(transparent 45.4545%, #000 60.6061%);
+  background:
+    radial-gradient(
+      calc(540 * var(--sea-unit)) calc(210 * var(--sea-unit)) at 67.3913% 100%,
+      #9dacfa9e,
+      transparent
+    ),
+    linear-gradient(
+      180deg,
+      transparent 18%,
+      #26295199 62%,
+      #5763b1d9 90%,
+      #96a9f8f2
+    );
+}
+.sea-sky-night-top {
+  mask-image: linear-gradient(#000 45.4545%, transparent 60.6061%);
+}
+.sea-water-night {
+  background: linear-gradient(
+    180deg,
+    #56629480,
+    #26295142 26%,
+    transparent 70%
+  );
+}
+.sea-scene[data-phase][data-quality="lite"] .sea-cloud,
+.sea-scene[data-phase][data-quality="lite"] .sea-twinkle,
+.sea-scene[data-phase][data-quality="lite"] .sea-meteor,
+.sea-scene[data-phase][data-quality="lite"] .sea-sun-motion,
+.sea-scene[data-phase][data-quality="lite"] .sea-mirror-motion,
+.sea-scene[data-phase][data-quality="lite"] .sea-glow-pulse,
+.sea-scene[data-phase][data-quality="lite"] .sea-breathe,
+.sea-scene[data-phase][data-quality="lite"] .sea-moon-glow {
+  animation: none;
+}
+
+/* Keep static guards after phase rules, including the delayed afterglow. */
+.sea-scene[data-phase][data-motion="static"] * {
+  transition: none;
+}
+@media (prefers-reduced-motion: reduce), (forced-colors: active) {
+  .sea-scene[data-phase][data-motion] * {
+    transition: none;
+  }
+  .sea-scene .sea-loop {
+    animation-play-state: paused;
+  }
+}
+
+/* Review S2: diffuse near-horizon daylight, using a prepainted 60px field.
+   The existing day/path/red opacity envelopes fade it; no new loop or live filter. */
+.sea-column-gold::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  height: 60px;
+  pointer-events: none;
+  background: radial-gradient(
+    ellipse 50% 100% at 50% 0%,
+    #ffd9a035,
+    transparent
+  );
+  opacity: var(--sea-day);
+  transition: opacity var(--sea-day-time) var(--sea-sky-ease);
+}

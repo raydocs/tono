@@ -1,0 +1,5 @@
+2026-10-04 08:19:04 UTC
+v26.10.0
+10.33.0
+Google Chrome 154.0.8037.93, headless, MacBook; port9384, 1x device scale.
+No Windows/WebView2/native build or external model review.

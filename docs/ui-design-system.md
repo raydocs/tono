@@ -11,10 +11,17 @@ macOS 与 Windows 客户端共用的视觉与交互约定。改任何 UI 之前�
 登录主操作 token 为 macOS `TonoBrand.actionGradient` / Windows
 `--tono-action-fill`（紫色短渐变 + 白字，见第 1 节）。状态颜色和延迟阈值的含义不变。
 
-### 强调色改为标志里的紫（2026-09-07）
+### Historical accent: purple from the mark (2026-09-07; superseded for new designs)
 
 强调色从钴蓝 `#4B6EFF` 改为从 TO 标志取样的紫，浅深两套值，主按钮改为
 紫色短渐变。玻璃材质保留。
+
+**2026-10-03 direction:** the owner superseded purple/cobalt for the new sea
+scene. Use warm amber/coral with an ink-blue night, not a purple accent. The
+table below documents the currently shipped tokens, not the new design target.
+PR 1 does not recolor existing screens or replace the logo. Windows-first scope
+and remaining owner decisions are recorded in
+[decision 055](decisions/055-2026-10-03-windows-sea-scene-preview.md).
 
 ## 1. 设计 Token（唯一事实源）
 
@@ -98,7 +105,9 @@ Windows 用 `tono-ui/tokens/motion.css` 的同名 token，并依赖 `tono.css` �
 `prefers-reduced-motion` 全局块。reduceMotion 下缩放类效果固定为 1，
 过渡退化为 opacity。作用域限制在单个组件。
 
-动效契约（两端同一张表；动效只做反馈，不做等待，除连接中的 spinner 外不循环）：
+Control motion contract (shared by both clients): motion is immediate feedback,
+not a prerequisite. Only the connecting spinner loops in this class. The separate
+ambient-scene class below does not extend any control duration:
 
 | 场景 | 时长 | 曲线 | 位移 | macOS | Windows |
 |---|---|---|---|---|---|
@@ -115,6 +124,47 @@ Windows 用 `tono-ui/tokens/motion.css` 的同名 token，并依赖 `tono.css` �
 | 连接成功 | 500ms | spring bounce 0.15 | 光晕升起 | `.arrival` | `--tono-spring-arrival` |
 
 **全 app 只有「连接成功」这一处过冲**；其他表面一律临界阻尼。
+
+### Ambient scene (Windows 0.0.75 preview only)
+
+`SeaScene` is an explicit decorative exception to the solid content ground.
+It is not mounted in the shipped app. Keep glass on navigation/controls;
+future dashboard safety/recovery cards require solid or smoked surfaces.
+The scene must never delay labels or actions: switch those within 250ms.
+
+| Ambient motion | Duration | Windows token / contract |
+|---|---|---|
+| Sun arrival / rise / failure / sunset | 2400 / 2600 / 1800 / 4600ms | `--tono-ambient-sun-*`; mirrored track uses the same curve |
+| Sky / night | 2600 / 6000ms | `--tono-ambient-sky`, `--tono-ambient-night`; no sky transition delays |
+| Reflection / near and distant glints / whole-water folds | 24–31s / 8–11s and 16–21s / 40–65s | `--tono-ambient-reflection-*`, `--tono-ambient-speck-*`, `--tono-ambient-swell-*` |
+| Two-stage arrival bloom / late sweep; moon exit / afterglow | 2400ms / 900ms after 1400ms; 500 / 6600ms | Immediate quiet confirmation, then settling light; never delays controls or loops |
+| Shared solar/lunar broken light; moon halo | 9.2 / 13.7s shimmer; 12s breath | Two depth envelopes, counter-drifting baked fields; near/far clocks staggered, cool lunar paint |
+| Connecting halo / connected glow / failed bob + ember | 2.4s / 7.6s / 5 + 6.4s | Separate `--tono-ambient-*` tokens; calm transform/opacity only |
+| Stars / clouds / meteor | Seeded 3–9s / 110–137s / 60s | Three star tiers, one third twinkle; one-way cloud passes; 700ms meteor after a 55s idle-entry delay |
+| Dawn stars | 2000ms fades, 0 / 300 / 600ms delay | `--tono-ambient-star-exit/stagger`; persistent dim/middle/bright groups, unchanged phase endpoints; no sky/control delay |
+| Shared sun/mirror disk shape | Same travel duration; at most3% vertical compression | Round high-sun targets; `--tono-ambient-ease-horizon` delays sunset shape until18% and settles by55%; travel curve unchanged |
+| Caller-controlled connecting progress | 900ms per update | `--tono-ambient-progress`; no autonomous progress |
+
+Only transform/opacity animate; color changes cross-fade prepainted layers.
+The 2600ms dawn sky uses a broader `.25,0,.75,1` curve to meet the measured
+brightness-step limit. Sun and mirror share each destination's curve; sunset
+uses the ROUND-2 `linear()` curve to linger at the horizon without delaying controls.
+Water uses baked PNG masks, never live SVG turbulence/displacement. Keep one
+persistent DOM so a changed destination retargets from the current presentation.
+Glint fields use integral96/192CSS-pixel vertical tile periods to avoid fractional
+raster seams at loop resets. Their width follows the path; the far tier is half
+the near tier's footprint and drifts more slowly. This is a two-depth approximation,
+not a simulated ocean. Initial connected mounts never play the arrival one-shot;
+phase changes cancel it and hidden surfaces hold its delay as well as its duration.
+Pause loops on document visibility changes and via `paused` for native hidden
+surfaces or a closed tray. Reduced motion, forced colors and explicit `paused`
+render a static destination. Keep static transition guards after every phase rule,
+including delayed afterglow, so an in-flight preference change snaps too.
+Reduced transparency/missing backdrop-filter make
+controls opaque, not the scene static (review E30, decision 057). Software rendering/remote-desktop detection is not
+reliable in the renderer: the caller must explicitly set `paused`.
+See [preview and measured evidence](sea-scene-preview.md).
+
 
 ## 8. 操作反馈
 

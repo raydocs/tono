@@ -1,0 +1,533 @@
+{
+  "arrival": [
+    {
+      "elapsed": 152.39999985694885,
+      "phase": "connected",
+      "same": true,
+      "label": "已连接",
+      "bloom": 0.103931,
+      "sweep": 0,
+      "sun": "matrix(1.07896, 0, 0, 1.07896, 0, 123.376)"
+    },
+    {
+      "elapsed": 601.7999999523163,
+      "phase": "connected",
+      "same": true,
+      "label": "已连接",
+      "bloom": 0,
+      "sweep": 0,
+      "sun": "matrix(1.05351, 0, 0, 1.05351, 0, 83.6153)"
+    },
+    {
+      "elapsed": 1202.0999999046326,
+      "phase": "connected",
+      "same": true,
+      "label": "已连接",
+      "bloom": 0,
+      "sweep": 0,
+      "sun": "matrix(1.01682, 0, 0, 1.01682, 0, 26.2888)"
+    },
+    {
+      "elapsed": 1701.3999998569489,
+      "phase": "connected",
+      "same": true,
+      "label": "已连接",
+      "bloom": 0.475477,
+      "sweep": 0.348255,
+      "sun": "matrix(1.00468, 0, 0, 1.00468, 0, 7.3126)"
+    },
+    {
+      "elapsed": 2403.0999999046326,
+      "phase": "connected",
+      "same": true,
+      "label": "已连接",
+      "bloom": 0.00066,
+      "sweep": 0,
+      "sun": "matrix(1, 0, 0, 1, 0, 0.00318163)"
+    }
+  ],
+  "hiddenArrival": {
+    "before": [
+      {
+        "name": "sea-arrival-bloom",
+        "time": 600.0269999098033,
+        "state": "paused",
+        "timing": {
+          "delay": 0,
+          "direction": "normal",
+          "duration": 2400,
+          "easing": "linear",
+          "endDelay": 0,
+          "fill": "none",
+          "iterationStart": 0,
+          "iterations": 1
+        }
+      },
+      {
+        "name": "sea-arrival-sweep",
+        "time": 600.0269999098033,
+        "state": "paused",
+        "timing": {
+          "delay": 1400,
+          "direction": "normal",
+          "duration": 900,
+          "easing": "linear",
+          "endDelay": 0,
+          "fill": "none",
+          "iterationStart": 0,
+          "iterations": 1
+        }
+      }
+    ],
+    "after": [
+      {
+        "name": "sea-arrival-bloom",
+        "time": 600.0269999098033,
+        "state": "paused"
+      },
+      {
+        "name": "sea-arrival-sweep",
+        "time": 600.0269999098033,
+        "state": "paused"
+      }
+    ]
+  },
+  "resumed": {
+    "time": [
+      1499.9559998660684,
+      1499.9559998660684
+    ],
+    "sweep": 0.33389
+  },
+  "canceled": {
+    "shots": 0,
+    "bloom": 0,
+    "sweep": 0
+  },
+  "glints": [
+    {
+      "selector": ".sea-sun-path",
+      "bars": 0,
+      "depths": [
+        {
+          "depth": "far",
+          "mask": "linear-gradient(rgb(0, 0, 0), rgb(0, 0, 0) 20%, rgba(0, 0, 0, 0) 72%)",
+          "fields": [
+            {
+              "tile": "50% 96px",
+              "animations": [
+                {
+                  "name": "sea-glint-flow",
+                  "duration": 16000,
+                  "frames": [
+                    {
+                      "offset": 0,
+                      "transform": "translateY(0px)"
+                    },
+                    {
+                      "offset": 1,
+                      "transform": "translateY(96px)"
+                    }
+                  ]
+                },
+                {
+                  "name": "sea-glint-shimmer",
+                  "duration": 9200,
+                  "frames": [
+                    {
+                      "offset": 0,
+                      "opacity": "1"
+                    },
+                    {
+                      "offset": 0.27,
+                      "opacity": "0.72"
+                    },
+                    {
+                      "offset": 0.61,
+                      "opacity": "0.94"
+                    },
+                    {
+                      "offset": 0.82,
+                      "opacity": "0.8"
+                    },
+                    {
+                      "offset": 1,
+                      "opacity": "1"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "tile": "50% 96px",
+              "animations": [
+                {
+                  "name": "sea-glint-flow",
+                  "duration": 21000,
+                  "frames": [
+                    {
+                      "offset": 0,
+                      "transform": "translateY(0px)"
+                    },
+                    {
+                      "offset": 1,
+                      "transform": "translateY(96px)"
+                    }
+                  ]
+                },
+                {
+                  "name": "sea-glint-shimmer",
+                  "duration": 13700,
+                  "frames": [
+                    {
+                      "offset": 0,
+                      "opacity": "1"
+                    },
+                    {
+                      "offset": 0.27,
+                      "opacity": "0.72"
+                    },
+                    {
+                      "offset": 0.61,
+                      "opacity": "0.94"
+                    },
+                    {
+                      "offset": 0.82,
+                      "opacity": "0.8"
+                    },
+                    {
+                      "offset": 1,
+                      "opacity": "1"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "depth": "near",
+          "mask": "linear-gradient(rgba(0, 0, 0, 0), rgb(0, 0, 0) 34%, rgb(0, 0, 0) 80%, rgba(0, 0, 0, 0))",
+          "fields": [
+            {
+              "tile": "100% 192px",
+              "animations": [
+                {
+                  "name": "sea-glint-flow",
+                  "duration": 8000,
+                  "frames": [
+                    {
+                      "offset": 0,
+                      "transform": "translateY(0px)"
+                    },
+                    {
+                      "offset": 1,
+                      "transform": "translateY(192px)"
+                    }
+                  ]
+                },
+                {
+                  "name": "sea-glint-shimmer",
+                  "duration": 9200,
+                  "frames": [
+                    {
+                      "offset": 0,
+                      "opacity": "1"
+                    },
+                    {
+                      "offset": 0.27,
+                      "opacity": "0.72"
+                    },
+                    {
+                      "offset": 0.61,
+                      "opacity": "0.94"
+                    },
+                    {
+                      "offset": 0.82,
+                      "opacity": "0.8"
+                    },
+                    {
+                      "offset": 1,
+                      "opacity": "1"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "tile": "100% 192px",
+              "animations": [
+                {
+                  "name": "sea-glint-flow",
+                  "duration": 11000,
+                  "frames": [
+                    {
+                      "offset": 0,
+                      "transform": "translateY(0px)"
+                    },
+                    {
+                      "offset": 1,
+                      "transform": "translateY(192px)"
+                    }
+                  ]
+                },
+                {
+                  "name": "sea-glint-shimmer",
+                  "duration": 13700,
+                  "frames": [
+                    {
+                      "offset": 0,
+                      "opacity": "1"
+                    },
+                    {
+                      "offset": 0.27,
+                      "opacity": "0.72"
+                    },
+                    {
+                      "offset": 0.61,
+                      "opacity": "0.94"
+                    },
+                    {
+                      "offset": 0.82,
+                      "opacity": "0.8"
+                    },
+                    {
+                      "offset": 1,
+                      "opacity": "1"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "selector": ".sea-moon-path",
+      "bars": 0,
+      "depths": [
+        {
+          "depth": "far",
+          "mask": "linear-gradient(rgb(0, 0, 0), rgb(0, 0, 0) 20%, rgba(0, 0, 0, 0) 72%)",
+          "fields": [
+            {
+              "tile": "50% 96px",
+              "animations": [
+                {
+                  "name": "sea-glint-flow",
+                  "duration": 16000,
+                  "frames": [
+                    {
+                      "offset": 0,
+                      "transform": "translateY(0px)"
+                    },
+                    {
+                      "offset": 1,
+                      "transform": "translateY(96px)"
+                    }
+                  ]
+                },
+                {
+                  "name": "sea-glint-shimmer",
+                  "duration": 9200,
+                  "frames": [
+                    {
+                      "offset": 0,
+                      "opacity": "1"
+                    },
+                    {
+                      "offset": 0.27,
+                      "opacity": "0.72"
+                    },
+                    {
+                      "offset": 0.61,
+                      "opacity": "0.94"
+                    },
+                    {
+                      "offset": 0.82,
+                      "opacity": "0.8"
+                    },
+                    {
+                      "offset": 1,
+                      "opacity": "1"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "tile": "50% 96px",
+              "animations": [
+                {
+                  "name": "sea-glint-flow",
+                  "duration": 21000,
+                  "frames": [
+                    {
+                      "offset": 0,
+                      "transform": "translateY(0px)"
+                    },
+                    {
+                      "offset": 1,
+                      "transform": "translateY(96px)"
+                    }
+                  ]
+                },
+                {
+                  "name": "sea-glint-shimmer",
+                  "duration": 13700,
+                  "frames": [
+                    {
+                      "offset": 0,
+                      "opacity": "1"
+                    },
+                    {
+                      "offset": 0.27,
+                      "opacity": "0.72"
+                    },
+                    {
+                      "offset": 0.61,
+                      "opacity": "0.94"
+                    },
+                    {
+                      "offset": 0.82,
+                      "opacity": "0.8"
+                    },
+                    {
+                      "offset": 1,
+                      "opacity": "1"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "depth": "near",
+          "mask": "linear-gradient(rgba(0, 0, 0, 0), rgb(0, 0, 0) 34%, rgb(0, 0, 0) 80%, rgba(0, 0, 0, 0))",
+          "fields": [
+            {
+              "tile": "100% 192px",
+              "animations": [
+                {
+                  "name": "sea-glint-flow",
+                  "duration": 8000,
+                  "frames": [
+                    {
+                      "offset": 0,
+                      "transform": "translateY(0px)"
+                    },
+                    {
+                      "offset": 1,
+                      "transform": "translateY(192px)"
+                    }
+                  ]
+                },
+                {
+                  "name": "sea-glint-shimmer",
+                  "duration": 9200,
+                  "frames": [
+                    {
+                      "offset": 0,
+                      "opacity": "1"
+                    },
+                    {
+                      "offset": 0.27,
+                      "opacity": "0.72"
+                    },
+                    {
+                      "offset": 0.61,
+                      "opacity": "0.94"
+                    },
+                    {
+                      "offset": 0.82,
+                      "opacity": "0.8"
+                    },
+                    {
+                      "offset": 1,
+                      "opacity": "1"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "tile": "100% 192px",
+              "animations": [
+                {
+                  "name": "sea-glint-flow",
+                  "duration": 11000,
+                  "frames": [
+                    {
+                      "offset": 0,
+                      "transform": "translateY(0px)"
+                    },
+                    {
+                      "offset": 1,
+                      "transform": "translateY(192px)"
+                    }
+                  ]
+                },
+                {
+                  "name": "sea-glint-shimmer",
+                  "duration": 13700,
+                  "frames": [
+                    {
+                      "offset": 0,
+                      "opacity": "1"
+                    },
+                    {
+                      "offset": 0.27,
+                      "opacity": "0.72"
+                    },
+                    {
+                      "offset": 0.61,
+                      "opacity": "0.94"
+                    },
+                    {
+                      "offset": 0.82,
+                      "opacity": "0.8"
+                    },
+                    {
+                      "offset": 1,
+                      "opacity": "1"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "moon": {
+    "halo": [
+      {
+        "name": "sea-moon-breathe",
+        "timing": {
+          "delay": 0,
+          "direction": "normal",
+          "duration": 12000,
+          "easing": "linear",
+          "endDelay": 0,
+          "fill": "none",
+          "iterationStart": 0,
+          "iterations": null
+        }
+      }
+    ],
+    "pathOpacity": "0.34",
+    "paints": [
+      "rgb(198, 207, 240)",
+      "rgb(198, 207, 240)",
+      "rgb(198, 207, 240)",
+      "rgb(198, 207, 240)"
+    ]
+  },
+  "moonExit": {
+    "moon": 0,
+    "path": 0
+  }
+}

@@ -1,0 +1,42 @@
+{
+  "checks": [
+    {
+      "name": "collapsed steps 860: text-only (backgroundColor, not shorthand)",
+      "pass": true,
+      "detail": {
+        "backgroundColor": "rgba(0, 0, 0, 0)",
+        "shadow": "none",
+        "padding": "0px",
+        "expanded": "false"
+      }
+    },
+    {
+      "name": "collapsed steps 920: text-only (backgroundColor, not shorthand)",
+      "pass": true,
+      "detail": {
+        "backgroundColor": "rgba(0, 0, 0, 0)",
+        "shadow": "none",
+        "padding": "0px",
+        "expanded": "false"
+      }
+    },
+    {
+      "name": "collapsed steps 1920: text-only (backgroundColor, not shorthand)",
+      "pass": true,
+      "detail": {
+        "backgroundColor": "rgba(0, 0, 0, 0)",
+        "shadow": "none",
+        "padding": "0px",
+        "expanded": "false"
+      }
+    },
+    {
+      "name": "scheduled sentence/countdown and card agree on scheduled state (card intentionally omits duplicate counter)",
+      "pass": true,
+      "detail": {
+        "sentence": "已拦住直连，12 秒后自动重试。",
+        "card": "当前线路未通过检查\n失败于 正在验证连接\n已安排自动重试\n已安排重试。你可以立即重试，也可以明确选择恢复普通网络。\n查看步骤\n总计 9.1s\n第 2 次\n正在验证连接…\n3.1s\n技术详情"
+      }
+    }
+  ]
+}

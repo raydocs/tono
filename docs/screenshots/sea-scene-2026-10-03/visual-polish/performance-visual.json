@@ -1,0 +1,21 @@
+{
+  "visible": {
+    "Paint": 0,
+    "Layout": 0,
+    "RasterTask": 0,
+    "UpdateLayoutTree": 65
+  },
+  "hidden": {
+    "Paint": 0,
+    "Layout": 0,
+    "RasterTask": 0,
+    "UpdateLayoutTree": 0
+  },
+  "pacing": {
+    "frames": 302,
+    "elapsed": 5016.434,
+    "fps": 60.00278285331771,
+    "p95": 16.700000000000728,
+    "max": 16.80000000000109
+  }
+}

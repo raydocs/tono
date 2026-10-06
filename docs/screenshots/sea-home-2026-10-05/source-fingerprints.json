@@ -1,0 +1,29 @@
+{
+  "baseline": "3f9c19520ce0d5c40a3d9c6a5e4294b4edd74af2",
+  "scope": "final working-tree app inputs before the delivery commit; final browser/test evidence generated from these bytes",
+  "sha256": {
+    "apps/windows/app/eslint.config.ts": "ed37f411680e629364f9533593a9e1e28103ae0138dba9213fb811bcaf049f21",
+    "apps/windows/app/src/dev/sea-home/fixtures.ts": "96d9afa9816ac859d90f936385c9480c2e8ed062b103c6acacd13f24cfad1bb9",
+    "apps/windows/app/src/dev/sea-home/index.html": "ac3e8218157bd4e8de45388723f5bbbe5b52853cc134d67a67cdbe9e83c0818a",
+    "apps/windows/app/src/dev/sea-home/main.tsx": "ccd4d5a544378d89e4d5243260b6475465680bd3d57c5083c5db4ae9a0759902",
+    "apps/windows/app/src/locales/en/tono.json": "31cb214660ffa43b44d9b0aede2aba6324d4691b6f7dcc4b1c6b72521120ee77",
+    "apps/windows/app/src/locales/zh/tono.json": "b191883362ffc8ba0e3cc5f03bf70c889a6d4f81ee86a21b72366b46ee003426",
+    "apps/windows/app/src/pages/tono/connect-progress.tsx": "1becb522ed7cbd2ceb8dc1e0f5bdf3cc9bb7b107942e776a1c7bb17dcfb5da30",
+    "apps/windows/app/src/pages/tono/dashboard.tsx": "ea5960b656f5e948991a669571968607beb911d1efdd86bb9cfd4f7eba9ac456",
+    "apps/windows/app/src/pages/tono/home-focus.ts": "31d65e4474b4821de43c518f43877ec4c2f6019f151026ecdb48422958711d7e",
+    "apps/windows/app/src/pages/tono/home-lines.tsx": "8fb14a1eb4f02b9cf634ce17112f7afd3f42c21117bb4ed9eef65abd0a4b5b35",
+    "apps/windows/app/src/pages/tono/home-timing.ts": "80eb267866c96b28699acd446758f29da2ed6a070e5bdccd59885e0bb47b3510",
+    "apps/windows/app/src/pages/tono/sea-home.css": "37828b8b9bab05ad07847037c87c7ee843de73af002e1ae7478b4a0a7fb81f87",
+    "apps/windows/app/src/pages/tono/sea-home.test.tsx": "f66924951730d81ff4665adb400327f507cf14389658defc9915f68ef1751a6a",
+    "apps/windows/app/src/pages/tono/sea-home.tsx": "896501c258e4fed0301f72d2810cb8d01bff8f36aa8312a0e85be86b8a836640",
+    "apps/windows/app/src/tono-ui/AiTrafficCard.tsx": "ce335cfe34c20aecba94a2452f7af445cca8aa8ff6835825411949796c3d9e8e",
+    "apps/windows/app/src/tono-ui/SeaScene.tsx": "52cc08bed1534fea9355f605f5ca484626740d13861cd84fdc42d1af73f6e01e",
+    "apps/windows/app/src/tono-ui/appearance-preferences.ts": "421d3c3a3d91c5c7c332cdf5e8ce65d9ec3907b1399b102845256c1d526a78f9",
+    "apps/windows/app/src/tono-ui/sea-scene.css": "8031df5c7e3e1f8609c9def9d702ecf1798adef452e71ddce551411d895362a4",
+    "apps/windows/app/src/tono-ui/tokens/motion.css": "f704d1a0cda64e06f56fea8188ab0a3bcfcc5718c2ed4bfdddaca150c26f53c0",
+    "apps/windows/app/src/tono-ui/useReleaseProtection.tsx": "05f2bc4a9e1f4230440f039370df702e2ec38a58665cf67e68be3f627d1bdf84",
+    "apps/windows/app/src/types/generated/i18n-keys.ts": "cbfe1ee179aafcabc6e805dfb2047aa755eebc1c1c5d2e400865501e3d8580c4",
+    "apps/windows/app/src/types/generated/i18n-resources.ts": "c634a6767e8d94ec97372289bf82c710aacd82b8ed889e09221a365836b3a35d",
+    "apps/windows/app/vite.home-preview.config.mts": "8a0eac2ea35964f9e45a51bbdca2c06066c14743cc348d67db1d998e93a7f4c4"
+  }
+}

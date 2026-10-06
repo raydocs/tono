@@ -1,0 +1,2962 @@
+{
+  "static-connected": {
+    "running": 0,
+    "sweep": "0"
+  },
+  "loops-connected": [
+    {
+      "name": "sea-twinkle",
+      "loop": true,
+      "properties": [
+        "opacity"
+      ]
+    },
+    {
+      "name": "sea-twinkle",
+      "loop": true,
+      "properties": [
+        "opacity"
+      ]
+    },
+    {
+      "name": "sea-twinkle",
+      "loop": true,
+      "properties": [
+        "opacity"
+      ]
+    },
+    {
+      "name": "sea-twinkle",
+      "loop": true,
+      "properties": [
+        "opacity"
+      ]
+    },
+    {
+      "name": "sea-twinkle",
+      "loop": true,
+      "properties": [
+        "opacity"
+      ]
+    },
+    {
+      "name": "sea-twinkle",
+      "loop": true,
+      "properties": [
+        "opacity"
+      ]
+    },
+    {
+      "name": "sea-twinkle",
+      "loop": true,
+      "properties": [
+        "opacity"
+      ]
+    },
+    {
+      "name": "sea-twinkle",
+      "loop": true,
+      "properties": [
+        "opacity"
+      ]
+    },
+    {
+      "name": "sea-twinkle",
+      "loop": true,
+      "properties": [
+        "opacity"
+      ]
+    },
+    {
+      "name": "sea-twinkle",
+      "loop": true,
+      "properties": [
+        "opacity"
+      ]
+    },
+    {
+      "name": "sea-twinkle",
+      "loop": true,
+      "properties": [
+        "opacity"
+      ]
+    },
+    {
+      "name": "sea-twinkle",
+      "loop": true,
+      "properties": [
+        "opacity"
+      ]
+    },
+    {
+      "name": "sea-twinkle",
+      "loop": true,
+      "properties": [
+        "opacity"
+      ]
+    },
+    {
+      "name": "sea-twinkle",
+      "loop": true,
+      "properties": [
+        "opacity"
+      ]
+    },
+    {
+      "name": "sea-twinkle",
+      "loop": true,
+      "properties": [
+        "opacity"
+      ]
+    },
+    {
+      "name": "sea-twinkle",
+      "loop": true,
+      "properties": [
+        "opacity"
+      ]
+    },
+    {
+      "name": "sea-twinkle",
+      "loop": true,
+      "properties": [
+        "opacity"
+      ]
+    },
+    {
+      "name": "sea-twinkle",
+      "loop": true,
+      "properties": [
+        "opacity"
+      ]
+    },
+    {
+      "name": "sea-moon-breathe",
+      "loop": true,
+      "properties": [
+        "opacity",
+        "transform"
+      ]
+    },
+    {
+      "name": "sea-cloud",
+      "loop": true,
+      "properties": [
+        "transform"
+      ]
+    },
+    {
+      "name": "sea-cloud",
+      "loop": true,
+      "properties": [
+        "transform"
+      ]
+    },
+    {
+      "name": "sea-breathe",
+      "loop": true,
+      "properties": [
+        "opacity"
+      ]
+    },
+    {
+      "name": "sea-sun-breathe",
+      "loop": true,
+      "properties": [
+        "opacity",
+        "transform"
+      ]
+    },
+    {
+      "name": "sea-swell-flow",
+      "loop": true,
+      "properties": [
+        "transform"
+      ]
+    },
+    {
+      "name": "sea-swell-flow",
+      "loop": true,
+      "properties": [
+        "transform"
+      ]
+    },
+    {
+      "name": "sea-ripple-flow",
+      "loop": true,
+      "properties": [
+        "transform"
+      ]
+    },
+    {
+      "name": "sea-ripple-counter",
+      "loop": true,
+      "properties": [
+        "transform"
+      ]
+    },
+    {
+      "name": "sea-ripple-flow",
+      "loop": true,
+      "properties": [
+        "transform"
+      ]
+    },
+    {
+      "name": "sea-ripple-counter",
+      "loop": true,
+      "properties": [
+        "transform"
+      ]
+    },
+    {
+      "name": "sea-glint-flow",
+      "loop": true,
+      "properties": [
+        "transform"
+      ]
+    },
+    {
+      "name": "sea-glint-shimmer",
+      "loop": true,
+      "properties": [
+        "opacity"
+      ]
+    },
+    {
+      "name": "sea-glint-flow",
+      "loop": true,
+      "properties": [
+        "transform"
+      ]
+    },
+    {
+      "name": "sea-glint-shimmer",
+      "loop": true,
+      "properties": [
+        "opacity"
+      ]
+    },
+    {
+      "name": "sea-glint-flow",
+      "loop": true,
+      "properties": [
+        "transform"
+      ]
+    },
+    {
+      "name": "sea-glint-shimmer",
+      "loop": true,
+      "properties": [
+        "opacity"
+      ]
+    },
+    {
+      "name": "sea-glint-flow",
+      "loop": true,
+      "properties": [
+        "transform"
+      ]
+    },
+    {
+      "name": "sea-glint-shimmer",
+      "loop": true,
+      "properties": [
+        "opacity"
+      ]
+    },
+    {
+      "name": "sea-glint-flow",
+      "loop": true,
+      "properties": [
+        "transform"
+      ]
+    },
+    {
+      "name": "sea-glint-shimmer",
+      "loop": true,
+      "properties": [
+        "opacity"
+      ]
+    },
+    {
+      "name": "sea-glint-flow",
+      "loop": true,
+      "properties": [
+        "transform"
+      ]
+    },
+    {
+      "name": "sea-glint-shimmer",
+      "loop": true,
+      "properties": [
+        "opacity"
+      ]
+    },
+    {
+      "name": "sea-glint-flow",
+      "loop": true,
+      "properties": [
+        "transform"
+      ]
+    },
+    {
+      "name": "sea-glint-shimmer",
+      "loop": true,
+      "properties": [
+        "opacity"
+      ]
+    },
+    {
+      "name": "sea-glint-flow",
+      "loop": true,
+      "properties": [
+        "transform"
+      ]
+    },
+    {
+      "name": "sea-glint-shimmer",
+      "loop": true,
+      "properties": [
+        "opacity"
+      ]
+    }
+  ],
+  "hidden-connected": {
+    "before": [
+      {
+        "name": "sea-twinkle",
+        "time": 1416.6030001863837,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.6030001863837,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.6030001863837,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.6030001863837,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.6030001863837,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.6030001863837,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.6030001863837,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.6030001863837,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.6030001863837,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.6030001863837,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.6030001863837,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.6030001863837,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.6030001863837,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.6030001863837,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.6030001863837,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.6030001863837,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.6030001863837,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.6030001863837,
+        "state": "paused"
+      },
+      {
+        "name": "sea-cloud",
+        "time": 1416.6030001863837,
+        "state": "paused"
+      },
+      {
+        "name": "sea-cloud",
+        "time": 1416.6030001863837,
+        "state": "paused"
+      },
+      {
+        "name": "sea-sun-breathe",
+        "time": 1416.6030001863837,
+        "state": "paused"
+      },
+      {
+        "name": "sea-swell-flow",
+        "time": 1416.6030001863837,
+        "state": "paused"
+      },
+      {
+        "name": "sea-swell-flow",
+        "time": 1416.6030001863837,
+        "state": "paused"
+      },
+      {
+        "name": "sea-ripple-flow",
+        "time": 1416.6030001863837,
+        "state": "paused"
+      },
+      {
+        "name": "sea-ripple-counter",
+        "time": 1416.6030001863837,
+        "state": "paused"
+      },
+      {
+        "name": "sea-ripple-flow",
+        "time": 1416.6030001863837,
+        "state": "paused"
+      },
+      {
+        "name": "sea-ripple-counter",
+        "time": 1416.6030001863837,
+        "state": "paused"
+      },
+      {
+        "name": "sea-glint-flow",
+        "time": 1416.6030001863837,
+        "state": "paused"
+      },
+      {
+        "name": "sea-glint-shimmer",
+        "time": 1416.6030001863837,
+        "state": "paused"
+      },
+      {
+        "name": "sea-glint-flow",
+        "time": 1416.6030001863837,
+        "state": "paused"
+      },
+      {
+        "name": "sea-glint-shimmer",
+        "time": 1416.6030001863837,
+        "state": "paused"
+      },
+      {
+        "name": "sea-glint-flow",
+        "time": 1416.6030001863837,
+        "state": "paused"
+      },
+      {
+        "name": "sea-glint-shimmer",
+        "time": 1416.6030001863837,
+        "state": "paused"
+      },
+      {
+        "name": "sea-glint-flow",
+        "time": 1416.6030001863837,
+        "state": "paused"
+      },
+      {
+        "name": "sea-glint-shimmer",
+        "time": 1416.6030001863837,
+        "state": "paused"
+      }
+    ],
+    "after": [
+      {
+        "name": "sea-twinkle",
+        "time": 1416.6030001863837,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.6030001863837,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.6030001863837,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.6030001863837,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.6030001863837,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.6030001863837,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.6030001863837,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.6030001863837,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.6030001863837,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.6030001863837,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.6030001863837,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.6030001863837,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.6030001863837,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.6030001863837,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.6030001863837,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.6030001863837,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.6030001863837,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.6030001863837,
+        "state": "paused"
+      },
+      {
+        "name": "sea-cloud",
+        "time": 1416.6030001863837,
+        "state": "paused"
+      },
+      {
+        "name": "sea-cloud",
+        "time": 1416.6030001863837,
+        "state": "paused"
+      },
+      {
+        "name": "sea-sun-breathe",
+        "time": 1416.6030001863837,
+        "state": "paused"
+      },
+      {
+        "name": "sea-swell-flow",
+        "time": 1416.6030001863837,
+        "state": "paused"
+      },
+      {
+        "name": "sea-swell-flow",
+        "time": 1416.6030001863837,
+        "state": "paused"
+      },
+      {
+        "name": "sea-ripple-flow",
+        "time": 1416.6030001863837,
+        "state": "paused"
+      },
+      {
+        "name": "sea-ripple-counter",
+        "time": 1416.6030001863837,
+        "state": "paused"
+      },
+      {
+        "name": "sea-ripple-flow",
+        "time": 1416.6030001863837,
+        "state": "paused"
+      },
+      {
+        "name": "sea-ripple-counter",
+        "time": 1416.6030001863837,
+        "state": "paused"
+      },
+      {
+        "name": "sea-glint-flow",
+        "time": 1416.6030001863837,
+        "state": "paused"
+      },
+      {
+        "name": "sea-glint-shimmer",
+        "time": 1416.6030001863837,
+        "state": "paused"
+      },
+      {
+        "name": "sea-glint-flow",
+        "time": 1416.6030001863837,
+        "state": "paused"
+      },
+      {
+        "name": "sea-glint-shimmer",
+        "time": 1416.6030001863837,
+        "state": "paused"
+      },
+      {
+        "name": "sea-glint-flow",
+        "time": 1416.6030001863837,
+        "state": "paused"
+      },
+      {
+        "name": "sea-glint-shimmer",
+        "time": 1416.6030001863837,
+        "state": "paused"
+      },
+      {
+        "name": "sea-glint-flow",
+        "time": 1416.6030001863837,
+        "state": "paused"
+      },
+      {
+        "name": "sea-glint-shimmer",
+        "time": 1416.6030001863837,
+        "state": "paused"
+      }
+    ]
+  },
+  "static-connecting": {
+    "running": 0,
+    "sweep": "0"
+  },
+  "loops-connecting": [
+    {
+      "name": "sea-twinkle",
+      "loop": true,
+      "properties": [
+        "opacity"
+      ]
+    },
+    {
+      "name": "sea-twinkle",
+      "loop": true,
+      "properties": [
+        "opacity"
+      ]
+    },
+    {
+      "name": "sea-twinkle",
+      "loop": true,
+      "properties": [
+        "opacity"
+      ]
+    },
+    {
+      "name": "sea-twinkle",
+      "loop": true,
+      "properties": [
+        "opacity"
+      ]
+    },
+    {
+      "name": "sea-twinkle",
+      "loop": true,
+      "properties": [
+        "opacity"
+      ]
+    },
+    {
+      "name": "sea-twinkle",
+      "loop": true,
+      "properties": [
+        "opacity"
+      ]
+    },
+    {
+      "name": "sea-twinkle",
+      "loop": true,
+      "properties": [
+        "opacity"
+      ]
+    },
+    {
+      "name": "sea-twinkle",
+      "loop": true,
+      "properties": [
+        "opacity"
+      ]
+    },
+    {
+      "name": "sea-twinkle",
+      "loop": true,
+      "properties": [
+        "opacity"
+      ]
+    },
+    {
+      "name": "sea-twinkle",
+      "loop": true,
+      "properties": [
+        "opacity"
+      ]
+    },
+    {
+      "name": "sea-twinkle",
+      "loop": true,
+      "properties": [
+        "opacity"
+      ]
+    },
+    {
+      "name": "sea-twinkle",
+      "loop": true,
+      "properties": [
+        "opacity"
+      ]
+    },
+    {
+      "name": "sea-twinkle",
+      "loop": true,
+      "properties": [
+        "opacity"
+      ]
+    },
+    {
+      "name": "sea-twinkle",
+      "loop": true,
+      "properties": [
+        "opacity"
+      ]
+    },
+    {
+      "name": "sea-twinkle",
+      "loop": true,
+      "properties": [
+        "opacity"
+      ]
+    },
+    {
+      "name": "sea-twinkle",
+      "loop": true,
+      "properties": [
+        "opacity"
+      ]
+    },
+    {
+      "name": "sea-twinkle",
+      "loop": true,
+      "properties": [
+        "opacity"
+      ]
+    },
+    {
+      "name": "sea-twinkle",
+      "loop": true,
+      "properties": [
+        "opacity"
+      ]
+    },
+    {
+      "name": "sea-moon-breathe",
+      "loop": true,
+      "properties": [
+        "opacity",
+        "transform"
+      ]
+    },
+    {
+      "name": "sea-cloud",
+      "loop": true,
+      "properties": [
+        "transform"
+      ]
+    },
+    {
+      "name": "sea-cloud",
+      "loop": true,
+      "properties": [
+        "transform"
+      ]
+    },
+    {
+      "name": "sea-breathe",
+      "loop": true,
+      "properties": [
+        "opacity"
+      ]
+    },
+    {
+      "name": "sea-swell-flow",
+      "loop": true,
+      "properties": [
+        "transform"
+      ]
+    },
+    {
+      "name": "sea-swell-flow",
+      "loop": true,
+      "properties": [
+        "transform"
+      ]
+    },
+    {
+      "name": "sea-ripple-flow",
+      "loop": true,
+      "properties": [
+        "transform"
+      ]
+    },
+    {
+      "name": "sea-ripple-counter",
+      "loop": true,
+      "properties": [
+        "transform"
+      ]
+    },
+    {
+      "name": "sea-ripple-flow",
+      "loop": true,
+      "properties": [
+        "transform"
+      ]
+    },
+    {
+      "name": "sea-ripple-counter",
+      "loop": true,
+      "properties": [
+        "transform"
+      ]
+    },
+    {
+      "name": "sea-glint-flow",
+      "loop": true,
+      "properties": [
+        "transform"
+      ]
+    },
+    {
+      "name": "sea-glint-shimmer",
+      "loop": true,
+      "properties": [
+        "opacity"
+      ]
+    },
+    {
+      "name": "sea-glint-flow",
+      "loop": true,
+      "properties": [
+        "transform"
+      ]
+    },
+    {
+      "name": "sea-glint-shimmer",
+      "loop": true,
+      "properties": [
+        "opacity"
+      ]
+    },
+    {
+      "name": "sea-glint-flow",
+      "loop": true,
+      "properties": [
+        "transform"
+      ]
+    },
+    {
+      "name": "sea-glint-shimmer",
+      "loop": true,
+      "properties": [
+        "opacity"
+      ]
+    },
+    {
+      "name": "sea-glint-flow",
+      "loop": true,
+      "properties": [
+        "transform"
+      ]
+    },
+    {
+      "name": "sea-glint-shimmer",
+      "loop": true,
+      "properties": [
+        "opacity"
+      ]
+    },
+    {
+      "name": "sea-glint-flow",
+      "loop": true,
+      "properties": [
+        "transform"
+      ]
+    },
+    {
+      "name": "sea-glint-shimmer",
+      "loop": true,
+      "properties": [
+        "opacity"
+      ]
+    },
+    {
+      "name": "sea-glint-flow",
+      "loop": true,
+      "properties": [
+        "transform"
+      ]
+    },
+    {
+      "name": "sea-glint-shimmer",
+      "loop": true,
+      "properties": [
+        "opacity"
+      ]
+    },
+    {
+      "name": "sea-glint-flow",
+      "loop": true,
+      "properties": [
+        "transform"
+      ]
+    },
+    {
+      "name": "sea-glint-shimmer",
+      "loop": true,
+      "properties": [
+        "opacity"
+      ]
+    },
+    {
+      "name": "sea-glint-flow",
+      "loop": true,
+      "properties": [
+        "transform"
+      ]
+    },
+    {
+      "name": "sea-glint-shimmer",
+      "loop": true,
+      "properties": [
+        "opacity"
+      ]
+    }
+  ],
+  "hidden-connecting": {
+    "before": [
+      {
+        "name": "sea-twinkle",
+        "time": 1416.5700001619755,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.5700001619755,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.5700001619755,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.5700001619755,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.5700001619755,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.5700001619755,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.5700001619755,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.5700001619755,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.5700001619755,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.5700001619755,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.5700001619755,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.5700001619755,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.5700001619755,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.5700001619755,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.5700001619755,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.5700001619755,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.5700001619755,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.5700001619755,
+        "state": "paused"
+      },
+      {
+        "name": "sea-cloud",
+        "time": 1416.5700001619755,
+        "state": "paused"
+      },
+      {
+        "name": "sea-cloud",
+        "time": 1416.5700001619755,
+        "state": "paused"
+      },
+      {
+        "name": "sea-breathe",
+        "time": 1416.5700001619755,
+        "state": "paused"
+      },
+      {
+        "name": "sea-swell-flow",
+        "time": 1416.5700001619755,
+        "state": "paused"
+      },
+      {
+        "name": "sea-swell-flow",
+        "time": 1416.5700001619755,
+        "state": "paused"
+      },
+      {
+        "name": "sea-ripple-flow",
+        "time": 1416.5700001619755,
+        "state": "paused"
+      },
+      {
+        "name": "sea-ripple-counter",
+        "time": 1416.5700001619755,
+        "state": "paused"
+      },
+      {
+        "name": "sea-ripple-flow",
+        "time": 1416.5700001619755,
+        "state": "paused"
+      },
+      {
+        "name": "sea-ripple-counter",
+        "time": 1416.5700001619755,
+        "state": "paused"
+      },
+      {
+        "name": "sea-glint-flow",
+        "time": 1416.5700001619755,
+        "state": "paused"
+      },
+      {
+        "name": "sea-glint-shimmer",
+        "time": 1416.5700001619755,
+        "state": "paused"
+      },
+      {
+        "name": "sea-glint-flow",
+        "time": 1416.5700001619755,
+        "state": "paused"
+      },
+      {
+        "name": "sea-glint-shimmer",
+        "time": 1416.5700001619755,
+        "state": "paused"
+      },
+      {
+        "name": "sea-glint-flow",
+        "time": 1416.5700001619755,
+        "state": "paused"
+      },
+      {
+        "name": "sea-glint-shimmer",
+        "time": 1416.5700001619755,
+        "state": "paused"
+      },
+      {
+        "name": "sea-glint-flow",
+        "time": 1416.5700001619755,
+        "state": "paused"
+      },
+      {
+        "name": "sea-glint-shimmer",
+        "time": 1416.5700001619755,
+        "state": "paused"
+      }
+    ],
+    "after": [
+      {
+        "name": "sea-twinkle",
+        "time": 1416.5700001619755,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.5700001619755,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.5700001619755,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.5700001619755,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.5700001619755,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.5700001619755,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.5700001619755,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.5700001619755,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.5700001619755,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.5700001619755,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.5700001619755,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.5700001619755,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.5700001619755,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.5700001619755,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.5700001619755,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.5700001619755,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.5700001619755,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.5700001619755,
+        "state": "paused"
+      },
+      {
+        "name": "sea-cloud",
+        "time": 1416.5700001619755,
+        "state": "paused"
+      },
+      {
+        "name": "sea-cloud",
+        "time": 1416.5700001619755,
+        "state": "paused"
+      },
+      {
+        "name": "sea-breathe",
+        "time": 1416.5700001619755,
+        "state": "paused"
+      },
+      {
+        "name": "sea-swell-flow",
+        "time": 1416.5700001619755,
+        "state": "paused"
+      },
+      {
+        "name": "sea-swell-flow",
+        "time": 1416.5700001619755,
+        "state": "paused"
+      },
+      {
+        "name": "sea-ripple-flow",
+        "time": 1416.5700001619755,
+        "state": "paused"
+      },
+      {
+        "name": "sea-ripple-counter",
+        "time": 1416.5700001619755,
+        "state": "paused"
+      },
+      {
+        "name": "sea-ripple-flow",
+        "time": 1416.5700001619755,
+        "state": "paused"
+      },
+      {
+        "name": "sea-ripple-counter",
+        "time": 1416.5700001619755,
+        "state": "paused"
+      },
+      {
+        "name": "sea-glint-flow",
+        "time": 1416.5700001619755,
+        "state": "paused"
+      },
+      {
+        "name": "sea-glint-shimmer",
+        "time": 1416.5700001619755,
+        "state": "paused"
+      },
+      {
+        "name": "sea-glint-flow",
+        "time": 1416.5700001619755,
+        "state": "paused"
+      },
+      {
+        "name": "sea-glint-shimmer",
+        "time": 1416.5700001619755,
+        "state": "paused"
+      },
+      {
+        "name": "sea-glint-flow",
+        "time": 1416.5700001619755,
+        "state": "paused"
+      },
+      {
+        "name": "sea-glint-shimmer",
+        "time": 1416.5700001619755,
+        "state": "paused"
+      },
+      {
+        "name": "sea-glint-flow",
+        "time": 1416.5700001619755,
+        "state": "paused"
+      },
+      {
+        "name": "sea-glint-shimmer",
+        "time": 1416.5700001619755,
+        "state": "paused"
+      }
+    ]
+  },
+  "static-failed": {
+    "running": 0,
+    "sweep": "0"
+  },
+  "loops-failed": [
+    {
+      "name": "sea-twinkle",
+      "loop": true,
+      "properties": [
+        "opacity"
+      ]
+    },
+    {
+      "name": "sea-twinkle",
+      "loop": true,
+      "properties": [
+        "opacity"
+      ]
+    },
+    {
+      "name": "sea-twinkle",
+      "loop": true,
+      "properties": [
+        "opacity"
+      ]
+    },
+    {
+      "name": "sea-twinkle",
+      "loop": true,
+      "properties": [
+        "opacity"
+      ]
+    },
+    {
+      "name": "sea-twinkle",
+      "loop": true,
+      "properties": [
+        "opacity"
+      ]
+    },
+    {
+      "name": "sea-twinkle",
+      "loop": true,
+      "properties": [
+        "opacity"
+      ]
+    },
+    {
+      "name": "sea-twinkle",
+      "loop": true,
+      "properties": [
+        "opacity"
+      ]
+    },
+    {
+      "name": "sea-twinkle",
+      "loop": true,
+      "properties": [
+        "opacity"
+      ]
+    },
+    {
+      "name": "sea-twinkle",
+      "loop": true,
+      "properties": [
+        "opacity"
+      ]
+    },
+    {
+      "name": "sea-twinkle",
+      "loop": true,
+      "properties": [
+        "opacity"
+      ]
+    },
+    {
+      "name": "sea-twinkle",
+      "loop": true,
+      "properties": [
+        "opacity"
+      ]
+    },
+    {
+      "name": "sea-twinkle",
+      "loop": true,
+      "properties": [
+        "opacity"
+      ]
+    },
+    {
+      "name": "sea-twinkle",
+      "loop": true,
+      "properties": [
+        "opacity"
+      ]
+    },
+    {
+      "name": "sea-twinkle",
+      "loop": true,
+      "properties": [
+        "opacity"
+      ]
+    },
+    {
+      "name": "sea-twinkle",
+      "loop": true,
+      "properties": [
+        "opacity"
+      ]
+    },
+    {
+      "name": "sea-twinkle",
+      "loop": true,
+      "properties": [
+        "opacity"
+      ]
+    },
+    {
+      "name": "sea-twinkle",
+      "loop": true,
+      "properties": [
+        "opacity"
+      ]
+    },
+    {
+      "name": "sea-twinkle",
+      "loop": true,
+      "properties": [
+        "opacity"
+      ]
+    },
+    {
+      "name": "sea-moon-breathe",
+      "loop": true,
+      "properties": [
+        "opacity",
+        "transform"
+      ]
+    },
+    {
+      "name": "sea-cloud",
+      "loop": true,
+      "properties": [
+        "transform"
+      ]
+    },
+    {
+      "name": "sea-cloud",
+      "loop": true,
+      "properties": [
+        "transform"
+      ]
+    },
+    {
+      "name": "sea-bob",
+      "loop": true,
+      "properties": [
+        "transform"
+      ]
+    },
+    {
+      "name": "sea-breathe",
+      "loop": true,
+      "properties": [
+        "opacity"
+      ]
+    },
+    {
+      "name": "sea-ember",
+      "loop": true,
+      "properties": [
+        "opacity",
+        "transform"
+      ]
+    },
+    {
+      "name": "sea-swell-flow",
+      "loop": true,
+      "properties": [
+        "transform"
+      ]
+    },
+    {
+      "name": "sea-swell-flow",
+      "loop": true,
+      "properties": [
+        "transform"
+      ]
+    },
+    {
+      "name": "sea-bob",
+      "loop": true,
+      "properties": [
+        "transform"
+      ]
+    },
+    {
+      "name": "sea-ripple-flow",
+      "loop": true,
+      "properties": [
+        "transform"
+      ]
+    },
+    {
+      "name": "sea-ripple-counter",
+      "loop": true,
+      "properties": [
+        "transform"
+      ]
+    },
+    {
+      "name": "sea-bob",
+      "loop": true,
+      "properties": [
+        "transform"
+      ]
+    },
+    {
+      "name": "sea-ripple-flow",
+      "loop": true,
+      "properties": [
+        "transform"
+      ]
+    },
+    {
+      "name": "sea-ripple-counter",
+      "loop": true,
+      "properties": [
+        "transform"
+      ]
+    },
+    {
+      "name": "sea-bob",
+      "loop": true,
+      "properties": [
+        "transform"
+      ]
+    },
+    {
+      "name": "sea-glint-flow",
+      "loop": true,
+      "properties": [
+        "transform"
+      ]
+    },
+    {
+      "name": "sea-glint-shimmer",
+      "loop": true,
+      "properties": [
+        "opacity"
+      ]
+    },
+    {
+      "name": "sea-glint-flow",
+      "loop": true,
+      "properties": [
+        "transform"
+      ]
+    },
+    {
+      "name": "sea-glint-shimmer",
+      "loop": true,
+      "properties": [
+        "opacity"
+      ]
+    },
+    {
+      "name": "sea-glint-flow",
+      "loop": true,
+      "properties": [
+        "transform"
+      ]
+    },
+    {
+      "name": "sea-glint-shimmer",
+      "loop": true,
+      "properties": [
+        "opacity"
+      ]
+    },
+    {
+      "name": "sea-glint-flow",
+      "loop": true,
+      "properties": [
+        "transform"
+      ]
+    },
+    {
+      "name": "sea-glint-shimmer",
+      "loop": true,
+      "properties": [
+        "opacity"
+      ]
+    },
+    {
+      "name": "sea-glint-flow",
+      "loop": true,
+      "properties": [
+        "transform"
+      ]
+    },
+    {
+      "name": "sea-glint-shimmer",
+      "loop": true,
+      "properties": [
+        "opacity"
+      ]
+    },
+    {
+      "name": "sea-glint-flow",
+      "loop": true,
+      "properties": [
+        "transform"
+      ]
+    },
+    {
+      "name": "sea-glint-shimmer",
+      "loop": true,
+      "properties": [
+        "opacity"
+      ]
+    },
+    {
+      "name": "sea-glint-flow",
+      "loop": true,
+      "properties": [
+        "transform"
+      ]
+    },
+    {
+      "name": "sea-glint-shimmer",
+      "loop": true,
+      "properties": [
+        "opacity"
+      ]
+    },
+    {
+      "name": "sea-glint-flow",
+      "loop": true,
+      "properties": [
+        "transform"
+      ]
+    },
+    {
+      "name": "sea-glint-shimmer",
+      "loop": true,
+      "properties": [
+        "opacity"
+      ]
+    }
+  ],
+  "hidden-failed": {
+    "before": [
+      {
+        "name": "sea-twinkle",
+        "time": 1416.6110001642255,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.6110001642255,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.6110001642255,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.6110001642255,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.6110001642255,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.6110001642255,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.6110001642255,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.6110001642255,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.6110001642255,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.6110001642255,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.6110001642255,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.6110001642255,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.6110001642255,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.6110001642255,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.6110001642255,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.6110001642255,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.6110001642255,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.6110001642255,
+        "state": "paused"
+      },
+      {
+        "name": "sea-cloud",
+        "time": 1416.6110001642255,
+        "state": "paused"
+      },
+      {
+        "name": "sea-cloud",
+        "time": 1416.6110001642255,
+        "state": "paused"
+      },
+      {
+        "name": "sea-bob",
+        "time": 1416.6110001642255,
+        "state": "paused"
+      },
+      {
+        "name": "sea-ember",
+        "time": 1416.6110001642255,
+        "state": "paused"
+      },
+      {
+        "name": "sea-swell-flow",
+        "time": 1416.6110001642255,
+        "state": "paused"
+      },
+      {
+        "name": "sea-swell-flow",
+        "time": 1416.6110001642255,
+        "state": "paused"
+      },
+      {
+        "name": "sea-bob",
+        "time": 1416.6110001642255,
+        "state": "paused"
+      },
+      {
+        "name": "sea-ripple-flow",
+        "time": 1416.6110001642255,
+        "state": "paused"
+      },
+      {
+        "name": "sea-ripple-counter",
+        "time": 1416.6110001642255,
+        "state": "paused"
+      },
+      {
+        "name": "sea-bob",
+        "time": 1416.6110001642255,
+        "state": "paused"
+      },
+      {
+        "name": "sea-ripple-flow",
+        "time": 1416.6110001642255,
+        "state": "paused"
+      },
+      {
+        "name": "sea-ripple-counter",
+        "time": 1416.6110001642255,
+        "state": "paused"
+      },
+      {
+        "name": "sea-bob",
+        "time": 1416.6110001642255,
+        "state": "paused"
+      },
+      {
+        "name": "sea-glint-flow",
+        "time": 1416.6110001642255,
+        "state": "paused"
+      },
+      {
+        "name": "sea-glint-shimmer",
+        "time": 1416.6110001642255,
+        "state": "paused"
+      },
+      {
+        "name": "sea-glint-flow",
+        "time": 1416.6110001642255,
+        "state": "paused"
+      },
+      {
+        "name": "sea-glint-shimmer",
+        "time": 1416.6110001642255,
+        "state": "paused"
+      },
+      {
+        "name": "sea-glint-flow",
+        "time": 1416.6110001642255,
+        "state": "paused"
+      },
+      {
+        "name": "sea-glint-shimmer",
+        "time": 1416.6110001642255,
+        "state": "paused"
+      },
+      {
+        "name": "sea-glint-flow",
+        "time": 1416.6110001642255,
+        "state": "paused"
+      },
+      {
+        "name": "sea-glint-shimmer",
+        "time": 1416.6110001642255,
+        "state": "paused"
+      }
+    ],
+    "after": [
+      {
+        "name": "sea-twinkle",
+        "time": 1416.6110001642255,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.6110001642255,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.6110001642255,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.6110001642255,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.6110001642255,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.6110001642255,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.6110001642255,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.6110001642255,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.6110001642255,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.6110001642255,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.6110001642255,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.6110001642255,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.6110001642255,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.6110001642255,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.6110001642255,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.6110001642255,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.6110001642255,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.6110001642255,
+        "state": "paused"
+      },
+      {
+        "name": "sea-cloud",
+        "time": 1416.6110001642255,
+        "state": "paused"
+      },
+      {
+        "name": "sea-cloud",
+        "time": 1416.6110001642255,
+        "state": "paused"
+      },
+      {
+        "name": "sea-bob",
+        "time": 1416.6110001642255,
+        "state": "paused"
+      },
+      {
+        "name": "sea-ember",
+        "time": 1416.6110001642255,
+        "state": "paused"
+      },
+      {
+        "name": "sea-swell-flow",
+        "time": 1416.6110001642255,
+        "state": "paused"
+      },
+      {
+        "name": "sea-swell-flow",
+        "time": 1416.6110001642255,
+        "state": "paused"
+      },
+      {
+        "name": "sea-bob",
+        "time": 1416.6110001642255,
+        "state": "paused"
+      },
+      {
+        "name": "sea-ripple-flow",
+        "time": 1416.6110001642255,
+        "state": "paused"
+      },
+      {
+        "name": "sea-ripple-counter",
+        "time": 1416.6110001642255,
+        "state": "paused"
+      },
+      {
+        "name": "sea-bob",
+        "time": 1416.6110001642255,
+        "state": "paused"
+      },
+      {
+        "name": "sea-ripple-flow",
+        "time": 1416.6110001642255,
+        "state": "paused"
+      },
+      {
+        "name": "sea-ripple-counter",
+        "time": 1416.6110001642255,
+        "state": "paused"
+      },
+      {
+        "name": "sea-bob",
+        "time": 1416.6110001642255,
+        "state": "paused"
+      },
+      {
+        "name": "sea-glint-flow",
+        "time": 1416.6110001642255,
+        "state": "paused"
+      },
+      {
+        "name": "sea-glint-shimmer",
+        "time": 1416.6110001642255,
+        "state": "paused"
+      },
+      {
+        "name": "sea-glint-flow",
+        "time": 1416.6110001642255,
+        "state": "paused"
+      },
+      {
+        "name": "sea-glint-shimmer",
+        "time": 1416.6110001642255,
+        "state": "paused"
+      },
+      {
+        "name": "sea-glint-flow",
+        "time": 1416.6110001642255,
+        "state": "paused"
+      },
+      {
+        "name": "sea-glint-shimmer",
+        "time": 1416.6110001642255,
+        "state": "paused"
+      },
+      {
+        "name": "sea-glint-flow",
+        "time": 1416.6110001642255,
+        "state": "paused"
+      },
+      {
+        "name": "sea-glint-shimmer",
+        "time": 1416.6110001642255,
+        "state": "paused"
+      }
+    ]
+  },
+  "static-idle": {
+    "running": 0,
+    "sweep": "0"
+  },
+  "loops-idle": [
+    {
+      "name": "sea-twinkle",
+      "loop": true,
+      "properties": [
+        "opacity"
+      ]
+    },
+    {
+      "name": "sea-twinkle",
+      "loop": true,
+      "properties": [
+        "opacity"
+      ]
+    },
+    {
+      "name": "sea-twinkle",
+      "loop": true,
+      "properties": [
+        "opacity"
+      ]
+    },
+    {
+      "name": "sea-twinkle",
+      "loop": true,
+      "properties": [
+        "opacity"
+      ]
+    },
+    {
+      "name": "sea-twinkle",
+      "loop": true,
+      "properties": [
+        "opacity"
+      ]
+    },
+    {
+      "name": "sea-twinkle",
+      "loop": true,
+      "properties": [
+        "opacity"
+      ]
+    },
+    {
+      "name": "sea-twinkle",
+      "loop": true,
+      "properties": [
+        "opacity"
+      ]
+    },
+    {
+      "name": "sea-twinkle",
+      "loop": true,
+      "properties": [
+        "opacity"
+      ]
+    },
+    {
+      "name": "sea-twinkle",
+      "loop": true,
+      "properties": [
+        "opacity"
+      ]
+    },
+    {
+      "name": "sea-twinkle",
+      "loop": true,
+      "properties": [
+        "opacity"
+      ]
+    },
+    {
+      "name": "sea-twinkle",
+      "loop": true,
+      "properties": [
+        "opacity"
+      ]
+    },
+    {
+      "name": "sea-twinkle",
+      "loop": true,
+      "properties": [
+        "opacity"
+      ]
+    },
+    {
+      "name": "sea-twinkle",
+      "loop": true,
+      "properties": [
+        "opacity"
+      ]
+    },
+    {
+      "name": "sea-twinkle",
+      "loop": true,
+      "properties": [
+        "opacity"
+      ]
+    },
+    {
+      "name": "sea-twinkle",
+      "loop": true,
+      "properties": [
+        "opacity"
+      ]
+    },
+    {
+      "name": "sea-twinkle",
+      "loop": true,
+      "properties": [
+        "opacity"
+      ]
+    },
+    {
+      "name": "sea-twinkle",
+      "loop": true,
+      "properties": [
+        "opacity"
+      ]
+    },
+    {
+      "name": "sea-twinkle",
+      "loop": true,
+      "properties": [
+        "opacity"
+      ]
+    },
+    {
+      "name": "sea-meteor",
+      "loop": true,
+      "properties": [
+        "opacity",
+        "transform"
+      ]
+    },
+    {
+      "name": "sea-moon-breathe",
+      "loop": true,
+      "properties": [
+        "opacity",
+        "transform"
+      ]
+    },
+    {
+      "name": "sea-cloud",
+      "loop": true,
+      "properties": [
+        "transform"
+      ]
+    },
+    {
+      "name": "sea-cloud",
+      "loop": true,
+      "properties": [
+        "transform"
+      ]
+    },
+    {
+      "name": "sea-breathe",
+      "loop": true,
+      "properties": [
+        "opacity"
+      ]
+    },
+    {
+      "name": "sea-swell-flow",
+      "loop": true,
+      "properties": [
+        "transform"
+      ]
+    },
+    {
+      "name": "sea-swell-flow",
+      "loop": true,
+      "properties": [
+        "transform"
+      ]
+    },
+    {
+      "name": "sea-ripple-flow",
+      "loop": true,
+      "properties": [
+        "transform"
+      ]
+    },
+    {
+      "name": "sea-ripple-counter",
+      "loop": true,
+      "properties": [
+        "transform"
+      ]
+    },
+    {
+      "name": "sea-ripple-flow",
+      "loop": true,
+      "properties": [
+        "transform"
+      ]
+    },
+    {
+      "name": "sea-ripple-counter",
+      "loop": true,
+      "properties": [
+        "transform"
+      ]
+    },
+    {
+      "name": "sea-glint-flow",
+      "loop": true,
+      "properties": [
+        "transform"
+      ]
+    },
+    {
+      "name": "sea-glint-shimmer",
+      "loop": true,
+      "properties": [
+        "opacity"
+      ]
+    },
+    {
+      "name": "sea-glint-flow",
+      "loop": true,
+      "properties": [
+        "transform"
+      ]
+    },
+    {
+      "name": "sea-glint-shimmer",
+      "loop": true,
+      "properties": [
+        "opacity"
+      ]
+    },
+    {
+      "name": "sea-glint-flow",
+      "loop": true,
+      "properties": [
+        "transform"
+      ]
+    },
+    {
+      "name": "sea-glint-shimmer",
+      "loop": true,
+      "properties": [
+        "opacity"
+      ]
+    },
+    {
+      "name": "sea-glint-flow",
+      "loop": true,
+      "properties": [
+        "transform"
+      ]
+    },
+    {
+      "name": "sea-glint-shimmer",
+      "loop": true,
+      "properties": [
+        "opacity"
+      ]
+    },
+    {
+      "name": "sea-glint-flow",
+      "loop": true,
+      "properties": [
+        "transform"
+      ]
+    },
+    {
+      "name": "sea-glint-shimmer",
+      "loop": true,
+      "properties": [
+        "opacity"
+      ]
+    },
+    {
+      "name": "sea-glint-flow",
+      "loop": true,
+      "properties": [
+        "transform"
+      ]
+    },
+    {
+      "name": "sea-glint-shimmer",
+      "loop": true,
+      "properties": [
+        "opacity"
+      ]
+    },
+    {
+      "name": "sea-glint-flow",
+      "loop": true,
+      "properties": [
+        "transform"
+      ]
+    },
+    {
+      "name": "sea-glint-shimmer",
+      "loop": true,
+      "properties": [
+        "opacity"
+      ]
+    },
+    {
+      "name": "sea-glint-flow",
+      "loop": true,
+      "properties": [
+        "transform"
+      ]
+    },
+    {
+      "name": "sea-glint-shimmer",
+      "loop": true,
+      "properties": [
+        "opacity"
+      ]
+    }
+  ],
+  "hidden-idle": {
+    "before": [
+      {
+        "name": "sea-twinkle",
+        "time": 1416.5920000597835,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.5920000597835,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.5920000597835,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.5920000597835,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.5920000597835,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.5920000597835,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.5920000597835,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.5920000597835,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.5920000597835,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.5920000597835,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.5920000597835,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.5920000597835,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.5920000597835,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.5920000597835,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.5920000597835,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.5920000597835,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.5920000597835,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.5920000597835,
+        "state": "paused"
+      },
+      {
+        "name": "sea-meteor",
+        "time": 1416.5920000597835,
+        "state": "paused"
+      },
+      {
+        "name": "sea-moon-breathe",
+        "time": 1416.5920000597835,
+        "state": "paused"
+      },
+      {
+        "name": "sea-cloud",
+        "time": 1416.5920000597835,
+        "state": "paused"
+      },
+      {
+        "name": "sea-cloud",
+        "time": 1416.5920000597835,
+        "state": "paused"
+      },
+      {
+        "name": "sea-swell-flow",
+        "time": 1416.5920000597835,
+        "state": "paused"
+      },
+      {
+        "name": "sea-swell-flow",
+        "time": 1416.5920000597835,
+        "state": "paused"
+      },
+      {
+        "name": "sea-ripple-flow",
+        "time": 1416.5920000597835,
+        "state": "paused"
+      },
+      {
+        "name": "sea-ripple-counter",
+        "time": 1416.5920000597835,
+        "state": "paused"
+      },
+      {
+        "name": "sea-ripple-flow",
+        "time": 1416.5920000597835,
+        "state": "paused"
+      },
+      {
+        "name": "sea-ripple-counter",
+        "time": 1416.5920000597835,
+        "state": "paused"
+      },
+      {
+        "name": "sea-glint-flow",
+        "time": 1416.5920000597835,
+        "state": "paused"
+      },
+      {
+        "name": "sea-glint-shimmer",
+        "time": 1416.5920000597835,
+        "state": "paused"
+      },
+      {
+        "name": "sea-glint-flow",
+        "time": 1416.5920000597835,
+        "state": "paused"
+      },
+      {
+        "name": "sea-glint-shimmer",
+        "time": 1416.5920000597835,
+        "state": "paused"
+      },
+      {
+        "name": "sea-glint-flow",
+        "time": 1416.5920000597835,
+        "state": "paused"
+      },
+      {
+        "name": "sea-glint-shimmer",
+        "time": 1416.5920000597835,
+        "state": "paused"
+      },
+      {
+        "name": "sea-glint-flow",
+        "time": 1416.5920000597835,
+        "state": "paused"
+      },
+      {
+        "name": "sea-glint-shimmer",
+        "time": 1416.5920000597835,
+        "state": "paused"
+      },
+      {
+        "name": "sea-glint-flow",
+        "time": 1416.5920000597835,
+        "state": "paused"
+      },
+      {
+        "name": "sea-glint-shimmer",
+        "time": 1416.5920000597835,
+        "state": "paused"
+      },
+      {
+        "name": "sea-glint-flow",
+        "time": 1416.5920000597835,
+        "state": "paused"
+      },
+      {
+        "name": "sea-glint-shimmer",
+        "time": 1416.5920000597835,
+        "state": "paused"
+      },
+      {
+        "name": "sea-glint-flow",
+        "time": 1416.5920000597835,
+        "state": "paused"
+      },
+      {
+        "name": "sea-glint-shimmer",
+        "time": 1416.5920000597835,
+        "state": "paused"
+      },
+      {
+        "name": "sea-glint-flow",
+        "time": 1416.5920000597835,
+        "state": "paused"
+      },
+      {
+        "name": "sea-glint-shimmer",
+        "time": 1416.5920000597835,
+        "state": "paused"
+      }
+    ],
+    "after": [
+      {
+        "name": "sea-twinkle",
+        "time": 1416.5920000597835,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.5920000597835,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.5920000597835,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.5920000597835,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.5920000597835,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.5920000597835,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.5920000597835,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.5920000597835,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.5920000597835,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.5920000597835,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.5920000597835,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.5920000597835,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.5920000597835,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.5920000597835,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.5920000597835,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.5920000597835,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.5920000597835,
+        "state": "paused"
+      },
+      {
+        "name": "sea-twinkle",
+        "time": 1416.5920000597835,
+        "state": "paused"
+      },
+      {
+        "name": "sea-meteor",
+        "time": 1416.5920000597835,
+        "state": "paused"
+      },
+      {
+        "name": "sea-moon-breathe",
+        "time": 1416.5920000597835,
+        "state": "paused"
+      },
+      {
+        "name": "sea-cloud",
+        "time": 1416.5920000597835,
+        "state": "paused"
+      },
+      {
+        "name": "sea-cloud",
+        "time": 1416.5920000597835,
+        "state": "paused"
+      },
+      {
+        "name": "sea-swell-flow",
+        "time": 1416.5920000597835,
+        "state": "paused"
+      },
+      {
+        "name": "sea-swell-flow",
+        "time": 1416.5920000597835,
+        "state": "paused"
+      },
+      {
+        "name": "sea-ripple-flow",
+        "time": 1416.5920000597835,
+        "state": "paused"
+      },
+      {
+        "name": "sea-ripple-counter",
+        "time": 1416.5920000597835,
+        "state": "paused"
+      },
+      {
+        "name": "sea-ripple-flow",
+        "time": 1416.5920000597835,
+        "state": "paused"
+      },
+      {
+        "name": "sea-ripple-counter",
+        "time": 1416.5920000597835,
+        "state": "paused"
+      },
+      {
+        "name": "sea-glint-flow",
+        "time": 1416.5920000597835,
+        "state": "paused"
+      },
+      {
+        "name": "sea-glint-shimmer",
+        "time": 1416.5920000597835,
+        "state": "paused"
+      },
+      {
+        "name": "sea-glint-flow",
+        "time": 1416.5920000597835,
+        "state": "paused"
+      },
+      {
+        "name": "sea-glint-shimmer",
+        "time": 1416.5920000597835,
+        "state": "paused"
+      },
+      {
+        "name": "sea-glint-flow",
+        "time": 1416.5920000597835,
+        "state": "paused"
+      },
+      {
+        "name": "sea-glint-shimmer",
+        "time": 1416.5920000597835,
+        "state": "paused"
+      },
+      {
+        "name": "sea-glint-flow",
+        "time": 1416.5920000597835,
+        "state": "paused"
+      },
+      {
+        "name": "sea-glint-shimmer",
+        "time": 1416.5920000597835,
+        "state": "paused"
+      },
+      {
+        "name": "sea-glint-flow",
+        "time": 1416.5920000597835,
+        "state": "paused"
+      },
+      {
+        "name": "sea-glint-shimmer",
+        "time": 1416.5920000597835,
+        "state": "paused"
+      },
+      {
+        "name": "sea-glint-flow",
+        "time": 1416.5920000597835,
+        "state": "paused"
+      },
+      {
+        "name": "sea-glint-shimmer",
+        "time": 1416.5920000597835,
+        "state": "paused"
+      },
+      {
+        "name": "sea-glint-flow",
+        "time": 1416.5920000597835,
+        "state": "paused"
+      },
+      {
+        "name": "sea-glint-shimmer",
+        "time": 1416.5920000597835,
+        "state": "paused"
+      },
+      {
+        "name": "sea-glint-flow",
+        "time": 1416.5920000597835,
+        "state": "paused"
+      },
+      {
+        "name": "sea-glint-shimmer",
+        "time": 1416.5920000597835,
+        "state": "paused"
+      }
+    ]
+  },
+  "hiddenProgress": {
+    "before": {
+      "offset": "148.75",
+      "transform": "matrix(1.08, 0, 0, 1.08, 0, 167.5)",
+      "transitions": [
+        {
+          "time": 0,
+          "state": "paused"
+        },
+        {
+          "time": 0,
+          "state": "paused"
+        },
+        {
+          "time": 0,
+          "state": "paused"
+        },
+        {
+          "time": 0,
+          "state": "paused"
+        }
+      ]
+    },
+    "after": {
+      "transform": "matrix(1.08, 0, 0, 1.08, 0, 167.5)",
+      "transitions": [
+        {
+          "time": 0,
+          "state": "paused"
+        },
+        {
+          "time": 0,
+          "state": "paused"
+        },
+        {
+          "time": 0,
+          "state": "paused"
+        },
+        {
+          "time": 0,
+          "state": "paused"
+        }
+      ]
+    }
+  },
+  "progressResumed": {
+    "sameRoot": true,
+    "sameSun": true,
+    "transform": "matrix(1.08, 0, 0, 1.08, 0, 148.75)"
+  },
+  "meteor": {
+    "duration": 60000,
+    "delay": 55000,
+    "opacity": "0",
+    "peakSeekOpacity": 0.538462,
+    "offAfterMs": 710,
+    "cancelOnDawn": true
+  },
+  "prefers-reduced-motion": {
+    "motion": "static",
+    "running": 0,
+    "blur": "none",
+    "duration": "0s"
+  },
+  "prefers-reduced-transparency": {
+    "motion": "ambient",
+    "running": 35,
+    "blur": "none",
+    "duration": "2.6s"
+  },
+  "forced-colors": {
+    "motion": "static",
+    "running": 0,
+    "blur": "none",
+    "duration": "0s"
+  },
+  "reversal": {
+    "sameRoot": true,
+    "sameSun": true,
+    "phase": "connecting",
+    "before": "matrix(1.04132, 0, 0, 1.04132, 0, 119.827)",
+    "after": "matrix(1.04132, 0, 0, 1.04132, 0, 119.827)"
+  },
+  "failed": {
+    "sweep": "0",
+    "bob": 5000,
+    "ember": 6400
+  },
+  "hiddenTrace": {
+    "Paint": 0,
+    "Layout": 0,
+    "RasterTask": 0,
+    "UpdateLayoutTree": 0
+  }
+}

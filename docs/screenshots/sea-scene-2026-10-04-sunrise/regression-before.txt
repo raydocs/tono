@@ -1,0 +1,32 @@
+
+ RUN  v5.0.1 /Users/ruirui/orca/workspaces/tono/coral/apps/windows/app
+
+ ❯ src/tono-ui/SeaScene.test.tsx (8 tests | 1 failed | 7 skipped) 54ms
+   × keeps separate brightness-tier star groups mounted during dawn and reversal 53ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/tono-ui/SeaScene.test.tsx > keeps separate brightness-tier star groups mounted during dawn and reversal
+AssertionError: expected [ …(2) ] to have a length of 3 but got 2
+
+- Expected
++ Received
+
+- 3
++ 2
+
+ ❯ src/tono-ui/SeaScene.test.tsx:285:18
+    283|   const groups = [...container.querySelectorAll('.sea-stars')]
+    284|   const stars = [...container.querySelectorAll('.sea-star')]
+    285|   expect(groups).toHaveLength(3)
+       |                  ^
+    286|   expect(groups[0].querySelectorAll('.sea-star-tier-0')).toHaveLength(…
+    287|   expect(groups[1].querySelectorAll('.sea-star-tier-1')).toHaveLength(…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 7 skipped (8)
+   Start at  04:08:06
+   Duration  761ms (environment 74%, import 12%, tests 8%, transform 5%)

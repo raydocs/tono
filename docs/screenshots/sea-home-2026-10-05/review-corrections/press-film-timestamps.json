@@ -1,0 +1,753 @@
+{
+  "timing": {
+    "timeOrigin": 1791239988695.1,
+    "down": 3619.5,
+    "pressed": 3673,
+    "click": 3824.2999999523163,
+    "label": 3835.9000000953674,
+    "pressMs": 53.5,
+    "labelMs": 11.600000143051147
+  },
+  "frames": [
+    {
+      "file": "press-frames/0000.jpg",
+      "offsetTop": 0,
+      "pageScaleFactor": 1,
+      "deviceWidth": 920,
+      "deviceHeight": 600,
+      "scrollOffsetX": 0,
+      "scrollOffsetY": 0,
+      "timestamp": 1791239991.906389
+    },
+    {
+      "file": "press-frames/0001.jpg",
+      "offsetTop": 0,
+      "pageScaleFactor": 1,
+      "deviceWidth": 920,
+      "deviceHeight": 600,
+      "scrollOffsetX": 0,
+      "scrollOffsetY": 0,
+      "timestamp": 1791239991.922248
+    },
+    {
+      "file": "press-frames/0002.jpg",
+      "offsetTop": 0,
+      "pageScaleFactor": 1,
+      "deviceWidth": 920,
+      "deviceHeight": 600,
+      "scrollOffsetX": 0,
+      "scrollOffsetY": 0,
+      "timestamp": 1791239991.938752
+    },
+    {
+      "file": "press-frames/0003.jpg",
+      "offsetTop": 0,
+      "pageScaleFactor": 1,
+      "deviceWidth": 920,
+      "deviceHeight": 600,
+      "scrollOffsetX": 0,
+      "scrollOffsetY": 0,
+      "timestamp": 1791239991.955737
+    },
+    {
+      "file": "press-frames/0004.jpg",
+      "offsetTop": 0,
+      "pageScaleFactor": 1,
+      "deviceWidth": 920,
+      "deviceHeight": 600,
+      "scrollOffsetX": 0,
+      "scrollOffsetY": 0,
+      "timestamp": 1791239991.973368
+    },
+    {
+      "file": "press-frames/0005.jpg",
+      "offsetTop": 0,
+      "pageScaleFactor": 1,
+      "deviceWidth": 920,
+      "deviceHeight": 600,
+      "scrollOffsetX": 0,
+      "scrollOffsetY": 0,
+      "timestamp": 1791239991.988119
+    },
+    {
+      "file": "press-frames/0006.jpg",
+      "offsetTop": 0,
+      "pageScaleFactor": 1,
+      "deviceWidth": 920,
+      "deviceHeight": 600,
+      "scrollOffsetX": 0,
+      "scrollOffsetY": 0,
+      "timestamp": 1791239992.005124
+    },
+    {
+      "file": "press-frames/0007.jpg",
+      "offsetTop": 0,
+      "pageScaleFactor": 1,
+      "deviceWidth": 920,
+      "deviceHeight": 600,
+      "scrollOffsetX": 0,
+      "scrollOffsetY": 0,
+      "timestamp": 1791239992.021445
+    },
+    {
+      "file": "press-frames/0008.jpg",
+      "offsetTop": 0,
+      "pageScaleFactor": 1,
+      "deviceWidth": 920,
+      "deviceHeight": 600,
+      "scrollOffsetX": 0,
+      "scrollOffsetY": 0,
+      "timestamp": 1791239992.037796
+    },
+    {
+      "file": "press-frames/0009.jpg",
+      "offsetTop": 0,
+      "pageScaleFactor": 1,
+      "deviceWidth": 920,
+      "deviceHeight": 600,
+      "scrollOffsetX": 0,
+      "scrollOffsetY": 0,
+      "timestamp": 1791239992.054725
+    },
+    {
+      "file": "press-frames/0010.jpg",
+      "offsetTop": 0,
+      "pageScaleFactor": 1,
+      "deviceWidth": 920,
+      "deviceHeight": 600,
+      "scrollOffsetX": 0,
+      "scrollOffsetY": 0,
+      "timestamp": 1791239992.071688
+    },
+    {
+      "file": "press-frames/0011.jpg",
+      "offsetTop": 0,
+      "pageScaleFactor": 1,
+      "deviceWidth": 920,
+      "deviceHeight": 600,
+      "scrollOffsetX": 0,
+      "scrollOffsetY": 0,
+      "timestamp": 1791239992.088001
+    },
+    {
+      "file": "press-frames/0012.jpg",
+      "offsetTop": 0,
+      "pageScaleFactor": 1,
+      "deviceWidth": 920,
+      "deviceHeight": 600,
+      "scrollOffsetX": 0,
+      "scrollOffsetY": 0,
+      "timestamp": 1791239992.105303
+    },
+    {
+      "file": "press-frames/0013.jpg",
+      "offsetTop": 0,
+      "pageScaleFactor": 1,
+      "deviceWidth": 920,
+      "deviceHeight": 600,
+      "scrollOffsetX": 0,
+      "scrollOffsetY": 0,
+      "timestamp": 1791239992.121719
+    },
+    {
+      "file": "press-frames/0014.jpg",
+      "offsetTop": 0,
+      "pageScaleFactor": 1,
+      "deviceWidth": 920,
+      "deviceHeight": 600,
+      "scrollOffsetX": 0,
+      "scrollOffsetY": 0,
+      "timestamp": 1791239992.137778
+    },
+    {
+      "file": "press-frames/0015.jpg",
+      "offsetTop": 0,
+      "pageScaleFactor": 1,
+      "deviceWidth": 920,
+      "deviceHeight": 600,
+      "scrollOffsetX": 0,
+      "scrollOffsetY": 0,
+      "timestamp": 1791239992.155314
+    },
+    {
+      "file": "press-frames/0016.jpg",
+      "offsetTop": 0,
+      "pageScaleFactor": 1,
+      "deviceWidth": 920,
+      "deviceHeight": 600,
+      "scrollOffsetX": 0,
+      "scrollOffsetY": 0,
+      "timestamp": 1791239992.171997
+    },
+    {
+      "file": "press-frames/0017.jpg",
+      "offsetTop": 0,
+      "pageScaleFactor": 1,
+      "deviceWidth": 920,
+      "deviceHeight": 600,
+      "scrollOffsetX": 0,
+      "scrollOffsetY": 0,
+      "timestamp": 1791239992.188617
+    },
+    {
+      "file": "press-frames/0018.jpg",
+      "offsetTop": 0,
+      "pageScaleFactor": 1,
+      "deviceWidth": 920,
+      "deviceHeight": 600,
+      "scrollOffsetX": 0,
+      "scrollOffsetY": 0,
+      "timestamp": 1791239992.20395
+    },
+    {
+      "file": "press-frames/0019.jpg",
+      "offsetTop": 0,
+      "pageScaleFactor": 1,
+      "deviceWidth": 920,
+      "deviceHeight": 600,
+      "scrollOffsetX": 0,
+      "scrollOffsetY": 0,
+      "timestamp": 1791239992.221377
+    },
+    {
+      "file": "press-frames/0020.jpg",
+      "offsetTop": 0,
+      "pageScaleFactor": 1,
+      "deviceWidth": 920,
+      "deviceHeight": 600,
+      "scrollOffsetX": 0,
+      "scrollOffsetY": 0,
+      "timestamp": 1791239992.237556
+    },
+    {
+      "file": "press-frames/0021.jpg",
+      "offsetTop": 0,
+      "pageScaleFactor": 1,
+      "deviceWidth": 920,
+      "deviceHeight": 600,
+      "scrollOffsetX": 0,
+      "scrollOffsetY": 0,
+      "timestamp": 1791239992.254661
+    },
+    {
+      "file": "press-frames/0022.jpg",
+      "offsetTop": 0,
+      "pageScaleFactor": 1,
+      "deviceWidth": 920,
+      "deviceHeight": 600,
+      "scrollOffsetX": 0,
+      "scrollOffsetY": 0,
+      "timestamp": 1791239992.27254
+    },
+    {
+      "file": "press-frames/0023.jpg",
+      "offsetTop": 0,
+      "pageScaleFactor": 1,
+      "deviceWidth": 920,
+      "deviceHeight": 600,
+      "scrollOffsetX": 0,
+      "scrollOffsetY": 0,
+      "timestamp": 1791239992.288426
+    },
+    {
+      "file": "press-frames/0024.jpg",
+      "offsetTop": 0,
+      "pageScaleFactor": 1,
+      "deviceWidth": 920,
+      "deviceHeight": 600,
+      "scrollOffsetX": 0,
+      "scrollOffsetY": 0,
+      "timestamp": 1791239992.304415
+    },
+    {
+      "file": "press-frames/0025.jpg",
+      "offsetTop": 0,
+      "pageScaleFactor": 1,
+      "deviceWidth": 920,
+      "deviceHeight": 600,
+      "scrollOffsetX": 0,
+      "scrollOffsetY": 0,
+      "timestamp": 1791239992.324463
+    },
+    {
+      "file": "press-frames/0026.jpg",
+      "offsetTop": 0,
+      "pageScaleFactor": 1,
+      "deviceWidth": 920,
+      "deviceHeight": 600,
+      "scrollOffsetX": 0,
+      "scrollOffsetY": 0,
+      "timestamp": 1791239992.3388
+    },
+    {
+      "file": "press-frames/0027.jpg",
+      "offsetTop": 0,
+      "pageScaleFactor": 1,
+      "deviceWidth": 920,
+      "deviceHeight": 600,
+      "scrollOffsetX": 0,
+      "scrollOffsetY": 0,
+      "timestamp": 1791239992.355085
+    },
+    {
+      "file": "press-frames/0028.jpg",
+      "offsetTop": 0,
+      "pageScaleFactor": 1,
+      "deviceWidth": 920,
+      "deviceHeight": 600,
+      "scrollOffsetX": 0,
+      "scrollOffsetY": 0,
+      "timestamp": 1791239992.372332
+    },
+    {
+      "file": "press-frames/0029.jpg",
+      "offsetTop": 0,
+      "pageScaleFactor": 1,
+      "deviceWidth": 920,
+      "deviceHeight": 600,
+      "scrollOffsetX": 0,
+      "scrollOffsetY": 0,
+      "timestamp": 1791239992.388495
+    },
+    {
+      "file": "press-frames/0030.jpg",
+      "offsetTop": 0,
+      "pageScaleFactor": 1,
+      "deviceWidth": 920,
+      "deviceHeight": 600,
+      "scrollOffsetX": 0,
+      "scrollOffsetY": 0,
+      "timestamp": 1791239992.404609
+    },
+    {
+      "file": "press-frames/0031.jpg",
+      "offsetTop": 0,
+      "pageScaleFactor": 1,
+      "deviceWidth": 920,
+      "deviceHeight": 600,
+      "scrollOffsetX": 0,
+      "scrollOffsetY": 0,
+      "timestamp": 1791239992.422247
+    },
+    {
+      "file": "press-frames/0032.jpg",
+      "offsetTop": 0,
+      "pageScaleFactor": 1,
+      "deviceWidth": 920,
+      "deviceHeight": 600,
+      "scrollOffsetX": 0,
+      "scrollOffsetY": 0,
+      "timestamp": 1791239992.439227
+    },
+    {
+      "file": "press-frames/0033.jpg",
+      "offsetTop": 0,
+      "pageScaleFactor": 1,
+      "deviceWidth": 920,
+      "deviceHeight": 600,
+      "scrollOffsetX": 0,
+      "scrollOffsetY": 0,
+      "timestamp": 1791239992.454869
+    },
+    {
+      "file": "press-frames/0034.jpg",
+      "offsetTop": 0,
+      "pageScaleFactor": 1,
+      "deviceWidth": 920,
+      "deviceHeight": 600,
+      "scrollOffsetX": 0,
+      "scrollOffsetY": 0,
+      "timestamp": 1791239992.470348
+    },
+    {
+      "file": "press-frames/0035.jpg",
+      "offsetTop": 0,
+      "pageScaleFactor": 1,
+      "deviceWidth": 920,
+      "deviceHeight": 600,
+      "scrollOffsetX": 0,
+      "scrollOffsetY": 0,
+      "timestamp": 1791239992.487
+    },
+    {
+      "file": "press-frames/0036.jpg",
+      "offsetTop": 0,
+      "pageScaleFactor": 1,
+      "deviceWidth": 920,
+      "deviceHeight": 600,
+      "scrollOffsetX": 0,
+      "scrollOffsetY": 0,
+      "timestamp": 1791239992.503685
+    },
+    {
+      "file": "press-frames/0037.jpg",
+      "offsetTop": 0,
+      "pageScaleFactor": 1,
+      "deviceWidth": 920,
+      "deviceHeight": 600,
+      "scrollOffsetX": 0,
+      "scrollOffsetY": 0,
+      "timestamp": 1791239992.520377
+    },
+    {
+      "file": "press-frames/0038.jpg",
+      "offsetTop": 0,
+      "pageScaleFactor": 1,
+      "deviceWidth": 920,
+      "deviceHeight": 600,
+      "scrollOffsetX": 0,
+      "scrollOffsetY": 0,
+      "timestamp": 1791239992.552497
+    },
+    {
+      "file": "press-frames/0039.jpg",
+      "offsetTop": 0,
+      "pageScaleFactor": 1,
+      "deviceWidth": 920,
+      "deviceHeight": 600,
+      "scrollOffsetX": 0,
+      "scrollOffsetY": 0,
+      "timestamp": 1791239992.574553
+    },
+    {
+      "file": "press-frames/0040.jpg",
+      "offsetTop": 0,
+      "pageScaleFactor": 1,
+      "deviceWidth": 920,
+      "deviceHeight": 600,
+      "scrollOffsetX": 0,
+      "scrollOffsetY": 0,
+      "timestamp": 1791239992.581511
+    },
+    {
+      "file": "press-frames/0041.jpg",
+      "offsetTop": 0,
+      "pageScaleFactor": 1,
+      "deviceWidth": 920,
+      "deviceHeight": 600,
+      "scrollOffsetX": 0,
+      "scrollOffsetY": 0,
+      "timestamp": 1791239992.588076
+    },
+    {
+      "file": "press-frames/0042.jpg",
+      "offsetTop": 0,
+      "pageScaleFactor": 1,
+      "deviceWidth": 920,
+      "deviceHeight": 600,
+      "scrollOffsetX": 0,
+      "scrollOffsetY": 0,
+      "timestamp": 1791239992.604817
+    },
+    {
+      "file": "press-frames/0043.jpg",
+      "offsetTop": 0,
+      "pageScaleFactor": 1,
+      "deviceWidth": 920,
+      "deviceHeight": 600,
+      "scrollOffsetX": 0,
+      "scrollOffsetY": 0,
+      "timestamp": 1791239992.621212
+    },
+    {
+      "file": "press-frames/0044.jpg",
+      "offsetTop": 0,
+      "pageScaleFactor": 1,
+      "deviceWidth": 920,
+      "deviceHeight": 600,
+      "scrollOffsetX": 0,
+      "scrollOffsetY": 0,
+      "timestamp": 1791239992.637761
+    },
+    {
+      "file": "press-frames/0045.jpg",
+      "offsetTop": 0,
+      "pageScaleFactor": 1,
+      "deviceWidth": 920,
+      "deviceHeight": 600,
+      "scrollOffsetX": 0,
+      "scrollOffsetY": 0,
+      "timestamp": 1791239992.654972
+    },
+    {
+      "file": "press-frames/0046.jpg",
+      "offsetTop": 0,
+      "pageScaleFactor": 1,
+      "deviceWidth": 920,
+      "deviceHeight": 600,
+      "scrollOffsetX": 0,
+      "scrollOffsetY": 0,
+      "timestamp": 1791239992.672237
+    },
+    {
+      "file": "press-frames/0047.jpg",
+      "offsetTop": 0,
+      "pageScaleFactor": 1,
+      "deviceWidth": 920,
+      "deviceHeight": 600,
+      "scrollOffsetX": 0,
+      "scrollOffsetY": 0,
+      "timestamp": 1791239992.68886
+    },
+    {
+      "file": "press-frames/0048.jpg",
+      "offsetTop": 0,
+      "pageScaleFactor": 1,
+      "deviceWidth": 920,
+      "deviceHeight": 600,
+      "scrollOffsetX": 0,
+      "scrollOffsetY": 0,
+      "timestamp": 1791239992.706104
+    },
+    {
+      "file": "press-frames/0049.jpg",
+      "offsetTop": 0,
+      "pageScaleFactor": 1,
+      "deviceWidth": 920,
+      "deviceHeight": 600,
+      "scrollOffsetX": 0,
+      "scrollOffsetY": 0,
+      "timestamp": 1791239992.721394
+    },
+    {
+      "file": "press-frames/0050.jpg",
+      "offsetTop": 0,
+      "pageScaleFactor": 1,
+      "deviceWidth": 920,
+      "deviceHeight": 600,
+      "scrollOffsetX": 0,
+      "scrollOffsetY": 0,
+      "timestamp": 1791239992.738234
+    },
+    {
+      "file": "press-frames/0051.jpg",
+      "offsetTop": 0,
+      "pageScaleFactor": 1,
+      "deviceWidth": 920,
+      "deviceHeight": 600,
+      "scrollOffsetX": 0,
+      "scrollOffsetY": 0,
+      "timestamp": 1791239992.755902
+    },
+    {
+      "file": "press-frames/0052.jpg",
+      "offsetTop": 0,
+      "pageScaleFactor": 1,
+      "deviceWidth": 920,
+      "deviceHeight": 600,
+      "scrollOffsetX": 0,
+      "scrollOffsetY": 0,
+      "timestamp": 1791239992.771962
+    },
+    {
+      "file": "press-frames/0053.jpg",
+      "offsetTop": 0,
+      "pageScaleFactor": 1,
+      "deviceWidth": 920,
+      "deviceHeight": 600,
+      "scrollOffsetX": 0,
+      "scrollOffsetY": 0,
+      "timestamp": 1791239992.792059
+    },
+    {
+      "file": "press-frames/0054.jpg",
+      "offsetTop": 0,
+      "pageScaleFactor": 1,
+      "deviceWidth": 920,
+      "deviceHeight": 600,
+      "scrollOffsetX": 0,
+      "scrollOffsetY": 0,
+      "timestamp": 1791239992.805618
+    },
+    {
+      "file": "press-frames/0055.jpg",
+      "offsetTop": 0,
+      "pageScaleFactor": 1,
+      "deviceWidth": 920,
+      "deviceHeight": 600,
+      "scrollOffsetX": 0,
+      "scrollOffsetY": 0,
+      "timestamp": 1791239992.822482
+    },
+    {
+      "file": "press-frames/0056.jpg",
+      "offsetTop": 0,
+      "pageScaleFactor": 1,
+      "deviceWidth": 920,
+      "deviceHeight": 600,
+      "scrollOffsetX": 0,
+      "scrollOffsetY": 0,
+      "timestamp": 1791239992.855434
+    },
+    {
+      "file": "press-frames/0057.jpg",
+      "offsetTop": 0,
+      "pageScaleFactor": 1,
+      "deviceWidth": 920,
+      "deviceHeight": 600,
+      "scrollOffsetX": 0,
+      "scrollOffsetY": 0,
+      "timestamp": 1791239992.872065
+    },
+    {
+      "file": "press-frames/0058.jpg",
+      "offsetTop": 0,
+      "pageScaleFactor": 1,
+      "deviceWidth": 920,
+      "deviceHeight": 600,
+      "scrollOffsetX": 0,
+      "scrollOffsetY": 0,
+      "timestamp": 1791239992.887358
+    },
+    {
+      "file": "press-frames/0059.jpg",
+      "offsetTop": 0,
+      "pageScaleFactor": 1,
+      "deviceWidth": 920,
+      "deviceHeight": 600,
+      "scrollOffsetX": 0,
+      "scrollOffsetY": 0,
+      "timestamp": 1791239992.903994
+    },
+    {
+      "file": "press-frames/0060.jpg",
+      "offsetTop": 0,
+      "pageScaleFactor": 1,
+      "deviceWidth": 920,
+      "deviceHeight": 600,
+      "scrollOffsetX": 0,
+      "scrollOffsetY": 0,
+      "timestamp": 1791239992.921338
+    },
+    {
+      "file": "press-frames/0061.jpg",
+      "offsetTop": 0,
+      "pageScaleFactor": 1,
+      "deviceWidth": 920,
+      "deviceHeight": 600,
+      "scrollOffsetX": 0,
+      "scrollOffsetY": 0,
+      "timestamp": 1791239992.939074
+    },
+    {
+      "file": "press-frames/0062.jpg",
+      "offsetTop": 0,
+      "pageScaleFactor": 1,
+      "deviceWidth": 920,
+      "deviceHeight": 600,
+      "scrollOffsetX": 0,
+      "scrollOffsetY": 0,
+      "timestamp": 1791239992.954686
+    },
+    {
+      "file": "press-frames/0063.jpg",
+      "offsetTop": 0,
+      "pageScaleFactor": 1,
+      "deviceWidth": 920,
+      "deviceHeight": 600,
+      "scrollOffsetX": 0,
+      "scrollOffsetY": 0,
+      "timestamp": 1791239992.972372
+    },
+    {
+      "file": "press-frames/0064.jpg",
+      "offsetTop": 0,
+      "pageScaleFactor": 1,
+      "deviceWidth": 920,
+      "deviceHeight": 600,
+      "scrollOffsetX": 0,
+      "scrollOffsetY": 0,
+      "timestamp": 1791239992.988983
+    },
+    {
+      "file": "press-frames/0065.jpg",
+      "offsetTop": 0,
+      "pageScaleFactor": 1,
+      "deviceWidth": 920,
+      "deviceHeight": 600,
+      "scrollOffsetX": 0,
+      "scrollOffsetY": 0,
+      "timestamp": 1791239993.004782
+    },
+    {
+      "file": "press-frames/0066.jpg",
+      "offsetTop": 0,
+      "pageScaleFactor": 1,
+      "deviceWidth": 920,
+      "deviceHeight": 600,
+      "scrollOffsetX": 0,
+      "scrollOffsetY": 0,
+      "timestamp": 1791239993.022579
+    },
+    {
+      "file": "press-frames/0067.jpg",
+      "offsetTop": 0,
+      "pageScaleFactor": 1,
+      "deviceWidth": 920,
+      "deviceHeight": 600,
+      "scrollOffsetX": 0,
+      "scrollOffsetY": 0,
+      "timestamp": 1791239993.037979
+    },
+    {
+      "file": "press-frames/0068.jpg",
+      "offsetTop": 0,
+      "pageScaleFactor": 1,
+      "deviceWidth": 920,
+      "deviceHeight": 600,
+      "scrollOffsetX": 0,
+      "scrollOffsetY": 0,
+      "timestamp": 1791239993.055513
+    },
+    {
+      "file": "press-frames/0069.jpg",
+      "offsetTop": 0,
+      "pageScaleFactor": 1,
+      "deviceWidth": 920,
+      "deviceHeight": 600,
+      "scrollOffsetX": 0,
+      "scrollOffsetY": 0,
+      "timestamp": 1791239993.074128
+    },
+    {
+      "file": "press-frames/0070.jpg",
+      "offsetTop": 0,
+      "pageScaleFactor": 1,
+      "deviceWidth": 920,
+      "deviceHeight": 600,
+      "scrollOffsetX": 0,
+      "scrollOffsetY": 0,
+      "timestamp": 1791239993.088439
+    },
+    {
+      "file": "press-frames/0071.jpg",
+      "offsetTop": 0,
+      "pageScaleFactor": 1,
+      "deviceWidth": 920,
+      "deviceHeight": 600,
+      "scrollOffsetX": 0,
+      "scrollOffsetY": 0,
+      "timestamp": 1791239993.104622
+    },
+    {
+      "file": "press-frames/0072.jpg",
+      "offsetTop": 0,
+      "pageScaleFactor": 1,
+      "deviceWidth": 920,
+      "deviceHeight": 600,
+      "scrollOffsetX": 0,
+      "scrollOffsetY": 0,
+      "timestamp": 1791239993.122267
+    },
+    {
+      "file": "press-frames/0073.jpg",
+      "offsetTop": 0,
+      "pageScaleFactor": 1,
+      "deviceWidth": 920,
+      "deviceHeight": 600,
+      "scrollOffsetX": 0,
+      "scrollOffsetY": 0,
+      "timestamp": 1791239993.138386
+    }
+  ]
+}

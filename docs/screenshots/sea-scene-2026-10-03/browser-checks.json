@@ -1,0 +1,270 @@
+{
+  "sizes": [
+    {
+      "width": 860,
+      "height": 540,
+      "phase": "connected",
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 860,
+        "height": 540,
+        "top": 0,
+        "right": 860,
+        "bottom": 540,
+        "left": 0
+      }
+    },
+    {
+      "width": 860,
+      "height": 540,
+      "phase": "connecting",
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 860,
+        "height": 540,
+        "top": 0,
+        "right": 860,
+        "bottom": 540,
+        "left": 0
+      }
+    },
+    {
+      "width": 860,
+      "height": 540,
+      "phase": "failed",
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 860,
+        "height": 540,
+        "top": 0,
+        "right": 860,
+        "bottom": 540,
+        "left": 0
+      }
+    },
+    {
+      "width": 860,
+      "height": 540,
+      "phase": "idle",
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 860,
+        "height": 540,
+        "top": 0,
+        "right": 860,
+        "bottom": 540,
+        "left": 0
+      }
+    },
+    {
+      "width": 920,
+      "height": 600,
+      "phase": "connected",
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 920,
+        "height": 600,
+        "top": 0,
+        "right": 920,
+        "bottom": 600,
+        "left": 0
+      }
+    },
+    {
+      "width": 920,
+      "height": 600,
+      "phase": "connecting",
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 920,
+        "height": 600,
+        "top": 0,
+        "right": 920,
+        "bottom": 600,
+        "left": 0
+      }
+    },
+    {
+      "width": 920,
+      "height": 600,
+      "phase": "failed",
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 920,
+        "height": 600,
+        "top": 0,
+        "right": 920,
+        "bottom": 600,
+        "left": 0
+      }
+    },
+    {
+      "width": 920,
+      "height": 600,
+      "phase": "idle",
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 920,
+        "height": 600,
+        "top": 0,
+        "right": 920,
+        "bottom": 600,
+        "left": 0
+      }
+    },
+    {
+      "width": 1920,
+      "height": 1080,
+      "phase": "connected",
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 1920,
+        "height": 1080,
+        "top": 0,
+        "right": 1920,
+        "bottom": 1080,
+        "left": 0
+      }
+    },
+    {
+      "width": 1920,
+      "height": 1080,
+      "phase": "connecting",
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 1920,
+        "height": 1080,
+        "top": 0,
+        "right": 1920,
+        "bottom": 1080,
+        "left": 0
+      }
+    },
+    {
+      "width": 1920,
+      "height": 1080,
+      "phase": "failed",
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 1920,
+        "height": 1080,
+        "top": 0,
+        "right": 1920,
+        "bottom": 1080,
+        "left": 0
+      }
+    },
+    {
+      "width": 1920,
+      "height": 1080,
+      "phase": "idle",
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 1920,
+        "height": 1080,
+        "top": 0,
+        "right": 1920,
+        "bottom": 1080,
+        "left": 0
+      }
+    }
+  ],
+  "fallbacks": [
+    {
+      "feature": "prefers-reduced-motion",
+      "matches": true,
+      "motion": "static",
+      "paused": "true",
+      "sun": "matrix(1.1, 0, 0, 1.1, 0, 290)",
+      "moonTransition": "0s",
+      "loops": true,
+      "dock": "none"
+    },
+    {
+      "feature": "prefers-reduced-transparency",
+      "matches": true,
+      "motion": "static",
+      "paused": "true",
+      "sun": "matrix(1.1, 0, 0, 1.1, 0, 290)",
+      "moonTransition": "0s",
+      "loops": true,
+      "dock": "none"
+    },
+    {
+      "feature": "explicit static/software mode",
+      "motion": "static",
+      "sun": "matrix(1.08, 0, 0, 1.08, 0, 125)",
+      "moonTransition": "0s",
+      "dock": "none"
+    },
+    {
+      "feature": "no backdrop-filter (simulated capability)",
+      "motion": "static",
+      "paused": "true",
+      "moonTransition": "0s",
+      "dock": "none"
+    }
+  ],
+  "reversals": [
+    {
+      "from": "connected",
+      "transient": "idle",
+      "to": "connecting",
+      "before": 61.2672,
+      "after": 63.6666,
+      "jump": 2.3994,
+      "persistent": true,
+      "phase": "connecting",
+      "title": "连接中"
+    },
+    {
+      "from": "idle",
+      "transient": "connecting",
+      "to": "idle",
+      "before": 175.833,
+      "after": 174.276,
+      "jump": 1.556999999999988,
+      "persistent": true,
+      "phase": "idle",
+      "title": "未连接"
+    }
+  ],
+  "visibility": {
+    "simulated": true,
+    "paused": "true",
+    "before": 966.6429999932647,
+    "after": 966.6429999932647,
+    "resumed": true
+  },
+  "pacing": {
+    "host": "MacBook Chrome headless (not Windows)",
+    "frames": 301,
+    "fps": 60.2,
+    "p95": 16.700000000000728,
+    "max": 16.800000000000182
+  },
+  "filters": {
+    "filtered": 0,
+    "svgFilters": 0
+  },
+  "trace": {
+    "durationMs": 3000,
+    "Paint": 0,
+    "Layout": 0,
+    "RasterTask": 0,
+    "UpdateLayoutTree": 55,
+    "complete": true
+  }
+}

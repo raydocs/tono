@@ -1,0 +1,32 @@
+{
+  "boxes": {
+    "root": {
+      "x": 0,
+      "y": 0,
+      "width": 920,
+      "height": 600
+    },
+    "column": {
+      "x": 489.984375,
+      "y": 330,
+      "width": 260,
+      "height": 189
+    },
+    "pseudoHeight": "60px"
+  },
+  "pixelDeltaBounds": [
+    376,
+    66,
+    871,
+    389
+  ],
+  "maxRgbDelta": 14,
+  "outsideLower60PxDeltaBounds": null,
+  "skyDeltaBounds": [
+    376,
+    66,
+    871,
+    313
+  ],
+  "confinedToFirst60Px": false
+}

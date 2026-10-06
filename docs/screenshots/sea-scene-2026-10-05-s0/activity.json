@@ -1,0 +1,62 @@
+{
+  "full-connected": {
+    "sky": 4.224055855284036,
+    "water": 8.894701086956522,
+    "offColumn": 5.5375
+  },
+  "full-connecting": {
+    "sky": 1.3634560456997777,
+    "water": 7.934103260869565,
+    "offColumn": 6.969444444444444
+  },
+  "full-failed": {
+    "sky": 2.553554427165979,
+    "water": 6.840353260869565,
+    "offColumn": 8.230555555555556
+  },
+  "full-idle": {
+    "sky": 0.4962710250714059,
+    "water": 8.960597826086957,
+    "offColumn": 8.529166666666667
+  },
+  "lite-connected": {
+    "sky": 0.0,
+    "water": 7.803668478260869,
+    "offColumn": 6.3694444444444445
+  },
+  "lite-connecting": {
+    "sky": 0.0,
+    "water": 7.349184782608695,
+    "offColumn": 6.881944444444445
+  },
+  "lite-failed": {
+    "sky": 0.0,
+    "water": 6.09375,
+    "offColumn": 7.395833333333333
+  },
+  "lite-idle": {
+    "sky": 0.0,
+    "water": 8.684782608695652,
+    "offColumn": 8.572222222222223
+  },
+  "static-connected": {
+    "sky": 0.0,
+    "water": 0.0,
+    "offColumn": 0.0
+  },
+  "static-connecting": {
+    "sky": 0.0,
+    "water": 0.0,
+    "offColumn": 0.0
+  },
+  "static-failed": {
+    "sky": 0.0,
+    "water": 0.0,
+    "offColumn": 0.0
+  },
+  "static-idle": {
+    "sky": 0.0,
+    "water": 0.0,
+    "offColumn": 0.0
+  }
+}

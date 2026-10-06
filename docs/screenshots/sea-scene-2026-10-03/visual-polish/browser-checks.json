@@ -1,0 +1,307 @@
+{
+  "sizes": [
+    {
+      "width": 860,
+      "height": 540,
+      "phase": "connected",
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 860,
+        "height": 540,
+        "top": 0,
+        "right": 860,
+        "bottom": 540,
+        "left": 0
+      }
+    },
+    {
+      "width": 860,
+      "height": 540,
+      "phase": "connecting",
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 860,
+        "height": 540,
+        "top": 0,
+        "right": 860,
+        "bottom": 540,
+        "left": 0
+      }
+    },
+    {
+      "width": 860,
+      "height": 540,
+      "phase": "failed",
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 860,
+        "height": 540,
+        "top": 0,
+        "right": 860,
+        "bottom": 540,
+        "left": 0
+      }
+    },
+    {
+      "width": 860,
+      "height": 540,
+      "phase": "idle",
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 860,
+        "height": 540,
+        "top": 0,
+        "right": 860,
+        "bottom": 540,
+        "left": 0
+      }
+    },
+    {
+      "width": 920,
+      "height": 600,
+      "phase": "connected",
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 920,
+        "height": 600,
+        "top": 0,
+        "right": 920,
+        "bottom": 600,
+        "left": 0
+      }
+    },
+    {
+      "width": 920,
+      "height": 600,
+      "phase": "connecting",
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 920,
+        "height": 600,
+        "top": 0,
+        "right": 920,
+        "bottom": 600,
+        "left": 0
+      }
+    },
+    {
+      "width": 920,
+      "height": 600,
+      "phase": "failed",
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 920,
+        "height": 600,
+        "top": 0,
+        "right": 920,
+        "bottom": 600,
+        "left": 0
+      }
+    },
+    {
+      "width": 920,
+      "height": 600,
+      "phase": "idle",
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 920,
+        "height": 600,
+        "top": 0,
+        "right": 920,
+        "bottom": 600,
+        "left": 0
+      }
+    },
+    {
+      "width": 1920,
+      "height": 1080,
+      "phase": "connected",
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 1920,
+        "height": 1080,
+        "top": 0,
+        "right": 1920,
+        "bottom": 1080,
+        "left": 0
+      }
+    },
+    {
+      "width": 1920,
+      "height": 1080,
+      "phase": "connecting",
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 1920,
+        "height": 1080,
+        "top": 0,
+        "right": 1920,
+        "bottom": 1080,
+        "left": 0
+      }
+    },
+    {
+      "width": 1920,
+      "height": 1080,
+      "phase": "failed",
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 1920,
+        "height": 1080,
+        "top": 0,
+        "right": 1920,
+        "bottom": 1080,
+        "left": 0
+      }
+    },
+    {
+      "width": 1920,
+      "height": 1080,
+      "phase": "idle",
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 1920,
+        "height": 1080,
+        "top": 0,
+        "right": 1920,
+        "bottom": 1080,
+        "left": 0
+      }
+    }
+  ],
+  "fallbacks": [
+    {
+      "feature": "prefers-reduced-motion",
+      "matches": true,
+      "motion": "static",
+      "paused": "true",
+      "sun": "matrix(1.1, 0, 0, 1.1, 0, 290)",
+      "moonTransition": "0s",
+      "loops": true,
+      "dock": "none"
+    },
+    {
+      "feature": "prefers-reduced-transparency",
+      "matches": true,
+      "motion": "static",
+      "paused": "true",
+      "sun": "matrix(1.1, 0, 0, 1.1, 0, 290)",
+      "moonTransition": "0s",
+      "loops": true,
+      "dock": "none"
+    },
+    {
+      "feature": "explicit static/software mode",
+      "motion": "static",
+      "sun": "matrix(1.08, 0, 0, 1.08, 0, 125)",
+      "moonTransition": "0s",
+      "dock": "none"
+    },
+    {
+      "feature": "no backdrop-filter (simulated capability)",
+      "motion": "static",
+      "paused": "true",
+      "moonTransition": "0s",
+      "dock": "none"
+    }
+  ],
+  "reversals": [
+    {
+      "from": "connected",
+      "transient": "idle",
+      "to": "connecting",
+      "before": 58.9394,
+      "after": 61.2735,
+      "jump": 2.3340999999999994,
+      "persistent": true,
+      "phase": "connecting",
+      "title": "连接中"
+    },
+    {
+      "from": "idle",
+      "transient": "connecting",
+      "to": "idle",
+      "before": 174.28,
+      "after": 172.772,
+      "jump": 1.5080000000000098,
+      "persistent": true,
+      "phase": "idle",
+      "title": "未连接"
+    }
+  ],
+  "visibility": {
+    "simulated": true,
+    "paused": "true",
+    "before": 983.3390001501887,
+    "after": 983.3390001501887,
+    "resumed": true
+  },
+  "pacing": {
+    "host": "MacBook Chrome headless (not Windows)",
+    "frames": 302,
+    "elapsed": 5016.5,
+    "fps": 60.00199342170836,
+    "p95": 16.700000000000273,
+    "max": 16.800000000000182
+  },
+  "filters": {
+    "filtered": 0,
+    "svgFilters": 0
+  },
+  "trace": {
+    "durationMs": 3000,
+    "Paint": 0,
+    "Layout": 0,
+    "RasterTask": 0,
+    "UpdateLayoutTree": 54,
+    "complete": true
+  },
+  "maskedDrift": {
+    "before": [
+      {
+        "x": -0.00960943,
+        "mask": "url(\"http://127.0.0.1:3000/tono-ui/sea-assets/ripple-1.png?t=1791069251395\")",
+        "animation": "sea-wobble"
+      },
+      {
+        "x": 2.59364,
+        "mask": "url(\"http://127.0.0.1:3000/tono-ui/sea-assets/ripple-2.png?t=1791069251397\")",
+        "animation": "sea-wobble"
+      }
+    ],
+    "after": [
+      {
+        "x": 3.44989,
+        "mask": "url(\"http://127.0.0.1:3000/tono-ui/sea-assets/ripple-1.png?t=1791069251395\")",
+        "animation": "sea-wobble"
+      },
+      {
+        "x": -0.327174,
+        "mask": "url(\"http://127.0.0.1:3000/tono-ui/sea-assets/ripple-2.png?t=1791069251397\")",
+        "animation": "sea-wobble"
+      }
+    ],
+    "waterLoops": 2,
+    "cloudMasks": [
+      "none",
+      "none"
+    ],
+    "cloudGradients": [
+      "radial-gradient(at 58% 50%, rgba(14, 6, 10, 0.376), rgba(14, 6, 10, 0.15) 42%, rgba(14, 6, 10, 0.04) 72%, rgba(0, 0, 0, 0) 90%)",
+      "radial-gradient(at 58% 50%, rgba(14, 6, 10, 0.376), rgba(14, 6, 10, 0.15) 42%, rgba(14, 6, 10, 0.04) 72%, rgba(0, 0, 0, 0) 90%)"
+    ]
+  },
+  "captureMode": "Four phase/size comparisons use explicit static mode for repeatable images; motion/trace checks use ambient mode."
+}

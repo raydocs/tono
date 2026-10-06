@@ -1,0 +1,728 @@
+/* biome-ignore-all lint/complexity/noImportantStyles: Home-only overrides must beat retained inline legacy cards and the global reduced-motion reset, without changing the default appearance. */
+/* Home-only materials and motion. No selector changes the default overview or shell. */
+.tono-home {
+  container-type: inline-size;
+  --tono-text-primary: #f6f2ec;
+  --tono-text-secondary: rgba(246, 242, 236, 0.86);
+  --tono-text-tertiary: rgba(246, 242, 236, 0.72);
+  --tono-text-link: #ffe2b0;
+  --tono-text-error: #ffc6b7;
+  --tono-home-quiet: linear-gradient(
+    180deg,
+    rgba(40, 16, 14, 0.34),
+    rgba(40, 16, 14, 0.46)
+  );
+  --tono-home-blur: blur(26px) saturate(115%);
+  --tono-home-panel-blur: blur(34px) saturate(140%);
+  --tono-home-panel: linear-gradient(
+    180deg,
+    rgba(26, 16, 18, 0.56),
+    rgba(16, 10, 14, 0.66)
+  );
+  --tono-home-highlight: inset 0 1px 0 rgba(255, 235, 210, 0.28);
+  --tono-surface-card: #1d1917;
+  --tono-surface-card-border: transparent;
+  --tono-glass-blur: none;
+  --tono-glass-blur-strong: none;
+  --tono-accent: #ffe2b0;
+  --tono-accent-soft: #ffe2b0;
+  isolation: isolate;
+  background: #090b17;
+}
+.tono-home[data-tone="cool"] {
+  --tono-home-quiet: linear-gradient(
+    180deg,
+    rgba(190, 202, 255, 0.14),
+    rgba(150, 160, 220, 0.06)
+  );
+  --tono-home-blur: blur(26px) saturate(160%);
+  --tono-home-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.24);
+}
+/* Local ink wash, not a blurred full-page overlay. Keeps small text legible at noon. */
+.tono-home::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(
+    90deg,
+    rgba(10, 8, 15, 0.56),
+    rgba(10, 8, 15, 0.56) calc(60% - 160px),
+    transparent 60%
+  );
+  z-index: 1;
+}
+.tono-home__column,
+.tono-home__telemetry {
+  z-index: 2;
+}
+.tono-home__title {
+  margin: 0;
+  font-weight: 300;
+  line-height: 1.1;
+  letter-spacing: 0.02em;
+  text-shadow: 0 2px 18px rgba(12, 6, 10, 0.45);
+}
+.tono-home__sentence {
+  margin: 10px 0 0;
+  max-width: min(400px, calc(100% - 24px), calc(60cqw - 216px));
+  font-size: 15px;
+  line-height: 1.55;
+  color: rgba(246, 242, 236, 0.94);
+  text-shadow: 0 1px 6px rgba(12, 6, 10, 0.6);
+  font-variant-numeric: tabular-nums;
+}
+.tono-home__text-swap {
+  position: relative;
+  display: inline-grid;
+}
+.tono-home__text-swap > span {
+  grid-area: 1 / 1;
+}
+.tono-home__text-out {
+  position: absolute;
+  inset: 0;
+  animation: tono-home-text-out 240ms var(--tono-ease) both;
+  pointer-events: none;
+}
+.tono-home__text-in {
+  animation: tono-home-text-in 240ms var(--tono-ease) both;
+}
+@keyframes tono-home-text-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@keyframes tono-home-text-out {
+  to {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+.tono-home__steps {
+  display: flex;
+  gap: 7px;
+  margin-top: 14px;
+}
+.tono-home__steps span {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.26);
+}
+.tono-home__steps [data-step="done"] {
+  background: #ffd9a0;
+}
+.tono-home__steps [data-step="current"] {
+  background: #fff3d4;
+  box-shadow: 0 0 8px rgba(255, 228, 170, 0.7);
+}
+.tono-home__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 22px;
+  flex-shrink: 0;
+}
+.tono-home__pill,
+.tono-home__chip {
+  height: 48px;
+  border: 0;
+  border-radius: 999px;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  font-size: 15px;
+  transition:
+    transform var(--tono-duration-press) var(--tono-ease),
+    opacity var(--tono-duration-state) var(--tono-ease);
+}
+.tono-home__pill {
+  padding: 0 32px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+}
+.tono-home__pill:active,
+.tono-home__chip:active {
+  transform: scale(0.97);
+}
+.tono-home__pill:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+.tono-home__primary {
+  color: #1a0f0a;
+  background: linear-gradient(180deg, #ffe9c4, #ffb877 60%, #ff9e63);
+  box-shadow:
+    inset 0 1px 0 #fff3d4,
+    0 10px 30px -8px rgba(255, 150, 80, 0.55);
+}
+.tono-home__quiet {
+  background: var(--tono-home-quiet);
+  backdrop-filter: var(--tono-home-blur);
+  -webkit-backdrop-filter: var(--tono-home-blur);
+  box-shadow: var(--tono-home-highlight);
+}
+.tono-home__chip {
+  padding: 0 18px 0 16px;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  max-width: 100%;
+  min-width: 0;
+}
+.tono-home__chip small {
+  font-size: 13px;
+  color: rgba(246, 242, 236, 0.76);
+  white-space: nowrap;
+}
+.tono-home__line-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tono-home__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: rgba(220, 212, 220, 0.45);
+  flex-shrink: 0;
+}
+.tono-home__dot[data-lit="true"] {
+  background: #ffd9a0;
+  box-shadow: 0 0 14px rgba(255, 197, 112, 0.75);
+}
+.tono-home__chevron {
+  margin-left: auto;
+  color: rgba(246, 242, 236, 0.76);
+}
+.tono-home__attention {
+  display: flex;
+  flex-direction: column;
+  flex: 0 1 auto;
+  gap: 10px;
+  margin-top: 16px;
+  scrollbar-width: thin;
+}
+.tono-home__attention > * {
+  flex-shrink: 0;
+}
+.tono-home__attention > :not(:empty) {
+  animation: tono-home-card-in 260ms var(--tono-ease-surface) both;
+}
+@keyframes tono-home-card-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.tono-home__attention > .tono-glass-card,
+.tono-home__progress-card,
+.tono-home__attention-slot > :where([role="alert"]),
+.tono-home__attention-slot > :where(div:not([role])) > :where(span, a),
+.tono-home__route-choice {
+  width: 100% !important;
+  box-sizing: border-box;
+  background: var(--tono-home-panel) !important;
+  border: none !important;
+  border-radius: 18px !important;
+  padding: 14px 16px !important;
+  margin: 0 !important;
+  box-shadow: inset 0 1px 0 rgba(255, 235, 220, 0.2) !important;
+  backdrop-filter: var(--tono-home-panel-blur) !important;
+  -webkit-backdrop-filter: var(--tono-home-panel-blur) !important;
+}
+.tono-home__attention button {
+  min-height: 32px;
+}
+.tono-home__attention > div {
+  margin-bottom: 0 !important;
+}
+.tono-home__route-choice {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  font-size: 13px;
+}
+.tono-home__telemetry {
+  font-size: 13px;
+  color: rgba(246, 242, 236, 0.86);
+  font-variant-numeric: tabular-nums;
+}
+.tono-home__telemetry > span {
+  min-width: 0;
+}
+.tono-home__link {
+  appearance: none;
+  border: 0;
+  padding: 5px 0;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  white-space: nowrap;
+}
+.tono-home__slow,
+.tono-home__first {
+  flex-shrink: 0;
+  margin: 12px 0 0;
+  font-size: 13px;
+  line-height: 1.5;
+  text-shadow: 0 1px 6px #130d16;
+}
+.tono-home__slow {
+  font-variant-numeric: tabular-nums;
+}
+.tono-home__slow button {
+  color: #ffe2b0;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.tono-home__first::before {
+  content: "•";
+  color: #ffd9a0;
+  margin-right: 8px;
+}
+.tono-home__dismiss {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+}
+.tono-home__panel {
+  color: #f6f2ec;
+  background: var(--tono-home-panel);
+  border: 0;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 235, 220, 0.2),
+    0 16px 40px rgba(0, 0, 0, 0.25);
+  z-index: 4;
+}
+/* The wide sheet is deliberately solid: only the small controls/popover/cards blur. */
+.tono-home__sheet {
+  border-radius: 26px;
+  padding: 18px 20px 20px;
+  background: #1d1917;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(calc(100% + 24px));
+  pointer-events: none;
+  transition:
+    opacity var(--tono-duration-surface) var(--tono-ease-surface),
+    transform var(--tono-duration-surface) var(--tono-ease-surface),
+    visibility 0s var(--tono-duration-surface);
+}
+.tono-home__sheet[data-open="true"] {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
+  pointer-events: auto;
+  transition-delay: 0s;
+}
+.tono-home__sheet-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.tono-home__sheet-header h2 {
+  font-size: 14px;
+  font-weight: 500;
+  margin: 0;
+}
+.tono-home__sheet-header button {
+  padding: 2px 10px;
+}
+.tono-home__tiles {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.tono-home__tiles > .tono-glass-card {
+  flex-shrink: 0;
+  height: auto !important;
+  max-height: none !important;
+  overflow: visible !important;
+  box-sizing: border-box;
+  width: auto !important;
+  min-width: 0;
+  border: 0 !important;
+  border-radius: 16px !important;
+  padding: 14px !important;
+  background: #27201f !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  box-shadow: none !important;
+}
+.tono-home__lines {
+  padding: 12px 8px 8px;
+  border-radius: 18px;
+  backdrop-filter: var(--tono-home-panel-blur);
+  -webkit-backdrop-filter: var(--tono-home-panel-blur);
+  transform-origin: top left;
+  animation: tono-home-popover 180ms var(--tono-ease-surface) both;
+  scrollbar-width: thin;
+}
+@keyframes tono-home-popover {
+  from {
+    opacity: 0;
+    transform: translateY(-6px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+.tono-home__line-group {
+  font-size: 11px;
+  color: rgba(246, 242, 236, 0.72);
+  padding: 6px 10px 4px;
+}
+.tono-home__line-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 34px;
+  border-radius: 10px;
+  border: 0;
+  padding: 6px 10px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+.tono-home__line-row:hover,
+.tono-home__line-row:focus-visible {
+  background: rgba(255, 255, 255, 0.09);
+}
+.tono-home__line-row > span:not(.tono-home__dot) {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.tono-home__line-row small {
+  margin-left: auto;
+  color: rgba(246, 242, 236, 0.8);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.tono-home__line-row:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.tono-home__all-lines {
+  justify-content: space-between;
+  margin-top: 8px;
+  box-shadow: 0 -1px 0 rgba(255, 235, 220, 0.12);
+}
+.tono-home__line-empty,
+.tono-home__line-error {
+  margin: 6px 10px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.tono-home__line-error {
+  color: #ffc6b7;
+}
+.tono-home :is(button, a, summary):focus-visible {
+  outline: 2px solid #ffe2b0;
+  outline-offset: 3px;
+}
+.tono-home:is([data-state="connecting"], [data-state="disconnecting"]),
+.tono-root--transacting .tono-home,
+.tono-home:has(.sea-scene[data-quality="lite"]) {
+  --tono-home-quiet: rgba(34, 16, 16, 0.78);
+  --tono-home-blur: none;
+  --tono-home-panel-blur: none;
+  --tono-home-panel: #1d1917;
+}
+.tono-home[data-tone="cool"]:has(.sea-scene[data-quality="lite"]) {
+  --tono-home-quiet: rgba(22, 22, 36, 0.8);
+}
+@supports not (backdrop-filter: blur(1px)) {
+  .tono-home {
+    --tono-home-quiet: #1d1917;
+    --tono-home-panel: #1d1917;
+    --tono-home-blur: none;
+    --tono-home-panel-blur: none;
+  }
+}
+@media (prefers-reduced-transparency: reduce), (prefers-contrast: more),
+  (prefers-reduced-motion: reduce) {
+  .tono-home {
+    --tono-home-quiet: #1d1917;
+    --tono-home-panel: #1d1917;
+    --tono-home-blur: none;
+    --tono-home-panel-blur: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .tono-root .tono-home .tono-home__text-in {
+    animation: tono-home-reduced-in 240ms var(--tono-ease) both !important;
+  }
+  .tono-root .tono-home .tono-home__text-out {
+    position: absolute;
+    inset: 0;
+    animation: tono-home-reduced-out 240ms var(--tono-ease) both !important;
+  }
+  .tono-root .tono-home .tono-home__sheet {
+    transform: none;
+    transition:
+      opacity 160ms ease,
+      visibility 0s 160ms !important;
+  }
+  .tono-root .tono-home .tono-home__sheet[data-open="true"] {
+    transition-delay: 0s !important;
+  }
+  .tono-root .tono-home .tono-home__attention > :not(:empty),
+  .tono-root .tono-home .tono-home__lines {
+    animation: tono-home-reduced-in 160ms ease both !important;
+  }
+  .tono-home__pill:active,
+  .tono-home__chip:active {
+    transform: none;
+  }
+}
+@keyframes tono-home-reduced-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes tono-home-reduced-out {
+  to {
+    opacity: 0;
+  }
+}
+@media (forced-colors: active) {
+  .tono-home {
+    color: CanvasText !important;
+    background: Canvas;
+  }
+  .tono-home::after {
+    display: none;
+  }
+  .tono-home__sentence,
+  .tono-home__telemetry {
+    color: CanvasText;
+    text-shadow: none;
+  }
+  .tono-home :is(button, a, summary) {
+    border: 1px solid ButtonText;
+    color: ButtonText;
+    background: Canvas;
+  }
+  .tono-home__panel {
+    color: CanvasText;
+    background: Canvas;
+    border: 1px solid CanvasText;
+  }
+  .tono-home :is(button, a, summary):focus-visible {
+    outline-color: Highlight;
+  }
+}
+
+.tono-home__attention-slot {
+  opacity: 1;
+  transform: translateY(0);
+  transition:
+    opacity 260ms var(--tono-ease-surface),
+    transform 260ms var(--tono-ease-surface);
+}
+.tono-home__attention-slot[data-shown="false"] {
+  opacity: 0;
+  transform: translateY(8px);
+  transition-duration: 160ms;
+}
+.tono-home__sheet,
+.tono-home__lines {
+  box-sizing: border-box;
+}
+.tono-home__attention .tono-glass-card {
+  transition: none !important;
+}
+@media (prefers-reduced-motion: reduce) {
+  .tono-root .tono-home .tono-home__attention-slot,
+  .tono-root .tono-home .tono-home__attention-slot[data-shown="false"] {
+    transform: none;
+    transition: opacity 160ms ease !important;
+  }
+}
+
+/* The intermediate 200px sidebar narrows the canvas; final full-bleed geometry is PR 3. */
+@container (max-width: 760px) {
+  .tono-home__sentence {
+    max-width: min(400px, calc(100% - 24px), calc(60cqw - 192px));
+  }
+  .tono-home__title[data-long="true"] {
+    font-size: 36px !important;
+  }
+  .tono-home__column {
+    left: 32px !important;
+  }
+  .tono-home:is([data-state="protectedOffline"], [data-failed="true"])
+    .tono-home__column {
+    top: 16% !important;
+    width: calc(100% - 64px) !important;
+    max-height: calc(84% - 60px) !important;
+  }
+  .tono-home__telemetry {
+    left: 32px !important;
+    right: 32px !important;
+  }
+  .tono-home__sheet {
+    left: 24px !important;
+    right: 24px !important;
+  }
+}
+
+/* Swap prepainted pill surfaces with opacity, never animate a gradient or live filter. */
+.tono-home__pill.tono-home__quiet,
+.tono-home__pill.tono-home__primary {
+  position: relative;
+  isolation: isolate;
+  background: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+.tono-home__pill::before,
+.tono-home__pill::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  z-index: -1;
+  pointer-events: none;
+  transition: opacity var(--tono-duration-state) var(--tono-ease);
+}
+.tono-home__pill::before {
+  background: var(--tono-home-quiet);
+  backdrop-filter: var(--tono-home-blur);
+  -webkit-backdrop-filter: var(--tono-home-blur);
+  box-shadow: var(--tono-home-highlight);
+  opacity: 1;
+}
+.tono-home__pill::after {
+  background: linear-gradient(180deg, #ffe9c4, #ffb877 60%, #ff9e63);
+  box-shadow:
+    inset 0 1px 0 #fff3d4,
+    0 10px 30px -8px rgba(255, 150, 80, 0.55);
+  opacity: 0;
+}
+.tono-home__pill.tono-home__primary::before {
+  opacity: 0;
+}
+.tono-home__pill.tono-home__primary::after {
+  opacity: 1;
+}
+@media (prefers-reduced-motion: reduce) {
+  .tono-root .tono-home .tono-home__pill::before,
+  .tono-root .tono-home .tono-home__pill::after {
+    transition: opacity 160ms ease !important;
+  }
+}
+@media (forced-colors: active) {
+  .tono-home__pill::before,
+  .tono-home__pill::after {
+    display: none;
+  }
+}
+
+/* Secondary tools are disclosed within the card; primary actions stay above it. */
+.tono-home__progress {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  max-height: var(--tono-home-attention-room, 220px);
+  flex-shrink: 1;
+}
+.tono-home__progress-card {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+.tono-home__tools {
+  margin-top: 12px;
+  display: flex;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.tono-home :is(.tono-button, .tono-link) {
+  color: #f6f2ec !important;
+  background: var(--tono-home-quiet) !important;
+  border: 0 !important;
+  box-shadow: var(--tono-home-highlight) !important;
+  backdrop-filter: var(--tono-home-blur) !important;
+  -webkit-backdrop-filter: var(--tono-home-blur) !important;
+}
+.tono-home__tiles .tono-button,
+.tono-home__tiles .tono-link {
+  background: rgba(255, 255, 255, 0.07) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+.tono-home .tono-home__tools button {
+  font: inherit;
+  font-size: 12px;
+  padding: 6px 0 !important;
+  min-height: 32px;
+  border-radius: 0;
+  background: none !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  cursor: pointer;
+}
+.tono-home__tiles .tono-glass-card > div > button > span:last-child {
+  color: #ffe2b0 !important;
+  background: rgba(255, 217, 160, 0.1) !important;
+}
+
+.tono-home__row-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tono-home__row-city {
+  color: rgba(246, 242, 236, 0.72);
+  font-size: 12px;
+}
+.tono-home__chevron {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  align-self: center;
+}
+.tono-home__progress[data-expanded="false"] .tono-home__progress-card {
+  background: transparent !important;
+  padding: 0 !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+.tono-home__progress-card summary {
+  font-size: 13px;
+  color: rgba(246, 242, 236, 0.86);
+  cursor: pointer;
+  padding: 4px 0;
+}

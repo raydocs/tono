@@ -683,5 +683,79 @@
     "repair": "修复",
     "repairing": "正在修复…",
     "repairFailed": "修复没成功。请用管理员身份的 PowerShell 依次运行 sc.exe config BFE start= auto、sc.exe start BFE、sc.exe start TonoService。"
+  },
+  "scenePreview": {
+    "notice": "场景预览 · 模拟状态 · 没有 VPN 连接",
+    "connected": "已连接",
+    "connecting": "连接中",
+    "failed": "没连上",
+    "idle": "未连接",
+    "detail": "仅演示背景，不代表真实连接或保护状态。",
+    "paused": "静态 / 软件渲染模式",
+    "viewport": "适应窗口",
+    "node": "Westwood · 演示节点",
+    "action": "切换场景",
+    "useProgress": "按输入进度",
+    "progress": "连接进度（预览）",
+    "quality": "画质",
+    "qualityModes": {
+      "auto": "自动",
+      "full": "完整",
+      "lite": "简洁",
+      "static": "静态"
+    },
+    "remeasure": "重新采样",
+    "notSampled": "未采样",
+    "probeFinished": "采样完成 · 不再运行帧脚本",
+    "probePending": "仅采样最初 3 秒可见动画",
+    "staticProbe": "静态 · 不运行帧采样"
+  },
+  "home": {
+    "title": {
+      "idle": "未连接",
+      "failed": "没连上",
+      "connecting": "连接中",
+      "disconnecting": "断开中"
+    },
+    "sentence": {
+      "idle": "选好线路，点连接。"
+    },
+    "details": "详情",
+    "closeDetails": "关闭详情",
+    "showSteps": "查看步骤",
+    "pickLine": "选择线路",
+    "chooseOtherLine": "选择其他线路",
+    "popover": {
+      "title": "换一条线路",
+      "recommended": "推荐",
+      "favorites": "收藏",
+      "recent": "最近用过",
+      "all": "全部线路",
+      "empty": "从全部线路中选择；推荐需要近期连接证据。"
+    },
+    "slow": {
+      "sentence": "{{stage}}，比平时久一点。",
+      "elapsed": "已用 {{seconds}} 秒。",
+      "switch": "换一条线路"
+    },
+    "duration": {
+      "justConnected": "刚刚连上。",
+      "minutes_other": "已保护 {{count}} 分钟。",
+      "minutes_one": "已保护 {{count}} 分钟。"
+    },
+    "firstRun": "关掉窗口，保护还在。断开在右下角托盘。",
+    "telemetry": {
+      "aiToday": "AI 今天 {{total}}"
+    },
+    "retry": {
+      "checking": "已拦住直连。正在读取重试安排。",
+      "unscheduled": "已拦住直连。没有安排自动重试，可以立即重试或恢复正常网络。",
+      "scheduled": "已拦住直连，{{seconds}} 秒后自动重试。",
+      "now": "已拦住直连，正在自动重试。"
+    },
+    "recovery": {
+      "scheduled": "已安排自动重试",
+      "unscheduled": "未安排自动重试"
+    }
   }
 }

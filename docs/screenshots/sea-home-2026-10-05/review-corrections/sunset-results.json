@@ -1,0 +1,2509 @@
+{
+  "off": {
+    "first": 89.81642512077295,
+    "last": 24.43377616747182,
+    "maxRolling300": 9.20150989359012,
+    "maxRise300": 0.03783736054860043,
+    "maxFall300": -9.20150989359012,
+    "direct300Max": 9.160628019323674,
+    "directPairs": 228,
+    "maxGapMs": 282.69410133361816,
+    "frames": 248,
+    "samples": [
+      {
+        "file": "sunset-off/0000.jpg",
+        "timestamp": 1791239968.339199,
+        "mean": 89.81642512077295
+      },
+      {
+        "file": "sunset-off/0001.jpg",
+        "timestamp": 1791239968.372761,
+        "mean": 89.83071658615137
+      },
+      {
+        "file": "sunset-off/0002.jpg",
+        "timestamp": 1791239968.405124,
+        "mean": 89.83917069243157
+      },
+      {
+        "file": "sunset-off/0003.jpg",
+        "timestamp": 1791239968.438735,
+        "mean": 89.86755233494364
+      },
+      {
+        "file": "sunset-off/0004.jpg",
+        "timestamp": 1791239968.472193,
+        "mean": 89.85507246376811
+      },
+      {
+        "file": "sunset-off/0005.jpg",
+        "timestamp": 1791239968.506027,
+        "mean": 89.88325281803543
+      },
+      {
+        "file": "sunset-off/0006.jpg",
+        "timestamp": 1791239968.539149,
+        "mean": 89.87580515297907
+      },
+      {
+        "file": "sunset-off/0007.jpg",
+        "timestamp": 1791239968.574344,
+        "mean": 89.88446054750402
+      },
+      {
+        "file": "sunset-off/0008.jpg",
+        "timestamp": 1791239968.606862,
+        "mean": 89.89613526570048
+      },
+      {
+        "file": "sunset-off/0009.jpg",
+        "timestamp": 1791239968.649742,
+        "mean": 89.4573268921095
+      },
+      {
+        "file": "sunset-off/0010.jpg",
+        "timestamp": 1791239968.673833,
+        "mean": 89.40901771336554
+      },
+      {
+        "file": "sunset-off/0011.jpg",
+        "timestamp": 1791239968.705491,
+        "mean": 89.32286634460547
+      },
+      {
+        "file": "sunset-off/0012.jpg",
+        "timestamp": 1791239968.738719,
+        "mean": 89.24376006441224
+      },
+      {
+        "file": "sunset-off/0013.jpg",
+        "timestamp": 1791239968.772536,
+        "mean": 89.13949275362319
+      },
+      {
+        "file": "sunset-off/0014.jpg",
+        "timestamp": 1791239968.805749,
+        "mean": 89.02858293075684
+      },
+      {
+        "file": "sunset-off/0015.jpg",
+        "timestamp": 1791239968.840416,
+        "mean": 88.88929146537842
+      },
+      {
+        "file": "sunset-off/0016.jpg",
+        "timestamp": 1791239968.871791,
+        "mean": 88.77918679549114
+      },
+      {
+        "file": "sunset-off/0017.jpg",
+        "timestamp": 1791239968.90565,
+        "mean": 88.5817230273752
+      },
+      {
+        "file": "sunset-off/0018.jpg",
+        "timestamp": 1791239968.940699,
+        "mean": 88.34963768115942
+      },
+      {
+        "file": "sunset-off/0019.jpg",
+        "timestamp": 1791239968.973928,
+        "mean": 88.05092592592592
+      },
+      {
+        "file": "sunset-off/0020.jpg",
+        "timestamp": 1791239969.006837,
+        "mean": 87.71417069243157
+      },
+      {
+        "file": "sunset-off/0021.jpg",
+        "timestamp": 1791239969.039068,
+        "mean": 87.35829307568439
+      },
+      {
+        "file": "sunset-off/0022.jpg",
+        "timestamp": 1791239969.073793,
+        "mean": 86.9915458937198
+      },
+      {
+        "file": "sunset-off/0023.jpg",
+        "timestamp": 1791239969.105608,
+        "mean": 86.59722222222223
+      },
+      {
+        "file": "sunset-off/0024.jpg",
+        "timestamp": 1791239969.13769,
+        "mean": 86.16364734299516
+      },
+      {
+        "file": "sunset-off/0025.jpg",
+        "timestamp": 1791239969.171362,
+        "mean": 85.70531400966183
+      },
+      {
+        "file": "sunset-off/0026.jpg",
+        "timestamp": 1791239969.205158,
+        "mean": 85.22644927536231
+      },
+      {
+        "file": "sunset-off/0027.jpg",
+        "timestamp": 1791239969.241096,
+        "mean": 84.72403381642512
+      },
+      {
+        "file": "sunset-off/0028.jpg",
+        "timestamp": 1791239969.272047,
+        "mean": 84.22604669887279
+      },
+      {
+        "file": "sunset-off/0029.jpg",
+        "timestamp": 1791239969.305683,
+        "mean": 83.6970611916264
+      },
+      {
+        "file": "sunset-off/0030.jpg",
+        "timestamp": 1791239969.33909,
+        "mean": 83.15378421900161
+      },
+      {
+        "file": "sunset-off/0031.jpg",
+        "timestamp": 1791239969.373019,
+        "mean": 82.58132045088567
+      },
+      {
+        "file": "sunset-off/0032.jpg",
+        "timestamp": 1791239969.406606,
+        "mean": 82.00503220611917
+      },
+      {
+        "file": "sunset-off/0033.jpg",
+        "timestamp": 1791239969.440069,
+        "mean": 81.39512882447666
+      },
+      {
+        "file": "sunset-off/0034.jpg",
+        "timestamp": 1791239969.474836,
+        "mean": 80.76509661835749
+      },
+      {
+        "file": "sunset-off/0035.jpg",
+        "timestamp": 1791239969.506604,
+        "mean": 80.15660225442834
+      },
+      {
+        "file": "sunset-off/0036.jpg",
+        "timestamp": 1791239969.53873,
+        "mean": 79.51388888888889
+      },
+      {
+        "file": "sunset-off/0037.jpg",
+        "timestamp": 1791239969.572921,
+        "mean": 78.83313204508856
+      },
+      {
+        "file": "sunset-off/0038.jpg",
+        "timestamp": 1791239969.604817,
+        "mean": 78.14170692431561
+      },
+      {
+        "file": "sunset-off/0039.jpg",
+        "timestamp": 1791239969.639151,
+        "mean": 77.40116747181965
+      },
+      {
+        "file": "sunset-off/0040.jpg",
+        "timestamp": 1791239969.670754,
+        "mean": 76.64070048309179
+      },
+      {
+        "file": "sunset-off/0041.jpg",
+        "timestamp": 1791239969.705064,
+        "mean": 75.85185185185185
+      },
+      {
+        "file": "sunset-off/0042.jpg",
+        "timestamp": 1791239969.738464,
+        "mean": 75.02958937198068
+      },
+      {
+        "file": "sunset-off/0043.jpg",
+        "timestamp": 1791239969.771751,
+        "mean": 74.19243156199678
+      },
+      {
+        "file": "sunset-off/0044.jpg",
+        "timestamp": 1791239969.804889,
+        "mean": 73.29126409017714
+      },
+      {
+        "file": "sunset-off/0045.jpg",
+        "timestamp": 1791239969.838519,
+        "mean": 72.39573268921094
+      },
+      {
+        "file": "sunset-off/0046.jpg",
+        "timestamp": 1791239969.871971,
+        "mean": 71.44685990338164
+      },
+      {
+        "file": "sunset-off/0047.jpg",
+        "timestamp": 1791239969.905123,
+        "mean": 70.5012077294686
+      },
+      {
+        "file": "sunset-off/0048.jpg",
+        "timestamp": 1791239969.939477,
+        "mean": 69.5024154589372
+      },
+      {
+        "file": "sunset-off/0049.jpg",
+        "timestamp": 1791239969.973137,
+        "mean": 68.46557971014492
+      },
+      {
+        "file": "sunset-off/0050.jpg",
+        "timestamp": 1791239970.004997,
+        "mean": 67.46719001610306
+      },
+      {
+        "file": "sunset-off/0051.jpg",
+        "timestamp": 1791239970.038874,
+        "mean": 66.41988727858293
+      },
+      {
+        "file": "sunset-off/0052.jpg",
+        "timestamp": 1791239970.071072,
+        "mean": 65.40116747181965
+      },
+      {
+        "file": "sunset-off/0053.jpg",
+        "timestamp": 1791239970.105709,
+        "mean": 64.39714170692432
+      },
+      {
+        "file": "sunset-off/0054.jpg",
+        "timestamp": 1791239970.138165,
+        "mean": 63.362721417069245
+      },
+      {
+        "file": "sunset-off/0055.jpg",
+        "timestamp": 1791239970.171361,
+        "mean": 62.32769726247987
+      },
+      {
+        "file": "sunset-off/0056.jpg",
+        "timestamp": 1791239970.204482,
+        "mean": 61.34057971014493
+      },
+      {
+        "file": "sunset-off/0057.jpg",
+        "timestamp": 1791239970.237863,
+        "mean": 60.34782608695652
+      },
+      {
+        "file": "sunset-off/0058.jpg",
+        "timestamp": 1791239970.272276,
+        "mean": 59.36594202898551
+      },
+      {
+        "file": "sunset-off/0059.jpg",
+        "timestamp": 1791239970.305855,
+        "mean": 58.40942028985507
+      },
+      {
+        "file": "sunset-off/0060.jpg",
+        "timestamp": 1791239970.338731,
+        "mean": 57.463566827697264
+      },
+      {
+        "file": "sunset-off/0061.jpg",
+        "timestamp": 1791239970.373209,
+        "mean": 56.52576489533011
+      },
+      {
+        "file": "sunset-off/0062.jpg",
+        "timestamp": 1791239970.405326,
+        "mean": 55.60648148148148
+      },
+      {
+        "file": "sunset-off/0063.jpg",
+        "timestamp": 1791239970.438724,
+        "mean": 54.78099838969404
+      },
+      {
+        "file": "sunset-off/0064.jpg",
+        "timestamp": 1791239970.47296,
+        "mean": 53.88909017713365
+      },
+      {
+        "file": "sunset-off/0065.jpg",
+        "timestamp": 1791239970.507228,
+        "mean": 53.074476650563604
+      },
+      {
+        "file": "sunset-off/0066.jpg",
+        "timestamp": 1791239970.539112,
+        "mean": 52.24013687600644
+      },
+      {
+        "file": "sunset-off/0067.jpg",
+        "timestamp": 1791239970.572301,
+        "mean": 51.443236714975846
+      },
+      {
+        "file": "sunset-off/0068.jpg",
+        "timestamp": 1791239970.604542,
+        "mean": 50.65680354267311
+      },
+      {
+        "file": "sunset-off/0069.jpg",
+        "timestamp": 1791239970.63811,
+        "mean": 49.871980676328505
+      },
+      {
+        "file": "sunset-off/0070.jpg",
+        "timestamp": 1791239970.671072,
+        "mean": 49.10084541062802
+      },
+      {
+        "file": "sunset-off/0071.jpg",
+        "timestamp": 1791239970.705724,
+        "mean": 48.35547504025765
+      },
+      {
+        "file": "sunset-off/0072.jpg",
+        "timestamp": 1791239970.738965,
+        "mean": 47.58977455716586
+      },
+      {
+        "file": "sunset-off/0073.jpg",
+        "timestamp": 1791239970.772748,
+        "mean": 46.85064412238325
+      },
+      {
+        "file": "sunset-off/0074.jpg",
+        "timestamp": 1791239970.806344,
+        "mean": 46.132850241545896
+      },
+      {
+        "file": "sunset-off/0075.jpg",
+        "timestamp": 1791239970.841321,
+        "mean": 45.43719806763285
+      },
+      {
+        "file": "sunset-off/0076.jpg",
+        "timestamp": 1791239970.874453,
+        "mean": 44.749597423510465
+      },
+      {
+        "file": "sunset-off/0077.jpg",
+        "timestamp": 1791239970.905269,
+        "mean": 44.04710144927536
+      },
+      {
+        "file": "sunset-off/0078.jpg",
+        "timestamp": 1791239970.938744,
+        "mean": 43.37016908212561
+      },
+      {
+        "file": "sunset-off/0079.jpg",
+        "timestamp": 1791239970.972672,
+        "mean": 42.66787439613527
+      },
+      {
+        "file": "sunset-off/0080.jpg",
+        "timestamp": 1791239971.007196,
+        "mean": 41.98792270531401
+      },
+      {
+        "file": "sunset-off/0081.jpg",
+        "timestamp": 1791239971.040251,
+        "mean": 41.348631239935585
+      },
+      {
+        "file": "sunset-off/0082.jpg",
+        "timestamp": 1791239971.072888,
+        "mean": 40.70632045088567
+      },
+      {
+        "file": "sunset-off/0083.jpg",
+        "timestamp": 1791239971.106059,
+        "mean": 40.10748792270532
+      },
+      {
+        "file": "sunset-off/0084.jpg",
+        "timestamp": 1791239971.139282,
+        "mean": 39.49838969404187
+      },
+      {
+        "file": "sunset-off/0085.jpg",
+        "timestamp": 1791239971.17248,
+        "mean": 38.917270531400966
+      },
+      {
+        "file": "sunset-off/0086.jpg",
+        "timestamp": 1791239971.204695,
+        "mean": 38.36594202898551
+      },
+      {
+        "file": "sunset-off/0087.jpg",
+        "timestamp": 1791239971.239879,
+        "mean": 37.84380032206119
+      },
+      {
+        "file": "sunset-off/0088.jpg",
+        "timestamp": 1791239971.272151,
+        "mean": 37.30414653784219
+      },
+      {
+        "file": "sunset-off/0089.jpg",
+        "timestamp": 1791239971.304934,
+        "mean": 36.762278582930755
+      },
+      {
+        "file": "sunset-off/0090.jpg",
+        "timestamp": 1791239971.338527,
+        "mean": 36.21799516908212
+      },
+      {
+        "file": "sunset-off/0091.jpg",
+        "timestamp": 1791239971.373461,
+        "mean": 35.72644927536232
+      },
+      {
+        "file": "sunset-off/0092.jpg",
+        "timestamp": 1791239971.407065,
+        "mean": 35.262278582930755
+      },
+      {
+        "file": "sunset-off/0093.jpg",
+        "timestamp": 1791239971.441521,
+        "mean": 34.79549114331723
+      },
+      {
+        "file": "sunset-off/0094.jpg",
+        "timestamp": 1791239971.473327,
+        "mean": 34.36010466988728
+      },
+      {
+        "file": "sunset-off/0095.jpg",
+        "timestamp": 1791239971.505803,
+        "mean": 33.93297101449275
+      },
+      {
+        "file": "sunset-off/0096.jpg",
+        "timestamp": 1791239971.538285,
+        "mean": 33.53099838969404
+      },
+      {
+        "file": "sunset-off/0097.jpg",
+        "timestamp": 1791239971.572152,
+        "mean": 33.11815619967794
+      },
+      {
+        "file": "sunset-off/0098.jpg",
+        "timestamp": 1791239971.60502,
+        "mean": 32.71054750402576
+      },
+      {
+        "file": "sunset-off/0099.jpg",
+        "timestamp": 1791239971.639798,
+        "mean": 32.28462157809984
+      },
+      {
+        "file": "sunset-off/0100.jpg",
+        "timestamp": 1791239971.672432,
+        "mean": 31.921296296296298
+      },
+      {
+        "file": "sunset-off/0101.jpg",
+        "timestamp": 1791239971.705302,
+        "mean": 31.545893719806763
+      },
+      {
+        "file": "sunset-off/0102.jpg",
+        "timestamp": 1791239971.738103,
+        "mean": 31.22342995169082
+      },
+      {
+        "file": "sunset-off/0103.jpg",
+        "timestamp": 1791239971.771326,
+        "mean": 30.940418679549115
+      },
+      {
+        "file": "sunset-off/0104.jpg",
+        "timestamp": 1791239971.805798,
+        "mean": 30.65901771336554
+      },
+      {
+        "file": "sunset-off/0105.jpg",
+        "timestamp": 1791239971.839671,
+        "mean": 30.40780998389694
+      },
+      {
+        "file": "sunset-off/0106.jpg",
+        "timestamp": 1791239971.872876,
+        "mean": 30.171296296296298
+      },
+      {
+        "file": "sunset-off/0107.jpg",
+        "timestamp": 1791239971.90828,
+        "mean": 29.943236714975846
+      },
+      {
+        "file": "sunset-off/0108.jpg",
+        "timestamp": 1791239971.940853,
+        "mean": 29.72584541062802
+      },
+      {
+        "file": "sunset-off/0109.jpg",
+        "timestamp": 1791239971.973801,
+        "mean": 29.52294685990338
+      },
+      {
+        "file": "sunset-off/0110.jpg",
+        "timestamp": 1791239972.008865,
+        "mean": 29.31622383252818
+      },
+      {
+        "file": "sunset-off/0111.jpg",
+        "timestamp": 1791239972.039162,
+        "mean": 29.101247987117553
+      },
+      {
+        "file": "sunset-off/0112.jpg",
+        "timestamp": 1791239972.073104,
+        "mean": 28.92451690821256
+      },
+      {
+        "file": "sunset-off/0113.jpg",
+        "timestamp": 1791239972.105577,
+        "mean": 28.74657809983897
+      },
+      {
+        "file": "sunset-off/0114.jpg",
+        "timestamp": 1791239972.13841,
+        "mean": 28.57769726247987
+      },
+      {
+        "file": "sunset-off/0115.jpg",
+        "timestamp": 1791239972.171542,
+        "mean": 28.411030595813205
+      },
+      {
+        "file": "sunset-off/0116.jpg",
+        "timestamp": 1791239972.20559,
+        "mean": 28.2512077294686
+      },
+      {
+        "file": "sunset-off/0117.jpg",
+        "timestamp": 1791239972.240351,
+        "mean": 28.102455716586153
+      },
+      {
+        "file": "sunset-off/0118.jpg",
+        "timestamp": 1791239972.273889,
+        "mean": 27.938204508856682
+      },
+      {
+        "file": "sunset-off/0119.jpg",
+        "timestamp": 1791239972.306112,
+        "mean": 27.802737520128826
+      },
+      {
+        "file": "sunset-off/0120.jpg",
+        "timestamp": 1791239972.339561,
+        "mean": 27.659219001610307
+      },
+      {
+        "file": "sunset-off/0121.jpg",
+        "timestamp": 1791239972.372586,
+        "mean": 27.526167471819647
+      },
+      {
+        "file": "sunset-off/0122.jpg",
+        "timestamp": 1791239972.406501,
+        "mean": 27.414049919484704
+      },
+      {
+        "file": "sunset-off/0123.jpg",
+        "timestamp": 1791239972.44044,
+        "mean": 27.266304347826086
+      },
+      {
+        "file": "sunset-off/0124.jpg",
+        "timestamp": 1791239972.473062,
+        "mean": 27.15438808373591
+      },
+      {
+        "file": "sunset-off/0125.jpg",
+        "timestamp": 1791239972.506448,
+        "mean": 27.01328502415459
+      },
+      {
+        "file": "sunset-off/0126.jpg",
+        "timestamp": 1791239972.538388,
+        "mean": 26.885265700483092
+      },
+      {
+        "file": "sunset-off/0127.jpg",
+        "timestamp": 1791239972.572199,
+        "mean": 26.790660225442835
+      },
+      {
+        "file": "sunset-off/0128.jpg",
+        "timestamp": 1791239972.6052,
+        "mean": 26.688607085346217
+      },
+      {
+        "file": "sunset-off/0129.jpg",
+        "timestamp": 1791239972.638524,
+        "mean": 26.595410628019323
+      },
+      {
+        "file": "sunset-off/0130.jpg",
+        "timestamp": 1791239972.672595,
+        "mean": 26.512278582930758
+      },
+      {
+        "file": "sunset-off/0131.jpg",
+        "timestamp": 1791239972.706426,
+        "mean": 26.4194847020934
+      },
+      {
+        "file": "sunset-off/0132.jpg",
+        "timestamp": 1791239972.739493,
+        "mean": 26.369363929146537
+      },
+      {
+        "file": "sunset-off/0133.jpg",
+        "timestamp": 1791239972.773295,
+        "mean": 26.26851851851852
+      },
+      {
+        "file": "sunset-off/0134.jpg",
+        "timestamp": 1791239972.804926,
+        "mean": 26.1676731078905
+      },
+      {
+        "file": "sunset-off/0135.jpg",
+        "timestamp": 1791239972.838896,
+        "mean": 26.080314009661837
+      },
+      {
+        "file": "sunset-off/0136.jpg",
+        "timestamp": 1791239972.872081,
+        "mean": 26.011674718196456
+      },
+      {
+        "file": "sunset-off/0137.jpg",
+        "timestamp": 1791239972.905679,
+        "mean": 25.910829307568438
+      },
+      {
+        "file": "sunset-off/0138.jpg",
+        "timestamp": 1791239972.937818,
+        "mean": 25.85889694041868
+      },
+      {
+        "file": "sunset-off/0139.jpg",
+        "timestamp": 1791239972.971494,
+        "mean": 25.778985507246375
+      },
+      {
+        "file": "sunset-off/0140.jpg",
+        "timestamp": 1791239973.005042,
+        "mean": 25.696859903381643
+      },
+      {
+        "file": "sunset-off/0141.jpg",
+        "timestamp": 1791239973.03843,
+        "mean": 25.634460547504027
+      },
+      {
+        "file": "sunset-off/0142.jpg",
+        "timestamp": 1791239973.072005,
+        "mean": 25.57588566827697
+      },
+      {
+        "file": "sunset-off/0143.jpg",
+        "timestamp": 1791239973.10446,
+        "mean": 25.52777777777778
+      },
+      {
+        "file": "sunset-off/0144.jpg",
+        "timestamp": 1791239973.1373,
+        "mean": 25.44746376811594
+      },
+      {
+        "file": "sunset-off/0145.jpg",
+        "timestamp": 1791239973.170819,
+        "mean": 25.400161030595815
+      },
+      {
+        "file": "sunset-off/0146.jpg",
+        "timestamp": 1791239973.205191,
+        "mean": 25.34400161030596
+      },
+      {
+        "file": "sunset-off/0147.jpg",
+        "timestamp": 1791239973.23874,
+        "mean": 25.27938808373591
+      },
+      {
+        "file": "sunset-off/0148.jpg",
+        "timestamp": 1791239973.271356,
+        "mean": 25.24537037037037
+      },
+      {
+        "file": "sunset-off/0149.jpg",
+        "timestamp": 1791239973.304411,
+        "mean": 25.21658615136876
+      },
+      {
+        "file": "sunset-off/0150.jpg",
+        "timestamp": 1791239973.337963,
+        "mean": 25.1694847020934
+      },
+      {
+        "file": "sunset-off/0151.jpg",
+        "timestamp": 1791239973.372001,
+        "mean": 25.134460547504027
+      },
+      {
+        "file": "sunset-off/0152.jpg",
+        "timestamp": 1791239973.404745,
+        "mean": 25.072262479871174
+      },
+      {
+        "file": "sunset-off/0153.jpg",
+        "timestamp": 1791239973.438315,
+        "mean": 25.01086956521739
+      },
+      {
+        "file": "sunset-off/0154.jpg",
+        "timestamp": 1791239973.471583,
+        "mean": 24.973027375201287
+      },
+      {
+        "file": "sunset-off/0155.jpg",
+        "timestamp": 1791239973.505036,
+        "mean": 24.914251207729468
+      },
+      {
+        "file": "sunset-off/0156.jpg",
+        "timestamp": 1791239973.54049,
+        "mean": 24.895933977455716
+      },
+      {
+        "file": "sunset-off/0157.jpg",
+        "timestamp": 1791239973.571254,
+        "mean": 24.869565217391305
+      },
+      {
+        "file": "sunset-off/0158.jpg",
+        "timestamp": 1791239973.604756,
+        "mean": 24.83313204508857
+      },
+      {
+        "file": "sunset-off/0159.jpg",
+        "timestamp": 1791239973.638918,
+        "mean": 24.802737520128826
+      },
+      {
+        "file": "sunset-off/0160.jpg",
+        "timestamp": 1791239973.672014,
+        "mean": 24.758252818035427
+      },
+      {
+        "file": "sunset-off/0161.jpg",
+        "timestamp": 1791239973.70507,
+        "mean": 24.734702093397747
+      },
+      {
+        "file": "sunset-off/0162.jpg",
+        "timestamp": 1791239973.737681,
+        "mean": 24.723027375201287
+      },
+      {
+        "file": "sunset-off/0163.jpg",
+        "timestamp": 1791239973.771458,
+        "mean": 24.70632045088567
+      },
+      {
+        "file": "sunset-off/0164.jpg",
+        "timestamp": 1791239973.804693,
+        "mean": 24.66183574879227
+      },
+      {
+        "file": "sunset-off/0165.jpg",
+        "timestamp": 1791239973.838588,
+        "mean": 24.657608695652176
+      },
+      {
+        "file": "sunset-off/0166.jpg",
+        "timestamp": 1791239973.872498,
+        "mean": 24.635668276972623
+      },
+      {
+        "file": "sunset-off/0167.jpg",
+        "timestamp": 1791239973.904638,
+        "mean": 24.622987117552334
+      },
+      {
+        "file": "sunset-off/0168.jpg",
+        "timestamp": 1791239973.937869,
+        "mean": 24.60305958132045
+      },
+      {
+        "file": "sunset-off/0169.jpg",
+        "timestamp": 1791239973.973708,
+        "mean": 24.597624798711756
+      },
+      {
+        "file": "sunset-off/0170.jpg",
+        "timestamp": 1791239974.005134,
+        "mean": 24.579106280193237
+      },
+      {
+        "file": "sunset-off/0171.jpg",
+        "timestamp": 1791239974.037781,
+        "mean": 24.55012077294686
+      },
+      {
+        "file": "sunset-off/0172.jpg",
+        "timestamp": 1791239974.07106,
+        "mean": 24.536634460547504
+      },
+      {
+        "file": "sunset-off/0173.jpg",
+        "timestamp": 1791239974.105075,
+        "mean": 24.49838969404187
+      },
+      {
+        "file": "sunset-off/0174.jpg",
+        "timestamp": 1791239974.138235,
+        "mean": 24.477858293075684
+      },
+      {
+        "file": "sunset-off/0175.jpg",
+        "timestamp": 1791239974.171248,
+        "mean": 24.465579710144926
+      },
+      {
+        "file": "sunset-off/0176.jpg",
+        "timestamp": 1791239974.206011,
+        "mean": 24.47584541062802
+      },
+      {
+        "file": "sunset-off/0177.jpg",
+        "timestamp": 1791239974.239149,
+        "mean": 24.43961352657005
+      },
+      {
+        "file": "sunset-off/0178.jpg",
+        "timestamp": 1791239974.272393,
+        "mean": 24.430555555555557
+      },
+      {
+        "file": "sunset-off/0179.jpg",
+        "timestamp": 1791239974.304685,
+        "mean": 24.44303542673108
+      },
+      {
+        "file": "sunset-off/0180.jpg",
+        "timestamp": 1791239974.337792,
+        "mean": 24.442632850241544
+      },
+      {
+        "file": "sunset-off/0181.jpg",
+        "timestamp": 1791239974.371066,
+        "mean": 24.46316425120773
+      },
+      {
+        "file": "sunset-off/0182.jpg",
+        "timestamp": 1791239974.405347,
+        "mean": 24.4573268921095
+      },
+      {
+        "file": "sunset-off/0183.jpg",
+        "timestamp": 1791239974.437427,
+        "mean": 24.41807568438003
+      },
+      {
+        "file": "sunset-off/0184.jpg",
+        "timestamp": 1791239974.470817,
+        "mean": 24.396537842190018
+      },
+      {
+        "file": "sunset-off/0185.jpg",
+        "timestamp": 1791239974.504818,
+        "mean": 24.40157004830918
+      },
+      {
+        "file": "sunset-off/0186.jpg",
+        "timestamp": 1791239974.53848,
+        "mean": 24.404991948470208
+      },
+      {
+        "file": "sunset-off/0187.jpg",
+        "timestamp": 1791239974.570487,
+        "mean": 24.425925925925927
+      },
+      {
+        "file": "sunset-off/0188.jpg",
+        "timestamp": 1791239974.604707,
+        "mean": 24.41022544283414
+      },
+      {
+        "file": "sunset-off/0189.jpg",
+        "timestamp": 1791239974.638583,
+        "mean": 24.420893719806763
+      },
+      {
+        "file": "sunset-off/0190.jpg",
+        "timestamp": 1791239974.921277,
+        "mean": 24.446859903381643
+      },
+      {
+        "file": "sunset-off/0191.jpg",
+        "timestamp": 1791239974.953827,
+        "mean": 24.45229468599034
+      },
+      {
+        "file": "sunset-off/0192.jpg",
+        "timestamp": 1791239974.987545,
+        "mean": 24.44585346215781
+      },
+      {
+        "file": "sunset-off/0193.jpg",
+        "timestamp": 1791239975.020187,
+        "mean": 24.445249597423512
+      },
+      {
+        "file": "sunset-off/0194.jpg",
+        "timestamp": 1791239975.054599,
+        "mean": 24.454508856682768
+      },
+      {
+        "file": "sunset-off/0195.jpg",
+        "timestamp": 1791239975.087631,
+        "mean": 24.453703703703702
+      },
+      {
+        "file": "sunset-off/0196.jpg",
+        "timestamp": 1791239975.122,
+        "mean": 24.451489533011273
+      },
+      {
+        "file": "sunset-off/0197.jpg",
+        "timestamp": 1791239975.154484,
+        "mean": 24.469202898550726
+      },
+      {
+        "file": "sunset-off/0198.jpg",
+        "timestamp": 1791239975.186967,
+        "mean": 24.45048309178744
+      },
+      {
+        "file": "sunset-off/0199.jpg",
+        "timestamp": 1791239975.221938,
+        "mean": 24.44987922705314
+      },
+      {
+        "file": "sunset-off/0200.jpg",
+        "timestamp": 1791239975.256938,
+        "mean": 24.44887278582931
+      },
+      {
+        "file": "sunset-off/0201.jpg",
+        "timestamp": 1791239975.288858,
+        "mean": 24.459138486312398
+      },
+      {
+        "file": "sunset-off/0202.jpg",
+        "timestamp": 1791239975.320953,
+        "mean": 24.48329307568438
+      },
+      {
+        "file": "sunset-off/0203.jpg",
+        "timestamp": 1791239975.355322,
+        "mean": 24.455716586151368
+      },
+      {
+        "file": "sunset-off/0204.jpg",
+        "timestamp": 1791239975.387708,
+        "mean": 24.447866344605476
+      },
+      {
+        "file": "sunset-off/0205.jpg",
+        "timestamp": 1791239975.421326,
+        "mean": 24.441425120772948
+      },
+      {
+        "file": "sunset-off/0206.jpg",
+        "timestamp": 1791239975.454455,
+        "mean": 24.454710144927535
+      },
+      {
+        "file": "sunset-off/0207.jpg",
+        "timestamp": 1791239975.487452,
+        "mean": 24.462761674718198
+      },
+      {
+        "file": "sunset-off/0208.jpg",
+        "timestamp": 1791239975.521216,
+        "mean": 24.448067632850243
+      },
+      {
+        "file": "sunset-off/0209.jpg",
+        "timestamp": 1791239975.554437,
+        "mean": 24.443639291465377
+      },
+      {
+        "file": "sunset-off/0210.jpg",
+        "timestamp": 1791239975.587508,
+        "mean": 24.447866344605476
+      },
+      {
+        "file": "sunset-off/0211.jpg",
+        "timestamp": 1791239975.621914,
+        "mean": 24.440217391304348
+      },
+      {
+        "file": "sunset-off/0212.jpg",
+        "timestamp": 1791239975.655374,
+        "mean": 24.44303542673108
+      },
+      {
+        "file": "sunset-off/0213.jpg",
+        "timestamp": 1791239975.688056,
+        "mean": 24.441022544283413
+      },
+      {
+        "file": "sunset-off/0214.jpg",
+        "timestamp": 1791239975.721021,
+        "mean": 24.45108695652174
+      },
+      {
+        "file": "sunset-off/0215.jpg",
+        "timestamp": 1791239975.755069,
+        "mean": 24.441022544283413
+      },
+      {
+        "file": "sunset-off/0216.jpg",
+        "timestamp": 1791239975.788768,
+        "mean": 24.436996779388085
+      },
+      {
+        "file": "sunset-off/0217.jpg",
+        "timestamp": 1791239975.821979,
+        "mean": 24.449677938808374
+      },
+      {
+        "file": "sunset-off/0218.jpg",
+        "timestamp": 1791239975.855379,
+        "mean": 24.438003220611915
+      },
+      {
+        "file": "sunset-off/0219.jpg",
+        "timestamp": 1791239975.887941,
+        "mean": 24.436795491143318
+      },
+      {
+        "file": "sunset-off/0220.jpg",
+        "timestamp": 1791239975.920627,
+        "mean": 24.433373590982285
+      },
+      {
+        "file": "sunset-off/0221.jpg",
+        "timestamp": 1791239975.954507,
+        "mean": 24.437600644122384
+      },
+      {
+        "file": "sunset-off/0222.jpg",
+        "timestamp": 1791239975.988563,
+        "mean": 24.461755233494365
+      },
+      {
+        "file": "sunset-off/0223.jpg",
+        "timestamp": 1791239976.021335,
+        "mean": 24.43498389694042
+      },
+      {
+        "file": "sunset-off/0224.jpg",
+        "timestamp": 1791239976.054225,
+        "mean": 24.436191626409016
+      },
+      {
+        "file": "sunset-off/0225.jpg",
+        "timestamp": 1791239976.087816,
+        "mean": 24.442028985507246
+      },
+      {
+        "file": "sunset-off/0226.jpg",
+        "timestamp": 1791239976.120679,
+        "mean": 24.430958132045088
+      },
+      {
+        "file": "sunset-off/0227.jpg",
+        "timestamp": 1791239976.154126,
+        "mean": 24.44585346215781
+      },
+      {
+        "file": "sunset-off/0228.jpg",
+        "timestamp": 1791239976.187953,
+        "mean": 24.43196457326892
+      },
+      {
+        "file": "sunset-off/0229.jpg",
+        "timestamp": 1791239976.220553,
+        "mean": 24.43196457326892
+      },
+      {
+        "file": "sunset-off/0230.jpg",
+        "timestamp": 1791239976.254394,
+        "mean": 24.434380032206118
+      },
+      {
+        "file": "sunset-off/0231.jpg",
+        "timestamp": 1791239976.287509,
+        "mean": 24.423107890499196
+      },
+      {
+        "file": "sunset-off/0232.jpg",
+        "timestamp": 1791239976.320802,
+        "mean": 24.420491143317232
+      },
+      {
+        "file": "sunset-off/0233.jpg",
+        "timestamp": 1791239976.354062,
+        "mean": 24.431360708534623
+      },
+      {
+        "file": "sunset-off/0234.jpg",
+        "timestamp": 1791239976.387591,
+        "mean": 24.43075684380032
+      },
+      {
+        "file": "sunset-off/0235.jpg",
+        "timestamp": 1791239976.421061,
+        "mean": 24.42612721417069
+      },
+      {
+        "file": "sunset-off/0236.jpg",
+        "timestamp": 1791239976.454391,
+        "mean": 24.431159420289855
+      },
+      {
+        "file": "sunset-off/0237.jpg",
+        "timestamp": 1791239976.488185,
+        "mean": 24.433574879227052
+      },
+      {
+        "file": "sunset-off/0238.jpg",
+        "timestamp": 1791239976.521518,
+        "mean": 24.42230273752013
+      },
+      {
+        "file": "sunset-off/0239.jpg",
+        "timestamp": 1791239976.554694,
+        "mean": 24.418880837359097
+      },
+      {
+        "file": "sunset-off/0240.jpg",
+        "timestamp": 1791239976.58746,
+        "mean": 24.4176731078905
+      },
+      {
+        "file": "sunset-off/0241.jpg",
+        "timestamp": 1791239976.62215,
+        "mean": 24.415861513687602
+      },
+      {
+        "file": "sunset-off/0242.jpg",
+        "timestamp": 1791239976.653919,
+        "mean": 24.441626409017715
+      },
+      {
+        "file": "sunset-off/0243.jpg",
+        "timestamp": 1791239976.689086,
+        "mean": 24.41988727858293
+      },
+      {
+        "file": "sunset-off/0244.jpg",
+        "timestamp": 1791239976.721194,
+        "mean": 24.419685990338163
+      },
+      {
+        "file": "sunset-off/0245.jpg",
+        "timestamp": 1791239976.75591,
+        "mean": 24.415056360708533
+      },
+      {
+        "file": "sunset-off/0246.jpg",
+        "timestamp": 1791239976.78844,
+        "mean": 24.4164653784219
+      },
+      {
+        "file": "sunset-off/0247.jpg",
+        "timestamp": 1791239976.821069,
+        "mean": 24.43377616747182
+      }
+    ]
+  },
+  "on": {
+    "first": 90.11211755233495,
+    "last": 24.401972624798713,
+    "maxRolling300": 9.172365955254278,
+    "maxRise300": 0.04475882823134825,
+    "maxFall300": -9.172365955254278,
+    "direct300Max": 9.190619967793872,
+    "directPairs": 228,
+    "maxGapMs": 283.5080623626709,
+    "frames": 248,
+    "samples": [
+      {
+        "file": "sunset-on/0000.jpg",
+        "timestamp": 1791239980.077883,
+        "mean": 90.11211755233495
+      },
+      {
+        "file": "sunset-on/0001.jpg",
+        "timestamp": 1791239980.105655,
+        "mean": 90.13003220611917
+      },
+      {
+        "file": "sunset-on/0002.jpg",
+        "timestamp": 1791239980.138844,
+        "mean": 90.13204508856683
+      },
+      {
+        "file": "sunset-on/0003.jpg",
+        "timestamp": 1791239980.171767,
+        "mean": 90.13446054750402
+      },
+      {
+        "file": "sunset-on/0004.jpg",
+        "timestamp": 1791239980.204742,
+        "mean": 90.14049919484702
+      },
+      {
+        "file": "sunset-on/0005.jpg",
+        "timestamp": 1791239980.238474,
+        "mean": 90.14291465378422
+      },
+      {
+        "file": "sunset-on/0006.jpg",
+        "timestamp": 1791239980.271697,
+        "mean": 90.14009661835749
+      },
+      {
+        "file": "sunset-on/0007.jpg",
+        "timestamp": 1791239980.304583,
+        "mean": 90.14975845410628
+      },
+      {
+        "file": "sunset-on/0008.jpg",
+        "timestamp": 1791239980.337778,
+        "mean": 90.15700483091787
+      },
+      {
+        "file": "sunset-on/0009.jpg",
+        "timestamp": 1791239980.383535,
+        "mean": 89.6413043478261
+      },
+      {
+        "file": "sunset-on/0010.jpg",
+        "timestamp": 1791239980.405122,
+        "mean": 89.5895732689211
+      },
+      {
+        "file": "sunset-on/0011.jpg",
+        "timestamp": 1791239980.438135,
+        "mean": 89.51388888888889
+      },
+      {
+        "file": "sunset-on/0012.jpg",
+        "timestamp": 1791239980.472205,
+        "mean": 89.43276972624798
+      },
+      {
+        "file": "sunset-on/0013.jpg",
+        "timestamp": 1791239980.505259,
+        "mean": 89.32508051529791
+      },
+      {
+        "file": "sunset-on/0014.jpg",
+        "timestamp": 1791239980.538952,
+        "mean": 89.20309983896941
+      },
+      {
+        "file": "sunset-on/0015.jpg",
+        "timestamp": 1791239980.572144,
+        "mean": 89.07004830917874
+      },
+      {
+        "file": "sunset-on/0016.jpg",
+        "timestamp": 1791239980.605738,
+        "mean": 88.96537842190016
+      },
+      {
+        "file": "sunset-on/0017.jpg",
+        "timestamp": 1791239980.63874,
+        "mean": 88.75664251207729
+      },
+      {
+        "file": "sunset-on/0018.jpg",
+        "timestamp": 1791239980.671533,
+        "mean": 88.52677133655395
+      },
+      {
+        "file": "sunset-on/0019.jpg",
+        "timestamp": 1791239980.704595,
+        "mean": 88.22463768115942
+      },
+      {
+        "file": "sunset-on/0020.jpg",
+        "timestamp": 1791239980.738957,
+        "mean": 87.89955716586151
+      },
+      {
+        "file": "sunset-on/0021.jpg",
+        "timestamp": 1791239980.773497,
+        "mean": 87.54367954911433
+      },
+      {
+        "file": "sunset-on/0022.jpg",
+        "timestamp": 1791239980.805645,
+        "mean": 87.1664653784219
+      },
+      {
+        "file": "sunset-on/0023.jpg",
+        "timestamp": 1791239980.839474,
+        "mean": 86.75201288244766
+      },
+      {
+        "file": "sunset-on/0024.jpg",
+        "timestamp": 1791239980.873325,
+        "mean": 86.3425925925926
+      },
+      {
+        "file": "sunset-on/0025.jpg",
+        "timestamp": 1791239980.905218,
+        "mean": 85.87661030595814
+      },
+      {
+        "file": "sunset-on/0026.jpg",
+        "timestamp": 1791239980.939379,
+        "mean": 85.39070048309179
+      },
+      {
+        "file": "sunset-on/0027.jpg",
+        "timestamp": 1791239980.972877,
+        "mean": 84.88123993558776
+      },
+      {
+        "file": "sunset-on/0028.jpg",
+        "timestamp": 1791239981.006122,
+        "mean": 84.38868760064412
+      },
+      {
+        "file": "sunset-on/0029.jpg",
+        "timestamp": 1791239981.039415,
+        "mean": 83.85929951690821
+      },
+      {
+        "file": "sunset-on/0030.jpg",
+        "timestamp": 1791239981.071606,
+        "mean": 83.31139291465378
+      },
+      {
+        "file": "sunset-on/0031.jpg",
+        "timestamp": 1791239981.106458,
+        "mean": 82.74859098228663
+      },
+      {
+        "file": "sunset-on/0032.jpg",
+        "timestamp": 1791239981.139546,
+        "mean": 82.15559581320451
+      },
+      {
+        "file": "sunset-on/0033.jpg",
+        "timestamp": 1791239981.173288,
+        "mean": 81.53562801932367
+      },
+      {
+        "file": "sunset-on/0034.jpg",
+        "timestamp": 1791239981.206629,
+        "mean": 80.90640096618357
+      },
+      {
+        "file": "sunset-on/0035.jpg",
+        "timestamp": 1791239981.240018,
+        "mean": 80.29408212560386
+      },
+      {
+        "file": "sunset-on/0036.jpg",
+        "timestamp": 1791239981.271466,
+        "mean": 79.65398550724638
+      },
+      {
+        "file": "sunset-on/0037.jpg",
+        "timestamp": 1791239981.30633,
+        "mean": 78.95450885668276
+      },
+      {
+        "file": "sunset-on/0038.jpg",
+        "timestamp": 1791239981.338821,
+        "mean": 78.26469404186795
+      },
+      {
+        "file": "sunset-on/0039.jpg",
+        "timestamp": 1791239981.37117,
+        "mean": 77.51670692431561
+      },
+      {
+        "file": "sunset-on/0040.jpg",
+        "timestamp": 1791239981.406398,
+        "mean": 76.76187600644123
+      },
+      {
+        "file": "sunset-on/0041.jpg",
+        "timestamp": 1791239981.440551,
+        "mean": 75.97282608695652
+      },
+      {
+        "file": "sunset-on/0042.jpg",
+        "timestamp": 1791239981.473002,
+        "mean": 75.13848631239935
+      },
+      {
+        "file": "sunset-on/0043.jpg",
+        "timestamp": 1791239981.505542,
+        "mean": 74.28945249597423
+      },
+      {
+        "file": "sunset-on/0044.jpg",
+        "timestamp": 1791239981.538367,
+        "mean": 73.38969404186795
+      },
+      {
+        "file": "sunset-on/0045.jpg",
+        "timestamp": 1791239981.571905,
+        "mean": 72.48107890499195
+      },
+      {
+        "file": "sunset-on/0046.jpg",
+        "timestamp": 1791239981.604735,
+        "mean": 71.5426731078905
+      },
+      {
+        "file": "sunset-on/0047.jpg",
+        "timestamp": 1791239981.637706,
+        "mean": 70.57709339774557
+      },
+      {
+        "file": "sunset-on/0048.jpg",
+        "timestamp": 1791239981.671251,
+        "mean": 69.58272946859903
+      },
+      {
+        "file": "sunset-on/0049.jpg",
+        "timestamp": 1791239981.704946,
+        "mean": 68.53824476650564
+      },
+      {
+        "file": "sunset-on/0050.jpg",
+        "timestamp": 1791239981.73788,
+        "mean": 67.53985507246377
+      },
+      {
+        "file": "sunset-on/0051.jpg",
+        "timestamp": 1791239981.771017,
+        "mean": 66.49396135265701
+      },
+      {
+        "file": "sunset-on/0052.jpg",
+        "timestamp": 1791239981.804118,
+        "mean": 65.4597423510467
+      },
+      {
+        "file": "sunset-on/0053.jpg",
+        "timestamp": 1791239981.837391,
+        "mean": 64.454307568438
+      },
+      {
+        "file": "sunset-on/0054.jpg",
+        "timestamp": 1791239981.871398,
+        "mean": 63.4212962962963
+      },
+      {
+        "file": "sunset-on/0055.jpg",
+        "timestamp": 1791239981.904366,
+        "mean": 62.388888888888886
+      },
+      {
+        "file": "sunset-on/0056.jpg",
+        "timestamp": 1791239981.938478,
+        "mean": 61.40096618357488
+      },
+      {
+        "file": "sunset-on/0057.jpg",
+        "timestamp": 1791239981.971855,
+        "mean": 60.392109500805155
+      },
+      {
+        "file": "sunset-on/0058.jpg",
+        "timestamp": 1791239982.004983,
+        "mean": 59.409017713365536
+      },
+      {
+        "file": "sunset-on/0059.jpg",
+        "timestamp": 1791239982.038684,
+        "mean": 58.453502415458935
+      },
+      {
+        "file": "sunset-on/0060.jpg",
+        "timestamp": 1791239982.072499,
+        "mean": 57.50221417069243
+      },
+      {
+        "file": "sunset-on/0061.jpg",
+        "timestamp": 1791239982.105885,
+        "mean": 56.56461352657005
+      },
+      {
+        "file": "sunset-on/0062.jpg",
+        "timestamp": 1791239982.139364,
+        "mean": 55.629428341384866
+      },
+      {
+        "file": "sunset-on/0063.jpg",
+        "timestamp": 1791239982.172284,
+        "mean": 54.78522544283414
+      },
+      {
+        "file": "sunset-on/0064.jpg",
+        "timestamp": 1791239982.205906,
+        "mean": 53.92270531400966
+      },
+      {
+        "file": "sunset-on/0065.jpg",
+        "timestamp": 1791239982.239577,
+        "mean": 53.07185990338164
+      },
+      {
+        "file": "sunset-on/0066.jpg",
+        "timestamp": 1791239982.273511,
+        "mean": 52.25946054750403
+      },
+      {
+        "file": "sunset-on/0067.jpg",
+        "timestamp": 1791239982.306836,
+        "mean": 51.46256038647343
+      },
+      {
+        "file": "sunset-on/0068.jpg",
+        "timestamp": 1791239982.338752,
+        "mean": 50.67049114331723
+      },
+      {
+        "file": "sunset-on/0069.jpg",
+        "timestamp": 1791239982.37258,
+        "mean": 49.880434782608695
+      },
+      {
+        "file": "sunset-on/0070.jpg",
+        "timestamp": 1791239982.40587,
+        "mean": 49.10587761674718
+      },
+      {
+        "file": "sunset-on/0071.jpg",
+        "timestamp": 1791239982.438426,
+        "mean": 48.38204508856683
+      },
+      {
+        "file": "sunset-on/0072.jpg",
+        "timestamp": 1791239982.472905,
+        "mean": 47.5871578099839
+      },
+      {
+        "file": "sunset-on/0073.jpg",
+        "timestamp": 1791239982.5059,
+        "mean": 46.85668276972625
+      },
+      {
+        "file": "sunset-on/0074.jpg",
+        "timestamp": 1791239982.539952,
+        "mean": 46.14090177133655
+      },
+      {
+        "file": "sunset-on/0075.jpg",
+        "timestamp": 1791239982.57334,
+        "mean": 45.45148953301127
+      },
+      {
+        "file": "sunset-on/0076.jpg",
+        "timestamp": 1791239982.605422,
+        "mean": 44.764694041867955
+      },
+      {
+        "file": "sunset-on/0077.jpg",
+        "timestamp": 1791239982.638665,
+        "mean": 44.04428341384863
+      },
+      {
+        "file": "sunset-on/0078.jpg",
+        "timestamp": 1791239982.671907,
+        "mean": 43.381441223832525
+      },
+      {
+        "file": "sunset-on/0079.jpg",
+        "timestamp": 1791239982.706944,
+        "mean": 42.664855072463766
+      },
+      {
+        "file": "sunset-on/0080.jpg",
+        "timestamp": 1791239982.739464,
+        "mean": 41.991143317230275
+      },
+      {
+        "file": "sunset-on/0081.jpg",
+        "timestamp": 1791239982.773121,
+        "mean": 41.35386473429951
+      },
+      {
+        "file": "sunset-on/0082.jpg",
+        "timestamp": 1791239982.806221,
+        "mean": 40.70309983896941
+      },
+      {
+        "file": "sunset-on/0083.jpg",
+        "timestamp": 1791239982.837796,
+        "mean": 40.097020933977454
+      },
+      {
+        "file": "sunset-on/0084.jpg",
+        "timestamp": 1791239982.87201,
+        "mean": 39.49335748792271
+      },
+      {
+        "file": "sunset-on/0085.jpg",
+        "timestamp": 1791239982.905743,
+        "mean": 38.90539452495974
+      },
+      {
+        "file": "sunset-on/0086.jpg",
+        "timestamp": 1791239982.938212,
+        "mean": 38.36352657004831
+      },
+      {
+        "file": "sunset-on/0087.jpg",
+        "timestamp": 1791239982.97193,
+        "mean": 37.83917069243156
+      },
+      {
+        "file": "sunset-on/0088.jpg",
+        "timestamp": 1791239983.006391,
+        "mean": 37.30776972624799
+      },
+      {
+        "file": "sunset-on/0089.jpg",
+        "timestamp": 1791239983.039494,
+        "mean": 36.75925925925926
+      },
+      {
+        "file": "sunset-on/0090.jpg",
+        "timestamp": 1791239983.073019,
+        "mean": 36.22242351046699
+      },
+      {
+        "file": "sunset-on/0091.jpg",
+        "timestamp": 1791239983.10525,
+        "mean": 35.74979871175523
+      },
+      {
+        "file": "sunset-on/0092.jpg",
+        "timestamp": 1791239983.140064,
+        "mean": 35.25865539452496
+      },
+      {
+        "file": "sunset-on/0093.jpg",
+        "timestamp": 1791239983.173683,
+        "mean": 34.79106280193237
+      },
+      {
+        "file": "sunset-on/0094.jpg",
+        "timestamp": 1791239983.206233,
+        "mean": 34.351851851851855
+      },
+      {
+        "file": "sunset-on/0095.jpg",
+        "timestamp": 1791239983.238663,
+        "mean": 33.93780193236715
+      },
+      {
+        "file": "sunset-on/0096.jpg",
+        "timestamp": 1791239983.273409,
+        "mean": 33.539855072463766
+      },
+      {
+        "file": "sunset-on/0097.jpg",
+        "timestamp": 1791239983.305903,
+        "mean": 33.12218196457327
+      },
+      {
+        "file": "sunset-on/0098.jpg",
+        "timestamp": 1791239983.339092,
+        "mean": 32.710346215781
+      },
+      {
+        "file": "sunset-on/0099.jpg",
+        "timestamp": 1791239983.373343,
+        "mean": 32.28582930756844
+      },
+      {
+        "file": "sunset-on/0100.jpg",
+        "timestamp": 1791239983.405824,
+        "mean": 31.92270531400966
+      },
+      {
+        "file": "sunset-on/0101.jpg",
+        "timestamp": 1791239983.438603,
+        "mean": 31.559782608695652
+      },
+      {
+        "file": "sunset-on/0102.jpg",
+        "timestamp": 1791239983.473496,
+        "mean": 31.216183574879228
+      },
+      {
+        "file": "sunset-on/0103.jpg",
+        "timestamp": 1791239983.506261,
+        "mean": 30.92874396135266
+      },
+      {
+        "file": "sunset-on/0104.jpg",
+        "timestamp": 1791239983.539949,
+        "mean": 30.66485507246377
+      },
+      {
+        "file": "sunset-on/0105.jpg",
+        "timestamp": 1791239983.571931,
+        "mean": 30.394122383252817
+      },
+      {
+        "file": "sunset-on/0106.jpg",
+        "timestamp": 1791239983.60707,
+        "mean": 30.1670692431562
+      },
+      {
+        "file": "sunset-on/0107.jpg",
+        "timestamp": 1791239983.639921,
+        "mean": 29.947866344605476
+      },
+      {
+        "file": "sunset-on/0108.jpg",
+        "timestamp": 1791239983.674166,
+        "mean": 29.74657809983897
+      },
+      {
+        "file": "sunset-on/0109.jpg",
+        "timestamp": 1791239983.705847,
+        "mean": 29.527173913043477
+      },
+      {
+        "file": "sunset-on/0110.jpg",
+        "timestamp": 1791239983.738497,
+        "mean": 29.321859903381643
+      },
+      {
+        "file": "sunset-on/0111.jpg",
+        "timestamp": 1791239983.772582,
+        "mean": 29.12097423510467
+      },
+      {
+        "file": "sunset-on/0112.jpg",
+        "timestamp": 1791239983.806304,
+        "mean": 28.926932367149757
+      },
+      {
+        "file": "sunset-on/0113.jpg",
+        "timestamp": 1791239983.838004,
+        "mean": 28.745571658615138
+      },
+      {
+        "file": "sunset-on/0114.jpg",
+        "timestamp": 1791239983.871469,
+        "mean": 28.567028985507246
+      },
+      {
+        "file": "sunset-on/0115.jpg",
+        "timestamp": 1791239983.905393,
+        "mean": 28.41022544283414
+      },
+      {
+        "file": "sunset-on/0116.jpg",
+        "timestamp": 1791239983.939499,
+        "mean": 28.256843800322063
+      },
+      {
+        "file": "sunset-on/0117.jpg",
+        "timestamp": 1791239983.97203,
+        "mean": 28.089573268921097
+      },
+      {
+        "file": "sunset-on/0118.jpg",
+        "timestamp": 1791239984.004578,
+        "mean": 27.938003220611915
+      },
+      {
+        "file": "sunset-on/0119.jpg",
+        "timestamp": 1791239984.038004,
+        "mean": 27.804549114331724
+      },
+      {
+        "file": "sunset-on/0120.jpg",
+        "timestamp": 1791239984.071082,
+        "mean": 27.667471819645733
+      },
+      {
+        "file": "sunset-on/0121.jpg",
+        "timestamp": 1791239984.104965,
+        "mean": 27.5444847020934
+      },
+      {
+        "file": "sunset-on/0122.jpg",
+        "timestamp": 1791239984.138293,
+        "mean": 27.409621578099838
+      },
+      {
+        "file": "sunset-on/0123.jpg",
+        "timestamp": 1791239984.172839,
+        "mean": 27.25161030595813
+      },
+      {
+        "file": "sunset-on/0124.jpg",
+        "timestamp": 1791239984.205839,
+        "mean": 27.155193236714975
+      },
+      {
+        "file": "sunset-on/0125.jpg",
+        "timestamp": 1791239984.239325,
+        "mean": 27.005032206119164
+      },
+      {
+        "file": "sunset-on/0126.jpg",
+        "timestamp": 1791239984.273839,
+        "mean": 26.89210950080515
+      },
+      {
+        "file": "sunset-on/0127.jpg",
+        "timestamp": 1791239984.305614,
+        "mean": 26.787640901771336
+      },
+      {
+        "file": "sunset-on/0128.jpg",
+        "timestamp": 1791239984.340394,
+        "mean": 26.697866344605476
+      },
+      {
+        "file": "sunset-on/0129.jpg",
+        "timestamp": 1791239984.374323,
+        "mean": 26.595410628019323
+      },
+      {
+        "file": "sunset-on/0130.jpg",
+        "timestamp": 1791239984.406423,
+        "mean": 26.51268115942029
+      },
+      {
+        "file": "sunset-on/0131.jpg",
+        "timestamp": 1791239984.438602,
+        "mean": 26.427737520128826
+      },
+      {
+        "file": "sunset-on/0132.jpg",
+        "timestamp": 1791239984.47162,
+        "mean": 26.368357487922705
+      },
+      {
+        "file": "sunset-on/0133.jpg",
+        "timestamp": 1791239984.506278,
+        "mean": 26.260668276972623
+      },
+      {
+        "file": "sunset-on/0134.jpg",
+        "timestamp": 1791239984.538468,
+        "mean": 26.15901771336554
+      },
+      {
+        "file": "sunset-on/0135.jpg",
+        "timestamp": 1791239984.572886,
+        "mean": 26.072866344605476
+      },
+      {
+        "file": "sunset-on/0136.jpg",
+        "timestamp": 1791239984.60611,
+        "mean": 26.026771336553946
+      },
+      {
+        "file": "sunset-on/0137.jpg",
+        "timestamp": 1791239984.639145,
+        "mean": 25.910426731078903
+      },
+      {
+        "file": "sunset-on/0138.jpg",
+        "timestamp": 1791239984.671906,
+        "mean": 25.855072463768117
+      },
+      {
+        "file": "sunset-on/0139.jpg",
+        "timestamp": 1791239984.705079,
+        "mean": 25.778582930756844
+      },
+      {
+        "file": "sunset-on/0140.jpg",
+        "timestamp": 1791239984.739344,
+        "mean": 25.70511272141707
+      },
+      {
+        "file": "sunset-on/0141.jpg",
+        "timestamp": 1791239984.77247,
+        "mean": 25.659420289855074
+      },
+      {
+        "file": "sunset-on/0142.jpg",
+        "timestamp": 1791239984.805461,
+        "mean": 25.57729468599034
+      },
+      {
+        "file": "sunset-on/0143.jpg",
+        "timestamp": 1791239984.838361,
+        "mean": 25.519524959742352
+      },
+      {
+        "file": "sunset-on/0144.jpg",
+        "timestamp": 1791239984.871516,
+        "mean": 25.44987922705314
+      },
+      {
+        "file": "sunset-on/0145.jpg",
+        "timestamp": 1791239984.904383,
+        "mean": 25.39291465378422
+      },
+      {
+        "file": "sunset-on/0146.jpg",
+        "timestamp": 1791239984.938578,
+        "mean": 25.33756038647343
+      },
+      {
+        "file": "sunset-on/0147.jpg",
+        "timestamp": 1791239984.972489,
+        "mean": 25.281803542673106
+      },
+      {
+        "file": "sunset-on/0148.jpg",
+        "timestamp": 1791239985.005861,
+        "mean": 25.25583735909823
+      },
+      {
+        "file": "sunset-on/0149.jpg",
+        "timestamp": 1791239985.038286,
+        "mean": 25.218397745571657
+      },
+      {
+        "file": "sunset-on/0150.jpg",
+        "timestamp": 1791239985.071426,
+        "mean": 25.163446054750402
+      },
+      {
+        "file": "sunset-on/0151.jpg",
+        "timestamp": 1791239985.106063,
+        "mean": 25.14331723027375
+      },
+      {
+        "file": "sunset-on/0152.jpg",
+        "timestamp": 1791239985.138259,
+        "mean": 25.07145732689211
+      },
+      {
+        "file": "sunset-on/0153.jpg",
+        "timestamp": 1791239985.172573,
+        "mean": 25.008856682769725
+      },
+      {
+        "file": "sunset-on/0154.jpg",
+        "timestamp": 1791239985.206423,
+        "mean": 24.968397745571657
+      },
+      {
+        "file": "sunset-on/0155.jpg",
+        "timestamp": 1791239985.237818,
+        "mean": 24.9176731078905
+      },
+      {
+        "file": "sunset-on/0156.jpg",
+        "timestamp": 1791239985.271877,
+        "mean": 24.906400966183575
+      },
+      {
+        "file": "sunset-on/0157.jpg",
+        "timestamp": 1791239985.304854,
+        "mean": 24.86231884057971
+      },
+      {
+        "file": "sunset-on/0158.jpg",
+        "timestamp": 1791239985.337606,
+        "mean": 24.832729468599034
+      },
+      {
+        "file": "sunset-on/0159.jpg",
+        "timestamp": 1791239985.370651,
+        "mean": 24.80877616747182
+      },
+      {
+        "file": "sunset-on/0160.jpg",
+        "timestamp": 1791239985.404307,
+        "mean": 24.765297906602253
+      },
+      {
+        "file": "sunset-on/0161.jpg",
+        "timestamp": 1791239985.437677,
+        "mean": 24.75342190016103
+      },
+      {
+        "file": "sunset-on/0162.jpg",
+        "timestamp": 1791239985.472641,
+        "mean": 24.732487922705314
+      },
+      {
+        "file": "sunset-on/0163.jpg",
+        "timestamp": 1791239985.505274,
+        "mean": 24.699074074074073
+      },
+      {
+        "file": "sunset-on/0164.jpg",
+        "timestamp": 1791239985.538309,
+        "mean": 24.670491143317232
+      },
+      {
+        "file": "sunset-on/0165.jpg",
+        "timestamp": 1791239985.571491,
+        "mean": 24.65780998389694
+      },
+      {
+        "file": "sunset-on/0166.jpg",
+        "timestamp": 1791239985.604274,
+        "mean": 24.634863123993558
+      },
+      {
+        "file": "sunset-on/0167.jpg",
+        "timestamp": 1791239985.637549,
+        "mean": 24.62157809983897
+      },
+      {
+        "file": "sunset-on/0168.jpg",
+        "timestamp": 1791239985.671069,
+        "mean": 24.606884057971016
+      },
+      {
+        "file": "sunset-on/0169.jpg",
+        "timestamp": 1791239985.704795,
+        "mean": 24.597826086956523
+      },
+      {
+        "file": "sunset-on/0170.jpg",
+        "timestamp": 1791239985.737756,
+        "mean": 24.57669082125604
+      },
+      {
+        "file": "sunset-on/0171.jpg",
+        "timestamp": 1791239985.771806,
+        "mean": 24.569444444444443
+      },
+      {
+        "file": "sunset-on/0172.jpg",
+        "timestamp": 1791239985.804846,
+        "mean": 24.534621578099838
+      },
+      {
+        "file": "sunset-on/0173.jpg",
+        "timestamp": 1791239985.838322,
+        "mean": 24.504428341384862
+      },
+      {
+        "file": "sunset-on/0174.jpg",
+        "timestamp": 1791239985.871696,
+        "mean": 24.464975845410628
+      },
+      {
+        "file": "sunset-on/0175.jpg",
+        "timestamp": 1791239985.904767,
+        "mean": 24.462761674718198
+      },
+      {
+        "file": "sunset-on/0176.jpg",
+        "timestamp": 1791239985.938932,
+        "mean": 24.481884057971016
+      },
+      {
+        "file": "sunset-on/0177.jpg",
+        "timestamp": 1791239985.971843,
+        "mean": 24.428945249597422
+      },
+      {
+        "file": "sunset-on/0178.jpg",
+        "timestamp": 1791239986.007735,
+        "mean": 24.423711755233494
+      },
+      {
+        "file": "sunset-on/0179.jpg",
+        "timestamp": 1791239986.038719,
+        "mean": 24.440821256038646
+      },
+      {
+        "file": "sunset-on/0180.jpg",
+        "timestamp": 1791239986.071886,
+        "mean": 24.452898550724637
+      },
+      {
+        "file": "sunset-on/0181.jpg",
+        "timestamp": 1791239986.105689,
+        "mean": 24.475442834138487
+      },
+      {
+        "file": "sunset-on/0182.jpg",
+        "timestamp": 1791239986.138321,
+        "mean": 24.44585346215781
+      },
+      {
+        "file": "sunset-on/0183.jpg",
+        "timestamp": 1791239986.172151,
+        "mean": 24.40599838969404
+      },
+      {
+        "file": "sunset-on/0184.jpg",
+        "timestamp": 1791239986.205392,
+        "mean": 24.401167471819647
+      },
+      {
+        "file": "sunset-on/0185.jpg",
+        "timestamp": 1791239986.238761,
+        "mean": 24.398953301127214
+      },
+      {
+        "file": "sunset-on/0186.jpg",
+        "timestamp": 1791239986.272077,
+        "mean": 24.41364734299517
+      },
+      {
+        "file": "sunset-on/0187.jpg",
+        "timestamp": 1791239986.30484,
+        "mean": 24.428341384863124
+      },
+      {
+        "file": "sunset-on/0188.jpg",
+        "timestamp": 1791239986.339479,
+        "mean": 24.420088566827697
+      },
+      {
+        "file": "sunset-on/0189.jpg",
+        "timestamp": 1791239986.371873,
+        "mean": 24.42451690821256
+      },
+      {
+        "file": "sunset-on/0190.jpg",
+        "timestamp": 1791239986.655381,
+        "mean": 24.457125603864736
+      },
+      {
+        "file": "sunset-on/0191.jpg",
+        "timestamp": 1791239986.688198,
+        "mean": 24.45209339774557
+      },
+      {
+        "file": "sunset-on/0192.jpg",
+        "timestamp": 1791239986.72142,
+        "mean": 24.445652173913043
+      },
+      {
+        "file": "sunset-on/0193.jpg",
+        "timestamp": 1791239986.754748,
+        "mean": 24.455716586151368
+      },
+      {
+        "file": "sunset-on/0194.jpg",
+        "timestamp": 1791239986.788207,
+        "mean": 24.45209339774557
+      },
+      {
+        "file": "sunset-on/0195.jpg",
+        "timestamp": 1791239986.821217,
+        "mean": 24.463768115942027
+      },
+      {
+        "file": "sunset-on/0196.jpg",
+        "timestamp": 1791239986.853952,
+        "mean": 24.450684380032207
+      },
+      {
+        "file": "sunset-on/0197.jpg",
+        "timestamp": 1791239986.888267,
+        "mean": 24.451288244766506
+      },
+      {
+        "file": "sunset-on/0198.jpg",
+        "timestamp": 1791239986.92316,
+        "mean": 24.448268921095007
+      },
+      {
+        "file": "sunset-on/0199.jpg",
+        "timestamp": 1791239986.954426,
+        "mean": 24.441626409017715
+      },
+      {
+        "file": "sunset-on/0200.jpg",
+        "timestamp": 1791239986.988426,
+        "mean": 24.447866344605476
+      },
+      {
+        "file": "sunset-on/0201.jpg",
+        "timestamp": 1791239987.020432,
+        "mean": 24.45229468599034
+      },
+      {
+        "file": "sunset-on/0202.jpg",
+        "timestamp": 1791239987.053813,
+        "mean": 24.457528180354267
+      },
+      {
+        "file": "sunset-on/0203.jpg",
+        "timestamp": 1791239987.087754,
+        "mean": 24.443840579710145
+      },
+      {
+        "file": "sunset-on/0204.jpg",
+        "timestamp": 1791239987.120455,
+        "mean": 24.450281803542673
+      },
+      {
+        "file": "sunset-on/0205.jpg",
+        "timestamp": 1791239987.154008,
+        "mean": 24.441425120772948
+      },
+      {
+        "file": "sunset-on/0206.jpg",
+        "timestamp": 1791239987.187255,
+        "mean": 24.445249597423512
+      },
+      {
+        "file": "sunset-on/0207.jpg",
+        "timestamp": 1791239987.220494,
+        "mean": 24.439412238325282
+      },
+      {
+        "file": "sunset-on/0208.jpg",
+        "timestamp": 1791239987.253795,
+        "mean": 24.436795491143318
+      },
+      {
+        "file": "sunset-on/0209.jpg",
+        "timestamp": 1791239987.288085,
+        "mean": 24.44283413848631
+      },
+      {
+        "file": "sunset-on/0210.jpg",
+        "timestamp": 1791239987.321234,
+        "mean": 24.445249597423512
+      },
+      {
+        "file": "sunset-on/0211.jpg",
+        "timestamp": 1791239987.355088,
+        "mean": 24.446658615136876
+      },
+      {
+        "file": "sunset-on/0212.jpg",
+        "timestamp": 1791239987.387301,
+        "mean": 24.438204508856682
+      },
+      {
+        "file": "sunset-on/0213.jpg",
+        "timestamp": 1791239987.420807,
+        "mean": 24.44746376811594
+      },
+      {
+        "file": "sunset-on/0214.jpg",
+        "timestamp": 1791239987.454207,
+        "mean": 24.440418679549115
+      },
+      {
+        "file": "sunset-on/0215.jpg",
+        "timestamp": 1791239987.487656,
+        "mean": 24.453099838969404
+      },
+      {
+        "file": "sunset-on/0216.jpg",
+        "timestamp": 1791239987.522043,
+        "mean": 24.44283413848631
+      },
+      {
+        "file": "sunset-on/0217.jpg",
+        "timestamp": 1791239987.554655,
+        "mean": 24.431561996779386
+      },
+      {
+        "file": "sunset-on/0218.jpg",
+        "timestamp": 1791239987.588305,
+        "mean": 24.43196457326892
+      },
+      {
+        "file": "sunset-on/0219.jpg",
+        "timestamp": 1791239987.621287,
+        "mean": 24.429750402576488
+      },
+      {
+        "file": "sunset-on/0220.jpg",
+        "timestamp": 1791239987.654093,
+        "mean": 24.431763285024154
+      },
+      {
+        "file": "sunset-on/0221.jpg",
+        "timestamp": 1791239987.687834,
+        "mean": 24.441425120772948
+      },
+      {
+        "file": "sunset-on/0222.jpg",
+        "timestamp": 1791239987.720993,
+        "mean": 24.45632045088567
+      },
+      {
+        "file": "sunset-on/0223.jpg",
+        "timestamp": 1791239987.75568,
+        "mean": 24.433574879227052
+      },
+      {
+        "file": "sunset-on/0224.jpg",
+        "timestamp": 1791239987.787712,
+        "mean": 24.437600644122384
+      },
+      {
+        "file": "sunset-on/0225.jpg",
+        "timestamp": 1791239987.821032,
+        "mean": 24.435990338164252
+      },
+      {
+        "file": "sunset-on/0226.jpg",
+        "timestamp": 1791239987.854824,
+        "mean": 24.43377616747182
+      },
+      {
+        "file": "sunset-on/0227.jpg",
+        "timestamp": 1791239987.886936,
+        "mean": 24.42632850241546
+      },
+      {
+        "file": "sunset-on/0228.jpg",
+        "timestamp": 1791239987.921781,
+        "mean": 24.431360708534623
+      },
+      {
+        "file": "sunset-on/0229.jpg",
+        "timestamp": 1791239987.954653,
+        "mean": 24.426529790660226
+      },
+      {
+        "file": "sunset-on/0230.jpg",
+        "timestamp": 1791239987.987301,
+        "mean": 24.434380032206118
+      },
+      {
+        "file": "sunset-on/0231.jpg",
+        "timestamp": 1791239988.021509,
+        "mean": 24.43216586151369
+      },
+      {
+        "file": "sunset-on/0232.jpg",
+        "timestamp": 1791239988.05458,
+        "mean": 24.42854267310789
+      },
+      {
+        "file": "sunset-on/0233.jpg",
+        "timestamp": 1791239988.088062,
+        "mean": 24.443438003220614
+      },
+      {
+        "file": "sunset-on/0234.jpg",
+        "timestamp": 1791239988.121935,
+        "mean": 24.425925925925927
+      },
+      {
+        "file": "sunset-on/0235.jpg",
+        "timestamp": 1791239988.155576,
+        "mean": 24.434380032206118
+      },
+      {
+        "file": "sunset-on/0236.jpg",
+        "timestamp": 1791239988.187718,
+        "mean": 24.426932367149757
+      },
+      {
+        "file": "sunset-on/0237.jpg",
+        "timestamp": 1791239988.220449,
+        "mean": 24.42169887278583
+      },
+      {
+        "file": "sunset-on/0238.jpg",
+        "timestamp": 1791239988.254177,
+        "mean": 24.4152576489533
+      },
+      {
+        "file": "sunset-on/0239.jpg",
+        "timestamp": 1791239988.287449,
+        "mean": 24.414452495974235
+      },
+      {
+        "file": "sunset-on/0240.jpg",
+        "timestamp": 1791239988.320978,
+        "mean": 24.417270531400966
+      },
+      {
+        "file": "sunset-on/0241.jpg",
+        "timestamp": 1791239988.355512,
+        "mean": 24.41686795491143
+      },
+      {
+        "file": "sunset-on/0242.jpg",
+        "timestamp": 1791239988.389282,
+        "mean": 24.42632850241546
+      },
+      {
+        "file": "sunset-on/0243.jpg",
+        "timestamp": 1791239988.421357,
+        "mean": 24.412037037037038
+      },
+      {
+        "file": "sunset-on/0244.jpg",
+        "timestamp": 1791239988.455025,
+        "mean": 24.417874396135264
+      },
+      {
+        "file": "sunset-on/0245.jpg",
+        "timestamp": 1791239988.487844,
+        "mean": 24.399959742351047
+      },
+      {
+        "file": "sunset-on/0246.jpg",
+        "timestamp": 1791239988.520313,
+        "mean": 24.40438808373591
+      },
+      {
+        "file": "sunset-on/0247.jpg",
+        "timestamp": 1791239988.554124,
+        "mean": 24.401972624798713
+      }
+    ]
+  },
+  "nightDifference": 0.03180354267310648
+}
