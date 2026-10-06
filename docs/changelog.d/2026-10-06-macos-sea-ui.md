@@ -30,3 +30,5 @@
 - 2026-10-06 SDK 续核：NSAccessibilityElement 的 identifier 是 @optional 方法（SDK NSAccessibilityProtocols.h:24–27），role 协议调用加方法可选链 `accessibilityIdentifier?()`；全协议必选调用不变。此为源码/API更正，未冒称原生编译通过。
 
 - 2026-10-06 状态词源码续核：旧 MenuBar.kind 可在 isConnected=false 时仍为 degraded，新词映射因此额外要求实际 isConnected 才显示 Connected；未知仍优先，已无连接的残留 degraded 只说 Not connected。不改原 status model/FSM/动作，新增一个窄投影回归（未本机运行），避免外观映射凭单独 degraded 标志误宣告连接成功。
+
+- 2026-10-06 同类投影续核：旧 kind.blocked 也用于 Waiting to retry，并非独自证明屏障；海景 Protected, not connected 额外要求实际 isProtectionBlocked 且未知标志不成立，否则说 Not connected/Protection status unconfirmed。新增一个无屏障重试 kind 的窄回归，原 FSM 与屏障读回仍不动；hosted 待验。
