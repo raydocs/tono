@@ -1,0 +1,108 @@
+.sea-tray {
+  width: 100%;
+  height: 100%;
+  padding: 16px;
+  box-sizing: border-box;
+  overflow: auto;
+  color: var(--sea-text);
+  background:
+    radial-gradient(110% 100% at 85% 130%, #646ac435, transparent 65%),
+    linear-gradient(#0d0b14, #171321);
+}
+.sea-tray[data-ground="warm"] {
+  background:
+    radial-gradient(110% 100% at 85% 130%, #ff975556, transparent 65%),
+    linear-gradient(#160e15, #2a161b);
+}
+.sea-tray[data-ground="ember"] {
+  background:
+    radial-gradient(110% 100% at 85% 130%, #e6503c42, transparent 65%),
+    linear-gradient(#130c14, #23131a);
+}
+.sea-tray h1 {
+  font-size: 20px;
+  font-weight: 400;
+  margin: 0 28px 4px 0;
+  line-height: 1.25;
+}
+.sea-tray > p {
+  margin: 0 0 8px;
+  font-size: 12px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+  color: var(--sea-secondary);
+}
+.sea-tray-mark {
+  float: right;
+  font-size: 22px;
+  color: var(--sea-accent);
+}
+.sea-tray-info {
+  font-size: 11px;
+  color: var(--sea-secondary);
+  margin-bottom: 6px;
+}
+.sea-tray-action {
+  width: 100%;
+  height: 40px;
+  margin-bottom: 6px;
+}
+.sea-tray-quick {
+  width: 100%;
+  min-height: 28px;
+  padding: 4px 8px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  font: inherit;
+  font-size: 12px;
+  color: inherit;
+  text-align: left;
+}
+.sea-tray-quick:hover {
+  background: #ffffff0e;
+}
+.sea-tray details {
+  font-size: 11px;
+  color: var(--sea-secondary);
+}
+.sea-tray summary {
+  cursor: pointer;
+  padding: 4px 8px;
+}
+.sea-tray footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 8px;
+}
+.sea-tray footer button {
+  background: none;
+  border: 0;
+  font: inherit;
+  font-size: 11px;
+  color: var(--sea-secondary);
+  padding: 4px 8px;
+  border-radius: 8px;
+}
+.sea-tray .sea-tray-error {
+  color: var(--sea-danger);
+}
+
+.sea-tray-all {
+  order: 1;
+}
+.sea-tray footer button:last-child {
+  order: 2;
+}
+
+.sea-tray-choices {
+  border: 0;
+  padding: 0;
+  margin: 0;
+}

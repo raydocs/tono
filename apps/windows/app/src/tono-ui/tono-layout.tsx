@@ -352,7 +352,11 @@ const TonoLayout = () => {
                     <ProtectedOfflineBanner />
                   )}
                   <div
-                    style={{ flex: isTrayRoute ? undefined : 1, minHeight: 0 }}
+                    style={{
+                      flex: isTrayRoute ? undefined : 1,
+                      minHeight: 0,
+                      height: isTrayRoute && newAppearance ? '100%' : undefined,
+                    }}
                   >
                     <BaseErrorBoundary>
                       {isLoginRoute || isTrayRoute ? (

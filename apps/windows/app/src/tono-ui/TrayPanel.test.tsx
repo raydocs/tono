@@ -6,6 +6,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from '@testing-library/react'
 import i18n from 'i18next'
 import type { ReactNode } from 'react'
@@ -26,6 +27,7 @@ const mocks = vi.hoisted(() => ({
   status: undefined as TonoStatus | undefined,
   mutateTonoStatus: vi.fn(),
   tonoServers: vi.fn(),
+  tonoRoutePreferences: vi.fn(),
   tonoConnectProgress: vi.fn(),
   tonoSelectServer: vi.fn(),
   tonoRetryNow: vi.fn(),
@@ -62,6 +64,7 @@ vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn() }))
 vi.mock('@/services/tono', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/services/tono')>()),
   tonoServers: mocks.tonoServers,
+  tonoRoutePreferences: mocks.tonoRoutePreferences,
   tonoConnectProgress: mocks.tonoConnectProgress,
   tonoSelectServer: mocks.tonoSelectServer,
   tonoRetryNow: mocks.tonoRetryNow,
@@ -70,6 +73,7 @@ vi.mock('@/services/tono', async (importOriginal) => ({
   tonoStatus: async () => mocks.status,
 }))
 
+import { setNewAppearance } from './appearance-preferences'
 import { TrayPanel } from './TrayPanel'
 
 void i18n.use(initReactI18next).init({
@@ -116,6 +120,8 @@ const freshSWR = ({ children }: { children: ReactNode }) => (
 )
 
 beforeEach(() => {
+  setNewAppearance(false)
+  mocks.tonoRoutePreferences.mockReset().mockResolvedValue(undefined)
   mocks.status = makeStatus()
   mocks.live = false
   mocks.cached = false
@@ -138,6 +144,7 @@ beforeEach(() => {
 
 afterEach(async () => {
   cleanup()
+  setNewAppearance(false)
   await removeCacheData(tonoConnectProgressQueryKey)
   await removeCacheData(tonoServersQueryKey)
 })
@@ -250,9 +257,9 @@ describe('TrayPanel backup channel', () => {
     mocks.status = makeStatus({ uiState: 'connecting' })
     await act(async () => rejectConnect(new Error('already connecting')))
     await waitFor(() => expect(mocks.mutateTonoStatus).toHaveBeenCalledTimes(1))
-    expect(screen.getByTitle('Switch server').getAttribute('aria-expanded')).toBe(
-      'false',
-    )
+    expect(
+      screen.getByTitle('Switch server').getAttribute('aria-expanded'),
+    ).toBe('false')
     expect(screen.queryByRole('alert')).toBeNull()
 
     mocks.status = makeStatus({
@@ -265,9 +272,9 @@ describe('TrayPanel backup channel', () => {
       await screen.findByRole('button', { name: /Backup channel/ }),
     )
     await waitFor(() => expect(mocks.mutateTonoStatus).toHaveBeenCalledTimes(2))
-    expect(screen.getByTitle('Switch server').getAttribute('aria-expanded')).toBe(
-      'false',
-    )
+    expect(
+      screen.getByTitle('Switch server').getAttribute('aria-expanded'),
+    ).toBe('false')
     expect(screen.queryByRole('alert')).toBeNull()
 
     mocks.tonoConnect.mockRejectedValueOnce(new Error('DNS restoration failed'))
@@ -276,9 +283,9 @@ describe('TrayPanel backup channel', () => {
       await screen.findByRole('button', { name: /Backup channel/ }),
     )
     expect(await screen.findByRole('alert')).toBeDefined()
-    expect(screen.getByTitle('Switch server').getAttribute('aria-expanded')).toBe(
-      'true',
-    )
+    expect(
+      screen.getByTitle('Switch server').getAttribute('aria-expanded'),
+    ).toBe('true')
     expect(mocks.mutateTonoStatus).toHaveBeenCalledTimes(2)
     expect(mocks.tonoConnect).toHaveBeenCalledTimes(3)
   })
@@ -356,4 +363,58 @@ describe('TrayPanel traffic rates', () => {
     view.rerender(<TrayPanel />)
     expect(screen.queryByText(/KB\/s/)).toBeNull()
   })
+})
+
+it('new-look quick switch calls the existing native selection once without duplicating Connect', async () => {
+  setNewAppearance(true)
+  const next = 'Buffalo · Niagara'
+  mocks.status = makeStatus({
+    uiState: 'connected',
+    routePreferenceScope: 'tray-test',
+    killSwitch: {
+      wanted: true,
+      live: true,
+      mode: 'locked',
+      endpoints: [],
+      last_error: null,
+    },
+  })
+  mocks.tonoServers.mockResolvedValue([
+    ...catalogWithHy2(),
+    {
+      name: next,
+      server: '203.0.113.11',
+      port: 443,
+      available: true,
+      selected: false,
+    },
+  ])
+  mocks.tonoRoutePreferences.mockResolvedValue({
+    scope: 'tray-test',
+    catalogRevision: 1,
+    favorites: [next],
+    fixedRegion: null,
+    recent: [{ name: next, revision: 1, verifiedAtMs: Date.now() }],
+  })
+  render(<TrayPanel />, { wrapper: freshSWR })
+  await act(async () =>
+    fireEvent.click(
+      await within(
+        screen.getByRole('group', { name: 'Switch server' }),
+      ).findByRole('button', { name: 'Buffalo' }),
+    ),
+  )
+  expect(mocks.tonoSelectServer).toHaveBeenCalledExactlyOnceWith(next)
+  expect(mocks.tonoConnect).not.toHaveBeenCalled()
+})
+
+it('new-look connecting action cancels through the existing Disconnect command once', async () => {
+  setNewAppearance(true)
+  mocks.status = makeStatus({ uiState: 'connecting' })
+  render(<TrayPanel />, { wrapper: freshSWR })
+  await act(async () =>
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel connection' })),
+  )
+  expect(mocks.tonoDisconnect).toHaveBeenCalledTimes(1)
+  expect(mocks.tonoConnect).not.toHaveBeenCalled()
 })

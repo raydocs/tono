@@ -18,6 +18,7 @@ import IntroPage from '@/pages/tono/intro'
 import LoginPage from '@/pages/tono/login'
 import ServersPage from '@/pages/tono/servers'
 import SupportPage from '@/pages/tono/support'
+import TrayPage from '@/pages/tono/tray'
 import {
   setNewAppearance,
   setMotionPreference,
@@ -46,6 +47,7 @@ const router = createMemoryRouter(
       element: <TonoLayout />,
       children: [
         { index: true, element: <DashboardPage /> },
+        { path: 'tray', element: <TrayPage /> },
         { path: 'login', element: <LoginPage /> },
         { path: 'intro', element: <IntroPage /> },
         { path: 'servers', element: <ServersPage /> },
