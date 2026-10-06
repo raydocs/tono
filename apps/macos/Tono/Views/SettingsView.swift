@@ -154,7 +154,9 @@ struct SettingsView: View {
 
             SettingRow(label: "Sea motion", subtitle: seaEnabled ? "Choose how much of the sea scene moves on this Mac." : nil) {
                 if seaEnabled {
-                    Picker("Sea motion", selection: $seaMotionMode) {
+                    Picker("Sea motion", selection: Binding(
+                        get: { SeaAppearance.displayMotionMode(seaMotionMode) },
+                        set: { seaMotionMode = $0 })) {
                         ForEach(SeaAppearance.motionOptions, id: \.self) { option in
                             Text(LocalizedStringKey(option)).tag(option)
                         }

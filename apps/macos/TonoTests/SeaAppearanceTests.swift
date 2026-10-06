@@ -62,4 +62,16 @@ final class SeaAppearanceTests: XCTestCase {
         XCTAssertFalse(SeaAppearance.animates("Static", reduceMotion: false))
         XCTAssertTrue(SeaAppearance.animates("Auto", reduceMotion: false))
     }
+
+    func testLegacySimpleMotionDisplaysAsLiteWithoutChangingItsStoredValue() throws {
+        let suite = "tono-simple-display-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set("Simple", forKey: SeaAppearance.motionKey)
+        let stored = try XCTUnwrap(defaults.string(forKey: SeaAppearance.motionKey))
+        XCTAssertEqual(SeaAppearance.displayMotionMode(stored), "Lite")
+        XCTAssertTrue(SeaAppearance.motionOptions.contains(SeaAppearance.displayMotionMode(stored)))
+        XCTAssertEqual(defaults.string(forKey: SeaAppearance.motionKey), "Simple")
+    }
+
 }

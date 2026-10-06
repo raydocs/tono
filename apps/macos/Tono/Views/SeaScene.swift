@@ -6,6 +6,10 @@ enum SeaAppearance {
     static let motionKey = "seaMotionMode"
     static let motionOptions = ["Auto", "Full", "Lite", "Static"]
 
+    static func displayMotionMode(_ stored: String) -> String {
+        stored == "Simple" ? "Lite" : stored
+    }
+
     static func animates(_ mode: String, reduceMotion: Bool) -> Bool {
         !reduceMotion && mode != "Static"
     }
