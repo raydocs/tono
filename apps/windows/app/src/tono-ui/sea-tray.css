@@ -10,6 +10,8 @@
     linear-gradient(#0d0b14, #171321);
 }
 .sea-tray[data-ground="warm"] {
+  /* The tray scopes its own tokens, so the warm accent is set here too. */
+  --sea-accent: #ffd58e;
   background:
     radial-gradient(110% 100% at 85% 130%, #ff975556, transparent 65%),
     linear-gradient(#160e15, #2a161b);

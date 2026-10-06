@@ -11,8 +11,12 @@
   justify-content: space-between;
   gap: 16px;
 }
+/* Same field as on Lines, wide enough for the whole hint. */
 .sea-activity-toolbar input {
-  width: 260px;
+  width: 340px;
+  min-height: 36px;
+  padding: 8px 14px;
+  font-size: 13px;
 }
 .sea-activity-legend {
   display: flex;
