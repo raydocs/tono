@@ -338,24 +338,24 @@ extension AppState {
                 try Task.checkCancellation()
                 let digest = try await runtimeDigest
                 self.connectionStage = .startingTunnel
-                // /core/start only waits ~150 ms after spawn. Controller bind,
-                // utun, and the loopback DNS listener appear after that IPC
-                // returns — poll them as soon as the process exists.
-                async let started: Void = coreRuntime.start(
-                    overlay: overlay,
-                    customNodes: runtimeNodes,
-                    directPolicy: activeDirectPolicy,
-                    helperPrepared: true,
-                    precomputedDigest: digest
+                try await CoreStartupReadiness.wait(
+                    start: {
+                        try await self.coreRuntime.start(
+                            overlay: overlay,
+                            customNodes: runtimeNodes,
+                            directPolicy: self.activeDirectPolicy,
+                            helperPrepared: true,
+                            precomputedDigest: digest
+                        )
+                    },
+                    controller: { try await api.waitUntilReady() }
                 )
-                try await api.waitUntilReady()
-                // Controller answering means the process exists. Start the
+                // Confirmed start and controller readiness mean the process exists. Start the
                 // utun poll and loopback DNS now — not before spawn, or the
                 // 2 s interface budget can expire while /core/start is still
                 // snapshotting.
                 async let tunReady = Self.waitForOwnedTunnelInterface()
                 async let localDNSReady = self.testLocalProtectedDNS()
-                try await started
                 self.loadedRuntimeConfigDigest = digest
                 self.commitResidentialRouteAuditContext(
                     overlay: overlay,
@@ -1808,19 +1808,19 @@ extension AppState {
               let api = self.coreController
         else { return .continueMonitoring }
 
+        let observedProtectionGeneration = connectionCoordinator.protectionOperationGeneration
+        let observedRouteGeneration = connectionCoordinator.routeOperationGeneration
+        let observedExit = self.selectedExitNode()
         let controllerTask = Task {
             await self.advisoryControllerExitProbe(
                 api: api,
-                selectedExit: self.selectedExitNode()
+                selectedExit: observedExit
             )
         }
         let tun = await self.raceHealthTrafficProbes(
             6,
             self.lastSuccessfulProbeOrigin
         )
-        if case .won(let label) = tun {
-            self.lastSuccessfulProbeOrigin = label
-        }
         let controller: ProbeCheck
         if case .won = tun {
             controllerTask.cancel()
@@ -1829,10 +1829,15 @@ extension AppState {
             controller = await controllerTask.value
         }
         guard !Task.isCancelled, self.isConnected else { return .stopMonitoring }
-        guard self.switchingNodeId == nil,
+        guard self.connectionCoordinator.protectionOperationGeneration == observedProtectionGeneration,
+              self.connectionCoordinator.routeOperationGeneration == observedRouteGeneration,
+              self.switchingNodeId == nil,
               self.connectionCoordinator.configReloadTask == nil else {
             state.consecutiveHealthFailures = 0
             return .continueMonitoring
+        }
+        if case .won(let label) = tun {
+            self.lastSuccessfulProbeOrigin = label
         }
         let decision = ProtectedConnectivity.classifyPostLock(
             controller: controller,
@@ -1841,7 +1846,7 @@ extension AppState {
                 .isPhysicallyOffline,
             stage: "health",
             attempt: state.healthCycle,
-            generation: self.connectionCoordinator.protectionOperationGeneration
+            generation: observedProtectionGeneration
         )
         switch decision {
         case .connected(let advisory):

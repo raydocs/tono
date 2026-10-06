@@ -22,7 +22,12 @@ final class ConnectionCoordinator {
     /// the intent until the user connects again, so wake and network-change
     /// recovery cannot turn it into a reconnect (X1-2).
     private var disconnectQueueReleaseIntent = false
-    var nodeSwitchTask: Task<Void, Never>?
+    // A completed switch/reload keeps the protection generation but retires
+    // any health proof started on the previous runtime.
+    private(set) var routeOperationGeneration: UInt64 = 0
+    var nodeSwitchTask: Task<Void, Never>? {
+        didSet { routeOperationGeneration &+= 1 }
+    }
     var protectedReconnectTask: Task<Void, Never>?
     var unarmedReconnectTask: Task<Void, Never>?
     /// Set while the unarmed loop is waiting or probing, with the generation
@@ -36,7 +41,9 @@ final class ConnectionCoordinator {
     var networkEnvironmentTask: Task<Void, Never>?
     var wakeRecoveryTask: Task<Void, Never>?
     var sleepRestrictTask: Task<Void, Never>?
-    var configReloadTask: Task<Void, Never>?
+    var configReloadTask: Task<Void, Never>? {
+        didSet { routeOperationGeneration &+= 1 }
+    }
     var configReloadRequestID = 0
 
     private var deferredConnect: (id: UUID, task: Task<Void, Never>)?

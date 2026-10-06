@@ -397,7 +397,9 @@ nonisolated enum HelperProtocolVersion {
     ///   relaunched by the helper, at most twice about 30 s apart, through
     ///   the user's Launch Services; the relaunched app resumes the route
     ///   itself (MAC-ORPHAN-OWNER-RELAUNCH).
-    static let current = "4.52.40"
+    /// - 4.52.40 → 4.52.41: Core replacement launches the root-owned config
+    ///   snapshot validated before stopping, never a second user-file copy.
+    static let current = "4.52.41"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS

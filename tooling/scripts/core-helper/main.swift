@@ -528,9 +528,51 @@ func runCoreLifecycleSelfTests() -> Bool {
     }
     check("still-the-same-core", manager.status().pid == started.pid)
 
+    // A rejected replacement must not stop the live child. Once approved, a
+    // user edit during beforeStop must not become the bytes launched afterward.
+    let changedConfig = config.replacingOccurrences(of: "198.19.1.2", with: "198.19.1.3")
+    var invalidReachedBeforeStop = false
+    refuses("sync-invalid-prevalidation-refused") {
+        _ = try manager.sync(
+            configDirectory: configDirectory,
+            configSHA256: String(repeating: "0", count: 64),
+            beforeStop: { invalidReachedBeforeStop = true }
+        )
+    }
+    check("sync-invalid-keeps-live-child", !invalidReachedBeforeStop &&
+          manager.status().pid == started.pid && manager.status().running)
     do {
+        let approvedPath = try manager.sync(
+            configDirectory: configDirectory, configSHA256: digest,
+            beforeStop: {
+                try changedConfig.write(toFile: configPath, atomically: true, encoding: .utf8)
+                guard chown(configPath, allowedUID, gid_t(bitPattern: -1)) == 0,
+                      chmod(configPath, 0o644) == 0 else {
+                    throw HelperFailure.system("Could not stage the changed test config.")
+                }
+            }
+        )
+        check("sync-runs-approved-snapshot", manager.status().running &&
+              manager.status().pid != started.pid &&
+              FileManager.default.contents(atPath: approvedPath) == staged &&
+              FileManager.default.contents(atPath: configPath) != staged)
+    } catch {
+        failures.append("sync-runs-approved-snapshot")
+    }
+    do {
+        try config.write(toFile: configPath, atomically: true, encoding: .utf8)
+        guard chown(configPath, allowedUID, gid_t(bitPattern: -1)) == 0,
+              chmod(configPath, 0o644) == 0 else {
+            throw HelperFailure.system("Could not restore the test config.")
+        }
+    } catch {
+        failures.append("restore-test-config-after-sync")
+    }
+
+    do {
+        let beforeReload = manager.status().pid
         _ = try manager.sync(configDirectory: configDirectory, configSHA256: digest)
-        check("reload-replaces-pid", manager.status().pid != started.pid)
+        check("reload-replaces-pid", manager.status().pid != beforeReload)
         check("reload-running", manager.status().running)
         refuses("reload-while-asleep-refused") {
             _ = try manager.sync(configDirectory: configDirectory, configSHA256: digest,
