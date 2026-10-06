@@ -323,11 +323,19 @@ export function catalogRelistTemplateUsesManagedIdentity(block: string): boolean
  * `validatedOwnedNode`, Windows `admit_node`). One inadmissible entry makes
  * each client refuse the whole catalog, so the Worker must refuse to publish
  * it. Returns the missing or unusable fields; empty means admissible.
- * Hysteria2 blocks are checked by catalogProxyUsesManagedIdentity instead.
+ * A Hysteria2 block's identity and pins are checked by
+ * catalogProxyUsesManagedIdentity; here it only needs its dial target.
  */
 export function catalogEntryMissingClientFields(block: string): string[] {
-  if (catalogProxyType(block) !== 'vless') return [];
   const missing: string[] = [];
+  if (catalogProxyType(block) === 'hysteria2') {
+    const rawPort = catalogScalar(block, 'port') ?? '';
+    if (!catalogScalar(block, 'server')) missing.push('server');
+    if (!/^\d+$/.test(rawPort) || Number(rawPort) < 1 || Number(rawPort) > 65535) missing.push('port');
+    if (!catalogScalar(block, 'sni') && !catalogScalar(block, 'servername')) missing.push('sni');
+    return missing;
+  }
+  if (catalogProxyType(block) !== 'vless') return [];
   if (!/^true$/i.test(catalogScalar(block, 'tls') ?? '')) missing.push('tls: true');
   if (!catalogScalar(block, 'servername') && !catalogScalar(block, 'sni')) missing.push('servername');
   if (catalogScalar(block, 'reality-opts') === null) missing.push('reality-opts');
