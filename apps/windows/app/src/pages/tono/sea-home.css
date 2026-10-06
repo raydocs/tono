@@ -643,11 +643,10 @@
   }
 }
 
-/* Exception actions stay reachable beside, never inside, the explanation card. */
+/* Secondary tools are disclosed within the card; primary actions stay above it. */
 .tono-home__progress {
   display: flex;
   flex-direction: column;
-  gap: 10px;
   min-height: 0;
   max-height: var(--tono-home-attention-room, 220px);
   flex-shrink: 1;
@@ -659,6 +658,7 @@
   scrollbar-width: thin;
 }
 .tono-home__tools {
+  margin-top: 12px;
   display: flex;
   flex-shrink: 0;
   flex-wrap: wrap;
@@ -678,12 +678,16 @@
   backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;
 }
-.tono-home__tools button {
+.tono-home .tono-home__tools button {
   font: inherit;
   font-size: 12px;
-  padding: 6px 10px;
+  padding: 6px 0 !important;
   min-height: 32px;
-  border-radius: 999px;
+  border-radius: 0;
+  background: none !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
   cursor: pointer;
 }
 .tono-home__tiles .tono-glass-card > div > button > span:last-child {

@@ -15,6 +15,8 @@ import {
 } from '@/tono-ui/appearance-preferences'
 import { TonoToastProvider } from '@/tono-ui/TonoToast'
 
+import { HomePreviewDiagnostics } from './diagnostics'
+
 import '@/tono-ui/design-tokens.css'
 import '@/tono-ui/tono.css'
 
@@ -87,6 +89,7 @@ createRoot(mount).render(
                 }
               />
             </Routes>
+            {parameters.has('diagnostics') && <HomePreviewDiagnostics />}
           </main>
         </div>
       </TonoToastProvider>

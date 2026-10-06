@@ -1,0 +1,10 @@
+{"name":"scene-full","scene":true,"sheet":false,"quality":"full","startedAt":"2026-10-06T00:17:20.220Z","revision":20,"report":{"fps":60,"p95":16.700000000000728,"liteP95":null,"renderer":"ANGLE (Apple, ANGLE Metal Renderer: Apple M3 Pro, Unspecified Version)","visibleMs":3000,"samples":180},"readout":"画质: 完整fps 60.0 · p95 16.7 msANGLE (Apple, ANGLE Metal Renderer: Apple M3 Pro, Unspecified Version)采样完成 · 不再运行帧脚本","complete":"true","sceneSize":{"width":920,"height":600},"visible":"visible","animations":35}
+file:///private/tmp/tono-pr2-recheck-20261005/pacing-matrix.mjs:38
+  if (dom.complete !== 'true' || dom.visible !== 'visible' || p.motion !== quality || dom.sheet !== sheet) throw Error(`Wrong state ${name}: ${JSON.stringify(dom)}`)
+                                                                                                                 ^
+
+Error: Wrong state home-default-full-closed: {"readout":"full · fps 60.0 · p95 16.8 msANGLE (Apple, ANGLE Metal Renderer: Apple M3 Pro, Unspecified Version)Finished — frame script stopped","complete":"true","sheet":true,"sceneSize":{"width":720,"height":600},"visible":"visible","animations":31}
+    at measure (file:///private/tmp/tono-pr2-recheck-20261005/pacing-matrix.mjs:38:114)
+    at async file:///private/tmp/tono-pr2-recheck-20261005/pacing-matrix.mjs:50:7
+
+Node.js v26.10.0

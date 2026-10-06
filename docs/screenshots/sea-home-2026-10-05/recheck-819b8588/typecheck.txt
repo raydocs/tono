@@ -1,0 +1,2 @@
+$ tsc --noEmit && node ../../../services/unchecked-index-ratchet.mjs --baseline unchecked-index.baseline -- ./node_modules/.bin/tsc --noEmit --pretty false --incremental false --noUncheckedIndexedAccess
+unchecked indexed access errors 79 (baseline 79)

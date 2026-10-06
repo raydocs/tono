@@ -211,7 +211,9 @@ it('keeps protected-offline retry, restore, diagnostics and route actions withou
   expect(
     screen.getAllByRole('button', { name: 'Restore Normal Internet' }).length,
   ).toBe(1)
-  expect(screen.getByRole('button', { name: 'Copy details' })).toBeDefined()
+  expect(
+    screen.getByRole('button', { name: 'Copy details', hidden: true }),
+  ).toBeDefined()
   expect(screen.getByTestId('tono-home-line-chip')).toBeDefined()
   expect(screen.queryByText(enTono.progress.releasedFailureBody)).toBeNull()
 })
@@ -435,7 +437,7 @@ it('counts down the same scheduled retry as the progress record without inventin
   )
 })
 
-it('shows a released failure sentence and retry only once, with diagnostics outside the explanation card', () => {
+it('shows a released failure sentence and retry only once, with secondary tools hidden in the card technical details', () => {
   mocks.progress = {
     steps: [],
     totalElapsedMs: 1000,
@@ -452,8 +454,16 @@ it('shows a released failure sentence and retry only once, with diagnostics outs
     screen.getAllByRole('button', { name: enTono.dashboard.errorRetry }),
   ).toHaveLength(1)
   expect(screen.queryByRole('button', { name: 'Retry Now' })).toBeNull()
-  expect(container.querySelector('.tono-home__progress-card button')).toBeNull()
-  expect(screen.getByRole('button', { name: 'Copy details' })).toBeDefined()
+  const technical = screen
+    .getByText(enTono.progress.technicalDetails)
+    .closest('details')
+  expect(technical?.open).toBe(false)
+  expect(container.querySelector('.tono-home__tools')?.closest('details')).toBe(
+    technical,
+  )
+  expect(
+    container.querySelector('.tono-home__progress-card')?.contains(technical),
+  ).toBe(true)
 })
 
 it('uses the selected chip name and measured exit latency in the checked popover row', async () => {
@@ -483,4 +493,27 @@ it('removes the trailing stage ellipsis before the slow sentence suffix', () => 
       .getByTestId('tono-home-sentence')
       .querySelector('.tono-home__text-in')?.textContent,
   ).not.toMatch(/(?:\.\.\.|…)/)
+})
+
+it('opens a scrollable line picker downward when 255 pixels remain below the chip', () => {
+  const original = HTMLElement.prototype.getBoundingClientRect
+  const geometry = vi
+    .spyOn(HTMLElement.prototype, 'getBoundingClientRect')
+    .mockImplementation(function (this: HTMLElement) {
+      if (this.classList.contains('tono-home'))
+        return new DOMRect(0, 0, 920, 600)
+      if (this.classList.contains('tono-home__chip'))
+        return new DOMRect(163, 281, 206, 48)
+      return original.call(this)
+    })
+  try {
+    render(view())
+    fireEvent.click(screen.getByTestId('tono-home-line-chip'))
+    const panel = screen.getByRole('dialog', { name: 'Switch line' })
+    expect(panel.style.top).toBe('337px')
+    expect(panel.style.maxHeight).toBe('255px')
+    expect(panel.style.overflowY).toBe('auto')
+  } finally {
+    geometry.mockRestore()
+  }
 })

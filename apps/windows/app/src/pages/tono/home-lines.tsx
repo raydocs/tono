@@ -105,10 +105,10 @@ export const HomeLines = ({
       const bounds = root.current?.getBoundingClientRect()
       const chip = anchor.current?.getBoundingClientRect()
       if (!bounds || !chip) return
-      // Flip above the chip in short windows; otherwise grow downward from it.
+      // Prefer downward scrolling; flip only when less than 200px remain below.
       const below = bounds.bottom - chip.bottom - 16
       const above = chip.top - bounds.top - 16
-      const down = below >= Math.min(260, above)
+      const down = below >= 200 || above <= below
       const maxHeight = Math.max(72, Math.min(320, down ? below : above))
       const height = Math.min(panelRef.current?.scrollHeight ?? 260, maxHeight)
       // eslint-disable-next-line @eslint-react/set-state-in-effect -- measure anchor collision before paint; ResizeObserver handles subsequent layout changes

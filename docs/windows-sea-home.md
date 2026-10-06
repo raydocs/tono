@@ -31,6 +31,7 @@ pnpm exec vite --config vite.home-preview.config.mts
 # lang=en; theme=light; quality=auto|full|lite|static
 # &full removes the 200px sidebar footprint for isolated home inspection
 # &appearance=old renders the unchanged overview in the same fixture shell
+# &diagnostics shows the bounded probe readout; Measure 3 s explicitly re-arms it
 ```
 
 The separate development entry renders the **actual DashboardPage, SeaScene,
@@ -54,11 +55,14 @@ ZIP, which remains a PR 1 artifact.
   Pointer-down has immediate 0.97 scale feedback. Existing connect, cancellation,
   retry, restore confirmation, backup, diagnostic copy and support handlers stay.
   Retry/restore/line selection live only under the title. The explanation card has
-  no buttons or duplicate failure sentence; copy/upload/backup/DNS tools stay in a
-  quiet toolbar above it. The protected-offline sentence and recovery heading use
+  no duplicate primary actions or failure sentence. Secondary copy/upload/backup/
+  DNS text buttons live behind its default-closed Technical details disclosure;
+  there is no third action row above the card (owner re-check R2). The protected-offline sentence and recovery heading use
   the same progress deadline/countdown, never a claim of an unscheduled retry.
 - The line chip opens a collision-clamped 320px dialog: recommended, favorite and
-  recent lines, at most five distinct line rows plus All lines. Selection has the
+  recent lines, at most five distinct line rows plus All lines. It opens downward
+  whenever at least200px remain below the chip, scrolling inside; it flips up only
+  with less than200px below and more room above (R1). Selection has the
   existing Lines-page availability guard, `tonoSelectServer` and
   `connectIfIdleAfterSelection` dispatch/refresh/toast path. Repeated dispatch is
   locked. No new recommendation policy or automatic failover. Chip/rows share
@@ -71,7 +75,9 @@ ZIP, which remains a PR 1 artifact.
   not a dark card. Home titles omit the ellipsis; slow-stage composition trims it
   before its suffix. Existing test IDs/actions remain.
 - Details preserve the existing exit, live traffic, AI tally and pool data.
-  Details use one vertical sheet scroll area; cards do not shrink/clip.
+  Details use one vertical sheet scroll area and non-shrinking cards. The legacy
+  card layout/cosmetic cutoff at the sheet edge is explicitly deferred to the
+  PR4 foundation work (owner re-check R3), not a current restyling acceptance.
   AiTrafficCard stays mounted in the closed, inert sheet. The telemetry AI total
   comes from that same tally, with scope matching before display. Before a traffic
   frame, keep Reading/telemetry-failed rather than inventing zero rates.
@@ -113,8 +119,11 @@ historical and does not contain this correction.
 
 [Initial d2dd8f21 evidence](screenshots/sea-home-2026-10-05/README.md) is retained;
 [owner-review correction evidence](screenshots/sea-home-2026-10-05/review-corrections/README.md)
-is the current receipt. 18 narrow home regressions plus unchanged baseline tests;
-one identity regression, the full frontend suite has351tests/49files. Typecheck/index79/baseline79, scoped
+is the historical H1–H12 receipt. [819b8588 re-check evidence](screenshots/sea-home-2026-10-05/recheck-819b8588/README.md)
+is the latest receipt for R1–R4. The new placement and revised secondary-tools
+regressions fail before the fix and pass after; current narrow home/progress
+checks pass53tests/2files. The earlier full frontend run passed351tests/49files;
+it is not represented as a current full-suite rerun. Typecheck/index79/baseline79, scoped
 ESLint/Biome, frontend build and locale generation/check pass. Existing en/zh
 values are unchanged;30 new `home.*` keys each, generated1158keys. The scanner
 still reports unrelated inactive-locale/legacy-backend gaps, not global cleanliness.

@@ -5,3 +5,7 @@
 Owner-supplied PR2-REVIEW H3, 2026-10-05; continuation in [changelog](../changelog.d/2026-10-05-sea-home.md). Not fixed on main or hardware-qualified.
 
 Current correction/verification: [H1–H12 evidence](../screenshots/sea-home-2026-10-05/review-corrections/README.md). Status remains in-PR; not merged or Windows-qualified.
+
+R2 re-check refines the secondary-tools placement: diagnostic/backup/DNS text buttons
+now live behind Technical details. Retry/restore/line choice remain only under the
+title; this does not reintroduce duplicated primary actions. [Latest evidence](../screenshots/sea-home-2026-10-05/recheck-819b8588/README.md).

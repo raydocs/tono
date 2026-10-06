@@ -1,0 +1,58 @@
+{
+  "checks": [
+    {
+      "name": "long English minimum failed, no third row",
+      "pass": true,
+      "detail": {
+        "closed": true,
+        "hidden": true,
+        "bottom": 479.984375,
+        "height": 128,
+        "primaries": [
+          "ConnectTry again",
+          "An exceptionally long residential route name for overflow testingLos Angeles · 83 ms"
+        ]
+      }
+    },
+    {
+      "name": "technical details keyboard disclosure failed",
+      "pass": false
+    },
+    {
+      "name": "disclosed tools keyboard reachable failed",
+      "pass": false,
+      "detail": {
+        "inTools": false,
+        "label": "Details ⌃"
+      }
+    },
+    {
+      "name": "long English minimum protectedOffline, no third row",
+      "pass": true,
+      "detail": {
+        "closed": true,
+        "hidden": true,
+        "bottom": 479.984375,
+        "height": 105,
+        "primaries": [
+          "ConnectRetry Now",
+          "Restore Normal Internet",
+          "An exceptionally long residential route name for overflow testingLos Angeles · 83 ms"
+        ]
+      }
+    },
+    {
+      "name": "technical details keyboard disclosure protectedOffline",
+      "pass": false
+    },
+    {
+      "name": "disclosed tools keyboard reachable protectedOffline",
+      "pass": false,
+      "detail": {
+        "inTools": false,
+        "label": "Details ⌃"
+      }
+    }
+  ],
+  "exceptions": []
+}

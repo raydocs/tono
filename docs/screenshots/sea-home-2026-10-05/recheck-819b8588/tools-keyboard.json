@@ -1,0 +1,74 @@
+{
+  "checks": [
+    {
+      "name": "long English minimum failed, no third row",
+      "pass": true,
+      "detail": {
+        "closed": true,
+        "hidden": true,
+        "bottom": 479.984375,
+        "height": 128,
+        "primaries": [
+          "ConnectTry again",
+          "An exceptionally long residential route name for overflow testingLos Angeles · 83 ms"
+        ]
+      }
+    },
+    {
+      "name": "closed tools excluded from Tab order failed",
+      "pass": true,
+      "detail": {
+        "outsideTools": true,
+        "label": "Details ⌃"
+      }
+    },
+    {
+      "name": "technical details keyboard disclosure failed",
+      "pass": true
+    },
+    {
+      "name": "disclosed tools keyboard reachable failed",
+      "pass": true,
+      "detail": {
+        "inTools": true,
+        "label": "Try backup channel"
+      }
+    },
+    {
+      "name": "long English minimum protectedOffline, no third row",
+      "pass": true,
+      "detail": {
+        "closed": true,
+        "hidden": true,
+        "bottom": 479.984375,
+        "height": 105,
+        "primaries": [
+          "ConnectRetry Now",
+          "Restore Normal Internet",
+          "An exceptionally long residential route name for overflow testingLos Angeles · 83 ms"
+        ]
+      }
+    },
+    {
+      "name": "closed tools excluded from Tab order protectedOffline",
+      "pass": true,
+      "detail": {
+        "outsideTools": true,
+        "label": "Details ⌃"
+      }
+    },
+    {
+      "name": "technical details keyboard disclosure protectedOffline",
+      "pass": true
+    },
+    {
+      "name": "disclosed tools keyboard reachable protectedOffline",
+      "pass": true,
+      "detail": {
+        "inTools": true,
+        "label": "Try backup channel"
+      }
+    }
+  ],
+  "exceptions": []
+}

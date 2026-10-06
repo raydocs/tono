@@ -274,6 +274,38 @@ export const ConnectProgressCard = ({
   const showFailureCopy =
     progress?.error != null || uiState === 'protectedOffline'
 
+  const homeTools = homePresentation &&
+    (showBackupAction || showFailureCopy) && (
+      <div className="tono-home__tools">
+        {showBackupAction && (
+          <button
+            type="button"
+            className="tono-button"
+            data-testid="tono-try-backup-channel"
+            onClick={handleTryBackupChannel}
+            disabled={retrying}
+          >
+            {retrying ? '…' : t('tono.progress.tryBackupChannel')}
+          </button>
+        )}
+        {isEncryptedDnsFailure(progress?.error) && (
+          <OpenDnsSettingsButton accent />
+        )}
+        {showFailureCopy && (
+          <>
+            <button
+              type="button"
+              className="tono-button"
+              onClick={handleCopyDetails}
+            >
+              {t('tono.progress.copyDetails')}
+            </button>
+            <SupportReportAction />
+          </>
+        )}
+      </div>
+    )
+
   const progressContent = showProgress && progress != null && (
     <>
       <div
@@ -531,7 +563,7 @@ export const ConnectProgressCard = ({
         progressContent
       )}
 
-      {progressError && (
+      {(progressError || homeTools) && (
         <details style={{ marginTop: 8 }}>
           <summary
             style={{
@@ -546,24 +578,27 @@ export const ConnectProgressCard = ({
               ? ` · ${t('tono.progress.failedAt', { stage: failedStepLabel })}`
               : ''}
           </summary>
-          <pre
-            data-testid="tono-progress-error"
-            style={{
-              margin: '8px 0 0',
-              padding: '10px 12px',
-              borderRadius: 10,
-              fontSize: 11,
-              fontFamily: TONO_MONO_STACK,
-              lineHeight: 1.5,
-              whiteSpace: 'pre-wrap',
-              wordBreak: 'break-word',
-              userSelect: 'text',
-              color: 'var(--tono-text-error)',
-              background: hex(TONO_COLORS.error, 0.1),
-            }}
-          >
-            {progressError.detail ?? progressError.message}
-          </pre>
+          {progressError && (
+            <pre
+              data-testid="tono-progress-error"
+              style={{
+                margin: '8px 0 0',
+                padding: '10px 12px',
+                borderRadius: 10,
+                fontSize: 11,
+                fontFamily: TONO_MONO_STACK,
+                lineHeight: 1.5,
+                whiteSpace: 'pre-wrap',
+                wordBreak: 'break-word',
+                userSelect: 'text',
+                color: 'var(--tono-text-error)',
+                background: hex(TONO_COLORS.error, 0.1),
+              }}
+            >
+              {progressError.detail ?? progressError.message}
+            </pre>
+          )}
+          {homeTools}
         </details>
       )}
 
@@ -725,36 +760,6 @@ export const ConnectProgressCard = ({
       className="tono-home__progress"
       data-expanded={forcedSteps || stepsExpanded}
     >
-      {(showBackupAction || showFailureCopy) && (
-        <div className="tono-home__tools">
-          {showBackupAction && (
-            <button
-              type="button"
-              className="tono-button"
-              data-testid="tono-try-backup-channel"
-              onClick={handleTryBackupChannel}
-              disabled={retrying}
-            >
-              {retrying ? '…' : t('tono.progress.tryBackupChannel')}
-            </button>
-          )}
-          {isEncryptedDnsFailure(progress?.error) && (
-            <OpenDnsSettingsButton accent />
-          )}
-          {showFailureCopy && (
-            <>
-              <button
-                type="button"
-                className="tono-button"
-                onClick={handleCopyDetails}
-              >
-                {t('tono.progress.copyDetails')}
-              </button>
-              <SupportReportAction />
-            </>
-          )}
-        </div>
-      )}
       {card}
     </div>
   )

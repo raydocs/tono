@@ -1,5 +1,9 @@
 # Owner-review corrections — PR #1393, 2026-10-05
 
+Later owner re-check: [R1–R4 continuation](../recheck-819b8588/README.md) supersedes
+secondary-tools placement, H12 cosmetic acceptance and the current pacing receipt.
+The raw checks/films below remain historical evidence.
+
 Corrects H1–H12 and the narrow S2 scene defect from the owner's independent
 MacBook review of d2dd8f21. Source code through70f870b9;
 [exact input fingerprints](source-fingerprints.json). **Draft, not merged.**
