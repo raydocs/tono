@@ -37,7 +37,7 @@ extension Color {
 struct MeshGradientBackground: View {
     var emphasis: Bool = false
     @AppStorage(SeaAppearance.enabledKey, store: AppProfile.defaults)
-    private var seaAppearanceEnabled = false
+    private var seaAppearanceEnabled = SeaAppearance.defaultEnabled
     @Environment(\.seaAppearanceOverride) private var seaAppearanceOverride
     @AppStorage(SettingsKey.glassTransparency) private var glassTransparency: Double = 50
     @Environment(\.colorScheme) private var colorScheme

@@ -42,7 +42,7 @@ struct SettingsView: View {
     ) private var internalFailureReportsOptedOut = false
     @AppStorage(SettingsKey.themeMode) private var themeMode = "Adaptive"
     @AppStorage(SeaAppearance.enabledKey, store: AppProfile.defaults)
-    private var seaAppearanceEnabled = false
+    private var seaAppearanceEnabled = SeaAppearance.defaultEnabled
     @AppStorage(SeaAppearance.motionKey, store: AppProfile.defaults)
     private var seaMotionMode = "Auto"
     @State private var researchProgramsExpanded = false
@@ -155,7 +155,7 @@ struct SettingsView: View {
             }
 
             SettingToggleRow(
-                label: "Sea appearance preview",
+                label: "Sea appearance",
                 subtitle: "Use the dark sea look on this Mac only. Connection behavior does not change.",
                 isOn: $seaAppearanceEnabled
             )

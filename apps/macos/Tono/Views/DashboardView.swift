@@ -6,7 +6,7 @@ struct DashboardView: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @AppStorage(SeaAppearance.enabledKey, store: AppProfile.defaults)
-    private var seaAppearanceEnabled = false
+    private var seaAppearanceEnabled = SeaAppearance.defaultEnabled
     @Environment(\.seaAppearanceOverride) private var seaAppearanceOverride
     @AppStorage(SeaAppearance.motionKey, store: AppProfile.defaults)
     private var seaMotionMode = "Auto"

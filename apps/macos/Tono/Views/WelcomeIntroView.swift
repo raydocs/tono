@@ -22,8 +22,8 @@ enum WelcomeLaunchGate {
     }
 }
 
-/// The original one-screen intro remains the default. The optional sea
-/// presentation pages through the same promises; finish or Esc still sets
+/// An explicit sea-appearance opt-out restores the original one-screen intro.
+/// The sea presentation pages through the same promises; finish or Esc still sets
 /// `introSeen` and the parent swaps in the account gate.
 /// Windows twin: `pages/tono/intro.tsx`.
 struct WelcomeIntroView: View {
@@ -103,11 +103,12 @@ struct WelcomeIntroView: View {
                                     .background(.white.opacity(0.10), in: Capsule())
                             }
                             Text("Illustration only · not your current connection status")
-                                .font(.caption).foregroundStyle(SeaTheme.muted)
+                                .font(.callout).foregroundStyle(SeaTheme.muted)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
                         .padding(28)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(Color(hex: "171E34").opacity(0.94),
+                        .background(SeaTheme.panel,
                                     in: RoundedRectangle(cornerRadius: 20, style: .continuous))
                         .overlay {
                             RoundedRectangle(cornerRadius: 20, style: .continuous)

@@ -3,7 +3,7 @@ import SwiftUI
 /// The existing device preference and the read-only render-fixture override.
 @propertyWrapper
 struct SeaAppearancePreference: DynamicProperty {
-    @AppStorage(SeaAppearance.enabledKey, store: AppProfile.defaults) private var stored = false
+    @AppStorage(SeaAppearance.enabledKey, store: AppProfile.defaults) private var stored = SeaAppearance.defaultEnabled
     @Environment(\.seaAppearanceOverride) private var previewOverride
     var wrappedValue: Bool { previewOverride ?? stored }
 }
@@ -14,6 +14,9 @@ enum SeaTheme {
     static let cool = Color(hex: "D5DAFF")
     static let warm = Color(hex: "FFD58E")
     static let ink = Color(hex: "1A0F0A")
+    static let panel = Color(hex: "211D1E")
+    static let panelTop = Color(hex: "272322")
+    static let panelBottom = Color(hex: "1E1B1B")
     static let danger = Color(hex: "FF9A8A")
     static let primaryGradient = LinearGradient(
         stops: [.init(color: Color(hex: "FFE9C4"), location: 0),
@@ -37,8 +40,8 @@ struct SeaPanelSurface: ViewModifier {
                     RoundedRectangle(cornerRadius: 18, style: .continuous)
                         .fill(LinearGradient(
                             colors: reduceTransparency || contrast == .increased
-                                ? [Color(hex: "25293A"), Color(hex: "202537")]
-                                : [.white.opacity(0.075), .white.opacity(0.04)],
+                                ? [Color(hex: "302A28"), Color(hex: "282323")]
+                                : [SeaTheme.panelTop, SeaTheme.panelBottom],
                             startPoint: .top, endPoint: .bottom
                         ))
                 }
@@ -100,7 +103,7 @@ struct SeaPageHeading: View {
     }
 }
 
-/// Opt-in primary chrome; native legacy prominence remains unchanged off.
+/// Sea primary chrome; an explicit opt-out retains native legacy prominence.
 struct SeaPrimaryAction: ViewModifier {
     @SeaAppearancePreference private var enabled
 

@@ -480,7 +480,7 @@ struct LoginView: View {
             }
         }
         .padding(28)
-        .background(seaAppearance ? Color(hex: "171E34").opacity(0.94)
+        .background(seaAppearance ? SeaTheme.panel
                     : (colorScheme == .dark ? Color(hex: "1B1C36") : .white),
                     in: RoundedRectangle(cornerRadius: 20, style: .continuous))
         .overlay {

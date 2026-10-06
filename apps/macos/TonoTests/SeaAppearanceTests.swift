@@ -1,14 +1,24 @@
+import SwiftUI
 import XCTest
 @testable import Tono
 
 @MainActor
 final class SeaAppearanceTests: XCTestCase {
-    func testSeaAppearanceIsOffInFreshDevicePreferences() throws {
+    func testSeaAppearanceDefaultsOnAndPreservesExplicitDeviceOptOut() throws {
         let suite = "tono-sea-appearance-\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
+        let preference = AppStorage<Bool>(wrappedValue: SeaAppearance.defaultEnabled,
+                                         SeaAppearance.enabledKey, store: defaults)
         XCTAssertNil(defaults.object(forKey: SeaAppearance.enabledKey))
-        XCTAssertFalse(defaults.bool(forKey: SeaAppearance.enabledKey))
+        XCTAssertTrue(preference.wrappedValue)
+        preference.wrappedValue = false
+        XCTAssertFalse(try XCTUnwrap(defaults.object(forKey: SeaAppearance.enabledKey) as? Bool))
+        let restored = AppStorage<Bool>(wrappedValue: SeaAppearance.defaultEnabled,
+                                       SeaAppearance.enabledKey, store: defaults)
+        XCTAssertFalse(restored.wrappedValue, "a stored opt-out must not be overwritten by the new default")
+        restored.wrappedValue = true
+        XCTAssertTrue(try XCTUnwrap(defaults.object(forKey: SeaAppearance.enabledKey) as? Bool))
     }
 
     func testSeaSceneNeverShowsConfirmedDayWithoutConfirmedConnection() {

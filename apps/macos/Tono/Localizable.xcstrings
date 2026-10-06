@@ -1,6 +1,7 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "Sea appearance": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Sea appearance"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "海景外观"}}}},
     "Disconnect": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Disconnect"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "断开"}}}},
     "sea.status.connecting": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Connecting"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "连接中"}}}},
     "sea.status.disconnecting": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Disconnecting"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "断开中"}}}},

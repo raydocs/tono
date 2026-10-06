@@ -2,6 +2,7 @@ import SwiftUI
 
 enum SeaAppearance {
     static let enabledKey = "seaAppearanceEnabled"
+    static let defaultEnabled = true
     static let motionKey = "seaMotionMode"
     static let motionOptions = ["Auto", "Full", "Simple", "Static"]
 
@@ -37,7 +38,7 @@ extension EnvironmentValues {
 /// This preference only makes their native controls legible on the night ground.
 struct SeaPageAppearance: ViewModifier {
     @AppStorage(SeaAppearance.enabledKey, store: AppProfile.defaults)
-    private var enabled = false
+    private var enabled = SeaAppearance.defaultEnabled
     @Environment(\.seaAppearanceOverride) private var previewOverride
 
     @ViewBuilder
@@ -332,14 +333,20 @@ struct SeaScene: View {
         let isMoon = phase == .night
         let centerX = width * (isMoon ? 0.78 : 0.72)
         let light = Color(hex: palette.reflection)
+        let glowWidth = disc * (isMoon ? 0.8 : 1.7)
+        let glowRadius = glowWidth * 0.5
         return ZStack(alignment: .topLeading) {
-            Ellipse()
+            Rectangle()
                 .fill(RadialGradient(
-                    colors: [light.opacity(isMoon ? 0.08 : 0.19), .clear],
-                    center: .top, startRadius: 0, endRadius: waterHeight * 0.72
+                    stops: [.init(color: light.opacity(isMoon ? 0.08 : 0.19), location: 0),
+                            .init(color: light.opacity(isMoon ? 0.025 : 0.06), location: 0.45),
+                            .init(color: .clear, location: 0.85),
+                            .init(color: .clear, location: 1)],
+                    center: .top, startRadius: 0, endRadius: glowRadius
                 ))
-                .frame(width: disc * (isMoon ? 0.8 : 1.7), height: waterHeight * 1.15)
-                .position(x: centerX, y: waterHeight * 0.40)
+                .frame(width: glowWidth, height: glowRadius)
+                .scaleEffect(x: 1, y: waterHeight * 0.82 / glowRadius, anchor: .top)
+                .position(x: centerX, y: glowRadius * 0.5)
 
             // A deterministic column: small near-horizon dashes broaden and
             // fragment toward the viewer, never a set of full-width stripes.
