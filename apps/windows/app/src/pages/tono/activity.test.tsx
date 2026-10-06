@@ -803,17 +803,46 @@ it('sea activity shows twenty connections of an expanded app, the rest on reques
     expect(container.querySelectorAll('.sea-activity-connection')).toHaveLength(
       20,
     )
+    const beyondTwenty = {
+      name: 'Close connection to group-22.example.test:443',
+    }
+    expect(screen.queryByRole('button', beyondTwenty)).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: 'Show all 23' }))
     expect(container.querySelectorAll('.sea-activity-connection')).toHaveLength(
       23,
     )
-    fireEvent.click(
-      screen.getByRole('button', {
-        name: 'Close connection to group-0.example.test:443',
-      }),
-    )
+    fireEvent.click(screen.getByRole('button', beyondTwenty))
     await waitFor(() =>
-      expect(closeConnectionMock).toHaveBeenCalledExactlyOnceWith('group-0', 7),
+      expect(closeConnectionMock).toHaveBeenCalledExactlyOnceWith(
+        'group-22',
+        7,
+      ),
+    )
+  } finally {
+    setNewAppearance(false)
+  }
+})
+
+it('sea activity returns a collapsed app to its first twenty connections', () => {
+  const metadata = { ...connection('group').metadata, process: 'Example.exe' }
+  connectionDataMock.activeConnections = Array.from(
+    { length: 23 },
+    (_, index) =>
+      connection(`group-${index}`, {
+        metadata: { ...metadata, host: `group-${index}.example.test` },
+      }),
+  )
+  setNewAppearance(true)
+  try {
+    const { container } = render(<ActivityPage />)
+    fireEvent.click(screen.getByText('Example.exe'))
+    fireEvent.click(screen.getByRole('button', { name: 'Show all 23' }))
+    const app = container.querySelector('details.sea-activity-app')
+    if (!(app instanceof HTMLDetailsElement)) throw new Error('no app row')
+    app.open = false
+    fireEvent(app, new Event('toggle'))
+    expect(container.querySelectorAll('.sea-activity-connection')).toHaveLength(
+      20,
     )
   } finally {
     setNewAppearance(false)

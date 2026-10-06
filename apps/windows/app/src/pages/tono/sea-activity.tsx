@@ -170,7 +170,19 @@ export const SeaActivity = ({
               ? appRows
               : appRows.slice(0, 20)
             return (
-              <details className="sea-activity-app">
+              <details
+                className="sea-activity-app"
+                onToggle={(event) => {
+                  // A collapsed app goes back to its first twenty rows.
+                  if (event.currentTarget.open) return
+                  setAllFor((shown) => {
+                    if (!shown.has(app.process)) return shown
+                    const next = new Set(shown)
+                    next.delete(app.process)
+                    return next
+                  })
+                }}
+              >
                 <summary className="sea-activity-app-row">
                   <span className="sea-activity-app-icon" aria-hidden="true">
                     {processLabel(app.process).slice(0, 1)}
