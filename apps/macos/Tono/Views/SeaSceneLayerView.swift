@@ -43,7 +43,7 @@ final class SeaSceneNativeView: NSView {
     override init(frame: NSRect) {
         super.init(frame: frame)
         wantsLayer = true
-        scene.isGeometryFlipped = true
+        layerUsesCoreImageFilters = true
         scene.masksToBounds = true
         layer?.addSublayer(scene)
     }
@@ -55,6 +55,9 @@ final class SeaSceneNativeView: NSView {
         guard bounds.size.width > 0, bounds.size.height > 0 else { return }
         CATransaction.begin()
         CATransaction.setDisableActions(true)
+        // AppKit already flips a flipped NSView's backing hierarchy. Normalize
+        // once against that hierarchy, rather than blindly flipping it twice.
+        scene.isGeometryFlipped = !(layer?.contentsAreFlipped() ?? false)
         scene.frame = bounds
         if lastSize != bounds.size {
             lastSize = bounds.size

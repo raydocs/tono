@@ -18,3 +18,6 @@
 - 第二轮 a07fbfb1 / [37525498343](https://github.com/raydocs/tono/actions/runs/37525498343)：Release app 构建、policy-tests、privileged-tests 已通过；XCTest 编译失败，因为 SwiftUI 的原生 accessibility/contrast 环境是只读。改为场景/表面的共享呈现输入，生产从 OS 环境读取、预览/夹具显式注入同一值；不写系统辅助功能偏好、不伪造 OS 标志，也不绕过动态/透明/对比度的真实呈现分支。夹具证明呈现回退，尚不证明 OS 偏好通知或真机设置路径。
 
 - 状态整窗夹具使用 Full 的真实初始挂载 + 活动循环，不以 Reduce Motion 代替普通截图；过渡与导航实例保留另由同窗实时序列证明。CPU 收据明确只是合成状态 UI test host 自身，未叠加真实网络/helper 负载，不冒充 owner 连接设备预算验收。
+
+- 第三轮 74d882d6 / [37527579501](https://github.com/raydocs/tono/actions/runs/37527579501)：Release app、policy-tests、privileged-tests 已通过；XCTest 编译因两处 `Any as? CGColor`（CF 类型不能条件向下转型）失败。改为先核对 CFTypeID 再桥接；这是夹具编译修正，原始运行失败仍保留。
+- 按本机 SDK NSView.h271–273/CALayer.h259–275 的公开契约启用自定义子层 Core Image filters，并相对 AppKit 实际 backing 层级规范化一次 top-down 坐标，避免盲目双翻转；加一条窄回归。尚未取得原生帧，均待新 head 的托管验证，不把源码推断写成截图通过。
