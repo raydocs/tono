@@ -365,6 +365,14 @@ describe('TrayPanel traffic rates', () => {
   })
 })
 
+it('new-look tray scopes the sea tokens itself, since the tray webview root may not carry the appearance flag', async () => {
+  setNewAppearance(true)
+  render(<TrayPanel />, { wrapper: freshSWR })
+  expect((await screen.findByRole('dialog')).getAttribute('data-sea-ui')).toBe(
+    'true',
+  )
+})
+
 it('new-look quick switch calls the existing native selection once without duplicating Connect', async () => {
   setNewAppearance(true)
   const next = 'Buffalo · Niagara'

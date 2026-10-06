@@ -283,6 +283,10 @@ export const SeaHome = ({
     return () => document.removeEventListener('keydown', onKey)
   }, [sheetOpen, linesOpen])
 
+  // The sentence in both cases names "restore normal internet"; the action
+  // it names must be on the same screen.
+  const offersRestore =
+    state === 'protectedOffline' || (state === 'connected' && !protectedNow)
   const lineChip = (
     <button
       ref={chipRef}
@@ -326,6 +330,7 @@ export const SeaHome = ({
       className="tono-home"
       data-state={state}
       data-failed={failed}
+      data-restore={offersRestore}
       data-tone={phase === 'idle' ? 'cool' : 'warm'}
       data-tono-theme="dark"
       style={{
@@ -398,10 +403,7 @@ export const SeaHome = ({
           >
             <TextSwap text={action} />
           </button>
-          {state === 'protectedOffline' ||
-          (state === 'connected' && !protectedNow) ? (
-            // The unknown-protection sentence names "restore normal internet";
-            // the action it names must be on the same screen.
+          {offersRestore ? (
             <button
               type="button"
               className="tono-home__pill tono-home__quiet"

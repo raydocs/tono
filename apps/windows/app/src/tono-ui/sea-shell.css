@@ -159,6 +159,11 @@
 .tono-root[data-sea-appearance="true"][data-sea-home="true"] .tono-main {
   padding-top: 0;
 }
+/* Scrolled content fades out under the transparent bar instead of running through it. */
+.tono-root[data-sea-appearance="true"]:not([data-sea-home="true"]) .tono-main {
+  -webkit-mask-image: linear-gradient(transparent 34px, #000 56px);
+  mask-image: linear-gradient(transparent 34px, #000 56px);
+}
 .tono-root[data-sea-appearance="true"][data-sea-home="true"]
   .tono-main
   > :not(:last-child) {

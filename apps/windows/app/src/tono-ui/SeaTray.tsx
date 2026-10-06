@@ -48,6 +48,8 @@ export const SeaTray = ({
   return (
     <div
       className="sea-tray"
+      // The tray webview's root never carries the appearance flag; the tokens start here.
+      data-sea-ui="true"
       role="dialog"
       aria-label="Tono"
       data-ground={tone}

@@ -421,6 +421,14 @@ it('does not claim an automatic retry when the protected-offline record has no t
   expect(screen.queryByText(enTono.experience.recoveryTitle)).toBeNull()
 })
 
+it('marks the home that offers restore, so the layout keeps its three controls on one row', () => {
+  mocks.status.uiState = 'protectedOffline'
+  const home = render(view())
+  expect(
+    home.container.querySelector('.tono-home')?.getAttribute('data-restore'),
+  ).toBe('true')
+})
+
 it('counts down the same scheduled retry as the progress record without inventing one', () => {
   vi.useFakeTimers()
   mocks.status.uiState = 'protectedOffline'
