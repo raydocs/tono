@@ -166,6 +166,14 @@ final class AccountSession {
     var diagnosticsLogUploader: DiagnosticsLogUploader?
     var systemSleeping = false
     var lastCatalogFailureMessage: String?
+    /// The latest catalog read ended on 503 `EXIT_IDENTITY_PROPAGATING`.
+    @ObservationIgnored var lastCatalogFailureIsIdentityPropagating = false
+    /// Spacing of the bounded wait a launch without a cached catalog takes
+    /// while this device's exit identity propagates. Replaceable by tests.
+    @ObservationIgnored var identityPropagatingRetryDelay: Duration = .seconds(15)
+    /// 20 × 15 s: about five minutes, then the launch fails as before and
+    /// offers Retry. The exits acknowledge a new identity in about a minute.
+    static let identityPropagatingRetryLimit = 20
     var lastTrafficPolicyFailureMessage: String?
     var lastTrafficPolicyRevision: Int?
     @ObservationIgnored let accountLifecycle = AccountLifecycleCoordinator()

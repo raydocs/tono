@@ -487,6 +487,7 @@ extension AccountSession {
                 try Task.checkCancellation()
                 guard accountReadRevision == accountRevision else { return false }
                 lastCatalogFailureMessage = nil
+                lastCatalogFailureIsIdentityPropagating = false
                 await recordOfflineGrant(confirming: catalog)
                 return true
             } catch is CancellationError {
@@ -499,6 +500,8 @@ extension AccountSession {
                 lastCatalogFailureMessage =
                     (error as? LocalizedError)?.errorDescription
                     ?? error.localizedDescription
+                lastCatalogFailureIsIdentityPropagating =
+                    error as? TonoAPIClient.APIError == .exitIdentityPropagating
                 if attempt + 1 < boundedAttempts {
                     do {
                         try await Task.sleep(for: .seconds(1))

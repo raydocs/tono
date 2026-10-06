@@ -1740,6 +1740,61 @@ final class AccountSessionRequestTests: XCTestCase {
         XCTAssertFalse(activated)
     }
 
+    /// CLIENT-PROPAGATING-SLOW-RETRY: a launch with no cached catalog that
+    /// hears 503 `EXIT_IDENTITY_PROPAGATING` waits without a terminal error and
+    /// asks again soon. A read retired while it waits is never consumed; a
+    /// later 200 completes the start.
+    func testPropagatingIdentityWithoutACacheWaitsAndStartsOnALaterCatalog() async throws {
+        var consumed = 0
+        var activated = false
+        let (account, transport, host, requests) = fixture(
+            catalogConsumer: { _ in consumed += 1 },
+            cloudFallbackConsumer: { _ in
+                guard consumed > 0 else { throw TonoSidecarService.Error.commandFailed("No managed cloud exit is available.") }
+                activated = true
+            }
+        )
+        let logUpload = SettingsKey.isNetworkLogUploadEnabled()
+        AppProfile.defaults.set(false, forKey: SettingsKey.networkLogUploadEnabled)
+        defer {
+            transport.invalidateAndCancel(); HeldAccountProtocol.remove(host)
+            try? testKeychain(host).remove(.refreshToken)
+            ManagedExitCatalogOwnership.purge()
+            AppProfile.defaults.set(logUpload, forKey: SettingsKey.networkLogUploadEnabled)
+        }
+        try await adoptTestAccount(account)
+        account.state = .restoring
+        account.identityPropagatingRetryDelay = .milliseconds(10)
+        let propagating = #"{"error":{"code":"EXIT_IDENTITY_PROPAGATING","message":"Exit identity is waiting for every served exit node to acknowledge it"}}"#
+        let catalog = #"{"revision":1,"yaml":"fixture","sha256":"fixture"}"#
+
+        // A read retired while the start waits is not consumed.
+        let stale = Task { await account.startCloudOnlyRuntime() }
+        try await nextRequest(requests).respond(status: 503, body: propagating)
+        try await nextRequest(requests).respond(status: 503, body: propagating)
+        let retired = try await nextRequest(requests)
+        XCTAssertEqual(account.state, .restoring, "propagating is a wait, not a terminal error")
+        account.invalidateAccountReads()
+        retired.respond(status: 200, body: catalog)
+        await stale.value
+        XCTAssertEqual(consumed, 0)
+        XCTAssertFalse(activated)
+        XCTAssertEqual(account.state, .restoring)
+
+        // The current start waits through propagation, then starts on the 200.
+        let start = Task { await account.startCloudOnlyRuntime() }
+        try await nextRequest(requests).respond(status: 503, body: propagating)
+        try await nextRequest(requests).respond(status: 503, body: propagating)
+        let retry = try await nextRequest(requests)
+        XCTAssertEqual(account.state, .restoring, "propagating is a wait, not a terminal error")
+        retry.respond(status: 200, body: catalog)
+        await start.value
+        XCTAssertEqual(consumed, 1)
+        XCTAssertTrue(activated)
+        XCTAssertEqual(account.state, .ready)
+        await account.stopRuntime()
+    }
+
     func testPolicyDiagnosticsReportTheActuallyInstalledRevision() async throws {
         let (account, transport, host, requests) = fixture(trafficPolicyConsumer: { _ in 100 })
         defer { transport.invalidateAndCancel(); HeldAccountProtocol.remove(host); try? testKeychain(host).remove(.refreshToken) }

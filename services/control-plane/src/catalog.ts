@@ -39,6 +39,40 @@ export async function enqueueRefreshCatalogForUser(e: Env, userId: string) {
   return queued;
 }
 
+// A served node without an active exit_nodes row has no token to
+// acknowledge a roster with, so nothing proves it holds the credential.
+// A served catalog home is left out only while no exit_nodes row (any
+// status) carries its name, its hy2 base name or that name plus the hy2
+// suffix: the two tables share no uniqueness, so a home named like an
+// exit must not exempt that exit.
+async function servedExitsAcknowledged(
+  e: Env,
+  createdAt: number,
+  servedNodes: string[],
+  servedHomes: Array<{ node: string; name: string }>,
+): Promise<boolean> {
+  const readiness = await e.DB.prepare(
+    `SELECT COUNT(*) AS served_nodes,
+            SUM(CASE WHEN exit_nodes.status = 'active' AND exit_nodes.last_roster_at > ?
+                     THEN 0 ELSE 1 END) AS unready_nodes
+     FROM (
+       SELECT value AS node FROM json_each(?)
+       UNION
+       SELECT json_extract(home.value, '$.node') FROM json_each(?) home
+       WHERE EXISTS (
+         SELECT 1 FROM exit_nodes named
+         WHERE named.name IN (json_extract(home.value, '$.node'), json_extract(home.value, '$.name'))
+            OR named.name IN (json_extract(home.value, '$.node') || ?, json_extract(home.value, '$.name') || ?)
+       )
+     ) served
+     LEFT JOIN exit_nodes ON exit_nodes.name = served.node`,
+  ).bind(
+    createdAt, JSON.stringify(servedNodes), JSON.stringify(servedHomes),
+    HY2_NAME_SUFFIX, HY2_NAME_SUFFIX,
+  ).first<Row>();
+  return Number(readiness?.served_nodes ?? 0) >= 1 && Number(readiness?.unready_nodes ?? 0) === 0;
+}
+
 /// The identity this account presents at the exit, minted on first need.
 ///
 /// Stable across fetches on purpose: the client persists the catalog digest and
@@ -71,41 +105,23 @@ export async function exitClientUUID(
     if (!row) {
       throw new ApiError(409, 'DEVICE_STATE_CHANGED', 'Device is no longer active');
     }
-    // A served node without an active exit_nodes row has no token to
-    // acknowledge a roster with, so nothing proves it holds the credential.
-    // A served catalog home is left out only while no exit_nodes row (any
-    // status) carries its name, its hy2 base name or that name plus the hy2
-    // suffix: the two tables share no uniqueness, so a home named like an
-    // exit must not exempt that exit.
-    const readiness = await e.DB.prepare(
-      `SELECT COUNT(*) AS served_nodes,
-              SUM(CASE WHEN exit_nodes.status = 'active' AND exit_nodes.last_roster_at > ?
-                       THEN 0 ELSE 1 END) AS unready_nodes
-       FROM (
-         SELECT value AS node FROM json_each(?)
-         UNION
-         SELECT json_extract(home.value, '$.node') FROM json_each(?) home
-         WHERE EXISTS (
-           SELECT 1 FROM exit_nodes named
-           WHERE named.name IN (json_extract(home.value, '$.node'), json_extract(home.value, '$.name'))
-              OR named.name IN (json_extract(home.value, '$.node') || ?, json_extract(home.value, '$.name') || ?)
-         )
-       ) served
-       LEFT JOIN exit_nodes ON exit_nodes.name = served.node`,
-    ).bind(
-      Number(row.created_at), JSON.stringify(servedNodes), JSON.stringify(servedHomes),
-      HY2_NAME_SUFFIX, HY2_NAME_SUFFIX,
-    ).first<Row>();
-    if (Number(readiness?.served_nodes ?? 0) < 1 || Number(readiness?.unready_nodes ?? 0) > 0) {
-      // During the dual phase, keep existing and newly logging-in clients on
-      // the per-user credential until the device credential is confirmed on
-      // every served exit. This makes the first deployment non-disruptive: exit nodes
-      // and their tokens can only be provisioned after these endpoints exist.
+    if (!(await servedExitsAcknowledged(e, Number(row.created_at), servedNodes, servedHomes))) {
+      // During the dual phase, keep existing clients on the per-user
+      // credential until the device credential is confirmed on every served
+      // exit, but only a shared credential that already exists and that every
+      // served exit has acknowledged since it was created. A missing or
+      // unacknowledged one is never minted or served here: the exit would
+      // reject it, so this device waits for its own credential instead.
       // A revoked device may hold the shared credential, so once any device
       // of the account is revoked it is retired (migration 0077) and never
       // served again; this device waits for its own credential instead.
       if (await exitCredentialRolloutPhase(e) === 'dual' && !(await legacyExitCredentialRetired(e, userId))) {
-        return exitClientUUID(e, userId, null);
+        const shared = await e.DB.prepare(
+          'SELECT client_uuid, created_at FROM exit_credentials WHERE user_id = ? AND retired_at IS NULL',
+        ).bind(userId).first<Row>();
+        if (shared && await servedExitsAcknowledged(e, Number(shared.created_at), servedNodes, servedHomes)) {
+          return String(shared.client_uuid);
+        }
       }
       throw new ApiError(
         503,

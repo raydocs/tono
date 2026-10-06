@@ -208,7 +208,7 @@ extension AccountSession {
             // network usable. The last authenticated mode-0600 catalog cache is
             // sufficient to paint the first usable screen; refreshing it is not a
             // launch gate and happens immediately in the background below.
-            try await activateCloudFallback()
+            try await activateCloudFallback(waitWhileIdentityPropagates: true)
             try requireNoNewRefusal()
         } catch {
             try requireNoNewRefusal()
@@ -257,7 +257,10 @@ extension AccountSession {
     /// after the failed Home-US sidecar is fully stopped. The first catalog
     /// request can otherwise reuse a control-plane connection invalidated when
     /// PF is armed and its previous states are flushed.
-    func activateCloudFallback(resumeProtection: Bool? = nil) async throws {
+    func activateCloudFallback(
+        resumeProtection: Bool? = nil,
+        waitWhileIdentityPropagates: Bool = false
+    ) async throws {
         try Task.checkCancellation()
         guard user != nil else { throw CancellationError() }
         let revision = accountReadRevision
@@ -269,12 +272,31 @@ extension AccountSession {
             return
         } catch {
             try Task.checkCancellation()
-            let refreshed = await refreshManagedCatalog(attempts: 2)
+            var refreshed = await refreshManagedCatalog(attempts: 2)
             try Task.checkCancellation()
             // 535R-C-F3: a refusal during the catalog read withdrew the exits;
             // do not select one for the refused session.
             guard accountReadRevision == revision, entitlementRefusals == refusals else {
                 throw CancellationError()
+            }
+            // With no usable cache, a launch whose exit identity the served
+            // exits have not acknowledged yet waits in its current, non-ready
+            // state and asks again on a short, bounded schedule. Sign-out and
+            // Restore internet cancel the wait; a read retired by an account
+            // or state change is never consumed.
+            var propagatingRetries = 0
+            while waitWhileIdentityPropagates, !refreshed, lastCatalogFailureIsIdentityPropagating,
+                  propagatingRetries < Self.identityPropagatingRetryLimit {
+                propagatingRetries += 1
+                try await Task.sleep(for: identityPropagatingRetryDelay)
+                guard accountReadRevision == revision, entitlementRefusals == refusals else {
+                    throw CancellationError()
+                }
+                refreshed = await refreshManagedCatalog()
+                try Task.checkCancellation()
+                guard accountReadRevision == revision, entitlementRefusals == refusals else {
+                    throw CancellationError()
+                }
             }
             guard refreshed else {
                 let detail = lastCatalogFailureMessage.map { " \($0)" } ?? ""
