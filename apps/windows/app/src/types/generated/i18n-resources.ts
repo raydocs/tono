@@ -1549,6 +1549,7 @@ export interface TranslationResources {
       }
       seaActivity: {
         exit: string
+        showAll: string
         summary: string
       }
       seaIntro: {

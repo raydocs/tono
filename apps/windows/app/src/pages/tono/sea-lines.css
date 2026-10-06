@@ -30,6 +30,26 @@
   align-items: center;
   gap: 20px;
 }
+/* The explanation opener reads as a control, not as stray punctuation after the tag. */
+.sea-lines-recommended .sea-lines-help {
+  min-height: 0;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  margin-left: 8px;
+  border: 1px solid var(--sea-divider);
+  border-radius: 50%;
+  font-size: 12px;
+  line-height: 1;
+  color: var(--sea-secondary);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  vertical-align: middle;
+}
+.sea-lines-recommended .sea-tag {
+  vertical-align: middle;
+}
 .sea-lines-recommended h2 {
   margin: 8px 0 6px;
   font-size: 17px;

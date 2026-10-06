@@ -787,7 +787,7 @@ it('renders an extensionless process whose basename is an inherited translation 
   expect(screen.getByText('toString')).toBeDefined()
 })
 
-it('sea activity caps an expanded app at twenty and retains the generation-scoped close path', async () => {
+it('sea activity shows twenty connections of an expanded app, the rest on request, and retains the generation-scoped close path', async () => {
   const metadata = { ...connection('group').metadata, process: 'Example.exe' }
   connectionDataMock.activeConnections = Array.from(
     { length: 23 },
@@ -803,9 +803,10 @@ it('sea activity caps an expanded app at twenty and retains the generation-scope
     expect(container.querySelectorAll('.sea-activity-connection')).toHaveLength(
       20,
     )
-    expect(
-      screen.getByText('Showing the first 20 connections for this app.'),
-    ).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Show all 23' }))
+    expect(container.querySelectorAll('.sea-activity-connection')).toHaveLength(
+      23,
+    )
     fireEvent.click(
       screen.getByRole('button', {
         name: 'Close connection to group-0.example.test:443',
@@ -814,6 +815,22 @@ it('sea activity caps an expanded app at twenty and retains the generation-scope
     await waitFor(() =>
       expect(closeConnectionMock).toHaveBeenCalledExactlyOnceWith('group-0', 7),
     )
+  } finally {
+    setNewAppearance(false)
+  }
+})
+
+it('sea activity offers nothing to close while Tono is not connected', () => {
+  tonoStatusMock.uiState = 'notConnected'
+  setNewAppearance(true)
+  try {
+    render(<ActivityPage />)
+    expect(
+      screen.getByText('Connect Tono to view live activity.'),
+    ).toBeDefined()
+    expect(
+      screen.queryByRole('button', { name: 'Close all connections' }),
+    ).toBeNull()
   } finally {
     setNewAppearance(false)
   }

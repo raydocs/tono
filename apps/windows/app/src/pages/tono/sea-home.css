@@ -406,6 +406,39 @@
   -webkit-backdrop-filter: none !important;
   box-shadow: none !important;
 }
+/* IHOME-12: the reused cards brought their own insets, a button on the platform font and
+   monospace figures. Inside the sheet every tile starts on the same 14px edge and reads in
+   the page font; figures stay aligned with tabular digits. */
+.tono-home__tiles .tono-exit__row {
+  padding-left: 0 !important;
+  padding-right: 0 !important;
+}
+.tono-home__tiles .tono-exit__row:first-child {
+  padding-top: 0 !important;
+}
+.tono-home__tiles .tono-exit__row:nth-last-child(1 of .tono-exit__row) {
+  padding-bottom: 0 !important;
+}
+.tono-home__tiles .tono-exit__pick {
+  font: inherit;
+  color: inherit;
+}
+.tono-home__tiles .tono-exit__figure {
+  font-family: inherit !important;
+  font-variant-numeric: tabular-nums;
+}
+.tono-home__tiles .tono-info__label {
+  font-size: 11px !important;
+}
+.tono-home__tiles .tono-info__label + .tono-exit__figure {
+  font-size: 15px !important;
+  font-weight: 500 !important;
+}
+/* The two small tiles share a row: one height, whatever each one says. */
+.tono-home__tiles
+> .tono-glass-card:not(:has(> div > button)):not(:has(.tono-ai-traffic)) {
+  align-self: stretch;
+}
 .tono-home__lines {
   padding: 12px 8px 8px;
   border-radius: 18px;
