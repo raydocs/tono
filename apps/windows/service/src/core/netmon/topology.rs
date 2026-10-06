@@ -4,20 +4,27 @@
 
 #[derive(Clone, Default, PartialEq, Eq)]
 pub(super) struct Topology {
-    pub interfaces: Vec<(u64, u32, u32, u32, bool)>,
+    /// Interface LUID, index, metric, MTU, connected, operational status.
+    pub interfaces: Vec<(u64, u32, u32, u32, bool, i32)>,
     pub routes: Vec<(u64, u32, u8, u32, u32)>,
+    /// IPv4 unicast addresses: interface LUID, address, on-link prefix length,
+    /// DAD state. A new source address behind the same gateway is a move.
+    pub addresses: Vec<(u64, u32, u8, i32)>,
     /// IPv6 default routes only (`::/0`): interface LUID, next hop, metric.
     /// Temporary host addresses are not recorded; they churn without a roam.
     /// An unreadable IPv6 table leaves this empty rather than failing the
     /// whole observation, so a DNS echo is not reported as "unknown".
     pub ipv6_defaults: Vec<(u64, [u8; 16], u32)>,
+    /// The IPv6 default routes could not be read in full. An external batch is then
+    /// published even when everything else compares equal: an unread part proves nothing.
+    pub ipv6_unreadable: bool,
 }
 
 #[cfg(not(feature = "test"))]
 pub(super) fn read() -> Result<Topology, String> {
     use windows_sys::Win32::NetworkManagement::IpHelper::{
-        GetIfEntry2, GetIpForwardTable2, GetIpInterfaceTable, MIB_IF_ROW2,
-        MIB_IPFORWARD_TABLE2, MIB_IPINTERFACE_TABLE, MIB_IF_TYPE_LOOPBACK,
+        GetIfEntry2, GetIpForwardTable2, GetIpInterfaceTable, GetUnicastIpAddressTable, MIB_IF_ROW2,
+        MIB_IPFORWARD_TABLE2, MIB_IPINTERFACE_TABLE, MIB_IF_TYPE_LOOPBACK, MIB_UNICASTIPADDRESS_TABLE,
     };
     use windows_sys::Win32::Networking::WinSock::AF_INET;
 
@@ -51,7 +58,7 @@ pub(super) fn read() -> Result<Topology, String> {
         }
         let luid = unsafe { row.InterfaceLuid.Value };
         included.insert(luid);
-        topology.interfaces.push((luid, row.InterfaceIndex, row.Metric, row.NlMtu, row.Connected));
+        topology.interfaces.push((luid, row.InterfaceIndex, row.Metric, row.NlMtu, row.Connected, interface.OperStatus));
     }
 
     let mut routes: *mut MIB_IPFORWARD_TABLE2 = std::ptr::null_mut();
@@ -74,14 +81,39 @@ pub(super) fn read() -> Result<Topology, String> {
             topology.routes.push((luid, destination, row.DestinationPrefix.PrefixLength, next_hop, row.Metric));
         }
     }
+
+    let mut addresses: *mut MIB_UNICASTIPADDRESS_TABLE = std::ptr::null_mut();
+    // SAFETY: initialized out pointer, IPv4 family; successful allocation is held by Table.
+    let status = unsafe { GetUnicastIpAddressTable(AF_INET, &mut addresses) };
+    if status != 0 || addresses.is_null() {
+        return Err(format!("GetUnicastIpAddressTable failed: {status}"));
+    }
+    let _addresses = Table(addresses.cast());
+    let count = unsafe { (*addresses).NumEntries } as usize;
+    if count > 4096 {
+        return Err("address observation exceeds 4096 rows".into());
+    }
+    // SAFETY: SDK-defined trailing array, bounded above, owned allocation remains alive.
+    let rows = unsafe { std::slice::from_raw_parts((*addresses).Table.as_ptr(), count) };
+    for row in rows {
+        let luid = unsafe { row.InterfaceLuid.Value };
+        if included.contains(&luid) {
+            // SAFETY: GetUnicastIpAddressTable(AF_INET) returns IPv4 rows.
+            let address = unsafe { row.Address.Ipv4.sin_addr.S_un.S_addr };
+            topology.addresses.push((luid, address, row.OnLinkPrefixLength, row.DadState));
+        }
+    }
     topology.interfaces.sort_unstable();
     topology.routes.sort_unstable();
+    topology.addresses.sort_unstable();
     topology.interfaces.dedup();
     topology.routes.dedup();
+    topology.addresses.dedup();
     // IPv4 is the observation that must succeed. A missing IPv6 stack must not
     // turn every later DNS echo into an unknown topology.
-    if let Ok(defaults) = read_ipv6_defaults() {
-        topology.ipv6_defaults = defaults;
+    match read_ipv6_defaults() {
+        Ok(defaults) => topology.ipv6_defaults = defaults,
+        Err(_) => topology.ipv6_unreadable = true,
     }
     Ok(topology)
 }
@@ -113,7 +145,10 @@ fn read_ipv6_defaults() -> Result<Vec<(u64, [u8; 16], u32)>, String> {
         let mut interface = MIB_IF_ROW2 { InterfaceLuid: row.InterfaceLuid, ..Default::default() };
         // SAFETY: InterfaceLuid is taken from the route row; GetIfEntry2 writes the rest.
         let status = unsafe { GetIfEntry2(&mut interface) };
-        if status != 0 || interface.Type == MIB_IF_TYPE_LOOPBACK {
+        if status != 0 {
+            return Err(format!("GetIfEntry2 failed for an IPv6 default route: {status}"));
+        }
+        if interface.Type == MIB_IF_TYPE_LOOPBACK {
             continue;
         }
         let end = interface.Alias.iter().position(|ch| *ch == 0).unwrap_or(interface.Alias.len());

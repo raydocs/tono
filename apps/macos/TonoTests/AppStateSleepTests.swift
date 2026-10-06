@@ -222,4 +222,56 @@ final class AppStateSleepTests: XCTestCase {
             "a network change must not reconnect over the refused release"
         )
     }
+
+    /// MAC-WAKE-NO-SERVICE-RELEASE regression: wake connected as soon as PF
+    /// was reasserted, before macOS named a primary service. That connect
+    /// failed on "no network service" and the armed failure released.
+    func testWakeHoldsTheBarrierWhileNoPrimaryServiceIsNamed() async {
+        let savedConsumer = RuntimeCleanup.launchProtectionConsumer
+        let savedArmed = KillSwitchService.isArmed
+        let app = AppState()
+        app.automaticResumeHeldAfterRestart = false
+        app.proxyRegions = [
+            ProxyRegion(
+                id: AppState.managedCatalogRegionID,
+                name: "TONO CLOUD",
+                nodes: [Fixture.realityNode()]
+            )
+        ]
+        KillSwitchService.isArmed = true
+        var releases = 0
+        var runtime = NetworkProtectionOperations()
+        runtime.repairForRelease = {}
+        runtime.stopCore = { _ in true }
+        runtime.coreStatus = { (false, true) }
+        runtime.restoreDNS = { true }
+        runtime.disableSystemProxy = {}
+        runtime.disarm = { releases += 1 }
+        runtime.releaseAfterFailure = { releases += 1 }
+        runtime.restrictToBootstrap = {}
+        runtime.reassertKillSwitch = { true }
+        app.networkProtection = runtime
+        let polledAgain = expectation(description: "wake reads the primary service again")
+        var reads = 0
+        var audits = ProtectionAuditOperations()
+        audits.primaryNetworkService = {
+            reads += 1
+            if reads == 2 { polledAgain.fulfill() }
+            return nil
+        }
+        app.protectionAudits = audits
+        defer {
+            app.connectionCoordinator.cancelReconnectTasks()
+            KillSwitchService.isArmed = savedArmed
+            RuntimeCleanup.launchProtectionConsumer = savedConsumer
+        }
+
+        app.resumeAfterSystemWake()
+        await fulfillment(of: [polledAgain], timeout: 5)
+
+        XCTAssertFalse(app.isConnecting, "no connect before macOS names a network service")
+        XCTAssertEqual(releases, 0)
+        XCTAssertTrue(KillSwitchService.isArmed)
+        XCTAssertNotNil(app.connectionCoordinator.wakeRecoveryTask, "wake still owns the retry")
+    }
 }

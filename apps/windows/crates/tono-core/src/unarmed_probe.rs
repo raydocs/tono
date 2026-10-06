@@ -20,6 +20,11 @@ pub const BACKOFF_MS: [u64; 6] = [2_000, 5_000, 15_000, 30_000, 60_000, 120_000]
 
 const MAX_PROBES_PER_ROUND: usize = 3;
 
+/// A failed full connection held the whole machine behind WFP while it ran. No round
+/// starts again before this many times its length has passed since it ended, so the
+/// retries keep the machine open at least three quarters of the time.
+const ATTEMPT_FLOOR_FACTOR: u64 = 3;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProbeTarget {
     pub name: String,
@@ -40,6 +45,9 @@ pub enum Step {
 pub struct Schedule {
     attempt: u32,
     next_due_ms: u64,
+    /// No round before this. Set by [`Schedule::full_connect_failed`]; a network change
+    /// restarts the ladder but does not lift it.
+    floor_ms: u64,
     down: BTreeSet<String>,
 }
 
@@ -48,8 +56,25 @@ impl Schedule {
         Self {
             attempt: 0,
             next_due_ms: now_ms,
+            floor_ms: 0,
             down: BTreeSet::new(),
         }
+    }
+
+    /// A full connection failed after `attempt_ms` behind the barrier, and its release
+    /// finished at `now_ms`. Wait the ladder's delay or [`ATTEMPT_FLOOR_FACTOR`] times
+    /// the attempt, whichever ends later.
+    pub fn full_connect_failed(&mut self, now_ms: u64, attempt_ms: u64) {
+        self.connect_failed(now_ms);
+        self.floor_ms = now_ms.saturating_add(attempt_ms.saturating_mul(ATTEMPT_FLOOR_FACTOR));
+    }
+
+    /// The physical uplink changed: restart the ladder and the proofs, but not before
+    /// the floor of the last failed full connection.
+    pub fn network_changed(&mut self, now_ms: u64) {
+        self.attempt = 0;
+        self.down.clear();
+        self.next_due_ms = now_ms;
     }
 
     pub fn note_down(&mut self, name: &str) {
@@ -80,8 +105,9 @@ impl Schedule {
         targets: &[ProbeTarget],
         now_ms: u64,
     ) -> Step {
-        if now_ms < self.next_due_ms {
-            return Step::Wait { until_ms: self.next_due_ms };
+        let due_ms = self.next_due_ms.max(self.floor_ms);
+        if now_ms < due_ms {
+            return Step::Wait { until_ms: due_ms };
         }
         let names = ordered_tcp_names(preferred, region, targets, &self.down);
         if names.is_empty() {

@@ -294,8 +294,6 @@ actor CoreControllerClient {
         // against 127.0.0.1, so a slow or high-latency WAN cannot make this
         // ramp give up early.
         let totalSleepBudgetMs = UInt64(attemptCount - 1) * intervalMs
-        let fastPollCeilingMs: UInt64 = 500
-        let fastPollIntervalMs = min(UInt64(50), intervalMs)
         var sleptMs: UInt64 = 0
         while true {
             try Task.checkCancellation()
@@ -320,15 +318,32 @@ actor CoreControllerClient {
             } catch {
                 try Task.checkCancellation()
                 guard sleptMs < totalSleepBudgetMs else { break }
-                let step = min(
-                    sleptMs < fastPollCeilingMs ? fastPollIntervalMs : intervalMs,
-                    totalSleepBudgetMs - sleptMs
+                let step = Self.readinessPollStep(
+                    sleptMs: sleptMs,
+                    budgetMs: totalSleepBudgetMs,
+                    intervalMs: intervalMs
                 )
                 try await Task.sleep(for: .milliseconds(step))
                 sleptMs += step
             }
         }
         throw CoreControllerError.requestFailed(String(localized: "Core did not become ready in time"))
+    }
+
+    /// Sleep before the next readiness poll. A controller that binds after the
+    /// first half second used to wait out a whole `intervalMs` tick, so the
+    /// dense 50 ms sampling now covers the first two seconds of sleep.
+    nonisolated static func readinessPollStep(
+        sleptMs: UInt64,
+        budgetMs: UInt64,
+        intervalMs: UInt64
+    ) -> UInt64 {
+        let fastPollCeilingMs: UInt64 = 2_000
+        let fastPollIntervalMs = min(UInt64(50), intervalMs)
+        return min(
+            sleptMs < fastPollCeilingMs ? fastPollIntervalMs : intervalMs,
+            budgetMs - sleptMs
+        )
     }
 
     // MARK: - Reload Config

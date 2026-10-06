@@ -22,7 +22,7 @@ use crate::tono::{
         apply_network_event_probe,         classify_core_sample, commit_core_baseline, connection_loop_continues, core_change_fires,
         core_identity_change_owned, exit_probe_due,
         health_threshold_reached, kill_switch_unhealthy_for_monitor, may_recover_in_place,
-        monitor_requires_reconnect, network_event_fires, next_network_events_counter,
+        monitor_requires_reconnect, network_change_audited, network_event_fires, next_network_events_counter,
         owned_direct_reload_in_flight,
         plan_network_event_probe, protected_dns_unhealthy,
     },
@@ -1092,7 +1092,7 @@ pub(super) async fn network_monitor_loop(state: Arc<TonoState>, app: AppHandle) 
                     endpoints: kill_switch.endpoints.len(),
                 });
             }
-            if network_changed {
+            if network_change_audited(network_changed, invalidated) {
                 events.push(AuditEvent::NetworkChange { counter });
             }
             if core_changed {
@@ -1628,14 +1628,33 @@ pub(super) async fn refresh_control_plane_pins_from_service(state: &TonoState) {
     }
 }
 
+/// Armed, the system resolver is Tono's protected one, which is down until this attempt's Core
+/// answers (and serves fake IPs the merge drops once it does), so the live lookup there mostly
+/// waits out its budget. The compiled and learned pins carry the bootstrap either way.
+const ARMED_BOOTSTRAP_LOOKUP_TIMEOUT: Duration = Duration::from_millis(300);
+
+fn bootstrap_lookup_budget(armed: bool) -> Duration {
+    if armed { ARMED_BOOTSTRAP_LOOKUP_TIMEOUT } else { DNS_LOOKUP_TIMEOUT }
+}
+
 /// F1: merge the pinned bootstrap IPs with the live resolution of the API
 /// host (best-effort — a failed lookup just yields the pins alone).
-pub(super) async fn bootstrap_hosts() -> Vec<String> {
-    let dynamic: Vec<String> =
-        match tokio::time::timeout(DNS_LOOKUP_TIMEOUT, tokio::net::lookup_host((bootstrap::API_HOST, 443))).await {
-            Ok(Ok(addrs)) => addrs.map(|addr| addr.ip().to_string()).collect(),
-            Ok(Err(_)) | Err(_) => Vec::new(),
-        };
+pub(super) async fn bootstrap_hosts(armed: bool) -> Vec<String> {
+    bootstrap_hosts_within(
+        bootstrap_lookup_budget(armed),
+        tokio::net::lookup_host((bootstrap::API_HOST, 443)),
+    )
+    .await
+}
+
+async fn bootstrap_hosts_within<I: Iterator<Item = std::net::SocketAddr>>(
+    budget: Duration,
+    lookup: impl std::future::Future<Output = std::io::Result<I>>,
+) -> Vec<String> {
+    let dynamic: Vec<String> = match tokio::time::timeout(budget, lookup).await {
+        Ok(Ok(addrs)) => addrs.map(|addr| addr.ip().to_string()).collect(),
+        Ok(Err(_)) | Err(_) => Vec::new(),
+    };
     bootstrap::merge_bootstrap_hosts(&dynamic)
 }
 
@@ -1645,6 +1664,23 @@ mod tests {
     use crate::tono::state::TonoState;
     use std::sync::Arc;
     use futures::FutureExt;
+
+    /// WIN-ARMED-BOOTSTRAP-LOOKUP-WAIT: armed, the system resolver is the protected one, down
+    /// while the Core restarts, so a protected re-entry waited the whole 2 s lookup budget in
+    /// PreparingService. The armed lookup is a short best effort and the compiled pins remain.
+    #[tokio::test(start_paused = true)]
+    async fn armed_bootstrap_lookup_is_short_best_effort() {
+        let started = tokio::time::Instant::now();
+        let hosts = super::bootstrap_hosts_within(
+            super::bootstrap_lookup_budget(true),
+            std::future::pending::<std::io::Result<std::vec::IntoIter<std::net::SocketAddr>>>(),
+        )
+        .await;
+        assert!(started.elapsed() <= std::time::Duration::from_millis(300));
+        for pinned in crate::tono::bootstrap::API_BOOTSTRAP_IPS {
+            assert!(hosts.iter().any(|host| host == pinned), "the compiled pins still carry the bootstrap");
+        }
+    }
 
     #[tokio::test]
     async fn health_proof_cannot_release_a_completed_switch_back_to_the_same_exit() {

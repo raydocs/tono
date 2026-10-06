@@ -15,7 +15,10 @@
 //! and rebuild a perfectly healthy tunnel every few seconds for ever. `raw_notify` therefore
 //! defers notifications arriving in the DNS-write window to a bounded topology read. A DNS
 //! echo has no interface/route change; a real overlapping change must still reach the App.
-//! Pre-window notifications retain their unconditional invalidation semantics.
+//! Pre-window notifications take the same comparison: a callback is not proof of a change
+//! (Tono's own adapter, IPv6 router refreshes and parameter echoes raise them with nothing
+//! observed changed), and every published batch costs the App a data-plane proof. An
+//! unreadable observation, or one whose IPv6 part could not be read, is still published for them.
 
 mod topology;
 
@@ -52,10 +55,16 @@ impl Reconciler {
     fn observe(&mut self, observed: Result<topology::Topology, String>, external: bool) -> Option<&'static str> {
         match observed {
             Ok(current) => {
-                let changed = self.baseline.as_ref().is_none_or(|old| *old != current);
+                let changed = self.baseline.as_ref().is_none_or(|old| {
+                    old.interfaces != current.interfaces
+                        || old.routes != current.routes
+                        || old.addresses != current.addresses
+                        || old.ipv6_defaults != current.ipv6_defaults
+                });
+                let publish = changed || (external && current.ipv6_unreadable);
                 self.baseline = Some(current);
                 self.unknown_reported = false;
-                (external || changed).then_some("network-change (ip-interface/route)")
+                publish.then_some("network-change (ip-interface/route)")
             }
             Err(error) => {
                 // Unknown is never "unchanged", but do not create a reconnect loop merely
@@ -311,9 +320,11 @@ mod tests {
         assert_eq!(super::change_count(), before, "the callback must not publish a DNS echo");
         assert!(retained, "the worker must reconcile physical changes that overlap a DNS write");
         let baseline = super::topology::Topology {
-            interfaces: vec![(17, 3, 25, 1500, true)],
+            interfaces: vec![(17, 3, 25, 1500, true, 1)],
             routes: vec![(17, 0, 0, 0x0100000a, 10)],
+            addresses: vec![(17, 0x1400000a, 24, 4)],
             ipv6_defaults: vec![(17, [0xfe, 0x80, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], 256)],
+            ipv6_unreadable: false,
         };
         let mut reconciler = super::Reconciler { baseline: Some(baseline.clone()), unknown_reported: false };
         assert!(reconciler.observe(Ok(baseline.clone()), false).is_none(), "DNS-only echoes stay quiet");
@@ -352,6 +363,39 @@ mod tests {
         // The tail keeps suppressing for a moment after the guard drops (the callback is
         // asynchronous), but the guard itself never leaves a window open.
         assert_eq!(crate::core::dns::self_write_depth_for_tests(), 0);
+    }
+
+    /// NETMON-UNCHANGED-EXTERNAL-NOISE: a batch outside the DNS-write window published even
+    /// when nothing observed had changed. A new source address behind the same gateway, which
+    /// the old observation did not hold, must still publish, and so must a batch whose IPv6
+    /// part could not be read.
+    #[test]
+    fn dns_self_write_readability_changes_are_silent() {
+        let baseline = super::topology::Topology::default();
+        let mut reconciler = super::Reconciler { baseline: Some(baseline.clone()), unknown_reported: false };
+        let blind = super::topology::Topology { ipv6_unreadable: true, ..baseline.clone() };
+        assert!(reconciler.observe(Ok(blind.clone()), false).is_none(), "readability alone is not a DNS-window network move");
+        assert!(reconciler.observe(Ok(baseline), false).is_none(), "readability recovery alone is not a network move");
+        assert!(reconciler.observe(Ok(blind), true).is_some(), "an unread external observation still publishes");
+    }
+
+    #[test]
+    fn unchanged_external_topology_is_silent() {
+        let baseline = super::topology::Topology {
+            interfaces: vec![(17, 3, 25, 1500, true, 1)],
+            routes: vec![(17, 0, 0, 0x0100000a, 10)],
+            addresses: vec![(17, 0x1400000a, 24, 4)],
+            ipv6_defaults: Vec::new(),
+            ipv6_unreadable: false,
+        };
+        let mut reconciler = super::Reconciler { baseline: Some(baseline.clone()), unknown_reported: false };
+        assert!(reconciler.observe(Ok(baseline.clone()), true).is_none());
+        let mut readdressed = baseline.clone();
+        readdressed.addresses[0].1 = 0x1500000a;
+        assert!(reconciler.observe(Ok(readdressed), true).is_some(), "a new source address is a move");
+        let blind = super::topology::Topology { ipv6_unreadable: true, ..baseline };
+        reconciler.observe(Ok(blind.clone()), false);
+        assert!(reconciler.observe(Ok(blind), true).is_some(), "an unread IPv6 part never proves a batch unchanged");
     }
 
     #[test]

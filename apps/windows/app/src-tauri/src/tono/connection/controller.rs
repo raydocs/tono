@@ -316,6 +316,27 @@ pub(super) async fn preflight_dns_listener() -> Result<(), String> {
     Ok(())
 }
 
+/// A strongly proven same-owner Core is admitted whatever the loopback:53 probe says, and it is
+/// the expected owner of that socket, so the probe's bind retries stop as soon as this attempt's
+/// resume status arrives as `Some` instead of spending ~3 s against it. A stopped probe never
+/// proves the socket free; `None` still waits for the probe's verdict.
+pub(super) async fn preflight_dns_listener_unless_resuming<T>(
+    preflight: impl std::future::Future<Output = Result<(), String>>,
+    resume: impl std::future::Future<Output = Option<T>>,
+) -> (Result<(), String>, Option<T>) {
+    tokio::pin!(preflight, resume);
+    tokio::select! {
+        status = &mut resume => match status {
+            Some(status) => (
+                Err("loopback:53 probe stopped; this attempt proved the active runtime that holds it".to_owned()),
+                Some(status),
+            ),
+            None => (preflight.await, None),
+        },
+        verdict = &mut preflight => (verdict, resume.await),
+    }
+}
+
 /// §6.4: poll the mihomo controller `/version` for at most 15 seconds. Each localhost request is
 /// independently bounded as well, so a half-open socket cannot multiply the whole-stage budget.
 pub(super) async fn wait_controller(secret: &str, controller_port: u16) -> Result<(), String> {
@@ -395,4 +416,27 @@ pub(super) async fn lock_kill_switch_with_retries(session: &OwnerSessionProof) -
         }
     }
     Err(format!("kill switch lock failed (TUN adapter not ready?): {last}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    /// WIN-RESUME-DNS-PROBE-WAIT: a relaunch over the preserved, proven Core waited out all 30
+    /// loopback:53 bind retries (~3 s) against the socket that Core holds before an admission
+    /// that the resume status alone decides.
+    #[tokio::test(start_paused = true)]
+    async fn proven_resume_stops_the_dns_listener_probe() {
+        let held = || async {
+            tokio::time::sleep(Duration::from_secs(3)).await;
+            Err::<(), String>("held".to_owned())
+        };
+        let started = tokio::time::Instant::now();
+        let (probe, resume) = super::preflight_dns_listener_unless_resuming(held(), async { Some(()) }).await;
+        assert!(probe.is_err() && resume.is_some(), "a stopped probe never proves the socket free");
+        assert!(started.elapsed() < Duration::from_millis(100));
+        let (probe, resume) = super::preflight_dns_listener_unless_resuming(held(), async { None::<()> }).await;
+        assert_eq!(probe, Err("held".to_owned()), "without a proven runtime the probe still gates");
+        assert!(resume.is_none());
+    }
 }

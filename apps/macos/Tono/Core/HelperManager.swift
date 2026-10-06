@@ -909,13 +909,19 @@ nonisolated struct HelperManager {
 
     // MARK: - Protected DNS
 
-    static func enableProtectedDNS(service: String) throws {
-        let result = try sendJSON(
-            method: "POST",
-            path: "/dns/enable",
-            object: ["service": service]
-        )
-        let envelope = try requireSuccess(result, operation: "enable protected DNS")
+    /// Takes the same lock refusal as restore, so it gets the same retry: one
+    /// lost lock race used to fail the whole connect. `send` replaces the
+    /// socket round trip in tests only.
+    static func enableProtectedDNS(
+        service: String,
+        send: (([String: String]) throws -> (status: Int, body: Data))? = nil
+    ) throws {
+        let envelope = try retryingHelperRefusal {
+            let object = ["service": service]
+            let result = try send?(object)
+                ?? sendJSON(method: "POST", path: "/dns/enable", object: object)
+            return try requireSuccess(result, operation: "enable protected DNS")
+        }
         guard envelope.configured == true,
               envelope.snapshotPresent != false,
               envelope.service == service else {

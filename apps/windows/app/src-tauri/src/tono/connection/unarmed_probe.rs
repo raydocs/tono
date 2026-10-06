@@ -101,6 +101,7 @@ async fn run(state: Arc<TonoState>, app: AppHandle, ticket: u64, mut generation:
                 ).await {
                     WaitOutcome::Retired => return,
                     WaitOutcome::Changed => schedule = Schedule::begin(elapsed_ms(clock)),
+                    WaitOutcome::NetworkChanged => schedule.network_changed(elapsed_ms(clock)),
                     WaitOutcome::Due => {}
                 }
             }
@@ -150,6 +151,7 @@ async fn run(state: Arc<TonoState>, app: AppHandle, ticket: u64, mut generation:
                     "Tono: unarmed probe found a reachable exit; connecting without a filter already installed"
                 );
                 let before = generation;
+                let started = elapsed_ms(clock);
                 // The starter is synchronous, so this await does not name
                 // `run` again. The trait object keeps the spawned task Send
                 // without embedding connect's concrete future.
@@ -166,7 +168,9 @@ async fn run(state: Arc<TonoState>, app: AppHandle, ticket: u64, mut generation:
                 generation = owned;
                 // TCP success is not a successful tunnel. Retain the ladder
                 // across our own failure generation and same-generation refusals.
-                schedule.connect_failed(elapsed_ms(clock));
+                // `fail_connect` has finished the release by the time this returns.
+                let ended = elapsed_ms(clock);
+                schedule.full_connect_failed(ended, ended.saturating_sub(started));
             }
         }
     }
@@ -251,7 +255,10 @@ async fn barrier_is_down(state: &TonoState, ticket: u64, generation: u64) -> boo
 #[derive(Debug, PartialEq, Eq)]
 enum WaitOutcome {
     Due,
+    /// The user's selection changed: a new choice starts a fresh ladder.
     Changed,
+    /// The preferred physical uplink changed.
+    NetworkChanged,
     Retired,
 }
 
@@ -272,19 +279,30 @@ fn start_native_observation(
     }))
 }
 
+/// The uplink Windows routes through: lowest effective metric, ties by LUID. Its
+/// metric is left out: Wi-Fi link-rate changes move the automatic metric with no
+/// move of the network, and each such wake used to restart the ladder.
+fn preferred_uplink(snapshot: &PhysicalNetworkSnapshot) -> Option<(u64, u32, u32)> {
+    snapshot
+        .iter()
+        .min_by_key(|(luid, source, gateway, metric)| (*metric, *luid, *source, *gateway))
+        .map(|(luid, source, gateway, _)| (*luid, *source, *gateway))
+}
+
 /// One pending native read per process at most, even across owner replacement.
 /// An unresponsive IP Helper call holds neither async workers nor lifecycle
 /// locks, and cannot spawn a worker on every tick. Samples remain memory-only.
 #[derive(Default)]
 struct NetworkWatch {
-    snapshot: Option<PhysicalNetworkSnapshot>,
+    uplink: Option<Option<(u64, u32, u32)>>,
     pending: Option<tokio::task::JoinHandle<Result<PhysicalNetworkSnapshot, String>>>,
 }
 
 impl NetworkWatch {
     fn observe(&mut self, snapshot: PhysicalNetworkSnapshot) -> bool {
-        let changed = self.snapshot.as_ref().is_some_and(|previous| previous != &snapshot);
-        self.snapshot = Some(snapshot);
+        let uplink = preferred_uplink(&snapshot);
+        let changed = self.uplink.as_ref().is_some_and(|previous| previous != &uplink);
+        self.uplink = Some(uplink);
         changed
     }
 
@@ -323,7 +341,7 @@ async fn sleep_until(
             return WaitOutcome::Changed;
         }
         if barrier_is_down(state, ticket, generation).await && network.changed().await {
-            return WaitOutcome::Changed;
+            return WaitOutcome::NetworkChanged;
         }
         let now = elapsed_ms(clock);
         if now >= until_ms {
@@ -525,7 +543,27 @@ mod tests {
         let moved = vec![(17, 0x0200000a, 0x0100000a, 25)];
         assert!(network.observe(moved.clone()), "same-adapter address change wakes recovery");
         assert!(!network.observe(moved));
-        assert!(network.observe(vec![(17, 0x0200000a, 0x0100000a, 30)]),
-            "changed physical route priority wakes recovery");
+        assert!(!network.observe(vec![(17, 0x0200000a, 0x0100000a, 30)]),
+            "a metric-only change of the same uplink is not a move");
+    }
+
+    /// WIN-UNARMED-METRIC-WAKE: a metric-only change of the same uplink restarted the
+    /// ladder at once, so a 52 s attempt behind the barrier could repeat seconds after
+    /// its release. The metric no longer wakes, and a real move still waits three times
+    /// the failed attempt from its release.
+    #[test]
+    fn metric_wake_preserves_attempt_floor() {
+        let targets = [ProbeTarget {
+            name: "US A".into(), region: "us".into(), endpoint: "192.0.2.1:443".into(), tcp: true,
+        }];
+        let mut network = NetworkWatch::default();
+        assert!(!network.observe(vec![(17, 0x0200000a, 0x0100000a, 25)]));
+        let mut schedule = Schedule::begin(0);
+        schedule.full_connect_failed(60_000, 52_000);
+        assert!(!network.observe(vec![(17, 0x0200000a, 0x0100000a, 35)]));
+        assert!(network.observe(vec![(18, 0x0300000a, 0x0100000a, 25)]), "a new uplink is a move");
+        schedule.network_changed(61_000);
+        assert_eq!(schedule.on_clock("US A", "us", &targets, 61_000), Step::Wait { until_ms: 216_000 });
+        assert!(matches!(schedule.on_clock("US A", "us", &targets, 216_000), Step::Probe { .. }));
     }
 }
