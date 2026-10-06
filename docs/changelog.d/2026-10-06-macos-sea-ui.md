@@ -41,3 +41,5 @@
 
 - 2026-10-06 M3/R1–R3 源码续修：加入只读 seaDecorationsOverride（nil仍尊重生产降低透明度/对比度），渲染明确输出夜/日/阻断装饰开关六图并增加真实首页装饰版；水面改独立深色底按相位着色并渐淡，第一色不再沿用sky末端；夜色为可辨靛蓝地平线，旧同色断言按被撤回的建议删除，改真实水面组合比天空暗的一个回归。日轮改普通Circle加装饰态柔边副本，短椭圆地平光代替全幅色带；无持续渲染/偏好写入/状态变化。source数学与diff检查通过，native图仍待新head。
 - 2026-10-06 原生证据裁定：只读arbiter据81e2的真实PNG/TXT确认SwiftUI托管AX只到HostingScrollView，不能靠再猜API证明画面；改用预选同一精确窗口原图的Vision英文文字/布局/对比度证据，捕获前记录并要求process与app-bundle英文。原AX保留诊断，绝不宣称动作、AX语义或恢复identifier通过；暂停态以真实app.recoveryFeedback完整可见文本作视觉证据。线路星号的Remove favorite本是不可见AX标签，不可用OCR冒充；视觉合同用真实Favorites/Paris行，原AX标签仍单独诊断未验。所有原图逐像素alpha1门槛保持，少数fractionalpixel继续使CI失败；增加真实window背景/不透明度、原CG/PNG/邻域与一次同来源重复捕获、ImageIO诊断，后者绝不择优替换原图。本机不跑原生，不以这些源码更改宣布绿色或UI/G1/G2验收。
+
+- 2026-10-06 exactde606/run37467832621：产品/测试编译、本地化覆盖、海景水色回归、四条状态词与原两张blocked原生文字/反馈/全图alpha门槛通过；root实际查看装饰开关六图及真实首页装饰图，已看见星点、光晕、纵向倒影、深水硬地平线与平滑日轮，仍不是owner/真机验收。二级页账户2个alpha252、活动1个alpha254在原CG、NSBitmap、ImageIO和同源重复中完全一致，故非PNG编码器单独问题，仍失败。随后设置页公开AX导航顺序的NSArray导入窄类型桥接触发Fatal（Expected NSAccessibilityElement / actual NSAccessibilitySegment），后续四页未完整执行；现诊断仅走SDK无泛型限制的accessibilityChildren，不再枚举重复的导航顺序数组，AX仍未验。Vision优先最少匹配行，避免短按钮被无关多行几何包围；第一图/文字/完整反馈/全像素alpha断言保持，无本机原生执行。

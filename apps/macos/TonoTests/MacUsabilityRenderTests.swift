@@ -434,7 +434,7 @@ final class MacUsabilityRenderTests: XCTestCase {
         }
     }
 
-    /// Only these two preselected fixtures accept this same-process window image.
+    /// Preselected fixtures accept only this same-process window image.
     /// Offscreen cacheDisplay output remains separate failed diagnostic evidence.
     private func captureNativeWindowAcceptance(
         _ name: String, window: NSWindow, host: NSView, folder: URL,
@@ -606,6 +606,7 @@ final class MacUsabilityRenderTests: XCTestCase {
             receipt.append("AX=unavailable: host/window mismatch; AX/action semantics unverified")
             return
         }
+        receipt.append("AX children source=untyped accessibilityChildren; typed navigation-order bridge not queried after hosted NSAccessibilitySegment crash; semantics unverified")
         var queue: [AnyObject] = [window, host]
         var visited = Set<ObjectIdentifier>()
         var matches: [String: NSRect] = [:]
@@ -638,7 +639,6 @@ final class MacUsabilityRenderTests: XCTestCase {
                 }
             }
             var children = full?.accessibilityChildren() ?? []
-            children += (full?.accessibilityChildrenInNavigationOrder() ?? []).map { $0 as Any }
             if children.isEmpty, let object {
                 children = object.accessibilityAttributeValue(.children) as? [Any] ?? []
             }
@@ -695,8 +695,9 @@ final class MacUsabilityRenderTests: XCTestCase {
             let expectedTokens = nativeNormalizedTokens(expected)
             guard !expectedTokens.isEmpty else { return false }
             var matched = false
-            for start in lines.indices {
-                for end in start..<min(lines.count, start + 8) {
+            for length in 1...min(8, lines.count) {
+                for start in 0...(lines.count - length) {
+                    let end = start + length - 1
                     let group = Array(lines[start...end])
                     guard group.allSatisfy({ $0.1 >= 0.35 }) else { continue }
                     let tokens = nativeNormalizedTokens(group.map { $0.0 }.joined(separator: " "))
