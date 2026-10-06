@@ -28,3 +28,9 @@
   旧外观导航词跟随共享词表（#1408 F4）；单个应用超过 20 条连接时没有逐行关闭（#1411 F3）；遥测简介未写「默认开启 / 关闭后仍上报失败」
   （#1412 F2，文案由老板定）。已驳回：#1409 F3、#1410 F5（核验方驳回）、#1407 F2（栈顶已是 Home/Servers）。
   未在 Windows/WebView2 真机验证；面板内确认框的裁切修复未做画面核对。
+- 续记 2026-10-06（本 PR 的评审与修复轮）：jev-route `5b56ff95`（Opus 5.5 + Codex gpt-6.1-sol，互验）PASSED，无阻断；两席都逐条确认
+  #1408 与 #1410 的两条 major 已关闭。3 条 minor（2 个问题）本轮修掉：连接中的裸 Enter/空格不再取消（原先只拦了已连接）；
+  确认框打开时窗口级 Ctrl+K 不再在其后连接或断开。两条回归在还原源码修复后实跑为红（各 `expected "vi.fn()" to not be called at all`），
+  恢复后 `Test Files 56 passed (56) / Tests 393 passed (393)`，typecheck `79 (baseline 79)`。
+  评审方未能核实：WebView2 在托盘 `window.hide()` 后是否把 `document.visibilityState` 置为 hidden（`whileVisible` 在托盘上是否真的停表取决于此），需真机。
+

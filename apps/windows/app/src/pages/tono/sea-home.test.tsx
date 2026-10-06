@@ -579,6 +579,13 @@ it('does not disconnect on a stray Enter while connected', () => {
   expect(mocks.disconnect).not.toHaveBeenCalled()
 })
 
+it('does not cancel an attempt on a stray Enter while connecting', () => {
+  mocks.status.uiState = 'connecting'
+  render(view())
+  fireEvent.keyDown(document, { key: 'Enter' })
+  expect(mocks.disconnect).not.toHaveBeenCalled()
+})
+
 it('holds the protected-duration timer while the window is hidden and catches up on return', () => {
   vi.useFakeTimers()
   mocks.status.uiState = 'connected'

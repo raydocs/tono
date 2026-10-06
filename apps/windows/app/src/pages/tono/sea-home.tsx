@@ -283,8 +283,8 @@ export const SeaHome = ({
       )
         return
       if (event.key !== 'Enter' && event.key !== ' ') return
-      // A stray key must not end protection; disconnecting needs the button itself.
-      if (state === 'connected') return
+      // A stray key must not end protection or an attempt; both need the button itself.
+      if (state === 'connected' || state === 'connecting') return
       // A confirmation that is open owns the keyboard.
       if (document.querySelector('[role="dialog"][aria-modal="true"]')) return
       const focused = document.activeElement

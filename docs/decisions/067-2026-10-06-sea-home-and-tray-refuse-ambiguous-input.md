@@ -3,10 +3,12 @@
 - Status: provisional (agent, under AGENTS "choose the stricter, non-leaking option"; raised by the per-PR reviews of
   #1393, #1408 and #1410; the owner can set `owner` or reverse any line)
 - Chosen, new appearance only:
-  1. Enter / Space on the home never disconnects. While connected the key does nothing; Disconnect needs its button.
+  1. Enter / Space on the home never disconnects and never cancels. While connected or connecting the key does
+     nothing; Disconnect and Cancel need their button.
   2. For 600 ms after the primary pill turns into Cancel, a click on it is ignored, so the second half of a double
      click on Connect cannot cancel the attempt it started.
-  3. While a confirmation dialog is open, the home's keyboard shortcuts do nothing and Escape belongs to the dialog.
+  3. While a confirmation dialog is open, the home's keyboard shortcuts and the window's Ctrl+K do nothing, and Escape
+     belongs to the dialog.
   4. The tray offers no Cancel while connecting with the barrier held (`protectionBlocked`); it offers it only when no
      barrier is held. Cancelling there went through Disconnect with no confirmation and would have released a held
      barrier from a flyout.

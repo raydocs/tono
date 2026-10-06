@@ -88,6 +88,9 @@ export const handleTonoWindowShortcut = (
 
   if (key === 'K') {
     event.preventDefault()
+    // A confirmation that is open owns the keyboard.
+    if (document.querySelector('[role="dialog"][aria-modal="true"]'))
+      return true
     if (uiState === 'notConnected') connect()
     else if (uiState === 'connected') disconnect()
     return true

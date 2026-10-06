@@ -61,6 +61,24 @@ describe('handleTonoWindowShortcut', () => {
   })
 })
 
+it('leaves Ctrl+K to an open confirmation instead of connecting or disconnecting behind it', () => {
+  const dialog = document.createElement('div')
+  dialog.setAttribute('role', 'dialog')
+  dialog.setAttribute('aria-modal', 'true')
+  document.body.append(dialog)
+  const connect = vi.fn()
+  const disconnect = vi.fn()
+  for (const uiState of ['connected', 'notConnected'])
+    handleTonoWindowShortcut(fire({ key: 'k', ctrlKey: true }).event, {
+      navigate: vi.fn(),
+      uiState,
+      connect,
+      disconnect,
+    })
+  expect(connect).not.toHaveBeenCalled()
+  expect(disconnect).not.toHaveBeenCalled()
+})
+
 describe('connectFromShortcut', () => {
   it('opens the server picker when Ctrl+K connect is refused for no server', async () => {
     const navigate = vi.fn()
