@@ -77,3 +77,27 @@ it('links the evidence-correct state on other pages back to home', () => {
   ).toBe('Tokyo 02')
   expect(screen.queryByText('tono.pill.title.connected')).toBeNull()
 })
+
+it('keeps the state link named when the narrow bar hides its visible word', () => {
+  const { container } = render(
+    <MemoryRouter>
+      <SeaChrome
+        appearance
+        login={false}
+        home={false}
+        status={undefined}
+        sidebar={null}
+        controls={null}
+        onDoubleClick={vi.fn()}
+      />
+    </MemoryRouter>,
+  )
+  const word = container.querySelector<HTMLElement>('.tono-sea-state-word')
+  if (!word) throw new Error('Missing state word')
+  word.style.display = 'none'
+  expect(
+    screen
+      .getByRole('link', { name: 'tono.home.title.idle' })
+      .getAttribute('href'),
+  ).toBe('/')
+})

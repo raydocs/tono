@@ -107,9 +107,9 @@
     "installHint": "If TonoService is not installed, reinstall the verified candidate instead of repeatedly reconnecting."
   },
   "nav": {
-    "dashboard": "Dashboard",
+    "dashboard": "Home",
     "activity": "Activity",
-    "nodes": "Nodes",
+    "nodes": "Servers",
     "account": "Account",
     "support": "Support",
     "settings": "Settings"
@@ -757,5 +757,13 @@
       "scheduled": "Automatic retry scheduled",
       "unscheduled": "Automatic retry not scheduled"
     }
+  },
+  "seaLines": {
+    "recommendation": "Recommended",
+    "explanation": "Server preferences explained",
+    "inUse": "In use",
+    "all": "All servers · {{count}}",
+    "evidence": "{{count}} tunnel verification records in the last 24 hours",
+    "selected": "Selected {{name}} · {{latency}}"
   }
 }

@@ -37,6 +37,7 @@ import { ProtectedOfflineBanner } from './ProtectedOfflineBanner'
 import { seaPresentation } from './sea-presentation'
 import { SeaBackdrop } from './SeaBackdrop'
 import { SeaChrome } from './SeaChrome'
+import { SeaPageFrame } from './SeaPageFrame'
 import { ServicePrereqBanner } from './ServicePrereqBanner'
 import { TONO_FONT_STACK, tonoText } from './theme'
 import { TonoSidebar } from './TonoSidebar'
@@ -97,7 +98,7 @@ export const handleTonoWindowShortcut = (
   if (key === 'F') {
     event.preventDefault()
     const input = document.querySelector(
-      '.tono-search input',
+      '.tono-search input, .sea-lines input[type="search"]',
     ) as HTMLInputElement | null
     if (input) input.focus()
     else navigate('/servers')
@@ -357,16 +358,13 @@ const TonoLayout = () => {
                       {isLoginRoute || isTrayRoute ? (
                         <Outlet />
                       ) : (
-                        <div
+                        <SeaPageFrame
                           key={location.pathname}
-                          className={
-                            newAppearance
-                              ? `tono-sea-page-in${isDashboardRoute ? '' : ' tono-sea-page'}`
-                              : 'tono-page-in'
-                          }
+                          appearance={newAppearance}
+                          home={isDashboardRoute}
                         >
                           <Outlet />
-                        </div>
+                        </SeaPageFrame>
                       )}
                     </BaseErrorBoundary>
                   </div>

@@ -581,7 +581,7 @@
       "service": "Tono 服务",
       "protection": "流量保护",
       "dns": "受保护 DNS",
-      "node": "当前节点",
+      "node": "当前线路",
       "lastError": "最近错误",
       "lastWarning": "提示（非错误）"
     },
@@ -757,5 +757,13 @@
       "scheduled": "已安排自动重试",
       "unscheduled": "未安排自动重试"
     }
+  },
+  "seaLines": {
+    "recommendation": "推荐",
+    "explanation": "线路偏好说明",
+    "inUse": "正在使用",
+    "all": "全部线路 · {{count}}",
+    "evidence": "24 小时内有 {{count}} 条隧道验证记录",
+    "selected": "已选 {{name}} · {{latency}}"
   }
 }

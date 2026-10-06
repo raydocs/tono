@@ -45,6 +45,7 @@ export default defineConfig([
             'vite.scene-preview.config.mts',
             'vite.home-preview.config.mts',
             'vite.ui-preview.config.mts',
+            'vite.shell-preview.config.mts',
             'scripts/*.mjs',
             'tests/*.ts',
             'src/polyfills/*.js',

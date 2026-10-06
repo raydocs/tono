@@ -1160,6 +1160,12 @@ export const translationKeys = [
   'tono.home.retry.now',
   'tono.home.recovery.scheduled',
   'tono.home.recovery.unscheduled',
+  'tono.seaLines.recommendation',
+  'tono.seaLines.explanation',
+  'tono.seaLines.inUse',
+  'tono.seaLines.all',
+  'tono.seaLines.evidence',
+  'tono.seaLines.selected',
 ] as const
 
 export type TranslationKey = (typeof translationKeys)[number]

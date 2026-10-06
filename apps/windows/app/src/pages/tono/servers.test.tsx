@@ -9,12 +9,14 @@ import {
 } from '@testing-library/react'
 import i18n from 'i18next'
 import { initReactI18next } from 'react-i18next'
+import { MemoryRouter } from 'react-router'
 import { SWRConfig, unstable_serialize } from 'swr'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 
 import enShared from '@/locales/en/shared.json'
 import enTono from '@/locales/en/tono.json'
 import type { TonoRoutePreferences, TonoServer } from '@/services/tono'
+import { setNewAppearance } from '@/tono-ui/appearance-preferences'
 
 const {
   serversMock,
@@ -668,4 +670,57 @@ it('does not show late account-A preferences as account-B history or recommendat
     screen.queryByText('No verified successful connections yet.'),
   ).toBeNull()
   expect(connectMock).not.toHaveBeenCalled()
+})
+
+it('selects without connecting in the sea look, then the selection capsule connects once', async () => {
+  const name = 'Los Angeles · Grove'
+  scopeMock.mockReturnValue('account:sea')
+  serversMock.mockResolvedValue([
+    {
+      name,
+      server: 'example.test',
+      port: 443,
+      selected: false,
+      available: true,
+    },
+  ])
+  preferencesMock.mockResolvedValue({
+    scope: 'account:sea',
+    catalogRevision: 54,
+    fixedRegion: null,
+    favorites: [],
+    recent: [],
+  })
+  statusMock.mockResolvedValue({
+    uiState: 'notConnected',
+    routePreferenceScope: 'account:sea',
+    catalogRevision: 54,
+    selectedServer: name,
+  })
+  setNewAppearance(true)
+  const { unmount } = render(
+    <MemoryRouter>
+      <SWRConfig value={{ provider: () => new Map(), errorRetryCount: 0 }}>
+        <ServersPage />
+      </SWRConfig>
+    </MemoryRouter>,
+  )
+  try {
+    const row = await screen.findByRole('button', {
+      name: /Los Angeles · Grove/,
+    })
+    fireEvent.click(row)
+    const connect = await screen.findByRole('button', { name: 'Connect' })
+    expect(selectServerMock).toHaveBeenCalledOnce()
+    expect(selectServerMock).toHaveBeenCalledWith(name, {
+      scope: 'account:sea',
+      catalogRevision: 54,
+    })
+    expect(connectMock).not.toHaveBeenCalled()
+    fireEvent.click(connect)
+    await waitFor(() => expect(connectMock).toHaveBeenCalledOnce())
+  } finally {
+    unmount()
+    setNewAppearance(false)
+  }
 })

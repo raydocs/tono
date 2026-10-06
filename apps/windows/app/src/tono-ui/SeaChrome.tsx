@@ -65,6 +65,7 @@ export const SeaChrome = ({
             <NavLink
               to="/"
               className="tono-sea-state"
+              aria-label={t(titleKey)}
               title={status?.selectedServer ?? undefined}
             >
               <span className="tono-sea-state-dot" aria-hidden="true" />

@@ -1547,6 +1547,14 @@ export interface TranslationResources {
         useProgress: string
         viewport: string
       }
+      seaLines: {
+        all: string
+        evidence: string
+        explanation: string
+        inUse: string
+        recommendation: string
+        selected: string
+      }
       servers: {
         cloudGroup: string
         empty: string
