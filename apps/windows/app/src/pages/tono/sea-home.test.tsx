@@ -568,6 +568,14 @@ it('opens a scrollable line picker downward when 255 pixels remain below the chi
   }
 })
 
+it('writes the active line latency in ms inside the details, as the chip does', () => {
+  mocks.status.uiState = 'connected'
+  mocks.status.exitDelayMs = 83
+  render(view())
+  // The chip writes "Tokyo · 83 ms" in one node; this is the figure on the details card.
+  expect(screen.getByText('83 ms')).toBeDefined()
+})
+
 it('does not disconnect on a stray Enter while connected', () => {
   mocks.status.uiState = 'connected'
   mocks.status.killSwitch = {

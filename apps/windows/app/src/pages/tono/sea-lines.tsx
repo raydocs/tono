@@ -215,7 +215,11 @@ export const SeaLines = ({
           }}
         >
           <span className="sea-line-name">{nodeDisplayName(server.name)}</span>
-          <span className="sea-line-city">{nodeCityLabel(server.name, t)}</span>
+          {/* A line with no city word falls back to its own name: say it once. */}
+          <span className="sea-line-city">
+            {nodeCityLabel(server.name, t) !== nodeDisplayName(server.name) &&
+              nodeCityLabel(server.name, t)}
+          </span>
           {isHy2CatalogName(server.name) && (
             <SeaTag>{t('tono.nodes.regions.udpBackup')}</SeaTag>
           )}
@@ -314,6 +318,7 @@ export const SeaLines = ({
           <SeaTag>{t('tono.seaLines.recommendation')}</SeaTag>
           <SeaButton
             variant="text"
+            className="sea-lines-help"
             aria-label={t('tono.seaLines.explanation')}
             onClick={(event) => setHelp(event.currentTarget)}
           >

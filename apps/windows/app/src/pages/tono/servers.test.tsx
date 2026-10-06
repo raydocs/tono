@@ -728,10 +728,10 @@ it('selects without connecting in the sea look, then the selection capsule conne
   }
 })
 
-const renderSeaRoutes = () => {
+const renderSeaRoutes = (servers = routeServers) => {
   scopeMock.mockReturnValue('account-a:7')
   serversMock.mockResolvedValue(
-    routeServers.map((server, index) => ({ ...server, selected: index === 0 })),
+    servers.map((server, index) => ({ ...server, selected: index === 0 })),
   )
   preferencesMock.mockResolvedValue({
     ...routeFixture(),
@@ -770,6 +770,24 @@ it('reads latency in milliseconds in the sea look, as the home chip does', async
     unmount()
     setNewAppearance(false)
     cached.mockRestore()
+  }
+})
+
+it('names a line once in the sea look when it has no separate city word', async () => {
+  const { unmount } = renderSeaRoutes([
+    ...routeServers,
+    ...routeServers
+      .slice(0, 1)
+      .map((server) => ({ ...server, name: 'Singapore · Harbor' })),
+  ])
+  try {
+    const row = (await screen.findByText('Singapore · Harbor')).closest(
+      '.sea-line-row',
+    )
+    expect(row?.textContent?.split('Singapore · Harbor')).toHaveLength(2)
+  } finally {
+    unmount()
+    setNewAppearance(false)
   }
 })
 

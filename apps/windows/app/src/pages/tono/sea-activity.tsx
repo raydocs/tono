@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { VirtualList } from '@/components/base/virtual-list'
@@ -61,6 +62,7 @@ export const SeaActivity = ({
   capped: boolean
 }) => {
   const { t } = useTranslation()
+  const [allFor, setAllFor] = useState<ReadonlySet<string>>(new Set())
   const routeLabel = (route: (typeof FILTERS)[number]) =>
     route === 'proxied'
       ? t('tono.seaActivity.exit')
@@ -163,11 +165,24 @@ export const SeaActivity = ({
           renderItem={(index) => {
             const app = apps[index]
             if (!app) return null
-            const entries = rows
-              .filter((row) => row.process === app.process)
-              .slice(0, 20)
+            const appRows = rows.filter((row) => row.process === app.process)
+            const entries = allFor.has(app.process)
+              ? appRows
+              : appRows.slice(0, 20)
             return (
-              <details className="sea-activity-app">
+              <details
+                className="sea-activity-app"
+                onToggle={(event) => {
+                  // A collapsed app goes back to its first twenty rows.
+                  if (event.currentTarget.open) return
+                  setAllFor((shown) => {
+                    if (!shown.has(app.process)) return shown
+                    const next = new Set(shown)
+                    next.delete(app.process)
+                    return next
+                  })
+                }}
+              >
                 <summary className="sea-activity-app-row">
                   <span className="sea-activity-app-icon" aria-hidden="true">
                     {processLabel(app.process).slice(0, 1)}
@@ -219,29 +234,41 @@ export const SeaActivity = ({
                       name: processLabel(app.process),
                     })}
                   </SeaButton>
-                  {rows.filter((row) => row.process === app.process).length >
-                    20 && <p>{t('tono.routeExplanation.limit')}</p>}
+                  {appRows.length > entries.length && (
+                    <SeaButton
+                      variant="text"
+                      onClick={() =>
+                        setAllFor((shown) => new Set(shown).add(app.process))
+                      }
+                    >
+                      {t('tono.seaActivity.showAll', { count: appRows.length })}
+                    </SeaButton>
+                  )}
                 </div>
               </details>
             )
           }}
         />
       )}
-      <footer>
-        <SeaButton
-          variant="danger"
-          disabled={!connected || !rows.length || closingAll}
-          onClick={onCloseAll}
-        >
-          {t(
-            closingAll ? 'tono.activity.closingAll' : 'tono.activity.closeAll',
-          )}
-        </SeaButton>
-        <span>
-          {t('tono.activity.closeAllHint')}
-          {capped && ` · ${t('tono.activity.limitNotice', { count: 2000 })}`}
-        </span>
-      </footer>
+      {connected && (
+        <footer>
+          <SeaButton
+            variant="danger"
+            disabled={!rows.length || closingAll}
+            onClick={onCloseAll}
+          >
+            {t(
+              closingAll
+                ? 'tono.activity.closingAll'
+                : 'tono.activity.closeAll',
+            )}
+          </SeaButton>
+          <span>
+            {t('tono.activity.closeAllHint')}
+            {capped && ` · ${t('tono.activity.limitNotice', { count: 2000 })}`}
+          </span>
+        </footer>
+      )}
     </div>
   )
 }

@@ -774,7 +774,8 @@
   },
   "seaActivity": {
     "summary": "Now · {{apps}} apps · {{connections}} active connections",
-    "exit": "Exit"
+    "exit": "Exit",
+    "showAll": "Show all {{count}}"
   },
   "seaSettings": {
     "motion": "Motion",

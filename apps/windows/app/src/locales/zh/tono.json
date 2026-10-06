@@ -774,7 +774,8 @@
   },
   "seaActivity": {
     "summary": "当前 {{apps}} 个应用 · {{connections}} 条活动连接",
-    "exit": "线路"
+    "exit": "线路",
+    "showAll": "显示全部 {{count}} 条"
   },
   "seaSettings": {
     "motion": "动效",

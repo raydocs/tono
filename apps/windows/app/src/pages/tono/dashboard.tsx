@@ -153,6 +153,7 @@ const ActiveNodeCard = ({
   claudeHomeActive,
   claudeHomeHost: _claudeHomeHost,
   darkOverride,
+  latencyInMs,
 }: {
   serverName: string
   connected: boolean
@@ -163,6 +164,8 @@ const ActiveNodeCard = ({
   claudeHomeActive?: boolean | null
   claudeHomeHost?: string | null
   darkOverride?: boolean
+  /** The new look writes every latency in ms, as its home chip and lines page do. */
+  latencyInMs?: boolean
 }) => {
   const { t } = useTranslation()
   const appDark = useThemeMode() !== 'light'
@@ -201,6 +204,7 @@ const ActiveNodeCard = ({
       }}
     >
       <div
+        className="tono-exit__row"
         style={{
           display: 'flex',
           alignItems: 'center',
@@ -238,6 +242,7 @@ const ActiveNodeCard = ({
       </div>
       {connected && (exitOrg || exitLocation) && (
         <div
+          className="tono-exit__row"
           style={{
             display: 'flex',
             gap: 16,
@@ -255,9 +260,10 @@ const ActiveNodeCard = ({
         </div>
       )}
 
-      <div style={{ padding: '0 10px 10px' }}>
+      <div className="tono-exit__row" style={{ padding: '0 10px 10px' }}>
         <button
           type="button"
+          className="tono-exit__pick"
           onClick={() => navigate('/servers')}
           style={{
             display: 'flex',
@@ -320,6 +326,7 @@ const ActiveNodeCard = ({
             </span>
           </span>
           <span
+            className="tono-exit__figure"
             style={{
               fontSize: 11,
               fontWeight: 600,
@@ -337,21 +344,24 @@ const ActiveNodeCard = ({
             }}
           >
             {reading
-              ? t(
-                  latencyLabelKey(reading.kind, reading.ms),
-                  latencyLabelVars(reading.ms),
-                )
+              ? latencyInMs
+                ? `${Math.round(reading.ms)} ms`
+                : t(
+                    latencyLabelKey(reading.kind, reading.ms),
+                    latencyLabelVars(reading.ms),
+                  )
               : '—'}
           </span>
         </button>
       </div>
       {connected && (
-        <div style={{ padding: '0 10px 10px' }}>
+        <div className="tono-exit__row" style={{ padding: '0 10px 10px' }}>
           <div
             style={{
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'space-between',
+              gap: 10,
               padding: '9px 12px',
               borderRadius: 11,
               background: claudeHomeActive
@@ -463,6 +473,7 @@ const InfoItem = ({
       style={{ display: 'flex', flexDirection: 'column', gap: 3, minWidth: 76 }}
     >
       <span
+        className="tono-info__label"
         style={{
           fontSize: 10,
           fontWeight: 600,
@@ -473,6 +484,7 @@ const InfoItem = ({
         {label}
       </span>
       <span
+        className="tono-exit__figure"
         style={{
           fontSize: 12,
           fontWeight: 600,
@@ -1036,6 +1048,7 @@ const DashboardPage = () => {
   const exitCard = status?.selectedServer && (
     <ActiveNodeCard
       darkOverride={newAppearance ? true : undefined}
+      latencyInMs={newAppearance}
       serverName={status.selectedServer}
       connected={connected}
       exitOrg={status.exitOrg}

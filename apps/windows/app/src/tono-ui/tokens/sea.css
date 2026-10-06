@@ -305,3 +305,41 @@
 [data-sea-appearance="true"] .tono-page-title {
   font-family: var(--sea-display);
 }
+
+/* One chevron for the new look's disclosures instead of the platform triangle. */
+:is(.sea-support-content, .sea-tray, .sea-lines, .tono-home__progress-card)
+  details
+  > summary {
+  list-style: none;
+}
+:is(.sea-support-content, .sea-tray, .sea-lines, .tono-home__progress-card)
+  details
+  > summary::-webkit-details-marker {
+  display: none;
+}
+:is(.sea-support-content, .sea-tray, .sea-lines, .tono-home__progress-card)
+  details
+  > summary::before {
+  content: "";
+  display: inline-block;
+  width: 0.42em;
+  height: 0.42em;
+  margin: 0 0.75em 0.18em 0.15em;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  opacity: 0.72;
+  transform: rotate(-45deg);
+  transition: transform 140ms ease-out;
+}
+:is(.sea-support-content, .sea-tray, .sea-lines, .tono-home__progress-card)
+  details[open]
+  > summary::before {
+  transform: rotate(45deg);
+}
+@media (prefers-reduced-motion: reduce) {
+  :is(.sea-support-content, .sea-tray, .sea-lines, .tono-home__progress-card)
+    details
+    > summary::before {
+    transition: none;
+  }
+}
